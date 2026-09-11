@@ -94,7 +94,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
     case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
     case ZombieState.MotionCue:   return ZombieStateMotionCue21(obj, eye, dt);
-    case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye, rng, host);
+    case ZombieState.HoldAtRange:
+      return ZombieStateHoldAtRange(obj, eye, rng, host, events);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
@@ -118,7 +119,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
 
     // The death chain. `updatesWhenDead` on the handler below is what lets
     // these run at all -- see `class30/death.ts` for the whole graph.
-    case ZombieState.Death:       return ZombieStateDeath6(obj, rng);
+    case ZombieState.Death:       return ZombieStateDeath6(obj, rng, events);
     // The other death, and the reason `ZombieRunState` is handed the host at
     // all on a dead actor: state 9's landing point is a point in the camera's
     // own space. See `class30/knockback.ts`.
@@ -238,7 +239,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
  * **none** of the 90 class-0x30 spawns starts in `Approach`. The old port
  * started everything there, which is why nothing ever reached the hub.
  */
-export function EnemyZombieInit(obj: ZombieActor): void {
+export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
+                                events?: Events): void {
   obj.attackPermit = -1;
   // `EnemyZombieInit`: `obj+0x124 = g_actor_radius_by_char[type]`, the shot
   // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
@@ -266,7 +268,7 @@ export function EnemyZombieInit(obj: ZombieActor): void {
   // Three of the spawn record's flag bits move into `obj+0x38` in there, and
   // one of them is the whole of what makes stage 3's two axe men stand still
   // instead of walking away.
-  EnemyZombieInitByCharType(obj);
+  EnemyZombieInitByCharType(obj, events);
   obj.state = ZombieEntryState(obj.initialState);
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.

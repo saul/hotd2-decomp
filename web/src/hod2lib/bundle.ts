@@ -194,6 +194,12 @@ export function soundJson(tables: ExeTables): Record<string, unknown> {
   return {
     se: byKey(tables.seNames()),
     voice: byKey(tables.voiceNames()),
+    // The looping-SE pairs. Without them a player cannot tell a chainsaw from
+    // a footstep -- `PlaySoundId` decides loop-versus-one-shot from these two
+    // tables and from nothing else, and the `_OFF` id is a *stop*, not a
+    // sound. Deciding it from the `_OFF` suffix instead would be a claim about
+    // the data that the tables already answer.
+    looping: tables.loopingSe(),
     // evt 0x2D's message groups. The sprite is an asset id the player has no
     // 2D pipeline for, but the voice is an ordinary sound id and the frame
     // count and screen position are exact.

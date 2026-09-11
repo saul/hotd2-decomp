@@ -1099,6 +1099,18 @@ export interface ActorBase {
   holdFrames: number;       // +0x1320, class 0x24
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
+  /**
+   * `obj+0x131B` — this actor is one of the holders of the looping
+   * held-weapon SE counted by `G.g_weapon_loop_holders`.
+   *
+   * A latch, not a count: `EnemyZombieInitByCharType` (`0x00453164`) writes 1
+   * for character types 2 and 3, `ZombieReleaseWeaponLoopSe` (`FUN_00456600`)
+   * refuses to do anything unless it is 1 and writes 0 on its way out. The
+   * only two readers in the image are that routine's own guard and
+   * `ScriptedHumanoidBoneDrawHook`, which is class 0x25 and a different
+   * meaning of the same byte (**L3**).
+   */
+  weaponLoopHeld: number;   // +0x131B, u8
   /** How deep in the distance queue this actor may be and still attack. */
   allowance: number;        // +0x1358
   /** Frames before this actor may claim again. `ZombieStateHoldAtRange`
@@ -1710,6 +1722,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     slideTimer: 0,
     holdFrames: 0,
     ringSet: 0,
+    weaponLoopHeld: 0,
     allowance: 0,
     cooldown: 0,
     target: vec3(),

@@ -28,6 +28,7 @@
  * and calls `ActorDespawn` itself. Nothing here needs a timer the exe does not
  * have.
  */
+import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, CountFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import {
@@ -40,6 +41,7 @@ import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
 import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import { ActorSetMotionBlended } from "./motion_cue";
+import { ZombieReleaseWeaponLoopSe } from "./weapon_loop";
 import { GAME_HZ, MotionFade, ZombieState } from "./states";
 
 /** `obj+0x1330 = 0x78` — the corpse lies there for two seconds. */
@@ -278,7 +280,8 @@ export function ZombieReleasePermitAndUntrack(obj: ZombieActor): void {
  * {@link ZombieFlag2.OneShotFired}, is cleared below exactly as the engine
  * clears it.
  */
-export function ZombieStateDeath6(obj: ZombieActor, rng: Rng): void {
+export function ZombieStateDeath6(obj: ZombieActor, rng: Rng,
+                                  events?: Events): void {
   if (obj.sub === 0) {
     ChooseDeathMotion(obj, rng);
     obj.sub += 1;
@@ -292,12 +295,15 @@ export function ZombieStateDeath6(obj: ZombieActor, rng: Rng): void {
     // hit reaction is dropped and the body takes part in both pushes again.
     obj.flags2 = (obj.flags2 & ~ZombieFlag2.HitReactionPending)
                | ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
-    // `ZombiePlayDeathVoice` (`FUN_00456600`) goes here. [diverges] It is
-    // sound only: it plays scream 0x4E17A9 or 0x2025A9 when this actor holds
-    // the last of the groan voices counted at `0x009C8A74`, then clears its
-    // own latch `obj+0x131B` and counts the global down. The latch is raised
-    // by `EnemyZombieInitByCharType` (0x00453164), which the port does not
-    // have, so a transcription here could never fire. `[open]`
+    // `ZombieReleaseWeaponLoopSe` (`FUN_00456600`) goes here, and it is no
+    // longer a divergence: the note that used to sit here called it a death
+    // scream and said its latch was unreachable. Both halves were wrong. The
+    // ids resolve to `CHAIN_SAW_22_OFF` and `LASER_SWORD_22_OFF`, which are
+    // *stoppers* out of `g_looping_se_stop_ids` and not screams, and the latch
+    // is raised by the character-type arm of `EnemyZombieInitByCharType` that
+    // the port now has. So this is where a dying chainsaw zombie silences the
+    // scene's chainsaw — if it is the last one holding it.
+    ZombieReleaseWeaponLoopSe(obj, events);
     ZombieReleasePermitAndUntrack(obj);
     obj.sub += 1;
     // `AND ECX, 0xfffeffff` at 0x00454D7D — the death clip's own splash cue

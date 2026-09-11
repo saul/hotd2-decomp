@@ -18,7 +18,9 @@
  * stand against, because the walk is what the *other* seven state-33 spawns
  * do.
  */
+import type { Events } from "../../core/events";
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
+import { EnemyZombieTakeWeaponLoopSe } from "./weapon_loop";
 
 /**
  * The two bits this routine consumes out of the spawn record's flags word.
@@ -35,14 +37,21 @@ const SPAWN_CARRIER_OFFSET = 0x4;
 /**
  * `EnemyZombieInitByCharType` — `FUN_00452FD0`.
  *
- * **The head only.** After these three moves the engine branches on the
- * character type: 2 and 3 load a held prop and play a spawn cry, 9 becomes a
- * corpse, 0xC branches on the body condition, 0xE loads a prop, and 0x12
- * allocates a *second* class-0x30 actor beside itself. None of that is ported.
- * `obj+0x34` bit 3 — spawned in the air — is the fourth thing the routine
- * looks at, and {@link ActorFlag.SpawnedInAir} already carries it.
+ * **The head, and one arm.** After these three moves the engine branches on
+ * the character type: 9 becomes a corpse, 0xC branches on the body condition,
+ * 0xE loads a prop, and 0x12 allocates a *second* class-0x30 actor beside
+ * itself — none of which is ported. `obj+0x34` bit 3 — spawned in the air — is
+ * the fourth thing the routine looks at, and {@link ActorFlag.SpawnedInAir}
+ * already carries it.
+ *
+ * The arm that **is** here is types 2 and 3, and it is the one this file used
+ * to describe as *"load a held prop and play a spawn cry"*. It is not a cry:
+ * it takes a share in the scene's one looping held-weapon SE, and the sound
+ * runs until an actor dies. See {@link EnemyZombieTakeWeaponLoopSe} — the prop
+ * load beside it is still unported and says so there.
  */
-export function EnemyZombieInitByCharType(obj: ZombieActor): void {
+export function EnemyZombieInitByCharType(obj: ZombieActor,
+                                          events?: Events): void {
   // `00453000  if (obj+0x136C & 0x20) obj+0x38 |= 8`. Raised, not moved: the
   // source bit stays where it is.
   //
@@ -65,4 +74,6 @@ export function EnemyZombieInitByCharType(obj: ZombieActor): void {
     obj.flags &= ~SPAWN_CARRIER_OFFSET;
     obj.flags38 |= ZombieAux.CarrierOffset;
   }
+  // `00453133`, the switch's types-2-and-3 arm, sound only.
+  EnemyZombieTakeWeaponLoopSe(obj, events);
 }

@@ -1590,7 +1590,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // it does not get to decide that an object exists or that a lifetime has
     // ended. `verify_layers.py` is what keeps that honest, and
     // `syncCharacterSpawns` is where the three layers meet.
-    syncCharacterSpawns(this.chars, this.walker.spawns);
+    // ...with `events`, because one class's `Init` makes a sound: character
+    // types 2 and 3 start the looping chainsaw or laser sword.
+    syncCharacterSpawns(this.chars, this.walker.spawns, this.events);
   }
 
   /**

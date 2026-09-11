@@ -1,8 +1,9 @@
 # Sound: ids, tables and BGM
 
-**Status:** the id space and the BGM tables are solved. SE and voice use the
-same dispatcher and their tables are located but not yet transcribed. What
-starts a stage's own music is **open**.
+**Status:** the id space, the BGM tables and the **looping-SE pairs** are
+solved. SE and voice use the same dispatcher and their name tables are read by
+`ExeTables.se_names()` / `.voice_names()`. What starts a stage's own music is
+**open**.
 
 Audio ships as plain `.wav` under `sound/` — `bgm/` (38 files, 270 MB),
 `SE/` and `voice/`. There is no container and no compression; the NAOMI sound
@@ -30,6 +31,71 @@ sound in the game. It switches on `id >> 28`:
 
 Three ids are special-cased in the SE path: `0x000100A0` is
 `SS_SND_ALL_SOUND_OFF`, and `0x21A9` / `0x121A9` take a different argument set.
+
+## Looping SE — two tables, and no handle anywhere
+
+**[proved]** Whether a sound effect loops is not a property of the file. Before
+`PlaySoundId` hands a name to `SoundPlayOnFreeChannel` it walks two parallel
+dword tables in step:
+
+```
+0x005887FC   u32[44]   g_looping_se_ids        play this one LOOPED
+0x005888B0   u32[44]   g_looping_se_stop_ids   ...and this one stops every loop
+```
+
+```c
+if (g_looping_se_ids != 0xFFFFFFFF) {
+    i = 0; id = g_looping_se_ids;
+    do {
+        if (param_1 == id)                       { loop = 1; break; }
+        if (param_1 == g_looping_se_stop_ids[i]) { SoundStopAllLoopingSe(); break; }
+        id = g_looping_se_ids[i + 1]; i++;
+    } while (id != 0xFFFFFFFF);
+}
+SoundPlayOnFreeChannel(name, loop, 0xFFFFFFFF, param_1);
+```
+
+`0x21A9` and `0x121A9` skip the walk entirely, on the same early branch that
+gives them their own argument set.
+
+**There is no handle for a playing loop, anywhere in the engine.**
+`SoundStopAllLoopingSe` takes no argument; a stop id names which loop it was
+*authored* for and stops the lot. Everything about how the game uses looping
+sound follows from that — a loop is started by one call from wherever the thing
+that makes the noise comes into existence, and stopped by another call from
+wherever it stops existing, with a refcount in between if more than one object
+can want it. See `g_weapon_loop_holders` (`0x009C8A74`) for the worked example.
+
+**Neither table stores a count and neither bounds the other.** Both walk to a
+`0xFFFFFFFF` terminator, and the two bases are `0xB4` = 45 dwords apart, so 44
+entries plus the terminator exactly fill the gap. That is the *shape* of
+[L6](../LESSONS.md), so the reading is checked rather than asserted:
+`tools/verify_looping_se.py` proves the pairing four ways —
+
+* both walks give the same 44 and fill the gap between the bases exactly;
+* all 88 ids resolve through `g_se_name_list`;
+* **every pair is `X.wav` against `X_OFF.wav`**, which is the assertion that
+  could not pass by accident and is what makes the pairing a fact rather than
+  an observation about two neighbouring arrays;
+* and no `_OFF` file is shipped, while the play files are — so a stop id is a
+  control word and not a sound.
+
+Eight of the 44 rows repeat a play id already listed; the table's own tail is a
+duplicate block. The engine breaks out of the walk on the **first** match, so
+that is harmless only while both copies name the same stopper, and the verifier
+asserts they do.
+
+| Entry | Play | Stop | Used by |
+|---|---|---|---|
+| 4 | `0x004D17A9` `COMMON2\CHAIN_SAW_22` | `0x004E17A9` | `EnemyZombieInitByCharType`, character type 2 |
+| 34 | `0x001F25A9` `STAGE6_SE\LASER_SWORD_22` | `0x002025A9` | ...and character type 3 |
+
+and the rest are the game's ambiences — `UFO_44`, `RAIN3ST_44`, `QUAKE_22`,
+`CAR_FIRE`, `BOAT_SLOW`, `HELI1_44`, `EREVATOR_16`, `WIND2_44`.
+
+Exposed as `ExeTables.looping_se()` in both halves of the library and carried
+into the bundle as `sound.looping`; `web/src/audio/bgm.ts` is the transcription
+of the branch above.
 
 ## BGM — two tables, chosen at runtime
 

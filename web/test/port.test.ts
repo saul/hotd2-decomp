@@ -77,6 +77,7 @@ import { ThrownWeaponUpdate, THROWN_SPIN_RATE }
   from "../src/game/class31/projectile";
 import { ActorPlayHitVoice, ActorVoice }
   from "../src/game/combat/voice";
+import { ZombieReleaseWeaponLoopSe } from "../src/game/class30/weapon_loop";
 import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type ScriptedSceneryActor,
@@ -423,6 +424,24 @@ const EYE = vec3(0, 0, 0);
 function spawnZombie(at: number, charType: number, name: string,
                      desc?: Partial<Actor>, rng?: Rng): ZombieActor {
   const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, desc, rng);
+  if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
+  return a;
+}
+
+/**
+ * `spawnZombie` with an events bus, for the one `Init` in the game that makes
+ * a sound.
+ *
+ * `EnemyZombieInitByCharType` (`FUN_00452FD0`) starts the looping chainsaw for
+ * character types 2 and 3, so `ActorSpawn` carries `events` through to
+ * `ClassHandler.init`. Going through `ActorSpawn` rather than calling the
+ * weapon-loop functions directly is the point of the fixture: it is the wiring
+ * from the spawn opcode down to the sound that was missing, not the arithmetic.
+ */
+function spawnZombieWithEvents(at: number, charType: number, name: string,
+                               events: Events): ZombieActor {
+  const a = ActorSpawn(at, SpawnClass.Zombie, charType, name, undefined,
+                       new Rng(1), events);
   if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
   return a;
 }
@@ -11632,6 +11651,189 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
     check("...and both counters come back with it",
           before === 1 && G.g_enemies_alive === 0 && G.g_enemies_present === 0,
           `${before} -> ${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+}
+
+
+/**
+ * The two sounds a zombie makes that are not shot feedback, and the one kind
+ * of `ActorPlayHitVoice` that turns out to be dead.
+ *
+ * `ActorPlayHitVoice` (`FUN_0040A6F0`) is the game's only voice routine and
+ * every one of its five kinds fires on an event, so for a long time the answer
+ * to "what does a standing zombie sound like" was `[open]`. It is two bare
+ * `PlaySoundId` calls, in two different places, and neither goes through that
+ * routine:
+ *
+ * * `ZombieStateHoldAtRange` (`FUN_00455720`) plays `0x1917A9` --
+ *   `COMMON2\ZOMBIE_041_16.wav` -- at `0x004558D6`, inside the same
+ *   `obj+0x1B4 != row[0]` test that starts the idle clip;
+ * * `EnemyZombieInitByCharType` (`FUN_00452FD0`) plays `0x4D17A9` at
+ *   `0x0045314F` for character types 2 and 3, which `g_looping_se_ids` makes a
+ *   **loop**, and `ZombieReleaseWeaponLoopSe` (`FUN_00456600`) stops it.
+ *
+ * Both were silent in the port. These assertions fail on the code before this
+ * commit, which is the only thing that makes them worth having.
+ */
+console.log("\nthe idle groan, the weapon loop, and kind 4:");
+{
+  const GROAN = 0x1917a9;
+  const CHAIN_SAW_LOOP = 0x4d17a9;
+  const CHAIN_SAW_STOP = 0x4e17a9;
+  const LASER_SWORD_LOOP = 0x1f25a9;
+
+  /** Every `sound.play` id an events bus saw, in order. */
+  const listen = (events: Events): number[] => {
+    const ids: number[] = [];
+    events.on("sound.play", (d) => { ids.push(d.id); });
+    return ids;
+  };
+  const clear = () => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_players_in_play = 1;
+  };
+
+  // -- C1. the groan fires on the frame the idle starts, and only then ------
+  //
+  // `004558b0 3bc7` / `004558b2 742a` is the whole gate. A zombie arriving at
+  // the ring is not yet playing `row[0]`, so the first update starts the clip
+  // and groans; the second finds the clip already running and does neither.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a00, 1, "arriving at the ring");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+    z.pos = vec3(0, 0, 40);
+    z.target = vec3(0, 0, 0);
+    // Something other than the idle -- the run clip, which is what an actor
+    // that has just arrived is still playing.
+    z.motion = TYPE.motion_row["0"][MotionRow.Run];
+    ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    check("a zombie that reaches the ring groans once -- `PlaySoundId(0x1917A9)`"
+          + " at 0x004558D6",
+          heard.length === 1 && heard[0] === GROAN,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+    check("...and the clip it groans on is the idle, `row[0]`",
+          z.motion === TYPE.motion_row["0"][MotionRow.Walk],
+          String(z.motion));
+    const after = heard.length;
+    for (let i = 0; i < 30; i++) {
+      ZombieStateHoldAtRange(z, EYE, new Rng(7), NULL_HOST, events);
+    }
+    check("...and does not groan again while the same idle clip runs -- it is "
+          + "one shot per entry, not a per-frame chance or a timer",
+          heard.length === after, `${heard.length - after} more`);
+  }
+
+  // -- C2. ...and it is not `ActorPlayHitVoice` -----------------------------
+  //
+  // The distinction is the whole reason the idle was never found: the voice
+  // routine has a kind for the attack cry and none for an idle, so reading it
+  // more carefully could never have turned this up. Kind 4 is the other half
+  // of that reading, and it is dead.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombie(0x7a01, 1, "proving kind 4 is silent");
+    ActorPlayHitVoice(z, ActorVoice.Kind4, new Rng(1),
+                      (id) => events.emit("sound.play", { id }));
+    check("kind 4 plays nothing: no call site in the image passes 4, and both "
+          + "ids at `g_actor_voice_kind4` (0x005A4EA8) are zero and unwritten",
+          heard.length === 0, heard.map((i) => i.toString(16)).join(","));
+  }
+
+  // -- C3. the weapon loop is refcounted, and shared -----------------------
+  //
+  // `00453133` gates the *sound* on `g_weapon_loop_holders == 0` while the
+  // increment and the `obj+0x131B` latch at `00453164` run for every holder.
+  // So two chainsaw zombies make one chainsaw noise.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const a = spawnZombieWithEvents(0x7b00, 2, "chainsaw one", events);
+    check("the first character-type-2 actor starts the looping chainsaw",
+          heard.length === 1 && heard[0] === CHAIN_SAW_LOOP,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+    check("...and latches `obj+0x131B` with the count at one",
+          a.weaponLoopHeld === 1 && G.g_weapon_loop_holders === 1,
+          `${a.weaponLoopHeld} / ${G.g_weapon_loop_holders}`);
+    const b = spawnZombieWithEvents(0x7b01, 2, "chainsaw two", events);
+    check("the second one takes a share and starts nothing -- one loop per "
+          + "scene, not one per actor",
+          heard.length === 1 && b.weaponLoopHeld === 1
+          && G.g_weapon_loop_holders === 2,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+
+    // ...and the release is the mirror: the first death is silent, the last
+    // plays the stop id, which `PlaySoundId` turns into a stop-all.
+    ZombieReleaseWeaponLoopSe(a, events);
+    check("the first holder to go plays no stop id",
+          heard.length === 1 && G.g_weapon_loop_holders === 1
+          && a.weaponLoopHeld === 0,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+    ZombieReleaseWeaponLoopSe(b, events);
+    check("the last one stops it, with the `_OFF` id out of "
+          + "`g_looping_se_stop_ids`",
+          heard.length === 2 && heard[1] === CHAIN_SAW_STOP
+          && G.g_weapon_loop_holders === 0,
+          heard.map((i) => `0x${i.toString(16)}`).join(","));
+    // Releasing twice must not take the count below zero: the engine's own
+    // guard is the latch, not the count.
+    ZombieReleaseWeaponLoopSe(b, events);
+    check("...and a second release from the same actor does nothing, because "
+          + "the latch is what guards it",
+          heard.length === 2 && G.g_weapon_loop_holders === 0,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+  }
+
+  // -- C4. character type 3 is the same arm with the other pair ------------
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    spawnZombieWithEvents(0x7b02, 3, "laser sword", events);
+    check("character type 3 starts the laser sword instead -- `0x1F25A9`, "
+          + "the other entry of the same table",
+          heard.length === 1 && heard[0] === LASER_SWORD_LOOP,
+          heard.map((i) => `0x${i.toString(16)}`).join(",") || "silence");
+  }
+
+  // -- C5. every other character type takes no share ----------------------
+  //
+  // The engine's `switch` has one arm for 2 and 3 and nothing for the rest, so
+  // an ordinary zombie must leave both the count and the latch alone -- or the
+  // *next* chainsaw zombie would find a non-zero count and never sound.
+  {
+    clear();
+    const events = new Events();
+    const heard = listen(events);
+    const z = spawnZombieWithEvents(0x7b03, 1, "ordinary", events);
+    check("an ordinary zombie takes no share of the weapon loop",
+          heard.length === 0 && z.weaponLoopHeld === 0
+          && G.g_weapon_loop_holders === 0,
+          `${heard.length} sounds, ${G.g_weapon_loop_holders} holders`);
+  }
+
+  // -- C6. the scene reset zeroes the count -------------------------------
+  //
+  // `MOV [0x009c8a74], 0` at `0x0045EF3D`. Without it a second stage's first
+  // chainsaw zombie inherits a non-zero count and the chainsaw never starts.
+  {
+    clear();
+    G.g_weapon_loop_holders = 3;
+    ResetSceneOnEnter();
+    check("`ResetSceneOnEnter` zeroes `g_weapon_loop_holders`, so a stage does "
+          + "not inherit the last one's holders",
+          G.g_weapon_loop_holders === 0, String(G.g_weapon_loop_holders));
   }
 }
 

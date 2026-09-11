@@ -19,7 +19,7 @@ import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
-import { T } from "./tables";
+import { SecondsToTicks, T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ProcessShotRequests } from "./combat/shot";
@@ -450,6 +450,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
                            events?: Events): FrameResult {
   const frames = dt * GAME_HZ;
   G.g_frame += frames;
+  // `FUN_0040E730` steps three free-running counters once a game tick, and
+  // this is the one two per-bone draw hooks index their model runs with --
+  // `ZombieDrawBonePart` (`FUN_004534A0`) and `ThrowerDrawBonePart`. Whole
+  // ticks, not `frames`: `g_frame` is fractional and a cel index taken from a
+  // fraction repeats and skips (L12).
+  G.g_blink_frame_counter += SecondsToTicks(dt);
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot

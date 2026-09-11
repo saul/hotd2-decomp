@@ -72,6 +72,20 @@ export enum AppState {
 }
 
 /**
+ * `g_hit_slots` holds fourteen entries, and the extent is the loop bound
+ * rather than a stored count: `ActorClaimHitSlot` (`FUN_00409270`) walks
+ * `&DAT_009c88c0` while the pointer is below `0x009C88F8`, and the span is
+ * `0x38` bytes. `[proved]`
+ *
+ * Here rather than in `game/hit_slots.ts` because that module needs `G` and
+ * this one must not need it back.
+ */
+export const HIT_SLOT_COUNT = 14;
+
+/** No slot: what a claim writes first, and what a full table leaves behind. */
+export const HIT_SLOT_NONE = -1;
+
+/**
  * One rain drop, in the camera's own space.
  *
  * Three floats, which is exactly what the exe's array holds: 12 bytes a
@@ -749,6 +763,37 @@ export const G = {
    */
   g_carrier_object: -1,
 
+  /**
+   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`.
+   *
+   * `ActorClaimHitSlot` (`FUN_00409270`) hands out the indices and
+   * `ActorDespawn` (`FUN_00409CC0`) gives them back; `game/hit_slots.ts` is
+   * both halves and says what is and is not ported. The reason the port holds
+   * it at all is that `obj+0x3C` is the **phase** of every cel animation
+   * `ZombieDrawBonePart` (`FUN_004534A0`) plays — see
+   * `class30/bonecels.ts`.
+   *
+   * [port-only] The engine stores pointers and zero means free; the port
+   * stores `at` and `-1` means free, because a snapshot carries an index.
+   */
+  g_hit_slots: [] as number[],
+
+  /**
+   * `g_blink_frame_counter` — `0x009A5C50`. Whole game ticks, from the scene
+   * reset.
+   *
+   * One of three free-running counters `FUN_0040E730` steps once a tick.
+   * `LoadSceneAndReset` (`0x00460030`) and `ResetSceneCombatState`
+   * (`0x0045EF1E`) both zero it. It is the cel phase two per-bone draw hooks
+   * index their model runs with — `ZombieDrawBonePart` (`FUN_004534A0`) and
+   * `ThrowerDrawBonePart` — and the parity class 0x31's blink states read.
+   *
+   * Not {@link g_frame}: that one is the port's own clock and is **fractional**
+   * (`G.g_frame += dt * 60`), and a cel index taken from a fraction skips and
+   * repeats. This is an integer stepped by whole ticks, as `obj+0x19C` is.
+   */
+  g_blink_frame_counter: 0,
+
   // -- the ground plane --------------------------------------------------
   /**
    * `g_camera_fixed_eye_y` — 0x009C8E58, also labelled `g_ground_plane_y`.
@@ -1045,8 +1090,10 @@ export type Globals = typeof G;
  *   `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) is what reads the pair. |
  * | `g_civilians_seen_by_scene`, `g_civilians_rescued_by_scene` | ❌ neither
  *   tally exists; the port raises a `civilian.rescued` event instead. |
- * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ❌ the port
- *   has no `obj+0x3C` slot index and never claims one. |
+ * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ✅ claimed,
+ *   released and cleared. `obj+0x3C` is the phase of every cel a class-0x30
+ *   bone draws, so the port needed it; `game/hit_slots.ts` says which parts of
+ *   the hit-slot system are ported and which are not. |
  * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
  * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
@@ -1066,6 +1113,12 @@ export function ResetSceneOnEnter(): void {
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
+  // `for (i = 0xE; i != 0; i--) *p++ = 0` over `&DAT_009C88C0` at
+  // `0x0045EE70` -- and the **0xE is a second, independent proof that
+  // `g_hit_slots` is fourteen deep**, the first being the pointer bound in
+  // `ActorClaimHitSlot` (`FUN_00409270`). `HIT_SLOT_NONE` rather than the
+  // engine's 0 because the port stores an actor's `at` and 0 is a real `at`.
+  G.g_hit_slots = new Array<number>(HIT_SLOT_COUNT).fill(HIT_SLOT_NONE);
   // `MOV [0x009c8a74], 0` at `0x0045EF3D` — the looping held-weapon SE's
   // refcount. It has to be zeroed here or the *next* scene's first chainsaw
   // zombie finds a non-zero count, never starts the loop, and the chainsaw is
@@ -1204,6 +1257,10 @@ export function ResetGameGlobals(): void {
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
   G.g_carrier_object = -1;
+  // `LoadSceneAndReset` zeroes the counter at `0x00460030`, and
+  // `ResetSceneCombatState` does it again at `0x0045EF1E`. The slot table is
+  // `ResetSceneOnEnter`'s and is cleared there.
+  G.g_blink_frame_counter = 0;
   G.g_frame = 0;
 }
 

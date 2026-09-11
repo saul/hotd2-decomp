@@ -411,8 +411,10 @@ ResolveDamagedPartSphere(record, slot, char_type);
 ```
 
 The bone's **draw slot is replaced**, which is why a zombie visibly comes apart
-where you shoot it. The slots are ordinary asset slots and resolve through the
-slot table like anything else — `char_adv02`'s gore lives in `harold.bin`,
+where you shoot it. What the bone then *draws* is not necessarily that slot —
+see [§8b](#8b-what-a-bone-actually-draws--zombiedrawbonepart), where nine arms
+of class 0x30's own draw hook substitute a cel or add a second model. The slots
+are ordinary asset slots and resolve through the slot table like anything else — `char_adv02`'s gore lives in `harold.bin`,
 `char_adv00`'s in `char_adv07.bin`, so there really is a shared gore set behind
 the per-character ones. `ResolveDamagedPartSphere` falls back to character type
 7 (or `0x0B`) when a character has no variant of its own.
@@ -696,6 +698,113 @@ characters that do not.
 `FUN_004098E0` calls it twice — once for the character's own type and, if that
 finds nothing, once for type 7 (or 0x0B) — so type 7's table is a shared set
 behind the per-character ones.
+
+## 8b. What a bone actually draws — `ZombieDrawBonePart`
+
+A bone's draw record names **one** slot and `AssetDrawSlot` (`FUN_00418560`)
+draws **one** model for it. Both of those are true, and together they do not
+say what a bone draws, because for class 0x30 `SkeletonEmitNode`
+(`FUN_004114C0`) does not call `SkeletonDrawNodeSlot` (`FUN_00411050`) at all.
+It calls the **per-bone draw callback** at `model+0x1158`:
+
+```c
+if (record[0] == 0 || !(model[0x64] & 1))          goto children;
+if (SkeletonNodeDrawSuppressed(node))              goto children;
+(*(void (**)(int))(model + 0x1158))(node);
+```
+
+`EnemyZombieInit` (`FUN_00452DA0`) writes `ZombieDrawBonePart`
+(`FUN_004534A0`) into `obj+0x12EC` — the same word, the actor being
+`model - 0x194` — at `0x00452E40`. Class 0x31's is `ThrowerDrawBonePart`,
+class 0x25's is `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`) and class
+0x20's is `OneHitTargetBoneDrawHook`; the default hook is the one-slot draw.
+
+`ZombieDrawBonePart` switches on `record[0]` — the slot the bone is *currently*
+drawing, so a gore swap changes the answer — and sixteen arms of that switch do
+something other than draw it. Nine are a **cel** out of a run of models, and
+four of those draw the bone's own slot as well. The index is arithmetic:
+
+```
+seed = g_blink_frame_counter + obj+0x3C * 10        ; 0x004534AE-0x004534D1
+```
+
+`obj+0x3C` is the actor's `g_hit_slots` index, so a crowd runs the same
+animation ten frames apart. Each `(base, count)` pair is an immediate inside
+the routine, `MOV ECX,count; CDQ; IDIV ECX; ADD EDX,base`:
+
+| drawing | at | draws |
+|---|---|---|
+| `0x1B3D` | `0x00453542`, `0x0045355B` | `0x1B3E + seed%20` **and** `0x1B52 + seed%30`, and **not itself** |
+| `0x1B70`, `0x1B71` | `0x0045355B` | itself **and** `0x1B52 + seed%30` |
+| `0x1BCC` | `0x00453583` | `0x1BCD + seed%5` |
+| `0x1BD2` | `0x00453598` | `0x1BD3 + seed%5` |
+| `0x1C96` | `0x00453798` | itself **and** `0x1CB9 + seed%120` |
+| `0x1C97` | `0x004537C0` | `0x1C97 + seed%18` |
+| `0x1DCD` | `0x00453927` | `0x1DCE + seed%50` |
+| `0x1E00` | `0x00453915` | `0x1E01 + seed%50` |
+| `0x1BEB`, `0x1BED` | count at `0x004535F5` | itself, then `0x161B + seed%25` under `T(0,-4.1,0)·S(0.5,0.5,1)` |
+| `0x1D99` | — | itself, then `0xB66` at `T(0.343, 0.4530, 1.0333)` |
+| `0x1CA9` | `0x004537E3` | `0x1CA9 + n`, `n` a latch in `obj+0x1328` that counts to 14 and stops |
+| `0x1F09` | — | a 60-cel ping-pong off the same word, restarted by `obj+0x136C` bit `0x80000` |
+| `0x1C71`–`0x1C7B` (not `0x1C73`), `0x1C7D`–`0x1C80` | — | `FUN_00418660(slot)` `[open]`, then itself |
+| `0x1C7C` | — | itself, and a per-frame decay of `obj+0x134C` / `obj+0x138C` |
+| `0x1C6C` | — | itself, and a transition that raises `obj+0x136C` bits `0x60000000` and plays `PlaySoundId(0x2225A9)` |
+| anything else | — | itself |
+
+Two arms are not draws at all and wrap this one: `ZombieDrawBoneSlotOnly`
+(`0x00453B30`) is the plain one-slot hook `ZombieAdvanceMotion` installs in
+**Boss Mode only**, and `ZombieDrawWithEnlargedHead` (`0x00453B50`) is the
+Original Mode big-head item — bone 2 at `MatrixScale(2,2,2)`, or
+`(1.8,1.8,1.0)` for character type `0x0E`.
+
+Every arm draws through `ZombieSubmitSlotByLighting` (`FUN_00453AE0`), which
+picks `SubmitSlotWithSceneLightArray`, `AssetDrawSlotWithAlpha` or
+`AssetDrawSlot` on `obj+0x136C` bit `0x20` and `obj+0x1368` bit `0x20` — so a
+cel keeps whatever lighting the spawn asked for.
+
+**Each trigger slot belongs to exactly one character type**, and every run
+resolves to that type's own `pol/` file, which is the check on the reading:
+
+| type | file | triggers |
+|---|---|---|
+| `0x00` | `char_adv02.bin` | `0x1B3D`, `0x1B70`, `0x1B71` |
+| `0x02` | `znchain.bin` | `0x1BCC`, `0x1BD2` |
+| `0x03` | `zndina.bin` | `0x1BEB`, `0x1BED` |
+| `0x07` | `char_adv00.bin` | `0x1F09` |
+| `0x09` | `znjikken1.bin` | `0x1C71`–`0x1C80` |
+| `0x0A` | `znjoe.bin` | `0x1C96`, `0x1C97`, `0x1CA9` |
+| `0x0C` | `znkager.bin` | `0x1D99` |
+| `0x0D` | `znkagex.bin` | `0x1DCD`, `0x1E00` |
+| `0x12` | `znele.bin` | `0x1C6C` |
+
+### Why this took so long to find
+
+`char_adv02`'s midriff. Bone 1 escalates to `0x1B70` on the first torso hit and
+that model is chest-only — `y 1.35..5.53` against the undamaged `0x1B3D`'s
+`y -2.02..5.53` — while the pelvis tops out at `y -0.45`. Type 0 is one of the
+21 with a **null** `g_pCharacterExtraParts` descriptor, so the soft waist 68
+other types carry gives it nothing, and the band had nothing drawing it.
+
+The search that stalled had ruled out the right things and drawn the wrong
+conclusion from them: "`AssetDrawSlot` draws one model per slot, so a bone
+cannot draw two" — true premise, false inference, because the hook calls the
+draw as many times as it likes. It then went looking for a table, found that
+`0x1B6B..0x1B6F` are referenced by **no table in the image**, and stopped
+there. That scan was correct. What it proves is that the selection is not
+data: the run is `0x1B52..0x1B6F`, **thirty** models, and the five were its
+last five.
+
+The models say the same thing. All twenty of `0x1B3E..0x1B51` carry 3 meshes
+and 138 vertices with textures `[8, 9, 1]`, and 98 of the 138 vertices differ
+between consecutive entries; all thirty of `0x1B52..0x1B6F` carry 2 meshes and
+39 vertices with `[8, 9]`, and 19 of the 39 differ. Same topology, same
+materials, moving vertices — a flipbook, not a set of variants. And stages
+`0x1B72`, `0x1B73` and `0x1B74`, the three the switch does *not* name, are
+exactly the three whose own geometry already reaches `y -2.02`.
+
+`tools/verify_bone_cels.py` holds all of it: the byte pattern for every
+`(base, count)`, the pelvis split measured from `pol/`, and the presence of
+every cel in every bundle that carries a trigger character.
 
 ## 9. Feedback — the sounds and the impact sprite
 

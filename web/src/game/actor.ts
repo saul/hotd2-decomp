@@ -11,6 +11,7 @@
  */
 import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
+import { HIT_SLOT_NONE } from "./globals";
 import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
 import type { Boss4Block } from "./class19/state";
@@ -979,6 +980,16 @@ export interface ActorBase {
    * own and until it happens this word carries only class 0x30's three bits.
    */
   flags38: number;          // +0x38
+  /**
+   * `obj+0x3C` — the index this actor holds in `g_hit_slots`, or `-1`.
+   *
+   * `ActorClaimHitSlot` (`FUN_00409270`) writes it and `ActorDespawn`
+   * (`FUN_00409CC0`) gives it back; see `game/hit_slots.ts`. It is here rather
+   * than absent because `ZombieDrawBonePart` (`FUN_004534A0`) uses it as the
+   * **phase** of every cel animation a class-0x30 bone plays —
+   * `g_blink_frame_counter + obj+0x3C * 10`.
+   */
+  hitSlot: number;          // +0x3C
   pos: Vec3;                // +0x40
   /**
    * Yaw in BAMS, the middle word of the engine's rotation triple at
@@ -1774,7 +1785,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // assigning `cls` here would widen it back to `SpawnClass` and defeat the
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
-    at, charType, name, flags38: 0,
+    at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
     // `ActorBuildSkinnedModel` writes both of these while building the model:
     // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),

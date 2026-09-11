@@ -88,6 +88,7 @@ const boneSuffix = (part: string) => `_${part}`;
  */
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
+import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { restoreGore, swapGore } from "./characters/gore";
 export type { Instance };
 
@@ -468,6 +469,11 @@ export class CharacterLayer implements System {
         inst.hidden = inst.a.removed.length;
       }
       this.applyBoneVeto(inst);
+      // `ZombieDrawBonePart` (`FUN_004534A0`) -- the cel a class-0x30 bone
+      // draws instead of, or as well as, its own model. This is what fills
+      // `char_adv02`'s midriff once its torso is shot; see
+      // `game/class30/bonecels.ts` for why no table names the models.
+      syncBoneCels(this.goreParts, inst);
       this.syncAttachments(inst);
       if (inst.a.civ) this.syncHeldItems(inst);
     }
@@ -811,6 +817,7 @@ export class CharacterLayer implements System {
   private restoreNodes(inst: Instance): void {
     for (const [bone, g] of inst.gore) restoreGore(inst, bone, g);
     inst.gore.clear();
+    clearBoneCels(inst);
     inst.hidden = 0;
     for (const g of inst.held?.values() ?? []) g.removeFromParent();
     inst.held?.clear();

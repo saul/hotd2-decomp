@@ -16505,6 +16505,145 @@ code this was written for had two of each, and chose between them on the prop's
 *family* — which is how all fifty generic types got type 51's order without
 anything being able to disagree.
 
+---
+
+## 2026-09-11 — the clip root is one absolute track with two consumers, and the port had one of them
+
+Settling `docs/BUGS.md`'s last `[open]` on the stage-2 car rider: its clip's
+root translation is a constant `(0, 15.692, 11.943)` and nothing in the port
+ever took the forward 11.943, so the model sat inside the car's cabin instead
+of on its bonnet. The question the entry left open was **which of the engine's
+two root routines is relative to which**, and the answer is *neither*.
+
+### What each routine does
+
+`SkeletonPoseRootFrame` (`FUN_00410920`) — despite the annotation that said it
+"applies the root translation and rotation", **it emits no `MatrixTranslate` at
+all.** It opens with a per-track pre-pass, now named
+`SkeletonResolveTrackFrames` (`FUN_00410BD0`), which caches each track's frame
+pointer into `g_motion_frame` or its cross-fade weight into
+`g_motion_fade_weight` (`0x007C1C30` and `0x007C1C24`, `+4*track`; `[proved]`
+from `EBP = 0x007C1C10` / `EBX = 0x007C1C04` with `ESI` stepping 4 from `0x20`).
+It then takes track 0's root translation — three floats, or the two tracks'
+lerped by that weight — writes it to `model+0x6C..0x74`, hands a **pointer** to
+it to `SkeletonApplyRootMotion`, and pushes only bone 0's `RotZ; RotY; RotX`.
+
+`SkeletonApplyRootMotion` (`FUN_00410C50`) is therefore the *only* consumer of
+the root translation, and it tests `model+0x64` bit 1 **twice**:
+
+* `0x00410D2F` — does the frame-to-frame delta move the object? `delta = root -
+  model+0x1160`, through `T(obj+0x40) Rz Ry Rx S(model+0x116C)`, written back to
+  `obj+0x40`/`obj+0x48` (and `obj+0x44` too when bit `0x10` is up).
+* `0x00411005` — which part of the same translation goes on the draw matrix?
+  `MatrixTranslate(0, root.y, 0)` with the bit **set**,
+  `MatrixTranslate(root.x, root.y, root.z)` with it **clear**.
+
+So the two are not nested and neither is relative to the other: they are two
+consumers of one absolute track, and one bit picks exactly one of them. A clip's
+root either moves the object or offsets the pose — never both, never neither.
+
+**`L37` again, and it is why this was `[open]`.** Ghidra ends the gated arm at
+its `MatrixStackPop(1)` and shows a `return`. The bytes at
+`0x00410E5F`–`0x00410E93` write the baseline and **fall through** into the
+shared tail that does the pose translate, the `model+0x10 = model+0x18` and the
+pose hook. Read from the pseudocode alone, the second gate test is dead code in
+the arm it appears in, and the routine has no second arm at all.
+
+The baseline is a field, not a remembered frame index, and nothing lets it turn
+an *absolute* root into a step: `ActorSetMotion` seeds it from the new clip's
+frame 0 when the gate is set (`TEST AL,2` at `0x00411966`, then
+`FUN_00412F50(type, motion, 0)` and three stores), `ActorSetMotionBlended`
+writes `track+0x37 = (old & 0xDF) | 1` — exactly the pair the routine tests
+before resetting the baseline to the current root — and a loop wrap is damped
+rather than taken. The port's frame-to-frame delta was already right.
+
+### The port
+
+`render/characters/pose.ts` applied the y-only arm **unconditionally**, with a
+comment asserting the other half was already handled. It is the reading that
+was missing, not the code: `MotionFlag.RootMotion` in `game/actor.ts` has
+described both arms correctly, in prose, since it was written — `L26` exactly,
+a claim with an alibi. The fix is the gate inline in `apply` and `applyBlend`
+(inline because an engine *function* called from `render/` fails
+`render-drives-the-port`, and the engine's own test is one `TEST` anyway), plus
+the one line `RescueTargetInit` was missing: `AND EDX,0xFFFFFFFD` at
+`0x00451759`, which takes bit 1 straight back out of the `3`
+`ActorBuildSkinnedModel` had just written. Class 0x21 and `CivilianRunScript`
+are the only two things in the game that clear it.
+
+### The blast radius, measured before it was changed
+
+`tools/verify_root_pose.py` is the new check and it holds both halves: ten
+instructions quoted as hex at their addresses, and the population.
+
+* **992 of 1058 motion blocks have an exactly zero horizontal root on frame 0**,
+  so for all but 64 the two arms draw in the same place. That is why a
+  collapsed arm survived this long.
+* Of the 140 clips the shipped class-0x10 scripts set, **three** can be posed
+  with a non-zero horizontal root — `people.bin` 596, 598 and 600, one root of
+  2.882 units, one use each — against 289 wait words that ask for root motion
+  and 307 that do not.
+* Plus `zom.bin` 998 at 11.943, which is the actor in the report.
+
+So four actors in six stages, and the second arm is a pose: no world position
+moves at all. `civ_walk.mjs` reports the stage-1 rescue civilian walking the
+identical `20.87 over 590 frames (56,-194) -> (37,-186)` either side of the
+change, and `playthrough.mjs` is unchanged across the six stages.
+
+The picture is the evidence (`L19`). At stage 2 block 0 step 2, driven frame
+440, camera 57 frame 258: **before**, the rider's knees are at the windscreen
+and its torso is inside the cabin; **after**, it lies clear along the bonnet
+with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
+
+### Wrong turns and things worth knowing
+
+* **The Ghidra MCP bridge went away mid-session** — `list_instances` returned
+  none, so the two routines were finished with `capstone` over the PE directly
+  (`pip install --break-system-packages capstone`, a 30-line section walker).
+  That is what found the fall-through, because a linear sweep does not stop
+  where a decompiler stops. The consequence is that **nothing was renamed in
+  the live database**: `SkeletonResolveTrackFrames`, `g_skeleton_model`,
+  `g_motion_frame` and `g_motion_fade_weight` exist in
+  `ghidra/annotations/*.tsv` and not yet in the project, so the next session to
+  open it should apply them before `export-annotations` can be trusted.
+* **A scan for writes of `model+0x64` through `obj+0x1F8` missed both the
+  civilian and the rescue target**, because both hold the model base in a
+  register and write `[reg+0x64]`. `L32`'s lesson one struct along: the offset a
+  field is written at depends on which pointer the routine kept. Scanning both
+  spellings found eleven classes that write that word.
+* The first two screenshots were taken at the reporter's own locator, `step=3
+  op=31 frame=150` and `frame=268`, and neither shows the rider — the camera is
+  behind the car at both. Sampling the Actors panel across 700 driven frames
+  found it at `d=65` on frame 440, which is the shot worth taking. The panel is
+  the player's own readout and reading it is what `civ_walk.mjs` already does.
+* `g_cur_actor_model` was the obvious name for `0x009CA0A0` and is already
+  taken, by `0x007DD09C` — a different scratch pointer for class 0x10.
+  `g_skeleton_model` instead.
+
+### Left open
+
+* **`model+0x116C` scales the pose offset in the engine and nothing in the port
+  applies it.** The translate sits inside `MatrixScale`, so a 0.9 character
+  offsets by 0.9 of what its clip authored; neither `hod2lib.characters` nor
+  `render/characters.ts` scales a drawn character at all, so the offset is left
+  unscaled to match the model it offsets. Two of the three civilian clips
+  belong to `scale 0.9` types, so the honest correction there is 2.594 and not
+  2.882 — and fixing it means scaling the drawn character, which is a change to
+  every skinned actor's size.
+* **The death clip is the one declared override**, and it is not a second
+  reading: the engine has no death track, and `ActorAdvanceMotion` does not run
+  root motion through a death, so `pose.ts` keeps the whole root there. The two
+  models agree wherever the clip's frame-0 horizontal root is zero, which is
+  992 blocks of 1058. Making it gate-driven means giving the death clip root
+  motion in `game/`.
+* **`MotionFlag.RootMotionY`, bit `0x10`**, still has no writer. Nine other
+  classes write `model+0x64` and none of the values were read here.
+* The engine's wrap damper is `baseline = root + (root - baseline)/play_length`,
+  which makes the applied delta `(baseline_old - root)/play_length`;
+  `rootDelta` in `game/root_motion.ts` computes `(root - root[0])/frames`
+  instead. Both are small and neither was touched, but they are not the same
+  number and nothing asserts either.
+
 ### Closing the descriptor-slot set: read the switch as a table
 
 The follow-up from the same session. Five types took `obj+0x28C` into a draw
@@ -16553,4 +16692,3 @@ inert generic, which is a module and not a table row.
 Type 72 is the one genuine `[open]` left, and it is the honest shape: every
 code clause says the descriptor names its model and the data says the
 descriptor names a 1.
-

@@ -125,6 +125,12 @@ CHECKS: list[Check] = [
           "class-0x30 state whose sole exit is a script flag a civilian's own "
           "stream raises",
           NEEDS_BUNDLE),
+    Check("loops", "web", ["npm", "run", "--silent", "loops"],
+          "that the looping sound effects reach an <audio> element, wrap "
+          "rather than running out, and are still there when the stage is "
+          "reached by a deep link -- the only check in the tree that measures "
+          "the mixer rather than the intent",
+          NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "

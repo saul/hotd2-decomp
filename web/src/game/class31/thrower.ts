@@ -580,8 +580,10 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Withdraw:
       return ThrowerStateWithdraw(obj, eye, dt, rng);
     case ThrowerState.LeapToPoint:
-      ThrowerStateLeapToPoint(obj);
-      return ActorIntegrate(obj, dt);
+      // No `ActorIntegrate`: the arc **interpolates** the position, the way
+      // `ActorArcStep` does for every other leap in this class. Integrating a
+      // velocity on top would move the actor twice.
+      return ThrowerStateLeapToPoint(obj, dt, rng, events);
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
       return ThrowerStatePathFollow(obj, dt);
@@ -601,21 +603,10 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
   }
 }
 
-/**
- * `pos += vel`, at the engine's own 60 Hz. The arc's velocity is per frame, so
- * the port scales it by however much of a frame this tick covered.
- */
 /** `param_1[0x4a]` in `EnemyThrowerInit`: `obj+0x128`, the body sphere. */
 const CHAR_ZSASS = 0x16;
 const BODY_RADIUS_ZSASS = 5.0;
 const BODY_RADIUS_OTHER = 4.0;
-
-function ActorIntegrate(obj: ThrowerActor, dt: number): void {
-  const frames = dt * GAME_HZ;
-  obj.pos.x += obj.vel.x * frames;
-  obj.pos.y += obj.vel.y * frames;
-  obj.pos.z += obj.vel.z * frames;
-}
 
 /**
  * `EnemyThrowerInit` — `FUN_00449620`.

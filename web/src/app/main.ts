@@ -1234,15 +1234,24 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   // -- per-frame ---------------------------------------------------------
 
   /**
-   * After a seek, play whatever track the replay last passed.
+   * After a seek, play whatever track the replay last passed — **and whatever
+   * loops it left sounding.**
    *
    * The replay itself is silent -- retriggering audio for every instruction
    * skipped over would be a burst of stops and starts -- so the walker records
    * the track and the result is applied once, here.
+   *
+   * The looping SE are the same problem and were not covered. A `se_play` of a
+   * looping id is one instruction that starts a noise lasting minutes: stage
+   * 1's rain, stage 3's wind, the machinery in stages 2 and 4. Skipped by a
+   * replay, they were absent for the whole scene, so arriving at a stage by a
+   * deep link gave a silent one and playing from the top did not. See
+   * `Walker.loopingSe`.
    */
   syncBgmToWalker(): void {
     const t = this.walker?.bgmTrack;
     if (t !== null && t !== undefined && t !== 0) this.bgm.play(t);
+    this.bgm.syncLoopingSe(this.walker?.loopingSe ?? []);
   }
 
   /**

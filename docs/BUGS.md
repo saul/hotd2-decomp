@@ -2410,6 +2410,49 @@ investigation ruled out.
   old line and a fifth mutation, one draw instead of the difference, fails the
   "both ways" one. `L46`.
 
+## Two reported on 2026-09-11
+
+- `[fixed]` **The looping sound effects stopped looping, and only when the
+  stage was reached by a deep link.** `Walker.playSe` is silent during a
+  replay, which is right for a gunshot and wrong for an ambient bed: one
+  `se_play` starts a noise lasting minutes and another stops it, so a seek
+  stepped over both and the stage had no rain, no wind and no machinery for the
+  rest of the scene. Measured before it was touched, by tapping `window.Audio`
+  before the app boots: from the top, `RAIN3ST_44.wav` loops and wraps and is
+  paused by its `_OFF` id; at a deep link past that instruction there is no
+  such element at all.
+
+  The music never had the problem, because `bgm_entry_play` records the track
+  on the walker *before* the quiet check and a seek applies it afterwards. The
+  loops now have the same record — `Walker.loopingSe`, kept in step by the same
+  two tables `PlaySoundId` walks — and `Bgm.syncLoopingSe` puts the mixer
+  where the script left it, adding and removing as little as it can.
+
+  **The report's "this was working yesterday" is right, and the line that
+  suppresses the sound is much older.** Until `20c825f` a looping id played as
+  a one-shot, so a skipped `se_play` cost 0.75 seconds nobody noticed; that
+  commit made the id loop and the same skip started costing the whole scene.
+
+- `[fixed]` **The zombies that come through windows had no animation for it.**
+  Reported from `?stage=2&mode=play&entry=0&block=11&step=4&op=9&frame=387`,
+  where the script plays `COMMON\GRASS1_22.WAV` — `GRASS` is ガラス, glass —
+  and the next instruction spawns two `zstin` in class-0x31 state 20.
+
+  `ThrowerStateLeapToPoint` (`FUN_0044E4C0`) installs a **three-stage arc
+  motion script** and steps it: motion 300 cut into a windup at 50..55, a
+  flight at 56..63 and a landing at 64..98, or motion 439 for `zskamere`. The
+  port integrated a velocity instead and played no clip, so the actors arrived
+  at the right point in the right number of frames in whatever pose they were
+  already in. Three smaller things went with it: `obj+0x34` bit `0x100`, which
+  makes the actor **unshootable while it is coming through**; the
+  `TrackBone2` bit, whose doc comment already named these two instructions and
+  which nothing set; and `COMMON\ENE_WALK6_22.WAV`, the footfall on the frame
+  the arc settles.
+
+  Bundle format 7 → 8: the three scripts and the clips they name had never been
+  exported, and each arc stage measures its exit against the clip's own frame,
+  so an actor whose clip is missing waits for ever rather than merely sliding.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

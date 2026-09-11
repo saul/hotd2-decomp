@@ -19,25 +19,25 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 43633 | 161 | engine |
-| `hod2lib/` | 16039 | 34 | engine |
+| `game/` | 43669 | 161 | engine |
+| `hod2lib/` | 16050 | 34 | engine |
 | `render/` | 8559 | 30 | render |
-| `app/` | 7418 | 29 | app |
-| `script/` | 4262 | 25 | engine |
+| `app/` | 7427 | 29 | app |
+| `script/` | 4308 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
-| `bundle/` | 2146 | 11 | engine |
+| `bundle/` | 2153 | 11 | engine |
 | `core/` | 910 | 9 | engine |
-| `audio/` | 363 | 1 | render |
+| `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **86773** | **327** | |
+| **total** | **86909** | **327** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
-* `app/main.ts` — 1979
+* `app/main.ts` — 1988
 * `game/actor.ts` — 1964
+* `script/walker.ts` — 1868
 * `hod2lib/exetab.ts` — 1839
-* `script/walker.ts` — 1822
 
 ## The port
 
@@ -47,7 +47,7 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 158 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 321 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
-| Declared `[diverges]` | **181** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **180** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **170** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
@@ -111,6 +111,7 @@ nothing exits 3 and is never counted as green.
 | `test:state` | that a save/load and a seek reach the *same world* play did -- the only check that compares two histories rather than one | bundle |
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
 | `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one -- and the only check that asks the same question of an ACTOR, for the one class-0x30 state whose sole exit is a script flag a civilian's own stream raises | bundle |
+| `loops` | that the looping sound effects reach an <audio> element, wrap rather than running out, and are still there when the stage is reached by a deep link -- the only check in the tree that measures the mixer rather than the intent | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
@@ -130,7 +131,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-13 of them need the installed game and 9 need an exported
+13 of them need the installed game and 10 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

@@ -71,7 +71,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 7;
+export const BUNDLE_FORMAT = 8;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.

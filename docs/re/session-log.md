@@ -17320,3 +17320,90 @@ The guard is four assertions and two mutations, and the rule is written up as
 in this port**, and `next()` belongs in a multiply. Where the exe masks rather
 than divides, check the mask is uniform over `rand()`'s 0..0x7FFF before
 calling it a count — `0x8000` is exactly eight times `0x1000`, so `& 0xFFF` is.
+
+---
+
+## Two reports in one turn: the loops that stopped looping, and the zombies that came through the window standing still
+
+### The looping SE were missing after a seek, and only after a seek
+
+Reported as *"the looping sound effects now no longer loop properly — this was
+working yesterday"*. Measured before it was touched, by tapping `window.Audio`
+before the app boots and sampling every element's `loop`, `paused` and
+`currentTime` once a second.
+
+Playing stage 1 **from the top**, the rain is correct: `RAIN3ST_44.wav` with
+`loop = true`, `currentTime` wrapping 0.75 → 0.09 → 0.25, and paused on the
+frame its `_OFF` id arrives. Opening the **same stage at a deep link** past
+that instruction, there is no rain element at all — the only `loop = true` in
+the page is the music.
+
+`Walker.playSe` is `quiet || !op.sound ? undefined : host.playSound(...)`, and
+`quiet` is a replay. That is right for a gunshot and wrong for an ambient bed:
+one `se_play` starts a noise lasting minutes and another stops it, and a seek
+stepped over both silently. **The music never had the problem** because op
+`0x5F` writes `w.bgmTrack` *before* the quiet check and `syncBgmToWalker`
+applies it afterwards. The loops had no such record.
+
+So `Walker.loopingSe` is that record, on the same terms: `playSe` keeps it in
+step whether or not the sound is played, walking the same two tables
+`PlaySoundId` walks, and `syncBgmToWalker` hands it to
+`Bgm.syncLoopingSe`, which adds and removes as little as it can — a loop
+already sounding and still wanted is left alone, because restarting it is
+audible.
+
+**The user is right that it changed yesterday, and the line that suppresses the
+sound is much older than that.** Before `20c825f` a looping id was played as a
+one-shot, so a skipped `se_play` cost 0.75 seconds of rain nobody noticed. That
+commit made the id loop, and the same skip started costing the whole scene's
+ambience. A latent gap became audible the moment the thing behind it began to
+matter.
+
+`shot()` in `seek.test.ts` carries the set now, so every snapshot round-trip
+and replay-identity assertion covers it, and there are twelve new assertions —
+a seek past each stage's first looping `se_play` leaves it sounding, and a seek
+past its stop leaves none. All twelve fail with the tracking removed.
+
+### `ThrowerStateLeapToPoint` had no animation
+
+Reported from `?stage=2&...&block=11&step=4&op=9`: *"zombies that burst through
+doors/windows seem to be missing some implementation."* That address is worth
+reading in full, because the script says exactly what should happen — step 4
+plays `COMMON\GRASS1_22.WAV` (`GRASS` is ガラス, glass), and the next
+instruction spawns two `zstin` in class-0x31 state 20.
+
+State 20 was ported, and its `[diverges]` said what was missing: *"The engine
+installs a three-stage arc motion script here as well — `0x00564918` or its
+byte-identical twin `0x00564948` at random, and `0x00565E28` for character type
+0x17 — and steps the full phase machine. This integrates the velocity instead
+and plays no clip."* So the actors arrived at the right point in the right
+number of frames, in whatever pose they were already in. A zombie sliding
+through a window is not a zombie bursting through one.
+
+Three smaller things went with the script, all in the same forty instructions:
+
+* `obj+0x34` bit `0x100` — `OR CH, 1` at `0x0044E4E3`, `AND AH, 0xFE` at
+  `0x0044E5B2`. **It cannot be shot while it is coming through.**
+* `ThrowerFlag.TrackBone2`, cleared on entry and set on landing, which is what
+  points `SkeletonEmitNode` at bone 2. The bit was already named, with these
+  two addresses in its doc comment, and nothing set it.
+* `PlaySoundId(0x2916A9)` — `COMMON\ENE_WALK6_22.WAV`, the footfall, once, on
+  the frame the arc settles.
+
+And a `rand()` draw whose two outcomes are byte-identical scripts. Taken
+anyway: `L46`'s other half is that a draw the port skips shifts the shared
+stream for everything after it.
+
+**The arc script has to be baked or the actor hangs.** Each stage measures its
+exit against the clip's own frame, so a stage whose clip is missing never
+advances — `ActorClipFrame` returns -1 and -1 is less than every threshold.
+Stage 4's nine state-20 `zskamere` needed motion 439, which no bundle had
+because nothing had ever asked for it; the exporter collects clips from
+`class31.scripts`, so adding the three scripts baked it. Format 7 → 8, because
+a format-7 bundle has neither the scripts nor the clips and a client reading
+one leaves every such actor standing in the window it should have come through.
+
+The port test for this state had never had an arc script either — it ran under
+`CHARS`, which has no class-0x31 block, while every other class-0x31 test runs
+under `CHARS31`. It passed because the old implementation needed no script. It
+is moved to the `thrower()` fixture with the exe's own twelve dwords in it.

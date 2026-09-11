@@ -390,7 +390,8 @@ export const WALKER_RESTORED_KEYS = [
   "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
   "stashedCam", "spawns", "simpleSpawns",
   "sceneState", "queuedEventsPending", "camPending",
-  "cam", "finished", "nextEntryBlock", "bgmTrack", "lastSound", "seq",
+  "cam", "finished", "nextEntryBlock", "bgmTrack", "lastSound", "loopingSe",
+  "seq",
 ] as const;
 
 /**
@@ -770,6 +771,22 @@ export class Walker {
   bgmTrack: number | null = null;
   /** The most recent `se_play` operand, for the HUD. */
   lastSound: number | null = null;
+  /**
+   * The looping sound effects the script has started and not stopped.
+   *
+   * **Script state, not audio state**, and it is here for the reason
+   * {@link Walker.bgmTrack} is: a seek replays the instructions silently, so a
+   * `se_play` of a looping id is skipped and the loop it should have started
+   * is missing for the rest of the scene. The music survived that already
+   * because the walker remembered the track; the loops did not, and what a
+   * player heard was a stage with no rain, no wind and no machinery whenever
+   * they arrived by a deep link rather than from the top.
+   *
+   * `PlaySoundId`'s stop ids are **stop-all** — `SoundStopAllLoopingSe`
+   * (`0x004AC220`) walks the whole mixer list and takes no argument — so a
+   * stop id empties this rather than removing one entry.
+   */
+  loopingSe: number[] = [];
 
   private seq = 0;
   private readonly liveBlocks: BlockJson[];
@@ -885,6 +902,7 @@ export class Walker {
     this.nextEntryBlock = null;
     this.bgmTrack = null;
     this.lastSound = null;
+    this.loopingSe = [];
     this.seq = 0;
     this.host.onBranch(null);
   }
@@ -929,7 +947,8 @@ export class Walker {
       wait: this.wait && { ...this.wait, policy: { ...this.wait.policy } },
       finished: this.finished, nextEntryBlock: this.nextEntryBlock,
       bgmTrack: this.bgmTrack,
-      lastSound: this.lastSound, seq: this.seq,
+      lastSound: this.lastSound, loopingSe: [...this.loopingSe],
+      seq: this.seq,
       // Sets are not JSON; the snapshot is a file the user can keep. The
       // script flags are not here: they live in `G.g_script_flags`, which the
       // game slice of the same snapshot carries.
@@ -1427,7 +1446,34 @@ export class Walker {
 
   static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
     w.lastSound = op.sound ?? null;
+    Walker.trackLoopingSe(w, op.sound ?? 0);
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
+  }
+
+  /**
+   * Keep {@link Walker.loopingSe} in step with what this `se_play` does to the
+   * mixer — **whether or not the sound is played**.
+   *
+   * `PlaySoundId` (`FUN_0041CFD0`) walks `g_looping_se_ids` (`0x005887FC`) and
+   * `g_looping_se_stop_ids` (`0x005888B0`) in step and breaks on the first
+   * match: an id in the first plays looped, an id in the second calls
+   * `SoundStopAllLoopingSe` and stops every loop in the mix. That walk is here
+   * as well as in `audio/bgm.ts` because the two answer different questions —
+   * the audio layer asks what to do with this id now, and this asks what the
+   * script has left sounding, which is the thing a seek has to reconstitute.
+   */
+  static trackLoopingSe(w: Walker, id: number): void {
+    if (!id) return;
+    for (const pair of w.script.sound?.looping ?? []) {
+      if (pair.play === id) {
+        if (!w.loopingSe.includes(id)) w.loopingSe.push(id);
+        return;
+      }
+      if (pair.stop === id) {
+        w.loopingSe = [];
+        return;
+      }
+    }
   }
 
   /**

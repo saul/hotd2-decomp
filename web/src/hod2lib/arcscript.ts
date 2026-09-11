@@ -36,6 +36,17 @@ export const CLASS31_ARC_SCRIPTS: Record<string, number> = {
   wall_left: 0x00564a68,         // state 14
   wall_right: 0x00564a38,        // state 15
   ceiling: 0x00564a98,           // state 16
+  /*
+   * `ThrowerStateLeapToPoint`'s three, and the reason a `zstin` comes through
+   * a window without a leg moving today. The state picks `drop_zskamere` for
+   * character type 0x17 and flips a coin between the other two, which are
+   * **byte for byte the same twelve dwords** -- motion 300 cut at 50..55,
+   * 56..63 and 64..98. The draw is still taken, because a `rand()` the port
+   * skips shifts the shared stream for everything after it.
+   */
+  drop: 0x00564918,
+  drop_alt: 0x00564948,
+  drop_zskamere: 0x00565e28,
 };
 
 /**

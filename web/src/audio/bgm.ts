@@ -253,6 +253,33 @@ export class Bgm {
   }
 
   /**
+   * `[port-only]` — make the mixer's loops exactly *ids*, adding and removing
+   * as little as possible.
+   *
+   * The seam a **seek** needs. A replay runs the script silently, so the
+   * `se_play` that starts a loop is skipped while the one that stops it may
+   * not be; the walker records what should be sounding
+   * (`Walker.loopingSe`) and this puts the mixer there. A loop already
+   * sounding and still wanted is left running rather than restarted, because
+   * restarting it is audible.
+   *
+   * The engine needs nothing like it: it has no seek.
+   */
+  syncLoopingSe(ids: readonly number[]): void {
+    const want = new Set(ids);
+    for (const [id, el] of [...this.loops]) {
+      if (want.has(id)) continue;
+      el.pause();
+      el.currentTime = 0;
+      this.loops.delete(id);
+    }
+    for (const id of ids) {
+      const file = this.sound?.se[String(id)];
+      if (file) this.startLoopingSe(id, file);
+    }
+  }
+
+  /**
    * `SoundStopAllLoopingSe`. It takes no argument in the engine either — a
    * stop id names which loop it was authored for and stops every one of them.
    */

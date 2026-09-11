@@ -75,6 +75,10 @@ function shot(w: Walker): string {
       .map((v, i) => (v ? i : -1)).filter((i) => i >= 0),
     shutter: w.shutterState,
     bgm: w.bgmTrack,
+    // A looping SE is script state, not a transient: one `se_play` starts a
+    // noise that lasts minutes and another stops it, so a seek that does not
+    // reproduce the set has left the mixer somewhere play never puts it.
+    loops: [...w.loopingSe].sort((a, b) => a - b),
     backdrop: w.backdropPreset,
     fixedEyeY: w.fixedEyeY,
     useFixedEyeY: w.useFixedEyeY,
@@ -1023,6 +1027,72 @@ for (const stage of STAGES) {
   }
   check(`stage ${stage}: ${done} snapshots round-trip and replay identically`,
         !bad, bad);
+}
+
+// -- the looping SE a seek has to reconstitute ------------------------------
+
+/**
+ * A replay is silent, and that is right for a gunshot and wrong for the rain.
+ *
+ * `PlaySoundId` loops 44 of the 324 SE ids, and a stage's ambient bed is one
+ * `se_play` at the top of a block that sounds until another stops it. The
+ * walker steps over both silently during a seek, so the mixer has to be told
+ * what the script left running -- which is `Walker.loopingSe`, and this is
+ * what says it is right.
+ *
+ * Arriving by a deep link gave a stage with no rain, no wind and no machinery
+ * while playing from the top gave the same stage with all three.
+ */
+for (const stage of STAGES) {
+  const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
+  if (!existsSync(file)) continue;
+  const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+  const pairs = script.sound?.looping ?? [];
+  if (!pairs.length) continue;
+  const plays = new Set(pairs.map((p) => p.play));
+  const stops = new Set(pairs.map((p) => p.stop));
+
+  // The first `se_play` of a looping id in this stage, and the stop that ends
+  // it. Both are addresses a URL can name, which is how they are reached.
+  const found: { start: number[] | null; stop: number[] | null } =
+    { start: null, stop: null };
+  for (let bi = 0; bi < script.blocks.length; bi++) {
+    const steps = script.blocks[bi].steps ?? [];
+    for (let si = 0; si < steps.length; si++) {
+      const ops = steps[si].ops ?? [];
+      for (let oi = 0; oi < ops.length; oi++) {
+        const id = (ops[oi] as OpJson).sound;
+        if (id === undefined || id === null) continue;
+        if (!found.start && plays.has(id)) found.start = [bi, si, oi, id];
+        else if (found.start && !found.stop && stops.has(id)) {
+          found.stop = [bi, si, oi];
+        }
+      }
+    }
+  }
+  if (!found.start) continue;
+  const [sb, ss, so, sid] = found.start;
+
+  const w = new Walker(script, mkHost());
+  if (!seekTo(w, sb, ss, so + 1)) {
+    check(`stage ${stage}: seek to the looping se_play`, false,
+          `${sb}/${ss}/${so + 1} unreachable`);
+    continue;
+  }
+  check(`stage ${stage}: a seek past a looping se_play leaves it sounding`,
+        w.loopingSe.includes(sid),
+        `after ${sb}/${ss}/${so + 1}: [${w.loopingSe.join(", ")}]`);
+
+  if (found.stop) {
+    const [pb, ps, po] = found.stop;
+    const v = new Walker(script, mkHost());
+    if (seekTo(v, pb, ps, po + 1)) {
+      // A stop id is stop-**all**: `SoundStopAllLoopingSe` takes no argument.
+      check(`stage ${stage}: ...and a seek past its stop leaves none`,
+            v.loopingSe.length === 0,
+            `after ${pb}/${ps}/${po + 1}: [${v.loopingSe.join(", ")}]`);
+    }
+  }
 }
 
 finishOrSkip("seek", failures, ran);

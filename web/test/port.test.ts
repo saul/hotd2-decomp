@@ -154,6 +154,7 @@ import { ThrowerState, ThrowSub } from "../src/game/class31/states";
 import { ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
+import { SND_LEAP_LANDED } from "../src/game/class31/leap";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
   from "../src/game/combat/resolve_hit";
@@ -364,6 +365,13 @@ const TYPE: CharacterType = {
     "102": motion(24), "103": motion(20),
     // 185 (0xB9) is the pose `ZombieStateEmerge` holds while it waits.
     "185": motion(4),
+    // 300 (0x12C) is `ThrowerStateLeapToPoint`'s clip, cut into a windup, a
+    // flight and a landing by the `drop` arc script. It has to be baked for
+    // the type or the state has no clip frame to measure its stages against,
+    // and an unbaked stage is an actor that hangs in the window for ever.
+    "300": motion(50),
+    // 439 (0x1B7) is the same, for `zskamere`.
+    "439": motion(22),
     // 988 (0x3DC) is class 0x20's death clip -- `OneHitTargetUpdate` names it
     // by id. Deliberately shorter than the 120-frame sink that follows, which
     // is the shape the "plays its death animation twice" report is about:
@@ -776,44 +784,6 @@ console.log("RankEnemiesByDistance:");
   check("it writes nothing onto a class that does not register",
         other.rank === 41 && other.queueRank === 42,
         `rank ${other.rank}, queueRank ${other.queueRank}`);
-}
-
-// -- 3b. the drop -----------------------------------------------------------
-
-console.log("ThrowerStateLeapToPoint:");
-{
-  const rng = new Rng(4);
-  const events = scene(0, rng);
-  // Stage 2 block 5 step 6's first zsass, verbatim: spawned at y = 87 with a
-  // descriptor naming the street at y = 37, thirty frames away.
-  const z = ActorSpawn(0x20e8, SpawnClass.Thrower, 1, "zsass", {
-    initialState: ThrowerState.LeapToPoint,
-    leap: { dest: [-732.8, 37.0, -1206.5], frames: 30 },
-  });
-  z.visible = true;
-  z.hp = 10;
-  z.pos = vec3(-732.8, 87.0, -1206.5);
-  z.motion = 10;
-
-  check("it starts in the descriptor's own state, not the throw",
-        z.state === ThrowerState.LeapToPoint, `state ${z.state}`);
-
-  const ys: number[] = [];
-  for (let i = 0; i < 40; i++) {
-    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-    ys.push(z.pos.y);
-  }
-  check("it falls", ys[5] < 87 && ys[5] > 37, `y ${ys[5].toFixed(1)}`);
-  check("it accelerates rather than sliding down at a constant rate",
-        ys[4] - ys[5] < ys[19] - ys[20],
-        `${(ys[4] - ys[5]).toFixed(3)} then ${(ys[19] - ys[20]).toFixed(3)}`);
-  check("it lands on the point the descriptor names",
-        Math.abs(z.pos.y - 37) < 0.01 && Math.abs(z.pos.x + 732.8) < 0.01,
-        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)})`);
-  check("in about the frames it names", ys.findIndex((y) => y <= 37.001) <= 31,
-        `${ys.findIndex((y) => y <= 37.001)}`);
-  check("and then stands up to throw",
-        z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
 }
 
 // -- 3c. the route ----------------------------------------------------------
@@ -4571,6 +4541,16 @@ const ARC = (motionId: number) => [
   { motion: motionId, start: 47, fade: 0, until: 47 },
 ];
 
+/**
+ * `CLASS31_ARC_SCRIPTS.drop` and its byte-identical twin, verbatim from
+ * `0x00564918`: motion 300 cut at 50..55, 56..63 and 64..98.
+ */
+const DROP_SCRIPT = (motionId: number) => [
+  { motion: motionId, start: 50, fade: 0, until: 55 },
+  { motion: motionId, start: 56, fade: 0, until: 63 },
+  { motion: motionId, start: 64, fade: 5, until: 98 },
+];
+
 const TYPE31: CharacterType = {
   ...TYPE,
   type: 0x19, name: "zstin", file: "zstin.bin",
@@ -4623,6 +4603,18 @@ const CLASS31 = {
   scripts: {
     wall_left: ARC(290), wall_right: ARC(291), ceiling: ARC(309),
     aside: ARC(282), aside_attack3: ARC(282), aside_zsass: ARC(282),
+    // `ThrowerStateLeapToPoint`'s three. `drop` and `drop_alt` are byte for
+    // byte the same in the exe and are the same here, which is what lets the
+    // coin flip be asserted as invisible.
+    // The exe's own twelve dwords, not `ARC`'s generic shape: the stage
+    // thresholds are what the state measures its windup, flight and landing
+    // against, and a stand-in with different ones tests a different clip.
+    drop: DROP_SCRIPT(300), drop_alt: DROP_SCRIPT(300),
+    drop_zskamere: [
+      { motion: 439, start: 0, fade: 0, until: 19 },
+      { motion: 439, start: 20, fade: 0, until: 31 },
+      { motion: 439, start: 32, fade: 0, until: 42 },
+    ],
   },
 };
 
@@ -4796,6 +4788,63 @@ console.log("\nEnemyThrowerInit: zslman is born NoDismember");
   check("...and no other thrower character type is",
         (zstin.flags & ActorFlag.NoDismember) === 0,
         `flags ${zstin.flags.toString(16)}`);
+}
+
+console.log("class 0x31, ThrowerStateLeapToPoint:");
+{
+  const rng = new Rng(41);
+  const events = new Events();
+  let thumps = 0;
+  events.on("sound.play", (d) => {
+    if (d.id === SND_LEAP_LANDED) thumps += 1;
+  });
+  // Stage 2 block 5 step 6's first zsass, verbatim: spawned at y = 87 with a
+  // descriptor naming the street at y = 37, thirty frames away. The other
+  // shape is stage 2 block 11 step 4 -- the script plays the glass and then
+  // puts two `zstin` in this state so they arrive through the window.
+  const z = thrower(ThrowerState.LeapToPoint, {
+    leap: { dest: [-732.8, 37.0, -1206.5], frames: 30 },
+  });
+  z.pos = vec3(-732.8, 87.0, -1206.5);
+  z.motion = 10;
+
+  check("it starts in the descriptor's own state, not the throw",
+        z.state === ThrowerState.LeapToPoint, `state ${z.state}`);
+
+  const ys: number[] = [];
+  let clip = -1;
+  let immune = 0;
+  for (let i = 0; i < 200 && z.state === ThrowerState.LeapToPoint; i++) {
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    ys.push(z.pos.y);
+    if (z.action) clip = z.action.motion;
+    if (z.flags & ActorFlag.ShotImmune) immune += 1;
+  }
+  // **The arc script is the point of this state**, and without it the actor
+  // slid to the ground in whatever pose it was already in. Clip 300 is the
+  // leap, cut into a windup at 50..55, a flight at 56..63 and a landing at
+  // 64..98 by `CLASS31_ARC_SCRIPTS.drop`.
+  check("it plays the leap clip the arc script names",
+        clip === 300, `clip ${clip}`);
+  check("it falls", ys[8] < 87 && ys[8] > 37, `y ${ys[8]?.toFixed(1)}`);
+  check("it accelerates rather than sliding down at a constant rate",
+        ys[7] - ys[8] < ys[22] - ys[23],
+        `${(ys[7] - ys[8]).toFixed(3)} then ${(ys[22] - ys[23]).toFixed(3)}`);
+  check("it lands on the point the descriptor names",
+        Math.abs(z.pos.y - 37) < 0.01 && Math.abs(z.pos.x + 732.8) < 0.01,
+        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)})`);
+  // `OR CH, 1` at `0x0044E4E3`, `AND AH, 0xFE` at `0x0044E5B2`: it cannot be
+  // shot on the way through.
+  // Every frame but the last: the flag is cleared inside the same update that
+  // hands the actor to state 7, which is the frame the loop stops on.
+  check("it is shot-immune for the whole leap and not after",
+        immune === ys.length - 1 && (z.flags & ActorFlag.ShotImmune) === 0,
+        `${immune} of ${ys.length} frames`);
+  check("and then stands up to throw",
+        z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
+  // The footfall, once: `PlaySoundId(0x2916A9)` at `0x0044E58E`.
+  check("...having thumped exactly once on the way down",
+        thumps === 1, `${thumps}`);
 }
 
 console.log("class 0x31, ThrowerStateWalkDistance:");
@@ -9035,7 +9084,13 @@ console.log("\nrain: DrawRainParticles' simulation half");
     T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["wall", "floor"];
     z.pos = vec3(0, 0, 45);
-    for (let i = 0; i < 10; i++) GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    // Long enough for the arc **and its landing clip**: the state holds until
+    // `ActorArcStep` runs out of script, which is what makes the leap an
+    // animation rather than a slide.
+    for (let i = 0; i < 200 && z.state === ThrowerState.LeapToPoint; i++) {
+      GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
+    }
+    GameUpdate(EYE, 1 / 60, CAM_HOST, rng, events);
     check("a state that writes `pos` outright is still pushed clear after it",
           z.state === ThrowerState.StandAndDecide && z.pos.x <= 26 + 1e-6,
           `state ${z.state} x ${z.pos.x.toFixed(2)}`);

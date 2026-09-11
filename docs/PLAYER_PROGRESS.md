@@ -1664,6 +1664,42 @@ head-look fix-up and its actor-versus-actor push, whose transformed point is
 whose sounds are ported and whose sprites are not because none of the three
 engine routines has a termination to copy.
 
+## Coming through the window, and the ambience that goes with it
+
+Two reports from the same afternoon, and they meet in the same place: a
+**seek** and a **state** each have to leave the world where play would have
+left it, and neither did.
+
+**`ThrowerStateLeapToPoint` (class 0x31 state 20) had no animation.** The state
+is how a class-0x31 actor arrives from somewhere it could not have walked from
+— stage 2 block 11 plays the glass and then spawns two `zstin` in it. The
+engine installs a three-stage **arc motion script** and steps it, cutting motion
+300 into a windup, a flight and a landing; the port integrated a velocity and
+played no clip, so the actor slid through in whatever pose it had. It also
+missed the three things that travel with the script: the actor is
+**unshootable** while it is coming through (`obj+0x34` bit `0x100`), the camera
+tracks bone 2 from the landing frame, and there is a footfall on the frame the
+arc settles.
+
+An arc stage measures its exit against the clip's **own frame**, so a stage
+whose clip is not baked never advances at all. Stage 4's nine `zskamere` needed
+motion 439, which no bundle had because nothing had ever asked for it. Bundle
+format 8 carries the three scripts and the clips they name.
+
+**The looping sound effects did not survive a seek.** `Walker.playSe` is silent
+during a replay, which is right for a gunshot and wrong for an ambient bed: one
+`se_play` starts a noise lasting minutes and another stops it, so a stage
+reached by a deep link had no rain, no wind and no machinery for the rest of the
+scene while the same stage played from the top had all three. The music never
+had the problem because `bgm_entry_play` records its track on the walker before
+the quiet check; the loops now have the same record, and `Bgm.syncLoopingSe`
+puts the mixer where the script left it without restarting a loop that is
+already correct.
+
+`npm run loops` is the check, and it is the only one in the tree that measures
+the mixer rather than the intent: it taps `window.Audio` before the app boots
+and watches the cursor wrap.
+
 ## The gameplay loop
 
 **Done.** Enemies advance by the game's own **advance rings**, compete for an

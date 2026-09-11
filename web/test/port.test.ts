@@ -35,7 +35,8 @@ import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { MotionFlag, type Boss2Actor } from "../src/game/actor";
+import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
+  from "../src/game/actor";
 import { CameraPointRiseFor, UpdateCameraFreeFlag }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
@@ -2860,6 +2861,26 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     check("...and it starts on row 0 of g_st2car_path_table",
           a.rescue.route === 0 && g_st2car_path_table[0] === 0x148,
           `route ${a.rescue.route}`);
+
+    // **And it turns root motion off**, one instruction after
+    // `ActorBuildSkinnedModel` turned it on: `MOV EDX,[EDI+0x64];
+    // AND EDX,0xFFFFFFFD; MOV [EDI+0x64],EDX` at `0x00451753`-`0x00451760`.
+    // Class 0x21 is one of exactly two things in the game that clear the bit.
+    //
+    // It is not bookkeeping. With the bit clear `SkeletonApplyRootMotion`
+    // (`FUN_00410C50`) poses the clip root's **whole** translation instead of
+    // only its y, and motion 0x3E6's root is the constant
+    // `(0, 15.692, 11.943)` on all sixteen frames -- so the missing line put
+    // the rider 11.943 units along its own +Z, out over the car's bonnet.
+    // `render/characters/pose.ts` reads this bit and `test/pose.test.ts`
+    // asserts the two arms; this is the half that says the bit is right.
+    check("...and it clears model+0x64 bit 1 -- root motion OFF",
+          (a.motionFlags & MotionFlag.RootMotion) === 0,
+          `motionFlags ${a.motionFlags}`);
+    check("...which is a departure from what the build leaves",
+          (MOTION_FLAGS_INIT & MotionFlag.RootMotion) !== 0
+          && a.motionFlags === (MOTION_FLAGS_INIT & ~MotionFlag.RootMotion),
+          `${MOTION_FLAGS_INIT} -> ${a.motionFlags}`);
 
     // **It is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`) puts
     // it at `g_st2car_path_table[obj+0x1350]`'s pose, and sub 0 then adds a

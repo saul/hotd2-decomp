@@ -18,6 +18,53 @@ bone offset runs along its own local X and the rest orientation comes from the
 animation — but the hierarchy, the parts and the proportions are all there
 without opening a single motion file.
 
+## What the root translation is for
+
+Each frame begins with three floats, and they are **one absolute track with two
+consumers**. `SkeletonApplyRootMotion` (`FUN_00410C50`) is handed a pointer to
+them and tests `model+0x64` bit 1 twice:
+
+* **bit set** — the frame-to-frame delta, `root - model+0x1160`, is rotated by
+  the actor's own `Rz Ry Rx`, scaled by `model+0x116C` and added to the
+  object's position (`obj+0x40` and `obj+0x48`; also `obj+0x44` when bit `0x10`
+  is set as well). The draw matrix then gets `MatrixTranslate(0, root.y, 0)` —
+  the **height only**, because the horizontal part has already walked the
+  object.
+* **bit clear** — nothing moves, and the draw matrix gets
+  `MatrixTranslate(root.x, root.y, root.z)`, the **whole** translation, as a
+  pose offset inside `T(obj+0x40) R(obj+0x64..0x6C) S(model+0x116C)`.
+
+So it is never both and never neither, and *neither half is relative to the
+other*: the delta and the offset are two readings of the same absolute number.
+`[proved]`, and from the bytes: Ghidra ends the gated arm at its
+`MatrixStackPop(1)` and shows a `return`, while `0x00410E5F`–`0x00410E93` write
+the baseline and fall into the shared tail that does the pose translate
+(`L37`). `SkeletonPoseRootFrame` (`FUN_00410920`) emits no translate of its own
+at all — it writes the frame's root to `model+0x6C..0x74`, hands the pointer
+on, and then pushes bone 0's `RotZ; RotY; RotX`.
+
+`model+0x1160..0x1168` is the baseline, and nothing lets it turn a clip's
+**absolute** root into a step: `ActorSetMotion` (`FUN_00411930`) seeds it from
+the new clip's frame 0 whenever the gate is set, `ActorSetMotionBlended`
+(`FUN_004119A0`) leaves the `track+0x37` flag pair that makes the routine reset
+it to the current root, and a loop wrap is *damped* —
+`baseline = root + (root - baseline)/play_length` when the frame index has
+jumped by more than a quarter of the clip — rather than taken.
+
+Two things in the shipped game ever clear the bit, and everything else runs
+with it set from `ActorBuildSkinnedModel`'s unconditional `model+0x64 = 3`:
+`RescueTargetInit` (`FUN_00451720`) at spawn, and `CivilianRunScript`
+(`FUN_0048B9E0`) on every clip change, from bit `0x00100000` of the wait word
+that opened the block.
+
+**It matters for far fewer clips than it sounds.** 992 of the 1058 blocks have
+an *exactly zero* horizontal root on frame 0, so the two arms draw in the same
+place for all but 64 of them. The largest are `komono_niwa.bin` 471 at 361.7
+units and `komono_bridge.bin` 472 at 47.9; `zom.bin` 998, the one clip class
+0x21 plays, is a **constant** `(0, 15.692, 11.943)` over all sixteen frames,
+which means its delta is zero on every frame and only the pose arm can place
+it. `tools/verify_root_pose.py` asserts all of this.
+
 ## Loading
 
 `MotionRequestBankLoad` (`0x0041D860`) enqueues **asset job kind 8** for a bank
@@ -179,6 +226,14 @@ A sample, with the characters they serve:
 | `komono*.bin` | 1–8 each | animated props, bone counts outside the character table |
 
 ## Verification
+
+`tools/verify_root_pose.py` checks what the root translation is *for* — the
+two arms of `model+0x64` bit 1, quoted as bytes at their addresses because the
+decompiler shows neither whole, and then the population: every block measured
+for an absolute horizontal root, and every clip the class-0x10 scripts can play
+with the gate clear enumerated against it. It is the only place the set of
+actors a clip root can reposition is written down as a fact rather than a
+guess.
 
 `tools/verify_mot.py` checks every bank. It deliberately does **not** assume a
 bank belongs to a known character: it tests the format's own arithmetic, that

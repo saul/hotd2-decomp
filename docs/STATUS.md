@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 42119 | 159 | engine |
+| `game/` | 42179 | 159 | engine |
 | `hod2lib/` | 15921 | 34 | engine |
-| `render/` | 8475 | 30 | render |
+| `render/` | 8513 | 30 | render |
 | `app/` | 7405 | 29 | app |
 | `script/` | 4144 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 904 | 9 | engine |
 | `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **84916** | **325** | |
+| **total** | **85014** | **325** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 866 in `ghidra/annotations/functions.tsv` |
-| Named globals | 396 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 32 under `tools/`, run together by `verify_all.py` |
+| Named functions | 867 in `ghidra/annotations/functions.tsv` |
+| Named globals | 399 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 33 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -116,6 +116,7 @@ nothing exits 3 and is never counted as green.
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
 | `verify_looping_se` | that `PlaySoundId`'s two loop tables really do pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is the only thing that says a stop id is a control word rather than a sound, and so the only thing that makes the chainsaw a loop rather than a one-shot | game-dir |
+| `verify_root_pose` | that a clip's root translation still either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes because Ghidra shows neither of them whole -- and the only place the set of actors the second arm can move is enumerated: every motion block in the game measured for an absolute horizontal root, paired with the class-0x10 wait word that governs it | game-dir |
 | `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
@@ -124,7 +125,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-11 of them need the installed game and 5 need an exported
+12 of them need the installed game and 5 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

@@ -1420,18 +1420,76 @@ frame)` is a **drop-in on top of that pose**, not a position: it is rotated by
 the route's own yaw, added to the route point, and reaches zero exactly as the
 camera frame reaches 50.
 
-**Still open: the model sits 11.94 units behind where the engine draws it,**
-along the car's own forward axis. Clip 998's root translation is a constant
+**And it sat 11.94 units behind where the engine draws it, until the port's
+root-motion model was settled.** Clip 998's root translation is a constant
 `(0, 15.692, 11.943)` — it is what puts the body over the bonnet — and
-`render/characters/pose.ts` applies only the **y** of a clip root, on the rule
-that the port has already taken the horizontal part as world movement through
+`render/characters/pose.ts` applied only the **y** of a clip root, on the rule
+that the port had already taken the horizontal part as world movement through
 `ApplyRootMotion`. For a clip whose root never changes the per-frame delta is
-zero, so nothing ever takes it and the offset is simply dropped. Correcting it
-is a change to the port's root-motion model for every skinned actor in the game,
-not to this class, and it wants `SkeletonPoseRootFrame` read first: the engine
-both places the root bone at the frame's translation *and* applies the
-frame-to-frame delta to the object, and which of those is relative to which is
-`[open]`.
+zero, so nothing ever took it. The rule is true of *one arm* of a test the
+engine has and the port had collapsed.
+
+`SkeletonApplyRootMotion` (`FUN_00410C50`) is handed a **pointer** to the
+current frame's three root floats and tests `model+0x64` bit 1 **twice**:
+
+```
+00410d2f  TEST byte ptr [ECX + 0x64],0x2    ; does the delta move the object?
+          delta = root - baseline, through T(obj+0x40) Rz Ry Rx S(model+0x116C)
+          written back to obj+0x40 / obj+0x48, and baseline = root
+00410e93  CALL dword ptr [ECX + 0x115c]     ; the gated arm does NOT return
+          T(obj+0x40); the actor's rotation; S(model+0x116C)
+00411005  TEST byte ptr [ECX + 0x64],0x2    ; ...and which part of it is posed?
+0041100b  MatrixTranslate(0, root.y, 0)     ;   bit set
+00411020  MatrixTranslate(root.x, root.y, root.z)   ; bit clear
+```
+
+So **neither is relative to the other: they are two consumers of one absolute
+track, and the bit picks exactly one of them.** A clip's root translation moves
+the object or offsets the pose, never both and never neither. `[proved]` — and
+from the bytes, because Ghidra shows the gated arm returning at its
+`MatrixStackPop` where in fact it writes the baseline at `0x00410E5F`–`0x00410E93`
+and falls into the shared tail (`L37`).
+
+The baseline is a field, `model+0x1160..0x1168`, not a remembered frame index,
+and nothing ever lets it turn a clip's *absolute* root into a step:
+`ActorSetMotion` seeds it from the new clip's frame 0, `ActorSetMotionBlended`
+leaves the flag pair that makes the routine reset it to the current root, and a
+loop wrap is damped rather than taken. So the port's frame-to-frame delta was
+right; the missing half was the pose.
+
+`RescueTargetInit` is one of exactly two things in the game that clear the bit
+— `MOV EDX,[EDI+0x64]; AND EDX,0xFFFFFFFD; MOV [EDI+0x64],EDX` at
+`0x00451753`–`0x00451760`, one instruction after `ActorBuildSkinnedModel` set
+the word to 3 — and the other is `CivilianRunScript`, per block. The port was
+missing that line too.
+
+**The blast radius is four actors, and it was measured rather than hoped for.**
+`tools/verify_root_pose.py` decodes every motion block in the game and counts
+the ones with a non-zero *absolute* horizontal root on frame 0: **992 of 1058
+are exactly zero**, which is why the collapsed arm was invisible. Then it pairs
+every clip the shipped class-0x10 scripts set against the wait word governing
+it, and the clips that can be posed with a horizontal root and the gate clear
+are `people.bin` 596, 598 and 600 — one root, 2.882 units, one use each. Plus
+`zom.bin` 998 at 11.943, which is this actor. Nothing else in six stages can
+move: `civ_walk.mjs` reports the stage-1 rescue civilian walking the identical
+`20.87 over 590 frames (56,-194) -> (37,-186)` either side of the change,
+because the second arm is a pose and moves no world position at all.
+
+One thing is deliberately not gate-driven: the **death** clip, which
+`ActorAdvanceMotion` does not run root motion through, so `pose.ts` keeps its
+whole root at that one call site. The two models agree wherever the clip's
+frame-0 horizontal root is zero — the pose offset is `root[f]` where the
+accumulated deltas would be `root[f] - root[0]`, both inside the actor's own
+rotation — which is 992 blocks of 1058. Making it faithful means giving the
+death clip root motion in `game/`, and that is a separate change.
+
+`[open]` The engine's pose translate sits **inside** `MatrixScale(model+0x116C)`,
+so a character drawn at 0.9 offsets by 0.9 of what its clip authored. This port
+draws every character at 1.0 — neither `hod2lib.characters` nor
+`render/characters.ts` applies that field to the model — so the offset is
+unscaled, consistently with the model it offsets. Two of the three civilian
+clips above belong to `scale 0.9` types, so the honest correction there is
+2.594 rather than 2.882, and fixing it means scaling the drawn character too.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any

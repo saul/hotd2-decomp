@@ -158,6 +158,17 @@ CHECKS: list[Check] = [
           "control word rather than a sound, and so the only thing that makes "
           "the chainsaw a loop rather than a one-shot",
           NEEDS_GAME),
+    Check("verify_root_pose", ".",
+          ["python3", "tools/verify_root_pose.py", "--game-dir",
+           "{game_dir}"],
+          "that a clip's root translation still either moves the object or "
+          "offsets the pose -- the two arms of one `model+0x64` bit, quoted "
+          "as bytes because Ghidra shows neither of them whole -- and the "
+          "only place the set of actors the second arm can move is "
+          "enumerated: every motion block in the game measured for an "
+          "absolute horizontal root, paired with the class-0x10 wait word "
+          "that governs it",
+          NEEDS_GAME),
     Check("verify_combat", ".",
           ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],
           "that the shot and damage tables hold together across every "

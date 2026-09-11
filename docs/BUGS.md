@@ -2202,13 +2202,50 @@ investigation ruled out.
   that table, so its silence about props had never said anything. With the type
   removed the same harness sees none and has nothing to shoot.
 
-- `[open]` **The browser's props panel says stage 3 has no breakables placed,
-  and the headless harness places two from the same bundle.** Found while
-  proving the above. **The port is the half that is right** — two harnesses and
-  the port test agree with each other — so this is in the panel or in the
-  browser harness, not in the transcription. It matters because that panel is
-  what a person looks at to decide whether something is placed, and it is
-  currently able to say "none" about a prop that is there.
+- `[not-a-bug]` + `[fixed]` **The browser's props panel said stage 3 has no
+  breakables while a harness reported two. The browser was right on every
+  line, and the harness never seeked at all.**
+
+  **This entry was wrong when I wrote it, and I had checked it.** I ran both
+  halves at what I believed was one identical point, saw the disagreement, and
+  recorded that "the port is the half that is right — two harnesses and the
+  port test agree". The harness's agreement was with itself: it **printed its
+  own arguments as the address it claimed to have reached**. `[proved]` It
+  passed an object where `seekTo` takes positional arguments, so the arrival
+  test compared against something no value equals, the op budget fell back to
+  half a million, and it replayed **the whole of stage 3 to the end** while
+  discarding the `false` it got back. Nothing could catch it: the `.mjs`
+  drivers are outside `tsc` altogether.
+
+  Three separate facts each read as "the props are gone" and none was a defect:
+
+  * **`props 0 / 0` is a different subject.** That row is scripted scenery and
+    hinges, and stage 3's bundle carries none of either, so it is correct and
+    has nothing to do with the class-0x41 family. Two rows, two subjects, one
+    word.
+  * **`block=0&step=3` lands before the placer**, and behind a
+    `wait_enemies_alive <= 0` two ops later. The props are two kills away.
+  * **A placer is not a prop.** The constructor runs from the class handler, so
+    a **paused** transport never builds one — one frame turns "none" into
+    three.
+
+  And even called correctly the harness cannot see the gate it sails through: a
+  walker-only harness never runs the character layer, so no enemy enters the
+  pool, the count stays 0 and the gate opens on frame 1.
+
+  Fixed rather than just explained: `seekTo` refuses a non-integer target and
+  names the argument, so that call throws instead of silently replaying a
+  stage; the URL parser takes those five fields as integers; the panel no
+  longer says "none placed" for two different situations and names placers
+  waiting for a frame; and `npm run props-panel` reads the panel at both
+  addresses **with a frame-count assertion before every read**.
+
+  `[open]` **The thirty-odd `.mjs` drivers are outside `tsc`**, while
+  `verify_all`'s own row claims `tools/` is included. Turning the checks on
+  reports 764 errors, so closing it is a piece of work rather than a line edit.
+  `[open]` And nothing checks that a walker-only harness crossing an enemy gate
+  has stood in for the character layer — **434 of the 488 shipped enemy gates
+  read that counter**, and every such harness sails through all of them.
 
 - `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
   defect in itself, and recorded because it is now live code with no coverage.

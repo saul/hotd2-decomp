@@ -537,7 +537,11 @@ export interface NamedSound { id: number; file: string }
 export interface CombatJson {
   /** `ActorPlayHitVoice`: one of five flesh impacts, on every hurt and kill. */
   impact: NamedSound[];
-  /** ...replaced by one of these two on a headshot kill. */
+  /**
+   * ...replaced by one of these two on kind 2, which is the hit
+   * **result** being 2 and not a headshot -- `ZombieOnShot`
+   * (`FUN_00453EB0`) tests no bone. See `game/combat/feedback.ts`.
+   */
   head_impact: NamedSound[];
   /**
    * `[set A, set B]` per event; `voice_set_a_types` says which a type takes.

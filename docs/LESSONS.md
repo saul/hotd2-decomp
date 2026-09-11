@@ -477,3 +477,26 @@ parents survived** (`comm -23` on the two `grep "^## "` outputs is enough for
 prose) and run the type checker before staging for code. A resolution that
 loses a line is indistinguishable from a resolution that was correct, right up
 until something parses it.
+
+
+**L41 — A marker something counts is not a word you may also use in prose.**
+Consolidating `ActorPlayHitVoice` into one copy closed a real open question in
+`combat/feedback.ts` — the bursting head had been silent because the voice
+tables were on the other side of the layer line — and `STATUS.md`'s
+`[open]` markers went **158 to 159**. Two narrative sentences saying *"that
+used to be an `[open]`"* and *"it had been an `[open]`"* each put the literal
+token back, and the counter counts tokens. So the number moved the wrong way
+across a change that answered one of the things it counts, and it would have
+gone into a report as evidence of the opposite.
+
+The same hazard is on `[diverges]`: a cross-reference reading *"see the
+`[diverges]` above"* is counted as a second declaration, which is what kept
+the divergence total flat over a commit that removed one. Both are cheap to
+hit, because writing about closing a marker is the natural thing to do in the
+comment where the marker was.
+
+**Write about a marker without spelling it** — "an open question", "this
+routine's declared divergence" — and check the generated count *after* the
+edit rather than assuming the direction. It is `L16` from the other side:
+that lesson is a number in prose rotting against a checker, this is prose
+*creating* the number the checker reports.

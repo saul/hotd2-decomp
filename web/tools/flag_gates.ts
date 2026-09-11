@@ -71,7 +71,13 @@ const FLAG_21_GATE_BLOCK = 2;
 const root = resolve(process.env.HOTD2_BUNDLE
   ?? (existsSync(resolve("extract/player"))
       ? "extract/player" : "../extract/player"));
-const names = readdirSync(root).filter((n) => n.startsWith("stage")).sort();
+// **The missing directory is a skip, not a failure** — `L14`. A fresh
+// worktree has no `extract/` at all, so `readdirSync` throws ENOENT and an
+// uncaught throw is exit 1, which reads as "this check found something wrong"
+// when it asserted nothing. `verify_all.py` counts a 3 separately and names
+// it; that is the whole point of the code.
+const names = existsSync(root)
+  ? readdirSync(root).filter((n) => n.startsWith("stage")).sort() : [];
 if (names.length === 0) {
   console.error(`no bundles under ${root} -- run \`npm run export\``);
   process.exit(3);

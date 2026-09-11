@@ -42,6 +42,8 @@ import { KIND_SHADOW } from "../game/class41/kinded";
 import {
   GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, GENERIC_SLOT_STRIP, PoseOrder,
 } from "../game/class41/generic";
+import { TYPE43_EFFECT7_RISE, TYPE43_EFFECT7_SLOT }
+  from "../game/class41/type43";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
 
@@ -160,6 +162,10 @@ const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
   [PropFamily.RisingDoor]: PoseOrder.YawOnly,
   [PropFamily.DrawOnlyType53]: PoseOrder.RollYawPitch,
   [PropFamily.DrawOnlyType54]: PoseOrder.RollYawPitch,
+  // `PropUpdateType43`'s two draw blocks both compose `Rz.Ry.Rx`, and its
+  // tumble drives all three angles, so this is the one family where the order
+  // is visible on every frame rather than only at placement.
+  [PropFamily.Type43]: PoseOrder.RollYawPitch,
 };
 
 /**
@@ -200,6 +206,14 @@ function DrawSlotFor(p: BreakableProp): number | null {
   // The two draw-only families each draw `obj+0x28C` and nothing else.
   if (p.family === PropFamily.DrawOnlyType53
       || p.family === PropFamily.DrawOnlyType54) return p.slot;
+  // `PropUpdateType43` has two draw blocks and picks between them on its
+  // effect id: with none it draws `obj+0x28C`, and with one -- kind 2, whose
+  // `obj+0x28C` is `0xFFFF` -- it draws `0x17A9` lifted 0.8 while the prop is
+  // whole, and the effect tree once it is destroyed.
+  if (p.family === PropFamily.Type43) {
+    if (p.effect === 0) return p.slot === SLOT_NONE ? null : p.slot;
+    return p.effectFrames === 0 ? TYPE43_EFFECT7_SLOT : null;
+  }
   // `-1` as a `u16`: the engine's "draw nothing", which `KindedPropUpdate`
   // writes over a prop it has hidden.
   if (p.slot === SLOT_NONE && p.family !== PropFamily.Generic) return null;
@@ -374,7 +388,11 @@ export class BreakableLayer implements System<RenderContext> {
       l.node.visible = !gone;
 
       const [sx, sz] = this.shake(p);
-      l.node.position.set(p.x + sx, p.y, p.z + sz);
+      // `MatrixTranslate(0, 0.8, 0)` after the pose, for the one piece a
+      // kind-2 `PropUpdateType43` draws instead of a body.
+      const rise = p.family === PropFamily.Type43 && p.effect !== 0
+        ? TYPE43_EFFECT7_RISE : 0;
+      l.node.position.set(p.x + sx, p.y + rise, p.z + sz);
       l.node.rotation.set(0, 0, 0);
       if (l.lift) {
         this.poseLift(l.lift, p);

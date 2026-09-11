@@ -27,6 +27,7 @@ import {
   PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
 } from "./draw_only";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
+import { PropUpdateType43 } from "./type43";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
 import {
@@ -80,6 +81,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       // Neither masks `obj+0x34` and neither registers a shot sphere either.
       case PropFamily.DrawOnlyType53: PropDrawOnlyType53(p); break;
       case PropFamily.DrawOnlyType54: PropDrawOnlyType54(p); break;
+      // Its own lifetime, its own hit arms, its own shot-test tail. Nothing
+      // the generic arm supplies belongs to it.
+      case PropFamily.Type43: PropUpdateType43(p, rng, events); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }

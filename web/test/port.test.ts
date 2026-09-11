@@ -183,7 +183,7 @@ import {
   BOSS4_WEAK_BONE, Boss4State,
 } from "../src/game/class19/state";
 import {
-  BreakableState, BreakablePropTakeShot, BreakablePropUpdate,
+  BreakableState, BreakableFlag, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
   PlaceBreakableGroup, PropContainerPlacerUpdate, PlaceKindedProp,
   KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE, PlaceGenericProp,
@@ -198,6 +198,9 @@ import {
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import {
+  Type43ItemSet, TYPE43_PICKUP_SLOT,
+} from "../src/game/class41/type43";
 import {
   SCRIPT_FLAG_TYPE54_DRIFT, TYPE31_DESPAWN_CAM_FRAME,
   TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
@@ -1375,10 +1378,19 @@ const BREAKABLES: BreakablesJson = {
   // re-seat and the object sinks to wherever the fall left it.
   hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
   falling_hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
-  kinds: Array.from({ length: 11 }, (_, k) => ({
-    kind: k, effect: k, effect_variant: 400 + k, sound: 0x1a16a9,
-    radius: 6, y_offset: 6,
-  })),
+  // Synthetic, except for kinds 2 and 3: those two carry `g_prop_kind_params`'
+  // own rows, because `PropUpdateType43` branches on the effect id and stage
+  // 3's seven spawns are all one or the other. Kind 3's effect is **0**, which
+  // is what sends it down the crack arm, and kind 2's is 7, which sends it
+  // straight to the destroy arm -- a fixture that made every effect non-zero
+  // could not tell those two paths apart.
+  kinds: Array.from({ length: 11 }, (_, k) => (
+    k === 2 ? { kind: 2, effect: 7, effect_variant: 469, sound: 0x1d16a9,
+                radius: 6, y_offset: 6 }
+      : k === 3 ? { kind: 3, effect: 0, effect_variant: 473, sound: 0x1a16a9,
+                    radius: 5, y_offset: 5 }
+        : { kind: k, effect: k, effect_variant: 400 + k, sound: 0x1a16a9,
+            radius: 6, y_offset: 6 })),
   placements: [
     { at: 0xa100, container: "group", group: 1, lifetime_evt_steps: 4 },
     { at: 0xa200, container: "group", group: 2, lifetime_evt_steps: 6 },
@@ -1954,6 +1966,158 @@ console.log("\nclass 0x41's three draw-only types:");
         G.g_breakable_props.length === 1
         && G.g_breakable_props[0].family === PropFamily.DrawOnlyType53,
         `${G.g_breakable_props.map((r) => PropFamily[r.family]).join()}`);
+}
+
+console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");
+{
+  const rng = new Rng(43);
+  const events = propScene(rng);
+  // Stage 3's kind-3 crate at evt 0x6900: the descriptor's THIRD orientation
+  // word is the kind, its `+0x11C` is a lifetime, and its pitch and roll are
+  // thrown away by the arm.
+  const crate = PlaceGenericProp({
+    at: 0xc000, container: "generic", type: 43, slot: 2,
+    lifetime_evt_steps: 2, field_1f4: 1, pos: [10, 20, 30],
+    pitch: 0x111, yaw: 0x4000, roll: 3,
+  }, rng);
+  G.g_breakable_props.push(crate);
+  check("a type-43 prop takes its kind from the third orientation word",
+        crate.kind === 3 && crate.family === PropFamily.Type43,
+        `kind ${crate.kind} ${PropFamily[crate.family]}`);
+  check("...its item set from desc+0x24, not from the byte above it",
+        crate.group === Type43ItemSet.ExtraLife, `${crate.group}`);
+  check("...the kind table's radius, effect and variant",
+        crate.hitRadius === 5 && crate.effect === 0
+        && crate.effectVariant === 473,
+        `r${crate.hitRadius} e${crate.effect} v${crate.effectVariant}`);
+  check("...kind 3 wears the ordinary breakable model",
+        crate.slot === BreakableSlot.Default, crate.slot.toString(16));
+  check("...and the arm throws the descriptor's pitch and roll away",
+        crate.pitch === 0 && crate.roll === 0 && crate.yaw === 0x4000,
+        `${crate.pitch}/${crate.yaw}/${crate.roll}`);
+  check("...with a radius, which is what makes it shootable at all",
+        crate.hitRadius > 0);
+
+  // It registers a shot sphere every frame, at the kind's own rise.
+  BreakablePropPoolUpdate(rng, events);
+  check("...and it publishes that sphere each frame",
+        crate.shotRegistered, `${crate.shotRegistered}`);
+
+  // The first shot cracks it: no points, the model swaps, and it turns to
+  // face the camera. `KindedPropUpdate` hides the model instead.
+  G.g_camera_yaw_bams = 0x2000;
+  const score = G.g_player_score[0];
+  crate.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
+  BreakablePropPoolUpdate(rng, events);
+  check("one shot cracks a kind 3 and pays nothing",
+        crate.slot === BreakableSlot.Broken
+        && G.g_player_score[0] === score,
+        `${crate.slot.toString(16)} +${G.g_player_score[0] - score}`);
+  check("...turning the broken model to face the camera",
+        crate.yaw === 0x2000, crate.yaw.toString(16));
+  check("...and it is still alive and still shootable",
+        !crate.dead && crate.effectFrames === 0);
+
+  // The second shot destroys it: ten points, the puff starts, and because it
+  // is holding a life it stays standing for a third.
+  crate.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
+  BreakablePropPoolUpdate(rng, events);
+  check("the second shot destroys it, for ten",
+        crate.effectFrames >= 1 && G.g_player_score[0] - score === 10,
+        `f${crate.effectFrames} +${G.g_player_score[0] - score}`);
+  check("...and a wreck that was holding something is not taken away",
+        !crate.dead, `${crate.dead}`);
+  for (let i = 0; i < 0x50; i += 1) BreakablePropPoolUpdate(rng, events);
+  check("...even after its puff has run out",
+        !crate.dead, `${crate.dead}`);
+
+  // The third shot is the one that pays out.
+  const lives = G.g_player_lives[0];
+  crate.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
+  BreakablePropPoolUpdate(rng, events);
+  check("a shot into the wreckage hands over the life",
+        G.g_player_lives[0] === lives + 1 && crate.branchLatched,
+        `${lives} -> ${G.g_player_lives[0]}`);
+  check("...and the wreck wears the pickup's own model",
+        crate.slot === TYPE43_PICKUP_SLOT, crate.slot.toString(16));
+  crate.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
+  BreakablePropPoolUpdate(rng, events);
+  check("...once, and not again",
+        G.g_player_lives[0] === lives + 1, `${G.g_player_lives[0]}`);
+}
+
+{
+  // A kind 2 has an effect id, so the first shot goes straight to the destroy
+  // arm: one shot, ten points, and no crate model at any point.
+  const rng = new Rng(143);
+  const events = propScene(rng);
+  const piece = PlaceGenericProp({
+    at: 0xc100, container: "generic", type: 43, slot: 2,
+    lifetime_evt_steps: 2, field_1f4: 0, pos: [0, 0, 0], roll: 2,
+  }, rng);
+  G.g_breakable_props.push(piece);
+  check("a kind 2 carries no body model and an effect id",
+        piece.slot === SLOT_NONE && piece.effect === 7,
+        `${piece.slot.toString(16)} e${piece.effect}`);
+  check("...and the kind table's own radius and rise, not the switch's",
+        piece.hitRadius === 6, `${piece.hitRadius}`);
+  const score = G.g_player_score[0];
+  piece.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
+  BreakablePropPoolUpdate(rng, events);
+  check("...and one shot destroys it, for ten",
+        piece.effectFrames >= 1 && G.g_player_score[0] - score === 10,
+        `f${piece.effectFrames} +${G.g_player_score[0] - score}`);
+  // Item set 0: this one IS taken away when the puff ends.
+  for (let i = 0; i < 0x50; i += 1) BreakablePropPoolUpdate(rng, events);
+  check("...and a wreck hiding nothing goes when its puff ends",
+        !G.g_breakable_props.includes(piece),
+        `${G.g_breakable_props.length} left`);
+}
+
+{
+  // The bob and the tumble. Both are seeded at placement and both move every
+  // frame; the bob is measured against `restY`, which the sine never touches.
+  const rng = new Rng(243);
+  const events = propScene(rng);
+  const p = PlaceGenericProp({
+    at: 0xc200, container: "generic", type: 43, slot: 1,
+    lifetime_evt_steps: 1, field_1f4: 0, pos: [0, 50, 0], roll: 3,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("its bob keeps the descriptor's Y as the centre it swings about",
+        p.restY === 50, `${p.restY}`);
+  check("...with an amplitude and two spin rates drawn at placement",
+        p.shake >= 0.25 && p.shake < 0.25 + 0.51
+        && p.spin !== 0 && p.rollSpin !== 0,
+        `a${p.shake} ${p.spin}/${p.rollSpin}`);
+  const pitch0 = p.pitch, roll0 = p.roll;
+  BreakablePropPoolUpdate(rng, events);
+  // The sine takes the phase BEFORE the step, and the phase starts at 0, so
+  // the first frame draws exactly at the centre. The tumble has no such
+  // delay: its rates are seeded non-zero and applied at once.
+  check("...the first frame leaves the bob at its centre, sine of nothing",
+        p.y === p.restY && p.pitch !== pitch0 && p.roll !== roll0,
+        `${p.y} ${pitch0}->${p.pitch} ${roll0}->${p.roll}`);
+  BreakablePropPoolUpdate(rng, events);
+  check("...and the second frame has moved it off the centre",
+        p.y !== p.restY, `${p.y - p.restY}`);
+  // The spring pulls the rate toward the angle's opposite, so over a long run
+  // the angle stays bounded rather than winding up.
+  let worst = 0;
+  for (let i = 0; i < 600; i += 1) {
+    BreakablePropPoolUpdate(rng, events);
+    worst = Math.max(worst, Math.abs(p.pitch), Math.abs(p.roll));
+  }
+  // A band and not just an upper bound: the divisor IS the stiffness, so the
+  // worst excursion over a fixed seed pins it. 48 gives 915 BAMS -- five
+  // degrees -- where 12 gives 336 and 192 gives 1742, so a wrong divisor
+  // fails this whichever way it is wrong. An `< 0x8000` bound passed all of
+  // them and asserted nothing about the spring at all.
+  check("...and the tumble is a damped spring of the stiffness the shift says",
+        worst > 700 && worst < 1100, `${worst}`);
+  check("...and the bob stays within its amplitude of the centre",
+        Math.abs(p.y - p.restY) <= p.shake + 1e-6,
+        `${p.y - p.restY} vs ${p.shake}`);
 }
 
 console.log("\nclass 0x41's pose orders come from the routines:");

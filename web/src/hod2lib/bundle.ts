@@ -185,6 +185,13 @@ export const GENERIC_STATIC_SLOTS: Record<number, number[]> = {
   30: [0x01df],                       // FUN_0046A0F0
   32: [0x197a, 0x197b, 0x1981],       // LiftUpdate -- car, cage leaf, panel
   35: [0x1812, 0x1813],               // FUN_0046B320
+  // PropUpdateType43 (FUN_0046CEA0). Its `obj+0x28C` is NOT the descriptor's
+  // -- the arm computes `kind == 3 ? 0x19E8 : 0xFFFF` -- so the slots it can
+  // wear are literals and belong here rather than in GENERIC_DESCRIPTOR_SLOT:
+  // the crate 0x19E8 and its broken half 0x19E6, the 0x17A9 piece a kind 2
+  // draws lifted 0.8 because its effect id is 7, and the two pickup models
+  // 0x116A/0x119C the wreckage becomes when the item comes out.
+  43: [0x19e8, 0x19e6, 0x17a9, 0x116a, 0x119c],
   49: [0x01d2, 0x10d0],               // FUN_0046E6E0, body plus its shadow
   56: [0x10d3],                       // ctor arm 0x38
   58: [0x01d1],                       // FUN_0046F580

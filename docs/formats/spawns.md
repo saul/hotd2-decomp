@@ -64,7 +64,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) reads `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 47 of the 59 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are hinges read by `props.md`; the rest are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
@@ -764,9 +764,32 @@ is opened rather than broken.
 |---|---|---|---|---|
 | `BreakablePropUpdate` (`FUN_00464620`) | 0x41 type 0 | 8 groups, 42 props | 2 | 7 props |
 | `KindedPropUpdate` (`FUN_00465FB0`) | 0x41 type 4 | **70** | 1, or 2 for a `0x19E8` crate | **37** |
+| `PropUpdateType43` (`FUN_0046CEA0`) | 0x41 type 43 | **7**, all stage 3 | 1 for a kind 2, 2 for a kind 3, **and a third for the item** | 4 (a life each) |
 | `FallingContainerUpdate` (`FUN_0046A580`) | 0x44 sel 16 | 2 | 2 | 2 |
 | `FUN_0046B5F0` | 0x41 type 37 | 3 | — | `[open]`, unread |
 | `FUN_0046FB50` | `[open]` | — | — | `[open]`, unread |
+
+**Type 43 is the exception to the sentence above**, and it is the reason it
+needed its own module rather than a row in `KindedPropUpdate`'s tables. It is
+the **third** object built from `g_prop_kind_params` — `PlaceKindedProp`
+(`FUN_00462E10`) and `PropBuildKindedProp` (`FUN_00473770`) build the other two
+— and the item does **not** come out on the shot that destroys it. The
+wreckage stays standing and a further shot into it is what pays:
+`GrantExtraLife` for item set 1, an Original Mode item for set 2, and the prop
+then wears the pickup's own model (`0x116A + 50 * player`). Its set is
+`obj+0x194`, one byte below the `obj+0x195` the other three use, and it runs
+through no `g_item_set_countdown` at all — so a type-43 prop is the one
+shootable object in the game whose item is its own and not the set's.
+
+Its **kind is the spawn descriptor's third orientation word**, `desc+0x6C`,
+which the arm at `0x00462250` copies to `obj+0x290`; the same word is a roll
+for most of the generic family and a slot-strip length for types 31 and 33.
+The arm then zeroes `obj+0x1CC` and `obj+0x1D4`, so the descriptor's pitch and
+roll are discarded and the prop bobs on a sine and tumbles on a damped spring
+instead. Four of the seven are kind 3 — `0x19E8`, the ordinary breakable, two
+shots — and three are kind 2, which draws no body at all and bursts in one
+because its `g_prop_kind_params` effect id is non-zero. See
+`game/class41/type43.ts`.
 
 **They all decrement the same `g_item_set_countdown`,** so an item set is not
 owned by a class. Stage 2's set 2 is spread across the group placer, seven

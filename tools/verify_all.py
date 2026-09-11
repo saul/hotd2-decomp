@@ -149,6 +149,14 @@ CHECKS: list[Check] = [
           "control word rather than a sound, and so the only thing that makes "
           "the chainsaw a loop rather than a one-shot",
           NEEDS_GAME),
+    Check("verify_combat", ".",
+          ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],
+          "that the shot and damage tables hold together across every "
+          "character type -- and the only place the *exact* set of attacks "
+          "the engine can never land is asserted, which is what stops the "
+          "crawlers' condition-4 swing being filtered out again as an "
+          "impossible row",
+          NEEDS_GAME),
     Check("verify_effects", ".",
           ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
           "that each of the 29 effect trees walks to exactly the node count "

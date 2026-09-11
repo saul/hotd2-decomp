@@ -562,6 +562,99 @@ def check_class31_literal_clips() -> None:
                  f"exporter's bake list and {len(stages)} exported stages")
 
 
+#: The crawlers' undamaged attack, as the EXE holds it at `0x00566E70`:
+#: ``(character types, body condition, index, strike clip, hit frame)``.
+#: Types 0x07, 0x0B and 0x0C share the row; `hod2lib.combat.attack_hit_lands`
+#: is the long form and `tools/verify_combat.py` checks the numbers against
+#: the EXE. Here they are only the join key into the bundle.
+CRAWLER_TYPES = (0x07, 0x0B, 0x0C)
+CRAWLER_CONDITION = 4
+CRAWLER_INDEX = 2
+CRAWLER_CLIP = 997
+CRAWLER_HIT_FRAME = 40
+
+
+def check_crawler_whiff() -> None:
+    """The attack that is meant to miss has to be **in** the bundle to miss.
+
+    `ZombieStateStrike` (`FUN_00455A40`) fires its hit on
+    ``obj+0x19C == entry+0x08`` exactly (``00455bdf``) and leaves the state at
+    ``g_motion_play_length[obj+0x1B4] - 1`` (``00455c0b``), so the shipped
+    condition-4 entry of clip 997 at hit frame 40 -- against a play length of
+    20 -- can never land. That is the engine's undamaged crawler, and it swings
+    and misses every time.
+
+    The exporter used to drop the entry as an impossible row, which left the
+    port drawing an index the bundle had no attack for; the substitute behind
+    that draw then handed the actor entry 3, a different clip at hit frame 3
+    that connects, and **the crawlers hurt the player where the engine's do
+    not**. There is nothing in `game/` left to check -- `ZombiePickAttack`
+    indexes blind now, the same as the engine -- so the only thing that can go
+    wrong again is the *bundle*, in either of two ways: the entry dropped
+    again, or the entry kept and clip 997 not baked, which is
+    `MotionPlayLength` 0 and a strike that ends on its first frame.
+
+    Both are asked of every exported stage that places one of these character
+    types. With no bundle this is a note, exactly as
+    {@func:`check_class31_literal_clips`} does it -- a check that cannot run
+    must not read as one that passed.
+    """
+    stages = sorted((ROOT / "extract" / "player").glob("stage*/stage*.script.json"))
+    if not stages:
+        notes.append("the crawler's unreachable hit frame is unchecked "
+                     "(no bundle to look in)")
+        return
+    import json
+    seen = 0
+    for path in stages:
+        doc = json.loads(path.read_text())
+        chars = doc.get("characters") or {}
+        placed = {p.get("char_type") for p in (chars.get("placements") or [])
+                  if p.get("class") == 0x30}
+        for key, t in (chars.get("types") or {}).items():
+            ct = int(key)
+            if ct not in CRAWLER_TYPES or ct not in placed:
+                continue
+            rel = f"{path.parent.name}/{path.name} type {ct:#04x}"
+            row = (t.get("attacks") or {}).get(str(CRAWLER_CONDITION)) or {}
+            entry = row.get(str(CRAWLER_INDEX))
+            if entry is None:
+                failures.append(
+                    f"{rel}: body condition {CRAWLER_CONDITION} carries no "
+                    f"attack {CRAWLER_INDEX}, so an undamaged crawler draws an "
+                    f"index the bundle cannot satisfy -- the engine's own swing "
+                    f"is missing and whatever the port does instead is not it")
+                continue
+            seen += 1
+            if entry.get("strike") != CRAWLER_CLIP \
+                    or entry.get("hit_frame") != CRAWLER_HIT_FRAME:
+                failures.append(
+                    f"{rel}: attack {CRAWLER_INDEX} is clip "
+                    f"{entry.get('strike')} at hit frame "
+                    f"{entry.get('hit_frame')}, not {CRAWLER_CLIP} at "
+                    f"{CRAWLER_HIT_FRAME}")
+                continue
+            clip = (t.get("motions") or {}).get(str(CRAWLER_CLIP))
+            if not clip:
+                failures.append(
+                    f"{rel}: attack {CRAWLER_INDEX} names clip "
+                    f"{CRAWLER_CLIP} and the bundle does not bake it, so the "
+                    f"swing has no length and ends on its first frame")
+                continue
+            play = clip.get("play") or 0
+            if play <= 0 or entry["hit_frame"] < play:
+                failures.append(
+                    f"{rel}: clip {CRAWLER_CLIP} has play length {play}, "
+                    f"which puts hit frame {entry['hit_frame']} back inside "
+                    f"the clip -- the swing would connect")
+    if not seen:
+        failures.append("no exported stage places a crawler with its "
+                        "condition-4 attack, so nothing was checked")
+        return
+    notes.append(f"the crawler's unreachable hit frame checks out in {seen} "
+                 f"exported (stage, character type) pairs")
+
+
 def check_docs_citations(named: dict[str, str]) -> None:
     """`docs/` cites the binary too, and nothing was checking those.
 
@@ -618,6 +711,7 @@ def main() -> int:
     check_snapshot_rules()
     check_frame_math()
     check_class31_literal_clips()
+    check_crawler_whiff()
     check_docs_citations(named)
 
     for n in notes:

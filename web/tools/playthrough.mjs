@@ -123,14 +123,15 @@
  * case that made that matter: with nobody rescued `g_script_branch_var` stays
  * 0 for the whole stage, block 0 goes to 11 every time, and blocks 1-10 and
  * 21-32 — twenty-two blocks of shipped script — had never been executed by
- * anything. `--entry` cannot reach them (stage 2 has one entry, and
+ * anything. `--entry` cannot reach them — stage 2 has one entry, and
  * `resolveEntry` falls back to it silently, so the flag produced a
- * byte-identical run), and neither can shooting: the arm that reaches block 1
- * is written by shooting the class-0x21 rescue target during block 0, and the
- * gate the walker is parked on there is neither an enemy gate nor a civilian
- * one, so {@link shootable} declines.
+ * byte-identical run — and the **gates** cannot either: the arm that reaches
+ * block 1 is written by shooting the class-0x21 rescue target during block 0,
+ * and the walker is parked there on a camera wait, not on a gate, so nothing
+ * {@link shootable} answers for is ever up.
  *
- *   node tools/playthrough.mjs --stage 2 --route 0:1,5:6,7:8,8:10
+ *   node tools/playthrough.mjs --stage 2 \
+ *     --route 0:1,1:2,3:4,5:6,6:7,7:8,8:10
  *
  * Each rule is `<block>:<target>` — *at the branch in block `<block>`, go to
  * block `<target>`* — and they are written the way the block dump and the

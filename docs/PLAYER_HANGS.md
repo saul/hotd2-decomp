@@ -125,6 +125,22 @@ Stage 5's row was `7875 / 78 / block 2 2 / 50` until class 0x33 was ported;
 that room is the second section below. **Stage 1 block 1 is the one left**, and
 it is the only room in the game a player cannot clear by shooting.
 
+**Re-measured after items 26 to 30**, because the strict camera wait of item 30
+costs a frame at every `wait_camera_path_frame <n>` in the game and so moves
+every stage's count. All six still reach an end block, and none reports a room
+the shots could not clear. Stage 1's block 1 is no longer among them — its room
+clears and the block branches to 10 — but that is somebody else's commit and
+not this measurement's to explain:
+
+| stage | frames | instr | against the row above |
+|---|---:|---:|---|
+| 1 | 8190 | 97 | −90 |
+| 2 | 12495 | 148 | +375 |
+| 3 | 6615 | 61 | +405 |
+| 4 | 7065 | 84 | −60 |
+| 5 | 7560 | 79 | +60 |
+| 6 | 7260 | 63 | +15 |
+
 **That table is one route per stage, not one stage per row.** Stage 3 has two
 entry blocks and stage 4 has two, and until item 21 the harness had no way to
 name the second: `--entry` did not exist. Ten of the twelve routes above were
@@ -1626,20 +1642,28 @@ the port.
 ### What the six runs played
 
 Same seed, same driven clock, one at a time (two browsers at once lose the
-renderer — `L29`). Frame numbers are identical run to run.
+renderer — `L29`). Route A gave the same frame numbers on three separate runs.
+The counts are **sampled every `--poll` frames**, 15 by default, so a shift of
+a frame or two rounds away and only a shift that crosses a poll boundary shows
+at all — which is why two of the routes read identically before and after.
 
-| route | blocks first executed | outcome |
-|---|---|---|
-| `0:1,1:2,3:4,5:6,6:7,7:8,8:10` | 1 2 3 4 5 6 7 8 10 9 | **hangs, block 9** |
-| `0:1,1:29,3:30,5:21` | 29 30 21 | end block 35, 11145 frames |
-| `14:22,22:23,23:24` | 22 23 24 | **hangs, block 24** |
-| `12:31,14:22,22:34,23:26` | 31 34 26 27 28 | end block 37, 12060 frames |
-| `0:1,1:2,3:4,5:6,6:7,7:25` | 25 | end block 37, 9045 frames |
-| `0:1,1:2,3:4,5:6,6:7,7:8,8:32` | 32 | **hangs, block 9** |
+| route | blocks first executed | before items 26-30 | after |
+|---|---|---|---|
+| `0:1,1:2,3:4,5:6,6:7,7:8,8:10` | 1 2 3 4 5 6 7 8 10 9 | hung, block 9 | **end 37**, 10860 |
+| `0:1,1:29,3:30,5:21` | 29 30 21 | end 35, 11145 | **end 35**, 11145 |
+| `14:22,22:23,23:24` | 22 23 24 | hung, block 24 | **hangs, block 24** |
+| `12:31,14:22,22:34,23:26` | 31 34 26 27 28 | end 37, 12060 | **end 37**, 12270 |
+| `0:1,1:2,3:4,5:6,6:7,7:25` | 25 | end 37, 9045 | **end 37**, 9045 |
+| `0:1,1:2,3:4,5:6,6:7,7:8,8:32` | 32 | hung, block 9 | **end 37**, 11025 |
 
-So **all twenty-two play**, three of the six routes reach an end block, and two
-blocks stop: 9 and 24, items 29 and 30. Neither stop is the branch mechanism —
-block 9 is reached on two different roads and hangs on both.
+So **all twenty-two play, and five of the six routes reach an end block**. One
+block stops: **24**, item 29, which is `[open]`. Block 9's two roads — `8→10→9`
+and `8→32→9` — both play now; it hung on both before item 30, which is what
+says that stop was not the branch mechanism either.
+
+The unrouted run is unchanged in outcome and 90 frames longer (12495 against
+12405), which is the strict camera wait of item 30 costing a frame at each of
+the sites it corrects. No route reports a room the shots could not clear.
 
 ### Two structural facts that came out of it
 
@@ -1651,27 +1675,29 @@ driven or played, can reach one. `--original` plays the Original Mode bundle,
 where the actors that write a 2 live; the rows above reach them by override in
 arcade, which is coverage and not a road the mode has.
 
-**Nothing was rescued in the old runs because nothing had to be.** The three
-roads the game itself takes once the rooms are cleared go through arm 1 every
-time: blocks 5, 6, 7 and 23 all wrote `g_script_branch_var = 1` off their own
-civilians' rescues. Blocks 7 to 10 are the road for a player who **fails** a
+**Nothing was rescued in the old runs because nothing had to be.** Once the
+rooms are cleared the game itself takes arm 1 at every fork that has a
+civilian in it: blocks 5, 6, 7 and 23 each wrote `g_script_branch_var = 1`
+off their own civilians' rescues, unprompted. Blocks 7 to 10 are the road for a player who **fails** a
 rescue, which is why they need an override from a driven run that kills
 everything.
 
 ## 26. `CivilianStepScript`'s camera bit read one of three conditions — **fixed**
 
-Found by playing stage 2's block 9 for the first time (item 25). The gate is
-`wait_script_flag 3` at block 9 step 2 op 14, and flag 3 is raised by the
-class-0x10 civilian the same step places at op 7 — spawn record `20908`,
-character type 42, entry 8, **stream 19**, whose `op 0x1C arg 3` is the only
-`set` of that flag on the route. She never reached it: `replay.mjs 2 9 2`
-shows her parked in state 0 on motion 413 for ten seconds, and the wait word
-she is parked on is `0x04109000`.
+Found while reading why stage 2's block 9 stopped, and **it was not the
+reason** — item 30 is. Recorded as its own item because it is its own defect:
+the fix is proved by the disassembly and by two assertions, and it changed
+nothing measurable in the six stages. The first reading of block 9 got this far
+and stopped here, which is the wrong turn worth keeping: `replay.mjs 2 9 2`
+shows the civilian who raises flag 3 parked in state 0 on motion 413 for ten
+seconds, and the wait word she is parked on *there* is `0x04109000`. In the
+real run she is dead and on a different stream with a different word, so this
+bit was never what held her.
 
 `0x04000000` is masked off as op 0x2C loads the word (`operand & 0xFBFFFFFF`),
 `0x00100000` is the root-motion switch and `0x00008000` is read nowhere in the
-routine, so the one live condition is **`0x00001000`** — and the port had a
-third of it. `[proved]`, from `0x0048B2F8`:
+routine, so the one live condition in `0x04109000` is **`0x00001000`** — and
+the port had a third of it. `[proved]`, from `0x0048B2F8`:
 
 ```
 0048b2f8  f6c710          TEST BH,0x10                   ; bit 0x1000
@@ -1885,6 +1911,20 @@ and is there so the pair cannot be "fixed" by making both go one further.
 The `21164 c48 s39.1` row beside her is the same story one step on: a captor in
 `ZombieStateAwaitCivilianOrder` (state 39) waits for an order her stream issues
 with op 0x1A, four commands past the cue that was out of reach.
+
+**And it needed both halves.** Either fix alone leaves the block shut, from
+opposite sides: with only the strict wait the walker parks on
+`wait_camera_path_frame 384` for ever, because nothing publishes 385; with only
+`pastEnd` the wait releases *on* 384 and the `finish_sequence 4` behind it
+freezes the camera before 385 is ever drawn. Measured both ways. Together,
+block 9 plays in 3,510 frames and the two routes that reach it — `8→10→9` and
+`8→32→9` — both reach block 37.
+
+`tools/verify_cam_waits.py` is the corpus guard, and it discriminates: model
+scene state 7 as stopping on its range's end and **eighteen**
+`wait_camera_path_frame` sites in stage 2 alone become gates nothing can open.
+That count is also the strongest evidence for the reading — the shipped scripts
+require the `JG`.
 
 ## Rules for whoever picks this up
 

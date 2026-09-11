@@ -19,17 +19,17 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 43572 | 161 | engine |
+| `game/` | 43615 | 161 | engine |
 | `hod2lib/` | 16039 | 34 | engine |
 | `render/` | 8559 | 30 | render |
 | `app/` | 7418 | 29 | app |
-| `script/` | 4179 | 25 | engine |
+| `script/` | 4262 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
 | `bundle/` | 2146 | 11 | engine |
 | `core/` | 910 | 9 | engine |
 | `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **86629** | **327** | |
+| **total** | **86755** | **327** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -37,7 +37,7 @@ The largest files, which is where the pressure to split next is:
 * `app/main.ts` — 1979
 * `game/actor.ts` — 1964
 * `hod2lib/exetab.ts` — 1839
-* `script/walker.ts` — 1780
+* `script/walker.ts` — 1822
 
 ## The port
 
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 873 in `ghidra/annotations/functions.tsv` |
+| Named functions | 874 in `ghidra/annotations/functions.tsv` |
 | Named globals | 403 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 35 under `tools/`, run together by `verify_all.py` |
+| Verifier scripts | 36 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -115,6 +115,7 @@ nothing exits 3 and is never counted as green.
 | `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
+| `verify_cam_waits` | that every `wait_camera_path_frame <n>` asks for a frame the play in force actually publishes -- the only check that holds the three routines that publish a camera frame against the scripts that wait on them, and the one that says the strict `frame > operand` of `EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene state 7 as stopping on its range's end rather than one past it and twenty of the sites it checks become gates nothing can open | bundle |
 | `verify_prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type, matched to the field each `MatrixRotate*` is handed. `render/breakables.ts` composed one order for all fifty, and it was type 51's alone: twenty shipped spawns came out somewhere else, four of them by more than a degree and the worst by 19.65 | game-dir |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
@@ -129,7 +130,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-13 of them need the installed game and 8 need an exported
+13 of them need the installed game and 9 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

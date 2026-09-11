@@ -136,9 +136,13 @@ function CivilianWaitStillHolds(obj: Actor, word: number): boolean {
   // driving (major 1), and it would not release one whose room was clear but
   // whose camera had not finished easing. `CameraTrackEnemiesTick` only ever
   // raises `settled` while nothing is being tracked, so with one enemy still
-  // holding an `g_enemy_slots` entry the port's single test can never come
-  // true — stage 2's block 9 waits on `wait_script_flag 3`, and flag 3 is
-  // raised by the civilian this releases.
+  // holding a `g_enemy_slots` entry the port's single test can never come
+  // true.
+  //
+  // **Found looking for stage 2's block 9 and not the cause of it** — that was
+  // a camera frame, `docs/PLAYER_HANGS.md` item 30. This changed nothing
+  // measurable in the six stages and is here because the disassembly says so;
+  // `test/port.test.ts` is what holds it.
   if ((word & CivilianWait.CameraSettled)
       && G.g_scene_state_major_entered === SCENE_STATE_PATH_CAMERA
       && (G.g_camera_settled !== 0 || G.g_camera_free !== 0)) return false;

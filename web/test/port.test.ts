@@ -10932,6 +10932,74 @@ console.log("\nthe camera path publishes every frame, ends included:");
 }
 
 /**
+ * `wait_camera_path_frame <n>` releases on `n + 1`, not on `n`.
+ *
+ * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`) advances the instruction
+ * pointer only when `g_cam_path_frame > operand`:
+ *
+ * ```
+ * 0045fae7  CMP dword ptr [0x009a6110],EAX
+ * 0045faed  JLE 0045fb29            ; frame <= operand: keep waiting
+ * ```
+ *
+ * The port counted down to the operand itself, so every instruction behind
+ * such a wait ran one frame early — and `runCameraOnPast`, the seek's half of
+ * the same rule, already used `arg + 1`, so the live walker and the seek
+ * disagreed about where the camera was. Stage 2's block 9 is the one where it
+ * mattered: `wait_camera_path_frame 384` let the `finish_sequence 4` behind it
+ * freeze the camera on 384, and frame 385 — the last frame of a stashed play,
+ * and a civilian's cue — was never published.
+ */
+console.log("\na camera-frame wait releases one frame past its operand:");
+{
+  const camOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 0],
+    start, end, slot: 7, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        camOp(0, 0, 10),
+        { i: 1, at: 1, op: 0x41, name: "wait_camera_path_frame", cat: "wait",
+          arg: 5, blocks_on: "camera path frame past arg" },
+        // The instruction behind the wait, and the frame it ran on is the
+        // measurement.
+        { i: 2, at: 2, op: 0x48, name: "set_script_flag", cat: "flow",
+          flag: 9 },
+        { i: 3, at: 3, op: 0x41, name: "wait_camera_path_frame", cat: "wait",
+          arg: 0, blocks_on: "camera path frame past arg" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  G.g_script_flags[9] = 0;
+  let ranOn = -1;
+  const seen: number[] = [];
+  for (let f = 0; f < 30; f++) {
+    w.tick(1 / 60);
+    seen.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+    if (ranOn < 0 && G.g_script_flags[9]) ranOn = seen[seen.length - 1];
+  }
+  check("the instruction behind `wait_camera_path_frame 5` runs on frame 6",
+        ranOn === 6, `ran on ${ranOn} of ${seen.slice(0, 12).join(",")}`);
+}
+
+/**
  * The **other** way the engine plays a path, and it is not this one.
  *
  * `queue_event cam_play` with `flags & 2` does not play: `FUN_00403490`

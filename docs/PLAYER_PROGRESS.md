@@ -1598,7 +1598,8 @@ found, items 26 to 30:
 
 * `CivilianStepScript`'s wait bit `0x1000` is **three** conditions and the port
   had one: the arm only applies while `g_scene_state_major_entered == 2` and it
-  releases on `g_camera_settled` **or** `g_camera_free`. Fixed.
+  releases on `g_camera_settled` **or** `g_camera_free`. Fixed — and it was
+  *not* what stopped block 9, which is why it is its own item.
 * A stashed camera range played by scene state **7** publishes one frame *past*
   its end — `JG` where state 6 has `JGE`, both incrementing before they
   publish. The port gave state 6's answer to both, and stage 2's block 9 waited

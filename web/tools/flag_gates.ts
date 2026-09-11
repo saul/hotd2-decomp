@@ -3,7 +3,7 @@
  * still has to excuse.
  *
  *     cd web && node tools/run_ts.mjs tools/flag_gates.ts
- *     HOTD2_BUNDLE=../extract/player node tools/run_ts.mjs tools/flag_gates.ts
+ *     HOTD2_BUNDLE=/path/to/export node tools/run_ts.mjs tools/flag_gates.ts
  *
  * `script/waits/flag.ts` declares a standing `[diverges]`: a gate on a flag
  * nothing this port runs can raise passes instead of parking the stage for
@@ -40,8 +40,9 @@
  * `[port-only]`. The engine needs none of this; every writer of
  * `g_script_flags` is code it is running.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { BUNDLE_ROOT, hasBundle, skipNoBundle } from "./lib/bundle_root";
 import type { ScriptJson } from "../src/bundle";
 import { SetGameTables } from "../src/game/tables";
 import { ScriptFlagsThisBundleCanRaise } from "../src/script/waits/flag";
@@ -63,25 +64,21 @@ const STAGE_WITHOUT_TYPE_75 = "stage5";
 const STAGE_WITH_FLAG_21_GATE = "stage3";
 const FLAG_21_GATE_BLOCK = 2;
 
-// `cd web && node tools/run_ts.mjs tools/flag_gates.ts` is the documented
-// invocation and the one `verify_all.py` makes, and there a bare
-// `extract/player` is `web/extract/player` with nothing in it. `import.meta`
-// cannot help: `run_ts.mjs` bundles this file into a temp directory, so the
-// module's own URL is not in the repo at all. So: try both, cwd first.
-const root = resolve(process.env.HOTD2_BUNDLE
-  ?? (existsSync(resolve("extract/player"))
-      ? "extract/player" : "../extract/player"));
-// **The missing directory is a skip, not a failure** — `L14`. A fresh
-// worktree has no `extract/` at all, so `readdirSync` throws ENOENT and an
-// uncaught throw is exit 1, which reads as "this check found something wrong"
-// when it asserted nothing. `verify_all.py` counts a 3 separately and names
-// it; that is the whole point of the code.
-const names = existsSync(root)
-  ? readdirSync(root).filter((n) => n.startsWith("stage")).sort() : [];
-if (names.length === 0) {
-  console.error(`no bundles under ${root} -- run \`npm run export\``);
-  process.exit(3);
-}
+// `BUNDLE_ROOT` and not a path of this file's own: it derives the export
+// directory from the checkout rather than from the working directory, which is
+// the whole reason `tools/lib/bundle_root.ts` exists. This used to resolve
+// `extract/player` against the cwd, and the documented invocation is
+// `cd web && ...`, where that is `web/extract/player` and there is nothing in
+// it. `import.meta` cannot stand in either — `run_ts.mjs` bundles this file
+// into a temp directory, so the module's own URL is not in the repo at all.
+const root = BUNDLE_ROOT;
+// **A missing export is a skip, not a failure** — `L14`, and `skipNoBundle`
+// is the one spelling of it. A fresh worktree has no `extract/` at all, so a
+// bare `readdirSync` throws ENOENT, and an uncaught throw is exit 1: it reads
+// as "this check found something wrong" when it asserted nothing.
+if (!hasBundle()) skipNoBundle("flag_gates");
+const names = readdirSync(root).filter((n) => n.startsWith("stage")).sort();
+if (names.length === 0) skipNoBundle("flag_gates");
 
 let failed = 0;
 const raisesFlag20 = new Map<string, boolean>();
@@ -201,7 +198,7 @@ const reach = new Map<string, ScriptJson>();
 
 for (const name of names) {
   const raw = JSON.parse(
-    readFileSync(resolve(root, name, `${name}.script.json`), "utf8"));
+    readFileSync(join(root, name, `${name}.script.json`), "utf8"));
   const script = raw as ScriptJson;
   // The same tables the player installs, so class 0x41's per-record answer has
   // the placements to resolve against.

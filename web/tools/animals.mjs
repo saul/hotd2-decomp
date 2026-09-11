@@ -24,7 +24,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
+import { BUNDLE_ROOT, hasBundle, skipNoBundle }
+  from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnSlotActors }
@@ -55,6 +56,12 @@ function check(name, ok, detail = "") {
   if (!ok) failures += 1;
   console.log(`  ${ok ? "ok  " : "FAIL"}  ${name}${ok || !detail ? "" : ` -- ${detail}`}`);
 }
+
+// **A missing export is a skip, not a failure** -- `L14`. Without this the
+// `readFileSync` below throws ENOENT, and an uncaught throw is exit 1: a fresh
+// worktree reports this as a check that found something wrong when in fact it
+// asserted nothing. `verify_all.py` counts a 3 separately and names it.
+if (!hasBundle()) skipNoBundle("animals");
 
 for (const [name, stage, block, step, cls, wanted, entry] of CASES) {
   const dir = join(BUNDLE_ROOT, `stage${stage}`);

@@ -706,8 +706,13 @@ export function combatTables(tables: ExeTables): Record<string, unknown> {
   for (const [k, s] of Object.entries(BLOOD_SCALE_BY_RESULT)) blood[k] = s;
 
   return {
-    // `ActorPlayHitVoice`. `impact` plays on every hurt and every body kill;
-    // `head` replaces it on a headshot kill.
+    // `ActorPlayHitVoice`. `impact` plays on kinds 0 and 1; `head_impact`
+    // replaces it on kind 2 -- which is the **hit result being 2**, not a
+    // headshot: `ZombieOnShot` (`FUN_00453EB0`) picks between kinds 1 and 2 at
+    // `0x00453F6E CMP EAX,0x2` on `g_hit_result` and tests no bone at all, and
+    // `ThrowerOnShot` (`FUN_004499A0`) agrees at `0x00449A76`. The two kinds
+    // share one voice pair, so the impact is the only audible difference;
+    // `tools/verify_combat.py` check 15 asserts both.
     impact: named(v.slice(0, 5)),
     head_impact: named([0x0116a9, 0x0516a9]),
     voice: {

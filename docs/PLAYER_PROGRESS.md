@@ -1440,18 +1440,104 @@ frame)` is a **drop-in on top of that pose**, not a position: it is rotated by
 the route's own yaw, added to the route point, and reaches zero exactly as the
 camera frame reaches 50.
 
-**Still open: the model sits 11.94 units behind where the engine draws it,**
-along the car's own forward axis. Clip 998's root translation is a constant
+**And it sat 11.94 units behind where the engine draws it, until the port's
+root-motion model was settled.** Clip 998's root translation is a constant
 `(0, 15.692, 11.943)` — it is what puts the body over the bonnet — and
-`render/characters/pose.ts` applies only the **y** of a clip root, on the rule
-that the port has already taken the horizontal part as world movement through
+`render/characters/pose.ts` applied only the **y** of a clip root, on the rule
+that the port had already taken the horizontal part as world movement through
 `ApplyRootMotion`. For a clip whose root never changes the per-frame delta is
-zero, so nothing ever takes it and the offset is simply dropped. Correcting it
-is a change to the port's root-motion model for every skinned actor in the game,
-not to this class, and it wants `SkeletonPoseRootFrame` read first: the engine
-both places the root bone at the frame's translation *and* applies the
-frame-to-frame delta to the object, and which of those is relative to which is
-`[open]`.
+zero, so nothing ever took it. The rule is true of *one arm* of a test the
+engine has and the port had collapsed.
+
+`SkeletonApplyRootMotion` (`FUN_00410C50`) is handed a **pointer** to the
+current frame's three root floats and tests `model+0x64` bit 1 **twice**:
+
+```
+00410d2f  TEST byte ptr [ECX + 0x64],0x2    ; does the delta move the object?
+          delta = root - baseline, through T(obj+0x40) Rz Ry Rx S(model+0x116C)
+          written back to obj+0x40 / obj+0x48, and baseline = root
+00410e93  CALL dword ptr [ECX + 0x115c]     ; the gated arm does NOT return
+          T(obj+0x40); the actor's rotation; S(model+0x116C)
+00411005  TEST byte ptr [ECX + 0x64],0x2    ; ...and which part of it is posed?
+0041100b  MatrixTranslate(0, root.y, 0)     ;   bit set
+00411020  MatrixTranslate(root.x, root.y, root.z)   ; bit clear
+```
+
+So **neither is relative to the other: they are two consumers of one absolute
+track, and the bit picks exactly one of them.** A clip's root translation moves
+the object or offsets the pose, never both and never neither. `[proved]` — and
+from the bytes, because Ghidra shows the gated arm returning at its
+`MatrixStackPop` where in fact it writes the baseline at `0x00410E5F`–`0x00410E93`
+and falls into the shared tail (`L37`).
+
+The baseline is a field, `model+0x1160..0x1168`, not a remembered frame index,
+and nothing ever lets it turn a clip's *absolute* root into a step:
+`ActorSetMotion` seeds it from the new clip's frame 0, `ActorSetMotionBlended`
+leaves the flag pair that makes the routine reset it to the current root, and a
+loop wrap is damped rather than taken. So the port's frame-to-frame delta was
+right; the missing half was the pose.
+
+`RescueTargetInit` is one of exactly two things in the game that clear the bit
+— `MOV EDX,[EDI+0x64]; AND EDX,0xFFFFFFFD; MOV [EDI+0x64],EDX` at
+`0x00451753`–`0x00451760`, one instruction after `ActorBuildSkinnedModel` set
+the word to 3 — and the other is `CivilianRunScript`, per block. The port was
+missing that line too.
+
+**The blast radius is four actors, and it was measured rather than hoped for.**
+`tools/verify_root_pose.py` decodes every motion block in the game and counts
+the ones with a non-zero *absolute* horizontal root on frame 0: **992 of 1058
+are exactly zero**, which is why the collapsed arm was invisible. Then it pairs
+every clip the shipped class-0x10 scripts set against the wait word governing
+it, and the clips that can be posed with a horizontal root and the gate clear
+are `people.bin` 596, 598 and 600 — one root, 2.882 units, one use each. Plus
+`zom.bin` 998 at 11.943, which is this actor. Nothing else in six stages can
+move: `civ_walk.mjs` reports the stage-1 rescue civilian walking the identical
+`20.87 over 590 frames (56,-194) -> (37,-186)` either side of the change,
+because the second arm is a pose and moves no world position at all.
+
+**Two things about it are `[diverges]`, not `[open]`**, and both are declared
+in `game/` rather than in `render/` so that `verify_port.py` counts them — the
+divergence count went 167 to 169 and that is the point of it. A departure
+described only in prose reads as settled, which is how a doc comment with no
+assertion behind it kept a hang alive for two sessions.
+
+1. **The death clip keeps its whole root whatever the gate says.**
+   `ActorAdvanceMotion` returns early on `obj.death`, so nothing steps the
+   actor, and `pose.ts` overrides the gate at that one call site because
+   otherwise a falling body's travel would come from nowhere. The engine has no
+   death track at all: a death clip is the ordinary motion and the gate decides
+   it like any other. The two land in the same place wherever the clip's frame-0
+   horizontal root is zero — the pose offset is `root[f]` where the accumulated
+   deltas would be `root[f] - root[0]`, both inside the actor's own rotation —
+   which is 992 blocks of 1058. **That is why it is invisible, not why it is
+   right.** Faithful means running root motion through a death in `game/`, for
+   the classes with no death machine. Tagged on the `obj.death` branch in
+   `game/motion.ts`.
+2. **The pose offset is unscaled, because the model is.** The engine's translate
+   sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at 0.9
+   offsets by 0.9 of what its clip authored. This port draws every character at
+   1.0 — neither `hod2lib.characters` nor `render/characters.ts` writes that
+   field to a node — so scaling the offset alone would be worse than leaving it,
+   since the offset would shrink while the model it offsets did not. The honest
+   size of the gap: three of the four clips that reach the pose at all belong to
+   `scale 0.9` types, where the engine's offset is **2.594 units and the port's
+   is 2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
+   they agree exactly. Faithful means scaling every skinned actor's drawn size,
+   which changes how the whole game looks. Tagged on `ActorModelScale` in
+   `game/root_motion.ts`.
+
+Still `[open]`, and deliberately left so: `MotionFlag.RootMotionY`, bit `0x10`
+of the same word, has no writer anywhere that has been read — nine other classes
+write `model+0x64` and none of their values were read here. And the engine's
+wrap damper makes the applied delta `(baseline_old - root)/play_length` where
+`rootDelta` computes `(root - root[0])/frames`; both are small, neither was
+touched, they are not the same number and nothing asserts either.
+
+**15 further `[diverges]` tags live outside `game/` and `script/`** — eight
+files under `render/` — and `verify_port.py` does not count them, because
+`cited_files()` is `game/` plus `script/` by an explicit earlier decision.
+Recorded here rather than acted on: widening the count is a change to what the
+honest measure measures, and it would move it by fifteen at once.
 
 **287 of 562 identified spawns are posed**, 25 distinct character types across
 the six stages. The rest keep their spawn marker, and the marker layer skips any
@@ -1689,6 +1775,87 @@ as a one-shot, so class 0x31's laser sword — ported earlier, and correctly —
 had been igniting for 0.4 seconds and never sustaining, and its `_OFF` cue was
 a 404 for a file the game does not ship. The loop branch is transcribed now,
 and the bundle carries `sound.looping`, the 44 pairs out of the EXE.
+
+### The hit voice exists once, and the kind is the hit-result code
+
+`ActorPlayHitVoice` (`FUN_0040A6F0`) was implemented **twice**: kinds 0, 1 and
+2 in `render/shooting.ts`, because the shot path needed them before there was
+anywhere else to put them, and kind 3 in `game/combat/voice.ts`. Both copies
+carried a comment saying so, and the renderer's carried the standing
+`[diverges]` that said consolidating it was four decisions rather than a move.
+All four are made.
+
+**The layer.** `verify_layers.py`'s `render-drives-the-port` refuses `render/`
+to call an engine function, and it is right: the engine plays the three shot
+kinds from `ZombieOnShot` (`FUN_00453EB0`) and `ThrowerOnShot`
+(`FUN_004499A0`), which are `game/` code. They are raised from
+`game/combat/feedback.ts` now — beside the blood, and in the engine's order,
+which is the blood first. The renderer has no `playSound` and no sound of its
+own left at all; `app/stage_load.ts` lost the wiring with it.
+
+**The determinism.** The pick was a generator private to `render/`, reseeded
+per stage, on the argument that which grunt plays is feedback rather than
+state. It is the world's seeded `rand()` now, like every other draw in the
+port, and therefore in the snapshot — which is what a save has to be able to
+reproduce (`L10`).
+
+`[proved]` **And the kind is the hit-result code and nothing else.** Two
+routines agree, which is what makes it a rule and not one function's habit:
+
+```
+00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
+00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
+00453f77  PUSH 0x1           ;                  dead otherwise -> kind 1
+00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+```
+
+and `ThrowerOnShot` is the same two instructions with the same two constants at
+`0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the bone and
+neither tests whether the actor died of *this* shot**, which is exactly what
+the render-side copy keyed on — `killed ? (head ? "head" : "kill") : "hurt"`.
+`docs/formats/combat.md` had said `bone == 2 ? 2 : 1` since the routine was
+first read, and the port was written from that line.
+
+**What a player actually hears change is the impact, and almost nothing else.**
+Kind 2's two voice ids in `g_hit_voice_table` are the *same pair* as kind 1's —
+`ZOMBIE_019` for set A, `ZOMBIE_018` for set B — so the difference between
+those two kinds is two head impacts (`BLOOD01`, `BLOOD05`) against the five
+body ones (`BLOOD02/03/04/06`, `BONE01`). So:
+
+* a **killing head shot** now plays a body impact, because its result is
+  usually 1 (the head model swapped) and not 2;
+* a **killing body shot whose result is 2** — plain damage, no swap — now plays
+  the head impact pair;
+* the **voice line is identical** in both of those, which is why this is a
+  correction worth making and not one worth being nervous about;
+* a shot that finds an actor **already dead** says the kill line rather than
+  the hurt line, because the test is the `Dead` flag and not this shot's kill.
+  `[likely]` audible: nothing in the port's candidate pick excludes a corpse,
+  but whether the engine's death states raise `ShotImmune` — which would
+  silence it there — is `[open]`.
+
+That equality is a claim small enough to be tempting to leave in a doc comment,
+which is how `L26` happens, so it is a check: `verify_combat.py`'s check 15
+reads `g_hit_voice_table` out of the EXE and asserts that kinds 1 and 2 share
+one pair, that the two impact tables are five and two ids with nothing in
+common, and that kind 3's entry is a *pair per set* where the others are one id
+per set. Four mutations of the parser fail it. The five kinds and the whole
+result-code mapping are asserted in `web/test/port.test.ts`; restoring the old
+`killed`/`head` rule fails three of them.
+
+**And the bursting head shouts.** `ActorShotFeedback` holds one of the routine's
+twenty-three call sites and it is **kind 3**, not a shot kind: `0x00454133 PUSH
+0x3` on the one head model (`0x1DC2`) that comes off on a damaging hit, before
+the `0x1DC1` stump is swapped in. That had been an open question in
+`combat/feedback.ts` saying the burst was silent because the voice tables lived
+in `render/`. It is the same cry a strike plays.
+
+One drift was found on the way. `web/src/hod2lib/combat.ts` had been given the
+attack pair when the silent swing was reported; `tools/hod2lib/combat.py` had
+not, so the Python half read all fifteen dwords of the table and emitted eleven
+of them for longer than the rule allows. `tools/verify_exporters.py` cannot see
+that class of gap — it compares the two halves' **modules and version**, not
+the fields they emit — and the new check 15 is what caught it.
 
 `[proved]` **Kind 4 of the voice routine is dead.** No call site in the image
 passes 4 — all twenty-three pass 0, 1, 2 or 3, and the census is in
@@ -2961,16 +3128,154 @@ shape for the same failure one class over: every slot a placed prop will pass
 to `AssetDrawSlot` has a model in its own bundle. Mutating the fix away makes
 it fail on both rising doors.
 
-`[open]` **The descriptor-slot set is seven types and three are still out.**
+### The descriptor-slot set is seven types, and the last three are drawn now
+
 `PropDrawOnlyType31` (`FUN_0046A1C0`, 6 spawns), `PropDrawOnlyType53`
-(`FUN_0046EBD0`, 2) and `PropDrawOnlyType54` (`FUN_0046EDC0`, 2) all draw
-`obj+0x28C` too — ten more spawns of scenery missing for the reason the van
-was. All three are read and annotated; they are not carried because adding a
-type makes its model travel *and* draw, and 54's authored drift would be
-visibly static. `[open]` **The renderer poses all forty-four generic props
-`Ry · Rz · Rx`**, which is type 51's order and not the family's: 5, 12, 31, 33,
-53 and 54 all compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or
-more non-zero angles and so are posed wrongly today.
+(`FUN_0046EBD0`, 2) and `PropDrawOnlyType54` (`FUN_0046EDC0`, 2) draw
+`obj+0x28C` too, and were held out because adding a type makes its model travel
+*and* draw — a type whose own arm is unported would arrive wearing the right
+geometry and doing the wrong thing. Their arms are ported now, in
+`game/class41/draw_only.ts`, and what each of them is came out of reading them:
+
+* **Type 31 is an effect strip, not scenery.** It draws
+  `obj+0x28C + obj+0x2A0` and the cursor is stepped every frame and **wrapped**
+  at `obj+0x2A4`, which `PlaceGenericProp` case 0x1F fills from the placer's
+  `+0x6C` — the spawn descriptor's *third orientation word*. So that word is a
+  frame count and a roll at the same time, and both readings are real: stage
+  1's 0x26 is 39 frames of `eff_1.bin`, stage 3's 9 is ten of `eff_taki.bin`
+  (`taki` is a waterfall, and the model renders as a sheet of spray) and stage
+  4's 0x1D is thirty more. **None of that is in the decompilation.**
+  `MatrixStackPop` is marked no-return, so Ghidra ends the function body at
+  that `CALL` and the pseudocode shows a bare draw with nothing stepping the
+  cursor — `L37`, and `0x0046A334` is where the tail really is. Type 33 has the
+  identical tail with `ActorKill` where 31 has the wrap, so it plays its 60
+  frames of `eff_shop.bin` once and dies; that one is still `[open]` in the
+  port, which draws frame 0 and holds it.
+* **Type 53 is a car.** `char_adv04.bin[0]`, charred black, with wheels and a
+  shadow quad. Its head is an inline variant of `PropExpireByStepLifetime`
+  with the scene-1 sweep left out and `ActorKill` in place of `ActorDespawn`.
+  `[likely] a burning car`: the same hidden-tail trap covers a second half at
+  `0x0046EC6D` that draws **two more camera-facing animated strips** whenever
+  `g_evt_block_index` is 4 or 5 — `char_adv04.bin[79..93]` at 15 frames scaled
+  1.5/2.0/1.0, and `char_adv00.bin[1..8]` at 8 frames scaled 7.0 and pushed
+  10.0 out, both on a yaw computed from `g_camera_pose[0]`. Block 4 is where
+  one of its two spawns is placed, so that is live in the shipped game and
+  `[open]` in the port: a camera-facing billboard is a render primitive there
+  is nowhere to put yet, and its slots are kept out of the bundle rather than
+  travelling unused.
+* **Type 54 drifts, and the flag it drifts on is not a global.** Ghidra carries
+  `DAT_009C720C` as its own symbol, which hides that `0x009C7200` is
+  `g_script_flags` and this is **element 12**. Stage 5's script raises flag 12
+  in block 5 step 2 and every branch out of block 4 — where the prop is placed
+  — reaches block 5, so the drift is always taken: 5.0 in X, 1.5 up and -4.0
+  in Z a frame, pitching `0x300` and yawing `-0x400`, for the 301 frames that
+  read 0..300 and then `ActorKill`. The training scene's copy never sees flag
+  12 raised and so stands where it was put, which is the engine's behaviour and
+  not a gap. The same flag is the stage-2 boss's summon gate
+  (`Class14StateSummonRoundB` writes it) and is raised in seven of stage 6's
+  blocks: a flag number means whatever its scene means by it.
+
+### The renderer posed all fifty generic props in one order, and it was type 51's
+
+`render/breakables.ts` composed `Ry · Rz · Rx` for every prop in the family.
+That is `PropDrawOnlyType51`'s order and **only** its order — twenty-two of the
+fifty routines compose `Rz · Ry · Rx`, five `Ry · Rz · Rx`, twelve rotate about
+Y alone, one about Z alone, one `Rz · Rx` with no yaw, six apply none of the
+three words and three are `[open]`. It reads `GENERIC_POSE_ORDER` now, which
+`tools/verify_prop_pose.py` derives from the EXE per type, matching each
+`MatrixRotate*` to the field the instruction before it pushed.
+
+**Matching the argument and not just the axis is what makes it readable.**
+`PropUpdateType19` rotates Y by the literal `0xC000`, then Z, then Y again,
+then X; counted by axis that is a fourth distinct order, and read with its
+arguments it is the same `Rz · Ry · Rx` as its neighbours plus a constant
+quarter turn. It also poses from `obj+0x64/68/6C` rather than
+`obj+0x1CC/1D0/1D4`, because its object is an enemy — `L3` again.
+
+The count that went with the old `[open]` note was fifteen, and it was the
+wrong measure twice. **The order only matters when yaw and roll are both
+non-zero**: `Rx` is last in every one of these compositions, so all an order
+can disagree about is whether `Ry` or `Rz` comes first, and with either angle
+at zero the two matrices are equal — which is why type 5's four stage-2 spawns,
+a pitch and a yaw with no roll, were never misplaced at all. And it was counted
+over six stages rather than the twelve bundles. What the check measures is
+**20 spawns posed differently, four of them by more than a degree**, and all
+four are `PropDrawOnlyType12` — stage 4's blocks 4, 7, 12 and 13, the worst by
+19.65°, a handcart tipped onto the wrong corner. The other sixteen move by
+fifths of a degree, because for types 31 and 33 the "roll" is a strip length.
+
+`tools/verify_prop_pose.py` is the check, and it holds three things the tables
+could not hold on their own: the pose order per type, against the routines; the
+strip set and the descriptor-slot set, against the routines, in **both** the
+port's copy and the exporter's — which is the check the van needed and the one
+`verify_prop_slots.py` cannot have, since it reads the same table it would be
+checking; and that `render/breakables.ts` composes a pose in exactly one place.
+The code the bug was in fails all four: two `rotateZ(p.roll)` sites, two
+`rotateY(p.yaw)`, two `rotateX(p.pitch)`, and no table.
+
+### Fourteen routines draw `obj+0x28C` and seven of them mean the descriptor
+
+`verify_prop_pose.py` asserts the set now instead of listing candidates, and
+what closed it was **`PlaceGenericProp`'s switch, read as a table**:
+
+```
+00461da2  MOV EAX,[EBP+0x130c]              ; the descriptor's type
+00461da8  ADD EAX,-6                        ; index = type - 6
+00461dab  CMP EAX,0x47 / JA default
+00461db6  MOV DL, byte ptr [EAX + 0x462978] ; g_place_generic_prop_arm_index
+00461dbc  JMP dword ptr [EDX*4 + 0x4628d4]  ; g_place_generic_prop_arms
+```
+
+Types 6..77 have an arm and types 5 and 78 fall to the default — which is why
+`PropDrawOnlyType5` has no per-type setup at all. 72 index entries select 41
+distinct arms, so most arms serve several types, and with the mapping in hand
+every write to `obj+0x28C` in that routine belongs to a named type. Four
+clauses then cut fourteen down to seven, and each excluded type is excluded for
+a reason rather than for want of reading:
+
+* **13, 34 and 67** — their arm writes an immediate over `obj+0x28C`
+  (`0x1A4A`, `0x0A50`, and `0x1A36`/`0x1A35`/`0x1A0F`).
+* **43** — its arm takes the field away too, and **not with an immediate**,
+  which is why a detector looking only for one had called it a descriptor
+  slot: `SBB EDX,EDX / AND EDX,0xFFFFE617 / ADD EDX,0x19E8` leaves either
+  `0x19E8`, the ordinary breakable model, or `0xFFFF`, the engine's
+  draw-nothing. It also ages `obj+0x11C` as a lifetime, and its seven spawns
+  carry 1, 2 or 3 there. And it turns out to be **the third object built from
+  `g_prop_kind_params`** — `PropUpdateType43` (`FUN_0046CEA0`) takes the kind
+  from the descriptor's third orientation word, the radius, effect and variant
+  from the kind's row, plays that row's sound on the first hit, pays for it,
+  swaps `0x19E8` to `0x19E6` and turns the broken model to face the camera.
+  So stage 3's seven "undrawn props" are **breakables the port does not place
+  as breakables**, not scenery with a missing model; the stage still carries no
+  hinges, no statics and no set pieces. That is the other side of the
+  no-scenery measurement, and it is a bigger job than a table row: the type
+  wants `PropFamily.Kinded`'s neighbour rather than an entry in this set.
+* **70 and 71** — `OriginalItemPropUpdate` ages `obj+0x11C` too, so the word in
+  it is a lifetime and the model comes from `g_original_item_records` through
+  `PickOriginalModeItem`.
+
+`[open]` **Type 72 passes every code clause and fails the data one.**
+`PropUpdateType72` (`FUN_00470750`) is an Original Mode collectible with its
+own routine, and for its first 25 frames it draws `AssetDrawSlot((s16)
+obj+0x28C)` at the spawn's pose scaled by `obj+0x2C4`. Its arm never overwrites
+that field and it never ages `obj+0x11C` — and its one shipped spawn, stage 2
+block 16, carries `+0x11C == 1`. So the engine really does hand
+`AssetDrawSlot` a 1. Whether anything is resident at slot 1 in that region has
+not been read, so whether that draw shows `bg_adv10.bin[0]` or nothing is
+undetermined, and it stays out: carrying that model would be the same mistake
+that once put characters and effects where stage 2's scenery should be.
+
+**The fourth clause is the shipped data, and the gap it rests on is measured.**
+Across the class-0x41 spawns of all twelve scenes a generic descriptor's
+`+0x11C` is one of **0, 1, 2, 3, 4, 5, 7** — 54 words — or one of
+**`0x2B`..`0x18BF`** — 43 words — with **nothing in between**. Below the band it
+is a lifetime in event steps; above it, an asset slot. The check asserts the
+band is still empty every run, because the rule is unsound the moment it is
+not, and it measures the band against the routines rather than against either
+table: deriving the threshold from the set being checked makes a removed type
+read as the gap closing instead of as a missing prop, which is
+`verify_prop_slots.py`'s own circularity one layer in and was caught here by
+the mutation test twice.
 
 ## Every opcode, and what the player does with it
 

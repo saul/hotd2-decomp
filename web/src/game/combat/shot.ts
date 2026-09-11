@@ -323,7 +323,7 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     // class gets class 0x31's answer, which is the ricochet the player
     // already sees and hears off a downed body.
     G.g_hit_result = HitResultCode.NoEffect;
-    ActorShotFeedback(obj, pick.bone, pick.point, host, events);
+    ActorShotFeedback(obj, pick.bone, pick.point, host, rng, events);
     // No `ScoreAddForPlayer` and no `g_head_combo_bonus`: both of those are
     // inside `ResolveHit`, which did not run.
     events?.emit("shot.resolved", {
@@ -339,7 +339,7 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // `ResolveHit` has written it. See `combat/feedback.ts` for why it is here
   // rather than in each class's own on-shot routine.
   G.g_hit_result = out.result;
-  ActorShotFeedback(obj, pick.bone, pick.point, host, events);
+  ActorShotFeedback(obj, pick.bone, pick.point, host, rng, events);
   let points = 0;
   if (out.head) {
     points += SCORE_HEAD + (G.g_head_combo_bonus[player] ?? 0);

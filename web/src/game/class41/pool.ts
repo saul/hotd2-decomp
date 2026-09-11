@@ -23,6 +23,9 @@ import {
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
 import { PropUpdateType75 } from "./flag_prop";
+import {
+  PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
+} from "./draw_only";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
@@ -71,6 +74,12 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       // prologue and has no `AND` on `obj+0x34` anywhere in it. Adding either
       // here would be two lines the engine does not run.
       case PropFamily.Type75: PropUpdateType75(p, rng, events); break;
+      // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
+      // own variant of it and 54 has no lifetime at all — so neither can ride
+      // the generic arm, which runs that prologue before it dispatches.
+      // Neither masks `obj+0x34` and neither registers a shot sphere either.
+      case PropFamily.DrawOnlyType53: PropDrawOnlyType53(p); break;
+      case PropFamily.DrawOnlyType54: PropDrawOnlyType54(p); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }
@@ -93,6 +102,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
  */
 const GENERIC_UPDATE: Partial<Record<number, (p: BreakableProp) => void>> = {
   14: PropUpdateType14,
+  // 31 *does* open with `PropExpireByStepLifetime`, so unlike 53 and 54 it
+  // rides the generic arm and only owes its camera cue and its strip cursor.
+  31: PropDrawOnlyType31,
   19: PropUpdateType19,
   25: PropUpdateType25,
   40: PropUpdateType40,

@@ -146,6 +146,15 @@ CHECKS: list[Check] = [
           "state's exit is an exact `obj+0x19C >= 0x3C` against a play clock "
           "that is 0 for a clip nothing carried",
           NEEDS_BUNDLE),
+    Check("verify_prop_pose", ".",
+          ["python3", "tools/verify_prop_pose.py", "--game-dir", "{game_dir}"],
+          "that every class-0x41 generic prop is posed in the order its own "
+          "update routine poses it -- read out of the EXE per type, matched to "
+          "the field each `MatrixRotate*` is handed. `render/breakables.ts` "
+          "composed one order for all fifty, and it was type 51's alone: "
+          "twenty shipped spawns came out somewhere else, four of them by more "
+          "than a degree and the worst by 19.65",
+          NEEDS_GAME),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",
@@ -174,6 +183,17 @@ CHECKS: list[Check] = [
           "file ships, which is the only thing that says a stop id is a "
           "control word rather than a sound, and so the only thing that makes "
           "the chainsaw a loop rather than a one-shot",
+          NEEDS_GAME),
+    Check("verify_root_pose", ".",
+          ["python3", "tools/verify_root_pose.py", "--game-dir",
+           "{game_dir}"],
+          "that a clip's root translation still either moves the object or "
+          "offsets the pose -- the two arms of one `model+0x64` bit, quoted "
+          "as bytes because Ghidra shows neither of them whole -- and the "
+          "only place the set of actors the second arm can move is "
+          "enumerated: every motion block in the game measured for an "
+          "absolute horizontal root, paired with the class-0x10 wait word "
+          "that governs it",
           NEEDS_GAME),
     Check("verify_combat", ".",
           ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],

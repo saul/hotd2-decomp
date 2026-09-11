@@ -47,6 +47,25 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // **Classes 0x30, 0x31 and 0x10 no longer arrive here.** All three are
     // `updatesWhenDead` and run their own death states over the base track, so
     // this is the shared clip for the classes that have no such machine.
+    //
+    // **The engine has no death track, and so no `return` here.** A death clip
+    // is the ordinary motion, `SkeletonApplyRootMotion` (`FUN_00410C50`) runs
+    // from the draw whichever clip it is, and `model+0x64` bit 1 is still set
+    // on every class that reaches this branch -- so the engine steps the object
+    // by the clip's frame-to-frame delta and poses `(0, root.y, 0)`. This
+    // returns instead: nothing moves the actor, and
+    // `render/characters/pose.ts` overrides the gate at its one death call
+    // site to pose the whole root, because otherwise a falling body's travel
+    // would come from nowhere at all.
+    //
+    // The two land in the same place wherever the clip's frame-0 horizontal
+    // root is zero -- the pose offset is `root[f]` where the accumulated
+    // deltas would be `root[f] - root[0]`, both inside the actor's own
+    // rotation -- and that is 992 of the game's 1058 motion blocks, measured
+    // by `tools/verify_root_pose.py`. Which is why it is invisible, not why it
+    // is right. Being faithful means running root motion through a death here,
+    // for the classes with no death machine, and that is a change of its own.
+    // [diverges]
     obj.death.ticks += SecondsToTicks(dt);
     return;
   }

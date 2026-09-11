@@ -39,6 +39,36 @@
  * in the 297 of 596 shipped blocks whose wait word does not ask for it just as
  * much as in the 289 that do. `[proved]`
  *
+ * **The gate has a second arm, and it is a pose.** One `if` in
+ * `SkeletonApplyRootMotion` decides both halves: with `model+0x64` bit 1 set
+ * the frame-to-frame delta moves the object and the draw matrix gets
+ * `MatrixTranslate(0, root.y, 0)`; with it **clear** nothing moves and the
+ * draw matrix gets `MatrixTranslate(root.x, root.y, root.z)` — the whole
+ * translation, as a pose offset in the actor's own rotated frame. A clip's
+ * root translation therefore either moves the object or offsets the pose,
+ * never both and never neither. `[proved]` from the bytes, because the
+ * decompiler shows neither half of it (`L37`):
+ *
+ * ```asm
+ * 00410d2f  TEST byte ptr [ECX + 0x64],0x2   ; the gate -- move the object?
+ * 00410e5f  ...                              ; the SET arm does NOT return;
+ * 00410e93  CALL dword ptr [ECX + 0x115c]    ;   it falls into the shared tail
+ * 00411005  TEST byte ptr [ECX + 0x64],0x2   ; the same gate -- pose which part?
+ * 00411009  JZ   0x00411020
+ * 0041100b  PUSH 0 / PUSH [ESI+4] / PUSH 0   ; MatrixTranslate(0, y, 0)
+ * 00411020  PUSH [ESI+8] / [ESI+4] / [ESI]   ; MatrixTranslate(x, y, z)
+ * ```
+ *
+ * `render/characters/pose.ts` is the port's other arm, and it reads the same
+ * {@link MotionFlag.RootMotion} bit inline — the engine's test is one `TEST`
+ * and not a routine, and an engine *function* called from `render/` is a
+ * layer violation (`render-drives-the-port`).
+ *
+ * Only two things in the shipped game ever clear the bit: `RescueTargetInit`
+ * (`FUN_00451720`) once, at spawn, and `CivilianRunScript` (`FUN_0048B9E0`)
+ * on every clip change, from its block's wait word. So the y-only arm is the
+ * ordinary case, and the other one has to be looked for.
+ *
  * **And the delta is scaled by the character's own size.**
  * `SkeletonApplyRootMotion` runs `MatrixScale(model+0x116C)` into the same
  * matrix it rotates the delta through, so a character drawn at 0.9 covers 0.9
@@ -52,6 +82,24 @@
  * 0.112 a frame; scaled, at 0.180. Both are small, and **the ratio between two
  * small numbers is not small** — 1.6x — so the grab landed 244 ticks after the
  * spawn instead of 158, long after its camera shot had cut away.
+ *
+ * **It scales the pose offset too, and the port scales neither that nor the
+ * model.** `SkeletonApplyRootMotion`'s pose translate is pushed *after*
+ * `MatrixScale(model+0x116C)`, so a character drawn at 0.9 offsets by 0.9 of
+ * what its clip authored. `render/characters/pose.ts` applies the offset
+ * unscaled -- deliberately, because nothing in this port scales a drawn
+ * character at all: neither `hod2lib.characters` nor `render/characters.ts`
+ * writes that field to a node, so every skinned actor is drawn at 1.0.
+ * Scaling the offset alone would be worse than leaving it, because the offset
+ * would shrink while the model it offsets did not.
+ *
+ * The honest size of it, from `tools/verify_root_pose.py`: of the four actors
+ * whose clip root reaches the pose at all, the three `people.bin` clips 596,
+ * 598 and 600 belong to `scale 0.9` types, so the engine's offset is **2.594
+ * units and the port's is 2.882**. The fourth is class 0x21 at character type
+ * 7, scale 1.0, where the two agree exactly. Making it faithful means scaling
+ * every skinned actor's drawn size, which is a change to how the whole game
+ * looks and not to this arithmetic. [diverges]
  *
  * [diverges] The engine rotates the delta by the full `Rz · Ry · Rx`; this
  * rotates by yaw alone. That is exact for anything standing upright and wrong
@@ -92,6 +140,17 @@ export function ActorModelScale(charType: number): number {
  * `prev` is the frame the delta was last taken at, `-1` on the first call.
  * Returns the delta in the clip's own space, which the caller rotates by the
  * actor's yaw.
+ *
+ * **The engine's baseline is a field, not a remembered frame index**, and the
+ * difference is worth stating because it is what this port nearly got wrong.
+ * `model+0x1160..0x1168` holds the root translation the last delta was taken
+ * at, and `ActorSetMotion` (`FUN_00411930`) seeds it from the **new clip's
+ * frame 0** whenever the gate is set (`TEST AL,2` at `0x00411966`), while
+ * `ActorSetMotionBlended` (`FUN_004119A0`) leaves `track+0x37` in the state
+ * that makes `SkeletonApplyRootMotion` reset it to the current root outright.
+ * So neither a cut nor a fade ever turns a clip's **absolute** root into a
+ * step, and `prev < 0` here — no delta on the first call — is that same
+ * statement. `[proved]`
  */
 export function rootDelta(m: BakedMotion, prev: number, next: number):
     { x: number; z: number } {

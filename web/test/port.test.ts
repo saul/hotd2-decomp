@@ -211,7 +211,8 @@ import {
   RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
 import {
-  MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT,
+  MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT, MOUSE_PAUSE_FRAMES,
+  MOUSE_SPEED, MOUSE_TURN_SPREAD,
   MouseBranchTriggerUpdate, MouseState, MouseWanderUpdate,
 } from "../src/game/class52";
 import {
@@ -3406,6 +3407,50 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
     }
     check("a wanderer leaves at 600 frames", b.despawned,
           `life ${b.mouse.life}`);
+
+    // **The turn is the whole of the wander.** `MouseWanderUpdate` ends its
+    // sixty-frame pause with `obj+0x68 += (rand() & 0xFFF) - (rand() & 0xFFF)`
+    // and then rebuilds the velocity from the new yaw. The port had that as a
+    // mask over `Rng.next()`, which returns a float in `[0, 1)`, so both terms
+    // were zero: the mouse paused on cue, turned by nothing, and ran in a
+    // straight line until its six hundred frames were up. One generator across
+    // the samples, because two draws from a fresh one are the same two draws.
+    const c = triggerScene(SpawnClass.Mouse, { class52: { subtype: 0 } });
+    if (c.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    const wanderRng = new Rng(4);
+    const turns: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      c.mouse.state = MouseState.Pause;
+      c.mouse.paused = MOUSE_PAUSE_FRAMES;
+      const before = c.yaw;
+      MouseWanderUpdate(c, { eye: EYE, dt: 1 / 60, rng: wanderRng,
+                             host: NULL_HOST });
+      turns.push(c.yaw - before);
+    }
+    check("the mouse turns when its pause ends",
+          turns.some((t) => t !== 0),
+          `${turns.filter((t) => t === 0).length} of 40 were zero`);
+    // One draw would be uniform over 0..0xFFF and so always a turn the same
+    // way round. The subtraction is what centres it on zero.
+    check("...both ways, because it is the difference of two draws",
+          turns.some((t) => t > 0) && turns.some((t) => t < 0),
+          `${turns.filter((t) => t > 0).length} up, `
+          + `${turns.filter((t) => t < 0).length} down`);
+    check("...and never by a whole twelve bits either way",
+          turns.every((t) => Math.abs(t) < MOUSE_TURN_SPREAD),
+          String(Math.max(...turns.map(Math.abs))));
+    // The velocity is rebuilt from the yaw on the same frame, or the mouse
+    // would face one way and keep running the other.
+    c.mouse.state = MouseState.Pause;
+    c.mouse.paused = MOUSE_PAUSE_FRAMES;
+    const vx0 = c.mouse.vx;
+    const vz0 = c.mouse.vz;
+    MouseWanderUpdate(c, { eye: EYE, dt: 1 / 60, rng: wanderRng,
+                           host: NULL_HOST });
+    check("...and the velocity follows it on the same frame",
+          (c.mouse.vx !== vx0 || c.mouse.vz !== vz0)
+          && Math.abs(Math.hypot(c.mouse.vx, c.mouse.vz) - MOUSE_SPEED) < 1e-6,
+          `${vx0},${vz0} -> ${c.mouse.vx},${c.mouse.vz}`);
   }
 
   // The trigger's flight: shot, then the per-subtype bound, then stopped.

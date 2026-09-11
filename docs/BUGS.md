@@ -2385,6 +2385,31 @@ investigation ruled out.
   field in every shipped bundle -- a format bump and a full re-export for a
   change that alters no behaviour. It wants the reading first.
 
+## And one about the mouse, found while reading class 0x52 for something else
+
+- `[fixed]` **The mouse could not turn, so it ran in a straight line until it
+  despawned.** `MouseWanderUpdate` (`FUN_0043F5C0`) ends its sixty-frame pause
+  with `obj+0x68 += (rand() & 0xFFF) - (rand() & 0xFFF)` at `0x0043F5F8`, and
+  the port had that as `(rng.next() & 0xfff) - (rng.next() & 0xfff)`.
+  `Rng.next()` returns a float in `[0, 1)` and JavaScript's `&` truncates to an
+  integer first, so **both terms were zero**: a wanderer paused on cue every
+  hundredth frame, turned by nothing, and carried on along its spawn yaw for the
+  whole six hundred frames.
+
+  Nothing had caught it. The two draws were still taken, so the shared stream
+  never went out of step and the determinism and save-state checks were clean;
+  the existing unit test built a fresh `Rng` per frame, which makes two draws in
+  one frame identical either way; and zero is a legal turn, so the actor did
+  something plausible with no crash, in Original Mode, off to one side.
+
+  The fix is `MOUSE_TURN_SPREAD`, a **count** rather than a mask, because
+  `Rng.int` is the port's spelling of `% n` — and the mask is uniform over
+  `rand()`'s 0..0x7FFF, since 0x8000 is exactly eight times 0x1000. Four
+  assertions guard it: the turn happens, it goes both ways, it stays inside
+  twelve bits, and the velocity is rebuilt on the same frame. Three fail on the
+  old line and a fifth mutation, one draw instead of the difference, fails the
+  "both ways" one. `L46`.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

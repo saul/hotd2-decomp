@@ -110,6 +110,17 @@ export const MOUSE_FRAMES = 10;
 
 /** `sub+0x0C` — the only speed the class has, in units a frame. */
 export const MOUSE_SPEED = 0.4;
+/**
+ * The width of each of the two draws the turn is built from — `rand() & 0xFFF`.
+ *
+ * It is a **mask on `rand()`**, and the mask is uniform here rather than
+ * merely nearly so: MSVC's `rand()` returns 0 to 0x7FFF, and 0x8000 is exactly
+ * eight times 0x1000, so every value of the low twelve bits comes up equally
+ * often. `Rng.int` is the port's spelling of `% n` and is the same
+ * distribution, which is why this is a count and not a mask — see
+ * {@link MouseWanderUpdate}.
+ */
+export const MOUSE_TURN_SPREAD = 0x1000;
 /** `obj+0x124` — the shot-test radius `ShotTestSphere` measures against. */
 export const MOUSE_HIT_RADIUS = 2.0;
 /** Frames a wanderer holds still, and the life at which it leaves. */
@@ -251,7 +262,14 @@ export function MouseWanderUpdate(obj: Actor, f: ClassFrame): void {
       sub.state = MouseState.Run;
       sub.paused = 0;
       // `(rand() & 0xFFF) - (rand() & 0xFFF)`, in that order. Two draws.
-      obj.yaw += (f.rng.next() & 0xfff) - (f.rng.next() & 0xfff);
+      //
+      // **A mask, not a call to `Rng.next`.** `Rng.next()` returns a float in
+      // `[0, 1)` and `0.7 & 0xFFF` is `0`, so the line this replaces made both
+      // draws zero and the mouse turned by exactly nothing for as long as it
+      // existed — it ran in a straight line until its six hundred frames were
+      // up. The draws were still taken, so the shared stream was never out of
+      // step and nothing downstream showed it. `L46`.
+      obj.yaw += f.rng.int(MOUSE_TURN_SPREAD) - f.rng.int(MOUSE_TURN_SPREAD);
       MouseSetVelocityFromYaw(obj, sub);
     }
   }

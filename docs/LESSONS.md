@@ -639,3 +639,38 @@ what writes it before overriding it. A coverage tool may cheat — this one also
 kills rooms with a debug button — but every cheat has to be printed in the run,
 because the next person to read the output will otherwise spend a session
 reading the port for a bug the harness invented.
+
+**L46 — `Rng.next()` returns a float, so a bitwise operator on it is silently
+zero.** `MouseWanderUpdate`'s turn is `(rand() & 0xFFF) - (rand() & 0xFFF)`, and
+the port transcribed it as `(rng.next() & 0xfff) - (rng.next() & 0xfff)`.
+`Rng.next()` is in `[0, 1)`; JavaScript's `&` converts to a 32-bit integer
+first, so both terms were `0`. The mouse paused on its own cue every hundred
+frames, turned by exactly nothing, and ran in a straight line until its six
+hundred frames were up.
+
+Nothing caught it for as long as it existed, and the reasons are worth knowing
+because they generalise:
+
+* **The generator stayed in step.** Both draws were still taken, so every later
+  draw in the shared stream landed where it would have. A save state restored
+  perfectly and the determinism check passed. A wrong *use* of a draw is
+  invisible to every test that only asks whether the stream is reproducible.
+* **The unit test drove it with a fresh `Rng` per frame**, so two draws in one
+  frame were two draws from seed *n* either way, and the assertion — that the
+  mouse moved — held with a turn of zero.
+* **Zero is a legal turn.** There is no crash, no `NaN`, no clamp; the actor
+  does something plausible, in a straight line, off camera, in Original Mode
+  only.
+
+It was found by eye, reading the class for something else. The guards now are a
+named constant — `MOUSE_TURN_SPREAD`, a *count* rather than a mask, because
+`Rng.int` is the port's `% n` — and four assertions that check the turn happens,
+goes both ways, stays inside twelve bits, and reaches the velocity on the same
+frame. Three of the four fail on the old line and a fifth mutation, a single
+draw instead of the difference, fails the "both ways" one.
+
+The rule: **`Rng.int(n)` is the only way to spell `rand() % n` or `rand() & (n-1)`
+in this port.** `next()` is the raw float and belongs in a multiply. When the exe
+masks rather than divides, check the mask is uniform over `rand()`'s range
+before calling it a count — `0x8000` is exactly eight times `0x1000`, so
+`& 0xFFF` is, and a mask that is not would need saying so.

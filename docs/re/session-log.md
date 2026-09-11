@@ -17270,3 +17270,53 @@ report counted `volleys += 1` **twice** per volley, so every "took N volleys"
 in `PLAYER_HANGS.md` written before today is double the truth. Fixed in
 passing while the shooting block was restructured; the counts recorded in
 items 25 and 30 are from the fixed code.
+
+---
+
+## The mouse could not turn, and the reason it went unseen is the lesson
+
+One line, in `MouseWanderUpdate`'s port. The engine ends the wanderer's
+sixty-frame pause with
+
+```
+0043f5f8  CALL rand ; MOV EBP,EAX ; AND EBP,0xfff
+0043f605  CALL rand ;              AND EAX,0xfff
+0043f60f  SUB  EBP,EAX
+0043f611  MOV  EAX,[EDI+0x68] ; ADD EAX,EBP ; MOV [EDI+0x68],EAX
+```
+
+and the port had `(rng.next() & 0xfff) - (rng.next() & 0xfff)`. `Rng.next()`
+returns a float in `[0, 1)`; `&` converts to a 32-bit integer first, so both
+terms were `0` and every class-0x52 wanderer ran in a straight line from its
+spawn yaw until its six hundred frames were up.
+
+**Read out of the executable rather than out of Ghidra**, because the GUI was
+closed and the MCP bridge had no instance. `capstone` over
+`ExeTables.data` at the function's file offset gives the same listing and takes
+a few seconds; it is worth knowing as a fallback, and for a sequence this short
+it is the more direct reading anyway. Everything else in the routine — the
+`> 0x3C` pause exit, the `life % 100 == 99` gate with `rand() % 10 < 4` behind
+it, the strip wrap, the 600-frame despawn, the velocity from `sin`/`cos` times
+`sub+0x0C` — matches what was already ported.
+
+### Why it survived every check
+
+* **The stream stayed in step.** Both draws were taken. A save state restored
+  identically, `test:state` passed, and the determinism harness had nothing to
+  say. *A wrong use of a draw is invisible to every check that only asks whether
+  the stream is reproducible.*
+* **The test built a fresh `Rng` per frame.** Two draws from seed *n* are the
+  same two draws whichever way they are consumed, so the assertion that the
+  mouse moved held with a turn of zero.
+* **Zero is a legal turn.** No crash, no `NaN`, no clamp. The actor does
+  something plausible, in Original Mode only, usually off to one side.
+
+It was found by eye while reading class 0x52 for the three-animal port, and
+reported before it was fixed rather than fixed in passing, because it is
+somebody else's class.
+
+The guard is four assertions and two mutations, and the rule is written up as
+`L46`: **`Rng.int(n)` is the only spelling of `rand() % n` or `rand() & (n-1)`
+in this port**, and `next()` belongs in a multiply. Where the exe masks rather
+than divides, check the mask is uniform over `rand()`'s 0..0x7FFF before
+calling it a count — `0x8000` is exactly eight times `0x1000`, so `& 0xFFF` is.

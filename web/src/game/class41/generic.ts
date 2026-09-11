@@ -72,13 +72,23 @@
  * two layers away from the placement — and that is the shape to watch for in
  * the other four.
  *
- * `[open]` **The renderer poses all forty-four of these as `Ry·Rz·Rx`**, which
- * is `PropDrawOnlyType51`'s order and not the family's: types 5, 12, 31, 33,
- * 53 and 54 compose `Rz·Ry·Rx`. Fifteen shipped spawns have two or more
- * non-zero angles and so are posed wrongly — four type-5s and five type-12s in
- * stage 2, five type-12s in stage 4, one type-33 in stage 2 — plus stage 3's
- * three type-31s once those are carried. Not fixed here; it wants its own arm
- * in `render/breakables.ts` and its own render check.
+ * **The renderer used to pose every one of these `Ry·Rz·Rx`**, which is
+ * `PropDrawOnlyType51`'s order and not the family's. It now reads
+ * {@link GENERIC_POSE_ORDER}, which `tools/verify_prop_pose.py` derives from
+ * the EXE per type and is the authority on the count.
+ *
+ * The count that went with the `[open]` note was fifteen, and it was the wrong
+ * measure twice over. **The order only matters when yaw and roll are both
+ * non-zero** — `Rx` is last in every one of these compositions, so all an
+ * order can disagree about is whether `Ry` or `Rz` comes first, and with
+ * either angle at zero the two matrices are equal. That is why type 5's four
+ * stage-2 spawns, which carry a pitch and a yaw and no roll, were never
+ * misplaced at all. And the fifteen was counted over six stages rather than
+ * the twelve bundles. What the check measures is 20 spawns posed differently,
+ * **four of them by more than a degree and all four `PropDrawOnlyType12`** —
+ * stage 4's blocks 4, 7, 12 and 13, the worst by 19.65°. The other sixteen are
+ * fifths of a degree, because for types 31 and 33 the "roll" is a strip
+ * length.
  *
  * Some of them are not props at all: cases 0x13 and 0x19 increment
  * `g_enemies_present` and case 0x0E `g_enemies_alive`, so a few of these are
@@ -96,6 +106,50 @@ import {
 import {
   LIFT_FAR_CLOSED, LIFT_NEAR_CLOSED, LIFT_PANEL_CLOSED,
 } from "./lift";
+
+/**
+ * The composition a class-0x41 generic type's routine applies the spawn
+ * descriptor's three orientation words in, before it draws.
+ *
+ * `[port-only]` as a *table*: the engine enumerates nothing here, each of the
+ * fifty routines simply has its own sequence of `MatrixRotate*` calls. It is
+ * an enum rather than three booleans because the *order* is the fact, and the
+ * member's value is the order — `"ZYX"` is `MatrixRotateZ` then `Y` then `X`,
+ * read left to right as the engine calls them, which for a pre-multiplying
+ * matrix stack composes as `Rz·Ry·Rx`.
+ *
+ * `tools/verify_prop_pose.py` reads these values straight out of the EXE and
+ * fails on any that disagrees, which is what stops the table becoming the
+ * second source `L16` is about.
+ */
+export enum PoseOrder {
+  /** `MatrixRotateZ(roll); MatrixRotateY(yaw); MatrixRotateX(pitch)`. */
+  RollYawPitch = "ZYX",
+  /** `MatrixRotateY(yaw); MatrixRotateZ(roll); MatrixRotateX(pitch)`. */
+  YawRollPitch = "YZX",
+  /** One rotation, about Y, and the descriptor's other two words unused. */
+  YawOnly = "Y",
+  /** One rotation, about Z. */
+  RollOnly = "Z",
+  /** `MatrixRotateZ(roll); MatrixRotateX(pitch)` — no yaw at all. */
+  RollPitch = "ZX",
+  /** `MatrixRotateY(yaw); MatrixRotateX(pitch)` — no roll. */
+  YawPitch = "YX",
+  /**
+   * The routine applies **none** of the three words: it draws at the spawn's
+   * position and whatever orientation the model was authored with. Nine
+   * types, and no shipped spawn of any of them carries an angle at all.
+   */
+  NoRotation = "",
+  /**
+   * `[open]` — the routine rotates from something the scanner cannot attribute
+   * to a descriptor word. Two types: **75** poses from the object path it
+   * rides (`PropUpdateType75`, `FUN_004710C0`), and **41**
+   * (`FUN_0046CC50`) takes its Z from a register the read did not follow.
+   * The renderer leaves these on the family default rather than guess.
+   */
+  Unread = "?",
+}
 
 /**
  * The per-type hit radius the switch sets, in the cases that set one. `+0x124`
@@ -123,13 +177,16 @@ export const GENERIC_HP: Partial<Record<number, number>> = {
  *
  * * 5 — `PropDrawOnlyType5` (`FUN_00466820`), a static prop the script can
  *   clear with flag 0x13.
- * * 12 — `FUN_00467E50`, scaled and z-offset, removed at cam path 0x2F
- *   frame 0x96.
- * * 33 — `FUN_00472950`, which draws `+0x28C + n` and dies when `n` passes
- *   `+0x2A4`: a strip of slots played as an animation.
+ * * 12 — `PropDrawOnlyType12` (`FUN_00467E50`), scaled, and removed when
+ *   `g_active_cam_path` is 0x2F at frame 0x96.
+ * * 31 — `PropDrawOnlyType31` (`FUN_0046A1C0`), an effect strip that wraps.
+ * * 33 — `PropDrawOnlyType33` (`FUN_00472950`), which draws `+0x28C + n` and
+ *   dies when `n` passes `+0x2A4`: a strip of slots played once.
  * * 51 — `PropDrawOnlyType51` (`FUN_0046EB20`): `PropExpireByStepLifetime`,
  *   then `Translate(x, y, z + obj+0x1C8); RotY; RotZ; RotX;
  *   AssetDrawSlot((s16)obj+0x28C)` and nothing else at all.
+ * * 53 — `PropDrawOnlyType53` (`FUN_0046EBD0`), with its own inline lifetime.
+ * * 54 — `PropDrawOnlyType54` (`FUN_0046EDC0`), which drifts on a flag.
  *
  * Every other type's `+0x11C` is a lifetime. See the module comment.
  *
@@ -143,20 +200,140 @@ export const GENERIC_HP: Partial<Record<number, number>> = {
  * A placement with no model and a placement that was never exported look
  * exactly the same from the level.
  *
- * `[open]` **The set is seven types, not four.** The routines that pass
- * `obj+0x28C` to `AssetDrawSlot` are 5, 12, **31**, 33, 51, **53** and **54**
- * — all seven read and annotated: `PropDrawOnlyType31` (`FUN_0046A1C0`, 6
- * spawns, slots `0xB3F`/`0xD01`/`0x1874`), `PropDrawOnlyType53`
- * (`FUN_0046EBD0`, 2 spawns, slot `0x2B`) and `PropDrawOnlyType54`
- * (`FUN_0046EDC0`, 2 spawns, slot `0x18A1`). They are not here because adding
- * a type makes its model travel *and* draw, and these three's own arms are
- * unported — 54's drift is authored, identical for every spawn, and would be
- * visibly static. **Ten more spawns of scenery are missing for the reason the
- * van was.** `tools/verify_prop_slots.py` holds whatever this set says, so the
- * way to close it is one type at a time with its retirement rule read.
+ * **The set is seven types, and all seven are here.** The routines that pass
+ * `obj+0x28C` to `AssetDrawSlot` are 5, 12, 31, 33, 51, 53 and 54, and the
+ * last three used to be held out because adding a type makes its model travel
+ * *and* draw, so a type whose own arm was unported would have arrived wearing
+ * the right geometry and doing the wrong thing. Their arms are ported now —
+ * `class41/draw_only.ts` — which is what let them in:
+ *
+ * * **31** — `PropDrawOnlyType31` (`FUN_0046A1C0`), 6 spawns. An **effect
+ *   strip**: `eff_1.bin[8..46]` in stage 1, `eff_taki.bin[0..9]` in stage 3
+ *   and `eff_taki.bin[30..59]` in stage 4, one frame a tick, wrapping. See
+ *   {@link GENERIC_SLOT_STRIP}.
+ * * **53** — `PropDrawOnlyType53` (`FUN_0046EBD0`), 2 spawns, slot `0x2B` =
+ *   `char_adv04.bin[0]`, with its own inline lifetime.
+ * * **54** — `PropDrawOnlyType54` (`FUN_0046EDC0`), 2 spawns, slot `0x18A1` =
+ *   `st5_02b.bin[6]`, which drifts for 300 frames on `g_script_flags[12]`
+ *   and then kills itself. Ten shipped spawns of scenery in total, missing
+ *   for exactly the reason the van's body was.
+ *
+ * `tools/verify_prop_slots.py` holds whatever this set says, and
+ * `tools/verify_prop_pose.py` holds the order each of them is drawn in.
  */
 export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> =
-  new Set([5, 12, 33, 51]);
+  new Set([5, 12, 31, 33, 51, 53, 54]);
+
+/**
+ * The two types whose routine plays `obj+0x28C` as a **strip of slots** and
+ * takes the strip's length from `obj+0x2A4`.
+ *
+ * ```
+ * AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)
+ * obj+0x2A0++;  if (obj+0x2A0 > obj+0x2A4)  ...
+ * ```
+ *
+ * Type 31 wraps the cursor back to 0 there; type 33 `ActorKill`s. **Neither
+ * tail is in the decompilation** — `MatrixStackPop` is marked no-return, so
+ * Ghidra ends both function bodies at that `CALL` and the pseudocode of each
+ * is a bare draw of `obj+0x28C + obj+0x2A0` with nothing stepping the cursor
+ * (`L37`). `disassemble_bytes` past `0x004729B3` and `0x0046A333` is what
+ * found them.
+ *
+ * `PlaceGenericProp`'s arms at `0x0046205E` (type 31) and `0x004620BE`
+ * (type 33) both write `obj+0x2A4` from the placer's `+0x6C` — **the spawn
+ * descriptor's third orientation word**. So for these two types that word is a
+ * frame count *and* a roll: the prologue copies it to `obj+0x1D4` as well and
+ * the routine applies it, which for the shipped values (9, 0x1D, 0x26, 0x3B)
+ * is a fifth of a degree. Both readings are the engine's and the port makes
+ * both.
+ *
+ * `[open]` Type 33's strip and its death are not ported: its single stage-2
+ * spawn plays 60 frames of `eff_shop.bin` and then kills itself, and the port
+ * draws frame 0 and holds it — the standing divergence this module declares.
+ * It is in this table so the exporter carries the strip either way, because
+ * what travels is decided by the routine and not by how far the port has got.
+ */
+export const GENERIC_SLOT_STRIP: ReadonlySet<number> = new Set([31, 33]);
+
+/**
+ * The order a generic type's routine applies the spawn descriptor's three
+ * orientation words, and the whole of what {@link PoseOrder} is for.
+ *
+ * `render/breakables.ts` composed `Ry·Rz·Rx` for all fifty of these, which is
+ * `PropDrawOnlyType51`'s order and **only** its order: twenty-two of the
+ * family compose `Rz·Ry·Rx`, five `Ry·Rz·Rx`, twelve rotate about Y alone, one
+ * about Z alone, one `Rz·Rx` with no yaw at all, six apply none of the three
+ * words, and three are `[open]`. Twenty shipped spawns came out in the wrong
+ * place, four of them by more than a degree and the worst by 19.65° — all four
+ * `PropDrawOnlyType12`, in stage 4's blocks 4, 7, 12 and 13.
+ *
+ * `tools/verify_prop_pose.py` derives this table from the EXE and fails on any
+ * row that disagrees, so it is a mirror and not a second source. Its two
+ * measurements are worth keeping in view:
+ *
+ * * **The order only matters when yaw and roll are both non-zero.** With
+ *   either at zero the two compositions are the same matrix, which is why
+ *   type 5's four stage-2 spawns — pitch and yaw, roll 0 — were never
+ *   misplaced despite carrying two non-zero angles.
+ * * **No shipped spawn carries a non-zero angle on an axis its routine does
+ *   not rotate.** So the Y-only and no-rotation rows cost nothing today, and
+ *   they are still here because that is a fact about the shipped data and not
+ *   about the engine.
+ */
+export const GENERIC_POSE_ORDER: Partial<Record<number, PoseOrder>> = {
+  5: PoseOrder.RollYawPitch,  // 0x466820
+  6: PoseOrder.YawOnly,  // 0x4668a0
+  7: PoseOrder.RollPitch,  // 0x466930
+  8: PoseOrder.YawRollPitch,  // 0x467080
+  9: PoseOrder.NoRotation,  // 0x472830
+  10: PoseOrder.YawOnly,  // 0x4668a0
+  11: PoseOrder.YawOnly,  // 0x467c80
+  12: PoseOrder.RollYawPitch,  // 0x467e50
+  13: PoseOrder.NoRotation,  // 0x467f50
+  14: PoseOrder.YawRollPitch,  // 0x468180
+  18: PoseOrder.RollYawPitch,  // 0x468e50; also Y<-lit 0xc000
+  19: PoseOrder.RollYawPitch,  // 0x468f00; also Y<-lit 0xc000
+  20: PoseOrder.YawOnly,  // 0x469380
+  21: PoseOrder.YawOnly,  // 0x4694a0
+  25: PoseOrder.YawOnly,  // 0x469ae0
+  27: PoseOrder.YawOnly,  // 0x469e60
+  28: PoseOrder.RollYawPitch,  // 0x469f50
+  30: PoseOrder.RollYawPitch,  // 0x46a0f0
+  31: PoseOrder.RollYawPitch,  // 0x46a1c0
+  32: PoseOrder.NoRotation,  // 0x46a360
+  33: PoseOrder.RollYawPitch,  // 0x472950
+  34: PoseOrder.RollYawPitch,  // 0x46a580
+  35: PoseOrder.YawOnly,  // 0x46b320
+  36: PoseOrder.NoRotation,  // 0x46b480
+  41: PoseOrder.Unread,  // 0x46cc50; also Y<-yaw, Z<-?, X<-pitch
+  43: PoseOrder.RollYawPitch,  // 0x46cea0
+  45: PoseOrder.NoRotation,  // 0x46dab0; also Y<-lit 0x3c4d
+  49: PoseOrder.YawRollPitch,  // 0x46e6e0
+  51: PoseOrder.YawRollPitch,  // 0x46eb20
+  53: PoseOrder.RollYawPitch,  // 0x46ebd0
+  54: PoseOrder.RollYawPitch,  // 0x46edc0
+  56: PoseOrder.RollYawPitch,  // 0x46f090; also Y<-lit 0x6b00
+  57: PoseOrder.NoRotation,  // 0x46f350; also Y<-lit 0xfffff500
+  58: PoseOrder.RollYawPitch,  // 0x46f580
+  59: PoseOrder.RollYawPitch,  // 0x46f750
+  60: PoseOrder.RollYawPitch,  // 0x46f840
+  62: PoseOrder.YawOnly,  // 0x46fa10
+  63: PoseOrder.YawOnly,  // 0x46fb50
+  64: PoseOrder.YawOnly,  // 0x46fbe0
+  67: PoseOrder.YawRollPitch,  // 0x470080
+  69: PoseOrder.RollYawPitch,  // 0x470500
+  70: PoseOrder.RollYawPitch,  // 0x4675a0
+  71: PoseOrder.RollYawPitch,  // 0x4675a0
+  72: PoseOrder.RollYawPitch,  // 0x470750
+  73: PoseOrder.RollYawPitch,  // 0x470b70
+  74: PoseOrder.RollYawPitch,  // 0x470e20
+  75: PoseOrder.Unread,  // 0x4710c0; also Z<-?, Y<-?, X<-?
+  76: PoseOrder.RollOnly,  // 0x471330; also Y<-lit 0xffffde98, Y<-obj+0x1e8, X<-obj+0x1e4
+  77: PoseOrder.Unread,  // 0x4717a0; also Y<-yaw, Y<-obj+0x1dc
+  78: PoseOrder.YawOnly,  // 0x471ba0
+};
+
 
 /**
  * What each read type actually draws — the first `AssetDrawSlot` literal in
@@ -235,6 +412,37 @@ export const GENERIC_LIFETIME_FROM_1F4: ReadonlySet<number> =
  */
 const PropContainerType32 = 32;
 
+/** Class 0x41 types 53 and 54, which have update routines of their own. */
+const TYPE53 = 53;
+const TYPE54 = 54;
+
+/**
+ * `PlaceGenericProp` case 0x36's five literals — the whole of type 54's drift,
+ * and the reason it could not be added to {@link GENERIC_DESCRIPTOR_SLOT}
+ * without being ported.
+ *
+ * Read out of the disassembly rather than the pseudocode, because these are
+ * `MOV dword ptr [ESI + disp], imm32` of float bit patterns and the decompiler
+ * shows them as integers (`L1`'s neighbour):
+ *
+ * ```
+ * 00462436  MOV dword ptr [ESI + 0x1c0], 0x40a00000   ;  5.0
+ * 00462447  MOV dword ptr [ESI + 0x1c4], 0x3fc00000   ;  1.5
+ * 00462451  MOV dword ptr [ESI + 0x1c8], 0xc0800000   ; -4.0
+ * 0046245b  MOV dword ptr [ESI + 0x1d8], 0x300
+ * 00462465  MOV dword ptr [ESI + 0x1dc], 0xfffffc00   ; -0x400
+ * ```
+ *
+ * Identical for every spawn, which is what makes the drift *authored*: both
+ * shipped type-54 props travel the same five units right, one and a half up
+ * and four back a frame, tumbling `0x300` in pitch and `-0x400` in yaw.
+ */
+const TYPE54_DRIFT_VX = 5.0;
+const TYPE54_DRIFT_VY = 1.5;
+const TYPE54_DRIFT_VZ = -4.0;
+const TYPE54_DRIFT_PITCH = 0x300;
+const TYPE54_DRIFT_YAW = -0x400;
+
 /**
  * The generic types whose object runs a routine of its own rather than the
  * shared prologue, and so gets its own {@link PropFamily}.
@@ -248,6 +456,12 @@ const PropContainerType32 = 32;
 export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
   [PropContainerType32]: PropFamily.Lift,
   [PROP75_TYPE]: PropFamily.Type75,
+  // Both of these open with their own lifetime rule instead of
+  // `PropExpireByStepLifetime`, which is what earns a family rather than a
+  // `GENERIC_UPDATE` row: the pool's generic arm runs that prologue before it
+  // dispatches, and neither routine has it. See `class41/draw_only.ts`.
+  [TYPE53]: PropFamily.DrawOnlyType53,
+  [TYPE54]: PropFamily.DrawOnlyType54,
 };
 
 /**
@@ -308,6 +522,22 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // Same argument for `+0x2A4`: `PropUpdateType75` counts step changes up
   // from zero in it, and the struct's default is the story switch's -1.
   if (p.family === PropFamily.Type75) p.removeFlag = 0;
+  // `MOV EDX,[EBP+0x6c]; MOV [ESI+0x2a4],EDX` — the arms at 0x0046205E and
+  // 0x004620BE give types 31 and 33 the placer's third orientation word as
+  // the length of the slot strip their routine plays. The same word is also
+  // the roll below, and both readings are the engine's.
+  if (GENERIC_SLOT_STRIP.has(type)) p.removeFlag = pl.roll ?? 0;
+  // Case 0x36's five literals. Without them a type-54 prop stands still with
+  // its script flag raised, which is the one thing the engine never does with
+  // it -- and then never retires, because the 300-frame drift is its only
+  // exit. See `class41/draw_only.ts`.
+  if (type === TYPE54) {
+    p.vx = TYPE54_DRIFT_VX;
+    p.vy = TYPE54_DRIFT_VY;
+    p.vz = TYPE54_DRIFT_VZ;
+    p.spin = TYPE54_DRIFT_PITCH;
+    p.yawSpin = TYPE54_DRIFT_YAW;
+  }
 
   p.x = pl.pos?.[0] ?? 0;
   p.y = pl.pos?.[1] ?? 0;

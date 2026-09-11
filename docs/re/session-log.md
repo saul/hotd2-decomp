@@ -15926,3 +15926,121 @@ missing for the van's reason. And the renderer poses the whole generic family
 compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or more non-zero
 angles. Both are written up where the code is, and neither is fixed here.
 
+## The last three descriptor-slot types, and the pose order that was one type's
+
+Picking up the two `[open]` notes the shutter-and-van session left: add types
+31, 53 and 54 to `GENERIC_DESCRIPTOR_SLOT`, and give the renderer each generic
+type's own rotation order instead of type 51's.
+
+**Both counts in those notes were wrong, and re-deriving them was the point.**
+
+*Ten more spawns* is right, and nine of them are in the twelve exported
+bundles — the tenth is the training scene's type 54, which the player does not
+export. Fine.
+
+*Fifteen posed wrongly* is not. Two mistakes, in opposite directions. The
+criterion used was "two or more non-zero angles", and the order only matters
+when **yaw and roll** are both non-zero: `Rx` is last in every one of these
+compositions, so all an order can disagree about is whether `Ry` or `Rz` comes
+first, and with either of those at zero the two matrices are equal. Type 5's
+four stage-2 spawns carry a pitch and a yaw and no roll and were never
+misplaced. The count was also taken over six stages rather than twelve bundles.
+The real number is **20 spawns, four of them by more than a degree** — all four
+`PropDrawOnlyType12`, stage 4, worst 19.65° — and the other sixteen by fifths
+of a degree. Which leads to the finding that mattered most:
+
+### `L37` again, twice, and it changed what two of these types *are*
+
+`MatrixStackPop` is marked no-return, so Ghidra ends a function body at that
+`CALL`. Both strip types lose their tail to it:
+
+* `PropDrawOnlyType31` (`FUN_0046A1C0`): the pseudocode is a draw of
+  `obj+0x28C + obj+0x2A0` with **nothing that ever writes `obj+0x2A0`** — and
+  the existing annotation said exactly that, "the draw's addend is the pool's
+  zero". `0x0046A334`–`0x0046A35B` increments it and wraps it at `obj+0x2A4`.
+  It is an **effect strip**, not a static prop: 39 frames of `eff_1.bin`, ten
+  of `eff_taki.bin`, thirty more of it.
+* `PropDrawOnlyType33` (`FUN_00472950`): the identical tail at `0x004729B4`
+  with `JMP ActorKill` where 31 wraps.
+* `PropDrawOnlyType53` (`FUN_0046EBD0`): `0x0046EC6D`–`0x0046EDB9` draws **two
+  more camera-facing animated strips** in blocks 4 and 5, and one of its two
+  spawns is placed in block 4. The annotation called it "a model at the spawn's
+  pose for a handful of steps and nothing else".
+
+And the strip length is the spawn descriptor's **third orientation word**:
+`PlaceGenericProp`'s arms at `0x0046205E` and `0x004620BE` copy the placer's
+`+0x6C` to `obj+0x2A4`, which the prologue has *also* copied to `obj+0x1D4`.
+One word, a frame count and a roll, both real — and it is why those sixteen
+spawns move by a fifth of a degree rather than a real angle.
+
+`disassemble_bytes` from the address `get_function_by_address` reports as
+`body_end` is the whole technique. It is worth running on every routine whose
+pseudocode ends in a tail call, not only when something looks missing: nothing
+looked missing in type 31's, which is why the wrong reading was already in the
+TSV.
+
+### `DAT_009C720C` is not a global
+
+Type 54 drifts while `DAT_009C720C == 1`. `0x009C7200` is `g_script_flags`, so
+that is **element 12** — Ghidra's own symbol at the address hides the array.
+Stage 5's script raises flag 12 in block 5 step 2; block 4, where the prop is
+placed, branches to 5 or 6 and block 6 gotos 5, so the drift is always taken
+and adding type 54 without porting it really would have put a static model
+where the game has one tumbling away. The same flag is the stage-2 boss's
+summon gate and is raised in seven of stage 6's blocks.
+
+`DAT_009A2BAC` is a global, and now `g_scene_tick_counter`: `FUN_0040E730`
+steps it once a game tick beside `g_frame_counter` and
+`g_blink_frame_counter`, `ResetSceneOnEnter` zeroes it (`XOR EBX,EBX` at the
+top of the routine, `MOV [0x009a2bac],EBX` at `0x0045EE23`), the save path
+stores and restores it, and nothing else writes it. `FUN_0046EEE3` tests it
+`== 0` to mean the scene's first tick, which only works if that is what it
+holds; every other reader takes it modulo something small as an animation
+phase. What still distinguishes it from the other two is thin — all three are
+per-tick counters with different reset scopes — so the name is about what it
+counts and not about which of the three it is.
+
+### What the scanner got wrong before it got it right
+
+The pose order is read by scanning each routine for `E8` calls to the three
+`MatrixRotate*` entry points and matching each to the field the instruction
+before it pushed. Three versions were wrong in ways worth recording:
+
+1. **Matching the axis and not the argument.** `PropUpdateType19` rotates Y by
+   a literal `0xC000`, then Z, then Y again, then X. By axis that is a fourth
+   order; by argument it is the same `Rz · Ry · Rx` as its neighbours, plus a
+   constant. It also poses from `obj+0x64/68/6C`, the actor fields, because its
+   object is an enemy — `L3`.
+2. **Claiming an order when no draw was found.** With a 0x400-byte window four
+   of the Original Mode collectibles never reached their `AssetDrawSlot`, so
+   the scan named whatever rotation it had last seen. That made the blast
+   radius read 60 spawns and 44 "invented rotations", none of which were real.
+   It returns `Unread` now when it cannot see the draw, and the invented count
+   is zero.
+3. **Picking a sub-part's pose.** `FUN_004717A0` poses one part from the
+   descriptor's yaw and a second from `obj+0x1DC`, and the run nearest the
+   first draw is the second part's. It returns `Unread` there too.
+
+Each of those would have put a confident wrong row in a table the renderer
+reads. `[open]` is a useful answer and the check now gives it three ways.
+
+### The check the van needed, and the one it still does not have
+
+`tools/verify_prop_slots.py` reads `GENERIC_DESCRIPTOR_SLOT` out of the
+exporter, so it cannot fail a type that should be in that set and is not —
+written down in its own docstring as its blind spot. `verify_prop_pose.py`
+derives the set from the EXE instead: which routines take `obj+0x28C` into
+their first draw (`0F BF /r` with a disp32 of `0x28C`), and which add
+`obj+0x2A0` to it. The strip set comes out exactly `{31, 33}` and is asserted
+in both copies. The descriptor set does **not** come out at seven: fourteen
+routines take that field, and seven of the extra are explained by an arm of
+`PlaceGenericProp`'s switch overwriting it with a literal. Five are not, so
+that direction is a printed work list and not an assertion — `43` in
+particular has **seven spawns, all in stage 3**, the stage a previous report
+measured as carrying no scenery at all.
+
+The pose check also counts the renderer's own rotate sites, one per angle. The
+code this was written for had two of each, and chose between them on the prop's
+*family* — which is how all fifty generic types got type 51's order without
+anything being able to disagree.
+

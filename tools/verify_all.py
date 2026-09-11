@@ -129,6 +129,15 @@ CHECKS: list[Check] = [
           "because nothing carried their geometry, which from the level looks "
           "exactly like a placement that was never exported",
           NEEDS_BUNDLE),
+    Check("verify_prop_pose", ".",
+          ["python3", "tools/verify_prop_pose.py", "--game-dir", "{game_dir}"],
+          "that every class-0x41 generic prop is posed in the order its own "
+          "update routine poses it -- read out of the EXE per type, matched to "
+          "the field each `MatrixRotate*` is handed. `render/breakables.ts` "
+          "composed one order for all fifty, and it was type 51's alone: "
+          "twenty shipped spawns came out somewhere else, four of them by more "
+          "than a degree and the worst by 19.65",
+          NEEDS_GAME),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

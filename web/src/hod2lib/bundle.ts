@@ -124,14 +124,47 @@ export const BREAKABLE_SLOTS = [
  * pose as two of them, and five other pieces of street furniture from the same
  * file.
  *
- * `[open]` Types **53** (`FUN_0046EBD0`) and **54** (`FUN_0046EDC0`) draw
- * `obj+0x28C` too -- three more spawns, all stage 5 -- and are deliberately
- * not here: 53's lifetime is an inline variant of `PropExpireByStepLifetime`
- * and 54 drifts its whole pose while `DAT_009C720C` is 1, and neither is
- * ported, so adding their slots would put a model in the level with the wrong
- * behaviour rather than none. Same for the rest of the family.
+ * **Types 31, 53 and 54 are here now too**, and were the last of the seven:
+ *
+ * * **31 -- `PropDrawOnlyType31` (`FUN_0046A1C0`)**, 6 spawns, an effect strip
+ *   out of `eff_1.bin` and `eff_taki.bin`. Its slot is the *base* of a strip
+ *   whose length is the descriptor's third orientation word; see
+ *   `GENERIC_SLOT_STRIP` below.
+ * * **53 -- `PropDrawOnlyType53` (`FUN_0046EBD0`)**, 2 spawns, slot `0x2B` =
+ *   `char_adv04.bin[0]`, an inline variant of `PropExpireByStepLifetime`.
+ * * **54 -- `PropDrawOnlyType54` (`FUN_0046EDC0`)**, 2 spawns, slot `0x18A1` =
+ *   `st5_02b.bin[6]`, which drifts its whole pose while `g_script_flags[12]`
+ *   is raised and kills itself 301 frames in.
+ *
+ * They were held out because adding a type makes its model travel *and* draw,
+ * and a type whose own arm is unported arrives wearing the right geometry and
+ * doing the wrong thing -- 54 in particular would have been visibly static
+ * where the game has it tumbling away. All three arms are ported now, in
+ * `game/class41/draw_only.ts`, which is what let their slots in. Ten shipped
+ * spawns of scenery, missing for exactly the reason the van's body was.
  */
-export const GENERIC_DESCRIPTOR_SLOT = [5, 12, 33, 51];
+export const GENERIC_DESCRIPTOR_SLOT = [5, 12, 31, 33, 51, 53, 54];
+
+/**
+ * The two descriptor-slot types whose routine plays its slot as a **strip**,
+ * so the whole strip has to travel and not just the base.
+ *
+ * `PropDrawOnlyType31` (`FUN_0046A1C0`) and `PropDrawOnlyType33`
+ * (`FUN_00472950`) both draw `(s16)obj+0x28C + (s32)obj+0x2A0` and step that
+ * cursor one frame at a time -- 31 wrapping at `obj+0x2A4`, 33 killing itself
+ * there -- and `PlaceGenericProp`'s arms at `0x0046205E` and `0x004620BE` give
+ * `obj+0x2A4` the placer's `+0x6C`, the descriptor's third orientation word.
+ * So the strip is `slot .. slot + roll` inclusive: 39 frames of `eff_1.bin`
+ * for stage 1's, 10 and 30 of `eff_taki.bin` for stages 3 and 4, and 60 of
+ * `eff_shop.bin` for stage 2's one type-33 spawn.
+ *
+ * **Neither cursor step is in the decompilation.** `MatrixStackPop` is marked
+ * no-return, so Ghidra ends both function bodies at that `CALL` and shows a
+ * bare draw with nothing advancing `obj+0x2A0` (`L37`). Carrying only the base
+ * slot would have been the van's bug again, one frame deep: the prop draws for
+ * one tick and then asks for a model that is not in the bundle.
+ */
+export const GENERIC_SLOT_STRIP = [31, 33];
 
 /**
  * The literal slots each read routine passes to `AssetDrawSlot`, in the order
@@ -900,15 +933,20 @@ export async function breakableSlotEntry(
   for (const pl of placements) {
     if (pl.container !== "generic") continue;
     // The literals this type's routine draws, always; plus the descriptor slot
-    // for the three types that read `obj+0x28C`. A type that is only ever
-    // handed a lifetime contributes nothing, which is what stops
-    // `+0x11C == 2` being exported as `char_adv03.bin`.
+    // -- or the whole strip -- for the seven types that read `obj+0x28C`. A
+    // type that is only ever handed a lifetime contributes nothing, which is
+    // what stops `+0x11C == 2` being exported as `char_adv03.bin`.
     for (const slot of GENERIC_STATIC_SLOTS[pl.type as number] ?? []) {
       if (!want.includes(slot)) want.push(slot);
     }
-    if (GENERIC_DESCRIPTOR_SLOT.includes(pl.type as number)
-        && !want.includes(pl.slot as number)) {
-      want.push(pl.slot as number);
+    if (GENERIC_DESCRIPTOR_SLOT.includes(pl.type as number)) {
+      // A strip type needs every frame of its strip, not just the base.
+      const span = GENERIC_SLOT_STRIP.includes(pl.type as number)
+        ? Math.max(0, (pl.roll as number) ?? 0) : 0;
+      for (let i = 0; i <= span; i++) {
+        const slot = (pl.slot as number) + i;
+        if (!want.includes(slot)) want.push(slot);
+      }
     }
   }
   // Class 0x44 selector 11 draws its descriptor's slot and nothing else, so

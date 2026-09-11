@@ -2758,16 +2758,99 @@ shape for the same failure one class over: every slot a placed prop will pass
 to `AssetDrawSlot` has a model in its own bundle. Mutating the fix away makes
 it fail on both rising doors.
 
-`[open]` **The descriptor-slot set is seven types and three are still out.**
+### The descriptor-slot set is seven types, and the last three are drawn now
+
 `PropDrawOnlyType31` (`FUN_0046A1C0`, 6 spawns), `PropDrawOnlyType53`
-(`FUN_0046EBD0`, 2) and `PropDrawOnlyType54` (`FUN_0046EDC0`, 2) all draw
-`obj+0x28C` too — ten more spawns of scenery missing for the reason the van
-was. All three are read and annotated; they are not carried because adding a
-type makes its model travel *and* draw, and 54's authored drift would be
-visibly static. `[open]` **The renderer poses all forty-four generic props
-`Ry · Rz · Rx`**, which is type 51's order and not the family's: 5, 12, 31, 33,
-53 and 54 all compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or
-more non-zero angles and so are posed wrongly today.
+(`FUN_0046EBD0`, 2) and `PropDrawOnlyType54` (`FUN_0046EDC0`, 2) draw
+`obj+0x28C` too, and were held out because adding a type makes its model travel
+*and* draw — a type whose own arm is unported would arrive wearing the right
+geometry and doing the wrong thing. Their arms are ported now, in
+`game/class41/draw_only.ts`, and what each of them is came out of reading them:
+
+* **Type 31 is an effect strip, not scenery.** It draws
+  `obj+0x28C + obj+0x2A0` and the cursor is stepped every frame and **wrapped**
+  at `obj+0x2A4`, which `PlaceGenericProp` case 0x1F fills from the placer's
+  `+0x6C` — the spawn descriptor's *third orientation word*. So that word is a
+  frame count and a roll at the same time, and both readings are real: stage
+  1's 0x26 is 39 frames of `eff_1.bin`, stage 3's 9 is ten of `eff_taki.bin`
+  (`taki` is a waterfall, and the model renders as a sheet of spray) and stage
+  4's 0x1D is thirty more. **None of that is in the decompilation.**
+  `MatrixStackPop` is marked no-return, so Ghidra ends the function body at
+  that `CALL` and the pseudocode shows a bare draw with nothing stepping the
+  cursor — `L37`, and `0x0046A334` is where the tail really is. Type 33 has the
+  identical tail with `ActorKill` where 31 has the wrap, so it plays its 60
+  frames of `eff_shop.bin` once and dies; that one is still `[open]` in the
+  port, which draws frame 0 and holds it.
+* **Type 53 is a car.** `char_adv04.bin[0]`, charred black, with wheels and a
+  shadow quad. Its head is an inline variant of `PropExpireByStepLifetime`
+  with the scene-1 sweep left out and `ActorKill` in place of `ActorDespawn`.
+  `[likely] a burning car`: the same hidden-tail trap covers a second half at
+  `0x0046EC6D` that draws **two more camera-facing animated strips** whenever
+  `g_evt_block_index` is 4 or 5 — `char_adv04.bin[79..93]` at 15 frames scaled
+  1.5/2.0/1.0, and `char_adv00.bin[1..8]` at 8 frames scaled 7.0 and pushed
+  10.0 out, both on a yaw computed from `g_camera_pose[0]`. Block 4 is where
+  one of its two spawns is placed, so that is live in the shipped game and
+  `[open]` in the port: a camera-facing billboard is a render primitive there
+  is nowhere to put yet, and its slots are kept out of the bundle rather than
+  travelling unused.
+* **Type 54 drifts, and the flag it drifts on is not a global.** Ghidra carries
+  `DAT_009C720C` as its own symbol, which hides that `0x009C7200` is
+  `g_script_flags` and this is **element 12**. Stage 5's script raises flag 12
+  in block 5 step 2 and every branch out of block 4 — where the prop is placed
+  — reaches block 5, so the drift is always taken: 5.0 in X, 1.5 up and -4.0
+  in Z a frame, pitching `0x300` and yawing `-0x400`, for the 301 frames that
+  read 0..300 and then `ActorKill`. The training scene's copy never sees flag
+  12 raised and so stands where it was put, which is the engine's behaviour and
+  not a gap. The same flag is the stage-2 boss's summon gate
+  (`Class14StateSummonRoundB` writes it) and is raised in seven of stage 6's
+  blocks: a flag number means whatever its scene means by it.
+
+### The renderer posed all fifty generic props in one order, and it was type 51's
+
+`render/breakables.ts` composed `Ry · Rz · Rx` for every prop in the family.
+That is `PropDrawOnlyType51`'s order and **only** its order — twenty-two of the
+fifty routines compose `Rz · Ry · Rx`, five `Ry · Rz · Rx`, twelve rotate about
+Y alone, one about Z alone, one `Rz · Rx` with no yaw, six apply none of the
+three words and three are `[open]`. It reads `GENERIC_POSE_ORDER` now, which
+`tools/verify_prop_pose.py` derives from the EXE per type, matching each
+`MatrixRotate*` to the field the instruction before it pushed.
+
+**Matching the argument and not just the axis is what makes it readable.**
+`PropUpdateType19` rotates Y by the literal `0xC000`, then Z, then Y again,
+then X; counted by axis that is a fourth distinct order, and read with its
+arguments it is the same `Rz · Ry · Rx` as its neighbours plus a constant
+quarter turn. It also poses from `obj+0x64/68/6C` rather than
+`obj+0x1CC/1D0/1D4`, because its object is an enemy — `L3` again.
+
+The count that went with the old `[open]` note was fifteen, and it was the
+wrong measure twice. **The order only matters when yaw and roll are both
+non-zero**: `Rx` is last in every one of these compositions, so all an order
+can disagree about is whether `Ry` or `Rz` comes first, and with either angle
+at zero the two matrices are equal — which is why type 5's four stage-2 spawns,
+a pitch and a yaw with no roll, were never misplaced at all. And it was counted
+over six stages rather than the twelve bundles. What the check measures is
+**20 spawns posed differently, four of them by more than a degree**, and all
+four are `PropDrawOnlyType12` — stage 4's blocks 4, 7, 12 and 13, the worst by
+19.65°, a handcart tipped onto the wrong corner. The other sixteen move by
+fifths of a degree, because for types 31 and 33 the "roll" is a strip length.
+
+`tools/verify_prop_pose.py` is the check, and it holds three things the tables
+could not hold on their own: the pose order per type, against the routines; the
+strip set and the descriptor-slot set, against the routines, in **both** the
+port's copy and the exporter's — which is the check the van needed and the one
+`verify_prop_slots.py` cannot have, since it reads the same table it would be
+checking; and that `render/breakables.ts` composes a pose in exactly one place.
+The code the bug was in fails all four: two `rotateZ(p.roll)` sites, two
+`rotateY(p.yaw)`, two `rotateX(p.pitch)`, and no table.
+
+`[open]` **Five more types take `obj+0x28C` into a draw and are in neither
+table**: 43 (seven spawns, all in stage 3, which is the stage reported as
+carrying no scenery at all), 67 (three, training only) and the Original Mode
+collectibles 70, 71 and 72. Whether the descriptor names their model depends on
+whether their arm of `PlaceGenericProp`'s switch overwrites that field, and
+four of the seventeen literal writes to `obj+0x28C` in that routine have not
+been mapped to a type. The check lists them every run rather than asserting
+either way.
 
 ## Every opcode, and what the player does with it
 

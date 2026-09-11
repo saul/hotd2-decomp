@@ -1736,7 +1736,12 @@ investigation ruled out.
   applies only a root's `y` on the rule that the horizontal part is already
   world movement — and for a clip whose root never changes the per-frame delta
   is zero. Fixing it changes the root-motion model for **every skinned actor**
-  and wants `SkeletonPoseRootFrame` (`FUN_00410C50`) read first.
+  and wants **both** halves read first: `SkeletonPoseRootFrame`
+  (`FUN_00410920`), which places the root bone at the frame's translation,
+  and `SkeletonApplyRootMotion` (`FUN_00410C50`), which turns the
+  frame-to-frame delta into world movement. Which is relative to which is
+  the `[open]`. This entry first paired the first name with the second
+  address, which `verify_port` caught.
   `RescueTargetFreedState` never ends, so a rescued target stays in the pool,
   harmless today. And **nothing counts the spawns a block asks for against the
   actors it gets** — that one comparison would have found this and both bosses

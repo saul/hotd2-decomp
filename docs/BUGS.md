@@ -2171,6 +2171,45 @@ investigation ruled out.
   bit, so **a captor killed mid-drag plays the wrong death clip**; that is a
   pre-existing gap the reading merely exposed.
 
+- `[fixed]` **Stage 3's seven breakables were placed as inert generics.** The
+  `[open]` lead from the prop-slot work, and the other side of the finding that
+  stage 3's bundle carries no scenery: what it was missing was not scenery but
+  a **breakable the port drew and could not break**.
+
+  No format change was owed — `g_prop_kind_params` (`0x00593DB8`) was already
+  exported by both halves. Two of its rows decide everything about the seven.
+  **Four are a wooden barrel** which takes the crack arm because its effect id
+  is 0, swaps model and needs a second shot; **three have no body model at
+  all**, draw a lifted piece, and burst in one shot because a non-zero effect
+  id skips the crack.
+
+  `[proved]` **The descriptor's third orientation word is the prop kind here**
+  — a *third* meaning for one word in this one family, after a slot-strip
+  length for two types and a roll for most. The arm then **zeroes the
+  descriptor's pitch and roll outright**, so only its yaw survives until the
+  tumble takes over.
+
+  The check still refuses this type **for the right reason rather than by
+  luck**: type 43 writes the draw-slot field from a *computed* register — a
+  two-case switch made branchless — which is exactly what fooled the first
+  detector, so the check asks where the register came from. Prop draw slots
+  checked go from 630 to 700.
+
+  **The proof is that they break, not that they draw.** A new harness drives
+  the real walker over the exported stage with the breakable table wired and
+  applies a shot the way the engine's shot processing does: kind 3 takes two
+  shots, swaps slot and pays 10 points. `tools/lifetime.mjs` does **not** wire
+  that table, so its silence about props had never said anything. With the type
+  removed the same harness sees none and has nothing to shoot.
+
+- `[open]` **The browser's props panel says stage 3 has no breakables placed,
+  and the headless harness places two from the same bundle.** Found while
+  proving the above. **The port is the half that is right** — two harnesses and
+  the port test agree with each other — so this is in the panel or in the
+  browser harness, not in the transcription. It matters because that panel is
+  what a person looks at to decide whether something is placed, and it is
+  currently able to say "none" about a prop that is there.
+
 - `[open]` **Nothing has ever executed stage 2's blocks 1-10 or 21-32.** Not a
   defect in itself, and recorded because it is now live code with no coverage.
   The rescue target its branch variable depends on had no skeleton until

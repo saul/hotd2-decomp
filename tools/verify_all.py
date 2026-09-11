@@ -114,6 +114,14 @@ CHECKS: list[Check] = [
     Check("test:camera", "web", ["npm", "run", "--silent", "test:camera"],
           "that a camera path seats where the exe's own evaluation puts it",
           NEEDS_BUNDLE),
+    Check("flag_gates", "web",
+          ["node", "tools/run_ts.mjs", "tools/flag_gates.ts"],
+          "that every `wait_script_flag` gate no `set_script_flag` on the "
+          "*route* to it can open has the actor that opens it placed on that "
+          "same route -- the only check that reads a gate per entry block "
+          "rather than per bundle, which is the difference between stage 3's "
+          "block 2 on the entry-0 route and on the entry-7 one",
+          NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "

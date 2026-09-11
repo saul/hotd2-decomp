@@ -850,6 +850,26 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **A `wait_script_flag` gate is held per *route*, not per stage.** `[proved]`
+  — `StoryModeSwitchUpdate` (`FUN_00474F30`), the class-0x44 selector-17
+  object, raises `g_script_flags[0x15]` at `0x00474FA6` while it stands in
+  scene 2 block 2 unthrown, and that write is **above** the routine's
+  `CMP g_GameMode, 1` at `0x00474FB4` — so it happens in Arcade as well as in
+  Original Mode, which is the opposite of what the rest of the routine does.
+
+  Stage 3's block 2 step 3 is `wait_script_flag 0x15`, and the stage's own
+  `set_script_flag 0x15` is in block 1 step 5 — a block only the entry-0 route
+  reaches. On the entry-7 route (7 → 8 → 2) the switch spawned by block 7 step
+  8 is the only thing that opens it, and with that write unported the stage
+  parked on the instruction for good. The port now runs the whole head of the
+  routine, above the mode gate, in `StoryModeSwitchPoolUpdate`.
+
+  The player learned this because `tools/playthrough.mjs` grew `--entry`:
+  before that it could only run each stage's first entry block, and stage 3's
+  block 2 had never been executed by anything. `tools/flag_gates.ts` now walks
+  `entries` → `route.next` and names every gate no `set_script_flag` on the
+  route to it can open — the gates an actor holds, one routine each.
+
 - **Arcade is `g_GameMode` 0 and 2 is Training, which the bundle had the wrong
   way round for as long as it carried the field.** `[proved]` — the values are
   the title menu's row order, and the menu names its own rows:

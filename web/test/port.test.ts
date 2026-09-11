@@ -10976,6 +10976,38 @@ console.log("\na stashed path is played by a hook that steps first:");
         w2.cam?.frame === 10, `frame ${w2.cam?.frame}`);
   check("...and with the action retired",
         w2.cam?.done === true, `done ${w2.cam?.done}`);
+
+  // A target that is not a whole number has to throw, because the silent
+  // failure is total rather than partial: `arrived()` compares
+  // `w.block === block`, so an object equals nothing, `maxOps` falls back to
+  // 500,000, and the "seek" replays the **entire script** and returns false.
+  // `tools/props43.mjs` was `seekTo(walker, { block, step }, rng)` for exactly
+  // that reason — the `.mjs` harnesses are outside `tsc`, so nothing but this
+  // stands between a mis-shaped call and a harness that reports the address it
+  // asked for as the address it reached. The messages name the argument.
+  const refuses = (label: string, call: () => unknown): void => {
+    let msg = "did not throw";
+    try {
+      call();
+    } catch (e) {
+      msg = e instanceof TypeError ? e.message : `threw ${String(e)}`;
+    }
+    check(`seekTo refuses ${label}`, msg.startsWith("seekTo: "), msg);
+  };
+  const w3 = new Walker(script, host);
+  // The exact call `props43.mjs` made: an options object where the block goes.
+  refuses("an options object for `block`",
+          () => seekTo(w3, { block: 0, step: 0 } as unknown as number, 0));
+  refuses("a string for `step`",
+          () => seekTo(w3, 0, "0" as unknown as number));
+  refuses("a fractional `opIndex`", () => seekTo(w3, 0, 0, 1.5));
+  refuses("a NaN `block`", () => seekTo(w3, Number.NaN, 0));
+  refuses("an infinite `maxOps`",
+          () => seekTo(w3, 0, 0, 0, Number.POSITIVE_INFINITY));
+  refuses("a fractional `entryBlock`",
+          () => seekTo(w3, 0, 0, 0, 500000, 0.5));
+  check("...and still takes the call it is meant to take",
+        seekTo(w3, 0, 0, 3) === true, `${w3.block}/${w3.step}/${w3.opIndex}`);
 }
 
 // The character's size, and the two things it decides.

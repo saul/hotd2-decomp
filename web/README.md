@@ -370,6 +370,24 @@ fails it; so does one that 200s and decodes to silence; so does a sound the page
 never asked for, which is what the missing gunshot was. Like `bundle-flow` it
 needs a real browser and is not in `verify_all`.
 
+`npm run props-panel -- --headless` reads the **Props panel** of two deep
+links and asserts that what is written in it is what the port holds. It is the
+only check that reads that panel, and it exists because the panel's own words
+were mistaken for a bug: `?stage=3&mode=play&block=0&step=3` shows `props 0 /
+0` and `breakables: none placed`, and all of that is true. `props` is
+`render/props.ts`, the scripted scenery, and stage 3's bundle has no hinges and
+no statics; the class-0x41 props of that step are placed by `spawn_placed` at
+ops 10 and 11, **behind** `wait_enemies_alive <= 0` at op 8, so there is a room
+to clear first. Seek past both placers with `&op=12` and they are still not
+built until the transport runs a frame, because `PropContainerPlacerUpdate` is
+a class handler and a paused player never calls `GameUpdate`. The check pins
+all three, at both addresses, with the driven clock (`?drive=1`) so that every
+read is preceded by an assertion that the frame count moved. `L15`: a green
+build is not a working page, and `verify_player_dom.py` can say an id is
+rendered but not what is written beside it. Needs a browser, so like the two
+above it is not in `verify_all`; `npm run props43` is the headless half of the
+same question and is.
+
 ---
 
 ## Not built yet

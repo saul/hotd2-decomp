@@ -35,6 +35,8 @@
     "cam-cues": "node tools/run_test.mjs tools/cam_cues.mjs",
     "leaps": "node tools/run_test.mjs tools/leaps.mjs",
     "lifetime": "node tools/run_test.mjs tools/lifetime.mjs",
+    "props43": "node tools/run_test.mjs tools/props43.mjs",
+    "props-panel": "node tools/props_panel.mjs",
     "test:texfilter": "node tools/run_test.mjs test/texfilter.test.ts",
     "lookat": "node tools/lookat_live.mjs",
     "cam-jump": "node tools/cam_jump.mjs",

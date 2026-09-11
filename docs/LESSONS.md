@@ -553,3 +553,57 @@ family — `git checkout <ref> -- <path>` writing the index, a stash that
 conflicts — with the same moral one step further out: **inspect the diff of
 every file you restored, not just of every file you edited.** A restore is an
 edit whose content you did not choose.
+
+**L44 — A harness that prints its arguments as its result cannot report that
+it failed.** `tools/props43.mjs` was written as
+`seekTo(walker, { block: Number(block), step: Number(step) }, rng)` against a
+positional `seekTo(w, block, step, opIndex, maxOps, entryBlock)`. `arrived()`
+compares `w.block === block`, an object equals nothing, `maxOps` fell back to
+500,000 — so it never seeked at all: it replayed **the whole of stage 3** to its
+end at block 11 and returned `false`, which the call site discarded. It then
+printed `stage 3, seeked to block 0 step 3` from its own `argv` and reported two
+props there. The props are at block 0 step 3 **op 10**, behind
+`wait_enemies_alive <= 0` at op 8 — a room the player has to clear — and the
+browser showing `breakables: none placed` at op 0 was right the whole time. A
+session went looking for a bug in the player's deep links on the strength of
+that line.
+
+Three things had to line up, and each is worth its own guard:
+
+* **`.mjs` harnesses are outside `tsc`.** `allowJs` is off, so
+  `include: ["tools"]` sees only the `.ts` files there, and
+  `--experimental-strip-types` and esbuild check nothing. The 30-odd `.mjs`
+  drivers call `src/` freely with no signature check at all, while
+  `verify_all`'s `tsc` row says "`test/` and `tools/` included" — for those
+  files it is not true. Turning `checkJs` on reports 764 errors, so closing
+  that gap is a piece of work and not a line edit.
+* **A silent degradation with a total effect.** The fix is in `seek.ts`: a
+  target that is not a whole number throws and names the argument. Same trade
+  as `L15`'s `querySelector(...) as T` — fail at the call, not three
+  conclusions later.
+* **Print the state, never the request.** `arrived` is returned for exactly
+  this reason and nine of the ten call sites test it. Report
+  `w.block/w.step/w.opIndex`, and a seek that went somewhere else says so.
+
+A second thing the harness could not have seen, which is why it is not only a
+typo: **a walker-only harness runs past every `wait_enemies_alive` gate.**
+`spawn_obj` pushes descriptors and nothing more — `SpawnScriptedCharacters` is
+called from `app/systems.ts`'s `syncCharacterSpawns`, by the character layer —
+so with no renderer no enemy enters the pool, `g_enemies_alive` never leaves 0,
+and the 434 shipped gates that read it all open on the first frame. A harness
+that means to honour one has to stand in for that layer the way
+`tools/cam_cues.mjs` does. Silence from one that does not is not evidence about
+the room.
+
+And the measurement that settled it is worth copying: drive the page with
+`?drive=1` and assert the **frame count moved** before reading anything off it.
+Watching a panel while the run has not advanced is not a negative result, it is
+no result — `L20` pointed at your own instrument.
+
+There is a smaller version of the same fault in the panel it was all about.
+`render/breakables.ts` said `none placed` both for "the script places none
+here" and for "the placers are in the pool and the transport is paused, so
+`PropContainerPlacerUpdate` has not run" — `spawn_placed` makes a *placer*, and
+the constructor that makes the prop is a class handler that needs a frame of
+`GameUpdate`. **One sentence for two situations is a readout that cannot be
+acted on**, and it is what made a correct page read as a broken one.

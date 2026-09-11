@@ -21,15 +21,15 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 43572 | 161 | engine |
 | `hod2lib/` | 16039 | 34 | engine |
-| `render/` | 8536 | 30 | render |
-| `app/` | 7404 | 29 | app |
-| `script/` | 4144 | 25 | engine |
+| `render/` | 8559 | 30 | render |
+| `app/` | 7418 | 29 | app |
+| `script/` | 4179 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
 | `bundle/` | 2146 | 11 | engine |
 | `core/` | 910 | 9 | engine |
 | `audio/` | 363 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **86557** | **327** | |
+| **total** | **86629** | **327** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -112,6 +112,7 @@ nothing exits 3 and is never counted as green.
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
 | `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one -- and the only check that asks the same question of an ACTOR, for the one class-0x30 state whose sole exit is a script flag a civilian's own stream raises | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
+| `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
 | `verify_prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type, matched to the field each `MatrixRotate*` is handed. `render/breakables.ts` composed one order for all fifty, and it was type 51's alone: twenty shipped spawns came out somewhere else, four of them by more than a degree and the worst by 19.65 | game-dir |
@@ -128,7 +129,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-13 of them need the installed game and 7 need an exported
+13 of them need the installed game and 8 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

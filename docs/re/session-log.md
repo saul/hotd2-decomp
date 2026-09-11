@@ -17069,3 +17069,84 @@ the `entries` tables now plays through**. Full
 suite on the merged tree: **36 passed, 0 failed, 0 skipped**, and `HEAD`
 typechecks from a bare `git archive` with nothing of this worktree in it but
 `node_modules`.
+
+## 2026-09-11 — the props panel was right, and the harness had never seeked
+
+Report: `?stage=3&mode=play&block=0&step=3` shows `props 0 / 0` and
+`breakables: none placed`, while
+`tools/run_test.mjs tools/props43.mjs 3 0 3 4` prints `2 type-43 props seen`
+and is green. Two hypotheses to separate by measurement — a URL seek that drops
+props (which would make every deep link into a prop bug misleading), or a wrong
+panel. **Neither. The page was right on every line.** `[proved]`
+
+Three separate facts, and each of them reads as "the props are gone":
+
+1. **`props 0 / 0` is a different subject from `breakables`.** It is
+   `render/props.ts` — the scripted scenery and its hinges. Stage 3's bundle
+   carries `props.hinges: 0` and `props.statics: 0`, so the row is correct and
+   has nothing to do with class 0x41. Two rows, two layers, one word.
+2. **The address in the report is before the placer.** Block 0 step 3's op list
+   is `spawn_obj` (two class-0x20 and two class-0x30) at ops 1–2,
+   `wait_camera_path_frame 0` at op 7, `wait_enemies_alive <= 0` at op 8, then
+   `spawn_placed` at ops 10 and 11 — `0xD6C` and `0xD94`, the two type-43
+   props, and `0xDBC`, a falling container. `seekTo(…, 0, 3, 0)` lands *before*
+   op 0, so the props are two kills away. Driven with `?drive=1`, the page sits
+   at `0/3/8` for 240 frames, which is the gate.
+3. **A placer is not a prop.** Seek to `&op=12`, past both `spawn_placed`
+   instructions, and `breakables` *still* says none placed while the transport
+   is stopped: `spawn_placed` runs `SpawnPropContainers`, which puts a
+   class-0x41 placer in the object pool, and `PropContainerPlacerUpdate`
+   (`FUN_00461CD0`) is the class handler that calls the constructor and then
+   `ActorKill`s itself. A paused player hands `world.update` a `STOPPED_TICK`,
+   so `GameUpdate` never runs. Press play for **one** frame and the row becomes
+   `3 up (3 drawn)`. So a deep link drops nothing.
+
+And the harness that contradicted all of it was wrong twice:
+
+* `seekTo(walker, { block: Number(block), step: Number(step) }, rng)` against a
+  positional `seekTo(w, block, step, opIndex, maxOps, entryBlock)`. It never
+  seeked: `w.block === {object}` is never true, `maxOps` fell back to 500,000,
+  and the replay ran the whole of stage 3 to `finished` at block 11 step 3. The
+  returned `false` was discarded and the printed address was its own `argv`.
+  Nine of the other ten `seekTo` call sites in the tree test the return value;
+  this was the tenth. Written up as **`L44`**.
+* Even called correctly, a walker-only harness cannot see the gate. `spawn_obj`
+  only pushes descriptors — `SpawnScriptedCharacters` is called by the
+  character layer, from `app/systems.ts`'s `syncCharacterSpawns` — so with no
+  renderer no class-0x30 actor enters the pool, `g_enemies_alive` stays 0, and
+  `wait_enemies_alive` opens on the first frame. Measured: the pool after the
+  seek holds only the class 0x60/0x63 cards. A harness that means to honour one
+  of the 434 shipped gates that read that counter has to stand in for the
+  character layer the way `tools/cam_cues.mjs` does.
+
+### What I got wrong on the way
+
+* **I ran `verify_all.py` with a `cd` to the shared checkout and read the
+  result as mine.** It reported 24 passed with no `props43` row, which is
+  exactly what a tree without my change looks like — and I nearly filed that as
+  "the CHECKS row is not being picked up". `L36`, one step over: the earlier
+  lesson is about *writing* outside the worktree, this is about *reading*
+  outside it and believing the answer. The tell was that `--list` from the
+  worktree showed the row and the run did not.
+* **I stopped at the pause and had the wrong cause for a while.** `playing` is
+  false on load, `gameStopped` is `mode === "play" && !playing`, and
+  `GameUpdate` is behind `if (t.frozen || t.dt <= 0) return` — which is a true
+  and sufficient-looking explanation for `none placed`. It is only half of it:
+  pressing Space and driving 240 frames left the row unchanged, because the
+  walker was parked on the enemy gate. Two causes stacked, and the first one
+  found accounts for the symptom well enough to stop looking.
+* **`checkJs` over `tools/` is not a line edit.** The hole `L44` came through
+  is that `.mjs` harnesses are outside `tsc`; turning `allowJs`/`checkJs` on
+  reports **764** errors, most of them `implicitly any`. Left `[open]` as a
+  piece of work rather than done badly, with the `seekTo` guard closing the one
+  failure mode that mattered.
+
+### Next actions
+
+1. `[open]` — bring `web/tools/*.mjs` inside `tsc`. 764 errors under
+   `checkJs`, and `verify_all`'s `tsc` row claims those files are covered.
+   Until then a harness can call `src/` with any shape of argument at all.
+2. `[open]` — the 434 `wait_enemies_alive` gates are invisible to every
+   walker-only harness in `web/tools/`. `props43` now says so in its own
+   output, and `cam_cues.mjs` shows the shape of the fix, but nothing checks
+   that a harness which crosses one has stood in for the character layer.

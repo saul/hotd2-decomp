@@ -131,6 +131,15 @@ CHECKS: list[Check] = [
           "enemy the character layer can build, and two have no character "
           "type at all",
           NEEDS_BUNDLE),
+    Check("props43", "web", ["npm", "run", "--silent", "props43"],
+          "where in a real script a class-0x41 prop is actually placed, and "
+          "that it takes a frame of `GameUpdate` to appear -- the only check "
+          "that separates `spawn_placed` putting a *placer* in the pool from "
+          "the constructor that builds the prop, which is the difference "
+          "between a room the player has not cleared and a placement the "
+          "player dropped. It is also the only harness that reports the "
+          "address the walker reached rather than the one it asked for",
+          NEEDS_BUNDLE),
     Check("verify_prop_slots", ".",
           ["python3", "tools/verify_prop_slots.py"],
           "that every asset slot a placed class-0x41 or class-0x44 prop will "

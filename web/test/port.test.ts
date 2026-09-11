@@ -44,7 +44,15 @@ import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
   type RainRules,
 } from "../src/game/effects/rain";
-import { NULL_HOST, type ShotPick } from "../src/game/host";
+import { NULL_HOST, type GameHost, type ShotPick } from "../src/game/host";
+import { FishUpdate } from "../src/game/class51";
+import { FishFlag, FishState, type FishTail } from "../src/game/class51/state";
+import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
+import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
+import { OwlStateDiveAtCamera, OwlUpdateAndResolveShot }
+  from "../src/game/class43";
+import { OwlDiveKind, OwlState, type OwlTail }
+  from "../src/game/class43/state";
 import { ActorShotFeedback } from "../src/game/combat/feedback";
 import { BLOOD_FIRST_SLOT, BLOOD_LAST_CEL, SpawnBloodSpray }
   from "../src/game/effects/blood";
@@ -102,7 +110,7 @@ import {
   UNCOUNTED_CHAR_TYPE, UNCOUNTED_INITIAL_STATE,
 } from "../src/game/combat/counts";
 import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
-import { ActorIsEnemy, DeadSweep, g_class_handlers, registerClass }
+import { ActorIsEnemy, type ClassFrame, DeadSweep, ENEMY_CLASSES, g_class_handlers, registerClass }
   from "../src/game/registry";
 import { PORTED_CLASSES } from "../src/game/classes";
 import {
@@ -8213,6 +8221,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
   // produced three times.
   const want: [SpawnClass, string][] = [
     [SpawnClass.Civilian, "0x10 civilian"],
+    [SpawnClass.Frog, "0x11 frog"],
     [SpawnClass.Boss4, "0x19 stage-4 boss"],
     [SpawnClass.Boss2, "0x14 stage-2 boss"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
@@ -8223,7 +8232,9 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Thrower, "0x31 thrower"],
     [SpawnClass.ScriptedScenery, "0x33 scripted scenery / the carrier"],
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
+    [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
+    [SpawnClass.WaterEnemy, "0x51 fish"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
     [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
     [SpawnClass.ChapterCard, "0x60 chapter card"],
@@ -8337,21 +8348,18 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
   const rng = new Rng(3);
   scene(0, rng);
 
-  // A class with no `onDeadSweep` at all: the generic enemy release. Class
-  // 0x51 has no module, so this is the fallback doing the only thing that can
-  // honestly be said about an unread class.
-  const f = ActorSpawn(0x2200, SpawnClass.WaterEnemy, 0, "water enemy");
-  f.visible = true;
-  G.g_enemies_alive = 1;
-  G.g_enemies_present = 1;
-  ActorDeadSweep(f, DeadSweep.Unloaded);
-  check("an undrawn unported enemy keeps both counts",
-        G.g_enemies_alive === 1 && G.g_enemies_present === 1,
-        `${G.g_enemies_alive}/${G.g_enemies_present}`);
-  ActorDeadSweep(f, DeadSweep.Dead);
-  check("...and a dead one leaves both",
-        G.g_enemies_alive === 0 && G.g_enemies_present === 0,
-        `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  // The generic enemy release in `despawn.ts` — the fallback for a class with
+  // no `onDeadSweep`. It used to be exercised through class 0x51 and then
+  // through 0x43; **every class in `ENEMY_CLASSES` now has a module**, and
+  // every one of those modules has the hook, so the fallback's enemy branch is
+  // no longer reachable from a ported class. That is the assertion now: if a
+  // future enemy class is added to the set without a hook, this fails and says
+  // so, which is the thing the old stand-in was really guarding.
+  for (const cls of ENEMY_CLASSES) {
+    check(`0x${cls.toString(16)} is an enemy and answers for its own teardown`,
+          typeof g_class_handlers[cls as SpawnClass]?.onDeadSweep === "function",
+          `${SpawnClass[cls as SpawnClass]}`);
+  }
 
   // ...and a non-enemy is not counted either way.
   const c = ActorSpawn(0x2300, SpawnClass.ScriptedHumanoid, 0, "humanoid");
@@ -11834,6 +11842,351 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
     check("`ResetSceneOnEnter` zeroes `g_weapon_loop_holders`, so a stage does "
           + "not inherit the last one's holders",
           G.g_weapon_loop_holders === 0, String(G.g_weapon_loop_holders));
+  }
+}
+
+// -- 30. the three flying and swimming enemies -------------------------------
+//
+// Class 0x11, 0x43 and 0x51, each of which had no module until now. Every
+// assertion here is one that fails if a specific reading is dropped.
+
+{
+  // A host whose `viewPoint` is the identity on x and y and negates z, so the
+  // engine's `-z is in front` lands somewhere a test can name. `NULL_HOST`
+  // answers nothing, which would put every camera-space target at the origin.
+  const HOST: GameHost = {
+    ...NULL_HOST,
+    viewPoint: (x, y, z, out) => {
+      out.x = EYE.x + x;
+      out.y = EYE.y + y;
+      out.z = EYE.z - z;
+    },
+  };
+  const frame = (rng: Rng, events?: Events): ClassFrame =>
+    ({ eye: EYE, dt: 1 / 60, rng, host: HOST, events });
+
+  // -- class 0x51, the fish ------------------------------------------------
+  {
+    const rng = new Rng(9);
+    scene(0, rng);
+    const header = ActorSpawn(0x9000, SpawnClass.WaterEnemy, -1, "fish", {
+      class51: {
+        water_level: -12.5, speed_x: -12.5, speed_z: 0, bob_amplitude: 0,
+        entry_mode: 0, subtype: 6, rise_frames: 0, bob_cycles: 0,
+        lunge_frames: 0,
+      },
+    }, rng);
+    check("a class-0x51 group header is not a fish: it sets the water level",
+          G.g_water_level === -12.5, `${G.g_water_level}`);
+    check("...and despawns without joining either enemy counter",
+          header.despawned && G.g_enemies_alive === 0
+          && G.g_enemies_present === 0,
+          `${header.despawned} ${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    const rng = new Rng(11);
+    scene(0, rng);
+    G.g_water_level = 0;
+    const make = (at: number) => ActorSpawn(at, SpawnClass.WaterEnemy, -1,
+      "fish", {
+        pos: vec3(0, -2, 40),
+        class51: {
+          water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+          entry_mode: 1, subtype: 0, rise_frames: 3, bob_cycles: 0,
+          lunge_frames: 40,
+        },
+      }, rng);
+    const a = make(0x9100);
+    const t = () => (a as { fish: FishTail }).fish;
+    check("a placed fish joins both enemy counters",
+          G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    check("...and `entry_mode` 1 starts it invisible, to fade in",
+          t().alpha === 0 && t().state === FishState.Rise, `${t().alpha}`);
+    check("...aimed at the camera, not along its own descriptor yaw",
+          t().vx === 0 && Math.abs(t().vz + 0.3) < 1e-6,
+          `${t().vx} ${t().vz}`);
+
+    // `rise_frames` is 3, so the fourth update is the one that hands over.
+    for (let i = 0; i < 3; i += 1) FishUpdate(a, frame(rng));
+    check("the rise lasts exactly `tail+0x10` frames",
+          t().state === FishState.Bob && t().alpha === 1,
+          `${FishState[t().state]} ${t().alpha}`);
+
+    // `bob_cycles` is 0 and the counter starts at 0, so the first bob frame
+    // already satisfies the test and it goes for a slot.
+    FishUpdate(a, frame(rng));
+    check("...and with no bob cycles owed it claims a slot at once",
+          t().state === FishState.Lunge && t().slot >= 0
+          && G.g_water_attack_slots[t().slot] === 1,
+          `${FishState[t().state]} slot ${t().slot}`);
+    check("...taking the permit its slot names",
+          a.attackPermit === 0, `${a.attackPermit}`);
+
+    // Four is the whole supply.
+    const rest = [make(0x9101), make(0x9102), make(0x9103), make(0x9104)];
+    for (const f of rest) {
+      const ft = (f as { fish: FishTail }).fish;
+      ft.state = FishState.Bob;
+      ft.bobCycles = 0;
+      ft.bobCycle = 0;
+      FishUpdate(f, frame(rng));
+    }
+    check("only four fish can be in the air at once",
+          G.g_water_attack_slots.filter((v) => v === 1).length === 4,
+          `${G.g_water_attack_slots}`);
+    const last = (rest[3] as { fish: FishTail }).fish;
+    check("...and the fifth retires from both counters and swims off",
+          last.swimAway && last.slot === -1,
+          `${last.swimAway} slot ${last.slot}`);
+  }
+
+  {
+    // Shot above the water and shot below it are different deaths.
+    const rng = new Rng(13);
+    scene(0, rng);
+    G.g_water_level = -10;
+    const mk = (at: number, submerged: boolean) => {
+      const f = ActorSpawn(at, SpawnClass.WaterEnemy, -1, "fish", {
+        pos: vec3(0, submerged ? -20 : 0, 30),
+        class51: {
+          water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+          entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+          lunge_frames: 40,
+        },
+      }, rng);
+      const ft = (f as { fish: FishTail }).fish;
+      if (submerged) ft.flags |= FishFlag.Submerged;
+      f.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      return { f, ft };
+    };
+    const above = mk(0x9200, false);
+    const below = mk(0x9201, true);
+    const score = G.g_player_score[0];
+    FishUpdate(above.f, frame(rng));
+    check("a fish above the water is flung when it is shot",
+          above.ft.state === FishState.Flung,
+          FishState[above.ft.state]);
+    FishUpdate(below.f, frame(rng));
+    check("...and one below it surfaces and sinks",
+          below.ft.state === FishState.Sink
+          // The state runs in the same update as the shot, and it takes its
+          // first 0.005 off the sinking centre before this line is reached.
+          && Math.abs(below.ft.sinkY - (G.g_water_level + 0.095)) < 1e-6,
+          `${FishState[below.ft.state]} sinkY=${below.ft.sinkY}`);
+    check("...each paying 80", G.g_player_score[0] - score === 160,
+          `${G.g_player_score[0] - score}`);
+  }
+
+  // -- class 0x11, the frog ------------------------------------------------
+  {
+    const rng = new Rng(17);
+    scene(0, rng);
+    const a = ActorSpawn(0x9300, SpawnClass.Frog, 0x1b, "frog", {
+      pos: vec3(50, -8, -432),
+      class11: {
+        char_type: 0x1b, motion: 0x141, cam_path: 41, cam_frame: 55,
+        wedge: 0,
+        commands: [{ op: 3, args: [0x3800] }, { op: 7, args: [] }],
+      },
+    }, rng);
+    const t = () => (a as { frog: FrogTail }).frog;
+    check("a frog joins both enemy counters",
+          G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    check("...snapped to the ground plane, which is a constant and not a query",
+          a.pos.y === G.g_camera_fixed_eye_y, `${a.pos.y}`);
+    // atan2(320, 640.2) is 26.55 degrees; less 0x200 that is 23.7, which is
+    // 0x10E2 in BAMS. A wedge read straight off a zero tail would be 0.
+    check("...and its wedge is the half-FOV less 0x200 when the tail says 0",
+          t().wedge === 0x10e2, `0x${t().wedge.toString(16)}`);
+
+    G.g_active_cam_path = 40;
+    G.g_cam_path_frame = 999;
+    FrogUpdate(a, frame(rng));
+    check("state 0 holds while the camera is on a different path",
+          t().state === FrogState.WaitForCamera, FrogState[t().state]);
+    G.g_active_cam_path = 41;
+    FrogUpdate(a, frame(rng));
+    FrogUpdate(a, frame(rng));
+    check("...and the cue takes the next command, which is the absolute turn",
+          t().state === FrogState.HopToHeading && t().cursor === 1,
+          `${FrogState[t().state]} cursor ${t().cursor}`);
+  }
+
+  {
+    const rng = new Rng(19);
+    scene(0, rng);
+    const a = ActorSpawn(0x9301, SpawnClass.Frog, 0x1b, "frog", {
+      pos: vec3(0, 0, 40),
+      class11: {
+        char_type: 0x1b, motion: 0x141, cam_path: 41, cam_frame: 0, wedge: 0,
+        commands: [],
+      },
+    }, rng);
+    const t = () => (a as { frog: FrogTail }).frog;
+    const score = G.g_player_score[0];
+    a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    FrogUpdate(a, frame(rng));
+    check("one shot kills a frog -- there is no hit-point arithmetic",
+          t().state === FrogState.Die && a.hp === 0,
+          `${FrogState[t().state]} hp ${a.hp}`);
+    check("...paying 80", G.g_player_score[0] - score === 80,
+          `${G.g_player_score[0] - score}`);
+    check("...and the alive count comes down while the present count does not",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 1,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    check("...with the corpse model on bone 1 and bones 2 and 3 blanked",
+          a.boneSlot["1"] === 0xb91 && a.boneSlot["2"] === 0
+          && a.boneSlot["3"] === 0,
+          JSON.stringify(a.boneSlot));
+  }
+
+  {
+    // Inside fifty units the frog takes a permit and leaps; if the permit is
+    // already out it idles instead, which is `L9` made a test.
+    const rng = new Rng(23);
+    scene(0, rng);
+    const a = ActorSpawn(0x9302, SpawnClass.Frog, 0x1b, "frog", {
+      pos: vec3(0, 0, 10),
+      class11: {
+        char_type: 0x1b, motion: 0x141, cam_path: 41, cam_frame: 0, wedge: 0,
+        commands: [],
+      },
+    }, rng);
+    const t = () => (a as { frog: FrogTail }).frog;
+    t().camDist = 10;
+    t().flags |= FrogFlag.WantCommand;
+    FrogReadNextScriptCommand(a, frame(rng));
+    check("a frog inside fifty units leaps, and takes a permit to do it",
+          t().state === FrogState.LeapAtPlayer && a.attackPermit === 0
+          && G.g_attack_permits[0] === a.at,
+          `${FrogState[t().state]} permit ${a.attackPermit}`);
+
+    const b = ActorSpawn(0x9303, SpawnClass.Frog, 0x1b, "frog", {
+      pos: vec3(0, 0, 10),
+      class11: {
+        char_type: 0x1b, motion: 0x141, cam_path: 41, cam_frame: 0, wedge: 0,
+        commands: [],
+      },
+    }, rng);
+    const bt = () => (b as { frog: FrogTail }).frog;
+    bt().camDist = 10;
+    bt().flags |= FrogFlag.WantCommand;
+    FrogReadNextScriptCommand(b, frame(rng));
+    check("...and a second one idles rather than leaping without one",
+          bt().state === FrogState.IdleAndCroak && b.attackPermit === -1,
+          `${FrogState[bt().state]} permit ${b.attackPermit}`);
+  }
+
+  // -- class 0x43, the owl --------------------------------------------------
+  {
+    const rng = new Rng(29);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    const mk = (at: number, subtype: number, member: number) =>
+      ActorSpawn(at, SpawnClass.FlyingEnemy, -1, "owl", {
+        pos: vec3(-644, 128, -943),
+        class43: { subtype, member },
+      }, rng);
+    const kept = [mk(0x9400, 1, 0), mk(0x9401, 1, 1)];
+    const gone = [mk(0x9402, 1, 2), mk(0x9403, 1, 3)];
+    check("one player faces two owls of a sub-type, not four",
+          kept.every((o) => !o.despawned) && gone.every((o) => o.despawned),
+          gone.map((o) => o.despawned).join(","));
+    check("...and only the survivors are counted",
+          G.g_enemies_alive === 2 && G.g_enemies_present === 2,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    const rng = new Rng(31);
+    scene(0, rng);
+    G.g_players_in_play = 2;
+    const owls = [0, 1, 2, 3].map((m) =>
+      ActorSpawn(0x9500 + m, SpawnClass.FlyingEnemy, -1, "owl", {
+        pos: vec3(-644, 128, -943),
+        class43: { subtype: 1, member: m },
+      }, rng));
+    const tail = (o: Actor) => (o as { owl: OwlTail }).owl;
+    check("two players face all four", owls.every((o) => !o.despawned));
+    check("...perched, with the token free",
+          owls.every((o) => tail(o).state === OwlState.WaitLaunch)
+          && G.g_class43_attack_token === -1,
+          `${G.g_class43_attack_token}`);
+
+    // Member 0 has no delay and no holding circle: it leaves on its first
+    // frame, straight onto the approach spline.
+    OwlUpdateAndResolveShot(owls[0], frame(rng));
+    check("member 0 goes straight to its run-in",
+          tail(owls[0]).state === OwlState.Approach,
+          OwlState[tail(owls[0]).state]);
+    // Members 1..3 wait 20, 40 and 60 frames.
+    // `timer` is compared **after** its increment, so member 1's twenty
+    // frames of delay take twenty-one updates to expire.
+    for (let i = 0; i < 21; i += 1) OwlUpdateAndResolveShot(owls[1], frame(rng));
+    check("member 1 waits twenty frames and then flies to the holding circle",
+          tail(owls[1]).state === OwlState.FlyToCircle,
+          OwlState[tail(owls[1]).state]);
+    check("...to a hard-coded point, not to its own spawn",
+          tail(owls[1]).centreX === -640 && tail(owls[1]).centreZ === -950,
+          `${tail(owls[1]).centreX},${tail(owls[1]).centreZ}`);
+    for (let i = 0; i < 19; i += 1) OwlUpdateAndResolveShot(owls[2], frame(rng));
+    check("...and member 2 is still perched at the same moment",
+          tail(owls[2]).state === OwlState.WaitLaunch,
+          OwlState[tail(owls[2]).state]);
+  }
+
+  {
+    // The sub-type-0 owl cannot be shot until the camera has gone far enough.
+    const rng = new Rng(37);
+    scene(0, rng);
+    G.g_players_in_play = 2;
+    const o = ActorSpawn(0x9600, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 0, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    G.g_cam_path_frame = 100;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(o, frame(rng));
+    check("a sub-type-0 owl is invulnerable before camera frame 682",
+          t().state !== OwlState.Dead, OwlState[t().state]);
+    G.g_cam_path_frame = 700;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const score = G.g_player_score[0];
+    OwlUpdateAndResolveShot(o, frame(rng));
+    check("...and killable after it, for 80",
+          t().state === OwlState.Dead && G.g_player_score[0] - score === 80,
+          `${OwlState[t().state]} +${G.g_player_score[0] - score}`);
+    check("...giving the token back if it was diving",
+          G.g_class43_attack_token === -1, `${G.g_class43_attack_token}`);
+    for (let i = 0; i < 0x79; i += 1) OwlUpdateAndResolveShot(o, frame(rng));
+    check("...and the corpse lasts 121 frames", o.despawned, `${o.despawned}`);
+  }
+
+  {
+    // The strike is a distance, not a clip frame.
+    const rng = new Rng(41);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const o = ActorSpawn(0x9700, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 2), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    t().state = OwlState.Dive;
+    t().dive = OwlDiveKind.Home;
+    o.attackPermit = 0;
+    G.g_class43_attack_token = 0;
+    const lives = G.g_player_lives[0];
+    OwlStateDiveAtCamera(o, frame(rng));
+    check("an owl inside five units of the eye takes a life",
+          G.g_player_lives[0] === lives - 1,
+          `${lives} -> ${G.g_player_lives[0]}`);
+    check("...then peels off and releases the token",
+          t().state === OwlState.OrbitAway && G.g_class43_attack_token === -1,
+          `${OwlState[t().state]} ${G.g_class43_attack_token}`);
   }
 }
 

@@ -1333,6 +1333,57 @@ spawn that has a real character so the two never draw on top of each other.
 | 5 | 4 | 25 |
 | 6 | 2 | 20 |
 
+## Three enemies that had no module: the frog, the owl and the fish
+
+Classes `0x11`, `0x43` and `0x51`. All three increment **both** enemy counters,
+so every `wait_enemies_alive` behind one used to be a gate the port opened for
+the wrong reason. All three are now in `game/class11/`, `game/class43/` and
+`game/class51/`.
+
+**Each species is settled by a name table, not by shape.** Class 0x11's
+descriptor tail carries character type `0x1B`, which `g_character_skeletons`
+resolves to `frog.bin`, and its one voice is `COMMON\KAERU4_22.WAV` — *kaeru*.
+Class 0x43 draws sixteen slots and every one lies in `owl.bin`, and it dies
+playing `COMMON2\FUKUROU1_22.wav` — *fukurō*. Class 0x51's twenty-frame swim
+strip is `fish.bin` entries 3 to 22. The bat records (`KOUMORI`) exist and the
+owl does not play them, which is what rules out the other reading.
+
+**None of the three has hit points.** `obj+0x11C` is written once in each and
+never compared: `obj+0x34` bit 3 is the whole damage model, and one bullet kills.
+Each pays 80.
+
+| | frog `0x11` | owl `0x43` | fish `0x51` |
+|---|---|---|---|
+| spawns | 4, stage 1 block 3 | 14, stages 2 and 3 | 28, stages 2 and 3 |
+| drawn as | a skeleton, `frog.bin` | a hand-built slot chain | one slot of `fish.bin` |
+| how it attacks | a 30-frame ballistic leap; the hit is **timed**, on motion frame 60 | a dive; the hit is a **distance**, five units from the eye | a lunge to one of four points in camera space |
+| what limits it | `g_attack_permits`, the same array class 0x30 uses | `g_class43_attack_token`, one per flock | `g_water_attack_slots`, four |
+| when it leaves | despawns after a landed leap, **without dying** | never: dive and orbit for ever | falls back and despawns |
+
+Three readings from these that are worth keeping:
+
+* **The engine's free value for `g_attack_permits` is zero, not -1.**
+  `ReleaseAttackSlot` (`FUN_00456520`) opens with `XOR EDX, EDX` and writes
+  that, and the frog tests `!= 0` for "taken". The port's array holds `-1` for
+  free and the holder's `at` otherwise, which is a `[port-only]` choice made
+  because a pointer is not an `at`; `game/class11/` spells its tests in the
+  port's sentinel and says so on the spot.
+* **A class-0x51 descriptor whose sub-type is 6 is not a fish.** It is the
+  water: `FishInit` clears the four attack slots, copies the tail's first float
+  into `g_water_level` and kills the actor. Seven of the twenty-eight shipped
+  records are these, which is why they sit at the world origin with no
+  orientation.
+* **A sub-type-0 owl cannot be shot until the camera's path frame passes 682**,
+  and no other sub-type has that guard.
+
+**What is not ported**, and each is declared where it lives: the owl's body
+chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
+per actor) and the four per-sub-type landings its corpse has; the frog's
+head-look fix-up and its actor-versus-actor push, whose transformed point is
+`[open]` between view and world space; and the fish's three cosmetic tasks,
+whose sounds are ported and whose sprites are not because none of the three
+engine routines has a termination to copy.
+
 ## The gameplay loop
 
 **Done.** Enemies advance by the game's own **advance rings**, compete for an

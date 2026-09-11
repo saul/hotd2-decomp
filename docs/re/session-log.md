@@ -15114,3 +15114,106 @@ observing it: every one of the 44 pairs is `X.wav` against `X_OFF.wav`, and no
 `_OFF` file is shipped, which is what makes a stop id a control word. It also
 catches the eight duplicated play ids and asserts that each repeat names the
 same stopper, so the first-match walk order is not load-bearing.
+
+---
+
+## Three enemies that had no module: the frog, the owl and the fish
+
+Classes `0x11`, `0x43` and `0x51`, read end to end and ported in one pass.
+Between them they are 46 of the game's spawns and every one of them counts into
+both enemy counters, so every `wait_enemies_alive` behind one used to be a gate
+the port opened for the wrong reason.
+
+### What settled each species
+
+Not shape, in any of the three cases — a name table each time, which is the
+lesson `docs/formats/sound.md`'s "On animals" section already had and this is
+the third and fourth and fifth time it has paid.
+
+* **`0x11` is a frog.** Its descriptor tail's first word is a character type,
+  `0x1B` in all four spawns, and `g_character_skeletons` (`0x004E0430`)
+  resolves that to `frog.bin`, 15 bones. Every draw slot it writes is a
+  `frog.bin` entry. And `FrogStateIdleAndCroak` plays `COMMON\KAERU4_22.WAV`.
+* **`0x43` is an owl.** `OwlDrawBodyChain` draws sixteen slots, all in
+  `0x0BBD..0x0C26`, which is `owl.bin` 0..105 — and nothing else in the image
+  draws from that run. The death sound is `COMMON2\FUKUROU1_22.wav`. The
+  `KOUMORI` (bat) records are adjacent in the table and the class never plays
+  them, which is what rules out the reading `spawns.md` left `[open]`.
+* **`0x51` is a fish.** Slots `0x1156`..`0x1169` are `fish.bin` 3..22 and the
+  death models `0xB6F`/`0xB70` are entries 0 and 1.
+
+### Four readings worth keeping
+
+1. **The free value of `g_attack_permits` is zero, not -1.**
+   `ReleaseAttackSlot` (`FUN_00456520`) is `XOR EDX, EDX` and then
+   `MOV [EAX*4 + 0x9A2BA0], EDX`, and class 0x11 tests `!= 0` for "taken" and
+   writes a literal 1 to claim. The port has held `-1` for free since the
+   permit was first ported, because it stores the holder's `at` rather than a
+   pointer and 0 is a legal `at`. That is a `[port-only]` sentinel, now said so
+   in `game/class11/index.ts` where the two conventions meet. The first draft
+   of the frog transcribed `!= 0` literally and the frog never attacked — the
+   test caught it, which is what the test is for.
+2. **A class-0x51 descriptor whose `tail+0x0E` is 6 is not a fish.** It is the
+   water surface: `FishInit` clears the four attack slots, copies `tail+0x00`
+   into `g_water_level` and kills the actor. Seven of the twenty-eight shipped
+   records are these, and that is why they sit at the world origin with no
+   orientation and no sensible speeds.
+3. **A sub-type-0 owl is invulnerable until `g_cam_path_frame` reaches 682.**
+   `FILD` / `FCOMP 682.0` at `0x004460EA`, and no other sub-type has the guard.
+4. **`FrogReadGroundPlaneY` (`FUN_0043A990`) ignores all three of its
+   arguments.** Two instructions: `FLD float ptr [g_camera_fixed_eye_y]` and
+   `RET`. Its four callers all push the actor's position, and the decompiler
+   shows a three-float signature. Implementing it as a terrain query would have
+   been a plausible, wrong port — `L1` exactly.
+
+### What the decompiler hid, three times
+
+`L37` bit in all three classes and it was load-bearing every time.
+
+* `FrogStateHopWithinScreenWedge` — **687 bytes** dropped at
+  `0x0043AAC8`..`0x0043AD76` plus 42 more. Read literally, the pseudocode says
+  substate 0 never picks a heading. The missing bytes are the whole wedge
+  clamp.
+* `FrogStateLeapAtPlayer` — 288 bytes at `0x0043B3F2`..`0x0043B50E` and 75
+  more; substate 0 appears never to advance, i.e. the frog can never attack.
+* `OwlStateDiveAtCamera` — 395 bytes: the listing jumps `0x004470EC` to
+  `0x0044727C` past a `MatrixStackPop` Ghidra has marked no-return, and those
+  bytes are the **entire** sway trajectory, which is the arm every relaunch
+  after the first uses. `OwlDrawBodyChain` loses 640 the same way.
+
+Anyone porting from the pseudocode alone would have produced a frog that stands
+still for ever and an owl with one dive instead of two.
+
+### What moved in the port
+
+`ActorSpawn` and `ActorInitFlags` are out of `director.ts` and into
+`game/spawn.ts`. `director.ts` imports `classes.ts` for its side effects, so
+every class module is downstream of it and a class that needs to *make* an
+actor — the stage-2 boss's summoning rounds through `SpawnFishAt` — would close
+an ESM cycle and get `undefined` back, which is the failure `registry.ts`
+already has three hours of history about. `director.ts` re-exports both, so
+nothing else moved.
+
+`Actor` gained `roll` (`obj+0x6C`). The class-0x33 entry above left it out on
+the grounds that only the engine's own draw reads it; class 0x43 writes it from
+four different states and a snapshot has to carry the pose, so it is a head
+field now.
+
+### What is not ported, named
+
+The owl's `OwlDrawBodyChain` — sixteen slots in one hand-built matrix chain
+against `render/slotmodels.ts`'s one node per actor — and the four per-sub-type
+landings its corpse has, which are a stairwell with two reflecting rails, a
+plane, a box with a stepped floor and a water line. The frog's head-look
+fix-up, which works on per-bone Euler angles the port has no field for, and
+`FrogPushOutOfActorCollision`, whose transformed point is `[open]` between view
+and world space — porting it under the wrong reading would push frogs the wrong
+way, which is worse than not pushing them. And the fish's three cosmetic tasks:
+their sounds are ported and their sprites are not, because none of the three
+engine routines has a termination to copy.
+
+`Class14StateSummonRoundA`'s `[diverges]` is narrower than it was but still
+there: class 0x51 has a module now, so `SpawnFishAt` would build a real fish,
+but **where** the boss puts one is not read — the call takes a height from
+`FUN_00442390`, the class-0x16 wave field, at an x and z built from a camera
+block and two of the boss's own floats, and neither has been read.

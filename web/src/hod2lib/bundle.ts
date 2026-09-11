@@ -70,7 +70,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 5;
+export const BUNDLE_FORMAT = 6;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -631,6 +631,16 @@ export async function scriptFlagEffectsJson(
  * `RegisterForShotTest` with a radius at `obj+0x124`, not by a bounding box.
  */
 export const ACTOR_SLOTS: Record<number, number[]> = {
+  // `fish.bin` 3..22 -- the twenty-frame swim strip class 0x51 flips through
+  // -- then entries 0, 1 and 2: the flung corpse, the sunk one, and the ripple
+  // `SpawnWaterRipple` (`FUN_00439FA0`) draws.
+  0x51: [...Array.from({ length: 20 }, (_, i) => 0x1156 + i), 0xb6f, 0xb70,
+         0xb71],
+  // `owl.bin` 0..105. `OwlDrawBodyChain` (`FUN_00447C20`) draws sixteen of
+  // them in one hand-built matrix chain; the whole run travels because the
+  // renderer will need the rest of the chain, and entries 34..50, 54, 58 and
+  // 90 are drawn by nothing in the image at all.
+  0x43: Array.from({ length: 106 }, (_, i) => 0xbbd + i),
   0x52: Array.from({ length: 10 }, (_, i) => 0x1385 + i),
 };
 
@@ -705,7 +715,7 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (class 0x52; class 0x25 variant 3)",
+    routine: "asset-slot actor draws (classes 0x43, 0x51, 0x52; class 0x25 variant 3)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",

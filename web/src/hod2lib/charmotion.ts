@@ -73,6 +73,25 @@ export const BOSS4_CLIPS: readonly number[] = [
   0x73, 0x74, 0x75, 0x76, 0x78, 0x7a, 0x7b, 0x7c, 0x7d,
 ];
 
+/**
+ * Class 0x11's whole motion bank -- bank 14, which `ExeTables.motionBanks()`
+ * names `frog.bin`, ids `0x13D`..`0x145`.
+ *
+ * The class names seven of the nine as literals across its states: `0x13E` the
+ * leap, `0x13F` the death, `0x140` the travelling hop, `0x141` the idle,
+ * `0x142`/`0x143` the two 45-degree turns and `0x144` the stationary hop.
+ * `0x13D` and `0x145` are in the bank and referenced by nothing in the class.
+ *
+ * All nine are baked for the same reason `BOSS4_CLIPS` is: **an unbaked clip
+ * is an actor that waits for ever.** Every one of the frog's hop substates
+ * leaves on an exact play-cursor frame or on `MotionPlayLength`, and with no
+ * clip that length is 0, the cursor never reaches 18, and the frog turns to
+ * face its heading and then never jumps.
+ */
+export const FROG_CLIPS: readonly number[] = [
+  0x13d, 0x13e, 0x13f, 0x140, 0x141, 0x142, 0x143, 0x144, 0x145,
+];
+
 export const MOTION_RULES: Record<number, MotionRule> = {
   // `Boss4Init` (`FUN_004917E0`) seats the clip as a literal:
   // `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E`, where `ECX` is
@@ -104,6 +123,11 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // exporter builds no skeleton for it at all -- stage 5, whose only class-0x14
   // spawn is its own, had no character type 71 in its bundle.
   0x14: ["literal", 33],
+  // `FrogInit` (`FUN_0043A080`) writes `obj+0x1B4 = (s16)tail+0x02`, which is
+  // `0x141` in all four shipped spawns. Without a rule the frog resolves to a
+  // character with no motion, the exporter emits it as a marker, and none of
+  // its nine clips reaches the bundle -- see {@link FROG_CLIPS}.
+  0x11: ["param", 0x02, "i16"],
   0x30: ["literal", 0x3bc],
   0x31: ["by_char", { 0x17: 0x1ba }, 0x3a8],
   0x53: ["table", 0x00589a64, 10, 0x00, "i16"],

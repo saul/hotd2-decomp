@@ -544,6 +544,63 @@ export const G = {
    */
   g_enemy_slots: [] as number[],
 
+  // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
+  /**
+   * `g_water_level` — 0x007DCBB0. The height of the water plane.
+   *
+   * A data initialiser puts -24.90 there, and it is **rewritten by every
+   * class-0x51 group header**: a descriptor whose `tail+0x0E` is 6 is not a
+   * fish at all, it is the surface, and `FishInit` (`FUN_00438540`) copies its
+   * `tail+0x00` float here before killing itself. Class 0x16 records the same
+   * plane for the wave field.
+   */
+  g_water_level: -24.9,
+  /**
+   * `g_water_attack_slots` — 0x009A2C20, four dwords.
+   *
+   * The only thing that lets a class-0x51 fish leave the surface, and the
+   * reason four of them can be in the air at once and no more.
+   * `FishClaimSlotAndLunge` (`FUN_00438850`) claims one and the index is also
+   * *where* the fish leaps to — the four are points in the camera's own space.
+   * `SpawnFishAt` (`FUN_00438640`) refuses to place one at all while any slot
+   * is taken, which is what paces the stage-2 boss's summoning rounds.
+   */
+  g_water_attack_slots: [0, 0, 0, 0],
+  /**
+   * `[port-only]` — the next spawn address to give an actor **nothing placed**.
+   *
+   * The port identifies an actor by the evt offset of the descriptor it came
+   * from, and `SpawnFishAt` (`FUN_00438640`) has no descriptor at all: the
+   * stage-2 boss calls it with three floats. Negative, and counting down, so
+   * such an actor can never collide with a real descriptor offset and
+   * `ActorByAt` still answers.
+   */
+  g_summoned_actor_at: -1,
+  /**
+   * `[port-only]` — the spawn addresses `SpawnSlotActors` has already built.
+   *
+   * There is no such list in the engine, and there cannot be: the spawn opcode
+   * builds an object once, in the step that holds it, and never looks again.
+   * The port materialises slot-drawn actors from the walker's live spawn list
+   * every frame, so it needs to remember which of them it has made — otherwise
+   * an actor that despawns under its own state machine comes straight back.
+   * An entry is dropped when the script stops listing that spawn.
+   */
+  g_slot_actors_built: [] as number[],
+
+  // -- the owls, class 0x43 ----------------------------------------------
+  /**
+   * `g_class43_attack_token` — 0x008111E0. **-1 means nobody is attacking.**
+   *
+   * One permit for a whole flock, and the reason owls come at you in turn
+   * rather than all at once: `OwlStateWaitLaunchDelay` and
+   * `OwlStateCircleHoldingPoint` refuse to begin a run-in unless they read -1,
+   * the launch stamps the owl's own member index into it, and the pull-out and
+   * the death give it back. It is **not** `g_attack_permits`: class 0x43 never
+   * touches that array at all.
+   */
+  g_class43_attack_token: -1,
+
   // -- breakable props, class 0x41 ---------------------------------------
   /**
    * Every live breakable prop. The engine allocates each as its own 0x378
@@ -1082,6 +1139,11 @@ export function ResetGameGlobals(): void {
   // first gate of the new one.
   G.g_evt_wait_alive_hysteresis = 0;
   G.g_enemy_slots = [];
+  G.g_water_level = -24.9;
+  G.g_water_attack_slots = [0, 0, 0, 0];
+  G.g_summoned_actor_at = -1;
+  G.g_slot_actors_built = [];
+  G.g_class43_attack_token = -1;
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];
   G.g_thrown_next_id = 1;

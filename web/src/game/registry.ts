@@ -290,7 +290,7 @@ export function registerClass(cls: SpawnClass, handler: ClassHandler): void {
  */
 export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   SpawnClass.Zombie, SpawnClass.Thrower, SpawnClass.FlyingEnemy,
-  SpawnClass.WaterEnemy,
+  SpawnClass.WaterEnemy, SpawnClass.Frog,
 ]);
 
 /** Whether this actor is one the enemy counters count. */

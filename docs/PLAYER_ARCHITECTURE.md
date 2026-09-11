@@ -634,8 +634,9 @@ web/src/
     rng.ts        seeded, state exposed — snapshots need it
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
-    class10/ class20/ class21/ class24/ class25/ class30/ class31/ class41/
-    class44/ class52/ class53/
+    class10/ class11/ class14/ class19/ class20/ class21/ class24/ class25/
+    class30/ class31/ class33/ class41/ class43/ class44/ class51/ class52/
+    class53/ class60/ class61/
                   one module per class. Each calls `registerClass` itself.
                   The ones that write the actor struct's tail words directly
                   also have a `state.ts`: the discriminated union's arm for
@@ -645,6 +646,10 @@ web/src/
     registry.ts   the handler contracts and an empty table. Imports no class
     classes.ts    the manifest: the side-effect imports that fill the table
     despawn.ts    `ActorDespawn`, and the sweep that asks the class what it holds
+    spawn.ts      `ActorSpawn` and `ActorInitFlags`. Apart from `director.ts`
+                  because that file imports `classes.ts`, so a class that has
+                  to *make* an actor -- the stage-2 boss's summons, the two
+                  prop placers' children -- would close an ESM cycle
     globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
     camera/       curve.ts (the `cam/` Hermite), path.ts, track.ts, slots.ts
     combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts

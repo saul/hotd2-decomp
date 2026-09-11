@@ -22,6 +22,9 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import { makeFrogTail, type FrogTail } from "./class11/state";
+import { makeOwlTail, type OwlTail } from "./class43/state";
+import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
   from "./class33/state";
@@ -973,6 +976,16 @@ export interface ActorBase {
    */
   pitch: number;            // +0x64
   /**
+   * `obj+0x6C` — the third orientation word, which every spawn allocator fills
+   * from the descriptor and `MatrixRotateZ` consumes.
+   *
+   * Only class 0x43 writes it after the spawn: the owl banks into its dive and
+   * rolls through its orbit. Class 0x41 type 4 reads the same word as an
+   * object **kind**, which is the polymorphism `docs/formats/spawns.md` warns
+   * about — check the class before believing it is an angle.
+   */
+  roll: number;             // +0x6C
+  /**
    * What the camera aims at, and **not** the actor's origin.
    *
    * `SkeletonEmitNode` (`FUN_004114C0`) records one bone's world position here
@@ -1198,6 +1211,18 @@ export interface ActorBase {
    * Its own field for the reason above: `tail+0x00` is class 0x30's body
    * condition.
    */
+  /**
+   * Class 0x51's descriptor tail — the fish's speeds, bob and timings, or the
+   * water level when the record is a group header.
+   *
+   * Its own field for the reason class 0x20's and class 0x52's are:
+   * `tail+0x00` is class 0x30's body condition, and here it is a float.
+   */
+  /** Class 0x11's descriptor tail — the frog's cue, wedge and command list. */
+  class11: CharacterPlacement["class11"];
+  /** Class 0x43's two descriptor bytes — the owl's member index and sub-type. */
+  class43: CharacterPlacement["class43"];
+  class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
    * Class 0x14's descriptor tail — the state the boss starts in, the route
@@ -1624,13 +1649,17 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Boss2; boss2: Boss2Tail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
+  | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
+  | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
+  | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
-      | SpawnClass.Boss2 | SpawnClass.Mouse
+      | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
+      | SpawnClass.Frog | SpawnClass.FlyingEnemy
       | SpawnClass.ScriptedScenery> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
@@ -1653,6 +1682,15 @@ export type Boss2Actor = Extract<Actor, { cls: SpawnClass.Boss2 }>;
 /** An actor already narrowed to class 0x20, for that class's own routines. */
 export type OneHitTargetActor = Extract<Actor,
   { cls: SpawnClass.OneHitTarget }>;
+
+/** An actor already narrowed to class 0x43, for that class's own routines. */
+export type OwlActor = Extract<Actor, { cls: SpawnClass.FlyingEnemy }>;
+
+/** An actor already narrowed to class 0x11, for that class's own routines. */
+export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
+
+/** An actor already narrowed to class 0x51, for that class's own routines. */
+export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
@@ -1700,6 +1738,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pos: vec3(),
     yaw: 0,
     pitch: 0,
+    roll: 0,
     lookAt: vec3(),
     vel: vec3(),
     accY: 0,
@@ -1740,6 +1779,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     worldPushDepth: 0,
     standThrow: undefined,
     oneHitTarget: null,
+    class11: null,
+    class43: null,
+    class51: null,
     class52: null,
     class14: null,
     class33: null,
@@ -1818,6 +1860,15 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };
+  }
+  if (cls === SpawnClass.WaterEnemy) {
+    return { ...head, cls, fish: makeFishTail() };
+  }
+  if (cls === SpawnClass.Frog) {
+    return { ...head, cls, frog: makeFrogTail() };
+  }
+  if (cls === SpawnClass.FlyingEnemy) {
+    return { ...head, cls, owl: makeOwlTail() };
   }
   if (cls === SpawnClass.ScriptedScenery) {
     return { ...head, cls, scenery: makeScriptedSceneryTail() };

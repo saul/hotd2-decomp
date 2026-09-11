@@ -120,6 +120,15 @@ CHECKS: list[Check] = [
           "enemy the character layer can build, and two have no character "
           "type at all",
           NEEDS_BUNDLE),
+    Check("verify_prop_slots", ".",
+          ["python3", "tools/verify_prop_slots.py"],
+          "that every asset slot a placed class-0x41 or class-0x44 prop will "
+          "pass to `AssetDrawSlot` has a model in its own bundle -- the check "
+          "that would have caught stage 3's roller shutter and the stage 5 "
+          "van's body, both of which were placed, updated and invisible "
+          "because nothing carried their geometry, which from the level looks "
+          "exactly like a placement that was never exported",
+          NEEDS_BUNDLE),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

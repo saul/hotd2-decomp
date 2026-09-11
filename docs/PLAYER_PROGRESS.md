@@ -2694,6 +2694,81 @@ when a prop is shot) has nothing to drive it here. A *general* effect-tree
 renderer is also still missing — the two trees this class places are flat, so
 the port draws one prop per drawable node and never has to compose a chain.
 
+### Selector 11 slides straight up, and it is stage 3's roller shutter
+
+**Done.** Two reports found one gap from opposite ends: a roller shutter
+missing from stage 3, and a stage 5 van drawn as two rear doors in mid-air.
+Neither was the placement path, which is why the first report's own
+measurement — stage 3 carries no hinges, no statics, no class-0x24 set pieces
+and no shutter rig — was right and pointed nowhere.
+
+**The shutter is class 0x44 selector 11**, `PropBuildRisingDoor`
+(`FUN_00473410`) and `RisingDoorUpdate` (`FUN_004753F0`), and it was in no
+table anywhere: not the `props` block, not `containerPlacements`, not
+`g_class44_subtypes`. It is not a hinge — one `MatrixRotateY` and no curve —
+and it is emphatically not the port's `shutter`, which is the HUD letterbox.
+It translates **Y upward** while a script flag is up: `speed` is seeded 0.5 on
+the frame the flag is first seen and gains `step` a frame until `y` passes a
+ceiling, at which point the routine stops writing `y` and the door holds one
+frame's worth above it rather than clamping.
+
+Both numbers come from a **slot test**, `CMP word ptr [ESI+0x28C], 0xA58`, not
+from anything measured about the model. Stage 3's door is that slot
+(`etc_door.bin[2]`): it climbs 36.1 at a tenth a frame and is clear on frame
+22, and while it waits it **rattles**, `(rand() % 0x191 - 200) * amp * 0.01` in
+X and `(rand() % 0x65 - 50) * amp * 0.01` in Z with the amplitude decaying 0.95
+a frame and reseeding itself whenever it falls below 0.001 — so it judders in
+~135-frame bursts rather than once. Stage 5's door is `st5.bin[9]`, takes the
+35.0 / 0.01 arm, and never rattles at all. Two spawns in the game and that is
+both of them.
+
+It lives in the **container pool** (`PropFamily.RisingDoor`) for the same
+reason selector 0 does: the engine `ActorAlloc`s a 0x378 object, the rise is
+real per-frame state that has to go in a snapshot, and `render/breakables.ts`
+already draws a model per asset slot at `p.x/p.y/p.z`. The amplitude decays in
+`game/`; the displacement it produces is a draw offset the engine recomputes
+every frame and never writes back, so that half is the renderer's — the same
+split `BreakablePropUpdate` already had. The rattle needed its own arm there:
+the two axes have different moduli, and reusing the square 0x97/75 draw would
+have been a guess.
+
+**The van's body was never a missing placement.** It is a class-0x41 **type
+51** generic prop at the doors' own position and yaw, drawing slot `0x1793` =
+`char_adv04.bin[94]` — three models before the `[95]`/`[96]` pair
+`PropBuildVanDoors` hands its hinges. `PlaceGenericProp` built it all along and
+`DrawSlotFor` asked for `0x1793` every frame; type 51 was missing from
+`GENERIC_DESCRIPTOR_SLOT`, the one list that decides which descriptor slots'
+geometry travels in a bundle, so there was nothing to clone. **A placement with
+no model and a placement that was never exported look exactly the same from the
+level**, which is the whole reason both of these lasted. Eleven type-51 spawns,
+all in stage 5: four vans, two ground quads and five other pieces of street
+furniture from the same file.
+
+**And four types take their lifetime from a different field.** Types 12, 31, 51
+and 53 have a switch arm that writes the placer's `+0x1F4` — the signed byte at
+`desc+0x24` — over `obj+0x11C`, so for those the slot and the lifetime are two
+separate descriptor fields and both are real. The port read the slot as both,
+which gave all 55 of those spawns a lifetime of their own asset slot: 6035
+event steps for the van in a nine-block stage, so `PropExpireByStepLifetime`
+never retired one. All 55 carry 0..7 in `desc+0x24`. That was invisible for
+exactly as long as the props were.
+
+`tools/verify_prop_slots.py` is the check, and it is `verify_attachments.py`'s
+shape for the same failure one class over: every slot a placed prop will pass
+to `AssetDrawSlot` has a model in its own bundle. Mutating the fix away makes
+it fail on both rising doors.
+
+`[open]` **The descriptor-slot set is seven types and three are still out.**
+`PropDrawOnlyType31` (`FUN_0046A1C0`, 6 spawns), `PropDrawOnlyType53`
+(`FUN_0046EBD0`, 2) and `PropDrawOnlyType54` (`FUN_0046EDC0`, 2) all draw
+`obj+0x28C` too — ten more spawns of scenery missing for the reason the van
+was. All three are read and annotated; they are not carried because adding a
+type makes its model travel *and* draw, and 54's authored drift would be
+visibly static. `[open]` **The renderer poses all forty-four generic props
+`Ry · Rz · Rx`**, which is type 51's order and not the family's: 5, 12, 31, 33,
+53 and 54 all compose `Rz · Ry · Rx`, and fifteen shipped spawns have two or
+more non-zero angles and so are posed wrongly today.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

@@ -63,6 +63,16 @@ export enum PropFamily {
    * by: what the object at `AssetDrawSlot(0xA6B)` actually is, is `[open]`.
    */
   Type75 = 8,
+  /**
+   * `RisingDoorUpdate` (`FUN_004753F0`) — class 0x44 selector 11, a door that
+   * slides straight up when a script flag is raised. Two spawns in the game:
+   * stage 3's roller shutter and stage 5's. See `class44/rising_door.ts`.
+   *
+   * Its own family and not {@link Generic} for the same reason
+   * {@link StoryModeSwitch} is: a different constructor, and no
+   * `PropExpireByStepLifetime` — the remove flag is its whole lifetime.
+   */
+  RisingDoor = 9,
 }
 
 /**
@@ -162,7 +172,9 @@ export interface BreakableProp {
    *
    * A third meaning for one offset, and not the last: `LiftUpdate` uses
    * this word as the **frame counter** that releases the lift's overhead
-   * panel, and
+   * panel,
+   * `ScriptFlagEffectUpdate` as the capture bone, `RisingDoorUpdate` as the
+   * script flag that starts the rise, and
    * several other generic routines use it as a state timer. Check the family
    * before reading it, exactly as for `kind`/`member` at `+0x290`.
    */

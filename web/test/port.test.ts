@@ -181,7 +181,8 @@ import {
   LiftUpdate, LiftFlag, LIFT_NEAR_CLOSED, LIFT_NEAR_OPEN,
   LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
-  PropExpireByStepLifetime, GENERIC_DRAW_SLOT,
+  PropExpireByStepLifetime, GENERIC_DRAW_SLOT, GENERIC_DESCRIPTOR_SLOT,
+  GENERIC_LIFETIME_FROM_1F4,
   GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
   PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
@@ -203,6 +204,9 @@ import {
   BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
   PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
   SFX_SCRIPT_FLAG_EFFECT, FALLING_SLOT_LOOSE, FALLING_SLOT_WHOLE,
+  PropBuildRisingDoor, RisingDoorUpdate, RisingDoorRise, RisingDoorRattles,
+  RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
+  RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
 import { SpawnPropContainers } from "../src/game/director";
 import {
@@ -3765,6 +3769,146 @@ console.log("\nclass 0x41 type 32, the lift:");
   check("and it expires on its two-step lifetime like any other prop",
         gate.dead);
   void LIFT_PANEL_DELAY;
+}
+
+console.log("\nclass 0x44 selector 11, the door that slides up:");
+{
+  const rng = new Rng(61);
+  propScene(rng);
+  // Stage 3's descriptor, exactly: evt 0x23F4, slot 0xA58 = etc_door.bin[2],
+  // open flag 6, remove flag 11, at the mouth block 8's zombies come out of.
+  const door = PropBuildRisingDoor(
+    { at: 0x23f4, container: "rising_door", slot: RISING_DOOR_RATTLE_SLOT,
+      open_flag: 6, remove_flag: 11, lifetime_evt_steps: 0,
+      pos: [-356.6, -16.1, -3047.8], yaw: 0 });
+  G.g_breakable_props.push(door);
+
+  check("it is its own family, not a hinge and not a generic prop",
+        door.family === PropFamily.RisingDoor);
+  check("the descriptor's tail names the model, the open flag and the "
+        + "remove flag",
+        door.slot === 0xa58 && door.storyItem === 6 && door.removeFlag === 11);
+
+  // No flag: it holds its placed Y for ever. `wait_enemies_alive` at stage 3
+  // block 8 step 2 op 23 is 600-odd frames after the block starts, so a door
+  // that crept would be visibly wrong by then.
+  for (let i = 0; i < 600; i++) RisingDoorUpdate(door);
+  check("with neither flag raised it never moves",
+        door.y === -16.1 && door.vy === 0 && !door.dead);
+  check("but it rattles while it waits, and reseeds its own amplitude",
+        door.shake > 0);
+
+  // Flag 6, which is what op 16 of that step sets. Speed starts at 0.5 and
+  // gains 0.1 a frame, so the first frame moves it 0.6.
+  G.g_script_flags[6] = 1;
+  RisingDoorUpdate(door);
+  check("the first frame of the rise seeds the speed at 0.5 and then steps it",
+        Math.abs(door.vy - 0.6) < 1e-6 && Math.abs(door.y - -15.5) < 1e-6,
+        `${door.vy} ${door.y}`);
+  check("and the latch means the speed is seeded once, not every frame",
+        door.cueCursorB === 1);
+
+  let frames = 1;
+  while (door.y < RISING_DOOR_CEILING && frames < 1000) {
+    RisingDoorUpdate(door);
+    frames++;
+  }
+  // v = 0.5 + 0.1k, y = -16.1 + 0.05k^2 + 0.55k: k = 22 is the first that
+  // reaches 20.0 (36.3 of the 36.1 it has to climb), k = 21 falls short.
+  check("slot 0xA58's arm clears its 20.0 ceiling from y = -16.1 in 22 "
+        + "frames", frames === 22, String(frames));
+  const held = door.y;
+  for (let i = 0; i < 300; i++) RisingDoorUpdate(door);
+  check("past the ceiling it stops writing Y rather than clamping to it -- "
+        + "so it holds one frame's worth ABOVE 20, not 20",
+        door.y === held && held > RISING_DOOR_CEILING, String(held));
+
+  // Flag 11 is the last op of that step, and it is `ActorKill` and not a hide.
+  G.g_script_flags[11] = 1;
+  RisingDoorUpdate(door);
+  check("the remove flag kills it outright", door.dead);
+}
+
+console.log("\nclass 0x44 selector 11, stage 5's door takes the other arm:");
+{
+  const rng = new Rng(62);
+  propScene(rng);
+  // Stage 5's descriptor: evt 0x0C2C, slot 0x189A = st5.bin[9], flags 2 and 7.
+  const door = PropBuildRisingDoor(
+    { at: 0x0c2c, container: "rising_door", slot: 0x189a,
+      open_flag: 2, remove_flag: 7, lifetime_evt_steps: 0,
+      pos: [275.4, 12.0, -89.6], yaw: 0 });
+  G.g_breakable_props.push(door);
+
+  // `CMP word ptr [ESI+0x28C], 0xA58` decides both the rattle and the pair.
+  check("a slot that is not 0xA58 does not rattle at all",
+        !RisingDoorRattles(door.slot));
+  for (let i = 0; i < 200; i++) RisingDoorUpdate(door);
+  check("...and its amplitude is never seeded", door.shake === 0);
+  check("it takes the 35.0 / 0.01 arm",
+        RisingDoorRise(door.slot)[0] === RISING_DOOR_CEILING_OTHER
+        && RisingDoorRise(door.slot)[1] === RISING_DOOR_STEP_OTHER);
+
+  G.g_script_flags[2] = 1;
+  let frames = 0;
+  while (door.y < RISING_DOOR_CEILING_OTHER && frames < 1000) {
+    RisingDoorUpdate(door);
+    frames++;
+  }
+  // A hundredth a frame rather than a tenth. It has less to climb -- 23
+  // against 36.1 -- and still takes half again as long, because the engine
+  // names one slot and not a speed.
+  check("the slower arm takes 35 frames to clear 35.0 from y = 12",
+        frames === 35, String(frames));
+  check("and there is no lifetime on this family -- step changes do not "
+        + "retire it", (() => {
+          for (let b = 1; b <= 20; b++) {
+            G.g_evt_step_index = b;
+            RisingDoorUpdate(door);
+          }
+          return !door.dead;
+        })());
+}
+
+console.log("\nclass 0x41, four types take their lifetime from +0x1F4:");
+{
+  const rng = new Rng(63);
+  propScene(rng);
+  // The stage 5 van body, exactly: type 51, `+0x11C` = 0x1793 (the model) and
+  // `desc+0x24` = 4 (the lifetime). Reading the first as both is what gave it
+  // 6035 event steps in a nine-block stage.
+  const van = PlaceGenericProp(
+    { at: 0x0d3c, container: "generic", type: 51, slot: 0x1793,
+      lifetime_evt_steps: 0x1793, field_1f4: 4,
+      pos: [280.0, 2.0, -222.3], pitch: 0, yaw: 4915, roll: 0 }, rng);
+  G.g_breakable_props.push(van);
+
+  check("type 51 is a descriptor-slot type, so +0x11C really is the model",
+        GENERIC_DESCRIPTOR_SLOT.has(51) && van.slot === 0x1793);
+  check("and its lifetime is the OTHER field, not that slot",
+        GENERIC_LIFETIME_FROM_1F4.has(51) && van.lifetime === 4,
+        String(van.lifetime));
+  check("the model it draws is the slot and not a literal -- 51 is absent "
+        + "from GENERIC_DRAW_SLOT on purpose",
+        GENERIC_DRAW_SLOT[51] === undefined);
+
+  for (let b = 1; b <= 4; b++) {
+    G.g_evt_step_index = b;
+    PropExpireByStepLifetime(van);
+  }
+  check("four step changes leave it standing", !van.dead);
+  G.g_evt_step_index = 5;
+  PropExpireByStepLifetime(van);
+  check("the fifth retires it -- with the slot as the lifetime it would have "
+        + "stood there for the rest of the stage", van.dead);
+
+  // A type NOT in the set still reads the word it always did.
+  const other = PlaceGenericProp(
+    { at: 0x0e00, container: "generic", type: 20, slot: 1,
+      lifetime_evt_steps: 1, field_1f4: 7, pos: [0, 0, 0],
+      pitch: 0, yaw: 0, roll: 0 }, rng);
+  check("a type outside the set is untouched by this and still reads +0x11C",
+        !GENERIC_LIFETIME_FROM_1F4.has(20) && other.lifetime === 1);
 }
 
 console.log("\nclass 0x41, a generic prop's +0x11C is a lifetime:");

@@ -360,6 +360,61 @@ The draw is gated on `g_motion_slots[471].state == 2` — the literal word at
 `0x009A469C`, which is that record's state half. Six sibling routines carry the
 same test as a literal address for their own motion.
 
+### Class 0x44 selector 11: a door that slides straight up
+
+**[proved]** `PropBuildRisingDoor` (`FUN_00473410`) and `RisingDoorUpdate`
+(`FUN_004753F0`). Two spawns in the whole game and both are a shutter the
+zombies come out from under: stage 3's evt `0x23F4` at `(-356.6, -16.1,
+-3047.8)` and stage 5's evt `0x0C2C` at `(275.4, 12.0, -89.6)`.
+
+```
+tail+0x04  u16  -> obj+0x28C   the asset slot it draws
+tail+0x08  u32  -> obj+0x14C   -1 in both shipped spawns
+tail+0x20  s8   -> obj+0x2A0   the script flag that starts the rise
+tail+0x21  s8   -> obj+0x2A4   the script flag that deletes it
+                  header: position -> obj+0x19C.., orient b -> obj+0x1D0,
+                          obj+0x68 = 0, obj+0x34 |= 0x51
+```
+
+The whole routine, and there is no curve and no table in it:
+
+```c
+if (g_script_flags[obj->+0x2A4] == 1) { ActorKill(); return; }
+dx = dz = 0;
+if ((s16)obj->+0x28C == 0xA58 && g_script_flags[obj->+0x2A0] == 0) {
+    if (obj->+0x2C0 < 0.001) { obj->+0x2C0 = 1.0f; PoseHookNone(2, 0x14); }
+    dx = (rand() % 0x191 - 200.0) * obj->+0x2C0 * 0.01;
+    dz = (rand() % 0x65  -  50.0) * obj->+0x2C0 * 0.01;
+    obj->+0x2C0 *= 0.95;
+}
+if (g_script_flags[obj->+0x2A0] == 1) {
+    if (obj->+0x2A8 == 0) { obj->+0x2A8 = 1; obj->+0x1C4 = 0.5f; }
+    ceiling = (s16)obj->+0x28C == 0xA58 ? 20.0 : 35.0;
+    step    = (s16)obj->+0x28C == 0xA58 ?  0.1 :  0.01;
+    if (obj->+0x1A0 < ceiling) { obj->+0x1C4 += step; obj->+0x1A0 += obj->+0x1C4; }
+}
+Translate(dx + obj->+0x19C, obj->+0x1A0, dz + obj->+0x1A4);
+RotateY(obj->+0x1D0); AssetDrawSlot((s16)obj->+0x28C);
+```
+
+Four details that are not what a from-scratch door would do:
+
+* **the ceiling and the rate are a slot comparison**, `CMP word ptr
+  [ESI+0x28C], 0xA58`, and nothing about the model decides them. Stage 3's
+  door is that slot and clears 36.1 units in 22 frames; stage 5's climbs 23 at
+  a hundredth a frame and takes 35;
+* **past the ceiling the routine stops writing `y`** — two `JGE`s jump to the
+  draw — so the door holds one frame's worth *above* it, not on it;
+* **the rattle reseeds itself.** `obj+0x2C0` decays to below 0.001 in about
+  135 frames and is then reset to 1.0, so a door waiting on its flag judders
+  in bursts. Only slot `0xA58` rattles at all;
+* `FUN_00420810(2, 0x14)` in the rattle is `PoseHookNone`, the empty stub.
+
+The two models are `etc_door.bin[2]` (slot `0xA58`) and `st5.bin[9]` (slot
+`0x189A`), and both render as a corrugated ribbed metal panel. `[likely]` a
+roller shutter, on the model, the `etc_door` filename and the vertical rise
+together.
+
 ### Class 0x24's parameter tail
 
 `SetPiecePropInit` reads everything a set-piece does out of the tail at

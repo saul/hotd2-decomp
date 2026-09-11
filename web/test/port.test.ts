@@ -11641,6 +11641,164 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
           before === 1 && G.g_enemies_alive === 0 && G.g_enemies_present === 0,
           `${before} -> ${G.g_enemies_alive}/${G.g_enemies_present}`);
   }
+
+  // -- `ZombieAttachToCarrier`: the three zombies really are on the car -----
+  //
+  // `ZombieAttachToCarrier` (`FUN_0045E770`), reached from
+  // `EnemyZombieInitByCharType` (`FUN_00452FD0`, 0x0045301D) at spawn and from
+  // `EnemyZombieUpdate` (`FUN_004533F0`, 0x00453424) every frame afterwards.
+  //
+  // The report these assertions exist for said three stage-5 `znnick` should
+  // be travelling with the car and were standing 2870 away; the port's own
+  // comment said 2870 was where the descriptor put them and "the distance was
+  // never the bug". The descriptor settles it: what it holds is an offset, not
+  // a position, and every number below is the shipped one.
+  //
+  //   evt 0x1D44  init_flags 0x20008  (-4.6, 10.0, -16.5)  yaw 16384
+  //   evt 0x1D74  init_flags 0x20008  (-4.6,  5.0,  -2.6)  yaw 16384
+  //   evt 0x1DA4  init_flags 0x20008  (-4.6,  5.0,   7.0)  yaw 16384
+  //
+  // `L26`: the divergence at the bottom is pinned by an assertion, because a
+  // note saying what somebody meant is not a statement about what runs.
+  {
+    // The three offsets, and the point stage 5's carrier descriptor fires its
+    // own effect at -- `tail+0x24`, which is where the car is at cursor 580.
+    const RIDERS: [number, [number, number, number]][] = [
+      [0x1d44, [-4.6, 10.0, -16.5]],
+      [0x1d74, [-4.6, 5.0, -2.6]],
+      [0x1da4, [-4.6, 5.0, 7.0]],
+    ];
+    const CAR_AT_EFFECT = vec3(678.8, -70, -2616.5);
+    const SHIPPED_FLAGS = 0x20008;
+    const DESC_YAW = 16384;
+
+    const seatOne = (at: number, off: [number, number, number],
+                     flags = SHIPPED_FLAGS): ZombieActor => {
+      const z = spawnZombie(at, 1, `znnick ${at.toString(16)}`, {
+        flags, yaw: DESC_YAW, pos: vec3(off[0], off[1], off[2]),
+        initialState: ZombieState.DelayedStrikeInPlace,
+        attackState: ZombieState.AttackRun,
+        entry: { delay: 2, rearm: 4, player: 0 } as Actor["entry"],
+      });
+      z.visible = true;
+      z.hp = z.maxHp = 130;
+      return z;
+    };
+
+    reset();
+    const car = makeCarrier(STAGE5());
+    car.pos = vec3(CAR_AT_EFFECT.x, CAR_AT_EFFECT.y, CAR_AT_EFFECT.z);
+    car.yaw = 0;
+    const riders = RIDERS.map(([at, off]) => seatOne(at, off));
+
+    check("descriptor flag bit 3 raises `obj+0x136C` 0x10000000 and 0x100000, "
+          + "so the actor is a passenger before a frame has run",
+          riders.every((z) => (z.flags2 & ZombieFlag2.AttachedToCarrier) !== 0
+                           && (z.flags2 & ZombieFlag2.Carried) !== 0),
+          riders.map((z) => (z.flags2 >>> 0).toString(16)).join(" "));
+    check("...and the descriptor position is stashed at `obj+0x13D8` rather "
+          + "than kept as a world position",
+          riders.every((z, i) => z.strikeStart.x === RIDERS[i][1][0]
+                              && z.strikeStart.y === RIDERS[i][1][1]
+                              && z.strikeStart.z === RIDERS[i][1][2]),
+          riders.map((z) => `${z.strikeStart.x},${z.strikeStart.z}`).join(" "));
+    check("...and `obj+0x135C` holds the descriptor yaw",
+          riders.every((z) => z.zom.throwHand === DESC_YAW),
+          riders.map((z) => z.zom.throwHand).join(" "));
+    // `MatrixRotateY(carrier+0x68)` then `MatrixRotateY(0x8000)`: with the
+    // car's own yaw at zero the seat is a half turn, so x and z negate.
+    check("the Init seats them on the car, x and z through the half turn at "
+          + "`0x0045E7A6`",
+          riders.every((z, i) =>
+            Math.abs(z.pos.x - (CAR_AT_EFFECT.x - RIDERS[i][1][0])) < 1e-3
+            && Math.abs(z.pos.y - (CAR_AT_EFFECT.y + RIDERS[i][1][1])) < 1e-3
+            && Math.abs(z.pos.z - (CAR_AT_EFFECT.z - RIDERS[i][1][2])) < 1e-3),
+          riders.map((z) => `(${z.pos.x.toFixed(1)},${z.pos.y.toFixed(1)},`
+                          + `${z.pos.z.toFixed(1)})`).join(" "));
+    check("...and the yaw is the composed one plus `obj+0x135C`, truncated to "
+          + "s16 the way `__ftol` leaves it",
+          riders.every((z) => z.yaw === -0x8000 + DESC_YAW),
+          riders.map((z) => z.yaw).join(" "));
+    // The whole of the report: they are ON the car, two and a half thousand
+    // units from the world origin the port was leaving them at.
+    check("...so they are within a metre of the car and nowhere near the "
+          + "origin, which is where `d≈2870` was measured from",
+          riders.every((z) => Math.hypot(z.pos.x - car.pos.x,
+                                         z.pos.z - car.pos.z) < 20
+                           && Math.hypot(z.pos.x, z.pos.z) > 2000),
+          riders.map((z) => Math.hypot(z.pos.x, z.pos.z).toFixed(0)).join(" "));
+
+    // Now drive. `ZombieStateDelayedStrikeInPlace` moves nothing at all, so if
+    // the re-seat were in the state rather than in front of it, this fails.
+    car.pos.x += 300;
+    car.pos.z += 500;
+    for (const z of riders) {
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng: new Rng(3),
+                             host: NULL_HOST });
+    }
+    check("`EnemyZombieUpdate` re-seats them every frame, so they travel with "
+          + "the car while sitting in a state that never moves an actor",
+          riders.every((z, i) =>
+            Math.abs(z.pos.x - (car.pos.x - RIDERS[i][1][0])) < 1e-3
+            && Math.abs(z.pos.z - (car.pos.z - RIDERS[i][1][2])) < 1e-3),
+          riders.map((z) => `(${z.pos.x.toFixed(1)},`
+                          + `${z.pos.z.toFixed(1)})`).join(" "));
+    // A quarter turn of the car swings the bed round with it.
+    car.yaw = 0x4000;
+    EnemyZombieUpdate(riders[0], { eye: EYE, dt: 1 / 60, rng: new Rng(3),
+                                   host: NULL_HOST });
+    check("...and the car's yaw turns the seat, not just the model",
+          Math.abs(riders[0].pos.x - (car.pos.x - RIDERS[0][1][2])) < 1e-3
+          && Math.abs(riders[0].pos.z - (car.pos.z + RIDERS[0][1][0])) < 1e-3,
+          `(${riders[0].pos.x.toFixed(1)},${riders[0].pos.z.toFixed(1)})`);
+  }
+  {
+    // The counterfactual, and it is exactly what the port did before: the same
+    // descriptor without bit 3 stays where the position field says, which is
+    // beside the world origin whatever the car does.
+    reset();
+    const car = makeCarrier(STAGE5());
+    car.pos = vec3(678.8, -70, -2616.5);
+    const z = spawnZombie(0x1d44, 1, "no bit 3", {
+      flags: 0x20000, yaw: 16384, pos: vec3(-4.6, 10.0, -16.5),
+      initialState: ZombieState.DelayedStrikeInPlace,
+      attackState: ZombieState.AttackRun,
+      entry: { delay: 2, rearm: 4, player: 0 } as Actor["entry"],
+    });
+    z.visible = true;
+    z.hp = z.maxHp = 130;
+    for (let i = 0; i < 60; i++) {
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng: new Rng(4),
+                             host: NULL_HOST });
+    }
+    check("without descriptor bit 3 the same spawn stays at the position "
+          + "field, beside the origin — the behaviour this section corrects",
+          (z.flags2 & ZombieFlag2.AttachedToCarrier) === 0
+          && Math.hypot(z.pos.x, z.pos.z) < 20,
+          `(${z.pos.x.toFixed(1)},${z.pos.z.toFixed(1)})`);
+  }
+  {
+    // [diverges] The engine dereferences `g_carrier_object` with no null test
+    // (`0x0045E781`). The port cannot, so the seat is skipped and the actor
+    // keeps its descriptor offset. Asserted rather than described, because the
+    // arm is unreachable in the shipped data and a note would be all there is.
+    reset();
+    G.g_carrier_object = -1;
+    const z = spawnZombie(0x1d44, 1, "no carrier", {
+      flags: 0x20008, yaw: 16384, pos: vec3(-4.6, 10.0, -16.5),
+      initialState: ZombieState.DelayedStrikeInPlace,
+      attackState: ZombieState.AttackRun,
+      entry: { delay: 2, rearm: 4, player: 0 } as Actor["entry"],
+    });
+    z.visible = true;
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng: new Rng(6),
+                           host: NULL_HOST });
+    check("[diverges] with no carrier the seat is skipped and the actor keeps "
+          + "its offset, where the engine would follow a null pointer",
+          (z.flags2 & ZombieFlag2.AttachedToCarrier) !== 0
+          && z.pos.x === -4.6 && z.pos.z === -16.5,
+          `(${z.pos.x},${z.pos.z})`);
+  }
 }
 
 // -- 30. the three flying and swimming enemies -------------------------------

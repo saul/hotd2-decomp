@@ -52,6 +52,7 @@ import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
+import { ZombieAttachToCarrier } from "./carrier";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
@@ -77,6 +78,13 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // state on the same frame that state first runs. Without this call class
   // 0x30 had no edge into `ZombieState.Death` at all.
   ZombieOnShot(obj);
+  // `0045341C  TEST EAX, 0x10000000` / `00453424  CALL ZombieAttachToCarrier`,
+  // and it is **before** the state dispatch at `0x00453434`. A passenger's
+  // position and yaw are recomputed from `g_carrier_object` every frame, so
+  // the state below never has to move it — and the three states that carry
+  // these four spawns never do. That is the whole of why stage 5 block 2's
+  // `znnick` ride the car while sitting in `DelayedStrikeInPlace`.
+  if (obj.flags2 & ZombieFlag2.AttachedToCarrier) ZombieAttachToCarrier(obj);
   ZombieRunState(obj, eye, dt, rng, host, events);
   // The engine's own order, and the two halves the port did not have.
   // `EnemyZombieUpdate` integrates the velocity straight after the state —
@@ -161,7 +169,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.LeapToPoint:
       return ZombieStateLeapToPoint(obj, eye, dt, rng, events);
     case ZombieState.RideCarrier:
-      return ZombieStateRideCarrier(obj, rng);
+      return ZombieStateRideCarrier(obj, eye, rng, dt);
     case ZombieState.ArcScriptedEntrance:
       return ZombieStateArcScriptedEntrance(obj, dt);
     case ZombieState.WaitScriptFlagThenEnter:

@@ -48,6 +48,13 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  * and the crowd push, `0x8000000` picks between `row[2]` and `row[3]`,
  * `0x40000` tells `EnemyZombieInit` not to compute the aim angles, and
  * `0x4000` freezes the pose.
+ *
+ * And `0x8` is class 0x30's **ride the carrier**: `EnemyZombieInitByCharType`
+ * reads it at `0x0045301D` and re-reads the descriptor's position and yaw as
+ * an offset on `g_carrier_object` — see `class30/carrier.ts`. Four shipped
+ * records set it, all in stage 5's block 2, and it is why carrying this whole
+ * word rather than picking over it is the right shape: the bit that mattered
+ * was one nobody had read.
  */
 export function ActorInitFlags(obj: Actor, spawnFlags: number): void {
   obj.flags = spawnFlags | 1;

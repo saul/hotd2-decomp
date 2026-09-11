@@ -19,8 +19,11 @@
 import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
-import { ActorFacePlayerTarget } from "../actor_turn";
+import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor }
+  from "../actor";
+import { ActorFacePlayerTarget, TurnActorTowardCameraEye }
+  from "../actor_turn";
+import { CARRIER_TURN_RATE } from "./entrance";
 import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
 import { ActorByAt, G } from "../globals";
@@ -342,8 +345,14 @@ function ZombieLeapPin(obj: ZombieActor): void {
  *
  * Three spawns, all stage 5, and the only class-0x30 state whose handler sits
  * outside the table's contiguous run — `0x0045E830` is past the whole captor
- * family. A stationary attacker on a timer: it stands where it spawned, waits
- * out `tail+0x04`, then swings at a player every `tail+0x06` frames for ever.
+ * family. A stationary attacker on a timer: it waits out `tail+0x04`, then
+ * swings at a player every `tail+0x06` frames for ever.
+ *
+ * **Stationary in its own frame of reference, which is not the world's.** All
+ * three shipped spawns set descriptor flag bit 3, so `EnemyZombieUpdate`
+ * re-seats them on `g_carrier_object` before this function runs and they ride
+ * stage 5's car the whole time they are swinging. This state moves nothing;
+ * that is not the same as the actor not moving. See `class30/carrier.ts`.
  *
  * Unlike `ZombieStateLeapToPoint` it draws a **real attack** out of
  * `g_class30_attack_picks`, so the swing is one of the character's own and
@@ -365,8 +374,17 @@ export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
                                                 dt: number, rng: Rng,
                                                 events?: Events): void {
   ZombieDelayedStrikeStep(obj, eye, dt, rng, events);
-  // `switchD_0045e899_default`, in order: the idle re-blend, then the watch.
+  // `switchD_0045e899_default`, in order: the idle re-blend, the camera turn,
+  // then the watch.
   ZombieDelayedStrikeIdle(obj, rng);
+  // `0045EAEA  TEST byte ptr [ESI + 0x38], 0x20` then
+  // `TurnActorTowardCameraEye(obj, 0x1A0)` — the same arm
+  // `ZombieStateRideCarrier` has at `0x004589F5`. No stage-5 passenger sets
+  // the descriptor bit behind it, so it is dead in the shipped data and
+  // transcribed anyway; see {@link ZombieAux.TurnTowardCameraEye}.
+  if (obj.flags38 & ZombieAux.TurnTowardCameraEye) {
+    TurnActorTowardCameraEye(obj, eye, CARRIER_TURN_RATE, dt);
+  }
   ZombieDelayedStrikeGiveUp(obj, dt);
 }
 
@@ -474,17 +492,26 @@ function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
  * **The carrier exists now.** `ScriptedCarrierUpdate33` (`FUN_004331D0`) is
  * ported (`game/class33/`) and writes `g_carrier_object`; stage 5 block 2's is
  * evt `0x1CE4`, whose descriptor fires its effect — and this bit — at path
- * cursor frame 580. That was the whole of the room a player could not clear:
- * `wait_enemies_alive <= 0` at step 2 op 50 with four state-32 `znnick` alive
- * at `d≈2870`, which is where the descriptor puts them and where this state
- * leaves them (`ZombieStateDelayedStrikeInPlace`, `FUN_0045E830`, never moves
- * an actor and `SpawnFromDescriptor`, `FUN_00408A20`, copies the spawn
- * position verbatim — the distance was never the bug).
+ * cursor frame 580. That was one half of the room a player could not clear:
+ * `wait_enemies_alive <= 0` at step 2 op 50. The other half was
+ * {@link ZombieState.Leave}: it is `10`, `g_class30_states[10]` is
+ * `ZombieReleaseAndDespawn` (`FUN_00455490`), and the port had no `case` for
+ * it, so every actor that got here went to `WaitTurn` and stayed alive. See
+ * `class30/index.ts`.
  *
- * The bit was only half of it. {@link ZombieState.Leave} is `10`, and
- * `g_class30_states[10]` is `ZombieReleaseAndDespawn` (`FUN_00455490`); the
- * port had no `case` for it and sent every actor that got here to
- * `WaitTurn` instead, where it stayed alive. See `class30/index.ts`.
+ * **This comment used to end "the distance was never the bug", and it was
+ * wrong.** The reasoning was that this state never moves an actor and
+ * `SpawnFromDescriptor` (`FUN_00408A20`) copies the spawn position verbatim,
+ * so `d≈2870` had to be where the level wanted them. Both halves are true
+ * and the conclusion does not follow: what the descriptor holds for these
+ * three is a **carrier-local offset**, `(-4.6, 10, -16.5)`, `(-4.6, 5, -2.6)`
+ * and `(-4.6, 5, 7)`, and `EnemyZombieInitByCharType` re-reads it as one on
+ * `obj+0x34` bit 3 and hands it to `ZombieAttachToCarrier` (`FUN_0045E770`),
+ * which `EnemyZombieUpdate` then re-runs **before this state every frame**.
+ * They ride the car. `d≈2870` was the distance from the player to the world
+ * origin, and the reporter who said they should be travelling with the car was
+ * right. See `class30/carrier.ts` — and `L26`, because a note this confident
+ * is exactly what stops anyone looking.
  *
  * The port still guards `g_carrier_object` before dereferencing it, which the
  * engine does not — see `entrance.ts`'s note on `ZombieStateRideCarrier`.

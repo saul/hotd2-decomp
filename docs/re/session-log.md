@@ -15135,3 +15135,100 @@ there: class 0x51 has a module now, so `SpawnFishAt` would build a real fish,
 but **where** the boss puts one is not read — the call takes a height from
 `FUN_00442390`, the class-0x16 wave field, at an x and z built from a camera
 block and two of the boss's own floats, and neither has been read.
+
+## 2026-09-11 — the three zombies were on a car, and the port's own note said they were not
+
+One report, one URL — `?stage=5&mode=play&block=2&step=2&op=50&frame=599` —
+and two accounts of it that could not both be true. The reporter said three
+`znnick` should be travelling with the car and were standing 2890 away.
+`class30/scripted.ts` carried a doc comment naming that same URL and concluding
+**"the distance was never the bug"**, on the reasoning that
+`ZombieStateDelayedStrikeInPlace` (`FUN_0045E830`) never moves an actor and
+`SpawnFromDescriptor` (`FUN_00408A20`) copies the spawn position verbatim.
+
+**The reporter was right.** Both halves of the comment are true statements about
+the binary and the conclusion does not follow from them, which is what made it
+so hard to look past: it reads as a settled case. `L26` is exactly this shape
+one level down — a divergence declared in prose that stopped anyone looking —
+and this is the same failure with a *conclusion* instead of a divergence.
+
+### What was actually there
+
+Reading `EnemyZombieInit` (`FUN_00452DA0`) downward rather than reading the
+state again:
+
+* `ActorInitFlags` (`FUN_00408970`) puts the descriptor's `+0x04` flags word on
+  `obj+0x34` before any `Init` runs.
+* `EnemyZombieInitByCharType` (`FUN_00452FD0`) has a **fourth arm** at
+  `0x0045301D` that nothing in this repo had read. The three before it move
+  single bits into `obj+0x38`; this one tests `obj+0x34 & 8` and, when it is
+  set, treats the descriptor's position and yaw as **carrier-local**: position
+  to `obj+0x13D8/DC/E0`, yaw to `obj+0x135C`, `obj+0x136C |= 0x10000000`, then
+  `ZombieAttachToCarrier` (`FUN_0045E770`, unnamed until now) and finally
+  `obj+0x136C |= 0x100000`.
+* `ZombieAttachToCarrier` seats the actor rigidly on `g_carrier_object`:
+  `MatrixTranslate(carrier+0x40/44/48)`, `MatrixRotateY(carrier+0x68)`,
+  `MatrixRotateY(0x8000)`, transform the stashed offset into `obj+0x40/44/48`,
+  and `MatrixToEulerBams` plus `obj+0x135C` into `obj+0x68`. Only the carrier's
+  yaw is read — its pitch and roll are ignored.
+* `EnemyZombieUpdate` (`FUN_004533F0`) re-runs that seat **every frame, at
+  `0x00453424`, before the state dispatch at `0x00453434`**. So a passenger
+  rides whatever state it is in, and a state that moves nothing is not the same
+  thing as an actor that does not move.
+
+Whole-corpus, and this is the part that makes it a fact rather than a reading:
+**exactly four descriptors in the twelve shipped scripts set `obj+0x34` bit
+3**, all class 0x30, all in `st5evtbl` block 2 step 2 op 38 —
+`0x1D44 (-4.6, 10, -16.5)`, `0x1D74 (-4.6, 5, -2.6)`, `0x1DA4 (-4.6, 5, 7)` in
+state 32 and `0x1DD4 (4.6, 0, 0)` in state 18. Those are not world positions;
+they are a line up the bed of a vehicle at `x = -4.6`, two of them five units
+off its floor. The carrier is the class-0x33 selector-1 car at evt `0x1CE4`,
+spawned by **op 37 of the same step**, which publishes itself into
+`g_carrier_object` in its own `Init` (`ScriptedSceneryDispatch33`,
+`0x00433014`) — so the global is live on the frame the four passengers are
+made, and the engine's null-test-free dereference is safe by construction.
+
+`d≈2870` was the distance from the player to the **world origin**. The port was
+leaving them at their offset, and their offset is near zero.
+
+### Two names that were guesses, and one arm that was the wrong half
+
+* `ZombieFlag2.SpawnedInAir` was `obj+0x136C` bit `0x10000000` named for what
+  an offset with `y = 5` looks like from outside. Nothing in the port set it and
+  nothing read it. It is `AttachedToCarrier`.
+* `ZombieAux.CarrierOffset` was `obj+0x38` bit `0x20`, on a note saying
+  `ZombieStateRideCarrier` "uses it to choose whether the actor's position is
+  the carrier's plus its own offset". It does not: that add at `0x00458A0E` is
+  unconditional, and the bit gates `TurnActorTowardCameraEye(obj, 0x1A0)` two
+  instructions later and nothing else. It is `TurnTowardCameraEye`, and both
+  readers — `0x004589F5` and `0x0045EAEA` — are transcribed now. Its three
+  source records are stage 2's first three state-29 riders, so stage 2's riders
+  turn toward the camera at 0x1A0 BAMS a frame where before they did not.
+
+Both are `L20` on the port side of the line, and both had the same tell: a flag
+that is *named* but neither written nor read.
+
+### Wrong turns
+
+* The first hour went into re-reading `FUN_0045E830` for a position write,
+  because the lead in the report pointed at `0x0045EAFE` — state 32's own
+  `g_carrier_object` read. There is no position write in that function: the
+  full disassembly, all 212 instructions of it, contains no FPU instruction at
+  all. `get_xrefs_to 0x009A5C34` is what found the answer, and the useful row
+  was the one nobody was looking for — two READs from `FUN_0045E770`, an
+  unnamed function sitting **immediately before** state 32 in the image. Start
+  at the global, not at the state that reads it.
+* `tools/enemy_gate.mjs` assigns `a.pos` *after* `ActorSpawn` returns, so it
+  overwrites whatever the class's `Init` computed and reported all four
+  passengers at `y0` with the fix in place. `SpawnScriptedCharacters`
+  (the real path) passes `pos` inside the descriptor, before `ActorInitFlags`
+  and the `Init`, which is why the page was right and the harness was not.
+  Twenty minutes on a harness shortcut; `L24`'s shape, two live copies of one
+  behaviour.
+* The locator itself is a **seek to the end of the camera path**: at
+  `frame=599` the carrier has not run its own ride (`path -1 frame 0/0`) and
+  sits at the origin, so the fixed port still reports `d≈2890` there. Played
+  from the spawn instead — `op=39&frame=240`, Space, four seconds — the car is
+  at `path 382 frame 480/590` and the four passengers are at `d=21..30` with
+  one of them swinging. A locator that reproduces a symptom is not always a
+  locator that can show the fix.

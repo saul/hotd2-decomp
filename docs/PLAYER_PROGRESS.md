@@ -191,6 +191,31 @@ the nineteen-unit melee at your face. The engine's own operand bug at
 armed, so it always lands on condition 1 with the left-arm zone bit set, which
 pins its pick to the right-arm swing.
 
+**And the crawler's swing misses now, because the engine's does.** Character
+types `0x07`, `0x0B` and `0x0C` share a body-condition-4 attack entry at
+`0x00566E70` — `{997, 1051, 26.0f, 40, 9, 1}` — whose hit frame is 40 against
+`g_motion_play_length[997]` of 20. `ZombieStateStrike` fires the hit on
+`obj+0x19C == entry+0x08` *exactly* (`00455bdf CMP ECX,EAX` / `JNZ`) and leaves
+the state at `play_length - 1` (`00455c02..0d`), so the equality is never
+reached: the strike never fires, nothing is aborted and nothing is retried, the
+clip plays out and the actor retreats. The condition-4 pick row is ten 2s then
+ten 3s per zone combo, so an **undamaged** crawler always draws that entry and
+always misses; one with its head shot off draws entry 3 — clip 1018, hit frame
+3 — and connects. `[proved]`
+
+The port had it the other way round, and this was divergence 2. The exporter
+dropped the entry as an impossible row, which left the draw naming an index the
+bundle had no attack for, and `ZombiePickAttack` reached for another one — so
+the crawlers landed the swing the engine whiffs, and **the port was more
+dangerous than the game**. The bundle carries the entry and bakes clip 997 now,
+the draw is blind again as the engine's is, and measured against the real
+stage-2 bundle over one minute against a live player: **29 hits landed before,
+0 after**, with the head-shot arm still landing its 29. `verify_port.py` asks
+the bundle for the entry and the clip; `verify_combat.py` asserts the *exact
+set* of three entries the engine can never land, rather than the bound it used
+to impose, because a row misread out of the next character's attacks looks the
+same from the outside and that is what the bound was really for.
+
 `web/tools/throwers.mjs` measures it: nine throwers, all nine net under 0.2
 units of movement against the 4.2-unit swing their throw clips carry and
 return, all nine throw both hands, all nine leave — seven by state 15 and two

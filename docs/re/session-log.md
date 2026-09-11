@@ -15454,3 +15454,126 @@ zombie behind them — in `extract/compare/clip1048/setpiece_g.png`.
    thing that would settle it is the other six spawns that use 1047/1048 —
    two trios three abreast at `(-7/-1/6, 3.2, -370)` in stage 1's two route
    branches, and stage 2's pair at `0x2194`/`0x21C4`.
+
+## Divergence 2 closed — the crawlers' swing is meant to miss
+
+`docs/BUGS.md`'s second "divergence awaiting a call", made faithful on the
+user's decision.
+
+### What the engine does with a hit frame past the end of the clip
+
+The question the fix had to answer first, because "it misses" is not the same
+claim as "it is a no-op", and the port had only ever assumed the weaker one.
+`ZombieStateStrike` (`FUN_00455A40`) sub 2 is two independent tests in one
+pass, and **both operators are load-bearing**:
+
+```
+00455bd2  0fbf4708        MOVSX EAX, word ptr [EDI + 0x8]        ; entry.hit_frame
+00455bd6  8b8e9c010000    MOV   ECX, dword ptr [ESI + 0x19c]     ; the play cursor
+00455bdf  3bc8            CMP   ECX, EAX
+00455be1  7509            JNZ   0x00455bec                       ; -> no hit, at all
+00455be4  e8a7080000      CALL  0x00456490                       ; ActorStrikeConnect
+...
+00455c02  0fbf144dd0074e00 MOVSX EDX, word ptr [ECX*0x2 + 0x4e07d0]
+00455c0a  4a              DEC   EDX                              ; play_length - 1
+00455c0b  3bc2            CMP   EAX, EDX
+00455c0d  7c12            JL    0x00455c21
+00455c0f  ...             MOV   word ptr [ESI + 0x1310], 0x4      ; -> ZombieStateBackOff
+```
+
+The strike is an **exact equality**, and the cursor is reset to 0 when the clip
+starts — `ActorSetMotionBlended` (`FUN_004119A0`) is `param_1[2] = param_3` and
+sub 1 passes 0 — so `obj+0x19C` only ever takes the values
+`0 .. g_motion_play_length[obj+0x1B4] - 1`. A hit frame outside that range is
+unreachable. Nothing is aborted, nothing is retried, no other entry is
+consulted and the state is not left early: **the clip runs to its end and the
+actor retreats having swung and missed.** `[proved]`
+
+Three shipped entries are like that, and they are one row shared by three
+character types — `0x07` (`char_adv00`), `0x0B` (`znkage`) and `0x0C`
+(`znkager`), body condition 4, index 2, `{997, 1051, 26.0f, 40, 9, 1}` at
+`0x00566E70` against `g_motion_play_length[997]` = 20. Their condition-4 pick
+row is ten 2s then ten 3s per zone combo, so the **even** zone combinations —
+every one with the head bit clear — always draw entry 2 and always miss, while
+the odd ones draw entry 3 (clip 1018, hit frame 3) and connect. Shooting the
+crawler's head off is what makes its swing dangerous.
+
+Read on the way, and worth keeping: `ActorStrikeConnect` (`FUN_00456490`) is
+one guard, `((zones & 7) & mask) != mask`, so a cancel mask of **zero** whiffs
+unconditionally. That matters because the ten zeroed attack entries the shipped
+tables carry — types `0x00` cond 0/1, `0x01` and `0x13`/`0x14` cond 4, `0x07`
+cond 6, `0x09`/`0x0F`/`0x10`/`0x11` cond 3, all `{0, 0, 0.0f, 0, 0, 0}` — are
+reachable by real pick rows, and the engine deals no damage on one either.
+
+### What changed
+
+The exporter's hit-frame bound is gone from both halves in the same commit
+(`tools/hod2lib/combat.py`, `web/src/hod2lib/combat.ts`), replaced by
+`attack_hit_lands` / `attackHitLands` carrying the reading. The bound was right
+when the reader **scanned** a fixed number of entries — the rows are adjacent
+with no count, and "hits on frame 40 of a 20-frame clip" is literally what
+reading the next character's attacks produced — but it has been indexed by the
+pick table for longer than that, so its only remaining effect was to delete
+three entries the game really carries. Measured before touching it: across all
+64 character types the bound rejects exactly those three and nothing else, and
+the lunge-length half of the same condition rejects nothing at all.
+
+`ZombiePickAttack` indexes blind now, as sub 0 does. The substitute it used to
+fall back on was the other half of the bug: with entry 2 missing, every draw
+became entry 3.
+
+### The measurement
+
+One `znkager` at body condition 4, sixty seconds against a live player, driven
+off the real stage-2 bundle:
+
+| | strikes | entry drawn | damage landed |
+|---|---:|---|---:|
+| before — entry 2 dropped, entry 3 substituted | 87 | 3 | **29** |
+| after — entry 2 as the table has it | 139 | 2 | **0** |
+| after, head shot off | 87 | 3 | 29 |
+
+More strikes after, because clip 997 is 20 ticks against 1018's 35.
+
+### Two checks, both watched failing
+
+`verify_port.py`'s `check_crawler_whiff` asks the **bundle** for the entry and
+the clip, in the same shape as `check_class31_literal_clips`: there is nothing
+left in `game/` to get wrong, so the way this regresses is the export. All
+three of its arms were mutation-tested against the real bundle — entry 2
+dropped, clip 997 unbaked, and clip 997 given a play length that reaches frame
+40 — and each fails with its own message.
+
+`verify_combat.py`'s check 8 no longer imposes the bound; it asserts the exact
+set of unreachable entries, `[(7, 4, 2, 997, 40, 20), (11, ...), (12, ...)]`.
+That is the half a misread row still has to get past. Both a permissive
+`attack_hit_lands` and a wrong expected set fail it.
+
+And `verify_combat` is in `tools/verify_all.py`'s `CHECKS` now, because it was
+not: the file existed, was green, and **nothing ran it**. It costs 118 seconds,
+which is most of the game-dir suite's new wall time. Seventeen other
+`tools/verify_*.py` are still missing from that list and were not touched here.
+
+### What was nearly got wrong
+
+The first plan was to keep the port's `list[String(v)]` guard and let the
+crawler's entry simply satisfy it, which would have "closed the divergence"
+without removing the substitute — and the substitute is wrong on its own terms
+for the zeroed entries too. Removing it routes those to the `!atk` arm and so
+to `ZombieGiveUpAttack`, which is an existing declared divergence rather than a
+new one; the engine plays motion 0 there, for 69 ticks, and connects nothing.
+No new `[diverges]` was added.
+
+**And I nearly wrote a wrong claim about which of those ten are reachable.** The
+first draft of this entry said `znebi2`/`znebi3`/`znebi4` reach their zeroed
+condition-3 entries in three or four draws out of every ten, on the strength of
+the pick rows alone. They do not: no shipped class-0x30 spawn of types
+`0x0F`–`0x11` is born at condition 3, and `ActorBodyConditionFromHands` returns
+before touching any type outside `0x01` and `0x13`–`0x14`, so their condition
+never moves off what the descriptor gave it. Counted against the twelve
+bundles, exactly **one** of the ten zeroed entries is reachable in shipped
+data: `char_adv02` (type `0x00`) at condition 0, 36 spawns, whose index 0 is
+zeroed and is named ten times by zone combo **7** — head *and* both arms shot
+off. A pick row is a claim about what the table can draw, not about what the
+game ever spawns; the spawn records are the other half and I had not read them.
+`L34` and `L27` are the same shape one level up.

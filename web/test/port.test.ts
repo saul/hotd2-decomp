@@ -75,7 +75,8 @@ import { MotionRow, StrikeSub, ZombieState }
 import { ZombieAttackRefusal, ZombieStateHoldAtRange }
   from "../src/game/class30/hold";
 import { ZombieStateBackOff } from "../src/game/class30/backoff";
-import { ZombieStateStrike } from "../src/game/class30/strike";
+import { ZombiePickAttack, ZombieStateStrike }
+  from "../src/game/class30/strike";
 import { ZombieStateWaitTurn } from "../src/game/class30/wait_turn";
 import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
@@ -7563,6 +7564,154 @@ console.log("\nActorBodyConditionFromHands:");
     ActorBodyConditionFromHands(znassb);
     check("...and only falls to zero when both are empty",
           znassb.condition === 0, String(znassb.condition));
+  }
+}
+
+// -- 33c. the crawler's attack is meant to miss ------------------------------
+
+console.log("\nthe crawler's undamaged swing:");
+{
+  /**
+   * `znkager` cut down to the row that matters: character type 12, body
+   * condition 4 on every one of its 20 shipped spawns, whose condition-4
+   * attack list is two real entries at `0x00566E70`:
+   *
+   * ```
+   *  entry 2  e5 03  1b 04  00 00 d0 41  28 00  09 00  01 00   997 / 1051 / 26.0 / hit 40
+   *  entry 3  fa 03  1b 04  00 00 d0 41  03 00  07 00  08 00  1018 / 1051 / 26.0 / hit  3
+   * ```
+   *
+   * and whose condition-4 pick row is ten 2s then ten 3s per zone combo, so an
+   * **undamaged** crawler always draws entry 2 and a crawler with its head
+   * shot off always draws entry 3.
+   *
+   * Entry 2's hit frame is 40 against `g_motion_play_length[997]` = 20, and
+   * `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08` *exactly*
+   * (`00455bdf`) while leaving the state at `play_length - 1` (`00455c0b`), so
+   * the equality is never reached: the engine's undamaged crawler swings and
+   * misses, every time. The frame counts and play lengths below are the real
+   * bake — 997 is 11 authored frames with a play length of 20, 1018 is 19 with
+   * 35, 1051 is 17 with 31.
+   *
+   * This is divergence 2, closed. The exporter used to drop entry 2 as an
+   * impossible row and `ZombiePickAttack` used to substitute another entry
+   * when the draw named one the bundle had no row for, which between them
+   * handed the crawler entry 3 — a swing that connects. Measured against the
+   * real stage-2 bundle: 29 hits landed in a minute before, 0 after.
+   */
+  const CRAWL = {
+    "2": { strike: 997, lunge: 1051, distance: 26, hit_frame: 40,
+           player_motion: 9, cancel_mask: 1 },
+    "3": { strike: 1018, lunge: 1051, distance: 26, hit_frame: 3,
+           player_motion: 7, cancel_mask: 8 },
+  };
+  const CRAWL_PICKS = Array.from({ length: 80 },
+                                 (_, i) => (i % 20 < 10 ? 2 : 3));
+  const TYPE_CRAWLER = {
+    ...TYPE,
+    type: 12, name: "znkager", file: "znkager.bin",
+    attacks: { ...TYPE.attacks, "4": CRAWL },
+    attack_picks: { ...TYPE.attack_picks, "4": CRAWL_PICKS },
+    motion_row: { ...TYPE.motion_row, "4": [10, 10, 12, 12, 14] },
+    reactions: { ...TYPE.reactions, "4": TYPE.reactions["0"] },
+    motions: { ...TYPE.motions, "997": motion(11, 0.2, 20),
+               "1018": motion(19, 0.2, 35), "1051": motion(17, 0.6, 31) },
+  } as unknown as CharacterType;
+  const CHARS_CRAWLER = {
+    ...CHARS, types: { "1": TYPE, "12": TYPE_CRAWLER },
+  } as unknown as CharactersJson;
+
+  const crawler = (zones: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_CRAWLER);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_camera_fixed_eye_y = 0;
+    const z = ActorSpawn(0x4048, SpawnClass.Zombie, 12, "znkager", {
+      initialState: ZombieState.AttackRun, condition: 4,
+    });
+    if (z.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
+    z.visible = true;
+    z.attackState = 1;
+    z.hp = z.maxHp = 10000;         // it must survive the whole measurement
+    z.zones = zones;
+    z.pos = vec3(0, 0, 60);
+    z.motion = 12;
+    return z;
+  };
+
+  // The draw, on its own. `ZombiePickAttack` indexes blind, as the engine
+  // does: the substitute that used to sit behind this is what made the
+  // crawlers dangerous.
+  {
+    const z = crawler(0);
+    const rng = new Rng(3);
+    const drawn = new Set<number>();
+    for (let i = 0; i < 200; i++) drawn.add(ZombiePickAttack(z, rng));
+    check("an undamaged crawler draws entry 2, every time",
+          drawn.size === 1 && drawn.has(2), `drew {${[...drawn].join(",")}}`);
+    z.zones = DamageZone.Head;
+    drawn.clear();
+    for (let i = 0; i < 200; i++) drawn.add(ZombiePickAttack(z, rng));
+    check("...and with its head shot off, entry 3",
+          drawn.size === 1 && drawn.has(3), `drew {${[...drawn].join(",")}}`);
+  }
+
+  // The draw must not be second-guessed against the list. A pick naming an
+  // index the bundle has no row for is the ten **zeroed** entries the shipped
+  // tables carry, and the engine deals no damage on one of those either.
+  {
+    const z = crawler(0);
+    const rng = new Rng(3);
+    const bare = {
+      ...TYPE_CRAWLER,
+      attacks: { ...TYPE.attacks, "4": { "3": CRAWL["3"] } },
+    } as unknown as CharacterType;
+    const bareChars = {
+      ...CHARS, types: { "1": TYPE, "12": bare },
+    } as unknown as CharactersJson;
+    SetGameTables(bareChars);
+    check("a draw the list cannot satisfy is still the draw",
+          ZombiePickAttack(z, rng) === 2, String(ZombiePickAttack(z, rng)));
+  }
+
+  // And the whole thing running: sixty seconds of one crawler with a live
+  // player in front of it.
+  const minute = (zones: number) => {
+    const z = crawler(zones);
+    const rng = new Rng(5);
+    const events = new Events();
+    let damaged = 0;
+    events.on("player.damaged", () => { damaged += 1; });
+    let strikes = 0;
+    let was = false;
+    const drawn = new Set<number>();
+    for (let i = 0; i < 3600; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      const now = z.state === ZombieState.Strike;
+      if (now && !was) strikes += 1;
+      if (now && z.attack >= 0) drawn.add(z.attack);
+      was = now;
+    }
+    return { strikes, damaged, drawn: [...drawn].sort() };
+  };
+
+  {
+    const m = minute(0);
+    check("it gets its swing in", m.strikes > 10, `${m.strikes} strikes`);
+    check("...on entry 2", m.drawn.length === 1 && m.drawn[0] === 2,
+          `drew {${m.drawn.join(",")}}`);
+    // The point of the whole change.
+    check("...and lands no damage at all, because clip 997 never reaches "
+          + "frame 40", m.damaged === 0, `${m.damaged} hits landed`);
+  }
+  {
+    // The other arm, so that "no damage" is a property of the entry and not
+    // of the fixture: shoot the head off and the same crawler connects.
+    const m = minute(DamageZone.Head);
+    check("a crawler with its head shot off draws entry 3 and does connect",
+          m.damaged > 0 && m.drawn.length === 1 && m.drawn[0] === 3,
+          `${m.damaged} hits on {${m.drawn.join(",")}}`);
   }
 }
 

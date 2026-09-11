@@ -16279,6 +16279,372 @@ named these because the state was unported.
   advances the counter and nothing else. `tools/shot.mjs --press Space` says so
   and had been in front of me the whole time.
 
+---
+
+## Session — a gate held by an actor, on a route nothing had ever played
+
+**Outcome:** stage 3's block 2 step 3 op 4 no longer parks. Two more hangs
+found behind it and filed as `[open]` (`PLAYER_HANGS.md` items 22 and 23).
+
+### The reproduction, and why it had never been seen
+
+    cd web && node tools/playthrough.mjs --stage 3 --entry 7 --headless
+
+`--entry` did not exist. `playthrough.mjs` built its URL as
+`?stage=N&drive=1&seed=S` and the player's `entry=` parameter — which has been
+there since format 5 — was unreachable from it, so of the fourteen entry routes
+in the six stages the harness had played six. Stage 3's **block 2 is on neither
+entry-0 route**: block 0 branches to 1 or 3 and the lowest-block rule takes 3.
+So a seven-step block of shipped script had never been executed by anything,
+and it held two hangs one behind the other.
+
+1110 frames on `45 wait_script_flag 0x15` at evt `0x0029E8`, 5/5.
+
+### The mechanism
+
+The report came with the established fact that every one of the ~40 gates names
+a flag its own stage never sets. **That is not true of this one.** Stage 3 sets
+flag 21 in block 1 step 5 (evt `0x001D00`) and block 1 is only on the entry-0
+route. The route that hangs gets the flag from an actor:
+
+`StoryModeSwitchUpdate` (`FUN_00474F30`), class 0x44 selector 17. Its head is
+a despawn test on `obj+0x2A4`, then `if (g_scene_index == 1) {...} else if
+(scene == 2 && g_evt_block_index == 2 && obj+0x192 == 0) g_script_flags[0x15]
+= 1;` at `0x00474FA6` — and the `CMP dword [0x009CA08C], 1 / JNZ` that gates
+the rest of the routine is at `0x00474FB4`, **seven bytes later**. So the flag
+write runs in Arcade too. `[proved]` by disassembling `0x00474F30`–`0x00474FCF`
+rather than by reading the pseudocode, which presents the arms in an order that
+does not make the position of the mode gate obvious.
+
+Stage 3's switch is the one **block 7 step 8** spawns (evt `0x3630`). Its
+removal flag is 22, which block 2 step 3 raises at its own end — so the step
+the switch opens is also the step that takes it away.
+
+The port's `class41/branch.ts` opened `StoryModeSwitchUpdate` with
+`if (G.g_GameMode !== GameMode.Original) return;` and its doc comment listed
+"the `g_script_flags[0x15]` it raises there" among the things not transcribed.
+`L26` exactly: a divergence in prose with no assertion behind it, which reads
+as settled and therefore never gets looked at. The whole head above the mode
+gate now lives in `StoryModeSwitchPoolUpdate`, next to the two despawn tests
+that were already there.
+
+### What was wrong on the way
+
+1. **The `--entry 7` in the reported command was silently ignored.** The first
+   thing I did was run it verbatim; it started at entry 0 and the hang did not
+   reproduce, which for a few minutes looked like a non-deterministic bug. It
+   is not: `opt()` in `playthrough.mjs` reads any `--name value` pair, but
+   nothing read `entry`, so the flag parsed and did nothing. A harness that
+   accepts an option it ignores is worse than one that rejects it.
+2. **The bundle in `extract/player` was stale and the page hung on the loading
+   overlay** — `L33`, and indistinguishable from a hang under a headless
+   harness. `gen_schema_hash.py` and `gen_builder_hash.py` both said "already
+   current", so the mismatch was on the *bundle* side, not the tree's. A
+   re-export fixed it, and because this is a worktree it wrote to the
+   worktree's own `extract/player` rather than the shared one.
+3. **`blocksReachableFrom` had its `queue.shift()` inside a `find` predicate.**
+   `Array.find` calls the predicate once per element, so the first comparison
+   consumed the queue and the other seventeen compared against `undefined`.
+   The route walk returned `{entry}` and nothing else, and the assertion it
+   fed failed with a message that read like a data problem
+   (`on-route blocks {} of {3,7,9}`). Caught only because the expected answer
+   was known.
+4. **I nearly wrote `ZombieStateDragTarget` into item 23 as
+   `FUN_0045BF60`-ish** from memory of the neighbourhood. It is `FUN_0045C080`,
+   class 0x30 state **43**, and the annotation says so. `L20`: a citation is a
+   claim.
+
+### What is behind it
+
+Two hangs, both `[open]` and both on routes that had never run:
+
+* **Stage 3 block 2 step 6 op 8.** `g_enemies_present` is 2 with
+  `g_enemies_alive` 0, so a dead civilian's killed script sits on
+  `CivilianWait.EnemiesPresent` for ever and `wait_scripted_actors 0` never
+  comes down. The two enemies still counted are parked in class 0x30 **state
+  12 sub 1** (`ZombieStateDeathFallAndBounce`, `FUN_00456DF0`), whose wait is
+  `obj+0x19C >= 0x3C`. In the exe that cursor reaches 60 because
+  `g_motion_play_length[0x3F9]` is 85 (`0x004E0FC2` = `0x0055`). In the port it
+  never moves: `MotionPlayFrame` answers `0` for a clip the character type has
+  not got, and **no character type in any of the twelve bundles has motion 1017
+  baked**. So nothing in the port can leave state 12 anywhere, and every actor
+  that enters it holds the present count for the rest of the stage. The fix is
+  either an exporter change (bake the clip — a format change in both halves of
+  `hod2lib`, and whether motion 1017's stride matches these rigs is `[open]`)
+  or a declared `[diverges]`, which is the user's call.
+* **Stage 4 entry 4, block 9 step 1 op 50.** One `znkage` in
+  `ZombieStateDragTarget` (state 43, `FUN_0045C080`) at 90 hit points, `d=4`,
+  70 volleys and no damage, and the debug clear did not take it either.
+  Nothing read.
+
+### Next actions
+
+1. Decide stage 3 item 22: bake clip `0x3F9`, or declare the divergence.
+2. Read `ZombieStateDragTarget` for item 23 before touching anything — start
+   with whether the actor holds `ActorFlag.ShotImmune`.
+3. Read the route pass's work-list in `node tools/run_ts.mjs
+   tools/flag_gates.ts`. Every `0xF8`/`0xFE` gate, stage 4's `0x1F` and `0x20`
+   and stage 5's `0x00` and `0x1E` are gates an actor holds, and each is a
+   routine the port must run for that stage to advance.
+
+## The last three descriptor-slot types, and the pose order that was one type's
+
+Picking up the two `[open]` notes the shutter-and-van session left: add types
+31, 53 and 54 to `GENERIC_DESCRIPTOR_SLOT`, and give the renderer each generic
+type's own rotation order instead of type 51's.
+
+**Both counts in those notes were wrong, and re-deriving them was the point.**
+
+*Ten more spawns* is right, and nine of them are in the twelve exported
+bundles — the tenth is the training scene's type 54, which the player does not
+export. Fine.
+
+*Fifteen posed wrongly* is not. Two mistakes, in opposite directions. The
+criterion used was "two or more non-zero angles", and the order only matters
+when **yaw and roll** are both non-zero: `Rx` is last in every one of these
+compositions, so all an order can disagree about is whether `Ry` or `Rz` comes
+first, and with either of those at zero the two matrices are equal. Type 5's
+four stage-2 spawns carry a pitch and a yaw and no roll and were never
+misplaced. The count was also taken over six stages rather than twelve bundles.
+The real number is **20 spawns, four of them by more than a degree** — all four
+`PropDrawOnlyType12`, stage 4, worst 19.65° — and the other sixteen by fifths
+of a degree. Which leads to the finding that mattered most:
+
+### `L37` again, twice, and it changed what two of these types *are*
+
+`MatrixStackPop` is marked no-return, so Ghidra ends a function body at that
+`CALL`. Both strip types lose their tail to it:
+
+* `PropDrawOnlyType31` (`FUN_0046A1C0`): the pseudocode is a draw of
+  `obj+0x28C + obj+0x2A0` with **nothing that ever writes `obj+0x2A0`** — and
+  the existing annotation said exactly that, "the draw's addend is the pool's
+  zero". `0x0046A334`–`0x0046A35B` increments it and wraps it at `obj+0x2A4`.
+  It is an **effect strip**, not a static prop: 39 frames of `eff_1.bin`, ten
+  of `eff_taki.bin`, thirty more of it.
+* `PropDrawOnlyType33` (`FUN_00472950`): the identical tail at `0x004729B4`
+  with `JMP ActorKill` where 31 wraps.
+* `PropDrawOnlyType53` (`FUN_0046EBD0`): `0x0046EC6D`–`0x0046EDB9` draws **two
+  more camera-facing animated strips** in blocks 4 and 5, and one of its two
+  spawns is placed in block 4. The annotation called it "a model at the spawn's
+  pose for a handful of steps and nothing else".
+
+And the strip length is the spawn descriptor's **third orientation word**:
+`PlaceGenericProp`'s arms at `0x0046205E` and `0x004620BE` copy the placer's
+`+0x6C` to `obj+0x2A4`, which the prologue has *also* copied to `obj+0x1D4`.
+One word, a frame count and a roll, both real — and it is why those sixteen
+spawns move by a fifth of a degree rather than a real angle.
+
+`disassemble_bytes` from the address `get_function_by_address` reports as
+`body_end` is the whole technique. It is worth running on every routine whose
+pseudocode ends in a tail call, not only when something looks missing: nothing
+looked missing in type 31's, which is why the wrong reading was already in the
+TSV.
+
+### `DAT_009C720C` is not a global
+
+Type 54 drifts while `DAT_009C720C == 1`. `0x009C7200` is `g_script_flags`, so
+that is **element 12** — Ghidra's own symbol at the address hides the array.
+Stage 5's script raises flag 12 in block 5 step 2; block 4, where the prop is
+placed, branches to 5 or 6 and block 6 gotos 5, so the drift is always taken
+and adding type 54 without porting it really would have put a static model
+where the game has one tumbling away. The same flag is the stage-2 boss's
+summon gate and is raised in seven of stage 6's blocks.
+
+`DAT_009A2BAC` is a global, and now `g_scene_tick_counter`: `FUN_0040E730`
+steps it once a game tick beside `g_frame_counter` and
+`g_blink_frame_counter`, `ResetSceneOnEnter` zeroes it (`XOR EBX,EBX` at the
+top of the routine, `MOV [0x009a2bac],EBX` at `0x0045EE23`), the save path
+stores and restores it, and nothing else writes it. `FUN_0046EEE3` tests it
+`== 0` to mean the scene's first tick, which only works if that is what it
+holds; every other reader takes it modulo something small as an animation
+phase. What still distinguishes it from the other two is thin — all three are
+per-tick counters with different reset scopes — so the name is about what it
+counts and not about which of the three it is.
+
+### What the scanner got wrong before it got it right
+
+The pose order is read by scanning each routine for `E8` calls to the three
+`MatrixRotate*` entry points and matching each to the field the instruction
+before it pushed. Three versions were wrong in ways worth recording:
+
+1. **Matching the axis and not the argument.** `PropUpdateType19` rotates Y by
+   a literal `0xC000`, then Z, then Y again, then X. By axis that is a fourth
+   order; by argument it is the same `Rz · Ry · Rx` as its neighbours, plus a
+   constant. It also poses from `obj+0x64/68/6C`, the actor fields, because its
+   object is an enemy — `L3`.
+2. **Claiming an order when no draw was found.** With a 0x400-byte window four
+   of the Original Mode collectibles never reached their `AssetDrawSlot`, so
+   the scan named whatever rotation it had last seen. That made the blast
+   radius read 60 spawns and 44 "invented rotations", none of which were real.
+   It returns `Unread` now when it cannot see the draw, and the invented count
+   is zero.
+3. **Picking a sub-part's pose.** `FUN_004717A0` poses one part from the
+   descriptor's yaw and a second from `obj+0x1DC`, and the run nearest the
+   first draw is the second part's. It returns `Unread` there too.
+
+Each of those would have put a confident wrong row in a table the renderer
+reads. `[open]` is a useful answer and the check now gives it three ways.
+
+### The check the van needed, and the one it still does not have
+
+`tools/verify_prop_slots.py` reads `GENERIC_DESCRIPTOR_SLOT` out of the
+exporter, so it cannot fail a type that should be in that set and is not —
+written down in its own docstring as its blind spot. `verify_prop_pose.py`
+derives the set from the EXE instead: which routines take `obj+0x28C` into
+their first draw (`0F BF /r` with a disp32 of `0x28C`), and which add
+`obj+0x2A0` to it. The strip set comes out exactly `{31, 33}` and is asserted
+in both copies. The descriptor set does **not** come out at seven: fourteen
+routines take that field, and seven of the extra are explained by an arm of
+`PlaceGenericProp`'s switch overwriting it with a literal. Five are not, so
+that direction is a printed work list and not an assertion — `43` in
+particular has **seven spawns, all in stage 3**, the stage a previous report
+measured as carrying no scenery at all.
+
+The pose check also counts the renderer's own rotate sites, one per angle. The
+code this was written for had two of each, and chose between them on the prop's
+*family* — which is how all fifty generic types got type 51's order without
+anything being able to disagree.
+
+---
+
+## 2026-09-11 — the clip root is one absolute track with two consumers, and the port had one of them
+
+Settling `docs/BUGS.md`'s last `[open]` on the stage-2 car rider: its clip's
+root translation is a constant `(0, 15.692, 11.943)` and nothing in the port
+ever took the forward 11.943, so the model sat inside the car's cabin instead
+of on its bonnet. The question the entry left open was **which of the engine's
+two root routines is relative to which**, and the answer is *neither*.
+
+### What each routine does
+
+`SkeletonPoseRootFrame` (`FUN_00410920`) — despite the annotation that said it
+"applies the root translation and rotation", **it emits no `MatrixTranslate` at
+all.** It opens with a per-track pre-pass, now named
+`SkeletonResolveTrackFrames` (`FUN_00410BD0`), which caches each track's frame
+pointer into `g_motion_frame` or its cross-fade weight into
+`g_motion_fade_weight` (`0x007C1C30` and `0x007C1C24`, `+4*track`; `[proved]`
+from `EBP = 0x007C1C10` / `EBX = 0x007C1C04` with `ESI` stepping 4 from `0x20`).
+It then takes track 0's root translation — three floats, or the two tracks'
+lerped by that weight — writes it to `model+0x6C..0x74`, hands a **pointer** to
+it to `SkeletonApplyRootMotion`, and pushes only bone 0's `RotZ; RotY; RotX`.
+
+`SkeletonApplyRootMotion` (`FUN_00410C50`) is therefore the *only* consumer of
+the root translation, and it tests `model+0x64` bit 1 **twice**:
+
+* `0x00410D2F` — does the frame-to-frame delta move the object? `delta = root -
+  model+0x1160`, through `T(obj+0x40) Rz Ry Rx S(model+0x116C)`, written back to
+  `obj+0x40`/`obj+0x48` (and `obj+0x44` too when bit `0x10` is up).
+* `0x00411005` — which part of the same translation goes on the draw matrix?
+  `MatrixTranslate(0, root.y, 0)` with the bit **set**,
+  `MatrixTranslate(root.x, root.y, root.z)` with it **clear**.
+
+So the two are not nested and neither is relative to the other: they are two
+consumers of one absolute track, and one bit picks exactly one of them. A clip's
+root either moves the object or offsets the pose — never both, never neither.
+
+**`L37` again, and it is why this was `[open]`.** Ghidra ends the gated arm at
+its `MatrixStackPop(1)` and shows a `return`. The bytes at
+`0x00410E5F`–`0x00410E93` write the baseline and **fall through** into the
+shared tail that does the pose translate, the `model+0x10 = model+0x18` and the
+pose hook. Read from the pseudocode alone, the second gate test is dead code in
+the arm it appears in, and the routine has no second arm at all.
+
+The baseline is a field, not a remembered frame index, and nothing lets it turn
+an *absolute* root into a step: `ActorSetMotion` seeds it from the new clip's
+frame 0 when the gate is set (`TEST AL,2` at `0x00411966`, then
+`FUN_00412F50(type, motion, 0)` and three stores), `ActorSetMotionBlended`
+writes `track+0x37 = (old & 0xDF) | 1` — exactly the pair the routine tests
+before resetting the baseline to the current root — and a loop wrap is damped
+rather than taken. The port's frame-to-frame delta was already right.
+
+### The port
+
+`render/characters/pose.ts` applied the y-only arm **unconditionally**, with a
+comment asserting the other half was already handled. It is the reading that
+was missing, not the code: `MotionFlag.RootMotion` in `game/actor.ts` has
+described both arms correctly, in prose, since it was written — `L26` exactly,
+a claim with an alibi. The fix is the gate inline in `apply` and `applyBlend`
+(inline because an engine *function* called from `render/` fails
+`render-drives-the-port`, and the engine's own test is one `TEST` anyway), plus
+the one line `RescueTargetInit` was missing: `AND EDX,0xFFFFFFFD` at
+`0x00451759`, which takes bit 1 straight back out of the `3`
+`ActorBuildSkinnedModel` had just written. Class 0x21 and `CivilianRunScript`
+are the only two things in the game that clear it.
+
+### The blast radius, measured before it was changed
+
+`tools/verify_root_pose.py` is the new check and it holds both halves: ten
+instructions quoted as hex at their addresses, and the population.
+
+* **992 of 1058 motion blocks have an exactly zero horizontal root on frame 0**,
+  so for all but 64 the two arms draw in the same place. That is why a
+  collapsed arm survived this long.
+* Of the 140 clips the shipped class-0x10 scripts set, **three** can be posed
+  with a non-zero horizontal root — `people.bin` 596, 598 and 600, one root of
+  2.882 units, one use each — against 289 wait words that ask for root motion
+  and 307 that do not.
+* Plus `zom.bin` 998 at 11.943, which is the actor in the report.
+
+So four actors in six stages, and the second arm is a pose: no world position
+moves at all. `civ_walk.mjs` reports the stage-1 rescue civilian walking the
+identical `20.87 over 590 frames (56,-194) -> (37,-186)` either side of the
+change, and `playthrough.mjs` is unchanged across the six stages.
+
+The picture is the evidence (`L19`). At stage 2 block 0 step 2, driven frame
+440, camera 57 frame 258: **before**, the rider's knees are at the windscreen
+and its torso is inside the cabin; **after**, it lies clear along the bonnet
+with its hands on the far wing. `web/shots/rider_{before,after}_440.png`.
+
+### Wrong turns and things worth knowing
+
+* **The Ghidra MCP bridge went away mid-session** — `list_instances` returned
+  none, so the two routines were finished with `capstone` over the PE directly
+  (`pip install --break-system-packages capstone`, a 30-line section walker).
+  That is what found the fall-through, because a linear sweep does not stop
+  where a decompiler stops. The consequence is that **nothing was renamed in
+  the live database**: `SkeletonResolveTrackFrames`, `g_skeleton_model`,
+  `g_motion_frame` and `g_motion_fade_weight` exist in
+  `ghidra/annotations/*.tsv` and not yet in the project, so the next session to
+  open it should apply them before `export-annotations` can be trusted.
+* **A scan for writes of `model+0x64` through `obj+0x1F8` missed both the
+  civilian and the rescue target**, because both hold the model base in a
+  register and write `[reg+0x64]`. `L32`'s lesson one struct along: the offset a
+  field is written at depends on which pointer the routine kept. Scanning both
+  spellings found eleven classes that write that word.
+* The first two screenshots were taken at the reporter's own locator, `step=3
+  op=31 frame=150` and `frame=268`, and neither shows the rider — the camera is
+  behind the car at both. Sampling the Actors panel across 700 driven frames
+  found it at `d=65` on frame 440, which is the shot worth taking. The panel is
+  the player's own readout and reading it is what `civ_walk.mjs` already does.
+* `g_cur_actor_model` was the obvious name for `0x009CA0A0` and is already
+  taken, by `0x007DD09C` — a different scratch pointer for class 0x10.
+  `g_skeleton_model` instead.
+
+### Left open
+
+* **`model+0x116C` scales the pose offset in the engine and nothing in the port
+  applies it.** The translate sits inside `MatrixScale`, so a 0.9 character
+  offsets by 0.9 of what its clip authored; neither `hod2lib.characters` nor
+  `render/characters.ts` scales a drawn character at all, so the offset is left
+  unscaled to match the model it offsets. Two of the three civilian clips
+  belong to `scale 0.9` types, so the honest correction there is 2.594 and not
+  2.882 — and fixing it means scaling the drawn character, which is a change to
+  every skinned actor's size.
+* **The death clip is the one declared override**, and it is not a second
+  reading: the engine has no death track, and `ActorAdvanceMotion` does not run
+  root motion through a death, so `pose.ts` keeps the whole root there. The two
+  models agree wherever the clip's frame-0 horizontal root is zero, which is
+  992 blocks of 1058. Making it gate-driven means giving the death clip root
+  motion in `game/`.
+* **`MotionFlag.RootMotionY`, bit `0x10`**, still has no writer. Nine other
+  classes write `model+0x64` and none of the values were read here.
+* The engine's wrap damper is `baseline = root + (root - baseline)/play_length`,
+  which makes the applied delta `(baseline_old - root)/play_length`;
+  `rootDelta` in `game/root_motion.ts` computes `(root - root[0])/frames`
+  instead. Both are small and neither was touched, but they are not the same
+  number and nothing asserts either.
+
+---
 
 ## The hit voice, consolidated into one copy in the engine
 

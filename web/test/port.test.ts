@@ -35,7 +35,8 @@ import { ActorKillAll } from "../src/game/combat/resolve_hit";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { MotionFlag, type Boss2Actor } from "../src/game/actor";
+import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
+  from "../src/game/actor";
 import { CameraPointRiseFor, UpdateCameraFreeFlag }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
@@ -186,6 +187,7 @@ import {
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
   PlaceBreakableGroup, PropContainerPlacerUpdate, PlaceKindedProp,
   KindedPropUpdate, PropFamily, KIND_SLOT, SLOT_NONE, PlaceGenericProp,
+  GENERIC_POSE_ORDER, GENERIC_SLOT_STRIP, PoseOrder,
   LiftUpdate, LiftFlag, LIFT_NEAR_CLOSED, LIFT_NEAR_OPEN,
   LIFT_FAR_CLOSED, LIFT_PANEL_CLOSED, LIFT_PANEL_OPEN, LIFT_PANEL_DELAY,
   LIFT_RIDE_DROP, LIFT_HINGE_STEP, SFX_LIFT_GATE, SFX_LIFT_PANEL,
@@ -196,6 +198,10 @@ import {
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import {
+  SCRIPT_FLAG_TYPE54_DRIFT, TYPE31_DESPAWN_CAM_FRAME,
+  TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
+} from "../src/game/class41/draw_only";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
 import {
   CLASS21_HP_BY_RANK, CLASS21_MOTION_FREED, g_st2car_path_table,
@@ -208,6 +214,9 @@ import {
 import {
   PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
+import {
+  STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
+} from "../src/game/class41/branch";
 import {
   BamsHalfway, FallingContainerUpdate, PlaceFallingContainer,
   PropBuildScriptFlagEffect, ScriptFlagEffectFlag, ScriptFlagEffectUpdate,
@@ -1798,6 +1807,162 @@ console.log("\nclass 0x41, the generic props:");
         door.slot === 0x1032 && door.hp === 1, door.slot.toString(16));
 }
 
+console.log("\nclass 0x41's three draw-only types:");
+{
+  // ---- type 54: the drift is authored, and it is the only exit ----------
+  const rng = new Rng(54);
+  propScene(rng);
+  const p = PlaceGenericProp({
+    at: 0xb000, container: "generic", type: 54, slot: 0x18a1,
+    lifetime_evt_steps: 0x18a1, field_1f4: 5, pos: [583, -67, -7773.4],
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("a type-54 prop is its own family, not the inert Generic arm",
+        p.family === PropFamily.DrawOnlyType54, `${PropFamily[p.family]}`);
+  check("...and PlaceGenericProp case 0x36 seeds all five drift rates",
+        p.vx === 5 && p.vy === 1.5 && p.vz === -4
+        && p.spin === 0x300 && p.yawSpin === -0x400,
+        `${p.vx}/${p.vy}/${p.vz} ${p.spin}/${p.yawSpin}`);
+  // Flag 12 down: it stands exactly where the script put it, for ever. There
+  // is no lifetime prologue on this routine at all.
+  G.g_script_flags[SCRIPT_FLAG_TYPE54_DRIFT] = 0;
+  for (let i = 0; i < 400; i += 1) BreakablePropPoolUpdate(rng);
+  check("with g_script_flags[12] down it does not move and does not retire",
+        G.g_breakable_props.length === 1 && p.x === 583 && p.storyItem === 0,
+        `${G.g_breakable_props.length} @ ${p.x} f${p.storyItem}`);
+  // Raised: five units of X a frame, and dead on the frame after 300.
+  G.g_script_flags[SCRIPT_FLAG_TYPE54_DRIFT] = 1;
+  BreakablePropPoolUpdate(rng);
+  check("...raised, it drifts five units of X and one frame",
+        p.x === 588 && p.storyItem === 1 && p.spin === 0x300
+        && p.pitch === 0x300, `${p.x} f${p.storyItem} p${p.pitch}`);
+  // `CMP EAX,0x12C` is on the count BEFORE the increment, so the frames that
+  // read 0..300 all draw -- 301 of them -- and the 302nd is the one that dies.
+  for (let i = 0; i < TYPE54_DRIFT_FRAMES; i += 1) {
+    BreakablePropPoolUpdate(rng);
+  }
+  check("...and it is still alive after 301 frames of drift",
+        G.g_breakable_props.length === 1 && p.storyItem === 301,
+        `${G.g_breakable_props.length} f${p.storyItem}`);
+  BreakablePropPoolUpdate(rng);
+  check("...and dies on the 302nd, because the compare is pre-increment",
+        G.g_breakable_props.length === 0, `${G.g_breakable_props.length}`);
+}
+
+{
+  // ---- type 31: an effect strip that wraps, and a camera cue ------------
+  const rng = new Rng(31);
+  propScene(rng);
+  // Stage 3's three, whose roll word 9 is a ten-frame strip of eff_taki.bin.
+  const p = PlaceGenericProp({
+    at: 0xb100, container: "generic", type: 31, slot: 0x0d01,
+    lifetime_evt_steps: 0x0d01, field_1f4: 4,
+    pos: [-1139, -12.9, -3962.5], pitch: 0, yaw: -0x2edc, roll: 9,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("a type-31 prop takes its strip length from the roll word",
+        p.removeFlag === 9 && p.slot === 0x0d01 && p.storyItem === 0,
+        `len ${p.removeFlag} slot ${p.slot.toString(16)}`);
+  check("...and the same word is still its roll, because both are the engine's",
+        p.roll === 9);
+  check("...with its lifetime from desc+0x24 and not from its own slot",
+        p.lifetime === 4, `${p.lifetime}`);
+  BreakablePropPoolUpdate(rng);
+  check("...it steps one frame of the strip a tick", p.storyItem === 1,
+        `${p.storyItem}`);
+  for (let i = 0; i < 8; i += 1) BreakablePropPoolUpdate(rng);
+  check("...and shows the last frame of a ten-frame loop, which is 9",
+        p.storyItem === 9, `${p.storyItem}`);
+  BreakablePropPoolUpdate(rng);
+  // The reset is in the same frame as the increment, so 10 is never held: a
+  // roll word of 9 is ten frames, 0..9, and `slot + 10` is never asked for.
+  check("...then back to 0 -- the cursor never reaches the strip length",
+        p.storyItem === 0, `${p.storyItem}`);
+  // The camera cue: exact path AND exact frame, or nothing happens.
+  G.g_active_cam_path = TYPE31_DESPAWN_CAM_PATH;
+  G.g_cam_path_frame = TYPE31_DESPAWN_CAM_FRAME - 1;
+  BreakablePropPoolUpdate(rng);
+  check("its camera cue is an equality: one frame early removes nothing",
+        G.g_breakable_props.length === 1, `${G.g_breakable_props.length}`);
+  G.g_cam_path_frame = TYPE31_DESPAWN_CAM_FRAME;
+  BreakablePropPoolUpdate(rng);
+  check("...and on the frame itself it goes",
+        G.g_breakable_props.length === 0, `${G.g_breakable_props.length}`);
+}
+
+{
+  // ---- type 53: its own inline lifetime, with no scene-1 sweep ----------
+  const rng = new Rng(53);
+  propScene(rng);
+  const p = PlaceGenericProp({
+    at: 0xb200, container: "generic", type: 53, slot: 0x002b,
+    lifetime_evt_steps: 0x002b, field_1f4: 6,
+    pos: [626.9, -71.1, -6422.6], yaw: -0x5555,
+  }, rng);
+  G.g_breakable_props.push(p);
+  check("a type-53 prop is its own family and its lifetime is desc+0x24",
+        p.family === PropFamily.DrawOnlyType53 && p.lifetime === 6,
+        `${PropFamily[p.family]} ${p.lifetime}`);
+  // Six step changes are survivable; the seventh is not.
+  for (let i = 1; i <= 6; i += 1) {
+    G.g_evt_step_index = i;
+    BreakablePropPoolUpdate(rng);
+  }
+  check("...it survives exactly as many step changes as its lifetime",
+        G.g_breakable_props.length === 1 && p.stepsElapsed === 6,
+        `${G.g_breakable_props.length} after ${p.stepsElapsed}`);
+  G.g_evt_step_index = 7;
+  BreakablePropPoolUpdate(rng);
+  check("...and dies on the one after", G.g_breakable_props.length === 0,
+        `${G.g_breakable_props.length}`);
+}
+
+{
+  // The sweep the shared prologue has and this routine does not. Scene 1 with
+  // flag 0x77 raised clears every prop that runs `PropExpireByStepLifetime`;
+  // a type-53 prop is not one of them, and folding it into the shared arm
+  // because its two shipped spawns are in scene 4 is the mistake `L27` names.
+  const rng = new Rng(153);
+  propScene(rng);
+  G.g_scene_index = 1;
+  const p = PlaceGenericProp({
+    at: 0xb300, container: "generic", type: 53, slot: 0x002b,
+    lifetime_evt_steps: 0x002b, field_1f4: 6, pos: [0, 0, 0],
+  }, rng);
+  const q = PlaceGenericProp({
+    at: 0xb301, container: "generic", type: 5, slot: 0x0fd2,
+    lifetime_evt_steps: 6, pos: [0, 0, 0],
+  }, rng);
+  G.g_breakable_props.push(p, q);
+  G.g_script_flags[0x77] = 1;
+  BreakablePropPoolUpdate(rng);
+  check("the scene-1 sweep clears a prologue prop and leaves a type-53 alone",
+        G.g_breakable_props.length === 1
+        && G.g_breakable_props[0].family === PropFamily.DrawOnlyType53,
+        `${G.g_breakable_props.map((r) => PropFamily[r.family]).join()}`);
+}
+
+console.log("\nclass 0x41's pose orders come from the routines:");
+{
+  // The table the renderer reads. `tools/verify_prop_pose.py` is what says
+  // the values match the EXE; this is what says the port's own three types
+  // are in it and that the set the fix was about did not drift.
+  check("type 51 is the only descriptor-slot type that composes Ry.Rz.Rx",
+        GENERIC_POSE_ORDER[51] === PoseOrder.YawRollPitch
+        && [5, 12, 31, 33, 53, 54].every(
+          (ty) => GENERIC_POSE_ORDER[ty] === PoseOrder.RollYawPitch),
+        `${[5, 12, 31, 33, 51, 53, 54].map((ty) => GENERIC_POSE_ORDER[ty])
+          .join()}`);
+  check("the descriptor-slot set is the seven types that draw obj+0x28C",
+        [5, 12, 31, 33, 51, 53, 54].every(
+          (ty) => GENERIC_DESCRIPTOR_SLOT.has(ty))
+        && GENERIC_DESCRIPTOR_SLOT.size === 7,
+        `${[...GENERIC_DESCRIPTOR_SLOT].join()}`);
+  check("and the two strip types are the two whose roll is a count",
+        GENERIC_SLOT_STRIP.has(31) && GENERIC_SLOT_STRIP.has(33)
+        && GENERIC_SLOT_STRIP.size === 2, `${[...GENERIC_SLOT_STRIP].join()}`);
+}
+
 console.log("\nclass 0x41 type 34 is a falling container:");
 {
   const rng = new Rng(9);
@@ -2861,6 +3026,26 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           a.rescue.route === 0 && g_st2car_path_table[0] === 0x148,
           `route ${a.rescue.route}`);
 
+    // **And it turns root motion off**, one instruction after
+    // `ActorBuildSkinnedModel` turned it on: `MOV EDX,[EDI+0x64];
+    // AND EDX,0xFFFFFFFD; MOV [EDI+0x64],EDX` at `0x00451753`-`0x00451760`.
+    // Class 0x21 is one of exactly two things in the game that clear the bit.
+    //
+    // It is not bookkeeping. With the bit clear `SkeletonApplyRootMotion`
+    // (`FUN_00410C50`) poses the clip root's **whole** translation instead of
+    // only its y, and motion 0x3E6's root is the constant
+    // `(0, 15.692, 11.943)` on all sixteen frames -- so the missing line put
+    // the rider 11.943 units along its own +Z, out over the car's bonnet.
+    // `render/characters/pose.ts` reads this bit and `test/pose.test.ts`
+    // asserts the two arms; this is the half that says the bit is right.
+    check("...and it clears model+0x64 bit 1 -- root motion OFF",
+          (a.motionFlags & MotionFlag.RootMotion) === 0,
+          `motionFlags ${a.motionFlags}`);
+    check("...which is a departure from what the build leaves",
+          (MOTION_FLAGS_INIT & MotionFlag.RootMotion) !== 0
+          && a.motionFlags === (MOTION_FLAGS_INIT & ~MotionFlag.RootMotion),
+          `${MOTION_FLAGS_INIT} -> ${a.motionFlags}`);
+
     // **It is on the car.** `RescueTargetPoseFromRoute` (`FUN_00451E50`) puts
     // it at `g_st2car_path_table[obj+0x1350]`'s pose, and sub 0 then adds a
     // drop-in of `(0, 50 - frame, 50 - frame)` rotated by that pose's own yaw.
@@ -3446,6 +3631,88 @@ console.log("\nthe branch writers: every route the game can choose:");
     G.g_script_flags[62] = 1;
     BreakablePropPoolUpdate(rng);
     check("...its own removal flag does", sw.dead);
+  }
+
+  // `g_script_flags[0x15]`, which the switch's HEAD raises -- `0x00474FA6`,
+  // before the `CMP g_GameMode, 1` at `0x00474FB4`. Stage 3's block 2 step 3
+  // is `wait_script_flag 0x15` and on the block-7 -> block-8 route nothing
+  // else in the stage sets it, so with this write missing the stage parked on
+  // that instruction for ever. Every arm of the engine's `if`/`else if` is
+  // here, because the one that made the bug invisible is the `else`.
+  {
+    const [SCENE, BLOCK] = STORY_SWITCH_FLAG_AT;
+    const flag = () => G.g_script_flags[STORY_SWITCH_SCRIPT_FLAG] ?? 0;
+    /** Stage 3's own switch: evt `0x3630`, removal flag 22, keyed on 0 and 6. */
+    const place = () => {
+      const p = PlaceStoryModeSwitch({
+        at: 0x4004, container: "story_switch", lifetime_evt_steps: 1,
+        branch_flag: -1, remove_flag: 22, keys: [0, 0, 6, 6],
+        pos: [0, 0, 0] });
+      G.g_breakable_props.push(p);
+      return p;
+    };
+
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const sw = place();
+    check("the switch's flag is down before its first frame", flag() === 0);
+    BreakablePropPoolUpdate(rng);
+    check("in scene 2 block 2 the switch raises g_script_flags[0x15] "
+          + "IN ARCADE -- the write is before the mode gate",
+          flag() === 1, String(flag()));
+    check("...and it is still standing: this is the head, not a despawn",
+          !sw.dead);
+
+    // The mode gate is below the write, so Original Mode raises it too.
+    propScene(rng, GameMode.Original);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("...and in Original Mode as well", flag() === 1, String(flag()));
+
+    // `g_evt_block_index == 2` is the whole of the block test; the switch
+    // stands in stage 3's blocks 7 and 8 first and must write nothing there.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = 8;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("a block the head does not name raises nothing", flag() === 0,
+          String(flag()));
+
+    // The `else`: scene 1 takes the despawn arm and never reaches the write,
+    // which is why five of the twelve switches in the game are in blocks that
+    // would otherwise match.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = 1;
+    G.g_evt_block_index = BLOCK;
+    place();
+    BreakablePropPoolUpdate(rng);
+    check("scene 1 is the OTHER arm of the same `if` and raises nothing",
+          flag() === 0, String(flag()));
+
+    // `obj+0x192 == 0` -- unthrown. A thrown switch hands the flag to the
+    // second write, behind the mode gate and the item spawn, which is not
+    // ported: see `StoryModeSwitchUpdate`.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const thrown = place();
+    thrown.branchLatched = true;
+    BreakablePropPoolUpdate(rng);
+    check("a thrown switch stops raising it", flag() === 0, String(flag()));
+
+    // ...and the removal flag still wins, because it is tested first.
+    propScene(rng, GameMode.Arcade);
+    G.g_scene_index = SCENE;
+    G.g_evt_block_index = BLOCK;
+    const gone = place();
+    G.g_script_flags[22] = 1;
+    BreakablePropPoolUpdate(rng);
+    check("its removal flag is tested BEFORE the write, and takes it away",
+          gone.dead && flag() === 0, `${gone.dead} / ${flag()}`);
   }
 
   // Original Mode only, every one of them. Arcade reaches types 14, 19 and 25

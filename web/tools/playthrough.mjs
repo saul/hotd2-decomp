@@ -118,6 +118,7 @@
  *
  *   node tools/playthrough.mjs --stage 2
  *   node tools/playthrough.mjs --stage 2 --headless --hang 1200
+ *   node tools/playthrough.mjs --stage 3 --entry 7 --headless
  *
  * Exit status is 0 only if the stage reached an end block.
  */
@@ -288,6 +289,13 @@ const started = Date.now();
 // driver to shoot that actor during block 0, which {@link shootable} declines
 // because the gate there is neither an enemy nor a civilian one. That is a
 // real coverage gap and it is open.
+//
+// It is also **not a deep link**: the run starts at a real entry block and
+// plays forward, so it exercises the stage's own rebuild path and not the
+// seek's. And it is not cosmetic coverage -- stage 3's block 2 is on neither
+// entry-0 route, so until this existed a seven-step block of shipped script
+// had never been executed by anything, and it held two hangs. See
+// `docs/PLAYER_HANGS.md` items 21 to 23.
 const entry = opt("entry", null);
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`

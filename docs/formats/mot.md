@@ -154,6 +154,38 @@ halfway, silently. That is what left the civilians alive under their captors:
 stage 1's four maul cues are 24, 30, 62 and 64 against clips of 41, 26, 43 and
 46 frames, so only the 24 ever fired.
 
+### And a clip nothing names is a clip nothing carries
+
+`g_motion_play_length` is a table of 1058 entries; a bundle carries a few
+hundred. The exporter bakes only what something it has **read** names — there
+is no fallback, for the reason `charmotion`'s module docstring gives — so the
+bake set is an inventory of routines that have been read, and a routine nobody
+read is a clip nobody carries.
+
+The port's answer for a clip that is not there is `MotionPlayFrame` returning
+**0**, and what that does depends on the shape of the wait the state is on:
+
+| the state's exit | with no clip | what it looks like |
+|---|---|---|
+| `cursor >= play_length - 1` | true on the **first** frame, because `play_length` is 0 too | a state that ends instantly. A condition-4 crawler with no `0x404` snapped straight to a corpse. |
+| `cursor >= <a literal>` | **never** true | an actor parked for the rest of the stage |
+
+The second is a hang and reads as a transcription bug rather than as a missing
+asset, which is why it has cost this project a session twice. Class 0x30's
+state 12 is `if (obj+0x19C < 0x3C) return;` against
+`g_motion_play_length[0x3F9]`, which is **85** — and `0x3F9` was baked for no
+character type in any of the twelve bundles, so nothing in the port could
+leave state 12 anywhere in the game and every actor that entered it held
+`g_enemies_present` for ever. `PLAYER_HANGS.md` 22.
+
+Three checks stand where the reading used to: `verify_scripted_clips.py` for
+what a class-0x25 program and a class-0x20 descriptor name,
+`verify_death_clips.py` for what `ChooseDeathMotion` names, and
+`tools/entrances.mjs` for whether the twelve entrance states end. The first
+asks the exporter and the second reads a real bundle, deliberately: the
+TypeScript half is the only writer of a bundle, and asking the Python half
+would go green on a fix that reached no byte the player loads (`L24`).
+
 ## Banks
 
 47 named banks hold 967 motion ids; `verify_mot.py` walks 49 (two hold props

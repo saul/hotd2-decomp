@@ -137,6 +137,15 @@ CHECKS: list[Check] = [
           "because nothing carried their geometry, which from the level looks "
           "exactly like a placement that was never exported",
           NEEDS_BUNDLE),
+    Check("verify_death_clips", ".",
+          ["python3", "tools/verify_death_clips.py"],
+          "that every clip `ChooseDeathMotion` can put on a dying class-0x30 "
+          "actor is baked for that spawn's own character type -- the only "
+          "check that reads a death clip out of a real bundle, and the one "
+          "that says whether an actor can leave state 12 at all, since that "
+          "state's exit is an exact `obj+0x19C >= 0x3C` against a play clock "
+          "that is 0 for a clip nothing carried",
+          NEEDS_BUNDLE),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

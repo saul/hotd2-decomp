@@ -386,7 +386,14 @@ const TYPE: CharacterType = {
     // The death of an actor still holding something: 1017 (0x3F9) is what
     // `ChooseDeathMotion` gives it and 1016 (0x3F8) the clip
     // `ZombieStateDeathFallAndBounce` cuts to when the body lands.
-    "1017": motion(40), "1016": motion(20),
+    //
+    // Both carry their **real** shape from `zom.bin` and their real
+    // `g_motion_play_length`, and 1017's 85 is the load-bearing half: state 12
+    // sub 1 is `if (obj+0x19C < 0x3C) return;`, a literal 60 measured against
+    // that play clock. A fixture that left `play` to be derived from the frame
+    // count would pass on a bundle that got it wrong, and the whole of
+    // `PLAYER_HANGS.md` 22 is an actor that never reached 60.
+    "1017": motion(44, 0, 85), "1016": motion(36, 0, 69),
     // 987 (0x3DB) is the clip `ChooseDeathMotion` gives body conditions 5 and
     // 6 — the two that die through state 9 rather than state 6.
     "987": motion(24),
@@ -9932,12 +9939,83 @@ console.log("class 0x30, dying with a weapon still in hand:");
   for (let i = 0; i < 40; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("...then falls under gravity", z.sub === 2 && z.pos.y < y0,
         `sub ${z.sub}, ${y0} -> ${z.pos.y}`);
+  // The present count is what the scripts wait on, and state 12 is the one
+  // death path that holds it past the death clip: `ReleaseEnemyPresentCount`
+  // (`FUN_00456580`) runs in `ZombieEnterCorpseState` and nowhere else, so
+  // every frame of the fall is a frame `wait_enemies_present` and
+  // `wait_scripted_actors` cannot come down.
+  check("...holding `g_enemies_present` for the whole fall",
+        G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
   for (let i = 0; i < 400; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     if (z.state === ZombieState.CorpseSink) break;
   }
   check("...and settles into the corpse", z.state === ZombieState.CorpseSink,
         `state ${z.state} sub ${z.sub} y ${z.pos.y}`);
+  check("...which is where it gives the present count back",
+        G.g_enemies_present === 0, `present ${G.g_enemies_present}`);
+}
+
+/**
+ * **What state 12 costs when its clip is not in the bundle**, pinned as a test
+ * rather than left as a sentence.
+ *
+ * `PLAYER_HANGS.md` 22 and the shape of it: sub 1 is
+ * `if (obj+0x19C < 0x3C) return;`, an exact literal against the play clock of
+ * clip `0x3F9`, and `MotionPlayFrame` answers **0** for a clip the character
+ * type has not got. No character type in any of the twelve shipped bundles had
+ * `0x3F9` baked, so no actor in the port could leave state 12 anywhere in the
+ * game, `ZombieEnterCorpseState` never ran, and `g_enemies_present` never
+ * fell. Stage 3's block 2 hung on a `wait_scripted_actors` behind a dead
+ * civilian who was herself parked on `CivilianWait.EnemiesPresent`.
+ *
+ * The fix is in the exporter -- `CLASS30_DEATH_CLIPS`, checked over the real
+ * bundles by `tools/verify_death_clips.py`, because a hand-written fixture that
+ * carries the clip is exactly what cannot see an exporter that does not. This
+ * block is the other half: it says out loud that state 12's exit **is** the
+ * clip's play clock, so a future attempt to clear the hang by short-circuiting
+ * the wait, by special-casing a missing clip, or by making `MotionPlayFrame`
+ * answer for a clip it has not got, fails here rather than looking like a fix.
+ */
+console.log("class 0x30 state 12, with no clip to wait on:");
+{
+  const rng = new Rng(14);
+  // Same fixture, one clip poorer. Everything else is `TYPE`, so the only
+  // difference between this block and the one above is the bundle.
+  const noFall = { ...TYPE.motions } as Record<string, unknown>;
+  delete noFall["1017"];
+  const TYPE_NO_FALL = { ...TYPE, motions: noFall } as unknown as CharacterType;
+  const CHARS_NO_FALL = {
+    ...CHARS, types: { "1": TYPE_NO_FALL },
+  } as unknown as CharactersJson;
+
+  ResetGameGlobals();
+  SetGameTables(CHARS_NO_FALL);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_nFiringGate = 1;
+  const events = new Events();
+  const z = spawnZombie(0x3520, 1, "axe man, no fall clip");
+  z.visible = true;
+  z.hp = 1;
+  z.pos = vec3(0, 40, 0);
+  z.flags |= ActorFlag.HoldingWeapon;
+  z.dead = true;
+  z.flags |= ActorFlag.Dead;
+  z.pendingHit = { bone: 1, result: 1 };
+
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("state 6 still sends it to state 12 -- the bit decides, not the clip",
+        z.state === ZombieState.DeathFallAndBounce, `state ${z.state}`);
+  // Ten times the sixty ticks the state is waiting for.
+  for (let i = 0; i < 600; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("...and with no 0x3F9 the play cursor never reaches 0x3C",
+        MotionPlayFrame(z) === 0, `cursor ${MotionPlayFrame(z)}`);
+  check("...so it is still in sub 1 after 600 frames",
+        z.state === ZombieState.DeathFallAndBounce && z.sub === 1,
+        `state ${z.state} sub ${z.sub}`);
+  check("...and `g_enemies_present` is leaked for the rest of the stage",
+        G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
 }
 
 console.log("`ActorKillAll` routes class 0x30 through its death chain:");

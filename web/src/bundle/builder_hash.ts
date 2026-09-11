@@ -26,9 +26,9 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "1c65a70fbca7c44852140a82d39469d7e0d1e394e6334eba920ce4e92b89efe7",
+  "characters.ts": "bd6735d9d9745672642625f6c5f6fcc6a7ee4521e99696932dff7da4c98d2845",
   "charbuild.ts": "8bdd7139c7753be5fe07aae6dae33411b39f68bfc661160eebc4e3ff06225a80",
-  "charmotion.ts": "55476f9eb54abf0782004ea2b7c186b08a10455281dfa0c9e3b3b448e788e8df",
+  "charmotion.ts": "13ff6fc8d34bd7b04b911d377303e641b6c8a23f951b8443ed50c591f53110f4",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
   "combat.ts": "02cc51f38c9f39cd341ca9aa44cf5c5d1f33894db0e3e7b9fae9df228b2504b3",
@@ -55,4 +55,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "1e3a15746df4924131e292f9e07d629a07cb41ad32f497a5894f159a7ff2dd66";
+export const BUILDER_HASH = "f6a62fa1e093bdc06bd9c6509c597d7ddb9da51b04b8121c321f7a0119f12cc7";

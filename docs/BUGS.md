@@ -2453,6 +2453,25 @@ investigation ruled out.
   exported, and each arc stage measures its exit against the clip's own frame,
   so an actor whose clip is missing waits for ever rather than merely sliding.
 
+- `[fixed]` **The fish were three and a third times too big.** `FishDraw`
+  (`FUN_00439860`) sets `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9` before it
+  hands the slot to `AssetDrawSlot`, and `FishSwimAwayTick` (`FUN_00439C20`)
+  does the same at `0x00439CF8`. `render/slotmodels.ts` cloned the model and
+  drew it at one, because until class 0x51 arrived **no slot-drawn class had a
+  scale at all** — `MouseWanderUpdate` (`FUN_0043F5C0`) and `OwlDrawBodyChain`
+  (`FUN_00447C20`) make no such call, which a scan of both routines confirms.
+
+  `DrawScaleFor` sits beside `DrawSlotFor` now and for the same reason: the
+  size is a property of the drawing routine rather than of the model, and there
+  is no general actor scale in the engine either. The shot sphere is not scaled
+  with it — `obj+0x124` stays 2.1 whatever the draw does, which is the engine's
+  arrangement.
+
+  The two other `MatrixScale` calls in the class are the flattened silhouette
+  on the water surface, `(0.4, 0.01, 0.4)` at `0x0043994F` and `0x00439A4A`.
+  That is a **second draw of the same model at a different place** and the
+  layer has no way to express one; it stays declared in `game/class51/`.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

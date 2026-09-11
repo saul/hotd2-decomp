@@ -17407,3 +17407,38 @@ The port test for this state had never had an arc script either — it ran under
 `CHARS`, which has no class-0x31 block, while every other class-0x31 test runs
 under `CHARS31`. It passed because the old implementation needed no script. It
 is moved to the `thrower()` fixture with the exe's own twelve dwords in it.
+
+---
+
+## The fish were too big, and nothing before them had a size at all
+
+Reported as *"the fish are way too big"*, and the number is exact: three and a
+third.
+
+`FishDraw` (`FUN_00439860`) sets the matrix before it hands the slot over —
+`MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, and `FishSwimAwayTick`
+(`FUN_00439C20`) repeats it at `0x00439CF8`. `render/slotmodels.ts` cloned the
+model, forced `scale` to one and never touched it again.
+
+**The reason it had never mattered** is worth the entry. The layer draws four
+classes and until class 0x51 arrived none of them scaled: a scan of
+`MouseWanderUpdate` (`FUN_0043F5C0`) and of all 0x384 bytes of
+`OwlDrawBodyChain` (`FUN_00447C20`) finds no `MatrixScale` call at all. So
+"clone it and put it there" was a complete description of every routine the
+layer had to serve, and the first one that disagreed was three times too big on
+screen with nothing in the code to say why.
+
+`DrawScaleFor` sits beside `DrawSlotFor` and is a `switch` for the same reason:
+there is no general actor scale in the engine, each routine sets its own, and a
+class absent from the switch draws at one because its routine does.
+
+Two things that are *not* scaled with it, both deliberate:
+
+* **The shot sphere.** `obj+0x124` is 2.1 whatever the draw does. The engine
+  never scales it either — `ShotTestSphere` reads the field, not the matrix.
+* **The surface silhouette**, `(0.4, 0.01, 0.4)` at `0x0043994F` and
+  `0x00439A4A`. That is a second draw of the same model at a different place,
+  which this layer cannot express; it stays declared in `game/class51/`.
+
+Caught by a render assertion that reads the node's scale, mutation-tested by
+putting the 1 back.

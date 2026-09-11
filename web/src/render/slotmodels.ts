@@ -117,6 +117,38 @@ function DrawSlotFor(a: Actor): number | null {
 }
 
 /**
+ * How big the drawing routine draws it, where that is not life size.
+ *
+ * **A property of the routine, not of the model.** Each class's own draw sets
+ * the matrix before it hands the slot to `AssetDrawSlot`, so the number lives
+ * beside {@link DrawSlotFor} and for the same reason: there is no general
+ * "actor scale" in the engine either.
+ *
+ * A class absent here draws at one, and most do — `MouseWanderUpdate`
+ * (`FUN_0043F5C0`) and `OwlDrawBodyChain` (`FUN_00447C20`) make no
+ * `MatrixScale` call at all, which is a fact about their code rather than an
+ * omission here.
+ */
+function DrawScaleFor(a: Actor): number {
+  switch (a.cls) {
+    case SpawnClass.WaterEnemy:
+      // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, and again at
+      // `0x00439CF8` in `FishSwimAwayTick` (`FUN_00439C20`). A fish drawn at
+      // one is three and a third times the size of the one in the game, which
+      // is what it looked like.
+      //
+      // The **other** two scale calls in the class are the flattened
+      // silhouette on the water — `(0.4, 0.01, 0.4)` at `0x0043994F` and
+      // `0x00439A4A` — and that is a second draw of the same model at a
+      // different place, which this layer has no way to express. It is
+      // declared in `game/class51/`.
+      return 0.3;
+    default:
+      return 1;
+  }
+}
+
+/**
  * `ScriptedHumanoidDraw`'s (`FUN_00484FF0`) object-path arm, placed.
  *
  * ```c
@@ -276,6 +308,8 @@ export class SlotModelLayer implements System<RenderContext> {
       // the mouse draws at `obj+0x40`/`obj+0x68`, and class 0x25's variant 3
       // draws at an object-path pose the actor never stores. Same switch as
       // {@link DrawSlotFor}, and it stays a switch for the same reason.
+      const k = DrawScaleFor(a);
+      live.node.scale.set(k, k, k);
       if (a.cls === SpawnClass.ScriptedHumanoid) {
         PlaceOnObjectPath(a, live.node, ctx.paths);
       } else if (a.cls === SpawnClass.ScriptedScenery) {
@@ -306,6 +340,15 @@ export class SlotModelLayer implements System<RenderContext> {
 
   resync(ctx: RenderContext): void {
     this.update(ctx);
+  }
+
+  /**
+   * The node drawn for one actor, or null. For the tests: the placement and
+   * the scale are the two things this layer decides, and neither is visible
+   * through {@link SlotModelLayer.describe}.
+   */
+  nodeFor(at: number): Object3D | null {
+    return this.nodes.get(at)?.node ?? null;
   }
 
   /**

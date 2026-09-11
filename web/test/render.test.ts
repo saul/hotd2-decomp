@@ -1196,6 +1196,43 @@ console.log("\nan asset-slot actor is drawn, and can be shot:");
   check("a dead actor loses its node", layer.describe().startsWith("0 drawn"),
         layer.describe());
   G.g_object_list.length = 0;
+
+  // **The scale is the drawing routine's, and most routines do not set one.**
+  // `MouseWanderUpdate` (`FUN_0043F5C0`) makes no `MatrixScale` call, so a
+  // mouse is life size; `FishDraw` (`FUN_00439860`) calls
+  // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, so a fish drawn at one is
+  // three and a third times too big -- which is what it looked like.
+  {
+    const fishRoot = new Obj3D();
+    const fishPart = new Obj3D();
+    fishPart.name = "slots_actor_fixed000_slot_1156";
+    fishPart.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+    fishRoot.add(fishPart);
+    const fishLayer = new SlotModelLayer();
+    fishLayer.adopt(fishRoot);
+    const f = makeActor(0x4321, SpawnClass.WaterEnemy, -1, "fish");
+    if (f.cls !== SpawnClass.WaterEnemy) throw new Error("not class 0x51");
+    f.fish.frame = 0x1156;
+    f.pos = { x: 0, y: 0, z: -20 };
+    G.g_object_list.push(f);
+    fishLayer.update(ctx);
+    const node = fishLayer.nodeFor(0x4321);
+    check("a fish is drawn at the 0.3 its own routine sets",
+          !!node && Math.abs(node.scale.x - 0.3) < 1e-6
+          && Math.abs(node.scale.y - 0.3) < 1e-6,
+          node ? `${node.scale.x}` : "no node");
+
+    const m = makeActor(0x4322, SpawnClass.Mouse, -1, "mouse");
+    if (m.cls !== SpawnClass.Mouse) throw new Error("not class 0x52");
+    m.mouse.frame = MOUSE_FIRST_SLOT;
+    m.pos = { x: 0, y: 0, z: -20 };
+    G.g_object_list.push(m);
+    layer.update(ctx);
+    const mn = layer.nodeFor(0x4322);
+    check("...and a mouse at the one its own routine does not set",
+          !!mn && mn.scale.x === 1, mn ? `${mn.scale.x}` : "no node");
+    G.g_object_list.length = 0;
+  }
 }
 
 console.log("\nclass 0x25's object-path draw is under the actor, not at it:");

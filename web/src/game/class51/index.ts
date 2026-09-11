@@ -61,7 +61,15 @@
  * covered, because `FishCheckShot` raises `NoCameraTrack` itself.
  *
  * The draw is `render/`'s: this class is drawn by asset slot, so it goes
- * through `render/slotmodels.ts` exactly as class 0x52 does.
+ * through `render/slotmodels.ts` exactly as class 0x52 does — **including its
+ * size.** `FishDraw` sets `MatrixScale(0.3, 0.3, 0.3)` before it hands the
+ * slot over, at `0x00439AC9` and again at `0x00439CF8`, and that scale is a
+ * property of the routine rather than of the model: `DrawScaleFor` in that
+ * file is where it lives, beside the slot it belongs with. Drawn at one the
+ * fish is three and a third times the size of the one in the game.
+ *
+ * `obj+0x124` is not scaled with it. The shot sphere is 2.1 whatever the draw
+ * does, which is the engine's arrangement too.
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";

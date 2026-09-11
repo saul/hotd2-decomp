@@ -45,27 +45,42 @@ was not: `FUN_004107E0` writes exactly one slot per bone into the draw record,
 turned out to be the per-bone **hit sphere** (`combat.HIT_SPHERES`), which is
 why its first word is compared against the node's slot.
 
-**[open] Twenty-one character types have no extra part, and one shows it.**
-``EXTRA_PARTS`` is a null pointer for 21 of the 86 types that have a skeleton
--- the cat and most of the bosses among them, where nothing is obviously
-missing. Type 0 is `char_adv02`, the commonest zombie, and it is: its
-*undamaged* torso model (slot ``0x1B3D``) reaches ``y -2.0..5.5`` and covers
-its own abdomen, so it looks right until it is shot. The first two damaged
-stages of bone 1, slots ``0x1B70`` and ``0x1B71``, are **chest-only** --
-``y 1.3..5.5``, and the parse is exact, 124 and 102 vertices against the
-model's own declared counts -- so from the first torso hit until the third
-there is nothing drawn between the pelvis (top at ``y -0.45``) and the chest.
+**Twenty-one character types have no extra part, and the one that showed it
+was a different mechanism entirely.** ``EXTRA_PARTS`` is a null pointer for 21
+of the 86 types that have a skeleton -- the cat and most of the bosses among
+them, where nothing is obviously missing. Type 0 is `char_adv02`, the commonest
+zombie, and it looked like the exception: its *undamaged* torso model (slot
+``0x1B3D``) reaches ``y -2.0..5.5``, the first two damaged stages of bone 1
+(``0x1B70`` and ``0x1B71``) are chest-only at ``y 1.35..5.53``, and the pelvis
+tops out at ``y -0.45``, so a shot zombie had a 1.75-unit hole where its
+midriff should be.
 
-What has been ruled out for the missing band: `AssetDrawSlot` (`FUN_00418560`)
-draws one model per slot, so a bone cannot draw two; `FUN_004122E0`, the only
-other thing `SkeletonDrawWalk` consults per node, **suppresses** a draw rather
-than adding one, and only for bone 9 on ten named slots; and `harold.bin`
-carries five lower-torso models at slots ``0x1B6B..0x1B6F``, of exactly the
-missing extent and exactly as many as bone 1 has damage stages, which **no
-table in the EXE references** -- an exhaustive scan finds the run only in the
-`pol/` slot lists themselves. Whether the retail game shows the same hole is
-undetermined; if it does not, something outside the skeleton walk draws it.
-See `web/src/render/characters/gore.ts`.
+The band is drawn by `ZombieDrawBonePart` (`FUN_004534A0`), class 0x30's
+**per-bone draw callback** -- installed at ``obj+0x12EC`` by `EnemyZombieInit`
+and called by `SkeletonEmitNode` *instead of* `SkeletonDrawNodeSlot`. It
+switches on the slot the bone is currently drawing, and for ``0x1B70`` and
+``0x1B71`` it draws that slot **and** a second model, ``0x1B52 + (counter +
+obj+0x3C * 10) % 30``: a thirty-cel flipbook of the lower torso. For the
+undamaged ``0x1B3D`` it draws no such thing as ``0x1B3D`` at all -- a twenty-cel
+chest, ``0x1B3E + seed % 20``, plus the same lower torso. Stages ``0x1B72``,
+``0x1B73`` and ``0x1B74`` fall to the default arm and draw alone, and those
+three are exactly the ones whose own geometry already reaches ``y -2.02``,
+which is the check on the reading.
+
+What this docstring used to say about the band, and why it was wrong: the two
+things ruled out were ruled out correctly -- `AssetDrawSlot` (`FUN_00418560`)
+draws one model per slot and `FUN_004122E0` only ever **suppresses** a draw --
+but "so a bone cannot draw two" does not follow, because the *hook* calls the
+draw as many times as it likes. It also said ``harold.bin`` carries five
+lower-torso models at ``0x1B6B..0x1B6F`` "of exactly the missing extent and
+exactly as many as bone 1 has damage stages, which no table in the EXE
+references". The scan was right that no table names them and the file was
+wrong -- they are in **both** `char_adv02.bin` and `harold.bin` -- and the run
+is ``0x1B52..0x1B6F``, thirty models, not five: reading only the last five of
+it is what made the count look meaningful. The selection is arithmetic in the
+hook, so no amount of scanning for a table could have found it.
+`web/src/game/class30/bonecels.ts` carries the table, the measurements and the
+seven arms that are not yet ported.
 """
 
 from __future__ import annotations

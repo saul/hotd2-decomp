@@ -19,6 +19,7 @@
  */
 
 import { composeBams, rotMatrix } from "./bams";
+import { g_class30_bone_cels } from "../game/class30/bonecels";
 import { u32 } from "./bytes";
 import { MOTION_ROW_BACKOFF, actorRadius, attackPicks, attackTables,
          damageRankRow, goreParts, hitReactions, hitSphere, hitSteps,
@@ -514,6 +515,24 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
   for (const h of zhands) {
     for (const v of [h.held, h.bare, h.projectile]) {
       if (v) want.add(v as number);
+    }
+  }
+  // **And the cel runs a bone draws instead of, or as well as, its own model.**
+  // `ZombieDrawBonePart` (`FUN_004534A0`) is class 0x30's per-bone draw hook
+  // and it computes these slots arithmetically, so no table names them and
+  // nothing in the export could have found them. Without them `char_adv02` has
+  // nothing to draw between a damaged chest and the pelvis -- the 1.75-unit
+  // midriff hole -- because slots `0x1B70` and `0x1B71` are chest-only and the
+  // lower torso is a thirty-cel run of its own. Filtered by what this
+  // character's bones can actually be showing, so a bundle only carries the
+  // runs its own trigger slots reach.
+  const triggers = new Set<number>();
+  for (const b of char.bones) if (b.slot) triggers.add(b.slot);
+  for (const s of char.gore.keys()) triggers.add(s);
+  for (const [slot, arm] of Object.entries(g_class30_bone_cels)) {
+    if (!triggers.has(Number(slot))) continue;
+    for (const r of arm.runs) {
+      for (let i = 0; i < r.count; i++) want.add(r.base + i);
     }
   }
   for (const slot of [...want].sort((a, b) => a - b)) {

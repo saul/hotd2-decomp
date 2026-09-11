@@ -41,13 +41,19 @@ exporter carry `eff_3.bin` for every crate in the game.
 **That exclusion is this check's blind spot, and it is where the van hid.** The
 check reads the same table the exporter does, so a type that *should* be in the
 set and is not is invisible to it -- mutate `GENERIC_DESCRIPTOR_SLOT` back to
-`[5, 12, 33]` and the rising doors are caught at once while the van is not. So
-the blind spot is written down rather than left implicit: the set is **seven**
-types by the routines -- 5, 12, 31, 33, 51, 53 and 54, every one of them read
-and annotated -- and three of those are deliberately still out, which is ten
-shipped spawns of scenery this check is currently agreeing to miss. See
-`GENERIC_DESCRIPTOR_SLOT` in `web/src/game/class41/generic.ts`. Closing it is
-adding a type with its retirement rule read; loosening this check is not.
+`[5, 12, 33]` and the rising doors are caught at once while the van is not.
+The set is **seven** types by the routines -- 5, 12, 31, 33, 51, 53 and 54 --
+and all seven are in it now, so the ten spawns this check was agreeing to miss
+are covered. The blind spot itself has not closed: this is still a check on the
+exporter's table rather than on the routines, and `tools/verify_prop_pose.py`
+is the one that reads the fifty routines out of the EXE.
+
+**Two of the seven draw a strip, not a slot.** `PropDrawOnlyType31`
+(`FUN_0046A1C0`) and `PropDrawOnlyType33` (`FUN_00472950`) pass
+`obj+0x28C + obj+0x2A0` and step that cursor a frame at a time, with the strip
+length in the descriptor's third orientation word, so every frame of the strip
+is a slot a placed prop will really ask for and every one of them is checked
+here. Carrying only the base would have been the van's bug one frame deep.
 
     python3 tools/verify_prop_slots.py
     HOTD2_BUNDLE=/path/to/export python3 tools/verify_prop_slots.py
@@ -97,13 +103,23 @@ def breakable_slots(gltf: dict) -> set[int]:
     return out
 
 
+def _int_list(name: str) -> set[int]:
+    """One `export const <name> = [...]` in the exporter, read and not copied."""
+    text = BUNDLE_TS.read_text(encoding="utf-8")
+    m = re.search(name + r"\s*=\s*\[([^\]]*)\]", text)
+    if not m:
+        raise SystemExit(f"{BUNDLE_TS}: {name} not found")
+    return {int(x, 0) for x in m.group(1).replace("\n", " ").split(",") if x.strip()}
+
+
 def descriptor_slot_types() -> set[int]:
     """`GENERIC_DESCRIPTOR_SLOT`, read out of the exporter."""
-    text = BUNDLE_TS.read_text(encoding="utf-8")
-    m = re.search(r"GENERIC_DESCRIPTOR_SLOT\s*=\s*\[([^\]]*)\]", text)
-    if not m:
-        raise SystemExit(f"{BUNDLE_TS}: GENERIC_DESCRIPTOR_SLOT not found")
-    return {int(x, 0) for x in m.group(1).replace("\n", " ").split(",") if x.strip()}
+    return _int_list("GENERIC_DESCRIPTOR_SLOT")
+
+
+def strip_types() -> set[int]:
+    """`GENERIC_SLOT_STRIP`, read out of the exporter."""
+    return _int_list("GENERIC_SLOT_STRIP")
 
 
 def static_slots() -> dict[int, list[int]]:
@@ -152,8 +168,10 @@ def main() -> int:
         return 3
 
     want_types = descriptor_slot_types()
+    strips = strip_types()
     literals = static_slots()
-    print(f"descriptor-slot types: {sorted(want_types)}")
+    print(f"descriptor-slot types: {sorted(want_types)}  "
+          f"(strips: {sorted(strips)})")
     print(f"literal draw lists: {len(literals)} types, "
           f"{sum(len(v) for v in literals.values())} slots")
 
@@ -161,6 +179,7 @@ def main() -> int:
     checked = 0
     doors = 0
     bodies = 0
+    frames = 0
     stages = 0
     for entry in json.loads(manifest.read_text())["stages"]:
         name = entry["name"]
@@ -186,9 +205,18 @@ def main() -> int:
                 ty = pl.get("type")
                 if ty in want_types:
                     slot = pl.get("slot") or 0
+                    # A strip type draws `slot .. slot + roll` inclusive, one
+                    # frame a tick; every frame is a slot it will really ask
+                    # for. See `GENERIC_SLOT_STRIP`.
+                    span = max(0, pl.get("roll") or 0) if ty in strips else 0
                     if slot:
-                        want.append((slot, f"type {ty}'s descriptor slot"))
+                        for i in range(span + 1):
+                            why = f"type {ty}'s descriptor slot"
+                            if span:
+                                why += f" + {i} of its {span + 1}-frame strip"
+                            want.append((slot + i, why))
                         bodies += 1
+                        frames += span
                 for lit in literals.get(ty, []):
                     want.append((lit, f"a literal type {ty} draws"))
             for slot, why in want:
@@ -204,7 +232,8 @@ def main() -> int:
         return 3
 
     print(f"{stages} bundles: {checked} prop draw slots, all resolved "
-          f"({doors} rising doors, {bodies} descriptor-slot props)")
+          f"({doors} rising doors, {bodies} descriptor-slot props, "
+          f"{frames} extra strip frames)")
     if bad:
         for line in bad[:40]:
             print(f"  {line}")

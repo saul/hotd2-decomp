@@ -219,6 +219,27 @@ export function ActorDespawnProp(p: BreakableProp): void {
 }
 
 /**
+ * `ActorKill` (`FUN_004A7040`) as a prop sees it.
+ *
+ * A **different** exit from {@link ActorDespawnProp}, and two of the generic
+ * draw-only types take this one: `PropDrawOnlyType53` at the end of its
+ * inline lifetime and `PropDrawOnlyType54` at the end of its drift both
+ * `CALL 0x004A7040`, where the shared prologue calls `0x00409CC0`. `ActorKill`
+ * unlinks the object and longjmps out of the pool's walk; it writes neither
+ * the flag word nor a light slot, which `ActorDespawn` does — so this does
+ * not either, and a member slot a generic prop never held is not released.
+ *
+ * `[port-only]` as a *name*: the engine's routine is `ActorKill`
+ * (`FUN_004A7040`), it operates on the pool's current object and takes no
+ * argument, and it longjmps rather than returning. This is the prop-shaped
+ * wrapper for it, the same shape and the same reason as `ActorKillPlacer` in
+ * `class41/index.ts` and `ActorDespawnProp` above.
+ */
+export function ActorKillProp(p: BreakableProp): void {
+  p.dead = true;
+}
+
+/**
  * `BreakablePropUpdate` — `FUN_00464620`. One prop, one 60 Hz frame.
  */
 export function BreakablePropUpdate(p: BreakableProp, rng: Rng,

@@ -55,6 +55,20 @@ function num(v: string | null): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * A script address out of the query string: a whole number or nothing.
+ *
+ * `block`, `step` and `op` are indices into the script and reach `seekTo`,
+ * which now refuses a target that is not an integer — so `?block=1.5` would
+ * throw during the stage load and take the page with it if this were `num`.
+ * A fractional address has never named an instruction; dropping it lands at
+ * the stage's entry, which is what a link with no address at all does.
+ */
+function addr(v: string | null): number | undefined {
+  const n = num(v);
+  return n !== undefined && Number.isInteger(n) ? n : undefined;
+}
+
 function bool(v: string | null): boolean | undefined {
   if (v === null) return undefined;
   return v === "" || v === "1" || v === "true";
@@ -69,11 +83,11 @@ export function readState(search = window.location.search): PlayerState {
     mode: mode === "play" || mode === "free" || mode === "step"
       ? mode
       : DEFAULTS.mode,
-    entry: num(q.get("entry")),
-    block: num(q.get("block")),
-    step: num(q.get("step")),
-    op: num(q.get("op")),
-    slot: num(q.get("slot")),
+    entry: addr(q.get("entry")),
+    block: addr(q.get("block")),
+    step: addr(q.get("step")),
+    op: addr(q.get("op")),
+    slot: addr(q.get("slot")),
     frame: num(q.get("frame")),
     all: bool(q.get("all")),
     seed: num(q.get("seed")),

@@ -30,9 +30,30 @@ import type { Walker } from "./walker";
  *
  * Returns whether it actually arrived, so a caller that asked for an
  * unreachable address can say so instead of silently showing another one.
+ *
+ * **The address is checked before the replay starts**, and a target that is
+ * not a whole number throws rather than degrading. Without that the failure
+ * is silent and total: `arrived()` compares `w.block === block`, so a `block`
+ * that is an object can never equal anything, `maxOps` defaults to 500,000,
+ * and the "seek" runs the **entire script to its end** and returns `false`.
+ * `tools/props43.mjs` was written as `seekTo(walker, { block, step }, rng)` —
+ * it never seeked anywhere, reported the block and step from its own `argv` as
+ * though they were where it had landed, and so claimed that stage 3 places two
+ * type-43 props at block 0 step 3 when what it had measured was the whole of
+ * stage 3. Nothing could catch it: the `.mjs` harnesses are outside `tsc`
+ * (`allowJs` is off, so `include: ["tools"]` sees only the `.ts` files there),
+ * `--experimental-strip-types` and esbuild check nothing, and the return value
+ * was discarded. A `TypeError` here is the same trade `L15` describes for
+ * `querySelector(...) as T`: fail at the call rather than three conclusions
+ * later. `L44`.
  */
 export function seekTo(w: Walker, block: number, step = 0, opIndex = 0,
                        maxOps = 500000, entryBlock?: number): boolean {
+  requireInt("block", block);
+  requireInt("step", step);
+  requireInt("opIndex", opIndex);
+  requireInt("maxOps", maxOps);
+  if (entryBlock !== undefined) requireInt("entryBlock", entryBlock);
   // From the entry the run actually opened at, not the stage's first one.
   // Stage 3 entered at block 7 cannot reach block 1, and a replay that starts
   // at 0 regardless would land somewhere the run never was.
@@ -44,6 +65,20 @@ export function seekTo(w: Walker, block: number, step = 0, opIndex = 0,
   } finally {
     w.replaying = wasReplaying;
   }
+}
+
+/**
+ * One seek argument, or a `TypeError` naming it.
+ *
+ * `Number.isInteger` and not a `typeof` test: `NaN`, `Infinity` and `1.5` are
+ * all numbers and none of them can ever satisfy `arrived()` either.
+ */
+function requireInt(name: string, v: unknown): void {
+  if (Number.isInteger(v)) return;
+  const got = typeof v === "object" && v !== null
+    ? `${v.constructor?.name ?? "object"} ${JSON.stringify(v)}`
+    : `${typeof v} ${String(v)}`;
+  throw new TypeError(`seekTo: ${name} must be a whole number, got ${got}`);
 }
 
 function seekInner(w: Walker, block: number, step: number, opIndex: number,

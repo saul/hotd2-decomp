@@ -44,6 +44,7 @@ import {
 } from "../game/class41/generic";
 import { TYPE43_EFFECT7_RISE, TYPE43_EFFECT7_SLOT }
   from "../game/class41/type43";
+import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
 
@@ -602,7 +603,29 @@ export class BreakableLayer implements System<RenderContext> {
   get describe(): string {
     const live = G.g_breakable_props.filter((p) => !p.dead);
     if (!this.templates.size) return "no models";
-    if (!live.length) return "none placed";
+    if (!live.length) {
+      // **"none placed" was one sentence for two situations**, and that is
+      // what a report of "the browser sees no props where the port sees two"
+      // turned out to be. A `spawn_placed` instruction puts a *placer* in the
+      // object pool; `PropContainerPlacerUpdate` (`FUN_00461CD0`) is what
+      // calls the constructor and then `ActorKill`s itself, and that is a
+      // class handler — so it needs a frame of `GameUpdate`. A paused
+      // transport hands `world.update` a `STOPPED_TICK` and never runs one,
+      // so a seek that arrived correctly, with every placer of the step in
+      // the pool, reads as though the script had placed nothing.
+      //
+      // The placers are counted rather than the props, because that is the
+      // distinction: "the script has not placed any here" and "press play"
+      // want different responses from whoever is reading the panel.
+      const waiting = G.g_object_list.filter((o) =>
+        !o.despawned && !o.dead
+        && (o.cls === SpawnClass.PropContainerPlacer
+            || o.cls === SpawnClass.PropPlacer)).length;
+      return waiting
+        ? `none built yet — ${waiting} placer${waiting === 1 ? "" : "s"}`
+          + ` in the pool, waiting for a game frame`
+        : "none placed";
+    }
     const generic = live.filter((p) => p.family === PropFamily.Generic).length;
     // `+0x290` is the object kind for a kinded prop and the class-0x41 type
     // for a generic one, so the two have to be counted apart or the line

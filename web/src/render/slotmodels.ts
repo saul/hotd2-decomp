@@ -55,6 +55,8 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
+import { OwlState } from "../game/class43/state";
+import { ScriptedScenerySelector } from "../game/class33/state";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 
@@ -76,6 +78,26 @@ function DrawSlotFor(a: Actor): number | null {
     case SpawnClass.Mouse:
       // `sub+0x20` — the frame of the ten-slot strip `mouse.bin` holds.
       return a.mouse.frame || null;
+    case SpawnClass.FlyingEnemy:
+      // The body alone. `OwlDrawBodyChain` (`FUN_00447C20`) draws sixteen
+      // slots in one chain — a body, a thirty-frame wing beat, a head strip
+      // and four limb chains — and this layer clones one node per actor, so
+      // the rest of the owl is a renderer job. See `game/class43/`.
+      return a.owl.state === OwlState.Dead ? 0xbc0 : 0xbbf;
+    case SpawnClass.WaterEnemy:
+      // `sub+0x6E` — `fish.bin`'s twenty-frame swim strip while it is alive,
+      // and entry 0 or 1 once it is a corpse. `FishDraw` (`FUN_00439860`)
+      // also draws a **flattened silhouette** on the water when the fish is
+      // below it and `sub+0x6A` bit 2 is set; that second draw is not here.
+      return a.fish.frame || null;
+    case SpawnClass.ScriptedScenery:
+      // `obj+0x13F0`, which `ScriptedPushableUpdate33` (`FUN_00433B70`) seeds
+      // from its descriptor tail and never changes. Selector 1's draw is a
+      // whole chain of sprite loops and sub-models the rig writer already
+      // exports, so it is deliberately not here: `a.scenery.slot` is non-zero
+      // only once a selector-4 object has seeded itself.
+      return a.hp === ScriptedScenerySelector.Pushable
+        ? (a.scenery.slot || null) : null;
     case SpawnClass.ScriptedHumanoid:
       // Only the object-path arm. The three fixed-point arms draw at points
       // the routine hardcodes, so the rig writer already exports them as
@@ -256,6 +278,18 @@ export class SlotModelLayer implements System<RenderContext> {
       // {@link DrawSlotFor}, and it stays a switch for the same reason.
       if (a.cls === SpawnClass.ScriptedHumanoid) {
         PlaceOnObjectPath(a, live.node, ctx.paths);
+      } else if (a.cls === SpawnClass.ScriptedScenery) {
+        // `ScriptedPushableUpdate33`'s own draw, and it is **all three**
+        // rotations: `MatrixTranslate(obj+0x40, +0x44, +0x48)` then
+        // `RotZ(obj+0x6C)`, `RotY(obj+0x68)`, `RotX(obj+0x64)` at
+        // `0x00433C17`..`0x00433C51`. That composition is a three.js `Euler`
+        // in `"ZYX"` order — the same argument `PlaceOnObjectPath` above
+        // spells out. The mouse's routine is yaw-only, which is why this is a
+        // second arm rather than pitch and roll added to the one below.
+        live.node.visible = true;
+        live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
+        live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
+                               a.roll * BAMS_TO_RAD, "ZYX");
       } else {
         live.node.visible = true;
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);

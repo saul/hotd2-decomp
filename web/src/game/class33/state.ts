@@ -17,17 +17,17 @@
  * any `Init` runs, and the class reads it as a selector. That is `L3`, and it
  * has already caught someone on this class.
  *
- * Only the two the port has read are members. The other ten are, by the
+ * Only the three the port has read are members. The other nine are, by the
  * dispatch's own jump table:
  *
  * ```
  * 3  -> 0x00433AC0    6  -> 0x00433E30    9  -> 0x00434100
- * 4  -> 0x00433B70    7  -> 0x00433E90   10  -> 0x00433F40
- * 5  -> 0x00433B00    8  -> 0x00433FE0   11  -> 0x00434260
+ * 5  -> 0x00433B00    7  -> 0x00433E90   10  -> 0x00433F40
+ *                     8  -> 0x00433FE0   11  -> 0x00434260
  *                                        99  -> 0x00433160
  * ```
  *
- * `docs/formats/spawns.md` records what four of those are; none of them is
+ * `docs/formats/spawns.md` records what three of those are; none of them is
  * read here and none has a module.
  */
 export enum ScriptedScenerySelector {
@@ -43,6 +43,12 @@ export enum ScriptedScenerySelector {
    * no second behaviour.
    */
   DrawUntilFlag = 2,
+  /**
+   * `ScriptedPushableUpdate33` (`FUN_00433B70`) — a piece of scenery an actor
+   * shoves out of its way. **Ported**, in `class33/pushable.ts`. Two shipped
+   * spawns, both stage 1's chairs.
+   */
+  Pushable = 4,
 }
 
 /**

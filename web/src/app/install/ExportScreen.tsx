@@ -33,8 +33,9 @@ import type { Root } from "react-dom/client";
 import { ALL_STAGES, BundleIndex, slotKey } from "../bundles";
 import type { Origin } from "../bundles";
 import { canPickDirectory, clearCache, downloadCache, forgetInstall,
-         pickInstall, regrantInstall, rememberedInstall, requestPersist,
-         readThumb, runExport, storageEstimate } from "./index";
+         onThumbWritten, pickInstall, regrantInstall, rememberedInstall,
+         requestPersist, readThumb, runExport,
+         storageEstimate } from "./index";
 import type { ExportHandle } from "./index";
 import type { InstallRef, WorkerOut } from "./protocol";
 
@@ -122,6 +123,45 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
    * nothing.
    */
   const scan = useRef(0);
+  /**
+   * The same guard for the pictures, and separately.
+   *
+   * A thumbnail write can arrive in the middle of a rescan -- that is the
+   * whole point of {@link onThumbWritten} -- and if it shared `scan` it would
+   * cancel that rescan's *labels* on its way past. Two concerns, two
+   * counters.
+   */
+  const thumbScan = useRef(0);
+
+  /**
+   * Read every stage's picture out of the store and put them on screen.
+   *
+   * Called on mount, after every export, **and whenever a picture is
+   * written**. That last one is the fix for a tile that stayed empty for as
+   * long as the screen was up: the player takes its fallback picture nine
+   * frames after a stage loads, and a screen opened straight after the page
+   * finished loading reads the store a few milliseconds before the PNG gets
+   * there. Nothing read it again, so the picture existed and was never shown.
+   * `bundle_flow.mjs` failed on that about one run in three and the wait it
+   * gave up on could not have helped: it was waiting for something that had
+   * already happened. See `onThumbWritten` in `browser_io.ts`.
+   */
+  const refreshThumbs = useCallback(async () => {
+    const mine = ++thumbScan.current;
+    const t = new Map<number, string>();
+    const made: string[] = [];
+    for (const n of ALL_STAGES) {
+      const url = await readThumb(n);
+      if (url) { made.push(url); t.set(n, url); }
+    }
+    if (mine !== thumbScan.current) {
+      for (const url of made) URL.revokeObjectURL(url);
+      return;
+    }
+    for (const url of blobs.current) URL.revokeObjectURL(url);
+    blobs.current = made;
+    setThumbs(t);
+  }, []);
 
   const rescan = useCallback(async () => {
     const mine = ++scan.current;
@@ -150,20 +190,8 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
     // stage finishes building, so a screen that read them once showed empty
     // tiles for everything it had just built and only caught up the next time
     // it was opened.
-    const t = new Map<number, string>();
-    const made: string[] = [];
-    for (const n of ALL_STAGES) {
-      const url = await readThumb(n);
-      if (url) { made.push(url); t.set(n, url); }
-    }
-    if (mine !== scan.current) {
-      for (const url of made) URL.revokeObjectURL(url);
-      return;
-    }
-    for (const url of blobs.current) URL.revokeObjectURL(url);
-    blobs.current = made;
-    setThumbs(t);
-  }, []);
+    await refreshThumbs();
+  }, [refreshThumbs]);
 
   useEffect(() => {
     void (async () => {
@@ -174,13 +202,16 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
       const known = await rememberedInstall();
       if (known) setInstall(known);
     })();
+    // And again on every later write, for the race above.
+    const stop = onThumbWritten(() => { void refreshThumbs(); });
     // A `blob:` URL nothing revokes holds its blob until the tab closes, and
     // this screen makes six of them every time it rescans.
     return () => {
+      stop();
       for (const url of blobs.current) URL.revokeObjectURL(url);
       blobs.current = [];
     };
-  }, [rescan]);
+  }, [rescan, refreshThumbs]);
 
   // Escape closes it, but only when there is something to go back to and
   // nothing is running: a half-written cache is worth a deliberate Stop.

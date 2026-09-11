@@ -1193,18 +1193,21 @@ function Class14LungeSub1(obj: Actor, t: Boss2Tail, f: ClassFrame): void {
 /**
  * `Class14StateSummonRoundA` — `FUN_00479530`. `g_class14_states[10]`.
  *
- * Phase 1's round. It calls `SpawnWaterEnemyAt` (`FUN_00438640`) with a
+ * Phase 1's round. It calls `SpawnFishAt` (`FUN_00438640`) with a
  * lifetime of 100 and sub-type 1 while `g_enemies_alive` is under four, spaces
  * them by `g_class14_summon_delays_a[rank]` and takes the count out of
  * `g_class14_summon_counts`. When the round is spent and the boss is the only
  * thing alive it returns to {@link Class14State.Hunt} with the phase set to
  * {@link Class14Phase.ShortFinal} — the phase whose death raises flag 17.
  *
- * `[diverges]` **The water enemies are not placed.** Class 0x51 has no module,
- * so `SpawnWaterEnemyAt` would build an actor nothing runs. The counting is
- * transcribed exactly and the placement is not, which means the round is over
- * as soon as its counters run out rather than when the water is clear. Porting
- * class 0x51 retires it.
+ * `[diverges]` **The water enemies are not placed.** Class 0x51 is ported now
+ * — `SpawnFishAt` (`FUN_00438640`) is in `game/class51/` and will build one —
+ * but **where** the boss puts it is not read: the call takes a point from
+ * `FUN_00442390`, the class-0x16 wave field's height, at an x and z built from
+ * the camera block at `0x007DCF1C` and two of the boss's own floats, and
+ * neither the wave field nor that pair has been read. `[open]`. Until it is,
+ * the counting is transcribed and the placement is not, so the round is over
+ * as soon as its counters run out rather than when the water is clear.
  */
 export function Class14StateSummonRoundA(obj: Actor, f: ClassFrame): void {
   const t = Tail(obj);
@@ -1277,13 +1280,10 @@ export function Class14StateSummonRoundA(obj: Actor, f: ClassFrame): void {
           }
         } else if (t.counter2 === 0) {
           if (G.g_enemies_alive < 4) {
-            // `SpawnWaterEnemyAt` (`FUN_00438640`) with a lifetime of 100
-            // and sub-type 1 goes here. Class 0x51 has no module, so an actor
-            // built for it would stand in the water doing nothing and hold
-            // `g_enemies_alive` above 1 for ever — which is the test this
-            // round's own exit reads. The counting is transcribed and the
-            // placement is not, so the round ends on its counters rather than
-            // on the water being cleared. `[diverges]`
+            // `SpawnFishAt` (`FUN_00438640`) with a lifetime of 100 and
+            // sub-type 1 goes here, at `wave(x, z) - 1.0`. Class 0x51 has a
+            // module now; the point does not — see the note on this function.
+            // `[diverges]`
             t.counter3 = f.rng.int(3) > t.counter3 ? 1 : 0;
             t.counter1 -= 1;
             t.counter2 = CLASS14_SUMMON_DELAYS_A[t.rank] ?? 0;
@@ -1400,11 +1400,9 @@ export function Class14StateSummonRoundB(obj: Actor, f: ClassFrame): void {
           }
         } else if (t.counter2 === 0) {
           if (G.g_enemies_alive < 4) {
-            // `SpawnWaterEnemyAt` (`FUN_00438640`) with a lifetime of 0x50
-            // and sub-type 2 goes here, and it is the same unported class 0x51
-            // as {@link Class14StateSummonRoundA}'s: the count is kept and the
-            // enemy is not placed, so the round is over when its counters run
-            // out rather than when the water is clear. `[diverges]`
+            // `SpawnFishAt` (`FUN_00438640`) with a lifetime of 0x50 and
+            // sub-type 2 goes here, and it is the same unread point as
+            // {@link Class14StateSummonRoundA}'s. `[diverges]`
             t.counter3 = f.rng.int(3) > t.counter3 ? 1 : 0;
             t.counter1 -= 1;
             t.counter2 = CLASS14_SUMMON_DELAYS_B[t.rank] ?? 0;

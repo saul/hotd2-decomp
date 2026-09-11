@@ -42,6 +42,7 @@ import {
   ZombieStateDelayedStrikeInPlace, ZombieStateLeapToPoint,
   ZombieStateScriptedGrabAndDespawn, ZombieStateWaitForCameraFrame,
 } from "./scripted";
+import { ZombieStateReleaseBodyCreature } from "./release_creature";
 import { ZombieState } from "./states";
 import { ZombieOnShot } from "./on_shot";
 import {
@@ -52,6 +53,7 @@ import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
+import { ZombieAttachToCarrier } from "./carrier";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
@@ -77,6 +79,13 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // state on the same frame that state first runs. Without this call class
   // 0x30 had no edge into `ZombieState.Death` at all.
   ZombieOnShot(obj);
+  // `0045341C  TEST EAX, 0x10000000` / `00453424  CALL ZombieAttachToCarrier`,
+  // and it is **before** the state dispatch at `0x00453434`. A passenger's
+  // position and yaw are recomputed from `g_carrier_object` every frame, so
+  // the state below never has to move it — and the three states that carry
+  // these four spawns never do. That is the whole of why stage 5 block 2's
+  // `znnick` ride the car while sitting in `DelayedStrikeInPlace`.
+  if (obj.flags2 & ZombieFlag2.AttachedToCarrier) ZombieAttachToCarrier(obj);
   ZombieRunState(obj, eye, dt, rng, host, events);
   // The engine's own order, and the two halves the port did not have.
   // `EnemyZombieUpdate` integrates the velocity straight after the state —
@@ -94,7 +103,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
     case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
     case ZombieState.MotionCue:   return ZombieStateMotionCue21(obj, eye, dt);
-    case ZombieState.HoldAtRange: return ZombieStateHoldAtRange(obj, eye, rng, host);
+    case ZombieState.HoldAtRange:
+      return ZombieStateHoldAtRange(obj, eye, rng, host, events);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
@@ -118,7 +128,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
 
     // The death chain. `updatesWhenDead` on the handler below is what lets
     // these run at all -- see `class30/death.ts` for the whole graph.
-    case ZombieState.Death:       return ZombieStateDeath6(obj, rng);
+    case ZombieState.Death:       return ZombieStateDeath6(obj, rng, events);
     // The other death, and the reason `ZombieRunState` is handed the host at
     // all on a dead actor: state 9's landing point is a point in the camera's
     // own space. See `class30/knockback.ts`.
@@ -158,10 +168,12 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
       return ZombieStateWaitScriptFlagThenBranch(obj);
     case ZombieState.ScriptedGrabAndDespawn:
       return ZombieStateScriptedGrabAndDespawn(obj, eye, events);
+    case ZombieState.ReleaseBodyCreature:
+      return ZombieStateReleaseBodyCreature(obj, eye, rng, host);
     case ZombieState.LeapToPoint:
       return ZombieStateLeapToPoint(obj, eye, dt, rng, events);
     case ZombieState.RideCarrier:
-      return ZombieStateRideCarrier(obj, rng);
+      return ZombieStateRideCarrier(obj, eye, rng, dt);
     case ZombieState.ArcScriptedEntrance:
       return ZombieStateArcScriptedEntrance(obj, dt);
     case ZombieState.WaitScriptFlagThenEnter:
@@ -238,7 +250,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
  * **none** of the 90 class-0x30 spawns starts in `Approach`. The old port
  * started everything there, which is why nothing ever reached the hub.
  */
-export function EnemyZombieInit(obj: ZombieActor): void {
+export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
+                                events?: Events): void {
   obj.attackPermit = -1;
   // `EnemyZombieInit`: `obj+0x124 = g_actor_radius_by_char[type]`, the shot
   // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
@@ -266,7 +279,7 @@ export function EnemyZombieInit(obj: ZombieActor): void {
   // Three of the spawn record's flag bits move into `obj+0x38` in there, and
   // one of them is the whole of what makes stage 3's two axe men stand still
   // instead of walking away.
-  EnemyZombieInitByCharType(obj);
+  EnemyZombieInitByCharType(obj, events);
   obj.state = ZombieEntryState(obj.initialState);
   // ...and the actor counts itself in, which is the engine's own last act
   // here. The two exclusions are the interesting part -- see `CountEnemyZombieIn`.

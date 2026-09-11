@@ -376,7 +376,7 @@ if ((civ[0] & 0x2000000) != 0 && !ActorBoundsOnScreen(obj)
 }
 ```
 
-Off screen, not in mode 2, holding no children: it leaves on the spot and takes
+Off screen, not in mode 2 (Training), holding no children: it leaves on the spot and takes
 itself out of the count. Stage 2's stream 95 ends on a wait word carrying this
 bit *and* `LeaveCountNow`, so it matters for exactly the gates this list is
 about. `web/src/game/class10/index.ts`, `CivilianCheckRemoval`. `[proved]` that

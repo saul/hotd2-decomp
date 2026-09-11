@@ -67,7 +67,18 @@ class Route:
     """
     slot: int                              #: op_ slot passed to CamEvalObjectPath6
     cam_paths: tuple[int, ...] = ()        #: cp_ slots that select this route
-    frame: str = "clamped"                 #: "clamped", "zero", or a rule
+    #: How the routine picks the evaluation time: ``"clamped"``, ``"zero"``, or
+    #: a rule in prose.
+    #:
+    #: **``"zero"`` is not prose, and it used to be treated as if it were.** It
+    #: says the routine passes a literal ``0.0f``, which is the same statement
+    #: :attr:`hold_frame` makes in the field the exporter actually reads -- and
+    #: both routes that carried it set this and not that. So the reading was
+    #: recorded and the mechanism was not wired, and both rigs rode the camera
+    #: frame up a path the engine parks them on. That is what made stage 6's
+    #: lift ascend the moment its shot began. ``hold_frame`` is derived from it
+    #: now when it is absent, so the two cannot disagree again.
+    frame: str = "clamped"
     #: Evaluation time when the routine passes a **literal** rather than the
     #: clamped camera frame, i.e. the object is parked at a fixed point on the
     #: path. ``None`` means the usual ``min(g_cam_path_frame,
@@ -1050,7 +1061,11 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
         for slot in rig.path_slots:          # flat spelling, no cam gate
             take(slot, ())
         for route in rig.routes:
-            take(route.slot, route.cam_paths, route.bias, route.hold_frame,
+            # `frame="zero"` and `hold_frame=0` are one fact. See `Route.frame`
+            # for the two routes that stated it in the inert one.
+            hold = (route.hold_frame if route.hold_frame is not None
+                    else (0.0 if route.frame == "zero" else None))
+            take(route.slot, route.cam_paths, route.bias, hold,
                  route.note, route.stop_frame)
 
         fixed = [{"kind": "fixed", "translation": list(fp.translation),

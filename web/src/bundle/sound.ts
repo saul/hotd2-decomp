@@ -7,7 +7,6 @@
 export interface BgmJson {
   /** Both filename tables, indexed by `id & 0xFFF`. Holes are real nulls. */
   names: { ar: (string | null)[]; plain: (string | null)[] };
-  default_table: "ar" | "plain";
   /** The stage's own track — named by convention, not started by the script. */
   stage_track: {
     index: number;
@@ -16,7 +15,16 @@ export interface BgmJson {
     plain: string | null;
     note: string;
   } | null;
-  /** `g_GameMode` as the exe numbers it — see `game/game_mode.ts`. */
+  /**
+   * `g_GameMode` as the exe numbers it — see `game/game_mode.ts`.
+   *
+   * **Which of the two tables is used is decided from this**, by
+   * `Bgm.setTable`, because `PlaySoundId`'s choice is a line of `.text` and
+   * not a number in `.rdata`. There was a `default_table: "ar"` beside this
+   * until format 6, stating the same fact a second time and stating it
+   * wrongly: it was written from the belief that mode 0 was a mode no stage
+   * is entered in, and mode 0 is Arcade.
+   */
   game_mode: number;
 }
 

@@ -122,6 +122,21 @@ CHECKS: list[Check] = [
           "rather than per bundle, which is the difference between stage 3's "
           "block 2 on the entry-0 route and on the entry-7 one",
           NEEDS_BUNDLE),
+    Check("animals", "web", ["npm", "run", "--silent", "animals"],
+          "that the frog, the owl and the fish are placed from a real bundle "
+          "and leave their opening state -- none of the three is a skinned "
+          "enemy the character layer can build, and two have no character "
+          "type at all",
+          NEEDS_BUNDLE),
+    Check("verify_prop_slots", ".",
+          ["python3", "tools/verify_prop_slots.py"],
+          "that every asset slot a placed class-0x41 or class-0x44 prop will "
+          "pass to `AssetDrawSlot` has a model in its own bundle -- the check "
+          "that would have caught stage 3's roller shutter and the stage 5 "
+          "van's body, both of which were placed, updated and invisible "
+          "because nothing carried their geometry, which from the level looks "
+          "exactly like a placement that was never exported",
+          NEEDS_BUNDLE),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",
@@ -142,6 +157,23 @@ CHECKS: list[Check] = [
           "the only thing that can say stage 3 and stage 4 have two entry "
           "points each",
           NEEDS_GAME),
+    Check("verify_looping_se", ".",
+          ["python3", "tools/verify_looping_se.py", "--game-dir",
+           "{game_dir}"],
+          "that `PlaySoundId`'s two loop tables really do pair index for "
+          "index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` "
+          "file ships, which is the only thing that says a stop id is a "
+          "control word rather than a sound, and so the only thing that makes "
+          "the chainsaw a loop rather than a one-shot",
+          NEEDS_GAME),
+    Check("verify_combat", ".",
+          ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],
+          "that the shot and damage tables hold together across every "
+          "character type -- and the only place the *exact* set of attacks "
+          "the engine can never land is asserted, which is what stops the "
+          "crawlers' condition-4 swing being filtered out again as an "
+          "impossible row",
+          NEEDS_GAME),
     Check("verify_effects", ".",
           ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
           "that each of the 29 effect trees walks to exactly the node count "
@@ -157,6 +189,15 @@ CHECKS: list[Check] = [
           "a model in the stage's glTF -- the check that would have caught "
           "the civilians having no hair, because a civilian's own head model "
           "is a shell open at the back and every count was right without it",
+          NEEDS_GAME),
+    Check("verify_bone_cels", ".",
+          ["python3", "tools/verify_bone_cels.py", "--game-dir",
+           "{game_dir}"],
+          "that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is "
+          "still the arithmetic in the EXE and is still in the bundle -- no "
+          "table in the image names those models, so this is the only thing "
+          "standing between a hand-written run and `char_adv02` losing its "
+          "midriff again",
           NEEDS_GAME),
     Check("verify_parts", ".",
           ["python3", "tools/verify_parts.py", "--game-dir", "{game_dir}"],

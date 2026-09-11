@@ -36,8 +36,17 @@
  *   charges one hit point per part carrying bit 3, so a frame can take more
  *   than one; the port's shot model is one `pendingHit` an actor, which is the
  *   same divergence class 0x20 declares and for the same reason.
- * * `FUN_00451E50`, `FUN_00451EB0`, `FUN_00451F40` and `FUN_00451FF0` — the
- *   four draw and pose helpers. The renderer's.
+ * * `RescueTargetDraw` (`FUN_00451FF0`) and `FUN_00451F40`. The renderer's:
+ *   the first loads the view matrix, transforms `obj+0x40` into camera space
+ *   and draws only if the result is nearer than `float[0x004C436C]`.
+ *
+ * Two of that group **are** here, because they are not drawing at all:
+ * {@link RescueTargetPoseFromRoute} (`FUN_00451E50`) and
+ * {@link RescueTargetPoseFromRouteWithVelocity} (`FUN_00451EB0`) write
+ * `obj+0x40`..`obj+0x6C` from an object path, and that is where the actor is
+ * in the world. They were read as draw helpers and left out, which is how the
+ * one actor that answers stage 2's first branch came to be standing at the
+ * world origin.
  * * `RescueTargetFreedState`'s hand-off at `0x00451DF0` and the ground-ring
  *   effect. Both are drawing.
  * * The rescue tallies. `g_civilians_rescued_total` and
@@ -59,8 +68,44 @@ import { RescueTargetState, type RescueTargetTail } from "./state";
 
 export { RescueTargetState } from "./state";
 
-/** `obj+0x11C` after `ActorInitHitPoints`, from `g_class21_hp_by_rank`. */
-export const CLASS21_HP_BY_RANK = [1, 1, 2, 2, 2];
+/**
+ * `g_class21_hp_by_rank` — `0x00565F0C`. `obj+0x11C` at spawn, indexed by
+ * `g_damage_rank` — `0x009C8E96`, which runs 0..15.
+ *
+ * **Sixteen rows, not five.** `RescueTargetInit` does
+ * `iVar3 = FUN_0040A8A0(); obj+0x11C = (s16)[0x00565F0C + iVar3 * 2]`, and
+ * `FUN_0040A8A0` is a one-line `return g_damage_rank`. This table read
+ * `[1, 1, 2, 2, 2]` with a comment saying it "gives 1 or 2 by difficulty",
+ * which is L6: the extent was guessed from the wrong index source, so the
+ * target took one hit at rank 5 where the engine wants two and one at rank 14
+ * where it wants four. The real extent is bounded by abutment —
+ * `g_st2car_asset_variants` — `0x00565F2C` begins exactly sixteen `s16` later
+ * — and the bytes are
+ * `0100 0100 0100 0100 0200 0200 0200 0200 0200 0200 0300 0300 0300 0300
+ * 0400 0400`. `[proved]`
+ */
+export const CLASS21_HP_BY_RANK =
+  [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4];
+
+/**
+ * `g_st2car_path_table` — `0x00565EF4`. The `op_` object-path slot an instance
+ * of the stage-2 car — or of the actor riding it — takes its pose from, by
+ * instance index.
+ *
+ * Eleven `s16`, bounded by abutment: {@link CLASS21_HP_BY_RANK}'s table
+ * begins at `0x00565F0C`, one zero word past the last of them. Rows 0, 1 and 2
+ * are the three shots of the opening — `op_st2` `0x148`, `0x14E` and `0x14D`,
+ * the same three `FUN_004521B0` selects by camera path `0x38`/`0x39`/`0x3A` —
+ * and rows 3..10 are the eight `op_train` paths the traffic instances ride,
+ * which are in no numbered stage.
+ *
+ * Class 0x21 reads row `obj+0x1350` through it, which is why the rescue target
+ * is **on the car** and not at a place of its own: same table, same frame,
+ * same curve. `[proved]` — `FUN_00451E50` and `FUN_00451EB0` both index it.
+ */
+export const g_st2car_path_table = [
+  0x148, 0x14e, 0x14d, 0x19a, 0x19b, 0x19c, 0x19d, 0x19e, 0x19f, 0x1a0, 0x1a1,
+];
 
 /** The clip `RescueTargetInit` installs, and the one the rescue swaps to. */
 export const CLASS21_MOTION_IDLE = 0x3e6;
@@ -69,6 +114,16 @@ export const CLASS21_MOTION_FREED = 0x3cc;
 /** `RescueTargetRideInState`'s two camera-frame cues. */
 export const CLASS21_RIDE_HANDOVER = 0x31;
 export const CLASS21_HELD_HANDOVER = 0xbd;
+
+/**
+ * The camera frame the drop-in offset reaches zero on — `50.0`, the double at
+ * `0x00565FC0` that `RescueTargetRideInState` does `FILD g_cam_path_frame;
+ * FSUBR double ptr [0x00565FC0]` against at `0x004518EF`–`0x004518FF`.
+ *
+ * The same 50 in both the y and the z of the point, and one frame past it
+ * `obj+0x1312` steps and the offset stops being applied at all.
+ */
+export const CLASS21_DROP_IN_FRAMES = 50;
 
 /** The camera path and frame that abandon it, and the one that despawns it. */
 export const CLASS21_ABANDON_PATH = 0x39;
@@ -101,7 +156,7 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * obj->+0x1B4 = 0x3E6;                    // the idle clip
  * obj->+0x194 = rand() % 10;              // its start frame
  * g_enemies_present += 1;  g_enemies_alive += 1;
- * if (g_GameMode != 2) obj->+0x11C = g_class21_hp_by_rank[rank];
+ * if (g_GameMode != 2) obj->+0x11C = g_class21_hp_by_rank[rank];  // not Training
  * *obj = RescueTargetRideInState;
  * ```
  *
@@ -109,8 +164,9 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * gate's business as well as a branch's — a stage that waits for the room to
  * clear waits for this too.
  *
- * The rank table is `g_class21_hp_by_rank` (`0x00565F0C`) and gives 1 or 2, so
- * the target dies to one or two hits and never to a damage row.
+ * The rank table is `g_class21_hp_by_rank` (`0x00565F0C`) and gives 1 to 4 —
+ * see {@link CLASS21_HP_BY_RANK} — so the target dies to that many part hits
+ * and never to a damage row.
  */
 export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   const t = Tail(obj);
@@ -129,40 +185,123 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
 }
 
 /**
+ * `RescueTargetPoseFromRoute` — `FUN_00451E50`. **The whole of "it is on the
+ * car".**
+ *
+ * ```c
+ * CamEvalObjectPath6(g_st2car_path_table[obj+0x1350], g_cam_path_frame, &p);
+ * obj+0x40 = p.x;  obj+0x44 = p.y;  obj+0x48 = p.z;
+ * obj+0x64 = p.rx; obj+0x68 = p.ry; obj+0x6C = p.rz;
+ * ```
+ *
+ * Six words, no offset and no bias: the actor is *at* the car's own pose on
+ * the car's own object path, sampled on the camera's frame. Both sub-states of
+ * {@link RescueTargetRideInState} open with this and
+ * {@link RescueTargetHeldState} runs {@link RescueTargetPoseFromRouteWithVelocity},
+ * so the rescue target is on the route for every frame it is alive.
+ *
+ * All three angles are written, not the yaw alone: `CharacterLayer.objectPath`
+ * publishes the whole `{pitch, yaw, roll}` triple out of `op_` channels 3, 4
+ * and 5, so there is nothing to leave out here. Whether a *skinned* actor is
+ * drawn with its pitch and roll is `render/characters.ts`'s question and not
+ * this file's — it poses from the yaw today.
+ */
+export function RescueTargetPoseFromRoute(obj: Actor, f: ClassFrame): boolean {
+  const t = Tail(obj);
+  if (!t) return false;
+  const slot = g_st2car_path_table[t.route];
+  if (slot === undefined) return false;
+  const p = f.host.objectPath?.(slot, G.g_cam_path_frame);
+  if (!p) return false;
+  obj.pos.x = p.x;
+  obj.pos.y = p.y;
+  obj.pos.z = p.z;
+  if (p.pitch !== undefined) obj.pitch = p.pitch;
+  if (p.yaw !== undefined) obj.yaw = p.yaw;
+  if (p.roll !== undefined) obj.roll = p.roll;
+  return true;
+}
+
+/**
+ * `RescueTargetPoseFromRouteWithVelocity` — `FUN_00451EB0`.
+ *
+ * {@link RescueTargetPoseFromRoute} with one more write: the new pose minus
+ * the old one, into `obj+0x13CC`/`+0x13D0`/`+0x13D4`, **before** the position
+ * is replaced. The two routines are otherwise instruction for instruction the
+ * same, which is why they are a pair rather than one with a flag.
+ *
+ * Nothing in the class reads the delta back — see
+ * {@link RescueTargetTail.delta} — but it is written because the routine
+ * writes it, and a word the port silently drops is a word the next reader has
+ * to rediscover.
+ */
+export function RescueTargetPoseFromRouteWithVelocity(
+    obj: Actor, f: ClassFrame): void {
+  const t = Tail(obj);
+  if (!t) return;
+  const was = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
+  if (!RescueTargetPoseFromRoute(obj, f)) return;
+  t.delta.x = obj.pos.x - was.x;
+  t.delta.y = obj.pos.y - was.y;
+  t.delta.z = obj.pos.z - was.z;
+}
+
+/**
  * `RescueTargetRideInState` — `FUN_00451860`.
  *
  * ```c
  * if (obj->+0x1312 == 0) {
- *     ...pose...
- *     obj->pos = Ry(obj->+0x68) * (0, 50 - g_cam_path_frame, 50 - g_cam_path_frame);
- *     if (g_cam_path_frame > 0x31) obj->+0x1312 += 1;
+ *     RescueTargetPoseFromRoute(obj);
+ *     MatrixLoadIdentity(); MatrixTranslate(obj->pos); MatrixRotateY(obj->+0x68);
+ *     MatrixTransformPoint((0, 50 - g_cam_path_frame, 50 - g_cam_path_frame),
+ *                          &obj->pos);
+ *     if (g_cam_path_frame >= 0x32) obj->+0x1312 += 1;
  * } else if (obj->+0x1312 == 1) {
- *     ...pose...
+ *     RescueTargetPoseFromRoute(obj);
  *     if (g_cam_path_frame != 0x5A && g_cam_path_frame != 0x8C
- *         && g_cam_path_frame > 0xBD) { obj->+0x4D4 = 1; *obj = RescueTargetHeldState; }
+ *         && g_cam_path_frame >= 0xBE) { obj->+0x1350 = 1; *obj = RescueTargetHeldState; }
  * }
- * if (g_cutscene_skipping) { obj->+0x4D4 = 1; *obj = RescueTargetHeldState; }
+ * RescueTargetDraw(obj);
+ * obj->+0x194 += 1;
+ * if (g_cutscene_skipping) { obj->+0x1350 = 1; *obj = RescueTargetHeldState; }
  * ```
  *
- * The position is rebuilt from the camera frame every frame rather than
- * integrated, so the target's approach is exactly as long as the shot that
- * carries it — and a skipped cutscene hands over at once, wherever it is.
+ * **Sub 0 is a drop-in onto the car, not a place of its own.** The pose comes
+ * from the route first, and the `(0, d, d)` point is then rotated by the
+ * route's own yaw and added to it — `T(pos) · Ry(yaw) · p`, the stack
+ * post-multiplying — so the offset shrinks to nothing exactly as the camera
+ * frame reaches 50 and the actor is on the car from there on. The port read
+ * this as an absolute position built from the yaw alone, with the route never
+ * sampled at all and the `d` in y dropped: the actor sat 40 units from the
+ * world origin, 1,600 units from the car, for the whole of both shots.
  *
  * The two excluded frames, `0x5A` and `0x8C`, are the engine's and are kept:
  * they are the only reason a hand-over can miss on one frame and take on the
  * next.
+ *
+ * `obj+0x1350` is written on the way out, and it is not bookkeeping: it is the
+ * route the *next* state poses from — row 1, `op_st2` `0x14E`, which is the
+ * car's route for camera path `0x39`.
  */
-export function RescueTargetRideInState(obj: Actor): void {
+export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
   const t = Tail(obj);
   if (!t) return;
   const frame = G.g_cam_path_frame;
   if (t.sub === 0) {
-    const d = 50 - frame;
+    RescueTargetPoseFromRoute(obj, f);
+    // `T(pos) · Ry(yaw) · (0, d, d)`. Ry's own signs are the engine's, the
+    // same pair `class25`'s path offset uses: `x' = x·cos + z·sin`,
+    // `z' = -x·sin + z·cos`, and y passes through.
+    const d = CLASS21_DROP_IN_FRAMES - frame;
     const r = obj.yaw * ((Math.PI * 2) / 65536);
-    obj.pos = { x: -Math.sin(r) * d, y: obj.pos.y, z: -Math.cos(r) * d };
+    obj.pos.x += Math.sin(r) * d;
+    obj.pos.y += d;
+    obj.pos.z += Math.cos(r) * d;
     if (frame > CLASS21_RIDE_HANDOVER) t.sub += 1;
   } else if (t.sub === 1) {
+    RescueTargetPoseFromRoute(obj, f);
     if (frame !== 0x5a && frame !== 0x8c && frame > CLASS21_HELD_HANDOVER) {
+      t.route = 1;
       t.state = RescueTargetState.Held;
     }
   }
@@ -242,6 +381,13 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
     RescueTargetRescued(obj, f);
     return;
   }
+
+  // `FUN_00451EB0(obj); FUN_00451FF0(obj); obj+0x194 += 1;` at
+  // `0x00451B2A`-`0x00451B39`, between the hit-point test above and the
+  // abandon test below. The order is the engine's: an actor rescued this frame
+  // never reaches the pose, which is why the freed clip plays where the shot
+  // landed rather than one frame further down the route.
+  RescueTargetPoseFromRouteWithVelocity(obj, f);
 
   if (G.g_active_cam_path === CLASS21_ABANDON_PATH
       && G.g_cam_path_frame > CLASS21_ABANDON_FRAME) {
@@ -336,7 +482,7 @@ export function RescueTargetUpdate(obj: Actor, f: ClassFrame): void {
   const t = Tail(obj);
   if (!t) return;
   switch (t.state) {
-    case RescueTargetState.RideIn: RescueTargetRideInState(obj); break;
+    case RescueTargetState.RideIn: RescueTargetRideInState(obj, f); break;
     case RescueTargetState.Held: RescueTargetHeldState(obj, f); break;
     case RescueTargetState.Freed: RescueTargetFreedState(obj); break;
     case RescueTargetState.Abandoned: RescueTargetAbandonedState(obj); break;

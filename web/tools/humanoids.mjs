@@ -92,8 +92,9 @@ function syncSpawns() {
 function syncCam() {
   G.g_active_cam_path = walker.cam ? walker.cam.slot : -1;
   G.g_cam_path_frame = walker.cam ? Math.trunc(walker.cam.frame) : 0;
-  G.g_script_flags = [];
-  for (const flag of walker.flags) G.g_script_flags[flag] = 1;
+  // `G.g_script_flags` is the walker's own array now -- `set_flag` writes it
+  // directly. This used to copy a `Walker.flags` Set into it, and that Set is
+  // gone, so the copy threw and this whole tool was dead.
 }
 
 function clip(a) {

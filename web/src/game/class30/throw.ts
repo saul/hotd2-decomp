@@ -26,13 +26,13 @@
  * path, not to this state, so it is named here rather than half-done.
  */
 import type { Events } from "../../core/events";
-import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 import { STAND_THROW_CONDITION } from "./stand_throw";
+import { THROWN_SPIN_RATE } from "../class31/projectile";
 
 /**
  * `ZombieThrownWeaponAimAtCamera` — `FUN_0045A070`. Where the weapon is aimed.
@@ -96,7 +96,7 @@ export function ZombieThrownWeaponAimAtCamera(obj: ZombieActor, host: GameHost,
  * shot path rather than to this routine.
  */
 export function SpawnZombieThrownWeapon(obj: ZombieActor, bone: number, eye: Vec3,
-                                        host: GameHost, rng: Rng,
+                                        host: GameHost,
                                         events?: Events): void {
   const kit = CharacterTypeOf(obj)?.zombie_throw;
   const hand = kit?.hands.find((h) => h.bone === bone);
@@ -144,9 +144,20 @@ export function SpawnZombieThrownWeapon(obj: ZombieActor, bone: number, eye: Vec
     vel,
     acc,
     ttl,
-    // Which hand it left decides which way it tumbles, as class 0x31's does.
-    spin: (hand.bone === 5 ? 1 : -1) * (0x100 + rng.int(0x200)),
+    // `ZombieThrownWeaponStateStraight` (`FUN_00459690`) at `0x00459731`:
+    // `obj+0x64 += obj+0x135C`, into the **X** term, with **no sign test on
+    // the hand** -- unlike class 0x31, which negates for bone 8. This used to
+    // be `(hand.bone === 5 ? 1 : -1) * (0x100 + rng.int(0x200))`, a hand-signed
+    // random rate on Y, which is neither the engine's axis nor its sign; the
+    // random part looks like the *landing* kick at `0x004597xx` read as a
+    // flight rate. The rate is the port's -- see `ThrownWeapon.spinAngle`.
+    spin: THROWN_SPIN_RATE,
+    axis: "x",
     spinAngle: 0,
+    // `ZombieThrowHandWeapon` (`FUN_0045A240`) writes the model and the
+    // position and nothing else, so class 0x30's projectile has no `obj+0x1364`
+    // tilt.
+    tilt: 0,
     after: 0,
     hit: false,
     hitKind: kit.hit_kind,

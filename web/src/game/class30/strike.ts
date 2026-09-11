@@ -29,6 +29,7 @@ import { ZombieGiveUpAttack } from "./leave";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { ActorStartFade } from "./motion_cue";
 import { MotionFade, StrikeSub, ZombieState } from "./states";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 
 /**
  * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
@@ -36,41 +37,48 @@ import { MotionFade, StrikeSub, ZombieState } from "./states";
  * The zone term is the point — a zombie that has lost its head or an arm draws
  * from a different ten, so shooting a limb off changes which attack it reaches
  * for as well as whether that attack can connect.
+ *
+ * **The index is used blind**, which is the engine's own shape: sub 0 writes
+ * the draw to `obj+0x131A` and forms the entry pointer as `base + index * 0x10`
+ * with no validity test of any kind. There used to be a substitute here — if
+ * the bundle carried no row for the drawn index the port reached for another
+ * one — and it made the crawlers *more dangerous than the game*. `znkager`
+ * (character type 12, body condition 4 on every one of its 20 spawns) has a
+ * cond-4 pick row of ten 2s followed by ten 3s, so an undamaged one always
+ * draws attack **2**, which is
+ *
+ * ```
+ * 00566e70  e5 03  1b 04  00 00 d0 41  28 00  09 00  01 00  00 00
+ *           ^997   ^1051  ^26.0f       ^40    ^9     ^mask 1
+ * ```
+ *
+ * a hit frame of 40 against `g_motion_play_length[997]` = `0x0014` = **20** at
+ * `0x004E0F9A`. `ZombieStateStrike` fires the hit on `obj+0x19C == entry+0x08`
+ * exactly and leaves at `play_length - 1`, so clip 997 can never reach frame
+ * 40: **in the engine an undamaged crawler swings and misses, every time.**
+ * The exporter dropped the entry as unreachable, the substitute then handed
+ * the actor attack 3 — a different clip, at hit frame 3, that connects — and
+ * the crawlers hurt the player where the engine's do not. The bundle carries
+ * the entry now (`hod2lib`'s `attackHitLands` says why) and the draw is blind
+ * again, so the swing whiffs on its own. `[proved]`
+ *
+ * What is left for a pick the bundle has no row for is the ten **zeroed**
+ * entries the shipped tables carry — `{0, 0, 0.0f, 0, 0, 0}`, which the
+ * exporter still refuses because motion 0 is not a clip any character can
+ * bake. Those fall to the `!atk` arm of {@link ZombieStateStrike} and so to
+ * `ZombieGiveUpAttack`, whose own divergence note covers them; the engine
+ * deals no damage on one either, because `ActorStrikeConnect`'s
+ * `masked != mask` test is false for a cancel mask of 0.
+ *
+ * Counted against the twelve bundles, exactly one of the ten is reachable in
+ * shipped data: `char_adv02` (type 0) at condition 0, whose index 0 is zeroed
+ * and is named by zone combo **7** — head and both arms destroyed — across 36
+ * spawns. The other nine sit on a (type, condition) pair no spawn is born on
+ * and `ActorBodyConditionFromHands` never writes. `[proved]`
  */
 export function ZombiePickAttack(obj: ZombieActor, rng: Rng): number {
-  const list = AttackListOf(obj);
   const picks = AttackPicksOf(obj);
-  const v = picks[rng.int(10) + (obj.zones & DamageZone.All) * 10];
-  if (v !== undefined && list[String(v)]) return v;
-  // [diverges] The pick named an entry the bundle does not carry, and this
-  // reaches for another. That is **not** what the engine does: it indexes the
-  // table blind and plays whatever is there.
-  //
-  // The case it matters in is the crawler. `znkager` (character type 12, body
-  // condition 4 on every one of its 20 spawns) has a cond-4 pick row of ten
-  // 2s followed by ten 3s, so an undamaged one always draws attack **2** —
-  // and attack 2 is
-  //
-  // ```
-  // 00566e70  e5 03  1b 04  00 00 d0 41  28 00  09 00  01 00  00 00
-  //           ^997   ^1051  ^26.0f       ^40    ^9     ^mask 1
-  // ```
-  //
-  // whose hit frame is 40 against `g_motion_play_length[997]`, which is
-  // `0x0014` = **20** at 0x004E0F9A. `ZombieStateStrike` lands the hit on
-  // `obj+0x19C == entry[4]` and leaves at `play_length - 1`, so clip 997 can
-  // never reach frame 40: **in the engine an undamaged crawler swings and
-  // misses, every time.** `tools/hod2lib/combat.py` drops the entry for
-  // exactly that reason ("a hit frame at or past the clip's length means the
-  // entry was not really there"), which leaves the port with only attack 3 —
-  // a *different* clip, at hit frame 3, that does connect.
-  //
-  // So the port is currently more dangerous than the game here, and the
-  // faithful fix is to keep the entry and bake clip 997 so the swing whiffs
-  // the way the engine's does. That is an exporter change and a change to what
-  // `attack_tables` is allowed to reject, so it is the user's call. `[proved]`
-  const keys = Object.keys(list);
-  return keys.length ? Number(keys[0]) : -1;
+  return picks[rng.int(10) + (obj.zones & DamageZone.All) * 10] ?? -1;
 }
 
 /**
@@ -115,6 +123,9 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     obj.struck = false;
     obj.sub = StrikeSub.Lunge;
   }
+  // The engine has no such arm: it dereferences whatever `obj+0x131A` names.
+  // The only draws that reach here are the ten zeroed entries — see
+  // {@link ZombiePickAttack} — and `ZombieGiveUpAttack` carries the note.
   const atk = list[String(obj.attack)] ?? null;
   if (!atk) { ZombieGiveUpAttack(obj); return; }
 
@@ -144,6 +155,12 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     }
     obj.action = { motion: atk.strike, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
+    // `FUN_0040A6F0(obj, 3)` at `0x00455B8A`, on the same frame the strike
+    // clip starts and immediately after `FUN_004119A0` sets it. This is what
+    // made zombies swing in silence: the routine was ported for the shot
+    // voices only, and nothing anywhere raised kind 3.
+    ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                      (id) => events?.emit("sound.play", { id }));
     // Where the clip finishes, not where it peaks: the attack's own distance
     // less the clip's net travel.
     const m0 = MotionOf(obj, atk.strike);

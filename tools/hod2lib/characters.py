@@ -45,27 +45,42 @@ was not: `FUN_004107E0` writes exactly one slot per bone into the draw record,
 turned out to be the per-bone **hit sphere** (`combat.HIT_SPHERES`), which is
 why its first word is compared against the node's slot.
 
-**[open] Twenty-one character types have no extra part, and one shows it.**
-``EXTRA_PARTS`` is a null pointer for 21 of the 86 types that have a skeleton
--- the cat and most of the bosses among them, where nothing is obviously
-missing. Type 0 is `char_adv02`, the commonest zombie, and it is: its
-*undamaged* torso model (slot ``0x1B3D``) reaches ``y -2.0..5.5`` and covers
-its own abdomen, so it looks right until it is shot. The first two damaged
-stages of bone 1, slots ``0x1B70`` and ``0x1B71``, are **chest-only** --
-``y 1.3..5.5``, and the parse is exact, 124 and 102 vertices against the
-model's own declared counts -- so from the first torso hit until the third
-there is nothing drawn between the pelvis (top at ``y -0.45``) and the chest.
+**Twenty-one character types have no extra part, and the one that showed it
+was a different mechanism entirely.** ``EXTRA_PARTS`` is a null pointer for 21
+of the 86 types that have a skeleton -- the cat and most of the bosses among
+them, where nothing is obviously missing. Type 0 is `char_adv02`, the commonest
+zombie, and it looked like the exception: its *undamaged* torso model (slot
+``0x1B3D``) reaches ``y -2.0..5.5``, the first two damaged stages of bone 1
+(``0x1B70`` and ``0x1B71``) are chest-only at ``y 1.35..5.53``, and the pelvis
+tops out at ``y -0.45``, so a shot zombie had a 1.75-unit hole where its
+midriff should be.
 
-What has been ruled out for the missing band: `AssetDrawSlot` (`FUN_00418560`)
-draws one model per slot, so a bone cannot draw two; `FUN_004122E0`, the only
-other thing `SkeletonDrawWalk` consults per node, **suppresses** a draw rather
-than adding one, and only for bone 9 on ten named slots; and `harold.bin`
-carries five lower-torso models at slots ``0x1B6B..0x1B6F``, of exactly the
-missing extent and exactly as many as bone 1 has damage stages, which **no
-table in the EXE references** -- an exhaustive scan finds the run only in the
-`pol/` slot lists themselves. Whether the retail game shows the same hole is
-undetermined; if it does not, something outside the skeleton walk draws it.
-See `web/src/render/characters/gore.ts`.
+The band is drawn by `ZombieDrawBonePart` (`FUN_004534A0`), class 0x30's
+**per-bone draw callback** -- installed at ``obj+0x12EC`` by `EnemyZombieInit`
+and called by `SkeletonEmitNode` *instead of* `SkeletonDrawNodeSlot`. It
+switches on the slot the bone is currently drawing, and for ``0x1B70`` and
+``0x1B71`` it draws that slot **and** a second model, ``0x1B52 + (counter +
+obj+0x3C * 10) % 30``: a thirty-cel flipbook of the lower torso. For the
+undamaged ``0x1B3D`` it draws no such thing as ``0x1B3D`` at all -- a twenty-cel
+chest, ``0x1B3E + seed % 20``, plus the same lower torso. Stages ``0x1B72``,
+``0x1B73`` and ``0x1B74`` fall to the default arm and draw alone, and those
+three are exactly the ones whose own geometry already reaches ``y -2.02``,
+which is the check on the reading.
+
+What this docstring used to say about the band, and why it was wrong: the two
+things ruled out were ruled out correctly -- `AssetDrawSlot` (`FUN_00418560`)
+draws one model per slot and `FUN_004122E0` only ever **suppresses** a draw --
+but "so a bone cannot draw two" does not follow, because the *hook* calls the
+draw as many times as it likes. It also said ``harold.bin`` carries five
+lower-torso models at ``0x1B6B..0x1B6F`` "of exactly the missing extent and
+exactly as many as bone 1 has damage stages, which no table in the EXE
+references". The scan was right that no table names them and the file was
+wrong -- they are in **both** `char_adv02.bin` and `harold.bin` -- and the run
+is ``0x1B52..0x1B6F``, thirty models, not five: reading only the last five of
+it is what made the count look meaningful. The selection is arithmetic in the
+hook, so no amount of scanning for a table could have found it.
+`web/src/game/class30/bonecels.ts` carries the table, the measurements and the
+seven arms that are not yet ported.
 """
 
 from __future__ import annotations
@@ -80,7 +95,9 @@ from .arcscript import (  # noqa: F401
                         CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
                         arc_script)
 from .charmotion import (  # noqa: F401
-    BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS, humanoid_motion_ids,
+    BODY_CREATURE_HOST_CLIPS,
+    BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS,
+    CLASS21_FREED_MOTION, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
 from .combat import (  # noqa: F401
@@ -104,8 +121,9 @@ from .combat import (  # noqa: F401
                      ZOMBIE_THROW_AIM_DROP, ZOMBIE_THROW_ARC_GRAVITY,
                      ZOMBIE_THROW_ARC_HIT_KIND, ZOMBIE_THROW_HIT_KIND,
                      ZOMBIE_THROW_SLOTS, ZOMBIE_THROW_SPEED,
-                     ZOMBIE_THROW_SPEED_STANDING, actor_radius, attack_picks,
-                     attack_tables, bone_zones, combat_tables,
+                     ZOMBIE_THROW_SPEED_STANDING, actor_radius,
+                     attack_hit_lands, attack_picks, attack_tables,
+                     bone_zones, combat_tables,
                      damage_rank_row, death_motions, difficulty_tables,
                      gore_parts, hit_reactions, hit_sphere, hit_steps,
                      motion_row, player_damage, reaction_groups, throw_tables,
@@ -168,6 +186,7 @@ __all__ = [
     "BONE_ZONE",
     "CLASS20_DEATH_MOTION",
     "CLASS20_IDLE_MOTIONS",
+    "CLASS21_FREED_MOTION",
     "CLASS30_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPT_BYTES",
@@ -191,6 +210,8 @@ __all__ = [
     "class20_tail",
     "SLOT_DRAWN_CLASSES",
     "CLASS33_CARRIER",
+    "CLASS33_PUSHABLE",
+    "class33_push_tail",
     "slot_drawn_spawn",
     "class33_tail",
     "class52_tail",
@@ -265,6 +286,7 @@ __all__ = [
     "actor_radius",
     "approach_tables",
     "arc_script",
+    "attack_hit_lands",
     "attack_picks",
     "attack_tables",
     "bake",
@@ -350,18 +372,36 @@ SLOT_DRAWN_CLASSES = frozenset({0x33, 0x52})
 #: 0x00432FF4 is the switch, and the descriptor's ``+0x22`` is what reaches it.
 CLASS33_CARRIER = 1
 
+#: The second class-0x33 sub-handler the player runs: ``obj+0x11C == 4``.
+#:
+#: `ScriptedPushableUpdate33` (`FUN_00433B70`), off the same switch. A piece of
+#: scenery an actor shoves out of its way: it draws ``tail+0x00`` and, while
+#: ``obj+0x34`` bit ``0x8000`` is clear, applies whatever
+#: `ColiTestSphereAgainstActors` recorded at ``obj+0x138``/``+0x13C``/
+#: ``+0x140`` -- a tenth of the penetration along the reversed normal, which is
+#: `ZombiePushOutOfWorldAndActors`' own arithmetic. Two shipped spawns, both
+#: stage 1: ``0x1A40`` and ``0x1A74``, asset slot 4196 = ``komono_7.bin``
+#: part 0.
+CLASS33_PUSHABLE = 4
+
 
 def slot_drawn_spawn(cls: int, rec) -> bool:
     """Which spawns of a :data:`SLOT_DRAWN_CLASSES` class carry a placement.
 
     Class 0x52 is one object, so every spawn of it qualifies. Class 0x33 is
-    eleven, and only selector 1's tail is decoded -- selector 2's props already
-    reach the player through `props`, and the other nine are unread. Emitting
-    them would be a placement whose ``class33`` block is a different handler's
-    bytes read under this one's names, which is `L3` written into the bundle.
+    eleven, and only **two** sub-handlers are decoded -- selector 1 by
+    :func:`class33_tail` and selector 4 by :func:`class33_push_tail`.
+    Selector 2's props already reach the player through `props`, and the other
+    eight are unread. Emitting one of those would be a placement whose tail
+    block is a different handler's bytes read under one of these two's names,
+    which is `L3` written into the bundle.
+
+    **The two blocks are mutually exclusive and the port reads their presence
+    as the selector**, so widening this is only half the change: see the gate
+    on ``class33``/``class33_push`` in :func:`resolve_for_stage`.
     """
     if cls == 0x33:
-        return rec.hp == CLASS33_CARRIER
+        return rec.hp in (CLASS33_CARRIER, CLASS33_PUSHABLE)
     return True
 
 
@@ -448,6 +488,83 @@ def class33_tail(rec) -> dict:
         "commit_flag": u8(0x20),
         "despawn_flag": u8(0x21),
         "effect": [f(0x24 + 4 * k) for k in range(6)],
+    }
+
+
+def class33_push_tail(rec) -> dict:
+    """Class 0x33 **selector 4's** tail, as `ScriptedPushableUpdate33`
+    (`FUN_00433B70`) reads it.
+
+    Every offset below is from `disassemble_bytes` over
+    ``0x00433B70``..``0x00433C31`` rather than from the pseudocode, because the
+    function is one the decompiler truncates -- see the `L35` note at the end.
+
+    ::
+
+        tail+0x00  i32  draw slot                       -> obj+0x13F0
+        tail+0x04  i32  shot mesh, -1 for none          -> obj+0x14C
+        tail+0x08  f32  the sphere, only when +0x04 is -1
+        tail+0x0C  u8   script flag that clears obj+0x34 bit 0x8000
+        tail+0x0D  u8   script flag that despawns it
+
+    The seed runs once, gated on ``obj+0x1312`` being zero
+    (``MOV DX, word ptr [ESI + 0x1312]`` / ``TEST DX, DX`` at ``0x00433B9A``),
+    and ends by **incrementing** that word rather than storing 1
+    (``INC EDX`` at ``0x00433BE6``). It ORs ``obj+0x34`` with ``0x1``
+    unconditionally, then splits on ``tail+0x04``:
+
+    * ``-1`` writes the ``f32`` at ``tail+0x08`` to ``obj+0x124`` **and**
+      ``obj+0x128`` -- two separate loads of ``[ECX + 8]`` at ``0x00433BD4``
+      and ``0x00433BDD``, so the object gets a *body* sphere and is pushable;
+    * anything else ORs ``0x40`` then ``0x10`` and puts the mesh id on
+      ``obj+0x14C``, which is the mesh shot test the port has not got.
+
+    Both shipped spawns carry ``-1``, so both are body spheres of 3.5.
+
+    ``push_flag`` is the flag whose byte is at ``tail+0x0C``
+    (``MOV DL, byte ptr [ECX + 0xc]`` at ``0x00433BF1``); when it reads 1,
+    ``AND AH, 0x7f`` at ``0x00433C00`` clears ``obj+0x34`` bit ``0x8000`` and
+    the object becomes pushable from that frame on. That is also the bit
+    `ColiTestSphereAgainstActors` skips an object on (``0x80008000``), so one
+    bit both holds the object still and keeps it out of the collision list --
+    which is why the arming flag is named for the push and not for the bit.
+
+    ``despawn_flag`` is the byte at ``tail+0x0D``
+    (``MOV AL, byte ptr [ECX + 0xd]`` at ``0x00433B80``) and its test is the
+    **first thing in the routine**: a raised flag calls `ActorDespawn` and
+    returns before the seed, the push and the draw. Neither flag index has a
+    "none" test in front of it, exactly as selector 1's two do not.
+
+    `L35`: Ghidra ends this function's body at ``0x00433C5C``, on the
+    `MatrixStackPop` call, and the pseudocode ends there too. The real tail
+    runs to ``0x00433CD3`` and holds ``PUSH ESI`` / ``CALL 0x00405160`` at
+    ``0x00433CC6`` -- `RegisterForShotTest`, which is what puts the object in
+    the per-frame dynamic list `ColiTestSphereAgainstActors` walks, and so the
+    reason an actor can find it at all.
+
+    Its own block and **not** :func:`class33_tail`'s: these are two handlers'
+    readings of the same bytes, and ``tail+0x0C`` is selector 1's ``op_`` path
+    slot. Two shipped spawns, both `spawn_obj` (opcode 0x0B) and both stage 1:
+    ``0x1A40`` and ``0x1A74``.
+    """
+    def f(at: int, dflt: float = 0.0) -> float:
+        v = rec.param(at, "f32")
+        return dflt if v is None else v
+
+    def i(at: int, dflt: int = -1) -> int:
+        v = rec.param(at, "i32")
+        return dflt if v is None else v
+
+    def u8(at: int) -> int:
+        v = rec.param(at, "u8")
+        return 0xFF if v is None else v
+
+    return {
+        "slot": i(0x00, 0),
+        "shot_mesh": i(0x04),
+        "shot_radius": f(0x08),
+        "push_flag": u8(0x0C),
+        "despawn_flag": u8(0x0D),
     }
 
 
@@ -767,7 +884,17 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class52 = class52_tail(rec) if sp["class"] == 0x52 else None
         class53 = class53_tail(rec) if sp["class"] == 0x53 else None
         class14 = class14_tail(rec) if sp["class"] == 0x14 else None
-        class33 = class33_tail(rec) if sp["class"] == 0x33 else None
+        # **Gated on the selector, not on the class.** Class 0x33 is
+        # eleven objects behind one id and these two blocks are two of
+        # them reading the same bytes; emitting both for one spawn, or
+        # either for a sub-handler that is neither, is `L3` written into
+        # the bundle. The port reads which key is present as the
+        # selector, so exactly one of them is ever set.
+        is33 = sp["class"] == 0x33
+        class33 = (class33_tail(rec)
+                   if is33 and rec.hp == CLASS33_CARRIER else None)
+        class33_push = (class33_push_tail(rec)
+                        if is33 and rec.hp == CLASS33_PUSHABLE else None)
         tscript = ascript = None
         camera_cue = None
         if sp["class"] == 0x30:
@@ -843,6 +970,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class53=class53,
             class14=class14,
             class33=class33,
+            class33_push=class33_push,
             hp=sp.get("hp", 0)))
         if motion is None:
             continue                      # marker only -- see the module note
@@ -939,6 +1067,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 for a30 in CLASS30_ARC_SCRIPTS.values():
                     entry_clips += [st["motion"]
                                     for st in (arc_script(tables, a30) or [])]
+        # The two clips the `znjoe` release state names -- keyed by
+        # character type, because that state is. See
+        # ``BODY_CREATURE_HOST_CLIPS``.
+        entry_clips += list(BODY_CREATURE_HOST_CLIPS.get(res.char_type, ()))
         # `ActorSnapToGroundHeight` routes an actor over a drop into state 11,
         # whose landing clip is 0x3BA -- and every class-0x30 actor can now
         # reach it, so it is baked for all of them.
@@ -957,6 +1089,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # and the clip `OneHitTargetUpdate` cues the frame the actor is shot.
         if sp["class"] == 0x20:
             entry_clips += list(CLASS20_IDLE_MOTIONS) + [CLASS20_DEATH_MOTION]
+        # Class 0x21's freed clip. The idle comes from `MOTION_RULES`; this is
+        # the one `RescueTargetHeldState` swaps to when the target is rescued.
+        if sp["class"] == 0x21:
+            entry_clips += [CLASS21_FREED_MOTION]
         entry_clips += target_script_motions(tscript)
         entry_clips += target_script_motions(ascript)
         if sp["class"] == 0x10:

@@ -14,6 +14,28 @@ import { ActorByAt, G } from "../globals";
 import { PlayerTakeDamageTimed } from "../combat/player";
 
 /**
+ * The tumble rate the port gives every thrown weapon, in BAMS per frame.
+ *
+ * `[diverges]` **The engine has no authored value.** The projectile's
+ * `obj+0x135C` is never written by either launcher — `SpawnThrownWeapon`
+ * (`FUN_004504E0`) writes the model and `obj+0x1364`, `ZombieThrowHandWeapon`
+ * (`FUN_0045A240`) the model and the position — and the allocator does not
+ * clear it: `FUN_004A6FA0` zeroes exactly the first 0xD dwords, the task
+ * header, and `FUN_004A7400` is a free-list split that returns the block as it
+ * stands. So the rate the engine tumbles at is whatever the previous occupant
+ * of that arena block left behind, which is a thing a port with no arena
+ * cannot reproduce and should not pretend to.
+ *
+ * It is also, on that reading, why the report said *the spin depends on which
+ * zombie is throwing the axe*.
+ *
+ * `0x200` is the middle of the range `class30/throw.ts` used to draw at
+ * random, so a weapon tumbles at about the speed it always has.
+ */
+export const THROWN_SPIN_RATE = 0x200;
+
+
+/**
  * `ThrownWeaponFlyToTarget` — `FUN_0044FD40`. One weapon, one frame.
  * Returns false once it should be removed from the pool.
  */

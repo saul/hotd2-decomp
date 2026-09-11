@@ -303,8 +303,48 @@ export class Shooting implements System {
   }
 
   /**
-   * `ActorPlayHitVoice` (`FUN_0040A6F0`): a flesh impact plus a voice, with
-   * the voice taken from set A or set B by character type.
+   * `ActorPlayHitVoice` (`FUN_0040A6F0`) kinds 0, 1 and 2: a flesh impact plus
+   * a voice, with the voice taken from set A or set B by character type.
+   *
+   * `[diverges]` **This is the same engine routine `game/combat/voice.ts`
+   * holds, implemented twice, and the second copy is here because the layer
+   * rule is right and the port is not finished.** The engine plays these three
+   * kinds from `ActorShotFeedback` (`FUN_00454050`) and its sibling
+   * `FUN_00453EB0`, which are `game/` code — `feedback.ts` is already the port
+   * of the first — so the faithful home is there, and
+   * `verify_layers.py`'s `render-drives-the-port` refuses this layer to call
+   * into the engine for exactly that reason.
+   *
+   * **The kinds those call sites pass have now been read**, and they are not
+   * what this function computes. `[proved]`, from `ZombieOnShot`
+   * (`FUN_00453EB0`) and its class-0x31 twin `ThrowerOnShot` (`FUN_004499A0`),
+   * which agree:
+   *
+   * ```
+   * 00453f6e  83f802   CMP EAX, 0x2     ; the hit result, read back
+   * 00453f73  6a02     PUSH 0x2         ; dead and result == 2 -> kind 2
+   * 00453f77  6a01     PUSH 0x1         ; dead otherwise        -> kind 1
+   * 00454025  83f805   CMP EAX, 0x5
+   * 0045402a  6a00     PUSH 0x0         ; alive and result != 5 -> kind 0
+   * ```
+   *
+   * — **the kind is the hit-result code and nothing else.** There is no test
+   * anywhere of whether the bone was the head or whether the actor died of it,
+   * which is what the `killed`/`head` mapping below uses. What that costs is
+   * small but real: kind 2's two voice ids in `g_hit_voice_table` are the
+   * *same pair* as kind 1's, so the only audible difference is the impact —
+   * two head impacts against the five body ones — and this copy plays the head
+   * pair on any headshot kill where the engine plays it on
+   * `HitResultCode.Plain`.
+   *
+   * So clearing this is four decisions, not a move: the layer, the
+   * determinism (the pick goes onto the **world** generator, the engine's own
+   * `rand()`, and so into the snapshot), that behavioural correction, and the
+   * standing `[diverges]` in `feedback.ts` that the port raises shot feedback
+   * once for every class where the engine raises it from each class's own
+   * on-shot routine. It wants its own commit and the user's decision, not a
+   * ride along with the attack cry. Until then the two copies must be kept in
+   * step by hand, and this comment is the only thing saying so.
    */
   private voice(charType: number, kind: "hurt" | "kill" | "head"): void {
     const c = this.combat;

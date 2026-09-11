@@ -9,6 +9,7 @@
 import type { Group, Mesh, Object3D } from "three";
 import type { Actor } from "../../game/actor";
 import type { CharacterType } from "../../bundle";
+import type { CelRunNode } from "./cels";
 
 /**
  * What one gore swap did to a bone, and therefore what undoing it must put
@@ -74,6 +75,21 @@ export interface Instance {
    * `restoreNodes` and a fresh instance both are.
    */
   veto?: number;
+  /**
+   * The cel nodes `ZombieDrawBonePart` (`FUN_004534A0`) draws on a bone, keyed
+   * `"<bone>:<run index>"`.
+   *
+   * Render bookkeeping: which cel is showing is a function of
+   * `G.g_blink_frame_counter` and `a.hitSlot`, both of which are in the
+   * snapshot, so nothing here needs saving and `resync` rebuilds it on the
+   * first frame after a load. See `render/characters/cels.ts`.
+   */
+  cels?: Map<string, CelRunNode>;
+  /**
+   * Bones whose own primitive meshes are hidden because a cel arm replaced
+   * them. Not the same set as `a.removed`, which is a severed subtree.
+   */
+  celHidden?: Set<number>;
   /**
    * The models an attachment list hung on a bone, by record id.
    *

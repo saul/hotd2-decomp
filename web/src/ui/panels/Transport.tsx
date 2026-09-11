@@ -52,25 +52,22 @@ export function Transport() {
 
       <span className="sep" />
 
-      <button className="sound" aria-pressed={!sound.muted}
-              title="Sound on / off. Browsers block audio until the page is clicked, so this is also the gesture that unblocks it."
-              onClick={() => dispatch({ kind: "toggleMute" })}>
-        <span>{sound.muted ? "🔇" : "🔊"}</span> <span>{sound.text}</span>
-      </button>
-      {/* The ids are the stylesheet's only hold on these three. Each is a
-          genuine singleton — there is one volume slider, one audio status
-          line, one camera label — so an id says what it is; a role that
-          repeats gets a class under an identified container instead. They
-          were dropped when this bar moved out of `index.html`, and the sheet
-          went on styling ids nothing rendered: the frame slider reflowed on
-          every frame for want of `#frame-label`'s `min-width`, and
-          `#bgm-label.blocked` — the one audio state that needs a click to
-          clear — had no colour to announce itself in. */}
-      <input type="range" id="volume" min="0" max="100" step="1"
-             value={sound.volume}
-             title="BGM volume"
-             onChange={(e) => dispatch({ kind: "setVolume",
-                                         volume: Number(e.target.value) })} />
+      {/* **The two sound controls are not here any more.** The speaker is in
+          the top bar and the volume slider is in the sidebar's Sound panel,
+          because that is where they were asked for: the one you reach for
+          often belongs with the other one-click switches, and the one you set
+          once belongs with the settings. What stays is the *status* —
+          which track is playing, and whether the browser is still blocking it
+          — because that is a readout of the transport rather than a control.
+
+          The ids are the stylesheet's only hold on these. Each is a genuine
+          singleton — one audio status line, one camera label — so an id says
+          what it is; a role that repeats gets a class under an identified
+          container instead. They were dropped when this bar moved out of
+          `index.html`, and the sheet went on styling ids nothing rendered: the
+          frame slider reflowed on every frame for want of `#frame-label`'s
+          `min-width`, and `#bgm-label.blocked` — the one audio state that
+          needs a click to clear — had no colour to announce itself in. */}
       <span id="bgm-label"
             className={`dim${sound.blocked && !sound.muted ? " blocked" : ""}`}>
         {sound.label}

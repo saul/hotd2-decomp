@@ -11,6 +11,7 @@
  */
 import type { ArcStage, CharacterPlacement, TargetScriptJson, ZombieEntryTail }
   from "../bundle/characters";
+import { HIT_SLOT_NONE } from "./globals";
 import { ActorModelScale } from "./root_motion";
 import type { CivilianState } from "./class10/state";
 import type { Boss4Block } from "./class19/state";
@@ -22,6 +23,9 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import { makeFrogTail, type FrogTail } from "./class11/state";
+import { makeOwlTail, type OwlTail } from "./class43/state";
+import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
   from "./class33/state";
@@ -597,16 +601,28 @@ export enum ZombieAux {
    */
   StandThrowRetire = 0x10,
   /**
-   * Bit 5 — `ZombieStateRideCarrier` (`0x004589F5`) and
-   * `ZombieStateDelayedStrikeInPlace` (`0x0045EAEA`) read it; the first uses
-   * it to choose whether the actor's position is the carrier's plus its own
-   * offset.
+   * Bit 5 — **turn toward the camera eye every frame**, at a rate of `0x1A0`
+   * BAMS.
    *
-   * [open] Not read in full. Three shipped class-0x30 records set the
-   * `obj+0x34` bit it comes from, all in stage 2, against the two that set
-   * {@link StandThrowRetire}'s.
+   * Two readers, and they are the two carrier states:
+   * `ZombieStateRideCarrier` at `0x004589F5` and
+   * `ZombieStateDelayedStrikeInPlace` at `0x0045EAEA`, both
+   * `TEST byte ptr [ESI + 0x38], 0x20` then
+   * `TurnActorTowardCameraEye(obj, 0x1A0)` (`FUN_00409E80`). `[proved]`
+   *
+   * It used to be called `CarrierOffset`, on a note saying the first reader
+   * "uses it to choose whether the actor's position is the carrier's plus its
+   * own offset". It does not: the offset add at `0x00458A0E` is
+   * unconditional, and this bit gates the call two instructions later and
+   * nothing else. The name came from where the bit sits — `L20` — and it was
+   * the wrong half of the routine.
+   *
+   * Three shipped class-0x30 records set the `obj+0x34` bit it comes from,
+   * and they are exactly stage 2's first three state-29 riders (evt `0x5030`,
+   * `0x506C`, `0x50A8`, `init_flags 0x60004`); none of the four spawns that
+   * ride through {@link ZombieFlag2.AttachedToCarrier} sets it.
    */
-  CarrierOffset = 0x20,
+  TurnTowardCameraEye = 0x20,
 }
 
 /** `obj+0x136C` for class 0x30, where the bits differ from the thrower's. */
@@ -792,13 +808,23 @@ export enum ZombieFlag2 {
    */
   HitReactionAlt = 0x100,
   /**
-   * Bit `0x10000000` — this actor was spawned in the air.
+   * Bit `0x10000000` — **this actor's position and yaw are an offset on
+   * `g_carrier_object`**, and something re-seats it there every frame.
    *
-   * `EnemyZombieInitByCharType` sets it (0x00453023) when the spawn record's
-   * `obj+0x34 & 8` says so, and `EnemyZombieUpdate` gates part of its frame on
-   * it (`0045341c`). `[proved]`
+   * `EnemyZombieInitByCharType` raises it at `0x00453028` when the spawn
+   * record's `obj+0x34 & 8` says so, in the same arm that stashes the
+   * descriptor's position at `obj+0x13D8` and its yaw at `obj+0x135C`; and
+   * `EnemyZombieUpdate` tests it at `0x0045341C` and calls
+   * `ZombieAttachToCarrier` (`FUN_0045E770`) at `0x00453424` — **before** the
+   * state dispatch at `0x00453434`. `[proved]`
+   *
+   * It used to be called `SpawnedInAir`, which is what an offset with `y = 5`
+   * looks like from outside and is not what the code does — `L20`. Nothing
+   * set it and nothing read it, and the four spawns that carry it were left
+   * standing at the world origin while the car they belong to drove off. See
+   * `class30/carrier.ts`.
    */
-  SpawnedInAir = 0x10000000,
+  AttachedToCarrier = 0x10000000,
 }
 
 /**
@@ -954,6 +980,16 @@ export interface ActorBase {
    * own and until it happens this word carries only class 0x30's three bits.
    */
   flags38: number;          // +0x38
+  /**
+   * `obj+0x3C` — the index this actor holds in `g_hit_slots`, or `-1`.
+   *
+   * `ActorClaimHitSlot` (`FUN_00409270`) writes it and `ActorDespawn`
+   * (`FUN_00409CC0`) gives it back; see `game/hit_slots.ts`. It is here rather
+   * than absent because `ZombieDrawBonePart` (`FUN_004534A0`) uses it as the
+   * **phase** of every cel animation a class-0x30 bone plays —
+   * `g_blink_frame_counter + obj+0x3C * 10`.
+   */
+  hitSlot: number;          // +0x3C
   pos: Vec3;                // +0x40
   /**
    * Yaw in BAMS, the middle word of the engine's rotation triple at
@@ -972,6 +1008,16 @@ export interface ActorBase {
    * is the half that has to catch up.
    */
   pitch: number;            // +0x64
+  /**
+   * `obj+0x6C` — the third orientation word, which every spawn allocator fills
+   * from the descriptor and `MatrixRotateZ` consumes.
+   *
+   * Only class 0x43 writes it after the spawn: the owl banks into its dive and
+   * rolls through its orbit. Class 0x41 type 4 reads the same word as an
+   * object **kind**, which is the polymorphism `docs/formats/spawns.md` warns
+   * about — check the class before believing it is an angle.
+   */
+  roll: number;             // +0x6C
   /**
    * What the camera aims at, and **not** the actor's origin.
    *
@@ -1099,6 +1145,18 @@ export interface ActorBase {
   holdFrames: number;       // +0x1320, class 0x24
   /** Which of `g_enemy_approach_rings` this actor measures against. */
   ringSet: number;          // +0x131F
+  /**
+   * `obj+0x131B` — this actor is one of the holders of the looping
+   * held-weapon SE counted by `G.g_weapon_loop_holders`.
+   *
+   * A latch, not a count: `EnemyZombieInitByCharType` (`0x00453164`) writes 1
+   * for character types 2 and 3, `ZombieReleaseWeaponLoopSe` (`FUN_00456600`)
+   * refuses to do anything unless it is 1 and writes 0 on its way out. The
+   * only two readers in the image are that routine's own guard and
+   * `ScriptedHumanoidBoneDrawHook`, which is class 0x25 and a different
+   * meaning of the same byte (**L3**).
+   */
+  weaponLoopHeld: number;   // +0x131B, u8
   /** How deep in the distance queue this actor may be and still attack. */
   allowance: number;        // +0x1358
   /** Frames before this actor may claim again. `ZombieStateHoldAtRange`
@@ -1186,6 +1244,18 @@ export interface ActorBase {
    * Its own field for the reason above: `tail+0x00` is class 0x30's body
    * condition.
    */
+  /**
+   * Class 0x51's descriptor tail — the fish's speeds, bob and timings, or the
+   * water level when the record is a group header.
+   *
+   * Its own field for the reason class 0x20's and class 0x52's are:
+   * `tail+0x00` is class 0x30's body condition, and here it is a float.
+   */
+  /** Class 0x11's descriptor tail — the frog's cue, wedge and command list. */
+  class11: CharacterPlacement["class11"];
+  /** Class 0x43's two descriptor bytes — the owl's member index and sub-type. */
+  class43: CharacterPlacement["class43"];
+  class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
    * Class 0x14's descriptor tail — the state the boss starts in, the route
@@ -1209,6 +1279,16 @@ export interface ActorBase {
    * (`FUN_00432FF0`) reads `obj+0x11C` for the same answer.
    */
   class33: CharacterPlacement["class33"];
+  /**
+   * Class 0x33 **selector 4's** tail — the draw slot, the sphere, and the two
+   * script flags that arm the push and take the object off the field.
+   *
+   * Never non-null on the same actor as {@link class33}: the exporter sets
+   * exactly one of the two, keyed on the descriptor's `+0x22`, because they
+   * are two sub-handlers' readings of the same bytes. So this field's presence
+   * *is* the selector, the same way that one's is. See `class33/pushable.ts`.
+   */
+  class33Push: CharacterPlacement["class33_push"];
   /**
    * `obj+0x124` — the radius `ShotTestSphere` (`FUN_00404630`) measures the
    * shot against, and the **whole** hit test for an actor with no skeleton.
@@ -1274,7 +1354,20 @@ export interface ActorBase {
    * at shot time and the class picks its reaction on its next tick — the same
    * frame boundary the engine has.
    */
-  pendingHit: { bone: number; result: number } | null;   // +0x190, +0x34 bit 3
+  /**
+   * ...and **which player fired**, because the engine's record is per player:
+   * `DispatchHit` (`FUN_004092F0`) reads the bone from `obj+0x190 + player`,
+   * and `ZombieOnShot` (`FUN_00453EB0`) walks `g_hit_player_order` around the
+   * whole of its body. Optional, because only the shot path knows it: the
+   * routines that fabricate a hit -- `ActorKillAll`, the debug clear -- have
+   * no shooter to name.
+   *
+   * `ZombieOnShot`'s live arm is the one reader. `ActorReactToHit`
+   * (`FUN_004543F0`) is called there, at `0x0045401A`, with the player as its
+   * only argument.
+   */
+  pendingHit:
+    { bone: number; result: number; player?: number } | null;  // +0x190
   /**
    * `obj+0x131C` — which player's shot killed this actor.
    *
@@ -1612,13 +1705,17 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Boss2; boss2: Boss2Tail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
+  | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
+  | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
+  | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
-      | SpawnClass.Boss2 | SpawnClass.Mouse
+      | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
+      | SpawnClass.Frog | SpawnClass.FlyingEnemy
       | SpawnClass.ScriptedScenery> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
@@ -1641,6 +1738,15 @@ export type Boss2Actor = Extract<Actor, { cls: SpawnClass.Boss2 }>;
 /** An actor already narrowed to class 0x20, for that class's own routines. */
 export type OneHitTargetActor = Extract<Actor,
   { cls: SpawnClass.OneHitTarget }>;
+
+/** An actor already narrowed to class 0x43, for that class's own routines. */
+export type OwlActor = Extract<Actor, { cls: SpawnClass.FlyingEnemy }>;
+
+/** An actor already narrowed to class 0x11, for that class's own routines. */
+export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
+
+/** An actor already narrowed to class 0x51, for that class's own routines. */
+export type FishActor = Extract<Actor, { cls: SpawnClass.WaterEnemy }>;
 
 /** An actor already narrowed to class 0x33, for that class's own routines. */
 export type ScriptedSceneryActor = Extract<Actor,
@@ -1679,7 +1785,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   // assigning `cls` here would widen it back to `SpawnClass` and defeat the
   // narrowing the union exists for.
   const head: Omit<ActorBase, "cls"> = {
-    at, charType, name, flags38: 0,
+    at, charType, name, flags38: 0, hitSlot: HIT_SLOT_NONE,
     // `ActorBuildSkinnedModel` writes both of these while building the model:
     // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),
@@ -1688,6 +1794,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pos: vec3(),
     yaw: 0,
     pitch: 0,
+    roll: 0,
     lookAt: vec3(),
     vel: vec3(),
     accY: 0,
@@ -1710,6 +1817,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     slideTimer: 0,
     holdFrames: 0,
     ringSet: 0,
+    weaponLoopHeld: 0,
     allowance: 0,
     cooldown: 0,
     target: vec3(),
@@ -1727,9 +1835,13 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     worldPushDepth: 0,
     standThrow: undefined,
     oneHitTarget: null,
+    class11: null,
+    class43: null,
+    class51: null,
     class52: null,
     class14: null,
     class33: null,
+    class33Push: null,
     class53: null,
     hitRadius: 0,
     entranceMotion: 0,
@@ -1805,6 +1917,15 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };
+  }
+  if (cls === SpawnClass.WaterEnemy) {
+    return { ...head, cls, fish: makeFishTail() };
+  }
+  if (cls === SpawnClass.Frog) {
+    return { ...head, cls, frog: makeFrogTail() };
+  }
+  if (cls === SpawnClass.FlyingEnemy) {
+    return { ...head, cls, owl: makeOwlTail() };
   }
   if (cls === SpawnClass.ScriptedScenery) {
     return { ...head, cls, scenery: makeScriptedSceneryTail() };

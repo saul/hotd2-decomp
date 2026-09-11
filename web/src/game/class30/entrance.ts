@@ -31,8 +31,9 @@ import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import {
-  ActorFlag, ZombieFlag2, type Actor, type ZombieActor,
+  ActorFlag, ZombieAux, ZombieFlag2, type Actor, type ZombieActor,
 } from "../actor";
+import type { Vec3 } from "../vec";
 import { CountEnemyZombieJoin } from "../combat/counts";
 import { ActorByAt, G } from "../globals";
 import {
@@ -42,7 +43,16 @@ import {
   FirstBakedOf, MotionPlayFrame, MotionPlayLength, MotionRowOf, T,
 } from "../tables";
 import { ActorSetMotion, ZombieSetMotionIfIdle } from "./motion_cue";
+import { TurnActorTowardCameraEye } from "../actor_turn";
 import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
+
+/**
+ * `PUSH 0x1A0` at `0x004589F7` and `0x0045EAF0` — the BAMS-per-frame rate the
+ * two carrier states turn at when {@link ZombieAux.TurnTowardCameraEye} is up.
+ * 0x1A0 is about 2.3 degrees a frame, an order of magnitude faster than the
+ * `0x40` the hub states use.
+ */
+export const CARRIER_TURN_RATE = 0x1a0;
 
 /**
  * The arc script `ZombieStateArcScriptedEntrance` installs, by character type
@@ -373,7 +383,8 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
  * **other** writer of `g_carrier_object`, stage 3's boat, and that class is
  * still unported.
  */
-export function ZombieStateRideCarrier(obj: ZombieActor, rng: Rng): void {
+export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
+                                       rng: Rng, dt: number): void {
   if (obj.sub === 0) {
     // `obj+0x13E4/E8/EC = obj+0x40/44/48` — the engine writes x, then z, then
     // y, into the three words `ActorFacePlayerTarget` otherwise uses.
@@ -394,6 +405,14 @@ export function ZombieStateRideCarrier(obj: ZombieActor, rng: Rng): void {
     obj.pos.x = obj.target.x + carrier.pos.x;
     obj.pos.y = obj.target.y + carrier.pos.y;
     obj.pos.z = obj.target.z + carrier.pos.z;
+  }
+  // `004589F5  TEST byte ptr [ESI + 0x38], 0x20` then
+  // `TurnActorTowardCameraEye(obj, 0x1A0)`. Only the three stage-2 riders
+  // whose descriptor sets `obj+0x34` bit 2 take it — see
+  // {@link ZombieAux.TurnTowardCameraEye}, which is what the bit means; the
+  // add above is unconditional and is not what this gates.
+  if (obj.flags38 & ZombieAux.TurnTowardCameraEye) {
+    TurnActorTowardCameraEye(obj, eye, CARRIER_TURN_RATE, dt);
   }
   // `(carrier+0x34 & 0x10000000) != 0` — the carrier says it is done. With no
   // carrier ported there is nothing to say it, so the ride is over at once.

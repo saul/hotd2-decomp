@@ -19,7 +19,11 @@
  *   is set, so an ordinary zombie has no wait between swings beyond the
  *   retreat itself — and it only counts down for an actor that has already
  *   swung, because the countdown is gated on `obj+0x136C & 0x40000` as well.
+ * * **the groan.** `PlaySoundId(0x1917A9)` at `0x004558D6` — and that `PUSH`
+ *   at `0x004558D2` is the **only** occurrence of the id anywhere in `.text`.
+ *   See {@link ZOMBIE_HOLD_GROAN}.
  */
+import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ZombieFlag2, type ZombieActor } from "../actor";
 import { G } from "../globals";
@@ -37,8 +41,47 @@ import { MotionFade, MotionRow, QUEUE_CAP, ZombieState } from "./states";
 /** `FUN_00409E80`'s turn rate here is a literal 0x40 BAMS. */
 const HOLD_TURN_RATE = 0x40;
 
+/**
+ * **The noise a standing zombie makes** — `COMMON2\ZOMBIE_041_16.wav`,
+ * resolved through `g_se_name_list` (`0x005845F8`).
+ *
+ * It had never been found because it was looked for in the wrong place. There
+ * is exactly one voice routine in this game, `ActorPlayHitVoice`
+ * (`FUN_0040A6F0`), and none of its five kinds is an idle: all five fire on an
+ * event. This is not one of them. It is a bare `PlaySoundId` inside the state
+ * that keeps an actor waiting at the ring, and it is gated on the one thing
+ * that makes it an idle noise rather than a cue — **the actor was not already
+ * playing its idle clip**:
+ *
+ * ```
+ * 004558a5  8b1481           MOV  EDX, dword ptr [ECX + EAX*0x4]   ; motion row
+ * 004558a8  8b86b4010000     MOV  EAX, dword ptr [ESI + 0x1b4]     ; playing now
+ * 004558ae  8b3a             MOV  EDI, dword ptr [EDX]             ; row[0], the idle
+ * 004558b0  3bc7             CMP  EAX, EDI
+ * 004558b2  742a             JZ   0x004558de                       ; already idling
+ * 004558b4  6a0a             PUSH 0xa                              ; fade
+ * 004558b6  e8a5650500       CALL _rand
+ * 004558c1  f7f9             IDIV ECX                              ; rand() %% 5
+ * 004558cc  e8cfc0fbff       CALL ActorSetMotionBlended
+ * 004558d1  68a9171900       PUSH 0x1917a9
+ * 004558d6  e8f576fcff       CALL PlaySoundId
+ * ```
+ *
+ * So it is **one shot per entry into the idle** — on arrival at the ring, and
+ * again after every swing and retreat — not periodic, not random, and not on a
+ * timer. There is no second site: a byte search for `a9 17 19 00` over the
+ * whole image finds this `PUSH`, the SE name record, and nothing else that is
+ * code.
+ *
+ * `[proved]`, and the search that would have found it sooner is the one over
+ * `PlaySoundId`'s 500 call sites narrowed to class 0x30's address range, not
+ * any amount of reading the voice routine.
+ */
+const ZOMBIE_HOLD_GROAN = 0x1917a9;
+
 export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
-                                       host: GameHost): void {
+                                       host: GameHost,
+                                       events?: Events): void {
   // Called for its side effect: it refreshes `obj+0x1358`, the queue depth
   // this actor is allowed to sit at.
   TestApproachRing(obj, eye);
@@ -120,11 +163,24 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
     return;
   }
 
-  // Waiting its turn: the idle from the motion row, and a slow turn to keep
-  // facing you.
-  ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
-    rng, 5, MotionFade.Normal);
+  // Waiting its turn: the idle from the motion row, a groan, and a slow turn
+  // to keep facing you.
+  //
+  // The engine's gate on both the clip and the sound is one `CMP` —
+  // `obj+0x1B4` against `row[0]` — so the groan is read off the same test.
+  // Taken **before** the call, because `ZombieSetMotionIfIdle` is what writes
+  // `obj.motion`, and confirmed after it, because that helper refuses while a
+  // one-shot owns the actor and the engine's `ActorSetMotionBlended` does not
+  // (see its own note). Playing on the intent rather than on the fact would
+  // groan every frame of a stumble; playing on the fact is the same event the
+  // engine plays it on.
+  const idle = FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk,
+                            MotionRow.WalkAlt);
+  const wasIdling = obj.motion === idle;
+  ZombieSetMotionIfIdle(obj, idle, rng, 5, MotionFade.Normal);
+  if (!wasIdling && idle !== undefined && obj.motion === idle) {
+    events?.emit("sound.play", { id: ZOMBIE_HOLD_GROAN });
+  }
   // ...and, between the two, the entry clip lets go of itself:
   //
   // ```

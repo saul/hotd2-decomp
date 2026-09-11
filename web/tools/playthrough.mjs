@@ -135,22 +135,6 @@ const flag = (n) => args.includes(`--${n}`);
 
 const stage = opt("stage", "2");
 const seed = opt("seed", "1");
-/**
- * Which of the stage's entry blocks to open at — `PlayerState.entry`.
- *
- * A stage does not choose where it starts; the stage before it does, and the
- * answer arrives in `g_evt_block_index`. Stage 3 opens at block 0 or block 7
- * and stage 4 at block 0 or block 4, so a tool that can only run the first
- * entry has never played half of the shipped script. Stage 3's block 2 hangs
- * on `wait_script_flag 0x15` from entry 7 and not from entry 0, and that is
- * the whole reason this option exists: **the default entry is one route, not
- * the stage.**
- *
- * This is still not a deep link — the run starts at a real entry block and
- * plays forward from there, so it exercises the stage's own rebuild path and
- * not the seek's.
- */
-const entry = opt("entry", null);
 /** Game frames on one instruction before the tool starts shooting. 3s. */
 const PATIENCE = Number(opt("patience", "180"));
 /** Game frames on one instruction before it is a hang. 15s, and see above. */
@@ -290,11 +274,34 @@ async function roomPressure(page) {
 }
 
 const started = Date.now();
+// `--entry` picks which of a stage's entry points to start from. Only stages
+// 3 and 4 have more than one, so it changes nothing on the other four --
+// `resolveEntry` falls back to the first entry when the number names none,
+// silently, which is why passing it on stage 2 produces a byte-identical run.
+//
+// **It is NOT a way to choose a branch arm, and this tool still has no way to
+// choose one.** A driven run takes one arm of every branch, so "the stage
+// reached an end block" means one path through it was played and no others.
+// Stage 2 is the case that makes that matter: the rescue target its branch
+// variable depends on had no skeleton, so blocks 1-10 and 21-32 were
+// unreachable and **nothing had ever executed them**; exporting the actor
+// turned them into live code that no run has visited. Reaching them needs the
+// driver to shoot that actor during block 0, which {@link shootable} declines
+// because the gate there is neither an enemy nor a civilian one. That is a
+// real coverage gap and it is open.
+//
+// It is also **not a deep link**: the run starts at a real entry block and
+// plays forward, so it exercises the stage's own rebuild path and not the
+// seek's. And it is not cosmetic coverage -- stage 3's block 2 is on neither
+// entry-0 route, so until this existed a seven-step block of shipped script
+// had never been executed by anything, and it held two hangs. See
+// `docs/PLAYER_HANGS.md` items 21 to 23.
+const entry = opt("entry", null);
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
   // is the other half, and it was already a URL flag.
   url: `?stage=${stage}&drive=1&seed=${seed}`
-     + (entry === null ? "" : `&entry=${entry}`),
+       + (entry === null ? "" : `&entry=${entry}`),
   size: opt("size", "1280x800"),
   headless: flag("headless"), quiet: !flag("loud"),
 });

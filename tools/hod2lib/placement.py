@@ -400,6 +400,13 @@ class Placement:
     #: it off the field. Selector 1 only: the other ten sub-handlers read the
     #: same bytes as something else. See :func:`characters.class33_tail`.
     class33: dict | None = None
+    #: Class 0x33 **selector 4's** tail -- the draw slot, the sphere, and the
+    #: two script flags that arm the push and take the object off the field.
+    #: Selector 4 only, and never set on the same placement as
+    #: :attr:`class33`: they are two sub-handlers' readings of the same bytes,
+    #: and the port takes which key is present as the selector. See
+    #: :func:`characters.class33_push_tail`.
+    class33_push: dict | None = None
     #: The descriptor's ``+0x22``, **before** difficulty scaling.
     #: `ActorInitHitPoints` adds ``difficulty.hp_delta[rank]`` and clamps to
     #: ``[1, 300]``; the client does that, because it is the client that owns
@@ -478,4 +485,6 @@ class Placement:
             d["class14"] = self.class14
         if self.class33:
             d["class33"] = self.class33
+        if self.class33_push:
+            d["class33_push"] = self.class33_push
         return d

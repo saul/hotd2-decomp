@@ -47,9 +47,27 @@ export interface PropsJson {
   note: string;
 }
 
+/** One row of `g_looping_se_ids` / `g_looping_se_stop_ids`, paired by index. */
+export interface LoopingSe {
+  /** The id that starts the loop — `g_looping_se_ids` (`0x005887FC`). */
+  play: number;
+  /**
+   * The id that stops **every** loop — `g_looping_se_stop_ids` (`0x005888B0`).
+   *
+   * `PlaySoundId` calls `SoundStopAllLoopingSe()` when it sees one of these,
+   * so the pairing names which loop a stop id belongs to and not what it
+   * stops: it stops the lot.
+   */
+  stop: number;
+}
+
 export interface SoundJson {
   se: Record<string, string>;
   voice: Record<string, string>;
+  /** `PlaySoundId`'s loop branch, 44 pairs. Absent in bundles built before it
+   * was read; a reader with no table plays every SE as a one-shot, which is
+   * what the player did. */
+  looping?: LoopingSe[];
   /** evt 0x2D groups; each holds three variants, one per player config. */
   messages?: Record<string, (MessageVariant | null)[]>;
   screen?: { width: number; height: number; note: string };
@@ -182,13 +200,22 @@ export interface BreakablePlacement {
    * `game/class41/branch.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
-    | "chain" | "fragment" | "story_switch" | "script_flag_effect";
+    | "chain" | "fragment" | "story_switch" | "script_flag_effect"
+    | "rising_door";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
   group?: number;
   /** `kinded` and `falling` — the object kind in the orientation word. */
   kind?: number;
+  /**
+   * `rising_door` — the script flag that starts the rise, `obj+0x2A0`.
+   *
+   * Class 0x44 selector 11, `RisingDoorUpdate` (`FUN_004753F0`). `slot` is the
+   * model it draws and `remove_flag` the flag that deletes it; there is no
+   * lifetime, so `lifetime_evt_steps` is 0 for these and means nothing.
+   */
+  open_flag?: number;
   /**
    * `generic` — the class-0x41 constructor type, and the spawn descriptor's
    * `+0x11C`.
@@ -197,8 +224,22 @@ export interface BreakablePlacement {
    * writes it to `obj+0x28C` and to `obj+0x11C` both. Only the types in
    * `GENERIC_DESCRIPTOR_SLOT` draw the slot; for everything else it is a
    * lifetime and `slot` is meaningless. See `game/class41/generic.ts`.
+   *
+   * Four of those types take their lifetime from {@link field_1f4} instead —
+   * their switch arm writes it over `obj+0x11C` — so for them `slot` and the
+   * lifetime are two different descriptor fields and both are real.
    */
   type?: number;
+  /**
+   * `generic` — `obj+0x1F4`, the **signed byte at `desc+0x24`**.
+   *
+   * `FUN_004088A0` widens it into `obj+0x1F4` and `PlaceGenericProp` reads it
+   * back in nine of its arms: as the lifetime for types 12, 31, 51 and 53, as
+   * an item set for 34, 70 and 71, as a sub-kind for 40 and as a radius
+   * multiplier for 59. Carried whole, because which of those it is depends on
+   * the type and that decision belongs in `game/class41/generic.ts`.
+   */
+  field_1f4?: number;
   slot?: number;
   /** `generic` — the other two orientation words, which really are angles. */
   pitch?: number;

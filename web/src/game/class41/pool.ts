@@ -13,6 +13,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { FallingContainerUpdate } from "../class44/container";
+import { RisingDoorUpdate } from "../class44/rising_door";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, OriginalItemPropUpdate, StoryModeSwitchUpdate,
@@ -60,6 +61,11 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
       case PropFamily.ScriptFlagEffect:
         ScriptFlagEffectUpdate(p, events); break;
+      // No prologue and no shot-test tail around this one either:
+      // `RisingDoorUpdate` has no `PropExpireByStepLifetime`, no `AND` on
+      // `obj+0x34` and no `RegisterForShotTest` in it. Its remove flag is its
+      // whole lifetime.
+      case PropFamily.RisingDoor: RisingDoorUpdate(p); break;
       // No `p.flags &= ~HIT_FLAG_MASK` and no `PropExpireByStepLifetime`
       // around this one: `PropUpdateType75` inlines its own variant of the
       // prologue and has no `AND` on `obj+0x34` anywhere in it. Adding either

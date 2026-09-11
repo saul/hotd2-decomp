@@ -15,7 +15,8 @@
  * something survives a frame and is not reachable from here, the snapshot is
  * wrong and so is the port.
  */
-import type { BloodSpray } from "./effects/blood";
+import type { BloodSpray, PointBloodSpray } from "./effects/blood";
+import type { BodyCreature } from "./body_creature";
 import type { SeveredHead } from "./effects/severed_head";
 import type { ShotFlash, ShotTracer, ShotWeaponEffect }
   from "./effects/shot_effects";
@@ -71,6 +72,20 @@ export enum AppState {
 }
 
 /**
+ * `g_hit_slots` holds fourteen entries, and the extent is the loop bound
+ * rather than a stored count: `ActorClaimHitSlot` (`FUN_00409270`) walks
+ * `&DAT_009c88c0` while the pointer is below `0x009C88F8`, and the span is
+ * `0x38` bytes. `[proved]`
+ *
+ * Here rather than in `game/hit_slots.ts` because that module needs `G` and
+ * this one must not need it back.
+ */
+export const HIT_SLOT_COUNT = 14;
+
+/** No slot: what a claim writes first, and what a full table leaves behind. */
+export const HIT_SLOT_NONE = -1;
+
+/**
  * One rain drop, in the camera's own space.
  *
  * Three floats, which is exactly what the exe's array holds: 12 bytes a
@@ -95,19 +110,67 @@ export interface ThrownWeapon {
   vel: Vec3;
   /** Frames of flight left. */
   ttl: number;
-  /** BAMS per frame, signed by which hand threw it. */
+  /**
+   * BAMS per frame. `[diverges]` — see {@link ThrownWeapon.spinAngle}, which
+   * carries the whole of why this number is the port's own.
+   */
   spin: number;
   /**
-   * The accumulated tumble, `obj+0x68`.
+   * Which axis the tumble turns about, and it is **not the same for both
+   * throwing families**.
    *
-   * `ThrownWeaponFlyToTarget` does `obj+0x68 += obj+0x135C` every frame in
-   * flight — negated for the other hand — and `ThrownWeaponUpdate` draws the
-   * weapon as `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)`. So
-   * the tumble is the **Y** term: the weapon turns about its own vertical.
-   * The X and Z terms are zero in flight; they are only set on landing, when
-   * `AimThrownWeapon` points the stuck weapon back at the camera.
+   * Both draw the weapon the same way — `ThrownWeaponUpdate` (`FUN_00450780`)
+   * and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) each emit
+   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — but they
+   * accumulate the tumble into **different terms**:
+   *
+   * | family | flight step | term | axis |
+   * |---|---|---|---|
+   * | class 0x31 | `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), `0x0044FDE9` | `obj+0x68` | **Y** |
+   * | class 0x30 | `ZombieThrownWeaponStateStraight` (`FUN_00459690`), `0x00459731` | `obj+0x64` | **X** |
+   *
+   * `[proved]`. Class 0x31 also negates the step unless the throwing hand
+   * `obj+0x1358` is bone 5; class 0x30 has no such test and adds it plainly.
+   * The port turned **everything** about Y, so a class-0x30 thrower's axe
+   * cartwheeled while a class-0x31 thrower's looked right — which is exactly
+   * how it was reported: *the spin depends on which zombie is throwing*.
+   *
+   * `axis` is the port's way of carrying the difference to the renderer
+   * without giving the record two nearly-identical angle fields.
+   */
+  axis: "x" | "y";
+  /**
+   * The accumulated tumble — `obj+0x68` for class 0x31, `obj+0x64` for class
+   * 0x30. See {@link ThrownWeapon.axis}.
+   *
+   * `[diverges]` **The rate is the port's invention, because the engine's is
+   * uninitialised memory.** Neither launcher writes the projectile's
+   * `obj+0x135C`: `SpawnThrownWeapon` (`FUN_004504E0`) writes only the model
+   * and `obj+0x1364`, and `ZombieThrowHandWeapon` (`FUN_0045A240`) only the
+   * model and the position. `ThrowerReleaseAttackPermit`'s sibling writes on
+   * `+0x135C` are all onto the *thrower*, where the field holds the hand bone.
+   * And the allocator does not clear it: `FUN_004A6FA0` zeroes exactly the
+   * first 0xD dwords — the task header — and `FUN_004A7400` is a free-list
+   * split that hands back the block as it stands. So every field from
+   * `obj+0x34` up is whatever the previous occupant of that arena block left,
+   * and the tumble rate with it. `[proved]` for the two zeroing bounds; the
+   * consequence is stated as a reading, not measured against a running game.
+   *
+   * The port has no arena to recycle, so there is no faithful value to copy.
+   * It picks a stable one instead and says so here.
    */
   spinAngle: number;
+  /**
+   * `obj+0x1364` — a **constant** added to the X term at draw time, per
+   * character type: `0x600` for `zsass` (0x16) and 0 for 0x18, both written by
+   * `SpawnThrownWeapon` (`FUN_004504E0`). Class 0x30's launcher never writes
+   * it at all, so it is 0 there.
+   *
+   * It is a fixed tilt and **not** a rate, which is what the port had been
+   * using it as: `THROWER_SLOTS[0x16].spin = 0x600` drove the Y tumble with a
+   * number the engine adds once, to X.
+   */
+  tilt: number;
   /** Frames spent in the stick-and-blink tail once the flight is done. */
   after: number;
   hit: boolean;
@@ -169,6 +232,22 @@ export const G = {
    * `g_max_attackers`, which is what the thrown weapon latches.
    */
   g_players_in_play: 1,
+  /**
+   * `g_weapon_loop_holders` — 0x009C8A74. **A refcount on one looping sound.**
+   *
+   * The chainsaw and the laser sword are not per-actor noises: they are two
+   * entries of `g_looping_se_ids` (`0x005887FC`), and the engine has no handle
+   * for a playing loop at all. So `EnemyZombieInitByCharType` starts the loop
+   * only while this is **zero** and `ZombieReleaseWeaponLoopSe` stops it only
+   * while it is **one** — the first character-type-2-or-3 actor in the scene
+   * opens it and the last one to die or lose its weapon closes it. Every
+   * holder in between latches {@link Actor.weaponLoopHeld} and does
+   * nothing else with the sound.
+   *
+   * `ResetSceneCombatState` (`0x0045EF3D`) zeroes it, which is the whole of its
+   * lifetime; nothing outside those three sites reads it.
+   */
+  g_weapon_loop_holders: 0,
 
   // -- attack permits ----------------------------------------------------
   /**
@@ -332,6 +411,27 @@ export const G = {
   /** `[port-only]` — see {@link SeveredHead.id}. */
   g_severed_head_seq: 0,
   /**
+   * `[port-only]` — the creatures `znjoe` has released.
+   *
+   * `SpawnBodyCreature` (`FUN_0043E720`) allocates each one as a task running
+   * `BodyCreatureUpdate` (`FUN_0043E880`), with no class id at all, so the
+   * same reasoning as `g_severed_heads` above applies and for the same two
+   * reasons: a fixed object pool, and a snapshot that goes through
+   * `clonePlain`. Unlike the heads these are **countable enemies** —
+   * `BodyCreatureInit` raises both enemy counts — so an emptied list is not a
+   * cosmetic difference. See `game/body_creature.ts`.
+   */
+  g_body_creatures: [] as BodyCreature[],
+  /** `[port-only]` — see {@link BodyCreature.id}. */
+  g_body_creature_seq: 0,
+  /**
+   * `[port-only]` — the blood `SpawnBloodSprayAtPoint` (`FUN_00430C50`) has
+   * put at a point rather than on a bone. `game/effects/blood.ts`.
+   */
+  g_point_blood_sprays: [] as PointBloodSpray[],
+  /** `[port-only]` — see {@link PointBloodSpray.id}. */
+  g_point_blood_spray_seq: 0,
+  /**
    * `[port-only]` — the sprite-effect objects `SpawnSpriteEffectFromParams`
    * (`FUN_004073B0`) has allocated: impacts, ricochets, splashes and the
    * boss bursts. Plain records for the same reason as `g_severed_heads`.
@@ -480,6 +580,63 @@ export const G = {
    */
   g_enemy_slots: [] as number[],
 
+  // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
+  /**
+   * `g_water_level` — 0x007DCBB0. The height of the water plane.
+   *
+   * A data initialiser puts -24.90 there, and it is **rewritten by every
+   * class-0x51 group header**: a descriptor whose `tail+0x0E` is 6 is not a
+   * fish at all, it is the surface, and `FishInit` (`FUN_00438540`) copies its
+   * `tail+0x00` float here before killing itself. Class 0x16 records the same
+   * plane for the wave field.
+   */
+  g_water_level: -24.9,
+  /**
+   * `g_water_attack_slots` — 0x009A2C20, four dwords.
+   *
+   * The only thing that lets a class-0x51 fish leave the surface, and the
+   * reason four of them can be in the air at once and no more.
+   * `FishClaimSlotAndLunge` (`FUN_00438850`) claims one and the index is also
+   * *where* the fish leaps to — the four are points in the camera's own space.
+   * `SpawnFishAt` (`FUN_00438640`) refuses to place one at all while any slot
+   * is taken, which is what paces the stage-2 boss's summoning rounds.
+   */
+  g_water_attack_slots: [0, 0, 0, 0],
+  /**
+   * `[port-only]` — the next spawn address to give an actor **nothing placed**.
+   *
+   * The port identifies an actor by the evt offset of the descriptor it came
+   * from, and `SpawnFishAt` (`FUN_00438640`) has no descriptor at all: the
+   * stage-2 boss calls it with three floats. Negative, and counting down, so
+   * such an actor can never collide with a real descriptor offset and
+   * `ActorByAt` still answers.
+   */
+  g_summoned_actor_at: -1,
+  /**
+   * `[port-only]` — the spawn addresses `SpawnSlotActors` has already built.
+   *
+   * There is no such list in the engine, and there cannot be: the spawn opcode
+   * builds an object once, in the step that holds it, and never looks again.
+   * The port materialises slot-drawn actors from the walker's live spawn list
+   * every frame, so it needs to remember which of them it has made — otherwise
+   * an actor that despawns under its own state machine comes straight back.
+   * An entry is dropped when the script stops listing that spawn.
+   */
+  g_slot_actors_built: [] as number[],
+
+  // -- the owls, class 0x43 ----------------------------------------------
+  /**
+   * `g_class43_attack_token` — 0x008111E0. **-1 means nobody is attacking.**
+   *
+   * One permit for a whole flock, and the reason owls come at you in turn
+   * rather than all at once: `OwlStateWaitLaunchDelay` and
+   * `OwlStateCircleHoldingPoint` refuse to begin a run-in unless they read -1,
+   * the launch stamps the owl's own member index into it, and the pull-out and
+   * the death give it back. It is **not** `g_attack_permits`: class 0x43 never
+   * touches that array at all.
+   */
+  g_class43_attack_token: -1,
+
   // -- breakable props, class 0x41 ---------------------------------------
   /**
    * Every live breakable prop. The engine allocates each as its own 0x378
@@ -606,6 +763,37 @@ export const G = {
    */
   g_carrier_object: -1,
 
+  /**
+   * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`.
+   *
+   * `ActorClaimHitSlot` (`FUN_00409270`) hands out the indices and
+   * `ActorDespawn` (`FUN_00409CC0`) gives them back; `game/hit_slots.ts` is
+   * both halves and says what is and is not ported. The reason the port holds
+   * it at all is that `obj+0x3C` is the **phase** of every cel animation
+   * `ZombieDrawBonePart` (`FUN_004534A0`) plays — see
+   * `class30/bonecels.ts`.
+   *
+   * [port-only] The engine stores pointers and zero means free; the port
+   * stores `at` and `-1` means free, because a snapshot carries an index.
+   */
+  g_hit_slots: [] as number[],
+
+  /**
+   * `g_blink_frame_counter` — `0x009A5C50`. Whole game ticks, from the scene
+   * reset.
+   *
+   * One of three free-running counters `FUN_0040E730` steps once a tick.
+   * `LoadSceneAndReset` (`0x00460030`) and `ResetSceneCombatState`
+   * (`0x0045EF1E`) both zero it. It is the cel phase two per-bone draw hooks
+   * index their model runs with — `ZombieDrawBonePart` (`FUN_004534A0`) and
+   * `ThrowerDrawBonePart` — and the parity class 0x31's blink states read.
+   *
+   * Not {@link g_frame}: that one is the port's own clock and is **fractional**
+   * (`G.g_frame += dt * 60`), and a cel index taken from a fraction skips and
+   * repeats. This is an integer stepped by whole ticks, as `obj+0x19C` is.
+   */
+  g_blink_frame_counter: 0,
+
   // -- the ground plane --------------------------------------------------
   /**
    * `g_camera_fixed_eye_y` — 0x009C8E58, also labelled `g_ground_plane_y`.
@@ -690,19 +878,29 @@ export const G = {
   /**
    * `g_GameMode` — 0x009CA08C. See {@link GameMode}.
    *
-   * Class 0x41 branches on it both ways: Original releases the member's own
-   * `storyItem` and can drop an extra life from every prop, Arcade turns
-   * selected members into one-shot targets and pays no score for them.
+   * Class 0x41 branches on it three ways: Original releases the member's own
+   * `storyItem` and can drop an extra life from every prop, **Training**
+   * turns selected members into one-shot targets and pays no score for them,
+   * and Arcade does neither.
    *
    * The bundle carries the same numbers — `script.game_mode` *is* this field,
-   * and `main.ts` copies it straight across.
+   * and `main.ts` copies it straight across. Arcade is **0**, not 2; the two
+   * one-shot-target arms below are Training's and unreachable in a shipped
+   * stage. See {@link GameMode} for what proves the values.
    */
   g_GameMode: GameMode.Arcade as GameMode,
   /**
-   * `g_prop_target_set` — 0x009C9118. Which of four member sets
-   * `PlaceBreakableGroup` turns into one-shot targets while `g_GameMode` is 2.
+   * `g_training_lesson` — 0x009C9118. Which training lesson is being played.
+   *
+   * It was `g_prop_target_set` here and in the TSV, named from the one use
+   * the port has for it: `PlaceBreakableGroup` turns the members it selects
+   * into one-shot targets while `g_GameMode` is 2. Mode 2 is **Training**,
+   * and the byte is read in exactly two places, both behind that test — the
+   * other is `PreloadScreenAssetList` (`FUN_00412FD0`), which indexes a
+   * per-lesson asset list with it at training block 3. So the four "member
+   * sets" are the four lessons, which is what the old name could not say.
    */
-  g_prop_target_set: 0,
+  g_training_lesson: 0,
   /**
    * `g_scene_index` — 0x009A1A08. Which scene is loaded, zero-based:
    * `ColiLoadForScene` indexes its file list with it, so scene 1 is stage 2.
@@ -884,6 +1082,7 @@ export type Globals = typeof G;
  * |---|---|
  * | `g_enemies_alive = 0`, `g_enemies_present = 0` | ✅ |
  * | `g_civilians_alive = 0` | ✅ |
+ * | `g_weapon_loop_holders = 0` (`0x0045EF3D`) | ✅ |
  * | the whole 0x100-byte `g_script_flags` | ✅ |
  * | per player: `g_head_combo_bonus`, `g_player_hit_count` | ✅ |
  * | per player: `g_player_shot_count` (0x009A5C84) | ❌ not in `G` — nothing
@@ -891,8 +1090,10 @@ export type Globals = typeof G;
  *   `EvtOpAwardAccuracyBonus2B` (`FUN_0045FE40`) is what reads the pair. |
  * | `g_civilians_seen_by_scene`, `g_civilians_rescued_by_scene` | ❌ neither
  *   tally exists; the port raises a `civilian.rescued` event instead. |
- * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ❌ the port
- *   has no `obj+0x3C` slot index and never claims one. |
+ * | `g_hit_slots` — the 14-slot table `ActorClaimHitSlot` claims | ✅ claimed,
+ *   released and cleared. `obj+0x3C` is the phase of every cel a class-0x30
+ *   bone draws, so the port needed it; `game/hit_slots.ts` says which parts of
+ *   the hit-slot system are ported and which are not. |
  * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
  * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
@@ -904,7 +1105,7 @@ export type Globals = typeof G;
  *   `DAT_009C6F20`, `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`,
  *   `DAT_009A34DC = 1` | `[open]` |
  *
- * Seven of thirteen. The name is the engine's and the omissions are itemised on
+ * Eight of fourteen. The name is the engine's and the omissions are itemised on
  * purpose: a partial transcription that says which part is a work list, and
  * one that does not is a lie waiting to be believed.
  */
@@ -912,6 +1113,18 @@ export function ResetSceneOnEnter(): void {
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
+  // `for (i = 0xE; i != 0; i--) *p++ = 0` over `&DAT_009C88C0` at
+  // `0x0045EE70` -- and the **0xE is a second, independent proof that
+  // `g_hit_slots` is fourteen deep**, the first being the pointer bound in
+  // `ActorClaimHitSlot` (`FUN_00409270`). `HIT_SLOT_NONE` rather than the
+  // engine's 0 because the port stores an actor's `at` and 0 is a real `at`.
+  G.g_hit_slots = new Array<number>(HIT_SLOT_COUNT).fill(HIT_SLOT_NONE);
+  // `MOV [0x009c8a74], 0` at `0x0045EF3D` — the looping held-weapon SE's
+  // refcount. It has to be zeroed here or the *next* scene's first chainsaw
+  // zombie finds a non-zero count, never starts the loop, and the chainsaw is
+  // silent for the rest of the stage; `audio/bgm.ts` stops the loop itself
+  // when the sound tables are swapped, which is the other half.
+  G.g_weapon_loop_holders = 0;
   // `for (i = 0x40; i--;) *p++ = 0` over `g_script_flags` — all 0x100 bytes.
   G.g_script_flags = [];
   // The per-player shot statistics, so the accuracy grade is per scene rather
@@ -990,6 +1203,10 @@ export function ResetGameGlobals(): void {
   G.g_sprite_effect_seq = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
+  G.g_point_blood_sprays = [];
+  G.g_point_blood_spray_seq = 0;
+  G.g_body_creatures = [];
+  G.g_body_creature_seq = 0;
   G.g_shot_flash_ring = makeShotFlashRing();
   G.g_shot_tracer_ring = makeShotTracerRing();
   G.g_shot_weapon_ring = makeShotWeaponRing();
@@ -1011,6 +1228,11 @@ export function ResetGameGlobals(): void {
   // first gate of the new one.
   G.g_evt_wait_alive_hysteresis = 0;
   G.g_enemy_slots = [];
+  G.g_water_level = -24.9;
+  G.g_water_attack_slots = [0, 0, 0, 0];
+  G.g_summoned_actor_at = -1;
+  G.g_slot_actors_built = [];
+  G.g_class43_attack_token = -1;
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];
   G.g_thrown_next_id = 1;
@@ -1035,6 +1257,10 @@ export function ResetGameGlobals(): void {
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
   G.g_carrier_object = -1;
+  // `LoadSceneAndReset` zeroes the counter at `0x00460030`, and
+  // `ResetSceneCombatState` does it again at `0x0045EF1E`. The slot table is
+  // `ResetSceneOnEnter`'s and is cleared there.
+  G.g_blink_frame_counter = 0;
   G.g_frame = 0;
 }
 

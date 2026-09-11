@@ -140,6 +140,18 @@ export interface HandKit {
  * drops to once thrown, and *projectile* the model that flies.
  */
 export const THROWER_SLOTS: Record<number, {
+  /**
+   * `obj+0x1364` — and it is a **constant tilt, not a rate**, whatever the
+   * field is called.
+   *
+   * `SpawnThrownWeapon` (`FUN_004504E0`) writes it onto the projectile per
+   * character type, and `ThrownWeaponUpdate` (`FUN_00450780`) draws
+   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — so it is
+   * added once, to the **X** term. The tumble is `obj+0x135C` accumulating
+   * into `obj+0x68`, which is a different field on a different axis, and the
+   * port drove the tumble with this number until that was read properly. The
+   * name is older than the reading and stays until the next format bump.
+   */
   5: HandKit; 8: HandKit; spin: number;
 }> = {
   0x16: {                                    // zsass.bin
@@ -180,6 +192,30 @@ export const ZOMBIE_THROW_SLOTS: Record<number, { 5: HandKit; 8: HandKit }> = {
 
 /** `znonoo.bin` part 0 -- the axe, the only projectile that flies straight. */
 export const ZOMBIE_AXE_SLOT = 0x249;
+
+/**
+ * The forty frames the creature `znjoe` releases is drawn with, per character
+ * type — `BODY_CREATURE_SLOTS` in `game/body_creature.ts`.
+ *
+ * `BodyCreatureUpdate` (`FUN_0043E880`) ends
+ * `AssetDrawSlot(obj+0x1330 % 0x28 + 0x1D31)`, and `ExeTables.assetSlots`
+ * resolves `0x1D31..0x1D58` to **`znjoe.bin` entries 176..215** — the host
+ * character's own model bank, past the last entry any skeleton node names.
+ * That is why no exporter that walks skeletons carried them: the character
+ * path emits one part per bone and per damaged variant, and these are
+ * neither.
+ *
+ * Keyed on the character type rather than on a spawn class because the
+ * creature **has** no class id, and because the run only exists in the file
+ * that type loads: shipping it unconditionally would ask five stages for a
+ * `znjoe.bin` they do not have. Only character type `0x0A` releases one —
+ * `ActorReactToHit` (`FUN_004543F0`) is the one place in the image that tests
+ * for it, and exactly seven spawns in the twelve shipped scripts resolve to
+ * it, all in stage 5.
+ */
+export const BODY_CREATURE_SLOTS: Record<number, readonly number[]> = {
+  0x0a: Array.from({ length: 0x28 }, (_, i) => 0x1d31 + i),
+};
 
 export const ZOMBIE_THROW_SPEED_STANDING = 1.5;
 export const ZOMBIE_THROW_SPEED = 1.0;
@@ -439,6 +475,47 @@ export function hitReactions(tables: ExeTables,
   return out;
 }
 
+/**
+ * Whether `ZombieStateStrike` can ever fire this entry's hit.
+ *
+ * It cannot when the hit frame is at or past the strike clip's play length,
+ * and that is the engine's own behaviour rather than a misread row.
+ * `ZombieStateStrike` (`FUN_00455A40`) sub 2 is two independent tests in one
+ * pass, and both the operators matter:
+ *
+ * * the strike is an **exact equality** -- `00455bdf CMP ECX,EAX` /
+ *   `00455be1 JNZ` over the `CALL 0x00456490`, so `obj+0x19C == entry+0x08`
+ *   or nothing happens;
+ * * the exit is `00455c02 MOVSX EDX,[ECX*2 + 0x4e07d0]` / `DEC` /
+ *   `CMP EAX,EDX` / `JL`, so the state hands to `ZombieStateBackOff` as soon
+ *   as `obj+0x19C >= g_motion_play_length[obj+0x1B4] - 1`.
+ *
+ * The cursor is reset to 0 when the clip starts (`ActorSetMotionBlended`
+ * (`FUN_004119A0`), `param_1[2] = param_3`), so it only ever takes the values
+ * `0 .. play_length - 1`. A hit frame outside that range is unreachable: the
+ * strike **never fires**, the state is not aborted and nothing is retried,
+ * the clip runs to its end and the actor retreats having swung and missed.
+ *
+ * **Why dropping these entries was right until now.** The rows of
+ * {@link ATTACK_TABLE} are adjacent with no count, so an early version of this
+ * reader scanned a fixed number of them and read the next row's attacks as
+ * this one's -- and "hits on frame 40 of a 20-frame clip" is precisely what
+ * that produced. Keeping only the entries the pick table names fixed the
+ * row-length problem at its source; the hit-frame bound stayed on afterwards
+ * as a second line of defence, and in doing so it deleted the three entries
+ * the game really does carry with an unreachable hit frame. Across every
+ * character type those three are the *only* picked entries it rejects --
+ * types 0x07, 0x0B and 0x0C, body condition 4, index 2, all of them
+ * `{997, 1051, 26.0f, 40, 9, 1}` against `g_motion_play_length[997] == 20` --
+ * and they are the crawlers' undamaged attack, which is meant to miss.
+ * `tools/verify_combat.py` asserts that set rather than the bound, so a
+ * genuine misread still fails a check.
+ */
+export function attackHitLands(hitFrame: number,
+                               strikePlayLength: number): boolean {
+  return hitFrame >= 0 && hitFrame < strikePlayLength;
+}
+
 export interface AttackEntry {
   strike: number;
   lunge: number;
@@ -455,10 +532,12 @@ export interface AttackEntry {
  * the only ones the game ever reads: `ZombieStateStrike` indexes with
  * `obj+0x131A`, which {@link attackPicks} supplies, and never scans. That also
  * sidesteps the row-length problem -- the rows are adjacent with no count, so
- * a fixed scan reads the next row's attacks as this one's, which is what
- * produced entries "hitting on frame 40 of a 20-frame clip".
+ * a fixed scan reads the next row's attacks as this one's, and an entry whose
+ * hit frame lands outside its own clip is what that looked like from here.
  *
- * Each entry is checked against its own strike clip before being kept.
+ * Each entry is checked against its own strike clip before being kept, but
+ * **a hit frame past the end of that clip is not a reason to drop it** -- see
+ * {@link attackHitLands}.
  */
 export function attackTables(tables: ExeTables,
                              charType: number): Map<number, Map<number, AttackEntry>> {
@@ -484,7 +563,7 @@ export function attackTables(tables: ExeTables,
       const dmot = i16(tables.data, a + 10);
       const mask = i16(tables.data, a + 12);
       if (strike <= 0 || lunge <= 0) continue;
-      if (!(hit >= 0 && hit < play(strike))) continue;
+      if (hit < 0 || play(strike) <= 0) continue;
       if (!(play(lunge) > 0 && play(lunge) <= 400)) continue;
       got.set(i, { strike, lunge, distance: dist, hit_frame: hit,
                    player_motion: dmot, cancel_mask: mask & 0xffff });
@@ -635,6 +714,14 @@ export function combatTables(tables: ExeTables): Record<string, unknown> {
       hurt: named([v[5], v[6]]),
       kill: named([v[7], v[8]]),
       head: named([v[9], v[10]]),
+      // **Kind 3, the attack cry**, and the table's shape changes here: kinds
+      // 0-2 are one id per voice set, and this is a *pair* per set that the
+      // routine tosses a coin within (`rand() & 1` at `0x0040A7B8` and
+      // `0x0040A7E0`). So it is `[set A pair, set B pair]` rather than
+      // `[set A, set B]`. The exporter has always read all fifteen dwords and
+      // emitted eleven of them; these four were the ones nothing carried, and
+      // without them a zombie swung silently.
+      attack: [named([v[11], v[12]]), named([v[13], v[14]])],
     },
     voice_set_a_types: [...VOICE_SET_A_TYPES],
     // `FUN_00407950` and `FUN_004073B0`, keyed by collision material.

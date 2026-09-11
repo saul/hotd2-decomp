@@ -69,6 +69,7 @@ import {
 } from "./scripted";
 import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
+import { THROWN_SPIN_RATE } from "./projectile";
 
 /**
  * How high the hand is above the actor's own origin, for the fallback in
@@ -344,9 +345,17 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
     vel: vec3((target.x - from.x) / ttl, (target.y - from.y) / ttl,
               (target.z - from.z) / ttl),
     ttl,
-    // Which hand it left decides which way it tumbles.
-    spin: hand.bone === 5 ? cfg.spin : -cfg.spin,
+    // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0044FDE9`:
+    // `obj+0x68 += obj+0x135C` when the throwing hand `obj+0x1358` is bone 5
+    // and `-=` otherwise. So the sign is the hand's and the axis is **Y**.
+    // The rate is the port's -- see `ThrownWeapon.spinAngle`.
+    spin: hand.bone === 5 ? THROWN_SPIN_RATE : -THROWN_SPIN_RATE,
+    axis: "y",
     spinAngle: 0,
+    // `obj+0x1364`, the constant the draw adds to the **X** term. `cfg.spin`
+    // is that constant: the exporter reads it out of `SpawnThrownWeapon` and
+    // the name is older than the reading.
+    tilt: cfg.spin,
     after: 0,
     hit: false,
     stickFrames: cfg.stick_frames,

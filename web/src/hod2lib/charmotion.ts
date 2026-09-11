@@ -28,6 +28,16 @@ export const CLASS20_IDLE_MOTIONS = [1021, 1023, 1024, 1025];
  */
 export const CLASS20_DEATH_MOTION = 988;
 
+/**
+ * The clip the rescue swaps to — `RescueTargetHeldState` (`FUN_00451980`)
+ * writes `obj+0x1B4 = 0x3CC` on its way into `RescueTargetFreedState`
+ * (`FUN_00451D80`), which plays it out.
+ *
+ * Baked beside the idle because the freed state measures nothing but the
+ * clip's own play clock, and a clip with no frames is a pose that never ends.
+ */
+export const CLASS21_FREED_MOTION = 0x3cc;
+
 export type MotionRule =
   | ["literal", number]
   | ["param", number, ParamKind]
@@ -73,6 +83,51 @@ export const BOSS4_CLIPS: readonly number[] = [
   0x73, 0x74, 0x75, 0x76, 0x78, 0x7a, 0x7b, 0x7c, 0x7d,
 ];
 
+/**
+ * Class 0x11's whole motion bank -- bank 14, which `ExeTables.motionBanks()`
+ * names `frog.bin`, ids `0x13D`..`0x145`.
+ *
+ * The class names seven of the nine as literals across its states: `0x13E` the
+ * leap, `0x13F` the death, `0x140` the travelling hop, `0x141` the idle,
+ * `0x142`/`0x143` the two 45-degree turns and `0x144` the stationary hop.
+ * `0x13D` and `0x145` are in the bank and referenced by nothing in the class.
+ *
+ * All nine are baked for the same reason `BOSS4_CLIPS` is: **an unbaked clip
+ * is an actor that waits for ever.** Every one of the frog's hop substates
+ * leaves on an exact play-cursor frame or on `MotionPlayLength`, and with no
+ * clip that length is 0, the cursor never reaches 18, and the frog turns to
+ * face its heading and then never jumps.
+ */
+export const FROG_CLIPS: readonly number[] = [
+  0x13d, 0x13e, 0x13f, 0x140, 0x141, 0x142, 0x143, 0x144, 0x145,
+];
+
+/**
+ * The two clips `ZombieStateReleaseBodyCreature` (`FUN_00457FB0`) names, per
+ * character type.
+ *
+ * `0x1E3` is the walk it backs out to its inner approach ring on and `0x1DF`
+ * the clip it opens the torso during, and both are literals in that state.
+ * They are baked for the reason {@link BOSS4_CLIPS} and {@link FROG_CLIPS}
+ * are: **an unbaked clip is an actor that waits for ever.** Sub 1 holds on
+ * `0x1E3`'s root motion to leave the ring, and sub 3 leaves on
+ * `obj+0x19C >= g_motion_play_length[0x1DF] - 1` -- which is 0 for a clip the
+ * bundle does not carry, so the cursor never reaches it.
+ *
+ * Measured, and this is why it is a rule and not a guess: `znjoe.bin`'s bank
+ * reaches the bundle with 477, 478, 480, 481, 482 and 484 in it and **not**
+ * 479 or 483, because nothing that named a clip named those two. A first
+ * torso shot then put the actor in state 25, where it stood in sub 1 for the
+ * rest of the stage and released nothing.
+ *
+ * Keyed by character type because the state is: `ActorReactToHit`
+ * (`FUN_004543F0`) is the only way in and it tests `obj+0x1F4` against
+ * `0x0A`.
+ */
+export const BODY_CREATURE_HOST_CLIPS: Record<number, readonly number[]> = {
+  0x0a: [0x1df, 0x1e3],
+};
+
 export const MOTION_RULES: Record<number, MotionRule> = {
   // `Boss4Init` (`FUN_004917E0`) seats the clip as a literal:
   // `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E`, where `ECX` is
@@ -104,6 +159,26 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // exporter builds no skeleton for it at all -- stage 5, whose only class-0x14
   // spawn is its own, had no character type 71 in its bundle.
   0x14: ["literal", 33],
+  // `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same
+  // shape as class 0x19's: `MOV dword ptr [EDI + 0x20], 0x3E6`
+  // (`c74720e6030000`) at `0x00451747` with `EDI = obj+0x194`, so
+  // `obj+0x1B4 = 0x3E6`. Clip **998** is one character type 7
+  // (`char_adv00.bin`) carries, which is the corroboration.
+  //
+  // There is one class-0x21 spawn in the whole game -- stage 2 block 0 step 2
+  // -- and it is the actor that answers that block's branch. Without this row
+  // `motionFor` answers null, `resolveForStage` records the placement as a
+  // marker and `continue`s, no skeleton is built, no `chr_` instance reaches
+  // the glTF, and `render/characters.ts` has nothing to adopt: the object is
+  // never made, `RescueTargetHeldState` never runs and `g_script_branch_var`
+  // can never become 1. Block 0 then always takes block 11 and block 1 --
+  // half of stage 2 -- is unreachable. See `game/class21/`.
+  0x21: ["literal", 0x3e6],
+  // `FrogInit` (`FUN_0043A080`) writes `obj+0x1B4 = (s16)tail+0x02`, which is
+  // `0x141` in all four shipped spawns. Without a rule the frog resolves to a
+  // character with no motion, the exporter emits it as a marker, and none of
+  // its nine clips reaches the bundle -- see {@link FROG_CLIPS}.
+  0x11: ["param", 0x02, "i16"],
   0x30: ["literal", 0x3bc],
   0x31: ["by_char", { 0x17: 0x1ba }, 0x3a8],
   0x53: ["table", 0x00589a64, 10, 0x00, "i16"],

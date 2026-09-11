@@ -208,9 +208,13 @@ export interface ZombieTail {
    *
    * * `0x2` — entered water. `ActorCheckWaterEntry` sets it (0x00456998) and
    *   tests it (0x00456925); `EnemyZombieUpdate` reads it (0x00453486).
-   * * `0x8` / `0x10` / `0x40` / `0x80` — kill-move death-clip selectors, each
-   *   set by `ZombieStateTargetMotionScript` for one motion id and read back
-   *   by `ChooseDeathMotion` to pick the matching death.
+   * * `0x8` / `0x10` / `0x40` / `0x80` — kill-move death-clip selectors, read
+   *   back by `ChooseDeathMotion` to pick the matching death.
+   *   `ZombieStateTargetMotionScript` sets one per motion id, and **it is not
+   *   the only writer**: `0x0045C0ED` is `OR EDX, 0x10` inside
+   *   `ZombieStateDragTarget`'s sub 0, so a captor killed mid-drag is meant to
+   *   take motion `0x1A5`. This note used to name one state; `functions.tsv`'s
+   *   `ChooseDeathMotion` row names both.
    * * `0x20` — set by `EnemyZombieInitByCharType` for character types 9 and
    *   0x12 (0x00453180), tested by `FUN_004534A0` (0x00453665 `TEST CL, 0x20`)
    *   and `FUN_00453AE0` (0x00453B07). `[open]` what it selects.

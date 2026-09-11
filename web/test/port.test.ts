@@ -403,6 +403,13 @@ const TYPE: CharacterType = {
     // 987 (0x3DB) is the clip `ChooseDeathMotion` gives body conditions 5 and
     // 6 — the two that die through state 9 rather than state 6.
     "987": motion(24),
+    // `ZombieStateDragTarget`'s four: 420 (0x1A4) the drag, 424 (0x1A8) the
+    // kill, 426 (0x1AA) the aftermath when the civilian is already dead, and
+    // 432 (0x1B0) the settle. Sub 2 waits for play cursor 0x2D on **whichever
+    // of the two kill clips sub 1 started**, not on 432 — so it is 424 and 426
+    // whose play lengths have to reach past 45.
+    "420": motion(20, 0, 30), "424": motion(32, 0, 60),
+    "426": motion(32, 0, 60), "432": motion(30, 0, 60),
   },
 };
 
@@ -6559,6 +6566,126 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
     }
     check("...and its cue frame is what kills the hostage",
           (civ.flags & ActorFlag.Dead) !== 0, `flags 0x${civ.flags.toString(16)}`);
+  }
+
+  // **State 43's tail, which is its only exit** — `PLAYER_HANGS` item 23.
+  //
+  // `ZombieStateDragTarget` (`FUN_0045C080`) raises `0x10100` on itself when
+  // it kills, so from that frame `DispatchHit` skips `ResolveHit` and nothing
+  // can shoot the captor out of `g_enemies_alive`. Sub 3 never increments the
+  // sub-state. The one thing that ends it is the tail at `0x0045C1AD`:
+  // `g_script_flags[0x1D]` plus `g_players_in_play`, releasing both enemy
+  // counts and going to sub 4, which despawns. The port had the sub-4 arm and
+  // nothing that could ever assign sub 4, so stage 4's entry-4 route stopped
+  // at block 9 with one `znkage` alive at 90 hit points for ever.
+  {
+    const drag: TargetScriptJson = {
+      state: ZombieState.DragTarget,
+      // One loop, and a cue at play cursor 4 so the kill lands early.
+      head: { loops: 1, cue: 4 },
+      entries: [],
+    };
+    const step = (z: ZombieActor, events: Events, n: number) => {
+      for (let i = 0; i < n; i++) {
+        ActorAdvanceMotion(z, 1 / 60);
+        zFrame(z, events);
+      }
+    };
+
+    {
+      const { civ, z, events } = captorScene(ZombieState.DragTarget, 1, drag);
+      // The room the gate is reading, as `EnemyZombieInit` leaves it.
+      G.g_enemies_alive = 1;
+      G.g_enemies_present = 1;
+      G.g_players_in_play = 1;
+
+      step(z, events, 1);
+      check("state 43 sub 0 falls into the drag on its own frame",
+            z.sub === 1 && z.motion === 0x1a4, `sub ${z.sub} motion ${z.motion}`);
+
+      // The drag glues the captor to the civilian -- all three rotations, not
+      // just the yaw.
+      civ.pos = vec3(7, 8, 9);
+      civ.pitch = 0x111; civ.yaw = 0x222; civ.roll = 0x333;
+      step(z, events, 1);
+      // x and z only: this fixture has no collision set, so the ground snap
+      // that runs after the state puts y at the no-floor floor. The rotations
+      // are the half that was missing -- the port copied `yaw` alone and the
+      // engine copies `obj+0x64`, `0x68` and `0x6C`.
+      check("...and the pose it copies is the position and all three rotations",
+            z.pos.x === 7 && z.pos.z === 9
+            && z.pitch === 0x111 && z.yaw === 0x222 && z.roll === 0x333,
+            `pos ${z.pos.x},${z.pos.y},${z.pos.z} `
+            + `rot ${z.pitch},${z.yaw},${z.roll}`);
+
+      // The cue kills her and makes the captor shot-immune.
+      step(z, events, 40);
+      check("...the cue frame kills the civilian and raises `0x10100` on itself",
+            (civ.flags & ActorFlag.Dead) !== 0
+            && (z.flags & ActorFlag.ShotImmune) !== 0,
+            `civ 0x${civ.flags.toString(16)} z 0x${z.flags.toString(16)}`);
+
+      // Sub 2 is its own arm. It used to fall through into sub 1's loop-and-cue
+      // block, whose second half fires the moment the civilian is dead -- so
+      // the settle was skipped in a single frame and the state went straight
+      // to the turn.
+      check("...and it settles in sub 2 rather than skipping to the turn",
+            z.sub === 2, `sub ${z.sub}`);
+      step(z, events, 400);
+      check("...then reaches sub 3, which never advances again",
+            z.sub === 3 && z.state === ZombieState.DragTarget,
+            `sub ${z.sub} state ${z.state}`);
+
+      // **This is the hang.** Nothing has raised flag 29, so the captor is
+      // still in the room and still cannot be shot out of it.
+      check("with `g_script_flags[0x1D]` down it holds both enemy counts open",
+            G.g_enemies_alive === 1 && G.g_enemies_present === 1
+            && !z.dead && z.visible,
+            `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
+
+      // ...and the flag is what ends it, on the very next frame.
+      G.g_script_flags[0x1d] = 1;
+      step(z, events, 1);
+      check("...and the flag releases both counts and sends it to sub 4",
+            G.g_enemies_alive === 0 && G.g_enemies_present === 0
+            && z.sub === 4 && (z.flags & ActorFlag.Dead) !== 0,
+            `alive ${G.g_enemies_alive} present ${G.g_enemies_present} `
+            + `sub ${z.sub} flags 0x${z.flags.toString(16)}`);
+      step(z, events, 1);
+      check("...and sub 4 despawns it", !z.visible, `visible ${z.visible}`);
+    }
+
+    // `g_players_in_play` is the second half of the test, and it is an
+    // `AND`: the tail does nothing before anyone has started.
+    {
+      const { z, events } = captorScene(ZombieState.DragTarget, 1, drag);
+      G.g_enemies_alive = 1;
+      G.g_enemies_present = 1;
+      G.g_players_in_play = 0;
+      G.g_script_flags[0x1d] = 1;
+      step(z, events, 4);
+      check("the tail is an AND: flag 29 up with no player in play holds",
+            G.g_enemies_alive === 1 && z.sub !== 4,
+            `alive ${G.g_enemies_alive} sub ${z.sub}`);
+    }
+
+    // The tail is reached from **every** sub, not only from the turn: the
+    // `goto switchD_0045c0aa_default` out of sub 1's "nothing to do" arm is
+    // the same block.
+    {
+      const { z, events } = captorScene(ZombieState.DragTarget, 1, drag);
+      G.g_enemies_alive = 1;
+      G.g_enemies_present = 1;
+      G.g_players_in_play = 1;
+      step(z, events, 1);
+      check("a captor still in sub 1 is where the flag can catch it",
+            z.sub === 1, `sub ${z.sub}`);
+      G.g_script_flags[0x1d] = 1;
+      step(z, events, 1);
+      check("...and the tail runs from sub 1 as well as from sub 3",
+            z.sub === 4 && G.g_enemies_alive === 0,
+            `sub ${z.sub} alive ${G.g_enemies_alive}`);
+    }
   }
 
 }

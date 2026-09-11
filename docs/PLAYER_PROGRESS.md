@@ -850,6 +850,30 @@ with.
 
 Things established while building it, now folded back into the format docs.
 
+- **An actor can park on a script flag too, and then the gate in front of it
+  is a gate the walker cannot see.** `[proved]` —
+  `ZombieStateDragTarget` (`FUN_0045C080`, class 0x30 state 43) has no exit of
+  its own. Its sub 3 turns on the spot and never advances, and the tail at
+  `0x0045C1AD` that every other sub falls into is the whole way out:
+  `g_script_flags[0x1D]` and `g_players_in_play`, then
+  `ReleaseEnemyAliveCount`, `ReleaseEnemyPresentCount` and the despawn arm. Sub
+  1 has already raised `obj+0x34 |= 0x10100` on itself, and `0x100` is the
+  `ShotImmune` `DispatchHit` (`FUN_004092F0`) jumps past `ResolveHit` on — so
+  the actor cannot be shot out of the count either.
+
+  `0x0045C1AE` is the only instruction in the image that names `0x009C721D`,
+  so flag 29 has no literal-address writer anywhere: in stage 4 the release is
+  the dragged **civilian's** own `CivilianRunScript` op `0x1C`, off all three
+  of her reachable streams. The captor is her spawn record's only child. So
+  `wait_enemies_alive` in a later block is held by a class-0x30 actor waiting
+  on a class-0x10 actor's script, with nothing in the walker's own view of
+  either. `tools/flag_gates.ts` asserts that link over all twelve bundles —
+  the same file's route pass, asked of an actor instead of the walker.
+
+  Found because `--entry` made stage 4's second route runnable; it was
+  `PLAYER_HANGS` item 23, and the port had transcribed the state without its
+  tail.
+
 - **A `wait_script_flag` gate is held per *route*, not per stage.** `[proved]`
   — `StoryModeSwitchUpdate` (`FUN_00474F30`), the class-0x44 selector-17
   object, raises `g_script_flags[0x15]` at `0x00474FA6` while it stands in

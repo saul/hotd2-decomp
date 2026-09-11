@@ -120,7 +120,10 @@ CHECKS: list[Check] = [
           "*route* to it can open has the actor that opens it placed on that "
           "same route -- the only check that reads a gate per entry block "
           "rather than per bundle, which is the difference between stage 3's "
-          "block 2 on the entry-0 route and on the entry-7 one",
+          "block 2 on the entry-0 route and on the entry-7 one -- and the "
+          "only check that asks the same question of an ACTOR, for the one "
+          "class-0x30 state whose sole exit is a script flag a civilian's own "
+          "stream raises",
           NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "

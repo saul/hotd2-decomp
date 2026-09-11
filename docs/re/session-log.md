@@ -15314,3 +15314,143 @@ that is *named* but neither written nor read.
   at `path 382 frame 480/590` and the four passengers are at `d=21..30` with
   one of them swinging. A locator that reproduces a symptom is not always a
   locator that can show the fix.
+
+
+## 2026-09-11 — the wrong entrance was the right clip, and the chair is a class 0x33 selector 4
+
+Stage 1 `0x16D8` `char_adv00` "plays the wrong entrance — a ledge hang where a
+chair push belongs". `BUGS.md` had the data chain proved right and two theories
+dead, and the next step it named was: render `char_adv00` clip 1048 and look
+at it.
+
+**Rendered, measured, and the premise of the question is false. 1048 is
+neither a chair push nor a ledge hang, and the chair push is not an animation
+on the zombie at all.**
+
+### What 1048 is `[proved]`
+
+`tools/export_character.py 7 --motion 1048 --frame N` at six frames, rendered
+through `blender_nodeview.py` under EEVEE, plus forward kinematics over the
+type-7 skeleton for hand and foot world positions:
+
+* 60 frames whose root translation wanders at most 0.45 and returns to ~0 —
+  a loop that goes nowhere, which is what the earlier "no net root motion"
+  reading had already said;
+* every bone rotation varies by at most ~27 degrees across the whole clip, so
+  it is a **held pose with a sway**, not a gesture;
+* the pose is a forward lean with the right hand 17.4 above its own feet —
+  above the head bone, which is 15.35 — and the left at 11.9;
+* both feet sit **1.18 above** where the walk 956 plants them (0.02), and hold
+  that for all 60 frames. 1047, the clip the sibling spawns use, is the same
+  shape with both hands at chest height.
+
+So: not a hang, because the body is not suspended under the hands and the legs
+are in a planted stagger; not a push, because in sixty frames nothing moves.
+It is the hold `ZombieStateWaitCameraFrameThenBranch` plays while it waits.
+What the pose was *authored to depict* is `[open]` and was not guessed at.
+
+Renders: `extract/compare/clip1048/m1048_f20_profile.png`,
+`m1048_front_f{0,10,20,30,40,50}.png`, `m1047_f{0,30}.png`, and
+`m956_f{0,15}.png` as the control — the walk renders as a walk with a clear
+leg phase, which is what says the poser, the stride and the bone indexing are
+right before any of the above is believed.
+
+### Where the chair actually is `[proved]`
+
+Block 1 step 2 spawns two class 0x33 at `(22.83, 6.5, -16.74)` and
+`(16.83, 6.5, -20.74)` — 3.5 and 7.2 units from `0x16D8` at `(24, 6.5, -20)`,
+which faces `-x`, straight at the second one. Both are asset slot 4196, which
+`ExeTables.asset_slots()` resolves to `komono_7.bin` part 0. Exported and
+rendered: **it is a chair** (`extract/compare/komono/komono7_part0.png`).
+
+Their selector — `desc+0x22`, not hit points, which is `L3` — is **4**, so
+`ScriptedSceneryDispatch33` installs `FUN_00433B70`, now
+`ScriptedPushableUpdate33`. Reading it end to end gives the whole set piece:
+
+```
+ScriptedPushableUpdate33      FUN_00433B70  the gate, the draw, the registration
+ScriptedPushableApplyPush33   FUN_00433CE0  the move
+ScriptedPushableSyncSphere33  FUN_00433E00  the sphere, re-seated after each move
+```
+
+`obj+0x34` bit `0x8000` is the freeze, cleared by the script flag at tail+0x0C,
+which for both chairs is **32** — and block 1 step 3's first instruction after
+the collision set is `set_script_flag 32`, one instruction before it spawns
+`0x16D8`. `0x8000` is also the bit `ColiTestSphereAgainstActors` skips on
+(`0x80008000`), so the same bit that freezes the chair keeps it out of the
+collision list until the flag arms it.
+
+The impulse is not a shot. `ColiTestSphereAgainstActors` — called every frame
+by `ZombiePushOutOfWorldAndActors` — writes the pusher into `obj+0x138`, the
+depth into `+0x13C` and the reversed normal into `+0x140`, and
+`ScriptedPushableApplyPush33` steps the object by a tenth of that depth, times
+1.8 if the *pusher* is airborne. That is class 0x30's own push arithmetic on a
+piece of furniture. `spawns.md` had this row as "shootable, but a hit only
+imparts an impulse"; both halves were wrong and the row is rewritten.
+
+**`L35` again, and it is load-bearing.** Ghidra ends `FUN_00433B70`'s body at
+`0x00433C5C`, on the `MatrixStackPop` call, and the pseudocode ends there too.
+The real tail runs to `0x00433CD3` and contains `PUSH ESI / CALL 0x00405160`
+at `0x00433CC6` — `RegisterForShotTest`, the call that puts the object in the
+per-frame dynamic list a push can find. `get_function_callers` on
+`RegisterForShotTest` does not name this function. Without disassembling past
+the body end the honest conclusion would have been "nothing can ever find the
+chair", which is the tell L35 describes: a negative result that would make a
+working piece of the shipped game impossible.
+
+### Why the port shows what it shows `[proved]`
+
+Four gaps, and none of them is the clip id:
+
+1. **No placement.** `characters.slot_drawn_spawn` emits a class-0x33
+   placement only when `rec.hp == 1` (`CLASS33_CARRIER`). The chairs are
+   selector 4, so `stage1.script.json` has their two spawn descriptors in
+   block 1 step 2 op 18 and **no placement and no `props` entry** for them.
+2. **No actor.** `SpawnSlotActors` requires a placement, so `continue` — the
+   live Actors panel at block 1 step 3 lists classes 0x20, 0x24, 0x25, 0x30,
+   0x41, 0x52, 0x60, 0x63 and **no 0x33 at all**.
+3. **No geometry**, therefore nothing drawn where the chairs are.
+4. **No consumer for the push.** The port already has `pushedBy`/`pushDepth`/
+   `pushNormal` at `+0x138`..`+0x148` and `ColiTestSphereAgainstActors`
+   already writes them — but the only reader is class 0x30's own
+   `ZombiePushOutOfWorldAndActors`. Even given an actor, the chairs would be
+   skipped: their descriptor flags are `0x8000`, and nothing clears it.
+
+The port is playing the right clip: the Actors panel reads
+`0x16D8 char_adv00 · d=32 · WaitCameraFrameThenBranch/0 · motion 1048`
+(`web/shots/port_hold.png`, seeked to block 1 step 3 op 16 and run 250 ms).
+Rendering stage 1 with the two chairs injected by hand at their descriptor
+positions shows the set piece as authored — two chairs at a desk with the
+zombie behind them — in `extract/compare/clip1048/setpiece_g.png`.
+
+### Wrong turns
+
+* The first six renders were shot at `RIGANG=1.57` and read as the profile.
+  They are the **front**. The profile is `RIGANG=0`, and it is the view that
+  shows the forward lean at all; the front view reads as an upright zombie
+  with one arm up, which is where "is it hanging?" came from.
+* Two attempts to put the eye near `(24, 6.2, -20)` for `blender_shot.py`
+  landed inside a pillar and inside a desk. The room is a study, and there is
+  very little clear line of sight to that corner.
+* Chased "does the chair register for collision at all" through
+  `get_function_callers` on `RegisterForShotTest` and concluded it does not.
+  It does; see L35 above.
+
+### Next actions
+
+1. The fix is an exporter change plus a port module, not a clip id. Decide
+   whether selector 4 earns a `class33_tail`-style block in the bundle
+   (`slot_drawn_spawn` widened to `hp in (1, 4)`, a `class33_push` block
+   carrying slot / shot mesh / radius / the two flags) and a
+   `game/class33/pushable.ts`. Counted rather than guessed: selector 4 has
+   **two** spawns in the whole game and both are these chairs, so the prize is
+   one set piece in one room. Worth knowing before the work is scoped, and
+   worth weighing against the other nine unread sub-handlers — selector 3 has
+   five spawns, selector 2 has ten and already reaches the player.
+2. `./ghidra/run.sh export-annotations` still has to be run **from `main`**
+   for the three renames above; the analyzer refuses a `.claude` worktree
+   path. The TSV rows and the live database were both written here.
+3. `char_adv00` 1048's authored intent is `[open]`. If it ever matters, the
+   thing that would settle it is the other six spawns that use 1047/1048 —
+   two trios three abreast at `(-7/-1/6, 3.2, -370)` in stage 1's two route
+   branches, and stage 2's pair at `0x2194`/`0x21C4`.

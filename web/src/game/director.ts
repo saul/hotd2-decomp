@@ -170,6 +170,13 @@ export function SpawnScriptedCharacters(
   for (const req of reqs) {
     if (ActorByAt(req.at)) continue;
     const p = placements.find((x) => x.at === req.at);
+    // **A synthetic row is not a spawn.** The bat's wings have a placement so
+    // that the client has geometry to bind, and no descriptor at all: the
+    // object is built by `SpawnBatWings` (`FUN_0042E060`) inside its body's
+    // `Init`, exactly where the engine builds it. Building one here as well
+    // would make two actors at one address, and the second would have run no
+    // `Init` worth the name.
+    if (p?.synthetic) continue;
     const type = T.types[String(p?.char_type ?? 0)];
     const hp = ActorInitHitPoints(p, p?.class);
     made.push(ActorSpawn(req.at, (p?.class ?? 0) as SpawnClass,

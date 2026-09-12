@@ -2063,5 +2063,203 @@ console.log("\nthe player's character survives its own op 10:");
   G.g_object_list.length = 0;
 }
 
+/**
+ * A skinned actor with **no bone sphere** is shot as one sphere, whole.
+ *
+ * `ShotTestSphere` (`FUN_00404630`) hands over to `ShotTestSkeleton` only when
+ * `obj+0x34` bit `0x80` is set *and* the skeleton has nodes; otherwise the
+ * whole actor is one candidate at `obj+0x124`. `g_character_bone_spheres`
+ * (`0x004D032C`) settles which side of that fork a character type lands on
+ * from the data alone: it holds **radius 0** for every bone of character type
+ * `0x1E`, the bat, so the bone arm could resolve nothing there even if the bit
+ * were set.
+ *
+ * The port drew the bat through the character path and tested only bone
+ * spheres, so a bat had no hit test at all and could not be shot. Reported
+ * from play, and it is a bug this file could have caught: `pickShot` had no
+ * test of its own.
+ */
+console.log("\nthe shot: a character with no bone sphere is one sphere");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { ActorSpawn } = await import("../src/game/spawn");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D } = await import("three");
+  // The real `PlaceBats`, so the radius under test is the one the class
+  // actually writes and not one this file made up.
+  await import("../src/game/classes");
+
+  // Character type 0x1E as the exporter emits it: one bone, one slot, and no
+  // `hit_radius` at all, because the EXE's row for it is zero.
+  const BAT_TYPE = {
+    type: 0x1e, name: "zabat", file: "zabat.bin", bone_count: 2,
+    actor_radius: 10,
+    bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
+              parent: null, steps: [[0, 0, 10]] }],
+    head_bone: 2, reactions: {}, attacks: {},
+    // One authored frame, so the poser has something real to read: the shot
+    // is what is under test, not the pose.
+    motions: { "1031": { bank: "z", frames: 1, fps: 30,
+                         root: [0, 0, 0], rot: [0, 0, 0] } },
+  };
+  const PLACE = {
+    at: 0x0f04, class: 0x46, char_type: 0x1e, motion: 1031, hp: 1, yaw: 0,
+    class46: { subtype: 0, group: 0, member: 0 },
+  };
+  const CHARS = { types: { "30": BAT_TYPE }, placements: [PLACE] };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_zabat_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_zabat",
+                   hod2_spawn_at: 0x0f04 };
+  const bone = new Object3D();
+  bone.name = "chr_zabat_spawn000_bone01_1b01";
+  rig.add(bone);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  const a = ActorSpawn(0x0f04, SpawnClass.Bat, 0x1e, "zabat", {
+    class46: PLACE.class46, visible: true,
+  });
+  a.pos.x = 0; a.pos.y = 0; a.pos.z = -30;
+  // `obj+0x70/0x74/0x78`, which the class publishes as `(x, y + 1, z)`.
+  a.shotCentre.x = 0; a.shotCentre.y = 1; a.shotCentre.z = -30;
+  chars.syncSpawns([{ at: 0x0f04 }], [a]);
+  chars.update({} as never);
+  check("`PlaceBats` gave it `obj+0x124` = 4.0", a.hitRadius === 4,
+        `${a.hitRadius}`);
+
+  const ray = (x: number, y: number) => ({
+    origin: { x: 0, y: 0, z: 0 },
+    dir: { x: x / Math.hypot(x, y, 30), y: y / Math.hypot(x, y, 30),
+           z: -30 / Math.hypot(x, y, 30) },
+  });
+  const dead = a.dead;
+  check("the bat's type really does carry no bone sphere",
+        !BAT_TYPE.bones.some((b) => (b as { hit_radius?: number }).hit_radius));
+  check("...and the actor is drawn, so it is a candidate at all",
+        !dead && a.visible, `dead ${dead} visible ${a.visible}`);
+  const hit = chars.pickShot(ray(0, 1));
+  check("a shot down the middle finds it",
+        hit?.kind === "actor" && hit.at === 0x0f04, JSON.stringify(hit));
+  // 4.0 is `obj+0x124`, and the centre is a unit above the actor -- so three
+  // units under the actor's own y is inside the sphere and six is not.
+  check("...inside `obj+0x124` = 4.0, measured from the published centre",
+        chars.pickShot(ray(0, -3))?.kind === "actor",
+        JSON.stringify(chars.pickShot(ray(0, -3))));
+  check("...and a shot outside it misses",
+        chars.pickShot(ray(0, -12)) === null,
+        JSON.stringify(chars.pickShot(ray(0, -12))));
+  check("...and so does one wide of it",
+        chars.pickShot(ray(9, 1)) === null,
+        JSON.stringify(chars.pickShot(ray(9, 1))));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
+ * The bat's wings: a **synthetic** placement, adopted rather than spawned.
+ *
+ * `SpawnBatWings` (`FUN_0042E060`) makes the wing actor inside its body's
+ * `Init`, exactly where the engine makes it, and the bundle carries a row for
+ * it only so that there is a hierarchy to bind. Two rules meet here and both
+ * have failed before in other shapes:
+ *
+ * * `SpawnScriptedCharacters` must **not** build from a synthetic row, or
+ *   there are two actors at one address and the second ran no `Init`;
+ * * the layer must adopt an actor the port made by a route that does not go
+ *   through `readySpawns`, or the wing is a hierarchy that never learns what
+ *   it draws and a bat has no wings.
+ */
+console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D } = await import("three");
+  await import("../src/game/classes");
+
+  const M = { bank: "z", frames: 1, fps: 30, root: [0, 0, 0], rot: [0, 0, 0] };
+  const BODY = {
+    type: 0x1e, name: "zabat", file: "zabat.bin", bone_count: 2,
+    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
+              parent: null }],
+    motions: { "1031": M },
+  };
+  const WING = {
+    type: 0x1f, name: "zabat_wing", file: "zabat_wing.bin", bone_count: 7,
+    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    bones: [{ bone: 1, part: "bone01_1b03", slot: 0x1b03, offset: [0, 0, 0],
+              parent: null }],
+    motions: { "1030": M },
+  };
+  const CHARS = {
+    types: { "30": BODY, "31": WING },
+    placements: [
+      { at: 0x0f04, class: 0x46, char_type: 0x1e, motion: 1031, hp: 1, yaw: 0,
+        class46: { subtype: 0, group: 0, member: 0 } },
+      { at: 0x40000f04, class: 0x46, char_type: 0x1f, motion: 1030, hp: 0,
+        yaw: 0, parent_at: 0x0f04, synthetic: true },
+    ],
+  };
+
+  const root = new Object3D();
+  for (const [name, at] of [["chr_zabat_spawn000", 0x0f04],
+                            ["chr_zabat_wing_spawn000", 0x40000f04]] as
+                           [string, number][]) {
+    const rig = new Object3D();
+    rig.name = name;
+    rig.userData = { hod2_kind: "rig", hod2_rig: name.replace(/_spawn\d+$/, ""),
+                     hod2_spawn_at: at };
+    const bone = new Object3D();
+    bone.name = `${name}_bone01_${at === 0x0f04 ? "1b01" : "1b03"}`;
+    rig.add(bone);
+    root.add(rig);
+  }
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  // The script lists the body and nothing else; the wing rides its parent.
+  const listed = [{ at: 0x0f04 }];
+  const ready = chars.readySpawns(listed);
+  check("the wing's row is wanted because its parent is",
+        ready.some((r) => r.at === 0x40000f04),
+        ready.map((r) => r.at.toString(16)).join(","));
+
+  const made = SpawnScriptedCharacters(ready);
+  check("...but nothing is spawned from it: the placer made the wing",
+        made.length === 1 && made[0].at === 0x0f04,
+        made.map((m) => m.at.toString(16)).join(","));
+  const wing = G.g_object_list.find((o) => o.at === 0x40000f04);
+  check("...and `SpawnBatWings` did, exactly once",
+        !!wing && G.g_object_list.filter((o) => o.at === 0x40000f04).length === 1,
+        `${G.g_object_list.length} objects`);
+
+  chars.syncSpawns(listed, made);
+  check("the layer adopted the wing the placer made",
+        chars.readySpawns(listed).every((r) => r.at !== 0x40000f04),
+        chars.readySpawns(listed).map((r) => r.at.toString(16)).join(","));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

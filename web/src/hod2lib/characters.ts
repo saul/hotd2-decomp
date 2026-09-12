@@ -185,6 +185,97 @@ export function class43Tail(rec: Spawn): Record<string, unknown> {
   };
 }
 
+/**
+ * Class 0x46's descriptor, which is three numbers and nothing else.
+ *
+ * Every one of the 27 spawns uses `spawn_placed` (0x09), so there is no
+ * parameter block: `EvtOpSpawnPlaced09` (`FUN_004088A0`) reads `desc+0x24`
+ * into `obj+0x1F4` and `desc+0x25` into `obj+0x130C` inline, and `PlaceBats`
+ * (`FUN_0042D9C0`) reads both back off the placer.
+ *
+ * * `desc+0x25` is the **sub-type**, and it decides which of three routines
+ *   the members run. Twenty-four spawns carry 0, one carries 1 and two carry 2.
+ * * `desc+0x24` is the **flight group**, 0..3, and only sub-type 0 reads it.
+ *   It is `obj+0x1F4` on the placer, which for every other opcode-0x09 class
+ *   is the character type -- the reason `spawnres` gives class 0x46 a literal
+ *   rule rather than `desc24`.
+ * * The **member index** is `desc+0x22 - 1`, which the allocator has already
+ *   put in `hp`. It picks the launch delay and, with the group, the row of
+ *   `g_bat_spline_points` the bat flies.
+ *
+ * The position is **not** here and is not in the descriptor at all: all
+ * twenty-four sub-type-0 records sit at the world origin and take their whole
+ * path from a table in the EXE. See `game/class46/`.
+ */
+/** Class 0x46, and the sub-type whose members are one per descriptor. */
+const CLASS46 = 0x46;
+const CLASS46_SUBTYPE_DIVE = 0;
+/** `zabat_wing.bin` — six nodes, and the clip `BatWingUpdate` settles on. */
+const CLASS46_WING_CHAR_TYPE = 0x1f;
+const CLASS46_WING_CLIP = 0x406;
+/**
+ * `[port-only]` — the spawn address the port's `SpawnBatWings` gives a wing.
+ *
+ * The engine keys nothing on an address; the port's pool does, so a placer's
+ * child needs one, and it takes its body's with bit 30 set. One definition,
+ * here and in `game/class46/`, and `verify_port.py` has no way to check that
+ * they agree — so the two carry each other's names in a comment.
+ */
+const CLASS46_WING_AT_BIT = 0x40000000;
+
+/**
+ * The synthetic placement a bat's wings are drawn from, and the character
+ * type it needs in the bundle.
+ *
+ * Returns null when the wing's own asset or clip will not build, which leaves
+ * the bat wingless rather than emitting a row nothing can pose.
+ */
+async function batWingPlacement(stage: Stage, tables: ExeTables,
+                                sp: SpawnJson, body: Placement,
+                                chars: Map<number, Character>,
+                                cache: AssetCache): Promise<Placement | null> {
+  const ct = CLASS46_WING_CHAR_TYPE;
+  if (!chars.has(ct)) {
+    const file = tables.characterAssetFile(ct);
+    if (!file) return null;
+    const built = build(tables, ct, file);
+    if (built === null) return null;
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  if (!c.motions.has(CLASS46_WING_CLIP)) {
+    const baked = await bake(stage.source, tables, CLASS46_WING_CLIP,
+                             c.boneCount);
+    if (baked === null) return null;
+    c.motions.set(CLASS46_WING_CLIP, baked);
+  }
+  void cache;
+  const w = new Placement();
+  w.at = (sp.at as number) | CLASS46_WING_AT_BIT;
+  w.cls = CLASS46;
+  w.char_type = ct;
+  w.motion = CLASS46_WING_CLIP;
+  w.hp = 0;
+  // The body's own spawn dict, so the wing's node lands where the body's does
+  // and `toJson` finds an orientation. `BatWingUpdate` moves it from there on
+  // its first frame.
+  w.spawn = { ...body.spawn, at: w.at };
+  w.parent_at = sp.at as number;
+  w.synthetic = true;
+  return w;
+}
+
+export function class46Tail(rec: Spawn): Record<string, unknown> {
+  const b = rec.evt?.raw;
+  const at = rec.offset + 0x24;
+  const u8 = (v: number | undefined) => (v ?? 0) & 0xff;
+  return {
+    subtype: b ? u8(b[at + 1]) : 0,
+    group: b ? u8(b[at]) : 0,
+    member: Math.max(0, (rec.hp ?? 1) - 1),
+  };
+}
+
 export function class11Tail(rec: Spawn): Record<string, unknown> {
   const args: Record<number, number> = { 0: 3, 3: 1 };
   const commands: { op: number; args: number[] }[] = [];
@@ -715,6 +806,7 @@ export async function resolveForStage(
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
+    const class46 = cls === 0x46 ? class46Tail(rec) : null;
     const class51 = cls === 0x51 ? class51Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
@@ -808,6 +900,7 @@ export async function resolveForStage(
     p.class20 = class20;
     p.class11 = class11;
     p.class43 = class43;
+    p.class46 = class46;
     p.class51 = class51;
     p.class52 = class52;
     p.class53 = class53;
@@ -962,6 +1055,38 @@ export async function resolveForStage(
     let list = perType.get(res.charType);
     if (!list) { list = []; perType.set(res.charType, list); }
     list.push(sp);
+
+    // -- the bat's wings ---------------------------------------------------
+    //
+    // `SpawnBatWings` (`FUN_0042E060`) builds a **second skinned actor** per
+    // bat: character type 0x1F, `zabat_wing.bin`, six nodes in two
+    // three-segment chains, running clip 0x406 off its body's motion clock.
+    // The engine needs no descriptor for it -- the placer allocates it -- and
+    // that is exactly why the bundle has to carry one: the client binds a
+    // drawable hierarchy to a **placement**, by spawn address, so an actor
+    // with no placement is an actor with no geometry.
+    //
+    // So this is a **synthetic placement**: a row the evt script has no
+    // descriptor for, marked as such, at the address the port's
+    // `SpawnBatWings` gives the actor and parented to the body's. Nothing
+    // spawns from it -- `SpawnScriptedCharacters` skips a synthetic row and
+    // the placer still makes the object, as the engine does. It exists to
+    // carry geometry and to be adopted.
+    //
+    // Only sub-type 0 gets one, because only sub-type 0 is one member per
+    // descriptor. The scatter's twenty-five and the swarm's six are runtime
+    // children of a placer and there is no descriptor to hang a row on.
+    if (cls === CLASS46 && class46
+        && (class46.subtype as number) === CLASS46_SUBTYPE_DIVE) {
+      const wing = await batWingPlacement(stage, tables, sp, p, chars, cache);
+      if (wing) {
+        placements.push(wing);
+        let wlist = perType.get(CLASS46_WING_CHAR_TYPE);
+        if (!wlist) { wlist = []; perType.set(CLASS46_WING_CHAR_TYPE, wlist); }
+        wlist.push({ ...sp, at: wing.at, class: CLASS46,
+                     hp: 0 } as SpawnJson);
+      }
+    }
   }
 
   const order = [...perType.keys()].sort((a, b) => a - b);

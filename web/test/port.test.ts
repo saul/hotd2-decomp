@@ -54,6 +54,9 @@ import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
 import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
   OwlUpdateAndResolveShot } from "../src/game/class43";
+import { BatDiveUpdate, BatUpdate, BAT_CHAR_TYPE, BAT_SPLINE_POINTS,
+  BAT_WING_CHAR_TYPE } from "../src/game/class46";
+import { BatState, type BatTail } from "../src/game/class46/state";
 import { OwlDiveKind, OwlState, type OwlTail }
   from "../src/game/class43/state";
 import { ActorShotFeedback } from "../src/game/combat/feedback";
@@ -9494,6 +9497,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
+    [SpawnClass.Bat, "0x46 bat"],
     [SpawnClass.WaterEnemy, "0x51 fish"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
     [SpawnClass.SkinnedNpc, "0x53 cat / branch trigger"],
@@ -14418,6 +14422,230 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     }
     check("the run-in's pitch closes on 0x3000 rather than running away",
           rising && held > 0 && held <= 0x3000, `${held}`);
+  }
+
+  // -- class 0x46, the bat --------------------------------------------------
+  //
+  // Every bat in the game is placed at the world origin, so nothing about a
+  // flight can be checked against a descriptor: the position, the stagger and
+  // the whole path come out of `BAT_SPLINE_POINTS`. These drive the three
+  // sub-types against that table and against the two counters.
+  const bat = (o: Actor) => (o as { bat: BatTail }).bat;
+  const mkBat = (at: number, subtype: number, group: number, member: number,
+                 rng: Rng, pos = vec3(0, 0, 0)) =>
+    ActorSpawn(at, SpawnClass.Bat, BAT_CHAR_TYPE, "bat", {
+      pos, yaw: 0x8000, class46: { subtype, group, member },
+    }, rng);
+
+  {
+    // Stage 4 block 0 step 6's six descriptors, exactly as they ship: group 0,
+    // `+0x11C` 1..6. A one-player game builds four of them.
+    const rng = new Rng(53);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    const six = [0, 1, 2, 3, 4, 5].map((m) => mkBat(0x9b00 + m, 0, 0, m, rng));
+    check("one player faces four of the six bats in a flight",
+          six.slice(0, 4).every((o) => !o.despawned)
+          && six.slice(4).every((o) => o.despawned),
+          six.map((o) => (o.despawned ? "-" : "+")).join(""));
+    check("...and only those four are in the counters",
+          G.g_enemies_alive === 4 && G.g_enemies_present === 4,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    // `BatSplineWeights(0, 0)` is `(0.5, 0.5, 0)`, so a bat starts at the
+    // midpoint of the first two control points and not at the first.
+    const row = BAT_SPLINE_POINTS[0];
+    check("a bat starts at the midpoint of p0 and p1, not at p0",
+          Math.abs(six[0].pos.x - (row[0][0] + row[1][0]) / 2) < 1e-3
+          && Math.abs(six[0].pos.z - (row[0][2] + row[1][2]) / 2) < 1e-3,
+          `${six[0].pos.x.toFixed(2)},${six[0].pos.z.toFixed(2)}`);
+    check("...and members 0 and 3 share a path, two apiece per flight",
+          bat(six[0]).group === bat(six[3]).group
+          && six[0].pos.x === six[3].pos.x && six[0].pos.z === six[3].pos.z,
+          `${six[0].pos.x} vs ${six[3].pos.x}`);
+    // Twenty frames apart. Member 0 leaves on its first update; member 1 is
+    // still waiting twenty updates later.
+    BatDiveUpdate(six[0], frame(rng));
+    check("member 0 launches on its first frame",
+          bat(six[0]).state === BatState.Fly, BatState[bat(six[0]).state]);
+    for (let i = 0; i < 20; i += 1) BatDiveUpdate(six[1], frame(rng));
+    check("...and member 1 is still waiting twenty frames later",
+          bat(six[1]).state === BatState.Wait, BatState[bat(six[1]).state]);
+    BatDiveUpdate(six[1], frame(rng));
+    check("...and leaves on the twenty-first",
+          bat(six[1]).state === BatState.Fly, BatState[bat(six[1]).state]);
+  }
+
+  {
+    // Two players get all six, which is the only thing the guard does.
+    const rng = new Rng(59);
+    scene(0, rng);
+    G.g_players_in_play = 2;
+    const six = [0, 1, 2, 3, 4, 5].map((m) => mkBat(0x9c00 + m, 0, 0, m, rng));
+    check("two players face all six", six.every((o) => !o.despawned));
+    check("...and all six are counted",
+          G.g_enemies_alive === 6 && G.g_enemies_present === 6,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    // The hit gate. A diving bat is invulnerable for its whole launch delay --
+    // the engine tests `state != 2 && state != 0` -- and killable once it is
+    // flying, for 80.
+    const rng = new Rng(61);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const o = mkBat(0x9d00, 0, 0, 2, rng);
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    BatUpdate(o, frame(rng));
+    check("a bat cannot be shot during its launch delay",
+          bat(o).state === BatState.Wait, BatState[bat(o).state]);
+    check("...and is still in both counters",
+          G.g_enemies_alive === 1 && G.g_enemies_present === 1,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    for (let i = 0; i < 41; i += 1) BatUpdate(o, frame(rng));
+    check("...it is flying once its stagger is up",
+          bat(o).state === BatState.Fly, BatState[bat(o).state]);
+    const score = G.g_player_score[0];
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    BatUpdate(o, frame(rng));
+    check("...and one bullet kills it then, for 80",
+          bat(o).state === BatState.Dead
+          && G.g_player_score[0] - score === 80,
+          `${BatState[bat(o).state]} +${G.g_player_score[0] - score}`);
+    check("...dropping both counters on the hit, not on the corpse",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    for (let i = 0; i < 0x51; i += 1) BatUpdate(o, frame(rng));
+    check("...and the corpse lasts eighty frames", o.despawned,
+          `${o.despawned}`);
+  }
+
+  {
+    // **An unshot bat always connects, and always leaves.** There is no range
+    // test and no attack permit anywhere in the class, so the only thing that
+    // ends a flight is arriving -- which is why `wait_enemies_present 0`
+    // behind one cannot deadlock.
+    const rng = new Rng(67);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    G.g_player_state = [5, 0];
+    G.g_camera_block_eye = vec3(100, -10, -140);
+    const o = mkBat(0x9e00, 0, 0, 0, rng);
+    const lives = G.g_player_lives[0];
+    let frames = 0;
+    for (; frames < 400 && !o.despawned; frames += 1) {
+      BatUpdate(o, frame(rng));
+    }
+    check("a bat left alone reaches the camera and takes a life",
+          o.despawned && G.g_player_lives[0] === lives - 1,
+          `${frames} frames, lives ${lives} -> ${G.g_player_lives[0]}`);
+    check("...in about 110 frames: forty of spline and sixty-seven of homing",
+          frames > 100 && frames < 125, `${frames}`);
+    check("...and gives both counters back, so the room clears",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    // Sub-type 2 is **six with one player and eight with two**, which reads
+    // the other way round in the decompiler:
+    // `((1 < g_players_in_play) - 1 & 0xFFFFFFFE) + 8`.
+    const rng = new Rng(71);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    mkBat(0x9f00, 2, 0, 0, rng, vec3(-295.7, 53.4, -673));
+    const one = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing).length;
+    check("a swarm is six bats with one player", one === 6, `${one}`);
+    check("...and all six are counted",
+          G.g_enemies_alive === 6 && G.g_enemies_present === 6,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+
+    const rng2 = new Rng(73);
+    scene(0, rng2);
+    G.g_players_in_play = 2;
+    mkBat(0x9f80, 2, 0, 0, rng2, vec3(-295.7, 53.4, -673));
+    const two = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing).length;
+    check("...and eight with two", two === 8, `${two}`);
+  }
+
+  {
+    // ...and unlike sub-type 0 it can be shot while it is still orbiting: its
+    // gate is `state != 2` alone. Two routines, one comparison apart -- `L11`
+    // in the shape it actually takes.
+    const rng = new Rng(79);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    mkBat(0xa000, 2, 0, 0, rng, vec3(0, 0, -40));
+    const member = G.g_object_list.find(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing)!;
+    check("a swarm member starts in the orbit",
+          bat(member).state === BatState.Wait,
+          BatState[bat(member).state]);
+    const score = G.g_player_score[0];
+    member.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    BatUpdate(member, frame(rng));
+    check("...and is killable there, where a diving bat is not",
+          bat(member).state === BatState.Dead
+          && G.g_player_score[0] - score === 80,
+          `${BatState[bat(member).state]} +${G.g_player_score[0] - score}`);
+  }
+
+  {
+    // Sub-type 1 is twenty-five bats that **touch neither counter**, so no
+    // `wait_enemies` gate can see one. They still score.
+    const rng = new Rng(83);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    mkBat(0xa100, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const members = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing);
+    check("a scatter is twenty-five bats", members.length === 25,
+          `${members.length}`);
+    check("...and none of them is in either counter",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    const one = members[0];
+    for (let i = 0; i < 4; i += 1) BatUpdate(one, frame(rng));
+    check("...member 0 is flying after its two-frame stagger",
+          bat(one).state === BatState.Fly, BatState[bat(one).state]);
+    const score = G.g_player_score[0];
+    one.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    BatUpdate(one, frame(rng));
+    check("...a shot one still pays 80 and drops no counter",
+          bat(one).state === BatState.Dead
+          && G.g_player_score[0] - score === 80
+          && G.g_enemies_alive === 0,
+          `${BatState[bat(one).state]} +${G.g_player_score[0] - score}`);
+  }
+
+  {
+    // The wings are a **second actor**, and `g_bat_members` is the whole of
+    // how they find their body and how they learn it has gone.
+    const rng = new Rng(89);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    const o = mkBat(0xa200, 0, 0, 0, rng);
+    const wing = G.g_object_list.find(
+      (a) => a.cls === SpawnClass.Bat && bat(a).isWing);
+    check("every bat is built with a wing actor", !!wing && !wing.despawned);
+    check("...of character type 0x1F, on its own clip",
+          wing!.charType === BAT_WING_CHAR_TYPE && wing!.motion === 0x406,
+          `${wing!.charType.toString(16)} clip ${wing!.motion.toString(16)}`);
+    for (let i = 0; i < 3; i += 1) BatUpdate(o, frame(rng));
+    BatUpdate(wing!, frame(rng));
+    check("...which follows its body a unit above it",
+          Math.abs(wing!.pos.y - (o.pos.y + 1)) < 1e-3,
+          `${wing!.pos.y.toFixed(2)} vs ${o.pos.y.toFixed(2)}`);
+    // The body leaves; the wing reads an empty slot and goes on the next frame.
+    ActorDespawn(o);
+    G.g_bat_members[bat(o).subtype * 0x19 + bat(o).member] = 0;
+    BatUpdate(wing!, frame(rng));
+    check("...and despawns the frame its body's slot goes empty",
+          wing!.despawned, `${wing!.despawned}`);
   }
 }
 

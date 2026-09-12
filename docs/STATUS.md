@@ -19,23 +19,23 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 44153 | 162 | engine |
-| `hod2lib/` | 16050 | 34 | engine |
-| `render/` | 8858 | 31 | render |
+| `game/` | 45561 | 164 | engine |
+| `hod2lib/` | 16213 | 34 | engine |
+| `render/` | 8908 | 31 | render |
 | `app/` | 7427 | 29 | app |
 | `script/` | 4324 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
-| `bundle/` | 2153 | 11 | engine |
+| `bundle/` | 2177 | 11 | engine |
 | `core/` | 910 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **87708** | **329** | |
+| **total** | **89353** | **331** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
+* `game/actor.ts` — 1993
 * `app/main.ts` — 1988
-* `game/actor.ts` — 1964
 * `script/walker.ts` — 1873
 * `hod2lib/exetab.ts` — 1839
 
@@ -43,11 +43,11 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **166 of 269** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 159 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 325 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
-| Declared `[diverges]` | **180** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Gameplay coverage | **166 of 271** annotated functions in the gameplay address ranges have a port (61%) |
+| Ported outside those ranges | 164 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 330 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **20 of 42** read classes have a module, covering 1422 of 1620 placements |
+| Declared `[diverges]` | **184** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **171** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 899 in `ghidra/annotations/functions.tsv` |
-| Named globals | 403 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 36 under `tools/`, run together by `verify_all.py` |
+| Named functions | 915 in `ghidra/annotations/functions.tsv` |
+| Named globals | 407 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 37 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -127,13 +127,14 @@ nothing exits 3 and is never counted as green.
 | `verify_root_pose` | that a clip's root translation still either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes because Ghidra shows neither of them whole -- and the only place the set of actors the second arm can move is enumerated: every motion block in the game measured for an absolute horizontal root, paired with the class-0x10 wait word that governs it | game-dir |
 | `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
+| `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
 | `verify_parts` | that every vertex-blended part in a bundle is skinned the way the exe deforms it -- one bone per vertex, weight 1, the exe's source geometry and no inverse binds -- which is the only check that can see the waist riding the hips instead of stretching to the chest | game-dir |
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-13 of them need the installed game and 12 need an exported
+14 of them need the installed game and 12 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

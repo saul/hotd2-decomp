@@ -25,6 +25,7 @@ import { makeRescueTargetTail, type RescueTargetTail }
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
 import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
+import { makeBatTail, type BatTail } from "./class46/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
@@ -1285,6 +1286,12 @@ export interface ActorBase {
   class11: CharacterPlacement["class11"];
   /** Class 0x43's two descriptor bytes — the owl's member index and sub-type. */
   class43: CharacterPlacement["class43"];
+  /**
+   * Class 0x46's three descriptor bytes — the bat's sub-type, flight group
+   * and member index. All three of them, because a class-0x46 descriptor says
+   * nothing else at all: the position is in the EXE.
+   */
+  class46: CharacterPlacement["class46"];
   class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
@@ -1473,6 +1480,19 @@ export interface ActorBase {
    * `ActorRegisterCameraPoint` lifts.
    */
   sphereCentre: Vec3;       // +0x12C
+  /**
+   * `obj+0x70/0x74/0x78` — the point `RegisterForShotTest`
+   * (`FUN_00405160`) publishes and `ShotTestSphere` (`FUN_00404630`) measures
+   * `obj+0x124` around. **Not** {@link sphereCentre}, which is `obj+0x12C`,
+   * the collision and push sphere.
+   *
+   * Written by each class's own update, immediately before it registers, and
+   * that is the engine's arrangement rather than a port choice: there is no
+   * shared routine that fills it, so what goes in is the class's business.
+   * Class 0x46 puts `(x, y + 1, z)` there. A class that never writes it is one
+   * whose shot is resolved bone by bone and never reads it.
+   */
+  shotCentre: Vec3;         // +0x70
   /**
    * Class 0x10's `ActorAllocSub(0xC4)` block at `obj+0x1310`.
    *
@@ -1738,6 +1758,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
   | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
+  | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
@@ -1745,7 +1766,7 @@ export type Actor =
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
       | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
-      | SpawnClass.Frog | SpawnClass.FlyingEnemy
+      | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.ScriptedScenery> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
@@ -1771,6 +1792,9 @@ export type OneHitTargetActor = Extract<Actor,
 
 /** An actor already narrowed to class 0x43, for that class's own routines. */
 export type OwlActor = Extract<Actor, { cls: SpawnClass.FlyingEnemy }>;
+
+/** An actor already narrowed to class 0x46, for that class's own routines. */
+export type BatActor = Extract<Actor, { cls: SpawnClass.Bat }>;
 
 /** An actor already narrowed to class 0x11, for that class's own routines. */
 export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
@@ -1867,6 +1891,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     oneHitTarget: null,
     class11: null,
     class43: null,
+    class46: null,
     class51: null,
     class52: null,
     class14: null,
@@ -1889,6 +1914,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     pushDepth: 0,
     pushNormal: vec3(),
     sphereCentre: vec3(),
+    shotCentre: vec3(),
     civ: null,
     boss4: null,
     targetAt: -1,
@@ -1956,6 +1982,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.FlyingEnemy) {
     return { ...head, cls, owl: makeOwlTail() };
+  }
+  if (cls === SpawnClass.Bat) {
+    return { ...head, cls, bat: makeBatTail() };
   }
   if (cls === SpawnClass.ScriptedScenery) {
     return { ...head, cls, scenery: makeScriptedSceneryTail() };

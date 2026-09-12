@@ -674,3 +674,24 @@ in this port.** `next()` is the raw float and belongs in a multiply. When the ex
 masks rather than divides, check the mask is uniform over `rand()`'s range
 before calling it a count — `0x8000` is exactly eight times `0x1000`, so
 `& 0xFFF` is, and a mask that is not would need saying so.
+
+**L47 — A count that falls is not proof a shot landed.** Class 0x46's bats were
+reported unshootable, and the session that ported them had "checked" it by
+clicking at one in the running player and watching `g_enemies_alive` drop from
+three to two. It did drop. A bat also gives both counters back when it reaches
+the camera, which it does every hundred frames or so whether or not anybody
+fires, and the two are indistinguishable from the count alone. The shot had
+never worked: nothing in the class descends into a bone, so the character
+layer's bone-sphere pick had nothing to test.
+
+**Pick a signal only the thing you are testing can produce.** `g_player_score`
+moves by 80 on a kill and by nothing on an arrival, and re-running the same
+click with the score as the assertion said 0 → 0 immediately. The same goes for
+`g_enemies_present` on any class that leaves under its own state machine, for
+`despawned` on anything with a lifetime, and for "the block advanced" on any
+gate that also times out.
+
+The second half is that the check belonged in a file, not in a shell loop.
+`pickShot` had no test at all — the whole of `render/characters.ts`'s shot path
+was exercised only by playing — and the four assertions added with the fix fail
+on the code as it was.

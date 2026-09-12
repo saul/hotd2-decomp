@@ -1677,6 +1677,112 @@ head-look fix-up and its actor-versus-actor push, whose transformed point is
 whose sounds are ported and whose sprites are not because none of the three
 engine routines has a termination to copy.
 
+## A fourth: the bat, class 0x46, and a flight path that is not in the script
+
+Reported as "bat zombies that fly out" in stage 4 block 0 step 6, with the
+class guessed at as 70. The guess was right, and both of the binary's name
+tables agree with it: character type `0x1E` is `zabat.bin` and the wing
+actor's `0x1F` is `zabat_wing.bin`, and every death plays
+`COMMON2\KOUMORI1_22.wav` or `KOUMORI2_22.wav` — *kōmori*. Those are the
+records the owl section above notes as existing and unplayed; this is the class
+that plays them. `game/class46/`.
+
+**The descriptors say almost nothing, which is the interesting part.** All
+twenty-four sub-type-0 spawns sit at `(0, 0, 0)` with a yaw of `0x8000`. Two
+bytes tell them apart — `+0x11C` is the member index plus one and `desc+0x24`
+is the flight group — and the pair indexes `g_bat_spline_points`
+(`0x00589944`), twelve rows of four control points walked as a **uniform
+quadratic B-spline**. `BatSplineWeights` (`FUN_0042DFD0`) is the same basis the
+owl's approach uses, which is why a bat starts at the *midpoint* of its first
+two control points and not at the first.
+
+| Group | Where | Spline slots |
+|---|---|---|
+| 0 | stage 4 block 0 step 6 | 0, 1, 2 |
+| 1 | stage 3 block 4 step 5 | 3, 4, 5 |
+| 2 | stage 4 block 2 step 6 | 6, 7, 8 |
+| 3 | stage 4 block 10 step 1 | 9, 10, 11 |
+
+Three sub-types, and they disagree about more than their trajectory:
+
+| | dive `0` | scatter `1` | swarm `2` |
+|---|---|---|---|
+| descriptors | 24 | 1 | 2 |
+| members each | 1 | 25 | 6, or 8 with two players |
+| enemy counters | both | **neither** | both |
+| killable while waiting | no | no | **yes** |
+| how it ends | reaches the eye, takes a life | passes `z = -3500` | reaches the eye, takes a life |
+| corpse gravity | `0.02722`, 80 frames | `0.04083`, to `y = -25` | `0.02722`, to `y = -25` |
+
+**Nothing stops a bat reaching you.** There is no range test, no attack permit
+and no `g_attack_permits` anywhere in the class: a bat flies its path, homes on
+`g_camera_block_eye`, calls `PlayerTakeDamage` and despawns. That is also why
+the `wait_enemies_present 0` behind each flight cannot deadlock — the flight
+ends itself whether or not anybody shoots.
+
+Four readings from this that are worth keeping:
+
+* **The bat is deliberately not a skeleton to shoot at.** `PlaceBats` writes
+  `obj+0x34 = (obj+0x34 & ~0x80) | 0x80000`, and bit `0x80` is the one
+  `ShotTestSphere` (`FUN_00404630`) tests before it descends into the bones.
+  Clearing it makes the bat one sphere of radius 4.0, whole, with one bone in
+  the skeleton it could have used.
+* **The bob is the clip's own root translation.** `obj+0x204` is
+  `model+0x70`, which `SkeletonPoseRootFrame` (`FUN_00410920`) rewrites every
+  time the model is drawn, and both flying sub-types add a multiple of it to
+  their height. The flight path is smooth; the up-and-down is the wing clip.
+  On the spline it is added **twice**, once inside the assignment and once
+  after it, and the latch at the end of the spline stores one of the two.
+* **The swarm is six with one player and eight with two**, and the expression
+  reads like the other way round:
+  `((1 < g_players_in_play) - 1 & 0xFFFFFFFE) + 8`. The first annotation of
+  `PlaceBats` had it as eight-and-ten, and `tools/verify_bats.py` asserts the
+  arithmetic now.
+* **Two objects collapsed into one, and the order of reads survived it.** The
+  engine's placer seeds the new object's previous position from `sin`/`cos` of
+  *its own* yaw, which is still zero, and only then copies the placer's yaw
+  over it. The port's sub-type-0 member *is* the placement's actor, whose yaw
+  is already the descriptor's `0x8000`, so the zero is written out explicitly.
+
+### The wings, and the bundle's first synthetic placement
+
+`SpawnBatWings` (`FUN_0042E060`) builds a **second skinned actor** per bat:
+character type `0x1F`, six nodes in two three-segment chains, clip `0x406` run
+off its body's own motion clock. It finds its body in `g_bat_members` every
+frame and despawns the frame that slot goes empty.
+
+The port builds it in the placer, where the engine does. What it needed on top
+is a **placement**, because `render/characters.ts` binds a drawable hierarchy
+to a placement by spawn address and a placer's child has no descriptor. So the
+exporter emits one synthetic row per sub-type-0 bat: parented to the body's
+row, at the address the port gives the wing, and flagged `synthetic` so
+`SpawnScriptedCharacters` refuses to build from it. The layer adopts the object
+the placer already made.
+
+That is a new shape for the bundle and it is worth naming: **a placement is no
+longer always an evt descriptor.** Two rules keep it honest, and both have
+their own assertions in `test:render` — nothing spawns from a synthetic row,
+and an actor the port made outside `readySpawns` is still adopted.
+
+### Two bugs the first cut shipped
+
+**The bats could not be shot, and the check that said they could was reading
+the wrong number.** `PlaceBats` clears `obj+0x34` bit `0x80`, and
+`g_character_bone_spheres` (`0x004D032C`) holds **radius 0** for character type
+`0x1E`'s one bone — so `ShotTestSkeleton` can resolve nothing on a bat and the
+engine measures `obj+0x124` = 4.0 around `obj+0x70` instead. The port drew the
+bat through the character path, whose pick walks bone spheres only, so a bat
+had no hit test at all. `pickShot` now takes the engine's own `else` arm for an
+instance whose bones carry no sphere, and the actor publishes `obj+0x70` as
+`(x, y + 1, z)` the way its update does. See `L47` for how the false
+verification happened.
+
+**The splash divergence stands; the wing one is gone.** What is still not
+ported: the **scatter's twenty-five and the swarm's six** are runtime children
+of a placer with no descriptor to key a row on, so they run — hits, score,
+counters, the strike — and are not drawn; and the **splash** is a sound and a
+despawn rather than thirty frames of `common.bin`.
+
 ## Coming through the window, and the ambience that goes with it
 
 Two reports from the same afternoon, and they meet in the same place: a

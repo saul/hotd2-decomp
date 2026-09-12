@@ -99,7 +99,8 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x61` | `ResultCardInstall` (`FUN_00434EF0`) | 5 | **The stage-clear card**, and `wait_script_flag 0xFE`'s only opener: a whole-image byte search for `0x009C72FE` finds exactly one instruction, `MOV byte ptr [0x009C72FE], 0x1` at `0x0043567C`, and it is this actor's last act. Sub 0 drops `g_nFiringGate`, latches `obj+0x11C = 0x1A4` (420 frames) and falls into the tally; sub 1 hands over to the score count-up once the dwell is at or below `0x78`; every arm ends on the same decrement. **Ported** (`game/class61/`), on the same terms as 0x60. | `[proved]` |
 | `0x62` | `ResultCardTally` (`FUN_00435930`) | 5 | The result card's companion, placed by `spawn_simple 0x00977244` immediately before it. Loads texbank `0x16A` and sound `0x7C`, then walks the per-scene rescue list at `0x0055DF50` against `g_civilians_rescued_by_scene`. **Writes no script flag** — every writer in the image falls outside its range — so the port names it and gives it no module. | `[proved]` |
 | `0x63` | `InitCutsceneSkipWatcher` (`FUN_00435F20`) | 45 | The commonest `spawn_simple` record (`0x0097724C`), at the top of most steps in every stage. Installs `CheckCutsceneSkipRequest` from the task table at `0x005934E4`; the installed update `ActorKill`s outright while `DAT_009A2D7C` is zero. **Writes no script flag.** | `[proved]` |
-| `0x45`, `0x46` | — | 37/27 | Not reached. | `[open]` |
+| `0x46` | `PlaceBats` (`FUN_0042D9C0`) | 27 | **The bat**, and two things say so: character type `0x1E` is `zabat.bin` and the wing actor's `0x1F` is `zabat_wing.bin`, and every death plays `COMMON2\KOUMORI1_22.wav` or `KOUMORI2_22.wav` — *kōmori*. (These are the records the owl row notes as existing and unplayed by class `0x43`; this is the class that plays them.) A **placer**: every path through the handler ends in `ActorKill`. `obj+0x130C`, the opcode-0x09 descriptor's `+0x25`, picks one of three flights, and each member is a `0x13D8`-byte actor with clip `0x407`, a 4.0 shot sphere, `BatDrawBoneSlot` at `obj+0x12EC` and a separate wing actor from `SpawnBatWings`. **Sub-type 0** (24 spawns, four flights of six) is one bat per descriptor running `BatDiveUpdate`; **sub-type 1** (1 spawn) builds 25 running `BatScatterUpdate`; **sub-type 2** (2 spawns) builds 6, or 8 with two players, running `BatSwarmUpdate`. Sub-types 0 and 2 increment **both** enemy counters and give them back on despawn; sub-type 1 touches neither. 80 points, no hit points at all — `obj+0x11C` is a member index, not health. **Ported** (`game/class46/`) — all three sub-types, the wing actor, the shot and the splash. Sub-type 0 draws in full, wings included, off a synthetic placement the exporter emits for the wing. The two placers' runtime children run but are not drawn: they have no descriptor to key a row on. See *The bat's four flights* below. | `[proved]` |
+| `0x45` | — | 37 | Not read. | `[open]` |
 
 The row above used to read *"`0x20`, `0x45`, `0x46` … Not reached. `0x20`
 has a call to the HP scaler at `0x0044964A`, so it is `[likely]` a combat
@@ -111,6 +112,58 @@ form: the handler was found by looking near where it ought to be rather than
 by reading `g_class_handler_pairs`, which names it outright. Class 0x20 is
 reached in four of the six stages, has no hit points at all, and is written
 out in full below.
+
+### The bat's four flights, and where they come from
+
+**[proved]** The twenty-four sub-type-0 descriptors all sit at the world
+origin with a yaw of `0x8000` and differ only in two bytes, because the bat's
+whole path is in the EXE rather than in the script:
+
+* `+0x11C` is `1`..`6`, the **member index** plus one. `PlaceBats` writes
+  `obj+0x1377 = +0x11C - 1`, and in a **one-player game members 5 and 6 are
+  never built** — the guard is `1 < g_players_in_play || +0x11C < 5`.
+* `desc+0x24` is the **flight group**, `0`..`3`, one per site.
+
+The two select a row of `g_bat_spline_points` (`0x00589944`, `s16 pts[12][4][3]`)
+as `group * 3 + member % 3`, so the six members of a flight share three paths
+two apiece. `BatDiveUpdate` walks it as a **uniform quadratic B-spline** —
+`BatSplineWeights` (`FUN_0042DFD0`) gives `(1-t)²/2`, `(1-t)t + ½`, `t²/2`,
+which is why a bat starts at the midpoint of the first two control points and
+not at the first — over two segments, `t` stepping `0.05` a frame, so 40
+frames of scripted flight after a launch delay of `member * 20`.
+
+| Group | Where | Spline slots |
+|---|---|---|
+| 0 | stage 4 block 0 step 6 | 0, 1, 2 |
+| 1 | stage 3 block 4 step 5 | 3, 4, 5 |
+| 2 | stage 4 block 2 step 6 | 6, 7, 8 |
+| 3 | stage 4 block 10 step 1 | 9, 10, 11 |
+
+Past the spline the bat **homes on `g_camera_block_eye`**, `obj+0x13A4` running
+0 to 1 at `0.015` a frame — about 67 frames — with a sideways sine wobble whose
+amplitude damps to nothing over the last fifth. On arrival it calls
+`PlayerTakeDamage(player, 1, 9)` if either `g_player_state` is 5, hands both
+enemy counters back and despawns. **There is no range test and no attack
+permit: an unshot bat always connects, and always leaves.** That is also why
+the `wait_enemies_present 0` at the end of each of these steps cannot deadlock
+— the flight ends itself.
+
+A hit is only taken while `obj+0x1376` is 1 or 2, so a **sub-type-0 bat is
+invulnerable for its whole launch delay**. Sub-type 2 gates only on
+`!= 2`, so a swarm bat *is* killable while it is still orbiting; the two
+handlers differ in that one comparison and nowhere else that matters.
+
+The wing is a second skinned actor, not a part of the body. `BatWingUpdate`
+(`FUN_0042F660`) finds its body each frame in `g_bat_members`
+(`0x007DC918`, 25 slots per sub-type), seats itself on the body's bone matrix
+translated `(0, 1, 2)`, copies the body's motion frame counter, and **despawns
+the frame its body's slot goes empty**. Its clip comes from a paired lookup in
+`g_bat_body_motions` / `g_bat_wing_motions`, both of which ship five identical
+rows, so the answer is always `0x406`.
+
+`tools/verify_bats.py` asserts the whole chain — the 24/1/2 sub-type split,
+the four complete flights, the twelve spline slots they reach, both motion
+tables and both character types.
 
 ### Class 0x25's `op 10` is an `if`, and it is not a player *count*
 

@@ -59,6 +59,7 @@ import { ATTACHMENT_REPLACES_BELOW } from "../game/attachments";
 import type { Vec3 } from "../game/vec";
 import type { CharacterSpawnRequest } from "../game/director";
 import { Rng } from "../core/rng";
+import { G } from "../game/globals";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
@@ -279,7 +280,9 @@ export class CharacterLayer implements System {
       // `syncSpawns`.
       this.pending.set(at, {
         at, type, root: node, pivot, bones, motion,
-        place: p, parentAt: p?.civilian_child,
+        // `parent_at` is the general form and `civilian_child` the one the
+        // captor family had first; a row carries one or the other, never both.
+        place: p, parentAt: p?.parent_at ?? p?.civilian_child,
         home: { x: node.position.x, y: node.position.y, z: node.position.z },
       });
       this.home.set(at, { x: node.position.x, y: node.position.y,
@@ -359,6 +362,21 @@ export class CharacterLayer implements System {
     // was decided by `SpawnScriptedCharacters`, and all that happens here is
     // that a set of nodes learns which object it draws.
     this.adopt(made);
+    // ...and the objects the port made by a route that does not go through
+    // `SpawnScriptedCharacters` at all. A class that builds a child of its own
+    // — `SpawnBatWings` (`FUN_0042E060`) inside `PlaceBats` — puts it straight
+    // in the pool, and the child's row in the bundle is a **synthetic** one it
+    // was never spawned from. It is still an actor with an address, so it is
+    // adopted on the same terms as any other; the search is over `want`
+    // rather than the pool so that this costs one lookup per waiting
+    // hierarchy and not a scan per frame.
+    const orphans: Actor[] = [];
+    for (const at of want) {
+      if (!this.pending.has(at)) continue;
+      const a = G.g_object_list.find((o) => o.at === at && !o.despawned);
+      if (a) orphans.push(a);
+    }
+    if (orphans.length) this.adopt(orphans);
 
     // ...and out again. `ActorDespawn` is the engine's own removal and the
     // pool sweep in `GameUpdate` takes it off `g_object_list`; the hierarchy
@@ -631,6 +649,38 @@ export class CharacterLayer implements System {
     let bestT = Infinity;
     for (const inst of this.instances) {
       if (!inst.root.visible || inst.a.dead) continue;
+      // **A skinned actor with no bone sphere anywhere is hit whole**, at
+      // `obj+0x124`, and that is the engine's own `else` arm rather than a
+      // fallback invented here: `ShotTestSphere` (`FUN_00404630`) hands over
+      // to `ShotTestSkeleton` only when the skeleton has nodes *and* the bone
+      // it would resolve has a radius, and `g_character_bone_spheres`
+      // (`0x004D032C`) holds **zero** for every bone of some character types.
+      // Character type `0x1E`, the bat, is one: one node, radius 0, and
+      // `PlaceBats` (`FUN_0042D9C0`) writes `obj+0x124 = 4.0` for it.
+      //
+      // Without this a class whose models come through the character path but
+      // whose hit test is a sphere could not be shot at all. It is derived
+      // from the table rather than listed per class on purpose -- a hand-kept
+      // list is the thing that goes stale when the next such character type
+      // is ported.
+      if (!inst.type.bones.some((b) => b.hit_radius)) {
+        if (inst.a.hitRadius > 0) {
+          // `obj+0x70/0x74/0x78`, the point the class itself published — not
+          // `obj+0x40`. Class 0x46's sits a unit above the actor.
+          const c = inst.a.shotCentre;
+          this._c.set(c.x, c.y, c.z);
+          this._ray.closestPointToPoint(this._c, this._p);
+          const t = this._p.sub(this._ray.origin).dot(this._ray.direction);
+          const r = inst.a.hitRadius;
+          if (t > 0 && this._ray.distanceSqToPoint(this._c) <= r * r
+              && t < bestT) {
+            bestT = t;
+            best = { kind: "actor", at: inst.at, bone: 0,
+                     point: { x: this._c.x, y: this._c.y, z: this._c.z } };
+          }
+        }
+        continue;
+      }
       for (const b of inst.type.bones) {
         if (!b.hit_radius) continue;
         // A removed bone has a zero draw slot, and `ShotTestBoneTree` never

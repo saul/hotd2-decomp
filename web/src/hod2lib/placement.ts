@@ -379,6 +379,27 @@ export class Placement {
   class11: Record<string, unknown> | null = null;
   /** Class 0x43's two bytes -- the owl's member index and sub-type. */
   class43: Record<string, unknown> | null = null;
+  class46: Record<string, unknown> | null = null;
+  /**
+   * The placement this one rides, when it is not a descriptor of its own.
+   *
+   * `[port-only]`, and the bundle's one **synthetic** row: `SpawnBatWings`
+   * (`FUN_0042E060`) builds a bat's wings as a second actor with no spawn
+   * record at all, and the client binds geometry to a placement by address —
+   * so a child actor that is drawn needs a row. It is not spawned from: see
+   * {@link Placement.synthetic}.
+   */
+  parent_at: number | null = null;
+  /**
+   * This row is **not** an evt descriptor.
+   *
+   * Nothing in the script places it and `SpawnScriptedCharacters` refuses to
+   * build one: the object is made by the class that owns it, exactly where the
+   * engine makes it. The row carries geometry and an address to adopt it by,
+   * and saying so in the bundle is what stops a reader treating the count of
+   * placements as the count of descriptors.
+   */
+  synthetic = false;
   /**
    * Class 0x51's tail -- the fish's speeds, bob and timings, **or** the water
    * level, when `subtype` is 6 and the record is a group header.
@@ -466,6 +487,9 @@ export class Placement {
     if (this.class20) d.class20 = this.class20;
     if (this.class11) d.class11 = this.class11;
     if (this.class43) d.class43 = this.class43;
+    if (this.class46) d.class46 = this.class46;
+    if (this.parent_at !== null) d.parent_at = this.parent_at;
+    if (this.synthetic) d.synthetic = true;
     if (this.class51) d.class51 = this.class51;
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;

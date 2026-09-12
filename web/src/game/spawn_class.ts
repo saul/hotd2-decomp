@@ -98,6 +98,15 @@ export enum SpawnClass {
   FlyingEnemy = 0x43,
   /** `FUN_00472B10` — prop placer. */
   PropPlacer = 0x44,
+  /**
+   * `PlaceBats` (`FUN_0042D9C0`) — **the bat**, settled by `zabat.bin` and
+   * `zabat_wing.bin` and by `COMMON2\KOUMORI1_22.wav`. A placer with three
+   * flights on the descriptor's `+0x25`: one bat that flies a spline in the
+   * EXE and then takes a life, twenty-five that burst away uncounted, and a
+   * swarm of six that orbits and dives. 27 spawns in two stages, 24 of them
+   * the first kind. Ported (`game/class46/`).
+   */
+  Bat = 0x46,
   /** `FUN_00438540` — water enemy. Rises, bobs, lunges to bite. */
   WaterEnemy = 0x51,
   /**

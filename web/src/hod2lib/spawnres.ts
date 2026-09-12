@@ -60,6 +60,13 @@ export const CHAR_TYPE_RULES: Record<number, CharTypeRule> = {
   0x30: ["tail", 0x00, "i8"],    // the zombie
   0x31: ["tail", 0x00, "i8"],    // humanoid enemy, subtypes 0x16-0x19
   0x32: ["tail", 0x00, "i8"],    // enemy, per-instance asset
+  // `PlaceBats` (`FUN_0042D9C0`) writes `obj+0x1F4 = 0x1E` as a literal on
+  // every member of every flight -- `zabat.bin`, one node, asset slot
+  // `0x1B01`. The descriptor's own `+0x24` is the flight GROUP here and not a
+  // character type, so `desc24` would resolve stage 4's four flights to types
+  // 0, 2 and 3 and stage 3's to 1. The wing actor's `0x1F` has no rule because
+  // it has no descriptor: see the note in `game/class46/`.
+  0x46: ["literal", 0x1e],   // the bat
   0x53: ["literal", 0x1a],       // FUN_00431250 stores 0x1A -- cat.bin
 };
 

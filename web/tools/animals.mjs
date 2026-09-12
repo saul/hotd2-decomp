@@ -54,6 +54,14 @@ const CASES = [
   ["fish st3 b1", 3, 1, 3, 0x51, ["Rise", "Bob", "Lunge", "FallBack"]],
   ["fish st3 b4", 3, 4, 1, 0x51, ["Rise", "Bob", "Lunge"]],
   ["fish st2 b16", 2, 16, 8, 0x51, ["Rise", "Bob", "Lunge"]],
+  // The bats. Sub-type 0 is the only one with a placement per member, so it is
+  // the only one this harness can watch through the character layer -- and it
+  // is 24 of the 27 shipped descriptors. Its whole path is in the EXE, so
+  // reaching `Fly` at all is the check that the flight group and the member
+  // index came off the descriptor the right way round.
+  ["bat st4 b0", 4, 0, 6, 0x46, ["Wait", "Fly"]],
+  ["bat st4 b2", 4, 2, 6, 0x46, ["Wait", "Fly"]],
+  ["bat st3 b4", 3, 4, 5, 0x46, ["Wait", "Fly"]],
 ];
 
 let failures = 0;

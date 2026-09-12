@@ -290,7 +290,12 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       `0x20` is the **one-hit target** (`OneHitTargetInit`, `FUN_00448ED0`) —
       36 spawns, no hit points at all, three idle sub-types and a scoring
       death; it had been filed as unreached on the strength of an address that
-      is inside class 0x31's handler.
+      is inside class 0x31's handler. Class `0x46` is **the bat**
+      (`PlaceBats`, `FUN_0042D9C0`) — 27 spawns in three sub-types, proved by
+      `zabat.bin` / `zabat_wing.bin` and by `COMMON2\KOUMORI1_22.wav`; its
+      twenty-four sub-type-0 spawns all sit at the world origin and take
+      their whole path from a twelve-row spline table in the EXE
+      (`tools/verify_bats.py`). Class `0x45` is still unread.
 - [x] **Item placement.** The items are not placed — the *containers* are.
       Class `0x41` type 0 places groups of breakable props from two EXE tables:
       9 groups, 42 props, each a 10-byte record with x/z, item-set, stack level

@@ -80,6 +80,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // shared field would have one class read the other's.
     class11: p?.class11 ?? null,
     class43: p?.class43 ?? null,
+    // Class 0x46's, and it is the whole descriptor: sub-type, flight group
+    // and member index. `tail+0x00` is class 0x30's body condition again.
+    class46: p?.class46 ?? null,
     class51: p?.class51 ?? null,
     class52: p?.class52 ?? null,
     class53: p?.class53 ?? null,

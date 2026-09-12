@@ -415,6 +415,30 @@ export interface CharacterPlacement {
    */
   class43?: { subtype: number; member: number } | null;
   /**
+   * Class 0x46's three descriptor bytes — the bat, and the whole descriptor.
+   *
+   * `subtype` is `desc+0x25`, 0 to 2, and picks which of three routines the
+   * members run; `group` is `desc+0x24`, 0 to 3, the flight; `member` is
+   * `desc+0x22 - 1`. Together the group and the member pick the row of
+   * `g_bat_spline_points` the bat flies, because the descriptor carries no
+   * position at all — every class-0x46 spawn sits at the world origin.
+   */
+  class46?: { subtype: number; group: number; member: number } | null;
+  /**
+   * The placement this one rides, when it is a child rather than a descriptor.
+   *
+   * Set on the bat's wing rows, which are {@link synthetic}. The client wants
+   * the hierarchy whenever the parent's is wanted, which is the same rule the
+   * civilian's held children have through `civilian_child`.
+   */
+  parent_at?: number | null;
+  /**
+   * **Not an evt descriptor.** Nothing in the script places it, and
+   * `SpawnScriptedCharacters` refuses to build one: the object is made by the
+   * class that owns it. The row carries geometry and an address to adopt by.
+   */
+  synthetic?: boolean;
+  /**
    * Class 0x51's tail — the fish.
    *
    * `speed_x` and `speed_z` are the per-axis closing speeds, scaled by the

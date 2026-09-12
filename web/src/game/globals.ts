@@ -689,6 +689,26 @@ export const G = {
    */
   g_class43_attack_token: -1,
 
+  // -- the bats, class 0x46 ----------------------------------------------
+  /**
+   * `g_bat_members` — 0x007DC918. The live class-0x46 actors, 25 slots per
+   * sub-type, indexed `subtype * 0x19 + member`.
+   *
+   * **It is not bookkeeping.** `BatWingUpdate` (`FUN_0042F660`) reads it to
+   * find the body it is drawn on and despawns itself the frame the slot goes
+   * empty, which is the whole mechanism by which a bat's wings follow it and
+   * die with it. Every bat re-stamps its own slot at the top of its update and
+   * clears it on the way out.
+   *
+   * `[port-only]` the entries are spawn addresses rather than pointers, so the
+   * array survives `clonePlain`. 0 is the engine's empty slot and no spawn
+   * address is 0, so the sentinel carries over unchanged.
+   *
+   * The four sub-type-0 flights all share slots 0..5, which is safe only
+   * because no two of them are ever in play at once.
+   */
+  g_bat_members: [] as number[],
+
   // -- breakable props, class 0x41 ---------------------------------------
   /**
    * Every live breakable prop. The engine allocates each as its own 0x378
@@ -1304,6 +1324,7 @@ export function ResetGameGlobals(): void {
   G.g_summoned_actor_at = -1;
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
+  G.g_bat_members = [];
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];
   G.g_thrown_next_id = 1;

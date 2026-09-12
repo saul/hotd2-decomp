@@ -210,6 +210,13 @@ MOTION_RULES: dict[int, tuple] = {
     # a rule here the stage-2 boss resolves to a character with no motion and
     # no skeleton is built for it at all -- stage 5, whose only class-0x14
     # spawn is its own, had no character type 71 in its bundle.
+    # `PlaceBats` (`FUN_0042D9C0`) seats the clip as a literal on every
+    # member: `obj+0x1B4 = 0x407`, the 22-frame `zabat.bin` clip in motion
+    # bank 3. Without it the 27 class-0x46 spawns resolve to a character with
+    # no motion and the exporter emits them as markers, so every bat is placed
+    # and never built. The wing's `0x406` travels with character type 0x1F,
+    # which no placement names -- see `game/class46/`.
+    0x46: ("literal", 0x407),
     0x14: ("literal", 33),
     # `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same
     # shape as class 0x19's: `MOV dword ptr [EDI + 0x20], 0x3E6`

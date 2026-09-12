@@ -17558,6 +17558,64 @@ shows: the owl below and to one side, and the beat seated in the half of its
 cycle whose height term is negative, so a frozen owl stalls *under* the camera
 rather than swinging through it.
 
+## Class 0x46 is the bat, and every one of its twenty-four flights is in the EXE
+
+A report about "bat zombies that fly out" in stage 4 block 0 step 6 came with a
+guess attached — class 70 — and the guess was right. `g_class_handler_pairs`
+gives class `0x46` the handler `FUN_0042D9C0`, and two independent names settle
+what it is: character type `0x1E` resolves through `g_character_skeletons` to
+`zabat.bin` (one node) with a wing actor of type `0x1F` = `zabat_wing.bin` (six
+nodes, two three-segment chains), and every death plays `COMMON2\KOUMORI1_22.wav`
+or `KOUMORI2_22.wav` — *kōmori*, bat. Both name tables, agreeing.
+
+That also closes a loose end in the owl row of `spawns.md`, which noted that the
+`KOUMORI` records exist and class `0x43` does not play them. This is the class
+that does.
+
+**The interesting part is that the descriptors say almost nothing.** All
+twenty-four sub-type-0 spawns sit at `(0, 0, 0)` with a yaw of `0x8000`. Two
+bytes distinguish them: `+0x11C` is `1`..`6` (the member index plus one) and
+`desc+0x24` is the flight group `0`..`3`. The pair indexes
+`g_bat_spline_points` at `0x00589944` as `group * 3 + member % 3`, twelve rows
+of four control points, walked as a uniform quadratic B-spline by
+`BatSplineWeights` (`FUN_0042DFD0`) — which is why a bat starts at the
+*midpoint* of the first two control points rather than at the first.
+
+So the whole path lives in the image and none of it is in the script, and that
+is the reason this reading got a checker of its own rather than a paragraph.
+`tools/verify_bats.py` walks descriptor byte → flight group → spline slot →
+character type → asset filename, and the mutation that motivated it is the
+obvious wrong turn: reading `desc+0x24` as the sub-type instead of `desc+0x25`.
+That mutation still yields a clean-looking three-way split — `{0: 9, 1: 6,
+2: 6, 3: 6}` — and only the counts reject it.
+
+**One reading was nearly wrong and the update caught it.** `PlaceBats` computes
+a bat's start position as three s16 rows of `0x00589944` times three floats
+from `FUN_0042DFD0`, which reads exactly like a 3×3 rotation matrix applied to
+a point, and would have gone into the notes as one. It is not: `BatDiveUpdate`
+indexes the same table as `(seg + slot * 4) * 6`, which only makes sense if the
+rows are four *control points* of six bytes, and the "matrix" is three of them
+weighted by a spline basis. The Init is the same expression with `t = 0`. The
+lesson is the old one — read the consumer before naming the structure, and the
+Init is not the only consumer.
+
+Behaviour, for whoever ports it: three sub-types, and only the hit gate really
+separates the two dangerous ones. Sub-type 0 flies its spline and then homes on
+`g_camera_block_eye` at `0.015` a frame, sub-type 2 orbits its placer at a
+radius of `12 + 5·sin` and then homes at `0.01`, and both end by calling
+`PlayerTakeDamage(player, 1, 9)` — **no range test, no attack permit, an
+unshot bat always connects and always leaves**, which is why the
+`wait_enemies_present 0` behind each flight cannot deadlock. Sub-type 0 takes a
+hit only in states 1 and 2, so it is invulnerable through its whole launch
+delay; sub-type 2 gates on `!= 2` alone and is killable while orbiting. Sub-type
+1 is 25 bats that burst away, accelerate, are shootable for the same 80 points
+and touch **neither** enemy counter.
+
+Not ported. `SpawnClass` has no `0x46` member and `spawnres.ts` has no character-type
+rule for it, so in the player these four bats do not exist and the gate behind
+them opens on the frame it is reached. Adding `0x46` to `ENEMY_CLASSES` without
+a module first would turn that into a stage that never continues.
+
 ## The room was waiting for the camera, and the port had the other driver
 
 Reported as pacing: the camera snaps and the script moves on the instant a
@@ -17631,3 +17689,101 @@ because each was a conflation the notes carried:
 have caught this: every other camera check asks whether a gate opens, and this
 one asks how long it takes. With the old rule it reports every room handing
 back in two frames whatever the camera was doing, which is the report.
+
+## Porting the bat, and the two objects that had to stay two
+
+Same session, second half: the reading above went into `web/src/game/class46/`,
+all three sub-types. The engine half is complete — the spline, the homing run,
+the orbit, the scatter, the wing actor, the three corpses, the damage, the
+score and both counters — and the whole of it is asserted by 31 new
+`port.test.ts` cases and three new `tools/animals.mjs` cases driven from real
+stage-3 and stage-4 bundles.
+
+**The placer's shape is the thing that took the thinking.** `PlaceBats` builds
+a second object and kills itself, and the port cannot do that for sub-type 0:
+the character layer binds a drawable hierarchy to a *placement*, by spawn
+address, and a runtime child has no placement. So sub-type 0's member is the
+placement's own actor and the placer's `ActorKill` becomes a no-op, while
+sub-types 1 and 2 build real children the way the engine does. That collapse
+had one trap in it and the decompilation caught it: the engine seeds the new
+object's previous position from `sin`/`cos` of **its own** `obj+0x68`, which
+`ActorClearGameFields` has just zeroed, and only afterwards copies the placer's
+yaw across. One object means `obj.yaw` is already the descriptor's `0x8000`, so
+the zero has to be written out on purpose. It is, with the reason on the spot.
+
+**A first draft of the annotation was wrong about the swarm's size**, and this
+is the one to remember. `((1 < g_players_in_play) - 1 & 0xFFFFFFFE) + 8` reads
+like "eight, or ten with two players" and is "six, or eight" — the subtraction
+happens first, so one player gets `-2 + 8`. It was written into
+`functions.tsv` and `spawns.md` before it was transcribed, and transcribing it
+is what found it. `tools/verify_bats.py` now computes the expression rather
+than quoting the answer, and checks the port's two constants against it.
+
+**`obj+0x204` was `[open]` for an hour and is `model+0x70`** — the current
+frame's root translation, which `SkeletonPoseRootFrame` (`FUN_00410920`)
+rewrites on every draw. Both flying sub-types add a multiple of its Y to their
+height, so the bat's bob is the wing clip's own root motion layered on a smooth
+path. Chasing it meant decompiling the model builder and the draw, neither of
+which writes it, and then the pose routine, which does.
+
+Two divergences are declared and both are the same one underneath: the wing
+actor and the two placers' children run but are not drawn, because there is no
+placement to hang a hierarchy on. Fixing it is a bundle-format change — a
+character type no placement names, or synthetic placements for child actors —
+and that is a decision about what a placement *is*, so it was left to the user
+rather than made in passing.
+
+## The bats could not be shot, and the wings were the easy half
+
+Both reported from play, in the same message, after the port above landed.
+
+**The shot is the one worth writing down, because the first session had
+"verified" it.** It clicked at a bat in the running player, watched
+`g_enemies_alive` fall from three to two, and called it working. It does fall —
+and a bat also gives both counters back when it reaches the camera, which it
+does every hundred frames or so whether or not anybody fires. The two are
+indistinguishable from the count. Re-run with `g_player_score` as the
+assertion, which moves by 80 on a kill and by nothing on an arrival, and the
+answer was 0 → 0 immediately. `L47`.
+
+The cause was a reading that was in the notes and had not been carried into the
+port. `PlaceBats` clears `obj+0x34` bit `0x80`, which is the bit
+`ShotTestSphere` (`FUN_00404630`) tests before it descends into the bone tree,
+and the corroboration is stronger than the bit: `g_character_bone_spheres`
+(`0x004D032C`) holds **radius 0** for character type `0x1E`'s one bone, so
+`ShotTestSkeleton` could resolve nothing on a bat either way. The engine
+measures `obj+0x124` = 4.0 around the point the update publishes at
+`obj+0x70`, which is `(x, y + 1, z)`. The port drew the bat through the
+character path, whose pick walks bone spheres and nothing else, so there was no
+hit test at all.
+
+`render/characters.ts` now takes the engine's own `else` arm for an instance
+whose bones carry no sphere — **derived from the table rather than listed per
+class**, because a hand-kept list is what goes stale when the next such
+character type is ported. `Actor.shotCentre` is `obj+0x70`, written by the
+class as the engine writes it. Four assertions in `test:render`, all four
+failing on the code as it was; `pickShot` had had no test of any kind.
+
+An hour went into a question that turned out not to need answering: **which
+routine sets `obj+0x34` bit `0x80`.** No shipped descriptor carries it — 0 of
+1492 — `ActorInitFlags` is `flags | 1`, and an instruction scan for the
+immediate forms finds nothing. Whether some register-to-memory store sets it is
+still `[open]`, and it does not matter for this class, because the bone-sphere
+table decides the same fork on its own. Recorded so the next reader does not
+spend the same hour: the *general* question of how a zombie's shot reaches its
+bones in the engine is open and is not what the annotation implies.
+
+**The wings needed a bundle-format decision, and the user made it.** The engine
+builds them in the placer with no descriptor; the client binds geometry to a
+placement by spawn address. So the exporter now emits a **synthetic placement**
+per sub-type-0 bat — parented to the body, at the address the port's
+`SpawnBatWings` uses, flagged so `SpawnScriptedCharacters` refuses to build
+from it — and `CharacterLayer.syncSpawns` adopts an actor the port made outside
+`readySpawns`. That is the first row in the bundle that is not an evt
+descriptor, which is why both halves of it are asserted rather than described.
+
+One ordering trap, and it cost a full re-export: `tools/gen_schema_hash.py`
+must run **before** the export, not after. Regenerating it afterwards stamps
+every bundle with the old hash and the player refuses all twelve of them at
+load — which presents as `#loading` never leaving, and as one browser check
+timing out while the other forty-two pass.

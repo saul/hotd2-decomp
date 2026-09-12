@@ -253,6 +253,14 @@ CHECKS: list[Check] = [
           "check that reads a motion at the effect stride rather than a "
           "character's",
           NEEDS_GAME),
+    Check("verify_bats", ".",
+          ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],
+          "that the class-0x46 bat's flight paths still line up with the "
+          "descriptors that select them -- the only check on a class whose "
+          "spawns are all at the world origin and take their whole position "
+          "from an EXE table, so nothing about a wrong reading of them looks "
+          "wrong in the data",
+          NEEDS_GAME),
     Check("verify_attachments", ".",
           ["python3", "tools/verify_attachments.py",
            "--game-dir", "{game_dir}"],

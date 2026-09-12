@@ -25,6 +25,7 @@
  * block on, and `WaitPolicy` says what the walker did instead.
  */
 
+import { CameraActionDriver } from "../game/camera/mode";
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
@@ -1566,6 +1567,10 @@ export class Walker {
    * because a `wait_camera_path_frame 0` precedes the `goto_scene_state`.
    */
   retireSceneSequence(): void {
+    // Parking the handler slot is what stops the driver, and the driver is
+    // what owns `g_camera_free`: with none installed the flag keeps whatever
+    // value the last shot left it, which is the engine's bare `RET`.
+    G.g_camera_action_driver = CameraActionDriver.None;
     this.settleCameraAction();
     this.ring.retire();
   }

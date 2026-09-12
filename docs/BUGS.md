@@ -2551,6 +2551,57 @@ investigation ruled out.
   with the beat frozen it reports the reporter's own case, one dive and no
   strike.
 
+## And one about the pacing of a room clear
+
+- `[fixed]` **The camera snapped back and the script moved on the instant a
+  zombie died.** Reported as the pacing being off, with the guess that the
+  engine waits for the corpse to reach the ground. It does not — `g_enemies_alive`
+  falls on the death frame and the corpse leaves `g_enemy_slots` on the same
+  frame, both inside `ZombieReleasePermitAndUntrack` (`FUN_004565A0`). What the
+  engine waits for is **the camera**.
+
+  `EvtActionFinishSequence21` (`FUN_00403710`) installs a per-frame driver out
+  of `g_camera_action_starters` (`0x00576B20`), indexed by the scene-state
+  minor it has just entered, and the two it can install are not the same rule:
+
+  * minors **4** and **6** install `CameraDriverSelectMode` (`FUN_00402650`),
+    which clears `g_camera_free` on every frame the camera mode is not 2, and
+    only reaches mode 2 when the alive count is zero *and* no camera slot is
+    claimed. Mode 2 is not the hand-back — it is the permission to start one.
+    `CameraTurnOntoPathTarget` (`FUN_00402740`) then eases the aim back onto
+    the path's own target and raises `g_camera_free` on the frame the two
+    converge, `|cos²| ≥ 0.99999`.
+  * minor **7** installs `CameraDriverFromDeferredPose` (`FUN_00402E00`),
+    which has no counter test and no turn: the flag follows the slot table.
+
+  **The port had the minor-7 rule on every shot.** Measured over the shipped
+  scripts that is the wrong one 572 times out of 836, and 267 of the 278
+  room-clear gates wait under the driver the port did not have. Driven on stage
+  1's block 1 the rooms now hold 25 to 55 frames after the last enemy dies,
+  scaled to how far that enemy had pulled the aim; with the old rule every one
+  of them opened in two frames whatever the camera was doing.
+
+  Two claims in the old code argued against exactly this, and both were wrong
+  in a way the binary settles:
+
+  * *"ANDing the counter and the convergence holds a gate for ever whenever
+    anything is still alive."* Every one of the 278 room-clear gates in the
+    shipped scripts has **operand 0**, so the gate's own counter test and the
+    selector's `== 0` are the same test and the conjunction cannot deadlock.
+  * *"Every enemy death site frees the flag outright."* Two sites do —
+    `0x0048042C` and `0x00428B44` — and neither is on class 0x30's path.
+
+  `g_camera_settled` moved with it. It is a this-frame answer cleared by
+  `CameraActorTick` (`FUN_004022B0`), and the port had the clear inside
+  `CameraTrackEnemiesTick` — which is the routine the hand-back runs *instead
+  of*, so leaving it there would have latched the flag and opened every
+  `wait_targets_clear` for the rest of the stage.
+
+  Not modelled, and named rather than guessed: the two mode overrides.
+  `[0x009CA094] == 1` forces mode 6 and `[0x009C6F30]` / `[0x009C6F32]` force
+  mode 7. Sixteen routines write the first and none of them has been read.
+  `[open]`
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are

@@ -22,6 +22,9 @@
  * {@link UNMODELLED} handler retires it, because the engine's does too.
  */
 import type { OpJson } from "../../bundle";
+import { CAMERA_ACTION_STARTERS, CameraActionDriver, CameraMode }
+  from "../../game/camera/mode";
+import { G } from "../../game/globals";
 import type { Walker } from "../walker";
 import { mergeTables } from "../registry";
 
@@ -145,6 +148,14 @@ const SCENE: Record<string, ActionImpl> = {
     // routine*, it does not hand control back from a path. Row 2's live
     // cells are 4, 6 and 7, and those are the only operands that occur.
     const minor = op.args?.[0];
+    // `g_camera_mode = 3` at 0x00403728, then
+    // `g_evt_action_handler = g_camera_action_starters[g_scene_state_minor]`
+    // at 0x00403765. The mode is reseeded every frame by the driver itself, so
+    // it is the handler that decides anything -- minors 4 and 6 give the room
+    // a turn back onto the rail before it hands over, minor 7 does not.
+    G.g_camera_mode = CameraMode.TrackEnemies;
+    G.g_camera_action_driver =
+      CAMERA_ACTION_STARTERS[minor ?? -1] ?? CameraActionDriver.None;
     if (minor === 6 || minor === 7) {
       const st = w.stashedCam;
       if (!st) return "state 6/7 with nothing stashed";

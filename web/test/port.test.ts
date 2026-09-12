@@ -37,7 +37,9 @@ import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
   from "../src/game/actor";
-import { CameraPointRiseFor, UpdateCameraFreeFlag }
+import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
+  CameraMode } from "../src/game/camera/mode";
+import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
   from "../src/game/globals";
@@ -515,6 +517,12 @@ function scene(n: number, rng: Rng): Events {
   // here would be dropped by `ProcessShotRequests`, which is the behaviour the
   // firing-gate section below exists to prove.
   G.g_nFiringGate = 1;
+  // The camera driver a shot installs. There is no script in this file, so
+  // this line stands in for the `finish_sequence` that would have run: with no
+  // driver installed `CameraRunQueuedAction` does nothing at all, which is the
+  // engine's bare `RET` and not a camera. Minor 4 is the commonest of the
+  // three starters.
+  G.g_camera_action_driver = CameraActionDriver.SelectMode;
   for (let i = 0; i < n; i++) {
     const a = spawnZombie(0x1000 + i, 1, `zombie ${i}`);
     a.visible = true;
@@ -8695,9 +8703,13 @@ console.log("\nthe crawler's undamaged swing:");
 }
 
 // `g_camera_free` -- the gate every room-clear wait needs on top of its
-// counter. It is the flag that decides whether a room hands over on the frame
-// the last enemy dies or once the camera has swung back onto its rail, and the
-// way it fails is by never rising, which parks the script for good.
+// counter. It decides whether a room hands over on the frame the last enemy
+// dies or once the camera has swung back onto its rail, and **which of two
+// drivers produces it is a property of the shot**: `finish_sequence` installs
+// one out of `g_camera_action_starters` by the scene-state minor it enters.
+//
+// This half is the minor-7 driver, `CameraDriverFromDeferredPose`
+// (`FUN_00402E00`): the slot array and nothing else.
 {
   ResetGameGlobals();
 
@@ -8705,29 +8717,143 @@ console.log("\nthe crawler's undamaged swing:");
   G.g_enemy_slots = [0];
   G.g_enemies_alive = 1;
   G.g_camera_settled = 1;
-  UpdateCameraFreeFlag();
+  CameraDriverFromDeferredPose();
   check("the camera is not free while an enemy holds a slot",
         G.g_camera_free === 0);
 
   // The slot empties and the flag rises again -- that is the whole rule.
   G.g_enemy_slots = [];
-  UpdateCameraFreeFlag();
+  CameraDriverFromDeferredPose();
   check("the camera is free once nothing holds a slot", G.g_camera_free === 1);
 
-  // The rule is the slot array and NOTHING else. An earlier cut of this also
-  // required `g_enemies_alive == 0` and a converged aim -- terms that belong
-  // to the other camera driver, not this one -- and the conjunction held every
-  // room-clear gate for ever while anything was still alive. These two are the
-  // regression: enemies alive, and an aim that has not converged, must both
-  // leave the flag up.
+  // For *this* driver the rule is the slot array and nothing else. It has no
+  // counter test and no turn, which is exactly why it is the wrong rule to
+  // apply to the other 572 shots.
   G.g_enemies_alive = 5;
-  UpdateCameraFreeFlag();
+  CameraDriverFromDeferredPose();
   check("...even with enemies alive, if none of them holds a slot",
         G.g_camera_free === 1);
   G.g_camera_settled = 0;
-  UpdateCameraFreeFlag();
+  CameraDriverFromDeferredPose();
   check("...and without waiting for the aim to converge",
         G.g_camera_free === 1);
+}
+
+// ...and this half is the minor-4/6 driver, `CameraDriverSelectMode`
+// (`FUN_00402650`) with the hand-back it dispatches to.
+//
+// Reported as the camera snapping and the script moving on the instant a
+// zombie died. The engine holds the room until the aim is back on the rail:
+// mode 2 is only the permission to *start* turning, and
+// `CameraTurnOntoPathTarget` raises the flag on the frame the eased aim
+// catches the path's own target.
+{
+  ResetGameGlobals();
+  // A camera at the origin, the rail aimed down +z, and the aim pulled a
+  // quarter turn off it by the enemy that has just died.
+  const seat = (offDegrees: number) => {
+    G.g_camera_block_eye.x = 0;
+    G.g_camera_block_eye.y = 0;
+    G.g_camera_block_eye.z = 0;
+    G.g_cam_path_target.x = 0;
+    G.g_cam_path_target.y = 0;
+    G.g_cam_path_target.z = 100;
+    const a = offDegrees * Math.PI / 180;
+    G.g_camera_block_target.x = Math.sin(a) * 100;
+    G.g_camera_block_target.y = 0;
+    G.g_camera_block_target.z = Math.cos(a) * 100;
+  };
+
+  seat(30);
+  G.g_enemies_alive = 1;
+  G.g_enemy_slots = [0];
+  G.g_camera_free = 1;
+  CameraActorTick();
+  CameraDriverSelectMode();
+  check("a live enemy puts the camera in the tracking mode and takes the "
+        + "room's permission away",
+        G.g_camera_mode === CameraMode.TrackEnemies && G.g_camera_free === 0,
+        `${G.g_camera_mode} ${G.g_camera_free}`);
+
+  // It dies: the count falls and the slot empties on the same frame, which is
+  // what `ZombieReleasePermitAndUntrack` does. The aim is re-seated because
+  // the frame above had no actor behind its slot and so aimed at the rail
+  // anyway -- where the enemy left the aim is the fixture, not the assertion.
+  G.g_enemies_alive = 0;
+  G.g_enemy_slots = [];
+  seat(30);
+  CameraActorTick();
+  CameraDriverSelectMode();
+  check("...and when it dies the mode flips, but the room does not hand back "
+        + "on that frame",
+        G.g_camera_mode === CameraMode.HandBackToPath && G.g_camera_free === 0,
+        `${G.g_camera_mode} ${G.g_camera_free}`);
+
+  let frames = 1;
+  for (; frames < 600 && G.g_camera_free === 0; frames += 1) {
+    CameraActorTick();
+    CameraDriverSelectMode();
+  }
+  check("...it hands back only once the aim has caught the rail",
+        G.g_camera_free === 1 && G.g_camera_settled === 1, `${frames}`);
+  // 64 frames at thirty degrees off. The assertion is the order of magnitude,
+  // not the exact count: it is a second of held camera, not two frames and not
+  // five seconds.
+  check("...which takes about a second, not a frame",
+        frames > 30 && frames < 150, `${frames} frames`);
+
+  // A wider swing takes longer, which is the whole point of easing it.
+  const settleFrom = (deg: number): number => {
+    ResetGameGlobals();
+    seat(deg);
+    G.g_enemies_alive = 0;
+    G.g_enemy_slots = [];
+    let n = 0;
+    for (; n < 600 && G.g_camera_free === 0; n += 1) {
+      CameraActorTick();
+      CameraDriverSelectMode();
+    }
+    return n;
+  };
+  const near = settleFrom(5);
+  const far = settleFrom(90);
+  check("...and a wider swing holds the room longer than a narrow one",
+        far > near && near > 20, `${near} -> ${far}`);
+
+  // The flag stays up once it is up: the mode is still 2, so the selector
+  // does not clear it and the hand-back takes its already-on-the-rail arm.
+  ResetGameGlobals();
+  seat(0);
+  G.g_enemies_alive = 0;
+  G.g_enemy_slots = [];
+  CameraActorTick();
+  CameraDriverSelectMode();
+  const wasFree = G.g_camera_free;
+  for (let i = 0; i < 30; i += 1) {
+    CameraActorTick();
+    CameraDriverSelectMode();
+  }
+  check("...and having handed back it stays handed back",
+        wasFree === 1 && G.g_camera_free === 1);
+
+  // And a new enemy takes it away again.
+  G.g_enemies_alive = 1;
+  G.g_enemy_slots = [0];
+  CameraActorTick();
+  CameraDriverSelectMode();
+  check("...until the next enemy claims a slot",
+        G.g_camera_free === 0 && G.g_camera_hand_back_started === 0);
+}
+
+// `g_camera_settled` is a this-frame answer, and the clear has to run
+// whichever driver the frame picks. It used to be the first line of
+// `CameraTrackEnemiesTick`, which the hand-back runs *instead of*.
+{
+  ResetGameGlobals();
+  G.g_camera_settled = 1;
+  CameraActorTick();
+  check("the camera actor clears `g_camera_settled` before any driver runs",
+        G.g_camera_settled === 0 && G.g_camera_is_tracking === 1);
 }
 
 // The camera-path cue, and the frame that gets stepped over.

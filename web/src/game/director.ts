@@ -13,8 +13,8 @@ import { ActorSpawn } from "./spawn";
 export { ActorInitFlags, ActorSpawn } from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
-import { ActorRegisterCameraPoint, CameraPointRiseFor, CameraTrackEnemiesTick,
-  UpdateCameraFreeFlag } from "./camera/track";
+import { CameraActorTick, CameraRunQueuedAction } from "./camera/mode";
+import { ActorRegisterCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
@@ -565,13 +565,15 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events);
 
+  // `FUN_00408DD0` drains the candidates the actor updates above registered.
   UpdateCameraEnemySlots(eye);
-  // `FUN_00402E00` recomputes `g_camera_free` from the slot array it has just
-  // filled -- the gate the room-clear waits need on top of their counter.
-  UpdateCameraFreeFlag();
-  // The camera hook, in the engine's own order: the queued `cam_play` action
-  // has already seated the block on the rail for this frame (the host calls
-  // `CamAdvancePathFrame`), and this eases the aim off it and back.
-  CameraTrackEnemiesTick();
+  // Then the two camera tasks, in the engine's own order. The camera actor
+  // clears the this-frame flags; the queued `cam_play` action runs whichever
+  // driver `finish_sequence` installed, which is what decides both where the
+  // aim goes and when the room is allowed to hand back. The block itself is
+  // already seated on the rail for this frame — the host calls
+  // `CamAdvancePathFrame` before any of this.
+  CameraActorTick();
+  CameraRunQueuedAction();
   return { lookAt: G.g_camera_block_target };
 }

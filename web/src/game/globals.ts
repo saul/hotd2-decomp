@@ -545,18 +545,70 @@ export const G = {
    * a room does not hand over the moment the last enemy dies — it hands over
    * once the camera has swung back onto its rail.
    *
-   * The engine computes it across two per-frame camera drivers:
-   * `FUN_00402E00` raises it when no `g_enemy_slots` entry is claimed, and
-   * `FUN_00402650` clears it on every frame the camera mode is not
-   * "return to path" — a mode it only picks when `g_enemies_alive == 0` *and*
-   * no slot is claimed. Inside that mode `CameraTurnOntoPathTarget` latches it
-   * when the eased look-at catches the path target.
+   * **Which of two rules produces it depends on the shot**, and the shot says
+   * so: `EvtActionFinishSequence21` installs a per-frame driver out of
+   * `g_camera_action_starters` (0x00576B20), indexed by the scene-state minor
+   * it has just entered. See {@link g_camera_action_driver}.
    *
-   * This port has one camera routine rather than that pair, so what it keeps
-   * is the conjunction the two of them compute between them: no slot claimed,
-   * no enemy alive, and the aim converged. [diverges]
+   * * Minors 4 and 6 — 572 of the 836 `finish_sequence` sites — install
+   *   `CameraDriverSelectMode` (`FUN_00402650`), which clears this on every
+   *   frame {@link g_camera_mode} is not
+   *   {@link CameraMode.HandBackToPath}, and only `CameraTurnOntoPathTarget`
+   *   (`FUN_00402740`) raises it again, on the frame the eased aim catches the
+   *   path's own target.
+   * * Minor 7 installs `CameraDriverFromDeferredPose` (`FUN_00402E00`), which
+   *   re-derives it from `g_enemy_slots` every frame with no turn at all.
+   *
+   * Measured over the shipped scripts, 267 of the 278 room-clear gates wait
+   * under the first rule and 5 under the second.
    */
   g_camera_free: 0,
+  /**
+   * `g_camera_mode` — 0x009C6F20. The index `CameraDriverSelectMode`
+   * (`FUN_00402650`) writes and then dispatches through `g_camera_mode_hooks`
+   * (`0x00576CBC`).
+   *
+   * It is recomputed from scratch every frame — the "keep what was there" arm
+   * needs {@link g_camera_hand_back_variant} to be negative and nothing ever
+   * makes it so — which is why `EvtActionFinishSequence21`'s seed of 3 never
+   * decides anything. Kept because the engine keeps it, and because the panel
+   * can show it.
+   */
+  g_camera_mode: 0,
+  /**
+   * `g_camera_hand_back_started` — 0x009C6F2C.
+   *
+   * Raised by `CameraTurnOntoPathTarget` on the first frame of the turn back
+   * onto the rail and cleared on the frame the aim converges, in the same
+   * breath as `g_camera_free`. `CameraDriverSelectMode` clears it on every
+   * frame the mode is not 2. It only separates the first frame of a turn from
+   * the rest, and both do the same work, so nothing downstream reads it.
+   */
+  g_camera_hand_back_started: 0,
+  /**
+   * `g_camera_hand_back_variant` — 0x009C6F2E. Which counter the hand-back
+   * watches, and which routine performs it.
+   *
+   * `CameraResetForPathShot` (`FUN_004031E0`) is its only writer and it writes
+   * **0**, at `0x0040322D`, so every shot in the shipped game watches
+   * `g_enemies_alive` and turns with `CameraTurnOntoPathTarget`. Modelled as a
+   * field rather than folded away because two separate routines branch on it,
+   * and because it is what makes the `rate = 0` snap in
+   * `CameraTrackEnemiesTick` (`0x00402A12`) dead code.
+   */
+  g_camera_hand_back_variant: 0,
+  /**
+   * `[port-only]` — which starter last ran, standing in for the function
+   * pointer `EvtActionFinishSequence21` parks in `g_evt_action_handler`
+   * (0x009A610C).
+   *
+   * The port cannot put a function pointer in a snapshot, and the identity is
+   * all anything needs: the three starters install two different drivers, and
+   * `goto_scene_state` parks the slot on a bare `RET`. Written by the
+   * `finish_sequence` action and cleared by `Walker.retireSceneSequence`,
+   * which is where the engine writes and parks it.
+   */
+  g_camera_action_driver: 0,
   /**
    * `g_evt_wait_alive_hysteresis` — 0x007DCCA8. The extra frame
    * `wait_enemies_alive` (0x44) costs, and nothing else in the program reads
@@ -1236,6 +1288,10 @@ export function ResetGameGlobals(): void {
   G.g_camera_turn_curve = 1;
   G.g_camera_settled = 0;
   G.g_camera_free = 0;
+  G.g_camera_mode = 0;
+  G.g_camera_hand_back_started = 0;
+  G.g_camera_hand_back_variant = 0;
+  G.g_camera_action_driver = 0;
   // Not in `ResetSceneOnEnter` — the engine's copy is only ever zeroed by the
   // wait that owns it. It is here because this is the port's "nothing is
   // half-done" call, and a seek that lands mid-`wait_enemies_alive` would

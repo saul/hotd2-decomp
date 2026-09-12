@@ -748,6 +748,19 @@ link says so rather than silently showing somewhere else.
 from cold, and compares the region, the streamed slots, the camera, the flags,
 **the live spawns** and the rest: 137 addresses, all exact.
 
+**A room-clear gate waits for the camera as well as the counter, and how long
+it waits is the camera's business.** `wait_enemies_alive` and its two siblings
+need `g_camera_free`, and `EvtActionFinishSequence21` installs one of two
+drivers to produce it, out of `g_camera_action_starters` by the scene-state
+minor a shot enters. 267 of the shipped scripts' 278 gates run under
+`CameraDriverSelectMode`, which holds the flag down until
+`CameraTurnOntoPathTarget` has eased the aim back onto the rail — 25 to 55
+frames a room on stage 1, scaled to how far the last enemy had pulled it. The
+other 5 run under `CameraDriverFromDeferredPose`, which frees the room as soon
+as the slot table empties. The player had that second rule on every shot, so
+every room handed over two frames after the last zombie died; `npm run
+handback` is what measures it.
+
 A replay also has to honour what a wait *leaves behind*, not only what it
 blocks on. `wait_enemies_alive` and `wait_enemies_present` open only when the
 counters fall, and the counters fall only when the actors die — so past one of

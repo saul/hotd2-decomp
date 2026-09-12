@@ -17557,3 +17557,77 @@ past, so it strikes regardless. Reproducing it needed the arrival the report
 shows: the owl below and to one side, and the beat seated in the half of its
 cycle whose height term is negative, so a frozen owl stalls *under* the camera
 rather than swinging through it.
+
+## The room was waiting for the camera, and the port had the other driver
+
+Reported as pacing: the camera snaps and the script moves on the instant a
+zombie dies, with the guess that the engine holds on until the corpse is in
+the ground. The guess is wrong and the instinct is right.
+
+**The corpse has nothing to do with it.** `ZombieReleasePermitAndUntrack`
+(`FUN_004565A0`) drops `g_enemies_alive` and takes the actor out of
+`g_enemy_slots` on the death frame, and it never touches `g_camera_free`.
+`g_enemies_present` is the counter that waits for the death clip, and only
+`wait_enemies_present` (0x43) reads it — 27 of the 278 room-clear gates.
+
+What holds the room is the camera, and **which rule holds it is a property of
+the shot**. `EvtActionFinishSequence21` (`FUN_00403710`) ends on
+`g_evt_action_handler = g_camera_action_starters[g_scene_state_minor]`, and
+the table at `0x00576B20` has three live cells: minors 4 and 6 install
+`CameraDriverSelectMode` (`FUN_00402650`), minor 7 installs
+`CameraDriverFromDeferredPose` (`FUN_00402E00`), and minor 3 — which is what
+every `goto_scene_state` in the game enters — is null, which is the engine
+parking the slot on a bare `RET`.
+
+`CameraDriverSelectMode` is a mode machine, not a driver:
+
+```c
+busy = any of the first four g_enemy_slots occupied;
+if (g_camera_hand_back_variant >= 0)
+    g_camera_mode = (g_enemies_alive == 0 && !busy) ? 2 : 3;
+if (g_camera_mode != 2) { g_camera_free = 0; g_camera_hand_back_started = 0; }
+g_camera_mode_hooks[g_camera_mode]();
+```
+
+Mode 2 is only the permission to start turning. `CameraTurnOntoPathTarget`
+(`FUN_00402740`) then eases the aim onto the path's own target at the untracked
+rate of 12 and raises `g_camera_free` on the frame `|cos²|` passes 0.99999.
+Measured with the port's own ease that is 41 frames from five degrees off the
+rail and 77 from ninety; measured on stage 1's block 1 with the real script and
+the real path it is 25 to 55 frames a room.
+
+**The port had the minor-7 rule on every shot.** Three measurements sized it:
+572 of the 836 `finish_sequence` sites install the mode machine against 264 for
+the deferred-pose driver; 267 of the 278 room-clear gates wait under it; and
+every one of those 278 gates has operand 0.
+
+That last number is what settles an argument the old code had written into a
+`[diverges]`: *"ANDing the counter and the convergence is stronger than either
+driver and holds a room-clear gate for ever whenever anything is still alive."*
+With every gate at operand 0 the gate's own test and the selector's `== 0` are
+the same test, so the conjunction cannot deadlock. The other half of that note
+said *"every enemy death site frees the flag outright"* and cited `0x0048042C`
+and `0x00428B44`; both are real and neither is on class 0x30's path. A
+generalisation from two special cases, and it survived because nothing measured
+the pacing.
+
+Three smaller things came out of the same reading and are worth recording
+because each was a conflation the notes carried:
+
+* `g_camera_update_hook` (0x009C7080) and `g_evt_action_handler` (0x009A610C)
+  are **two hooks**. The scene-state table at `0x00576C14` — `major * 9 +
+  minor`, which is `EvtEnterSceneState`'s own arithmetic — installs the first;
+  `g_camera_action_starters` installs the second. The earlier note had
+  `DAT_00576B20` indexed by the scene-state minor, which is right, and
+  described it as the scene-state table, which is not.
+* `CameraDriverFromDeferredPose` is not "the" camera driver with a free-flag
+  rule the port could reuse everywhere; it is one of two alternatives.
+* `g_camera_hand_back_variant` (0x009C6F2E) is written exactly once, to 0, by
+  `CameraResetForPathShot` (`FUN_004031E0`). That is what makes the `rate = 0`
+  snap at `0x00402A12` dead code — the note about it was right, and this is the
+  routine it was missing.
+
+`tools/handback.mjs` is the check, and it exists because nothing else could
+have caught this: every other camera check asks whether a gate opens, and this
+one asks how long it takes. With the old rule it reports every room handing
+back in two frames whatever the camera was doing, which is the report.

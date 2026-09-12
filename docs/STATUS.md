@@ -19,36 +19,36 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 43727 | 161 | engine |
+| `game/` | 44153 | 162 | engine |
 | `hod2lib/` | 16050 | 34 | engine |
 | `render/` | 8858 | 31 | render |
 | `app/` | 7427 | 29 | app |
-| `script/` | 4308 | 25 | engine |
+| `script/` | 4324 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
 | `bundle/` | 2153 | 11 | engine |
 | `core/` | 910 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **87266** | **328** | |
+| **total** | **87708** | **329** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
 * `app/main.ts` — 1988
 * `game/actor.ts` — 1964
-* `script/walker.ts` — 1868
+* `script/walker.ts` — 1873
 * `hod2lib/exetab.ts` — 1839
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **163 of 267** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 158 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 321 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **166 of 269** annotated functions in the gameplay address ranges have a port (61%) |
+| Ported outside those ranges | 159 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 325 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **19 of 42** read classes have a module, covering 1395 of 1620 placements |
-| Declared `[diverges]` | **179** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **170** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **180** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **171** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 893 in `ghidra/annotations/functions.tsv` |
-| Named globals | 397 in `ghidra/annotations/globals.tsv` |
+| Named functions | 899 in `ghidra/annotations/functions.tsv` |
+| Named globals | 403 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 36 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
@@ -114,6 +114,7 @@ nothing exits 3 and is never counted as green.
 | `loops` | that the looping sound effects reach an <audio> element, wrap rather than running out, and are still there when the stage is reached by a deep link -- the only check in the tree that measures the mixer rather than the intent | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
+| `handback` | that a room waits for the camera to turn back onto its rail after the last enemy dies and not merely for the counter -- the only check that measures the *pacing* of a room-clear gate rather than whether it opens at all, and the one that separates the two drivers a `finish_sequence` can install | bundle |
 | `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
 | `verify_prop_slots` | that every asset slot a placed class-0x41 or class-0x44 prop will pass to `AssetDrawSlot` has a model in its own bundle -- the check that would have caught stage 3's roller shutter and the stage 5 van's body, both of which were placed, updated and invisible because nothing carried their geometry, which from the level looks exactly like a placement that was never exported | bundle |
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
@@ -132,7 +133,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-13 of them need the installed game and 11 need an exported
+13 of them need the installed game and 12 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

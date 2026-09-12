@@ -153,15 +153,13 @@ const TURN_NUMERATOR = 1;
 const _eased = vec3();
 
 export function CameraTrackEnemiesTick(): void {
-  // `FUN_004022B0` clears `g_camera_settled` at the top of the camera actor
-  // every frame and the convergence test below raises it again — it is a
-  // *this frame* answer, not a latch. The port only ever raised it, so once
-  // the aim had converged one time it stayed converged for the rest of the
-  // stage and everything gated on it was permanently open. The engine's clear
-  // lives one function earlier than this; the order within the frame is the
-  // same. [diverges]
-  G.g_camera_settled = 0;
-
+  // `g_camera_settled` is cleared by `CameraActorTick` (`FUN_004022B0`) and
+  // raised again by the convergence test below — it is a *this frame* answer,
+  // not a latch. The clear used to be the first line of this function, which
+  // held while this was the only camera routine the port ran and became a bug
+  // the moment `CameraDispatchHandBack` could run instead of it: a latched
+  // `g_camera_settled` opens every `wait_targets_clear` for the rest of the
+  // stage. It is in the engine's own routine now.
   SelectCameraLookAtTarget();
 
   const eye = G.g_camera_block_eye;
@@ -201,39 +199,32 @@ export function CameraTrackEnemiesTick(): void {
 }
 
 /**
- * `g_camera_free` — `CameraDriverFromDeferredPose` (`FUN_00402E00`).
+ * `CameraDriverFromDeferredPose` — `FUN_00402E00`. **The other driver**, and
+ * the one a scene-state minor of 7 installs.
  *
  *     g_camera_free = 1;
  *     for (p = &g_enemy_slots; p < 0x009A5EE0; p += 8)
  *         if (*p != 0) { g_camera_free = 0; break; }
+ *     memcpy(&g_camera_block_eye, 0x009C70C0, 24);
+ *     memcpy(&g_camera_block_target, &g_cam_path_target, 24);
+ *     g_cam_path_frame = __ftol([0x009C70BC]);
  *
  * Four slots, stride 8, and the flag is the *occupied* byte of each — nothing
  * else. `g_enemy_slots` here holds only the claimed slots, so the walk is a
  * length test.
  *
- * The room-clear waits `0x43`, `0x44` and `0x46` all require this on top of
- * their counter, so a room does not hand over while an enemy still holds the
- * camera.
+ * **It has no turn back onto the rail and no counter test**: it copies the
+ * deferred pose block into the camera block whole and frees the room on the
+ * frame the last enemy leaves the slot table. That is why it is the wrong rule
+ * to apply to every shot, which is what this function used to do — see
+ * `camera/mode.ts`. Minor 7 is 264 of the 836 `finish_sequence` sites and 5 of
+ * the 278 room-clear gates.
  *
- * **Two things this deliberately does not do**, both of which an earlier cut
- * of this function got wrong and which parked the script:
- *
- * - It does not require `g_enemies_alive == 0`, and it does not require the
- *   aim to have converged. Those belong to `FUN_00402650`, the *other*
- *   per-frame camera driver — the two are alternatives selected by the
- *   `finish_sequence` minor (`DAT_00576B20[minor]`: 4 and 6 install
- *   `FUN_00402650`, 7 installs this one), not a pair that both run. ANDing all
- *   three terms is stronger than either driver and holds a room-clear gate for
- *   ever whenever anything is still alive. This port models the driver it can
- *   represent. [diverges]
- * - It does not wait out the swing back onto the rail. The engine explicitly
- *   refuses to: every enemy death site frees the actor's slot and then forces
- *   this flag straight to 1 (`0x00480416` then `0x0048042C`; `0x00428B44`
- *   right after `g_enemies_present--`), so the gate opens on the death frame.
- *   Here the slot list is rebuilt from the live actors every frame, so a dead
- *   enemy leaves it on its own and the flag rises the same way — one frame
- *   later than the engine's explicit store. [diverges]
+ * The two `memcpy`s and the frame store are not modelled: the port's camera
+ * block is seated from the playing path by the host every frame, which is the
+ * same call it makes about `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`)
+ * above. What is left is the flag. [diverges]
  */
-export function UpdateCameraFreeFlag(): void {
+export function CameraDriverFromDeferredPose(): void {
   G.g_camera_free = G.g_enemy_slots.length === 0 ? 1 : 0;
 }

@@ -144,6 +144,13 @@ CHECKS: list[Check] = [
           "made up, which is what every other owl check does and why none of "
           "them could see a run-in parked five units under the eye",
           NEEDS_BUNDLE),
+    Check("handback", "web", ["npm", "run", "--silent", "handback"],
+          "that a room waits for the camera to turn back onto its rail after "
+          "the last enemy dies and not merely for the counter -- the only "
+          "check that measures the *pacing* of a room-clear gate rather than "
+          "whether it opens at all, and the one that separates the two "
+          "drivers a `finish_sequence` can install",
+          NEEDS_BUNDLE),
     Check("props43", "web", ["npm", "run", "--silent", "props43"],
           "where in a real script a class-0x41 prop is actually placed, and "
           "that it takes a frame of `GameUpdate` to appear -- the only check "

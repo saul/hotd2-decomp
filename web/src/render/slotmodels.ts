@@ -96,6 +96,11 @@ function DrawSlotFor(a: Actor): number | null {
       // also draws a **flattened silhouette** on the water when the fish is
       // below it and `sub+0x6A` bit 2 is set; that second draw is not here.
       return a.fish.frame || null;
+    case SpawnClass.ScriptedProp:
+      // `obj+0x1F4`, straight off the descriptor tail. One slot, drawn under
+      // `Translate; RotX; RotZ; RotY` and an optional uniform scale --
+      // `ScriptedPropUpdate13` (`FUN_0043FE90`).
+      return a.prop13.slot || null;
     case SpawnClass.ScriptedScenery:
       // `obj+0x13F0`, which `ScriptedPushableUpdate33` (`FUN_00433B70`) seeds
       // from its descriptor tail and never changes. Selector 1's draw is a
@@ -137,6 +142,11 @@ function DrawSlotFor(a: Actor): number | null {
  */
 function DrawScaleFor(a: Actor): number {
   switch (a.cls) {
+    case SpawnClass.ScriptedProp:
+      // `MatrixScale(s, s, s)` at `0x0043FF1E`, and only when the descriptor's
+      // `tail+0x0C` is not 1.0 -- the engine skips the call outright
+      // otherwise. Stage 2's block 16 prop is the one that is not: 2.5.
+      return a.prop13.scale || 1;
     case SpawnClass.WaterEnemy:
       // `MatrixScale(0.3, 0.3, 0.3)` at `0x00439AC9`, and again at
       // `0x00439CF8` in `FishSwimAwayTick` (`FUN_00439C20`). A fish drawn at
@@ -343,6 +353,16 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "ZYX");
+      } else if (a.cls === SpawnClass.ScriptedProp) {
+        // `ScriptedPropUpdate13` (`FUN_0043FE90`) is
+        // `MatrixTranslate(obj+0x40)` then `RotX(obj+0x64)`, `RotZ(obj+0x6C)`,
+        // `RotY(obj+0x68)` at `0x0043FEE3`..`0x0043FEF9` — the product is
+        // `Rx · Rz · Ry`, a three.js `Euler` in `"XZY"`. Three arms now, three
+        // different orders, and each is its own routine's.
+        live.node.visible = true;
+        live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
+        live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
+                               a.roll * BAMS_TO_RAD, "XZY");
       } else if (a.cls === SpawnClass.FlyingEnemy) {
         // `MatrixTranslate(pos)` then `RotY(obj+0x68) RotZ(obj+0x6C)
         // RotX(obj+0x64)` at `0x00447C49`..`0x00447C64` — the product is

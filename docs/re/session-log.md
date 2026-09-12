@@ -17787,3 +17787,75 @@ must run **before** the export, not after. Regenerating it afterwards stamps
 every bundle with the old hash and the player refuses all twelve of them at
 load — which presents as `#loading` never leaving, and as one browser check
 timing out while the other forty-two pass.
+
+## Stage 3's boat, the civilian on it and the three riding it
+
+Reported as a boat and a civilian that never arrive at stage 3 block 0 step 6.
+Two classes, neither ported, and the second of them is barely a class at all.
+
+**Class 0x13** is a script-driven prop. `ScriptedPropInit13` (`FUN_0043FE10`)
+fills a 0x1C-byte block from the opcode-0x0C descriptor tail — the draw slot,
+a camera path and frame that despawn it, a uniform scale, an index into
+`g_prop_behaviours` (`0x005926A8`) and the behaviour's own operand block — and
+then **calls the behaviour once**, which is how entry 8 gets to install a
+routine before the first update runs. `CarrierPropSelectRoutine`
+(`FUN_00440190`) is that entry: it sets `g_civilian_carrier` and overwrites
+its own slot with one of seven routines.
+
+Stage 3's boat is selector 1, `CarrierPropRoutine1` (`FUN_004403D0`): eight
+states riding `op_` object paths 350 and 351, both of which the bundle already
+carried. The one thing it asks the rest of the scene is at path frame `0x500`,
+where `(g_civilians_alive != 0) ? 2 : 4` — the `NEG`/`SBB` pair at
+`0x00440458` — decides whether it pulls up and moors or runs past.
+
+**Class 0x18 is a class-0x30 zombie in a carrier's frame.**
+`CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` plus
+`obj+0x13B0 = g_civilian_carrier`, and `CarriedZombieUpdate18` pushes
+`Translate; RotX; RotZ; RotY` off the carrier around the whole ordinary
+update. `CivilianUpdateOnCarrier` (`FUN_0048B140`) is the same four calls
+around `CivilianUpdate`, and `CivilianInit` installs it for the seven civilians
+whose `obj+0x11C` is non-zero — which is how the passenger gets on the boat.
+One `game/carrier.ts` serves both.
+
+Three things this cost, and each is the kind that is invisible until it is not.
+
+**The path frame's `INC` is shared.** `0x00440467` sits immediately above the
+routine's tail, and every arm of states 0, 1, 2 and 4 jumps *to* it while
+states 3, 5 and 6 jump *past* it to `0x00440469`. Read as though the increment
+belonged to state 1 alone, the boat rode in and then stopped dead one frame
+into its mooring approach. The states that hold their frame and the states that
+advance it are a property of where the jumps land, not of what the states do.
+
+**Class 0x18 needed a `CHAR_TYPE_RULES` row and the class-0x30 tail bytes.**
+Without the first its three spawns resolved to no skeleton and never became
+placements; without the second they started in state 0, which is `NoOp`, fell
+through to `AttackRun` and walked off the boat into the canal — in carrier
+space, so they marched away from a camera they were measuring in world space.
+The descriptor says state 35, and at 35 they stand where they are put. A class
+that *is* another class has to say so in both tables, not one.
+
+**The port has no matrix stack in `game/`, and that is the seam.** The engine
+pushes the carrier's transform around the rider's whole update, so the state
+machine writes carrier-relative positions and the draw inherits the matrix.
+The port runs the state machine on the same relative position, which is
+faithful, and publishes the composed world point on the actor for `render/`
+and the camera to read. That is `[port-only]` and declared; approximating it by
+baking the world position into `obj+0x40` would have put the rider in the right
+place and the state machine in the wrong frame.
+
+Left `[open]`: the wake strip and the bow splash, which are draw-side objects
+with no state a gate can see; the on-screen test `FUN_004459C0` that state 6
+despawns on, which is a projection against the viewport the port cannot answer
+headlessly and does not need, because the descriptor's own camera cue removes
+the boat anyway; and the six other `CarrierPropSelectRoutine` selectors and
+eight other `g_prop_behaviours` entries, none of which stage 3 reaches.
+
+**The water gate is not in this.** Hunting it ruled out a great deal and found
+nothing: stage 3 has no hinges and correctly so, its class-0x44 selectors are
+9, 10, 11, 14, 15 and 17 rather than the 1, 2 and 4 that are hinges; the one
+`rising_door` it does have is built, positioned and rising on script flag 6,
+which a harness confirmed; `PropBuildKindedProp` returns without building for
+scene 2 block 1 outside Original Mode; and no node in the stage geometry is
+named for water or a gate. What is left unexamined in stage 3 is class 0x26,
+eight spawns of the camera's own boat, and class 0x45, thirty-two spawns that
+have never been read.

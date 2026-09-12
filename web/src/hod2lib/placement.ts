@@ -376,6 +376,10 @@ export class Placement {
    */
   class20: Record<string, unknown> | null = null;
   /** Class 0x11's tail -- the frog's cue, wedge and command list. */
+  /** Class 0x13's tail -- the prop's draw slot, despawn cue and behaviour. */
+  class13: Record<string, unknown> | null = null;
+  /** Class 0x18's three -- the state it leaves from and the camera cue. */
+  class18: Record<string, unknown> | null = null;
   class11: Record<string, unknown> | null = null;
   /** Class 0x43's two bytes -- the owl's member index and sub-type. */
   class43: Record<string, unknown> | null = null;
@@ -485,6 +489,8 @@ export class Placement {
     }
     if (this.intro) d.intro = { motion: this.intro[0], delay: this.intro[1] };
     if (this.class20) d.class20 = this.class20;
+    if (this.class13) d.class13 = this.class13;
+    if (this.class18) d.class18 = this.class18;
     if (this.class11) d.class11 = this.class11;
     if (this.class43) d.class43 = this.class43;
     if (this.class46) d.class46 = this.class46;

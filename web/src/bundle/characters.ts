@@ -413,6 +413,26 @@ export interface CharacterPlacement {
    * `member` is `desc+0x22 - 1`, 0 to 3, and picks the launch delay, the
    * retreat climb and the approach spline's row.
    */
+  /**
+   * Class 0x13's tail — a script-driven prop, one asset slot under a matrix.
+   *
+   * `slot` is what `AssetDrawSlot` is given, `cam_path`/`cam_frame` are the
+   * pair that despawns it, `scale` is applied only when it is not 1.0, and
+   * `behaviour` indexes `g_prop_behaviours` (`0x005926A8`). `selector` is the
+   * first dword of the behaviour's operand block and means something only for
+   * behaviour 8, `CarrierPropSelectRoutine`.
+   */
+  class13?: {
+    slot: number; cam_path: number; cam_frame: number;
+    scale: number; behaviour: number; selector: number;
+  } | null;
+  /**
+   * Class 0x18's three — the class-0x30 state a rider leaves the carrier from,
+   * and the camera path and frame that let it. See `game/class18/`.
+   */
+  class18?: {
+    from_state: number; cue_path: number; cue_frame: number;
+  } | null;
   class43?: { subtype: number; member: number } | null;
   /**
    * Class 0x46's three descriptor bytes — the bat, and the whole descriptor.

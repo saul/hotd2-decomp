@@ -291,6 +291,11 @@ export function registerClass(cls: SpawnClass, handler: ClassHandler): void {
 export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   SpawnClass.Zombie, SpawnClass.Thrower, SpawnClass.FlyingEnemy,
   SpawnClass.WaterEnemy, SpawnClass.Frog, SpawnClass.Bat,
+  // Class 0x18 counts because `CarriedZombieInit18` (`FUN_0045CD60`) opens on
+  // `EnemyZombieInit`, which does both `INC`s. Leaving it out held stage 3's
+  // first `wait_enemies_alive` open for the rest of the stage: the three
+  // riders were in `g_enemies_alive` and nothing would retire them.
+  SpawnClass.CarriedZombie,
 ]);
 
 /** Whether this actor is one the enemy counters count. */

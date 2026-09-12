@@ -33,6 +33,10 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   // `obj+0x120` and `obj+0x121` are both 0xFF: a civilian holds neither a
   // general slot nor an attack permit, whatever `RegisterEnemySlot` hands it.
   obj.attackPermit = -1;
+  // `if (obj+0x11C != 0) { civ->+0x68 = g_civilian_carrier;
+  //   obj[0] = CivilianUpdateOnCarrier; }` at `0x0048A747`-`0x0048A75E`.
+  // Seven of the game's 47 civilians ride something; this one does.
+  if (obj.hp !== 0) obj.carrierAt = G.g_civilian_carrier;
   sub.turnRate = DEFAULT_TURN_RATE;
   // `obj+0x124 = g_actor_radius_by_char[type]`, `obj+0x128 = 1.0`. The first
   // is the shot sphere and is ten units for every civilian; the second is the

@@ -39,6 +39,9 @@ import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
+import { ScriptedPropUpdate13 } from "../src/game/class13";
+import { CarrierState, type ScriptedPropTail } from "../src/game/class13/state";
+import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
 import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
@@ -9489,6 +9492,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Boss2, "0x14 stage-2 boss"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
+    [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
+    [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -14646,6 +14651,91 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     BatUpdate(wing!, frame(rng));
     check("...and despawns the frame its body's slot goes empty",
           wing!.despawned, `${wing!.despawned}`);
+  }
+
+  // -- class 0x13, the prop that carries, and class 0x18, what rides it -----
+  {
+    // Stage 3's block 0 step 6 in miniature: a boat on object path 351 with a
+    // zombie standing on it. The engine's carrier is a matrix pushed around
+    // the rider's whole update, so the rider's own position is **relative**
+    // and the world point is composed; that is the part a renderer needs and
+    // the part a test can pin down.
+    const rng = new Rng(53);
+    scene(0, rng);
+    G.g_civilians_alive = 1;
+    // A host with one straight object path, so the ride is arithmetic rather
+    // than a bundle read.
+    const host: GameHost = {
+      ...HOST,
+      objectPath: (slot, frame) =>
+        slot === 0x15f ? { x: frame, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 }
+                       : { x: 0, y: 0, z: frame, pitch: 0, yaw: 0, roll: 0 },
+    };
+    const fr = (r: Rng): ClassFrame =>
+      ({ eye: EYE, dt: 1 / 60, rng: r, host });
+
+    G.g_cam_path_frame = 1000;
+    const boat = ActorSpawn(0x9b00, SpawnClass.ScriptedProp, -1, "boat", {
+      class13: { slot: 6711, cam_path: 130, cam_frame: 170,
+                 scale: 1, behaviour: 8, selector: 1 },
+    }, rng);
+    const t = () => (boat as { prop13: ScriptedPropTail }).prop13;
+    check("a class-0x13 prop takes its slot and its despawn cue off the tail",
+          t().slot === 6711 && t().camPath === 130 && t().camFrame === 170,
+          `${t().slot} ${t().camPath} ${t().camFrame}`);
+    check("...and behaviour 8 makes it the carrier",
+          G.g_civilian_carrier === boat.at,
+          `${G.g_civilian_carrier.toString(16)}`);
+
+    // The rider, placed after the carrier the way the script places it.
+    const rider = ActorSpawn(0x9b01, SpawnClass.CarriedZombie, 5, "rider", {
+      pos: vec3(5, -6, -14),
+      class18: { from_state: 48, cue_path: 124, cue_frame: 1080 },
+    }, rng);
+    check("a class-0x18 rider takes the carrier that was current",
+          rider.carrierAt === boat.at, `${rider.carrierAt.toString(16)}`);
+
+    // One frame of each: the boat seats itself on the path, the rider
+    // publishes where the boat's matrix puts it.
+    ScriptedPropUpdate13(boat, fr(rng));
+    CarriedZombieUpdate18(rider, fr(rng));
+    check("the carrier rides its object path from the camera's frame",
+          Math.abs(boat.pos.x - 1000) < 1e-6, `${boat.pos.x}`);
+    check("...and the rider's world point is the carrier's own transform of "
+          + "its local one",
+          Math.abs(rider.carrierWorld.x - (boat.pos.x + 5)) < 1e-6
+          && Math.abs(rider.carrierWorld.z - (boat.pos.z - 14)) < 1e-6,
+          `${rider.carrierWorld.x},${rider.carrierWorld.z}`);
+
+    // The fork at path frame 0x500 is the class's one dependence on the rest
+    // of the scene. With a civilian alive it moors; with none it runs past.
+    t().pathFrame = 0x500;
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("a carrier with a civilian still alive pulls up at 0x500",
+          t().state === CarrierState.PullUp, CarrierState[t().state]);
+
+    G.g_civilians_alive = 0;
+    t().state = CarrierState.RunIn;
+    t().pathFrame = 0x500;
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("...and one with none of them runs past instead",
+          t().state === CarrierState.RunPast, CarrierState[t().state]);
+
+    // Only the three riding states advance the path frame: `0x00440467` is
+    // the `INC` every one of their arms jumps to, and states 3, 5 and 6 jump
+    // past it.
+    t().state = CarrierState.Moored;
+    const before = t().pathFrame;
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("a moored carrier holds its path frame", t().pathFrame === before,
+          `${before} -> ${t().pathFrame}`);
+
+    // The despawn is the descriptor's own camera cue, and it is an equality
+    // on both halves.
+    G.g_active_cam_path = 130;
+    G.g_cam_path_frame = 170;
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("the camera cue on the tail is what removes it", boat.despawned);
   }
 }
 

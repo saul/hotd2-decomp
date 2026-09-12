@@ -60,6 +60,11 @@ export const CHAR_TYPE_RULES: Record<number, CharTypeRule> = {
   0x30: ["tail", 0x00, "i8"],    // the zombie
   0x31: ["tail", 0x00, "i8"],    // humanoid enemy, subtypes 0x16-0x19
   0x32: ["tail", 0x00, "i8"],    // enemy, per-instance asset
+  // `CarriedZombieInit18` (`FUN_0045CD60`) opens on `EnemyZombieInit`, so a
+  // class-0x18 spawn is a class-0x30 zombie in every respect that reaches the
+  // character layer -- same tail, same first byte. All three carry 5,
+  // `znnick.bin`, which stage 3 already loads for its ordinary zombies.
+  0x18: ["tail", 0x00, "i8"],    // the zombie that rides a carrier
   // `PlaceBats` (`FUN_0042D9C0`) writes `obj+0x1F4 = 0x1E` as a literal on
   // every member of every flight -- `zabat.bin`, one node, asset slot
   // `0x1B01`. The descriptor's own `+0x24` is the flight GROUP here and not a

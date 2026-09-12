@@ -79,6 +79,8 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // class 0x20's is: `tail+0x00` is class 0x30's body condition, and a
     // shared field would have one class read the other's.
     class11: p?.class11 ?? null,
+    class13: p?.class13 ?? null,
+    class18: p?.class18 ?? null,
     class43: p?.class43 ?? null,
     // Class 0x46's, and it is the whole descriptor: sub-type, flight group
     // and member index. `tail+0x00` is class 0x30's body condition again.

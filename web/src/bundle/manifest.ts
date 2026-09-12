@@ -56,7 +56,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 8;
+export const SUPPORTED_FORMAT = 9;
 
 /**
  * The exporter's digest of the declarations in this directory.

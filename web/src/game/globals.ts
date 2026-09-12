@@ -834,6 +834,18 @@ export const G = {
    * `class30/entrance.ts`.
    */
   g_carrier_object: -1,
+  /**
+   * `g_civilian_carrier` — 0x009A2C88. The object a **carried actor** rides,
+   * and a different global from {@link g_carrier_object} above.
+   *
+   * `CarrierPropSelectRoutine` (`FUN_00440190`) writes it at `0x004401A0`
+   * when a class-0x13 prop installs its routine, and `Class26Subtype2Update`
+   * (`FUN_0048EAD0`) writes it too. `CarriedZombieInit18` (`FUN_0045CD60`)
+   * copies it into `obj+0x13B0` at spawn and never reads it again, so it is
+   * the carrier that was current on the frame the rider was placed — which is
+   * why the script spawns a boat and its passengers in the same instruction.
+   */
+  g_civilian_carrier: -1,
 
   /**
    * `g_hit_slots` — `0x009C88C0`. Fourteen entries, an actor's `at` or `-1`.
@@ -1349,6 +1361,7 @@ export function ResetGameGlobals(): void {
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
   G.g_carrier_object = -1;
+  G.g_civilian_carrier = -1;
   // `LoadSceneAndReset` zeroes the counter at `0x00460030`, and
   // `ResetSceneCombatState` does it again at `0x0045EF1E`. The slot table is
   // `ResetSceneOnEnter`'s and is cleared there.

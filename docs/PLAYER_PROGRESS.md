@@ -748,6 +748,19 @@ link says so rather than silently showing somewhere else.
 from cold, and compares the region, the streamed slots, the camera, the flags,
 **the live spawns** and the rest: 137 addresses, all exact.
 
+**Stage 3's boat carries its passengers, and the carrier is a matrix.** Class
+0x13 is a script-driven prop — one asset slot, a behaviour out of a ten-entry
+table, and a camera cue that removes it — and the eighteen spawns that take
+behaviour 8 install a routine that makes the object a *carrier*. Stage 3's
+block 0 boat is selector 1: it rides two object paths and forks on whether a
+civilian is still alive, mooring if one is and running past if none is. Class
+0x18 is an ordinary class-0x30 zombie whose descriptor position is relative to
+that boat, and the seven civilians whose `obj+0x11C` is non-zero ride the same
+way. The engine pushes the carrier's transform around the whole update; the
+port runs the state machine on the same relative position and publishes the
+composed world point for the renderer, which is the one thing a port with no
+matrix stack in `game/` has to add.
+
 **A room-clear gate waits for the camera as well as the counter, and how long
 it waits is the camera's business.** `wait_enemies_alive` and its two siblings
 need `g_camera_free`, and `EvtActionFinishSequence21` installs one of two

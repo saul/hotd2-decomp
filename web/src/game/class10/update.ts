@@ -8,6 +8,7 @@
  */
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { CamPathCueReached } from "../camera/path";
+import { CarrierPublishWorld } from "../carrier";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
 import type { ClassFrame } from "../registry";
@@ -32,6 +33,14 @@ import { CivilianStepTurnToTarget } from "./turn";
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
   if (!sub) return;
+  // `CivilianUpdateOnCarrier` (`FUN_0048B140`) is this routine with the
+  // carrier's matrix pushed around it. The push is `game/carrier.ts`'s and
+  // the world point it produces is published for the renderer; everything
+  // below runs on the carrier-relative position, which is where the engine's
+  // matrix stack leaves it too.
+  if (obj.carrierAt >= 0) {
+    CarrierPublishWorld(obj, ActorByAt(obj.carrierAt));
+  }
   const frames = SecondsToTicks(f.dt);
 
   CivilianPruneDeadChildren(obj);

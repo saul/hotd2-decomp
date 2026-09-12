@@ -270,6 +270,20 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
     // Class 0x43 -- the owl. Its handler is a placer that builds a 0x2A0-byte
     // object with no character type, so nothing in the character path can make
     // one either.
+    // Class 0x13 -- a script-driven prop. No character type and no skeleton:
+    // one asset slot under a matrix, so it comes through here rather than
+    // through `render/characters.ts`.
+    if (s.class === SpawnClassValue.ScriptedProp) {
+      if (!pl.class13) continue;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
+                           { class13: pl.class13, yaw: pl.yaw ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      continue;
+    }
     if (s.class === SpawnClassValue.FlyingEnemy) {
       if (!pl.class43) continue;
       G.g_slot_actors_built.push(s.at);

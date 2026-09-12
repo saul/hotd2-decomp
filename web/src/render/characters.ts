@@ -468,8 +468,21 @@ export class CharacterLayer implements System {
       // The director owns position and facing; apply what it decided. The
       // exporter baked the spawn pose into the root, and this replaces it
       // with the live one rather than composing onto it.
-      inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
-      inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+      // **A rider is drawn where its carrier's matrix puts it.**
+      // `CarriedZombieUpdate18` (`FUN_0045CD90`) and `CivilianUpdateOnCarrier`
+      // (`FUN_0048B140`) push the carrier's transform around their whole
+      // update, so the actor's own position is carrier-relative and the draw
+      // inherits the matrix. The port composes the point in `game/carrier.ts`
+      // and publishes it; this reads it.
+      if (inst.a.carrierAt >= 0) {
+        inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
+                               inst.a.carrierWorld.z);
+        inst.root.rotation.set(
+          0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
+      } else {
+        inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
+        inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+      }
       // The clocks belong to the port -- `ActorAdvanceMotion` -- so the game
       // can be run with no renderer at all, and so a swing keeps its play
       // position across a save state. This only reads them.
@@ -1014,8 +1027,15 @@ export class CharacterLayer implements System {
       inst.veto = undefined;
       this.applyBoneVeto(inst);
       inst.root.visible = this.enabled && inst.a.visible;
-      inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
-      inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+      if (inst.a.carrierAt >= 0) {
+        inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
+                               inst.a.carrierWorld.z);
+        inst.root.rotation.set(
+          0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
+      } else {
+        inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
+        inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+      }
       this.poser.pose(inst);
     }
   }

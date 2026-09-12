@@ -82,6 +82,18 @@ export enum SpawnClass {
   /** `EnemyThrowerInit` (`FUN_00449620`) — humanoid enemy, four subtypes. Ported. */
   Thrower = 0x31,
   /** `FUN_00432FF0` — generic scripted scenery, eleven sub-handlers. */
+  /**
+   * `ScriptedPropInit13` (`FUN_0043FE10`) — a script-driven prop: one asset
+   * slot under a matrix, with a behaviour out of `g_prop_behaviours`. Stage
+   * 3's arriving boat is one. See `game/class13/`.
+   */
+  ScriptedProp = 0x13,
+  /**
+   * `CarriedZombieInit18` (`FUN_0045CD60`) — a class-0x30 zombie whose whole
+   * update runs inside a carrier's matrix, so its descriptor position is
+   * relative to the carrier. Three spawns, all on stage 3's boat.
+   */
+  CarriedZombie = 0x18,
   ScriptedScenery = 0x33,
   /** `FUN_0043BD30` — horde spawner. */
   HordeSpawner = 0x40,

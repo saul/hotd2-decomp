@@ -109,7 +109,7 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * so `spawnres` can never identify one and the placement has to survive that
  * anyway. See the note in `resolveForStage`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x33, 0x43, 0x51, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x33, 0x43, 0x51, 0x52]);
 
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
@@ -175,6 +175,65 @@ export function class52Tail(rec: Spawn): Record<string, unknown> {
  * records reuse indices 0 and 1, which the port copies rather than tidies --
  * see `game/class43/`.
  */
+/**
+ * Class 0x13's descriptor tail — the whole of what `ScriptedPropInit13`
+ * (`FUN_0043FE10`) reads before it hands the object to a behaviour.
+ *
+ * The class has no character type and no skeleton: it is one asset slot drawn
+ * under a matrix, so the bundle carries the tail and nothing else.
+ *
+ * ```
+ * +0x00 u16  the draw slot, into obj+0x1F4
+ * +0x04 u32  a pointer or -1, into obj+0x14C; no ported behaviour reads it
+ * +0x08 u16  the camera path that despawns it
+ * +0x0A u16  ...and the frame on that path
+ * +0x0C f32  a uniform scale, applied only when it is not 1.0
+ * +0x10 u32  an index into g_prop_behaviours (0x005926A8)
+ * +0x14 ...  the behaviour's own operand block. For behaviour 8,
+ *            `CarrierPropSelectRoutine`, the first dword is the routine.
+ * ```
+ *
+ * `selector` is emitted for every spawn and is meaningless unless `behaviour`
+ * is 8 — five of the game's 23 spawns take behaviour 0, `NoOpStub`, and are
+ * static props whose `+0x14` is `-1`.
+ */
+/**
+ * Class 0x18's three numbers, and they are all read out of the class-0x30
+ * parameter tail it shares.
+ *
+ * `CarriedZombieUpdate18` (`FUN_0045CD90`) tests
+ * `obj+0x1310 == (s8)tail[3] && obj+0x1312 == 0 && tail+0x0C != -1 &&
+ * g_cam_path_frame >= tail+0x0E && g_active_cam_path == tail+0x0C`, so the
+ * byte is the state it leaves *from* and the two words are the camera cue that
+ * lets it. All three shipped spawns carry state 48 on path 124 frame 1080,
+ * which is the shot stage 3's block 0 step 6 is playing.
+ *
+ * Separate from class 0x30's `camera_cue` on purpose: that one is gated on the
+ * spawn being a captor, because read blind those bytes are mantissa 330 times
+ * out of 333. This class reads them on every spawn and guards with the `-1`.
+ */
+export function class18Tail(rec: Spawn): Record<string, unknown> {
+  const b = rec.evt?.raw;
+  const at = rec.offset + 0x24;
+  const s8 = (v: number | undefined) => ((v ?? 0) << 24) >> 24;
+  return {
+    from_state: b ? s8(b[at + 3]) : -1,
+    cue_path: rec.param(0x0c, "i16") ?? -1,
+    cue_frame: rec.param(0x0e, "i16") ?? -1,
+  };
+}
+
+export function class13Tail(rec: Spawn): Record<string, unknown> {
+  return {
+    slot: rec.param(0x00, "u16") ?? 0,
+    cam_path: rec.param(0x08, "u16") ?? -1,
+    cam_frame: rec.param(0x0a, "u16") ?? -1,
+    scale: rec.param(0x0c, "f32") ?? 1,
+    behaviour: rec.param(0x10, "u32") ?? 0,
+    selector: rec.param(0x14, "u32") ?? 0,
+  };
+}
+
 export function class43Tail(rec: Spawn): Record<string, unknown> {
   const b = rec.evt?.raw;
   const at = rec.offset + 0x24;
@@ -672,7 +731,13 @@ export async function resolveForStage(
     // carry one each. It is not a body condition, so it is emitted as
     // `initial_state` and `body_condition` stays 0: the same offset, named for
     // what the class using it uses it as.
-    const tail: [number, number, number] = (cls === 0x30 || cls === 0x31)
+    // Class 0x18 reads the same three bytes as class 0x30, because
+    // `CarriedZombieInit18` (`FUN_0045CD60`) **is** `EnemyZombieInit` with two
+    // lines after it. Without this row its three spawns start in state 0 and
+    // the zombie `NoOp` falls straight through to `AttackRun`, which walks
+    // them off the boat they are standing on.
+    const tail: [number, number, number] =
+      (cls === 0x30 || cls === 0x31 || cls === 0x18)
       ? [rec.param(1, "i8") || 0, rec.param(2, "i8") || 0,
          rec.param(3, "i8") || 0]
       : cls === 0x19 ? [0, rec.param(1, "u8") || 0, 0]
@@ -803,6 +868,8 @@ export async function resolveForStage(
         delayedLeap = { delay: rec.param(4, "i32") || 0, dest, gravity: g };
       }
     }
+    const class13 = cls === 0x13 ? class13Tail(rec) : null;
+    const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
@@ -897,6 +964,8 @@ export async function resolveForStage(
     p.cue = cue;
     p.leap_strike_frames = leapStrikeFrames;
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
+    p.class13 = class13;
+    p.class18 = class18;
     p.class20 = class20;
     p.class11 = class11;
     p.class43 = class43;

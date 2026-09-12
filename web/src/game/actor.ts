@@ -25,6 +25,7 @@ import { makeRescueTargetTail, type RescueTargetTail }
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
 import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
+import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
@@ -1284,6 +1285,30 @@ export interface ActorBase {
    */
   /** Class 0x11's descriptor tail — the frog's cue, wedge and command list. */
   class11: CharacterPlacement["class11"];
+  /** Class 0x13's descriptor tail — the prop's slot, despawn cue, behaviour. */
+  class13: CharacterPlacement["class13"];
+  /** Class 0x18's three — the rider's leave-state and its camera cue. */
+  class18: CharacterPlacement["class18"];
+  /**
+   * `obj+0x13B0` — the carrier this actor rides, by spawn address.
+   *
+   * `[diverges]` The engine keeps a pointer; an address is what survives a
+   * snapshot and is what every other cross-actor reference here uses. `-1`
+   * once the actor has stepped off, which is `CarriedZombieUpdate18` putting
+   * the plain zombie update back.
+   */
+  carrierAt: number;
+  /**
+   * Where the carrier's matrix puts this actor, in world space.
+   *
+   * `[port-only]` The engine has no such field: it pushes the carrier's matrix
+   * around the whole update, so the draw and the shot test inherit it. The
+   * port has no matrix stack in `game/`, so the composed point is published
+   * here for `render/` and the camera to read.
+   */
+  carrierWorld: Vec3;
+  /** The carrier's own yaw, so a rider's facing composes with it. */
+  carrierYaw: number;
   /** Class 0x43's two descriptor bytes — the owl's member index and sub-type. */
   class43: CharacterPlacement["class43"];
   /**
@@ -1751,6 +1776,10 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.SetPieceProp; prop: SetPiecePropTail })
   | (ActorBase & { cls: SpawnClass.Thrower; thr: ThrowerTail })
   | (ActorBase & { cls: SpawnClass.Zombie; zom: ZombieTail })
+  // Class 0x18 **is** a class-0x30 zombie -- `CarriedZombieInit18`
+  // (`FUN_0045CD60`) opens on `EnemyZombieInit` -- so it carries the same
+  // tail and every class-0x30 routine takes one without a cast.
+  | (ActorBase & { cls: SpawnClass.CarriedZombie; zom: ZombieTail })
   | (ActorBase & { cls: SpawnClass.OneHitTarget; tgt: OneHitTargetTail })
   | (ActorBase & { cls: SpawnClass.Boss2; boss2: Boss2Tail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
@@ -1758,6 +1787,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
   | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
+  | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
@@ -1767,6 +1797,7 @@ export type Actor =
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
       | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
+      | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
@@ -1890,6 +1921,11 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     standThrow: undefined,
     oneHitTarget: null,
     class11: null,
+    class13: null,
+    class18: null,
+    carrierAt: -1,
+    carrierWorld: vec3(),
+    carrierYaw: 0,
     class43: null,
     class46: null,
     class51: null,
@@ -1959,7 +1995,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   if (cls === SpawnClass.Thrower) {
     return { ...head, cls, thr: makeThrowerTail() };
   }
-  if (cls === SpawnClass.Zombie) {
+  if (cls === SpawnClass.Zombie || cls === SpawnClass.CarriedZombie) {
     return { ...head, cls, zom: makeZombieTail() };
   }
   if (cls === SpawnClass.OneHitTarget) {
@@ -1982,6 +2018,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.FlyingEnemy) {
     return { ...head, cls, owl: makeOwlTail() };
+  }
+  if (cls === SpawnClass.ScriptedProp) {
+    return { ...head, cls, prop13: makeScriptedPropTail() };
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };

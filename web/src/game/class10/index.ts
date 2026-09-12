@@ -79,13 +79,19 @@
  * `ActorAdvanceMotion` root walk already carries a civilian where its clips
  * say.
  *
- * [open] `CivilianUpdateOnCarrier` (`FUN_0048B140`) pushes a carrier object's
- * translate and rotate around the whole update, for the **7 of 47** spawns
- * whose descriptor `+0x22` is non-zero. The carrier is `g_civilian_carrier`
- * (0x009A2C88), which a class-0x13 sub-constructor writes — and class 0x13 is
- * not read, let alone ported, so there is no object to ride. Those seven stand
- * where the script put them until it is. Naming the dependency is the point:
- * approximating the ride would put them somewhere plausible and wrong.
+ * **`CivilianUpdateOnCarrier` (`FUN_0048B140`) is ported.** `CivilianInit`
+ * tests `obj+0x11C != 0` at `0x0048A747` and, when it is, writes
+ * `g_civilian_carrier` (0x009A2C88) into the civilian's own `+0x68` and
+ * installs that routine in place of `CivilianUpdate` — 7 of the 47 spawns.
+ * The routine is `MatrixTranslate; RotX; RotZ; RotY` around an ordinary
+ * `CivilianUpdate`, the same four calls `CarriedZombieUpdate18` makes, so the
+ * two share `game/carrier.ts`. The carrier is written by class 0x13's
+ * `CarrierPropSelectRoutine`, which is ported now: stage 3's boat.
+ *
+ * [open] The routine's other arm, at `0x0048B160`, hands the civilian back to
+ * the plain `CivilianUpdate` once the carrier raises `obj+0x34` bit
+ * `0x4000000` — the bit `CarrierPropRoutine1` sets from the on-screen test
+ * this port does not have. Stage 3's block-0 boat moors and never reaches it.
  *
  * [open] `SpawnCivilianBloodPool` (`FUN_0048E080`) builds a ground decal at the
  * shot point, scaled by how far below the camera plane it is. It is a whole

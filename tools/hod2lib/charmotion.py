@@ -234,6 +234,10 @@ MOTION_RULES: dict[int, tuple] = {
     # block 11 and block 1 -- half of stage 2 -- is unreachable.
     0x21: ("literal", 0x3E6),
     0x30: ("literal", 0x3BC),
+    # `CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` and two
+    # stores, so class 0x18 opens in class 0x30's clip. See the TypeScript
+    # twin in `web/src/hod2lib/charmotion.ts` for what its absence cost.
+    0x18: ("literal", 0x3BC),
     0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),
 }

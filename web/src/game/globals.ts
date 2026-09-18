@@ -201,6 +201,17 @@ export const G = {
    * `g_cur_actor` (0x009A26A0); a list is the same thing with an index.
    */
   g_object_list: [] as Actor[],
+  /**
+   * `g_cur_actor` — 0x009A26A0, **which object's update is running**, by spawn
+   * address; `-1` outside the walk.
+   *
+   * The engine's task walk leaves the current object here, and the collision
+   * passes over moving objects read it to skip the object asking:
+   * `ColiTraceSegmentAllSets` (`FUN_004053B0`) compares it at `0x00405448`
+   * and `ColiTestSphereAgainstFullSet` (`FUN_004057F0`) at `0x0040583A`
+   * (`CMP dword ptr [0x009a26a0], ESI`), so a boat never stands on itself.
+   */
+  g_cur_actor: -1,
   /** `g_enemies_alive` — 0x009C904A. */
   g_enemies_alive: 0,
   /**
@@ -828,9 +839,10 @@ export const G = {
    * bit 0x10000000. `ZombieStateDelayedStrikeInPlace` (state 32) watches the
    * same object's bit 0x40000000 and gives up 0x14 frames after it appears.
    *
-   * [diverges] **The port has no rideable object.** Every class that writes
-   * this one — `St1VehicleUpdate` (`FUN_0048E600`) among them — is unported,
-   * so it stays -1 and the two states above take their no-carrier arms. See
+   * Two ported classes write it: class 0x33 selector 1
+   * (`ScriptedCarrierUpdate33`) and class 0x26 subtype 2
+   * (`Class26Subtype2Update` — `FUN_0048EAD0`, stage 3's boat, at
+   * `0x0048EB1C`). `St1VehicleUpdate` (`FUN_0048E600`) is unported. See
    * `class30/entrance.ts`.
    */
   g_carrier_object: -1,
@@ -839,8 +851,12 @@ export const G = {
    * and a different global from {@link g_carrier_object} above.
    *
    * `CarrierPropSelectRoutine` (`FUN_00440190`) writes it at `0x004401A0`
-   * when a class-0x13 prop installs its routine, and `Class26Subtype2Update`
-   * (`FUN_0048EAD0`) writes it too. `CarriedZombieInit18` (`FUN_0045CD60`)
+   * when a class-0x13 prop installs its routine — the one write
+   * `get_xrefs_to 0x009a2c88` lists (readers: `CivilianInit`,
+   * `CarriedZombieInit18`, `Boss4Init`).
+   * (`Class26Subtype2Update` (`FUN_0048EAD0`) was once listed here too; it
+   * writes {@link g_carrier_object} instead — `0048eb1c 8935345c9a00`, `MOV
+   * [0x009a5c34], ESI`.) `CarriedZombieInit18` (`FUN_0045CD60`)
    * copies it into `obj+0x13B0` at spawn and never reads it again, so it is
    * the carrier that was current on the frame the rider was placed — which is
    * why the script spawns a boat and its passengers in the same instruction.
@@ -1262,6 +1278,7 @@ export function ResetSceneOnEnter(): void {
  */
 export function ResetGameGlobals(): void {
   G.g_object_list = [];
+  G.g_cur_actor = -1;
   ResetSceneOnEnter();
   G.g_attack_permits = new Array(G.g_max_attackers).fill(-1);
   G.g_attack_committed = 0;

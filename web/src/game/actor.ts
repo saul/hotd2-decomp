@@ -26,6 +26,7 @@ import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
 import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
+import { makeVehicleTail, type VehicleTail } from "./class26/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
@@ -1289,6 +1290,35 @@ export interface ActorBase {
   class13: CharacterPlacement["class13"];
   /** Class 0x18's three — the rider's leave-state and its camera cue. */
   class18: CharacterPlacement["class18"];
+  /** Class 0x26 subtype 2's tail — the collision blob its first frame seats. */
+  class26: CharacterPlacement["class26"];
+  /**
+   * `obj+0x14C` — **a collision blob of the object's own**, traced in its own
+   * space. `-1` in the engine, `null` here, for every object that has none.
+   *
+   * `ColiTraceSegmentAllSets` (`FUN_004053B0`) and
+   * `ColiTestSphereAgainstFullSet` (`FUN_004057F0`) both open with a pass over
+   * every registered object whose `obj+0x14C != -1` and whose `obj+0x34` has
+   * bits `0x10` and `0x40` up and `0x80008000` down, and test the query
+   * against this blob through the inverse of {@link coliMatrix}. That is how
+   * a moving object is ground: the zombie that leaps onto stage 3's boat lands
+   * on its deck because of it. The key is the bundle's `coli.blobs` key.
+   */
+  coliBlob: string | null;
+  /**
+   * `obj+0x150` — the object's **world** matrix, the one {@link coliBlob} is
+   * in. `[port-only]` layout: row-major 3x4, `[r00 r01 r02 tx, r10 r11 r12 ty,
+   * r20 r21 r22 tz]`, a point being `R·p + t`.
+   *
+   * The engine's draw stores the stack top here (`MatrixStore`, `FUN_004A8CA0`)
+   * — which is view-space, since the view is under it — and
+   * `RegisterForShotTest` (`FUN_00405160`) multiplies the camera block's
+   * matrix back in for an object carrying `obj+0x34 & 0x10`, at
+   * `0x00405190`..`0x004051CC`, which `[likely]` leaves the world matrix: the
+   * collision passes invert it and trace world points through the inverse,
+   * which is only meaningful if it is. `null` until the object has posed.
+   */
+  coliMatrix: number[] | null;
   /**
    * `obj+0x13B0` — the carrier this actor rides, by spawn address.
    *
@@ -1788,6 +1818,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
+  | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
@@ -1798,7 +1829,7 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
-      | SpawnClass.ScriptedScenery> });
+      | SpawnClass.ScriptedScenery | SpawnClass.Vehicle> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1923,6 +1954,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class11: null,
     class13: null,
     class18: null,
+    class26: null,
+    coliBlob: null,
+    coliMatrix: null,
     carrierAt: -1,
     carrierWorld: vec3(),
     carrierYaw: 0,
@@ -2021,6 +2055,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.ScriptedProp) {
     return { ...head, cls, prop13: makeScriptedPropTail() };
+  }
+  if (cls === SpawnClass.Vehicle) {
+    return { ...head, cls, vehicle: makeVehicleTail() };
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };

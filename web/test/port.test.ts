@@ -148,7 +148,9 @@ import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
-import { GameSystem, syncPortGlobals } from "../src/app/systems";
+import { GameSystem, syncCharacterSpawns, syncPortGlobals,
+         type CharacterPool } from "../src/app/systems";
+import { CarrierTransformPoint } from "../src/game/carrier";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -9494,6 +9496,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
+    [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -15193,6 +15196,170 @@ console.log("\nznjoe's creature:");
     check("...and a reset empties it",
           (ResetGameGlobals(), G.g_body_creatures.length === 0));
   }
+}
+
+// -- stage 3's two boats: what stands on one, and what rides the other -------
+
+console.log("stage 3's boats -- the one the player rides and the one that "
+            + "arrives:");
+{
+  // **Class 0x26 subtype 2 is a floor.** `Class26Subtype2Update`
+  // (`FUN_0048EAD0`) seats `obj+0x14C` from its descriptor tail and raises
+  // `obj+0x34 |= 0x51`, and `ColiTraceSegmentAllSets` (`FUN_004053B0`) opens
+  // with a pass over exactly such objects, tracing the query through the
+  // inverse of `obj+0x150`. Stage 3 block 0 step 4's zombie leaps onto the
+  // boat's bow; with no such pass its ground snap found nothing under the
+  // hull and stood it in the canal, waist-deep in the boat.
+  //
+  // The deck here is one quad at the boat's own y = -2, spanning x +-10 and
+  // z 0..30 -- the shape of `coli3.bin:39944`, which is the foredeck in the
+  // boat's space -- and the boat is turned a quarter, so an answer that
+  // ignored the rotation would miss it.
+  const rng = new Rng(26);
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  T.coli = { files: ["test"], blobs: {
+    deck: coliQuad([0, 1, 0, 2], 1,
+                   [-10, -2, 30, 10, -2, 30, 10, -2, 0, -10, -2, 0], 53),
+  } } as unknown as typeof T.coli;
+  G.g_coli_full_set = [];
+  G.g_camera_fixed_eye_y = -999;          // so a fall-through is unmistakable
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot) => slot === 0x156
+      ? { x: 100, y: -19, z: 200, pitch: 0, yaw: 0x4000, roll: 0 } : null,
+  };
+  G.g_active_cam_path = 0x7c;
+  G.g_cam_path_frame = 855;
+  const boat = ActorSpawn(3244, SpawnClass.Vehicle, -1, "boat", {
+    hp: 2, class26: { coli: "deck" },
+  }, rng);
+  boat.visible = true;
+  check("before its first tick the boat is no floor: the probe falls through",
+        QueryGroundHeightAt(115, -10, 200) === -999,
+        `${QueryGroundHeightAt(115, -10, 200)}`);
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("the first tick seats the blob, raises 0x51 and takes the carrier",
+        boat.coliBlob === "deck" && (boat.flags & 0x51) === 0x51
+        && G.g_carrier_object === boat.at,
+        `blob ${boat.coliBlob} flags ${boat.flags.toString(16)} `
+        + `carrier ${G.g_carrier_object}`);
+  check("...and the pose is the path's, two units up",
+        boat.pos.x === 100 && boat.pos.y === -17 && boat.pos.z === 200,
+        `${boat.pos.x},${boat.pos.y},${boat.pos.z}`);
+  // Local (0, -2, 15) is world (100 + 15, -17 - 2, 200) under a quarter turn
+  // of RotY: x' = x cos + z sin.
+  const deck = QueryGroundHeightAt(115, -10, 200);
+  check("a ground probe over the deck finds the deck, in world space",
+        Math.abs(deck - -19) < 1e-4, `${deck}`);
+  check("...and the material is the blob's",
+        QueryGroundSurfaceAt(115, -10, 200) === 53,
+        `${QueryGroundSurfaceAt(115, -10, 200)}`);
+  check("...but not where the unturned deck would have been",
+        QueryGroundHeightAt(100, -10, 215) === -999,
+        `${QueryGroundHeightAt(100, -10, 215)}`);
+  G.g_cur_actor = boat.at;
+  check("an object never stands on its own blob (g_cur_actor)",
+        QueryGroundHeightAt(115, -10, 200) === -999);
+  G.g_cur_actor = -1;
+  // A leaper's ground snap is exactly this probe: from six above its feet.
+  const z = spawnZombie(0x2516, 1, "leaper");
+  z.visible = true;
+  z.pos = vec3(114, -19.5, 200);
+  ActorSnapToGroundHeight(z);
+  check("a zombie landing on the bow snaps to the deck, not the canal",
+        Math.abs(z.pos.y - -19) < 1e-4, `${z.pos.y}`);
+  // The sphere pass is the same list with the normal rotated properly.
+  check("the body push sees the deck as well",
+        ColiTestSphereAgainstFullSet(115, -18.5, 200, 1)
+        && G.g_coli_hit_normal[1] > 0.99,
+        `${G.g_coli_hit_normal}`);
+  // `0x80008000` refuses an object whatever else it carries.
+  boat.flags |= 0x8000;
+  check("...and an object carrying 0x8000 takes no part",
+        QueryGroundHeightAt(115, -10, 200) === -999);
+  boat.flags &= ~0x8000;
+  // The latch: on camera path 0x7C frame 0x140 the boat turns to face the
+  // camera, and at 0x29E it turns back.
+  G.g_camera_yaw_bams = 0x1000;
+  G.g_cam_path_frame = 0x140;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("the face-camera latch turns it to the camera's yaw + 0x8000",
+        boat.yaw === 0x9000, `${boat.yaw.toString(16)}`);
+  G.g_cam_path_frame = 0x29e;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("...and the frame that drops it hands the yaw back to the path",
+        boat.yaw === 0x4000, `${boat.yaw.toString(16)}`);
+  // A camera path outside the switch skips the pose: the boat stays put.
+  G.g_active_cam_path = 0x80;
+  boat.pos.x = 1;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("a camera path the routine does not name leaves the pose alone",
+        boat.pos.x === 1, `${boat.pos.x}`);
+  T.coli = null;
+}
+{
+  // **A carrier's rotation is in BAMS.** `CarrierTransformPoint` multiplied
+  // by `vec.ts`'s `BAMS` -- BAMS *per radian* -- and so turned every rider by
+  // 10430^2/65536 times the carrier's angle. The earlier test of it rode a
+  // boat at yaw 0, where every wrong factor is right.
+  const carrier = { pos: vec3(10, 0, 20), pitch: 0, yaw: 0x4000, roll: 0 };
+  const out = vec3();
+  CarrierTransformPoint(carrier as unknown as Parameters<
+    typeof CarrierTransformPoint>[0], 1, 0, 0, out);
+  check("a rider one unit along x on a boat turned a quarter is at -z",
+        Math.abs(out.x - 10) < 1e-6 && Math.abs(out.z - 19) < 1e-6,
+        `${out.x},${out.z}`);
+}
+{
+  // **The script's spawns are made in the script's order.** One
+  // `spawn_obj_c` places stage 3's arriving boat -- class 0x13, drawn by slot
+  // -- and then what rides it; each rider's `Init` copies
+  // `g_civilian_carrier`, which the boat's own `Init` has only just set. The
+  // player built every character spawn before every slot actor, so the
+  // riders copied no carrier at all and stood at their boat-relative offsets
+  // from the world origin: the civilian and the zombie "missing" from the
+  // other boat.
+  const rng = new Rng(18);
+  ResetGameGlobals();
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      { at: 3184, class: 0x13, char_type: -1, motion: null, hp: 0,
+        yaw: 57344, init_flags: 0x8000,
+        class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+                   behaviour: 8, selector: 1 } },
+      { at: 2780, class: 0x18, char_type: 1, motion: 956, hp: 130,
+        yaw: 16384, init_flags: 0x60400, initial_state: 35,
+        attack_state: 48,
+        class18: { from_state: 48, cue_path: 124, cue_frame: 1080 } },
+    ],
+  } as unknown as CharactersJson);
+  const listed = [
+    { at: 3184, class: SpawnClass.ScriptedProp,
+      pos: [-1055, -26.25, -1620] as [number, number, number] },
+    { at: 2780, class: SpawnClass.CarriedZombie,
+      pos: [5, -6, -14] as [number, number, number] },
+  ];
+  // The character layer, reduced to its contract: the rider is placeable,
+  // the boat is not one of its.
+  const pool: CharacterPool = {
+    rng,
+    bindToPool: () => {},
+    readySpawns: (spawns) => spawns
+      .filter((s) => s.at === 2780)
+      .map((s) => ({ at: s.at, motion: 956, pos: vec3(5, -6, -14) })),
+    syncSpawns: () => [],
+  };
+  syncCharacterSpawns(pool, listed);
+  const rider = G.g_object_list.find((o) => o.at === 2780);
+  const boatObj = G.g_object_list.find((o) => o.at === 3184);
+  check("the boat and its rider are both made",
+        !!rider && !!boatObj, `${!!rider} ${!!boatObj}`);
+  check("...boat first, so the rider rides it",
+        rider?.carrierAt === 3184,
+        `rider carrier ${rider?.carrierAt} / g_civilian_carrier `
+        + `${G.g_civilian_carrier}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

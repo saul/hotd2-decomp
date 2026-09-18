@@ -6115,6 +6115,28 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
   }
 
+  // **A captor that leaves is not a captor that died.**
+  // `CivilianPruneDeadChildren` (`FUN_0048CA60`) tests the child's `obj+0x34`
+  // bit `0x4000000` and nothing else; `ActorDespawn` (`FUN_00409CC0`) raises
+  // `0x80018000` and never that bit. The port dropped a child as soon as it
+  // was missing from the pool, which counted a despawn as a rescue.
+  {
+    const { a, kids, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetChildrenGoal, 0),
+      cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+      cmd(CivilianOp.Wait, CivilianWait.Rescued),
+      cmd(CivilianOp.End),
+    ]], [0x4100]);
+    cFrame(a, events);
+    ActorDespawn(kids[0]);
+    G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
+    for (let i = 0; i < 3; i++) cFrame(a, events);
+    check("a captor that despawns without the dead bit is still held",
+          a.civ?.childCount === 1 && G.g_player_score[0] === 0,
+          `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
+  }
+
   // **The rescue.** Wait bit 0x04 blocks while more than `childrenGoal` of
   // the civilian's captors are alive; the block it unblocks carries the
   // 0x10000000 bit, which is where the 400 is paid.
@@ -6134,12 +6156,16 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("...and the rescue does not pay while either is alive",
           G.g_player_score[0] === 0 && paid === 0,
           `score ${G.g_player_score[0]}`);
+    // `CivilianPruneDeadChildren` reads the child's `obj+0x34` bit and
+    // nothing else, so a kill here is the bit every real kill raises.
     kids[0].dead = true;
+    kids[0].flags |= ActorFlag.Dead;
     cFrame(a, events);
     check("one captor down is not enough",
           a.civ?.childCount === 1 && G.g_player_score[0] === 0,
           `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
     kids[1].dead = true;
+    kids[1].flags |= ActorFlag.Dead;
     cFrame(a, events);
     check("the last captor down pays 400 -- to both players, since the port "
           + "cannot name a shooter",
@@ -12394,6 +12420,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   // The rescue: the captor dies, the civilian's own stream runs on and raises
   // the flag. Nothing else in the fixture can raise it.
   captor.dead = true;
+  captor.flags |= ActorFlag.Dead;
   frame();
   check("killing the captor lets her stream raise the flag",
         (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
@@ -12461,6 +12488,41 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   check("a seek over the gate leaves the flag it was waiting for raised",
         (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
         `${G.g_script_flags[RESCUE_FLAG]}`);
+
+  // ...and the **other** half of that postcondition: the civilian who raises
+  // the flag has run past it. A replay that raised the byte and kept her spawn
+  // marker rebuilt her at the landing address with a fresh script, and her
+  // rescue block ran again there. Stage 4's block-4 hostage `0x3578` did that
+  // at a deep link to block 12: her captor saw flag 29 already up, died on the
+  // first frame, and her `SetRouteBranch 1` decided block 12's branch whatever
+  // the player did (bug 16). `Walker.retireFlagRaisers`.
+  {
+    ResetGameGlobals();
+    const placed = {
+      ...script,
+      civilians: T.civilians,
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [
+          { i: 0, at: 0, op: 0x0c, name: "spawn_obj_c", cat: "spawn",
+            spawns: [{ at: 0x4000, class: SpawnClass.Civilian, flags: 0,
+                       pos: [0, 0, 0], yaw_deg: 0, orient: [0, 0, 0], hp: 0,
+                       desc_flags: 0 }] },
+          { ...flagOp(1, 0x45, RESCUE_FLAG) },
+          { ...flagOp(2, 0x48, 7) },
+        ] }],
+      }],
+    } as unknown as ScriptJson;
+    const w4 = new Walker(placed, host);
+    seekTo(w4, 0, 0, 1);
+    check("a seek that stops at the gate keeps the hostage's spawn listed",
+          w4.spawns.some((s) => s.at === 0x4000),
+          `${w4.spawns.map((s) => s.at).join(",")}`);
+    seekTo(w4, 0, 0, 2);
+    check("...and a seek past it retires her with the flag she raises",
+          !w4.spawns.some((s) => s.at === 0x4000),
+          `${w4.spawns.map((s) => s.at).join(",")}`);
+  }
 }
 
 /**

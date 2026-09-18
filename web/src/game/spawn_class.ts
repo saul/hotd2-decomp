@@ -145,7 +145,8 @@ export enum SpawnClass {
   /**
    * `ChapterCardInstall` (`FUN_004342E0`) — the chapter card. Holds for 180
    * frames, raises `g_script_flags[0xF8]` and kills itself; every stage's
-   * block 0 step 1 waits on that flag. **Ported** (`game/class60/`).
+   * block 0 step 1 waits on that flag. **Ported** (`game/class60/`), and
+   * skipped on its first frame by the user's decision — see that module.
    */
   ChapterCard = 0x60,
   /**

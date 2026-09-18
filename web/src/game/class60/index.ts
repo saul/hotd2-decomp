@@ -17,11 +17,24 @@
  * ## What the port keeps, and what it does not
  *
  * The card itself is screen furniture: eight text slots at `0x007DCBA0`, a
- * scene light block through `FUN_0040E140`, a per-scene sound, a fade.
+ * scene light block through `LightBlockSetDirection` (`FUN_0040E140`) and
+ * `SetSceneAmbient` (`FUN_0040C2C0`), a per-scene sound, a fade, and at the
+ * end the chapter texbank freed through `AssetQueueFreeTexbank`
+ * (`FUN_0041D710`).
  * **None of that is ported** — the player draws no chapter card — and none of
  * it is what the script is waiting for. What is ported is the actor's
- * **lifetime**, which is the whole of the gate: 180 frames, then the flag,
+ * **lifetime**, which is the whole of the gate: the dwell, then the flag,
  * then `ActorKill`.
+ *
+ * ## The port skips every card
+ *
+ * The engine holds the card for 180 frames (`0xB4`) unless the pad cuts it
+ * short. A player that draws no card showed those three seconds as a dead
+ * pause at the top of every stage, so **by the user's decision the port
+ * skips the chapter card entirely** — see {@link ChapterCardSkipRequested}.
+ * The skip goes through the engine's *own* skip arm rather than around it, so
+ * everything else the routine does is unchanged: the installer tests, sub 0's
+ * latch, the flag and the kill all happen, on the card's first update.
  */
 import type { Actor } from "../actor";
 import { AppState, G } from "../globals";
@@ -46,14 +59,25 @@ export const CHAPTER_CARD_FRAMES = 0xb4;
 /**
  * The dwell below which a trigger pull cuts the card short, at `0x00434810`.
  *
- * `[open]` in the port. The engine's test is `g_pad_state` (`0x009C9028`)
- * bit 2 **and** `obj+0x11C < 0xA0`, so the first 20 frames of a card cannot be
- * skipped; bit `0x20000` skips with no dwell test at all. Neither is modelled
- * — the port has no pad word for the screen furniture, and the walker's
- * `set_skippable_region` is the *script's* flag rather than this one. Named so
- * that the number is already right the day it is wired.
+ * The engine's test is `g_pad_state` (`0x009C9028`) bit 2 **and**
+ * `obj+0x11C < 0xA0`, so the first 20 frames of a card cannot be skipped by
+ * the trigger; bit `0x20000` skips with no dwell test at all. The port has no
+ * pad word for the screen furniture — the walker's `set_skippable_region` is
+ * the *script's* flag rather than this one — and does not need one, because
+ * it takes the unconditional arm on every card
+ * ({@link ChapterCardSkipRequested}). Named so the number is already right.
  */
 export const CHAPTER_CARD_SKIPPABLE_BELOW = 0xa0;
+
+/** `g_pad_state` bit 2 — the trigger, honoured once the dwell is below 0xA0. */
+const PAD_SKIP_TRIGGER = 0x2;
+
+/** `g_pad_state` bit `0x20000` — skips the card with no dwell test. */
+const PAD_SKIP_ALWAYS = 0x20000;
+
+/** `MOV word ptr [ESI+0x11c], BX` with `BX = 1` at `0x00434826`: a skip
+ *  leaves one frame, which the decrement straight after it spends. */
+const CHAPTER_CARD_SKIPPED_DWELL = 1;
 
 /**
  * The app state whose arm installs `FUN_00434DA0` instead of the card.
@@ -101,16 +125,50 @@ export function ChapterCardInstall(obj: Actor, f: ClassFrame): void {
 }
 
 /**
- * The countdown at `0x00434802`, which every arm of both subs falls into.
+ * The countdown at `0x00434802`, which every arm of both subs falls into —
+ * sub 1's scene-5 arm included: its `MatrixStackPop` at `0x004347AD` is a
+ * `CALL` and not a tail jump, so the pseudocode's `return` there is Ghidra's
+ * (`L35`), and the arm runs on through `0x00436AD0` into this.
  *
- * `DEC word ptr [ESI+0x11c]; CMP ..., 0; JG return` — so a dwell of `n` costs
- * `n` frames and the flag lands on the frame it reaches zero.
+ * First the skip test, `0x00434802`–`0x00434826`:
+ *
+ * ```
+ * if ((sub >= 1 && obj+0x11C < 0xA0 && (g_pad_state & 2))
+ *     || (g_pad_state & 0x20000))
+ *     obj+0x11C = 1;
+ * ```
+ *
+ * then `DEC word ptr [ESI+0x11c]; CMP ..., 0; JG return` — so a dwell of `n`
+ * costs `n` frames, a skip costs the frame it is taken on, and the flag lands
+ * on the frame the dwell reaches zero.
  */
 function ChapterCardCountDown(obj: Actor): void {
+  const pad = ChapterCardSkipRequested();
+  if ((obj.sub >= Sub.Hold && obj.hp < CHAPTER_CARD_SKIPPABLE_BELOW
+       && (pad & PAD_SKIP_TRIGGER) !== 0)
+      || (pad & PAD_SKIP_ALWAYS) !== 0) {
+    obj.hp = CHAPTER_CARD_SKIPPED_DWELL;
+  }
   obj.hp -= 1;
   if (obj.hp > 0) return;
   G.g_script_flags[CHAPTER_CARD_FLAG] = 1;
   ChapterCardKill(obj);
+}
+
+/**
+ * `[port-only]` — the `g_pad_state` word (`0x009C9028`) as the card's skip
+ * test reads it. The port has no pad word, so this is where it is decided.
+ *
+ * `[diverges]` Always the unconditional skip bit, so every chapter card is
+ * cut on its first update and raises flag 248 there instead of three seconds
+ * later. **The user's decision** (docs/NEW-BUGS.md, bug 13): the port draws
+ * no chapter card, so the engine's dwell was a three-second dead pause at the
+ * top of every stage, and the port skips title sequences entirely. Taking
+ * the engine's own skip arm keeps the rest of the routine — installer, latch,
+ * flag, kill — exactly as the exe runs it for a player who presses skip.
+ */
+export function ChapterCardSkipRequested(): number {
+  return PAD_SKIP_ALWAYS;
 }
 
 /**

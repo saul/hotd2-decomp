@@ -33,9 +33,15 @@ export function freePort() {
   });
 }
 
-/** Vite, on its own port, killed on the way out. */
+/** Vite, on its own port, killed on the way out.
+ *
+ * `--host 127.0.0.1` because that is the address every caller navigates to.
+ * Left to itself vite binds whatever `localhost` resolves to first, which on
+ * a machine that prefers IPv6 is `[::1]` alone: vite prints "ready", and the
+ * page load is refused. */
 export async function serve(port) {
-  const proc = spawn("npx", ["vite", "--port", String(port), "--strictPort"], {
+  const proc = spawn("npx", ["vite", "--host", "127.0.0.1", "--port",
+                             String(port), "--strictPort"], {
     cwd: WEB, stdio: ["ignore", "pipe", "pipe"],
   });
   proc.stderr.on("data", (b) => process.stderr.write(`vite: ${b}`));

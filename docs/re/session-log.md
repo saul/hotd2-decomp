@@ -18061,3 +18061,64 @@ porting `ZombieStateCarryProp` and the carried prop for its own fat zombies at
 the same time, and a second port of the same routines would collide. What
 stage 1 needs beyond theirs is behaviour 3 and `CarriedPropHitTargetSphere`
 (`FUN_00443540`).
+
+## Stage 3's two boats: the one a zombie lands on, and the one whose riders were missing
+
+Two reports against stage 3 block 0. Step 4: the zombie that leaps onto the
+player's boat "lands on the water and clips through the boat". Step 6 at camera
+frame 1102: the civilian and the zombie on the other boat are missing.
+
+**Step 4 is a collision pass the port had declared away.** The leaper is a
+class-0x30 state-26 spawn (evt 2516) whose descriptor lands it at y -19.7; the
+harness showed it reaching that and being snapped to -25.0 on the landing
+frame, which is the canal under the hull. `ZombieStateDelayedLeap`'s landing
+drops the airborne bit and the ground snap takes over, and
+`QueryGroundHeightAt` is `ColiTraceSegmentAllSets` — whose first pass, over
+registered objects with a blob at `obj+0x14C` and `obj+0x34 & 0x50`, the port
+had marked `[diverges]` "the port has no per-actor blobs". The player's boat is
+class 0x26 subtype 2, `Class26Subtype2Update` (`FUN_0048EAD0`), and its first
+frame seats `obj+0x14C` from `tail+0x00`: a relocated pointer that resolves,
+exactly like an opcode-0x10 operand, to `coli3.bin+0x9C08` — 23 quads of
+surface 53 spanning the boat's foredeck in the boat's own space. The boat was
+only a rig in `render/`; it is now `game/class26/` too, with its world matrix,
+and the pass is ported (`ColiTraceSegmentVsObjectBlob`,
+`ColiTraceSegmentInObjectSpace`, and the sphere pass's twin). After it the
+leaper lands at -19.3 and walks the sloping deck at -19.3..-18.3.
+
+Three things in that reading were past the end of what Ghidra showed (`L35`,
+`L37`): `RegisterForShotTest`'s append after its world-matrix fixup (the
+pseudocode returns before it), the boat's own `RegisterForShotTest` call after
+a no-return `MatrixStackPop`, and `ColiTraceSegmentInObjectSpace`'s actual
+trace. The segment pass also returns its normal through `MatrixTransformPoint`
+rather than `MatrixTransformVector` — translation included — and that is
+transcribed as read.
+
+**Step 6 was three faults stacked, each enough on its own.**
+* Class 0x18 had no `MOTION_RULES` row, so the exporter emitted its spawns as
+  markers, `render/characters.ts` never adopted one, and
+  `SpawnScriptedCharacters` was never asked: the class was ported and no rider
+  ever existed. The previous session's test built the rider by hand.
+* `syncCharacterSpawns` built every character spawn before every slot actor.
+  One `spawn_obj_c` places the class-0x13 boat and then the civilian, whose
+  `CivilianInit` copies `g_civilian_carrier` — which the boat's Init had not
+  yet set. The civilian rode no carrier and was drawn at its boat-relative
+  offset from the world origin. Spawns are now made in the script's order;
+  with the old order the new test reads `rider carrier -1`.
+* `CarrierTransformPoint` did `carrier.yaw * BAMS` with `vec.ts`'s `BAMS`,
+  which is BAMS *per radian*. The earlier test rode a boat at yaw 0.
+
+**Wrong turns.** The triage pointed at step 4's class-0x44 selector-9 spawn as
+the possible boat. It is not: `PropBuildFlagLiftedProp` (`0x00473300`, not a
+Ghidra function until now) builds `FlagLiftedPropUpdate` (`0x00474EA0`), a
+slot-drawn prop 330 units away that rises on script flag 5 and has no blob.
+Named and left unported. And `globals.tsv` said `Class26Subtype2Update` writes
+`g_civilian_carrier`; it writes `g_carrier_object` (`0x0048EB1C`).
+
+Left `[open]`: which frame's matrix a query sees (the engine publishes the
+registration list once a frame from inside a task); `g_camera_block_yaw_bams`
+versus `g_camera_yaw_bams` for the boat's face-camera latch (the port reads
+the latter, as class 0x43 and 0x46 do); and whether class 0x13's and 0x33's
+`obj+0x14C` pointers are blobs too — both are excluded from the pass anyway,
+0x13's by its spawn flag `0x8000` and 0x33's by `0x80000000`. `render/rigs.ts`
+still poses its own copy of the boat from the same path; making it read the
+actor is the renderer's half.

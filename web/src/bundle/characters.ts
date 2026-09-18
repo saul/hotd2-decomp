@@ -433,6 +433,14 @@ export interface CharacterPlacement {
   class18?: {
     from_state: number; cue_path: number; cue_frame: number;
   } | null;
+  /**
+   * Class 0x26 subtype 2's tail -- the boat the player rides in stage 3.
+   *
+   * `coli` is the `coli.blobs` key `tail+0x00` points at, which
+   * `Class26Subtype2Update` (`FUN_0048EAD0`) seats in `obj+0x14C`: the blob a
+   * collision trace tests in the object's own space. See `game/class26/`.
+   */
+  class26?: { coli: string | null } | null;
   class43?: { subtype: number; member: number } | null;
   /**
    * Class 0x46's three descriptor bytes — the bat, and the whole descriptor.

@@ -783,6 +783,18 @@ port runs the state machine on the same relative position and publishes the
 composed world point for the renderer, which is the one thing a port with no
 matrix stack in `game/` has to add.
 
+**...and the boat the player rides is a floor.** Class 0x26 subtype 2
+(`game/class26/`) is an actor now, not only a rig: its first frame seats a
+collision blob of its own — `coli3.bin`'s foredeck, in the boat's own space —
+and the first pass of both collision queries tests every such object through
+the inverse of its world matrix. The zombie that leaps onto the bow at block 0
+step 4 lands on the deck instead of standing in the canal inside the hull. The
+arriving boat's riders were three faults deep: class 0x18 had no motion rule,
+so no rider was ever built; the player made character spawns before slot
+actors, so the civilian copied `g_civilian_carrier` before the boat had set it;
+and the carrier transform converted BAMS the wrong way. Spawns are now made in
+the script's order.
+
 **A room-clear gate waits for the camera as well as the counter, and how long
 it waits is the camera's business.** `wait_enemies_alive` and its two siblings
 need `g_camera_free`, and `EvtActionFinishSequence21` installs one of two

@@ -206,7 +206,15 @@ spaces really are the same — `--no-coli` skips it.
    them.
 2. `coli0.bin` is loaded for every scene, yet **none** of the 86 script
    pointers reference it. What selects it — the object-attached blobs at
-   `obj+0x14C`, or a default set installed outside the script?
+   `obj+0x14C`, or a default set installed outside the script? **Partly
+   answered:** object-attached blobs exist and are read. Class 0x26 subtype 2
+   (stage 3's boat, descriptor 3244) seats `obj+0x14C` from a descriptor-tail
+   pointer that resolves exactly like an opcode-0x10 operand — to
+   `coli3.bin+0x9C08`, not `coli0.bin` — and `ColiTraceSegmentAllSets` /
+   `ColiTestSphereAgainstFullSet` test such blobs first, in the object's own
+   space (`ColiTraceSegmentVsObjectBlob`, `ColiTraceSegmentInObjectSpace`).
+   Who references `coli0.bin` is still `[open]`; class 0x13 and 0x33 also
+   write `obj+0x14C` and their pointers have not been resolved.
 3. Two quads have an `axis` tag that is not the largest normal component, and a
    handful have a zero-length normal. Authoring slack, or a deliberate marker?
 4. Export: the sidecar carries the geometry, but nothing yet builds a debug
@@ -215,6 +223,18 @@ spaces really are the same — `--no-coli` skips it.
    with visible materials.
 
 ## What the player does with it
+
+**Moving objects first.** Both queries open with a pass over every registered
+object whose `obj+0x14C` names a blob and whose `obj+0x34` has `0x10|0x40` up
+and `0x80008000` down, other than `g_cur_actor`: the query goes into the
+object's space through the inverse of `obj+0x150`, the hit comes back through
+the matrix, and it competes on the same nearest-to-the-query distance as a
+static hit. The segment pass returns the normal through `MatrixTransformPoint`
+(translation included — transcribed as read); the sphere pass through
+`MatrixTransformVector`. The port walks the pool for these objects and takes
+the matrix each stored at its last update; which frame's matrix a given query
+sees in the engine is `[open]`.
+
 
 The browser port answers its own collision queries, in `web/src/game/coli.ts`,
 against the quads exported here. It does **not** raycast the drawn geometry —

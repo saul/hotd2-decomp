@@ -488,6 +488,25 @@ it, and a block whose own wait is already satisfied is **skipped** — with
 block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
 frames and the two score paths.
 
+**A captor counts as gone only when it dies.** `CivilianPruneDeadChildren`
+tests the child's `obj+0x34` bit `0x4000000` and nothing else; the port also
+dropped a child that was merely missing from the pool, so a captor that left
+by `ActorDespawn` — which never raises the bit — released its civilian as
+though she had been rescued. Every ordinary exit (a kill,
+`ZombieRetireAndCredit`, the drag's flag-29 exit) raises the bit first, so the
+faithful test changes nothing in play that the engine does not also do.
+
+**A deep link no longer replays a finished rescue.** Stepping over a
+`wait_script_flag` in a replay raised the flag and left the civilian who raises
+it listed, so she was rebuilt at the landing address with a fresh script and
+ran her rescue again there. At `?stage=4&entry=4&block=12` that was stage 4's
+block-4 hostage `0x3578`: her captor saw flag 29 already up, died on the first
+frame, and her `SetRouteBranch 1` decided block 12's branch — `next[1]`, block
+14, whether or not the player saved block 12's own civilian. The replay now
+retires a class-0x10 spawn whose streams raise the flag it steps over
+(`Walker.retireFlagRaisers`), so the landing state is one the engine can be in:
+block 12 routes to 13 unless `0x63CC` is rescued, and to 14 when she is.
+
 **And they are on screen.** `CivilianInit` writes motion **660** before it runs
 a line of script, and without a `MOTION_RULES` entry for the class the exporter
 resolved all 47 to a character with no motion and the client drew none of

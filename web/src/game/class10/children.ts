@@ -23,6 +23,18 @@ const RIDE_TURN_CAP = 0x80;
  * Drops every child whose `obj+0x34` carries the dead bit, remembering the
  * player named at `child+0x131C` — which is who gets the +400 when the last
  * one goes.
+ *
+ * **The bit is the whole test.** `[proved]`: the loop reads
+ * `*(u32 *)(child + 0x34) & 0x4000000` and nothing else. It used to be
+ * `kid.dead || flags & Dead`, and a child **missing from the pool** was
+ * dropped as well — so a captor that left by `ActorDespawn` (`FUN_00409CC0`),
+ * which raises `0x80018000` and never `0x4000000`, counted as a rescue here
+ * and in no engine. A child the pool no longer holds is kept: the engine's
+ * list still points at it, and its last flags word is what it would read.
+ * Every ordinary way out — a kill, `ZombieRetireAndCredit` (`0x4008001`),
+ * `ZombieStateDragTarget`'s flag-29 exit — raises the bit before the actor
+ * goes, and the civilian updates every frame in between, so none of them is
+ * missed.
  */
 export function CivilianPruneDeadChildren(obj: Actor): void {
   const sub = obj.civ;
@@ -30,11 +42,11 @@ export function CivilianPruneDeadChildren(obj: Actor): void {
   const keep: number[] = [];
   for (const at of sub.children) {
     const kid = ActorByAt(at);
-    if (kid && !(kid.dead || (kid.flags & ActorFlag.Dead))) {
+    if (!kid || !(kid.flags & ActorFlag.Dead)) {
       keep.push(at);
       continue;
     }
-    if (kid) sub.rescuePlayer = kid.killedBy ?? -1;
+    sub.rescuePlayer = kid.killedBy ?? -1;
     // `sub+0x64` is the pounce slot; the engine clears it when the child
     // holding it goes, or the next one never gets a turn.
     if (sub.pouncer === at) sub.pouncer = 0;

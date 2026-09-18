@@ -17859,3 +17859,73 @@ scene 2 block 1 outside Original Mode; and no node in the stage geometry is
 named for water or a gate. What is left unexamined in stage 3 is class 0x26,
 eight spawns of the camera's own boat, and class 0x45, thirty-two spawns that
 have never been read.
+
+## Two civilian reports: a branch a deep link decided, and a barrel thrown early
+
+**Bug 16 — stage 4 block 12's rescue "takes the wrong branch".** Block 12 is
+`branch {13, 14}` — the exe's own route record at `0x00597640` reads
+`01 00 0d 00 0e 00 ff ff` `[proved]` — and its last step places civilian
+`0x63CC`, script 39 → stream 93, whose rescue block runs `SetRouteBranch 1`
+(op 0x19, `0x0048BED5`). `EvtAdvanceStepOrRoute` indexes `next[var]`, so a
+rescue goes to block 14 and a maul to block 13. The port does exactly that
+now; what it did before was take 14 **whatever happened**, and the reason was
+not the civilian in the report at all.
+
+A headless trace of the deep link (seek, then `Walker` + `GameSystem` +
+civilian children built beside their parent) showed `g_script_branch_var`
+written at frame 1, before `0x63CC` had even spawned. The writer was stage 4's
+**block-4** hostage `0x3578`: the seek had stepped over block 4's
+`wait_script_flag 29`, raised the flag, and left her spawn marker standing, so
+she was rebuilt fresh at block 12; her captor's `ZombieStateDragTarget` saw
+flag 29 already up, raised its own dead bit and left, and her stream ran its
+rescue block — `SetRouteBranch 1` — in block 12's last step. Fixed in the
+replay, not the port: `Walker.retireFlagRaisers` retires a class-0x10 spawn
+whose streams raise the flag a replay steps over. Measured with the same
+harness, base against fix: no rescue took 14 before and 13 after; a rescue
+takes 14 in both.
+
+**What I have not settled** is the report's direction. At block 12's last
+frame the camera is at (-124.4, -665.2) looking at (-171.7, -715.8); block 13's
+room (its zombies at x ≈ -290) lies to the left of that view and block 14's
+(x ≈ +15..+90) to the right, and path 178 — block 14's first shot — turns
+right. So the exe's rescue route is the **right-hand** one as the port draws
+the world, and the report says a rescue should go left. Either the report
+remembers the other road, or the port's image is mirrored relative to the
+game's. `UpdateSceneViewAndLight` builds the view looking down local -Z and
+`BuildPerspectiveProjection` is left-handed; where the two are reconciled I did
+not find, so the handedness is `[open]`, and I did not force an arm (L45).
+
+Two further things came out of it. `CivilianPruneDeadChildren` read
+`kid.dead || flags & Dead` and also dropped a child missing from the pool; the
+exe tests `child+0x34 & 0x4000000` and nothing else, and `ActorDespawn` never
+raises it, so the port counted a captor that simply left as a rescue. Fixed,
+with a test that fails on the old line. And a byte sweep for `a4889c00` (L32)
+found a sixteen-writer inventory that is really eighteen: class 0x2C
+(`Class2CBranchToggleInit` / `Class2CBranchToggleUpdate`, `0x00432D50`) zeroes
+the variable at spawn and toggles it 0/1 on every shot. No shipped stage places
+class 0x2C.
+
+Wrong turns: I first read my own harness's `var 1 at frame 0` as the port's
+answer and nearly concluded "the port matches the exe, no bug" — it was the
+stale civilian, visible only once the write was trapped with a setter and a
+stack trace. And a harness that builds the walker's spawns but not a
+civilian's children (which only the character layer adds) makes every hostage
+"rescued" on her first frame, because her child list is empty; it looked like
+the same bug and was not.
+
+**Bug 11 — stage 1 original block 6, the barrel thrown before the player
+arrives.** Root cause `[proved]`: the captor `0x3C7C` holding the barrel is
+class 0x30 **state 37**, `ZombieStateCarryProp` (`FUN_0045B380`), which the
+port does not have — `class30/index.ts` runs state 37 as
+`ZombieStateTargetMotionScript`. The exe's state reads a 0x38-byte header
+(here: prop type 0, behaviour 1, release 3, motion 271 for **two loops**, mode
+-2), builds the barrel as a companion object (`CarriedPropInit`,
+`FUN_00442740`), holds it through 271 ×2, then 265, then releases on frame 15
+of 266 into `g_prop_behaviours[3]` — a ballistic throw that kills the civilian
+on contact unless the barrel or its carrier is shot first. The port skips the
+header entirely, so the two-loop hold never happens and the throw comes as
+soon as the actor is built. Not ported here: the bridge workstream (bug 3) is
+porting `ZombieStateCarryProp` and the carried prop for its own fat zombies at
+the same time, and a second port of the same routines would collide. What
+stage 1 needs beyond theirs is behaviour 3 and `CarriedPropHitTargetSphere`
+(`FUN_00443540`).

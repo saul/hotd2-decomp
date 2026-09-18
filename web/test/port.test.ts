@@ -39,8 +39,16 @@ import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
-import { ScriptedPropUpdate13 } from "../src/game/class13";
-import { CarrierState, type ScriptedPropTail } from "../src/game/class13/state";
+import { ScriptedPropUpdate13, g_carrier_prop_routines }
+  from "../src/game/class13";
+import {
+  CARRIER_SELECTORS_PORTED, CarrierRoutine0State, CarrierState,
+  type ScriptedPropTail,
+} from "../src/game/class13/state";
+import {
+  CARRIER0_FRAME_STRIKE, CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST,
+  SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
+} from "../src/game/class13/routine0";
 import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
@@ -207,6 +215,15 @@ import {
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import {
+  SCRIPT_FLAG_TYPE13_DROP, SFX_TYPE13_BEEP, SFX_TYPE13_LAND,
+  SFX_TYPE13_RELEASE, TYPE13_FLOOR_Y, TYPE13_PANEL_LIT_SLOT,
+  TYPE13_PANEL_SLOT, Type13Phase,
+} from "../src/game/class41/type13";
+import {
+  SCRIPT_FLAG_TYPE35_RATTLE, SCRIPT_FLAG_TYPE35_STILL, SFX_TYPE35_KNOCK,
+  Type35Phase,
+} from "../src/game/class41/type35";
 import {
   Type43ItemSet, TYPE43_PICKUP_SLOT,
 } from "../src/game/class41/type43";
@@ -4268,6 +4285,147 @@ console.log("\nclass 0x41 type 32, the lift:");
   check("and it expires on its two-step lifetime like any other prop",
         gate.dead);
   void LIFT_PANEL_DELAY;
+}
+
+console.log("\nclass 0x41 type 13, what drops out of stage 2's clock tower:");
+{
+  // Stage 2 block 21 step 4 op 6, evt 0xEC94, exactly as the bundle places
+  // it: type 13, a four-step lifetime, (-925, 180, -1297).
+  const rng = new Rng(13);
+  const events = propScene(rng);
+  G.g_scene_index = 1;
+  G.g_evt_step_index = 4;
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const drop = PlaceGenericProp(
+    { at: 0xec94, container: "generic", type: 13, slot: 4,
+      lifetime_evt_steps: 4, pos: [-925, 180, -1297],
+      pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(drop);
+  const tick = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      G.g_scene_tick_counter += 1;
+      BreakablePropPoolUpdate(rng, events);
+    }
+  };
+
+  check("it is its own family, because it inlines its own lifetime",
+        drop.family === PropFamily.Type13);
+  check("the arm gives it the 0x1A4A panel, not the descriptor's 4",
+        drop.slot === TYPE13_PANEL_SLOT, drop.slot.toString(16));
+
+  // Hanging: the panel blinks on the scene clock, 40 ticks a frame of it, and
+  // nothing else moves.
+  G.g_scene_tick_counter = 0;
+  tick(40);
+  check("hanging, the panel blinks every 40 scene ticks",
+        drop.slot === TYPE13_PANEL_SLOT && drop.removeFlag === 1,
+        `${drop.slot.toString(16)} ${drop.removeFlag}`);
+  tick(40);
+  check("...back to 0x1A49 on the next",
+        drop.slot === TYPE13_PANEL_LIT_SLOT, drop.slot.toString(16));
+  check("and it has not moved and made no sound",
+        drop.y === 180 && sounds.length === 0 && !drop.dead);
+  check("it never registers a shot sphere", !drop.shotRegistered);
+
+  // A step change stops the blink for good and resets the panel.
+  G.g_evt_step_index = 5;
+  tick(1);
+  check("a step change sets +0x2A0 and puts the panel back to 0x1A4A",
+        drop.storyItem === 1 && drop.slot === TYPE13_PANEL_SLOT
+        && drop.stepsElapsed === 1, `${drop.storyItem} ${drop.slot}`);
+  tick(200);
+  check("...and the blink never runs again",
+        drop.slot === TYPE13_PANEL_SLOT);
+
+  // Flag 0x6D, which block 21 step 7 op 4 raises: the release frame plays
+  // both sounds and lights the panel, and nothing falls yet.
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 1;
+  tick(1);
+  check("flag 0x6D releases it with a beep and the shutter sound",
+        drop.routinePhase === Type13Phase.Fall
+        && sounds.join() === [SFX_TYPE13_BEEP, SFX_TYPE13_RELEASE].join()
+        && drop.slot === TYPE13_PANEL_LIT_SLOT && drop.y === 180,
+        `${drop.routinePhase} ${sounds.map((x) => x.toString(16))}`);
+
+  // 0.02 of gravity a frame from rest: y = 180 - 0.01 n (n + 1), below the
+  // -6.0 floor on the 136th frame. 186 units, which is why the cut scene
+  // looking up the tower sees it go past.
+  let n = 0;
+  while (drop.routinePhase === Type13Phase.Fall && n < 1000) { tick(1); n++; }
+  check("it falls 186 units and lands on the 136th frame",
+        n === 136 && drop.y === TYPE13_FLOOR_Y, `${n} ${drop.y}`);
+  check("...with the landing sound, and a 0.4 judder across Z",
+        sounds[sounds.length - 1] === SFX_TYPE13_LAND
+        && Math.abs(drop.vz - 0.4) < 1e-9, `${drop.vz}`);
+  n = 0;
+  while (drop.routinePhase === Type13Phase.Judder && n < 1000) {
+    tick(1); n++;
+  }
+  check("the judder rings down at -0.925 a frame and stops after 27",
+        n === 27 && drop.vz === 0 && drop.routinePhase === Type13Phase.Rest,
+        `${n} ${drop.vz}`);
+
+  // The inlined lifetime: the step count first, `ActorKill`, no sweep test in
+  // between. Four steps; the fifth change retires it.
+  for (let b = 6; b <= 9; b++) { G.g_evt_step_index = b; tick(1); }
+  check("and it retires on the fifth step change of a four-step life",
+        drop.dead);
+}
+
+console.log("\nclass 0x41 type 35, the door stage 2's block-5 civilian is behind:");
+{
+  // Stage 2 block 3 step 4 op 5, evt 0x2504: placed at the ORIGIN, because
+  // `PropUpdateType35` draws both leaves at literal world coordinates.
+  const rng = new Rng(35);
+  const events = propScene(rng);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const door = PlaceGenericProp(
+    { at: 0x2504, container: "generic", type: 35, slot: 4,
+      lifetime_evt_steps: 4, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  G.g_breakable_props.push(door);
+  const tick = (k: number) => {
+    for (let i = 0; i < k; i++) BreakablePropPoolUpdate(rng, events);
+  };
+
+  tick(100);
+  check("with flag 0x68 down the door stands shut",
+        door.yaw === 0 && door.storyItem === 0 && sounds.length === 0);
+
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_RATTLE] = 1;
+  tick(19);
+  check("flag 0x68 up: nothing for nineteen frames",
+        door.routinePhase === Type35Phase.Count && sounds.length === 0,
+        `${door.storyItem}`);
+  tick(1);
+  check("...and the knock on the twentieth",
+        door.routinePhase === Type35Phase.Swing
+        && sounds.join() === String(SFX_TYPE35_KNOCK));
+  const swing: number[] = [];
+  for (let i = 0; i < 7; i++) { tick(1); swing.push(door.yaw); }
+  // `ftol(sin(phase) * 1536)`, phase 0x2000, 0x4000, then 0x1000 steps: out
+  // in two frames, back in five, zeroed as it passes 0x8000.
+  check("the leaves kick out 1536 BAMS in two frames and shut over five",
+        swing.join() === [1086, 1536, 1419, 1086, 587, 0, 0].join(),
+        swing.join());
+  check("...and it is counting again",
+        door.routinePhase === Type35Phase.Count && door.hingeB === 0);
+  tick(29);
+  check("the second knock is thirty counted frames after the first",
+        sounds.length === 1, `${sounds.length}`);
+  tick(1);
+  check("...on the fiftieth, which resets the count",
+        sounds.length === 2 && door.storyItem === 0);
+
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_STILL] = 1;
+  tick(3);
+  check("flag 0x69 stops it dead, whatever the swing was doing",
+        door.yaw === 0);
+  check("it draws the same two leaves whatever its position: the model is "
+        + "0x1812 and the placement is the origin",
+        GENERIC_DRAW_SLOT[35] === 0x1812 && door.x === 0 && door.z === 0);
 }
 
 console.log("\nclass 0x44 selector 11, the door that slides up:");
@@ -14736,6 +14894,73 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     G.g_cam_path_frame = 170;
     ScriptedPropUpdate13(boat, fr(rng));
     check("the camera cue on the tail is what removes it", boat.despawned);
+  }
+
+  // -- class 0x13 selector 0: stage 2's boat, which runs into the wall -------
+  {
+    // Stage 2 block 16 step 11 op 2, evt 0xA3E8: slot 0x1A36, scale 2.5,
+    // despawn on camera path 78 frame 1110, behaviour 8, selector 0 -- the
+    // bundle's own tail. Object path 0x151 here is `x = frame`.
+    const rng = new Rng(130);
+    scene(0, rng);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const host: GameHost = {
+      ...HOST,
+      objectPath: (slot, frame) => slot === 0x151
+        ? { x: frame, y: -25, z: 0, pitch: 0, yaw: 0, roll: 0 } : null,
+    };
+    const fr = (r: Rng): ClassFrame =>
+      ({ eye: EYE, dt: 1 / 60, rng: r, host, events });
+    G.g_active_cam_path = 78;
+    G.g_cam_path_frame = 326;
+    const boat = ActorSpawn(0xa3e8, SpawnClass.ScriptedProp, -1, "boat", {
+      class13: { slot: 0x1a36, cam_path: 78, cam_frame: 1110,
+                 scale: 2.5, behaviour: 8, selector: 0 },
+      pos: vec3(-1055, -26.25, -1620),
+    }, rng);
+    const t = () => (boat as { prop13: ScriptedPropTail }).prop13;
+    check("selector 0 makes it the carrier too",
+          G.g_civilian_carrier === boat.at);
+    check("the routines the class runs are exactly the selectors the "
+          + "exporter carries a model for",
+          Object.keys(g_carrier_prop_routines).map(Number).sort().join()
+          === [...CARRIER_SELECTORS_PORTED].sort().join(),
+          Object.keys(g_carrier_prop_routines).join());
+
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("its first frame allocates the ride and seats it on path 0x151 at "
+          + "the camera's frame -- it used to stand at its descriptor for ever",
+          t().state === CarrierRoutine0State.Ride && boat.pos.x === 326
+          && t().pathFrame === 327,
+          `${t().state} ${boat.pos.x} ${t().pathFrame}`);
+
+    let n = 1;
+    while (t().splashCel === 0 && n < 1000) {
+      ScriptedPropUpdate13(boat, fr(rng)); n++;
+    }
+    check("it strikes when the ride frame reaches 0x276, with SIBUKI2",
+          t().pathFrame === CARRIER0_FRAME_STRIKE && boat.pos.x === 629
+          && t().splashCel === CARRIER0_SPLASH_FIRST
+          && sounds.join() === String(SFX_CARRIER0_STRIKE),
+          `${t().pathFrame} ${boat.pos.x} ${sounds.map((x) => x.toString(16))}`);
+    check("...still in the ride state, which hands over one frame later",
+          t().state === CarrierRoutine0State.Ride);
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("and the next frame coasts on without the wake",
+          t().state === CarrierRoutine0State.Coast && boat.pos.x === 630);
+
+    // The splash strip is 94 cels and then off; the ride coasts to 710.
+    for (let i = 0; i < 200; i++) ScriptedPropUpdate13(boat, fr(rng));
+    check("the coast stops on g_carrier_routine0_ride_end and holds there",
+          t().state === CarrierRoutine0State.Stopped
+          && t().pathFrame === g_carrier_routine0_ride_end
+          && boat.pos.x === g_carrier_routine0_ride_end,
+          `${t().state} ${t().pathFrame} ${boat.pos.x}`);
+    check("the splash strip ran to 0x1031 and switched itself off, once",
+          t().splashCel === 0 && sounds.length === 1
+          && CARRIER0_SPLASH_LAST - CARRIER0_SPLASH_FIRST === 93);
   }
 }
 

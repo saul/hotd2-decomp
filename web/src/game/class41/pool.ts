@@ -27,6 +27,8 @@ import {
   PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
 } from "./draw_only";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
+import { PropUpdateType13 } from "./type13";
+import { PropUpdateType35 } from "./type35";
 import { PropUpdateType43 } from "./type43";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
@@ -61,7 +63,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       case PropFamily.Kinded: KindedPropUpdate(p, rng, events); break;
       case PropFamily.Falling: FallingContainerUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
-      case PropFamily.Generic: GenericPropUpdate(p); break;
+      case PropFamily.Generic: GenericPropUpdate(p, events); break;
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
       case PropFamily.ScriptFlagEffect:
         ScriptFlagEffectUpdate(p, events); break;
@@ -84,6 +86,10 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       // Its own lifetime, its own hit arms, its own shot-test tail. Nothing
       // the generic arm supplies belongs to it.
       case PropFamily.Type43: PropUpdateType43(p, rng, events); break;
+      // Its own inlined lifetime (step count before the sweep, `ActorKill`
+      // rather than `ActorDespawn`), no `AND` on `obj+0x34` and no
+      // `RegisterForShotTest`. See `class41/type13.ts`.
+      case PropFamily.Type13: PropUpdateType13(p, events); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }
@@ -104,11 +110,16 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
  * A type absent here is placed, drawn and otherwise inert, which is the
  * standing divergence `class41/generic.ts` declares.
  */
-const GENERIC_UPDATE: Partial<Record<number, (p: BreakableProp) => void>> = {
+const GENERIC_UPDATE: Partial<Record<number,
+  (p: BreakableProp, events?: Events) => void>> = {
   14: PropUpdateType14,
   // 31 *does* open with `PropExpireByStepLifetime`, so unlike 53 and 54 it
   // rides the generic arm and only owes its camera cue and its strip cursor.
   31: PropDrawOnlyType31,
+  // Opens with `PropExpireByStepLifetime` too, and ignores what it did: a
+  // retired door runs its rattle once more before the pool drops it, which
+  // the arm below does not reproduce because nothing can see it.
+  35: PropUpdateType35,
   19: PropUpdateType19,
   25: PropUpdateType25,
   40: PropUpdateType40,
@@ -132,7 +143,7 @@ const GENERIC_UPDATE: Partial<Record<number, (p: BreakableProp) => void>> = {
  * Every one of these routines masks `obj+0x34` itself, and a prop whose hit
  * bit survived the frame would answer its branch on every frame afterwards.
  */
-function GenericPropUpdate(p: BreakableProp): void {
+function GenericPropUpdate(p: BreakableProp, events?: Events): void {
   // `if (g_GameMode != 1) { ActorDespawn(obj); return; }` — Original Mode's
   // collectibles, gone on their first frame in Arcade.
   if (GENERIC_ORIGINAL_MODE_ONLY.has(p.kind) && G.g_GameMode !== 1) {
@@ -143,7 +154,7 @@ function GenericPropUpdate(p: BreakableProp): void {
   if (p.chainGroup > 0) {
     ChainSegmentUpdate(p, ChainSegmentZero(p.chainGroup));
   } else {
-    GENERIC_UPDATE[p.kind]?.(p);
+    GENERIC_UPDATE[p.kind]?.(p, events);
   }
   p.flags &= ~HIT_FLAG_MASK;
   // The tail thirty of these routines share: publish the sphere. A chain

@@ -65,6 +65,40 @@ units and `komono_bridge.bin` 472 at 47.9; `zom.bin` 998, the one clip class
 which means its delta is zero on every frame and only the pose arm can place
 it. `tools/verify_root_pose.py` asserts all of this.
 
+## Cross-fades: a still, and a held start frame
+
+`ActorSetMotionBlended` (`FUN_004119A0`) writes the start cursor to
+`track+0x08` (and its half, the authored frame, to `+0x18`), `track+0x28 =
+counter - 1`, `track+0x30 = fade + 1`, raises `track+0x37` bit 0, and calls
+`MotionStartOnTrack` (`FUN_004119F0`), which loads two pose slots through
+`MotionLoadPoseSlot` (`FUN_00411C20`):
+
+| mode | root | per bone (record stride 0x90) | from |
+|---|---|---|---|
+| 0 | `+0x6C` current | `+0x7C` | motion data |
+| 1 | `+0x44` slot A | `+0x88` | motion data |
+| 2 | `+0x50` slot B | `+0x94` | motion data |
+| 0xC | `+0x6C` -> `+0x44` | `+0x7C` -> `+0x88` | **the pose last drawn** |
+
+A blended start is mode 0xC then mode 2 at the new clip's start frame. For as
+long as bit 0 is up, `SkeletonAdvancePlayCursor` (`FUN_004111A0`) leaves the
+cursor where it is; `SkeletonResolveTrackFrames` (`FUN_00410BD0`) computes the
+weight `(counter - track+0x28) / track+0x30` and `SkeletonPoseRootFrame`
+(`FUN_00410920`) draws A lerped to B; `SkeletonApplyRootMotion` resets its
+baseline to the blended root every frame, so the object does not move. When
+`counter - track+0x28` reaches `track+0x30 + 1` the counter is rewritten to
+`start + 1` and the bit drops. So a fade of `n` shows the incoming start frame
+for `n + 1` frames at weights `1/(n+1) .. 1`, **out of a still**, and only
+then starts the clip. `[proved]`
+
+`MotionStartBetweenFrames` (`FUN_00411F20`) is the odd-cursor arm of the same
+start: slot A from authored frame `f`, slot B from `f + 1`.
+`MotionWriteBoneAngles` (`FUN_00411D70`) writes a bone only when its record's
+track byte `+0x8E` matches the track being started, which
+`SkeletonAssignSubtreeTrack` (`FUN_00412200`) sets per subtree -- that is how
+the hit reaction on track 1 drives only the bones it owns. `[likely]` for the
+last clause; its helper `FUN_00412290` is unread.
+
 ## Loading
 
 `MotionRequestBankLoad` (`0x0041D860`) enqueues **asset job kind 8** for a bank

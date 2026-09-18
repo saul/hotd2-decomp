@@ -77,19 +77,58 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // one of them silently never fired. `dt` is always a whole number of ticks
   // here -- `Tick.dt` is `frames * TICK` -- so this is a conversion, not a
   // rounding-off of something finer.
-  obj.playTicks += SecondsToTicks(dt);
-  // The outgoing clip keeps running underneath, which is what makes the blend
-  // land in the right place rather than freezing a pose and dissolving it.
+  //
+  // **A cross-fade holds both ends still**, and this is `SkeletonAdvancePlayCursor`
+  // (`FUN_004111A0`) and `SkeletonPoseRootFrame` (`FUN_00410920`) read
+  // together. `ActorSetMotionBlended` (`FUN_004119A0`) does not start the new
+  // clip running: it snapshots the pose **last drawn** into slot A
+  // (`MotionLoadPoseSlot` mode 0xC, `+0x6C` into `+0x44` and each bone's
+  // `+0x7C` into `+0x88`), loads the new clip's **start frame** into slot B
+  // (mode 2), and raises `track+0x37` bit 0. While that bit is up the sampler
+  // does not recompute the cursor from the frame counter at all -- the cursor
+  // stays on the start frame -- and the drawn pose is A lerped to B by
+  // `(counter - track+0x28) / track+0x30`. On the frame that ratio would pass
+  // one the counter is rewritten to `start + 1`, the bit drops, and the clip
+  // plays on from there.
+  //
+  // So the outgoing clip is a **still** -- it does not keep running underneath,
+  // and this used to say it did. It mattered wherever the outgoing clip was a
+  // one-shot on its last frame: its clock ran on past the end, the poser's
+  // `% frames` wrapped it to frame 0, and the blend dissolved **from the clip's
+  // first pose**. `ZombieStateEmerge` hands over on the last frame of an emerge
+  // clip whose first pose is crouched under the surface, so every zombie that
+  // came out of the water sank back into it for the length of the fade and
+  // stood up again (stage 2, block 16).
+  //
+  // And the incoming clip does not advance during the fade either, so a state
+  // that waits on its cursor waits the fade out first -- as it does in the
+  // engine.
+  const ticks = SecondsToTicks(dt);
+  let fading = false;
   if (obj.fadeFrom) {
-    obj.fadeFrom.ticks += SecondsToTicks(dt);
-    obj.fade -= SecondsToTicks(dt);
-    if (obj.fade <= 0) obj.fadeFrom = null;
+    obj.fade -= ticks;
+    if (obj.fade < 0) {
+      // `*model = model[2] + 1`: the fade is over and the clip starts moving,
+      // from the frame after the one it was held on.
+      obj.playTicks += -obj.fade;
+      obj.fadeFrom = null;
+      obj.fade = 0;
+    } else {
+      fading = true;
+    }
+  } else {
+    obj.playTicks += ticks;
   }
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
   if (base && !obj.action) {
     const f = MotionAuthoredFrame(obj, base);
-    const d = rootDelta(base, wasBase, f);
+    // `SkeletonApplyRootMotion` (`FUN_00410C50`) resets its baseline to the
+    // current root whenever `track+0x37` has bit 0 up and bit 5 down
+    // (`00410cf8`..`00410d29`), which is every frame of a fade: nothing moves
+    // the actor until the clip is playing again, and the first step is from
+    // the held start frame to the one after it.
+    const d = fading ? { x: 0, z: 0 } : rootDelta(base, wasBase, f);
     ApplyRootMotion(obj, d.x, d.z);
     obj.rootFrame = f;
   } else {

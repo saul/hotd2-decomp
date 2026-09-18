@@ -17922,3 +17922,72 @@ move out rather than at the eye. The probe reads no spike after the change.
 Wrong turns: the first guess for the flash was a light-gun frame blank or a
 DOM overlay, and there is neither in the player; the first probe shot at the
 stage-1 intro, where the shutter keeps the gun closed and nothing fires at all.
+
+## The emerging zombies sank back into the water, and every cross-fade was wrong
+
+Reported: stage 2 block 16 step 2's three class-0x30 spawns (state 27,
+`ZombieStateEmerge`, clip 183) "finish their animation then seem to disappear
+(or fall into the ground?) for a few frames".
+
+**The game state was innocent, and proving that came first.** A headless trace
+of the three actors through the real player (`?drive=1`, the harness's trace
+rows) had `y` at -14.8 -- the script's ground plane, because the spawns stand
+over the canal where `coli2.bin:4656` has a hole -- on every frame from spawn
+to well past the hand-over. The screenshots, one per frame, showed the drop
+starting four frames after the hand-over to `AttackRun` and recovering over the
+next six: the length of the attack run's 10-frame fade.
+
+**The fade was the port's invention in two ways.** `ActorAdvanceMotion` ran the
+outgoing clip's clock through the fade ("the outgoing clip keeps running
+underneath"), and the poser takes `% frames` of it; the emerge clip was on its
+last frame, so its clock wrapped to frame 0 -- the crouch under the surface --
+and the blend dissolved from there. Reading `ActorSetMotionBlended` down through
+`MotionStartOnTrack`, `MotionLoadPoseSlot` (mode 0xC copies the last drawn pose
+into slot A), `SkeletonResolveTrackFrames`, `SkeletonPoseRootFrame` and
+`SkeletonAdvancePlayCursor` settled what the engine does instead: a still of
+the outgoing pose, the incoming clip held on its start frame for `fade + 1`
+frames with root motion suppressed, then play from `start + 1`. All three are
+ported, in `ActorAdvanceMotion` and one fade-counter helper, so every class
+that fades gets them (L8).
+
+**Named:** `MotionLoadPoseSlot` (`0x00411C20`), `MotionWriteBoneAngles`
+(`0x00411D70`), `SkeletonWalkBoneAngles` (`0x00411EC0`),
+`MotionStartBetweenFrames` (`0x00411F20`), `SkeletonAssignSubtreeTrack`
+(`0x00412200`, `[likely]`). The first three names I tried for the middle ones
+were refused by the MCP's token-subset gate as variants of the first; the
+names above say what each does differently.
+
+**`ZombieStateEmerge` itself, re-read from the bytes:** both clip changes are
+`ActorSetMotion` cuts, not fades; case 0 falls into case 1 (and 1 into 2) with
+no return, so the delay's first frame is the spawn frame; there is no `0x4000`
+anywhere in it -- the port's pose freeze during the wait was invented; and
+`tail+0x03 == 1` hides the actor (`ActorSetPartVisibility(0)`) until the clip
+starts, which two of the three block-16 spawns take.
+
+Wrong turns, kept:
+
+* My first headless trace put every actor at `y = 0` because the harness
+  selected no collision and left the ground plane at 0; the first "real" trace
+  then read the floor as flickering between -25 and 0, which was the actor
+  walking over the edge of the canal hole in a harness with the wrong ground
+  plane. Neither was the bug. The real player's trace was the one to believe.
+* I first switched the poser to a *held* frame for the outgoing clip. That is
+  wrong for a looping clip, whose cursor is unbounded and must wrap; the fix is
+  stopping the clock, not clamping it, and the poser change was reverted to a
+  comment.
+* I first set the fade counter to the engine's `fade + 1`. The port advances
+  clocks **before** the state runs, so that drew weight 0 on the frame of the
+  call and released the clip a frame late. Counting from `fade` against a
+  length of `fade + 1` gives the engine's weights on the engine's frames.
+* The regression test's first version used the fixture's clip 12 as the emerge
+  clip -- which is also the fixture's run, so there was no clip change and no
+  fade to test. It uses 700 now.
+
+Timing moved for every faded clip, as it should: the stationary thrower's
+release and a death clip's corpse hand-over each land `fade` frames later, and
+their two tests say why.
+
+Left `[open]`: `obj+0x136C |= 0x100002` in the emerge's sub 0 and its
+`&= ~0x100000` on the hand-over (`0x100000` is `Carried` for the carrier
+states; L3), the `0x80000` in `obj+0x34`, and `model+0x64` bit 0, which the
+hidden arm clears and the clip start sets.

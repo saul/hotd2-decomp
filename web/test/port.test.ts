@@ -83,7 +83,7 @@ import {
   ColiTraceSegmentAllSets,
   QueryGroundHeightAt, QueryGroundSurfaceAt,
 } from "../src/game/coli";
-import { MotionRow, StrikeSub, ZombieState }
+import { MotionFade, MotionRow, StrikeSub, ZombieState }
   from "../src/game/class30/states";
 import { ZombieAttackRefusal, ZombieStateHoldAtRange }
   from "../src/game/class30/hold";
@@ -180,8 +180,9 @@ import {
 } from "../src/game/class14";
 import { ScriptFlagsThisBundleCanRaise }
   from "../src/script/waits/flag";
-import { CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES }
-  from "../src/game/class60";
+import {
+  CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES, ChapterCardSkipRequested,
+} from "../src/game/class60";
 import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
   from "../src/game/class61";
 import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
@@ -7102,19 +7103,109 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     check("state 27 is an entrance, not a synonym for AttackRun",
           z.state === ZombieState.Emerge, `state ${z.state}`);
     EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
-    check("...which holds the submerged pose and freezes the clock",
-          z.motion === 0xb9 && z.frozen === 1, `motion ${z.motion}`);
-    for (let i = 0; i < 29; i++) {
+    // Case 0 falls into case 1 in the engine's jump table, so the first
+    // frame both cuts to 0xB9 and counts one frame of the delay off. And
+    // nothing in the state writes `obj+0x34` bit 0x4000: the pose plays.
+    check("...which cuts to the submerged pose and counts its first frame",
+          z.motion === 0xb9 && z.zom.holdFrames === 29,
+          `motion ${z.motion} hold ${z.zom.holdFrames}`);
+    check("...without freezing the clock, which the engine never does",
+          z.frozen === 0 && (z.flags & ActorFlag.PoseFrozen) === 0,
+          `frozen ${z.frozen} flags ${z.flags.toString(16)}`);
+    for (let i = 0; i < 28; i++) {
       EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
     }
     check("it waits the descriptor's delay out", z.motion === 0xb9,
           `motion ${z.motion}`);
     EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
-    check("and then plays the clip the descriptor names",
+    check("and then plays the clip the descriptor names, on frame 30",
           z.motion === 12 && z.frozen === 0, `motion ${z.motion}`);
     // And the snap has it standing on the floor rather than under it.
     check("...on the floor, not five units under it", z.pos.y === 0,
           `y ${z.pos.y}`);
+  }
+
+  // A zero delay starts the emerge clip on the spawn frame -- sub 0 into sub
+  // 1 into sub 2 without a return -- and `tail+0x03 == 1` keeps the actor
+  // undrawn until then (`ActorSetPartVisibility`, `FUN_00409D10`, with 0 at
+  // `0x0045855A` and with 1 at `0x004585DC`).
+  {
+    const z = scene30();
+    z.emerge = { delay: 0, motion: 12 };
+    z.state = ZombieEntryState(ZombieState.Emerge);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    check("a zero-delay emerge plays its clip on the spawn frame",
+          z.motion === 12 && z.sub === 2, `motion ${z.motion} sub ${z.sub}`);
+
+    const w = scene30();
+    w.emerge = { delay: 15, motion: 12 };
+    w.attackState = 1;
+    w.state = ZombieEntryState(ZombieState.Emerge);
+    EnemyZombieUpdate(w, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    check("`tail+0x03 == 1` is not drawn while it waits", w.alpha === 0,
+          `alpha ${w.alpha}`);
+    for (let i = 0; i < 14; i++) {
+      EnemyZombieUpdate(w, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    }
+    check("...and is drawn again as the clip starts",
+          w.motion === 12 && w.alpha === 1, `motion ${w.motion} alpha ${w.alpha}`);
+  }
+
+  // **The hand-over does not sink the actor back into the water.** Stage 2
+  // block 16: `ZombieStateEmerge` leaves on the last frame of its clip and
+  // `ZombieStateAttackRun` starts the run over a 10-frame fade. The engine
+  // dissolves from a *still* of the last drawn pose -- `ActorSetMotionBlended`
+  // (`FUN_004119A0`) snapshots it into slot A through `MotionLoadPoseSlot`
+  // (`FUN_00411C20`) mode 0xC -- and holds the run on its start frame until
+  // the fade is done (`SkeletonAdvancePlayCursor`, `FUN_004111A0`). The port
+  // ran the outgoing clock on past the end of the clip, the poser's `% frames`
+  // wrapped it to frame 0, and frame 0 of an emerge clip is the submerged
+  // crouch: the zombie dropped under the surface for the fade and stood up.
+  {
+    const z = scene30();
+    // 700 rather than 12: the fixture's run *is* 12, and a run started over
+    // the clip already playing is no clip change at all.
+    z.emerge = { delay: 0, motion: 700 };
+    // Well out of the rings, so the run is still the run when its fade ends.
+    z.pos = vec3(0, 0, 150);
+    z.allowance = 8;
+    z.state = ZombieEntryState(ZombieState.Emerge);
+    const em = MotionOf(z, 700)!;
+    const step = () => {
+      ActorAdvanceMotion(z, 1 / 60);
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    };
+    for (let i = 0; i < 200 && z.state === ZombieState.Emerge; i++) step();
+    check("the emerge clip hands over to the attack run",
+          z.state === ZombieState.AttackRun, ZombieState[z.state]);
+    // Run the attack run's first frame, which is where the fade starts.
+    step();
+    const from = z.fadeFrom;
+    check("...over a fade out of the emerge clip",
+          from?.motion === 700 && z.fade > 0, JSON.stringify(from));
+    const startCursor = MotionPlayFrame(z);
+    const at = { ...z.pos };
+    const frames: number[] = [];
+    let held = true;
+    let fadeFrames = 0;
+    while (z.fadeFrom && fadeFrames < 40) {
+      frames.push(authoredFrameOfTicks(z.fadeFrom.ticks, em.fps, em.frames));
+      if (MotionPlayFrame(z) !== startCursor) held = false;
+      step();
+      fadeFrames += 1;
+    }
+    check("...dissolving from the clip's last pose on every frame of it, "
+          + "never its first", frames.length > 0
+            && frames.every((f) => f === em.frames - 1),
+          frames.join(","));
+    check("...while the run is held on its start frame, as the engine holds "
+          + "it", held && fadeFrames === 11, `held ${held} for ${fadeFrames}`);
+    check("...and nothing walks the actor until the fade is over",
+          Math.hypot(z.pos.x - at.x, z.pos.z - at.z) < 1e-9,
+          `moved ${Math.hypot(z.pos.x - at.x, z.pos.z - at.z).toFixed(3)}`);
+    check("...after which the run moves on from the frame after it",
+          MotionPlayFrame(z) === startCursor + 1,
+          `${MotionPlayFrame(z)} after ${startCursor}`);
   }
 
   // **A zombie in its emerge animation does not stagger when it is shot.**
@@ -8351,7 +8442,11 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
       },
     };
     const kit = CHARS.types["1"].zombie_throw!;
-    for (let i = 0; i < 12 && !G.g_thrown_weapons.length; i++) {
+    // 24, not 12: the throw clip starts over a fade of 4, and the engine
+    // holds a faded-in clip on its start frame for the fade's five frames
+    // (`SkeletonAdvancePlayCursor`, `FUN_004111A0`) before the cursor moves
+    // towards `hit_frame`.
+    for (let i = 0; i < 24 && !G.g_thrown_weapons.length; i++) {
       ZombieStateStandAndThrow(z, EYE, new Rng(1), host);
       ActorAdvanceMotion(z, 1 / 60);
     }
@@ -10352,8 +10447,11 @@ console.log("class 0x30, the death chain:");
 
   // The death clip plays **exactly once**: state 6 leaves at
   // `g_motion_play_length[obj+0x1B4] - 1`, which for the fixture's 30-frame
-  // clips is 58 ticks.
-  const clipTicks = MotionPlayLength(z);
+  // clips is 58 ticks -- after the fade in. `ChooseDeathMotion` starts it
+  // over `MotionFade.Quick`, and the engine holds a faded-in clip on its
+  // start frame until the fade is done (`SkeletonAdvancePlayCursor`,
+  // `FUN_004111A0`), which puts the whole fade in front of those 58.
+  const clipTicks = MotionPlayLength(z) + MotionFade.Quick;
   let toCorpse = -1;
   for (let i = 0; i < 400 && toCorpse < 0; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
@@ -11815,6 +11913,17 @@ console.log("\nthe shot effects:");
   check("the tracer flies twenty units a frame",
         Math.abs(Math.hypot(tracer.vel.x, tracer.vel.y, tracer.vel.z) - 20)
           < 1e-4, `${tracer.vel.z}`);
+  // NEW-BUGS bug 15, the full-screen flash on every shot. The muzzle is one
+  // unit in front of the eye, and the tracer's quad drawn there at scale 1
+  // fills the frame. `PlayerShotEffectsThink` (`FUN_00416B00`) moves a
+  // tracer **before** it draws it, so the engine never draws one there: the
+  // first position anything can see is one move out, and the roll has made
+  // its first step. The spawn lands after this frame's tick, so the spawn
+  // has to make that first move itself.
+  check("the tracer is first seen one move out from the muzzle, never at it",
+        Math.abs(tracer.pos.z - (1 + 20)) < 1e-4 && tracer.spin === 0x1000
+        && tracer.frame === 0,
+        `z ${tracer.pos.z} spin ${tracer.spin} frame ${tracer.frame}`);
   check("nothing was hit, so the tracer is not cut short",
         G.g_shot_hit_something[0] === 0);
   check("the ring cursor moved on", G.g_shot_effect_cursor[0] === 1);
@@ -12440,7 +12549,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     // Bails when there is no card rather than dereferencing one: with opcode
     // 0x0A unwired there is nothing to drive, and a suite that throws reports
     // one crash where it should report which assertions the work is holding up.
-    if (!card) return { frames: -1, card: null };
+    if (!card) return { frames: -1, card: null, w };
     let updates = 0;
     const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
     while (updates < expect + 60 && (G.g_script_flags[flag] ?? 0) === 0) {
@@ -12448,21 +12557,31 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
       updates += 1;
       w.tick(1 / 60);
     }
-    return { frames: updates, card };
+    return { frames: updates, card, w };
   };
 
   // The chapter card: `MOV word ptr [ESI+0x11c], 0xb4` at `0x004345AB`, then
-  // one decrement a frame and the flag on the frame it reads zero.
+  // the skip test at `0x00434802`. The engine would hold 180 frames; by the
+  // user's decision (NEW-BUGS bug 13) the port takes the pad's unconditional
+  // skip arm on every card, so the flag is up after **one** update — not a
+  // three-second dead pause at the top of every stage.
   {
-    const { frames, card } = runCard(SpawnClass.ChapterCard,
+    const { frames, card, w } = runCard(SpawnClass.ChapterCard,
                                      CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES);
-    check(`the chapter card holds ${CHAPTER_CARD_FRAMES} frames, then raises `
-          + `g_script_flags[${CHAPTER_CARD_FLAG}]`,
-          frames === CHAPTER_CARD_FRAMES
-          && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
+    check(`the chapter card is skipped: it raises `
+          + `g_script_flags[${CHAPTER_CARD_FLAG}] on its first update, not `
+          + `after ${CHAPTER_CARD_FRAMES}`,
+          frames === 1 && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
           `${frames} frames, flag ${G.g_script_flags[CHAPTER_CARD_FLAG]}`);
-    check("...and kills itself on the same frame",
-          card?.dead === true, `dead ${card?.dead}`);
+    check("...still through sub 0's latch, and kills itself on the same frame",
+          card?.dead === true && card?.sub === 1 && card?.hp === 0,
+          `dead ${card?.dead} sub ${card?.sub} hp ${card?.hp}`);
+    check("...via the pad's own no-dwell skip bit",
+          (ChapterCardSkipRequested() & 0x20000) !== 0,
+          `pad 0x${ChapterCardSkipRequested().toString(16)}`);
+    check("...and the gate behind it is open on the next walker tick",
+          w.wait === null && (G.g_script_flags[9] ?? 0) === 1,
+          `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
   }
 
   // The result card: 420 frames, and it drops the trigger on its first.

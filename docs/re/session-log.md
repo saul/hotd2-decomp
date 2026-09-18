@@ -17859,3 +17859,135 @@ scene 2 block 1 outside Original Mode; and no node in the stage geometry is
 named for water or a gate. What is left unexamined in stage 3 is class 0x26,
 eight spawns of the camera's own boat, and class 0x45, thirty-two spawns that
 have never been read.
+
+## The chapter card is skipped, and the shot flash was the tracer
+
+Two reports from `NEW-BUGS.md`, both decided by the user before any reading:
+skip title sequences entirely (bug 13), and lose the full-screen flash on every
+shot (bug 15, a photosensitivity problem).
+
+**The chapter card goes through its own skip arm.** `ChapterCardInstall`
+(`FUN_004342E0`) was already ported for its lifetime; reading the countdown in
+full found the pad test the port had noted and not transcribed. At `0x00434802`
+the engine sets the dwell to 1 when `g_pad_state` has bit 2 and the dwell is
+under `0xA0`, **or** has bit `0x20000` at all, then decrements. So "skip the
+card" did not need a new path: `ChapterCardSkipRequested` returns the `0x20000`
+bit, the test is transcribed as the engine writes it, and sub 0's setup, the
+flag and the kill all run on the card's first update. That is the declared
+divergence, at the function. The class-0x60 spawns were enumerated from the
+bundles: eight have a `wait_script_flag 248` behind them — every stage's block
+0 step 1, plus stage 3 block 7 and stage 4 block 4 — and the
+boss-block cards (op 3 of stage 1 block 16, stage 2 blocks 39/41, stage 3
+15/17, stage 4 27/29, stage 5 9, stage 6 14) have no gate behind them at all.
+
+Things the reading found that the port does not do, before or after this:
+
+* While a card is up `g_screen_furniture_flags` bit `0x20` is set, and five
+  routines test it — `RegionDrawResidentSet` skips the world, and
+  `ScriptedHumanoidDraw`, `SetPiecePropDrawAndTick`, `St1VehicleUpdate` and
+  `Class22CutsceneHoldUntilChapterCard` hold still. The port models no such
+  bit; with the card skipped it would last one frame anyway.
+* Sub 0 re-points light block 0 along the camera (`LightBlockSetDirection`,
+  `FUN_0040E140`) and sets the scene ambient to 0.7 (`SetSceneAmbient`,
+  `FUN_0040C2C0`), and neither is undone when the card dies. The light block
+  lives in the walker's channel state, which `game/` cannot write; unported,
+  and an open question whether stage 4's opening ambient of 0.2 is meant to
+  survive the card.
+* The boss-name banner (`BossIntroBannerUpdate`, `FUN_00437AC0`) is the other
+  thing in the image shaped like a title: 300 frames between the boss's own
+  `set_script_flag 30` and the shutter opening, reached from five boss classes
+  through `BossIntroBannerSpawn`. It is not a `wait_script_flag 248` gate and
+  it drives the boss's entrance, so it was left alone and put to the user.
+
+The pseudocode's `return` after sub 1's scene-5 draw is `L35` again:
+`MatrixStackPop` at `0x004347AD` is a `CALL`, and the arm runs on through
+`0x00436AD0` into the countdown like the other five.
+
+**The flash was a tracer drawn at the eye.** Reproduced headlessly with a probe
+that reads the canvas's mean luminance every animation frame: 58 before a shot,
+142 for one frame after it, three shots out of three. The muzzle-flash toggle
+was off, so it was not the one effect that is meant to be at the crosshair.
+`PlayerShotEffectSpawn` seats the tracer at the muzzle point, one unit in front
+of the eye; `PlayerShotEffectsThink` (`FUN_00416B00`) runs *test, move, draw,
+step*, so the engine's first draw of a tracer is always one move (twenty
+units) out, whichever side of the player's task its own sits on. The port's
+tick runs before the shot is resolved, so a fresh tracer was drawn unmoved —
+and the doc comment on the tick said so, as a declared one-frame divergence
+with the engine's task order left open. It was the flash. The spawn now makes the first pass's move itself
+(`TracerAdvance`, shared with the tick); the frame counter is left for the next
+tick, which is where the engine steps it, so the sixty-frame life and the
+cut-on-hit at frame 1 are unchanged and a landed shot's single draw is now one
+move out rather than at the eye. The probe reads no spike after the change.
+
+Wrong turns: the first guess for the flash was a light-gun frame blank or a
+DOM overlay, and there is neither in the player; the first probe shot at the
+stage-1 intro, where the shutter keeps the gun closed and nothing fires at all.
+
+## The emerging zombies sank back into the water, and every cross-fade was wrong
+
+Reported: stage 2 block 16 step 2's three class-0x30 spawns (state 27,
+`ZombieStateEmerge`, clip 183) "finish their animation then seem to disappear
+(or fall into the ground?) for a few frames".
+
+**The game state was innocent, and proving that came first.** A headless trace
+of the three actors through the real player (`?drive=1`, the harness's trace
+rows) had `y` at -14.8 -- the script's ground plane, because the spawns stand
+over the canal where `coli2.bin:4656` has a hole -- on every frame from spawn
+to well past the hand-over. The screenshots, one per frame, showed the drop
+starting four frames after the hand-over to `AttackRun` and recovering over the
+next six: the length of the attack run's 10-frame fade.
+
+**The fade was the port's invention in two ways.** `ActorAdvanceMotion` ran the
+outgoing clip's clock through the fade ("the outgoing clip keeps running
+underneath"), and the poser takes `% frames` of it; the emerge clip was on its
+last frame, so its clock wrapped to frame 0 -- the crouch under the surface --
+and the blend dissolved from there. Reading `ActorSetMotionBlended` down through
+`MotionStartOnTrack`, `MotionLoadPoseSlot` (mode 0xC copies the last drawn pose
+into slot A), `SkeletonResolveTrackFrames`, `SkeletonPoseRootFrame` and
+`SkeletonAdvancePlayCursor` settled what the engine does instead: a still of
+the outgoing pose, the incoming clip held on its start frame for `fade + 1`
+frames with root motion suppressed, then play from `start + 1`. All three are
+ported, in `ActorAdvanceMotion` and one fade-counter helper, so every class
+that fades gets them (L8).
+
+**Named:** `MotionLoadPoseSlot` (`0x00411C20`), `MotionWriteBoneAngles`
+(`0x00411D70`), `SkeletonWalkBoneAngles` (`0x00411EC0`),
+`MotionStartBetweenFrames` (`0x00411F20`), `SkeletonAssignSubtreeTrack`
+(`0x00412200`, `[likely]`). The first three names I tried for the middle ones
+were refused by the MCP's token-subset gate as variants of the first; the
+names above say what each does differently.
+
+**`ZombieStateEmerge` itself, re-read from the bytes:** both clip changes are
+`ActorSetMotion` cuts, not fades; case 0 falls into case 1 (and 1 into 2) with
+no return, so the delay's first frame is the spawn frame; there is no `0x4000`
+anywhere in it -- the port's pose freeze during the wait was invented; and
+`tail+0x03 == 1` hides the actor (`ActorSetPartVisibility(0)`) until the clip
+starts, which two of the three block-16 spawns take.
+
+Wrong turns, kept:
+
+* My first headless trace put every actor at `y = 0` because the harness
+  selected no collision and left the ground plane at 0; the first "real" trace
+  then read the floor as flickering between -25 and 0, which was the actor
+  walking over the edge of the canal hole in a harness with the wrong ground
+  plane. Neither was the bug. The real player's trace was the one to believe.
+* I first switched the poser to a *held* frame for the outgoing clip. That is
+  wrong for a looping clip, whose cursor is unbounded and must wrap; the fix is
+  stopping the clock, not clamping it, and the poser change was reverted to a
+  comment.
+* I first set the fade counter to the engine's `fade + 1`. The port advances
+  clocks **before** the state runs, so that drew weight 0 on the frame of the
+  call and released the clip a frame late. Counting from `fade` against a
+  length of `fade + 1` gives the engine's weights on the engine's frames.
+* The regression test's first version used the fixture's clip 12 as the emerge
+  clip -- which is also the fixture's run, so there was no clip change and no
+  fade to test. It uses 700 now.
+
+Timing moved for every faded clip, as it should: the stationary thrower's
+release and a death clip's corpse hand-over each land `fade` frames later, and
+their two tests say why.
+
+Left `[open]`: `obj+0x136C |= 0x100002` in the emerge's sub 0 and its
+`&= ~0x100000` on the hand-over (`0x100000` is `Carried` for the carrier
+states; L3), the `0x80000` in `obj+0x34`, and `model+0x64` bit 0, which the
+hidden arm clears and the clip start sets.

@@ -250,11 +250,11 @@ OPCODES: dict[int, Op] = {
     # the 64-entry ring at DAT_007DA220 with a fixed job kind; see
     # ASSET_JOB_KIND and docs/formats/pipeline.md.
     0x50: ("asset_load_slot", "fix", 2),    # FUN_0041D5D0, kind 0/1
-    0x51: ("asset_unload_slot", "fix", 2),  # FUN_0041D610, kind 2
+    0x51: ("asset_unload_slot", "fix", 2),  # AssetQueueUnloadSlot (FUN_0041D610), kind 2
     0x52: ("asset_load_polfile", "fix", 2),  # FUN_0041D650, kind 3
     0x53: ("asset_free_polfile", "fix", 2),  # FUN_0041D690, kind 4
     0x54: ("asset_load_texbank", "fix", 2),  # FUN_0041D6D0, kind 6
-    0x55: ("asset_free_texbank", "fix", 2),  # FUN_0041D710, kind 7
+    0x55: ("asset_free_texbank", "fix", 2),  # AssetQueueFreeTexbank (FUN_0041D710), kind 7
     0x56: ("asset_job_8", "fix", 2),        # FUN_0041D750, kind 8
     0x57: ("asset_job_9", "fix", 2),        # FUN_0041D790, kind 9
     # Drain the asset job ring: everything, only tex\+pol\ (types < 8), or

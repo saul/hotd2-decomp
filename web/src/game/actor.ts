@@ -1701,9 +1701,17 @@ export interface ActorBase {
    * straight into the walk-back.
    */
   fadeFrom: { motion: number; ticks: number } | null;
-  /** Frames of the cross-fade left. */
+  /**
+   * Frames of the cross-fade left. It starts at the fade length and the
+   * fade is over when it goes **below zero**, so the incoming clip is held on
+   * its start frame for `length + 1` frames, as the engine holds it -- see
+   * `ActorAdvanceMotion` and `ActorRestartFade` in `class30/motion_cue.ts`.
+   */
   fade: number;
-  /** How many it started with, so the weight is a ratio. */
+  /**
+   * The engine's `track+0x30`: the fade length **plus one**, so that the
+   * weight `1 - fade / fadeLen` runs from `1 / (length + 1)` to one.
+   */
   fadeLen: number;
   /**
    * The frame index the root-motion delta was last taken at, for the base

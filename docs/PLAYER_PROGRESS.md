@@ -342,9 +342,12 @@ mechanism the engine does not have, which is now gone.
 **And two entrances that place the actor.** A spawn's `y` is where its entrance
 *starts*, not where it stands:
 
-* `ZombieStateEmerge` (27, eighteen spawns) holds a submerged pose with the
-  clock frozen and root motion off, waits the descriptor's delay, then plays
-  the clip the descriptor names — 178 for the water ones, 183 for the ground —
+* `ZombieStateEmerge` (27, eighteen spawns) cuts to the submerged clip 0xB9
+  and lets it play -- this said "with the clock frozen and root motion off",
+  and nothing in the routine writes the freeze bit -- waits the descriptor's
+  delay (the first frame of it counted on the spawn frame, and a spawn whose
+  `tail+0x03` is 1 not drawn until it is over), then cuts to the clip the
+  descriptor names — 178 for the water ones, 183 for the ground —
   whose own translation lifts the actor out, throwing a splash at frames 22 and
   35. That is the missing "get out of the water" animation.
 * `ZombieStateDelayedLeap` (26, eleven spawns) waits, then rides an arc to a
@@ -862,6 +865,8 @@ each one.
 | The blood sat inside the limb, at its middle | Half right and half not. `DrawBloodSpray` (`FUN_00407230`) does put it at the hit **bone**, and re-reads the bone every one of its twenty-five frames so it tracks — but at the sphere's centre **plus its radius on camera-space z**, which is the near face, the side the shot came from. The port had the centre and left it there | `render/effects.ts` works in camera space, which is what the routine does |
 | A miss had no material | `SpawnWorldImpact` (`FUN_00405260`) takes the sprite kind *and* the sound from the collision triangle, and `render/shooting.ts` had no collision to trace, so it raycast the drawn geometry and called every surface "other". The bundle carries the game's own `coli/` sets now | `ShotHitWorld` in `game/combat/shot.ts`, tracing far-end-first the way `FUN_00404B80` does |
 | The gun made no noise | `PlayerFireAndReloadUpdate` (`FUN_00414940`) ends a shot with `BuildShotRay`, `PlayerShotEffectSpawn` and `PlaySoundId(g_gunshot_sound_ids[player])`, and `ResolveShotRequest` had the first two. Nothing else in the shot path was silent — the flesh impacts, the ricochets, the surfaces and the breakables all played, which is why this reads as "no sound" rather than as one missing file | the emit on the line after the muzzle flash in `game/combat/shot.ts`; `npm run audio` measures the peak sample the page decodes |
+| A full-screen white flash on every shot (NEW-BUGS 15: "triggering for epilepsy"), mean frame luminance 58 → 142 for one frame | Not the light gun, and not the muzzle flash (that toggle is off by default). It was the **tracer**: `PlayerShotEffectSpawn` puts the round at the muzzle point, one unit in front of the eye, and the port drew it there on the spawn frame, where its scale-1 quad fills the view. `PlayerShotEffectsThink` (`FUN_00416B00`) moves a tracer *before* it draws it, so the engine never draws one at the muzzle whichever order its two tasks run in. The port's spawn lands after the frame's tick, and a declared one-frame divergence said so — it was the flash | the spawn makes the first pass's move itself (`TracerAdvance` in `game/effects/shot_effects.ts`), so every tracer is first drawn one move out, as in the exe, and the divergence is gone; `test:port` asserts the first drawn position, and a canvas-luminance probe reads no spike across three shots |
+| A three-second dead pause at the top of every stage (NEW-BUGS 13) | Block 0 step 1 of every stage waits on `wait_script_flag 248`, and flag 248 is raised by the chapter card, class 0x60, after its 180-frame dwell. The player draws no card, so the dwell was a frozen scene | **by the user's decision the port skips title sequences**: `ChapterCardSkipRequested` hands the card's skip test the pad's unconditional skip bit (`0x20000`), so the engine's own skip arm cuts it on its first update — installer, latch, flag and kill all still run. Declared as a divergence in `game/class60/`; `test:port` asserts one update to the flag and the gate open behind it |
 | `breakables: none placed` where the port had props | Neither half of that was a port bug. `render/breakables.ts` reads `G.g_breakable_props`, and `spawn_placed` does not fill it: it puts a class-0x41 **placer** in the object pool, and `PropContainerPlacerUpdate` (`FUN_00461CD0`) is the class handler that calls the constructor and then `ActorKill`s itself. A paused transport hands `world.update` a `STOPPED_TICK`, so `GameUpdate` never runs and a seek that arrived correctly shows nothing. The address in the report was also before the placer -- stage 3 block 0 step 3 places its props at ops 10 and 11, behind `wait_enemies_alive <= 0` at op 8, so there is a room to clear first -- and the harness that contradicted the page had never seeked at all (`L44`) | the describe line now names the placers waiting for a frame; `npm run props43` pins the two addresses headlessly and `npm run props-panel` reads the panel itself in Chrome |
 
 **Where the effects live, and why it is not `render/`.** All of it is engine
@@ -2811,6 +2816,44 @@ Both halves are transcribed now, each on the line with the address that writes
 it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
+
+## A cross-fade dissolves from a still, and holds the new clip
+
+Emerging zombies in stage 2's block 16 finished their climb out of the water,
+sank back into it for a few frames, and stood up again. Nothing in the game
+state moved -- `y` was the same on every frame of the hand-over -- and the
+cause was the one thing every blended clip change in the port shared.
+
+`ActorSetMotionBlended` (`FUN_004119A0`) does not keep the outgoing clip
+running. `MotionStartOnTrack` snapshots the pose **last drawn** into slot A
+(`MotionLoadPoseSlot`, `FUN_00411C20`, mode 0xC), loads the incoming clip's
+**start frame** into slot B, and raises `track+0x37` bit 0. While that bit is
+up `SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not recompute the cursor,
+`SkeletonPoseRootFrame` draws A lerped to B by `(counter - track+0x28) /
+track+0x30` (`fade + 1`), and `SkeletonApplyRootMotion` resets its baseline
+each frame so nothing walks the actor. When the counter passes the fade the
+cursor is rewritten to `start + 1` and the clip plays on. `[proved]`
+
+The port ran the outgoing clip's clock through the fade and started the new
+clip moving at once. For a looping clip the difference is a few frames of
+timing; for a one-shot on its last frame it is the whole bug, because the
+poser's `% frames` wrapped the still-running clock back to the clip's **first**
+pose -- and frame 0 of an emerge clip is the crouch under the surface. Now:
+
+* the outgoing clip is a still -- `fadeFrom.ticks` is not advanced;
+* the incoming clip is held on its start frame for `fade + 1` frames, with no
+  root motion, and moves on from the frame after it;
+* the weight runs `1/(fade+1) .. 1`, as the engine's does.
+
+**That is a timing change for every blended clip in the game**, and it is the
+engine's: a state that waits on a cursor frame of a faded-in clip now waits the
+fade out first. Two port tests had bounds tuned to the old clock -- the
+stationary thrower's release inside 12 frames and a death clip's 58 ticks --
+and both now carry the fade in front, with the routine cited. `ZombieStateEmerge`
+itself also moved closer: both its clip changes are `ActorSetMotion` cuts, its
+sub 0 falls into sub 1 on the same frame, it never froze the pose, and a
+`tail+0x03 == 1` spawn is undrawn (`ActorSetPartVisibility` 0, the port's
+`alpha`) until its clip starts.
 
 ## What a bone draws, which is not its draw slot
 

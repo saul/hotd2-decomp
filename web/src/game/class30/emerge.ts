@@ -20,7 +20,7 @@ import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
-import { ActorSetMotionBlended } from "./motion_cue";
+import { ActorSetMotion, ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
 
 /** The pose `ZombieStateEmerge` holds while it waits — `FUN_00411930(0xB9)`. */
@@ -68,12 +68,25 @@ function atLastFrame(obj: ZombieActor): boolean {
 /**
  * `ZombieStateEmerge` — `FUN_004584E0`, class 0x30 state 27.
  *
- * Sub 0 freezes the actor in motion 0xB9 — root motion **off**, so it does not
- * drift while it waits — and arms the descriptor's delay. Sub 1 counts that
- * down and then turns root motion back on and plays the descriptor's own
- * emerge clip, whose translation is what lifts the actor out. Sub 2 plays it
- * out, throwing a splash at frames 22 and 35 if it is clip 178, and hands over
- * to `AttackRun`.
+ * Sub 0 cuts to motion 0xB9 and arms the descriptor's delay, and **falls
+ * straight into sub 1 on the same frame** -- the jump table sends case 0 on
+ * into case 1's decrement, so a delay of 0 starts the emerge clip on the
+ * spawn frame. Sub 1 counts the delay down and then cuts to the descriptor's
+ * own emerge clip, whose translation is what lifts the actor out. Sub 2 plays
+ * it out, throwing a splash at frames 22 and 35 if it is clip 178, and hands
+ * over to `AttackRun`.
+ *
+ * **Both clip changes are cuts** -- `ActorSetMotion` (`FUN_00411930`) at
+ * `0x00458588` and `0x00458600`, not the blended setter. The hand-over is the
+ * other way round: `ZombieStateAttackRun` starts its run over a 10-frame fade,
+ * which dissolves from a **still** of this clip's last pose. The port ran that
+ * still's clock on past the end of the clip and wrapped it back to the first,
+ * submerged, frame, so the actor sank into the water for the length of the
+ * fade and stood up again -- see `ActorAdvanceMotion`.
+ *
+ * **Nothing here freezes the pose.** The port raised `ActorFlag.PoseFrozen`
+ * and `obj.frozen` through the wait, "so it does not drift"; there is no
+ * `0x4000` in any of the three writes to `obj+0x34` below, and 0xB9 plays.
  *
  * **Three writes to `obj+0x34` span the state, and they are what makes an
  * emerging zombie unstaggerable.** `OR DH, 0x21` in sub 0, `AND EDX,
@@ -81,6 +94,11 @@ function atLastFrame(obj: ZombieActor): boolean {
  * {@link ActorFlag.NoHitReaction} is up for the whole entrance and
  * {@link ActorFlag.ShotImmune} for the submerged half of it. Each is on its
  * line below with the address that writes it.
+ *
+ * [open] `obj+0x136C |= 0x100002` in sub 0 (`0x00458528`; `|= 0x10` instead
+ * when `obj+0x34` has `0x200000`, which it clears) and `&= ~0x100000` on the
+ * hand-over are not ported. `0x100000` is `ZombieFlag2.Carried` for the
+ * carrier states, and L3 says not to assume it means that here.
  */
 export function ZombieStateEmerge(obj: ZombieActor, dt: number,
                                   events?: Events): void {
@@ -88,8 +106,8 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
   if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
 
   if (obj.sub === 0) {
-    // Off the world push and out of the ground snap until it is up: the pose
-    // is under the floor on purpose.
+    // `0x00458535  AND ECX, 0xdfffffff` on `obj+0x136C` -- off the world
+    // push until it is up: the pose is under the floor on purpose.
     obj.flags2 &= ~ZombieFlag2.CollideWorld;
     // `00458532  80ce21  OR DH, 0x21` — **one instruction, two bits, and both
     // of them are about being shot.** `0x100` is {@link ActorFlag.ShotImmune},
@@ -98,28 +116,38 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     // `ActorPlayHitReaction` (`FUN_004544C0`) tests at `004544D8`. Neither was
     // ported, which is why a zombie halfway out of the water stumbled.
     obj.flags |= ActorFlag.ShotImmune | ActorFlag.NoHitReaction;
-    obj.flags |= ActorFlag.PoseFrozen;
-    obj.frozen = 1;
-    ActorSetMotionBlended(obj, SUBMERGED_MOTION, 0, 0);
+    // `0x0045854A  CMP byte [EBP+3], 1` -- descriptor `tail+0x03`, which the
+    // port carries as `attackState` -- then `ActorSetPartVisibility`
+    // (`FUN_00409D10`) with 0: an actor whose byte is 1 is **not drawn** while
+    // it waits. `obj.alpha` is the port's stand-in for the per-part draw byte
+    // (see `render/characters.ts`), as it is for
+    // `ZombieStateAwaitCivilianOrder`. The same arm raises `obj+0x34 |=
+    // 0x90000` (`ActorFlag.NoCameraTrack` and an unnamed `0x80000`) and clears
+    // `model+0x64` bit 0; the clip start below takes all three back.
+    if (obj.attackState === 1) {
+      obj.alpha = 0;
+      obj.flags |= ActorFlag.NoCameraTrack;
+    }
+    ActorSetMotion(obj, SUBMERGED_MOTION);
     obj.zom.holdFrames = p.delay;              // +0x1330
     obj.sub = 1;
-    return;
+    // No return: case 0 falls into case 1.
   }
 
   if (obj.sub === 1) {
     obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames > 0) return;
-    obj.frozen = 0;
-    obj.flags &= ~ActorFlag.PoseFrozen;
+    // `0x004585DC  ActorSetPartVisibility(model, 1)` -- drawn again.
+    obj.alpha = 1;
     // `004585EC  81e2fffef6ff  AND EDX, 0xfff6feff` — the clip that lifts the
     // actor out has started, so it is shootable again. The mask drops
     // `0x90100`; the port names two of those three bits and `0x80000` has no
     // field here. **`0x2000` is not in it** — the stagger stays suppressed for
     // the whole clip, and only the hand-over below takes it back down.
     obj.flags &= ~(ActorFlag.ShotImmune | ActorFlag.NoCameraTrack);
-    ActorSetMotionBlended(obj, p.motion, 0, 0);
+    ActorSetMotion(obj, p.motion);
     obj.sub = 2;
-    return;
+    // No return: case 1 falls into case 2 as well.
   }
 
   if (obj.motion === EMERGE_SPLASH_MOTION) {

@@ -17859,3 +17859,66 @@ scene 2 block 1 outside Original Mode; and no node in the stage geometry is
 named for water or a gate. What is left unexamined in stage 3 is class 0x26,
 eight spawns of the camera's own boat, and class 0x45, thirty-two spawns that
 have never been read.
+
+## The chapter card is skipped, and the shot flash was the tracer
+
+Two reports from `NEW-BUGS.md`, both decided by the user before any reading:
+skip title sequences entirely (bug 13), and lose the full-screen flash on every
+shot (bug 15, a photosensitivity problem).
+
+**The chapter card goes through its own skip arm.** `ChapterCardInstall`
+(`FUN_004342E0`) was already ported for its lifetime; reading the countdown in
+full found the pad test the port had noted and not transcribed. At `0x00434802`
+the engine sets the dwell to 1 when `g_pad_state` has bit 2 and the dwell is
+under `0xA0`, **or** has bit `0x20000` at all, then decrements. So "skip the
+card" did not need a new path: `ChapterCardSkipRequested` returns the `0x20000`
+bit, the test is transcribed as the engine writes it, and sub 0's setup, the
+flag and the kill all run on the card's first update. That is the declared
+divergence, at the function. The class-0x60 spawns were enumerated from the
+bundles: eight have a `wait_script_flag 248` behind them — every stage's block
+0 step 1, plus stage 3 block 7 and stage 4 block 4 — and the
+boss-block cards (op 3 of stage 1 block 16, stage 2 blocks 39/41, stage 3
+15/17, stage 4 27/29, stage 5 9, stage 6 14) have no gate behind them at all.
+
+Things the reading found that the port does not do, before or after this:
+
+* While a card is up `g_screen_furniture_flags` bit `0x20` is set, and five
+  routines test it — `RegionDrawResidentSet` skips the world, and
+  `ScriptedHumanoidDraw`, `SetPiecePropDrawAndTick`, `St1VehicleUpdate` and
+  `Class22CutsceneHoldUntilChapterCard` hold still. The port models no such
+  bit; with the card skipped it would last one frame anyway.
+* Sub 0 re-points light block 0 along the camera (`LightBlockSetDirection`,
+  `FUN_0040E140`) and sets the scene ambient to 0.7 (`SetSceneAmbient`,
+  `FUN_0040C2C0`), and neither is undone when the card dies. The light block
+  lives in the walker's channel state, which `game/` cannot write; unported,
+  and an open question whether stage 4's opening ambient of 0.2 is meant to
+  survive the card.
+* The boss-name banner (`BossIntroBannerUpdate`, `FUN_00437AC0`) is the other
+  thing in the image shaped like a title: 300 frames between the boss's own
+  `set_script_flag 30` and the shutter opening, reached from five boss classes
+  through `BossIntroBannerSpawn`. It is not a `wait_script_flag 248` gate and
+  it drives the boss's entrance, so it was left alone and put to the user.
+
+The pseudocode's `return` after sub 1's scene-5 draw is `L35` again:
+`MatrixStackPop` at `0x004347AD` is a `CALL`, and the arm runs on through
+`0x00436AD0` into the countdown like the other five.
+
+**The flash was a tracer drawn at the eye.** Reproduced headlessly with a probe
+that reads the canvas's mean luminance every animation frame: 58 before a shot,
+142 for one frame after it, three shots out of three. The muzzle-flash toggle
+was off, so it was not the one effect that is meant to be at the crosshair.
+`PlayerShotEffectSpawn` seats the tracer at the muzzle point, one unit in front
+of the eye; `PlayerShotEffectsThink` (`FUN_00416B00`) runs *test, move, draw,
+step*, so the engine's first draw of a tracer is always one move (twenty
+units) out, whichever side of the player's task its own sits on. The port's
+tick runs before the shot is resolved, so a fresh tracer was drawn unmoved —
+and the doc comment on the tick said so, as a declared one-frame divergence
+with the engine's task order left open. It was the flash. The spawn now makes the first pass's move itself
+(`TracerAdvance`, shared with the tick); the frame counter is left for the next
+tick, which is where the engine steps it, so the sixty-frame life and the
+cut-on-hit at frame 1 are unchanged and a landed shot's single draw is now one
+move out rather than at the eye. The probe reads no spike after the change.
+
+Wrong turns: the first guess for the flash was a light-gun frame blank or a
+DOM overlay, and there is neither in the player; the first probe shot at the
+stage-1 intro, where the shutter keeps the gun closed and nothing fires at all.

@@ -178,8 +178,9 @@ import {
 } from "../src/game/class14";
 import { ScriptFlagsThisBundleCanRaise }
   from "../src/script/waits/flag";
-import { CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES }
-  from "../src/game/class60";
+import {
+  CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES, ChapterCardSkipRequested,
+} from "../src/game/class60";
 import { RESULT_CARD_FLAG, RESULT_CARD_FRAMES }
   from "../src/game/class61";
 import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
@@ -11812,6 +11813,17 @@ console.log("\nthe shot effects:");
   check("the tracer flies twenty units a frame",
         Math.abs(Math.hypot(tracer.vel.x, tracer.vel.y, tracer.vel.z) - 20)
           < 1e-4, `${tracer.vel.z}`);
+  // NEW-BUGS bug 15, the full-screen flash on every shot. The muzzle is one
+  // unit in front of the eye, and the tracer's quad drawn there at scale 1
+  // fills the frame. `PlayerShotEffectsThink` (`FUN_00416B00`) moves a
+  // tracer **before** it draws it, so the engine never draws one there: the
+  // first position anything can see is one move out, and the roll has made
+  // its first step. The spawn lands after this frame's tick, so the spawn
+  // has to make that first move itself.
+  check("the tracer is first seen one move out from the muzzle, never at it",
+        Math.abs(tracer.pos.z - (1 + 20)) < 1e-4 && tracer.spin === 0x1000
+        && tracer.frame === 0,
+        `z ${tracer.pos.z} spin ${tracer.spin} frame ${tracer.frame}`);
   check("nothing was hit, so the tracer is not cut short",
         G.g_shot_hit_something[0] === 0);
   check("the ring cursor moved on", G.g_shot_effect_cursor[0] === 1);
@@ -12437,7 +12449,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     // Bails when there is no card rather than dereferencing one: with opcode
     // 0x0A unwired there is nothing to drive, and a suite that throws reports
     // one crash where it should report which assertions the work is holding up.
-    if (!card) return { frames: -1, card: null };
+    if (!card) return { frames: -1, card: null, w };
     let updates = 0;
     const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
     while (updates < expect + 60 && (G.g_script_flags[flag] ?? 0) === 0) {
@@ -12445,21 +12457,31 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
       updates += 1;
       w.tick(1 / 60);
     }
-    return { frames: updates, card };
+    return { frames: updates, card, w };
   };
 
   // The chapter card: `MOV word ptr [ESI+0x11c], 0xb4` at `0x004345AB`, then
-  // one decrement a frame and the flag on the frame it reads zero.
+  // the skip test at `0x00434802`. The engine would hold 180 frames; by the
+  // user's decision (NEW-BUGS bug 13) the port takes the pad's unconditional
+  // skip arm on every card, so the flag is up after **one** update — not a
+  // three-second dead pause at the top of every stage.
   {
-    const { frames, card } = runCard(SpawnClass.ChapterCard,
+    const { frames, card, w } = runCard(SpawnClass.ChapterCard,
                                      CHAPTER_CARD_FLAG, CHAPTER_CARD_FRAMES);
-    check(`the chapter card holds ${CHAPTER_CARD_FRAMES} frames, then raises `
-          + `g_script_flags[${CHAPTER_CARD_FLAG}]`,
-          frames === CHAPTER_CARD_FRAMES
-          && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
+    check(`the chapter card is skipped: it raises `
+          + `g_script_flags[${CHAPTER_CARD_FLAG}] on its first update, not `
+          + `after ${CHAPTER_CARD_FRAMES}`,
+          frames === 1 && G.g_script_flags[CHAPTER_CARD_FLAG] === 1,
           `${frames} frames, flag ${G.g_script_flags[CHAPTER_CARD_FLAG]}`);
-    check("...and kills itself on the same frame",
-          card?.dead === true, `dead ${card?.dead}`);
+    check("...still through sub 0's latch, and kills itself on the same frame",
+          card?.dead === true && card?.sub === 1 && card?.hp === 0,
+          `dead ${card?.dead} sub ${card?.sub} hp ${card?.hp}`);
+    check("...via the pad's own no-dwell skip bit",
+          (ChapterCardSkipRequested() & 0x20000) !== 0,
+          `pad 0x${ChapterCardSkipRequested().toString(16)}`);
+    check("...and the gate behind it is open on the next walker tick",
+          w.wait === null && (G.g_script_flags[9] ?? 0) === 1,
+          `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
   }
 
   // The result card: 420 frames, and it drops the trigger on its first.

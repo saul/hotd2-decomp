@@ -219,7 +219,7 @@ classic ring-buffer initialisation.
 | `0x0041D610` | enqueue **unload slot** (`0x51`) |
 | `0x0041D650` | enqueue **load pol file** (`0x52`) |
 | `0x0041D690` | enqueue **free pol file** (`0x53`) |
-| `0x0041D6D0` / `0x0041D710` | enqueue tex bank load / free (`0x54`/`0x55`) |
+| `0x0041D6D0` / `0x0041D710` | enqueue tex bank load / free (`0x54`/`0x55`); the free is `AssetQueueFreeTexbank` |
 | `0x0041D750` / `0x0041D790` | enqueue job kinds 8 / 9 (`0x56`/`0x57`) |
 | `0x00418820` | load ONE slot: read offset table, seek, read just that model |
 | `0x00418BA0` | unload one slot: unlink, free, clear state |

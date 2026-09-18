@@ -342,9 +342,12 @@ mechanism the engine does not have, which is now gone.
 **And two entrances that place the actor.** A spawn's `y` is where its entrance
 *starts*, not where it stands:
 
-* `ZombieStateEmerge` (27, eighteen spawns) holds a submerged pose with the
-  clock frozen and root motion off, waits the descriptor's delay, then plays
-  the clip the descriptor names — 178 for the water ones, 183 for the ground —
+* `ZombieStateEmerge` (27, eighteen spawns) cuts to the submerged clip 0xB9
+  and lets it play -- this said "with the clock frozen and root motion off",
+  and nothing in the routine writes the freeze bit -- waits the descriptor's
+  delay (the first frame of it counted on the spawn frame, and a spawn whose
+  `tail+0x03` is 1 not drawn until it is over), then cuts to the clip the
+  descriptor names — 178 for the water ones, 183 for the ground —
   whose own translation lifts the actor out, throwing a splash at frames 22 and
   35. That is the missing "get out of the water" animation.
 * `ZombieStateDelayedLeap` (26, eleven spawns) waits, then rides an arc to a
@@ -2811,6 +2814,44 @@ Both halves are transcribed now, each on the line with the address that writes
 it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
+
+## A cross-fade dissolves from a still, and holds the new clip
+
+Emerging zombies in stage 2's block 16 finished their climb out of the water,
+sank back into it for a few frames, and stood up again. Nothing in the game
+state moved -- `y` was the same on every frame of the hand-over -- and the
+cause was the one thing every blended clip change in the port shared.
+
+`ActorSetMotionBlended` (`FUN_004119A0`) does not keep the outgoing clip
+running. `MotionStartOnTrack` snapshots the pose **last drawn** into slot A
+(`MotionLoadPoseSlot`, `FUN_00411C20`, mode 0xC), loads the incoming clip's
+**start frame** into slot B, and raises `track+0x37` bit 0. While that bit is
+up `SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not recompute the cursor,
+`SkeletonPoseRootFrame` draws A lerped to B by `(counter - track+0x28) /
+track+0x30` (`fade + 1`), and `SkeletonApplyRootMotion` resets its baseline
+each frame so nothing walks the actor. When the counter passes the fade the
+cursor is rewritten to `start + 1` and the clip plays on. `[proved]`
+
+The port ran the outgoing clip's clock through the fade and started the new
+clip moving at once. For a looping clip the difference is a few frames of
+timing; for a one-shot on its last frame it is the whole bug, because the
+poser's `% frames` wrapped the still-running clock back to the clip's **first**
+pose -- and frame 0 of an emerge clip is the crouch under the surface. Now:
+
+* the outgoing clip is a still -- `fadeFrom.ticks` is not advanced;
+* the incoming clip is held on its start frame for `fade + 1` frames, with no
+  root motion, and moves on from the frame after it;
+* the weight runs `1/(fade+1) .. 1`, as the engine's does.
+
+**That is a timing change for every blended clip in the game**, and it is the
+engine's: a state that waits on a cursor frame of a faded-in clip now waits the
+fade out first. Two port tests had bounds tuned to the old clock -- the
+stationary thrower's release inside 12 frames and a death clip's 58 ticks --
+and both now carry the fade in front, with the routine cited. `ZombieStateEmerge`
+itself also moved closer: both its clip changes are `ActorSetMotion` cuts, its
+sub 0 falls into sub 1 on the same frame, it never froze the pose, and a
+`tail+0x03 == 1` spawn is undrawn (`ActorSetPartVisibility` 0, the port's
+`alpha`) until its clip starts.
 
 ## What a bone draws, which is not its draw slot
 

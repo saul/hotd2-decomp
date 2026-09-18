@@ -1197,7 +1197,7 @@ export type Globals = typeof G;
  * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
  * | `g_nFiringGate = 0` | ✅ |
- * | the scene light block, via `FUN_0040E140` | ❌ |
+ * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
  * | five unread words: `DAT_009A2BAC`, `DAT_009C8E8C`, `DAT_009C6F1C`,

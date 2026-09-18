@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 46333 | 168 | engine |
+| `game/` | 46514 | 168 | engine |
 | `hod2lib/` | 16293 | 34 | engine |
-| `render/` | 8948 | 31 | render |
+| `render/` | 8957 | 31 | render |
 | `app/` | 7427 | 29 | app |
 | `script/` | 4324 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 910 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **90265** | **335** | |
+| **total** | **90455** | **335** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
-* `game/actor.ts` — 2032
+* `game/actor.ts` — 2040
 * `app/main.ts` — 1988
 * `script/walker.ts` — 1873
 * `hod2lib/exetab.ts` — 1839
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 915 in `ghidra/annotations/functions.tsv` |
+| Named functions | 925 in `ghidra/annotations/functions.tsv` |
 | Named globals | 407 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 37 under `tools/`, run together by `verify_all.py` |
 

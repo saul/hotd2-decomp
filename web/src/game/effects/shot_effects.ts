@@ -247,6 +247,15 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
     t.kind = slow ? OriginalWeaponKind.Slow : 0;
     t.vel.x = dx * speed; t.vel.y = dy * speed; t.vel.z = dz * speed;
     t.spin = 0;
+    // The engine's first pass over this record, which the port's tick has
+    // already run past this frame. `PlayerShotEffectsThink` moves a tracer
+    // **before** it draws it (`+0x04 += +0x1C` ahead of the `AssetDrawSlot`
+    // at `0x00416B00`'s tracer arm), so the round is never drawn where it
+    // spawned — one unit in front of the eye, where a scale-1 quad fills
+    // the frame. Drawing it there once was the full-screen flash on every
+    // shot (NEW-BUGS bug 15). The frame counter is *not* stepped here: the
+    // engine steps it after the draw, and the port's next tick is that step.
+    TracerAdvance(t);
   }
 
   // The cursor moves HERE, between the tracer and the third record.
@@ -271,6 +280,20 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
 }
 
 /**
+ * `[port-only]` — the tracer arm's move, out of `PlayerShotEffectsThink`
+ * (`FUN_00416B00`): `pos += vel`, then, off the object-path arm (kind 5),
+ * the roll steps by `0x1000` — both before the `AssetDrawSlot`. A helper
+ * only because the port runs it from two places: the tick, and the spawn for
+ * the pass the tick has already made this frame.
+ */
+function TracerAdvance(t: ShotTracer): void {
+  t.pos.x += t.vel.x;
+  t.pos.y += t.vel.y;
+  t.pos.z += t.vel.z;
+  if (t.kind !== OriginalWeaponKind.Slow) t.spin += TRACER_SPIN;
+}
+
+/**
  * `[port-only]` — the state half of `PlayerShotEffectsThink`
  * (`FUN_00416B00`).
  *
@@ -284,12 +307,13 @@ export function PlayerShotEffectSpawn(player: number, ray: ShotRay,
  * engine's own behaviour and is what makes a re-used slot expire immediately
  * rather than a frame late.
  *
- * [diverges] by exactly one frame, on the frame a record is spawned: the
- * engine moves the tracer before its first draw and the port draws it at the
- * muzzle first, because the spawn happens after this tick has already run.
- * Which of the two the engine really does depends on where
+ * A record spawned this frame is spawned **after** this tick, so its first
+ * pass's move is made by `PlayerShotEffectSpawn` itself (see
+ * {@link TracerAdvance}); either task order in the engine draws a tracer
+ * first one move out from the muzzle, and so does the port. Which frame that
+ * draw lands on — the spawn frame or the next — depends on where
  * `PlayerShotEffectsThink`'s task sits in the list relative to the player's,
- * and that order is `[open]`.
+ * and that order is `[open]`; the positions drawn are the same either way.
  */
 export function PlayerShotEffectsTick(): void {
   for (let i = 0; i < SHOT_EFFECT_RING * 2; i++) {
@@ -306,12 +330,7 @@ export function PlayerShotEffectsTick(): void {
           || (t.frame === 1 && (G.g_shot_hit_something[t.player] ?? 0) !== 0)) {
         t.live = false;
       }
-      if (t.live) {
-        t.pos.x += t.vel.x;
-        t.pos.y += t.vel.y;
-        t.pos.z += t.vel.z;
-        if (t.kind !== OriginalWeaponKind.Slow) t.spin += TRACER_SPIN;
-      }
+      if (t.live) TracerAdvance(t);
     }
 
     if (G.g_GameMode === 1) {

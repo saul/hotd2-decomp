@@ -18664,3 +18664,53 @@ the script reporting itself unblocked; that is behind an override and is
 Left `[open]`: class 0x30 states 46 (`0x2E`, where the cue sends a rider) and
 48 (the riders' attack state) are unported and fall to `ZombieGiveUpAttack`, so
 a rider that wins a permit does not do what the engine's does.
+
+### Class 0x30 states 46, 47 and 48: what a rider does
+
+`g_class30_states` (`0x00592AE8`) read directly (`L38`): 46 `0x0045CFC0`,
+47 `0x0045D120`, 48 `0x0045D500`, with 45 (`ZombieStateTargetLostPause`) and
+49 (`NoOpStub`) either side agreeing with the port. All three fell to the
+dispatch's `default` before, which sent a rider to `WaitTurn` on the boat.
+
+* **46 `ZombieStateIdleOnCarrier`** — play `row[0]` and turn toward the camera
+  taken into the carrier's space (`MatrixInvert` of the carrier's matrix).
+  It never leaves on its own: a rider whose script ends while the camera is
+  short of its cue frame holds here until it is shot. Stage 3's 1P rider does
+  exactly that (script ends at camera frame ~1066, cue 1080) `[likely]` —
+  ten frames' margin, which the port's clip timing decides.
+* **48 `ZombieStateLeapOffCarrierToPoint`** — stage 3's riders' attack. On the
+  clip's launch frame: `CarrierBakeWorldPose` (`FUN_0045D920`, position AND
+  orientation), back to the plain update, and a parabola `t = |vy/accel|`,
+  `vel = (dx/2t, vy, dz/2t)` to the script's world point. Lands, plays out,
+  `AttackRun`. Headless, with the rider spawned after the cue (a seek): it
+  leaps from the arriving boat onto the player's boat at (-1068.7, -18.8,
+  -2846.0) against a scripted (-1068.2, -2845.4), stands on its deck —
+  through the moving-object collision pass — and strikes. Screenshots read.
+* **47 `ZombieStateLeapOffCarrierForward`** — the same launched along the
+  baked facing at a scripted speed, gravity `0xBDDF0123`. Stage 2's rider.
+
+The leap's numbers are the `tail+0x08` blob; the exporter now decodes shapes
+47 (14 bytes) and 48 (22 bytes) in both halves. `CarrierBakeWorldPose` also
+replaces class 0x18's step-off, which baked the point and dropped the yaw.
+`MatrixGetAngles`, `MatrixToEulerBams` and `VecAimYAxisXThenZ`
+(`FUN_00401800`) are in `game/matrix.ts`.
+
+**Overlap.** `newbugs-stage2-scenery` was porting the same three states at
+the same time (uncommitted, `game/class30/carrier_rider.ts`, with its own
+names in the shared Ghidra database: `ZombieStateHoldOnCarrier`,
+`ZombieStateLeapOffCarrierAtMark`). This branch's names are in its TSV; the
+merge has to pick one.
+
+**Also found, not changed:** `ZombieStateDelayedLeap`'s launch comment says
+the `0xDFFEFFFF` mask drops `CollideWorld | OffScreenPermit`, but
+`OffScreenPermit` is `0x20000` and the mask's second bit is `0x10000`
+(`OneShotFired`). And `globals.tsv` names `0x00592CBC`
+`g_pHitReactionMotionsAlt`, while every reader the port has uses it as the
+general motion row (`MotionRowOf`).
+
+**The `--route 0:3` stop was the harness.** The branch bar freezes its
+countdown while hovered, and `playthrough.mjs` left the real mouse parked on
+the route button it clicked at block 0 — so block 4's branch, drawn under the
+same pointer, never counted down. Not the override's world state (`L45`) and
+not the port. It moves the pointer away now, and `--route 0:3` reaches an end
+block in both modes. (It did not need to earn block 0's arm by shooting.)

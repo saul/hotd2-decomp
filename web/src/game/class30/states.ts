@@ -223,6 +223,17 @@ export enum ZombieState {
   PounceOnTarget = 44,
   /** `ZombieStateTargetLostPause` (`FUN_0045C7D0`). The target died under it. */
   TargetLostPause = 45,
+
+  // -- a rider's: states that start on a carrier (`class30/carrier_leap.ts`)
+  /**
+   * `ZombieStateIdleOnCarrier` (`FUN_0045CFC0`). Idle on the boat, facing the
+   * camera, until `CarriedZombieUpdate18`'s camera cue lets the attack run.
+   */
+  IdleOnCarrier = 46,
+  /** `ZombieStateLeapOffCarrierForward` (`FUN_0045D120`). Stage 2's rider. */
+  LeapOffCarrierForward = 47,
+  /** `ZombieStateLeapOffCarrierToPoint` (`FUN_0045D500`). Stage 3's riders. */
+  LeapOffCarrierToPoint = 48,
   /**
    * The order `ZombieStateAwaitCivilianOrder` reads as "die" rather than as a
    * state to enter — class 0x10's op 0x1A writes it to `sub+0x2C`.

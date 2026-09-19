@@ -27,6 +27,10 @@
 import type { Actor } from "./actor";
 import { BAMS_TO_RAD } from "../core/bams";
 import type { Vec3 } from "./vec";
+import {
+  MatIdentity, MatrixGetTranslation, MatrixInvert, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixToEulerBams, MatrixTransformPoint, MatrixTranslate,
+} from "./matrix";
 
 /** `obj+0x34` bit `0x4000000` — the carrier is leaving and its riders step off. */
 export const CARRIER_LEAVING_BIT = 0x4000000;
@@ -84,4 +88,54 @@ export function CarrierPublishWorld(obj: Actor, carrier: Actor | undefined):
   // is relative to it for the same reason its position is.
   obj.carrierYaw = carrier.yaw;
   return true;
+}
+
+/**
+ * `CarrierBakeWorldPose` — `FUN_0045D920`. Put a rider down in world space.
+ *
+ * ```
+ * MatrixLoadIdentity();
+ * Translate(carrier+0x40); RotX(+0x64); RotZ(+0x6C); RotY(+0x68);
+ * Translate(obj+0x40);     RotX(+0x64); RotZ(+0x6C); RotY(+0x68);
+ * obj+0x40 = MatrixGetTranslation();
+ * MatrixToEulerBams(obj+0x64, obj+0x68, obj+0x6C);
+ * ```
+ *
+ * **Position and orientation both.** The step-off this replaces baked only
+ * the point, so a rider that left its boat kept its boat-relative yaw in world
+ * space and faced wherever that happened to point. The engine then reloads
+ * the camera's view onto the stack, which is the draw's business.
+ */
+export function CarrierBakeWorldPose(obj: Actor, carrier: Actor): void {
+  const m = MatIdentity();
+  MatrixTranslate(m, carrier.pos.x, carrier.pos.y, carrier.pos.z);
+  MatrixRotateX(m, carrier.pitch);
+  MatrixRotateZ(m, carrier.roll);
+  MatrixRotateY(m, carrier.yaw);
+  MatrixTranslate(m, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixRotateX(m, obj.pitch);
+  MatrixRotateZ(m, obj.roll);
+  MatrixRotateY(m, obj.yaw);
+  MatrixGetTranslation(m, obj.pos);
+  const e = MatrixToEulerBams(m);
+  obj.pitch = e.rx;
+  obj.yaw = e.ry;
+  obj.roll = e.rz;
+}
+
+/**
+ * A world point in a carrier's own space: `MatrixLoadIdentity; Translate;
+ * RotX; RotZ; RotY` off the carrier, `MatrixInvert(0)`, `MatrixTransformPoint`.
+ * `[port-only]` as a function -- the three carrier-leap states each spell
+ * those calls out inline, and this is exactly them.
+ */
+export function CarrierLocalPoint(carrier: Actor, x: number, y: number,
+                                  z: number, out: Vec3): void {
+  const m = MatIdentity();
+  MatrixTranslate(m, carrier.pos.x, carrier.pos.y, carrier.pos.z);
+  MatrixRotateX(m, carrier.pitch);
+  MatrixRotateZ(m, carrier.roll);
+  MatrixRotateY(m, carrier.yaw);
+  MatrixInvert(m);
+  MatrixTransformPoint(m, { x, y, z }, out);
 }

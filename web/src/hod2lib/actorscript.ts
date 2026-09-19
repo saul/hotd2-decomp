@@ -33,6 +33,11 @@ export const TARGET_SCRIPT_SHAPE: Record<number, [number, number]> = {
   40: [16, 4],   // {f32 x, y, z; s16 motion, frame}
   41: [16, 4],   // the same, arrived at rather than walked past
   43: [4, 0],    // {s16 loops; s16 cue_frame} -- no list
+  // The two leaps off a carrier. `FUN_0045D120` (state 47):
+  // {f32 speed; f32 vy; s16 motion, frame, freeze}. `FUN_0045D500` (48):
+  // {f32 x, z; f32 vy, accel; s16 motion, frame, freeze}. No list.
+  47: [14, 0],
+  48: [22, 0],
 };
 
 export interface TargetScript {
@@ -84,6 +89,21 @@ export function targetScript(prog: RawSource, off: number | null | undefined,
     }
   } else if (state === 43) {
     head = { loops: i16(raw, off), cue: i16(raw, off + 2) };
+  } else if (state === 47) {
+    // `ZombieStateLeapOffCarrierForward` (`FUN_0045D120`): the launch speed
+    // along the facing, the upward speed, then the clip, the frame it leaves
+    // on and the frame its pose freezes on.
+    head = { leap_speed: f32(raw, off), leap_vy: f32(raw, off + 4),
+             motion: i16(raw, off + 8), frame: i16(raw, off + 10),
+             freeze: i16(raw, off + 12) };
+  } else if (state === 48) {
+    // `ZombieStateLeapOffCarrierToPoint` (`FUN_0045D500`): the world x and z
+    // it lands at, the upward speed and the per-frame vertical acceleration,
+    // then the clip, the frame it leaves on and the frame it freezes on.
+    head = { leap_point: [f32(raw, off), f32(raw, off + 4)],
+             leap_vy: f32(raw, off + 8), leap_accel: f32(raw, off + 12),
+             motion: i16(raw, off + 16), frame: i16(raw, off + 18),
+             freeze: i16(raw, off + 20) };
   } else if (state === 37) {
     // `ZombieStateCarryProp` (`FUN_0045B380`) and `CarriedPropInit`
     // (`FUN_00442740`) between them read every word of the 0x38 bytes:

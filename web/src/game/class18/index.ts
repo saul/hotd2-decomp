@@ -23,7 +23,7 @@
  *         && g_cam_path_frame < params[0x0E]
  *         && g_active_cam_path == params[0x0C]) { state = 0x2E; sub = 0; }
  *     if (state == 7 && sub == 1 && obj->+0x1330 == 2) {
- *         FUN_0045D920(carrier+0x40, obj+0x40);
+ *         CarrierBakeWorldPose(obj+0x40, carrier+0x40);   // FUN_0045D920
  *         obj->[0] = EnemyZombieUpdate;
  *     }
  *     MatrixStackPop(1);
@@ -44,9 +44,16 @@
  * frame on it is an ordinary class-0x30 actor standing in world space, and
  * nothing about it remembers the carrier.
  *
- * `FUN_0045D920` is the bake — it is the carrier matrix applied to
- * `obj+0x40` — and the port composes the same transform rather than calling a
- * routine it has not read in isolation.
+ * `CarrierBakeWorldPose` (`FUN_0045D920`) is the bake, and it is position
+ * **and** orientation: carrier matrix times the actor's own, read back with
+ * `MatrixToEulerBams`. This used to be the point alone, from a routine the
+ * port had not read.
+ *
+ * The **attack** is not this exit at all: a rider's attack state is 48
+ * (`ZombieStateLeapOffCarrierToPoint`, `class30/carrier_leap.ts`), which does
+ * the same bake from inside the update and leaps at a world point; and state
+ * `0x2E`, where the cue sends it until the camera arrives, is
+ * `ZombieStateIdleOnCarrier`.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -55,7 +62,7 @@ import { type Actor, type ZombieActor } from "../actor";
 import { EnemyZombieHandler, EnemyZombieInit, EnemyZombieUpdate }
   from "../class30/index";
 import { ZombieState } from "../class30/states";
-import { CarrierPublishWorld, CarrierTransformPoint } from "../carrier";
+import { CarrierBakeWorldPose, CarrierPublishWorld } from "../carrier";
 import { ActorByAt, G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -68,7 +75,7 @@ import { SpawnClass } from "../spawn_class";
  * It is class 0x30's own table index, not a class-0x18 state: this class has
  * no state machine of its own at all.
  */
-export const CARRIED_ZOMBIE_CUE_STATE = 0x2e;
+export const CARRIED_ZOMBIE_CUE_STATE = ZombieState.IdleOnCarrier;
 
 /** `obj+0x1330 == 2`, the second half of the step-off test — the field the
  * port calls {@link Actor.slideTimer}. */
@@ -88,8 +95,6 @@ export function CarriedZombieInit18(obj: Actor, rng?: Rng,
   obj.carrierAt = G.g_civilian_carrier;
 }
 
-const _world = { x: 0, y: 0, z: 0 };
-
 /**
  * `CarriedZombieUpdate18` — `FUN_0045CD90`.
  *
@@ -105,7 +110,12 @@ const _world = { x: 0, y: 0, z: 0 };
 export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
   const carrier = obj.carrierAt >= 0 ? ActorByAt(obj.carrierAt) : undefined;
   EnemyZombieUpdate(obj as ZombieActor, f);
-  if (!CarrierPublishWorld(obj, carrier) || !carrier) return;
+  if (!carrier) return;
+  // States 47 and 48 step off inside the update (`CarrierBakeWorldPose` and
+  // `*obj = EnemyZombieUpdate`): the rest of this frame's wrapper still runs
+  // in the engine, but the position is world now, so there is nothing to
+  // publish.
+  if (obj.carrierAt >= 0 && !CarrierPublishWorld(obj, carrier)) return;
 
   const z = obj as ZombieActor;
   // The camera cue out of the spawn's own parameters. `tail+0x0C` is the path
@@ -123,12 +133,9 @@ export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
     z.sub = 0;
   }
   // ...and the step off, which bakes the transform and hands the actor back.
-  if (z.state === ZombieState.CorpseSink && z.sub === 1
+  if (obj.carrierAt >= 0 && z.state === ZombieState.CorpseSink && z.sub === 1
       && z.slideTimer === CARRIED_ZOMBIE_STEP_OFF_SUB) {
-    CarrierTransformPoint(carrier, obj.pos.x, obj.pos.y, obj.pos.z, _world);
-    obj.pos.x = _world.x;
-    obj.pos.y = _world.y;
-    obj.pos.z = _world.z;
+    CarrierBakeWorldPose(obj, carrier);
     obj.carrierAt = -1;
   }
 }

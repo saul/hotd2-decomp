@@ -18,7 +18,7 @@
 
 /** The per-file digests, so a stale bundle can name what moved. */
 export const BUILDER_FILES: Readonly<Record<string, string>> = {
-  "actorscript.ts": "96c980600b829786a2f02ea8c85853d4e99e5291c465a3b5276dc8889b2835e5",
+  "actorscript.ts": "56b7d192278d5d7c2c75f64f72ef75cf96516250bf04e3f6c113dc3a4b9be1c3",
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "8a62bedf274c97b1d6d7dfe8e64934a767bbeb694a7de3fee1b4c73ad35fb2e1",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
@@ -58,4 +58,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "c27934bd37b7c87a1deff892dbc60f12b2e0731e7f9595a546222e0c10cb9e44";
+export const BUILDER_HASH = "1030434216b28c507f5878e31a0c6bcc2b20e9187335ab5114a64fdc08d3ea7a";

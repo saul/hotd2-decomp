@@ -659,6 +659,14 @@ try {
       } else {
         console.log(`  branch ${b.sub}: ${chose}`);
       }
+      // **Take the pointer off the branch bar after clicking it.** The bar
+      // freezes its countdown while hovered (`Player.branchHover`), and a real
+      // mouse left parked on a button stays "over" the bar the next time one
+      // appears in the same place -- so the next branch's countdown never ran
+      // and the run read as a hang at that block's end (stage 3 block 4 step 7
+      // op 0 under `--route 0:3`). Volleys are dispatched events and never
+      // move it.
+      if (pick) await page.mouse.move(1, 1);
       branches.push({ block: b.block, sub: b.sub,
                       game: game ? game.target : null,
                       took: pick ? pick.target : game ? game.target : null,

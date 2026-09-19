@@ -32,6 +32,11 @@ TARGET_SCRIPT_SHAPE: dict[int, tuple[int, int]] = {
     40: (16, 4),   # {f32 x, y, z; s16 motion, frame}
     41: (16, 4),   # the same, arrived at rather than walked past
     43: (4, 0),    # {s16 loops; s16 cue_frame} -- no list
+    # The two leaps off a carrier. FUN_0045D120 (state 47):
+    # {f32 speed; f32 vy; s16 motion, frame, freeze}. FUN_0045D500 (48):
+    # {f32 x, z; f32 vy, accel; s16 motion, frame, freeze}. No list.
+    47: (14, 0),
+    48: (22, 0),
 }
 
 
@@ -67,6 +72,16 @@ def target_script(prog, off: int, state: int) -> dict | None:
     elif state == 43:
         head = {"loops": struct.unpack_from("<h", raw, off)[0],
                 "cue": struct.unpack_from("<h", raw, off + 2)[0]}
+    elif state == 47:
+        speed, vy = struct.unpack_from("<2f", raw, off)
+        m, fr, fz = struct.unpack_from("<3h", raw, off + 8)
+        head = {"leap_speed": speed, "leap_vy": vy, "motion": m,
+                "frame": fr, "freeze": fz}
+    elif state == 48:
+        x, z, vy, acc = struct.unpack_from("<4f", raw, off)
+        m, fr, fz = struct.unpack_from("<3h", raw, off + 16)
+        head = {"leap_point": [x, z], "leap_vy": vy, "leap_accel": acc,
+                "motion": m, "frame": fr, "freeze": fz}
     elif state == 37:
         # `ZombieStateCarryProp` (FUN_0045B380) and `CarriedPropInit`
         # (FUN_00442740) between them read every word of the 0x38 bytes:

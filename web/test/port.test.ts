@@ -17544,5 +17544,109 @@ console.log("\nlight block 1 (the characters' light):");
         r.state === 0x2e, `state ${r.state}`);
 }
 
+console.log("class 0x30 states 46-48 -- the riders on a carrier:");
+{
+  // `g_class30_states[46..48]` = `0x0045CFC0`, `0x0045D120`, `0x0045D500`,
+  // which the port had no case for: a rider that won its permit fell to the
+  // dispatch's `default` and gave the attack up on the boat.
+  const rng = new Rng(46);
+  scene(0, rng);
+  const host: GameHost = { ...NULL_HOST };
+  const frame: ClassFrame = { eye: EYE, dt: 1 / 60, rng, host };
+  G.g_camera_fixed_eye_y = -30;             // the ground, when the probe misses
+  const boat = ActorSpawn(0x9e00, SpawnClass.ScriptedProp, -1, "boat", {
+    class13: { slot: 6711, cam_path: -1, cam_frame: -1, scale: 1,
+               behaviour: 0, selector: 0 },
+  }, rng);
+  boat.pos = vec3(100, -17, 200);
+  boat.yaw = 0x4000;
+  G.g_civilian_carrier = boat.at;
+  const leap = { state: 48, entries: [], head: {
+    leap_point: [130, 180] as [number, number], leap_vy: 1,
+    leap_accel: -0.04, motion: 10, frame: 0, freeze: 75 } };
+  const r = ActorSpawn(0x9e01, SpawnClass.CarriedZombie, 1, "rider", {
+    pos: vec3(5, -6, -14), initialState: 48, attackState: 48,
+    flags: 0x60400,
+    script: { target: null, attack: leap },
+    class18: { from_state: 48, cue_path: -1, cue_frame: -1 },
+  }, rng) as ZombieActor;
+  r.visible = true;
+  r.hp = 130;
+  check("the rider is on the boat", r.carrierAt === boat.at);
+
+  // State 46: idle, turning toward the camera measured in the boat's space.
+  r.state = ZombieState.IdleOnCarrier; r.sub = 0; r.yaw = 0;
+  CarriedZombieUpdate18(r, frame);
+  check("state 46 settles into its sub 1 and stays on the boat",
+        r.state === ZombieState.IdleOnCarrier && r.sub === 1
+        && r.carrierAt === boat.at, `${r.state}/${r.sub}`);
+  const y0 = r.yaw;
+  CarriedZombieUpdate18(r, frame);
+  check("...turning, 0x68 a frame, toward the camera in carrier space",
+        r.yaw !== y0 && Math.abs(((r.yaw - y0 + 0x8000) & 0xffff) - 0x8000)
+          <= 0x68, `${y0} -> ${r.yaw}`);
+
+  // State 48: the leap off.
+  r.state = ZombieState.LeapOffCarrierToPoint; r.sub = 0;
+  CarriedZombieUpdate18(r, frame);
+  check("state 48 sub 0 plays the clip and raises NoHitReaction",
+        r.sub === 1 && (r.flags & ActorFlag.NoHitReaction) !== 0);
+  // Where the boat's matrix will put it: local (x, y, z) under a quarter
+  // turn is (100 + z, -17 + y, 200 - x).
+  const lx = r.pos.x, ly = r.pos.y, lz = r.pos.z, lyaw = r.yaw;
+  const wx = 100 + lz, wy = -17 + ly, wz = 200 - lx;
+  CarriedZombieUpdate18(r, frame);
+  check("on the launch frame it steps off -- world space, no carrier",
+        r.carrierAt === -1 && r.sub === 2
+        && (r.flags2 & ZombieFlag2.Leaping) !== 0, `${r.carrierAt} ${r.sub}`);
+  check("...baked through the boat's matrix, position and yaw",
+        // ...less the first step of the arc, which `EnemyZombieUpdate`
+        // integrates straight after the state on the same frame.
+        Math.abs(r.pos.x - r.vel.x - wx) < 1e-3
+        && Math.abs(r.pos.y - r.vel.y - wy) < 1e-3
+        && Math.abs(r.pos.z - r.vel.z - wz) < 1e-3
+        && Math.abs((((r.yaw - (lyaw + 0x4000)) & 0xffff) + 0x8000 & 0xffff)
+                    - 0x8000) <= 0x68,  // ...and one 0x68 turn after it
+        `${r.pos.x.toFixed(2)},${r.pos.y.toFixed(2)},${r.pos.z.toFixed(2)}`
+        + ` yaw ${r.yaw} from ${lyaw} want ${wx},${wy},${wz}`);
+  // t = |vy / accel| = 25 frames up, 50 in all: vel spans the gap in 2t.
+  check("...and aims a parabola at the scripted world point",
+        Math.abs(r.vel.x - (130 - wx) / 50) < 1e-4
+        && Math.abs(r.vel.z - (180 - wz) / 50) < 1e-4
+        && r.vel.y === 1 && r.accY === -0.04,
+        `${r.vel.x} ${r.vel.z} ${r.vel.y} ${r.accY}`);
+  let n = 0;
+  while (r.sub === 2 && n++ < 400) CarriedZombieUpdate18(r, frame);
+  check("it lands on the ground and moves to sub 3",
+        r.sub === 3 && r.pos.y === -30 && r.vel.y === 0,
+        `sub ${r.sub} y ${r.pos.y} after ${n}`);
+  n = 0;
+  while (r.state === ZombieState.LeapOffCarrierToPoint && n++ < 400) {
+    CarriedZombieUpdate18(r, frame);
+  }
+  check("...and once the clip has played out it attacks: AttackRun",
+        r.state === ZombieState.AttackRun || r.state > 0,
+        `state ${ZombieState[r.state] ?? r.state}`);
+
+  // State 47: launched along its own facing.
+  const fwd = { state: 47, entries: [], head: {
+    leap_speed: 2, leap_vy: 1.5, motion: 10, frame: 0, freeze: 40 } };
+  const q = ActorSpawn(0x9e02, SpawnClass.CarriedZombie, 1, "rider2", {
+    pos: vec3(0, -6, 0), initialState: 47, attackState: 47, flags: 0x60400,
+    script: { target: null, attack: fwd },
+    class18: { from_state: 47, cue_path: -1, cue_frame: -1 },
+  }, rng) as ZombieActor;
+  q.visible = true; q.hp = 130;
+  q.state = ZombieState.LeapOffCarrierForward; q.sub = 0; q.yaw = 0;
+  CarriedZombieUpdate18(q, frame);
+  CarriedZombieUpdate18(q, frame);
+  // Baked yaw is the boat's quarter turn: -sin/-cos of 0x4000 is (-2, 0).
+  check("state 47 launches along the baked facing at the scripted speed",
+        q.carrierAt === -1 && Math.abs(q.vel.x + 2) < 1e-6
+        && Math.abs(q.vel.z) < 1e-6 && q.vel.y === 1.5
+        && Math.abs(q.accY + 0.1088888868689537) < 1e-9,
+        `${q.vel.x} ${q.vel.z} ${q.vel.y} ${q.accY}`);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

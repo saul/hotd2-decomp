@@ -173,6 +173,18 @@ export interface TargetScriptJson {
     offset?: [number, number, number];
     spin?: [number, number, number];
     launch?: [number, number, number];
+    /**
+     * States 47 and 48, the leaps off a carrier: `leap_speed` (47) along the
+     * facing or `leap_point` (48) the world x/z it lands at; `leap_vy` the
+     * upward speed; `leap_accel` (48) the per-frame vertical acceleration;
+     * `freeze` the clip frame the pose freezes on (`motion`/`frame` are the
+     * clip and the frame it leaves on).
+     */
+    leap_speed?: number;
+    leap_point?: [number, number];
+    leap_vy?: number;
+    leap_accel?: number;
+    freeze?: number;
   };
   entries: TargetScriptEntry[];
 }

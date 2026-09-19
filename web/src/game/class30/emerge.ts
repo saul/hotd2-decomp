@@ -229,7 +229,11 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): 
                           alt ? 5 : 1);
     // `obj+0x136C = (obj+0x136C & 0xDFFEFFFF) | 0x4000` — off the world push
     // for the flight, and the leap's own bit up.
-    obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.OffScreenPermit);
+    // `004582aa 81e2fffffedf AND EDX, 0xdffeffff`: the two bits that mask
+    // drops are `0x20000000` and **`0x10000`** -- {@link
+    // ZombieFlag2.OneShotFired}, the landing effect's latch -- not `0x20000`,
+    // `OffScreenPermit`, which this cleared and which a permit holder needs.
+    obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.OneShotFired);
     obj.flags2 |= ZombieFlag2.Leaping;
     obj.flags &= ~ActorFlag.HoldingWeapon;
     obj.sub = 2;

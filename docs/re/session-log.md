@@ -18714,3 +18714,61 @@ the route button it clicked at block 0 — so block 4's branch, drawn under the
 same pointer, never counted down. Not the override's world state (`L45`) and
 not the port. It moves the pointer away now, and `--route 0:3` reaches an end
 block in both modes. (It did not need to earn block 0's arm by shooting.)
+### Third follow-up: the rider that held block 16 open
+
+Stage 2 original block 16 step 12 hung on the boat rider (`0xA174`). Read
+`CarriedZombieUpdate18` from the disassembly, then the three states its
+attack state can be (`g_class30_states[46..48]` = `0x0045CFC0`,
+`0x0045D120`, `0x0045D500` — the last had no function in Ghidra and was
+created), then `CarrierBakeWorldPose` (`0x0045D920`), `MatrixToEulerBams` and
+its helper `0x00401800`, and `MatrixGetAngles`.
+
+**Wrong turns.** The port's cue comparison was `>=` and the exe's is `<`
+(`CMP [g_cam_path_frame], ECX; JGE skip`), which the pseudocode shows plainly
+and the previous transcription had inverted — `L11`'s neighbour, a test
+copied the way it reads in prose. The first fix (the three states) made the
+rider hold on the boat as the exe has it, and the playthrough **still hung**:
+the harness's volleys took its hit points to zero with no death, because
+`ResolveHit` wrote `pendingHit` for classes 0x30 and 0x31 only. The earlier
+report called the rider "unhittable"; it was being hit the whole time.
+
+Separately, `playthrough.mjs --route` leaves a branch with no rule of its own
+unresolved when a rule elsewhere had it fire volleys (block 12 after a
+`0:11` rule, block 1 after `0:1`): the countdown never runs. Routing every
+branch avoids it; it is the harness, not the port, and is not fixed here.
+
+### Reconciling the two readings of states 46–48
+
+Main took `newbugs-stage2-scenery`'s port (`class30/carrier_rider.ts`); this
+branch dropped its own (`carrier_leap.ts`, its TSV names and its matrix.ts
+additions) and ran its tests against main's code as a second reading. The two
+agree on every routine's structure — the idle and turn of 46, the release
+frame, the bake, the parabola `t = |vy/g|`, the flight, the water walk, the
+landing masks and the `AttackRun` hand-over of 47 and 48 — and in the page the
+seek-to-1070 drive lands main's rider on the player's boat deck at
+(-1068.7, -18.8, -2846.0), where this branch's did, through the moving-object
+collision pass. Three places they differed, each settled from the instructions:
+
+* **State 47's gravity.** `0xBDDF0123` is -0.1088888868689537; main had
+  -0.10889056. Fixed; the test compares to 1e-9.
+* **`MatrixGetAngles`' elevation**, `[likely]` in main, is `VecToAngles`
+  (`FUN_004016B0`) and is now `[proved]`: `NEG` of the s16 of `atan2(y, len)`,
+  where `len` is `z / cos(heading)` or `x / sin(heading)` by the
+  `(heading + 0x2000) & 0x4000` test — main used `hypot`, the same up to the
+  heading's truncation. Transcribed exactly.
+* **The same-frame publish.** When 47/48 step off inside the update, main's
+  `CarriedZombieUpdate18` still composed the carrier's matrix onto the
+  now-world position and published it. Guarded; the renderer already ignored
+  it once `carrierAt` was -1.
+
+Also settled from the instructions:
+
+* `ZombieStateDelayedLeap`'s launch mask (`004582aa 81e2fffffedf AND EDX,
+  0xdffeffff`) drops `0x20000000` and `0x10000` (`OneShotFired`); the port
+  cleared `0x20000` (`OffScreenPermit`, the off-screen attack latch). Fixed,
+  with a test.
+* `0x00592CBC` is `g_class30_motion_rows`, not `g_pHitReactionMotionsAlt`:
+  sixteen readers, fourteen of them states picking walk/run/idle/back-away by
+  fixed index. Renamed in the TSV, the database, the port, `combat.md`, and
+  the exporter's constant (`HIT_REACT_ALT_TABLE` -> `MOTION_ROW_TABLE`, both
+  halves).

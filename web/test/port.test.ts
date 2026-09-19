@@ -178,7 +178,11 @@ import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { GameSystem, syncCharacterSpawns, syncPortGlobals,
          type CharacterPool } from "../src/app/systems";
-import { CarrierTransformPoint } from "../src/game/carrier";
+import {
+  CarrierBakeWorldPose, CarrierInverseTransformPoint, CarrierTransformPoint,
+  MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
+} from "../src/game/carrier";
+import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -8627,6 +8631,21 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
     return z;
   };
 
+  {
+    // The launch's `AND EDX, 0xdffeffff` (`0x004582AA`) drops `0x20000000`
+    // and `0x10000` -- `OneShotFired`. It is not `OffScreenPermit` (`0x20000`),
+    // which the port cleared, and which is the off-screen attack latch.
+    const z = leaper();
+    const rng = new Rng(5);
+    z.flags2 |= ZombieFlag2.OffScreenPermit | ZombieFlag2.OneShotFired;
+    for (let f = 0; f < 5 && z.sub < 2; f++) {
+      EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
+    }
+    check("the leap's launch clears OneShotFired and leaves OffScreenPermit",
+          z.sub >= 2 && (z.flags2 & ZombieFlag2.OneShotFired) === 0
+          && (z.flags2 & ZombieFlag2.OffScreenPermit) !== 0,
+          `sub ${z.sub} flags2 ${z.flags2.toString(16)}`);
+  }
   {
     const z = leaper();
     const rng = new Rng(5);
@@ -17544,7 +17563,7 @@ console.log("\nlight block 1 (the characters' light):");
         r.state === 0x2e, `state ${r.state}`);
 }
 
-console.log("class 0x30 states 46-48 -- the riders on a carrier:");
+console.log("class 0x30 states 46-48, a second reading of main's port:");
 {
   // `g_class30_states[46..48]` = `0x0045CFC0`, `0x0045D120`, `0x0045D500`,
   // which the port had no case for: a rider that won its permit fell to the
@@ -17562,8 +17581,8 @@ console.log("class 0x30 states 46-48 -- the riders on a carrier:");
   boat.yaw = 0x4000;
   G.g_civilian_carrier = boat.at;
   const leap = { state: 48, entries: [], head: {
-    leap_point: [130, 180] as [number, number], leap_vy: 1,
-    leap_accel: -0.04, motion: 10, frame: 0, freeze: 75 } };
+    point: [130, 0, 180] as [number, number, number], vy: 1,
+    gravity: -0.04, motion: 10, release: 0, flag_frame: 75 } };
   const r = ActorSpawn(0x9e01, SpawnClass.CarriedZombie, 1, "rider", {
     pos: vec3(5, -6, -14), initialState: 48, attackState: 48,
     flags: 0x60400,
@@ -17575,10 +17594,10 @@ console.log("class 0x30 states 46-48 -- the riders on a carrier:");
   check("the rider is on the boat", r.carrierAt === boat.at);
 
   // State 46: idle, turning toward the camera measured in the boat's space.
-  r.state = ZombieState.IdleOnCarrier; r.sub = 0; r.yaw = 0;
+  r.state = ZombieState.HoldOnCarrier; r.sub = 0; r.yaw = 0;
   CarriedZombieUpdate18(r, frame);
   check("state 46 settles into its sub 1 and stays on the boat",
-        r.state === ZombieState.IdleOnCarrier && r.sub === 1
+        r.state === ZombieState.HoldOnCarrier && r.sub === 1
         && r.carrierAt === boat.at, `${r.state}/${r.sub}`);
   const y0 = r.yaw;
   CarriedZombieUpdate18(r, frame);
@@ -17587,7 +17606,7 @@ console.log("class 0x30 states 46-48 -- the riders on a carrier:");
           <= 0x68, `${y0} -> ${r.yaw}`);
 
   // State 48: the leap off.
-  r.state = ZombieState.LeapOffCarrierToPoint; r.sub = 0;
+  r.state = ZombieState.LeapOffCarrierAtMark; r.sub = 0;
   CarriedZombieUpdate18(r, frame);
   check("state 48 sub 0 plays the clip and raises NoHitReaction",
         r.sub === 1 && (r.flags & ActorFlag.NoHitReaction) !== 0);
@@ -17621,7 +17640,7 @@ console.log("class 0x30 states 46-48 -- the riders on a carrier:");
         r.sub === 3 && r.pos.y === -30 && r.vel.y === 0,
         `sub ${r.sub} y ${r.pos.y} after ${n}`);
   n = 0;
-  while (r.state === ZombieState.LeapOffCarrierToPoint && n++ < 400) {
+  while (r.state === ZombieState.LeapOffCarrierAtMark && n++ < 400) {
     CarriedZombieUpdate18(r, frame);
   }
   check("...and once the clip has played out it attacks: AttackRun",
@@ -17630,7 +17649,7 @@ console.log("class 0x30 states 46-48 -- the riders on a carrier:");
 
   // State 47: launched along its own facing.
   const fwd = { state: 47, entries: [], head: {
-    leap_speed: 2, leap_vy: 1.5, motion: 10, frame: 0, freeze: 40 } };
+    dist: 2, vy: 1.5, motion: 10, release: 0, flag_frame: 40 } };
   const q = ActorSpawn(0x9e02, SpawnClass.CarriedZombie, 1, "rider2", {
     pos: vec3(0, -6, 0), initialState: 47, attackState: 47, flags: 0x60400,
     script: { target: null, attack: fwd },
@@ -17646,6 +17665,110 @@ console.log("class 0x30 states 46-48 -- the riders on a carrier:");
         && Math.abs(q.vel.z) < 1e-6 && q.vel.y === 1.5
         && Math.abs(q.accY + 0.1088888868689537) < 1e-9,
         `${q.vel.x} ${q.vel.z} ${q.vel.y} ${q.accY}`);
+}
+{
+  // **Stage 2 block 16's boat rider, after its maul.** `ZombieScriptEnded`
+  // sends it to its attack state, 47, and `CarriedZombieUpdate18`'s cue then
+  // decides: `g_cam_path_frame < tail+0x0E` (the camera still short of 630)
+  // sends it to 0x2E and it holds on the boat, facing the camera. The port had
+  // the comparison the wrong way round and no state 46, 47 or 48 at all -- the
+  // default arm put it in `AttackRun` in the carrier's frame, 1,660 units
+  // from the camera -- and a shot rider never died, because only classes 0x30
+  // and 0x31 were handed the hit `ZombieOnShot` reads. Stage 2 block 16 step
+  // 12's `wait_enemies_alive` never released.
+  const rng = new Rng(1600);
+  scene(0, rng);
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: -1100, y: -25, z: -1530, pitch: 0, yaw: 0x4000,
+                         roll: 0 }),
+  };
+  const fr = (): ClassFrame => ({ eye: vec3(-1100, 0, -1400), dt: 1 / 60,
+                                  rng, host });
+  G.g_active_cam_path = 78;
+  G.g_cam_path_frame = 560;
+  const boat = ActorSpawn(0xa3e8, SpawnClass.ScriptedProp, -1, "boat", {
+    class13: { slot: 0x1a36, cam_path: 78, cam_frame: 1110, scale: 2.5,
+               behaviour: 8, selector: 0 },
+  }, rng);
+  ScriptedPropUpdate13(boat, fr());
+  const rider = ActorSpawn(0xa174, SpawnClass.CarriedZombie, 1, "rider", {
+    pos: vec3(-1, 3, 7.5),
+    class18: { from_state: 47, cue_path: 78, cue_frame: 630 },
+  }, rng) as ZombieActor;
+  rider.hp = rider.maxHp = 180;
+  rider.attackState = 47;
+  rider.state = 47;
+  rider.sub = 0;
+  CarriedZombieUpdate18(rider, fr());
+  check("a rider whose script ends before its camera cue holds on the boat "
+        + "(state 0x2E), not AttackRun",
+        rider.state === ZombieState.HoldOnCarrier && rider.carrierAt === boat.at,
+        `${ZombieState[rider.state] ?? rider.state} carrier ${rider.carrierAt}`);
+  for (let i = 0; i < 240; i++) CarrierPostFrame(rider);
+  const localEye = vec3();
+  CarrierInverseTransformPoint(boat, -1100, 0, -1400, localEye);
+  const want = VecToAngles(rider.pos.x - localEye.x, 0,
+                           rider.pos.z - localEye.z).yaw;
+  check("...turning to face the camera in the boat's own frame",
+        Math.abs(bamsDelta(rider.yaw, want)) < 0x200,
+        `${rider.yaw} vs ${want}`);
+  check("...and it stays aboard: the world point is the boat's transform",
+        Math.hypot(rider.carrierWorld.x - boat.pos.x,
+                   rider.carrierWorld.z - boat.pos.z) < 20,
+        `${rider.carrierWorld.x},${rider.carrierWorld.z}`);
+
+  // Shot dead: the hit reaches `ZombieOnShot`, which is `EnemyZombieUpdate`'s
+  // and so class 0x18's too.
+  for (let i = 0; i < 40 && !rider.dead; i++) {
+    ResolveHit(rider, 2, 0, NULL_HOST, rng);
+  }
+  CarriedZombieUpdate18(rider, fr());
+  check("a rider shot to zero hit points goes into its death state",
+        rider.dead && rider.state === ZombieState.Death,
+        `${rider.dead} ${ZombieState[rider.state] ?? rider.state}`);
+
+  // Past the cue the same script end takes the attack state instead.
+  const late = ActorSpawn(0xa175, SpawnClass.CarriedZombie, 1, "rider2", {
+    pos: vec3(-1, 3, 7.5),
+    class18: { from_state: 47, cue_path: 78, cue_frame: 630 },
+  }, rng) as ZombieActor;
+  late.attackState = 47;
+  late.state = 47;
+  late.sub = 0;
+  G.g_cam_path_frame = 640;
+  CarriedZombieUpdate18(late, fr());
+  check("...and one whose script ends after the cue leaps (state 47 runs)",
+        late.state === ZombieState.LeapOffCarrierForward,
+        `${ZombieState[late.state] ?? late.state}`);
+
+  function CarrierPostFrame(a: ZombieActor): void {
+    CarriedZombieUpdate18(a, fr());
+  }
+}
+
+{
+  // `CarrierBakeWorldPose` (`FUN_0045D920`): the carrier's matrix times the
+  // rider's, read back through `MatrixToEulerBams`. A yaw-only pair adds.
+  const carrier = { pos: vec3(10, 0, 20), pitch: 0, yaw: 0x4000, roll: 0 };
+  const a = { pos: vec3(1, 2, 0), pitch: 0, yaw: 0x1000, roll: 0 };
+  CarrierBakeWorldPose(a as unknown as Actor, carrier as unknown as Actor);
+  check("the step-off bakes the carrier's position and adds the yaws",
+        Math.abs(a.pos.x - 10) < 1e-6 && Math.abs(a.pos.z - 19) < 1e-6
+        && Math.abs(a.pos.y - 2) < 1e-6 && Math.abs(a.yaw - 0x5000) <= 1,
+        `${a.pos.x},${a.pos.y},${a.pos.z} yaw ${a.yaw}`);
+  const r = MatrixToEulerBams(RotXZY(0x0800, 0x0400, 0x2000));
+  check("MatrixToEulerBams takes a RotX·RotZ·RotY pose back off its matrix",
+        Math.abs(r.pitch - 0x800) <= 1 && Math.abs(r.roll - 0x400) <= 1
+        && Math.abs(r.yaw - 0x2000) <= 1,
+        `${r.pitch} ${r.roll} ${r.yaw}`);
+  // `MatrixGetAngles` (`FUN_004018E0`) reads `RotY·RotX·RotZ` back, with the
+  // elevation `VecToAngles` (`FUN_004016B0`) gives: negated, off
+  // `z / cos(heading)`. The wrong sign would read 0x800 back as -0x800.
+  const g = MatrixGetAngles(RotYXZ(0x2000, 0x0800, 0x0400));
+  check("MatrixGetAngles takes a RotY·RotX·RotZ pose back, elevation signed",
+        Math.abs(g.x - 0x800) <= 1 && Math.abs(g.y - 0x2000) <= 1
+        && Math.abs(g.z - 0x400) <= 1, `${g.x} ${g.y} ${g.z}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

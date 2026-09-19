@@ -18,7 +18,7 @@
 
 /** The per-file digests, so a stale bundle can name what moved. */
 export const BUILDER_FILES: Readonly<Record<string, string>> = {
-  "actorscript.ts": "56b7d192278d5d7c2c75f64f72ef75cf96516250bf04e3f6c113dc3a4b9be1c3",
+  "actorscript.ts": "bdb28fb46c32fa5ae163a66121c912eb4e1a46152b0bf71129ae41ec2a39df93",
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "8a62bedf274c97b1d6d7dfe8e64934a767bbeb694a7de3fee1b4c73ad35fb2e1",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
@@ -31,7 +31,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "charmotion.ts": "3d426e4c66628163540997108756a7b2f59a24ba0abc6526bd8c7c279f90c671",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
-  "combat.ts": "a6c62112328c45f22dd15a67b1a29ae8d95dd6d7342ce3ea26ef06f7ff3d30e4",
+  "combat.ts": "b9374ee43dd39e712a7338b84aa95b6250990b56e4bd1c0bd2b02186b99a7e9e",
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "4004cb37faed0192ad4c09044c9a5af6162b8ed874a28b0a47e2397fe0349228",
@@ -58,4 +58,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "1030434216b28c507f5878e31a0c6bcc2b20e9187335ab5114a64fdc08d3ea7a";
+export const BUILDER_HASH = "3f4992de3914b8a339ba9853f2ae6bff8f6a10117c8390d91653c1f716e5ceca";

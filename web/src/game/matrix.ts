@@ -20,7 +20,7 @@
  * sign convention recovered by reasoning is exactly what `L1` and `L2` are
  * about, and these are short enough to copy.
  */
-import { VecToAngles, type Vec3 } from "./vec";
+import type { Vec3 } from "./vec";
 
 /** Sixteen floats, `g_MatrixStackTop`'s own layout. */
 export type Mat = number[];
@@ -274,69 +274,4 @@ export function VecAngleBetween(ax: number, ay: number, az: number,
   const s = Math.sqrt((bz * bz + by * by + bx * bx)
                       * (az * az + ay * ay + ax * ax) - dot * dot);
   return FtolS16(Math.atan2(s, dot) * RADIANS_TO_BAMS);
-}
-
-/**
- * `VecAimYAxisXThenZ` — `FUN_00401800`. The BAMS pair that carries +Y onto
- * `(x, y, z)` for {@link MatrixToEulerBams}: `rx = atan2(z, y)`, then the
- * length in that plane by whichever of `cos`/`sin` is the larger, and
- * `rz = -atan2(x, h)`. Both through `__ftol` into a signed short.
- */
-export function VecAimYAxisXThenZ(x: number, y: number, z: number):
-    { rx: number; rz: number } {
-  const rx = FtolS16(Math.atan2(z, y) * RADIANS_TO_BAMS);
-  const a = rx * 9.587379924285257e-05;
-  const h = ((rx + 0x2000) & 0x4000) === 0 ? y / Math.cos(a) : z / Math.sin(a);
-  const rz = -FtolS16(Math.atan2(x, h) * RADIANS_TO_BAMS);
-  return { rx, rz };
-}
-
-/**
- * `MatrixToEulerBams` — `FUN_00401AE0`. The three angles that rebuild the
- * rotation of `m` as `MatrixRotateX(rx); MatrixRotateZ(rz); MatrixRotateY(ry)`
- * — the order every object root in the engine is posed in.
- *
- * The image of +Y gives `rx` and `rz` ({@link VecAimYAxisXThenZ}); the image
- * of +Z is taken back through `MatrixRotateZ(-rz); MatrixRotateX(-rx)` and
- * `ry = atan2(x, z)` of what is left (`FLD [ESP+0x34]; FLD [ESP+0x3C];
- * FPATAN; FMUL [0x004C4378]` at `0x00401BA4`).
- */
-export function MatrixToEulerBams(m: ArrayLike<number>):
-    { rx: number; ry: number; rz: number } {
-  const ay: Vec3 = { x: 0, y: 0, z: 0 };
-  MatrixTransformVector(m, { x: 0, y: 1, z: 0 }, ay);
-  const { rx, rz } = VecAimYAxisXThenZ(ay.x, ay.y, ay.z);
-  const az: Vec3 = { x: 0, y: 0, z: 0 };
-  MatrixTransformVector(m, { x: 0, y: 0, z: 1 }, az);
-  const u = MatIdentity();
-  MatrixRotateZ(u, -rz);
-  MatrixRotateX(u, -rx);
-  const back: Vec3 = { x: 0, y: 0, z: 0 };
-  MatrixTransformVector(u, az, back);
-  const ry = FtolS16(Math.atan2(back.x, back.z) * RADIANS_TO_BAMS);
-  return { rx, ry, rz };
-}
-
-/**
- * `MatrixGetAngles` — `FUN_004018E0`. The same rotation read the other way:
- * pitch and yaw are `VecToAngles` of the image of +Z; the image of +X, taken
- * back through `MatrixRotateX(-pitch); MatrixRotateY(-yaw)`, gives the roll as
- * `atan2(y, x)` (`FPATAN; FMUL [0x004C4378]` at `0x004019AC`).
- */
-export function MatrixGetAngles(m: ArrayLike<number>):
-    { pitch: number; yaw: number; roll: number } {
-  const az: Vec3 = { x: 0, y: 0, z: 0 };
-  MatrixTransformVector(m, { x: 0, y: 0, z: 1 }, az);
-  const a = VecToAngles(az.x, az.y, az.z);
-  const pitch = FtolS16(a.pitch);
-  const yaw = FtolS16(a.yaw);
-  const ax: Vec3 = { x: 0, y: 0, z: 0 };
-  MatrixTransformVector(m, { x: 1, y: 0, z: 0 }, ax);
-  const u = MatIdentity();
-  MatrixRotateX(u, -pitch);
-  MatrixRotateY(u, -yaw);
-  const back: Vec3 = { x: 0, y: 0, z: 0 };
-  MatrixTransformVector(u, ax, back);
-  const roll = FtolS16(Math.atan2(back.y, back.x) * RADIANS_TO_BAMS);
-  return { pitch, yaw, roll };
 }

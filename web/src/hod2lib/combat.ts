@@ -72,7 +72,7 @@ export const HIT_REACT_TABLE = 0x00592fc8;
  *     2, 3  ZombieStateAttackRun -- the run, by bit 27
  *     4     ZombieStateBackOff -- the back-away walk
  */
-export const HIT_REACT_ALT_TABLE = 0x00592cbc;
+export const MOTION_ROW_TABLE = 0x00592cbc;
 
 /** How many entries of that row to export. */
 export const MOTION_ROW_LEN = 8;
@@ -396,11 +396,11 @@ export function hitSteps(tables: ExeTables, charType: number,
   return out;
 }
 
-/** `{bodyCondition: [motion, ...]}` from {@link HIT_REACT_ALT_TABLE}. */
+/** `{bodyCondition: [motion, ...]}` from {@link MOTION_ROW_TABLE}. */
 export function motionRow(tables: ExeTables,
                           charType: number): Map<number, number[]> {
   const out = new Map<number, number[]>();
-  boundedPtrArray(tables, HIT_REACT_ALT_TABLE, charType).forEach((row, cond) => {
+  boundedPtrArray(tables, MOTION_ROW_TABLE, charType).forEach((row, cond) => {
     const o = tables.v2r(row);
     if (o === null || o + MOTION_ROW_LEN * 4 > tables.data.length) return;
     out.set(cond, u32s(tables.data, o, MOTION_ROW_LEN));

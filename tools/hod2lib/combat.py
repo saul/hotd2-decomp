@@ -84,7 +84,7 @@ HIT_REACT_TABLE = 0x00592FC8
 #:       zone-0 entry of the reaction set `FUN_004547C0` reads at
 #:       ``+0x10 + zone*4``
 #: ===== =========================================================
-HIT_REACT_ALT_TABLE = 0x00592CBC
+MOTION_ROW_TABLE = 0x00592CBC
 
 #: How many entries of that row to export.
 MOTION_ROW_LEN = 8
@@ -456,9 +456,9 @@ def hit_steps(tables, char_type: int, bone: int) -> list[list[int]]:
 
 
 def motion_row(tables, char_type: int) -> dict[int, list[int]]:
-    """``{body_condition: [motion, ...]}`` from :data:`HIT_REACT_ALT_TABLE`."""
+    """``{body_condition: [motion, ...]}`` from :data:`MOTION_ROW_TABLE`."""
     out: dict[int, list[int]] = {}
-    for cond, row in enumerate(_bounded_ptr_array(tables, HIT_REACT_ALT_TABLE,
+    for cond, row in enumerate(_bounded_ptr_array(tables, MOTION_ROW_TABLE,
                                                   char_type)):
         o = tables._v2r(row)
         if o is None or o + MOTION_ROW_LEN * 4 > len(tables.data):

@@ -5,7 +5,7 @@
  * switch inside it that picks which of a held-item record's six attach sets
  * this skin uses.
  */
-import type { Actor } from "../actor";
+import { ZombieAux, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { CharacterTypeOf, T } from "../tables";
@@ -51,6 +51,10 @@ export function CivilianInit(obj: Actor, rng?: Rng): void {
   obj.bodyRadius = CIVILIAN_BODY_RADIUS;
   sub.scaleTarget = CIVILIAN_BODY_RADIUS;
   sub.attachSet = CivilianAttachSet(obj.charType);
+  // `if (g_scene_lighting) { model+0x1174 = ActorDrawAttachedPartsLit;
+  // obj+0x38 |= 8; }` at `0x0048A625`-`0x0048A642`: a civilian spawned while
+  // the scene light array is up is drawn by it, body and attachments alike.
+  if (G.g_scene_lighting !== 0) obj.flags38 |= ZombieAux.SceneLit;
 
   // `FUN_0045EBB0(*(u32 *)(tail + 8))` into `model+0x1170`, then
   // `ActorBindPartList` -- the two instructions before the `CivilianUpdate`

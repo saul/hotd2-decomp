@@ -3787,6 +3787,59 @@ where routine 1's is `-5.0` — with `0x000B16A9`; its state-5/6 strip sits at
 `CarrierDrawGroundWake`'s distance argument, not the scale it had been read
 as. `CARRIER_GROUND_WAKE_DRAW` holds the three literals per routine.
 
+### The gun lights are real spotlights now, placed by the port
+
+Bug 14: "the flashlight … is a bit naff". It was two `SpotLight`s in
+`render/lighting.ts`, one unit ahead of the camera and pointing straight
+ahead whatever the aim, visible only in the "+ scene light" view, on every
+surface, at a third of the engine's brightness and with no shadow. In the
+default view there was no torch at all.
+
+What the engine does, read for it (`docs/formats/evt.md` rows 14–16,
+`game/scene_lights.ts`): evt `0x14` raises `g_scene_lighting`, `0x15`
+`g_entity_spotlights_on`, `0x16` sets `g_light_array_ambient`. Each frame
+`SceneLightArrayUpdate` (`FUN_00480970`) runs `BuildEntitySpotlightArray`
+(`FUN_00480AC0`), which puts one D3D spot per player at the crosshair's
+eye-space point at depth 1, aimed along eye→point, `attenuation0 = 0.5`
+(twice white), `theta = phi = π/8`. Only the things that ask for the array are
+lit by it — `draw_mode` 1 region models, actors with `obj+0x38` bit 3, throwers
+with `obj+0x136C` bit 0 — and they get the evt-0x16 ambient in place of the
+default light, so in stage 4 the room goes moonlit blue and the torch is where
+the mouse is.
+
+The port now: `g_entity_lights` and the three globals are in `G`; the walker's
+two gates are accessors over them and `0x16` is ported (the exporter resolves
+its three pointers into `rgb`); the pointer is written to `g_crosshair_x/y` as
+input by `app/`; `GameSystem` runs `SceneLightArrayUpdate` every frame, paused
+or not. `render/gunlights.ts` reads that and nothing else: a `SpotLight` per
+live entry with a 1024² PCF shadow map, and the lit set swapped to a Lambert
+twin that reproduces `clamp(ambient + 2·N·L) × texel` in gamma space.
+`EnemyZombieInit` now seeds `obj+0x136C`'s low half from the descriptor, so
+stage 4's 35 flagged zombies are lit (they could not be before);
+`CivilianInit` raises bit 3 when spawned under the lights.
+
+Three `[diverges]`, all presentation, all the user's request: shadows (D3D7 had
+none), the lamp moved 2.5 units right and down of the engine's point so its
+shadows can be seen at all (the engine's lamp is on the eye ray), and a 0.3
+penumbra in place of per-vertex smearing. Cost, GPU-synced frame time on an
+M1 Pro headless: +0.2–0.6 ms a frame in stage 4 and +0.5 ms in stage 2's
+mansion while a torch is live (the shadow pass is most of it), nothing
+elsewhere.
+
+**Class 0x41 type 48, the lamp that owns a light.** `PlaceFlickerLightProp48`
+(`FUN_00463B20`) and `PropUpdateType48FlickerLight` (`FUN_0046DDE0`), ported
+in `game/class41/type48.ts`. It is its own constructor rather than a
+`PlaceGenericProp` type, so it was in no bundle until now: the exporter emits a
+`flicker_light` placement carrying its 32 models. One spawn, stage 2 block 26
+step 1, in the stretch where the scene light array is on. It claims a
+`g_entity_lights` entry (`EntityLightAcquireSlot`, from entry 3 up): a point
+light with a colour of (20, 20, 15), `att2` flickering between 0.01 and 0.03.
+Shot, it bursts into thirty pieces for ninety frames while the light fades,
+then shows the broken lamp. `render/gunlights.ts` draws the light as a
+three.js `PointLight` on the same lit set; `[diverges]`: the `att0` near field
+is dropped, which only matters inside two units, where both saturate.
+
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in
@@ -3831,9 +3884,9 @@ missed. Meanings and confidence marks live in
 | `11` | `set_collision_set_ray_only` | collision | done | fills `g_coli_ray_set`, which only the segment test consults |
 | `12` | `set_approach_steps_2p_bias` | spawn | shown | enemy approach pacing; operands decoded as floats |
 | `13` | `set_scene_lighting_override` | light | *tracked* | lighting override; values decoded, not applied to the render |
-| `14` | `set_scene_lighting` | light | **done** | gates `15` and `16`, as the game does |
+| `14` | `set_scene_lighting` | light | **done** | `g_scene_lighting`: gates the gun lights, and picks the scene-light-array draw for `draw_mode` 1 regions and `obj+0x38` bit 3 actors |
 | `15` | `enable_entity_spotlights` | light | **done** | **the two players' gun lights** — not one per enemy; the array is two entries wide |
-| `16` | `set_ambient_light_rgb` | light | *tracked* | lighting override; values decoded, not applied to the render |
+| `16` | `set_ambient_light_rgb` | light | **done** | `g_light_array_ambient` r, g, b — the scene-light-array path's ambient; the exporter resolves the three pointers into `rgb` |
 | `17` | `slerp_light0_direction` | light | ~approx~ | the slerp target is taken immediately rather than stepped |
 | `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
 | `19` | `set_light1_direction` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |

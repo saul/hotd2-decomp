@@ -33,6 +33,7 @@ import { PlaceGenericProp } from "./generic";
 import { PlaceFallingContainer } from "../class44/container";
 import { PlaceChainSegments, PlaceFragmentProps } from "./triggers";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
+import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 
 /**
  * `obj+0x130C` for this class — the constructor index, **not** the body
@@ -109,6 +110,15 @@ export const g_class41_constructors:
       (q) => q.at === obj.at && q.container === "fragment");
     if (!pl) return;
     G.g_breakable_props.push(...PlaceFragmentProps(pl));
+  },
+  // `PlaceFlickerLightProp48` (`FUN_00463B20`) -- the lamp with a light.
+  [FLICKER_LIGHT_TYPE]: (obj, f) => {
+    void f;
+    const pl = T.breakables?.placements?.find(
+      (q) => q.at === obj.at && q.container === "flicker_light");
+    if (!pl) return;
+    G.g_breakable_props.push(PlaceFlickerLightProp48(
+      pl, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw));
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(

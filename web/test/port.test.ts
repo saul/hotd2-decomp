@@ -199,6 +199,16 @@ import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
 import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
+import {
+  ActorDrawsSceneLit, BuildEntitySpotlightArray, EntityLightLive, GUN_LIGHT_CONE,
+  GUN_LIGHT_FIRST, RenderLightType, SceneLightArrayUpdate, SetPlayerAimFromPointer,
+} from "../src/game/scene_lights";
+import { VecToAngles } from "../src/game/vec";
+import {
+  EntityLightReleaseSlot, FLICKER_BROKEN, FLICKER_DEBRIS_COUNT, FLICKER_FADE_FRAMES,
+  PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
+} from "../src/game/class41/type48";
+import { ZombieAux } from "../src/game/actor";
 import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
 import {
@@ -16796,5 +16806,175 @@ console.log("\na civilian's captors are made with it, though the script never li
   check("...straight after the civilian that owns it",
         order.indexOf(15484) === order.indexOf(15416) + 1, `pool ${order}`);
 }
+// -- the gun lights: BuildEntitySpotlightArray and its gates ----------------
+//
+// `BuildEntitySpotlightArray` (`FUN_00480AC0`) under `SceneLightArrayUpdate`
+// (`FUN_00480970`), evt 0x14/0x15/0x16 through the walker, and the draw-path
+// bit a class-0x30 descriptor's `+0x20` word raises. The renderer places its
+// SpotLight from exactly these numbers, so these are the flashlight.
+console.log("\nthe gun lights:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  // A camera one unit per axis of its own, at (10, 20, 30), looking down -z:
+  // `viewPoint` is the camera block's +0x40 matrix, camera -> world.
+  const eye = vec3(10, 20, 30);
+  G.g_camera_block_eye = { ...eye };
+  const host: GameHost = {
+    ...NULL_HOST,
+    viewPoint: (x, y, z, out) => { out.x = eye.x + x; out.y = eye.y + y; out.z = eye.z + z; },
+  };
+  SceneLightArrayUpdate(host);
+  check("nothing is built while g_scene_lighting is clear",
+        !G.g_entity_lights[GUN_LIGHT_FIRST].enabled && !EntityLightLive(GUN_LIGHT_FIRST));
+  // evt 0x14, 0x15, 0x16 as stage 4 block 0 step 3 runs them.
+  const script = {
+    scene: 3, stage: 4, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x14, name: "set_scene_lighting", cat: "light", enabled: true },
+        { i: 1, at: 8, op: 0x15, name: "enable_entity_spotlights", cat: "light", raw: ["0x00000001"] },
+        { i: 2, at: 16, op: 0x16, name: "set_ambient_light_rgb", cat: "light", rgb: [0.5, 0.6, 0.8] },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  w.tick(1 / 60);
+  check("evt 0x14 and 0x15 write g_scene_lighting and g_entity_spotlights_on",
+        G.g_scene_lighting === 1 && G.g_entity_spotlights_on === 1,
+        `${G.g_scene_lighting} ${G.g_entity_spotlights_on}`);
+  check("evt 0x16 writes g_light_array_ambient",
+        G.g_light_array_ambient.join() === "0.5,0.6,0.8",
+        G.g_light_array_ambient.join());
+
+  SetPlayerAimFromPointer(0, 0, 0);
+  SceneLightArrayUpdate(host);
+  const l = G.g_entity_lights[GUN_LIGHT_FIRST];
+  check("player 1's light is entry 1, a spot, and live",
+        l.enabled && l.type === RenderLightType.Spot && EntityLightLive(GUN_LIGHT_FIRST));
+  check("...one unit in front of the eye for a centred crosshair",
+        l.pos.x === 10 && l.pos.y === 20 && l.pos.z === 29,
+        `${l.pos.x} ${l.pos.y} ${l.pos.z}`);
+  check("...pointing away from the eye",
+        Math.abs(l.dir.z + 1) < 1e-9 && Math.abs(l.dir.x) < 1e-9 && Math.abs(l.dir.y) < 1e-9,
+        `${l.dir.x} ${l.dir.y} ${l.dir.z}`);
+  check("...with the engine's constants",
+        l.att0 === 0.5 && l.theta === GUN_LIGHT_CONE && l.phi === GUN_LIGHT_CONE
+        && l.diffuse.join() === "1,1,1");
+  // An aim up and to the right: the light sits there at depth 1 and points
+  // along eye -> it. This is the VecToAngles pitch sign: it was written
+  // "the obvious way" and pointed the torch down when aimed up.
+  SetPlayerAimFromPointer(0, 320.1, 320.1);
+  SceneLightArrayUpdate(host);
+  const n = Math.hypot(0.5, 0.5, 1);
+  check("an aim up and right puts the light up and right",
+        Math.abs(l.pos.x - 10.5) < 1e-9 && Math.abs(l.pos.y - 20.5) < 1e-9,
+        `${l.pos.x} ${l.pos.y}`);
+  check("...and points it up and right, not down",
+        // To BAMS rounding: `VecToAngles` truncates the yaw to s16 and
+        // recovers the horizontal length through it, as the engine does.
+        Math.abs(l.dir.x - 0.5 / n) < 1e-4 && Math.abs(l.dir.y - 0.5 / n) < 1e-4
+        && Math.abs(l.dir.z + 1 / n) < 1e-4,
+        `${l.dir.x} ${l.dir.y} ${l.dir.z}`);
+  check("VecToAngles gives a negative pitch looking up, as FUN_004016B0 does",
+        VecToAngles(0, 1, 1).pitch < 0);
+  check("player 2 has no input device, so no light",
+        !G.g_entity_lights[GUN_LIGHT_FIRST + 1].enabled);
+  G.g_entity_spotlights_on = 0;
+  BuildEntitySpotlightArray(host);
+  check("evt 0x15 off switches it off", !l.enabled);
+  G.g_entity_spotlights_on = 1;
+  G.g_scene_lighting = 0;
+  SceneLightArrayUpdate(host);
+  check("...and with 0x14 off the entry is not submitted",
+        !EntityLightLive(GUN_LIGHT_FIRST));
+
+  // The draw path. `EnemyZombieInit` seeds obj+0x136C's low half from the
+  // descriptor's +0x20 word, and `EnemyZombieInitByCharType` raises obj+0x38
+  // bit 3 from its 0x20 -- which is what puts stage 4's zombies under the
+  // torch. The port used to drop the word, so the bit never rose.
+  G.g_scene_lighting = 1;
+  const lit = spawnZombie(0x2000, 1, "lit", { descFlags: 0x20 } as Partial<Actor>);
+  const plain = spawnZombie(0x2001, 1, "plain", { descFlags: 0 } as Partial<Actor>);
+  check("a class-0x30 descriptor with +0x20 bit 0x20 raises obj+0x38 bit 3",
+        !!(lit.flags38 & ZombieAux.SceneLit), `flags38 ${lit.flags38}`);
+  check("...and draws through the scene light array", ActorDrawsSceneLit(lit));
+  check("...one without it does not", !ActorDrawsSceneLit(plain));
+  G.g_scene_lighting = 0;
+  check("...and nothing does while g_scene_lighting is clear",
+        !ActorDrawsSceneLit(lit));
+}
+
+// -- class 0x41 type 48: the lamp and its point light ------------------------
+//
+// `PlaceFlickerLightProp48` (`FUN_00463B20`) and `PropUpdateType48FlickerLight`
+// (`FUN_0046DDE0`). Stage 2 block 26 step 1 places the one the game ships.
+console.log("\nclass 0x41 type 48, the lamp:");
+{
+  ResetGameGlobals();
+  // The mode is not scene state and an earlier section leaves Training up,
+  // where a prop hit pays nothing.
+  G.g_GameMode = GameMode.Arcade;
+  const rng = new Rng(3);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push((e as { id: number }).id));
+  const lamp = PlaceFlickerLightProp48(
+    { at: 0x11ef0, lifetime_evt_steps: 2 }, -450, 12.7, -1330.3, 0);
+  const slot = lamp.flicker!.lightSlot;
+  check("it claims entry 3, the first past the gun lights",
+        slot === 3 && G.g_entity_lights[3].inUse, `slot ${slot}`);
+  PropUpdateType48FlickerLight(lamp, rng, events);
+  const e = G.g_entity_lights[slot];
+  check("whole, it lights a point light at the lamp",
+        e.enabled && e.type === RenderLightType.Point && e.pos.x === -450
+        && e.diffuse.join() === "20,20,15" && e.att0 === 0.15 && e.range === 1024);
+  const a0 = e.att2;
+  PropUpdateType48FlickerLight(lamp, rng, events);
+  check("...and flickers: att2 moves with the phase",
+        a0 === 0.02 && e.att2 !== a0 && Math.abs(e.att2 - 0.02) <= 0.01,
+        `${a0} -> ${e.att2}`);
+  check("...and it is shootable, 1.2 below its origin, radius 3",
+        lamp.shotRegistered && Math.abs(lamp.shotY - 11.5) < 1e-9
+        && lamp.hitRadius === 3);
+  lamp.flags |= 0x8 | 0x2;          // hit by player 0
+  lamp.shotRegistered = false;      // the pool clears it at the top of a frame
+  const score = G.g_player_score[0] ?? 0;
+  PropUpdateType48FlickerLight(lamp, rng, events);
+  check("a shot breaks it: sound, score, thirty pieces",
+        (lamp.flags & FLICKER_BROKEN) !== 0 && sounds.includes(SFX_FLICKER_BREAK)
+        && lamp.flicker!.debris.length === FLICKER_DEBRIS_COUNT
+        && (G.g_player_score[0] ?? 0) === score + 10,
+        `sounds ${sounds} pieces ${lamp.flicker!.debris.length} `
+        + `score ${score} -> ${G.g_player_score[0]}`);
+  check("...and the light stays on, fading",
+        e.enabled && Math.abs(e.att2 - 0.02) < 1e-9 && !lamp.shotRegistered);
+  const y0 = lamp.flicker!.debris[0].y;
+  for (let i = 0; i < 30; i++) PropUpdateType48FlickerLight(lamp, rng, events);
+  check("...the pieces fly up and fall", lamp.flicker!.debris[0].y !== y0);
+  for (let i = 0; i < FLICKER_FADE_FRAMES; i++) {
+    PropUpdateType48FlickerLight(lamp, rng, events);
+  }
+  check("...and after ninety frames the light is out", !e.enabled);
+  G.g_evt_step_index += 1; PropUpdateType48FlickerLight(lamp, rng, events);
+  G.g_evt_step_index += 1; PropUpdateType48FlickerLight(lamp, rng, events);
+  G.g_evt_step_index += 1; PropUpdateType48FlickerLight(lamp, rng, events);
+  check("past its lifetime it dies and gives the entry back",
+        lamp.dead && !G.g_entity_lights[3].inUse);
+  EntityLightReleaseSlot(3);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

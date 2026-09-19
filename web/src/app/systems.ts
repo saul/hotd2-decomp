@@ -10,6 +10,7 @@ import type { RenderContext } from "../render/context";
 import type { CameraRig } from "../render/camera";
 import { CamSeatPathFrame } from "../game/camera/path";
 import { GameUpdate } from "../game/director";
+import { SceneLightArrayUpdate } from "../game/scene_lights";
 import { ActorIsEnemy } from "../game/registry";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
@@ -176,6 +177,12 @@ export class GameSystem implements System {
     G.g_camera_yaw_bams = ctx.view.yawBams;
     // ...and the pitch beside it: the horde's dive lifts its arc by it.
     G.g_camera_block_pitch_bams = ctx.view.pitchBams;
+    // `SceneLightArrayUpdate` (`FUN_00480970`) — the gun lights, for the same
+    // reason: where the torch points is the crosshair and the camera, not
+    // elapsed time, and it writes nothing but `g_entity_lights`, which no
+    // gameplay routine reads. Above the return, so a paused frame and a deep
+    // link draw it where the pointer is rather than where the last tick was.
+    SceneLightArrayUpdate(this.host);
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes
     // hit points off, `ScoreAddForPlayer` pays, and `PlayerShotEffectSpawn`

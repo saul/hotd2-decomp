@@ -151,5 +151,5 @@ export const OPS: Record<number, OpImpl> = {
 
     // Decoded into the feed with their operands, and nothing more. Everything
     // here is a real instruction the player does not yet honour.
-    0x13: { status: "tracked" }, 0x16: { status: "tracked" },
+    0x13: { status: "tracked" },
 };

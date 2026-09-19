@@ -267,6 +267,14 @@ export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
   // `00452eaf` with `(s16)obj+0x1316 | 0x60000000`), so a pooled actor
   // starts a life with no strike anchor however its last one ended.
   obj.flags2 &= ~ZombieFlag2.StrikeAnchor;
+  // ...and its **low half is the descriptor's `+0x20` word**, which is where
+  // `ZombieFlag2.DrawVariantSource` comes from. The shipped class-0x30 spawns
+  // carry 0x1, 0x2, 0x4, 0x20 and 0x40 there and nothing with bit 15, so the
+  // s16 sign extension never reaches the high half; of those bits the port
+  // reads only 0x20, and that one is what puts 55 zombies under the gun
+  // lights. [diverges] The high half is still or-ed rather than assigned,
+  // as it was: the carrier classes raise bits there before this runs.
+  obj.flags2 = (obj.flags2 & ~0xffff) | (obj.descFlags & 0xffff);
   obj.struck = false;
   // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;

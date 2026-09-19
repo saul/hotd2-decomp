@@ -203,6 +203,18 @@ export const GENERIC_STATIC_SLOTS: Record<number, number[]> = {
   77: [0x10ab],                       // FUN_004717A0, Original Mode only
 };
 
+/**
+ * Class 0x41 type 48 -- `PlaceFlickerLightProp48` (`FUN_00463B20`) builds it,
+ * not `PlaceGenericProp`, so it is its own container. What
+ * `PropUpdateType48FlickerLight` (`FUN_0046DDE0`) draws: the whole prop
+ * `0x17AC`, the broken one `0x17AD`, and thirty debris pieces
+ * `0xCA5 + i`.
+ */
+export const FLICKER_LIGHT_TYPE = 48;
+export const FLICKER_LIGHT_SLOTS: number[] = [
+  0x17ac, 0x17ad, ...Array.from({ length: 30 }, (_, i) => 0xca5 + i),
+];
+
 /** Types whose routine draws only an effect, never a static model. */
 export const GENERIC_NO_MODEL = [18, 25, 28];
 
@@ -369,6 +381,16 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           set_size: rec.orient[0],
           lifetime_evt_steps: rec.hp & 0xff,
           pos: [...rec.pos], yaw: rec.orient[1],
+        });
+      } else if (ctor === FLICKER_LIGHT_TYPE) {
+        // `PlaceFlickerLightProp48`: its own constructor. `+0x11C` (the
+        // descriptor's hit-point word) is the lifetime in evt steps; the
+        // position and yaw are the placer's.
+        out.push({
+          at: rec.offset, container: "flicker_light",
+          lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos], yaw: rec.orient[1],
+          slots: FLICKER_LIGHT_SLOTS,
         });
       } else if (generic.has(ctor)) {
         // Everything else `PlaceGenericProp` builds. The prologue writes
@@ -1100,6 +1122,12 @@ export async function breakableSlotEntry(
         const slot = (pl.slot as number) + i;
         if (!want.includes(slot)) want.push(slot);
       }
+    }
+  }
+  for (const pl of placements) {
+    if (pl.container !== "flicker_light") continue;
+    for (const slot of FLICKER_LIGHT_SLOTS) {
+      if (!want.includes(slot)) want.push(slot);
     }
   }
   // Class 0x44 selector 11 draws its descriptor's slot and nothing else, so

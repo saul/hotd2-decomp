@@ -165,6 +165,13 @@ export class Shooting implements System {
    * "Input intent".
    */
   onFire: (ray: { origin: Vector3; dir: Vector3 }) => void = () => {};
+  /**
+   * Where the pointer is aiming, in normalised device coordinates, on every
+   * move. The same shape as {@link onFire} and for the same reason: the aim is
+   * input the port owns (`g_crosshair_x`, which the gun lights are built
+   * from), so this layer reports it and `app/` writes it.
+   */
+  onAim: (ndcX: number, ndcY: number) => void = () => {};
 
   private combat: CombatJson | null = null;
   /**
@@ -205,6 +212,10 @@ export class Shooting implements System {
       const p = this.pointerAt(e);
       this.dot.style.left = `${p.x}px`;
       this.dot.style.top = `${p.y}px`;
+      const r = this.viewport.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        this.onAim((p.x / r.width) * 2 - 1, -(p.y / r.height) * 2 + 1);
+      }
     });
   }
 

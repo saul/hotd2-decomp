@@ -30,6 +30,7 @@ import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { PropUpdateType13 } from "./type13";
 import { PropUpdateType35 } from "./type35";
 import { PropUpdateType43 } from "./type43";
+import { PropUpdateType48FlickerLight } from "./type48";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
 import {
@@ -90,6 +91,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       // rather than `ActorDespawn`), no `AND` on `obj+0x34` and no
       // `RegisterForShotTest`. See `class41/type13.ts`.
       case PropFamily.Type13: PropUpdateType13(p, events); break;
+      // Its own constructor, its own lifetime, its own light. See
+      // `class41/type48.ts`.
+      case PropFamily.Type48: PropUpdateType48FlickerLight(p, rng, events); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }

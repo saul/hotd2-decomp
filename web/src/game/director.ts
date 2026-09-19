@@ -18,6 +18,7 @@ import { ActorRegisterCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
+import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
 import { SpawnHordePlacers } from "./class40";
 import { SecondsToTicks, T } from "./tables";
@@ -488,12 +489,15 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "falling" ? PropContainerType.FallingContainer
       : pl.container === "chain" ? PropContainerType.ChainSegments
       : pl.container === "fragment" ? PropContainerType.FragmentProps
+      : pl.container === "flicker_light" ? FLICKER_LIGHT_TYPE
       : PropContainerType.BreakableGroup;
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
                          pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
-                           : `breakable group ${pl.group}`,
+                           : pl.container === "flicker_light"
+                             ? "flicker light"
+                             : `breakable group ${pl.group}`,
                          { hp: pl.group ?? 0, condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;

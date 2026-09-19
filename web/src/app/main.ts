@@ -16,6 +16,7 @@
 
 import {
   Color,
+  PCFSoftShadowMap,
   PerspectiveCamera,
   Scene,
   WebGLRenderer,
@@ -25,6 +26,10 @@ import type { SoundJson } from "../bundle/scene";
 import type { ScriptJson } from "../bundle/stage";
 import { CamPaths } from "../game/camera/curve";
 import { QueueShotRequest } from "../game/combat/shot";
+import {
+  ActorDrawsSceneLit, EntityLightLive, GUN_LIGHT_FIRST, PROJECTION_DISTANCE_PX,
+  SetPlayerAimFromPointer,
+} from "../game/scene_lights";
 import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
@@ -70,6 +75,7 @@ import {
 import { SceneFog } from "../render/fog";
 import { TextureFilter } from "../render/texfilter";
 import { SceneLighting } from "../render/lighting";
+import { GunLights } from "../render/gunlights";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { entryBlockFor, loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
@@ -96,7 +102,7 @@ import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { ResetPropContainers } from "../game/class41";
-import { ResetGameGlobals } from "../game/globals";
+import { ActorByAt, ResetGameGlobals } from "../game/globals";
 import { SetGameTables } from "../game/tables";
 
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
@@ -216,6 +222,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly sceneFog: SceneFog;
   readonly texFilter = new TextureFilter();
   readonly lighting: SceneLighting;
+  /** The two players' gun lights, with shadows. See `render/gunlights.ts`. */
+  readonly gunLights: GunLights;
   readonly backdrop = new Backdrop();
   readonly rigs = new RigLayer();
   readonly chars = new CharacterLayer();
@@ -382,6 +390,18 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray);
       this.pacer.wake();
     };
+    // The aim, as `PollPlayerAimInput`'s mouse arm would record it: pixels
+    // from the centre of the engine's frame, `+y` up. The frame is whatever
+    // the camera's own field of view spans at `g_projection_distance_px`, so
+    // this stays right with the 4:3 pillarbox off. A move only wakes the loop
+    // while a gun light is live -- it is then the one thing on screen that
+    // follows the pointer through a pause.
+    this.shooting.onAim = (nx, ny) => {
+      const half = Math.tan((this.camera.fov * Math.PI) / 360)
+        * PROJECTION_DISTANCE_PX;
+      SetPlayerAimFromPointer(0, nx * half * this.camera.aspect, ny * half);
+      if (EntityLightLive(GUN_LIGHT_FIRST)) this.pacer.wake();
+    };
     this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
@@ -389,6 +409,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       powerPreference: "high-performance",
     });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    // For the gun lights' shadows (`render/gunlights.ts`). On for the life of
+    // the page and free until one is live: three.js renders a shadow pass
+    // only for a visible light with `castShadow`, and those two lights are
+    // the only ones that have it.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.scene.background = new Color(0x05070a);
 
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
@@ -403,6 +429,16 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // told about it once rather than reaching for a global.
     this.texFilter.setRenderer(this.renderer);
     this.lighting = new SceneLighting(this.scene);
+    this.gunLights = new GunLights(this.scene, this.lighting);
+    // The port's two answers, handed across as questions -- see
+    // `GunLightSource` for why the layer does not ask the port itself.
+    this.gunLights.source = {
+      live: (i) => EntityLightLive(i),
+      litActor: (at) => {
+        const obj = ActorByAt(at);
+        return !!obj && ActorDrawsSceneLit(obj);
+      },
+    };
     this.scene.add(this.backdrop.group);
     this.scene.add(this.rain.group);
     this.scene.add(this.spawns.group);
@@ -462,6 +498,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.backdrop);
     this.world.add("render", this.rigs);
     this.world.add("render", this.chars);
+    // After the characters: a gore swap clones a part onto a bone, and the
+    // light should see it the frame it appears.
+    this.world.add("render", this.gunLights);
     this.world.add("render", this.props);
     this.world.add("render", this.breakables);
     this.world.add("render", this.slotModels);
@@ -1581,8 +1620,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (this.state.mode === "free") return true;
     if (this.state.freeze) return false;
     if (!this.gameStopped) return true;
-    // Feedback for a click outlives the click.
-    return this.shooting.busy;
+    // Feedback for a click outlives the click, and a gun light built from
+    // the camera before the one on screen owes the frame that rebuilds it.
+    return this.shooting.busy || this.gunLights.stale;
   }
 
   /** The script-owned globals the port reads. See `app/systems.ts`. */

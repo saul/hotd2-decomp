@@ -2730,10 +2730,14 @@ trigger or START; then `CreditsClear` and the next app state, 3. The trigger
 or START cuts the fly-over short below frame 0xA5 and the logo below 0xAF;
 Training and the boss's own run return to play instead. The page draws the
 records `ui/panels/GameOver.tsx` reads from the projection, as text standing in
-for the pictures. `[diverges]`, all in `game_over.ts`: the fly-over camera
-(path `0x1F`, scene set `0x4D`) is not run, so the stage stands still behind
-it; the sprites' texbank `0x155` is not exported; the route map and the two
-player figures are not ported, so phase 5 draws nothing and waits.
+for the pictures. `[diverges]`, all in `game_over.ts`: the fly-over is not ported. In the exe
+it is not the stage at all -- phase 0 unloads the stage (`CamSlotsReset` and
+the pol-slot reset `LoadSceneAndReset` also runs), replaces the scene's task
+list, and films the player's body from `gameover_player.bin` collapsing on
+motion `0x338` along the one path in `cp_gmovr.bin` (global slot `0x1F`). The
+bundle carries none of the three, so the port leaves the stage on screen,
+frozen. The sprites' texbank `0x155` is not exported either, and the route map
+and the two player figures are not ported, so phase 5 draws nothing and waits.
 
 **Two buttons on it, the page's own** (`[port-only]`, not a gameplay
 divergence): **Restart this stage** and **Start from stage 1**. The engine

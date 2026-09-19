@@ -1713,10 +1713,18 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // `PlayerEnterPlay` (`FUN_00414770`) zeroes the overlay's active word and
   // count, which with the rest of the record unread is all of it.
   //
-  // `g_player_camera_hook` is **not** reset, deliberately: in the engine only
-  // the scene-state installers write it, so it holds whatever the last one
-  // wrote across a scene load -- and in the port the walker's replay of a
-  // deep link or a seek may have run those installers before this reset.
+  // `g_player_camera_hook` is **not** reset, deliberately, and neither is it
+  // in the engine `[proved]`: the only writers of `0x009A5CDC` and player 1's
+  // `0x009A5E0C` are the six scene-state installers (both players),
+  // `PlayerInstallDrawBodyHook`, `PlayerInstallDamageOverlayHook` and
+  // `PlayerStateArmGameOver` (one player each). The boot routine
+  // `FUN_0040A920` -- run once, from `ReadIniFlushSettings` -- writes other
+  // fields of the player block and not this one, and neither
+  // `LoadSceneAndReset` nor `ResetSceneOnEnter` touches it. So a player who
+  // stays out keeps the hook the last installer wrote, through a scene load
+  // and through a new game; the port's restart leaves player 1's `1` there
+  // for the same reason. In the port the walker's replay of a deep link or a
+  // seek may also have run those installers before this reset.
   G.g_damage_overlays = makeDamageOverlays();
   G.g_screen_shake_pitch = 0;
   // `g_player_hit_count` and `g_head_combo_bonus` are `ResetSceneOnEnter`'s.

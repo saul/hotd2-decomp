@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 58292 | 202 | engine |
+| `game/` | 58321 | 202 | engine |
 | `hod2lib/` | 16768 | 34 | engine |
 | `render/` | 10781 | 35 | render |
 | `app/` | 7725 | 29 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 943 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **105472** | **376** | |
+| **total** | **105501** | **376** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -37,7 +37,7 @@ The largest files, which is where the pressure to split next is:
 * `game/actor.ts` — 2113
 * `app/main.ts` — 2099
 * `script/walker.ts` — 2069
-* `game/globals.ts` — 1857
+* `game/globals.ts` — 1865
 
 ## The port
 
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1114 in `ghidra/annotations/functions.tsv` |
+| Named functions | 1118 in `ghidra/annotations/functions.tsv` |
 | Named globals | 487 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 39 under `tools/`, run together by `verify_all.py` |
 

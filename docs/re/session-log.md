@@ -19186,3 +19186,36 @@ Wrong turns:
   screen. The draw is inside `DamageOverlayUpdateAndDraw`, which only
   in-play and continue-countdown tasks run; the renderer now asks for that
   task as well as the active record.
+
+## 2026-09-19 -- the game-over fly-over is not the stage
+
+Asked to port the fly-over camera "so the stage moves behind the logo". Read
+first, and the premise does not hold `[proved]`: `GameOverRunPhase` phase 0
+opens like `LoadSceneAndReset` -- `FUN_004A7310`, `FUN_0041D510` (whose
+callees include `CamSlotsReset`, all 418 cam slots cleared, and `FUN_00418690`,
+every pol slot back to the resident set) -- and then queues its own assets.
+`0x4D` is not a scene set; it is pol file `gameover_player.bin` (36 models).
+Job kind `0xB`, `AssetQueueLoadCamFile(5)`, is `cp_gmovr.bin`: the kind's
+handler at `0x00404080` dispatches through `0x005773C0` = the cam loader's
+three steps. Global path `0x1F` is that file's one path. `TaskListBuild`
+replaces the scene's task list, so the enemies stop running and drawing. What
+the camera films is the player: `PlayerStateArmGameOver`, in app state 7, puts
+motion `0x338` on the player's entity and installs
+`PlayerHookDrawBodyUntilMotionEnd`, which draws the skinned body and shadow
+and steps the motion once the path frame passes `0x3B`.
+
+So "the camera over the stage" would be a new wrong thing, not a port: it
+would fly `cp_gmovr`'s path through whatever stage coordinates it lands in.
+Nothing was ported; the `[diverges]` now says what the exe does. Porting it
+needs the bundle to carry `cp_gmovr.bin`'s path, the body models and motion
+`0x338` (a format change in both halves), and a renderer for the body with an
+empty world -- which is a question for the coordinator, not a line edit.
+
+Also `[proved]` on the way: `g_player_camera_hook` is never reset between
+games. Its only writers are the six scene-state installers,
+`PlayerInstallDrawBodyHook`, `PlayerInstallDamageOverlayHook` and
+`PlayerStateArmGameOver`; the boot routine `FUN_0040A920` (called once, from
+`ReadIniFlushSettings`) does not write it.
+
+Named: `AssetQueueLoadCamFile` `0x0041D7D0`, `CamSlotsReset` `0x00403E20`,
+`TaskListBuild` `0x004A6F50`, `TaskListWalk` `0x004A7240`.

@@ -18958,4 +18958,49 @@ do -- `Class14StateDeathC` in its sub 0, `Class14StateDeathA`/`B` beside the
 `g_enemies_present` decrement. `[proved]` Transcribed; the camera admission
 found a port gap rather than making one. After it: all fourteen `NEW-BUGS.md`
 links play to their stage's end, and so do arcade stages 1-6 and Original 1-6.
+## 2026-09-19 -- the damage overlay: what a hit looks like
+
+Asked for the "damage sprites" -- the bite, the slash -- that appear when the
+player is hit, the port drew none. Read from `PlayerTakeDamage` outward.
+
+* `PlayerTakeDamage` (`FUN_00415300`) draws nothing; `g_player_hit_motion`'s
+  only reader (three xrefs) is `FUN_00415180`, now
+  `PlayerHookSpawnDamageOverlay`, reached through `FUN_00415100`
+  (`PlayerRunCameraHook`) -- an indirect call through `0x009A5CDC + p*0x130`,
+  which the scene-state installers write. So the "hit motion" is the overlay
+  kind. `[proved]`
+* `FUN_00417440` spawns, `FUN_00417300` counts down and draws, `FUN_004172E0`
+  clears. Four eleven-row tables: slots (`0x00579F80`, read through
+  `0x579F7C` with a count of 1 or 2 -- the word at `0x579F7C` is
+  `g_muzzle_smoke_slots` and is never read here, L6), offsets (all zero),
+  scales (all 0.02) and sounds. The overlays are `common.bin` 116..126.
+* **Decompiler, L37 again:** `FUN_00417300`'s pseudocode returns from the draw
+  arm, which would make the hurt voice at `frames == 0x37` unreachable while
+  the overlay is up. The draw arm falls through to `0x004173CC`; the voice
+  plays on the fifth frame of every overlay.
+* **Decompiler, L1:** `UpdateScreenShake` (`FUN_00415270`) shows `fcos(...)`
+  as a dropped statement; the `FCOS` result is live into the `FMULP`.
+* The latch is cleared by `UpdateScreenShake`, run by `SelectAttackablePlayer`'s
+  task. For an overlay ever to appear, the player's update must see the latch
+  before that task clears it; the port runs them in that order. `[likely]`, by
+  elimination.
+
+**Wrong turn:** I read `g_scene_state_table` as rows 1 and 2 starting at minor
+0 (installers at 1/0..1/2 and 2/0..2/3), counting the dwords of a hex dump by
+eye. `EvtEnterSceneState`'s own annotation already had the right layout (1/1..
+1/3, 2/4..2/7) and the shipped `finish_sequence` operands are only 4, 6 and 7.
+The first page run caught it: the bats' hit latched under major 2 and the hook
+was never installed. The port test had passed, because it called the installer
+with the same wrong numbers -- the test encoded the misreading.
+
+**Second wrong turn:** the page harness detected a hit by the score falling by
+100, and its first "hit" in stage 1 was not one: lives unchanged,
+invulnerability 0 -- a civilian's death costs 100 as well (L47). It detects a
+hit by `g_player_invuln_frames` rising now, which only `PlayerTakeDamage` does.
+
+**Found in passing, not fixed** (it is `PlayerTakeDamage`'s signature, which
+another branch owns): the exe's second argument gates the latch, and
+`ActorStrikeConnect` / `ThrowerStrikeConnect` pass 0 -- and then despawn the
+striker -- when `obj+0x34` bit `0x2000000` is set. The port's
+`ActorStrikeConnect` has neither the 0 nor the despawn.
 

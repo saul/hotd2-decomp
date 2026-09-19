@@ -139,6 +139,11 @@ import { ScriptedCarrierUpdate33, ScriptedPushableUpdate33,
 import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
+import { PlayerTakeDamage } from "../src/game/combat/player";
+import {
+  DAMAGE_OVERLAY_SLOTS, DAMAGE_OVERLAY_SOUNDS, DAMAGE_OVERLAY_VOICES,
+  DamageOverlayClear, DamageOverlayKind, PlayerCameraHook, SceneStateInstallPlayerHooks,
+} from "../src/game/effects/damage_overlay";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
 import {
@@ -17914,6 +17919,115 @@ console.log("class 0x30 states 46-48, a second reading of main's port:");
   check("MatrixGetAngles takes a RotY·RotX·RotZ pose back, elevation signed",
         Math.abs(g.x - 0x800) <= 1 && Math.abs(g.y - 0x2000) <= 1
         && Math.abs(g.z - 0x400) <= 1, `${g.x} ${g.y} ${g.z}`);
+}
+
+console.log("\nthe damage overlay:");
+{
+  // `PlayerTakeDamage` latches, `PlayerHookSpawnDamageOverlay` spawns on the
+  // player's next update, `DamageOverlayUpdateAndDraw` keeps it up, and
+  // `UpdateScreenShake` clears the latch. Driven through `GameUpdate` from the
+  // page's own reset (L49), so the wiring is what is under test.
+  const rng = new Rng(41);
+  const events = scene(1, rng);
+  const heard: number[] = [];
+  events.on("sound.play", (d) => heard.push(d.id));
+  const o = G.g_damage_overlays[0]!;
+  const step = () => GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+
+  // The reset does not touch the hook -- only an installer writes it -- so
+  // whatever an earlier case left is put to a known value first.
+  SceneStateInstallPlayerHooks(1, 1);
+  check("the follow camera's installer puts the body draw on both players",
+        G.g_player_camera_hook[0] === PlayerCameraHook.DrawBody
+        && G.g_player_camera_hook[1] === PlayerCameraHook.DrawBody);
+  G.g_player_camera_hook = [PlayerCameraHook.None, PlayerCameraHook.None];
+  SceneStateInstallPlayerHooks(1, 3);
+  check("CameraInstallViewAngles leaves the camera hook alone",
+        G.g_player_camera_hook[0] === PlayerCameraHook.None);
+  SceneStateInstallPlayerHooks(2, 5);
+  check("every cam/ path installer puts the overlay hook on both players",
+        G.g_player_camera_hook[0] === PlayerCameraHook.SpawnDamageOverlay
+        && G.g_player_camera_hook[1] === PlayerCameraHook.SpawnDamageOverlay);
+
+  PlayerTakeDamage(0, null, DamageOverlayKind.Claw, events);
+  check("the hit only latches: nothing is spawned inside PlayerTakeDamage",
+        !o.active && G.g_player_was_hit[0] === 1);
+  step();
+  check("the next update spawns it, with the kind the hit passed",
+        o.active === 1 && o.kind === DamageOverlayKind.Claw && o.count === 1
+        && o.x === 0, JSON.stringify(o));
+  check("...and draws its first frame the same update: 59 left",
+        o.frames === 59, `${o.frames}`);
+  check("kind 3 draws slot 0x932 (common.bin[117], the claw marks)",
+        DAMAGE_OVERLAY_SLOTS[o.kind]![o.count - 1] === 0x932);
+  check("...and plays DAMAGE2 as it spawns",
+        heard.includes(0x001b16a9) && DAMAGE_OVERLAY_SOUNDS[3] === 0x001b16a9,
+        heard.map((h) => h.toString(16)).join(","));
+  check("UpdateScreenShake consumed the latch and started the shake",
+        G.g_player_was_hit[0] === 0 && G.g_screen_shake_frames === 0x2f,
+        `${G.g_player_was_hit[0]} ${G.g_screen_shake_frames}`);
+  // 47 * 0x1800 BAMS = 146.25 degrees; cos * 47 = -39.08, truncated.
+  check("the shake's pitch is ftol(cos(frames * 0x1800) * frames)",
+        G.g_screen_shake_pitch === -39, `${G.g_screen_shake_pitch}`);
+
+  heard.length = 0;
+  for (let i = 0; i < 4; i++) step();
+  const voices = DAMAGE_OVERLAY_VOICES[0]!;
+  check("the hurt voice plays on the fifth update, with the overlay still up",
+        o.frames === 0x37 && o.active === 1 && heard.length === 1
+        && voices.includes(heard[0]!),
+        `${o.frames} ${heard.map((h) => h.toString(16))}`);
+
+  // A second hit while it is up: the invulnerability window would refuse it,
+  // so it is lifted -- the spawn's own guard is what is under test.
+  G.g_player_invuln_frames = 0;
+  heard.length = 0;
+  PlayerTakeDamage(0, null, DamageOverlayKind.Bite, events);
+  step();
+  check("a hit while one is up shows nothing new and plays nothing",
+        o.kind === DamageOverlayKind.Claw && heard.length === 0,
+        `${o.kind} ${heard}`);
+
+  // 6 updates so far; it is drawn on updates 1..59 and gone on the 60th.
+  for (let i = 6; i < 59; i++) step();
+  check("it is up, unchanged, for 59 updates", o.active === 1 && o.frames === 1,
+        `${o.active} ${o.frames}`);
+  step();
+  check("...and gone on the sixtieth", o.active === 0 && o.frames === 0);
+
+  // Under the follow camera the hook is the body draw: the latch is still
+  // consumed by the shake, and no overlay appears.
+  SceneStateInstallPlayerHooks(1, 1);
+  G.g_player_invuln_frames = 0;
+  PlayerTakeDamage(0, null, DamageOverlayKind.Bite, events);
+  step();
+  check("under CameraInstallFollowMidpoint a hit shows no overlay",
+        o.active === 0 && G.g_player_was_hit[0] === 0
+        && G.g_screen_shake_frames === 0x2f);
+
+  // Two players: player 0's overlay sits left, and kind 6 swaps its model.
+  SceneStateInstallPlayerHooks(2, 4);
+  G.g_max_attackers = 2;
+  G.g_player_invuln_frames = 0;
+  PlayerTakeDamage(0, null, DamageOverlayKind.Gash, events);
+  step();
+  check("with two players the gash is slot 0x936, 0.22 to the left",
+        o.active === 1 && DAMAGE_OVERLAY_SLOTS[o.kind]![o.count - 1] === 0x936
+        && Math.abs(o.x + 0.22) < 1e-6, JSON.stringify(o));
+  G.g_max_attackers = 1;
+
+  // A player joining clears it: the count latched at spawn is compared.
+  // (`DamageOverlayClear` first, so the spawn's live-guard lets it in.)
+  DamageOverlayClear(0);
+  G.g_player_was_hit[0] = 1;
+  G.g_player_hit_motion[0] = DamageOverlayKind.Splat;
+  step();
+  const spawned = o.active === 1 && o.count === 1;
+  G.g_max_attackers = 2;
+  step();
+  check("a second player joining takes the overlay down",
+        spawned && o.active === 0, `${spawned} ${o.active}`);
+  G.g_max_attackers = 1;
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

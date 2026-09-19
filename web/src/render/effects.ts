@@ -42,6 +42,10 @@ import {
   WEAPON_SCALE,
 } from "../game/effects/shot_effects";
 import { POINT_BLOOD_SCALE } from "../game/effects/blood";
+import {
+  DAMAGE_OVERLAY_OFFSETS, DAMAGE_OVERLAY_SCALES, DAMAGE_OVERLAY_SLOTS,
+  DAMAGE_OVERLAY_Z,
+} from "../game/effects/damage_overlay";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 
@@ -197,6 +201,7 @@ export class EffectLayer implements System<RenderContext> {
     this.drawBodyCreatures(seen);
     this.drawCarriedProps(seen);
     this.drawShotRings(seen);
+    this.drawDamageOverlays(seen);
 
     for (const [key, l] of this.nodes) {
       if (seen.has(key)) continue;
@@ -482,6 +487,43 @@ export class EffectLayer implements System<RenderContext> {
   }
 
   /**
+   * The draw half of `DamageOverlayUpdateAndDraw` (`FUN_00417300`):
+   *
+   * ```
+   * SetDrawLayerNibble(0xA); MatrixStackPush(0); MatrixLoadIdentity()
+   * MatrixTranslate(offsets[kind].x + rec.x, offsets[kind].y, -1.02)
+   * MatrixScale(scales[kind], scales[kind], scales[kind])
+   * AssetDrawSlot(slots[kind][count - 1]); MatrixStackPop(1)
+   * ```
+   *
+   * Identity, so camera space: the view group, with no rotation of its own.
+   * Drawn for exactly as long as the record is active, from the record alone,
+   * so a seek or a load shows whatever the restored state says and nothing a
+   * frame from the old timeline left behind.
+   *
+   * The draw order is the renderer's guess. The engine sets draw layer 0xA for
+   * it and 0xC/0xE for the shot effects; how those layers are ordered is not
+   * read, so it is drawn last of all the effects, which is what a sprite a
+   * hundredth of a unit in front of the eye would win on depth anyway.
+   */
+  private drawDamageOverlays(seen: Set<string>): void {
+    G.g_damage_overlays.forEach((o, p) => {
+      if (!o.active) return;
+      const slot = DAMAGE_OVERLAY_SLOTS[o.kind]?.[o.count - 1];
+      if (slot === undefined) return;
+      const key = `do${p}`;
+      const node = this.node(key, slot, this.viewGroup);
+      if (!node) return;
+      seen.add(key);
+      const off = DAMAGE_OVERLAY_OFFSETS[o.kind] ?? [0, 0];
+      node.position.set(off[0] + o.x, off[1], DAMAGE_OVERLAY_Z);
+      node.quaternion.identity();
+      node.scale.setScalar(DAMAGE_OVERLAY_SCALES[o.kind] ?? 0);
+      node.renderOrder = 1000;
+    });
+  }
+
+  /**
    * What the panel says, and why it says the pool counts too.
    *
    * A layer that draws nothing has three possible reasons and they need
@@ -496,6 +538,8 @@ export class EffectLayer implements System<RenderContext> {
     const tracer = G.g_shot_tracer_ring.filter((t) => t.live).length;
     return `${this.nodes.size} drawn · blood ${G.g_blood_sprays.length}`
       + `, sprites ${G.g_sprite_effects.length}, flash ${flash}`
-      + `, tracer ${tracer} · ${this.templates.size} templates`;
+      + `, tracer ${tracer}`
+      + `, hurt ${G.g_damage_overlays.filter((o) => o.active).length}`
+      + ` · ${this.templates.size} templates`;
   }
 }

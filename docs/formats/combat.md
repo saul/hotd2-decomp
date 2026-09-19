@@ -1634,10 +1634,69 @@ invuln_frames[player] = 0x5A;            /* 90 frames, 1.5 s */
 ```
 
 **One strike costs exactly one life.** There is no variable damage against the
-player — the attack entry's `+0x0A` is a *motion*, not an amount. And the
+player — the attack entry's `+0x0A` is not an amount. It is not a motion
+either, whatever the field is called (`player_motion` in the bundle,
+`g_player_hit_motion` in the exe's names): its one reader is the damage
+overlay, below. And the
 `g_damage_rank_pending -= 2` closes a loop from §4: being hit lowers the
 adaptive rank, which raises the per-bone damage modifier, so the game gets
 easier the worse you do. The continue screen restores 1 or 2 lives.
+
+### What being hit looks like — the damage overlay
+
+`[proved]` The third argument is the **overlay kind**, 0..10. Nothing in
+`PlayerTakeDamage` draws: the player's own update, `PlayerUpdateInPlay`
+(`0x00413E90`), calls `PlayerRunCameraHook` (`FUN_00415100`), which calls
+whatever the scene state's installer put in `g_player_camera_hook`
+(`0x009A5CDC + p*0x130`). Under the four `cam/` path cameras (scene states
+2/4..2/7) that is `PlayerHookSpawnDamageOverlay` (`FUN_00415180`); under the
+follow and no-op cameras (1/1, 1/2) it is `PlayerHookDrawBody`, which draws the
+player's body and never reads the latch. The spawn:
+
+```c
+DamageOverlaySpawn(task, kind):                    /* FUN_00417440 */
+  if (g_damage_overlays[p].active) return;         /* no restart, no sound */
+  rec = { active 1, frames 60, count g_max_attackers,
+          x g_damage_overlay_x_by_players[count-1][p], kind };
+  PlaySoundId(g_damage_overlay_sounds[kind]);
+```
+
+and every frame, from the same update, `DamageOverlayUpdateAndDraw`
+(`FUN_00417300`) counts it down and draws it **unchanged** -- no fade, no
+flash, no animation -- for 59 frames: identity matrix, translate
+`(offsets[kind].x + rec.x, offsets[kind].y, -1.02)`, scale `0.02`,
+`AssetDrawSlot(g_damage_overlay_slots[kind][count-1])`, draw layer 0xA. On the
+fifth update (`frames == 0x37`) it plays the hurt voice, `rand() % 2` of
+James's `DAMEGE_JMS\184/185` or Gary's `DAMEGE_GA\187/188`. The latch is
+cleared by `UpdateScreenShake` (`FUN_00415270`), which also starts a 48-frame
+vertical camera nod.
+
+| kind | slot | `common.bin` | picture | sound |
+|---|---|---|---|---|
+| 0 | 0x93B | 126 | diagonal swipe, mirrored | DAMAGE1 |
+| 1 | 0x93A | 125 | diagonal swipe | DAMAGE1 |
+| 2 | 0x938 | 123 | three claw marks, U-flipped | DAMAGE2 |
+| 3 | 0x932 | 117 | three claw marks | DAMAGE2 |
+| 4 | 0x939 | 124 | one slash, U-flipped | BLOOD03 |
+| 5 | 0x933 | 118 | one slash | BLOOD03 |
+| 6 | 0x937 (2P 0x936) | 122 (121) | wide gash | BLOOD03 |
+| 7 | 0x934 | 119 | splat | DAMAGE4 |
+| 8 | 0x935 | 120 | vertical streak | BLOOD05 |
+| 9, 10 | 0x931 | 116 | ring of teeth marks | BONE01 |
+
+The zombie attack tables' `+0x0A` values span 0, 1, 2, 3 (type 0x0D only), 4,
+5, 7, 8 and 9; the literals at the other call sites are 0/1 (the thrower's
+grab), 4 (the axe), 6 (arcing throws, the stage-2 boss), 7 (leaps, rolled
+props), 8 (boss 4), 9 (bats, fish, frog, owl, body creature) and 10 (the
+horde). With two players the overlays sit at x = -0.22 and +0.22. The port is
+`web/src/game/effects/damage_overlay.ts`.
+
+**The second argument decides whether there is an overlay at all.** It gates
+the latch, and it is 1 at every call site but three: `ActorStrikeConnect` and
+`ThrowerStrikeConnect` pass **0** when the striker has `obj+0x34` bit
+`0x2000000` set (and then despawn it -- `ZombieReleaseAndDespawn` /
+`ThrowerLeave`), and `ThrowerStrikeConnect`'s first site at `0x0044CEE6`
+passes 0 as well. A life is still taken; no overlay and no shake.
 
 ### Do zombies aim their torso and head at the player? No.
 

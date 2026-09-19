@@ -766,7 +766,8 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   // `obj+0x24C` is never incremented in this state, so the distance is the
   // only way out of it.
   if (d >= OWL_STRIKE_RANGE && sub.timer < 1) return;
-  PlayerTakeDamage(obj.attackPermit, obj, OWL_DAMAGE_KIND, f.events, "strike");
+  PlayerTakeDamage(obj.attackPermit, 1, OWL_DAMAGE_KIND, f.events, obj,
+                   "strike");
 
   sub.state = OwlState.OrbitAway;
   const damp = sub.subtype === 1 && sub.dive === OwlDiveKind.Home

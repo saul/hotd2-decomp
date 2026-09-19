@@ -4,18 +4,29 @@
  * A strike costs exactly **one life** — the attack entry's `+0x0A` is the
  * damage overlay it shows, not a damage amount — plus 100 points and 90 frames
  * of invulnerability. It also drops the adaptive damage rank by 2, which is
- * how being hit makes the game easier.
+ * how being hit makes the game easier. Outside the path camera the last life
+ * cannot go: a hit there floors it at one.
  */
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { AppState, G, PlayerState } from "../globals";
+import { ScoreAddForPlayer } from "./score";
 
 /**
- * `CheckPlayerCanBeHit` — `FUN_004153E0`. The invulnerability window, which is
- * why a second zombie swinging on the same frame does not cost a second life.
+ * `CheckPlayerCanBeHit` — `FUN_004153E0`. 0 when the player may be hit: -1
+ * for an index that is not 0 or 1, and -3 while a stage is being played
+ * (`g_app_state == 6`) and the player is in any state but 1, 4 or 5. It does
+ * **not** test lives or invulnerability -- `PlayerTakeDamage` tests the
+ * window itself, on the next line.
  */
-export function CheckPlayerCanBeHit(player: number): boolean {
-  return G.g_player_lives[player] > 0 && G.g_player_invuln_frames <= 0;
+export function CheckPlayerCanBeHit(player: number): number {
+  if (player !== 0 && player !== 1) return -1;
+  const s = G.g_player_state[player];
+  if (G.g_app_state === AppState.InPlay && s !== PlayerState.EnterContinue
+      && (s < PlayerState.Continue || s > PlayerState.InPlay)) {
+    return -3;
+  }
+  return 0;
 }
 
 /**
@@ -47,11 +58,8 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  *
  * The third clause used to be a stand-in -- "has a life left" -- because the
  * port seeded `g_player_state` 0 and nothing wrote 5. It reads the real
- * state now: the reset seeds player 0 in play, as `PlayerEnterPlay`
- * (`FUN_00414770`) leaves it, and player 1 at 9, which is not attackable,
- * exactly as in a one-player game. See `g_player_state` in `globals.ts` for
- * the one stand-in left, which is that the port does not run the shell that
- * gets a player to 5.
+ * state now, which `game/player_shell.ts` keeps: `PlayerEnterPlay`
+ * (`FUN_00414770`) puts a player at 5 and the continue takes them out.
  *
  * **Its call sites.** Eight functions in the engine call it; the port has
  * modules for four of them and all four now do:
@@ -108,41 +116,50 @@ const PLAYER_HIT_RANK_DELTA = -2;
 /**
  * `PlayerTakeDamage` — `FUN_00415300`.
  *
- * One function for every damage source. The melee strike and the thrown weapon
- * both land here and the engine does not care which: that duplication is
- * exactly what the two hand-written callbacks in the old `main.ts` had grown.
+ * One function for every damage source, three arguments: the player, whether
+ * to raise the hit latch, and the motion the player plays. Refused for player
+ * -1, for a player `CheckPlayerCanBeHit` turns away, inside the player's own
+ * invulnerability window, and in the attract demo. Otherwise, unless the
+ * player's `g_player_no_damage` byte is set: a life, 100 points through
+ * `ScoreAddForPlayer` (so the score floors at 0), and the rank. Then the
+ * latch, 0x5A frames, and -- **only outside scene major 2**, the path camera
+ * -- the floor at one life. On the path camera the last life can go, and
+ * `PlayerUpdateInPlay` (`FUN_00413E90`) takes the player out of play the next
+ * frame.
  *
- * `events` is not the exe's — the engine sets `g_player_was_hit` and lets the
- * player entity notice next frame. The global is still written; the event is
- * how the HUD and the feed hear about it without polling.
+ * `latch` is the engine's second argument: 1 at every call site but
+ * `ActorStrikeConnect`'s (`FUN_00456490`) despawning arm, which passes 0.
+ * `src`, `source` and `attack` are not the exe's -- they feed the
+ * `player.damaged` event the HUD and the feed hear it by.
+ *
+ * `[diverges]` The rank change goes into `g_damage_rank` at once, floored at
+ * 0. The engine subtracts 2 from `g_damage_rank_pending` (`0x009A3794`) and
+ * `UpdateDamageRank` (`FUN_004607B0`) folds it in and clamps next frame; that
+ * routine is not ported -- see `run_phase.ts`.
  */
-export function PlayerTakeDamage(player: number, src: Actor | null,
+export function PlayerTakeDamage(player: number, latch: number,
                                  overlayKind: number, events?: Events,
+                                 src: Actor | null = null,
                                  source: "strike" | "thrown" = "strike",
                                  attack = -1): boolean {
-  if (!CheckPlayerCanBeHit(player)) return false;
-
-  // [diverges] Floored at **one**, not zero. Reaching zero is the continue
-  // sequence, and this port has none: the engine's `g_player_state`
-  // (0x009A5C62) leaves 5 and `IsPlayerAttackable` above then makes
-  // every enemy stand down, so a player who runs out simply stops being
-  // attacked and the script freezes on `g_evt_gameplay_live`. With neither of
-  // those modelled, a run that hit zero left the player alive, unattackable by
-  // nothing, and the scene running on — which reads as the enemies breaking.
-  // Until there is a player state to lose, there is no last life to lose
-  // either. Named on purpose: this is a stand-in, not the rule.
-  G.g_player_lives[player] =
-    Math.max(1, G.g_player_lives[player] - PLAYER_LIFE_COST);
-  G.g_player_score[player] += PLAYER_HIT_SCORE;
-  G.g_player_invuln_frames = PLAYER_INVULN_FRAMES;
-  G.g_player_was_hit[player] = 1;
-  G.g_player_damage_overlay_kind[player] = overlayKind;
-  // Being hit drops the adaptive rank by two, floored at zero.
-  G.g_damage_rank =
-    Math.max(0, G.g_damage_rank - Math.abs(PLAYER_HIT_RANK_DELTA));
-  // A non-head hit ends the headshot chain; taking one certainly does.
-  G.g_head_combo_bonus[player] = 0;
-
+  if (player === -1) return false;
+  if (CheckPlayerCanBeHit(player) !== 0
+      || G.g_player_invuln_frames[player] !== 0
+      || G.g_app_state === AppState.Attract) {
+    return false;
+  }
+  if (G.g_player_no_damage[player] === 0) {
+    G.g_player_lives[player] -= PLAYER_LIFE_COST;
+    G.g_damage_rank =
+      Math.max(0, G.g_damage_rank + PLAYER_HIT_RANK_DELTA);
+    ScoreAddForPlayer(player, PLAYER_HIT_SCORE, events);
+  }
+  if (latch !== 0) {
+    G.g_player_was_hit[player] = 1;
+    G.g_player_damage_overlay_kind[player] = overlayKind;
+  }
+  G.g_player_invuln_frames[player] = PLAYER_INVULN_FRAMES;
+  PlayerFloorLivesOffPath(player);
   events?.emit("player.damaged", {
     source,
     at: src?.at ?? -1,
@@ -155,16 +172,59 @@ export function PlayerTakeDamage(player: number, src: Actor | null,
 }
 
 /**
- * `PlayerTakeDamageTimed` — `FUN_00415430`. The same, from a source that
- * schedules its own hit frame; the thrown weapon's expiry is one.
+ * `[port-only]` -- the last three lines both damage routines end on, named so
+ * they are one rule: off the path camera (`g_scene_state_major_entered` and
+ * `g_scene_state_major` both not 2) a player with no lives is given one back.
  */
-export function PlayerTakeDamageTimed(player: number, src: Actor | null,
-                                      overlayKind: number,
-                                      events?: Events): boolean {
-  return PlayerTakeDamage(player, src, overlayKind, events, "thrown", -1);
+function PlayerFloorLivesOffPath(player: number): void {
+  if (G.g_scene_state_major_entered !== SCENE_STATE_PATH_CAMERA
+      && G.g_scene_state_major !== SCENE_STATE_PATH_CAMERA
+      && G.g_player_lives[player] < 1) {
+    G.g_player_lives[player] = 1;
+  }
 }
 
-/** Count down the invulnerability window. One 60 Hz frame per call. */
-export function TickPlayerInvulnerability(frames: number): void {
-  G.g_player_invuln_frames = Math.max(0, G.g_player_invuln_frames - frames);
+/**
+ * `PlayerTakeDamageTimed` — `FUN_00415430`. `PlayerTakeDamage` with two more
+ * arguments: `ignoreInvuln` lets the hit through the window, and
+ * `invulnFrames` (-1 for "leave it") sets the window it opens. It does not test
+ * the attract demo, and it does not refuse player -1 before calling
+ * `CheckPlayerCanBeHit`, which refuses it anyway.
+ *
+ * `[open]` **Nothing in the image calls it** -- no `CALL 0x00415430` exists.
+ * The port's two callers, the class-0x31 thrown weapon and class 0x10's shot,
+ * were attributed to it before that was checked; the weapon's engine routine,
+ * `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), calls `PlayerTakeDamage`
+ * (`player, 1, 6`), and now does so here too. Class 0x10's engine call has not
+ * been found and is left on this routine with its default arguments.
+ */
+export function PlayerTakeDamageTimed(player: number, latch: number,
+                                      overlayKind: number, ignoreInvuln = 0,
+                                      invulnFrames = -1, events?: Events,
+                                      src: Actor | null = null): boolean {
+  if (CheckPlayerCanBeHit(player) !== 0) return false;
+  if (G.g_player_invuln_frames[player] !== 0 && ignoreInvuln === 0) {
+    return false;
+  }
+  if (G.g_player_no_damage[player] === 0) {
+    G.g_player_lives[player] -= PLAYER_LIFE_COST;
+    G.g_damage_rank =
+      Math.max(0, G.g_damage_rank + PLAYER_HIT_RANK_DELTA);
+    ScoreAddForPlayer(player, PLAYER_HIT_SCORE, events);
+  }
+  if (latch !== 0) {
+    G.g_player_was_hit[player] = 1;
+    G.g_player_damage_overlay_kind[player] = overlayKind;
+  }
+  if (invulnFrames !== -1) G.g_player_invuln_frames[player] = invulnFrames;
+  PlayerFloorLivesOffPath(player);
+  events?.emit("player.damaged", {
+    source: "thrown",
+    at: src?.at ?? -1,
+    who: src?.name ?? "—",
+    attack: -1,
+    lives: G.g_player_lives[player],
+    score: G.g_player_score[player],
+  });
+  return true;
 }

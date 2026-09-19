@@ -82,7 +82,10 @@ export function CivilianCheckShot(obj: Actor, f: ClassFrame): void {
     // `obj+0x34` bits 1 and 2 name the shooter; neither means "either".
     const two = obj.flags & 6;
     player = two === 2 ? 0 : two === 4 ? 1 : (f.rng.next() < 0.5 ? 0 : 1);
-    PlayerTakeDamageTimed(player, obj, 0, f.events);
+    // `[open]` The engine call behind this has not been found: `CivilianUpdate`
+    // (`FUN_0048A920`) makes no damage call, and `PlayerTakeDamageTimed` has
+    // no caller in the image. Kept on it, with its default arguments.
+    PlayerTakeDamageTimed(player, 1, 0, 0, -1, f.events, obj);
     ScoreAddForPlayer(player, SHOT_PENALTY, f.events);
     G.g_head_combo_bonus[player] = 0;
     G.g_player_hit_count[player] += 1;

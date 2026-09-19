@@ -21,11 +21,13 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { AttackJson } from "../../bundle";
 import { ticksOfAuthoredFrame } from "../../core/play_cursor";
-import { DamageZone, ZombieFlag2, type ZombieActor } from "../actor";
+import { ActorFlag, DamageZone, ZombieFlag2, type ZombieActor }
+  from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieGiveUpAttack } from "./leave";
+import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorFacePlayerTarget } from "../actor_turn";
 import { ActorStartFade } from "./motion_cue";
 import { MotionFade, StrikeSub, ZombieState } from "./states";
@@ -82,14 +84,28 @@ export function ZombiePickAttack(obj: ZombieActor, rng: Rng): number {
 }
 
 /**
- * `ActorStrikeConnect` — `FUN_00456490`. The hit whiffs if **every** zone the
+ * `ActorStrikeConnect` — `FUN_00456490`. The hit lands on the player the
+ * permit names (`obj+0x121`, 0 or 1 only), and whiffs if **every** zone the
  * attack needs has been shot off. Mask 8 is outside the three-bit zone mask,
  * so those attacks can never be cancelled.
+ *
+ * With {@link ActorFlag.StrikeAndLeave} up the hit carries no latch --
+ * `PlayerTakeDamage(player, 0, motion)` at `0x004564F1` -- and the actor
+ * goes, `ZombieReleaseAndDespawn` at `0x004564FA`. It used to hit player 0
+ * whatever the permit said.
  */
 export function ActorStrikeConnect(obj: ZombieActor, atk: AttackJson,
                                    events?: Events): boolean {
+  const player = obj.attackPermit;
+  if (player !== 0 && player !== 1) return false;
   if ((obj.zones & DamageZone.All & atk.cancel_mask) === atk.cancel_mask) return false;
-  return PlayerTakeDamage(0, obj, atk.overlay_kind, events, "strike",
+  if (obj.flags & ActorFlag.StrikeAndLeave) {
+    const hit = PlayerTakeDamage(player, 0, atk.overlay_kind, events, obj,
+                                 "strike", obj.attack);
+    ZombieReleaseAndDespawn(obj);
+    return hit;
+  }
+  return PlayerTakeDamage(player, 1, atk.overlay_kind, events, obj, "strike",
                           obj.attack);
 }
 

@@ -1623,25 +1623,52 @@ scenery at the camera.
 ### Damage to the player — `PlayerTakeDamage`
 
 ```c
-if (invuln_frames[player] || app_state == 5) return;
-if (!shielded) {
+if (player == -1) return;
+if (CheckPlayerCanBeHit(player) != 0            /* -1 bad index; -3 in app 6 at a state not 1, 4 or 5 */
+    || invuln_frames[player] || app_state == 5) return;
+if (!g_player_no_damage[player]) {             /* 0x009C9FD8 + player*0x7C */
     g_player_lives[player] -= 1;
-    g_damage_rank_pending -= 2;          /* UpdateDamageRank consumes this */
-    ScoreAddForPlayer(player, -100);
+    g_damage_rank_pending -= 2;                /* UpdateDamageRank consumes this */
+    ScoreAddForPlayer(player, -100);           /* floored at 0 */
 }
-if (show) { g_player_was_hit[player] = 1; g_player_damage_overlay_kind[player] = kind; }
-invuln_frames[player] = 0x5A;            /* 90 frames, 1.5 s */
+if (latch) { g_player_was_hit[player] = 1; g_player_damage_overlay_kind[player] = kind; }
+invuln_frames[player] = 0x5A;                  /* 90 frames, 1.5 s, one dword per player */
+if (major_entered != 2 && major != 2 && g_player_lives[player] < 1)
+    g_player_lives[player] = 1;                /* off the path camera the last life cannot go */
 ```
 
-**One strike costs exactly one life.** There is no variable damage against the
-player — the attack entry's `+0x0A` is not an amount. It is the **damage
-overlay kind** (`overlay_kind` in the bundle, `g_player_damage_overlay_kind`
-in the exe's names -- both were called the "player motion" until format 10,
-and nothing reads it as a motion): its one reader is the damage overlay,
-below. And the
-`g_damage_rank_pending -= 2` closes a loop from §4: being hit lowers the
-adaptive rank, which raises the per-bone damage modifier, so the game gets
-easier the worse you do. The continue screen restores 1 or 2 lives.
+`[proved]`, `FUN_00415300`. **One strike costs exactly one life.** There is no
+variable damage against the player -- the attack entry's `+0x0A` is a
+not an amount. It is the **damage overlay kind** (`overlay_kind` in the
+bundle, `g_player_damage_overlay_kind` in the exe's names -- both were called
+the "player motion" until format 10, and nothing reads it as a motion): its
+one reader is the damage overlay, below. The `latch` argument is 1 at every call site but the
+`obj+0x34 & 0x2000000` arms of `ActorStrikeConnect` and `ThrowerStrikeConnect`,
+which pass 0. `g_damage_rank_pending -= 2` closes a loop from section 4: being
+hit lowers the adaptive rank, which raises the per-bone damage modifier, so the
+game gets easier the worse you do. **The damage sprite is not spawned here**:
+the per-player `+0x7C` hook turns `g_player_was_hit` and the kind into it
+(`0x00415180` -> `FUN_00417440`); see `game/player_shell.ts`.
+
+**On the path camera the last life goes.** `PlayerUpdateInPlay`
+(`FUN_00413E90`) then takes the player out of play on its next turn --
+`g_players_in_play -= 1`, state 4 -- and the player shell runs the continue:
+
+| state | handler | what it does |
+|---:|---|---|
+| 4 | `PlayerStateArmContinue` then `PlayerContinueCountdown` | `0x9FFF`, -`0x2D` a frame, the digit is `>> 12` (about 910 frames); the trigger knocks it to the bottom of its digit; START with a credit is state 1 |
+| 1 | `PlayerStateEnterContinue` | `ScoreAddForPlayer(p, 1)`, `g_damage_rank -= 1`, `PlayerEnterPlay(1)`: `g_start_lives`, 180 frames' grace |
+| 6 | `PlayerStateArmGameOver`, `PlayerGameOverWait` | the countdown ran out: `g_max_attackers -= 1`, 120 frames, then 9 |
+
+With every player out (states 4 and 9 carry flag 1 at `+0x04` of
+`g_player_state_handlers`) `RunPhaseInPlay` hands the run to its own CONTINUE?
+screen, phases 3 and 4 (`RunPhaseContinueArm`, `RunPhaseContinueCountdown`) --
+or, with no credit, phase 11 -- and if nobody takes one the game-over screen,
+app state 7. The scene keeps running under the continue screen. Credits: the
+title seeds `ModeStartCounterValue(mode)` -- six in Arcade at the factory
+options, six in Original, one in Training and Boss -- and the start takes one.
+Lives: `g_start_lives = g_start_lives_by_option[0x009C9F21]`, **three** at the
+factory setting.
 
 ### What being hit looks like — the damage overlay
 

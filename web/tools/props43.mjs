@@ -59,6 +59,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUNDLE_ROOT, hasStage, skipNoBundle } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
@@ -93,8 +94,9 @@ function reset() {
   ResetGameGlobals();
   SetGameTables(script.characters, script.breakables, script.set_pieces,
                 script.humanoids, script.coli, script.civilians);
-  G.g_players_in_play = 1;
-  G.g_player_lives = [2, 2];
+  // In play through the ported routines, not by hand (L49): the reset
+  // started the game from the title, and this is the first player turn.
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
   // The browser sets this from the bundle, and class 0x41 branches on it:
   // `PlaceGenericProp`'s types 70-72 and 77 despawn on their first frame
   // unless the mode is Original. Leaving it at the default made this harness

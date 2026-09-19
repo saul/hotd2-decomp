@@ -763,7 +763,7 @@ export function FrogStateLeapAtPlayer(obj: Actor, f: ClassFrame): void {
       obj.vel.z = 0;
       sub.flags |= FrogFlag.NoGravity;
       FrogPlay(obj, FrogMotion.Idle);
-      PlayerTakeDamage(obj.attackPermit, obj, FROG_DAMAGE_KIND, f.events,
+      PlayerTakeDamage(obj.attackPermit, 1, FROG_DAMAGE_KIND, f.events, obj,
                        "strike");
       sub.sub = 4;
       return;

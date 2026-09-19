@@ -652,6 +652,11 @@ web/src/
                   prop placers' children -- would close an ESM cycle
     globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
     camera/       curve.ts (the `cam/` Hermite), path.ts, track.ts, slots.ts
+    player_shell.ts  the per-player state machine: start, in play, continue,
+                  game over, and the stage step's park at 2
+    run_phase.ts  the run phases a stage is played in (2, 3, 4, 11, 12) and
+                  `RunSceneTasksAndTimers`; app_state.ts the screen request
+    credits.ts    what a start and a continue spend
     combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts
     effects/                                 coli.ts, motion.ts, tables.ts, ...
   bundle/       one module per exporter block, re-exported by index.ts

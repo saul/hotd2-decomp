@@ -13,7 +13,7 @@
  * reach it and no snapshot could describe it.
  *
  * So the click becomes **input**: `QueueShotRequest` puts a segment on
- * `g_shot_requests`, and `ProcessShotRequests` drains it at the head of
+ * `g_shot_requests`, and `PlayerFireFromQueue` drains it from the player's own task in
  * `GameUpdate`. That is the shape the engine already has — `BuildShotRay`
  * (`FUN_00406110`) writes the per-player shot record and the game loop reads
  * it — and it buys the thing the plan has wanted since the beginning: the
@@ -160,34 +160,58 @@ function CameraBackYawBams(): number {
 }
 
 /**
- * Drain the shot queue.
+ * Whether a trigger pull of `player` falls due this frame.
  *
- * `[port-only]` — the loop around the engine's per-frame shot test, which has
- * no queue to drain. Everything inside it is transcribed.
- *
- * The queue is taken and replaced rather than shifted, so a class that fires
- * during its own update (nothing does yet) queues for the next frame instead
- * of extending this one.
+ * `[port-only]` -- the engine polls a trigger bit (`+0x14` of the aim record,
+ * `g_trigger_down`); the port's trigger is the queue, so the bit is derived
+ * from it once a frame before the player tasks run.
  */
-export function ProcessShotRequests(host: GameHost, rng: Rng,
+export function ShotRequestDue(player: number): boolean {
+  const now = Math.round(G.g_frame);
+  return G.g_shot_requests.some((r) => r.player === player && r.frame <= now);
+}
+
+/**
+ * Resolve `player`'s due trigger pulls -- the port's half of the trigger poll
+ * in `PlayerFireAndReloadUpdate` (`FUN_00414940`) and its Original Mode twin
+ * `PlayerFireOriginalModeWeapon` (`FUN_00414B90`).
+ *
+ * `[port-only]` -- the loop around the engine's per-frame shot test, which has
+ * no queue to drain. Everything inside it is transcribed. **Only the player's
+ * own task calls it**, from `PlayerUpdateInPlay` (`FUN_00413E90`) while it has
+ * a life, or `PlayerStateFireOnly` (`FUN_00414740`): a player out of lives, in
+ * the continue countdown or out of the game does not fire at all, which is the
+ * engine's shape. It used to drain every request at the head of `GameUpdate`
+ * whatever state the player was in.
+ *
+ * **`req.frame` is read, which is what makes the queue a log rather than a
+ * list.** A request is resolved on the frame it was pulled on, or on the first
+ * frame after it. Live play never exercises the second half -- a click arrives
+ * on a DOM event and is stamped with the current `g_frame`, so it is always due
+ * -- but a replay feeds the log in ahead of the clock, and this is the line
+ * that makes the shots land where they landed rather than all at once on the
+ * frame the log was loaded.
+ */
+export function PlayerFireFromQueue(player: number, host: GameHost, rng: Rng,
                                     events?: Events): void {
   const queued = G.g_shot_requests;
   if (!queued.length) return;
-  // **`req.frame` is read, which is what makes the queue a log rather than a
-  // list.** It was written on every request and consulted by nothing, so the
-  // claim that recording the queue per frame gives an input log for free was
-  // half true: the data was there and no code path could re-time to it.
-  //
-  // A request is resolved on the frame it was pulled on, or on the first frame
-  // after it. Live play never exercises the second half — a click arrives on a
-  // DOM event and is stamped with the current `g_frame`, so it is always due —
-  // but a replay feeds the log in ahead of the clock, and this is the line
-  // that makes the shots land where they landed rather than all at once on the
-  // frame the log was loaded.
   const now = Math.round(G.g_frame);
-  const due = queued.filter((r) => r.frame <= now);
-  G.g_shot_requests = queued.filter((r) => r.frame > now);
+  const due = queued.filter((r) => r.player === player && r.frame <= now);
+  if (!due.length) return;
+  G.g_shot_requests = queued.filter((r) => !due.includes(r));
   for (const req of due) ResolveShotRequest(req, host, rng, events);
+}
+
+/**
+ * `[port-only]` -- the pulls no player's task took this frame are gone: the
+ * engine polls the trigger once a frame and a poll nobody makes is simply a
+ * frame in which nothing happened. A queue that kept them would fire them the
+ * moment the player came back into play, which the engine never does.
+ */
+export function DropDueShotRequests(): void {
+  const now = Math.round(G.g_frame);
+  G.g_shot_requests = G.g_shot_requests.filter((r) => r.frame > now);
 }
 
 /**
@@ -215,7 +239,7 @@ export function ProcessShotRequests(host: GameHost, rng: Rng,
  * The request is **dropped**, not held: the engine polls the trigger once a
  * frame and a blocked poll is simply a frame in which nothing happened. A
  * queue that saved the click for later would fire it when the shutter opened,
- * which the engine never does. `ProcessShotRequests` has already taken every
+ * which the engine never does. `PlayerFireFromQueue` has already taken every
  * due request off the queue by the time this runs, so returning is the drop.
  *
  * What is **not** gated, because the engine does not gate it: reloading. Both

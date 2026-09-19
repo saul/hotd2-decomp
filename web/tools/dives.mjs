@@ -32,6 +32,8 @@ import { readFileSync } from "node:fs";
 import { CameraFrame } from "../src/core/camera.ts";
 import { Events } from "../src/core/events.ts";
 import { Rng } from "../src/core/rng.ts";
+import { NULL_HOST } from "../src/game/host.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Scope } from "../src/core/scope.ts";
 import { World } from "../src/core/world.ts";
 import { GameSystem, ScriptSystem, syncPortGlobals }
@@ -108,8 +110,12 @@ for (const [name, stage, block, step, subtype, entry] of CASES) {
   world.attach(ctx);
   SetGameTables(chars, script.breakables, script.set_pieces, script.humanoids,
                 script.coli, script.civilians);
-  G.g_players_in_play = 1;
-  G.g_player_lives = [9999, 9999];
+  // In play through the ported routines, not by hand (L49): the reset
+  // started the game from the title, and this is the first player turn.
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+  // The engine's own "cannot be hurt" byte, `g_player_no_damage`, rather
+  // than a life count the first player turn would overwrite.
+  G.g_player_no_damage = [1, 1];
   G.g_GameMode = script.game_mode;
   if (!seekTo(walker, block, step, 0, 500000, entry)) {
     check(`${name}: seek to ${stage}/${block}/${step}`, false);

@@ -58,7 +58,7 @@ const overlay = () => page.evaluate(async () => {
     major: G.g_scene_state_major_entered,
     wasHit: [...G.g_player_was_hit],
     lives: [...G.g_player_lives],
-    invuln: G.g_player_invuln_frames,
+    invuln: [...G.g_player_invuln_frames],
     state: [...G.g_player_state],
   };
 });
@@ -82,18 +82,24 @@ try {
   // civilian's death also costs 100.)
   const invuln = () => page.evaluate(async () => {
     const { G } = await import("/src/game/globals.ts");
-    return G.g_player_invuln_frames;
+    // One dword per player now (`game/player_shell.ts`); player 0's, and the
+    // lives beside it: entering play also opens a 90-frame window, so a
+    // strike is the window re-opening **with a life gone** (L47).
+    return [G.g_player_invuln_frames[0], G.g_player_lives[0]];
   });
   // A snapshot from before any hit, for the load check below.
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.evaluate(() => document.activeElement?.blur?.());
-  let prev = 0, hits = 0, drawn = 0, stale = null;
+  let [prev, prevLives] = await invuln();
+  let hits = 0, drawn = 0, stale = null;
   for (let done = 0; done < BUDGET && hits < WANT; done += 2) {
     await advance(2);
     const rows = await drain();
-    const v = await invuln();
-    const struck = v > prev ? rows[rows.length - 1] ?? { a: "?", f: -1 } : null;
+    const [v, lives] = await invuln();
+    const struck = v > prev && lives < prevLives
+      ? rows[rows.length - 1] ?? { a: "?", f: -1 } : null;
     prev = v;
+    prevLives = lives;
     if (!struck) continue;
     hits += 1;
     // Three frames on: the player's update has spawned it by now.
@@ -146,7 +152,7 @@ try {
     // Let this one run out before looking for the next, so the next picture
     // is the next hit's and not a leftover.
     for (let k = 0; k < 70; k += 10) { await advance(10); await drain(); }
-    prev = await invuln();
+    [prev, prevLives] = await invuln();
   }
   console.log(`\n${where}: ${hits} hits, ${drawn} with an overlay up`);
   if (hits === 0) {

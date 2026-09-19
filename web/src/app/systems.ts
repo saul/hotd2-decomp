@@ -12,6 +12,7 @@ import { CamSeatPathFrame } from "../game/camera/path";
 import { GameUpdate } from "../game/director";
 import { SceneLightArrayUpdate } from "../game/scene_lights";
 import { ActorIsEnemy } from "../game/registry";
+import type { PlayerBlock } from "../game/player_shell";
 import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
 import type { GameHost, ShotPick, ShotRay } from "../game/host";
@@ -155,8 +156,16 @@ export class GameSystem implements System {
    * go in **after** this, because the reset zeroes the data segment.
    */
   attach(): void {
-    ResetGameGlobals();
+    ResetGameGlobals(this.carry ?? undefined);
+    this.carry = null;
   }
+
+  /**
+   * The player block a stage step carries into the next stage's reset, taken
+   * by `Player.advanceScene` just before the load. `null` for every other
+   * load, which is a new game started from the title.
+   */
+  carry: PlayerBlock | null = null;
 
   /**
    * `SceneLightArrayUpdate` (`FUN_00480970`) against *view* -- the camera this
@@ -391,6 +400,9 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // pair `EvtEnterSceneState` records; this is the half the combat code reads,
   // and without it here nothing in the game would ever be allowed to attack.
   G.g_scene_state_major_entered = w.sceneState.major;
+  // ...and the live one beside it, which the walker does not keep apart --
+  // see `g_scene_state_major` in `game/globals.ts`.
+  G.g_scene_state_major = w.sceneState.major;
   // `__ftol` -- both camera drivers end on `g_cam_path_frame = __ftol(...)`,
   // so this global is an **integer** that steps by exactly one a frame. The
   // walker's clock is a float (`dt * 60`), and handing that straight over

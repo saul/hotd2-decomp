@@ -647,7 +647,7 @@ export function FishLungeTestBite(obj: Actor, f: ClassFrame): void {
   if (d >= FISH_BITE_RANGE) {
     if (d <= FISH_ABANDON_RANGE) return;
   } else if (obj.attackPermit !== -1) {
-    PlayerTakeDamage(obj.attackPermit, obj, FISH_DAMAGE_KIND, f.events,
+    PlayerTakeDamage(obj.attackPermit, 1, FISH_DAMAGE_KIND, f.events, obj,
                      "strike");
     FishEndLunge(obj);
     return;

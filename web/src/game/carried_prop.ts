@@ -624,7 +624,7 @@ export function CarriedPropThrowAtCamera(p: CarriedProp, cam: CameraPair | null,
     p.routine = CarriedPropRoutine.StuckToScreen;
     let kind = HIT_KIND;
     if (p.type === 2) { p.rx = -0x800; kind = HIT_KIND_TYPE2; }
-    PlayerTakeDamage(p.player, null, kind, events, "thrown");
+    PlayerTakeDamage(p.player, 1, kind, events, null, "thrown");
   }
 }
 
@@ -1016,7 +1016,7 @@ export function CarriedPropRollAtCamera(p: CarriedProp, cam: CameraPair | null,
     p.routine = CarriedPropRoutine.StuckToScreen;
     if (G.g_players_in_play === 1) p.player = G.g_active_player;
     else if (G.g_players_in_play === 2) p.player = p.shotPoint.x >= 0 ? 1 : 0;
-    PlayerTakeDamage(p.player, null, HIT_KIND, events, "thrown");
+    PlayerTakeDamage(p.player, 1, HIT_KIND, events, null, "thrown");
     // The engine writes 1; the port's permits hold a claimant, and this one
     // has no actor of its own -- the carrier is the nearest thing to one.
     if (p.player >= 0) G.g_attack_permits[p.player] = p.carrier;

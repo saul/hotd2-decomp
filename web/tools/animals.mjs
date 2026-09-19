@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { BUNDLE_ROOT, hasBundle, skipNoBundle }
   from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
@@ -85,8 +86,9 @@ for (const [name, stage, block, step, cls, wanted, entry] of CASES) {
   ResetGameGlobals();
   SetGameTables(chars, undefined, undefined, undefined, script.coli,
                 script.civilians);
-  G.g_players_in_play = 1;
-  G.g_player_lives = [2, 2];
+  // In play through the ported routines, not by hand (L49): the reset
+  // started the game from the title, and this is the first player turn.
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
   const rng = new Rng(1);
   const events = new Events();
   let eye = vec3(0, 6, 0);

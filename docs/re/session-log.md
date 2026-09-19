@@ -19036,3 +19036,90 @@ striker -- when `obj+0x34` bit `0x2000000` is set. The port's
   read *before* the six nod frames and reported the overlay "MOVED" while
   paused. It compares against a read taken at the pause now.
 
+
+## 2026-09-19 -- the player shell, and PlayerTakeDamage exactly (follow-up to bug 19)
+
+The bug-19 fix seeded `g_player_state = [5, 9]`. The user asked for the real
+thing, so the per-player state machine is ported (`game/player_shell.ts`,
+`run_phase.ts`, `credits.ts`, `app_state.ts`) and nothing about the player is
+seeded any more.
+
+What was read, all `[proved]` unless marked:
+
+* `g_player_state_handlers` (`0x00579CD0`) is twelve rows of five dwords:
+  handler plus four flags. The first flag (`+0x04`) is 1 for states 4 and 9
+  only -- the "out of play" test `RunPhaseInPlay`, `RunPhaseContinueCountdown`
+  and `RunPhaseArmSceneAdvance` make. State 5's handler is **null**.
+* `g_player_enter_play_modes` has **seven** rows, not four: 4 is the attract
+  demo's entry and leaves the player at **9**, 5 also 9, 6 is state 12 with no
+  reachable caller. My first annotation said "all four rows write 5"; it was
+  four of seven, and the TSV now says so.
+* `PlayerTakeDamage` (`FUN_00415300`): the port's version tested lives and
+  invulnerability in `CheckPlayerCanBeHit`, which tests neither (it is the
+  index and the in-play states 1/4/5); it floored lives at one always, where
+  the exe floors only **off the path camera**; it ignored the second argument,
+  the hit latch, which `ActorStrikeConnect`/`ThrowerStrikeConnect` pass 0 on
+  their `obj+0x34 & 0x2000000` arm; its invulnerability was one scalar for two
+  players; it charged the score without `ScoreAddForPlayer`'s floor at 0; it
+  cleared the head combo, which the exe does not. All exact now except the
+  rank, which still goes into `g_damage_rank` at once because
+  `UpdateDamageRank` is not ported (`[diverges]`, in `run_phase.ts`).
+* `PlayerTakeDamageTimed` (`0x00415430`) has **no caller** in the image. The
+  port's two callers had been attributed to it: the class-0x31 weapon's engine
+  routine calls `PlayerTakeDamage(permit, 1, 6)` -- and the port passed 0 as
+  its motion; fixed -- and class 0x10's shot damage has no engine call found
+  (`[open]`, kept on the timed routine).
+* `ActorStrikeConnect` hit player 0 whatever the permit said; it uses the
+  permit now.
+* The two unread stores of `g_player_state`: `NetworkModeRunPhase` at
+  `0x0049F4E4` writes `BX`, the same register it writes to `g_GameMode` as 0;
+  `0x00481F3C` writes `DI` to players at 8 in Boss mode, and `DI` is the 0 the
+  routine pushes as a translation and compares against a countdown
+  (`[likely]`). Neither is 5: `PlayerEnterPlay` is the only way into play.
+* Credits: `SetBothPlayerCounters`' count was `[open]`; `CreditTrySpend` is
+  only called by `PlayerTryStartPress`, which passes "is at state 4", so it is
+  starts and continues. Factory options (`FUN_00401130`): lives setting 2 ->
+  **three** lives (`0x004D0EDC`), credits 5 -> six in Arcade.
+* The damage sprite is not `PlayerTakeDamage`'s: it latches the motion and the
+  per-player `+0x7C` hook (`0x00415180` -> `FUN_00417440`) makes the sprite.
+  Rows 0 and 2 install a different hook (`0x00415120`, the player entity).
+  Left as a named stub, `PlayerRunHitHook`, for the damage-fx port.
+
+Wrong turns: the circular import between `globals.ts` and `player_shell.ts`
+evaluated the handler table before the enums existed -- green in `tsc` and in
+the bundled tests, dead in the page ("Cannot read properties of undefined
+(reading 'EnterNewGame')") -- L15 again. The enums moved to `player_state.ts`. And the mode
+leaked between tests: `g_GameMode` survives the reset, as the title's choice
+does, so a Training test left one credit for every game after it and player 2
+could not join. Harness tools that wrote `g_players_in_play = 1` after the
+reset would now have counted two players; they enter play through the shell.
+
+Consequence: **lives drain and a game can end.** Every playthrough without
+`--continue` now ends in GAME OVER in its first rooms, because the tool's
+volleys do not stop everything that hits; the page shows `CONTINUE? n` and
+takes START on `S`.
+
+### Merged with the damage overlay (main 7dab068)
+
+The damage-fx branch walked `PlayerRunCameraHook` / `DamageOverlayUpdateAndDraw`
+from a `[port-only]` `PlayerDamageFeedbackTick` because there was no player
+task. There is now: both run inside `PlayerUpdateInPlay` (the overlay update
+also in `PlayerContinueCountdown`, and `PlayerStateEnterContinue` clears it),
+and `UpdateScreenShake` runs from `SelectAttackablePlayer` (`FUN_00414F40`),
+the task `FUN_00414FB0` allocates right after `PlayerTasksCreate` at every
+call site -- so the player updates see the latch before the shake clears it,
+now `[proved]` from the allocation order rather than `[likely]` by
+elimination. `PlayerEnterPlay` writes the `+0x7C` hook its row carries
+(`PlayerInstallDrawBodyHook` `0x004150C0` for rows 0/2/4/5,
+`PlayerInstallDamageOverlayHook` `0x004150E0` for 1/3); the scene-state
+installers overwrite it. To keep a deep link's installers on top, the reset
+now takes the scene's first player turn itself. `SelectAttackablePlayer` also
+computes `g_active_player` now, which nothing in the port did before.
+
+The strike connects' second arm: `obj+0x34 & 0x2000000` (`ActorFlag.
+StrikeAndLeave`) passes latch 0 and despawns -- `ZombieReleaseAndDespawn`
+(`0x004564FA`) and `ThrowerLeave` (`0x0044CF8A` / melee `0x0044CEE3`). What
+raises the bit (`FUN_0045E010`, `FUN_0045E660`) is unread, so it is ported
+and unreached. `tools/damage_fx.mjs` counted the 90-frame grace of entering
+play as a hit; it now wants a life gone as well. Its "load a pre-hit snapshot"
+check fails on main too (the overlay stays active after the load).

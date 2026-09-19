@@ -57,7 +57,9 @@ function run(n) {
   G.g_coli_full_set = Object.keys(script.coli?.blobs ?? {});
   // The player must stay alive: `PlayerTakeDamage` is real here and a corpse
   // changes what the queue does.
-  G.g_player_lives = [99, 99];
+  // The engine's own "cannot be hurt" byte, `g_player_no_damage`, rather
+  // than a life count the first player turn would overwrite.
+  G.g_player_no_damage = [1, 1];
 
   const places = script.characters.placements
     .filter((x) => x.class === 0x30 && x.motion);
@@ -82,7 +84,9 @@ function run(n) {
   let maxAtOnce = 0;
   let idleFrames = 0;
   for (let i = 0; i < SECONDS * 60; i++) {
-    G.g_player_lives = [99, 99];
+    // The engine's own "cannot be hurt" byte, `g_player_no_damage`, rather
+    // than a life count the first player turn would overwrite.
+    G.g_player_no_damage = [1, 1];
     GameUpdate(EYE, 1 / 60, HOST, rng, events);
     let atOnce = 0;
     for (let k = 0; k < n; k++) {

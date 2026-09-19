@@ -132,11 +132,12 @@ for (let stage = 1; stage <= 6; stage++) {
     scriptSys.walker = walker;
     ctx.walker = walker;
     ResetPropContainers();
+    // The mode first, as the page does: the reset starts the game from the
+    // title in it.
+    G.g_GameMode = script.game_mode;
     world.attach(ctx);
     SetGameTables(chars, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
-    G.g_player_lives = [2, 2];
-    G.g_GameMode = script.game_mode;
     if (!seekTo(walker, ...where.at)) {
       unreachable += 1;
       seen -= 1;

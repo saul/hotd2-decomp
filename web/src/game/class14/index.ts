@@ -1061,7 +1061,7 @@ export function Class14StateStrike(obj: Actor, f: ClassFrame): void {
     return;
   }
   if (fr === 0x3c) {
-    PlayerTakeDamage(G.g_active_player, obj, 6, f.events);
+    PlayerTakeDamage(G.g_active_player, 1, 6, f.events, obj);
     obj.flags &= ~ActorFlag.NoHitReaction;
     t.parts = Math.max(0, t.parts - 1);
     return;
@@ -1137,7 +1137,7 @@ export function Class14StateLungeAtCamera(obj: Actor, f: ClassFrame): void {
       if (ClipFrame(obj) === 0x55) obj.flags |= ActorFlag.PoseFrozen;
       const g = QueryGroundHeightAt(obj.pos.x, obj.pos.y + 100, obj.pos.z);
       if (obj.pos.y < g + 22) {
-        PlayerTakeDamage(G.g_active_player, obj, 6, f.events);
+        PlayerTakeDamage(G.g_active_player, 1, 6, f.events, obj);
         obj.vel.x *= 0.1; obj.vel.y *= 0.1; obj.vel.z *= 0.1;
         obj.accY = 0;
         t.counter0 = 10;
@@ -1517,7 +1517,7 @@ export function Class14StateLeapAttack(obj: Actor, f: ClassFrame): void {
       if (ClipFrame(obj) === 0x55) obj.flags |= ActorFlag.PoseFrozen;
       const g = QueryGroundHeightAt(obj.pos.x, obj.pos.y + 100, obj.pos.z);
       if (obj.pos.y < g + 22) {
-        PlayerTakeDamage(G.g_active_player, obj, 6, f.events);
+        PlayerTakeDamage(G.g_active_player, 1, 6, f.events, obj);
         obj.vel.x *= 0.1; obj.vel.y *= 0.1; obj.vel.z *= 0.1;
         obj.accY = 0;
         t.counter0 = 10;
@@ -1690,7 +1690,7 @@ function Class14LeapFromSideSub3(obj: Actor, t: Boss2Tail,
   if (ClipFrame(obj) === 0x55) obj.flags |= ActorFlag.PoseFrozen;
   const g = QueryGroundHeightAt(obj.pos.x, obj.pos.y + 100, obj.pos.z);
   if (obj.pos.y < g + 22) {
-    PlayerTakeDamage(G.g_active_player, obj, 6, f.events);
+    PlayerTakeDamage(G.g_active_player, 1, 6, f.events, obj);
     obj.vel.x *= 0.1; obj.vel.y *= 0.1; obj.vel.z *= 0.1;
     obj.accY = 0;
     t.counter0 = 10;

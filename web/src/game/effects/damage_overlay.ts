@@ -55,13 +55,15 @@
  *   draw the way `UpdateSceneViewAndLight` (`FUN_00401F40`) applies it: this
  *   file computes `g_screen_shake_pitch`, that one re-aims the view by it.
  *   The shake's other writers (entrances, boss deaths) are not wired yet.
- * * `FUN_00414280`, the dead player's update, also calls
- *   `DamageOverlayUpdateAndDraw`, and `g_player_state_handlers[1]`
- *   (`0x00413DE0`) calls `DamageOverlayClear`. The port runs neither state.
+ * * Nothing here decides when these run: `PlayerUpdateInPlay`,
+ *   `PlayerContinueCountdown` (`FUN_00414280`), `PlayerStateEnterContinue`
+ *   (`FUN_00413DE0`) and `SelectAttackablePlayer` do, in
+ *   `game/player_shell.ts`, and `PlayerEnterPlay` writes the hook its row
+ *   carries before any installer does.
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { G, PlayerState } from "../globals";
+import { G } from "../globals";
 
 /**
  * `g_player_damage_overlay_kind` as `DamageOverlaySpawn` (below) reads it:
@@ -413,31 +415,4 @@ export function UpdateScreenShake(): void {
   const phase = (frames * SCREEN_SHAKE_PHASE_STEP) * (Math.PI * 2 / 65536);
   G.g_screen_shake_pitch =
     Math.trunc(Math.cos(phase) * frames * SCREEN_SHAKE_GAIN);
-}
-
-/**
- * `[port-only]` — the three places in a frame this file's routines run, in
- * the engine's order.
- *
- * The engine has no such function: `PlayerRunCameraHook` and
- * `DamageOverlayUpdateAndDraw` are two calls inside each player's
- * `PlayerUpdateInPlay`, and `UpdateScreenShake` is inside a task of its own.
- * The port has no player task yet, so this is where they are walked.
- *
- * **The order is fixed by the overlay existing at all.** The hook only reads
- * the latch and `UpdateScreenShake` clears it, so if the shake's task ran
- * between the enemy that struck and the player's update no overlay could ever
- * be spawned -- and the shipped game shows one. So the players' updates come
- * first `[likely, by elimination]`, and the overlay appears on the frame after
- * the strike: the port's actors run later in `GameUpdate` than this.
- */
-export function PlayerDamageFeedbackTick(rng: Rng, events?: Events): void {
-  for (let p = 0; p < 2; p++) {
-    // `PlayerUpdateInPlay` is the update of a player **in play**; a player
-    // in any other state runs another state's handler and neither routine.
-    if (G.g_player_state[p] !== PlayerState.InPlay) continue;
-    PlayerRunCameraHook(p, events);
-    DamageOverlayUpdateAndDraw(p, rng, events);
-  }
-  UpdateScreenShake();
 }

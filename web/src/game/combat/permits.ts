@@ -20,7 +20,7 @@ import { vec3 } from "../vec";
  * with a literal 320 for the half-width.
  */
 const SCREEN_HALF_H = 240;
-const PROJECTION_DISTANCE_PX = 640.2;
+export const PROJECTION_DISTANCE_PX = 640.2;
 
 const _view = vec3();
 

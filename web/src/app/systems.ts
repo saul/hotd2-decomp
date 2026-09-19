@@ -29,6 +29,10 @@ import type { Events } from "../core/events";
 /** What the renderer answers for the port. See `game/host.ts`. */
 export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
+  /** One bone's world matrix, `Matrix4.elements`. See `GameHost.boneMatrix`. */
+  boneMatrix?(at: number, bone: number, out: number[]): boolean;
+  /** One bone's hit sphere in world space. See `GameHost.boneSphere`. */
+  boneSphereWorld?(at: number, bone: number, out: Vec3): number | null;
   setBoneSlot(at: number, bone: number, slot: number): void;
   /**
    * `CamEvalObjectPath6` — a point *and its orientation* on an `op_` path.
@@ -86,6 +90,17 @@ export class GameSystem implements System {
   private readonly host: GameHost = {
     boneWorld: (at, bone, out) =>
       this.backend?.boneWorld(at, bone, out) ?? false,
+    boneMatrix: (at, bone, out) =>
+      this.backend?.boneMatrix?.(at, bone, out) ?? false,
+    boneSphere: (at, bone, out) =>
+      this.backend?.boneSphereWorld?.(at, bone, out) ?? null,
+    // The two matrices of the engine's camera block. `ctx.view` already holds
+    // both; the carried props cross between the spaces with them.
+    cameraMatrices: (w2v, v2w) => {
+      if (!this.view) return false;
+      this.view.copyMatrices(w2v, v2w);
+      return true;
+    },
     // `CamEvalObjectPath6`. The curves are in the camera bundle and their
     // evaluation is the renderer's, so the port asks across the seam rather
     // than carrying a Hermite evaluator of its own.
@@ -282,10 +297,28 @@ export function syncCharacterSpawns(chars: CharacterPool,
   const ready = new Map(chars.readySpawns(spawns).map((r) => [r.at, r]));
   const made: Actor[] = [];
   SlotActorsForgetUnlisted(spawns);
+  // **A civilian's captors are not in `spawns`** -- `CivilianInit` spawns them
+  // itself -- so the walk over the script's list never reached them, and
+  // 6da5fab's reordering left every captor in the game unmade: stage 1's
+  // barrel man over the civilian (bug 11) never existed, and the civilian's
+  // rescue paid out for children that were never there. They are made
+  // straight after the spawn that owns them, which is where the engine's
+  // `Init` makes them.
+  const listed = new Set(spawns.map((s) => s.at));
+  const childrenOf = (parent: number): CharacterSpawnRequest[] =>
+    [...ready.values()].filter((r) => r.parentAt === parent
+                                      && !listed.has(r.at));
   for (const s of spawns) {
     const r = ready.get(s.at);
-    if (r) made.push(...SpawnScriptedCharacters([r], chars.rng, events));
-    else SpawnSlotActor(s, chars.rng);
+    if (r) {
+      made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+      const kids = childrenOf(s.at);
+      if (kids.length) {
+        made.push(...SpawnScriptedCharacters(kids, chars.rng, events));
+      }
+    } else {
+      SpawnSlotActor(s, chars.rng);
+    }
   }
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }

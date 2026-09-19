@@ -88,15 +88,24 @@ const CARRIER_BOW_BIT = 0x400000;
  * `g_prop_behaviours` — `0x005926A8`, ten entries indexed by the descriptor's
  * `tail+0x10`.
  *
- * Only two are modelled. Entry 0 is `NoOpStub` and is what a static prop
- * takes; entry 8 is {@link CarrierPropSelectRoutine}. The other eight —
- * `0x00442820`, `0x00443200`, `0x004432D0`, `0x00443B90`, `0x00443DC0`,
- * `0x0043FFC0`, `0x004400D0` and `0x00445050` — have no shipped stage-3
- * spawn and are not read. `[open]`
+ * Entry 0 is `NoOpStub` and is what a static prop takes; entry 8 is
+ * {@link CarrierPropSelectRoutine}. Entries 1, 3, 4 and 5 are the carried
+ * props' — class 0x30 state 37's barrels, which reach the table through the
+ * state-37 script rather than through a class-0x13 descriptor; 1 and 4 are
+ * ported in `game/carried_prop.ts`. The rest — `0x00443200`, `0x0043FFC0`,
+ * `0x004400D0` and `0x00445050` — are not read. `[open]`
  */
 export enum PropBehaviour {
   /** `NoOpStub` (`0x0041EBB0`) — a static prop, drawn and nothing else. */
   None = 0,
+  /** `CarriedPropHeldUpdate` (`FUN_00442820`) — `game/carried_prop.ts`. */
+  CarriedPropHeld = 1,
+  /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — not ported. */
+  CarriedPropThrowAtTarget = 3,
+  /** `CarriedPropThrowAtCamera` (`FUN_00443B90`) — `game/carried_prop.ts`. */
+  CarriedPropThrowAtCamera = 4,
+  /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — not ported. */
+  CarriedPropRollAtCamera = 5,
   /** `CarrierPropSelectRoutine` (`FUN_00440190`). */
   SelectCarrierRoutine = 8,
 }

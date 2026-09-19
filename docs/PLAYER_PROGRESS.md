@@ -53,6 +53,38 @@ carrier killed holding its prop drops it (`CarriedPropDrop`,
 `CarriedPropFallFree`), and a prop shot to pieces draws its break effect -- the
 drum splits in two -- through the effect tree the class-0x44 props use.
 
+**A rescued civilian holds the room while she speaks** (bug 18). There is no
+"wait for the dialogue" opcode: `CivilianUpdate` (`FUN_0048A920`) calls
+`ActorRegisterCameraPoint` every frame (`0x0048ADB0`), which tail-calls
+`RegisterForCameraTracking`, so a civilian is a camera candidate whenever her
+wait word carries `0x40000`. While she holds a `g_enemy_slots` entry the
+camera tracks her, `g_camera_free` stays down and `wait_enemies_alive` holds;
+her script drops the bit in the block that reopens the shutter. The port kept
+every non-enemy out of the candidate list, so stage 4 (Original) block 1 handed
+the room back the frame her captor died and the two throwers walked in 180
+frames into her line with the shutter still closed. `ClassHandler.tracksCamera`
+is how a non-enemy class says its routine makes the call; `web/tools/civ_speech.mjs`
+times rescue, lines, shutter, gate and next spawn on stage 4 (Original) block 1
+and stage 2 block 6. Stage 1 block 1's script untracks her for the two turn
+clips before her line, so there the gate can still open before she speaks --
+the same rule, applied to that script.
+
+**A deep link lands with the civilians play would have.** A seek replays the
+script with every wait stepped over and no actor running, so a civilian from
+an earlier block was rebuilt at her first command wherever the link landed --
+captors, camera slot and rescue all ahead of her again, which since bug 18
+holds the room's gate for good (stage 3 past block 0, stage 4 past block 1).
+The replay now applies her own ways out (`script/civilian_life.ts`): her
+removal cue when its camera plays it, and the off-camera arm at the first
+`goto_scene_state` after her room. The game itself now has that arm too
+(`CivilianUpdate`'s `0x2000000` test, with `ActorBoundsOnScreen` ported), so a
+rescued civilian leaves once she is off screen. All fourteen bug links in
+`NEW-BUGS.md` load and play to the stage's end (`playthrough.mjs --link`).
+The two ported bosses are camera candidates as the exe makes them
+(`Class14Update`, `Boss4Update`), with their per-actor lifts -- and the stage-2
+boss's three deaths now take it off the camera's list as the exe's do, which
+the port's shared death body had left out.
+
 **A civilian's captors are made again.** `CivilianInit` spawns its children
 itself, so the walker's spawn list names only the civilian; 6da5fab walked
 that list to keep the script's order and every captor in the game went
@@ -2671,6 +2703,13 @@ counts down and asks for the game-over screen, which the port does not have
 (`[diverges]`): the transport stops and the feed says "game over". Player 2 can
 join by the same route, but the page has no second START key yet.
 
+**Ammo, as far as it goes.** `g_player_ammo` (`0x009A5C7C`) and
+`g_player_magazine_size` (`0x009A2248`) exist in `G` and are written only by
+`PlayerEnterPlay` (6 in Arcade, the magazine in Original) and
+`PlayerStateFireOnly` (6). Nothing decrements or reloads them yet: the port's
+trigger (`PlayerFireFromQueue`, called from the player's own task) still has
+no magazine, and the HUD draws neither. That is the next port's.
+
 Note what the gate does **not** test: `g_player_invuln_frames`. The 90-frame
 window after a hit stops the damage and nothing else, so the enemies keep
 taking their turns through it. That is the engine's answer to "why is there no
@@ -2726,6 +2765,42 @@ all four now do: `TryClaimAttackSlot`, `ThrowerTryClaimAttackSlot` (which
 delegates), the two scripted attackers through `ZombieScriptedPickPlayer`, and
 `ThrowerStateGrabPlayer`. The rest are `ThrowerStateLeapStrike`, which no
 shipped spawn can reach, and three calls in classes with no module.
+
+### Being hit shows the game's damage overlay
+
+A hit used to take a life and a hundred points and put nothing on the screen.
+The exe draws one of eleven full-screen sprites out of `pol/common.bin` --
+claw marks, a slash, a swipe, a gash, a splat, a bite ring -- chosen by
+`PlayerTakeDamage`'s third argument, which the port had been storing as
+`g_player_hit_motion` and never reading. It is ported as the engine has it,
+in `game/effects/damage_overlay.ts`:
+
+* the player's update calls `PlayerRunCameraHook`, whose hook the scene
+  state's installer chose -- the overlay spawner under every `cam/` path camera
+  (2/4..2/7), the body draw under the follow and no-op cameras (1/1, 1/2) --
+  and the spawner reads the latch and calls `DamageOverlaySpawn` with the kind;
+* `DamageOverlayUpdateAndDraw` keeps it up, **unchanged, for 59 frames** --
+  there is no fade, flash or animation anywhere in the chain -- and plays the
+  hurt voice on the fifth; a hit while one is up shows nothing new;
+* `UpdateScreenShake` clears the latch and computes the 48-frame nod.
+
+`render/effects.ts` draws it in camera space at `z = -1.02`, scale 0.02, from
+the record alone, so a load or a seek shows whatever the restored state says.
+The eleven models ride the `slots_effect` rig (slots 0x931..0x93B), so
+**a bundle exported before this has none -- re-export.**
+
+Checked in the page with `tools/damage_fx.mjs`: a zombie's swipe (kinds 0 and
+1, stage 2's `znkage`), the bats' bite (kind 9, stage 4 block 0) and the stage-3
+axe (kind 4), each screenshotted with the overlay up, held through a pause,
+and gone after loading a snapshot taken before the hit.
+
+Not yet: the nod itself. `g_screen_shake_pitch` carries the engine's value,
+but applying it is `UpdateSceneViewAndLight`'s first block, which writes the
+camera block's *angles*, and whether that accumulates on a held pose is an
+open question the port's eye/target block cannot answer yet. And
+`PlayerTakeDamage`'s second argument -- 0 at the strike sites whose striker
+has `obj+0x34` bit `0x2000000`, meaning no overlay and no shake -- is not in
+the port's signature, so every hit latches.
 
 ### `ResetSceneOnEnter`, and the three blocks it zeroes
 

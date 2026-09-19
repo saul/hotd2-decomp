@@ -2,10 +2,9 @@
  * NEW-BUGS 19 in the real page: **a bat that reaches the screen costs a life.**
  *
  * Opens a block that places bats under `?drive=1`, plays without firing, and
- * reads the score off the drive seam's trace row per frame. A strike is
- * `PlayerTakeDamage` (`FUN_00415300`), which charges 100 points; a bat kill
- * pays 80 and nothing else here moves the score -- so a fall of exactly 100 is
- * a signal only a strike can produce (`L47`: the counters cannot tell an
+ * reads player 0's lives out of the page's own `G` each frame while bats are
+ * up. A life gone is `PlayerTakeDamage` (`FUN_00415300`) and nothing else, so
+ * it is a signal only a strike can produce (`L47`: the counters cannot tell an
  * arrival from a kill). Screenshots before the flight and after the first
  * strike go to `web/shots/`, for the lives on the HUD.
  *
@@ -44,17 +43,23 @@ try {
   const drain = () => page.evaluate(() => globalThis.__hotd2Drive.drain());
   await page.evaluate(() => globalThis.__hotd2Drive.trace(true));
 
-  const score = (t) => Number(/ s(-?\d+)/.exec(t.c)?.[1] ?? NaN);
+  // A strike is a life gone, read off the page's own `G` (the dev server
+  // hands `import()` the module the player loaded). The score used to be the
+  // signal, and cannot be now: `ScoreAddForPlayer` floors it at 0, so a
+  // strike off an empty score moves nothing (L47 the other way round).
+  const lives = () => page.evaluate(async () => {
+    const { G } = await import("/src/game/globals.ts");
+    return G.g_player_lives[0];
+  });
   const bats = (t) => (t.o ?? []).filter((s) => / c70 /.test(s)).length;
   let first = null, prev = null, peak = 0, strikes = 0, shotAt = -1;
   let before = false, over = false;
   for (let done = 0; done < BUDGET; done += 10) {
     await advance(10);
     for (const t of await drain()) {
-      const s = score(t);
       const n = bats(t);
       peak = Math.max(peak, n);
-      if (first === null) first = s;
+      if (first === null) first = await lives();
       if (n > 0 && !before) {
         before = true;
         await page.screenshot({ path: join(SHOTS, `${tag}-before.png`) });
@@ -63,9 +68,10 @@ try {
       // somebody else's (a zombie in the next room took one in the unfixed
       // page, and read as a pass).
       if (before && n === 0) over = true;
-      if (!over && prev !== null && s - prev === -100) {
+      const s = await lives();
+      if (!over && prev !== null && s < prev) {
         strikes += 1;
-        console.log(`f${t.f} ${t.a}  score ${prev} -> ${s}  bats ${n}  ${t.c}`);
+        console.log(`f${t.f} ${t.a}  lives ${prev} -> ${s}  bats ${n}  ${t.c}`);
         if (shotAt < 0) shotAt = t.f;
       }
       prev = s;
@@ -76,7 +82,7 @@ try {
     await page.screenshot({ path: join(SHOTS, `${tag}-after.png`) });
   }
   console.log(`\n${where}: bats seen ${peak}, strikes ${strikes}, `
-    + `score ${first} -> ${prev}`);
+    + `lives ${first} -> ${prev}`);
   failed = strikes === 0;
   console.log(failed ? "FAIL  no bat took a life"
                      : "ok    a bat that reached the screen took a life");

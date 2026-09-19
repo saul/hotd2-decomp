@@ -18829,6 +18829,181 @@ against the unfixed code "passed" -- a zombie in the next block took the life
 after the flight had ended; the check now stops counting when the last bat
 goes. And stage 4 block 7's swarm is not reachable from entry 0: it needs
 `entry=4`.
+## 2026-09-19 -- bug 18: the room did not wait for a rescued civilian's lines
+
+Report: stage 4 (Original), the encounter before block 1 step 2 op 11 -- the
+game moves on while the rescued civilian is still speaking, and the next
+zombies appear before the shutter is open.
+
+Her stream (75) closes the shutter at command 19, speaks at 26, hands over an
+item and reopens the shutter at 44. Nothing in the evt waits on any of it:
+step 1 ends `wait_enemies_alive 0` and step 2 spawns two throwers and plays
+the next camera. So the hold had to be in one of the gate's conditions.
+`EvtOpWaitEnemiesAlive44` is `alive <= arg && g_evt_gameplay_live &&
+g_camera_free && hysteresis` -- and `g_camera_free` is the one a civilian can
+touch. `CivilianUpdate` calls `ActorRegisterCameraPoint` at `0x0048ADB0` on
+every non-despawning path (disassembled from `0x0048AB8F` and `0x0048AD0F`
+to the call: every branch rejoins at `0x0048AD97`), and that routine
+tail-calls `RegisterForCameraTracking` at `0x00409C03`, whose only test is
+`obj+0x34` bit `0x10000`. Op 0x2C writes that bit from wait bit `0x40000`,
+inverted. Her words carry `0x40000` from command 0 to 39; command 41's
+`0x2188000` drops it, and `SetHudShutterState 1` follows in the same block.
+`[proved]`
+
+The port's `RegisterForCameraTracking` filtered with `ActorIsEnemy`, a stand-in
+for the call sites -- which had one non-enemy caller. Fixed by letting a
+class's `tracksCamera` answer for a non-enemy, and class 0x10 answering yes.
+
+Headless, from the rescue step (`web/tools/civ_speech.mjs`):
+
+| | rescue | lines | untracked | shutter 1 | gate | next enemy |
+|---|---|---|---|---|---|---|
+| stage 4 (O) b1, before | f241 | f315..495 | f242 | f489 | f318 | f318 |
+| stage 4 (O) b1, after | f241 | f315..495 | f489 | f489 | f558 | f558 |
+| stage 2 b6, before | f151 | f192..411 | f152 | f473 | f220 (0x44) | f465 |
+| stage 2 b6, after | f151 | f192..411 | f412 | f473 | f481 | f533 |
+
+Wrong turns. The first harness respawned every actor the frame it despawned
+(it only checked the pool) and never made the civilian's captor, which
+`CivilianInit` builds and the walker does not list -- so the civilian sat on
+wait bit `0x04` for ever and the dead zombies stood back up. Both were the
+harness; `syncCharacterSpawns` already does it right.
+
+Stage 1 block 1 (stream 3) is not a confirmation and is not a
+counter-example: the script drops `0x40000` for the two turn clips between the
+rescue and the line (`0x100100` at commands 12 and 17), so under the same rule
+the gate opened at f328 against her line at f350 (f285 before the fix).
+`[likely]` the exe does the same, subject to the port's camera-turn timing and
+clip lengths matching.
+
+`[open]` Four boss classes (0x14, 0x19, 0x22, 0x32) and the `0x0042xxxx` and
+`0x0049xxxx` families also call `ActorRegisterCameraPoint` and are not in
+`ENEMY_CLASSES` (call sites in `Class22FightPhase2`, `Class32Update`,
+`Class14Update`, `Boss4Update`, ...). Whether the port makes them camera
+candidates was not checked here.
+
+`handback` then failed its stage 3 case: 0 enemy gates. The case seeks to
+block 1 step 1, and the seek's replay builds block 0's boat hostage fresh at
+her first command -- waiting on a captor and on camera path 124, which block 1
+never plays -- so she now held a camera slot and `g_camera_free` for ever. The
+engine never has her there (played, she is rescued in block 0 and her stream
+ends untracked); on the base commit the same artifact already stalled this
+case at block 1 step 2's `wait_scripted_actors`, just past the gates it
+measures. The harness now holds any civilian present on the seek's first frame
+out of the camera slots; its three stage-3 measurements are identical to the
+base commit's (2deg/34f, 7deg/47f, 7deg/47f). `[open]` The same artifact
+applies to a player deep link past a civilian's block: the rebuilt civilian
+is at her first command, and after this fix a tracked one holds the room's
+gate rather than only `wait_scripted_actors`.
+
+## 2026-09-19 -- bug 18 follow-up: seeks converge on play; who the camera may look at
+
+**Seeks.** A seek replays the evt with every wait stepped over and no actor
+running, so the walker's spawn list at the landing address still held every
+civilian listed before it, and the rebuild built each at her first command.
+Measured with a walker-only sweep over every step start in stages 1-4 and 6:
+stage 1 carried 19172, 15416 and 6312 into later blocks, stage 2 carried
+34336, stage 3 3008, stage 4 4348, 4484 and 25548. Since bug 18 a tracked
+civilian holds `g_camera_free`, so those rebuilt hostages held room gates for
+good.
+
+Read the exe's ways out, `CivilianUpdate` `0x0048AF8E..0x0048B0C8`: skip,
+countdown, cue (exact frame), and a fourth arm the port did not have at all --
+word bit `0x2000000`, `!ActorBoundsOnScreen`, `g_scene_state_major_entered !=
+2`, no children: despawn. `[proved]` `ActorBoundsOnScreen` (`FUN_0045CA60`)
+read in full and ported; its view point `obj+0x10C..0x114` is
+`SkeletonEmitNode`'s node-1 translation (`FSTP` at `0x004115B5`), `[likely]`
+node 1 for every actor the port asks about.
+
+The replay applies what it can see (`script/civilian_life.ts`, one
+bookkeeping map on the walker beside `retireFlagRaisers`): a civilian's room
+is "cleared" when a gate with the new `clearsRoom` rule field is stepped over
+(0x43, 0x44, 0x46, 0x47); the cue arm retires her once her path has been
+played past her frame and her room is cleared; the off-camera arm retires her
+at the first `enterSceneState` off row 2 after that, if her rescue path ends
+on `0x2000000`. `[likely]` for the last -- the replay has no pose, and uses
+"major left 2 after her room" for "off screen with major != 2". After it the
+sweep carries no earlier-block civilian anywhere.
+
+Wrong turn: the first rule required **every** reachable stream to end on
+`0x2000000`, on-shot ones included; three civilians survived on the strength
+of an on-shot stream ending `0x80000`. The rescue path is the one to follow.
+And the survey script first ran without `SetGameTables`, so `wait_script_flag`
+took its no-writer `[diverges]` pass and `retireFlagRaisers` never ran --
+stage 2's 34336 looked stuck when it was the harness.
+
+`handback`'s stage-3 special case is removed; its numbers are the base
+commit's again with the seek doing the work.
+
+**Camera candidates.** Every `ActorRegisterCameraPoint` call read with its
+gate (table in `game/camera/track.ts`). Of the classes the port has, 0x14
+(`Class14Update`, `state+0x0C`) and 0x19 (`Boss4Update`, `state+0x70`) call it
+every frame ungated and are not in `ENEMY_CLASSES`, so the camera never looked
+at either boss: both now answer `tracksCamera` and a new `cameraRise` hook.
+`FrogUpdate` pushes 1.0 (`680000803f` at `0x0043A2C2`) and the port gave it 0.
+Classes 0x2D, 0x22, 0x23 and 0x32 call it too and have no port; their rows are
+recorded, not admitted. Named: `Class2DUpdate`, `Class2DState3/4/5`,
+`Class2DChildKind0..3Update`, `g_class2d_states`, `Class23UpdateSubtype0/1/2`,
+`Class23StateShared1`, `Class23Subtype2State1` -- structural names from the
+dispatch tables and `Class2DState4`'s four `ActorAlloc`s.
+
+First link run: four of fourteen links reported "Execution context was
+destroyed" -- vite reloading the page because this session was editing
+`web/src` during the run, not the port. Re-run with no edits in flight.
+
+Admitting class 0x14 hung stage 5 at block 3's `wait_enemies_present 0`: the
+dead boss still held a camera slot. The port's three deaths share one
+`[port-only]` body that never raised `obj+0x34` bit `0x10000`; the exe's all
+do -- `Class14StateDeathC` in its sub 0, `Class14StateDeathA`/`B` beside the
+`g_enemies_present` decrement. `[proved]` Transcribed; the camera admission
+found a port gap rather than making one. After it: all fourteen `NEW-BUGS.md`
+links play to their stage's end, and so do arcade stages 1-6 and Original 1-6.
+## 2026-09-19 -- the damage overlay: what a hit looks like
+
+Asked for the "damage sprites" -- the bite, the slash -- that appear when the
+player is hit, the port drew none. Read from `PlayerTakeDamage` outward.
+
+* `PlayerTakeDamage` (`FUN_00415300`) draws nothing; `g_player_hit_motion`'s
+  only reader (three xrefs) is `FUN_00415180`, now
+  `PlayerHookSpawnDamageOverlay`, reached through `FUN_00415100`
+  (`PlayerRunCameraHook`) -- an indirect call through `0x009A5CDC + p*0x130`,
+  which the scene-state installers write. So the "hit motion" is the overlay
+  kind. `[proved]`
+* `FUN_00417440` spawns, `FUN_00417300` counts down and draws, `FUN_004172E0`
+  clears. Four eleven-row tables: slots (`0x00579F80`, read through
+  `0x579F7C` with a count of 1 or 2 -- the word at `0x579F7C` is
+  `g_muzzle_smoke_slots` and is never read here, L6), offsets (all zero),
+  scales (all 0.02) and sounds. The overlays are `common.bin` 116..126.
+* **Decompiler, L37 again:** `FUN_00417300`'s pseudocode returns from the draw
+  arm, which would make the hurt voice at `frames == 0x37` unreachable while
+  the overlay is up. The draw arm falls through to `0x004173CC`; the voice
+  plays on the fifth frame of every overlay.
+* **Decompiler, L1:** `UpdateScreenShake` (`FUN_00415270`) shows `fcos(...)`
+  as a dropped statement; the `FCOS` result is live into the `FMULP`.
+* The latch is cleared by `UpdateScreenShake`, run by `SelectAttackablePlayer`'s
+  task. For an overlay ever to appear, the player's update must see the latch
+  before that task clears it; the port runs them in that order. `[likely]`, by
+  elimination.
+
+**Wrong turn:** I read `g_scene_state_table` as rows 1 and 2 starting at minor
+0 (installers at 1/0..1/2 and 2/0..2/3), counting the dwords of a hex dump by
+eye. `EvtEnterSceneState`'s own annotation already had the right layout (1/1..
+1/3, 2/4..2/7) and the shipped `finish_sequence` operands are only 4, 6 and 7.
+The first page run caught it: the bats' hit latched under major 2 and the hook
+was never installed. The port test had passed, because it called the installer
+with the same wrong numbers -- the test encoded the misreading.
+
+**Second wrong turn:** the page harness detected a hit by the score falling by
+100, and its first "hit" in stage 1 was not one: lives unchanged,
+invulnerability 0 -- a civilian's death costs 100 as well (L47). It detects a
+hit by `g_player_invuln_frames` rising now, which only `PlayerTakeDamage` does.
+
+**Found in passing, not fixed** (it is `PlayerTakeDamage`'s signature, which
+another branch owns): the exe's second argument gates the latch, and
+`ActorStrikeConnect` / `ThrowerStrikeConnect` pass 0 -- and then despawn the
+striker -- when `obj+0x34` bit `0x2000000` is set. The port's
+`ActorStrikeConnect` has neither the 0 nor the despawn.
+
 
 ## 2026-09-19 -- the player shell, and PlayerTakeDamage exactly (follow-up to bug 19)
 
@@ -18891,3 +19066,28 @@ Consequence: **lives drain and a game can end.** Every playthrough without
 `--continue` now ends in GAME OVER in its first rooms, because the tool's
 volleys do not stop everything that hits; the page shows `CONTINUE? n` and
 takes START on `S`.
+
+### Merged with the damage overlay (main 7dab068)
+
+The damage-fx branch walked `PlayerRunCameraHook` / `DamageOverlayUpdateAndDraw`
+from a `[port-only]` `PlayerDamageFeedbackTick` because there was no player
+task. There is now: both run inside `PlayerUpdateInPlay` (the overlay update
+also in `PlayerContinueCountdown`, and `PlayerStateEnterContinue` clears it),
+and `UpdateScreenShake` runs from `SelectAttackablePlayer` (`FUN_00414F40`),
+the task `FUN_00414FB0` allocates right after `PlayerTasksCreate` at every
+call site -- so the player updates see the latch before the shake clears it,
+now `[proved]` from the allocation order rather than `[likely]` by
+elimination. `PlayerEnterPlay` writes the `+0x7C` hook its row carries
+(`PlayerInstallDrawBodyHook` `0x004150C0` for rows 0/2/4/5,
+`PlayerInstallDamageOverlayHook` `0x004150E0` for 1/3); the scene-state
+installers overwrite it. To keep a deep link's installers on top, the reset
+now takes the scene's first player turn itself. `SelectAttackablePlayer` also
+computes `g_active_player` now, which nothing in the port did before.
+
+The strike connects' second arm: `obj+0x34 & 0x2000000` (`ActorFlag.
+StrikeAndLeave`) passes latch 0 and despawns -- `ZombieReleaseAndDespawn`
+(`0x004564FA`) and `ThrowerLeave` (`0x0044CF8A` / melee `0x0044CEE3`). What
+raises the bit (`FUN_0045E010`, `FUN_0045E660`) is unread, so it is ported
+and unreached. `tools/damage_fx.mjs` counted the 90-frame grace of entering
+play as a hit; it now wants a life gone as well. Its "load a pre-hit snapshot"
+check fails on main too (the overlay stays active after the load).

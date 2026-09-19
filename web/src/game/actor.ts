@@ -83,6 +83,17 @@ export const MOTION_FLAGS_INIT = 3;
 /** `obj+0x34` — the object's flag word. Only the bits the port reads. */
 export enum ActorFlag {
   /**
+   * `obj+0x34` bit `0x2000000`. Its only readers are the two strike connects,
+   * `ActorStrikeConnect` (`FUN_00456490`) and `ThrowerStrikeConnect`
+   * (`FUN_0044CE60`): with it up the strike lands **without** the hit latch
+   * (`PlayerTakeDamage(player, 0, motion)`, so no damage overlay) and the
+   * striker leaves at once -- `ZombieReleaseAndDespawn` or `ThrowerLeave`. It
+   * is raised by `FUN_0045E010` and `FUN_0045E660`, neither of them read, so
+   * what makes an actor strike-and-leave is `[open]` and nothing in the port
+   * sets it.
+   */
+  StrikeAndLeave = 0x2000000,
+  /**
    * Set by `ZombieStateBackOff` while the actor retreats and cleared when it
    * finishes. `RankEnemiesByDistance` drops these from the compacted queue.
    */

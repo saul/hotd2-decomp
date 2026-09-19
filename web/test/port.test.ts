@@ -32,6 +32,7 @@ import { authoredFrameHeld, authoredFrameOfTicks,
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
 import { ActorKillAll } from "../src/game/combat/resolve_hit";
+import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
@@ -56,6 +57,7 @@ import {
 import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
+import { ActorStrikeConnect } from "../src/game/class30/strike";
 import { PadBit, PlayerBlockCapture, PlayerTasksRun }
   from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
@@ -144,6 +146,10 @@ import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { CheckPlayerCanBeHit, IsPlayerAttackable, PlayerTakeDamage }
   from "../src/game/combat/player";
+import {
+  DAMAGE_OVERLAY_SLOTS, DAMAGE_OVERLAY_SOUNDS, DAMAGE_OVERLAY_VOICES,
+  DamageOverlayClear, DamageOverlayKind, PlayerCameraHook, SceneStateInstallPlayerHooks,
+} from "../src/game/effects/damage_overlay";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
 import {
@@ -8520,15 +8526,12 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   G.g_GameMode = GameMode.Arcade;
   ResetGameGlobals();
   SetGameTables(CHARS);
-  check("the reset leaves player 0 at state 0 with its handler installed, "
-        + "one credit spent of six",
-        G.g_player_state[0] === PlayerState.EnterNewGame
-        && G.g_player_task[0] === PlayerTask.EnterNewGame
-        && G.g_player_state[1] === PlayerState.Out
+  check("the reset's start press spends one credit of six and puts the "
+        + "game in app state 6, player 1 still out",
+        G.g_player_state[1] === PlayerState.Out
         && G.g_credits[0] === 5 && G.g_app_state === AppState.InPlay,
         `${G.g_player_state} tasks ${G.g_player_task} credits ${G.g_credits}`);
-  PlayerTasksRun(f);
-  check("...and its first turn is PlayerEnterPlay(0): in play, three lives, "
+  check("...and the scene's first turn is PlayerEnterPlay(0): in play, three lives, "
         + "one player, one attacker, 90 frames' grace",
         G.g_player_state[0] === PlayerState.InPlay
         && G.g_player_lives[0] === 3 && G.g_players_in_play === 1
@@ -8618,7 +8621,6 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
 {
   // A stage step keeps the player: the block rides across, and
   // `AdvanceToNextScene` parks them at 2 for row 2 -- no lives, no counts.
-  const rng = new Rng(4);
   G.g_GameMode = GameMode.Arcade;
   ResetGameGlobals();
   EnterPlay();
@@ -8627,12 +8629,7 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   ScoreAddForPlayer(0, 500);
   const carry = PlayerBlockCapture();
   ResetGameGlobals(carry);
-  check("across a stage step the player is parked at 2",
-        G.g_player_state[0] === PlayerState.SceneReentry
-        && G.g_player_task[0] === PlayerTask.ReenterAfterScene,
-        `state ${G.g_player_state[0]}`);
-  PlayerTasksRun({ host: NULL_HOST, rng });
-  check("...and re-enters by row 2: lives and score kept, counts unchanged, "
+  check("across a stage step the player re-enters by row 2: lives and score kept, counts unchanged, "
         + "90 frames' grace",
         G.g_player_state[0] === PlayerState.InPlay
         && G.g_player_lives[0] === 2 && G.g_player_score[0] === 500
@@ -8640,6 +8637,32 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         && G.g_player_invuln_frames[0] === 90,
         `state ${G.g_player_state[0]} lives ${G.g_player_lives[0]} `
         + `score ${G.g_player_score[0]} in ${G.g_players_in_play}`);
+}
+
+{
+  // `ActorStrikeConnect`'s two arms: the permit's player, the latch, and the
+  // strike-and-leave arm that passes 0 and despawns (`0x004564F1`).
+  const rng = new Rng(8);
+  scene(1, rng);
+  const z = G.g_object_list[0] as ZombieActor;
+  z.attackPermit = 0;
+  z.zones = 0;
+  const atk = { cancel_mask: 8, player_motion: 5 } as unknown as
+    Parameters<typeof ActorStrikeConnect>[1];
+  const lives = G.g_player_lives[0];
+  ActorStrikeConnect(z, atk);
+  check("a strike lands on the permit's player and raises the hit latch",
+        G.g_player_lives[0] === lives - 1 && G.g_player_was_hit[0] === 1
+        && G.g_player_hit_motion[0] === 5 && !z.despawned);
+  RunOutInvulnerability();
+  G.g_player_was_hit[0] = 0;
+  z.flags |= ActorFlag.StrikeAndLeave;
+  ActorStrikeConnect(z, atk);
+  check("...with obj+0x34 bit 0x2000000 it lands without the latch and the "
+        + "striker leaves", G.g_player_lives[0] === lives - 2
+        && G.g_player_was_hit[0] === 0 && z.despawned,
+        `lives ${G.g_player_lives[0]} latch ${G.g_player_was_hit[0]} `
+        + `despawned ${z.despawned}`);
 }
 
 {
@@ -11163,6 +11186,54 @@ console.log("\na dead civilian releases its captors:");
         (captor.flags2 & 1) === 1, captor.flags2.toString(16));
 }
 
+/**
+ * Bug 18. `CivilianUpdate` (`FUN_0048A920`) calls `ActorRegisterCameraPoint`
+ * at `0x0048ADB0` on every path, and that tail-calls
+ * `RegisterForCameraTracking` (`FUN_00408EC0`), whose only test is `obj+0x34`
+ * bit `0x10000`. So a civilian whose wait word carries `0x40000` holds a
+ * camera slot, `CameraDriverSelectMode` stays in the tracking mode, and
+ * `g_camera_free` -- and with it every room-clear gate -- stays down while she
+ * speaks. The port filtered every non-enemy out of the candidate list, and
+ * stage 4's next zombies walked in over her lines.
+ */
+console.log("\na tracked civilian holds the camera, and the room with it:");
+{
+  const rng = new Rng(18);
+  const events = scene(0, rng);
+  const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 0x20, "rescued");
+  civ.visible = true;
+  civ.hp = 1;
+  g_class_handlers[SpawnClass.Civilian]!.init(civ, rng);
+  // Op 0x2C's write for a word carrying `CivilianWait.CameraTrack`.
+  civ.flags &= ~ActorFlag.NoCameraTrack;
+  const prop = ActorSpawn(0x4100, SpawnClass.SetPieceProp, 0, "set piece");
+  prop.visible = true;
+  G.g_enemies_alive = 0;
+
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a civilian without `obj+0x34` bit 0x10000 is a camera candidate",
+        G.g_enemy_slots.includes(civ.at),
+        `[${G.g_enemy_slots.map((a) => a.toString(16)).join(",")}]`);
+  check("...and a class whose routine never calls it is not",
+        !G.g_enemy_slots.includes(prop.at));
+  G.g_camera_free = 1;
+  CameraDriverSelectMode();
+  check("...so with no enemy alive the camera still tracks, and the room is "
+        + "not handed back",
+        G.g_camera_mode === CameraMode.TrackEnemies && G.g_camera_free === 0,
+        `${G.g_camera_mode} ${G.g_camera_free}`);
+
+  // Her script's next word drops `0x40000`: op 0x2C sets the bit.
+  civ.flags |= ActorFlag.NoCameraTrack;
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  CameraDriverSelectMode();
+  check("...and once her wait word drops the track bit the slot goes and the "
+        + "hand-back starts",
+        !G.g_enemy_slots.includes(civ.at)
+        && G.g_camera_mode === CameraMode.HandBackToPath,
+        `${G.g_camera_mode}`);
+}
+
 // -- 15. class 0x30's own death chain ---------------------------------------
 
 /**
@@ -13533,6 +13604,32 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
     }
   };
 
+  // **The boss holds the camera.** `Boss4Update` (`FUN_004919D0`) calls
+  // `ActorRegisterCameraPoint(state+0x70)` at `0x00491A49` every frame, and
+  // that tail-calls `RegisterForCameraTracking` (`FUN_00408EC0`), whose only
+  // test is `obj+0x34` bit `0x10000`. Class 0x19 is not in `ENEMY_CLASSES`,
+  // so the port never let the camera look at it.
+  {
+    const obj = spawnBoss(0);
+    obj.flags &= ~ActorFlag.NoCameraTrack;
+    UpdateCameraEnemySlots(EYE);
+    check("the stage-4 boss is a camera candidate while bit 0x10000 is clear",
+          G.g_enemy_slots.includes(obj.at),
+          `[${G.g_enemy_slots.join(",")}]`);
+    G.g_enemies_alive = 0;
+    G.g_camera_free = 1;
+    CameraDriverSelectMode();
+    check("...so it keeps the camera tracking and the room held",
+          G.g_camera_mode === CameraMode.TrackEnemies && G.g_camera_free === 0,
+          `${G.g_camera_mode} ${G.g_camera_free}`);
+    check("...and it is lifted by its own state+0x70, 6.0",
+          g_class_handlers[SpawnClass.Boss4]?.cameraRise?.(obj) === 6);
+    obj.flags |= ActorFlag.NoCameraTrack;
+    UpdateCameraEnemySlots(EYE);
+    check("...until `Boss4StateDeath` raises the bit",
+          !G.g_enemy_slots.includes(obj.at));
+  }
+
   {
     const obj = spawnBoss(0);
     check("Boss4Init counts the boss in both enemy counters",
@@ -13918,6 +14015,16 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
             .every((n) => (G.g_script_flags[n] ?? 0) === 0),
           `${G.g_script_flags.map((v, i) => (v ? i : -1))
               .filter((i) => i >= 0).join(",")}`);
+    // All three deaths raise `obj+0x34` bit `0x10000` -- DeathC in its sub 0,
+    // A and B with the present decrement -- so the dead boss stops holding
+    // the camera, and with it `wait_enemies_present 0`.
+    a.flags &= ~ActorFlag.NoCameraTrack;
+    for (let i = 0; i < 600 && (a.flags & ActorFlag.NoCameraTrack) === 0; i++) {
+      Boss2Handler.update(a, f);
+      ActorAdvanceMotion(a, 1 / 60);
+    }
+    check(`...and ${Class14State[state]} takes the boss off the camera's list`,
+          (a.flags & ActorFlag.NoCameraTrack) !== 0);
   }
 
   /**
@@ -18100,6 +18207,119 @@ console.log("class 0x30 states 46-48, a second reading of main's port:");
   check("MatrixGetAngles takes a RotY·RotX·RotZ pose back, elevation signed",
         Math.abs(g.x - 0x800) <= 1 && Math.abs(g.y - 0x2000) <= 1
         && Math.abs(g.z - 0x400) <= 1, `${g.x} ${g.y} ${g.z}`);
+}
+
+console.log("\nthe damage overlay:");
+{
+  // `PlayerTakeDamage` latches, `PlayerHookSpawnDamageOverlay` spawns on the
+  // player's next update, `DamageOverlayUpdateAndDraw` keeps it up, and
+  // `UpdateScreenShake` clears the latch. Driven through `GameUpdate` from the
+  // page's own reset (L49), so the wiring is what is under test.
+  const rng = new Rng(41);
+  const events = scene(1, rng);
+  // Five hits on the path camera would take every life and the player out of
+  // play, where no update runs the hook. The engine's own "no damage" byte
+  // keeps the latch and the lives apart: the latch is set either way.
+  G.g_player_no_damage[0] = 1;
+  const heard: number[] = [];
+  events.on("sound.play", (d) => heard.push(d.id));
+  const o = G.g_damage_overlays[0]!;
+  const step = () => GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+
+  // The reset does not touch the hook -- only an installer writes it -- so
+  // whatever an earlier case left is put to a known value first.
+  SceneStateInstallPlayerHooks(1, 1);
+  check("the follow camera's installer puts the body draw on both players",
+        G.g_player_camera_hook[0] === PlayerCameraHook.DrawBody
+        && G.g_player_camera_hook[1] === PlayerCameraHook.DrawBody);
+  G.g_player_camera_hook = [PlayerCameraHook.None, PlayerCameraHook.None];
+  SceneStateInstallPlayerHooks(1, 3);
+  check("CameraInstallViewAngles leaves the camera hook alone",
+        G.g_player_camera_hook[0] === PlayerCameraHook.None);
+  SceneStateInstallPlayerHooks(2, 5);
+  check("every cam/ path installer puts the overlay hook on both players",
+        G.g_player_camera_hook[0] === PlayerCameraHook.SpawnDamageOverlay
+        && G.g_player_camera_hook[1] === PlayerCameraHook.SpawnDamageOverlay);
+
+  PlayerTakeDamage(0, 1, DamageOverlayKind.Claw, events);
+  check("the hit only latches: nothing is spawned inside PlayerTakeDamage",
+        !o.active && G.g_player_was_hit[0] === 1);
+  step();
+  check("the next update spawns it, with the kind the hit passed",
+        o.active === 1 && o.kind === DamageOverlayKind.Claw && o.count === 1
+        && o.x === 0, JSON.stringify(o));
+  check("...and draws its first frame the same update: 59 left",
+        o.frames === 59, `${o.frames}`);
+  check("kind 3 draws slot 0x932 (common.bin[117], the claw marks)",
+        DAMAGE_OVERLAY_SLOTS[o.kind]![o.count - 1] === 0x932);
+  check("...and plays DAMAGE2 as it spawns",
+        heard.includes(0x001b16a9) && DAMAGE_OVERLAY_SOUNDS[3] === 0x001b16a9,
+        heard.map((h) => h.toString(16)).join(","));
+  check("UpdateScreenShake consumed the latch and started the shake",
+        G.g_player_was_hit[0] === 0 && G.g_screen_shake_frames === 0x2f,
+        `${G.g_player_was_hit[0]} ${G.g_screen_shake_frames}`);
+  // 47 * 0x1800 BAMS = 146.25 degrees; cos * 47 = -39.08, truncated.
+  check("the shake's pitch is ftol(cos(frames * 0x1800) * frames)",
+        G.g_screen_shake_pitch === -39, `${G.g_screen_shake_pitch}`);
+
+  heard.length = 0;
+  for (let i = 0; i < 4; i++) step();
+  const voices = DAMAGE_OVERLAY_VOICES[0]!;
+  check("the hurt voice plays on the fifth update, with the overlay still up",
+        o.frames === 0x37 && o.active === 1 && heard.length === 1
+        && voices.includes(heard[0]!),
+        `${o.frames} ${heard.map((h) => h.toString(16))}`);
+
+  // A second hit while it is up: the invulnerability window would refuse it,
+  // so it is lifted -- the spawn's own guard is what is under test.
+  RunOutInvulnerability();
+  heard.length = 0;
+  PlayerTakeDamage(0, 1, DamageOverlayKind.Bite, events);
+  step();
+  check("a hit while one is up shows nothing new and plays nothing",
+        o.kind === DamageOverlayKind.Claw && heard.length === 0,
+        `${o.kind} ${heard}`);
+
+  // 6 updates so far; it is drawn on updates 1..59 and gone on the 60th.
+  for (let i = 6; i < 59; i++) step();
+  check("it is up, unchanged, for 59 updates", o.active === 1 && o.frames === 1,
+        `${o.active} ${o.frames}`);
+  step();
+  check("...and gone on the sixtieth", o.active === 0 && o.frames === 0);
+
+  // Under the follow camera the hook is the body draw: the latch is still
+  // consumed by the shake, and no overlay appears.
+  SceneStateInstallPlayerHooks(1, 1);
+  RunOutInvulnerability();
+  PlayerTakeDamage(0, 1, DamageOverlayKind.Bite, events);
+  step();
+  check("under CameraInstallFollowMidpoint a hit shows no overlay",
+        o.active === 0 && G.g_player_was_hit[0] === 0
+        && G.g_screen_shake_frames === 0x2f);
+
+  // Two players: player 0's overlay sits left, and kind 6 swaps its model.
+  SceneStateInstallPlayerHooks(2, 4);
+  G.g_max_attackers = 2;
+  RunOutInvulnerability();
+  PlayerTakeDamage(0, 1, DamageOverlayKind.Gash, events);
+  step();
+  check("with two players the gash is slot 0x936, 0.22 to the left",
+        o.active === 1 && DAMAGE_OVERLAY_SLOTS[o.kind]![o.count - 1] === 0x936
+        && Math.abs(o.x + 0.22) < 1e-6, JSON.stringify(o));
+  G.g_max_attackers = 1;
+
+  // A player joining clears it: the count latched at spawn is compared.
+  // (`DamageOverlayClear` first, so the spawn's live-guard lets it in.)
+  DamageOverlayClear(0);
+  G.g_player_was_hit[0] = 1;
+  G.g_player_hit_motion[0] = DamageOverlayKind.Splat;
+  step();
+  const spawned = o.active === 1 && o.count === 1;
+  G.g_max_attackers = 2;
+  step();
+  check("a second player joining takes the overlay down",
+        spawned && o.active === 0, `${spawned} ${o.active}`);
+  G.g_max_attackers = 1;
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

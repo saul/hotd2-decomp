@@ -1113,6 +1113,12 @@ export async function actorSlotEntry(
  *   `ActorShotFeedback` (`FUN_00454050`) can name, which are also the ranges
  *   `SpawnPropHitSpark` (`FUN_00465860`) draws from.
  *
+ * And one thing a bullet does not produce: the eleven full-screen **damage
+ * overlays** `DamageOverlayUpdateAndDraw` (`FUN_00417300`) draws when the
+ * player is hit, `g_damage_overlay_slots` 0x931..0x93B, all `common.bin`.
+ * They are drawn exactly the way the muzzle flash is -- camera space, one
+ * `AssetDrawSlot` -- so they ride the same rig.
+ *
  * What is **not** here, deliberately: the boss and set-piece kinds of
  * `SpawnSpriteEffectFromParams`' switch — 0x41, 0x44, 0x45, 0x50, 0x53, 0x5A,
  * 0x5B, 0x5C, 0x5D, 0x61 — which live in `water_hamon`, `eff_dokan`,
@@ -1133,6 +1139,7 @@ export const EFFECT_SLOT_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x08f8, 0x0903],    // kind 5, water
   [0x0904, 0x0919],    // kind 6, wood -- and the prop spark, from 0x905
   [0x0054, 0x0062],    // kind 0x51, the type-3 ricochet
+  [0x0931, 0x093b],    // the damage overlays -- g_damage_overlay_slots
 ];
 
 /**

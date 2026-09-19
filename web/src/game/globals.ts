@@ -24,6 +24,8 @@ import type { ShotFlash, ShotTracer, ShotWeaponEffect }
 import { makeShotFlashRing, makeShotTracerRing, makeShotWeaponRing }
   from "./effects/shot_effects";
 import type { SpriteEffect } from "./effects/sprite";
+import { makeDamageOverlays, PlayerCameraHook, type DamageOverlay }
+  from "./effects/damage_overlay";
 import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
@@ -33,7 +35,8 @@ import { vec3, type Vec3 } from "./vec";
 import { makeEntityLights } from "./entity_light";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
-  PlayerStartGameFromTitle, PlayerTasksCreate, type PlayerBlock }
+  PlayerStartGameFromTitle, PlayerTasksCreate, PlayerTasksRunFirstTurn,
+  type PlayerBlock }
   from "./player_shell";
 
 /**
@@ -480,8 +483,33 @@ export const G = {
   g_training_out: 0,
   /** `g_player_was_hit` — 0x009A5CD0 + player*0x98. */
   g_player_was_hit: [0, 0],
-  /** `g_player_hit_motion` — 0x009A5CD2 + player*0x130. */
+  /**
+   * `g_player_hit_motion` — 0x009A5CD2 + player*0x130. Not a motion: its one
+   * reader hands it to `DamageOverlaySpawn` as the overlay kind -- see
+   * `DamageOverlayKind` in `effects/damage_overlay.ts`.
+   */
   g_player_hit_motion: [0, 0],
+  /**
+   * `g_player_camera_hook` — 0x009A5CDC + player*0x130. What
+   * `PlayerRunCameraHook` calls; the scene-state installers write it.
+   */
+  // `PlayerCameraHook.None`, spelled as its value: this initialiser runs
+  // before `effects/damage_overlay.ts` has finished loading whenever that
+  // module is the one imported first, and its enum is not there yet.
+  g_player_camera_hook: [0, 0] as PlayerCameraHook[],
+  /** `g_damage_overlays` — 0x009A26C0, one 0x14-byte record per player. */
+  g_damage_overlays: makeDamageOverlays() as DamageOverlay[],
+  /**
+   * `g_screen_shake_frames` — 0x009C8E8C. The shake's countdown; a consumed
+   * hit restarts it at 0x30.
+   */
+  g_screen_shake_frames: 0,
+  /**
+   * `g_screen_shake_pitch` — 0x009CA0E4. What the camera would nod by, in
+   * thousandths of the look distance. Computed and not yet applied -- see
+   * `effects/damage_overlay.ts`.
+   */
+  g_screen_shake_pitch: 0,
   /** `g_player_hit_count` — 0x009A5C86 + player*0x98. Hits that scored. */
   g_player_hit_count: [0, 0],
   /** `g_head_combo_bonus` — 0x009A5C82 + player*0x98. */
@@ -1543,11 +1571,13 @@ export type Globals = typeof G;
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
  * | `g_scene_tick_counter` (`0x009A2BAC`, at `0x0045EE23`) | ✅ |
- * | the unread words: `DAT_009C8E8C`, `DAT_009C6F1C`, `DAT_009C6F20`,
+ * | `g_screen_shake_frames = 0` (`0x0045EE29`) | ✅ |
+ * | the unread words: `DAT_009C6F1C`, `DAT_009C6F20`,
  *   `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`, `DAT_009A34DC = 1` |
  *   `[open]` |
  *
- * Nine of fifteen. The name is the engine's and the omissions are itemised on
+ * The ✅ rows are the ported part (a count here rots, L16). The name is the
+ * engine's and the omissions are itemised on
  * purpose: a partial transcription that says which part is a work list, and
  * one that does not is a lie waiting to be believed.
  */
@@ -1593,6 +1623,8 @@ export function ResetSceneOnEnter(): void {
   // `G` for class 0x19 -- until then the walker owned it and this routine
   // could not reach it.
   G.g_bHudShutterState = 2;
+  // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
+  G.g_screen_shake_frames = 0;
 }
 
 /**
@@ -1627,6 +1659,15 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_entity_lights = makeEntityLights();
   G.g_player_was_hit = [0, 0];
   G.g_player_hit_motion = [0, 0];
+  // `PlayerEnterPlay` (`FUN_00414770`) zeroes the overlay's active word and
+  // count, which with the rest of the record unread is all of it.
+  //
+  // `g_player_camera_hook` is **not** reset, deliberately: in the engine only
+  // the scene-state installers write it, so it holds whatever the last one
+  // wrote across a scene load -- and in the port the walker's replay of a
+  // deep link or a seek may have run those installers before this reset.
+  G.g_damage_overlays = makeDamageOverlays();
+  G.g_screen_shake_pitch = 0;
   // `g_player_hit_count` and `g_head_combo_bonus` are `ResetSceneOnEnter`'s.
   // [diverges] `g_one_hit_target_kills` is **not**: nothing read so far
   // clears it, and it is deliberately outside the `ResetSceneOnEnter`
@@ -1737,6 +1778,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     PlayerBlockRestore(carry);
     AdvanceToNextScene();
     PlayerTasksCreate();
+    PlayerTasksRunFirstTurn();
   } else {
     PlayerStartGameFromTitle(G.g_GameMode);
   }

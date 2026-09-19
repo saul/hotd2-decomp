@@ -30,22 +30,23 @@
  *
  * ## What the port leaves out
  *
- * `[diverges]` **The draw hooks.** `PlayerEnterPlay`'s rows install two
- * per-player callbacks (`+0x7C` and `+0x80`) that place the player's entity on
- * the view (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`) and play the
- * hit splash (`FUN_00417440`, `FUN_00417300`, `PlayerClearHitSplash`); every
- * handler also draws its own HUD -- the crosshair, the lives, the ammo, the
- * continue digit, "GAME OVER", "PRESS START". Those are the renderer's and the
- * HUD's, and they read the state this module writes; none of them decides
- * anything. `PlayerEnterPlay`'s crosshair zeroing is left out with them: the
- * engine re-polls the aim the next frame, and the port's aim is written on
- * pointer moves only, so zeroing it would park the gun light in the middle of
- * the screen until the mouse moved.
+ * `[diverges]` **The draws.** The `+0x80` hook places the player's entity on
+ * the view (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`), `PlayerHookDrawBody`
+ * draws the body, and every handler draws its own HUD -- crosshair, lives, ammo,
+ * the continue digit, "GAME OVER", "PRESS START". Those are the renderer's and
+ * the HUD's and read the state this module writes. The damage overlay's state
+ * half is ported (`effects/damage_overlay.ts`) and runs from here.
+ * `PlayerEnterPlay`'s crosshair zeroing is left out: the engine re-polls the
+ * aim the next frame, and the port's aim is written on pointer moves only, so
+ * zeroing it would park the gun light in the middle of the
+ * screen until the mouse moved.
  */
 import type { Events } from "../core/events";
 import { CommitAppState, RequestAppState } from "./app_state";
 import { PlayerFireFromQueue, ShotRequestDue } from "./combat/shot";
 import { ScoreAddForPlayer } from "./combat/score";
+import { DamageOverlayClear, DamageOverlayUpdateAndDraw, PlayerCameraHook,
+  PlayerRunCameraHook, UpdateScreenShake } from "./effects/damage_overlay";
 import { CreditCount, CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
   SetBothPlayerCounters } from "./credits";
 import { GameMode } from "./game_mode";
@@ -110,14 +111,16 @@ export enum EnterPlayFlag {
  * caller the image reaches -- its only thunk, `0x00414730`, has no xref.
  */
 export const g_player_enter_play_modes: readonly {
-  flags: number; state: number; invuln: number;
+  flags: number; state: number; invuln: number; hook: PlayerCameraHook;
 }[] = [
-  { flags: 0x3d, state: PlayerState.InPlay, invuln: 90 },   // 0 new game
-  { flags: 0x19, state: PlayerState.InPlay, invuln: 180 },  // 1 continue
-  { flags: 0x08, state: PlayerState.InPlay, invuln: 90 },   // 2 next scene
-  { flags: 0x3d, state: PlayerState.InPlay, invuln: 180 },  // 3 join in
-  { flags: 0x3c, state: PlayerState.Out, invuln: 90 },      // 4 attract
-  { flags: 0x3d, state: PlayerState.Out, invuln: 90 },      // 5
+  // `PlayerCameraHook` spelled as its values (2 draw body, 1 overlay): this
+  // table is built at load, and `effects/damage_overlay.ts` may not be yet.
+  { flags: 0x3d, state: PlayerState.InPlay, invuln: 90, hook: 2 },   // 0 new game
+  { flags: 0x19, state: PlayerState.InPlay, invuln: 180, hook: 1 },  // 1 continue
+  { flags: 0x08, state: PlayerState.InPlay, invuln: 90, hook: 2 },   // 2 next scene
+  { flags: 0x3d, state: PlayerState.InPlay, invuln: 180, hook: 1 },  // 3 join in
+  { flags: 0x3c, state: PlayerState.Out, invuln: 90, hook: 2 },      // 4 attract
+  { flags: 0x3d, state: PlayerState.Out, invuln: 90, hook: 2 },      // 5
 ];
 
 /**
@@ -210,8 +213,15 @@ export function PlayerEnterPlay(player: number, mode: number,
     G.g_player_lives_shown[player] = G.g_start_lives;
   }
   if (row.flags & EnterPlayFlag.ClearScore) G.g_player_score[player] = 0;
+  // The `+0x7C` hook the row carries: `PlayerInstallDrawBodyHook`
+  // (`FUN_004150C0`) or `PlayerInstallDamageOverlayHook` (`FUN_004150E0`).
+  // The `+0x80` hook is the renderer's (`PlacePlayerEntityFromViewPose`).
+  G.g_player_camera_hook[player] = row.hook;
   if (row.flags & EnterPlayFlag.CountPlayer) G.g_players_in_play += 1;
   if (row.flags & EnterPlayFlag.CountAttacker) G.g_max_attackers += 1;
+  // The overlay's `active` and `frames` words, `0x009A26C0/C4 + player*0x14`.
+  G.g_damage_overlays[player].active = 0;
+  G.g_damage_overlays[player].frames = 0;
   G.g_player_invuln_frames[player] = row.invuln;
   G.g_player_continue_timer[player] = 0;
   // The six slots of each shot-effect ring this player owns, and the cursor.
@@ -317,6 +327,7 @@ export function PlayerStateEnterNewGame(player: number, f: PlayerFrame): void {
  * digit), the damage rank down one, floored at 0, then row 1.
  */
 export function PlayerStateEnterContinue(player: number, f: PlayerFrame): void {
+  if (G.g_damage_overlays[player].active !== 0) DamageOverlayClear(player);
   ScoreAddForPlayer(player, 1, f.events);
   G.g_damage_rank -= 1;
   if (G.g_damage_rank < 0) G.g_damage_rank = 0;
@@ -367,7 +378,9 @@ export function PlayerStateArmContinue(player: number): void {
  * While the run is on its own continue screen (phase 4) this timer stands
  * still: that screen counts for everybody.
  */
-export function PlayerContinueCountdown(player: number): void {
+export function PlayerContinueCountdown(player: number,
+                                        f: PlayerFrame): void {
+  DamageOverlayUpdateAndDraw(player, f.rng, f.events);
   const seen = G.g_player_credit_seen[player];
   if (seen[0] !== CreditCount(0) || seen[1] !== CreditCount(1)
       || seen[2] !== 0 || seen[3] !== 0) {
@@ -401,10 +414,10 @@ export function PlayerContinueCountdown(player: number): void {
  * installs when the run's continue screen hands back: a fresh countdown, then
  * the countdown itself, this frame.
  */
-export function PlayerContinueRearm(player: number): void {
+export function PlayerContinueRearm(player: number, f: PlayerFrame): void {
   G.g_player_continue_timer[player] = CONTINUE_TIMER_START;
   G.g_player_task[player] = PlayerTask.ContinueCountdown;
-  PlayerContinueCountdown(player);
+  PlayerContinueCountdown(player, f);
 }
 
 /**
@@ -499,9 +512,9 @@ export function PlayerStateFireOnly(player: number, f: PlayerFrame): void {
  * press can join.
  */
 export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
-  // `FUN_00415100`: the per-player `+0x7C` hook, which is where the engine
-  // turns a hit into its on-screen sprite. See `PlayerRunHitHook`.
-  PlayerRunHitHook(player, f);
+  // The `+0x80` hook (`PlacePlayerEntityFromViewPose`) is the renderer's.
+  // Then the `+0x7C` hook, which is where a hit becomes its damage overlay.
+  PlayerRunCameraHook(player, f.events);
   if (G.g_app_state === AppState.Attract) G.g_player_lives[player] = 1;
   if (!(G.g_player_lives[player] > 0)) G.g_player_lives[player] = 0;
   if (G.g_player_lives[player] !== 0) {
@@ -519,27 +532,8 @@ export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
       G.g_player_lives_shown[player] = G.g_player_lives[player];
     }
   }
+  DamageOverlayUpdateAndDraw(player, f.rng, f.events);
   if (IsDemoRun()) PlayerPollStart(player);
-}
-
-/**
- * `[port-only]` stub for `FUN_00415100`, the call through the player's `+0x7C`
- * hook that `PlayerUpdateInPlay` makes first. **This is where the damage
- * sprite comes from, not `PlayerTakeDamage`**: `PlayerTakeDamage` only raises
- * `g_player_was_hit` and stores the motion (its third argument) in
- * `g_player_hit_motion`, and the hook turns that into the sprite. Which hook
- * a player has is `PlayerEnterPlay`'s row's: rows 1 and 3 (continue, join)
- * install `0x00415180` through `0x004150E0` -- `if (was_hit)
- * FUN_00417440(obj, hit_motion)`, which arms the splash at `0x009A26C0..D0`
- * for 60 frames and plays `0x00579FD8[motion]`; `FUN_00417300` draws and
- * counts it down, and `FUN_004172E0` clears it. Rows 0 and 2 (new game, next
- * scene) install `0x00415120` through `0x004150C0`, which draws the player's
- * entity while `+0x12C` bit 0 is up and does not read the latch. That split is
- * `[proved]` from the table; what it means on screen is `[open]`. Left for the
- * damage-sprite port to fill.
- */
-export function PlayerRunHitHook(_player: number, _f: PlayerFrame): void {
-  // Deliberately empty until the splash is ported.
 }
 
 /**
@@ -554,8 +548,9 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
       PlayerStateReenterAfterScene(player, f); break;
     case PlayerTask.EnterJoinIn: PlayerStateEnterJoinIn(player, f); break;
     case PlayerTask.ArmContinue: PlayerStateArmContinue(player); break;
-    case PlayerTask.ContinueCountdown: PlayerContinueCountdown(player); break;
-    case PlayerTask.ContinueRearm: PlayerContinueRearm(player); break;
+    case PlayerTask.ContinueCountdown:
+      PlayerContinueCountdown(player, f); break;
+    case PlayerTask.ContinueRearm: PlayerContinueRearm(player, f); break;
     case PlayerTask.InPlay: PlayerUpdateInPlay(player, f); break;
     case PlayerTask.ArmGameOver: PlayerStateArmGameOver(player); break;
     case PlayerTask.GameOverWait: PlayerGameOverWait(player); break;
@@ -574,13 +569,39 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
 
 /**
  * `[port-only]` — both player tasks, in the order `PlayerTasksCreate`
- * allocates them, which puts them at the head of every scene's task list.
+ * allocates them, which puts them at the head of every scene's task list, and
+ * the `SelectAttackablePlayer` task allocated after them.
  * The trigger bit is derived from the shot queue first; see
  * {@link G.g_trigger_down}.
  */
 export function PlayerTasksRun(f: PlayerFrame): void {
   for (let p = 0; p < 2; p++) G.g_trigger_down[p] = ShotRequestDue(p) ? 1 : 0;
   for (let p = 0; p < 2; p++) PlayerTaskRun(p, f);
+  SelectAttackablePlayer();
+}
+
+/**
+ * `SelectAttackablePlayer` — `FUN_00414F40`, the task `FUN_00414FB0`
+ * allocates on the line after every `PlayerTasksCreate` -- so it runs after
+ * both player tasks in the walk, which is what lets a player's own update see
+ * `g_player_was_hit` before `UpdateScreenShake` clears it. `[proved]` from the
+ * call order at `0x00460729`/`0x0046072E` and `ActorAlloc` appending.
+ *
+ * Then `g_active_player`: -1 with nobody in play; with one, player 0 if its
+ * state is 5 or 7 and player 1 otherwise; with two, 2 (and `0x007C211C = 1`,
+ * not carried).
+ */
+export function SelectAttackablePlayer(): void {
+  UpdateScreenShake();
+  if (G.g_players_in_play === 0) {
+    G.g_active_player = -1;
+  } else if (G.g_players_in_play === 1) {
+    const s = G.g_player_state[0];
+    G.g_active_player = s !== PlayerState.InPlay && s !== PlayerState.Idle
+      ? 1 : 0;
+  } else if (G.g_players_in_play === 2) {
+    G.g_active_player = 2;
+  }
 }
 
 // -- entering a stage --------------------------------------------------------
@@ -643,7 +664,11 @@ export function PlayerBlockBoot(): void {
  * state 6 and puts the player at 0. `CommitAppState` applies it at the end of
  * the frame; `ResetGameOnStart` (`0x0045FEF0`) is run phase 0 and leaves
  * phase 2; and the scene's `PlayerTasksCreate` gives player 0 the state-0
- * handler, which is `PlayerEnterPlay(0)` on its first turn.
+ * handler, which is `PlayerEnterPlay(0)` on its first turn -- taken here, so
+ * that the scene-state installers a deep link's replay runs afterwards land
+ * on top of the hook `PlayerEnterPlay` writes, as they do in a game started at
+ * the entry (`[likely]`: the player tasks are allocated before the scene's
+ * script starts entering scene states).
  */
 export function PlayerStartGameFromTitle(mode: number,
                                          f: PlayerFrame = TITLE_FRAME): void {
@@ -658,6 +683,17 @@ export function PlayerStartGameFromTitle(mode: number,
   CommitAppState();
   G.g_nRunPhase = RunPhase.InPlay;
   PlayerTasksCreate();
+  PlayerTasksRun(f);
+}
+
+/**
+ * `[port-only]` -- the new scene's first player turn after a stage step,
+ * taken at the reset for the same reason as in
+ * {@link PlayerStartGameFromTitle}: row 2's hook goes in before the walker
+ * enters the new scene's first scene state.
+ */
+export function PlayerTasksRunFirstTurn(): void {
+  PlayerTasksRun(TITLE_FRAME);
 }
 
 /**

@@ -1122,4 +1122,57 @@ for (const stage of STAGES) {
   }
 }
 
+// **A seek lands with the civilians play would still have, and no others.**
+// The replay steps over every wait and runs no actor, so a civilian spawned
+// before the landing address used to be rebuilt there at her first command --
+// captors, camera slot and rescue all ahead of her again. Since bug 18 a
+// tracked civilian holds `g_camera_free`, so that rebuilt hostage held the
+// room's gate for ever: stage 3's boat hostage at any address past block 0,
+// stage 4's block-1 civilian at any address past block 1. The exe removes her
+// on her cue or, off camera, once `goto_scene_state` has left scene row 2
+// after her room -- `script/civilian_life.ts`.
+{
+  const cases: [string, number, number[], number[]][] = [
+    // bundle, the civilian's block, the landing blocks, her addresses
+    ["stage4_original", 1, [2, 3, 10, 12, 25], [4348, 4484]],
+    ["stage4", 1, [2, 3, 10], [4348, 4484]],
+    ["stage3", 0, [1, 3], [3008]],
+  ];
+  for (const [name, from, blocks, civs] of cases) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    ran++;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    for (const b of blocks) {
+      const w = new Walker(script, mkHost());
+      if (!seekTo(w, b, 1, 0)) {
+        check(`${name}: seek to block ${b} step 1`, false);
+        continue;
+      }
+      const left = w.spawns.filter((s) => civs.includes(s.at));
+      check(`${name}: a seek to block ${b} carries no block-${from} civilian`,
+            left.length === 0,
+            left.map((s) => `${s.at}@${s.block}/${s.step}`).join(" "));
+    }
+  }
+
+  // ...and inside her own room she is still there: stage 4 (Original) block 1
+  // step 1 op 36 is the gate she is rescued behind.
+  const file = join(ROOT, "stage4_original", "stage4_original.script.json");
+  if (existsSync(file)) {
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const w = new Walker(script, mkHost());
+    seekTo(w, 1, 1, 36);
+    check("a seek into her own room before its gate keeps her",
+          w.spawns.some((s) => s.at === 4348));
+    // Playback is untouched: the bookkeeping is the replay's alone.
+    const play = new Walker(script, mkHost());
+    seekTo(play, 1, 1, 36);
+    play.replaying = false;
+    play.enterSceneState(1, 3);
+    check("...and leaving scene row 2 in playback retires nobody",
+          play.spawns.some((s) => s.at === 4348));
+  }
+}
+
 finishOrSkip("seek", failures, ran);

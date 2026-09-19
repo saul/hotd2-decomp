@@ -16,7 +16,9 @@ import { T, SecondsToTicks } from "../tables";
 import { CivilianPruneDeadChildren } from "./children";
 import { CivilianRunFrameHook, PoseHookGrowAndPushOutOfWorld } from "./hooks";
 import { CivilianCountMotionLoops } from "./loops";
-import { CivilianTarget } from "./ops";
+import { CivilianTarget, CivilianWait } from "./ops";
+import { ActorBoundsOnScreen } from "../combat/permits";
+import type { GameHost } from "../host";
 import { CivilianRunScript } from "./script";
 import { CivilianCheckShot } from "./shot";
 import { CivilianStepScript } from "./step";
@@ -92,7 +94,7 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // sets, and the sphere-centre switch below.
   CivilianWriteSphereCentre(obj);
   PoseHookGrowAndPushOutOfWorld(obj);
-  CivilianCheckRemoval(obj);
+  CivilianCheckRemoval(obj, f.host);
   // `LAB_0048B0CE`, the tail every path out of `CivilianUpdate` falls into
   // except the two that despawn.
   if (!obj.despawned) CivilianReleaseCaptors(obj);
@@ -208,26 +210,60 @@ export function CivilianReleaseCaptors(obj: Actor): void {
 }
 
 /**
- * The removal cue: camera path `removePath` reaching frame `removeFrame`
- * starts a countdown, and the actor leaves when it runs out.
+ * The removal arms at the tail of `CivilianUpdate` (`FUN_0048A920`,
+ * `0x0048AF8E..0x0048B0C8`), in the engine's order. `[proved]`
+ *
+ * ```
+ * if (g_cutscene_skipping && !(word & 0x20000000)) sub+0x2A = 1;   // skip
+ * else if (sub+0x2A) {                                             // countdown
+ *   if (--sub+0x2A == 0) { if (children) sub+0x2A = 1; else leave; }
+ * } else if (g_active_cam_path == sub+0x26 && g_cam_path_frame == sub+0x28)
+ *   sub+0x2A = tail+0x06;                                          // the cue
+ * else if (word & 0x2000000                                        // off camera
+ *          && !ActorBoundsOnScreen(obj)
+ *          && g_scene_state_major_entered != 2
+ *          && !children)
+ *   leave;
+ * ```
+ *
+ * The off-camera arm is how most civilians go: of the 126 streams that end in
+ * themselves (the other ten hand over with op 0x1E/0x1F), 87 end on a word
+ * carrying `0x2000000`, and `goto_scene_state` taking the major to 1 after a
+ * room is when it can fire. The port had the cue and the countdown
+ * only, so a rescued civilian stood where her script left her for the rest of
+ * the stage.
+ *
+ * [open] The skip arm: `g_cutscene_skipping` (`0x009A2230`) has no field in
+ * `G` -- see `class41/type13.ts` for the same gap.
  */
-function CivilianCheckRemoval(obj: Actor): void {
+function CivilianCheckRemoval(obj: Actor, host: GameHost): void {
   const sub = obj.civ;
   if (!sub) return;
-  if (sub.removeDelay === 0) {
-    if (CamPathCueReached(sub.removePath, sub.removeFrame)) {
-      sub.removeDelay = Math.max(1, T.civilians?.spawns?.[String(obj.at)]
-        ?.removeDelay ?? 0);
-    }
+  if (sub.removeDelay !== 0) {
+    sub.removeDelay -= 1;
+    if (sub.removeDelay !== 0) return;
+    // A civilian still holding children does not leave: the engine restarts
+    // the countdown instead, which is what keeps a hostage on stage until
+    // rescued.
+    if (sub.childCount !== 0) { sub.removeDelay = 1; return; }
+    CivilianLeaveField(obj);
     return;
   }
-  sub.removeDelay -= 1;
-  if (sub.removeDelay !== 0) return;
-  // A civilian still holding children does not leave: the engine restarts the
-  // countdown instead, which is what keeps a hostage on stage until rescued.
-  if (sub.childCount !== 0) { sub.removeDelay = 1; return; }
+  if (CamPathCueReached(sub.removePath, sub.removeFrame)) {
+    sub.removeDelay = Math.max(1, T.civilians?.spawns?.[String(obj.at)]
+      ?.removeDelay ?? 0);
+    return;
+  }
+  if (!(sub.wait & CivilianWait.RemoveOffCamera)) return;
+  if (ActorBoundsOnScreen(obj, host)) return;
+  if (G.g_scene_state_major_entered === SCENE_MAJOR_PATH_CAMERA) return;
+  if (sub.childCount !== 0) return;
   CivilianLeaveField(obj);
 }
+
+/** `g_scene_state_major_entered`'s `cam/` path row -- `CMP [0x009C6F08], 2`
+ * at `0x0048B068`. */
+const SCENE_MAJOR_PATH_CAMERA = 2;
 
 /**
  * Class 0x10's leave: the tail `CivilianUpdate` (`FUN_0048A920`) runs inline

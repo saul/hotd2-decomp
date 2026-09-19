@@ -13,7 +13,8 @@
  * the stab connects because the arc put the actor there on that frame.
  */
 import type { Events } from "../../core/events";
-import { ThrowerFlag, type ThrowerActor } from "../actor";
+import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
+import { ThrowerLeave } from "./death";
 import { PlayerTakeDamage } from "../combat/player";
 import { ArcPhase } from "./arc";
 import { ActorClipFrame } from "./arc";
@@ -55,9 +56,15 @@ export function ThrowerStrikeConnect(obj: ThrowerActor,
 
   obj.flags2 |= ThrowerFlag.Struck;
   if (obj.attackPermit < 0) return false;
-  // `[open]` As in `ActorStrikeConnect`: the engine's `obj+0x34 & 0x2000000`
-  // arm passes 0 for the latch and then `ThrowerLeave`; the port never raises
-  // that bit, so the latching arm is the one here.
+  // `obj+0x34 & 0x2000000` (`ActorFlag.StrikeAndLeave`): no latch, at
+  // `0x0044CEE3`, then `ThrowerLeave` -- the melee arm; the throw-table arm,
+  // which the port does not reach, does the same at `0x0044CF81`/`0x0044CF8A`.
+  if (obj.flags & ActorFlag.StrikeAndLeave) {
+    const hit = PlayerTakeDamage(obj.attackPermit, 0, e.player_motion, events,
+                                 obj, "strike", obj.attack);
+    ThrowerLeave(obj);
+    return hit;
+  }
   return PlayerTakeDamage(obj.attackPermit, 1, e.player_motion, events, obj,
                           "strike", obj.attack);
 }

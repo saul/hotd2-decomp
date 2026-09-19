@@ -231,6 +231,12 @@ export enum CivilianWait {
    * — so the bit set means *tracked* and the bit clear means *excluded from
    * `RegisterForCameraTracking`*. 315 of the 596 shipped wait commands set it,
    * more than any other bit in the word. `[proved]`
+   *
+   * **It is what holds the room while a rescued civilian speaks.**
+   * `CivilianUpdate` calls `ActorRegisterCameraPoint` at `0x0048ADB0` every
+   * frame, so while this bit is set she holds a `g_enemy_slots` entry and
+   * `g_camera_free` -- the second half of every room-clear gate -- stays down.
+   * See `camera/slots.ts` and bug 18.
    */
   CameraTrack = 0x00040000,
   /**

@@ -544,11 +544,26 @@ const original = flag("original");
 /** Press START on every continue countdown; see the loop. */
 const CONTINUE = flag("continue");
 let continues = 0;
+/**
+ * `--link` starts from a **deep link** -- the query string of a URL the user
+ * filed a bug with -- instead of the stage's entry block. Everything the
+ * header says about why this tool does not seek still holds: a seek is its own
+ * rebuild path with its own bugs. That is exactly what this flag is for --
+ * checking that the address a bug report names loads and plays on to the end
+ * of the stage rather than hanging on a world the seek built wrong.
+ *
+ *   node tools/playthrough.mjs --headless \
+ *     --link "stage=4&original=1&mode=play&block=1&step=2&op=11&frame=770"
+ */
+const link = opt("link", null);
+if (link !== null) console.log(`--link: ${link}`);
 if (original) console.log("--original: g_GameMode 1, the Original Mode bundle");
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
   // is the other half, and it was already a URL flag.
-  url: `?stage=${stage}&drive=1&seed=${seed}`
+  url: link !== null
+    ? `?${link.replace(/^\?/, "")}&drive=1&seed=${seed}`
+    : `?stage=${stage}&drive=1&seed=${seed}`
        + (original ? "&original=1" : "")
        + (entry === null ? "" : `&entry=${entry}`),
   size: opt("size", "1280x800"),
@@ -720,12 +735,12 @@ try {
     if (CONTINUE && /CONTINUE\?/.test(s.lives)) {
       await page.keyboard.press("KeyS");
       continues += 1;
-      console.log(`  f${String(frames).padStart(6)}  continue ${continues} `
-                  + `taken at block ${s.block}`);
+      console.log(`  f${String(frames).padStart(6)}  START ${continues} `
+                  + `at block ${s.block}`);
     }
     if (/GAME OVER/.test(s.lives)) {
       console.log(`\nGAME OVER at block ${s.block} step/op ${s.step} after `
-                  + `${frames} game frames, ${continues} continue(s) taken`
+                  + `${frames} game frames, START pressed ${continues} time(s)`
                   + (CONTINUE ? " -- the credits ran out"
                               : " -- run with --continue to spend credits"));
       exit = 1;
@@ -736,8 +751,8 @@ try {
       const t = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`\nreached an end block after ${frames} game frames `
                   + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
-                  + `wall clock), ${steps} instructions, ${continues} `
-                  + `continue(s) taken`);
+                  + `wall clock), ${steps} instructions, START pressed `
+                  + `${continues} time(s)`);
       if (unclearable.length) {
         // **Reaching the end block is not the same as the stage being
         // playable.** Every line here is a room whose enemies the shots could
@@ -768,7 +783,10 @@ try {
     // **Both clocks**, because a room being cleared slowly is not a hang and a
     // fight is not an authored sequence. `stalled > HANG` alone would call
     // stage 6's rooms hung while their hit points were visibly falling.
-    if (stalled > HANG && fruitless > HANG) {
+    // A continue countdown is not a hang: the room is parked because nobody
+    // is in play, and the countdown ends it either way -- a continue or the
+    // game over above.
+    if (stalled > HANG && fruitless > HANG && !/CONTINUE\?/.test(s.lives)) {
       console.log(`\nHUNG at block ${s.block} step/op ${s.step}`);
       if (s.policy === "civilians") {
         console.log("  a civilian gate, which nothing here touches on purpose:"

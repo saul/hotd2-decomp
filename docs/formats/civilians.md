@@ -99,6 +99,24 @@ so the wait bit set means tracked. `0x01000000` is the world push and
 `0x20000000` gates op 0x1D's dialogue on `DAT_009A2230`. The counts are of the
 596 `Wait` commands in the 136 shipped streams.
 
+**The camera-track bit is how the room waits for her.** `[proved]`
+`CivilianUpdate` (`FUN_0048A920`) ends every path that does not despawn at
+`0x0048AD97` and runs `PUSH 0x40800000; CALL ActorRegisterCameraPoint` at
+`0x0048ADAB`; `ActorRegisterCameraPoint` (`FUN_00409B70`) ends
+`PUSH ESI; CALL 0x00408EC0` at `0x00409C03`, and `RegisterForCameraTracking`
+tests nothing but `obj+0x34` bit `0x10000` and the list being full. So in every
+block whose word carries `0x40000` the civilian is in `g_enemy_slots`, the
+camera looks at her, `CameraDriverSelectMode` (`FUN_00402650`) stays in mode 3
+and `g_camera_free` stays 0 -- and `wait_enemies_alive`,
+`wait_enemies_present`, `wait_scripted_actors` and `wait_targets_clear` all
+need that flag. A rescue script keeps the bit through the closed shutter and
+her lines and drops it in the block that opens the shutter again (stage 4's
+stream 75: tracked from command 0 to the `0x2188000` at command 41, which is
+followed by `SetHudShutterState 1`). None of the 16 wait words carrying
+`0x1000` (camera settled) also carries `0x40000`, which is consistent: a
+tracked camera never raises `g_camera_settled`, so a script untracks her before
+it waits for the camera.
+
 ### The root-motion gate — `0x00100000`
 
 **The engine's civilians are carried by their clips, through the same routine
@@ -480,6 +498,35 @@ units** for every civilian type — and descends into `ShotTestSkeleton` only
 when `obj+0x34` bit `0x80` is set. No class-0x10 script ever sets it. What
 lands is `MarkActorShot` (`FUN_00404DB0`): `obj+0x34 |= (1 << (player + 1)) |
 8`, and `CivilianUpdate` reads those bits back on its next frame.
+
+## How a civilian leaves
+
+`CivilianUpdate` ends (`0x0048AF8E..0x0048B0C8`) with four arms, in this
+order. `[proved]`
+
+| Arm | Condition | Effect |
+|---|---|---|
+| skip | `g_cutscene_skipping` and the word lacks `0x20000000` | `sub+0x2A = 1` |
+| countdown | `sub+0x2A != 0` | count down; at zero despawn, or `sub+0x2A = 1` again while children remain |
+| cue | `g_active_cam_path == sub+0x26 && g_cam_path_frame == sub+0x28` | `sub+0x2A = tail+0x06` |
+| off camera | the word has `0x2000000`, `ActorBoundsOnScreen` (`FUN_0045CA60`) says no, `g_scene_state_major_entered != 2`, no children | despawn now |
+
+Every despawn frees the hit slot, runs `ActorReleasePartList`, leaves
+`g_civilians_alive` unless `sub+0x04` bit 0 says she already did, and calls
+`ActorDespawn`. Of the 126 streams that end in themselves (ten hand over with
+op 0x1E/0x1F), 87 end on a `0x2000000` word, and `goto_scene_state` taking the
+major to 1 after a room is the first moment that arm can fire. The port had
+the countdown and the cue only; the off-camera arm is in
+`game/class10/update.ts` now and the skip arm is `[open]` (no
+`g_cutscene_skipping` in `G`).
+
+**A seek has to reproduce this**, because it replays the evt with no actor
+running and would otherwise rebuild every earlier civilian at her first
+command. `web/src/script/civilian_life.ts` applies the arms a replay can see:
+the cue exactly (the replay's camera plays her path past her frame, once her
+room is played), and the off-camera arm at the first `goto_scene_state` after
+her room's gate when her rescue path ends on `0x2000000` -- `[likely]`, since
+a replay has no pose to test the screen against.
 
 ## The rescue, and what the class is
 

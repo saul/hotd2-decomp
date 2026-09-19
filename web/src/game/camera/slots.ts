@@ -33,13 +33,41 @@ export function ResetCameraEnemySlots(): void {
  * the only actors were enemies and the cat, and bit the moment class 0x24 was
  * ported: 21 set-pieces sit at the world origin, and with nothing nearer the
  * camera swung to look at empty space and the screen went black.
+ *
+ * **"Enemy" is the stand-in, not the rule, and a class that makes the call
+ * while not being an enemy says so through `tracksCamera`.** The routine's
+ * whole body is the bit test and the list-full test:
+ *
+ * ```c
+ * if ((obj+0x34 & 0x10000) == 0 && g_camera_candidate_count < 0xE) { ...append... }
+ * ```
+ *
+ * — no class test and no dead test; those are the callers'. Class 0x10 is the
+ * case that needs it: `CivilianUpdate` (`FUN_0048A920`) pushes 4.0 and calls
+ * `ActorRegisterCameraPoint` at `0x0048ADB0`, on every path through the
+ * routine, and `ActorRegisterCameraPoint` (`FUN_00409B70`) ends
+ * `PUSH ESI; CALL 0x00408EC0` at `0x00409C03`. So a civilian is a camera
+ * candidate in every block whose wait word carries `0x40000` — which is the
+ * whole of her rescue: the camera turns to her, `CameraDriverSelectMode`
+ * (`FUN_00402650`) stays in mode 3 because a slot is held, `g_camera_free`
+ * stays down, and the room-clear gates wait until her script drops the bit.
+ * The port filtered her out with the enemy test, and stage 4's next zombies
+ * walked in over her lines (bug 18). `[proved]`
+ *
+ * A non-enemy class is therefore a candidate only if its handler says its
+ * update made the call; an enemy class keeps the dead test that stands in for
+ * the death chains that stop calling it.
  */
 export function RegisterForCameraTracking(obj: Actor): boolean {
-  if (obj.dead || !obj.visible) return false;
-  if (!ActorIsEnemy(obj.cls)) return false;
+  if (!obj.visible) return false;
   // A class that makes the call only sometimes answers for itself.
   const tracks = g_class_handlers[obj.cls]?.tracksCamera;
-  if (tracks && !tracks(obj)) return false;
+  if (ActorIsEnemy(obj.cls)) {
+    if (obj.dead) return false;
+    if (tracks && !tracks(obj)) return false;
+  } else if (!tracks || !tracks(obj)) {
+    return false;
+  }
   return (obj.flags & ActorFlag.NoCameraTrack) === 0;
 }
 

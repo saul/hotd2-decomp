@@ -250,8 +250,23 @@ export interface ClassHandler {
    * Class 0x40's member calls it unless its formation is waiting for a script
    * flag, and its corpse only while it is the horde's last. Absent means the
    * predicate's answer stands.
+   *
+   * **For a class that is not an enemy this is the only way in**: the
+   * predicate's enemy test stands in for the call site, so a non-enemy whose
+   * routine does make the call has to say so. Class 0x10 is one —
+   * `CivilianUpdate` (`FUN_0048A920`) calls `ActorRegisterCameraPoint` at
+   * `0x0048ADB0` every frame — and its `obj+0x34` bit `0x10000`, written from
+   * the wait word, is then what decides. See `camera/slots.ts`.
    */
   tracksCamera?(obj: Actor): boolean;
+  /**
+   * The float this class's `Update` pushes to `ActorRegisterCameraPoint`
+   * (`FUN_00409B70`), when it is a **field** rather than a literal. Class 0x14
+   * pushes `state+0x0C` (`Class14Update`, `0x0047621E`) and class 0x19
+   * `state+0x70` (`Boss4Update`, `0x00491A49`). Absent means the class's
+   * literal from `CameraPointRiseFor` in `camera/track.ts`.
+   */
+  cameraRise?(obj: Actor): number;
 }
 
 /**

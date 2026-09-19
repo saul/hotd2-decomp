@@ -629,7 +629,9 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
       // class's `Update` makes the call -- 4.0 for a zombie or a civilian,
       // **0 for a thrower**. `CameraPointRiseFor` is that table; see it for
       // all fifteen call sites and for what the port does differently.
-      ActorRegisterCameraPoint(obj, host, CameraPointRiseFor(obj.cls));
+      ActorRegisterCameraPoint(obj, host,
+        g_class_handlers[obj.cls]?.cameraRise?.(obj)
+          ?? CameraPointRiseFor(obj.cls));
     }
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {

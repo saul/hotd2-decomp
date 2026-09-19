@@ -47,6 +47,61 @@ export function ActorIsOnScreen(obj: Actor, host: GameHost): boolean {
   return x >= -halfW && x <= halfW && y >= -SCREEN_HALF_H && y <= SCREEN_HALF_H;
 }
 
+/** `ActorBoundsOnScreen`'s half-width: a literal `320.0`, not
+ * `g_projection_distance_px * 0.5` as `ActorIsOnScreen` has it. */
+const BOUNDS_HALF_W = 320;
+/**
+ * The skeleton node whose view-space translation `SkeletonEmitNode`
+ * (`FUN_004114C0`) stores into `obj+0x10C/0x110/0x114` -- `MOV ECX, 0x1` at
+ * `0x00411539`, the default; the store is `FSTP [EDX + 0x10C]` at
+ * `0x004115B5` and its two neighbours. Nodes 9 and 2 replace it only on arms
+ * gated by `DAT_009C7310` and fields this port has not read. `[likely]` node
+ * 1 for every actor the port asks about.
+ */
+const BOUNDS_NODE = 1;
+const _node = vec3();
+
+/**
+ * `ActorBoundsOnScreen` — `FUN_0045CA60`. The looser on-screen test: the
+ * view-space point `obj+0x10C/0x110/0x114`, padded by the radius `obj+0x124`
+ * toward the eye, projected and tested against a 640x480 frame.
+ *
+ * ```c
+ * if (0.0 <= z) return 0;                         // behind the eye
+ * nx = x <= 0 ? -x - r : r - x;  ny = y <= 0 ? -y - r : r - y;
+ * k  = g_projection_distance_px / z;
+ * a = k*nx; b = k*ny; c = -(P*x)/z; d = -(P*y)/z;
+ * if ((a < 320 || c < 320) && (-320 < a || -320 < c) && (b < 240 || d < 240))
+ *     return !(b <= -240 && d <= -240);
+ * return 0;
+ * ```
+ *
+ * Unlike {@link ActorIsOnScreen} it **does** test the sign: a point behind the
+ * eye is off screen. Transcribed as read, asymmetries included. With no pose
+ * or no camera it answers "on screen", the same "no opinion" the other test
+ * gives, so a headless run removes nothing on it.
+ */
+export function ActorBoundsOnScreen(obj: Actor, host: GameHost): boolean {
+  if (!host.boneWorld(obj.at, BOUNDS_NODE, _node)) return true;
+  if (!host.viewSpaceOfPoint?.(_node, _view)) return true;
+  const { x, y, z } = _view;
+  if (0 <= z) return false;
+  const r = obj.radius;
+  const nx = x <= 0 ? -x - r : r - x;
+  const ny = y <= 0 ? -y - r : r - y;
+  const k = PROJECTION_DISTANCE_PX / z;
+  const a = k * nx;
+  const b = k * ny;
+  const c = -((PROJECTION_DISTANCE_PX * x) / z);
+  const d = -((PROJECTION_DISTANCE_PX * y) / z);
+  if ((a < BOUNDS_HALF_W || c < BOUNDS_HALF_W)
+      && (-BOUNDS_HALF_W < a || -BOUNDS_HALF_W < c)
+      && (b < SCREEN_HALF_H || d < SCREEN_HALF_H)) {
+    return !(b <= -SCREEN_HALF_H && d <= -SCREEN_HALF_H);
+  }
+  return false;
+}
+
 /**
  * `TryClaimAttackSlot` — `FUN_00455DE0`. Take a free permit, or fail.
  *

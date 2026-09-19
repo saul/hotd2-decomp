@@ -35,6 +35,7 @@
     "horde": "node tools/run_test.mjs tools/horde.mjs",
     "dives": "node tools/run_test.mjs tools/dives.mjs",
     "handback": "node tools/run_test.mjs tools/handback.mjs",
+    "civ_speech": "node tools/run_test.mjs tools/civ_speech.mjs",
     "loops": "node tools/loops.mjs",
     "cam-cues": "node tools/run_test.mjs tools/cam_cues.mjs",
     "leaps": "node tools/run_test.mjs tools/leaps.mjs",

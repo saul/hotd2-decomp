@@ -67,6 +67,8 @@ export interface CreatureSphereSource {
    * null. See `EffectLayer.pickCreature`.
    */
   pickCreature(ray: Ray): { id: number; t: number; point: Vector3 } | null;
+  /** The same for the carried props. See `EffectLayer.pickCarried`. */
+  pickCarried(ray: Ray): { id: number; t: number; point: Vector3 } | null;
 }
 
 export interface BoneSphereSource {
@@ -193,6 +195,7 @@ export class EffectLayer implements System<RenderContext> {
     this.drawBlood(ctx, seen);
     this.drawPointBlood(seen);
     this.drawBodyCreatures(seen);
+    this.drawCarriedProps(seen);
     this.drawShotRings(seen);
 
     for (const [key, l] of this.nodes) {
@@ -353,6 +356,52 @@ export class EffectLayer implements System<RenderContext> {
       if (!best || t < best.t) {
         best = { id: c.id, t, point: this._c.clone() };
       }
+    }
+    return best;
+  }
+
+  /**
+   * The carried props' draw — `AssetDrawSlot(sub+0x0C)` under whatever matrix
+   * the routine built, which `game/carried_prop.ts` hands over whole. Every
+   * one of those routines draws a **modelview**: the held one from
+   * `MatrixLoadIdentity` and the bones' view-space records, the flight under
+   * `g_camera_world_to_view`, the stuck one from `MatrixLoadIdentity` again.
+   * So the node hangs off the view group with the engine's matrix as its
+   * local transform, and the element layouts agree (see `game/matrix.ts`).
+   */
+  private drawCarriedProps(seen: Set<string>): void {
+    for (const c of G.g_carried_props) {
+      if (!c.draw || !c.slot) continue;
+      const key = `cp${c.id}`;
+      const node = this.node(key, c.slot,
+                             c.draw.view ? this.viewGroup : this.group);
+      if (!node) continue;
+      seen.add(key);
+      node.matrixAutoUpdate = false;
+      node.matrix.fromArray(c.draw.m);
+      node.matrixWorldNeedsUpdate = true;
+      // A prop is scenery, not a click effect: draw it in the world's order.
+      node.renderOrder = 0;
+    }
+  }
+
+  /**
+   * `ShotTestSphere` (`FUN_00404630`) for the carried props: the sphere at
+   * `obj+0x70..0x78` — view space, so out through the view group's matrix —
+   * with radius `obj+0x124`, for every prop `RegisterForShotTest` took this
+   * frame.
+   */
+  pickCarried(ray: Ray): { id: number; t: number; point: Vector3 } | null {
+    let best: { id: number; t: number; point: Vector3 } | null = null;
+    for (const c of G.g_carried_props) {
+      if (!c.shootable) continue;
+      this._c.set(c.shotPoint.x, c.shotPoint.y, c.shotPoint.z)
+        .applyMatrix4(this.viewGroup.matrix);
+      ray.closestPointToPoint(this._c, this._v);
+      const t = this._v.sub(ray.origin).dot(ray.direction);
+      if (t <= 0) continue;
+      if (ray.distanceSqToPoint(this._c) > c.radius * c.radius) continue;
+      if (!best || t < best.t) best = { id: c.id, t, point: this._c.clone() };
     }
     return best;
   }

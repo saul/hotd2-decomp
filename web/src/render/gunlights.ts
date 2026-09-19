@@ -62,6 +62,7 @@ import {
   Scene,
   ShaderChunk,
   SpotLight,
+  PointLight,
   Group,
   Color,
   Matrix4,
@@ -70,7 +71,7 @@ import {
   type WebGLRenderer,
 } from "three";
 import { G } from "../game/globals";
-import { GUN_LIGHT_FIRST } from "../game/scene_lights";
+import { GUN_LIGHT_FIRST, RenderLightType } from "../game/scene_lights";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import type { SceneLighting } from "./lighting";
@@ -119,8 +120,14 @@ const GUN_LIGHTS = 2;
 const LIGHTS_BEGIN = patchLightsBegin(ShaderChunk.lights_fragment_begin);
 
 /**
- * `lights_fragment_begin`, with only the spot lights left in it and the
- * ambient replaced by the array path's own.
+ * The point lights the rest of `g_entity_lights` can hold — class 0x41 type
+ * 48's lamp claims one through `EntityLightAcquireSlot`, from entry 3 up.
+ */
+const ENTITY_POINT_FIRST = 3;
+
+/**
+ * `lights_fragment_begin`, with only the spot and point lights left in it and
+ * the ambient replaced by the array path's own.
  *
  * The engine's array path enables the sixteen `g_entity_lights` entries and
  * nothing else — `RenderLightsResetAll` (`FUN_004AA830`) switches the default
@@ -129,7 +136,6 @@ const LIGHTS_BEGIN = patchLightsBegin(ShaderChunk.lights_fragment_begin);
  */
 function patchLightsBegin(src: string): string {
   const out = src
-    .replace("( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )", "0")
     .replace("( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )", "0")
     .replace("( NUM_HEMI_LIGHTS > 0 )", "0")
     .replace("getAmbientLightIrradiance( ambientLightColor )",
@@ -209,6 +215,8 @@ export class GunLights implements System<RenderContext> {
   readonly group = new Group();
   source: GunLightSource = { live: () => false, litActor: () => false };
   private readonly spots: SpotLight[] = [];
+  /** Entries 3..15 of `g_entity_lights` that are D3D point lights. */
+  private readonly points: PointLight[] = [];
   /** Meshes under a `draw_mode` 1 region node. */
   private regionLit: Mesh[] = [];
   /**
@@ -244,6 +252,15 @@ export class GunLights implements System<RenderContext> {
       sp.shadow.normalBias = SHADOW_NORMAL_BIAS;
       this.spots.push(sp);
       this.group.add(sp, sp.target);
+    }
+    for (let i = ENTITY_POINT_FIRST; i < 16; i++) {
+      // No shadow: a cube map per lamp is six passes, and the one lamp the
+      // game ships hangs in a room the torch already shadows.
+      const pt = new PointLight(0xffffff, 0, 0, 2);
+      pt.name = `entity_light_${i}`;
+      pt.visible = false;
+      this.points.push(pt);
+      this.group.add(pt);
     }
     scene.add(this.group);
   }
@@ -337,6 +354,29 @@ export class GunLights implements System<RenderContext> {
       sp.intensity = (Math.PI * e.diffuse[0]) / Math.max(e.att0, 1e-6);
       sp.distance = 0;
       sp.decay = 0;
+    }
+    // The point lights. D3D attenuates by `1 / (att0 + att1 d + att2 d^2)`;
+    // three.js's physical point light is `I / d^2` with `decay = 2`, so
+    // `I = diffuse / att2` matches it everywhere `att0` is small beside
+    // `att2 d^2` -- past two units for the lamp's `0.15` against `0.02`, and
+    // inside that the vertex colour is saturated in both. [diverges] that
+    // near field, declared here. Colour is the diffuse's ratio; the flicker is
+    // `att2`, so it lands on the intensity. PI as for the spots.
+    for (let k = 0; k < this.points.length; k++) {
+      const pt = this.points[k];
+      const idx = ENTITY_POINT_FIRST + k;
+      const e = G.g_entity_lights[idx];
+      const on = !!e && e.type === RenderLightType.Point && this.source.live(idx);
+      pt.visible = on;
+      if (!on) continue;
+      any = true;
+      const peak = Math.max(e.diffuse[0], e.diffuse[1], e.diffuse[2], 1e-6);
+      pt.color.setRGB(e.diffuse[0] / peak, e.diffuse[1] / peak,
+                      e.diffuse[2] / peak);
+      pt.intensity = (Math.PI * peak) / Math.max(e.att2, 1e-6);
+      pt.distance = e.range;
+      pt.decay = 2;
+      pt.position.set(e.pos.x, e.pos.y, e.pos.z);
     }
     const [r, g, b] = G.g_light_array_ambient;
     gunAmbient.value.setRGB(r, g, b);

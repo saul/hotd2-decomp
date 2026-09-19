@@ -30,6 +30,10 @@ import type { Events } from "../core/events";
 /** What the renderer answers for the port. See `game/host.ts`. */
 export interface HostBackend {
   boneWorld(at: number, bone: number, out: Vec3): boolean;
+  /** One bone's world matrix, `Matrix4.elements`. See `GameHost.boneMatrix`. */
+  boneMatrix?(at: number, bone: number, out: number[]): boolean;
+  /** One bone's hit sphere in world space. See `GameHost.boneSphere`. */
+  boneSphereWorld?(at: number, bone: number, out: Vec3): number | null;
   setBoneSlot(at: number, bone: number, slot: number): void;
   /**
    * `CamEvalObjectPath6` — a point *and its orientation* on an `op_` path.
@@ -87,6 +91,17 @@ export class GameSystem implements System {
   private readonly host: GameHost = {
     boneWorld: (at, bone, out) =>
       this.backend?.boneWorld(at, bone, out) ?? false,
+    boneMatrix: (at, bone, out) =>
+      this.backend?.boneMatrix?.(at, bone, out) ?? false,
+    boneSphere: (at, bone, out) =>
+      this.backend?.boneSphereWorld?.(at, bone, out) ?? null,
+    // The two matrices of the engine's camera block. `ctx.view` already holds
+    // both; the carried props cross between the spaces with them.
+    cameraMatrices: (w2v, v2w) => {
+      if (!this.view) return false;
+      this.view.copyMatrices(w2v, v2w);
+      return true;
+    },
     // `CamEvalObjectPath6`. The curves are in the camera bundle and their
     // evaluation is the renderer's, so the port asks across the seam rather
     // than carrying a Hermite evaluator of its own.
@@ -286,14 +301,32 @@ export function syncCharacterSpawns(chars: CharacterPool,
   // offsets from the world origin. Same `chars.rng` throughout, because the
   // engine draws from one `rand()` and every spawn on this frame is on the
   // same stream.
-  const ready = new Map(chars.readySpawns(spawns).map((r) => [r.at, r]));
+  //
+  // A civilian's captors are not in the script's list at all: `CivilianInit`
+  // (`FUN_0048A3E0`) makes them itself, so they come straight after the
+  // civilian that holds them — and, being made in its `Init`, they see the
+  // same `g_civilian_carrier` it did. Any left over (a captor whose civilian
+  // was made on an earlier frame) are made last.
+  const reqs = chars.readySpawns(spawns);
+  const ready = new Map(reqs.map((r) => [r.at, r]));
+  const listed = new Set(spawns.map((s) => s.at));
   const made: Actor[] = [];
+  const done = new Set<number>();
+  const make = (r: CharacterSpawnRequest): void => {
+    if (done.has(r.at)) return;
+    done.add(r.at);
+    made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+    for (const c of reqs) {
+      if (c.parentAt === r.at && !listed.has(c.at)) make(c);
+    }
+  };
   SlotActorsForgetUnlisted(spawns);
   for (const s of spawns) {
     const r = ready.get(s.at);
-    if (r) made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+    if (r) make(r);
     else SpawnSlotActor(s, chars.rng);
   }
+  for (const r of reqs) make(r);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }
 

@@ -60,7 +60,13 @@ export type ShotPick =
    * other registered object in — and the split here is the port's object pool
    * showing, not a difference in what a bullet does.
    */
-  | { kind: "creature"; creatureId: number; point: Vec3 };
+  | { kind: "creature"; creatureId: number; point: Vec3 }
+  /**
+   * A prop a class-0x30 zombie is carrying or has thrown —
+   * `G.g_carried_props`, by `id`. Its own kind for the reason the creature's
+   * is: a separate pool in the port, one list in the engine.
+   */
+  | { kind: "carried"; carriedId: number; point: Vec3 };
 
 export interface GameHost {
   /**
@@ -125,6 +131,28 @@ export interface GameHost {
    * scale, which is what the engine uses past fifteen units anyway.
    */
   viewSpaceOfPoint?(p: Vec3, out: Vec3): boolean;
+  /**
+   * One bone's **world** matrix, sixteen floats in `g_MatrixStackTop`'s own
+   * layout (which is `Matrix4.elements`'). The engine reads the bone's
+   * view-space draw record at `obj + 0x20C + bone*0x90 + 0x28`; the port
+   * multiplies this by {@link GameHost.cameraMatrices}'s world-to-view to get
+   * the same numbers. `CarriedPropSeatBetweenBones` (`FUN_00442EB0`) is the
+   * reader. Optional and false when the actor is not posed.
+   */
+  boneMatrix?(at: number, bone: number, out: number[]): boolean;
+  /**
+   * The camera block's two matrices: `g_camera_world_to_view` (`0x009A6000`,
+   * the block's `+0x00`) and its inverse `g_camera_blocks` (`0x009A6040`,
+   * `+0x40`), in the engine's layout. False with no camera.
+   */
+  cameraMatrices?(worldToView: number[], viewToWorld: number[]): boolean;
+  /**
+   * One bone's hit sphere: its **world** centre into `out` and its radius
+   * returned — `obj + bone*0x90 + 0x274` and `+0x284`, which the engine keeps
+   * in view space. `CarriedPropHitTargetSphere` (`FUN_00443540`) tests a
+   * dropped prop against the civilian's bone 2 with it. Null when not posed.
+   */
+  boneSphere?(at: number, bone: number, out: Vec3): number | null;
   /** Swap the asset drawn for one bone — a hand going bare, or gore. */
   setBoneSlot(at: number, bone: number, slot: number): void;
   /**

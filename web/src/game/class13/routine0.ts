@@ -46,17 +46,20 @@
  * frame that seated the boat at 629 — and case 1 hands over to case 2 one
  * frame later, so the strike is on the last frame the wake is drawn.
  *
- * Not ported, both draw-side: the wake (`char_adv06.bin[0..21]`, the same
- * strip `CarrierPropRoutine1` draws) and the splash strip. Their cursors are
- * stepped here, because they are state, and neither slot range is in the
- * bundle yet. The same position selector 1 takes for its own wake.
+ * Both draws are `render/slotmodels.ts`', off `wakeDrawn` and `splashDrawn`,
+ * which this routine sets on exactly the frames it draws: the wake
+ * (`char_adv06.bin[0..21]`, one slot — selector 1 draws two, on the ground)
+ * under the boat's own pose, and the splash at its fixed point by the wall.
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { ClassFrame } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { PropSeatOnObjectPath } from "./index";
-import { CarrierRoutine0State, type ScriptedPropTail } from "./state";
+import {
+  CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST, CARRIER_WAKE_FIRST,
+  CARRIER_WAKE_LAST, CarrierRoutine0State, type ScriptedPropTail,
+} from "./state";
 
 /** `PUSH 0x151` — the `op_` object path the routine rides. */
 export const CARRIER0_PATH = 0x151;
@@ -67,12 +70,10 @@ export const CARRIER0_FRAME_STRIKE = 0x276;
  * ends (it starts at 326 and lasts 384), and the frame the boat stops on.
  */
 export const g_carrier_routine0_ride_end = 0x2c6;
-/** `ride+0x04`, the wake strip, `char_adv06.bin[0..21]`. */
-const CARRIER0_WAKE_FIRST = 0x24a;
-const CARRIER0_WAKE_LAST = 0x25f;
-/** `ride+0x08`, the splash strip, `eff_dokan.bin[0..93]`. */
-export const CARRIER0_SPLASH_FIRST = 0xfd4;
-export const CARRIER0_SPLASH_LAST = 0x1031;
+/** `ride+0x04`, the wake strip — shared with selector 1. */
+const CARRIER0_WAKE_FIRST = CARRIER_WAKE_FIRST;
+const CARRIER0_WAKE_LAST = CARRIER_WAKE_LAST;
+export { CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST };
 /** `COMMON\SIBUKI2_16.WAV` — *shibuki*, spray. */
 export const SFX_CARRIER0_STRIKE = 0x4116a9;
 
@@ -88,6 +89,7 @@ export function CarrierPropRoutine0(obj: Actor, f: ClassFrame): void {
     ? (obj as { prop13: ScriptedPropTail }).prop13 : null;
   if (!sub) return;
 
+  sub.wakeDrawn = 0;
   switch (sub.state as CarrierRoutine0State) {
     case CarrierRoutine0State.Begin:
       sub.riding = true;
@@ -110,8 +112,10 @@ export function CarrierPropRoutine0(obj: Actor, f: ClassFrame): void {
   }
 
   // The tail, `0x0044032B`.
+  sub.splashDrawn = 0;
   if (sub.splashCel !== 0) {
     // The draw of `sub.splashCel` is the renderer's; the step is state.
+    sub.splashDrawn = sub.splashCel;
     sub.splashCel += 1;
     if (sub.splashCel > CARRIER0_SPLASH_LAST) sub.splashCel = 0;
     return;
@@ -135,6 +139,7 @@ function CarrierPropRoutine0Ride(obj: Actor, sub: ScriptedPropTail,
     sub.state = CarrierRoutine0State.Coast;
   }
   // `AssetDrawSlot(ride->wake)` is the renderer's; the cursor is this.
+  sub.wakeDrawn = sub.wakeCel;
   sub.wakeCel += 1;
   if (sub.wakeCel > CARRIER0_WAKE_LAST) sub.wakeCel = CARRIER0_WAKE_FIRST;
   sub.pathFrame += 1;

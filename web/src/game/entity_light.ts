@@ -34,6 +34,8 @@ export interface EntityLight {
   theta: number;              // +0x60
   phi: number;                // +0x64
   enabled: boolean;           // +0x68
+  /** `EntityLightAcquireSlot` / `EntityLightReleaseSlot`'s in-use word. */
+  inUse: boolean;             // +0x6C
 }
 
 /** Sixteen entries — `SceneLightArrayUpdate` walks all of them. */
@@ -48,7 +50,7 @@ export function makeEntityLight(): EntityLight {
     type: 0 as RenderLightType, diffuse: [0, 0, 0],
     pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: 0 },
     range: 0, falloff: 1, att0: 0, att1: 0, att2: 0, theta: 0, phi: 0,
-    enabled: false,
+    enabled: false, inUse: false,
   };
 }
 

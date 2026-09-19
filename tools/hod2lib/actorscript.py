@@ -27,7 +27,7 @@ TARGET_SCRIPT_SHAPE: dict[int, tuple[int, int]] = {
     34: (10, 4),   # {f32 arrive_dist; u16 loops; u16 motion; u16 frame}
     35: (0, 4),    # straight into the entries
     36: (0, 5),    # ...with a g_script_flags index per entry
-    37: (0x38, 4),  # the carried-prop record; [open] beyond its motion fields
+    37: (0x38, 4),  # the carried-prop record -- see the note in target_script
     38: (20, 4),   # {f32 x, y, z; s16 motion, frame; s16 loops, mode}
     40: (16, 4),   # {f32 x, y, z; s16 motion, frame}
     41: (16, 4),   # the same, arrived at rather than walked past
@@ -67,6 +67,25 @@ def target_script(prog, off: int, state: int) -> dict | None:
     elif state == 43:
         head = {"loops": struct.unpack_from("<h", raw, off)[0],
                 "cue": struct.unpack_from("<h", raw, off + 2)[0]}
+    elif state == 37:
+        # `ZombieStateCarryProp` (FUN_0045B380) and `CarriedPropInit`
+        # (FUN_00442740) between them read every word of the 0x38 bytes:
+        # +0x00 the prop type (g_carried_prop_types), +0x04 its first
+        # g_prop_behaviours index, +0x08 the behaviour the release hands it
+        # to (obj+0x1358), +0x0C..0x14 its offset in the hands, +0x18..0x20
+        # the spin per frame, +0x24..0x2C the launch words (obj+0x4C..0x54),
+        # then the first motion entry at +0x30 -- which is the header's own,
+        # read by sub 0, and not the list's first.
+        head = {"prop_type": struct.unpack_from("<i", raw, off)[0],
+                "behaviour": struct.unpack_from("<i", raw, off + 4)[0],
+                "release": struct.unpack_from("<i", raw, off + 8)[0],
+                "offset": list(struct.unpack_from("<3f", raw, off + 0x0C)),
+                "spin": list(struct.unpack_from("<3i", raw, off + 0x18)),
+                "launch": list(struct.unpack_from("<3f", raw, off + 0x24)),
+                "motion": struct.unpack_from("<h", raw, off + 0x30)[0],
+                "frame": struct.unpack_from("<h", raw, off + 0x32)[0],
+                "loops": struct.unpack_from("<h", raw, off + 0x34)[0],
+                "mode": struct.unpack_from("<h", raw, off + 0x36)[0]}
     entries: list[dict] = []
     p = off + head_len
     while per and len(entries) < 64 and p + per * 2 <= len(raw):

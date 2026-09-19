@@ -18,6 +18,7 @@ import { ActorRegisterCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
+import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
 import { SecondsToTicks, T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
@@ -26,6 +27,7 @@ import { ProcessShotRequests } from "./combat/shot";
 import { ShotEffectsTick } from "./effects/tick";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
+import { CarriedPropPoolUpdate } from "./carried_prop";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
 import { ActorByAt, G } from "./globals";
@@ -93,6 +95,12 @@ export interface CharacterSpawnRequest {
   at: number;
   motion: number;
   pos: Vec3;
+  /**
+   * The spawn whose `Init` makes this one, when the script does not list it:
+   * a class-0x10 civilian's captors, which `CivilianInit` (`FUN_0048A3E0`)
+   * `SpawnFromDescriptor`s itself. Their order follows from it.
+   */
+  parentAt?: number;
 }
 
 /**
@@ -477,12 +485,15 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "falling" ? PropContainerType.FallingContainer
       : pl.container === "chain" ? PropContainerType.ChainSegments
       : pl.container === "fragment" ? PropContainerType.FragmentProps
+      : pl.container === "flicker_light" ? FLICKER_LIGHT_TYPE
       : PropContainerType.BreakableGroup;
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
                          pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
-                           : `breakable group ${pl.group}`,
+                           : pl.container === "flicker_light"
+                             ? "flicker light"
+                             : `breakable group ${pl.group}`,
                          { hp: pl.group ?? 0, condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
@@ -626,6 +637,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // (`FUN_0043E720`) allocates a task with no class id, so it is stepped here
   // beside the other non-actor pools rather than inside the actor walk.
   BodyCreaturePoolUpdate(rng, host, events);
+  // ...and the props state-37 zombies carry, which `ZombieStateCarryProp`
+  // (`FUN_0045B380`) allocates the same way. See `game/carried_prop.ts`.
+  CarriedPropPoolUpdate(rng, host, events);
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events);

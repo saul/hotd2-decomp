@@ -31,6 +31,31 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**Class 0x30 state 37 carries and throws** (`class30/carry_prop.ts`,
+`game/carried_prop.ts`). Stage 3 block 3 step 6's two fat zombies spawn on
+the bridge holding drums over their heads: `ZombieStateCarryProp` allocates the
+drum as a classless object (`CarriedPropInit`), turns to the camera through the
+carry clip's loops, claims the player's attack permit, and lets go on frame 24
+of the throw. The drum flies a ballistic arc to fifteen units in front of the
+camera; three hits break it in the air (and give the permit back), and one that
+arrives costs a life and sits on the lens for ninety frames. The state used to
+run as the maul, which played the throw with nothing in the hands, ended the
+script a second later and retired both zombies off screen while the camera was
+still on its way -- so the bridge was empty. Stage 1's barrel man over the
+civilian (block 6, bug 11) is the same state releasing into behaviour 3,
+`CarriedPropThrowAtTarget`: two loops of 271 and one of 265 before 266 lets go
+on frame 15, and the barrel dropped on the civilian's head kills her unless it
+or its carrier is shot first. `op 0x47`, `wait_targets_clear`, is real now and
+counts carried props as camera candidates. `[open]`: stage 2's pair release
+into behaviour 5 (`CarriedPropRollAtCamera`), a carrier killed holding its prop
+drops it into `CarriedPropFallFree`, and neither is ported -- the prop stays
+undrawn in the pool; the break effect's draw is not ported either.
+
+**A civilian's captors are made again.** `CivilianInit` spawns its children
+itself, so the walker's spawn list names only the civilian; 6da5fab walked
+that list to keep the script's order and every captor in the game went
+unmade. `syncCharacterSpawns` now makes them straight after their civilian.
+
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
 which is the **body** sphere every collision uses — and the port wrote neither.
@@ -793,7 +818,9 @@ arriving boat's riders were three faults deep: class 0x18 had no motion rule,
 so no rider was ever built; the player made character spawns before slot
 actors, so the civilian copied `g_civilian_carrier` before the boat had set it;
 and the carrier transform converted BAMS the wrong way. Spawns are now made in
-the script's order.
+the script's order. Stage 3's second arriving boat (block 7, carrier routine 6) rides
+its paths too, and the player's boat is drawn from its actor rather than from
+a second copy of its routine in the renderer.
 
 **A room-clear gate waits for the camera as well as the counter, and how long
 it waits is the camera's business.** `wait_enemies_alive` and its two siblings
@@ -3644,14 +3671,33 @@ the boat**: it ends the ride state at the `MatrixStackPop` and shows no
 `frame++`; the increment is at `0x00440323` and the whole tail past it.
 `game/class13/routine0.ts`.
 
-Not ported, both draw-side, and neither slot range is in the bundle: selector
-0's wake (`char_adv06.bin[0..21]`, the same strip selector 1 draws) and the
-splash strip. Their cursors are stepped in `game/`. The **zombie in the boat**
-is the civilian's class-0x18 child (evt `0xA174`), and no class-0x18 spawn in
-any stage becomes a character: class 0x18 has no `MOTION_RULES` row, so it
-exports as a marker. That is the stage-3 boat work's fix and is not repeated
-here; without it the civilian's captor never exists and the civilian is
-"rescued" on its first frame.
+**The draws are ported too.** Selector 0's wake (`char_adv06.bin[0..21]`
+under the boat's own pose, `Translate(0, 0, 27.5); Scale(1, 0.15, 1)`) and its
+splash (`eff_dokan.bin[0..93]` at the fixed point by the wall) are drawn by
+`render/slotmodels.ts` from `wakeDrawn`/`splashDrawn`, which the routine sets
+on exactly the frames it draws — a cel is drawn and *then* stepped, so reading
+the cursor itself would put every strip a frame ahead. The same machinery
+carries **selector 1's**, which were a `[diverges]` only for want of their
+slots: `CarrierDrawGroundWake` (`FUN_00440770`) lays two wake slots flat on
+the ground under the boat (`QueryGroundHeightAt(x, y + 100, z)`, headed along
+the keel by `VecToAngles` of the rotated forward axis — both computed in
+`game/`, since a collision query is the port's), states 5/6 draw their strip
+at the bow, and at path frame `0x550` the bow throws `SpawnPropStripEffect`
+(`FUN_0043FCA0`) kind 3 — a small effect object, `PropStripEffectUpdate`
+(`FUN_0043FBC0`), now `game/effects/prop_strip.ts` — with `0x000B16A9`.
+`CarrierDrawSlots` is what the exporter carries for each ported selector.
+
+**The zombie in the boat was a regression in the spawn order**, not the
+class-0x18 motion row. After the stage-3 boat work, `syncCharacterSpawns`
+walked the walker's spawn list to keep script order — and a civilian's
+children are not in it: `CivilianInit` builds them from descriptors nothing in
+the script points at, so they reach `readySpawns` through their parent. No
+civilian child was built anywhere; block 5's two captors never came through
+the door and this boat carried nobody. They are now built straight after their
+parent (`CharacterSpawnRequest.parentAt`), which is when `CivilianInit` builds
+them in the engine, and the zombie rides the boat into the wall.
+`[open]` whether it walks toward the civilian as it should while riding: it
+sits in `ZombieStateWalkToTarget` and barely moves in carrier space.
 
 ### The gun lights are real spotlights now, placed by the port
 
@@ -3691,6 +3737,20 @@ penumbra in place of per-vertex smearing. Cost, GPU-synced frame time on an
 M1 Pro headless: +0.2–0.6 ms a frame in stage 4 and +0.5 ms in stage 2's
 mansion while a torch is live (the shadow pass is most of it), nothing
 elsewhere.
+
+**Class 0x41 type 48, the lamp that owns a light.** `PlaceFlickerLightProp48`
+(`FUN_00463B20`) and `PropUpdateType48FlickerLight` (`FUN_0046DDE0`), ported
+in `game/class41/type48.ts`. It is its own constructor rather than a
+`PlaceGenericProp` type, so it was in no bundle until now: the exporter emits a
+`flicker_light` placement carrying its 32 models. One spawn, stage 2 block 26
+step 1, in the stretch where the scene light array is on. It claims a
+`g_entity_lights` entry (`EntityLightAcquireSlot`, from entry 3 up): a point
+light with a colour of (20, 20, 15), `att2` flickering between 0.01 and 0.03.
+Shot, it bursts into thirty pieces for ninety frames while the light fades,
+then shows the broken lamp. `render/gunlights.ts` draws the light as a
+three.js `PointLight` on the same lit set; `[diverges]`: the `att0` near field
+is dropped, which only matters inside two units, where both saturate.
+
 
 ## Every opcode, and what the player does with it
 
@@ -3788,7 +3848,7 @@ missed. Meanings and confidence marks live in
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the **live-enemy** gate, on `g_enemies_alive`, and 434 of the 488 enemy gates. Same side conditions as `0x43` plus `g_evt_wait_alive_hysteresis`, so it costs one frame more — both are now ported |
 | `45` | `wait_script_flag` | wait | ~approx~ | the **script-flag gate**, on `g_script_flags` (0x009C7200) — and that array is one array: every one of the forty-odd gates in the six shipped scripts names a flag that script's own `set_script_flag` never sets, so this opcode is *only* ever a wait on an actor. **Real** now; it used to read a `Set` beside `G` that held the script's own writes only, and passed on sight. **`[diverges]`**: a gate whose flag *nothing this port runs can raise* passes instead of parking, and the boundary is derived from the bundle rather than listed — the stage's own `set_script_flag` ops, the civilians' streams and the captors' state 36. Honouring every gate unconditionally parks stage 5 at block 1, stage 1 at blocks 14 and 16, stage 2 at 35-41, stage 4 at 23-29 and all six on the chapter card |
 | `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real**: it holds until the captors are dead. All 68 sites pass operand 0 |
-| `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |
+| `47` | `wait_targets_clear` | wait | ~approx~ | **Real**: `(g_camera_settled \|\| g_camera_free) && g_camera_candidate_count == 0`, the candidate count including carried props. It passed on sight until stage 3's bridge, where it let the script leave with a drum-thrower still standing there. `g_evt_gameplay_live` is not modelled, as for `0x45` |
 | `48` | `set_script_flag` | flow | **done** | `g_script_flags[operand] = 1` and nothing else — the whole of `EvtOpSetScriptFlag48`. It writes `G.g_script_flags`, the same array the civilians' op 0x1C and the captors' state 36 write |
 | `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4A` | `variant_call_b` | flow | shown | a global picks which operand list runs; the client does not evaluate it |

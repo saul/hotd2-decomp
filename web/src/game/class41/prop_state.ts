@@ -117,6 +117,35 @@ export enum PropFamily {
    * `class41/type13.ts`.
    */
   Type13 = 13,
+  /**
+   * `PropUpdateType48FlickerLight` (`FUN_0046DDE0`) — class 0x41 type 48,
+   * built by its own constructor, `PlaceFlickerLightProp48`: a hanging lamp
+   * that owns a flickering point light in `g_entity_lights` and bursts into
+   * thirty pieces when shot. One spawn, stage 2 block 26 step 1. See
+   * `class41/type48.ts`.
+   */
+  Type48 = 14,
+}
+
+/** One of `PropUpdateType48FlickerLight`'s thirty debris pieces. */
+export interface FlickerDebris {
+  x: number; y: number; z: number;       // +0x238 + i*0xC
+  /** BAMS, s16: `+0x910`, `+0x912`, `+0x914` + i*6. */
+  rx: number; ry: number; rz: number;
+  vx: number; vy: number; vz: number;    // +0x5A4 + i*0xC
+  /** BAMS per frame: `+0xAC6`, `+0xAC8`, `+0xACA` + i*6. */
+  wx: number; wy: number; wz: number;
+}
+
+/** `PropUpdateType48FlickerLight`'s words beyond the common prop fields. */
+export interface FlickerLightState {
+  /** `obj+0x1C4` — its entry in `g_entity_lights`, from `EntityLightAcquireSlot`. */
+  lightSlot: number;
+  /** `obj+0x1AC` — the flicker phase, `+= 0x800` a frame. */
+  phase: number;
+  /** `obj+0x1C0` — frames since it broke. */
+  brokenFrames: number;
+  debris: FlickerDebris[];
 }
 
 /**
@@ -494,6 +523,8 @@ export interface BreakableProp {
   routinePhase: number;     // +0x192
   /** Dead, and due to leave the pool. Not an exe field; the pool is a list. */
   dead: boolean;
+  /** {@link PropFamily.Type48}'s own words, and null for every other family. */
+  flicker: FlickerLightState | null;
 }
 
 /** `obj+0x34` bits `BreakablePropUpdate` tests. */
@@ -564,5 +595,6 @@ export function makeBreakableProp(id: number, group: number,
     key0: -1, key1: -1, key2: -1, key3: -1,
     branchLatched: false,
     dead: false,
+    flicker: null,
   };
 }

@@ -235,7 +235,12 @@ export class Harness {
        // so are in none of `o` below, while `e` and `p` above **count them**
        // -- so without this a driven run reads a live enemy it cannot see and
        // a room that will not clear for a reason nothing in the row explains.
-       + ` b${G.g_body_creatures.length}`,
+       + ` b${G.g_body_creatures.length}`
+       // `cp` is the props state-37 zombies carry: routine, hit points and the
+       // view depth of the shot point, for the same reason -- a pool the actor
+       // rows below cannot show. See `game/carried_prop.ts`.
+       + ` cp[${G.g_carried_props.map((p) =>
+           `${p.routine}:${p.hp}:${Math.round(p.shotPoint.z)}`).join(",")}]`,
       o: live.map((o) =>
         `${o.at} c${o.cls} s${o.state}.${o.sub} h${o.hp}`
         + ` @${q(o.pos.x)},${q(o.pos.y)},${q(o.pos.z)}`

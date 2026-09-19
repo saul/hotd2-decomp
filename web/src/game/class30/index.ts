@@ -6,6 +6,7 @@
  * `ActorAbortAttackAndLeave` rather than a fallthrough, so no unmodelled state
  * can sit on a permit.
  */
+import { ZombieStateCarryProp } from "./carry_prop";
 import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
@@ -229,14 +230,10 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
         // The delegate may have changed the state; state 42 reads that back.
         if (o.state === st) o.state = was;
       });
-    // [open] `ZombieStateCarryProp` (`FUN_0045B380`) allocates a companion
-    // object running `FUN_00442740` and waits for the player to destroy it.
-    // That class is unread, so its exit cannot be modelled — but the state's
-    // own body plays its script, which is what the engine does for as long as
-    // the prop lives. Nine spawns, and running them as the maul is very much
-    // closer than sending them at the player.
+    // The barrel-carrier: it allocates the prop it holds (`game/carried_prop.ts`)
+    // and throws it on its script's cue. See `class30/carry_prop.ts`.
     case ZombieState.CarryProp:
-      return ZombieStateTargetMotionScript(obj, rng, events);
+      return ZombieStateCarryProp(obj, eye, host);
 
     default:                      return ZombieGiveUpAttack(obj);
   }

@@ -61,6 +61,7 @@ RENAMES = {
     "main_asset_param": "mainAssetParam",
     "placement_blocked": "placementBlocked",
     "spawn_class": "spawnClass",
+    "spawn_subtype": "spawnSubtype",
 }
 
 

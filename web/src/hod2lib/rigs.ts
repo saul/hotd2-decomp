@@ -235,6 +235,15 @@ export interface Rig {
    * rig with a class can be placed at every spawn descriptor of that class.
    */
   spawnClass?: number | null;
+  /**
+   * Place the rig only at spawns of {@link spawnClass} whose `desc+0x22` --
+   * `obj+0x11C`, the subtype a class installer switches on -- is this, and at
+   * each such descriptor **once**, however many blocks respawn it. For a rig
+   * whose pose the port's own actor owns, the root is the actor's: one per
+   * spawn address, tagged `hod2_spawn_at`, placed by `render/rigs.ts` from the
+   * actor every frame.
+   */
+  spawnSubtype?: number | null;
   parts?: RigPart[];
   note?: string;
 }
@@ -487,8 +496,16 @@ export async function resolveForStage(
       blocked.push(rig);
       continue;
     }
-    const placed = rig.spawnClass !== undefined && rig.spawnClass !== null
+    let placed = rig.spawnClass !== undefined && rig.spawnClass !== null
       ? placements.get(rig.spawnClass) ?? [] : [];
+    if (rig.spawnSubtype !== undefined && rig.spawnSubtype !== null) {
+      const seen = new Set<unknown>();
+      placed = placed.filter((sp) => {
+        if (sp.hp !== rig.spawnSubtype || seen.has(sp.at)) return false;
+        seen.add(sp.at);
+        return true;
+      });
+    }
     if (!routes.length && !fixed.length && !world && !placed.length) continue;
 
     const parts: PartModels[] = [];

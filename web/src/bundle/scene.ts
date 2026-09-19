@@ -201,7 +201,7 @@ export interface BreakablePlacement {
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door";
+    | "rising_door" | "flicker_light";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -298,6 +298,11 @@ export interface BreakablePlacement {
   pos?: [number, number, number];
   /** BAMS. */
   yaw?: number;
+  /**
+   * `flicker_light` only -- every asset slot `PropUpdateType48FlickerLight`
+   * draws, so `tools/verify_prop_slots.py` can hold the bundle to them.
+   */
+  slots?: number[];
 }
 
 /**

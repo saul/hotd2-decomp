@@ -45,6 +45,11 @@ import {
 import { TYPE43_EFFECT7_RISE, TYPE43_EFFECT7_SLOT }
   from "../game/class41/type43";
 import { TYPE13_DROP_SLOT } from "../game/class41/type13";
+import {
+  FLICKER_BROKEN, FLICKER_BROKEN_SCALE, FLICKER_DEBRIS_SCALE,
+  FLICKER_FADE_FRAMES, FLICKER_SLOT_BROKEN, FLICKER_SLOT_DEBRIS,
+  FLICKER_SLOT_WHOLE, FLICKER_WHOLE_RISE, FLICKER_WHOLE_SCALE,
+} from "../game/class41/type48";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
@@ -228,6 +233,11 @@ function PoseOrderFor(p: BreakableProp): string {
  */
 function DrawSlotFor(p: BreakableProp): number | null {
   if (p.family === PropFamily.Lift) return LIFT_CAR_SLOT;
+  // `PropUpdateType48FlickerLight`: the whole lamp, or once shot the broken
+  // one -- which it draws for the rest of its life, pieces or no pieces.
+  if (p.family === PropFamily.Type48) {
+    return (p.flags & FLICKER_BROKEN) ? FLICKER_SLOT_BROKEN : FLICKER_SLOT_WHOLE;
+  }
   // The two draw-only families each draw `obj+0x28C` and nothing else.
   if (p.family === PropFamily.DrawOnlyType53
       || p.family === PropFamily.DrawOnlyType54) return p.slot;
@@ -276,6 +286,9 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // `PropUpdateType13` (`FUN_00467F50`) is two `AssetDrawSlot` calls and
   // neither is a shadow.
   if (p.family === PropFamily.Type13) return null;
+  // Nor does `PropUpdateType48FlickerLight`: a lamp, and three draws, none a
+  // shadow.
+  if (p.family === PropFamily.Type48) return null;
   if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
   return KIND_SHADOW[p.kind] ?? null;
 }
@@ -304,6 +317,8 @@ interface Live {
    * the second draw on the first's matrix.
    */
   second?: Object3D | null;
+  /** `PropUpdateType48FlickerLight`'s thirty pieces, built on the break. */
+  debris?: Object3D[];
 }
 
 /** The slot of a routine's second, independently placed draw, if it has one. */
@@ -371,6 +386,7 @@ export class BreakableLayer implements System<RenderContext> {
         l.node.removeFromParent();
         l.shadow?.removeFromParent();
         l.second?.removeFromParent();
+        for (const d of l.debris ?? []) d.removeFromParent();
       }
       this.nodes.clear();
     });
@@ -410,6 +426,7 @@ export class BreakableLayer implements System<RenderContext> {
       if (l && l.slot !== slot) {
         l.node.removeFromParent();
         l.second?.removeFromParent();
+        for (const d of l.debris ?? []) d.removeFromParent();
         l.shadow?.removeFromParent();
         this.nodes.delete(p.id);
         l = undefined;
@@ -446,7 +463,9 @@ export class BreakableLayer implements System<RenderContext> {
         ? TYPE43_EFFECT7_RISE : 0;
       l.node.position.set(p.x + sx, p.y + rise, p.z + sz);
       l.node.rotation.set(0, 0, 0);
-      if (p.family === PropFamily.Type13) {
+      if (p.family === PropFamily.Type48) {
+        this.poseFlicker(l, p);
+      } else if (p.family === PropFamily.Type13) {
         // `AssetDrawSlot(obj+0x28C)` under no matrix of its own: the panel is
         // modelled in world space. Then `Translate(x, y, z + obj+0x1C8)` for
         // the part that falls -- `vz` is the landing judder for this type.
@@ -511,7 +530,50 @@ export class BreakableLayer implements System<RenderContext> {
       l.node.removeFromParent();
       l.shadow?.removeFromParent();
       l.second?.removeFromParent();
+      for (const d of l.debris ?? []) d.removeFromParent();
       this.nodes.delete(id);
+    }
+  }
+
+  /**
+   * `PropUpdateType48FlickerLight`'s draw. Whole: `Translate(x, y + 2, z);
+   * RotY(yaw); Scale(3)`. Broken: `Translate(x, y, z); RotY(yaw); Scale(2)`,
+   * and for the first ninety frames each piece at its own position under
+   * `RotZ; RotY; RotX; Scale(0.5)`, slot `0xCA5 + i`.
+   */
+  private poseFlicker(l: Live, p: BreakableProp): void {
+    const broken = (p.flags & FLICKER_BROKEN) !== 0;
+    l.node.rotation.set(0, p.yaw * BAMS_TO_RAD, 0);
+    if (!broken) {
+      l.node.position.set(p.x, p.y + FLICKER_WHOLE_RISE, p.z);
+      l.node.scale.setScalar(FLICKER_WHOLE_SCALE);
+      return;
+    }
+    l.node.position.set(p.x, p.y, p.z);
+    l.node.scale.setScalar(FLICKER_BROKEN_SCALE);
+    const f = p.flicker;
+    if (!f) return;
+    if (!l.debris) {
+      l.debris = [];
+      for (let i = 0; i < f.debris.length; i++) {
+        const c = this.clone(FLICKER_SLOT_DEBRIS + i) ?? new Group();
+        c.scale.setScalar(FLICKER_DEBRIS_SCALE);
+        c.rotation.order = "ZYX";
+        this.group.add(c);
+        l.debris.push(c);
+      }
+    }
+    const flying = f.brokenFrames < FLICKER_FADE_FRAMES;
+    for (let i = 0; i < l.debris.length; i++) {
+      const c = l.debris[i];
+      const d = f.debris[i];
+      c.visible = flying && !!d;
+      if (!d) continue;
+      c.position.set(d.x, d.y, d.z);
+      // `RotZ(rz); RotY(ry); RotX(rx)` pre-multiplied: X first on the model,
+      // then Y, then Z -- three.js's "ZYX" order is exactly that product.
+      c.rotation.set(d.rx * BAMS_TO_RAD, d.ry * BAMS_TO_RAD,
+                     d.rz * BAMS_TO_RAD);
     }
   }
 

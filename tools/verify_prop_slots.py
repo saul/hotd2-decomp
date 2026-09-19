@@ -196,6 +196,11 @@ def main() -> int:
         for pl in placements:
             kind = pl.get("container")
             want: list[tuple[int, str]] = []
+            if kind == "flicker_light":
+                # Class 0x41 type 48: the whole, broken and debris models
+                # PropUpdateType48FlickerLight draws, carried on the placement.
+                for slot in pl.get("slots") or []:
+                    want.append((slot, "a model PropUpdateType48FlickerLight draws"))
             if kind == "rising_door":
                 slot = pl.get("slot") or 0
                 if slot:

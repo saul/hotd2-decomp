@@ -35,9 +35,10 @@ import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
-import { CARRIER_SELECTORS_PORTED } from "../game/class13/state";
+import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
+  from "../game/class13/state";
 import { f32, i16, i32, u32 } from "./bytes";
-import { BODY_CREATURE_SLOTS } from "./combat";
+import { BODY_CREATURE_SLOTS, CARRIED_PROP_SLOTS } from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
 import * as charmotion from "./charmotion";
 import * as degraded from "./degraded";
@@ -201,6 +202,18 @@ export const GENERIC_STATIC_SLOTS: Record<number, number[]> = {
   64: [0x1a39, 0x0c27],               // FUN_0046FBE0
   77: [0x10ab],                       // FUN_004717A0, Original Mode only
 };
+
+/**
+ * Class 0x41 type 48 -- `PlaceFlickerLightProp48` (`FUN_00463B20`) builds it,
+ * not `PlaceGenericProp`, so it is its own container. What
+ * `PropUpdateType48FlickerLight` (`FUN_0046DDE0`) draws: the whole prop
+ * `0x17AC`, the broken one `0x17AD`, and thirty debris pieces
+ * `0xCA5 + i`.
+ */
+export const FLICKER_LIGHT_TYPE = 48;
+export const FLICKER_LIGHT_SLOTS: number[] = [
+  0x17ac, 0x17ad, ...Array.from({ length: 30 }, (_, i) => 0xca5 + i),
+];
 
 /** Types whose routine draws only an effect, never a static model. */
 export const GENERIC_NO_MODEL = [18, 25, 28];
@@ -368,6 +381,16 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           set_size: rec.orient[0],
           lifetime_evt_steps: rec.hp & 0xff,
           pos: [...rec.pos], yaw: rec.orient[1],
+        });
+      } else if (ctor === FLICKER_LIGHT_TYPE) {
+        // `PlaceFlickerLightProp48`: its own constructor. `+0x11C` (the
+        // descriptor's hit-point word) is the lifetime in evt steps; the
+        // position and yaw are the placer's.
+        out.push({
+          at: rec.offset, container: "flicker_light",
+          lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos], yaw: rec.orient[1],
+          slots: FLICKER_LIGHT_SLOTS,
         });
       } else if (generic.has(ctor)) {
         // Everything else `PlaceGenericProp` builds. The prologue writes
@@ -798,6 +821,33 @@ export function bodyCreatureDrawSlots(
 }
 
 /**
+ * The asset slots a stage's **carried props** are drawn with.
+ *
+ * `ZombieStateCarryProp` (`FUN_0045B380`) allocates an object with no class
+ * id and `CarriedPropInit` (`FUN_00442740`) picks its type out of the state-37
+ * script's `+0x00`, so the slot is a property of the script and not of any
+ * class or character. They ride `slots_effect` because the prop is drawn in
+ * two spaces -- world while it is held and thrown, the camera's once it has
+ * hit (`CarriedPropStuckToScreen`, `FUN_00444160`) -- and `render/effects.ts`
+ * is the layer that holds a group in each. See `game/carried_prop.ts`.
+ */
+export function carriedPropDrawSlots(
+    placements: readonly Record<string, unknown>[]): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    for (const k of ["target_script", "attack_script"]) {
+      const s = p[k] as { state?: number; head?: { prop_type?: number } }
+        | null | undefined;
+      if (s?.state !== 37) continue;
+      for (const slot of CARRIED_PROP_SLOTS[s.head?.prop_type ?? -1] ?? []) {
+        if (!out.includes(slot)) out.push(slot);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * The asset slots a stage's class-0x33 **selector-4 descriptors** ask for.
  *
  * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
@@ -860,6 +910,13 @@ export function scriptedPropDrawSlots(
     const slot = t?.slot;
     if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
       out.push(slot);
+    }
+    // ...and every slot the carrier routine draws beside the prop: the wake,
+    // selector 0's splash, selector 1's strip and bow effect.
+    if (t?.behaviour === 8) {
+      for (const s of CarrierDrawSlots(t.selector ?? -1)) {
+        if (!out.includes(s)) out.push(s);
+      }
     }
   }
   return out;
@@ -1055,6 +1112,12 @@ export async function breakableSlotEntry(
         const slot = (pl.slot as number) + i;
         if (!want.includes(slot)) want.push(slot);
       }
+    }
+  }
+  for (const pl of placements) {
+    if (pl.container !== "flicker_light") continue;
+    for (const slot of FLICKER_LIGHT_SLOTS) {
+      if (!want.includes(slot)) want.push(slot);
     }
   }
   // Class 0x44 selector 11 draws its descriptor's slot and nothing else, so
@@ -1368,8 +1431,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
      ...scriptedPropDrawSlots(charPlaces)],
     cache);
-  const eff = await effectSlotEntry(stage, cache,
-                                   bodyCreatureDrawSlots(charDefs.keys()));
+  const eff = await effectSlotEntry(stage, cache, [
+    ...bodyCreatureDrawSlots(charDefs.keys()),
+    ...carriedPropDrawSlots(charPlaces as unknown as Record<string, unknown>[]),
+  ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);

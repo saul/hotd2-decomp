@@ -18185,6 +18185,145 @@ Named: `PropUpdateType13` (`0x00467F50`), `PropUpdateType35` (`0x0046B320`),
 (`0x0057727C`), `g_bams_to_rad` (`0x004C4370`). Ported with
 `g_scene_tick_counter` (`0x009A2BAC`), which the port did not have.
 
+### Follow-up: every stage-3 carrier moves, and the boat has one pose
+
+The class-0x18 motion rule made riders exist everywhere, so every carrier they
+ride has to move. Stage 3's bundle builds two class-0x13 boats: block 0's
+(selector 1, ported) and block 7 step 10's (evt 29240, selector 6), carrying
+civilian 29072 and its captor 29136. `CarrierPropRoutine6` (`0x004413C0`, not
+a Ghidra function until now) is ported: routine 1's eight states on `op_`
+paths 352/353, fork at `0x635`, moor at `0x6AE`, and a run-past arm arranged
+differently from routine 1's — fade at `0x668`, splash at `0x6A4`, and the
+`0x400000` bit raised with the state change rather than ten frames later.
+Harness (entry 7, block 7 step 10): the boat rides from x -590 to -489 and
+moors, civilian and captor aboard; screenshot read.
+
+**A regression I introduced and caught here.** Making spawns in the script's
+order walked the walker's list — and a civilian's captors are in no list:
+`CivilianInit` makes them itself. So the first cut built **no captor anywhere**
+(fifty zombies holding hostages). Captors now come straight after the spawn
+that holds them (`CharacterSpawnRequest.parentAt`), and the test fails
+without it.
+
+**The boat's pose is computed once.** `render/rigs.ts` ran its own copy of
+`Class26Subtype2Update`'s camera-path switch off the rig table; the rig entry
+(`tools/hod2lib/rigs.py`, generated into `rigs_data.ts`) now has no routes and
+`spawn_class=0x26, spawn_subtype=2`, so the exporter emits one root per spawn
+and the rig layer places it from the class-0x26 actor. Consequence worth
+knowing: a **paused** deep link shows actors before their first tick, so the
+boat now sits at its descriptor there, like every other actor, instead of
+being posed off the camera by the renderer.
+
+The builder hash did not cover `game/class13/state.ts`, which
+`hod2lib/bundle.ts` reads to decide which class-0x13 models a bundle carries
+(`L24`): porting a routine changed a bundle with no stamp moving.
+`gen_builder_hash.py` now also digests the `game/` modules `hod2lib/` imports.
+
+Left `[open]`: stage 4's carrier routines (`0x004408A0`, `0x00440AD0`,
+`0x00440C20`, `0x00441000`, selectors 2..5 and 7..9), whose seven boats carry
+the stage-4 boss and civilians; the bundle keeps their models out.
+### Follow-up, the same day: the wakes, the splashes, and a civilian's children
+
+Ported the carrier draws that were declared or missing: selector 0's wake and
+splash, selector 1's ground wake (`CarrierDrawGroundWake`, `0x00440770`), its
+state-5/6 strip and its bow effect (`SpawnPropStripEffect` `0x0043FCA0` /
+`PropStripEffectUpdate` `0x0043FBC0`, a small slot-strip object with ten
+callers — only the carrier's is wired). Selector 1's two `[diverges]` for
+these are gone.
+
+**Wrong turn.** The decompiler's `CarrierPropRoutine1` has states 5/6 and the
+0x550 arm ending in `return` after `MatrixStackPop` — `L37` again. The
+disassembly shows both jump back into the shared tail (`0x00440469` /
+`0x00440467`), so the wake fade and the frame step run on those frames too;
+the existing port already had that right, and reading the pseudocode alone
+would have "fixed" it wrong.
+
+**Wrong turn two.** After the merge the zombie still did not ride, and the
+first suspicion was the class-0x18 motion row the boat work added. The
+hierarchy was in the bundle with motion 956; the actor was never made.
+`syncCharacterSpawns` now walks the walker's list to keep script order, and a
+civilian's children are only in `readySpawns` — so every civilian child in the
+game had stopped being built, block 5's captors included. Children are built
+straight after their parent now, with a `parentAt` on the request.
+
+Draw timing: a routine draws a cel and then steps it, and `game/` runs before
+`render/`, so the tail carries `wakeDrawn`/`splashDrawn`/`stripDrawn` — what
+was drawn this frame — rather than have the renderer draw the cursor a frame
+ahead or step it backwards.
+## The drum-throwers on stage 3's bridge, and stage 1's barrel man (bugs 3 and 11)
+
+Report: stage 3 block 3 step 6 should have "a fat zombie (or two) on the bridge
+throwing barrels", and there was nothing there. Second report, from the
+civilians workstream: stage 1 (original) block 6 step 1's zombie holding a
+barrel over a civilian throws before the player arrives.
+
+**Cause.** Both are class 0x30 state 37, `ZombieStateCarryProp`
+(`FUN_0045B380`), which the port ran as the maul. The maul reads the list at
+`+0x38` and so skipped the script's 0x38-byte header -- whose last eight bytes
+are the carry clip's own entry (271, loops 4/3/2) -- played the throw at once
+with nothing in the hands, ended the script and retired the actor through state
+38 while the camera was still approaching. `[proved]` by the decompilation and
+the replay (`CarryProp` -> `RetireOffScreen` inside two seconds).
+
+**What the state is.** Sub 0 allocates a 0x19C-byte classless object,
+`CarriedPropInit` (`FUN_00442740`), typed by the header's `+0x00` out of
+`g_carried_prop_types` (`0x005644D8`, three 0x28-byte records: radii, sounds,
+hit points and one draw slot per remaining hit point; type 1 is `dolam.bin`'s
+drum). The carrier loops the header entry, and with release mode 4 claims the
+player's attack permit -- replaying 271 while it is taken -- then writes the
+release mode into the prop on the throw entry's cue frame. The prop's routines
+come from `g_prop_behaviours`, the table class 0x13 shares: 1 held between
+bones 4 and 7 (`CarriedPropSeatBetweenBones`), 4 a ballistic arc to fifteen
+units in front of the camera (`CarriedPropThrowAtCamera`) that costs a life on
+arrival and sticks to the lens for ninety frames, 3 a drop onto the target's
+head (`CarriedPropThrowAtTarget`, stage 1), 5 a roll (stage 2, not ported).
+Three hits break a drum (`CarriedPropCheckShot`), and the break arm shares a
+tail with the deflect arm, past the end of Ghidra's body (L37), that gives the
+permit back and plays the break sound.
+
+**Spaces.** `0x009A6000` is world-to-view and `g_camera_blocks` (`0x009A6040`)
+its inverse: `FishProjectToScreen` writes the view-space `obj+0x70` through the
+first and `CarriedPropRelease` takes a view-space matrix to the world through
+the second. `[proved]`. `game/body_creature.ts`'s `[open]` note calls
+`g_camera_blocks + 0x00` the world-to-view matrix, which on this reading is the
+other one; it is not changed here.
+
+**Also found.**
+* `wait_targets_clear` (0x47, `EvtOpWaitTargetsClear47`) passed on sight. It
+  is `(g_camera_settled || g_camera_free) && g_camera_candidate_count == 0`,
+  and carried props register for camera tracking, so it is what keeps the
+  camera on the bridge until the second drum has been thrown. Now real.
+* `VecToAngles`' pitch had the wrong sign and no reader; it is the exe's now.
+* After merging main, **no civilian captor in the game was being made**:
+  6da5fab (the boats) iterated the walker's spawn list for order, and
+  `CivilianInit`'s children are not in it. Fixed in `syncCharacterSpawns`,
+  children straight after their parent, with a failing-then-passing test.
+* `tools/playthrough.mjs` now fires at, and debug-clears, a `targets` gate the
+  way it does an enemy gate: stage 3 block 0 step 6's `wait_targets_clear`
+  holds for the two class-0x18 boat riders, which it used to skip. Stage 3
+  still hangs at block 1 step 1 (`wait_enemies_alive`, a rider in AttackRun)
+  and stage 2 at block 11 -- **both identically on main e2bf904**, checked in a
+  detached worktree against main's own bundle; with the captor fix stage 2
+  now gets to block 16 instead.
+
+**Wrong turns.** I first read `g_camera_blocks` as world-to-view from the
+body-creature note and could not make the flight's `-15.0` arrival test mean
+anything; the fish's projection settled it. The first bridge drive "found"
+no zombies because the harness had not pressed play. The first stage-1 drive
+showed no captors at all, which I nearly filed as a seek problem; it was the
+spawn-order regression above. The first behaviour-3 test failed because the
+fixture's victim zombie ran off in its own attack run.
+
+**Open.** Behaviour 5 (`CarriedPropRollAtCamera`) and a dropped prop
+(`CarriedPropFallFree`, `CarriedPropGroundContact`) are not ported -- the prop
+stays in the pool undrawn and unshot; the break effect's draw
+(`0x0040DD90`); carried props are counted as camera candidates but not aimed
+at (the slot list is actors-only); `DAT_009A2234`, the Training word state 37
+tests; the per-part draw of a type-2 prop. The held prop's seat uses the
+bone's world matrix times the camera's, which is the product the engine's
+draw record holds `[likely]` -- up to the bone frames the exporter emits
+matching the engine's.
+
 ## 2026-09-19 — bug 14, the gun lights (flashlight)
 
 Read `BuildEntitySpotlightArray` (`FUN_00480AC0`) from the disassembly: its
@@ -18216,3 +18355,19 @@ exactly hidden behind their casters, so the renderer offsets the lamp
 (`[diverges]`, presentation). And the zombie in the user's shot was not lit
 until `EnemyZombieInit` seeded `obj+0x136C` from the descriptor, which the
 port's own comment had flagged as the gap.
+
+Follow-up, same day: merged main (6bca278). The bridge work had also fixed
+`VecToAngles`' pitch sign; kept main's version (it recovers the horizontal
+length through the truncated s16 yaw, as the engine does) and dropped mine, so
+the pitch is negated once. The gun-light test now allows BAMS rounding.
+
+Ported class 0x41 type 48. Ghidra had its update (`FUN_0046DDE0`, created last
+session) but not its constructor, which is not `PlaceGenericProp`: the ctor
+table entry is `0x00463B20`, now `PlaceFlickerLightProp48`. That is why no
+bundle carried the one shipped spawn — the exporter's `containerPlacements`
+only recognised generic ctors. The decompile of the update misleads twice
+(L35): the shot registration at `0x0046E151` and the debris loop's tail are
+outside the body, so it reads as though the whole lamp is never shootable and
+the broken lamp is not drawn while the pieces fly. It is 30 pieces, not the 24
+I first wrote from the decompile's loop bound; the disassembly's
+`CMP EBP, 0x1E` settles it.

@@ -217,6 +217,22 @@ export const BODY_CREATURE_SLOTS: Record<number, readonly number[]> = {
   0x0a: Array.from({ length: 0x28 }, (_, i) => 0x1d31 + i),
 };
 
+/**
+ * The draw slots of the three carried-prop types, by type — the s16 run
+ * `g_carried_prop_types` (0x005644D8) holds from record +0x22, indexed by the
+ * prop's remaining hit points. `CarriedPropInit` (`FUN_00442740`) draws
+ * `s16[0x10 + hp]` and `CarriedPropCheckShot` (`FUN_004423F0`) moves it down
+ * one per hit, so every one of them can be on screen. Read out of `.rdata`:
+ * type 0 `0200 e719 e919`, type 1 `0300 530a 540a 570a`, type 2 `0100 9603`
+ * (the first short is the hit points). Type 1 is `dolam.bin`'s drum.
+ * `CARRIED_PROP_TYPES` in `game/carried_prop.ts` is the port's copy.
+ */
+export const CARRIED_PROP_SLOTS: Record<number, readonly number[]> = {
+  0: [0x19e7, 0x19e9],
+  1: [0x0a53, 0x0a54, 0x0a57],
+  2: [0x0396],
+};
+
 export const ZOMBIE_THROW_SPEED_STANDING = 1.5;
 export const ZOMBIE_THROW_SPEED = 1.0;
 export const ZOMBIE_THROW_AIM_DROP = 1.5;

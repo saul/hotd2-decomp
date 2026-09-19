@@ -786,7 +786,7 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
 {
   const RIGS = {
     rigs: [{
-      name: "obj_48ead0", routine: "FUN_0048EAD0", note: "",
+      name: "obj_48f050", routine: "FUN_0048F050", note: "",
       routes: [
         { slot: 342, bias: [0, 2, 0] as [number, number, number],
           cam_paths: [124], file: null, index: null, duration: null,
@@ -807,8 +807,8 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
     return o;
   };
   const root = new Group();
-  const boatA = rigRoot("obj_48ead0", 342);
-  const boatB = rigRoot("obj_48ead0", 343);
+  const boatA = rigRoot("obj_48f050", 342);
+  const boatB = rigRoot("obj_48f050", 343);
   // Two spawns of one character skin -- the shape that made this matter. The
   // exporter puts every character through the rig writer, so `chr_` roots
   // carry `hod2_kind: "rig"` too, and stage 3 has 135 of them against nine
@@ -841,7 +841,10 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
   // Where a rig is *before its first shot*, which is the thing the header's
   // `[diverges]` claims and the code did not do.
   //
-  // `Class26Subtype2Update` (`FUN_0048EAD0`) reaches its draw through
+  // (This was stage 3's boat, `Class26Subtype2Update`, until the port gave
+  // that routine an actor -- see the next block. The route logic it pinned
+  // down is every other rig's, and `FUN_0048F050` has the same `default:`.)
+  // A routine like this reaches its draw through
   // `default:` on any camera path its switch does not name, and that arm
   // writes no pose at all -- the object is wherever the spawn descriptor put
   // it, which for every rig the six stages carry is a zero position with a
@@ -880,7 +883,7 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
   check("the shot's own route is the one drawn",
         boatA.visible && !boatB.visible);
 
-  // `FUN_0048EAD0`'s `default:` skips the pose and still draws. The old rule
+  // `FUN_0048F050`'s `default:` skips the pose and still draws. The old rule
   // held the instance only once `frozen`, so the boat vanished on every shot
   // outside the table -- which is most of stage 3's opening.
   const wasX = boatA.position.x;
@@ -961,6 +964,54 @@ console.log("\nrigs: a rig a spawn installs is not drawn before that spawn");
   rigs.update(ctx([5116, 27660], 163));
   check("...and forgets the pose, so it comes back at its spawn pose",
         lift.visible && lift.position.x === 0, `${lift.position.x}`);
+}
+
+console.log("\nrigs: the boat the port's actor poses");
+{
+  // `Class26Subtype2Update` (`FUN_0048EAD0`) is `game/class26/`, and the rig
+  // layer no longer runs its own copy of that routine's camera-path switch:
+  // the root is one per spawn, tagged `hod2_spawn_at`, drawn while the actor
+  // is in the pool and placed from it. This used to be a table of routes in
+  // `rigs_data.ts` evaluated here a second time.
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { ActorSpawn } = await import("../src/game/director");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  ResetGameGlobals();
+  const RIGS = {
+    rigs: [{ name: "obj_48ead0", routine: "FUN_0048EAD0", note: "",
+             routes: [], spawn_class: 0x26 }],
+    blocked: [], note: "",
+  };
+  const boat = new Group();
+  boat.userData = { hod2_kind: "rig", hod2_rig: "obj_48ead0",
+                    hod2_spawn_at: 3244, hod2_spawn_class: 0x26 };
+  const root = new Group();
+  root.add(boat);
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never,
+             new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never));
+  const at = { walker: { cam: { slot: 124, frame: 855 } } } as unknown as
+    Parameters<typeof rigs.update>[0];
+  rigs.update(at);
+  check("with no class-0x26 actor in the pool the boat is not drawn",
+        !boat.visible);
+  const a = ActorSpawn(3244, SpawnClass.Vehicle, -1, "boat", { hp: 2 });
+  a.pos.x = -1115; a.pos.y = -17; a.pos.z = -2668;
+  a.yaw = 0x4000;
+  rigs.update(at);
+  check("with one, the root is drawn at the actor's position",
+        boat.visible && boat.position.x === -1115 && boat.position.y === -17
+        && boat.position.z === -2668,
+        `${boat.visible} ${boat.position.x},${boat.position.y},${boat.position.z}`);
+  const fwd = new Vector3(0, 0, 1).applyQuaternion(boat.quaternion);
+  check("...turned by the actor's yaw (a quarter turn takes +z to +x)",
+        Math.abs(fwd.x - 1) < 1e-6 && Math.abs(fwd.z) < 1e-6,
+        `${fwd.x},${fwd.z}`);
+  a.despawned = true;
+  rigs.update(at);
+  check("...and gone when the actor is", !boat.visible);
+  ResetGameGlobals();
+  void G;
 }
 
 console.log("\nthe object-path seam carries six values");

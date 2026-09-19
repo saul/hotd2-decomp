@@ -17,12 +17,14 @@
  */
 import type { BloodSpray, PointBloodSpray } from "./effects/blood";
 import type { BodyCreature } from "./body_creature";
+import type { CarriedProp } from "./carried_prop";
 import type { SeveredHead } from "./effects/severed_head";
 import type { ShotFlash, ShotTracer, ShotWeaponEffect }
   from "./effects/shot_effects";
 import { makeShotFlashRing, makeShotTracerRing, makeShotWeaponRing }
   from "./effects/shot_effects";
 import type { SpriteEffect } from "./effects/sprite";
+import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
@@ -436,6 +438,15 @@ export const G = {
   /** `[port-only]` — see {@link BodyCreature.id}. */
   g_body_creature_seq: 0,
   /**
+   * `[port-only]` — the props class-0x30 zombies in state 37 are carrying or
+   * have thrown. `ZombieStateCarryProp` (`FUN_0045B380`) allocates each one
+   * as a task with no class id, so this is a pool of plain records for the
+   * same two reasons `g_body_creatures` is. See `game/carried_prop.ts`.
+   */
+  g_carried_props: [] as CarriedProp[],
+  /** `[port-only]` — see {@link CarriedProp.id}. */
+  g_carried_prop_seq: 0,
+  /**
    * `[port-only]` — the blood `SpawnBloodSprayAtPoint` (`FUN_00430C50`) has
    * put at a point rather than on a bone. `game/effects/blood.ts`.
    */
@@ -450,6 +461,13 @@ export const G = {
   g_sprite_effects: [] as SpriteEffect[],
   /** `[port-only]` — see {@link SpriteEffect.id}. */
   g_sprite_effect_seq: 0,
+  /**
+   * `[port-only]` — the slot-strip objects `SpawnPropStripEffect`
+   * (`FUN_0043FCA0`) has allocated. `game/effects/prop_strip.ts`.
+   */
+  g_prop_strip_effects: [] as PropStripEffect[],
+  /** `[port-only]` — see {@link PropStripEffect.id}. */
+  g_prop_strip_effect_seq: 0,
   /**
    * `[port-only]` — the blood `SpawnBloodSpray` (`FUN_00407310`) and
    * `SpawnBoneHitSprite` (`FUN_00407200`) have allocated. Each one holds an
@@ -642,6 +660,14 @@ export const G = {
    * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
    */
   g_enemy_slots: [] as number[],
+  /**
+   * `g_camera_candidate_count` — 0x009CA93C. How many objects called
+   * `RegisterForCameraTracking` (`FUN_00408EC0`) this frame: the actors
+   * `UpdateCameraEnemySlots` ranks **and** the carried props, which register
+   * too but which `g_enemy_slots` cannot hold (see `game/carried_prop.ts`).
+   * `EvtOpWaitTargetsClear47` (`FUN_0045FD20`) waits for it to reach zero.
+   */
+  g_camera_candidate_count: 0,
 
   // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
   /**
@@ -1340,12 +1366,16 @@ export function ResetGameGlobals(): void {
   G.g_severed_head_seq = 0;
   G.g_sprite_effects = [];
   G.g_sprite_effect_seq = 0;
+  G.g_prop_strip_effects = [];
+  G.g_prop_strip_effect_seq = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
   G.g_point_blood_sprays = [];
   G.g_point_blood_spray_seq = 0;
   G.g_body_creatures = [];
   G.g_body_creature_seq = 0;
+  G.g_carried_props = [];
+  G.g_carried_prop_seq = 0;
   G.g_shot_flash_ring = makeShotFlashRing();
   G.g_shot_tracer_ring = makeShotTracerRing();
   G.g_shot_weapon_ring = makeShotWeaponRing();
@@ -1371,6 +1401,7 @@ export function ResetGameGlobals(): void {
   // first gate of the new one.
   G.g_evt_wait_alive_hysteresis = 0;
   G.g_enemy_slots = [];
+  G.g_camera_candidate_count = 0;
   G.g_water_level = -24.9;
   G.g_water_attack_slots = [0, 0, 0, 0];
   G.g_summoned_actor_at = -1;

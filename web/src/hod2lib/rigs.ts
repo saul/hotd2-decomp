@@ -236,10 +236,15 @@ export interface Rig {
    */
   spawnClass?: number | null;
   /**
-   * `[spawn class, obj+0x11C]` of the spawns whose class handler installs
-   * this routine -- see `installed_by` in `tools/hod2lib/rigs.py`.
+   * `obj+0x11C` of the spawns of {@link spawnClass} whose class handler
+   * installs this routine -- the one answer to "which spawn owns this rig";
+   * see `spawn_subtype` in `tools/hod2lib/rigs.py`. Every such rig carries
+   * the matching spawns' addresses as {@link RigInstance.spawnAts}, and the
+   * player draws it only once one has run. A rig with no route and no fixed
+   * pose is also placed once per matching spawn, tagged `hod2_spawn_at`, and
+   * `render/rigs.ts` poses that root from the port's actor every frame.
    */
-  installedBy?: [number, number] | null;
+  spawnSubtype?: number | null;
   parts?: RigPart[];
   note?: string;
 }
@@ -327,7 +332,7 @@ export interface RigInstance {
   placements: Record<string, unknown>[];
   /**
    * The script addresses of the spawns that install this routine, or `null`
-   * for a rig nothing links to a spawn. See {@link Rig.installedBy}.
+   * for a rig nothing links to a spawn. See {@link Rig.spawnSubtype}.
    */
   spawnAts?: number[] | null;
   /** Only prop rigs carry these; see `props.rigEntries`. */
@@ -497,8 +502,23 @@ export async function resolveForStage(
       blocked.push(rig);
       continue;
     }
-    const placed = rig.spawnClass !== undefined && rig.spawnClass !== null
+    let placed = rig.spawnClass !== undefined && rig.spawnClass !== null
       ? placements.get(rig.spawnClass) ?? [] : [];
+    // `spawnSubtype` is the one answer to "which spawn owns this rig": every
+    // matching spawn's address goes out as `spawnAts`, and only a rig nothing
+    // else poses -- no route, no fixed pose -- is also placed once per spawn
+    // for the port's actor to pose.
+    let spawnAts: number[] | null = null;
+    if (rig.spawnSubtype !== undefined && rig.spawnSubtype !== null) {
+      const seen = new Set<unknown>();
+      placed = placed.filter((sp) => {
+        if (sp.hp !== rig.spawnSubtype || seen.has(sp.at)) return false;
+        seen.add(sp.at);
+        return true;
+      });
+      spawnAts = placed.map((sp) => sp.at as number);
+      if (routes.length || fixed.length) placed = [];
+    }
     if (!routes.length && !fixed.length && !world && !placed.length) continue;
 
     const parts: PartModels[] = [];
@@ -518,15 +538,6 @@ export async function resolveForStage(
         if (rec[1] < ms.length) models.push([ms[rec[1]], bank, stem]);
       }
       if (models.length) parts.push([part, models]);
-    }
-    // The spawns whose handler installs this routine: `obj+0x11C` is the
-    // descriptor's `+0x22`, which `evt.Spawn.hp` already is.
-    let spawnAts: number[] | null = null;
-    if (rig.installedBy) {
-      const [cls, sub] = rig.installedBy;
-      spawnAts = (spawnRecords ?? [])
-        .filter((r) => r.cls === cls && ((r.hp << 16) >> 16) === sub)
-        .map((r) => r.offset);
     }
     if (parts.length) {
       out.push({

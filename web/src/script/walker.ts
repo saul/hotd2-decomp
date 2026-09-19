@@ -188,6 +188,8 @@ export type WaitPolicy =
   | { kind: "queued" }
   /** `wait_script_flag`: blocks until `g_script_flags[index]` is raised. */
   | { kind: "flag"; index: number }
+  /** `wait_targets_clear`: blocks while anything is a camera candidate. */
+  | { kind: "targets" }
   | { kind: "passed"; why: string };
 
 export interface PendingWait {
@@ -309,6 +311,13 @@ export interface WalkerHost {
    * swung back onto the path. Without it every room hands over abruptly.
    */
   cameraFree(): boolean | null;
+  /**
+   * `wait_targets_clear` (0x47)'s condition — `(g_camera_settled ||
+   * g_camera_free) && g_camera_candidate_count == 0` — or `null` when this
+   * client has no camera or object pool to ask. Optional, so a walker-only
+   * host that has neither passes the gate, as `WAIT_NOTES` says.
+   */
+  cameraTargetsClear?(): boolean | null;
   /**
    * evt `0x2D`: start a dialogue group's voice, and say how long it runs.
    *

@@ -222,10 +222,14 @@ at `obj+0x11C` (the descriptor's `+0x22`) and stores the subtype's routine at
 3 → `FUN_0048F050` (`obj_48f050`), 4 → `FUN_0048F190` (after one call to
 `FUN_00475A50`), 5 → `FUN_0048F560`, 6/7 → `FUN_0048F930`. So each of those
 rigs **exists from the frame its spawn opcode runs**, and not before.
-`tools/hod2lib/rigs.py` records this as `installed_by = (0x26, n)`; the bundle
+`tools/hod2lib/rigs.py` records this as `spawn_class=0x26, spawn_subtype=n`
+— one field, the only answer to "which spawn owns this rig". The bundle
 resolves it to `rigs[].spawn_ats`, the script addresses of the matching
-spawns, and `render/rigs.ts` draws such a rig only once the walker has run one
-of them. Stage 4's `obj_48f050` had been drawn from stage load at its baked
+spawns, and `render/rigs.ts` draws every such rig only once the walker has run
+one of them. A rig with no route and no fixed pose — subtype 2, stage 3's boat,
+whose camera-path switch lives in `game/class26/` — is also placed once per
+spawn (`hod2_spawn_at`) and posed from that actor; the route-driven four are
+posed by their routes. Stage 4's `obj_48f050` had been drawn from stage load at its baked
 origin pose — inside the desk of block 0's opening shot (new bug 12) — while
 its one spawn is in block 12.
 

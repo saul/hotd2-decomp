@@ -40,7 +40,8 @@ export const RIGS: readonly Rig[] = [
         note: "parked: CamEvalObjectPath6(0xFE, 350.0), a literal, not the camera frame",
       },
     ],
-    installedBy: [38, 1],
+    spawnClass: 38,
+    spawnSubtype: 1,
     parts: [
       {
         name: "body",
@@ -155,81 +156,17 @@ export const RIGS: readonly Rig[] = [
   {
     name: "obj_48ead0",
     routine: "FUN_0048EAD0",
-    routes: [
-      {
-        slot: 342,
-        camPaths: [124],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 343,
-        camPaths: [125],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 344,
-        camPaths: [126],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 345,
-        camPaths: [127],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 346,
-        camPaths: [130],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 347,
-        camPaths: [133],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 348,
-        camPaths: [134],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 349,
-        camPaths: [135],
-        bias: [0.0, 2.0, 0.0],
-        note: "pose.y is biased by the literal 2.0 at 0x004E30F0 before the rotations, so it is baked into the anchor",
-      },
-      {
-        slot: 409,
-        camPaths: [246],
-        bias: [0.0, 2.0, 0.0],
-      },
-      {
-        slot: 409,
-        camPaths: [247],
-        bias: [0.0, 2.0, 0.0],
-      },
-      {
-        slot: 409,
-        camPaths: [248],
-        bias: [0.0, 2.0, 0.0],
-      },
-    ],
-    installedBy: [38, 2],
+    spawnClass: 38,
+    spawnSubtype: 2,
     parts: [
       {
         name: "part_1a37",
         slots: [6711],
-        animated: "Root Y rotation is overridden while the latch obj+0x1350 is set: obj+0x68 becomes the live camera yaw (0x009A6040 + cam*0x1A4 + 0x90) + 0x8000, i.e. the part turns to face 180 deg from the camera. The latch is toggled at hardcoded frames per path -- see docs/formats/cam.md. Exported at the path pose.",
-        note: "drawn at the object root; FUN_004A8CA0 then snapshots the matrix into obj+0x150 for hit-testing, not a draw",
+        animated: "Root Y rotation is overridden while the latch obj+0x1350 is set: obj+0x68 becomes the live camera yaw (0x009A6040 + cam*0x1A4 + 0x90) + 0x8000, i.e. the part turns to face 180 deg from the camera. The latch is toggled at hardcoded frames per path -- see docs/formats/cam.md. The port's actor applies it.",
+        note: "drawn at the object root; FUN_004A8CA0 then snapshots the matrix into obj+0x150 -- the world matrix the moving-object collision passes invert",
       },
     ],
-    note: "Frame is min(g_frame, cam_path_length[slot]) -- clamped to the end of the path. On a camera path outside the table the pose is not refreshed and the object draws at whatever pose it last held.",
+    note: "Class 0x26 subtype 2. Posed by the port's actor (game/class26/): the path switch, the 2.0 bias and the face-camera latch are Class26Subtype2Update's, and this root is placed at the spawn and then from that actor every frame.",
   },
   {
     name: "obj_48f050",
@@ -250,7 +187,8 @@ export const RIGS: readonly Rig[] = [
         camPaths: [177],
       },
     ],
-    installedBy: [38, 3],
+    spawnClass: 38,
+    spawnSubtype: 3,
     parts: [
       {
         name: "part_185b",
@@ -289,7 +227,8 @@ export const RIGS: readonly Rig[] = [
         note: "hardcoded pose, no path eval",
       },
     ],
-    installedBy: [38, 4],
+    spawnClass: 38,
+    spawnSubtype: 4,
     parts: [
       {
         name: "part_8c7_145c",
@@ -368,7 +307,8 @@ export const RIGS: readonly Rig[] = [
         note: "hardcoded pose",
       },
     ],
-    installedBy: [38, 5],
+    spawnClass: 38,
+    spawnSubtype: 5,
     parts: [
       {
         name: "part_1913",

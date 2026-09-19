@@ -830,6 +830,14 @@ export enum ZombieFlag2 {
    */
   HitReactionPending = 0x200,
   /**
+   * Bit `0x1` — raised with {@link ActorFlag.HoldingWeapon} cleared, when the
+   * actor lets go of what it was holding: `ZombieStateCarryProp` does both at
+   * its release and when its prop is destroyed, the same `& 0xFEFFFFFF` on
+   * `obj+0x34` and `| 1` here both times. `ChooseDeathMotion`'s directional arm reads
+   * `obj+0x136C` bits 1, 2 and 4; `[open]` what this one selects there.
+   */
+  LetGo = 0x1,
+  /**
    * Bit `0x100` — the other half of that gate. `[open]`: nothing found raises
    * it, and `ActorSnapToGroundHeight` (0x00454B3B) is the one reader.
    *

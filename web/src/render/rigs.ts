@@ -7,6 +7,13 @@
  * transcribes the routine and the exporter instantiates it as a node
  * hierarchy. See `docs/formats/rigs.md`.
  *
+ * **One rig is not this layer's to pose.** Stage 3's boat, class 0x26 subtype
+ * 2, is a port actor (`game/class26/`) because its collision blob needs the
+ * pose in the engine; its root is one per spawn, tagged `hod2_spawn_at`, and
+ * {@link RigLayer} places it from that actor — see `ACTOR_POSED_CLASSES`. The
+ * route table this layer used to run for it was a second transcription of
+ * `Class26Subtype2Update`'s camera-path switch and is gone from the rig data.
+ *
  * What the client adds is the motion. The bundle exports rig roots
  * *unparented*, tagged `hod2_path_slot`, because it ships no baked camera or
  * object animation — the same decision the camera rails are built on. So the
@@ -92,6 +99,8 @@ import type { Context, System } from "../core/system";
 import type { CamPaths } from "../game/camera/curve";
 import { OP_CHANNELS } from "../game/camera/curve";
 import { BAMS_TO_RAD } from "../core/bams";
+import { G } from "../game/globals";
+import { SpawnClass } from "../game/spawn_class";
 
 /** BAMS -> radians. */
 
@@ -161,7 +170,29 @@ interface Instance {
    * the file for why the baked root pose is that pose.
    */
   posed: boolean;
+  /**
+   * `hod2_spawn_at`, for a root the port's own actor poses — see
+   * {@link ACTOR_POSED_CLASSES}. Such a root has no routes and is never in
+   * {@link RigLayer}'s route-driven actors.
+   */
+  spawnAt: number | null;
+  /** ...and the class that actor must be. */
+  spawnClass: number | null;
 }
+
+/**
+ * The spawn classes whose rig is posed **by the port's actor** rather than by
+ * this layer.
+ *
+ * Class 0x26 subtype 2, `Class26Subtype2Update` (`FUN_0048EAD0`), is
+ * `game/class26/`: the camera-path switch, the 2.0 bias and the face-camera
+ * latch run there, once, because the boat's collision blob needs the pose in
+ * the engine. This layer used to run its own transcription of the same switch
+ * off the rig table's routes; now the root is placed from the actor's
+ * `obj+0x40`/`+0x64`..`+0x6C` and drawn exactly while that actor is in the
+ * pool — which is also the routine's own lifetime.
+ */
+const ACTOR_POSED_CLASSES: ReadonlySet<number> = new Set([SpawnClass.Vehicle]);
 
 /** All the roots belonging to one object, across its routes. */
 interface Actor {
@@ -284,10 +315,11 @@ export class RigLayer implements System {
      * `rigs.rigs[].name` names 2–10 rigs against 45–335 tagged nodes.
      */
     const mine = new Set(json.rigs.map((r) => r.name));
+    const classOf = new Map(json.rigs.map((r) => [r.name, r.spawn_class]));
 
     root.traverse((o) => {
       const x = o.userData as { hod2_kind?: string; hod2_path_slot?: number;
-                               hod2_rig?: string };
+                               hod2_rig?: string; hod2_spawn_at?: number };
       if (x?.hod2_kind !== "rig") return;
       if (!x.hod2_rig || !mine.has(x.hod2_rig)) return;
       const slot = x.hod2_path_slot;
@@ -324,13 +356,23 @@ export class RigLayer implements System {
         frozen: false,
         frame: 0,
         posed: false,
+        spawnAt: null,
+        spawnClass: null,
       });
+      const cls = classOf.get(x.hod2_rig) ?? null;
+      if (cls !== null && ACTOR_POSED_CLASSES.has(cls)
+          && x.hod2_spawn_at !== undefined) {
+        const inst = this.instances[this.instances.length - 1];
+        inst.spawnAt = x.hod2_spawn_at;
+        inst.spawnClass = cls;
+      }
     });
 
     // Group by rig: the routes of one routine are one object taking different
     // paths, not several objects.
     const byRig = new Map<string, Actor>();
     for (const inst of this.instances) {
+      if (inst.spawnAt !== null) continue;
       let a = byRig.get(inst.rig);
       if (!a) {
         const ats = json.rigs.find((r) => r.name === inst.rig)?.spawn_ats;
@@ -365,6 +407,7 @@ export class RigLayer implements System {
    * `g_active_cam_path` dispatch: object and shot run in lockstep.
    */
   update(ctx: Context): void {
+    this.placeFromActors();
     if (!this.paths) return;
     const cam = ctx.walker?.cam;
     const camSlot = cam ? cam.slot : null;
@@ -450,6 +493,26 @@ export class RigLayer implements System {
       this.applyPartRules(show, camSlot, camFrame);
     }
     this.outline();
+  }
+
+  /**
+   * The roots the port's actors pose: drawn while the actor is in the pool,
+   * at its position under `T · Rz · Ry · Rx` of its three angles — the
+   * product `Class26Subtype2Update`'s draw builds, and the one
+   * {@link bamsEuler} spells. Reads engine state and writes only the nodes.
+   */
+  private placeFromActors(): void {
+    for (const inst of this.instances) {
+      if (inst.spawnAt === null) continue;
+      const a = G.g_object_list.find(
+        (o) => o.at === inst.spawnAt && o.cls === inst.spawnClass
+               && !o.despawned);
+      inst.root.visible = this.enabled && !!a;
+      if (!a) continue;
+      inst.root.position.set(a.pos.x, a.pos.y, a.pos.z);
+      inst.root.quaternion.setFromEuler(
+        bamsEuler(a.pitch, a.yaw, a.roll, this._e));
+    }
   }
 
   /**

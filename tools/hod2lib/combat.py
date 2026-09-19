@@ -224,6 +224,19 @@ BODY_CREATURE_SLOTS: dict[int, tuple[int, ...]] = {
     0x0A: tuple(range(0x1D31, 0x1D31 + 0x28)),
 }
 
+#: The draw slots of the three carried-prop types, by type -- the s16 run
+#: `g_carried_prop_types` (0x005644D8) holds from record +0x22, indexed by the
+#: prop's remaining hit points. `CarriedPropInit` (FUN_00442740) draws
+#: `s16[0x10 + hp]` and `CarriedPropCheckShot` (FUN_004423F0) moves it down
+#: one per hit, so every one of them can be on screen. Read out of `.rdata`:
+#: type 0 `0200 e719 e919`, type 1 `0300 530a 540a 570a`, type 2 `0100 9603`
+#: (the first short is the hit points). Type 1 is `dolam.bin`'s drum.
+CARRIED_PROP_SLOTS: dict[int, tuple[int, ...]] = {
+    0: (0x19E7, 0x19E9),
+    1: (0x0A53, 0x0A54, 0x0A57),
+    2: (0x0396,),
+}
+
 #: `ZombieThrowHandWeapon`'s two speeds for `obj+0x1370`: the stationary
 #: thrower's axe is faster than an ordinary one's.
 ZOMBIE_THROW_SPEED_STANDING = 1.5

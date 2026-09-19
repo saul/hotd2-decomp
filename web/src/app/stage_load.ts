@@ -28,6 +28,7 @@ import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
 import { G } from "../game/globals";
 import { seekTo as seekWalkerTo } from "../script/seek";
+import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
 import { minimapGraph, treeProjection } from "./projection/script";
 import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
@@ -356,6 +357,9 @@ function applyIncomingState(p: Player): void {
                    `/${p.state.op ?? 0}; showing ${w.block}/${w.step}` +
                    `/${w.opIndex}`);
     }
+    // The replay runs no frame, so the HUD readouts -- which the engine
+    // draws every frame -- would be the reset's empty list.
+    PlayerTasksDrawWithoutAFrame();
     // Land in the same shot, not at the start of it.
     if (p.state.frame !== undefined && w.cam) {
       w.cam.frame = p.state.frame;

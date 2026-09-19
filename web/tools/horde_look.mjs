@@ -15,7 +15,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad, SHOTS } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => {
@@ -81,7 +81,7 @@ let row = before;
 for (let v = 0; v < 120; v += 1) {
   for (let r = 0; r < 6; r += 1) {
     for (let c = 0; c < 8; c += 1) {
-      await page.mouse.click(box.x + (box.width * (c + 0.5)) / 8,
+      await pull(page, box.x + (box.width * (c + 0.5)) / 8,
                              box.y + (box.height * (r + 0.5)) / 6);
     }
   }

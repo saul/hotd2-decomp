@@ -7,7 +7,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad, SHOTS } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => {
@@ -42,7 +42,7 @@ for (let f = 0; f < frames; f += every) {
       volleys += 1;
       for (let y = 0; y < 4; y += 1) {
         for (let x = 0; x < 6; x += 1) {
-          await page.mouse.click(box.x + box.width * (x + 0.5) / 6,
+          await pull(page, box.x + box.width * (x + 0.5) / 6,
                                  box.y + box.height * (y + 0.5) / 4);
         }
       }

@@ -105,7 +105,9 @@ import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { ResetPropContainers } from "../game/class41";
 import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
-import { PadBit, PlayerBlockCapture } from "../game/player_shell";
+import {
+  PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame,
+} from "../game/player_shell";
 import { SetGameTables } from "../game/tables";
 
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
@@ -1224,6 +1226,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.newSession();
     this.ring.clear();
     seekWalkerTo(w, block, step, op);
+    // The replay runs no frame, so the HUD readouts -- which the engine draws
+    // every frame -- would be the reset's empty list. See the routine.
+    PlayerTasksDrawWithoutAFrame();
     // A seek replaces the world exactly as a snapshot load does, so it takes
     // the same rebuild path. Running only half of it is what let a rig keep a
     // held pose across a seek.

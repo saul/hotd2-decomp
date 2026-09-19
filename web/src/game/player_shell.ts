@@ -57,10 +57,11 @@ import { DamageOverlayClear, DamageOverlayUpdateAndDraw, PlayerCameraHook,
 import { CreditCount, CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
   SetBothPlayerCounters } from "./credits";
 import { GameMode } from "./game_mode";
-import { AppState, G } from "./globals";
+import { AppState, G, RestoreGameGlobals } from "./globals";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { NULL_HOST, type GameHost } from "./host";
 import { Rng } from "../core/rng";
+import { clonePlain } from "../core/snapshot";
 
 /** What a player task needs from the frame. */
 export interface PlayerFrame {
@@ -617,6 +618,38 @@ export function PlayerTasksRun(f: PlayerFrame): void {
   for (let p = 0; p < 2; p++) PlayerTaskRun(p, f);
   for (let p = 0; p < 2; p++) if (offscreen[p]) G.g_aim_on_screen[p] = 1;
   SelectAttackablePlayer();
+}
+
+/**
+ * `[port-only]` -- the screen sprites of a world no frame has been run on.
+ *
+ * The engine draws the readouts every frame (`HudDrawAmmoAndReloadPrompt`,
+ * `HudDrawLives`), so any picture of it has them. The port can build a world
+ * without running a frame -- a seek replays the script and stops -- and would
+ * then show the reset's empty `G.g_screen_sprites`: a seek into a fight,
+ * paused, had no bullets and no lives on it.
+ *
+ * So this runs the next frame's player turn, {@link PlayerTasksRun}, and
+ * throws it away: `G` is copied first and written back after, keeping only
+ * the sprites. Nothing is heard (no events), the world's generator is not
+ * drawn from (a scratch one), and nothing is asked of the renderer
+ * (`NULL_HOST`). There is no invented "does this player have a HUD" test:
+ * the routines that draw the readouts decide, from a player task that is
+ * often not yet `InPlay` after a seek -- the enter-play states run
+ * `PlayerUpdateInPlay` on their own first frame.
+ *
+ * The turn runs on a deep copy swapped into `G`, and the live references are
+ * swapped back after, so every object the world holds -- the actors a
+ * renderer is keyed on among them -- is the same object, untouched, and no
+ * resync is owed.
+ */
+export function PlayerTasksDrawWithoutAFrame(): void {
+  const live = { ...G };
+  RestoreGameGlobals(clonePlain(G));
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(0) });
+  const sprites = G.g_screen_sprites;
+  RestoreGameGlobals(live);
+  G.g_screen_sprites = sprites;
 }
 
 /**

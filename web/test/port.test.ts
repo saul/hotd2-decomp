@@ -58,8 +58,9 @@ import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
-import { PadBit, PlayerBlockCapture, PlayerTasksRun }
-  from "../src/game/player_shell";
+import {
+  PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
+} from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers } from "../src/game/run_phase";
 import { ActorByAt, AppState, G, PlayerState, PlayerTask, ResetGameGlobals,
@@ -18657,6 +18658,32 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("the frame's sprites are plain data a snapshot can copy",
         JSON.stringify(JSON.parse(JSON.stringify(G.g_screen_sprites)))
         === JSON.stringify(G.g_screen_sprites));
+
+  // A seek builds a world and runs no frame: the readouts are redrawn from
+  // it, and nothing the two routines keep moves.
+  G.g_player_ammo[0] = 0;
+  G.g_player_magazine_empty[0] = 1;
+  G.g_player_reload_prompt_timer[0] = 130;
+  const drawn = JSON.stringify(G.g_screen_sprites);
+  G.g_screen_sprites = [];
+  const before = heard.length;
+  const world = () => JSON.stringify({ ...G, g_screen_sprites: null });
+  const was = world();
+  const pool = G.g_object_list;
+  PlayerTasksDrawWithoutAFrame();
+  check("a seek redraws the readouts without a frame: RELOAD, its second "
+        + "line and the lives, and no bullets",
+        sprites(HudSprite.Reload).length === 1
+        && sprites(HudSprite.ShootOutside).length === 1
+        && bullets().length === 0 && lamps().length > 0,
+        JSON.stringify(G.g_screen_sprites.map((s) => s.id.toString(16))));
+  check("...and moves nothing else in G, and plays nothing",
+        world() === was && G.g_object_list === pool
+        && heard.length === before,
+        `${G.g_player_reload_prompt_timer[0]} ${heard.length - before}`);
+  G.g_screen_sprites = JSON.parse(drawn);
+  G.g_player_ammo[0] = ARCADE_MAGAZINE;
+  G.g_player_magazine_empty[0] = 0;
 
   // Out of lives: no readouts at all.
   G.g_player_lives[0] = 0;

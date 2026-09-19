@@ -19186,3 +19186,62 @@ Wrong turns:
   screen. The draw is inside `DamageOverlayUpdateAndDraw`, which only
   in-play and continue-countdown tasks run; the renderer now asks for that
   task as well as the active record.
+
+## 2026-09-19 -- the magazine, R to reload, and the HUD readouts
+
+The task: "port the lives sprites rendering in the HUD, and the 'bullets
+remaining' HUD display ... a notion of bullets in clip and ability to reload
+too (press R)". Taken over from an agent that stalled twice; its work is
+commit `8f2682a`, and this entry covers both halves.
+
+**Read, all `[proved]`:** `PlayerFireAndReloadUpdate` (`0x00414940`),
+`PlayerRefillMagazine` (`0x00414B30`), `PlayerFireOriginalModeWeapon`
+(`0x00414B90`), `PlayerReloadOriginalModeWeapon` (`0x00414E40`),
+`HudDrawAmmoAndReloadPrompt` (`0x004177D0`), `HudDrawLives` (`0x004174A0`),
+`DrawScreenSprite` (`0x0041C6D0`), and the shutter's one-frame states 0, 5 and 6
+at `0x00413A04`..`0x00413A96` (disassembly; the pseudocode walks past them).
+Re-read in this session against `game/player_gun.ts` and `game/hud_readout.ts`
+constant by constant -- every position, scale, depth and sound id matches.
+An empty gun on the screen does nothing; a gun reloads only by a pull off the
+screen; the PC mouse is a gun and its right button is that pull. So **R is
+mapped onto the off-screen pull** at the input seam, a key binding like S for
+START, and the gameplay has no divergence for it.
+
+**`DrawScreenSprite`'s record**: `{id, x, y, depth, sx, sy, u0 0, v0 0, u1 1,
+v1 1, rot, 1.0, -1, flags}`. The game-over entry above describes the call as
+"a scale of 1 and a colour triple"; the 1.0s are the UV rectangle and `sx`,
+`sy` are arguments 5 and 6. The TSV keeps the record reading.
+
+**Renamed on merge**: main's `g_screen_sprite_texbank` / `g_screen_sprite_slot`
+(`0x0057A5BC` / `0x0057D448`) and this branch's `g_screen_sprite_bank` /
+`g_screen_sprite_tex_slot` were the same two tables named twice. Ghidra holds
+the latter and more code cites them, so the TSV keeps them, with main's
+game-over facts folded into the descriptions.
+
+**Wrong turns:**
+
+* A seek to a fight, paused, had no bullets and no lives. A seek replays the
+  script and runs no frame, and the sprite list is written by the player
+  tasks. The first fix redrew under `PlayerUpdateInPlay`'s own conditions --
+  and drew nothing, because a seek leaves the player task at `EnterNewGame`,
+  whose first frame is what calls `PlayerUpdateInPlay`. Re-deciding "does
+  this player have a HUD" outside the routines is the invented test the port
+  rules forbid; the fix runs the next frame's `PlayerTasksRun` on a deep copy
+  of `G` and keeps only the sprites (`PlayerTasksDrawWithoutAFrame`). The
+  first version of that restored `G` from the copy, which would have replaced
+  every actor object under the renderers on the load path, which has no
+  resync; it now runs on the copy and swaps the live references back.
+* The port's field was `G.g_screen_sprites` -- the exe's name for
+  `ScreenSpriteRegister`'s 64-slot array at `0x007DDAA8`, a different thing.
+  Renamed `g_screen_sprite_draws`, and the record and `DrawScreenSprite` moved
+  to `game/screen_sprite.ts` so the game-over sprites can use the same path.
+* `audio.mjs` counted 194 page errors: the Globals panel read any object with
+  an `x` as a vector and called `toFixed` on the sprite record's missing `z`.
+  No other check opens every panel.
+* An in-page sound trace under `?drive=1` heard nothing at all, not even the
+  gunshots: `captureThumb` saves the mute state, mutes, and restores it after
+  its await, which under the driven clock finishes after the harness's own
+  unmute. The trace was taken on the real clock instead. Not fixed here.
+* `audio.mjs`'s peak checks read exactly 0.000 for every source on this
+  machine, as the `loops` check does on the morning's base commit; the plays
+  themselves are recorded.

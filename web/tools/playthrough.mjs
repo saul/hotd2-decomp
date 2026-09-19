@@ -111,7 +111,7 @@
  * Stage 1's block 1, measured the same way, holds `140/140` for 3,000 frames
  * across a hundred volleys, because the script has `g_nFiringGate` down —
  * `HudDrawShutterState` (`FUN_00413970`) drops it at `0x00413B06` when a
- * state-3 close finishes — so `ResolveShotRequest` returns before the ray.
+ * state-3 close finishes — so `PlayerFireAndReloadUpdate` returns before the ray.
  * Elapsed time cannot separate those two; **damage can**, and that is the only
  * thing this now measures. Raising the window instead would have hidden stage
  * 1 as well as excusing stage 6.

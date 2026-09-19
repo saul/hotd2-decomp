@@ -19,17 +19,17 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 47119 | 170 | engine |
-| `hod2lib/` | 16343 | 34 | engine |
-| `render/` | 8957 | 31 | render |
+| `game/` | 47650 | 173 | engine |
+| `hod2lib/` | 16386 | 34 | engine |
+| `render/` | 9024 | 31 | render |
 | `app/` | 7441 | 29 | app |
 | `script/` | 4386 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
 | `bundle/` | 2205 | 11 | engine |
-| `core/` | 910 | 9 | engine |
+| `core/` | 922 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **91194** | **337** | |
+| **total** | **91847** | **340** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -48,7 +48,7 @@ The largest files, which is where the pressure to split next is:
 | Citations checked | 338 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **23 of 43** read classes have a module, covering 1473 of 1623 placements |
 | Declared `[diverges]` | **191** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **175** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **177** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 930 in `ghidra/annotations/functions.tsv` |
-| Named globals | 407 in `ghidra/annotations/globals.tsv` |
+| Named functions | 933 in `ghidra/annotations/functions.tsv` |
+| Named globals | 409 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 37 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

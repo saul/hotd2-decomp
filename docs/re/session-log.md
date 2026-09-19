@@ -18122,3 +18122,65 @@ the latter, as class 0x43 and 0x46 do); and whether class 0x13's and 0x33's
 0x13's by its spawn flag `0x8000` and 0x33's by `0x80000000`. `render/rigs.ts`
 still poses its own copy of the boat from the same path; making it read the
 actor is the renderer's half.
+
+## 2026-09-18 — three stage-2 set pieces: the door, the ladder, the boat
+
+Three NEW-BUGS reports (4, 5, 7), all stage 2 Original, all the same shape: a
+routine read for *what* it draws and not for *where* or *when*.
+
+**The door (bug 4) was not where the triage looked.** Block 5 step 2 spawns
+only the civilian, so the hunt started at its own Init, its attachments and
+the class-0x44 hinges — none of which draw a door there. What found it was
+asking the exe who reads the two script flags the step raises around the
+civilian: `g_script_flags[0x68]` and `[0x69]` each have **one** reader,
+`FUN_0046B320`, which is class 0x41 type 35 — placed three blocks earlier
+(block 3 step 4, evt `0x2504`) **at the origin**. The routine never reads its
+position; it draws two leaves at literal world coordinates, and the port drew
+`0x1812` at `(0, 0, 0)`. Its lifetime of four steps survives to block 5 step 2
+only because a block change into step 1 does not change `g_evt_step_index`
+(block 4's last step and block 5's first are both index 1) — counted naively
+it would have been dead by then, which is a trap worth writing down.
+
+**The ladder (bug 5) was not class 0x44 either.** The triage pointed at the
+two selector-1 hinges (op 44, after the cut scene) and the selector-15 spawn
+in step 6; selector 15 is `PropBuildKindedProp` — kind 2, a crate. The drop is
+class 0x41 **type 13** in step 4, `FUN_00467F50`, whose draw is two
+`AssetDrawSlot`s: `obj+0x28C` with **no matrix of its own** (the
+`komono_tokeidai` panel is modelled in world space; the glTF bounds put it at
+`(-947, 96..107, -1297)`) and `0x1A43` translated by the prop's own position.
+The port had it as a drawn-only generic: world space added to world space, and
+the ladder not drawn at all. Camera path 34 is aimed at exactly its X and Z.
+
+**The boat (bug 7) needed two fixes and either alone hides it.**
+`CarrierPropSelectRoutine`'s selector 0 was unported, so the boat stood at its
+descriptor; and `actorSlotEntry` carried **no** class-0x13 slot — stage 3's
+boat only ever had geometry because `0x1A37` is also class 0x25's variant-3
+model. `scriptedPropDrawSlots` now carries a class-0x13 descriptor's slot when
+the port runs its behaviour (statics, and carriers on selectors 0/1); stage 4's
+seven carriers on selectors 2..9 are held back rather than drawn frozen.
+
+**Wrong turns, recorded.**
+
+* `CarrierPropRoutine0`'s pseudocode has **no `frame++` in the ride state**:
+  Ghidra ends the arm at `MatrixStackPop` (`L37` again). Transcribed from the
+  pseudocode the boat would have seated itself on frame 326 for ever. The
+  increment is `0x00440323`, and case 2's `JL` lands in the middle of it.
+* The first "after" screenshots showed no ladder and no boat, and it was the
+  harness: `&frame=N` poses the camera from the path and runs **no** game
+  frame, so no placer had built anything. Playing (`--press Space --settle`)
+  is what shows the port. A paused shot of a prop is not evidence.
+* `core/bams.ts` said the exe's BAMS constant is a float32. It is a **double**
+  (`0x004C4370`, now `g_bams_to_rad`); `MatrixRotate*` round the *product* to
+  float. Type 35 keeps the product on the FPU into `FSIN`, and with the float
+  constant its quarter-turn peak truncates to 1535 instead of 1536 — which the
+  port test caught. `BAMS_TO_RAD_F64` carries the double; `BAMS_TO_RAD` is
+  unchanged.
+* The zombie that rides stage 2's boat is the civilian's class-0x18 child and
+  never becomes a character: class 0x18 has no `MOTION_RULES` row, so it
+  exports as a marker (stage 3's riders the same). The stage-3 boat work in
+  flight adds that row; not duplicated here.
+
+Named: `PropUpdateType13` (`0x00467F50`), `PropUpdateType35` (`0x0046B320`),
+`CarrierPropRoutine0` (`0x00440210`), `g_carrier_routine0_ride_end`
+(`0x0057727C`), `g_bams_to_rad` (`0x004C4370`). Ported with
+`g_scene_tick_counter` (`0x009A2BAC`), which the port did not have.

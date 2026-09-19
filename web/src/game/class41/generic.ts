@@ -450,6 +450,8 @@ const PropContainerType32 = 32;
 
 /** Class 0x41 types 43, 53 and 54, which have update routines of their own. */
 const TYPE43 = 43;
+/** Class 0x41 type 13, which has its own lifetime and so its own family. */
+const TYPE13 = 13;
 const TYPE53 = 53;
 const TYPE54 = 54;
 
@@ -502,6 +504,9 @@ export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
   // Its own routine, its own lifetime, and its own everything: the third
   // object built from `g_prop_kind_params`. See `class41/type43.ts`.
   [TYPE43]: PropFamily.Type43,
+  // Inlines its own lifetime and registers no sphere: the part that drops
+  // out of stage 2's clock tower. See `class41/type13.ts`.
+  [TYPE13]: PropFamily.Type13,
 };
 
 /**
@@ -562,6 +567,8 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // Same argument for `+0x2A4`: `PropUpdateType75` counts step changes up
   // from zero in it, and the struct's default is the story switch's -1.
   if (p.family === PropFamily.Type75) p.removeFlag = 0;
+  // ...and `PropUpdateType13` toggles its blink frame in the same word.
+  if (p.family === PropFamily.Type13) p.removeFlag = 0;
   // `MOV EDX,[EBP+0x6c]; MOV [ESI+0x2a4],EDX` — the arms at 0x0046205E and
   // 0x004620BE give types 31 and 33 the placer's third orientation word as
   // the length of the slot strip their routine plays. The same word is also

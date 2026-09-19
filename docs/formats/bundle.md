@@ -17,10 +17,29 @@ extract/player/
   manifest.json          the index: version, schema digest, stages, sources
   stage2/
     stage2.glb           geometry, materials, textures
-    stage2.cam.json      Hermite curves keyed by global path slot
+    stage2.cam.json      Hermite curves keyed by global path slot -- the
+                         stage's `cp_`/`op_` files and, since format 11,
+                         `cp_gmovr` (slot 0x1F, the game-over fly-over)
     stage2.script.json   the resolved event script, and every table block
   stage2_original/       game mode 1, same shape
 ```
+
+Since format 11 every stage's `characters.placements` also carries two
+**synthetic** rows with `player_body` set, at `0x20000000 + p`: the players'
+bodies, character types `0x39` and `0x3A` -- the game-over fly-over's bodies
+and the route map's figures -- with every clip that screen draws them on
+(`0x32C`, `0x338`, `0x339`, `0x358`, `0x35B` as each type has them). Nothing
+spawns from them; `render/game_over_scene.ts` claims their hierarchies from the
+character layer.
+
+Since format 12 `script.json` carries a `game_over` block -- the game-over
+screen's `.rdata`, read by `ExeTables.gameOverTables` in both halves: the
+bodies' types, start and fall clips, fall frames and stands; the route map's
+tile bases, waypoint table and default route -- and `screen_sprites` (the old
+`hud_sprites`) holds the logo's and the route tiles' images beside the HUD's.
+The `.text` immediates that are join keys (the logo sprite ids, the figures'
+clips, the disc and footprint slots) live in `web/src/game/player_body_data.ts`,
+which the exporter imports.
 
 ## Three versions, and only one of them moves on its own
 

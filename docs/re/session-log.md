@@ -19302,3 +19302,109 @@ any directory under `web/src/`. Today's set is unchanged -- `class13/state`,
 `class25/state` (whose imports are type-only), `class30/bonecels`,
 `hud_sprites` -- so the digest did not move; a probe module re-exported through
 `hud_sprites.ts` was picked up, which the old rule would have missed.
+
+
+## 2026-09-19 -- the game-over fly-over, ported
+
+The fly-over is phase 1 of `GameOverRunPhase` and it is now the exe's: the
+stage released, `cp_gmovr.bin`'s path `0x1F` flown by `GameOverCameraFlyTick`
+from frame 10, and the players' bodies drawn by
+`PlayerHookDrawBodyUntilMotionEnd`. Read on the way, all `[proved]`:
+
+* `PlayerBodiesCreate` (`0x00416450`, was `FUN_`) makes one skinned body per
+  player whenever a task list with the camera tasks (`FUN_00414F20`) is built:
+  type `0x00579F50[p]` = `0x39`, `0x3A`; motion `0x004EC8A4[p]` = `0x32C`. In
+  Original Mode it reads a character byte at `0x009A2242 + p*0x14` unless that
+  equals `p` -- and `ResetOriginalModeLoadout` is the byte's only writer and
+  stores `p`. So no per-character file ever changes the body.
+* `GameOverPlaceBody` (`0x00415A80`) pushes `0x00579EA8[p - 2 +
+  g_game_over_players*2]` through `T(g_camera_eye) Rz Ry Rx`; phase 0 zeroes
+  all six and only camera hooks write them, none installed on this screen, so
+  it is the table point: the origin for one player.
+* `g_game_over_players` (`0x009C8E88`) is `g_max_attackers` copied on the line
+  before each `RequestAppState(7)`.
+* The hook: draw, hand over to `PlayerHookSetCurActor` on the clip's last tick,
+  else step from path frame `0x3C` (one player) or `0x004EC8C4[p]` (two). The
+  body is not drawn again after that frame.
+* `DrawSkinnedModelAndShadow` is push, `SkeletonDrawWalk`, pop -- no shadow.
+* `FUN_00416810(task, 1)` writes node 5's slot from `0x004EC9E0[p*3+1]`, which
+  is the skeleton's own bone-5 slot, so nothing to carry.
+* `LightBlockInit`, run by `CameraBlocksReset`: fog (65535, 65536) in colour 0.
+
+**The route decides the clip** -- **wrong, see the next entry**: the port had
+left out the fly-over's `PlayerTasksCreate`. What was written at the time: the harness zeroed the credits, and the body fell on
+`0x32C`, not `0x338`. With no credit `PlayerContinueCountdown` ends at once in
+`PlayerSetState(6)` in play, `PlayerStateArmGameOver` runs in app state 6
+(hook installed, motion untouched), and phase 0 re-arms only players still at
+4. The fresh body keeps `0x32C`. Only the run's own continue screen (phase 4,
+a credit left) holds the player at 4 into the game over and so reaches the
+`0x338` fall. Both clips are baked now; `tools/game_over_page.mjs` drives one
+of each route and shoots both.
+
+Bundle format 11: `cp_gmovr` in every stage's cam files (`loadCamPaths` in
+both halves), two synthetic `player_body` rows and their clips in
+`characters`. Hashes regenerated before the export (L33).
+
+## 2026-09-19 -- the game-over screen's sprites and route map
+
+After the HUD branch's generic screen-sprite path landed, the game-over logo and
+the route map moved onto it, with the pictures exported (format 12).
+
+Read on the way, all `[proved]`:
+
+* `ScreenSpriteDraw` (`0x00499F00`) is `DrawScreenSprite`'s record with the
+  caller's alpha at `+0x2C` and **10** at `+0x34`. That word's low nibble is
+  `DrawSpriteQuadCommand`'s anchor, `(flags & 3, flags >> 2 & 3)` half-extents
+  off `g_sprite_quad_corners`: 10 is the centre. The TSV had called it "draw
+  layer 10"; corrected.
+* The logo's four sprites are `scr_gameover.bin`, direct colour; the route
+  map's 300 tiles (`g_route_map_tiles`, four screens of 5x15, 128x32) are
+  `scr_bunki.bin`.
+* The route map: `GameOverRouteMapArm` seeds a cursor and a target from
+  `g_route_waypoints` (`0x00567A04`, `wp + (stage*0x27 + block)*6`) and swaps
+  in `g_route_default` (`0x0059351C`) for an empty history; `RouteMapDrawTask`
+  advances the target whenever the cursor sits on it and draws the tiles at
+  depth 120; `RouteFigureTick` / `RoutePartnerTick` step the cursor 4 px a
+  frame, scroll, turn, drop footprints (`RouteMarkSpawn` / `RouteMarkTick`) and
+  draw a skinned figure lying flat, with a disc, in camera space. When the
+  history runs out the done word goes 1 -> 2 (blend) -> 3 -> -1 after 0x78
+  frames, and `GameOverRouteMapWait` hands on without a button.
+* `g_route_history` is recorded by the `checkpoint` opcode
+  (`ResetSceneCombatState`): block at `g_route_count` (`0x009A5C30`), -1 after.
+* Ghidra's bodies for both figure tasks end at their matrix pop; the draw
+  tails (disc slot `0x145B`, `DrawSkinnedModelAndShadow`, `model[0]++`) are
+  past it and were read with `disassemble_bytes`.
+
+Wrong turns:
+
+* **The "no credit falls on 0x32C" finding of the fly-over commit was wrong.**
+  The harness zeroed the credits and the body fell on `0x32C`, and I wrote that
+  up as the exe's behaviour. It was the port's: `GameOverBuildFlyTasks` calls
+  `PlayerTasksCreate`, which I had left out, and that puts a player already at
+  6 back on state 6's handler -- `PlayerStateArmGameOver` in app state 7, onto
+  `0x338`. Both routes fall on `0x338`. Found while reading the route list,
+  which calls it too.
+* Part (a) had transcribed the game-over `.rdata` -- body types, clips, fall
+  frames, stands -- as constants in `game/`, which `docs/formats/bundle.md`'s
+  rule forbids. They are read by `ExeTables.gameOverTables` (both halves) now
+  and travel in `script.json`'s `game_over` block.
+* The first route-map screenshot showed the tiles and nothing walking on them.
+  The figures were there, behind the HUD canvas: the tiles are drawn at depth
+  120, the figures at 100, and a canvas over the WebGL view cannot be behind
+  anything. Sprites deeper than 1.0 are drawn in the 3D now.
+* The first cut had the renderer computing a footprint's position by calling
+  the port's `RouteMarkTick`; `verify_layers` refused it
+  (`render-drives-the-port`). The tick runs in the walk and leaves its point on
+  the record.
+* A checkpoint on a stage's first frame recorded into scene 0: `G.g_scene_index`
+  is copied from the walker once a frame, after the script has run. The opcode
+  reads the walker's scene.
+* A test route with unused waypoints filled with -1 never let the done word
+  settle: the frame after the history runs out, the block is -1 and the flat
+  index reads the row before it; the exe's unused rows are zeroes, a target the
+  cursor is not on, which is what lets the hold run to -1.
+
+Named: `RouteFigureTick`, `RoutePartnerTick`, `RouteMarkSpawn`, `RouteMarkTick`,
+`RouteCameraTaskCreate`, `SpawnRouteMapTask`; `g_route_count`,
+`g_route_map_tiles`, `g_route_waypoints`, `g_route_default`, and the walk's
+`0x007DCCD8`..`0x007DCCFE`.

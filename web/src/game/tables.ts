@@ -14,6 +14,7 @@ import { authoredFrameOfTicks, ticksOfAuthoredFrame, ticksOfSeconds }
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
+import type { GameOverJson } from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
@@ -48,6 +49,12 @@ export const T = {
   coli: null as ColiJson | null,
   types: {} as Record<string, CharacterType>,
   /**
+   * The game-over screen's `.rdata`: the bodies' types, clips and stands, the
+   * route map's tiles, waypoints and default route. One block for the whole
+   * game. Null in a bundle written before it, which draws no body and no map.
+   */
+  gameOver: null as GameOverJson | null,
+  /**
    * The turn-rate curves and the approach radii — the two `.rdata` tables the
    * camera director reads. The immediates that used to sit beside them in this
    * block are in `game/camera/constants.ts` now; see `docs/formats/bundle.md`.
@@ -62,6 +69,11 @@ export const T = {
  */
 /** Said once: a headless fixture legitimately has no collision. */
 let warnedNoColi = false;
+
+/** `[port-only]` -- the game-over block, from the same `script.json`. */
+export function SetGameOverTables(json: GameOverJson | undefined): void {
+  T.gameOver = json ?? null;
+}
 
 export function SetGameTables(chars: CharactersJson | undefined,
                               breakables?: BreakablesJson,

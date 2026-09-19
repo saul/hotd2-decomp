@@ -123,9 +123,7 @@ function projection(): UiProjection {
     skip: { canSkip: true, sub: "region 3", stacked: false },
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
-    gameOver: { phase: 3, label: "GAME OVER", sprites: [
-      { id: 0x43a, x: 320, y: 240, sx: 1, sy: 1, alpha: 0.5 },
-    ] },
+    gameOver: { phase: 3, label: "GAME OVER" },
     scopes: null,
     scopeContext: { frame: 10, stageLoadedAt: 0 },
     hasSaved: false,

@@ -210,12 +210,26 @@ export interface ShutterView {
  */
 export interface ScreenSpriteView {
   id: number;
-  /** Top-left corner in the 640x480 screen, y down. */
+  /** The anchor point in the 640x480 screen, y down -- see `flags`. */
   x: number;
   y: number;
   /** Multiply the image's own size. */
   sx: number;
   sy: number;
+  /** 0..1. */
+  alpha: number;
+  /**
+   * The quad's depth. The HUD's readouts are at 1.0 and nearer; anything
+   * deeper sits behind the 3D and is not this layer's to draw (see
+   * `render/screen_sprites_deep.ts`).
+   */
+  depth: number;
+  /**
+   * The low nibble is the anchor, in half-extents from the top-left:
+   * `(flags & 3, flags >> 2 & 3)`, or `(1, 1)` -- the top-left itself -- when
+   * it is 0. 10 is the centre.
+   */
+  flags: number;
 }
 
 /** One sprite's image: the texture's size and a URL for it. */
@@ -326,7 +340,8 @@ export class Hud {
    * The frame's screen sprites, in the order the engine drew them.
    *
    * `DrawSpriteQuadCommand` (0x004A7AB0) draws the texture `w * sx` by
-   * `h * sy` from the top-left corner it is given, and the canvas's backing
+   * `h * sy` about the anchor the flags name (the top-left for every HUD
+   * readout, the centre for `ScreenSpriteDraw`), and the canvas's backing
    * store is the game's 640x480, so that is the whole of the mapping. The
    * images arrive the right way up from the exporter. An image still decoding
    * is skipped and the frame is marked undrawn, so the next draw fills it in.
@@ -335,11 +350,15 @@ export class Hud {
     const ctx = this.screen;
     if (!ctx) return;
     let key = "";
-    for (const s of sprites) key += `${s.id},${s.x},${s.y},${s.sx},${s.sy};`;
+    // Only the ones in the HUD's own plane -- depth 1.0 or nearer.
+    const near = sprites.filter((s) => s.depth <= 1);
+    for (const s of near) {
+      key += `${s.id},${s.x},${s.y},${s.sx},${s.sy},${s.alpha},${s.flags};`;
+    }
     if (key === this.screenDrawn) return;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     let complete = true;
-    for (const s of sprites) {
+    for (const s of near) {
       const src = this.spriteImages(s.id);
       if (!src) continue;
       const img = this.image(src.url);
@@ -347,8 +366,18 @@ export class Hud {
         complete = false;
         continue;
       }
-      ctx.drawImage(img, s.x, s.y, src.w * s.sx, src.h * s.sy);
+      // `g_sprite_quad_corners` less the anchor, in half-extents: the left
+      // edge is `(1 - ax)` of them from x, the top `(1 - ay)` from y.
+      const w = src.w * s.sx;
+      const h = src.h * s.sy;
+      const a = s.flags & 0xf;
+      const ax = a === 0 ? 1 : a & 3;
+      const ay = a === 0 ? 1 : (a >> 2) & 3;
+      ctx.globalAlpha = Math.max(0, Math.min(1, s.alpha));
+      ctx.drawImage(img, s.x + (1 - ax) * w / 2, s.y + (1 - ay) * h / 2,
+                    w, h);
     }
+    ctx.globalAlpha = 1;
     this.screenDrawn = complete ? key : "";
   }
 

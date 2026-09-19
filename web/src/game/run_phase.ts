@@ -191,7 +191,11 @@ export function RunPhaseContinueCountdown(walk: () => void): void {
     PlayerResumeContinue(1);
   } else {
     G.g_continue_timer -= CONTINUE_TIMER_STEP;
-    if (G.g_continue_timer < 1) RequestAppState(AppState.GameOver);
+    if (G.g_continue_timer < 1) {
+      // `0x0046069F`: how many bodies the game-over screen stands up.
+      G.g_game_over_players = G.g_max_attackers;
+      RequestAppState(AppState.GameOver);
+    }
   }
 }
 
@@ -214,6 +218,8 @@ export function RunPhaseNoContinueWait(walk: () => void): void {
   RunSceneTasksAndTimers(walk);
   G.g_no_continue_frames += 1;
   if (G.g_no_continue_frames > NO_CONTINUE_FRAMES) {
+    // `0x00460375`, the same copy as the continue screen's.
+    G.g_game_over_players = G.g_max_attackers;
     RequestAppState(AppState.GameOver);
   }
 }

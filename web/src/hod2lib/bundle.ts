@@ -40,6 +40,10 @@ import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 import { HUD_READOUT_SPRITES } from "../game/hud_sprites";
+// And the game-over screen's: its logo sprites are immediates in
+// `GameOverLogoTask`, its route tiles are `.rdata` read below.
+import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
+  from "../game/player_body_data";
 import { f32, i16, i32, u32 } from "./bytes";
 import * as C from "./container";
 import { encodeRgba } from "./png";
@@ -81,7 +85,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 10;
+export const BUNDLE_FORMAT = 12;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -1584,6 +1588,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ...Object.values(carriedEffects).flatMap((d) =>
       ((d as { nodes: { slot: number }[] }).nodes)
         .map((n) => n.slot).filter((x) => x > 0)),
+    // ...and the game-over route map's: the figures' ground disc and the two
+    // footprints, drawn in view space by `render/game_over_scene.ts`.
+    ROUTE_FIGURE_SHADOW_SLOT, ...ROUTE_MARK_SLOTS,
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -1634,7 +1641,15 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
   scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};
-  scriptJson.hud_sprites = await hudSpritesJson(tables, stage.source, deflate);
+  // The game-over screen's `.rdata`, and every sprite the game draws by id:
+  // the HUD's readouts, the logo, and the route map's 4 x 75 tiles.
+  const gameOver = tables.gameOverTables();
+  scriptJson.game_over = gameOver;
+  const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
+    Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
+  scriptJson.screen_sprites = await screenSpritesJson(
+    tables, stage.source, deflate,
+    [...HUD_READOUT_SPRITES, ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;
@@ -1746,32 +1761,42 @@ export async function writeManifest(
 }
 
 /**
- * The screen sprites the in-play HUD draws, as images the right way up.
+ * The route map's tiles per 640x480 screen: `RouteMapDrawTask`
+ * (`FUN_00461180`) draws 5 columns by 15 rows of 128x32, id `base + row * 5 +
+ * col`.
+ */
+const ROUTE_TILES_PER_SCREEN = 5 * 15;
+
+/**
+ * The screen sprites the game draws, as images the right way up.
  *
  * `DrawScreenSprite` (`0x0041C6D0`) names a sprite by id; the id picks a
  * `tex/` bank and a global texture slot out of two tables in the exe
- * (`ExeTables.screenSprite`), the slot picks the bank's descriptor, and every
- * one the HUD uses is a PAL4 texture of `tex/scr_common.bin` with its palette
- * out of `g_texture_palette_table`. The quad the game draws puts texture row 0
- * at the sprite's bottom edge (`DrawSpriteQuadCommand`, `0x004A7AB0`), so the
- * image is flipped here and the client draws it as it comes.
+ * (`ExeTables.screenSprite`), the slot picks the bank's descriptor. The HUD's
+ * are PAL4 textures of `tex/scr_common.bin` with their palette out of
+ * `g_texture_palette_table`; the game-over logo's are `scr_gameover.bin` and
+ * the route map's tiles `scr_bunki.bin`, both direct colour. The quad the game
+ * draws puts texture row 0 at the sprite's bottom edge
+ * (`DrawSpriteQuadCommand`, `0x004A7AB0`), so the image is flipped here and
+ * the client draws it as it comes.
  *
- * In `script.json` rather than beside it: the same two dozen small images in
- * every stage, a few kilobytes, and the loader and its cache already carry
- * that file. A sprite that will not resolve is left out and recorded.
+ * In `script.json` rather than beside it: the same few hundred small images in
+ * every stage, and the loader and its cache already carry that file. A sprite
+ * that will not resolve is left out and recorded.
  */
-export async function hudSpritesJson(tables: ExeTables, source: AssetSource,
-                                     deflate: Deflate):
+export async function screenSpritesJson(tables: ExeTables,
+                                        source: AssetSource, deflate: Deflate,
+                                        ids: readonly number[]):
     Promise<Record<string, { w: number; h: number; png: string }>> {
   const out: Record<string, { w: number; h: number; png: string }> = {};
   const banks = new Map<string, Uint8Array | null>();
-  for (const id of HUD_READOUT_SPRITES) {
+  for (const id of ids) {
     const key = String(id);
     if (key in out) continue;
     const hit = tables.screenSprite(id);
     if (!hit) {
-      degraded.note("hudSpritesJson", `sprite 0x${id.toString(16)}`,
-                    "that HUD sprite", "no bank or slot");
+      degraded.note("screenSpritesJson", `sprite 0x${id.toString(16)}`,
+                    "that screen sprite", "no bank or slot");
       continue;
     }
     const [bank, e, pal] = hit;
@@ -1788,15 +1813,15 @@ export async function hudSpritesJson(tables: ExeTables, source: AssetSource,
       banks.set(bank, data);
     }
     if (!data) {
-      degraded.note("hudSpritesJson", `sprite 0x${id.toString(16)}`,
-                    "that HUD sprite", `no tex/${bank}.bin`);
+      degraded.note("screenSpritesJson", `sprite 0x${id.toString(16)}`,
+                    "that screen sprite", `no tex/${bank}.bin`);
       continue;
     }
     let rgba: Uint8Array;
     if (e.layout === 5) {
       if (!pal || e.offset + (e.width * e.height) / 2 > data.length) {
-        degraded.note("hudSpritesJson", `sprite 0x${id.toString(16)}`,
-                      "that HUD sprite", "no palette, or past the bank");
+        degraded.note("screenSpritesJson", `sprite 0x${id.toString(16)}`,
+                      "that screen sprite", "no palette, or past the bank");
         continue;
       }
       rgba = texbank.decodePal4(data, e.offset, e.width, e.height, e.pixfmt,

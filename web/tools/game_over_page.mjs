@@ -41,23 +41,38 @@ const state = () => page.evaluate(async () => {
 });
 const dom = () => page.evaluate(() => {
   const el = document.querySelector("#gameover");
-  // The plate's own element, not the text: the panel's tag says "game over"
-  // too, so a text match would pass with no plate drawn at all (L47).
-  const plate = el?.querySelector(".go-43a");
-  return el ? { phase: el.dataset.phase, text: el.innerText,
-                plate: plate ? Number(getComputedStyle(plate).opacity) : null }
-            : null;
+  // The HUD canvas's own pixels over the plate's 512x64 rectangle: what the
+  // page drew, not what the port says it drew (L47).
+  const cv = document.querySelector(".hud-screen");
+  let inked = -1;
+  if (cv instanceof HTMLCanvasElement) {
+    const px = cv.getContext("2d")?.getImageData(64, 208, 512, 64).data;
+    if (px) {
+      inked = 0;
+      for (let i = 3; i < px.length; i += 4) if (px[i] > 200) inked += 1;
+    }
+  }
+  return el ? { phase: el.dataset.phase, text: el.innerText, inked } : null;
+});
+const draws = () => page.evaluate(async () => {
+  const { G } = await import("/src/game/globals.ts");
+  return G.g_screen_sprite_draws.map((d) => ({ ...d }));
 });
 
 // The last life only goes on the path camera: off it, `PlayerTakeDamage`
 // floors the player at one (`PlayerFloorLivesOffPath`). So play on until the
 // scene is on the path camera (scene major 2) and strike there.
-async function killPlayer() {
-  await page.evaluate(async () => {
+// Two routes into the game-over screen, and they draw different bodies.
+// With credits the run's own continue screen (phase 4) counts down while the
+// player waits at state 4, and phase 0 arms them: the fall, motion 0x338.
+// With none the player's own countdown ends at once and puts them at 6 in
+// play, so phase 0 leaves them be and the fresh body keeps motion 0x32C.
+async function killPlayer(zeroCredits) {
+  await page.evaluate(async (zero) => {
     const { G } = await import("/src/game/globals.ts");
-    G.g_credits[0] = 0; G.g_credits[1] = 0;
+    if (zero) { G.g_credits[0] = 0; G.g_credits[1] = 0; }
     G.g_player_no_damage[0] = 0;
-  });
+  }, zeroCredits);
   for (let i = 0; i < 4000; i += 5) {
     const struck = await page.evaluate(async () => {
       const { G } = await import("/src/game/globals.ts");
@@ -108,11 +123,47 @@ try {
   check(s.app === 6 && (await dom()) === null,
         "in play, no game-over layer");
 
-  await killPlayer();
+  await killPlayer(false);
   console.log("struck:", JSON.stringify(await state()));
   s = await untilGameOverPhase(1);
   console.log("fly-over:", JSON.stringify(s));
-  check(s.app === 7, "the last life with no credit reaches app state 7");
+  check(s.app === 7, "the last life, through the run's continue screen, reaches app state 7");
+
+  // The fly-over: the stage released, the camera on `cp_gmovr`'s path, and
+  // the player's body falling from path frame 0x3C. Shot twice -- standing,
+  // and most of the way down.
+  const fly = () => page.evaluate(async () => {
+    const { G } = await import("/src/game/globals.ts");
+    const b = G.g_player_bodies[0];
+    return { phase: G.g_nRunPhase, frame: G.g_game_over_fly_frame,
+             unloaded: G.g_stage_unloaded,
+             eye: { ...G.g_camera_block_eye },
+             body: b ? { drawn: b.drawn, ticks: b.playTicks, motion: b.motion,
+                         pos: { ...b.pos } } : null };
+  });
+  const untilFly = async (frame) => {
+    for (let i = 0; i < 400; i += 1) {
+      const t = await fly();
+      if (t.phase !== 1 || t.frame >= frame) return t;
+      await advance(1);
+    }
+    return fly();
+  };
+  let t = await untilFly(0x30);
+  console.log("fly-over start:", JSON.stringify(t));
+  check(t.phase === 1 && t.unloaded === 1 && !!t.body && t.body.drawn === 1
+        && t.body.motion === 0x338 && t.body.ticks === 0,
+        "the fly-over draws the body on motion 0x338, not yet falling, "
+        + "with the stage released");
+  check(t.eye.x !== 0 || t.eye.y !== 0 || t.eye.z !== 0,
+        "the camera block is on the fly-over path, not the stage's shot");
+  await page.screenshot({ path: join(SHOTS, "gameover-fly-start.png") });
+  t = await untilFly(0x96);
+  console.log("fly-over fall:", JSON.stringify(t));
+  check(t.phase === 1 && !!t.body && t.body.drawn === 1
+        && t.body.ticks === t.frame - 0x3c,
+        "from path frame 0x3C the body's cursor steps once a frame");
+  await page.screenshot({ path: join(SHOTS, "gameover-fly-fall.png") });
 
   // Into the logo. `GameOverLogoTask` fades the plate in over 50 frames
   // and spawns the flashes from 0x78; shoot the plate at full strength and
@@ -135,8 +186,14 @@ try {
               JSON.stringify(plate));
   check(s.phase === 3 && plate !== null && plate.alpha >= 1,
         "phase 3 has the GAME OVER plate up at full alpha");
-  check(!!d && d.plate !== null && d.plate >= 0.99,
-        "the page draws the GAME OVER plate at full opacity");
+  const dr = await draws();
+  check(dr.some((x) => x.id === 0x43a && x.alpha >= 1 && x.flags === 10
+                && x.x === 320 && x.y === 240),
+        "the plate goes through ScreenSpriteDraw: centred at (320, 240), "
+        + "alpha 1");
+  check(!!d && d.inked > 2000,
+        "the HUD canvas has the plate's texture where the plate is",
+        `${d?.inked} opaque pixels`);
   await page.screenshot({ path: join(SHOTS, "gameover-logo.png") });
   await untilLogo(0x8a);
   s = await state();
@@ -145,12 +202,27 @@ try {
   check(s.sprites >= 4, "the flashes are out");
   await page.screenshot({ path: join(SHOTS, "gameover-flashes.png") });
 
+  // The route map: the figure walking the run's route over the map.
   s = await untilGameOverPhase(5);
-  await advance(30);
+  await advance(60);
   s = await state();
-  console.log("wait:", JSON.stringify(s));
-  check(s.app === 7 && s.phase === 5, "phase 5 waits for a button");
-  await page.screenshot({ path: join(SHOTS, "gameover-wait.png") });
+  const route = await page.evaluate(async () => {
+    const { G } = await import("/src/game/globals.ts");
+    return { map: { ...G.g_route_map }, figures: G.g_route_figures.length,
+             motion: G.g_route_figures[0]?.motion ?? -1,
+             marks: G.g_route_marks.length,
+             tiles: G.g_screen_sprite_draws.length,
+             done: G.g_game_over_route_done };
+  });
+  console.log("route:", JSON.stringify(s), JSON.stringify(route));
+  check(s.app === 7 && s.phase === 5 && route.figures === 1
+        && (route.motion === 0x35b || route.done !== 0) && route.tiles === 300
+        && route.marks > 0,
+        "phase 5 walks player 1's figure on 0x35B over the 300-tile map, "
+        + "leaving footprints");
+  await page.screenshot({ path: join(SHOTS, "gameover-route.png") });
+  await advance(240);
+  await page.screenshot({ path: join(SHOTS, "gameover-route-later.png") });
 
   // Restart this stage.
   await page.click("#gameover-restart");
@@ -173,9 +245,16 @@ try {
   check((await dom()) === null, "the game-over layer is gone");
   await page.screenshot({ path: join(SHOTS, "gameover-restarted.png") });
 
-  // And again, to stage 1.
-  await killPlayer();
-  console.log("struck:", JSON.stringify(await state()));
+  // And again, to stage 1 -- this time with no credit, the other route.
+  await killPlayer(true);
+  s = await untilGameOverPhase(1);
+  t = await untilFly(0x60);
+  console.log("fly-over, no credit:", JSON.stringify(t));
+  check(t.phase === 1 && !!t.body && t.body.drawn === 1
+        && t.body.motion === 0x338,
+        "with no credit the body falls on 0x338 too: the fly-over's "
+        + "PlayerTasksCreate arms a player already at 6 again");
+  await page.screenshot({ path: join(SHOTS, "gameover-fly-nocredit.png") });
   s = await untilGameOverPhase(3);
   check(s.app === 7, "a second game over");
   await page.click("#gameover-first");

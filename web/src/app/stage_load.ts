@@ -180,6 +180,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.chars.build(p.scene3d.root, p.ctx.scope,
                    bundle.script.characters);
   p.spawns.setPosed(p.chars.posed);
+  // The two player bodies are the game-over screen's, not the script's.
+  p.gameOverScene.build(p.ctx.scope, p.chars, p.effects);
   // Doors, shutters and the vans they hang off; driven by the script's
   // own flags, so nothing here needs a clock of its own.
   p.props.build(p.scene3d.root, p.ctx.scope, bundle.script.props);
@@ -243,12 +245,14 @@ export async function loadStageInto(p: Player): Promise<void> {
   // are bundle data and belong here.
   p.hudLayer.messages =
     (g) => screenMessage(bundle.script.sound?.messages?.[String(g)]?.[0] ?? null);
-  // ...and the HUD readouts' images, which are bundle data in the same way.
-  const hudSprites = bundle.script.hud_sprites ?? {};
+  // ...and the screen sprites' images -- the HUD's, the game-over logo's and
+  // the route map's -- which are bundle data in the same way.
+  const hudSprites = bundle.script.screen_sprites ?? {};
   p.hudLayer.spriteImages = (id) => {
     const s = hudSprites[String(id)];
     return s ? { w: s.w, h: s.h, url: s.png } : null;
   };
+  p.deepSprites.images = p.hudLayer.spriteImages;
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);

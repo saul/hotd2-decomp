@@ -153,14 +153,15 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
  * the units this client already works in.
  */
 private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
-                   mB: BakedMotion, fB: number, w: number): void {
+                   mB: BakedMotion, fB: number, w: number,
+                   full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0):
+    void {
   const ra = fA * 3;
   const rb = fB * 3;
   // The same two arms as `apply`, and the engine reaches them through the same
   // `if`: `SkeletonPoseRootFrame` (`FUN_00410920`) lerps the two tracks' root
   // translations into one triple at `model+0x6C..0x74` *before*
   // `SkeletonApplyRootMotion` sees it, so a blend is one root, not two.
-  const full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0;
   const lerp = (a: number, b: number): number => a + (b - a) * w;
   inst.pivot.position.set(
     full ? lerp(mA.root[ra], mB.root[rb]) : 0,
@@ -236,6 +237,51 @@ private apply(inst: Instance, m: BakedMotion, f: number,
     if (o + 2 >= m.rot.length) continue;
     node.quaternion.copy(this.bams(m.rot[o], m.rot[o + 1], m.rot[o + 2]));
   }
+}
+
+/**
+ * Pose a hierarchy with no `Actor` behind it: one clip, held on its last
+ * frame, at a cursor in 60 Hz ticks. The player's body on the game-over
+ * fly-over is the one caller -- `game/player_body.ts` holds its state, and it
+ * is not an actor in the port's pool.
+ *
+ * `rootMotion` is `model+0x64` bit 1: with it up the pose keeps only the
+ * clip root's height, because the horizontal part has already moved the body.
+ */
+poseHeld(target: Pick<Instance, "type" | "pivot" | "bones">, motion: number,
+         ticks: number, rootMotion: boolean): boolean {
+  const m = target.type.motions[String(motion)];
+  if (!m || m.frames <= 0) return false;
+  this.apply(target as Instance, m, authoredFrameHeld(ticks, m.fps, m.frames),
+             !rootMotion);
+  return true;
+}
+
+/**
+ * {@link poseHeld}'s looping, cross-fading twin, for the route map's figures:
+ * the clip at a cursor that wraps at its play length plus one
+ * (`SkeletonAdvancePlayCursor`, `FUN_004111A0`), and while a fade is running
+ * the snapshot it came from, weighted by `w` onto this one.
+ */
+poseLooped(target: Pick<Instance, "type" | "pivot" | "bones">,
+           motion: number, ticks: number, rootMotion: boolean,
+           from: { motion: number; ticks: number } | null = null,
+           w = 1): boolean {
+  const m = target.type.motions[String(motion)];
+  if (!m || m.frames <= 0) return false;
+  const frameOf = (mm: BakedMotion, t: number): number => {
+    const play = mm.play ?? Math.max(1, mm.frames * 2 - 2);
+    return authoredFrameHeld(t % (play + 1), mm.fps, mm.frames);
+  };
+  const f = frameOf(m, ticks);
+  const pm = from ? target.type.motions[String(from.motion)] : undefined;
+  if (pm && pm.frames > 0 && w < 1) {
+    this.applyBlend(target as Instance, pm, frameOf(pm, from!.ticks), m, f,
+                    Math.max(0, w), !rootMotion);
+  } else {
+    this.apply(target as Instance, m, f, !rootMotion);
+  }
+  return true;
 }
 
 /**

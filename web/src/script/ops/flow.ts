@@ -115,9 +115,22 @@ export const OPS: Record<number, OpImpl> = {
       },
     },
     0x4d: {                                     // checkpoint
+      // `ResetSceneCombatState` (`FUN_0045EEC0`) ends by recording the block
+      // in the run's route history -- `g_route_history[scene][count++] =
+      // block`, then -1 after it -- which the game-over route map walks.
       status: "tracked",
       run: (w) => {
         w.checkpointBlock = w.block;
+        // The walker's scene, which `G.g_scene_index` mirrors a frame
+        // later: the first block's checkpoint runs before that copy.
+        const row = G.g_route_history[w.script.scene ?? G.g_scene_index];
+        if (row) {
+          const i = G.g_route_count;
+          // s8 stores: the count and the block are both bytes.
+          if (i >= 0 && i < 16) row[i] = (w.block << 24) >> 24;
+          if (i + 1 >= 0 && i + 1 < 16) row[i + 1] = -1;
+          G.g_route_count = ((i + 1) << 24) >> 24;
+        }
         return "checkpoint";
       },
     },

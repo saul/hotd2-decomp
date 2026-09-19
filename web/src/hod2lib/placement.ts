@@ -409,6 +409,12 @@ export class Placement {
    */
   synthetic = false;
   /**
+   * The player whose body this synthetic row draws, 0 or 1 -- the
+   * game-over fly-over's (`PlayerStateArmGameOver`, `FUN_00414420`). Null on
+   * every other row.
+   */
+  player_body: number | null = null;
+  /**
    * Class 0x51's tail -- the fish's speeds, bob and timings, **or** the water
    * level, when `subtype` is 6 and the record is a group header.
    */
@@ -502,6 +508,7 @@ export class Placement {
     if (this.class40) d.class40 = this.class40;
     if (this.parent_at !== null) d.parent_at = this.parent_at;
     if (this.synthetic) d.synthetic = true;
+    if (this.player_body !== null) d.player_body = this.player_body;
     if (this.class51) d.class51 = this.class51;
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;

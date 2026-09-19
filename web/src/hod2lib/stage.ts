@@ -150,17 +150,26 @@ export async function loadAsset(source: AssetSource, tables: ExeTables | null,
 }
 
 /**
- * The `cam/` files belonging to a stage: `cp_stN` then `op_stN`.
+ * The `cam/` files belonging to a stage: `cp_stN` then `op_stN`, and for a
+ * stage `cp_gmovr` after them.
+ *
+ * `cp_gmovr.bin` is the game-over screen's: `GameOverRunPhase`
+ * (`FUN_00460960`) loads it (`AssetQueueLoadCamFile(5)`) and
+ * `GameOverCameraFlyTick` (`FUN_00460E60`) flies its one path, global slot
+ * `0x1F`. Every stage can end in a game over, so every stage carries it.
  *
  * Returns `[]` when the asset has no matching camera file, which is normal --
  * only the six stages and a handful of cutscenes have one.
  */
+/** The game-over fly-over's `cam/` file, global path slot `0x1F`. */
+export const GAME_OVER_CAM_FILE = "cp_gmovr";
+
 export async function loadCamPaths(source: AssetSource, stage: number | null,
                                    name: string | null):
     Promise<camlib.CamFile[]> {
   let stems: string[] = [];
   if (stage !== null) {
-    stems = [`cp_st${stage}`, `op_st${stage}`];
+    stems = [`cp_st${stage}`, `op_st${stage}`, GAME_OVER_CAM_FILE];
   } else if (name) {
     const m = /^st(\d+)_/.exec(name);           // st2_07 -> stage 2
     if (m) stems = [`cp_st${m[1]}`, `op_st${m[1]}`];

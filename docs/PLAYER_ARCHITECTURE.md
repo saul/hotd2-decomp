@@ -657,7 +657,9 @@ web/src/
     run_phase.ts  the run phases a stage is played in (0, 2, 3, 4, 11, 12),
                   `RunSceneTasksAndTimers` and the damage rank; app_state.ts
                   the screen request
-    game_over.ts  app state 7: `GameOverRunPhase` and its screen sprites
+    game_over.ts  app state 7: `GameOverRunPhase`, the fly-over, the logo;
+                  route_map.ts its route map; player_body.ts the bodies;
+                  player_body_data.ts the immediates the exporter shares
     player_gun.ts the trigger, the magazine and the reload
     hud_readout.ts  the bullets, the RELOAD prompt and the lives, drawn as
                   screen sprites; hud_sprites.ts their ids, for the exporter

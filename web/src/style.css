@@ -780,26 +780,10 @@ tr.gdead td { opacity: 0.45; }
   position: absolute;
   inset: 0;
   z-index: 3;
-  container-type: inline-size;
-  background: rgba(8, 0, 0, 0.35);
+  /* No wash over the view: the screen under it is the game's own. */
   /* A click on the view is the trigger, which cuts the screen short; only the
      panel takes the pointer. */
   pointer-events: none;
-}
-#gameover .go-sprite {
-  position: absolute;
-  white-space: nowrap;
-  pointer-events: none;
-  color: #c01010;
-  text-shadow: 0 0 6px #000, 0 0 2px #000;
-}
-#gameover .go-43a {
-  font: 900 9cqw/1 Georgia, "Times New Roman", serif;
-  letter-spacing: 0.08em;
-}
-#gameover .go-43b, #gameover .go-43c, #gameover .go-43d {
-  color: #fff4d0;
-  font-size: 5cqw;
 }
 #gameover .go-panel {
   position: absolute;

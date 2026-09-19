@@ -9,6 +9,7 @@ import type { Context, System, Tick } from "../core/system";
 import type { RenderContext } from "../render/context";
 import type { CameraRig } from "../render/camera";
 import { CamSeatPathFrame } from "../game/camera/path";
+import type { CamPaths } from "../game/camera/curve";
 import { GameUpdate } from "../game/director";
 import { SceneLightArrayUpdate } from "../game/scene_lights";
 import { ActorIsEnemy } from "../game/registry";
@@ -91,6 +92,8 @@ export class GameSystem implements System {
    * the frame, so the host never reads one from a previous stage.
    */
   private view: CameraFrame | null = null;
+  /** The stage's camera paths, held for `camPath` the same way. */
+  private paths: CamPaths | null = null;
   private readonly host: GameHost = {
     boneWorld: (at, bone, out) =>
       this.backend?.boneWorld(at, bone, out) ?? false,
@@ -109,6 +112,9 @@ export class GameSystem implements System {
     // evaluation is the renderer's, so the port asks across the seam rather
     // than carrying a Hermite evaluator of its own.
     objectPath: (slot, frame) => this.backend?.objectPath?.(slot, frame) ?? null,
+    // A `cp_` path by global slot, for the port's own `CamEvalPath7` calls --
+    // the game-over fly-over's. The curves are the camera bundle's.
+    camPath: (slot) => this.paths?.paths.get(slot) ?? null,
     // The camera looks down its own local -Z, which is where the player is.
     aimPoint: (ahead, out) => this.view?.toWorld(0, 0, -ahead, out),
     // A point in the camera's own space, in world coordinates. The engine
@@ -181,6 +187,7 @@ export class GameSystem implements System {
 
   update(ctx: Context, t: Tick): void {
     this.view = ctx.view;
+    this.paths = (ctx as Partial<RenderContext>).paths ?? null;
     // `g_camera_yaw_bams` — class 0x31 wants the yaw on its own, not the whole
     // matrix: the leap aside builds its landing point with a bare
     // `MatrixRotateY` and the wall search refuses unless the actor faces
@@ -449,6 +456,14 @@ export function seatCamera(rig: CameraRig, ctx: RenderContext,
   if (!w || !rig.scripted) return;
   const cam = w.cam;
   if (!cam) return;
+  // **The game-over screen's camera is the port's.** Phase 0 of
+  // `GameOverRunPhase` replaces the scene's task list, so the queued camera
+  // action the walker's shot stands for is gone, and `GameOverCameraFlyTick`
+  // writes the block itself -- level, roll 0.
+  if (G.g_stage_unloaded !== 0) {
+    rig.pose.roll = 0;
+    return;
+  }
   // **A shot that has run out moves to where the next one picks up.**
   //
   // `FUN_00402890` and `FUN_00402740`, the two row-5 camera hooks, both open

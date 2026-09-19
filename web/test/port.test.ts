@@ -344,6 +344,10 @@ import {
   type HumanoidProgram,
 } from "../src/game/class25";
 
+import { GameOverCameraFlyTick } from "../src/game/game_over";
+import { SetGameOverTables } from "../src/game/tables";
+import { CamPath } from "../src/game/camera/curve";
+
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
   if (ok) {
@@ -8641,18 +8645,93 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   ev.on("sound.play", (d) => heard.push(d.id));
   const z0 = G.g_object_list.find((o) => o.cls === SpawnClass.Zombie);
   const zAt = z0 ? { ...z0.pos } : null;
+  // The bodies' clips, as the bundle carries them: `0x338` is 61 frames at 30
+  // Hz, played over 120 cursor ticks.
+  for (const ct of ["57", "58"]) {
+    T.types[ct] = { ...(T.types[ct] ?? {}), motions: {
+      ...(T.types[ct]?.motions ?? {}),
+      "824": { bank: 38, frames: 61, fps: 30, play: 120,
+               root: new Array(61 * 3).fill(0), rot: [] },
+    } } as unknown as (typeof T.types)[string];
+  }
+  // The game-over block, as `ExeTables.gameOverTables` reads it -- the real
+  // values for the bodies; a one-block route for the map: stage 1, block 0,
+  // one waypoint 48 map pixels down from where the cursor starts.
+  // Unused rows are zeroes in the exe's table, and that matters: the frame
+  // the history runs out leaves the block at -1, and the next frame reads
+  // the row before it -- a zero there is a target the cursor is not on, which
+  // is what lets the done word run on to -1.
+  const waypoints = Array.from({ length: 6 }, () =>
+    Array.from({ length: 0x27 }, () =>
+      Array.from({ length: 6 }, () => [0, 0])));
+  waypoints[0][0][0] = [-16, -98];
+  waypoints[0][0][1] = [-1, -1];
+  SetGameOverTables({
+    body_char_types: [0x39, 0x3a], body_start_motions: [0x32c, 0x32c],
+    fall_motions: [0x338, 0x338], fall_frames: [0x50, 0x3c],
+    body_offsets: [[0, 0], [0, 0], [-5, -1.9], [4.2, 0.7]],
+    route_tiles: [0xce, 0x119, 0x164, 0x1af],
+    route_waypoints: waypoints,
+    default_route: Array.from({ length: 6 }, () => new Array(16).fill(-1)),
+  });
   run(1, rng, ev);
   check("phase 0: every player at 4 goes to 6, 200 frames, BGM 9 unlooped",
         G.g_player_state[0] === PlayerState.GameOver
         && G.g_game_over_timer === 200 && G.g_nRunPhase === 1
         && heard.includes(0x10000009), `${G.g_player_state} ${heard}`);
-  run(199, rng, ev);
+  check("...the stage is released and both bodies are made, on 0x32C "
+        + "(`PlayerBodiesCreate`, `FUN_00416450`), with the fly-over counter "
+        + "at 11 -- 10 was evaluated as the task was made",
+        G.g_stage_unloaded === 1 && G.g_player_bodies.length === 2
+        && G.g_player_bodies[0].charType === 0x39
+        && G.g_player_bodies[1].charType === 0x3a
+        && G.g_player_bodies[0].motion === 0x32c
+        && G.g_game_over_fly_frame === 11,
+        JSON.stringify(G.g_player_bodies.map((b) => b.motion))
+        + ` fly ${G.g_game_over_fly_frame}`);
+  run(1, rng, ev);
+  const body = G.g_player_bodies[0];
+  check("phase 1's first frame arms the player: the fall, 0x338, at the "
+        + "origin, drawn, not yet stepping -- and player 2, out, has no body "
+        + "drawn",
+        body.motion === 0x338 && body.playTicks === 0 && body.drawn === 1
+        && body.pos.x === 0 && body.pos.z === 0
+        && G.g_player_camera_hook[0]
+           === PlayerCameraHook.DrawBodyUntilMotionEnd
+        && G.g_player_bodies[1].drawn === 0,
+        JSON.stringify(body));
+  run(0x3c - 12, rng, ev);
+  check("...the cursor holds until the path frame passes 0x3B",
+        body.playTicks === 0 && G.g_cam_path_frame === 0x3b,
+        `ticks ${body.playTicks} path frame ${G.g_cam_path_frame}`);
+  run(1, rng, ev);
+  check("...and steps from 0x3C", body.playTicks === 1,
+        `ticks ${body.playTicks}`);
+  run(118, rng, ev);
+  check("...to the clip's last tick, 119, still under the body's hook",
+        body.playTicks === 119 && body.drawn === 1
+        && G.g_player_camera_hook[0]
+           === PlayerCameraHook.DrawBodyUntilMotionEnd,
+        `ticks ${body.playTicks} hook ${G.g_player_camera_hook[0]}`);
+  run(1, rng, ev);
+  check("the next frame draws it on that tick once more and hands the hook "
+        + "over to `PlayerHookSetCurActor`",
+        body.playTicks === 119 && body.drawn === 1
+        && G.g_player_camera_hook[0] === PlayerCameraHook.SetCurActor,
+        `ticks ${body.playTicks} hook ${G.g_player_camera_hook[0]}`);
+  run(1, rng, ev);
+  check("...which draws nothing: the body is gone for the rest of the "
+        + "fly-over", body.drawn === 0);
+  // Phase 1 has run 1 + (0x3C - 12) + 1 + 118 + 1 + 1 frames of its 200.
+  run(199 - (1 + (0x3c - 12) + 1 + 118 + 1 + 1), rng, ev);
   check("phase 1 runs its 200 frames", G.g_nRunPhase === 1
         && G.g_game_over_timer === 1, `${G.g_nRunPhase} ${G.g_game_over_timer}`);
   run(2, rng, ev);
-  check("...then phase 2 arms the logo, 180 frames",
+  check("...then phase 2 arms the logo, 180 frames, with the camera block "
+        + "reset to the origin and the stage still released",
         G.g_nRunPhase === 3 && G.g_game_over_timer === 0xb4
-        && G.g_game_over_logo_frame === 0);
+        && G.g_game_over_logo_frame === 0 && G.g_stage_unloaded === 1
+        && G.g_camera_block_eye.x === 0 && G.g_camera_block_target.z === 0);
   run(1, rng, ev);
   const plate = G.g_screen_sprite_anims[0];
   check("the logo's first frame spawns the GAME OVER plate 0x43A at "
@@ -8665,19 +8744,75 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         G.g_screen_sprite_anims.map((s) => s.id.toString(16)).join(","));
   check("the scene's actors stand still on the game-over screen",
         !z0 || !zAt || (z0.pos.x === zAt.x && z0.pos.z === zAt.z));
-  run(0xb4, rng, ev);
-  check("after the logo the route map, which waits for the trigger",
-        G.g_nRunPhase === 5, `${G.g_nRunPhase}`);
-  run(30, rng, ev);
-  check("...and does not end by itself", G.g_nRunPhase === 5
-        && G.g_app_state === AppState.GameOver);
-  G.g_pad_state = 2;
+  // The route this game took: the checkpoint the harness never ran, so the
+  // history is as the reset left it plus one block -- stage 1, block 0.
+  G.g_route_history[0][0] = 0;
+  G.g_route_history[0][1] = -1;
+  G.g_route_history[0][2] = 1;          // a second entry of 0 is "empty"
+  for (let i = 0; i < 0xb4 && G.g_nRunPhase !== 5; i++) run(1, rng, ev);
+  const rm = G.g_route_map;
+  check("after the logo the route map: one figure, player 1's, on its walk "
+        + "clip, the cursor at (-16, -146) aimed at the block's waypoint",
+        G.g_nRunPhase === 5 && G.g_route_figures.length === 1
+        && G.g_route_figures[0].charType === 0x39
+        && G.g_route_figures[0].motion === 0x35b
+        && rm.cursorX === -16 && rm.targetY === -98,
+        `phase ${G.g_nRunPhase} ${JSON.stringify(rm)}`);
   run(1, rng, ev);
-  G.g_pad_state = 0;
-  check("the trigger clears the credits and asks for app state 3",
-        G.g_credits[0] === 0 && G.g_app_state_pending === -1
-        && G.g_app_state === 3 && G.g_player_state[0] === PlayerState.Out,
-        `credits ${G.g_credits} app ${G.g_app_state} ${G.g_player_state}`);
+  const tiles = G.g_screen_sprite_draws;
+  check("...the map drawn as 300 tiles through DrawScreenSprite, screen 1's "
+        + "first at the top-left, depth 120",
+        tiles.length === 300 && tiles[0].id === 0xce && tiles[0].x === 0
+        && tiles[0].y === 0 && tiles[0].depth === 120 && tiles[0].flags === 0,
+        `${tiles.length} ${JSON.stringify(tiles[0])}`);
+  run(11, rng, ev);
+  check("the figure walks 4 map pixels a frame down the map, leaving a "
+        + "footprint a step -- and on the waypoint the history runs out: the "
+        + "done word goes to 1 that frame",
+        rm.cursorY === -98 && G.g_route_marks.length === 12
+        && G.g_route_figures[0].yaw === 0
+        && G.g_game_over_route_done === 1,
+        `y ${rm.cursorY} marks ${G.g_route_marks.length} `
+        + `done ${G.g_game_over_route_done}`);
+  run(1, rng, ev);
+  check("...and the figure blends into its end clip, 0x338, over 10 frames",
+        G.g_route_figures[0].motion === 0x338
+        && G.g_route_figures[0].fadeFrom?.motion === 0x35b
+        && G.g_game_over_route_done === 2);
+  run(0x78, rng, ev);
+  check("...held 0x78 frames the screen is still up",
+        G.g_app_state === AppState.GameOver);
+  run(1, rng, ev);
+  check("0x78 frames on the end clip, and the screen hands on by itself: "
+        + "credits cleared, app state 3",
+        G.g_app_state === 3 && G.g_credits[0] === 0
+        && G.g_player_state[0] === PlayerState.Out,
+        `app ${G.g_app_state} done ${G.g_game_over_route_done}`);
+}
+
+{
+  // `GameOverCameraFlyTick` (`FUN_00460E60`): the path frame is its own
+  // counter, the pose goes straight into the block, and the counter steps.
+  const key = (t: number, v: number) => [t, v, 0, 0];
+  const path = new CamPath(0x1f, {
+    file: "cp_gmovr", index: 0, start: 10, duration: 200,
+    channels: {
+      eye_x: [key(10, 1), key(210, 201)], eye_y: [key(10, 5), key(210, 5)],
+      eye_z: [key(10, 0), key(210, 0)], target_x: [key(10, 0), key(210, 0)],
+      target_y: [key(10, 0), key(210, 0)],
+      target_z: [key(10, -1), key(210, -1)],
+    },
+  } as never, false);
+  const host = { ...NULL_HOST, camPath: (slot: number) =>
+    slot === 0x1f ? path : null };
+  G.g_game_over_fly_frame = 50;
+  GameOverCameraFlyTick(host);
+  check("the fly-over tick evaluates path 0x1F at its own counter into the "
+        + "camera block, then counts on",
+        G.g_cam_path_frame === 50 && G.g_game_over_fly_frame === 51
+        && Math.abs(G.g_camera_block_eye.y - 5) < 1e-9
+        && Math.abs(G.g_camera_block_target.z + 1) < 1e-9,
+        `frame ${G.g_cam_path_frame} eye ${JSON.stringify(G.g_camera_block_eye)}`);
 }
 
 {

@@ -87,6 +87,10 @@ export class CameraRig {
                       G.g_camera_block_eye.z);
     this.pose.target.set(G.g_camera_block_target.x, G.g_camera_block_target.y,
                          G.g_camera_block_target.z);
+    // A block with its eye on its look-at has no direction -- the game-over
+    // screen's `CameraBlocksReset` leaves both at the origin, over nothing
+    // drawn -- so the camera stays where the last frame put it.
+    if (this.pose.eye.equals(this.pose.target)) return;
     // The orientation comes from the block's eye/target pair; only the eye's
     // height is adjusted, and only after. Doing it the other way round tilts
     // the shot.

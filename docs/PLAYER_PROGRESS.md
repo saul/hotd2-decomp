@@ -793,7 +793,9 @@ arriving boat's riders were three faults deep: class 0x18 had no motion rule,
 so no rider was ever built; the player made character spawns before slot
 actors, so the civilian copied `g_civilian_carrier` before the boat had set it;
 and the carrier transform converted BAMS the wrong way. Spawns are now made in
-the script's order.
+the script's order. Stage 3's second arriving boat (block 7, carrier routine 6) rides
+its paths too, and the player's boat is drawn from its actor rather than from
+a second copy of its routine in the renderer.
 
 **A room-clear gate waits for the camera as well as the counter, and how long
 it waits is the camera's business.** `wait_enemies_alive` and its two siblings

@@ -62,7 +62,7 @@ export enum CarrierRoutine0State {
  * path, and `hod2lib/bundle.ts` keeps such a model out of the bundle rather
  * than have it arrive doing the wrong thing.
  */
-export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> = new Set([0, 1]);
+export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> = new Set([0, 1, 6]);
 
 /** The 0x1C bytes `ScriptedPropInit13` fills, at `obj+0x1310`. */
 export interface ScriptedPropTail {

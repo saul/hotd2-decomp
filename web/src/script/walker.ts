@@ -387,6 +387,7 @@ export const WALKER_RESTORED_KEYS = [
   "backdropMode", "shutterState", "shutterPrev", "shutterCounter",
   "captionGroup", "captionFrames", "firingGate",
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
+  "sceneAmbient",
   "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
   "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
   "stashedCam", "spawns", "simpleSpawns",
@@ -535,10 +536,26 @@ export class Walker {
   skipRequested = false;
   /** evt 0x1D: rain. Only stage 1 ever turns it on. */
   rain = false;
-  /** evt 0x15: the two players' gun spotlights. Gated by 0x14. */
-  gunLights = false;
-  /** evt 0x14: the scene light array, which gates 0x15 and 0x16. */
-  sceneLighting = false;
+  /**
+   * evt 0x15: the two players' gun spotlights. Gated by 0x14.
+   *
+   * Accessors over `G`, like {@link branchChoice}: the engine has one global
+   * for each (`g_entity_spotlights_on`, `g_scene_lighting`), the evt writes
+   * it and the port's draw-path and light code read it — `CivilianInit`
+   * among them, at spawn, which is why a per-frame copy would be too late.
+   */
+  get gunLights(): boolean { return G.g_entity_spotlights_on === 1; }
+  set gunLights(v: boolean) { G.g_entity_spotlights_on = v ? 1 : 0; }
+  /** evt 0x14: `g_scene_lighting`, the scene light array, which gates 0x15. */
+  get sceneLighting(): boolean { return G.g_scene_lighting !== 0; }
+  set sceneLighting(v: boolean) { G.g_scene_lighting = v ? 1 : 0; }
+  /** evt 0x16: `g_scene_light_ambient` r, g, b. */
+  get sceneAmbient(): [number, number, number] {
+    return [...G.g_scene_light_ambient];
+  }
+  set sceneAmbient(v: [number, number, number]) {
+    G.g_scene_light_ambient = [v[0], v[1], v[2]];
+  }
   /**
    * `g_script_branch_var` — `0x009C88A4`. Which route a branch takes.
    *
@@ -877,6 +894,7 @@ export class Walker {
     this.rain = false;
     this.gunLights = false;
     this.sceneLighting = false;
+    this.sceneAmbient = [0.5, 0.5, 0.5];
     this.branchChoice = 0;
     this.parked = false;
     this.stashedCam = null;
@@ -928,6 +946,7 @@ export class Walker {
       skippable: this.skippable,
       skipRequested: this.skipRequested, rain: this.rain,
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
+      sceneAmbient: this.sceneAmbient,
       branchChoice: this.branchChoice, parked: this.parked,
       sceneState: { ...this.sceneState },
       queuedEventsPending: this.queuedEventsPending,

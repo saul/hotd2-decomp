@@ -61,16 +61,12 @@ const SPAWN_TURN_TOWARD_CAMERA = 0x4;
 export function EnemyZombieInitByCharType(obj: ZombieActor,
                                           events?: Events): void {
   // `00453000  if (obj+0x136C & 0x20) obj+0x38 |= 8`. Raised, not moved: the
-  // source bit stays where it is.
-  //
-  // [open] `EnemyZombieInit` *assigns* `obj+0x136C` from the descriptor's
-  // `+0x20` word (`(s16)obj+0x1316 | 0x60000000`, `00452EAF`) and this port
-  // does not — class 0x31 does, in `EnemyThrowerInit`. So the source bit is
-  // unreachable here and this arm cannot fire, for the 55 shipped class-0x30
-  // spawns that set it. Seeding the word is a change of its own; the line is
-  // transcribed rather than dropped so that the gap is one place, not none.
+  // source bit stays where it is. `EnemyZombieInit` seeds `obj+0x136C`'s low
+  // half from the descriptor's `+0x20` word (`00452EAF`) before calling this,
+  // so the 55 shipped class-0x30 spawns that set it reach the arm -- which is
+  // what draws them through the gun lights (`ZombieAux.SceneLit`).
   if (obj.flags2 & ZombieFlag2.DrawVariantSource) {
-    obj.flags38 |= ZombieAux.DrawVariant;
+    obj.flags38 |= ZombieAux.SceneLit;
   }
   // `0045300B  if (obj+0x34 & 2) { obj+0x34 &= ~2; obj+0x38 |= 0x10 }`
   if (obj.flags & SPAWN_STAND_THROW_RETIRE) {

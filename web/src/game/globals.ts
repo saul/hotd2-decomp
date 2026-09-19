@@ -28,6 +28,7 @@ import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
+import { makeEntityLights } from "./entity_light";
 
 /**
  * `g_app_state` (`0x009C8E98`) — the game's top-level screen, and something
@@ -289,6 +290,36 @@ export const G = {
   g_enemy_approach_steps_mid: 0,
   /** `g_enemy_approach_steps_outer` — 0x009C8E48. */
   g_enemy_approach_steps_outer: 0,
+
+  // -- the scene light array --------------------------------------------
+  // See `scene_lights.ts`. The initial values are `SceneLightArrayInit`'s
+  // (`FUN_004809D0`).
+  /**
+   * `g_scene_lighting` — 0x009A2BB4. evt `0x14`. While set, the light
+   * array is built and submitted and the draw routines that ask for it use it.
+   */
+  g_scene_lighting: 0,
+  /** `g_entity_spotlights_on` — 0x009C8D4C. evt `0x15`; the gun lights' gate. */
+  g_entity_spotlights_on: 0,
+  /**
+   * `g_scene_light_ambient` — 0x009C71D0, `{unused, r, g, b}`; only r, g, b
+   * are carried. evt `0x16` writes them.
+   */
+  g_scene_light_ambient: [0.5, 0.5, 0.5] as [number, number, number],
+  /** `g_entity_lights` — 0x009A1A20, sixteen entries of stride 0x74. */
+  g_entity_lights: makeEntityLights(),
+  /**
+   * `g_crosshair_x` — 0x009A5C70 + player*0x130, and `g_crosshair_y`
+   * beside it: pixels from the centre of the 640x480 frame, `+y` up.
+   */
+  g_crosshair_x: [0, 0],
+  g_crosshair_y: [0, 0],
+  /**
+   * `g_aim_on_screen` — 0x009C8FD0 + player*0x28. `PollPlayerAimInput`
+   * sets it to 1 every frame for a mouse. [port-only] Player 2 has no input
+   * device in the port, so theirs stays 0.
+   */
+  g_aim_on_screen: [1, 0],
 
   // -- the player --------------------------------------------------------
   /** `g_player_lives` — 0x009A5C66 + player*0x98. */
@@ -1279,6 +1310,12 @@ export function ResetGameGlobals(): void {
   // `main.ts` overwrites this from the bundle's `start_lives` immediately
   // after, which is the engine's order too.
   G.g_player_lives = [2, 2];
+  // `SceneLightArrayInit` (`FUN_004809D0`), run at scene init. The aim is
+  // input and survives, as the engine's input record does.
+  G.g_scene_lighting = 0;
+  G.g_entity_spotlights_on = 0;
+  G.g_scene_light_ambient = [0.5, 0.5, 0.5];
+  G.g_entity_lights = makeEntityLights();
   G.g_player_invuln_frames = 0;
   G.g_player_was_hit = [0, 0];
   G.g_player_hit_motion = [0, 0];

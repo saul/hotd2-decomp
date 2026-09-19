@@ -169,6 +169,12 @@ import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
 import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
 import { Walker } from "../src/script/walker";
+import {
+  ActorDrawsSceneLit, BuildEntitySpotlightArray, EntityLightLive, GUN_LIGHT_CONE,
+  GUN_LIGHT_FIRST, RenderLightType, SceneLightArrayUpdate, SetPlayerAimFromPointer,
+} from "../src/game/scene_lights";
+import { VecToAngles } from "../src/game/vec";
+import { ZombieAux } from "../src/game/actor";
 import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
 import {
@@ -15193,6 +15199,115 @@ console.log("\nznjoe's creature:");
     check("...and a reset empties it",
           (ResetGameGlobals(), G.g_body_creatures.length === 0));
   }
+}
+
+// -- the gun lights: BuildEntitySpotlightArray and its gates ----------------
+//
+// `BuildEntitySpotlightArray` (`FUN_00480AC0`) under `SceneLightArrayUpdate`
+// (`FUN_00480970`), evt 0x14/0x15/0x16 through the walker, and the draw-path
+// bit a class-0x30 descriptor's `+0x20` word raises. The renderer places its
+// SpotLight from exactly these numbers, so these are the flashlight.
+console.log("\nthe gun lights:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  // A camera one unit per axis of its own, at (10, 20, 30), looking down -z:
+  // `viewPoint` is the camera block's +0x40 matrix, camera -> world.
+  const eye = vec3(10, 20, 30);
+  G.g_camera_block_eye = { ...eye };
+  const host: GameHost = {
+    ...NULL_HOST,
+    viewPoint: (x, y, z, out) => { out.x = eye.x + x; out.y = eye.y + y; out.z = eye.z + z; },
+  };
+  SceneLightArrayUpdate(host);
+  check("nothing is built while g_scene_lighting is clear",
+        !G.g_entity_lights[GUN_LIGHT_FIRST].enabled && !EntityLightLive(GUN_LIGHT_FIRST));
+  // evt 0x14, 0x15, 0x16 as stage 4 block 0 step 3 runs them.
+  const script = {
+    scene: 3, stage: 4, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x14, name: "set_scene_lighting", cat: "light", enabled: true },
+        { i: 1, at: 8, op: 0x15, name: "enable_entity_spotlights", cat: "light", raw: ["0x00000001"] },
+        { i: 2, at: 16, op: 0x16, name: "set_ambient_light_rgb", cat: "light", rgb: [0.5, 0.6, 0.8] },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  w.tick(1 / 60);
+  check("evt 0x14 and 0x15 write g_scene_lighting and g_entity_spotlights_on",
+        G.g_scene_lighting === 1 && G.g_entity_spotlights_on === 1,
+        `${G.g_scene_lighting} ${G.g_entity_spotlights_on}`);
+  check("evt 0x16 writes g_scene_light_ambient",
+        G.g_scene_light_ambient.join() === "0.5,0.6,0.8",
+        G.g_scene_light_ambient.join());
+
+  SetPlayerAimFromPointer(0, 0, 0);
+  SceneLightArrayUpdate(host);
+  const l = G.g_entity_lights[GUN_LIGHT_FIRST];
+  check("player 1's light is entry 1, a spot, and live",
+        l.enabled && l.type === RenderLightType.Spot && EntityLightLive(GUN_LIGHT_FIRST));
+  check("...one unit in front of the eye for a centred crosshair",
+        l.pos.x === 10 && l.pos.y === 20 && l.pos.z === 29,
+        `${l.pos.x} ${l.pos.y} ${l.pos.z}`);
+  check("...pointing away from the eye",
+        Math.abs(l.dir.z + 1) < 1e-9 && Math.abs(l.dir.x) < 1e-9 && Math.abs(l.dir.y) < 1e-9,
+        `${l.dir.x} ${l.dir.y} ${l.dir.z}`);
+  check("...with the engine's constants",
+        l.att0 === 0.5 && l.theta === GUN_LIGHT_CONE && l.phi === GUN_LIGHT_CONE
+        && l.diffuse.join() === "1,1,1");
+  // An aim up and to the right: the light sits there at depth 1 and points
+  // along eye -> it. This is the VecToAngles pitch sign: it was written
+  // "the obvious way" and pointed the torch down when aimed up.
+  SetPlayerAimFromPointer(0, 320.1, 320.1);
+  SceneLightArrayUpdate(host);
+  const n = Math.hypot(0.5, 0.5, 1);
+  check("an aim up and right puts the light up and right",
+        Math.abs(l.pos.x - 10.5) < 1e-9 && Math.abs(l.pos.y - 20.5) < 1e-9,
+        `${l.pos.x} ${l.pos.y}`);
+  check("...and points it up and right, not down",
+        Math.abs(l.dir.x - 0.5 / n) < 1e-6 && Math.abs(l.dir.y - 0.5 / n) < 1e-6
+        && Math.abs(l.dir.z + 1 / n) < 1e-6,
+        `${l.dir.x} ${l.dir.y} ${l.dir.z}`);
+  check("VecToAngles gives a negative pitch looking up, as FUN_004016B0 does",
+        VecToAngles(0, 1, 1).pitch < 0);
+  check("player 2 has no input device, so no light",
+        !G.g_entity_lights[GUN_LIGHT_FIRST + 1].enabled);
+  G.g_entity_spotlights_on = 0;
+  BuildEntitySpotlightArray(host);
+  check("evt 0x15 off switches it off", !l.enabled);
+  G.g_entity_spotlights_on = 1;
+  G.g_scene_lighting = 0;
+  SceneLightArrayUpdate(host);
+  check("...and with 0x14 off the entry is not submitted",
+        !EntityLightLive(GUN_LIGHT_FIRST));
+
+  // The draw path. `EnemyZombieInit` seeds obj+0x136C's low half from the
+  // descriptor's +0x20 word, and `EnemyZombieInitByCharType` raises obj+0x38
+  // bit 3 from its 0x20 -- which is what puts stage 4's zombies under the
+  // torch. The port used to drop the word, so the bit never rose.
+  G.g_scene_lighting = 1;
+  const lit = spawnZombie(0x2000, 1, "lit", { descFlags: 0x20 } as Partial<Actor>);
+  const plain = spawnZombie(0x2001, 1, "plain", { descFlags: 0 } as Partial<Actor>);
+  check("a class-0x30 descriptor with +0x20 bit 0x20 raises obj+0x38 bit 3",
+        !!(lit.flags38 & ZombieAux.SceneLit), `flags38 ${lit.flags38}`);
+  check("...and draws through the scene light array", ActorDrawsSceneLit(lit));
+  check("...one without it does not", !ActorDrawsSceneLit(plain));
+  G.g_scene_lighting = 0;
+  check("...and nothing does while g_scene_lighting is clear",
+        !ActorDrawsSceneLit(lit));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -134,6 +134,12 @@ export interface OpJson {
   track?: number;
   roll_enabled?: boolean;
   enabled?: boolean;
+  /**
+   * evt `0x16` `set_ambient_light_rgb`: the three floats its pointers name,
+   * which `EvtOpSetAmbientLightRgb16` copies into `g_scene_light_ambient`.
+   * Null for an operand that is not a pointer into the evt file.
+   */
+  rgb?: (number | null)[];
   ground_y?: number;
   /**
    * evt `0x10` / `0x11`: the `coli/` blobs this instruction selects into the

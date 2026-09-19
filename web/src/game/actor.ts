@@ -603,18 +603,22 @@ export enum CountFlag {
  */
 export enum ZombieAux {
   /**
-   * Bit 3 — a draw-path selector, raised from `obj+0x136C` bit `0x20`, which
-   * is the descriptor's own `+0x20` word. `DrawCharacterPartSlot`
-   * (`FUN_00419B40`) is the only reader, in eight places, and it takes it
-   * together with the word at `0x009A2BB4`. Fifty-five shipped class-0x30
+   * Bit 3 — **draw through the scene light array.** Raised from
+   * `obj+0x136C` bit `0x20`, which is the descriptor's own `+0x20` word.
+   * `DrawCharacterPartSlot` (`FUN_00419B40`) reads it in eight places, always
+   * together with `g_scene_lighting` (`0x009A2BB4`), and with both set it
+   * submits through `SubmitSlotWithSceneLightArray` (or its alpha twin
+   * `FUN_00418620`) instead of `AssetDrawSlot` — so the actor is lit by the
+   * gun lights and the evt `0x16` ambient. `[proved]`, read for the flashlight;
+   * this used to be `DrawVariant` and `[open]`. Fifty-five shipped class-0x30
    * spawns set the source bit — 20 in stage 2 and 35 in stage 4.
    *
-   * [open] What it selects has not been read. It is set here because the
-   * routine sets it, and because `EnemyThrowerInit` (`0x00449802`) and
-   * `CivilianInit` (`0x0048A642`) raise the same bit — so it is class-agnostic
-   * and not a zombie fact.
+   * Class-agnostic: `EnemyThrowerInit` (`0x00449802`, character type 0x17
+   * with `obj+0x136C` bit 0) and `CivilianInit` (`0x0048A642`, when
+   * `g_scene_lighting` is set at spawn) raise the same bit. See
+   * `scene_lights.ts`, `ActorDrawsSceneLit`.
    */
-  DrawVariant = 0x8,
+  SceneLit = 0x8,
   /**
    * Bit 4 — **a stationary thrower that never walks away.**
    *
@@ -668,7 +672,7 @@ export enum ZombieFlag2 {
   MayFall = 0x4000000,
   /**
    * Bit `0x20` — the descriptor's own `+0x20` word asking for
-   * {@link ZombieAux.DrawVariant}. `EnemyZombieInitByCharType`
+   * {@link ZombieAux.SceneLit}. `EnemyZombieInitByCharType`
    * (`FUN_00452FD0`) reads it at `0x00453000` and raises `obj+0x38` bit 3 from
    * it; nothing else in the image looks at it.
    */

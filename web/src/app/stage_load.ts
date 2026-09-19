@@ -215,6 +215,7 @@ export async function loadStageInto(p: Player): Promise<void> {
       : null,
     p.rng);
   p.lighting.build(p.scene3d.root);
+  p.gunLights.build(p.scene3d.root);
   p.scene.add(p.scene3d.root);
 
   // Made per stage, from that stage's curves, and never freed until now: one

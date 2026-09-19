@@ -91,7 +91,6 @@
 
 import {
   AmbientLight,
-  SpotLight,
   Color,
   SRGBColorSpace,
   DirectionalLight,
@@ -115,26 +114,16 @@ export const LIGHT_AMBIENT_SCALE = 0.3;
 
 export type LightingMode = "unlit" | "scene";
 
-/**
- * `BuildEntitySpotlightArray` (`0x00480AC0`), reached from evt opcode `0x15`
- * and only while `0x14` is on.
- *
- * Despite the name it is not one light per enemy: the loop runs over the
- * array at `0x009A5C74` with a `0x130` stride and a `0x009A5ED4` bound —
- * **two entries**, the two players. Each light is positioned at the world
- * point the player's crosshair projects to at view-space `z = -1`
- * (`aim / g_projection_distance_px`), and aimed along `eye -> that point`.
- * It is the gun light.
- *
- * The player has no gun and no aim, so the crosshair is taken as centred,
- * which places the light one unit in front of the camera pointing forward.
- *
- * The constants are verbatim: `theta = phi = 0.3926991` (pi/8, and D3D's cone
- * angles are full angles, so three.js's half-angle is pi/16), falloff 1,
- * attenuation0 0.5, diffuse white, range effectively infinite.
+/*
+ * The gun lights — `BuildEntitySpotlightArray` (`FUN_00480AC0`), evt `0x15`
+ * under `0x14` — used to be two `SpotLight`s here, placed one unit in front of
+ * the camera and shown only in this module's "+ scene light" view, on every
+ * surface. They are `render/gunlights.ts` now, placed from `g_entity_lights`
+ * and drawn in every view on exactly the surfaces the engine lights with
+ * them. Both swap the same meshes' materials, so the rig asks
+ * {@link SceneLighting.viewMaterial} what to put back and this module leaves a
+ * gun-lit mesh alone.
  */
-export const GUN_LIGHT_CONE = Math.PI / 8;
-export const GUN_LIGHT_ATTEN0 = 0.5;
 
 export interface SceneLightState {
   /** Light colour, 0..1 per component, from tween channels 6/7/8. */
@@ -173,10 +162,6 @@ export class SceneLighting implements System<RenderContext> {
   readonly group = new Group();
   private readonly dir = new DirectionalLight(0xffffff, DIFFUSE_SCALE);
   private readonly amb = new AmbientLight(0xffffff, 1);
-  /** The two players' gun lights, from evt 0x15. */
-  private readonly guns: SpotLight[] = [];
-  private gunsOn = false;
-  private sceneLightingOn = false;
   private mode: LightingMode = "unlit";
   private intensity = 1;
   private state: SceneLightState = { ...DEFAULT_LIGHT };
@@ -184,19 +169,10 @@ export class SceneLighting implements System<RenderContext> {
   private readonly lit = new Map<Material, Material>();
   private root: Object3D | null = null;
   private readonly _v = new Vector3();
-  private readonly _fwd = new Vector3();
 
   constructor(scene: Scene) {
     this.group.name = "scene_lights";
     this.group.add(this.dir, this.dir.target, this.amb);
-    for (let i = 0; i < 2; i++) {
-      // D3D cone angles are full angles; three.js `angle` is the half-angle.
-      // theta == phi, so the edge is hard and penumbra is 0.
-      const sp = new SpotLight(0xffffff, 1, 0, GUN_LIGHT_CONE / 2, 0, 0);
-      sp.visible = false;
-      this.guns.push(sp);
-      this.group.add(sp, sp.target);
-    }
     this.group.visible = false;
     scene.add(this.group);
   }
@@ -216,41 +192,7 @@ export class SceneLighting implements System<RenderContext> {
     if (mode === this.mode) return;
     this.mode = mode;
     this.group.visible = mode === "scene";
-    this.refreshGuns();
     this.applyMaterials();
-  }
-
-  /**
-   * evt `0x15` (gun lights) and `0x14` (scene lighting), which gates it.
-   * `BuildEntitySpotlightArray` only fills the array while `0x14` is set.
-   */
-  setGunLights(on: boolean): void {
-    this.gunsOn = on;
-    this.refreshGuns();
-  }
-
-  setSceneLighting(on: boolean): void {
-    this.sceneLightingOn = on;
-    this.refreshGuns();
-  }
-
-  private refreshGuns(): void {
-    const on = this.mode === "scene" && this.gunsOn && this.sceneLightingOn;
-    for (const g of this.guns) g.visible = on;
-  }
-
-  /** Place the gun lights for the current view. Aim is taken as centred. */
-  updateGunLights(eye: Vector3, forward: Vector3): void {
-    if (!this.guns[0]?.visible) return;
-    for (const g of this.guns) {
-      // The light sits at the crosshair's world point, one unit ahead.
-      g.position.copy(forward).multiplyScalar(1).add(eye);
-      g.target.position.copy(forward).multiplyScalar(2).add(eye);
-      g.target.updateMatrixWorld();
-      g.intensity = this.intensity;
-      g.decay = 0;                     // attenuation1/2 are both 0
-      g.distance = 0;                  // range is effectively infinite
-    }
   }
 
   setIntensity(v: number): void {
@@ -276,19 +218,26 @@ export class SceneLighting implements System<RenderContext> {
   }
 
   /**
-   * The script's light block, the two evt gates, and the gun lights' place in
-   * the world — all four every tick, because the script ramps the colour over
-   * frames rather than switching it. `set` and `refreshGuns` no-op when
-   * nothing actually moved.
+   * The script's light block, every tick, because the script ramps the colour
+   * over frames rather than switching it; `set` no-ops when nothing moved.
    */
   update(ctx: RenderContext): void {
     const w = ctx.walker;
     if (!w) return;
     this.set(w.light);
-    this.setGunLights(w.gunLights);
-    this.setSceneLighting(w.sceneLighting);
-    this.updateGunLights(ctx.camera.position,
-                         ctx.camera.getWorldDirection(this._fwd));
+  }
+
+  /**
+   * What this view draws a stage material with: its Lambert twin under
+   * "+ scene light", the exported unlit one otherwise. Either can come in.
+   */
+  viewMaterial(m: Material): Material {
+    if (this.mode === "scene") {
+      if (m instanceof MeshLambertMaterial) return m;
+      return this.twinOf(m);
+    }
+    const back = this.lit.get(m);
+    return back && back instanceof MeshBasicMaterial ? back : m;
   }
 
   resync(ctx: RenderContext): void {
@@ -333,48 +282,49 @@ export class SceneLighting implements System<RenderContext> {
    */
   private applyMaterials(): void {
     if (!this.root) return;
-    const want = this.mode === "scene";
     this.root.traverse((o) => {
       const mesh = o as Mesh;
       if (!mesh.isMesh || !mesh.material) return;
       const swap = (m: Material): Material => {
-        if (want) {
-          if (m instanceof MeshLambertMaterial) return m;
-          let twin = this.lit.get(m);
-          if (!twin) {
-            const b = m as MeshBasicMaterial;
-            twin = new MeshLambertMaterial({
-              map: b.map,
-              color: b.color,
-              transparent: b.transparent,
-              opacity: b.opacity,
-              alphaTest: b.alphaTest,
-              alphaMap: b.alphaMap,
-              side: b.side,
-              depthWrite: b.depthWrite,
-              depthTest: b.depthTest,
-              blending: b.blending,
-              vertexColors: b.vertexColors,
-              fog: b.fog,
-              name: b.name,
-            });
-            twin.userData = m.userData;
-            // Keep the fog uniform hook the fog module installed.
-            twin.onBeforeCompile = m.onBeforeCompile;
-            this.lit.set(m, twin);
-            this.lit.set(twin, m);        // reverse, for the swap back
-          }
-          return twin;
-        }
-        // Back to unlit: the reverse mapping was stored alongside.
-        const back = this.lit.get(m);
-        return back && back instanceof MeshBasicMaterial ? back : m;
+        // A mesh the gun light holds keeps its gun-lit twin; the rig puts
+        // back whatever this view wants when the light goes out.
+        if (m.userData?.gunLit) return m;
+        return this.viewMaterial(m);
       };
       mesh.material = Array.isArray(mesh.material)
         ? mesh.material.map(swap)
         : swap(mesh.material);
     });
     this.refresh();
+  }
+
+  /** The Lambert twin of an unlit material, built once and cached both ways. */
+  private twinOf(m: Material): Material {
+    let twin = this.lit.get(m);
+    if (!twin) {
+      const b = m as MeshBasicMaterial;
+      twin = new MeshLambertMaterial({
+        map: b.map,
+        color: b.color,
+        transparent: b.transparent,
+        opacity: b.opacity,
+        alphaTest: b.alphaTest,
+        alphaMap: b.alphaMap,
+        side: b.side,
+        depthWrite: b.depthWrite,
+        depthTest: b.depthTest,
+        blending: b.blending,
+        vertexColors: b.vertexColors,
+        fog: b.fog,
+        name: b.name,
+      });
+      twin.userData = m.userData;
+      // Keep the fog uniform hook the fog module installed.
+      twin.onBeforeCompile = m.onBeforeCompile;
+      this.lit.set(m, twin);
+      this.lit.set(twin, m);        // reverse, for the swap back
+    }
+    return twin;
   }
 
   get describe(): string {

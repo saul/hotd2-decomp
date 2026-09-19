@@ -473,6 +473,12 @@ export class Program {
       d.scene_state_minor = arg0;
     } else if (o === 0x14) {                      // set_scene_lighting
       d.enabled = Boolean(arg0);
+    } else if (o === 0x16) {                      // set_ambient_light_rgb
+      // `EvtOpSetAmbientLightRgb16` resolves three pointers and copies the
+      // float behind each into `g_scene_light_ambient` r, g, b -- the ambient
+      // the scene-light-array path draws with. The values live in the evt
+      // file, so they are read here or not at all.
+      d.rgb = ins.raw.slice(0, 3).map((w) => this.derefF32(w));
     } else if (o === 0x35) {
       // CamEvalPath7 evaluates a cp_ path's 7th channel (roll/bank) only while
       // this is set, and forces roll to 0 otherwise. So the client must gate

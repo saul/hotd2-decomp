@@ -17859,3 +17859,36 @@ scene 2 block 1 outside Original Mode; and no node in the stage geometry is
 named for water or a gate. What is left unexamined in stage 3 is class 0x26,
 eight spawns of the camera's own boat, and class 0x45, thirty-two spawns that
 have never been read.
+
+
+## 2026-09-19 — bug 14, the gun lights (flashlight)
+
+Read `BuildEntitySpotlightArray` (`FUN_00480AC0`) from the disassembly: its
+stores of position, direction, diffuse, falloff, attenuation and cone at
+`0x00480C46`–`0x00480CA9` are **outside the body Ghidra gives it** (L35), which
+is why the decompile shows the matrix work and then nothing. The entry layout
+is `D3DLIGHT7` + enabled at `+0x68` + index at `+0x70`, stride `0x74`, base
+`0x009A1A20`; players' lights are entries 1 and 2. Named the task that drives it
+(`SceneLightArrayUpdate`/`Init`), the render-side light plumbing
+(`RenderLightsResetAll`, `SetRenderLightEnabled`, `SetRenderLightFromWorld`,
+`StoreLightArrayAmbientColour`, `ToggleRenderMultipleLights`),
+`PollPlayerAimInput` (the source of `g_aim_on_screen`), and class-0x41 type 48
+(`PropUpdateType48FlickerLight`, a flickering point light that breaks when shot
+— Ghidra had no function at the table entry; created). Type 48 is not ported.
+
+`DrawCharacterPartSlot` settles `obj+0x38` bit 3: it selects
+`SubmitSlotWithSceneLightArray`. Renamed the port's `ZombieAux.DrawVariant` to
+`SceneLit` and closed its `[open]`. `VecToAngles`' pitch is `-atan2(dy, h)`;
+the port had the opposite sign, "written the obvious way", unread until now.
+
+Wrong turns, for the record: (1) the first screenshots of the fix showed no
+torch at all because the paused player draws the canvas through
+`grayscale(1) brightness(0.75)` and the harness was photographing a paused
+frame — A/B shots now strip `.paused`; (2) the shader divided the lit sum by
+`diffuse / PI` when the PI had already been fed in with the light, so every
+surface clamped to full white and the torch was invisible against it;
+(3) with the lamp at the engine's own point — on the eye ray — shadows are
+exactly hidden behind their casters, so the renderer offsets the lamp
+(`[diverges]`, presentation). And the zombie in the user's shot was not lit
+until `EnemyZombieInit` seeded `obj+0x136C` from the descriptor, which the
+port's own comment had flagged as the gap.

@@ -35,6 +35,18 @@ export const OPS: Record<number, OpImpl> = {
         return w.gunLights ? "gun lights on" : "gun lights off";
       },
     },
+    0x16: {                                     // set_ambient_light_rgb
+      // `EvtOpSetAmbientLightRgb16`: three evt pointers, the floats behind
+      // them into `g_scene_light_ambient` r, g, b -- the ambient the scene
+      // light array draws with. The exporter resolves the pointers.
+      status: "done",
+      run: (w, op) => {
+        const [r, g, b] = op.rgb ?? [];
+        if (r == null || g == null || b == null) return undefined;
+        w.sceneAmbient = [r, g, b];
+        return `ambient ${r.toFixed(2)} ${g.toFixed(2)} ${b.toFixed(2)}`;
+      },
+    },
     // Block 0 is pushed every frame, so it is the one that shows.
     0x20: { status: "done", run: (w, op) => w.applyLightChannel(op) },
     0x21: { status: "done", run: (w, op) => w.applyLightChannel(op) },

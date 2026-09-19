@@ -40,6 +40,8 @@ export const RIGS: readonly Rig[] = [
         note: "parked: CamEvalObjectPath6(0xFE, 350.0), a literal, not the camera frame",
       },
     ],
+    spawnClass: 38,
+    spawnSubtype: 1,
     parts: [
       {
         name: "body",
@@ -185,6 +187,8 @@ export const RIGS: readonly Rig[] = [
         camPaths: [177],
       },
     ],
+    spawnClass: 38,
+    spawnSubtype: 3,
     parts: [
       {
         name: "part_185b",
@@ -223,6 +227,8 @@ export const RIGS: readonly Rig[] = [
         note: "hardcoded pose, no path eval",
       },
     ],
+    spawnClass: 38,
+    spawnSubtype: 4,
     parts: [
       {
         name: "part_8c7_145c",
@@ -301,6 +307,8 @@ export const RIGS: readonly Rig[] = [
         note: "hardcoded pose",
       },
     ],
+    spawnClass: 38,
+    spawnSubtype: 5,
     parts: [
       {
         name: "part_1913",

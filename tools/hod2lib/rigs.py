@@ -197,10 +197,21 @@ class Rig:
     #: spawn descriptor of that class, which is how objects that take their
     #: path slot from the object at runtime still get exported.
     spawn_class: int | None = None
-    #: Place only at spawns of `spawn_class` whose ``desc+0x22`` (``obj+0x11C``,
-    #: the subtype a class installer switches on) is this, once per descriptor
-    #: however many blocks respawn it. For a rig whose pose the browser port's
-    #: own actor owns -- the root is then one per spawn address.
+    #: ``obj+0x11C`` of the spawns of `spawn_class` whose class handler
+    #: installs this routine -- **the one answer to "which spawn owns this
+    #: rig"**. **[proved]** for class 0x26: `Class26InstallSubtypeUpdate`
+    #: (`FUN_0048E290`) switches on the s16 at ``obj+0x11C`` (the descriptor's
+    #: ``+0x22``) and stores the chosen routine at ``obj+0x00``, so the object
+    #: exists, and draws, from the frame that spawn's opcode runs and not
+    #: before. Two consequences, both from this one field:
+    #:
+    #: * every such rig carries ``spawn_ats`` -- the script addresses of the
+    #:   matching spawns, once each however many blocks respawn them -- and the
+    #:   player holds it back until one of them has run (stage 4's
+    #:   `obj_48f050` is spawned in block 12 and was drawn in block 0's desk);
+    #: * a rig with **no route, path slot or fixed pose** is posed by the
+    #:   browser port's own actor, so it is placed once per matching spawn
+    #:   (``hod2_spawn_at``) instead -- stage 3's boat, subtype 2.
     spawn_subtype: int | None = None
     parts: tuple[RigPart, ...] = field(default_factory=tuple)
     note: str = ""
@@ -244,6 +255,8 @@ _ST1_OCCUPANT_YAW = dict(
 ST1_VEHICLE = Rig(
     name="st1_vehicle",
     routine="FUN_0048E600",
+    spawn_class=0x26,
+    spawn_subtype=1,
     routes=(
         Route(0xFD, cam_paths=(0x20,)),
         Route(0xFE, cam_paths=(0x21,), stop_frame=0x15D,
@@ -382,6 +395,8 @@ OBJ_48EAD0 = Rig(
 OBJ_48F050 = Rig(
     name="obj_48f050",
     routine="FUN_0048F050",
+    spawn_class=0x26,
+    spawn_subtype=3,
     routes=(
         Route(0x173, cam_paths=(0xAE, 0xAF, 0xB2), frame="zero",
               note="frame is a literal 0.0f (6A 00), not the clamped frame"),
@@ -404,6 +419,8 @@ OBJ_48F050 = Rig(
 OBJ_48F190 = Rig(
     name="obj_48f190",
     routine="FUN_0048F190",
+    spawn_class=0x26,
+    spawn_subtype=4,
     routes=(
         Route(0x17A, cam_paths=(0xCD,)),
         Route(0x17B, cam_paths=(0xCE,)),
@@ -469,6 +486,8 @@ OBJ_48F190 = Rig(
 OBJ_48F560 = Rig(
     name="obj_48f560",
     routine="FUN_0048F560",
+    spawn_class=0x26,
+    spawn_subtype=5,
     routes=(
         Route(0x182, cam_paths=(0xDA,), frame="zero",
               note="frame is a literal 0.0f"),
@@ -1114,6 +1133,14 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
                 seen.add(sp.get("at"))
                 kept.append(sp)
             placed = kept
+        # `spawn_subtype` is the one answer to "which spawn owns this rig":
+        # every matching spawn's address goes out as `spawn_ats`, and only a
+        # rig nothing else poses -- no route, no fixed pose -- is also placed
+        # once per spawn for the port's actor to pose.
+        spawn_ats = ([sp.get("at") for sp in placed]
+                     if rig.spawn_subtype is not None else None)
+        if rig.spawn_subtype is not None and (routes or fixed):
+            placed = []
         if not routes and not fixed and not world and not placed:
             continue
 
@@ -1134,6 +1161,7 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
                 parts.append((part, models))
         if parts:
             out.append({"rig": rig, "routes": routes, "parts": parts,
+                        "spawn_ats": spawn_ats,
                         "blocked": rig.placement_blocked,
                         "fixed": fixed, "world": world,
                         "placements": (placed

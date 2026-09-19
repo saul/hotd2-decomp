@@ -5,13 +5,15 @@
  * are props**: a shootable thing standing in a branch block whose one job is
  * to answer `EvtAdvanceStepOrRoute`'s `next[]` index. They are here rather
  * than one file apiece because they are one mechanism written nine ways, and
- * reading them side by side is the only way the shape is visible:
+ * reading them side by side is the only way the shape is visible. Type 40 is
+ * ported whole and lives in `class41/type40.ts`; the table keeps its row so
+ * the nine are still read together:
  *
  * ```
  * type 14  first hit          -> 1 - obj+0x11C     both modes
  * type 19  first hit          -> 1 - obj+0x11C     both modes
  * type 25  first hit, block 0x17 -> 1              both modes
- * type 40  both sub-kind 9 broken, flag 0x11 -> 2  original only
+ * type 40  both sub-kind 9 broken, flag 0x11 -> 2  original only  (type40.ts)
  * type 56  script flag 5, block 9 -> 2             original only
  * type 69  flag 0x23, already 1, shot -> 2         original only
  * type 70  scene 2, block 4, flag 0x13 -> scene    original only
@@ -205,48 +207,6 @@ export function PropUpdateType25(p: BreakableProp): void {
   G.g_script_branch_var = 1;
   p.branchLatched = true;
   p.flags |= PROP_BRANCH_ANSWERED;
-}
-
-/**
- * `PropUpdateType40` — `FUN_0046C570`. `g_class41_updates[40]`, 28 spawns.
- *
- * Two halves, and the order matters — the engine tests the **count** before
- * it tests the hit, so the frame that breaks the second prop is not the frame
- * that opens the route:
- *
- * ```c
- * if (g_GameMode == 1 && obj->+0x1BA == 9
- *     && g_branch_prop_shot_count == 2 && g_script_flags[0x11] == 1) {
- *     g_script_branch_var = 2;
- *     g_branch_prop_shot_count = -1;          // fire once
- * }
- * ...
- * if (hit && !obj->+0x1B9 && ...) {
- *     ...forty fragments...
- *     if (g_GameMode == 1 && obj->+0x1BA == 9) g_branch_prop_shot_count += 1;
- * }
- * ```
- *
- * So **both** of the sub-kind-9 props have to be broken, and the counter is
- * shared: it is a global, not a field, which is what lets two objects agree.
- * The `-1` is the latch, and it is why the route cannot open a third time.
- *
- * Not transcribed: the forty fragments, their bounce off
- * `g_camera_fixed_eye_y + 1`, the light colour the routine sets for itself,
- * the two camera-path despawns and the sub-kind draw scales.
- */
-export function PropUpdateType40(p: BreakableProp): void {
-  if (G.g_GameMode === GameMode.Original && p.subKind === 9
-      && G.g_branch_prop_shot_count === 2
-      && ScriptFlag(BranchScriptFlag.FragmentPair) === 1) {
-    G.g_script_branch_var = 2;
-    G.g_branch_prop_shot_count = -1;
-  }
-  if ((p.flags & BreakableFlag.Hit) === 0 || p.branchLatched) return;
-  p.branchLatched = true;
-  if (G.g_GameMode === GameMode.Original && p.subKind === 9) {
-    G.g_branch_prop_shot_count += 1;
-  }
 }
 
 /**

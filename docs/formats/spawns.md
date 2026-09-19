@@ -64,7 +64,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported, see PLAYER_PROGRESS *Three stage-2 set pieces*. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported, see PLAYER_PROGRESS *Three stage-2 set pieces*. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. State 37, `ZombieStateCarryProp`, carries a **classless prop** (`CarriedPropInit`, `FUN_00442740`) typed by its script's `+0x00` out of `g_carried_prop_types` and throws it through `g_prop_behaviours` 1/3/4/5 -- stage 3's drums and stage 1's barrel; see `game/carried_prop.ts`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 47 of the 59 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are the hinges (`HingeUpdate`, see PLAYER_PROGRESS *Scripted scenery*); 9 (`PropBuildFlagLiftedProp`, `0x00473300` — one asset slot that rises 0.8 a frame to y 10 on one script flag and is killed by another; no collision) is read and unported; 15 is `PropBuildKindedProp`; the rest are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
@@ -275,6 +275,65 @@ standing in for scenery.
 `if (g_GameMode != 1) { ActorDespawn(obj); return; }` — they are Original
 Mode's collectibles and are gone on their first frame of an Arcade run.
 
+### Stage 1's church: class 0x41 types 38, 39, 40 and 44 build from tables
+
+**[proved]** Block 1 step 2 op 16/17 of stage 1 (both modes) runs four
+placers whose descriptors all stand at the origin — evt `0x1994`, `0x19BC`,
+`0x19E4` and `0x1B48`, types 38, 39, 40 (sub-kind 0) and 44, each `+0x11C = 4`.
+The descriptor contributes only that lifetime: every object comes out of a
+table in the image. Until 2026-09-18 the port had no constructor for 38, 39 or
+44 and put every type-40 object at the placer's own point with slot 0, which is
+why the church had bare pews (new bug 8) and the humanoid in step 5 had its arm
+round nothing (new bug 9).
+
+| type | constructor | update | objects | draws | shot |
+|---|---|---|---|---|---|
+| 38 | `PlaceTable38Props` (`FUN_00463420`) | `PropUpdateType38` (`FUN_0046BCC0`) | 9, `g_prop_table38` (`0x00593E70`) | `komono_st1.bin[3]` → `[2]` once shot | r 3.0 at y−1, every frame; pays 0 |
+| 39 | `PlaceTable39Stacks` (`FUN_00463510`) | `PropUpdateType39` (`FUN_0046C240`) | 8 stacks, `g_prop_table39` (`0x00593F48`) | up to 8 × `0x1237`, 0.926 apart | r 5.0 at y+3 until shot; pays 10 |
+| 40 | `PlaceFragmentProps` (`FUN_004636A0`) | `PropUpdateType40` (`FUN_0046C570`) | `g_class41_fragment_counts[sk]` | `obj+0x1E0`, +1 once shot, and 40 `garasu.bin` pieces | r 5.5, rise by slot; pays 10 |
+| 44 | `PlaceTable44Props` (`FUN_004639F0`) | `PropUpdateType44` (`FUN_0046D850`) | 7, `g_prop_table44` (`0x005946F8`) | rows 0–1 effect 0x13 on motion 468, rows 2–6 `komono_7.bin[0]`, all a shadow `0x10D1` ×(8,1,8) | r 5.0 at y+5 until shot; pays 10 |
+
+* **Angles in degrees.** Tables 38 and 39 and sub-kind 1's poses store
+  `{f32 x, y, z; f32 rx, ry, rz}` with the angles in degrees, turned into BAMS
+  by `__ftol(deg * 182.0444)` (`0x00569010`) — truncation, not rounding.
+* **Type 39's heights are computed**: `__ftol(8.0 - row * 0.4f)` after a
+  32-bit store, so 8, 7, 7, 6, 6, 6, 5, 5. Row 5 is six only because the
+  product goes through a `float` before `__ftol`.
+* **Type 44 is chairs, by asset**: `0x1064` is `komono_7.bin[0]`, the model
+  class 0x33 selector 4's pushable chairs draw, and effect 0x13's ten nodes
+  are `komono_7.bin[11..20]`. Row 6, lying on its side at (−22.3, 9.06,
+  −97.86), is the chair the step-5 humanoid lies against — a screenshot of
+  `?stage=1&original=1&block=1&step=5&op=12&frame=500` shows his arm over it.
+* **Type 40 sub-kind 0** is placed by
+  `T(16.473, 16.821, 4.749) . RotY(0x278D) . T(x, 0, z)` of each row of
+  `g_fragment_subkind0_offsets` and the translation read back. Sub-kind 1
+  uses `g_fragment_subkind1_intact` (`0x007DCDB8`), a per-game latch: a
+  sub-kind-1 object once broken is built as `0x17C7` and refuses the next hit
+  until `ResetFragmentSubkind1Intact` (`FUN_00463680`). Sub-kinds 2–19 read
+  `g_fragment_pose_tables[sk]` and `g_fragment_slots[sk]`, then a switch
+  through the jump table at `0x00463998` (sub-kinds below 6 wrap past it on an
+  unsigned `JA`). Sub-kind 11's third row is at z = −107367 in the shipped
+  table; transcribed, not corrected.
+* **Traps**: the decompiler ends `PlaceFragmentProps`' sub-kind-0 arm, both
+  table routines' draw tails and `PropUpdateType44`'s shadow at the first
+  `MatrixStackPop` (L35), and drops every `__ftol` multiplier (L1). Every
+  constant here was re-read with `disassemble_bytes`.
+* **`0x009A4684` is `g_motion_slots[468].state`**, the residency word the
+  type-44 effect draw is gated on — the same literal-address idiom
+  `ScriptFlagEffectUpdate` uses for 471.
+* **The hit effect** all three table routines call is
+  `SpawnPropHitEffectScaled` (`FUN_004666B0`) — effect strip `0xE25`, drawn
+  `0xE26`..`0xE33` by `PropHitEffectScaledUpdate` (`FUN_004667A0`) at
+  `scale * 1.5`, at the crosshair unprojected to the prop's depth. 23 call
+  sites against `SpawnPropHitSpark`'s 9, and **none of types 38, 39, 40 or 44
+  calls the spark**. Both ported.
+* **Effect 0x13 is interpolation mode 2**, and `EffectPoseNode`'s matrix arm
+  is reached on 12 node-frames of motion 468: `MatrixInterpolateSwingTwist`
+  (`FUN_00412750`) — see the effect system section below. Ported.
+
+`tools/verify_prop_tables.py` compares every table word the port carries as a
+literal against the image.
+
 ### Class 0x41 type 4: seven of the eleven kinds are effects, not models
 
 **[proved]** `PlaceKindedProp` (`FUN_00462E10`) sets `obj+0x28C = 0xFFFF` and
@@ -332,8 +391,18 @@ g_motion_slots[motion].base + 4 + frame * align4(bones * 0x12 - 0xF)
 with the rotations following at `bone * 6` (three BAMS shorts, X then Y then
 Z), so `mot.md`'s decoder already reads the data — only the node tree is new.
 `g_effect_interp_mode` picks the rate: 0 is one key per frame, 1 and 2 halve it
-and blend the neighbouring keys, and 2 additionally slerps through matrices
-when any axis differs by more than `0x3000`.
+and blend the neighbouring keys. **Mode 2**, on an odd cursor past 1 and only
+when **all three** angles differ by more than `0x3000` (Z, then Y, then X, as
+plain integer differences), builds both keys' `Rz . Ry . Rx` and hands them to
+`MatrixInterpolateSwingTwist` (`FUN_00412750`) at `t = 0.5`: with
+`R = A^-1 . B`, the swing `s` is the angle `R` turns Y through, about
+`c = Y x R.Y`, and the twist `b` is what is left about Y; the result is
+`A . Rot(c, trunc(s t)) . RotY(trunc(b t))`, both angles `(s16)__ftol`'d from
+`atan2 * 32768/pi` (`g_rad_to_bams`, `0x004C4378`). Its `c = (1,0,0)` arm for
+a half-turn swing is unreachable — the swing is sign-extended before it is
+compared with `0x8000`. The five matrix routines it rests on are
+`MatrixSetTop3x4`/`MatrixGetTop3x4` (`FUN_004A9ED0`/`FUN_004A9E30`),
+`MatrixInvert`, `MatrixMultiply`, `MatrixRotateAxis` and `MatrixRotateY`.
 
 **[proved] by the slot names.** Every node of an effect resolves to one
 `komono_*.bin` — *komono*, "small items", the same family as the breakable

@@ -236,12 +236,13 @@ export interface Rig {
    */
   spawnClass?: number | null;
   /**
-   * Place the rig only at spawns of {@link spawnClass} whose `desc+0x22` --
-   * `obj+0x11C`, the subtype a class installer switches on -- is this, and at
-   * each such descriptor **once**, however many blocks respawn it. For a rig
-   * whose pose the port's own actor owns, the root is the actor's: one per
-   * spawn address, tagged `hod2_spawn_at`, placed by `render/rigs.ts` from the
-   * actor every frame.
+   * `obj+0x11C` of the spawns of {@link spawnClass} whose class handler
+   * installs this routine -- the one answer to "which spawn owns this rig";
+   * see `spawn_subtype` in `tools/hod2lib/rigs.py`. Every such rig carries
+   * the matching spawns' addresses as {@link RigInstance.spawnAts}, and the
+   * player draws it only once one has run. A rig with no route and no fixed
+   * pose is also placed once per matching spawn, tagged `hod2_spawn_at`, and
+   * `render/rigs.ts` poses that root from the port's actor every frame.
    */
   spawnSubtype?: number | null;
   parts?: RigPart[];
@@ -329,6 +330,11 @@ export interface RigInstance {
   fixed: RigFixed[];
   world: boolean;
   placements: Record<string, unknown>[];
+  /**
+   * The script addresses of the spawns that install this routine, or `null`
+   * for a rig nothing links to a spawn. See {@link Rig.spawnSubtype}.
+   */
+  spawnAts?: number[] | null;
   /** Only prop rigs carry these; see `props.rigEntries`. */
   anchors?: Record<string, unknown>;
   biases?: Record<string, unknown>;
@@ -498,6 +504,11 @@ export async function resolveForStage(
     }
     let placed = rig.spawnClass !== undefined && rig.spawnClass !== null
       ? placements.get(rig.spawnClass) ?? [] : [];
+    // `spawnSubtype` is the one answer to "which spawn owns this rig": every
+    // matching spawn's address goes out as `spawnAts`, and only a rig nothing
+    // else poses -- no route, no fixed pose -- is also placed once per spawn
+    // for the port's actor to pose.
+    let spawnAts: number[] | null = null;
     if (rig.spawnSubtype !== undefined && rig.spawnSubtype !== null) {
       const seen = new Set<unknown>();
       placed = placed.filter((sp) => {
@@ -505,6 +516,8 @@ export async function resolveForStage(
         seen.add(sp.at);
         return true;
       });
+      spawnAts = placed.map((sp) => sp.at as number);
+      if (routes.length || fixed.length) placed = [];
     }
     if (!routes.length && !fixed.length && !world && !placed.length) continue;
 
@@ -528,6 +541,7 @@ export async function resolveForStage(
     }
     if (parts.length) {
       out.push({
+        spawnAts,
         rig, routes, parts, blocked: rig.placementBlocked ?? "", fixed, world,
         placements: (rig.worldSpace || rig.routeParam || rig.variantParam)
           ? [] : placed,

@@ -371,6 +371,19 @@ export class EffectLayer implements System<RenderContext> {
    */
   private drawCarriedProps(seen: Set<string>): void {
     for (const c of G.g_carried_props) {
+      // The break effect: one node per part, each already a world matrix --
+      // `CarriedPropBreakUpdate` draws on the world-to-view top, so the
+      // modelview it builds is `view . part` and the part is the world one.
+      c.parts.forEach((part, i) => {
+        const key = `cp${c.id}p${i}`;
+        const node = this.node(key, part.slot, this.group);
+        if (!node) return;
+        seen.add(key);
+        node.matrixAutoUpdate = false;
+        node.matrix.fromArray(part.m);
+        node.matrixWorldNeedsUpdate = true;
+        node.renderOrder = 0;
+      });
       if (!c.draw || !c.slot) continue;
       const key = `cp${c.id}`;
       const node = this.node(key, c.slot,

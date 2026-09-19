@@ -46,10 +46,12 @@ civilian (block 6, bug 11) is the same state releasing into behaviour 3,
 `CarriedPropThrowAtTarget`: two loops of 271 and one of 265 before 266 lets go
 on frame 15, and the barrel dropped on the civilian's head kills her unless it
 or its carrier is shot first. `op 0x47`, `wait_targets_clear`, is real now and
-counts carried props as camera candidates. `[open]`: stage 2's pair release
-into behaviour 5 (`CarriedPropRollAtCamera`), a carrier killed holding its prop
-drops it into `CarriedPropFallFree`, and neither is ported -- the prop stays
-undrawn in the pool; the break effect's draw is not ported either.
+counts carried props as camera candidates. Stage 2 block 28's pair release
+into behaviour 5, `CarriedPropRollAtCamera`: the barrels roll down the steps at
+the player on `CarriedPropGroundContact`'s friction-and-bounce ground model. A
+carrier killed holding its prop drops it (`CarriedPropDrop`,
+`CarriedPropFallFree`), and a prop shot to pieces draws its break effect -- the
+drum splits in two -- through the effect tree the class-0x44 props use.
 
 **A civilian's captors are made again.** `CivilianInit` spawns its children
 itself, so the walker's spawn list names only the civilian; 6da5fab walked
@@ -3839,6 +3841,44 @@ then shows the broken lamp. `render/gunlights.ts` draws the light as a
 three.js `PointLight` on the same lit set; `[diverges]`: the `att0` near field
 is dropped, which only matters inside two units, where both saturate.
 
+
+### Stage 1's church is furnished, and stage 4's desk has no lift in it
+
+Three reports, two causes.
+
+**The church (new bugs 8 and 9).** Class 0x41 types 38, 39 and 44 had no
+constructor in `g_class41_constructors`, and type 40 had only its branch arm:
+every one of its objects stood at the placer's origin with draw slot 0. All
+four are ported whole now, each in its own file under `game/class41/` —
+`PlaceTable38Props`/`PropUpdateType38` (nine objects that hop and land
+pivoting on a hull corner), `PlaceTable39Stacks`/`PropUpdateType39` (eight
+stacks that topple item by item, blink and go), `PlaceFragmentProps`/
+`PropUpdateType40` (all twenty sub-kinds' tables, the forty-piece burst and
+the per-game `g_fragment_subkind1_intact` latch) and
+`PlaceTable44Props`/`PropUpdateType44` (seven chairs: two drawn as effect 0x13
+that a shot blows apart, five whole). They draw through `render/prop_parts.ts`,
+which writes each routine's `AssetDrawSlot` blocks out as a list of parts. Row
+6 of type 44 is the chair the step-5 humanoid lies against. The bundles carry
+the new slots, `verify_prop_slots` now checks them, and `verify_prop_tables`
+compares every table the port carries as a literal with the EXE.
+
+Every other type-40 placement in stages 1, 2 and 4 moves with it: objects that
+had been drawn nowhere are now at their table points with their own models.
+
+**Stage 4 (new bug 12).** `obj_48f050` — class 0x26 subtype 3, installed by
+`Class26InstallSubtypeUpdate` (`FUN_0048E290`) — was drawn from stage load at
+its baked origin pose, which is inside the desk of block 0's opening shot. Its
+one spawn is in block 12. Rigs whose routine a spawn installs now carry
+`spawn_ats` in the bundle and are drawn only once the walker has run one of
+those spawns, which closes the timing half of `render/rigs.ts`'s declared
+divergence for all five class-0x26 rigs.
+
+Both of what was left over is ported now: `SpawnPropHitEffectScaled`
+(`FUN_004666B0`), the hit effect types 38, 39 and 44 — and 43 — call, at the
+point the shot was aimed (the generic spark no longer fires for 38/39/40/44,
+none of whose routines calls it); and `EffectPoseNode`'s matrix arm,
+`MatrixInterpolateSwingTwist` (`FUN_00412750`), which effect 0x13 reaches on
+12 node-frames of its break (`class44/swing_twist.ts`).
 
 ### Light block 1 is the characters' light
 

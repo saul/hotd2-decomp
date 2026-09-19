@@ -11,17 +11,17 @@
  * PlaceChainSegments      FUN_00463160  class 0x41 ctor 24   stage 2 blk 22
  * PlaceFragmentProps      FUN_004636A0  class 0x41 ctor 40   28 spawns
  * PlaceStoryModeSwitch    FUN_00473A70  class 0x44 sel 17    12 spawns
+ *
+ * The fragment row is ported whole now and has its own file,
+ * `class41/type40.ts`: constructor, update, draw and all twenty sub-kinds.
  * ```
  *
  * All three are Original Mode's. The chain refuses to build its trigger group
  * outside it, and the other two are gated in their updates.
  *
- * **What is transcribed**: the object count, the fields the branch arm reads,
- * and the shared counter one of them zeroes. The positions each constructor
- * computes from its own tables — the chain's per-segment hang, the fragment
- * row's per-sub-kind layout tables at `0x00594038` and `0x005945EC` — are not,
- * so the port places them at the placer's own point. That is a drawing
- * difference and it is declared; where they *are* is not what decides a route.
+ * **What is transcribed** for the chain and the switch: the object count, the
+ * fields the branch arm reads, and the chain's per-segment hang (without its
+ * swing, declared at the site).
  */
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
@@ -30,8 +30,7 @@ import {
   BreakableFlag, BreakableState, makeBreakableProp, PropFamily,
   type BreakableProp,
 } from "./prop_state";
-import { CHAIN_LINK_DROP, FRAGMENT_RADIUS, STORY_SWITCH_RADIUS }
-  from "./shot_test";
+import { CHAIN_LINK_DROP, STORY_SWITCH_RADIUS } from "./shot_test";
 
 /** `PlaceChainSegments` writes `seg->+0x124 = 2.0` for every link. */
 export const CHAIN_SEGMENT_RADIUS = 2.0;
@@ -41,23 +40,6 @@ export const CHAIN_SEGMENTS = 0x14;
 
 /** The chain group that carries a route, and the only one gated on the mode. */
 export const CHAIN_BRANCH_GROUP = 1;
-
-/**
- * `g_class41_fragment_counts` — `0x005945D8`, one byte per sub-kind: how many
- * objects `PlaceFragmentProps` builds for it.
- *
- * Sub-kind **9** is 2, and that 2 is load-bearing: it is the number
- * `PropUpdateType40` waits for `g_branch_prop_shot_count` to reach before it
- * opens the route. The rest are here because the count is what decides how
- * many objects stand in the level, and a table read out of the image beats a
- * constant chosen to make one case work.
- */
-export const FRAGMENT_COUNTS = [
-  8, 12, 4, 15, 9, 2, 6, 2, 1, 2, 3, 3, 4, 1, 1, 12, 1, 3, 2, 2,
-];
-
-/** The sub-kind whose pair is a route-branch trigger. */
-export const FRAGMENT_BRANCH_SUBKIND = 9;
 
 /**
  * `PlaceChainSegments` — `FUN_00463160`. `g_class41_constructors[24]`.
@@ -118,76 +100,6 @@ export function PlaceChainSegments(pl: BreakablePlacement): BreakableProp[] {
     G.g_chain_segments[group * CHAIN_SEGMENTS + i] = p.id;
     out.push(p);
   }
-  return out;
-}
-
-/**
- * `PlaceFragmentProps` — `FUN_004636A0`. `g_class41_constructors[40]`,
- * 28 spawns and the most-placed of the branch triggers.
- *
- * ```c
- * count = g_class41_fragment_counts[placer->+0x1F4];
- * for (i = 0; i < count; i++) {
- *     obj = ActorAlloc(PropUpdateType40, 0xD14);
- *     obj->+0x11C = placer->+0x11C;
- *     obj->+0x1B8 = i;                 obj->+0x1BA = placer->+0x1F4;
- *     obj->+0x124 = 5.5;               obj->+0x34  = 0x80000001;
- *     ...a per-sub-kind position table, a draw slot, a scale...
- *     if (sub_kind == 9) g_branch_prop_shot_count = 0;
- * }
- * ```
- *
- * **The counter is zeroed here**, in the constructor, which is what makes
- * `PropUpdateType40`'s "both of them broken" test mean *both of the two this
- * placement built* rather than two from any run. It sits in the `switch` arm
- * for `sub_kind - 6 == 3`, so it fires once per placement rather than once per
- * object.
- */
-/**
- * Where `PlaceFragmentProps` puts sub-kind 9's pair, out of the pointer table
- * at `0x005945EC` — `[9]` resolves to `0x00594408`.
- *
- * Two objects, the same y and z, **41.683 apart in x**: the left and right of
- * a corridor, which is what a route-branch pair looks like. They are here as
- * literals because they are the only sub-kind whose placement the port needs
- * to be *right* rather than merely present — the branch depends on both being
- * shootable, and a pair stacked on the placer is one target.
- *
- * [open] The other nineteen sub-kinds' tables are read but not carried; those
- * objects are placed at the placer's own point.
- */
-export const FRAGMENT_SUBKIND9_POSITIONS:
-    ReadonlyArray<readonly [number, number, number]> = [
-  [86.6348, -4.30138, -224.319],
-  [128.3177, -4.30138, -224.319],
-];
-
-export function PlaceFragmentProps(pl: BreakablePlacement): BreakableProp[] {
-  const subKind = pl.sub_kind ?? 0;
-  const count = FRAGMENT_COUNTS[subKind] ?? 0;
-  const out: BreakableProp[] = [];
-  for (let i = 0; i < count; i++) {
-    const p = makeBreakableProp(G.g_breakable_next_id++, 0, i);
-    p.family = PropFamily.Generic;
-    p.at = pl.at;
-    p.kind = 40;
-    p.subKind = subKind;
-    // `obj+0x124 = 0x40B00000` -- 5.5 for every sub-kind.
-    p.hitRadius = FRAGMENT_RADIUS;
-    p.state = BreakableState.Standing;
-    p.flags = 0x80000000 | BreakableFlag.Live;
-    p.lastStepIndex = G.g_evt_step_index;
-    p.stepsElapsed = 0;
-    p.lifetime = pl.lifetime_evt_steps ?? 0;
-    const at = subKind === FRAGMENT_BRANCH_SUBKIND
-      ? FRAGMENT_SUBKIND9_POSITIONS[i] : undefined;
-    p.x = at ? at[0] : pl.pos?.[0] ?? 0;
-    p.y = at ? at[1] : pl.pos?.[1] ?? 0;
-    p.z = at ? at[2] : pl.pos?.[2] ?? 0;
-    p.yaw = pl.yaw ?? 0;
-    out.push(p);
-  }
-  if (subKind === FRAGMENT_BRANCH_SUBKIND) G.g_branch_prop_shot_count = 0;
   return out;
 }
 

@@ -22,6 +22,7 @@
 00462978	g_place_generic_prop_arm_index	u8[0x48], the byte index table of PlaceGenericProp's type switch: 0x00461DA2 loads the descriptor's type from placer+0x130C, subtracts 6, refuses anything above 0x47, indexes this, and jumps through g_place_generic_prop_arms. So types 6..77 have an arm and types 5 and 78 fall to the default at 0x004628CE -- which is why PropDrawOnlyType5's obj+0x28C is the prologue's untouched and it has no per-type setup at all. 72 entries selecting 41 distinct arms, so most arms serve more than one type. tools/verify_prop_pose.py walks it to decide which arm a type's slot and lifetime writes belong to.
 0048e32c	g_class26_states	8 entries; entries 6 and 7 share a target
 004c4370	g_bams_to_rad	f64 0x3F1921FB54442D18 = 2pi/65536 exactly -- BAMS to radians, and a DOUBLE: MatrixRotateX/Y/Z are FILD angle; FMUL double [here]; FSTP float, so the radians they use are the double product rounded to float, not a float constant. 155 readers. PropUpdateType35 (0x0046B320) keeps the product on the FPU into FSIN, so it sees the double. web/src/core/bams.ts carries both (BAMS_TO_RAD, BAMS_TO_RAD_F64).
+004c4378	g_rad_to_bams	f64 0x40C45F306DC9C883 = 32768/pi, radians to BAMS -- the reciprocal of g_bams_to_rad beside it. MatrixInterpolateSwingTwist multiplies both FPATAN results by it before __ftol.
 004c43a4	g_camera_track_key_scale	10.0f. RegisterForCameraTracking's sort key is the distance from the camera eye times this, as an int.
 004c479c	g_cam_path_file_id
 004c4cd0	g_approach_ring_defaults	Four {inner, mid, outer} f32 ring sets copied into g_enemy_approach_rings by the scene reset. 25/38/51 for most characters, 37/48/51 for set 2. No stage script uses evt 0x0E, so these are what every encounter runs on.
@@ -172,7 +173,20 @@
 00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
 00593d14	g_breakable_group_counts	nine member counts: {4,2,3,9,5,3,3,6,7}
 00593db8	g_prop_kind_params	Per class-0x41-type-4 object kind, stride 0xC: {s16 effect_id @+0, s16 effect_arg @+2, ..., s16 radius @+8}. PlaceKindedProp copies them into the prop's +0x324/+0x328/+0x124.
+00593e70	g_prop_table38	PlaceTable38Props' nine rows, stride 0x18: {f32 x, y, z; f32 rx, ry, rz in DEGREES}. The constructor reads it from 0x00593E74 as [-1],[0],[1] and scales the angles by 182.0444 (0x00569010).
+00593f48	g_prop_table39	PlaceTable39Stacks' eight rows, the same {x,y,z, three angles in degrees} shape as g_prop_table38 and immediately after it.
+00594008	g_prop38_hull_points	PropUpdateType38's eight hull corners, s16 x/y/z * 0.001 (stride 6, 0x00594008..0x00594037): x +/-0.307, y +/-2.772, z 2.188 / -1.985. The loop walks the y word from 0x0059400A and stops at 0x0059403A. g_fragment_subkind1_poses starts on the next byte.
+00594038	g_fragment_subkind1_poses	PlaceFragmentProps' sub-kind 1 rows, 12 x {f32 x,y,z; f32 rx,ry,rz degrees}. Rotations go through __ftol(deg * 182.0444).
+00594158	g_fragment_subkind0_offsets	PlaceFragmentProps' sub-kind 0 rows, 8 x {f32 x, f32 z}, each put through T(16.4731, 16.8210, 4.7490) . RotY(0x278D) . T(x, 0, z) and the resulting translation read back with MatrixGetTranslation.
 005945d8	g_class41_fragment_counts	One byte per class 0x41 type-40 sub-kind: how many objects PlaceFragmentProps builds for it. 8, 12, 4, 15, 9, 2, 6, 2, 1, 2, 3, 3, 4, 1, 1, 12, 1, 3, 2, 2 for sub-kinds 0..19. Sub-kind 9 -- the route-branch pair -- is 2, which is why PropUpdateType40's branch needs g_branch_prop_shot_count to reach exactly that.
+005945ec	g_fragment_pose_tables	One pointer per type-40 sub-kind to its {f32 x,y,z} rows (stride 12, g_class41_fragment_counts[sk] of them). Entries 0 and 1 are null: those sub-kinds have their own arms. The code indexes it both as [sk] and as 0x00594604[sk-6].
+0059463c	g_fragment_slots	u16 per type-40 sub-kind: the slot obj+0x1E0 starts at; the code reads it as 0x00594648[sk-6]. 0 for sub-kinds 0 and 1, whose arms write 0x123E and 0x17C6/0x17C7 themselves. A hit adds one (sub-kind 0 is set to 0x123F).
+00594664	g_fragment_subkind11_scales	Three f32 scales for sub-kind 11's objects: 1.7575, 0.5946, 1.0.
+00594670	g_fragment_subkind12_scales	Four f32 scales for sub-kind 12's objects: 0.72, 0.72, 0.906, 0.9967.
+00594680	g_fragment_subkind11_yaws	Three s32 BAMS yaws for sub-kind 11: 0, 10638, -31395.
+0059468c	g_fragment_subkind12_yaws	Four s32 BAMS yaws for sub-kind 12: 3129, 3129, 29830, 39322.
+0059469c	g_fragment_burst_scales	One byte per type-40 sub-kind: the burst fragments' uniform scale in hundredths (70, 100 or 125). Ghidra labels it as a string.
+005946f8	g_prop_table44	PlaceTable44Props' seven rows, stride 20: {s16 x, y, z (* 0.01); s16 pad; s32 rx, ry, rz (BAMS)}. Rows 2..6 are the whole chairs PropUpdateType44 draws; row 6 lies on its side at (-22.3, 9.06, -97.86).
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 0059505a	g_item_score_table	per-kind pickup score, stride 0xC
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
@@ -241,6 +255,7 @@
 007dcccc	g_nRunPhaseDelay	Frames left before RunPhaseStepToNextScene picks the next scene. RunPhaseArmSceneAdvance seeds it with 1, so the advance lands on the very next frame.
 007dcd14	g_original_item_pickup_blocked	One byte with twelve writers across class 0x41 and 0x44 and exactly one reader: OriginalItemPropUpdate (FUN_004675A0) at 0x0046769E jumps past its whole pick-up arm -- the award, the g_original_items_taken tally, PlaySoundId(0x3616A9) and the 0x32-frame fade -- while it is non-zero. So a prop that sets it takes the original-mode collectibles out of play for as long as it holds it, and PropUpdateType75 is one of them: it clears the byte on the frame it is shot and sets it again 290 frames later when its ride ends. Not modelled in the port: nothing there transcribes the arm it gates.
 007dcd18	g_chain_segments	The chain segment table PlaceChainSegments fills and ChainSegmentUpdate re-registers into every frame, indexed [group * 0x14 + segment] over 20 segments a group. Segment 0's +0x1B0 is the latch that stops chain group 1 opening its route twice.
+007dcdb8	g_fragment_subkind1_intact	Twelve bytes, one per sub-kind-1 object: 1 until that object is broken outside Training. PlaceFragmentProps reads it to pick 0x17C6 (intact) or 0x17C7, PropUpdateType40 refuses a hit on a cleared one, and ResetFragmentSubkind1Intact sets all twelve back to 1 once a game.
 007dcdd4	g_breakable_members	group*9 + member -> the live BreakablePropUpdate object, or 0 once it is destroyed. Stride 9 because the largest breakable group has nine members. The topple test reads it to find the props a member supports.
 007dcf18	g_branch_prop_shot_count	How many of PropUpdateType40's sub-kind-9 props have been broken this run. That routine increments it on each break while g_GameMode == 1, and at 2 -- both of them -- with g_script_flags[0x11] raised it writes g_script_branch_var = 2 and stores -1 here so the route opens once.
 007dcf1c	g_class14_char	The class-0x14 boss's character instance, obj+0x194. Re-seated at the top of Class14Init and Class14Update, so the whole class reads it as a singleton rather than passing the actor down.

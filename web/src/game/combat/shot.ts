@@ -58,6 +58,17 @@ import { ActorFlag, type Actor } from "../actor";
 import { MarkBodyCreatureShot } from "../body_creature";
 import { MarkCarriedPropShot } from "../carried_prop";
 import { BreakablePropTakeShot } from "../class41/prop";
+import { PropFamily } from "../class41/prop_state";
+
+/**
+ * The prop families whose routine never calls `SpawnPropHitSpark`
+ * (`FUN_00465860`) — read off that function's nine call sites, none of which
+ * is in `PropUpdateType38`, `PropUpdateType39`, `PropUpdateType40` or
+ * `PropUpdateType44`.
+ */
+const NO_PROP_SPARK: ReadonlySet<PropFamily> = new Set([
+  PropFamily.Type38, PropFamily.Type39, PropFamily.Type40, PropFamily.Type44,
+]);
 import { ColiTraceSegmentAllSets } from "../coli";
 import { PlayerShotEffectSpawn } from "../effects/shot_effects";
 import { SpawnPropHitSpark } from "../effects/sprite";
@@ -407,7 +418,13 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
   // it is here because the port's props do not each carry a shot response.
   // [diverges] in where it is called from, not in what it does.
   const spark = PropSparkPoint(prop, req.ray, host);
-  if (spark) SpawnPropHitSpark(spark.x, spark.y, prop.z);
+  prop.hitAim = spark ? { x: spark.x, y: spark.y } : null;
+  // Types 38, 39, 40 and 44 call no `SpawnPropHitSpark` at all -- the first
+  // three and 44 call `SpawnPropHitEffectScaled` from their own hit arm with
+  // the point above, and 40 calls neither -- so the stand-in stays off them.
+  if (spark && !NO_PROP_SPARK.has(prop.family)) {
+    SpawnPropHitSpark(spark.x, spark.y, prop.z);
+  }
   events?.emit("shot.resolved", {
     player: req.player, kind: "prop", ray: req.ray, point: pick.point,
     propGroup: prop.group, propMember: prop.member, propHp: prop.hp,

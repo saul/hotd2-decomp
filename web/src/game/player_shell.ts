@@ -653,7 +653,7 @@ export function PlayerTasksDrawWithoutAFrame(): void {
 }
 
 /**
- * `SelectAttackablePlayer` — `FUN_00414F40`, the task `FUN_00414FB0`
+ * `SelectAttackablePlayer` — `FUN_00414F40`, the task `SpawnAttackablePlayerTask`
  * allocates on the line after every `PlayerTasksCreate` -- so it runs after
  * both player tasks in the walk, which is what lets a player's own update see
  * `g_player_was_hit` before `UpdateScreenShake` clears it. `[proved]` from the
@@ -685,6 +685,11 @@ export function SelectAttackablePlayer(): void {
  * the start lives from the options.
  */
 export function PlayerBlockBoot(): void {
+  G.g_damage_rank_pending = 0;
+  G.g_rank_clock = 0;
+  G.g_rank_clock_on = 0;
+  G.g_rank_players_seen = 0;
+  G.g_rank_attackers_seen = 0;
   G.g_player_state = [PlayerState.Out, PlayerState.Out];
   G.g_player_task = [PlayerTask.None, PlayerTask.None];
   G.g_player_lives = [0, 0];
@@ -719,6 +724,10 @@ export function PlayerBlockBoot(): void {
   G.g_screen_furniture_flags = 0;
   G.g_app_state_pending = -1;
   G.g_continue_timer = 0;
+  G.g_game_over_timer = 0;
+  G.g_game_over_logo_frame = -1;
+  G.g_screen_sprite_anims = [];
+  G.g_game_over_route_done = 0;
   G.g_continue_credit_seen = [0, 0, 0, 0];
   G.g_no_continue_frames = 0;
   G.g_start_lives = START_LIVES_BY_OPTION[OPTION_LIVES];
@@ -757,8 +766,9 @@ export function PlayerStartGameFromTitle(mode: number,
   G.g_pad_state = PadBit.Start0;
   PlayerTaskRun(0, f);
   G.g_pad_state = 0;
+  // `CommitAppState` leaves run phase 0, `ResetGameOnStart`, which is
+  // where the rank is seeded -- on the first frame, in `run_phase.ts`.
   CommitAppState();
-  G.g_nRunPhase = RunPhase.InPlay;
   PlayerTasksCreate();
   PlayerTasksRun(f);
 }
@@ -813,6 +823,9 @@ const PLAYER_BLOCK_FIELDS = [
   "g_player_magazine_empty", "g_player_reload_prompt_timer", "g_hud_ammo_slide",
   "g_player_input_is_gun", "g_player_pad_kind", "g_player_infinite_ammo",
   "g_original_fire_mode", "g_original_fire_latches",
+  // The rank is the run's, not the scene's: only `ResetDamageRank` resets it.
+  "g_damage_rank", "g_damage_rank_pending", "g_rank_clock", "g_rank_clock_on",
+  "g_rank_players_seen", "g_rank_attackers_seen",
 ] as const;
 
 /**

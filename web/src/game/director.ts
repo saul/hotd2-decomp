@@ -26,6 +26,7 @@ import { SecondsToTicks, T } from "./tables";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { DropDueShotRequests } from "./combat/shot";
 import { CommitAppState } from "./app_state";
+import { GameOverRunPhase } from "./game_over";
 import { PlayerTasksRun } from "./player_shell";
 import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
@@ -559,10 +560,15 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // at its first slot rather than its second. The engine's task list has the
   // same property for a different reason: `ActorAlloc` appends, and the walk
   // that would step a new task has already gone past the end.
-  // `[diverges]` The game-over screen (`FUN_00460960`, app state 7) is not
-  // ported: once the run has asked for it the scene simply stops, and the app
-  // stops the transport. See `run_phase.ts`.
-  if (G.g_app_state === AppState.GameOver) {
+  // `AppStateDispatch` (`FUN_004608A0`): only app state 6 runs the scene.
+  // The game-over screen, 7, runs its own phases and task lists
+  // (`game/game_over.ts`) and the stage's actors stand still; any other
+  // screen (3, after the game over) runs nothing the port has.
+  if (G.g_app_state !== AppState.InPlay) {
+    if (G.g_app_state === AppState.GameOver) {
+      GameOverRunPhase({ host, rng, events }, events);
+    }
+    CommitAppState();
     return { lookAt: G.g_camera_block_target };
   }
   ShotEffectsTick();

@@ -62,7 +62,7 @@ import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
 } from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
-import { RunSceneTasksAndTimers } from "../src/game/run_phase";
+import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
 import { ActorByAt, AppState, G, PlayerState, PlayerTask, ResetGameGlobals,
   ResetSceneOnEnter, RunPhase }
   from "../src/game/globals";
@@ -8604,12 +8604,15 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   run(1, rng, new Events());
   G.g_pad_state = 0;
   run(1, rng, new Events());
+  // The continue lowers the rank by one, and the next `UpdateDamageRank`
+  // sees a player back in play: +4 (`(in_play - seen) * 4`).
   check("START during the countdown continues: in play again with three "
-        + "lives, a credit spent, one point, the rank one lower",
+        + "lives, a credit spent, one point, the rank one lower then +4 for "
+        + "the player back in play",
         G.g_player_state[0] === PlayerState.InPlay
         && G.g_player_lives[0] === 3 && G.g_credits[0] === 4
         && G.g_player_score[0] === 1
-        && G.g_damage_rank === Math.max(0, rank - 1)
+        && G.g_damage_rank === Math.min(15, Math.max(0, rank - 1) + 4)
         && G.g_player_invuln_frames[0] > 90,
         `state ${G.g_player_state[0]} lives ${G.g_player_lives[0]} `
         + `credits ${G.g_credits[0]} score ${G.g_player_score[0]} `
@@ -8629,10 +8632,52 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         + "digits of 0x2D a frame",
         G.g_app_state === AppState.GameOver && frames > 880 && frames < 930,
         `${frames} frames, app ${G.g_app_state}`);
-  check("...and on the game-over screen the scene no longer runs",
-        (() => { const g = G.g_frame; run(10, rng, new Events());
-                 return G.g_frame === g + 10; })()
-        && G.g_nRunPhase === 0, `phase ${G.g_nRunPhase}`);
+
+  // The game-over screen, `GameOverRunPhase` (`FUN_00460960`), from phase 0.
+  check("the game-over screen starts at phase 0", G.g_nRunPhase === 0,
+        `phase ${G.g_nRunPhase}`);
+  const heard: number[] = [];
+  const ev = new Events();
+  ev.on("sound.play", (d) => heard.push(d.id));
+  const z0 = G.g_object_list.find((o) => o.cls === SpawnClass.Zombie);
+  const zAt = z0 ? { ...z0.pos } : null;
+  run(1, rng, ev);
+  check("phase 0: every player at 4 goes to 6, 200 frames, BGM 9 unlooped",
+        G.g_player_state[0] === PlayerState.GameOver
+        && G.g_game_over_timer === 200 && G.g_nRunPhase === 1
+        && heard.includes(0x10000009), `${G.g_player_state} ${heard}`);
+  run(199, rng, ev);
+  check("phase 1 runs its 200 frames", G.g_nRunPhase === 1
+        && G.g_game_over_timer === 1, `${G.g_nRunPhase} ${G.g_game_over_timer}`);
+  run(2, rng, ev);
+  check("...then phase 2 arms the logo, 180 frames",
+        G.g_nRunPhase === 3 && G.g_game_over_timer === 0xb4
+        && G.g_game_over_logo_frame === 0);
+  run(1, rng, ev);
+  const plate = G.g_screen_sprite_anims[0];
+  check("the logo's first frame spawns the GAME OVER plate 0x43A at "
+        + "(320, 240), fading in from 0 by 0.02 a frame",
+        !!plate && plate.id === 0x43a && plate.x === 320 && plate.y === 240
+        && Math.abs(plate.alpha - 0.02) < 1e-9, JSON.stringify(plate));
+  run(0x78, rng, ev);
+  check("...and 120 frames on, the flashes: 0x43B at (340, 260)",
+        G.g_screen_sprite_anims.some((s) => s.id === 0x43b && s.x === 340),
+        G.g_screen_sprite_anims.map((s) => s.id.toString(16)).join(","));
+  check("the scene's actors stand still on the game-over screen",
+        !z0 || !zAt || (z0.pos.x === zAt.x && z0.pos.z === zAt.z));
+  run(0xb4, rng, ev);
+  check("after the logo the route map, which waits for the trigger",
+        G.g_nRunPhase === 5, `${G.g_nRunPhase}`);
+  run(30, rng, ev);
+  check("...and does not end by itself", G.g_nRunPhase === 5
+        && G.g_app_state === AppState.GameOver);
+  G.g_pad_state = 2;
+  run(1, rng, ev);
+  G.g_pad_state = 0;
+  check("the trigger clears the credits and asks for app state 3",
+        G.g_credits[0] === 0 && G.g_app_state_pending === -1
+        && G.g_app_state === 3 && G.g_player_state[0] === PlayerState.Out,
+        `credits ${G.g_credits} app ${G.g_app_state} ${G.g_player_state}`);
 }
 
 {
@@ -8680,6 +8725,43 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         && G.g_player_was_hit[0] === 0 && z.despawned,
         `lives ${G.g_player_lives[0]} latch ${G.g_player_was_hit[0]} `
         + `despawned ${z.despawned}`);
+}
+
+{
+  // `UpdateDamageRank` / `ResetDamageRank`, through `GameUpdate` from the
+  // page's own reset: the seed on the first frame, a player's entry, a hit's
+  // pending -2, and the clock.
+  const rng = new Rng(12);
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  check("the reset leaves run phase 0, ResetGameOnStart",
+        G.g_nRunPhase === RunPhase.ResetGameOnStart, `${G.g_nRunPhase}`);
+  const seed = CHARS.difficulty?.initial_rank?.[G.g_difficulty] ?? 0;
+  run(1, rng, new Events());
+  check("the first frame seeds the rank from the difficulty and adds 4 for "
+        + "the player who entered: CommitAppState zeroed what the rank had seen",
+        G.g_damage_rank === Math.min(15, Math.max(0, seed + 4))
+        && G.g_nRunPhase === RunPhase.InPlay && G.g_rank_clock === 2,
+        `seed ${seed} rank ${G.g_damage_rank} clock ${G.g_rank_clock}`);
+  RunOutInvulnerability();
+  const before = G.g_damage_rank;
+  PlayerTakeDamage(0, 1, 9);
+  check("a hit only queues -2", G.g_damage_rank === before
+        && G.g_damage_rank_pending === -2);
+  run(1, rng, new Events());
+  check("...and the next frame applies it and restarts the clock",
+        G.g_damage_rank === Math.max(0, before - 2)
+        && G.g_damage_rank_pending === 0 && G.g_rank_clock === 1,
+        `rank ${G.g_damage_rank} clock ${G.g_rank_clock}`);
+  const r = G.g_damage_rank;
+  G.g_rank_clock = 0x708;
+  UpdateDamageRank();
+  check("every 0x708 frames of clock the rank rises one -- two with four "
+        + "lives or more", G.g_damage_rank === Math.min(15, r + 1)
+        && G.g_player_lives[0] < 4, `rank ${r} -> ${G.g_damage_rank}`);
 }
 
 {

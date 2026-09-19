@@ -553,6 +553,18 @@ if (ROUTE.size) {
 const original = flag("original");
 /** Press START on every continue countdown; see the loop. */
 const CONTINUE = flag("continue");
+/**
+ * `--no-damage` -- **a cheat, and printed as one (L45).** Raises player 0's
+ * `g_player_no_damage` (`0x009C9FD8`), the engine's own byte that makes
+ * `PlayerTakeDamage` take no life, so a run tests the script rather than the
+ * shooting. Written into the page's own `G` every poll, because a seek or a
+ * stage step's reset boots the player block and clears it.
+ */
+const NO_DAMAGE = flag("no-damage");
+if (NO_DAMAGE) {
+  console.log("--no-damage: CHEAT -- g_player_no_damage[0] = 1 (0x009C9FD8), "
+              + "no hit costs a life");
+}
 let continues = 0;
 /**
  * `--link` starts from a **deep link** -- the query string of a URL the user
@@ -742,6 +754,12 @@ try {
     // reported as one. `--continue` presses START (`S`, a credit) whenever
     // the countdown is up, which is what a player who wants to see the stage
     // does -- the credits are the game's own, five continues in Arcade.
+    if (NO_DAMAGE) {
+      await page.evaluate(async () => {
+        const { G } = await import("/src/game/globals.ts");
+        G.g_player_no_damage[0] = 1;
+      });
+    }
     if (CONTINUE && /CONTINUE\?/.test(s.lives)) {
       await page.keyboard.press("KeyS");
       continues += 1;

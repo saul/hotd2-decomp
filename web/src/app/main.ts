@@ -392,7 +392,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // has already counted the click in the HUD's own shots tally — and the
     // pacer's list of wakers says "a shot" without qualification.
     this.shooting.onFire = (ray) => {
-      if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray);
+      // On the game-over screen a pull is the pad bit its cuts test
+      // (`GAME_OVER_SKIP_BITS`, player 0's `2`), not a shot: no scene runs.
+      if (G.g_app_state === AppState.GameOver) {
+        this.padLatch |= 2;
+      } else if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray);
       this.pacer.wake();
     };
     // The right button is a pull **off the screen**, because that is what the
@@ -1739,7 +1743,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         // after a variable number of frames put the whole rest of the stage on
         // a different frame in every run.
         if (!this.branchHover) w.tickBranchCountdown(TICK);
-      } else if (!w.finished) {
+      } else if (!w.finished && G.g_app_state === AppState.InPlay) {
+        // `AppStateDispatch` runs the scene -- and the script -- only in app
+        // state 6; the game-over screen stops it where it stood.
         w.tick(TICK);
         this.syncUrlToWalker();
       }
@@ -1756,18 +1762,17 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.update(this.ctx,
                       this.gameStopped ? STOPPED_TICK : DRIVEN_TICK);
     if (!this.gameStopped) G.g_pad_state = 0;
-    // `[diverges]` The game-over screen (`FUN_00460960`, app state 7) is not
-    // ported. When the run requests it -- nobody in play and the continue ran
-    // out -- the player stops the transport and says so, and the scene stays
-    // where it was.
-    if (G.g_app_state === AppState.GameOver && this.playing) {
-      this.playing = false;
+    // The game-over screen (`game/game_over.ts`) runs in the port; the
+    // script does not -- only app state 6 runs the evt interpreter. Said once
+    // in the feed, as the moment the run ended.
+    if (G.g_app_state === AppState.InPlay) this.gameOverNoted = false;
+    else if (!this.gameOverNoted) {
+      this.gameOverNoted = true;
       this.onFeed({
         seq: -1, block: w.block, step: w.step, opIndex: w.opIndex,
         op: { i: -1, at: 0, op: -1, name: "game over", cat: "flow" },
         note: "no credit taken before the continue ran out",
       });
-      return false;
     }
     // The history a rewind walks back through, offered every tick and taken
     // on the ring's own cadence. Here rather than in the pacer because a
@@ -1791,6 +1796,27 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private advancing = false;
   /** START presses waiting for the next tick; see `stepOneFrame`. */
   private padLatch = 0;
+  /** The feed has been told this run is over. Cleared by a restart. */
+  private gameOverNoted = false;
+
+  /**
+   * `[port-only]` -- the game-over screen's two buttons: start a new game
+   * at a stage's entry, through exactly the path a page load takes (the reset
+   * boots the player block, the title's confirm seeds the credits, START
+   * enters play). `stage` is the current one for "restart", 1 for "from the
+   * start".
+   */
+  restartRun(stage: number): void {
+    if (stage !== this.state.stage) this.state.entry = undefined;
+    this.state.stage = stage;
+    this.gameOverNoted = false;
+    this.state.block = this.state.step = this.state.op = undefined;
+    this.state.slot = this.state.frame = undefined;
+    this.pushUrl();
+    void this.loadStage().finally(() => {
+      if (this.state.mode === "play") this.playing = true;
+    });
+  }
 
   /**
    * The stage-to-stage transition: the run's phase machine, as much of it as

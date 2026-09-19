@@ -347,13 +347,37 @@ rank = g_damage_rank;                                   /* GetDamageRank */
 damage += (s8) g_pBoneDamageByRank[char][bone*0x10 + rank];
 ```
 
-`ResetDamageRank` seeds it from `g_initial_damage_rank[difficulty]` =
-`{-3, -1, 1, 4, 8}`, and `UpdateDamageRank` moves it with lives lost and
-elapsed time, clamped to `[0, 15]`. Rank 0 is the *most* generous: for
-`char_adv02`'s torso the row is `{25, 20, 15, 10, 5, 0, 0, -5, ...}` — +25 at
-rank 0, −15 at rank 15. Normal difficulty starts at rank 1, so the torso does
-50/60/70/80/90 rather than 30/40/50/60/70, and **two headshots (100 + 120 =
-220) kill exactly**.
+`ResetDamageRank` (`FUN_00460770`, run phase 0) seeds it from
+`g_initial_damage_rank[difficulty]` = `{-3, -1, 1, 4, 8}` -- index 2 in a demo
+run -- **unclamped**, and turns the rank clock on at 1. Rank 0 is the *most*
+generous: for `char_adv02`'s torso the row is `{25, 20, 15, 10, 5, 0, 0, -5,
+...}` — +25 at rank 0, −15 at rank 15.
+
+`UpdateDamageRank` (`FUN_004607B0`) runs once a frame from
+`RunSceneTasksAndTimers`, after the task walk and before the clock ticks
+`[proved]`:
+
+```c
+r = rank + (g_players_in_play - players_seen) * 4;  /* a join +4, a drop -4 */
+if (clock % 0x708 == 0) {                            /* every 30 s of clock  */
+    r += 1;
+    if (lone player with lives >= 4 || both with lives >= 7 between them) r += 1;
+}
+r += g_damage_rank_pending; g_damage_rank_pending = 0;   /* a hit queues -2 */
+r = clamp(r, 0, 15);
+if (r < rank) clock = 0;                             /* a fall restarts it   */
+rank = r; players_seen = g_players_in_play; attackers_seen = g_max_attackers;
+```
+
+`players_seen` (`0x009C8E82`) is zeroed by `CommitAppState`, so **the first
+frame of a game adds 4 for each player in it**: a one-player game on Normal
+plays at rank 5, not 1, and on Very Easy at 1, not 0. `[likely]` that this is
+the design rather than an accident: the table's negative entries only make
+sense with that +4 coming, and nothing clamps the seed. The clock
+(`0x009C8A7C`) counts while `0x009A2C30` is set, so rank rises by 1 every 30
+seconds without a hit, 2 while the player is healthy. The earlier reading
+here -- "Normal starts at rank 1, so two headshots kill a stage-2 zombie
+exactly" -- was computed at rank 1, and is `[open]` again at rank 5.
 
 ### Hit points — `ActorInitHitPoints`
 
@@ -1502,9 +1526,6 @@ Not implemented, and why:
   states picking a walk, run, idle or back-away clip;
 * the **fade back out** of a reaction. `MotionCrossFadeTo` states the fade *in*;
   the player fades out over the same length, which is `[likely]`, not proved;
-* the **adaptive rank** itself. `UpdateDamageRank` needs lives lost and elapsed
-  play time; the player holds the rank at `g_initial_damage_rank[difficulty]`,
-  which is what a fresh game starts on.
 
 The gameplay loop **is** implemented end to end: the advance rings, the
 per-band step counts, the attack permit, the attack run, the hold at range, the

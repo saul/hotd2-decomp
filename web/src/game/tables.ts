@@ -105,10 +105,9 @@ export function SetGameTables(chars: CharactersJson | undefined,
   // does — the four curves themselves are `.rdata` and come from the bundle.
   G.g_camera_turn_curve = TURN_CURVE_DEFAULT;
   G.g_camera_turn_rate = TURN_RATE_UNTRACKED;
-  // `ResetDamageRank` (`FUN_00460770`) seeds the adaptive rank from the menu
-  // difficulty; there is no adaptive update ported yet, so it stays at seed.
-  G.g_damage_rank = Math.min(15, Math.max(0,
-    chars?.difficulty?.initial_rank?.[G.g_difficulty] ?? 0));
+  // The rank is **not** seeded here any more: `ResetDamageRank`
+  // (`FUN_00460770`) does it once a game, from run phase 0, and reads
+  // `g_initial_damage_rank` out of `T.chars.difficulty` -- see `run_phase.ts`.
 }
 
 export function CharacterTypeOf(a: Actor): CharacterType | null {

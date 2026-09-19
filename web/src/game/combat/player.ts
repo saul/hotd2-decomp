@@ -132,10 +132,9 @@ const PLAYER_HIT_RANK_DELTA = -2;
  * `src`, `source` and `attack` are not the exe's -- they feed the
  * `player.damaged` event the HUD and the feed hear it by.
  *
- * `[diverges]` The rank change goes into `g_damage_rank` at once, floored at
- * 0. The engine subtracts 2 from `g_damage_rank_pending` (`0x009A3794`) and
- * `UpdateDamageRank` (`FUN_004607B0`) folds it in and clamps next frame; that
- * routine is not ported -- see `run_phase.ts`.
+ * The rank change goes into `g_damage_rank_pending` (`0x009A3794`), and
+ * `UpdateDamageRank` (`FUN_004607B0`) folds it in and clamps it on the frame's
+ * `RunSceneTasksAndTimers`.
  */
 export function PlayerTakeDamage(player: number, latch: number,
                                  overlayKind: number, events?: Events,
@@ -150,8 +149,7 @@ export function PlayerTakeDamage(player: number, latch: number,
   }
   if (G.g_player_no_damage[player] === 0) {
     G.g_player_lives[player] -= PLAYER_LIFE_COST;
-    G.g_damage_rank =
-      Math.max(0, G.g_damage_rank + PLAYER_HIT_RANK_DELTA);
+    G.g_damage_rank_pending += PLAYER_HIT_RANK_DELTA;
     ScoreAddForPlayer(player, PLAYER_HIT_SCORE, events);
   }
   if (latch !== 0) {
@@ -208,8 +206,7 @@ export function PlayerTakeDamageTimed(player: number, latch: number,
   }
   if (G.g_player_no_damage[player] === 0) {
     G.g_player_lives[player] -= PLAYER_LIFE_COST;
-    G.g_damage_rank =
-      Math.max(0, G.g_damage_rank + PLAYER_HIT_RANK_DELTA);
+    G.g_damage_rank_pending += PLAYER_HIT_RANK_DELTA;
     ScoreAddForPlayer(player, PLAYER_HIT_SCORE, events);
   }
   if (latch !== 0) {

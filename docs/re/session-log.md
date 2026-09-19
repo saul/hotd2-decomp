@@ -19123,3 +19123,66 @@ raises the bit (`FUN_0045E010`, `FUN_0045E660`) is unread, so it is ported
 and unreached. `tools/damage_fx.mjs` counted the 90-frame grace of entering
 play as a hit; it now wants a life gone as well. Its "load a pre-hit snapshot"
 check fails on main too (the overlay stays active after the load).
+
+## 2026-09-19 -- the damage rank, the game-over screen, and a way back from it
+
+Follow-up to bug 19, on `fix/newbugs-bats`.
+
+**`UpdateDamageRank` (`FUN_004607B0`) and `ResetDamageRank` (`FUN_00460770`)**
+are ported and the `[diverges]` that had `PlayerTakeDamage` write
+`g_damage_rank` itself is gone; a hit queues -2 in `g_damage_rank_pending`
+(`0x009A3794`) and the frame folds it in. Four globals named on the way:
+`g_rank_clock` `0x009C8A7C`, `g_rank_clock_on` `0x009A2C30`,
+`g_rank_players_seen` `0x009C8E82`, `g_rank_attackers_seen` `0x009C8E86`.
+The surprise is the first frame: `CommitAppState` zeroes `players_seen`, so
+`(in_play - seen) * 4` adds 4 per player and a one-player Normal game plays at
+rank 5. The seed table's negative entries (`-3, -1`) are what make that read as
+design (`[likely]`). The continue test in `port.test.ts` had assumed rank 0;
+it now expects the ported arithmetic. Run phase 0 exists now
+(`ResetGameOnStart`, `0x0045FEF0`, the rank half only) because the rank seed
+lives there, and `PlayerStartGameFromTitle` no longer forces phase 2.
+
+**App state 7** is `GameOverRunPhase` (`FUN_00460960`), six phases, in
+`game/game_over.ts`; the screen sprites are `ScreenSpriteAnimSpawn`
+(`FUN_00499C60`) / `ScreenSpriteAnimTick` (`FUN_00499CE0`) records in `G`,
+drawn by `ui/panels/GameOver.tsx`. Named: `GameOverBuildFlyTasks` `0x00460BB0`,
+`GameOverBuildLogoTasks` `0x00460CA0`, `GameOverLogoTask` `0x00460CD0`,
+`GameOverCameraFlyTick` `0x00460E60`, `GameOverSpawnCameraFly` `0x00460EC0`,
+`GameOverResetCamera` `0x00460EF0`, `GameOverRouteMapArm` `0x00460F00`,
+`GameOverBuildRouteTasks` `0x00460FF0`, `GameOverRouteMapWait` `0x004610F0`,
+`RouteMapDrawTask` `0x00461180`, `GameOverSpawnPlayerFigure` `0x004613C0`,
+`GameOverSpawnPartnerFigure` `0x004617F0`, `CameraBlocksReset` `0x004021D0`,
+`SpawnAttackablePlayerTask` `0x00414FB0`, `ScreenSpriteDraw` `0x00499F00`,
+`CreditsClear` `0x00406FD0`; globals `g_game_over_timer` `0x009CA0F8`,
+`g_game_over_route_done` `0x007DCCE4`, `g_screen_sprite_texbank` `0x0057A5BC`,
+`g_screen_sprite_slot` `0x0057D448`. `0x0041C630` and `0x0041C6D0` were
+already `SpriteDrawCheckedBank` and `DrawScreenSprite` in Ghidra (another
+workstream's); my TSV rows had invented `ScreenSpriteSubmit` /
+`ScreenSpriteDrawAt` for them and were changed to the existing names.
+`SelectAttackablePlayerTaskCreate` was refused by Ghidra's name checker as a
+token superset of `SelectAttackablePlayer`.
+
+Mode 1 of `ScreenSpriteAnimTick` looked like a transcription slip -- `sy += 1`
+a frame against `sx -= 1/frames` -- and is not: the constant at `0x004C4380`
+is 1.0. The second GAME OVER plate squeezes flat and stretches to 21 times its
+height over its 20 frames as it fades.
+
+Wrong turns:
+
+* A Python one-liner `open(p,'w').write(open(p).read())` truncated
+  `web/src/app/main.ts` to 0 bytes (the write opens first). Restored with
+  `git checkout` and the edits reapplied.
+* After merging main at format 10 the page would not load: the worktree's
+  bundle was still format 9. Re-exported into the worktree.
+* The first page harness said a restart never came back into play: Playwright's
+  `waitForFunction` does not await an async predicate, so the promise read as
+  truthy and the check ran before the load. Poll instead.
+* Then the restarted stage parked at block 0/4 where the first run had gone on
+  to block 11. Diffing `G` after the restart against a fresh load found two
+  differences: `g_crosshair_x/y`, where the button click had left the mouse,
+  and player 1's camera hook. Moving the mouse off the page made the second run
+  replay the first -- the aim is game input, and a reload was never the cause.
+* The first game-over screenshot showed the damage splat frozen over the whole
+  screen. The draw is inside `DamageOverlayUpdateAndDraw`, which only
+  in-play and continue-countdown tasks run; the renderer now asks for that
+  task as well as the active record.

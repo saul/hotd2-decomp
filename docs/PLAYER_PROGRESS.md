@@ -2699,9 +2699,8 @@ counted by the routine that counts them; `g_player_lives` has no default. The
 path camera the last life goes, the player drops out of play, and the
 continue countdown runs (the HUD strip shows `CONTINUE? n`). **Press S** --
 START -- to continue on a credit; otherwise the run's own continue screen
-counts down and asks for the game-over screen, which the port does not have
-(`[diverges]`): the transport stops and the feed says "game over". Player 2 can
-join by the same route, but the page has no second START key yet.
+counts down and asks for the game-over screen (below). Player 2 can join by
+the same route, but the page has no second START key yet.
 
 **Ammo, as far as it goes.** `g_player_ammo` (`0x009A5C7C`) and
 `g_player_magazine_size` (`0x009A2248`) exist in `G` and are written only by
@@ -2709,6 +2708,48 @@ join by the same route, but the page has no second START key yet.
 `PlayerStateFireOnly` (6). Nothing decrements or reloads them yet: the port's
 trigger (`PlayerFireFromQueue`, called from the player's own task) still has
 no magazine, and the HUD draws neither. That is the next port's.
+
+**The adaptive rank moves.** `UpdateDamageRank` (`FUN_004607B0`) and
+`ResetDamageRank` (`FUN_00460770`) are ported exactly and the `[diverges]` that
+had `PlayerTakeDamage` write the rank directly is gone: a hit queues -2 in
+`g_damage_rank_pending` and the frame's `RunSceneTasksAndTimers` folds it in.
+The first frame of a game adds 4 per player, so a one-player Normal game plays
+at rank 5 -- see `docs/formats/combat.md`, "Damage rank". Run phase 0,
+`ResetGameOnStart`, is where the seed happens; the rest of that routine is the
+app's stage load (`[diverges]`, `run_phase.ts`).
+
+**The game-over screen.** App state 7 is `GameOverRunPhase` (`FUN_00460960`),
+now `game/game_over.ts`: with both players at state 4 it puts them at 6,
+starts `OVR_AR.WAV` (`0x10000009`) and runs 200 frames of fly-over with the
+player tasks still walking; then `GameOverLogoTask` (`FUN_00460CD0`), 0xB4
+frames of screen sprites -- the GAME OVER plate `0x43A` fading in, five
+flashes from frame 0x78, and the plate again at 0x91 squeezed flat and
+stretched tall as it fades (`ScreenSpriteAnimTick` scale mode 1: `sx -=
+1/frames`, `sy += 1` a frame); then the route map, which waits for the
+trigger or START; then `CreditsClear` and the next app state, 3. The trigger
+or START cuts the fly-over short below frame 0xA5 and the logo below 0xAF;
+Training and the boss's own run return to play instead. The page draws the
+records `ui/panels/GameOver.tsx` reads from the projection, as text standing in
+for the pictures. `[diverges]`, all in `game_over.ts`: the fly-over camera
+(path `0x1F`, scene set `0x4D`) is not run, so the stage stands still behind
+it; the sprites' texbank `0x155` is not exported; the route map and the two
+player figures are not ported, so phase 5 draws nothing and waits.
+
+**Two buttons on it, the page's own** (`[port-only]`, not a gameplay
+divergence): **Restart this stage** and **Start from stage 1**. The engine
+hands on to a screen the port does not have, so these stand in for the coin
+slot. Both go through `restartRun` and the stage load a page load takes --
+boot, title confirm, START, `PlayerEnterPlay` -- so credits, lives and score
+are fresh. `web/tools/game_over_page.mjs` plays stage 2 to a game over by a
+real strike on the path camera, reads the plate and the flashes out of `G` and
+the DOM, and presses both buttons (screenshots in `web/shots/gameover-*.png`).
+The damage splat no longer hangs over the screen: the renderer draws an
+overlay only while the player's task is one that runs
+`DamageOverlayUpdateAndDraw`.
+
+**`--no-damage`** on `tools/playthrough.mjs` sets `g_player_no_damage[0]`
+(`0x009C9FD8`, the engine's own byte, which `PlayerTakeDamage` reads) and says
+so as a cheat on the first line (`L45`).
 
 Note what the gate does **not** test: `g_player_invuln_frames`. The 90-frame
 window after a hit stops the damage and nothing else, so the enemies keep

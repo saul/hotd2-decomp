@@ -84,6 +84,30 @@ export interface SkipProjection {
   stacked: boolean;
 }
 
+/** One live screen sprite on the game-over screen, as its record holds it. */
+export interface GameOverSprite {
+  id: number;
+  /** 640x480 screen pixels, the sprite's centre. */
+  x: number;
+  y: number;
+  sx: number;
+  sy: number;
+  alpha: number;
+}
+
+/**
+ * The game-over screen, from `game/game_over.ts`'s state. Null while a stage
+ * is being played.
+ */
+export interface GameOverProjection {
+  /** `GameOverRunPhase`'s phase, 0..5, or -1 once it has handed on. */
+  phase: number;
+  /** What the phase is, in words. */
+  label: string;
+  /** The logo's sprite records, drawn in allocation order. */
+  sprites: GameOverSprite[];
+}
+
 /** One instruction, as the tree and the feed draw it. */
 export interface TreeOp {
   i: number;
@@ -427,6 +451,7 @@ export interface UiProjection {
   groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   skip: SkipProjection | null;
   branch: BranchProjection | null;
+  gameOver: GameOverProjection | null;
   scopes: ScopeRow | null;
   scopeContext: { frame: number; stageLoadedAt: number };
   /** Whether a snapshot is held, so Load can be enabled. */

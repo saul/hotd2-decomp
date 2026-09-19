@@ -1581,7 +1581,7 @@ and `ActorStrikeConnect` whiffs when every zone it names is gone:
 
 ```c
 if ((destroyed_zones & 7 & atk.cancel_mask) != atk.cancel_mask)
-    PlayerTakeDamage(permit_holder, kind, atk.player_motion);
+    PlayerTakeDamage(permit_holder, show, atk.overlay_kind);
 ```
 
 `znchain` shows the design cleanly: a right-arm swing cancelled by `0x2`, a
@@ -1629,15 +1629,16 @@ if (!shielded) {
     g_damage_rank_pending -= 2;          /* UpdateDamageRank consumes this */
     ScoreAddForPlayer(player, -100);
 }
-if (kind) { g_player_was_hit[player] = 1; g_player_hit_motion[player] = motion; }
+if (show) { g_player_was_hit[player] = 1; g_player_damage_overlay_kind[player] = kind; }
 invuln_frames[player] = 0x5A;            /* 90 frames, 1.5 s */
 ```
 
 **One strike costs exactly one life.** There is no variable damage against the
-player — the attack entry's `+0x0A` is not an amount. It is not a motion
-either, whatever the field is called (`player_motion` in the bundle,
-`g_player_hit_motion` in the exe's names): its one reader is the damage
-overlay, below. And the
+player — the attack entry's `+0x0A` is not an amount. It is the **damage
+overlay kind** (`overlay_kind` in the bundle, `g_player_damage_overlay_kind`
+in the exe's names -- both were called the "player motion" until format 10,
+and nothing reads it as a motion): its one reader is the damage overlay,
+below. And the
 `g_damage_rank_pending -= 2` closes a loop from §4: being hit lowers the
 adaptive rank, which raises the per-bone damage modifier, so the game gets
 easier the worse you do. The continue screen restores 1 or 2 lives.
@@ -1665,11 +1666,15 @@ and every frame, from the same update, `DamageOverlayUpdateAndDraw`
 (`FUN_00417300`) counts it down and draws it **unchanged** -- no fade, no
 flash, no animation -- for 59 frames: identity matrix, translate
 `(offsets[kind].x + rec.x, offsets[kind].y, -1.02)`, scale `0.02`,
-`AssetDrawSlot(g_damage_overlay_slots[kind][count-1])`, draw layer 0xA. On the
+`AssetDrawSlot(g_damage_overlay_slots[kind][count-1])`, draw layer 0xA --
+which the translucent sort (`RenderCommandCompare`, layer ascending) puts
+under the shot effects' 0xC and 0xE. On the
 fifth update (`frames == 0x37`) it plays the hurt voice, `rand() % 2` of
 James's `DAMEGE_JMS\184/185` or Gary's `DAMEGE_GA\187/188`. The latch is
 cleared by `UpdateScreenShake` (`FUN_00415270`), which also starts a 48-frame
-vertical camera nod.
+vertical camera nod: `UpdateSceneViewAndLight` re-aims the camera at
+`(0, g_screen_shake_pitch, -1000)` in its own un-rolled frame, where
+`g_screen_shake_pitch = ftol(cos(frames * 0x1800 BAMS) * frames)`.
 
 | kind | slot | `common.bin` | picture | sound |
 |---|---|---|---|---|

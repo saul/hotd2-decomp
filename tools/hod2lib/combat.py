@@ -644,7 +644,7 @@ def attack_tables(tables, char_type: int) -> dict:
             if hit < 0 or play(strike) <= 0 or not (0 < play(lunge) <= 400):
                 continue
             got[i] = {"strike": strike, "lunge": lunge, "distance": dist,
-                      "hit_frame": hit, "player_motion": dmot,
+                      "hit_frame": hit, "overlay_kind": dmot,
                       "cancel_mask": mask & 0xFFFF}
         if got:
             out[cond] = got
@@ -679,7 +679,7 @@ def throw_tables(tables, char_type: int) -> dict | None:
             if motion <= 0 or not (0 <= rel < play(motion)):
                 continue
             hands.append({"bone": bone, "motion": motion, "release_frame": rel,
-                          "range": rng, "player_motion": dmot,
+                          "range": rng, "overlay_kind": dmot,
                           "cancel_mask": mask & 0xFFFF, **kit[bone]})
         if hands:
             out[cond] = hands

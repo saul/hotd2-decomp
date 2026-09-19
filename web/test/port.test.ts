@@ -140,6 +140,7 @@ import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { IsPlayerAttackable } from "../src/game/combat/player";
 import { PlayerTakeDamage } from "../src/game/combat/player";
+import { ShakeNodLookAt } from "../src/game/camera/shake";
 import {
   DAMAGE_OVERLAY_SLOTS, DAMAGE_OVERLAY_SOUNDS, DAMAGE_OVERLAY_VOICES,
   DamageOverlayClear, DamageOverlayKind, PlayerCameraHook, SceneStateInstallPlayerHooks,
@@ -400,22 +401,22 @@ const TYPE: CharacterType = {
       // of the port.
       "1": {
         strike: 100, lunge: 101, distance: 26, hit_frame: 10,
-        player_motion: 7, cancel_mask: 8,
+        overlay_kind: 7, cancel_mask: 8,
       },
     },
     // The throw entries: index 0 is bone 5's and index 1 is bone 8's, and the
     // range is a throw's rather than a reach's.
     "7": {
       "0": { strike: 102, lunge: 101, distance: 99, hit_frame: 8,
-             player_motion: 4, cancel_mask: 2 },
+             overlay_kind: 4, cancel_mask: 2 },
       "1": { strike: 103, lunge: 101, distance: 99, hit_frame: 8,
-             player_motion: 4, cancel_mask: 4 },
+             overlay_kind: 4, cancel_mask: 4 },
     },
     "8": {
       "0": { strike: 102, lunge: 101, distance: 99, hit_frame: 8,
-             player_motion: 4, cancel_mask: 2 },
+             overlay_kind: 4, cancel_mask: 2 },
       "1": { strike: 103, lunge: 101, distance: 99, hit_frame: 8,
-             player_motion: 4, cancel_mask: 4 },
+             overlay_kind: 4, cancel_mask: 4 },
     },
   },
   attack_picks: { "0": new Array(80).fill(1) },
@@ -5075,16 +5076,16 @@ const CLASS31 = {
     attacks: {
       // Stance 0, the ground: two hands and a head-butt.
       "0": {
-        "0": { script: ARC(303), hit_frame: 62, player_motion: 2, cancel_mask: 2 },
-        "1": { script: ARC(302), hit_frame: 64, player_motion: 3, cancel_mask: 4 },
-        "3": { script: ARC(284), hit_frame: 41, player_motion: 7, cancel_mask: 8 },
+        "0": { script: ARC(303), hit_frame: 62, overlay_kind: 2, cancel_mask: 2 },
+        "1": { script: ARC(302), hit_frame: 64, overlay_kind: 3, cancel_mask: 4 },
+        "3": { script: ARC(284), hit_frame: 41, overlay_kind: 7, cancel_mask: 8 },
       },
       // Stance 1 and 2, the two walls -- a different swing on each.
       "1": {
-        "0": { script: ARC(299), hit_frame: 52, player_motion: 2, cancel_mask: 2 },
+        "0": { script: ARC(299), hit_frame: 52, overlay_kind: 2, cancel_mask: 2 },
       },
       "2": {
-        "0": { script: ARC(298), hit_frame: 52, player_motion: 2, cancel_mask: 2 },
+        "0": { script: ARC(298), hit_frame: 52, overlay_kind: 2, cancel_mask: 2 },
       },
     },
     // Intact: a coin flip between the two hands.
@@ -5129,9 +5130,9 @@ const CLASS31 = {
 const THROW31_ENTRY = {
   hands: {
     "0": [
-      { bone: 5, motion: 9, release_frame: 48, range: 20, player_motion: 6,
+      { bone: 5, motion: 9, release_frame: 48, range: 20, overlay_kind: 6,
         cancel_mask: 2, held: null, bare: 8177, projectile: 8162 },
-      { bone: 8, motion: 8, release_frame: 48, range: 20, player_motion: 6,
+      { bone: 8, motion: 8, release_frame: 48, range: 20, overlay_kind: 6,
         cancel_mask: 4, held: null, bare: 8173, projectile: 8161 },
     ],
   },
@@ -5531,8 +5532,8 @@ console.log("class 0x31, the pounce and the leap back:");
   const rng = new Rng(5);
   const events = new Events();
   let hits = 0;
-  let hitMotion = -1;
-  events.on("player.damaged", () => { hits++; hitMotion = G.g_player_hit_motion[0]; });
+  let overlayKind = -1;
+  events.on("player.damaged", () => { hits++; overlayKind = G.g_player_damage_overlay_kind[0]; });
   const z = thrower(ThrowerState.StandAndDecide);
   z.pos = vec3(0, 0, 25);                // inside 30: the router goes straight to 8
 
@@ -5555,10 +5556,10 @@ console.log("class 0x31, the pounce and the leap back:");
   check("the leap puts it on the landing point, not at a range it chose",
         Math.abs(closest - 15.5) < 0.6, `closest ${closest.toFixed(2)}`);
   check("and the stab lands", hits > 0, `${hits} hits`);
-  // Attack 0's `player_motion` is 2, attack 1's is 3: whichever it drew, the
+  // Attack 0's `overlay_kind` is 2, attack 1's is 3: whichever it drew, the
   // reaction is the attack entry's, not a constant.
   check("with the reaction the attack entry names",
-        hitMotion === 2 || hitMotion === 3, `motion ${hitMotion}`);
+        overlayKind === 2 || overlayKind === 3, `motion ${overlayKind}`);
   check("then it leaps back out", sawAside, `state ${z.state}`);
   check("and the permit is free again for the next one",
         G.g_attack_permits.filter((p) => p !== -1).length <= 1,
@@ -5789,9 +5790,9 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   // already moved to `ThrowSub.Thrown`. So the clip played, the hand went
   // bare, the permit changed hands, and no axe ever left it.
   const HANDS = [
-    { bone: 5, motion: 8, release_frame: 6, range: 20, player_motion: 6,
+    { bone: 5, motion: 8, release_frame: 6, range: 20, overlay_kind: 6,
       cancel_mask: 2, held: 8098, bare: 8095, projectile: 8081 },
-    { bone: 8, motion: 9, release_frame: 6, range: 20, player_motion: 6,
+    { bone: 8, motion: 9, release_frame: 6, range: 20, overlay_kind: 6,
       cancel_mask: 4, held: 8094, bare: 8091, projectile: 8080 },
   ];
   const TYPE_THROWER = {
@@ -6096,9 +6097,9 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
 console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
 {
   const HANDS = [
-    { bone: 5, motion: 9, release_frame: 30, range: 20, player_motion: 6,
+    { bone: 5, motion: 9, release_frame: 30, range: 20, overlay_kind: 6,
       cancel_mask: 2, held: 0x1fa2, bare: 0x1f9f, projectile: 8081 },
-    { bone: 8, motion: 8, release_frame: 30, range: 20, player_motion: 6,
+    { bone: 8, motion: 8, release_frame: 30, range: 20, overlay_kind: 6,
       cancel_mask: 4, held: 0x1f9e, bare: 0x1f9b, projectile: 8080 },
   ];
   const TYPE_REARM = {
@@ -9048,9 +9049,9 @@ console.log("\nActorBodyConditionFromHands:");
   ];
   const MELEE = {
     "0": { strike: 100, lunge: 101, distance: 19, hit_frame: 10,
-           player_motion: 4, cancel_mask: 2 },
+           overlay_kind: 4, cancel_mask: 2 },
     "1": { strike: 100, lunge: 101, distance: 19, hit_frame: 10,
-           player_motion: 5, cancel_mask: 4 },
+           overlay_kind: 5, cancel_mask: 4 },
   };
   const TYPE_AXE = {
     ...TYPE,
@@ -9220,9 +9221,9 @@ console.log("\nthe crawler's undamaged swing:");
    */
   const CRAWL = {
     "2": { strike: 997, lunge: 1051, distance: 26, hit_frame: 40,
-           player_motion: 9, cancel_mask: 1 },
+           overlay_kind: 9, cancel_mask: 1 },
     "3": { strike: 1018, lunge: 1051, distance: 26, hit_frame: 3,
-           player_motion: 7, cancel_mask: 8 },
+           overlay_kind: 7, cancel_mask: 8 },
   };
   const CRAWL_PICKS = Array.from({ length: 80 },
                                  (_, i) => (i % 20 < 10 ? 2 : 3));
@@ -15346,9 +15347,9 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     }
     check("a diving bat that reaches the camera takes a life off the reset "
           + "state", dive.despawned && G.g_player_lives[0] === lives - 1
-          && G.g_player_was_hit[0] === 1 && G.g_player_hit_motion[0] === 9,
+          && G.g_player_was_hit[0] === 1 && G.g_player_damage_overlay_kind[0] === 9,
           `lives ${lives} -> ${G.g_player_lives[0]}, `
-          + `hit ${G.g_player_was_hit[0]}/${G.g_player_hit_motion[0]}`);
+          + `hit ${G.g_player_was_hit[0]}/${G.g_player_damage_overlay_kind[0]}`);
 
     // ...and so does the swarm's, through the same strike.
     // Out of the invulnerability window, and above the port's floor of one.
@@ -18020,7 +18021,7 @@ console.log("\nthe damage overlay:");
   // (`DamageOverlayClear` first, so the spawn's live-guard lets it in.)
   DamageOverlayClear(0);
   G.g_player_was_hit[0] = 1;
-  G.g_player_hit_motion[0] = DamageOverlayKind.Splat;
+  G.g_player_damage_overlay_kind[0] = DamageOverlayKind.Splat;
   step();
   const spawned = o.active === 1 && o.count === 1;
   G.g_max_attackers = 2;
@@ -18028,6 +18029,56 @@ console.log("\nthe damage overlay:");
   check("a second player joining takes the overlay down",
         spawned && o.active === 0, `${spawned} ${o.active}`);
   G.g_max_attackers = 1;
+}
+
+{
+  // The nod: `UpdateSceneViewAndLight` re-aims the block at (0, pitch, -1000)
+  // in its own un-rolled frame. Tested off the identity (L48): a camera
+  // turned a quarter, and one looking down, where "up" is not world +Y.
+  const near = (a: { x: number; y: number; z: number }, x: number, y: number,
+                z: number) => Math.abs(a.x - x) < 1e-3
+                && Math.abs(a.y - y) < 1e-3 && Math.abs(a.z - z) < 1e-3;
+  const eye = vec3(5, 2, 7);
+  const o = vec3();
+  ShakeNodLookAt(eye, vec3(5, 2, -100), 39, o);
+  check("looking down -Z, a pitch of 39 aims 39 up at 1000 ahead",
+        near(o, 5, 41, -993), JSON.stringify(o));
+  ShakeNodLookAt(eye, vec3(50, 2, 7), -39, o);
+  check("a quarter turn keeps the nod vertical, and the sign",
+        near(o, 1005, -37, 7), JSON.stringify(o));
+  // 30 degrees down: up' = (0, cos30, -sin30) for a camera facing -Z.
+  const d = { x: 5, y: 2 - Math.sin(Math.PI / 6), z: 7 - Math.cos(Math.PI / 6) };
+  ShakeNodLookAt(eye, d, 10, o);
+  check("looking down, the nod is about the camera's own right axis",
+        near(o, 5, 2 - 500 + 10 * Math.cos(Math.PI / 6),
+             7 - 1000 * Math.cos(Math.PI / 6) - 10 * Math.sin(Math.PI / 6)),
+        JSON.stringify(o));
+  ShakeNodLookAt(eye, vec3(5, 2, -100), 0, o);
+  check("no shake, no nod", near(o, 5, 2, -993));
+
+  // Through the frame: a hit's shake reaches the block's view target at the
+  // end of `GameUpdate`, where `UpdateSceneViewAndLight` would apply it, and
+  // leaves the block's own eased target alone.
+  const rng = new Rng(43);
+  const events = scene(1, rng);
+  G.g_camera_block_eye = vec3(0, 0, 0);
+  G.g_camera_block_target = vec3(0, 0, -50);
+  SceneStateInstallPlayerHooks(2, 4);
+  PlayerTakeDamage(0, null, DamageOverlayKind.Bite, events);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  // The eye is the origin, so the view target is 1000 along the block's
+  // (eased) aim plus `pitch` across it, whatever the camera tick did to it.
+  const v = G.g_camera_block_view_target;
+  const pitch = G.g_screen_shake_pitch;
+  const t = G.g_camera_block_target;
+  const n = Math.hypot(t.x, t.y, t.z);
+  const along = (v.x * t.x + v.y * t.y + v.z * t.z) / n;
+  const across = Math.hypot(v.x - t.x / n * along, v.y - t.y / n * along,
+                            v.z - t.z / n * along);
+  check("the frame's last step aims the view by the shake's pitch",
+        pitch !== 0 && Math.abs(along - 1000) < 1e-3
+        && Math.abs(across - Math.abs(pitch)) < 1e-3,
+        `pitch ${pitch} along ${along} across ${across}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

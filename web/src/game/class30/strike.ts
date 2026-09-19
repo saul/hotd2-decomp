@@ -89,7 +89,7 @@ export function ZombiePickAttack(obj: ZombieActor, rng: Rng): number {
 export function ActorStrikeConnect(obj: ZombieActor, atk: AttackJson,
                                    events?: Events): boolean {
   if ((obj.zones & DamageZone.All & atk.cancel_mask) === atk.cancel_mask) return false;
-  return PlayerTakeDamage(0, obj, atk.player_motion, events, "strike",
+  return PlayerTakeDamage(0, obj, atk.overlay_kind, events, "strike",
                           obj.attack);
 }
 

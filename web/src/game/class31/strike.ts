@@ -55,6 +55,6 @@ export function ThrowerStrikeConnect(obj: ThrowerActor,
 
   obj.flags2 |= ThrowerFlag.Struck;
   if (obj.attackPermit < 0) return false;
-  return PlayerTakeDamage(obj.attackPermit, obj, e.player_motion, events,
+  return PlayerTakeDamage(obj.attackPermit, obj, e.overlay_kind, events,
                           "strike", obj.attack);
 }

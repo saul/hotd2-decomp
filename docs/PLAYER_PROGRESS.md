@@ -2753,8 +2753,10 @@ shipped spawn can reach, and three calls in classes with no module.
 A hit used to take a life and a hundred points and put nothing on the screen.
 The exe draws one of eleven full-screen sprites out of `pol/common.bin` --
 claw marks, a slash, a swipe, a gash, a splat, a bite ring -- chosen by
-`PlayerTakeDamage`'s third argument, which the port had been storing as
-`g_player_hit_motion` and never reading. It is ported as the engine has it,
+`PlayerTakeDamage`'s third argument, which the port had been storing -- as
+the "hit motion", its name then -- and never reading. It is
+`g_player_damage_overlay_kind` now, and the bundle's attack field
+`overlay_kind` (format 10). It is ported as the engine has it,
 in `game/effects/damage_overlay.ts`:
 
 * the player's update calls `PlayerRunCameraHook`, whose hook the scene
@@ -2776,13 +2778,24 @@ Checked in the page with `tools/damage_fx.mjs`: a zombie's swipe (kinds 0 and
 axe (kind 4), each screenshotted with the overlay up, held through a pause,
 and gone after loading a snapshot taken before the hit.
 
-Not yet: the nod itself. `g_screen_shake_pitch` carries the engine's value,
-but applying it is `UpdateSceneViewAndLight`'s first block, which writes the
-camera block's *angles*, and whether that accumulates on a held pose is an
-open question the port's eye/target block cannot answer yet. And
+**The nod** is applied too (`game/camera/shake.ts`): `UpdateSceneViewAndLight`
+re-aims the active camera block at `(0, g_screen_shake_pitch, -1000)` in its
+own un-rolled frame before the view is built. The port does the same at the
+end of `GameUpdate`, into `g_camera_block_view_target` beside the block, and
+`render/camera.ts` only reads it -- so a no-tick frame draws what the tick
+before it drew, and a reset, which zeroes the pitch, falls back to the block. It does not accumulate: every camera routine that runs in play
+re-derives the block's angles from its eye and target each frame, and the nod
+never touches either. In the page a hit swings the view about 4.4 degrees peak
+to peak in its first six frames (`tools/damage_fx.mjs`'s `-nod-*.png`).
+
+**Draw order.** The exe sorts its translucent queue by draw layer, ascending
+(`RenderCommandCompare`), so the overlay (layer 0xA) is drawn *under* the
+muzzle flash and tracer (0xC) and the sprite effects (0xE). The renderer
+does the same with `renderOrder` 899 against their 900.
+
 `PlayerTakeDamage`'s second argument -- 0 at the strike sites whose striker
-has `obj+0x34` bit `0x2000000`, meaning no overlay and no shake -- is not in
-the port's signature, so every hit latches.
+has `obj+0x34` bit `0x2000000`, meaning no overlay and no shake -- is not yet
+in the port's signature; that is the exact `PlayerTakeDamage` port's.
 
 ### `ResetSceneOnEnter`, and the three blocks it zeroes
 

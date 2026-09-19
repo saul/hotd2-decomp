@@ -374,11 +374,12 @@ export const G = {
   /** `g_player_was_hit` — 0x009A5CD0 + player*0x98. */
   g_player_was_hit: [0, 0],
   /**
-   * `g_player_hit_motion` — 0x009A5CD2 + player*0x130. Not a motion: its one
+   * `g_player_damage_overlay_kind` — 0x009A5CD2 + player*0x130. Once named the
+   * "hit motion"; its one
    * reader hands it to `DamageOverlaySpawn` as the overlay kind -- see
    * `DamageOverlayKind` in `effects/damage_overlay.ts`.
    */
-  g_player_hit_motion: [0, 0],
+  g_player_damage_overlay_kind: [0, 0],
   /**
    * `g_player_camera_hook` — 0x009A5CDC + player*0x130. What
    * `PlayerRunCameraHook` calls; the scene-state installers write it.
@@ -395,9 +396,8 @@ export const G = {
    */
   g_screen_shake_frames: 0,
   /**
-   * `g_screen_shake_pitch` — 0x009CA0E4. What the camera would nod by, in
-   * thousandths of the look distance. Computed and not yet applied -- see
-   * `effects/damage_overlay.ts`.
+   * `g_screen_shake_pitch` — 0x009CA0E4. How far the camera nods, in units
+   * up at a look distance of 1000 -- see `camera/shake.ts`.
    */
   g_screen_shake_pitch: 0,
   /** `g_player_hit_count` — 0x009A5C86 + player*0x98. Hits that scored. */
@@ -624,6 +624,14 @@ export const G = {
    * frames instead of cutting to it.
    */
   g_camera_block_target: vec3(),
+  /**
+   * `[port-only]` — where the block's angles face once
+   * `UpdateSceneViewAndLight` has applied the screen shake: see
+   * `SceneViewApplyShake` in `camera/shake.ts`. The engine keeps it as the
+   * block's pitch and yaw; the port's block is two points, so this is the
+   * third. Read by the draw only while `g_screen_shake_pitch` is non-zero.
+   */
+  g_camera_block_view_target: vec3(),
   /**
    * `g_cam_path_target` — 0x009C70D8. The look-at `CamEvalPath7` evaluates
    * from the active path's target channels, and the fallback
@@ -1530,7 +1538,7 @@ export function ResetGameGlobals(): void {
   G.g_entity_lights = makeEntityLights();
   G.g_player_invuln_frames = 0;
   G.g_player_was_hit = [0, 0];
-  G.g_player_hit_motion = [0, 0];
+  G.g_player_damage_overlay_kind = [0, 0];
   // `PlayerEnterPlay` (`FUN_00414770`) zeroes the overlay's active word and
   // count, which with the rest of the record unread is all of it.
   //
@@ -1577,6 +1585,7 @@ export function ResetGameGlobals(): void {
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
+  G.g_camera_block_view_target = vec3();
   G.g_cam_path_target = vec3();
   G.g_camera_turn_rate = 0;
   G.g_camera_turn_curve = 1;

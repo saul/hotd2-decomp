@@ -39,12 +39,15 @@ import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
-import { ScriptedPropUpdate13, g_carrier_prop_routines }
+import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
   from "../src/game/class13";
 import {
-  CARRIER_SELECTORS_PORTED, CarrierRoutine0State, CarrierState,
-  type ScriptedPropTail,
+  CARRIER_SELECTORS_PORTED, CarrierDrawSlots, CarrierRoutine0State,
+  CarrierState, type ScriptedPropTail,
 } from "../src/game/class13/state";
+import {
+  PropStripEffectsTick, PropStripKind, SpawnPropStripEffect,
+} from "../src/game/effects/prop_strip";
 import {
   CARRIER0_FRAME_STRIKE, CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST,
   SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
@@ -15063,6 +15066,28 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and one with none of them runs past instead",
           t().state === CarrierState.RunPast, CarrierState[t().state]);
 
+    // Running past, at 0x550: the wake starts to fade and the bow throws a
+    // strip -- `SpawnPropStripEffect` kind 3 five units off the bow -- with
+    // `0x000B16A9`. This was a `[diverges]` for want of the slots.
+    {
+      const ev = new Events();
+      const heard: number[] = [];
+      ev.on("sound.play", (e) => heard.push(e.id));
+      G.g_prop_strip_effects = [];
+      t().pathFrame = 0x550;
+      ScriptedPropUpdate13(boat, { ...fr(rng), events: ev });
+      const bow = G.g_prop_strip_effects[0];
+      check("at path frame 0x550 the carrier throws the bow strip and sounds it",
+            !!bow && bow.first === 0x174a && heard.includes(SFX_CARRIER_BOW)
+            && Math.abs(bow.pos.x - boat.pos.x) < 1e-6
+            && Math.abs(bow.pos.z - (boat.pos.z - 5)) < 1e-6,
+            `${bow?.pos.x},${bow?.pos.z} vs ${boat.pos.x},${boat.pos.z}`);
+      check("...and the wake is drawn this frame, on the ground under it",
+            t().wakeDrawn >= 0x24a && t().wakeDrawn <= 0x25f
+            && t().wakeGroundY === G.g_camera_fixed_eye_y,
+            `${t().wakeDrawn} ${t().wakeGroundY}`);
+    }
+
     // Only the three riding states advance the path frame: `0x00440467` is
     // the `INC` every one of their arms jumps to, and states 3, 5 and 6 jump
     // past it.
@@ -15114,6 +15139,9 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           Object.keys(g_carrier_prop_routines).join());
 
     ScriptedPropUpdate13(boat, fr(rng));
+    check("the ride frame draws the wake cel it then steps past",
+          t().wakeDrawn === 0x24a && t().wakeCel === 0x24b
+          && t().splashDrawn === 0);
     check("its first frame allocates the ride and seats it on path 0x151 at "
           + "the camera's frame -- it used to stand at its descriptor for ever",
           t().state === CarrierRoutine0State.Ride && boat.pos.x === 326
@@ -15131,9 +15159,19 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           `${t().pathFrame} ${boat.pos.x} ${sounds.map((x) => x.toString(16))}`);
     check("...still in the ride state, which hands over one frame later",
           t().state === CarrierRoutine0State.Ride);
+    check("...and the splash is armed on that frame but not yet drawn",
+          t().splashDrawn === 0);
     ScriptedPropUpdate13(boat, fr(rng));
-    check("and the next frame coasts on without the wake",
-          t().state === CarrierRoutine0State.Coast && boat.pos.x === 630);
+    check("the next frame hands over to the coast -- after drawing the "
+          + "wake one last time, because case 1 draws whatever it decided",
+          t().state === CarrierRoutine0State.Coast && boat.pos.x === 630
+          && t().wakeDrawn !== 0,
+          `${t().state} ${boat.pos.x} ${t().wakeDrawn}`);
+    check("...drawing the splash's first cel",
+          t().splashDrawn === CARRIER0_SPLASH_FIRST);
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("and from then on it coasts without the wake",
+          t().wakeDrawn === 0 && t().splashDrawn === CARRIER0_SPLASH_FIRST + 1);
 
     // The splash strip is 94 cels and then off; the ride coasts to 710.
     for (let i = 0; i < 200; i++) ScriptedPropUpdate13(boat, fr(rng));
@@ -15845,6 +15883,91 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   check("...and at the path's end the strip starts and 0x400000 goes up",
         t().state === CarrierState.Wake && (boat.flags & 0x400000) !== 0,
         `${CarrierState[t().state]} ${boat.flags.toString(16)}`);
+}
+
+{
+  // **A civilian's children come straight after it.** Stage 2 block 16's
+  // civilian (0xA134) rides the boat and `CivilianInit` builds its class-0x18
+  // captor (0xA174) itself; the child is in `readySpawns` and not in the
+  // walker's list. Walking only the list built no civilian child anywhere:
+  // block 5's captors never came through the door and the boat carried no
+  // zombie.
+  const rng = new Rng(19);
+  ResetGameGlobals();
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      { at: 0xa3e8, class: 0x13, char_type: -1, motion: null, hp: 0,
+        yaw: 57344, init_flags: 0x8000,
+        class13: { slot: 0x1a36, cam_path: 78, cam_frame: 1110, scale: 2.5,
+                   behaviour: 8, selector: 0 } },
+      { at: 0xa134, class: 0x10, char_type: 1, motion: 660, hp: 1,
+        yaw: 61440 },
+      { at: 0xa174, class: 0x18, char_type: 1, motion: 956, hp: 180,
+        yaw: 32768, initial_state: 34, attack_state: 47,
+        civilian_child: 0xa134,
+        class18: { from_state: 47, cue_path: 78, cue_frame: 630 } },
+    ],
+  } as unknown as CharactersJson);
+  const listed = [
+    { at: 0xa3e8, class: SpawnClass.ScriptedProp,
+      pos: [-1055, -26.25, -1620] as [number, number, number] },
+    { at: 0xa134, class: SpawnClass.Civilian,
+      pos: [1.5, 3, 7.5] as [number, number, number] },
+  ];
+  const order: number[] = [];
+  const pool: CharacterPool = {
+    rng,
+    bindToPool: () => {},
+    readySpawns: () => [
+      { at: 0xa134, motion: 660, pos: vec3(1.5, 3, 7.5) },
+      { at: 0xa174, motion: 956, pos: vec3(1, 3, -22.5), parentAt: 0xa134 },
+    ],
+    syncSpawns: (_s, made) => { order.push(...made.map((a) => a.at)); return []; },
+  };
+  syncCharacterSpawns(pool, listed);
+  const child = G.g_object_list.find((o) => o.at === 0xa174);
+  check("a civilian's class-0x18 child is made although no spawn lists it",
+        !!child, order.map((x) => x.toString(16)).join());
+  check("...straight after its parent, and it rides the boat",
+        order.join() === [0xa134, 0xa174].join()
+        && child?.carrierAt === 0xa3e8,
+        `${order.map((x) => x.toString(16))} ${child?.carrierAt}`);
+}
+
+{
+  // `SpawnPropStripEffect` (`FUN_0043FCA0`) kind 3 and its update: nothing
+  // drawn on the spawn frame, then 0x174A..0x1785 once each, then gone.
+  ResetGameGlobals();
+  const ev = new Events();
+  const heard: number[] = [];
+  ev.on("sound.play", (e) => heard.push(e.id));
+  SpawnPropStripEffect({ pos: vec3(1, 2, 3), pitch: 0, yaw: 0x4000, roll: 0 },
+                       PropStripKind.CarrierBow, 1.0, ev);
+  const e = G.g_prop_strip_effects[0];
+  check("the bow strip spawns waiting one frame, silent",
+        !!e && e.delay === 1 && heard.length === 0);
+  const seen: number[] = [];
+  for (let i = 0; i < 100 && G.g_prop_strip_effects.length; i++) {
+    PropStripEffectsTick();
+    const x = G.g_prop_strip_effects[0];
+    if (x) seen.push(x.slot);
+  }
+  check("...then draws 0x174A..0x1785 once each and despawns",
+        seen.length === 0x3c && seen[0] === 0x174a
+        && seen[seen.length - 1] === 0x1785
+        && G.g_prop_strip_effects.length === 0,
+        `${seen.length} ${seen[0]?.toString(16)}`);
+  SpawnPropStripEffect({ pos: vec3(0, 0, 0), pitch: 0, yaw: 0, roll: 0 },
+                       PropStripKind.Kind0, 1.0, ev);
+  check("kinds 0 and 1 sound SIBUKI2 as they spawn",
+        heard.join() === String(0x4116a9));
+  check("the exporter carries every slot the carrier routines draw",
+        CarrierDrawSlots(0).includes(0x25f) && CarrierDrawSlots(0).includes(0xfd4)
+        && CarrierDrawSlots(0).includes(0x1031)
+        && CarrierDrawSlots(1).includes(0x275) && CarrierDrawSlots(1).includes(0x1ad2)
+        && CarrierDrawSlots(1).includes(0x174a) && CarrierDrawSlots(1).includes(0x1785)
+        && CarrierDrawSlots(2).length === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -3646,14 +3646,33 @@ the boat**: it ends the ride state at the `MatrixStackPop` and shows no
 `frame++`; the increment is at `0x00440323` and the whole tail past it.
 `game/class13/routine0.ts`.
 
-Not ported, both draw-side, and neither slot range is in the bundle: selector
-0's wake (`char_adv06.bin[0..21]`, the same strip selector 1 draws) and the
-splash strip. Their cursors are stepped in `game/`. The **zombie in the boat**
-is the civilian's class-0x18 child (evt `0xA174`), and no class-0x18 spawn in
-any stage becomes a character: class 0x18 has no `MOTION_RULES` row, so it
-exports as a marker. That is the stage-3 boat work's fix and is not repeated
-here; without it the civilian's captor never exists and the civilian is
-"rescued" on its first frame.
+**The draws are ported too.** Selector 0's wake (`char_adv06.bin[0..21]`
+under the boat's own pose, `Translate(0, 0, 27.5); Scale(1, 0.15, 1)`) and its
+splash (`eff_dokan.bin[0..93]` at the fixed point by the wall) are drawn by
+`render/slotmodels.ts` from `wakeDrawn`/`splashDrawn`, which the routine sets
+on exactly the frames it draws — a cel is drawn and *then* stepped, so reading
+the cursor itself would put every strip a frame ahead. The same machinery
+carries **selector 1's**, which were a `[diverges]` only for want of their
+slots: `CarrierDrawGroundWake` (`FUN_00440770`) lays two wake slots flat on
+the ground under the boat (`QueryGroundHeightAt(x, y + 100, z)`, headed along
+the keel by `VecToAngles` of the rotated forward axis — both computed in
+`game/`, since a collision query is the port's), states 5/6 draw their strip
+at the bow, and at path frame `0x550` the bow throws `SpawnPropStripEffect`
+(`FUN_0043FCA0`) kind 3 — a small effect object, `PropStripEffectUpdate`
+(`FUN_0043FBC0`), now `game/effects/prop_strip.ts` — with `0x000B16A9`.
+`CarrierDrawSlots` is what the exporter carries for each ported selector.
+
+**The zombie in the boat was a regression in the spawn order**, not the
+class-0x18 motion row. After the stage-3 boat work, `syncCharacterSpawns`
+walked the walker's spawn list to keep script order — and a civilian's
+children are not in it: `CivilianInit` builds them from descriptors nothing in
+the script points at, so they reach `readySpawns` through their parent. No
+civilian child was built anywhere; block 5's two captors never came through
+the door and this boat carried nobody. They are now built straight after their
+parent (`CharacterSpawnRequest.parentAt`), which is when `CivilianInit` builds
+them in the engine, and the zombie rides the boat into the wall.
+`[open]` whether it walks toward the civilian as it should while riding: it
+sits in `ZombieStateWalkToTarget` and barely moves in carrier space.
 
 ## Every opcode, and what the player does with it
 

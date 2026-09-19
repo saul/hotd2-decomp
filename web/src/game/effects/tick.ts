@@ -8,6 +8,7 @@
  */
 import { BloodSpraysTick, PointBloodSpraysTick } from "./blood";
 import { PlayerShotEffectsTick } from "./shot_effects";
+import { PropStripEffectsTick } from "./prop_strip";
 import { SpriteEffectsTick } from "./sprite";
 
 /** `[port-only]` — see the file comment. */
@@ -16,4 +17,7 @@ export function ShotEffectsTick(): void {
   SpriteEffectsTick();
   BloodSpraysTick();
   PointBloodSpraysTick();
+  // Not a shot effect -- the carrier's bow strip -- but the same kind of
+  // pool, walked at the same point in the frame.
+  PropStripEffectsTick();
 }

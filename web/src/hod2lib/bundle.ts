@@ -35,7 +35,8 @@ import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
-import { CARRIER_SELECTORS_PORTED } from "../game/class13/state";
+import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
+  from "../game/class13/state";
 import { f32, i16, i32, u32 } from "./bytes";
 import { BODY_CREATURE_SLOTS } from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
@@ -860,6 +861,13 @@ export function scriptedPropDrawSlots(
     const slot = t?.slot;
     if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
       out.push(slot);
+    }
+    // ...and every slot the carrier routine draws beside the prop: the wake,
+    // selector 0's splash, selector 1's strip and bow effect.
+    if (t?.behaviour === 8) {
+      for (const s of CarrierDrawSlots(t.selector ?? -1)) {
+        if (!out.includes(s)) out.push(s);
+      }
     }
   }
   return out;

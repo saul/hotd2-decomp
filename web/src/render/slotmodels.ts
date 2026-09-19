@@ -47,7 +47,7 @@
  * and wants its own measurement, so it stays as it is and is recorded here
  * beside the routine that says otherwise.
  */
-import { Group, Object3D, Ray, Vector3 } from "three";
+import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import type { Actor, HumanoidActor } from "../game/actor";
@@ -59,6 +59,52 @@ import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
+import { CARRIER_WAKE_PAIR, type ScriptedPropTail }
+  from "../game/class13/state";
+
+/**
+ * The literals of the carrier routines' own draws, read off the disassembly
+ * (`L1`) — see `game/class13/`.
+ *
+ * * `CarrierPropRoutine0` (`FUN_00440210`): the wake at
+ *   `Translate(0, 0, 27.5); Scale(1, 0.15, 1)` under the boat's pose, and the
+ *   splash at the fixed world point `(-1181.71, -18.908, -1508.41)`, turned
+ *   `0x18E3` and scaled 0.6.
+ * * `CarrierDrawGroundWake` (`FUN_00440770`): `Translate(0, 0, 27.0)` along
+ *   the heading, `Scale(1, s, s)`.
+ * * `CarrierPropRoutine1` states 5/6: the strip at the carrier's
+ *   `Translate(0, 0, -5.0)`.
+ */
+const WAKE0_Z = 27.5;
+const WAKE0_SCALE_Y = 0.15;
+const SPLASH0_AT: readonly [number, number, number] =
+  [-1181.71, -18.908, -1508.41];
+const SPLASH0_YAW = 0x18e3;
+const SPLASH0_SCALE = 0.6;
+const WAKE1_Z = 27.0;
+const STRIP1_Z = -5.0;
+
+/** Scratch matrices for the carrier draws; the layer is single-threaded. */
+const _m = new Matrix4();
+const _t = new Matrix4();
+
+/** `M = M · T(x, y, z)`. */
+function mTranslate(m: Matrix4, x: number, y: number, z: number): void {
+  m.multiply(_t.makeTranslation(x, y, z));
+}
+/** `M = M · R(axis, bams)`, the engine's `MatrixRotate*`. */
+function mRotX(m: Matrix4, b: number): void {
+  m.multiply(_t.makeRotationX(b * BAMS_TO_RAD));
+}
+function mRotY(m: Matrix4, b: number): void {
+  m.multiply(_t.makeRotationY(b * BAMS_TO_RAD));
+}
+function mRotZ(m: Matrix4, b: number): void {
+  m.multiply(_t.makeRotationZ(b * BAMS_TO_RAD));
+}
+function mScale(m: Matrix4, x: number, y: number, z: number): void {
+  m.multiply(_t.makeScale(x, y, z));
+}
 
 /**
  * `DrawSlotFor`'s answer for a class whose draw is a **chain** of slots rather
@@ -242,6 +288,8 @@ export class SlotModelLayer implements System<RenderContext> {
   readonly group = new Group();
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<number, Live>();
+  /** The routines' extra draws, keyed by what drew them. Session state. */
+  private readonly extras = new Map<string, Live>();
   /** Scratch for {@link SlotModelLayer.chain}; the layer is single-threaded. */
   private readonly _parts: OwlPart[] = [];
   private enabled = true;
@@ -282,6 +330,8 @@ export class SlotModelLayer implements System<RenderContext> {
     ctx.session.defer(() => {
       for (const l of this.nodes.values()) l.node.removeFromParent();
       this.nodes.clear();
+      for (const l of this.extras.values()) l.node.removeFromParent();
+      this.extras.clear();
     });
   }
 
@@ -310,7 +360,7 @@ export class SlotModelLayer implements System<RenderContext> {
   update(ctx: RenderContext): void {
     this.group.visible = this.enabled;
     if (!this.enabled) return;
-    const seen = new Set<number>();
+    const seen = new Set<number | string>();
 
     for (const a of G.g_object_list) {
       if (a.dead) continue;
@@ -380,6 +430,15 @@ export class SlotModelLayer implements System<RenderContext> {
       }
     }
 
+    this.drawCarrierEffects(seen);
+    this.drawPropStrips(seen);
+
+    for (const [key, l] of this.extras) {
+      if (seen.has(key)) continue;
+      l.node.removeFromParent();
+      this.extras.delete(key);
+    }
+
     for (const [at, l] of this.nodes) {
       if (seen.has(at)) continue;
       l.node.removeFromParent();
@@ -389,6 +448,98 @@ export class SlotModelLayer implements System<RenderContext> {
 
   resync(ctx: RenderContext): void {
     this.update(ctx);
+  }
+
+  /**
+   * A node for one of a routine's extra draws, re-cloned when its slot moves
+   * on, and placed by the matrix the routine composed.
+   */
+  private extra(key: string, slot: number, m: Matrix4,
+                seen: Set<number | string>): void {
+    let live = this.extras.get(key);
+    if (!live || live.slot !== slot) {
+      live?.node.removeFromParent();
+      const node = this.clone(slot);
+      if (!node) { this.extras.delete(key); return; }
+      node.matrixAutoUpdate = false;
+      this.group.add(node);
+      live = { node, slot };
+      this.extras.set(key, live);
+    }
+    live.node.matrix.copy(m);
+    live.node.visible = true;
+    seen.add(key);
+  }
+
+  /**
+   * The draws class 0x13's carrier routines make besides the prop, on the
+   * frames `game/class13/` says they made them (`*Drawn`, 0 for none).
+   */
+  private drawCarrierEffects(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.dead || a.despawned || a.cls !== SpawnClass.ScriptedProp) continue;
+      const t = (a as { prop13?: ScriptedPropTail }).prop13;
+      if (!t || t.behaviour !== 8) continue;
+      if (t.selector === 0) {
+        if (t.wakeDrawn) {
+          // `Push; Translate(pos); RotX; RotZ; RotY; Translate(0, 0, 27.5);
+          // Scale(1, 0.15, 1); AssetDrawSlot(ride->wake)`.
+          _m.identity();
+          mTranslate(_m, a.pos.x, a.pos.y, a.pos.z);
+          mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
+          mTranslate(_m, 0, 0, WAKE0_Z);
+          mScale(_m, 1, WAKE0_SCALE_Y, 1);
+          this.extra(`w0:${a.at}`, t.wakeDrawn, _m, seen);
+        }
+        if (t.splashDrawn) {
+          _m.identity();
+          mTranslate(_m, ...SPLASH0_AT);
+          mRotY(_m, SPLASH0_YAW);
+          mScale(_m, SPLASH0_SCALE, SPLASH0_SCALE, SPLASH0_SCALE);
+          this.extra(`s0:${a.at}`, t.splashDrawn, _m, seen);
+        }
+      } else if (t.selector === 1) {
+        if (t.wakeDrawn) {
+          // `CarrierDrawGroundWake` (`FUN_00440770`): on the ground, along
+          // the keel, two slots under one matrix.
+          _m.identity();
+          mTranslate(_m, a.pos.x, t.wakeGroundY, a.pos.z);
+          mRotY(_m, t.wakeYaw);
+          mTranslate(_m, 0, 0, WAKE1_Z);
+          mScale(_m, 1, t.wakeScale, t.wakeScale);
+          this.extra(`w1:${a.at}`, t.wakeDrawn, _m, seen);
+          this.extra(`w1b:${a.at}`, t.wakeDrawn + CARRIER_WAKE_PAIR, _m, seen);
+        }
+        if (t.stripDrawn) {
+          // States 5/6: `Translate(pos); RotX; RotZ; RotY; Translate(0, 0,
+          // -5); RotY(-yaw); RotZ(roll); RotX(pitch); RotY(camera yaw)`, as
+          // written -- the three turns after the bow are not an inverse.
+          _m.identity();
+          mTranslate(_m, a.pos.x, a.pos.y, a.pos.z);
+          mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
+          mTranslate(_m, 0, 0, STRIP1_Z);
+          mRotY(_m, -a.yaw); mRotZ(_m, a.roll); mRotX(_m, a.pitch);
+          mRotY(_m, G.g_camera_yaw_bams);
+          this.extra(`t1:${a.at}`, t.stripDrawn, _m, seen);
+        }
+      }
+    }
+  }
+
+  /**
+   * `PropStripEffectUpdate` (`FUN_0043FBC0`)'s draw: `Translate; RotX; RotZ;
+   * RotY`, and a scale only when it is not 1.0. An object that has not yet
+   * run its first update (`delay` still up) has drawn nothing.
+   */
+  private drawPropStrips(seen: Set<number | string>): void {
+    for (const e of G.g_prop_strip_effects) {
+      if (e.delay !== 0) continue;
+      _m.identity();
+      mTranslate(_m, e.pos.x, e.pos.y, e.pos.z);
+      mRotX(_m, e.pitch); mRotZ(_m, e.roll); mRotY(_m, e.yaw);
+      if (e.scale !== 1) mScale(_m, e.scale, e.scale, e.scale);
+      this.extra(`p:${e.id}`, e.slot, _m, seen);
+    }
   }
 
   /**

@@ -18643,6 +18643,50 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         G.g_player_reload_prompt_timer[0] === 120,
         `${G.g_player_reload_prompt_timer[0]}`);
 
+  // The voice's gates, from `HudDrawAmmoAndReloadPrompt`'s tail: the timer
+  // non-zero, the trigger down this frame, the aim on the screen -- and the
+  // routine runs at all only with the firing gate up.
+  reload();
+  for (let i = 0; i < 5; i++) shoot();
+  heard.length = 0;
+  shoot();
+  const vo = (h: number[]) => h.filter((id) => id === RELOAD_VOICE
+                                          || id === SHOOT_VOICE);
+  check("the shot that empties the gun is not nagged: the timer is 0 that "
+        + "frame", G.g_player_ammo[0] === 0 && vo(heard).length === 0
+        && heard.includes(g_gunshot_sound_ids[0]),
+        heard.map((h) => h.toString(16)).join(" "));
+  heard.length = 0;
+  for (let i = 0; i < 30; i++) step();
+  check("...and nothing is said while the trigger is left alone",
+        vo(heard).length === 0, heard.map((h) => h.toString(16)).join(" "));
+  heard.length = 0;
+  shoot();
+  shoot();
+  check("each dry pull is one RELOAD -- a pull is one frame of trigger",
+        vo(heard).length === 2 && vo(heard).every((id) => id === RELOAD_VOICE),
+        heard.map((h) => h.toString(16)).join(" "));
+  G.g_player_input_is_gun[0] = 0;
+  G.g_player_pad_kind[0] = 0;
+  G.g_player_reload_prompt_timer[0] = 130;
+  heard.length = 0;
+  shoot();
+  check("a controller past 120 still hears RELOAD, not SHOOT",
+        vo(heard).length === 1 && vo(heard)[0] === RELOAD_VOICE,
+        heard.map((h) => h.toString(16)).join(" "));
+  G.g_player_input_is_gun[0] = 1;
+  G.g_player_pad_kind[0] = -1;
+  G.g_nFiringGate = 0;
+  const tGate = G.g_player_reload_prompt_timer[0];
+  heard.length = 0;
+  shoot();
+  check("with the firing gate down: no prompt, no voice, and the timer "
+        + "stands", sprites(HudSprite.Reload).length === 0
+        && vo(heard).length === 0
+        && G.g_player_reload_prompt_timer[0] === tGate,
+        `${G.g_player_reload_prompt_timer[0]} vs ${tGate}`);
+  G.g_nFiringGate = 1;
+
   // A controller -- the PC keyboard -- reloads with pad B instead.
   G.g_player_input_is_gun[0] = 0;
   G.g_player_pad_kind[0] = 0;

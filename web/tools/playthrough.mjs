@@ -532,11 +532,26 @@ if (ROUTE.size) {
  * It is a URL flag the player already has; this only passes it, and says so.
  */
 const original = flag("original");
+/**
+ * `--link` starts from a **deep link** -- the query string of a URL the user
+ * filed a bug with -- instead of the stage's entry block. Everything the
+ * header says about why this tool does not seek still holds: a seek is its own
+ * rebuild path with its own bugs. That is exactly what this flag is for --
+ * checking that the address a bug report names loads and plays on to the end
+ * of the stage rather than hanging on a world the seek built wrong.
+ *
+ *   node tools/playthrough.mjs --headless \
+ *     --link "stage=4&original=1&mode=play&block=1&step=2&op=11&frame=770"
+ */
+const link = opt("link", null);
+if (link !== null) console.log(`--link: ${link}`);
 if (original) console.log("--original: g_GameMode 1, the Original Mode bundle");
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
   // is the other half, and it was already a URL flag.
-  url: `?stage=${stage}&drive=1&seed=${seed}`
+  url: link !== null
+    ? `?${link.replace(/^\?/, "")}&drive=1&seed=${seed}`
+    : `?stage=${stage}&drive=1&seed=${seed}`
        + (original ? "&original=1" : "")
        + (entry === null ? "" : `&entry=${entry}`),
   size: opt("size", "1280x800"),

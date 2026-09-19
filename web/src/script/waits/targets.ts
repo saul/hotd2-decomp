@@ -43,6 +43,7 @@ export function CameraTargetsClear(): boolean {
 
 export const waitTargetsClear: WaitRule = {
   ops: [0x47],
+  clearsRoom: true,
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
     // A host with no camera and no pool cannot answer, and passes -- the same
     // contract the enemy gates keep for the walker-only harnesses.

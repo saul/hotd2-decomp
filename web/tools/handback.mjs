@@ -42,7 +42,6 @@ import { ActorIsEnemy } from "../src/game/registry.ts";
 import { SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G } from "../src/game/globals.ts";
-import { SpawnClass } from "../src/game/spawn_class.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
@@ -167,34 +166,12 @@ for (const [name, stage, block, step] of CASES) {
   /** One row per gate: how long it waited after its counter reached zero. */
   const gates = [];
   let waiting = null;
-  /** Civilians the seek built rather than the stage -- see below. */
-  const seekCivilians = new Set();
   for (let f = 0; f < FRAMES; f += 1) {
     walker.tick(TICK);
     if (walker.branch) walker.takeBranch(walker.branch.targets[0]);
     syncPortGlobals(walker, false, ctx.view.eye);
     seat();
     spawn();
-    // **A civilian the seek rebuilt is not one the stage has at this address.**
-    // The replay steps over every wait, so a class-0x10 spawn listed before
-    // the target is built fresh at her first command -- stage 3's boat
-    // hostage, whose script waits on her captor and on camera path 124, which
-    // block 1 never plays. The engine never has her there: played, she is
-    // rescued in block 0 and her stream ends untracked. Since
-    // `CivilianUpdate` registers her for the camera (`0x0048ADB0`, bug 18)
-    // she would hold `g_camera_free` for ever and this would measure her
-    // rather than the room; before that she already stalled this case at
-    // block 1 step 2's `wait_scripted_actors`. So a civilian present on the
-    // first frame is held out of the camera's slots, which is the state her
-    // own finished script leaves.
-    if (f === 0) {
-      for (const o of G.g_object_list) {
-        if (o.cls === SpawnClass.Civilian) seekCivilians.add(o.at);
-      }
-    }
-    for (const o of G.g_object_list) {
-      if (seekCivilians.has(o.at)) o.flags |= ActorFlag.NoCameraTrack;
-    }
     world.update(ctx, LIVE);
 
     const w = walker.wait;

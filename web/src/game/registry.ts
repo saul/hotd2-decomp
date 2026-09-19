@@ -259,6 +259,14 @@ export interface ClassHandler {
    * the wait word, is then what decides. See `camera/slots.ts`.
    */
   tracksCamera?(obj: Actor): boolean;
+  /**
+   * The float this class's `Update` pushes to `ActorRegisterCameraPoint`
+   * (`FUN_00409B70`), when it is a **field** rather than a literal. Class 0x14
+   * pushes `state+0x0C` (`Class14Update`, `0x0047621E`) and class 0x19
+   * `state+0x70` (`Boss4Update`, `0x00491A49`). Absent means the class's
+   * literal from `CameraPointRiseFor` in `camera/track.ts`.
+   */
+  cameraRise?(obj: Actor): number;
 }
 
 /**

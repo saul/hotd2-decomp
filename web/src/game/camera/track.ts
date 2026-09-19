@@ -68,25 +68,35 @@ const CAMERA_TRACK_BONE = 1;
  * All fifteen call sites, re-read with `disassemble_bytes` and the raw hex
  * quoted, because the decompiler drops float arguments:
  *
- * | site | caller | push | value |
- * |---|---|---|---|
- * | 0x0045347A | `EnemyZombieUpdate`, class 0x30 | `6800008040` | **4.0** |
- * | 0x00449991 | `EnemyThrowerUpdate`, class 0x31 | `6a00` | **0.0** |
- * | 0x0048ADB0 | `CivilianUpdate`, class 0x10 | `6800008040` | **4.0** |
- * | 0x00427D01 / 0x004283D2 / 0x00428AB2 | the 0x0042xxxx family | `680000a040` | 5.0 |
- * | 0x0042C273, 0x0049C8CE | ditto | `6800000040` | 2.0 |
- * | 0x0042C986, 0x0042D5D0 | ditto | `6800007041` | 15.0 |
- * | 0x0042CF93, 0x0047CA3A | ditto, and class 0x32 | `6a00` | 0.0 |
- * | 0x00490917, 0x004912EA | the 0x0049xxxx family | `680000c040` | 6.0 |
- * | 0x00491A49 | `FUN_004919D0` | `PUSH EAX` = `[EDX + 0x70]` | **runtime** |
+ * | site | caller | push | value | gate before the call |
+ * |---|---|---|---|---|
+ * | 0x0045347A | `EnemyZombieUpdate`, class 0x30 | `6800008040` | **4.0** | none |
+ * | 0x00449991 | `EnemyThrowerUpdate`, class 0x31 | `6a00` | **0.0** | none |
+ * | 0x0048ADB0 | `CivilianUpdate`, class 0x10 | `6800008040` | **4.0** | none |
+ * | 0x0043A2C7 | `FrogUpdate`, class 0x11 | `680000803f` | 1.0 | none |
+ * | 0x0047621E | `Class14Update`, class 0x14 | `state+0x0C` | **runtime** | none |
+ * | 0x00491A49 | `Boss4Update`, class 0x19 | `PUSH EAX` = `[EDX + 0x70]` | **runtime** | none |
+ * | 0x00427D01 / 0x004283D2 / 0x00428AB2 | `Class2DState3` / `4` / `5`, class 0x2D | `680000a040` | 5.0 | none |
+ * | 0x0042C273 | `Class2DChildKind0Update` | `6800000040` | 2.0 | `obj+0x34` bit `0x100` clear |
+ * | 0x0042C986, 0x0042D5D0 | `Class2DChildKind1Update`, `Class2DChildKind3Update` | `6800007041` | 15.0 | bit `0x100` clear |
+ * | 0x0042CF93 | `Class2DChildKind2Update` | `6a00` | 0.0 | bit `0x100` clear |
+ * | 0x0049C8CE | `Class22FightPhase2`, class 0x22 | `6800000040` | 2.0 | bit `0x100` clear |
+ * | 0x0047CA3A | `Class32Update`, class 0x32 | `6a00` | 0.0 | none |
+ * | 0x00490917, 0x004912EA | `Class23StateShared1`, `Class23Subtype2State1`, class 0x23 | `680000c040` | 6.0 | none |
  *
- * So it is per-call-site, and at fourteen of the fifteen a constant — the
- * survey's "per-call-site constant" needs that one qualification.
+ * `Class2DState4` (`FUN_00427D40`) is what builds the four child kinds, one
+ * `ActorAlloc(init, 0x13F4)` each on `obj+0x1320` 0..3 (`0x004282C5..0x0042831B`),
+ * with the inits at `0x0042C0B0`, `0x0042C830`, `0x0042CD30` and `0x0042D490`.
+ * Classes 0x2D, 0x22, 0x23 and 0x32 have no port, so their rows are recorded
+ * and not admitted: an actor with no behaviour registering for the camera
+ * would hold every room gate with nothing to shoot. `[open]` until they are.
  *
- * Three of the port's seven classes appear above. **The other four —
- * 0x24, 0x25, 0x41, 0x44 — never call the routine at all**: those fifteen are
- * every reference to 0x00409B70 in the binary and none of them is in those
- * classes' code. They get 0 here, because 0 is the only value that does not
+ * So it is per-call-site, and a constant at all but two -- class 0x14's and
+ * class 0x19's are fields, which `ClassHandler.cameraRise` answers.
+ *
+ * **Classes 0x24, 0x25, 0x41 and 0x44 never call the routine at all**: the
+ * sixteen rows above are every reference to 0x00409B70 in the binary and none
+ * of them is in those classes' code. They get 0 here, because 0 is the only value that does not
  * invent a lift the engine never applies to them.
  *
  * [diverges] *Who* is registered is still not the engine's set: `director.ts`
@@ -102,6 +112,8 @@ const CAMERA_POINT_RISE: Partial<Record<SpawnClass, number>> = {
   // `CarriedZombieUpdate18` runs `EnemyZombieUpdate`, whose call this is.
   [SpawnClass.CarriedZombie]: 4,
   [SpawnClass.Thrower]: 0,
+  // `FrogUpdate` (`FUN_0043A1E0`): `ActorRegisterCameraPoint(1.0)`.
+  [SpawnClass.Frog]: 1,
 };
 
 /** What {@link CAMERA_POINT_RISE} gives a class with no exe call site. */

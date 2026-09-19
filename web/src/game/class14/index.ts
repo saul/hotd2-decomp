@@ -2000,17 +2000,17 @@ function Class14KnockedDownToRoll(obj: Actor, t: Boss2Tail): void {
  * same step then reaches can come down. The choreography is `[open]`.
  */
 export function Class14StateDeathA(obj: Actor, f: ClassFrame): void {
-  Class14StateDeathCommon(obj, f);
+  Class14StateDeathCommon(obj, f, false);
 }
 
 /** `Class14StateDeathB` — `FUN_0047BFE0`. `g_class14_states[19]`, phase 7's. */
 export function Class14StateDeathB(obj: Actor, f: ClassFrame): void {
-  Class14StateDeathCommon(obj, f);
+  Class14StateDeathCommon(obj, f, false);
 }
 
 /** `Class14StateDeathC` — `FUN_0047C5F0`. `g_class14_states[20]`, phase 9's. */
 export function Class14StateDeathC(obj: Actor, f: ClassFrame): void {
-  Class14StateDeathCommon(obj, f);
+  Class14StateDeathCommon(obj, f, true);
 }
 
 /**
@@ -2032,11 +2032,22 @@ export function Class14StateDeathC(obj: Actor, f: ClassFrame): void {
  * four sub-states long and measured in motion frames and route segments, and
  * two of the three end on effects the port does not have. One count is what is
  * transcribed; the time in front of it is named rather than derived.
+ *
+ * **And the boss leaves the camera's list.** `[proved]` All three raise
+ * `obj+0x34` bit `0x10000`: `Class14StateDeathC` in its sub 0, beside the
+ * clip change, and `Class14StateDeathA` / `B` on the frame their count runs
+ * out, beside the `g_enemies_present` decrement (`OR [param_1+0x34], 0x10000`
+ * in both tails). `Class14Update` registers the boss for the camera every
+ * frame, so without it a dead boss held `g_camera_free` down and stage 5's
+ * `wait_enemies_present 0` for ever -- which the port did the moment the boss
+ * became a camera candidate at all.
  */
-function Class14StateDeathCommon(obj: Actor, f: ClassFrame): void {
+function Class14StateDeathCommon(obj: Actor, f: ClassFrame,
+                                 untrackOnEntry: boolean): void {
   const t = Tail(obj);
   if (!t) return;
   if (t.sub === 0) {
+    if (untrackOnEntry) obj.flags |= ActorFlag.NoCameraTrack;
     obj.flags |= ActorFlag.NoHitReaction;
     t.flags |= Class14Flag.OffRoute;
     t.counter0 = CLASS14_DEATH_FRAMES;
@@ -2047,6 +2058,7 @@ function Class14StateDeathCommon(obj: Actor, f: ClassFrame): void {
   if (t.counter0 > 0) return;
   // `DEC word ptr [g_enemies_present]` at `0x0047C92A`, once.
   G.g_enemies_present -= 1;
+  obj.flags |= ActorFlag.NoCameraTrack;
   t.sub = 2;
 }
 
@@ -2083,6 +2095,14 @@ export const Boss2Handler: ClassHandler = {
     CLASS14_FLAG_BREAK_A_DONE, CLASS14_FLAG_BREAK_B_OPEN,
     CLASS14_FLAG_BREAK_B_DONE, CLASS14_FLAG_DEAD, CLASS14_FLAG_DEAD_STAGE5,
   ],
+  // `Class14Update` (`FUN_00476150`) ends `ActorRegisterCameraPoint(state
+  // +0x0C)` at `0x0047621E` on every frame -- no gate -- and that routine
+  // tail-calls `RegisterForCameraTracking` (`FUN_00408EC0`), which tests only
+  // `obj+0x34` bit `0x10000`. So the boss is a camera candidate whenever that
+  // bit is clear, which this class sets and clears itself. The class is not
+  // in `ENEMY_CLASSES`, so without this the camera never looked at it.
+  tracksCamera: () => true,
+  cameraRise: (obj) => Tail(obj)?.cameraRise ?? 0,
   onDeadSweep: () => {
     // Nothing. `Class14ApplyBoneDamage` has already dropped the alive count
     // and the class's own death states drop the present count, so the generic

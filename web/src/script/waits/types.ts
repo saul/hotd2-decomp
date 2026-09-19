@@ -64,6 +64,18 @@ export interface WaitRule {
    */
   readonly retires?: "enemies" | "civilians";
   /**
+   * True if passing it means the room it closes has been played out: the
+   * room-clear gates `0x43`, `0x44`, `0x46` and `0x47`.
+   *
+   * A replay needs it for the civilians the room held. Past one of these in
+   * play her captors are dead (they are class 0x30 and counted), she has left
+   * `g_civilians_alive`, or she has let go of the camera -- and every gate
+   * needs `g_camera_free`, which a tracked civilian holds down (bug 18). So
+   * her rescue is behind her, and her life's end is the next thing
+   * `script/civilian_life.ts` looks for.
+   */
+  readonly clearsRoom?: boolean;
+  /**
    * True if stepping past it means the camera has reached the frame it was
    * waiting for.
    *

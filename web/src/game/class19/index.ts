@@ -223,9 +223,11 @@ export function Boss4Update(obj: Actor, f: ClassFrame): void {
 
   (BOSS4_STATES[b.state] ?? Boss4StateNotPorted)(obj, b);
 
-  // `FUN_00492460`, `FUN_00492620`, `FUN_00492790` and `FUN_00409B70(state
-  // +0x70)` — the per-frame movement and the part placement. `[open]`, and the
-  // render side's. `FUN_00493090`, `FUN_004934D0` and `FUN_004935E0` likewise.
+  // `FUN_00492460`, `FUN_00492620` and `FUN_00492790` — the per-frame
+  // movement and the part placement. `[open]`, and the render side's.
+  // `ActorRegisterCameraPoint(state+0x70)` (`FUN_00409B70`) follows them; the
+  // director makes that call for every actor, with this class's rise from
+  // `Boss4Handler.cameraRise` and its camera candidacy from `tracksCamera`. `FUN_00493090`, `FUN_004934D0` and `FUN_004935E0` likewise.
 
   // `MOVSX EAX, word ptr [EDI + 0x40]; CMP [g_active_cam_path], EAX` — the
   // despawn, on the camera reaching the pair in the descriptor tail at `+0x40`
@@ -275,6 +277,12 @@ export const Boss4Handler: ClassHandler = {
   // 31 and not 32 — see this file's header. The flag whose whole chain this
   // module runs is declared; the one it cannot reach is not.
   raisesScriptFlag: BOSS4_FIGHT_READY_FLAG,
+  // `Boss4Update` (`FUN_004919D0`) calls `ActorRegisterCameraPoint(state
+  // +0x70)` at `0x00491A49` every frame, ungated, and so registers for the
+  // camera whenever `obj+0x34` bit `0x10000` is clear -- `Boss4StateDeath`
+  // is what sets it. Not in `ENEMY_CLASSES`, so this is the only way in.
+  tracksCamera: () => true,
+  cameraRise: (obj) => obj.boss4?.walkSpeed ?? 0,
   debug: Boss4Debug,
 };
 

@@ -18896,3 +18896,66 @@ applies to a player deep link past a civilian's block: the rebuilt civilian
 is at her first command, and after this fix a tracked one holds the room's
 gate rather than only `wait_scripted_actors`.
 
+## 2026-09-19 -- bug 18 follow-up: seeks converge on play; who the camera may look at
+
+**Seeks.** A seek replays the evt with every wait stepped over and no actor
+running, so the walker's spawn list at the landing address still held every
+civilian listed before it, and the rebuild built each at her first command.
+Measured with a walker-only sweep over every step start in stages 1-4 and 6:
+stage 1 carried 19172, 15416 and 6312 into later blocks, stage 2 carried
+34336, stage 3 3008, stage 4 4348, 4484 and 25548. Since bug 18 a tracked
+civilian holds `g_camera_free`, so those rebuilt hostages held room gates for
+good.
+
+Read the exe's ways out, `CivilianUpdate` `0x0048AF8E..0x0048B0C8`: skip,
+countdown, cue (exact frame), and a fourth arm the port did not have at all --
+word bit `0x2000000`, `!ActorBoundsOnScreen`, `g_scene_state_major_entered !=
+2`, no children: despawn. `[proved]` `ActorBoundsOnScreen` (`FUN_0045CA60`)
+read in full and ported; its view point `obj+0x10C..0x114` is
+`SkeletonEmitNode`'s node-1 translation (`FSTP` at `0x004115B5`), `[likely]`
+node 1 for every actor the port asks about.
+
+The replay applies what it can see (`script/civilian_life.ts`, one
+bookkeeping map on the walker beside `retireFlagRaisers`): a civilian's room
+is "cleared" when a gate with the new `clearsRoom` rule field is stepped over
+(0x43, 0x44, 0x46, 0x47); the cue arm retires her once her path has been
+played past her frame and her room is cleared; the off-camera arm retires her
+at the first `enterSceneState` off row 2 after that, if her rescue path ends
+on `0x2000000`. `[likely]` for the last -- the replay has no pose, and uses
+"major left 2 after her room" for "off screen with major != 2". After it the
+sweep carries no earlier-block civilian anywhere.
+
+Wrong turn: the first rule required **every** reachable stream to end on
+`0x2000000`, on-shot ones included; three civilians survived on the strength
+of an on-shot stream ending `0x80000`. The rescue path is the one to follow.
+And the survey script first ran without `SetGameTables`, so `wait_script_flag`
+took its no-writer `[diverges]` pass and `retireFlagRaisers` never ran --
+stage 2's 34336 looked stuck when it was the harness.
+
+`handback`'s stage-3 special case is removed; its numbers are the base
+commit's again with the seek doing the work.
+
+**Camera candidates.** Every `ActorRegisterCameraPoint` call read with its
+gate (table in `game/camera/track.ts`). Of the classes the port has, 0x14
+(`Class14Update`, `state+0x0C`) and 0x19 (`Boss4Update`, `state+0x70`) call it
+every frame ungated and are not in `ENEMY_CLASSES`, so the camera never looked
+at either boss: both now answer `tracksCamera` and a new `cameraRise` hook.
+`FrogUpdate` pushes 1.0 (`680000803f` at `0x0043A2C2`) and the port gave it 0.
+Classes 0x2D, 0x22, 0x23 and 0x32 call it too and have no port; their rows are
+recorded, not admitted. Named: `Class2DUpdate`, `Class2DState3/4/5`,
+`Class2DChildKind0..3Update`, `g_class2d_states`, `Class23UpdateSubtype0/1/2`,
+`Class23StateShared1`, `Class23Subtype2State1` -- structural names from the
+dispatch tables and `Class2DState4`'s four `ActorAlloc`s.
+
+First link run: four of fourteen links reported "Execution context was
+destroyed" -- vite reloading the page because this session was editing
+`web/src` during the run, not the port. Re-run with no edits in flight.
+
+Admitting class 0x14 hung stage 5 at block 3's `wait_enemies_present 0`: the
+dead boss still held a camera slot. The port's three deaths share one
+`[port-only]` body that never raised `obj+0x34` bit `0x10000`; the exe's all
+do -- `Class14StateDeathC` in its sub 0, `Class14StateDeathA`/`B` beside the
+`g_enemies_present` decrement. `[proved]` Transcribed; the camera admission
+found a port gap rather than making one. After it: all fourteen `NEW-BUGS.md`
+links play to their stage's end, and so do arcade stages 1-6 and Original 1-6.
+

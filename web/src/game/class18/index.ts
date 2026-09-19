@@ -20,7 +20,7 @@
  *     MatrixTranslate(carrier+0x40); RotX(+0x64); RotZ(+0x6C); RotY(+0x68);
  *     EnemyZombieUpdate(obj);
  *     if (state == (s8)params[3] && sub == 0 && params[0x0C] != -1
- *         && g_cam_path_frame >= params[0x0E]
+ *         && g_cam_path_frame < params[0x0E]
  *         && g_active_cam_path == params[0x0C]) { state = 0x2E; sub = 0; }
  *     if (state == 7 && sub == 1 && obj->+0x1330 == 2) {
  *         FUN_0045D920(carrier+0x40, obj+0x40);
@@ -112,8 +112,12 @@ export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
   // and `tail+0x0E` the frame; `-1` in the path is "no cue", and the byte at
   // `tail[3]` is the state it may leave from.
   const cue = obj.class18;
+  // **Before** the cue frame, not after: `CMP [0x009a6110], ECX` / `JGE`
+  // past the arm at `0x0045CE07`, so the state is switched while
+  // `g_cam_path_frame < tail+0x0E`. This read `>=` until it was checked
+  // against the instructions; the pseudocode says `<` as well.
   if (cue && cue.cue_path >= 0 && z.state === cue.from_state && z.sub === 0
-      && G.g_cam_path_frame >= cue.cue_frame
+      && G.g_cam_path_frame < cue.cue_frame
       && G.g_active_cam_path === cue.cue_path) {
     z.state = CARRIED_ZOMBIE_CUE_STATE;
     z.sub = 0;

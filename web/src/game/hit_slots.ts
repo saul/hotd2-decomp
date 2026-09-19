@@ -65,6 +65,8 @@ export const HIT_SLOT_CLAIMING_CLASSES: ReadonlySet<SpawnClass> = new Set([
   SpawnClass.OneHitTarget, SpawnClass.RankScaledEnemy,
   SpawnClass.SetPieceProp, SpawnClass.ScriptedHumanoid, SpawnClass.Zombie,
   SpawnClass.Thrower, SpawnClass.SkinnedNpc,
+  // `CarriedZombieInit18` (`FUN_0045CD60`) opens on `EnemyZombieInit`.
+  SpawnClass.CarriedZombie,
 ]);
 
 /**

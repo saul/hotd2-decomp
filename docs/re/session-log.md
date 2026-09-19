@@ -18612,3 +18612,33 @@ on the boat killed both and the wait passed on its own.
 flat ground and failed: friction stops a barrel well short of that, and the
 real one has stairs. The fixture now stands inside the forty units where a
 grounded roll re-aims itself.
+
+### A shot rider never died: stage 3 block 1's gate
+
+Reported from the bridge branch: `wait_enemies_alive` at stage 3 block 1 step 1
+never opened, with the two boat riders (2780 in state 35, captor 3072 in state
+38) flagged dead and standing. **Cause [proved]:** `CarriedZombieUpdate18`
+(`FUN_0045CD90`) runs `EnemyZombieUpdate` (`CALL 0x004533f0` at `0x0045CDDD`),
+which opens on `ZombieOnShot` — but the port's `ResolveHit` left the hit record
+`ZombieOnShot` reads only on classes 0x30 and 0x31. The riders had been ported
+for a while; they only started to exist when the motion rule arrived, which is
+when this showed. Class 0x18 now gets the record, and — for the same reason,
+that its update *is* `EnemyZombieUpdate` — it is ranked
+(`RegisterForDistanceRank`'s one caller is `0x0045346D`), its camera point
+rises 4.0, and its Init claims a hit slot.
+
+Reading the wrapper again for this turned up a second fault in it: the camera
+cue is `g_cam_path_frame < tail+0x0E` (`CMP [0x009a6110], ECX` / `JGE` past the
+arm at `0x0045CE07`), and the port had `>=`. Fixed, and the TSV row said
+"reached", which was the same misreading.
+
+Playthroughs, shooting only (`--shoot-for 1000000`, no debug clear): stage 3
+and stage 3 Original, entry 0 (0→1→2→11) and entry 7 (7→9→4→5→6→13), all reach
+an end block. With `--route 0:3` (an arm the run could not earn, because it
+will not fire at block 0's civilian) the run hangs at block 4 step 7 op 0 with
+the script reporting itself unblocked; that is behind an override and is
+`[open]`.
+
+Left `[open]`: class 0x30 states 46 (`0x2E`, where the cue sends a rider) and
+48 (the riders' attack state) are unported and fall to `ZombieGiveUpAttack`, so
+a rider that wins a permit does not do what the engine's does.

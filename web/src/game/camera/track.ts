@@ -99,6 +99,8 @@ const CAMERA_TRACK_BONE = 1;
 const CAMERA_POINT_RISE: Partial<Record<SpawnClass, number>> = {
   [SpawnClass.Civilian]: 4,
   [SpawnClass.Zombie]: 4,
+  // `CarriedZombieUpdate18` runs `EnemyZombieUpdate`, whose call this is.
+  [SpawnClass.CarriedZombie]: 4,
   [SpawnClass.Thrower]: 0,
 };
 

@@ -205,7 +205,7 @@ export function class52Tail(rec: Spawn): Record<string, unknown> {
  *
  * `CarriedZombieUpdate18` (`FUN_0045CD90`) tests
  * `obj+0x1310 == (s8)tail[3] && obj+0x1312 == 0 && tail+0x0C != -1 &&
- * g_cam_path_frame >= tail+0x0E && g_active_cam_path == tail+0x0C`, so the
+ * g_cam_path_frame < tail+0x0E && g_active_cam_path == tail+0x0C`, so the
  * byte is the state it leaves *from* and the two words are the camera cue that
  * lets it. All three shipped spawns carry state 48 on path 124 frame 1080,
  * which is the shot stage 3's block 0 step 6 is playing.

@@ -27,6 +27,7 @@
 
 import { CameraActionDriver } from "../game/camera/mode";
 import { G } from "../game/globals";
+import { SceneStateInstallPlayerHooks } from "../game/effects/damage_overlay";
 import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
@@ -1646,6 +1647,9 @@ export class Walker {
    */
   enterSceneState(major: number, minor: number): void {
     this.sceneState = { major, minor };
+    // The installer's write of both players' camera hook, which is what
+    // decides whether a hit shows its damage overlay.
+    SceneStateInstallPlayerHooks(major, minor);
   }
 
   /**

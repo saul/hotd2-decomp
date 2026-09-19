@@ -2732,6 +2732,42 @@ delegates), the two scripted attackers through `ZombieScriptedPickPlayer`, and
 `ThrowerStateGrabPlayer`. The rest are `ThrowerStateLeapStrike`, which no
 shipped spawn can reach, and three calls in classes with no module.
 
+### Being hit shows the game's damage overlay
+
+A hit used to take a life and a hundred points and put nothing on the screen.
+The exe draws one of eleven full-screen sprites out of `pol/common.bin` --
+claw marks, a slash, a swipe, a gash, a splat, a bite ring -- chosen by
+`PlayerTakeDamage`'s third argument, which the port had been storing as
+`g_player_hit_motion` and never reading. It is ported as the engine has it,
+in `game/effects/damage_overlay.ts`:
+
+* the player's update calls `PlayerRunCameraHook`, whose hook the scene
+  state's installer chose -- the overlay spawner under every `cam/` path camera
+  (2/4..2/7), the body draw under the follow and no-op cameras (1/1, 1/2) --
+  and the spawner reads the latch and calls `DamageOverlaySpawn` with the kind;
+* `DamageOverlayUpdateAndDraw` keeps it up, **unchanged, for 59 frames** --
+  there is no fade, flash or animation anywhere in the chain -- and plays the
+  hurt voice on the fifth; a hit while one is up shows nothing new;
+* `UpdateScreenShake` clears the latch and computes the 48-frame nod.
+
+`render/effects.ts` draws it in camera space at `z = -1.02`, scale 0.02, from
+the record alone, so a load or a seek shows whatever the restored state says.
+The eleven models ride the `slots_effect` rig (slots 0x931..0x93B), so
+**a bundle exported before this has none -- re-export.**
+
+Checked in the page with `tools/damage_fx.mjs`: a zombie's swipe (kinds 0 and
+1, stage 2's `znkage`), the bats' bite (kind 9, stage 4 block 0) and the stage-3
+axe (kind 4), each screenshotted with the overlay up, held through a pause,
+and gone after loading a snapshot taken before the hit.
+
+Not yet: the nod itself. `g_screen_shake_pitch` carries the engine's value,
+but applying it is `UpdateSceneViewAndLight`'s first block, which writes the
+camera block's *angles*, and whether that accumulates on a held pose is an
+open question the port's eye/target block cannot answer yet. And
+`PlayerTakeDamage`'s second argument -- 0 at the strike sites whose striker
+has `obj+0x34` bit `0x2000000`, meaning no overlay and no shake -- is not in
+the port's signature, so every hit latches.
+
 ### `ResetSceneOnEnter`, and the three blocks it zeroes
 
 `ResetSceneOnEnter` (`FUN_0045EDD0`) is what a scene starts clean, called from

@@ -26,6 +26,7 @@ import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { ProcessShotRequests } from "./combat/shot";
 import { ShotEffectsTick } from "./effects/tick";
+import { PlayerDamageFeedbackTick } from "./effects/damage_overlay";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
@@ -558,6 +559,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // The heads the burst threw, stepped where the engine steps its tasks.
   SeveredHeadsTick(rng, events);
   TickPlayerInvulnerability(frames);
+  // The players' update and `SelectAttackablePlayer`'s shake, ahead of the
+  // actors: a strike this frame is seen by the player on the next one.
+  PlayerDamageFeedbackTick(rng, events);
 
   // Once a frame, for everyone: the rank the approach state tests against the
   // ring table's allowance.

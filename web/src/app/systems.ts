@@ -279,14 +279,33 @@ export function syncCharacterSpawns(chars: CharacterPool,
   // offsets from the world origin. Same `chars.rng` throughout, because the
   // engine draws from one `rand()` and every spawn on this frame is on the
   // same stream.
-  const ready = new Map(chars.readySpawns(spawns).map((r) => [r.at, r]));
+  //
+  // **A spawn's children come straight after it.** `CivilianInit` builds its
+  // captors and riders inside its own `Init`, from descriptors nothing in the
+  // script points at, so they are in `readySpawns` and not in `spawns` -- and
+  // walking only `spawns` built none of them: every civilian stood alone,
+  // counted itself rescued, and stage 2's boat carried no zombie. They are
+  // made the moment their parent is, which is when the engine makes them,
+  // after `g_civilian_carrier` has been set by whatever came before.
+  const readyList = chars.readySpawns(spawns);
+  const ready = new Map(readyList.map((r) => [r.at, r]));
   const made: Actor[] = [];
+  const build = (r: CharacterSpawnRequest) => {
+    ready.delete(r.at);
+    made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+    for (const c of readyList) {
+      if (c.parentAt === r.at && ready.has(c.at)) build(c);
+    }
+  };
   SlotActorsForgetUnlisted(spawns);
   for (const s of spawns) {
     const r = ready.get(s.at);
-    if (r) made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+    if (r) build(r);
     else SpawnSlotActor(s, chars.rng);
   }
+  // ...and a child whose parent was built on an earlier frame -- its own
+  // hierarchy was not ready then -- on the first frame it is.
+  for (const r of [...ready.values()]) if (ready.has(r.at)) build(r);
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
 }
 

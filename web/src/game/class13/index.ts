@@ -36,12 +36,13 @@
  * for four other classes. What is here is the state, the motion and the
  * despawn.
  *
- * Two **effects** are declared rather than ported. The wake `FUN_00440770`
- * draws every frame from `ride+0x04`, and the bow splash `FUN_0043FCA0`
- * spawned at path frame 0x550 with `PlaySoundId(0x000B16A9)`, are both draw-
- * side objects with no game state a gate or a snapshot can see. The amplitude
- * they fade *is* state and is stepped here, so a later renderer has it.
- * [diverges]
+ * The **effects** are ported with it: the wake `CarrierDrawGroundWake`
+ * (`FUN_00440770`) lays on the ground under the boat from `ride+0x04`, the
+ * bow strip `SpawnPropStripEffect` (`FUN_0043FCA0`, kind 3) spawned at path
+ * frame 0x550 with `PlaySoundId(0x000B16A9)`, and states 5 and 6's strip.
+ * The state and the cursors are here; the draws are `render/slotmodels.ts`',
+ * reading the `*Drawn` fields this file sets on the frames the engine draws.
+ * They used to be a `[diverges]` for want of their slots in the bundle.
  *
  * `FUN_004459C0`, the on-screen test state 6 uses to decide when to despawn,
  * reads view-space `obj+0x70`/`+0x78` against the shot radius. The port has
@@ -56,14 +57,29 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
-import { CarrierState, type ScriptedPropTail } from "./state";
+import { QueryGroundHeightAt } from "../coli";
+import { CarrierTransformPoint } from "../carrier";
+import {
+  PropStripKind, SpawnPropStripEffect,
+} from "../effects/prop_strip";
+import { vec3, VecToAngles } from "../vec";
+import {
+  CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST, CARRIER_WAKE_FIRST,
+  CARRIER_WAKE_LAST, CarrierState, type ScriptedPropTail,
+} from "./state";
 
 /** `ActorAllocSub(0x18)`'s `ride+0x04`, and the range it wraps in. */
-const WAKE_CEL_FIRST = 0x24a;
-const WAKE_CEL_LAST = 0x25f;
+const WAKE_CEL_FIRST = CARRIER_WAKE_FIRST;
+const WAKE_CEL_LAST = CARRIER_WAKE_LAST;
 /** `ride+0x14`, the strip states 5 and 6 draw. */
-const STRIP_CEL_FIRST = 0x1aab;
-const STRIP_CEL_LAST = 0x1ad2;
+const STRIP_CEL_FIRST = CARRIER1_STRIP_FIRST;
+const STRIP_CEL_LAST = CARRIER1_STRIP_LAST;
+/** `CarrierDrawGroundWake`'s probe starts this far above the carrier. */
+const WAKE_PROBE_RISE = 100.0;
+/** `MatrixTranslate(0, 0, -5.0)` — the bow, in the carrier's own frame. */
+const CARRIER_BOW_Z = -5.0;
+/** `PlaySoundId(0x000B16A9)` with the bow strip at path frame 0x550. */
+export const SFX_CARRIER_BOW = 0xb16a9;
 /** `obj+0x124 = 40.0` — the shot sphere state 0 seats. */
 const CARRIER_HIT_RADIUS = 40.0;
 /** The two `op_` object paths `CarrierPropRoutine1` rides. */
@@ -178,17 +194,50 @@ export function PropSeatOnObjectPath(obj: Actor, slot: number, frame: number,
  * whole body.
  *
  * The wake's scale decays once a fade has been started and the wake switches
- * off when it reaches zero. The **draw** that uses it is `FUN_00440770` and is
- * not ported; the amplitude is, because it is state. [diverges]
+ * off when it reaches zero. While it is on, `CarrierDrawGroundWake`
+ * (`FUN_00440770`) draws `ride+0x04` and `ride+0x04 + 0x16` flat on the
+ * ground under the boat, and the cel steps. The draw is
+ * `render/slotmodels.ts`'; the two numbers it needs from the world are
+ * computed here — see {@link CarrierDrawGroundWakeInputs}.
  */
-function CarrierPropStepWake(sub: ScriptedPropTail): void {
+function CarrierPropStepWake(obj: Actor, sub: ScriptedPropTail): void {
+  sub.wakeDrawn = 0;
   if (sub.wakeFade !== 0) {
     sub.wakeScale += sub.wakeFade;
     if (sub.wakeScale <= 0) sub.wakeOn = 0;
   }
   if (sub.wakeOn === 0) return;
+  CarrierDrawGroundWakeInputs(obj, sub);
+  sub.wakeDrawn = sub.wakeCel;
   sub.wakeCel += 1;
   if (sub.wakeCel > WAKE_CEL_LAST) sub.wakeCel = WAKE_CEL_FIRST;
+}
+
+/**
+ * The half of `CarrierDrawGroundWake` (`FUN_00440770`) that is not a draw.
+ *
+ * ```c
+ * Push; LoadIdentity; RotX(+0x64); RotZ(+0x6C); RotY(+0x68);
+ * MatrixTransformPoint((0, 0, 1)) -> d;  VecToAngles(d) -> (pitch, yaw);
+ * SetTop(camera); Translate(x, QueryGroundHeightAt(x, y + 100, z), z);
+ * RotY(yaw); Translate(0, 0, 27.0); Scale(1, scale, scale);
+ * AssetDrawSlot(cel); AssetDrawSlot(cel + 0x16); Pop;
+ * ```
+ *
+ * The heading comes from the full three-axis pose, so a boat pitching in the
+ * water still lays its wake level and along its keel. `[port-only]` as a
+ * function: the engine computes both inside the draw.
+ */
+function CarrierDrawGroundWakeInputs(obj: Actor, sub: ScriptedPropTail): void {
+  // The rotation alone: `MatrixLoadIdentity` before the three turns.
+  const origin = { pos: vec3(0, 0, 0), pitch: obj.pitch, yaw: obj.yaw,
+                   roll: obj.roll } as Actor;
+  const d = vec3();
+  CarrierTransformPoint(origin, 0, 0, 1, d);
+  sub.wakeYaw = VecToAngles(d.x, d.y, d.z).yaw;
+  sub.wakeGroundY = QueryGroundHeightAt(obj.pos.x,
+                                        obj.pos.y + WAKE_PROBE_RISE,
+                                        obj.pos.z);
 }
 
 /**
@@ -224,6 +273,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
 
+  sub.stripDrawn = 0;
   switch (sub.state) {
     case CarrierState.Begin:
       // `ActorAllocSub(0x18)`, and the fields it seeds.
@@ -263,8 +313,16 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
         sub.state = CarrierState.Wake;
       } else if (sub.pathFrame === FRAME_BOW_EFFECT) {
         sub.wakeFade = WAKE_FADE_RATE;
-        // `FUN_0043FCA0` spawns the splash five units off the bow and
-        // `PlaySoundId(0x000B16A9)` sounds it. Both are draw-side. [diverges]
+        // `0x00440546`..`0x004405F8`: the bow is the carrier's own
+        // `Translate(0, 0, -5)` read back with `MatrixGetTranslation`, the
+        // strip faces the camera's yaw with no pitch or roll, and the sound
+        // follows the spawn.
+        const bow = vec3();
+        CarrierTransformPoint(obj, 0, 0, CARRIER_BOW_Z, bow);
+        SpawnPropStripEffect({ pos: bow, pitch: 0,
+                               yaw: G.g_camera_yaw_bams, roll: 0 },
+                             PropStripKind.CarrierBow, 1.0, f.events);
+        f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       } else if (sub.pathFrame === FRAME_BOW_FLAG) {
         obj.flags |= CARRIER_BOW_BIT;
       }
@@ -274,6 +332,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
     case CarrierState.Wake:
     case CarrierState.WakeSpent: {
       // The strip the two states draw is `render/`'s; the cursor is state.
+      sub.stripDrawn = sub.stripCel;
       sub.stripCel += 1;
       if (sub.stripCel > STRIP_CEL_LAST) sub.stripCel = STRIP_CEL_FIRST;
       if (sub.state === CarrierState.Wake
@@ -297,7 +356,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
       ActorDespawn(obj);
       return;
   }
-  CarrierPropStepWake(sub);
+  CarrierPropStepWake(obj, sub);
 }
 
 /**

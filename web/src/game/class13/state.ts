@@ -64,6 +64,47 @@ export enum CarrierRoutine0State {
  */
 export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> = new Set([0, 1]);
 
+/**
+ * The wake strip both carrier routines step — `char_adv06.bin[0..21]` — and
+ * the offset `CarrierDrawGroundWake` (`FUN_00440770`) adds for the second of
+ * the two slots it draws each frame (`char_adv06.bin[22..43]`).
+ */
+export const CARRIER_WAKE_FIRST = 0x24a;
+export const CARRIER_WAKE_LAST = 0x25f;
+export const CARRIER_WAKE_PAIR = 0x16;
+/** `CarrierPropRoutine0`'s splash, `eff_dokan.bin[0..93]`. */
+export const CARRIER0_SPLASH_FIRST = 0xfd4;
+export const CARRIER0_SPLASH_LAST = 0x1031;
+/** `CarrierPropRoutine1`'s states 5 and 6, `ride+0x14`. */
+export const CARRIER1_STRIP_FIRST = 0x1aab;
+export const CARRIER1_STRIP_LAST = 0x1ad2;
+/** `SpawnPropStripEffect` kind 3, which `CarrierPropRoutine1` spawns at 0x550. */
+export const CARRIER1_BOW_FIRST = 0x174a;
+export const CARRIER1_BOW_LAST = 0x1785;
+
+const span = (a: number, b: number): number[] =>
+  Array.from({ length: b - a + 1 }, (_, i) => a + i);
+
+/**
+ * `[port-only]` — every asset slot a ported carrier routine draws besides the prop's own
+ * `obj+0x1F4` — what the exporter has to carry for the draws in
+ * `render/slotmodels.ts` to have anything to clone.
+ */
+export function CarrierDrawSlots(selector: number): number[] {
+  switch (selector) {
+    case 0:
+      return [...span(CARRIER_WAKE_FIRST, CARRIER_WAKE_LAST),
+              ...span(CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST)];
+    case 1:
+      return [...span(CARRIER_WAKE_FIRST,
+                      CARRIER_WAKE_LAST + CARRIER_WAKE_PAIR),
+              ...span(CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST),
+              ...span(CARRIER1_BOW_FIRST, CARRIER1_BOW_LAST)];
+    default:
+      return [];
+  }
+}
+
 /** The 0x1C bytes `ScriptedPropInit13` fills, at `obj+0x1310`. */
 export interface ScriptedPropTail {
   /** `sub+0x00` — which `g_prop_behaviours` entry is installed. */
@@ -110,6 +151,26 @@ export interface ScriptedPropTail {
    * two blocks are two layouts.
    */
   splashCel: number;
+  /**
+   * `[port-only]` — the two numbers `CarrierDrawGroundWake`
+   * (`FUN_00440770`) computes at draw time and the renderer cannot: the
+   * ground under the carrier, `QueryGroundHeightAt(x, y + 100, z)`, and the
+   * heading of its forward axis, `VecToAngles` of `(0, 0, 1)` through
+   * `RotX; RotZ; RotY`. A collision query is the port's, so the routine's
+   * tail computes both when it would draw and the renderer reads them.
+   */
+  wakeGroundY: number;
+  wakeYaw: number;
+  /**
+   * `[port-only]` — the slot each of the routine's own draws handed
+   * `AssetDrawSlot` **this frame**, 0 for no draw. The engine draws a cel and
+   * then steps it; the port steps it in `game/` before `render/` looks, so
+   * without these the renderer would draw every strip one frame ahead, or do
+   * the step backwards itself.
+   */
+  wakeDrawn: number;
+  splashDrawn: number;
+  stripDrawn: number;
 }
 
 /** `[port-only]` — the two blocks `ActorAllocSub` zeroes, as one object. */
@@ -118,6 +179,7 @@ export function makeScriptedPropTail(): ScriptedPropTail {
     behaviour: 0, selector: 0, state: CarrierState.Begin,
     camPath: -1, camFrame: -1, scale: 1, alpha: 1, slot: 0, riding: false,
     pathFrame: 0, wakeCel: 0, wakeOn: 0, wakeScale: 0, wakeFade: 0,
-    stripCel: 0, splashCel: 0,
+    stripCel: 0, splashCel: 0, wakeGroundY: 0, wakeYaw: 0,
+    wakeDrawn: 0, splashDrawn: 0, stripDrawn: 0,
   };
 }

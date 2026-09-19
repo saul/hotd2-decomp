@@ -331,7 +331,8 @@ export class CharacterLayer implements System {
       if (this.spent.has(at)) continue;
       const rec = this.pending.get(at);
       if (!rec) continue;
-      out.push({ at, motion: rec.motion, pos: { ...rec.home } });
+      out.push({ at, motion: rec.motion, pos: { ...rec.home },
+                parentAt: rec.parentAt });
     }
     return out;
   }

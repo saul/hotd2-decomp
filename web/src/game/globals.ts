@@ -23,6 +23,7 @@ import type { ShotFlash, ShotTracer, ShotWeaponEffect }
 import { makeShotFlashRing, makeShotTracerRing, makeShotWeaponRing }
   from "./effects/shot_effects";
 import type { SpriteEffect } from "./effects/sprite";
+import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
@@ -450,6 +451,13 @@ export const G = {
   g_sprite_effects: [] as SpriteEffect[],
   /** `[port-only]` — see {@link SpriteEffect.id}. */
   g_sprite_effect_seq: 0,
+  /**
+   * `[port-only]` — the slot-strip objects `SpawnPropStripEffect`
+   * (`FUN_0043FCA0`) has allocated. `game/effects/prop_strip.ts`.
+   */
+  g_prop_strip_effects: [] as PropStripEffect[],
+  /** `[port-only]` — see {@link PropStripEffect.id}. */
+  g_prop_strip_effect_seq: 0,
   /**
    * `[port-only]` — the blood `SpawnBloodSpray` (`FUN_00407310`) and
    * `SpawnBoneHitSprite` (`FUN_00407200`) have allocated. Each one holds an
@@ -1329,6 +1337,8 @@ export function ResetGameGlobals(): void {
   G.g_severed_head_seq = 0;
   G.g_sprite_effects = [];
   G.g_sprite_effect_seq = 0;
+  G.g_prop_strip_effects = [];
+  G.g_prop_strip_effect_seq = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
   G.g_point_blood_sprays = [];

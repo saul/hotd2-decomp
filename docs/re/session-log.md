@@ -18184,3 +18184,32 @@ Named: `PropUpdateType13` (`0x00467F50`), `PropUpdateType35` (`0x0046B320`),
 `CarrierPropRoutine0` (`0x00440210`), `g_carrier_routine0_ride_end`
 (`0x0057727C`), `g_bams_to_rad` (`0x004C4370`). Ported with
 `g_scene_tick_counter` (`0x009A2BAC`), which the port did not have.
+
+### Follow-up, the same day: the wakes, the splashes, and a civilian's children
+
+Ported the carrier draws that were declared or missing: selector 0's wake and
+splash, selector 1's ground wake (`CarrierDrawGroundWake`, `0x00440770`), its
+state-5/6 strip and its bow effect (`SpawnPropStripEffect` `0x0043FCA0` /
+`PropStripEffectUpdate` `0x0043FBC0`, a small slot-strip object with ten
+callers — only the carrier's is wired). Selector 1's two `[diverges]` for
+these are gone.
+
+**Wrong turn.** The decompiler's `CarrierPropRoutine1` has states 5/6 and the
+0x550 arm ending in `return` after `MatrixStackPop` — `L37` again. The
+disassembly shows both jump back into the shared tail (`0x00440469` /
+`0x00440467`), so the wake fade and the frame step run on those frames too;
+the existing port already had that right, and reading the pseudocode alone
+would have "fixed" it wrong.
+
+**Wrong turn two.** After the merge the zombie still did not ride, and the
+first suspicion was the class-0x18 motion row the boat work added. The
+hierarchy was in the bundle with motion 956; the actor was never made.
+`syncCharacterSpawns` now walks the walker's list to keep script order, and a
+civilian's children are only in `readySpawns` — so every civilian child in the
+game had stopped being built, block 5's captors included. Children are built
+straight after their parent now, with a `parentAt` on the request.
+
+Draw timing: a routine draws a cel and then steps it, and `game/` runs before
+`render/`, so the tail carries `wakeDrawn`/`splashDrawn`/`stripDrawn` — what
+was drawn this frame — rather than have the renderer draw the cursor a frame
+ahead or step it backwards.

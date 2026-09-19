@@ -93,6 +93,12 @@ export interface CharacterSpawnRequest {
   at: number;
   motion: number;
   pos: Vec3;
+  /**
+   * The spawn whose `Init` builds this one, for a descriptor nothing in the
+   * script points at — a class-0x10 civilian's captors and riders, which
+   * `CivilianInit` (`FUN_0048A3E0`) makes itself. Absent for a script spawn.
+   */
+  parentAt?: number;
 }
 
 /**

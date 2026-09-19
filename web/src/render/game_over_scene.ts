@@ -119,6 +119,7 @@ export class GameOverScene implements System<RenderContext> {
                                           true, fig.fadeFrom, w);
       node.root.visible = shown;
       node.root.position.set(fig.view.x, fig.view.y, fig.view.z);
+      // `RotX(pitch) RotZ(0) RotY(yaw)` -- see `FigureTurn` for the proof.
       node.root.rotation.set(fig.pitch * BAMS_TO_RAD, fig.yaw * BAMS_TO_RAD,
                              0, "XYZ");
       const disc = this.disc(i);

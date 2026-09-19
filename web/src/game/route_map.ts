@@ -303,7 +303,17 @@ function FigureSetMotionBlended(fig: RouteFigure, motion: number,
   fig.playTicks = 0;
 }
 
-/** The yaw each step direction turns a figure to. */
+/**
+ * The yaw each step direction turns a figure to: `obj+0x68` = `0x8000` up the
+ * map, `0x4000` for x+, `0xFFFFC000` for x-, 0 down -- the four arms at
+ * `RouteFigureTick`'s second switch, copied by `RoutePartnerTick`. The draw
+ * (`SkeletonApplyRootMotion`'s tail, `FUN_00410C50`) builds `T(obj+0x40)`, then
+ * by `model+0x68` -- 1, `obj+0x1FC` as `GameOverSpawnPlayerFigure` writes it --
+ * `RotX(obj+0x64) RotZ(obj+0x6C) RotY(obj+0x68)`: with Z 0 that is `Rx * Ry`,
+ * three.js's Euler `"XYZ"`, and the same BAMS sign every other character in the
+ * port is drawn with. The block's angles are zero on this screen, so camera
+ * space and world space share their axes. `[proved]`
+ */
 function FigureTurn(fig: RouteFigure, dir: number): void {
   if (dir === 2) fig.yaw = 0x8000;
   else if (dir === 4) fig.yaw = 0x4000;

@@ -58,8 +58,9 @@ import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
-import { PadBit, PlayerBlockCapture, PlayerTasksRun }
-  from "../src/game/player_shell";
+import {
+  PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
+} from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
 import { ActorByAt, AppState, G, PlayerState, PlayerTask, ResetGameGlobals,
@@ -109,7 +110,8 @@ import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
 import { ShotEffectsTick } from "../src/game/effects/tick";
 import { SpawnSpriteEffect, SpriteEffectKind }
   from "../src/game/effects/sprite";
-import { MarkActorShot, QueueShotRequest, g_gunshot_sound_ids }
+import { MarkActorShot, QueueOffscreenPull, QueueShotRequest,
+  g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
          SetGameTables, T } from "../src/game/tables";
@@ -202,6 +204,14 @@ import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
+import {
+  ARCADE_MAGAZINE, INPUT_BINDINGS, InputBindingSet, PlayerInputBindingSet,
+  RELOAD_SOUND,
+} from "../src/game/player_gun";
+import {
+  RELOAD_VOICE, SHOOT_VOICE,
+} from "../src/game/hud_readout";
+import { HUD_READOUT_SPRITES, HudSprite } from "../src/game/hud_sprites";
 import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
@@ -6311,7 +6321,13 @@ console.log("\na downed thrower, shot on the ground:");
   let actedWhileDead = 0;
   let worstWhileDead = "";
   const step = (fire: boolean): void => {
-    if (fire) QueueShotRequest(0, RAY);
+    // A gun holds six. A player who shoots this long reloads, and the one
+    // way a gun does is a pull off the screen (`PlayerFireAndReloadUpdate`),
+    // made on the same frame ahead of the round.
+    if (fire) {
+      QueueOffscreenPull(0);
+      QueueShotRequest(0, RAY);
+    }
     GameUpdate(EYE, 1 / 60, host, rng, events);
     const live = ActorByAt(AT);
     if (live?.dead && !live.despawned && !DYING.has(live.state)) {
@@ -10812,7 +10828,10 @@ console.log("\nthe shot queue:");
     heard.length = 0;
   }
 
-  // Two pulls between frames both land, in the order they were made.
+  // Two pulls between frames both land, in the order they were made -- off a
+  // full magazine, which a frame of its own reloads.
+  QueueOffscreenPull(0);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
   const before = G.g_player_score[0];
   pick = { kind: "actor", at: z2.at, bone: 4, point: vec3() };
   QueueShotRequest(0, RAY);
@@ -18536,6 +18555,350 @@ console.log("\nthe damage overlay:");
         pitch !== 0 && Math.abs(along - 1000) < 1e-3
         && Math.abs(across - Math.abs(pitch)) < 1e-3,
         `pitch ${pitch} along ${along} across ${across}`);
+}
+
+
+console.log("\nthe shutter's one-frame states (HudDrawShutterState's tails):");
+{
+  // 0, 5 and 6 each last one frame: their tails, at 0x00413A0B, 0x00413A6D
+  // and 0x00413A85, write the state they leave for. Without them the HUD
+  // readouts -- which draw only in 1, 2 and 4 -- vanished for the rest of any
+  // scene that had issued a 6.
+  const sh = new Shutter();
+  sh.reset();
+  sh.set(6);
+  sh.step(1);
+  check("a 6 is a 2 with the gate up one frame later",
+        sh.state === 2 && G.g_nFiringGate === 1, `${sh.state}`);
+  sh.set(0);
+  sh.step(1);
+  check("a 0 is a 4 with the gate up", sh.state === 4
+        && G.g_nFiringGate === 1, `${sh.state} ${G.g_nFiringGate}`);
+  sh.set(5);
+  sh.step(1);
+  check("a 5 is a 4 with the gate down", sh.state === 4
+        && G.g_nFiringGate === 0, `${sh.state} ${G.g_nFiringGate}`);
+  sh.set(7);
+  check("...and a 7 after them restores the 4 they left, not the 5",
+        sh.state === 4, `${sh.state}`);
+  sh.reset();
+}
+
+console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
+{
+  // `PlayerFireAndReloadUpdate` (0x00414940), `PlayerRefillMagazine`
+  // (0x00414B30), `HudDrawAmmoAndReloadPrompt` (0x004177D0) and
+  // `HudDrawLives` (0x004174A0), driven through `GameUpdate` from the page's
+  // own reset. Every pull misses -- nothing is under the ray -- so what is
+  // measured is the gun and not a target.
+  const rng = new Rng(51);
+  const events = scene(0, rng);
+  const heard: number[] = [];
+  events.on("sound.play", (d) => heard.push(d.id));
+  let resolved = 0;
+  events.on("shot.resolved", () => { resolved += 1; });
+  const RAY = { origin: vec3(0, 0, 0), dir: vec3(0, 0, -1) };
+  const step = () => GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  const shoot = () => { QueueShotRequest(0, RAY); step(); };
+  const reload = () => { QueueOffscreenPull(0); step(); };
+  const sprites = (id: number) => G.g_screen_sprite_draws.filter((s) => s.id === id);
+  const bullets = () => sprites(HudSprite.Bullet);
+  const lamps = () => G.g_screen_sprite_draws.filter(
+    (s) => s.id >= HudSprite.Lamp1P && s.id < HudSprite.Lamp1P + 7);
+
+  step();
+  check("a player enters play with six rounds and the latch down",
+        G.g_player_ammo[0] === ARCADE_MAGAZINE
+        && G.g_player_magazine_empty[0] === 0,
+        `${G.g_player_ammo[0]} ${G.g_player_magazine_empty[0]}`);
+  check("the mouse is a gun: its binding set is the gun's, which has no "
+        + "reload bit", PlayerInputBindingSet(0) === InputBindingSet.Gun
+        && INPUT_BINDINGS[0][InputBindingSet.Gun].reload === 0);
+  check("six bullets are drawn from x = 24, 24 px apart, at y = 364",
+        bullets().length === 6
+        && bullets().every((b, i) => b.x === 24 + 24 * i && b.y === 364
+                                   && b.sx === 1),
+        JSON.stringify(bullets().map((b) => b.x)));
+  check("'1P' and a lamp a life, 32 px apart from x = 60, at y = 412",
+        sprites(HudSprite.Tag1P).length === 1 && lamps().length === 3
+        && lamps().every((l, i) => l.x === 60 + 32 * i && l.y === 412),
+        JSON.stringify(lamps().map((l) => [l.id.toString(16), l.x])));
+  // Each lamp is four frames out of step with the one before it.
+  const f = G.g_frame_counter >>> 0;
+  check("each lamp's flame cel is ((g_frame_counter + 4i) / 3) % 7",
+        lamps().every((l, i) => l.id === HudSprite.Lamp1P
+                        + Math.trunc((f + 4 * i) / 3) % 7),
+        `${f} ${lamps().map((l) => l.id - HudSprite.Lamp1P).join(",")}`);
+
+  const fired0 = G.g_nPlayerFired[0];
+  heard.length = 0;
+  shoot();
+  check("a shot takes one round and fires the gun",
+        G.g_player_ammo[0] === 5 && heard.includes(g_gunshot_sound_ids[0])
+        && G.g_nPlayerFired[0] === fired0 + 1 && bullets().length === 5,
+        `ammo ${G.g_player_ammo[0]}, heard ${heard.map((h) => h.toString(16))}`);
+  for (let i = 0; i < 5; i++) shoot();
+  check("the sixth empties it and raises the latch",
+        G.g_player_ammo[0] === 0 && G.g_player_magazine_empty[0] === 1
+        && bullets().length === 0,
+        `${G.g_player_ammo[0]} ${G.g_player_magazine_empty[0]}`);
+  check("...and RELOAD is up, 1.5 wide, at (24, 260)",
+        sprites(HudSprite.Reload).length === 1
+        && sprites(HudSprite.Reload)[0].x === 24
+        && sprites(HudSprite.Reload)[0].y === 260
+        && sprites(HudSprite.Reload)[0].sx === 1.5,
+        JSON.stringify(sprites(HudSprite.Reload)));
+
+  const firedDry = G.g_nPlayerFired[0];
+  const resolvedDry = resolved;
+  heard.length = 0;
+  shoot();
+  check("an empty gun pointed at the screen does nothing: no round, no shot, "
+        + "no gunshot", G.g_player_ammo[0] === 0
+        && G.g_nPlayerFired[0] === firedDry && resolved === resolvedDry
+        && !heard.includes(g_gunshot_sound_ids[0])
+        && !heard.includes(RELOAD_SOUND),
+        heard.map((h) => h.toString(16)).join(" "));
+  check("...and does not reload itself either -- the voice says RELOAD",
+        G.g_player_magazine_empty[0] === 1 && heard.includes(RELOAD_VOICE),
+        heard.map((h) => h.toString(16)).join(" "));
+
+  heard.length = 0;
+  reload();
+  check("a pull off the screen reloads: six rounds, latch down, the reload "
+        + "sound", G.g_player_ammo[0] === 6 && G.g_player_magazine_empty[0] === 0
+        && heard.includes(RELOAD_SOUND) && !heard.includes(g_gunshot_sound_ids[0])
+        && sprites(HudSprite.Reload).length === 0 && bullets().length === 6,
+        `${G.g_player_ammo[0]} ${heard.map((h) => h.toString(16))}`);
+  heard.length = 0;
+  reload();
+  check("...and on a full gun it does nothing at all",
+        G.g_player_ammo[0] === 6 && !heard.includes(RELOAD_SOUND));
+  shoot(); shoot(); shoot();
+  reload();
+  check("a half-empty gun reloads to six", G.g_player_ammo[0] === 6,
+        `${G.g_player_ammo[0]}`);
+
+  // The gate: a shutter shut for a cutscene takes the round away and leaves
+  // the reload.
+  G.g_nFiringGate = 0;
+  shoot();
+  check("with the firing gate down a pull takes no round",
+        G.g_player_ammo[0] === 6, `${G.g_player_ammo[0]}`);
+  check("...and the bullets are hidden, and the lives stay",
+        bullets().length === 0 && lamps().length === 3,
+        `${bullets().length} ${lamps().length}`);
+  G.g_nFiringGate = 1;
+  shoot();
+  G.g_nFiringGate = 0;
+  heard.length = 0;
+  reload();
+  check("...but a reload still happens, silently",
+        G.g_player_ammo[0] === 6 && !heard.includes(RELOAD_SOUND),
+        `${G.g_player_ammo[0]} ${heard.map((h) => h.toString(16))}`);
+  G.g_nFiringGate = 1;
+
+  // The prompt: 45 frames on in every 60, a second line from 120.
+  for (let i = 0; i < 6; i++) shoot();
+  const t0 = G.g_player_reload_prompt_timer[0];
+  let blinkOn = 0;
+  let secondAt = -1;
+  for (let i = 0; i < 180; i++) {
+    const t = G.g_player_reload_prompt_timer[0];
+    step();
+    if (sprites(HudSprite.Reload).length) blinkOn += 1;
+    if (secondAt < 0 && sprites(HudSprite.ShootOutside).length) secondAt = t;
+  }
+  check("RELOAD blinks on 45 of every 60 frames of its timer",
+        blinkOn === 135, `${blinkOn} from timer ${t0}`);
+  check("...and 'SHOOT OUTSIDE OF THE SCREEN!' joins it at 120, at (16, 325)",
+        secondAt === 120
+        && sprites(HudSprite.ShootOutside).every((s) => s.x === 16 && s.y === 325),
+        `${secondAt}`);
+  heard.length = 0;
+  shoot();
+  check("...past 120 a gun's dry pull hears SHOOT, not RELOAD",
+        heard.includes(SHOOT_VOICE) && !heard.includes(RELOAD_VOICE),
+        heard.map((h) => h.toString(16)).join(" "));
+  G.g_player_reload_prompt_timer[0] = 601;
+  step();
+  check("the timer folds back to 120 past 600",
+        G.g_player_reload_prompt_timer[0] === 120,
+        `${G.g_player_reload_prompt_timer[0]}`);
+
+  // The voice's gates, from `HudDrawAmmoAndReloadPrompt`'s tail: the timer
+  // non-zero, the trigger down this frame, the aim on the screen -- and the
+  // routine runs at all only with the firing gate up.
+  reload();
+  for (let i = 0; i < 5; i++) shoot();
+  heard.length = 0;
+  shoot();
+  const vo = (h: number[]) => h.filter((id) => id === RELOAD_VOICE
+                                          || id === SHOOT_VOICE);
+  check("the shot that empties the gun is not nagged: the timer is 0 that "
+        + "frame", G.g_player_ammo[0] === 0 && vo(heard).length === 0
+        && heard.includes(g_gunshot_sound_ids[0]),
+        heard.map((h) => h.toString(16)).join(" "));
+  heard.length = 0;
+  for (let i = 0; i < 30; i++) step();
+  check("...and nothing is said while the trigger is left alone",
+        vo(heard).length === 0, heard.map((h) => h.toString(16)).join(" "));
+  heard.length = 0;
+  shoot();
+  shoot();
+  check("each dry pull is one RELOAD -- a pull is one frame of trigger",
+        vo(heard).length === 2 && vo(heard).every((id) => id === RELOAD_VOICE),
+        heard.map((h) => h.toString(16)).join(" "));
+  G.g_player_input_is_gun[0] = 0;
+  G.g_player_pad_kind[0] = 0;
+  G.g_player_reload_prompt_timer[0] = 130;
+  heard.length = 0;
+  shoot();
+  check("a controller past 120 still hears RELOAD, not SHOOT",
+        vo(heard).length === 1 && vo(heard)[0] === RELOAD_VOICE,
+        heard.map((h) => h.toString(16)).join(" "));
+  G.g_player_input_is_gun[0] = 1;
+  G.g_player_pad_kind[0] = -1;
+  G.g_nFiringGate = 0;
+  const tGate = G.g_player_reload_prompt_timer[0];
+  heard.length = 0;
+  shoot();
+  check("with the firing gate down: no prompt, no voice, and the timer "
+        + "stands", sprites(HudSprite.Reload).length === 0
+        && vo(heard).length === 0
+        && G.g_player_reload_prompt_timer[0] === tGate,
+        `${G.g_player_reload_prompt_timer[0]} vs ${tGate}`);
+  G.g_nFiringGate = 1;
+
+  // A controller -- the PC keyboard -- reloads with pad B instead.
+  G.g_player_input_is_gun[0] = 0;
+  G.g_player_pad_kind[0] = 0;
+  reload();
+  check("a controller does not reload by shooting off the screen",
+        G.g_player_ammo[0] === 0);
+  step();
+  check("...its prompt's second line is 'PRESS THE RELOAD BUTTON' at (16, 325)",
+        sprites(HudSprite.PressReloadButton).length === 1
+        || G.g_player_reload_prompt_timer[0] % 60 > 45,
+        JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
+  G.g_pad_state = INPUT_BINDINGS[0][InputBindingSet.Controller].reload & 0x2;
+  step();
+  G.g_pad_state = 0;
+  check("...and pad B -- Right Ctrl -- does", G.g_player_ammo[0] === 6,
+        `${G.g_player_ammo[0]}`);
+  G.g_player_input_is_gun[0] = 1;
+  G.g_player_pad_kind[0] = -1;
+  shoot();
+  G.g_pad_state = 0x2;
+  step();
+  G.g_pad_state = 0;
+  check("a gun ignores pad B", G.g_player_ammo[0] === 5,
+        `${G.g_player_ammo[0]}`);
+
+  // The shutter: opening grows the readout from 1.5 to 1; shut, it goes.
+  G.g_bHudShutterState = 1;
+  G.g_hud_ammo_slide[0] = 0;
+  step();
+  check("while the shutter opens the bullets are drawn 1.5x, spaced 1.5x",
+        bullets().length === 5 && bullets()[0].sx === 1.5
+        && bullets()[1].x === 24 + 36, JSON.stringify(bullets()[1]));
+  check("...and the lives are not drawn until it is open",
+        lamps().length === 0);
+  G.g_bHudShutterState = 4;
+  G.g_frame_counter = 60;
+  step();
+  const hold = sprites(HudSprite.HoldYourFire);
+  check("shut, no bullets, no lives, and 'HOLD YOUR FIRE!' at (32, 422)",
+        bullets().length === 0 && lamps().length === 0 && hold.length === 1
+        && hold[0].x === 32 && hold[0].y === 422 && hold[0].sx === 1.5,
+        JSON.stringify(hold));
+  G.g_frame_counter = 50;
+  step();
+  check("...blinking: off on the last 15 of every 60 frames",
+        sprites(HudSprite.HoldYourFire).length === 0);
+  G.g_bHudShutterState = 2;
+
+  // A life lost is a lamp gone.
+  G.g_player_lives[0] = 2;
+  step();
+  check("two lives, two lamps", lamps().length === 2, `${lamps().length}`);
+
+  // Original Mode: the magazine is the weapon's.
+  G.g_GameMode = GameMode.Original;
+  G.g_player_magazine_size[0] = 9;
+  reload();
+  check("Original Mode reloads to the magazine size",
+        G.g_player_ammo[0] === 9, `${G.g_player_ammo[0]}`);
+  const digits = G.g_screen_sprite_draws.filter(
+    (s) => s.id >= HudSprite.Digit0 && s.id <= HudSprite.Digit0 + 9);
+  check("...and draws seven or more as one bullet, 'x' and two digits",
+        bullets().length === 1 && sprites(HudSprite.Times).length === 1
+        && digits.map((d) => d.id - HudSprite.Digit0).join("") === "09",
+        JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
+  G.g_player_magazine_size[0] = -1;
+  G.g_player_ammo[0] = -1;
+  shoot();
+  check("an unlimited magazine takes no round and reads 'x o'",
+        G.g_player_ammo[0] === -1 && sprites(HudSprite.Times).length === 1
+        && sprites(HudSprite.Glyph63).length === 1,
+        `${G.g_player_ammo[0]}`);
+  G.g_player_magazine_size[0] = 6;
+  G.g_original_fire_mode[0] = 2;
+  G.g_player_ammo[0] = 3;
+  reload();
+  check("fire mode 2 cannot be reloaded until it is empty",
+        G.g_player_ammo[0] === 3, `${G.g_player_ammo[0]}`);
+  G.g_player_ammo[0] = 1;
+  shoot();
+  // Mode 2's row puts 2 in the latch the trigger waits on: the next pull is
+  // not read until it has counted down.
+  reload();
+  check("...a shot in mode 2 holds the trigger off for two frames",
+        G.g_player_ammo[0] === 0, `${G.g_player_ammo[0]}`);
+  step();
+  reload();
+  check("...and can once it is", G.g_player_ammo[0] === 6,
+        `${G.g_player_ammo[0]}`);
+  G.g_original_fire_mode[0] = 0;
+  G.g_GameMode = GameMode.Arcade;
+
+  check("every sprite the readouts drew is one the exporter ships",
+        G.g_screen_sprite_draws.every((s) => HUD_READOUT_SPRITES.includes(s.id)));
+  check("the frame's sprites are plain data a snapshot can copy",
+        JSON.stringify(JSON.parse(JSON.stringify(G.g_screen_sprite_draws)))
+        === JSON.stringify(G.g_screen_sprite_draws));
+
+  // A seek builds a world and runs no frame: the readouts are redrawn from
+  // it, and nothing the two routines keep moves.
+  G.g_player_ammo[0] = 0;
+  G.g_player_magazine_empty[0] = 1;
+  G.g_player_reload_prompt_timer[0] = 130;
+  const drawn = JSON.stringify(G.g_screen_sprite_draws);
+  G.g_screen_sprite_draws = [];
+  const before = heard.length;
+  const world = () => JSON.stringify({ ...G, g_screen_sprite_draws: null });
+  const was = world();
+  const pool = G.g_object_list;
+  PlayerTasksDrawWithoutAFrame();
+  check("a seek redraws the readouts without a frame: RELOAD, its second "
+        + "line and the lives, and no bullets",
+        sprites(HudSprite.Reload).length === 1
+        && sprites(HudSprite.ShootOutside).length === 1
+        && bullets().length === 0 && lamps().length > 0,
+        JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
+  check("...and moves nothing else in G, and plays nothing",
+        world() === was && G.g_object_list === pool
+        && heard.length === before,
+        `${G.g_player_reload_prompt_timer[0]} ${heard.length - before}`);
+  G.g_screen_sprite_draws = JSON.parse(drawn);
+  G.g_player_ammo[0] = ARCADE_MAGAZINE;
+  G.g_player_magazine_empty[0] = 0;
+
+  // Out of lives: no readouts at all.
+  G.g_player_lives[0] = 0;
+  step();
+  check("a player out of lives draws no readout", G.g_screen_sprite_draws.length === 0,
+        `${G.g_screen_sprite_draws.length}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -1096,8 +1096,8 @@ set**. The shots are not being refused by the actor. They are not being fired.
 `hud_shutter_state 3`, and `HudDrawShutterState` (`FUN_00413970`) drops the
 gate at `0x00413B06` when that close finishes counting; nothing raises it again
 until step 9 op 1. The gate at **step 8 op 6** is inside that window, and
-`ResolveShotRequest` returns before the ray exactly as
-`PlayerFireAndReloadUpdate` does at `0x004149BE`. The screenshot says
+`PlayerFireAndReloadUpdate` (`game/player_gun.ts`) returns before the ray at
+`0x004149BE`, as the exe does. The screenshot says
 `shutter closed` and the sidebar says `hp 140/140`; those two facts are the
 whole of it.
 

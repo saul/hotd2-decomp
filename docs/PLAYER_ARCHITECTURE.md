@@ -658,6 +658,10 @@ web/src/
                   `RunSceneTasksAndTimers` and the damage rank; app_state.ts
                   the screen request
     game_over.ts  app state 7: `GameOverRunPhase` and its screen sprites
+    player_gun.ts the trigger, the magazine and the reload
+    hud_readout.ts  the bullets, the RELOAD prompt and the lives, drawn as
+                  screen sprites; hud_sprites.ts their ids, for the exporter
+    screen_sprite.ts  `DrawScreenSprite`, recorded for the HUD layer to draw
     credits.ts    what a start and a continue spend
     combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts
     effects/                                 coli.ts, motion.ts, tables.ts, ...

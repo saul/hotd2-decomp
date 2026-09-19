@@ -100,9 +100,11 @@ export class Shutter {
    * `g_bHudShutterState` and `g_bHudShutterPrev` to 5 in the same routine. A 5
    * draws the closed bars and hands over to 4; a 2 draws nothing. That is a
    * visible difference at the first frame of a stage and it predates this
-   * file, so it is named rather than changed here — the port's shutter machine
-   * also has no per-frame collapse of 0, 5 and 6 into 4 and 2, and putting the
-   * initial state right without that would leave the bars shut for good.
+   * file, so it is named rather than changed here. (The reason it gave -- no
+   * per-frame collapse of 0, 5 and 6 into 4 and 2 -- is gone: {@link step}
+   * has it now. What is left is that a 5 at reset would shut the bars on
+   * every freshly loaded stage until its script opens them, which is the
+   * engine's picture and a change of its own to make.)
    */
   reset(): void {
     this.state = this.prev = 2;
@@ -161,6 +163,24 @@ export class Shutter {
       // written every frame there and only by `set` here. Two `7`s in the six
       // shipped scripts.
       if (this.state !== 8) this.prev = this.state;
+    }
+    // The three states that last one frame. Their tails are in bytes the
+    // pseudocode walks past (L37), read off the disassembly through the jump
+    // table at `0x00413C80`: state 0 draws the bars closed and leaves 4 with
+    // the gate up (`0x00413A0B`); 5 draws them closed and leaves 4 with the
+    // gate down (`0x00413A6D`..`0x00413A7E`); 6 draws nothing and leaves 2
+    // with the gate up (`0x00413A85`..`0x00413A96`). Each writes
+    // `g_bHudShutterPrev` with the new state beside it. Without this the
+    // machine sat in 0, 5 or 6 for good -- which the bars could not show, and
+    // the HUD readouts can: `HudDrawAmmoAndReloadPrompt` and `HudDrawLives`
+    // draw only in 1, 2 and 4, so a stage that opened with a 6 had no bullets
+    // and no lives for the rest of the scene.
+    if (this.state === 0 || this.state === 5) {
+      this.firingGate = this.state === 0;
+      this.prev = this.state = 4;
+    } else if (this.state === 6) {
+      this.firingGate = true;
+      this.prev = this.state = 2;
     }
     if (this.state === 1) {
       this.counter = Math.min(SHUTTER_FRAMES, this.counter + frames);

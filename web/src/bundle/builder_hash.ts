@@ -3,7 +3,8 @@
  *
  * Written by `tools/gen_builder_hash.py` and committed; it covers the code in
  * `web/src/hod2lib/`, which is the only thing that decides what a bundle
- * contains. `tools/verify_exporters.py` fails when this file is stale.
+ * contains, and every module it imports a value from, followed transitively.
+ * `tools/verify_exporters.py` fails when this file is stale.
  *
  * The exporter stamps it into `manifest.json` and onto every stage entry, and
  * `bundle/load.ts` compares -- but **warns rather than refuses**. A schema
@@ -22,7 +23,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "8a62bedf274c97b1d6d7dfe8e64934a767bbeb694a7de3fee1b4c73ad35fb2e1",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "b333cf7900934cf36f6896a0f642cf020228c8bc7a3ec47d56805886bc8b78f3",
+  "bundle.ts": "29da465ea0c4d868863084e66617c19dd600a426292069dbcf3a39f857e276fd",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -35,10 +36,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "4004cb37faed0192ad4c09044c9a5af6162b8ed874a28b0a47e2397fe0349228",
-  "exetab.ts": "1f2069a9884f525ad766ada283cff81ac97cd3f1b8b8e348f33ff214913d4373",
+  "exetab.ts": "2d80bbfeb58c7d1f61d16a8618f5b3b2b4789ba00fbaf60fcb46f38b297ea892",
   "game/class13/state.ts": "e3d20421a1274502fcdfb9996a699c4d124b51cec1047c4f30a96e8cc4eb008a",
   "game/class25/state.ts": "aef47ee1636919fb933d733fb3c9b67d7eafc1e013c3ebc7dd884c409f4e0795",
   "game/class30/bonecels.ts": "8d9f2553b5c7dbb065d6a3a48ead984a757ce5f3fbf6c830938a49a3ebcf6a40",
+  "game/hud_sprites.ts": "3f9a30694addbe84cd141cc6629e3bbf12732e2e44b36bce4cdac2c85d1a9d64",
   "game/player_body_data.ts": "436ce0d738826476ae183f2fcd4a3b153b4badc7930fba1bf011cc7d456e1fde",
   "gltf.ts": "a627387e4c52fecb292eb8736d7fbee2818fd503ac20f23337d760091c0fb109",
   "io.ts": "e9e18d6a03619988a2506b77a28063c2885743d52c3f2e620a149b36a8e20170",
@@ -55,8 +57,8 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
   "spawnres.ts": "b7e0a4d06daa4b0df84e6794253ece41bbd1e322e46e5dead53c38feecb010c5",
   "stage.ts": "73bc6983e83b0be5627d645ac10530aec40ab0afbc8ac65a8a9f9fe6bb74ed8d",
-  "texbank.ts": "40786961f0e540180ebf8b56622bcd155e5b6a4e39bac81b8e787c4c1078cdc5",
+  "texbank.ts": "804ee06b5324e31ba191ac1c3e382bedd2861e9657a0f07da6b09b7a61267f0a",
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "c35d086a348f552e62452d7c90bcab764c22b3edf43eb1d62bcdb84d7ded5f11";
+export const BUILDER_HASH = "8ed2d4f22b9e4f9d021b850e311879e99dff89543e3146c44f287446892bca69";

@@ -182,3 +182,45 @@ export async function waitForLoad(page, selector) {
 // it was off, and a null count is not a condition — so a playthrough sailed
 // through every fight it existed to test. There is no toggle now. See the note
 // at the top of `src/render/shooting.ts`.
+
+/** The arcade magazine: `PlayerRefillMagazine`'s literal 6. */
+export const MAGAZINE = 6;
+/** Pulls made on each page since its last reload. */
+const pullsSinceReload = new WeakMap();
+
+/**
+ * One trigger pull at `(x, y)`, reloading first when six have been made.
+ *
+ * **A gun holds six**, and an empty gun pointed at the screen does nothing at
+ * all (`PlayerFireAndReloadUpdate`, `FUN_00414940`) -- so a driver that only
+ * clicks fires six shots and then clicks at nothing for the rest of its run.
+ * The page's mouse is a gun, a gun reloads by a pull off the screen, and `R`
+ * is that pull (`app/main.ts`). The count is of pulls, not of rounds taken:
+ * a pull made with the firing gate down takes none, so this reloads early
+ * sometimes and late never, and a reload on a full gun does nothing.
+ * `playthrough.mjs`'s volley keeps its own count, for the same reason.
+ */
+export async function pull(page, x, y) {
+  const n = pullsSinceReload.get(page) ?? MAGAZINE;
+  if (n >= MAGAZINE) {
+    await page.keyboard.press("KeyR");
+    pullsSinceReload.set(page, 0);
+  }
+  pullsSinceReload.set(page, (pullsSinceReload.get(page) ?? 0) + 1);
+  await page.mouse.click(x, y);
+}
+
+/**
+ * Turn the sound on, and give the focus back to the page.
+ *
+ * The page starts muted, and a click on `button.sound` is the gesture that
+ * unmutes it -- **and leaves the button focused**, so the next Space a driver
+ * presses to start the transport presses the button again and mutes it. A
+ * sound trace taken that way hears nothing and looks like a page that plays
+ * no sound under `?drive=1`; that is how it was first misread.
+ */
+export async function unmute(page) {
+  const b = page.locator("button.sound");
+  if (await b.getAttribute("aria-pressed") !== "true") await b.click();
+  await page.evaluate(() => document.activeElement?.blur?.());
+}

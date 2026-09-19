@@ -19219,6 +19219,90 @@ games. Its only writers are the six scene-state installers,
 
 Named: `AssetQueueLoadCamFile` `0x0041D7D0`, `CamSlotsReset` `0x00403E20`,
 `TaskListBuild` `0x004A6F50`, `TaskListWalk` `0x004A7240`.
+## 2026-09-19 -- the magazine, R to reload, and the HUD readouts
+
+The task: "port the lives sprites rendering in the HUD, and the 'bullets
+remaining' HUD display ... a notion of bullets in clip and ability to reload
+too (press R)". Taken over from an agent that stalled twice; its work is
+commit `8f2682a`, and this entry covers both halves.
+
+**Read, all `[proved]`:** `PlayerFireAndReloadUpdate` (`0x00414940`),
+`PlayerRefillMagazine` (`0x00414B30`), `PlayerFireOriginalModeWeapon`
+(`0x00414B90`), `PlayerReloadOriginalModeWeapon` (`0x00414E40`),
+`HudDrawAmmoAndReloadPrompt` (`0x004177D0`), `HudDrawLives` (`0x004174A0`),
+`DrawScreenSprite` (`0x0041C6D0`), and the shutter's one-frame states 0, 5 and 6
+at `0x00413A04`..`0x00413A96` (disassembly; the pseudocode walks past them).
+Re-read in this session against `game/player_gun.ts` and `game/hud_readout.ts`
+constant by constant -- every position, scale, depth and sound id matches.
+An empty gun on the screen does nothing; a gun reloads only by a pull off the
+screen; the PC mouse is a gun and its right button is that pull. So **R is
+mapped onto the off-screen pull** at the input seam, a key binding like S for
+START, and the gameplay has no divergence for it.
+
+**`DrawScreenSprite`'s record**: `{id, x, y, depth, sx, sy, u0 0, v0 0, u1 1,
+v1 1, rot, 1.0, -1, flags}`. The game-over entry above describes the call as
+"a scale of 1 and a colour triple"; the 1.0s are the UV rectangle and `sx`,
+`sy` are arguments 5 and 6. The TSV keeps the record reading.
+
+**Renamed on merge**: main's `g_screen_sprite_texbank` / `g_screen_sprite_slot`
+(`0x0057A5BC` / `0x0057D448`) and this branch's `g_screen_sprite_bank` /
+`g_screen_sprite_tex_slot` were the same two tables named twice. Ghidra holds
+the latter and more code cites them, so the TSV keeps them, with main's
+game-over facts folded into the descriptions.
+
+**Wrong turns:**
+
+* A seek to a fight, paused, had no bullets and no lives. A seek replays the
+  script and runs no frame, and the sprite list is written by the player
+  tasks. The first fix redrew under `PlayerUpdateInPlay`'s own conditions --
+  and drew nothing, because a seek leaves the player task at `EnterNewGame`,
+  whose first frame is what calls `PlayerUpdateInPlay`. Re-deciding "does
+  this player have a HUD" outside the routines is the invented test the port
+  rules forbid; the fix runs the next frame's `PlayerTasksRun` on a deep copy
+  of `G` and keeps only the sprites (`PlayerTasksDrawWithoutAFrame`). The
+  first version of that restored `G` from the copy, which would have replaced
+  every actor object under the renderers on the load path, which has no
+  resync; it now runs on the copy and swaps the live references back.
+* The port's field was `G.g_screen_sprites` -- the exe's name for
+  `ScreenSpriteRegister`'s 64-slot array at `0x007DDAA8`, a different thing.
+  Renamed `g_screen_sprite_draws`, and the record and `DrawScreenSprite` moved
+  to `game/screen_sprite.ts` so the game-over sprites can use the same path.
+* `audio.mjs` counted 194 page errors: the Globals panel read any object with
+  an `x` as a vector and called `toFixed` on the sprite record's missing `z`.
+  No other check opens every panel.
+* An in-page sound trace under `?drive=1` heard nothing at all, not even the
+  gunshots: `captureThumb` saves the mute state, mutes, and restores it after
+  its await, which under the driven clock finishes after the harness's own
+  unmute. The trace was taken on the real clock instead. Not fixed here.
+* `audio.mjs`'s peak checks read exactly 0.000 for every source on this
+  machine, as the `loops` check does on the morning's base commit; the plays
+  themselves are recorded.
+
+## 2026-09-19 -- correction: `?drive=1` does play sound; the exporter digest follows imports
+
+**A correction to the entry above.** It said a `?drive=1` sound trace heard
+nothing because `captureThumb` restores a saved mute state late. That was a
+guess and it was wrong: `captureThumb` runs only after an in-browser build
+(`stageBuilt`), never on a page load. Instrumenting `Bgm.play` showed the
+mute button reading "on" after the harness clicked it and "off" one frame
+later -- the click had left `button.sound` focused, and the harness's next
+key, Space to start the transport, pressed it again. The page was right; the
+harness muted it. With the focus given back, a driven trace records every
+sound on its frame: six `GUN5_22.WAV` at g1701..g1706, `vo_RELOAD_16.wav` at
+g1712 and g1713, `vo_SHOOT_16.wav` at g1839, `RELOAD1_44.WAV` at g1840 (R) and
+g1844 (right button on five rounds), nothing for R or the right button on a
+full gun. `tools/lib/player.mjs` has an `unmute` that clicks and blurs.
+
+**The builder digest follows the exporter's imports to the bottom.**
+`gen_builder_hash.game_sources` already derived its list from `hod2lib/`'s
+imports, but one level deep and only `from "../game/..."`. It now parses every
+import and re-export statement, skips type-only ones (erased, so they decide no
+byte) and the two generated digests, and follows the rest transitively into
+any directory under `web/src/`. Today's set is unchanged -- `class13/state`,
+`class25/state` (whose imports are type-only), `class30/bonecels`,
+`hud_sprites` -- so the digest did not move; a probe module re-exported through
+`hud_sprites.ts` was picked up, which the old rule would have missed.
+
 
 ## 2026-09-19 -- the game-over fly-over, ported
 

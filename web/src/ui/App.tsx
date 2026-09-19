@@ -75,12 +75,13 @@ import { ErrorBoundary } from "./ErrorBoundary";
 export interface UiHost {
   canvas: HTMLCanvasElement;
   viewport: HTMLElement;
-  /** `.hud-layer` and its three children; see `hud/hud.ts`. */
+  /** `.hud-layer` and its four children; see `hud/hud.ts`. */
   hud: {
     root: HTMLElement;
     top: HTMLElement;
     bottom: HTMLElement;
     message: HTMLElement;
+    screen: HTMLCanvasElement;
   };
   /** `.crosshair`; see `render/shooting.ts`. */
   crosshair: HTMLElement;
@@ -127,6 +128,7 @@ function Page(
   const shutterTop = useRef<HTMLDivElement>(null);
   const shutterBottom = useRef<HTMLDivElement>(null);
   const message = useRef<HTMLDivElement>(null);
+  const screen = useRef<HTMLCanvasElement>(null);
   const crosshair = useRef<HTMLDivElement>(null);
 
   // Once, after the first commit. There is no projection yet and there cannot
@@ -140,14 +142,15 @@ function Page(
   // unconditionally, so after the first commit they are all present; if that
   // ever stops being true this fires never rather than half.
   useEffect(() => {
-    const [c, v, h, t, b, m, x] = [
+    const [c, v, h, t, b, m, s, x] = [
       canvas.current, viewport.current, hud.current, shutterTop.current,
-      shutterBottom.current, message.current, crosshair.current,
+      shutterBottom.current, message.current, screen.current,
+      crosshair.current,
     ];
-    if (c && v && h && t && b && m && x) {
+    if (c && v && h && t && b && m && s && x) {
       onHost({
         canvas: c, viewport: v, crosshair: x,
-        hud: { root: h, top: t, bottom: b, message: m },
+        hud: { root: h, top: t, bottom: b, message: m, screen: s },
       });
     }
   }, [onHost]);
@@ -192,7 +195,7 @@ function Page(
             their `hidden` is the same toggle field it already subscribes to
             for the `shooting` class. */}
         <Viewport refs={{ host: viewport, hud, shutterTop, shutterBottom,
-                          message, crosshair }}>
+                          message, screen, crosshair }}>
           <canvas id="view" ref={canvas} />
           {/* The boundary goes round the overlays and never round `#viewport`
               or `#view`: `app/` was handed those two elements through `onHost`

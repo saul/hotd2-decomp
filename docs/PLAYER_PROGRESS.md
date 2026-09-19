@@ -2702,12 +2702,9 @@ START -- to continue on a credit; otherwise the run's own continue screen
 counts down and asks for the game-over screen (below). Player 2 can join by
 the same route, but the page has no second START key yet.
 
-**Ammo, as far as it goes.** `g_player_ammo` (`0x009A5C7C`) and
-`g_player_magazine_size` (`0x009A2248`) exist in `G` and are written only by
-`PlayerEnterPlay` (6 in Arcade, the magazine in Original) and
-`PlayerStateFireOnly` (6). Nothing decrements or reloads them yet: the port's
-trigger (`PlayerFireFromQueue`, called from the player's own task) still has
-no magazine, and the HUD draws neither. That is the next port's.
+**Ammo, the reload and the HUD readouts.** A gun holds six, and **R**
+reloads. The whole of it is below, under *The magazine, the reload and the
+HUD readouts*.
 
 **The adaptive rank moves.** `UpdateDamageRank` (`FUN_004607B0`) and
 `ResetDamageRank` (`FUN_00460770`) are ported exactly and the `[diverges]` that
@@ -3307,7 +3304,7 @@ itself `[open]`, and the port writes none rather than guessing.
   `else if (g_nFiringGate != 0)`, which is one test above the ammo decrement,
   the shot counter, `BuildShotRay` *and* `PlayerShotEffectSpawn` — so a pull
   under a closed shutter is not a shot that misses, it is not a shot, and it
-  makes no muzzle flash and no tracer either. `ResolveShotRequest` asks the
+  makes no muzzle flash and no tracer either. The port's `PlayerFireAndReloadUpdate` asks the
   same question in the same place and drops the request rather than holding it.
   Non-zero means *allowed*: state 0 draws the closed bars **and** raises the
   gate, so a letterboxed intro is playable, and state 5 draws the same bars and
@@ -3344,12 +3341,84 @@ cloned onto the bone when hit, rather than duplicated across all 108 instances.
 
 Not implemented, each for a stated reason: the per-bone **collision-mesh**
 refinement (the sphere alone picks the same bone except at grazing angles), the
-**difficulty modifier** at `PTR_DAT_004D0D84` (needs a rank), **ammo and
-reload** — which is also why the firing gate above is asserted against
-`g_nPlayerFired` rather than a magazine — **civilians**, and `FUN_004560B0`'s
+**difficulty modifier** at `PTR_DAT_004D0D84` (needs a rank),
+**civilians**, and `FUN_004560B0`'s
 **special deaths** for a
 particular destroyed part (`obj+0x1368` bits → motions 428, 421, 633, 553), so
 a character whose arm has come off still plays a directional death.
+
+### The magazine, the reload and the HUD readouts
+
+**Done.** `game/player_gun.ts` transcribes the trigger:
+`PlayerUpdateInPlay` (`FUN_00413E90`) polls it once a frame through
+`PlayerFireAndReloadUpdate` (`FUN_00414940`), or in Original Mode
+`PlayerFireOriginalModeWeapon` (`FUN_00414B90`). What the exe does, all
+`[proved]` from the decompile:
+
+* **A shot takes a round**, unless the app state is the attract demo, the
+  player has infinite ammo, or an Original weapon's magazine is -1. The shot
+  that takes the last one raises the empty latch (`+0x1E`) and zeroes the
+  prompt timer (`+0x20`).
+* **An empty gun pointed at the screen does nothing** -- no round, no shot
+  counter, no ray, no flash, no gunshot, and no reload.
+* **A gun reloads by a pull off the screen**, and only that way; a standard
+  controller (on PC the keyboard, Right Ctrl) reloads with its binding set's
+  reload bit, which the gun's set does not have. The refill,
+  `PlayerRefillMagazine` (`FUN_00414B30`), fills to 6 (or the Original
+  magazine), drops the latch, and plays `COMMON\RELOAD1_44.WAV` (`0x003E16A9`)
+  -- the sound, and only the sound, behind the firing gate. A pull off the
+  screen on a full gun does nothing.
+* **The page's mouse is a gun**, because `InputMapDevicesToMaple`
+  (`FUN_0041E530`) makes the PC mouse one, and its right button is a pull off
+  the screen (`MouseGunResolvePull`, `FUN_0041EB30`). So the right button
+  reloads, and **R is the port's key for the same pull** -- a key binding at
+  the input seam, like S for START, not a change to the game.
+
+`game/hud_readout.ts` transcribes the two draw routines `PlayerUpdateInPlay`
+calls for a player with a life outside the attract states, and
+`game/screen_sprite.ts` records every `DrawScreenSprite` (`FUN_0041C6D0`)
+call into `G.g_screen_sprite_draws` for the HUD layer's 640x480 canvas to draw
+from the bundle's images (`script.json`'s `hud_sprites`, textures of
+`tex/scr_common.bin`, see `formats/texbank.md`):
+
+* `HudDrawAmmoAndReloadPrompt` (`FUN_004177D0`), only with the firing gate up:
+  one bullet (`0xA74`) per round, 24 px apart from (24, 364) for player 1 and
+  leftwards from 592 for player 2; in shutter state 1 (opening) scaled
+  `(40 - slide) * 0.0125 + 1`, the slide counting up a frame; nothing in any
+  other state. Original Mode draws seven or more as one sprite, `x` and two
+  digits, and an unlimited magazine as `x` and `0x63`. With the latch up,
+  **RELOAD** (`0xA27`, 1.5 wide at (24, 260)) blinks on 45 of every 60 frames of
+  the prompt timer, and from frame 120 a second line joins it: "SHOOT OUTSIDE
+  OF THE SCREEN!" (`0xA29`) for a gun, "PRESS THE RELOAD BUTTON" (`0xA28`) for a
+  controller. **The voice**: on a frame the timer is non-zero, the trigger is
+  down and the aim is on the screen -- that is, a dry pull, once per pull --
+  `ETC\vo_RELOAD_16.wav` (`0x000115A9`), or for a gun past 120 frames
+  `ETC\vo_SHOOT_16.wav` (`0x000215A9`). The same ids for both players. The
+  timer steps once a call and folds back to 120 past 600; the shot that
+  empties the gun is never nagged, because the timer is 0 on that frame.
+* `HudDrawLives` (`FUN_004174A0`), in shutter state 2 only: the "1P"/"2P" tag
+  at (28, 412) / (584, 412) and one lamp a life 32 px apart from x = 60 (548
+  leftwards for player 2), each a seven-cel flame on `g_frame_counter`, three
+  frames a cel and four frames out of step with its neighbour. Original Mode
+  with more than five lives draws one lamp, `x` and the count. In state 4 --
+  the letterbox shut -- it blinks "HOLD YOUR FIRE!" (`0x5B8`) instead, unless
+  a result card has the screen (`g_screen_furniture_flags & 0x10`).
+
+**What it took elsewhere.** The shutter machine had no per-frame collapse of
+its one-frame states 0, 5 and 6 into 4 and 2 (`0x00413A04`..`0x00413A96`,
+read off the disassembly the pseudocode walks past); the bars could not show
+that, but the readouts could, and a stage that opened with a 6 had no bullets
+for the rest of the scene. A **seek** runs no frame, so it now runs the next
+frame's player turn on a copy of `G` and keeps only the sprites
+(`PlayerTasksDrawWithoutAFrame`) -- a deep link into a fight shows its
+readouts while paused. Every harness that clicks at the page pulls through
+`tools/lib/player.mjs`'s `pull`, which presses R before every seventh pull.
+
+Verified by `web/test/port.test.ts` ("the gun: the magazine, the reload, and
+the HUD readouts"), and in the page: six live shots each play
+`COMMON/GUN5_22.WAV`, a dry pull `vo_RELOAD_16.wav`, a dry pull past 120
+frames `vo_SHOOT_16.wav`, R and the right button `RELOAD1_44.WAV`, R on a full
+gun nothing.
 
 ## Scripted scenery: doors, shutters and vans
 

@@ -46,6 +46,28 @@ export const LAYOUT_TWIDDLED = 1;
 export const LAYOUT_VQ = 3;
 export const LAYOUT_RECTANGLE = 9;
 export const LAYOUT_TWIDDLED_RECT = 13;
+/**
+ * 4-bit palettised, twiddled. Only the screen banks use it -- the HUD, the
+ * menus -- so no model texture ever did. `DecodeTextureToSurface`
+ * (0x004AC270) is the decoder; see `texbank.decodePal4`.
+ */
+export const LAYOUT_PAL4 = 5;
+
+/** `g_screen_sprite_bank`: `DrawScreenSprite` id -> tex/ bank index. */
+export const SCREEN_SPRITE_BANK = 0x0057a5bc;
+/** `g_screen_sprite_tex_slot`: sprite id -> global texture slot (+0x0C). */
+export const SCREEN_SPRITE_TEX_SLOT = 0x0057d448;
+/** Both tables end where the second one ends, at 0x005802D4. */
+export const SCREEN_SPRITE_COUNT = (0x005802d4 - SCREEN_SPRITE_TEX_SLOT) / 4;
+/** `g_texture_palette_table`: an s16, then `{s16 16; u32 ptr; u32 16}`. */
+export const PALETTE_TABLE = 0x0057a010;
+/**
+ * `TexBankPaletteIndex` (0x0041C9E0), the arms that read a table: bank index
+ * -> s16 palette per texture. Only scr_common's is transcribed; any other
+ * bank's PAL4 texture has no palette here and is refused.
+ */
+export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
+  new Map([[0x147, 0x0057a524]]);
 
 export class TexEntry {
   constructor(
@@ -1207,6 +1229,53 @@ export class ExeTables {
   }
 
   /** The filename a `PlaySoundId` id names, if it is a category-0 id. */
+  /** A tex/ bank's name without `.bin`, by bank index. */
+  bankName(index: number): string | null {
+    const ptr = this.ru32(TEX_NAME_TABLE + index * 4);
+    const name = ptr ? this.cstr(ptr) : null;
+    return name && name.endsWith(".bin") ? name.slice(0, -4) : null;
+  }
+
+  /** Palette `index` of `g_texture_palette_table`: sixteen ARGB1555. */
+  palette(index: number): number[] | null {
+    const r = this.v2r(PALETTE_TABLE + 2 + index * 12);
+    if (r === null) return null;
+    if (i16(this.data, r) !== 16) return null;
+    const pr = this.v2r(u32(this.data, r + 2));
+    if (pr === null) return null;
+    const out: number[] = [];
+    for (let i = 0; i < 16; i++) out.push(u16(this.data, pr + i * 2));
+    return out;
+  }
+
+  /**
+   * `[bank, entry, palette]` for a `DrawScreenSprite` id.
+   *
+   * The bank and the global slot are the two tables at 0x0057A5BC and
+   * 0x0057D448; the entry is the bank's descriptor carrying that slot. A PAL4
+   * entry's palette is `TexBankPaletteIndex`'s, and null when that bank's arm
+   * is not transcribed.
+   */
+  screenSprite(spriteId: number):
+      [string, TexEntry, number[] | null] | null {
+    if (spriteId < 0 || spriteId >= SCREEN_SPRITE_COUNT) return null;
+    const bank = this.ru32(SCREEN_SPRITE_BANK + spriteId * 4);
+    const slot = this.ru32(SCREEN_SPRITE_TEX_SLOT + spriteId * 4);
+    const name = bank !== null ? this.bankName(bank) : null;
+    if (name === null) return null;
+    const entry = this.entries(name).find((e) => e.slot === slot);
+    if (!entry) return null;
+    let pal: number[] | null = null;
+    if (entry.layout === LAYOUT_PAL4) {
+      const table = BANK_PALETTE_INDEX.get(bank!);
+      if (table !== undefined) {
+        const r = this.v2r(table + entry.index * 2);
+        if (r !== null) pal = this.palette(i16(this.data, r));
+      }
+    }
+    return [name, entry, pal];
+  }
+
   soundName(soundId: number): string | null {
     return this.soundRecords().get(soundId) ?? null;
   }

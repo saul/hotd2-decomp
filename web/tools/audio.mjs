@@ -25,7 +25,7 @@
  * * audio is muted on load and browsers block playback until a gesture, so the
  *   sound button has to be *clicked*, not toggled through the store.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -152,7 +152,7 @@ try {
         const x = box.x + box.width * (0.12 + gx * 0.19);
         const y = box.y + box.height * (0.22 + gy * 0.17);
         await page.mouse.move(x, y);
-        await page.mouse.click(x, y);
+        await pull(page, x, y);
         await page.waitForTimeout(60);
       }
     }

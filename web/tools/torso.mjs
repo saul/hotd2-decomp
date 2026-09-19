@@ -24,7 +24,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad, SHOTS } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
@@ -72,7 +72,7 @@ try {
   for (let i = 0; i < shots; i++) {
     const c = i % cols;
     const r = Math.floor(i / cols) % rows;
-    await page.mouse.click(
+    await pull(page, 
       box.x + box.width * (0.3 + (0.4 * (c + 0.5)) / cols),
       box.y + box.height * (0.35 + (0.3 * (r + 0.5)) / rows));
     await page.evaluate((n) => window.__hotd2Drive.advance(n), gap);

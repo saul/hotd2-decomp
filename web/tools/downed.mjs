@@ -26,7 +26,7 @@
  *
  *   node tools/downed.mjs --headless
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -84,7 +84,7 @@ try {
     for (let i = 0; i < n; i++) {
       const c = (k % 6) + 0.5, r = (Math.floor(k / 6) % 5) + 0.5;
       k++;
-      await page.mouse.click(box.x + (box.width * c) / 6,
+      await pull(page, box.x + (box.width * c) / 6,
                              box.y + (box.height * r) / 5);
     }
   };

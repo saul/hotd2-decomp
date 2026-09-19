@@ -898,7 +898,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                         if is33 and rec.hp == CLASS33_PUSHABLE else None)
         tscript = ascript = None
         camera_cue = None
-        if sp["class"] == 0x30:
+        # Class 0x18 too -- `CarriedZombieInit18` is `EnemyZombieInit` plus
+        # two stores, so its tail is class 0x30's. Twin of the TS resolver.
+        if sp["class"] in (0x30, 0x18):
             # **The header shape belongs to the state that reads the blob,
             # not to the state the descriptor starts the actor in.**
             # `ZombieScriptForState` (`FUN_0045CA10`) is

@@ -65,6 +65,25 @@ export enum CarrierRoutine0State {
 export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> = new Set([0, 1, 6]);
 
 /**
+ * The per-routine literals of the two ground-wake routines' draws, which is
+ * all that tells selector 1's draws from selector 6's:
+ *
+ * * `wakeZ` — the fourth argument of `CarrierDrawGroundWake`, its
+ *   `Translate(0, 0, z)` along the heading: `PUSH 0x41D80000` (27.0) in
+ *   `CarrierPropRoutine1`, `PUSH 0x42020000` (32.5) at `0x00441493` in
+ *   `CarrierPropRoutine6`. A distance, not a scale.
+ * * `stripZ` — states 5/6's `Translate(0, 0, z)` before the strip: -5.0 in
+ *   routine 1, `PUSH 0xC0000000` (-2.0) at `0x00441644` in routine 6.
+ * * `bowZ` — where the bow strip spawns: -5.0 in routine 1, and
+ *   `PUSH 0x41000000` (+8.0) at `0x0044157C` in routine 6.
+ */
+export const CARRIER_GROUND_WAKE_DRAW: Readonly<Record<number,
+  { wakeZ: number; stripZ: number; bowZ: number }>> = {
+  1: { wakeZ: 27.0, stripZ: -5.0, bowZ: -5.0 },
+  6: { wakeZ: 32.5, stripZ: -2.0, bowZ: 8.0 },
+};
+
+/**
  * The wake strip both carrier routines step — `char_adv06.bin[0..21]` — and
  * the offset `CarrierDrawGroundWake` (`FUN_00440770`) adds for the second of
  * the two slots it draws each frame (`char_adv06.bin[22..43]`).
@@ -96,6 +115,7 @@ export function CarrierDrawSlots(selector: number): number[] {
       return [...span(CARRIER_WAKE_FIRST, CARRIER_WAKE_LAST),
               ...span(CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST)];
     case 1:
+    case 6:
       return [...span(CARRIER_WAKE_FIRST,
                       CARRIER_WAKE_LAST + CARRIER_WAKE_PAIR),
               ...span(CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST),

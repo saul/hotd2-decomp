@@ -49,8 +49,13 @@ from hod2lib import script as scriptlib, stage as stagelib  # noqa: E402
 #: and every one of them decodes cleanly under the ordered shape and under no
 #: other; this file used to say the odd one "reads the civilian's own block
 #: rather than a script of its own", which was wrong.
-EXPECT_SPAWNS = 70
-EXPECT_SCRIPTS = 105
+#:
+#: 76 and 113 once class 0x18 is read with class 0x30: `CarriedZombieInit18`
+#: (`FUN_0045CD60`) is `EnemyZombieInit` plus two stores, so the six riders --
+#: five on stage 3's boats, one on stage 2's -- carry the same two blobs. The
+#: exporter dropped them, and stage 2's rider stood turning for the whole ride.
+EXPECT_SPAWNS = 76
+EXPECT_SCRIPTS = 113
 
 
 def main() -> int:
@@ -94,7 +99,10 @@ def main() -> int:
             civscripts = {"entries": [], "scripts": []}
 
         for rec in recs.values():
-            if rec.cls != 0x30:
+            # Class 0x18 too: `CarriedZombieInit18` is `EnemyZombieInit` plus
+            # two stores, so its tail -- and its two script blobs -- are
+            # class 0x30's.
+            if rec.cls not in (0x30, 0x18):
                 continue
             init = rec.param(2, "i8") or 0
             atk = rec.param(3, "i8") or 0

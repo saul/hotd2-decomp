@@ -64,7 +64,8 @@ import {
 } from "../effects/prop_strip";
 import { vec3, VecToAngles } from "../vec";
 import {
-  CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST, CARRIER_WAKE_FIRST,
+  CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST, CARRIER_GROUND_WAKE_DRAW,
+  CARRIER_WAKE_FIRST,
   CARRIER_WAKE_LAST, CarrierState, type ScriptedPropTail,
 } from "./state";
 
@@ -76,8 +77,6 @@ const STRIP_CEL_FIRST = CARRIER1_STRIP_FIRST;
 const STRIP_CEL_LAST = CARRIER1_STRIP_LAST;
 /** `CarrierDrawGroundWake`'s probe starts this far above the carrier. */
 const WAKE_PROBE_RISE = 100.0;
-/** `MatrixTranslate(0, 0, -5.0)` — the bow, in the carrier's own frame. */
-const CARRIER_BOW_Z = -5.0;
 /** `PlaySoundId(0x000B16A9)` with the bow strip at path frame 0x550. */
 export const SFX_CARRIER_BOW = 0xb16a9;
 /** `obj+0x124 = 40.0` — the shot sphere state 0 seats. */
@@ -352,7 +351,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
         // strip faces the camera's yaw with no pitch or roll, and the sound
         // follows the spawn.
         const bow = vec3();
-        CarrierTransformPoint(obj, 0, 0, CARRIER_BOW_Z, bow);
+        CarrierTransformPoint(obj, 0, 0, CARRIER_GROUND_WAKE_DRAW[1].bowZ, bow);
         SpawnPropStripEffect({ pos: bow, pitch: 0,
                                yaw: G.g_camera_yaw_bams, roll: 0 },
                              PropStripKind.CarrierBow, 1.0, f.events);
@@ -415,9 +414,11 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
  *
  * Routine 1 fades and splashes on one frame (`0x550`) and raises `0x400000`
  * ten frames later on its own; this one fades first, splashes later, and
- * raises the bit with the state change. The wake it draws is scaled 32.5
- * (`PUSH 0x42020000` at `0x00441493`) against routine 1's 27.0 — draw-side,
- * like the splash. [diverges] the splash and its sound, as in routine 1.
+ * raises the bit with the state change. The draws differ only in their
+ * literals, which `CARRIER_GROUND_WAKE_DRAW` carries: the wake sits 32.5
+ * along the heading (`PUSH 0x42020000` at `0x00441493` is
+ * `CarrierDrawGroundWake`'s distance argument, not a scale) against routine
+ * 1's 27.0, the state-5/6 strip at -2.0 and the bow strip at +8.0.
  */
 export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
@@ -430,6 +431,7 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
     }
   };
 
+  sub.stripDrawn = 0;
   switch (sub.state) {
     case CarrierState.Begin:
       // `0x004413E7`: the same ride block routine 1 allocates, seeded the same
@@ -469,18 +471,24 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
       } else if (sub.pathFrame === CARRIER6_FRAME_FADE) {
         sub.wakeFade = WAKE_FADE_RATE;
       } else if (sub.pathFrame === CARRIER6_FRAME_BOW_EFFECT) {
-        // The engine spawns the splash with `FUN_0043FCA0` eight units along
-        // the bow and plays `PlaySoundId(0x000B16A9)`; the port does neither,
-        // as in routine 1 — both are draw-side, with no state a gate reads.
-        // [diverges]
+        // `0x00441544`..`0x004415EF`: the carrier's `Translate(0, 0, 8.0)`
+        // read back, facing the camera's yaw, kind 3, then the sound.
+        const bow = vec3();
+        CarrierTransformPoint(obj, 0, 0, CARRIER_GROUND_WAKE_DRAW[6].bowZ, bow);
+        SpawnPropStripEffect({ pos: bow, pitch: 0,
+                               yaw: G.g_camera_yaw_bams, roll: 0 },
+                             PropStripKind.CarrierBow, 1.0, f.events);
+        f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       }
       sub.pathFrame += 1;
       break;
     case CarrierState.Wake:
     case CarrierState.WakeSpent:
-      // `0x004415FC`: the strip cursor, then `state == 5 &&
-      // g_cam_path_frame >= g_cam_path_length[0x161]` moves it to 6, and 6's
-      // screen test is the same unported exit as routine 1's. [diverges]
+      // `0x004415FC`: the strip drawn at the carrier's `Translate(0, 0, -2)`
+      // and stepped, then `state == 5 && g_cam_path_frame >=
+      // g_cam_path_length[0x161]` moves it to 6, and 6's screen test is the
+      // same unported exit as routine 1's. [diverges]
+      sub.stripDrawn = sub.stripCel;
       sub.stripCel += 1;
       if (sub.stripCel > STRIP_CEL_LAST) sub.stripCel = STRIP_CEL_FIRST;
       if (sub.state === CarrierState.Wake

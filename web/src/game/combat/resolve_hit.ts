@@ -531,7 +531,7 @@ const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
  * half in none. `ThrowerOnShot` (`FUN_004499A0`) refuses to react while the
  * bit is up, `ZombieOnShot` (`FUN_00453EB0`) likewise, and
  * `ThrowerStateGetUp`'s doc comment said in so many words that "shots ricochet
- * off a thrower that is getting up" — while `ResolveShotRequest` charged the
+ * off a thrower that is getting up" — while `FireShotRequest` charged the
  * damage anyway. A `zsass` knocked down and then shot on the ground therefore
  * reached zero hit points inside the one window where nothing was listening
  * for it: `dead` was set, the kill voice played, and its own `state 2` sub 4
@@ -541,7 +541,7 @@ const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
  *
  * `null` is the refusal. What the engine does *instead* is still a hit — the
  * shot marked the actor and the class's own feedback routine runs — so the
- * caller draws the ricochet and scores nothing; see `ResolveShotRequest`.
+ * caller draws the ricochet and scores nothing; see `FireShotRequest`.
  *
  * `[diverges]` The engine's routine is a loop over `g_hit_player_order` that
  * also copies `obj+0x190+p` into `g_hit_bone[p]` and clears the per-player

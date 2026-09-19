@@ -30,6 +30,7 @@ import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
+import type { ScreenSprite } from "./screen_sprite";
 import type { ScreenSpriteAnim } from "./game_over";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
@@ -392,8 +393,8 @@ export const G = {
   g_player_task: [PlayerTask.None, PlayerTask.None] as PlayerTask[],
   /**
    * `g_player_ammo` — 0x009A5C7C + player*0x130. `PlayerEnterPlay` loads six
-   * in Arcade. [open] Nothing in the port reads it: the port's trigger has no
-   * magazine (see `combat/shot.ts`).
+   * in Arcade; `PlayerFireAndReloadUpdate` takes one a shot and
+   * `PlayerRefillMagazine` puts the magazine back. See `game/player_gun.ts`.
    */
   g_player_ammo: [0, 0],
   /**
@@ -401,6 +402,90 @@ export const G = {
    * Arcade arm writes it 6 (the low byte of its `0x3000006` store).
    */
   g_player_magazine_size: [6, 6],
+  /**
+   * `g_player_magazine_empty` — 0x009A5C7E + player*0x130. Raised by the shot
+   * that empties the gun, cleared by every refill; the RELOAD prompt is drawn
+   * while it is up.
+   */
+  g_player_magazine_empty: [0, 0],
+  /**
+   * `g_player_reload_prompt_timer` — 0x009A5C80 + player*0x130. Frames since
+   * the gun ran dry, stepped by `HudDrawAmmoAndReloadPrompt` and folded back
+   * to 120 past 600.
+   */
+  g_player_reload_prompt_timer: [0, 0],
+  /**
+   * `g_hud_ammo_slide` — 0x007C2120, a float per player: the readout's own
+   * counter while the shutter opens, which scales it from 1.5 down to 1.0.
+   */
+  g_hud_ammo_slide: [0, 0],
+  /**
+   * `g_player_input_is_gun` — 0x009A5D85 + player*0x130. 1 for a gun, 0 for
+   * a standard controller, -1 for no device.
+   *
+   * **1 in the port, because the port's pointer is the PC mouse and the exe
+   * makes the mouse a gun**: `InputMapDevicesToMaple` (`FUN_0041E530`) gives
+   * input modes 5 and 6 a maple record with flag `0x80`, and
+   * `PlayerBindMapleDevices` (`FUN_0040D8B0`) turns that flag into this 1. So
+   * the port's player aims with the gun arm of `PollPlayerAimInput`, reloads
+   * by a pull off the screen, and is told "SHOOT OUTSIDE OF THE SCREEN!".
+   * Player 2 has no device in the port and never enters play; the value is
+   * the same so no lookup ever indexes a binding set of -1.
+   */
+  g_player_input_is_gun: [1, 1] as number[],
+  /**
+   * `g_player_pad_kind` — 0x009A5D84 + player*0x130. `MapleDeviceKind`
+   * (`FUN_0040D950`) of a non-gun device; -1 for a gun.
+   */
+  g_player_pad_kind: [-1, -1] as number[],
+  /**
+   * `g_player_infinite_ammo` — 0x009C9FD9 + player*0x7C. Non-zero and a shot
+   * takes no round. Zeroed by the options reset; its setter is `[open]`.
+   */
+  g_player_infinite_ammo: [0, 0] as number[],
+  /**
+   * `g_ini_autoreload` — 0x007C17AC. `Hod2.ini`'s `AUTORELOAD`, which
+   * `ReadIniFlushSettings` (`FUN_0049E4A0`) reads **only when `G_ENABLE` is
+   * 1** and otherwise forces to 0. The installed configuration has
+   * `G_ENABLE = 0`, so 0; `AutoReloadEmptyGuns` is transcribed and idle.
+   */
+  g_ini_autoreload: 0,
+  /**
+   * `g_input_mode_p1` — 0x00588E24 and `g_input_mode_p2` — 0x007DC698, as
+   * `GetPlayerInputModes` (`FUN_0041E260`) returns them. The low half is the
+   * PC input mode (5 is the mouse); bit 31 is the gun flag the auto-reload
+   * tests. Mode 5 without the flag is what the port's pointer is.
+   */
+  g_input_mode: [5, 5] as number[],
+  /**
+   * `g_original_fire_mode` — 0x009A2247 + player*0x14: how the Original Mode
+   * weapon fires (1 bursts, 2 reloads only when empty). 0 in Arcade and in
+   * every loadout the port can reach.
+   */
+  g_original_fire_mode: [0, 0] as number[],
+  /**
+   * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
+   * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
+   * (`FUN_00416420`) loads and `PlayerFireOriginalModeWeapon` counts down:
+   * `[1]` a round is owed without a pull, `[2]` the burst count, `[3]` the
+   * frames before the next.
+   */
+  g_original_fire_latches: [[0, 0, 0, 0], [0, 0, 0, 0]] as number[][],
+  /**
+   * The screen sprites this frame drew, in draw order -- every
+   * `DrawScreenSprite` call, whoever made it. See `game/screen_sprite.ts`.
+   *
+   * `[port-only]` as a list; what fills it is the engine's.
+   * `DrawScreenSprite` (`FUN_0041C6D0`) goes to `DrawSpriteQuadCommand`
+   * (`FUN_004A7AB0`) and a quad on the screen, and the port's screen is the
+   * HUD layer, which may not read the engine -- so the calls are recorded
+   * here, cleared at the head of every frame's player walk, and `app/` hands
+   * the list across. Plain data, so a snapshot carries exactly what the frame
+   * it was taken on drew. **Not** the exe's `g_screen_sprites` (0x007DDAA8),
+   * which is `ScreenSpriteRegister`'s 64-slot array and a different thing;
+   * this field was named that until the two were noticed side by side.
+   */
+  g_screen_sprite_draws: [] as ScreenSprite[],
   /**
    * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
    * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
@@ -1036,7 +1121,7 @@ export const G = {
    *
    * `[port-only]` in shape. The port has no crosshair in pixels; what it has
    * is the ray each shot request carries, which is that crosshair already
-   * unprojected. `ResolveShotRequest` records the last one per player, and a
+   * unprojected. `FireShotRequest` records the last one per player, and a
    * routine that unprojects the crosshair at some depth -- class 0x40's
    * `SpawnEmergePropSparkAtCrosshair` -- takes the point on it instead.
    */
@@ -1668,9 +1753,10 @@ export function ResetSceneOnEnter(): void {
   //
   // The port writes **2**, not 5, and that is `Shutter.reset`'s standing
   // `[diverges]` seen from the other side rather than a second one: a 5 draws
-  // the closed bars and hands over to 4, and the port's shutter machine has no
-  // per-frame collapse of 0, 5 and 6 into 4 and 2, so a 5 here would leave the
-  // bars shut for good. It is written at all only because the byte moved into
+  // the closed bars and hands over to 4 -- which the port's shutter machine
+  // now does too (`Shutter.step`), so what is left is the picture: a 5 here
+  // would shut the bars on every freshly loaded stage until its script opens
+  // them. It is written at all only because the byte moved into
   // `G` for class 0x19 -- until then the walker owned it and this routine
   // could not reach it.
   G.g_bHudShutterState = 2;
@@ -1761,6 +1847,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_shot_effect_cursor = [0, 0];
   G.g_shot_hit_something = [0, 0];
   G.g_original_weapon_kind = [0, 0];
+  G.g_screen_sprite_draws = [];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
@@ -1842,6 +1929,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   } else {
     PlayerStartGameFromTitle(G.g_GameMode);
   }
+  // The player turn taken above is the port's sequencing, not a frame the
+  // engine draws: it runs before the scene's script has set the shutter, so
+  // what it drew would be the HUD of a shutter state nobody has chosen yet --
+  // on screen for as long as a freshly loaded stage sits paused.
+  G.g_screen_sprite_draws = [];
 }
 
 /**

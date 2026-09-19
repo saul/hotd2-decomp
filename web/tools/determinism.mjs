@@ -32,7 +32,7 @@
  *
  * Exit status is 0 only if every run traced identically.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d = null) => {
@@ -81,7 +81,7 @@ async function volley(page, box) {
   const COLS = 5, ROWS = 4;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      await page.mouse.click(box.x + (box.width * (c + 0.5)) / COLS,
+      await pull(page, box.x + (box.width * (c + 0.5)) / COLS,
                              box.y + (box.height * (r + 0.5)) / ROWS);
     }
   }

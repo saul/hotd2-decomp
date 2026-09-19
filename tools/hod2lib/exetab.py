@@ -49,6 +49,25 @@ LAYOUT_TWIDDLED = 1
 LAYOUT_VQ = 3
 LAYOUT_RECTANGLE = 9
 LAYOUT_TWIDDLED_RECT = 13
+#: 4-bit palettised, twiddled. Only the screen banks use it -- the HUD, the
+#: menus -- so no model texture ever did, which is why texbank.md once said
+#: the game has no palettes. ``DecodeTextureToSurface`` (0x004AC270) is the
+#: decoder; see texbank.decode_pal4.
+LAYOUT_PAL4 = 5
+
+# The screen sprites ``DrawScreenSprite`` (0x0041C6D0) draws by id.
+#: ``g_screen_sprite_bank``: sprite id -> tex/ bank index.
+SCREEN_SPRITE_BANK = 0x0057A5BC
+#: ``g_screen_sprite_tex_slot``: sprite id -> global texture slot (+0x0C).
+SCREEN_SPRITE_TEX_SLOT = 0x0057D448
+#: Both tables end where the second one ends, at 0x005802D4.
+SCREEN_SPRITE_COUNT = (0x005802D4 - SCREEN_SPRITE_TEX_SLOT) // 4
+#: ``g_texture_palette_table``: an s16, then {s16 16; u32 ptr; u32 16}.
+PALETTE_TABLE = 0x0057A010
+#: ``TexBankPaletteIndex`` (0x0041C9E0), the arms that read a table: bank
+#: index -> s16 palette per texture. Only scr_common's is transcribed; any
+#: other bank's PAL4 texture has no palette here and is refused.
+BANK_PALETTE_INDEX = {0x147: 0x0057A524}
 
 
 @dataclass(frozen=True)
@@ -1092,6 +1111,54 @@ class ExeTables:
                 # this slot holds a string, and No is an answer.
                 continue
         return out
+
+    def bank_name(self, index: int) -> str | None:
+        """A tex/ bank's name without ``.bin``, by bank index."""
+        ptr = self._u32(TEX_NAME_TABLE + index * 4)
+        name = self._cstr(ptr) if ptr else None
+        return name[:-4] if name and name.endswith(".bin") else None
+
+    def palette(self, index: int) -> list[int] | None:
+        """Palette ``index`` of ``g_texture_palette_table``: 16 ARGB1555."""
+        rec = PALETTE_TABLE + 2 + index * 12
+        r = self._v2r(rec)
+        if r is None:
+            return None
+        count = struct.unpack_from("<h", self.data, r)[0]
+        if count != 16:
+            return None
+        pr = self._v2r(struct.unpack_from("<I", self.data, r + 2)[0])
+        if pr is None:
+            return None
+        return list(struct.unpack_from("<16H", self.data, pr))
+
+    def screen_sprite(self, sprite_id: int
+                      ) -> tuple[str, TexEntry, list[int] | None] | None:
+        """``(bank, entry, palette)`` for a ``DrawScreenSprite`` id.
+
+        The bank and the global slot are the two tables at 0x0057A5BC and
+        0x0057D448; the entry is the bank's descriptor carrying that slot. A
+        PAL4 entry's palette is ``TexBankPaletteIndex``'s, and None when that
+        bank's arm is not transcribed.
+        """
+        if not 0 <= sprite_id < SCREEN_SPRITE_COUNT:
+            return None
+        bank = self._u32(SCREEN_SPRITE_BANK + sprite_id * 4)
+        slot = self._u32(SCREEN_SPRITE_TEX_SLOT + sprite_id * 4)
+        name = self.bank_name(bank) if bank is not None else None
+        if name is None:
+            return None
+        entry = next((e for e in self.entries(name) if e.slot == slot), None)
+        if entry is None:
+            return None
+        pal = None
+        if entry.layout == LAYOUT_PAL4:
+            table = BANK_PALETTE_INDEX.get(bank)
+            if table is not None:
+                r = self._v2r(table + entry.index * 2)
+                if r is not None:
+                    pal = self.palette(struct.unpack_from("<h", self.data, r)[0])
+        return name, entry, pal
 
     def sound_name(self, sound_id: int) -> str | None:
         """The filename a `PlaySoundId` id names, if it is a category-0 id."""

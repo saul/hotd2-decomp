@@ -12,7 +12,7 @@
  * carried props as `routine:hp:viewZ`) and writes `shots/bridge_<f>.png`.
  */
 import { resolve } from "node:path";
-import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad, SHOTS } from "./lib/player.mjs";
 
 const args = process.argv.slice(2);
 const opt = (n, d) => {
@@ -42,7 +42,7 @@ try {
     f = await page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
     for (const q of fires) {
       if (q[0] === f) {
-        await page.mouse.click(q[1], q[2]);
+        await pull(page, q[1], q[2]);
         console.log(`  fired at (${q[1]}, ${q[2]}) on f${f}`);
       }
     }

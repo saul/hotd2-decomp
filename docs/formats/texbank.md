@@ -99,6 +99,38 @@ Measured across all 9,112 models — much narrower than the hardware allows:
 The open question from Phase 0 about where palettes live is therefore answered:
 there are none.
 
+## The screen banks: PAL4, with the palettes in the exe
+
+The table above is the **models'**. The 2D screen banks are different:
+`tex/scr_common.bin` (bank `0x147`), which holds the in-play HUD -- bullets,
+life lamps, RELOAD, the digits -- is **PAL4**, layout `0x500`. Whether every screen bank is, is `[open]`.
+`[proved]` from
+`DecodeTextureToSurface` (`0x004AC270`):
+
+* the pixels are 4-bit indices, two to a byte, low nibble first, in the
+  twiddled (Morton) order -- cut into `h`-wide square blocks along x once
+  `x >= h` for a texture wider than tall `[likely]`: which loop bound is the
+  height is read off Ghidra's stack locals;
+* the palette is 16 ARGB1555 entries in `.rdata` (`0x004ECB8C..`), listed by
+  `g_texture_palette_table` (`0x0057A010`), whatever the texture's own pixel
+  format; the entries are converted to the surface format (1555, 565 or 4444
+  by the descriptor's format, the table at `0x00571250`);
+* **which** palette is the bank's choice: `TexBankPaletteIndex`
+  (`0x0041C9E0`) switches on the bank, and for `scr_common` reads the s16 per
+  texture at `g_scr_common_palette_index` (`0x0057A524`).
+
+A screen sprite is named by id, not by texture: `DrawScreenSprite`
+(`0x0041C6D0`) looks the id up in `g_screen_sprite_bank` (`0x0057A5BC`) for
+the bank and `g_screen_sprite_tex_slot` (`0x0057D448`) for the global texture
+slot (the descriptor's `+0x0C`). And `DrawSpriteQuadCommand` (`0x004A7AB0`)
+puts texture row 0 at the **bottom** of the quad, so every screen texture is
+stored upside down relative to the picture it shows.
+
+The exporter (`hod2lib/texbank.ts`, `exetab.ts`, and `bundle.ts`'s
+`hudSpritesJson`) decodes the ids `web/src/game/hud_sprites.ts` lists, flips
+them, and writes them into `script.json` as `hud_sprites`: `{w, h, png}` by
+sprite id.
+
 ## Two banks that overwrite a third: the blood colour
 
 `tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold **39 textures each,

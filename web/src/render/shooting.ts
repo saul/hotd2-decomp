@@ -166,6 +166,12 @@ export class Shooting implements System {
    */
   onFire: (ray: { origin: Vector3; dir: Vector3 }) => void = () => {};
   /**
+   * The right button: a trigger pull with the aim outside the screen, which is
+   * how the exe's mouse-gun reloads (`MouseGunResolvePull`, `FUN_0041EB30`).
+   * No ray -- the engine builds none for it. Wired by `app/main.ts`.
+   */
+  onOffscreenPull: () => void = () => {};
+  /**
    * Where the pointer is aiming, in normalised device coordinates, on every
    * move. The same shape as {@link onFire} and for the same reason: the aim is
    * input the port owns (`g_crosshair_x`, which the gun lights are built
@@ -194,7 +200,14 @@ export class Shooting implements System {
     // what decides what the shot did. Owned by the app scope, like everything
     // else this layer holds that outlives a stage.
     scope.defer(events.on("shot.resolved", (r) => this.onResolved(r)));
+    // The context menu would take the right button, which is the reload.
+    viewport.addEventListener("contextmenu", (e) => e.preventDefault());
     viewport.addEventListener("pointerdown", (e) => {
+      if (e.button === 2) {
+        e.preventDefault();
+        this.onOffscreenPull();
+        return;
+      }
       if (e.button !== 0) return;
       // `preventDefault` stops the drag-select a click on the scene would
       // otherwise start. It also stops the **focus change** the browser would

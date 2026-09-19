@@ -26,7 +26,7 @@
  *
  * Screenshots go to `web/shots/`, which is gitignored.
  */
-import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
+import { openPlayer, pull, waitForLoad, SHOTS } from "./lib/player.mjs";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -133,7 +133,7 @@ try {
     // outside the scene, where a ray meets nothing at all.
     const y = box.y + box.height * (0.62 + (i % 4) * 0.05);
     await page.mouse.move(x, y);
-    await page.mouse.click(x, y);
+    await pull(page, x, y);
     await page.waitForTimeout(50);
     const r = await row("effects");
     if (!miss && /blood 0/.test(r)) miss = r;
@@ -160,7 +160,7 @@ try {
 
   // ...and on, which is what the toggle is for.
   await toggle("Muzzle flash");
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.7);
+  await pull(page, box.x + box.width / 2, box.y + box.height * 0.7);
   await page.waitForTimeout(50);
   const lit = await row("effects");
   check("...and on when the toggle is", /flash [1-9]/.test(lit), lit);
@@ -177,7 +177,7 @@ try {
         const x = box.x + box.width * (0.08 + gx * 0.12);
         const y = box.y + box.height * (0.18 + gy * 0.13);
         await page.mouse.move(x, y);
-        await page.mouse.click(x, y);
+        await pull(page, x, y);
         const r = await row("effects");
         if (/blood [1-9]/.test(r)) { bled = r; break outer; }
       }

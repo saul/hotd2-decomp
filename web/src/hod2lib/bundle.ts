@@ -336,6 +336,48 @@ export function rainJson(tables: ExeTables,
   };
 }
 
+/** `PlaceTable44Props`' literal `obj+0x324 = 0x13` and `obj+0x328 = 0x1D4`. */
+export const TABLE44_EFFECT = 0x13;
+export const TABLE44_MOTION = 0x1d4;
+
+/**
+ * The slots the three table constructors' objects draw, by container.
+ *
+ * * `table38`/`table39` — `0x1237` whole, `0x1236` once `PropUpdateType38`
+ *   is shot (`komono_st1.bin[3]` and `[2]`).
+ * * `table44` — `0x1064` (`komono_7.bin[0]`) for rows 2..6 and the shadow
+ *   `0x10D1`; rows 0 and 1 draw effect 0x13, whose node slots travel with
+ *   the effect.
+ */
+export const TABLE_SLOTS: Record<string, number[]> = {
+  table38: [0x1237, 0x1236],
+  table39: [0x1237],
+  table44: [0x1064, 0x10d1],
+};
+
+/**
+ * The slots one type-40 sub-kind can draw, from `PlaceFragmentProps`
+ * (`FUN_004636A0`) and `PropUpdateType40` (`FUN_0046C570`): its starting slot
+ * (`g_fragment_slots`, or the literals of arms 0 and 1), the next one — a hit
+ * adds one — sub-kind 9's second draw at `+0x96`, and the forty `garasu.bin`
+ * burst pieces `0xCA5`..`0xCCC` every sub-kind shares.
+ */
+export function fragmentSlots(tables: ExeTables, subKind: number): number[] {
+  const out: number[] = [];
+  if (subKind === 0) out.push(0x123e, 0x123f);
+  else if (subKind === 1) out.push(0x17c6, 0x17c7);
+  else {
+    const base = tables.ru16(FRAGMENT_SLOTS + subKind * 2) ?? 0;
+    if (base) out.push(base, base + 1);
+    if (base && subKind === 9) out.push(base + 0x96, base + 1 + 0x96);
+  }
+  for (let i = 0; i < 40; i++) out.push(0xca5 + i);
+  return out;
+}
+
+/** `g_fragment_slots` — `0x0059463C`, a u16 per type-40 sub-kind. */
+export const FRAGMENT_SLOTS = 0x0059463c;
+
 /** The class-0x41 types `PlaceGenericProp` builds, from the dispatch table. */
 function genericTypes(tables: ExeTables): Set<number> {
   const ctor = 0x00461cf0;
@@ -434,6 +476,20 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
           at: rec.offset, container: "fragment",
           sub_kind: s8(rec.offset + 0x24),
           lifetime_evt_steps: rec.hp,
+          pos: [...rec.pos], yaw: rec.orient[1],
+        });
+      } else if (ctor === 38 || ctor === 39 || ctor === 44) {
+        // `PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`:
+        // every object comes out of a table in the image, so the descriptor
+        // contributes only `+0x11C`, copied into each one as its step
+        // lifetime. Type 44's first two rows draw effect 0x13 on motion 468
+        // (`obj+0x324`/`+0x328`, literals in the constructor), which is what
+        // puts that effect's tree and clip in `breakables.effects`.
+        out.push({
+          at: rec.offset, container: `table${ctor}`,
+          lifetime_evt_steps: rec.hp,
+          ...(ctor === 44 ? { effect: TABLE44_EFFECT, motion: TABLE44_MOTION }
+                          : {}),
           pos: [...rec.pos], yaw: rec.orient[1],
         });
       } else if (ctor === 4) {
@@ -692,7 +748,9 @@ export async function scriptFlagEffectsJson(
   const out: Record<string, unknown> = {};
   const banks = tables.motionBanks();
   for (const pl of placements) {
-    if (pl.container !== "script_flag_effect") continue;
+    // Every placement that names an effect and a motion: class 0x44 selector
+    // 0's window halves, and class 0x41 type 44's two breakable chairs.
+    if (pl.effect === undefined || pl.motion === undefined) continue;
     const effect = pl.effect as number;
     const motion = pl.motion as number;
     if (out[String(effect)] !== undefined) continue;
@@ -1135,6 +1193,17 @@ export async function breakableSlotEntry(
   // Without this the prop is placed, `DrawSlotFor` asks for `0xA58`, and the
   // renderer has nothing to clone -- which is exactly how stage 3's roller
   // shutter came to be missing from a level that placed it.
+  // The table constructors' literals, and every slot a type-40 sub-kind this
+  // stage places can draw -- whole, shot, its second draw and the forty
+  // pieces it bursts into. Without them the objects are placed and the
+  // renderer has nothing to clone, which is how stage 1's church came to have
+  // bare pews.
+  for (const pl of placements) {
+    const slots = pl.container === "fragment"
+      ? fragmentSlots(stage.tables, (pl.sub_kind as number) ?? 0)
+      : TABLE_SLOTS[pl.container as string] ?? [];
+    for (const slot of slots) if (!want.includes(slot)) want.push(slot);
+  }
   for (const pl of placements) {
     if (pl.container !== "rising_door") continue;
     const slot = pl.slot as number;
@@ -1268,6 +1337,11 @@ export function rigsJson(instances: RigInstance[], blocked: Rig[],
       routes,
       world_space: rig.worldSpace ?? false,
       spawn_class: rig.spawnClass ?? null,
+      // The script addresses of the spawns whose class handler installs this
+      // routine. `null` means nothing links the rig to a spawn and the player
+      // shows it from stage load, as before; a list -- even an empty one --
+      // means the object exists only once one of those spawns has run.
+      spawn_ats: inst.spawnAts ?? null,
       // Rules the transcription records rather than bakes, so the client can
       // show them instead of pretending the part is static.
       animated_parts: inst.parts

@@ -53,6 +53,7 @@ import {
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
+import { COMPOSITE_FAMILIES, PropParts, type PropPart } from "./prop_parts";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
@@ -311,6 +312,14 @@ interface Live {
   /** Only the lift has one; the pivots its update drives. */
   lift?: LiftParts;
   /**
+   * For the families `render/prop_parts.ts` draws: the slots of the parts
+   * `node` holds, in order, so a change in what the routine draws rebuilds
+   * the group rather than re-posing the wrong children.
+   */
+  parts?: string;
+  /** Those parts' nodes, in list order. */
+  partNodes?: Object3D[];
+  /**
    * The second model of a routine that draws two under separate matrices:
    * `PropUpdateType13`'s falling part and `PropUpdateType35`'s second leaf.
    * A sibling in the layer's group, not a child — neither routine composes
@@ -415,6 +424,12 @@ export class BreakableLayer implements System<RenderContext> {
 
     for (const p of G.g_breakable_props) {
       if (p.dead) continue;
+      const parts = COMPOSITE_FAMILIES.has(p.family) ? PropParts(p) : null;
+      if (parts) {
+        seen.add(p.id);
+        this.drawParts(p.id, parts);
+        continue;
+      }
       const slot = DrawSlotFor(p);
       // A generic type whose routine draws only an effect has no model here,
       // and drawing `obj+0x28C` for it put a character where scenery was.
@@ -575,6 +590,46 @@ export class BreakableLayer implements System<RenderContext> {
       c.rotation.set(d.rx * BAMS_TO_RAD, d.ry * BAMS_TO_RAD,
                      d.rz * BAMS_TO_RAD);
     }
+  }
+
+  /**
+   * One prop drawn as several `AssetDrawSlot`s, each at its own matrix — see
+   * `render/prop_parts.ts`. The group is rebuilt when the list of slots
+   * changes and re-posed every frame otherwise.
+   */
+  private drawParts(id: number, parts: PropPart[]): void {
+    const key = parts.map((q) => `${q.slot}:${q.parent}`).join(",");
+    let l = this.nodes.get(id);
+    if (l && l.parts !== key) {
+      l.node.removeFromParent();
+      this.nodes.delete(id);
+      l = undefined;
+    }
+    if (!l) {
+      const root = new Group();
+      const made: Object3D[] = [];
+      for (const q of parts) {
+        const n = (q.slot && this.clone(q.slot)) || new Group();
+        (q.parent >= 0 ? made[q.parent] : root).add(n);
+        made.push(n);
+      }
+      this.group.add(root);
+      this.nodes.set(id, (l = { node: root, shadow: null, slot: -1,
+                                parts: key, partNodes: made }));
+    }
+    const kids = l.partNodes ?? [];
+    parts.forEach((q, i) => {
+      const n = kids[i];
+      if (!n) return;
+      n.position.set(q.x, q.y, q.z);
+      n.rotation.set(0, 0, 0);
+      for (const axis of q.order) {
+        if (axis === "Z") n.rotateZ(q.roll * BAMS_TO_RAD);
+        else if (axis === "Y") n.rotateY(q.yaw * BAMS_TO_RAD);
+        else if (axis === "X") n.rotateX(q.pitch * BAMS_TO_RAD);
+      }
+      n.scale.set(q.sx, q.sy, q.sz);
+    });
   }
 
   /**

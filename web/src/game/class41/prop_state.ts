@@ -118,13 +118,86 @@ export enum PropFamily {
    */
   Type13 = 13,
   /**
+   * `PropUpdateType38` (`FUN_0046BCC0`) — class 0x41 type 38, the nine
+   * objects `PlaceTable38Props` builds out of `g_prop_table38`. Stage 1's
+   * church. A shot hops it into the air and it lands pivoting on one of its
+   * eight hull corners. See `class41/type38.ts`.
+   */
+  Type38 = 14,
+  /**
+   * `PropUpdateType39` (`FUN_0046C240`) — class 0x41 type 39, eight stacks of
+   * the same model that topple one item at a time when shot. Stage 1's
+   * church. See `class41/type39.ts`.
+   */
+  Type39 = 15,
+  /**
+   * `PropUpdateType44` (`FUN_0046D850`) — class 0x41 type 44, seven objects:
+   * two drawn as effect 0x13, which a shot blows apart, and five that draw
+   * `komono_7.bin[0]` whole. Stage 1's church. See `class41/type44.ts`.
+   */
+  Type44 = 16,
+  /**
+   * `PropUpdateType40` (`FUN_0046C570`) — class 0x41 type 40, the objects
+   * `PlaceFragmentProps` builds, which burst into forty `garasu.bin` pieces.
+   * 28 spawns in stages 1, 2 and 4. Its own family and not {@link Generic}
+   * because it is not `PlaceGenericProp`'s and its prologue is its own. See
+   * `class41/type40.ts`.
+   */
+  Type40 = 17,
+  /**
    * `PropUpdateType48FlickerLight` (`FUN_0046DDE0`) — class 0x41 type 48,
    * built by its own constructor, `PlaceFlickerLightProp48`: a hanging lamp
    * that owns a flickering point light in `g_entity_lights` and bursts into
    * thirty pieces when shot. One spawn, stage 2 block 26 step 1. See
    * `class41/type48.ts`.
    */
-  Type48 = 14,
+  Type48 = 18,
+}
+
+/**
+ * One item of a `PropUpdateType39` stack.
+ *
+ * `obj+0x22C + 12i` holds its position and `obj+0x1FC + 6i` / `+0x1FE + 6i`
+ * two s16 rotation offsets — X from the constructor's `rand()`, Y the one the
+ * topple turns. The engine's layout is two parallel arrays; one record each
+ * here, because the port's pool has to survive `structuredClone`.
+ */
+export interface StackItem {
+  x: number;              // +0x22C + 12i
+  y: number;              // +0x230 + 12i
+  z: number;              // +0x234 + 12i
+  /** s16 added to `obj+0x1CC` in the draw's `MatrixRotateX`. */
+  rx: number;             // +0x1FC + 6i
+  /** s16 added to `obj+0x1D0` in the draw's `MatrixRotateY`. */
+  ry: number;             // +0x1FE + 6i
+}
+
+/** One posed node of an effect tree, as `EffectPoseNode` leaves it. */
+export interface PosedNode {
+  slot: number;
+  x: number; y: number; z: number;
+  pitch: number; yaw: number; roll: number;
+}
+
+/**
+ * One of `PropUpdateType40`'s forty burst pieces, `garasu.bin` slot
+ * `0xCA5 + i`.
+ */
+export interface BurstPiece {
+  x: number;              // +0x238 + 12i
+  y: number;              // +0x23C + 12i
+  z: number;              // +0x240 + 12i
+  vx: number;             // +0x5A4 + 12i
+  vy: number;             // +0x5A8 + 12i
+  vz: number;             // +0x5AC + 12i
+  /** s16 BAMS; the draw is `Rz.Ry.Rx`. */
+  rx: number;             // +0x910 + 6i
+  ry: number;             // +0x912 + 6i
+  rz: number;             // +0x914 + 6i
+  /** s16 BAMS added to each angle every frame. */
+  sx: number;             // +0xAC6 + 6i
+  sy: number;             // +0xAC8 + 6i
+  sz: number;             // +0xACA + 6i
 }
 
 /** One of `PropUpdateType48FlickerLight`'s thirty debris pieces. */
@@ -512,6 +585,43 @@ export interface BreakableProp {
    */
   cuePhase: PropCuePhase;   // +0x192
   /**
+   * `obj+0x1B8` — the height `PropUpdateType38` comes back to rest at, and
+   * the floor its hull corners are tested against. `PlaceTable38Props` and
+   * `PlaceTable39Stacks` both write the row's `y` here. Zero for every other
+   * family.
+   */
+  restHeight: number;     // +0x1B8
+  /** `PropUpdateType39`'s stack. Empty for every other family. */
+  stack: StackItem[];     // +0x1FC / +0x22C
+  /**
+   * `obj+0x118` — a uniform draw scale, `MatrixScale(s, s, s)`.
+   * `PlaceFragmentProps` writes 1.0 and then a per-sub-kind value; nothing
+   * else in class 0x41 reads it. 1 for every other family.
+   */
+  scale: number;          // +0x118
+  /** `PropUpdateType40`'s forty pieces, from the frame it is shot. */
+  burst: BurstPiece[];    // +0x238 ..
+  /** `obj+0x1C0` — frames the burst has run; it draws while this is < 100. */
+  burstFrames: number;    // +0x1C0
+  /**
+   * [port-only] The answers the draw halves of types 39, 40 and 44 compute
+   * on their way to `AssetDrawSlot`, left on the object so `render/` reads
+   * them rather than making the decision itself: how many stack items this
+   * frame's draw includes, the per-axis `MatrixScale`, and the posed nodes of
+   * an effect tree. The engine keeps none of these; it draws in the routine.
+   */
+  stackDrawn: number;
+  drawScale: [number, number, number];
+  effectPoses: PosedNode[];
+  /**
+   * [port-only] Where the last shot on this prop was aimed, at the prop's own
+   * camera depth — `g_crosshair_x/y` unprojected by `obj+0x78`, which is what
+   * `SpawnPropHitEffectScaled` (`FUN_004666B0`) computes when a routine calls
+   * it. The port resolves the ray at shot time (`combat/shot.ts`), so the
+   * point is left here for the routine. `null` when nothing could project it.
+   */
+  hitAim: { x: number; y: number } | null;
+  /**
    * `obj+0x192` for the two generic routines that keep a small state machine
    * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
    * door rattle (`Type35Phase`).
@@ -594,6 +704,15 @@ export function makeBreakableProp(id: number, group: number,
     routinePhase: 0,
     key0: -1, key1: -1, key2: -1, key3: -1,
     branchLatched: false,
+    restHeight: 0,
+    stack: [],
+    scale: 1,
+    burst: [],
+    burstFrames: 0,
+    stackDrawn: 0,
+    drawScale: [1, 1, 1],
+    effectPoses: [],
+    hitAim: null,
     dead: false,
     flicker: null,
   };

@@ -204,6 +204,14 @@ CHECKS: list[Check] = [
           "twenty shipped spawns came out somewhere else, four of them by more "
           "than a degree and the worst by 19.65",
           NEEDS_GAME),
+    Check("verify_prop_tables", ".",
+          ["python3", "tools/verify_prop_tables.py", "--game-dir", "{game_dir}"],
+          "that the tables class 0x41 types 38, 39, 40 and 44 build their "
+          "objects from -- positions, angles, hull corners, slots, counts, "
+          "scales -- are the EXE's own words: the port carries them as "
+          "literals, and a mistyped row would put a church chair somewhere "
+          "the engine does not, with nothing else to notice",
+          NEEDS_GAME),
     Check("verify_annotations", ".",
           ["python3", "tools/verify_annotations.py", "--game-dir", "{game_dir}"],
           "that every annotated address is a real function in the EXE",

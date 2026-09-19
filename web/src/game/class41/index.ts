@@ -31,7 +31,11 @@ import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
 import { PlaceGenericProp } from "./generic";
 import { PlaceFallingContainer } from "../class44/container";
-import { PlaceChainSegments, PlaceFragmentProps } from "./triggers";
+import { PlaceChainSegments } from "./triggers";
+import { PlaceFragmentProps } from "./type40";
+import { PlaceTable38Props } from "./type38";
+import { PlaceTable39Stacks } from "./type39";
+import { PlaceTable44Props } from "./type44";
 import { PROP75_SCRIPT_FLAG, PROP75_TYPE } from "./flag_prop";
 import { FLICKER_LIGHT_TYPE, PlaceFlickerLightProp48 } from "./type48";
 
@@ -68,6 +72,12 @@ export enum PropContainerType {
    * the pair.
    */
   FragmentProps = 40,
+  /** `PlaceTable38Props` (`FUN_00463420`) — nine objects from a table. */
+  Table38Props = 38,
+  /** `PlaceTable39Stacks` (`FUN_00463510`) — eight stacks from a table. */
+  Table39Stacks = 39,
+  /** `PlaceTable44Props` (`FUN_004639F0`) — seven chairs from a table. */
+  Table44Props = 44,
 }
 
 /** What one class-0x41 constructor does. `undefined` where none is ported. */
@@ -119,6 +129,17 @@ export const g_class41_constructors:
     if (!pl) return;
     G.g_breakable_props.push(PlaceFlickerLightProp48(
       pl, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw));
+  },
+  // The three table constructors copy the placer's `+0x11C` into every object
+  // they build as its step lifetime; nothing else of the descriptor is read.
+  [PropContainerType.Table38Props]: (obj) => {
+    G.g_breakable_props.push(...PlaceTable38Props(obj.at, obj.hp));
+  },
+  [PropContainerType.Table39Stacks]: (obj, f) => {
+    G.g_breakable_props.push(...PlaceTable39Stacks(obj.at, obj.hp, f.rng));
+  },
+  [PropContainerType.Table44Props]: (obj) => {
+    G.g_breakable_props.push(...PlaceTable44Props(obj.at, obj.hp));
   },
   [PropContainerType.KindedProp]: (obj, f) => {
     const pl = T.breakables?.placements?.find(
@@ -234,6 +255,10 @@ export * from "./kinded";
 export * from "./generic";
 export * from "./branch";
 export * from "./triggers";
+export * from "./type38";
+export * from "./type39";
+export * from "./type40";
+export * from "./type44";
 export * from "./prop_state";
 export * from "./prop";
 export * from "./items";

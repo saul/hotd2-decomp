@@ -340,6 +340,39 @@ export function SpawnPropHitSpark(x: number, y: number, z: number): void {
 }
 
 /**
+ * `SpawnPropHitEffectScaled` — `FUN_004666B0`, with its per-frame body at
+ * `PropHitEffectScaledUpdate` (`FUN_004667A0`).
+ *
+ * The bigger sibling of {@link SpawnPropHitSpark}, and the one most of class
+ * 0x41's routines actually call (23 call sites against the spark's 9): the
+ * same object shape and the same crosshair-at-the-prop's-depth placement with
+ * `z` overwritten by the prop's `obj+0x1A4`, but effect strip `0xE25` —
+ * stepped before it draws, so `0xE26`..`0xE33` are the frames seen — and a
+ * caller-chosen size: `obj+0x4C = scale * 1.5` (`0x004C4CB8`), drawn through
+ * `MatrixScale(s, s, s)` under a cleared rotation.
+ */
+export function SpawnPropHitEffectScaled(x: number, y: number, z: number,
+                                         scale: number): void {
+  const s = scale * PROP_HIT_EFFECT_SCALE;
+  G.g_sprite_effects.push({
+    id: G.g_sprite_effect_seq++,
+    kind: PROP_SPARK_KIND,
+    pos: vec3(x, y, z),
+    pitch: 0, yaw: 0, roll: 0,
+    scale: vec3(s, s, s),
+    slot: PROP_HIT_EFFECT_FIRST_SLOT,
+    lastSlot: PROP_HIT_EFFECT_LAST_SLOT,
+  });
+}
+
+/** `0x004C4CB8` — 1.5, what the caller's scale is multiplied by. */
+export const PROP_HIT_EFFECT_SCALE = 1.5;
+/** `+0x48 = 0xE25`, stepped before the first draw. */
+export const PROP_HIT_EFFECT_FIRST_SLOT = 0xe26;
+/** `if (0xE33 < +0x48) ActorKill()`. */
+export const PROP_HIT_EFFECT_LAST_SLOT = 0xe33;
+
+/**
  * `[port-only]` — the spark is not a kind in the engine's switch at all, so
  * this number names it for the renderer and matches nothing in
  * `combat.impact_sprite`. It billboards and it makes no sound.

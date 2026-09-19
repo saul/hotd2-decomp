@@ -53,6 +53,9 @@
  * it is written the number is already right.
  */
 import type { EffectDefJson } from "../../bundle";
+import {
+  MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
+} from "./swing_twist";
 import type { Events } from "../../core/events";
 import { G } from "../globals";
 import { T } from "../tables";
@@ -93,13 +96,13 @@ export enum EffectInterp {
   /** Half rate: key `cursor / 2`, blended half way to the next on odd. */
   HalfRate = 1,
   /**
-   * As {@link HalfRate}, and additionally slerping through matrices when any
-   * of the three angles differs by more than `0x3000`.
-   *
-   * The slerp arm is **not ported**: no effect this class places is mode 2 —
-   * effects 2 and 3 are both mode 1 — so it has never been reached. Below,
-   * mode 2 takes the same blend mode 1 does, which is what the engine does
-   * for every pair of keys inside that threshold.
+   * As {@link HalfRate}, except that on an odd cursor past 1, when **all
+   * three** of the two keys' angles differ by more than `0x3000` (Z, then Y,
+   * then X, each as a plain integer difference), the rotation is not blended
+   * angle by angle: both keys' `Rz . Ry . Rx` go through
+   * `MatrixInterpolateSwingTwist` (`FUN_00412750`) at `t = 0.5`. Effect 0x13 —
+   * class 0x41 type 44's breaking chair — is this mode, and motion 468
+   * reaches the matrix arm on twelve of its node-frames. See `swing_twist.ts`.
    */
   HalfRateSlerp = 2,
 }
@@ -223,22 +226,46 @@ export const SCRIPT_FLAG_EFFECT_A = 2;
 export function EffectPoseNode(p: BreakableProp): void {
   const def = EffectDefOf(p.effect);
   if (!def || !def.frames) return;
-  const node = def.nodes[p.kind];
-  if (!node || node.bone < 1) return;
+  if (!EffectSampleNode(def, p.kind, p.effectFrames, p.effectPrevFrame, p)) {
+    return;
+  }
+  p.effectPrevFrame = p.effectFrames;
+}
+
+/** Where one node's pose lands: a position and three BAMS angles. */
+export interface EffectNodePose {
+  x: number; y: number; z: number;
+  pitch: number; yaw: number; roll: number;
+}
+
+/**
+ * The body of `EffectPoseNode` (`FUN_0040D9D0`) for one node, written into
+ * *out* instead of onto a matrix stack. False for a node the routine does not
+ * pose (the root, bone 0).
+ *
+ * `[port-only]` as a function: split out of the routine above so that an
+ * object drawing a **whole tree** under its own transform —
+ * `PropUpdateType44` (`FUN_0046D850`) draws effect 0x13's ten pieces — can
+ * ask for each node without the one-prop-per-node shape
+ * `PropBuildScriptFlagEffect` uses. Same arithmetic, same arms.
+ */
+export function EffectSampleNode(def: EffectDefJson, nodeIndex: number,
+                                 cursor: number, prevFrame: number,
+                                 out: EffectNodePose): boolean {
+  const node = def.nodes[nodeIndex];
+  if (!node || node.bone < 1) return false;
   const b = node.bone - 1;
-  if (b >= def.bones) return;
-  const cursor = p.effectFrames;
+  if (b >= def.bones) return false;
+  const p = out;
 
   if (def.interp === EffectInterp.PerFrame) {
     ScriptFlagEffectSeat(p, def, cursor, b);
-    p.effectPrevFrame = cursor;
-    return;
+    return true;
   }
   // Half rate. `cursor & 0x80000001` — even and non-negative reads one key.
   if ((cursor & 1) === 0) {
     ScriptFlagEffectSeat(p, def, Math.trunc(cursor / 2), b);
-    p.effectPrevFrame = cursor;
-    return;
+    return true;
   }
   const key = Math.trunc(cursor / 2);
   // The three arms of the engine's `next`, in its order. **Neither wrap arm is
@@ -248,20 +275,47 @@ export function EffectPoseNode(p: BreakableProp): void {
   // pass a *play* frame where a key index is wanted and the engine does not
   // clamp; this does, rather than read off the end of the array.
   let next: number;
-  if (cursor === def.play_length - 1 && cursor !== p.effectPrevFrame
-      && cursor - p.effectPrevFrame >= 0) {
+  if (cursor === def.play_length - 1 && cursor !== prevFrame
+      && cursor - prevFrame >= 0) {
     next = 0;
-  } else if (cursor === 0 && p.effectPrevFrame > 0) {
+  } else if (cursor === 0 && prevFrame > 0) {
     next = def.play_length - 1;
   } else {
     next = key + 1;
   }
   ScriptFlagEffectBlend(p, def, key, next, b);
-  p.effectPrevFrame = cursor;
+  if (def.interp === EffectInterp.HalfRateSlerp && cursor > 1) {
+    EffectSwingTwistArm(p, def, key, next, b);
+  }
+  return true;
+}
+
+/**
+ * `EffectPoseNode`'s matrix arm (`0x0040DBC0`..`0x0040DCD9`): when all three
+ * angles jump by more than `0x3000` between the two keys, the rotation is
+ * `MatrixInterpolateSwingTwist(Rzyx(key), Rzyx(next), 0.5)` instead of the
+ * per-angle halfway the caller has already written. The translation blend
+ * is the same either way.
+ *
+ * [port-only] as a function: the engine writes the arm inline.
+ */
+function EffectSwingTwistArm(p: EffectNodePose, def: EffectDefJson,
+                             a: number, bKey: number, b: number): void {
+  const ia = EffectKey(def, a, b);
+  const ib = EffectKey(def, bKey, b);
+  const far = (k: number) => Math.abs(def.r[ib + k] - def.r[ia + k]) > 0x3000;
+  if (!(far(2) && far(1) && far(0))) return;
+  const m = MatrixInterpolateSwingTwist(
+    MatrixFromZYX(def.r[ia], def.r[ia + 1], def.r[ia + 2]),
+    MatrixFromZYX(def.r[ib], def.r[ib + 1], def.r[ib + 2]), 0.5);
+  const e = MatrixToZYX(m);
+  p.pitch = e.pitch;
+  p.yaw = e.yaw;
+  p.roll = e.roll;
 }
 
 /** Key *k*, bone *b*, straight out of the baked arrays. */
-function ScriptFlagEffectSeat(p: BreakableProp, def: EffectDefJson,
+function ScriptFlagEffectSeat(p: EffectNodePose, def: EffectDefJson,
                               k: number, b: number): void {
   const i = EffectKey(def, k, b);
   p.x = def.t[i];
@@ -273,7 +327,7 @@ function ScriptFlagEffectSeat(p: BreakableProp, def: EffectDefJson,
 }
 
 /** Half way from key *a* to key *bKey*, as the engine computes each term. */
-function ScriptFlagEffectBlend(p: BreakableProp, def: EffectDefJson,
+function ScriptFlagEffectBlend(p: EffectNodePose, def: EffectDefJson,
                                a: number, bKey: number, b: number): void {
   const ia = EffectKey(def, a, b);
   const ib = EffectKey(def, bKey, b);

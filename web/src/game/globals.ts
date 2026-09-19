@@ -1206,6 +1206,17 @@ export const G = {
    */
   g_branch_prop_shot_count: 0,
   /**
+   * `g_fragment_subkind1_intact` — 0x007DCDB8, twelve bytes.
+   *
+   * One per sub-kind-1 object `PlaceFragmentProps` builds: 1 until a game
+   * outside Training breaks that object. The constructor draws `0x17C6` for a
+   * 1 and `0x17C7` otherwise, and `PropUpdateType40` refuses a hit on a 0 —
+   * so a sub-kind-1 object shot once stays shot for the rest of the game,
+   * through every re-placement. `ResetFragmentSubkind1Intact` (`FUN_00463680`)
+   * is the only thing that puts them back, once a game.
+   */
+  g_fragment_subkind1_intact: new Array(12).fill(1) as number[],
+  /**
    * `g_original_item_slots` — 0x009A2240, stride 0x14, two slots a player.
    *
    * Original Mode's inventory. `PlayerHoldsOriginalItem` (`FUN_00461C70`)
@@ -1532,6 +1543,7 @@ export function ResetGameGlobals(): void {
   G.g_evt_block_index = 0;
   G.g_script_branch_var = 0;
   G.g_branch_prop_shot_count = 0;
+  ResetFragmentSubkind1Intact();
   G.g_original_item_slots = [[-1, -1], [-1, -1]];
   G.g_chain_segments = [];
   G.g_scene_index = 0;
@@ -1552,6 +1564,16 @@ export function ResetGameGlobals(): void {
   G.g_blink_frame_counter = 0;
   G.g_frame_counter = 0;
   G.g_frame = 0;
+}
+
+/**
+ * `ResetFragmentSubkind1Intact` — `FUN_00463680`.
+ *
+ * Three dword stores of `0x01010101` over `g_fragment_subkind1_intact`.
+ * `ResetGameOnStart` calls it, and so does the port's game reset above.
+ */
+export function ResetFragmentSubkind1Intact(): void {
+  G.g_fragment_subkind1_intact = new Array(12).fill(1);
 }
 
 /** Write a saved data segment back over the live one, field by field. */

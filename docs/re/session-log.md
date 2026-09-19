@@ -18499,3 +18499,78 @@ outside the body, so it reads as though the whole lamp is never shootable and
 the broken lamp is not drawn while the pieces fly. It is 30 pieces, not the 24
 I first wrote from the decompile's loop bound; the disassembly's
 `CMP EBP, 0x1E` settles it.
+
+## Stage 1's church, the chair under the humanoid's arm, and a rig in stage 4's desk (2026-09-18)
+
+New bugs 8, 9 and 12. Two causes, and neither was where the triage pointed.
+
+**The church.** Block 1 step 2 runs four class-0x41 placers at the origin —
+types 38, 39, 40 (sub-kind 0) and 44 — and the port built nothing from three of
+them and put the fourth's eight objects at (0, 0, 0) with slot 0. All four
+constructors build out of tables in the image (`g_prop_table38/39/44`,
+`g_fragment_*`), so the spawn contributes only a lifetime. Read, named and
+ported whole: `PlaceTable38Props`, `PropUpdateType38`, `PlaceTable39Stacks`,
+`PropUpdateType39`, `PlaceTable44Props`, `PropUpdateType44`, the rest of
+`PlaceFragmentProps` and `PropUpdateType40`, and
+`ResetFragmentSubkind1Intact`. The decompiler lost the tails of five of those
+at a `MatrixStackPop` (L35) and every `__ftol` multiplier (L1); all of it came
+from `disassemble_bytes`. `tools/verify_prop_tables.py` now compares every
+table word the port carries as a literal against the EXE.
+
+**Type 44 is the chair of bug 9**, and that was settled by the render, not by
+position. The first attempt to check it projected the chair's *origin* into
+the reported shot and found it off the left edge, which read as "not this
+chair"; the second shot of the fixed build still showed no chair. Both were
+wrong for ordinary reasons: the chair is a model several units across lying on
+its side, and its body reaches into the frame where its origin does not; and
+the second shot was taken paused, and a placer needs a game frame to build
+anything (L44's `none built yet`). One frame of play shows the humanoid's arm
+over the seat.
+
+**Stage 4's desk.** The triage named class 0x41 type 32, the lift. Stage 4
+places no type 32. The object in the desk is `obj_48f050`, the class-0x26
+subtype-3 rig, and removing it from the draw made it disappear from the shot.
+`Class26InstallSubtypeUpdate` installs that routine on the spawn's first frame
+and its only spawn is block 12's, so the engine has no such object in block 0;
+the renderer had been drawing every rig from stage load. Rigs now carry the
+script addresses of the spawns that install them (`installed_by` in
+`rigs.py`, `spawn_ats` in the bundle) and are drawn only once the walker has
+run one. [open] what the model is — the user calls it a lift; slot `0x185B`
+is not identified here.
+
+**What this made false.** `EffectInterp.HalfRateSlerp`'s note said the slerp
+arm of `EffectPoseNode` was unreachable because no placed effect was mode 2.
+Effect 0x13 is mode 2, and motion 468 reaches the arm on 12 node-frames; the
+port blends those per angle. Declared at the site and put to the user rather
+than ported: `FUN_00412750` is a swing-twist matrix interpolation over five
+matrix routines. And `class41/triggers.ts`'s declared divergence — fragment
+rows placed at the placer's point — is gone with the port.
+
+Not done: `SpawnPropHitEffectScaled` (`FUN_004666B0`), still `[open]` for all
+three table types as it already was for type 43.
+
+**Merged with the boat branch's answer to the same question (2026-09-19).**
+Main had meanwhile made stage 3's boat (subtype 2) a port actor, with
+`spawn_subtype=2` on its rig and one root per spawn posed from the actor, and
+this branch had added `installed_by=(0x26, n)` for the draw gate. Two fields
+for one fact is the drift `CLAUDE.md` warns about, so `installed_by` is gone:
+`spawn_subtype` now drives both — `spawn_ats` for every class-0x26 rig, and
+per-spawn actor-posed roots only for a rig with no route or fixed pose. The
+boat keeps no route table.
+
+**Two follow-ups, both ported (2026-09-19).** `MatrixInterpolateSwingTwist`
+(`FUN_00412750`) was read with its five matrix routines — two of them named
+here, `MatrixSetTop3x4` and `MatrixGetTop3x4` — and every FPU argument
+re-read from the disassembly (the decompiler drops the `atan2 * 32768/pi`
+multiplier and the `* t` on both `__ftol`s). It is a swing of the Y axis then a
+twist about it, not a quaternion slerp; its `(1,0,0)` half-turn arm cannot be
+reached because the swing is sign-extended before the `CMP 0x8000`. Checked
+against three hand-computed rotations and the arm selection in
+`EffectSampleNode`. The divergence this branch had declared for it is gone.
+`SpawnPropHitEffectScaled` (`FUN_004666B0`) has 23 callers against
+`SpawnPropHitSpark`'s 9, and none of 38, 39, 40 or 44 calls the spark — so the
+port's everything-gets-a-spark stand-in was wrong for them as well as
+incomplete; those four families no longer get it, and 38, 39, 43 and 44 spawn
+the scaled effect themselves at the aim point `combat/shot.ts` now records.
+The other nineteen callers still get the spark stand-in (unchanged).
+

@@ -54,8 +54,13 @@ from hod2lib import script as scriptlib, stage as stagelib  # noqa: E402
 #: (`FUN_0045CD60`) is `EnemyZombieInit` plus two stores, so the six riders --
 #: five on stage 3's boats, one on stage 2's -- carry the same two blobs. The
 #: exporter dropped them, and stage 2's rider stood turning for the whole ride.
+#:
+#: 117 once the two carrier-leap states have shapes: the four riders' attack
+#: blobs (one state 47 on stage 2's boat, three state 48 on stage 3's) were
+#: not decoded at all, and those riders fell to `ZombieGiveUpAttack` in the
+#: carrier's frame when their scripts ended.
 EXPECT_SPAWNS = 76
-EXPECT_SCRIPTS = 113
+EXPECT_SCRIPTS = 117
 
 
 def main() -> int:
@@ -142,6 +147,16 @@ def main() -> int:
                           " entry list never terminates -- the header length"
                           " for that state is wrong")
                     bad += 1
+                h = s["head"]
+                if state in (47, 48) and not (
+                        0 < h["motion"] < 4096 and 0 <= h["release"] < 1000
+                        and 0 <= h["flag_frame"] < 1000
+                        and abs(h["vy"]) < 100):
+                    print(f"FAIL stage {n} spawn {rec.offset}: state {state}'s"
+                          f" leap header does not read as one: {h}")
+                    bad += 1
+                if state in (47, 48):
+                    print(f"  stage {n} spawn {rec.offset} state {state}: {h}")
                 for e in s["entries"]:
                     if not 0 < e["motion"] < 4096:
                         print(f"FAIL stage {n} spawn {rec.offset}: state"

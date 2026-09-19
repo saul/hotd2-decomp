@@ -33,6 +33,13 @@ export const TARGET_SCRIPT_SHAPE: Record<number, [number, number]> = {
   40: [16, 4],   // {f32 x, y, z; s16 motion, frame}
   41: [16, 4],   // the same, arrived at rather than walked past
   43: [4, 0],    // {s16 loops; s16 cue_frame} -- no list
+  // The two leaps off a carrier, class 0x18's attack states. Neither steps a
+  // list: `ZombieStateLeapOffCarrierForward` (`FUN_0045D120`) reads
+  // {f32 dist; f32 vy; s16 motion; s16 release_frame; s16 flag_frame} and
+  // `ZombieStateLeapOffCarrierAtMark` (`FUN_0045D500`) reads
+  // {f32 x, z, vy, gravity; s16 motion; s16 release_frame; s16 flag_frame}.
+  47: [14, 0],
+  48: [22, 0],
 };
 
 export interface TargetScript {
@@ -82,6 +89,15 @@ export function targetScript(prog: RawSource, off: number | null | undefined,
       head.loops = i16(raw, off + 16);
       head.mode = i16(raw, off + 18);
     }
+  } else if (state === 47) {
+    head = { dist: f32(raw, off), vy: f32(raw, off + 4),
+             motion: i16(raw, off + 8), release: i16(raw, off + 10),
+             flag_frame: i16(raw, off + 12) };
+  } else if (state === 48) {
+    head = { point: [f32(raw, off), 0, f32(raw, off + 4)],
+             vy: f32(raw, off + 8), gravity: f32(raw, off + 12),
+             motion: i16(raw, off + 16), release: i16(raw, off + 18),
+             flag_frame: i16(raw, off + 20) };
   } else if (state === 43) {
     head = { loops: i16(raw, off), cue: i16(raw, off + 2) };
   } else if (state === 37) {

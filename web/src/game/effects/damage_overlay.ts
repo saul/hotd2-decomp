@@ -3,7 +3,7 @@
  * that feeds it.
  *
  * `PlayerTakeDamage` (`FUN_00415300`) does not draw anything. It stores its
- * third argument in `g_player_hit_motion` and raises `g_player_was_hit`, and
+ * third argument in `g_player_damage_overlay_kind` and raises `g_player_was_hit`, and
  * the player's own per-frame update, `PlayerUpdateInPlay` (`0x00413E90`),
  * picks the latch up two routines later:
  *
@@ -14,7 +14,7 @@
  *     g_player_camera_hook[player](task)      0x009A5CDC + player*0x130
  *       = PlayerHookSpawnDamageOverlay        FUN_00415180, under a cam/ path
  *           if (g_player_was_hit[player])
- *             DamageOverlaySpawn(task, g_player_hit_motion[player])
+ *             DamageOverlaySpawn(task, g_player_damage_overlay_kind[player])
  *   ...trigger, crosshair, shot rings, HUD...
  *   DamageOverlayUpdateAndDraw(task)          FUN_00417300
  *
@@ -22,8 +22,8 @@
  *   UpdateScreenShake()                       FUN_00415270 -- clears the latch
  * ```
  *
- * So the "hit motion" is not a motion. Its one reader is the spawn, which
- * uses it as the overlay **kind**: an index into four eleven-row tables that
+ * It used to be called the "hit motion", and it is not a motion. Its one
+ * reader is the spawn, which uses it as the overlay **kind**: an index into four eleven-row tables that
  * pick the sprite, its placement, its scale and the sound it makes. See
  * {@link DamageOverlayKind}.
  *
@@ -51,16 +51,10 @@
  *
  * ## What is not here
  *
- * * **The shake is computed and not applied.** `UpdateScreenShake` is ported
- *   whole -- it is the routine that clears the latch, so the overlay cannot be
- *   right without it -- and `g_screen_shake_pitch` carries the engine's value.
- *   What turns it into a nod of the camera is the first block of
- *   `UpdateSceneViewAndLight` (`FUN_00401F40`), which re-aims the camera
- *   block at `(0, pitch, -1000)` and writes the angles back into the block.
- *   Whether that write accumulates across frames on a held pose is an open
- *   question (it depends on which camera hooks re-derive the block's angles
- *   every frame), and the port's camera block is an eye/target pair rather
- *   than the engine's angles, so it is left for a camera change of its own.
+ * * **The shake's nod** is `game/camera/shake.ts`, applied by the camera
+ *   draw the way `UpdateSceneViewAndLight` (`FUN_00401F40`) applies it: this
+ *   file computes `g_screen_shake_pitch`, that one re-aims the view by it.
+ *   The shake's other writers (entrances, boss deaths) are not wired yet.
  * * `FUN_00414280`, the dead player's update, also calls
  *   `DamageOverlayUpdateAndDraw`, and `g_player_state_handlers[1]`
  *   (`0x00413DE0`) calls `DamageOverlayClear`. The port runs neither state.
@@ -70,7 +64,7 @@ import type { Rng } from "../../core/rng";
 import { G, PlayerState } from "../globals";
 
 /**
- * `g_player_hit_motion` as `DamageOverlaySpawn` (below) reads it:
+ * `g_player_damage_overlay_kind` as `DamageOverlaySpawn` (below) reads it:
  * which of the eleven overlays a hit shows.
  *
  * The values are `PlayerTakeDamage`'s third argument at the engine's own call
@@ -322,7 +316,7 @@ export function DamageOverlaySpawn(player: number, kind: number,
 export function PlayerHookSpawnDamageOverlay(player: number,
                                              events?: Events): void {
   if ((G.g_player_was_hit[player] ?? 0) !== 0) {
-    DamageOverlaySpawn(player, G.g_player_hit_motion[player] ?? 0, events);
+    DamageOverlaySpawn(player, G.g_player_damage_overlay_kind[player] ?? 0, events);
   }
 }
 

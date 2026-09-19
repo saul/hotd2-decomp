@@ -10,6 +10,9 @@
  * frames and screenshots, so each picture is labelled with the kind the port
  * says it is drawing.
  *
+ * On the first hit it also shoots six frames in a row, for the screen
+ * shake's nod (`game/camera/shake.ts`).
+ *
  * Then the two things a renderer can get wrong and the port cannot see:
  *
  * * **pause** -- with the transport stopped the overlay must stay exactly as
@@ -49,8 +52,9 @@ const overlay = () => page.evaluate(async () => {
   return {
     rec: G.g_damage_overlays.map((o) => ({ ...o })),
     hook: [...G.g_player_camera_hook],
-    kind: G.g_player_hit_motion[0],
+    kind: G.g_player_damage_overlay_kind[0],
     shake: G.g_screen_shake_frames,
+    pitch: G.g_screen_shake_pitch,
     major: G.g_scene_state_major_entered,
     wasHit: [...G.g_player_was_hit],
     lives: [...G.g_player_lives],
@@ -105,13 +109,24 @@ try {
     console.log(`  -> ${file}`);
     if (o.active) drawn += 1;
     if (hits === 1 && o.active) {
+      // The nod, frame by frame: the camera's pitch swings by
+      // atan(g_screen_shake_pitch / 1000) about its own right axis.
+      for (let k = 1; k <= 6; k++) {
+        await advance(1);
+        await drain();
+        const n = await overlay();
+        const f = join(SHOTS, `damage-${tag}-nod-${k}.png`);
+        await page.screenshot({ path: f });
+        console.log(`  nod frame +${k}: shake ${n.shake}, pitch ${n.pitch} -> ${f}`);
+      }
       // Pause: nothing may move while the transport is stopped.
+      const was = (await overlay()).rec[0];
       await page.keyboard.press("Space");
       await page.waitForTimeout(400);
       const held = (await overlay()).rec[0];
       await page.screenshot({ path: join(SHOTS, `damage-${tag}-paused.png`) });
-      const still = held.frames === o.frames && held.active === o.active;
-      console.log(`  paused 400 ms: frames ${o.frames} -> ${held.frames} `
+      const still = held.frames === was.frames && held.active === was.active;
+      console.log(`  paused 400 ms: frames ${was.frames} -> ${held.frames} `
         + (still ? "(held)" : "(MOVED)"));
       if (!still) failed = true;
       await page.keyboard.press("Space");
@@ -140,7 +155,7 @@ try {
   } else if (drawn < hits) {
     console.log("FAIL  a hit under a path camera showed no overlay");
     failed = true;
-  } else {
+  } else if (!failed) {
     console.log("ok    every hit showed its overlay");
   }
 } finally {

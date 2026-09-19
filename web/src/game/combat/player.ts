@@ -2,7 +2,7 @@
  * What being hit costs.
  *
  * A strike costs exactly **one life** — the attack entry's `+0x0A` is the
- * motion the player plays, not a damage amount — plus 100 points and 90 frames
+ * damage overlay it shows, not a damage amount — plus 100 points and 90 frames
  * of invulnerability. It also drops the adaptive damage rank by 2, which is
  * how being hit makes the game easier.
  */
@@ -117,7 +117,7 @@ const PLAYER_HIT_RANK_DELTA = -2;
  * how the HUD and the feed hear about it without polling.
  */
 export function PlayerTakeDamage(player: number, src: Actor | null,
-                                 hitMotion: number, events?: Events,
+                                 overlayKind: number, events?: Events,
                                  source: "strike" | "thrown" = "strike",
                                  attack = -1): boolean {
   if (!CheckPlayerCanBeHit(player)) return false;
@@ -136,7 +136,7 @@ export function PlayerTakeDamage(player: number, src: Actor | null,
   G.g_player_score[player] += PLAYER_HIT_SCORE;
   G.g_player_invuln_frames = PLAYER_INVULN_FRAMES;
   G.g_player_was_hit[player] = 1;
-  G.g_player_hit_motion[player] = hitMotion;
+  G.g_player_damage_overlay_kind[player] = overlayKind;
   // Being hit drops the adaptive rank by two, floored at zero.
   G.g_damage_rank =
     Math.max(0, G.g_damage_rank - Math.abs(PLAYER_HIT_RANK_DELTA));
@@ -159,9 +159,9 @@ export function PlayerTakeDamage(player: number, src: Actor | null,
  * schedules its own hit frame; the thrown weapon's expiry is one.
  */
 export function PlayerTakeDamageTimed(player: number, src: Actor | null,
-                                      hitMotion: number,
+                                      overlayKind: number,
                                       events?: Events): boolean {
-  return PlayerTakeDamage(player, src, hitMotion, events, "thrown", -1);
+  return PlayerTakeDamage(player, src, overlayKind, events, "thrown", -1);
 }
 
 /** Count down the invulnerability window. One 60 Hz frame per call. */

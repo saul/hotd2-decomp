@@ -65,6 +65,19 @@ export class CameraRig {
     roll: 0,
   };
 
+  /**
+   * The pose the view is built from: {@link pose} aimed at the port's
+   * `g_camera_block_view_target` while the screen shake runs -- the nod
+   * `UpdateSceneViewAndLight` (`FUN_00401F40`) applies before it builds the
+   * view. A separate scratch because the block itself -- its eye and its eased
+   * target -- is not moved by the nod, and the rails read the un-nodded pair.
+   */
+  private readonly viewed: CameraPose = {
+    eye: new Vector3(0, 0, 0),
+    target: new Vector3(0, 0, -1),
+    roll: 0,
+  };
+
   /** The draw: the block, after the hook has eased it. */
   draw(ctx: RenderContext): void {
     const w = ctx.walker;
@@ -81,7 +94,18 @@ export class CameraRig {
     // `path.y - 15` rule is a property of the draw (`g_camera_eye_y`), not of
     // the block, so it is applied here -- see the note on `APPLY_EYE_Y_RULE`
     // in render/campath.ts for why it is off anyway.
-    applyPose(ctx.camera, this.pose,
+    // The nod, as the port left it (`SceneViewApplyShake`): state a game
+    // tick writes, so a no-tick frame draws exactly what the tick before it
+    // drew, and a reset -- which zeroes the pitch -- falls back to the block.
+    this.viewed.eye.copy(this.pose.eye);
+    this.viewed.roll = this.pose.roll;
+    if (G.g_screen_shake_pitch !== 0) {
+      const v = G.g_camera_block_view_target;
+      this.viewed.target.set(v.x, v.y, v.z);
+    } else {
+      this.viewed.target.copy(this.pose.target);
+    }
+    applyPose(ctx.camera, this.viewed,
               cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
     this.rails?.setCameraPose(ctx.camera.position, this.pose.target);
   }

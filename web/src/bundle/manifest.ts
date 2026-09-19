@@ -22,6 +22,12 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 10: every attack entry's `player_motion` is `overlay_kind` -- the damage
+ * overlay a strike shows (`DamageOverlaySpawn`, `FUN_00417440`), which is
+ * the field's only use in the exe; nothing ever read it as a motion. A
+ * renamed field, so the digest alone would refuse a format-9 bundle; the
+ * number moves with it so the refusal names the cause.
+ *
  * 8: the class-0x31 tables carry `drop`, `drop_alt` and `drop_zskamere` --
  * `ThrowerStateLeapToPoint`'s three arc motion scripts -- and the clips they
  * name are baked. A format-7 bundle has neither, and a client that reads one
@@ -56,7 +62,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 9;
+export const SUPPORTED_FORMAT = 10;
 
 /**
  * The exporter's digest of the declarations in this directory.

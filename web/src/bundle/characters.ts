@@ -666,8 +666,11 @@ export interface AttackJson {
   distance: number;
   /** Frame of the strike clip on which the hit lands. */
   hit_frame: number;
-  /** The motion the *player* plays when hit. */
-  player_motion: number;
+  /**
+   * The damage overlay this strike shows -- `PlayerTakeDamage`'s third
+   * argument. See `DamageOverlayKind` in `game/effects/damage_overlay.ts`.
+   */
+  overlay_kind: number;
   /**
    * If every zone named here is destroyed the strike whiffs — 1 head,
    * 2 right arm, 4 left arm. 8 is outside the 3-bit mask, so it never cancels.
@@ -683,7 +686,8 @@ export interface ThrowHandJson {
   /** Frame of the throw clip on which the weapon leaves the hand. */
   release_frame: number;
   range: number;
-  player_motion: number;
+  /** The damage overlay the weapon shows when it lands. */
+  overlay_kind: number;
   /** Destroyed zones that cancel it — 2 right arm, 4 left arm. */
   cancel_mask: number;
   /** Asset slot the hand draws while armed; null when the skeleton names it. */
@@ -815,8 +819,8 @@ export interface Class31Attack {
   script: ArcStage[];
   /** Frame of the script's clip on which the hit lands; -1 means "on landing". */
   hit_frame: number;
-  /** The reaction the *player* plays when it connects. */
-  player_motion: number;
+  /** The damage overlay it shows when it connects -- see above. */
+  overlay_kind: number;
   /** If every zone named here is destroyed the strike whiffs. */
   cancel_mask: number;
 }

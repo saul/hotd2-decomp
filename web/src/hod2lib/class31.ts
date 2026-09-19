@@ -204,7 +204,7 @@ export function class31Tables(tables: ExeTables | null): Record<string, unknown>
           const stance = Math.floor(k / CLASS31_ATTACKS_PER_STANCE);
           const idx = k % CLASS31_ATTACKS_PER_STANCE;
           (attacks[String(stance)] ??= {})[String(idx)] = {
-            script, hit_frame: hit, player_motion: hurt,
+            script, hit_frame: hit, overlay_kind: hurt,
             cancel_mask: mask & 0xffff,
           };
         }
@@ -235,7 +235,7 @@ export function class31Tables(tables: ExeTables | null): Record<string, unknown>
         const mask = i16(tables.data, a + 12);
         if (strike <= 0) continue;
         strikes[String(k)] = { strike, lunge, distance: dist, hit_frame: hit,
-                               player_motion: hurt, cancel_mask: mask & 0xffff };
+                               overlay_kind: hurt, cancel_mask: mask & 0xffff };
       }
     }
     row.strikes = strikes;

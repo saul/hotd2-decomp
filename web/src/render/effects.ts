@@ -501,10 +501,19 @@ export class EffectLayer implements System<RenderContext> {
    * so a seek or a load shows whatever the restored state says and nothing a
    * frame from the old timeline left behind.
    *
-   * The draw order is the renderer's guess. The engine sets draw layer 0xA for
-   * it and 0xC/0xE for the shot effects; how those layers are ordered is not
-   * read, so it is drawn last of all the effects, which is what a sprite a
-   * hundredth of a unit in front of the eye would win on depth anyway.
+   * **Drawn before the shot effects, not after** `[proved]`. Every
+   * translucent draw is queued by `RenderEnqueueCommand` (`FUN_004A7E50`)
+   * with the current `SetDrawLayerNibble` value OR'd into the low nibble of
+   * its key, and `RenderFlushCommandList` (`FUN_004A88E0`) sorts the queue
+   * with `RenderCommandCompare`: **layer ascending**, then depth descending,
+   * then draws in that order. So the overlay's layer 0xA goes down after the
+   * scene's translucent layer 8 and before the muzzle flash and tracer (0xC,
+   * `PlayerShotEffectsThink`) and the sprite effects (0xE,
+   * `SpriteEffectDrawAndTick`), which blend over it. Every effect here is at
+   * `renderOrder` 900 and the world at 0, and three.js sorts transparent
+   * objects by `renderOrder` first, so 899 is exactly the exe's slot.
+   * Nothing translucent writes depth (the loader's `BLEND` materials), so the
+   * order is the whole of it.
    */
   private drawDamageOverlays(seen: Set<string>): void {
     G.g_damage_overlays.forEach((o, p) => {
@@ -519,7 +528,8 @@ export class EffectLayer implements System<RenderContext> {
       node.position.set(off[0] + o.x, off[1], DAMAGE_OVERLAY_Z);
       node.quaternion.identity();
       node.scale.setScalar(DAMAGE_OVERLAY_SCALES[o.kind] ?? 0);
-      node.renderOrder = 1000;
+      // Layer 0xA: after the world's translucent layer 8, before 0xC/0xE.
+      node.renderOrder = 899;
     });
   }
 

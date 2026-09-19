@@ -130,7 +130,7 @@ export const ARC_BAMS = 36408.88671875;
 /** `CMP EAX, 0x1E` — frames between arriving and the player losing a life. */
 export const HIT_DELAY_FRAMES = 0x1e;
 /** `PlayerTakeDamage(player, 1, 9)` at `0x0043EDE5`. */
-export const HIT_MOTION = 9;
+export const HIT_OVERLAY_KIND = 9;
 /** `FMUL float ptr [0x004E1FE0]` — the tumble's angle scale, in BAMS. */
 export const SPIN_SWEEP_BAMS = 32768;
 /** `FMUL float ptr [0x0055D22C]` — and its amplitude: 4096 BAMS is 22.5°. */
@@ -458,7 +458,7 @@ function BodyCreatureFly(c: BodyCreature, rng: Rng,
     if (G.g_scene_state_major_entered === DAMAGE_SCENE_MAJOR
         && G.g_players_in_play > 0
         && G.g_player_state[c.target] === PLAYER_STATE_IN_PLAY) {
-      PlayerTakeDamage(c.target, null, HIT_MOTION, events);
+      PlayerTakeDamage(c.target, null, HIT_OVERLAY_KIND, events);
       // `PlaySoundId(0)`, which is `PlaySoundId`'s own nothing: id 0 has no
       // record. Transcribed as the call it is rather than as a sound.
       events?.emit("sound.play", { id: 0 });

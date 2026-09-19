@@ -14,6 +14,7 @@ export { ActorInitFlags, ActorSpawn } from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraActorTick, CameraRunQueuedAction } from "./camera/mode";
+import { SceneViewApplyShake } from "./camera/shake";
 import { ActorRegisterCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
@@ -674,5 +675,7 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // `CamAdvancePathFrame` before any of this.
   CameraActorTick();
   CameraRunQueuedAction();
+  // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
+  SceneViewApplyShake();
   return { lookAt: G.g_camera_block_target };
 }

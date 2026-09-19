@@ -19004,3 +19004,35 @@ another branch owns): the exe's second argument gates the latch, and
 striker -- when `obj+0x34` bit `0x2000000` is set. The port's
 `ActorStrikeConnect` has neither the 0 nor the despawn.
 
+### Follow-up: the nod, the draw order, and a rename
+
+* **The nod** is the first block of `UpdateSceneViewAndLight`
+  (`FUN_00401F40`): `T(eye) RotY(yaw) RotX(pitch)` with no roll, transform
+  `(0, (float)g_screen_shake_pitch, -1000)`, and `CamBlockSetAnglesFromLookAt`
+  (`FUN_00403AC0`) writes the block's pitch/yaw from it, roll kept. It writes
+  the **angles** only. Does it accumulate? Not where a hit can happen
+  `[proved]`: `CameraTrackEnemiesTick` calls `CamBlockSetAnglesFromLookAt(eye,
+  target)` unconditionally every frame (`0x00402964`), and so do
+  `CamAdvancePathFrame`, `CameraStepRailTick` and `CameraPlayStashedPath`.
+  `[open]` whether it compounds under a row-1 camera that re-derives nothing,
+  which needs a scene change inside a shake. Ported as `ShakeNodLookAt` and
+  `SceneViewApplyShake` (`game/camera/shake.ts`), run at the end of
+  `GameUpdate` into `g_camera_block_view_target`, which `CameraRig.draw` reads;
+  the block's eased target -- `CameraTrackEnemiesTick`'s -- is never moved.
+  Wrong turn: the first cut called `ShakeNodLookAt` from `CameraRig.draw`, and
+  `verify_layers`' `render-drives-the-port` refused it -- rightly, the view's
+  aim is an engine write (the exe writes it into the block), so it moved.
+* **Draw layers.** `RenderEnqueueCommand` (`FUN_004A7E50`) ORs the
+  `SetDrawLayerNibble` value into the low nibble of each translucent command's
+  key; `RenderCommandCompare` (`FUN_004A8A20`) sorts layer ascending, then
+  depth descending. So layer 0xA (the overlay) draws before 0xC and 0xE -- the
+  shot effects blend over it, the opposite of the first cut, which drew it
+  last.
+* **Rename**, per the procedure: `g_player_hit_motion` is
+  `g_player_damage_overlay_kind` and the bundle's `player_motion` is
+  `overlay_kind`, everywhere but this log; `BUNDLE_FORMAT` 9 -> 10, both
+  hashes regenerated, re-exported. It was only ever the overlay kind.
+* Wrong turn in the harness: its pause check compared against the record
+  read *before* the six nod frames and reported the overlay "MOVED" while
+  paused. It compares against a read taken at the pause now.
+

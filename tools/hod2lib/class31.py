@@ -236,7 +236,7 @@ def class31_tables(tables) -> dict:
                     stance, idx = divmod(k, CLASS31_ATTACKS_PER_STANCE)
                     attacks.setdefault(str(stance), {})[str(idx)] = {
                         "script": script, "hit_frame": hit,
-                        "player_motion": hurt, "cancel_mask": mask & 0xFFFF}
+                        "overlay_kind": hurt, "cancel_mask": mask & 0xFFFF}
         row["attacks"] = attacks
         # `g_class31_throws` in the raw, per set. `throw_tables` reads the same
         # two rows for the projectile, keyed by the hand; `ThrowerStateCloseAndStrike`
@@ -261,7 +261,7 @@ def class31_tables(tables) -> dict:
                     continue
                 strikes[str(k)] = {"strike": strike, "lunge": lunge,
                                    "distance": dist, "hit_frame": hit,
-                                   "player_motion": hurt,
+                                   "overlay_kind": hurt,
                                    "cancel_mask": mask & 0xFFFF}
         row["strikes"] = strikes
         o = tables._v2r(_ptr_row(tables, CLASS31_ATTACK_PICKS, i) or 0)

@@ -550,7 +550,7 @@ export interface AttackEntry {
   lunge: number;
   distance: number;
   hit_frame: number;
-  player_motion: number;
+  overlay_kind: number;
   cancel_mask: number;
 }
 
@@ -595,7 +595,7 @@ export function attackTables(tables: ExeTables,
       if (hit < 0 || play(strike) <= 0) continue;
       if (!(play(lunge) > 0 && play(lunge) <= 400)) continue;
       got.set(i, { strike, lunge, distance: dist, hit_frame: hit,
-                   player_motion: dmot, cancel_mask: mask & 0xffff });
+                   overlay_kind: dmot, cancel_mask: mask & 0xffff });
     }
     if (got.size) out.set(cond, got);
   });
@@ -631,7 +631,7 @@ export function throwTables(tables: ExeTables,
       const mask = i16(tables.data, a + 12);
       if (motion <= 0 || !(rel >= 0 && rel < play(motion))) return;
       hands.push({ bone, motion, release_frame: rel, range: rng,
-                   player_motion: dmot, cancel_mask: mask & 0xffff,
+                   overlay_kind: dmot, cancel_mask: mask & 0xffff,
                    ...kit[bone as 5 | 8] });
     });
     if (hands.length) out.set(cond, hands);

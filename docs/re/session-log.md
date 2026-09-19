@@ -19219,3 +19219,44 @@ games. Its only writers are the six scene-state installers,
 
 Named: `AssetQueueLoadCamFile` `0x0041D7D0`, `CamSlotsReset` `0x00403E20`,
 `TaskListBuild` `0x004A6F50`, `TaskListWalk` `0x004A7240`.
+
+## 2026-09-19 -- the game-over fly-over, ported
+
+The fly-over is phase 1 of `GameOverRunPhase` and it is now the exe's: the
+stage released, `cp_gmovr.bin`'s path `0x1F` flown by `GameOverCameraFlyTick`
+from frame 10, and the players' bodies drawn by
+`PlayerHookDrawBodyUntilMotionEnd`. Read on the way, all `[proved]`:
+
+* `PlayerBodiesCreate` (`0x00416450`, was `FUN_`) makes one skinned body per
+  player whenever a task list with the camera tasks (`FUN_00414F20`) is built:
+  type `0x00579F50[p]` = `0x39`, `0x3A`; motion `0x004EC8A4[p]` = `0x32C`. In
+  Original Mode it reads a character byte at `0x009A2242 + p*0x14` unless that
+  equals `p` -- and `ResetOriginalModeLoadout` is the byte's only writer and
+  stores `p`. So no per-character file ever changes the body.
+* `GameOverPlaceBody` (`0x00415A80`) pushes `0x00579EA8[p - 2 +
+  g_game_over_players*2]` through `T(g_camera_eye) Rz Ry Rx`; phase 0 zeroes
+  all six and only camera hooks write them, none installed on this screen, so
+  it is the table point: the origin for one player.
+* `g_game_over_players` (`0x009C8E88`) is `g_max_attackers` copied on the line
+  before each `RequestAppState(7)`.
+* The hook: draw, hand over to `PlayerHookSetCurActor` on the clip's last tick,
+  else step from path frame `0x3C` (one player) or `0x004EC8C4[p]` (two). The
+  body is not drawn again after that frame.
+* `DrawSkinnedModelAndShadow` is push, `SkeletonDrawWalk`, pop -- no shadow.
+* `FUN_00416810(task, 1)` writes node 5's slot from `0x004EC9E0[p*3+1]`, which
+  is the skeleton's own bone-5 slot, so nothing to carry.
+* `LightBlockInit`, run by `CameraBlocksReset`: fog (65535, 65536) in colour 0.
+
+**The route decides the clip**, which the first page run found and nothing in
+the reading had predicted: the harness zeroed the credits, and the body fell on
+`0x32C`, not `0x338`. With no credit `PlayerContinueCountdown` ends at once in
+`PlayerSetState(6)` in play, `PlayerStateArmGameOver` runs in app state 6
+(hook installed, motion untouched), and phase 0 re-arms only players still at
+4. The fresh body keeps `0x32C`. Only the run's own continue screen (phase 4,
+a credit left) holds the player at 4 into the game over and so reaches the
+`0x338` fall. Both clips are baked now; `tools/game_over_page.mjs` drives one
+of each route and shoots both.
+
+Bundle format 11: `cp_gmovr` in every stage's cam files (`loadCamPaths` in
+both halves), two synthetic `player_body` rows and their clips in
+`characters`. Hashes regenerated before the export (L33).

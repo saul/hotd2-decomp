@@ -145,15 +145,26 @@ def load_asset(game: _Path, name: str):
     return models, bank
 
 
+#: The game-over fly-over's ``cam/`` file, global path slot ``0x1F``.
+GAME_OVER_CAM_FILE = "cp_gmovr"
+
+
 def load_cam_paths(game: _Path, stage: int | None, name: str | None):
-    """The ``cam/`` files belonging to a stage: ``cp_stN`` then ``op_stN``.
+    """The ``cam/`` files belonging to a stage: ``cp_stN`` then ``op_stN``,
+    and for a stage ``cp_gmovr`` after them.
+
+    ``cp_gmovr.bin`` is the game-over screen's: ``GameOverRunPhase``
+    (``FUN_00460960``) loads it (``AssetQueueLoadCamFile(5)``) and
+    ``GameOverCameraFlyTick`` (``FUN_00460E60``) flies its one path, global
+    slot ``0x1F``. Every stage can end in a game over, so every stage carries
+    it.
 
     Returns ``[]`` when the asset has no matching camera file, which is
     normal -- only the six stages and a handful of cutscenes have one.
     """
     stems: list[str] = []
     if stage is not None:
-        stems = [f"cp_st{stage}", f"op_st{stage}"]
+        stems = [f"cp_st{stage}", f"op_st{stage}", GAME_OVER_CAM_FILE]
     elif name:
         m = re.match(r"st(\d+)_", name)      # st2_07 -> stage 2
         if m:

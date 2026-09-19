@@ -64,6 +64,9 @@ import type { RigInstance } from "./rigs";
 import type { Program } from "./script";
 import { resolveSpawn } from "./spawnres";
 import type { Stage } from "./stage";
+// Data only -- see the head of that file for why `hod2lib` may import it.
+import { PLAYER_BODY_AT, PLAYER_BODY_CHAR_TYPES, PLAYER_BODY_START_MOTIONS,
+         PLAYER_GAME_OVER_MOTIONS } from "../game/player_body_data";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -353,6 +356,62 @@ async function batWingPlacement(stage: Stage, tables: ExeTables,
   w.parent_at = sp.at as number;
   w.synthetic = true;
   return w;
+}
+
+/**
+ * The synthetic placement a player's body is drawn from on the game-over
+ * screen, and the character type it needs in the bundle.
+ *
+ * `PlayerBodiesCreate` (`FUN_00416450`) allocates a skinned actor per player
+ * with no spawn record behind it, and `PlayerStateArmGameOver` (`FUN_00414420`)
+ * puts it on motion `0x338` for the fly-over -- so, as for the bat's wings,
+ * the bundle carries a row to hang the geometry on, at the address the port's
+ * body actor takes (`PLAYER_BODY_AT`). Nothing spawns from it. The pose in the
+ * row is the world origin, facing -Z: `GameOverPlaceBody` writes the real
+ * position before the first draw.
+ *
+ * Both clips a body can be drawn on are baked: the fall, `0x338`, and the
+ * motion `PlayerBodiesCreate` makes it on, `0x32C` -- which is what a player
+ * whose own continue countdown ran out in play falls on, because phase 0
+ * arms only the players still at state 4 (see `PLAYER_BODY_START_MOTIONS`).
+ * Returns null when the type or the fall will not build, which leaves the
+ * fly-over with no body rather than a heap.
+ */
+async function playerBodyPlacement(stage: Stage, tables: ExeTables,
+                                   player: number,
+                                   chars: Map<number, Character>):
+    Promise<Placement | null> {
+  const ct = PLAYER_BODY_CHAR_TYPES[player];
+  const motion = PLAYER_GAME_OVER_MOTIONS[player];
+  if (!chars.has(ct)) {
+    const file = tables.characterAssetFile(ct);
+    if (!file) return null;
+    const built = build(tables, ct, file);
+    if (built === null) return null;
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  if (!c.motions.has(motion)) {
+    const baked = await bake(stage.source, tables, motion, c.boneCount);
+    if (baked === null) return null;
+    c.motions.set(motion, baked);
+  }
+  const start = PLAYER_BODY_START_MOTIONS[player];
+  if (!c.motions.has(start)) {
+    const baked = await bake(stage.source, tables, start, c.boneCount);
+    if (baked !== null) c.motions.set(start, baked);
+  }
+  const b = new Placement();
+  b.at = PLAYER_BODY_AT[player];
+  b.cls = -1;
+  b.char_type = ct;
+  b.motion = motion;
+  b.hp = 0;
+  b.spawn = { at: b.at, class: -1, pos: [0, 0, 0], yaw_deg: 0,
+              orient: [0, 0, 0] };
+  b.synthetic = true;
+  b.player_body = player;
+  return b;
 }
 
 /**
@@ -1306,6 +1365,25 @@ export async function resolveForStage(
                      hp: 0 } as SpawnJson);
       }
     }
+  }
+
+  // -- the players' bodies ---------------------------------------------------
+  //
+  // Two synthetic rows, one per player, in every stage: a game over can come
+  // anywhere. See `playerBodyPlacement`.
+  for (let p = 0; p < PLAYER_BODY_AT.length; p++) {
+    const body = await playerBodyPlacement(stage, tables, p, chars);
+    if (!body) {
+      degraded.note("hod2lib.characters.resolve_for_stage",
+                    `player ${p + 1}'s body`,
+                    "the game-over fly-over draws no body",
+                    "the character type or motion 0x338 did not build");
+      continue;
+    }
+    placements.push(body);
+    let blist = perType.get(body.char_type);
+    if (!blist) { blist = []; perType.set(body.char_type, blist); }
+    blist.push(body.spawn);
   }
 
   const order = [...perType.keys()].sort((a, b) => a - b);

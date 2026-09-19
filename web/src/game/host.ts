@@ -11,6 +11,7 @@
  * Nothing here returns state: every answer is derived from this frame's pose,
  * so none of it is in a snapshot.
  */
+import type { CamPath } from "./camera/curve";
 import type { Vec3 } from "./vec";
 
 /**
@@ -88,6 +89,14 @@ export interface GameHost {
   objectPath?(slot: number, frame: number):
     { x: number; y: number; z: number;
       pitch?: number; yaw?: number; roll?: number } | null;
+
+  /**
+   * A `cp_` camera path by global slot, for the port's own `CamEvalPath7`
+   * (`FUN_004041E0`) calls -- `GameOverCameraFlyTick`'s. Optional for the
+   * same reason as {@link objectPath}: a host with no paths leaves the camera
+   * block where it is.
+   */
+  camPath?(slot: number): CamPath | null;
 
   /** World position of one bone on one actor. False if it is not posed. */
   boneWorld(at: number, bone: number, out: Vec3): boolean;

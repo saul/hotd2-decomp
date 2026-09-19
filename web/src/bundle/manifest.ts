@@ -22,6 +22,13 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 11: the game-over fly-over. Every stage's `cam.json` carries
+ * `cp_gmovr.bin`'s path, global slot `0x1F`, and its `characters` carry two
+ * synthetic `player_body` rows -- character types `0x39` and `0x3A` on motion
+ * `0x338` -- for `GameOverCameraFlyTick` (`FUN_00460E60`) to fly over and
+ * `PlayerHookDrawBodyUntilMotionEnd` (`FUN_004151D0`) to draw. A format-10
+ * bundle has neither, and a client reading one would film an empty world.
+ *
  * 10: every attack entry's `player_motion` is `overlay_kind` -- the damage
  * overlay a strike shows (`DamageOverlaySpawn`, `FUN_00417440`), which is
  * the field's only use in the exe; nothing ever read it as a motion. A
@@ -62,7 +69,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 10;
+export const SUPPORTED_FORMAT = 11;
 
 /**
  * The exporter's digest of the declarations in this directory.

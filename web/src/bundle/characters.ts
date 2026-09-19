@@ -496,6 +496,13 @@ export interface CharacterPlacement {
    */
   synthetic?: boolean;
   /**
+   * On the two synthetic rows a player's body is drawn from: which player, 0
+   * or 1. The body is `PlayerBodiesCreate`'s (`FUN_00416450`) actor, drawn on
+   * the game-over fly-over only -- see `game/player_body.ts`. Absent on every
+   * other row.
+   */
+  player_body?: number;
+  /**
    * Class 0x51's tail — the fish.
    *
    * `speed_x` and `speed_z` are the per-axis closing speeds, scaled by the

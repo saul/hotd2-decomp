@@ -47,6 +47,7 @@ import { Bgm } from "../audio/bgm";
 import { Backdrop } from "../render/backdrop";
 import { RigLayer } from "../render/rigs";
 import { CharacterLayer } from "../render/characters";
+import { GameOverScene } from "../render/game_over_scene";
 import { PropLayer } from "../render/props";
 import { Shooting } from "../render/shooting";
 import { ColiDebugLayer } from "../render/coli_debug";
@@ -230,6 +231,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly backdrop = new Backdrop();
   readonly rigs = new RigLayer();
   readonly chars = new CharacterLayer();
+  /**
+   * The game-over screen's world: the bodies, and the stage not drawn. See
+   * `render/game_over_scene.ts`.
+   */
+  readonly gameOverScene = new GameOverScene(this.scene);
   readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
   /**
@@ -532,6 +538,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.stuckDebug);
     this.world.add("render", this.rain);
     this.world.add("render", this.debug);
+    // Last of the render phase: while the stage is released it hides what
+    // every layer above drew and draws the bodies.
+    this.world.add("render", this.gameOverScene);
     // The screen-space layer, and the last thing the tick does: it draws the
     // shutter and the caption straight off the walker, and holds no state of
     // its own for a snapshot to miss. The projection is *not* built here --

@@ -239,6 +239,17 @@ export enum PlayerCameraHook {
    * hook does nothing here, and that is exactly its effect on the overlay.
    */
   DrawBody = 2,
+  /**
+   * `PlayerHookDrawBodyUntilMotionEnd` (`FUN_004151D0`) --
+   * `PlayerStateArmGameOver` installs it. It draws only in app state 7, where
+   * `PlayerGameOverWait` runs it; see `game/player_body.ts`.
+   */
+  DrawBodyUntilMotionEnd = 3,
+  /**
+   * `PlayerHookSetCurActor` (`FUN_004151B0`) -- what the body's hook hands
+   * over to on the clip's last frame. It draws nothing.
+   */
+  SetCurActor = 4,
 }
 
 /**
@@ -332,6 +343,10 @@ export function PlayerRunCameraHook(player: number, events?: Events): void {
       PlayerHookSpawnDamageOverlay(player, events);
       return;
     case PlayerCameraHook.DrawBody:
+    // Outside app state 7 the body's hook draws nothing and steps nothing;
+    // inside it `PlayerGameOverWait` runs the hook itself.
+    case PlayerCameraHook.DrawBodyUntilMotionEnd:
+    case PlayerCameraHook.SetCurActor:
     case PlayerCameraHook.None:
     default:
       return;

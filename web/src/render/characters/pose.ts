@@ -239,6 +239,24 @@ private apply(inst: Instance, m: BakedMotion, f: number,
 }
 
 /**
+ * Pose a hierarchy with no `Actor` behind it: one clip, held on its last
+ * frame, at a cursor in 60 Hz ticks. The player's body on the game-over
+ * fly-over is the one caller -- `game/player_body.ts` holds its state, and it
+ * is not an actor in the port's pool.
+ *
+ * `rootMotion` is `model+0x64` bit 1: with it up the pose keeps only the
+ * clip root's height, because the horizontal part has already moved the body.
+ */
+poseHeld(target: Pick<Instance, "type" | "pivot" | "bones">, motion: number,
+         ticks: number, rootMotion: boolean): boolean {
+  const m = target.type.motions[String(motion)];
+  if (!m || m.frames <= 0) return false;
+  this.apply(target as Instance, m, authoredFrameHeld(ticks, m.fps, m.frames),
+             !rootMotion);
+  return true;
+}
+
+/**
  * One bone posed as the clip has it this frame, but with its X rotation
  * replaced -- `SubModelPoseBoneHalfRate` (`FUN_0040ED30`) does exactly that
  * to character type 0x1D's jaw (bones 8 and 9) while the member dives. It

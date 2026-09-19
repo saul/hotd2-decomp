@@ -293,6 +293,22 @@ export class CharacterLayer implements System {
     }
   }
 
+  /**
+   * Take an adopted hierarchy out of this layer for good, and hand back its
+   * nodes. For a synthetic row whose object is not an `Actor` at all -- the
+   * player's body on the game-over fly-over, `render/game_over_scene.ts` --
+   * so that nothing here ever adopts, poses or releases it.
+   */
+  claim(at: number): Pick<Instance, "type" | "root" | "pivot" | "bones">
+      | null {
+    const rec = this.pending.get(at);
+    if (!rec) return null;
+    this.pending.delete(at);
+    this.posed.delete(at);
+    return { type: rec.type, root: rec.root, pivot: rec.pivot,
+             bones: rec.bones };
+  }
+
   /** Which adopted hierarchies the script is asking for, this frame. */
   private wantedSpawns(spawns: readonly { at: number }[]): Set<number> {
     const want = new Set<number>();

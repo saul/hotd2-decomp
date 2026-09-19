@@ -52,6 +52,9 @@ import { CreditCount, CreditTrySpend, CreditsAvailable, ModeStartCounterValue,
 import { GameMode } from "./game_mode";
 import { AppState, G } from "./globals";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
+import { GameOverPlaceBody, PlayerBodySetMotion,
+         PlayerHookDrawBodyUntilMotionEnd } from "./player_body";
+import { PLAYER_GAME_OVER_MOTIONS } from "./player_body_data";
 import { NULL_HOST, type GameHost } from "./host";
 import { Rng } from "../core/rng";
 
@@ -431,10 +434,25 @@ export function PlayerResumeContinue(player: number): void {
 }
 
 /**
- * `PlayerStateArmGameOver` — `FUN_00414420`. The draws and the entity pose
- * aside, a 120-frame wait, then `PlayerGameOverWait` this frame.
+ * `PlayerStateArmGameOver` — `FUN_00414420`. Installs
+ * `PlayerHookDrawBodyUntilMotionEnd` as the player's camera hook -- in every
+ * app state, though only the game-over screen's wait runs it -- and on the
+ * game-over screen puts the body on its fall, motion `0x004EC8B4[p]`. Then
+ * `GameOverPlaceBody`, a 120-frame wait, and `PlayerGameOverWait` this frame.
+ *
+ * Left out: outside app state 7 it first calls `FUN_00416900` (unread, a
+ * draw), and on it `FUN_00416810(task, 1)` writes node 5's model slot from
+ * `0x004EC9E0[p*3 + 1]` -- which is the skeleton's own slot for bone 5
+ * (`0x1591`, `0x15A4`), so the bundle's body already wears it. It also clears
+ * bit 1 of `0x009A5D8C + p*0x130` (unread).
  */
 export function PlayerStateArmGameOver(player: number): void {
+  G.g_player_camera_hook[player] = PlayerCameraHook.DrawBodyUntilMotionEnd;
+  const body = G.g_player_bodies[player];
+  if (G.g_app_state === AppState.GameOver && body) {
+    PlayerBodySetMotion(body, PLAYER_GAME_OVER_MOTIONS[player]);
+  }
+  GameOverPlaceBody(player);
   G.g_player_gameover_timer[player] = GAME_OVER_FRAMES;
   G.g_player_task[player] = PlayerTask.GameOverWait;
   PlayerGameOverWait(player);
@@ -442,10 +460,24 @@ export function PlayerStateArmGameOver(player: number): void {
 
 /**
  * `PlayerGameOverWait` — `FUN_004144C0`. On the game-over screen it only runs
- * the draw hook; otherwise it counts down and puts the player out.
+ * the camera hook; otherwise it counts down and puts the player out.
+ *
+ * The hook `PlayerStateArmGameOver` installed is the body's, and it is run
+ * from here because this module can reach `game/player_body.ts` and
+ * `PlayerRunCameraHook`'s cannot -- it is the same one indirect call.
  */
-export function PlayerGameOverWait(player: number): void {
-  if (G.g_app_state === AppState.GameOver) return;
+export function PlayerGameOverWait(player: number, events?: Events): void {
+  if (G.g_app_state === AppState.GameOver) {
+    if (G.g_player_camera_hook[player]
+        === PlayerCameraHook.DrawBodyUntilMotionEnd) {
+      if (!PlayerHookDrawBodyUntilMotionEnd(player)) {
+        G.g_player_camera_hook[player] = PlayerCameraHook.SetCurActor;
+      }
+    } else {
+      PlayerRunCameraHook(player, events);
+    }
+    return;
+  }
   G.g_player_gameover_timer[player] -= 1;
   if (G.g_player_gameover_timer[player] === 0) {
     PlayerSetState(PlayerState.Out, 1, player);
@@ -553,7 +585,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
     case PlayerTask.ContinueRearm: PlayerContinueRearm(player, f); break;
     case PlayerTask.InPlay: PlayerUpdateInPlay(player, f); break;
     case PlayerTask.ArmGameOver: PlayerStateArmGameOver(player); break;
-    case PlayerTask.GameOverWait: PlayerGameOverWait(player); break;
+    case PlayerTask.GameOverWait: PlayerGameOverWait(player, f.events); break;
     case PlayerTask.Out: PlayerStateOut(player, f); break;
     case PlayerTask.PollStart: PlayerPollStart(player); break;
     case PlayerTask.ArmPendingStart: PlayerStateArmPendingStart(player); break;
@@ -651,6 +683,10 @@ export function PlayerBlockBoot(): void {
   G.g_game_over_logo_frame = -1;
   G.g_screen_sprite_anims = [];
   G.g_game_over_route_done = 0;
+  G.g_game_over_players = 0;
+  G.g_game_over_fly_frame = 0;
+  G.g_stage_unloaded = 0;
+  G.g_player_bodies = [];
   G.g_continue_credit_seen = [0, 0, 0, 0];
   G.g_no_continue_frames = 0;
   G.g_start_lives = START_LIVES_BY_OPTION[OPTION_LIVES];

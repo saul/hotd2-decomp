@@ -31,6 +31,7 @@ import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
 import type { ScreenSpriteAnim } from "./game_over";
+import type { PlayerBody } from "./player_body";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 import { makeEntityLights } from "./entity_light";
@@ -1196,6 +1197,35 @@ export const G = {
    * drawn the whole route; the trigger sets -1, which ends the screen.
    */
   g_game_over_route_done: 0,
+  /**
+   * `g_game_over_players` — 0x009C8E88, u16. `g_max_attackers` as it stood
+   * when the run asked for the game-over screen: `RunPhaseContinueCountdown`
+   * and `RunPhaseNoContinueWait` copy it on the line before
+   * `RequestAppState(7)`, and they are its only writers. Where the bodies
+   * stand and when each falls read it. `[proved]`
+   */
+  g_game_over_players: 0,
+  /**
+   * `GameOverCameraFlyTick`'s own counter -- its task's `+0x50`, the fly-over
+   * path frame the next tick evaluates. `GameOverSpawnCameraFly` starts it at
+   * 10.
+   */
+  g_game_over_fly_frame: 0,
+  /**
+   * `[port-only]` -- the stage is not resident. Phase 0 of `GameOverRunPhase`
+   * runs `FUN_0041D510`, whose callees reset every pol slot back to the
+   * resident common set (`FUN_00418690`) and unload every cam file
+   * (`CamSlotsReset`); from then until a stage is loaded again nothing of the
+   * stage exists to draw. The port keeps the stage in memory for the restart
+   * buttons, and this is how the renderer knows not to draw it.
+   */
+  g_stage_unloaded: 0,
+  /**
+   * `0x009A5CD8 + p*0x130` -- each player's body actor, `PlayerBodiesCreate`'s
+   * (`FUN_00416450`). Empty until a game-over fly-over builds them; see
+   * `game/player_body.ts`.
+   */
+  g_player_bodies: [] as PlayerBody[],
   /** `g_continue_timer` — 0x009A2BB8, the run's own continue countdown. */
   g_continue_timer: 0,
   /** `g_continue_credit_seen` — 0x007DCCAC..0x007DCCB8. */

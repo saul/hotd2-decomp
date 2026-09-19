@@ -179,6 +179,8 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.chars.build(p.scene3d.root, p.ctx.scope,
                    bundle.script.characters);
   p.spawns.setPosed(p.chars.posed);
+  // The two player bodies are the game-over screen's, not the script's.
+  p.gameOverScene.build(p.ctx.scope, p.chars);
   // Doors, shutters and the vans they hang off; driven by the script's
   // own flags, so nothing here needs a clock of its own.
   p.props.build(p.scene3d.root, p.ctx.scope, bundle.script.props);

@@ -2730,14 +2730,29 @@ trigger or START; then `CreditsClear` and the next app state, 3. The trigger
 or START cuts the fly-over short below frame 0xA5 and the logo below 0xAF;
 Training and the boss's own run return to play instead. The page draws the
 records `ui/panels/GameOver.tsx` reads from the projection, as text standing in
-for the pictures. `[diverges]`, all in `game_over.ts`: the fly-over is not ported. In the exe
-it is not the stage at all -- phase 0 unloads the stage (`CamSlotsReset` and
-the pol-slot reset `LoadSceneAndReset` also runs), replaces the scene's task
-list, and films the player's body from `gameover_player.bin` collapsing on
-motion `0x338` along the one path in `cp_gmovr.bin` (global slot `0x1F`). The
-bundle carries none of the three, so the port leaves the stage on screen,
-frozen. The sprites' texbank `0x155` is not exported either, and the route map
-and the two player figures are not ported, so phase 5 draws nothing and waits.
+for the pictures.
+
+**The fly-over is ported, and it is not the stage.** Phase 0 releases the
+stage (`CamSlotsReset` and the pol-slot reset `LoadSceneAndReset` also runs)
+and replaces the scene's task list, so nothing of the level runs or draws;
+`G.g_stage_unloaded` says so and `render/game_over_scene.ts` hides every node
+but the bodies, with no fog on black (`LightBlockInit`'s fog colour 0).
+`GameOverCameraFlyTick` flies global path `0x1F`, the one path in
+`cp_gmovr.bin`, from frame 10. The bodies are `PlayerBodiesCreate`'s
+(`FUN_00416450`) -- character types `0x39`/`0x3A`, James and Gary, from
+`0x00579F50` in both modes, because Original Mode's character byte is only ever
+the player index -- placed by `GameOverPlaceBody` (`FUN_00415A80`) at the
+origin for one player, and drawn by `PlayerHookDrawBodyUntilMotionEnd`: motion
+`0x338`, stepping from path frame `0x3C`, gone after its last frame. **Which
+fall you see depends on the route**: through the run's continue screen (a credit
+left) the player is still at 4 and phase 0 arms them onto `0x338`; with no
+credit the player's own countdown already put them at 6 in play, and the fresh
+body keeps the motion it was made on, `0x32C`. The bundle is format 11 for it:
+every stage's `cam.json` carries `cp_gmovr`, and its `characters` two
+synthetic `player_body` rows with both clips. `DrawSkinnedModelAndShadow`
+draws no shadow, whatever its name says. `[diverges]`, in `game_over.ts`: the
+sprites' texbank `0x155` is not exported yet, and the route map and the two
+player figures are not ported, so phase 5 draws nothing and waits.
 
 **Two buttons on it, the page's own** (`[port-only]`, not a gameplay
 divergence): **Restart this stage** and **Start from stage 1**. The engine

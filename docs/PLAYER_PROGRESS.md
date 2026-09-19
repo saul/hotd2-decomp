@@ -1832,6 +1832,68 @@ of a placer with no descriptor to key a row on, so they run — hits, score,
 counters, the strike — and are not drawn; and the **splash** is a sound and a
 despawn rather than thirty frames of `common.bin`.
 
+## A fifth: the horde, class 0x40 — worms that come up out of the street
+
+Reported as "the 0x40 horde spawner (worms) hasn't been implemented". It had
+no module, so every class-0x40 spawn placed nothing, counted nothing, and the
+`wait_enemies_alive` behind each of the five hordes opened on its first frame.
+**Ported** (`game/class40/`), drawn (`render/characters/horde.ts`,
+`render/horde.ts`), checked from a real bundle (`npm run horde`) and in the
+page (`tools/horde_look.mjs`).
+
+* **What it is.** Character type `0x1D`, `mol.bin`: nine nodes, a chain of six
+  ring segments 1.3 apart with a two-bone toothed jaw. `[likely]` a worm — the
+  model is a limbless, banded, segmented body tapering to a spike (rendered to
+  `scratchpad/horde/mol_m53*.png` and in the page); no name table says so.
+* **Two classes of object behind one id.** `PlaceHorde` (`FUN_0043BD30`)
+  switches on the descriptor's `+0x25`: **1** builds four to ten members, **2**
+  is not a horde at all but the prop they push aside
+  (`SpawnHordeEmergeProp`, `FUN_0043DC30`). Seven descriptors, nine spawn
+  instructions: five hordes (stage 1 blocks 3 and 8, stage 2 blocks 0x0E, 0x12
+  and 0x19) and four props (stage 1 blocks 3, 7, 8 and 12). The first
+  annotation said all nine were hordes.
+* **The member** (`HordeMemberInit`, `FUN_0043BEF0`; `HordeMemberUpdate`,
+  `FUN_0043C440`): a hold of `idx * 20` frames out of the shot test, a walk in
+  along six segments of `g_horde_formation`, then wandering a grid until it is
+  its turn (`g_horde_diver`, one at a time, ninety frames apart, and only on
+  screen): wind up toward the eye, leap, hang in front of the camera and
+  **bite** — `PlayerTakeDamage(player, 1, 10)` — pull out and wander again.
+  One bullet, 80 points, both counters, a `PDMG_MORR` from the stage's bank
+  and a splash-and-ripple (`SpawnHordeDeathSplash`, `FUN_0043E4C0`); the
+  corpse sinks and flattens for sixty frames (`HordeCorpseSinkUpdate`,
+  `FUN_0043DA20`). Where the horde is decides its formation, its skin (row 1 of
+  `g_submodel_bone_slots` in stage 1 block 8 and stage 2 block 0x19 — green
+  scales rather than purple bands) and its size (0.55 in block 0x19, where
+  members 3+ drop from the ceiling and nobody is counted until
+  `g_script_flags[94]`).
+* **The sub-model.** The member is not drawn by the ordinary skeleton code but
+  by a second, smaller copy of it that lives in the member's side block
+  (`SubModelInit` .. `SubModelBlendToMotion`, `FUN_0040EAE0`..`FUN_0040F900`),
+  with its own clock stepped only on the frames the member draws, all three
+  object rotations and its own scale. The clock is `game/class40/submodel.ts`;
+  the pose is the character layer's, fed the same half-frame cursor. The jaw
+  opens during the dive (`SubModelPoseBoneHalfRate`'s type-0x1D arm).
+* **The prop** is shootable, rings, tumbles onto a corner and rocks flat, and
+  can be shot again; it scores nothing and counts for nothing.
+* **Two routines Ghidra truncates** (`L35` again): `HordeMemberUpdate`
+  "returns" after the shadow's `MatrixStackPop`, and `HordeEmergePropUpdate`
+  after its fall's. The bytes carry on in both — into the shot-sphere publish,
+  the camera registration and the `g_horde_members` stamp for the member, and
+  into the draw and `RegisterForShotTest` for the prop. Transcribed from the
+  pseudocode neither could be shot once drawn.
+
+Verified: `npm run test:port` drives every state against the real play
+lengths; `npm run horde` builds all five hordes from the exported bundle,
+sees them walk in, dive and bite, shoots them all (a printed override: no pick
+without a page) and watches both counters return to zero and the walker leave
+the gate; `tools/horde_look.mjs` does it in the page through the real shot
+path — stage 1 block 3: eight members, `e8 p8`, 640 points, walker 3/3 → 3/4.
+
+One declared divergence, where it lives: stage 2 block 0x19's **deformed prop**
+(`SpawnHordeDeformedProp`, `FUN_0043EF70`), a `komono_room.bin` sheet the first
+three members bulge from underneath, is not built. Not ported either: class
+0x47 (`PlaceLoneHordeMember47`), which no shipped descriptor uses.
+
 ## Coming through the window, and the ambience that goes with it
 
 Two reports from the same afternoon, and they meet in the same place: a

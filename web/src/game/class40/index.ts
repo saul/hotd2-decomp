@@ -73,7 +73,7 @@ import {
 import {
   HORDE_FORMATION, HORDE_FORMATION_MEMBERS, HORDE_FORMATION_POINTS,
   HORDE_SHOT_DELAY, HORDE_SPLINE_RATES, HORDE_WANDER_CELL,
-  HORDE_WANDER_ORIGIN,
+  HORDE_WANDER_ORIGIN, SUBMODEL_BONE_SLOTS,
 } from "./tables";
 
 export * from "./state";
@@ -497,7 +497,8 @@ function HordeMemberSplineRate(t: HordeTail): number {
  * vertices in `render/` and one more routine read (`FUN_0043F2E0`); until
  * then stage 2 block 0x19 has no sheet at all.
  */
-export function HordeMemberInit(obj: Actor, rng: Rng): void {
+export function HordeMemberInit(obj: Actor, rng: Rng, host?: GameHost):
+    void {
   const t = HordeOf(obj);
   if (!t) return;
   t.sub.clip = 0;
@@ -560,6 +561,18 @@ export function HordeMemberInit(obj: Actor, rng: Rng): void {
     }
   }
 
+  // `SubModelStoreRestBone` (`FUN_0040EC50`) draws each bone from
+  // `g_submodel_bone_slots[bone + obj+0x1350 * 10]`. Row 0 is the skeleton's
+  // own slots; row 1 is the second skin, and the port says so the way every
+  // other swap is said -- per bone, on the actor, and to the host.
+  if (t.skinRow !== 0) {
+    const row = SUBMODEL_BONE_SLOTS[t.skinRow] ?? [];
+    for (let bone = 1; bone < row.length; bone += 1) {
+      if (!row[bone]) continue;
+      obj.boneSlot[String(bone)] = row[bone];
+      host?.setBoneSlot(obj.at, bone, row[bone]);
+    }
+  }
   obj.pitch = 0;
   obj.roll = 0;
   // The grid cell each formation starts its members in.
@@ -1230,7 +1243,7 @@ export function HordeUpdate(obj: Actor, f: ClassFrame): void {
   if (!t) return;
   switch (t.kind) {
     case HordeKind.MemberInit:
-      HordeMemberInit(obj, f.rng);
+      HordeMemberInit(obj, f.rng, f.host);
       obj.alpha = 0;
       return;
     case HordeKind.Member: HordeMemberUpdate(obj, f); return;

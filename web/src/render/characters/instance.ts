@@ -39,6 +39,12 @@ export interface GoreSwap {
 }
 
 export interface Instance {
+  /**
+   * Class 0x40's second draw of a member, where stage 1 block 3 reflects it.
+   * A copy of {@link Instance.root}'s tree, re-posed from it each frame; see
+   * `render/characters/horde.ts`.
+   */
+  mirror?: Object3D;
   /** evt offset of the spawn descriptor — the identity the walker uses. */
   at: number;
   /** The game object. All state is here; this is a live reference to it. */

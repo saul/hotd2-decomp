@@ -137,6 +137,13 @@ CHECKS: list[Check] = [
           "enemy the character layer can build, and two have no character "
           "type at all",
           NEEDS_BUNDLE),
+    Check("horde", "web", ["npm", "run", "--silent", "horde"],
+          "that each of the five class-0x40 hordes is built from a real bundle, "
+          "walks in, dives and bites, and that shooting every member gives "
+          "both counters back and lets the walker past the room's "
+          "wait_enemies_alive -- the members are runtime children with no "
+          "descriptor, so only the placer's own spawn can bring them into play",
+          NEEDS_BUNDLE),
     Check("dives", "web", ["npm", "run", "--silent", "dives"],
           "that a class-0x43 dive reaches the camera it is aimed at, strikes "
           "and comes round again -- the only check that drives a class "
@@ -252,6 +259,14 @@ CHECKS: list[Check] = [
           "system plays divides by the stride that count implies -- the only "
           "check that reads a motion at the effect stride rather than a "
           "character's",
+          NEEDS_GAME),
+    Check("verify_horde", ".",
+          ["python3", "tools/verify_horde.py", "--game-dir", "{game_dir}"],
+          "that every number the class-0x40 horde is steered by -- its entry "
+          "splines, spline rates, shot delays, wander grid, second skin and "
+          "the emerge prop's corners -- is the EXE's, and that the seven "
+          "descriptors split five hordes to two props on the byte PlaceHorde "
+          "switches on",
           NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],

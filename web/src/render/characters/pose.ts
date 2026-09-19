@@ -238,6 +238,22 @@ private apply(inst: Instance, m: BakedMotion, f: number,
   }
 }
 
+/**
+ * One bone posed as the clip has it this frame, but with its X rotation
+ * replaced -- `SubModelPoseBoneHalfRate` (`FUN_0040ED30`) does exactly that
+ * to character type 0x1D's jaw (bones 8 and 9) while the member dives. It
+ * keeps the clip's Y and Z and writes its own X.
+ */
+overrideBoneX(inst: Instance, bone: number, rx: number): void {
+  const m = inst.type.motions[String(inst.a.motion)];
+  const node = inst.bones.get(bone);
+  if (!m || m.frames <= 0 || !node) return;
+  const f = authoredFrameOfTicks(inst.a.playTicks, m.fps, m.frames);
+  const o = f * inst.type.bone_count * 3 + bone * 3;
+  if (o + 2 >= m.rot.length) return;
+  node.quaternion.copy(this.bams(rx, m.rot[o + 1], m.rot[o + 2]));
+}
+
 /** `qZ * qY * qX`, matching the engine's `RotZ; RotY; RotX` stack order. */
 private bams(rx: number, ry: number, rz: number): Quaternion {
   this.q.setFromAxisAngle(AXIS_Z, rz * BAMS_TO_RAD);

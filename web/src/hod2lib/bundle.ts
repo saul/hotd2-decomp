@@ -918,8 +918,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x13, 0x40, 0x43, 0x51, 0x52; class "
-      + "0x25 variant 3; class 0x33 selector 4)",
+    routine: "asset-slot actor draws (classes 0x13, 0x40, 0x43, 0x51, "
+      + "0x52; class 0x25 variant 3; class 0x33 selector 4)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",

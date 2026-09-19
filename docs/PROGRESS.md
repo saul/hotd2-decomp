@@ -295,7 +295,11 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       `zabat.bin` / `zabat_wing.bin` and by `COMMON2\KOUMORI1_22.wav`; its
       twenty-four sub-type-0 spawns all sit at the world origin and take
       their whole path from a twelve-row spline table in the EXE
-      (`tools/verify_bats.py`). Class `0x45` is still unread.
+      (`tools/verify_bats.py`). Class `0x40` is **the horde**
+      (`PlaceHorde`, `FUN_0043BD30`) — five hordes of `mol.bin` members
+      (worms, `[likely]` from the model) and four of the prop they come up
+      through, drawn by a side-block sub-model the rest of the game never
+      uses (`tools/verify_horde.py`). Class `0x45` is still unread.
 - [x] **Item placement.** The items are not placed — the *containers* are.
       Class `0x41` type 0 places groups of breakable props from two EXE tables:
       9 groups, 42 props, each a 10-byte record with x/z, item-set, stack level

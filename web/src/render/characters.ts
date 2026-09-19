@@ -89,6 +89,8 @@ const boneSuffix = (part: string) => `_${part}`;
  */
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
+import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
+  from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { restoreGore, swapGore } from "./characters/gore";
 export type { Instance };
@@ -294,18 +296,27 @@ export class CharacterLayer implements System {
   /** Which adopted hierarchies the script is asking for, this frame. */
   private wantedSpawns(spawns: readonly { at: number }[]): Set<number> {
     const want = new Set<number>();
-    for (const s of spawns) if (this.pending.has(s.at) || this.live.has(s.at)) {
-      want.add(s.at);
+    // A parent with no hierarchy of its own still has children that do: a
+    // class-0x40 placer is drawn by nothing and `ActorKill`s itself, and its
+    // members are rows parented to it. Listed is enough to want them.
+    const listed = new Set<number>();
+    for (const s of spawns) {
+      listed.add(s.at);
+      if (this.pending.has(s.at) || this.live.has(s.at)) want.add(s.at);
     }
     // **Class 0x10's children are not in the walker's list.** `CivilianInit`
     // (`FUN_0048A3E0`) `SpawnFromDescriptor`s each of them itself, and nothing
     // in the evt points at their descriptors — so they are present exactly
     // when the civilian that holds them is.
     for (const rec of [...this.pending.values()]) {
-      if (rec.parentAt !== undefined && want.has(rec.parentAt)) want.add(rec.at);
+      if (rec.parentAt !== undefined
+          && (want.has(rec.parentAt) || listed.has(rec.parentAt))) {
+        want.add(rec.at);
+      }
     }
     for (const inst of this.instances) {
-      if (inst.parentAt !== undefined && want.has(inst.parentAt)) {
+      if (inst.parentAt !== undefined
+          && (want.has(inst.parentAt) || listed.has(inst.parentAt))) {
         want.add(inst.at);
       }
     }
@@ -405,6 +416,8 @@ export class CharacterLayer implements System {
   /** Put one instance's nodes back and return its record to `pending`. */
   private release(inst: Instance): void {
     inst.root.visible = false;
+    inst.mirror?.removeFromParent();
+    inst.mirror = undefined;
     // **Not `inst.a.visible = false`.** Whether an actor is in the world is
     // the port's, and it already says so: `ActorDespawn` (`FUN_00409CC0`)
     // clears the flag, and `app/` runs `RetireUnlistedActor` on everything
@@ -464,7 +477,10 @@ export class CharacterLayer implements System {
       // asks for.
       const show = this.enabled && inst.a.visible && inst.a.alpha > 0;
       inst.root.visible = show;
-      if (!show) continue;
+      if (!show) {
+        syncHordeMirror(inst, false);
+        continue;
+      }
       // The director owns position and facing; apply what it decided. The
       // exporter baked the spawn pose into the root, and this replaces it
       // with the live one rather than composing onto it.
@@ -474,7 +490,10 @@ export class CharacterLayer implements System {
       // update, so the actor's own position is carrier-relative and the draw
       // inherits the matrix. The port composes the point in `game/carrier.ts`
       // and publishes it; this reads it.
-      if (inst.a.carrierAt >= 0) {
+      if (placeHordeRoot(inst)) {
+        // Class 0x40's sub-model: its own object transform. See
+        // `render/characters/horde.ts`.
+      } else if (inst.a.carrierAt >= 0) {
         inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
                                inst.a.carrierWorld.z);
         inst.root.rotation.set(
@@ -487,6 +506,8 @@ export class CharacterLayer implements System {
       // can be run with no renderer at all, and so a swing keeps its play
       // position across a save state. This only reads them.
       this.poser.pose(inst);
+      poseHordeJaw(inst, this.poser);
+      syncHordeMirror(inst, true);
       // A bone `RemoveBoneSubtree` took off is hidden here rather than where
       // the shot resolved: `ResolveHit` runs in the port now, and what a
       // severed subtree *looks like* is this layer's half of it. `a.removed`
@@ -1026,8 +1047,10 @@ export class CharacterLayer implements System {
       // here; clearing the cache is what makes the next apply do the work.
       inst.veto = undefined;
       this.applyBoneVeto(inst);
-      inst.root.visible = this.enabled && inst.a.visible;
-      if (inst.a.carrierAt >= 0) {
+      inst.root.visible = this.enabled && inst.a.visible && inst.a.alpha > 0;
+      if (placeHordeRoot(inst)) {
+        // See `update`.
+      } else if (inst.a.carrierAt >= 0) {
         inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
                                inst.a.carrierWorld.z);
         inst.root.rotation.set(
@@ -1037,6 +1060,8 @@ export class CharacterLayer implements System {
         inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
       }
       this.poser.pose(inst);
+      poseHordeJaw(inst, this.poser);
+      syncHordeMirror(inst, inst.root.visible);
     }
   }
 

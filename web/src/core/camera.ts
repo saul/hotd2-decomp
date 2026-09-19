@@ -36,6 +36,13 @@ export class CameraFrame {
    */
   yawBams = 0;
   /**
+   * `g_camera_block_pitch_bams` — the camera's X rotation, positive looking
+   * up. The engine builds the camera as `T(eye) Ry Rx Rz` looking down its
+   * own -z (`UpdateSceneViewAndLight`), so this is `asin` of the view
+   * direction's y. Rounded here for the same reason the yaw is.
+   */
+  pitchBams = 0;
+  /**
    * The camera's own -Z in world space, normalised -- what
    * `Camera.getWorldDirection` hands back, kept rather than reduced to
    * {@link yawBams}.
@@ -84,6 +91,8 @@ export class CameraFrame {
     const bams = Math.round(
       Math.atan2(forward.x, forward.z) * 65536 / (Math.PI * 2));
     this.yawBams = (bams % 65536 + 65536) % 65536;
+    const fy = Math.max(-1, Math.min(1, forward.y));
+    this.pitchBams = Math.round(Math.asin(fy) * 65536 / (Math.PI * 2));
   }
 
   /** A point in the camera's own space, in world coordinates. */

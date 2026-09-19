@@ -646,8 +646,9 @@ class Program:
         """The 0x20-0x27 family: ``[op][channel][...]``.
 
         These drive the two **scene light / fog blocks**, not per-player view
-        structs -- a reading overturned at the renderer end. Block 0 is pushed
-        to the device every frame; block 1 only at scene init.
+        structs -- a reading overturned at the renderer end. Block 0 lights the
+        world and block 1 every character (LightsUseSecondarySet); 0x24-0x27
+        are thunks into 0x20-0x23's bodies with the block argument 1.
         """
         if not ins.raw:
             return {}
@@ -673,12 +674,14 @@ class Program:
         # read their target inline and convert int -> float, everything else
         # dereferences. `frames` is always inline.
         inline_target = sub in (2, 3, 4, 5)
+        # Block 1's opcodes are thunks into the same bodies with block 1.
+        kind = ins.opcode & ~4
 
         def target(word: int):
             return float(word) if inline_target else self._deref_f32(word)
 
         if sub in (5, 9):
-            if ins.opcode == 0x20:
+            if kind == 0x20:
                 out["components"] = list(vals)
                 return out
             # One target applied to all three components.
@@ -690,10 +693,10 @@ class Program:
             if out["value"] is None:
                 out["raw_value"] = f"0x{vals[0]:08X}"
 
-        if ins.opcode == 0x21 and len(vals) >= 2:
+        if kind == 0x21 and len(vals) >= 2:
             out["tween"] = "rate"
             out["rate"] = self._deref_f32(vals[1])
-        elif ins.opcode == 0x23 and len(vals) >= 2:
+        elif kind == 0x23 and len(vals) >= 2:
             out["tween"] = "time"
             out["frames"] = vals[1]
         return out

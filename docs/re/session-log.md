@@ -18499,3 +18499,26 @@ outside the body, so it reads as though the whole lamp is never shootable and
 the broken lamp is not drawn while the pieces fly. It is 30 pieces, not the 24
 I first wrote from the decompile's loop bound; the disassembly's
 `CMP EBP, 0x1E` settles it.
+
+
+## 2026-09-19 — light block 1, `LightsUseSecondarySet`
+
+The horde agent flagged that the worms and the rug draw under a second light
+set. Reading it: `LightsUseSecondarySet` (`FUN_0041DC70`) has **44 callers**,
+not two, and `ZombieAdvanceMotion`'s first instruction is one of them, so block
+1 is simply the characters' light. Block 1's opcodes are thunks into block 0's
+bodies with the block argument 1 (`0x0040B632`, `0x0040BA82`, `0x0040C1E2`);
+`LightBlockInit` (`FUN_0041DBA0`, named) seeds both blocks with ambient 0.7.
+The port's "block 1 never reaches the renderer" was a claim nobody had
+checked against the readers of `0x009A59E0`.
+
+Found on the way: the exporter decoded tween operands for `0x21`/`0x23` only,
+so all 94 shipped `0x27`s arrived as immediate sets. Fixed in both
+halves. The first unit test of the block-1 tween failed for a reason of the
+test's own — a finished walker runs no further frames — not the port.
+
+Screenshots (scene-light view, drive mode): stage 1 block 3 frame 400, the
+worm in front darkens slightly — block 1 there is the default white at 0.7
+against block 0's 0.85 — and stage 2 block 0x19 frame 780, the rug slightly
+lighter, its ridges still visible. In the default unlit view both are
+unchanged, as they must be.

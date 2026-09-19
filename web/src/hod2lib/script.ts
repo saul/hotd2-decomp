@@ -707,8 +707,9 @@ export class Program {
    * The 0x20-0x27 family: `[op][channel][...]`.
    *
    * These drive the two **scene light / fog blocks**, not per-player view
-   * structs -- a reading overturned at the renderer end. Block 0 is pushed to
-   * the device every frame; block 1 only at scene init.
+   * structs -- a reading overturned at the renderer end. Block 0 lights the
+   * world and block 1 every character (`LightsUseSecondarySet`); 0x24-0x27
+   * are thunks into 0x20-0x23's bodies with the block argument 1.
    */
   private decodeLightTween(ins: evt.Instr): Record<string, unknown> {
     if (!ins.raw.length) return {};
@@ -733,11 +734,16 @@ export class Program {
     // the 5 that sets all three) read their target inline and convert int ->
     // float, everything else dereferences. `frames` is always inline.
     const inlineTarget = sub === 2 || sub === 3 || sub === 4 || sub === 5;
+    // Block 1's four opcodes are thunks into the same four bodies with the
+    // block argument 1 -- `0x0040B632`, `0x0040BA82`, `0x0040C1E2` -- so the
+    // operands read the same way. This used to decode only block 0's, and
+    // every 0x25/0x27 came out as an immediate set.
+    const kind = ins.opcode & ~4;
     const target = (word: number): number | null =>
       inlineTarget ? word : this.derefF32(word);
 
     if (sub === 5 || sub === 9) {
-      if (ins.opcode === 0x20) {
+      if (kind === 0x20) {
         out.components = [...vals];
         return out;
       }
@@ -753,10 +759,10 @@ export class Program {
       }
     }
 
-    if (ins.opcode === 0x21 && vals.length >= 2) {
+    if (kind === 0x21 && vals.length >= 2) {
       out.tween = "rate";
       out.rate = this.derefF32(vals[1]);
-    } else if (ins.opcode === 0x23 && vals.length >= 2) {
+    } else if (kind === 0x23 && vals.length >= 2) {
       out.tween = "time";
       out.frames = vals[1];
     }

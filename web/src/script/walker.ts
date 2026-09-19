@@ -399,7 +399,7 @@ export const WALKER_RESTORED_KEYS = [
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "sceneAmbient",
   "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
-  "lightSet", "checkpointBlock", "branchPreview", "camOverrideValid",
+  "lightSet", "light1", "checkpointBlock", "branchPreview", "camOverrideValid",
   "stashedCam", "spawns", "simpleSpawns",
   "sceneState", "queuedEventsPending", "camPending",
   "cam", "finished", "nextEntryBlock", "bgmTrack", "lastSound", "loopingSe",
@@ -618,6 +618,33 @@ export class Walker {
 
   /** The directional light, derived from channels 6-8 and 10 plus `0x18`. */
   get light(): LightState { return this.lightBlock.light; }
+  /**
+   * **Light block 1** — `g_scene_light_block1`, `0x009A59E0`, the same layout
+   * as block 0. Opcodes `0x19` (direction) and `0x24`/`0x25`/`0x27` (the
+   * channels) write it, and `LightsUseSecondarySet` (`FUN_0041DC70`) installs
+   * its colour, ambient and direction for every character's draw, then
+   * `LightsRestoreScene` (`FUN_0041DCC0`) puts block 0's back. It used to be
+   * "pushed only at scene init and never reaches the renderer"; it reaches
+   * every zombie. Only its light half is read; its fog channels are written
+   * and nothing draws with them.
+   */
+  readonly lightBlock1 = new ChannelBlock();
+  get light1(): { channels: number[]; tweens: (ChannelTween | null)[];
+                  lightDir: { pitchDeg: number; yawDeg: number } } {
+    return {
+      channels: [...this.lightBlock1.channels],
+      tweens: this.lightBlock1.tweens.map((t) => t && { ...t }),
+      lightDir: { ...this.lightBlock1.lightDir },
+    };
+  }
+  set light1(v: { channels: number[]; tweens: (ChannelTween | null)[];
+                  lightDir: { pitchDeg: number; yawDeg: number } }) {
+    this.lightBlock1.channels = [...v.channels];
+    this.lightBlock1.tweens = v.tweens.map((t) => t && { ...t });
+    this.lightBlock1.lightDir = { ...v.lightDir };
+  }
+  /** Block 1's directional light, for the characters. */
+  get lightSecondary(): LightState { return this.lightBlock1.light; }
 
   /**
    * The scene light block, as 11 channels -- the same numbering the tween
@@ -913,6 +940,7 @@ export class Walker {
     this.branchPreview = null;
     this.camOverrideValid = false;
     this.lightBlock.reset();
+    this.lightBlock1.reset();
     // `entryBlock` rather than `this.script.entry_block`: a stage no longer
     // chooses where it starts.
     this.checkpointBlock = entryBlock;
@@ -963,7 +991,8 @@ export class Walker {
       camPending: this.camPending,
       channels: [...this.channels], tweens: this.tweens.map((t) => t && {...t}),
       fogSet: this.fogSet, lightDir: { ...this.lightDir },
-      lightSet: this.lightSet, checkpointBlock: this.checkpointBlock,
+      lightSet: this.lightSet, light1: this.light1,
+      checkpointBlock: this.checkpointBlock,
       branchPreview: this.branchPreview,
       camOverrideValid: this.camOverrideValid, stashedCam: this.stashedCam,
       spawns: this.spawns.map((s) => ({ ...s })),
@@ -1292,6 +1321,8 @@ export class Walker {
 
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.lightBlock.step(dt * fps);
+    // `PushSceneLightStateToDevice` steps both blocks' channel tweens.
+    this.lightBlock1.step(dt * fps);
 
     this.shutter.step(dt * fps);
     // The caption is a countdown in script frames, not in wall time: stepping
@@ -1601,7 +1632,7 @@ export class Walker {
    */
   /** One of the light-block opcodes. See `script/state/channels.ts`. */
   applyLightChannel(op: OpJson): string | undefined {
-    return this.lightBlock.apply(op);
+    return (op.light_block === 1 ? this.lightBlock1 : this.lightBlock).apply(op);
   }
 
   /**

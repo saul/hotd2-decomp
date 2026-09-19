@@ -50,7 +50,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
   "rigs.ts": "2f56d14d5ce38d6133739ac9a93bb5b31fd4ab0d30f058a713b6cc3cdb303cbe",
   "rigs_data.ts": "6d01ccae95d063a67cd7b0ce034df332fdf74fa60dfb51bf2c5d10ca6ec04204",
-  "script.ts": "6bbe4cb6d4658e17e34104fddb39c9fe99308c0d8c3438d51c03b94c534d56a2",
+  "script.ts": "f06caa37c419015f5673f993aac6ca105e4ca0f62dbd0a28af142df99c781cd2",
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
   "spawnres.ts": "b7e0a4d06daa4b0df84e6794253ece41bbd1e322e46e5dead53c38feecb010c5",
   "stage.ts": "d77e2d9e1f922a719952aec4bc6730cd70db0d4b81756402e5e30450c28f94a8",
@@ -58,4 +58,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "e447822b5de3c8206ae30ca715f3cf65da70a950bec9fe3e623eac58d0961ef5";
+export const BUILDER_HASH = "ff65568a1b2d457a284ede1792272cb8151004141c8288082bcc3726c7e94c75";

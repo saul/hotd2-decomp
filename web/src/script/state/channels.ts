@@ -47,13 +47,22 @@ export interface LightState {
   yawDeg: number;
 }
 
-/** Fog off (a range past the 8000 far plane) and a neutral white light. */
+/**
+ * Fog off (a range past the 8000 far plane) and a neutral white light.
+ *
+ * The light half is `LightBlockInit` (`FUN_0041DBA0`)'s, which both blocks
+ * get at scene init: colour `(1, 1, 1)` at `+0x240`, ambient **0.7**
+ * (`0x3F333333`) at `+0x24C`, direction `(0, 0)`. `[proved]` The ambient was
+ * 0.5 here, from nothing. The routine's fog is `65535`/`65536`; the port's
+ * `65000`/`65001` are what the scripts use to switch it off, and either is
+ * past the far plane.
+ */
 export function defaultChannels(): number[] {
   const c = new Array(CHANNEL_COUNT).fill(0);
   c[CH_FOG_NEAR] = 65000;
   c[CH_FOG_FAR] = 65001;
   c[CH_LIGHT_R] = c[CH_LIGHT_R + 1] = c[CH_LIGHT_R + 2] = 1;
-  c[CH_AMBIENT] = 0.5;
+  c[CH_AMBIENT] = 0.7;
   return c;
 }
 

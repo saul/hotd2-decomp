@@ -389,6 +389,8 @@ export class SlotModelLayer implements System<RenderContext> {
         this.group.add(node);
         live = { node, slot };
         this.nodes.set(a.at, live);
+        // Whose draw this is, for the light set `render/lighting.ts` picks.
+        node.userData.hod2_actor_at = a.at;
       }
       // Where a slot model goes is the drawing routine's, not the actor's:
       // the mouse draws at `obj+0x40`/`obj+0x68`, and class 0x25's variant 3
@@ -580,6 +582,7 @@ export class SlotModelLayer implements System<RenderContext> {
       this.group.add(g);
       live = { node: g, slot: CHAIN, parts: [] };
       this.nodes.set(a.at, live);
+      g.userData.hod2_actor_at = a.at;
     }
     const have = live.parts ?? (live.parts = []);
     for (let i = 0; i < parts.length; i++) {

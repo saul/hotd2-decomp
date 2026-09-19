@@ -100,8 +100,11 @@ import {
   MeshLambertMaterial,
   Object3D,
   Scene,
+  ShaderChunk,
   Vector3,
   type Material,
+  type WebGLProgramParametersWithUniforms,
+  type WebGLRenderer,
 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
@@ -113,6 +116,54 @@ export const DIFFUSE_SCALE = 1.4;
 export const LIGHT_AMBIENT_SCALE = 0.3;
 
 export type LightingMode = "unlit" | "scene";
+
+/**
+ * The two light sets, as `LightsUseSecondarySet` (`FUN_0041DC70`) and
+ * `LightsRestoreScene` (`FUN_0041DCC0`) switch between them.
+ *
+ * Every draw in the default path is lit by whatever `SetRenderAmbient`,
+ * `SetRenderLightDirection` and `SetRenderLightColour` last left, and
+ * `RenderEnqueueCommand` re-installs the light the moment one of them marks it
+ * dirty. The world draws under **light block 0**. Forty-four routines --
+ * `ZombieAdvanceMotion`'s very first instruction among them -- switch to
+ * **light block 1** before they draw and back after, so every character is
+ * lit by block 1. `[proved]` The port keeps both blocks in the walker and asks
+ * `app/` which actors are under block 1 (`ActorDrawsUnderSecondaryLights`).
+ *
+ * Only this module's "+ scene light" view draws with either; the default view
+ * is unlit for everything, as the module comment explains, and so shows no
+ * difference.
+ */
+export interface SecondaryLightSource {
+  /** Block 1, as the walker holds it. Null before a stage. */
+  light(): SceneLightState | null;
+  /** Is the actor at this spawn address drawn under block 1? */
+  secondary(at: number): boolean;
+}
+
+/** Block 1's three terms, shared by every secondary-lit program. */
+const secAmbient = { value: new Color(0, 0, 0) };
+const secColor = { value: new Color(0, 0, 0) };
+/** Toward the light, in **view** space: rewritten every frame. */
+const secDirView = { value: new Vector3(0, 0, 1) };
+
+const SECONDARY_LIGHTS = (() => {
+  const src = ShaderChunk.lights_fragment_begin;
+  const out = src
+    .replace("( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )", "0")
+    .replace("( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )", "0")
+    .replace("( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )", "0")
+    .replace("( NUM_HEMI_LIGHTS > 0 )", "0")
+    .replace("getAmbientLightIrradiance( ambientLightColor )", "secAmbient");
+  if (out === src) console.warn("lighting: lights_fragment_begin not patched");
+  // Block 1's one directional light, in place of the scene's.
+  return out + `
+  {
+    float secNL = saturate( dot( geometryNormal, secDirView ) );
+    reflectedLight.directDiffuse += secNL * secColor
+      * BRDF_Lambert( material.diffuseColor );
+  }`;
+})();
 
 /*
  * The gun lights — `BuildEntitySpotlightArray` (`FUN_00480AC0`), evt `0x15`
@@ -140,7 +191,7 @@ export interface SceneLightState {
 
 export const DEFAULT_LIGHT: SceneLightState = {
   rgb: [1, 1, 1],
-  ambient: 0.5,
+  ambient: 0.7,                     // LightBlockInit's
   pitchDeg: 0,
   yawDeg: 0,
 };
@@ -167,6 +218,11 @@ export class SceneLighting implements System<RenderContext> {
   private state: SceneLightState = { ...DEFAULT_LIGHT };
   /** Lambert twins of the unlit materials, built once and reused. */
   private readonly lit = new Map<Material, Material>();
+  /** Block-1 twins, the same way. */
+  private readonly litSecondary = new Map<Material, Material>();
+  /** The layers whose meshes are not under the stage root. */
+  private readonly extraRoots: Object3D[] = [];
+  source: SecondaryLightSource = { light: () => null, secondary: () => false };
   private root: Object3D | null = null;
   private readonly _v = new Vector3();
 
@@ -181,6 +237,7 @@ export class SceneLighting implements System<RenderContext> {
   build(root: Object3D): void {
     this.root = root;
     this.lit.clear();
+    this.litSecondary.clear();
     if (this.mode === "scene") this.applyMaterials();
   }
 
@@ -225,6 +282,33 @@ export class SceneLighting implements System<RenderContext> {
     const w = ctx.walker;
     if (!w) return;
     this.set(w.light);
+    if (this.mode !== "scene") return;
+    this.refreshSecondary(ctx);
+    this.applyMaterials();
+  }
+
+  /** A layer that clones its own meshes outside the stage root. */
+  addRoot(o: Object3D): void {
+    if (!this.extraRoots.includes(o)) this.extraRoots.push(o);
+  }
+
+  /**
+   * Block 1's uniforms, from the walker, by the same arithmetic `refresh`
+   * applies to block 0 -- `SetLightingDefaultSingle` is one routine and both
+   * blocks go through it.
+   */
+  private refreshSecondary(ctx: RenderContext): void {
+    const l = this.source.light() ?? DEFAULT_LIGHT;
+    const [r, g, b] = l.rgb;
+    const a = l.ambient;
+    secColor.value.setRGB(r * a * DIFFUSE_SCALE, g * a * DIFFUSE_SCALE,
+                          b * a * DIFFUSE_SCALE, SRGBColorSpace)
+      .multiplyScalar(this.intensity);
+    const amb = a + LIGHT_AMBIENT_SCALE;
+    secAmbient.value.setRGB(r * amb, g * amb, b * amb, SRGBColorSpace)
+      .multiplyScalar(this.intensity);
+    lightDirection(l.pitchDeg, l.yawDeg, secDirView.value)
+      .transformDirection(ctx.camera.matrixWorldInverse);
   }
 
   /**
@@ -232,12 +316,9 @@ export class SceneLighting implements System<RenderContext> {
    * "+ scene light", the exported unlit one otherwise. Either can come in.
    */
   viewMaterial(m: Material): Material {
-    if (this.mode === "scene") {
-      if (m instanceof MeshLambertMaterial) return m;
-      return this.twinOf(m);
-    }
-    const back = this.lit.get(m);
-    return back && back instanceof MeshBasicMaterial ? back : m;
+    const base = this.baseOf(m);
+    if (this.mode === "scene") return this.twinOf(base);
+    return base;
   }
 
   resync(ctx: RenderContext): void {
@@ -282,20 +363,69 @@ export class SceneLighting implements System<RenderContext> {
    */
   private applyMaterials(): void {
     if (!this.root) return;
-    this.root.traverse((o) => {
+    const visit = (o: Object3D, at: number | null): void => {
+      const x = o.userData as { hod2_spawn_at?: number; hod2_actor_at?: number };
+      const own = x?.hod2_actor_at ?? x?.hod2_spawn_at;
+      const here = own !== undefined ? own : at;
       const mesh = o as Mesh;
-      if (!mesh.isMesh || !mesh.material) return;
-      const swap = (m: Material): Material => {
-        // A mesh the gun light holds keeps its gun-lit twin; the rig puts
-        // back whatever this view wants when the light goes out.
-        if (m.userData?.gunLit) return m;
-        return this.viewMaterial(m);
-      };
-      mesh.material = Array.isArray(mesh.material)
-        ? mesh.material.map(swap)
-        : swap(mesh.material);
-    });
+      if (mesh.isMesh && mesh.material) {
+        const second = this.mode === "scene" && here !== null
+          && this.source.secondary(here);
+        const swap = (m: Material): Material => {
+          // A mesh the gun light holds keeps its gun-lit twin; the rig puts
+          // back whatever this view wants when the light goes out.
+          if (m.userData?.gunLit) return m;
+          const base = this.baseOf(m);
+          if (this.mode !== "scene") return base;
+          return second ? this.secondaryTwinOf(base) : this.twinOf(base);
+        };
+        mesh.material = Array.isArray(mesh.material)
+          ? mesh.material.map(swap)
+          : swap(mesh.material);
+      }
+      for (const c of o.children) visit(c, here);
+    };
+    visit(this.root, null);
+    for (const r of this.extraRoots) visit(r, null);
     this.refresh();
+  }
+
+  /** The exported unlit material behind either twin. */
+  private baseOf(m: Material): Material {
+    const back = this.lit.get(m) ?? this.litSecondary.get(m);
+    return back && back instanceof MeshBasicMaterial ? back : m;
+  }
+
+  /**
+   * The block-1 twin: a Lambert material whose shader takes block 1's
+   * direction, colour and ambient from uniforms and none of the scene's
+   * lights.
+   */
+  private secondaryTwinOf(m: Material): Material {
+    if (!(m instanceof MeshBasicMaterial)) return m;
+    let twin = this.litSecondary.get(m);
+    if (!twin) {
+      const w = this.twinOf(m) as MeshLambertMaterial;
+      const t = w.clone();
+      t.userData = { ...m.userData, secondaryLit: true };
+      const inner = m.onBeforeCompile;
+      t.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms,
+                           renderer: WebGLRenderer) => {
+        inner?.call(m, shader, renderer);
+        shader.uniforms.secAmbient = secAmbient;
+        shader.uniforms.secColor = secColor;
+        shader.uniforms.secDirView = secDirView;
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>", "#include <common>\nuniform vec3 "
+                   + "secAmbient;\nuniform vec3 secColor;\nuniform vec3 secDirView;")
+          .replace("#include <lights_fragment_begin>", SECONDARY_LIGHTS);
+      };
+      t.customProgramCacheKey = () => "secondarylit";
+      twin = t;
+      this.litSecondary.set(m, twin);
+      this.litSecondary.set(twin, m);
+    }
+    return twin;
   }
 
   /** The Lambert twin of an unlit material, built once and cached both ways. */

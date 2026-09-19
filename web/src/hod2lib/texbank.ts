@@ -170,6 +170,77 @@ export function decode(data: Uint8Array, off: number,
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// PAL4 -- the screen banks
+// ---------------------------------------------------------------------------
+
+/**
+ * `DecodeTextureToSurface`'s surface format per descriptor pixel format (the
+ * table at 0x00571250): 0 -> 5 (1555 kept), 1 -> 2 (565), 2 -> 6 (4444). The
+ * palette entries are ARGB1555 whatever the texture's format, and are
+ * converted to the surface's on the way in.
+ */
+const PAL4_SURFACE: Record<number, number> = { 0: 5, 1: 2, 2: 6 };
+
+/**
+ * The nibble index `DecodeTextureToSurface` reads for pixel (x, y): the
+ * Morton index, with the texture cut into h-wide square blocks along x once x
+ * reaches h. For w >= h that is {@link twiddledIndex}; for a texture taller
+ * than wide it is plain Morton, which agrees with it at 2:1 and not beyond.
+ * `[likely]` -- which of the loop's two bounds is the height is read off
+ * Ghidra's stack locals.
+ */
+export function pal4Index(x: number, y: number, _w: number,
+                          h: number): number {
+  if (x >= h) return Math.floor(x / h) * h * h + morton(x % h, y);
+  return morton(x, y);
+}
+
+function pal4Colour(p: number, surface: number, out: Uint8Array,
+                    o: number): void {
+  if (surface === 2) {
+    rgb565((((p & 0xffe0) << 1) | (p & 0x1f)) & 0xffff, out, o);
+  } else if (surface === 6) {
+    const a = p & 0x8000 ? 0xf : 0;
+    argb4444((a << 12) | (((p >> 11) & 0xf) << 8) | (((p >> 6) & 0xf) << 4)
+             | ((p >> 1) & 0xf), out, o);
+  } else {
+    argb1555(p, out, o);
+  }
+}
+
+/** Decode a layout-5 texture to RGBA8888, in texture row order. */
+export function decodePal4(data: Uint8Array, off: number, w: number,
+                           h: number, pixfmt: number,
+                           palette: readonly number[]): Uint8Array {
+  const surface = PAL4_SURFACE[pixfmt] ?? 5;
+  const colours = new Uint8Array(16 * 4);
+  for (let i = 0; i < 16; i++) pal4Colour(palette[i] ?? 0, surface, colours, i * 4);
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = pal4Index(x, y, w, h);
+      const n = (data[off + (i >> 1)] >> ((i & 1) * 4)) & 0xf;
+      out.set(colours.subarray(n * 4, n * 4 + 4), (y * w + x) * 4);
+    }
+  }
+  return out;
+}
+
+/**
+ * Row 0 last. `DrawSpriteQuadCommand` (0x004A7AB0) puts v = 0 on the sprite's
+ * bottom edge, so a screen texture is stored upside down relative to the
+ * picture it shows; this turns it the right way up.
+ */
+export function flipRows(rgba: Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(rgba.length);
+  const stride = w * 4;
+  for (let y = 0; y < h; y++) {
+    out.set(rgba.subarray(y * stride, (y + 1) * stride), (h - 1 - y) * stride);
+  }
+  return out;
+}
+
 /** Collect `textureId -> TexDesc` from parsed models. */
 export function harvestDescriptors(models: Model[]): Map<number, TexDesc> {
   const out = new Map<number, TexDesc>();

@@ -77,6 +77,7 @@ export interface ViewportRefs {
   shutterTop: RefObject<HTMLDivElement | null>;
   shutterBottom: RefObject<HTMLDivElement | null>;
   message: RefObject<HTMLDivElement | null>;
+  screen: RefObject<HTMLCanvasElement | null>;
   crosshair: RefObject<HTMLDivElement | null>;
 }
 
@@ -139,6 +140,13 @@ export function Viewport(
             first `draw` the div is empty, which has no box and paints
             nothing. */}
         <div className="screen-message" ref={refs.message} />
+        {/* The game's 640x480 screen, for the readouts `DrawScreenSprite`
+            draws -- the lives, the bullets, the RELOAD prompt. A canvas so
+            that `hud/` draws into it rather than growing nodes inside an
+            element React renders; the backing store is the game's own pixel
+            grid and the stylesheet fits it to a 4:3 box. */}
+        <canvas className="hud-screen" ref={refs.screen} width={640}
+                height={480} />
       </div>
       <div className="crosshair" ref={refs.crosshair} hidden={!aiming} />
     </div>

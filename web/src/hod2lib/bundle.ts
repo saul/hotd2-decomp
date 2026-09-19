@@ -37,7 +37,13 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
 import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
+// Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
+// from, as data, and the exporter must put exactly those textures in.
+import { HUD_READOUT_SPRITES } from "../game/hud_sprites";
 import { f32, i16, i32, u32 } from "./bytes";
+import * as C from "./container";
+import { encodeRgba } from "./png";
+import * as texbank from "./texbank";
 import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
   from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
@@ -48,7 +54,7 @@ import * as evtlib from "./evt";
 import type { Spawn } from "./evt";
 import type { ExeTables } from "./exetab";
 import * as gltf from "./gltf";
-import type { BundleSink, Deflate, Progress } from "./io";
+import type { AssetSource, BundleSink, Deflate, Progress } from "./io";
 import { loadBank } from "./mot";
 import { dumpsIndented, dumpsStrict } from "./pyjson";
 import * as propslib from "./props";
@@ -1628,6 +1634,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
   scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};
+  scriptJson.hud_sprites = await hudSpritesJson(tables, stage.source, deflate);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;
@@ -1736,6 +1743,92 @@ export async function writeManifest(
   if (notes) doc.notes = notes;
   await sink.write("manifest.json", dumpsIndented(doc));
   return "manifest.json";
+}
+
+/**
+ * The screen sprites the in-play HUD draws, as images the right way up.
+ *
+ * `DrawScreenSprite` (`0x0041C6D0`) names a sprite by id; the id picks a
+ * `tex/` bank and a global texture slot out of two tables in the exe
+ * (`ExeTables.screenSprite`), the slot picks the bank's descriptor, and every
+ * one the HUD uses is a PAL4 texture of `tex/scr_common.bin` with its palette
+ * out of `g_texture_palette_table`. The quad the game draws puts texture row 0
+ * at the sprite's bottom edge (`DrawSpriteQuadCommand`, `0x004A7AB0`), so the
+ * image is flipped here and the client draws it as it comes.
+ *
+ * In `script.json` rather than beside it: the same two dozen small images in
+ * every stage, a few kilobytes, and the loader and its cache already carry
+ * that file. A sprite that will not resolve is left out and recorded.
+ */
+export async function hudSpritesJson(tables: ExeTables, source: AssetSource,
+                                     deflate: Deflate):
+    Promise<Record<string, { w: number; h: number; png: string }>> {
+  const out: Record<string, { w: number; h: number; png: string }> = {};
+  const banks = new Map<string, Uint8Array | null>();
+  for (const id of HUD_READOUT_SPRITES) {
+    const key = String(id);
+    if (key in out) continue;
+    const hit = tables.screenSprite(id);
+    if (!hit) {
+      degraded.note("hudSpritesJson", `sprite 0x${id.toString(16)}`,
+                    "that HUD sprite", "no bank or slot");
+      continue;
+    }
+    const [bank, e, pal] = hit;
+    let data = banks.get(bank);
+    if (data === undefined) {
+      const path = `tex/${bank}.bin`;
+      if (await source.exists(path)) {
+        const raw = await source.read(path);
+        const tc = C.load(raw);
+        data = tc.kind === C.COMPRESSED ? tc.data : raw;
+      } else {
+        data = null;
+      }
+      banks.set(bank, data);
+    }
+    if (!data) {
+      degraded.note("hudSpritesJson", `sprite 0x${id.toString(16)}`,
+                    "that HUD sprite", `no tex/${bank}.bin`);
+      continue;
+    }
+    let rgba: Uint8Array;
+    if (e.layout === 5) {
+      if (!pal || e.offset + (e.width * e.height) / 2 > data.length) {
+        degraded.note("hudSpritesJson", `sprite 0x${id.toString(16)}`,
+                      "that HUD sprite", "no palette, or past the bank");
+        continue;
+      }
+      rgba = texbank.decodePal4(data, e.offset, e.width, e.height, e.pixfmt,
+                                pal);
+    } else {
+      rgba = texbank.decode(data, e.offset, {
+        width: e.width, height: e.height, pixfmt: e.pixfmt, vq: e.vq,
+        mipmap: false, twiddled: e.twiddled,
+      });
+    }
+    const png = await encodeRgba(e.width, e.height,
+                                 texbank.flipRows(rgba, e.width, e.height),
+                                 deflate);
+    out[key] = { w: e.width, h: e.height,
+                 png: `data:image/png;base64,${base64(png)}` };
+  }
+  return out;
+}
+
+const B64 =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** RFC 4648 base64, the same in a browser and in node. */
+function base64(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i += 3) {
+    const n = (b[i] << 16) | ((b[i + 1] ?? 0) << 8) | (b[i + 2] ?? 0);
+    s += B64[(n >> 18) & 63] + B64[(n >> 12) & 63]
+      + (i + 1 < b.length ? B64[(n >> 6) & 63] : "=")
+      + (i + 2 < b.length ? B64[n & 63] : "=");
+  }
+  return s;
 }
 
 /**

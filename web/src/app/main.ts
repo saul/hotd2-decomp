@@ -25,7 +25,7 @@ import { type Manifest } from "../bundle";
 import type { SoundJson } from "../bundle/scene";
 import type { ScriptJson } from "../bundle/stage";
 import { CamPaths } from "../game/camera/curve";
-import { QueueShotRequest } from "../game/combat/shot";
+import { QueueOffscreenPull, QueueShotRequest } from "../game/combat/shot";
 import {
   ActorDrawsSceneLit, EntityLightLive, GUN_LIGHT_FIRST, PROJECTION_DISTANCE_PX,
   SetPlayerAimFromPointer,
@@ -393,6 +393,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray);
       this.pacer.wake();
     };
+    // The right button is a pull **off the screen**, because that is what the
+    // exe makes of it: the PC mouse is a gun (`InputMapDevicesToMaple`,
+    // `FUN_0041E530`), its right button is `g_mouse_gun_offscreen_pull`, and a
+    // gun reloads by shooting outside the screen. Same transport rule as a
+    // click. `R` below is the port's own second way to say the same thing.
+    this.shooting.onOffscreenPull = () => this.offscreenPull();
     // The aim, as `PollPlayerAimInput`'s mouse arm would record it: pixels
     // from the centre of the engine's frame, `+y` up. The frame is whatever
     // the camera's own field of view spans at `g_projection_distance_px`, so
@@ -534,7 +540,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // it is built at the end of `frame`, outside the tick, because a world
     // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
-                                    (ctx) => this.hudLayer.draw(ctx.walker)));
+                                    (ctx) => this.hudLayer.draw(ctx.walker,
+                                                            G.g_screen_sprites)));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
@@ -981,6 +988,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // The pad's START for player 1 (`g_pad_state` bit 8): a new game from
       // "out", a continue during the countdown. See `PadStartPressed`.
       else if (e.code === "KeyS") this.padLatch |= PadBit.Start0;
+      // Reload. `[port-only]` as a key: the exe's mouse reloads with its right
+      // button, which is a pull off the screen, and `R` is mapped onto exactly
+      // that pull -- not onto a pad bit, because the gun's binding set in
+      // `g_input_bindings_default` has no reload bit to press.
+      else if (e.code === "KeyR") this.offscreenPull();
     });
 
     window.addEventListener("popstate", () => {
@@ -1085,6 +1097,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * The whole feature is live in the retail game -- region, Start poll, watcher
    * task, and every consumer of the flag. See `Walker.skipRequested`.
    */
+  /**
+   * One trigger pull outside the screen for player 1 -- the mouse-gun's
+   * reload. Queued only while the clock can consume it, as a click is.
+   */
+  offscreenPull(): void {
+    if (this.gameRunning && !this.frozen) QueueOffscreenPull(0);
+    this.pacer.wake();
+  }
+
   requestSkip(): void {
     const w = this.walker;
     if (!w || !w.requestSkip()) return;

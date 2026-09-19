@@ -377,7 +377,9 @@ body.resizing { cursor: col-resize; user-select: none; }
    view the way the game's fixed 11.2 px advance tracks its 640-wide screen. */
 .hud-layer {
   position: absolute; inset: 0; pointer-events: none;
-  container-type: inline-size;
+  /* `size` rather than `inline-size` so `.hud-screen` can fit a 4:3 box by
+     both axes; the caption's `cqw` reads the same either way. */
+  container-type: size;
   /* Above the canvas, below the tool's own bars. The layer is rendered after
      the skip and branch bars -- it used to be appended after them, and since
      step 26 React renders it there -- so without this the closed letterbox,
@@ -416,6 +418,13 @@ body.resizing { cursor: col-resize; user-select: none; }
   text-overflow: ellipsis;
 }
 .screen-message[hidden] { display: none; }
+/* The game's 640x480 screen, the largest 4:3 box that fits and centred --
+   which is exactly the pillarboxed view, and the middle of an unboxed one. */
+.hud-screen {
+  position: absolute; left: 50%; top: 50%;
+  width: min(100cqw, 133.3333cqh); height: min(75cqw, 100cqh);
+  transform: translate(-50%, -50%);
+}
 
 /* ---- overlays ---- */
 

@@ -32,10 +32,12 @@
  *
  * `[diverges]` **The draws.** The `+0x80` hook places the player's entity on
  * the view (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`), `PlayerHookDrawBody`
- * draws the body, and every handler draws its own HUD -- crosshair, lives, ammo,
- * the continue digit, "GAME OVER", "PRESS START". Those are the renderer's and
+ * draws the body, and every handler draws its own HUD -- crosshair, the
+ * continue digit, "GAME OVER", "PRESS START". Those are the renderer's and
  * the HUD's and read the state this module writes. The damage overlay's state
- * half is ported (`effects/damage_overlay.ts`) and runs from here.
+ * half is ported (`effects/damage_overlay.ts`) and runs from here, and so are
+ * the lives, the bullets and the RELOAD prompt (`hud_readout.ts`), which keep
+ * state of their own and record what they draw.
  * `PlayerEnterPlay`'s crosshair zeroing is left out: the engine re-polls the
  * aim the next frame, and the port's aim is written on pointer moves only, so
  * zeroing it would park the gun light in the middle of the
@@ -43,7 +45,12 @@
  */
 import type { Events } from "../core/events";
 import { CommitAppState, RequestAppState } from "./app_state";
-import { PlayerFireFromQueue, ShotRequestDue } from "./combat/shot";
+import { FirstDueShotRequest } from "./combat/shot";
+import { HudDrawAmmoAndReloadPrompt, HudDrawLives } from "./hud_readout";
+import {
+  OriginalWeaponLoadFireParams, PlayerFireAndReloadUpdate,
+  PlayerFireOriginalModeWeapon,
+} from "./player_gun";
 import { ScoreAddForPlayer } from "./combat/score";
 import { DamageOverlayClear, DamageOverlayUpdateAndDraw, PlayerCameraHook,
   PlayerRunCameraHook, UpdateScreenShake } from "./effects/damage_overlay";
@@ -224,6 +231,10 @@ export function PlayerEnterPlay(player: number, mode: number,
   G.g_damage_overlays[player].frames = 0;
   G.g_player_invuln_frames[player] = row.invuln;
   G.g_player_continue_timer[player] = 0;
+  // `+0x1E` and `+0x20` of the player block: the empty latch and the RELOAD
+  // prompt's timer.
+  G.g_player_magazine_empty[player] = 0;
+  G.g_player_reload_prompt_timer[player] = 0;
   // The six slots of each shot-effect ring this player owns, and the cursor.
   const ring = G.g_shot_tracer_ring.length / 2;
   for (let i = 0; i < ring; i++) {
@@ -235,6 +246,7 @@ export function PlayerEnterPlay(player: number, mode: number,
   G.g_shot_effect_cursor[player] = 0;
   if (G.g_GameMode === GameMode.Original) {
     G.g_player_ammo[player] = G.g_player_magazine_size[player];
+    OriginalWeaponLoadFireParams(player);
   } else {
     G.g_player_ammo[player] = ARCADE_AMMO;
   }
@@ -250,6 +262,7 @@ export function PlayerEnterPlay(player: number, mode: number,
     // 6, weapon kind 0, sound kind 0, `+0x0B` 3; `+0x0C` 1.0.
     G.g_player_magazine_size[player] = ARCADE_AMMO;
     G.g_original_weapon_kind[player] = 0;
+    G.g_original_fire_mode[player] = 0;
   }
   PlayerSetState(row.state, 0, player);
   G.g_player_task[player] = PlayerTask.InPlay;
@@ -497,7 +510,7 @@ export function PlayerPendingStart(player: number, f: PlayerFrame): void {
 /** `PlayerStateFireOnly` — `FUN_00414740`. Six rounds and the trigger. */
 export function PlayerStateFireOnly(player: number, f: PlayerFrame): void {
   G.g_player_ammo[player] = FIRE_ONLY_AMMO;
-  PlayerFireFromQueue(player, f.host, f.rng, f.events);
+  PlayerFireAndReloadUpdate(player, f);
 }
 
 /**
@@ -508,8 +521,13 @@ export function PlayerStateFireOnly(player: number, f: PlayerFrame): void {
  * and outside states 5 and 9 of the app, **the frame lives reach 0** the player
  * leaves play: `g_players_in_play` drops and state 4, the continue, is
  * installed -- or, in Training, `g_training_out` is raised instead. A
- * player with lives takes the shown copy. Then, only in a demo run, a start
- * press can join.
+ * player with lives gets the HUD -- the bullets and the RELOAD prompt while
+ * the firing gate is up (`0x00413F63`), the lives always -- and takes the
+ * shown copy. Then, only in a demo run, a start press can join.
+ *
+ * `HudDrawCrosshair` (`FUN_004169C0`) and `PlayerShotEffectsThink`
+ * (`FUN_00416B00`) sit between the trigger and the HUD; the crosshair is the
+ * UI's reticle and the shot rings are stepped by `ShotEffectsTick`.
  */
 export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
   // The `+0x80` hook (`PlacePlayerEntityFromViewPose`) is the renderer's.
@@ -518,7 +536,11 @@ export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
   if (G.g_app_state === AppState.Attract) G.g_player_lives[player] = 1;
   if (!(G.g_player_lives[player] > 0)) G.g_player_lives[player] = 0;
   if (G.g_player_lives[player] !== 0) {
-    PlayerFireFromQueue(player, f.host, f.rng, f.events);
+    if (G.g_GameMode === GameMode.Original) {
+      PlayerFireOriginalModeWeapon(player, f);
+    } else {
+      PlayerFireAndReloadUpdate(player, f);
+    }
   }
   if (G.g_app_state !== 9 && G.g_app_state !== AppState.Attract) {
     if (G.g_player_lives[player] === 0) {
@@ -529,6 +551,8 @@ export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
         PlayerSetState(PlayerState.Continue, 1, player);
       }
     } else {
+      if (G.g_nFiringGate !== 0) HudDrawAmmoAndReloadPrompt(player, f.events);
+      HudDrawLives(player);
       G.g_player_lives_shown[player] = G.g_player_lives[player];
     }
   }
@@ -572,11 +596,26 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
  * allocates them, which puts them at the head of every scene's task list, and
  * the `SelectAttackablePlayer` task allocated after them.
  * The trigger bit is derived from the shot queue first; see
- * {@link G.g_trigger_down}.
+ * {@link G.g_trigger_down}. So is the aim's on-screen bit, for the one frame
+ * a pull off the screen stands for: `MouseGunResolvePull` (`FUN_0041EB30`)
+ * puts the mouse-gun at `(0xFFFF, 0xFFFF)` for the frame of a right click
+ * and the next frame reads the mouse again, which the port's pointer always
+ * has on the screen. The frame's screen sprites start empty here, because
+ * the player tasks are what draw them.
  */
 export function PlayerTasksRun(f: PlayerFrame): void {
-  for (let p = 0; p < 2; p++) G.g_trigger_down[p] = ShotRequestDue(p) ? 1 : 0;
+  G.g_screen_sprites = [];
+  const offscreen = [false, false];
+  for (let p = 0; p < 2; p++) {
+    const r = FirstDueShotRequest(p);
+    G.g_trigger_down[p] = r ? 1 : 0;
+    if (r && r.onScreen === 0) {
+      G.g_aim_on_screen[p] = 0;
+      offscreen[p] = true;
+    }
+  }
   for (let p = 0; p < 2; p++) PlayerTaskRun(p, f);
+  for (let p = 0; p < 2; p++) if (offscreen[p]) G.g_aim_on_screen[p] = 1;
   SelectAttackablePlayer();
 }
 
@@ -621,6 +660,11 @@ export function PlayerBlockBoot(): void {
   G.g_player_invuln_frames = [0, 0];
   G.g_player_ammo = [0, 0];
   G.g_player_magazine_size = [ARCADE_AMMO, ARCADE_AMMO];
+  G.g_player_magazine_empty = [0, 0];
+  G.g_player_reload_prompt_timer = [0, 0];
+  G.g_hud_ammo_slide = [0, 0];
+  G.g_original_fire_mode = [0, 0];
+  G.g_original_fire_latches = [[0, 0, 0, 0], [0, 0, 0, 0]];
   G.g_player_continue_timer = [0, 0];
   G.g_player_credit_seen = [[0, 0, 0, 0], [0, 0, 0, 0]];
   G.g_player_gameover_timer = [0, 0];
@@ -733,6 +777,9 @@ const PLAYER_BLOCK_FIELDS = [
   "g_free_play", "g_credits_per_player", "g_credits_to_start",
   "g_credits_to_continue", "g_title_start_armed", "g_screen_furniture_flags",
   "g_start_lives", "g_app_state", "g_nRunPhase", "g_original_weapon_kind",
+  "g_player_magazine_empty", "g_player_reload_prompt_timer", "g_hud_ammo_slide",
+  "g_player_input_is_gun", "g_player_pad_kind", "g_player_infinite_ammo",
+  "g_original_fire_mode", "g_original_fire_latches",
 ] as const;
 
 /**

@@ -20,7 +20,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-__all__ = ["TexDesc", "decode", "harvest_descriptors", "solve_layout", "Bank"]
+__all__ = ["TexDesc", "decode", "harvest_descriptors", "solve_layout", "Bank",
+           "decode_pal4", "pal4_index", "flip_rows"]
 
 VQ_CODEBOOK_BYTES = 2048  # 256 entries x 2x2 pixels x 2 bytes
 
@@ -149,6 +150,69 @@ def decode(data: bytes, off: int, d: TexDesc) -> bytearray:
             r, g, b, a = conv(px16[src])
             o = (y * w + x) * 4
             out[o : o + 4] = bytes((r, g, b, a))
+    return out
+
+
+# --------------------------------------------------------------------------
+# PAL4 -- the screen banks
+# --------------------------------------------------------------------------
+
+#: DecodeTextureToSurface's surface format per descriptor pixel format
+#: (the table at 0x00571250): 0 -> 5 (1555 kept), 1 -> 2 (565), 2 -> 6 (4444).
+#: The palette entries are ARGB1555 whatever the texture's format, and are
+#: converted to the surface's on the way in.
+_PAL4_SURFACE = {0: 5, 1: 2, 2: 6}
+
+
+def pal4_index(x: int, y: int, w: int, h: int) -> int:
+    """The nibble index DecodeTextureToSurface reads for pixel (x, y).
+
+    The Morton index of (x, y), with the texture cut into h-wide square blocks
+    along x once x reaches h. For w >= h that is twiddled_index; for a texture
+    taller than wide it is plain Morton, which agrees with twiddled_index for
+    2:1 and not beyond. [likely] -- which of the loop's two bounds is the
+    height is read off Ghidra's stack locals.
+    """
+    if x >= h:
+        return (x // h) * h * h + _morton(x % h, y)
+    return _morton(x, y)
+
+
+def _pal4_colour(p: int, surface: int) -> tuple[int, int, int, int]:
+    if surface == 2:                      # (v & 0xFFE0) << 1 | v & 0x1F
+        return _rgb565(((p & 0xFFE0) << 1 | p & 0x1F) & 0xFFFF)
+    if surface == 6:                      # 1555 -> 4444
+        a = 0xF if p & 0x8000 else 0
+        q = (a << 12) | (((p >> 11) & 0xF) << 8) | (((p >> 6) & 0xF) << 4) \
+            | ((p >> 1) & 0xF)
+        return _argb4444(q)
+    return _argb1555(p)
+
+
+def decode_pal4(data: bytes, off: int, w: int, h: int, pixfmt: int,
+                palette: list[int]) -> bytearray:
+    """Decode a layout-5 texture to RGBA8888, in texture row order."""
+    surface = _PAL4_SURFACE.get(pixfmt, 5)
+    colours = [_pal4_colour(c, surface) for c in palette]
+    out = bytearray(w * h * 4)
+    for y in range(h):
+        for x in range(w):
+            i = pal4_index(x, y, w, h)
+            n = (data[off + (i >> 1)] >> ((i & 1) * 4)) & 0xF
+            o = (y * w + x) * 4
+            out[o:o + 4] = bytes(colours[n])
+    return out
+
+
+def flip_rows(rgba: bytes | bytearray, w: int, h: int) -> bytearray:
+    """Row 0 last. DrawSpriteQuadCommand (0x004A7AB0) puts v = 0 on the
+    sprite's bottom edge, so a screen texture is stored upside down relative
+    to the picture it shows; this turns it the right way up."""
+    out = bytearray(len(rgba))
+    stride = w * 4
+    for y in range(h):
+        out[(h - 1 - y) * stride:(h - y) * stride] = \
+            rgba[y * stride:(y + 1) * stride]
     return out
 
 

@@ -242,6 +242,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // are bundle data and belong here.
   p.hudLayer.messages =
     (g) => screenMessage(bundle.script.sound?.messages?.[String(g)]?.[0] ?? null);
+  // ...and the HUD readouts' images, which are bundle data in the same way.
+  const hudSprites = bundle.script.hud_sprites ?? {};
+  p.hudLayer.spriteImages = (id) => {
+    const s = hudSprites[String(id)];
+    return s ? { w: s.w, h: s.h, url: s.png } : null;
+  };
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);

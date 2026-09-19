@@ -13,7 +13,7 @@
  * reach it and no snapshot could describe it.
  *
  * So the click becomes **input**: `QueueShotRequest` puts a segment on
- * `g_shot_requests`, and `PlayerFireFromQueue` drains it from the player's own task in
+ * `g_shot_requests`, and `TakeDueShotRequests` drains it from the player's own task in
  * `GameUpdate`. That is the shape the engine already has — `BuildShotRay`
  * (`FUN_00406110`) writes the per-player shot record and the game loop reads
  * it — and it buys the thing the plan has wanted since the beginning: the
@@ -92,6 +92,15 @@ export interface ShotRequest {
   /** `g_frame` when the trigger was pulled — what a replay log re-times to. */
   frame: number;
   ray: ShotRay;
+  /**
+   * `g_aim_on_screen` (`0x009C8FD0`) at the pull: 1 for a click on the
+   * scene, 0 for a pull **outside the screen**. The port's pointer is the PC
+   * mouse, which `InputMapDevicesToMaple` (`FUN_0041E530`) makes a *gun*
+   * (input modes 5 and 6), and a gun reloads by shooting off the screen --
+   * `MouseGunResolvePull` (`FUN_0041EB30`) turns the mouse's right button
+   * into exactly that. See {@link QueueOffscreenPull}.
+   */
+  onScreen: number;
 }
 
 /**
@@ -139,6 +148,30 @@ export function QueueShotRequest(player: number, ray: ShotRay): void {
       origin: { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z },
       dir: { x: ray.dir.x, y: ray.dir.y, z: ray.dir.z },
     },
+    onScreen: 1,
+  });
+}
+
+/**
+ * Put one trigger pull **outside the screen** on the queue.
+ *
+ * `[port-only]` as a queue entry, like {@link QueueShotRequest}; what it
+ * stands for is the engine's. On PC the mouse is a gun
+ * (`InputMapDevicesToMaple`, `FUN_0041E530`, input modes 5 and 6), its right
+ * button raises `g_mouse_gun_offscreen_pull` (`0x007DB7C8`), and
+ * `MouseGunResolvePull` (`FUN_0041EB30`) turns that into a shot at
+ * `(0xFFFF, 0xFFFF)` -- a pull with the aim off the screen. The gun arm of
+ * `PlayerFireAndReloadUpdate` (`FUN_00414940`) fires nothing for it and
+ * refills the magazine instead, which is the only way a gun reloads: the
+ * gun's binding set in `g_input_bindings_default` (`0x004C42A8`) has no reload
+ * bit. The ray is never built, so it is left at the origin.
+ */
+export function QueueOffscreenPull(player: number): void {
+  G.g_shot_requests.push({
+    player,
+    frame: Math.round(G.g_frame),
+    ray: { origin: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: -1 } },
+    onScreen: 0,
   });
 }
 
@@ -172,17 +205,30 @@ export function ShotRequestDue(player: number): boolean {
 }
 
 /**
- * Resolve `player`'s due trigger pulls -- the port's half of the trigger poll
- * in `PlayerFireAndReloadUpdate` (`FUN_00414940`) and its Original Mode twin
- * `PlayerFireOriginalModeWeapon` (`FUN_00414B90`).
+ * The first of `player`'s pulls that falls due this frame, or null.
  *
- * `[port-only]` -- the loop around the engine's per-frame shot test, which has
- * no queue to drain. Everything inside it is transcribed. **Only the player's
- * own task calls it**, from `PlayerUpdateInPlay` (`FUN_00413E90`) while it has
- * a life, or `PlayerStateFireOnly` (`FUN_00414740`): a player out of lives, in
- * the continue countdown or out of the game does not fire at all, which is the
- * engine's shape. It used to drain every request at the head of `GameUpdate`
- * whatever state the player was in.
+ * `[port-only]` -- what the engine's `PollPlayerAimInput` (`FUN_0040CBB0`)
+ * would have read off the device this frame: whether the trigger is down,
+ * and whether the aim is on the screen.
+ */
+export function FirstDueShotRequest(player: number): ShotRequest | null {
+  const now = Math.round(G.g_frame);
+  return G.g_shot_requests.find((r) => r.player === player && r.frame <= now)
+    ?? null;
+}
+
+/**
+ * Take `player`'s due trigger pulls off the queue, in the order they were
+ * made.
+ *
+ * `[port-only]` -- the loop around the engine's per-frame trigger poll, which
+ * has no queue to drain. `PlayerFireAndReloadUpdate` (`FUN_00414940`) runs its
+ * trigger block once for each, so a click and an off-screen pull made on the
+ * same frame -- a harness's volley with its reloads between -- land in order.
+ * **Only the player's own task calls it**, from `PlayerUpdateInPlay`
+ * (`FUN_00413E90`) while it has a life, or `PlayerStateFireOnly`
+ * (`FUN_00414740`): a player out of lives, in the continue countdown or out
+ * of the game does not fire at all, which is the engine's shape.
  *
  * **`req.frame` is read, which is what makes the queue a log rather than a
  * list.** A request is resolved on the frame it was pulled on, or on the first
@@ -192,15 +238,13 @@ export function ShotRequestDue(player: number): boolean {
  * that makes the shots land where they landed rather than all at once on the
  * frame the log was loaded.
  */
-export function PlayerFireFromQueue(player: number, host: GameHost, rng: Rng,
-                                    events?: Events): void {
+export function TakeDueShotRequests(player: number): ShotRequest[] {
   const queued = G.g_shot_requests;
-  if (!queued.length) return;
+  if (!queued.length) return [];
   const now = Math.round(G.g_frame);
   const due = queued.filter((r) => r.player === player && r.frame <= now);
-  if (!due.length) return;
-  G.g_shot_requests = queued.filter((r) => !due.includes(r));
-  for (const req of due) ResolveShotRequest(req, host, rng, events);
+  if (due.length) G.g_shot_requests = queued.filter((r) => !due.includes(r));
+  return due;
 }
 
 /**
@@ -215,46 +259,35 @@ export function DropDueShotRequests(): void {
 }
 
 /**
- * One request, from segment to score. `[port-only]` — see above.
+ * One shot, from `BuildShotRay` to the score -- the fire block of
+ * `PlayerFireAndReloadUpdate` (`FUN_00414940`) from its `g_nPlayerFired` on,
+ * and what `ProcessPlayerShots` (`FUN_00404570`) then does with the ray.
+ * `[port-only]` as a function; its caller has already taken the round and
+ * passed the firing gate, and every line inside is transcribed.
  *
- * ## The firing gate is the first thing it asks
+ * ## The firing gate, and the magazine, are the caller's
  *
- * `PlayerFireAndReloadUpdate` (`FUN_00414940`) is shaped
+ * `PlayerFireAndReloadUpdate` is shaped
  *
  * ```c
- * if (trigger_latch) {
- *   if (magazine empty)          { auto-refill }
- *   else if (g_nFiringGate != 0) { ammo--; shots++; BuildShotRay();
+ * if (trigger) {
+ *   if (!on_screen || ammo == 0) { a gun off the screen reloads }
+ *   else if (g_nFiringGate != 0) { ammo--; fired; shots++; BuildShotRay();
  *                                  PlayerShotEffectSpawn(); gunshot(); }
  * }
  * ```
  *
- * so a trigger pulled while the gate is down does **nothing at all** — it
- * returns before the ammo decrement, before the shot counter, before
- * `BuildShotRay` and before `PlayerShotEffectSpawn`, which is why a shutter
- * that is closed for a cutscene produces no muzzle flash and no tracer either.
- * That distinction is the whole behaviour, so the test is here, above
- * `g_nPlayerFired` and above the effect spawn, and not at the pointer.
- *
- * The request is **dropped**, not held: the engine polls the trigger once a
- * frame and a blocked poll is simply a frame in which nothing happened. A
- * queue that saved the click for later would fire it when the shutter opened,
- * which the engine never does. `PlayerFireFromQueue` has already taken every
- * due request off the queue by the time this runs, so returning is the drop.
- *
- * What is **not** gated, because the engine does not gate it: reloading. Both
- * the auto-refill-when-empty path and the reload button run with the gate
- * down, and only `PlayerRefillMagazine`'s sound is held back (`0x00414B75`).
- * The port has no ammo and no magazine, so there is nothing here to exempt —
- * see `docs/PLAYER_PROGRESS.md`.
+ * so a trigger pulled while the gate is down does **nothing at all** — no
+ * round, no shot counter, no `BuildShotRay`, no `PlayerShotEffectSpawn`, which
+ * is why a shutter that is closed for a cutscene produces no muzzle flash and
+ * no tracer either -- and a trigger pulled on an empty gun does nothing either.
+ * Both tests are in `game/player_gun.ts` now, where the routine is.
  */
-function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
-                            events?: Events): void {
+export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
+                                events?: Events,
+                                gunshot: number =
+                                  g_gunshot_sound_ids[req.player] ?? 0): void {
   const player = req.player;
-  // `g_nFiringGate` — `0x009C8E00`. The test is at 0x004149BE in the arcade
-  // routine and at 0x00414C2D in the Original Mode twin at 0x00414B90, which
-  // is the same shape with a per-weapon magazine and a recoil spread.
-  if (G.g_nFiringGate === 0) return;
   // `g_crosshair_x/y`, as the ray `BuildShotRay` makes of them -- see
   // `G.g_crosshair_ray`.
   G.g_crosshair_ray[player] = {
@@ -270,18 +303,9 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // ...and the gunshot is the line after it, which is where this one is. The
   // whole of `PlayerFireAndReloadUpdate`'s tail is `BuildShotRay`,
   // `PlayerShotEffectSpawn`, `PlaySoundId(g_gunshot_sound_ids[player])`, in
-  // that order, and the port had the first two.
-  //
-  // [diverges] The engine reaches that line only with a round in the magazine
-  // and `g_nFiringGate` open, and plays nothing at all on a dry trigger — the
-  // empty magazine goes to `PlayerRefillMagazine` (`FUN_00414B30`) and its
-  // `0x3E16A9` `COMMON\RELOAD1_44.WAV` instead. The port has neither ammo nor
-  // the gate (`g_player_ammo` and `g_nFiringGate` are both listed as absent in
-  // `globals.ts`), so every request that reaches here fires. That is the same
-  // divergence `PlayerShotEffectSpawn` on the line above already carries, and
-  // not a second one: the reload sound has nowhere to be played from until the
-  // magazine is ported. [open]
-  events?.emit("sound.play", { id: g_gunshot_sound_ids[player] ?? 0 });
+  // that order. The Original Mode twin picks its own id first, which is why
+  // the caller hands it in.
+  events?.emit("sound.play", { id: gunshot });
   const pick = host.pickShot?.(req.ray) ?? null;
   // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
   // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its

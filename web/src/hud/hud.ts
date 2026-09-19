@@ -204,6 +204,28 @@ export interface ShutterView {
 }
 
 /**
+ * One screen sprite to draw: `DrawScreenSprite`'s arguments as the engine
+ * recorded them. Structural, like {@link ShutterView}: the engine's type is
+ * `ScreenSprite` in `game/hud_readout.ts`, and `app/` hands its list across.
+ */
+export interface ScreenSpriteView {
+  id: number;
+  /** Top-left corner in the 640x480 screen, y down. */
+  x: number;
+  y: number;
+  /** Multiply the image's own size. */
+  sx: number;
+  sy: number;
+}
+
+/** One sprite's image: the texture's size and a URL for it. */
+export interface ScreenSpriteImage {
+  w: number;
+  h: number;
+  url: string;
+}
+
+/**
  * The four nodes this layer draws onto, handed over by `app/`.
  *
  * The layer used to build them itself and append the root into `#viewport`,
@@ -237,12 +259,28 @@ export interface HudElements {
   bottom: HTMLElement;
   /** `.screen-message`, the caption. This layer owns its `hidden`. */
   message: HTMLElement;
+  /**
+   * `.hud-screen`, a 640x480 canvas fitted to the game's 4:3 screen: the
+   * readouts `DrawScreenSprite` draws. This layer owns its pixels.
+   */
+  screen: HTMLCanvasElement;
 }
 
 export class Hud {
   private readonly top: HTMLElement;
   private readonly bottom: HTMLElement;
   private readonly message: HTMLElement;
+  private readonly screen: CanvasRenderingContext2D | null;
+
+  /**
+   * The screen sprites' images, by id. Installed by `app/` at stage load from
+   * the bundle; a sprite with none is not drawn.
+   */
+  spriteImages: (id: number) => ScreenSpriteImage | null = () => null;
+  /** Decoded images by URL, so a frame never waits on a decode twice. */
+  private readonly images = new Map<string, HTMLImageElement>();
+  /** What the screen last showed, as a string, so an unchanged frame costs nothing. */
+  private screenDrawn = "";
 
   /**
    * The dialogue table, by group. Installed by `app/` at stage load.
@@ -262,6 +300,7 @@ export class Hud {
     this.top = nodes.top;
     this.bottom = nodes.bottom;
     this.message = nodes.message;
+    this.screen = nodes.screen.getContext("2d");
     // The caption starts hidden because there is no caption until the script
     // starts one, and this layer is the only writer of that flag — React
     // renders the node and never touches its `hidden`, precisely so there is
@@ -276,9 +315,51 @@ export class Hud {
    * `app/` can register it with `drawSystem` and a load, a seek and an
    * ordinary frame all go through one path.
    */
-  draw(w: ShutterView | null): void {
+  draw(w: ShutterView | null,
+       sprites: readonly ScreenSpriteView[] = []): void {
     this.apply(w?.shutterState ?? 2, w?.shutterCounter ?? 0);
     this.drawLine(w?.captionGroup ?? -1, w?.captionFrames ?? 0);
+    this.drawSprites(sprites);
+  }
+
+  /**
+   * The frame's screen sprites, in the order the engine drew them.
+   *
+   * `DrawSpriteQuadCommand` (0x004A7AB0) draws the texture `w * sx` by
+   * `h * sy` from the top-left corner it is given, and the canvas's backing
+   * store is the game's 640x480, so that is the whole of the mapping. The
+   * images arrive the right way up from the exporter. An image still decoding
+   * is skipped and the frame is marked undrawn, so the next draw fills it in.
+   */
+  private drawSprites(sprites: readonly ScreenSpriteView[]): void {
+    const ctx = this.screen;
+    if (!ctx) return;
+    let key = "";
+    for (const s of sprites) key += `${s.id},${s.x},${s.y},${s.sx},${s.sy};`;
+    if (key === this.screenDrawn) return;
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    let complete = true;
+    for (const s of sprites) {
+      const src = this.spriteImages(s.id);
+      if (!src) continue;
+      const img = this.image(src.url);
+      if (!img.complete || img.naturalWidth === 0) {
+        complete = false;
+        continue;
+      }
+      ctx.drawImage(img, s.x, s.y, src.w * s.sx, src.h * s.sy);
+    }
+    this.screenDrawn = complete ? key : "";
+  }
+
+  private image(url: string): HTMLImageElement {
+    let img = this.images.get(url);
+    if (!img) {
+      img = new Image();
+      img.src = url;
+      this.images.set(url, img);
+    }
+    return img;
   }
 
   /**

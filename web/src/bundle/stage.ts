@@ -70,6 +70,12 @@ export interface ScriptJson {
   humanoids?: Record<string, HumanoidProgramJson>;
   /** Class 0x10's civilians: the exe's scripts, and who runs which. */
   civilians?: CiviliansJson;
+  /**
+   * The screen sprites the in-play HUD draws, by `DrawScreenSprite` id in
+   * decimal: the lives, the bullets, the RELOAD prompt. Absent in a bundle
+   * written before them, which draws no HUD readout.
+   */
+  hud_sprites?: Record<string, HudSpriteImage>;
   rain?: RainJson;
   /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
   coli?: ColiJson;
@@ -81,4 +87,15 @@ export interface StageBundle {
   script: ScriptJson;
   cam: CamJson;
   geometryUrl: string;
+}
+
+/**
+ * One screen sprite: its texture's size in the game's 640x480 pixels, and the
+ * texture as a PNG data URL, already the right way up (the game's quad draws
+ * texture row 0 at the bottom -- see `docs/formats/texbank.md`).
+ */
+export interface HudSpriteImage {
+  w: number;
+  h: number;
+  png: string;
 }

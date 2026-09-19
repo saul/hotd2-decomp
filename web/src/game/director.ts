@@ -27,6 +27,7 @@ import { RankEnemiesByDistance } from "./combat/rank";
 import { DropDueShotRequests } from "./combat/shot";
 import { CommitAppState } from "./app_state";
 import { PlayerTasksRun } from "./player_shell";
+import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { SeveredHeadsTick } from "./effects/severed_head";
@@ -547,6 +548,8 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   G.g_frame_counter += SecondsToTicks(dt);
   // ...and the third, the one `ResetSceneOnEnter` zeroes.
   G.g_scene_tick_counter += SecondsToTicks(dt);
+  // ...and the tick's next lines, the Hod2.ini auto-reload.
+  AutoReloadEmptyGuns(events);
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot

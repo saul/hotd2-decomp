@@ -336,11 +336,21 @@ function shootable(s) {
  */
 async function volley(page, box, cols = 5, rows = 4) {
   const COLS = cols, ROWS = rows;
+  // **A gun holds six.** `PlayerFireAndReloadUpdate` takes a round a shot and
+  // a pull on an empty gun does nothing, so a grid of twenty would be six
+  // shots and fourteen clicks. The player's mouse is a gun, and a gun reloads
+  // by a pull off the screen -- `R` is that pull -- so the volley reloads
+  // before it starts and after every sixth round. The pulls queue in the
+  // order they are made and the frame takes them in that order.
+  const MAGAZINE = 6;
+  await page.keyboard.press("KeyR");
+  let n = 0;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const x = box.x + (box.width * (c + 0.5)) / COLS;
       const y = box.y + (box.height * (r + 0.5)) / ROWS;
       await page.mouse.click(x, y);
+      if (++n % MAGAZINE === 0) await page.keyboard.press("KeyR");
     }
   }
   // **The pointer does not get left on the furniture.** The bottom row of the

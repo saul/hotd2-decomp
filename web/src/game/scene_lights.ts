@@ -196,12 +196,15 @@ export function ActorDrawsSceneLit(obj: Actor): boolean {
 }
 
 /**
- * The port's half of `PollPlayerAimInput`'s mouse arm (`FUN_0040CBB0`).
+ * The port's half of `PollPlayerAimInput`'s gun arm (`FUN_0040CBB0`).
  *
  * `[port-only]`. The engine polls a device each frame; the port's one device
  * is the pointer, which the renderer owns, so `app/` writes it here as input
- * the way `QueueShotRequest` takes a trigger pull. The mouse arm sets
- * `g_aim_on_screen = 1` unconditionally, so that is what this does; the
+ * the way `QueueShotRequest` takes a trigger pull. The pointer is the PC
+ * mouse, which `InputMapDevicesToMaple` (`FUN_0041E530`) makes a gun, so this
+ * is the gun arm: `g_aim_on_screen` is whether the aim is inside the screen,
+ * and a pointer moving over the scene always is. The one frame it is not --
+ * a pull off the screen -- is the shot queue's (`QueueOffscreenPull`). The
  * coordinates are the engine's own frame — pixels from the centre of the
  * 640x480 screen, `+y` up (`FUN_00486820` draws the crosshair at
  * `320 + x, 240 - y`).

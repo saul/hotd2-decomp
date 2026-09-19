@@ -18788,3 +18788,44 @@ one number there). Port test and render test each fail without their half.
 Measured with a 120 Hz rAF probe: mean second difference 4.1 -> 0.9 px, still
 frames 88/493 -> 261/438.
 
+
+## 2026-09-19 -- the bats never hurt (NEW-BUGS 19)
+
+The bat's strike was already transcribed correctly -- `BatDiveUpdate`
+(`0x0042E230`) and `BatSwarmUpdate` (`0x0042ED50`) re-read and matching the
+port line for line: at `t > 1` both call `PlayerTakeDamage(obj+0x121, 1, 9)`
+when **either `g_player_state` is 5**, with no permit and no
+`IsPlayerAttackable`. The port seeded `g_player_state = [0, 0]` and nothing
+wrote 5, so the branch never ran in the page. The bat test in
+`port.test.ts` set `[5, 0]` by hand, and so did `tools/horde.mjs` for the
+horde's bite (same bare test), so both passed while the page's bats and worms
+flew into the camera for free. `IsPlayerAttackable` had papered over the same
+gap with "has a life left", which is why zombies did hurt.
+
+Read the writer instead of standing in for it. `PlayerEnterPlay`
+(`FUN_00414770`) indexes `g_player_enter_play_modes` (`0x00579DE8`, four rows
+of `{flags, state, invuln, hook, hook, update}`) and **every row's state is
+5**; it is called by `g_player_state_handlers` (`0x00579CD0`) entries 0..3,
+each of which is `PlayerEnterPlay(obj, n)` (entry 2 had no Ghidra function;
+created as `PlayerStateReenterAfterScene`, `0x00413E40`, which is how a player
+`AdvanceToNextScene` parked at 2 gets back to 5). `PlayerSetState`
+(`FUN_00415080`) is the transition. Boot (`FUN_0040A920`, `0x0040AA3D`) writes
+9 to both players. `CheckPlayerCanBeHit` (`0x004153E0`) was also read: in app
+state 6 it accepts states 1, 4 and 5 only -- the port's version tests lives
+and invulnerability instead, noted and left for whoever ports the shell.
+
+Fix: `PlayerState` enum (2, 5, 9 -- the members anything reads);
+`ResetGameGlobals` seeds `[InPlay, Out]` as the stand-in for boot plus
+`PlayerEnterPlay`, the same stand-in `g_players_in_play = 1` already was. With
+the real state in place the two "has a life left" fallbacks
+(`IsPlayerAttackable`, `BuildEntitySpotlightArray`) went, taking two
+`[diverges]` with them; player 1, at 9, is no longer attackable in a
+one-player game, as in the exe.
+
+Wrong turns: the first headless harness respawned every bat each frame (the
+placer kills itself and a bat despawns on arrival, so "not in the pool" is not
+"not yet built") and reported 102 arrivals from four bats. The first page run
+against the unfixed code "passed" -- a zombie in the next block took the life
+after the flight had ended; the check now stops counting when the last bat
+goes. And stage 4 block 7's swarm is not reachable from entry 0: it needs
+`entry=4`.

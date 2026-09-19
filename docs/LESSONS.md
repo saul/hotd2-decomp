@@ -702,3 +702,13 @@ by BAMS-per-radian: zero times anything is zero, so the test passed and every
 rider in the game was spun around its boat. Give a rotation test a quarter
 turn, where `sin` and `cos` swap and a wrong factor, a wrong sign or a wrong
 axis all show.
+
+**L49 — A test that sets a gate by hand proves only what is behind it.** The
+bat's strike and the horde's bite both test `g_player_state == 5`, and both
+had passing tests that wrote `G.g_player_state = [5, 0]` in their setup. The
+page never wrote 5 -- the port seeded 0 and had no writer -- so in the game
+neither ever hurt anyone, for as long as the tests stayed green. When a setup
+line writes a global, ask what writes it in the page; if the answer is
+"nothing", the test has found the bug and hidden it in the same line. Drive at
+least one check from the reset the page runs (`ResetGameGlobals`), not from a
+state assembled for the test.

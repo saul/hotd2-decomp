@@ -75,6 +75,36 @@ export enum AppState {
 }
 
 /**
+ * `g_player_state` (`0x009A5C62`) — the per-player shell's state, and the index
+ * `PlayerSetState` (`FUN_00415080`) takes into `g_player_state_handlers`
+ * (`0x00579CD0`). Only the members something in the port reads or writes are
+ * here; 0, 1, 3, 4, 6, 7, 8, 10 and 11 are the shell's other states.
+ */
+export enum PlayerState {
+  /**
+   * Parked for a scene load. `AdvanceToNextScene` (`FUN_0045FFF0`) puts an
+   * in-play player here, and the handler it installs,
+   * `PlayerStateReenterAfterScene` (`FUN_00413E40`), is nothing but
+   * `PlayerEnterPlay(obj, 2)`. `[proved]`
+   */
+  SceneReentry = 2,
+  /**
+   * In play. `PlayerEnterPlay` (`FUN_00414770`) writes it from every row of
+   * `g_player_enter_play_modes` (`0x00579DE8`), and it is what
+   * `IsPlayerAttackable` (`FUN_00409DC0`), `BatDiveUpdate` (`FUN_0042E230`),
+   * `BatSwarmUpdate` (`FUN_0042ED50`) and the horde's bite test for. `[proved]`
+   */
+  InPlay = 5,
+  /**
+   * Out of the game. The boot reset `FUN_0040A920` stores it for both players
+   * (`0x0040AA3D`), and `CommitAppState` (`FUN_0040E860`) for both on any
+   * screen but 6 and 7. That it means "not participating" is `[likely]`: it
+   * is the value a player holds everywhere a game is not running.
+   */
+  Out = 9,
+}
+
+/**
  * `g_hit_slots` holds fourteen entries, and the extent is the loop bound
  * rather than a stored count: `ActorClaimHitSlot` (`FUN_00409270`) walks
  * `&DAT_009c88c0` while the pointer is below `0x009C88F8`, and the span is
@@ -941,18 +971,24 @@ export const G = {
    */
   g_app_state: AppState.InPlay as number,
   /**
-   * `g_player_state` — 0x009A5C62 + player*0x98, s16. 5 is *in play*, and
-   * `IsPlayerAttackable`'s third clause. `AdvanceToNextScene` (`FUN_0045FFF0`)
-   * puts a player at 5 back to 2 for the duration of a scene load, and 8, 9
-   * and 4 are the name-entry, not-participating and credit states.
+   * `g_player_state` — 0x009A5C62 + player*0x98, s16. See {@link PlayerState}.
+   * 5 is *in play*, `IsPlayerAttackable`'s third clause and the gate on every
+   * scripted strike that does not take a permit -- the bat's, the horde's, the
+   * body creature's. `AdvanceToNextScene` (`FUN_0045FFF0`) puts a player at 5
+   * back to 2 for the duration of a scene load, and 8, 9 and 4 are the
+   * name-entry, not-participating and credit states.
    *
-   * [diverges] **The port never writes 5.** Everything that does is the game's
-   * shell — attract, continue, name entry, game over — reached through the
-   * per-player hook the scene-state table installs at `_DAT_009A5CDC`, which
-   * is an indirect call and not a routine the port has. So this stays at its
-   * initial value and `IsPlayerAttackable` falls back to the stand-in below.
+   * [diverges] **The port does not run the per-player shell** that gets a
+   * player here: a start press (`FUN_00414FC0`) sets a state 0..3 whose
+   * handler calls `PlayerEnterPlay` (`FUN_00414770`), and that writes 5.
+   * {@link ResetGameGlobals} stands for boot plus player 0 having entered, and
+   * seeds `[InPlay, Out]` -- the same stand-in `g_players_in_play: 1` and
+   * `g_max_attackers: 1` are for that routine's two counter increments. Until
+   * 2026-09-19 it seeded `[0, 0]`, a value the engine never holds in play, and
+   * everything that tests 5 directly -- the bats' and the horde's strikes --
+   * silently never landed in the page (NEW-BUGS 19).
    */
-  g_player_state: [0, 0] as number[],
+  g_player_state: [PlayerState.InPlay, PlayerState.Out] as number[],
   /**
    * `g_script_flags` — 0x009C7200. The byte array `set_script_flag` (evt 0x48)
    * writes and the set-pieces read for their other removal trigger.
@@ -1551,7 +1587,9 @@ export function ResetGameGlobals(): void {
   G.g_active_cam_path = -1;
   G.g_scene_state_major_entered = 0;
   G.g_app_state = AppState.InPlay;
-  G.g_player_state = [0, 0];
+  // Boot writes 9 to both players; player 0 then enters play, which writes 5.
+  // See `g_player_state` above for the stand-in this is.
+  G.g_player_state = [PlayerState.InPlay, PlayerState.Out];
   G.g_cam_path_frame = 0;
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];

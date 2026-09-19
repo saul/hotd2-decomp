@@ -143,8 +143,9 @@ frames of scripted flight after a launch delay of `member * 20`.
 Past the spline the bat **homes on `g_camera_block_eye`**, `obj+0x13A4` running
 0 to 1 at `0.015` a frame — about 67 frames — with a sideways sine wobble whose
 amplitude damps to nothing over the last fifth. On arrival it calls
-`PlayerTakeDamage(player, 1, 9)` if either `g_player_state` is 5, hands both
-enemy counters back and despawns. **There is no range test and no attack
+`PlayerTakeDamage(player, 1, 9)` if either `g_player_state` is 5 (read bare,
+not through `IsPlayerAttackable`; `PlayerEnterPlay`, `FUN_00414770`, is what
+puts a player at 5), hands both enemy counters back and despawns. **There is no range test and no attack
 permit: an unshot bat always connects, and always leaves.** That is also why
 the `wait_enemies_present 0` at the end of each of these steps cannot deadlock
 — the flight ends itself.

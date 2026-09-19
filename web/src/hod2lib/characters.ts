@@ -931,7 +931,12 @@ export async function resolveForStage(
     let tscript: TargetScript | null = null;
     let ascript: TargetScript | null = null;
     let cameraCue: Record<string, unknown> | null = null;
-    if (cls === 0x30) {
+    // Class 0x18 too: `CarriedZombieInit18` (`FUN_0045CD60`) is
+    // `EnemyZombieInit` and two stores, so its tail is class 0x30's byte for
+    // byte and `ZombieScriptForState` reads the same two blobs. Left out, the
+    // rider on stage 2's boat had no script -- clip 0, arrival distance 0 --
+    // and stood turning toward its civilian for the whole ride.
+    if (cls === 0x30 || cls === 0x18) {
       // **The header shape belongs to the state that reads the blob, not to
       // the state the descriptor starts the actor in.** `ZombieScriptForState`
       // is `state == tail[3] ? tail+0x08 : tail+0x04`, so tail+0x04 is read by

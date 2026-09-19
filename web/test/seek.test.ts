@@ -1095,4 +1095,31 @@ for (const stage of STAGES) {
   }
 }
 
+// **A class-0x18 rider carries class 0x30's script blobs.**
+// `CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` and two stores,
+// so its tail is class 0x30's and `ZombieScriptForState` reads the same two
+// pointers. The exporter decoded them for class 0x30 only, and stage 2's rider
+// (0xA174) had clip 0 and an arrival distance of 0: it turned toward its
+// civilian for the whole ride and never walked the boat.
+{
+  let riders = 0, scripted = 0;
+  for (const name of ["stage2_original", "stage3"]) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    ran++;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const pl = (script.characters?.placements ?? []) as unknown as {
+      class: number; target_script?: unknown; attack_script?: unknown }[];
+    for (const p of pl) {
+      if (p.class !== 0x18) continue;
+      riders++;
+      if (p.target_script || p.attack_script) scripted++;
+    }
+  }
+  if (riders) {
+    check("every class-0x18 rider in stages 2 and 3 carries its script",
+          scripted === riders, `${scripted} of ${riders}`);
+  }
+}
+
 finishOrSkip("seek", failures, ran);

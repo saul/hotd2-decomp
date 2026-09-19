@@ -59,7 +59,9 @@ import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
-import { CARRIER_WAKE_PAIR, type ScriptedPropTail }
+import {
+  CARRIER_GROUND_WAKE_DRAW, CARRIER_WAKE_PAIR, type ScriptedPropTail,
+}
   from "../game/class13/state";
 
 /**
@@ -70,10 +72,9 @@ import { CARRIER_WAKE_PAIR, type ScriptedPropTail }
  *   `Translate(0, 0, 27.5); Scale(1, 0.15, 1)` under the boat's pose, and the
  *   splash at the fixed world point `(-1181.71, -18.908, -1508.41)`, turned
  *   `0x18E3` and scaled 0.6.
- * * `CarrierDrawGroundWake` (`FUN_00440770`): `Translate(0, 0, 27.0)` along
- *   the heading, `Scale(1, s, s)`.
- * * `CarrierPropRoutine1` states 5/6: the strip at the carrier's
- *   `Translate(0, 0, -5.0)`.
+ * * `CarrierDrawGroundWake` (`FUN_00440770`): `Translate(0, 0, z)` along
+ *   the heading, `Scale(1, s, s)`, and states 5/6's strip at the carrier's
+ *   `Translate(0, 0, z)` — per routine, `CARRIER_GROUND_WAKE_DRAW`.
  */
 const WAKE0_Z = 27.5;
 const WAKE0_SCALE_Y = 0.15;
@@ -81,8 +82,6 @@ const SPLASH0_AT: readonly [number, number, number] =
   [-1181.71, -18.908, -1508.41];
 const SPLASH0_YAW = 0x18e3;
 const SPLASH0_SCALE = 0.6;
-const WAKE1_Z = 27.0;
-const STRIP1_Z = -5.0;
 
 /** Scratch matrices for the carrier draws; the layer is single-threaded. */
 const _m = new Matrix4();
@@ -498,14 +497,16 @@ export class SlotModelLayer implements System<RenderContext> {
           mScale(_m, SPLASH0_SCALE, SPLASH0_SCALE, SPLASH0_SCALE);
           this.extra(`s0:${a.at}`, t.splashDrawn, _m, seen);
         }
-      } else if (t.selector === 1) {
+      } else if (CARRIER_GROUND_WAKE_DRAW[t.selector]) {
+        // Selectors 1 and 6: one shape of draw, their own literals.
+        const lit = CARRIER_GROUND_WAKE_DRAW[t.selector];
         if (t.wakeDrawn) {
           // `CarrierDrawGroundWake` (`FUN_00440770`): on the ground, along
           // the keel, two slots under one matrix.
           _m.identity();
           mTranslate(_m, a.pos.x, t.wakeGroundY, a.pos.z);
           mRotY(_m, t.wakeYaw);
-          mTranslate(_m, 0, 0, WAKE1_Z);
+          mTranslate(_m, 0, 0, lit.wakeZ);
           mScale(_m, 1, t.wakeScale, t.wakeScale);
           this.extra(`w1:${a.at}`, t.wakeDrawn, _m, seen);
           this.extra(`w1b:${a.at}`, t.wakeDrawn + CARRIER_WAKE_PAIR, _m, seen);
@@ -517,7 +518,7 @@ export class SlotModelLayer implements System<RenderContext> {
           _m.identity();
           mTranslate(_m, a.pos.x, a.pos.y, a.pos.z);
           mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
-          mTranslate(_m, 0, 0, STRIP1_Z);
+          mTranslate(_m, 0, 0, lit.stripZ);
           mRotY(_m, -a.yaw); mRotZ(_m, a.roll); mRotX(_m, a.pitch);
           mRotY(_m, G.g_camera_yaw_bams);
           this.extra(`t1:${a.at}`, t.stripDrawn, _m, seen);

@@ -18323,3 +18323,21 @@ tests; the per-part draw of a type-2 prop. The held prop's seat uses the
 bone's world matrix times the camera's, which is the product the engine's
 draw record holds `[likely]` -- up to the bone frames the exporter emits
 matching the engine's.
+
+### Second follow-up: routine 6 on the draw machinery, and the rider's walk
+
+`CarrierPropRoutine6` (stage 3 block 7) came in from the boat work before the
+draw machinery and kept its splash, sound and end strip as `[diverges]`. Read
+from the disassembly: the bow strip is `Translate(0, 0, +8.0)` (`0x0044157C`)
+where routine 1's is -5.0, the state-5/6 strip `-2.0` (`0x00441644`), and the
+wake's `PUSH 0x42020000` at `0x00441493` is `CarrierDrawGroundWake`'s fourth
+argument — the `Translate` along the heading, 32.5 — **not a scale**, which is
+how the merge note had read it. Both routines' literals are one table now.
+
+The rider question from the last entry is settled `[proved]`: state 34 reads
+raw `obj+0x40/+0x48` against the target's, which are both carrier-relative on
+a boat, so it *does* walk. It stood still because class 0x18's script blobs
+were never exported (`cls === 0x30` in both resolvers). Wrong turn worth
+keeping: the stand-still read as "the state machine is wrong in carrier
+space" until the placement turned out to have no `target_script` at all. The
+port was right; the bundle was empty.

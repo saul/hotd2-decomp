@@ -42,7 +42,8 @@ import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
 import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
   from "../src/game/class13";
 import {
-  CARRIER_SELECTORS_PORTED, CarrierDrawSlots, CarrierRoutine0State,
+  CARRIER_GROUND_WAKE_DRAW, CARRIER_SELECTORS_PORTED, CarrierDrawSlots,
+  CarrierRoutine0State,
   CarrierState, type ScriptedPropTail,
 } from "../src/game/class13/state";
 import {
@@ -15887,11 +15888,35 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   check("running past, the wake starts to fade at 0x668 and the bit waits",
         t().wakeFade < 0 && (boat.flags & 0x400000) === 0,
         `${t().wakeFade} ${boat.flags.toString(16)}`);
+  // 0x6A4: the bow strip, eight units *ahead* along the boat's z (routine
+  // 1's is five behind), and `0x000B16A9`.
+  {
+    const ev = new Events();
+    const heard: number[] = [];
+    ev.on("sound.play", (e) => heard.push(e.id));
+    G.g_prop_strip_effects = [];
+    t().pathFrame = 0x6a4;
+    ScriptedPropUpdate13(boat, { ...fr(), events: ev });
+    const bow = G.g_prop_strip_effects[0];
+    check("at 0x6A4 routine 6 throws the bow strip 8 units along its z, "
+          + "with the sound -- no longer a [diverges]",
+          !!bow && bow.first === 0x174a && heard.includes(SFX_CARRIER_BOW)
+          && Math.abs(bow.pos.z - (boat.pos.z + 8)) < 1e-6,
+          `${bow?.pos.z} vs ${boat.pos.z}`);
+    check("its wake sits 32.5 along the heading, routine 1's 27.0",
+          CARRIER_GROUND_WAKE_DRAW[6].wakeZ === 32.5
+          && CARRIER_GROUND_WAKE_DRAW[1].wakeZ === 27.0
+          && CarrierDrawSlots(6).join() === CarrierDrawSlots(1).join());
+  }
   t().pathFrame = 0x6ae;
   ScriptedPropUpdate13(boat, fr());
   check("...and at the path's end the strip starts and 0x400000 goes up",
         t().state === CarrierState.Wake && (boat.flags & 0x400000) !== 0,
         `${CarrierState[t().state]} ${boat.flags.toString(16)}`);
+  ScriptedPropUpdate13(boat, fr());
+  check("...and states 5/6 draw the strip cel they then step",
+        t().stripDrawn === 0x1aab && t().stripCel === 0x1aac,
+        `${t().stripDrawn.toString(16)}`);
 }
 
 {

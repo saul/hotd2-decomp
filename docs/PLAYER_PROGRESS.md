@@ -3696,8 +3696,25 @@ civilian child was built anywhere; block 5's two captors never came through
 the door and this boat carried nobody. They are now built straight after their
 parent (`CharacterSpawnRequest.parentAt`), which is when `CivilianInit` builds
 them in the engine, and the zombie rides the boat into the wall.
-`[open]` whether it walks toward the civilian as it should while riding: it
-sits in `ZombieStateWalkToTarget` and barely moves in carrier space.
+**And it walks the boat.** `[proved]` `ZombieStateWalkToTarget`
+(`FUN_0045A890`) measures `obj+0x40/+0x48` against the civilian's own, both
+carrier-relative while both ride, turns toward it at `0x1A0` and lets the
+target script's clip carry it; at the script's arrival distance it goes to
+state 35 and mauls. The rider stood still because it **had no script**: the
+exporter decoded the two blobs for class 0x30 only, and `CarriedZombieInit18`
+(`FUN_0045CD60`) is `EnemyZombieInit` plus two stores, so class 0x18's tail is
+class 0x30's byte for byte. With them (clip 1056, arrival 10) it walks from
+the stern to the civilian and, unshot, kills him on the way to the wall.
+Stage 3's five riders take their scripts the same way. `verify_captor_scripts`
+now counts class 0x18 (76 spawns, 113 scripts) and `test:seek` asserts every
+rider in the bundle carries one.
+
+**Selector 6** (`CarrierPropRoutine6`, stage 3 block 7's boat) is on the same
+machinery: at path frame `0x6A4` it throws the bow strip — `+8.0` along its z
+where routine 1's is `-5.0` — with `0x000B16A9`; its state-5/6 strip sits at
+`-2.0`; and its wake at 32.5 along the heading. That `PUSH 0x42020000` is
+`CarrierDrawGroundWake`'s distance argument, not the scale it had been read
+as. `CARRIER_GROUND_WAKE_DRAW` holds the three literals per routine.
 
 ## Every opcode, and what the player does with it
 

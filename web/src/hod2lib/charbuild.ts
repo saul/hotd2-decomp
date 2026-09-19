@@ -69,6 +69,13 @@ export class Character {
    */
   attachmentSlots = new Set<number>();
   /**
+   * A second skin: the slots `g_submodel_bone_slots` (`0x004E1F88`) row 1
+   * names for character type 0x1D, which the horde's formations 1 and 2 wear.
+   * No skeleton node names them, so they ride the gore template to be cloned
+   * by slot like the attachments above.
+   */
+  skinSlots = new Set<number>();
+  /**
    * `g_pCharacterExtraParts`, resolved -- see `ExeTables.characterParts`.
    *
    * Set by {@link build} alongside {@link Character.extras}, which is the same
@@ -483,6 +490,8 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
   // `hito_kao_*` head a spawn wears instead of the skeleton's, and the
   // `etc_komono_*` hair, hat, bag or shoes drawn on top of it.
   for (const s of char.attachmentSlots) want.add(s);
+  // And a second skin -- see `Character.skinSlots`.
+  for (const s of char.skinSlots) want.add(s);
   // **And the head's own undamaged model**, which the skeleton *does* name --
   // but names as a bone, not by slot, and the client clones by slot.
   //

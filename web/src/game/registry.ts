@@ -239,6 +239,19 @@ export interface ClassHandler {
    * open, so it must not draw from `rng`, advance a clock or touch `G`.
    */
   debug?(obj: Actor): ActorDebug;
+  /**
+   * Did this actor's own update call `RegisterForCameraTracking`
+   * (`FUN_00408EC0`) this frame?
+   *
+   * The engine's registration is a **call**, made or not made by each class's
+   * routine; the port's is a predicate over the pool, and for most classes
+   * "an enemy, visible, without bit `0x10000`" is the same answer. A class
+   * whose routine calls it only under a condition of its own says so here.
+   * Class 0x40's member calls it unless its formation is waiting for a script
+   * flag, and its corpse only while it is the horde's last. Absent means the
+   * predicate's answer stands.
+   */
+  tracksCamera?(obj: Actor): boolean;
 }
 
 /**
@@ -296,6 +309,11 @@ export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   // first `wait_enemies_alive` open for the rest of the stage: the three
   // riders were in `g_enemies_alive` and nothing would retire them.
   SpawnClass.CarriedZombie,
+  // Class 0x40's members do both `INC`s in `HordeMemberInit` (`FUN_0043BEF0`)
+  // and both `DEC`s in the kill. The placer, the emerge prop and the splash
+  // share the class id and are not counted; `ClassHandler.onDeadSweep` and
+  // `tracksCamera` are how the class tells them apart.
+  SpawnClass.HordeSpawner,
 ]);
 
 /** Whether this actor is one the enemy counters count. */

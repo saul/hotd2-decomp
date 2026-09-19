@@ -746,6 +746,16 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 90 are drawn by nothing in the image at all.
   0x43: Array.from({ length: 106 }, (_, i) => 0xbbd + i),
   0x52: Array.from({ length: 10 }, (_, i) => 0x1385 + i),
+  // Class 0x40, the horde: the emerge prop `HordeEmergePropUpdate`
+  // (`FUN_0043DD00`) draws twice (`komono_st1b.bin` 12, slot 0x17CC), the
+  // member's ground shadow (`common.bin` 200, 0x10D0), and its death splash --
+  // the ripple (`common.bin` 371, 0x1A38) and the thirty-frame splash strip
+  // (`common.bin` 338..367, 0x15E4 + g_frame_counter % 30). The members
+  // themselves are skeletons and ride the character path.
+  // And stage 2 block 0x19's sheet, `komono_room.bin` 2 (0x10CF), which
+  // `HordeDeformedPropUpdate` (`FUN_0043F010`) reshapes every frame.
+  0x40: [0x17cc, 0x10d0, 0x1a38, 0x10cf,
+         ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
 };
 
 /**
@@ -945,8 +955,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x13, 0x43, 0x51, 0x52; class "
-      + "0x25 variant 3; class 0x33 selector 4)",
+    routine: "asset-slot actor draws (classes 0x13, 0x40, 0x43, 0x51, "
+      + "0x52; class 0x25 variant 3; class 0x33 selector 4)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",

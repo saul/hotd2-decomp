@@ -386,6 +386,8 @@ export class Placement {
   /** Class 0x43's two bytes -- the owl's member index and sub-type. */
   class43: Record<string, unknown> | null = null;
   class46: Record<string, unknown> | null = null;
+  /** Class 0x40's selector. See `class40Tail`. */
+  class40: Record<string, unknown> | null = null;
   /**
    * The placement this one rides, when it is not a descriptor of its own.
    *
@@ -497,6 +499,7 @@ export class Placement {
     if (this.class11) d.class11 = this.class11;
     if (this.class43) d.class43 = this.class43;
     if (this.class46) d.class46 = this.class46;
+    if (this.class40) d.class40 = this.class40;
     if (this.parent_at !== null) d.parent_at = this.parent_at;
     if (this.synthetic) d.synthetic = true;
     if (this.class51) d.class51 = this.class51;

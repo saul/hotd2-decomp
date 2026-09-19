@@ -466,6 +466,11 @@ export interface CharacterPlacement {
    */
   class46?: { subtype: number; group: number; member: number } | null;
   /**
+   * Class 0x40's descriptor: `desc+0x25`, the selector. See
+   * `game/class40/state.ts`.
+   */
+  class40?: { selector: number } | null;
+  /**
    * The placement this one rides, when it is a child rather than a descriptor.
    *
    * Set on the bat's wing rows, which are {@link synthetic}. The client wants

@@ -47,7 +47,7 @@
  * and wants its own measurement, so it stays as it is and is recorded here
  * beside the routine that says otherwise.
  */
-import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
+import { Group, Matrix4, Object3D, Ray, Vector3, type Mesh } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import type { Actor, HumanoidActor } from "../game/actor";
@@ -57,6 +57,7 @@ import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
 import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
+import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import {
@@ -154,6 +155,11 @@ function DrawSlotFor(a: Actor): number | null {
       // only once a selector-4 object has seeded itself.
       return a.hp === ScriptedScenerySelector.Pushable
         ? (a.scenery.slot || null) : null;
+    case SpawnClass.HordeSpawner:
+      // A chain too: the member's shadow, the emerge prop's two halves, the
+      // splash and its ripple -- `render/horde.ts` composes the matrices, in
+      // world space. The member's own model is the character layer's.
+      return -1;
     case SpawnClass.ScriptedHumanoid:
       // Only the object-path arm. The three fixed-point arms draw at points
       // the routine hardcodes, so the rig writer already exports them as
@@ -291,6 +297,8 @@ export class SlotModelLayer implements System<RenderContext> {
   private readonly extras = new Map<string, Live>();
   /** Scratch for {@link SlotModelLayer.chain}; the layer is single-threaded. */
   private readonly _parts: OwlPart[] = [];
+  /** Scratch for class 0x40's chain. */
+  private readonly _hordeParts: HordePart[] = [];
   private enabled = true;
 
   constructor() {
@@ -412,6 +420,11 @@ export class SlotModelLayer implements System<RenderContext> {
         live.node.position.set(a.pos.x, a.pos.y, a.pos.z);
         live.node.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                                a.roll * BAMS_TO_RAD, "XZY");
+      } else if (a.cls === SpawnClass.HordeSpawner) {
+        // `render/horde.ts` hands back world-space matrices.
+        live.node.visible = true;
+        live.node.position.set(0, 0, 0);
+        live.node.rotation.set(0, 0, 0);
       } else if (a.cls === SpawnClass.FlyingEnemy) {
         // `MatrixTranslate(pos)` then `RotY(obj+0x68) RotZ(obj+0x6C)
         // RotX(obj+0x64)` at `0x00447C49`..`0x00447C64` — the product is
@@ -553,8 +566,14 @@ export class SlotModelLayer implements System<RenderContext> {
    * the matrices are rewritten every frame either way, because the angles do.
    */
   private chain(a: Actor, live: Live | undefined): Live | null {
-    const parts = OwlBodyChain(a, this._parts);
-    if (!parts.length) return null;
+    const parts: (OwlPart | HordePart)[] = a.cls === SpawnClass.HordeSpawner
+      ? HordeDrawParts(a, this._hordeParts) : OwlBodyChain(a, this._parts);
+    if (!parts.length) {
+      // Nothing drawn this frame -- a member that is not drawing its shadow.
+      // Hide what the last frame drew rather than leave it standing.
+      if (live) live.node.visible = false;
+      return null;
+    }
     if (!live || live.slot !== CHAIN) {
       live?.node.removeFromParent();
       const g = new Object3D();
@@ -570,6 +589,13 @@ export class SlotModelLayer implements System<RenderContext> {
         // and carry on, rather than truncating the chain from here. Every one
         // of the sixteen ships, so this is the shape of a stale export.
         if (!c) { if (!live.node.children[i]) break; continue; }
+        // The sheet reshapes its model every frame: its own geometry, then.
+        if ((parts[i] as Partial<HordePart>).deform) {
+          c.traverse((o) => {
+            const mesh = o as Mesh;
+            if (mesh.geometry) mesh.geometry = mesh.geometry.clone();
+          });
+        }
         if (live.node.children[i]) {
           live.node.remove(live.node.children[i]);
           live.node.children.splice(i, 0, c);
@@ -583,6 +609,31 @@ export class SlotModelLayer implements System<RenderContext> {
       c.matrixAutoUpdate = false;
       c.matrix.copy(parts[i].m);
       c.visible = true;
+      if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
+      // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the one fading draw in a
+      // chain, class 0x40's ripple. The clone shares its template's
+      // materials, so it gets its own before its opacity is touched.
+      const alpha = (parts[i] as Partial<HordePart>).alpha ?? 1;
+      if (alpha < 1 || c.userData.hordeAlpha !== undefined) {
+        if (c.userData.hordeAlpha === undefined) {
+          c.traverse((o) => {
+            const mesh = o as Mesh;
+            if (!mesh.material) return;
+            mesh.material = Array.isArray(mesh.material)
+              ? mesh.material.map((x) => x.clone()) : mesh.material.clone();
+          });
+        }
+        c.userData.hordeAlpha = alpha;
+        c.traverse((o) => {
+          const mesh = o as Mesh;
+          const mats = !mesh.material ? []
+            : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mat of mats) {
+            mat.transparent = true;
+            mat.opacity = Math.max(0, Math.min(1, alpha));
+          }
+        });
+      }
     }
     while (live.node.children.length > parts.length) {
       live.node.children.pop();

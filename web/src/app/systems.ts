@@ -23,6 +23,8 @@ import {
   type CharacterSpawnRequest, type ScriptSpawn,
 } from "../game/director";
 import type { Actor } from "../game/actor";
+import { SpawnHordePlacers } from "../game/class40";
+import { T } from "../game/tables";
 import type { Rng } from "../core/rng";
 import type { Events } from "../core/events";
 
@@ -172,6 +174,8 @@ export class GameSystem implements System {
     // taken in free roam, which turns the camera every frame with no tick
     // under it.
     G.g_camera_yaw_bams = ctx.view.yawBams;
+    // ...and the pitch beside it: the horde's dive lifts its arc by it.
+    G.g_camera_block_pitch_bams = ctx.view.pitchBams;
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes
     // hit points off, `ScoreAddForPlayer` pays, and `PlayerShotEffectSpawn`
@@ -314,6 +318,10 @@ export function syncCharacterSpawns(chars: CharacterPool,
     }
   };
   SlotActorsForgetUnlisted(spawns);
+  // Class 0x40's placers are built per instruction rather than per address,
+  // ahead of the rest -- see `SpawnHordePlacers`. They read nothing another
+  // spawn leaves behind, so building them first changes nothing they do.
+  SpawnHordePlacers(spawns, T.chars?.placements ?? [], chars.rng);
   for (const s of spawns) {
     const r = ready.get(s.at);
     if (r) make(r);

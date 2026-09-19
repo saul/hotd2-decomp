@@ -18185,6 +18185,57 @@ Named: `PropUpdateType13` (`0x00467F50`), `PropUpdateType35` (`0x0046B320`),
 (`0x0057727C`), `g_bams_to_rad` (`0x004C4370`). Ported with
 `g_scene_tick_counter` (`0x009A2BAC`), which the port did not have.
 
+## 2026-09-19 — class 0x40, the horde: worms, a prop, and two truncated routines
+
+Reported as "the 0x40 horde spawner (worms) hasn't been implemented". It had
+no module: the five hordes placed nothing and every `wait_enemies_alive`
+behind them opened on its first frame.
+
+**Read.** `PlaceHorde` (`FUN_0043BD30`), `HordeMemberInit` (`FUN_0043BEF0`),
+`HordeMemberUpdate` (`FUN_0043C440`, all 1,144 instructions, against the
+pseudocode), `HordeTryStartDive`, `HordeCorpseSinkUpdate`, the splash pair,
+the emerge prop and its spark, the deformed prop's three routines, and the
+**sub-model** the member is drawn by — `SubModelInit` through
+`SubModelBlendToMotion` (`FUN_0040EAE0`..`FUN_0040F900`), a second copy of the
+skeleton code living in the side block, called from nowhere but this class
+and class 0x47. Five functions Ghidra did not have were created
+(`0x0043BE60`, `0x0043DD00`, `0x0043E540`, `0x0043EFE0`, `0x0043F010`).
+Thirty-five names, thirteen globals, `tools/verify_horde.py` over every table.
+
+**What it is.** `mol.bin` rendered (`scratchpad/horde/mol_m535_*.png`,
+`mol_m536_*.png`): a banded, limbless, six-ring body with a toothed jaw.
+Worm is `[likely]` from the model; nothing in the binary names it.
+
+**Wrong turns, recorded.**
+
+* **The annotation said all nine spawns were selector 1.** Reading the
+  descriptors' `+0x25` says five and four: selector 2 is not a horde but the
+  prop the horde comes up through, and stage 1 spawns it in four blocks.
+* **Both updates are truncated in the pseudocode** (`L35`, twice in one
+  class). `HordeMemberUpdate` "returns" after the shadow's `MatrixStackPop` at
+  `0x0043D3E3`; the bytes fall through (`ADD ESP,0x28`) into the shot sphere,
+  the camera registration and the `g_horde_members` stamp — without them a
+  drawn member is unshootable and the dive turn skips it. `HordeEmergePropUpdate`
+  does it twice: the fall's corner loop `JMP`s on to the draw, and after the
+  draws `0x0043E2E4` publishes `obj+0x70` and calls `RegisterForShotTest`,
+  none of which the pseudocode shows.
+* **Formation 2's spline rate for members 2+ was read as 0.04**; `0x3CCCCCCD`
+  is 0.025. Caught decoding the hex, before it reached the port.
+* **Two of my own test expectations were wrong, and the code right.** The
+  corpse despawns on its 61st update (`if (0x3B < n++)`), and the prop's lift
+  overshoots to `0x4200` because `if (pitch < 0x4000) pitch += 0x600` has no
+  clamp — only the settle writes `0x4000`.
+* **The headless harness first read two gates as stuck** that were its own
+  doing: a seek lists every spawn it passed, and building stage 2 block 0's
+  rescue target held a count for ever (`L45`'s shape); and a seek past block
+  0x19 step 1's `wait_enemies_alive` retires the horde's spawn. It now builds
+  only the block's own spawns, and raises flag 94 itself in block 0x19,
+  printed as an override.
+
+**Decisions left to the user.** Formation 2's deformed sheet
+(`SpawnHordeDeformedProp`) is declared, not built: a vertex deformation of a
+model the members crawl under, visual only, needing one more routine read
+(`FUN_0043F2E0`) and a mesh the renderer can rewrite.
 ### Follow-up: every stage-3 carrier moves, and the boat has one pose
 
 The class-0x18 motion rule made riders exist everywhere, so every carrier they
@@ -18386,3 +18437,18 @@ were never exported (`cls === 0x30` in both resolvers). Wrong turn worth
 keeping: the stand-still read as "the state machine is wrong in carrier
 space" until the placement turned out to have no `target_script` at all. The
 port was right; the bundle was empty.
+### Follow-up: the rug is ported, not declared
+
+The coordinator relayed that a new divergence is the user's call, so the
+sheet went in. `HordeDeformedPropUpdate` (`FUN_0043F010`) read from its 198
+instructions, since the decompiler hides the sine's argument behind `ftol`:
+`a = ftol((5 - d) * 3276.8)`, `s = sin(a) * 1.2`, `(dx + 545) * s * 0.2`
+when `dx < -540` (never, with the shipped positions), `min(1, (5 - |dz|) *
+0.2)` across, `11.5 / obj+0x40` past member x 11.5 (the sheet's own `+0x40`,
+which nothing writes -- unreachable, and a division by zero if it were), and
+the corpse's `(60 - n) / 60`. `FUN_0043F2E0` is face normals
+(`Vec3Cross`, `FUN_004AA980`, of `v0 - v1` and `v1 - v2`) and `FUN_0043F3E0`
+averages them per logical vertex **with x and z weighted by four**. The sheet
+is `komono_room.bin` part 2, a patterned rug. Wrong turn: my first test
+expected the rug over member 0, and it is over the **placer** --
+`HordeMemberInit` spawns it before moving the member onto its spline.

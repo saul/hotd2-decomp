@@ -28,6 +28,7 @@ import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
 import { makeBatTail, type BatTail } from "./class46/state";
+import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
@@ -1355,6 +1356,12 @@ export interface ActorBase {
    * nothing else at all: the position is in the EXE.
    */
   class46: CharacterPlacement["class46"];
+  /**
+   * Class 0x40's one descriptor byte that anything reads: `desc+0x25`, the
+   * selector `PlaceHorde` (`FUN_0043BD30`) switches on — a horde, or the prop
+   * it pushes up. Only the placer carries it; a member is built with none.
+   */
+  class40: CharacterPlacement["class40"];
   class51: CharacterPlacement["class51"];
   class52: CharacterPlacement["class52"];
   /**
@@ -1836,6 +1843,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
+  | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
   | (ActorBase & { cls: Exclude<SpawnClass,
@@ -1845,7 +1853,8 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
-      | SpawnClass.ScriptedScenery | SpawnClass.Vehicle> });
+      | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
+      | SpawnClass.HordeSpawner> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -1978,6 +1987,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     carrierYaw: 0,
     class43: null,
     class46: null,
+    class40: null,
     class51: null,
     class52: null,
     class14: null,
@@ -2077,6 +2087,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };
+  }
+  if (cls === SpawnClass.HordeSpawner) {
+    return { ...head, cls, horde: makeHordeTail() };
   }
   if (cls === SpawnClass.ScriptedScenery) {
     return { ...head, cls, scenery: makeScriptedSceneryTail() };

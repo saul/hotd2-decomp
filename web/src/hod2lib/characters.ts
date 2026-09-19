@@ -110,7 +110,8 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * so `spawnres` can never identify one and the placement has to survive that
  * anyway. See the note in `resolveForStage`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x26, 0x33, 0x43, 0x51, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x26, 0x33, 0x40, 0x43, 0x51,
+                                           0x52]);
 
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
@@ -352,6 +353,97 @@ async function batWingPlacement(stage: Stage, tables: ExeTables,
   w.parent_at = sp.at as number;
   w.synthetic = true;
   return w;
+}
+
+/**
+ * Class 0x40's descriptor: `desc+0x25`, the selector `PlaceHorde`
+ * (`FUN_0043BD30`) switches on, which the opcode-0x09 allocator copies to
+ * `obj+0x130C`. 1 is a horde of members and 2 the prop they push aside; the
+ * seven shipped descriptors carry five of one and two of the other. Nothing
+ * else in the descriptor is read -- `desc+0x24` goes to `obj+0x1F4` and the
+ * placer never looks at it.
+ */
+export function class40Tail(rec: Spawn): Record<string, unknown> {
+  const b = rec.evt?.raw;
+  const at = rec.offset + 0x24;
+  return { selector: b ? (b[at + 1] ?? 0) & 0xff : 0 };
+}
+
+/** Class 0x40, and the selector whose placer builds members. */
+const CLASS40 = 0x40;
+const CLASS40_SELECTOR_HORDE = 1;
+/**
+ * `HordeMemberInit` (`FUN_0043BEF0`) writes `side+0x8E = 0x1D` -- `mol.bin`,
+ * nine nodes -- as a literal, and the member's three clips are its own:
+ * `0x218` the crawl it starts on, `0x217` the leap, `0x219` the death.
+ */
+const CLASS40_MEMBER_CHAR_TYPE = 0x1d;
+const CLASS40_MEMBER_CLIPS = [0x218, 0x217, 0x219];
+/** `g_horde_members` has ten slots, and a placer never makes more. */
+const CLASS40_MEMBERS = 10;
+/**
+ * `g_submodel_bone_slots` (`0x004E1F88`) row 1 -- the second skin, which
+ * formations 1 and 2 wear through `obj+0x1350`. Row 0 is the skeleton's own
+ * slots and needs nothing; these are `mol.bin`'s odd parts, which no skeleton
+ * node names, so they ride the gore template to be cloned by slot.
+ * `tools/verify_horde.py` asserts them against the EXE.
+ */
+const CLASS40_SKIN_SLOTS = [4979, 4981, 4983, 4985, 4987, 4989, 4975, 4993,
+                            4991];
+
+/**
+ * `[port-only]` -- a horde member's spawn address: the placer's with the
+ * member index in bits 20..23 and bit 28 set. One definition in two places --
+ * `HordeMemberAt` in `game/class40/` is the other -- so each names the other.
+ */
+export function hordeMemberAt(placerAt: number, idx: number): number {
+  return 0x10000000 | ((idx & 0xf) << 20) | (placerAt & 0xfffff);
+}
+
+/**
+ * The synthetic placements a horde's members are drawn from: ten per
+ * selector-1 descriptor, character type 0x1D, parented to the placer.
+ *
+ * The same arrangement the bat's wing has, for the same reason: the engine
+ * builds the members inside `PlaceHorde` with no descriptor, and the client
+ * binds a drawable hierarchy to a placement by address. The rows are never
+ * spawned from; the placer makes the objects and the character layer adopts
+ * them. Returns an empty list when `mol.bin` or its crawl will not build.
+ */
+async function hordeMemberPlacements(stage: Stage, tables: ExeTables,
+                                     sp: SpawnJson,
+                                     chars: Map<number, Character>):
+    Promise<Placement[]> {
+  const ct = CLASS40_MEMBER_CHAR_TYPE;
+  if (!chars.has(ct)) {
+    const file = tables.characterAssetFile(ct);
+    if (!file) return [];
+    const built = build(tables, ct, file);
+    if (built === null) return [];
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  for (const clip of CLASS40_MEMBER_CLIPS) {
+    if (c.motions.has(clip)) continue;
+    const baked = await bake(stage.source, tables, clip, c.boneCount);
+    if (baked !== null) c.motions.set(clip, baked);
+  }
+  if (!c.motions.has(CLASS40_MEMBER_CLIPS[0])) return [];
+  for (const s of CLASS40_SKIN_SLOTS) c.skinSlots.add(s);
+  const out: Placement[] = [];
+  for (let i = 0; i < CLASS40_MEMBERS; i += 1) {
+    const m = new Placement();
+    m.at = hordeMemberAt(sp.at as number, i);
+    m.cls = CLASS40;
+    m.char_type = ct;
+    m.motion = CLASS40_MEMBER_CLIPS[0];
+    m.hp = 0;
+    m.spawn = { ...sp, at: m.at };
+    m.parent_at = sp.at as number;
+    m.synthetic = true;
+    out.push(m);
+  }
+  return out;
 }
 
 export function class46Tail(rec: Spawn): Record<string, unknown> {
@@ -913,6 +1005,7 @@ export async function resolveForStage(
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
     const class46 = cls === 0x46 ? class46Tail(rec) : null;
+    const class40 = cls === CLASS40 ? class40Tail(rec) : null;
     const class51 = cls === 0x51 ? class51Tail(rec) : null;
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
@@ -1015,6 +1108,7 @@ export async function resolveForStage(
     p.class11 = class11;
     p.class43 = class43;
     p.class46 = class46;
+    p.class40 = class40;
     p.class51 = class51;
     p.class52 = class52;
     p.class53 = class53;
@@ -1028,6 +1122,17 @@ export async function resolveForStage(
     p.attachments = attachmentList(evt, rec, cls, attachRecords.length);
     p.hp = (sp.hp as number) ?? 0;
     placements.push(p);
+    // A horde's members: see `hordeMemberPlacements`. Emitted here, before
+    // the placer's own row leaves as a marker below.
+    if (cls === CLASS40 && class40
+        && (class40.selector as number) === CLASS40_SELECTOR_HORDE) {
+      for (const m of await hordeMemberPlacements(stage, tables, sp, chars)) {
+        placements.push(m);
+        let mlist = perType.get(CLASS40_MEMBER_CHAR_TYPE);
+        if (!mlist) { mlist = []; perType.set(CLASS40_MEMBER_CHAR_TYPE, mlist); }
+        mlist.push({ ...sp, at: m.at, class: CLASS40, hp: 0 } as SpawnJson);
+      }
+    }
 
     if (motion === null) continue;         // marker only -- see the module note
     // A slot-drawn class reaches the placement above with no character type

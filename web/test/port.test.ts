@@ -78,6 +78,13 @@ import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
 import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
   OwlUpdateAndResolveShot } from "../src/game/class43";
+import {
+  HordeFormation, HordeKind, HordeMemberAt, HordeState, HordeUpdate,
+  PlaceHorde, SubModelAdvanceClock, SubModelBlendToMotion, SubModelSetMotion,
+  HORDE_CHAR_TYPE, HORDE_CLIP_CRAWL, HORDE_CLIP_DEATH, HORDE_CLIP_LEAP,
+  EmergePropState, type HordeTail,
+} from "../src/game/class40";
+import { makeSubModel, SubModelFlag } from "../src/game/class40/submodel";
 import { BatDiveUpdate, BatUpdate, BAT_CHAR_TYPE, BAT_SPLINE_POINTS,
   BAT_WING_CHAR_TYPE } from "../src/game/class46";
 import { BatState, type BatTail } from "../src/game/class46/state";
@@ -9797,6 +9804,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
+    [SpawnClass.HordeSpawner, "0x40 horde"],
     [SpawnClass.Bat, "0x46 bat"],
     [SpawnClass.WaterEnemy, "0x51 fish"],
     [SpawnClass.Mouse, "0x52 mouse / branch trigger"],
@@ -9814,11 +9822,12 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
         && want.every(([c]) => PORTED_CLASSES.includes(c)),
         PORTED_CLASSES.map((c) => `0x${c.toString(16)}`).join(","));
   // The cat is 0x53 and now has one -- its sub-type 2 is a route-branch
-  // trigger. Class 0x40, the horde, still has none: an unported class must
-  // stay absent rather than fall back to anything, because an `if` is what had
-  // the cat running the zombie's state machine.
+  // trigger -- and 0x40, the horde, has one too. Class 0x42, the falling
+  // breakables, still has none: an unported class must stay absent rather
+  // than fall back to anything, because an `if` is what had the cat running
+  // the zombie's state machine.
   check("a class with no module has no row",
-        g_class_handlers[0x40 as SpawnClass] === undefined);
+        g_class_handlers[0x42 as SpawnClass] === undefined);
 
   // Loud, not last-one-wins. A row silently overwritten by a second module is
   // a class whose behaviour depends on evaluation order.
@@ -15917,6 +15926,479 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   check("...and states 5/6 draw the strip cel they then step",
         t().stripDrawn === 0x1aab && t().stripCel === 0x1aac,
         `${t().stripDrawn.toString(16)}`);
+}
+
+// -- class 0x40, the horde -----------------------------------------------------
+//
+// `PlaceHorde` (`FUN_0043BD30`) and everything it leaves behind: the member's
+// Init, its six live states, the kill, the corpse, the dive turn and the prop.
+// The fixture is one character type, `mol.bin`'s three clips at their real
+// play lengths, and no renderer.
+console.log("\nclass 0x40, the horde:");
+{
+  const MOL = {
+    type: HORDE_CHAR_TYPE, name: "mol", file: "mol.bin", bone_count: 10,
+    bones: [],
+    motions: {
+      [String(HORDE_CLIP_LEAP)]: motion(16, 0, 29),
+      [String(HORDE_CLIP_CRAWL)]: motion(16, 0, 29),
+      [String(HORDE_CLIP_DEATH)]: motion(31, 0, 60),
+    },
+  } as unknown as CharacterType;
+  const HORDE_CHARS = { ...CHARS,
+    types: { ...CHARS.types, [String(HORDE_CHAR_TYPE)]: MOL } } as CharactersJson;
+  const horde = (o: Actor) => (o as { horde: HordeTail }).horde;
+  const HOST: GameHost = { ...NULL_HOST };
+  const frame = (rng: Rng, events?: Events): ClassFrame =>
+    ({ eye: EYE, dt: 1 / 60, rng, host: HOST, events });
+
+  /** A stage-1 or stage-2 room with the placer's descriptor as it ships. */
+  const room = (scene: number, block: number, rng: Rng, players = 1) => {
+    ResetGameGlobals();
+    SetGameTables(HORDE_CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_player_state = [5, 0];
+    G.g_players_in_play = players;
+    G.g_active_player = 0;
+    G.g_scene_index = scene;
+    G.g_evt_block_index = block;
+    G.g_camera_fixed_eye_y = -10;
+    G.g_camera_block_eye = vec3(-100, -2, -500);
+    void rng;
+  };
+  const place = (at: number, selector: number, pos: Vec3, rng: Rng) =>
+    ActorSpawn(at, SpawnClass.HordeSpawner, -1, "horde placer", {
+      class40: { selector }, pos, visible: true,
+    }, rng);
+  const members = () => G.g_object_list.filter((o) => {
+    const t = (o as { horde?: HordeTail }).horde;
+    return !o.despawned && t && (t.kind === HordeKind.MemberInit
+      || t.kind === HordeKind.Member || t.kind === HordeKind.Corpse);
+  });
+  const step = (rng: Rng, events?: Events) => {
+    G.g_frame_counter += 1;
+    for (const o of [...G.g_object_list]) {
+      if (!o.despawned) HordeUpdate(o, frame(rng, events));
+    }
+    G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
+  };
+
+  {
+    // The counts. Selector 1 is eight, or ten with two players; blocks 0x0E
+    // and 0x12 make six or eight; block 0x19 makes four whatever.
+    const rng = new Rng(401);
+    const cases: [number, number, number, number][] = [
+      [0, 3, 1, 8], [0, 3, 2, 10], [1, 0x0e, 1, 6], [1, 0x12, 2, 8],
+      [1, 0x19, 1, 4], [1, 0x19, 2, 4],
+    ];
+    for (const [sc, blk, players, want] of cases) {
+      room(sc, blk, rng, players);
+      const p = place(0x2b94, 1, vec3(-70, -10, -520), rng);
+      check(`block ${blk.toString(16)} with ${players} player(s) makes ${want}`,
+            members().length === want && p.despawned,
+            `${members().length}, placer despawned ${p.despawned}`);
+    }
+    room(0, 3, rng);
+    place(0x2cec, 2, vec3(-100.866, -7.78, -558.8), rng);
+    const props = G.g_object_list.filter(
+      (o) => (o as { horde?: HordeTail }).horde?.kind === HordeKind.EmergeProp);
+    check("selector 2 is not a horde: one emerge prop and no members",
+          props.length === 1 && members().length === 0,
+          `${props.length} props, ${members().length} members`);
+    check("...at the placer's x and the routine's own y and z",
+          props.length === 1 && props[0].pos.x === -100.866
+          && Math.abs(props[0].pos.y - -9.2769) < 1e-6
+          && Math.abs(props[0].pos.z - -538.8) < 1e-6,
+          props[0] ? `${props[0].pos.x},${props[0].pos.y},${props[0].pos.z}`
+            : "none");
+  }
+
+  {
+    // The Init runs as the member's first frame, not inside the placer.
+    const rng = new Rng(409);
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    const ms = members();
+    check("a member is allocated with its Init still to run",
+          ms.every((m) => horde(m).kind === HordeKind.MemberInit)
+          && G.g_enemies_alive === 0,
+          `${ms.map((m) => HordeKind[horde(m).kind]).join(",")} `
+          + `alive ${G.g_enemies_alive}`);
+    step(rng);
+    check("...and its first frame counts it into both counters",
+          G.g_enemies_alive === 8 && G.g_enemies_present === 8,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    const m0 = ms[0];
+    const t0 = horde(m0);
+    check("...in stage 1 block 3's formation, at the spline's first point",
+          t0.formation === HordeFormation.Stage1Block3
+          && Math.abs(m0.pos.x - (-70 + (-30 + -27) / 2)) < 1e-9
+          && Math.abs(m0.pos.z - (-520 + (-20 + -16) / 2)) < 1e-9,
+          `formation ${t0.formation} at ${m0.pos.x},${m0.pos.z}`);
+    check("...a unit above the placer, out of the shot test, holding",
+          m0.pos.y === -9 && (m0.flags & 0x8000) !== 0
+          && t0.state === HordeState.Hold && horde(ms[3]).hold === 60,
+          `y ${m0.pos.y} flags ${m0.flags.toString(16)} hold ${horde(ms[3]).hold}`);
+    check("...and none of them is drawn while it holds",
+          ms.every((m) => m.alpha === 0));
+    step(rng);
+    check("member 0's hold runs out on its first update and it comes up",
+          t0.state === HordeState.Enter && G.g_horde_emerged === 1
+          && (m0.flags & 0x8000) === 0,
+          `${HordeState[t0.state]} emerged ${G.g_horde_emerged}`);
+    check("...drawn, with its own slot in g_horde_members",
+          m0.alpha === 1 && G.g_horde_members[0] === m0.at
+          && m0.shotCentre.x === m0.pos.x && m0.shotCentre.z === m0.pos.z,
+          `alpha ${m0.alpha} slot ${G.g_horde_members[0]}`);
+    check("...and member 1 still holds, twenty frames behind",
+          horde(ms[1]).state === HordeState.Hold, HordeState[horde(ms[1]).state]);
+    let n = 0;
+    for (; n < 400 && t0.state === HordeState.Enter; n += 1) step(rng);
+    // Member 0 is the first diver, so it may take its dive from segment 4
+    // once the first ninety frames are up; the scene is in play, so it does.
+    check("the leader leaves its spline for the dive from segment 4",
+          t0.state === HordeState.WindUp && t0.segment >= 4,
+          `${HordeState[t0.state]} seg ${t0.segment} after ${n} frames`);
+    const t1 = horde(ms[1]);
+    for (let i = 0; i < 400 && t1.state !== HordeState.Wander; i += 1) {
+      step(rng);
+    }
+    check("a follower walks all six segments and wanders",
+          t1.state === HordeState.Wander && t1.segment === 6,
+          `${HordeState[t1.state]} seg ${t1.segment}`);
+  }
+
+  {
+    // A dive connects: one life, then the pull-out, then the turn passes.
+    const rng = new Rng(419);
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    const ms = members();
+    const m0 = ms[0];
+    const t0 = horde(m0);
+    const lives = G.g_player_lives[0];
+    let saw = { wind: false, dive: false, jaw: false };
+    let n = 0;
+    for (; n < 2000 && t0.state !== HordeState.PullOut; n += 1) {
+      step(rng);
+      if (t0.state === HordeState.WindUp) saw.wind = true;
+      if (t0.state === HordeState.Dive) {
+        saw.dive = true;
+        if (m0.flags & 0x10000000) saw.jaw = true;
+      }
+    }
+    check("the leader winds up and dives",
+          saw.wind && saw.dive && saw.jaw, JSON.stringify(saw));
+    check("...and the bite takes a life at the end of the dive",
+          G.g_player_lives[0] === lives - 1,
+          `lives ${lives} -> ${G.g_player_lives[0]} after ${n} frames`);
+    check("...and hands the dive turn to member 1", G.g_horde_diver === 1,
+          `diver ${G.g_horde_diver}`);
+    for (let i = 0; i < 400 && t0.state === HordeState.PullOut; i += 1) {
+      step(rng);
+    }
+    check("...then it falls back to the ground and wanders at double speed",
+          t0.state === HordeState.Wander && t0.speed === 2.0
+          && (m0.flags & 0x10000000) === 0 && m0.pitch === 0,
+          `${HordeState[t0.state]} speed ${t0.speed} pitch ${m0.pitch}`);
+    check("...on the crawl clip again, a cut and not a blend",
+          t0.sub.clip === HORDE_CLIP_CRAWL
+          && (t0.sub.flags & SubModelFlag.Blending) === 0,
+          `clip ${t0.sub.clip} flags ${t0.sub.flags}`);
+  }
+
+  {
+    // No dive in a cut scene: `g_scene_state_major_entered != 2` refuses it
+    // and keeps the turn.
+    const rng = new Rng(421);
+    room(0, 3, rng);
+    G.g_scene_state_major_entered = 1;
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    for (let i = 0; i < 1500; i += 1) step(rng);
+    check("outside play nobody dives, and nobody is hurt",
+          members().every((m) => horde(m).state === HordeState.Wander
+                                 || horde(m).state === HordeState.Enter)
+          && G.g_player_lives[0] === PLAYER.start_lives,
+          members().map((m) => HordeState[horde(m).state]).join(","));
+  }
+
+  {
+    // One bullet, 80 points, both counters, a splash, a sixty-frame corpse --
+    // and the room clears when the last one goes.
+    const rng = new Rng(431);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e: { id: number }) => sounds.push(e.id));
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    step(rng, events);
+    const ms = members();
+    const m0 = ms[0];
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    step(rng, events);
+    check("a member cannot be shot while it holds",
+          horde(m0).state !== HordeState.Dead && G.g_enemies_alive === 8,
+          `${HordeState[horde(m0).state]} alive ${G.g_enemies_alive}`);
+    step(rng, events);
+    const score = G.g_player_score[0];
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    step(rng, events);
+    check("one bullet kills a member that has come up, for 80",
+          horde(m0).state === HordeState.Dead
+          && horde(m0).kind === HordeKind.Corpse
+          && G.g_player_score[0] - score === 80,
+          `${HordeState[horde(m0).state]} +${G.g_player_score[0] - score}`);
+    check("...dropping both counters at once",
+          G.g_enemies_alive === 7 && G.g_enemies_present === 7,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    check("...playing a STAGE1_SE PDMG_MORR and the splash's BOBBLE1",
+          sounds.some((id) => id === 0x1e18a9 || id === 0x1d18a9)
+          && sounds.includes(0x118a9),
+          sounds.map((x) => x.toString(16)).join(","));
+    check("...blending to the death clip, and leaving a splash behind",
+          horde(m0).sub.clip === HORDE_CLIP_DEATH
+          && G.g_object_list.some((o) => (o as { horde?: HordeTail })
+            .horde?.kind === HordeKind.Splash));
+    check("...and the corpse cannot be shot again", m0.hitRadius === 0);
+    let n = 0;
+    for (; n < 100 && !m0.despawned; n += 1) step(rng, events);
+    // `if (0x3b < n++)`: sixty drawn frames, and it goes on the sixty-first.
+    check("the corpse lasts sixty frames and gives its slot back",
+          m0.despawned && n === 61 && !G.g_horde_members[0],
+          `${n} frames, slot ${G.g_horde_members[0]}`);
+    // Now the rest of the room.
+    for (let i = 0; i < 3000 && G.g_enemies_alive > 0; i += 1) {
+      for (const m of members()) {
+        const t = horde(m);
+        if (t.kind === HordeKind.Member && t.state !== HordeState.Hold) {
+          m.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        }
+      }
+      step(rng, events);
+    }
+    check("shooting every member clears the room for wait_enemies_alive",
+          G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    for (let i = 0; i < 200; i += 1) step(rng, events);
+    check("...and every object the horde made has gone",
+          G.g_object_list.every((o) => {
+            const t = (o as { horde?: HordeTail }).horde;
+            return !t || t.kind === HordeKind.EmergeProp;
+          }),
+          G.g_object_list.map((o) => o.name).join(","));
+  }
+
+  {
+    // Formation 3's members may not be shot for the first frames of their
+    // spline: `g_horde_shot_delay` is 10/8 there.
+    const rng = new Rng(433);
+    room(1, 0x0e, rng);
+    place(0x7f7c, 1, vec3(-1062, -36, -1075), rng);
+    step(rng);
+    step(rng);
+    const m0 = members()[0];
+    check("stage 2 block 0x0E's member 0 is walking in",
+          horde(m0).state === HordeState.Enter
+          && horde(m0).formation === HordeFormation.Stage2Block14,
+          `${HordeState[horde(m0).state]} formation ${horde(m0).formation}`);
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    step(rng);
+    check("...and cannot be shot for its first ten frames of it",
+          horde(m0).state === HordeState.Enter, HordeState[horde(m0).state]);
+    for (let i = 0; i < 10; i += 1) step(rng);
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    step(rng);
+    check("...and can after them", horde(m0).state === HordeState.Dead,
+          HordeState[horde(m0).state]);
+  }
+
+  {
+    // Formation 2 (stage 2 block 0x19): four members, none counted by the
+    // Init, all counted exactly once when `g_script_flags[94]` rises.
+    const rng = new Rng(439);
+    room(1, 0x19, rng);
+    place(0x113fc, 1, vec3(-530, 33, -1318), rng);
+    for (let i = 0; i < 120; i += 1) step(rng);
+    check("formation 2 counts nobody in until its flag",
+          members().length === 4 && G.g_enemies_alive === 0
+          && members().every((m) => horde(m).state === HordeState.Hold),
+          `${members().length} alive ${G.g_enemies_alive}`);
+    check("...and its members 3+ wait up at y = 41.4",
+          Math.abs(members()[3].pos.y - 41.4) < 1e-9,
+          `${members()[3].pos.y}`);
+    G.g_script_flags[94] = 1;
+    step(rng);
+    check("...then all four at once, and each only once",
+          G.g_enemies_alive === 4 && G.g_enemies_present === 4
+          && members().every((m) => horde(m).state === HordeState.Enter),
+          `${G.g_enemies_alive}/${G.g_enemies_present}`);
+    step(rng);
+    check("...holding at four on the next frame",
+          G.g_enemies_alive === 4, `${G.g_enemies_alive}`);
+  }
+
+  {
+    // `g_active_cam_path == 0x47` freezes the whole routine.
+    const rng = new Rng(443);
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    step(rng);
+    step(rng);
+    const m0 = members()[0];
+    const x = m0.pos.x;
+    G.g_active_cam_path = 0x47;
+    for (let i = 0; i < 30; i += 1) step(rng);
+    check("camera path 0x47 stops a member dead, undrawn",
+          m0.pos.x === x && m0.alpha === 0, `${x} -> ${m0.pos.x}`);
+  }
+
+  {
+    // The prop: lifted by the first member up, then a target.
+    const rng = new Rng(449);
+    const events = new Events();
+    room(0, 3, rng);
+    place(0x2cec, 2, vec3(-100.866, -7.78, -558.8), rng);
+    const prop = G.g_object_list.find((o) => (o as { horde?: HordeTail })
+      .horde?.kind === HordeKind.EmergeProp)!;
+    const pt = horde(prop);
+    step(rng, events);
+    check("the prop waits for the horde", pt.propState === EmergePropState.Wait);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    // The Init frame, the frame member 0 comes up (after the prop has run),
+    // the frame the prop sees it, and the first frame of the lift.
+    step(rng, events);
+    step(rng, events);
+    step(rng, events);
+    step(rng, events);
+    check("...lifts when the first member comes up",
+          pt.propState === EmergePropState.Lift && pt.propPitch > 0,
+          `${EmergePropState[pt.propState]} pitch ${pt.propPitch}`);
+    for (let i = 0; i < 60 && pt.propState === EmergePropState.Lift; i += 1) {
+      step(rng, events);
+    }
+    // `if (pitch < 0x4000) pitch += 0x600` overshoots to 0x4200 and stays:
+    // the lift has no clamp. Only the settle writes 0x4000.
+    check("...and comes to rest past upright, where the lift left it",
+          pt.propState === EmergePropState.Rest && pt.propPitch === 0x4200,
+          `${EmergePropState[pt.propState]} pitch ${pt.propPitch}`);
+    G.g_camera_fixed_eye_y = -9.2769;
+    prop.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const sparks = G.g_sprite_effects.length;
+    step(rng, events);
+    check("shot, it jumps and throws a spark",
+          pt.propState === EmergePropState.Fall && pt.fallVy === 0.6
+          && G.g_sprite_effects.length === sparks + 1
+          && (prop.flags & ActorFlag.Hit) === 0,
+          `${EmergePropState[pt.propState]} sparks ${G.g_sprite_effects.length}`);
+    let n = 0;
+    for (; n < 600 && pt.propState !== EmergePropState.Rest; n += 1) {
+      step(rng, events);
+    }
+    check("...lands on a corner, rocks, and is at rest again",
+          pt.propState === EmergePropState.Rest && pt.propPitch === 0x4000
+          && pt.propRoll === 0, `${EmergePropState[pt.propState]} after ${n}`);
+    // The lifetime: block 3's prop goes on the second step change.
+    const s0 = G.g_evt_step_index;
+    G.g_evt_step_index = s0 + 1;
+    step(rng, events);
+    check("...and outlives one step change", !prop.despawned);
+    G.g_evt_step_index = s0 + 2;
+    step(rng, events);
+    check("...but not two, in block 3", prop.despawned);
+  }
+
+  {
+    // The sub-model clock. A blend is five draws from a frozen pose to the new
+    // clip's first frame, and then the clip runs from 0.
+    const m = makeSubModel();
+    m.clip = HORDE_CLIP_CRAWL;
+    m.frame = 17;
+    SubModelAdvanceClock(m, 29);
+    check("unblended, the play frame is the frame modulo the play length",
+          m.play === 17, `${m.play}`);
+    m.frame = 40;
+    SubModelAdvanceClock(m, 29);
+    check("...wrapping at g_motion_play_length", m.play === 11, `${m.play}`);
+    SubModelBlendToMotion(m, HORDE_CLIP_DEATH, 0, 4);
+    check("a blend starts at frame 1, held on the new clip's start",
+          m.frame === 1 && m.play === 0 && m.blendLen === 5
+          && m.fromClip === HORDE_CLIP_CRAWL && m.fromPlay === 11);
+    const seen: string[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      SubModelAdvanceClock(m, 60);
+      seen.push(`${m.frame}/${m.play}/${m.flags & 1}`);
+      m.frame += 1;
+    }
+    check("...and ends on its fifth draw, on frame 0 of the new clip",
+          seen.join(" ") === "1/0/1 2/0/1 3/0/1 4/0/1 0/0/0 1/1/0",
+          seen.join(" "));
+    SubModelSetMotion(m, HORDE_CLIP_LEAP);
+    check("a cut starts the clip at 0", m.frame === 0 && m.play === 0
+          && m.clip === HORDE_CLIP_LEAP);
+  }
+
+  {
+    // Stage 2 block 0x19's sheet: laid by member 0's Init, waiting a frame for
+    // its model, reshaped while the step has changed at most once, frozen
+    // after that and gone after the third.
+    const rng = new Rng(457);
+    room(1, 0x19, rng);
+    G.g_evt_step_index = 1;
+    place(0x113fc, 1, vec3(-530, 33, -1318), rng);
+    step(rng);
+    const sheets = () => G.g_object_list.filter((o) => {
+      const k = (o as { horde?: HordeTail }).horde?.kind;
+      return !o.despawned && (k === HordeKind.SheetAwait || k === HordeKind.Sheet);
+    });
+    const m0 = members()[0];
+    // At the placer's point: `HordeMemberInit` calls it before it has moved
+    // the member onto its spline or lifted it the unit.
+    void m0;
+    check("formation 2's member 0 lays one sheet, half a unit above the placer",
+          sheets().length === 1
+          && horde(sheets()[0]).propY === 33.5
+          && horde(sheets()[0]).propX === -530,
+          `${sheets().length} ${sheets()[0] ? horde(sheets()[0]).propY : ""}`);
+    const sh = sheets()[0];
+    check("...which waits one frame for its model",
+          horde(sh).kind === HordeKind.SheetAwait);
+    step(rng);
+    step(rng);
+    check("...and then reshapes every frame",
+          horde(sh).kind === HordeKind.Sheet && horde(sh).drawn);
+    G.g_active_cam_path = 0x47;
+    step(rng);
+    check("...but not while camera path 0x47 plays", !horde(sh).drawn);
+    G.g_active_cam_path = 0x40;
+    G.g_cam_path_frame = 0x120;
+    step(rng);
+    check("...nor path 0x40 between frames 0x10C and 0x168", !horde(sh).drawn);
+    G.g_cam_path_frame = 0x169;
+    step(rng);
+    check("...and again after it", horde(sh).drawn);
+    G.g_evt_step_index = 2;
+    step(rng);
+    check("one step change leaves it reshaping", horde(sh).drawn);
+    G.g_evt_step_index = 3;
+    step(rng);
+    check("...a second freezes it for good",
+          !horde(sh).drawn && (sh.flags & 0x4000000) !== 0);
+    G.g_evt_step_index = 4;
+    step(rng);
+    check("...and it outlives the third", !sh.despawned);
+    G.g_evt_step_index = 5;
+    step(rng);
+    check("...but not the fourth", sh.despawned);
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    step(rng);
+    check("no other formation lays one", sheets().length === 0);
+  }
+
+  check("a member's address is the placer's, with the index in bits 20..23",
+        HordeMemberAt(0x2b94, 3) === (0x10000000 | (3 << 20) | 0x2b94));
+  void PlaceHorde;
 }
 
 {

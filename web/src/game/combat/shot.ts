@@ -220,6 +220,10 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // routine and at 0x00414C2D in the Original Mode twin at 0x00414B90, which
   // is the same shape with a per-weapon magazine and a recoil spread.
   if (G.g_nFiringGate === 0) return;
+  // `g_crosshair_x/y`, as the ray `BuildShotRay` makes of them -- see
+  // `G.g_crosshair_ray`.
+  G.g_crosshair_ray[player] = {
+    origin: { ...req.ray.origin }, dir: { ...req.ray.dir } };
   // `g_nPlayerFired` — the accuracy denominator. Counted here rather than
   // where the click landed, so it counts shots the *game* saw.
   G.g_nPlayerFired[player] = (G.g_nPlayerFired[player] ?? 0) + 1;

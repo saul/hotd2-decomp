@@ -22,10 +22,7 @@ export function RequestAppState(state: number): void {
  * Everything else the engine does here is the shell's and has no port: the
  * job-queue drains (`AssetDrainAllJobs`, `FUN_004A7310`, `FUN_0041D510`,
  * `FUN_0041D540`), the attract flag `0x009C71C4`, the view reset
- * `FUN_00419490(320, 240)`, and the words `0x009CA120`, `0x009A5E00` and
- * `0x009C8E8C`. `0x009C8E82` and `0x009C8E86` are `UpdateDamageRank`'s
- * memory of the two counters, which the port does not run -- see
- * `combat/player.ts`.
+ * `FUN_00419490(320, 240)`, and the words `0x009CA120`, and `0x009A5E00`.
  *
  * Note it clears `g_player_was_hit` for **player 0 only**: the store is to
  * `0x009A5CD0` itself.
@@ -35,6 +32,10 @@ export function CommitAppState(): void {
   G.g_screen_furniture_flags = (G.g_screen_furniture_flags & 0xffffffc7) | 2;
   G.g_max_attackers = 0;
   G.g_players_in_play = 0;
+  G.g_rank_attackers_seen = 0;
+  G.g_rank_players_seen = 0;
+  // `0x009C8E8C`, `g_screen_shake_frames`.
+  G.g_screen_shake_frames = 0;
   G.g_player_was_hit[0] = 0;
   G.g_title_start_armed = 0;
   G.g_app_state = G.g_app_state_pending;

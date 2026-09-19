@@ -131,6 +131,8 @@ export enum PlayerTask {
  * ending) are the app's, which does them its own way; see `app/main.ts`.
  */
 export enum RunPhase {
+  /** `ResetGameOnStart` (`FUN_0045FEF0`): `CommitAppState` leaves 0. */
+  ResetGameOnStart = 0,
   /** `RunPhaseInPlay` (`FUN_004601D0`): a stage being played. */
   InPlay = 2,
   /** `RunPhaseContinueArm` (`FUN_004604E0`). */

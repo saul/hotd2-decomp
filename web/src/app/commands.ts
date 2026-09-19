@@ -125,6 +125,8 @@ export interface PlayerCommands {
   stepBack(): void;
   rewind(): void;
   requestSkip(): void;
+  /** The game-over screen's buttons. See {@link UiCommand}. */
+  restartRun(stage: number): void;
   poseFromSlot(slot: number, frame: number): void;
   syncCameraToWalker(force?: boolean): void;
   onCamera(cmd: CamCommand): void;
@@ -197,6 +199,8 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "stepBack":   p.stepBack(); return;
     case "rewind":     p.rewind(); return;
     case "requestSkip": p.requestSkip(); return;
+    case "restartStage": p.restartRun(p.state.stage); return;
+    case "restartFromStageOne": p.restartRun(1); return;
     case "branchHover":
       p.branchHover = c.over;
       return;

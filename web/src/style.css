@@ -761,3 +761,55 @@ tr.gdead td { opacity: 0.45; }
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .export-warn { color: var(--warn); }
+
+/* The game-over screen (`ui/panels/GameOver.tsx`). The sprites stand in for
+   texbank 0x155's pictures, so they are placed in the 640x480 frame the
+   records use: the layer covers the rendered view and the percentages are of
+   it. The panel with the two port-only buttons sits at the foot, in the
+   branch bar's place, because it is an offer about what to do next. */
+#gameover {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  container-type: inline-size;
+  background: rgba(8, 0, 0, 0.35);
+  /* A click on the view is the trigger, which cuts the screen short; only the
+     panel takes the pointer. */
+  pointer-events: none;
+}
+#gameover .go-sprite {
+  position: absolute;
+  white-space: nowrap;
+  pointer-events: none;
+  color: #c01010;
+  text-shadow: 0 0 6px #000, 0 0 2px #000;
+}
+#gameover .go-43a {
+  font: 900 9cqw/1 Georgia, "Times New Roman", serif;
+  letter-spacing: 0.08em;
+}
+#gameover .go-43b, #gameover .go-43c, #gameover .go-43d {
+  color: #fff4d0;
+  font-size: 5cqw;
+}
+#gameover .go-panel {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(rgba(11, 14, 18, 0), rgba(11, 14, 18, 0.92) 38%);
+  border-top: 1px solid #c01010;
+  pointer-events: auto;
+}
+#gameover .tag {
+  background: #c01010; color: #fff; font-weight: 700;
+  border-radius: 4px; padding: 2px 8px; font-size: 11px;
+  letter-spacing: 0.3px; text-transform: uppercase; flex: none;
+  margin-right: auto;
+}
+#gameover button {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 4px 12px; font: inherit; cursor: pointer;
+  flex: none;
+}
+#gameover button:hover { border-color: #c01010; color: #ff8080; }

@@ -42,6 +42,7 @@ import {
   WEAPON_SCALE,
 } from "../game/effects/shot_effects";
 import { POINT_BLOOD_SCALE } from "../game/effects/blood";
+import { PlayerTask } from "../game/player_state";
 import {
   DAMAGE_OVERLAY_OFFSETS, DAMAGE_OVERLAY_SCALES, DAMAGE_OVERLAY_SLOTS,
   DAMAGE_OVERLAY_Z,
@@ -514,10 +515,20 @@ export class EffectLayer implements System<RenderContext> {
    * objects by `renderOrder` first, so 899 is exactly the exe's slot.
    * Nothing translucent writes depth (the loader's `BLEND` materials), so the
    * order is the whole of it.
+   *
+   * **Only while a task that draws it is the player's.** The draw is inside
+   * `DamageOverlayUpdateAndDraw`, which only `PlayerUpdateInPlay` and
+   * `PlayerContinueCountdown` call `[proved]`. A player the last hit put out
+   * of play goes to state 6 with the record still active -- nothing clears
+   * it until the next `PlayerEnterPlay` -- and the game-over screen showed
+   * the splat frozen over its whole length until this test was added.
    */
   private drawDamageOverlays(seen: Set<string>): void {
     G.g_damage_overlays.forEach((o, p) => {
       if (!o.active) return;
+      const task = G.g_player_task[p];
+      if (task !== PlayerTask.InPlay
+          && task !== PlayerTask.ContinueCountdown) return;
       const slot = DAMAGE_OVERLAY_SLOTS[o.kind]?.[o.count - 1];
       if (slot === undefined) return;
       const key = `do${p}`;

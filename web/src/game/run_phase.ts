@@ -13,7 +13,9 @@ import { CreditCount, CreditsAvailable } from "./credits";
 import { GameMode } from "./game_mode";
 import { AppState, G } from "./globals";
 import { PlayerState, RunPhase } from "./player_state";
-import { PlayerResumeContinue, g_player_state_handlers } from "./player_shell";
+import { IsDemoRun, PlayerResumeContinue, g_player_state_handlers }
+  from "./player_shell";
+import { T } from "./tables";
 
 /** `g_continue_timer`'s start, and what a frame takes off it. */
 const CONTINUE_TIMER_START = 0x9fff;
@@ -32,22 +34,100 @@ function NobodyInPlay(): boolean {
 }
 
 /**
- * `RunSceneTasksAndTimers` — `FUN_004606D0`. The task walk, then the frame's
- * timers: both players' invulnerability counts down, floored at 0.
- *
- * `[diverges]` `UpdateDamageRank` (`FUN_004607B0`), which runs between the two,
- * is not ported, and neither is the `0x009C8A7C` frame count it reads: the
- * port applies `PlayerTakeDamage`'s rank change at once instead of through
- * `g_damage_rank_pending` (see `combat/player.ts`). Porting it moves the rank
- * on every join and every 1800 frames, which changes every stage's damage
- * and wants its own tests.
+ * `RunSceneTasksAndTimers` — `FUN_004606D0`. The task walk, then
+ * `UpdateDamageRank`, the rank clock while it runs, and both players'
+ * invulnerability counted down, floored at 0.
  */
 export function RunSceneTasksAndTimers(walk: () => void): void {
   walk();
+  UpdateDamageRank();
+  if (G.g_rank_clock_on !== 0) G.g_rank_clock += 1;
   for (let p = 0; p < 2; p++) {
     G.g_player_invuln_frames[p] -= 1;
     if (G.g_player_invuln_frames[p] < 0) G.g_player_invuln_frames[p] = 0;
   }
+}
+
+/** `0x708` -- 1800 frames, 30 seconds, between the rank clock's ticks. */
+const RANK_CLOCK_PERIOD = 0x708;
+/** Lives a lone player must hold for a clock tick to count double. */
+const RANK_LIVES_ONE = 4;
+/** ...and the two players' lives together. */
+const RANK_LIVES_TWO = 7;
+/** A player joining moves the rank by this. */
+const RANK_PER_PLAYER = 4;
+/** The rank's range. */
+const RANK_MAX = 0xf;
+
+/**
+ * `UpdateDamageRank` — `FUN_004607B0`. The adaptive difficulty, once a frame:
+ *
+ * ```
+ * r = rank + (players_in_play - players_seen) * 4   // a join: +4, a drop: -4
+ * if (clock % 0x708 == 0) {                          // every 30 s of clock
+ *   r += 1;
+ *   if (lone player with >= 4 lives, or both with >= 7 between them) r += 1;
+ * }
+ * r += pending; pending = 0; clamp to 0..15
+ * if (r < rank) clock = 0;                           // a fall restarts the clock
+ * rank = r; players_seen = players_in_play; attackers_seen = max_attackers
+ * ```
+ *
+ * "Lone player" is `g_active_player` 0 or 1 reading that player's lives;
+ * `g_active_player` 2 reads both; -1 (nobody) takes only the +1. `[proved]`
+ */
+export function UpdateDamageRank(): void {
+  let r = G.g_damage_rank
+    + (G.g_players_in_play - G.g_rank_players_seen) * RANK_PER_PLAYER;
+  if (G.g_rank_clock % RANK_CLOCK_PERIOD === 0) {
+    r += 1;
+    const a = G.g_active_player;
+    let bonus = false;
+    if (a === 0 || a === 1) {
+      bonus = !(G.g_player_lives[a] < RANK_LIVES_ONE);
+    } else if (a === 2) {
+      bonus = !(G.g_player_lives[0] + G.g_player_lives[1] < RANK_LIVES_TWO);
+    }
+    if (bonus) r += 1;
+  }
+  r += G.g_damage_rank_pending;
+  G.g_damage_rank_pending = 0;
+  if (r < 0) r = 0;
+  else if (r > RANK_MAX) r = RANK_MAX;
+  if (!(G.g_damage_rank <= r)) G.g_rank_clock = 0;
+  G.g_rank_players_seen = G.g_players_in_play;
+  G.g_rank_attackers_seen = G.g_max_attackers;
+  G.g_damage_rank = r;
+}
+
+/**
+ * `ResetDamageRank` — `FUN_00460770`. The rank a game starts at:
+ * `g_initial_damage_rank[difficulty]` -- index 2 in a demo run -- **not
+ * clamped** (the table holds -3); the clock on and at 1, nothing pending.
+ * `UpdateDamageRank` clamps it on the same frame.
+ */
+export function ResetDamageRank(): void {
+  const idx = IsDemoRun() ? 2 : G.g_difficulty;
+  G.g_damage_rank = T.chars?.difficulty?.initial_rank?.[idx] ?? 0;
+  G.g_rank_clock_on = 1;
+  G.g_damage_rank_pending = 0;
+  G.g_rank_clock = 1;
+}
+
+/**
+ * `ResetGameOnStart` — `FUN_0045FEF0`, run phase 0, the rank half.
+ *
+ * `[diverges]` The rest of the routine -- the scene and block index, the
+ * Original Mode loadout, the civilian and route tallies, `LoadSceneAndReset`
+ * -- is the app's stage load, which the port has already done by the time the
+ * first frame runs. The engine spends this frame on the load and runs the
+ * tasks on the next; the port runs phase 2 on the same frame, so a game's
+ * first frame is the one it always was.
+ */
+export function ResetGameOnStart(walk: () => void): void {
+  ResetDamageRank();
+  G.g_nRunPhase = RunPhase.InPlay;
+  RunPhaseInPlay(walk);
 }
 
 /**
@@ -144,6 +224,7 @@ export function RunPhaseNoContinueWait(walk: () => void): void {
  */
 export function RunPhaseDispatch(walk: () => void): void {
   switch (G.g_nRunPhase) {
+    case RunPhase.ResetGameOnStart: ResetGameOnStart(walk); break;
     case RunPhase.InPlay: RunPhaseInPlay(walk); break;
     case RunPhase.ContinueArm: RunPhaseContinueArm(walk); break;
     case RunPhase.ContinueCountdown: RunPhaseContinueCountdown(walk); break;

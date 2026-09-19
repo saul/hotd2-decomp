@@ -30,6 +30,7 @@ import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
+import type { ScreenSpriteAnim } from "./game_over";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 import { makeEntityLights } from "./entity_light";
@@ -702,6 +703,28 @@ export const G = {
   // -- difficulty --------------------------------------------------------
   /** `g_difficulty` — 0x009C8E94. Scales spawn HP only. */
   g_difficulty: 2,
+  /**
+   * `g_damage_rank_pending` — 0x009A3794. `PlayerTakeDamage` subtracts 2;
+   * `UpdateDamageRank` adds it into the rank next frame and clears it.
+   */
+  g_damage_rank_pending: 0,
+  /**
+   * `g_rank_clock` — 0x009C8A7C. Frames since the rank last fell (or since
+   * `ResetDamageRank`, which sets 1); `RunSceneTasksAndTimers` counts it while
+   * `g_rank_clock_on`, and every 0x708 of them `UpdateDamageRank` raises the
+   * rank.
+   */
+  g_rank_clock: 0,
+  /** `g_rank_clock_on` — 0x009A2C30. `ResetDamageRank` raises it. */
+  g_rank_clock_on: 0,
+  /**
+   * `g_rank_players_seen` — 0x009C8E82, `g_players_in_play` as
+   * `UpdateDamageRank` last saw it; a player joining raises the rank by 4.
+   * `CommitAppState` zeroes it.
+   */
+  g_rank_players_seen: 0,
+  /** `g_rank_attackers_seen` — 0x009C8E86, the same for `g_max_attackers`. */
+  g_rank_attackers_seen: 0,
   /** `g_damage_rank` — 0x009C8E96. The adaptive per-shot damage bonus. */
   g_damage_rank: 2,
   /** `g_hit_result` — 0x009A58F8. What the last shot did; the score reads it. */
@@ -1153,6 +1176,26 @@ export const G = {
    * `CommitAppState` and required by `PlayerTryStartPress`.
    */
   g_screen_furniture_flags: 0,
+  /**
+   * `g_game_over_timer` — 0x009CA0F8. `GameOverRunPhase`'s phase timer:
+   * 200 frames of fly-over, 180 of logo.
+   */
+  g_game_over_timer: 0,
+  /**
+   * `[port-only]` -- `GameOverLogoTask`'s frame counter (its task's
+   * `+0x34`), -1 while there is no such task.
+   */
+  g_game_over_logo_frame: -1,
+  /**
+   * `[port-only]` -- the live `ScreenSpriteAnimSpawn` tasks, in allocation
+   * order. See `game/game_over.ts`.
+   */
+  g_screen_sprite_anims: [] as ScreenSpriteAnim[],
+  /**
+   * `g_game_over_route_done` — 0x007DCCE4. The route map sets 1 when it has
+   * drawn the whole route; the trigger sets -1, which ends the screen.
+   */
+  g_game_over_route_done: 0,
   /** `g_continue_timer` — 0x009A2BB8, the run's own continue countdown. */
   g_continue_timer: 0,
   /** `g_continue_credit_seen` — 0x007DCCAC..0x007DCCB8. */

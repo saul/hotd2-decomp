@@ -32,6 +32,7 @@ import { authoredFrameHeld, authoredFrameOfTicks,
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
 import { ActorKillAll } from "../src/game/combat/resolve_hit";
+import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
@@ -13318,6 +13319,32 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
     }
   };
 
+  // **The boss holds the camera.** `Boss4Update` (`FUN_004919D0`) calls
+  // `ActorRegisterCameraPoint(state+0x70)` at `0x00491A49` every frame, and
+  // that tail-calls `RegisterForCameraTracking` (`FUN_00408EC0`), whose only
+  // test is `obj+0x34` bit `0x10000`. Class 0x19 is not in `ENEMY_CLASSES`,
+  // so the port never let the camera look at it.
+  {
+    const obj = spawnBoss(0);
+    obj.flags &= ~ActorFlag.NoCameraTrack;
+    UpdateCameraEnemySlots(EYE);
+    check("the stage-4 boss is a camera candidate while bit 0x10000 is clear",
+          G.g_enemy_slots.includes(obj.at),
+          `[${G.g_enemy_slots.join(",")}]`);
+    G.g_enemies_alive = 0;
+    G.g_camera_free = 1;
+    CameraDriverSelectMode();
+    check("...so it keeps the camera tracking and the room held",
+          G.g_camera_mode === CameraMode.TrackEnemies && G.g_camera_free === 0,
+          `${G.g_camera_mode} ${G.g_camera_free}`);
+    check("...and it is lifted by its own state+0x70, 6.0",
+          g_class_handlers[SpawnClass.Boss4]?.cameraRise?.(obj) === 6);
+    obj.flags |= ActorFlag.NoCameraTrack;
+    UpdateCameraEnemySlots(EYE);
+    check("...until `Boss4StateDeath` raises the bit",
+          !G.g_enemy_slots.includes(obj.at));
+  }
+
   {
     const obj = spawnBoss(0);
     check("Boss4Init counts the boss in both enemy counters",
@@ -13700,6 +13727,16 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
             .every((n) => (G.g_script_flags[n] ?? 0) === 0),
           `${G.g_script_flags.map((v, i) => (v ? i : -1))
               .filter((i) => i >= 0).join(",")}`);
+    // All three deaths raise `obj+0x34` bit `0x10000` -- DeathC in its sub 0,
+    // A and B with the present decrement -- so the dead boss stops holding
+    // the camera, and with it `wait_enemies_present 0`.
+    a.flags &= ~ActorFlag.NoCameraTrack;
+    for (let i = 0; i < 600 && (a.flags & ActorFlag.NoCameraTrack) === 0; i++) {
+      Boss2Handler.update(a, f);
+      ActorAdvanceMotion(a, 1 / 60);
+    }
+    check(`...and ${Class14State[state]} takes the boss off the camera's list`,
+          (a.flags & ActorFlag.NoCameraTrack) !== 0);
   }
 
   /**

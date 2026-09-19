@@ -34,6 +34,10 @@ import { OPS as OPS_TABLE } from "./ops";
 import { WAIT_RULES, passedBecause, type WaitContext } from "./waits";
 import { CivilianRaisesScriptFlag } from "./waits/flag";
 import {
+  CivilianEndsRemovable, CivilianHasChildren, CivilianRemoveCue,
+  type CivilianLife,
+} from "./civilian_life";
+import {
   ChannelBlock, type ChannelTween, type FogState, type LightState,
 } from "./state/channels";
 import { ActionRing } from "./state/queued";
@@ -370,6 +374,13 @@ const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
  */
 const CIVILIAN_GATE_CLASSES: ReadonlySet<number> =
   new Set<number>([SpawnClass.Civilian]);
+
+/**
+ * `g_scene_state_major_entered`'s `cam/` path row. `EvtOpGotoSceneState31`
+ * leaves it for row 1, and that is when `CivilianUpdate`'s off-camera arm
+ * (`0x0048B068 CMP [0x009C6F08], 2 / JZ`) can first take a civilian.
+ */
+const SCENE_MAJOR_PATH_CAMERA = 2;
 
 /**
  * One opcode's implementation and how far this client honours it.
@@ -795,6 +806,13 @@ export class Walker {
    * the same state behind.
    */
   replaying = false;
+
+  /**
+   * The listed civilians' progress through a replay, by spawn address -- see
+   * `script/civilian_life.ts`. Filled only while {@link replaying}, and a
+   * seek is one call, so it is not saved; {@link reset} clears it.
+   */
+  private civilianLives = new Map<number, CivilianLife>();
   wait: PendingWait | null = null;
   branch: BranchChoice | null = null;
   finished = false;
@@ -951,6 +969,7 @@ export class Walker {
     G.g_script_flags = [];
     this.loadedSlots.clear();
     this.spawns = [];
+    this.civilianLives.clear();
     this.simpleSpawns = [];
     this.cam = null;
     this.wait = null;
@@ -1111,6 +1130,7 @@ export class Walker {
     const retires = rule?.retires;
     if (retires) this.retireGated(retires === "civilians"
       ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
+    if (rule?.clearsRoom) this.civilianRoomsCleared();
     if (rule?.skipRunsCameraOn) this.runCameraOnPast(this.wait.op);
     // The third postcondition: a `wait_script_flag` is only ever passed in
     // play with the byte already a 1, so a replay that steps over one has to
@@ -1155,6 +1175,84 @@ export class Walker {
   }
 
   /**
+   * The rest of a civilian's life, for a replay: the room she was held in has
+   * been played, so her captors are dead and her rescue is behind her. Every
+   * civilian listed now is marked; the removal arms below read the mark.
+   * `script/civilian_life.ts` has the exe's arms and why each is here.
+   */
+  private civilianRoomsCleared(): void {
+    if (!this.replaying) return;
+    for (const s of this.spawns) {
+      if (s.class !== SpawnClass.Civilian) continue;
+      this.civilianLifeOf(s.at).roomCleared = true;
+    }
+    this.retireCiviliansOnCue();
+  }
+
+  /**
+   * The cue arm's evidence: the camera the replay runs has played a listed
+   * civilian's removal path past its frame. `CivilianUpdate`'s test is
+   * `g_active_cam_path == sub+0x26 && g_cam_path_frame == sub+0x28`, and the
+   * replay jumps frames where play steps them, so "at or past" is the frame
+   * play would have passed through.
+   */
+  private civilianCuesSeen(): void {
+    if (!this.replaying) return;
+    const cam = this.cam;
+    if (!cam) return;
+    const civ = this.script.civilians;
+    for (const s of this.spawns) {
+      if (s.class !== SpawnClass.Civilian) continue;
+      const cue = CivilianRemoveCue(civ, s.at);
+      if (cue && cue.path === cam.slot && cam.frame >= cue.frame) {
+        this.civilianLifeOf(s.at).cueSeen = true;
+      }
+    }
+    this.retireCiviliansOnCue();
+  }
+
+  /**
+   * The cue arm: `sub+0x2A` counts `tail+0x06` frames from the cue and the
+   * despawn waits for `sub+0x1E`, the child count, to be zero -- restarting
+   * the count at 1 while it is not (`0x0048AFCA`). So cue seen and captors
+   * dead, in either order, is gone.
+   */
+  private retireCiviliansOnCue(): void {
+    const civ = this.script.civilians;
+    this.spawns = this.spawns.filter((s) => {
+      if (s.class !== SpawnClass.Civilian) return true;
+      const life = this.civilianLives.get(s.at);
+      if (!life?.cueSeen) return true;
+      return !(life.roomCleared || !CivilianHasChildren(civ, s.at));
+    });
+  }
+
+  /**
+   * The off-camera arm: `g_scene_state_major_entered` has just left 2, which
+   * is the one condition of that arm a replay can see. A civilian whose room
+   * has been played and every one of whose streams ends on a `0x2000000` word
+   * is retired here. `[likely]` -- see `script/civilian_life.ts`.
+   */
+  private retireCiviliansOffCamera(): void {
+    if (!this.replaying) return;
+    const civ = this.script.civilians;
+    this.spawns = this.spawns.filter((s) => {
+      if (s.class !== SpawnClass.Civilian) return true;
+      if (!this.civilianLives.get(s.at)?.roomCleared) return true;
+      return !CivilianEndsRemovable(civ, s.at);
+    });
+  }
+
+  private civilianLifeOf(at: number): CivilianLife {
+    let life = this.civilianLives.get(at);
+    if (!life) {
+      life = { roomCleared: false, cueSeen: false };
+      this.civilianLives.set(at, life);
+    }
+    return life;
+  }
+
+  /**
    * The camera half of a wait's postcondition — see
    * {@link WaitRule.skipRunsCameraOn}.
    *
@@ -1180,6 +1278,7 @@ export class Walker {
     cam.frame = to;
     cam.started = false;
     if (cam.frame >= cam.endFrame) cam.done = true;
+    this.civilianCuesSeen();
     this.settleCameraAction();
     this.host.startCamera(cam);
   }
@@ -1646,6 +1745,7 @@ export class Walker {
    */
   enterSceneState(major: number, minor: number): void {
     this.sceneState = { major, minor };
+    if (major !== SCENE_MAJOR_PATH_CAMERA) this.retireCiviliansOffCamera();
   }
 
   /**
@@ -1729,6 +1829,7 @@ export class Walker {
       // is the answer -- retire exactly what it counts.
       if (rule?.retires) this.retireGated(rule.retires === "civilians"
         ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
+      if (rule?.clearsRoom) this.civilianRoomsCleared();
       // Not `raisesScriptFlag` here: `0x45` only reaches this arm with the
       // flag *already* raised, so there is nothing to reproduce. The
       // postcondition belongs to `stepOverWait`, which is the path that walks

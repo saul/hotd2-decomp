@@ -69,6 +69,22 @@ and stage 2 block 6. Stage 1 block 1's script untracks her for the two turn
 clips before her line, so there the gate can still open before she speaks --
 the same rule, applied to that script.
 
+**A deep link lands with the civilians play would have.** A seek replays the
+script with every wait stepped over and no actor running, so a civilian from
+an earlier block was rebuilt at her first command wherever the link landed --
+captors, camera slot and rescue all ahead of her again, which since bug 18
+holds the room's gate for good (stage 3 past block 0, stage 4 past block 1).
+The replay now applies her own ways out (`script/civilian_life.ts`): her
+removal cue when its camera plays it, and the off-camera arm at the first
+`goto_scene_state` after her room. The game itself now has that arm too
+(`CivilianUpdate`'s `0x2000000` test, with `ActorBoundsOnScreen` ported), so a
+rescued civilian leaves once she is off screen. All fourteen bug links in
+`NEW-BUGS.md` load and play to the stage's end (`playthrough.mjs --link`).
+The two ported bosses are camera candidates as the exe makes them
+(`Class14Update`, `Boss4Update`), with their per-actor lifts -- and the stage-2
+boss's three deaths now take it off the camera's list as the exe's do, which
+the port's shared death body had left out.
+
 **A civilian's captors are made again.** `CivilianInit` spawns its children
 itself, so the walker's spawn list names only the civilian; 6da5fab walked
 that list to keep the script's order and every captor in the game went

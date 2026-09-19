@@ -19277,3 +19277,28 @@ game-over facts folded into the descriptions.
 * `audio.mjs`'s peak checks read exactly 0.000 for every source on this
   machine, as the `loops` check does on the morning's base commit; the plays
   themselves are recorded.
+
+## 2026-09-19 -- correction: `?drive=1` does play sound; the exporter digest follows imports
+
+**A correction to the entry above.** It said a `?drive=1` sound trace heard
+nothing because `captureThumb` restores a saved mute state late. That was a
+guess and it was wrong: `captureThumb` runs only after an in-browser build
+(`stageBuilt`), never on a page load. Instrumenting `Bgm.play` showed the
+mute button reading "on" after the harness clicked it and "off" one frame
+later -- the click had left `button.sound` focused, and the harness's next
+key, Space to start the transport, pressed it again. The page was right; the
+harness muted it. With the focus given back, a driven trace records every
+sound on its frame: six `GUN5_22.WAV` at g1701..g1706, `vo_RELOAD_16.wav` at
+g1712 and g1713, `vo_SHOOT_16.wav` at g1839, `RELOAD1_44.WAV` at g1840 (R) and
+g1844 (right button on five rounds), nothing for R or the right button on a
+full gun. `tools/lib/player.mjs` has an `unmute` that clicks and blurs.
+
+**The builder digest follows the exporter's imports to the bottom.**
+`gen_builder_hash.game_sources` already derived its list from `hod2lib/`'s
+imports, but one level deep and only `from "../game/..."`. It now parses every
+import and re-export statement, skips type-only ones (erased, so they decide no
+byte) and the two generated digests, and follows the rest transitively into
+any directory under `web/src/`. Today's set is unchanged -- `class13/state`,
+`class25/state` (whose imports are type-only), `class30/bonecels`,
+`hud_sprites` -- so the digest did not move; a probe module re-exported through
+`hud_sprites.ts` was picked up, which the old rule would have missed.

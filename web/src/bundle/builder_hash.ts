@@ -3,7 +3,8 @@
  *
  * Written by `tools/gen_builder_hash.py` and committed; it covers the code in
  * `web/src/hod2lib/`, which is the only thing that decides what a bundle
- * contains. `tools/verify_exporters.py` fails when this file is stale.
+ * contains, and every module it imports a value from, followed transitively.
+ * `tools/verify_exporters.py` fails when this file is stale.
  *
  * The exporter stamps it into `manifest.json` and onto every stage entry, and
  * `bundle/load.ts` compares -- but **warns rather than refuses**. A schema

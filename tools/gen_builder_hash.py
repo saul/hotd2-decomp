@@ -63,27 +63,70 @@ def sources(root: Path | None = None) -> list[Path]:
     return sorted((root or ROOT).joinpath(BUILDER_DIR).glob("*.ts"))
 
 
-#: `import ... from "../game/<path>"` in a `hod2lib/` module.
-_GAME_IMPORT = re.compile(r'from\s+"\.\./(game/[^"]+)"')
+#: One import or re-export statement's specifier, and whether it is
+#: type-only. `import type` / `export type` are erased and decide no byte;
+#: everything else -- a named, default, namespace, side-effect or re-export --
+#: runs, so it can. Statements may span lines, hence the lazy `[^;]*?`.
+_IMPORT = re.compile(
+    r'^\s*(?:import|export)\s+(type\s+)?(?:[^;"\']*?\s+from\s+)?["\']([^"\']+)["\']',
+    re.M | re.S)
+
+#: Modules an exporter import may reach and that are **not** exporter input:
+#: the two generated digests. `builder_hash.ts` is this file's own output, and
+#: hashing it would make the digest depend on itself; `schema_hash.ts` is the
+#: other half of the contract and has its own generator and check.
+_NOT_INPUT = {Path("bundle") / "builder_hash.ts", Path("bundle") / "schema_hash.ts"}
+
+
+def _resolve(spec: str, importer: Path) -> Path | None:
+    """A relative specifier as the bundler resolves it, or None (a package)."""
+    if not spec.startswith("."):
+        return None
+    base = (importer.parent / spec).resolve()
+    for cand in (base.with_name(base.name + ".ts"), base / "index.ts", base):
+        if cand.is_file() and cand.suffix == ".ts":
+            return cand
+    return None
 
 
 def game_sources(root: Path | None = None) -> list[Path]:
-    """The `web/src/game/` modules `hod2lib/` imports, which decide bytes too.
+    """Every module outside `hod2lib/` the exporter runs, followed transitively.
 
     `hod2lib/bundle.ts` reads `CARRIER_SELECTORS_PORTED` out of
-    `game/class13/state.ts` to decide which class-0x13 models a bundle
-    carries, so porting a carrier routine changes a bundle without touching
-    `hod2lib/` -- a stale bundle nobody is warned about (`L24`). One level:
-    these are data modules, and the imports are named, not globbed.
+    `game/class13/state.ts` and the HUD's sprite ids out of
+    `game/hud_sprites.ts`, so porting a routine changes a bundle without
+    touching `hod2lib/` -- a stale bundle nobody is warned about (`L24`).
+
+    **Derived from the import statements, never named**, and followed to the
+    bottom: this list used to be one level of `from "../game/..."`, which a
+    data module that imports a value from a second module -- or an exporter
+    import from `core/` rather than `game/` -- would have walked straight past.
+    Type-only imports are skipped because they are erased; the two generated
+    digests are skipped (see :data:`_NOT_INPUT`).
     """
-    base = (root or ROOT).joinpath(BUILDER_DIR)
-    out: set[Path] = set()
-    for p in sources(root):
-        for m in _GAME_IMPORT.finditer(p.read_text(encoding="utf-8")):
-            f = base.parent / (m.group(1) + ".ts")
-            if f.exists():
-                out.add(f)
-    return sorted(out)
+    src = (root or ROOT).joinpath(BUILDER_DIR).parent.resolve()
+    hod2lib = (root or ROOT).joinpath(BUILDER_DIR).resolve()
+    seen: set[Path] = set()
+    todo = [p.resolve() for p in sources(root)]
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        for m in _IMPORT.finditer(f.read_text(encoding="utf-8")):
+            if m.group(1):
+                continue
+            dep = _resolve(m.group(2), f)
+            if dep is None or dep in seen:
+                continue
+            try:
+                rel = dep.relative_to(src)
+            except ValueError:
+                continue
+            if rel in _NOT_INPUT:
+                continue
+            todo.append(dep)
+    return sorted(p for p in seen if p.parent != hod2lib)
 
 
 def file_digests(root: Path | None = None) -> dict[str, str]:
@@ -92,7 +135,7 @@ def file_digests(root: Path | None = None) -> dict[str, str]:
     `hod2lib/` files are keyed by their bare name, as they always were; the
     `game/` modules they import by their path under `web/src/`, so two
     `state.ts` files cannot collide."""
-    src = (root or ROOT).joinpath(BUILDER_DIR).parent
+    src = (root or ROOT).joinpath(BUILDER_DIR).parent.resolve()
     keyed = [(p.name, p) for p in sources(root)] + [
         (str(p.relative_to(src)), p) for p in game_sources(root)]
     return {k: hashlib.sha256(
@@ -118,7 +161,8 @@ def client_source(root: Path | None = None) -> str:
  *
  * Written by `tools/gen_builder_hash.py` and committed; it covers the code in
  * `web/src/hod2lib/`, which is the only thing that decides what a bundle
- * contains. `tools/verify_exporters.py` fails when this file is stale.
+ * contains, and every module it imports a value from, followed transitively.
+ * `tools/verify_exporters.py` fails when this file is stale.
  *
  * The exporter stamps it into `manifest.json` and onto every stage entry, and
  * `bundle/load.ts` compares -- but **warns rather than refuses**. A schema

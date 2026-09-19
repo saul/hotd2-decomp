@@ -34,7 +34,7 @@
  * three.js lights themselves — is `render/lighting.ts`, and it reads only what
  * is here.
  */
-import { AppState, G } from "./globals";
+import { AppState, G, PlayerState } from "./globals";
 import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
 import { ThrowerFlag, ZombieAux, type Actor } from "./actor";
@@ -56,8 +56,6 @@ export const GUN_LIGHT_ATTEN0 = 0.5;
 export const GUN_LIGHT_RANGE = Infinity;
 /** `g_projection_distance_px` — 0x009A2D70, for the 640x480 frame. */
 export const PROJECTION_DISTANCE_PX = 640.2;
-/** `g_player_state` for a player who is in play. */
-const PLAYER_STATE_IN_PLAY = 5;
 
 const _local: Vec3 = { x: 0, y: 0, z: 0 };
 const _eye: Vec3 = { x: 0, y: 0, z: 0 };
@@ -93,17 +91,12 @@ const _eye: Vec3 = { x: 0, y: 0, z: 0 };
  * camera's forward transform, which is what `GameHost.viewPoint` answers.
  * `VecToAngles` then the rotation back is `normalize(pos - eye)` up to the
  * angles' BAMS rounding, and it is transcribed as the two calls.
- *
- * [diverges] **`g_player_state` is never 5 in the port** — see its note in
- * `globals.ts` — so "in play" takes the same stand-in `IsPlayerAttackable`
- * does: a player with lives left.
  */
 export function BuildEntitySpotlightArray(host: GameHost): void {
   for (let p = 0; p < 2; p++) {
     const light = G.g_entity_lights[GUN_LIGHT_FIRST + p];
-    const inPlay = G.g_player_state[p] === PLAYER_STATE_IN_PLAY
-      || G.g_app_state === AppState.Attract
-      || (G.g_player_lives[p] ?? 0) > 0;
+    const inPlay = G.g_player_state[p] === PlayerState.InPlay
+      || G.g_app_state === AppState.Attract;
     if (G.g_entity_spotlights_on !== 1 || !inPlay || !G.g_aim_on_screen[p]) {
       light.enabled = false;
       continue;

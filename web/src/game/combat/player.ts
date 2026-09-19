@@ -8,7 +8,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
-import { AppState, G } from "../globals";
+import { AppState, G, PlayerState } from "../globals";
 
 /**
  * `CheckPlayerCanBeHit` — `FUN_004153E0`. The invulnerability window, which is
@@ -29,7 +29,7 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  * the engine's answer to "why is there no pause after I am hit", and it is
  * why there is not one here either.
  *
- * The engine's three clauses, in order, and two of them are ported:
+ * The engine's three clauses, in order, all three ported:
  *
  * 1. `g_scene_state_major_entered` must be **2** — the `cam/` path camera row
  *    of `g_scene_state_table`. So nothing attacks while the follow camera or a
@@ -45,13 +45,13 @@ export function CheckPlayerCanBeHit(player: number): boolean {
  *    `g_app_state` in `game/globals.ts` for what that cost.
  * 3. `g_player_state[player] == 5`, in play.
  *
- * [diverges] **The third clause is a stand-in.** Nothing in the port ever
- * writes `g_player_state = 5`: every writer is the game's shell — attract,
- * continue, name entry, game over — reached through the per-player hook the
- * scene-state table installs at `_DAT_009A5CDC`, an indirect call the port has
- * no equivalent of. Until that shell exists, "is this player in play" is
- * answered by the thing that stands in for it, which is that the player has a
- * life left. `g_player_lives` floors at one for the same reason.
+ * The third clause used to be a stand-in -- "has a life left" -- because the
+ * port seeded `g_player_state` 0 and nothing wrote 5. It reads the real
+ * state now: the reset seeds player 0 in play, as `PlayerEnterPlay`
+ * (`FUN_00414770`) leaves it, and player 1 at 9, which is not attackable,
+ * exactly as in a one-player game. See `g_player_state` in `globals.ts` for
+ * the one stand-in left, which is that the port does not run the shell that
+ * gets a player to 5.
  *
  * **Its call sites.** Eight functions in the engine call it; the port has
  * modules for four of them and all four now do:
@@ -76,8 +76,7 @@ export function IsPlayerAttackable(player: number): boolean {
   if (G.g_scene_state_major_entered !== SCENE_STATE_PATH_CAMERA) return false;
   if (G.g_app_state === AppState.Attract) return true;
   if (player < 0) return false;
-  if (G.g_player_state[player] === PLAYER_STATE_IN_PLAY) return true;
-  return (G.g_player_lives[player] ?? 0) > 0;
+  return G.g_player_state[player] === PlayerState.InPlay;
 }
 
 /**
@@ -86,8 +85,6 @@ export function IsPlayerAttackable(player: number): boolean {
  * (`FUN_00403BD0`) for the whole table.
  */
 const SCENE_STATE_PATH_CAMERA = 2;
-/** `g_player_state` for a player who is in play. */
-const PLAYER_STATE_IN_PLAY = 5;
 
 // -- what a hit costs ------------------------------------------------------
 //

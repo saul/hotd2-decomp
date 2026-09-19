@@ -1798,6 +1798,18 @@ and no `g_attack_permits` anywhere in the class: a bat flies its path, homes on
 the `wait_enemies_present 0` behind each flight cannot deadlock — the flight
 ends itself whether or not anybody shoots.
 
+**...and until 2026-09-19 it arrived and did nothing** (NEW-BUGS 19). The
+strike's one gate is `g_player_state == 5` for either player, read bare at
+`0x0042E88A` (dive) and `0x0042F1B5` (swarm), and the port seeded that word 0.
+The routines were transcribed right; the state they test had never been
+written. See the `IsPlayerAttackable` section for `PlayerEnterPlay` and the
+seed. `tools/bats.mjs` now runs all six bat steps through the real bundles
+without touching the state word, and `tools/bats_page.mjs` drives the page
+under `?drive=1` and watches the score fall by exactly 100 — a strike's charge,
+which no kill can produce (`L47`). Only one life per flight: members arrive
+twenty frames apart and the 90-frame invulnerability window swallows the rest,
+as `PlayerTakeDamage` (`FUN_00415300`) does in the exe.
+
 Four readings from this that are worth keeping:
 
 * **The bat is deliberately not a skeleton to shoot at.** `PlaceBats` writes
@@ -2628,16 +2640,25 @@ with "the player has a life left". Two are ported now:
    was a guess about what 0 meant, and it was wrong. See
    **`g_app_state` and `ResolveHit`'s three suppression bits** below.
 
-`[diverges]` **The third clause is still a stand-in.** `g_player_state`
-(0x009A5C62) must be 5, and *nothing in the port ever writes 5*: every writer
-is the game's shell — attract, continue, name entry, game over — reached
-through the per-player hook the scene-state table installs at `_DAT_009A5CDC`,
-an indirect call with no port equivalent. `AdvanceToNextScene` (`FUN_0045FFF0`)
-is the one writer that is plainly readable, and it goes the other way: it puts
-a player at 5 back to **2** for the duration of a scene load, which is why no
-enemy attacks across a stage change. Until the shell exists, "in play" is
-answered by "has a life left", and `g_player_lives` floors at one for the same
-reason.
+**The third clause is ported too, as of 2026-09-19** (NEW-BUGS 19).
+`g_player_state` (0x009A5C62) must be 5, and the writer of 5 is now read:
+`PlayerEnterPlay` (`FUN_00414770`), whose four rows in
+`g_player_enter_play_modes` (`0x00579DE8`) all carry state 5. The per-player
+shell reaches it from states 0..3 — each of `g_player_state_handlers`
+(`0x00579CD0`) entries 0..3 is `PlayerEnterPlay(obj, n)` — and
+`AdvanceToNextScene` (`FUN_0045FFF0`) parks an in-play player at **2** for a
+scene load, whose handler `PlayerStateReenterAfterScene` (`FUN_00413E40`)
+enters play again. Boot (`FUN_0040A920`) leaves both players at **9**.
+
+`[diverges]` The port still does not run that shell. `ResetGameGlobals` seeds
+`g_player_state = [5, 9]` — boot plus player 0 having entered — which is the
+same stand-in `g_players_in_play = 1` and `g_max_attackers = 1` already were
+for `PlayerEnterPlay`'s two counter increments. Until then it seeded `[0, 0]`,
+the gate fell back on "has a life left", and everything that reads the state
+word *directly* rather than through `IsPlayerAttackable` — the bat's strike,
+the horde's bite, the body creature's hit — never landed in the page. Their
+port tests set 5 by hand and passed. `g_player_lives` still floors at one,
+because there is still no continue.
 
 Note what the gate does **not** test: `g_player_invuln_frames`. The 90-frame
 window after a hit stops the damage and nothing else, so the enemies keep

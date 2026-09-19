@@ -56,7 +56,7 @@ import {
 import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
-import { ActorByAt, AppState, G, ResetGameGlobals, ResetSceneOnEnter }
+import { ActorByAt, AppState, G, PlayerState, ResetGameGlobals, ResetSceneOnEnter }
   from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
@@ -8433,7 +8433,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
 
 console.log("\nIsPlayerAttackable: the scene has to be running:");
 {
-  // Three clauses, two of them ported. The first is the interesting one:
+  // Three clauses, all ported. The first is the interesting one:
   // nothing may attack unless the scene state's major is 2, the `cam/` path
   // camera row -- so a scripted view-angle turn is a window in which the
   // player cannot be hit.
@@ -8454,13 +8454,19 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
   // The attract override: the demo has no real player, so `g_player_state` is
   // never 5, and without this the demo would never be attacked.
   G.g_scene_state_major_entered = 2;
-  G.g_player_lives = [0, 0];
-  check("a player with no lives left is not attackable — the port's stand-in "
-        + "for the state word", !IsPlayerAttackable(0), "still attackable");
+  // The third clause is the state word itself, and nothing else: lives are
+  // not in it. The reset leaves player 1 at 9, out of the game, as boot does.
+  check("player 1 is out of a one-player game, lives or no lives",
+        G.g_player_state[1] === PlayerState.Out && G.g_player_lives[1] > 0
+        && !IsPlayerAttackable(1), `state ${G.g_player_state[1]}`);
+  G.g_player_state = [PlayerState.Out, PlayerState.Out];
+  check("a player who is not in play is not attackable",
+        !IsPlayerAttackable(0), "still attackable");
   G.g_app_state = AppState.Attract;
   check("...unless the attract demo is running, which overrides it",
         IsPlayerAttackable(0), "override did not fire");
   G.g_app_state = AppState.InPlay;
+  G.g_player_state = [PlayerState.InPlay, PlayerState.Out];
 
   // ...and the engine's own third clause, for when a player state exists.
   G.g_player_state = [5, 0];
@@ -15228,6 +15234,48 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and gives both counters back, so the room clears",
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  {
+    // NEW-BUGS 19: **the same flight, with nothing set by hand.** The strike's
+    // only gate is `g_player_state == 5` for either player (`0x0042E88A`,
+    // `0x0042F1B5`), and the page never set it -- the test above did, so it
+    // passed while every bat in the page arrived and did nothing. The reset is
+    // what the page runs, and it has to leave player 0 in play.
+    const rng = new Rng(68);
+    scene(0, rng);
+    G.g_camera_block_eye = vec3(100, -10, -140);
+    check("the stage starts with player 0 in play and player 1 out",
+          G.g_player_state[0] === PlayerState.InPlay
+          && G.g_player_state[1] === PlayerState.Out,
+          `${G.g_player_state}`);
+    const dive = mkBat(0x9e40, 0, 0, 0, rng);
+    const lives = G.g_player_lives[0];
+    for (let i = 0; i < 400 && !dive.despawned; i += 1) {
+      BatUpdate(dive, frame(rng));
+    }
+    check("a diving bat that reaches the camera takes a life off the reset "
+          + "state", dive.despawned && G.g_player_lives[0] === lives - 1
+          && G.g_player_was_hit[0] === 1 && G.g_player_hit_motion[0] === 9,
+          `lives ${lives} -> ${G.g_player_lives[0]}, `
+          + `hit ${G.g_player_was_hit[0]}/${G.g_player_hit_motion[0]}`);
+
+    // ...and so does the swarm's, through the same strike.
+    // Out of the invulnerability window, and above the port's floor of one.
+    G.g_player_invuln_frames = 0;
+    G.g_player_lives[0] = 3;
+    mkBat(0x9e80, 2, 0, 0, rng, vec3(90, -10, -120));
+    const swarm = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing
+        && bat(a).subtype === 2);
+    const before = G.g_player_lives[0];
+    const first = swarm[0];
+    for (let i = 0; i < 400 && !first.despawned; i += 1) {
+      BatUpdate(first, frame(rng));
+    }
+    check("...and a swarm bat that reaches it takes one too",
+          first.despawned && G.g_player_lives[0] === before - 1,
+          `lives ${before} -> ${G.g_player_lives[0]}`);
   }
 
   {

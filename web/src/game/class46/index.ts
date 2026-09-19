@@ -105,7 +105,7 @@ import {
 } from "../combat/counts";
 import { ActorReleaseHitSlot } from "../hit_slots";
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
-import { G } from "../globals";
+import { G, PlayerState } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -390,9 +390,18 @@ function BatApplyWobble(obj: Actor, sub: BatTail): void {
  * with one, and **left where it was** when that is -1 or 2, the same asymmetry
  * `OwlPickTargetPlayerAndAimOffset` has. Then both counters come back and the
  * actor goes. No range test: reaching `t > 1` is the whole condition.
+ *
+ * **No permit either, and no `IsPlayerAttackable`** (`FUN_00409DC0`): the
+ * only gate is the bare `g_player_state == 5` for either player, read at
+ * `0x0042E88A` in the dive and `0x0042F1B5` in the swarm. The damage call is
+ * `PlayerTakeDamage(obj+0x121, 1, 9)` -- a non-zero second argument, so the
+ * hit latch and hit motion 9 are written. That gate is why the page's bats
+ * never hurt: `g_player_state` used to be seeded 0, and nothing but a test
+ * ever wrote 5 (NEW-BUGS 19; see `g_player_state` in `globals.ts`).
  */
 function BatStrikeAndLeave(obj: Actor, sub: BatTail, f: ClassFrame): void {
-  if (G.g_player_state[0] === 5 || G.g_player_state[1] === 5) {
+  if (G.g_player_state[0] === PlayerState.InPlay
+      || G.g_player_state[1] === PlayerState.InPlay) {
     if (G.g_players_in_play === 2) {
       obj.attackPermit = f.rng.int(2);
     } else {

@@ -52,7 +52,7 @@ import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
-import { G } from "../globals";
+import { G, PlayerState } from "../globals";
 import type { GameHost } from "../host";
 import {
   registerClass, DeadSweep, type ActorDebug, type ClassFrame,
@@ -1000,7 +1000,7 @@ function HordeStateDive(obj: Actor, t: HordeTail, f: ClassFrame): void {
   t.diveT += t.diveRate;
   if (t.diveRate <= HORDE_DIVE_RATE_END) {
     const p = obj.attackPermit;
-    if ((G.g_player_state[p] ?? 0) === 5) {
+    if ((G.g_player_state[p] ?? 0) === PlayerState.InPlay) {
       PlayerTakeDamage(p, obj, HORDE_DAMAGE_KIND, f.events);
     }
     if (!(obj.flags & HordeFlag.Landed) && t.idx < 3) {

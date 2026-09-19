@@ -201,6 +201,17 @@ export const G = {
    * `g_cur_actor` (0x009A26A0); a list is the same thing with an index.
    */
   g_object_list: [] as Actor[],
+  /**
+   * `g_cur_actor` — 0x009A26A0, **which object's update is running**, by spawn
+   * address; `-1` outside the walk.
+   *
+   * The engine's task walk leaves the current object here, and the collision
+   * passes over moving objects read it to skip the object asking:
+   * `ColiTraceSegmentAllSets` (`FUN_004053B0`) compares it at `0x00405448`
+   * and `ColiTestSphereAgainstFullSet` (`FUN_004057F0`) at `0x0040583A`
+   * (`CMP dword ptr [0x009a26a0], ESI`), so a boat never stands on itself.
+   */
+  g_cur_actor: -1,
   /** `g_enemies_alive` — 0x009C904A. */
   g_enemies_alive: 0,
   /**
@@ -898,9 +909,10 @@ export const G = {
    * bit 0x10000000. `ZombieStateDelayedStrikeInPlace` (state 32) watches the
    * same object's bit 0x40000000 and gives up 0x14 frames after it appears.
    *
-   * [diverges] **The port has no rideable object.** Every class that writes
-   * this one — `St1VehicleUpdate` (`FUN_0048E600`) among them — is unported,
-   * so it stays -1 and the two states above take their no-carrier arms. See
+   * Two ported classes write it: class 0x33 selector 1
+   * (`ScriptedCarrierUpdate33`) and class 0x26 subtype 2
+   * (`Class26Subtype2Update` — `FUN_0048EAD0`, stage 3's boat, at
+   * `0x0048EB1C`). `St1VehicleUpdate` (`FUN_0048E600`) is unported. See
    * `class30/entrance.ts`.
    */
   g_carrier_object: -1,
@@ -909,8 +921,12 @@ export const G = {
    * and a different global from {@link g_carrier_object} above.
    *
    * `CarrierPropSelectRoutine` (`FUN_00440190`) writes it at `0x004401A0`
-   * when a class-0x13 prop installs its routine, and `Class26Subtype2Update`
-   * (`FUN_0048EAD0`) writes it too. `CarriedZombieInit18` (`FUN_0045CD60`)
+   * when a class-0x13 prop installs its routine — the one write
+   * `get_xrefs_to 0x009a2c88` lists (readers: `CivilianInit`,
+   * `CarriedZombieInit18`, `Boss4Init`).
+   * (`Class26Subtype2Update` (`FUN_0048EAD0`) was once listed here too; it
+   * writes {@link g_carrier_object} instead — `0048eb1c 8935345c9a00`, `MOV
+   * [0x009a5c34], ESI`.) `CarriedZombieInit18` (`FUN_0045CD60`)
    * copies it into `obj+0x13B0` at spawn and never reads it again, so it is
    * the carrier that was current on the frame the rider was placed — which is
    * why the script spawns a boat and its passengers in the same instruction.
@@ -962,6 +978,15 @@ export const G = {
    * can never drift.
    */
   g_frame_counter: 0,
+  /**
+   * `g_scene_tick_counter` — `0x009A2BAC`. The third of the counters
+   * `FUN_0040E730` steps once a tick, and the one that counts **ticks since
+   * the scene was entered**: `ResetSceneOnEnter` (`FUN_0045EDD0`) zeroes it
+   * at `0x0045EE23`, where the other two are zeroed by the scene *load*.
+   *
+   * `PropUpdateType13` (`FUN_00467F50`) blinks its panel on `% 0x28` of it.
+   */
+  g_scene_tick_counter: 0,
 
   // -- the ground plane --------------------------------------------------
   /**
@@ -1279,11 +1304,12 @@ export type Globals = typeof G;
  * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
- * | five unread words: `DAT_009A2BAC`, `DAT_009C8E8C`, `DAT_009C6F1C`,
- *   `DAT_009C6F20`, `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`,
- *   `DAT_009A34DC = 1` | `[open]` |
+ * | `g_scene_tick_counter` (`0x009A2BAC`, at `0x0045EE23`) | ✅ |
+ * | the unread words: `DAT_009C8E8C`, `DAT_009C6F1C`, `DAT_009C6F20`,
+ *   `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`, `DAT_009A34DC = 1` |
+ *   `[open]` |
  *
- * Eight of fourteen. The name is the engine's and the omissions are itemised on
+ * Nine of fifteen. The name is the engine's and the omissions are itemised on
  * purpose: a partial transcription that says which part is a work list, and
  * one that does not is a lie waiting to be believed.
  */
@@ -1291,6 +1317,8 @@ export function ResetSceneOnEnter(): void {
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
+  // `MOV [0x009a2bac], EBX` at `0x0045EE23`, `EBX` zeroed at the top.
+  G.g_scene_tick_counter = 0;
   // `for (i = 0xE; i != 0; i--) *p++ = 0` over `&DAT_009C88C0` at
   // `0x0045EE70` -- and the **0xE is a second, independent proof that
   // `g_hit_slots` is fourteen deep**, the first being the pointer bound in
@@ -1341,6 +1369,7 @@ export function ResetSceneOnEnter(): void {
  */
 export function ResetGameGlobals(): void {
   G.g_object_list = [];
+  G.g_cur_actor = -1;
   ResetSceneOnEnter();
   G.g_attack_permits = new Array(G.g_max_attackers).fill(-1);
   G.g_attack_committed = 0;

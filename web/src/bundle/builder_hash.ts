@@ -22,13 +22,13 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "8a62bedf274c97b1d6d7dfe8e64934a767bbeb694a7de3fee1b4c73ad35fb2e1",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "e9e02f0b48ca0e3817d5f7fa772535ffc7e8c5e0123d9c18ae99ac0de7dbbfa7",
+  "bundle.ts": "ec398fd90686e575a6bdfb04b187364f2ed9af4d1a5bd15921f496544e4df22c",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "af33dc89a48875b130c1ea38d54d843a8ad437df6fe900f18138d4a5b6fddd4c",
+  "characters.ts": "a04dce9c42c36e32691cce72cf68c14c518a5e553fdb2c76a092b9e66d8179e5",
   "charbuild.ts": "361a125d13404ac2bca62de1ca916a68579cfe0bf5fc397a118096ab9691e639",
-  "charmotion.ts": "cd4b6a141de1b98a2de184596e384a8589ad4aaa1696692c327f8b37405cb1a4",
+  "charmotion.ts": "3d426e4c66628163540997108756a7b2f59a24ba0abc6526bd8c7c279f90c671",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
   "combat.ts": "02cc51f38c9f39cd341ca9aa44cf5c5d1f33894db0e3e7b9fae9df228b2504b3",
@@ -41,7 +41,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "lz.ts": "dddff2029ebd1cafc686d25b57da5e5ad8e22fdb2febf4af4988651d627aa80e",
   "mot.ts": "114f3ffa4e967dcdb69ea6919ec21b83d6ff9d1f6754d2a7f9e0fd1d3d1a3952",
   "nl1.ts": "317558dbf8e53791395e7dd24c85b18487576ee110545cc284b6ab65cdff82bd",
-  "placement.ts": "7deb7d4fbe89f4186068b0a2b783482d5ca2d2518f1727f9c38fc038eda7a2e0",
+  "placement.ts": "19e2b98ad7db6a6a27b8efb0fcf62d67f1c1917308268e0de5eaccf0117341ff",
   "png.ts": "326d5417b68475ad54b90e2a91a1f68ca3859d6ba044582928a13459b4afa50b",
   "props.ts": "7186ef2c37d5b64e8893cee5b51e1894f09972ce14c7f487f10e125e2e49bc30",
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
@@ -55,4 +55,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "e9ca621954b41c4c7d7d72c4ea97a86ff02178cc01c326e15bedca97c1aa84e0";
+export const BUILDER_HASH = "cde996f56581a662eb0b0468229af252a7ea74485e0512b3c8e3b2b759cabb76";

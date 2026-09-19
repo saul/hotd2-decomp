@@ -19,10 +19,12 @@ import type { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
 import {
   RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
-  SpawnSlotActors,
+  SlotActorsForgetUnlisted, SpawnSlotActor,
   type CharacterSpawnRequest, type ScriptSpawn,
 } from "../game/director";
 import type { Actor } from "../game/actor";
+import { SpawnHordePlacers } from "../game/class40";
+import { T } from "../game/tables";
 import type { Rng } from "../core/rng";
 import type { Events } from "../core/events";
 
@@ -266,14 +268,32 @@ export class CharacterBindSystem implements System {
 export function syncCharacterSpawns(chars: CharacterPool,
                                     spawns: readonly ScriptSpawn[],
                                     events?: Events): void {
-  const made = SpawnScriptedCharacters(chars.readySpawns(spawns), chars.rng,
-                                       events);
+  // **In the script's order**, the character spawns and the ones the
+  // character pool can never make (their model is an asset slot and they have
+  // no character type — see `SpawnSlotActors`) interleaved. The engine's
+  // `SpawnFromDescriptor` (`FUN_00408A20`) makes one object per descriptor as
+  // the instruction runs, so an `Init` that reads what the spawn before it
+  // left behind reads exactly that. Stage 3's boat is the case that showed:
+  // one `spawn_obj_c` places the class-0x13 boat and then its civilian, whose
+  // `CivilianInit` copies `g_civilian_carrier` — and with every character
+  // built before every slot actor, the civilian and the class-0x18 riders
+  // copied the carrier of *no* boat and were drawn at their boat-relative
+  // offsets from the world origin. Same `chars.rng` throughout, because the
+  // engine draws from one `rand()` and every spawn on this frame is on the
+  // same stream.
+  const ready = new Map(chars.readySpawns(spawns).map((r) => [r.at, r]));
+  const made: Actor[] = [];
+  SlotActorsForgetUnlisted(spawns);
+  // Class 0x40's placers are built per instruction rather than per address,
+  // ahead of the rest -- see `SpawnHordePlacers`. They read nothing another
+  // spawn leaves behind, so building them first changes nothing they do.
+  SpawnHordePlacers(spawns, T.chars?.placements ?? [], chars.rng);
+  for (const s of spawns) {
+    const r = ready.get(s.at);
+    if (r) made.push(...SpawnScriptedCharacters([r], chars.rng, events));
+    else SpawnSlotActor(s, chars.rng);
+  }
   for (const a of chars.syncSpawns(spawns, made)) RetireUnlistedActor(a);
-  // ...and the ones the character pool can never make, because their model is
-  // an asset slot and they have no character type to resolve. See
-  // `SpawnSlotActors`. Same `chars.rng`, because the engine draws from one
-  // `rand()` and every spawn on this frame is on the same stream.
-  SpawnSlotActors(spawns, chars.rng);
 }
 
 /**

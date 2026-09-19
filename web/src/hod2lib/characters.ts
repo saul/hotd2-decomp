@@ -48,6 +48,7 @@ import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
          difficultyTables, playerDamage, reactionGroups,
          STAND_AND_THROW_STATES } from "./combat";
+import * as colilib from "./coli";
 import * as degraded from "./degraded";
 import * as evtlib from "./evt";
 import type { Spawn } from "./evt";
@@ -109,7 +110,8 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * so `spawnres` can never identify one and the placement has to survive that
  * anyway. See the note in `resolveForStage`.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x33, 0x40, 0x43, 0x51, 0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x26, 0x33, 0x40, 0x43, 0x51,
+                                           0x52]);
 
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
@@ -221,6 +223,35 @@ export function class18Tail(rec: Spawn): Record<string, unknown> {
     cue_path: rec.param(0x0c, "i16") ?? -1,
     cue_frame: rec.param(0x0e, "i16") ?? -1,
   };
+}
+
+/** Class 0x26's subtype, `obj+0x11C`, for the one routine this library reads. */
+export const CLASS26_BOAT = 2;
+
+/**
+ * Class 0x26 subtype 2's descriptor tail, as `Class26Subtype2Update`
+ * (`FUN_0048EAD0`) reads it on its first frame:
+ *
+ * ```
+ * 0048eb14  8b00          MOV EAX, dword ptr [EAX]        ; EAX = obj+0x1390
+ * 0048eb16  89864c010000  MOV dword ptr [ESI + 0x14c], EAX
+ * ```
+ *
+ * One dword, `tail+0x00`, and it is a **relocated pointer** into the collision
+ * buffers -- the same kind of operand opcodes 0x10/0x11 carry -- so it is
+ * resolved here to the `"<file>:<offset>"` key the bundle's `coli.blobs` is
+ * keyed by. Stage 3's one spawn, descriptor 3244, names `coli3.bin` at 0x9C08:
+ * 23 quads of surface 53, the boat's foredeck in the boat's own space. A
+ * pointer that lands on no blob header is `null`, which is what a wrong
+ * reading would look like.
+ */
+export function class26Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  const word = rec.param(0x00, "u32");
+  const hit = word !== null && sets
+    ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
+  return { coli: hit ? `${hit[0]}:${hit[1]}` : null };
 }
 
 export function class13Tail(rec: Spawn): Record<string, unknown> {
@@ -506,6 +537,11 @@ export const CLASS33_PUSHABLE = 4;
  * `class33`/`class33_push` in {@link resolveCharacters}.
  */
 export function slotDrawnSpawn(cls: number, rec: Spawn): boolean {
+  // Class 0x26 is eight objects behind one id, switched on `obj+0x11C` by
+  // `Class26InstallSubtypeUpdate` (`FUN_0048E290`). Only subtype 2 is read --
+  // `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's boat -- and the rest
+  // are drawn by `render/rigs.ts` off the rig table with no actor behind them.
+  if (cls === 0x26) return rec.hp === CLASS26_BOAT;
   if (cls === 0x33) {
     return rec.hp === CLASS33_CARRIER || rec.hp === CLASS33_PUSHABLE;
   }
@@ -770,6 +806,9 @@ export async function resolveForStage(
 
   const chars = new Map<number, Character>();
   const placements: Placement[] = [];
+  // The two collision files, for the one descriptor tail that names a blob --
+  // see {@link class26Tail}.
+  const coliSets = await stage.colisets();
   const class31 = class31Tables(tables);
   let civscripts: CivBlock;
   try {
@@ -961,6 +1000,7 @@ export async function resolveForStage(
     }
     const class13 = cls === 0x13 ? class13Tail(rec) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
+    const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
@@ -1058,6 +1098,7 @@ export async function resolveForStage(
     p.ring_set = res.charType === 0 ? RING_SET_FOR_CHAR0 : 0;
     p.class13 = class13;
     p.class18 = class18;
+    p.class26 = class26;
     p.class20 = class20;
     p.class11 = class11;
     p.class43 = class43;

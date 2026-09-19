@@ -17991,3 +17991,196 @@ Left `[open]`: `obj+0x136C |= 0x100002` in the emerge's sub 0 and its
 `&= ~0x100000` on the hand-over (`0x100000` is `Carried` for the carrier
 states; L3), the `0x80000` in `obj+0x34`, and `model+0x64` bit 0, which the
 hidden arm clears and the clip start sets.
+
+## Two civilian reports: a branch a deep link decided, and a barrel thrown early
+
+**Bug 16 — stage 4 block 12's rescue "takes the wrong branch".** Block 12 is
+`branch {13, 14}` — the exe's own route record at `0x00597640` reads
+`01 00 0d 00 0e 00 ff ff` `[proved]` — and its last step places civilian
+`0x63CC`, script 39 → stream 93, whose rescue block runs `SetRouteBranch 1`
+(op 0x19, `0x0048BED5`). `EvtAdvanceStepOrRoute` indexes `next[var]`, so a
+rescue goes to block 14 and a maul to block 13. The port does exactly that
+now; what it did before was take 14 **whatever happened**, and the reason was
+not the civilian in the report at all.
+
+A headless trace of the deep link (seek, then `Walker` + `GameSystem` +
+civilian children built beside their parent) showed `g_script_branch_var`
+written at frame 1, before `0x63CC` had even spawned. The writer was stage 4's
+**block-4** hostage `0x3578`: the seek had stepped over block 4's
+`wait_script_flag 29`, raised the flag, and left her spawn marker standing, so
+she was rebuilt fresh at block 12; her captor's `ZombieStateDragTarget` saw
+flag 29 already up, raised its own dead bit and left, and her stream ran its
+rescue block — `SetRouteBranch 1` — in block 12's last step. Fixed in the
+replay, not the port: `Walker.retireFlagRaisers` retires a class-0x10 spawn
+whose streams raise the flag a replay steps over. Measured with the same
+harness, base against fix: no rescue took 14 before and 13 after; a rescue
+takes 14 in both.
+
+**What I have not settled** is the report's direction. At block 12's last
+frame the camera is at (-124.4, -665.2) looking at (-171.7, -715.8); block 13's
+room (its zombies at x ≈ -290) lies to the left of that view and block 14's
+(x ≈ +15..+90) to the right, and path 178 — block 14's first shot — turns
+right. So the exe's rescue route is the **right-hand** one as the port draws
+the world, and the report says a rescue should go left. Either the report
+remembers the other road, or the port's image is mirrored relative to the
+game's. `UpdateSceneViewAndLight` builds the view looking down local -Z and
+`BuildPerspectiveProjection` is left-handed; where the two are reconciled I did
+not find, so the handedness is `[open]`, and I did not force an arm (L45).
+
+Two further things came out of it. `CivilianPruneDeadChildren` read
+`kid.dead || flags & Dead` and also dropped a child missing from the pool; the
+exe tests `child+0x34 & 0x4000000` and nothing else, and `ActorDespawn` never
+raises it, so the port counted a captor that simply left as a rescue. Fixed,
+with a test that fails on the old line. And a byte sweep for `a4889c00` (L32)
+found a sixteen-writer inventory that is really eighteen: class 0x2C
+(`Class2CBranchToggleInit` / `Class2CBranchToggleUpdate`, `0x00432D50`) zeroes
+the variable at spawn and toggles it 0/1 on every shot. No shipped stage places
+class 0x2C.
+
+Wrong turns: I first read my own harness's `var 1 at frame 0` as the port's
+answer and nearly concluded "the port matches the exe, no bug" — it was the
+stale civilian, visible only once the write was trapped with a setter and a
+stack trace. And a harness that builds the walker's spawns but not a
+civilian's children (which only the character layer adds) makes every hostage
+"rescued" on her first frame, because her child list is empty; it looked like
+the same bug and was not.
+
+**Bug 11 — stage 1 original block 6, the barrel thrown before the player
+arrives.** Root cause `[proved]`: the captor `0x3C7C` holding the barrel is
+class 0x30 **state 37**, `ZombieStateCarryProp` (`FUN_0045B380`), which the
+port does not have — `class30/index.ts` runs state 37 as
+`ZombieStateTargetMotionScript`. The exe's state reads a 0x38-byte header
+(here: prop type 0, behaviour 1, release 3, motion 271 for **two loops**, mode
+-2), builds the barrel as a companion object (`CarriedPropInit`,
+`FUN_00442740`), holds it through 271 ×2, then 265, then releases on frame 15
+of 266 into `g_prop_behaviours[3]` — a ballistic throw that kills the civilian
+on contact unless the barrel or its carrier is shot first. The port skips the
+header entirely, so the two-loop hold never happens and the throw comes as
+soon as the actor is built. Not ported here: the bridge workstream (bug 3) is
+porting `ZombieStateCarryProp` and the carried prop for its own fat zombies at
+the same time, and a second port of the same routines would collide. What
+stage 1 needs beyond theirs is behaviour 3 and `CarriedPropHitTargetSphere`
+(`FUN_00443540`).
+
+## Stage 3's two boats: the one a zombie lands on, and the one whose riders were missing
+
+Two reports against stage 3 block 0. Step 4: the zombie that leaps onto the
+player's boat "lands on the water and clips through the boat". Step 6 at camera
+frame 1102: the civilian and the zombie on the other boat are missing.
+
+**Step 4 is a collision pass the port had declared away.** The leaper is a
+class-0x30 state-26 spawn (evt 2516) whose descriptor lands it at y -19.7; the
+harness showed it reaching that and being snapped to -25.0 on the landing
+frame, which is the canal under the hull. `ZombieStateDelayedLeap`'s landing
+drops the airborne bit and the ground snap takes over, and
+`QueryGroundHeightAt` is `ColiTraceSegmentAllSets` — whose first pass, over
+registered objects with a blob at `obj+0x14C` and `obj+0x34 & 0x50`, the port
+had marked `[diverges]` "the port has no per-actor blobs". The player's boat is
+class 0x26 subtype 2, `Class26Subtype2Update` (`FUN_0048EAD0`), and its first
+frame seats `obj+0x14C` from `tail+0x00`: a relocated pointer that resolves,
+exactly like an opcode-0x10 operand, to `coli3.bin+0x9C08` — 23 quads of
+surface 53 spanning the boat's foredeck in the boat's own space. The boat was
+only a rig in `render/`; it is now `game/class26/` too, with its world matrix,
+and the pass is ported (`ColiTraceSegmentVsObjectBlob`,
+`ColiTraceSegmentInObjectSpace`, and the sphere pass's twin). After it the
+leaper lands at -19.3 and walks the sloping deck at -19.3..-18.3.
+
+Three things in that reading were past the end of what Ghidra showed (`L35`,
+`L37`): `RegisterForShotTest`'s append after its world-matrix fixup (the
+pseudocode returns before it), the boat's own `RegisterForShotTest` call after
+a no-return `MatrixStackPop`, and `ColiTraceSegmentInObjectSpace`'s actual
+trace. The segment pass also returns its normal through `MatrixTransformPoint`
+rather than `MatrixTransformVector` — translation included — and that is
+transcribed as read.
+
+**Step 6 was three faults stacked, each enough on its own.**
+* Class 0x18 had no `MOTION_RULES` row, so the exporter emitted its spawns as
+  markers, `render/characters.ts` never adopted one, and
+  `SpawnScriptedCharacters` was never asked: the class was ported and no rider
+  ever existed. The previous session's test built the rider by hand.
+* `syncCharacterSpawns` built every character spawn before every slot actor.
+  One `spawn_obj_c` places the class-0x13 boat and then the civilian, whose
+  `CivilianInit` copies `g_civilian_carrier` — which the boat's Init had not
+  yet set. The civilian rode no carrier and was drawn at its boat-relative
+  offset from the world origin. Spawns are now made in the script's order;
+  with the old order the new test reads `rider carrier -1`.
+* `CarrierTransformPoint` did `carrier.yaw * BAMS` with `vec.ts`'s `BAMS`,
+  which is BAMS *per radian*. The earlier test rode a boat at yaw 0.
+
+**Wrong turns.** The triage pointed at step 4's class-0x44 selector-9 spawn as
+the possible boat. It is not: `PropBuildFlagLiftedProp` (`0x00473300`, not a
+Ghidra function until now) builds `FlagLiftedPropUpdate` (`0x00474EA0`), a
+slot-drawn prop 330 units away that rises on script flag 5 and has no blob.
+Named and left unported. And `globals.tsv` said `Class26Subtype2Update` writes
+`g_civilian_carrier`; it writes `g_carrier_object` (`0x0048EB1C`).
+
+Left `[open]`: which frame's matrix a query sees (the engine publishes the
+registration list once a frame from inside a task); `g_camera_block_yaw_bams`
+versus `g_camera_yaw_bams` for the boat's face-camera latch (the port reads
+the latter, as class 0x43 and 0x46 do); and whether class 0x13's and 0x33's
+`obj+0x14C` pointers are blobs too — both are excluded from the pass anyway,
+0x13's by its spawn flag `0x8000` and 0x33's by `0x80000000`. `render/rigs.ts`
+still poses its own copy of the boat from the same path; making it read the
+actor is the renderer's half.
+
+## 2026-09-18 — three stage-2 set pieces: the door, the ladder, the boat
+
+Three NEW-BUGS reports (4, 5, 7), all stage 2 Original, all the same shape: a
+routine read for *what* it draws and not for *where* or *when*.
+
+**The door (bug 4) was not where the triage looked.** Block 5 step 2 spawns
+only the civilian, so the hunt started at its own Init, its attachments and
+the class-0x44 hinges — none of which draw a door there. What found it was
+asking the exe who reads the two script flags the step raises around the
+civilian: `g_script_flags[0x68]` and `[0x69]` each have **one** reader,
+`FUN_0046B320`, which is class 0x41 type 35 — placed three blocks earlier
+(block 3 step 4, evt `0x2504`) **at the origin**. The routine never reads its
+position; it draws two leaves at literal world coordinates, and the port drew
+`0x1812` at `(0, 0, 0)`. Its lifetime of four steps survives to block 5 step 2
+only because a block change into step 1 does not change `g_evt_step_index`
+(block 4's last step and block 5's first are both index 1) — counted naively
+it would have been dead by then, which is a trap worth writing down.
+
+**The ladder (bug 5) was not class 0x44 either.** The triage pointed at the
+two selector-1 hinges (op 44, after the cut scene) and the selector-15 spawn
+in step 6; selector 15 is `PropBuildKindedProp` — kind 2, a crate. The drop is
+class 0x41 **type 13** in step 4, `FUN_00467F50`, whose draw is two
+`AssetDrawSlot`s: `obj+0x28C` with **no matrix of its own** (the
+`komono_tokeidai` panel is modelled in world space; the glTF bounds put it at
+`(-947, 96..107, -1297)`) and `0x1A43` translated by the prop's own position.
+The port had it as a drawn-only generic: world space added to world space, and
+the ladder not drawn at all. Camera path 34 is aimed at exactly its X and Z.
+
+**The boat (bug 7) needed two fixes and either alone hides it.**
+`CarrierPropSelectRoutine`'s selector 0 was unported, so the boat stood at its
+descriptor; and `actorSlotEntry` carried **no** class-0x13 slot — stage 3's
+boat only ever had geometry because `0x1A37` is also class 0x25's variant-3
+model. `scriptedPropDrawSlots` now carries a class-0x13 descriptor's slot when
+the port runs its behaviour (statics, and carriers on selectors 0/1); stage 4's
+seven carriers on selectors 2..9 are held back rather than drawn frozen.
+
+**Wrong turns, recorded.**
+
+* `CarrierPropRoutine0`'s pseudocode has **no `frame++` in the ride state**:
+  Ghidra ends the arm at `MatrixStackPop` (`L37` again). Transcribed from the
+  pseudocode the boat would have seated itself on frame 326 for ever. The
+  increment is `0x00440323`, and case 2's `JL` lands in the middle of it.
+* The first "after" screenshots showed no ladder and no boat, and it was the
+  harness: `&frame=N` poses the camera from the path and runs **no** game
+  frame, so no placer had built anything. Playing (`--press Space --settle`)
+  is what shows the port. A paused shot of a prop is not evidence.
+* `core/bams.ts` said the exe's BAMS constant is a float32. It is a **double**
+  (`0x004C4370`, now `g_bams_to_rad`); `MatrixRotate*` round the *product* to
+  float. Type 35 keeps the product on the FPU into `FSIN`, and with the float
+  constant its quarter-turn peak truncates to 1535 instead of 1536 — which the
+  port test caught. `BAMS_TO_RAD_F64` carries the double; `BAMS_TO_RAD` is
+  unchanged.
+* The zombie that rides stage 2's boat is the civilian's class-0x18 child and
+  never becomes a character: class 0x18 has no `MOTION_RULES` row, so it
+  exports as a marker (stage 3's riders the same). The stage-3 boat work in
+  flight adds that row; not duplicated here.
+
+Named: `PropUpdateType13` (`0x00467F50`), `PropUpdateType35` (`0x0046B320`),
+`CarrierPropRoutine0` (`0x00440210`), `g_carrier_routine0_ride_end`
+(`0x0057727C`), `g_bams_to_rad` (`0x004C4370`). Ported with
+`g_scene_tick_counter` (`0x009A2BAC`), which the port did not have.

@@ -251,17 +251,39 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
   //
   // The engine has no such bookkeeping because it has no such routine: the
   // spawn opcode runs once, in the step that holds it.
+  SlotActorsForgetUnlisted(spawns);
   // Class 0x40 counts instructions rather than addresses: see
   // `SpawnHordePlacers`.
   SpawnHordePlacers(spawns, placements, rng);
+  for (const s of spawns) SpawnSlotActor(s, rng);
+}
+
+/**
+ * The bookkeeping half of {@link SpawnSlotActors}: forget a built spawn once
+ * the script has stopped listing it. `[port-only]`, for the reason given
+ * there.
+ */
+export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
   const listed = new Set(spawns.map((s) => s.at));
   G.g_slot_actors_built = G.g_slot_actors_built.filter((at) => listed.has(at));
-  const built = new Set(G.g_slot_actors_built);
-  for (const s of spawns) {
-    if (built.has(s.at)) continue;
-    if (ActorByAt(s.at)) continue;
+}
+
+/**
+ * One spawn of {@link SpawnSlotActors}, built if it is listed, placeable and
+ * not built yet. Split out so `app/` can interleave these with the character
+ * spawns **in the script's own order** — `SpawnFromDescriptor` makes one
+ * object per descriptor, in instruction order, and a class whose `Init` reads
+ * what the previous one left behind (`g_civilian_carrier`) sees exactly that.
+ * `[port-only]`, as {@link SpawnSlotActors} is.
+ */
+export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
+  const placements = T.chars?.placements;
+  if (!placements?.length) return;
+  {
+    if (G.g_slot_actors_built.includes(s.at)) return;
+    if (ActorByAt(s.at)) return;
     const pl = placements.find((p) => p.at === s.at);
-    if (!pl) continue;
+    if (!pl) return;
     if (s.class === SpawnClassValue.Mouse) {
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.Mouse, -1, "mouse",
@@ -269,7 +291,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                            rng);
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.visible = true;
-      continue;
+      return;
     }
     // Class 0x43 -- the owl. Its handler is a placer that builds a 0x2A0-byte
     // object with no character type, so nothing in the character path can make
@@ -278,7 +300,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
     // one asset slot under a matrix, so it comes through here rather than
     // through `render/characters.ts`.
     if (s.class === SpawnClassValue.ScriptedProp) {
-      if (!pl.class13) continue;
+      if (!pl.class13) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
                            { class13: pl.class13, yaw: pl.yaw ?? 0,
@@ -286,10 +308,26 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                                        s.pos?.[2] ?? 0) },
                            rng);
       a.visible = true;
-      continue;
+      return;
+    }
+    // Class 0x26 subtype 2 -- stage 3's boat. Drawn by asset slot and by
+    // `render/rigs.ts`, with no character type, so it comes through here; the
+    // bundle carries a placement for that subtype alone (`slotDrawnSpawn`).
+    // `hp` is the subtype, `obj+0x11C`, as `SpawnFromDescriptor` copies it.
+    if (s.class === SpawnClassValue.Vehicle) {
+      if (!pl.class26) return;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.Vehicle, -1, "boat",
+                           { class26: pl.class26, hp: pl.hp, maxHp: pl.hp,
+                             yaw: pl.yaw ?? 0, flags: pl.init_flags ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      return;
     }
     if (s.class === SpawnClassValue.FlyingEnemy) {
-      if (!pl.class43) continue;
+      if (!pl.class43) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.FlyingEnemy, -1, "owl",
                            { class43: pl.class43, yaw: pl.yaw ?? 0,
@@ -297,7 +335,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                                        s.pos?.[2] ?? 0) },
                            rng);
       a.visible = true;
-      continue;
+      return;
     }
     // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
     // no character type and never reaches `render/characters.ts` either.
@@ -305,7 +343,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
     // `g_water_level` and kills the actor, and skipping it would leave the
     // water where the previous scene left it.
     if (s.class === SpawnClassValue.WaterEnemy) {
-      if (!pl.class51) continue;
+      if (!pl.class51) return;
       // The position goes in the **descriptor**, not after the spawn: it is
       // the one class here whose `Init` reads it, into `sub+0x00..0x08`.
       G.g_slot_actors_built.push(s.at);
@@ -315,7 +353,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                                        s.pos?.[2] ?? 0) },
                            rng);
       a.visible = true;
-      continue;
+      return;
     }
     // Class 0x33 -- `hp` is the **selector**, not hit points:
     // `SpawnFromDescriptor` (`FUN_00408A20`) copies the raw `s16` at
@@ -328,7 +366,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
     // for an unnamed class-0x44 kind, rather than a default arm that would run
     // the wrong handler.
     if (s.class === SpawnClassValue.ScriptedScenery) {
-      if (!pl.class33 && !pl.class33_push) continue;
+      if (!pl.class33 && !pl.class33_push) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedScenery, -1,
                            `scenery ${pl.hp}`,
@@ -343,7 +381,7 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
                              flags: pl.init_flags ?? 0 });
       a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
       a.visible = true;
-      continue;
+      return;
     }
   }
 }
@@ -483,6 +521,8 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   G.g_blink_frame_counter += SecondsToTicks(dt);
   // ...and the second of the three, which `OwlDrawBodyChain` reads.
   G.g_frame_counter += SecondsToTicks(dt);
+  // ...and the third, the one `ResetSceneOnEnter` zeroes.
+  G.g_scene_tick_counter += SecondsToTicks(dt);
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot
@@ -578,7 +618,11 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
         continue;
       }
     }
+    // `g_cur_actor` is the object whose update is running, and the moving-
+    // object collision passes skip it. See `Globals.g_cur_actor`.
+    G.g_cur_actor = obj.at;
     handler?.update(obj, f);
+    G.g_cur_actor = -1;
   }
 
   ThrownWeaponUpdate(frames, events);

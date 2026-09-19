@@ -492,7 +492,11 @@ that resolve to no character), and *nothing in the evt's instruction stream
 points at their descriptors* — so a walk of the script never returns them.
 
 `CivilianPruneDeadChildren` (`FUN_0048CA60`) drops a child when it dies and
-remembers that child's `obj+0x131C`, the player who killed it. Wait bit `0x04`
+remembers that child's `obj+0x131C`, the player who killed it. "Dies" is
+exactly `child+0x34 & 0x4000000` `[proved]` — the loop reads nothing else, so a
+captor that leaves by `ActorDespawn` (`FUN_00409CC0`, which ORs `0x80018000`)
+is still held; `ZombieRetireAndCredit` (`FUN_0045BA40`, `0x4008001`) and
+`ResolveHit`'s kill raise the bit and are. Wait bit `0x04`
 blocks until the list is shorter than `sub+0x20`, and the block it unblocks
 ends with a wait word carrying `0x10000000` — which is where
 `ScoreAddForPlayer` pays **400**, to that player or, when it is `-1`, to both.

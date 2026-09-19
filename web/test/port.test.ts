@@ -39,8 +39,16 @@ import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
-import { ScriptedPropUpdate13 } from "../src/game/class13";
-import { CarrierState, type ScriptedPropTail } from "../src/game/class13/state";
+import { ScriptedPropUpdate13, g_carrier_prop_routines }
+  from "../src/game/class13";
+import {
+  CARRIER_SELECTORS_PORTED, CarrierRoutine0State, CarrierState,
+  type ScriptedPropTail,
+} from "../src/game/class13/state";
+import {
+  CARRIER0_FRAME_STRIKE, CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST,
+  SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
+} from "../src/game/class13/routine0";
 import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
@@ -155,7 +163,9 @@ import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
-import { GameSystem, syncPortGlobals } from "../src/app/systems";
+import { GameSystem, syncCharacterSpawns, syncPortGlobals,
+         type CharacterPool } from "../src/app/systems";
+import { CarrierTransformPoint } from "../src/game/carrier";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -215,6 +225,15 @@ import {
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
+import {
+  SCRIPT_FLAG_TYPE13_DROP, SFX_TYPE13_BEEP, SFX_TYPE13_LAND,
+  SFX_TYPE13_RELEASE, TYPE13_FLOOR_Y, TYPE13_PANEL_LIT_SLOT,
+  TYPE13_PANEL_SLOT, Type13Phase,
+} from "../src/game/class41/type13";
+import {
+  SCRIPT_FLAG_TYPE35_RATTLE, SCRIPT_FLAG_TYPE35_STILL, SFX_TYPE35_KNOCK,
+  Type35Phase,
+} from "../src/game/class41/type35";
 import {
   Type43ItemSet, TYPE43_PICKUP_SLOT,
 } from "../src/game/class41/type43";
@@ -4278,6 +4297,147 @@ console.log("\nclass 0x41 type 32, the lift:");
   void LIFT_PANEL_DELAY;
 }
 
+console.log("\nclass 0x41 type 13, what drops out of stage 2's clock tower:");
+{
+  // Stage 2 block 21 step 4 op 6, evt 0xEC94, exactly as the bundle places
+  // it: type 13, a four-step lifetime, (-925, 180, -1297).
+  const rng = new Rng(13);
+  const events = propScene(rng);
+  G.g_scene_index = 1;
+  G.g_evt_step_index = 4;
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const drop = PlaceGenericProp(
+    { at: 0xec94, container: "generic", type: 13, slot: 4,
+      lifetime_evt_steps: 4, pos: [-925, 180, -1297],
+      pitch: 0, yaw: 0, roll: 0 }, rng);
+  G.g_breakable_props.push(drop);
+  const tick = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      G.g_scene_tick_counter += 1;
+      BreakablePropPoolUpdate(rng, events);
+    }
+  };
+
+  check("it is its own family, because it inlines its own lifetime",
+        drop.family === PropFamily.Type13);
+  check("the arm gives it the 0x1A4A panel, not the descriptor's 4",
+        drop.slot === TYPE13_PANEL_SLOT, drop.slot.toString(16));
+
+  // Hanging: the panel blinks on the scene clock, 40 ticks a frame of it, and
+  // nothing else moves.
+  G.g_scene_tick_counter = 0;
+  tick(40);
+  check("hanging, the panel blinks every 40 scene ticks",
+        drop.slot === TYPE13_PANEL_SLOT && drop.removeFlag === 1,
+        `${drop.slot.toString(16)} ${drop.removeFlag}`);
+  tick(40);
+  check("...back to 0x1A49 on the next",
+        drop.slot === TYPE13_PANEL_LIT_SLOT, drop.slot.toString(16));
+  check("and it has not moved and made no sound",
+        drop.y === 180 && sounds.length === 0 && !drop.dead);
+  check("it never registers a shot sphere", !drop.shotRegistered);
+
+  // A step change stops the blink for good and resets the panel.
+  G.g_evt_step_index = 5;
+  tick(1);
+  check("a step change sets +0x2A0 and puts the panel back to 0x1A4A",
+        drop.storyItem === 1 && drop.slot === TYPE13_PANEL_SLOT
+        && drop.stepsElapsed === 1, `${drop.storyItem} ${drop.slot}`);
+  tick(200);
+  check("...and the blink never runs again",
+        drop.slot === TYPE13_PANEL_SLOT);
+
+  // Flag 0x6D, which block 21 step 7 op 4 raises: the release frame plays
+  // both sounds and lights the panel, and nothing falls yet.
+  G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] = 1;
+  tick(1);
+  check("flag 0x6D releases it with a beep and the shutter sound",
+        drop.routinePhase === Type13Phase.Fall
+        && sounds.join() === [SFX_TYPE13_BEEP, SFX_TYPE13_RELEASE].join()
+        && drop.slot === TYPE13_PANEL_LIT_SLOT && drop.y === 180,
+        `${drop.routinePhase} ${sounds.map((x) => x.toString(16))}`);
+
+  // 0.02 of gravity a frame from rest: y = 180 - 0.01 n (n + 1), below the
+  // -6.0 floor on the 136th frame. 186 units, which is why the cut scene
+  // looking up the tower sees it go past.
+  let n = 0;
+  while (drop.routinePhase === Type13Phase.Fall && n < 1000) { tick(1); n++; }
+  check("it falls 186 units and lands on the 136th frame",
+        n === 136 && drop.y === TYPE13_FLOOR_Y, `${n} ${drop.y}`);
+  check("...with the landing sound, and a 0.4 judder across Z",
+        sounds[sounds.length - 1] === SFX_TYPE13_LAND
+        && Math.abs(drop.vz - 0.4) < 1e-9, `${drop.vz}`);
+  n = 0;
+  while (drop.routinePhase === Type13Phase.Judder && n < 1000) {
+    tick(1); n++;
+  }
+  check("the judder rings down at -0.925 a frame and stops after 27",
+        n === 27 && drop.vz === 0 && drop.routinePhase === Type13Phase.Rest,
+        `${n} ${drop.vz}`);
+
+  // The inlined lifetime: the step count first, `ActorKill`, no sweep test in
+  // between. Four steps; the fifth change retires it.
+  for (let b = 6; b <= 9; b++) { G.g_evt_step_index = b; tick(1); }
+  check("and it retires on the fifth step change of a four-step life",
+        drop.dead);
+}
+
+console.log("\nclass 0x41 type 35, the door stage 2's block-5 civilian is behind:");
+{
+  // Stage 2 block 3 step 4 op 5, evt 0x2504: placed at the ORIGIN, because
+  // `PropUpdateType35` draws both leaves at literal world coordinates.
+  const rng = new Rng(35);
+  const events = propScene(rng);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const door = PlaceGenericProp(
+    { at: 0x2504, container: "generic", type: 35, slot: 4,
+      lifetime_evt_steps: 4, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0 },
+    rng);
+  G.g_breakable_props.push(door);
+  const tick = (k: number) => {
+    for (let i = 0; i < k; i++) BreakablePropPoolUpdate(rng, events);
+  };
+
+  tick(100);
+  check("with flag 0x68 down the door stands shut",
+        door.yaw === 0 && door.storyItem === 0 && sounds.length === 0);
+
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_RATTLE] = 1;
+  tick(19);
+  check("flag 0x68 up: nothing for nineteen frames",
+        door.routinePhase === Type35Phase.Count && sounds.length === 0,
+        `${door.storyItem}`);
+  tick(1);
+  check("...and the knock on the twentieth",
+        door.routinePhase === Type35Phase.Swing
+        && sounds.join() === String(SFX_TYPE35_KNOCK));
+  const swing: number[] = [];
+  for (let i = 0; i < 7; i++) { tick(1); swing.push(door.yaw); }
+  // `ftol(sin(phase) * 1536)`, phase 0x2000, 0x4000, then 0x1000 steps: out
+  // in two frames, back in five, zeroed as it passes 0x8000.
+  check("the leaves kick out 1536 BAMS in two frames and shut over five",
+        swing.join() === [1086, 1536, 1419, 1086, 587, 0, 0].join(),
+        swing.join());
+  check("...and it is counting again",
+        door.routinePhase === Type35Phase.Count && door.hingeB === 0);
+  tick(29);
+  check("the second knock is thirty counted frames after the first",
+        sounds.length === 1, `${sounds.length}`);
+  tick(1);
+  check("...on the fiftieth, which resets the count",
+        sounds.length === 2 && door.storyItem === 0);
+
+  G.g_script_flags[SCRIPT_FLAG_TYPE35_STILL] = 1;
+  tick(3);
+  check("flag 0x69 stops it dead, whatever the swing was doing",
+        door.yaw === 0);
+  check("it draws the same two leaves whatever its position: the model is "
+        + "0x1812 and the placement is the origin",
+        GENERIC_DRAW_SLOT[35] === 0x1812 && door.x === 0 && door.z === 0);
+}
+
 console.log("\nclass 0x44 selector 11, the door that slides up:");
 {
   const rng = new Rng(61);
@@ -6122,6 +6282,28 @@ console.log("\nclass 0x10, the civilian and the rescue:");
           a.civ?.turnRate === 77, `rate ${a.civ?.turnRate}`);
   }
 
+  // **A captor that leaves is not a captor that died.**
+  // `CivilianPruneDeadChildren` (`FUN_0048CA60`) tests the child's `obj+0x34`
+  // bit `0x4000000` and nothing else; `ActorDespawn` (`FUN_00409CC0`) raises
+  // `0x80018000` and never that bit. The port dropped a child as soon as it
+  // was missing from the pool, which counted a despawn as a rescue.
+  {
+    const { a, kids, events } = civScene([[
+      cmd(CivilianOp.Wait, CivilianWait.Free),
+      cmd(CivilianOp.SetChildrenGoal, 0),
+      cmd(CivilianOp.Wait, CivilianWait.ChildrenAlive),
+      cmd(CivilianOp.Wait, CivilianWait.Rescued),
+      cmd(CivilianOp.End),
+    ]], [0x4100]);
+    cFrame(a, events);
+    ActorDespawn(kids[0]);
+    G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
+    for (let i = 0; i < 3; i++) cFrame(a, events);
+    check("a captor that despawns without the dead bit is still held",
+          a.civ?.childCount === 1 && G.g_player_score[0] === 0,
+          `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
+  }
+
   // **The rescue.** Wait bit 0x04 blocks while more than `childrenGoal` of
   // the civilian's captors are alive; the block it unblocks carries the
   // 0x10000000 bit, which is where the 400 is paid.
@@ -6141,12 +6323,16 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     check("...and the rescue does not pay while either is alive",
           G.g_player_score[0] === 0 && paid === 0,
           `score ${G.g_player_score[0]}`);
+    // `CivilianPruneDeadChildren` reads the child's `obj+0x34` bit and
+    // nothing else, so a kill here is the bit every real kill raises.
     kids[0].dead = true;
+    kids[0].flags |= ActorFlag.Dead;
     cFrame(a, events);
     check("one captor down is not enough",
           a.civ?.childCount === 1 && G.g_player_score[0] === 0,
           `left ${a.civ?.childCount} score ${G.g_player_score[0]}`);
     kids[1].dead = true;
+    kids[1].flags |= ActorFlag.Dead;
     cFrame(a, events);
     check("the last captor down pays 400 -- to both players, since the port "
           + "cannot name a shooter",
@@ -9596,6 +9782,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
+    [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -12403,6 +12590,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   // The rescue: the captor dies, the civilian's own stream runs on and raises
   // the flag. Nothing else in the fixture can raise it.
   captor.dead = true;
+  captor.flags |= ActorFlag.Dead;
   frame();
   check("killing the captor lets her stream raise the flag",
         (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
@@ -12470,6 +12658,41 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   check("a seek over the gate leaves the flag it was waiting for raised",
         (G.g_script_flags[RESCUE_FLAG] ?? 0) === 1,
         `${G.g_script_flags[RESCUE_FLAG]}`);
+
+  // ...and the **other** half of that postcondition: the civilian who raises
+  // the flag has run past it. A replay that raised the byte and kept her spawn
+  // marker rebuilt her at the landing address with a fresh script, and her
+  // rescue block ran again there. Stage 4's block-4 hostage `0x3578` did that
+  // at a deep link to block 12: her captor saw flag 29 already up, died on the
+  // first frame, and her `SetRouteBranch 1` decided block 12's branch whatever
+  // the player did (bug 16). `Walker.retireFlagRaisers`.
+  {
+    ResetGameGlobals();
+    const placed = {
+      ...script,
+      civilians: T.civilians,
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [
+          { i: 0, at: 0, op: 0x0c, name: "spawn_obj_c", cat: "spawn",
+            spawns: [{ at: 0x4000, class: SpawnClass.Civilian, flags: 0,
+                       pos: [0, 0, 0], yaw_deg: 0, orient: [0, 0, 0], hp: 0,
+                       desc_flags: 0 }] },
+          { ...flagOp(1, 0x45, RESCUE_FLAG) },
+          { ...flagOp(2, 0x48, 7) },
+        ] }],
+      }],
+    } as unknown as ScriptJson;
+    const w4 = new Walker(placed, host);
+    seekTo(w4, 0, 0, 1);
+    check("a seek that stops at the gate keeps the hostage's spawn listed",
+          w4.spawns.some((s) => s.at === 0x4000),
+          `${w4.spawns.map((s) => s.at).join(",")}`);
+    seekTo(w4, 0, 0, 2);
+    check("...and a seek past it retires her with the flag she raises",
+          !w4.spawns.some((s) => s.at === 0x4000),
+          `${w4.spawns.map((s) => s.at).join(",")}`);
+  }
 }
 
 /**
@@ -14865,6 +15088,73 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     ScriptedPropUpdate13(boat, fr(rng));
     check("the camera cue on the tail is what removes it", boat.despawned);
   }
+
+  // -- class 0x13 selector 0: stage 2's boat, which runs into the wall -------
+  {
+    // Stage 2 block 16 step 11 op 2, evt 0xA3E8: slot 0x1A36, scale 2.5,
+    // despawn on camera path 78 frame 1110, behaviour 8, selector 0 -- the
+    // bundle's own tail. Object path 0x151 here is `x = frame`.
+    const rng = new Rng(130);
+    scene(0, rng);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const host: GameHost = {
+      ...HOST,
+      objectPath: (slot, frame) => slot === 0x151
+        ? { x: frame, y: -25, z: 0, pitch: 0, yaw: 0, roll: 0 } : null,
+    };
+    const fr = (r: Rng): ClassFrame =>
+      ({ eye: EYE, dt: 1 / 60, rng: r, host, events });
+    G.g_active_cam_path = 78;
+    G.g_cam_path_frame = 326;
+    const boat = ActorSpawn(0xa3e8, SpawnClass.ScriptedProp, -1, "boat", {
+      class13: { slot: 0x1a36, cam_path: 78, cam_frame: 1110,
+                 scale: 2.5, behaviour: 8, selector: 0 },
+      pos: vec3(-1055, -26.25, -1620),
+    }, rng);
+    const t = () => (boat as { prop13: ScriptedPropTail }).prop13;
+    check("selector 0 makes it the carrier too",
+          G.g_civilian_carrier === boat.at);
+    check("the routines the class runs are exactly the selectors the "
+          + "exporter carries a model for",
+          Object.keys(g_carrier_prop_routines).map(Number).sort().join()
+          === [...CARRIER_SELECTORS_PORTED].sort().join(),
+          Object.keys(g_carrier_prop_routines).join());
+
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("its first frame allocates the ride and seats it on path 0x151 at "
+          + "the camera's frame -- it used to stand at its descriptor for ever",
+          t().state === CarrierRoutine0State.Ride && boat.pos.x === 326
+          && t().pathFrame === 327,
+          `${t().state} ${boat.pos.x} ${t().pathFrame}`);
+
+    let n = 1;
+    while (t().splashCel === 0 && n < 1000) {
+      ScriptedPropUpdate13(boat, fr(rng)); n++;
+    }
+    check("it strikes when the ride frame reaches 0x276, with SIBUKI2",
+          t().pathFrame === CARRIER0_FRAME_STRIKE && boat.pos.x === 629
+          && t().splashCel === CARRIER0_SPLASH_FIRST
+          && sounds.join() === String(SFX_CARRIER0_STRIKE),
+          `${t().pathFrame} ${boat.pos.x} ${sounds.map((x) => x.toString(16))}`);
+    check("...still in the ride state, which hands over one frame later",
+          t().state === CarrierRoutine0State.Ride);
+    ScriptedPropUpdate13(boat, fr(rng));
+    check("and the next frame coasts on without the wake",
+          t().state === CarrierRoutine0State.Coast && boat.pos.x === 630);
+
+    // The splash strip is 94 cels and then off; the ride coasts to 710.
+    for (let i = 0; i < 200; i++) ScriptedPropUpdate13(boat, fr(rng));
+    check("the coast stops on g_carrier_routine0_ride_end and holds there",
+          t().state === CarrierRoutine0State.Stopped
+          && t().pathFrame === g_carrier_routine0_ride_end
+          && boat.pos.x === g_carrier_routine0_ride_end,
+          `${t().state} ${t().pathFrame} ${boat.pos.x}`);
+    check("the splash strip ran to 0x1031 and switched itself off, once",
+          t().splashCel === 0 && sounds.length === 1
+          && CARRIER0_SPLASH_LAST - CARRIER0_SPLASH_FIRST === 93);
+  }
 }
 
 // -- the bone cel runs, and the hit slot that phases them ------------------
@@ -15321,6 +15611,170 @@ console.log("\nznjoe's creature:");
     check("...and a reset empties it",
           (ResetGameGlobals(), G.g_body_creatures.length === 0));
   }
+}
+
+// -- stage 3's two boats: what stands on one, and what rides the other -------
+
+console.log("stage 3's boats -- the one the player rides and the one that "
+            + "arrives:");
+{
+  // **Class 0x26 subtype 2 is a floor.** `Class26Subtype2Update`
+  // (`FUN_0048EAD0`) seats `obj+0x14C` from its descriptor tail and raises
+  // `obj+0x34 |= 0x51`, and `ColiTraceSegmentAllSets` (`FUN_004053B0`) opens
+  // with a pass over exactly such objects, tracing the query through the
+  // inverse of `obj+0x150`. Stage 3 block 0 step 4's zombie leaps onto the
+  // boat's bow; with no such pass its ground snap found nothing under the
+  // hull and stood it in the canal, waist-deep in the boat.
+  //
+  // The deck here is one quad at the boat's own y = -2, spanning x +-10 and
+  // z 0..30 -- the shape of `coli3.bin:39944`, which is the foredeck in the
+  // boat's space -- and the boat is turned a quarter, so an answer that
+  // ignored the rotation would miss it.
+  const rng = new Rng(26);
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  T.coli = { files: ["test"], blobs: {
+    deck: coliQuad([0, 1, 0, 2], 1,
+                   [-10, -2, 30, 10, -2, 30, 10, -2, 0, -10, -2, 0], 53),
+  } } as unknown as typeof T.coli;
+  G.g_coli_full_set = [];
+  G.g_camera_fixed_eye_y = -999;          // so a fall-through is unmistakable
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot) => slot === 0x156
+      ? { x: 100, y: -19, z: 200, pitch: 0, yaw: 0x4000, roll: 0 } : null,
+  };
+  G.g_active_cam_path = 0x7c;
+  G.g_cam_path_frame = 855;
+  const boat = ActorSpawn(3244, SpawnClass.Vehicle, -1, "boat", {
+    hp: 2, class26: { coli: "deck" },
+  }, rng);
+  boat.visible = true;
+  check("before its first tick the boat is no floor: the probe falls through",
+        QueryGroundHeightAt(115, -10, 200) === -999,
+        `${QueryGroundHeightAt(115, -10, 200)}`);
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("the first tick seats the blob, raises 0x51 and takes the carrier",
+        boat.coliBlob === "deck" && (boat.flags & 0x51) === 0x51
+        && G.g_carrier_object === boat.at,
+        `blob ${boat.coliBlob} flags ${boat.flags.toString(16)} `
+        + `carrier ${G.g_carrier_object}`);
+  check("...and the pose is the path's, two units up",
+        boat.pos.x === 100 && boat.pos.y === -17 && boat.pos.z === 200,
+        `${boat.pos.x},${boat.pos.y},${boat.pos.z}`);
+  // Local (0, -2, 15) is world (100 + 15, -17 - 2, 200) under a quarter turn
+  // of RotY: x' = x cos + z sin.
+  const deck = QueryGroundHeightAt(115, -10, 200);
+  check("a ground probe over the deck finds the deck, in world space",
+        Math.abs(deck - -19) < 1e-4, `${deck}`);
+  check("...and the material is the blob's",
+        QueryGroundSurfaceAt(115, -10, 200) === 53,
+        `${QueryGroundSurfaceAt(115, -10, 200)}`);
+  check("...but not where the unturned deck would have been",
+        QueryGroundHeightAt(100, -10, 215) === -999,
+        `${QueryGroundHeightAt(100, -10, 215)}`);
+  G.g_cur_actor = boat.at;
+  check("an object never stands on its own blob (g_cur_actor)",
+        QueryGroundHeightAt(115, -10, 200) === -999);
+  G.g_cur_actor = -1;
+  // A leaper's ground snap is exactly this probe: from six above its feet.
+  const z = spawnZombie(0x2516, 1, "leaper");
+  z.visible = true;
+  z.pos = vec3(114, -19.5, 200);
+  ActorSnapToGroundHeight(z);
+  check("a zombie landing on the bow snaps to the deck, not the canal",
+        Math.abs(z.pos.y - -19) < 1e-4, `${z.pos.y}`);
+  // The sphere pass is the same list with the normal rotated properly.
+  check("the body push sees the deck as well",
+        ColiTestSphereAgainstFullSet(115, -18.5, 200, 1)
+        && G.g_coli_hit_normal[1] > 0.99,
+        `${G.g_coli_hit_normal}`);
+  // `0x80008000` refuses an object whatever else it carries.
+  boat.flags |= 0x8000;
+  check("...and an object carrying 0x8000 takes no part",
+        QueryGroundHeightAt(115, -10, 200) === -999);
+  boat.flags &= ~0x8000;
+  // The latch: on camera path 0x7C frame 0x140 the boat turns to face the
+  // camera, and at 0x29E it turns back.
+  G.g_camera_yaw_bams = 0x1000;
+  G.g_cam_path_frame = 0x140;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("the face-camera latch turns it to the camera's yaw + 0x8000",
+        boat.yaw === 0x9000, `${boat.yaw.toString(16)}`);
+  G.g_cam_path_frame = 0x29e;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("...and the frame that drops it hands the yaw back to the path",
+        boat.yaw === 0x4000, `${boat.yaw.toString(16)}`);
+  // A camera path outside the switch skips the pose: the boat stays put.
+  G.g_active_cam_path = 0x80;
+  boat.pos.x = 1;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("a camera path the routine does not name leaves the pose alone",
+        boat.pos.x === 1, `${boat.pos.x}`);
+  T.coli = null;
+}
+{
+  // **A carrier's rotation is in BAMS.** `CarrierTransformPoint` multiplied
+  // by `vec.ts`'s `BAMS` -- BAMS *per radian* -- and so turned every rider by
+  // 10430^2/65536 times the carrier's angle. The earlier test of it rode a
+  // boat at yaw 0, where every wrong factor is right.
+  const carrier = { pos: vec3(10, 0, 20), pitch: 0, yaw: 0x4000, roll: 0 };
+  const out = vec3();
+  CarrierTransformPoint(carrier as unknown as Parameters<
+    typeof CarrierTransformPoint>[0], 1, 0, 0, out);
+  check("a rider one unit along x on a boat turned a quarter is at -z",
+        Math.abs(out.x - 10) < 1e-6 && Math.abs(out.z - 19) < 1e-6,
+        `${out.x},${out.z}`);
+}
+{
+  // **The script's spawns are made in the script's order.** One
+  // `spawn_obj_c` places stage 3's arriving boat -- class 0x13, drawn by slot
+  // -- and then what rides it; each rider's `Init` copies
+  // `g_civilian_carrier`, which the boat's own `Init` has only just set. The
+  // player built every character spawn before every slot actor, so the
+  // riders copied no carrier at all and stood at their boat-relative offsets
+  // from the world origin: the civilian and the zombie "missing" from the
+  // other boat.
+  const rng = new Rng(18);
+  ResetGameGlobals();
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      { at: 3184, class: 0x13, char_type: -1, motion: null, hp: 0,
+        yaw: 57344, init_flags: 0x8000,
+        class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+                   behaviour: 8, selector: 1 } },
+      { at: 2780, class: 0x18, char_type: 1, motion: 956, hp: 130,
+        yaw: 16384, init_flags: 0x60400, initial_state: 35,
+        attack_state: 48,
+        class18: { from_state: 48, cue_path: 124, cue_frame: 1080 } },
+    ],
+  } as unknown as CharactersJson);
+  const listed = [
+    { at: 3184, class: SpawnClass.ScriptedProp,
+      pos: [-1055, -26.25, -1620] as [number, number, number] },
+    { at: 2780, class: SpawnClass.CarriedZombie,
+      pos: [5, -6, -14] as [number, number, number] },
+  ];
+  // The character layer, reduced to its contract: the rider is placeable,
+  // the boat is not one of its.
+  const pool: CharacterPool = {
+    rng,
+    bindToPool: () => {},
+    readySpawns: (spawns) => spawns
+      .filter((s) => s.at === 2780)
+      .map((s) => ({ at: s.at, motion: 956, pos: vec3(5, -6, -14) })),
+    syncSpawns: () => [],
+  };
+  syncCharacterSpawns(pool, listed);
+  const rider = G.g_object_list.find((o) => o.at === 2780);
+  const boatObj = G.g_object_list.find((o) => o.at === 3184);
+  check("the boat and its rider are both made",
+        !!rider && !!boatObj, `${!!rider} ${!!boatObj}`);
+  check("...boat first, so the rider rides it",
+        rider?.carrierAt === 3184,
+        `rider carrier ${rider?.carrierAt} / g_civilian_carrier `
+        + `${G.g_civilian_carrier}`);
 }
 
 // -- class 0x40, the horde -----------------------------------------------------

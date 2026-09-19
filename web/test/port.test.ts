@@ -346,6 +346,7 @@ import {
 
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
+import { RouteFigureTick } from "../src/game/route_map";
 import { CamPath } from "../src/game/camera/curve";
 
 let failures = 0;
@@ -8788,6 +8789,28 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         G.g_app_state === 3 && G.g_credits[0] === 0
         && G.g_player_state[0] === PlayerState.Out,
         `app ${G.g_app_state} done ${G.g_game_over_route_done}`);
+}
+
+{
+  // `RouteFigureTick` (`FUN_004614C0`): the step picks the yaw -- 0x8000 up
+  // the map, 0x4000 x+, -0x4000 x-, 0 down -- and the figure lies at X 0x4000.
+  const fig = { kind: 0, charType: 0x39, motion: 0x35b, playTicks: 0,
+                fadeFrom: null, fade: 0, fadeLen: 0, end: 0x338, xOff: 0,
+                held: 0, pitch: 0x4000, yaw: 0, view: vec3(), disc: vec3() };
+  const yawFor = (cx: number, cy: number, tx: number, ty: number): number => {
+    G.g_game_over_route_done = 0;
+    G.g_route_marks = [];
+    G.g_route_map = { scroll: 0, markSlot: 0, stage: 0, block: 0, dir: 0,
+                      wp: 0, entry: 0, cursorY: cy, targetX: tx, targetY: ty,
+                      screenY: 50, cursorX: cx };
+    RouteFigureTick(fig);
+    return fig.yaw;
+  };
+  check("a route figure turns by its step: up 0x8000, x+ 0x4000, "
+        + "x- -0x4000, down 0, lying at X 0x4000",
+        yawFor(0, 10, 0, 0) === 0x8000 && yawFor(0, 0, 10, 0) === 0x4000
+        && yawFor(10, 0, 0, 0) === -0x4000 && yawFor(0, 0, 0, 10) === 0
+        && fig.pitch === 0x4000);
 }
 
 {

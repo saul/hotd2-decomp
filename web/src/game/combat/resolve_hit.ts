@@ -708,7 +708,15 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
   // as one of three things that mean "hit this frame", so widening the write
   // would change when a civilian's on-shot script runs. Two named classes,
   // because two engine routines read the field.
-  if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie) {
+  //
+  // **Class 0x18 is the same routine.** `CarriedZombieUpdate18`
+  // (`FUN_0045CD90`) calls `EnemyZombieUpdate`, whose first act is
+  // `ZombieOnShot` -- so a rider reads its hit exactly as a class-0x30 zombie
+  // does. Left out, a shot rider lost its hit points, was flagged dead, and
+  // never entered a death state: stage 2's boat rider stood on the boat at
+  // zero hit points holding block 16 step 12's room open for ever.
+  if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie
+      || obj.cls === SpawnClass.CarriedZombie) {
     obj.pendingHit = { bone, result, player };
   }
   const react = survived && !ownReaction
@@ -865,7 +873,8 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
     // count, no corpse and no despawn. Reproducing a state machine's effects
     // at its call site is exactly what `ThrowerOnShot`'s note above was
     // written against, and the same reasoning covers both classes now.
-    if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie) {
+    if (obj.cls === SpawnClass.Thrower || obj.cls === SpawnClass.Zombie
+        || obj.cls === SpawnClass.CarriedZombie) {
       obj.pendingHit = { bone: 1, result: HitResultCode.Damaged };
     }
     // Same rule as `ResolveHit` above: a class that runs its own death gets

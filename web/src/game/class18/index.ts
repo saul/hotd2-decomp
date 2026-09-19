@@ -20,7 +20,7 @@
  *     MatrixTranslate(carrier+0x40); RotX(+0x64); RotZ(+0x6C); RotY(+0x68);
  *     EnemyZombieUpdate(obj);
  *     if (state == (s8)params[3] && sub == 0 && params[0x0C] != -1
- *         && g_cam_path_frame >= params[0x0E]
+ *         && g_cam_path_frame < params[0x0E]
  *         && g_active_cam_path == params[0x0C]) { state = 0x2E; sub = 0; }
  *     if (state == 7 && sub == 1 && obj->+0x1330 == 2) {
  *         FUN_0045D920(carrier+0x40, obj+0x40);
@@ -55,7 +55,7 @@ import { type Actor, type ZombieActor } from "../actor";
 import { EnemyZombieHandler, EnemyZombieInit, EnemyZombieUpdate }
   from "../class30/index";
 import { ZombieState } from "../class30/states";
-import { CarrierPublishWorld, CarrierTransformPoint } from "../carrier";
+import { CarrierBakeWorldPose, CarrierPublishWorld } from "../carrier";
 import { ActorByAt, G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -88,8 +88,6 @@ export function CarriedZombieInit18(obj: Actor, rng?: Rng,
   obj.carrierAt = G.g_civilian_carrier;
 }
 
-const _world = { x: 0, y: 0, z: 0 };
-
 /**
  * `CarriedZombieUpdate18` — `FUN_0045CD90`.
  *
@@ -109,11 +107,23 @@ export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
 
   const z = obj as ZombieActor;
   // The camera cue out of the spawn's own parameters. `tail+0x0C` is the path
-  // and `tail+0x0E` the frame; `-1` in the path is "no cue", and the byte at
-  // `tail[3]` is the state it may leave from.
+  // and `tail+0x0E` the frame, and the byte at `tail[3]` -- the attack state
+  // -- is the state it may leave from. Read off the disassembly, and **both
+  // halves were wrong here**:
+  //
+  //   0045cdfd  CMP dword ptr [EBX+0xc], -1 ; JZ skip   -- the whole dword,
+  //             so only path AND frame both -1 is "no cue"
+  //   0045ce07  CMP [g_cam_path_frame], ECX  ; JGE skip -- it fires while the
+  //             camera is still SHORT of the frame, not once it passes it
+  //
+  // So a rider whose script ends before the cue holds on the carrier
+  // (state 0x2E, `ZombieStateHoldOnCarrier`) and one whose script ends after
+  // it takes its attack state and leaps. With `>=` stage 2's boat rider did
+  // the opposite of both.
   const cue = obj.class18;
-  if (cue && cue.cue_path >= 0 && z.state === cue.from_state && z.sub === 0
-      && G.g_cam_path_frame >= cue.cue_frame
+  if (cue && !(cue.cue_path === -1 && cue.cue_frame === -1)
+      && z.state === cue.from_state && z.sub === 0
+      && G.g_cam_path_frame < cue.cue_frame
       && G.g_active_cam_path === cue.cue_path) {
     z.state = CARRIED_ZOMBIE_CUE_STATE;
     z.sub = 0;
@@ -121,10 +131,9 @@ export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
   // ...and the step off, which bakes the transform and hands the actor back.
   if (z.state === ZombieState.CorpseSink && z.sub === 1
       && z.slideTimer === CARRIED_ZOMBIE_STEP_OFF_SUB) {
-    CarrierTransformPoint(carrier, obj.pos.x, obj.pos.y, obj.pos.z, _world);
-    obj.pos.x = _world.x;
-    obj.pos.y = _world.y;
-    obj.pos.z = _world.z;
+    // `CarrierBakeWorldPose` (`FUN_0045D920`) bakes the angles as well as
+    // the position -- the port used to carry the position alone.
+    CarrierBakeWorldPose(obj, carrier);
     obj.carrierAt = -1;
   }
 }

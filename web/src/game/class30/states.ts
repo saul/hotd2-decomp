@@ -224,6 +224,15 @@ export enum ZombieState {
   /** `ZombieStateTargetLostPause` (`FUN_0045C7D0`). The target died under it. */
   TargetLostPause = 45,
   /**
+   * `ZombieStateHoldOnCarrier` (`FUN_0045CFC0`). A class-0x18 rider whose
+   * script ended before its camera cue: aboard, facing the camera, until shot.
+   */
+  HoldOnCarrier = 46,
+  /** `ZombieStateLeapOffCarrierForward` (`FUN_0045D120`). Leap off along the facing. */
+  LeapOffCarrierForward = 47,
+  /** `ZombieStateLeapOffCarrierAtMark` (`FUN_0045D500`). ...at a point. */
+  LeapOffCarrierAtMark = 48,
+  /**
    * The order `ZombieStateAwaitCivilianOrder` reads as "die" rather than as a
    * state to enter — class 0x10's op 0x1A writes it to `sub+0x2C`.
    */

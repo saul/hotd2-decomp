@@ -161,6 +161,17 @@ export interface TargetScriptJson {
     /** State 43: the frame the drag kills on. */
     cue?: number;
     /**
+     * States 47 and 48, the leaps off a carrier: `dist` (47) is the run-up
+     * along the facing, `vy` the launch, `gravity` (48) its own fall rate,
+     * `release` the clip frame the actor leaves the carrier on and
+     * `flag_frame` the one that freezes its pose.
+     */
+    dist?: number;
+    vy?: number;
+    gravity?: number;
+    // `release` is state 37's word too, declared with it below.
+    flag_frame?: number;
+    /**
      * State 37, `ZombieStateCarryProp`: the carried prop's record. `prop_type`
      * indexes `g_carried_prop_types`, `behaviour` the `g_prop_behaviours` it
      * starts in, `release` the one the throw hands it to; `offset` is its

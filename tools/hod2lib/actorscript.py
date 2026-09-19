@@ -32,6 +32,9 @@ TARGET_SCRIPT_SHAPE: dict[int, tuple[int, int]] = {
     40: (16, 4),   # {f32 x, y, z; s16 motion, frame}
     41: (16, 4),   # the same, arrived at rather than walked past
     43: (4, 0),    # {s16 loops; s16 cue_frame} -- no list
+    # The two leaps off a carrier (class 0x18's attack states); no list.
+    47: (14, 0),   # {f32 dist, vy; s16 motion, release_frame, flag_frame}
+    48: (22, 0),   # {f32 x, z, vy, gravity; s16 motion, release, flag_frame}
 }
 
 
@@ -64,6 +67,16 @@ def target_script(prog, off: int, state: int) -> dict | None:
         if state == 38:
             head["loops"] = struct.unpack_from("<h", raw, off + 16)[0]
             head["mode"] = struct.unpack_from("<h", raw, off + 18)[0]
+    elif state == 47:
+        d, vy = struct.unpack_from("<2f", raw, off)
+        m, rel, fl = struct.unpack_from("<3h", raw, off + 8)
+        head = {"dist": d, "vy": vy, "motion": m, "release": rel,
+                "flag_frame": fl}
+    elif state == 48:
+        x, z, vy, g = struct.unpack_from("<4f", raw, off)
+        m, rel, fl = struct.unpack_from("<3h", raw, off + 16)
+        head = {"point": [x, 0.0, z], "vy": vy, "gravity": g, "motion": m,
+                "release": rel, "flag_frame": fl}
     elif state == 43:
         head = {"loops": struct.unpack_from("<h", raw, off)[0],
                 "cue": struct.unpack_from("<h", raw, off + 2)[0]}

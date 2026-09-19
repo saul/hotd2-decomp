@@ -178,7 +178,11 @@ import type { TargetScriptJson } from "../src/bundle/characters";
 import { SpawnClass } from "../src/game/spawn_class";
 import { GameSystem, syncCharacterSpawns, syncPortGlobals,
          type CharacterPool } from "../src/app/systems";
-import { CarrierTransformPoint } from "../src/game/carrier";
+import {
+  CarrierBakeWorldPose, CarrierInverseTransformPoint, CarrierTransformPoint,
+  MatrixToEulerBams, RotXZY,
+} from "../src/game/carrier";
+import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
          CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
@@ -17409,6 +17413,104 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
           broke && parts.join(",") === `${0x0a56},${0x0a55}`,
           `parts ${parts.map((x) => x.toString(16))}`);
   }
+}
+
+{
+  // **Stage 2 block 16's boat rider, after its maul.** `ZombieScriptEnded`
+  // sends it to its attack state, 47, and `CarriedZombieUpdate18`'s cue then
+  // decides: `g_cam_path_frame < tail+0x0E` (the camera still short of 630)
+  // sends it to 0x2E and it holds on the boat, facing the camera. The port had
+  // the comparison the wrong way round and no state 46, 47 or 48 at all -- the
+  // default arm put it in `AttackRun` in the carrier's frame, 1,660 units
+  // from the camera -- and a shot rider never died, because only classes 0x30
+  // and 0x31 were handed the hit `ZombieOnShot` reads. Stage 2 block 16 step
+  // 12's `wait_enemies_alive` never released.
+  const rng = new Rng(1600);
+  scene(0, rng);
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: -1100, y: -25, z: -1530, pitch: 0, yaw: 0x4000,
+                         roll: 0 }),
+  };
+  const fr = (): ClassFrame => ({ eye: vec3(-1100, 0, -1400), dt: 1 / 60,
+                                  rng, host });
+  G.g_active_cam_path = 78;
+  G.g_cam_path_frame = 560;
+  const boat = ActorSpawn(0xa3e8, SpawnClass.ScriptedProp, -1, "boat", {
+    class13: { slot: 0x1a36, cam_path: 78, cam_frame: 1110, scale: 2.5,
+               behaviour: 8, selector: 0 },
+  }, rng);
+  ScriptedPropUpdate13(boat, fr());
+  const rider = ActorSpawn(0xa174, SpawnClass.CarriedZombie, 1, "rider", {
+    pos: vec3(-1, 3, 7.5),
+    class18: { from_state: 47, cue_path: 78, cue_frame: 630 },
+  }, rng) as ZombieActor;
+  rider.hp = rider.maxHp = 180;
+  rider.attackState = 47;
+  rider.state = 47;
+  rider.sub = 0;
+  CarriedZombieUpdate18(rider, fr());
+  check("a rider whose script ends before its camera cue holds on the boat "
+        + "(state 0x2E), not AttackRun",
+        rider.state === ZombieState.HoldOnCarrier && rider.carrierAt === boat.at,
+        `${ZombieState[rider.state] ?? rider.state} carrier ${rider.carrierAt}`);
+  for (let i = 0; i < 240; i++) CarrierPostFrame(rider);
+  const localEye = vec3();
+  CarrierInverseTransformPoint(boat, -1100, 0, -1400, localEye);
+  const want = VecToAngles(rider.pos.x - localEye.x, 0,
+                           rider.pos.z - localEye.z).yaw;
+  check("...turning to face the camera in the boat's own frame",
+        Math.abs(bamsDelta(rider.yaw, want)) < 0x200,
+        `${rider.yaw} vs ${want}`);
+  check("...and it stays aboard: the world point is the boat's transform",
+        Math.hypot(rider.carrierWorld.x - boat.pos.x,
+                   rider.carrierWorld.z - boat.pos.z) < 20,
+        `${rider.carrierWorld.x},${rider.carrierWorld.z}`);
+
+  // Shot dead: the hit reaches `ZombieOnShot`, which is `EnemyZombieUpdate`'s
+  // and so class 0x18's too.
+  for (let i = 0; i < 40 && !rider.dead; i++) {
+    ResolveHit(rider, 2, 0, NULL_HOST, rng);
+  }
+  CarriedZombieUpdate18(rider, fr());
+  check("a rider shot to zero hit points goes into its death state",
+        rider.dead && rider.state === ZombieState.Death,
+        `${rider.dead} ${ZombieState[rider.state] ?? rider.state}`);
+
+  // Past the cue the same script end takes the attack state instead.
+  const late = ActorSpawn(0xa175, SpawnClass.CarriedZombie, 1, "rider2", {
+    pos: vec3(-1, 3, 7.5),
+    class18: { from_state: 47, cue_path: 78, cue_frame: 630 },
+  }, rng) as ZombieActor;
+  late.attackState = 47;
+  late.state = 47;
+  late.sub = 0;
+  G.g_cam_path_frame = 640;
+  CarriedZombieUpdate18(late, fr());
+  check("...and one whose script ends after the cue leaps (state 47 runs)",
+        late.state === ZombieState.LeapOffCarrierForward,
+        `${ZombieState[late.state] ?? late.state}`);
+
+  function CarrierPostFrame(a: ZombieActor): void {
+    CarriedZombieUpdate18(a, fr());
+  }
+}
+
+{
+  // `CarrierBakeWorldPose` (`FUN_0045D920`): the carrier's matrix times the
+  // rider's, read back through `MatrixToEulerBams`. A yaw-only pair adds.
+  const carrier = { pos: vec3(10, 0, 20), pitch: 0, yaw: 0x4000, roll: 0 };
+  const a = { pos: vec3(1, 2, 0), pitch: 0, yaw: 0x1000, roll: 0 };
+  CarrierBakeWorldPose(a as unknown as Actor, carrier as unknown as Actor);
+  check("the step-off bakes the carrier's position and adds the yaws",
+        Math.abs(a.pos.x - 10) < 1e-6 && Math.abs(a.pos.z - 19) < 1e-6
+        && Math.abs(a.pos.y - 2) < 1e-6 && Math.abs(a.yaw - 0x5000) <= 1,
+        `${a.pos.x},${a.pos.y},${a.pos.z} yaw ${a.yaw}`);
+  const r = MatrixToEulerBams(RotXZY(0x0800, 0x0400, 0x2000));
+  check("MatrixToEulerBams takes a RotX·RotZ·RotY pose back off its matrix",
+        Math.abs(r.pitch - 0x800) <= 1 && Math.abs(r.roll - 0x400) <= 1
+        && Math.abs(r.yaw - 0x2000) <= 1,
+        `${r.pitch} ${r.roll} ${r.yaw}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

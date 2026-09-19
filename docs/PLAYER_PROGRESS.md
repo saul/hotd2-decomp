@@ -3880,6 +3880,41 @@ none of whose routines calls it); and `EffectPoseNode`'s matrix arm,
 `MatrixInterpolateSwingTwist` (`FUN_00412750`), which effect 0x13 reaches on
 12 node-frames of its break (`class44/swing_twist.ts`).
 
+### The rider after its maul, and the room it held open
+
+Stage 2 original block 16 step 12's `wait_enemies_alive` never released: the
+boat's class-0x18 rider (evt `0xA174`) was about 1,660 units from the camera
+in `AttackRun` and could not be killed. Three faults, all `[proved]` from the
+exe:
+
+* **States 46, 47 and 48 had no port.** A rider's script ends in its attack
+  state (`tail[3]`, 47 here), and the default arm sent it to `AttackRun` —
+  in the carrier's frame, so it walked off across the canal in boat-relative
+  coordinates. Ported in `game/class30/carrier_rider.ts`:
+  `ZombieStateHoldOnCarrier` (46, aboard, turning to face the camera through
+  the inverse carrier matrix, no exit), `ZombieStateLeapOffCarrierForward`
+  (47) and `ZombieStateLeapOffCarrierAtMark` (48), which bake the carrier into
+  the rider with `CarrierBakeWorldPose` (`FUN_0045D920`, position *and*
+  angles, through a transcription of `MatrixToEulerBams`), fly, splash through
+  water, land and turn on the player. The attack blobs' headers for 47 and 48
+  are now decoded (`actorscript.ts`, both halves).
+* **The cue test was inverted.** `CarriedZombieUpdate18` fires
+  `state = 0x2E` while `g_cam_path_frame < tail+0x0E` (`JGE` skips it at
+  `0x0045CE0D`), and only a whole-dword `-1` at `tail+0x0C` means "no cue".
+  The port had `>=` — so a rider whose maul ends mid-ride, as this one's
+  does, holds on the boat; the port would have leapt it.
+* **A shot rider never died.** `ResolveHit` handed `pendingHit` — what
+  `ZombieOnShot` reads — to classes 0x30 and 0x31 only, but class 0x18 runs
+  `EnemyZombieUpdate` and so `ZombieOnShot`. It reached zero hit points, was
+  flagged dead and stayed in its state for ever.
+
+With all three the rider rides into the wall facing the camera and dies to a
+volley; stage 2 and stage 2 Original play to their end blocks along the
+default road, the 1-2-3-4-5-6-7-8-10 road and the 5→21→16 road with no
+debug clear. The corpse step-off (`state 7 sub 1`, `obj+0x1330 == 2`) now
+bakes the angles too. `[open]`: `RegisterForDistanceRank` still admits class
+0x30 only; whether a rider registers, and with which position, is unread.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

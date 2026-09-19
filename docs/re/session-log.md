@@ -18612,3 +18612,26 @@ on the boat killed both and the wait passed on its own.
 flat ground and failed: friction stops a barrel well short of that, and the
 real one has stairs. The fixture now stands inside the forty units where a
 grounded roll re-aims itself.
+
+### Third follow-up: the rider that held block 16 open
+
+Stage 2 original block 16 step 12 hung on the boat rider (`0xA174`). Read
+`CarriedZombieUpdate18` from the disassembly, then the three states its
+attack state can be (`g_class30_states[46..48]` = `0x0045CFC0`,
+`0x0045D120`, `0x0045D500` — the last had no function in Ghidra and was
+created), then `CarrierBakeWorldPose` (`0x0045D920`), `MatrixToEulerBams` and
+its helper `0x00401800`, and `MatrixGetAngles`.
+
+**Wrong turns.** The port's cue comparison was `>=` and the exe's is `<`
+(`CMP [g_cam_path_frame], ECX; JGE skip`), which the pseudocode shows plainly
+and the previous transcription had inverted — `L11`'s neighbour, a test
+copied the way it reads in prose. The first fix (the three states) made the
+rider hold on the boat as the exe has it, and the playthrough **still hung**:
+the harness's volleys took its hit points to zero with no death, because
+`ResolveHit` wrote `pendingHit` for classes 0x30 and 0x31 only. The earlier
+report called the rider "unhittable"; it was being hit the whole time.
+
+Separately, `playthrough.mjs --route` leaves a branch with no rule of its own
+unresolved when a rule elsewhere had it fire volleys (block 12 after a
+`0:11` rule, block 1 after `0:1`): the countdown never runs. Routing every
+branch avoids it; it is the harness, not the port, and is not fixed here.

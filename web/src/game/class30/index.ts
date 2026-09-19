@@ -58,6 +58,10 @@ import { ZombieAttachToCarrier } from "./carrier";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
+import {
+  ZombieStateHoldOnCarrier, ZombieStateLeapOffCarrierForward,
+  ZombieStateLeapOffCarrierAtMark,
+} from "./carrier_rider";
 import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength, MotionRowOf }
   from "../tables";
 import {
@@ -234,6 +238,14 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     // and throws it on its script's cue. See `class30/carry_prop.ts`.
     case ZombieState.CarryProp:
       return ZombieStateCarryProp(obj, eye, host);
+    // A class-0x18 rider's three ways off its script. See
+    // `class30/carrier_rider.ts`.
+    case ZombieState.HoldOnCarrier:
+      return ZombieStateHoldOnCarrier(obj, eye, dt);
+    case ZombieState.LeapOffCarrierForward:
+      return ZombieStateLeapOffCarrierForward(obj, eye, dt, host, events);
+    case ZombieState.LeapOffCarrierAtMark:
+      return ZombieStateLeapOffCarrierAtMark(obj, eye, dt, host, events);
 
     default:                      return ZombieGiveUpAttack(obj);
   }

@@ -37,7 +37,10 @@ function value(v: unknown): string {
   if (typeof v === "number") return num(v);
   if (typeof v === "boolean") return v ? "true" : "false";
   if (Array.isArray(v)) return `[${v.map((x) => value(x)).join(", ")}]`;
-  if (v && typeof v === "object" && "x" in v) {
+  // A vector is x, y and z. `x` alone is not one: a screen sprite record
+  // (`game/screen_sprite.ts`) has x and y and no z, and read as a vector it
+  // threw on every frame the Globals panel was open.
+  if (v && typeof v === "object" && "x" in v && "z" in v) {
     const p = v as { x: number; y: number; z: number };
     return `(${num(p.x)}, ${num(p.y)}, ${num(p.z)})`;
   }

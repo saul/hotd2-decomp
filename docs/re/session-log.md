@@ -18324,6 +18324,52 @@ bone's world matrix times the camera's, which is the product the engine's
 draw record holds `[likely]` -- up to the bone frames the exporter emits
 matching the engine's.
 
+### Bug 16, second pass: every link in the chain read from the exe
+
+The user reports that in the real game a rescue at stage 4 block 12 leads to
+the fallen-pillar room. Each candidate for a disagreement, checked against
+`Hod2.exe` (the PC build):
+
+* **The route record** `[proved]`. `g_scene_routes[3]` is `0x005975E0`; all 25
+  records match the bundle's `routes` one for one, and record 12 at
+  `0x00597640` is `01 00 0d 00 0e 00 ff ff` — kind 1, `next = {13, 14, -1}`.
+* **The indexing** `[proved]` from the instruction stream rather than the
+  decompiler: `0x0045F060 MOVSX EDX,[0x009C88A4]` /
+  `LEA EAX,[EDX + EAX*4]` / `MOV CX,[ECX + EAX*2 + 2]` — the short at
+  `record + 2 + var*2`, i.e. `next[var]`. No complement, no bit test; the
+  variable is zeroed only after the read (`0x0045F121`).
+* **The civilian's write** `[proved]`. `g_civilian_scripts[39]` is
+  `0x0056F488`; its bytes match stream 93 command for command. The jump table
+  at `0x0048C258` is indexed by opcode with no byte map, and entry `0x19` is
+  `0x0048BECE`: `MOV CX,[ESI+4]; MOV [0x009C88A4],CX`. The command is
+  `19 00 00 00 01 00 00 00` — 1 — in the block led by `0x10140010`, which
+  runs only once the child wait (`0x340004`) releases, i.e. after the captor's
+  dead bit is set; the killed branch (stream 92) has no op 0x19.
+  `CivilianStepScript`'s loop was re-read as well: a released children wait
+  walks to that block and stops on its `0x10000000` word, and
+  `CivilianUpdate` then runs the block — the write cannot be skipped.
+* **Nothing overwrites it before the route is read** `[proved]` for literal
+  addressing: all 42 sites of the bytes `a4889c00` were read. None is reached
+  between block 12 step 2's spawn and its `advance_step` — the class-0x41
+  constructors in that step are types 12 and 78 (neither is case 0x0E, 0x13 or
+  0x19 of `PlaceGenericProp`'s table at `0x004628D4`/`0x00462978`), class 0x26
+  subtype 3 and class 0x44 selector 14 (`0x004736D0`, scenery) write nothing,
+  and `EvtLoadBlockProgram`'s zero runs only at scene setup.
+* **Block identity** `[likely]`. Block 13's four zombies spawn at
+  x ≈ -283..-306, z ≈ -783..-788, beside the two tilted pieces block 12 step 2
+  places for it (class 0x41 generic type 12 at (-275, -796.6) and class 0x44
+  selector 14 at (-284.8, -799.4)); the port's block-13 frames show them as a
+  fallen column. Block 14 is a narrow corridor with a wooden door and item
+  crates. So block 13 is the pillar room and block 14 the doorway.
+* **Mirroring** — ruled out by observation: a poster in stage 1 original's
+  block 6 alley reads "CORRIDA" and "…9" left to right in the port.
+* Original Mode's stage 4 has the same record and the same civilian.
+
+So the PC exe sends a rescued block-12 civilian to block 14 and a failed one to
+block 13, and the port now does the same. The user's memory disagrees with
+this build; whether another release of the game (arcade, Dreamcast) routes
+differently is `[open]` and cannot be answered from `Hod2.exe`.
+
 ## Stage 1's church, the chair under the humanoid's arm, and a rig in stage 4's desk (2026-09-18)
 
 New bugs 8, 9 and 12. Two causes, and neither was where the triage pointed.
@@ -18381,4 +18427,3 @@ for one fact is the drift `CLAUDE.md` warns about, so `installed_by` is gone:
 `spawn_subtype` now drives both — `spawn_ats` for every class-0x26 rig, and
 per-spawn actor-posed roots only for a rig with no route or fixed pose. The
 boat keeps no route table.
-

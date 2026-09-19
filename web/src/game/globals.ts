@@ -709,6 +709,76 @@ export const G = {
    */
   g_bat_members: [] as number[],
 
+  // -- the horde, class 0x40 ---------------------------------------------
+  /**
+   * `g_horde_members` — 0x007DCC20. Ten slots, one per member index.
+   *
+   * Every member stamps its own slot at the end of each update, the corpse
+   * clears it when it despawns, and three things read it: the wander's
+   * neighbour test, the dive turn in {@link Globals.g_horde_diver} (which
+   * skips an empty slot) and the stage-2 deformed prop.
+   *
+   * `[port-only]` spawn addresses rather than pointers, so the array survives
+   * `clonePlain`; 0 is the engine's empty slot and no spawn address is 0.
+   */
+  g_horde_members: [] as number[],
+  /**
+   * `g_horde_live_count` — 0x007DCBD0. How many members the placer made, less
+   * the ones killed while more than one was left. The last one's corpse keeps
+   * the camera's attention while this is 1.
+   */
+  g_horde_live_count: 0,
+  /**
+   * `g_horde_diver` — 0x007DCBD4. The member index whose turn it is to dive.
+   * One at a time: nobody else may start one, and every path out of a dive or
+   * a refusal hands the turn to the next live index.
+   */
+  g_horde_diver: 0,
+  /**
+   * `g_horde_last_dive_frame` — 0x007DCC1C. `g_frame_counter` when the last
+   * dive started; the next may not start for ninety frames.
+   */
+  g_horde_last_dive_frame: 0,
+  /**
+   * `g_horde_emerged` — 0x007DCC48, a byte. Raised by the first member to
+   * leave its hold; the emerge prop waits for it.
+   */
+  g_horde_emerged: 0,
+  /**
+   * `[port-only]` — the next spawn address a class-0x40 effect object takes.
+   *
+   * The engine's splash and spark are tasks with no descriptor; the port's
+   * pool is keyed on `at`, and two splashes from one member cannot share one.
+   * A counter in `G` rather than anywhere else so a snapshot restores it.
+   */
+  g_horde_effect_seq: 0,
+  /**
+   * `[port-only]` — how many class-0x40 placers each listed spawn address has
+   * been built as, keyed by address.
+   *
+   * The engine builds a placer every time the spawn instruction runs, and
+   * stage 1 runs the same selector-2 descriptor in blocks 7, 8 and 12. The
+   * slot-actor bookkeeping builds an address once while it is listed, which
+   * is right for an actor that lives while it is listed and wrong for one
+   * that `ActorKill`s itself on its first frame; `SpawnHordePlacers` counts
+   * instructions instead.
+   */
+  g_horde_placers_built: {} as Record<string, number>,
+  /**
+   * `g_crosshair_x` — 0x009A5C70, and its `+0x04` beside it: per player,
+   * where each player is aiming, in screen pixels.
+   *
+   * `[port-only]` in shape. The port has no crosshair in pixels; what it has
+   * is the ray each shot request carries, which is that crosshair already
+   * unprojected. `ResolveShotRequest` records the last one per player, and a
+   * routine that unprojects the crosshair at some depth -- class 0x40's
+   * `SpawnEmergePropSparkAtCrosshair` -- takes the point on it instead.
+   */
+  g_crosshair_ray: [null, null] as ({ origin: { x: number; y: number;
+                                                z: number };
+                                      dir: { x: number; y: number;
+                                             z: number } } | null)[],
+
   // -- breakable props, class 0x41 ---------------------------------------
   /**
    * Every live breakable prop. The engine allocates each as its own 0x378
@@ -933,6 +1003,15 @@ export const G = {
    * within 0x2000 of it. The host writes it once a frame.
    */
   g_camera_yaw_bams: 0,
+  /**
+   * `g_camera_block_pitch_bams` — 0x009A60CC, `g_camera_blocks + 0x8C`: the
+   * camera block's X rotation. `UpdateSceneViewAndLight` (`FUN_00401F40`)
+   * builds the camera as `T(eye) Ry(yaw) Rx(this) Rz(roll)` looking down its
+   * own -z, so this is `asin` of the view direction's y — positive looking
+   * up. The horde's dive lifts its arc by `2 * sin(this)`. The host writes it
+   * once a frame beside the yaw.
+   */
+  g_camera_block_pitch_bams: 0,
   /**
    * `g_coli_hit_surface` — 0x009CAC40. The material id of whatever the last
    * collision trace hit, and a **side output**: every caller reads it straight
@@ -1337,6 +1416,14 @@ export function ResetGameGlobals(): void {
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
+  G.g_horde_members = [];
+  G.g_horde_live_count = 0;
+  G.g_horde_diver = 0;
+  G.g_horde_last_dive_frame = 0;
+  G.g_horde_emerged = 0;
+  G.g_horde_effect_seq = 0;
+  G.g_horde_placers_built = {};
+  G.g_crosshair_ray = [null, null];
   G.g_thrown_weapons = [];
   G.g_rain_particles = [];
   G.g_thrown_next_id = 1;

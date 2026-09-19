@@ -19,6 +19,7 @@ import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
 import { Class44Selector } from "./class44";
+import { SpawnHordePlacers } from "./class40";
 import { SecondsToTicks, T } from "./tables";
 import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
@@ -250,6 +251,9 @@ export function SpawnSlotActors(spawns: readonly ScriptSpawn[],
   //
   // The engine has no such bookkeeping because it has no such routine: the
   // spawn opcode runs once, in the step that holds it.
+  // Class 0x40 counts instructions rather than addresses: see
+  // `SpawnHordePlacers`.
+  SpawnHordePlacers(spawns, placements, rng);
   const listed = new Set(spawns.map((s) => s.at));
   G.g_slot_actors_built = G.g_slot_actors_built.filter((at) => listed.has(at));
   const built = new Set(G.g_slot_actors_built);

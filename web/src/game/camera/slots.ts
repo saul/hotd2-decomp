@@ -12,7 +12,7 @@ import { ActorFlag, type Actor } from "../actor";
 import { G } from "../globals";
 import { CAMERA_ATTACK_SLOTS, CAMERA_MAX_CANDIDATES,
          CAMERA_TRACK_DISTANCE_SCALE } from "./constants";
-import { ActorIsEnemy } from "../registry";
+import { ActorIsEnemy, g_class_handlers } from "../registry";
 import { dist3d, type Vec3 } from "../vec";
 
 /** `ResetCameraEnemySlots` — `FUN_00408D90`. */
@@ -37,6 +37,9 @@ export function ResetCameraEnemySlots(): void {
 export function RegisterForCameraTracking(obj: Actor): boolean {
   if (obj.dead || !obj.visible) return false;
   if (!ActorIsEnemy(obj.cls)) return false;
+  // A class that makes the call only sometimes answers for itself.
+  const tracks = g_class_handlers[obj.cls]?.tracksCamera;
+  if (tracks && !tracks(obj)) return false;
   return (obj.flags & ActorFlag.NoCameraTrack) === 0;
 }
 

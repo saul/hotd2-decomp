@@ -85,6 +85,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // Class 0x46's, and it is the whole descriptor: sub-type, flight group
     // and member index. `tail+0x00` is class 0x30's body condition again.
     class46: p?.class46 ?? null,
+    // Class 0x40's selector, on the same terms: `tail+0x00` would be class
+    // 0x30's body condition.
+    class40: p?.class40 ?? null,
     class51: p?.class51 ?? null,
     class52: p?.class52 ?? null,
     class53: p?.class53 ?? null,

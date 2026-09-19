@@ -197,6 +197,11 @@ class Rig:
     #: spawn descriptor of that class, which is how objects that take their
     #: path slot from the object at runtime still get exported.
     spawn_class: int | None = None
+    #: Place only at spawns of `spawn_class` whose ``desc+0x22`` (``obj+0x11C``,
+    #: the subtype a class installer switches on) is this, once per descriptor
+    #: however many blocks respawn it. For a rig whose pose the browser port's
+    #: own actor owns -- the root is then one per spawn address.
+    spawn_subtype: int | None = None
     parts: tuple[RigPart, ...] = field(default_factory=tuple)
     note: str = ""
 
@@ -347,20 +352,18 @@ ST1_VEHICLE = Rig(
 OBJ_48EAD0 = Rig(
     name="obj_48ead0",
     routine="FUN_0048EAD0",
-    routes=tuple(
-        Route(slot, cam_paths=(cam,), bias=(0.0, 2.0, 0.0),
-              note="pose.y is biased by the literal 2.0 at 0x004E30F0 before "
-                   "the rotations, so it is baked into the anchor")
-        for cam, slot in ((0x7C, 0x156), (0x7D, 0x157), (0x7E, 0x158),
-                          (0x7F, 0x159), (0x82, 0x15A), (0x85, 0x15B),
-                          (0x86, 0x15C), (0x87, 0x15D))
-    ) + tuple(
-        Route(0x199, cam_paths=(cam,), bias=(0.0, 2.0, 0.0))
-        for cam in (0xF6, 0xF7, 0xF8)
-    ),
-    note="Frame is min(g_frame, cam_path_length[slot]) -- clamped to the end "
-         "of the path. On a camera path outside the table the pose is not "
-         "refreshed and the object draws at whatever pose it last held.",
+    # No routes. The routine's camera-path switch -- slots 0x156..0x15D and
+    # 0x199 by cp 0x7C..0x87 and 0xF6..0xF8, the 2.0 bias at 0x004E30F0, the
+    # face-camera latch obj+0x1350 -- is transcribed once, in the browser
+    # port's `Class26Subtype2Update` (web/src/game/class26/), and the root is
+    # placed from that actor. It used to be transcribed here as well and run
+    # a second time in the renderer.
+    spawn_class=0x26,
+    spawn_subtype=2,
+    note="Class 0x26 subtype 2. Posed by the port's actor (game/class26/): "
+         "the path switch, the 2.0 bias and the face-camera latch are "
+         "Class26Subtype2Update's, and this root is placed at the spawn and "
+         "then from that actor every frame.",
     parts=(
         RigPart("part_1a37", (0x1A37,),
                 animated="Root Y rotation is overridden while the latch "
@@ -368,9 +371,10 @@ OBJ_48EAD0 = Rig(
                          "yaw (0x009A6040 + cam*0x1A4 + 0x90) + 0x8000, i.e. "
                          "the part turns to face 180 deg from the camera. The "
                          "latch is toggled at hardcoded frames per path -- see "
-                         "docs/formats/cam.md. Exported at the path pose.",
+                         "docs/formats/cam.md. The port's actor applies it.",
                 note="drawn at the object root; FUN_004A8CA0 then snapshots "
-                     "the matrix into obj+0x150 for hit-testing, not a draw"),
+                     "the matrix into obj+0x150 -- the world matrix the "
+                     "moving-object collision passes invert"),
     ),
 )
 
@@ -1100,8 +1104,17 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
         if rig.placement_blocked:
             blocked.append(rig)
             continue
-        if not routes and not fixed and not world \
-                and not placements.get(rig.spawn_class):
+        placed = placements.get(rig.spawn_class, [])
+        if rig.spawn_subtype is not None:
+            seen: set = set()
+            kept = []
+            for sp in placed:
+                if sp.get("hp") != rig.spawn_subtype or sp.get("at") in seen:
+                    continue
+                seen.add(sp.get("at"))
+                kept.append(sp)
+            placed = kept
+        if not routes and not fixed and not world and not placed:
             continue
 
         parts = []
@@ -1123,7 +1136,7 @@ def resolve_for_stage(stage, bbox=None) -> tuple[list[dict], list[Rig]]:
             out.append({"rig": rig, "routes": routes, "parts": parts,
                         "blocked": rig.placement_blocked,
                         "fixed": fixed, "world": world,
-                        "placements": (placements.get(rig.spawn_class, [])
+                        "placements": (placed
                                        if not (rig.world_space or rig.route_param
                                                or rig.variant_param) else [])})
     return out, blocked

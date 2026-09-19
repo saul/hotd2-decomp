@@ -15739,6 +15739,12 @@ console.log("stage 3's boats -- the one the player rides and the one that "
         yaw: 16384, init_flags: 0x60400, initial_state: 35,
         attack_state: 48,
         class18: { from_state: 48, cue_path: 124, cue_frame: 1080 } },
+      // A captor: in no script list, made by the `Init` of the spawn that
+      // holds it (`CivilianInit` in the game; any listed spawn here).
+      { at: 3072, class: 0x18, char_type: 1, motion: 956, hp: 220,
+        yaw: 28672, init_flags: 0x60400, initial_state: 35,
+        attack_state: 38, civilian_child: 2780,
+        class18: { from_state: 38, cue_path: -1, cue_frame: -1 } },
     ],
   } as unknown as CharactersJson);
   const listed = [
@@ -15752,9 +15758,11 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   const pool: CharacterPool = {
     rng,
     bindToPool: () => {},
-    readySpawns: (spawns) => spawns
-      .filter((s) => s.at === 2780)
-      .map((s) => ({ at: s.at, motion: 956, pos: vec3(5, -6, -14) })),
+    readySpawns: (spawns) => [
+      ...spawns.filter((s) => s.at === 2780)
+        .map((s) => ({ at: s.at, motion: 956, pos: vec3(5, -6, -14) })),
+      { at: 3072, motion: 956, pos: vec3(-2, -6, 3), parentAt: 2780 },
+    ],
     syncSpawns: () => [],
   };
   syncCharacterSpawns(pool, listed);
@@ -15766,6 +15774,77 @@ console.log("stage 3's boats -- the one the player rides and the one that "
         rider?.carrierAt === 3184,
         `rider carrier ${rider?.carrierAt} / g_civilian_carrier `
         + `${G.g_civilian_carrier}`);
+  // The first cut of the ordering walked the script's list alone, and a
+  // captor is in no list: every civilian's captors stopped being made.
+  const captor = G.g_object_list.find((o) => o.at === 3072);
+  check("a captor the script does not list is still made",
+        !!captor, `${!!captor}`);
+  const order = G.g_object_list.map((o) => o.at);
+  check("...straight after the spawn that holds it, on the same carrier",
+        order.indexOf(3072) === order.indexOf(2780) + 1
+        && captor?.carrierAt === 3184,
+        `${order} carrier ${captor?.carrierAt}`);
+}
+{
+  // **`CarrierPropRoutine6` (`FUN_004413C0`)** -- stage 3 block 7's boat.
+  // Routine 1's machine on `op_` paths 352/353 at its own frames, with the
+  // run-past arm rearranged: fade at 0x668, splash at 0x6A4, and the
+  // `0x400000` bit raised with the state change at the path's end.
+  const rng = new Rng(66);
+  scene(0, rng);
+  G.g_civilians_alive = 1;
+  const seen: number[] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => {
+      seen.push(slot);
+      return { x: frame, y: slot, z: 0, pitch: 0, yaw: 0, roll: 0 };
+    },
+  };
+  const fr = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+  G.g_cam_path_frame = 0x600;
+  const boat = ActorSpawn(29240, SpawnClass.ScriptedProp, -1, "boat", {
+    class13: { slot: 6711, cam_path: 134, cam_frame: 340, scale: 1,
+               behaviour: 8, selector: 6 },
+  }, rng);
+  const t = () => (boat as { prop13: ScriptedPropTail }).prop13;
+  check("selector 6 has a routine now",
+        typeof g_carrier_prop_routines[6] === "function"
+        && CARRIER_SELECTORS_PORTED.has(6));
+  ScriptedPropUpdate13(boat, fr());
+  check("it rides op_ path 353 from the camera's frame",
+        boat.pos.y === 0x161 && boat.pos.x === 0x600
+        && t().state === CarrierState.RunIn,
+        `${boat.pos.x} ${boat.pos.y} ${CarrierState[t().state]}`);
+  t().pathFrame = 0x635;
+  ScriptedPropUpdate13(boat, fr());
+  check("...forks at 0x635 -- a civilian alive, so it pulls up",
+        t().state === CarrierState.PullUp, CarrierState[t().state]);
+  t().pathFrame = 0x672;
+  ScriptedPropUpdate13(boat, fr());
+  check("...on path 352, fading its wake at 0x672",
+        boat.pos.y === 0x160 && t().wakeFade < 0,
+        `${boat.pos.y} ${t().wakeFade}`);
+  t().pathFrame = 0x6ae;
+  ScriptedPropUpdate13(boat, fr());
+  check("...and moors at 0x6AE", t().state === CarrierState.Moored,
+        CarrierState[t().state]);
+  const held = t().pathFrame;
+  ScriptedPropUpdate13(boat, fr());
+  check("a moored boat holds its frame", t().pathFrame === held);
+
+  t().state = CarrierState.RunPast;
+  t().wakeFade = 0;
+  t().pathFrame = 0x668;
+  ScriptedPropUpdate13(boat, fr());
+  check("running past, the wake starts to fade at 0x668 and the bit waits",
+        t().wakeFade < 0 && (boat.flags & 0x400000) === 0,
+        `${t().wakeFade} ${boat.flags.toString(16)}`);
+  t().pathFrame = 0x6ae;
+  ScriptedPropUpdate13(boat, fr());
+  check("...and at the path's end the strip starts and 0x400000 goes up",
+        t().state === CarrierState.Wake && (boat.flags & 0x400000) !== 0,
+        `${CarrierState[t().state]} ${boat.flags.toString(16)}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

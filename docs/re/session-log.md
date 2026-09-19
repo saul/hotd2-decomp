@@ -18184,3 +18184,41 @@ Named: `PropUpdateType13` (`0x00467F50`), `PropUpdateType35` (`0x0046B320`),
 `CarrierPropRoutine0` (`0x00440210`), `g_carrier_routine0_ride_end`
 (`0x0057727C`), `g_bams_to_rad` (`0x004C4370`). Ported with
 `g_scene_tick_counter` (`0x009A2BAC`), which the port did not have.
+
+### Follow-up: every stage-3 carrier moves, and the boat has one pose
+
+The class-0x18 motion rule made riders exist everywhere, so every carrier they
+ride has to move. Stage 3's bundle builds two class-0x13 boats: block 0's
+(selector 1, ported) and block 7 step 10's (evt 29240, selector 6), carrying
+civilian 29072 and its captor 29136. `CarrierPropRoutine6` (`0x004413C0`, not
+a Ghidra function until now) is ported: routine 1's eight states on `op_`
+paths 352/353, fork at `0x635`, moor at `0x6AE`, and a run-past arm arranged
+differently from routine 1's — fade at `0x668`, splash at `0x6A4`, and the
+`0x400000` bit raised with the state change rather than ten frames later.
+Harness (entry 7, block 7 step 10): the boat rides from x -590 to -489 and
+moors, civilian and captor aboard; screenshot read.
+
+**A regression I introduced and caught here.** Making spawns in the script's
+order walked the walker's list — and a civilian's captors are in no list:
+`CivilianInit` makes them itself. So the first cut built **no captor anywhere**
+(fifty zombies holding hostages). Captors now come straight after the spawn
+that holds them (`CharacterSpawnRequest.parentAt`), and the test fails
+without it.
+
+**The boat's pose is computed once.** `render/rigs.ts` ran its own copy of
+`Class26Subtype2Update`'s camera-path switch off the rig table; the rig entry
+(`tools/hod2lib/rigs.py`, generated into `rigs_data.ts`) now has no routes and
+`spawn_class=0x26, spawn_subtype=2`, so the exporter emits one root per spawn
+and the rig layer places it from the class-0x26 actor. Consequence worth
+knowing: a **paused** deep link shows actors before their first tick, so the
+boat now sits at its descriptor there, like every other actor, instead of
+being posed off the camera by the renderer.
+
+The builder hash did not cover `game/class13/state.ts`, which
+`hod2lib/bundle.ts` reads to decide which class-0x13 models a bundle carries
+(`L24`): porting a routine changed a bundle with no stamp moving.
+`gen_builder_hash.py` now also digests the `game/` modules `hod2lib/` imports.
+
+Left `[open]`: stage 4's carrier routines (`0x004408A0`, `0x00440AD0`,
+`0x00440C20`, `0x00441000`, selectors 2..5 and 7..9), whose seven boats carry
+the stage-4 boss and civilians; the bundle keeps their models out.

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -62,11 +63,41 @@ def sources(root: Path | None = None) -> list[Path]:
     return sorted((root or ROOT).joinpath(BUILDER_DIR).glob("*.ts"))
 
 
+#: `import ... from "../game/<path>"` in a `hod2lib/` module.
+_GAME_IMPORT = re.compile(r'from\s+"\.\./(game/[^"]+)"')
+
+
+def game_sources(root: Path | None = None) -> list[Path]:
+    """The `web/src/game/` modules `hod2lib/` imports, which decide bytes too.
+
+    `hod2lib/bundle.ts` reads `CARRIER_SELECTORS_PORTED` out of
+    `game/class13/state.ts` to decide which class-0x13 models a bundle
+    carries, so porting a carrier routine changes a bundle without touching
+    `hod2lib/` -- a stale bundle nobody is warned about (`L24`). One level:
+    these are data modules, and the imports are named, not globbed.
+    """
+    base = (root or ROOT).joinpath(BUILDER_DIR)
+    out: set[Path] = set()
+    for p in sources(root):
+        for m in _GAME_IMPORT.finditer(p.read_text(encoding="utf-8")):
+            f = base.parent / (m.group(1) + ".ts")
+            if f.exists():
+                out.add(f)
+    return sorted(out)
+
+
 def file_digests(root: Path | None = None) -> dict[str, str]:
-    """``{filename: sha256 of its code}``, sorted by filename."""
-    return {p.name: hashlib.sha256(
+    """``{filename: sha256 of its code}``, sorted by filename.
+
+    `hod2lib/` files are keyed by their bare name, as they always were; the
+    `game/` modules they import by their path under `web/src/`, so two
+    `state.ts` files cannot collide."""
+    src = (root or ROOT).joinpath(BUILDER_DIR).parent
+    keyed = [(p.name, p) for p in sources(root)] + [
+        (str(p.relative_to(src)), p) for p in game_sources(root)]
+    return {k: hashlib.sha256(
         declarations(p.read_text(encoding="utf-8")).encode()).hexdigest()
-        for p in sources(root)}
+        for k, p in sorted(keyed)}
 
 
 def builder_hash(root: Path | None = None) -> str:

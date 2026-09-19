@@ -401,7 +401,10 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
       } else if (sub.pathFrame === CARRIER6_FRAME_FADE) {
         sub.wakeFade = WAKE_FADE_RATE;
       } else if (sub.pathFrame === CARRIER6_FRAME_BOW_EFFECT) {
-        // `FUN_0043FCA0` and `PlaySoundId(0x000B16A9)`. [diverges] draw-side.
+        // The engine spawns the splash with `FUN_0043FCA0` eight units along
+        // the bow and plays `PlaySoundId(0x000B16A9)`; the port does neither,
+        // as in routine 1 — both are draw-side, with no state a gate reads.
+        // [diverges]
       }
       sub.pathFrame += 1;
       break;

@@ -41,7 +41,7 @@
  * The first-visit yield is not modelled either; that is the standing
  * `[diverges]` on `0x41`/`0x42`/`0x45` described in {@link WaitRule.enter}.
  */
-import type { OpJson, ScriptJson } from "../../bundle";
+import type { CiviliansJson, OpJson, ScriptJson } from "../../bundle";
 import { g_class_handlers, type SpawnRecord } from "../../game/registry";
 import type { SpawnClass } from "../../game/spawn_class";
 import { T } from "../../game/tables";
@@ -223,6 +223,36 @@ export function ScriptFlagsThisBundleCanRaise(
 
   cache = { script, civ, chars, breakables, flags };
   return flags;
+}
+
+/**
+ * Whether the class-0x10 spawn at `at` runs op 0x1C `SetScriptFlag flag` in
+ * any stream its entry can reach — the same walk
+ * {@link ScriptFlagsThisBundleCanRaise} makes, for one spawn.
+ *
+ * [port-only] The engine has no such question: it is what a **replay** needs
+ * to apply a `wait_script_flag`'s postcondition to the actor that answers it.
+ * See `Walker.retireFlagRaisers`.
+ */
+export function CivilianRaisesScriptFlag(civ: CiviliansJson | undefined,
+                                         at: number, flag: number): boolean {
+  const sp = civ?.spawns?.[String(at)];
+  if (!civ || !sp) return false;
+  const seen = new Set<number>();
+  const pending = [civ.entries?.[sp.script] ?? -1];
+  while (pending.length) {
+    const id = pending.pop() as number;
+    const stream = civ.scripts?.[id];
+    if (!stream || seen.has(id)) continue;
+    seen.add(id);
+    for (const c of stream) {
+      if (c.op === CIVILIAN_OP_SET_SCRIPT_FLAG && c.args[0] === flag) {
+        return true;
+      }
+      for (const s of c.scripts ?? []) pending.push(s);
+    }
+  }
+  return false;
 }
 
 export const waitScriptFlag: WaitRule = {

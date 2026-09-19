@@ -250,6 +250,13 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // its nine clips reaches the bundle -- see {@link FROG_CLIPS}.
   0x11: ["param", 0x02, "i16"],
   0x30: ["literal", 0x3bc],
+  // `CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` and two
+  // stores, so class 0x18 opens in class 0x30's clip. Without this row the
+  // three riders on stage 3's block-0 boat resolved to a character with no
+  // motion, the exporter emitted them as markers, `render/characters.ts` never
+  // adopted one and `SpawnScriptedCharacters` was never asked to build them:
+  // the class was ported and no class-0x18 actor ever existed.
+  0x18: ["literal", 0x3bc],
   0x31: ["by_char", { 0x17: 0x1ba }, 0x3a8],
   0x53: ["table", 0x00589a64, 10, 0x00, "i16"],
 };

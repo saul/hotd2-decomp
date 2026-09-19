@@ -44,6 +44,7 @@ import {
 } from "../game/class41/generic";
 import { TYPE43_EFFECT7_RISE, TYPE43_EFFECT7_SLOT }
   from "../game/class41/type43";
+import { TYPE13_DROP_SLOT } from "../game/class41/type13";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
@@ -74,6 +75,29 @@ const DOOR_SHAKE_X: readonly [number, number] = [0x191, 200];
 const DOOR_SHAKE_Z: readonly [number, number] = [0x65, 50];
 /** Where the rattle starts on every stage load. Any constant; one constant. */
 const SHAKE_SEED = 0x52415454;
+
+/**
+ * `PropUpdateType35` (`FUN_0046B320`)'s draw — two leaves at literal world
+ * coordinates, each its own `Push; Translate; RotateY; AssetDrawSlot; Pop`:
+ *
+ * ```
+ * 0046b402  PUSH 0xc4797ed9 ; PUSH 0x4284966d ; PUSH 0xc41b2354  ; Translate
+ *           RotateY( obj+0x1D0) ; AssetDrawSlot(0x1812)
+ * 0046b439  PUSH 0xc475345a ; PUSH 0x4284966d ; PUSH 0xc41b2354  ; Translate
+ *           RotateY(-obj+0x1D0) ; AssetDrawSlot(0x1813)
+ * ```
+ *
+ * The prop's own position is never read, and its one spawn is placed at the
+ * origin — so drawing the model at `p.x/p.y/p.z` put it a kilometre from the
+ * doorway it hangs in. The second leaf is past the `MatrixStackPop` Ghidra
+ * ends the function on (`L37`).
+ */
+const TYPE35_LEAF_A: readonly [number, number, number] =
+  [-620.5520, 66.2938, -997.9820];
+const TYPE35_LEAF_B: readonly [number, number, number] =
+  [-620.5520, 66.2938, -980.8180];
+const TYPE35_LEAF_B_SLOT = 0x1813;
+const TYPE35 = 35;
 
 /** Templates come from the hidden `slots_breakable` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
@@ -250,6 +274,9 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // `ScriptFlagEffectUpdate` (`FUN_00473B90`) draws the effect tree and
   // nothing else -- no second `AssetDrawSlot`, so no shadow.
   if (p.family === PropFamily.ScriptFlagEffect) return null;
+  // `PropUpdateType13` (`FUN_00467F50`) is two `AssetDrawSlot` calls and
+  // neither is a shadow.
+  if (p.family === PropFamily.Type13) return null;
   if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
   return KIND_SHADOW[p.kind] ?? null;
 }
@@ -279,6 +306,22 @@ interface Live {
   parts?: string;
   /** Those parts' nodes, in list order. */
   partNodes?: Object3D[];
+  /**
+   * The second model of a routine that draws two under separate matrices:
+   * `PropUpdateType13`'s falling part and `PropUpdateType35`'s second leaf.
+   * A sibling in the layer's group, not a child — neither routine composes
+   * the second draw on the first's matrix.
+   */
+  second?: Object3D | null;
+}
+
+/** The slot of a routine's second, independently placed draw, if it has one. */
+function SecondSlotFor(p: BreakableProp): number | null {
+  if (p.family === PropFamily.Type13) return TYPE13_DROP_SLOT;
+  if (p.family === PropFamily.Generic && p.kind === TYPE35) {
+    return TYPE35_LEAF_B_SLOT;
+  }
+  return null;
 }
 
 export class BreakableLayer implements System<RenderContext> {
@@ -336,6 +379,7 @@ export class BreakableLayer implements System<RenderContext> {
       for (const l of this.nodes.values()) {
         l.node.removeFromParent();
         l.shadow?.removeFromParent();
+        l.second?.removeFromParent();
       }
       this.nodes.clear();
     });
@@ -380,6 +424,8 @@ export class BreakableLayer implements System<RenderContext> {
       // every frame and a changed one re-clones rather than re-poses.
       if (l && l.slot !== slot) {
         l.node.removeFromParent();
+        l.second?.removeFromParent();
+        l.shadow?.removeFromParent();
         this.nodes.delete(p.id);
         l = undefined;
       }
@@ -392,6 +438,11 @@ export class BreakableLayer implements System<RenderContext> {
         if (shadow) this.group.add(shadow);
         this.nodes.set(p.id, (l = { node, shadow, slot }));
         if (p.family === PropFamily.Lift) this.buildLift(l);
+        const second = SecondSlotFor(p);
+        if (second !== null) {
+          l.second = this.clone(second);
+          if (l.second) this.group.add(l.second);
+        }
       }
 
       // A destroyed prop is a puff the port is counting down; nothing of the
@@ -410,7 +461,22 @@ export class BreakableLayer implements System<RenderContext> {
         ? TYPE43_EFFECT7_RISE : 0;
       l.node.position.set(p.x + sx, p.y + rise, p.z + sz);
       l.node.rotation.set(0, 0, 0);
-      if (l.lift) {
+      if (p.family === PropFamily.Type13) {
+        // `AssetDrawSlot(obj+0x28C)` under no matrix of its own: the panel is
+        // modelled in world space. Then `Translate(x, y, z + obj+0x1C8)` for
+        // the part that falls -- `vz` is the landing judder for this type.
+        l.node.position.set(0, 0, 0);
+        l.second?.position.set(p.x, p.y, p.z + p.vz);
+        if (l.second) l.second.visible = !gone;
+      } else if (p.family === PropFamily.Generic && p.kind === TYPE35) {
+        l.node.position.set(...TYPE35_LEAF_A);
+        l.node.rotation.set(0, p.yaw * BAMS_TO_RAD, 0);
+        if (l.second) {
+          l.second.position.set(...TYPE35_LEAF_B);
+          l.second.rotation.set(0, -p.yaw * BAMS_TO_RAD, 0);
+          l.second.visible = !gone;
+        }
+      } else if (l.lift) {
         this.poseLift(l.lift, p);
       } else {
         // Each routine's own order, read out of the EXE. `PoseOrder`'s value
@@ -459,6 +525,7 @@ export class BreakableLayer implements System<RenderContext> {
       if (seen.has(id)) continue;
       l.node.removeFromParent();
       l.shadow?.removeFromParent();
+      l.second?.removeFromParent();
       this.nodes.delete(id);
     }
   }

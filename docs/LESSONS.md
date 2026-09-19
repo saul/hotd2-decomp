@@ -695,3 +695,10 @@ The second half is that the check belonged in a file, not in a shell loop.
 `pickShot` had no test at all — the whole of `render/characters.ts`'s shot path
 was exercised only by playing — and the four assertions added with the fix fail
 on the code as it was.
+
+**L48 — A transform tested only at the identity cannot fail on units.** The
+carrier test rode a boat at yaw 0, and `CarrierTransformPoint` multiplied BAMS
+by BAMS-per-radian: zero times anything is zero, so the test passed and every
+rider in the game was spun around its boat. Give a rotation test a quarter
+turn, where `sin` and `cos` swap and a wrong factor, a wrong sign or a wrong
+axis all show.

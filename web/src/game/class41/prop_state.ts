@@ -107,24 +107,35 @@ export enum PropFamily {
    */
   Type43 = 12,
   /**
+   * `PropUpdateType13` (`FUN_00467F50`) — class 0x41 type 13, one spawn in
+   * stage 2: the part that drops out of the clock tower on script flag 0x6D.
+   *
+   * Its own family and not {@link Generic} for the reason
+   * {@link DrawOnlyType53} is: it inlines its own lifetime, with the
+   * step-change count **before** the scene-1 sweep and an `ActorKill` where
+   * the prologue has `ActorDespawn`, and it registers no shot sphere. See
+   * `class41/type13.ts`.
+   */
+  Type13 = 13,
+  /**
    * `PropUpdateType38` (`FUN_0046BCC0`) — class 0x41 type 38, the nine
    * objects `PlaceTable38Props` builds out of `g_prop_table38`. Stage 1's
    * church. A shot hops it into the air and it lands pivoting on one of its
    * eight hull corners. See `class41/type38.ts`.
    */
-  Type38 = 13,
+  Type38 = 14,
   /**
    * `PropUpdateType39` (`FUN_0046C240`) — class 0x41 type 39, eight stacks of
    * the same model that topple one item at a time when shot. Stage 1's
    * church. See `class41/type39.ts`.
    */
-  Type39 = 14,
+  Type39 = 15,
   /**
    * `PropUpdateType44` (`FUN_0046D850`) — class 0x41 type 44, seven objects:
    * two drawn as effect 0x13, which a shot blows apart, and five that draw
    * `komono_7.bin[0]` whole. Stage 1's church. See `class41/type44.ts`.
    */
-  Type44 = 15,
+  Type44 = 16,
   /**
    * `PropUpdateType40` (`FUN_0046C570`) — class 0x41 type 40, the objects
    * `PlaceFragmentProps` builds, which burst into forty `garasu.bin` pieces.
@@ -132,7 +143,7 @@ export enum PropFamily {
    * because it is not `PlaceGenericProp`'s and its prologue is its own. See
    * `class41/type40.ts`.
    */
-  Type40 = 16,
+  Type40 = 17,
 }
 
 /**
@@ -573,6 +584,16 @@ export interface BreakableProp {
   stackDrawn: number;
   drawScale: [number, number, number];
   effectPoses: PosedNode[];
+  /**
+   * `obj+0x192` for the two generic routines that keep a small state machine
+   * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
+   * door rattle (`Type35Phase`).
+   *
+   * The fifth port field for that one engine word, and separate for the same
+   * reason {@link BreakableProp.cuePhase} is (`L3`): each routine's `1` means
+   * something different. **Check the family, and for `Generic` the type.**
+   */
+  routinePhase: number;     // +0x192
   /** Dead, and due to leave the pool. Not an exe field; the pool is a list. */
   dead: boolean;
 }
@@ -641,6 +662,7 @@ export function makeBreakableProp(id: number, group: number,
     subKind: 0,
     removeFlag: -1,
     cuePhase: PropCuePhase.Untouched,
+    routinePhase: 0,
     key0: -1, key1: -1, key2: -1, key3: -1,
     branchLatched: false,
     restHeight: 0,

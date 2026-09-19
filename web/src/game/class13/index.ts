@@ -55,6 +55,7 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { CarrierPropRoutine0 } from "./routine0";
 import { CarrierState, type ScriptedPropTail } from "./state";
 
 /** `ActorAllocSub(0x18)`'s `ride+0x04`, and the range it wraps in. */
@@ -78,7 +79,7 @@ const FRAME_BOW_EFFECT = 0x550;
 const FRAME_BOW_FLAG = 0x55a;
 /** `ride+0x10` — what the wake scale gains a frame once a fade starts. */
 const WAKE_FADE_RATE = -0.015;
-/** The one `CarrierPropSelectRoutine` selector this port has read. */
+/** Selector 1 — the stage-3 boat, and the routine this file ports. */
 export const CARRIER_ROUTINE_PORTED = 1;
 /** `obj+0x34` bit the run-past arm raises at path frame `0x55A`. */
 const CARRIER_BOW_BIT = 0x400000;
@@ -137,10 +138,10 @@ export function ScriptedPropInit13(obj: Actor): void {
  * `CarrierPropSelectRoutine` — `FUN_00440190`. `g_prop_behaviours[8]`.
  *
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
- * routines chosen through the jump table at `0x004401E4`. Only selector 1 is
- * ported; the other six — `0x00440210`, `0x004408A0`, `0x00440AD0`,
- * `0x00440C20`, `0x00441000` and `0x004413C0` — have no stage-3 spawn.
- * `[open]`
+ * routines chosen through the jump table at `0x004401E4` — see
+ * {@link g_carrier_prop_routines}. Selectors 0 and 1 are ported; the other
+ * five — `0x004408A0` (2 and 9), `0x00440AD0` (3), `0x00440C20` (4 and 7),
+ * `0x00441000` (5 and 8) and `0x004413C0` (6) — are unread. `[open]`
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -315,9 +316,19 @@ export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
     return;
   }
   if (sub.behaviour !== PropBehaviour.SelectCarrierRoutine) return;
-  if (sub.selector !== CARRIER_ROUTINE_PORTED) return;
-  CarrierPropRoutine1(obj, f);
+  g_carrier_prop_routines[sub.selector]?.(obj, f);
 }
+
+/**
+ * The routines `CarrierPropSelectRoutine` (`FUN_00440190`) installs, by the
+ * first dword of the operand block. Sparse: a selector with no entry installs
+ * a routine this port has not read, and runs nothing.
+ */
+export const g_carrier_prop_routines: Partial<Record<number,
+  (obj: Actor, f: ClassFrame) => void>> = {
+  0: CarrierPropRoutine0,
+  [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
+};
 
 function ScriptedPropDebug(obj: Actor): ActorDebug {
   const sub = Tail(obj);
@@ -331,7 +342,7 @@ function ScriptedPropDebug(obj: Actor): ActorDebug {
       `carrier ${G.g_civilian_carrier.toString(16)}`,
     ],
     hot: sub.behaviour === PropBehaviour.SelectCarrierRoutine
-      && sub.selector !== CARRIER_ROUTINE_PORTED,
+      && g_carrier_prop_routines[sub.selector] === undefined,
   };
 }
 

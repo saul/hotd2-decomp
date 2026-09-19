@@ -19,24 +19,24 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 46333 | 168 | engine |
-| `hod2lib/` | 16293 | 34 | engine |
-| `render/` | 8948 | 31 | render |
-| `app/` | 7427 | 29 | app |
-| `script/` | 4324 | 25 | engine |
+| `game/` | 48919 | 177 | engine |
+| `hod2lib/` | 16485 | 34 | engine |
+| `render/` | 9253 | 32 | render |
+| `app/` | 7441 | 29 | app |
+| `script/` | 4386 | 25 | engine |
 | `ui/` | 3094 | 26 | ui |
-| `bundle/` | 2197 | 11 | engine |
-| `core/` | 910 | 9 | engine |
+| `bundle/` | 2218 | 11 | engine |
+| `core/` | 922 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **90265** | **335** | |
+| **total** | **93457** | **345** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
-* `game/actor.ts` — 2032
+* `game/actor.ts` — 2077
 * `app/main.ts` — 1988
-* `script/walker.ts` — 1873
+* `script/walker.ts` — 1905
 * `hod2lib/exetab.ts` — 1839
 
 ## The port
@@ -44,11 +44,11 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **167 of 271** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 168 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 335 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **22 of 43** read classes have a module, covering 1448 of 1623 placements |
+| Ported outside those ranges | 176 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 343 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **23 of 43** read classes have a module, covering 1473 of 1623 placements |
 | Declared `[diverges]` | **192** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **173** — questions the port is honest about not having answered |
+| `[open]` markers in `game/` | **181** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 52 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 915 in `ghidra/annotations/functions.tsv` |
-| Named globals | 407 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 37 under `tools/`, run together by `verify_all.py` |
+| Named functions | 940 in `ghidra/annotations/functions.tsv` |
+| Named globals | 423 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 38 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -120,6 +120,7 @@ nothing exits 3 and is never counted as green.
 | `verify_death_clips` | that every clip `ChooseDeathMotion` can put on a dying class-0x30 actor is baked for that spawn's own character type -- the only check that reads a death clip out of a real bundle, and the one that says whether an actor can leave state 12 at all, since that state's exit is an exact `obj+0x19C >= 0x3C` against a play clock that is 0 for a clip nothing carried | bundle |
 | `verify_cam_waits` | that every `wait_camera_path_frame <n>` asks for a frame the play in force actually publishes -- the only check that holds the three routines that publish a camera frame against the scripts that wait on them, and the one that says the strict `frame > operand` of `EvtOpWaitCameraPathFrame41` is safe to transcribe. Model scene state 7 as stopping on its range's end rather than one past it and twenty of the sites it checks become gates nothing can open | bundle |
 | `verify_prop_pose` | that every class-0x41 generic prop is posed in the order its own update routine poses it -- read out of the EXE per type, matched to the field each `MatrixRotate*` is handed. `render/breakables.ts` composed one order for all fifty, and it was type 51's alone: twenty shipped spawns came out somewhere else, four of them by more than a degree and the worst by 19.65 | game-dir |
+| `verify_prop_tables` | that the tables class 0x41 types 38, 39, 40 and 44 build their objects from -- positions, angles, hull corners, slots, counts, scales -- are the EXE's own words: the port carries them as literals, and a mistyped row would put a church chair somewhere the engine does not, with nothing else to notice | game-dir |
 | `verify_annotations` | that every annotated address is a real function in the EXE | game-dir |
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
@@ -134,7 +135,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-14 of them need the installed game and 12 need an exported
+15 of them need the installed game and 12 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

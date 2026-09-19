@@ -127,8 +127,17 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
   if (!fade || inst.a.fade <= 0 || inst.a.fadeLen <= 0) return false;
   const pm = inst.type.motions[String(fade.motion)];
   if (!pm || pm.frames <= 0) return false;
-  // The outgoing clip keeps playing underneath; `ActorAdvanceMotion` runs
-  // its clock. Weight goes 0 -> 1 onto the incoming one.
+  // The outgoing clip is a still -- the pose the engine snapshotted when the
+  // fade began -- and the incoming one is held on its start frame; the port
+  // advances neither clock until the fade is over (see `ActorAdvanceMotion`).
+  // Weight goes 1/(fade+1) -> 1 onto the incoming one.
+  //
+  // This read the outgoing clock while the port still ran it, and the
+  // `% frames` below wrapped a one-shot that had ended into its own first
+  // pose: an emerging zombie dissolved from its emerge clip's first --
+  // submerged -- frame and sank back into the water. The wrap is still right
+  // for a looping clip's snapshot, whose cursor is not bounded; what fixed it
+  // was stopping the clock.
   const pf = authoredFrameOfTicks(fade.ticks, pm.fps, pm.frames);
   const w = 1 - inst.a.fade / inst.a.fadeLen;
   this.applyBlend(inst, pm, pf, m, f, Math.min(1, Math.max(0, w)));

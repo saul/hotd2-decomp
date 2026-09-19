@@ -49,8 +49,11 @@ import { ZombieScriptForState } from "./target";
 const RIDER_TURN_RATE = 0x68;
 /** `0x1A0` — the turn once it has landed. */
 const LANDED_TURN_RATE = 0x1a0;
-/** `MOV [ESI+0x5C], 0xBDDF0123` — state 47's own gravity, -0.109. */
-const LEAP47_GRAVITY = -0.10889056;
+/**
+ * `MOV [ESI+0x5C], 0xBDDF0123` — state 47's own gravity. The float those bits
+ * are is -0.10888888..., not the -0.10889056 this said.
+ */
+const LEAP47_GRAVITY = -0.1088888868689537;
 /** `QueryGroundHeightAt(x, y + 100, z)`. */
 const GROUND_PROBE_RISE = 100.0;
 /** The two collision surfaces the landing treats as water. */
@@ -90,7 +93,7 @@ function turnTowardInCarrier(obj: ZombieActor, x: number, y: number,
  * `ZombieStateHoldOnCarrier` — `FUN_0045CFC0`. Class 0x30 state 46.
  *
  * Sub 0 blends to the actor's own idle — row 0 of
- * `g_pHitReactionMotionsAlt` for its body condition, the clip
+ * `g_class30_motion_rows` for its body condition, the clip
  * `ZombieStateApproach` walks on — and remembers it at `obj+0x1320`; sub 1
  * turns toward the camera eye, taken into the carrier's frame, at `0x68` a
  * frame; later subs only re-blend to the remembered clip. **No exit**: the

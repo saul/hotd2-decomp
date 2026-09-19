@@ -1496,8 +1496,10 @@ Not implemented, and why:
 * the **body condition** `obj+0x130C`, held at 0. `ActorUpdateBodyCondition`
   derives it partly from `obj+0x4DC` / `obj+0x68C`, which are `[open]`. It only
   changes the stumble at condition 3, and conditions 0, 1, 2 and 4 share a row;
-* the **alternate reaction table** `g_pHitReactionMotionsAlt`, reached only
-  when `obj+0x136C & 0x100`, which is `[open]`;
+* the **alternate reactions** at `+0x10` of each `g_class30_motion_rows`
+  row, reached only when `obj+0x136C & 0x100`, which is `[open]`. The table
+  itself is the general motion row -- sixteen readers, fourteen of them
+  states picking a walk, run, idle or back-away clip;
 * the **fade back out** of a reaction. `MotionCrossFadeTo` states the fade *in*;
   the player fades out over the same length, which is `[likely]`, not proved;
 * the **adaptive rank** itself. `UpdateDamageRank` needs lives lost and elapsed

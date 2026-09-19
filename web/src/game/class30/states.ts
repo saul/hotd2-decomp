@@ -252,7 +252,7 @@ export enum StrikeSub {
 /**
  * Which entry of the character's general motion row a state plays.
  *
- * `PTR_PTR_00592CBC[charType][condition]` is the row; each state indexes it
+ * ``g_class30_motion_rows` (`0x00592CBC`)[charType][condition]` is the row; each state indexes it
  * with a fixed offset, and those offsets are what these are.
  */
 /**

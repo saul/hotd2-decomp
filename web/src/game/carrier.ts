@@ -166,14 +166,21 @@ export function MatrixToEulerBams(m: Rot3):
  * through `VecToAngles`, then the roll off `M·(1,0,0)` with those two undone
  * (`RotX(-x); RotY(-y)`).
  *
- * `[likely]` on the sign of the elevation: it is the one that makes the
- * routine's own undo cancel, which is what the routine relies on; the
- * disassembly of `VecToAngles`' pitch has not been read here.
+ * The elevation is `VecToAngles` (`FUN_004016B0`) exactly, `[proved]` from
+ * its instructions: `FLD x; FLD z; FPATAN` is the heading, `__ftol`'d to an
+ * s16; the horizontal length is `z / cos(heading)` or, when
+ * `(heading + 0x2000) & 0x4000`, `x / sin(heading)` (`FCOS; FDIVR [z]` /
+ * `FSIN; FDIVR [x]` at `0x004016E7`..`0x004016F1`) -- not a `hypot`; and the
+ * elevation is `NEG` of the s16 of `atan2(y, length)` (`0x0040170F`). This
+ * said `[likely]` and used `hypot`, which is the same up to the heading's
+ * truncation.
  */
 export function MatrixGetAngles(m: Rot3): { x: number; y: number; z: number } {
   const f = apply3(m, 0, 0, 1);
   const y = s16(Math.atan2(f[0], f[2]) * RAD_TO_BAMS_F64);
-  const x = s16(Math.atan2(-f[1], Math.hypot(f[0], f[2])) * RAD_TO_BAMS_F64);
+  const len = ((y + 0x2000) & 0x4000) === 0
+    ? f[2] / Math.cos(y * BAMS_TO_RAD) : f[0] / Math.sin(y * BAMS_TO_RAD);
+  const x = -s16(Math.atan2(f[1], len) * RAD_TO_BAMS_F64);
   const r = apply3(m, 1, 0, 0);
   const v = apply3(mul3(rotX(-x), rotY(-y)), r[0], r[1], r[2]);
   const z = s16(Math.atan2(v[1], v[0]) * RAD_TO_BAMS_F64);

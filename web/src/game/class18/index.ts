@@ -103,7 +103,12 @@ export function CarriedZombieInit18(obj: Actor, rng?: Rng,
 export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
   const carrier = obj.carrierAt >= 0 ? ActorByAt(obj.carrierAt) : undefined;
   EnemyZombieUpdate(obj as ZombieActor, f);
-  if (!CarrierPublishWorld(obj, carrier) || !carrier) return;
+  if (!carrier) return;
+  // States 47 and 48 step off *inside* the update (`CarrierBakeWorldPose`,
+  // `*obj = EnemyZombieUpdate`): the rest of this frame's wrapper still runs
+  // in the engine, but the position is world space now, and composing the
+  // carrier's matrix onto it again published a point off in the canal.
+  if (obj.carrierAt >= 0 && !CarrierPublishWorld(obj, carrier)) return;
 
   const z = obj as ZombieActor;
   // The camera cue out of the spawn's own parameters. `tail+0x0C` is the path

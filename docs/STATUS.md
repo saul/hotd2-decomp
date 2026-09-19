@@ -19,23 +19,23 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 55438 | 194 | engine |
+| `game/` | 55450 | 194 | engine |
 | `hod2lib/` | 16761 | 34 | engine |
 | `render/` | 10692 | 35 | render |
-| `app/` | 7550 | 29 | app |
+| `app/` | 7601 | 29 | app |
 | `script/` | 4540 | 26 | engine |
 | `ui/` | 3094 | 26 | ui |
 | `bundle/` | 2261 | 11 | engine |
 | `core/` | 943 | 9 | engine |
 | `audio/` | 390 | 1 | render |
 | `hud/` | 349 | 1 | ui |
-| **total** | **102018** | **366** | |
+| **total** | **102081** | **366** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/class14/index.ts` — 2106
 * `game/actor.ts` — 2102
-* `app/main.ts` — 2039
+* `app/main.ts` — 2043
 * `script/walker.ts` — 1964
 * `hod2lib/exetab.ts` — 1839
 

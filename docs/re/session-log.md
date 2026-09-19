@@ -18772,3 +18772,19 @@ Also settled from the instructions:
   fixed index. Renamed in the TSV, the database, the port, `combat.md`, and
   the exporter's constant (`HIT_REACT_ALT_TABLE` -> `MOTION_ROW_TABLE`, both
   halves).
+
+## 2026-09-19 -- the gun light flickered on a moving camera
+
+User report after bug 14 landed: the torch flickers between two points when
+the camera moves, and is steady while it only turns. Cause: the light was
+built in `GameSystem.update` from `ctx.view` (the last draw's camera, a frame
+behind the block by design) minus `g_camera_block_eye` (seated this frame).
+At >60 Hz rAF the two agree on no-tick frames and disagree by one frame's
+travel on tick frames. Same family as the camera-aim flicker `CameraSeatSystem`
+already guards against. Fix: `GunLightBuildSystem` in the render phase after
+the camera draw, and the eye taken as the view matrix's origin (the engine
+builds `+0x40` from the block eye, `UpdateSceneViewAndLight`, so the two are
+one number there). Port test and render test each fail without their half.
+Measured with a 120 Hz rAF probe: mean second difference 4.1 -> 0.9 px, still
+frames 88/493 -> 261/438.
+

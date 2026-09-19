@@ -3791,6 +3791,24 @@ as. `CARRIER_GROUND_WAKE_DRAW` holds the three literals per routine.
 
 ### The gun lights are real spotlights now, placed by the port
 
+**Built off the camera the frame draws, and aimed out of that camera's own
+origin.** The first version ran `SceneLightArrayUpdate` inside the port's
+frame, against `ctx.view` -- the camera as the *last* draw left it, a frame
+behind the block by design (`CameraTakeSystem`) -- and aimed it at
+`pos - g_camera_block_eye`, an eye seated a frame later. On a display faster
+than 60 Hz only every other rAF owes a tick, so whenever the camera
+*translated* the torch swung between two aims at the refresh rate; a camera
+that only turned was fine, because turning moves no eye. Now
+`GunLightBuildSystem` (`app/systems.ts`) builds the lights in the render
+phase straight after `CameraDrawSystem`, from that camera's matrices, and
+`BuildEntitySpotlightArray` takes the eye as the same matrix's origin -- which
+in the engine it is: both of the block's matrices are built from the block's
+own position (`UpdateSceneViewAndLight`, `FUN_00401F40`), so `pos - eye` is
+the crosshair offset rotated. Measured at 120 Hz rAF on the bug-14 link, the
+torch pool's frame-to-frame second difference fell from 4.1 px to 0.9 px on
+a 160x100 probe, and 261 of 438 frames are now pixel-still (the no-tick
+frames) against 88 of 493 before.
+
 Bug 14: "the flashlight … is a bit naff". It was two `SpotLight`s in
 `render/lighting.ts`, one unit ahead of the camera and pointing straight
 ahead whatever the aim, visible only in the "+ scene light" view, on every

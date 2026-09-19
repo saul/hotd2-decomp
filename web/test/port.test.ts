@@ -17176,6 +17176,18 @@ console.log("\nthe gun lights:");
   check("...with the engine's constants",
         l.att0 === 0.5 && l.theta === GUN_LIGHT_CONE && l.phi === GUN_LIGHT_CONE
         && l.diffuse.join() === "1,1,1");
+  // The block eye a frame ahead of the matrix, as it is in the page for one
+  // frame whenever the camera moves: the aim is the matrix's own, `pos` minus
+  // the matrix origin, because in the engine `+0x40` is built out of that eye.
+  // Read from `g_camera_block_eye` it swung off by the camera's travel and
+  // the torch flickered between two aims on a moving camera.
+  G.g_camera_block_eye = { x: eye.x + 3, y: eye.y, z: eye.z - 4 };
+  SceneLightArrayUpdate(host);
+  check("the aim does not depend on g_camera_block_eye, only on the matrix",
+        Math.abs(l.dir.z + 1) < 1e-9 && Math.abs(l.dir.x) < 1e-9
+        && Math.abs(l.dir.y) < 1e-9,
+        `${l.dir.x} ${l.dir.y} ${l.dir.z}`);
+  G.g_camera_block_eye = { ...eye };
   // An aim up and to the right: the light sits there at depth 1 and points
   // along eye -> it. This is the VecToAngles pitch sign: it was written
   // "the obvious way" and pointed the torch down when aimed up.

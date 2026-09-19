@@ -66,6 +66,7 @@ function stubViewport(): unknown {
 }
 
 export {};
+type RenderContextT = import("../src/render/context").RenderContext;
 
 const { LabelCache } = await import("../src/render/overlays");
 const { SceneFog } = await import("../src/render/fog");
@@ -2431,6 +2432,53 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
   deformHordeSheet(root, sheet);
   check("...and a frozen sheet is not reshaped", pos.getY(top) === before);
   G.g_object_list.length = 0;
+}
+
+console.log("\nthe gun lights are built off the camera this frame draws:");
+{
+  // `GunLightBuildSystem` runs after the camera draw, so the torch is placed
+  // off the camera the frame is drawn with. It used to run inside the port's
+  // frame, against `ctx.view` -- the camera as the *last* draw left it -- and
+  // subtracted a block eye seated a frame later: on a moving camera the torch
+  // swung between two aims at the display's refresh rate.
+  const { GameSystem, GunLightBuildSystem } = await import("../src/app/systems");
+  const { G: g } = await import("../src/game/globals");
+  const { SetPlayerAimFromPointer, GUN_LIGHT_FIRST }
+    = await import("../src/game/scene_lights");
+  const game = new GameSystem();
+  const build = new GunLightBuildSystem(game);
+  const cam = new PerspectiveCamera();
+  g.g_scene_lighting = 1;
+  g.g_entity_spotlights_on = 1;
+  g.g_player_lives[0] = 3;
+  SetPlayerAimFromPointer(0, 0, 0);
+  // The block eye deliberately somewhere else: the aim must not read it.
+  g.g_camera_block_eye = { x: -500, y: -500, z: -500 };
+  const ctx = { camera: cam } as unknown as RenderContextT;
+  const light = g.g_entity_lights[GUN_LIGHT_FIRST];
+  cam.position.set(10, 20, 30);
+  build.update(ctx);
+  const at1 = `${light.pos.x.toFixed(6)},${light.pos.y.toFixed(6)},${light.pos.z.toFixed(6)}`;
+  check("the torch is one unit ahead of the camera just placed",
+        at1 === "10.000000,20.000000,29.000000", at1);
+  // Move the camera and build again with nothing in between -- no tick, no
+  // `CameraTakeSystem`: exactly an idle rAF after a draw that moved it.
+  cam.position.set(15, 20, 30);
+  build.update(ctx);
+  const at2 = `${light.pos.x.toFixed(6)},${light.pos.y.toFixed(6)},${light.pos.z.toFixed(6)}`;
+  check("...and follows the camera on the next frame with no tick between",
+        at2 === "15.000000,20.000000,29.000000", at2);
+  check("...aimed straight down the camera's -Z, whatever the block eye says",
+        Math.abs(light.dir.z + 1) < 1e-9 && Math.abs(light.dir.x) < 1e-9
+        && Math.abs(light.dir.y) < 1e-9,
+        `${light.dir.x} ${light.dir.y} ${light.dir.z}`);
+  cam.rotation.set(0, Math.PI / 2, 0);
+  build.update(ctx);
+  check("...and turns with it: yawed a quarter turn left it points down -X",
+        Math.abs(light.dir.x + 1) < 1e-6 && Math.abs(light.dir.z) < 1e-6,
+        `${light.dir.x} ${light.dir.y} ${light.dir.z}`);
+  g.g_scene_lighting = 0;
+  g.g_entity_spotlights_on = 0;
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

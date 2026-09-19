@@ -89,7 +89,8 @@ import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing, type HistoryView } from "./ring";
 import {
-  CameraSeatSystem, CharacterBindSystem, GameSystem, ScriptSystem, drawSystem,
+  CameraSeatSystem, CharacterBindSystem, GameSystem, GunLightBuildSystem,
+  ScriptSystem, drawSystem,
   seatCamera, syncCamera, syncCharacterSpawns, syncPortGlobals,
 } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
@@ -502,6 +503,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // a system rather than a hand-rolled tick so that a seek and a snapshot
     // load both reach it -- see `render/freeroam.ts`.
     this.world.add("render", this.freeRoam);
+    // The gun lights, off the camera just placed -- not the one the port's
+    // frame read a phase earlier. See `GunLightBuildSystem`.
+    this.world.add("render", new GunLightBuildSystem(this.game));
     // Everything below poses against the camera the draw just placed.
     this.world.add("render", this.spawns);
     this.world.add("render", this.sceneFog);

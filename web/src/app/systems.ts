@@ -16,7 +16,7 @@ import { ActorByAt, G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../game/globals";
 import type { GameHost, ShotPick, ShotRay } from "../game/host";
 import type { Vec3 } from "../game/vec";
-import type { CameraFrame } from "../core/camera";
+import { CameraFrame } from "../core/camera";
 import type { Walker } from "../script/walker";
 import {
   RetireUnlistedActor, SpawnPropContainers, SpawnScriptedCharacters,
@@ -158,6 +158,18 @@ export class GameSystem implements System {
     ResetGameGlobals();
   }
 
+  /**
+   * `SceneLightArrayUpdate` (`FUN_00480970`) against *view* -- the camera this
+   * frame is drawn with, which is not the one the port's own frame read (see
+   * `GunLightBuildSystem`). Every other closure of the host is the port's.
+   */
+  buildGunLights(view: CameraFrame): void {
+    SceneLightArrayUpdate({
+      ...this.host,
+      viewPoint: (x, y, z, out) => view.toWorld(x, y, z, out),
+    });
+  }
+
   update(ctx: Context, t: Tick): void {
     this.view = ctx.view;
     // `g_camera_yaw_bams` — class 0x31 wants the yaw on its own, not the whole
@@ -177,12 +189,7 @@ export class GameSystem implements System {
     G.g_camera_yaw_bams = ctx.view.yawBams;
     // ...and the pitch beside it: the horde's dive lifts its arc by it.
     G.g_camera_block_pitch_bams = ctx.view.pitchBams;
-    // `SceneLightArrayUpdate` (`FUN_00480970`) — the gun lights, for the same
-    // reason: where the torch points is the crosshair and the camera, not
-    // elapsed time, and it writes nothing but `g_entity_lights`, which no
-    // gameplay routine reads. Above the return, so a paused frame and a deep
-    // link draw it where the pointer is rather than where the last tick was.
-    SceneLightArrayUpdate(this.host);
+    // The gun lights are **not** built here -- see `GunLightBuildSystem`.
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes
     // hit points off, `ScoreAddForPlayer` pays, and `PlayerShotEffectSpawn`
@@ -543,5 +550,45 @@ export class CameraSeatSystem implements System<RenderContext> {
    */
   resync(ctx: RenderContext): void {
     seatCamera(this.rig, ctx, true);
+  }
+}
+
+/**
+ * `SceneLightArrayUpdate` (`FUN_00480970`), run against the camera **this
+ * frame is drawn with**.
+ *
+ * The port's frame reads the camera through `ctx.view`, which
+ * `CameraTakeSystem` fills from the three.js camera as the *last* draw left
+ * it -- a frame behind the block, deliberately, because the gameplay has
+ * always run against that. The gun lights cannot: they are placed one unit in
+ * front of the eye and aimed out of it, and against a matrix one frame old
+ * their origin trailed a moving camera by a frame's travel. On a display
+ * faster than 60 Hz only every other rAF owes a game tick, so the trail came
+ * and went at the refresh rate -- the torch flickered between two positions
+ * whenever the camera moved, and held still while it only turned.
+ *
+ * So the lights are built here, after `CameraDrawSystem` has placed the
+ * camera for this frame and before `GunLights` places them, from a copy of
+ * that camera's matrices. It writes `g_entity_lights` and nothing else, and
+ * nothing in gameplay reads those: moving the call changes what is lit, and
+ * cannot change what happens. It runs on every frame, paused or not, for the
+ * reason it always did -- where the torch points is the crosshair and the
+ * camera, not elapsed time.
+ */
+export class GunLightBuildSystem implements System<RenderContext> {
+  readonly id = "gunlights.build";
+  private readonly view = new CameraFrame();
+  constructor(private readonly game: GameSystem) {}
+
+  update(ctx: RenderContext): void {
+    const cam = ctx.camera;
+    cam.updateMatrixWorld();
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+    this.view.take(cam.matrixWorld.elements, cam.matrixWorldInverse.elements);
+    this.game.buildGunLights(this.view);
+  }
+
+  resync(ctx: RenderContext): void {
+    this.update(ctx);
   }
 }

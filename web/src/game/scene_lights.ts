@@ -60,6 +60,7 @@ export const PROJECTION_DISTANCE_PX = 640.2;
 const PLAYER_STATE_IN_PLAY = 5;
 
 const _local: Vec3 = { x: 0, y: 0, z: 0 };
+const _eye: Vec3 = { x: 0, y: 0, z: 0 };
 
 /**
  * `BuildEntitySpotlightArray` — `FUN_00480AC0`. The two gun lights.
@@ -82,7 +83,7 @@ const _local: Vec3 = { x: 0, y: 0, z: 0 };
  *                 g_crosshair_y / g_projection_distance_px, -1.0);
  * MatrixMultiply(camera_block + 0x40);        // camera -> world
  * pos = MatrixGetTranslation();
- * VecToAngles(pos - g_camera_block_eye, &pitch, &yaw);
+ * VecToAngles(pos - g_camera_block_eye, &pitch, &yaw);   // eye: see below
  * dir = RotZ(0) RotY(yaw) RotX(pitch) * (0, 0, 1);
  * type 2, diffuse (1,1,1), falloff 1, att0 0.5, att1 = att2 = 0,
  * theta = phi = pi/8, range = sqrt(*(double *)0x005691D8)
@@ -114,8 +115,19 @@ export function BuildEntitySpotlightArray(host: GameHost): void {
     light.pos.x = _local.x;
     light.pos.y = _local.y;
     light.pos.z = _local.z;
-    const eye = G.g_camera_block_eye;
-    const a = VecToAngles(_local.x - eye.x, _local.y - eye.y, _local.z - eye.z);
+    // The eye is the **same matrix's** origin, not `g_camera_block_eye` read
+    // on its own. In the engine the two are one number: `+0x40` is built as
+    // `T(eye) RotZ RotY RotX` out of the block eye by `UpdateSceneViewAndLight`,
+    // so `pos - eye` is the crosshair offset `(x, y, -1)` rotated, and the aim
+    // depends on the camera's rotation and nothing else. The port's matrix and
+    // its block eye are written by different layers at different points in the
+    // frame, and read separately they disagreed by one frame's travel whenever
+    // the camera moved: on a display faster than 60 Hz the torch swung
+    // between two aims every other frame, and held still for a camera that
+    // only turned.
+    host.viewPoint(0, 0, 0, _eye);
+    const a = VecToAngles(_local.x - _eye.x, _local.y - _eye.y,
+                          _local.z - _eye.z);
     RotateForwardByAngles(a.pitch, a.yaw, light.dir);
     light.diffuse = [1, 1, 1];
     light.falloff = 1;

@@ -18829,3 +18829,70 @@ against the unfixed code "passed" -- a zombie in the next block took the life
 after the flight had ended; the check now stops counting when the last bat
 goes. And stage 4 block 7's swarm is not reachable from entry 0: it needs
 `entry=4`.
+## 2026-09-19 -- bug 18: the room did not wait for a rescued civilian's lines
+
+Report: stage 4 (Original), the encounter before block 1 step 2 op 11 -- the
+game moves on while the rescued civilian is still speaking, and the next
+zombies appear before the shutter is open.
+
+Her stream (75) closes the shutter at command 19, speaks at 26, hands over an
+item and reopens the shutter at 44. Nothing in the evt waits on any of it:
+step 1 ends `wait_enemies_alive 0` and step 2 spawns two throwers and plays
+the next camera. So the hold had to be in one of the gate's conditions.
+`EvtOpWaitEnemiesAlive44` is `alive <= arg && g_evt_gameplay_live &&
+g_camera_free && hysteresis` -- and `g_camera_free` is the one a civilian can
+touch. `CivilianUpdate` calls `ActorRegisterCameraPoint` at `0x0048ADB0` on
+every non-despawning path (disassembled from `0x0048AB8F` and `0x0048AD0F`
+to the call: every branch rejoins at `0x0048AD97`), and that routine
+tail-calls `RegisterForCameraTracking` at `0x00409C03`, whose only test is
+`obj+0x34` bit `0x10000`. Op 0x2C writes that bit from wait bit `0x40000`,
+inverted. Her words carry `0x40000` from command 0 to 39; command 41's
+`0x2188000` drops it, and `SetHudShutterState 1` follows in the same block.
+`[proved]`
+
+The port's `RegisterForCameraTracking` filtered with `ActorIsEnemy`, a stand-in
+for the call sites -- which had one non-enemy caller. Fixed by letting a
+class's `tracksCamera` answer for a non-enemy, and class 0x10 answering yes.
+
+Headless, from the rescue step (`web/tools/civ_speech.mjs`):
+
+| | rescue | lines | untracked | shutter 1 | gate | next enemy |
+|---|---|---|---|---|---|---|
+| stage 4 (O) b1, before | f241 | f315..495 | f242 | f489 | f318 | f318 |
+| stage 4 (O) b1, after | f241 | f315..495 | f489 | f489 | f558 | f558 |
+| stage 2 b6, before | f151 | f192..411 | f152 | f473 | f220 (0x44) | f465 |
+| stage 2 b6, after | f151 | f192..411 | f412 | f473 | f481 | f533 |
+
+Wrong turns. The first harness respawned every actor the frame it despawned
+(it only checked the pool) and never made the civilian's captor, which
+`CivilianInit` builds and the walker does not list -- so the civilian sat on
+wait bit `0x04` for ever and the dead zombies stood back up. Both were the
+harness; `syncCharacterSpawns` already does it right.
+
+Stage 1 block 1 (stream 3) is not a confirmation and is not a
+counter-example: the script drops `0x40000` for the two turn clips between the
+rescue and the line (`0x100100` at commands 12 and 17), so under the same rule
+the gate opened at f328 against her line at f350 (f285 before the fix).
+`[likely]` the exe does the same, subject to the port's camera-turn timing and
+clip lengths matching.
+
+`[open]` Four boss classes (0x14, 0x19, 0x22, 0x32) and the `0x0042xxxx` and
+`0x0049xxxx` families also call `ActorRegisterCameraPoint` and are not in
+`ENEMY_CLASSES` (call sites in `Class22FightPhase2`, `Class32Update`,
+`Class14Update`, `Boss4Update`, ...). Whether the port makes them camera
+candidates was not checked here.
+
+`handback` then failed its stage 3 case: 0 enemy gates. The case seeks to
+block 1 step 1, and the seek's replay builds block 0's boat hostage fresh at
+her first command -- waiting on a captor and on camera path 124, which block 1
+never plays -- so she now held a camera slot and `g_camera_free` for ever. The
+engine never has her there (played, she is rescued in block 0 and her stream
+ends untracked); on the base commit the same artifact already stalled this
+case at block 1 step 2's `wait_scripted_actors`, just past the gates it
+measures. The harness now holds any civilian present on the seek's first frame
+out of the camera slots; its three stage-3 measurements are identical to the
+base commit's (2deg/34f, 7deg/47f, 7deg/47f). `[open]` The same artifact
+applies to a player deep link past a civilian's block: the rebuilt civilian
+is at her first command, and after this fix a tracked one holds the room's
+gate rather than only `wait_scripted_actors`.
+

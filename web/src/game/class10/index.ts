@@ -157,6 +157,16 @@ export const CivilianHandler: ClassHandler = {
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj: Actor) => (obj.civ?.onShotScript ?? -1) < 0,
   leave: CivilianLeaveField,
+  // **Always**, and the wait word decides. `CivilianUpdate` pushes 4.0 and
+  // calls `ActorRegisterCameraPoint` (`FUN_00409B70`) at `0x0048ADB0` on every
+  // path that does not despawn -- the shot branch included -- and that routine
+  // tail-calls `RegisterForCameraTracking` (`FUN_00408EC0`), whose only test is
+  // `obj+0x34` bit `0x10000`. Op 0x2C writes that bit from wait bit `0x40000`
+  // (`CivilianWait.CameraTrack`), so a civilian holds a camera slot -- and with
+  // it `g_camera_free` and every room-clear gate -- for exactly the blocks her
+  // script asks. That is how the game waits for a rescued civilian to finish
+  // speaking (bug 18). `[proved]`
+  tracksCamera: () => true,
 };
 
 /**

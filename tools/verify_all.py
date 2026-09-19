@@ -158,6 +158,13 @@ CHECKS: list[Check] = [
           "whether it opens at all, and the one that separates the two "
           "drivers a `finish_sequence` can install",
           NEEDS_BUNDLE),
+    Check("civ_speech", "web", ["npm", "run", "--silent", "civ_speech"],
+          "that a rescued civilian holds a camera slot while her script asks, "
+          "and that the room-clear gate therefore waits for her lines and her "
+          "shutter -- the only check that plays a real civilian stream against "
+          "the stage's own gate, and the reason a non-enemy can be a camera "
+          "candidate at all",
+          NEEDS_BUNDLE),
     Check("props43", "web", ["npm", "run", "--silent", "props43"],
           "where in a real script a class-0x41 prop is actually placed, and "
           "that it takes a frame of `GameUpdate` to appear -- the only check "

@@ -57,7 +57,7 @@ import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
 import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
-import { HordeDrawParts, type HordePart } from "./horde";
+import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import { CARRIER_WAKE_PAIR, type ScriptedPropTail }
@@ -588,6 +588,13 @@ export class SlotModelLayer implements System<RenderContext> {
         // and carry on, rather than truncating the chain from here. Every one
         // of the sixteen ships, so this is the shape of a stale export.
         if (!c) { if (!live.node.children[i]) break; continue; }
+        // The sheet reshapes its model every frame: its own geometry, then.
+        if ((parts[i] as Partial<HordePart>).deform) {
+          c.traverse((o) => {
+            const mesh = o as Mesh;
+            if (mesh.geometry) mesh.geometry = mesh.geometry.clone();
+          });
+        }
         if (live.node.children[i]) {
           live.node.remove(live.node.children[i]);
           live.node.children.splice(i, 0, c);
@@ -601,6 +608,7 @@ export class SlotModelLayer implements System<RenderContext> {
       c.matrixAutoUpdate = false;
       c.matrix.copy(parts[i].m);
       c.visible = true;
+      if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
       // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the one fading draw in a
       // chain, class 0x40's ripple. The clone shares its template's
       // materials, so it gets its own before its opacity is touched.

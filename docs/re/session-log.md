@@ -18374,3 +18374,19 @@ tests; the per-part draw of a type-2 prop. The held prop's seat uses the
 bone's world matrix times the camera's, which is the product the engine's
 draw record holds `[likely]` -- up to the bone frames the exporter emits
 matching the engine's.
+
+### Follow-up: the rug is ported, not declared
+
+The coordinator relayed that a new divergence is the user's call, so the
+sheet went in. `HordeDeformedPropUpdate` (`FUN_0043F010`) read from its 198
+instructions, since the decompiler hides the sine's argument behind `ftol`:
+`a = ftol((5 - d) * 3276.8)`, `s = sin(a) * 1.2`, `(dx + 545) * s * 0.2`
+when `dx < -540` (never, with the shipped positions), `min(1, (5 - |dz|) *
+0.2)` across, `11.5 / obj+0x40` past member x 11.5 (the sheet's own `+0x40`,
+which nothing writes -- unreachable, and a division by zero if it were), and
+the corpse's `(60 - n) / 60`. `FUN_0043F2E0` is face normals
+(`Vec3Cross`, `FUN_004AA980`, of `v0 - v1` and `v1 - v2`) and `FUN_0043F3E0`
+averages them per logical vertex **with x and z weighted by four**. The sheet
+is `komono_room.bin` part 2, a patterned rug. Wrong turn: my first test
+expected the rug over member 0, and it is over the **placer** --
+`HordeMemberInit` spawns it before moving the member onto its spline.

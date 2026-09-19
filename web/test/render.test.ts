@@ -2312,5 +2312,70 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
   G.g_object_list.length = 0;
 }
 
+// -- class 0x40's sheet ------------------------------------------------------
+//
+// `HordeDeformedPropUpdate` (`FUN_0043F010`)'s reshape, on a flat grid: the
+// vertex under a member rises the full 1.2, one five units off in x and z is
+// flat, and the normals lean with the bump.
+{
+  const { deformHordeSheet } = await import("../src/render/horde");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { ActorSpawn } = await import("../src/game/spawn");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { HordeKind } = await import("../src/game/class40/state");
+  const three = await import("three");
+  ResetGameGlobals();
+  const sheet = ActorSpawn(0x18000000, SpawnClass.HordeSpawner, -1, "sheet");
+  const member = ActorSpawn(0x10000000, SpawnClass.HordeSpawner, 0x1d, "m");
+  const st = (sheet as unknown as { horde: { kind: number; drawn: boolean;
+    propX: number; propY: number; propZ: number } }).horde;
+  st.kind = HordeKind.Sheet;
+  st.drawn = true;
+  st.propX = -530; st.propY = 33.5; st.propZ = -1318;
+  member.pos.x = -530 + 2; member.pos.y = 34; member.pos.z = -1318 - 1;
+  G.g_horde_members = [member.at, 0, 0];
+  // A 21x21 grid over [-10, 10], flat at y = 0.3 so "laid flat" shows.
+  const geo = new three.PlaneGeometry(20, 20, 20, 20);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0.3, 0);
+  const root = new three.Object3D();
+  root.add(new three.Mesh(geo, new three.MeshBasicMaterial()));
+  deformHordeSheet(root, sheet);
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  const at = (x: number, z: number) => {
+    for (let i = 0; i < pos.count; i += 1) {
+      if (Math.abs(pos.getX(i) - x) < 1e-6 && Math.abs(pos.getZ(i) - z) < 1e-6) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  const top = at(2, -1);
+  check("the sheet rises 1.2 right over a member",
+        top >= 0 && Math.abs(pos.getY(top) - 1.2) < 1e-6, `${pos.getY(top)}`);
+  const far = at(-8, 8);
+  check("...and is laid flat where no member is near",
+        far >= 0 && pos.getY(far) === 0, `${pos.getY(far)}`);
+  const side = at(4, -1);
+  check("...slopes between, by the half-sine of the distance",
+        side >= 0 && pos.getY(side) > 0 && pos.getY(side) < 1.2,
+        `${pos.getY(side)}`);
+  check("...and the normals lean off the bump's flank",
+        side >= 0 && nrm.getX(side) > 0.1 && nrm.getY(side) > 0,
+        `${nrm.getX(side)},${nrm.getY(side)}`);
+  const before = pos.getY(top);
+  G.g_horde_members = [0, 0, 0];
+  deformHordeSheet(root, sheet);
+  check("...with no member about, it keeps the shape it had",
+        pos.getY(top) === before, `${pos.getY(top)}`);
+  G.g_horde_members = [member.at, 0, 0];
+  st.drawn = false;
+  member.pos.x += 5;
+  deformHordeSheet(root, sheet);
+  check("...and a frozen sheet is not reshaped", pos.getY(top) === before);
+  G.g_object_list.length = 0;
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

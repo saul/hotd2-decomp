@@ -752,7 +752,9 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // the ripple (`common.bin` 371, 0x1A38) and the thirty-frame splash strip
   // (`common.bin` 338..367, 0x15E4 + g_frame_counter % 30). The members
   // themselves are skeletons and ride the character path.
-  0x40: [0x17cc, 0x10d0, 0x1a38,
+  // And stage 2 block 0x19's sheet, `komono_room.bin` 2 (0x10CF), which
+  // `HordeDeformedPropUpdate` (`FUN_0043F010`) reshapes every frame.
+  0x40: [0x17cc, 0x10d0, 0x1a38, 0x10cf,
          ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
 };
 

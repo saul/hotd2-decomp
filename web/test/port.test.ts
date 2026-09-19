@@ -16313,6 +16313,64 @@ console.log("\nclass 0x40, the horde:");
           && m.clip === HORDE_CLIP_LEAP);
   }
 
+  {
+    // Stage 2 block 0x19's sheet: laid by member 0's Init, waiting a frame for
+    // its model, reshaped while the step has changed at most once, frozen
+    // after that and gone after the third.
+    const rng = new Rng(457);
+    room(1, 0x19, rng);
+    G.g_evt_step_index = 1;
+    place(0x113fc, 1, vec3(-530, 33, -1318), rng);
+    step(rng);
+    const sheets = () => G.g_object_list.filter((o) => {
+      const k = (o as { horde?: HordeTail }).horde?.kind;
+      return !o.despawned && (k === HordeKind.SheetAwait || k === HordeKind.Sheet);
+    });
+    const m0 = members()[0];
+    // At the placer's point: `HordeMemberInit` calls it before it has moved
+    // the member onto its spline or lifted it the unit.
+    void m0;
+    check("formation 2's member 0 lays one sheet, half a unit above the placer",
+          sheets().length === 1
+          && horde(sheets()[0]).propY === 33.5
+          && horde(sheets()[0]).propX === -530,
+          `${sheets().length} ${sheets()[0] ? horde(sheets()[0]).propY : ""}`);
+    const sh = sheets()[0];
+    check("...which waits one frame for its model",
+          horde(sh).kind === HordeKind.SheetAwait);
+    step(rng);
+    step(rng);
+    check("...and then reshapes every frame",
+          horde(sh).kind === HordeKind.Sheet && horde(sh).drawn);
+    G.g_active_cam_path = 0x47;
+    step(rng);
+    check("...but not while camera path 0x47 plays", !horde(sh).drawn);
+    G.g_active_cam_path = 0x40;
+    G.g_cam_path_frame = 0x120;
+    step(rng);
+    check("...nor path 0x40 between frames 0x10C and 0x168", !horde(sh).drawn);
+    G.g_cam_path_frame = 0x169;
+    step(rng);
+    check("...and again after it", horde(sh).drawn);
+    G.g_evt_step_index = 2;
+    step(rng);
+    check("one step change leaves it reshaping", horde(sh).drawn);
+    G.g_evt_step_index = 3;
+    step(rng);
+    check("...a second freezes it for good",
+          !horde(sh).drawn && (sh.flags & 0x4000000) !== 0);
+    G.g_evt_step_index = 4;
+    step(rng);
+    check("...and it outlives the third", !sh.despawned);
+    G.g_evt_step_index = 5;
+    step(rng);
+    check("...but not the fourth", sh.despawned);
+    room(0, 3, rng);
+    place(0x2b94, 1, vec3(-70, -10, -520), rng);
+    step(rng);
+    check("no other formation lays one", sheets().length === 0);
+  }
+
   check("a member's address is the placer's, with the index in bits 20..23",
         HordeMemberAt(0x2b94, 3) === (0x10000000 | (3 << 20) | 0x2b94));
   void PlaceHorde;

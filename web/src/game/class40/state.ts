@@ -74,6 +74,10 @@ export enum HordeKind {
   Splash = 5,
   /** `HordeDeathRippleFade` (`FUN_0043E650`), which the splash hands to. */
   Ripple = 6,
+  /** `HordeDeformedPropAwaitModel` (`FUN_0043EFE0`) -- stage 2's sheet, waiting. */
+  SheetAwait = 7,
+  /** `HordeDeformedPropUpdate` (`FUN_0043F010`) -- the sheet. */
+  Sheet = 8,
 }
 
 /**
@@ -295,7 +299,10 @@ export interface HordeTail {
   // `render/`'s, so each routine leaves the decisions it made -- whether it
   // drew, and where the second and third draws went -- here for that layer
   // to read. Nothing in `game/` reads them back.
-  /** The member's `SubModelDraw` ran this frame. */
+  /**
+   * The member's `SubModelDraw` ran this frame -- or, for the sheet, its
+   * vertices were reshaped this frame.
+   */
   drawn: boolean;
   /** ...and ran a second time, reflected (stage 1 block 3). */
   mirrored: boolean;

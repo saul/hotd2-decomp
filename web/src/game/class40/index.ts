@@ -31,12 +31,13 @@
  * keeps the decisions here — whether it drew this frame, the reflection, the
  * shadow — on the tail for `render/` to act on.
  *
+ * ## Stage 2 block 0x19's sheet
+ *
+ * Formation 2's member 0 lays a sheet the first three members bulge from
+ * underneath as they crawl -- `sheet.ts`, with the reshape in `render/`.
+ *
  * ## What is not ported
  *
- * * `SpawnHordeDeformedProp` (`FUN_0043EF70`) and its two routines — the
- *   stage-2 block-0x19 sheet the first three members bulge from underneath —
- *   are recorded rather than built; see `HordeMemberInit`'s note where it would
- *   be called.
  * * Class 0x47 (`PlaceLoneHordeMember47`, `FUN_0043BE60`) is the same member
  *   without a formation. No shipped descriptor is class 0x47.
  */
@@ -61,6 +62,8 @@ import { ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
 import { vec3 } from "../vec";
 import { HordeEmergePropUpdate, SpawnHordeEmergeProp } from "./emerge_prop";
+import { HordeDeformedPropAwaitModel, HordeDeformedPropUpdate,
+         SpawnHordeDeformedProp } from "./sheet";
 import { HordeDeathRippleFade, HordeDeathSplashUpdate, SpawnHordeDeathSplash }
   from "./splash";
 import {
@@ -489,13 +492,8 @@ function HordeMemberSplineRate(t: HordeTail): number {
  * `y = 41.4`, and it counts nobody into the enemy counters here: its state 0
  * does that once `g_script_flags[94]` rises.
  *
- * `[diverges]` `SpawnHordeDeformedProp` (`FUN_0043EF70`) is not called:
- * formation 2's member 0 lays down `komono_room.bin` part 2 and the first
- * three members bulge it from underneath as they crawl
- * (`HordeDeformedPropUpdate`, `FUN_0043F010`) — a vertex deformation of a
- * model, drawing only, with no effect on any state. It needs the model's
- * vertices in `render/` and one more routine read (`FUN_0043F2E0`); until
- * then stage 2 block 0x19 has no sheet at all.
+ * Formation 2's member 0 also lays down the sheet the first three members
+ * crawl under (`SpawnHordeDeformedProp`, `FUN_0043EF70`; see `sheet.ts`).
  */
 export function HordeMemberInit(obj: Actor, rng: Rng, host?: GameHost):
     void {
@@ -536,8 +534,7 @@ export function HordeMemberInit(obj: Actor, rng: Rng, host?: GameHost):
         t.skinRow = 1;
         t.formation = HordeFormation.Stage2Block25;
         t.scale = HORDE_SCALE_SMALL;
-        // Here `SpawnHordeDeformedProp` (`FUN_0043EF70`) runs for member 0;
-        // see this routine's note.
+        if (t.idx === 0) SpawnHordeDeformedProp(obj);
       }
     }
     const [x, z] = FormationSplinePoint(t, 0, 0);
@@ -1251,6 +1248,8 @@ export function HordeUpdate(obj: Actor, f: ClassFrame): void {
     case HordeKind.EmergeProp: HordeEmergePropUpdate(obj, f); return;
     case HordeKind.Splash: HordeDeathSplashUpdate(obj); return;
     case HordeKind.Ripple: HordeDeathRippleFade(obj); return;
+    case HordeKind.SheetAwait: HordeDeformedPropAwaitModel(obj); return;
+    case HordeKind.Sheet: HordeDeformedPropUpdate(obj); return;
     default: return;
   }
 }

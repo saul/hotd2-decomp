@@ -1916,10 +1916,19 @@ without a page) and watches both counters return to zero and the walker leave
 the gate; `tools/horde_look.mjs` does it in the page through the real shot
 path — stage 1 block 3: eight members, `e8 p8`, 640 points, walker 3/3 → 3/4.
 
-One declared divergence, where it lives: stage 2 block 0x19's **deformed prop**
-(`SpawnHordeDeformedProp`, `FUN_0043EF70`), a `komono_room.bin` sheet the first
-three members bulge from underneath, is not built. Not ported either: class
-0x47 (`PlaceLoneHordeMember47`), which no shipped descriptor uses.
+**The rug.** Stage 2 block 0x19's first member lays a sheet --
+`komono_room.bin` part 2, a patterned rug -- and the first three crawl under
+it, bulging it as they go (`SpawnHordeDeformedProp`, `FUN_0043EF70`;
+`HordeDeformedPropUpdate`, `FUN_0043F010`; the normal passes
+`VertexMapRebuildFaceNormals`, `FUN_0043F2E0`, and
+`VertexMapAverageFaceNormalsXZ4`, `FUN_0043F3E0`). Its lifetime and when it
+may move are `game/class40/sheet.ts`; the per-vertex half-sine and the
+normals are `render/horde.ts`, reading the members the port already keeps.
+Screenshot `web/shots/horde-sheet-00780.png` (`tools/horde_sheet_look.mjs`):
+three ridges across the rug while the members are under it. Not ported:
+class 0x47 (`PlaceLoneHordeMember47`), which no shipped descriptor uses. The
+secondary light set the member and the rug draw under
+(`LightsUseSecondarySet`) is not modelled.
 
 ## Coming through the window, and the ambience that goes with it
 

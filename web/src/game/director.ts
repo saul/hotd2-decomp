@@ -523,6 +523,8 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   G.g_blink_frame_counter += SecondsToTicks(dt);
   // ...and the second of the three, which `OwlDrawBodyChain` reads.
   G.g_frame_counter += SecondsToTicks(dt);
+  // ...and the third, the one `ResetSceneOnEnter` zeroes.
+  G.g_scene_tick_counter += SecondsToTicks(dt);
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot

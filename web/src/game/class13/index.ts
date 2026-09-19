@@ -55,6 +55,7 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { CarrierPropRoutine0 } from "./routine0";
 import { CarrierState, type ScriptedPropTail } from "./state";
 
 /** `ActorAllocSub(0x18)`'s `ride+0x04`, and the range it wraps in. */
@@ -78,13 +79,8 @@ const FRAME_BOW_EFFECT = 0x550;
 const FRAME_BOW_FLAG = 0x55a;
 /** `ride+0x10` — what the wake scale gains a frame once a fade starts. */
 const WAKE_FADE_RATE = -0.015;
-/** The `CarrierPropSelectRoutine` selectors this port has read. */
-export enum CarrierRoutine {
-  /** `CarrierPropRoutine1` (`FUN_004403D0`) — stage 3 block 0's boat. */
-  Routine1 = 1,
-  /** `CarrierPropRoutine6` (`FUN_004413C0`) — stage 3 block 7's boat. */
-  Routine6 = 6,
-}
+/** Selector 1 — the stage-3 boat, and the routine this file ports. */
+export const CARRIER_ROUTINE_PORTED = 1;
 
 // -- `CarrierPropRoutine6`'s own numbers --------------------------------------
 //
@@ -166,12 +162,11 @@ export function ScriptedPropInit13(obj: Actor): void {
  * `CarrierPropSelectRoutine` — `FUN_00440190`. `g_prop_behaviours[8]`.
  *
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
- * routines chosen through the jump table at `0x004401E4`: 0 →
- * `CarrierPropRoutine0` (`0x00440210`), 1 → {@link CarrierPropRoutine1},
- * 2 and 9 → `0x004408A0`, 3 → `0x00440AD0`, 4 and 7 → `0x00440C20`, 5 and 8 →
- * `0x00441000`, 6 → {@link CarrierPropRoutine6}. Selectors 1 and 6 are
- * ported — they are stage 3's two boats. Selector 0 is stage 2's (block 16)
- * and 2..9 are stage 4's; those five routines are unread. `[open]`
+ * routines chosen through the jump table at `0x004401E4` — see
+ * {@link g_carrier_prop_routines}. Selectors 0, 1 and 6 are ported (stage
+ * 2's block-16 boat and stage 3's two); the other four routines —
+ * `0x004408A0` (2 and 9), `0x00440AD0` (3), `0x00440C20` (4 and 7) and
+ * `0x00441000` (5 and 8), all stage 4's — are unread. `[open]`
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -445,11 +440,20 @@ export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
     return;
   }
   if (sub.behaviour !== PropBehaviour.SelectCarrierRoutine) return;
-  if (sub.selector === CarrierRoutine.Routine1) CarrierPropRoutine1(obj, f);
-  else if (sub.selector === CarrierRoutine.Routine6) {
-    CarrierPropRoutine6(obj, f);
-  }
+  g_carrier_prop_routines[sub.selector]?.(obj, f);
 }
+
+/**
+ * The routines `CarrierPropSelectRoutine` (`FUN_00440190`) installs, by the
+ * first dword of the operand block. Sparse: a selector with no entry installs
+ * a routine this port has not read, and runs nothing.
+ */
+export const g_carrier_prop_routines: Partial<Record<number,
+  (obj: Actor, f: ClassFrame) => void>> = {
+  0: CarrierPropRoutine0,
+  [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
+  6: CarrierPropRoutine6,
+};
 
 function ScriptedPropDebug(obj: Actor): ActorDebug {
   const sub = Tail(obj);
@@ -463,7 +467,7 @@ function ScriptedPropDebug(obj: Actor): ActorDebug {
       `carrier ${G.g_civilian_carrier.toString(16)}`,
     ],
     hot: sub.behaviour === PropBehaviour.SelectCarrierRoutine
-      && CarrierRoutine[sub.selector] === undefined,
+      && g_carrier_prop_routines[sub.selector] === undefined,
   };
 }
 

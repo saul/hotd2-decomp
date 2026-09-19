@@ -3586,6 +3586,73 @@ read as the gap closing instead of as a missing prop, which is
 `verify_prop_slots.py`'s own circularity one layer in and was caught here by
 the mutation test twice.
 
+### Three stage-2 set pieces that drew at the wrong origin or never moved
+
+Three reports, one pattern: a routine the port had read for **what** it draws
+but not for **where** or **when**. All three are now transcribed whole.
+
+**The door the block-5 civilian is behind — class 0x41 type 35.**
+`PropUpdateType35` (`FUN_0046B320`) is placed at the **origin** (stage 2 block 3
+step 4 op 5, evt `0x2504`) and never reads its own position: both leaves are
+drawn at literal world coordinates, `0x1812` at `(-620.55, 66.294, -997.98)`
+and `0x1813` at `(-620.55, 66.294, -980.82)` (`komono_uemiti.bin[3]`/`[4]`).
+The renderer drew `0x1812` at `p.x/p.y/p.z` — the origin — so the doorway the
+two captors come out of was empty grey. The second leaf is past the
+`MatrixStackPop` Ghidra ends the body on (`L37`). While script flag `0x68` is
+up and `0x69` down the door **rattles**: a knock (`DAMAGE3_22.WAV`) on counted
+frame 20 and again on 50, each a seven-frame swing of `ftol(sin(phase) *
+1536)` BAMS, the leaves mirrored. Stage 2 block 5 step 2 raises `0x68` one
+frame before it spawns the civilian and `0x69` at camera path 5 frame 365.
+`game/class41/type35.ts`.
+
+**The ladder in the clock-tower cut scene — class 0x41 type 13.**
+`PropUpdateType13` (`FUN_00467F50`), one spawn (block 21 step 4, evt
+`0xEC94`), placed at `(-925, 180, -1297)`. Two draws: `AssetDrawSlot(obj+0x28C)`
+with **no matrix of its own** — `komono_tokeidai.bin[1]`/`[2]` are modelled in
+world space, a panel beside where the cut scene's two player bodies stand,
+blinking every 40 scene ticks until the first step change — and `0x1A43`
+(`komono_tokeidai.bin[0]`, 191 units tall) at `Translate(x, y, z + judder)`.
+Flag `0x6D`, raised by block 21 step 7 op 4, drops it: `0.02` of gravity a
+frame from rest, 186 units in 136 frames to `y = -6.0`, then a `0.4` judder
+across Z decaying by `-0.925` for 27 frames. The camera of path 34 is aimed at
+exactly its X and Z. The port had it as a drawn-only generic prop: `0x1A4A`
+at `p.x/p.y/p.z` (world space added to world space, a kilometre off) and no
+`0x1A43` at all. It is its own `PropFamily.Type13` because it **inlines** its
+lifetime — the step count before the scene-1 sweep, `ActorKill` rather than
+`ActorDespawn` — and registers no shot sphere. `game/class41/type13.ts`.
+The skip arm (flag `0x6D` with `g_cutscene_skipping` snaps it to the floor) is
+not transcribed: `g_cutscene_skipping` has no port, the gap classes 0x21 and
+0x25 already name.
+
+**The boat that runs into the wall — class 0x13 selector 0.**
+`CarrierPropRoutine0` (`FUN_00440210`), stage 2 block 16 step 11 (evt
+`0xA3E8`), slot `0x1A36` (`komono_boat.bin[1]`) at scale 2.5. It rides object
+path `0x151` (`op_st2` 9) from the camera's frame; at ride frame `0x276` (630)
+`SIBUKI2_16.WAV` plays and a 94-frame `eff_dokan.bin` strip starts at a fixed
+point by the wall, and it coasts on to `g_carrier_routine0_ride_end` (710).
+Two things were missing, and either alone hid the boat: the routine (the class
+dispatched selector 1 only, so the boat stood at its descriptor for ever) and
+**its model** — `actorSlotEntry` carried no class-0x13 slot at all, and stage
+3's boat had geometry only because `0x1A37` is also class 0x25's variant-3
+model. `scriptedPropDrawSlots` now carries each class-0x13 descriptor's own
+slot **when the port runs its behaviour** — `NoOpStub` statics, and carriers
+on selectors in `CARRIER_SELECTORS_PORTED` — which also brings stage 2's five
+static class-0x13 props (`0x1237`, `0x1383`) into its bundles. Stage 4's seven
+carriers take selectors 2..9 and stay out: drawn, they would stand at their
+descriptors while the game drives them. **Ghidra's pseudocode would have frozen
+the boat**: it ends the ride state at the `MatrixStackPop` and shows no
+`frame++`; the increment is at `0x00440323` and the whole tail past it.
+`game/class13/routine0.ts`.
+
+Not ported, both draw-side, and neither slot range is in the bundle: selector
+0's wake (`char_adv06.bin[0..21]`, the same strip selector 1 draws) and the
+splash strip. Their cursors are stepped in `game/`. The **zombie in the boat**
+is the civilian's class-0x18 child (evt `0xA174`), and no class-0x18 spawn in
+any stage becomes a character: class 0x18 has no `MOTION_RULES` row, so it
+exports as a marker. That is the stage-3 boat work's fix and is not repeated
+here; without it the civilian's captor never exists and the civilian is
+"rescued" on its first frame.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

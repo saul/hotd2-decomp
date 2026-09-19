@@ -34,6 +34,8 @@ import { SCHEMA_FILES, SCHEMA_HASH } from "../bundle/schema_hash";
 // and the exporter has no business acquiring one.
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
+// Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
+import { CARRIER_SELECTORS_PORTED } from "../game/class13/state";
 import { f32, i16, i32, u32 } from "./bytes";
 import { BODY_CREATURE_SLOTS } from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
@@ -824,6 +826,46 @@ export function sceneryDrawSlots(
 }
 
 /**
+ * The asset slots a stage's class-0x13 **descriptors** draw.
+ *
+ * `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `obj+0x1F4`, which
+ * `ScriptedPropInit13` (`FUN_0043FE10`) copies from the descriptor tail's
+ * `+0x00` -- so, like {@link sceneryDrawSlots}, the model is a property of the
+ * spawn and not of the class. Twenty-three spawns over three stages name
+ * their own slots, and keying on the class would carry every one of them
+ * into every bundle.
+ *
+ * Stage 3's boat only ever had geometry because its slot, `0x1A37`, is also
+ * {@link HUMANOID_VARIANT3_SLOT} and so travelled for class 0x25. Stage 2's
+ * boat (`0x1A36`, `komono_boat.bin[1]`) had none: the actor was built, rode
+ * its path, and the client had nothing to clone.
+ */
+export function scriptedPropDrawSlots(
+    placements: readonly {
+      class13?: { slot?: number; behaviour?: number; selector?: number } | null;
+    }[],
+): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    // Only a prop whose behaviour the port runs: `g_prop_behaviours[0]` is
+    // `NoOpStub`, a static model, and `[8]` is a carrier whose selector must
+    // be one of {@link CARRIER_SELECTORS_PORTED}. Stage 4's seven carriers take
+    // selectors 2..9 and would otherwise stand at their descriptors while the
+    // game drives them -- right geometry, wrong behaviour, which is the reason
+    // `GENERIC_DESCRIPTOR_SLOT` holds its unported types back too.
+    const t = p.class13;
+    const ported = t?.behaviour === 0
+      || (t?.behaviour === 8 && CARRIER_SELECTORS_PORTED.has(t.selector ?? -1));
+    if (!ported) continue;
+    const slot = t?.slot;
+    if (typeof slot === "number" && slot > 0 && !out.includes(slot)) {
+      out.push(slot);
+    }
+  }
+  return out;
+}
+
+/**
  * A hidden rig holding the models an **actor** class draws by asset slot.
  *
  * The counterpart of {@link breakableSlotEntry}, for the classes whose draw is
@@ -868,8 +910,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x43, 0x51, 0x52; class 0x25 "
-      + "variant 3; class 0x33 selector 4)",
+    routine: "asset-slot actor draws (classes 0x13, 0x43, 0x51, 0x52; class "
+      + "0x25 variant 3; class 0x33 selector 4)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -1323,7 +1365,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const humanoids = evt ? scriptedHumanoidsJson(evt, spawnRecords) : {};
   const act = await actorSlotEntry(
     stage, spawnRecords.map((r) => r.cls),
-    [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces)],
+    [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
+     ...scriptedPropDrawSlots(charPlaces)],
     cache);
   const eff = await effectSlotEntry(stage, cache,
                                    bodyCreatureDrawSlots(charDefs.keys()));

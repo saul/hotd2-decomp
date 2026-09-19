@@ -223,3 +223,55 @@ export function MatrixRotateAxis(m: Mat, axis: Vec3, bams: number): void {
   r[10] = a.z * a.z * t + c;
   MatrixMultiply(m, r);
 }
+
+/**
+ * `MatrixInvert` — `FUN_004A8D20`. The general 4x4 inverse by cofactors over
+ * the determinant (`FUN_004A8B60`); a singular matrix becomes sixteen
+ * `3.4e38`s. The port computes the same inverse by elimination, which agrees
+ * to rounding.
+ */
+export function MatrixInvert(m: Mat): void {
+  const a = m.slice(0, 16);
+  const inv = MatIdentity();
+  for (let c = 0; c < 4; c++) {
+    let piv = c;
+    for (let r = c + 1; r < 4; r++) {
+      if (Math.abs(a[r * 4 + c]) > Math.abs(a[piv * 4 + c])) piv = r;
+    }
+    if (a[piv * 4 + c] === 0) {
+      for (let i = 0; i < 16; i++) m[i] = 3.4e38;
+      return;
+    }
+    if (piv !== c) {
+      for (let k = 0; k < 4; k++) {
+        [a[c * 4 + k], a[piv * 4 + k]] = [a[piv * 4 + k], a[c * 4 + k]];
+        [inv[c * 4 + k], inv[piv * 4 + k]] = [inv[piv * 4 + k], inv[c * 4 + k]];
+      }
+    }
+    const d = a[c * 4 + c];
+    for (let k = 0; k < 4; k++) { a[c * 4 + k] /= d; inv[c * 4 + k] /= d; }
+    for (let r = 0; r < 4; r++) {
+      if (r === c) continue;
+      const f = a[r * 4 + c];
+      if (f === 0) continue;
+      for (let k = 0; k < 4; k++) {
+        a[r * 4 + k] -= f * a[c * 4 + k];
+        inv[r * 4 + k] -= f * inv[c * 4 + k];
+      }
+    }
+  }
+  for (let i = 0; i < 16; i++) m[i] = inv[i];
+}
+
+/**
+ * `VecAngleBetween` — `FUN_00401D70`. The angle between two vectors in BAMS,
+ * `(s16)trunc(atan2(sqrt(|a|^2 |b|^2 - dot^2), dot) * 65536/2pi)`
+ * (`0x00401DCE FXCH; FPATAN; FMUL [0x004C4378]`).
+ */
+export function VecAngleBetween(ax: number, ay: number, az: number,
+                                bx: number, by: number, bz: number): number {
+  const dot = az * bz + ay * by + ax * bx;
+  const s = Math.sqrt((bz * bz + by * by + bx * bx)
+                      * (az * az + ay * ay + ax * ax) - dot * dot);
+  return FtolS16(Math.atan2(s, dot) * RADIANS_TO_BAMS);
+}

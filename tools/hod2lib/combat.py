@@ -231,6 +231,14 @@ BODY_CREATURE_SLOTS: dict[int, tuple[int, ...]] = {
 #: one per hit, so every one of them can be on screen. Read out of `.rdata`:
 #: type 0 `0200 e719 e919`, type 1 `0300 530a 540a 570a`, type 2 `0100 9603`
 #: (the first short is the hit points). Type 1 is `dolam.bin`'s drum.
+#: Each carried-prop type's break effect: record +0x00 (the effect id) and
+#: +0x02 (its motion), which `CarriedPropCheckShot` (FUN_004423F0) copies when
+#: the last hit point goes. Type 2 deflects instead and has none.
+CARRIED_PROP_BREAK: dict[int, tuple[int, int]] = {
+    0: (0x04, 0x1DA),
+    1: (0x12, 0x1CF),
+}
+
 CARRIED_PROP_SLOTS: dict[int, tuple[int, ...]] = {
     0: (0x19E7, 0x19E9),
     1: (0x0A53, 0x0A54, 0x0A57),

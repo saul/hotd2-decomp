@@ -227,6 +227,19 @@ export const BODY_CREATURE_SLOTS: Record<number, readonly number[]> = {
  * (the first short is the hit points). Type 1 is `dolam.bin`'s drum.
  * `CARRIED_PROP_TYPES` in `game/carried_prop.ts` is the port's copy.
  */
+/**
+ * Each carried-prop type's break effect: record `+0x00` (the effect id,
+ * `sub+0x44`) and `+0x02` (its motion, `sub+0x48`), which
+ * `CarriedPropCheckShot` (`FUN_004423F0`) copies when the last hit point goes
+ * and `CarriedPropBreakUpdate` (`FUN_00444EE0`) draws. Type 2 deflects instead
+ * of breaking and has none. Out of `.rdata`: `0400 da01` and `1200 cf01`.
+ */
+export const CARRIED_PROP_BREAK: Record<number, { effect: number;
+                                                 motion: number }> = {
+  0: { effect: 0x04, motion: 0x1da },
+  1: { effect: 0x12, motion: 0x1cf },
+};
+
 export const CARRIED_PROP_SLOTS: Record<number, readonly number[]> = {
   0: [0x19e7, 0x19e9],
   1: [0x0a53, 0x0a54, 0x0a57],

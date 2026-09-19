@@ -17259,5 +17259,157 @@ console.log("\nclass 0x41 type 48, the lamp:");
   EntityLightReleaseSlot(3);
 }
 
+console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the drop and the break:");
+{
+  const ROLL_TYPE: CharacterType = {
+    ...TYPE,
+    motions: {
+      ...TYPE.motions,
+      "271": motion(20, 0, 38), "274": motion(20, 0, 38),
+      "267": motion(30, 0, 58), "270": motion(20),
+    },
+  };
+  // Stage 2 block 28's script (78264), with the loops cut short.
+  const rollScript: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 1, behaviour: 1, release: 5, offset: [0, 3.5, 2],
+            spin: [512, 0, 0], launch: [0, 0.35, -1],
+            motion: 271, frame: 10, loops: 1, mode: -3 },
+    entries: [{ motion: 274, frame: 40, loops: 1, mode: -3 },
+              { motion: 267, frame: 0, loops: 1, mode: 24 }],
+  };
+  const retire: TargetScriptJson = {
+    state: ZombieState.RetireOffScreen,
+    head: { point: [0, 0, -60], motion: 270, frame: 0, loops: 1, mode: 0 },
+    entries: [],
+  };
+  // Effect 0x12, the drum's break: two halves on bones 1 and 2, one key.
+  const DRUM_EFFECT = {
+    nodes: [{ slot: 0, bone: 0, children: [1, 2] },
+            { slot: 0x0a56, bone: 1, children: [] },
+            { slot: 0x0a55, bone: 2, children: [] }],
+    interp: 0, motion: 0x1cf, play_length: 30, frames: 1, bones: 2,
+    t: [0, 1, 0, 0, -1, 0], r: [0, 0, 0, 0, 0, 0], cues: [],
+  };
+  const identity = MatIdentity();
+  const HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+    viewSpaceOf: () => false,
+  };
+  const scene2 = (seed: number) => {
+    const rng = new Rng(seed);
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, types: { "1": ROLL_TYPE } } as unknown as CharactersJson);
+    T.breakables = { effects: { "18": DRUM_EFFECT } } as never;
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_player_state = [5, 5];
+    G.g_app_state = AppState.InPlay;
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    G.g_camera_fixed_eye_y = -20;
+    const z = spawnZombie(0x131b8, 1, "barrel roller", {
+      initialState: ZombieState.CarryProp,
+      attackState: ZombieState.RetireOffScreen,
+      script: { target: rollScript, attack: retire },
+    }, rng);
+    z.visible = true;
+    z.pos = vec3(0, 0, -100);
+    // Already facing the camera, as the carry's turn leaves it: its own +Z
+    // away from the eye, so the script's launch `-Z` rolls at the player.
+    z.yaw = 0x8000;
+    z.hp = 220;
+    return { rng, z, events: new Events() };
+  };
+  const drum = (): CarriedProp | undefined => G.g_carried_props[0];
+
+  // -- 1. the roll ---------------------------------------------------------
+  // On flat ground friction stops a barrel long before a hundred units -- the
+  // real one has stage 2's steps to fall down -- so this carrier stands inside
+  // the forty units where a grounded roll re-aims its arc at the lens.
+  {
+    const { rng, z, events } = scene2(31);
+    z.pos = vec3(0, 0, -36);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const lives = G.g_player_lives[0];
+    let released = -1, grounded = false, drawn = false, hit = -1;
+    for (let f = 0; f < 1200 && hit < 0; f++) {
+      GameUpdate(EYE, 1 / 60, HOST, rng, events);
+      const p = drum();
+      if (p?.routine === CarriedPropRoutine.RollAtCamera) {
+        if (released < 0) released = f;
+        grounded ||= sounds.includes(0x001916a9);
+        drawn ||= p.draw !== null;
+      }
+      if (p?.routine === CarriedPropRoutine.StuckToScreen) hit = f;
+    }
+    check("release 5 hands the drum to the roll, not to nothing",
+          released >= 0, `released ${released}`);
+    check("...which is drawn, lands and plays the ground sound",
+          drawn && grounded);
+    check("...and rolls on to the lens and costs a life",
+          hit > released && G.g_player_lives[0] === lives - 1,
+          `hit ${hit} lives ${G.g_player_lives[0]}`);
+  }
+
+  // -- 2. the carrier dies holding it -------------------------------------
+  {
+    const { rng, z, events } = scene2(33);
+    for (let f = 0; f < 5; f++) GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    const x0 = drum()?.shotPoint.z ?? NaN;
+    z.flags |= ActorFlag.Dead;
+    let moved = false, drawn = false;
+    for (let f = 0; f < 120; f++) {
+      GameUpdate(EYE, 1 / 60, HOST, rng, events);
+      const p = drum();
+      if (p?.routine === CarriedPropRoutine.FallFree) {
+        drawn ||= p.draw !== null;
+        moved ||= Math.abs(p.pos.z - x0) > 0.1;
+      }
+    }
+    check("a carrier killed with its drum drops it into the fall",
+          drum()?.routine === CarriedPropRoutine.FallFree,
+          `routine ${drum()?.routine}`);
+    // At rest its centre sits the record's `+0x0C` (5.0) above the ground.
+    check("...which is drawn, is pushed off, and comes to rest on the ground",
+          drawn && moved && Math.abs((drum()?.pos.y ?? 0) - (-20 + 5)) < 0.5,
+          `drawn ${drawn} moved ${moved} y ${drum()?.pos.y}`);
+  }
+
+  // -- 3. the break draws its effect -------------------------------------
+  {
+    const { rng, events } = scene2(35);
+    let broke = false, parts: number[] = [];
+    for (let f = 0; f < 1200 && !broke; f++) {
+      GameUpdate(EYE, 1 / 60, HOST, rng, events);
+      const p = drum();
+      if (p?.routine === CarriedPropRoutine.RollAtCamera && p.shootable
+          && !(p.flags & 8)) MarkCarriedPropShot(p, 0);
+      if (p?.routine === CarriedPropRoutine.Break) {
+        broke = true;
+        GameUpdate(EYE, 1 / 60, HOST, rng, events);
+        parts = (drum()?.parts ?? []).map((x) => x.slot);
+      }
+    }
+    check("a broken drum draws effect 0x12's two halves",
+          broke && parts.join(",") === `${0x0a56},${0x0a55}`,
+          `parts ${parts.map((x) => x.toString(16))}`);
+  }
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

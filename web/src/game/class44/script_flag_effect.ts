@@ -269,7 +269,7 @@ export function EffectSampleNode(def: EffectDefJson, nodeIndex: number,
   }
   const key = Math.trunc(cursor / 2);
   // The three arms of the engine's `next`, in its order. **Neither wrap arm is
-  // reachable here**: `ScriptFlagEffectUpdate` stops the cursor at
+  // reachable for class 0x44**: `ScriptFlagEffectUpdate` stops the cursor at
   // `play_length - 2`, so it never equals `play_length - 1`, and it only ever
   // counts up, so `cursor == 0` cannot follow a positive previous frame. Both
   // pass a *play* frame where a key index is wanted and the engine does not
@@ -312,6 +312,22 @@ function EffectSwingTwistArm(p: EffectNodePose, def: EffectDefJson,
   p.pitch = e.pitch;
   p.yaw = e.yaw;
   p.roll = e.roll;
+}
+
+/**
+ * `[port-only]` {@link EffectSampleNode} for a caller that wants the pose
+ * back rather than written into a record it owns — the carried props' break
+ * effect (`CarriedPropBreakUpdate`, `FUN_00444EE0`) poses through it.
+ * The engine has one routine, `EffectPoseNode` (`FUN_0040D9D0`), and one
+ * state block; the port has two owners. Null for a node the engine neither
+ * poses nor draws, and for an effect with no baked frames.
+ */
+export function EffectNodePoseAt(def: EffectDefJson, nodeIndex: number,
+                                 cursor: number, prev: number):
+    EffectNodePose | null {
+  if (!def.frames) return null;
+  const out: EffectNodePose = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 };
+  return EffectSampleNode(def, nodeIndex, cursor, prev, out) ? out : null;
 }
 
 /** Key *k*, bone *b*, straight out of the baked arrays. */

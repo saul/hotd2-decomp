@@ -13,7 +13,7 @@
  * They are draw routines that also keep state -- the RELOAD prompt's timer,
  * the readout's slide-in counter, the "RELOAD!" voice -- so they are the
  * engine's and live here. What they draw goes through {@link DrawScreenSprite}
- * into `G.g_screen_sprites`, and `hud/` puts those on the screen; it decides
+ * into `G.g_screen_sprite_draws`, and `hud/` puts those on the screen; it decides
  * nothing.
  *
  * ## The screen they draw on
@@ -40,25 +40,7 @@ import type { Events } from "../core/events";
 import { GameMode } from "./game_mode";
 import { G } from "./globals";
 import { HudSprite, LAMP_CELS, ORIGINAL_AMMO_HUD_ROWS } from "./hud_sprites";
-
-/**
- * One `DrawScreenSprite` call, as the HUD layer draws it.
- *
- * `[port-only]` as a record: the engine turns the call straight into a quad.
- * The fields are the call's own arguments.
- */
-export interface ScreenSprite {
-  /** The sprite id: `g_screen_sprite_bank` / `g_screen_sprite_tex_slot`. */
-  id: number;
-  /** Top-left corner, 640x480, y down. */
-  x: number;
-  y: number;
-  /** z and rhw; 1.0 for most, 0.98 for digits over a sprite. */
-  depth: number;
-  /** Multiplies the texture's width and height. */
-  sx: number;
-  sy: number;
-}
+import { DrawScreenSprite } from "./screen_sprite";
 
 /** `ETC\vo_RELOAD_16.wav` -- the dry trigger's voice. */
 export const RELOAD_VOICE = 0x000115a9;
@@ -67,16 +49,6 @@ export const SHOOT_VOICE = 0x000215a9;
 
 /** Frames before the RELOAD prompt's second line, and the voice change. */
 export const RELOAD_PROMPT_SECOND_LINE = 120;
-
-/**
- * `DrawScreenSprite` — `FUN_0041C6D0`. Recorded rather than drawn; see
- * `G.g_screen_sprites`. The rotation and flag arguments are 0 at every call
- * this file makes, and are not carried.
- */
-export function DrawScreenSprite(id: number, x: number, y: number,
-                                 depth = 1, sx = 1, sy = 1): void {
-  G.g_screen_sprites.push({ id, x, y, depth, sx, sy });
-}
 
 /**
  * The magazine readout, at scale `s` -- one arm of

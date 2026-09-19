@@ -605,7 +605,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
  * the player tasks are what draw them.
  */
 export function PlayerTasksRun(f: PlayerFrame): void {
-  G.g_screen_sprites = [];
+  G.g_screen_sprite_draws = [];
   const offscreen = [false, false];
   for (let p = 0; p < 2; p++) {
     const r = FirstDueShotRequest(p);
@@ -626,7 +626,7 @@ export function PlayerTasksRun(f: PlayerFrame): void {
  * The engine draws the readouts every frame (`HudDrawAmmoAndReloadPrompt`,
  * `HudDrawLives`), so any picture of it has them. The port can build a world
  * without running a frame -- a seek replays the script and stops -- and would
- * then show the reset's empty `G.g_screen_sprites`: a seek into a fight,
+ * then show the reset's empty `G.g_screen_sprite_draws`: a seek into a fight,
  * paused, had no bullets and no lives on it.
  *
  * So this runs the next frame's player turn, {@link PlayerTasksRun}, and
@@ -647,9 +647,9 @@ export function PlayerTasksDrawWithoutAFrame(): void {
   const live = { ...G };
   RestoreGameGlobals(clonePlain(G));
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(0) });
-  const sprites = G.g_screen_sprites;
+  const sprites = G.g_screen_sprite_draws;
   RestoreGameGlobals(live);
-  G.g_screen_sprites = sprites;
+  G.g_screen_sprite_draws = sprites;
 }
 
 /**

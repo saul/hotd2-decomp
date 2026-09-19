@@ -30,7 +30,7 @@ import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
-import type { ScreenSprite } from "./hud_readout";
+import type { ScreenSprite } from "./screen_sprite";
 import type { ScreenSpriteAnim } from "./game_over";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
@@ -472,7 +472,8 @@ export const G = {
    */
   g_original_fire_latches: [[0, 0, 0, 0], [0, 0, 0, 0]] as number[][],
   /**
-   * The screen sprites this frame's player tasks drew, in draw order.
+   * The screen sprites this frame drew, in draw order -- every
+   * `DrawScreenSprite` call, whoever made it. See `game/screen_sprite.ts`.
    *
    * `[port-only]` as a list; what fills it is the engine's.
    * `DrawScreenSprite` (`FUN_0041C6D0`) goes to `DrawSpriteQuadCommand`
@@ -480,9 +481,11 @@ export const G = {
    * HUD layer, which may not read the engine -- so the calls are recorded
    * here, cleared at the head of every frame's player walk, and `app/` hands
    * the list across. Plain data, so a snapshot carries exactly what the frame
-   * it was taken on drew. See `game/hud_readout.ts`.
+   * it was taken on drew. **Not** the exe's `g_screen_sprites` (0x007DDAA8),
+   * which is `ScreenSpriteRegister`'s 64-slot array and a different thing;
+   * this field was named that until the two were noticed side by side.
    */
-  g_screen_sprites: [] as ScreenSprite[],
+  g_screen_sprite_draws: [] as ScreenSprite[],
   /**
    * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
    * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
@@ -1836,7 +1839,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_shot_effect_cursor = [0, 0];
   G.g_shot_hit_something = [0, 0];
   G.g_original_weapon_kind = [0, 0];
-  G.g_screen_sprites = [];
+  G.g_screen_sprite_draws = [];
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
@@ -1922,7 +1925,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // engine draws: it runs before the scene's script has set the shutter, so
   // what it drew would be the HUD of a shutter state nobody has chosen yet --
   // on screen for as long as a freshly loaded stage sits paused.
-  G.g_screen_sprites = [];
+  G.g_screen_sprite_draws = [];
 }
 
 /**

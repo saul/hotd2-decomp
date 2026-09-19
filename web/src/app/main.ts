@@ -547,7 +547,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
                                     (ctx) => this.hudLayer.draw(ctx.walker,
-                                                            G.g_screen_sprites)));
+                                                            G.g_screen_sprite_draws)));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore

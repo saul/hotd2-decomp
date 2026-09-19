@@ -18518,9 +18518,9 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   const step = () => GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   const shoot = () => { QueueShotRequest(0, RAY); step(); };
   const reload = () => { QueueOffscreenPull(0); step(); };
-  const sprites = (id: number) => G.g_screen_sprites.filter((s) => s.id === id);
+  const sprites = (id: number) => G.g_screen_sprite_draws.filter((s) => s.id === id);
   const bullets = () => sprites(HudSprite.Bullet);
-  const lamps = () => G.g_screen_sprites.filter(
+  const lamps = () => G.g_screen_sprite_draws.filter(
     (s) => s.id >= HudSprite.Lamp1P && s.id < HudSprite.Lamp1P + 7);
 
   step();
@@ -18653,7 +18653,7 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("...its prompt's second line is 'PRESS THE RELOAD BUTTON' at (16, 325)",
         sprites(HudSprite.PressReloadButton).length === 1
         || G.g_player_reload_prompt_timer[0] % 60 > 45,
-        JSON.stringify(G.g_screen_sprites.map((s) => s.id.toString(16))));
+        JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
   G.g_pad_state = INPUT_BINDINGS[0][InputBindingSet.Controller].reload & 0x2;
   step();
   G.g_pad_state = 0;
@@ -18702,12 +18702,12 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   reload();
   check("Original Mode reloads to the magazine size",
         G.g_player_ammo[0] === 9, `${G.g_player_ammo[0]}`);
-  const digits = G.g_screen_sprites.filter(
+  const digits = G.g_screen_sprite_draws.filter(
     (s) => s.id >= HudSprite.Digit0 && s.id <= HudSprite.Digit0 + 9);
   check("...and draws seven or more as one bullet, 'x' and two digits",
         bullets().length === 1 && sprites(HudSprite.Times).length === 1
         && digits.map((d) => d.id - HudSprite.Digit0).join("") === "09",
-        JSON.stringify(G.g_screen_sprites.map((s) => s.id.toString(16))));
+        JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
   G.g_player_magazine_size[0] = -1;
   G.g_player_ammo[0] = -1;
   shoot();
@@ -18736,20 +18736,20 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   G.g_GameMode = GameMode.Arcade;
 
   check("every sprite the readouts drew is one the exporter ships",
-        G.g_screen_sprites.every((s) => HUD_READOUT_SPRITES.includes(s.id)));
+        G.g_screen_sprite_draws.every((s) => HUD_READOUT_SPRITES.includes(s.id)));
   check("the frame's sprites are plain data a snapshot can copy",
-        JSON.stringify(JSON.parse(JSON.stringify(G.g_screen_sprites)))
-        === JSON.stringify(G.g_screen_sprites));
+        JSON.stringify(JSON.parse(JSON.stringify(G.g_screen_sprite_draws)))
+        === JSON.stringify(G.g_screen_sprite_draws));
 
   // A seek builds a world and runs no frame: the readouts are redrawn from
   // it, and nothing the two routines keep moves.
   G.g_player_ammo[0] = 0;
   G.g_player_magazine_empty[0] = 1;
   G.g_player_reload_prompt_timer[0] = 130;
-  const drawn = JSON.stringify(G.g_screen_sprites);
-  G.g_screen_sprites = [];
+  const drawn = JSON.stringify(G.g_screen_sprite_draws);
+  G.g_screen_sprite_draws = [];
   const before = heard.length;
-  const world = () => JSON.stringify({ ...G, g_screen_sprites: null });
+  const world = () => JSON.stringify({ ...G, g_screen_sprite_draws: null });
   const was = world();
   const pool = G.g_object_list;
   PlayerTasksDrawWithoutAFrame();
@@ -18758,20 +18758,20 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         sprites(HudSprite.Reload).length === 1
         && sprites(HudSprite.ShootOutside).length === 1
         && bullets().length === 0 && lamps().length > 0,
-        JSON.stringify(G.g_screen_sprites.map((s) => s.id.toString(16))));
+        JSON.stringify(G.g_screen_sprite_draws.map((s) => s.id.toString(16))));
   check("...and moves nothing else in G, and plays nothing",
         world() === was && G.g_object_list === pool
         && heard.length === before,
         `${G.g_player_reload_prompt_timer[0]} ${heard.length - before}`);
-  G.g_screen_sprites = JSON.parse(drawn);
+  G.g_screen_sprite_draws = JSON.parse(drawn);
   G.g_player_ammo[0] = ARCADE_MAGAZINE;
   G.g_player_magazine_empty[0] = 0;
 
   // Out of lives: no readouts at all.
   G.g_player_lives[0] = 0;
   step();
-  check("a player out of lives draws no readout", G.g_screen_sprites.length === 0,
-        `${G.g_screen_sprites.length}`);
+  check("a player out of lives draws no readout", G.g_screen_sprite_draws.length === 0,
+        `${G.g_screen_sprite_draws.length}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

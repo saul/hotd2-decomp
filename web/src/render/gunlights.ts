@@ -20,7 +20,7 @@
  * clamp(ambient + sum(spot_i * 2 * N.L), 0, 1) * texel        (gamma space)
  * ```
  *
- * `ambient` is `g_scene_light_ambient` (evt `0x16`), `2` is `1 /
+ * `ambient` is `g_light_array_ambient` (evt `0x16`), `2` is `1 /
  * attenuation0`, and the spot factor is 1 inside `theta = pi/8` and 0 outside.
  * That is what the `makeGunLitMaterial` shader computes, per pixel, and it
  * converts the clamped factor to linear before the multiply, which is the
@@ -338,7 +338,7 @@ export class GunLights implements System<RenderContext> {
       sp.distance = 0;
       sp.decay = 0;
     }
-    const [r, g, b] = G.g_scene_light_ambient;
+    const [r, g, b] = G.g_light_array_ambient;
     gunAmbient.value.setRGB(r, g, b);
 
     if (!any) {

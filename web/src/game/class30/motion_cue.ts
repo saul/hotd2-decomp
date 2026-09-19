@@ -34,8 +34,7 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
   // taking `obj.motion` instead would fade out of the walk the swing had
   // covered up, and the bite would still cut.
   if (obj.fadeFrom && obj.fade > 0) {
-    obj.fade = fade;
-    obj.fadeLen = fade;
+    ActorRestartFade(obj, fade);
   } else {
     ActorStartFade(obj, obj.motion, obj.playTicks, fade);
   }
@@ -126,8 +125,7 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
   ActorEndOneShot(obj, fade);
   if (obj.motion !== motion) {
     if (obj.fadeFrom && obj.fade > 0) {
-      obj.fade = fade;
-      obj.fadeLen = fade;
+      ActorRestartFade(obj, fade);
     } else {
       ActorStartFade(obj, obj.motion, obj.playTicks, fade);
     }
@@ -180,6 +178,11 @@ export function SetCurrentActorMotionBlended(obj: Actor, motion: number,
  * The engine holds two motions on one track and fades between them;
  * `MotionCrossFadeTo` (`FUN_00411B70`) is the same operation for the stumble,
  * which this port already does. This is it for an ordinary motion change.
+ *
+ * `fromTicks` is where the outgoing clip **stops**: the engine snapshots the
+ * last drawn pose into slot A (`MotionLoadPoseSlot`, `FUN_00411C20`, mode
+ * 0xC) and nothing advances it, so `ActorAdvanceMotion` leaves
+ * `fadeFrom.ticks` alone for the whole fade.
  */
 export function ActorStartFade(obj: Actor, fromMotion: number,
                                fromTicks: number, frames: number): void {
@@ -189,6 +192,31 @@ export function ActorStartFade(obj: Actor, fromMotion: number,
     return;
   }
   obj.fadeFrom = { motion: fromMotion, ticks: fromTicks };
+  ActorRestartFade(obj, frames);
+}
+
+/**
+ * Set the fade counters, as `ActorSetMotionBlended` (`FUN_004119A0`) does.
+ *
+ * `[port-only]` as a function: the engine writes `track+0x30 = fade + 1` and
+ * `track+0x28 = counter - 1` inline, and `SkeletonResolveTrackFrames`
+ * (`FUN_00410BD0`) weighs the incoming pose by `(counter - track+0x28) /
+ * track+0x30` -- `1 / (fade + 1)` on the frame of the call, one on the fade's
+ * last held frame, and on the frame after that `SkeletonAdvancePlayCursor`
+ * (`FUN_004111A0`) lets the clip move again.
+ *
+ * So the length is `fade + 1` and the count starts at `fade`, not at the
+ * length: the port advances the clocks **before** the state runs, so the
+ * frame of the call is drawn with the counter as it is set here, and the
+ * weight the renderer takes, `1 - fade / fadeLen`, is `1 / (fade + 1)`.
+ * `ActorAdvanceMotion` counts {@link Actor.fade} down and holds the incoming
+ * clip until it goes below zero -- `fade + 1` frames on its start frame, as
+ * the engine holds it.
+ *
+ * The mid-fade restart keeps the snapshot it already has -- the pose the
+ * outgoing fade was dissolving from -- and only rearms the counter.
+ */
+function ActorRestartFade(obj: Actor, frames: number): void {
   obj.fade = frames;
-  obj.fadeLen = frames;
+  obj.fadeLen = frames + 1;
 }

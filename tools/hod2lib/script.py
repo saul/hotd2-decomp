@@ -421,7 +421,7 @@ class Program:
             d["enabled"] = bool(arg0)
         elif ins.opcode == 0x16:                      # set_ambient_light_rgb
             # EvtOpSetAmbientLightRgb16 resolves three pointers and copies the
-            # float behind each into g_scene_light_ambient r, g, b -- the
+            # float behind each into g_light_array_ambient r, g, b -- the
             # ambient the scene-light-array path draws with.
             d["rgb"] = [self._deref_f32(w) for w in ins.raw[:3]]
         elif ins.opcode == 0x35:

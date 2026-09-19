@@ -342,9 +342,12 @@ mechanism the engine does not have, which is now gone.
 **And two entrances that place the actor.** A spawn's `y` is where its entrance
 *starts*, not where it stands:
 
-* `ZombieStateEmerge` (27, eighteen spawns) holds a submerged pose with the
-  clock frozen and root motion off, waits the descriptor's delay, then plays
-  the clip the descriptor names — 178 for the water ones, 183 for the ground —
+* `ZombieStateEmerge` (27, eighteen spawns) cuts to the submerged clip 0xB9
+  and lets it play -- this said "with the clock frozen and root motion off",
+  and nothing in the routine writes the freeze bit -- waits the descriptor's
+  delay (the first frame of it counted on the spawn frame, and a spawn whose
+  `tail+0x03` is 1 not drawn until it is over), then cuts to the clip the
+  descriptor names — 178 for the water ones, 183 for the ground —
   whose own translation lifts the actor out, throwing a splash at frames 22 and
   35. That is the missing "get out of the water" animation.
 * `ZombieStateDelayedLeap` (26, eleven spawns) waits, then rides an arc to a
@@ -487,6 +490,25 @@ it, and a block whose own wait is already satisfied is **skipped** — with
 `CivilianReapplyWaitCommand` re-applying the clip, target and cues the skipped
 block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
 frames and the two score paths.
+
+**A captor counts as gone only when it dies.** `CivilianPruneDeadChildren`
+tests the child's `obj+0x34` bit `0x4000000` and nothing else; the port also
+dropped a child that was merely missing from the pool, so a captor that left
+by `ActorDespawn` — which never raises the bit — released its civilian as
+though she had been rescued. Every ordinary exit (a kill,
+`ZombieRetireAndCredit`, the drag's flag-29 exit) raises the bit first, so the
+faithful test changes nothing in play that the engine does not also do.
+
+**A deep link no longer replays a finished rescue.** Stepping over a
+`wait_script_flag` in a replay raised the flag and left the civilian who raises
+it listed, so she was rebuilt at the landing address with a fresh script and
+ran her rescue again there. At `?stage=4&entry=4&block=12` that was stage 4's
+block-4 hostage `0x3578`: her captor saw flag 29 already up, died on the first
+frame, and her `SetRouteBranch 1` decided block 12's branch — `next[1]`, block
+14, whether or not the player saved block 12's own civilian. The replay now
+retires a class-0x10 spawn whose streams raise the flag it steps over
+(`Walker.retireFlagRaisers`), so the landing state is one the engine can be in:
+block 12 routes to 13 unless `0x63CC` is rescued, and to 14 when she is.
 
 **And they are on screen.** `CivilianInit` writes motion **660** before it runs
 a line of script, and without a `MOTION_RULES` entry for the class the exporter
@@ -761,6 +783,18 @@ port runs the state machine on the same relative position and publishes the
 composed world point for the renderer, which is the one thing a port with no
 matrix stack in `game/` has to add.
 
+**...and the boat the player rides is a floor.** Class 0x26 subtype 2
+(`game/class26/`) is an actor now, not only a rig: its first frame seats a
+collision blob of its own — `coli3.bin`'s foredeck, in the boat's own space —
+and the first pass of both collision queries tests every such object through
+the inverse of its world matrix. The zombie that leaps onto the bow at block 0
+step 4 lands on the deck instead of standing in the canal inside the hull. The
+arriving boat's riders were three faults deep: class 0x18 had no motion rule,
+so no rider was ever built; the player made character spawns before slot
+actors, so the civilian copied `g_civilian_carrier` before the boat had set it;
+and the carrier transform converted BAMS the wrong way. Spawns are now made in
+the script's order.
+
 **A room-clear gate waits for the camera as well as the counter, and how long
 it waits is the camera's business.** `wait_enemies_alive` and its two siblings
 need `g_camera_free`, and `EvtActionFinishSequence21` installs one of two
@@ -862,6 +896,8 @@ each one.
 | The blood sat inside the limb, at its middle | Half right and half not. `DrawBloodSpray` (`FUN_00407230`) does put it at the hit **bone**, and re-reads the bone every one of its twenty-five frames so it tracks — but at the sphere's centre **plus its radius on camera-space z**, which is the near face, the side the shot came from. The port had the centre and left it there | `render/effects.ts` works in camera space, which is what the routine does |
 | A miss had no material | `SpawnWorldImpact` (`FUN_00405260`) takes the sprite kind *and* the sound from the collision triangle, and `render/shooting.ts` had no collision to trace, so it raycast the drawn geometry and called every surface "other". The bundle carries the game's own `coli/` sets now | `ShotHitWorld` in `game/combat/shot.ts`, tracing far-end-first the way `FUN_00404B80` does |
 | The gun made no noise | `PlayerFireAndReloadUpdate` (`FUN_00414940`) ends a shot with `BuildShotRay`, `PlayerShotEffectSpawn` and `PlaySoundId(g_gunshot_sound_ids[player])`, and `ResolveShotRequest` had the first two. Nothing else in the shot path was silent — the flesh impacts, the ricochets, the surfaces and the breakables all played, which is why this reads as "no sound" rather than as one missing file | the emit on the line after the muzzle flash in `game/combat/shot.ts`; `npm run audio` measures the peak sample the page decodes |
+| A full-screen white flash on every shot (NEW-BUGS 15: "triggering for epilepsy"), mean frame luminance 58 → 142 for one frame | Not the light gun, and not the muzzle flash (that toggle is off by default). It was the **tracer**: `PlayerShotEffectSpawn` puts the round at the muzzle point, one unit in front of the eye, and the port drew it there on the spawn frame, where its scale-1 quad fills the view. `PlayerShotEffectsThink` (`FUN_00416B00`) moves a tracer *before* it draws it, so the engine never draws one at the muzzle whichever order its two tasks run in. The port's spawn lands after the frame's tick, and a declared one-frame divergence said so — it was the flash | the spawn makes the first pass's move itself (`TracerAdvance` in `game/effects/shot_effects.ts`), so every tracer is first drawn one move out, as in the exe, and the divergence is gone; `test:port` asserts the first drawn position, and a canvas-luminance probe reads no spike across three shots |
+| A three-second dead pause at the top of every stage (NEW-BUGS 13) | Block 0 step 1 of every stage waits on `wait_script_flag 248`, and flag 248 is raised by the chapter card, class 0x60, after its 180-frame dwell. The player draws no card, so the dwell was a frozen scene | **by the user's decision the port skips title sequences**: `ChapterCardSkipRequested` hands the card's skip test the pad's unconditional skip bit (`0x20000`), so the engine's own skip arm cuts it on its first update — installer, latch, flag and kill all still run. Declared as a divergence in `game/class60/`; `test:port` asserts one update to the flag and the gate open behind it |
 | `breakables: none placed` where the port had props | Neither half of that was a port bug. `render/breakables.ts` reads `G.g_breakable_props`, and `spawn_placed` does not fill it: it puts a class-0x41 **placer** in the object pool, and `PropContainerPlacerUpdate` (`FUN_00461CD0`) is the class handler that calls the constructor and then `ActorKill`s itself. A paused transport hands `world.update` a `STOPPED_TICK`, so `GameUpdate` never runs and a seek that arrived correctly shows nothing. The address in the report was also before the placer -- stage 3 block 0 step 3 places its props at ops 10 and 11, behind `wait_enemies_alive <= 0` at op 8, so there is a room to clear first -- and the harness that contradicted the page had never seeked at all (`L44`) | the describe line now names the placers waiting for a frame; `npm run props43` pins the two addresses headlessly and `npm run props-panel` reads the panel itself in Chrome |
 
 **Where the effects live, and why it is not `render/`.** All of it is engine
@@ -2812,6 +2848,44 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+## A cross-fade dissolves from a still, and holds the new clip
+
+Emerging zombies in stage 2's block 16 finished their climb out of the water,
+sank back into it for a few frames, and stood up again. Nothing in the game
+state moved -- `y` was the same on every frame of the hand-over -- and the
+cause was the one thing every blended clip change in the port shared.
+
+`ActorSetMotionBlended` (`FUN_004119A0`) does not keep the outgoing clip
+running. `MotionStartOnTrack` snapshots the pose **last drawn** into slot A
+(`MotionLoadPoseSlot`, `FUN_00411C20`, mode 0xC), loads the incoming clip's
+**start frame** into slot B, and raises `track+0x37` bit 0. While that bit is
+up `SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not recompute the cursor,
+`SkeletonPoseRootFrame` draws A lerped to B by `(counter - track+0x28) /
+track+0x30` (`fade + 1`), and `SkeletonApplyRootMotion` resets its baseline
+each frame so nothing walks the actor. When the counter passes the fade the
+cursor is rewritten to `start + 1` and the clip plays on. `[proved]`
+
+The port ran the outgoing clip's clock through the fade and started the new
+clip moving at once. For a looping clip the difference is a few frames of
+timing; for a one-shot on its last frame it is the whole bug, because the
+poser's `% frames` wrapped the still-running clock back to the clip's **first**
+pose -- and frame 0 of an emerge clip is the crouch under the surface. Now:
+
+* the outgoing clip is a still -- `fadeFrom.ticks` is not advanced;
+* the incoming clip is held on its start frame for `fade + 1` frames, with no
+  root motion, and moves on from the frame after it;
+* the weight runs `1/(fade+1) .. 1`, as the engine's does.
+
+**That is a timing change for every blended clip in the game**, and it is the
+engine's: a state that waits on a cursor frame of a faded-in clip now waits the
+fade out first. Two port tests had bounds tuned to the old clock -- the
+stationary thrower's release inside 12 frames and a death clip's 58 ticks --
+and both now carry the fade in front, with the routine cited. `ZombieStateEmerge`
+itself also moved closer: both its clip changes are `ActorSetMotion` cuts, its
+sub 0 falls into sub 1 on the same frame, it never froze the pose, and a
+`tail+0x03 == 1` spawn is undrawn (`ActorSetPartVisibility` 0, the port's
+`alpha`) until its clip starts.
+
 ## What a bone draws, which is not its draw slot
 
 **Done for nine of sixteen arms**, and the reason a shot `char_adv02` had a
@@ -3512,6 +3586,73 @@ read as the gap closing instead of as a missing prop, which is
 `verify_prop_slots.py`'s own circularity one layer in and was caught here by
 the mutation test twice.
 
+### Three stage-2 set pieces that drew at the wrong origin or never moved
+
+Three reports, one pattern: a routine the port had read for **what** it draws
+but not for **where** or **when**. All three are now transcribed whole.
+
+**The door the block-5 civilian is behind — class 0x41 type 35.**
+`PropUpdateType35` (`FUN_0046B320`) is placed at the **origin** (stage 2 block 3
+step 4 op 5, evt `0x2504`) and never reads its own position: both leaves are
+drawn at literal world coordinates, `0x1812` at `(-620.55, 66.294, -997.98)`
+and `0x1813` at `(-620.55, 66.294, -980.82)` (`komono_uemiti.bin[3]`/`[4]`).
+The renderer drew `0x1812` at `p.x/p.y/p.z` — the origin — so the doorway the
+two captors come out of was empty grey. The second leaf is past the
+`MatrixStackPop` Ghidra ends the body on (`L37`). While script flag `0x68` is
+up and `0x69` down the door **rattles**: a knock (`DAMAGE3_22.WAV`) on counted
+frame 20 and again on 50, each a seven-frame swing of `ftol(sin(phase) *
+1536)` BAMS, the leaves mirrored. Stage 2 block 5 step 2 raises `0x68` one
+frame before it spawns the civilian and `0x69` at camera path 5 frame 365.
+`game/class41/type35.ts`.
+
+**The ladder in the clock-tower cut scene — class 0x41 type 13.**
+`PropUpdateType13` (`FUN_00467F50`), one spawn (block 21 step 4, evt
+`0xEC94`), placed at `(-925, 180, -1297)`. Two draws: `AssetDrawSlot(obj+0x28C)`
+with **no matrix of its own** — `komono_tokeidai.bin[1]`/`[2]` are modelled in
+world space, a panel beside where the cut scene's two player bodies stand,
+blinking every 40 scene ticks until the first step change — and `0x1A43`
+(`komono_tokeidai.bin[0]`, 191 units tall) at `Translate(x, y, z + judder)`.
+Flag `0x6D`, raised by block 21 step 7 op 4, drops it: `0.02` of gravity a
+frame from rest, 186 units in 136 frames to `y = -6.0`, then a `0.4` judder
+across Z decaying by `-0.925` for 27 frames. The camera of path 34 is aimed at
+exactly its X and Z. The port had it as a drawn-only generic prop: `0x1A4A`
+at `p.x/p.y/p.z` (world space added to world space, a kilometre off) and no
+`0x1A43` at all. It is its own `PropFamily.Type13` because it **inlines** its
+lifetime — the step count before the scene-1 sweep, `ActorKill` rather than
+`ActorDespawn` — and registers no shot sphere. `game/class41/type13.ts`.
+The skip arm (flag `0x6D` with `g_cutscene_skipping` snaps it to the floor) is
+not transcribed: `g_cutscene_skipping` has no port, the gap classes 0x21 and
+0x25 already name.
+
+**The boat that runs into the wall — class 0x13 selector 0.**
+`CarrierPropRoutine0` (`FUN_00440210`), stage 2 block 16 step 11 (evt
+`0xA3E8`), slot `0x1A36` (`komono_boat.bin[1]`) at scale 2.5. It rides object
+path `0x151` (`op_st2` 9) from the camera's frame; at ride frame `0x276` (630)
+`SIBUKI2_16.WAV` plays and a 94-frame `eff_dokan.bin` strip starts at a fixed
+point by the wall, and it coasts on to `g_carrier_routine0_ride_end` (710).
+Two things were missing, and either alone hid the boat: the routine (the class
+dispatched selector 1 only, so the boat stood at its descriptor for ever) and
+**its model** — `actorSlotEntry` carried no class-0x13 slot at all, and stage
+3's boat had geometry only because `0x1A37` is also class 0x25's variant-3
+model. `scriptedPropDrawSlots` now carries each class-0x13 descriptor's own
+slot **when the port runs its behaviour** — `NoOpStub` statics, and carriers
+on selectors in `CARRIER_SELECTORS_PORTED` — which also brings stage 2's five
+static class-0x13 props (`0x1237`, `0x1383`) into its bundles. Stage 4's seven
+carriers take selectors 2..9 and stay out: drawn, they would stand at their
+descriptors while the game drives them. **Ghidra's pseudocode would have frozen
+the boat**: it ends the ride state at the `MatrixStackPop` and shows no
+`frame++`; the increment is at `0x00440323` and the whole tail past it.
+`game/class13/routine0.ts`.
+
+Not ported, both draw-side, and neither slot range is in the bundle: selector
+0's wake (`char_adv06.bin[0..21]`, the same strip selector 1 draws) and the
+splash strip. Their cursors are stepped in `game/`. The **zombie in the boat**
+is the civilian's class-0x18 child (evt `0xA174`), and no class-0x18 spawn in
+any stage becomes a character: class 0x18 has no `MOTION_RULES` row, so it
+exports as a marker. That is the stage-3 boat work's fix and is not repeated
+here; without it the civilian's captor never exists and the civilian is
+"rescued" on its first frame.
+
 ### The gun lights are real spotlights now, placed by the port
 
 Bug 14: "the flashlight … is a bit naff". It was two `SpotLight`s in
@@ -3522,7 +3663,7 @@ default view there was no torch at all.
 
 What the engine does, read for it (`docs/formats/evt.md` rows 14–16,
 `game/scene_lights.ts`): evt `0x14` raises `g_scene_lighting`, `0x15`
-`g_entity_spotlights_on`, `0x16` sets `g_scene_light_ambient`. Each frame
+`g_entity_spotlights_on`, `0x16` sets `g_light_array_ambient`. Each frame
 `SceneLightArrayUpdate` (`FUN_00480970`) runs `BuildEntitySpotlightArray`
 (`FUN_00480AC0`), which puts one D3D spot per player at the crosshair's
 eye-space point at depth 1, aimed along eye→point, `attenuation0 = 0.5`
@@ -3546,8 +3687,9 @@ stage 4's 35 flagged zombies are lit (they could not be before);
 Three `[diverges]`, all presentation, all the user's request: shadows (D3D7 had
 none), the lamp moved 2.5 units right and down of the engine's point so its
 shadows can be seen at all (the engine's lamp is on the eye ray), and a 0.3
-penumbra in place of per-vertex smearing. Cost: about +0.2–0.4 ms a frame in
-stage 4 and +1 ms in stage 2's mansion while a torch is live, nothing
+penumbra in place of per-vertex smearing. Cost, GPU-synced frame time on an
+M1 Pro headless: +0.2–0.6 ms a frame in stage 4 and +0.5 ms in stage 2's
+mansion while a torch is live (the shadow pass is most of it), nothing
 elsewhere.
 
 ## Every opcode, and what the player does with it
@@ -3596,7 +3738,7 @@ missed. Meanings and confidence marks live in
 | `13` | `set_scene_lighting_override` | light | *tracked* | lighting override; values decoded, not applied to the render |
 | `14` | `set_scene_lighting` | light | **done** | `g_scene_lighting`: gates the gun lights, and picks the scene-light-array draw for `draw_mode` 1 regions and `obj+0x38` bit 3 actors |
 | `15` | `enable_entity_spotlights` | light | **done** | **the two players' gun lights** — not one per enemy; the array is two entries wide |
-| `16` | `set_ambient_light_rgb` | light | **done** | `g_scene_light_ambient` r, g, b — the scene-light-array path's ambient; the exporter resolves the three pointers into `rgb` |
+| `16` | `set_ambient_light_rgb` | light | **done** | `g_light_array_ambient` r, g, b — the scene-light-array path's ambient; the exporter resolves the three pointers into `rgb` |
 | `17` | `slerp_light0_direction` | light | ~approx~ | the slerp target is taken immediately rather than stepped |
 | `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
 | `19` | `set_light1_direction` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |

@@ -136,7 +136,7 @@ export interface OpJson {
   enabled?: boolean;
   /**
    * evt `0x16` `set_ambient_light_rgb`: the three floats its pointers name,
-   * which `EvtOpSetAmbientLightRgb16` copies into `g_scene_light_ambient`.
+   * which `EvtOpSetAmbientLightRgb16` copies into `g_light_array_ambient`.
    * Null for an operand that is not a pointer into the evt file.
    */
   rgb?: (number | null)[];

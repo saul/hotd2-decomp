@@ -475,7 +475,7 @@ export class Program {
       d.enabled = Boolean(arg0);
     } else if (o === 0x16) {                      // set_ambient_light_rgb
       // `EvtOpSetAmbientLightRgb16` resolves three pointers and copies the
-      // float behind each into `g_scene_light_ambient` r, g, b -- the ambient
+      // float behind each into `g_light_array_ambient` r, g, b -- the ambient
       // the scene-light-array path draws with. The values live in the evt
       // file, so they are read here or not at all.
       d.rgb = ins.raw.slice(0, 3).map((w) => this.derefF32(w));

@@ -32,6 +32,7 @@ import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
 import { OPS as OPS_TABLE } from "./ops";
 import { WAIT_RULES, passedBecause, type WaitContext } from "./waits";
+import { CivilianRaisesScriptFlag } from "./waits/flag";
 import {
   ChannelBlock, type ChannelTween, type FogState, type LightState,
 } from "./state/channels";
@@ -549,12 +550,12 @@ export class Walker {
   /** evt 0x14: `g_scene_lighting`, the scene light array, which gates 0x15. */
   get sceneLighting(): boolean { return G.g_scene_lighting !== 0; }
   set sceneLighting(v: boolean) { G.g_scene_lighting = v ? 1 : 0; }
-  /** evt 0x16: `g_scene_light_ambient` r, g, b. */
+  /** evt 0x16: `g_light_array_ambient` r, g, b. */
   get sceneAmbient(): [number, number, number] {
-    return [...G.g_scene_light_ambient];
+    return [...G.g_light_array_ambient];
   }
   set sceneAmbient(v: [number, number, number]) {
-    G.g_scene_light_ambient = [v[0], v[1], v[2]];
+    G.g_light_array_ambient = [v[0], v[1], v[2]];
   }
   /**
    * `g_script_branch_var` — `0x009C88A4`. Which route a branch takes.
@@ -1079,9 +1080,40 @@ export class Walker {
     // and the classes that read the same array — 0x24's removal cue, 0x30's
     // states 20 and 31, 0x31's cue conditions, 0x52's despawn — see a world
     // the address does not describe.
-    if (rule?.raisesScriptFlag) G.g_script_flags[this.wait.op.arg ?? 0] = 1;
+    if (rule?.raisesScriptFlag) {
+      const flag = this.wait.op.arg ?? 0;
+      G.g_script_flags[flag] = 1;
+      this.retireFlagRaisers(flag);
+    }
     this.wait = null;
     this.opIndex++;
+  }
+
+  /**
+   * A `wait_script_flag`'s postcondition, applied to **who raises the flag**.
+   *
+   * Raising the byte is half of it. In play the byte comes up because a
+   * civilian's stream reached op 0x1C (`CivilianRunScript`, `FUN_0048B9E0`),
+   * so past the gate she has already run everything in front of that command
+   * — and in every shipped stream that includes the rescue block, whose
+   * `SetRouteBranch` writes `g_script_branch_var`. A replay that raised the
+   * byte and left her spawn marker standing rebuilt her at the landing address
+   * with a fresh script: stage 4's block-4 hostage `0x3578` came back at
+   * block 12, her captor saw flag 29 already up and died on the first frame,
+   * and her stream ran `SetRouteBranch 1` in block 12's last step — so a deep
+   * link to that block took `next[1]` whatever the player did there. The
+   * engine cannot be in that state: her write was made, and cleared, eleven
+   * blocks earlier.
+   *
+   * So a class-0x10 spawn whose streams raise the flag being stepped over is
+   * retired with the gate, the way {@link retireGated} retires the enemies an
+   * enemy gate counts. Replay only, for the same reason.
+   */
+  private retireFlagRaisers(flag: number): void {
+    if (!this.replaying) return;
+    const civ = this.script.civilians;
+    this.spawns = this.spawns.filter((s) => s.class !== SpawnClass.Civilian
+      || !CivilianRaisesScriptFlag(civ, s.at, flag));
   }
 
   /**

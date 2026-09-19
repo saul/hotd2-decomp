@@ -106,6 +106,17 @@ export enum PropFamily {
    * `class41/type43.ts`.
    */
   Type43 = 12,
+  /**
+   * `PropUpdateType13` (`FUN_00467F50`) — class 0x41 type 13, one spawn in
+   * stage 2: the part that drops out of the clock tower on script flag 0x6D.
+   *
+   * Its own family and not {@link Generic} for the reason
+   * {@link DrawOnlyType53} is: it inlines its own lifetime, with the
+   * step-change count **before** the scene-1 sweep and an `ActorKill` where
+   * the prologue has `ActorDespawn`, and it registers no shot sphere. See
+   * `class41/type13.ts`.
+   */
+  Type13 = 13,
 }
 
 /**
@@ -471,6 +482,16 @@ export interface BreakableProp {
    * **Check the family before reading either.**
    */
   cuePhase: PropCuePhase;   // +0x192
+  /**
+   * `obj+0x192` for the two generic routines that keep a small state machine
+   * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
+   * door rattle (`Type35Phase`).
+   *
+   * The fifth port field for that one engine word, and separate for the same
+   * reason {@link BreakableProp.cuePhase} is (`L3`): each routine's `1` means
+   * something different. **Check the family, and for `Generic` the type.**
+   */
+  routinePhase: number;     // +0x192
   /** Dead, and due to leave the pool. Not an exe field; the pool is a list. */
   dead: boolean;
 }
@@ -539,6 +560,7 @@ export function makeBreakableProp(id: number, group: number,
     subKind: 0,
     removeFlag: -1,
     cuePhase: PropCuePhase.Untouched,
+    routinePhase: 0,
     key0: -1, key1: -1, key2: -1, key3: -1,
     branchLatched: false,
     dead: false,

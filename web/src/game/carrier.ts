@@ -25,7 +25,8 @@
  * by the yaw first and the translation applied last.
  */
 import type { Actor } from "./actor";
-import { BAMS, type Vec3 } from "./vec";
+import { BAMS_TO_RAD } from "../core/bams";
+import type { Vec3 } from "./vec";
 
 /** `obj+0x34` bit `0x4000000` — the carrier is leaving and its riders step off. */
 export const CARRIER_LEAVING_BIT = 0x4000000;
@@ -39,9 +40,15 @@ export const CARRIER_LEAVING_BIT = 0x4000000;
  */
 export function CarrierTransformPoint(carrier: Actor, x: number, y: number,
                                       z: number, out: Vec3): void {
-  const rx = carrier.pitch * BAMS;
-  const ry = carrier.yaw * BAMS;
-  const rz = carrier.roll * BAMS;
+  // BAMS to radians. This multiplied by `vec.ts`'s `BAMS`, which is the
+  // other direction -- 65536 / 2pi, *BAMS per radian* -- so every angle came
+  // out 10430^2/65536 times too large and a rider's offset was spun to a
+  // different point of the compass on every frame the carrier turned. Stage
+  // 3's civilian, standing 7.8 below the boat's origin and 8 across it, was
+  // thrown out of the hull and under the canal.
+  const rx = carrier.pitch * BAMS_TO_RAD;
+  const ry = carrier.yaw * BAMS_TO_RAD;
+  const rz = carrier.roll * BAMS_TO_RAD;
   // RotY, innermost.
   let px = x * Math.cos(ry) + z * Math.sin(ry);
   let py = y;

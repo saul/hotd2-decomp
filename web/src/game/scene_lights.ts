@@ -7,7 +7,7 @@
  * `SceneLightArrayUpdate` (`FUN_00480970`), that runs once a frame. Every
  * frame it resets the renderer's sixteen light slots (`RenderLightsResetAll`,
  * `FUN_004AA830`), and **only while `g_scene_lighting` is non-zero** — evt
- * `0x14` — it builds the gun lights, hands `g_scene_light_ambient` to the
+ * `0x14` — it builds the gun lights, hands `g_light_array_ambient` to the
  * renderer as the D3D ambient (`StoreLightArrayAmbientColour`,
  * `FUN_004AA720`) and submits every enabled entry of `g_entity_lights`
  * (`SetRenderLightEnabled` / `SetRenderLightFromWorld`, `FUN_004AA6F0` /

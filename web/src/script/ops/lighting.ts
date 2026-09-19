@@ -37,7 +37,7 @@ export const OPS: Record<number, OpImpl> = {
     },
     0x16: {                                     // set_ambient_light_rgb
       // `EvtOpSetAmbientLightRgb16`: three evt pointers, the floats behind
-      // them into `g_scene_light_ambient` r, g, b -- the ambient the scene
+      // them into `g_light_array_ambient` r, g, b -- the ambient the scene
       // light array draws with. The exporter resolves the pointers.
       status: "done",
       run: (w, op) => {

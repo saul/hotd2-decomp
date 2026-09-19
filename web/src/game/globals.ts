@@ -31,6 +31,10 @@ import type { ShotRequest } from "./combat/shot";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 import { makeEntityLights } from "./entity_light";
+import { PlayerState, PlayerTask, RunPhase } from "./player_state";
+import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
+  PlayerStartGameFromTitle, PlayerTasksCreate, type PlayerBlock }
+  from "./player_shell";
 
 /**
  * `g_app_state` (`0x009C8E98`) — the game's top-level screen, and something
@@ -43,6 +47,12 @@ import { makeEntityLights } from "./entity_light";
  * `g_app_state_pending` (`0x007C17A0`) at the end of the frame.
  */
 export enum AppState {
+  /**
+   * The title and mode-select screen: `AppStateDispatch` (`FUN_004608A0`)
+   * runs `TitleMenuRunPhase` (`FUN_00496200`) in it. A start press here is
+   * what spends the first credit and requests {@link InPlay}. `[proved]`
+   */
+  Title = 4,
   /**
    * The attract demo. `RunAttractDemo` (`FUN_00426800`) advances only while
    * this is the state, and it is `IsPlayerAttackable`'s (`FUN_00409DC0`)
@@ -62,6 +72,13 @@ export enum AppState {
    */
   InPlay = 6,
   /**
+   * The game-over screen, `FUN_00460960`. `RunPhaseContinueCountdown`
+   * (`FUN_00460530`) and `RunPhaseNoContinue` (`FUN_00460250`) request it when
+   * nobody is left in play, and `CommitAppState` leaves `g_player_state`
+   * alone for it, as for 6. `[proved]`
+   */
+  GameOver = 7,
+  /**
    * Boot. Stamped once, by `FUN_0040E4A0`, whose only caller is the startup
    * routine `FUN_0049E4A0` — the one that reads `Hod2.ini` — and which resets
    * the whole data segment (`FUN_0040A920`, `g_app_state = 0`) before setting
@@ -74,35 +91,7 @@ export enum AppState {
   Boot = 0x10,
 }
 
-/**
- * `g_player_state` (`0x009A5C62`) — the per-player shell's state, and the index
- * `PlayerSetState` (`FUN_00415080`) takes into `g_player_state_handlers`
- * (`0x00579CD0`). Only the members something in the port reads or writes are
- * here; 0, 1, 3, 4, 6, 7, 8, 10 and 11 are the shell's other states.
- */
-export enum PlayerState {
-  /**
-   * Parked for a scene load. `AdvanceToNextScene` (`FUN_0045FFF0`) puts an
-   * in-play player here, and the handler it installs,
-   * `PlayerStateReenterAfterScene` (`FUN_00413E40`), is nothing but
-   * `PlayerEnterPlay(obj, 2)`. `[proved]`
-   */
-  SceneReentry = 2,
-  /**
-   * In play. `PlayerEnterPlay` (`FUN_00414770`) writes it from every row of
-   * `g_player_enter_play_modes` (`0x00579DE8`), and it is what
-   * `IsPlayerAttackable` (`FUN_00409DC0`), `BatDiveUpdate` (`FUN_0042E230`),
-   * `BatSwarmUpdate` (`FUN_0042ED50`) and the horde's bite test for. `[proved]`
-   */
-  InPlay = 5,
-  /**
-   * Out of the game. The boot reset `FUN_0040A920` stores it for both players
-   * (`0x0040AA3D`), and `CommitAppState` (`FUN_0040E860`) for both on any
-   * screen but 6 and 7. That it means "not participating" is `[likely]`: it
-   * is the value a player holds everywhere a game is not running.
-   */
-  Out = 9,
-}
+export { PlayerState, PlayerTask, RunPhase } from "./player_state";
 
 /**
  * `g_hit_slots` holds fourteen entries, and the extent is the loop bound
@@ -222,7 +211,8 @@ export interface ThrownWeapon {
   acc?: Vec3;
   /**
    * The damage kind `PlayerTakeDamage` is given on arrival — 4 for a flat
-   * throw and 6 for an arced one. Absent means class 0x31's, which passes 0.
+   * throw and 6 for an arced one. Absent means class 0x31's, which passes 6
+   * (`0x0044FE4C`).
    */
   hitKind?: number;
 }
@@ -263,11 +253,14 @@ export const G = {
    * `g_players_in_play` — 0x009C8E80. **How many players are in play**, and
    * not the two-player flag its old name claimed.
    *
-   * `FUN_004147E0` does `INC word [009C8E80]` once per player as it enters —
-   * beside a *separate* `INC` of `g_max_attackers` on a different slot bit —
-   * and `FUN_00413F42` does the matching `DEC` when one drops out. So an
-   * ordinary single-player game runs at **1**, and 0 means nobody has started
-   * yet.
+   * `PlayerEnterPlay` (`FUN_00414770`) does `INC word [009C8E80]` as a player
+   * enters, on row flag `0x10` of `g_player_enter_play_modes` -- beside a
+   * *separate* `INC` of `g_max_attackers` on flag `0x20` -- and
+   * `PlayerUpdateInPlay` (`FUN_00413E90`) does the matching `DEC` at
+   * `0x00413F42` when one runs out of lives. `CommitAppState` (`FUN_0040E860`)
+   * zeroes both on every screen change. So an ordinary single-player game runs
+   * at **1**, and 0 means nobody has started yet -- which is what it holds
+   * until `player_shell.ts` has run the start press, not a default.
    *
    * That distinction is load-bearing: `ZombieStateLeapToPoint` and
    * `ZombieStateDelayedStrikeInPlace` both refuse to strike while this is 0,
@@ -275,7 +268,7 @@ export const G = {
    * spawns for ever. Anything that wants "are there two players" reads
    * `g_max_attackers`, which is what the thrown weapon latches.
    */
-  g_players_in_play: 1,
+  g_players_in_play: 0,
   /**
    * `g_weapon_loop_holders` — 0x009C8A74. **A refcount on one looping sound.**
    *
@@ -300,9 +293,13 @@ export const G = {
    * `g_max_attackers` of them, so with one player exactly one enemy is
    * committed at a time — which is the game's feel.
    */
-  g_attack_permits: [-1] as number[],
-  /** `g_max_attackers` — 0x009C8E84. */
-  g_max_attackers: 1,
+  g_attack_permits: [-1, -1] as number[],
+  /**
+   * `g_max_attackers` — 0x009C8E84. `PlayerEnterPlay` (`FUN_00414770`) raises
+   * it on row flag `0x20`, `PlayerContinueCountdown` (`FUN_00414280`) lowers
+   * it when a continue runs out, and `CommitAppState` zeroes it.
+   */
+  g_max_attackers: 0,
   /**
    * `g_attack_committed` — 0x009A34F0. One enemy off camera may hold a
    * permit; while it does, **nobody else may claim one at all**.
@@ -365,10 +362,122 @@ export const G = {
   g_aim_on_screen: [1, 0],
 
   // -- the player --------------------------------------------------------
-  /** `g_player_lives` — 0x009A5C66 + player*0x98. */
-  g_player_lives: [2, 2],
-  /** `g_player_invuln_frames` — 0x009C8E08. */
-  g_player_invuln_frames: 0,
+  /**
+   * `g_player_lives` — 0x009A5C66 + player*0x98. Written by
+   * `PlayerEnterPlay` (`FUN_00414770`) from `g_start_lives`, and nowhere else
+   * outside the damage path.
+   */
+  g_player_lives: [0, 0],
+  /**
+   * `g_player_lives_shown` — 0x009A5C68 + player*0x98, the copy
+   * `PlayerUpdateInPlay` (`FUN_00413E90`) takes of the lives after its HUD
+   * draw, and `PlayerEnterPlay` sets beside them.
+   */
+  g_player_lives_shown: [0, 0],
+  /**
+   * `g_player_invuln_frames` — 0x009C8E08, **one dword per player**.
+   * `PlayerEnterPlay` sets the row's frames, `PlayerTakeDamage` 0x5A, and
+   * `RunSceneTasksAndTimers` (`FUN_004606D0`) counts both down once a frame,
+   * floored at 0.
+   */
+  g_player_invuln_frames: [0, 0] as number[],
+  /**
+   * Which routine each player's task runs -- `task+0`, the pointer at
+   * `0x009A5CD4 + player*0x130`. See {@link PlayerTask}.
+   */
+  g_player_task: [PlayerTask.None, PlayerTask.None] as PlayerTask[],
+  /**
+   * `g_player_ammo` — 0x009A5C7C + player*0x130. `PlayerEnterPlay` loads six
+   * in Arcade. [open] Nothing in the port reads it: the port's trigger has no
+   * magazine (see `combat/shot.ts`).
+   */
+  g_player_ammo: [0, 0],
+  /**
+   * `g_player_magazine_size` — 0x009A2248 + player*0x14. `PlayerEnterPlay`'s
+   * Arcade arm writes it 6 (the low byte of its `0x3000006` store).
+   */
+  g_player_magazine_size: [6, 6],
+  /**
+   * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
+   * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
+   * `PlayerContinueCountdown` takes `0x2D` a frame.
+   */
+  g_player_continue_timer: [0, 0],
+  /**
+   * `g_player_credit_seen` — the four dwords at 0x009A5C8C + player*0x130:
+   * the credit counts the continue countdown last saw, and two words it
+   * zeroes beside them. A change restarts the countdown.
+   */
+  g_player_credit_seen: [[0, 0, 0, 0], [0, 0, 0, 0]] as number[][],
+  /**
+   * `g_player_gameover_timer` — 0x009A5C88 + player*0x130. 120 frames from
+   * `PlayerStateArmGameOver` to state 9.
+   */
+  g_player_gameover_timer: [0, 0],
+  /**
+   * `g_player_pending_state` — 0x009A5CA8 + player*0x130. The state a start
+   * press asked for while it was held back in state 10.
+   */
+  g_player_pending_state: [0, 0],
+  /**
+   * `g_player_no_damage` — 0x009C9FD8 + player*0x7C. Non-zero and
+   * `PlayerTakeDamage` takes no life, no rank and no points. The factory
+   * options reset `FUN_00401060` zeroes it and nothing in the image writes
+   * anything else; what sets it, if anything, is `[open]`.
+   */
+  g_player_no_damage: [0, 0],
+  /**
+   * `g_start_lives` — 0x009A34C4. `FUN_0040AB50` loads it from
+   * {@link START_LIVES_BY_OPTION} at the options' lives setting, and
+   * `PlayerEnterPlay` gives it to every player whose row resets lives.
+   */
+  g_start_lives: 0,
+  /**
+   * `g_credits` — 0x009C8E60, stride 8: the credits (continues) left, one
+   * shared count unless `g_credits_per_player` is set. `SetBothPlayerCounters`
+   * seeds it from `ModeStartCounterValue` when the title menu is confirmed.
+   */
+  g_credits: [0, 0],
+  /** `g_credit_tier` — 0x009C8E64, stride 8. `CreditTiersUpdate`'s 0/1/2. */
+  g_credit_tier: [0, 0],
+  /**
+   * `g_credit_is_continue` — 0x005A4D30 + player*4, what the last spend was
+   * for: 0 a start, 1 a continue.
+   */
+  g_credit_is_continue: [0, 0],
+  /** `g_free_play` — 0x009C8E70. 1: every spend succeeds. */
+  g_free_play: 0,
+  /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
+  g_credits_per_player: 0,
+  /** `g_credits_to_start` — 0x009C8E78. `FUN_004066D0` sets 1. */
+  g_credits_to_start: 1,
+  /** `g_credits_to_continue` — 0x009C8E7C. `FUN_004066D0` sets 1. */
+  g_credits_to_continue: 1,
+  /**
+   * `g_title_start_armed` — 0x009A21C0. `TitleMenuUpdateAndSelect` raises it
+   * on a mode's confirm; in app state 4 `CreditTrySpend` refuses without it.
+   */
+  g_title_start_armed: 0,
+  /**
+   * `g_pad_state` — 0x009C9028. Only the start and continue bits are fed:
+   * `8` and `0x80000` are the two players' START that `PadStartPressed`
+   * (`FUN_00413230`) tests, `4` and `0x40000` what the continue screen reads.
+   * `[port-only]` The page raises a bit for one tick when START is pressed.
+   */
+  g_pad_state: 0,
+  /**
+   * `g_trigger_down` — 0x009C8FD4 + player*0x28, the trigger bit in the aim
+   * record `PollPlayerAimInput` (`FUN_0040CBB0`) fills. The continue
+   * countdown reads it to skip a digit. `[port-only]` Raised for the tick a
+   * shot request of that player falls due.
+   */
+  g_trigger_down: [0, 0],
+  /**
+   * `g_training_out` — 0x009A2234. `PlayerUpdateInPlay` sets it instead of
+   * the continue when a Training player runs out of lives. What reads it is
+   * `[open]`.
+   */
+  g_training_out: 0,
   /** `g_player_was_hit` — 0x009A5CD0 + player*0x98. */
   g_player_was_hit: [0, 0],
   /** `g_player_hit_motion` — 0x009A5CD2 + player*0x130. */
@@ -388,9 +497,9 @@ export const G = {
    */
   g_one_hit_target_kills: 0,
   /**
-   * The running score. `[open]` — it is in the same +player*0x98 block as
-   * `g_player_lives` (0x009A5C66) but its offset has not been read out, so
-   * this carries no address rather than a guessed one.
+   * `g_player_score` — 0x009A5C6C + player*0x130, a dword. `ScoreAddForPlayer`
+   * (`FUN_004156C0`) is its writer and floors it at 0; `PlayerEnterPlay`
+   * clears it on row flag 4.
    */
   g_player_score: [0, 0],
   /** `g_nPlayerFired` — 0x009A5C78. Shots taken, for the accuracy grade. */
@@ -925,6 +1034,15 @@ export const G = {
    */
   g_scene_state_major_entered: 0,
   /**
+   * `g_scene_state_major` — 0x009C6F0C, the live major beside the stamped
+   * one. `PlayerTakeDamage` floors lives at one only when **both** are off 2.
+   *
+   * `[diverges]` The walker keeps one pair, the stamped one, so the port
+   * pushes the same value into both. They differ only across a partial enter
+   * (`FUN_00403BB0`), which leaves the stamp alone.
+   */
+  g_scene_state_major: 0,
+  /**
    * `g_app_state` — 0x009C8E98. Which of the game's top-level screens is
    * running. **The port sits at {@link AppState.InPlay}, 6**, because that
    * is the state the engine is in while a stage is being played, and the port
@@ -978,17 +1096,33 @@ export const G = {
    * back to 2 for the duration of a scene load, and 8, 9 and 4 are the
    * name-entry, not-participating and credit states.
    *
-   * [diverges] **The port does not run the per-player shell** that gets a
-   * player here: a start press (`FUN_00414FC0`) sets a state 0..3 whose
-   * handler calls `PlayerEnterPlay` (`FUN_00414770`), and that writes 5.
-   * {@link ResetGameGlobals} stands for boot plus player 0 having entered, and
-   * seeds `[InPlay, Out]` -- the same stand-in `g_players_in_play: 1` and
-   * `g_max_attackers: 1` are for that routine's two counter increments. Until
-   * 2026-09-19 it seeded `[0, 0]`, a value the engine never holds in play, and
-   * everything that tests 5 directly -- the bats' and the horde's strikes --
-   * silently never landed in the page (NEW-BUGS 19).
+   * Written only by `game/player_shell.ts` and the two app-state routines,
+   * which are the engine's writers: boot leaves 9, a start press 0 or 3,
+   * `PlayerEnterPlay` (`FUN_00414770`) 5, the stage step 2, running out 4.
+   * Until 2026-09-19 the port seeded it -- `[0, 0]`, then `[5, 9]` -- and
+   * everything that tests 5 directly, the bats' and the horde's strikes,
+   * silently never landed in the page while their tests set 5 by hand (L49).
    */
-  g_player_state: [PlayerState.InPlay, PlayerState.Out] as number[],
+  g_player_state: [PlayerState.Out, PlayerState.Out] as number[],
+  /**
+   * `g_nRunPhase` — 0x009C90A4. See {@link RunPhase}: the port runs phases
+   * 2, 3, 4 and 11, the in-play phase and the continue screen.
+   */
+  g_nRunPhase: RunPhase.InPlay as number,
+  /** `g_app_state_pending` — 0x007C17A0. -1 for none. */
+  g_app_state_pending: -1,
+  /**
+   * `g_screen_furniture_flags` — 0x009A5900. Bit 0 lets a start press take
+   * effect at once (else it waits in state 10); bit 1 is raised by
+   * `CommitAppState` and required by `PlayerTryStartPress`.
+   */
+  g_screen_furniture_flags: 0,
+  /** `g_continue_timer` — 0x009A2BB8, the run's own continue countdown. */
+  g_continue_timer: 0,
+  /** `g_continue_credit_seen` — 0x007DCCAC..0x007DCCB8. */
+  g_continue_credit_seen: [0, 0, 0, 0] as number[],
+  /** `g_no_continue_frames` — 0x007DCCD4, a byte. */
+  g_no_continue_frames: 0,
   /**
    * `g_script_flags` — 0x009C7200. The byte array `set_script_flag` (evt 0x48)
    * writes and the set-pieces read for their other removal trigger.
@@ -1471,11 +1605,13 @@ export function ResetSceneOnEnter(): void {
  * all, because its pool is a fixed array it walks; the port keeps a list, so
  * emptying it is a thing that has to happen somewhere.
  */
-export function ResetGameGlobals(): void {
+export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_object_list = [];
   G.g_cur_actor = -1;
   ResetSceneOnEnter();
-  G.g_attack_permits = new Array(G.g_max_attackers).fill(-1);
+  // Two permits, one a player, whatever `g_max_attackers` says: the array at
+  // `0x009A2BA0` is fixed and `TryClaimAttackSlot` offers the first N of it.
+  G.g_attack_permits = [-1, -1];
   G.g_attack_committed = 0;
   G.g_enemy_approach_rings = [];
   G.g_enemy_approach_ring_mid = [];
@@ -1483,21 +1619,12 @@ export function ResetGameGlobals(): void {
   G.g_enemy_approach_steps = 0;
   G.g_enemy_approach_steps_mid = 0;
   G.g_enemy_approach_steps_outer = 0;
-  // The scene reset re-arms the player: `ResetSceneCombatState`
-  // (`FUN_0045EEC0`) calls into the player init, and without it a replay or a
-  // seek starts with however many lives the last run ended on. That went
-  // unnoticed until `TryClaimAttackSlot` grew its `IsPlayerAttackable` gate,
-  // at which point a zero-life player made every enemy stop attacking.
-  // `main.ts` overwrites this from the bundle's `start_lives` immediately
-  // after, which is the engine's order too.
-  G.g_player_lives = [2, 2];
   // `SceneLightArrayInit` (`FUN_004809D0`), run at scene init. The aim is
   // input and survives, as the engine's input record does.
   G.g_scene_lighting = 0;
   G.g_entity_spotlights_on = 0;
   G.g_light_array_ambient = [0.5, 0.5, 0.5];
   G.g_entity_lights = makeEntityLights();
-  G.g_player_invuln_frames = 0;
   G.g_player_was_hit = [0, 0];
   G.g_player_hit_motion = [0, 0];
   // `g_player_hit_count` and `g_head_combo_bonus` are `ResetSceneOnEnter`'s.
@@ -1586,10 +1713,7 @@ export function ResetGameGlobals(): void {
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
   G.g_scene_state_major_entered = 0;
-  G.g_app_state = AppState.InPlay;
-  // Boot writes 9 to both players; player 0 then enters play, which writes 5.
-  // See `g_player_state` above for the stand-in this is.
-  G.g_player_state = [PlayerState.InPlay, PlayerState.Out];
+  G.g_scene_state_major = 0;
   G.g_cam_path_frame = 0;
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
@@ -1602,6 +1726,20 @@ export function ResetGameGlobals(): void {
   G.g_blink_frame_counter = 0;
   G.g_frame_counter = 0;
   G.g_frame = 0;
+  // **The player.** The engine's scene load never touches the player block;
+  // the port's reset rebuilds all of `G`, so the block is booted here and then
+  // either carried across (a stage step: `AdvanceToNextScene` parks whoever is
+  // in play at 2, and the new scene's tasks bring them back through row 2) or
+  // started afresh from the title, which is what a page load and a seek are.
+  // See `game/player_shell.ts`; every step there is a ported routine.
+  PlayerBlockBoot();
+  if (carry) {
+    PlayerBlockRestore(carry);
+    AdvanceToNextScene();
+    PlayerTasksCreate();
+  } else {
+    PlayerStartGameFromTitle(G.g_GameMode);
+  }
 }
 
 /**

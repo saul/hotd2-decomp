@@ -11,17 +11,19 @@ import { G } from "../globals";
 
 /**
  * `ScoreAddForPlayer` — `FUN_004156C0`. Add `points` to one player's running
- * total.
+ * total, `g_player_score` (`0x009A5C6C`), **floored at zero**: a penalty
+ * never takes a score below 0.
  *
- * [diverges] The engine also drives the on-screen score popup from here and
- * clamps at the display's digit count; neither is modelled. The total itself
- * is `g_player_score`, whose offset within the +player*0x98 block is still
- * `[open]` — see `globals.ts`.
+ * `[diverges]` In Original Mode the engine doubles `points` while the byte at
+ * `0x009A2243 + player*0x14` is 2 -- the fourth byte of the Original Mode
+ * block `g_original_item_slots` starts, which the port does not carry. The
+ * score popup it also drives is the HUD's.
  */
 export function ScoreAddForPlayer(player: number, points: number,
                                   events?: Events): void {
   if (player < 0 || player >= G.g_player_score.length) return;
   G.g_player_score[player] += points;
+  if (G.g_player_score[player] < 0) G.g_player_score[player] = 0;
   events?.emit("player.score", {
     player, points, score: G.g_player_score[player],
   });

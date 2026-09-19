@@ -2442,15 +2442,21 @@ console.log("\nthe gun lights are built off the camera this frame draws:");
   // subtracted a block eye seated a frame later: on a moving camera the torch
   // swung between two aims at the display's refresh rate.
   const { GameSystem, GunLightBuildSystem } = await import("../src/app/systems");
-  const { G: g } = await import("../src/game/globals");
+  const { G: g, ResetGameGlobals: reset } = await import("../src/game/globals");
+  const { PlayerTasksRun } = await import("../src/game/player_shell");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { Rng } = await import("../src/core/rng");
   const { SetPlayerAimFromPointer, GUN_LIGHT_FIRST }
     = await import("../src/game/scene_lights");
   const game = new GameSystem();
   const build = new GunLightBuildSystem(game);
   const cam = new PerspectiveCamera();
+  // A player in play, the way the page gets one: the reset's start press and
+  // the first player turn. The light is lit only for a player at state 5.
+  reset();
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
   g.g_scene_lighting = 1;
   g.g_entity_spotlights_on = 1;
-  g.g_player_lives[0] = 3;
   SetPlayerAimFromPointer(0, 0, 0);
   // The block eye deliberately somewhere else: the aim must not read it.
   g.g_camera_block_eye = { x: -500, y: -500, z: -500 };

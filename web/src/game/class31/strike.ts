@@ -55,6 +55,9 @@ export function ThrowerStrikeConnect(obj: ThrowerActor,
 
   obj.flags2 |= ThrowerFlag.Struck;
   if (obj.attackPermit < 0) return false;
-  return PlayerTakeDamage(obj.attackPermit, obj, e.player_motion, events,
+  // `[open]` As in `ActorStrikeConnect`: the engine's `obj+0x34 & 0x2000000`
+  // arm passes 0 for the latch and then `ThrowerLeave`; the port never raises
+  // that bit, so the latching arm is the one here.
+  return PlayerTakeDamage(obj.attackPermit, 1, e.player_motion, events, obj,
                           "strike", obj.attack);
 }

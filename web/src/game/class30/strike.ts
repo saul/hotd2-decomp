@@ -82,14 +82,23 @@ export function ZombiePickAttack(obj: ZombieActor, rng: Rng): number {
 }
 
 /**
- * `ActorStrikeConnect` — `FUN_00456490`. The hit whiffs if **every** zone the
+ * `ActorStrikeConnect` — `FUN_00456490`. The hit lands on the player the
+ * permit names (`obj+0x121`, 0 or 1 only), and whiffs if **every** zone the
  * attack needs has been shot off. Mask 8 is outside the three-bit zone mask,
  * so those attacks can never be cancelled.
+ *
+ * `[open]` The engine has a second arm: with `obj+0x34` bit `0x2000000` up it
+ * calls `PlayerTakeDamage(player, 0, motion)` -- no hit latch -- and then
+ * `ZombieReleaseAndDespawn`. The bit is raised by `FUN_0045E010` and
+ * `FUN_0045E660`, neither read, and nothing in the port raises it, so only
+ * the latching arm is here. It used to hit player 0 whatever the permit said.
  */
 export function ActorStrikeConnect(obj: ZombieActor, atk: AttackJson,
                                    events?: Events): boolean {
+  const player = obj.attackPermit;
+  if (player !== 0 && player !== 1) return false;
   if ((obj.zones & DamageZone.All & atk.cancel_mask) === atk.cancel_mask) return false;
-  return PlayerTakeDamage(0, obj, atk.player_motion, events, "strike",
+  return PlayerTakeDamage(player, 1, atk.player_motion, events, obj, "strike",
                           obj.attack);
 }
 

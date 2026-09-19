@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { ActorDespawn } from "../src/game/despawn.ts";
@@ -61,8 +62,9 @@ for (const b of script.blocks ?? []) {
 ResetGameGlobals();
 SetGameTables(chars, undefined, undefined, undefined, script.coli,
               script.civilians);
-G.g_players_in_play = 1;
-G.g_player_lives = [2, 2];
+// In play through the ported routines, not by hand (L49): the reset
+// started the game from the title, and this is the first player turn.
+PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
 
 const NOOP = () => undefined;
 const walker = new Walker(script, {

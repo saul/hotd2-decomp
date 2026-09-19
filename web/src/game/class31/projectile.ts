@@ -11,7 +11,7 @@
  */
 import type { Events } from "../../core/events";
 import { ActorByAt, G } from "../globals";
-import { PlayerTakeDamageTimed } from "../combat/player";
+import { PlayerTakeDamage } from "../combat/player";
 
 /**
  * The tumble rate the port gives every thrown weapon, in BAMS per frame.
@@ -33,6 +33,12 @@ import { PlayerTakeDamageTimed } from "../combat/player";
  * random, so a weapon tumbles at about the speed it always has.
  */
 export const THROWN_SPIN_RATE = 0x200;
+
+/**
+ * Class 0x31's weapon's hit motion: `PUSH 0x6` at `0x0044FE4C`, the third
+ * argument of `ThrownWeaponFlyToTarget`'s `PlayerTakeDamage`. It was 0.
+ */
+export const THROWER_WEAPON_HIT_KIND = 6;
 
 
 /**
@@ -58,8 +64,11 @@ export function ThrownWeaponFlyToTarget(i: number, frames: number,
     p.ttl -= frames;
     if (p.ttl <= 0 && !p.hit) {
       p.hit = true;
-      PlayerTakeDamageTimed(0, ActorByAt(p.from) ?? null, p.hitKind ?? 0,
-                            events);
+      // `PlayerTakeDamage(obj+0x121, 1, 6)` at `0x0044FE51` -- not the timed
+      // variant, which nothing in the image calls. The port's weapon does not
+      // carry the thrower's permit, so the player is 0, as it always was here.
+      PlayerTakeDamage(0, 1, p.hitKind ?? THROWER_WEAPON_HIT_KIND, events, ActorByAt(p.from) ?? null,
+                       "thrown");
     }
     return true;
   }

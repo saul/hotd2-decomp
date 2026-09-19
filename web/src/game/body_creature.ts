@@ -458,7 +458,7 @@ function BodyCreatureFly(c: BodyCreature, rng: Rng,
     if (G.g_scene_state_major_entered === DAMAGE_SCENE_MAJOR
         && G.g_players_in_play > 0
         && G.g_player_state[c.target] === PLAYER_STATE_IN_PLAY) {
-      PlayerTakeDamage(c.target, null, HIT_MOTION, events);
+      PlayerTakeDamage(c.target, 1, HIT_MOTION, events);
       // `PlaySoundId(0)`, which is `PlaySoundId`'s own nothing: id 0 has no
       // record. Transcribed as the call it is rather than as a sound.
       events?.emit("sound.play", { id: 0 });

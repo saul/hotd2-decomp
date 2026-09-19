@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
@@ -94,13 +95,14 @@ for (let stage = 1; stage <= 6; stage++) {
     G.g_cam_path_frame = 0;
     // A single player, in play. `g_players_in_play` is a **count**; leaving it
     // at 0 is the attract screen, and states 24 and 32 refuse to strike there.
-    G.g_players_in_play = 1;
+    // In play through the ported routines, not by hand (L49): the reset
+    // started the game from the title, and this is the first player turn.
+    PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
     // ...and the scene state the player gets from the walker through
     // `syncPortGlobals`. `IsPlayerAttackable` (`FUN_00409DC0`) refuses unless
     // the major is 2 -- the `cam/` path camera row -- so a harness that leaves
     // it at 0 is testing a scripted cutscene, where nothing may attack.
     G.g_scene_state_major_entered = 2;
-    G.g_player_lives = [2, 2];
 
     const a = ActorSpawn(sp.at, sp.class, p.char_type,
                          chars.types[String(p.char_type)]?.name ?? "?",

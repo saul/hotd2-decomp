@@ -262,8 +262,8 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
     if (obj.attackPermit >= 0 && !obj.struck
         && ActorClipFrame(obj) >= GRAB_HIT_FRAME) {
       obj.struck = true;
-      PlayerTakeDamage(obj.attackPermit, obj, m !== GRAB_A ? 1 : 0, events,
-                       "strike", -1);
+      PlayerTakeDamage(obj.attackPermit, 1, m !== GRAB_A ? 1 : 0, events,
+                       obj, "strike", -1);
     }
     if (obj.action && ActorClipFrame(obj) < ActorClipLength(obj, m) - 1) {
       return ThrowerGrabRide(obj, eye);

@@ -153,17 +153,19 @@ export async function loadStageInto(p: Player): Promise<void> {
   // actor read every ring as zero, and so nothing ever reached striking
   // range: they walked into the camera and spun on a facing angle that has
   // no direction at zero distance.
+  //
+  // The mode goes in **before** it: the reset starts the game from the title,
+  // and `PlayerStartGameFromTitle` seeds the credits from the mode the title
+  // confirmed. Nothing wrote the mode at all once, so every run was Arcade
+  // whichever bundle was loaded; `PlaceGenericProp`'s types 70-72 and 77
+  // despawn on their first frame unless it is Original.
+  //
+  // The lives are not written here any more. They are `PlayerEnterPlay`'s
+  // (`FUN_00414770`), from `g_start_lives`; the bundle's `start_lives` was a
+  // second answer to that question and nothing in the image read it.
+  G.g_GameMode = bundle.script.game_mode;
   p.world.attach(p.ctx);
   p.applyGameTables(bundle.script);
-  G.g_player_lives = [
-    bundle.script.characters?.player?.start_lives ?? 2,
-    bundle.script.characters?.player?.start_lives ?? 2,
-  ];
-  // Nothing wrote this before, so every run was Arcade whichever bundle was
-  // loaded. That stopped being harmless the moment class 0x41 grew a branch
-  // on it: `PlaceGenericProp`'s types 70-72 and 77 despawn on their first
-  // frame unless the mode is Original, and the whole item hunt is behind it.
-  G.g_GameMode = bundle.script.game_mode;
   // Characters are already in the stage glTF, one hierarchy per spawn;
   // this adopts them and takes over the pose.
   // The object paths class 0x25 rides live in the camera bundle; the

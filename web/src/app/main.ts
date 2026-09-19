@@ -104,7 +104,8 @@ import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
 import { ResetPropContainers } from "../game/class41";
-import { ActorByAt, ResetGameGlobals } from "../game/globals";
+import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
+import { PadBit, PlayerBlockCapture } from "../game/player_shell";
 import { SetGameTables } from "../game/tables";
 
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
@@ -977,6 +978,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       else if (e.code === "Digit2") this.setMode("play");
       else if (e.code === "Digit3") this.setMode("free");
       else if (e.code === "Enter") { e.preventDefault(); this.requestSkip(); }
+      // The pad's START for player 1 (`g_pad_state` bit 8): a new game from
+      // "out", a continue during the countdown. See `PadStartPressed`.
+      else if (e.code === "KeyS") this.padLatch |= PadBit.Start0;
     });
 
     window.addEventListener("popstate", () => {
@@ -1717,8 +1721,28 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.pushPortGlobals();
     this.cam.driving = !this.scrubbing;
     this.cam.scripted = this.state.mode !== "free";
+    // START, held for exactly the one tick after the key went down: the engine
+    // reads `g_pad_state` once a frame and a press is a frame's worth of bit.
+    if (!this.gameStopped) {
+      G.g_pad_state = this.padLatch;
+      this.padLatch = 0;
+    }
     this.world.update(this.ctx,
                       this.gameStopped ? STOPPED_TICK : DRIVEN_TICK);
+    if (!this.gameStopped) G.g_pad_state = 0;
+    // `[diverges]` The game-over screen (`FUN_00460960`, app state 7) is not
+    // ported. When the run requests it -- nobody in play and the continue ran
+    // out -- the player stops the transport and says so, and the scene stays
+    // where it was.
+    if (G.g_app_state === AppState.GameOver && this.playing) {
+      this.playing = false;
+      this.onFeed({
+        seq: -1, block: w.block, step: w.step, opIndex: w.opIndex,
+        op: { i: -1, at: 0, op: -1, name: "game over", cat: "flow" },
+        note: "no credit taken before the continue ran out",
+      });
+      return false;
+    }
     // The history a rewind walks back through, offered every tick and taken
     // on the ring's own cadence. Here rather than in the pacer because a
     // snapshot is game state and this is the one place game state moves.
@@ -1739,6 +1763,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * so the flag is what stops the frame loop asking again every 16 ms.
    */
   private advancing = false;
+  /** START presses waiting for the next tick; see `stepOneFrame`. */
+  private padLatch = 0;
 
   /**
    * The stage-to-stage transition: the run's phase machine, as much of it as
@@ -1777,6 +1803,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (entry === undefined || entry === null) return;
     if (!this.stages.includes(next)) return;
     this.advancing = true;
+    // The engine's scene load leaves the player block alone; the port's reset
+    // rebuilds all of `G`, so the block rides across in the game system and
+    // `AdvanceToNextScene` parks it -- see `game/player_shell.ts`.
+    this.game.carry = PlayerBlockCapture();
     this.state.stage = next;
     this.state.entry = entry;
     this.state.block = this.state.step = this.state.op = undefined;

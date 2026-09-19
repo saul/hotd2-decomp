@@ -205,6 +205,15 @@
  *   node tools/playthrough.mjs --stage 3 --entry 7 --headless
  *
  * Exit status is 0 only if the stage reached an end block.
+ *
+ * ### `--continue`, because the player can lose now
+ *
+ * The player shell is ported (`game/player_shell.ts`) and a hit on the path
+ * camera can take the last life. A run that nobody continues ends in
+ * **GAME OVER**, reported as such rather than as a hang. `--continue` presses
+ * START whenever the HUD shows the continue countdown, spending the game's own
+ * credits -- five continues in Arcade at the factory options -- and the count
+ * taken is printed with the result.
  */
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -532,6 +541,9 @@ if (ROUTE.size) {
  * It is a URL flag the player already has; this only passes it, and says so.
  */
 const original = flag("original");
+/** Press START on every continue countdown; see the loop. */
+const CONTINUE = flag("continue");
+let continues = 0;
 if (original) console.log("--original: g_GameMode 1, the Original Mode bundle");
 const { page, state, close } = await openPlayer({
   // `drive=1` is the whole of what makes this comparable between runs; `seed`
@@ -698,11 +710,34 @@ try {
       }
     }
 
+    // **Lives drain now** (`game/player_shell.ts`): the last one goes on the
+    // path camera, the player drops into the continue countdown, and with
+    // nobody pressing START the run asks for the game-over screen and the
+    // page stops. That is an outcome of its own, not a hang, and it is
+    // reported as one. `--continue` presses START (`S`, a credit) whenever
+    // the countdown is up, which is what a player who wants to see the stage
+    // does -- the credits are the game's own, five continues in Arcade.
+    if (CONTINUE && /CONTINUE\?/.test(s.lives)) {
+      await page.keyboard.press("KeyS");
+      continues += 1;
+      console.log(`  f${String(frames).padStart(6)}  continue ${continues} `
+                  + `taken at block ${s.block}`);
+    }
+    if (/GAME OVER/.test(s.lives)) {
+      console.log(`\nGAME OVER at block ${s.block} step/op ${s.step} after `
+                  + `${frames} game frames, ${continues} continue(s) taken`
+                  + (CONTINUE ? " -- the credits ran out"
+                              : " -- run with --continue to spend credits"));
+      exit = 1;
+      break;
+    }
+
     if (/\(end/.test(s.block)) {
       const t = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`\nreached an end block after ${frames} game frames `
                   + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
-                  + `wall clock), ${steps} instructions`);
+                  + `wall clock), ${steps} instructions, ${continues} `
+                  + `continue(s) taken`);
       if (unclearable.length) {
         // **Reaching the end block is not the same as the stage being
         // playable.** Every line here is a room whose enemies the shots could

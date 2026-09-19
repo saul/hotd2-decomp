@@ -1803,7 +1803,7 @@ strike's one gate is `g_player_state == 5` for either player, read bare at
 `0x0042E88A` (dive) and `0x0042F1B5` (swarm), and the port seeded that word 0.
 The routines were transcribed right; the state they test had never been
 written. See the `IsPlayerAttackable` section for `PlayerEnterPlay` and the
-seed. `tools/bats.mjs` now runs all six bat steps through the real bundles
+player shell that now writes it. `tools/bats.mjs` now runs all six bat steps through the real bundles
 without touching the state word, and `tools/bats_page.mjs` drives the page
 under `?drive=1` and watches the score fall by exactly 100 — a strike's charge,
 which no kill can produce (`L47`). Only one life per flight: members arrive
@@ -2650,15 +2650,26 @@ shell reaches it from states 0..3 — each of `g_player_state_handlers`
 scene load, whose handler `PlayerStateReenterAfterScene` (`FUN_00413E40`)
 enters play again. Boot (`FUN_0040A920`) leaves both players at **9**.
 
-`[diverges]` The port still does not run that shell. `ResetGameGlobals` seeds
-`g_player_state = [5, 9]` — boot plus player 0 having entered — which is the
-same stand-in `g_players_in_play = 1` and `g_max_attackers = 1` already were
-for `PlayerEnterPlay`'s two counter increments. Until then it seeded `[0, 0]`,
-the gate fell back on "has a life left", and everything that reads the state
-word *directly* rather than through `IsPlayerAttackable` — the bat's strike,
-the horde's bite, the body creature's hit — never landed in the page. Their
-port tests set 5 by hand and passed. `g_player_lives` still floors at one,
-because there is still no continue.
+**The port runs that shell now** (`game/player_shell.ts`, the same day).
+Every page load and every seek is a game started from the title: boot puts
+both players at 9, the title's confirm arms it and seeds the credits
+(`SetBothPlayerCounters(ModeStartCounterValue(mode))`), player 0's START spends
+one and asks for app state 6, `CommitAppState` applies it, and the scene's
+`PlayerTasksCreate` gives player 0 the state-0 handler, whose first turn is
+`PlayerEnterPlay(0)`: three lives (the factory options), one player, one
+attacker, 90 frames' grace. A stage step carries the player block across and
+`AdvanceToNextScene` parks them at 2, so they come back by row 2 with their
+lives and score. `g_players_in_play` and `g_max_attackers` start at 0 and are
+counted by the routine that counts them; `g_player_lives` has no default. The
+`[diverges]` on `g_player_state` and the "has a life left" stand-ins are gone.
+
+**Lives now drain, and a game can end.** `PlayerTakeDamage` is exact: on the
+path camera the last life goes, the player drops out of play, and the
+continue countdown runs (the HUD strip shows `CONTINUE? n`). **Press S** --
+START -- to continue on a credit; otherwise the run's own continue screen
+counts down and asks for the game-over screen, which the port does not have
+(`[diverges]`): the transport stops and the feed says "game over". Player 2 can
+join by the same route, but the page has no second START key yet.
 
 Note what the gate does **not** test: `g_player_invuln_frames`. The 90-frame
 window after a hit stops the damage and nothing else, so the enemies keep

@@ -24,7 +24,7 @@
  * pushed the panels below it off the bottom of the column. Lists get a panel
  * that folds and scrolls.
  */
-import { G } from "../../game/globals";
+import { AppState, G, PlayerState, RunPhase } from "../../game/globals";
 import { SHUTTER_LABEL } from "../../script/ops/hud";
 import type { Walker } from "../../script/walker";
 import type { DebugGroupName, StripRow } from "../../ui/projection";
@@ -203,8 +203,9 @@ export function hudRows(w: Walker, x: HudInputs): StripRow[] {
     ["spawns", `${w.spawns.length} placed`
       + (w.liveEnemies ? `, ${w.liveEnemies} the enemy gate waits on` : "")],
     ["lives", `${G.g_player_lives[0]}`
-      + (G.g_player_invuln_frames > 0
-        ? ` · invulnerable ${Math.ceil(G.g_player_invuln_frames)}f` : "")],
+      + (G.g_player_invuln_frames[0] > 0
+        ? ` · invulnerable ${Math.ceil(G.g_player_invuln_frames[0])}f` : "")
+      + playerShellNote()],
     ["bgm", w.bgmTrack === null ? "—" : `track ${w.bgmTrack}`],
     ["shutter", d.shutter],
     // The two globals the skip feature hangs off, so it is visible that the
@@ -276,4 +277,23 @@ export function groupRows(w: Walker, x: HudInputs):
       ["blood", d.blood],
     ],
   };
+}
+
+/**
+ * What the player's shell is doing when it is not simply "in play": the
+ * continue digit (`timer >> 12`, as the engine draws it), game over, or out.
+ * Read straight off `game/player_shell.ts`'s state; the HUD decides nothing.
+ */
+function playerShellNote(): string {
+  if (G.g_app_state === AppState.GameOver) return " · GAME OVER";
+  const s = G.g_player_state[0];
+  const credits = G.g_free_play === 1 ? "free play" : `${G.g_credits[0]} credits`;
+  if (s === PlayerState.Continue) {
+    const t = G.g_nRunPhase === RunPhase.ContinueCountdown
+      ? G.g_continue_timer : G.g_player_continue_timer[0];
+    return ` · CONTINUE? ${Math.max(0, t >> 12)} (S to continue, ${credits})`;
+  }
+  if (s === PlayerState.GameOver) return " · game over";
+  if (s === PlayerState.Out) return " · out (S to start)";
+  return "";
 }

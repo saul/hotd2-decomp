@@ -56,7 +56,12 @@ import {
 import { CarriedZombieUpdate18 } from "../src/game/class18";
 import { CameraPointRiseFor, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
-import { ActorByAt, AppState, G, PlayerState, ResetGameGlobals, ResetSceneOnEnter }
+import { PadBit, PlayerBlockCapture, PlayerTasksRun }
+  from "../src/game/player_shell";
+import { ScoreAddForPlayer } from "../src/game/combat/score";
+import { RunSceneTasksAndTimers } from "../src/game/run_phase";
+import { ActorByAt, AppState, G, PlayerState, PlayerTask, ResetGameGlobals,
+  ResetSceneOnEnter, RunPhase }
   from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
@@ -137,7 +142,8 @@ import { ScriptedCarrierUpdate33, ScriptedPushableUpdate33,
          ScriptedScenerySelector } from "../src/game/class33";
 import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
-import { IsPlayerAttackable } from "../src/game/combat/player";
+import { CheckPlayerCanBeHit, IsPlayerAttackable, PlayerTakeDamage }
+  from "../src/game/combat/player";
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
 import {
@@ -586,7 +592,8 @@ function scene(n: number, rng: Rng): Events {
   ResetGameGlobals();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  EnterPlay();
   // `g_nFiringGate` — `0x009C8E00`. `ResetSceneOnEnter` leaves it **down** and
   // the stage script raises it with `hud_shutter_state` 1 or 6; there is no
   // script in this file, so this line stands in for one. Without it every shot
@@ -609,6 +616,38 @@ function scene(n: number, rng: Rng): Events {
   }
   void rng;
   return new Events();
+}
+
+/**
+ * The scene's first task turn for the players, which is where the start press
+ * the reset made becomes a player in play: state 0's handler is
+ * `PlayerEnterPlay(0)`. Then the 90 frames of invulnerability it opens, run
+ * out through the routine that counts them (`RunSceneTasksAndTimers`), so a
+ * test can be hit on its first frame. Nothing here is set by hand (L49).
+ */
+function EnterPlay(): void {
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+  RunOutInvulnerability();
+}
+
+/**
+ * Player 2 presses START in the middle of the game: state 9's poll sees it,
+ * a credit goes, and state 3's handler is `PlayerEnterPlay(3)` -- which counts
+ * the second player and the second attacker. The ported routines, in order.
+ */
+function JoinPlayerTwo(): void {
+  G.g_pad_state = PadBit.Start1;
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+  G.g_pad_state = 0;
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+  RunOutInvulnerability();
+}
+
+/** Both players' invulnerability, counted down by the engine's own timer. */
+function RunOutInvulnerability(): void {
+  while (G.g_player_invuln_frames[0] > 0 || G.g_player_invuln_frames[1] > 0) {
+    RunSceneTasksAndTimers(() => {});
+  }
 }
 
 function run(frames: number, rng: Rng, events: Events): void {
@@ -740,6 +779,12 @@ console.log("the queue throttle:");
   z.attackState = 1;
   z.hp = 1000;
   z.pos = vec3(0, 0, 120);
+  // Forty-five seconds of bites would take every life: on the path camera the
+  // last one goes, and a player out of play is not attacked. The engine's own
+  // answer to "a player who cannot die" is `g_player_no_damage`
+  // (`0x009C9FD8`), which `PlayerTakeDamage` tests before it takes a life;
+  // this is a test of the zombie, so the player gets it.
+  G.g_player_no_damage[0] = 1;
   z.motion = 10;
   check("it starts unranked, which reads as -1 and passes the rank test",
         z.rank === -1, `rank ${z.rank}`);
@@ -1529,11 +1574,12 @@ const BREAKABLES: BreakablesJson = {
  * number; the case below passed for the right reason under the wrong name.
  */
 function propScene(rng: Rng, mode: GameMode = GameMode.Original): Events {
+  // The mode first: the reset starts the game from the title with it.
+  G.g_GameMode = mode;
   ResetGameGlobals();
   SetGameTables(CHARS, BREAKABLES);
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  EnterPlay();
   G.g_camera_fixed_eye_y = 0;
-  G.g_GameMode = mode;
   void rng;
   return new Events();
 }
@@ -2257,6 +2303,7 @@ function humanoidScene(cmds: HumanoidProgram["cmds"],
                        over: Partial<HumanoidProgram> = {}):
     { a: HumanoidActor; events: Events } {
   ResetGameGlobals();
+  EnterPlay();
   const prog: HumanoidProgram = {
     charType: 1, removePath: 90, removeFrame: 900, flags2: 0,
     motion: 10, phase: 0, cmds, ...over,
@@ -2791,6 +2838,7 @@ function targetScene(over: Partial<NonNullable<Actor["oneHitTarget"]>> = {},
                      rng = new Rng(7)):
     { a: OneHitTargetActor; events: Events; rng: Rng } {
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS, undefined, undefined, undefined);
   G.g_active_cam_path = -1;
   G.g_cam_path_frame = 0;
@@ -3015,6 +3063,7 @@ console.log("\n`ActorInitHitPoints` runs for two classes, not for every spawn:")
   // clamp's floor of 1 turns an honest zero into a one. For a class-0x20
   // sub-type 1 that zero **is** the spin direction, so the clamp reversed it.
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS, undefined, undefined, undefined);
   const zero = { hp: 0 } as unknown as CharacterPlacement;
   check("a class-0x30 spawn is scaled and clamped to at least 1",
@@ -3060,6 +3109,7 @@ function setPieceScene(over: Partial<SetPieceParams>, rng: Rng): {
   a: SetPiecePropActor; events: Events;
 } {
   ResetGameGlobals();
+  EnterPlay();
   const params = { ...SETPIECE_BASE, ...over };
   SetGameTables(CHARS, undefined, { "12288": params });
   G.g_camera_fixed_eye_y = 0;
@@ -3262,6 +3312,7 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
 
   const rescueScene = (rng = new Rng(21)) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS, undefined, undefined, undefined);
     G.g_active_cam_path = 0x39;
     G.g_cam_path_frame = 0;
@@ -3422,6 +3473,7 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
   const triggerScene = (cls: SpawnClass, tail: object,
                         mode = GameMode.Original) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS, undefined, undefined, undefined);
     G.g_GameMode = mode;
     const a = ActorSpawn(0x1234, cls, 0x1a, "trigger", tail, new Rng(5));
@@ -5017,6 +5069,9 @@ console.log("\nclass 0x41, Training's one-shot targets:");
         `hp ${target!.hp} state ${target!.state}`);
   check("and it pays no score", G.g_player_score[0] === before,
         `${G.g_player_score[0]} vs ${before}`);
+  // The mode survives the reset, as the title's choice does; put Arcade back so
+  // the next game started here has Arcade's credits and not Training's one.
+  G.g_GameMode = GameMode.Arcade;
 }
 
 
@@ -5239,7 +5294,7 @@ function thrower(state: number, extra: Record<string, unknown> = {}) {
   ResetGameGlobals();
   SetGameTables(CHARS31);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  EnterPlay();
   // `g_camera_yaw_bams` is the heading *from* the camera *toward* what it
   // looks at -- `ThrowerStateLeapDown` sets the pouncing actor's own yaw from
   // it, and an actor facing the camera carries `VecToAngles(obj - eye)`. This
@@ -5268,6 +5323,7 @@ console.log("\nEnemyThrowerInit: zslman is born NoDismember");
 // because it lives in class 0x31's Init.
 {
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS31);
   const zslman = ActorSpawn(0x9100, SpawnClass.Thrower, 0x18, "zslman",
                             { initialState: ThrowerState.StandAndDecide,
@@ -5579,7 +5635,7 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   z.flags2 = 0;
   z.zones = 2;                          // attack 0 names zone 2, the right arm
   z.action = { motion: 303, ticks: 62, loop: false };
-  G.g_player_invuln_frames = 0;
+  RunOutInvulnerability();
   const before = hits;
   ThrowerStrikeConnect(z, events);
   check("but an attack whose zone has been shot off whiffs", hits === before,
@@ -5757,6 +5813,7 @@ console.log("the counts an actor never joined:");
     ["character type 9", UNCOUNTED_CHAR_TYPE, 0],
   ] as const) {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     const z = spawnZombie(0x1000, ct, "zom",
@@ -5816,7 +5873,7 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   ResetGameGlobals();
   SetGameTables(CHARS_THROW);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  EnterPlay();
   G.g_camera_yaw_bams = 0;
   const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x16, "thrower", {
     initialState: ThrowerState.StandAndDecide, condition: 0,
@@ -5965,6 +6022,7 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
    */
   const throwing = (charType: number, at: number, drop = 0) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS31);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_yaw_bams = 0;
@@ -6114,7 +6172,7 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   ResetGameGlobals();
   SetGameTables(CHARS_REARM);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  EnterPlay();
   G.g_camera_yaw_bams = 0;
   const z = ActorSpawn(0x9300, SpawnClass.Thrower, 0x16, "zsass", {
     initialState: ThrowerState.StandAndDecide, condition: 0,
@@ -6206,7 +6264,11 @@ console.log("\na downed thrower, shot on the ground:");
   SetGameTables(CHARS31);
   G.g_app_state = AppState.InPlay;
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  EnterPlay();
+  // A minute of a thrower on its feet takes every life, and a player out of
+  // play has no trigger. This is a test of the thrower: the player is given
+  // the engine's own "cannot be hurt" byte, `g_player_no_damage`.
+  G.g_player_no_damage[0] = 1;
   G.g_nFiringGate = 1;
   G.g_camera_yaw_bams = 0;
 
@@ -6331,6 +6393,7 @@ console.log("\na downed thrower, shot on the ground:");
 console.log("coli/, the game's own collision:");
 {
   ResetGameGlobals();
+  EnterPlay();
   T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
   G.g_coli_full_set = ["wall", "floor"];
   G.g_camera_fixed_eye_y = -999;          // so a fallback is unmistakable
@@ -6446,6 +6509,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
   const civScene = (cmds: CivilianCmdJson[][], children: number[] = [],
                     items: CivilianItemJson[] = [], seed?: number) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
       entries: [0],
       scripts: cmds,
@@ -6658,11 +6722,13 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     const { a, events } = civScene([[
       cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End),
     ]]);
-    G.g_player_lives = [2, 2];
+    EnterPlay();
+    const lives0 = G.g_player_lives[0];
     a.flags |= 8;
     cFrame(a, events);
     check("a civilian with no on-shot script cannot be shot",
-          G.g_player_lives[0] === 2 && G.g_player_score[0] === 0 && !a.dead,
+          G.g_player_lives[0] === lives0 && G.g_player_score[0] === 0
+          && !a.dead,
           `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
   }
   {
@@ -6675,18 +6741,21 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.SetTurnRate, 55),
        cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
     ]);
-    G.g_player_lives = [2, 2];
-    G.g_player_score = [0, 0];
+    EnterPlay();
+    // Points to lose: `ScoreAddForPlayer` floors the score at 0, so a penalty
+    // off an empty score reads as nothing at all.
+    ScoreAddForPlayer(0, 1000);
+    const lives0 = G.g_player_lives[0];
     let shot = 0;
     events.on("civilian.shot", () => { shot += 1; });
     a.flags |= 8 | 2;                       // hit, and bit 1 names player 0
     cFrame(a, events);
-    // -200, not -100: `PlayerTakeDamage` charges its own 100 for the life and
+    // 200, not 100: `PlayerTakeDamage` charges its own 100 for the life and
     // `CivilianUpdate` charges another for the civilian. That is what
     // "-100 twice" in docs/formats/spawns.md is.
     check("shooting a civilian costs a life and 100 points twice",
-          shot === 1 && G.g_player_lives[0] === 1
-          && G.g_player_score[0] === -200,
+          shot === 1 && G.g_player_lives[0] === lives0 - 1
+          && G.g_player_score[0] === 800,
           `lives ${G.g_player_lives[0]} score ${G.g_player_score[0]}`);
     check("...and switches it to the on-shot script",
           a.civ?.turnRate === 55 && a.dead, `rate ${a.civ?.turnRate}`);
@@ -6698,13 +6767,15 @@ console.log("\nclass 0x10, the civilian and the rescue:");
        cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
       [cmd(CivilianOp.Wait, 0), cmd(CivilianOp.End)],
     ]);
-    G.g_player_lives = [2, 2];
-    G.g_player_score = [0, 0];
+    EnterPlay();
+    ScoreAddForPlayer(0, 1000);
+    ScoreAddForPlayer(1, 1000);
+    const lives0 = G.g_player_lives[0];
     a.flags |= ActorFlag.Dead;              // a killing shot
     cFrame(a, events);
     check("a killing shot charges 100 to BOTH players and no life",
-          G.g_player_score[0] === -100 && G.g_player_score[1] === -100
-          && G.g_player_lives[0] === 2,
+          G.g_player_score[0] === 900 && G.g_player_score[1] === 900
+          && G.g_player_lives[0] === lives0,
           `${G.g_player_score.join("/")} lives ${G.g_player_lives[0]}`);
   }
 
@@ -7136,6 +7207,7 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
                        ]],
                        attackScript: TargetScriptJson | null = null) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
       entries: [0], scripts: civCmds, items: [],
       spawns: {
@@ -7543,6 +7615,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
   // A floor at y = 0 and nothing else, so the snap has exactly one answer.
   const scene30 = () => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     T.coli = { files: ["t"], blobs: { floor: FLOOR_BLOB } };
@@ -7791,6 +7864,7 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
 {
   const scenePush = () => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     T.coli = { files: ["t"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
@@ -7855,6 +7929,7 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
   // that. See `game/class30/walk_distance.ts`.
   const walker = (dist: number) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
@@ -7932,6 +8007,7 @@ console.log("\nthe clip clock the scripts count in:");
   // names is in *those* units. Counting in authored frames loses every cue
   // past halfway, which is what left the mauled civilians alive.
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   const z = spawnZombie(0x7200, 1, "clock");
@@ -8005,6 +8081,7 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   // captor walking at its civilian was shoved off it from 13.5 away when its
   // script wanted to be within 6. It never arrived and nobody was ever mauled.
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
@@ -8047,6 +8124,7 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
   // piece played its dying clip over and over.
   const dying = (loops: number) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
@@ -8130,6 +8208,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
 
   const spawn = (init: number, entry: unknown, exit = ZombieState.AttackRun) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
@@ -8431,6 +8510,149 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
   }
 }
 
+console.log("\nthe player shell: in, hit, out, continue, over:");
+{
+  // Everything through the ported routines: the reset starts a game from the
+  // title, the first task turn enters play, the hits come from
+  // `PlayerTakeDamage`, and the frames from `GameUpdate`.
+  const rng = new Rng(3);
+  const f = { host: NULL_HOST, rng };
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  check("the reset leaves player 0 at state 0 with its handler installed, "
+        + "one credit spent of six",
+        G.g_player_state[0] === PlayerState.EnterNewGame
+        && G.g_player_task[0] === PlayerTask.EnterNewGame
+        && G.g_player_state[1] === PlayerState.Out
+        && G.g_credits[0] === 5 && G.g_app_state === AppState.InPlay,
+        `${G.g_player_state} tasks ${G.g_player_task} credits ${G.g_credits}`);
+  PlayerTasksRun(f);
+  check("...and its first turn is PlayerEnterPlay(0): in play, three lives, "
+        + "one player, one attacker, 90 frames' grace",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_player_lives[0] === 3 && G.g_players_in_play === 1
+        && G.g_max_attackers === 1 && G.g_player_invuln_frames[0] === 90
+        && G.g_player_task[0] === PlayerTask.InPlay,
+        `state ${G.g_player_state[0]} lives ${G.g_player_lives[0]} `
+        + `in ${G.g_players_in_play}/${G.g_max_attackers} `
+        + `inv ${G.g_player_invuln_frames[0]}`);
+  check("a hit inside the grace is refused",
+        !PlayerTakeDamage(0, 1, 9), `lives ${G.g_player_lives[0]}`);
+
+  // Off the path camera the last life cannot go.
+  G.g_scene_state_major_entered = 1;
+  G.g_scene_state_major = 1;
+  for (let i = 0; i < 3; i++) {
+    RunOutInvulnerability();
+    PlayerTakeDamage(0, 1, 9);
+  }
+  check("off the path camera a hit floors lives at one",
+        G.g_player_lives[0] === 1, `lives ${G.g_player_lives[0]}`);
+  check("...and the score does not go below zero",
+        G.g_player_score[0] === 0, `score ${G.g_player_score[0]}`);
+
+  // On it, the last one goes, and the next task turn takes the player out.
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  RunOutInvulnerability();
+  PlayerTakeDamage(0, 1, 9);
+  check("on the path camera the last life goes",
+        G.g_player_lives[0] === 0, `lives ${G.g_player_lives[0]}`);
+  PlayerTasksRun(f);
+  check("...and the player leaves play: state 4, nobody in play, "
+        + "not attackable",
+        G.g_player_state[0] === PlayerState.Continue
+        && G.g_players_in_play === 0 && !IsPlayerAttackable(0),
+        `state ${G.g_player_state[0]} in ${G.g_players_in_play}`);
+  QueueShotRequest(0, { origin: vec3(), dir: vec3(0, 0, 1) });
+  const fired = G.g_nPlayerFired[0];
+  run(1, rng, new Events());
+  check("...a player in the continue has no trigger",
+        G.g_nPlayerFired[0] === fired && G.g_shot_requests.length === 0,
+        `fired ${fired} -> ${G.g_nPlayerFired[0]}`);
+  const armed = G.g_nRunPhase;
+  run(1, rng, new Events());
+  check("...and the run falls into its continue screen: phase 3, then 4",
+        armed === RunPhase.ContinueArm
+        && G.g_nRunPhase === RunPhase.ContinueCountdown,
+        `phase ${armed} -> ${G.g_nRunPhase}`);
+
+  // START with a credit: state 1, a point, the rank down one, three lives.
+  const rank = G.g_damage_rank;
+  G.g_pad_state = PadBit.Start0;
+  run(1, rng, new Events());
+  G.g_pad_state = 0;
+  run(1, rng, new Events());
+  check("START during the countdown continues: in play again with three "
+        + "lives, a credit spent, one point, the rank one lower",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_player_lives[0] === 3 && G.g_credits[0] === 4
+        && G.g_player_score[0] === 1
+        && G.g_damage_rank === Math.max(0, rank - 1)
+        && G.g_player_invuln_frames[0] > 90,
+        `state ${G.g_player_state[0]} lives ${G.g_player_lives[0]} `
+        + `credits ${G.g_credits[0]} score ${G.g_player_score[0]} `
+        + `rank ${rank} -> ${G.g_damage_rank}`);
+  check("...and the run goes back to play",
+        G.g_nRunPhase === RunPhase.InPlay, `phase ${G.g_nRunPhase}`);
+
+  // Run out again and let the countdown run out: game over.
+  G.g_player_lives[0] = 0;
+  run(1, rng, new Events());
+  let frames = 0;
+  while (G.g_app_state !== AppState.GameOver && frames < 2000) {
+    run(1, rng, new Events());
+    frames += 1;
+  }
+  check("a continue nobody takes ends in the game-over screen, after ten "
+        + "digits of 0x2D a frame",
+        G.g_app_state === AppState.GameOver && frames > 880 && frames < 930,
+        `${frames} frames, app ${G.g_app_state}`);
+  check("...and on the game-over screen the scene no longer runs",
+        (() => { const g = G.g_frame; run(10, rng, new Events());
+                 return G.g_frame === g + 10; })()
+        && G.g_nRunPhase === 0, `phase ${G.g_nRunPhase}`);
+}
+
+{
+  // A stage step keeps the player: the block rides across, and
+  // `AdvanceToNextScene` parks them at 2 for row 2 -- no lives, no counts.
+  const rng = new Rng(4);
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  EnterPlay();
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  PlayerTakeDamage(0, 1, 9);
+  ScoreAddForPlayer(0, 500);
+  const carry = PlayerBlockCapture();
+  ResetGameGlobals(carry);
+  check("across a stage step the player is parked at 2",
+        G.g_player_state[0] === PlayerState.SceneReentry
+        && G.g_player_task[0] === PlayerTask.ReenterAfterScene,
+        `state ${G.g_player_state[0]}`);
+  PlayerTasksRun({ host: NULL_HOST, rng });
+  check("...and re-enters by row 2: lives and score kept, counts unchanged, "
+        + "90 frames' grace",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_player_lives[0] === 2 && G.g_player_score[0] === 500
+        && G.g_players_in_play === 1 && G.g_max_attackers === 1
+        && G.g_player_invuln_frames[0] === 90,
+        `state ${G.g_player_state[0]} lives ${G.g_player_lives[0]} `
+        + `score ${G.g_player_score[0]} in ${G.g_players_in_play}`);
+}
+
+{
+  // `CheckPlayerCanBeHit`: indices, and in play the states 1, 4 and 5 only.
+  G.g_GameMode = GameMode.Arcade;
+  ResetGameGlobals();
+  EnterPlay();
+  check("CheckPlayerCanBeHit refuses an index that is not 0 or 1",
+        CheckPlayerCanBeHit(2) === -1 && CheckPlayerCanBeHit(-1) === -1);
+  check("...and a player at 9 while a stage runs",
+        CheckPlayerCanBeHit(1) === -3 && CheckPlayerCanBeHit(0) === 0);
+}
+
 console.log("\nIsPlayerAttackable: the scene has to be running:");
 {
   // Three clauses, all ported. The first is the interesting one:
@@ -8438,6 +8660,7 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
   // camera row -- so a scripted view-angle turn is a window in which the
   // player cannot be hit.
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   G.g_player_lives = [2, 2];
   check("a player is not attackable before a scene state is entered",
@@ -8482,6 +8705,7 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
   // when this refuses, so no enemy takes a permit during a scripted camera.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_player_lives = [2, 2];
     const z = spawnZombie(0x7D00, 1, "claimant");
@@ -8505,6 +8729,7 @@ console.log("\nResetSceneOnEnter: what a scene starts clean:");
   // where `ResetGameOnStart` (`FUN_0045FEF0`) zeroes the run totals and the
   // scene load zeroes these.
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_enemies_alive = 4;
@@ -8543,6 +8768,7 @@ console.log("\nResetSceneOnEnter: what a scene starts clean:");
   G.g_script_flags[4] = 1;
   G.g_civilians_alive = 2;
   ResetGameGlobals();
+  EnterPlay();
   check("the pool reset still performs the scene reset",
         G.g_enemies_alive === 0 && G.g_civilians_alive === 0
         && (G.g_script_flags[4] ?? 0) === 0,
@@ -8564,6 +8790,7 @@ console.log("\nthe two enemy counters, stepped and not derived:");
   };
 
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   check("a scene starts with both counts at zero",
@@ -8620,6 +8847,7 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
   const LIMP_MOTION = 0x3f7;
   const leaper = (hp = 100) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
@@ -8706,6 +8934,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
 
   const thrower = (cond = 7) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
@@ -8759,6 +8988,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
   // plane and threw from behind the wall he had been standing on.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;          // the ground plane, far below
@@ -8839,6 +9069,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
 
     const axeMan = (flags: number) => {
       ResetGameGlobals();
+      EnterPlay();
       SetGameTables(CHARS);
       G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
       G.g_camera_fixed_eye_y = 0;
@@ -9070,7 +9301,7 @@ console.log("\nActorBodyConditionFromHands:");
     ResetGameGlobals();
     SetGameTables(CHARS_AXE);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    EnterPlay();
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(at, SpawnClass.Zombie, 0x14, "znonoopa", {
       initialState: ZombieState.AttackRun, condition: cond,
@@ -9162,6 +9393,7 @@ console.log("\nActorBodyConditionFromHands:");
 
     // Character type 1 has no 1-or-2 row, so the routine only ever writes 0.
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     const znassb = ActorSpawn(0x6800, SpawnClass.Zombie, 1, "znassb", {
@@ -9238,7 +9470,7 @@ console.log("\nthe crawler's undamaged swing:");
     ResetGameGlobals();
     SetGameTables(CHARS_CRAWLER);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    EnterPlay();
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(0x4048, SpawnClass.Zombie, 12, "znkager", {
       initialState: ZombieState.AttackRun, condition: 4,
@@ -9338,6 +9570,7 @@ console.log("\nthe crawler's undamaged swing:");
 // (`FUN_00402E00`): the slot array and nothing else.
 {
   ResetGameGlobals();
+  EnterPlay();
 
   // Claimed: somebody is in the camera's slots.
   G.g_enemy_slots = [0];
@@ -9375,6 +9608,7 @@ console.log("\nthe crawler's undamaged swing:");
 // catches the path's own target.
 {
   ResetGameGlobals();
+  EnterPlay();
   // A camera at the origin, the rail aimed down +z, and the aim pulled a
   // quarter turn off it by the enemy that has just died.
   const seat = (offDegrees: number) => {
@@ -9431,6 +9665,7 @@ console.log("\nthe crawler's undamaged swing:");
   // A wider swing takes longer, which is the whole point of easing it.
   const settleFrom = (deg: number): number => {
     ResetGameGlobals();
+    EnterPlay();
     seat(deg);
     G.g_enemies_alive = 0;
     G.g_enemy_slots = [];
@@ -9449,6 +9684,7 @@ console.log("\nthe crawler's undamaged swing:");
   // The flag stays up once it is up: the mode is still 2, so the selector
   // does not clear it and the hand-back takes its already-on-the-rail arm.
   ResetGameGlobals();
+  EnterPlay();
   seat(0);
   G.g_enemies_alive = 0;
   G.g_enemy_slots = [];
@@ -9476,6 +9712,7 @@ console.log("\nthe crawler's undamaged swing:");
 // `CameraTrackEnemiesTick`, which the hand-back runs *instead of*.
 {
   ResetGameGlobals();
+  EnterPlay();
   G.g_camera_settled = 1;
   CameraActorTick();
   check("the camera actor clears `g_camera_settled` before any driver runs",
@@ -9500,6 +9737,7 @@ console.log("\nthe crawler's undamaged swing:");
 // in every snapshot regardless.
 {
   ResetGameGlobals();
+  EnterPlay();
   G.g_active_cam_path = 39;
 
   G.g_cam_path_frame = 280;
@@ -9548,6 +9786,7 @@ console.log("\nthe crawler's undamaged swing:");
   const captor = (state: number, attackState: number,
                   point: [number, number, number], yaw = 0) => {
     ResetGameGlobals();
+    EnterPlay();
     const z = spawnZombie(0x18e8, 1, "captor");
     z.state = state;
     z.attackState = attackState;
@@ -9592,6 +9831,7 @@ console.log("\nthe crawler's undamaged swing:");
 {
   const staged = (cue: { path: number; frame: number } | null) => {
     ResetGameGlobals();
+    EnterPlay();
     const z = spawnZombie(0xa030, 1, "staged captor");
     z.state = ZombieState.TargetMotionScript;
     z.attackState = ZombieState.AttackRun;
@@ -9654,6 +9894,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
   };
   const rng = new Rng(1);
   ResetGameGlobals();
+  EnterPlay();
   RainResetParticles(rules, rng);
   check("the pool is the extent of the array, not a stored count",
         G.g_rain_particles.length === RAIN_PARTICLE_COUNT,
@@ -9696,9 +9937,11 @@ console.log("\nrain: DrawRainParticles' simulation half");
 
   // Determinism: the same seed must give the same rain, or a replay diverges.
   ResetGameGlobals();
+  EnterPlay();
   RainResetParticles(rules, new Rng(7));
   const a = JSON.stringify(G.g_rain_particles);
   ResetGameGlobals();
+  EnterPlay();
   RainResetParticles(rules, new Rng(7));
   check("and the same seed gives the same rain",
         JSON.stringify(G.g_rain_particles) === a);
@@ -9882,6 +10125,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
   // pushed at all — which is "quite far into the wall".
   {
     ResetGameGlobals();
+    EnterPlay();
     T.coli = { files: ["test"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["wall", "floor"];
     // The wall's outward normal is -x, so the solid side is x > 30.
@@ -10357,6 +10601,9 @@ console.log("\nthe shot queue:");
     check("a hit fires the gun too, and before whatever the round met",
           heard[0] === g_gunshot_sound_ids[0],
           heard.map((h) => h.toString(16)).join(" "));
+    // Player 1 has to be in play to pull a trigger at all: the trigger is
+    // polled from the player's own task.
+    JoinPlayerTwo();
     heard.length = 0;
     QueueShotRequest(1, RAY);
     GameUpdate(EYE, 1 / 60, host, rng, events);
@@ -10412,6 +10659,7 @@ console.log("\nthe shot queue:");
   // run it replaced.
   QueueShotRequest(0, RAY);
   ResetGameGlobals();
+  EnterPlay();
   check("a scene reset empties the queue", G.g_shot_requests.length === 0);
 }
 
@@ -10575,6 +10823,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
   };
   const clear = () => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
@@ -11213,6 +11462,7 @@ console.log("class 0x30 state 9: the body is thrown, not dropped:");
 
   const shot = (condition: number) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
@@ -11412,7 +11662,7 @@ console.log("class 0x30 state 12, with no clip to wait on:");
   ResetGameGlobals();
   SetGameTables(CHARS_NO_FALL);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-  G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+  EnterPlay();
   G.g_nFiringGate = 1;
   const events = new Events();
   const z = spawnZombie(0x3520, 1, "axe man, no fall clip");
@@ -11709,6 +11959,7 @@ console.log("\nan entrance state is counted from its first frame:");
                        maxHp: 100, visible: true, pos: vec3(0, 61, -20) }, rng);
 
   ResetGameGlobals();
+  EnterPlay();
   const a = drop(0xb000);
   const b = drop(0xb001);
   check("both droppers join the counters in `Init`, before a frame runs",
@@ -12131,6 +12382,7 @@ console.log("\na stashed path is played by a hook that steps first:");
 // settled, sunk and freed.
 {
   ResetGameGlobals();
+  EnterPlay();
   const rng = new Rng(7);
   SpawnSeveredHead(vec3(0, 40, 0), 0x1234, 0, 0);
   check("a burst puts one head in the pool", G.g_severed_heads.length === 1);
@@ -12185,6 +12437,7 @@ console.log("\na stashed path is played by a hook that steps first:");
   const row = [900, 901, 902, 903, 904];
   const zombie = (flags: number) => {
     ResetGameGlobals();
+    EnterPlay();
     const z = spawnZombie(0x4000, 1, "runner");
     z.flags = flags;
     return z;
@@ -12250,6 +12503,7 @@ console.log("\na stashed path is played by a hook that steps first:");
 
   if (process.env.HEAD_TRACE) {
     ResetGameGlobals();
+    EnterPlay();
     const r = new Rng(3);
     SpawnSeveredHead(vec3(0, 11, 0), 0x30, 0, 0);
     const h = G.g_severed_heads[0]!;
@@ -12846,6 +13100,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   } as unknown as ScriptJson;
 
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS, undefined, undefined, undefined, undefined, {
     entries: [0],
     // The shape of the shipped stream 64, which is the one the hostage at
@@ -12964,6 +13219,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
         `${[...canRaise].sort((a, b) => a - b).join(",")}`);
   {
     ResetGameGlobals();
+    EnterPlay();
     const unraisable = {
       ...script,
       blocks: [{
@@ -12985,6 +13241,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   // 0x31's cue conditions, 0x52's despawn) sees a world the address does not
   // describe.
   ResetGameGlobals();
+  EnterPlay();
   const w2 = new Walker(script, host);
   seekTo(w2, 0, 0, 1);
   check("a seek over the gate leaves the flag it was waiting for raised",
@@ -13000,6 +13257,7 @@ console.log("\n`wait_script_flag` holds for the actor that raises the flag:");
   // the player did (bug 16). `Walker.retireFlagRaisers`.
   {
     ResetGameGlobals();
+    EnterPlay();
     const placed = {
       ...script,
       civilians: T.civilians,
@@ -13081,6 +13339,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
   /** Drive one card to its flag and report how many frames it took. */
   const runCard = (cls: SpawnClass, flag: number, expect: number) => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     const script = cardScript(cls, flag);
     const w = new Walker(script, cardHost);
@@ -13148,6 +13407,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
   // The result card: 420 frames, and it drops the trigger on its first.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_nFiringGate = 1;
     const w = new Walker(cardScript(SpawnClass.ResultCard, RESULT_CARD_FLAG),
@@ -13183,6 +13443,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
   // spawns the card can open its flag, one that does not, cannot.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     const withCard = ScriptFlagsThisBundleCanRaise(
       cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG));
@@ -13202,6 +13463,7 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
   // collapse duplicates, because stage 3's block 11 lists one twice.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     const two = {
       ...cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
@@ -13251,6 +13513,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
   /** One boss, straight out of `Boss4Init`, with the entrance `entrance`. */
   const spawnBoss = (entrance: number): Actor => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(BOSS_CHARS);
     // `ActorSpawn` runs the class's `Init` itself, the way
     // `SpawnFromDescriptor` does; calling it again here would count the boss
@@ -13426,6 +13689,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
   // The half that decides whether the gate is evaluated at all.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(BOSS_CHARS);
     const bossScript = {
       scene: 0, stage: 4, game_mode: 0, evt_file: "test", entry_block: 0,
@@ -13454,6 +13718,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
   // has to notice a write that did not come through evt 0x1F.
   {
     ResetGameGlobals();
+    EnterPlay();
     const sh = new Shutter();
     sh.reset();
     sh.set(5);
@@ -13528,6 +13793,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
    */
   const spawnBoss = (state: number, hp: number): Boss2Actor => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS14);
     const a = ActorSpawn(0x2400, SpawnClass.Boss2, 0x47, "boss2",
                          { class14: desc14(state) }, new Rng(7));
@@ -13700,6 +13966,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
   // evaluates the gate. Both directions.
   {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS14);
     const spawnScript = (cls: number) => ({
       scene: 0, stage: 5, game_mode: 0, evt_file: "test", entry_block: 0,
@@ -13765,6 +14032,7 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
   };
   const reset = () => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
@@ -14169,6 +14437,7 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
   };
   const clear = () => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
@@ -14404,6 +14673,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
 
   const reset = () => {
     ResetGameGlobals();
+    EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
@@ -15216,9 +15486,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     // behind one cannot deadlock.
     const rng = new Rng(67);
     scene(0, rng);
-    G.g_players_in_play = 1;
     G.g_active_player = 0;
-    G.g_player_state = [5, 0];
     G.g_camera_block_eye = vec3(100, -10, -140);
     const o = mkBat(0x9e00, 0, 0, 0, rng);
     const lives = G.g_player_lives[0];
@@ -15262,8 +15530,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
 
     // ...and so does the swarm's, through the same strike.
     // Out of the invulnerability window, and above the port's floor of one.
-    G.g_player_invuln_frames = 0;
-    G.g_player_lives[0] = 3;
+    RunOutInvulnerability();
     mkBat(0x9e80, 2, 0, 0, rng, vec3(90, -10, -120));
     const swarm = G.g_object_list.filter(
       (a) => a.cls === SpawnClass.Bat && !a.despawned && !bat(a).isWing
@@ -15725,9 +15992,7 @@ console.log("\nznjoe's creature:");
     ResetGameGlobals();
     SetGameTables(joeChars);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
-    G.g_player_state = [5, 5];
-    G.g_app_state = AppState.InPlay;
+    EnterPlay();
     G.g_nFiringGate = 1;
     const joe = spawnZombie(0x0a68, JOE, "znjoe", {}, rng);
     joe.visible = true;
@@ -16041,6 +16306,7 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   // ignored the rotation would miss it.
   const rng = new Rng(26);
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   T.coli = { files: ["test"], blobs: {
     deck: coliQuad([0, 1, 0, 2], 1,
@@ -16146,6 +16412,7 @@ console.log("stage 3's boats -- the one the player rides and the one that "
   // other boat.
   const rng = new Rng(18);
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables({
     ...CHARS,
     placements: [
@@ -16315,12 +16582,15 @@ console.log("\nclass 0x40, the horde:");
 
   /** A stage-1 or stage-2 room with the placer's descriptor as it ships. */
   const room = (scene: number, block: number, rng: Rng, players = 1) => {
+    // Arcade, whatever an earlier test left: the mode is the title's, and a
+    // Training or Boss game starts with one credit, which the start spends --
+    // leaving none for player 2 to join on.
+    G.g_GameMode = GameMode.Arcade;
     ResetGameGlobals();
     SetGameTables(HORDE_CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
-    G.g_player_state = [5, 0];
-    G.g_players_in_play = players;
+    EnterPlay();
+    if (players === 2) JoinPlayerTwo();
     G.g_active_player = 0;
     G.g_scene_index = scene;
     G.g_evt_block_index = block;
@@ -16480,7 +16750,7 @@ console.log("\nclass 0x40, the horde:");
     check("outside play nobody dives, and nobody is hurt",
           members().every((m) => horde(m).state === HordeState.Wander
                                  || horde(m).state === HordeState.Enter)
-          && G.g_player_lives[0] === PLAYER.start_lives,
+          && G.g_player_lives[0] === G.g_start_lives,
           members().map((m) => HordeState[horde(m).state]).join(","));
   }
 
@@ -16771,6 +17041,7 @@ console.log("\nclass 0x40, the horde:");
   // zombie.
   const rng = new Rng(19);
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables({
     ...CHARS,
     placements: [
@@ -16816,6 +17087,7 @@ console.log("\nclass 0x40, the horde:");
   // `SpawnPropStripEffect` (`FUN_0043FCA0`) kind 3 and its update: nothing
   // drawn on the spawn frame, then 0x174A..0x1785 once each, then gone.
   ResetGameGlobals();
+  EnterPlay();
   const ev = new Events();
   const heard: number[] = [];
   ev.on("sound.play", (e) => heard.push(e.id));
@@ -16919,10 +17191,7 @@ console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
     ResetGameGlobals();
     SetGameTables(CARRY_CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
-    G.g_player_state = [5, 5];
-    G.g_app_state = AppState.InPlay;
-    G.g_players_in_play = 1;
+    EnterPlay();
     G.g_active_player = 0;
     const z = spawnZombie(0x4050, 1, "drummer", {
       initialState: ZombieState.CarryProp,
@@ -17082,6 +17351,7 @@ console.log("\nclass 0x30 state 37, release 3 — stage 1's barrel over the civi
   };
   const rng = new Rng(9);
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables({ ...CHARS, types: { "1": DROP_TYPE } } as unknown as CharactersJson);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_app_state = AppState.InPlay;
@@ -17129,6 +17399,7 @@ console.log("\na civilian's captors are made with it, though the script never li
   // unmade -- stage 1's barrel man over the civilian (bug 11) among them.
   const rng = new Rng(21);
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables({
     ...CHARS,
     placements: [
@@ -17166,6 +17437,7 @@ console.log("\na civilian's captors are made with it, though the script never li
 console.log("\nthe gun lights:");
 {
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   // A camera one unit per axis of its own, at (10, 20, 30), looking down -z:
   // `viewPoint` is the camera block's +0x40 matrix, camera -> world.
@@ -17287,6 +17559,7 @@ console.log("\nthe gun lights:");
 console.log("\nclass 0x41 type 48, the lamp:");
 {
   ResetGameGlobals();
+  EnterPlay();
   // The mode is not scene state and an earlier section leaves Training up,
   // where a prop hit pays nothing.
   G.g_GameMode = GameMode.Arcade;
@@ -17395,10 +17668,7 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
     SetGameTables({ ...CHARS, types: { "1": ROLL_TYPE } } as unknown as CharactersJson);
     T.breakables = { effects: { "18": DRUM_EFFECT } } as never;
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
-    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
-    G.g_player_state = [5, 5];
-    G.g_app_state = AppState.InPlay;
-    G.g_players_in_play = 1;
+    EnterPlay();
     G.g_active_player = 0;
     G.g_camera_fixed_eye_y = -20;
     const z = spawnZombie(0x131b8, 1, "barrel roller", {
@@ -17499,6 +17769,7 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
 console.log("\nlight block 1 (the characters' light):");
 {
   ResetGameGlobals();
+  EnterPlay();
   SetGameTables(CHARS);
   const script = {
     scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,

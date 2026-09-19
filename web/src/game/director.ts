@@ -22,16 +22,18 @@ import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
 import { SpawnHordePlacers } from "./class40";
 import { SecondsToTicks, T } from "./tables";
-import { TickPlayerInvulnerability } from "./combat/player";
 import { RankEnemiesByDistance } from "./combat/rank";
-import { ProcessShotRequests } from "./combat/shot";
+import { DropDueShotRequests } from "./combat/shot";
+import { CommitAppState } from "./app_state";
+import { PlayerTasksRun } from "./player_shell";
+import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
 import { DescriptorFromPlacement } from "./descriptor";
 import type { CharacterPlacement } from "../bundle/characters";
-import { ActorByAt, G } from "./globals";
+import { ActorByAt, AppState, G } from "./globals";
 import { ActorUpdateSuppressedBones } from "./parts";
 import type { GameHost } from "./host";
 import { ActorAdvanceMotion } from "./motion";
@@ -553,11 +555,38 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // at its first slot rather than its second. The engine's task list has the
   // same property for a different reason: `ActorAlloc` appends, and the walk
   // that would step a new task has already gone past the end.
+  // `[diverges]` The game-over screen (`FUN_00460960`, app state 7) is not
+  // ported: once the run has asked for it the scene simply stops, and the app
+  // stops the transport. See `run_phase.ts`.
+  if (G.g_app_state === AppState.GameOver) {
+    return { lookAt: G.g_camera_block_target };
+  }
   ShotEffectsTick();
-  ProcessShotRequests(host, rng, events);
+  // The run phase wraps the task walk: `RunPhaseDispatch` (`FUN_0045FEE0`)
+  // runs `RunSceneTasksAndTimers` from every phase a stage is played in, and
+  // the continue screen is what it does around the walk. Then the frame's
+  // screen request, if one was made, is committed -- `CommitAppState`
+  // (`FUN_0040E860`) ends the engine's tick the same way.
+  let result: FrameResult = { lookAt: G.g_camera_block_target };
+  RunPhaseDispatch(() => {
+    result = SceneTaskWalk(eye, dt, frames, host, rng, events);
+  });
+  CommitAppState();
+  return result;
+}
+
+/**
+ * `[port-only]` -- the scene's task list, walked in the engine's order: the
+ * two player tasks first (`PlayerTasksCreate` allocates them before anything
+ * else in a scene), which is where the trigger is polled; then the actors and
+ * the non-actor pools; then the camera tasks.
+ */
+function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
+                       rng: Rng, events?: Events): FrameResult {
+  PlayerTasksRun({ host, rng, events });
+  DropDueShotRequests();
   // The heads the burst threw, stepped where the engine steps its tasks.
   SeveredHeadsTick(rng, events);
-  TickPlayerInvulnerability(frames);
 
   // Once a frame, for everyone: the rank the approach state tests against the
   // ring table's allowance.

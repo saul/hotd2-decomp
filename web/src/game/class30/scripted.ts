@@ -223,9 +223,9 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
   if (obj.sub === 2) {
     if (MotionPlayFrame(obj) !== (t.hit_frame ?? -1)) return;
     if (obj.attackPermit >= 0) {
-      PlayerTakeDamage(obj.attackPermit, obj,
+      PlayerTakeDamage(obj.attackPermit, 1,
                        obj.motion === GRAB_HIT_KIND_MOTION ? 0 : GRAB_HIT_KIND,
-                       events);
+                       events, obj);
     }
     obj.sub = 3;
   }
@@ -309,7 +309,7 @@ export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
   if (obj.sub === 4) {
     if (MotionPlayFrame(obj) === (t.hit_frame ?? -1)) {
       if (obj.attackPermit >= 0) {
-        PlayerTakeDamage(obj.attackPermit, obj, LEAP_HIT_KIND, events);
+        PlayerTakeDamage(obj.attackPermit, 1, LEAP_HIT_KIND, events, obj);
       }
       obj.sub = 5;
     }

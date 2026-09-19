@@ -408,7 +408,7 @@ function BatStrikeAndLeave(obj: Actor, sub: BatTail, f: ClassFrame): void {
       if (G.g_active_player === 0) obj.attackPermit = 0;
       if (G.g_active_player === 1) obj.attackPermit = 1;
     }
-    PlayerTakeDamage(obj.attackPermit, obj, BAT_DAMAGE_KIND, f.events);
+    PlayerTakeDamage(obj.attackPermit, 1, BAT_DAMAGE_KIND, f.events, obj);
   }
   BatReleaseCounts(obj);
   BatLeaveMemberSlot(obj, sub);

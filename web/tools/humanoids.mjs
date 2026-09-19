@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUNDLE_ROOT } from "./lib/bundle_root.ts";
 import { Rng } from "../src/core/rng.ts";
+import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { authoredFrameOfTicks } from "../src/core/play_cursor.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
@@ -49,8 +50,9 @@ const placementAt = new Map(chars.placements.map((p) => [p.at, p]));
 ResetGameGlobals();
 SetGameTables(chars, script.breakables, script.set_pieces,
               script.humanoids, script.coli, script.civilians);
-G.g_players_in_play = 1;
-G.g_player_lives = [2, 2];
+// In play through the ported routines, not by hand (L49): the reset
+// started the game from the title, and this is the first player turn.
+PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
 const rng = new Rng(1);
 const events = new Events();
 let eye = vec3(0, 6, 0);

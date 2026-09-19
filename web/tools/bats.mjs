@@ -8,11 +8,13 @@
  * screen". The strike's only gate is `g_player_state == 5` for either player
  * (`BatDiveUpdate` 0x0042E88A, `BatSwarmUpdate` 0x0042F1B5), and the page left
  * it at 0 -- while `port.test.ts` and `horde.mjs` set 5 by hand and passed.
- * So this harness **does not touch `g_player_state`**: the state is whatever
- * `ResetGameGlobals` leaves, which is what the page runs on.
+ * So this harness **does not touch the player at all**: the state is whatever
+ * `ResetGameGlobals` and the first frame's player task make it, which is what
+ * the page runs on.
  *
- * Lives are raised to nine so the port's floor of one cannot hide a strike,
- * and the harness counts `player.damaged` events from bats. The 90-frame
+ * The player is whatever the reset and the first frame make of it -- three
+ * lives, in play, through `game/player_shell.ts` -- and the harness counts
+ * `player.damaged` events from bats. The 90-frame
  * invulnerability window means a flight of bats twenty frames apart does not
  * take a life each; what is asserted is that the strike *path* runs -- one
  * damage per arrival outside the window -- and that the counters come back.
@@ -66,10 +68,7 @@ for (const [name, stage, block, step, entry] of CASES) {
   ResetGameGlobals();
   SetGameTables(script.characters, undefined, undefined, undefined,
                 script.coli, script.civilians);
-  G.g_players_in_play = 1;
-  G.g_player_lives = [9, 9];
   G.g_nFiringGate = 1;
-  const state0 = [...G.g_player_state];
   const rng = new Rng(1);
   const events = new Events();
   const hits = [];
@@ -93,6 +92,8 @@ for (const [name, stage, block, step, entry] of CASES) {
     && s.step === step);
   const seen = new Set();
   const built = new Set();
+  /** The player states after the first frame, which is where play begins. */
+  let state0 = null;
   const bySub = new Map();
   let seated = false;
   let arrived = 0;
@@ -131,6 +132,7 @@ for (const [name, stage, block, step, entry] of CASES) {
     }
     peak = Math.max(peak, bs.length);
     GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+    if (state0 === null) state0 = [...G.g_player_state];
     for (const [at, o] of live) {
       if (!o.despawned) continue;
       live.delete(at);
@@ -144,17 +146,17 @@ for (const [name, stage, block, step, entry] of CASES) {
     + `(${[...bySub].map(([s, n]) => `sub${s}:${n}`).join(" ")}); `
     + `arrived ${arrived}; damage events ${hits.length} `
     + `(${[...new Set(hits.map((h) => h.who))].join(",")}); `
-    + `lives 9 -> ${G.g_player_lives[0]}; `
+    + `lives ${G.g_start_lives} -> ${G.g_player_lives[0]}; `
     + `alive=${G.g_enemies_alive} present=${G.g_enemies_present}`);
-  check(`${name}: the reset leaves player 0 in play`,
-        state0[0] === PlayerState.InPlay, `${state0}`);
+  check(`${name}: the first frame puts player 0 in play`,
+        state0?.[0] === PlayerState.InPlay, `${state0}`);
   check(`${name}: bats are placed`, seen.size > 0, `${seen.size}`);
   const strikers = (bySub.get(0) ?? 0) + (bySub.get(2) ?? 0);
   if (strikers) {
     check(`${name}: every unshot diving/swarm bat arrives`,
           arrived === strikers, `${arrived} of ${strikers}`);
     check(`${name}: an arrival takes a life`,
-          batHits.length > 0 && G.g_player_lives[0] < 9,
+          batHits.length > 0 && G.g_player_lives[0] < G.g_start_lives,
           `${batHits.length} events, lives ${G.g_player_lives[0]}`);
     check(`${name}: ...and gives both counters back`,
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,

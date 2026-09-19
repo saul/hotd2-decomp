@@ -1001,7 +1001,7 @@ function HordeStateDive(obj: Actor, t: HordeTail, f: ClassFrame): void {
   if (t.diveRate <= HORDE_DIVE_RATE_END) {
     const p = obj.attackPermit;
     if ((G.g_player_state[p] ?? 0) === PlayerState.InPlay) {
-      PlayerTakeDamage(p, obj, HORDE_DAMAGE_KIND, f.events);
+      PlayerTakeDamage(p, 1, HORDE_DAMAGE_KIND, f.events, obj);
     }
     if (!(obj.flags & HordeFlag.Landed) && t.idx < 3) {
       obj.flags |= HordeFlag.Landed;

@@ -66,9 +66,10 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
   ResetGameGlobals();
   SetGameTables(chars, undefined, undefined, undefined, script.coli,
                 script.civilians);
-  G.g_players_in_play = 1;
-  G.g_player_lives = [9, 9];
-  G.g_player_state = [5, 0];
+  // The player is not set by hand: the reset starts a game from the title
+  // and the first frame's player task puts player 0 in play with the factory
+  // three lives (`game/player_shell.ts`). It used to write `[5, 0]` here,
+  // which is how the horde's bite passed while the page's never landed (L49).
   G.g_nFiringGate = 1;
   const rng = new Rng(1);
   const events = new Events();
@@ -131,7 +132,8 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
   let cleared = -1;
   let gateBlock = -1;
   let gateStep = -1;
-  const lives0 = G.g_player_lives[0];
+  // What the first frame's `PlayerEnterPlay` will give.
+  const lives0 = G.g_start_lives;
   for (let f = 0; f < 60 * 120; f += 1) {
     walker.tick(1 / 60);
     G.g_scene_state_major_entered = walker.sceneState.major;

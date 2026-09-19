@@ -38,7 +38,11 @@ export const RANK_SLOTS = 14;
  * applies `RANK_SLOTS` **before** the sort and not after.
  */
 export function RegisterForDistanceRank(obj: Actor): boolean {
-  return !obj.dead && obj.visible && obj.cls === SpawnClass.Zombie;
+  // `EnemyZombieUpdate` is the one caller (`0x0045346D`), and class 0x18's
+  // update runs it inside the carrier's matrix -- so a rider ranks too, by
+  // its carrier-relative `obj+0x40`, exactly as the engine's does.
+  return !obj.dead && obj.visible
+    && (obj.cls === SpawnClass.Zombie || obj.cls === SpawnClass.CarriedZombie);
 }
 
 /**

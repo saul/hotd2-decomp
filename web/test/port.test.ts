@@ -17472,5 +17472,77 @@ console.log("\nlight block 1 (the characters' light):");
         ActorDrawsUnderSecondaryLights(z));
 }
 
+{
+  // **A shot rider dies.** Class 0x18's update is `CarriedZombieUpdate18`
+  // (`FUN_0045CD90`), which runs `EnemyZombieUpdate` and so `ZombieOnShot`
+  // (`FUN_00453EB0`) -- but `ResolveHit` left the hit record `ZombieOnShot`
+  // reads only on classes 0x30 and 0x31. A rider shot to zero was flagged
+  // dead, kept standing in state 35, and held `g_enemies_alive` for ever:
+  // stage 3 block 1 step 1's `wait_enemies_alive` never opened.
+  const rng = new Rng(18);
+  scene(0, rng);
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 }),
+  };
+  G.g_cam_path_frame = 1000;
+  ActorSpawn(0x9c00, SpawnClass.ScriptedProp, -1, "boat", {
+    class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+               behaviour: 8, selector: 1 },
+  }, rng).visible = true;
+  const rider = ActorSpawn(0x9c01, SpawnClass.CarriedZombie, 1, "rider", {
+    pos: vec3(5, -6, -14), initialState: 35, attackState: 48, flags: 0x60400,
+    class18: { from_state: 48, cue_path: -1, cue_frame: -1 },
+  }, rng) as ZombieActor;
+  rider.visible = true;
+  const alive = G.g_enemies_alive;
+  GameUpdate(EYE, 1 / 60, host, rng);
+  rider.hp = 1;
+  const kill = ResolveHit(rider, 1, 0, host, rng);
+  check("a rider shot to zero is killed", kill.killed && rider.dead);
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("...and its own update sends it into a death state",
+        rider.state === ZombieState.Death
+        || rider.state === ZombieState.DeathKnockbackArc,
+        `state ${ZombieState[rider.state] ?? rider.state}`);
+  check("...which takes it out of g_enemies_alive",
+        G.g_enemies_alive === alive - 1,
+        `${alive} -> ${G.g_enemies_alive}`);
+}
+{
+  // The camera cue fires **before** its frame, not after: `CMP
+  // [g_cam_path_frame], ECX` / `JGE` past the arm at `0x0045CE07`.
+  const rng = new Rng(19);
+  scene(0, rng);
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 }),
+  };
+  ActorSpawn(0x9d00, SpawnClass.ScriptedProp, -1, "boat", {
+    class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+               behaviour: 8, selector: 1 },
+  }, rng);
+  const r = ActorSpawn(0x9d01, SpawnClass.CarriedZombie, 1, "rider", {
+    pos: vec3(5, -6, -14), initialState: 48, flags: 0x60400,
+    class18: { from_state: ZombieState.HoldForCameraCue, cue_path: 124,
+               cue_frame: 1080 },
+  }, rng) as ZombieActor;
+  const frame: ClassFrame = { eye: EYE, dt: 1 / 60, rng, host };
+  // The wrapper tests the state *after* `EnemyZombieUpdate` has run it, so
+  // the "from" state here is one that holds sub 0 across an update --
+  // `HoldForCameraCue`. The shipped riders name 48 and 38.
+  G.g_active_cam_path = 124;
+  G.g_cam_path_frame = 1080;
+  r.state = ZombieState.HoldForCameraCue; r.sub = 0;
+  CarriedZombieUpdate18(r, frame);
+  check("at the cue frame itself the rider is not switched",
+        r.state !== 0x2e, `state ${r.state}`);
+  G.g_cam_path_frame = 1079;
+  r.state = ZombieState.HoldForCameraCue; r.sub = 0;
+  CarriedZombieUpdate18(r, frame);
+  check("...before it, it is sent to state 0x2E",
+        r.state === 0x2e, `state ${r.state}`);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

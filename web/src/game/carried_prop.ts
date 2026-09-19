@@ -60,9 +60,13 @@ import type { GameHost } from "./host";
 import {
   FtolS16, MatCopy, MatIdentity, MatrixGetTranslation, MatrixLoadIdentity,
   MatrixMultiply, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
-  MatrixRotateAxis, MatrixToEulerZYX, MatrixTransformPoint, MatrixTranslate,
-  RADIANS_TO_BAMS, VecAimXAxisYThenZ, type Mat,
+  MatrixInvert, MatrixRotateAxis, MatrixToEulerZYX, MatrixTransformPoint,
+  MatrixTransformVector, MatrixTranslate, RADIANS_TO_BAMS, VecAimXAxisYThenZ,
+  VecAngleBetween, type Mat,
 } from "./matrix";
+import { QueryGroundHeightAt } from "./coli";
+import { T } from "./tables";
+import { EffectNodePoseAt } from "./class44/script_flag_effect";
 import { PROJECTION_DISTANCE_PX } from "./combat/permits";
 import { PropBehaviour } from "./class13";
 import { vec3, VecToAngles, type Vec3 } from "./vec";
@@ -113,6 +117,14 @@ export interface CarriedPropType {
   radius: number;
   /** f32 `+0x08` — `obj+0x128`. */
   bodyRadius: number;
+  /**
+   * f32 `+0x0C`, `+0x10`, `+0x14` — what `CarriedPropGroundContact` measures
+   * the prop with: the drop from its centre to the ground, the same from each
+   * end, and the half-length from the centre to each end along its own +X.
+   */
+  contactCentre: number;
+  contactEnd: number;
+  halfLength: number;
   /** u32 `+0x18` — the sound a hit that does not break it plays. */
   hitSound: number;
   /** u32 `+0x1C` — the sound the last hit plays. */
@@ -142,13 +154,13 @@ export interface CarriedPropType {
  */
 export const g_carried_prop_types: readonly CarriedPropType[] = [
   { breakModel: 4, breakMotion: 0x1da, breakPlay: 0x46, radius: 4.5,
-    bodyRadius: 3.5, hitSound: 0x001d16a9, breakSound: 0x002216a9, hp: 2,
+    bodyRadius: 3.5, contactCentre: 3.3, contactEnd: 2.5, halfLength: 4.0, hitSound: 0x001d16a9, breakSound: 0x002216a9, hp: 2,
     slots: { 1: 0x19e7, 2: 0x19e9 } },
   { breakModel: 0x12, breakMotion: 0x1cf, breakPlay: 0x1e, radius: 8,
-    bodyRadius: 8, hitSound: 0x001816a9, breakSound: 0x001616a9, hp: 3,
+    bodyRadius: 8, contactCentre: 5, contactEnd: 5, halfLength: 7.5, hitSound: 0x001816a9, breakSound: 0x001616a9, hp: 3,
     slots: { 1: 0x0a53, 2: 0x0a54, 3: 0x0a57 } },
   { breakModel: 0, breakMotion: 0, breakPlay: 0, radius: 5.5,
-    bodyRadius: 0, hitSound: 0x000e16a9, breakSound: 0x000f16a9,
+    bodyRadius: 0, contactCentre: 0, contactEnd: 0, halfLength: 0, hitSound: 0x000e16a9, breakSound: 0x000f16a9,
     hp: 1, slots: { 1: 0x0396 } },
 ];
 
@@ -206,8 +218,21 @@ export interface CarriedProp {
    * has bounced it.
    */
   pivot: Vec3;
-  /** `sub+0x2C/0x30/0x34` — BAMS a frame added to `rx`, `ry`, `rz`. */
+  /**
+   * `sub+0x2C/0x30/0x34` — BAMS a frame. The flights add them to `rx`, `ry`,
+   * `rz`; the roll and the fall read `+0x2C` as a spin about X and `+0x34` as
+   * the angle turned about {@link axis} each frame.
+   */
   spin: [number, number, number];
+  /** `sub+0x38..0x40` — the axis the roll and the fall turn about. */
+  axis: Vec3;
+  /** `sub+0x50` — the break effect's previous frame, `EffectDrawTree`'s. */
+  breakPrev: number;
+  /**
+   * `[port-only]` — the break effect's drawn nodes this frame: each node's
+   * slot and world matrix. Empty but for `CarriedPropBreakUpdate`.
+   */
+  parts: { slot: number; m: Mat }[];
   /** `sub+0x98` — frames left stuck to the screen. */
   stuck: number;
   /** `sub+0x4C` — the break effect's frame. */
@@ -270,6 +295,9 @@ export function CarriedPropAlloc(carrier: Actor,
     lastPos: vec3(),
     pivot: vec3(),
     spin: [0, 0, 0],
+    axis: vec3(),
+    breakPrev: 0,
+    parts: [],
     stuck: 0,
     breakFrame: 0,
     // `ActorClearGameFields` zeroes the object from `+0x34` on.
@@ -431,7 +459,7 @@ export function CarriedPropHeldUpdate(p: CarriedProp, host: GameHost,
   if (!dead) {
     if (p.mode !== CARRIED_PROP_HELD) CarriedPropRelease(p, m, host, cam);
   } else {
-    CarriedPropDrop(p);
+    CarriedPropDrop(p, m, seat, cam);
     // `*(target+0x1310 + 0x4C) = 0` for a target still alive. `[open]` what
     // that word of the civilian's block is; no state-37 spawn in the game has
     // a civilian, so the write has no reader to reach.
@@ -489,9 +517,12 @@ export function CarriedPropRelease(p: CarriedProp, m: Mat, host: GameHost,
     p.vel.z = v.z;
     p.vel.y = dy / frames - frames * p.gravity * 0.5;
   } else {
-    // Mode 3 (stage 1's, `CarriedPropThrowAtTarget`), 5 and anything else: the launch words turned by the
-    // carrier's own facing. Mode 5 also sets `sub+0x38..0x40 = (0, 0, 1)`,
-    // the axis its roll turns about -- `[open]` with the routine that reads it.
+    // Mode 3 (stage 1's), 5 (stage 2's) and anything else: the launch words
+    // turned by the carrier's own facing. Mode 5 also sets
+    // `sub+0x38..0x40 = (0, 0, 1)`, the axis its roll turns about.
+    if (p.mode === CarriedPropRoutine.RollAtCamera) {
+      p.axis.x = 0; p.axis.y = 0; p.axis.z = 1;
+    }
     const r = MatIdentity();
     MatrixRotateX(r, carrier?.pitch ?? 0);
     MatrixRotateZ(r, carrier?.roll ?? 0);
@@ -505,21 +536,55 @@ export function CarriedPropRelease(p: CarriedProp, m: Mat, host: GameHost,
 /**
  * `CarriedPropDrop` — `FUN_00442950`. The carrier died holding it.
  *
- * `[open]` The routine it installs, `CarriedPropFallFree` (`FUN_00444D80`),
- * and the ground contact that routine rests on (`CarriedPropGroundContact`,
- * `FUN_00444280`) are not ported, so the prop is left where the hands were,
- * undrawn: what the engine does with it next is a fall and a roll this port
- * does not have. The permit hand-back at the end of the routine is ported,
- * because it is what lets the next attacker in.
+ * The held matrix `m` goes to the world through `g_camera_blocks`; the angle
+ * the seat faces decides which way it falls: turned by the carrier's own
+ * rotation, a push of `0.15` forward and a tumble one way when the carrier was
+ * not holding a weapon and the seat's pitch is below 1, backward and the other
+ * way otherwise. Then `CarriedPropFallFree`, and the permit back.
  */
-export function CarriedPropDrop(p: CarriedProp): void {
+export function CarriedPropDrop(p: CarriedProp, m: Mat,
+                                seat: { rx: number; ry: number; rz: number } | null,
+                                cam: CameraPair | null): void {
   p.flags &= ~ActorFlag.ShotImmune;
+  const v2w = cam?.v2w ?? MatIdentity();
+  const w = MatCopy(MatIdentity(), v2w);
+  MatrixMultiply(w, m);
+  MatrixGetTranslation(w, p.pos);
+  p.lastPos.x = p.shotPoint.x;
+  p.lastPos.y = p.shotPoint.y;
+  p.lastPos.z = p.shotPoint.z;
+  const e = MatrixToEulerZYX(w);
+  p.rx = e.rx; p.ry = e.ry; p.rz = e.rz;
+  const f = MatCopy(MatIdentity(), v2w);
+  MatrixRotateY(f, seat?.ry ?? 0);
+  MatrixRotateZ(f, seat?.rz ?? 0);
+  MatrixRotateX(f, seat?.rx ?? 0);
+  const d = vec3();
+  MatrixTransformVector(f, { x: 0, y: 0, z: 1 }, d);
+  const pitch = FtolS16(VecToAngles(d.x, d.y, d.z).pitch);
+  const carrier = ActorByAt(p.carrier);
+  const r = MatIdentity();
+  MatrixRotateX(r, carrier?.pitch ?? 0);
+  MatrixRotateZ(r, carrier?.roll ?? 0);
+  MatrixRotateY(r, carrier?.yaw ?? 0);
+  const holding = ((carrier?.flags ?? 0) & ActorFlag.HoldingWeapon) !== 0;
+  if (!holding && pitch < 1) {
+    MatrixTransformPoint(r, { x: 0, y: 0, z: DROP_PUSH }, p.vel);
+    p.spin = [-0x200, 0, -0x100];
+  } else {
+    MatrixTransformPoint(r, { x: 0, y: 0, z: -DROP_PUSH }, p.vel);
+    p.spin = [0x200, 0, 0x100];
+  }
+  p.axis.x = 0; p.axis.y = 0; p.axis.z = 1;
   p.routine = CarriedPropRoutine.FallFree;
   if (p.player >= 0) {
     G.g_attack_permits[p.player] = -1;
     p.player = -1;
   }
 }
+
+/** `0x3E19999A` — the push a dropped prop leaves the hands with. */
+const DROP_PUSH = 0.15;
 
 /**
  * `CarriedPropThrowAtCamera` — `FUN_00443B90`. `g_prop_behaviours[4]`.
@@ -650,22 +715,345 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
 }
 
 /**
- * `CarriedPropBreakUpdate` — `FUN_00444EE0`. The break effect's clock.
+ * `CarriedPropBreakUpdate` — `FUN_00444EE0`. The broken prop, as an effect.
  *
- * `[open]` The draw — `EffectDrawUnlit` (`0x0040DD90`) of model `sub+0x44`
- * on motion `sub+0x48`, while `g_motion_slots` has that motion resident — is
- * not ported, and the break is invisible here. The clock is: the routine
- * falls through from the draw into the count (`L37` — Ghidra ends the arm at
- * the pop), so the object lasts `g_motion_play_length[motion] - 1` frames
- * whether or not anything drew it.
+ * While the break motion is resident (`g_motion_slots[motion].state == 2`) it
+ * halves the roll and draws effect `sub+0x44` (`EffectDrawUnlit`,
+ * `0x0040DD90`) at `T(pos) RotY RotZ`; then, in every case — Ghidra ends the
+ * draw arm at the pop and the bytes fall through at `0x00444F46`, `L37` — the
+ * cursor steps and the object despawns at `g_motion_play_length - 1`.
+ *
+ * `[likely]` the motion is resident: the stage loads the pol file the effect
+ * belongs to before it spawns the carrier, and the port has no residency.
  */
 export function CarriedPropBreakUpdate(p: CarriedProp): boolean {
   p.draw = null;
   p.shootable = false;
-  if (p.rz !== 0) p.rz = Math.trunc(p.rz / 2);
+  p.parts = [];
   const rec = g_carried_prop_types[p.type] ?? g_carried_prop_types[0];
+  const def = T.breakables?.effects?.[String(rec.breakModel)] ?? null;
+  if (p.rz !== 0) p.rz = Math.trunc(p.rz / 2);
+  if (def) {
+    const base = MatIdentity();
+    MatrixTranslate(base, p.pos.x, p.pos.y, p.pos.z);
+    MatrixRotateY(base, p.ry);
+    MatrixRotateZ(base, p.rz);
+    EffectDrawTreeInto(p, def, base);
+  }
   p.breakFrame += 1;
   return p.breakFrame < rec.breakPlay - 1;
+}
+
+/**
+ * `EffectDrawTree` (`FUN_0040DDC0`) and `EffectDrawNode` (`FUN_0040DE50`),
+ * for this pool: wrap the cursor, then walk the tree from the root with a
+ * matrix pushed per node, so a child composes on its parent's pose, and emit
+ * one part per node with a slot. `[port-only]` as a function -- the two are
+ * the renderer's walk in the engine; here they produce the matrices it draws.
+ * No carried prop's tree has the `0x10CE` node that draws at a random scale.
+ */
+function EffectDrawTreeInto(p: CarriedProp,
+                            def: NonNullable<NonNullable<typeof T.breakables>["effects"]>[string],
+                            base: Mat): void {
+  const play = def.play_length;
+  if (play - 1 <= p.breakFrame) p.breakFrame = 0;
+  if (p.breakFrame < 0) p.breakFrame = play - 2;
+  const walk = (i: number, parent: Mat): void => {
+    const n = def.nodes[i];
+    const m = parent.slice(0, 16);
+    if (n.bone >= 1) {
+      const pose = EffectNodePoseAt(def, i, p.breakFrame, p.breakPrev);
+      if (pose) {
+        MatrixTranslate(m, pose.x, pose.y, pose.z);
+        MatrixRotateZ(m, pose.roll);
+        MatrixRotateY(m, pose.yaw);
+        MatrixRotateX(m, pose.pitch);
+      }
+      if (n.slot) p.parts.push({ slot: n.slot, m });
+    }
+    for (const c of n.children) walk(c, m);
+  };
+  for (const c of def.nodes[0]?.children ?? []) walk(c, base);
+  p.breakPrev = p.breakFrame;
+}
+
+/** `PlaySoundId(0x1916A9)` — a rolling prop touching the ground. */
+const ROLL_GROUND_SOUND = 0x001916a9;
+/** `-40.0` — the depth inside which a grounded roll re-aims itself at the lens. */
+const ROLL_REAIM_DEPTH = -40.0;
+/** `FADD [0x004C43B0]` — the ground query starts this far above the prop. */
+const GROUND_QUERY_LIFT = 100.0;
+/** The two surfaces the ground query does not count as ground. */
+const SURFACE_NOT_GROUND_A = 5;
+const SURFACE_NOT_GROUND_B = 0x37;
+/** `[0x0056453C]` — friction along the ground, per contact. */
+const GROUND_FRICTION = 0.105;
+/** `[0x0055D2C4]` — the bounce: the normal velocity reversed and scaled. */
+const GROUND_RESTITUTION = -0.3;
+/** `[0x004E3100]` — a vertical speed below this is zeroed. */
+const GROUND_REST_SPEED = 0.02;
+/** `[0x005643E0]` — the X spin kept per contact. */
+const SPIN_KEEP = 0.99;
+/** `[0x00564534]` — the axis turn kept per flat contact. */
+const TURN_KEEP = 0.85;
+/** `[0x00564538]` — the edge contact's tilt, scaled into the turn. */
+const TILT_KEEP = 0.975;
+/** `[0x00564530]` — `2^-15`: a BAMS spin times a radius is a roll distance. */
+const ROLL_SCALE = 3.0517578e-05;
+/** `2pi / 65536`, `[0x004C4370]`. */
+const BAMS_RAD = 9.587379924285257e-05;
+
+/**
+ * `CarriedPropGroundContact` — `FUN_00444280`. Ground under a falling or
+ * rolling prop, and what touching it does.
+ *
+ * Everything is measured in the frame of the ground under the prop — the
+ * ground height `QueryGroundHeightAt` finds (or `g_camera_fixed_eye_y` over
+ * water, surfaces 5 and `0x37`), tilted to the surface normal when there is
+ * one. The prop's two ends, `+-halfLength` along its own +X, and its centre
+ * are dropped by the record's contact extents; the lowest of the three is
+ * the contact. At or below the ground: lift the prop out, bounce the velocity
+ * (friction 0.105 along, `-0.3` across), stop a vertical speed under 0.02,
+ * decay the spins, and — when an **end** touches — set the roll axis and tilt
+ * from how that end is moving; if either end is still in the air, turn the
+ * axis toward the ground by a step of the angle. Last, roll the prop forward
+ * by its X spin times the radius it rolls on. True on a contact.
+ */
+export function CarriedPropGroundContact(p: CarriedProp): boolean {
+  const rec = g_carried_prop_types[p.type] ?? g_carried_prop_types[0];
+  const a = rec.contactCentre, b = rec.contactEnd, c = rec.halfLength;
+  let edge = false;
+  let ground = QueryGroundHeightAt(p.pos.x, p.pos.y + GROUND_QUERY_LIFT,
+                                   p.pos.z);
+  if (G.g_coli_hit_surface === SURFACE_NOT_GROUND_A
+      || G.g_coli_hit_surface === SURFACE_NOT_GROUND_B) {
+    G.g_coli_hit_surface = 0;
+    ground = G.g_camera_fixed_eye_y;
+  }
+  const top = MatIdentity();
+  MatrixTranslate(top, p.pos.x, ground, p.pos.z);
+  let groundM = top.slice(0, 16);                     // `MatrixStore(local_40)`
+  MatrixTranslate(top, 0, p.pos.y - ground, 0);
+  MatrixRotateZ(top, p.rz); MatrixRotateY(top, p.ry); MatrixRotateX(top, p.rx);
+  const pP = vec3(), pM = vec3();
+  MatrixTransformPoint(top, { x: c, y: 0, z: 0 }, pP);
+  MatrixTransformPoint(top, { x: -c, y: 0, z: 0 }, pM);
+  let side = -c;
+  MatrixRotateAxis(top, p.axis, p.spin[2]);
+  const qP = vec3(), qM = vec3();
+  MatrixTransformPoint(top, { x: c, y: 0, z: 0 }, qP);
+  MatrixTransformPoint(top, { x: -c, y: 0, z: 0 }, qM);
+  const dP = vec3(qP.x - pP.x, qP.y - pP.y, qP.z - pP.z);
+  const dM = vec3(qM.x - pM.x, qM.y - pM.y, qM.z - pM.z);
+  if (G.g_coli_hit_surface !== 0) {
+    const [nx, ny, nz] = G.g_coli_hit_normal;
+    const tilt = VecAngleBetween(nx, ny, nz, 0, 1, 0);
+    const yaw = FtolS16(Math.atan2(nx, nz) * RADIANS_TO_BAMS);
+    const g = groundM.slice(0, 16);
+    MatrixRotateY(g, yaw);
+    MatrixRotateX(g, tilt);
+    groundM = g;
+  }
+  const inv = groundM.slice(0, 16);
+  MatrixInvert(inv);
+  const lp = vec3(), A = vec3(), B = vec3();
+  MatrixTransformPoint(inv, p.pos, lp);
+  MatrixTransformPoint(inv, pP, A);
+  MatrixTransformPoint(inv, pM, B);
+  const seg = VecAimXAxisYThenZ(A.x - B.x, A.y - B.y, A.z - B.z);
+  const s = MatIdentity();
+  MatrixRotateY(s, seg.ry);
+  MatrixRotateZ(s, seg.rz);
+  const drop = (at: Vec3, by: number): Vec3 => {
+    s[12] = at.x; s[13] = at.y; s[14] = at.z;         // `MatrixSetTranslation`
+    MatrixTranslate(s, 0, -by, 0);
+    const o = vec3();
+    MatrixGetTranslation(s, o);
+    return o;
+  };
+  const centre = drop(lp, a);
+  const aEnd = drop(A, b);
+  const bEnd = drop(B, b);
+  let low = centre;
+  let lowDelta = centre;
+  if (bEnd.y <= aEnd.y) {
+    if (bEnd.y < centre.y) { low = bEnd; lowDelta = dM; edge = true; }
+  } else if (aEnd.y < centre.y) {
+    low = aEnd; lowDelta = dP; edge = true; side = c;
+  }
+  if (!(low.y <= 0)) return false;
+
+  // Out of the ground, along the ground's own up.
+  const lift = groundM.slice(0, 16);
+  lift[12] = p.pos.x; lift[13] = p.pos.y; lift[14] = p.pos.z;
+  MatrixTranslate(lift, 0, -low.y, 0);
+  MatrixGetTranslation(lift, p.pos);
+  MatrixInvert(lift);
+  const vl = vec3();
+  MatrixTransformVector(lift, p.vel, vl);
+  const v2 = vec3(vl.x - vl.x * GROUND_FRICTION, vl.y * GROUND_RESTITUTION,
+                  vl.z - vl.z * GROUND_FRICTION);
+  MatrixTransformVector(groundM, v2, p.vel);
+  if (Math.abs(p.vel.y) < GROUND_REST_SPEED) p.vel.y = 0;
+
+  const toLocal = MatIdentity();
+  MatrixRotateX(toLocal, -p.rx); MatrixRotateY(toLocal, -p.ry);
+  MatrixRotateZ(toLocal, -p.rz);
+  if (edge) {
+    const gi = groundM.slice(0, 16);
+    MatrixInvert(gi);
+    const d = vec3();
+    MatrixTransformVector(gi, lowDelta, d);
+    const dy = d.y < 0 ? d.y * GROUND_RESTITUTION : d.y;
+    const r = vec3();
+    MatrixTransformPoint(toLocal, { x: d.x + v2.x, y: dy + v2.y, z: d.z + v2.z },
+                         r);
+    p.axis.x = 0;
+    p.axis.y = -(r.z * side);
+    p.axis.z = r.y * side;
+    p.spin[0] = Math.trunc(p.spin[0] * SPIN_KEEP);
+    const tilt = FtolS16(Math.atan2(Math.sqrt(r.y * r.y + r.z * r.z), c)
+                         * RADIANS_TO_BAMS);
+    p.spin[2] = Math.trunc(tilt * TILT_KEEP);
+  } else {
+    p.spin[0] = Math.trunc(p.spin[0] * SPIN_KEEP);
+    p.spin[2] = Math.trunc(p.spin[2] * TURN_KEEP);
+  }
+  if (aEnd.y > 0 || bEnd.y > 0) {
+    // An end in the air: tip the turn toward the ground.
+    const w = vec3();
+    MatrixTransformPoint(groundM, low, w);
+    const up = vec3(), rel = vec3();
+    MatrixTransformPoint(toLocal, { x: 0, y: 1, z: 0 }, up);
+    MatrixTransformPoint(toLocal, { x: p.pos.x - w.x, y: p.pos.y - w.y,
+                                    z: p.pos.z - w.z }, rel);
+    const ax = vec3(rel.z * up.y - rel.y * up.z, rel.x * up.z - rel.z * up.x,
+                    rel.y * up.x - rel.x * up.y);
+    const ang = VecAngleBetween(up.x, up.y, up.z, rel.x, rel.y, rel.z);
+    if (ang > 0x100) {
+      const m3 = MatIdentity();
+      MatrixRotateAxis(m3, p.axis, p.spin[2]);
+      const step = Math.trunc(ang / 256);
+      MatrixRotateAxis(m3, ax, edge ? step : -step);
+      const e = vec3();
+      MatrixTransformPoint(m3, { x: 1, y: 0, z: 0 }, e);
+      p.axis.z = e.y;
+      p.axis.y = -e.z;
+      p.axis.x = 0;
+      p.spin[2] = VecAngleBetween(1, 0, 0, e.x, e.y, e.z);
+    }
+  }
+  // Roll: the X spin over the radius it rolls on, along the segment's heading.
+  const k = Math.cos(seg.rz * BAMS_RAD) * p.spin[0] * (edge ? b : a)
+    * ROLL_SCALE;
+  const rm = groundM.slice(0, 16);
+  MatrixRotateY(rm, seg.ry);
+  MatrixRotateZ(rm, seg.rz);
+  const mv = vec3();
+  MatrixTransformVector(rm, { x: 0, y: 0, z: k }, mv);
+  p.pos.x += mv.x; p.pos.y += mv.y; p.pos.z += mv.z;
+  return true;
+}
+
+/**
+ * The spin step `CarriedPropRollAtCamera` and `CarriedPropFallFree` share:
+ * `LoadIdentity; RotZ RotY RotX; MatrixRotateAxis(axis, sub+0x34);
+ * RotX(sub+0x2C)`, read back into the three angles. `[port-only]` as a
+ * function -- both routines write it inline.
+ */
+function CarriedPropTumble(p: CarriedProp): void {
+  const m = MatIdentity();
+  MatrixRotateZ(m, p.rz); MatrixRotateY(m, p.ry); MatrixRotateX(m, p.rx);
+  MatrixRotateAxis(m, p.axis, p.spin[2]);
+  MatrixRotateX(m, p.spin[0]);
+  const e = MatrixToEulerZYX(m);
+  p.rx = e.rx; p.ry = e.ry; p.rz = e.rz;
+}
+
+/** `w2v . T(pos) . RotZ RotY RotX`, drawn and read back as the shot point. */
+function CarriedPropDrawWorld(p: CarriedProp, w2v: Mat): Mat {
+  const d = MatCopy(MatIdentity(), w2v);
+  MatrixTranslate(d, p.pos.x, p.pos.y, p.pos.z);
+  MatrixRotateZ(d, p.rz); MatrixRotateY(d, p.ry); MatrixRotateX(d, p.rx);
+  p.draw = { m: d, view: true };
+  MatrixGetTranslation(d, p.shotPoint);
+  return d;
+}
+
+/**
+ * `CarriedPropRollAtCamera` — `FUN_00443DC0`. `g_prop_behaviours[5]`, stage
+ * 2's pair: the barrel dropped from the hands rolls along the ground at the
+ * player.
+ *
+ * Integrate, tumble, `CarriedPropGroundContact` (the sound `0x1916A9` on a
+ * contact), draw, camera-track, shot-test. With hit points left: inside
+ * `-15` it has arrived -- onto the lens for ninety frames, a life from the
+ * player on the side of the screen it reached, and that player's permit
+ * raised; on the ground inside `-40` it re-aims its vertical speed so the arc
+ * it is on meets the lens.
+ */
+export function CarriedPropRollAtCamera(p: CarriedProp, cam: CameraPair | null,
+                                        rng: Rng, events?: Events): void {
+  p.pos.x += p.vel.x;
+  p.pos.y += p.vel.y;
+  p.pos.z += p.vel.z;
+  p.vel.y += p.gravity;
+  CarriedPropTumble(p);
+  const contact = CarriedPropGroundContact(p);
+  if (contact) events?.emit("sound.play", { id: ROLL_GROUND_SOUND });
+  p.lastPos.x = p.pos.x; p.lastPos.y = p.pos.y; p.lastPos.z = p.pos.z;
+  const w2v = cam?.w2v ?? MatIdentity();
+  const d = CarriedPropDrawWorld(p, w2v);
+  RegisterForCameraTracking(p);
+  RegisterForShotTest(p);
+  CarriedPropCheckShot(p, d, cam, rng, events);
+  if (!(p.hp > 0)) return;
+  if (ARRIVE_DEPTH <= p.shotPoint.z && cam) {
+    MatrixGetTranslation(d, p.pos);
+    const e = MatrixToEulerZYX(d);
+    p.rx = e.rx; p.ry = e.ry; p.rz = e.rz;
+    p.stuck = STUCK_FRAMES;
+    p.routine = CarriedPropRoutine.StuckToScreen;
+    if (G.g_players_in_play === 1) p.player = G.g_active_player;
+    else if (G.g_players_in_play === 2) p.player = p.shotPoint.x >= 0 ? 1 : 0;
+    PlayerTakeDamage(p.player, null, HIT_KIND, events, "thrown");
+    // The engine writes 1; the port's permits hold a claimant, and this one
+    // has no actor of its own -- the carrier is the nearest thing to one.
+    if (p.player >= 0) G.g_attack_permits[p.player] = p.carrier;
+    return;
+  }
+  if (contact && ROLL_REAIM_DEPTH <= p.shotPoint.z && cam) {
+    const fwd = vec3();
+    MatrixTransformVector(cam.v2w, { x: 0, y: 0, z: 1 }, fwd);
+    const ang = VecToAngles(fwd.x, fwd.y, fwd.z);
+    const pitch = FtolS16(ang.pitch) * BAMS_RAD;
+    const yaw = FtolS16(ang.yaw) * BAMS_RAD;
+    const s1 = Math.sin(pitch), c1 = Math.cos(pitch);
+    const f10 = Math.sin(yaw) * p.vel.x + Math.cos(yaw) * p.vel.z;
+    const f9 = (-p.shotPoint.y * s1 + (ARRIVE_DEPTH - p.shotPoint.z) * c1) / f10;
+    p.vel.y = (-p.shotPoint.y / f9 - f10 * s1) / c1 - f9 * p.gravity * 0.5;
+  }
+}
+
+/**
+ * `CarriedPropFallFree` — `FUN_00444D80`. A prop dropped from a dead
+ * carrier's hands: integrate, tumble, `CarriedPropGroundContact`, draw, and a
+ * shot test only while `CarriedPropIsOnScreen`. Nothing here despawns it.
+ */
+export function CarriedPropFallFree(p: CarriedProp, cam: CameraPair | null,
+                                    rng: Rng, events?: Events): void {
+  p.pos.x += p.vel.x;
+  p.pos.y += p.vel.y;
+  p.pos.z += p.vel.z;
+  p.vel.y += p.gravity;
+  CarriedPropTumble(p);
+  CarriedPropGroundContact(p);
+  p.lastPos.x = p.pos.x; p.lastPos.y = p.pos.y; p.lastPos.z = p.pos.z;
+  const d = CarriedPropDrawWorld(p, cam?.w2v ?? MatIdentity());
+  if (CarriedPropIsOnScreen(p)) {
+    RegisterForShotTest(p);
+    CarriedPropCheckShot(p, d, cam, rng, events);
+  }
 }
 
 /** `g_app_state` 10, in which a dropped prop hits nothing. `[open]` what screen it is. */
@@ -937,16 +1325,20 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
       case CarriedPropRoutine.ThrowAtTarget:
         CarriedPropThrowAtTarget(p, host, cam, rng, events);
         return true;
+      case CarriedPropRoutine.RollAtCamera:
+        CarriedPropRollAtCamera(p, cam, rng, events);
+        return true;
+      case CarriedPropRoutine.FallFree:
+        CarriedPropFallFree(p, cam, rng, events);
+        return true;
       case CarriedPropRoutine.StuckToScreen:
         return CarriedPropStuckToScreen(p);
       case CarriedPropRoutine.Break:
         return CarriedPropBreakUpdate(p);
       default:
-        // `[open]` `CarriedPropRollAtCamera` (stage 2) and `CarriedPropFallFree`
-        // (a dropped prop) are not ported:
-        // the object stays in the pool, undrawn and unshootable, so the
-        // carrier still sees it alive -- which is what keeps the carrier's own
-        // state machine on the engine's path.
+        // Every routine a shipped script can reach is above; a script naming
+        // another `g_prop_behaviours` entry would leave the object here,
+        // undrawn and unshootable. No shipped one does.
         p.draw = null;
         return true;
     }

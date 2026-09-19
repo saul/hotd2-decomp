@@ -222,68 +222,84 @@ export const SCRIPT_FLAG_EFFECT_A = 2;
  */
 export function EffectPoseNode(p: BreakableProp): void {
   const def = EffectDefOf(p.effect);
-  if (!def || !def.frames) return;
-  const node = def.nodes[p.kind];
-  if (!node || node.bone < 1) return;
+  if (!def) return;
+  const pose = EffectNodePoseAt(def, p.kind, p.effectFrames, p.effectPrevFrame);
+  if (!pose) return;
+  p.x = pose.x; p.y = pose.y; p.z = pose.z;
+  p.pitch = pose.pitch; p.yaw = pose.yaw; p.roll = pose.roll;
+  p.effectPrevFrame = p.effectFrames;
+}
+
+/** One node's pose: a translation and three BAMS angles. */
+export interface EffectNodePose {
+  x: number; y: number; z: number;
+  pitch: number; yaw: number; roll: number;
+}
+
+/**
+ * `[port-only]` The arithmetic of `EffectPoseNode` on its own, for a node of
+ * `def` at play-cursor `cursor` with `prev` the cursor it was last drawn at.
+ * The class-0x44 props and the carried props' break effect both pose through
+ * it; the engine has one routine and one state block, the port two owners.
+ * Null for a node the engine neither poses nor draws.
+ */
+export function EffectNodePoseAt(def: EffectDefJson, nodeIndex: number,
+                                 cursor: number, prev: number):
+    EffectNodePose | null {
+  if (!def.frames) return null;
+  const node = def.nodes[nodeIndex];
+  if (!node || node.bone < 1) return null;
   const b = node.bone - 1;
-  if (b >= def.bones) return;
-  const cursor = p.effectFrames;
+  if (b >= def.bones) return null;
 
   if (def.interp === EffectInterp.PerFrame) {
-    ScriptFlagEffectSeat(p, def, cursor, b);
-    p.effectPrevFrame = cursor;
-    return;
+    return ScriptFlagEffectSeat(def, cursor, b);
   }
   // Half rate. `cursor & 0x80000001` — even and non-negative reads one key.
   if ((cursor & 1) === 0) {
-    ScriptFlagEffectSeat(p, def, Math.trunc(cursor / 2), b);
-    p.effectPrevFrame = cursor;
-    return;
+    return ScriptFlagEffectSeat(def, Math.trunc(cursor / 2), b);
   }
   const key = Math.trunc(cursor / 2);
   // The three arms of the engine's `next`, in its order. **Neither wrap arm is
-  // reachable here**: `ScriptFlagEffectUpdate` stops the cursor at
+  // reachable for class 0x44**: `ScriptFlagEffectUpdate` stops the cursor at
   // `play_length - 2`, so it never equals `play_length - 1`, and it only ever
   // counts up, so `cursor == 0` cannot follow a positive previous frame. Both
   // pass a *play* frame where a key index is wanted and the engine does not
   // clamp; this does, rather than read off the end of the array.
   let next: number;
-  if (cursor === def.play_length - 1 && cursor !== p.effectPrevFrame
-      && cursor - p.effectPrevFrame >= 0) {
+  if (cursor === def.play_length - 1 && cursor !== prev
+      && cursor - prev >= 0) {
     next = 0;
-  } else if (cursor === 0 && p.effectPrevFrame > 0) {
+  } else if (cursor === 0 && prev > 0) {
     next = def.play_length - 1;
   } else {
     next = key + 1;
   }
-  ScriptFlagEffectBlend(p, def, key, next, b);
-  p.effectPrevFrame = cursor;
+  return ScriptFlagEffectBlend(def, key, next, b);
 }
 
 /** Key *k*, bone *b*, straight out of the baked arrays. */
-function ScriptFlagEffectSeat(p: BreakableProp, def: EffectDefJson,
-                              k: number, b: number): void {
+function ScriptFlagEffectSeat(def: EffectDefJson, k: number, b: number):
+    EffectNodePose {
   const i = EffectKey(def, k, b);
-  p.x = def.t[i];
-  p.y = def.t[i + 1];
-  p.z = def.t[i + 2];
-  p.pitch = def.r[i];
-  p.yaw = def.r[i + 1];
-  p.roll = def.r[i + 2];
+  return { x: def.t[i], y: def.t[i + 1], z: def.t[i + 2],
+           pitch: def.r[i], yaw: def.r[i + 1], roll: def.r[i + 2] };
 }
 
 /** Half way from key *a* to key *bKey*, as the engine computes each term. */
-function ScriptFlagEffectBlend(p: BreakableProp, def: EffectDefJson,
-                               a: number, bKey: number, b: number): void {
+function ScriptFlagEffectBlend(def: EffectDefJson, a: number, bKey: number,
+                               b: number): EffectNodePose {
   const ia = EffectKey(def, a, b);
   const ib = EffectKey(def, bKey, b);
   // Translations blend linearly at 0.5 -- `(next - this) * 0.5 + this`.
-  p.x = (def.t[ib] - def.t[ia]) * 0.5 + def.t[ia];
-  p.y = (def.t[ib + 1] - def.t[ia + 1]) * 0.5 + def.t[ia + 1];
-  p.z = (def.t[ib + 2] - def.t[ia + 2]) * 0.5 + def.t[ia + 2];
-  p.pitch = BamsHalfway(def.r[ia], def.r[ib]);
-  p.yaw = BamsHalfway(def.r[ia + 1], def.r[ib + 1]);
-  p.roll = BamsHalfway(def.r[ia + 2], def.r[ib + 2]);
+  return {
+    x: (def.t[ib] - def.t[ia]) * 0.5 + def.t[ia],
+    y: (def.t[ib + 1] - def.t[ia + 1]) * 0.5 + def.t[ia + 1],
+    z: (def.t[ib + 2] - def.t[ia + 2]) * 0.5 + def.t[ia + 2],
+    pitch: BamsHalfway(def.r[ia], def.r[ib]),
+    yaw: BamsHalfway(def.r[ia + 1], def.r[ib + 1]),
+    roll: BamsHalfway(def.r[ia + 2], def.r[ib + 2]),
+  };
 }
 
 /** Where in the flat arrays key *k*'s bone *b* starts, clamped to the block. */

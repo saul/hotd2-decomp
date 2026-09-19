@@ -3,6 +3,10 @@
  * frame by frame in a real browser, with a screenshot at the frames named.
  *
  *   node tools/bridge.mjs --headless [--every 30] [--frames 600] [--shots 200,330]
+ *                         [--fire 355:650:360,358:650:360] [--classes ' c48 ']
+ *
+ * `--fire F:X:Y` clicks the page at (X, Y) on driven frame F, through the real
+ * pointer handler and shot path -- the same thing a player's click does.
  *
  * Prints the drive harness's row (walker address, permits, actors, and the
  * carried props as `routine:hp:viewZ`) and writes `shots/bridge_<f>.png`.
@@ -27,10 +31,21 @@ try {
   await waitForLoad(page);
   // A stage sits at its entry until something presses play.
   await page.keyboard.press("Space");
+  const fires = opt("fire", "").split(",").filter(Boolean)
+    .map((t) => t.split(":").map(Number)).sort((a, b) => a[0] - b[0]);
   let f = 0;
   while (f < total) {
-    const n = Math.min(every, total - f);
+    let n = Math.min(every, total - f);
+    const due = fires.find((q) => q[0] > f && q[0] <= f + n);
+    if (due) n = due[0] - f;
+    if (due && n === 0) n = 1;
     f = await page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
+    for (const q of fires) {
+      if (q[0] === f) {
+        await page.mouse.click(q[1], q[2]);
+        console.log(`  fired at (${q[1]}, ${q[2]}) on f${f}`);
+      }
+    }
     const row = await page.evaluate(() => globalThis.__hotd2Drive.now());
     const pat = new RegExp(opt("classes", " c(48|16) "));
     const actors = row.o.filter((o) => pat.test(` ${o} `)).join(" | ");

@@ -38,7 +38,8 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
 import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
 import { f32, i16, i32, u32 } from "./bytes";
-import { BODY_CREATURE_SLOTS, CARRIED_PROP_SLOTS } from "./combat";
+import { BODY_CREATURE_SLOTS, CARRIED_PROP_BREAK, CARRIED_PROP_SLOTS }
+  from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
 import * as charmotion from "./charmotion";
 import * as degraded from "./degraded";
@@ -666,62 +667,104 @@ export function breakablesJson(tables: ExeTables,
 export async function scriptFlagEffectsJson(
     stage: Stage, placements: Record<string, unknown>[]):
     Promise<Record<string, unknown>> {
-  const tables = stage.tables;
   const out: Record<string, unknown> = {};
-  const banks = tables.motionBanks();
   for (const pl of placements) {
     if (pl.container !== "script_flag_effect") continue;
     const effect = pl.effect as number;
     const motion = pl.motion as number;
     if (out[String(effect)] !== undefined) continue;
-    const nodes = propslib.effectTree(tables, effect);
-    const declared = tables.ru16(propslib.EFFECT_BONE_COUNTS + effect * 2) ?? 0;
-    // `spawns.md` proves the two agree on the four effects it lists; a stage
-    // that disagreed would be a tree read at the wrong struct, and baking the
-    // motion at the wrong stride afterwards would hide it in float noise.
-    if (!nodes.length || nodes.length !== declared) {
-      degraded.note("hod2lib.bundle.script_flag_effects",
-                    `effect ${effect} tree`,
-                    "the effect is not exported and nothing draws it",
-                    `${nodes.length} nodes against g_effect_bone_counts `
-                    + `${declared}`);
-      continue;
-    }
-    const bankId = tables.motionBankOf(motion);
-    const bank = bankId !== null && banks.has(bankId)
-      ? await loadBank(stage.source, banks.get(bankId)![0],
-                       banks.get(bankId)![1])
-      : null;
-    const frames = bank ? bank.effectFrames(motion, declared) : [];
-    if (!frames.length) {
-      degraded.note("hod2lib.bundle.script_flag_effects",
-                    `effect ${effect} motion ${motion}`,
-                    "the effect is exported without a pose and holds frame 0",
-                    "no frames decoded");
-    }
-    const t: number[] = [];
-    const r: number[] = [];
-    for (const f of frames) {
-      for (const v of f.t) t.push(v[0], v[1], v[2]);
-      for (const v of f.r) r.push(v[0], v[1], v[2]);
-    }
-    out[String(effect)] = {
-      nodes: nodes.map((n) => ({ slot: n.slot, bone: n.bone,
-                                 children: [...n.children] })),
-      interp: tables.data[tables.v2r(propslib.EFFECT_INTERP_MODE + effect) ?? 0],
-      motion,
-      // The clock `ScriptFlagEffectUpdate` stops two short of, in play frames.
-      play_length: tables.motionPlayLength(motion) ?? 0,
-      frames: frames.length,
-      bones: declared - 1,
-      t, r,
-      cues: propslib.effectSoundCues(
-        tables, effect === propslib.SCRIPT_FLAG_EFFECT_A.effect
+    const def = await effectDefJson(
+      stage, effect, motion, "hod2lib.bundle.script_flag_effects",
+      propslib.effectSoundCues(
+        stage.tables, effect === propslib.SCRIPT_FLAG_EFFECT_A.effect
           ? propslib.SCRIPT_FLAG_EFFECT_CUES_A
-          : propslib.SCRIPT_FLAG_EFFECT_CUES_B),
-    };
+          : propslib.SCRIPT_FLAG_EFFECT_CUES_B));
+    if (def) out[String(effect)] = def;
   }
   return out;
+}
+
+/**
+ * The break effects of the carried props a stage's state-37 scripts name,
+ * keyed by effect id into the same map the class-0x44 effects use --
+ * `CarriedPropBreakUpdate` (`FUN_00444EE0`) draws them through the same
+ * `EffectDrawUnlit` those do. No sound cues: the break has none of its own.
+ */
+export async function carriedPropEffectsJson(
+    stage: Stage, placements: readonly Record<string, unknown>[]):
+    Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const type of carriedPropTypes(placements)) {
+    const brk = CARRIED_PROP_BREAK[type];
+    if (!brk || out[String(brk.effect)] !== undefined) continue;
+    const def = await effectDefJson(stage, brk.effect, brk.motion,
+                                    "hod2lib.bundle.carried_prop_effects", []);
+    if (def) out[String(brk.effect)] = def;
+  }
+  return out;
+}
+
+/** The `g_carried_prop_types` indices a stage's state-37 scripts name. */
+function carriedPropTypes(placements: readonly Record<string, unknown>[]):
+    number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    for (const k of ["target_script", "attack_script"]) {
+      const s = p[k] as { state?: number; head?: { prop_type?: number } }
+        | null | undefined;
+      const t = s?.state === 37 ? s.head?.prop_type : undefined;
+      if (t !== undefined && !out.includes(t)) out.push(t);
+    }
+  }
+  return out;
+}
+
+/** One effect id's tree and baked motion, or null with a degraded note. */
+async function effectDefJson(stage: Stage, effect: number, motion: number,
+                             site: string, cues: number[]):
+    Promise<Record<string, unknown> | null> {
+  const tables = stage.tables;
+  const banks = tables.motionBanks();
+  const nodes = propslib.effectTree(tables, effect);
+  const declared = tables.ru16(propslib.EFFECT_BONE_COUNTS + effect * 2) ?? 0;
+  // `spawns.md` proves the two agree on the effects it lists; a stage that
+  // disagreed would be a tree read at the wrong struct, and baking the motion
+  // at the wrong stride afterwards would hide it in float noise.
+  if (!nodes.length || nodes.length !== declared) {
+    degraded.note(site, `effect ${effect} tree`,
+                  "the effect is not exported and nothing draws it",
+                  `${nodes.length} nodes against g_effect_bone_counts `
+                  + `${declared}`);
+    return null;
+  }
+  const bankId = tables.motionBankOf(motion);
+  const bank = bankId !== null && banks.has(bankId)
+    ? await loadBank(stage.source, banks.get(bankId)![0],
+                     banks.get(bankId)![1])
+    : null;
+  const frames = bank ? bank.effectFrames(motion, declared) : [];
+  if (!frames.length) {
+    degraded.note(site, `effect ${effect} motion ${motion}`,
+                  "the effect is exported without a pose and holds frame 0",
+                  "no frames decoded");
+  }
+  const t: number[] = [];
+  const r: number[] = [];
+  for (const f of frames) {
+    for (const v of f.t) t.push(v[0], v[1], v[2]);
+    for (const v of f.r) r.push(v[0], v[1], v[2]);
+  }
+  return {
+    nodes: nodes.map((n) => ({ slot: n.slot, bone: n.bone,
+                               children: [...n.children] })),
+    interp: tables.data[tables.v2r(propslib.EFFECT_INTERP_MODE + effect) ?? 0],
+    motion,
+    // The clock the cursor stops two short of, in play frames.
+    play_length: tables.motionPlayLength(motion) ?? 0,
+    frames: frames.length,
+    bones: declared - 1,
+    t, r, cues,
+  };
 }
 
 /**
@@ -1402,7 +1445,12 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // Before the glTF: the template rig has to include every asset slot the
   // stage's generic props name, and only the script knows which those are.
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
-  const effectDefs = await scriptFlagEffectsJson(stage, placements);
+  const carriedEffects = await carriedPropEffectsJson(
+    stage, charPlaces as unknown as Record<string, unknown>[]);
+  const effectDefs = {
+    ...(await scriptFlagEffectsJson(stage, placements)),
+    ...carriedEffects,
+  };
   const brk = await breakableSlotEntry(stage, placements, effectDefs, cache);
   // Decoded here rather than beside the rest of the script json below,
   // because the glTF needs to know whether any class-0x25 descriptor asks for
@@ -1416,6 +1464,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const eff = await effectSlotEntry(stage, cache, [
     ...bodyCreatureDrawSlots(charDefs.keys()),
     ...carriedPropDrawSlots(charPlaces as unknown as Record<string, unknown>[]),
+    // ...and the break effects' node models, which `render/effects.ts` draws
+    // for the same object once it has broken.
+    ...Object.values(carriedEffects).flatMap((d) =>
+      ((d as { nodes: { slot: number }[] }).nodes)
+        .map((n) => n.slot).filter((x) => x > 0)),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.

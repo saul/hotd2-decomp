@@ -46,10 +46,12 @@ civilian (block 6, bug 11) is the same state releasing into behaviour 3,
 `CarriedPropThrowAtTarget`: two loops of 271 and one of 265 before 266 lets go
 on frame 15, and the barrel dropped on the civilian's head kills her unless it
 or its carrier is shot first. `op 0x47`, `wait_targets_clear`, is real now and
-counts carried props as camera candidates. `[open]`: stage 2's pair release
-into behaviour 5 (`CarriedPropRollAtCamera`), a carrier killed holding its prop
-drops it into `CarriedPropFallFree`, and neither is ported -- the prop stays
-undrawn in the pool; the break effect's draw is not ported either.
+counts carried props as camera candidates. Stage 2 block 28's pair release
+into behaviour 5, `CarriedPropRollAtCamera`: the barrels roll down the steps at
+the player on `CarriedPropGroundContact`'s friction-and-bounce ground model. A
+carrier killed holding its prop drops it (`CarriedPropDrop`,
+`CarriedPropFallFree`), and a prop shot to pieces draws its break effect -- the
+drum splits in two -- through the effect tree the class-0x44 props use.
 
 **A civilian's captors are made again.** `CivilianInit` spawns its children
 itself, so the walker's spawn list names only the civilian; 6da5fab walked

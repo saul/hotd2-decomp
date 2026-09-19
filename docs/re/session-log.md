@@ -18452,3 +18452,41 @@ averages them per logical vertex **with x and z weighted by four**. The sheet
 is `komono_room.bin` part 2, a patterned rug. Wrong turn: my first test
 expected the rug over member 0, and it is over the **placer** --
 `HordeMemberInit` spawns it before moving the member onto its spline.
+
+## The rolling barrels, the drop and the break (bug 3 follow-up)
+
+The first pass released stage 2's pair into nothing. Now ported, each read in
+full: `CarriedPropRollAtCamera` (`0x00443DC0`, behaviour 5),
+`CarriedPropGroundContact` (`0x00444280` -- 735 instructions, every `__ftol`
+operand checked in the listing because the decompiler shows none of them),
+`CarriedPropFallFree` (`0x00444D80`), the whole of `CarriedPropDrop`
+(`0x00442950`), `MatrixInvert` and `VecAngleBetween`, and the break effect's
+draw: `EffectDrawTree`/`EffectDrawNode` walked for the carried prop with a push
+per node, posed by `EffectPoseNode`'s arithmetic, which is now one function
+(`EffectNodePoseAt`) the class-0x44 props and the break share. The exporter
+bakes the break effects (0x04 for type 0, 0x12 -- the drum's two halves -- for
+type 1) into the same `breakables.effects` map.
+
+**Checked in the page, headless, with screenshots read.** Stage 2 block 28
+step 4: both barrels held, released into the roll, down the steps and onto the
+lens (`s -100`); four real clicks on one rolling barrel took its three hit
+points and it split in two, then left after its clip. Stage 3 block 0 step 6:
+the 0x47 wait holds on the class-0x18 boat rider in state 35 (a camera
+candidate; the other rider is in state 38 with `NoCameraTrack`); real clicks
+on the boat killed both and the wait passed on its own.
+
+**Two hangs that are not this work, both identical on main 446c728.**
+* Stage 3 block 1 step 1 `wait_enemies_alive`: the two boat riders killed by
+  those clicks keep `Dead` and their captor states (35, 38) and never enter a
+  death state, so `g_enemies_alive` stays 2. `[open]` why `ZombieOnShot`'s
+  dispatch does not reach them.
+* Stage 2 block 16 step 12 `wait_enemies_alive`: held by captor `0xA174`
+  (class 0x18, a child of civilian `0xA134`) riding carrier `0xA3E8`, about
+  1,660 units from the camera, in `AttackRun`. It exists because a civilian's
+  captors are made again (main's `parentAt` fix); what it should be doing
+  there is the carrier's and the rider's code, not the carried props'.
+
+**Wrong turn.** The first roll fixture put the carrier a hundred units off on
+flat ground and failed: friction stops a barrel well short of that, and the
+real one has stairs. The fixture now stands inside the forty units where a
+grounded roll re-aims itself.

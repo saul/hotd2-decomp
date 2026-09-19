@@ -10908,6 +10908,54 @@ console.log("\na dead civilian releases its captors:");
         (captor.flags2 & 1) === 1, captor.flags2.toString(16));
 }
 
+/**
+ * Bug 18. `CivilianUpdate` (`FUN_0048A920`) calls `ActorRegisterCameraPoint`
+ * at `0x0048ADB0` on every path, and that tail-calls
+ * `RegisterForCameraTracking` (`FUN_00408EC0`), whose only test is `obj+0x34`
+ * bit `0x10000`. So a civilian whose wait word carries `0x40000` holds a
+ * camera slot, `CameraDriverSelectMode` stays in the tracking mode, and
+ * `g_camera_free` -- and with it every room-clear gate -- stays down while she
+ * speaks. The port filtered every non-enemy out of the candidate list, and
+ * stage 4's next zombies walked in over her lines.
+ */
+console.log("\na tracked civilian holds the camera, and the room with it:");
+{
+  const rng = new Rng(18);
+  const events = scene(0, rng);
+  const civ = ActorSpawn(0x4000, SpawnClass.Civilian, 0x20, "rescued");
+  civ.visible = true;
+  civ.hp = 1;
+  g_class_handlers[SpawnClass.Civilian]!.init(civ, rng);
+  // Op 0x2C's write for a word carrying `CivilianWait.CameraTrack`.
+  civ.flags &= ~ActorFlag.NoCameraTrack;
+  const prop = ActorSpawn(0x4100, SpawnClass.SetPieceProp, 0, "set piece");
+  prop.visible = true;
+  G.g_enemies_alive = 0;
+
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a civilian without `obj+0x34` bit 0x10000 is a camera candidate",
+        G.g_enemy_slots.includes(civ.at),
+        `[${G.g_enemy_slots.map((a) => a.toString(16)).join(",")}]`);
+  check("...and a class whose routine never calls it is not",
+        !G.g_enemy_slots.includes(prop.at));
+  G.g_camera_free = 1;
+  CameraDriverSelectMode();
+  check("...so with no enemy alive the camera still tracks, and the room is "
+        + "not handed back",
+        G.g_camera_mode === CameraMode.TrackEnemies && G.g_camera_free === 0,
+        `${G.g_camera_mode} ${G.g_camera_free}`);
+
+  // Her script's next word drops `0x40000`: op 0x2C sets the bit.
+  civ.flags |= ActorFlag.NoCameraTrack;
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  CameraDriverSelectMode();
+  check("...and once her wait word drops the track bit the slot goes and the "
+        + "hand-back starts",
+        !G.g_enemy_slots.includes(civ.at)
+        && G.g_camera_mode === CameraMode.HandBackToPath,
+        `${G.g_camera_mode}`);
+}
+
 // -- 15. class 0x30's own death chain ---------------------------------------
 
 /**

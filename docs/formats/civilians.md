@@ -99,6 +99,24 @@ so the wait bit set means tracked. `0x01000000` is the world push and
 `0x20000000` gates op 0x1D's dialogue on `DAT_009A2230`. The counts are of the
 596 `Wait` commands in the 136 shipped streams.
 
+**The camera-track bit is how the room waits for her.** `[proved]`
+`CivilianUpdate` (`FUN_0048A920`) ends every path that does not despawn at
+`0x0048AD97` and runs `PUSH 0x40800000; CALL ActorRegisterCameraPoint` at
+`0x0048ADAB`; `ActorRegisterCameraPoint` (`FUN_00409B70`) ends
+`PUSH ESI; CALL 0x00408EC0` at `0x00409C03`, and `RegisterForCameraTracking`
+tests nothing but `obj+0x34` bit `0x10000` and the list being full. So in every
+block whose word carries `0x40000` the civilian is in `g_enemy_slots`, the
+camera looks at her, `CameraDriverSelectMode` (`FUN_00402650`) stays in mode 3
+and `g_camera_free` stays 0 -- and `wait_enemies_alive`,
+`wait_enemies_present`, `wait_scripted_actors` and `wait_targets_clear` all
+need that flag. A rescue script keeps the bit through the closed shutter and
+her lines and drops it in the block that opens the shutter again (stage 4's
+stream 75: tracked from command 0 to the `0x2188000` at command 41, which is
+followed by `SetHudShutterState 1`). None of the 16 wait words carrying
+`0x1000` (camera settled) also carries `0x40000`, which is consistent: a
+tracked camera never raises `g_camera_settled`, so a script untracks her before
+it waits for the camera.
+
 ### The root-motion gate — `0x00100000`
 
 **The engine's civilians are carried by their clips, through the same routine

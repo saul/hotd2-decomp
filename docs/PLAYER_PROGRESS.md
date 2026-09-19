@@ -53,6 +53,22 @@ carrier killed holding its prop drops it (`CarriedPropDrop`,
 `CarriedPropFallFree`), and a prop shot to pieces draws its break effect -- the
 drum splits in two -- through the effect tree the class-0x44 props use.
 
+**A rescued civilian holds the room while she speaks** (bug 18). There is no
+"wait for the dialogue" opcode: `CivilianUpdate` (`FUN_0048A920`) calls
+`ActorRegisterCameraPoint` every frame (`0x0048ADB0`), which tail-calls
+`RegisterForCameraTracking`, so a civilian is a camera candidate whenever her
+wait word carries `0x40000`. While she holds a `g_enemy_slots` entry the
+camera tracks her, `g_camera_free` stays down and `wait_enemies_alive` holds;
+her script drops the bit in the block that reopens the shutter. The port kept
+every non-enemy out of the candidate list, so stage 4 (Original) block 1 handed
+the room back the frame her captor died and the two throwers walked in 180
+frames into her line with the shutter still closed. `ClassHandler.tracksCamera`
+is how a non-enemy class says its routine makes the call; `web/tools/civ_speech.mjs`
+times rescue, lines, shutter, gate and next spawn on stage 4 (Original) block 1
+and stage 2 block 6. Stage 1 block 1's script untracks her for the two turn
+clips before her line, so there the gate can still open before she speaks --
+the same rule, applied to that script.
+
 **A civilian's captors are made again.** `CivilianInit` spawns its children
 itself, so the walker's spawn list names only the civilian; 6da5fab walked
 that list to keep the script's order and every captor in the game went

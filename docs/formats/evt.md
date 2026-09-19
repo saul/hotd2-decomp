@@ -733,8 +733,18 @@ So the `0x24`-dword `{enabled, from, to, rate}` tween block animates *these*:
 | 9 | light colour, all three at once |
 | 10 | ambient |
 
-`0x20`/`0x21`/`0x22`/`0x23` target light block 0 and `0x24`–`0x27` block 1;
-block 0 is pushed to the renderer every frame, block 1 only at scene init.
+`0x20`/`0x21`/`0x22`/`0x23` target light block 0 and `0x24`–`0x27` block 1 —
+**[proved]** each block-1 opcode is a thunk into the block-0 body with the block
+argument 1 (`0x0040B632`, `0x0040BA82`, `0x0040C1E2`), so the operands decode
+identically. Block 0 lights the world; **block 1 lights every character**:
+`LightsUseSecondarySet` (`FUN_0041DC70`) installs block 1's ambient, direction
+and colour before a character draws and `LightsRestoreScene` (`FUN_0041DCC0`)
+puts block 0's back — 44 routines make the pair of calls, `ZombieAdvanceMotion`
+and `ThrowerAdvanceMotion` as their first instruction. This row used to say
+block 1 was pushed "only at scene init"; that was wrong. Both blocks start at
+`LightBlockInit` (`FUN_0041DBA0`)'s colour `(1, 1, 1)` and ambient **0.7**.
+The exporter decoded only block 0's tweens until this was read, so every
+shipped `0x25`/`0x27` had come out as an immediate set.
 
 ## `queue_event` — the scripted-action table, SOLVED
 

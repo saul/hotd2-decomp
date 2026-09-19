@@ -14,10 +14,23 @@ export const OPS: Record<number, OpImpl> = {
     // which is the one approximation in this group.
     0x18: { status: "done", run: (w, op) => Walker.setLightDir(w, op) },
     0x17: { status: "approx", run: (w, op) => Walker.setLightDir(w, op) },
-    // Light block 1 is pushed only at scene init and never reaches the
-    // renderer, so these are no-ops in the game as well as here. Honouring
-    // them would be wrong, not merely unimplemented.
-    0x19: { status: "none", run: () => undefined },
+    // Light block 1 -- the characters' light. `LightsUseSecondarySet`
+    // (`FUN_0041DC70`) installs it for every character's draw, so these are
+    // real. They used to be no-ops on the belief that block 1 never reached
+    // the renderer.
+    0x19: {                                     // set_light1_direction
+      status: "done",
+      run: (w, op) => {
+        if (op.pitch_deg !== undefined) {
+          w.lightBlock1.lightDir = {
+            pitchDeg: op.pitch_deg,
+            yawDeg: op.yaw_deg ?? w.lightBlock1.lightDir.yawDeg,
+          };
+          w.lightBlock1.lightSet = true;
+        }
+        return undefined;
+      },
+    },
     0x14: {                                     // set_scene_lighting
       status: "done",
       run: (w, op) => {
@@ -51,9 +64,9 @@ export const OPS: Record<number, OpImpl> = {
     0x20: { status: "done", run: (w, op) => w.applyLightChannel(op) },
     0x21: { status: "done", run: (w, op) => w.applyLightChannel(op) },
     0x23: { status: "done", run: (w, op) => w.applyLightChannel(op) },
-    // Block 1 again -- same reasoning as 0x19 above.
-    0x24: { status: "none", run: () => undefined },
-    0x25: { status: "none", run: () => undefined },
-    0x27: { status: "none", run: () => undefined },
+    // Block 1's channels, the same stepper as block 0's.
+    0x24: { status: "done", run: (w, op) => w.applyLightChannel(op) },
+    0x25: { status: "done", run: (w, op) => w.applyLightChannel(op) },
+    0x27: { status: "done", run: (w, op) => w.applyLightChannel(op) },
     0x22: { status: "shown" }, 0x26: { status: "shown" },
 };

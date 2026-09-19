@@ -76,6 +76,7 @@ import { SceneFog } from "../render/fog";
 import { TextureFilter } from "../render/texfilter";
 import { SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
+import { ActorDrawsUnderSecondaryLights } from "../game/light_sets";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
 import { entryBlockFor, loadStageInto } from "./stage_load";
 import { Events } from "../core/events";
@@ -430,6 +431,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.texFilter.setRenderer(this.renderer);
     this.lighting = new SceneLighting(this.scene);
     this.gunLights = new GunLights(this.scene, this.lighting);
+    // The two light sets -- see `SecondaryLightSource`. Block 1 is the
+    // walker's; which actors draw under it is the port's.
+    this.lighting.source = {
+      light: () => this.walker?.lightSecondary ?? null,
+      secondary: (at) => {
+        const obj = ActorByAt(at);
+        return !!obj && ActorDrawsUnderSecondaryLights(obj);
+      },
+    };
     // The port's two answers, handed across as questions -- see
     // `GunLightSource` for why the layer does not ask the port itself.
     this.gunLights.source = {
@@ -449,6 +459,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.rigs.group);
     this.scene.add(this.breakables.group);
     this.scene.add(this.slotModels.group);
+    this.lighting.addRoot(this.slotModels.group);
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
 

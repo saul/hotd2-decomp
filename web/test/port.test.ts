@@ -204,6 +204,7 @@ import {
   GUN_LIGHT_FIRST, RenderLightType, SceneLightArrayUpdate, SetPlayerAimFromPointer,
 } from "../src/game/scene_lights";
 import { VecToAngles } from "../src/game/vec";
+import { ActorDrawsUnderSecondaryLights } from "../src/game/light_sets";
 import {
   EntityLightReleaseSlot, FLICKER_BROKEN, FLICKER_DEBRIS_COUNT, FLICKER_FADE_FRAMES,
   PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
@@ -17409,6 +17410,66 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
           broke && parts.join(",") === `${0x0a56},${0x0a55}`,
           `parts ${parts.map((x) => x.toString(16))}`);
   }
+}
+
+// -- light block 1: LightsUseSecondarySet --------------------------------------
+//
+// `LightsUseSecondarySet` (`FUN_0041DC70`) lights every character with light
+// block 1, which evt 0x19 and 0x24/0x25/0x27 write. The walker used to drop
+// those as no-ops.
+console.log("\nlight block 1 (the characters' light):");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x19, name: "set_light1_direction", cat: "light",
+          pitch_deg: 270, yaw_deg: 0 },
+        { i: 1, at: 12, op: 0x24, name: "light1_set", cat: "light",
+          light_block: 1, channel: 6, value: 0.8 },
+        { i: 2, at: 24, op: 0x27, name: "light1_tween_time", cat: "light",
+          light_block: 1, channel: 10, value: 0.3, tween: "time", frames: 4 },
+        { i: 3, at: 36, op: 0x20, name: "light0_set", cat: "light",
+          light_block: 0, channel: 6, value: 0.5 },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  check("both blocks start at LightBlockInit's ambient, 0.7",
+        w.light.ambient === 0.7 && w.lightSecondary.ambient === 0.7);
+  w.tick(1 / 60);
+  check("...and 0x27 leaves block 1's ambient tweening, not set",
+        w.lightBlock1.tweens[10]?.to === 0.3 && w.lightSecondary.ambient === 0.7);
+  // The script ends after the four instructions, and a finished walker runs
+  // no more frames; step the block the way `PushSceneLightStateToDevice`
+  // would for the four frames the tween asks for.
+  w.lightBlock1.step(4);
+  const b1 = w.lightSecondary;
+  check("evt 0x19 sets block 1's direction, not block 0's",
+        b1.pitchDeg === 270 && w.light.pitchDeg === 0,
+        `b1 ${b1.pitchDeg} b0 ${w.light.pitchDeg}`);
+  check("evt 0x24 sets block 1's colour, 0x20 block 0's",
+        b1.rgb[0] === 0.8 && w.light.rgb[0] === 0.5,
+        `b1 ${b1.rgb[0]} b0 ${w.light.rgb[0]}`);
+  check("evt 0x27 tweens block 1's ambient to its target",
+        Math.abs(b1.ambient - 0.3) < 1e-9, `${b1.ambient}`);
+  const z = spawnZombie(0x3000, 1, "z");
+  check("a zombie draws under block 1 (ZombieAdvanceMotion's first call)",
+        ActorDrawsUnderSecondaryLights(z));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

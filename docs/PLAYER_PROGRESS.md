@@ -3880,6 +3880,30 @@ none of whose routines calls it); and `EffectPoseNode`'s matrix arm,
 `MatrixInterpolateSwingTwist` (`FUN_00412750`), which effect 0x13 reaches on
 12 node-frames of its break (`class44/swing_twist.ts`).
 
+### Light block 1 is the characters' light
+
+`LightsUseSecondarySet` (`FUN_0041DC70`) swaps the device's ambient,
+direction and colour to **light block 1** (`0x009A59E0`) and
+`LightsRestoreScene` (`FUN_0041DCC0`) swaps block 0's back. Forty-four
+routines make the pair of calls around their draw, unconditionally — among
+them `ZombieAdvanceMotion` and `ThrowerAdvanceMotion` as their first
+instruction, `CivilianUpdate`, the frog, class 0x14, the one-hit targets, class
+0x22, the set pieces, the humanoids, the horde members and the horde's rug, the
+owl's corpse, the bats, the fish and the cat. So the world is lit by block 0
+and **every character by block 1**. The port had block 1's opcodes (`0x19`,
+`0x24`, `0x25`, `0x27` -- 91 + 112 + 0 + 94 = 297 instructions across the six stages) as no-ops on
+the belief that block 1 "never reaches the renderer", and the exporter decoded
+only block 0's tweens, so every `0x25`/`0x27` came out as an immediate set.
+
+Now: the walker keeps both blocks (`lightBlock1`, in the snapshot), stepped
+together; both start at `LightBlockInit` (`FUN_0041DBA0`)'s ambient 0.7, which
+was 0.5 from nothing; `game/light_sets.ts` says which classes draw under block
+1; and `render/lighting.ts` gives those actors' meshes a Lambert twin lit by
+block 1's uniforms alone. **Only the "+ scene light" view shows it**, because
+the default view is unlit for everything. `[open]`: twenty-one of the callers
+are unnamed routines whose class has not been read, plus `BodyCreatureUpdate`
+and `ScorePickupUpdate`, which are not actors in the port's pool.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in
@@ -3929,7 +3953,7 @@ missed. Meanings and confidence marks live in
 | `16` | `set_ambient_light_rgb` | light | **done** | `g_light_array_ambient` r, g, b — the scene-light-array path's ambient; the exporter resolves the three pointers into `rgb` |
 | `17` | `slerp_light0_direction` | light | ~approx~ | the slerp target is taken immediately rather than stepped |
 | `18` | `set_light0_direction` | light | **done** | **drives the directional light** in `+ scene light` mode |
-| `19` | `set_light1_direction` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `19` | `set_light1_direction` | light | **done** | light block 1 — **every character's light** (`LightsUseSecondarySet`); drawn in the "+ scene light" view |
 | `1A` | `set_ground_plane_y` | camera | *tracked* | ground plane / g_camera_fixed_eye_y; see the eye-height note |
 | `1B` | `set_backdrop_preset` | scenery | **done** | **the backdrop dome is drawn**, following the camera |
 | `1C` | `set_backdrop_mode` | scenery | **done** | dome mode: 0 off, 2 frozen, anything else spins at the preset's rate |
@@ -3940,10 +3964,10 @@ missed. Meanings and confidence marks live in
 | `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |
 | `23` | `light0_tween_time` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
-| `24` | `light1_set` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
-| `25` | `light1_tween_rate` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `24` | `light1_set` | light | **done** | light block 1 — **every character's light** (`LightsUseSecondarySet`); drawn in the "+ scene light" view |
+| `25` | `light1_tween_rate` | light | **done** | light block 1 — **every character's light** (`LightsUseSecondarySet`); drawn in the "+ scene light" view |
 | `26` | `light1_stop` | light | shown | clears a channel tween |
-| `27` | `light1_tween_time` | light | none | light block 1 — pushed only at scene init, so it never reaches the renderer |
+| `27` | `light1_tween_time` | light | **done** | light block 1 — **every character's light** (`LightsUseSecondarySet`); drawn in the "+ scene light" view |
 | `28` | `region_load` | region | shown | preloads a region's assets; everything is already resident here |
 | `29` | `region_enter` | region | **done** | **switches the drawn region** — the core of the streaming model |
 | `2A` | `unused_2a` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |

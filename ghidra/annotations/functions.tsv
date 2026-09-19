@@ -319,7 +319,8 @@
 0041d970	AssetDrainAllJobs
 0041d9d0	AssetDrainTexAndPolJobs
 0041da70	AssetDrainMotionJobs
-0041dc70	LightsUseSecondarySet	SetRenderAmbient/Direction/Colour from the second light block at 0x009A59EC..0x009A5C2C. The horde member and the deformed prop draw under it.
+0041dba0	LightBlockInit	LightBlockInit(block) -- seeds one light/fog block: fog (65535, 65536), fog colour 0, light colour (1,1,1) at +0x240, ambient 0.7 (0x3F333333) at +0x24C, direction (0,0). Called for block 0 (0x009A3540) and block 1 (0x009A59E0) at 0x0040AAD6/0x0040AAE0.
+0041dc70	LightsUseSecondarySet	SetRenderAmbient(block1+0x24C), BuildSceneLightDirection(block1 pitch/yaw) + SetRenderLightDirection, SetRenderLightColour(block1+0x240..0x248) -- light block 1 at 0x009A59E0. 44 callers make it around their draw, unconditionally: ZombieAdvanceMotion and ThrowerAdvanceMotion as their first instruction, CivilianUpdate, FrogDrawAndCycleBone2Slot, Class14AdvanceMotionAndPublishPoints, OneHitTarget*, Class22AdvanceAndSeatRider, SetPiecePropDrawAndTick, ScriptedHumanoidDraw, HordeMemberUpdate, HordeDeformedPropUpdate, OwlCorpseFallAndSettle, Bat*Update, FishDraw, FishSwimAwayTick, CatBranchTriggerUpdate, BodyCreatureUpdate, ScorePickupUpdate and 21 unnamed. So block 1 is the characters' light.
 0041dcc0	LightsRestoreScene	Puts the scene's own ambient, direction and colour back after LightsUseSecondarySet.
 0041ebb0	NoOpStub	a bare RET; the filler entry in every dispatch table
 0041f9b0	RunAttractScene10	App state 10 in AppStateDispatch. Run phase 0 sets g_GameMode = 0 and g_scene_index = 10, loads the screen assets through PreloadScreenAssetList, registers LAB_0041FAB0 as the frame callback and resets the scene; phase 1 runs the callback until DAT_009C71C0 and then AppStateAdvanceByTable. One of the two attract screens; RunAttractScene11 is the other.

@@ -28,6 +28,7 @@
 import { Walker, type WalkerHost } from "../script/walker";
 import type { ScriptJson } from "../bundle";
 import { G } from "../game/globals";
+import { CameraTargetsClear } from "../script/waits/targets";
 import { screenMessage } from "./projection/message";
 import type { Player } from "./main";
 
@@ -78,6 +79,9 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // `g_camera_free` -- the room-clear waits need the camera back on its
     // rail, not just the count at zero.
     cameraFree: () => G.g_camera_free !== 0,
+    // `EvtOpWaitTargetsClear47` (`FUN_0045FD20`): the camera is settled or
+    // free, and nothing registered for camera tracking this frame.
+    cameraTargetsClear: () => CameraTargetsClear(),
     // The shutter is the walker's own state now: there is nothing to tell.
     showMessage: (g) => {
       // Variant 0 is the 1P / player-1 configuration, which is what a

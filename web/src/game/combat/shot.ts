@@ -56,6 +56,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { MarkBodyCreatureShot } from "../body_creature";
+import { MarkCarriedPropShot } from "../carried_prop";
 import { BreakablePropTakeShot } from "../class41/prop";
 import { ColiTraceSegmentAllSets } from "../coli";
 import { PlayerShotEffectSpawn } from "../effects/shot_effects";
@@ -280,6 +281,19 @@ function ResolveShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     G.g_head_combo_bonus[player] = 0;
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point, points: 0,
+    });
+    return;
+  }
+
+  if (pick.kind === "carried") {
+    // `MarkActorShot` and nothing else, as for the creature: what the hit
+    // costs the prop is `CarriedPropCheckShot`'s, on its next update. No head
+    // combo reset -- that is `ResolveHit`'s, and a prop never reaches it.
+    const c = G.g_carried_props.find((x) => x.id === pick.carriedId);
+    if (c) MarkCarriedPropShot(c, player);
+    events?.emit("shot.resolved", {
+      player, kind: c ? "marked" : "miss", ray: req.ray,
+      point: c ? pick.point : undefined, points: 0,
     });
     return;
   }

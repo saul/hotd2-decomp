@@ -62,5 +62,11 @@ export function UpdateCameraEnemySlots(eye: Vec3): void {
     }
   }
   G.g_enemy_slots = [...attackers, ...rest];
+  // The count the list holds, which is not only actors: a carried prop in
+  // flight or stuck to the lens calls `RegisterForCameraTracking` as well.
+  // [open] the slot array stays actors-only -- the same gap
+  // `g_body_creatures` names -- so the props count here but are not aimed at.
+  G.g_camera_candidate_count = cand.length
+    + G.g_carried_props.filter((p) => p.cameraTracked).length;
   G.g_camera_is_tracking = G.g_enemy_slots.length ? 1 : 0;
 }

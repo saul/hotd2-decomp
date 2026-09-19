@@ -160,6 +160,19 @@ export interface TargetScriptJson {
     mode?: number;
     /** State 43: the frame the drag kills on. */
     cue?: number;
+    /**
+     * State 37, `ZombieStateCarryProp`: the carried prop's record. `prop_type`
+     * indexes `g_carried_prop_types`, `behaviour` the `g_prop_behaviours` it
+     * starts in, `release` the one the throw hands it to; `offset` is its
+     * position in the hands, `spin` BAMS per frame, `launch` the three words
+     * `obj+0x4C..0x54` start as. See `game/carried_prop.ts`.
+     */
+    prop_type?: number;
+    behaviour?: number;
+    release?: number;
+    offset?: [number, number, number];
+    spin?: [number, number, number];
+    launch?: [number, number, number];
   };
   entries: TargetScriptEntry[];
 }

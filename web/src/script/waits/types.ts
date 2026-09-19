@@ -146,7 +146,8 @@ export const WAIT_NOTES: Record<number, string> = {
   0x45: "the script-flag gate (`g_script_flags`): real — the array is one "
       + "array, and gameplay writes it too",
   0x46: "the civilian gate: real — it ends when the captors are dead",
-  0x47: "passed: 'camera settled and no live target' needs the runtime",
+  0x47: "passed: this client has no camera to ask whether anything is left "
+      + "to track",
 };
 
 /** The fallback: a wait this client cannot evaluate does not block. */

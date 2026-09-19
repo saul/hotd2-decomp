@@ -144,8 +144,10 @@ export function ZombieScriptForState(obj: ZombieActor): TargetScriptJson | null 
 const SCRIPT_TARGET = 0;                       // tail +0x04
 const SCRIPT_ATTACK = 1;                       // tail +0x08
 
-/** Which blob `ZombieScriptForState` picks for the state the actor is in now. */
-function blobForState(obj: ZombieActor): number {
+/** Which blob `ZombieScriptForState` picks for the state the actor is in now.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
+ */
+export function blobForState(obj: ZombieActor): number {
   return obj.state === obj.attackState ? SCRIPT_ATTACK : SCRIPT_TARGET;
 }
 
@@ -156,8 +158,9 @@ function blobForState(obj: ZombieActor): number {
  * else re-derives it. `ZombieStateWalkToTarget` sets it to `blob + 10` — past
  * the head — and `ZombieStateTargetMotionScript` to `blob + 4` per entry
  * consumed; both are this, in entries rather than shorts.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
  */
-function aimCursor(obj: ZombieActor, blob: number, pc: number): void {
+export function aimCursor(obj: ZombieActor, blob: number, pc: number): void {
   obj.zom.scriptBlob = blob;
   obj.zom.scriptPc = pc;
 }
@@ -171,15 +174,18 @@ function aimCursor(obj: ZombieActor, blob: number, pc: number): void {
  * replayed the approach clip it had already finished, and bounced to the walk
  * again. Two zombies circled a hostage in stage 3 for ever and her script,
  * parked on `children-alive`, never moved.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
  */
-function cursorScript(obj: ZombieActor): TargetScriptJson | null {
+export function cursorScript(obj: ZombieActor): TargetScriptJson | null {
   const p = obj.script;
   if (!p) return null;
   return (obj.zom.scriptBlob === SCRIPT_ATTACK ? p.attack : p.target) ?? null;
 }
 
-/** The entry the cursor is on, or null past the end of the list. */
-function entryAt(s: TargetScriptJson | null, pc: number):
+/** The entry the cursor is on, or null past the end of the list.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
+ */
+export function entryAt(s: TargetScriptJson | null, pc: number):
     TargetScriptEntry | null {
   const e = s?.entries[pc];
   return e && e.motion >= 1 ? e : null;
@@ -302,8 +308,10 @@ function loseTarget(obj: ZombieActor): void {
   obj.sub = 0;
 }
 
-/** The clip frame this actor is on — the engine's `obj+0x19C`. */
-function frameOf(obj: ZombieActor): number {
+/** The clip frame this actor is on — the engine's `obj+0x19C`.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
+ */
+export function frameOf(obj: ZombieActor): number {
   return MotionPlayFrame(obj);
 }
 
@@ -312,8 +320,9 @@ function frameOf(obj: ZombieActor): number {
  *
  * Both halves count in the **play** clock, not in authored frames. Measuring
  * this in frames ends every entry at halfway and takes the kill cue with it.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
  */
-function atLastFrame(obj: ZombieActor): boolean {
+export function atLastFrame(obj: ZombieActor): boolean {
   const len = MotionPlayLength(obj);
   // **Equality, because the cursor wraps.** `>=` is true for both `len - 1`
   // and `len`, so every entry would spend two of its loops per play-through.
@@ -324,8 +333,9 @@ function atLastFrame(obj: ZombieActor): boolean {
  * The tail every scripted state shares: if the clip has drifted off the one
  * the script asked for, blend back to it — hard when the loop count is nearly
  * spent, soft otherwise.
+ * `[port-only]` as an export -- `class30/carry_prop.ts` reads the same cursor.
  */
-function reblend(obj: ZombieActor): void {
+export function reblend(obj: ZombieActor): void {
   if (obj.flags & ActorFlag.Reacting) return;
   if (obj.motion === obj.zom.scriptMotion || !obj.zom.scriptMotion) return;
   const m = MotionOf(obj, obj.motion);

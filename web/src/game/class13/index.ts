@@ -36,12 +36,13 @@
  * for four other classes. What is here is the state, the motion and the
  * despawn.
  *
- * Two **effects** are declared rather than ported. The wake `FUN_00440770`
- * draws every frame from `ride+0x04`, and the bow splash `FUN_0043FCA0`
- * spawned at path frame 0x550 with `PlaySoundId(0x000B16A9)`, are both draw-
- * side objects with no game state a gate or a snapshot can see. The amplitude
- * they fade *is* state and is stepped here, so a later renderer has it.
- * [diverges]
+ * The **effects** are ported with it: the wake `CarrierDrawGroundWake`
+ * (`FUN_00440770`) lays on the ground under the boat from `ride+0x04`, the
+ * bow strip `SpawnPropStripEffect` (`FUN_0043FCA0`, kind 3) spawned at path
+ * frame 0x550 with `PlaySoundId(0x000B16A9)`, and states 5 and 6's strip.
+ * The state and the cursors are here; the draws are `render/slotmodels.ts`',
+ * reading the `*Drawn` fields this file sets on the frames the engine draws.
+ * They used to be a `[diverges]` for want of their slots in the bundle.
  *
  * `FUN_004459C0`, the on-screen test state 6 uses to decide when to despawn,
  * reads view-space `obj+0x70`/`+0x78` against the shot radius. The port has
@@ -56,14 +57,29 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
-import { CarrierState, type ScriptedPropTail } from "./state";
+import { QueryGroundHeightAt } from "../coli";
+import { CarrierTransformPoint } from "../carrier";
+import {
+  PropStripKind, SpawnPropStripEffect,
+} from "../effects/prop_strip";
+import { vec3, VecToAngles } from "../vec";
+import {
+  CARRIER1_STRIP_FIRST, CARRIER1_STRIP_LAST, CARRIER_WAKE_FIRST,
+  CARRIER_WAKE_LAST, CarrierState, type ScriptedPropTail,
+} from "./state";
 
 /** `ActorAllocSub(0x18)`'s `ride+0x04`, and the range it wraps in. */
-const WAKE_CEL_FIRST = 0x24a;
-const WAKE_CEL_LAST = 0x25f;
+const WAKE_CEL_FIRST = CARRIER_WAKE_FIRST;
+const WAKE_CEL_LAST = CARRIER_WAKE_LAST;
 /** `ride+0x14`, the strip states 5 and 6 draw. */
-const STRIP_CEL_FIRST = 0x1aab;
-const STRIP_CEL_LAST = 0x1ad2;
+const STRIP_CEL_FIRST = CARRIER1_STRIP_FIRST;
+const STRIP_CEL_LAST = CARRIER1_STRIP_LAST;
+/** `CarrierDrawGroundWake`'s probe starts this far above the carrier. */
+const WAKE_PROBE_RISE = 100.0;
+/** `MatrixTranslate(0, 0, -5.0)` — the bow, in the carrier's own frame. */
+const CARRIER_BOW_Z = -5.0;
+/** `PlaySoundId(0x000B16A9)` with the bow strip at path frame 0x550. */
+export const SFX_CARRIER_BOW = 0xb16a9;
 /** `obj+0x124 = 40.0` — the shot sphere state 0 seats. */
 const CARRIER_HIT_RADIUS = 40.0;
 /** The two `op_` object paths `CarrierPropRoutine1` rides. */
@@ -81,6 +97,30 @@ const FRAME_BOW_FLAG = 0x55a;
 const WAKE_FADE_RATE = -0.015;
 /** Selector 1 — the stage-3 boat, and the routine this file ports. */
 export const CARRIER_ROUTINE_PORTED = 1;
+
+// -- `CarrierPropRoutine6`'s own numbers --------------------------------------
+//
+// The same eight states through a jump table of the same shape (`0x0044172C`:
+// `0x004413E7`, `0x00441427`, `0x004414C2`, `0x00441459`, `0x004414F0`,
+// `0x004415FC` twice, `0x00441718`), on two other object paths and at other
+// frames. Read instruction by instruction, not copied from routine 1: the
+// run-past arm is arranged differently (below).
+
+/** `PUSH 0x160` / `PUSH 0x161` — `op_` paths 352 (pull up) and 353 (run). */
+export const CARRIER6_PATH_MOOR = 0x160;
+export const CARRIER6_PATH_RUN = 0x161;
+/** `[0x005772BC]` — `g_cam_path_length[0x161]`, read from the image: 0x6AE. */
+export const CARRIER6_PATH_END = 0x6ae;
+/** `CMP EAX, 0x635` at `0x0044143A` — the fork on `g_civilians_alive`. */
+const CARRIER6_FRAME_FORK = 0x635;
+/** `SUB EAX, 0x672` at `0x004414D5` — the pull-up starts the wake's fade. */
+const CARRIER6_FRAME_MOOR_FADE = 0x672;
+/** `SUB EAX, 0x3C` at `0x004414DC` — 0x6AE, moored. */
+const CARRIER6_FRAME_MOORED = 0x6ae;
+/** `CMP EAX, 0x668` at `0x00441526` — running past, the wake starts to fade. */
+const CARRIER6_FRAME_FADE = 0x668;
+/** `CMP EAX, 0x6A4` at `0x00441539` — the bow splash and its sound. */
+const CARRIER6_FRAME_BOW_EFFECT = 0x6a4;
 /** `obj+0x34` bit the run-past arm raises at path frame `0x55A`. */
 const CARRIER_BOW_BIT = 0x400000;
 
@@ -88,15 +128,24 @@ const CARRIER_BOW_BIT = 0x400000;
  * `g_prop_behaviours` — `0x005926A8`, ten entries indexed by the descriptor's
  * `tail+0x10`.
  *
- * Only two are modelled. Entry 0 is `NoOpStub` and is what a static prop
- * takes; entry 8 is {@link CarrierPropSelectRoutine}. The other eight —
- * `0x00442820`, `0x00443200`, `0x004432D0`, `0x00443B90`, `0x00443DC0`,
- * `0x0043FFC0`, `0x004400D0` and `0x00445050` — have no shipped stage-3
- * spawn and are not read. `[open]`
+ * Entry 0 is `NoOpStub` and is what a static prop takes; entry 8 is
+ * {@link CarrierPropSelectRoutine}. Entries 1, 3, 4 and 5 are the carried
+ * props' — class 0x30 state 37's barrels, which reach the table through the
+ * state-37 script rather than through a class-0x13 descriptor; 1 and 4 are
+ * ported in `game/carried_prop.ts`. The rest — `0x00443200`, `0x0043FFC0`,
+ * `0x004400D0` and `0x00445050` — are not read. `[open]`
  */
 export enum PropBehaviour {
   /** `NoOpStub` (`0x0041EBB0`) — a static prop, drawn and nothing else. */
   None = 0,
+  /** `CarriedPropHeldUpdate` (`FUN_00442820`) — `game/carried_prop.ts`. */
+  CarriedPropHeld = 1,
+  /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — not ported. */
+  CarriedPropThrowAtTarget = 3,
+  /** `CarriedPropThrowAtCamera` (`FUN_00443B90`) — `game/carried_prop.ts`. */
+  CarriedPropThrowAtCamera = 4,
+  /** `CarriedPropRollAtCamera` (`FUN_00443DC0`) — not ported. */
+  CarriedPropRollAtCamera = 5,
   /** `CarrierPropSelectRoutine` (`FUN_00440190`). */
   SelectCarrierRoutine = 8,
 }
@@ -139,9 +188,10 @@ export function ScriptedPropInit13(obj: Actor): void {
  *
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
  * routines chosen through the jump table at `0x004401E4` — see
- * {@link g_carrier_prop_routines}. Selectors 0 and 1 are ported; the other
- * five — `0x004408A0` (2 and 9), `0x00440AD0` (3), `0x00440C20` (4 and 7),
- * `0x00441000` (5 and 8) and `0x004413C0` (6) — are unread. `[open]`
+ * {@link g_carrier_prop_routines}. Selectors 0, 1 and 6 are ported (stage
+ * 2's block-16 boat and stage 3's two); the other four routines —
+ * `0x004408A0` (2 and 9), `0x00440AD0` (3), `0x00440C20` (4 and 7) and
+ * `0x00441000` (5 and 8), all stage 4's — are unread. `[open]`
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -178,17 +228,50 @@ export function PropSeatOnObjectPath(obj: Actor, slot: number, frame: number,
  * whole body.
  *
  * The wake's scale decays once a fade has been started and the wake switches
- * off when it reaches zero. The **draw** that uses it is `FUN_00440770` and is
- * not ported; the amplitude is, because it is state. [diverges]
+ * off when it reaches zero. While it is on, `CarrierDrawGroundWake`
+ * (`FUN_00440770`) draws `ride+0x04` and `ride+0x04 + 0x16` flat on the
+ * ground under the boat, and the cel steps. The draw is
+ * `render/slotmodels.ts`'; the two numbers it needs from the world are
+ * computed here — see {@link CarrierDrawGroundWakeInputs}.
  */
-function CarrierPropStepWake(sub: ScriptedPropTail): void {
+function CarrierPropStepWake(obj: Actor, sub: ScriptedPropTail): void {
+  sub.wakeDrawn = 0;
   if (sub.wakeFade !== 0) {
     sub.wakeScale += sub.wakeFade;
     if (sub.wakeScale <= 0) sub.wakeOn = 0;
   }
   if (sub.wakeOn === 0) return;
+  CarrierDrawGroundWakeInputs(obj, sub);
+  sub.wakeDrawn = sub.wakeCel;
   sub.wakeCel += 1;
   if (sub.wakeCel > WAKE_CEL_LAST) sub.wakeCel = WAKE_CEL_FIRST;
+}
+
+/**
+ * The half of `CarrierDrawGroundWake` (`FUN_00440770`) that is not a draw.
+ *
+ * ```c
+ * Push; LoadIdentity; RotX(+0x64); RotZ(+0x6C); RotY(+0x68);
+ * MatrixTransformPoint((0, 0, 1)) -> d;  VecToAngles(d) -> (pitch, yaw);
+ * SetTop(camera); Translate(x, QueryGroundHeightAt(x, y + 100, z), z);
+ * RotY(yaw); Translate(0, 0, 27.0); Scale(1, scale, scale);
+ * AssetDrawSlot(cel); AssetDrawSlot(cel + 0x16); Pop;
+ * ```
+ *
+ * The heading comes from the full three-axis pose, so a boat pitching in the
+ * water still lays its wake level and along its keel. `[port-only]` as a
+ * function: the engine computes both inside the draw.
+ */
+function CarrierDrawGroundWakeInputs(obj: Actor, sub: ScriptedPropTail): void {
+  // The rotation alone: `MatrixLoadIdentity` before the three turns.
+  const origin = { pos: vec3(0, 0, 0), pitch: obj.pitch, yaw: obj.yaw,
+                   roll: obj.roll } as Actor;
+  const d = vec3();
+  CarrierTransformPoint(origin, 0, 0, 1, d);
+  sub.wakeYaw = VecToAngles(d.x, d.y, d.z).yaw;
+  sub.wakeGroundY = QueryGroundHeightAt(obj.pos.x,
+                                        obj.pos.y + WAKE_PROBE_RISE,
+                                        obj.pos.z);
 }
 
 /**
@@ -224,6 +307,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
 
+  sub.stripDrawn = 0;
   switch (sub.state) {
     case CarrierState.Begin:
       // `ActorAllocSub(0x18)`, and the fields it seeds.
@@ -263,8 +347,16 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
         sub.state = CarrierState.Wake;
       } else if (sub.pathFrame === FRAME_BOW_EFFECT) {
         sub.wakeFade = WAKE_FADE_RATE;
-        // `FUN_0043FCA0` spawns the splash five units off the bow and
-        // `PlaySoundId(0x000B16A9)` sounds it. Both are draw-side. [diverges]
+        // `0x00440546`..`0x004405F8`: the bow is the carrier's own
+        // `Translate(0, 0, -5)` read back with `MatrixGetTranslation`, the
+        // strip faces the camera's yaw with no pitch or roll, and the sound
+        // follows the spawn.
+        const bow = vec3();
+        CarrierTransformPoint(obj, 0, 0, CARRIER_BOW_Z, bow);
+        SpawnPropStripEffect({ pos: bow, pitch: 0,
+                               yaw: G.g_camera_yaw_bams, roll: 0 },
+                             PropStripKind.CarrierBow, 1.0, f.events);
+        f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       } else if (sub.pathFrame === FRAME_BOW_FLAG) {
         obj.flags |= CARRIER_BOW_BIT;
       }
@@ -274,6 +366,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
     case CarrierState.Wake:
     case CarrierState.WakeSpent: {
       // The strip the two states draw is `render/`'s; the cursor is state.
+      sub.stripDrawn = sub.stripCel;
       sub.stripCel += 1;
       if (sub.stripCel > STRIP_CEL_LAST) sub.stripCel = STRIP_CEL_FIRST;
       if (sub.state === CarrierState.Wake
@@ -297,7 +390,109 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
       ActorDespawn(obj);
       return;
   }
-  CarrierPropStepWake(sub);
+  CarrierPropStepWake(obj, sub);
+}
+
+/**
+ * `CarrierPropRoutine6` — `FUN_004413C0`. Stage 3 block 7's boat.
+ *
+ * `CarrierPropSelectRoutine`'s selector 6, and one shipped spawn: evt 29240,
+ * placed with its civilian (29072) — whose captor (29136, class 0x18) rides
+ * it too — at block 7 step 10. The same machine as
+ * {@link CarrierPropRoutine1} on `op_` paths 352/353, forking at `0x635`, with
+ * the same shared `INC` above the same tail (`0x00441457`, jumped to by every
+ * arm of states 0, 1, 2 and 4 and past by 3, 5 and 6). What differs is the
+ * run-past arm:
+ *
+ * ```
+ * seat(0x161, n);
+ * if (n >= g_cam_path_length[0x161]) { strip = 0x1AAB; state = 5;
+ *                                     obj+0x34 |= 0x400000; }
+ * else if (n == 0x668) wakeFade = -0.015;
+ * else if (n == 0x6A4) { splash 8 units along the bow; PlaySoundId(0xB16A9); }
+ * n++;
+ * ```
+ *
+ * Routine 1 fades and splashes on one frame (`0x550`) and raises `0x400000`
+ * ten frames later on its own; this one fades first, splashes later, and
+ * raises the bit with the state change. The wake it draws is scaled 32.5
+ * (`PUSH 0x42020000` at `0x00441493`) against routine 1's 27.0 — draw-side,
+ * like the splash. [diverges] the splash and its sound, as in routine 1.
+ */
+export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
+  const sub = Tail(obj);
+  if (!sub) return;
+  const runIn = (): void => {
+    PropSeatOnObjectPath(obj, CARRIER6_PATH_RUN, sub.pathFrame, f);
+    if (sub.pathFrame === CARRIER6_FRAME_FORK) {
+      sub.state = G.g_civilians_alive !== 0
+        ? CarrierState.PullUp : CarrierState.RunPast;
+    }
+  };
+
+  switch (sub.state) {
+    case CarrierState.Begin:
+      // `0x004413E7`: the same ride block routine 1 allocates, seeded the same
+      // way, then straight on into state 1's body at `0x00441427`.
+      sub.riding = true;
+      sub.wakeCel = WAKE_CEL_FIRST;
+      sub.wakeOn = 1;
+      sub.wakeScale = 1;
+      sub.wakeFade = 0;
+      sub.pathFrame = G.g_cam_path_frame;
+      obj.hitRadius = CARRIER_HIT_RADIUS;
+      sub.state = CarrierState.RunIn;
+      runIn();
+      sub.pathFrame += 1;
+      break;
+    case CarrierState.RunIn:
+      runIn();
+      sub.pathFrame += 1;
+      break;
+    case CarrierState.PullUp:
+      PropSeatOnObjectPath(obj, CARRIER6_PATH_MOOR, sub.pathFrame, f);
+      if (sub.pathFrame === CARRIER6_FRAME_MOOR_FADE) {
+        sub.wakeFade = WAKE_FADE_RATE;
+      } else if (sub.pathFrame === CARRIER6_FRAME_MOORED) {
+        sub.state = CarrierState.Moored;
+      }
+      sub.pathFrame += 1;
+      break;
+    case CarrierState.Moored:
+      break;
+    case CarrierState.RunPast:
+      PropSeatOnObjectPath(obj, CARRIER6_PATH_RUN, sub.pathFrame, f);
+      if (sub.pathFrame >= CARRIER6_PATH_END) {
+        sub.stripCel = STRIP_CEL_FIRST;
+        sub.state = CarrierState.Wake;
+        obj.flags |= CARRIER_BOW_BIT;
+      } else if (sub.pathFrame === CARRIER6_FRAME_FADE) {
+        sub.wakeFade = WAKE_FADE_RATE;
+      } else if (sub.pathFrame === CARRIER6_FRAME_BOW_EFFECT) {
+        // The engine spawns the splash with `FUN_0043FCA0` eight units along
+        // the bow and plays `PlaySoundId(0x000B16A9)`; the port does neither,
+        // as in routine 1 — both are draw-side, with no state a gate reads.
+        // [diverges]
+      }
+      sub.pathFrame += 1;
+      break;
+    case CarrierState.Wake:
+    case CarrierState.WakeSpent:
+      // `0x004415FC`: the strip cursor, then `state == 5 &&
+      // g_cam_path_frame >= g_cam_path_length[0x161]` moves it to 6, and 6's
+      // screen test is the same unported exit as routine 1's. [diverges]
+      sub.stripCel += 1;
+      if (sub.stripCel > STRIP_CEL_LAST) sub.stripCel = STRIP_CEL_FIRST;
+      if (sub.state === CarrierState.Wake
+          && G.g_cam_path_frame >= CARRIER6_PATH_END) {
+        sub.state = CarrierState.WakeSpent;
+      }
+      break;
+    case CarrierState.Gone:
+      ActorDespawn(obj);
+      return;
+  }
+  CarrierPropStepWake(obj, sub);
 }
 
 /**
@@ -328,6 +523,7 @@ export const g_carrier_prop_routines: Partial<Record<number,
   (obj: Actor, f: ClassFrame) => void>> = {
   0: CarrierPropRoutine0,
   [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
+  6: CarrierPropRoutine6,
 };
 
 function ScriptedPropDebug(obj: Actor): ActorDebug {

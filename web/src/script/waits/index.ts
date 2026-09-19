@@ -12,10 +12,12 @@ import { waitQueuedEvents } from "./queued";
 import { waitEnemiesAlive, waitEnemiesPresent, waitScriptedActors }
   from "./enemies";
 import { waitScriptFlag } from "./flag";
+import { waitTargetsClear } from "./targets";
 
 const RULES: readonly WaitRule[] = [
   waitFrames, waitCameraPathFrame, waitQueuedEvents,
   waitEnemiesPresent, waitEnemiesAlive, waitScriptedActors, waitScriptFlag,
+  waitTargetsClear,
 ];
 
 /**

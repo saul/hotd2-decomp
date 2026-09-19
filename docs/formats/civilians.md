@@ -592,7 +592,7 @@ and 47 of them are a civilian's captors.
 | 34 | `ZombieStateWalkToTarget` | Walk at the civilian until inside the script's radius, then grab |
 | 35 | `ZombieStateTargetMotionScript` | The maul: steps a motion list and kills on a cue frame |
 | 36 | `ZombieStateTargetScriptWithFlag` | The same, raising a `g_script_flags` byte on the cue |
-| 37 | `ZombieStateCarryProp` | Carries a companion object and turns toward the camera |
+| 37 | `ZombieStateCarryProp` | Carries a prop (`CarriedPropInit`, no class id) turned to the camera, claims a permit and throws it on a cue frame; see `game/carried_prop.ts` |
 | 38 | `ZombieStateRetireOffScreen` | Leaves once it is off camera, or once its loops run out |
 | 39 | `ZombieStateAwaitCivilianOrder` | Waits on the civilian's own script — see below |
 | 40 | `ZombieStateWalkPastPoint` | Walk until a point is behind it, then maul |

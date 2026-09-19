@@ -9,7 +9,7 @@
  * draw. A list ends on the first entry whose motion is below 1.
  */
 
-import { f32, i16, u16 } from "./bytes";
+import { f32, i16, i32, u16 } from "./bytes";
 import type { CivCommand, CivItem } from "./exetab";
 
 /**
@@ -28,7 +28,7 @@ export const TARGET_SCRIPT_SHAPE: Record<number, [number, number]> = {
   34: [10, 4],   // {f32 arrive_dist; u16 loops; u16 motion; u16 frame}
   35: [0, 4],    // straight into the entries
   36: [0, 5],    // ...with a g_script_flags index per entry
-  37: [0x38, 4], // the carried-prop record; [open] beyond its motion fields
+  37: [0x38, 4], // the carried-prop record -- see the note in targetScript
   38: [20, 4],   // {f32 x, y, z; s16 motion, frame; s16 loops, mode}
   40: [16, 4],   // {f32 x, y, z; s16 motion, frame}
   41: [16, 4],   // the same, arrived at rather than walked past
@@ -84,6 +84,24 @@ export function targetScript(prog: RawSource, off: number | null | undefined,
     }
   } else if (state === 43) {
     head = { loops: i16(raw, off), cue: i16(raw, off + 2) };
+  } else if (state === 37) {
+    // `ZombieStateCarryProp` (`FUN_0045B380`) and `CarriedPropInit`
+    // (`FUN_00442740`) between them read every word of the 0x38 bytes:
+    // +0x00 the prop type (`g_carried_prop_types`), +0x04 its first
+    // `g_prop_behaviours` index, +0x08 the behaviour the release hands it to
+    // (`obj+0x1358`), +0x0C..0x14 its offset in the hands, +0x18..0x20 the
+    // spin per frame, +0x24..0x2C the launch words (`obj+0x4C..0x54`), then
+    // the first motion entry at +0x30 -- which is the header's own, read by
+    // sub 0, and not the list's first.
+    head = {
+      prop_type: i32(raw, off), behaviour: i32(raw, off + 4),
+      release: i32(raw, off + 8),
+      offset: [f32(raw, off + 0x0c), f32(raw, off + 0x10), f32(raw, off + 0x14)],
+      spin: [i32(raw, off + 0x18), i32(raw, off + 0x1c), i32(raw, off + 0x20)],
+      launch: [f32(raw, off + 0x24), f32(raw, off + 0x28), f32(raw, off + 0x2c)],
+      motion: i16(raw, off + 0x30), frame: i16(raw, off + 0x32),
+      loops: i16(raw, off + 0x34), mode: i16(raw, off + 0x36),
+    };
   }
   const entries: Record<string, number>[] = [];
   let p = off + headLen;

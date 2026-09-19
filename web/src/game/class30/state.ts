@@ -278,6 +278,20 @@ export interface ZombieTail {
    * The same word is class 0x25's `hum.pathSlot`.
    */
   throwHand: number;          // +0x135C, also class 0x25
+  /**
+   * `obj+0x1358` in state 37 — the `g_prop_behaviours` index the carried prop
+   * is released into, copied from the script's `+0x08` by
+   * `ZombieStateCarryProp`'s sub 0 and written into the prop's `sub+0x10` on
+   * the cue frame. The same word as {@link resumeSub}; state 37 is the one
+   * reader of it in this sense, and it gets its own name for the reason
+   * `resumeSub` and `allowance` do.
+   */
+  carryRelease: number;       // +0x1358 in state 37
+  /**
+   * `obj+0x139C` — the prop `ZombieStateCarryProp` allocated, as its
+   * `G.g_carried_props` id; `-1` for none. The engine holds the pointer.
+   */
+  carriedProp: number;        // +0x139C
 }
 
 /**
@@ -310,5 +324,7 @@ export function makeZombieTail(): ZombieTail {
     scriptPc: 0,
     scriptBlob: 0,
     throwHand: 0,
+    carryRelease: 0,
+    carriedProp: -1,
   };
 }

@@ -62,6 +62,15 @@ import {
   type RainRules,
 } from "../src/game/effects/rain";
 import { NULL_HOST, type GameHost, type ShotPick } from "../src/game/host";
+import {
+  CarriedPropRoutine, MarkCarriedPropShot, type CarriedProp,
+} from "../src/game/carried_prop";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixToEulerZYX,
+  VecAimXAxisYThenZ,
+} from "../src/game/matrix";
+import { CameraTargetsClear, waitTargetsClear }
+  from "../src/script/waits/targets";
 import { FishUpdate } from "../src/game/class51";
 import { FishFlag, FishState, type FishTail } from "../src/game/class51/state";
 import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
@@ -15970,5 +15979,315 @@ console.log("stage 3's boats -- the one the player rides and the one that "
         && CarrierDrawSlots(2).length === 0);
 }
 
+console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
+{
+  // -- the matrix helpers the carried prop is built on --------------------
+  // `MatrixToEulerZYX` (`FUN_004019E0`) has to give back the angles a
+  // `RotZ; RotY; RotX` was built with, or a released drum snaps round.
+  {
+    const m = MatIdentity();
+    MatrixRotateZ(m, 0x0900); MatrixRotateY(m, -0x2300); MatrixRotateX(m, 0x1400);
+    const e = MatrixToEulerZYX(m);
+    const near = (a: number, b: number) => Math.abs(a - b) <= 2;
+    check("MatrixToEulerZYX undoes MatrixRotateZ; RotateY; RotateX",
+          near(e.rz, 0x0900) && near(e.ry, -0x2300) && near(e.rx, 0x1400),
+          `rz ${e.rz} ry ${e.ry} rx ${e.rx}`);
+    const a = VecAimXAxisYThenZ(0, 0, -5);
+    check("VecAimXAxisYThenZ: -Z is a quarter turn about Y from +X",
+          a.ry === 0x4000 && a.rz === 0, `ry ${a.ry} rz ${a.rz}`);
+  }
+
+  const CARRY_TYPE: CharacterType = {
+    ...TYPE,
+    motions: {
+      ...TYPE.motions,
+      // 271 (0x10F) the carry and the wait for a permit; 267 the throw, which
+      // lets go on play frame 24; 270 what state 38 stands in afterwards.
+      "271": motion(20, 0, 38), "267": motion(30, 0, 58), "270": motion(20),
+    },
+  };
+  const CARRY_CHARS = { ...CHARS, types: { "1": CARRY_TYPE } } as
+    unknown as CharactersJson;
+  // Stage 3 block 3 step 6's own script, with the loop count cut to two.
+  const carryScript: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 1, behaviour: 1, release: 4, offset: [0, 3.5, 2],
+            spin: [512, 0, 0], launch: [30, -0.085, 0],
+            motion: 271, frame: 0, loops: 2, mode: -2 },
+    entries: [{ motion: 267, frame: 0, loops: 1, mode: 24 }],
+  };
+  const retireScript: TargetScriptJson = {
+    state: ZombieState.RetireOffScreen,
+    head: { point: [0, 0, -60], motion: 270, frame: 0, loops: 1, mode: 0 },
+    entries: [],
+  };
+  // A camera at the origin looking down -Z: world and view space coincide, so
+  // a drum's shot point is its world position. The two bones sit either side
+  // of the carrier's head.
+  const identity = MatIdentity();
+  const CARRY_HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+    viewSpaceOf: (at, out) => {
+      const z = ActorByAt(at);
+      if (!z) return false;
+      out.x = z.pos.x; out.y = z.pos.y; out.z = z.pos.z;
+      return true;
+    },
+  };
+  const carryScene = (rng: Rng) => {
+    ResetGameGlobals();
+    SetGameTables(CARRY_CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_player_lives = [PLAYER.start_lives, PLAYER.start_lives];
+    G.g_player_state = [5, 5];
+    G.g_app_state = AppState.InPlay;
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const z = spawnZombie(0x4050, 1, "drummer", {
+      initialState: ZombieState.CarryProp,
+      attackState: ZombieState.RetireOffScreen,
+      script: { target: carryScript, attack: retireScript },
+    }, rng);
+    z.visible = true;
+    z.pos = vec3(0, 0, -60);
+    z.hp = 220;
+    return { z, events: new Events() };
+  };
+  const step = (rng: Rng, events: Events) =>
+    GameUpdate(EYE, 1 / 60, CARRY_HOST, rng, events);
+  const drum = (): CarriedProp | undefined => G.g_carried_props[0];
+
+  // -- 1. the carry, the throw and the hit --------------------------------
+  {
+    const rng = new Rng(3);
+    const { z, events } = carryScene(rng);
+    check("state 37 is entered as itself, not as the maul",
+          z.state === ZombieState.CarryProp, `state ${z.state}`);
+    step(rng, events);
+    step(rng, events);
+    const d = drum();
+    check("sub 0 allocates the drum, and its first update seats it in the hands",
+          !!d && d.routine === CarriedPropRoutine.Held && d.hp === 3
+          && d.slot === 0x0a57 && d.draw !== null,
+          d ? `routine ${d.routine} hp ${d.hp} slot ${d.slot}` : "no drum");
+    check("...holding the header's own clip, 271, not the list's first",
+          z.motion === 271, `motion ${z.motion}`);
+    let retiredWhileHolding = false, released = -1, claimed = -1;
+    let hitFrame = -1, trackedInFlight = false, gateHeld = false;
+    const lives = G.g_player_lives[0];
+    for (let f = 0; f < 600 && hitFrame < 0; f++) {
+      step(rng, events);
+      const p = drum();
+      if (claimed < 0 && G.g_attack_permits[0] === z.at) claimed = f;
+      if (p && released < 0 && p.routine === CarriedPropRoutine.ThrowAtCamera) {
+        released = f;
+      }
+      if (released < 0 && z.state === ZombieState.RetireOffScreen) {
+        retiredWhileHolding = true;
+      }
+      if (p?.routine === CarriedPropRoutine.ThrowAtCamera) {
+        trackedInFlight ||= G.g_camera_candidate_count > 0;
+        G.g_camera_settled = 1;
+        gateHeld ||= !waitTargetsClear.satisfied!(
+          { kind: "targets" }, { op: 0x47 } as never,
+          { host: { cameraTargetsClear: CameraTargetsClear } } as never);
+      }
+      if (p?.routine === CarriedPropRoutine.StuckToScreen) hitFrame = f;
+    }
+    check("the zombie never retires while it still holds its drum",
+          !retiredWhileHolding);
+    check("it claims the player's permit before it throws",
+          claimed >= 0 && released > claimed,
+          `claimed ${claimed} released ${released}`);
+    check("the drum is released on the throw's cue and flies at the camera",
+          released >= 0, `released ${released}`);
+    check("a drum in the air is a camera candidate",
+          trackedInFlight, `count ${G.g_camera_candidate_count}`);
+    check("...so `wait_targets_clear` (0x47) holds while it flies", gateHeld);
+    check("arriving with hit points left costs a life and sticks to the lens",
+          hitFrame >= 0 && G.g_player_lives[0] === lives - 1,
+          `hit ${hitFrame} lives ${G.g_player_lives[0]}`);
+    for (let f = 0; f < 91; f++) step(rng, events);
+    // The throw clip outlasts the flight, so the script ends -- and the
+    // carrier turns to state 38 -- while the drum is still on the lens.
+    check("...and the carrier's script has ended: it now retires",
+          z.state === ZombieState.RetireOffScreen, `state ${z.state}`);
+    check("ninety frames on the lens, then the drum goes and the permit with it",
+          G.g_carried_props.length === 0 && G.g_attack_permits[0] === -1,
+          `props ${G.g_carried_props.length} permit ${G.g_attack_permits[0]}`);
+  }
+
+  // -- 2. shot out of the air ----------------------------------------------
+  {
+    const rng = new Rng(5);
+    const { events } = carryScene(rng);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const lives = G.g_player_lives[0];
+    let shots = 0, broke = false, slots: number[] = [];
+    for (let f = 0; f < 600 && !broke; f++) {
+      step(rng, events);
+      const p = drum();
+      if (p?.routine === CarriedPropRoutine.ThrowAtCamera && p.shootable
+          && !(p.flags & 8) && shots < 3) {
+        MarkCarriedPropShot(p, 0);
+        shots++;
+        slots.push(p.slot);
+      }
+      broke = p?.routine === CarriedPropRoutine.Break;
+    }
+    check("three hits break a type-1 drum in the air", broke, `shots ${shots}`);
+    check("...stepping its draw slot down one per hit",
+          slots.join(",") === `${0x0a57},${0x0a54},${0x0a53}`,
+          slots.map((x) => x.toString(16)).join(","));
+    check("...the last hit plays the break sound and frees the permit",
+          sounds.includes(0x001616a9) && G.g_attack_permits[0] === -1,
+          `permit ${G.g_attack_permits[0]}`);
+    for (let f = 0; f < 60; f++) step(rng, events);
+    check("...no life is lost, and the break is over in its clip's length",
+          G.g_player_lives[0] === lives && G.g_carried_props.length === 0,
+          `lives ${G.g_player_lives[0]} props ${G.g_carried_props.length}`);
+  }
+}
+
+
+console.log("\nclass 0x30 state 37, release 3 — stage 1's barrel over the civilian:");
+{
+  const DROP_TYPE: CharacterType = {
+    ...TYPE,
+    motions: {
+      ...TYPE.motions,
+      "271": motion(20, 0, 38), "265": motion(20, 0, 38),
+      "266": motion(20, 0, 38), "270": motion(20),
+    },
+  };
+  // Stage 1 original block 6 step 1's script: two loops of 271, one of 265,
+  // and the drop on frame 15 of 266, released into behaviour 3.
+  const dropScript: TargetScriptJson = {
+    state: ZombieState.CarryProp,
+    head: { prop_type: 0, behaviour: 1, release: 3, offset: [0, 2, 0],
+            spin: [512, 0, 0], launch: [0, -1.5, 0],
+            motion: 271, frame: 0, loops: 2, mode: -2 },
+    entries: [{ motion: 265, frame: 0, loops: 1, mode: -1 },
+              { motion: 266, frame: 0, loops: 1, mode: 15 }],
+  };
+  const identity = MatIdentity();
+  // The barrel sits between bones 4 and 7 of the carrier at y 10; the victim's
+  // head is straight below it.
+  const DROP_HOST: GameHost = {
+    ...NULL_HOST,
+    boneMatrix: (at, bone, out) => {
+      const z = ActorByAt(at);
+      if (!z || (bone !== 4 && bone !== 7)) return false;
+      const m = MatIdentity();
+      m[12] = z.pos.x + (bone === 4 ? -1 : 1); m[13] = z.pos.y + 10;
+      m[14] = z.pos.z;
+      for (let i = 0; i < 16; i++) out[i] = m[i];
+      return true;
+    },
+    // The victim's head, pinned a few units under where the carrier holds
+    // the barrel: the fixture's victim is only a target, and its own state
+    // machine is not what is under test.
+    boneSphere: (at, bone, out) => {
+      const c = G.g_object_list.find((o) => o.name === "barrel man");
+      if (at !== 0x3c38 || bone !== 2 || !c) return null;
+      out.x = c.pos.x; out.y = c.pos.y - 2; out.z = c.pos.z + 1;
+      return 1.5;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = identity[i]; v2w[i] = identity[i]; }
+      return true;
+    },
+  };
+  const rng = new Rng(9);
+  ResetGameGlobals();
+  SetGameTables({ ...CHARS, types: { "1": DROP_TYPE } } as unknown as CharactersJson);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_app_state = AppState.InPlay;
+  const victim = ActorSpawn(0x3c38, SpawnClass.Zombie, 1, "victim");
+  victim.visible = true;
+  victim.pos = vec3(0, 0, -60);
+  const z = spawnZombie(0x3c7c, 1, "barrel man", {
+    initialState: ZombieState.CarryProp,
+    attackState: ZombieState.RetireOffScreen,
+    script: { target: dropScript, attack: null }, targetAt: victim.at,
+  }, rng);
+  z.visible = true;
+  z.pos = vec3(0, 0, -60);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  let released = -1, killed = -1;
+  for (let f = 0; f < 400 && killed < 0; f++) {
+    GameUpdate(EYE, 1 / 60, DROP_HOST, rng, events);
+    const p = G.g_carried_props[0];
+    if (released < 0 && p?.routine === CarriedPropRoutine.ThrowAtTarget) released = f;
+    if (victim.flags & ActorFlag.Dead) killed = f;
+  }
+  // 271 twice (38 each), 265 once (38), then 266 to frame 15: about 130
+  // frames of holding, not the second the maul took.
+  check("the barrel is held through the header's two loops and 265 first",
+        released > 110, `released on frame ${released}`);
+  check("...and released into behaviour 3, not thrown at the camera",
+        released >= 0);
+  check("dropped on the target's head, it kills it and plays 0x1D16A9",
+        killed > released && sounds.includes(0x001d16a9),
+        `killed ${killed}`);
+  const p = G.g_carried_props[0];
+  check("...and bounces off: the contact leaves a pivot and a tumble",
+        !!p && (p.pivot.x !== 0 || p.pivot.y !== 0 || p.pivot.z !== 0)
+        && (p.spin[0] !== 512 || p.spin[1] !== 0 || p.spin[2] !== 0),
+        p ? `pivot ${JSON.stringify(p.pivot)} spin ${p.spin}` : "no prop");
+}
+
+console.log("\na civilian's captors are made with it, though the script never lists them:");
+{
+  // `CivilianInit` (`FUN_0048A3E0`) spawns its children itself, so the
+  // walker's spawn list names the civilian and not them. 6da5fab walked that
+  // list to keep the script's order and left every captor in the game
+  // unmade -- stage 1's barrel man over the civilian (bug 11) among them.
+  const rng = new Rng(21);
+  ResetGameGlobals();
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      { at: 15484, class: 0x30, char_type: 1, motion: 10, hp: 110, yaw: 0,
+        initial_state: 1, attack_state: 1, civilian_child: 15416 },
+    ],
+  } as unknown as CharactersJson);
+  const listed = [
+    { at: 15416, class: SpawnClass.Civilian,
+      pos: [0, 0, 0] as [number, number, number] },
+  ];
+  const pool: CharacterPool = {
+    rng,
+    bindToPool: () => {},
+    // The character layer's contract: the civilian and, because its parent
+    // is wanted, its captor.
+    readySpawns: () => [
+      { at: 15416, motion: 10, pos: vec3() },
+      { at: 15484, motion: 10, pos: vec3(0, 5, 0), parentAt: 15416 },
+    ],
+    syncSpawns: () => [],
+  };
+  syncCharacterSpawns(pool, listed);
+  const order = G.g_object_list.map((o) => o.at);
+  check("the captor is made", order.includes(15484), `pool ${order}`);
+  check("...straight after the civilian that owns it",
+        order.indexOf(15484) === order.indexOf(15416) + 1, `pool ${order}`);
+}
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

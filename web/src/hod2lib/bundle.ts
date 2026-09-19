@@ -38,7 +38,7 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
 import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
 import { f32, i16, i32, u32 } from "./bytes";
-import { BODY_CREATURE_SLOTS } from "./combat";
+import { BODY_CREATURE_SLOTS, CARRIED_PROP_SLOTS } from "./combat";
 import { charactersJson, resolveForStage as resolveCharacters } from "./characters";
 import * as charmotion from "./charmotion";
 import * as degraded from "./degraded";
@@ -799,6 +799,33 @@ export function bodyCreatureDrawSlots(
 }
 
 /**
+ * The asset slots a stage's **carried props** are drawn with.
+ *
+ * `ZombieStateCarryProp` (`FUN_0045B380`) allocates an object with no class
+ * id and `CarriedPropInit` (`FUN_00442740`) picks its type out of the state-37
+ * script's `+0x00`, so the slot is a property of the script and not of any
+ * class or character. They ride `slots_effect` because the prop is drawn in
+ * two spaces -- world while it is held and thrown, the camera's once it has
+ * hit (`CarriedPropStuckToScreen`, `FUN_00444160`) -- and `render/effects.ts`
+ * is the layer that holds a group in each. See `game/carried_prop.ts`.
+ */
+export function carriedPropDrawSlots(
+    placements: readonly Record<string, unknown>[]): number[] {
+  const out: number[] = [];
+  for (const p of placements) {
+    for (const k of ["target_script", "attack_script"]) {
+      const s = p[k] as { state?: number; head?: { prop_type?: number } }
+        | null | undefined;
+      if (s?.state !== 37) continue;
+      for (const slot of CARRIED_PROP_SLOTS[s.head?.prop_type ?? -1] ?? []) {
+        if (!out.includes(slot)) out.push(slot);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * The asset slots a stage's class-0x33 **selector-4 descriptors** ask for.
  *
  * Not in {@link ACTOR_SLOTS}, for the same reason {@link humanoidDrawSlots} is
@@ -1376,8 +1403,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
      ...scriptedPropDrawSlots(charPlaces)],
     cache);
-  const eff = await effectSlotEntry(stage, cache,
-                                   bodyCreatureDrawSlots(charDefs.keys()));
+  const eff = await effectSlotEntry(stage, cache, [
+    ...bodyCreatureDrawSlots(charDefs.keys()),
+    ...carriedPropDrawSlots(charPlaces as unknown as Record<string, unknown>[]),
+  ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
   const isBloodTexture = bloodTexturePredicate(tables);

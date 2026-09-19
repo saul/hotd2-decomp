@@ -31,6 +31,31 @@ score pickup for the rest. The countdown is seeded `rand() % n + 1`, so which
 break pays out is random, and `port.test.ts` asserts that over 40 seeds it is
 not always the same one.
 
+**Class 0x30 state 37 carries and throws** (`class30/carry_prop.ts`,
+`game/carried_prop.ts`). Stage 3 block 3 step 6's two fat zombies spawn on
+the bridge holding drums over their heads: `ZombieStateCarryProp` allocates the
+drum as a classless object (`CarriedPropInit`), turns to the camera through the
+carry clip's loops, claims the player's attack permit, and lets go on frame 24
+of the throw. The drum flies a ballistic arc to fifteen units in front of the
+camera; three hits break it in the air (and give the permit back), and one that
+arrives costs a life and sits on the lens for ninety frames. The state used to
+run as the maul, which played the throw with nothing in the hands, ended the
+script a second later and retired both zombies off screen while the camera was
+still on its way -- so the bridge was empty. Stage 1's barrel man over the
+civilian (block 6, bug 11) is the same state releasing into behaviour 3,
+`CarriedPropThrowAtTarget`: two loops of 271 and one of 265 before 266 lets go
+on frame 15, and the barrel dropped on the civilian's head kills her unless it
+or its carrier is shot first. `op 0x47`, `wait_targets_clear`, is real now and
+counts carried props as camera candidates. `[open]`: stage 2's pair release
+into behaviour 5 (`CarriedPropRollAtCamera`), a carrier killed holding its prop
+drops it into `CarriedPropFallFree`, and neither is ported -- the prop stays
+undrawn in the pool; the break effect's draw is not ported either.
+
+**A civilian's captors are made again.** `CivilianInit` spawns its children
+itself, so the walker's spawn list names only the civilian; 6da5fab walked
+that list to keep the script's order and every captor in the game went
+unmade. `syncCharacterSpawns` now makes them straight after their civilian.
+
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
 which is the **body** sphere every collision uses — and the port wrote neither.
@@ -3770,7 +3795,7 @@ missed. Meanings and confidence marks live in
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the **live-enemy** gate, on `g_enemies_alive`, and 434 of the 488 enemy gates. Same side conditions as `0x43` plus `g_evt_wait_alive_hysteresis`, so it costs one frame more — both are now ported |
 | `45` | `wait_script_flag` | wait | ~approx~ | the **script-flag gate**, on `g_script_flags` (0x009C7200) — and that array is one array: every one of the forty-odd gates in the six shipped scripts names a flag that script's own `set_script_flag` never sets, so this opcode is *only* ever a wait on an actor. **Real** now; it used to read a `Set` beside `G` that held the script's own writes only, and passed on sight. **`[diverges]`**: a gate whose flag *nothing this port runs can raise* passes instead of parking, and the boundary is derived from the bundle rather than listed — the stage's own `set_script_flag` ops, the civilians' streams and the captors' state 36. Honouring every gate unconditionally parks stage 5 at block 1, stage 1 at blocks 14 and 16, stage 2 at 35-41, stage 4 at 23-29 and all six on the chapter card |
 | `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real**: it holds until the captors are dead. All 68 sites pass operand 0 |
-| `47` | `wait_targets_clear` | wait | shown | runtime counter; passed, with the condition reported |
+| `47` | `wait_targets_clear` | wait | ~approx~ | **Real**: `(g_camera_settled \|\| g_camera_free) && g_camera_candidate_count == 0`, the candidate count including carried props. It passed on sight until stage 3's bridge, where it let the script leave with a drum-thrower still standing there. `g_evt_gameplay_live` is not modelled, as for `0x45` |
 | `48` | `set_script_flag` | flow | **done** | `g_script_flags[operand] = 1` and nothing else — the whole of `EvtOpSetScriptFlag48`. It writes `G.g_script_flags`, the same array the civilians' op 0x1C and the captors' state 36 write |
 | `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4A` | `variant_call_b` | flow | shown | a global picks which operand list runs; the client does not evaluate it |

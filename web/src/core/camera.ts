@@ -86,6 +86,18 @@ export class CameraFrame {
     this.yawBams = (bams % 65536 + 65536) % 65536;
   }
 
+  /**
+   * Both matrices, copied out: world-to-view into `w2v` and view-to-world into
+   * `v2w` — the engine's `g_camera_world_to_view` and `g_camera_blocks`, in
+   * the same sixteen-element layout.
+   */
+  copyMatrices(w2v: number[], v2w: number[]): void {
+    for (let i = 0; i < 16; i++) {
+      w2v[i] = this.inverse[i];
+      v2w[i] = this.world[i];
+    }
+  }
+
   /** A point in the camera's own space, in world coordinates. */
   toWorld(x: number, y: number, z: number, out: XYZ): void {
     apply(this.world, x, y, z, out);

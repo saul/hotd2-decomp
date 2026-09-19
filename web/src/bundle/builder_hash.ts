@@ -18,11 +18,11 @@
 
 /** The per-file digests, so a stale bundle can name what moved. */
 export const BUILDER_FILES: Readonly<Record<string, string>> = {
-  "actorscript.ts": "7ef39ca11fda6332b8630f4c78c241c7dae9e9c412af524ab7ed6df879a4d0fa",
+  "actorscript.ts": "96c980600b829786a2f02ea8c85853d4e99e5291c465a3b5276dc8889b2835e5",
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "8a62bedf274c97b1d6d7dfe8e64934a767bbeb694a7de3fee1b4c73ad35fb2e1",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "2ce91afb9d85c08e7d4943ca8aa0342f9ab108f5af8f8184f98377340de98e99",
+  "bundle.ts": "851b36e85effe4bceea9911225d3a2894c731926d590dafb0b362e031d353f79",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
@@ -31,7 +31,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "charmotion.ts": "3d426e4c66628163540997108756a7b2f59a24ba0abc6526bd8c7c279f90c671",
   "class31.ts": "92eddede0017e448c05697810f1b3cd1112340d1ddae676bb682b940e0e22aea",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
-  "combat.ts": "02cc51f38c9f39cd341ca9aa44cf5c5d1f33894db0e3e7b9fae9df228b2504b3",
+  "combat.ts": "e3f00e9fd1170275bde5fd92dffdcbe3fd1ca74bcbbf555650647e6a06417c85",
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "4004cb37faed0192ad4c09044c9a5af6162b8ed874a28b0a47e2397fe0349228",
@@ -58,4 +58,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "fb6898b0fc70eb42f16912f466d8ea18c3edadb6ffccfa36439db5e63fee5c2f";
+export const BUILDER_HASH = "1223dbb1dca00d0dc83c6b35600a25bfac68d26143fa0aa2b7b2ba8c31f00f68";

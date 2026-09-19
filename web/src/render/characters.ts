@@ -746,9 +746,18 @@ export class CharacterLayer implements System {
     // in camera space and that layer owns the matrix.
     const creature = this.effects?.pickCreature(this._ray) ?? null;
     if (creature && creature.t < bestT) {
+      bestT = creature.t;
       best = { kind: "creature", creatureId: creature.id,
                point: { x: creature.point.x, y: creature.point.y,
                         z: creature.point.z } };
+    }
+    // ...and the props state-37 zombies carry and throw, the fourth pool in
+    // the same list: a drum in front of the zombie holding it takes the shot.
+    const carried = this.effects?.pickCarried(this._ray) ?? null;
+    if (carried && carried.t < bestT) {
+      best = { kind: "carried", carriedId: carried.id,
+               point: { x: carried.point.x, y: carried.point.y,
+                        z: carried.point.z } };
     }
     // Say so rather than doing nothing quietly: a bundle exported before the
     // reaction tables were added has no `reaction_groups`, and a silent no-op
@@ -983,6 +992,27 @@ export class CharacterLayer implements System {
     if (!node) return false;
     node.getWorldPosition(this._bone);
     out.x = this._bone.x; out.y = this._bone.y; out.z = this._bone.z;
+    return true;
+  }
+
+  /** `boneSphere` across the seam as three numbers, for `GameHost.boneSphere`. */
+  boneSphereWorld(at: number, bone: number, out: Vec3): number | null {
+    const r = this.boneSphere(at, bone, this._bone);
+    if (r === null) return null;
+    out.x = this._bone.x; out.y = this._bone.y; out.z = this._bone.z;
+    return r;
+  }
+
+  /**
+   * One bone's world matrix, for `CarriedPropSeatBetweenBones`. The elements
+   * are the engine's own layout, so they cross as they are.
+   */
+  boneMatrix(at: number, bone: number, out: number[]): boolean {
+    const inst = this.instances.find((i) => i.at === at);
+    const node = inst?.bones.get(bone);
+    if (!node) return false;
+    node.updateWorldMatrix(true, false);
+    for (let i = 0; i < 16; i++) out[i] = node.matrixWorld.elements[i];
     return true;
   }
 

@@ -302,7 +302,11 @@ function blockerRows(s) {
  * summary and from nowhere else.
  */
 function shootable(s) {
-  if (s.policy === "enemies") return true;
+  // `wait_targets_clear` (0x47) is an enemy gate by another counter: it holds
+  // while anything is a camera candidate, which is every committed enemy and
+  // every carried prop in the air. It used to pass on sight, so nothing here
+  // had to shoot at one.
+  if (s.policy === "enemies" || s.policy === "targets") return true;
   // A **boss's** flag gate is shot at for the same reason an enemy gate is:
   // the gate is waiting for an actor to die and the player's job is to kill
   // it. It goes through the same civilian guard, because stage 3's
@@ -865,7 +869,7 @@ try {
         // past that gate; a `wait_script_flag` is waiting for an actor to
         // *do* something, and killing it from outside its own death states
         // opens nothing.
-        if (s.policy === "enemies") {
+        if (s.policy === "enemies" || s.policy === "targets") {
           await page.click('button[title^="Kill every live actor"]');
         }
       }

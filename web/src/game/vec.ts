@@ -26,15 +26,22 @@ export function dist3d(a: Vec3, b: Vec3): number {
 /**
  * `VecToAngles` — `FUN_004016B0`. A direction as a BAMS angle pair.
  *
- * Only `yaw` is exercised by the ported code; `pitch` is written the obvious
- * way and has not been checked against the exe's own, so nothing reads it yet.
+ * `yaw = atan2(dx, dz)`, and `pitch = -atan2(dy, h)` with `h` the horizontal
+ * length recovered as `dz / cos(yaw)` or `dx / sin(yaw)` by the same
+ * `(yaw + 0x2000) & 0x4000` choice `VecAimXAxisYThenZ` makes -- **negative
+ * upward**, which is what `MatrixRotateX(pitch)` needs to tip +Z onto the
+ * vector. `[proved]` from the decompilation (the pitch used to be written
+ * positive upward, unchecked, and had no reader until `CarriedPropHitTargetSphere`).
+ * The engine truncates both to s16; the port hands back the floats and a
+ * caller that needs the truncation applies it.
  */
 export function VecToAngles(dx: number, dy: number, dz: number):
     { pitch: number; yaw: number } {
-  return {
-    yaw: Math.atan2(dx, dz) * BAMS,
-    pitch: Math.atan2(dy, Math.hypot(dx, dz)) * BAMS,
-  };
+  const yaw = Math.atan2(dx, dz) * BAMS;
+  const y16 = Math.trunc(yaw);
+  const a = y16 / BAMS;
+  const h = ((y16 + 0x2000) & 0x4000) === 0 ? dz / Math.cos(a) : dx / Math.sin(a);
+  return { yaw, pitch: -Math.atan2(dy, h) * BAMS };
 }
 
 /**

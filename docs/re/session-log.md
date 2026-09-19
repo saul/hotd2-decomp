@@ -18250,3 +18250,76 @@ Draw timing: a routine draws a cel and then steps it, and `game/` runs before
 `render/`, so the tail carries `wakeDrawn`/`splashDrawn`/`stripDrawn` — what
 was drawn this frame — rather than have the renderer draw the cursor a frame
 ahead or step it backwards.
+## The drum-throwers on stage 3's bridge, and stage 1's barrel man (bugs 3 and 11)
+
+Report: stage 3 block 3 step 6 should have "a fat zombie (or two) on the bridge
+throwing barrels", and there was nothing there. Second report, from the
+civilians workstream: stage 1 (original) block 6 step 1's zombie holding a
+barrel over a civilian throws before the player arrives.
+
+**Cause.** Both are class 0x30 state 37, `ZombieStateCarryProp`
+(`FUN_0045B380`), which the port ran as the maul. The maul reads the list at
+`+0x38` and so skipped the script's 0x38-byte header -- whose last eight bytes
+are the carry clip's own entry (271, loops 4/3/2) -- played the throw at once
+with nothing in the hands, ended the script and retired the actor through state
+38 while the camera was still approaching. `[proved]` by the decompilation and
+the replay (`CarryProp` -> `RetireOffScreen` inside two seconds).
+
+**What the state is.** Sub 0 allocates a 0x19C-byte classless object,
+`CarriedPropInit` (`FUN_00442740`), typed by the header's `+0x00` out of
+`g_carried_prop_types` (`0x005644D8`, three 0x28-byte records: radii, sounds,
+hit points and one draw slot per remaining hit point; type 1 is `dolam.bin`'s
+drum). The carrier loops the header entry, and with release mode 4 claims the
+player's attack permit -- replaying 271 while it is taken -- then writes the
+release mode into the prop on the throw entry's cue frame. The prop's routines
+come from `g_prop_behaviours`, the table class 0x13 shares: 1 held between
+bones 4 and 7 (`CarriedPropSeatBetweenBones`), 4 a ballistic arc to fifteen
+units in front of the camera (`CarriedPropThrowAtCamera`) that costs a life on
+arrival and sticks to the lens for ninety frames, 3 a drop onto the target's
+head (`CarriedPropThrowAtTarget`, stage 1), 5 a roll (stage 2, not ported).
+Three hits break a drum (`CarriedPropCheckShot`), and the break arm shares a
+tail with the deflect arm, past the end of Ghidra's body (L37), that gives the
+permit back and plays the break sound.
+
+**Spaces.** `0x009A6000` is world-to-view and `g_camera_blocks` (`0x009A6040`)
+its inverse: `FishProjectToScreen` writes the view-space `obj+0x70` through the
+first and `CarriedPropRelease` takes a view-space matrix to the world through
+the second. `[proved]`. `game/body_creature.ts`'s `[open]` note calls
+`g_camera_blocks + 0x00` the world-to-view matrix, which on this reading is the
+other one; it is not changed here.
+
+**Also found.**
+* `wait_targets_clear` (0x47, `EvtOpWaitTargetsClear47`) passed on sight. It
+  is `(g_camera_settled || g_camera_free) && g_camera_candidate_count == 0`,
+  and carried props register for camera tracking, so it is what keeps the
+  camera on the bridge until the second drum has been thrown. Now real.
+* `VecToAngles`' pitch had the wrong sign and no reader; it is the exe's now.
+* After merging main, **no civilian captor in the game was being made**:
+  6da5fab (the boats) iterated the walker's spawn list for order, and
+  `CivilianInit`'s children are not in it. Fixed in `syncCharacterSpawns`,
+  children straight after their parent, with a failing-then-passing test.
+* `tools/playthrough.mjs` now fires at, and debug-clears, a `targets` gate the
+  way it does an enemy gate: stage 3 block 0 step 6's `wait_targets_clear`
+  holds for the two class-0x18 boat riders, which it used to skip. Stage 3
+  still hangs at block 1 step 1 (`wait_enemies_alive`, a rider in AttackRun)
+  and stage 2 at block 11 -- **both identically on main e2bf904**, checked in a
+  detached worktree against main's own bundle; with the captor fix stage 2
+  now gets to block 16 instead.
+
+**Wrong turns.** I first read `g_camera_blocks` as world-to-view from the
+body-creature note and could not make the flight's `-15.0` arrival test mean
+anything; the fish's projection settled it. The first bridge drive "found"
+no zombies because the harness had not pressed play. The first stage-1 drive
+showed no captors at all, which I nearly filed as a seek problem; it was the
+spawn-order regression above. The first behaviour-3 test failed because the
+fixture's victim zombie ran off in its own attack run.
+
+**Open.** Behaviour 5 (`CarriedPropRollAtCamera`) and a dropped prop
+(`CarriedPropFallFree`, `CarriedPropGroundContact`) are not ported -- the prop
+stays in the pool undrawn and unshot; the break effect's draw
+(`0x0040DD90`); carried props are counted as camera candidates but not aimed
+at (the slot list is actors-only); `DAT_009A2234`, the Training word state 37
+tests; the per-part draw of a type-2 prop. The held prop's seat uses the
+bone's world matrix times the camera's, which is the product the engine's
+draw record holds `[likely]` -- up to the bone frames the exporter emits
+matching the engine's.

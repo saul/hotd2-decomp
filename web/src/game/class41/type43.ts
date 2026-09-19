@@ -80,6 +80,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
 import { T } from "../tables";
@@ -309,12 +310,12 @@ function Type43FirstHit(p: BreakableProp, rng: Rng, events?: Events): void {
   // the two kinds have different ones: 0x1D16A9 for kind 2 and 0x1A16A9 for
   // kind 3, which are the crack and the break the other families share.
   //
-  // `[open]` `SpawnPropHitEffectScaled(obj, player, 1.5f)`
-  // (`FUN_004666B0`) beside it: effect id 0xE25 at the crosshair, unprojected
-  // to the prop's depth. The port does not spawn it. The spark the crack arm
-  // also asks for is already covered -- `combat/shot.ts` spawns
-  // `SpawnPropHitSpark` for every prop a shot lands on.
+  // `SpawnPropHitEffectScaled(obj, player, 1.5f)` (`FUN_004666B0`) beside
+  // it: effect 0xE25 at the point the shot was aimed, which `combat/shot.ts`
+  // left on the prop. The spark the crack arm also asks for is spawned by
+  // `combat/shot.ts` for every prop a shot lands on.
   events?.emit("prop.cracked", { id: p.id, sound: params?.sound ?? 0 });
+  if (p.hitAim) SpawnPropHitEffectScaled(p.hitAim.x, p.hitAim.y, p.z, 1.5);
 
   if (p.effect === 0 && p.slot === BreakableSlot.Default) {
     // The crack: award 0, so no points. Swap the model, turn it to face the

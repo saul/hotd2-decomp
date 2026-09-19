@@ -321,11 +321,15 @@ round nothing (new bug 9).
 * **`0x009A4684` is `g_motion_slots[468].state`**, the residency word the
   type-44 effect draw is gated on — the same literal-address idiom
   `ScriptFlagEffectUpdate` uses for 471.
-* **[open]** `SpawnPropHitEffectScaled` (`FUN_004666B0`), which all three table
-  routines call on a hit, is still not ported; the port's generic prop spark
-  stands in. **Not ported, declared**: effect 0x13 is interpolation mode 2, and
-  `EffectPoseNode`'s matrix-slerp arm (`FUN_00412750`) is reached on 12
-  node-frames of motion 468 — the port blends those per angle.
+* **The hit effect** all three table routines call is
+  `SpawnPropHitEffectScaled` (`FUN_004666B0`) — effect strip `0xE25`, drawn
+  `0xE26`..`0xE33` by `PropHitEffectScaledUpdate` (`FUN_004667A0`) at
+  `scale * 1.5`, at the crosshair unprojected to the prop's depth. 23 call
+  sites against `SpawnPropHitSpark`'s 9, and **none of types 38, 39, 40 or 44
+  calls the spark**. Both ported.
+* **Effect 0x13 is interpolation mode 2**, and `EffectPoseNode`'s matrix arm
+  is reached on 12 node-frames of motion 468: `MatrixInterpolateSwingTwist`
+  (`FUN_00412750`) — see the effect system section below. Ported.
 
 `tools/verify_prop_tables.py` compares every table word the port carries as a
 literal against the image.
@@ -387,8 +391,18 @@ g_motion_slots[motion].base + 4 + frame * align4(bones * 0x12 - 0xF)
 with the rotations following at `bone * 6` (three BAMS shorts, X then Y then
 Z), so `mot.md`'s decoder already reads the data — only the node tree is new.
 `g_effect_interp_mode` picks the rate: 0 is one key per frame, 1 and 2 halve it
-and blend the neighbouring keys, and 2 additionally slerps through matrices
-when any axis differs by more than `0x3000`.
+and blend the neighbouring keys. **Mode 2**, on an odd cursor past 1 and only
+when **all three** angles differ by more than `0x3000` (Z, then Y, then X, as
+plain integer differences), builds both keys' `Rz . Ry . Rx` and hands them to
+`MatrixInterpolateSwingTwist` (`FUN_00412750`) at `t = 0.5`: with
+`R = A^-1 . B`, the swing `s` is the angle `R` turns Y through, about
+`c = Y x R.Y`, and the twist `b` is what is left about Y; the result is
+`A . Rot(c, trunc(s t)) . RotY(trunc(b t))`, both angles `(s16)__ftol`'d from
+`atan2 * 32768/pi` (`g_rad_to_bams`, `0x004C4378`). Its `c = (1,0,0)` arm for
+a half-turn swing is unreachable — the swing is sign-extended before it is
+compared with `0x8000`. The five matrix routines it rests on are
+`MatrixSetTop3x4`/`MatrixGetTop3x4` (`FUN_004A9ED0`/`FUN_004A9E30`),
+`MatrixInvert`, `MatrixMultiply`, `MatrixRotateAxis` and `MatrixRotateY`.
 
 **[proved] by the slot names.** Every node of an effect resolves to one
 `komono_*.bin` — *komono*, "small items", the same family as the breakable

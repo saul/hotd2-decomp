@@ -17,6 +17,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
 import { BreakablePropAwardHit, ActorKillProp, SFX_PROP_CRACK } from "./prop";
 import { PropStepLifetimeInline } from "./lifetime";
@@ -171,8 +172,9 @@ export function PropUpdateType39(p: BreakableProp, rng: Rng,
       && p.state === BreakableState.Standing) {
     BreakablePropAwardHit(p.flags, true, rng);
     events?.emit("sound.play", { id: SFX_PROP_CRACK });
-    // `[open]` `SpawnPropHitEffectScaled(obj, player, 1.0f)` (`FUN_004666B0`)
-    // is not ported; `combat/shot.ts` spawns the prop spark in its place.
+    // `SpawnPropHitEffectScaled(obj, player, 1.0f)` (`FUN_004666B0`) at the
+    // point the shot was aimed, which `combat/shot.ts` left on the prop.
+    if (p.hitAim) SpawnPropHitEffectScaled(p.hitAim.x, p.hitAim.y, p.z, 1.0);
     p.state = BreakableState.Falling;
     p.storyItem = 0;
   }

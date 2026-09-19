@@ -27,6 +27,7 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
 import { T } from "../tables";
 import { BreakablePropAwardHit, SFX_PROP_BREAK } from "./prop";
@@ -134,8 +135,9 @@ export function PropUpdateType44(p: BreakableProp, rng: Rng,
     // The mask is inside the hit arm, not after it: a hit that lands on a
     // row already shot leaves its bit set, and nothing reads it again.
     p.flags &= ~BreakableFlag.Hit;
-    // `[open]` `SpawnPropHitEffectScaled(obj, player, 1.5f)` (`FUN_004666B0`)
-    // is not ported; `combat/shot.ts` spawns the prop spark in its place.
+    // `SpawnPropHitEffectScaled(obj, player, 1.5f)` (`FUN_004666B0`) at the
+    // point the shot was aimed, which `combat/shot.ts` left on the prop.
+    if (p.hitAim) SpawnPropHitEffectScaled(p.hitAim.x, p.hitAim.y, p.z, 1.5);
   }
   if (p.effectFrames >= 1) {
     p.effectFrames += 1;

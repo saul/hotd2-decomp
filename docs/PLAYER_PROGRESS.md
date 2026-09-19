@@ -3730,9 +3730,12 @@ one spawn is in block 12. Rigs whose routine a spawn installs now carry
 those spawns, which closes the timing half of `render/rigs.ts`'s declared
 divergence for all five class-0x26 rigs.
 
-Still owed: `SpawnPropHitEffectScaled` (`FUN_004666B0`) for all three table
-types, and `EffectPoseNode`'s matrix-slerp arm, which effect 0x13 reaches on
-12 node-frames of its break (declared in `class44/script_flag_effect.ts`).
+Both of what was left over is ported now: `SpawnPropHitEffectScaled`
+(`FUN_004666B0`), the hit effect types 38, 39 and 44 — and 43 — call, at the
+point the shot was aimed (the generic spark no longer fires for 38/39/40/44,
+none of whose routines calls it); and `EffectPoseNode`'s matrix arm,
+`MatrixInterpolateSwingTwist` (`FUN_00412750`), which effect 0x13 reaches on
+12 node-frames of its break (`class44/swing_twist.ts`).
 
 ## Every opcode, and what the player does with it
 

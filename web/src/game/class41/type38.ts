@@ -19,6 +19,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { BAMS } from "../vec";
+import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
 import { BreakablePropAwardHit, SFX_PROP_CRACK } from "./prop";
 import { PropStepLifetimeInline } from "./lifetime";
@@ -177,9 +178,9 @@ export function PropUpdateType38(p: BreakableProp, rng: Rng,
   if ((p.flags & BreakableFlag.Hit) !== 0 && state === Type38State.Resting) {
     BreakablePropAwardHit(p.flags, false, rng);
     events?.emit("sound.play", { id: SFX_PROP_CRACK });
-    // `[open]` `SpawnPropHitEffectScaled(obj, player, 0.7f)` (`FUN_004666B0`)
-    // — effect 0xE25 at the crosshair — is not ported; the spark
-    // `combat/shot.ts` spawns for every prop hit stands in its place.
+    // `SpawnPropHitEffectScaled(obj, player, 0.7f)` (`FUN_004666B0`) at the
+    // point the shot was aimed, which `combat/shot.ts` left on the prop.
+    if (p.hitAim) SpawnPropHitEffectScaled(p.hitAim.x, p.hitAim.y, p.z, 0.7);
     p.slot = TYPE38_SLOT_HIT;
     p.state = Type38State.Hopping as unknown as BreakableState;
     p.vy = TYPE38_HOP;

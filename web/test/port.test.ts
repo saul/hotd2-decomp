@@ -260,6 +260,10 @@ import {
   PlaceChainSegments, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
 import {
+  MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
+} from "../src/game/class44/swing_twist";
+import { EffectSampleNode } from "../src/game/class44/script_flag_effect";
+import {
   PlaceFragmentProps, FRAGMENT_BURST_FRAMES, FRAGMENT_BURST_PIECES,
   FRAGMENT_SUBKIND0_SLOT, FRAGMENT_SUBKIND0_SLOT_HIT,
 } from "../src/game/class41/type40";
@@ -4342,7 +4346,17 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
   const b = t38[2];
   const score0 = G.g_player_score[0];
   BreakablePropTakeShot(b, 0);
+  // `combat/shot.ts` leaves the aimed point on the prop; the routine's own
+  // `SpawnPropHitEffectScaled(obj, player, 0.7)` then puts effect 0xE25 there.
+  b.hitAim = { x: 1.5, y: 7.25 };
+  const fx0 = G.g_sprite_effects.length;
   BreakablePropPoolUpdate(rng, events);
+  const fx = G.g_sprite_effects[fx0];
+  check("the hit spawns SpawnPropHitEffectScaled's strip at the aimed point",
+        !!fx && fx.slot === 0xe26 && fx.lastSlot === 0xe33
+        && fx.pos.x === 1.5 && fx.pos.y === 7.25 && fx.pos.z === b.z
+        && Math.abs(fx.scale.x - 0.7 * 1.5) < 1e-9,
+        JSON.stringify(fx));
   check("a shot type-38 swaps to 0x1236 and hops, and pays nothing",
         b.slot === TYPE38_SLOT_HIT
         && (b.state as number) === Type38State.Hopping
@@ -4422,6 +4436,70 @@ console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 
         G.g_breakable_props.filter((q) => q.at === 0x1994 || q.at === 0x19bc
           || q.at === 0x1b48 || q.at === 0x19e4).length === 0,
         String(G.g_breakable_props.length));
+}
+
+console.log("\nMatrixInterpolateSwingTwist, effect interpolation mode 2:");
+{
+  const near = (a: number, b: number, eps = 1) => Math.abs(a - b) <= eps;
+  const I = MatrixFromZYX(0, 0, 0);
+  // A pure twist: RotY(0x4000) swings nothing, so the Y arm alone runs and
+  // halves the twist to 0x2000.
+  const yHalf = MatrixToZYX(MatrixInterpolateSwingTwist(
+    I, MatrixFromZYX(0, 0x4000, 0), 0.5));
+  check("a pure turn about Y is halved about Y",
+        near(yHalf.yaw, 0x2000) && near(yHalf.pitch, 0) && near(yHalf.roll, 0),
+        JSON.stringify(yHalf));
+  // A pure swing: RotX(0x4000) carries Y onto +Z, so the axis is
+  // Y x (0,0,1) = (1,0,0), the swing is 0x4000 and no twist is left.
+  const xHalf = MatrixToZYX(MatrixInterpolateSwingTwist(
+    I, MatrixFromZYX(0x4000, 0, 0), 0.5));
+  check("a pure turn about X is halved about X",
+        near(xHalf.pitch, 0x2000) && near(xHalf.yaw, 0) && near(xHalf.roll, 0),
+        JSON.stringify(xHalf));
+  // Hand-computed: B = RotZ(0x4000) . RotY(0x4000). Y goes to Rz(Y) = (-1,0,0),
+  // a swing of 0x4000 about Y x (-1,0,0) = (0,0,1), i.e. Rz; the twist left
+  // over is RotY(0x4000). Halved: Rz(0x2000) . Ry(0x2000).
+  const zy = MatrixToZYX(MatrixInterpolateSwingTwist(
+    I, MatrixFromZYX(0, 0x4000, 0x4000), 0.5));
+  check("a swing and a twist are each halved, swing first",
+        near(zy.roll, 0x2000) && near(zy.yaw, 0x2000) && near(zy.pitch, 0),
+        JSON.stringify(zy));
+  // ...and it is not the per-angle halfway for a case where the two differ:
+  // from A = Rx(0x5000) to B = Rz(0x5000) . Ry(0x5000), every angle moves by
+  // more than 0x3000, which is exactly when EffectPoseNode takes this arm.
+  const a = MatrixFromZYX(0x5000, 0, 0);
+  const b = MatrixFromZYX(0, 0x5000, 0x5000);
+  const full = MatrixInterpolateSwingTwist(a, b, 1);
+  check("t = 1 lands on B", full.every((v, i) => Math.abs(v - b[i]) < 1e-3),
+        full.map((v) => v.toFixed(3)).join(","));
+  const mid = MatrixToZYX(MatrixInterpolateSwingTwist(a, b, 0.5));
+  // EffectPoseNode takes the arm in mode 2 only, on an odd cursor past 1,
+  // and only when all three angles jump by more than 0x3000.
+  const def = {
+    nodes: [{ slot: 0, bone: 0, children: [1] }, { slot: 1, bone: 1, children: [] }],
+    interp: 2, motion: 1, play_length: 8, frames: 3, bones: 1,
+    t: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    r: [0x5000, 0, 0, 0, 0x5000, 0x5000, 0, 0x5000, 0x5000],
+    cues: [],
+  };
+  const pose = { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0 };
+  EffectSampleNode(def as never, 1, 1, 0, pose);
+  check("cursor 1 is below the arm, and blends per angle",
+        pose.pitch === 0x2800 && pose.yaw === 0x2800, JSON.stringify(pose));
+  EffectSampleNode(def as never, 1, 3, 2, pose);
+  check("cursor 3 between two keys that stand still is per angle too",
+        pose.yaw === 0x5000 && pose.roll === 0x5000, JSON.stringify(pose));
+  const d2 = { ...def, frames: 4,
+               r: [...def.r, 0x5000, 0, 0], t: [...def.t, 0, 0, 0] };
+  EffectSampleNode(d2 as never, 1, 5, 4, pose);
+  const want = MatrixToZYX(MatrixInterpolateSwingTwist(
+    MatrixFromZYX(0, 0x5000, 0x5000), MatrixFromZYX(0x5000, 0, 0), 0.5));
+  check("cursor 5, all three angles far apart, takes the matrix arm",
+        Math.abs(pose.pitch - want.pitch) < 1e-6
+        && Math.abs(pose.yaw - want.yaw) < 1e-6, JSON.stringify(pose));
+  check("...and halfway is not the per-angle blend",
+        !(near(mid.pitch, 0x2800, 64) && near(mid.yaw, 0x2800, 64)
+          && near(mid.roll, 0x2800, 64)), JSON.stringify(mid));
 }
 
 console.log("\nclass 0x41 type 32, the lift:");

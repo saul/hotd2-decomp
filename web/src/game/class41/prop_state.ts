@@ -585,6 +585,14 @@ export interface BreakableProp {
   drawScale: [number, number, number];
   effectPoses: PosedNode[];
   /**
+   * [port-only] Where the last shot on this prop was aimed, at the prop's own
+   * camera depth — `g_crosshair_x/y` unprojected by `obj+0x78`, which is what
+   * `SpawnPropHitEffectScaled` (`FUN_004666B0`) computes when a routine calls
+   * it. The port resolves the ray at shot time (`combat/shot.ts`), so the
+   * point is left here for the routine. `null` when nothing could project it.
+   */
+  hitAim: { x: number; y: number } | null;
+  /**
    * `obj+0x192` for the two generic routines that keep a small state machine
    * there: {@link PropFamily.Type13}'s drop (`Type13Phase`) and type 35's
    * door rattle (`Type35Phase`).
@@ -673,6 +681,7 @@ export function makeBreakableProp(id: number, group: number,
     stackDrawn: 0,
     drawScale: [1, 1, 1],
     effectPoses: [],
+    hitAim: null,
     dead: false,
   };
 }

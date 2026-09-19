@@ -53,6 +53,9 @@
  * it is written the number is already right.
  */
 import type { EffectDefJson } from "../../bundle";
+import {
+  MatrixFromZYX, MatrixInterpolateSwingTwist, MatrixToZYX,
+} from "./swing_twist";
 import type { Events } from "../../core/events";
 import { G } from "../globals";
 import { T } from "../tables";
@@ -93,20 +96,13 @@ export enum EffectInterp {
   /** Half rate: key `cursor / 2`, blended half way to the next on odd. */
   HalfRate = 1,
   /**
-   * As {@link HalfRate}, and additionally slerping through matrices when any
-   * of the three angles differs by more than `0x3000`.
-   *
-   * [diverges] The slerp arm is **not ported**, and it is now reached. Class
-   * 0x44 selector 0 never reaches it — effects 2 and 3 are both mode 1 — but
-   * class 0x41 type 44's two breakable chairs draw **effect 0x13, which is
-   * mode 2**, and the shipped motion 468 has all three angles jump by more than
-   * `0x3000` between consecutive keys on 12 of its half-rate node-frames (odd play
-   * frames 3..41). On those frames the engine interpolates the two keys' whole
-   * rotation matrices through `FUN_00412750` — a swing about the node's Y axis
-   * then a twist about it, each halved, built on `MatrixInvert` and
-   * `MatrixRotateAxis` — and the port takes the per-angle halfway blend mode 1
-   * uses, so one flying piece shows a different orientation for one frame.
-   * Porting it is the user's decision; see the session log (2026-09-18).
+   * As {@link HalfRate}, except that on an odd cursor past 1, when **all
+   * three** of the two keys' angles differ by more than `0x3000` (Z, then Y,
+   * then X, each as a plain integer difference), the rotation is not blended
+   * angle by angle: both keys' `Rz . Ry . Rx` go through
+   * `MatrixInterpolateSwingTwist` (`FUN_00412750`) at `t = 0.5`. Effect 0x13 —
+   * class 0x41 type 44's breaking chair — is this mode, and motion 468
+   * reaches the matrix arm on twelve of its node-frames. See `swing_twist.ts`.
    */
   HalfRateSlerp = 2,
 }
@@ -288,7 +284,34 @@ export function EffectSampleNode(def: EffectDefJson, nodeIndex: number,
     next = key + 1;
   }
   ScriptFlagEffectBlend(p, def, key, next, b);
+  if (def.interp === EffectInterp.HalfRateSlerp && cursor > 1) {
+    EffectSwingTwistArm(p, def, key, next, b);
+  }
   return true;
+}
+
+/**
+ * `EffectPoseNode`'s matrix arm (`0x0040DBC0`..`0x0040DCD9`): when all three
+ * angles jump by more than `0x3000` between the two keys, the rotation is
+ * `MatrixInterpolateSwingTwist(Rzyx(key), Rzyx(next), 0.5)` instead of the
+ * per-angle halfway the caller has already written. The translation blend
+ * is the same either way.
+ *
+ * [port-only] as a function: the engine writes the arm inline.
+ */
+function EffectSwingTwistArm(p: EffectNodePose, def: EffectDefJson,
+                             a: number, bKey: number, b: number): void {
+  const ia = EffectKey(def, a, b);
+  const ib = EffectKey(def, bKey, b);
+  const far = (k: number) => Math.abs(def.r[ib + k] - def.r[ia + k]) > 0x3000;
+  if (!(far(2) && far(1) && far(0))) return;
+  const m = MatrixInterpolateSwingTwist(
+    MatrixFromZYX(def.r[ia], def.r[ia + 1], def.r[ia + 2]),
+    MatrixFromZYX(def.r[ib], def.r[ib + 1], def.r[ib + 2]), 0.5);
+  const e = MatrixToZYX(m);
+  p.pitch = e.pitch;
+  p.yaw = e.yaw;
+  p.roll = e.roll;
 }
 
 /** Key *k*, bone *b*, straight out of the baked arrays. */

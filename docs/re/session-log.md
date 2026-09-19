@@ -18427,3 +18427,20 @@ for one fact is the drift `CLAUDE.md` warns about, so `installed_by` is gone:
 `spawn_subtype` now drives both — `spawn_ats` for every class-0x26 rig, and
 per-spawn actor-posed roots only for a rig with no route or fixed pose. The
 boat keeps no route table.
+
+**Two follow-ups, both ported (2026-09-19).** `MatrixInterpolateSwingTwist`
+(`FUN_00412750`) was read with its five matrix routines — two of them named
+here, `MatrixSetTop3x4` and `MatrixGetTop3x4` — and every FPU argument
+re-read from the disassembly (the decompiler drops the `atan2 * 32768/pi`
+multiplier and the `* t` on both `__ftol`s). It is a swing of the Y axis then a
+twist about it, not a quaternion slerp; its `(1,0,0)` half-turn arm cannot be
+reached because the swing is sign-extended before the `CMP 0x8000`. Checked
+against three hand-computed rotations and the arm selection in
+`EffectSampleNode`. The divergence this branch had declared for it is gone.
+`SpawnPropHitEffectScaled` (`FUN_004666B0`) has 23 callers against
+`SpawnPropHitSpark`'s 9, and none of 38, 39, 40 or 44 calls the spark — so the
+port's everything-gets-a-spark stand-in was wrong for them as well as
+incomplete; those four families no longer get it, and 38, 39, 43 and 44 spawn
+the scaled effect themselves at the aim point `combat/shot.ts` now records.
+The other nineteen callers still get the spark stand-in (unchanged).
+

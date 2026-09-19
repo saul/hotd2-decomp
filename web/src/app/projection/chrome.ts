@@ -168,7 +168,8 @@ const GAME_OVER_LABELS = [
 
 /**
  * The game-over screen, read off `G`. Null while app state 6 runs; on the
- * game-over screen (7) the phase and the logo's sprite records; once it has
+ * game-over screen (7) the phase -- its sprites are the HUD layer's, through
+ * `G.g_screen_sprite_draws` like every other screen sprite; once it has
  * handed on to the next screen (3, which the port does not have) phase -1,
  * so the buttons stay up.
  */
@@ -179,9 +180,5 @@ export function gameOverProjection(): GameOverProjection | null {
     phase: over ? G.g_nRunPhase : -1,
     label: over ? (GAME_OVER_LABELS[G.g_nRunPhase] ?? "game over")
                 : "game over",
-    sprites: over ? G.g_screen_sprite_anims.map((a) => ({
-      id: a.id, x: a.x, y: a.y, sx: a.sx, sy: a.sy,
-      alpha: Math.max(0, Math.min(1, a.alpha)),
-    })) : [],
   };
 }

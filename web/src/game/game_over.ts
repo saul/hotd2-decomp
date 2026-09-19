@@ -36,44 +36,42 @@
  * `GameOverSpawnCameraFly` starts it on -- and run 210 frames, more than
  * phase 1's 200 (measured on the exported path).
  *
- * **A player whose own continue countdown ran out falls differently.** The
- * countdown ends in `PlayerSetState(6)` in play, so `PlayerStateArmGameOver`
- * ran then -- in app state 6, where it installs the hook and leaves the motion
- * -- and phase 0 re-arms only players still at 4. The fresh body keeps the
- * motion `PlayerBodiesCreate` made it on, `0x32C`, at the origin. That is
- * every game over with no credit left, and the run's own continue screen
- * (phase 4, which holds the players at 4) is the only route to the fall.
+ * Every player at 6 falls on `0x338`, whichever way they got there: the
+ * list's `PlayerTasksCreate` puts each player's task back to its state's
+ * handler, so a player whose own continue countdown already put them at 6 in
+ * play is armed again, in app state 7.
  *
  * ## What the port runs, and what it draws
  *
- * Every phase transition, timer, skip, player-state change, sound and the
- * next-screen request is here, and so is the fly-over: the stage released
- * (`g_stage_unloaded`; `render/game_over_scene.ts` stops drawing it), the
- * camera on `cp_gmovr`'s path, the bodies made, armed, placed, stepped and
- * dropped by the ported routines. The logo's sprites are here too, as the
- * records the engine's `ScreenSpriteAnimTick` tasks hold, so the HUD can draw
- * them from game state.
+ * All six phases, the fly-over (the stage released -- `g_stage_unloaded`,
+ * which `render/game_over_scene.ts` reads -- the camera on `cp_gmovr`'s path,
+ * the bodies made, armed, placed, stepped and dropped), the logo
+ * (`ScreenSpriteAnimTick` records drawn through `ScreenSpriteDraw`, the
+ * bundle's `scr_gameover.bin` images) and the route map (`game/route_map.ts`:
+ * the history the `checkpoint` opcode records, the walk, the tiles through
+ * `DrawScreenSprite`, the figures, their discs and the footprints). Every
+ * screen sprite goes through `G.g_screen_sprite_draws`, like the HUD's.
  *
- * `[diverges]` **Two things are not ported, and both are drawing:** the
- * logo's **textures** (sprite ids `0x43A..0x43D` are texbank `0x155`'s global
- * slots `0x9F0..0x9F3`, not yet in the bundle: the HUD draws the records as
- * styled text instead), and the route map with its two character figures
- * (`GameOverBuildRouteTasks`, `RouteMapDrawTask`). The route map's own "done"
- * flag is therefore never raised, and phase 5 waits for the trigger, which is
- * one of its two exits in the engine as well. The old actor pool is not
- * emptied either: the engine's arena reset frees it, the port leaves it be,
- * and with `GameUpdate` running only `GameOverRunPhase` nothing in it runs or
- * is drawn.
+ * `[diverges]` Two small ones, both drawing. The route figures' draw takes no
+ * horizontal root delta: the engine's `SkeletonApplyRootMotion` moves a figure
+ * by one frame's delta inside its draw, and the task puts it back on its
+ * cursor point before the next -- a fraction of a unit, re-seated every frame.
+ * And the old actor pool is not emptied at phase 0: the engine's arena reset
+ * frees it, the port leaves it be, and with `GameUpdate` running only
+ * `GameOverRunPhase` nothing in it runs or is drawn.
  */
 import type { Events } from "../core/events";
 import { RequestAppState } from "./app_state";
 import { CreditTiersUpdate } from "./credits";
 import { GameMode } from "./game_mode";
 import { AppState, G } from "./globals";
-import { PlayerSetState, PlayerTasksRun, type PlayerFrame }
+import { PlayerSetState, PlayerTasksCreate, PlayerTasksRun,
+         type PlayerFrame }
   from "./player_shell";
 import { PlayerState } from "./player_state";
 import { PlayerBodiesCreate } from "./player_body";
+import { GameOverRouteMapArm, GameOverRouteMapWait } from "./route_map";
+import { ScreenSpriteDraw } from "./screen_sprite";
 import { GAME_OVER_CAM_PATH } from "./player_body_data";
 import { vec3 } from "./vec";
 import type { CamPose } from "./camera/curve";
@@ -112,8 +110,8 @@ export const GAME_OVER_NEXT_APP_STATE = 3;
 
 /**
  * One `ScreenSpriteAnimSpawn` task (`FUN_00499C60`, `0x60` bytes): a 2D
- * sprite drawn every frame by `ScreenSpriteDraw` (`FUN_00499F00`) on layer
- * 10 and animated by `ScreenSpriteAnimTick` until its count runs out.
+ * sprite drawn every frame by `ScreenSpriteDraw` (`FUN_00499F00`), centred on
+ * its (x, y), and animated by `ScreenSpriteAnimTick` until its count runs out.
  */
 export interface ScreenSpriteAnim {
   /** `+0x34` -- the sprite id; `0x0057A5BC[id]` is its texbank. */
@@ -160,8 +158,8 @@ export function ScreenSpriteAnimSpawn(id: number, x: number, y: number,
 }
 
 /**
- * `ScreenSpriteAnimTick` — `FUN_00499CE0`. Draw (the HUD's, from this
- * record), then the scale mode, then the alpha mode and the end test, then
+ * `ScreenSpriteAnimTick` — `FUN_00499CE0`. Draw (`ScreenSpriteDraw`, at
+ * depth 1.0), then the scale mode, then the alpha mode and the end test, then
  * the count. Returns false once the task has killed itself.
  *
  * ```
@@ -175,6 +173,9 @@ export function ScreenSpriteAnimSpawn(id: number, x: number, y: number,
  * ```
  */
 export function ScreenSpriteAnimTick(s: ScreenSpriteAnim): boolean {
+  // `ScreenSpriteDraw(id, x, y, 1.0, sx, sy, alpha)` -- the draw comes first,
+  // so a record's values are drawn before this frame's step changes them.
+  ScreenSpriteDraw(s.id, s.x, s.y, 1, s.sx, s.sy, s.alpha);
   switch (s.scaleMode) {
     case 1:
       s.sx -= 1.0 / s.frames;
@@ -353,13 +354,17 @@ export function GameOverSpawnCameraFly(host: GameHost): void {
  * `GameOverBuildFlyTasks` — `FUN_00460BB0`: the fly-over's task list, built
  * by `TaskListBuild` in phase 0. `GameOverSpawnCameraFly`; the camera tasks
  * (`FUN_00414F20`), whose `CameraUpdateTick` runs the no-op hook scene state
- * (0, 0) installed and whose `PlayerBodiesCreate` makes the bodies; the
- * player tasks, which carry on from where they were; and
- * `SpawnAttackablePlayerTask`, whose screen shake has nothing to shake.
+ * (0, 0) installed and whose `PlayerBodiesCreate` makes the bodies;
+ * `PlayerTasksCreate`, which puts each player's task back to its state's
+ * handler; and `SpawnAttackablePlayerTask`, whose screen shake has nothing to
+ * shake.
  */
 export function GameOverBuildFlyTasks(host: GameHost): void {
   GameOverSpawnCameraFly(host);
   PlayerBodiesCreate();
+  // `PlayerTasksCreate`: every player's task is its state's handler again --
+  // so a player already at 6 is armed afresh, in app state 7, onto the fall.
+  PlayerTasksCreate();
 }
 
 /**
@@ -387,6 +392,9 @@ function GameOverBodiesUndrawn(): void {
  * `SelectAttackablePlayer`.
  */
 export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
+  // `[port-only]` -- the frame's screen sprites start empty: the engine draws
+  // immediate-mode, and this screen's task lists are what draw them.
+  G.g_screen_sprite_draws = [];
   switch (G.g_nRunPhase) {
     case GameOverPhase.Arm:
       // `FUN_004A7310` and `FUN_0041D510`: the stage is released -- every pol
@@ -455,15 +463,13 @@ export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
       }
       return;
     case GameOverPhase.ArmRouteMap:
-      // The route history and the map task list: drawing.
+      // The logo's list is replaced by the route map's.
       G.g_screen_sprite_anims = [];
-      G.g_game_over_route_done = 0;
-      G.g_nRunPhase += 1;
+      GameOverRouteMapArm(f);
       return;
     case GameOverPhase.RouteMap:
-      if ((G.g_pad_state & GAME_OVER_SKIP_BITS) !== 0) {
-        G.g_game_over_route_done = -1;
-      } else if (G.g_game_over_route_done !== -1) {
+      if (!GameOverRouteMapWait(f,
+                                (G.g_pad_state & GAME_OVER_SKIP_BITS) !== 0)) {
         return;
       }
       CreditsClear();

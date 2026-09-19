@@ -127,9 +127,12 @@ puts texture row 0 at the **bottom** of the quad, so every screen texture is
 stored upside down relative to the picture it shows.
 
 The exporter (`hod2lib/texbank.ts`, `exetab.ts`, and `bundle.ts`'s
-`hudSpritesJson`) decodes the ids `web/src/game/hud_sprites.ts` lists, flips
-them, and writes them into `script.json` as `hud_sprites`: `{w, h, png}` by
-sprite id.
+`screenSpritesJson`) decodes the ids the game draws -- the HUD's, which
+`web/src/game/hud_sprites.ts` lists, the game-over logo's `0x43A..0x43D`
+(`scr_gameover.bin`, direct colour) and the route map's 300 tiles from
+`g_route_map_tiles` (`scr_bunki.bin`, direct colour) -- flips them, and writes
+them into `script.json` as `screen_sprites` (format 12; `hud_sprites` before):
+`{w, h, png}` by sprite id.
 
 ## Two banks that overwrite a third: the blood colour
 

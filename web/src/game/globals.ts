@@ -33,6 +33,7 @@ import type { ShotRequest } from "./combat/shot";
 import type { ScreenSprite } from "./screen_sprite";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { PlayerBody } from "./player_body";
+import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 import { makeEntityLights } from "./entity_light";
@@ -1311,6 +1312,30 @@ export const G = {
    * `game/player_body.ts`.
    */
   g_player_bodies: [] as PlayerBody[],
+  /**
+   * `g_route_history` — 0x009A5920, s8, sixteen per scene for ten scenes:
+   * the blocks this run has entered, in order, -1 after the last. The
+   * `checkpoint` opcode (0x4D, `ResetSceneCombatState`, `FUN_0045EEC0`)
+   * appends `g_evt_block_index` at `g_route_count` and writes -1 after it;
+   * `ResetGameOnStart` fills all 0x28 dwords with -1. The game-over route map
+   * walks it. `[proved]`
+   */
+  g_route_history: Array.from({ length: 10 },
+                              () => new Array(16).fill(-1)) as number[][],
+  /**
+   * `g_route_count` — 0x009A5C30, s8: this scene's next history entry.
+   * `ResetSceneOnEnter` zeroes it. `[proved]`
+   */
+  g_route_count: 0,
+  /** The route map's walk, `0x007DCCD8`..; see `game/route_map.ts`. */
+  g_route_map: {
+    scroll: 0, markSlot: 0, stage: 0, block: 0, dir: 0, wp: 0, entry: 0,
+    cursorY: 0, targetX: 0, targetY: 0, screenY: 0, cursorX: 0,
+  } as RouteMapState,
+  /** The route map's figure tasks, in allocation order. */
+  g_route_figures: [] as RouteFigure[],
+  /** The route map's footprint tasks, in allocation order. */
+  g_route_marks: [] as RouteMark[],
   /** `g_continue_timer` — 0x009A2BB8, the run's own continue countdown. */
   g_continue_timer: 0,
   /** `g_continue_credit_seen` — 0x007DCCAC..0x007DCCB8. */
@@ -1748,6 +1773,8 @@ export type Globals = typeof G;
  * one that does not is a lie waiting to be believed.
  */
 export function ResetSceneOnEnter(): void {
+  // The route history's cursor for this scene (`DAT_009A5C30`).
+  G.g_route_count = 0;
   G.g_enemies_alive = 0;
   G.g_enemies_present = 0;
   G.g_civilians_alive = 0;
@@ -1957,6 +1984,13 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
     PlayerTasksCreate();
     PlayerTasksRunFirstTurn();
   } else {
+    // `ResetGameOnStart`'s (`0x0045FEF0`) route half: the history is the
+    // run's, filled with -1 when a game starts and carried by nothing else.
+    // Here rather than in the port's `ResetGameOnStart`, which runs on the
+    // first frame -- after the script's first `checkpoint`, which the engine
+    // runs after the reset.
+    G.g_route_history = Array.from({ length: 10 },
+                                   () => new Array(16).fill(-1));
     PlayerStartGameFromTitle(G.g_GameMode);
   }
   // The player turn taken above is the port's sequencing, not a frame the

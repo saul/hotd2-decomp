@@ -26,10 +26,20 @@ extract/player/
 
 Since format 11 every stage's `characters.placements` also carries two
 **synthetic** rows with `player_body` set, at `0x20000000 + p`: the players'
-bodies, character types `0x39` and `0x3A` on motions `0x32C` and `0x338`, which
-only the game-over fly-over draws (`game/player_body.ts`). Nothing spawns from
-them; `render/game_over_scene.ts` claims their hierarchies from the character
-layer.
+bodies, character types `0x39` and `0x3A` -- the game-over fly-over's bodies
+and the route map's figures -- with every clip that screen draws them on
+(`0x32C`, `0x338`, `0x339`, `0x358`, `0x35B` as each type has them). Nothing
+spawns from them; `render/game_over_scene.ts` claims their hierarchies from the
+character layer.
+
+Since format 12 `script.json` carries a `game_over` block -- the game-over
+screen's `.rdata`, read by `ExeTables.gameOverTables` in both halves: the
+bodies' types, start and fall clips, fall frames and stands; the route map's
+tile bases, waypoint table and default route -- and `screen_sprites` (the old
+`hud_sprites`) holds the logo's and the route tiles' images beside the HUD's.
+The `.text` immediates that are join keys (the logo sprite ids, the figures'
+clips, the disc and footprint slots) live in `web/src/game/player_body_data.ts`,
+which the exporter imports.
 
 ## Three versions, and only one of them moves on its own
 

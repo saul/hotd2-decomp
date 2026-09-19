@@ -41,15 +41,45 @@ export interface ScreenSprite {
   /** Multiplies the texture's width and height. */
   sx: number;
   sy: number;
+  /**
+   * `+0x2C` -- the quad's alpha, 0..1. `DrawScreenSprite` writes 1.0;
+   * `ScreenSpriteDraw` passes its own.
+   */
+  alpha: number;
+  /**
+   * `+0x34` -- the flags word. The low nibble is the **anchor**:
+   * `DrawSpriteQuadCommand` (`FUN_004A7AB0`) places the quad's corners at
+   * `g_sprite_quad_corners` (`{1,3},{3,3},{1,1},{3,1}`) less
+   * `(flags & 3, flags >> 2 & 3)` half-extents, or less `(1, 1)` when the
+   * nibble is 0 -- so 0 puts `(x, y)` at the top-left and 10 (`2, 2`) at the
+   * centre. `[proved]` Bits `0x10`/`0x20` flip U/V; no call the port makes
+   * sets them.
+   */
+  flags: number;
 }
 
 /**
  * `DrawScreenSprite` — `FUN_0041C6D0`. Recorded rather than drawn; see
- * `G.g_screen_sprite_draws`. The rotation and flag arguments are 0 at every
- * call the port makes, and are not carried; a caller that needs them adds
- * them to {@link ScreenSprite} and to the layer's draw.
+ * `G.g_screen_sprite_draws`. The rotation argument is 0 at every call the
+ * port makes and is not carried; the flags word is, for its anchor nibble.
  */
 export function DrawScreenSprite(id: number, x: number, y: number,
-                                 depth = 1, sx = 1, sy = 1): void {
-  G.g_screen_sprite_draws.push({ id, x, y, depth, sx, sy });
+                                 depth = 1, sx = 1, sy = 1, flags = 0): void {
+  G.g_screen_sprite_draws.push({ id, x, y, depth, sx, sy, alpha: 1, flags });
+}
+
+/** `ScreenSpriteDraw`'s flags word: anchor `(2, 2)`, the sprite's centre. */
+const SCREEN_SPRITE_DRAW_FLAGS = 10;
+
+/**
+ * `ScreenSpriteDraw` — `FUN_00499F00`. The same record as `DrawScreenSprite`
+ * builds, with the caller's alpha at `+0x2C` and flags 10 -- so `(x, y)` is
+ * the sprite's **centre** -- and on through `SpriteDrawCheckedBank`.
+ * `ScreenSpriteAnimTick`'s draw. `[proved]`
+ */
+export function ScreenSpriteDraw(id: number, x: number, y: number,
+                                 depth: number, sx: number, sy: number,
+                                 alpha: number): void {
+  G.g_screen_sprite_draws.push({ id, x, y, depth, sx, sy, alpha,
+                                 flags: SCREEN_SPRITE_DRAW_FLAGS });
 }

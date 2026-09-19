@@ -22,6 +22,15 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 12: the game-over screen's sprites and route map. `script.json`'s
+ * `hud_sprites` is `screen_sprites` -- the HUD's images and now the logo's
+ * (`scr_gameover.bin`) and the route map's 300 tiles (`scr_bunki.bin`) -- and a
+ * `game_over` block carries the screen's `.rdata` (`ExeTables.gameOverTables`):
+ * the bodies' types, clips and stands, the route's tiles, waypoints and
+ * default route. The effect slots gain the route's disc and footprints, and
+ * the body rows the route figures' clips. A renamed block, so the number
+ * moves with the digest.
+ *
  * 11: the game-over fly-over. Every stage's `cam.json` carries
  * `cp_gmovr.bin`'s path, global slot `0x1F`, and its `characters` carry two
  * synthetic `player_body` rows -- character types `0x39` and `0x3A` on motion
@@ -69,7 +78,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 11;
+export const SUPPORTED_FORMAT = 12;
 
 /**
  * The exporter's digest of the declarations in this directory.

@@ -1160,6 +1160,48 @@ class ExeTables:
                     pal = self.palette(struct.unpack_from("<h", self.data, r)[0])
         return name, entry, pal
 
+    def game_over_tables(self) -> dict:
+        """The game-over screen's ``.rdata``, for ``script.json``'s
+        ``game_over`` block. The TypeScript half's ``gameOverTables`` says
+        what each field is and where it comes from; this is the same read.
+        """
+        def s32(va: int, n: int) -> list[int]:
+            out = []
+            for i in range(n):
+                r = self._v2r(va + i * 4)
+                out.append(struct.unpack_from("<i", self.data, r)[0]
+                           if r is not None else 0)
+            return out
+
+        def s16(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<h", self.data, r)[0] if r is not None else 0
+
+        def s8(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<b", self.data, r)[0] if r is not None else -1
+
+        def f32(va: int) -> float:
+            r = self._v2r(va)
+            return struct.unpack_from("<f", self.data, r)[0] if r is not None else 0.0
+
+        return {
+            "body_char_types": s32(0x00579F50, 2),
+            "body_start_motions": s32(0x004EC8A4, 2),
+            "fall_motions": s32(0x004EC8B4, 2),
+            "fall_frames": s32(0x004EC8C4, 2),
+            "body_offsets": [[f32(0x00579EA8 + i * 12),
+                              f32(0x00579EA8 + i * 12 + 8)] for i in range(4)],
+            "route_tiles": [s16(0x005679FC + i * 2) for i in range(4)],
+            "route_waypoints": [[[[s16(0x00567A04 + (wp + (st * 0x27 + blk) * 6) * 4),
+                                   s16(0x00567A04 + (wp + (st * 0x27 + blk) * 6) * 4 + 2)]
+                                  for wp in range(6)]
+                                 for blk in range(0x27)]
+                                for st in range(6)],
+            "default_route": [[s8(0x0059351C + st * 16 + i) for i in range(16)]
+                              for st in range(6)],
+        }
+
     def sound_name(self, sound_id: int) -> str | None:
         """The filename a `PlaySoundId` id names, if it is a category-0 id."""
         return self.sound_records().get(sound_id)

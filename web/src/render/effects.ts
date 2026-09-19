@@ -169,6 +169,15 @@ export class EffectLayer implements System<RenderContext> {
     this.viewGroup.visible = v;
   }
 
+  /**
+   * A fresh copy of the model at an asset slot, from the hidden
+   * `slots_effect` rig -- for another layer that draws by slot (the
+   * game-over screen's discs and footprints). Null if the bundle has none.
+   */
+  cloneSlot(slot: number): Object3D | null {
+    return this.clone(slot);
+  }
+
   private clone(slot: number): Object3D | null {
     const t = this.templates.get(slot);
     if (!t) return null;

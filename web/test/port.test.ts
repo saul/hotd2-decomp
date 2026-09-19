@@ -345,6 +345,7 @@ import {
 } from "../src/game/class25";
 
 import { GameOverCameraFlyTick } from "../src/game/game_over";
+import { SetGameOverTables } from "../src/game/tables";
 import { CamPath } from "../src/game/camera/curve";
 
 let failures = 0;
@@ -8653,6 +8654,26 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
                root: new Array(61 * 3).fill(0), rot: [] },
     } } as unknown as (typeof T.types)[string];
   }
+  // The game-over block, as `ExeTables.gameOverTables` reads it -- the real
+  // values for the bodies; a one-block route for the map: stage 1, block 0,
+  // one waypoint 48 map pixels down from where the cursor starts.
+  // Unused rows are zeroes in the exe's table, and that matters: the frame
+  // the history runs out leaves the block at -1, and the next frame reads
+  // the row before it -- a zero there is a target the cursor is not on, which
+  // is what lets the done word run on to -1.
+  const waypoints = Array.from({ length: 6 }, () =>
+    Array.from({ length: 0x27 }, () =>
+      Array.from({ length: 6 }, () => [0, 0])));
+  waypoints[0][0][0] = [-16, -98];
+  waypoints[0][0][1] = [-1, -1];
+  SetGameOverTables({
+    body_char_types: [0x39, 0x3a], body_start_motions: [0x32c, 0x32c],
+    fall_motions: [0x338, 0x338], fall_frames: [0x50, 0x3c],
+    body_offsets: [[0, 0], [0, 0], [-5, -1.9], [4.2, 0.7]],
+    route_tiles: [0xce, 0x119, 0x164, 0x1af],
+    route_waypoints: waypoints,
+    default_route: Array.from({ length: 6 }, () => new Array(16).fill(-1)),
+  });
   run(1, rng, ev);
   check("phase 0: every player at 4 goes to 6, 200 frames, BGM 9 unlooped",
         G.g_player_state[0] === PlayerState.GameOver
@@ -8723,19 +8744,50 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         G.g_screen_sprite_anims.map((s) => s.id.toString(16)).join(","));
   check("the scene's actors stand still on the game-over screen",
         !z0 || !zAt || (z0.pos.x === zAt.x && z0.pos.z === zAt.z));
-  run(0xb4, rng, ev);
-  check("after the logo the route map, which waits for the trigger",
-        G.g_nRunPhase === 5, `${G.g_nRunPhase}`);
-  run(30, rng, ev);
-  check("...and does not end by itself", G.g_nRunPhase === 5
-        && G.g_app_state === AppState.GameOver);
-  G.g_pad_state = 2;
+  // The route this game took: the checkpoint the harness never ran, so the
+  // history is as the reset left it plus one block -- stage 1, block 0.
+  G.g_route_history[0][0] = 0;
+  G.g_route_history[0][1] = -1;
+  G.g_route_history[0][2] = 1;          // a second entry of 0 is "empty"
+  for (let i = 0; i < 0xb4 && G.g_nRunPhase !== 5; i++) run(1, rng, ev);
+  const rm = G.g_route_map;
+  check("after the logo the route map: one figure, player 1's, on its walk "
+        + "clip, the cursor at (-16, -146) aimed at the block's waypoint",
+        G.g_nRunPhase === 5 && G.g_route_figures.length === 1
+        && G.g_route_figures[0].charType === 0x39
+        && G.g_route_figures[0].motion === 0x35b
+        && rm.cursorX === -16 && rm.targetY === -98,
+        `phase ${G.g_nRunPhase} ${JSON.stringify(rm)}`);
   run(1, rng, ev);
-  G.g_pad_state = 0;
-  check("the trigger clears the credits and asks for app state 3",
-        G.g_credits[0] === 0 && G.g_app_state_pending === -1
-        && G.g_app_state === 3 && G.g_player_state[0] === PlayerState.Out,
-        `credits ${G.g_credits} app ${G.g_app_state} ${G.g_player_state}`);
+  const tiles = G.g_screen_sprite_draws;
+  check("...the map drawn as 300 tiles through DrawScreenSprite, screen 1's "
+        + "first at the top-left, depth 120",
+        tiles.length === 300 && tiles[0].id === 0xce && tiles[0].x === 0
+        && tiles[0].y === 0 && tiles[0].depth === 120 && tiles[0].flags === 0,
+        `${tiles.length} ${JSON.stringify(tiles[0])}`);
+  run(11, rng, ev);
+  check("the figure walks 4 map pixels a frame down the map, leaving a "
+        + "footprint a step -- and on the waypoint the history runs out: the "
+        + "done word goes to 1 that frame",
+        rm.cursorY === -98 && G.g_route_marks.length === 12
+        && G.g_route_figures[0].yaw === 0
+        && G.g_game_over_route_done === 1,
+        `y ${rm.cursorY} marks ${G.g_route_marks.length} `
+        + `done ${G.g_game_over_route_done}`);
+  run(1, rng, ev);
+  check("...and the figure blends into its end clip, 0x338, over 10 frames",
+        G.g_route_figures[0].motion === 0x338
+        && G.g_route_figures[0].fadeFrom?.motion === 0x35b
+        && G.g_game_over_route_done === 2);
+  run(0x78, rng, ev);
+  check("...held 0x78 frames the screen is still up",
+        G.g_app_state === AppState.GameOver);
+  run(1, rng, ev);
+  check("0x78 frames on the end clip, and the screen hands on by itself: "
+        + "credits cleared, app state 3",
+        G.g_app_state === 3 && G.g_credits[0] === 0
+        && G.g_player_state[0] === PlayerState.Out,
+        `app ${G.g_app_state} done ${G.g_game_over_route_done}`);
 }
 
 {

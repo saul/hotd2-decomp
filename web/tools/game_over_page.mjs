@@ -41,12 +41,22 @@ const state = () => page.evaluate(async () => {
 });
 const dom = () => page.evaluate(() => {
   const el = document.querySelector("#gameover");
-  // The plate's own element, not the text: the panel's tag says "game over"
-  // too, so a text match would pass with no plate drawn at all (L47).
-  const plate = el?.querySelector(".go-43a");
-  return el ? { phase: el.dataset.phase, text: el.innerText,
-                plate: plate ? Number(getComputedStyle(plate).opacity) : null }
-            : null;
+  // The HUD canvas's own pixels over the plate's 512x64 rectangle: what the
+  // page drew, not what the port says it drew (L47).
+  const cv = document.querySelector(".hud-screen");
+  let inked = -1;
+  if (cv instanceof HTMLCanvasElement) {
+    const px = cv.getContext("2d")?.getImageData(64, 208, 512, 64).data;
+    if (px) {
+      inked = 0;
+      for (let i = 3; i < px.length; i += 4) if (px[i] > 200) inked += 1;
+    }
+  }
+  return el ? { phase: el.dataset.phase, text: el.innerText, inked } : null;
+});
+const draws = () => page.evaluate(async () => {
+  const { G } = await import("/src/game/globals.ts");
+  return G.g_screen_sprite_draws.map((d) => ({ ...d }));
 });
 
 // The last life only goes on the path camera: off it, `PlayerTakeDamage`
@@ -176,8 +186,14 @@ try {
               JSON.stringify(plate));
   check(s.phase === 3 && plate !== null && plate.alpha >= 1,
         "phase 3 has the GAME OVER plate up at full alpha");
-  check(!!d && d.plate !== null && d.plate >= 0.99,
-        "the page draws the GAME OVER plate at full opacity");
+  const dr = await draws();
+  check(dr.some((x) => x.id === 0x43a && x.alpha >= 1 && x.flags === 10
+                && x.x === 320 && x.y === 240),
+        "the plate goes through ScreenSpriteDraw: centred at (320, 240), "
+        + "alpha 1");
+  check(!!d && d.inked > 2000,
+        "the HUD canvas has the plate's texture where the plate is",
+        `${d?.inked} opaque pixels`);
   await page.screenshot({ path: join(SHOTS, "gameover-logo.png") });
   await untilLogo(0x8a);
   s = await state();
@@ -186,12 +202,27 @@ try {
   check(s.sprites >= 4, "the flashes are out");
   await page.screenshot({ path: join(SHOTS, "gameover-flashes.png") });
 
+  // The route map: the figure walking the run's route over the map.
   s = await untilGameOverPhase(5);
-  await advance(30);
+  await advance(60);
   s = await state();
-  console.log("wait:", JSON.stringify(s));
-  check(s.app === 7 && s.phase === 5, "phase 5 waits for a button");
-  await page.screenshot({ path: join(SHOTS, "gameover-wait.png") });
+  const route = await page.evaluate(async () => {
+    const { G } = await import("/src/game/globals.ts");
+    return { map: { ...G.g_route_map }, figures: G.g_route_figures.length,
+             motion: G.g_route_figures[0]?.motion ?? -1,
+             marks: G.g_route_marks.length,
+             tiles: G.g_screen_sprite_draws.length,
+             done: G.g_game_over_route_done };
+  });
+  console.log("route:", JSON.stringify(s), JSON.stringify(route));
+  check(s.app === 7 && s.phase === 5 && route.figures === 1
+        && (route.motion === 0x35b || route.done !== 0) && route.tiles === 300
+        && route.marks > 0,
+        "phase 5 walks player 1's figure on 0x35B over the 300-tile map, "
+        + "leaving footprints");
+  await page.screenshot({ path: join(SHOTS, "gameover-route.png") });
+  await advance(240);
+  await page.screenshot({ path: join(SHOTS, "gameover-route-later.png") });
 
   // Restart this stage.
   await page.click("#gameover-restart");
@@ -220,8 +251,9 @@ try {
   t = await untilFly(0x60);
   console.log("fly-over, no credit:", JSON.stringify(t));
   check(t.phase === 1 && !!t.body && t.body.drawn === 1
-        && t.body.motion === 0x32c,
-        "with no credit the body is drawn on 0x32C, the motion it was made on");
+        && t.body.motion === 0x338,
+        "with no credit the body falls on 0x338 too: the fly-over's "
+        + "PlayerTasksCreate arms a player already at 6 again");
   await page.screenshot({ path: join(SHOTS, "gameover-fly-nocredit.png") });
   s = await untilGameOverPhase(3);
   check(s.app === 7, "a second game over");

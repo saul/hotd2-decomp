@@ -1,50 +1,67 @@
 /**
- * The player's own body: the constants the exporter and the port both need.
+ * The game-over screen's immediates: the ones the exporter and the port both
+ * need.
  *
  * Data only, with no module-scope side effect, so that `hod2lib/` can import
  * it without acquiring the port -- the same arrangement as
- * `class25/state.ts`.
- *
- * In the exe each player has a skinned body actor, allocated by
- * `PlayerBodiesCreate` (`FUN_00416450`) into `0x009A5CD8 + p*0x130` whenever a
- * task list with the camera tasks in it is built. The port draws it in one
- * place only: the game-over fly-over, where `PlayerStateArmGameOver`
- * (`FUN_00414420`) puts it on motion `0x338` and
- * `PlayerHookDrawBodyUntilMotionEnd` (`FUN_004151D0`) draws it. See
- * `game/player_body.ts`.
+ * `class25/state.ts`. Every value here is a `.text` immediate (a `PUSH` or a
+ * `MOV` inside the routine named), and each is a **join key**: a motion the
+ * exporter has to bake, a slot it has to carry, a sprite it has to decode. The
+ * game-over screen's `.rdata` -- the bodies' types and clips, where they stand,
+ * the route map's tiles and waypoints -- is read by `ExeTables.gameOverTables`
+ * and travels in `script.json`'s `game_over` block instead. See
+ * `docs/formats/bundle.md`, "The rule".
  */
 
 /**
- * `0x00579F50`, s32 per player: the body's character type -- `0x39`, whose
- * parts are `player1.bin`'s, and `0x3A`, `player2.bin`'s. `[proved]`
- *
- * In Original Mode `PlayerBodiesCreate` takes the type from the character
- * byte at `0x009A2242 + p*0x14` instead, unless that byte equals the player
- * index; and the byte's only writer, `ResetOriginalModeLoadout`
- * (`FUN_0048A0D0`), stores the player index. So both modes draw these two.
- * `[proved]`
- */
-export const PLAYER_BODY_CHAR_TYPES: readonly number[] = [0x39, 0x3a];
-
-/**
- * `0x004EC8A4`, s32 per player: the motion `PlayerBodiesCreate` builds a body
- * on. It is drawn, too: a player whose own continue countdown ran out in play
- * is already at state 6 when the game-over screen starts, so phase 0 does not
- * arm them again and their fresh body keeps this clip under the hook
- * `PlayerStateArmGameOver` installed back in app state 6. `[proved]`
- */
-export const PLAYER_BODY_START_MOTIONS: readonly number[] = [0x32c, 0x32c];
-
-/** `0x004EC8B4`, s32 per player: the motion the body falls on. `[proved]` */
-export const PLAYER_GAME_OVER_MOTIONS: readonly number[] = [0x338, 0x338];
-
-/**
- * `[port-only]` -- the address each player's body actor and its bundle row
- * are known by. The engine keys nothing on an address; the port's bundle binds
- * a hierarchy to a placement by one, so a body needs one that no evt offset
- * can be. The class-0x46 wings take bit 30; these take bit 29.
+ * `[port-only]` -- the address each player's body and its bundle row are
+ * known by. The engine keys nothing on an address; the port's bundle binds a
+ * hierarchy to a placement by one, so a body needs one that no evt offset can
+ * be. The class-0x46 wings take bit 30; these take bit 29. Row `p` carries the
+ * body type `g_player_body_char_types[p]` (`0x00579F50`).
  */
 export const PLAYER_BODY_AT: readonly number[] = [0x20000000, 0x20000001];
 
 /** `GameOverCameraFlyTick`'s path: global slot `0x1F`, `cp_gmovr.bin`'s one. */
 export const GAME_OVER_CAM_PATH = 0x1f;
+
+/**
+ * `GameOverLogoTask`'s (`FUN_00460CD0`) sprites: the plate `0x43A` and the
+ * three flashes. `scr_gameover.bin`, texbank `0x155`.
+ */
+export const GAME_OVER_LOGO_SPRITES: readonly number[] =
+  [0x43a, 0x43b, 0x43c, 0x43d];
+
+/** One route-map figure, as `GameOverBuildRouteTasks` (`FUN_00460FF0`) makes it. */
+export interface RouteFigureSpec {
+  /** The character type -- the same two the bodies are. */
+  charType: number;
+  /** The clip it walks the route on. */
+  walk: number;
+  /** The clip it blends into once the route is drawn. */
+  end: number;
+}
+
+/**
+ * `GameOverSpawnPlayerFigure(0x39, 0x35B, 0x338, ...)` and
+ * `GameOverSpawnPlayerFigure(0x3A, 0x358, 0x339, 0)` -- the player figure, by
+ * which player is on the game-over screen -- and `GameOverSpawnPartnerFigure`
+ * (`FUN_004617F0`), which is always type `0x3A` on `0x358` and blends `0x339`
+ * (`FUN_004618C0`). `[proved]`
+ */
+export const ROUTE_FIGURES: readonly RouteFigureSpec[] = [
+  { charType: 0x39, walk: 0x35b, end: 0x338 },
+  { charType: 0x3a, walk: 0x358, end: 0x339 },
+];
+
+/** The player figure's x offset with a partner beside it: `0x18`. */
+export const ROUTE_FIGURE_PAIR_OFFSET = 0x18;
+
+/**
+ * `g_route_mark_slot` (`0x007DCCE0`): the footprint model the walk leaves,
+ * `0x14C2` when player 1 is on the screen and `0x14D2` for player 2 alone.
+ */
+export const ROUTE_MARK_SLOTS: readonly number[] = [0x14c2, 0x14d2];
+
+/** The figure's ground disc, `AssetDrawSlot(0x145B)` under each figure. */
+export const ROUTE_FIGURE_SHADOW_SLOT = 0x145b;

@@ -71,11 +71,17 @@ export interface ScriptJson {
   /** Class 0x10's civilians: the exe's scripts, and who runs which. */
   civilians?: CiviliansJson;
   /**
-   * The screen sprites the in-play HUD draws, by `DrawScreenSprite` id in
-   * decimal: the lives, the bullets, the RELOAD prompt. Absent in a bundle
-   * written before them, which draws no HUD readout.
+   * The screen sprites the game draws, by `DrawScreenSprite` id in decimal:
+   * the in-play HUD's lives, bullets and RELOAD prompt, and the game-over
+   * screen's logo and route-map tiles. Absent in a bundle written before
+   * them, which draws none.
    */
-  hud_sprites?: Record<string, HudSpriteImage>;
+  screen_sprites?: Record<string, HudSpriteImage>;
+  /**
+   * The game-over screen's `.rdata` -- see `ExeTables.gameOverTables` in the
+   * exporter for where each field is read from.
+   */
+  game_over?: GameOverJson;
   rain?: RainJson;
   /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
   coli?: ColiJson;
@@ -94,6 +100,26 @@ export interface StageBundle {
  * texture as a PNG data URL, already the right way up (the game's quad draws
  * texture row 0 at the bottom -- see `docs/formats/texbank.md`).
  */
+/** `script.json`'s `game_over` block. */
+export interface GameOverJson {
+  /** `0x00579F50`: each player's body character type. */
+  body_char_types: number[];
+  /** `0x004EC8A4`: the motion a body is made on. */
+  body_start_motions: number[];
+  /** `0x004EC8B4`: the motion it falls on in app state 7. */
+  fall_motions: number[];
+  /** `0x004EC8C4`: with two players, the path frame each starts falling at. */
+  fall_frames: number[];
+  /** `0x00579EA8`: `[x, z]` by `p - 2 + players * 2`. */
+  body_offsets: number[][];
+  /** `0x005679FC`: the first sprite id of each of the map's four screens. */
+  route_tiles: number[];
+  /** `0x00567A04`: `[stage][block][waypoint] = [x, y]`, x -1 ends a list. */
+  route_waypoints: number[][][][];
+  /** `0x0059351C`: `[stage][16]` blocks, -1 ending each. */
+  default_route: number[][];
+}
+
 export interface HudSpriteImage {
   w: number;
   h: number;

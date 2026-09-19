@@ -1276,6 +1276,65 @@ export class ExeTables {
     return [name, entry, pal];
   }
 
+  /**
+   * The game-over screen's `.rdata`, for `script.json`'s `game_over` block.
+   *
+   * * `body_char_types` -- `0x00579F50`, s32[2]: each player's body type,
+   *   `PlayerBodiesCreate`'s (`FUN_00416450`).
+   * * `body_start_motions` -- `0x004EC8A4`, s32[2]: the motion a body is made
+   *   on. `fall_motions` -- `0x004EC8B4`, s32[2]: the one
+   *   `PlayerStateArmGameOver` puts it on in app state 7.
+   * * `fall_frames` -- `0x004EC8C4`, s32[2]: with two players, the fly-over
+   *   path frame each body starts falling at.
+   * * `body_offsets` -- `0x00579EA8`, four `{f32 x, _, f32 z}`, indexed
+   *   `p - 2 + players * 2`: where `GameOverPlaceBody` stands each body.
+   * * `route_tiles` -- `0x005679FC`, s16[4]: the first sprite id of each of
+   *   the route map's four 640x480 screens, 5x15 tiles of 128x32.
+   * * `route_waypoints` -- `0x00567A04`, `[stage][block 0..0x26][6]` of
+   *   `{s16 x, s16 y}`, the map point each block's walk visits; x -1 ends a
+   *   block's list. `RouteMapDrawTask` (`FUN_00461180`) indexes it
+   *   `((wp + (stage * 0x27 + block) * 6) * 4)`.
+   * * `default_route` -- `0x0059351C`, s8[6][16]: the route
+   *   `GameOverRouteMapArm` (`FUN_00460F00`) copies over an empty history.
+   *
+   * All `[proved]` from the routines named.
+   */
+  gameOverTables(): Record<string, unknown> {
+    const s32 = (va: number, n: number) =>
+      Array.from({ length: n }, (_u, i) => this.ri32(va + i * 4) ?? 0);
+    const s16 = (va: number) => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const s8 = (va: number) => {
+      const r = this.v2r(va);
+      if (r === null) return -1;
+      const v = this.data[r];
+      return v >= 0x80 ? v - 0x100 : v;
+    };
+    const offsets = Array.from({ length: 4 }, (_u, i) =>
+      [this.rf32(0x00579ea8 + i * 12) ?? 0,
+       this.rf32(0x00579ea8 + i * 12 + 8) ?? 0]);
+    const waypoints = Array.from({ length: 6 }, (_s, st) =>
+      Array.from({ length: 0x27 }, (_b, blk) =>
+        Array.from({ length: 6 }, (_w, wp) => {
+          const va = 0x00567a04 + ((wp + (st * 0x27 + blk) * 6) * 4);
+          return [s16(va), s16(va + 2)];
+        })));
+    const route = Array.from({ length: 6 }, (_s, st) =>
+      Array.from({ length: 16 }, (_i, i) => s8(0x0059351c + st * 16 + i)));
+    return {
+      body_char_types: s32(0x00579f50, 2),
+      body_start_motions: s32(0x004ec8a4, 2),
+      fall_motions: s32(0x004ec8b4, 2),
+      fall_frames: s32(0x004ec8c4, 2),
+      body_offsets: offsets,
+      route_tiles: Array.from({ length: 4 }, (_u, i) => s16(0x005679fc + i * 2)),
+      route_waypoints: waypoints,
+      default_route: route,
+    };
+  }
+
   soundName(soundId: number): string | null {
     return this.soundRecords().get(soundId) ?? null;
   }

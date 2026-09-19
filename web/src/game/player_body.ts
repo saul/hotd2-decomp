@@ -22,8 +22,7 @@
  */
 import { MotionFlag, MOTION_FLAGS_INIT } from "./actor";
 import { G } from "./globals";
-import { PLAYER_BODY_AT, PLAYER_BODY_CHAR_TYPES, PLAYER_BODY_START_MOTIONS }
-  from "./player_body_data";
+import { PLAYER_BODY_AT } from "./player_body_data";
 import { ActorModelScale, rootDelta } from "./root_motion";
 import { T } from "./tables";
 import { authoredFrameHeld } from "../core/play_cursor";
@@ -65,35 +64,31 @@ export interface PlayerBody {
   drawn: number;
 }
 
-/** `0x004EC8C4`: with two players, the path frame each body starts falling at. */
-const TWO_PLAYER_FALL_FRAMES = [0x50, 0x3c];
-/** ...and with one: the frame after this one. */
+/** With one player the body falls from the path frame after this one. */
 const ONE_PLAYER_FALL_AFTER = 0x3b;
-
-/**
- * `0x00579EA8`, `{x, _, z}` in twelve-byte rows, indexed by
- * `player - 2 + g_game_over_players * 2`: where each body stands, one player
- * at the origin and two either side of it. `[proved]`
- */
-const GAME_OVER_BODY_OFFSETS: readonly (readonly [number, number])[] = [
-  [0, 0], [0, 0], [-5, -1.9], [4.2, 0.7],
-];
 
 /**
  * `PlayerBodiesCreate` — `FUN_00416450`. One body per player, on the start
  * motion `0x004EC8A4` names, at the allocation's zeroed pose.
  *
- * The type is `0x00579F50[p]` in both modes -- see `PLAYER_BODY_CHAR_TYPES`
- * for why Original Mode's character byte never changes it. The hit slot
+ * The type is `g_player_body_char_types[p]` (`0x00579F50`, `T.gameOver`) in
+ * both modes: Original Mode reads a character byte at `0x009A2242 + p*0x14`
+ * instead unless it equals `p`, and that byte's only writer,
+ * `ResetOriginalModeLoadout` (`FUN_0048A0D0`), stores `p`. `[proved]` The hit slot
  * (`obj+0x3C = 0xE + p`) and the per-part draw callback at `obj+0x12EC`
  * (`FUN_00416570`, which widens two bones in Original Mode's big-head cheat)
  * are left out: nothing shoots the body, and the cheat is not in the port.
  */
 export function PlayerBodiesCreate(): void {
+  const go = T.gameOver;
+  if (!go) {
+    G.g_player_bodies = [];
+    return;
+  }
   G.g_player_bodies = PLAYER_BODY_AT.map((at, p) => {
-    const ct = PLAYER_BODY_CHAR_TYPES[p];
+    const ct = go.body_char_types[p];
     return {
-      at, charType: ct, motion: PLAYER_BODY_START_MOTIONS[p], playTicks: 0,
+      at, charType: ct, motion: go.body_start_motions[p], playTicks: 0,
       pos: vec3(), yaw: 0, motionFlags: MOTION_FLAGS_INIT,
       scale: ActorModelScale(ct), lastFrame: -1, drawn: 0,
     };
@@ -123,7 +118,7 @@ export function PlayerBodySetMotion(b: PlayerBody, motion: number): void {
 export function GameOverPlaceBody(player: number): void {
   const b = G.g_player_bodies[player];
   if (!b) return;
-  const row = GAME_OVER_BODY_OFFSETS[player - 2 + G.g_game_over_players * 2]
+  const row = T.gameOver?.body_offsets[player - 2 + G.g_game_over_players * 2]
     ?? [0, 0];
   b.pos.x = row[0];
   b.pos.y = 0;
@@ -156,7 +151,7 @@ export function PlayerHookDrawBodyUntilMotionEnd(player: number): boolean {
   const len = m ? (m.play ?? Math.max(1, m.frames * 2 - 2)) : 0;
   if (b.playTicks === len - 1) return false;
   if (G.g_game_over_players === 2) {
-    if ((TWO_PLAYER_FALL_FRAMES[player] ?? 0) <= G.g_cam_path_frame) {
+    if ((T.gameOver?.fall_frames[player] ?? 0) <= G.g_cam_path_frame) {
       b.playTicks += 1;
     }
   } else if (ONE_PLAYER_FALL_AFTER < G.g_cam_path_frame) {

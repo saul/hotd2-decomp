@@ -100,6 +100,8 @@
 00567990	g_accuracy_bonus_table
 005679a8	g_pfnRunPhaseHandlers	Thirteen function pointers, indexed by g_nRunPhase. See RunPhaseDispatch (0x0045FEE0).
 005679f4	g_initial_damage_rank	s8[5], difficulty -> starting g_damage_rank: -3, -1, 1, 4, 8. Not clamped on the way in; UpdateDamageRank clamps to [0,15] on its first pass.
+005679fc	g_route_map_tiles	s16[4]: the first DrawScreenSprite id of each of the route map's four 640x480 screens (5 x 15 tiles of 128x32, id base + row*5 + col; scr_bunki.bin). [proved]
+00567a04	g_route_waypoints	{s16 x, s16 y}, indexed wp + (stage * 0x27 + block) * 6: the map points each block's walk visits, x -1 after the last. [proved]
 0056b0e4	g_hp_percent_by_rank	u8[16], g_damage_rank -> the percentage of a spawn's descriptor hit points it actually starts with: 60 60 70 80 90 100 100 100 105 110 115 120 125 125 130 130. CivilianInit applies it to every child it builds.
 005702a8	g_civilian_scripts	Class 0x10's script table: 67 dword pointers into 0x0056B9E4..0x005702A8, indexed by the spawn tail's byte +0x01. CivilianRunScript walks the stream it names. Ops 0x0E/0x0F/0x1E/0x1F point at further streams that live in the gaps between the table's own entries, so the whole set is 136 streams and 1967 commands. Decoded by ExeTables.civilian_scripts.
 005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
@@ -188,6 +190,7 @@
 0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
 00593170	g_zombie_thrown_weapon_states	The four states ZombieThrownWeaponUpdate dispatches on: 0 the shared no-op, 1 ZombieThrownWeaponStateStraight (the axe), 2 ZombieThrownWeaponStateArc, 3 ZombieThrownWeaponStateShotDown. Class 0x30's projectile is a separate family from class 0x31's at g_thrown_weapon_states (0x00592AE0), which has two states rather than four.
 00593358	g_class_handler_pairs	{class_id, handler}, 56 entries, negative id terminates
+0059351c	g_route_default	s8[6][16]: the route GameOverRouteMapArm copies over an empty history. [proved]
 00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
 005936bc	g_class41_updates	79 child entry functions
 005937f8	g_breakable_hull_points	96 x {s16 x, s16 y, s16 z}, scaled by 0.001, the prop's collision hull. BreakablePropGroundContact transforms all 96 to find which corner a toppling prop lands on.
@@ -288,7 +291,18 @@
 007dccac	g_continue_credit_seen	Four dwords the run's continue screen compares against CreditCount(0), CreditCount(1), 0, 0; a change restarts g_continue_timer. [proved]
 007dcccc	g_nRunPhaseDelay	Frames left before RunPhaseStepToNextScene picks the next scene. RunPhaseArmSceneAdvance seeds it with 1, so the advance lands on the very next frame.
 007dccd4	g_no_continue_frames	Byte: RunPhaseNoContinue zeroes it and RunPhaseNoContinueWait counts it; past 1, the game-over screen. [proved]
+007dccd8	g_route_scroll	s32: how far the route map has scrolled. [proved]
+007dcce0	g_route_mark_slot	The footprint model: 0x14C2, or 0x14D2 for player 2 alone. [proved]
 007dcce4	g_game_over_route_done	RouteMapDrawTask sets 1 when the route is drawn; GameOverRouteMapWait's trigger writes -1, which ends the screen. [proved]
+007dcce6	g_route_stage	s16: the stage whose history the walk is in. [proved]
+007dcce8	g_route_block	s16: the block whose waypoints it walks. [proved]
+007dccea	g_route_step	s16: this frame's step, 0 / 2 up / 4 x+ / 6 x- / 8 down. [proved]
+007dccec	g_route_waypoint	s16: the waypoint within the block. [proved]
+007dccee	g_route_entry	s16: the entry within the stage's history. [proved]
+007dccf4	g_route_cursor_y	s16: the cursor's map y. [proved]
+007dccf8	g_route_target	{s16 x, s16 y}: the waypoint the cursor walks to. [proved]
+007dccfc	g_route_screen_y	s16: the cursor's screen offset. [proved]
+007dccfe	g_route_cursor_x	s16: the cursor's map x. [proved]
 007dcd14	g_original_item_pickup_blocked	One byte with twelve writers across class 0x41 and 0x44 and exactly one reader: OriginalItemPropUpdate (FUN_004675A0) at 0x0046769E jumps past its whole pick-up arm -- the award, the g_original_items_taken tally, PlaySoundId(0x3616A9) and the 0x32-frame fade -- while it is non-zero. So a prop that sets it takes the original-mode collectibles out of play for as long as it holds it, and PropUpdateType75 is one of them: it clears the byte on the frame it is shot and sets it again 290 frames later when its ride ends. Not modelled in the port: nothing there transcribes the arm it gates.
 007dcd18	g_chain_segments	The chain segment table PlaceChainSegments fills and ChainSegmentUpdate re-registers into every frame, indexed [group * 0x14 + segment] over 20 segments a group. Segment 0's +0x1B0 is the latch that stops chain group 1 opening its route twice.
 007dcdb8	g_fragment_subkind1_intact	Twelve bytes, one per sub-kind-1 object: 1 until that object is broken outside Training. PlaceFragmentProps reads it to pick 0x17C6 (intact) or 0x17C7, PropUpdateType40 refuses a hit on a cleared one, and ResetFragmentSubkind1Intact sets all twelve back to 1 once a game.
@@ -377,8 +391,9 @@
 009a37e0	g_motion_slots	motion id -> {u32 base; u32 state}, state 2 = resident
 009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
 009a5900	g_screen_furniture_flags	A bit set the screen-furniture classes own. ChapterCardInstall ORs 0x20 in on its first frame and clears it as it raises g_script_flags[0xF8]; ResultCardInstall does the same with 0x10 against g_script_flags[0xFE]. Read by the HUD/draw side, which the port does not have.
-009a5920	g_route_history
+009a5920	g_route_history	s8[10][16]: the blocks this run entered, per scene, -1 after the last -- ResetSceneCombatState appends g_evt_block_index at g_route_count; ResetGameOnStart fills all 0x28 dwords with -1. GameOverRouteMapArm replaces it with the default route 0x0059351C when scene 0's first entry is -1 or its second is 0; RouteMapDrawTask walks it (flat, stage*16 + i). [proved]
 009a59e0	g_scene_light_block1
+009a5c30	g_route_count	s8: the next g_route_history entry for this scene. ResetSceneCombatState (the checkpoint opcode 0x4D) stores the block at it and -1 after it, then counts it up; ResetSceneOnEnter zeroes it. [proved]
 009a5c34	g_carrier_object	the current rideable object. ZombieStateRideCarrier (class 0x30 state 29) adds this object's +0x40/44/48 to its own recorded spawn position every frame and leaves when the carrier raises its obj+0x34 bit 0x10000000; ZombieStateDelayedStrikeInPlace (state 32) gives up to state 10 0x14 frames after the same object raises bit 0x40000000. Distinct from g_civilian_carrier (0x009A2C88), which is class 0x10's own. THREE consumers, not two, and the third is the one that moves an actor in any state: ZombieAttachToCarrier (FUN_0045E770) seats a class-0x30 actor rigidly on this object -- position through the carrier's translate and yaw, plus the actor's own stashed local offset -- and EnemyZombieUpdate calls it every frame, before the state dispatch, for any actor whose obj+0x136C bit 0x10000000 is up (raised by EnemyZombieInitByCharType from descriptor flag bit 3). Written by ScriptedSceneryDispatch33 (00433014) in class 0x33's Init as well as by ScriptedCarrierUpdate33 (004331E1) every frame, so it is live on the same frame the carrier is made -- which is how stage 5 block 2's op-37 car is already published when op 38 spawns its four riders.
 009a5c4c	g_frame_bone_rotations	frame + 0x0C: the s16 triple array SkeletonWalkNode indexes
 009a5c50	g_blink_frame_counter	One of the three free-running counters FUN_0040E730 steps once a game tick, beside g_frame_counter (0x009A32A0) and g_scene_tick_counter (0x009A2BAC). The name is now too narrow and is kept only because renaming it wants a sweep: class 0x31 states 5, 27 and 34 read its low bit for a blink parity, and it is ALSO the cel phase of two per-bone draw hooks -- ZombieDrawBonePart (FUN_004534A0) reads it as g_blink_frame_counter + obj+0x3C*10 and indexes runs of 5, 18, 20, 25, 30, 50 and 120 models with it, and ThrowerDrawBonePart reads it %%0x32 and %%0x78 for the same purpose. What distinguishes it from the other two is its reset scope: LoadSceneAndReset (0x00460030) and ResetSceneCombatState (0x0045EEC0) both zero this one, where g_scene_tick_counter is zeroed only by ResetSceneOnEnter and g_frame_counter only by the new-game reset.

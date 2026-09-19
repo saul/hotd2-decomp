@@ -61,8 +61,8 @@ import { AppState, G, RestoreGameGlobals } from "./globals";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { GameOverPlaceBody, PlayerBodySetMotion,
          PlayerHookDrawBodyUntilMotionEnd } from "./player_body";
-import { PLAYER_GAME_OVER_MOTIONS } from "./player_body_data";
 import { NULL_HOST, type GameHost } from "./host";
+import { T } from "./tables";
 import { Rng } from "../core/rng";
 import { clonePlain } from "../core/snapshot";
 
@@ -464,7 +464,7 @@ export function PlayerStateArmGameOver(player: number): void {
   G.g_player_camera_hook[player] = PlayerCameraHook.DrawBodyUntilMotionEnd;
   const body = G.g_player_bodies[player];
   if (G.g_app_state === AppState.GameOver && body) {
-    PlayerBodySetMotion(body, PLAYER_GAME_OVER_MOTIONS[player]);
+    PlayerBodySetMotion(body, T.gameOver?.fall_motions[player] ?? body.motion);
   }
   GameOverPlaceBody(player);
   G.g_player_gameover_timer[player] = GAME_OVER_FRAMES;
@@ -764,6 +764,8 @@ export function PlayerBlockBoot(): void {
   G.g_game_over_fly_frame = 0;
   G.g_stage_unloaded = 0;
   G.g_player_bodies = [];
+  G.g_route_figures = [];
+  G.g_route_marks = [];
   G.g_continue_credit_seen = [0, 0, 0, 0];
   G.g_no_continue_frames = 0;
   G.g_start_lives = START_LIVES_BY_OPTION[OPTION_LIVES];

@@ -2722,12 +2722,10 @@ player tasks still walking; then `GameOverLogoTask` (`FUN_00460CD0`), 0xB4
 frames of screen sprites -- the GAME OVER plate `0x43A` fading in, five
 flashes from frame 0x78, and the plate again at 0x91 squeezed flat and
 stretched tall as it fades (`ScreenSpriteAnimTick` scale mode 1: `sx -=
-1/frames`, `sy += 1` a frame); then the route map, which waits for the
-trigger or START; then `CreditsClear` and the next app state, 3. The trigger
-or START cuts the fly-over short below frame 0xA5 and the logo below 0xAF;
-Training and the boss's own run return to play instead. The page draws the
-records `ui/panels/GameOver.tsx` reads from the projection, as text standing in
-for the pictures.
+1/frames`, `sy += 1` a frame); then the route map; then `CreditsClear` and the
+next app state, 3. The trigger or START cuts the fly-over short below frame
+0xA5 and the logo below 0xAF, and ends the route map at once; Training and the
+boss's own run return to play instead.
 
 **The fly-over is ported, and it is not the stage.** Phase 0 releases the
 stage (`CamSlotsReset` and the pol-slot reset `LoadSceneAndReset` also runs)
@@ -2740,16 +2738,30 @@ but the bodies, with no fog on black (`LightBlockInit`'s fog colour 0).
 `0x00579F50` in both modes, because Original Mode's character byte is only ever
 the player index -- placed by `GameOverPlaceBody` (`FUN_00415A80`) at the
 origin for one player, and drawn by `PlayerHookDrawBodyUntilMotionEnd`: motion
-`0x338`, stepping from path frame `0x3C`, gone after its last frame. **Which
-fall you see depends on the route**: through the run's continue screen (a credit
-left) the player is still at 4 and phase 0 arms them onto `0x338`; with no
-credit the player's own countdown already put them at 6 in play, and the fresh
-body keeps the motion it was made on, `0x32C`. The bundle is format 11 for it:
-every stage's `cam.json` carries `cp_gmovr`, and its `characters` two
-synthetic `player_body` rows with both clips. `DrawSkinnedModelAndShadow`
-draws no shadow, whatever its name says. `[diverges]`, in `game_over.ts`: the
-sprites' texbank `0x155` is not exported yet, and the route map and the two
-player figures are not ported, so phase 5 draws nothing and waits.
+`0x338`, stepping from path frame `0x3C`, gone after its last frame. Every
+player at 6 falls on `0x338`: the fly-over list's `PlayerTasksCreate` re-arms
+a player whose own countdown put them at 6 in play. The bundle is format 11 for
+it: every stage's `cam.json` carries `cp_gmovr`, and its `characters` two
+synthetic `player_body` rows. `DrawSkinnedModelAndShadow` draws no shadow,
+whatever its name says.
+
+**The logo and the route map are the game's own pictures now** (format 12).
+Every screen sprite goes through `DrawScreenSprite`'s record in
+`G.g_screen_sprite_draws`; `ScreenSpriteDraw` (`FUN_00499F00`, the logo's)
+is the same record with an alpha and flags 10, which is the **anchor** nibble --
+the sprite's centre -- not a draw layer. The logo's `0x43A..0x43D` come from
+`scr_gameover.bin`. The route map (`game/route_map.ts`) is `GameOverRouteMapArm`,
+`RouteMapDrawTask` and two figure tasks: a figure -- James, or Gary for
+player 2 alone, with Gary beside James for two -- walks the blocks this run
+entered (`g_route_history`, which the `checkpoint` opcode now records; an empty
+one gets the exe's default route) over the 300 `scr_bunki.bin` tiles, 4 map
+pixels a frame, leaving footprints, scrolling the map; when the history runs
+out it blends into its end pose, holds 0x78 frames and the screen hands on by
+itself. The figures, their ground discs and the footprints are 3D in camera
+space; the tiles are drawn at depth 120 behind them, so a screen sprite deeper
+than 1.0 is drawn in the 3D (`render/screen_sprites_deep.ts`) rather than on
+the HUD canvas, which sits over the view. The text stand-ins are gone;
+`ui/panels/GameOver.tsx` is the two buttons and the phase's name.
 
 **Two buttons on it, the page's own** (`[port-only]`, not a gameplay
 divergence): **Restart this stage** and **Start from stage 1**. The engine

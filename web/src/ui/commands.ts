@@ -78,6 +78,14 @@ export type UiCommand =
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
   | { kind: "requestSkip" }
+  /**
+   * `[port-only]` -- the game-over screen's buttons: a new game at this
+   * stage's entry, or at stage 1, through the same boot, title and START a
+   * page load runs. Not gameplay: the engine's screen hands on to the next
+   * screen instead, which the port does not have.
+   */
+  | { kind: "restartStage" }
+  | { kind: "restartFromStageOne" }
   | { kind: "takeBranch"; target: number }
   /** Hovering a route's button previews its opening shot. */
   | { kind: "previewBranch"; slot: number; frame: number }

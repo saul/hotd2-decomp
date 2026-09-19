@@ -10,8 +10,10 @@
 import { SnapshotRing } from "../ring";
 import type { Player } from "../main";
 import type {
-  BranchProjection, SkipProjection, SoundProjection, TransportProjection,
+  BranchProjection, GameOverProjection, SkipProjection, SoundProjection,
+  TransportProjection,
 } from "../../ui/projection";
+import { AppState, G } from "../../game/globals";
 
 /**
  * The skip bar, shown under the game's own condition.
@@ -155,5 +157,31 @@ export function soundProjection(p: Player): SoundProjection {
       : bs.blocked && on
         ? "click 🔇 to allow audio"
         : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`,
+  };
+}
+
+/** What each of `GameOverRunPhase`'s phases is showing. */
+const GAME_OVER_LABELS = [
+  "game over", "game over", "game over", "GAME OVER", "your route",
+  "your route -- click to go on",
+];
+
+/**
+ * The game-over screen, read off `G`. Null while app state 6 runs; on the
+ * game-over screen (7) the phase and the logo's sprite records; once it has
+ * handed on to the next screen (3, which the port does not have) phase -1,
+ * so the buttons stay up.
+ */
+export function gameOverProjection(): GameOverProjection | null {
+  if (G.g_app_state === AppState.InPlay) return null;
+  const over = G.g_app_state === AppState.GameOver;
+  return {
+    phase: over ? G.g_nRunPhase : -1,
+    label: over ? (GAME_OVER_LABELS[G.g_nRunPhase] ?? "game over")
+                : "game over",
+    sprites: over ? G.g_screen_sprite_anims.map((a) => ({
+      id: a.id, x: a.x, y: a.y, sx: a.sx, sy: a.sy,
+      alpha: Math.max(0, Math.min(1, a.alpha)),
+    })) : [],
   };
 }

@@ -58,6 +58,7 @@ import { BundleButton, Modes, StagePicker, Status, ViewSettings }
   from "./panels/Topbar";
 import { Transport } from "./panels/Transport";
 import { SkipBar } from "./panels/SkipBar";
+import { GameOver } from "./panels/GameOver";
 import { BranchBar } from "./panels/BranchBar";
 import { LoadingOverlay, PausedOverlay, Viewport } from "./panels/Viewport";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -208,6 +209,7 @@ function Page(
                 skip bar sits above it on the rare frame both are live. */}
             <SkipBar />
             <BranchBar />
+            <GameOver />
           </ErrorBoundary>
         </Viewport>
 

@@ -25,6 +25,7 @@ import type {
 } from "../../ui/projection";
 import type { DebugGroupName } from "../../ui/projection";
 import { stabilise } from "./stable";
+import { gameOverProjection } from "./chrome";
 import { actorsProjection, waitProjection } from "./sidebar";
 import { globalsProjection } from "./globals";
 import { rigsProjection, type RigSource } from "./rigs";
@@ -153,6 +154,7 @@ export function buildProjection(v: PlayerView, ctx: RenderContext,
     groups: v.groups,
     skip: v.skip,
     branch: v.branch,
+    gameOver: gameOverProjection(),
     // The last ungated expensive slice. `snapshot()` walks the whole disposal
     // tree and allocates a plain object per scope, once a frame, whether or
     // not anything is showing it -- and the tree it walks grows with every

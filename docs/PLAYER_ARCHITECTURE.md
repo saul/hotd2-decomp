@@ -654,8 +654,10 @@ web/src/
     camera/       curve.ts (the `cam/` Hermite), path.ts, track.ts, slots.ts
     player_shell.ts  the per-player state machine: start, in play, continue,
                   game over, and the stage step's park at 2
-    run_phase.ts  the run phases a stage is played in (2, 3, 4, 11, 12) and
-                  `RunSceneTasksAndTimers`; app_state.ts the screen request
+    run_phase.ts  the run phases a stage is played in (0, 2, 3, 4, 11, 12),
+                  `RunSceneTasksAndTimers` and the damage rank; app_state.ts
+                  the screen request
+    game_over.ts  app state 7: `GameOverRunPhase` and its screen sprites
     credits.ts    what a start and a continue spend
     combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts
     effects/                                 coli.ts, motion.ts, tables.ts, ...
@@ -694,7 +696,8 @@ web/src/
     commands.ts   what the UI is allowed to ask for
     persist.ts    usePersisted — folds and widths, and nothing else
     panels/       one file per panel, each subscribing to what it reads;
-                  Viewport.tsx renders the canvas, hud nodes and crosshair
+                  Viewport.tsx renders the canvas, hud nodes and crosshair;
+                  GameOver.tsx the game-over sprites and its two buttons
   hud/          hud.ts — the shutter and the caption, drawn. Holds no state
                 and imports nothing; React renders its nodes and hands them
                 over through `UiHost`

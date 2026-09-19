@@ -59,11 +59,13 @@
  *
  * [diverges] Before the *first* shot that selects a route, the pose the
  * engine holds is the spawn descriptor's, written when the spawn opcode runs;
- * the port draws the exporter's baked root pose instead, and it draws from
- * stage load rather than from the frame that opcode ran, because nothing in
- * the bundle links a rig to its descriptor. For the rigs the six stages carry
- * the two agree on *where* — each is spawned at a zero position with a zero
- * orientation, which is the baked pose — so what diverges is the timing.
+ * the port draws the exporter's baked root pose instead. For the rigs the six
+ * stages carry the two agree on *where* — each is spawned at a zero position
+ * with a zero orientation, which is the baked pose. **The timing no longer
+ * diverges for class 0x26's five subtypes**: the bundle's `spawn_ats` names
+ * the spawns that install each routine, and such a rig is drawn only once the
+ * walker has run one of them. The other rigs — the ones no spawn links to —
+ * still draw from stage load rather than from the frame their opcode ran.
  *
  * **That paragraph described the intent and not the code**, and the gap was a
  * visible object. `update` placed the fallback instance from its path at
@@ -167,6 +169,17 @@ interface Actor {
   instances: Instance[];
   /** The instance currently drawn, if any. */
   showing: Instance | null;
+  /**
+   * The script addresses of the spawns whose class handler installs this
+   * routine, or `null` when the bundle links the rig to none.
+   *
+   * `Class26InstallSubtypeUpdate` (`FUN_0048E290`) is the whole of how a
+   * class-0x26 object gets its draw routine: it runs once, on the spawn's
+   * first frame, and stores the subtype's routine at `obj+0x00`. Before that
+   * spawn's opcode has run there is no object and nothing draws. See
+   * {@link RigLayer.update}.
+   */
+  spawnAts: ReadonlySet<number> | null;
 }
 
 /**
@@ -319,8 +332,13 @@ export class RigLayer implements System {
     const byRig = new Map<string, Actor>();
     for (const inst of this.instances) {
       let a = byRig.get(inst.rig);
-      if (!a) byRig.set(inst.rig, (a = { rig: inst.rig, instances: [],
-                                        showing: null }));
+      if (!a) {
+        const ats = json.rigs.find((r) => r.name === inst.rig)?.spawn_ats;
+        byRig.set(inst.rig, (a = {
+          rig: inst.rig, instances: [], showing: null,
+          spawnAts: ats ? new Set(ats) : null,
+        }));
+      }
       a.instances.push(inst);
     }
     this.actors = [...byRig.values()];
@@ -352,6 +370,26 @@ export class RigLayer implements System {
     const camSlot = cam ? cam.slot : null;
     const camFrame = cam ? cam.frame : 0;
     for (const actor of this.actors) {
+      // **No spawn, no object.** A rig whose routine is installed by a spawn
+      // exists from the frame the walker runs that spawn's opcode, and not
+      // from stage load: stage 4's `obj_48f050` (`FUN_0048F050`, class 0x26
+      // subtype 3) is spawned in block 12, and drawing it from the start put
+      // its model at the origin -- inside the desk of block 0's opening shot.
+      // Hidden, and forgotten, so a seek back past the spawn starts it over.
+      if (actor.spawnAts
+          && !ctx.walker?.spawns.some((sp) => actor.spawnAts!.has(sp.at))) {
+        for (const inst of actor.instances) inst.root.visible = false;
+        if (actor.showing) {
+          for (const inst of actor.instances) {
+            inst.posed = false;
+            inst.frozen = false;
+            inst.root.position.copy(inst.bakedPos);
+            inst.root.quaternion.copy(inst.bakedQuat);
+          }
+          actor.showing = null;
+        }
+        continue;
+      }
       // The route the camera currently selects, if any.
       const selected = actor.instances.find(
         (i) => i.gate.length === 0 ||

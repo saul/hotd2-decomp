@@ -675,6 +675,9 @@ web/src/
                   skeleton, drawn and offered to the shot test as the single
                   sphere `ShotTestSphere` measures. Its own layer because the
                   character pool cannot hold one: it has no character type
+    prop_parts.ts the class-0x41 routines that draw several models at
+                  several poses (types 38, 39, 40, 44) as lists of parts;
+                  breakables.ts clones and poses them
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders

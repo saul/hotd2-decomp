@@ -235,6 +235,11 @@ export interface Rig {
    * rig with a class can be placed at every spawn descriptor of that class.
    */
   spawnClass?: number | null;
+  /**
+   * `[spawn class, obj+0x11C]` of the spawns whose class handler installs
+   * this routine -- see `installed_by` in `tools/hod2lib/rigs.py`.
+   */
+  installedBy?: [number, number] | null;
   parts?: RigPart[];
   note?: string;
 }
@@ -320,6 +325,11 @@ export interface RigInstance {
   fixed: RigFixed[];
   world: boolean;
   placements: Record<string, unknown>[];
+  /**
+   * The script addresses of the spawns that install this routine, or `null`
+   * for a rig nothing links to a spawn. See {@link Rig.installedBy}.
+   */
+  spawnAts?: number[] | null;
   /** Only prop rigs carry these; see `props.rigEntries`. */
   anchors?: Record<string, unknown>;
   biases?: Record<string, unknown>;
@@ -509,8 +519,18 @@ export async function resolveForStage(
       }
       if (models.length) parts.push([part, models]);
     }
+    // The spawns whose handler installs this routine: `obj+0x11C` is the
+    // descriptor's `+0x22`, which `evt.Spawn.hp` already is.
+    let spawnAts: number[] | null = null;
+    if (rig.installedBy) {
+      const [cls, sub] = rig.installedBy;
+      spawnAts = (spawnRecords ?? [])
+        .filter((r) => r.cls === cls && ((r.hp << 16) >> 16) === sub)
+        .map((r) => r.offset);
+    }
     if (parts.length) {
       out.push({
+        spawnAts,
         rig, routes, parts, blocked: rig.placementBlocked ?? "", fixed, world,
         placements: (rig.worldSpace || rig.routeParam || rig.variantParam)
           ? [] : placed,

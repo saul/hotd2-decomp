@@ -907,6 +907,62 @@ console.log("\nrigs: whose nodes these are, and what happens off the table");
         `${boatA.position.x}, ${boatA.position.y}, ${boatA.position.z}`);
 }
 
+console.log("\nrigs: a rig a spawn installs is not drawn before that spawn");
+
+{
+  // Stage 4's opening shot (new bug 12): `obj_48f050` is `FUN_0048F050`,
+  // installed by `Class26InstallSubtypeUpdate` (`FUN_0048E290`) for class
+  // 0x26 subtype 3, and the one spawn that installs it is block 12's, script
+  // address 27660, at the origin. Drawn from stage load it stood at (0, 0, 0)
+  // -- inside the desk of block 0's opening shot.
+  const RIGS = {
+    rigs: [{
+      name: "obj_48f050", routine: "FUN_0048F050", note: "",
+      spawn_ats: [27660],
+      routes: [
+        { slot: 371, bias: [0, 0, 0] as [number, number, number],
+          cam_paths: [176], file: null, index: null, duration: null,
+          length: 160, hold_frame: null, stop_frame: null, note: "" },
+      ],
+    }],
+    blocked: [], note: "",
+  };
+  const root = new Group();
+  const lift = new Group();
+  lift.userData = { hod2_kind: "rig", hod2_rig: "obj_48f050",
+                    hod2_path_slot: 371 };
+  root.add(lift);
+  const rigs = new RigLayer();
+  const key = (v: number) => [[0, v, 0, 0], [200, v, 0, 0]];
+  const paths = new CamPaths({
+    fps: 60, paths: {},
+    object_paths: { "371": { channels: { pos_x: key(5), pos_y: key(6),
+                                         pos_z: key(7) },
+                             file: "op_st4", index: 0, start: 0,
+                             duration: 200 } },
+  } as never);
+  rigs.build(root, RIGS as never, paths);
+  const ctx = (spawns: number[], slot = 163) => ({
+    walker: { cam: { slot, frame: 31 }, spawns: spawns.map((at) => ({ at })) },
+  }) as unknown as Parameters<typeof rigs.update>[0];
+
+  rigs.update(ctx([]));
+  check("before its spawn has run the rig is not drawn", !lift.visible);
+  rigs.update(ctx([5116]));
+  check("...nor for somebody else's spawn", !lift.visible);
+  rigs.update(ctx([5116, 27660]));
+  check("once the walker has run it, it is", lift.visible);
+  rigs.update(ctx([5116, 27660], 176));
+  check("...and it rides its route like any rig",
+        lift.visible && lift.position.x === 5,
+        `${lift.position.x}`);
+  rigs.update(ctx([5116]));
+  check("a seek back past the spawn hides it again", !lift.visible);
+  rigs.update(ctx([5116, 27660], 163));
+  check("...and forgets the pose, so it comes back at its spawn pose",
+        lift.visible && lift.position.x === 0, `${lift.position.x}`);
+}
+
 console.log("\nthe object-path seam carries six values");
 
 {

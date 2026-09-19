@@ -18,7 +18,7 @@ import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, OriginalItemPropUpdate, StoryModeSwitchUpdate,
   PropUpdateType14,
-  PropUpdateType19, PropUpdateType25, PropUpdateType40, PropUpdateType56,
+  PropUpdateType19, PropUpdateType25, PropUpdateType56,
   PropUpdateType69, PropUpdateType73, PropUpdateType76,
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
@@ -37,6 +37,10 @@ import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
 import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
   from "./prop_state";
 import { LiftUpdate } from "./lift";
+import { PropUpdateType38 } from "./type38";
+import { PropUpdateType39 } from "./type39";
+import { PropUpdateType40 } from "./type40";
+import { PropUpdateType44 } from "./type44";
 
 /**
  * Every live container, once a frame.
@@ -84,6 +88,12 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       // Its own lifetime, its own hit arms, its own shot-test tail. Nothing
       // the generic arm supplies belongs to it.
       case PropFamily.Type43: PropUpdateType43(p, rng, events); break;
+      // Each of these four has its own lifetime head, hit arm and shot-test
+      // tail, so none of them can ride the generic arm either.
+      case PropFamily.Type38: PropUpdateType38(p, rng, events); break;
+      case PropFamily.Type39: PropUpdateType39(p, rng, events); break;
+      case PropFamily.Type40: PropUpdateType40(p, rng, events); break;
+      case PropFamily.Type44: PropUpdateType44(p, rng, events); break;
       default: BreakablePropUpdate(p, rng, events); break;
     }
   }
@@ -97,8 +107,8 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
  *
  * This table **is** the engine's indirect call: `ActorAlloc` was handed
  * `g_class41_updates[obj->+0x130C]` and the object calls through it every
- * frame, so switching on the type here is that call written out. Nine of the
- * ten entries are branch triggers — see `class41/branch.ts` — because a route
+ * frame, so switching on the type here is that call written out. Eight of the
+ * eleven entries are branch triggers — see `class41/branch.ts` — because a route
  * the stage takes is worth more than a swing.
  *
  * A type absent here is placed, drawn and otherwise inert, which is the
@@ -111,7 +121,6 @@ const GENERIC_UPDATE: Partial<Record<number, (p: BreakableProp) => void>> = {
   31: PropDrawOnlyType31,
   19: PropUpdateType19,
   25: PropUpdateType25,
-  40: PropUpdateType40,
   56: PropUpdateType56,
   69: PropUpdateType69,
   70: OriginalItemPropUpdate,

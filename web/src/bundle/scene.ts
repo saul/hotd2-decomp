@@ -132,6 +132,13 @@ export interface RigJson {
   routes: RigRoute[];
   world_space: boolean;
   spawn_class: number | null;
+  /**
+   * The script addresses of the spawns whose class handler installs this
+   * routine, or `null` when nothing links the rig to a spawn. A rig with a
+   * list is drawn only once one of those spawns has run: the object does not
+   * exist before its spawn opcode does. Class 0x26's five subtypes carry one.
+   */
+  spawn_ats: number[] | null;
   /** Rules the transcription records rather than bakes. */
   animated_parts: { part: string; rule: string; condition: string }[];
 }
@@ -198,10 +205,16 @@ export interface BreakablePlacement {
    * write `g_script_branch_var`, and without them in the bundle the port
    * cannot take five of the game's sixteen branches. See
    * `game/class41/branch.ts`.
+   *
+   * `table38`, `table39` and `table44` are class 0x41 constructors 38, 39 and
+   * 44 (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`), which
+   * build their objects from tables in the image rather than from the spawn:
+   * the placement carries only the step lifetime, and for `table44` the
+   * effect and motion its two breakable rows draw. See `game/class41/`.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door";
+    | "rising_door" | "table38" | "table39" | "table44";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */

@@ -17859,3 +17859,52 @@ scene 2 block 1 outside Original Mode; and no node in the stage geometry is
 named for water or a gate. What is left unexamined in stage 3 is class 0x26,
 eight spawns of the camera's own boat, and class 0x45, thirty-two spawns that
 have never been read.
+
+## Stage 1's church, the chair under the humanoid's arm, and a rig in stage 4's desk (2026-09-18)
+
+New bugs 8, 9 and 12. Two causes, and neither was where the triage pointed.
+
+**The church.** Block 1 step 2 runs four class-0x41 placers at the origin —
+types 38, 39, 40 (sub-kind 0) and 44 — and the port built nothing from three of
+them and put the fourth's eight objects at (0, 0, 0) with slot 0. All four
+constructors build out of tables in the image (`g_prop_table38/39/44`,
+`g_fragment_*`), so the spawn contributes only a lifetime. Read, named and
+ported whole: `PlaceTable38Props`, `PropUpdateType38`, `PlaceTable39Stacks`,
+`PropUpdateType39`, `PlaceTable44Props`, `PropUpdateType44`, the rest of
+`PlaceFragmentProps` and `PropUpdateType40`, and
+`ResetFragmentSubkind1Intact`. The decompiler lost the tails of five of those
+at a `MatrixStackPop` (L35) and every `__ftol` multiplier (L1); all of it came
+from `disassemble_bytes`. `tools/verify_prop_tables.py` now compares every
+table word the port carries as a literal against the EXE.
+
+**Type 44 is the chair of bug 9**, and that was settled by the render, not by
+position. The first attempt to check it projected the chair's *origin* into
+the reported shot and found it off the left edge, which read as "not this
+chair"; the second shot of the fixed build still showed no chair. Both were
+wrong for ordinary reasons: the chair is a model several units across lying on
+its side, and its body reaches into the frame where its origin does not; and
+the second shot was taken paused, and a placer needs a game frame to build
+anything (L44's `none built yet`). One frame of play shows the humanoid's arm
+over the seat.
+
+**Stage 4's desk.** The triage named class 0x41 type 32, the lift. Stage 4
+places no type 32. The object in the desk is `obj_48f050`, the class-0x26
+subtype-3 rig, and removing it from the draw made it disappear from the shot.
+`Class26InstallSubtypeUpdate` installs that routine on the spawn's first frame
+and its only spawn is block 12's, so the engine has no such object in block 0;
+the renderer had been drawing every rig from stage load. Rigs now carry the
+script addresses of the spawns that install them (`installed_by` in
+`rigs.py`, `spawn_ats` in the bundle) and are drawn only once the walker has
+run one. [open] what the model is — the user calls it a lift; slot `0x185B`
+is not identified here.
+
+**What this made false.** `EffectInterp.HalfRateSlerp`'s note said the slerp
+arm of `EffectPoseNode` was unreachable because no placed effect was mode 2.
+Effect 0x13 is mode 2, and motion 468 reaches the arm on 12 node-frames; the
+port blends those per angle. Declared at the site and put to the user rather
+than ported: `FUN_00412750` is a swing-twist matrix interpolation over five
+matrix routines. And `class41/triggers.ts`'s declared divergence — fragment
+rows placed at the placer's point — is gone with the port.
+
+Not done: `SpawnPropHitEffectScaled` (`FUN_004666B0`), still `[open]` for all
+three table types as it already was for type 43.

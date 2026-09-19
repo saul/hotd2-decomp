@@ -40,6 +40,7 @@ export const RIGS: readonly Rig[] = [
         note: "parked: CamEvalObjectPath6(0xFE, 350.0), a literal, not the camera frame",
       },
     ],
+    installedBy: [38, 1],
     parts: [
       {
         name: "body",
@@ -219,6 +220,7 @@ export const RIGS: readonly Rig[] = [
         bias: [0.0, 2.0, 0.0],
       },
     ],
+    installedBy: [38, 2],
     parts: [
       {
         name: "part_1a37",
@@ -248,6 +250,7 @@ export const RIGS: readonly Rig[] = [
         camPaths: [177],
       },
     ],
+    installedBy: [38, 3],
     parts: [
       {
         name: "part_185b",
@@ -286,6 +289,7 @@ export const RIGS: readonly Rig[] = [
         note: "hardcoded pose, no path eval",
       },
     ],
+    installedBy: [38, 4],
     parts: [
       {
         name: "part_8c7_145c",
@@ -364,6 +368,7 @@ export const RIGS: readonly Rig[] = [
         note: "hardcoded pose",
       },
     ],
+    installedBy: [38, 5],
     parts: [
       {
         name: "part_1913",

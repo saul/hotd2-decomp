@@ -97,7 +97,7 @@ never fire.
 |---|---|---|---|
 | `St1VehicleUpdate` `0x0048E600` | `st1_vehicle` | `0xFD`, `0xFE` (×2) | stage-1 opening vehicle, 11 parts. **Rides `0xFD`/`0xFE` only.** On `cp_st1` 2 it parks: `CamEvalObjectPath6(0xFE, 350.0)` with a *literal* time. `0xFF` is read only for `rot_y`, the occupants' yaw — it is not a route. |
 | `0x0048EAD0` | `obj_48ead0` | `0x156`–`0x15D`, `0x199` | [likely] a speedboat — renders as one, with an outboard motor. `+2.0` Y pose bias. |
-| `0x0048F050` | `obj_48f050` | `0x173`, `0x174` | one part |
+| `0x0048F050` | `obj_48f050` | `0x173`, `0x174` | one part. Class 0x26 subtype 3; its one spawn is stage 4 block 12's (evt 27660), so it must not draw before block 12 — see below |
 | `0x0048F190` | `obj_48f190` | `0x17A`–`0x17D` | [likely] a convertible car — renders as one. 8 parts, nesting depth 2. |
 | `0x0048F560` | `obj_48f560` | `0x182` | two 2-digit readouts on opposite faces, counting 36→50 |
 | `0x00484FF0` | `obj_484ff0_props` | — | world space; **not placed**, see below |
@@ -213,3 +213,19 @@ unless the source column says otherwise.
 * On `0x0048F560` the decompiler renders a jump table as an indirect call and
   leaves `0x48F796`–`0x48F80F` undisassembled. Those tables were recovered by
   hand from `0x0048F918`.
+
+## Which spawn installs a rig (2026-09-18)
+
+**[proved]** `Class26InstallSubtypeUpdate` (`FUN_0048E290`) switches on the s16
+at `obj+0x11C` (the descriptor's `+0x22`) and stores the subtype's routine at
+`obj+0x00`: 1 → `St1VehicleUpdate`, 2 → `Class26Subtype2Update` (`obj_48ead0`),
+3 → `FUN_0048F050` (`obj_48f050`), 4 → `FUN_0048F190` (after one call to
+`FUN_00475A50`), 5 → `FUN_0048F560`, 6/7 → `FUN_0048F930`. So each of those
+rigs **exists from the frame its spawn opcode runs**, and not before.
+`tools/hod2lib/rigs.py` records this as `installed_by = (0x26, n)`; the bundle
+resolves it to `rigs[].spawn_ats`, the script addresses of the matching
+spawns, and `render/rigs.ts` draws such a rig only once the walker has run one
+of them. Stage 4's `obj_48f050` had been drawn from stage load at its baked
+origin pose — inside the desk of block 0's opening shot (new bug 12) — while
+its one spawn is in block 12.
+

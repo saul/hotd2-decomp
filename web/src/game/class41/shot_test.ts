@@ -126,31 +126,6 @@ export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
 };
 
 /**
- * `PropUpdateType40`'s y offset, which its own routine picks from the **draw
- * slot** rather than from the sub-kind, as a chain of overrides:
- *
- * ```c
- * y = 0.0;
- * if (obj+0x1BA == 0)                              y = 2.5;
- * if (obj+0x1E0 == 0x17C6)                         y = 8.0;
- * if (obj+0x1E0 == 0x1786 || obj+0x1E0 == 0x16B1)  y = 5.0;
- * ```
- *
- * Resolved through `PlaceFragmentProps`' slot table this gives the per-sub-kind
- * values below. **Sub-kind 9 — the route-branch pair — is 8.0**, which is a
- * long way up against a radius of 5.5 and is exactly the sort of number a port
- * gets wrong by assuming zero.
- */
-export const FRAGMENT_SHOT_RISE: Partial<Record<number, number>> = {
-  0: 2.5,
-  2: 8.0, 3: 8.0, 4: 8.0, 9: 8.0, 10: 8.0, 15: 8.0,
-  5: 5.0, 7: 5.0, 8: 5.0,
-};
-
-/** `PlaceFragmentProps` writes `obj+0x124 = 0x40B00000` for every sub-kind. */
-export const FRAGMENT_RADIUS = 5.5;
-
-/**
  * The types whose registration the routine **gates**, and on what.
  *
  * A gate here is the difference between a prop you can shoot once and a prop
@@ -158,9 +133,10 @@ export const FRAGMENT_RADIUS = 5.5;
  * `obj+0x34 |= 0x44000000` and bit 26 removes it from the shot test
  * permanently, which is why its route can only be opened once.
  *
- * [port-only] as a *function*: four routines put their own test around their
+ * [port-only] as a *function*: three routines put their own test around their
  * own registration, and they are gathered here so a reader can see there are
- * four and not thirty.
+ * three and not thirty. (Type 40 was the fourth; it has its own routine now,
+ * `class41/type40.ts`, and its own tail.)
  */
 export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
   switch (p.kind) {
@@ -170,10 +146,6 @@ export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
     case 25: return (p.flags & PROP_SHOT_TEST_DONE) === 0;
     // The registration lives inside the state-1 arm; states 0 and 2 jump past.
     case 72: return p.state === BreakableState.Falling;
-    // `PropUpdateType40`: gated solely by `obj+0x1B9 == 0`, which the first
-    // hit sets and nothing ever clears. **One shot ends it for ever** — the
-    // forty-piece debris that follows runs unregistered.
-    case 40: return !p.branchLatched;
     default: return true;
   }
 }
@@ -309,12 +281,6 @@ export function GenericPropRegisterForShotTest(p: BreakableProp): void {
   const off = PROP_SHOT_OFFSET[p.kind];
   if (off?.world) {
     PropRegisterForShotTest(p, off.world[0], off.world[1], off.world[2]);
-    return;
-  }
-  // Type 40 picks its rise from the draw slot, which resolves per sub-kind.
-  if (p.kind === 40) {
-    PropRegisterForShotTest(p, p.x,
-                            p.y + (FRAGMENT_SHOT_RISE[p.subKind] ?? 0), p.z);
     return;
   }
   const rise = (off?.halfRadius ? p.hitRadius * 0.5 : 0) + (off?.y ?? 0);

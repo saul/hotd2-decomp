@@ -73,3 +73,36 @@ export function PropExpireByStepLifetime(p: BreakableProp): boolean {
   }
   return false;
 }
+
+/**
+ * The **inline** copy of the step-lifetime test that `PropUpdateType38`
+ * (`FUN_0046BCC0`), `PropUpdateType39` (`FUN_0046C240`) and
+ * `PropUpdateType44` (`FUN_0046D850`) open with instead of calling
+ * {@link PropExpireByStepLifetime}:
+ *
+ * ```c
+ * if ((s16)g_evt_step_index != (s8)obj->+0x196) {
+ *     if (obj->+0x11C < (s16)(s8)++obj->+0x197) { ActorDespawn(obj); return; }
+ *     obj->+0x196 = g_evt_step_index;
+ * }
+ * ```
+ *
+ * The same two lines **without the scene-1 sweep** (`g_script_flags[0x77]`),
+ * so these three are not cleared by it — which is the reason it is its own
+ * function here rather than a call to the shared one. All three live only in
+ * stage 1, scene 0, where the sweep could not fire anyway; that is the
+ * argument `L27` warns against making, so the difference is kept.
+ *
+ * `[port-only]` as a function: the engine writes it out three times.
+ */
+export function PropStepLifetimeInline(p: BreakableProp): boolean {
+  if (G.g_evt_step_index !== p.lastStepIndex) {
+    p.stepsElapsed += 1;
+    if (p.lifetime < p.stepsElapsed) {
+      ActorDespawnProp(p);
+      return true;
+    }
+    p.lastStepIndex = G.g_evt_step_index;
+  }
+  return false;
+}

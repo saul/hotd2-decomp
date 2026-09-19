@@ -439,13 +439,23 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "falling" ? PropContainerType.FallingContainer
       : pl.container === "chain" ? PropContainerType.ChainSegments
       : pl.container === "fragment" ? PropContainerType.FragmentProps
+      : pl.container === "table38" ? PropContainerType.Table38Props
+      : pl.container === "table39" ? PropContainerType.Table39Stacks
+      : pl.container === "table44" ? PropContainerType.Table44Props
       : PropContainerType.BreakableGroup;
+    // The three table constructors read the placer's `+0x11C` as the step
+    // lifetime they copy into every object, so that is what goes in `hp` for
+    // them; for a group it is the group id.
+    const table = pl.container === "table38" || pl.container === "table39"
+      || pl.container === "table44";
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
                          pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
                            : `breakable group ${pl.group}`,
-                         { hp: pl.group ?? 0, condition: type });
+                         { hp: table ? pl.lifetime_evt_steps
+                                     : pl.group ?? 0,
+                           condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
     a.visible = true;

@@ -151,6 +151,63 @@ def static_slots() -> dict[int, list[int]]:
     return out
 
 
+TYPE40_TS = ROOT / "web" / "src" / "game" / "class41" / "type40.ts"
+TABLE_TS = {
+    "table38": ROOT / "web" / "src" / "game" / "class41" / "type38.ts",
+    "table39": ROOT / "web" / "src" / "game" / "class41" / "type38.ts",
+    "table44": ROOT / "web" / "src" / "game" / "class41" / "type44.ts",
+}
+
+
+def _ts_const(path: Path, name: str) -> int:
+    """One `export const NAME = 0x...;` out of a game module."""
+    m = re.search(r"export const " + name + r"\s*=\s*(0x[0-9a-fA-F]+|\d+);",
+                  path.read_text(encoding="utf-8"))
+    if not m:
+        raise SystemExit(f"{path}: {name} not found")
+    return int(m.group(1), 0)
+
+
+def fragment_slots(sub_kind: int) -> list[tuple[int, str]]:
+    """Every slot `PropUpdateType40` can draw for one sub-kind, out of the
+    port's own tables in `game/class41/type40.ts`: the starting slot, the one
+    a hit swaps to, sub-kind 9's second model, and the forty burst pieces."""
+    text = TYPE40_TS.read_text(encoding="utf-8")
+    m = re.search(r"export const FRAGMENT_SLOTS = \[([^\]]*)\]", text)
+    if not m:
+        raise SystemExit(f"{TYPE40_TS}: FRAGMENT_SLOTS not found")
+    table = [int(x, 0) for x in m.group(1).replace("\n", " ").split(",")
+             if x.strip()]
+    out: list[tuple[int, str]] = []
+    if sub_kind == 0:
+        base = [_ts_const(TYPE40_TS, "FRAGMENT_SUBKIND0_SLOT"),
+                _ts_const(TYPE40_TS, "FRAGMENT_SUBKIND0_SLOT_HIT")]
+    elif sub_kind == 1:
+        base = [_ts_const(TYPE40_TS, "FRAGMENT_SUBKIND1_SLOT"),
+                _ts_const(TYPE40_TS, "FRAGMENT_SUBKIND1_SLOT_TAKEN")]
+    else:
+        b = table[sub_kind] if sub_kind < len(table) else 0
+        base = [b, b + 1] if b else []
+        if b and sub_kind == 9:
+            extra = _ts_const(TYPE40_TS, "FRAGMENT_SUBKIND9_EXTRA_SLOT")
+            base += [b + extra, b + 1 + extra]
+    out += [(x, f"type 40 sub-kind {sub_kind}'s own model") for x in base]
+    first = _ts_const(TYPE40_TS, "FRAGMENT_BURST_SLOT")
+    n = _ts_const(TYPE40_TS, "FRAGMENT_BURST_PIECES")
+    out += [(first + i, "a type 40 burst piece") for i in range(n)]
+    return out
+
+
+def table_slots(kind: str) -> list[tuple[int, str]]:
+    """The literals the three table constructors' routines draw."""
+    names = {
+        "table38": ["TYPE38_SLOT", "TYPE38_SLOT_HIT"],
+        "table39": ["TYPE38_SLOT"],
+        "table44": ["TYPE44_WHOLE_SLOT", "TYPE44_SHADOW_SLOT"],
+    }[kind]
+    return [(_ts_const(TABLE_TS[kind], n), f"{kind}'s {n}") for n in names]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     # Accepted and unused: the suite passes it to every tools/verify_*.
@@ -219,6 +276,10 @@ def main() -> int:
                         frames += span
                 for lit in literals.get(ty, []):
                     want.append((lit, f"a literal type {ty} draws"))
+            elif kind == "fragment":
+                want += fragment_slots(pl.get("sub_kind") or 0)
+            elif kind in TABLE_TS:
+                want += table_slots(kind)
             for slot, why in want:
                 checked += 1
                 if slot not in have:

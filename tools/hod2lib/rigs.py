@@ -197,6 +197,18 @@ class Rig:
     #: spawn descriptor of that class, which is how objects that take their
     #: path slot from the object at runtime still get exported.
     spawn_class: int | None = None
+    #: ``(spawn class, obj+0x11C)`` of the spawn whose class handler installs
+    #: this routine, when the routine is one arm of a subtype dispatch rather
+    #: than a class handler of its own. **[proved]** for class 0x26:
+    #: `Class26InstallSubtypeUpdate` (`FUN_0048E290`) switches on the s16 at
+    #: ``obj+0x11C`` -- the descriptor's ``+0x22`` -- and stores the chosen
+    #: routine at ``obj+0x00``, so the object exists, and draws, from the frame
+    #: that spawn's opcode runs and not before. The exporter resolves it to the
+    #: script addresses of those spawns, which is what lets the player hold a
+    #: rig back until its spawn has run: stage 4's `obj_48f050` is spawned in
+    #: block 12 and was being drawn at the origin -- inside the desk of block
+    #: 0's opening shot -- from the moment the stage loaded.
+    installed_by: tuple[int, int] | None = None
     parts: tuple[RigPart, ...] = field(default_factory=tuple)
     note: str = ""
 
@@ -239,6 +251,7 @@ _ST1_OCCUPANT_YAW = dict(
 ST1_VEHICLE = Rig(
     name="st1_vehicle",
     routine="FUN_0048E600",
+    installed_by=(0x26, 1),
     routes=(
         Route(0xFD, cam_paths=(0x20,)),
         Route(0xFE, cam_paths=(0x21,), stop_frame=0x15D,
@@ -347,6 +360,7 @@ ST1_VEHICLE = Rig(
 OBJ_48EAD0 = Rig(
     name="obj_48ead0",
     routine="FUN_0048EAD0",
+    installed_by=(0x26, 2),
     routes=tuple(
         Route(slot, cam_paths=(cam,), bias=(0.0, 2.0, 0.0),
               note="pose.y is biased by the literal 2.0 at 0x004E30F0 before "
@@ -378,6 +392,7 @@ OBJ_48EAD0 = Rig(
 OBJ_48F050 = Rig(
     name="obj_48f050",
     routine="FUN_0048F050",
+    installed_by=(0x26, 3),
     routes=(
         Route(0x173, cam_paths=(0xAE, 0xAF, 0xB2), frame="zero",
               note="frame is a literal 0.0f (6A 00), not the clamped frame"),
@@ -400,6 +415,7 @@ OBJ_48F050 = Rig(
 OBJ_48F190 = Rig(
     name="obj_48f190",
     routine="FUN_0048F190",
+    installed_by=(0x26, 4),
     routes=(
         Route(0x17A, cam_paths=(0xCD,)),
         Route(0x17B, cam_paths=(0xCE,)),
@@ -465,6 +481,7 @@ OBJ_48F190 = Rig(
 OBJ_48F560 = Rig(
     name="obj_48f560",
     routine="FUN_0048F560",
+    installed_by=(0x26, 5),
     routes=(
         Route(0x182, cam_paths=(0xDA,), frame="zero",
               note="frame is a literal 0.0f"),

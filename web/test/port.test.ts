@@ -225,8 +225,19 @@ import {
   MouseBranchTriggerUpdate, MouseState, MouseWanderUpdate,
 } from "../src/game/class52";
 import {
-  PlaceChainSegments, PlaceFragmentProps, PlaceStoryModeSwitch,
+  PlaceChainSegments, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
+import {
+  PlaceFragmentProps, FRAGMENT_BURST_FRAMES, FRAGMENT_BURST_PIECES,
+  FRAGMENT_SUBKIND0_SLOT, FRAGMENT_SUBKIND0_SLOT_HIT,
+} from "../src/game/class41/type40";
+import {
+  PROP_TABLE38, TYPE38_SLOT, TYPE38_SLOT_HIT, Type38State,
+} from "../src/game/class41/type38";
+import { Type39StackHeight } from "../src/game/class41/type39";
+import {
+  TYPE44_WHOLE_SLOT, TYPE44_EFFECT,
+} from "../src/game/class41/type44";
 import {
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "../src/game/class41/branch";
@@ -1421,6 +1432,25 @@ const BREAKABLES: BreakablesJson = {
         0, 0, 0, 0, 0xc000, 0,
       ],
       cues: [1, 3],
+    },
+    // Effect 0x13, the breakable chair's: a root and ten pieces, each piece
+    // rising one unit per key so a played clip is visible. Half rate, like
+    // the shipped one's interpolation family, and four keys long.
+    "19": {
+      nodes: [
+        { slot: 0, bone: 0, children: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+        ...Array.from({ length: 10 }, (_, i) => (
+          { slot: 0x1070 + i, bone: i + 1, children: [] })),
+      ],
+      interp: 1,
+      motion: 468,
+      play_length: 6,
+      frames: 4,
+      bones: 10,
+      t: Array.from({ length: 4 * 10 * 3 },
+                    (_, j) => (j % 3 === 1 ? Math.floor(j / 30) : 0)),
+      r: Array.from({ length: 4 * 10 * 3 }, () => 0),
+      cues: [],
     },
   },
   level_height: 7.540296,
@@ -3140,12 +3170,17 @@ console.log("\nclass 0x41, the props are in the save state:");
   const snap = JSON.stringify(G.g_breakable_props);
   check("the prop pool survives JSON.stringify",
         JSON.parse(snap).length === 3);
+  // Plain objects and plain arrays of them, all the way down: type 39's
+  // stack and type 40's burst are arrays of records, which `structuredClone`
+  // and `JSON` carry exactly as they carry an object.
+  const plain = (v: unknown): boolean =>
+    typeof v !== "function"
+    && (typeof v !== "object" || v === null
+        || (Array.isArray(v) && v.every(plain))
+        || (Object.getPrototypeOf(v) === Object.prototype
+            && Object.values(v).every(plain)));
   check("a prop holds no functions or class instances",
-        G.g_breakable_props.every(
-          (p) => Object.values(p).every(
-            (v) => typeof v !== "function"
-                   && (typeof v !== "object" || v === null
-                       || Object.getPrototypeOf(v) === Object.prototype))));
+        G.g_breakable_props.every((p) => plain(p)));
   void events;
 }
 console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
@@ -4185,6 +4220,176 @@ console.log("\nprops are shot by a sphere, not by the model they draw:");
     check("...until one is broken, and then that one is out of the test",
           !pair[0].shotRegistered && pair[1].shotRegistered);
   }
+}
+
+console.log("\nclass 0x41 types 38, 39, 40 and 44 -- stage 1's church (new bugs 8, 9):");
+{
+  // The four constructors stage 1 block 1 step 2 runs through its placers at
+  // evt 0x1994, 0x19BC, 0x19E4 and 0x1B48. Before these were ported, types 38,
+  // 39 and 44 had no entry in `g_class41_constructors` and type 40 put every
+  // object at the placer's own point with slot 0: the church had bare pews and
+  // no chairs.
+  const rng = new Rng(38);
+  const events = propScene(rng);
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const place = (at: number, type: number, lifetime: number) => {
+    const placer = ActorSpawn(at, SpawnClass.PropContainerPlacer, lifetime,
+                              "placer");
+    placer.visible = true;
+    placer.hp = lifetime;       // +0x11C: the step lifetime, for these three
+    placer.condition = type;    // +0x130C
+    PropContainerPlacerUpdate(placer, {
+      eye: EYE, dt: 1 / 60, rng, host: NULL_HOST,
+    });
+    return G.g_breakable_props.filter((q) => q.at === at);
+  };
+
+  const t38 = place(0x1994, 38, 4);
+  check("constructor 38 builds nine objects from g_prop_table38",
+        t38.length === 9 && t38.every((q) => q.family === PropFamily.Type38),
+        `${t38.length}`);
+  check("...at the table's points, not the placer's origin",
+        t38[5].x === PROP_TABLE38[5][0] && t38[5].z === PROP_TABLE38[5][2]);
+  check("...with the angles in degrees turned into truncated BAMS",
+        t38[0].pitch === Math.trunc(-104.851 * Math.fround(182.0444))
+        && t38[0].roll === Math.trunc(90 * Math.fround(182.0444)),
+        `${t38[0].pitch} ${t38[0].roll}`);
+  check("...drawing komono_st1 slot 0x1237 with a 3.0 sphere",
+        t38.every((q) => q.slot === TYPE38_SLOT && q.hitRadius === 3));
+
+  const t39 = place(0x19bc, 39, 4);
+  check("constructor 39 builds eight stacks",
+        t39.length === 8 && t39.every((q) => q.family === PropFamily.Type39));
+  check("...8, 7, 7, 6, 6, 6, 5 and 5 high: __ftol(8 - i * 0.4f) after a "
+        + "float store", [0, 1, 2, 3, 4, 5, 6, 7].map(Type39StackHeight)
+          .join() === "8,7,7,6,6,6,5,5",
+        [0, 1, 2, 3, 4, 5, 6, 7].map(Type39StackHeight).join());
+  check("...each item 0.926 above the last",
+        Math.abs(t39[0].stack[7].y - t39[0].stack[0].y - 7 * 0.926) < 1e-4);
+
+  const t40 = place(0x19e4, 40, 4);
+  check("constructor 40 is no longer a placeholder", t40.length === 0,
+        "PropContainerPlacerUpdate needs a fragment placement to find");
+  const frag = PlaceFragmentProps({ at: 0x19e4, container: "fragment",
+                                    sub_kind: 0, lifetime_evt_steps: 4,
+                                    pos: [0, 0, 0] });
+  G.g_breakable_props.push(...frag);
+  check("sub-kind 0 is eight objects, off the placer's origin and on the pews",
+        frag.length === 8
+        && frag.every((q) => Math.abs(q.y - 16.821) < 1e-3 && q.x !== 0),
+        frag.map((q) => `${q.x.toFixed(2)},${q.z.toFixed(2)}`).join(" "));
+  check("...through T(16.473, 16.821, 4.749) . RotY(0x278D) . T(x, 0, z)",
+        // 0x278D is 55.62 degrees: (18.942, 2.629) turns to (12.866, -14.148)
+        // and the frame's origin adds (16.473, 4.749).
+        Math.abs(frag[0].x - 29.339) < 0.01 && Math.abs(frag[0].z + 9.399) < 0.01,
+        `${frag[0].x} ${frag[0].z}`);
+  check("...drawing 0x123E, not slot 0",
+        frag.every((q) => q.slot === FRAGMENT_SUBKIND0_SLOT));
+
+  const t44 = place(0x1b48, 44, 4);
+  check("constructor 44 builds seven chairs",
+        t44.length === 7 && t44.every((q) => q.family === PropFamily.Type44));
+  check("rows 2..6 draw komono_7 slot 0x1064, rows 0 and 1 the effect",
+        t44.slice(2).every((q) => q.slot === TYPE44_WHOLE_SLOT)
+        && t44.slice(0, 2).every((q) => q.slot === SLOT_NONE
+                                       && q.effect === TYPE44_EFFECT));
+  check("row 6 is the chair lying on its side beside the humanoid (bug 9)",
+        Math.abs(t44[6].x + 22.3) < 1e-4 && Math.abs(t44[6].y - 9.06) < 1e-4
+        && Math.abs(t44[6].z + 97.86) < 1e-4 && t44[6].pitch === -0x26bd
+        && t44[6].roll === -0x4000);
+
+  BreakablePropPoolUpdate(rng, events);
+  check("all four families register for the shot test on their own tails",
+        [t38[0], t39[0], frag[0], t44[0]].every((q) => q.shotRegistered));
+  check("...type 38 one unit below its origin, type 44 five above",
+        Math.abs(t38[0].shotY - (t38[0].y - 1)) < 1e-6
+        && Math.abs(t44[0].shotY - (t44[0].y + 5)) < 1e-6);
+
+  // Type 38: a hop, a landing on a hull corner, a pivot, and rest.
+  const b = t38[2];
+  const score0 = G.g_player_score[0];
+  BreakablePropTakeShot(b, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("a shot type-38 swaps to 0x1236 and hops, and pays nothing",
+        b.slot === TYPE38_SLOT_HIT
+        && (b.state as number) === Type38State.Hopping
+        && G.g_player_score[0] === score0,
+        `slot ${b.slot} state ${b.state} score ${G.g_player_score[0]}`);
+  let landed = -1;
+  let rested = -1;
+  for (let f = 0; f < 600 && rested < 0; f++) {
+    BreakablePropPoolUpdate(rng, events);
+    if (landed < 0 && (b.state as number) === Type38State.Pivoting) landed = f;
+    if (landed >= 0 && (b.state as number) === Type38State.Resting) rested = f;
+  }
+  check("...lands on a corner and pivots, then comes to rest",
+        landed > 0 && rested > landed, `landed ${landed} rested ${rested}`);
+  check("...with yaw back at 0, roll at a quarter turn and y at its rest",
+        b.yaw === 0 && b.roll === 0x4000
+        && b.y === PROP_TABLE38[2][1], `${b.yaw} ${b.roll} ${b.y}`);
+
+  // Type 39: the stack falls over item by item, blinks, and is gone.
+  const st = t39[0];
+  BreakablePropTakeShot(st, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("a shot stack pays ten and stops registering",
+        G.g_player_score[0] === score0 + 10 && !st.shotRegistered,
+        `${G.g_player_score[0]}`);
+  let blinked = false;
+  for (let f = 0; f < 400 && !st.dead; f++) {
+    BreakablePropPoolUpdate(rng, events);
+    if (!st.dead && st.stackDrawn === 0) blinked = true;
+  }
+  check("...lays every item on the floor 1.2 apart, blinks and is killed",
+        st.dead && blinked
+        && Math.abs(st.stack[1].y - Math.fround(1.6205)) < 1e-6
+        && Math.abs((st.stack[0].z - st.stack[3].z) - 3 * Math.fround(1.2))
+           < 1e-4, `dead ${st.dead} blink ${blinked}`);
+
+  // Type 40 sub-kind 0: forty pieces for a hundred frames, and a new model.
+  const g = frag[3];
+  BreakablePropTakeShot(g, 0);
+  BreakablePropPoolUpdate(rng, events);
+  check("a shot sub-kind-0 object bursts into forty pieces and swaps to 0x123F",
+        g.burst.length === FRAGMENT_BURST_PIECES
+        && g.slot === FRAGMENT_SUBKIND0_SLOT_HIT && !g.shotRegistered,
+        `${g.burst.length} ${g.slot.toString(16)}`);
+  check("...with one of the routine's two break sounds",
+        sounds.includes(0x2d16a9) || sounds.includes(0x2c16a9));
+  for (let f = 0; f < 150; f++) BreakablePropPoolUpdate(rng, events);
+  check("...and the burst runs for exactly a hundred frames",
+        g.burstFrames === FRAGMENT_BURST_FRAMES, String(g.burstFrames));
+  check("...its pieces coming to rest on the floor, not through it",
+        g.burst.every((q) => q.y >= G.g_camera_fixed_eye_y + 1 - 1e-4));
+
+  // Type 44: a whole chair takes the shot and stays a whole chair.
+  const c6 = t44[6];
+  BreakablePropTakeShot(c6, 0);
+  BreakablePropPoolUpdate(rng, events);
+  // Row 0: the effect tree. Its ten pieces are posed from the clip on the
+  // object, and the break moves them.
+  const c0 = t44[0];
+  const before = c0.effectPoses.map((q) => q.y);
+  BreakablePropTakeShot(c0, 0);
+  for (let f = 0; f < 30; f++) BreakablePropPoolUpdate(rng, events);
+  check("a shot breakable chair plays motion 468 on effect 0x13's ten pieces",
+        c0.effectFrames > 1 && c0.effectPoses.length === 10
+        && c0.effectPoses.some((q, i) => q.y !== before[i]),
+        `${c0.effectFrames} ${c0.effectPoses.length}`);
+  check("a shot whole chair pays and leaves the shot test, but stays drawn",
+        c6.effectFrames >= 1 && !c6.shotRegistered
+        && c6.slot === TYPE44_WHOLE_SLOT && !c6.dead);
+
+  // The step lifetime: four step changes and they are all gone.
+  for (let step = 1; step <= 5; step++) {
+    G.g_evt_step_index = step;
+    BreakablePropPoolUpdate(rng, events);
+  }
+  check("every one of them expires after its four evt steps",
+        G.g_breakable_props.filter((q) => q.at === 0x1994 || q.at === 0x19bc
+          || q.at === 0x1b48 || q.at === 0x19e4).length === 0,
+        String(G.g_breakable_props.length));
 }
 
 console.log("\nclass 0x41 type 32, the lift:");

@@ -25,11 +25,11 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `app/` | 7764 | 29 | app |
 | `script/` | 4792 | 27 | engine |
 | `ui/` | 3192 | 27 | ui |
-| `bundle/` | 2289 | 11 | engine |
+| `bundle/` | 2290 | 11 | engine |
 | `core/` | 943 | 9 | engine |
 | `hud/` | 430 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **106827** | **380** | |
+| **total** | **106828** | **380** | |
 
 The largest files, which is where the pressure to split next is:
 

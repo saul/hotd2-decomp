@@ -209,3 +209,18 @@ export async function pull(page, x, y) {
   pullsSinceReload.set(page, (pullsSinceReload.get(page) ?? 0) + 1);
   await page.mouse.click(x, y);
 }
+
+/**
+ * Turn the sound on, and give the focus back to the page.
+ *
+ * The page starts muted, and a click on `button.sound` is the gesture that
+ * unmutes it -- **and leaves the button focused**, so the next Space a driver
+ * presses to start the transport presses the button again and mutes it. A
+ * sound trace taken that way hears nothing and looks like a page that plays
+ * no sound under `?drive=1`; that is how it was first misread.
+ */
+export async function unmute(page) {
+  const b = page.locator("button.sound");
+  if (await b.getAttribute("aria-pressed") !== "true") await b.click();
+  await page.evaluate(() => document.activeElement?.blur?.());
+}

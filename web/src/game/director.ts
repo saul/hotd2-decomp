@@ -784,15 +784,16 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.
   Boss4HitMarksTick(host);
-  // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
-  // bulge and the wake -- allocated by its actors above, so after them.
-  Boss3TasksTick(events);
-  // ...and the owl's and the fish's, for the same reason: every one of them
-  // runs on the frame its actor made it, after that actor, and draws what it
-  // stepped to. See `game/effects/owl.ts`.
+  // The owl's and the fish's tasks, allocated by their actors above, so
+  // after them: every one runs on the frame its actor made it and draws what
+  // it stepped to. See `game/effects/owl.ts`.
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+
+  // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
+  // bulge and the wake -- allocated by its actors above, so after them.
+  Boss3TasksTick(events);
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the

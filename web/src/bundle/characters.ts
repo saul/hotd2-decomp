@@ -477,6 +477,12 @@ export interface CharacterPlacement {
    */
   class46?: { subtype: number; group: number; member: number } | null;
   /**
+   * Class 0x45's sub-type, `desc+0x25` -- the stage-3 boss's six inits: 0 the
+   * opening head, 1 its civilian, 2 a fighting head (index in `hp`), 3 a held
+   * civilian (index in `hp`), 4 nothing, 5 the body. See `game/class45/`.
+   */
+  class45?: { subtype: number } | null;
+  /**
    * Class 0x40's descriptor: `desc+0x25`, the selector. See
    * `game/class40/state.ts`.
    */

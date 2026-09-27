@@ -133,6 +133,19 @@ export interface ClassHandler {
    */
   updatesWhenDead?: boolean;
   /**
+   * The class steps its own models' frame counters, so the director must not.
+   *
+   * `ActorAdvanceMotion` runs for every visible actor before its update,
+   * which is the port's stand-in for the classes whose engine update steps
+   * `model[0]` unconditionally once a frame. A class whose routines step it
+   * only in some states -- a head that holds its death clip's last frame by
+   * **not** incrementing, a body whose swim cursor waits on a clip boundary
+   * -- does it itself, at the instruction the engine does it, and says so
+   * here. Class 0x45 is the first: every `INC dword ptr [model]` in
+   * `Boss3FightHeadUpdate` (`FUN_004209B0`) sits behind a state test.
+   */
+  ownsMotionClock?: boolean;
+  /**
    * Can this actor be hurt at all, right now?
    *
    * Class 0x10's answer is `sub.onShotScript < 0` — a civilian with no on-shot

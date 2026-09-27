@@ -43,7 +43,7 @@ import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
          bake, humanoidMotionIds, introFor, motionFor,
-         BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
+         BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
          difficultyTables, playerDamage, reactionGroups,
@@ -515,6 +515,21 @@ export function class46Tail(rec: Spawn): Record<string, unknown> {
     group: b ? u8(b[at]) : 0,
     member: Math.max(0, (rec.hp ?? 1) - 1),
   };
+}
+
+/**
+ * Class 0x45's descriptor: `desc+0x25`, the sub-type `EvtOpSpawnPlaced09`
+ * copies into `obj+0x130C` and `Boss3ClassHandler` (`FUN_0041FC00`)
+ * dispatches on through `0x0041FD8C` -- 0 the opening head, 1 its civilian,
+ * 2 a fighting head, 3 a held civilian, 4 nothing, 5 the body. The head or
+ * civilian **index** is `desc+0x22`, which the allocator has already put in
+ * `hp`, and the civilians' character type is `desc+0x24`, which `spawnres`
+ * reads. See `game/class45/`.
+ */
+export function class45Tail(rec: Spawn): Record<string, unknown> {
+  const b = rec.evt?.raw;
+  const at = rec.offset + 0x25;
+  return { subtype: b && at < b.length ? (b[at] << 24) >> 24 : 0 };
 }
 
 export function class11Tail(rec: Spawn): Record<string, unknown> {
@@ -1070,6 +1085,7 @@ export async function resolveForStage(
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
     const class14 = cls === 0x14 ? class14Tail(rec) : null;
+    const class45 = cls === 0x45 ? class45Tail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
     // objects behind one id and these two blocks are two of them reading
     // the same bytes; emitting both for one spawn, or either for a
@@ -1173,6 +1189,7 @@ export async function resolveForStage(
     p.class52 = class52;
     p.class53 = class53;
     p.class14 = class14;
+    p.class45 = class45;
     p.class33 = class33;
     p.class33_push = class33Push;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
@@ -1259,6 +1276,9 @@ export async function resolveForStage(
     if (cls === 0x11) entryClips.push(...FROG_CLIPS);
     // The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
     if (cls === 0x14) entryClips.push(...CLASS14_MOTIONS);
+    // The stage-3 boss's clips, all three of its skeletons' -- see
+    // `BOSS3_CLIPS`.
+    if (cls === 0x45) entryClips.push(...BOSS3_CLIPS);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.

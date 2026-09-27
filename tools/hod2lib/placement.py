@@ -395,6 +395,10 @@ class Placement:
     #: Class 0x14's tail -- the stage-2 boss's state, route quad and despawn
     #: cue; see :func:`characters.class14_tail`.
     class14: dict | None = None
+    #: Class 0x45's descriptor byte -- ``{subtype}``, ``desc+0x25``, which
+    #: picks which of six inits the stage-3 boss's actor runs; see
+    #: :func:`characters.class45_tail`.
+    class45: dict | None = None
     #: Class 0x33 **selector 1's** tail -- the draw slot, the ``op_`` path it
     #: rides, and the four cues that raise its two ``obj+0x34`` bits and take
     #: it off the field. Selector 1 only: the other ten sub-handlers read the
@@ -483,6 +487,8 @@ class Placement:
             d["class53"] = self.class53
         if self.class14:
             d["class14"] = self.class14
+        if self.class45:
+            d["class45"] = self.class45
         if self.class33:
             d["class33"] = self.class33
         if self.class33_push:

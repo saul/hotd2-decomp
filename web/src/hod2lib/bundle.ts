@@ -41,6 +41,8 @@ import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
 // from, as data, and the exporter must put exactly those textures in.
 import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
 // ...and the boss-name banner's, whose record table is data in the same way.
+import { BOSS3_CARD_SPRITES, BOSS3_EFFECT_SLOTS }
+  from "../game/class45/tables";
 import { BOSS_BANNER_SPRITES, bannerCardSlots }
   from "../game/boss_banner_records";
 // And the game-over screen's: its logo sprites are immediates in
@@ -88,7 +90,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 12;
+export const BUNDLE_FORMAT = 13;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -1597,6 +1599,10 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the boss-name banner's cards, for the classes this stage spawns
     // that make one: drawn in view space too, by `render/effects.ts`.
     ...bannerCardSlots(spawnRecords.map((r) => r.cls)),
+    // ...and the stage-3 boss's own: its intro card's pieces (view space
+    // again), its sparks, splashes, bite flashes, wake and path effects. See
+    // `game/class45/tables.ts`.
+    ...(spawnRecords.some((r) => r.cls === 0x45) ? BOSS3_EFFECT_SLOTS : []),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -1657,7 +1663,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.screen_sprites = await screenSpritesJson(
     tables, stage.source, deflate,
     [...HUD_READOUT_SPRITES, ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES,
-     ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
+     ...BOSS3_CARD_SPRITES, ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;

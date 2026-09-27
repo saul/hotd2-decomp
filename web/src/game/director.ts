@@ -630,7 +630,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {
-      ActorAdvanceMotion(obj, dt);
+      // ...unless the class steps its own, at the instructions the engine
+      // does -- see `ClassHandler.ownsMotionClock`.
+      if (!g_class_handlers[obj.cls]?.ownsMotionClock) {
+        ActorAdvanceMotion(obj, dt);
+      }
       // `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), which the engine asks
       // per node inside `SkeletonEmitNode`. Its input is `bone_records[9].slot`
       // -- what bone 9 is *currently* drawing -- so it cannot be baked into

@@ -11870,8 +11870,10 @@ console.log("the skinned model's draw gates, as state:");
   // `ActorBuildSkinnedModel` (`FUN_00410440`): `model+0x64 = 3`, and one
   // eight-byte record per `g_pCharacterExtraParts` entry with byte `+1` at 1.
   const z = spawnZombie(0x3080, 1, "built");
+  // ...and then `EnemyZombieInit` ORs bit 4 in (`0x00452E21`), the trace the
+  // corpse's ring and the shadow take -- so a class-0x30 actor carries 7.
   check("the build leaves the skeleton drawn and one byte per part, all 1",
-        z.motionFlags === MOTION_FLAGS_INIT
+        z.motionFlags === (MOTION_FLAGS_INIT | MotionFlag.TraceGround)
         && (z.motionFlags & MotionFlag.Drawn) !== 0
         && z.partVisible.length === TYPE.parts!.length
         && z.partVisible.every((v) => v === 1),

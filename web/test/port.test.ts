@@ -12622,6 +12622,54 @@ console.log("\na stashed path is played by a hook that steps first:");
   check("state 6 reaches the end frame", published.includes(10), head);
   check("...and stops on it", !published.includes(11), head);
 
+  // **Stage 4's boss blocks install (2,6) over no stash at all.** Blocks 23,
+  // 25, 27 and 29 play `cam_play 185 0..0` -- a static pose, which is what
+  // leaves `g_active_cam_path` on the fight's path -- and then
+  // `finish_sequence 6`; the rail then runs over whatever the stash words
+  // hold, and the boss's own camera cues move them. The port refused the
+  // install for want of a stash, so the fight's `g_cam_path_frame` sat at 0.
+  {
+    ResetGameGlobals();
+    const bossScript = {
+      ...script,
+      blocks: [{
+        index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+        steps: [{ index: 0, at: 0, ops: [
+          { i: 0, at: 0, op: 0x30, name: "queue_event", cat: "camera",
+            sel: 0x40, action: "cam_play", args: [0, 0, 185, 0],
+            start: 0, end: 0, slot: 185, flags: 0, static: true,
+            resume: false, cam: { file: "cp_test", path: 0, duration: 1 } },
+          { i: 1, at: 1, op: 0x30, name: "queue_event", cat: "camera",
+            sel: 0x21, action: "finish_sequence", args: [6],
+            scene_state: { major: 2, minor: 6 },
+            camera_state: "play_stashed_path" },
+          // The fight: a wait long enough for the rail to be watched. (The
+          // block's own is `wait_script_flag 32`, which a bundle with no
+          // class-0x19 spawn excuses.)
+          { i: 2, at: 2, op: 0x42, name: "wait_frames", cat: "wait",
+            arg: 1000, blocks_on: "arg frames elapsed" },
+        ] }],
+      }],
+    } as unknown as ScriptJson;
+    const wb = new Walker(bossScript, host);
+    for (let f = 0; f < 5; f++) wb.tick(1 / 60);
+    check("finish_sequence 6 after a static pose rides the pose's path on "
+          + "the rail",
+          wb.cam?.slot === 185 && wb.cam.deferred === true,
+          `slot ${wb.cam?.slot} deferred ${wb.cam?.deferred}`);
+    // What `Boss4PlayCameraCue` writes when a cue starts.
+    G.g_stashed_path_frame = 20;
+    G.g_stashed_path_end_frame = 30;
+    const drawn: number[] = [];
+    for (let f = 0; f < 15; f++) {
+      wb.tick(1 / 60);
+      drawn.push(wb.cam ? Math.trunc(wb.cam.frame) : -1);
+    }
+    check("...and a range moved on under it is drawn frame by frame",
+          drawn.slice(0, 10).join() === "21,22,23,24,25,26,27,28,29,30"
+          && drawn[14] === 30, drawn.join(","));
+  }
+
   // And the seek's half: `seekTo` observes no waits, so an address behind
   // `wait_camera_path_frame` is reached with the shot still in the middle of
   // itself unless the wait's postcondition is applied by hand. It used to be

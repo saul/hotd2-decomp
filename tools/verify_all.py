@@ -151,6 +151,13 @@ CHECKS: list[Check] = [
           "made up, which is what every other owl check does and why none of "
           "them could see a run-in parked five units under the eye",
           NEEDS_BUNDLE),
+    Check("boss4_fight", "web", ["npm", "run", "--silent", "boss4_fight"],
+          "that the stage-4 boss's fight runs from its entrance to "
+          "`g_script_flags[32]` in both arenas, against the stage's own script "
+          "and camera paths -- the only check that plays a boss's phases, its "
+          "camera cues and the (2,6) rail they move, since the playthrough "
+          "stops on entering the end block the fight is in",
+          NEEDS_BUNDLE),
     Check("handback", "web", ["npm", "run", "--silent", "handback"],
           "that a room waits for the camera to turn back onto its rail after "
           "the last enemy dies and not merely for the counter -- the only "

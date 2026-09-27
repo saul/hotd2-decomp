@@ -19,17 +19,17 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 65411 | 224 | engine |
+| `game/` | 65416 | 224 | engine |
 | `hod2lib/` | 17354 | 34 | engine |
-| `render/` | 11334 | 37 | render |
+| `render/` | 11369 | 37 | render |
 | `app/` | 7797 | 29 | app |
-| `script/` | 4897 | 27 | engine |
+| `script/` | 4910 | 27 | engine |
 | `ui/` | 3161 | 27 | ui |
 | `bundle/` | 2419 | 11 | engine |
 | `core/` | 943 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **114165** | **400** | |
+| **total** | **114218** | **400** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -115,6 +115,7 @@ nothing exits 3 and is never counted as green.
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
+| `boss4_fight` | that the stage-4 boss's fight runs from its entrance to `g_script_flags[32]` in both arenas, against the stage's own script and camera paths -- the only check that plays a boss's phases, its camera cues and the (2,6) rail they move, since the playthrough stops on entering the end block the fight is in | bundle |
 | `handback` | that a room waits for the camera to turn back onto its rail after the last enemy dies and not merely for the counter -- the only check that measures the *pacing* of a room-clear gate rather than whether it opens at all, and the one that separates the two drivers a `finish_sequence` can install | bundle |
 | `civ_speech` | that a rescued civilian holds a camera slot while her script asks, and that the room-clear gate therefore waits for her lines and her shutter -- the only check that plays a real civilian stream against the stage's own gate, and the reason a non-enemy can be a camera candidate at all | bundle |
 | `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
@@ -139,7 +140,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-17 of them need the installed game and 14 need an exported
+17 of them need the installed game and 15 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

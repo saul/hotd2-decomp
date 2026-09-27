@@ -1401,6 +1401,23 @@ export interface ActorBase {
    */
   class14: CharacterPlacement["class14"];
   /**
+   * Class 0x19's descriptor tail -- the stage-4 boss's entrance, its per-bone
+   * collision meshes and the camera pair that despawns it. See
+   * `game/class19/`.
+   */
+  class19: CharacterPlacement["class19"];
+  /**
+   * `bone record +0x88` per bone, for the bones that are shot-tested against
+   * a **collision mesh** rather than a sphere -- the `coli.blobs` key, by
+   * bone index. `ShotTestBoneTree` (`FUN_00404750`) takes `ShotTestBoneMesh`
+   * (`FUN_004048A0`) for a record whose `+0x74` has bit `0x10` and whose
+   * `+0x88` is not -1, and the sphere test otherwise; the only writer in the
+   * image is `Boss4Init` (`FUN_004917E0`), which also raises `+0x74 |= 0x51`
+   * and zeroes the sphere's radius at `+0x78` for each. An entry here is all
+   * three.
+   */
+  boneColi: Record<string, string>;
+  /**
    * Class 0x33 **selector 1's** descriptor tail — the draw slot, the `op_`
    * path it rides, and the four cues that raise its two `obj+0x34` bits and
    * take it off the field.
@@ -2030,6 +2047,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class51: null,
     class52: null,
     class14: null,
+    class19: null,
+    boneColi: {},
     class33: null,
     class33Push: null,
     class53: null,

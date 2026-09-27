@@ -465,6 +465,21 @@ export interface CharacterPlacement {
    * collision trace tests in the object's own space. See `game/class26/`.
    */
   class26?: { coli: string | null } | null;
+  /**
+   * Class 0x19's tail -- the stage-4 boss. `entrance` is `tail+0x01`, the
+   * `g_class19_states` index it starts in; `bone_coli[i]` the `coli.blobs`
+   * key bone `i + 1` is shot-tested against instead of its sphere (the tail
+   * dword `Boss4Init` copies to the bone record's `+0x88`), `null` for a
+   * sphere bone; `despawn_path`/`despawn_frame` are `tail+0x40`/`+0x42`. See
+   * `game/class19/`.
+   */
+  class19?: {
+    char_type: number;
+    entrance: number;
+    bone_coli: (string | null)[];
+    despawn_path: number;
+    despawn_frame: number;
+  } | null;
   class43?: { subtype: number; member: number } | null;
   /**
    * Class 0x46's three descriptor bytes — the bat, and the whole descriptor.

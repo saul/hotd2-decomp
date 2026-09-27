@@ -62,7 +62,8 @@ export enum CarrierRoutine0State {
  * path, and `hod2lib/bundle.ts` keeps such a model out of the bundle rather
  * than have it arrive doing the wrong thing.
  */
-export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> = new Set([0, 1, 6]);
+export const CARRIER_SELECTORS_PORTED: ReadonlySet<number> =
+  new Set([0, 1, 2, 6, 9]);
 
 /**
  * The per-routine literals of the two ground-wake routines' draws, which is
@@ -94,6 +95,23 @@ export const CARRIER_WAKE_PAIR = 0x16;
 /** `CarrierPropRoutine0`'s splash, `eff_dokan.bin[0..93]`. */
 export const CARRIER0_SPLASH_FIRST = 0xfd4;
 export const CARRIER0_SPLASH_LAST = 0x1031;
+/**
+ * `CarrierPropRoutine2`'s two doors -- `AssetDrawSlot(0x952)` and `(0x953)`
+ * at `0x00440A6A` and `0x00440A9B`, `st1_1b.bin[4]` and `[5]`, each at its
+ * own fixed offset from the carrier and turned by its own yaw.
+ */
+export const CARRIER2_DOOR_SLOTS: readonly [number, number] = [0x952, 0x953];
+/**
+ * The two doors' offsets in the carrier's frame -- `PUSH` immediates at
+ * `0x00440A4E`..`0x00440A58` and `0x00440A7B`..`0x00440A85`:
+ * `(0x41DDA3D7, 0xC1F0A234, 0xC1C6D326)` and `(.., .., 0x41C96F69)`.
+ */
+export const CARRIER2_DOOR_AT: readonly [readonly [number, number, number],
+                                         readonly [number, number, number]] = [
+  [Math.fround(27.705), Math.fround(-30.0792), Math.fround(-24.8531)],
+  [Math.fround(27.705), Math.fround(-30.0792), Math.fround(25.1794)],
+];
+
 /** `CarrierPropRoutine1`'s states 5 and 6, `ride+0x14`. */
 export const CARRIER1_STRIP_FIRST = 0x1aab;
 export const CARRIER1_STRIP_LAST = 0x1ad2;
@@ -114,6 +132,9 @@ export function CarrierDrawSlots(selector: number): number[] {
     case 0:
       return [...span(CARRIER_WAKE_FIRST, CARRIER_WAKE_LAST),
               ...span(CARRIER0_SPLASH_FIRST, CARRIER0_SPLASH_LAST)];
+    case 2:
+    case 9:
+      return [...CARRIER2_DOOR_SLOTS];
     case 1:
     case 6:
       return [...span(CARRIER_WAKE_FIRST,
@@ -191,6 +212,14 @@ export interface ScriptedPropTail {
   wakeDrawn: number;
   splashDrawn: number;
   stripDrawn: number;
+
+  // -- `CarrierPropRoutine2`'s 0xC-byte ride block, another layout (`L3`) ---
+  /** `ride+0x00` -- the first door's yaw, BAMS, `0xC000 + t[i]`. */
+  door0Yaw: number;
+  /** `ride+0x04` -- the second door's, `0xC000 - t[i]`. */
+  door1Yaw: number;
+  /** `ride+0x08` -- the index into `g_carrier2_door_yaw`, 0..0x3B. */
+  doorStep: number;
 }
 
 /** `[port-only]` — the two blocks `ActorAllocSub` zeroes, as one object. */
@@ -201,5 +230,6 @@ export function makeScriptedPropTail(): ScriptedPropTail {
     pathFrame: 0, wakeCel: 0, wakeOn: 0, wakeScale: 0, wakeFade: 0,
     stripCel: 0, splashCel: 0, wakeGroundY: 0, wakeYaw: 0,
     wakeDrawn: 0, splashDrawn: 0, stripDrawn: 0,
+    door0Yaw: 0, door1Yaw: 0, doorStep: 0,
   };
 }

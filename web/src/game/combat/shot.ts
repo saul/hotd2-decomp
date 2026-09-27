@@ -75,6 +75,7 @@ import { SpawnPropHitSpark } from "../effects/sprite";
 import { ActorShotFeedback, SpawnWorldImpact } from "./feedback";
 import { ActorByAt, G } from "../globals";
 import type { GameHost, ShotRay } from "../host";
+import type { Vec3 } from "../vec";
 import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
 import { DispatchHit, HitResultCode } from "./resolve_hit";
@@ -369,7 +370,9 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // a civilian *means*: a life, two hundred points and the on-shot script.
   // Scoring it here would be a second implementation of that rule.
   if (g_class_handlers[obj.cls as SpawnClass]?.ownsShotResult) {
-    MarkActorShot(obj, player, pick.bone, pick.whole ?? false);
+    MarkActorShot(obj, player, pick.bone, pick.whole ?? false,
+                  pick.mesh ? { point: pick.point, ...pick.mesh } : undefined,
+                  host, events);
     G.g_head_combo_bonus[player] = 0;
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point,
@@ -488,17 +491,31 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
  * pays. `obj+0x190 + player` also takes the bone, which is why the same
  * function serves the skeleton path.
  *
+ * **A bone hit on a collision mesh** (`mesh`, the bone record's `+0x74` bit
+ * `0x10`) goes on to `SpawnWorldImpact` (`FUN_00405260`) with the winning
+ * quad -- the `CALL` at the end of the bone arm -- which spawns the impact
+ * sprite of that surface's kind and leaves the point, surface and normal in
+ * `g_shot_hit_records[player]`. The stage-4 boss is the only actor with such
+ * bones, and its `Boss4ResolveShot` reads the record back.
+ *
  * [diverges] The engine's version also runs the blood effect and, in Original
  * Mode, the item-drop test. Neither is state, and both are the renderer's.
  */
 export function MarkActorShot(obj: Actor, player: number, bone = 0,
-                              whole = false): void {
+                              whole = false,
+                              mesh?: { point: Vec3; surface: number;
+                                       normal: Vec3 },
+                              host?: GameHost, events?: Events): void {
   obj.flags |= (1 << ((player + 1) & 0x1f)) | ActorFlag.Hit;
   obj.pendingHit = { bone, result: 0 };
   // `MOV byte ptr [ECX + EAX + 0x190], ...` -- the bone's own index for a
   // bone hit (the node's `+0x14`), and a literal 1 for an actor hit whole.
   if (player >= 0 && player < obj.shotBones.length) {
     obj.shotBones[player] = whole ? 1 : bone;
+  }
+  if (mesh && host) {
+    SpawnWorldImpact(player, mesh.point, mesh.normal, mesh.surface, host,
+                     events);
   }
 }
 

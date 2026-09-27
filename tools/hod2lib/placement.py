@@ -395,6 +395,9 @@ class Placement:
     #: Class 0x14's tail -- the stage-2 boss's state, route quad and despawn
     #: cue; see :func:`characters.class14_tail`.
     class14: dict | None = None
+    #: Class 0x19's tail -- the stage-4 boss's entrance, per-bone collision
+    #: meshes and despawn cue; see :func:`characters.class19_tail`.
+    class19: dict | None = None
     #: Class 0x33 **selector 1's** tail -- the draw slot, the ``op_`` path it
     #: rides, and the four cues that raise its two ``obj+0x34`` bits and take
     #: it off the field. Selector 1 only: the other ten sub-handlers read the
@@ -483,6 +486,8 @@ class Placement:
             d["class53"] = self.class53
         if self.class14:
             d["class14"] = self.class14
+        if self.class19:
+            d["class19"] = self.class19
         if self.class33:
             d["class33"] = self.class33
         if self.class33_push:

@@ -131,14 +131,20 @@ const CARRIER_BOW_BIT = 0x400000;
  * {@link CarrierPropSelectRoutine}. Entries 1, 3, 4 and 5 are the carried
  * props' — class 0x30 state 37's barrels, which reach the table through the
  * state-37 script rather than through a class-0x13 descriptor; 1 and 4 are
- * ported in `game/carried_prop.ts`. The rest — `0x00443200`, `0x0043FFC0`,
- * `0x004400D0` and `0x00445050` — are not read. `[open]`
+ * ported in `game/carried_prop.ts`, and so is 2, the stage-4 boss's. The
+ * rest — `0x0043FFC0`, `0x004400D0` and `0x00445050` — are not read.
+ * `[open]`
  */
 export enum PropBehaviour {
   /** `NoOpStub` (`0x0041EBB0`) — a static prop, drawn and nothing else. */
   None = 0,
   /** `CarriedPropHeldUpdate` (`FUN_00442820`) — `game/carried_prop.ts`. */
   CarriedPropHeld = 1,
+  /**
+   * `CarriedPropHeldInBone8Update` (`FUN_00443200`) — `game/carried_prop.ts`.
+   * The stage-4 boss's props; `Boss4SpawnHeldProp` is its only allocator.
+   */
+  CarriedPropHeldInBone8 = 2,
   /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — not ported. */
   CarriedPropThrowAtTarget = 3,
   /** `CarriedPropThrowAtCamera` (`FUN_00443B90`) — `game/carried_prop.ts`. */

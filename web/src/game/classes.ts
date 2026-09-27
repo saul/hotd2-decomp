@@ -43,6 +43,7 @@ import "./class43";
 import "./class40";
 import "./class46";
 import "./class44";
+import "./class45";
 import "./class51";
 import "./class52";
 import "./class53";

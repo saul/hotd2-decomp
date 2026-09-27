@@ -91,6 +91,12 @@ export interface EventMap {
    * treating it as a bare sound.
    */
   "civilian.dialogue": { at: number; group: number };
+  /**
+   * `EvtOpPlayDialogue2D` called by a class that is not a civilian -- the
+   * stage-3 boss's body plays group `0x83` as it passes path point `0x3C`.
+   * The same message groups again, so the host routes it the same way.
+   */
+  "actor.dialogue": { at: number; group: number };
 
   // -- class 0x41, the breakable props -----------------------------------
   /** First shot: the prop swapped to its broken model and shook. */

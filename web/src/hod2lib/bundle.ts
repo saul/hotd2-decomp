@@ -43,6 +43,8 @@ import { Boss4EffectSlots } from "../game/class19/slots";
 // from, as data, and the exporter must put exactly those textures in.
 import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
 // ...and the boss-name banner's, whose record table is data in the same way.
+import { BOSS3_CARD_SPRITES, BOSS3_EFFECT_SLOTS }
+  from "../game/class45/tables";
 import { BOSS_BANNER_SPRITES, bannerCardSlots }
   from "../game/boss_banner_records";
 // And the game-over screen's: its logo sprites are immediates in
@@ -90,7 +92,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 13;
+export const BUNDLE_FORMAT = 14;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -907,13 +909,18 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
  * `render/effects.ts` clones from `slots_effect` rather than
  * `render/slotmodels.ts` from `slots_actor`.
  *
- * One class today: JUDGMENT's walker's sparks, which only its flier's
+ * Two classes today. JUDGMENT's walker's sparks, which only its flier's
  * presence brings. `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind
  * 0x5B through `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
- * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load.
+ * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. And the
+ * Tower's, class 0x45, every one of which its routines draw themselves.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
+  // The stage-3 boss's own: its intro card's pieces (view space), its
+  // sparks, splashes, bite flashes, wake, path effects, the civilian's
+  // shadow and the water mound. See `game/class45/tables.ts`.
+  0x45: [...BOSS3_EFFECT_SLOTS],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */
@@ -1698,7 +1705,7 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.screen_sprites = await screenSpritesJson(
     tables, stage.source, deflate,
     [...HUD_READOUT_SPRITES, ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES,
-     ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
+     ...BOSS3_CARD_SPRITES, ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;

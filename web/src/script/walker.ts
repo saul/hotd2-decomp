@@ -319,6 +319,9 @@ const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
                                     //        gone before the gate is reached
   SpawnClass.FlyingEnemy,           // 0x43
   SpawnClass.WaterEnemy,            // 0x51
+  SpawnClass.Boss3,                 // 0x45 — head 2 (`INC` 0x00420082/89,
+                                    //        `DEC` 0x00421623/2A) and the body
+                                    //        (0x00420522/29, 0x0042340C/13)
 ]);
 
 /**

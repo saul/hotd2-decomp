@@ -145,7 +145,10 @@ export interface ClassHandler {
    * counter itself — held at `0x84` while the body falls, stepped twice a
    * frame on landing, tested against `0x1C`, `0x92` and the play length. A
    * class that says so here calls `ActorAdvanceMotion` itself, at each of
-   * the engine's increments.
+   * the engine's increments -- or, as class 0x45 does, keeps a model block
+   * of its own: every `INC dword ptr [model]` in `Boss3FightHeadUpdate`
+   * (`FUN_004209B0`) sits behind a state test, and its cross-fades are the
+   * engine's slots and swing-twist, which the shared clock does not model.
    */
   advancesOwnMotion?: boolean;
   /**

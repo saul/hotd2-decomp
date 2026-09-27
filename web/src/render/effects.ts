@@ -29,7 +29,10 @@
  * a running zombie's shoulder and sits on the face of the limb turned toward
  * the camera. {@link EffectLayer.bones} is what answers that here.
  */
-import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
+import {
+  type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
+} from "three";
+import { drawBoss3Effects } from "./boss3_effects";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
@@ -85,6 +88,27 @@ export interface BoneSphereSource {
    * and `DrawBloodSpray` draws at. Returns the radius, or null.
    */
   boneSphere(at: number, bone: number, out: Vector3): number | null;
+  /**
+   * One bone's world matrix as the skeleton was last posed, as sixteen
+   * elements into `out`; false when the actor has no such node. Class 0x45
+   * draws its bite flash and its wake on the bone's own matrix
+   * (`Boss3DrawBoneParts`). Optional so a stand-in need not pose bones.
+   */
+  boneMatrix?(at: number, bone: number, out: number[]): boolean;
+}
+
+/**
+ * Free the materials a fading draw gave its clone -- see `setSlotAlpha` in
+ * `boss3_effects.ts` -- and the geometry a deforming one copied (the water
+ * mound). Anything else is the template's and is not ours.
+ */
+function disposeOwned(node: Object3D): void {
+  const owned = node.userData.ownedMaterials as Material[] | undefined;
+  if (owned) for (const m of owned) m.dispose();
+  node.userData.ownedMaterials = undefined;
+  const geos = node.userData.ownedGeometries as BufferGeometry[] | undefined;
+  if (geos) for (const g of geos) g.dispose();
+  node.userData.ownedGeometries = undefined;
 }
 
 /** One drawn node, and the slot it was cloned for. */
@@ -120,6 +144,8 @@ export class EffectLayer implements System<RenderContext> {
   private readonly _c = new Vector3();
   private readonly _v = new Vector3();
   private readonly _m = new Matrix4();
+  private readonly _view = new Matrix4();
+  private readonly _elems: number[] = new Array<number>(16).fill(0);
 
   constructor() {
     this.group.name = "effects";
@@ -154,7 +180,10 @@ export class EffectLayer implements System<RenderContext> {
    */
   private claimSession(ctx: RenderContext): void {
     ctx.session.defer(() => {
-      for (const l of this.nodes.values()) l.node.removeFromParent();
+      for (const l of this.nodes.values()) {
+        l.node.removeFromParent();
+        disposeOwned(l.node);
+      }
       this.nodes.clear();
     });
   }
@@ -216,10 +245,25 @@ export class EffectLayer implements System<RenderContext> {
     this.drawShotRings(seen);
     this.drawDamageOverlays(seen);
     this.drawBossBanners(seen);
+    if (this.bones) {
+      const bones = this.bones;
+      this._view.copy(ctx.camera.matrixWorldInverse);
+      drawBoss3Effects({
+        node: (key, slot, parent) => this.node(key, slot, parent),
+        world: this.group, view: this.viewGroup, viewMatrix: this._view,
+        boneSphere: (at, bone, out) => bones.boneSphere(at, bone, out),
+        boneMatrix: (at, bone, out) => {
+          if (!bones.boneMatrix?.(at, bone, this._elems)) return false;
+          out.fromArray(this._elems);
+          return true;
+        },
+      }, seen);
+    }
 
     for (const [key, l] of this.nodes) {
       if (seen.has(key)) continue;
       l.node.removeFromParent();
+      disposeOwned(l.node);
       this.nodes.delete(key);
     }
   }
@@ -241,6 +285,7 @@ export class EffectLayer implements System<RenderContext> {
       return live.node;
     }
     live?.node.removeFromParent();
+    if (live) disposeOwned(live.node);
     const node = this.clone(slot);
     if (!node) { this.nodes.delete(key); return null; }
     parent.add(node);

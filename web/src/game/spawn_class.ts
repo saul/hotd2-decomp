@@ -125,6 +125,15 @@ export enum SpawnClass {
   /** `FUN_00472B10` — prop placer. */
   PropPlacer = 0x44,
   /**
+   * `Boss3ClassHandler` (`FUN_0041FC00`) — **the stage-3 boss**, "the Tower":
+   * five heads (`boss3.bin`, and `boss3l.bin` for the big one) and a body
+   * that swims the canal, three civilians, and the fight's own intro card,
+   * all under one class id and told apart by the sub-type at `desc+0x25`.
+   * 37 spawns: stage 3 blocks 11, 13, 15 and 17, and the heads alone in
+   * stage 6 block 2. Ported (`game/class45/`).
+   */
+  Boss3 = 0x45,
+  /**
    * `PlaceBats` (`FUN_0042D9C0`) — **the bat**, settled by `zabat.bin` and
    * `zabat_wing.bin` and by `COMMON2\KOUMORI1_22.wav`. A placer with three
    * flights on the descriptor's `+0x25`: one bat that flies a spline in the

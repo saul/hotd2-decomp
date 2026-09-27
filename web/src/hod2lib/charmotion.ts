@@ -44,7 +44,8 @@ export type MotionRule =
   | ["param_or", number, ParamKind, number]
   | ["block", number, number]
   | ["by_char", Record<number, number>, number]
-  | ["table", number, number, number, ParamKind];
+  | ["table", number, number, number, ParamKind]
+  | ["class45"];
 
 /**
  * How each class chooses the motion it starts in, from its handler.
@@ -103,6 +104,35 @@ export const BOSS4_CLIPS: readonly number[] = [
  */
 export const FROG_CLIPS: readonly number[] = [
   0x13d, 0x13e, 0x13f, 0x140, 0x141, 0x142, 0x143, 0x144, 0x145,
+];
+
+/**
+ * Every clip class 0x45 can put on one of its actors, over all three of its
+ * character types -- `bake` refuses a clip authored for another skeleton, so
+ * the union is offered whole and each type keeps its own.
+ *
+ * * `boss3.bin` (`0x49`), the four small heads and the opening head: 74..100.
+ *   The idle sets `g_boss3_idle_motions_a`/`_b` (93..98, 80..84), the attacks
+ *   `g_boss3_attacks_a`/`_b` (74, 75, 77, 78), the hurt table
+ *   `g_boss3_hurt_motions` (99, 100, 85, 86), the swaps
+ *   `g_boss3_swap_motions` (92, 79), the death `0x4C`, the grab and intro
+ *   clips `0x57`..`0x5B`.
+ * * `boss3l.bin` (`0x48`), the big head and the body: 59..73. The head's idle
+ *   `g_boss3l_idle_motions` (67..72), attack 64, hurt `0x49` and death `0x41`;
+ *   the body's swim `0x42`, surface and lunges `0x3B`..`0x3F`
+ *   (`g_boss3_body_attack_motions_b` and the tail's clip test).
+ * * The civilians (`0x34`, `0x2E`): `0x21D`/`0x21F` the two grabs, `0x21E`
+ *   held, `0x23D` the opening walk, `0x24F`/`0x264` taken.
+ *
+ * Baked for the reason {@link BOSS4_CLIPS} is: **an unbaked clip is an actor
+ * that waits for ever.** Every head state leaves on the clip-ended byte, the
+ * death on cursor `0x4B`/`0x70`, and the body's surfacing on a cursor it can
+ * only reach if the clip has a play length. See `docs/re/boss-tower.md`.
+ */
+export const BOSS3_CLIPS: readonly number[] = [
+  ...Array.from({ length: 100 - 74 + 1 }, (_u, i) => 74 + i),
+  ...Array.from({ length: 73 - 59 + 1 }, (_u, i) => 59 + i),
+  0x21d, 0x21e, 0x21f, 0x23d, 0x24f, 0x264,
 ];
 
 /**
@@ -268,7 +298,48 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   0x18: ["literal", 0x3bc],
   0x31: ["by_char", { 0x17: 0x1ba }, 0x3a8],
   0x53: ["table", 0x00589a64, 10, 0x00, "i16"],
+  // Class 0x45 seats a clip per sub-type and, for the heads, per index --
+  // see `class45Motion`.
+  0x45: ["class45"],
 };
+
+/** `g_boss3_idle_motions_a` -- `0x00588EE0`, the even heads' first idle. */
+const BOSS3_IDLE_A = [93, 94, 95, 96, 97];
+/** `g_boss3_idle_motions_b` -- `0x00588EF8`, the odd heads'. */
+const BOSS3_IDLE_B = [80, 81, 82, 83, 83];
+
+/**
+ * The clip each class-0x45 init seats, which is what the placement is posed
+ * in. The game seats its own at init (`game/class45/`); this has to name a
+ * clip the character bakes, and the one the init writes is the honest choice.
+ *
+ * * 0, `Boss3OpeningHeadInit` (`FUN_0041FDB0`): `0x5A` in block 11, `0x5B`
+ *   otherwise -- the descriptor does not know its block, so `0x5A`; both bake.
+ * * 1, `Boss3OpeningBystanderInit` (`FUN_004200F0`): `0x23D`.
+ * * 2, `Boss3FightHeadInit` (`FUN_0041FE30`): index 2 `g_boss3l_idle_motions[0]`
+ *   (67), even `g_boss3_idle_motions_a[idx]`, odd `_b[idx]`.
+ * * 3, `Boss3HeldBystanderInit` (`FUN_00420180`): `0x21E`.
+ * * 5, `Boss3BodyInit` (`FUN_00420360`): `0x42`.
+ */
+function class45Motion(spawnRec: Spawn): number | null {
+  const evt = spawnRec.evt;
+  if (evt === null) return null;
+  const at = spawnRec.offset + 0x25;
+  if (at >= evt.raw.length) return null;
+  const sub = (evt.raw[at] << 24) >> 24;
+  const idx = spawnRec.hp & 0xffff;
+  switch (sub) {
+    case 0: return 0x5a;
+    case 1: return 0x23d;
+    case 2:
+      if (idx === 2) return 67;
+      if (idx > 4) return null;
+      return (idx & 1) ? BOSS3_IDLE_B[idx] : BOSS3_IDLE_A[idx];
+    case 3: return 0x21e;
+    case 5: return 0x42;
+    default: return null;
+  }
+}
 
 /**
  * `mot/` is authored at 30 Hz against the engine's 60 Hz clock. The exact
@@ -438,6 +509,7 @@ export function motionFor(tables: ExeTables, spawnRec: Spawn,
   const rule = MOTION_RULES[cls];
   if (rule === undefined) return null;
   if (rule[0] === "literal") return rule[1];
+  if (rule[0] === "class45") return class45Motion(spawnRec);
   if (rule[0] === "block") {
     const [, ptrAt, field] = rule;
     const evt = spawnRec.evt;

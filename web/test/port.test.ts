@@ -367,6 +367,12 @@ import { CamPath } from "../src/game/camera/curve";
 import { Class22SubActorAt } from "../src/game/class22/records";
 import { Class22Relative } from "../src/game/class22/state";
 import { Class23State } from "../src/game/class23/state";
+import {
+  Boss3BodyState, Boss3HeadState, Boss3Phase, Boss3Routine, Boss3Subtype,
+  Boss3Variant,
+} from "../src/game/class45/state";
+import type { Boss3Actor } from "../src/game/actor";
+import { clonePlain } from "../src/core/snapshot";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -10668,6 +10674,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
+    [SpawnClass.Boss3, "0x45 stage-3 boss"],
     [SpawnClass.HordeSpawner, "0x40 horde"],
     [SpawnClass.Bat, "0x46 bat"],
     [SpawnClass.WaterEnemy, "0x51 fish"],
@@ -20189,6 +20196,346 @@ console.log("\nthe per-bone bit, from the skeleton build:");
   const none = ActorSpawn(0x3002, SpawnClass.Zombie, 0x77, "no type");
   check("...and a type the tables do not know has no nodes to raise it for",
         (none.flags & ActorFlag.ShootPerBone) === 0);
+  ResetGameGlobals();
+}
+
+/**
+ * Class 0x45, the stage-3 boss, driven through `GameUpdate` from a reset
+ * (L49): the handler, init and update on three frames, the heads' fight and
+ * its two gates, and the body. The skeletons are the shipped ones' shape --
+ * `boss3.bin` a chain of nineteen nodes whose seventeenth carries the two
+ * jaws, `boss3l.bin` twenty-six with the jaws on the twenty-fourth -- and
+ * every clip is sixty frames of one pose, with the jaws open by `0x2000` or
+ * shut, so the jaw gate is the fixture's to set.
+ */
+console.log("\nclass 0x45: the stage-3 boss -- heads, gates and the body:");
+{
+  const JAW = 0x1000;
+  const boss3Bones = (n: number, weak: number, step: number) => {
+    const out: CharacterType["bones"] = [];
+    for (let b = 1; b <= weak; b++) {
+      out.push({ bone: b, part: `n${b}`, slot: 900 + b,
+                 offset: [b === 1 ? 0 : step, 0, 0],
+                 parent: b === 1 ? null : b - 2, damage_rank: [],
+                 hit_radius: b === weak ? 3 : 2.75, hit_centre: [0, 0, 0],
+                 steps: [] } as never);
+    }
+    for (let b = weak + 1; b < n; b++) {
+      out.push({ bone: b, part: `jaw${b}`, slot: 900 + b,
+                 offset: [step, 0, 0], parent: weak - 1, damage_rank: [],
+                 steps: [] } as never);
+    }
+    return out;
+  };
+  const boss3Clip = (bones: number, jawA: number, jawB: number,
+                     open: boolean) => {
+    const frames = 60;
+    const rot = new Array<number>(frames * bones * 3).fill(0);
+    for (let f = 0; f < frames; f++) {
+      rot[(f * bones + jawA) * 3 + 2] = open ? JAW : 0;
+      rot[(f * bones + jawB) * 3 + 2] = open ? -JAW : 0;
+    }
+    return { bank: "t", frames, fps: 30,
+             root: new Array<number>(frames * 3).fill(0), rot };
+  };
+  const clips = (ids: number[], bones: number, jawA: number, jawB: number,
+                 open: boolean) =>
+    Object.fromEntries(ids.map((id) => [String(id),
+                                        boss3Clip(bones, jawA, jawB, open)]));
+  const range = (a: number, b: number) =>
+    Array.from({ length: b - a + 1 }, (_, i) => a + i);
+  const chars = (open: boolean) => ({
+    ...CHARS,
+    types: {
+      "1": TYPE,
+      "73": { ...TYPE, type: 73, name: "boss3", bone_count: 20,
+              actor_radius: 45, bones: boss3Bones(20, 17, 3),
+              motions: clips(range(74, 100), 20, 18, 19, open) },
+      "72": { ...TYPE, type: 72, name: "boss3l", bone_count: 27,
+              actor_radius: 95, bones: boss3Bones(27, 24, 4),
+              motions: clips(range(59, 73), 27, 25, 26, open) },
+    },
+  } as unknown as CharactersJson);
+  const OPEN = chars(true);
+  const SHUT = chars(false);
+  const HEAD_AT = [0xb000, 0xb028, 0xb050, 0xb078, 0xb0a0];
+  const BODY_AT = 0xb0c8;
+  const rng = new Rng(45);
+  const events = new Events();
+  /**
+   * `op_` paths for the body: segment `k` walks along x from its own
+   * `from`, so every point is distinct and the chain has somewhere to face.
+   */
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot: number, frame: number) =>
+      ({ x: frame * 0.5, y: -5, z: slot }),
+  };
+  const tick = (n: number): void => {
+    for (let i = 0; i < n; i++) GameUpdate(EYE, 1 / 60, host, rng, events);
+  };
+  const head = (i: number) => ActorByAt(HEAD_AT[i]) as Boss3Actor | null;
+
+  /** Five heads out of the spawn list, in Boss Mode's block 15 (variant 0). */
+  const fight = (tables: CharactersJson): Boss3Actor[] => {
+    ResetGameGlobals();
+    SetGameTables(tables);
+    G.g_GameMode = GameMode.Boss;
+    G.g_evt_block_index = 0xf;
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    return HEAD_AT.map((at, i) => ActorSpawn(
+      at, SpawnClass.Boss3, i === 2 ? 72 : 73, `head ${i}`,
+      { class45: { subtype: Boss3Subtype.FightHead }, hp: i, visible: true,
+        pos: vec3(i * 30 - 60, 0, 120) } as never) as Boss3Actor);
+  };
+
+  {
+    const heads = fight(SHUT);
+    check("a spawned head is on the class handler, not yet its init",
+          heads[0].boss3.routine === Boss3Routine.ClassHandler);
+    tick(1);
+    check("frame 1 is `Boss3ClassHandler`: variant 0 from block 15 in Boss "
+          + "Mode, the pool 180, and every head on its init",
+          G.g_boss3_variant === Boss3Variant.Stage3A
+            && G.g_boss3_head_hp_pool === 180
+            && heads.every((h) => h.boss3.routine
+                           === Boss3Routine.FightHeadInit),
+          `variant ${G.g_boss3_variant} pool ${G.g_boss3_head_hp_pool}`);
+    check("...and nothing is counted yet", G.g_enemies_present === 0);
+    tick(1);
+    check("frame 2 is the init: 45 hit points, head 2 alone in both counters",
+          heads.every((h) => h.hp === 45) && G.g_enemies_present === 1
+            && G.g_enemies_alive === 1
+            && heads.every((h) => h.boss3.routine
+                           === Boss3Routine.FightHeadUpdate),
+          `present ${G.g_enemies_present} alive ${G.g_enemies_alive}`);
+    check("...every head out of the shot test (bit 0x8000) and built per bone",
+          heads.every((h) => (h.flags & ActorFlag.NoShotTest) !== 0
+                      && (h.flags & ActorFlag.ShootPerBone) !== 0));
+    tick(1);
+    check("frame 3 is the update, and it registers nothing while 0x8000 holds",
+          G.g_shot_test_list.length === 0,
+          `${G.g_shot_test_list.length} registered`);
+    G.g_script_flags[2] = 1;
+    tick(1);
+    check("`g_script_flags[2]` starts the fight: phase 1, every head idle, "
+          + "shootable, and the bar full",
+          G.g_boss3_phase === Boss3Phase.Fight
+            && heads.every((h) => h.state === Boss3HeadState.Idle
+                           && (h.flags & ActorFlag.NoShotTest) === 0)
+            && G.g_boss_hp_bars.length === 1 && G.g_boss_hp_fraction === 1,
+          `phase ${G.g_boss3_phase} bars ${G.g_boss_hp_bars.length}`);
+    tick(1);
+    check("...and all five register for the shot test once they are in it",
+          HEAD_AT.every((at) => G.g_shot_test_list.some((e) => e.at === at)),
+          `${G.g_shot_test_list.map((e) => e.at.toString(16)).join(",")}`);
+
+    const bar = G.g_boss_hp_bars[0];
+    const early = bar?.shown ?? -1;
+    tick(120);
+    check("the bar fills from empty to the heads' pool, a little a frame",
+          early > 0 && early < 0.2 && bar?.shown === 1,
+          `after 2 frames ${early}, after 122 ${bar?.shown}`);
+
+    const headSnap = JSON.stringify(clonePlain(heads[2])).length;
+    console.log(`  (a head mid-fight snapshots to ${headSnap} bytes)`);
+
+    // A shot on the weak bone with the mouth shut is a miss.
+    MarkActorShot(heads[0], 0, 17);
+    tick(1);
+    check("the weak bone with the jaws shut is a miss: no damage, a spark",
+          heads[0].hp === 45 && G.g_boss3_sparks.length === 1,
+          `hp ${heads[0].hp} sparks ${G.g_boss3_sparks.length}`);
+  }
+
+  {
+    const heads = fight(OPEN);
+    tick(3);
+    G.g_script_flags[2] = 1;
+    tick(2);
+    MarkActorShot(heads[0], 0, 3);
+    tick(1);
+    check("with the jaws open, a bone that is not the weak one is still a miss",
+          heads[0].hp === 45, `hp ${heads[0].hp}`);
+    MarkActorShot(heads[0], 0, 17);
+    tick(1);
+    check("...and the weak bone takes 45/3 = 15 off the head and the pool",
+          heads[0].hp === 30 && G.g_boss3_head_hp_pool === 165,
+          `hp ${heads[0].hp} pool ${G.g_boss3_head_hp_pool}`);
+    check("...the bar reads the pool over 180",
+          G.g_boss_hp_fraction === Math.fround(165 * Math.fround(1 / 180)),
+          `${G.g_boss_hp_fraction}`);
+    check("...and the head flinches", heads[0].state === Boss3HeadState.Flinch);
+
+    // Head 2 cannot be hurt on stage 3.
+    for (let i = 0; i < 40 && heads[2].state !== Boss3HeadState.Idle; i++) {
+      tick(1);
+    }
+    MarkActorShot(heads[2], 0, 24);
+    tick(1);
+    check("the big head refuses even an open-jawed weak-bone hit in variant 0",
+          heads[2].hp === 45, `hp ${heads[2].hp}`);
+
+    // Four small heads, three hits each.
+    const shootDown = (h: Boss3Actor): void => {
+      for (let n = 0; n < 400 && h.state !== Boss3HeadState.Dead; n++) {
+        if (h.state === Boss3HeadState.Idle
+            && !(h.flags & ActorFlag.Hit)) {
+          MarkActorShot(h, 0, 17);
+        }
+        tick(1);
+      }
+    };
+    for (const i of [0, 1, 3]) shootDown(heads[i]);
+    check("three small heads down, the fight is still on and head 2 alive",
+          G.g_boss3_heads_left === 2 && G.g_boss3_phase === Boss3Phase.Fight
+            && heads[2].state !== Boss3HeadState.Dead,
+          `left ${G.g_boss3_heads_left}`);
+    shootDown(heads[4]);
+    check("the fourth leaves one: head 2, whose own tail has not run yet",
+          G.g_boss3_heads_left === 1 && heads[2].state === Boss3HeadState.Idle,
+          `left ${G.g_boss3_heads_left} state ${heads[2].state}`);
+    // Head 2 is ahead of head 4 in the walk, so its tail (`0x00421879`) sees
+    // the count on the next frame.
+    tick(1);
+    check("...the next frame takes head 2 with it: nobody left, phase 2, the "
+          + "big head dead on its own",
+          G.g_boss3_heads_left === 0 && G.g_boss3_phase === Boss3Phase.AllDown
+            && heads[2].state === Boss3HeadState.Dead,
+          `left ${G.g_boss3_heads_left} phase ${G.g_boss3_phase} `
+          + `state ${heads[2].state}`);
+    check("...the bar reads empty", G.g_boss_hp_fraction === 0,
+          `${G.g_boss_hp_fraction}`);
+    check("...and still counts in `g_enemies_present`: the gate is closed",
+          G.g_enemies_present === 1);
+    let opened = -1;
+    for (let n = 1; n <= 200 && opened < 0; n++) {
+      tick(1);
+      if (G.g_enemies_present === 0) opened = n;
+    }
+    check("180 frames later head 2 drops both counters -- the first gate",
+          opened === 180 && G.g_enemies_alive === 0,
+          `opened after ${opened} frames`);
+    const gone = (i: number): boolean => head(i)?.despawned ?? true;
+    check("...moves the class to phase 3, and leaves",
+          G.g_boss3_phase === Boss3Phase.Despawn && gone(2),
+          `phase ${G.g_boss3_phase}`);
+    tick(1);
+    check("...and on stage 3 every other head goes on the next frame",
+          HEAD_AT.every((_, i) => gone(i)));
+  }
+
+  {
+    // The scheduler: never more than two heads armed, and never head 2.
+    const heads = fight(SHUT);
+    G.g_player_no_damage[0] = 1;
+    tick(3);
+    G.g_script_flags[2] = 1;
+    let most = 0;
+    let bites = 0;
+    let bigArmed = false;
+    for (let n = 0; n < 3000; n++) {
+      tick(1);
+      const armed = heads.filter((h) => (h.boss3.block?.armed ?? -1) > -1);
+      most = Math.max(most, G.g_boss3_heads_attacking, armed.length);
+      if (heads[2].boss3.block!.armed > -1) bigArmed = true;
+      bites += heads.filter((h) => h.state === Boss3HeadState.Attack
+                            && h.boss3.cursor === 0).length;
+    }
+    check("in fifty seconds of fight the heads attack",
+          bites > 0, `${bites} attacks started`);
+    check("...never more than two armed at once", most <= 2 && most > 0,
+          `most ${most}`);
+    check("...and head 2 is never armed on stage 3", !bigArmed);
+  }
+
+  {
+    // The body, on block 11 in the Arcade: variant 0. `g_GameMode` is the
+    // run's and outlives a reset, so it is said again here.
+    ResetGameGlobals();
+    SetGameTables(OPEN);
+    G.g_GameMode = GameMode.Arcade;
+    G.g_evt_block_index = 0xb;
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    const body = ActorSpawn(BODY_AT, SpawnClass.Boss3, 72, "body",
+      { class45: { subtype: Boss3Subtype.Body }, hp: 1, visible: true,
+        pos: vec3(0, 0, 100) } as never) as Boss3Actor;
+    tick(2);
+    check("the body's init: 120 hit points, the 95-unit broad sphere, state 8, "
+          + "both counters",
+          body.hp === 120 && body.hitRadius === 95
+            && body.state === Boss3BodyState.BuildPath
+            && G.g_enemies_present === 1 && G.g_enemies_alive === 1,
+          `hp ${body.hp} r ${body.hitRadius} state ${body.state} `
+          + `present ${G.g_enemies_present}`);
+    tick(1);
+    check("building its path it is drawn by nothing and not in the shot test",
+          !body.boss3.drawn
+            && !G.g_shot_test_list.some((e) => e.at === BODY_AT));
+    for (let n = 0; n < 20 && body.state === Boss3BodyState.BuildPath; n++) {
+      tick(1);
+    }
+    check("eight segments (variant 0) and it takes the camera",
+          body.state === Boss3BodyState.TakeCamera
+            && body.boss3.block!.pathCount > 2000,
+          `state ${body.state} points ${body.boss3.block!.pathCount}`);
+    tick(1);
+    check("state 9 hands on to the swim and holds the camera (mode 6)",
+          body.state === Boss3BodyState.Swim && G.g_camera_driver_held === 1,
+          `state ${body.state} held ${G.g_camera_driver_held}`);
+    tick(1);
+    check("...swimming, it registers for the shot test and is drawn",
+          G.g_shot_test_list.some((e) => e.at === BODY_AT) && body.boss3.drawn);
+    MarkActorShot(body, 0, 0x18);
+    tick(1);
+    check("an open-jawed weak-bone hit in the swim does nothing",
+          body.hp === 120, `hp ${body.hp}`);
+    let surfaced = -1;
+    for (let n = 0; n < 400 && surfaced < 0; n++) {
+      tick(1);
+      if (body.state === Boss3BodyState.Surfaced) surfaced = n;
+    }
+    check("the path cursor reaches the first surfacing (210) and it surfaces",
+          surfaced >= 0 && body.boss3.block!.pathCursor === 210,
+          `cursor ${body.boss3.block!.pathCursor} state ${body.state}`);
+    MarkActorShot(body, 0, 0x18);
+    tick(1);
+    check("...where the same hit takes ten off, one player in play: 110",
+          body.hp === 110, `hp ${body.hp}`);
+    check("...and the bar reads it over 120",
+          G.g_boss_hp_fraction === Math.fround(110 * Math.fround(1 / 120)),
+          `${G.g_boss_hp_fraction}`);
+    check("...the camera is still the body's",
+          G.g_camera_driver_held === 1);
+    let n = 0;
+    while (body.state !== Boss3BodyState.Dead && n++ < 4000) {
+      if ((body.state === Boss3BodyState.Surfaced
+           || body.state === Boss3BodyState.Lunge)
+          && !(body.flags & ActorFlag.Hit)) {
+        MarkActorShot(body, 0, 0x18);
+      }
+      tick(1);
+    }
+    check("shot down: state 14, both counters dropped -- the second gate",
+          body.state === Boss3BodyState.Dead && G.g_enemies_present === 0
+            && G.g_enemies_alive === 0,
+          `state ${body.state} present ${G.g_enemies_present} after ${n}`);
+    check("...and it gives the camera back: driver free, `g_camera_free`",
+          G.g_camera_driver_held === 0 && G.g_camera_free === 1);
+    check("...the bar reads empty", G.g_boss_hp_fraction === 0);
+    tick(1);
+    check("dead, it registers nothing",
+          !G.g_shot_test_list.some((e) => e.at === BODY_AT));
+    const snap = JSON.stringify(clonePlain(body));
+    check("the whole actor, path and all, is plain data a snapshot can copy",
+          snap.length > 0, `${snap.length} bytes`);
+    console.log(`  (a body mid-fight snapshots to ${snap.length} bytes)`);
+  }
+  G.g_GameMode = GameMode.Arcade;
   ResetGameGlobals();
 }
 

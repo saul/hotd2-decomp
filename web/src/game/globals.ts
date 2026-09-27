@@ -34,6 +34,10 @@ import type { ShotTestEntry } from "./combat/shot_test";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
 import type { BossHpBar } from "./boss_hp_bar";
 import type { BossBanner } from "./boss_banner";
+import type {
+  Boss3CardPiece, Boss3IntroCard, Boss3MeshBulge, Boss3PathEffect, Boss3Spark,
+  Boss3Splash,
+} from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { Boss4HitMark } from "./class19/hit_mark";
 import type { PlayerBody } from "./player_body";
@@ -567,6 +571,74 @@ export const G = {
    * See `game/boss_banner.ts`.
    */
   g_boss_banners: [] as BossBanner[],
+  // -- class 0x45, the stage-3 boss: its globals, `0x007DC6F0..0x007DC80F`
+  //    and `0x00811200`. Every one is written and read inside the class
+  //    (`get_xrefs_to`), bar the counter `NetworkModeRunPhase` also zeroes.
+  //    See `game/class45/` and `docs/re/boss-tower.md`.
+  /**
+   * `g_boss3_heads_attacking` — `0x007DC6F0`. Heads with an armed or running
+   * attack; head idx 2's scheduler arms another only while it is below 2.
+   */
+  g_boss3_heads_attacking: 0,
+  /**
+   * `g_boss3_variant` — `0x007DC6F1`. 0 and 1 the two stage-3 fights (blocks
+   * 11/15 and 13/17), 2 stage 6's. `Boss3ClassHandler` picks it.
+   */
+  g_boss3_variant: 0,
+  /**
+   * `g_boss3_heads` — `0x007DC6F4`. The five fighting heads by index, as the
+   * spawn addresses of their actors (`-1` for none). Slot 0 is also written
+   * by the opening head and by the body, every frame.
+   */
+  g_boss3_heads: [-1, -1, -1, -1, -1] as number[],
+  /** `g_boss3_last_head` — `0x007DC71C`. The head that last bit or was hit. */
+  g_boss3_last_head: 0,
+  /** `g_boss3_attack_delay` — `0x007DC71E`, s16. Frames to the next armed attack. */
+  g_boss3_attack_delay: 0,
+  /** `g_boss3_head_hp_pool` — `0x007DC720`, s16. The heads' shared bar. */
+  g_boss3_head_hp_pool: 0,
+  /**
+   * `g_boss3_pose_bone` — `0x007DC724`. `Boss3ComposeBonePose`'s loop index,
+   * stored every pass and read by nothing.
+   */
+  g_boss3_pose_bone: 0,
+  /** `g_boss3_heads_left` — `0x007DC728`, s8. Heads still up, 5 at the start. */
+  g_boss3_heads_left: 0,
+  /** `g_boss3_bystanders` — `0x007DC72C`. The two civilians, by spawn address. */
+  g_boss3_bystanders: [-1, -1] as number[],
+  /** `g_boss3_phase` — `0x007DC738`, s8. See `Boss3Phase`. */
+  g_boss3_phase: 0,
+  /**
+   * `g_boss3_card_pieces` — `0x007DC740`, eight `{x, y, z, s32 yaw, scale}`
+   * records: the intro card, in camera space.
+   */
+  g_boss3_card_pieces: Array.from({ length: 8 },
+    () => ({ x: 0, y: 0, z: 0, yaw: 0, scale: 0 })) as Boss3CardPiece[],
+  /** `g_boss3_track_point` — `0x007DC7E0`. The smoothed point the camera tracks. */
+  g_boss3_track_point: vec3(),
+  /** `g_boss3_opening_bystander_pos` — `0x007DC7F0`. */
+  g_boss3_opening_bystander_pos: vec3(),
+  /** `g_boss3_opening_bystander_yaw` — `0x007DC800`. Written, not read. */
+  g_boss3_opening_bystander_yaw: 0,
+  /** `g_boss3_rank` — `0x007DC80C`, s8 0..15. The heads' own adaptive rank. */
+  g_boss3_rank: 0,
+  /**
+   * `g_boss3_rand_counter` — `0x00811200`, u32. `Boss3NextRand`'s state:
+   * seeded per variant by the class handler, stepped by every draw and bumped
+   * by every processed head shot.
+   */
+  g_boss3_rand_counter: 0,
+  /**
+   * `[port-only]` as pools: the tasks class 0x45 allocates, in creation
+   * order -- `Boss3IntroCardUpdate`, `Boss3SparkUpdate`, `Boss3SplashUpdate`,
+   * `Boss3MeshBulgeUpdate` and `Boss3PathEffectUpdate`. Plain records for the
+   * same reason as `g_severed_heads`.
+   */
+  g_boss3_intro_cards: [] as Boss3IntroCard[],
+  g_boss3_sparks: [] as Boss3Spark[],
+  g_boss3_splashes: [] as Boss3Splash[],
+  g_boss3_mesh_bulges: [] as Boss3MeshBulge[],
+  g_boss3_path_effects: [] as Boss3PathEffect[],
   /**
    * `g_camera_driver_held` — `0x009CA094`. While it is 1,
    * `CameraDriverSelectMode` (`FUN_00402650`) forces camera mode 6, the hook
@@ -1615,6 +1687,16 @@ export const G = {
    */
   g_camera_block_pitch_bams: 0,
   /**
+   * `g_camera_block_yaw_bams` — `0x009A60D0`, `g_camera_blocks + 0x90`: the
+   * camera block's Y rotation, which `UpdateSceneViewAndLight`
+   * (`FUN_00401F40`) builds the view from beside the pitch. The port's view
+   * is built from the block's eye and look-at instead, so this is only
+   * written by the one routine that aims the camera by angle rather than by
+   * point -- the stage-3 boss's body, `Boss3BodyUpdate` (`FUN_004231C0`) --
+   * which then publishes the look-at those angles give.
+   */
+  g_camera_block_yaw_bams: 0,
+  /**
    * `g_coli_hit_surface` — 0x009CAC40. The material id of whatever the last
    * collision trace hit, and a **side output**: every caller reads it straight
    * after its own trace rather than being handed it.
@@ -2033,6 +2115,32 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_boss_hp_bars = [];
   G.g_boss_banners = [];
   G.g_boss4_hit_marks = [];
+  // Class 0x45's tasks go with the task list; its data-segment words are
+  // re-seeded by `Boss3ClassHandler` on the next spawn, and are put back to
+  // the image's zeroes here so a seek from a cold start and one from mid-fight
+  // arrive at the same world.
+  G.g_boss3_intro_cards = [];
+  G.g_boss3_sparks = [];
+  G.g_boss3_splashes = [];
+  G.g_boss3_mesh_bulges = [];
+  G.g_boss3_path_effects = [];
+  G.g_boss3_heads_attacking = 0;
+  G.g_boss3_variant = 0;
+  G.g_boss3_heads = [-1, -1, -1, -1, -1];
+  G.g_boss3_last_head = 0;
+  G.g_boss3_attack_delay = 0;
+  G.g_boss3_head_hp_pool = 0;
+  G.g_boss3_pose_bone = 0;
+  G.g_boss3_heads_left = 0;
+  G.g_boss3_bystanders = [-1, -1];
+  G.g_boss3_phase = 0;
+  G.g_boss3_card_pieces = Array.from({ length: 8 },
+    () => ({ x: 0, y: 0, z: 0, yaw: 0, scale: 0 }));
+  G.g_boss3_track_point = vec3();
+  G.g_boss3_opening_bystander_pos = vec3();
+  G.g_boss3_opening_bystander_yaw = 0;
+  G.g_boss3_rank = 0;
+  G.g_boss3_rand_counter = 0;
   G.g_screen_sprite_queue = [];
   // ...and a banner that was flying the camera took its hold with it. The
   // engine's own reset is the scene's first `checkpoint`; this is the port's

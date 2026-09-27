@@ -79,6 +79,9 @@ CHAR_TYPE_RULES: dict[int, tuple] = {
     # types 0, 2 and 3 and stage 3's to 1. The wing actor's `0x1F` has no rule
     # because it has no descriptor: see the note in `game/class46/`.
     0x46: ("literal", 0x1E),       # the bat
+    # The stage-3 boss, five heads and a body and three civilians under one
+    # class id -- see `_class45_type` below and `web/src/game/class45/`.
+    0x45: ("class45",),
     0x53: ("literal", 0x1A),       # FUN_00431250 stores 0x1A -- cat.bin
 }
 
@@ -107,6 +110,40 @@ def _desc24_i8(spawn) -> int | None:
     return struct.unpack_from("<b", spawn.evt.raw, off)[0]
 
 
+def _desc25_i8(spawn) -> int | None:
+    """``desc+0x25``, the class-0x45 sub-type byte `EvtOpSpawnPlaced09` copies."""
+    from . import evt as evtlib
+    if spawn.evt is None:
+        return None
+    off = spawn.offset + evtlib.SPAWN_HEADER + 1
+    if off < 0 or off >= len(spawn.evt.raw):
+        return None
+    return struct.unpack_from("<b", spawn.evt.raw, off)[0]
+
+
+def _class45_type(spawn) -> int | None:
+    """Class 0x45's character type, picked by the sub-type at ``desc+0x25``
+    and, for the fighting heads, by the index at ``desc+0x22``.
+
+    Sub-type 0 (`Boss3OpeningHeadInit`, `FUN_0041FDB0`) writes 0x49; 1 and 3
+    (`Boss3OpeningBystanderInit` `FUN_004200F0`, `Boss3HeldBystanderInit`
+    `FUN_00420180`) write none, so ``desc+0x24`` stands; 2
+    (`Boss3FightHeadInit`, `FUN_0041FE30`) writes 0x48 for index 2 and 0x49
+    for the rest; 5 (`Boss3BodyInit`, `FUN_00420360`) writes 0x48; 4 is
+    `NoOpStub` and no shipped spawn has it. See `docs/re/boss-tower.md`.
+    """
+    sub = _desc25_i8(spawn)
+    if sub == 0:
+        return 0x49
+    if sub in (1, 3):
+        return _desc24_i8(spawn)
+    if sub == 2:
+        return 0x48 if (spawn.hp & 0xFFFF) == 2 else 0x49
+    if sub == 5:
+        return 0x48
+    return None
+
+
 def resolve_spawn(tables, spawn) -> ResolvedSpawn:
     """Identify one spawn descriptor."""
     rule = CHAR_TYPE_RULES.get(spawn.cls)
@@ -124,6 +161,8 @@ def resolve_spawn(tables, spawn) -> ResolvedSpawn:
         ct = rule[1]
     elif rule[0] == "tail":
         ct = spawn.param(rule[1], rule[2])
+    elif rule[0] == "class45":
+        ct = _class45_type(spawn)
     elif rule[0] == "desc24":
         # Opcode 0x09's path: `FUN_004088A0` copies `(s8)desc+0x24` straight to
         # `obj+0x1F4` and there is no parameter block, so `Spawn.param` -- which

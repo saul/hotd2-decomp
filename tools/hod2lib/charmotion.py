@@ -171,6 +171,52 @@ BOSS4_CLIPS: tuple[int, ...] = (
     0x73, 0x74, 0x75, 0x76, 0x78, 0x7A, 0x7B, 0x7C, 0x7D,
 )
 
+#: Every clip class 0x45 can put on one of its actors, over its three
+#: character types -- ``bake`` refuses another skeleton's clip, so the union is
+#: offered whole. ``boss3.bin`` 74..100 (idles, attacks, hurts, swaps, death
+#: 0x4C, grab and intro 0x57..0x5B), ``boss3l.bin`` 59..73 (the big head's
+#: idles 67..72, attack 64, hurt 0x49, death 0x41; the body's 0x3B..0x3F and
+#: swim 0x42), and the civilians' 0x21D/0x21E/0x21F/0x23D/0x24F/0x264. Baked
+#: for the reason ``BOSS4_CLIPS`` is. See `docs/re/boss-tower.md`.
+BOSS3_CLIPS: tuple[int, ...] = (
+    tuple(range(74, 101)) + tuple(range(59, 74))
+    + (0x21D, 0x21E, 0x21F, 0x23D, 0x24F, 0x264)
+)
+
+#: `g_boss3_idle_motions_a` (0x00588EE0) and `_b` (0x00588EF8), per head index.
+_BOSS3_IDLE_A = (93, 94, 95, 96, 97)
+_BOSS3_IDLE_B = (80, 81, 82, 83, 83)
+
+
+def _class45_motion(spawn_rec) -> int | None:
+    """The clip each class-0x45 init seats: sub-type 0 `Boss3OpeningHeadInit`
+    0x5A (0x5B outside block 11; both bake), 1 `Boss3OpeningBystanderInit`
+    0x23D, 2 `Boss3FightHeadInit` 67 for index 2 else the idle table by index
+    parity, 3 `Boss3HeldBystanderInit` 0x21E, 5 `Boss3BodyInit` 0x42."""
+    evt = getattr(spawn_rec, "evt", None)
+    if evt is None:
+        return None
+    at = spawn_rec.offset + 0x25
+    if at >= len(evt.raw):
+        return None
+    sub = struct.unpack_from("<b", evt.raw, at)[0]
+    idx = spawn_rec.hp & 0xFFFF
+    if sub == 0:
+        return 0x5A
+    if sub == 1:
+        return 0x23D
+    if sub == 2:
+        if idx == 2:
+            return 67
+        if idx > 4:
+            return None
+        return _BOSS3_IDLE_B[idx] if idx & 1 else _BOSS3_IDLE_A[idx]
+    if sub == 3:
+        return 0x21E
+    if sub == 5:
+        return 0x42
+    return None
+
 
 MOTION_RULES: dict[int, tuple] = {
     # `Boss4Init` (`FUN_004917E0`) seats the clip as a literal:
@@ -244,6 +290,9 @@ MOTION_RULES: dict[int, tuple] = {
     0x18: ("literal", 0x3BC),
     0x31: ("by_char", {0x17: 0x1BA}, 0x3A8),
     0x53: ("table", 0x00589A64, 10, 0x00, "i16"),
+    # Class 0x45 seats a clip per sub-type and, for the heads, per index --
+    # see `_class45_motion`.
+    0x45: ("class45",),
 }
 
 #: `mot/` is authored at 30 Hz against the engine's 60 Hz clock -- see the note
@@ -435,6 +484,8 @@ def motion_for(tables, spawn_rec, cls: int) -> int | None:
         return None
     if rule[0] == "literal":
         return rule[1]
+    if rule[0] == "class45":
+        return _class45_motion(spawn_rec)
     if rule[0] == "block":
         _, ptr_at, field = rule
         evt = getattr(spawn_rec, "evt", None)

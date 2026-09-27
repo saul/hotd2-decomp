@@ -17,7 +17,8 @@ import type { ExeTables } from "./exetab";
 export type CharTypeRule =
   | ["literal", number]
   | ["tail", number, ParamKind]
-  | ["desc24"];
+  | ["desc24"]
+  | ["class45"];
 
 /**
  * How each class finds its character type (`obj+0x1F4`), from the handler
@@ -76,6 +77,9 @@ export const CHAR_TYPE_RULES: Record<number, CharTypeRule> = {
   // 0, 2 and 3 and stage 3's to 1. The wing actor's `0x1F` has no rule because
   // it has no descriptor: see the note in `game/class46/`.
   0x46: ["literal", 0x1e],   // the bat
+  // The stage-3 boss, five heads and a body and three civilians under one
+  // class id -- see `class45Type` below and `game/class45/`.
+  0x45: ["class45"],
   0x53: ["literal", 0x1a],       // FUN_00431250 stores 0x1A -- cat.bin
 };
 
@@ -102,6 +106,39 @@ function desc24I8(spawn: Spawn): number | null {
   return (spawn.evt.raw[off] << 24) >> 24;
 }
 
+/** `desc+0x25`, the class-0x45 sub-type byte `EvtOpSpawnPlaced09` copies. */
+function desc25I8(spawn: Spawn): number | null {
+  if (spawn.evt === null) return null;
+  const off = spawn.offset + SPAWN_HEADER + 1;
+  if (off < 0 || off >= spawn.evt.raw.length) return null;
+  return (spawn.evt.raw[off] << 24) >> 24;
+}
+
+/**
+ * Class 0x45's character type, which no single-field rule can express: it is
+ * picked by the **sub-type** at `desc+0x25`, and for the fighting heads by the
+ * **index** at `desc+0x22` as well. Each sub-type's init writes it, as a
+ * literal or not at all (`docs/re/boss-tower.md`):
+ *
+ * | `desc+0x25` | init | type |
+ * |---|---|---|
+ * | 0 | `Boss3OpeningHeadInit` (`FUN_0041FDB0`), `0x0041FDCB` | `0x49`, `boss3.bin` |
+ * | 1, 3 | `Boss3OpeningBystanderInit` (`FUN_004200F0`), `Boss3HeldBystanderInit` (`FUN_00420180`) | none written: `desc+0x24`, which `EvtOpSpawnPlaced09` copied |
+ * | 2 | `Boss3FightHeadInit` (`FUN_0041FE30`) | index 2 `0x48` (`boss3l.bin`), the others `0x49` |
+ * | 4 | `NoOpStub` (`FUN_0041EBB0`) | none -- no shipped spawn |
+ * | 5 | `Boss3BodyInit` (`FUN_00420360`) | `0x48` |
+ */
+function class45Type(spawn: Spawn): number | null {
+  const sub = desc25I8(spawn);
+  switch (sub) {
+    case 0: return 0x49;
+    case 1: case 3: return desc24I8(spawn);
+    case 2: return (spawn.hp & 0xffff) === 2 ? 0x48 : 0x49;
+    case 5: return 0x48;
+    default: return null;
+  }
+}
+
 /** Identify one spawn descriptor. */
 export function resolveSpawn(tables: ExeTables, spawn: Spawn): ResolvedSpawn {
   const rule = CHAR_TYPE_RULES[spawn.cls];
@@ -121,6 +158,8 @@ export function resolveSpawn(tables: ExeTables, spawn: Spawn): ResolvedSpawn {
     ct = rule[1];
   } else if (rule[0] === "tail") {
     ct = spawn.param(rule[1], rule[2]);
+  } else if (rule[0] === "class45") {
+    ct = class45Type(spawn);
   } else {
     // Opcode 0x09's path: `FUN_004088A0` copies `(s8)desc+0x24` straight to
     // `obj+0x1F4` and there is no parameter block, so `Spawn.param` -- which

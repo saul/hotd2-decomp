@@ -613,6 +613,21 @@ console.log("\nThe shutter bars, as the HUD layer covers the frame:\n");
   const black = shutterCover([{ y: 0, sy: 8 }]);
   check("the blackout covers all of it", black.top === 100
         && black.bottom === 100, JSON.stringify(black));
+
+  // ...and "the frame" is the rendered view. Pillarboxed in a window taller
+  // than 4:3 the canvas is a centred 4:3 box shorter than the viewport, and
+  // bars measured off the viewport covered its black margin instead.
+  const frameOf = (boxed: boolean) => {
+    const html = render({ ...projection(), pillarbox: boxed });
+    const layer = html.slice(html.indexOf('class="hud-layer"'));
+    const m = /<div class="(hud-frame[^"]*)">\s*<div class="shutter shutter-top"/
+      .exec(layer);
+    return m?.[1] ?? null;
+  };
+  check("pillarboxed, the bars sit in the 4:3 frame box",
+        frameOf(true) === "hud-frame boxed", String(frameOf(true)));
+  check("...and unboxed, in a frame that is the whole viewport",
+        frameOf(false) === "hud-frame", String(frameOf(false)));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -3480,6 +3480,12 @@ What that fixed, all inside the one routine:
   do not model their bits yet, so in the page the last is dormant.)
 * **A seek or a paused load** runs no frame, so the next frame's bars are drawn
   on a copy with the readouts (`PlayerTasksDrawWithoutAFrame`).
+* **The frame the bars are a tenth of** is the rendered view. Pillarboxed in a
+  window taller than 4:3, the canvas is a centred 4:3 box shorter than the
+  viewport, and the bars were measured off the viewport: they covered the
+  box's black margin and a sliver of the picture. They sit in a `.hud-frame`
+  that is that box now (`ui/panels/Viewport.tsx`), and in the whole viewport
+  unboxed, where the fixed vertical FOV spans it.
 
 Pinned by `test:port`'s "the shutter frame by frame" section, driven from
 `ResetGameGlobals`: each of the reset, the order, the slide's timing, the card

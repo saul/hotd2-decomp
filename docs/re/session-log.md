@@ -20071,6 +20071,11 @@ turns it on for `--route`, which reads the bar.
   the end of the walker's tick. That puts it after the script but still
   before the players, so the fire routine would still see this frame's gate
   a frame early; only `SceneTaskWalk` has the players in it.
+* The first screenshot after the change looked right and was not: in a
+  window taller than 4:3 the pillarboxed canvas is shorter than the viewport,
+  and `hud/` measured the bars off the viewport, so the "closed" bars were
+  mostly the canvas's own black margin. That predates this change; the bars
+  sit in a 4:3 frame box now when pillarboxed.
 * Drawing from the record would have left a paused load or a seek with no
   bars, because nothing there runs a frame (caught in the design, not in the
   page). `PlayerTasksDrawWithoutAFrame` already existed for

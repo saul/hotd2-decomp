@@ -5,7 +5,8 @@
  *
  *   Step       block -> step -> instruction, every one of them seekable, with
  *              a frame slider inside a camera move
- *   Play       60 Hz with a speed control, pausing at every branch point
+ *   Play       60 Hz with a speed control; a branch goes as the game's does,
+ *              unless the sidebar's "Pause at branches" debug aid holds it
  *   Free roam  orbit and fly, detached from the rail
  *
  * The camera is the game's own: 41.100 degrees vertical, 4:3, near 0.8, far

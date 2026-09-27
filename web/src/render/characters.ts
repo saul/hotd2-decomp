@@ -67,6 +67,7 @@ import type { ShotPick, ShotRay } from "../game/host";
 import type { BreakableLayer } from "./breakables";
 import type { SlotModelLayer } from "./slotmodels";
 import type { CreatureSphereSource } from "./effects";
+import { boss3Drawn, poseBoss3 } from "./characters/boss3";
 import { BAMS_TO_RAD } from "../core/bams";
 
 /**
@@ -493,7 +494,10 @@ export class CharacterLayer implements System {
       // a threshold is the whole of what this needs; a genuine fade would have
       // to reach every material under the root and is not what either state
       // asks for.
-      const show = this.enabled && inst.a.visible && inst.a.alpha > 0;
+      // Class 0x45's routines say for themselves whether they drew the
+      // skeleton this frame -- see `render/characters/boss3.ts`.
+      const show = this.enabled && inst.a.visible && inst.a.alpha > 0
+        && boss3Drawn(inst);
       inst.root.visible = show;
       if (!show) {
         syncHordeMirror(inst, false);
@@ -508,23 +512,29 @@ export class CharacterLayer implements System {
       // update, so the actor's own position is carrier-relative and the draw
       // inherits the matrix. The port composes the point in `game/carrier.ts`
       // and publishes it; this reads it.
-      if (placeHordeRoot(inst)) {
-        // Class 0x40's sub-model: its own object transform. See
-        // `render/characters/horde.ts`.
-      } else if (inst.a.carrierAt >= 0) {
-        inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
-                               inst.a.carrierWorld.z);
-        inst.root.rotation.set(
-          0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
+      if (poseBoss3(inst)) {
+        // Class 0x45 composes its own matrices; this places them. See
+        // `render/characters/boss3.ts`.
       } else {
-        inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
-        inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+        if (placeHordeRoot(inst)) {
+          // Class 0x40's sub-model: its own object transform. See
+          // `render/characters/horde.ts`.
+        } else if (inst.a.carrierAt >= 0) {
+          inst.root.position.set(inst.a.carrierWorld.x,
+                                 inst.a.carrierWorld.y,
+                                 inst.a.carrierWorld.z);
+          inst.root.rotation.set(
+            0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
+        } else {
+          inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
+          inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+        }
+        // The clocks belong to the port -- `ActorAdvanceMotion` -- so the
+        // game can be run with no renderer at all, and so a swing keeps its
+        // play position across a save state. This only reads them.
+        this.poser.pose(inst);
+        poseHordeJaw(inst, this.poser);
       }
-      // The clocks belong to the port -- `ActorAdvanceMotion` -- so the game
-      // can be run with no renderer at all, and so a swing keeps its play
-      // position across a save state. This only reads them.
-      this.poser.pose(inst);
-      poseHordeJaw(inst, this.poser);
       syncHordeMirror(inst, true);
       // A bone `RemoveBoneSubtree` took off is hidden here rather than where
       // the shot resolved: `ResolveHit` runs in the port now, and what a
@@ -1112,20 +1122,26 @@ export class CharacterLayer implements System {
       // here; clearing the cache is what makes the next apply do the work.
       inst.veto = undefined;
       this.applyBoneVeto(inst);
-      inst.root.visible = this.enabled && inst.a.visible && inst.a.alpha > 0;
-      if (placeHordeRoot(inst)) {
+      inst.root.visible = this.enabled && inst.a.visible && inst.a.alpha > 0
+        && boss3Drawn(inst);
+      if (poseBoss3(inst)) {
         // See `update`.
-      } else if (inst.a.carrierAt >= 0) {
-        inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
-                               inst.a.carrierWorld.z);
-        inst.root.rotation.set(
-          0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
       } else {
-        inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
-        inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+        if (placeHordeRoot(inst)) {
+          // See `update`.
+        } else if (inst.a.carrierAt >= 0) {
+          inst.root.position.set(inst.a.carrierWorld.x,
+                                 inst.a.carrierWorld.y,
+                                 inst.a.carrierWorld.z);
+          inst.root.rotation.set(
+            0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
+        } else {
+          inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
+          inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
+        }
+        this.poser.pose(inst);
+        poseHordeJaw(inst, this.poser);
       }
-      this.poser.pose(inst);
-      poseHordeJaw(inst, this.poser);
       syncHordeMirror(inst, inst.root.visible);
     }
   }

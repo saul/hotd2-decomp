@@ -40,7 +40,7 @@ import {
 import { ApplyRootMotion } from "../root_motion";
 import { CharacterTypeOf, MotionOf, MotionPlayLength } from "../tables";
 import type { BakedMotion, CharacterBone } from "../../bundle";
-import { BOSS3_MAX_BONES, type Boss3Tail } from "./state";
+import { BOSS3_MAX_BONES, Boss3PoseHook, type Boss3Tail } from "./state";
 
 /** `model+0x37` bit 0 -- a cross-fade is running. */
 export const TRACK_FADING = 0x01;
@@ -338,6 +338,10 @@ export function Boss3DrawModel(obj: Boss3Actor): void {
   Boss3ApplyRootMotion(obj);
   obj.boss3.composed = false;
   Boss3PoseMatrices(obj, false);
+  // The skeleton walk draws a node only through the pose hook, and the
+  // heads' and the body's is `PoseHookNone`: they are drawn by
+  // `Boss3DrawBoneParts` instead.
+  if (obj.boss3.poseHook !== Boss3PoseHook.None) obj.boss3.drawn = true;
 }
 
 /** Bone `b`'s record in the bundle's list, and its parent's bone number. */

@@ -126,7 +126,10 @@ export function NoOpStub(): void {
 function Boss3Dispatch(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.Boss3) return;
   const b = obj as Boss3Actor;
-  switch (b.boss3.routine) {
+  // What the frame draws is the routine's to say, afresh.
+  const t = b.boss3;
+  t.drawn = false; t.flash = -1; t.wakeBones = 0; t.shadow = false;
+  switch (t.routine) {
     case Boss3Routine.ClassHandler: Boss3ClassHandler(b, f); break;
     case Boss3Routine.OpeningHeadInit: Boss3OpeningHeadInit(b); break;
     case Boss3Routine.OpeningHeadUpdate: Boss3OpeningHeadUpdate(b, f); break;

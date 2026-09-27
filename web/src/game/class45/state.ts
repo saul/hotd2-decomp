@@ -193,6 +193,12 @@ export enum Boss3PoseHook {
   None = 0,
   /** `Boss3BystanderPoseHook` (`FUN_004208F0`) -- the civilians'. */
   Bystander = 1,
+  /**
+   * `FUN_00411050`, which `ActorBuildSkinnedModel` (`FUN_00410440`) installs
+   * at `0x00410522`: `NoOpStub(model+0x116C); AssetDrawSlot(node's slot)`.
+   * The opening head keeps it.
+   */
+  Default = 2,
 }
 
 /** Bones in the larger skeleton, and so in every per-bone array here. */
@@ -410,6 +416,19 @@ export interface Boss3Tail {
    * (`FUN_00408EC0`). Read by the class's `tracksCamera`.
    */
   cameraTracked: boolean;
+  /**
+   * `[port-only]` -- what this frame's update drew, for `render/`: the
+   * skeleton at all (`drawn`); the bite flash, as the clock value its cels
+   * were chosen by (`flash`, -1 for none); the wake, as a mask of the bones
+   * that drew it and the `g_frame_counter` its cel was chosen by; and the
+   * opening civilian's shadow disc. The engine draws these inside the update
+   * and keeps nothing; the port's renderer runs after it and needs to be told.
+   */
+  drawn: boolean;
+  flash: number;
+  wakeBones: number;
+  wakeCel: number;
+  shadow: boolean;
   /** `obj+0x1390` -- the state block, heads and body only. */
   block: Boss3Block | null;
 }
@@ -429,7 +448,8 @@ export function makeBoss3Tail(): Boss3Tail {
     pivot: vec3(), composed: false,
     boneOrigin: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
     bonePoint: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
-    cameraTracked: false, block: null,
+    cameraTracked: false, drawn: false, flash: -1, wakeBones: 0,
+    wakeCel: 0, shadow: false, block: null,
   };
 }
 
@@ -438,8 +458,12 @@ export interface Boss3CardPiece {
   x: number; y: number; z: number; yaw: number; scale: number;
 }
 
-/** `Boss3IntroCardUpdate`'s task: step at `+0x1310`, frame at `+0x1320`. */
-export interface Boss3IntroCard { step: number; frame: number }
+/**
+ * `Boss3IntroCardUpdate`'s task: step at `+0x1310`, frame at `+0x1320`.
+ * `drawn` is `[port-only]`: whether this frame's step drew the pieces, which
+ * the engine does inside the step.
+ */
+export interface Boss3IntroCard { step: number; frame: number; drawn: boolean }
 
 /**
  * `Boss3SparkUpdate`'s task: the actor `+0x34`, bone `+0x46`, cel `+0x44`.
@@ -462,10 +486,11 @@ export interface Boss3MeshBulge { step: number; stopped: number }
 
 /**
  * `Boss3PathEffectUpdate`'s task: `+0x1330` the step, `+0x1334` the row of
- * `g_boss3_path_effects`, `+0x1338` the cel. `shown`, `shownRow` and
- * `shownAlpha` are what this frame drew (`shown` -1 for nothing).
+ * `g_boss3_path_effects`, `+0x1338` the cel. `shown`, `shownRow`,
+ * `shownAlpha` and `shownYaw` (the camera block's yaw it was turned by) are
+ * what this frame drew (`shown` -1 for nothing).
  */
 export interface Boss3PathEffect {
   step: number; row: number; cel: number;
-  shown: number; shownRow: number; shownAlpha: number;
+  shown: number; shownRow: number; shownAlpha: number; shownYaw: number;
 }

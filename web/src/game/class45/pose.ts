@@ -350,6 +350,19 @@ export function Boss3ComposeBonePose(obj: Boss3Actor): void {
 
 /** The bite flash's clock stops at `0x25` on a head. */
 const FLASH_FRAMES = 0x25;
+/**
+ * The wake's windows (`0x00421CA3`..`0x00421D01`): not in clip `0x3D` before
+ * cursor `0x37`, not past bone 15 in clips `0x3B`/`0x3C`, and only while the
+ * path cursor is in `(0x5E, 0x519]` or at `0x57A` and beyond.
+ */
+const CLIP_WAKE_LATE = 0x3d;
+const WAKE_LATE_FROM = 0x37;
+const CLIP_WAKE_TURN_A = 0x3b;
+const CLIP_WAKE_TURN_B = 0x3c;
+const WAKE_TURN_LAST_BONE = 0xf;
+const WAKE_FIRST_AFTER = 0x5e;
+const WAKE_FIRST_END = 0x519;
+const WAKE_SECOND_FROM = 0x57a;
 /** The dive splash's line, `[0x004C4C78]` -- -15.0. */
 const SPLASH_LINE = -15;
 /** `PlaySoundId(0x4116A9)` -- `COMMON\SIBUKI2`. */
@@ -378,14 +391,33 @@ export function Boss3DrawBoneParts(obj: Boss3Actor, events?: Events): void {
   const t = obj.boss3;
   const blk = t.block;
   if (!blk) return;
+  t.drawn = true;
+  const wake = G.g_boss3_variant === 0 && t.index === 8
+    && obj.state >= Boss3BodyState.Swim && obj.state <= Boss3BodyState.Recover
+    && !(obj.motion === CLIP_WAKE_LATE && t.cursor < WAKE_LATE_FROM)
+    && ((blk.pathCursor > WAKE_FIRST_AFTER && blk.pathCursor <= WAKE_FIRST_END)
+        || blk.pathCursor >= WAKE_SECOND_FROM);
   for (let i = 1; i < blk.boneCount; i++) {
-    if (obj.state === Boss3HeadState.Attack && i === blk.jawB
+    // `0x00421A59`/`0x00421AFA`: a head's bite flash at its second jaw, the
+    // clock stepped first and its cels chosen by the new value.
+    if (t.index !== 8 && obj.state === Boss3HeadState.Attack && i === blk.jawB
         && blk.flashClock < FLASH_FRAMES) {
       blk.flashClock += 1;
+      t.flash = blk.flashClock;
     }
+    // `0x00421BBE`: the body's, at its weak bone in state 11, uncapped.
     if (t.index === 8 && obj.state === Boss3BodyState.Surfaced
         && i === blk.weakBone) {
       blk.flashClock = ((blk.flashClock + 1) << 16) >> 16;
+      t.flash = blk.flashClock;
+    }
+    // `0x00421C73`: two wake cels on every chain bone below the weak one
+    // but, in the two turning clips, the tail's past bone 15.
+    if (wake && i < blk.weakBone
+        && !((obj.motion === CLIP_WAKE_TURN_A || obj.motion === CLIP_WAKE_TURN_B)
+             && i > WAKE_TURN_LAST_BONE)) {
+      t.wakeBones |= 1 << i;
+      t.wakeCel = G.g_frame_counter >>> 0;
     }
     if (blk.eventIndex === SPLASH_EVENT && blk.pathCursor >= SPLASH_FROM
         && i === blk.jawB) {

@@ -12,7 +12,8 @@
 import type { Events } from "../../core/events";
 import { ActorByAt, G } from "../globals";
 import {
-  Boss3BodyState, type Boss3PathEffect, type Boss3Spark, type Boss3Splash,
+  Boss3BodyState, type Boss3IntroCard, type Boss3PathEffect, type Boss3Spark,
+  type Boss3Splash,
 } from "./state";
 import {
   BOSS3_PATH_EFFECTS, BOSS3_SPARK_LAST_CEL, BOSS3_SPLASH_KIND0_END,
@@ -62,7 +63,7 @@ const CARD_FADE = Math.fround(1 / 60);
 
 /** `ActorAlloc(Boss3IntroCardUpdate, 0x13F4)` with step 0. `[port-only]` as a function. */
 export function Boss3SpawnIntroCard(): void {
-  G.g_boss3_intro_cards.push({ step: 0, frame: 0 });
+  G.g_boss3_intro_cards.push({ step: 0, frame: 0, drawn: false });
 }
 
 /**
@@ -82,9 +83,12 @@ export function Boss3SpawnIntroCard(): void {
  * the page curl `CurlModelSlot3F7ByYaw` (`FUN_004759C0`) applies to them
  * during the flip is that layer's too.
  */
-export function Boss3IntroCardUpdate(c: { step: number; frame: number }):
-    boolean {
+export function Boss3IntroCardUpdate(c: Boss3IntroCard): boolean {
   const p = G.g_boss3_card_pieces;
+  // Step 1 before frame `0x50` and step 2 before frame 300 draw every piece
+  // (`MatrixLoadIdentity; T; RotY; Scale; AssetDrawSlot(g_boss3_card_piece_slots[i])`
+  // under `CurlModelSlot3F7ByYaw`, which is inert); step 0 and the kill do not.
+  c.drawn = false;
   if (c.step === 0) {
     c.frame = 0;
     for (let i = 0; i < CARD_PIECES; i++) {
@@ -106,6 +110,7 @@ export function Boss3IntroCardUpdate(c: { step: number; frame: number }):
         p[i].z = Math.fround(-1 - (8 - i) * CARD_STACK);
       }
     }
+    c.drawn = true;
   } else if (c.step === 1 || c.step === 2) {
     if (c.step === 1) c.step = 2;
     if (c.frame === CARD_END) return false;
@@ -119,6 +124,7 @@ export function Boss3IntroCardUpdate(c: { step: number; frame: number }):
         p[i].y = Math.fround(p[i].y + CARD_BOSS_SLIDE_Y);
       }
     }
+    c.drawn = true;
   }
   if (c.step >= 2 && c.step <= 3 && c.frame >= CARD_FLIP_END) {
     let a = Math.fround((c.frame - CARD_FLIP_END) * CARD_FADE);
@@ -218,7 +224,8 @@ export function Boss3MeshBulgeUpdate(b: { stopped: number }): boolean {
  */
 export function Boss3SpawnPathEffects(): void {
   G.g_boss3_path_effects.push({ step: G.g_evt_step_index, row: 0, cel: 0,
-                                shown: -1, shownRow: 0, shownAlpha: 1 });
+                                shown: -1, shownRow: 0, shownAlpha: 1,
+                                shownYaw: 0 });
 }
 
 /** `COMMON\ENE_WALK6_22`, every eighth path point inside a window. */
@@ -254,8 +261,10 @@ export function Boss3PathEffectUpdate(e: Boss3PathEffect,
   if (row.start <= cur && cur <= row.end + PATH_EFFECT_TAIL) {
     // `AssetDrawSlotWithAlpha(0x1987 + cel, (end - cur + 0x14) * 0.05)` past
     // the row's end, `AssetDrawSlot` before it -- `render/`'s, from these.
+    // `T(row point); RotY(g_camera_block_yaw_bams); Scale(2, 2, 2)`.
     e.shown = e.cel;
     e.shownRow = e.row;
+    e.shownYaw = G.g_camera_block_yaw_bams;
     e.shownAlpha = row.end < cur
       ? Math.fround((row.end - cur + PATH_EFFECT_TAIL) * PATH_EFFECT_FADE) : 1;
     e.cel += 1;

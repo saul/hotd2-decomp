@@ -92,6 +92,8 @@ export function Boss3OpeningHeadInit(obj: Boss3Actor): void {
   Boss3SetMotion(obj, G.g_evt_block_index === 0xb
     ? CLIP_OPENING_A : CLIP_OPENING_B);
   ActorClaimHitSlot(obj);
+  // `ActorBuildSkinnedModel` leaves its own draw hook, and this Init keeps it.
+  t.poseHook = Boss3PoseHook.Default;
   obj.flags |= 0x88000;
   t.modelFrame = 0;
   t.blend = OPENING_OFFSET;
@@ -180,6 +182,9 @@ export function Boss3OpeningBystanderUpdate(obj: Boss3Actor,
   const t = obj.boss3;
   G.g_boss3_bystanders[0] = obj.at;
   if (obj.state > 0) Boss3DrawModel(obj);
+  // `MatrixTranslate(x, y + 0.3, z); MatrixScale(10, 1, 10); NoOpStub(10.0);
+  // AssetDrawSlot(0x10D0)` -- her shadow disc, in every state.
+  t.shadow = true;
   const variant = G.g_boss3_variant;
   switch (obj.state) {
     case Boss3BystanderState.Standing:

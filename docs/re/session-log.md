@@ -19566,6 +19566,47 @@ port's reset clears them now (`[port-only]` -- the engine never needs to).
 
 Named: `CamStashPathRange`, `g_rail_frame`, `g_force_rail_advance`.
 
+## 2026-09-27 -- JUDGMENT (classes 0x22 and 0x23), read for the port
+
+Phase 1 of the boss port: the whole of classes 0x22 and 0x23 read, named and
+written up in [`boss-judgment.md`](boss-judgment.md); no TypeScript.
+
+* Class 0x22 is the small flier (character type 0x45, `_ZE`/`_ZEA` voice
+  files, *"The small one must be the brain!?"*), class 0x23 the large walker
+  (0x44). The walker never loses hit points outside Training; each hit on it
+  adds 1 to the flier's `obj+0x132C`, which the flier's phase-1 damage step
+  subtracts in four of its fourteen sub-states and otherwise discards.
+* `obj+0x1310` is relative: the three variant updates index
+  `g_class22_states` from `0x598000`, `0x598008` and `0x598018`.
+* The gates: `wait_script_flag 3` (stage 1 blocks 14/16) is opened at
+  `0x0049CC95`, `wait_script_flag 0` (stage 5 block 1) at `0x0049CC85`, both
+  in `Class22Death` sub 5, 300 frames into the death orbit. The banner
+  (variant 1 only) waits on `g_script_flags[2]`, which the ride-in raises at
+  camera frame 830.
+* Stage 5 flies `op_st1` paths: the engine's per-scene cam list
+  (`0x004C4990`) loads `op_st1` in scene 4, and the web loader does not.
+
+Wrong turns:
+
+* The brief said the four spawns were opcode `0x09` and asked how `0x09`
+  reaches `obj+0x1390`. It does not: `dump_stage_script.py` prints opcode
+  `0x0B` as `spawn_obj` and `0x09` as `spawn_placed`; the evt table at
+  `0x005931D8` settles it (entry 9 `0x004088A0`, entry `0xB` `0x00408AA0`).
+* An earlier, abandoned session's names were kept where the code agreed and
+  changed where it did not: `Class22AdvanceAndSeatRider` is the draw, not an
+  advance (the callers advance `obj+0x194`), so it is
+  `Class22DrawAndPoseSubActor`; `Class23StateShared1`/`Class23Subtype2State1`
+  are `Class23FightBesideCompanion`/`Class23TrainingFightAlone`. Its notes had
+  variant 3 as unused (it is `advevtbl.bin`'s) and phase 2 as setting
+  `obj+0x1310` to 5 (it writes 3, relative).
+* Four routines are truncated at a `MatrixStackPop` in Ghidra (L35): the
+  draw, `Class22FightPhase1` (whose tail publishes `g_boss_hp_fraction` and
+  registers the shot), `Class22Death` (`CamBlockSetAnglesFromLookAt`) and
+  `Class22Phase1TakeShots`. The draw's hidden half is the whole sub-actor.
+
+Named: every routine of both classes (Ghidra had no function at `0x00490B00`,
+`0x00490D00` or `0x0049D980`), three renamed, and their tables; see the TSVs.
+
 ## 2026-09-27 -- two `[open]`s in the boss furniture, closed
 
 Under the standing rule that a divergence is fixed rather than declared.
@@ -19653,6 +19694,55 @@ playthroughs are identical to the baseline to the frame.
 Named: `ProcessPlayerShotsTaskCreate`, `ProcessPlayerShotsTask` (the thunk
 had the same name as the routine), `ShotPushWorldCandidate`,
 `ShotPushColiHitCandidate`.
+
+## 2026-09-27 -- JUDGMENT ported: classes 0x22 and 0x23, and what the draw had hidden
+
+Phase 2 of the boss port: both classes transcribed routine by routine into
+`game/class22/` and `game/class23/`, the exporter taught the nested walker,
+the sub-actor and every scene's cam files, the draw ported in
+`render/characters/judgment.ts`, and both classes moved onto the faithful
+shot test once it landed. Stage 1 block 14 plays through: phase 1, the
+walker's fall, phase 2, the death orbit and `g_script_flags[3]`.
+
+* The draw is where most of the unread engine was. `SkeletonApplyRootMotion`
+  switches the object rotation order on `model+0x68` (table `0x00411038`);
+  the flier and its wings are order 5, the walker 1 -- `open question 7` of
+  phase 1, which had the byte and not its meaning. `Class22DrawBonePart`'s
+  second arm keys on the node's **slot** `0x2BB`, not on node 1, and turns its
+  two models by nodes 3 and 6's drawn angles, which `FUN_00411700` writes to
+  the draw record as it rotates each node.
+* `Class23LandingRingUpdate` draws, then increments, then kills past `0x50`:
+  the port's first cut drew one frame late and lost the last frame.
+* **The models were the wrong file.** The exe lists the boss's slots under
+  `char_adv04.bin` first and the exporter took that; the stages load
+  `boss1q`/`boss1z`/`boss1z_wing`, and `FUN_00418EC0` fills a slot from
+  whatever file is loaded while it is free. The flier matched byte for byte
+  bar texture numbering; the walker's arm and one texture did not.
+* `FUN_00445050` writing flag 3 is `g_prop_behaviours[9]`, and no prop in
+  stage 1's boss blocks runs it.
+
+Wrong turns:
+
+* An early phase-2 note had both classes without bit `0x80`, and so hit as
+  one sphere. Wrong: `ActorBuildSkinnedModel` raises `0x80` for both (the
+  shot-test workstream's reading), so they are hit bone by bone after the
+  `obj+0x124` sphere.
+* A port-only "was this actor on the shot list last frame" latch stood in for
+  the list itself, dropping shots that landed on unlisted frames. It went
+  when the list arrived; nothing it did survives.
+* `Class22Init` ran its first update inline, as the engine's `Init` does from
+  the task walk -- which, with the director's walk also updating it, was two
+  updates on the spawn frame. The engine's `Init` *is* the task walk's call,
+  so the port's spawn-frame walk is that update and the inline one went.
+* A hand-split `.rdata` hex image for `0x00570BE0` was off by a line; the
+  image is generated now and checked against Ghidra's bytes.
+* The first stage-1 playthrough stopped at block 14 as "reached an end block"
+  -- the harness ends on arrival -- and a copy that played on was killed by
+  its own debug clear after 480 frames of volleys the room-pressure meter could
+  not see land (it does not read the flier). A long `--shoot-for` shows the
+  fight; `--no-damage` shows the end.
+
+Named: `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`).
 
 ## 2026-09-27 -- Strength (class 0x19), the whole fight
 

@@ -251,10 +251,11 @@ thousand units) against the blob in the bone's frame, over
 the quad's surface; `MarkActorShot` hands them to `SpawnWorldImpact`, which
 fills `g_shot_hit_records` for the boss's own `Boss4ResolveShot` to read.
 
-Class 0x19 sets the flag (branch `boss/strength`): `Boss4Update` calls
+JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), and
+so does Strength (`game/class19/`: `Boss4Update` calls
 `ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line, and the mesh
-arm below is its alone. The other bosses are being ported in other
-workstreams and each will set it with its own module. Their sites:
+arm above is its alone), at the sites below; the other bosses are being ported
+in other workstreams and each will set it with its own module. The sites:
 
 | class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
 |---|---|---|---|---|---|---|

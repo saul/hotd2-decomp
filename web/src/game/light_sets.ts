@@ -21,7 +21,8 @@
  * | `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) | 0x14 |
  * | `Boss4AdvanceMotionAndDrawHeldProps` (`FUN_00492620`) | 0x19 |
  * | `OneHitTargetUpdate` and its three states (`FUN_00449020`..) | 0x20 |
- * | `Class22AdvanceAndSeatRider` (`FUN_0049D770`) | 0x22 |
+ * | `Class22DrawAndPoseSubActor` (`FUN_0049D770`) | 0x22, and its sub-actor |
+ * | `Class23Draw` (`FUN_004916D0`) | 0x23 |
  * | `SetPiecePropDrawAndTick` (`FUN_004834F0`) | 0x24 |
  * | `ScriptedHumanoidDraw` (`FUN_00484FF0`) | 0x25 |
  * | `HordeMemberUpdate` (`FUN_0043C440`), `HordeDeformedPropUpdate` (`FUN_0043F010`) | 0x40, members and the rug |
@@ -37,7 +38,7 @@
  * (`FUN_004021D0`, `FUN_00415120`, `FUN_00420550`, `FUN_00420820`,
  * `FUN_00423050`, `FUN_004231C0`, `FUN_00435760`, `FUN_0043D800`,
  * `FUN_004729E0`, `FUN_0047FE40`, `FUN_00483A40`, `FUN_00483B40`,
- * `FUN_00483CE0`, `FUN_004916D0`, `FUN_0049A210`,
+ * `FUN_00483CE0`, `FUN_0049A210`,
  * `FUN_0049A470`, `FUN_0049A680`, `FUN_0049A7F0`, `FUN_0049AFB0`); which
  * classes they draw has not been read, so no class is listed for them.
  */
@@ -48,7 +49,8 @@ import { OwlState } from "./class43/state";
 /** The classes whose every draw is under block 1. */
 const SECONDARY_LIGHT_CLASSES: ReadonlySet<SpawnClass> = new Set([
   SpawnClass.Civilian, SpawnClass.Frog, SpawnClass.Boss2, SpawnClass.Boss4,
-  SpawnClass.CarriedZombie, SpawnClass.OneHitTarget, SpawnClass.VariantEnemy,
+  SpawnClass.CarriedZombie, SpawnClass.OneHitTarget, SpawnClass.Judgment,
+  SpawnClass.JudgmentCompanion,
   SpawnClass.SetPieceProp, SpawnClass.ScriptedHumanoid, SpawnClass.Zombie,
   SpawnClass.Thrower, SpawnClass.HordeSpawner, SpawnClass.Bat,
   SpawnClass.WaterEnemy, SpawnClass.SkinnedNpc,

@@ -23,6 +23,9 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import { makeJudgmentTail, type JudgmentTail } from "./class22/state";
+import { makeJudgmentCompanionTail, type JudgmentCompanionTail }
+  from "./class23/state";
 import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
@@ -1449,6 +1452,15 @@ export interface ActorBase {
    */
   boneColi: Record<string, string>;
   /**
+   * Class 0x22's descriptor tail — JUDGMENT's flier: variant, first clip,
+   * despawn cue, the three hit-point words and the nested companion. Its own
+   * field for the reason class 0x14's is: `tail+0x01` is class 0x30's
+   * initial state, and `Class22Init` (`FUN_0049B0D0`) reads it as a variant.
+   */
+  class22: CharacterPlacement["class22"];
+  /** Class 0x23's — the walker's subtype and despawn cue, on the same terms. */
+  class23: CharacterPlacement["class23"];
+  /**
    * Class 0x33 **selector 1's** descriptor tail — the draw slot, the `op_`
    * path it rides, and the four cues that raise its two `obj+0x34` bits and
    * take it off the field.
@@ -1928,6 +1940,9 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.CarriedZombie; zom: ZombieTail })
   | (ActorBase & { cls: SpawnClass.OneHitTarget; tgt: OneHitTargetTail })
   | (ActorBase & { cls: SpawnClass.Boss2; boss2: Boss2Tail })
+  | (ActorBase & { cls: SpawnClass.Judgment; judgment: JudgmentTail })
+  | (ActorBase & { cls: SpawnClass.JudgmentCompanion;
+                   companion: JudgmentCompanionTail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
   | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
@@ -1943,7 +1958,8 @@ export type Actor =
       SpawnClass.ScriptedHumanoid | SpawnClass.SetPieceProp
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
-      | SpawnClass.Boss2 | SpawnClass.Mouse | SpawnClass.WaterEnemy
+      | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
+      | SpawnClass.Mouse | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
@@ -1965,6 +1981,13 @@ export type ZombieActor = Extract<Actor, { cls: SpawnClass.Zombie }>;
 
 /** An actor already narrowed to class 0x14, the stage-2 boss. */
 export type Boss2Actor = Extract<Actor, { cls: SpawnClass.Boss2 }>;
+
+/** An actor already narrowed to class 0x22, JUDGMENT's flier or its sub-actor. */
+export type JudgmentActor = Extract<Actor, { cls: SpawnClass.Judgment }>;
+
+/** An actor already narrowed to class 0x23, JUDGMENT's walker. */
+export type JudgmentCompanionActor = Extract<Actor,
+  { cls: SpawnClass.JudgmentCompanion }>;
 
 /** An actor already narrowed to class 0x20, for that class's own routines. */
 export type OneHitTargetActor = Extract<Actor,
@@ -2086,6 +2109,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class14: null,
     class19: null,
     boneColi: {},
+    class22: null,
+    class23: null,
     class33: null,
     class33Push: null,
     class53: null,
@@ -2162,6 +2187,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Boss2) {
     return { ...head, cls, boss2: makeBoss2Tail() };
+  }
+  if (cls === SpawnClass.Judgment) {
+    return { ...head, cls, judgment: makeJudgmentTail() };
+  }
+  if (cls === SpawnClass.JudgmentCompanion) {
+    return { ...head, cls, companion: makeJudgmentCompanionTail() };
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };

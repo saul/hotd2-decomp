@@ -67,6 +67,13 @@ import { resolveSpawn } from "./spawnres";
 import type { Stage } from "./stage";
 // Data only -- see the head of that file for why `hod2lib` may import it.
 import { PLAYER_BODY_AT, ROUTE_FIGURES } from "../game/player_body_data";
+// Data only, for the same reason: the clips JUDGMENT's two classes name.
+import {
+  CLASS22_MOTIONS, CLASS22_NODE2_CYCLE_A, CLASS22_NODE2_CYCLE_B,
+  CLASS22_NODE2_SLOT_BASE, CLASS22_SUBACTOR_CHAR_TYPE, CLASS22_SUBACTOR_CLIP,
+  CLASS22_SUBACTOR_MOTIONS, Class22SubActorAt,
+} from "../game/class22/records";
+import { CLASS23_MOTIONS } from "../game/class23/records";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -822,6 +829,156 @@ export function class14Tail(rec: Spawn): Record<string, unknown> {
 export const CLASS14_MOTIONS: number[] =
   Array.from({ length: 58 - 21 + 1 }, (_unused, i) => 21 + i);
 
+/**
+ * Class 0x22's tail -- JUDGMENT's flier, as `Class22Init` (`FUN_0049B0D0`)
+ * and its states read it. See `CharacterPlacement.class22` for the fields.
+ *
+ * `+0x10` is a **pointer** to the nested class-0x23 descriptor, and only the
+ * two fighting variants have one: variant 0's tail is twelve bytes and a
+ * class-0x30 header follows it (`st1` `0x7C4`). `companion_at` is that
+ * pointer as an evt offset, the address the walker's own placement has.
+ */
+export function class22Tail(rec: Spawn): Record<string, unknown> {
+  const variant = rec.param(0x01, "i8") || 0;
+  const fights = variant === CLASS22_VARIANT_STAGE1
+    || variant === CLASS22_VARIANT_STAGE5;
+  const ptr = fights ? rec.param(0x10, "u32") : null;
+  const evt = rec.evt;
+  return {
+    variant,
+    clip: rec.param(0x02, "i16") || 0,
+    frame: rec.param(0x04, "i16") || 0,
+    despawn_path: rec.param(0x06, "i16") || 0,
+    despawn_frame: rec.param(0x08, "i16") || 0,
+    hp: rec.param(0x0a, "i16") ?? -1,
+    hp_stage: fights ? rec.param(0x0c, "i16") || 0 : 0,
+    phase1_floor: fights ? rec.param(0x0e, "i16") || 0 : 0,
+    companion_at: ptr && evt ? evt.toOffset(ptr) : null,
+    sub_actor_at: Class22SubActorAt(rec.offset),
+  };
+}
+
+/**
+ * Class 0x23's tail -- JUDGMENT's walker: the subtype at `+0x01` and the
+ * camera cue at `+0x06`/`+0x08`. The descriptor's own position and angles go
+ * with it, because the walker is made by the flier's class and not placed
+ * from a glTF node -- see `CharacterPlacement.class23`.
+ */
+export function class23Tail(rec: Spawn): Record<string, unknown> {
+  return {
+    subtype: rec.param(0x01, "i8") || 0,
+    despawn_path: rec.param(0x06, "i16") || 0,
+    despawn_frame: rec.param(0x08, "i16") || 0,
+    pos: [...rec.pos],
+    angles: [...rec.orient],
+  };
+}
+
+/** `AssetDrawSlot(0x2B5)` and `(0x2B4)` -- node 1's two extra models. */
+const CLASS22_NODE1_EXTRA_A = 0x2b5;
+const CLASS22_NODE1_EXTRA_B = 0x2b4;
+
+/** The two variants of class 0x22 whose tail carries the walker. */
+const CLASS22 = 0x22;
+const CLASS23 = 0x23;
+const CLASS22_VARIANT_STAGE1 = 1;
+const CLASS22_VARIANT_STAGE5 = 2;
+
+/** JUDGMENT's three character types: the walker, the flier, its sub-actor. */
+const JUDGMENT_CHAR_TYPES: ReadonlySet<number> = new Set([0x44, 0x45, 0x46]);
+
+/**
+ * Build one of JUDGMENT's character types from the file the stage's own
+ * script loads it from.
+ *
+ * `AssetDrawSlot` draws what is resident in a slot, and a whole-file load
+ * (`asset_load_polfile`, opcode `0x52`) makes it resident: `FUN_00418E40`
+ * points `0x007C2134` at the file's slot list and `FUN_00418EC0` installs
+ * each of the file's models into its slot, binding its textures through the
+ * **file's** texture table (`0x0055B9B8 + file * 4`). The exe's first listing
+ * for slots `0x28F`..`0x2C8` is `char_adv04.bin`, which is what
+ * `characterAssetFile` answers -- and no stage-1 or stage-5 block loads it.
+ * Stage 1's blocks 0, 14 and 16 and stage 5's blocks 0 and 1 load
+ * `boss1z.bin`, `boss1z_wing.bin` and `boss1q.bin` instead. `[proved]`
+ *
+ * For the flier and its sub-actor the difference is only the texture
+ * numbering (each file indexes its own bank, and the images are the same);
+ * for the walker it is not -- slot `0x29D`'s meshes 4 and 6 are different
+ * geometry in `boss1q.bin`, and its texture 1 is a different image. So the
+ * walker drawn from `char_adv04.bin` was not the one the game draws.
+ *
+ * The file is the first one the script loads whose slot list covers every
+ * node of the skeleton; null when none does, and the caller keeps the exe's
+ * first listing. Only JUDGMENT's types come through here: the rule is the
+ * engine's for every character, but moving the others is not this class's
+ * change to make.
+ */
+function judgmentBuild(prog: Program, tables: ExeTables, ct: number,
+                       fallback: string | null): Character | null {
+  let file: string | null = null;
+  let own: number[] | null = null;
+  const want = tables.characterSkeleton(ct).map((n) => n.slot)
+    .filter((sl) => sl !== 0);
+  for (const blk of prog.blocks) {
+    for (const step of blk.steps) {
+      for (const op of step.ops) {
+        if (file !== null || op.opcode !== 0x52) continue;
+        const f = op.detail.file;
+        if (typeof f !== "string") continue;
+        const list = tables.polFileSlots(f);
+        if (list && want.every((sl) => list.includes(sl))) {
+          file = f;
+          own = list;
+        }
+      }
+    }
+  }
+  const use = file ?? fallback;
+  if (use === null) return null;
+  const built = build(tables, ct, use);
+  if (built !== null && own !== null) {
+    built.ownSlots = new Map(own.map((sl, k) => [sl, k]));
+  }
+  return built;
+}
+
+/**
+ * The synthetic placement JUDGMENT's sub-actor is drawn from: character type
+ * 0x46 (`boss1z_wing`'s six nodes), clip 0x10, at the address
+ * `Class22SubActorAt` gives it and parented to its flier. `Class22Init`
+ * builds the actor with `ActorAllocSub`; nothing places it -- the bat's
+ * wing's arrangement. Null when the type or its clips will not build.
+ */
+async function class22SubActorPlacement(stage: Stage, tables: ExeTables,
+                                        prog: Program, sp: SpawnJson,
+                                        chars: Map<number, Character>):
+    Promise<Placement | null> {
+  const ct = CLASS22_SUBACTOR_CHAR_TYPE;
+  if (!chars.has(ct)) {
+    const built = judgmentBuild(prog, tables, ct,
+                                tables.characterAssetFile(ct));
+    if (built === null) return null;
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  for (const mid of CLASS22_SUBACTOR_MOTIONS) {
+    if (c.motions.has(mid)) continue;
+    const baked = await bake(stage.source, tables, mid, c.boneCount);
+    if (baked !== null) c.motions.set(mid, baked);
+  }
+  if (!c.motions.has(CLASS22_SUBACTOR_CLIP)) return null;
+  const w = new Placement();
+  w.at = Class22SubActorAt(sp.at as number);
+  w.cls = CLASS22;
+  w.char_type = ct;
+  w.motion = CLASS22_SUBACTOR_CLIP;
+  w.hp = 0;
+  w.spawn = { ...sp, at: w.at };
+  w.parent_at = sp.at as number;
+  w.synthetic = true;
+  return w;
+}
+
 export interface ResolvedCharacters {
   chars: Map<number, Character>;
   placements: Placement[];
@@ -899,6 +1056,37 @@ export async function resolveForStage(
           civilian_child: rec.offset,
         });
       }
+    }
+  }
+
+  // **Nor is JUDGMENT's walker.** `Class22RideInAndJoinFight` (`FUN_0049B640`)
+  // and `Class22DescendAndJoinFight` (`FUN_0049CE10`) hand the pointer at
+  // their own `tail+0x10` to `SpawnFromDescriptor` from their first frame
+  // (`0x0049B6FA`, `0x0049CE42`) -- a whole class-0x23 descriptor nested in
+  // the flier's, which nothing in the instruction stream points at. Stage 1's
+  // blocks 14 and 16 spawn the same flier descriptor, so one walker serves
+  // both. The row is synthetic and parented to the flier: the flier's class
+  // makes the object, the script never does.
+  for (const rec of [...recs.values()]) {
+    if (rec.cls !== CLASS22) continue;
+    const variant = rec.param(0x01, "i8") || 0;
+    if (variant !== CLASS22_VARIANT_STAGE1
+        && variant !== CLASS22_VARIANT_STAGE5) continue;
+    const w = rec.param(0x10, "u32");
+    const off = w ? evt.toOffset(w) : null;
+    if (off === null || recs.has(off) || off > evt.raw.length - 0x24) {
+      continue;
+    }
+    const kid = evtlib.readSpawn(evt, off, 0x0b);
+    if (kid.cls !== CLASS23) continue;
+    recs.set(off, kid);
+    if (!byAt.has(off)) {
+      byAt.set(off, {
+        at: off, class: kid.cls, flags: kid.initFlags,
+        pos: [...kid.pos], yaw_deg: kid.yawDeg, orient: [...kid.orient],
+        hp: kid.hp, desc_flags: kid.descFlags,
+        nested_in: rec.offset,
+      });
     }
   }
 
@@ -1109,6 +1297,8 @@ export async function resolveForStage(
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
     const class14 = cls === 0x14 ? class14Tail(rec) : null;
+    const class22 = cls === CLASS22 ? class22Tail(rec) : null;
+    const class23 = cls === CLASS23 ? class23Tail(rec) : null;
     // **Gated on the selector, not on the class.** Class 0x33 is eleven
     // objects behind one id and these two blocks are two of them reading
     // the same bytes; emitting both for one spawn, or either for a
@@ -1213,6 +1403,13 @@ export async function resolveForStage(
     p.class52 = class52;
     p.class53 = class53;
     p.class14 = class14;
+    p.class22 = class22;
+    p.class23 = class23;
+    // The walker: made by its flier's class, never by the script.
+    if (sp.nested_in !== undefined) {
+      p.parent_at = sp.nested_in as number;
+      p.synthetic = true;
+    }
     p.class33 = class33;
     p.class33_push = class33Push;
     // `ActorBindPartList` (`FUN_00412440`) -- the faces and accessories this
@@ -1240,7 +1437,9 @@ export async function resolveForStage(
     // to the compiler, which cannot see that the two are the same set.
     if (res.charType === null) continue;
     if (!chars.has(res.charType)) {
-      const built = build(tables, res.charType, res.assetFile!);
+      const built = JUDGMENT_CHAR_TYPES.has(res.charType)
+        ? judgmentBuild(prog, tables, res.charType, res.assetFile)
+        : build(tables, res.charType, res.assetFile!);
       if (built === null) continue;
       chars.set(res.charType, built);
     }
@@ -1299,6 +1498,11 @@ export async function resolveForStage(
     if (cls === 0x11) entryClips.push(...FROG_CLIPS);
     // The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
     if (cls === 0x14) entryClips.push(...CLASS14_MOTIONS);
+    // JUDGMENT's two: every clip the flier's and the walker's states name,
+    // all in `mot/boss1.bin`. Their states measure exits on these clips' play
+    // clocks, so a missing one is a state that never ends.
+    if (cls === CLASS22) entryClips.push(...CLASS22_MOTIONS);
+    if (cls === CLASS23) entryClips.push(...CLASS23_MOTIONS);
     // The emerge clip, the submerged pose it holds first, and the two clips
     // the delayed leap plays. An unbaked entrance is an actor standing in the
     // water.
@@ -1413,6 +1617,36 @@ export async function resolveForStage(
         wlist.push({ ...sp, at: wing.at, class: CLASS46,
                      hp: 0 } as SpawnJson);
       }
+    }
+  }
+
+  // -- JUDGMENT's sub-actor and the flier's extra models -------------------
+  //
+  // `Class22Init` builds a second skinned actor per flier -- character type
+  // 0x46, clip 0x10 -- and `Class22DrawBonePart` (`FUN_0049D980`) draws node
+  // 2 from a cycle of slots `0x2A5 + g_class22_node2_cycle_a/b` and node 1
+  // with two more models, `0x2B4` and `0x2B5`. None of those is a skeleton
+  // node's own slot, so each rides the character's hidden template rig.
+  for (const p of [...placements]) {
+    if (p.cls !== CLASS22 || p.synthetic || p.motion === null) continue;
+    const sub = await class22SubActorPlacement(stage, tables, prog, p.spawn,
+                                               chars);
+    if (sub) {
+      placements.push(sub);
+      let slist = perType.get(CLASS22_SUBACTOR_CHAR_TYPE);
+      if (!slist) {
+        slist = [];
+        perType.set(CLASS22_SUBACTOR_CHAR_TYPE, slist);
+      }
+      slist.push({ ...p.spawn, at: sub.at, class: CLASS22, hp: 0 } as SpawnJson);
+    }
+    const c = chars.get(p.char_type);
+    if (c) {
+      for (const k of [...CLASS22_NODE2_CYCLE_A, ...CLASS22_NODE2_CYCLE_B]) {
+        c.heldSlots.add(CLASS22_NODE2_SLOT_BASE + k);
+      }
+      c.heldSlots.add(CLASS22_NODE1_EXTRA_A);
+      c.heldSlots.add(CLASS22_NODE1_EXTRA_B);
     }
   }
 

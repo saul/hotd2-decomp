@@ -641,6 +641,27 @@ class ExeTables:
                 out.setdefault(slot, (name, k))
         return out
 
+    def pol_file_slots(self, name: str) -> list[int] | None:
+        """One pol file's slot list, ``POL_SLOT_LIST[file]`` (0x004E794C).
+
+        Entry k of the file loads into slot ``list[k]``; it is the list the
+        whole-file load walks (``FUN_00418E40`` points 0x007C2134 at it and
+        ``FUN_00418EC0`` installs one model per slot that is not already
+        resident). Twin of ``ExeTables.polFileSlots``.
+        """
+        for fi, (n, cnt) in self.pol_files().items():
+            if n != name:
+                continue
+            lst = self._u32(self.POL_SLOT_LIST + fi * 4)
+            if not lst:
+                return None
+            r = self._v2r(lst)
+            if r is None:
+                return None
+            return [struct.unpack_from("<h", self.data, r + k * 2)[0]
+                    for k in range(cnt)]
+        return None
+
     def slot_pol_file(self, slot: int) -> str | None:
         fi = self._u16(self.SLOT_TO_POL + slot * 2)
         if fi is None:
@@ -686,6 +707,42 @@ class ExeTables:
             cnt = self._u16(self.CAM_PATH_COUNT + i * 2) or 0
             if cnt:
                 out[i] = (name, cnt)
+        return out
+
+    #: ``PTR_DAT_004c4990`` -- one pointer per scene to an ``s16`` list of cam
+    #: file indices ending in -1, which ``FUN_004040A0`` walks for
+    #: ``g_scene_index``, queuing file ``0x16`` (``op_org``) after each entry
+    #: in Original Mode. Scene 4 (stage 5) is ``{10, 20, 16}`` -- ``cp_st5``,
+    #: ``op_st5`` and ``op_st1``. Twin of ``ExeTables.sceneCamFiles``.
+    SCENE_CAM_FILES = 0x004C4990
+    ORIGINAL_CAM_FILE = 0x16
+
+    def scene_cam_files(self, scene: int, original: bool) -> list[str]:
+        """The cam file stems ``FUN_004040A0`` loads for a scene, in order."""
+        out: list[str] = []
+        if not 0 <= scene < self.SCENE_COUNT:
+            return out
+        ptr = self._u32(self.SCENE_CAM_FILES + scene * 4)
+        r = self._v2r(ptr) if ptr else None
+        if r is None:
+            return out
+        files = self.cam_files()
+
+        def add(fi: int) -> None:
+            rec = files.get(fi)
+            if rec is None:
+                return
+            stem = rec[0][:-4] if rec[0].endswith(".bin") else rec[0]
+            if stem not in out:
+                out.append(stem)
+
+        for k in range(self.MAX_CAM_FILES):
+            fi = struct.unpack_from("<h", self.data, r + k * 2)[0]
+            if fi == -1:
+                break
+            add(fi)
+            if original:
+                add(self.ORIGINAL_CAM_FILE)
         return out
 
     def cam_path_slots(self) -> dict[int, tuple[str, int]]:

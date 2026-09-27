@@ -335,8 +335,13 @@ def main() -> int:
                     f"{rel}:{line}: {m.group(0).strip()}")
             for names, spec in GAME_VALUE_IMPORT_RE.findall(text):
                 # `game/vec.ts` is pure maths over plain numbers and holds no
-                # state, so calling into it is not driving anything.
-                if spec.endswith("/vec"):
+                # state, so calling into it is not driving anything. Nor is
+                # `game/matrix.ts`: the engine's matrix routines over a
+                # sixteen-float array, no module state, importing only a type.
+                # A draw that takes a matrix apart the way the engine does --
+                # `MatrixToEulerZYX` for class 0x22's sub-actor seat -- has to
+                # call the one transcription rather than write a second.
+                if spec.endswith("/vec") or spec.endswith("/matrix"):
                     continue
                 for n in (x.strip() for x in names.split(",")):
                     if not n or n.startswith("type "):

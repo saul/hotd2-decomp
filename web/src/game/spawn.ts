@@ -42,8 +42,19 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
   // caller and no others. `obj+0x3C` is the phase of every cel a class-0x30
   // bone draws; see `class30/bonecels.ts`.
   if (HIT_SLOT_CLAIMING_CLASSES.has(cls)) ActorBuildSkinnedModel(obj);
-  g_class_handlers[cls]?.init(obj, rng, events);
+  // **Into the pool before its `Init` runs**, because that is where the
+  // engine's object is: `SpawnFromDescriptor` (`FUN_00408A20`) is
+  // `ActorAlloc(g_class_handlers[class], 0x13F4)`, which links the task into
+  // the ring, and the handler it installs is the `Init` -- run later, by the
+  // task walk, from its place in the ring. So an object an `Init` makes is
+  // linked **after** the one making it, and is updated after it every frame
+  // from then on. `Class22Init` (`FUN_0049B0D0`) is the case that reads the
+  // order: its companion, spawned from its own first update, reads the
+  // flier's hit points and phase every frame, and the flier reads the
+  // companion's position and strike bits, each a frame old in the engine.
+  // Pushing after the `Init` put every such child in front of its parent.
   G.g_object_list.push(obj);
+  g_class_handlers[cls]?.init(obj, rng, events);
   return obj;
 }
 

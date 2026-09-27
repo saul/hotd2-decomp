@@ -18,6 +18,7 @@ import { BAMS_TO_RAD } from "../../core/bams";
 import { authoredFrameHeld, authoredFrameOfTicks }
   from "../../core/play_cursor";
 import { MotionFlag, type FadeRecord } from "../../game/actor";
+import { MatrixToEulerZYX } from "../../game/matrix";
 import type { Instance } from "./instance";
 
 /** The port's clock. `mot/` authors at 30; the engine's frames are 60 Hz. */
@@ -32,6 +33,7 @@ export class Poser {
   private readonly qa = new Quaternion();
 
 pose(inst: Instance): void {
+  inst.drawnFrom = null;
   // Dying takes over everything: the clip plays once and holds its last
   // frame, because what happens after it is `FUN_00456740`, unread.
   if (inst.a.death) {
@@ -158,6 +160,7 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
                    full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0,
                    overA?: readonly FadeRecord[]):
     void {
+  inst.drawnFrom = null;
   const ra = fA * 3;
   const rb = fB * 3;
   // The same two arms as `apply`, and the engine reaches them through the same
@@ -228,6 +231,7 @@ private apply(inst: Instance, m: BakedMotion, f: number,
               full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0):
     void {
 
+  inst.drawnFrom = { motion: m, frame: f };
   // Root translation: three floats per frame.
   const r = f * 3;
   inst.pivot.position.set(full ? m.root[r] : 0, m.root[r + 1],
@@ -304,6 +308,40 @@ overrideBoneX(inst: Instance, bone: number, rx: number): void {
   const o = f * inst.type.bone_count * 3 + bone * 3;
   if (o + 2 >= m.rot.length) return;
   node.quaternion.copy(this.bams(rx, m.rot[o + 1], m.rot[o + 2]));
+}
+
+/**
+ * The integer triple one bone was drawn with on the last pose -- the draw
+ * record's `+0x04`/`+0x08`/`+0x0C`, which `FUN_00411700` writes as it rotates
+ * the node and which a class's per-bone hook may read back.
+ * `Class22DrawBonePart` (`FUN_0049D980`) is the reader: it turns two extra
+ * models by node 3's and node 6's.
+ *
+ * From one clip it is that frame's three shorts, exactly, as the engine's
+ * unblended arm has them. From a mix it is `MatrixToEulerZYX` (`FUN_004019E0`)
+ * of the rotation this layer drew, which is what the engine's
+ * interpolated arm also ends in; the mix itself is the poser's slerp. False
+ * when the bone is not posed.
+ */
+drawnAngles(inst: Instance, bone: number,
+            out: { rx: number; ry: number; rz: number }): boolean {
+  const node = inst.bones.get(bone);
+  if (!node) return false;
+  const src = inst.drawnFrom;
+  if (src) {
+    const o = src.frame * inst.type.bone_count * 3 + bone * 3;
+    if (o + 2 < src.motion.rot.length) {
+      // `MOVSX` -- the frame's shorts, sign-extended.
+      out.rx = (src.motion.rot[o] << 16) >> 16;
+      out.ry = (src.motion.rot[o + 1] << 16) >> 16;
+      out.rz = (src.motion.rot[o + 2] << 16) >> 16;
+      return true;
+    }
+  }
+  node.updateMatrix();
+  const e = MatrixToEulerZYX(node.matrix.elements);
+  out.rx = e.rx; out.ry = e.ry; out.rz = e.rz;
+  return true;
 }
 
 /** `qZ * qY * qX`, matching the engine's `RotZ; RotY; RotX` stack order. */

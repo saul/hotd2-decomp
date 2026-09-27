@@ -41,7 +41,7 @@ import { SpawnBloodSpray } from "../effects/blood";
 import { SpawnSpriteEffect } from "../effects/sprite";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
-import type { GameHost } from "../host";
+import type { GameHost, ShotRay } from "../host";
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixInvert, MatrixRotateX,
   MatrixTransformPoint, MatrixTranslate, RADIANS_TO_BAMS, FtolS16,
@@ -114,11 +114,12 @@ export function Class14SpawnNoDamageHitEffect(obj: Actor, bone: number,
  * the host's camera, the ray's direction becomes `BuildShotRay`'s four
  * angles, and `P` is measured from the eye, where the engine's line starts.
  * Without a camera there is no view space and no hit -- the engine is never
- * without one.
+ * without one. `ray` is the shot record, `g_shot_records[player]`: the pull
+ * that marked the boss (`Actor.shotRays`), which the engine's once-a-frame
+ * trigger makes the same thing.
  */
-function Class14WeakPointInReach(W1: ArrayLike<number>, player: number,
+function Class14WeakPointInReach(W1: ArrayLike<number>, ray: ShotRay | null,
                                  host: GameHost | undefined): boolean {
-  const ray = G.g_crosshair_ray[player];
   const toView = host?.viewSpaceOfPoint;
   if (!ray || !toView) return false;
   const m = MatCopy(MatIdentity(), W1);
@@ -163,11 +164,10 @@ function Class14WeakPointInReach(W1: ArrayLike<number>, player: number,
  * same, rather than reading two points that were never written.
  */
 function Class14WindowConeHit(W1: ArrayLike<number>, t: Boss2Tail,
-                              player: number): boolean {
+                              ray: ShotRay | null): boolean {
   const [maxYaw, rotX, minPitch, maxPitch] =
     Class14DamageCone(t.bookB.frame - t.bookB.low);
   if (maxYaw === 0) return false;
-  const ray = G.g_crosshair_ray[player];
   if (!ray) return false;
   const m = MatCopy(MatIdentity(), W1);
   MatrixTranslate(m, 0, CONE_CENTRE_Y, 0);
@@ -220,8 +220,12 @@ export function Class14ApplyBoneDamage(obj: Actor, bone: number,
   const t = Tail(obj);
   const W1 = obj.skel?.bones[WEAK_POINT_BONE]?.mat;
   if (!t || !W1) return;
-  if (!Class14WeakPointInReach(W1, player, host)
-      || !Class14WindowConeHit(W1, t, player)) {
+  // The shot record the two gates read: the pull that marked this actor
+  // (`Actor.shotRays`), which is `g_shot_records[player]` whenever a frame
+  // carries one pull, as the engine's always does.
+  const ray = obj.shotRays[player] ?? G.g_crosshair_ray[player] ?? null;
+  if (!Class14WeakPointInReach(W1, ray, host)
+      || !Class14WindowConeHit(W1, t, ray)) {
     Class14SpawnNoDamageHitEffect(obj, bone, player, host, events);
     return;
   }

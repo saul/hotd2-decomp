@@ -4343,6 +4343,24 @@ swims away the right way round; the scripted breaks fly the camera along
 the body on the wave field before it leaves `g_enemies_present`; the sounds and
 the partner's "Left."/"Right." play.
 
+**A volley is not a trigger** (`L50`). Driven by `playthrough.mjs --boss`,
+stage 2's end block first measured zero damage in 33 dense volleys: the
+harness fires its whole grid between two driven frames, the port's queue hands
+that one frame every pull, and the boss resolves its mark on its next update
+against the one shot record -- which was the grid's last pull, not the one
+that crossed the weak point. Two changes: `MarkActorShot` keeps each marking
+pull's ray (`Actor.shotRays`, `[port-only]`) and the gates read it, and
+`--aim`'s pulls get a frame of their own before the grid.
+
+**Measured** (`node tools/playthrough.mjs --headless --continue --boss --watch
+0x14`, against this branch's bundle): **stage 5** plays through with no cheat
+-- the cameo at block 3 goes 200 → -9 in 2155 frames, flag 31 opens block 4,
+and the end block 7 is played through to the next stage. **Stage 2** needs
+`--no-damage` to reach its boss at all (the harness spends its five credits by
+block 14, before any class-0x14 code runs); with it, end block 35 goes 300 →
+-10 in 3825 frames through the banner, a summoning round and the phase
+ladder, and the script leaves the block for stage 3.
+
 ## JUDGMENT: stage 1's boss, and its return in stage 5
 
 Classes 0x22 and 0x23, `game/class22/` and `game/class23/`, read in

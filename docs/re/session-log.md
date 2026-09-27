@@ -19982,3 +19982,40 @@ shots in five thousand landed; the test camera looks at its target now.
 spawn to `DeathC` in under a thousand frames (the port test's debug trace:
 entrance to Hunt at frame 200, `DeathC` at 807); the three death forks
 through to the present decrement; 2094 port checks.
+
+## 2026-09-27 -- the Hierophant under main's harness: a volley is not a trigger
+
+Merged main twice (416ef9d STRENGTH and JUDGMENT's harness flags, then
+c3125bd TOWER). Main's format 13 was the stage-4 boss and 14 the stage-3
+boss, so the Hierophant's layout is **15**. Two ports of
+`ActorShiftToHoldBone1Position` had been written a day apart: main's
+(`game/actor_pose.ts`) is the routine now, and the model-block arm from
+`game/skeleton.ts` is what it sends an actor that carries the block to.
+`ClassHandler.advancesOwnMotion` replaced this branch's `!obj.skel` test in
+the director.
+
+**Wrong turn.** A `--through-end` flag written for `playthrough.mjs` before
+the merge duplicated main's `--play-end`; it was dropped unmerged.
+
+**Zero damage in 33 volleys.** Stage 2's end block, with the banner working,
+flags 9 and 10 raised and the bar up, took no damage from the harness's dense
+grid. A node probe with the real bundle showed the gates pass for shots from
+the camera's side, and a page probe firing **one pull every three frames** at
+`shotTargets` took the boss from 300 to 96 through phase 1 into round A. The
+difference is the frame: the driver fires a whole volley between two driven
+frames, the port's queue gives that frame every pull, and the boss resolves
+its mark on its next update against the shot record -- `G.g_crosshair_ray`,
+the grid's last pull. `MarkActorShot` also writes the bone byte per pull, so
+the byte the class reads is whichever grid pull crossed its 30-unit sphere
+last. The engine reads the trigger once a frame and has never seen two
+(`L50`).
+
+Two changes, both `[port-only]`: `Actor.shotRays[p]`, the marking pull's ray,
+written by `MarkActorShot` beside the bone byte and read by
+`Class14ApplyBoneDamage`'s two gates; and `--aim`'s pulls get a frame of their
+own before the grid. The port test that pins the first fails on the old read.
+
+**Measured**: stage 5 plays through with no cheat (the cameo 200 → -9 at block
+3, end block 7 played through); stage 2 reaches its boss only with
+`--no-damage` -- the harness spends five credits by block 14 -- and with it
+end block 35 goes 300 → -10 and the script leaves the block for stage 3.

@@ -121,8 +121,8 @@ import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
 import { ShotEffectsTick } from "../src/game/effects/tick";
 import { SpawnSpriteEffect, SpriteEffectKind }
   from "../src/game/effects/sprite";
-import { MarkActorShot, MergeShotPicks, QueueOffscreenPull, QueueShotRequest,
-  g_gunshot_sound_ids }
+import { FireShotRequest, MarkActorShot, MergeShotPicks, QueueOffscreenPull,
+  QueueShotRequest, g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
          SetBoss4Tables, SetGameTables, T } from "../src/game/tables";
@@ -14837,6 +14837,42 @@ console.log("\nclass 0x14, the stage-2 boss:");
       check("...and on bone 1 under the phase immunity (0x100) as well",
             shootFrom(a, goodDir, ZERO, rng, events) === 0);
     }
+  }
+
+  // -- two pulls in one frame -------------------------------------------
+  // The engine polls the trigger once a frame, so the shot record the gates
+  // read back is always the pull that marked the boss. The port's queue lets
+  // a whole volley into one frame, and the gates read the marking pull's ray
+  // (`Actor.shotRays`), not the frame's last.
+  if (goodDir) {
+    const { rng, events, a } = gateRig(11);
+    a.boss2.bookB.frame = a.boss2.bookB.low + 30;
+    const W1 = a.skel!.bones[1].mat;
+    const P = vec3();
+    const m = MatCopy(MatIdentity(), W1);
+    MatrixTranslate(m, 0, 4, 1);
+    MatrixGetTranslation(m, P);
+    const dw = vec3();
+    MatrixTransformVector(W1, goodDir, dw);
+    const eye = vec3(P.x + dw.x * 60, P.y + dw.y * 60, P.z + dw.z * 60);
+    const host = camHost(eye, P);
+    MatrixGetTranslation(W1, a.shotCentre);
+    G.g_shot_test_list = [];
+    RegisterForShotTest(a, host);
+    const pull = (q: Vec3): void => {
+      const l = Math.hypot(q.x - eye.x, q.y - eye.y, q.z - eye.z);
+      FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: {
+        origin: vec3(eye.x, eye.y, eye.z),
+        dir: vec3((q.x - eye.x) / l, (q.y - eye.y) / l, (q.z - eye.z) / l),
+      } }, host, rng, events);
+    };
+    pull(P);                                          // lands: bone 1
+    const marked = a.shotBones[0];
+    pull(vec3(P.x + 200, P.y + 200, P.z));            // hits nothing
+    Class14ResolveShotBone(a, rng, host, events);
+    check("two pulls in one frame: the gates read the ray of the pull that "
+          + "marked the boss, not the frame's last one",
+          marked === 1 && a.hp < 300, `bone ${marked}, hp ${a.hp}`);
   }
 
   // -- the damage: Arcade takes the table, Original multiplies ------------

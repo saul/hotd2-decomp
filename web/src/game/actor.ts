@@ -24,6 +24,7 @@ import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
 import type { SkeletonModel } from "./skeleton";
+import type { ShotRay } from "./host";
 import { makeJudgmentTail, type JudgmentTail } from "./class22/state";
 import { makeJudgmentCompanionTail, type JudgmentCompanionTail }
   from "./class23/state";
@@ -1617,6 +1618,20 @@ export interface ActorBase {
    */
   shotBones: number[];
   /**
+   * `[port-only]` -- the ray of the pull that wrote {@link shotBones}`[p]`,
+   * per player: `G.g_crosshair_ray[p]` as it stood when `MarkActorShot` ran.
+   *
+   * The engine polls the trigger once a frame, so the shot record a class
+   * reads back after being marked (`g_shot_records[p] + 0x18/+0x24`,
+   * `G.g_crosshair_ray` here) is always the pull that marked it. The port's
+   * queue lets several pulls into one frame -- a driver's volley arrives
+   * whole between two driven frames -- and the last of them, not the one
+   * that landed, would be what the class read. A class that reads the record
+   * back (class 0x14's weak-point gates) reads this instead; with one pull a
+   * frame the two are the same object.
+   */
+  shotRays: (ShotRay | null)[];
+  /**
    * `obj+0x131C` — which player's shot killed this actor.
    *
    * `CivilianPruneDeadChildren` reads it off a dead captor to decide who is
@@ -2174,6 +2189,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     leapStrikeFrames: 0,
     pendingHit: null,
     shotBones: [0, 0],
+    shotRays: [null, null],
     killedBy: -1,
     despawned: false,
     radius: 0,

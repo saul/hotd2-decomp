@@ -548,6 +548,8 @@ export function MarkActorShot(obj: Actor, player: number, bone = 0,
   // bone hit (the node's `+0x14`), and a literal 1 for an actor hit whole.
   if (player >= 0 && player < obj.shotBones.length) {
     obj.shotBones[player] = whole ? 1 : bone;
+    // `[port-only]` The pull that wrote the byte -- see `Actor.shotRays`.
+    obj.shotRays[player] = G.g_crosshair_ray[player] ?? null;
   }
   if (mesh && host) {
     SpawnWorldImpact(player, mesh.point, mesh.normal, mesh.surface, host,

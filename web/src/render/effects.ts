@@ -34,6 +34,7 @@ import {
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
 import { drawBatSplashes } from "./bat_splash";
+import { drawCreatureEffects } from "./creature_effects";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
@@ -246,6 +247,12 @@ export class EffectLayer implements System<RenderContext> {
     this.drawShotRings(seen);
     this.drawDamageOverlays(seen);
     this.drawBossBanners(seen);
+    // The owl's and the fish's tasks, and the ring the fish's corpse leaves:
+    // `render/creature_effects.ts`.
+    drawCreatureEffects({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.group, view: this.viewGroup,
+    }, seen);
     drawBatSplashes({ node: (key, slot, parent) => this.node(key, slot, parent),
                       world: this.group }, seen);
     if (this.bones) {

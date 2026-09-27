@@ -92,7 +92,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 14;
+export const BUNDLE_FORMAT = 15;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -886,6 +886,19 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 90 are drawn by nothing in the image at all.
   0x43: Array.from({ length: 106 }, (_, i) => 0xbbd + i),
   0x52: Array.from({ length: 10 }, (_, i) => 0x1385 + i),
+  // Class 0x14, the stage-2 boss: the two flipbooks
+  // `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) draws under bone
+  // 1's matrix beside the bone's own part -- `state+0x7C` steps 0x2CB..0x2ED
+  // and `state+0x88`, the weak point whose frame is the damage window,
+  // 0x2EE..0x315. `boss2.bin` entries 2..76. The skeleton itself rides the
+  // character path. Then the two splash strips its states and deaths spawn
+  // through `SpawnPropStripEffect` (`FUN_0043FCA0`): kind 0, 0x1339..0x1356,
+  // and kind 2, 0x0DD7..0x0E22 -- the strip object draws by slot.
+  0x14: [
+    ...Array.from({ length: 0x315 - 0x2cb + 1 }, (_, i) => 0x2cb + i),
+    ...Array.from({ length: 0x1356 - 0x1339 + 1 }, (_, i) => 0x1339 + i),
+    ...Array.from({ length: 0x0e22 - 0x0dd7 + 1 }, (_, i) => 0x0dd7 + i),
+  ],
   // Class 0x40, the horde: the emerge prop `HordeEmergePropUpdate`
   // (`FUN_0043DD00`) draws twice (`komono_st1b.bin` 12, slot 0x17CC), the
   // member's ground shadow (`common.bin` 200, 0x10D0), and its death splash --
@@ -905,6 +918,16 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
 };
 
 /**
+ * Two runs of `common.bin` the owl's and the fish's tasks share: the ring
+ * (371, slot `0x1A38`) with the thirty-frame strip that stands in it (338..367,
+ * `0x15E4 + n`), and the thirty-frame splash (307..336, `0x1339 + n`).
+ */
+const CREATURE_RING_SLOTS: readonly number[] = [
+  0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)];
+const CREATURE_SPLASH_SLOTS: readonly number[] =
+  Array.from({ length: 30 }, (_, i) => 0x1339 + i);
+
+/**
  * The **sprite-effect** slots a stage's classes draw -- the ones
  * `render/effects.ts` clones from `slots_effect` rather than
  * `render/slotmodels.ts` from `slots_actor`.
@@ -913,8 +936,9 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
  * `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind 0x5B through
  * `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
  * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. The
- * Tower's, class 0x45, every one of which its routines draw themselves. And
- * the bat's splash, class 0x46's.
+ * Tower's, class 0x45, every one of which its routines draw themselves. The
+ * owl's and the fish's effect tasks, classes 0x43 and 0x51. And the bat's
+ * splash, class 0x46's.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
@@ -922,11 +946,23 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // The owl's three tasks (`game/effects/owl.ts`): the feather
+  // (`OwlFeatherDriftAndDraw`, `FUN_00448A80`: `owl.bin` 51), the ground
+  // impact ring and its strip (`OwlGroundImpactRingPulse`, `FUN_00448CE0`:
+  // `common.bin` 371 and 338..367) and the water splash
+  // (`OwlWaterSplashFlipbookStep`, `FUN_00448800`: `common.bin` 307..336).
+  0x43: [0xbf0, ...CREATURE_RING_SLOTS, ...CREATURE_SPLASH_SLOTS],
+  // The fish's (`game/effects/fish.ts`): the splash (`WaterSplashUpdate`,
+  // `FUN_00439F10`: the same 307..336), the surface ring
+  // (`SurfaceRingDrawAndFade`, `FUN_0043A000`: `fish.bin` 2) and the ring
+  // task its corpse leaves (`RingEffectSpread`, `FUN_00407E30`: 371 and
+  // 338..367). The blood cloud's cels are the shot path's, already carried.
+  0x51: [...CREATURE_SPLASH_SLOTS, 0xb71, ...CREATURE_RING_SLOTS],
   // Class 0x46, the bat: the splash a shot one falls into.
   // `BatSplashUpdate` (`FUN_0042F930`) draws `AssetDrawSlot(0x1339 + n)` for
-  // n in 0..0x1D -- `common.bin` 307..336 -- under a bare translation. See
-  // `game/class46/splash.ts`.
-  0x46: Array.from({ length: 0x1e }, (_, i) => 0x1339 + i),
+  // n in 0..0x1D -- `common.bin` 307..336, the owl's and the fish's run --
+  // under a bare translation. See `game/class46/splash.ts`.
+  0x46: [...CREATURE_SPLASH_SLOTS],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */
@@ -1135,8 +1171,8 @@ export async function actorSlotEntry(
   if (!parts.length) return null;
   const rig: Rig = {
     name: "slots_actor",
-    routine: "asset-slot actor draws (classes 0x13, 0x40, 0x43, 0x51, "
-      + "0x52; class 0x25 variant 3; class 0x33 selector 4)",
+    routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x43, "
+      + "0x51, 0x52; class 0x25 variant 3; class 0x33 selector 4)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",

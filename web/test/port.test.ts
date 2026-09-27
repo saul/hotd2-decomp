@@ -215,6 +215,8 @@ import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
   from "../src/game/hud_sprites";
 import { BOSS_HP_BAR_KILL, BossHpBarSpawn, BossHpBarsTick, BossHpFractionOf }
   from "../src/game/boss_hp_bar";
+import { BannerStep, BossBannersTick, BossIntroBannerSpawn }
+  from "../src/game/boss_banner";
 import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
   ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
   from "../src/game/screen_sprite";
@@ -13863,6 +13865,9 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
   const tickBoss = (obj: Actor, n: number): void => {
     for (let i = 0; i < n; i++) {
       g_class_handlers[SpawnClass.Boss4]?.update(obj, bossFrame);
+      // The name banner the entrance spawns is a task of its own, stepped
+      // after the boss the way the task walk reaches it.
+      BossBannersTick(NULL_HOST);
       // `ActorAdvanceMotion` is the engine's `obj+0x194` step and it is what
       // moves the play cursor these states test against; without it every clip
       // test in this class is frozen on frame 0.
@@ -19078,6 +19083,111 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         layers.join());
   G.g_screen_sprite_draws = [];
   ScreenSpriteQueueReset();
+}
+
+// The boss-name banner -- `BossIntroBannerSpawn` (`FUN_00437A70`) and
+// `BossIntroBannerUpdate` (`FUN_00437AC0`) -- with Judgment's record: flag 2,
+// camera path 48, the boss's card in slot 0x181D.
+{
+  ResetGameGlobals();
+  // A path whose eye is the frame it was asked for, so the flight is visible.
+  const path = {
+    pose: (t: number, _roll: boolean,
+           out: { eye: Vec3; target: Vec3; roll: number }) => {
+      out.eye.x = t; out.eye.y = 1; out.eye.z = 2;
+      out.target.x = t; out.target.y = 1; out.target.z = 10;
+      out.roll = 0;
+      return out;
+    },
+  };
+  const host: GameHost = {
+    ...NULL_HOST,
+    camPath: (slot) => (slot === 48 ? path as unknown as CamPath : null),
+  };
+  G.g_camera_block_eye = { x: 7, y: 8, z: 9 };
+  G.g_camera_block_target = { x: 70, y: 80, z: 90 };
+  const b = BossIntroBannerSpawn(0x00570ec8);
+  BossBannersTick(host);
+  check("a banner waits on its record's flag", b.step === BannerStep.Waiting
+        && G.g_camera_driver_held === 0, `step ${b.step}`);
+
+  ResetGameGlobals();
+  G.g_camera_block_eye = { x: 7, y: 8, z: 9 };
+  G.g_camera_block_target = { x: 70, y: 80, z: 90 };
+  G.g_script_flags[2] = 1;
+  const j = BossIntroBannerSpawn(0x00570ec8);
+  BossBannersTick(host);
+  check("...and the preload tests the flag on its own frame "
+        + "(`JMP 0x00437d70`), so a raised flag seats it at once",
+        j.step === BannerStep.Seat && j.frame === 1, `${j.step} ${j.frame}`);
+  BossBannersTick(host);
+  check("the seat parks the camera driver and lays out eight cards, the "
+        + "boss's own seventh",
+        G.g_camera_driver_held === 1 && j.step === BannerStep.Slide
+        && j.frame === 2 && j.slots.join() === [0x7ed, 0x7ee, 0x7ee, 0x7ee,
+          0x7ee, 0x7ee, 0x181d, 0x7ee].join()
+        && j.cards[7].z < j.cards[0].z && j.cards[0].scale === Math.fround(0.03),
+        `${j.slots.map((v) => v.toString(16)).join()}`);
+  G.g_camera_mode = CameraMode.TrackEnemies;
+  G.g_camera_free = 1;
+  CameraDriverSelectMode();
+  check("...and a held driver is mode 6, which does nothing and frees nothing",
+        G.g_camera_mode === CameraMode.Held && G.g_camera_free === 0);
+
+  BossBannersTick(host);
+  check("the slide flies the camera block along the record's path",
+        G.g_camera_block_eye.x === 2 && G.g_camera_block_target.z === 10,
+        JSON.stringify(G.g_camera_block_eye));
+  let restacked = -1;
+  while (j.frame < 0x50 && j.step === BannerStep.Slide) {
+    BossBannersTick(host);
+    if (restacked < 0 && j.cards[0].yaw === -0x4200) restacked = j.frame;
+  }
+  check("card 0 turns 0x300 a frame from frame 15, is re-stacked edge-on and "
+        + "stops half way round",
+        restacked === 15 + 22 && j.cards[0].yaw === -0x8000
+        && j.cards[0].z === Math.fround(-1 - 8 * Math.fround(0.01))
+        && j.cards[6].yaw === 0 && j.cards[7].yaw === 0,
+        `${restacked} ${j.cards[0].yaw} ${j.cards[0].z}`);
+
+  G.g_screen_sprite_draws = [];
+  BossBannersTick(host);
+  const names = G.g_screen_sprite_draws.filter((d) => d.id === 0xba
+                                              || d.id === 0xc8);
+  check("frame 0x50 starts the hold and the two names, at alpha 0",
+        j.step === BannerStep.Hold && names.length === 2
+        && names[0].alpha === 0 && names[0].x === 310 && names[1].x === 526,
+        JSON.stringify(names));
+  for (let i = 0; i < 60; i++) BossBannersTick(host);
+  G.g_screen_sprite_draws = [];
+  BossBannersTick(host);
+  check("...and they are fully in sixty frames later",
+        G.g_screen_sprite_draws.some((d) => d.id === 0xba && d.alpha === 1));
+  check("every card but the boss's has shrunk away; the boss's is 0.06 and "
+        + "where the record sends it",
+        j.cards.every((c, i) => i === 6 || c.scale === 0)
+        && j.cards[6].scale === Math.fround(0.06)
+        && j.cards[6].x === Math.fround(0.06)
+        && j.cards[6].y === Math.fround(0.01),
+        JSON.stringify(j.cards[6]));
+
+  let n = 0;
+  while (G.g_boss_banners.length && n < 1000) { BossBannersTick(host); n++; }
+  check("on frame 300 the banner opens the shutter, lets the camera go, puts "
+        + "the block back and ends",
+        G.g_bHudShutterState === 1 && G.g_camera_driver_held === 0
+        && G.g_camera_block_eye.x === 7 && G.g_camera_block_target.z === 90
+        && G.g_boss_banners.length === 0 && j.frame === 300,
+        `${G.g_bHudShutterState} ${j.frame} ${JSON.stringify(G.g_camera_block_eye)}`);
+
+  const k = BossIntroBannerSpawn(0x00570ec8);
+  BossBannersTick(host);
+  BossBannersTick(host);
+  check("a banner mid-flight is plain data a snapshot can copy",
+        JSON.stringify(JSON.parse(JSON.stringify(k))) === JSON.stringify(k));
+  ResetGameGlobals();
+  check("a scene reset takes the banner and its hold on the camera with it",
+        G.g_boss_banners.length === 0 && G.g_camera_driver_held === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

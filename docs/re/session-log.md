@@ -19460,3 +19460,47 @@ Named: `BossHpBarSpawn`, `BossHpBarUpdate`, `DrawScreenSpriteLayered`,
 `ScreenSpriteQueuePush`, `ScreenSpriteQueueReset`, `ScreenSpriteQueueFlush`,
 `BossModeChapterCardUpdate`, `BossModeClockStart`/`Read`/`Set`;
 `g_boss_hp_fraction`, `g_boss_engaged`, `g_screen_sprite_queue`.
+
+## 2026-09-27 -- the boss-name banner is a camera flight, and a shared task
+
+`BossIntroBannerUpdate` (`0x00437AC0`) was ported inside `game/class19/` as
+"screen furniture": its lifetime and the one shutter write the stage-4 gate
+needs. Reading it whole for the other bosses (seven call sites -- 0x14, 0x19,
+0x22, 0x2D and 0x32; class 0x45 has none) found three things that description
+left out.
+
+* **It flies the camera.** Steps 2 and 3 call `CamEvalPath7(record+0x02,
+  frame)` straight into `g_camera_block_eye`/`target`, and step 1 raises
+  `0x009CA094` -- now `g_camera_driver_held` -- whose one reader,
+  `CameraDriverSelectMode` (`0x004026AB`), forces camera mode 6, the hook that
+  does nothing, and drops `g_camera_free`. The block is stashed on entry and
+  put back on the last frame. Class 0x14's scripted break, class 0x22's death,
+  class 0x45 and class 0x19 write the same word, so it is shared.
+* **It is the tarot-card intro.** Eight cards in camera space (slots `0x7ED`,
+  `0x7EE` from `etc_2.bin`, and the boss's own card from its pol file at
+  `record+0x06`), six of them turning over in a staggered sequence and
+  re-stacked the frame they are edge-on; then all but the boss's shrink away
+  and the boss's grows and slides. The decompile shows only card 0 being drawn:
+  the loop's increment sits after `MatrixStackPop`, which Ghidra marks
+  no-return, so both eight-card loops were cut off at their first iteration
+  (L35 again).
+* **It draws the boss's name**: two sprites per record, `scr_bosmater_stN.bin`,
+  fading in over sixty frames from frame 0x50. They are PAL4 and their banks
+  (0x186..0x18B, and the health bar's 0x177) take palette 10 from
+  `TexBankPaletteIndex`'s constant arm -- read from the byte table at
+  `0x0041CB90` and jump table `0x0041CB38`, not from the case labels. Stage 1's
+  pair decodes as "JUDGMENT" and "Type 28".
+
+And one off-by-one in the old port: step 0 does not end the frame after queuing
+the card backs -- `JMP 0x00437d70` goes into the flag test, so a flag already
+up seats the banner on its first frame.
+
+It is a pool in `G` now (`game/boss_banner.ts`), stepped after the camera
+tasks and the actors, because `ActorAlloc` appends and the scene made its
+camera tasks before any boss existed. Class 0x19 spawns into it and keeps no
+hold. The records are `.rdata`, and they are kept in `game/` as cited
+constants -- the precedent class 0x19 set for its two -- in a data-only file
+the exporter imports for the name-sprite list. The cards are state only;
+nothing in `render/` draws them yet (`[diverges]`, visual). `FUN_004759C0`,
+called per card with the yaw, rewrites a float in a render-state list from
+`sin(yaw)` and is left `[open]`.

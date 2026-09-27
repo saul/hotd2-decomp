@@ -121,6 +121,9 @@ export const OPS: Record<number, OpImpl> = {
       status: "tracked",
       run: (w) => {
         w.checkpointBlock = w.block;
+        // `MOV dword ptr [0x009ca094], EBX` at `0x0045EF12`, EBX zeroed at
+        // `0x0045EEC7`: a checkpoint lets go of a held camera driver.
+        G.g_camera_driver_held = 0;
         // The walker's scene, which `G.g_scene_index` mirrors a frame
         // later: the first block's checkpoint runs before that copy.
         const row = G.g_route_history[w.script.scene ?? G.g_scene_index];

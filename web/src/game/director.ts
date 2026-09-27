@@ -32,6 +32,7 @@ import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
+import { BossBannersTick } from "./boss_banner";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -703,9 +704,6 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events);
-  // The boss health bar is a task a boss allocates, so it runs after the
-  // boss did -- and it outlives it, so it is not the boss's to drive.
-  BossHpBarsTick();
 
   // `FUN_00408DD0` drains the candidates the actor updates above registered.
   UpdateCameraEnemySlots(eye);
@@ -717,6 +715,12 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `CamAdvancePathFrame` before any of this.
   CameraActorTick();
   CameraRunQueuedAction();
+  // The tasks a boss allocates: the name banner and the health bar. After
+  // the camera tasks, which the scene created before any boss existed, and
+  // after the boss -- `ActorAlloc` appends. The banner flies the camera block
+  // here, with the camera driver parked so nothing above undoes it.
+  BossBannersTick(host);
+  BossHpBarsTick();
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the

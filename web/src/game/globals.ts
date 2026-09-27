@@ -32,6 +32,7 @@ import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
 import type { BossHpBar } from "./boss_hp_bar";
+import type { BossBanner } from "./boss_banner";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
@@ -518,6 +519,22 @@ export const G = {
    * same reason as `g_severed_heads`.
    */
   g_boss_hp_bars: [] as BossHpBar[],
+  /**
+   * `[port-only]` as a pool: the `BossIntroBannerUpdate` tasks
+   * `BossIntroBannerSpawn` (`FUN_00437A70`) allocates, in creation order.
+   * See `game/boss_banner.ts`.
+   */
+  g_boss_banners: [] as BossBanner[],
+  /**
+   * `g_camera_driver_held` — `0x009CA094`. While it is 1,
+   * `CameraDriverSelectMode` (`FUN_00402650`) forces camera mode 6, the hook
+   * that does nothing, and drops `g_camera_free` -- the camera block is left
+   * to whoever is writing it. Its only reader. The boss-name banner raises it
+   * for the length of its flight, and the bosses' own camera takeovers do too;
+   * `ResetSceneCombatState` (`FUN_0045EEC0`, the `checkpoint` opcode) zeroes
+   * it at `0x0045EF12`.
+   */
+  g_camera_driver_held: 0,
   /**
    * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
    * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
@@ -1923,7 +1940,12 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // The scene's task list is rebuilt on a scene load, and a bar task goes
   // with it; the fill itself is a data-segment word and is left alone.
   G.g_boss_hp_bars = [];
+  G.g_boss_banners = [];
   G.g_screen_sprite_queue = [];
+  // ...and a banner that was flying the camera took its hold with it. The
+  // engine's own reset is the scene's first `checkpoint`; this is the port's
+  // load, which reaches the same state without running one.
+  G.g_camera_driver_held = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
   G.g_point_blood_sprays = [];

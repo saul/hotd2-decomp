@@ -68,6 +68,12 @@ PALETTE_TABLE = 0x0057A010
 #: index -> s16 palette per texture. Only scr_common's is transcribed; any
 #: other bank's PAL4 texture has no palette here and is refused.
 BANK_PALETTE_INDEX = {0x147: 0x0057A524}
+#: ``TexBankPaletteIndex``'s arms that return a constant, for the banks whose
+#: sprites the port draws: ``scr_bosmater`` (0x177) and the six
+#: ``scr_bosmater_st1``..``st6`` (0x186..0x18B), which the byte table at
+#: 0x0041CB90 all sends to jump-table entry 10, ``MOV EAX, 0xA`` at 0x0041CA1A.
+BANK_PALETTE_CONST = {0x177: 10, 0x186: 10, 0x187: 10, 0x188: 10,
+                      0x189: 10, 0x18A: 10, 0x18B: 10}
 
 
 @dataclass(frozen=True)
@@ -1153,8 +1159,11 @@ class ExeTables:
             return None
         pal = None
         if entry.layout == LAYOUT_PAL4:
+            fixed = BANK_PALETTE_CONST.get(bank)
             table = BANK_PALETTE_INDEX.get(bank)
-            if table is not None:
+            if fixed is not None:
+                pal = self.palette(fixed)
+            elif table is not None:
                 r = self._v2r(table + entry.index * 2)
                 if r is not None:
                     pal = self.palette(struct.unpack_from("<h", self.data, r)[0])

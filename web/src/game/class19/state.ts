@@ -257,36 +257,6 @@ export interface Boss4Block {
    * One slot, four meanings; the engine reuses it and so does this.
    */
   timer: number;
-  /**
-   * The intro banner this boss spawned — `BossIntroBannerUpdate`
-   * (`FUN_00437AC0`), or `null` before its entrance has run.
-   *
-   * `[diverges]` In the engine the banner is a **task of its own**, allocated
-   * by `BossIntroBannerSpawn` (`FUN_00437A70`) with its own 0xE0-byte block,
-   * and it outlives nothing — it kills itself 300 frames in. The port's object
-   * pool is keyed by spawn class and the banner has none, so it is driven from
-   * this boss's update instead. That is behaviourally the same thing for as
-   * long as the boss is in the pool and updating, which covers the banner's
-   * whole life; it would differ only if the boss died first, and the boss
-   * cannot die before its own entrance has finished.
-   */
-  banner: Boss4BannerState | null;
-}
-
-/** `BossIntroBannerUpdate`'s 0xE0-byte block, the fields it reads. */
-export interface Boss4BannerState {
-  /** `+0x00` — 0 preload, 999 waiting on the flag, 1 seat, 2 slide, 3 hold. */
-  step: number;
-  /** `+0x04` — the frame counter, incremented at the bottom of every call. */
-  frame: number;
-  /**
-   * The `g_boss4_intro_banners` entry, as an index.
-   *
-   * The engine keeps the pointer at the banner task's own `obj+0x130C`
-   * (`MOV dword ptr [ESI + 0x130c], EAX` at `0x00437AA1`); an index is the
-   * same thing through a table the port has, and it survives `clonePlain`.
-   */
-  rec: number;
 }
 
 /**
@@ -310,6 +280,5 @@ export function Boss4BlockNew(): Boss4Block {
     // `MOV dword ptr [EDX + 0x70], 0x40C00000` at `0x004919BC`.
     walkSpeed: 6,
     timer: 0,
-    banner: null,
   };
 }

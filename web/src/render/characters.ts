@@ -91,6 +91,7 @@ const boneSuffix = (part: string) => `_${part}`;
  */
 import type { Instance } from "./characters/instance";
 import { Poser } from "./characters/pose";
+import { PoseFromModelBlock } from "./characters/model_block";
 import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
   from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
@@ -154,6 +155,10 @@ export class CharacterLayer implements System {
   private enabled = true;
   /** Posing and blending. See `render/characters/pose.ts`. */
   private readonly poser = new Poser();
+  /** Scratch for the camera's matrices and its up, for the model block. */
+  private readonly _w2v: number[] = new Array(16).fill(0);
+  private readonly _v2w: number[] = new Array(16).fill(0);
+  private readonly _up = { x: 0, y: 1, z: 0 };
   private readonly _c = new Vector3();
   private readonly _p = new Vector3();
   /** Asset slot → the template node for that damaged part. */
@@ -505,6 +510,16 @@ export class CharacterLayer implements System {
       if (!show) {
         syncHordeMirror(inst, false);
         continue;
+      }
+      // An actor that carries the engine's model block was posed by its own
+      // class this frame; what is left is the engine's draw of it. See
+      // `render/characters/model_block.ts`.
+      if (inst.a.skel) {
+        _ctx.view.copyMatrices(this._w2v, this._v2w);
+        this._up.x = this._v2w[4];
+        this._up.y = this._v2w[5];
+        this._up.z = this._v2w[6];
+        if (PoseFromModelBlock(inst, this._up)) continue;
       }
       // The director owns position and facing; apply what it decided. The
       // exporter baked the spawn pose into the root, and this replaces it

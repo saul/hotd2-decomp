@@ -712,3 +712,28 @@ line writes a global, ask what writes it in the page; if the answer is
 "nothing", the test has found the bug and hidden it in the same line. Drive at
 least one check from the reset the page runs (`ResetGameGlobals`), not from a
 state assembled for the test.
+
+**L50 — A driven volley is not a trigger.** `playthrough.mjs` fires its whole
+grid between two driven frames, so the port's shot queue hands **one frame** a
+hundred and thirty pulls; the engine polls the trigger once a frame and has
+never seen two. A class that resolves its own mark on its next update -- class
+0x14 reads back the bone byte and the shot record -- sees only the last pull
+that crossed it, and stage 2's boss took **zero** damage in 33 dense volleys
+while one pull every three frames at the same point killed it. Before calling
+a fight unwinnable from a harness, fire at it one pull a frame; and a class
+that reads the shot record back must read the pull that marked it
+(`Actor.shotRays`), not the frame's last.
+
+**L51 — A subagent's scratch directory is its parent session's, and the
+siblings share it.** Every agent a coordinator launches is handed the same
+`scratchpad/` path, so a helper named `mutate.py` or `test_block.ts` is one
+file for all of them. Two of mine were overwritten by a sibling working on a
+different class between my writing them and my running them again, and the
+only tell was a harness notice that the file had changed on disk -- the
+insertion script had already consumed my copy, so nothing broke, which is
+luck and not a guarantee. A test block pasted into `port.test.ts` from a file
+another agent had just rewritten would have committed their assertions under
+my name. **Make a subdirectory named for your task and keep every scratch
+file in it**, and treat a name at the scratch root as something another agent
+may already own. It is L28 and L36 pointed at the one directory that is
+outside every worktree by design.

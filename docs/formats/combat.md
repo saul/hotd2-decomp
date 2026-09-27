@@ -251,6 +251,14 @@ thousand units) against the blob in the bone's frame, over
 the quad's surface; `MarkActorShot` hands them to `SpawnWorldImpact`, which
 fills `g_shot_hit_records` for the boss's own `Boss4ResolveShot` to read.
 
+**Several pulls in one frame.** `[port-only]` The engine reads the trigger once
+a frame, so the shot record a class reads back on its update is always the
+pull that marked it. The port's queue lets one frame take several pulls per
+player -- a driver's volley arrives whole between two driven frames (`L50`) --
+so `MarkActorShot` also keeps each marking pull's ray beside the bone byte,
+per player, in `Actor.shotRays`. Class 0x14's weak-point gates read that
+instead of `G.g_crosshair_ray`; with one pull a frame they are the same object.
+
 JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), and
 so does Strength (`game/class19/`: `Boss4Update` calls
 `ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line, and the mesh

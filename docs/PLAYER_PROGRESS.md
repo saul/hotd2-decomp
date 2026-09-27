@@ -3137,6 +3137,26 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+### A zombie cannot be staggered out of its own attack
+
+The other half of that mask is raised by the **strike itself**, and the port
+had never raised it. `ZombieStateStrike`'s sub 0 opens with one
+read-modify-write of `obj+0x34`, before it draws an attack —
+`00455a93 AND CH, 0xfe` / `00455a96 OR ECX, 0x10000000` — and nothing on the
+melee path lowers the bit again until `ZombieStateBackOff`'s first frame
+(`00455ca1 AND ECX, 0xefffffff`, in the same write that raises `BackingOff`).
+So from the pick, through the lunge and the whole swing, **a shot takes its hit
+points but plays no stumble**; the ways to stop an attack are to kill the
+zombie or to shoot off every limb its entry's cancel mask names, which whiffs
+it in `ActorStrikeConnect`. In the port, every strike could be cut short by a
+stagger. The same bit is half of `ZombiePushOutOfWorldAndActors`' `0x18000000`
+test, which the port had transcribed as "the airborne bits" — a zombie in its
+strike is shoved out of a crowd, and shoves a chair, 1.8× as hard.
+
+`ActorPlayHitReaction` also carries a `state 3 && sub 2 → BackOff` arm behind
+the gate — a shot ending the swing — which the gate makes unreachable for
+class 0x30: every entry to state 3 writes sub 0, and sub 0 raises the bit.
+
 ## A cross-fade dissolves from a still, and holds the new clip
 
 Emerging zombies in stage 2's block 16 finished their climb out of the water,

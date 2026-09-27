@@ -58,9 +58,15 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
     // paces attacks.
     obj.zom.shoveTimer = 0x3c;            // +0x1338
     obj.zom.backoffFrames = 0;            // +0x1334
-    // `obj+0x34 |= 0x20000000`: out of the compacted queue while retreating,
-    // so whoever is behind moves up and can take its turn.
-    obj.flags |= ActorFlag.BackingOff;
+    // `obj+0x34 = obj+0x34 & ~0x10000000 | 0x20000000` (`00455ca1`,
+    // `00455cb1`): no longer committed to the swing, and out of the compacted
+    // queue while retreating, so whoever is behind moves up and can take its
+    // turn.
+    //
+    // The clear is the other half of `ZombieStateStrike`'s sub 0, which raised
+    // {@link ActorFlag.Committed}; this is the first frame since then that a
+    // shot may stagger the actor.
+    obj.flags = (obj.flags & ~ActorFlag.Committed) | ActorFlag.BackingOff;
     obj.sub = 1;
   }
 

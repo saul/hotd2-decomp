@@ -11371,6 +11371,127 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     check("`backoffFrames` counts updates, not seconds", z.zom.backoffFrames === 7,
           String(z.zom.backoffFrames));
   }
+
+  // -- B8. the strike commits at the pick, and the retreat lets go ---------
+  //
+  // `00455a93 80e5fe` / `00455a96 81c900000010`: sub 0's first write, before
+  // the draw, drops `0x100` and raises `0x10000000` on `obj+0x34`, and nothing
+  // on the melee path lowers it until `ZombieStateBackOff`'s first frame
+  // (`00455ca1 81e1ffffffef`). `ActorPlayHitReaction` refuses outright while
+  // it is up (`004544d8`), so a swing cannot be staggered. Nothing here sets
+  // the bit by hand -- `L49` -- because the strike raising it is the half the
+  // port was missing.
+  {
+    clear();
+    const atk = TYPE.attacks["0"]["1"];
+    const z = zombie("committing", { state: ZombieState.Strike,
+                                     sub: StrikeSub.Pick,
+                                     pos: vec3(0, 0, atk.distance + 20) });
+    z.flags |= ActorFlag.ShotImmune;
+    ZombieStateStrike(z, EYE, new Rng(4));
+    check("the strike's pick raises `Committed`, before the lunge",
+          (z.flags & ActorFlag.Committed) !== 0
+            && z.state === ZombieState.Strike && z.sub === StrikeSub.Lunge,
+          `flags 0x${z.flags.toString(16)} ${z.state}/${z.sub}`);
+    check("...and drops bit 8 in the same write",
+          (z.flags & ActorFlag.ShotImmune) === 0, `0x${z.flags.toString(16)}`);
+    check("...so a shot during the lunge plays no stumble",
+          ActorPlayHitReaction(z, 1, HitResultCode.Damaged) === undefined
+            && z.react === null, JSON.stringify(z.react));
+    const hp = z.hp;
+    ResolveHit(z, 1, 0, NULL_HOST, new Rng(6));
+    check("...though the whole shot still lands, and the lunge goes on",
+          z.hp < hp && z.react === null && z.state === ZombieState.Strike,
+          `hp ${z.hp}/${hp} react ${JSON.stringify(z.react)} state ${z.state}`);
+
+    z.pos = vec3(0, 0, atk.distance - 1);
+    // A latch left up by whatever played before -- the arc entrance raises it
+    // on its landing and hands straight to this state.
+    z.flags2 |= ZombieFlag2.OneShotFired;
+    ZombieStateStrike(z, EYE, new Rng(4));
+    check("the swing is committed too",
+          z.sub === StrikeSub.Swinging && (z.flags & ActorFlag.Committed) !== 0
+            && ActorPlayHitReaction(z, 1, HitResultCode.Damaged) === undefined,
+          `${z.sub} 0x${z.flags.toString(16)}`);
+    check("...and its start drops the clip's one-shot latch, "
+          + "`00455b77 81e2fffffeff`",
+          (z.flags2 & ZombieFlag2.OneShotFired) === 0,
+          `0x${z.flags2.toString(16)}`);
+
+    // Play the clip out: the strike hands to the retreat and does not lower
+    // the bit itself.
+    const m = MotionOf(z, atk.strike);
+    if (z.action && m) {
+      z.action.ticks = ticksOfAuthoredFrame(m.frames - 1, m.fps);
+    }
+    ZombieStateStrike(z, EYE, new Rng(4));
+    check("...and it is still up as the swing hands to the retreat",
+          z.state === ZombieState.BackOff
+            && (z.flags & ActorFlag.Committed) !== 0,
+          `${ZombieState[z.state]} 0x${z.flags.toString(16)}`);
+    z.pos = vec3(0, 0, 5);              // deep inside the ring: keeps retreating
+    ZombieStateBackOff(z, EYE, 1 / 60, new Rng(2));
+    check("`ZombieStateBackOff`'s first frame takes it down, in the write "
+          + "that raises `BackingOff`",
+          z.state === ZombieState.BackOff
+            && (z.flags & ActorFlag.Committed) === 0
+            && (z.flags & ActorFlag.BackingOff) !== 0,
+          `${ZombieState[z.state]} 0x${z.flags.toString(16)}`);
+    check("...and from there a shot staggers it again",
+          ActorPlayHitReaction(z, 1, HitResultCode.Damaged) !== undefined,
+          JSON.stringify(z.react));
+  }
+
+  // -- B9. ...and a committed zombie is shoved harder ----------------------
+  //
+  // `ZombiePushOutOfWorldAndActors` multiplies the push by 1.8 (`0x0055dd48`)
+  // while `obj+0x34 & 0x18000000` (`004549b6`), and half of that mask is the
+  // bit the strike raises. The port had the test and nothing that raised the
+  // bit, so a striking zombie was pushed out of a crowd like any other.
+  {
+    const shove = (strike: boolean): number => {
+      clear();
+      const a = zombie("shoved", { state: ZombieState.Strike,
+                                   sub: StrikeSub.Pick, pos: vec3(0, 0, 40) });
+      const b = spawnZombie(0x7901, 1, "in the way");
+      b.visible = true;
+      b.hp = b.maxHp = 100;
+      b.pos = vec3(2, 0, 40);             // well inside 3.5 + 3.5
+      if (strike) ZombieStateStrike(a, EYE, new Rng(4));
+      a.pos = vec3(0, 0, 40);
+      ZombiePushOutOfWorldAndActors(a, 1);
+      return a.pos.x;
+    };
+    const plain = shove(false);
+    const striking = shove(true);
+    check("a zombie in its strike is pushed out 1.8x as far",
+          plain < 0 && Math.abs(striking / plain - 1.8) < 1e-6,
+          `${striking.toFixed(4)} against ${plain.toFixed(4)}`);
+  }
+
+  // -- B10. sub 1 falls into sub 2 on the frame the clip starts ------------
+  //
+  // `00455bc5` increments the sub and runs on into `00455bcc` with no `RET`
+  // between them, so sub 2's `obj+0x19C == entry+0x08` sees frame 0 on the
+  // frame the clip is set. No attack the shipped pick tables name has a hit
+  // frame of 0, so this pins the shape with one that does.
+  {
+    clear();
+    const atk0 = { ...TYPE.attacks["0"]["1"], hit_frame: 0 };
+    SetGameTables({
+      ...CHARS,
+      types: { ...CHARS.types,
+               "1": { ...TYPE, attacks: { ...TYPE.attacks, "0": { "1": atk0 } } } },
+    } as unknown as CharactersJson);
+    const z = zombie("frame-0 striker",
+                     { state: ZombieState.Strike, sub: StrikeSub.Lunge,
+                       attack: 1, pos: vec3(0, 0, atk0.distance - 1) });
+    ZombieStateStrike(z, EYE, new Rng(4));
+    check("an attack whose hit frame is 0 lands on the frame its clip starts",
+          z.sub === StrikeSub.Swinging && z.action?.motion === atk0.strike
+            && z.struck, `${z.sub}/${z.action?.motion}/${z.struck}`);
+    SetGameTables(CHARS);
+  }
 }
 /**
  * B25. The lift is `ActorRegisterCameraPoint`'s **float argument**, pushed by

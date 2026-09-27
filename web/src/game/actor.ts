@@ -228,10 +228,28 @@ export enum ActorFlag {
    */
   KeepCameraWhenLast = 0x800000,
   /**
-   * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
-   * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
-   * of the throw clip and `ZombieStateTargetMotionScript` for an entry whose
-   * mode is not negative.
+   * `obj+0x34` bit `0x10000000` — this actor is mid-attack, and **a shot may
+   * not stagger it out of the attack**.
+   *
+   * On class 0x30 the writers are the attacks themselves:
+   * `ZombieStateStrike` raises it in sub 0, before the draw (`00455a96`), and
+   * `ZombieStateBackOff`'s first frame is what clears it (`00455ca1`), so it
+   * spans the pick, the lunge and the whole swing. `ZombieStateStandAndThrow`
+   * holds it for the throw clip, `ZombieStateTargetMotionScript` for an entry
+   * whose mode is not negative, and `ZombieStateDelayedStrikeInPlace` for its
+   * own swing. `[proved]`
+   *
+   * The readers that matter to class 0x30, from a sweep of every `TEST`
+   * against a mask holding the bit and every `AND` that clears it:
+   * `ActorPlayHitReaction`'s opening refusal (`004544d8`, mask
+   * `0x10002000`), `ZombieStateDelayedStrikeInPlace`'s idle (`0045eab3`),
+   * `ZombieTwinFollowHost` (`004532e7`, the host's bit: the twin stops
+   * copying its pose while the host attacks) and `ZombieDrawBonePart`'s
+   * `0x1C6C` cel arm. The last two are not ported. `ZombieStateRideCarrier`
+   * (`00458a35`) reads the **carrier's**, which is another class.
+   *
+   * It said "will not be re-ranked out of it". `RankEnemiesByDistance`
+   * reads bit 1 and {@link BackingOff} and not this. `[proved]`
    */
   Committed = 0x10000000,
   /**

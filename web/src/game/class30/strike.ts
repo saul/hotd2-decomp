@@ -1,9 +1,10 @@
 /**
  * `ZombieStateStrike` — `FUN_00455A40`, and the hit it lands.
  *
- * Sub 0 draws which attack to use, sub 1 lunges until it is inside that
- * attack's own distance and starts the clip, sub 2 plays it out and lands the
- * hit on the exact frame the table names.
+ * Sub 0 commits the actor -- no stumble can interrupt it from here until
+ * `ZombieStateBackOff` -- and draws which attack to use, sub 1 lunges until it
+ * is inside that attack's own distance and starts the clip, sub 2 plays it out
+ * and lands the hit on the exact frame the table names.
  *
  * ## Why shooting an arm off matters twice
  *
@@ -135,6 +136,28 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
   ActorFacePlayerTarget(obj, eye);
   const list = AttackListOf(obj);
   if (obj.sub === StrikeSub.Pick) {
+    // The first thing sub 0 does, before it draws:
+    //
+    // ```
+    // 00455a82  8b4e34          MOV  ECX, dword ptr [ESI + 0x34]
+    // 00455a93  80e5fe          AND  CH, 0xfe            ; ~0x100
+    // 00455a96  81c900000010    OR   ECX, 0x10000000
+    // 00455a9c  894e34          MOV  dword ptr [ESI + 0x34], ECX
+    // ```
+    //
+    // {@link ActorFlag.Committed} goes up here, at the pick and before the
+    // lunge, and stays up through the swing: the one clear on this path is
+    // `ZombieStateBackOff`'s first frame. While it is up
+    // `ActorPlayHitReaction` refuses the stumble outright, so **a zombie that
+    // has started its attack cannot be staggered out of it** -- a shot still
+    // takes its hit points, and shooting off the limb the attack needs still
+    // whiffs it (`ActorStrikeConnect`), but the swing plays on. The port had
+    // no write here at all, so every strike could be cut short by a stumble.
+    //
+    // {@link ActorFlag.ShotImmune} comes down in the same write, so an actor
+    // that reaches its strike still holding bit 8 from a scripted entrance is
+    // shootable from the first frame of it.
+    obj.flags = (obj.flags & ~ActorFlag.ShotImmune) | ActorFlag.Committed;
     obj.attack = ZombiePickAttack(obj, rng);
     obj.struck = false;
     obj.sub = StrikeSub.Lunge;
@@ -171,6 +194,20 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     }
     obj.action = { motion: atk.strike, ticks: 0, loop: false };
     obj.rootActionFrame = -1;
+    // `00455b77 81e2fffffeff` / `00455b7e 81ca00000800` on `obj+0x136C`: the
+    // new clip's one-shot latch comes down with the swing.
+    //
+    // [diverges] Three things between the clip and the cry are not here, and
+    // all three are effects. `CALL [0x00592bcc]` at `0x00455B69` is
+    // `ZombieStrikeStartSplash` (`FUN_00456C50`) and `CALL [0x00592bd0]` at
+    // `0x00455BED`, every frame of sub 2, is `ZombieStrikeFrameSplash`
+    // (`FUN_00456D10`) -- a wading actor's splash at the swing's start and
+    // 0x14 frames before its end, the second latched by the bit cleared
+    // above. The same write raises {@link ZombieFlag2.StrikeStarted}, which is
+    // left down: its one reader and its only clear are `ZombieDrawBonePart`'s
+    // `0x1F09` cel arm, which `bonecels.ts` lists as not ported, so raising
+    // it here would leave it up for good.
+    obj.flags2 &= ~ZombieFlag2.OneShotFired;
     // `FUN_0040A6F0(obj, 3)` at `0x00455B8A`, on the same frame the strike
     // clip starts and immediately after `FUN_004119A0` sets it. This is what
     // made zombies swing in silence: the routine was ported for the shot
@@ -194,8 +231,13 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
       obj.strikeStart.z = obj.pos.z;
       obj.flags2 |= ZombieFlag2.StrikeAnchor;
     }
+    // `00455bc5 66ff8612130000 INC word ptr [ESI+0x1312]` and no `RET`: sub 1
+    // runs straight on into sub 2, so the hit test and the end test below see
+    // the clip's frame 0 on the frame it starts. This returned here, which no
+    // shipped entry could tell apart -- none of the attacks the pick tables
+    // name has a hit frame of 0 or a strike clip one play frame long -- but it
+    // is a `RET` the routine does not have.
     obj.sub = StrikeSub.Swinging;
-    return;
   }
 
   // Swinging: the clip is running. `hit_frame` counts the engine's own frame

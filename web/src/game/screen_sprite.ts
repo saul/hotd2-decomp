@@ -106,8 +106,12 @@ export const SCREEN_SPRITE_QUEUE_LAYERS = 4;
 
 /**
  * `ScreenSpriteQueuePush` flags every cell with this: `OR DH, 0x7` at
- * `0x0041C7D0`. What the three bits mean to `SubmitScreenSpriteQuad` is
- * `[open]`; they are carried, and the HUD layer reads only the anchor nibble.
+ * `0x0041C7D0`. Bits 8..10 are the quad's **depth compare**:
+ * `DrawSpriteQuadCommand` (`FUN_004A7AB0`) puts them in the PVR2 ISP word
+ * (0 standing for 4) and `TranslatePvr2StateToD3D` (`FUN_004A7780`) maps them
+ * through `g_ZFuncTable` (`[1, 7, 3, 5, 4, 6, 2, 8]`) -- so a plain sprite is
+ * `D3DCMP_LESSEQUAL` and a queued one `D3DCMP_ALWAYS`, drawn over whatever the
+ * scene has at its depth. `render/screen_sprites_deep.ts` honours it.
  */
 const QUEUED_FLAG_BITS = 0x700;
 

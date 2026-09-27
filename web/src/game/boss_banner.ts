@@ -35,10 +35,11 @@
  * are plain data here -- position, yaw and scale per card, and the slot each
  * draws -- and `render/effects.ts` draws them from it in the camera's space,
  * which is where `MatrixLoadIdentity` puts them. The per-card
- * `FUN_004759C0(yaw)` call, which rewrites a float in each entry of a
- * render-state list at `0x009AE584` from `sin(yaw)`, is the renderer's and is
- * `[open]`: `[diverges]` visual, whatever it changes on a card is not
- * changed.
+ * `CurlModelSlot3F7ByYaw` (`FUN_004759C0`) call bends a model by the card's
+ * yaw -- but the model is asset slot `0x3F7`, `boss4_kls_hod1.bin[30]`, and it
+ * only does so while that slot is resident. No shipped stage script loads that
+ * file, so in every stage the port plays the call changes nothing and the
+ * cards are drawn flat, which is what the port draws.
  *
  * ## Why this is a pool in `G`
  *
@@ -286,7 +287,8 @@ function BannerSlide(b: BossBanner, rec: BossIntroBannerRecord,
       c.z = Math.fround(rec.z - (BANNER_CARDS - i) * CARD_STACK);
     }
   }
-  // Then all eight are drawn -- `FUN_004759C0(yaw)`, identity, translate,
+  // Then all eight are drawn -- `CurlModelSlot3F7ByYaw(yaw)` (a no-op in
+  // every shipped stage; see the file comment), identity, translate,
   // yaw, scale, `AssetDrawSlot(slot)` -- which `render/effects.ts` does from
   // this state, in its camera-space group.
 }

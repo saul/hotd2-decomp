@@ -60,6 +60,7 @@ import type { Vec3 } from "../game/vec";
 import type { CharacterSpawnRequest } from "../game/director";
 import { Rng } from "../core/rng";
 import { G } from "../game/globals";
+import { g_class_handlers } from "../game/registry";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
@@ -687,13 +688,21 @@ export class CharacterLayer implements System {
   }
 
   /**
-   * `ShotTestSphere` (`FUN_00404630`) — what one shot segment hits first.
+   * `ShotTestSphere` (`FUN_00404630`) — what one shot segment hits first,
+   * among the classes that do not register for the shot test the engine's
+   * way.
    *
-   * The **renderer's half of a shot, and only that half.** The engine
-   * broad-phases on the actor's own sphere before descending into the bones;
-   * here the bone spheres are cheap enough (fifteen per character, a few dozen
-   * characters) that the broad phase would cost more than it saves, so it is
-   * skipped — the answer is the same.
+   * The **renderer's half of a shot, and only that half.** The classes that
+   * set `ClassHandler.registersForShotTest` are not here at all: they are
+   * tested by `game/combat/shot_test.ts` against `G.g_shot_test_list`, with
+   * the broad phase, and `MergeShotPicks` puts the two answers together.
+   *
+   * [diverges] For everything else there is no registration and no broad
+   * phase: every visible, living actor is a candidate, and a skinned one goes
+   * straight to its bone spheres, where the engine would first reject any
+   * shot outside `obj+0x124`. Moving a class across is setting that flag and
+   * calling `RegisterForShotTest` where its routine does; `combat.md`, "The
+   * shot test", lists the sites.
    *
    * The sphere is `PTR_DAT_004D032C`'s centre and radius, carried on the bone
    * and therefore moving with the animation exactly as `FUN_004107E0` makes it.
@@ -711,6 +720,9 @@ export class CharacterLayer implements System {
     let bestT = Infinity;
     for (const inst of this.instances) {
       if (!inst.root.visible || inst.a.dead) continue;
+      // A class that registers the engine's way is found through its
+      // registration or not at all -- see `game/combat/shot_test.ts`.
+      if (g_class_handlers[inst.a.cls]?.registersForShotTest) continue;
       // `RegisterForShotTest` (`FUN_00405160`) never appends an actor whose
       // `obj+0x34` has bit `0x8000`, so no shot can find it.
       if (inst.a.flags & ActorFlag.NoShotTest) continue;
@@ -806,6 +818,7 @@ export class CharacterLayer implements System {
     // the same list: a drum in front of the zombie holding it takes the shot.
     const carried = this.effects?.pickCarried(this._ray) ?? null;
     if (carried && carried.t < bestT) {
+      bestT = carried.t;
       best = { kind: "carried", carriedId: carried.id,
                point: { x: carried.point.x, y: carried.point.y,
                         z: carried.point.z } };
@@ -820,7 +833,9 @@ export class CharacterLayer implements System {
         "[characters] no hit-reaction data in this bundle — re-export it "
         + "(`npm run export`). Zombies will not stagger when shot.");
     }
-    return best;
+    // How far along the shot, so `MergeShotPicks` can weigh this against the
+    // registered classes' answer.
+    return best ? { ...best, t: bestT } : null;
   }
 
   /**

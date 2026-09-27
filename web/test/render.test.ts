@@ -2282,6 +2282,25 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
         JSON.stringify(chars.pickShot(ray(0, 1))));
   a.flags &= ~ActorFlag.NoShotTest;
 
+  // The distance along the shot comes back with the pick: it is what
+  // `MergeShotPicks` weighs this answer against the registered classes' by.
+  // The centre is (0, 1, -30) and the ray runs straight at it.
+  const along = chars.pickShot(ray(0, 1))?.t ?? NaN;
+  check("the pick says how far along the shot it is",
+        Math.abs(along - Math.hypot(1, 30)) < 1e-6, `${along}`);
+  // A class that registers the engine's way is `game/combat/shot_test.ts`'s:
+  // this pick passes it by, registered or not, so the one answer it gets is
+  // the one its own registration earns.
+  const { g_class_handlers } = await import("../src/game/registry");
+  const h = g_class_handlers[SpawnClass.Bat]!;
+  h.registersForShotTest = true;
+  check("a class that registers the engine's way is not picked here",
+        chars.pickShot(ray(0, 1)) === null,
+        JSON.stringify(chars.pickShot(ray(0, 1))));
+  delete h.registersForShotTest;
+  check("...and is again once it stops", chars.pickShot(ray(0, 1))?.kind
+        === "actor");
+
   stage.dispose();
   G.g_object_list.length = 0;
 }
@@ -2496,6 +2515,36 @@ console.log("\nthe gun lights are built off the camera this frame draws:");
         `${light.dir.x} ${light.dir.y} ${light.dir.z}`);
   g.g_scene_lighting = 0;
   g.g_entity_spotlights_on = 0;
+}
+
+// A queued screen sprite ignores the scene's depth; a plain one does not.
+// `DrawSpriteQuadCommand` (`FUN_004A7AB0`) sends `g_ZFuncTable[flags >> 8 & 7]`
+// (0 meaning 4) as ZFUNC, and the table makes 4 LESSEQUAL and 7 ALWAYS.
+{
+  const { ScreenSpritesDeep } = await import("../src/render/screen_sprites_deep");
+  const { G: g } = await import("../src/game/globals");
+  const { AlwaysDepth, LessEqualDepth, PerspectiveCamera, Texture }
+    = await import("three");
+  const deep = new ScreenSpritesDeep();
+  deep.images = () => ({ w: 16, h: 16, url: "data:image/png;base64," });
+  // `TextureLoader` needs a DOM; the depth test needs none of the image.
+  (deep as unknown as { texture: () => unknown }).texture = () => new Texture();
+  const cam = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  g.g_screen_sprite_draws = [
+    { id: 0xb6, x: 176, y: 35, depth: 1.002, sx: 1, sy: 0.8, alpha: 1,
+      flags: 0x729 },
+    { id: 0x59, x: 0, y: 0, depth: 120, sx: 1, sy: 1, alpha: 1, flags: 0 },
+  ];
+  deep.update({ camera: cam } as unknown as RenderContextT);
+  const quads = deep.group.children as unknown as
+    { material: { depthFunc: number } }[];
+  check("a queued sprite (flags 0x700) is drawn with ZFUNC ALWAYS",
+        quads[0]?.material.depthFunc === AlwaysDepth,
+        `${quads[0]?.material.depthFunc}`);
+  check("...and a plain one with LESSEQUAL, against the scene",
+        quads[1]?.material.depthFunc === LessEqualDepth,
+        `${quads[1]?.material.depthFunc}`);
+  g.g_screen_sprite_draws = [];
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

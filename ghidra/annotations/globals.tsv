@@ -239,6 +239,8 @@
 00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
 005936bc	g_class41_updates	79 child entry functions
 005937f8	g_breakable_hull_points	96 x {s16 x, s16 y, s16 z}, scaled by 0.001, the prop's collision hull. BreakablePropGroundContact transforms all 96 to find which corner a toppling prop lands on.
+00593a38	g_shatter_fragment_slots_a	15 s16 asset slots (0x19EA..0x19F8, then a 0 pad) -- the piece BreakablePropShatterUpdate draws for piece i when the shatter object's +0x36 (the prop's +0x324) is 0. [proved]
+00593a58	g_shatter_fragment_slots_b	15 s16 asset slots (0x1A11..0x1A1F, then a 0 pad) -- the piece BreakablePropShatterUpdate draws for piece i when the prop's +0x324 is non-zero; PlaceBreakableGroup writes 6 there only for a Training one-shot target (slot 0x1A0F). [proved] for the selector, [likely] that only the target reaches it.
 00593a78	g_shatter_fragment_offsets	15 x {s16 x, s16 y, s16 z} in thousandths -- where each shatter fragment starts, relative to the prop.
 00593ad4	g_shatter_fragment_angles	15 x {s16 rx, s16 ry, s16 rz} in BAMS -- each shatter fragment's initial orientation.
 00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
@@ -258,6 +260,8 @@
 0059468c	g_fragment_subkind12_yaws	Four s32 BAMS yaws for sub-kind 12: 3129, 3129, 29830, 39322.
 0059469c	g_fragment_burst_scales	One byte per type-40 sub-kind: the burst fragments' uniform scale in hundredths (70, 100 or 125). Ghidra labels it as a string.
 005946f8	g_prop_table44	PlaceTable44Props' seven rows, stride 20: {s16 x, y, z (* 0.01); s16 pad; s32 rx, ry, rz (BAMS)}. Rows 2..6 are the whole chairs PropUpdateType44 draws; row 6 lies on its side at (-22.3, 9.06, -97.86).
+00594788	g_falling_container_hull_points	48 x {s16 x, s16 y, s16 z} in thousandths -- the hull FallingContainerUpdate passes FallingContainerGroundContact as (0x00594788, 0x30). [proved]
+005948a8	g_container_fragment_hull_points	55 x {s16 x, s16 y, s16 z} in thousandths -- the hull FallingContainerFragmentUpdate passes FallingContainerGroundContact as (0x005948A8, 0x37). It starts where the 48-point container hull ends. [proved]
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 0059505a	g_item_score_table	per-kind pickup score, stride 0xC
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.

@@ -601,7 +601,15 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
  */
 function ShotTestBoneSphere(obj: Actor, node: CharacterBone, shot: ShotTest,
                             out: ShotCandidate[]): void {
-  const r = shot.host.boneSphere?.(obj.at, node.bone, _w) ?? null;
+  // An actor that carries the engine's model block has the record itself:
+  // `rec+0x68` is what its own `SkeletonEmitNode` wrote this frame, and
+  // `rec+0x78` the type's radius. See `game/skeleton.ts`.
+  const rec = obj.skel?.bones[node.bone];
+  if (rec) {
+    _w.x = rec.hit[0]; _w.y = rec.hit[1]; _w.z = rec.hit[2];
+  }
+  const r = rec ? (node.hit_radius ?? 0)
+    : shot.host.boneSphere?.(obj.at, node.bone, _w) ?? null;
   if (r === null || r === SHOT_TEST_ZERO) return;
   if (!shot.host.viewSpaceOfPoint?.(_w, _c)) return;
   if (RayTestSphere(shot.angles, _c.x - shot.eye.x, _c.y - shot.eye.y,

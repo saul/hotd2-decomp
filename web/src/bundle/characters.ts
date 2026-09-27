@@ -583,6 +583,26 @@ export interface CharacterPlacement {
     despawn_frame: number;
   } | null;
   /**
+   * Class 0x16 — `WaterFieldCreate` (`FUN_00442290`). A **marker**: the
+   * routine reads no tail at all, only the spawn's own `y` (`obj+0x44`) for
+   * the field's plane, and that comes with the spawn record. The block is
+   * here because a class with no character type reaches the player only
+   * through a placement.
+   */
+  class16?: Record<string, never> | null;
+  /**
+   * Class 0x17's tail — `WaterWaveSourceAdd` (`FUN_004422D0`). `kind` is the
+   * spawn's `obj+0x11C` (its `hp`), the index into `g_wave_source_kinds`
+   * (0 travelling, 1 circular); `amplitude`, `wavelength` and `speed` are
+   * `tail+0x00..+0x08`, which the source's first tick copies to
+   * `+0x5C..+0x64`; `pitch` and `roll` are the spawn's `obj+0x64`/`+0x6C`,
+   * which the routine copies to `+0x48`/`+0x50` beside the yaw.
+   */
+  class17?: {
+    kind: number; amplitude: number; wavelength: number; speed: number;
+    pitch: number; roll: number;
+  } | null;
+  /**
    * Class 0x22's tail — JUDGMENT's flier, as `Class22Init` (`FUN_0049B0D0`)
    * and its states read it.
    *
@@ -957,6 +977,59 @@ export interface Class31Json {
 }
 
 /**
+ * One `g_class14_anim_cues` record (`0x0059626C`), as `g_class14_anim_slots`
+ * (`0x00596408`) points at it: the motion the slot plays, then the
+ * `{frame, code}` pairs `Class14AdvanceMotionAndPublishPoints`
+ * (`FUN_00476AD0`) walks for the first frame at or past the play cursor, and
+ * the code that holds after the last pair. The code picks the foot-contact
+ * strengths for `g_class14_foot_contacts`.
+ */
+export interface Class14AnimCue {
+  motion: number;
+  cues: [number, number][];
+  end_code: number;
+}
+
+/** One row of `g_class14_window_timing` (`0x005965C0`), 12 bytes. */
+export interface Class14WindowTiming {
+  /** `+0x00` s16 — frames the weak point is held open at the top. */
+  open_hold: number;
+  /** `+0x02` s16 — frames it is held shut at the bottom. */
+  shut_hold: number;
+  /** `+0x04` f32 — flipbook frames a tick while opening. */
+  open_rate: number;
+  /** `+0x08` f32 — while closing (negative). */
+  close_rate: number;
+}
+
+/**
+ * Class 0x14's `.rdata` — the stage-2 boss. Every table here is read by an
+ * instruction in `game/class14/` names; see `web/src/hod2lib/class14.ts` for
+ * the addresses.
+ */
+export interface Class14Json {
+  /** `g_class14_anim_slots` — 30 cue records by anim slot. */
+  anim_slots: (Class14AnimCue | null)[];
+  /**
+   * `g_class14_damage_cones` (`0x00596480`) — 40 rows of
+   * `[maxYaw, rotX, minPitch, maxPitch]`, s16 BAMS, indexed by the weak-point
+   * flipbook's frame less its first.
+   */
+  damage_cones: [number, number, number, number][];
+  /** `g_class14_window_timing` — 8 rows by `state+0x94`. */
+  window_timing: Class14WindowTiming[];
+  /** `g_class14_summon_delays_a` / `_b` — frames between fish, by rank. */
+  summon_delays_a: number[];
+  summon_delays_b: number[];
+  /** `g_class14_summon_counts` — `[rank][round]`. */
+  summon_counts: number[][];
+  /** `g_class14_phase_hp_frac` — by phase. */
+  phase_hp_frac: number[];
+  /** `g_class14_bone_damage` — `[rank][players - 1]`. */
+  bone_damage: number[][];
+}
+
+/**
  * One row of `g_actor_attachment_records` — `0x004EC4C0`, 81 of them.
  *
  * `bone` is `-1` for a row whose pointer does not resolve; the row is kept so
@@ -980,6 +1053,8 @@ export interface CharactersJson {
   player: PlayerDamageJson;
   /** Class 0x31's own tables — see {@link Class31Json}. */
   class31?: Class31Json;
+  /** Class 0x14's own tables — see {@link Class14Json}. */
+  class14?: Class14Json | Record<string, never>;
   /**
    * `g_actor_attachment_records` — `0x004EC4C0`, indexed by the ids in a
    * placement's {@link CharacterPlacement.attachments}.

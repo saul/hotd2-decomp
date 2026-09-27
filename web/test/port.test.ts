@@ -12552,6 +12552,73 @@ console.log("\nthe camera path publishes every frame, ends included:");
 }
 
 /**
+ * A block change leaves the action ring alone.
+ *
+ * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) moves the block and the program
+ * pointer and nothing else; `EvtLoadBlockProgram` (`FUN_0045EBC0`), which
+ * zeroes `g_queued_events_pending`, is called only by the two task-list
+ * builders. A `cam_play` a skip cut short retires on its next call -- after
+ * the interpreter has raced into the next block -- so its count has to still
+ * be there. The port zeroed it at the block change, the retire took the next
+ * block's count, and stage 6 block 1 parked on a -1.
+ */
+console.log("\na block change carries the action ring's count:");
+{
+  const camOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 0],
+    start, end, slot: 7, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const waitRing = (i: number) => ({ i, at: i, op: 0x40,
+    name: "wait_queued_events_done", cat: "wait",
+    blocks_on: "queued events pending == 0" });
+  const region = (i: number, open: boolean) => ({ i, at: i, op: 0x2c,
+    name: "set_skippable_region", cat: "flow", open });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 1, routes: [], regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "goto", next: [1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [] }, { index: 1, at: 0, ops: [
+        region(0, true), camOp(1, 0, 100), waitRing(2), region(3, false),
+      ] }],
+    }, {
+      index: 1, at: 100, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 100, ops: [] }, { index: 1, at: 100, ops: [
+        camOp(0, 0, 10), waitRing(1),
+        { i: 2, at: 102, op: 0x42, name: "wait_frames", cat: "wait", arg: 100,
+          blocks_on: "arg frames elapsed" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  ResetGameGlobals();
+  let lowest = 0, skipped = false, passedAt = -1;
+  for (let f = 0; f < 60; f++) {
+    if (f === 5) skipped = w.requestSkip();
+    WalkerCameraFrame(w);
+    lowest = Math.min(lowest, G.g_queued_events_pending);
+    if (passedAt < 0 && w.block === 1 && w.opIndex === 2) {
+      passedAt = G.g_cam_path_frame;
+    }
+  }
+  check("the skip is taken inside the region", skipped);
+  check("the count never goes below zero", lowest >= 0, `${lowest}`);
+  check("...and the next block's wait holds until its own shot has ended",
+        passedAt === 10, `passed with the camera on ${passedAt}`);
+}
+
+/**
  * `goto_scene_state_when_alive` (0x32) waits for the players.
  *
  * `EvtOpGotoSceneStateWhenPlayersAlive32` (`FUN_0045F900`) returns with the

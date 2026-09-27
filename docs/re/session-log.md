@@ -20093,3 +20093,103 @@ landings.
 fall-through, the feather's kill-without-draw, the ring task's fortieth-frame
 kill, the owl's blood, or putting the surface ring back on the underwater death
 each fails `npm run test:port`.
+
+## 2026-09-27 -- the camera is the exe's two tasks (branch `fix/camera-faithful`)
+
+The camera used to be seated from outside the game: `Walker.tick` advanced a
+`cam_play`, retired it and released `wait_queued_events_done` inside one call,
+and an `app/` system wrote the block from the walker's shot before the actors
+ran. It is now the exe's pipeline, in the order the scene's task list at
+`0x00460710` builds it `[proved]`: interpreter (pushes only), light push,
+`CameraActorTick` (the action ring, the driver, `UpdateSceneViewAndLight`),
+backdrop, `CameraUpdateTick` (the scene state's hook, the bodies), the player
+tasks, `SelectAttackablePlayer`, shutter, scene lights, region draw, rain,
+`UpdateCameraEnemySlots`, `RankEnemiesByDistance`, the shot resolution, then
+every actor. `SceneTaskWalk` is that list.
+
+What moved or was ported: the action ring and all ten handlers
+(`game/camera/actions.ts`, `EvtRunQueuedActions` with its advance word and
+drain mode); the view built from the block's angles with the shake's nod,
+into two matrices in `G` the renderer draws from; the scene-state hooks writing
+the gameplay eye `g_camera_eye` -- the `-15` is its -- and the deferred pose
+block; the rail's pause (`RailMayAdvance`) applied, because nothing snaps the
+block onto a stashed play any more; `CameraDriverFromDeferredPose`'s copies;
+both eye eases (`CameraEaseBlockEyeToPathPose`, `CameraEaseEyeToPath`); the
+integer `TurnLookAtToward`; `CameraArmStashedPath` where the two drivers call
+it; the slot table dealt by the next frame's fill; per-class camera
+registration through `ActorRegisterCameraPoint`'s second tail call; waits that
+yield on their first visit and `wait_frames n` passing after `n + 1`; and
+`0x32`'s gate on the players (states 4, 5 and 6 with no lives hold it, read
+from `g_player_state_handlers +0x10`). A seek runs the camera's two tasks
+through every wait it steps over rather than writing the words.
+
+Measured: `handback` now lets each room fight for a second first (below) and
+gives 7-14 degrees and 50-76 frames in stage 1 block 1's fought rooms, 2
+frames in an empty one; `cam_cues` moved by one frame for the entrances whose
+shot is queued after the spawn (the ring dequeues a frame later), and stage 2's
+`0x10948` (cue 430, the end of `cam_play 336..430`) now leaves on its first
+update instead of 552 frames later -- the retire publishes the end frame and
+the spawn is made in the same interpreter pass, so its equality holds at once.
+Stage 1's opening room holds about 180 frames longer: the last zombie carries
+`KeepCameraWhenLast`, stays a camera candidate through its death clip, and the
+mode machine tracks its corpse until `ZombieStateCorpseSink` untracks it.
+
+**Wrong turns.**
+
+* The first rotation helpers duplicated `carrier.ts`'s `MatrixGetAngles`,
+  `matrix.ts`'s `VecAngleBetween` and `vec.ts`'s `LerpWeighted`; verify_port's
+  rule 1 caught all three.
+* Test fixtures that set a handler found it parked: `CameraActorInit` starts
+  the advance word at 2, which dequeues on the first call. Fixtures that set
+  only the stamped scene state were reset by the per-frame stamp and had to
+  set the live one as well.
+* Harness replays deadlocked on a `goto_scene_state` that ran ahead of a
+  queued `finish_sequence`, until the replay modelled the yields of 0x41,
+  0x42, 0x45 and 0x47 and ran camera frames through every step-over.
+* `handback`'s first kill model raised `NoCameraTrack` and left the permit
+  holders standing, which are camera targets as long as they stand; its seek
+  rebuilt block 0's boat hostage fresh, holding a slot for ever. Every spawn
+  is now made once, and a kill goes through the class's death. Then it killed
+  on the gate's first frame, which the two-frame slot latency means is before
+  the camera has turned at all: four of five stage-1 rooms measured 0 degrees
+  and the "wider swing holds longer" check silently stopped being asserted.
+  It lets each room fight for `FIGHT_FRAMES` now.
+* `horde` raised flag 94 at a fixed frame; with `wait_queued_events_done`
+  waiting on the ring the members spawn two frames later, the fourth one's
+  hold had not run out, and `HordeStateHold` counts a member in on every such
+  frame. It raises the flag once the holds are out, as step 2 does.
+* The walker zeroed the ring's count on every block change, on the reading
+  that `EvtLoadBlockProgram` (`FUN_0045EBC0`) runs there. It does not:
+  `EvtAdvanceStepOrRoute` moves the block index and the pointer and nothing
+  else, and `FUN_0045EBC0`'s two callers are task-list builders. With the ring
+  now the engine's, a `cam_play` a skip cut short at the end of stage 6's
+  block 0 retired into block 1 after the reset, took the new block's count,
+  and block 1 step 5's `wait_queued_events_done` held on -1. The reset had
+  also been hiding a replay bug: stepping over a wait that yielded on its
+  first visit ran one camera frame, so a room gate the replay could not count
+  left its `finish_sequence` queued for the `goto_scene_state` behind it, and
+  the driver was installed afterwards with no count. A yield now takes the
+  rule's postcondition like any other wait.
+* A screenshot pass and two playthroughs failed mid-run because the shared
+  bundle was re-exported at a new format under them (L29's cousin): the
+  measurements that count were rerun one Chrome at a time against a bundle in
+  this worktree's own `extract/`. One of mine failed the same way because I
+  edited the source under a running playthrough, and vite reloaded the page.
+
+**Still `[diverges]`, camera-related:** `CamPathCueReached` treats a cue the
+seek landed past as reached (the engine never seeks); four class routines read
+camera block 0 where the exe reads block 2 or the bare block-0 symbol
+(`class30/entrance.ts`, `class33`, `class11`'s wedge, `class46`'s dive yaw) --
+the port models one block, and blocks 1-3's handlers are `NoOpStub` in every
+shipped script.
+
+**Next actions.**
+
+* The boss classes still answer `tracksCamera` (0x19, 0x22, 0x23, 0x45, and
+  0x14, which also makes the call): each should call
+  `RegisterForCameraTracking` -- or `ActorRegisterCameraPoint(obj, host, rise)`
+  where the exe does -- from its own update at the exe's site, and drop the
+  predicate; the director's bridge goes with the last one.
+* The Tower's `Boss3PublishCameraAngles` and `Boss3SeatCameraAngles`
+  (`class45/body.ts`) compensate for a view built from the look-at. The view
+  is built from the angles now, so both can go.

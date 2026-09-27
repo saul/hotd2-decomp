@@ -566,19 +566,3 @@ export function CameraActorInit(): void {
   G.g_evt_action_handler = EvtActionHandler.None;
 }
 
-/**
- * `[port-only]` as a function -- the ring half of `EvtLoadBlockProgram`
- * (`FUN_0045EBC0`), which the interpreter runs on every block it loads:
- *
- * ```c
- * DAT_009CA108 = DAT_009A34D0 = 0;  g_queued_events_pending = 0;  g_evt_action_advance = 2;
- * ```
- *
- * Whatever was still queued is dropped. The handler slot is **not** touched:
- * a shot or a driver still installed plays on into the new block. `[proved]`
- */
-export function EvtLoadBlockProgramRing(): void {
-  G.g_evt_action_ring = [];
-  G.g_queued_events_pending = 0;
-  G.g_evt_action_advance = 2;
-}

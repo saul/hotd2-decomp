@@ -920,6 +920,12 @@ is that list now, and the camera lives entirely inside it:
   `UpdateCameraEnemySlots` deals the slots, and the camera reads them the frame
   after that. The camera is two frames behind the room, as the exe's is.
 
+A block change leaves the ring alone. `EvtAdvanceStepOrRoute` moves the block
+and the program pointer; only a scene's task list runs `EvtLoadBlockProgram`,
+which empties the ring and zeroes the count. So an action still running when a
+block ends -- a `cam_play` a skip cut short -- retires in the next block and
+takes its own count with it. `[proved]`
+
 Waits yield on their first visit, as every wait opcode but `0x40` does, and
 `wait_frames n` passes after `n + 1` frames. A seek walks the script without
 running frames, so every wait it steps over runs the camera's two tasks to the

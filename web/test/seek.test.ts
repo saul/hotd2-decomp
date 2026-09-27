@@ -964,12 +964,13 @@ for (const stage of STAGES) {
     // retirement parks all six stages on a `wait_queued_events_done` within
     // the first few blocks, because the count never falls back to zero.
     //
-    // This one is the structural complement. `FUN_0045EBC0` zeroes the count
-    // when it loads a block, so the engine absorbs a residue silently; if the
-    // port retires every action from the right instruction, that reset is a
-    // no-op and the ring is *already* empty at each transition. It is, in all
-    // six stages -- which is a statement about the script's shape, not about
-    // the port agreeing with itself.
+    // This one is the structural complement. A block change leaves the ring
+    // alone (`EvtAdvanceStepOrRoute` never calls `FUN_0045EBC0`, which only
+    // a scene's task list does), so a residue would carry into the next
+    // block; if the port retires every action from the right instruction the
+    // ring is *already* empty at each transition. It is, in all six stages
+    // -- which is a statement about the script's shape, not about the port
+    // agreeing with itself.
     check(`stage ${stage}: the action ring balances`,
           !negative && w.ringResidue === 0 && w.queuedEventsPending === 0,
           `${w.ringResidue} block(s) ended owing an action, ended on `
@@ -1002,7 +1003,7 @@ for (const stage of STAGES) {
       for (let s = 1; s < blk.steps.length; s++) addrs.push([blk.index, s]);
     }
 
-    let stuck = 0, seeks = 0, worst = "";
+    let stuck = 0, seeks = 0, worst = "", residueAt = "";
     for (const [b, s] of addrs) {
       freshGame(file);
       const v = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
@@ -1012,6 +1013,11 @@ for (const stage of STAGES) {
                                      scriptFlagRaised: shotsDone });
       if (!seekTo(v, b, s, 0)) continue;
       seeks++;
+      // The replay crossed every block boundary with the ring drained, as
+      // play does. A block change does not empty the ring (only a scene's
+      // task list does), so a replay that left an action queued would carry
+      // it into the next block rather than have it wiped.
+      if (v.ringResidue !== 0 && !residueAt) residueAt = `${b}/${s}`;
       let at = "", stalls = 0;
       for (let i = 0; i < 60 * 60 * 8 && !v.finished; i++) {
         if (v.branch) v.takeBranch(0);
@@ -1030,6 +1036,9 @@ for (const stage of STAGES) {
     }
     check(`stage ${stage}: every reload point still plays to the end`,
           stuck === 0, `${stuck} of ${seeks} stuck -- ${worst}`);
+    check(`stage ${stage}: ...and every replay crossed its block changes `
+          + `with the ring drained`, residueAt === "",
+          `the seek to ${residueAt} left an action queued`);
   }
 }
 

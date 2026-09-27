@@ -27,7 +27,7 @@
 
 import { G } from "../game/globals";
 import { CameraUpdateHook, EvtActionHandler } from "../game/camera/driver";
-import { EvtGotoSceneState, EvtLoadBlockProgramRing, EvtQueueAction,
+import { EvtGotoSceneState, EvtQueueAction,
          EvtOpSetActionDrainMode33 } from "../game/camera/actions";
 import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
@@ -658,10 +658,12 @@ export class Walker {
   /**
    * How many block transitions found the action ring still owing work.
    *
-   * `FUN_0045EBC0` zeroes `g_queued_events_pending` when it loads a block, so
-   * a residue is silently absorbed by the engine too -- which makes it the one
-   * place the port's accounting can be checked against the script's own
-   * structure rather than against itself. It should be zero.
+   * The engine carries a residue across a block change (see
+   * {@link goToBlock}), and the shipped scripts leave none when nothing is
+   * skipped: every block ends on a wait that drains the ring. So this is the
+   * one place the port's accounting can be checked against the script's own
+   * structure rather than against itself, and on an unskipped run it should
+   * be zero.
    */
   ringResidue = 0;
 
@@ -1060,15 +1062,16 @@ export class Walker {
    */
   stepOverWait(): void {
     if (!this.wait) return;
-    // A yield's condition was never going to be held on, and its enter has
-    // already done what the pass does: stepping it is the frame and nothing
-    // more -- one pass of the camera's tasks.
-    if (this.wait.policy.kind === "yield") {
-      CameraReplayFor(1);
-      this.wait = null;
-      this.opIndex++;
-      return;
-    }
+    // A yield is a wait whose condition already held on its first visit, and
+    // stepping over it is the same claim as stepping over any other: the game
+    // is past the instruction, with the world it leaves. So it takes the
+    // rule's postcondition below like every other kind. It used to be one
+    // camera frame and nothing more, which is a different world whenever the
+    // host cannot answer the condition -- a replay's room gate with nobody to
+    // count passes on its first visit, and one frame left the
+    // `finish_sequence` queued in front of it in the ring for the
+    // `goto_scene_state` behind it to take back, so its driver was installed
+    // afterwards with no count and held the ring shut into the next block.
     const rule = WAIT_RULES.get(this.wait.op.op);
     const retires = rule?.retires;
     if (retires) this.retireGated(retires === "civilians"
@@ -1917,12 +1920,18 @@ export class Walker {
       this.host.onBranch(null);
       return false;
     }
-    // `FUN_0045EBC0` loads a block's program and zeroes `g_queued_events_pending`
-    // with it, so the ring's accounting cannot drift across a block boundary.
-    // That is a real bound, not a tidy-up: it is why a miscounted action costs
-    // at most one block rather than deadlocking the stage.
+    // **The ring is not touched here.** `EvtAdvanceStepOrRoute`
+    // (`FUN_0045F000`) moves the block index and the program pointer and
+    // nothing else; `EvtLoadBlockProgram` (`FUN_0045EBC0`), which does zero
+    // `g_queued_events_pending` and empty the ring, has two callers, and both
+    // are task-list builders (`0x00460710`, `0x0041FAB0`) -- a scene's start,
+    // not a block's. `[proved]` So an action still running when a block ends
+    // -- a `cam_play` a skip cut short, which retires on its next call --
+    // keeps its count into the next block and retires it there. Zeroing the
+    // count here took that count back twice: the retire landed on the new
+    // block's first `cam_play`, the ring read -1 once that one retired, and
+    // stage 6 block 1 step 5's `wait_queued_events_done` held for ever.
     if (this.queuedEventsPending !== 0) this.ringResidue += 1;
-    EvtLoadBlockProgramRing();
     // **The spawn markers do not clear here, and they used to.**
     //
     // `FUN_0045EBC0` is the whole of the engine's block change: it picks the

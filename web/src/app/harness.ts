@@ -57,7 +57,7 @@ import type { PlayerState } from "./urlstate";
 export const DRIVE_GLOBAL = "__hotd2Drive";
 
 /** Bumped when the shape below changes, so a stale tool says so instead of lying. */
-export const DRIVE_VERSION = 2;
+export const DRIVE_VERSION = 3;
 
 /**
  * One frame of **game state** and nothing else.
@@ -101,6 +101,28 @@ export interface DriveTarget {
   wake(): void;
   readonly walker: Walker | null;
   readonly rng: Rng;
+  /**
+   * A world point through the camera the trigger casts through, in normalised
+   * device coordinates (`x`, `y` in -1..1 across the viewport, `z` < 1 in
+   * front of the lens). Optional: a target with no camera answers nothing,
+   * and {@link Harness.shotTargets} is then empty.
+   */
+  projectWorld?(p: { x: number; y: number; z: number }):
+    { x: number; y: number; z: number } | null;
+}
+
+/**
+ * One entry of the shot-test list, where it is on the screen: `at` and the
+ * class, and `obj+0x70..0x78` (`Actor.shotCentre`) through the camera in
+ * normalised device coordinates. What a driver aims a pull at.
+ */
+export interface ShotTarget {
+  at: number;
+  cls: number;
+  x: number;
+  y: number;
+  /** Depth, NDC: in front of the lens and inside the far plane when < 1. */
+  z: number;
 }
 
 /**
@@ -249,6 +271,30 @@ export class Harness {
     };
   }
 
+  /**
+   * `G.g_shot_test_list`, on the screen.
+   *
+   * The list is what the engine's shot test walks (`RegisterForShotTest`,
+   * `FUN_00405160`): an object on it is one a pull *can* hit this frame, at
+   * the point its class published at `obj+0x70`. A driver that cannot see the
+   * actors sprays a grid and walks past a boss's handful of spheres; this is
+   * the same information the game itself uses, read, not a new decision. Only
+   * the classes that register the engine's way are on the list.
+   */
+  shotTargets(): ShotTarget[] {
+    const out: ShotTarget[] = [];
+    const project = this.target.projectWorld?.bind(this.target);
+    if (!project) return out;
+    for (const e of G.g_shot_test_list) {
+      const obj = G.g_object_list.find((o) => o.at === e.at);
+      if (!obj) continue;
+      const p = project(obj.shotCentre);
+      if (!p) continue;
+      out.push({ at: obj.at, cls: obj.cls, x: p.x, y: p.y, z: p.z });
+    }
+    return out;
+  }
+
   /** The object a driver talks to. Everything on it is read or "run frames". */
   private get api() {
     return {
@@ -270,6 +316,8 @@ export class Harness {
       },
       /** One row for right now, whether or not tracing is on. */
       now: (): TraceRow => this.snapshot(),
+      /** Where every registered shot-test object is on screen. */
+      shotTargets: (): ShotTarget[] => this.shotTargets(),
     };
   }
 

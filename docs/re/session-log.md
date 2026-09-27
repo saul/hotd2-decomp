@@ -19818,3 +19818,28 @@ surface to `SpawnWorldImpact` and `g_shot_hit_records`.
 * I had the phase-2 summary say the port's `ActorSetMotionBlended` needs an
   "already playing" guard. It does not; the exe's callers write the guard at
   each site, and so does the port (`Boss4BlendUnlessPlaying`).
+
+## 2026-09-27 -- the playthrough can play a boss to its end
+
+`web/tools/playthrough.mjs` gains four opt-ins, default behaviour unchanged
+(stage 1 still reports its end block at frame 9150, 97 instructions):
+`--play-end` plays an end block through, `--meter-all` counts every class's hit
+points and `g_boss_hp_fraction` in the no-damage clock, `--aim` pulls at every
+object on `G.g_shot_test_list` through the new `__hotd2Drive.shotTargets`
+(drive version 3, projected through the trigger's own camera), and `--watch`
+prints named classes' rows as they change. `--boss` is the first three.
+
+Stage 5 block 1, reported stuck at the flier's 169 hit points, was the meter:
+it read `2/0` for the whole of phase 1 because the flier is class 0x22, so a
+fight being won was called fruitless and the run hung at `--hang` (900)
+whatever `--shoot-for` said. With `--boss` the flier goes 300 to 0 in 1920
+frames, `wait_script_flag 0` (op 72) opens, and the script leaves block 1 --
+no cheat, no debug clear. Nothing in the port changed. Phase 1 takes damage in
+subs 1, 5, 7 and 11 (byte table `0x0049D498`) and the walker's hits reach
+`obj+0x132C` in both subtypes; stage 5 needs neither more than stage 1 does.
+
+Stage 1's block 16 is the same descriptor as 14 and is on no route and no
+Arcade or Original entry; `--link ...block=16` lands in block 14 and the stage
+ends three instructions later, which is the seek and not the block. It is not
+exercised.
+

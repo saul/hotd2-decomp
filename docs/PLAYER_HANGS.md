@@ -943,11 +943,22 @@ boss blocks play a static pose and then `finish_sequence 6` with nothing
 stashed, and the walker refused that install, so the fight's
 `g_cam_path_frame` sat at 0 and the fight stalled in phase 1. Fixed in
 `script/state/camera_action.ts`. The playthrough's own contract is unchanged:
-`node tools/playthrough.mjs --stage 4 --headless --shoot-flag-gates --continue`
+`node tools/playthrough.mjs --stage 4 --headless --continue`
 still reports "reached an end block after 8130 game frames" on stepping into
 block 25, identical to main. What the harness does not play is the room after
 the fight: the step's eight bats hold `wait_enemies_present 0`, and nothing in
 it shoots them.
+
+**Opt-in since 2026-09-27: `--play-end`** (or `--boss`, which adds
+`--meter-all` and `--aim`). The default contract is unchanged -- a run still
+stops on entering an end block -- but with the flag it plays the block through
+and succeeds only when the walker leaves it. Measured with `--boss`: stage 1
+block 14 (JUDGMENT) leaves after 4065 frames and 19 instructions, stage 5's
+block 7 after 1620; stage 5's block 1 (JUDGMENT's return, not an end block)
+is left 3495 frames after it is entered. `--meter-all` was the other half: the damage
+meter counted classes 0x30/0x31 only, so a boss being shot down read as a
+fruitless room and was called a hang after `--hang` frames.
+
 ## 17. A boss gate is a room clear the harness will not shoot at
 
 **Open, and it is a decision rather than a bug.**

@@ -536,6 +536,28 @@ export const G = {
    */
   g_camera_driver_held: 0,
   /**
+   * `g_stashed_path_frame` — `0x009C70AC`, and `g_stashed_path_end_frame` —
+   * `0x009C70B0`. The stashed rail's cursor and its end, as integers.
+   * `CamStashPathRange` (`FUN_00403490`) writes them from a `cam_play` with
+   * `flags & 2`; the hooks scene states (2,6) and (2,7) install step the
+   * cursor; `Boss4PlayCameraCue` overwrites both with its own cue. One owner,
+   * in the data segment -- see `game/camera/rail.ts`.
+   */
+  g_stashed_path_frame: 0,
+  g_stashed_path_end_frame: 0,
+  /**
+   * `g_rail_frame` — `0x009C70BC`. The frame the stashed rail last drew, as a
+   * **float**, which `CameraDriverSelectMode` and
+   * `CameraDriverFromDeferredPose` truncate into `g_cam_path_frame`.
+   */
+  g_rail_frame: 0,
+  /**
+   * `g_force_rail_advance` — `0x009CA098`. At 1 the stashed rail steps even
+   * while the screen shakes or nobody is in play. `EvtOpForceCameraPathAdvance37`
+   * (`FUN_0045FA60`) writes it; `ResetSceneOnEnter` zeroes it at `0x0045EE7E`.
+   */
+  g_force_rail_advance: 0,
+  /**
    * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
    * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
    * `PlayerContinueCountdown` takes `0x2D` a frame.
@@ -1809,9 +1831,10 @@ export type Globals = typeof G;
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
  * | `g_scene_tick_counter` (`0x009A2BAC`, at `0x0045EE23`) | ✅ |
+ * | `g_force_rail_advance` (`0x009CA098`, at `0x0045EE7E`) | ✅ |
  * | `g_screen_shake_frames = 0` (`0x0045EE29`) | ✅ |
  * | the unread words: `DAT_009C6F1C`, `DAT_009C6F20`,
- *   `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`, `DAT_009A34DC = 1` |
+ *   `DAT_009C71C0`, `DAT_009A5C30`, `DAT_009A34DC = 1` |
  *   `[open]` |
  *
  * The ✅ rows are the ported part (a count here rots, L16). The name is the
@@ -1866,6 +1889,9 @@ export function ResetSceneOnEnter(): void {
   G.g_bHudShutterState = 2;
   // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
   G.g_screen_shake_frames = 0;
+  // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
+  // again in a new scene.
+  G.g_force_rail_advance = 0;
 }
 
 /**
@@ -1946,6 +1972,13 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // engine's own reset is the scene's first `checkpoint`; this is the port's
   // load, which reaches the same state without running one.
   G.g_camera_driver_held = 0;
+  // `[port-only]`: the stashed rail's words. The engine never clears them on
+  // a scene load -- every stashed play writes both before a scene state reads
+  // them -- but a seek has to arrive at the same world from a cold start and
+  // from 1500 frames in, and left alone they carry the old stage's range.
+  G.g_stashed_path_frame = 0;
+  G.g_stashed_path_end_frame = 0;
+  G.g_rail_frame = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
   G.g_point_blood_sprays = [];

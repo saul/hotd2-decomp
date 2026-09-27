@@ -37,6 +37,8 @@ import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { ActorHeadingErrorTo, ActorTurnTowardXZ } from "../src/game/actor_turn";
+import { CamStashPathRange, CameraPlayStashedPath, CameraStepRailTick }
+  from "../src/game/camera/rail";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
@@ -19242,6 +19244,42 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   ActorTurnTowardXZ(a, -1, 0, 0x200);
   check("...and turns the other way for the other side", a.yaw === -0x200,
         `${a.yaw}`);
+}
+
+// The stashed rail, owned by `G`: `CameraStepRailTick` (`FUN_0040C790`) and
+// `CameraPlayStashedPath` (`FUN_0040C8A0`) step `g_stashed_path_frame` and
+// publish `g_rail_frame`, and a range written from game code -- the stage-4
+// boss's camera cues -- is what they play next.
+{
+  ResetGameGlobals();
+  const drawn = (tick: () => boolean): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i < 100 && tick(); i++) out.push(G.g_rail_frame);
+    return out;
+  };
+  CamStashPathRange(351, 384);
+  const six = drawn(CameraStepRailTick);
+  check("state (2,6) increments before it publishes and stops at the end: "
+        + "351..384 draws 352..384",
+        six[0] === 352 && six[six.length - 1] === 384 && six.length === 33,
+        `${six[0]}..${six[six.length - 1]} (${six.length})`);
+  CamStashPathRange(351, 384);
+  const seven = drawn(CameraPlayStashedPath);
+  check("...and state (2,7)'s JG lets one frame past the end through: "
+        + "352..385", seven[seven.length - 1] === 385 && seven.length === 34,
+        `${seven[0]}..${seven[seven.length - 1]} (${seven.length})`);
+  check("a finished rail publishes nothing more", !CameraStepRailTick()
+        && G.g_rail_frame === 385);
+  // What `Boss4PlayCameraCue` does: overwrite both stash words from game code.
+  G.g_stashed_path_frame = 600;
+  G.g_stashed_path_end_frame = 640;
+  check("...until game code moves the range on, and it plays from there",
+        CameraStepRailTick() && G.g_rail_frame === 601,
+        `${G.g_rail_frame}`);
+  ResetGameGlobals();
+  check("a reset leaves no stale range for a seek to replay",
+        G.g_stashed_path_frame === 0 && G.g_stashed_path_end_frame === 0
+        && G.g_rail_frame === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

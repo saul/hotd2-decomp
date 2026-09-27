@@ -4346,7 +4346,7 @@ missed. Meanings and confidence marks live in
 | `34` | `unused_34` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `35` | `enable_camera_path_roll` | camera | **done** | **gates the camera roll channel**, exactly as CamEvalPath7 does |
 | `36` | `pin_view_to_ground_plane` | camera | *tracked* | selects the fixed camera eye height; see the eye-height note |
-| `37` | `force_camera_path_advance` | camera | *tracked* | forces camera path advance past the room-cleared gate |
+| `37` | `force_camera_path_advance` | camera | done | `EvtOpForceCameraPathAdvance37` writes `g_force_rail_advance` (`0x009CA098`): at 1 the stashed rail steps through a screen shake or with nobody in play. The rail's gate itself is a declared divergence in `game/camera/rail.ts` |
 | `38` | `se_play` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
 | `39` | `se_play_3d` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
 | `3A` | `se_play_unless_skip` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |

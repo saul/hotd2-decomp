@@ -27,6 +27,8 @@
 
 import { CameraActionDriver } from "../game/camera/mode";
 import { G } from "../game/globals";
+import { CameraPlayStashedPath, CameraStepRailTick }
+  from "../game/camera/rail";
 import { SceneStateInstallPlayerHooks } from "../game/effects/damage_overlay";
 import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
@@ -678,8 +680,14 @@ export class Walker {
   get tweening(): boolean {
     return this.tweens.some((t) => t !== null);
   }
-  /** A `cam_play` with `flags & 2` stashes its range for a later 0x21. */
-  stashedCam: { slot: number; start: number; end: number } | null = null;
+  /**
+   * A `cam_play` with `flags & 2` stashed a range for a later 0x21: the path
+   * it names. The range itself is `G.g_stashed_path_frame` /
+   * `g_stashed_path_end_frame`, which `CamStashPathRange` (`FUN_00403490`)
+   * writes and the rail hooks step -- one owner, because the stage-4 boss
+   * writes it too. See `game/camera/rail.ts`.
+   */
+  stashedCam: { slot: number } | null = null;
 
   /**
    * `g_scene_state_major` / `g_scene_state_minor` (0x009C6F0C / 0x009C6F14).
@@ -1276,7 +1284,7 @@ export class Walker {
     const arg = op.arg ?? 0;
     const to = arg === 0 ? cam.endFrame : Math.min(arg + 1, cam.endFrame);
     if (to <= cam.frame) return;
-    cam.frame = to;
+    this.setCameraFrame(to);
     cam.started = false;
     if (cam.frame >= cam.endFrame) cam.done = true;
     this.civilianCuesSeen();
@@ -1390,6 +1398,18 @@ export class Walker {
    */
   private advanceCameraPath(frames: number): void {
     const cam = this.cam;
+    if (cam && cam.deferred) {
+      // A stashed range is the rail's, and the rail is `G`'s: scene state
+      // (2,6)'s `CameraStepRailTick` or (2,7)'s `CameraPlayStashedPath` steps
+      // it, and the shot mirrors what the hook published. The hook runs every
+      // frame it is installed -- after its end too, where it only recomputes
+      // the frames left -- so a range moved on under it (the stage-4 boss's
+      // camera cues) starts it drawing again. `[port-only]` guard: a tick with
+      // no frame in it steps nothing, as the old `min(frames, ...)` did.
+      if (frames > 0) this.stepStashedRail(cam);
+      this.settleCameraAction();
+      return;
+    }
     if (cam && !cam.isStatic) {
       if (cam.done) {
         // The handler published the shot's last frame on the tick `done` was
@@ -1413,6 +1433,58 @@ export class Walker {
     }
     // `CamAdvancePathFrame` retires its action on the frame the path ends.
     this.settleCameraAction();
+  }
+
+  /**
+   * One frame of a stashed play: the scene state's hook, then the shot's
+   * mirror of it. `done` is the frame the hook stopped publishing -- `cur >=
+   * end` under (2,6), `cur > end` under (2,7), whose `JG` lets one frame past
+   * the end through ({@link CamCommand.pastEnd}) -- and `retired` the frame
+   * after, exactly as the path play's are.
+   *
+   * [diverges] The order within the frame. The engine's `CameraActorTick`
+   * task runs `EvtRunQueuedActions` -- where `CameraDriverSelectMode` stores
+   * `g_cam_path_frame = __ftol(g_rail_frame)` -- **before** the rail hook's
+   * task steps the rail, so what the frame's actors read is the float the
+   * rail (or the stage-4 boss) left at the end of the previous frame. The
+   * port steps here and `app/`'s `syncPortGlobals` reads the result, so a
+   * frame written by a game routine reaches `g_cam_path_frame` one step on.
+   * Every value is still published in order; only its frame moves, and the
+   * stashed-range cues the port has matched were tuned against this order.
+   */
+  private stepStashedRail(cam: CamCommand): void {
+    const wasDone = cam.done;
+    const drew = cam.pastEnd ? CameraPlayStashedPath() : CameraStepRailTick();
+    if (drew) cam.frame = G.g_rail_frame;
+    cam.endFrame = G.g_stashed_path_end_frame;
+    const atEnd = cam.pastEnd
+      ? G.g_stashed_path_frame > G.g_stashed_path_end_frame
+      : G.g_stashed_path_frame >= G.g_stashed_path_end_frame;
+    if (wasDone && atEnd) {
+      cam.retired = true;
+    } else if (wasDone) {
+      // The range was moved on under the hook: it is drawing again.
+      cam.done = false;
+      cam.retired = false;
+    } else if (atEnd) {
+      cam.done = true;
+    }
+  }
+
+  /**
+   * `[port-only]` -- put the shot's cursor at `frame`, for a seek, the
+   * scrubber or a restored URL. A stashed play's cursor is the rail's, which
+   * `G` owns, so that is written too; writing only the shot would have the
+   * next rail tick put the old frame back.
+   */
+  setCameraFrame(frame: number): void {
+    const cam = this.cam;
+    if (!cam) return;
+    cam.frame = frame;
+    if (cam.deferred) {
+      G.g_stashed_path_frame = Math.trunc(frame);
+      G.g_rail_frame = frame;
+    }
   }
 
   /** `EvtInterpreterLoop`'s share of one frame. See {@link tick}. */
@@ -1486,6 +1558,11 @@ export class Walker {
     // `wait_queued_events_done` fall through on the next frame.
     if (this.cam && !this.cam.done) {
       this.cam.endFrame = this.cam.frame;
+      // A stashed play's end is the rail's, in `G`; end it there too, or the
+      // next rail tick would put the old end back.
+      if (this.cam.deferred) {
+        G.g_stashed_path_end_frame = G.g_stashed_path_frame;
+      }
       this.cam.done = true;
       this.settleCameraAction();
       this.host.startCamera(this.cam);

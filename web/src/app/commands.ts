@@ -244,7 +244,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.scrubbing = !c.done;
       const w = p.walker;
       if (!w?.cam) return;
-      w.cam.frame = c.frame;
+      w.setCameraFrame(c.frame);
       p.syncCameraToWalker();
       p.state.frame = w.cam.frame;
       p.pushUrl();

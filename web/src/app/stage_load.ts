@@ -366,7 +366,7 @@ function applyIncomingState(p: Player): void {
     PlayerTasksDrawWithoutAFrame();
     // Land in the same shot, not at the start of it.
     if (p.state.frame !== undefined && w.cam) {
-      w.cam.frame = p.state.frame;
+      w.setCameraFrame(p.state.frame);
     }
     p.syncCameraToWalker(true);
     p.syncBgmToWalker();

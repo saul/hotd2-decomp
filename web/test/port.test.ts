@@ -31,7 +31,7 @@ import { authoredFrameHeld, authoredFrameOfTicks,
          ticksOfAuthoredFrame } from "../src/core/play_cursor";
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
-import { ActorKillAll } from "../src/game/combat/resolve_hit";
+import { ActorKillAll, RemoveBoneSubtree } from "../src/game/combat/resolve_hit";
 import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
@@ -58,8 +58,14 @@ import {
   SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
 } from "../src/game/class13/routine0";
 import { CarriedZombieUpdate18 } from "../src/game/class18";
-import { CameraPointRiseFor, CameraDriverFromDeferredPose }
+import { ActorRegisterCameraPoint, CameraPointRiseFor,
+         CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
+import { ActorBuildSkinnedModel } from "../src/game/spawn";
+import {
+  ColiSortHitCandidatesByDistance, ProcessPlayerShotsTestList, RayTestSphere,
+  RegisterForShotTest, ShotCandidateKey, ShotRayAnglesFromView,
+} from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
@@ -113,7 +119,7 @@ import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
 import { ShotEffectsTick } from "../src/game/effects/tick";
 import { SpawnSpriteEffect, SpriteEffectKind }
   from "../src/game/effects/sprite";
-import { MarkActorShot, QueueOffscreenPull, QueueShotRequest,
+import { MarkActorShot, MergeShotPicks, QueueOffscreenPull, QueueShotRequest,
   g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
@@ -19280,6 +19286,288 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("a reset leaves no stale range for a seek to replay",
         G.g_stashed_path_frame === 0 && G.g_stashed_path_end_frame === 0
         && G.g_rail_frame === 0);
+}
+
+// -- the shot test the engine's way: registration, the sphere, the fork -----
+
+/**
+ * **`RegisterForShotTest`, `ShotTestSphere` and the fork into the bones, for a
+ * class that registers the way the engine does.**
+ *
+ * The class under test is a stand-in shaped like the bosses: its `Init`
+ * writes `obj+0x124` and runs the skeleton build, and its update ends in
+ * `ActorRegisterCameraPoint` the way `Class14Update` (`0x0047621E`) and
+ * `Boss4Update` (`0x00491A49`) do. Class 0x2D has no module, so its row is
+ * free to borrow; the real bosses' modules are other workstreams'.
+ *
+ * Every assertion reads what only a shot can write -- `obj+0x190 + player`,
+ * the bone byte `MarkActorShot` leaves (L47) -- and every frame is a real
+ * `GameUpdate` from `ResetGameGlobals`, so the list is emptied and refilled
+ * where the director does it and not where the test would like it (L49).
+ * The host is the only stub: a camera at the origin looking down -Z, so view
+ * space is world space, and three bone spheres.
+ */
+console.log("\nthe shot test, for a class that registers the engine's way:");
+{
+  const rng = new Rng(29);
+  const events = scene(0, rng);
+  const CLS = SpawnClass.LargeCreature;
+  if (g_class_handlers[CLS]) throw new Error("class 0x2D is ported now");
+  // A root at the actor and two children beside it: bone 2 four units to the
+  // side, inside a twelve-unit `obj+0x124`, and bone 3 twenty units out,
+  // beyond it. Parents are indices into this list, as the exporter writes
+  // them.
+  const BOSS: CharacterType = {
+    ...TYPE, type: 0x60, name: "test boss", bone_count: 4,
+    bones: [
+      { bone: 1, part: "b1", slot: 0x100, offset: [0, 0, 0], parent: null,
+        hit_radius: 3, hit_centre: [0, 0, 0] },
+      { bone: 2, part: "b2", slot: 0x101, offset: [0, 0, 0], parent: 0,
+        hit_radius: 1, hit_centre: [0, 0, 0] },
+      { bone: 3, part: "b3", slot: 0x102, offset: [0, 0, 0], parent: 0,
+        hit_radius: 1, hit_centre: [0, 0, 0] },
+    ],
+  };
+  SetGameTables({ ...CHARS, types: { ...CHARS.types, "96": BOSS } } as
+                unknown as CharactersJson);
+  const Z = -40;
+  const bonesAt: Record<number, Vec3> = {
+    1: vec3(0, 0, Z), 2: vec3(4, 0, Z), 3: vec3(20, 0, Z),
+  };
+  const radii: Record<number, number> = { 1: 3, 2: 1, 3: 1 };
+  const host: GameHost = {
+    ...NULL_HOST,
+    viewSpaceOfPoint: (p, out) => { out.x = p.x; out.y = p.y; out.z = p.z;
+                                    return true; },
+    boneWorld: (_at, bone, out) => {
+      const b = bonesAt[bone]; if (!b) return false;
+      out.x = b.x; out.y = b.y; out.z = b.z; return true;
+    },
+    boneSphere: (_at, bone, out) => {
+      const b = bonesAt[bone]; if (!b) return null;
+      out.x = b.x; out.y = b.y; out.z = b.z; return radii[bone] ?? null;
+    },
+  };
+  let register = true;
+  const RISE = 5;
+  g_class_handlers[CLS] = {
+    init(obj) {
+      obj.hitRadius = 12;                  // what Class14Init/Boss4Init do
+      ActorBuildSkinnedModel(obj);         // ...and the build that raises 0x80
+    },
+    update(obj, f) {
+      if (register) ActorRegisterCameraPoint(obj, f.host, RISE);
+    },
+    registersForShotTest: true,
+    ownsShotResult: true,
+  };
+  const boss = ActorSpawn(0x2000, CLS, 0x60, "boss", { visible: true });
+  const frame = () => GameUpdate(EYE, 1 / 60, host, rng, events);
+  // A gun reloads by pulling off the screen, and pulls on one frame land in
+  // order: reload, then fire, both on the frame under test, so the
+  // registration that frame's pull sees is exactly last frame's.
+  const fired = () => G.g_nPlayerFired[0];
+  const fireAt = (t: Vec3) => {
+    boss.shotBones[0] = 0;
+    const l = Math.hypot(t.x, t.y, t.z);
+    const before = fired();
+    QueueOffscreenPull(0);
+    QueueShotRequest(0, { origin: vec3(0, 0, 0),
+                          dir: vec3(t.x / l, t.y / l, t.z / l) });
+    frame();
+    if (fired() !== before + 1) throw new Error("the gun did not fire");
+    return boss.shotBones[0];
+  };
+
+  check("the skeleton build raised the per-bone bit on a type with bones",
+        (boss.flags & ActorFlag.ShootPerBone) !== 0, `0x${boss.flags.toString(16)}`);
+
+  frame();
+  check("its update registers it: one entry in `g_shot_test_list`",
+        G.g_shot_test_list.length === 1 && G.g_shot_test_list[0].at === 0x2000,
+        JSON.stringify(G.g_shot_test_list));
+  check("...at the tracked bone, before the lift: `obj+0x70` on the bone and "
+        + "`obj+0x100` five above it",
+        boss.shotCentre.y === 0 && boss.lookAt.y === RISE,
+        `shot ${boss.shotCentre.y} look ${boss.lookAt.y}`);
+
+  check("a shot at bone 2 lands on bone 2 -- the byte is the bone's own index",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+
+  // L47: the byte, not a count. And the one-frame order: the pull is tested
+  // against what the actors registered on the frame before.
+  register = false;
+  check("a class that stopped registering is still hit on the frame after "
+        + "its last registration -- the list is last frame's",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+  check("...and not on the frame after that: unregistered is unshootable",
+        fireAt(bonesAt[2]) === 0 && G.g_shot_test_list.length === 0,
+        `${boss.shotBones[0]} list ${G.g_shot_test_list.length}`);
+  register = true;
+  frame();
+
+  // The broad phase. Bone 3's own sphere is on this ray, and the actor's
+  // twelve-unit sphere at bone 1 is 17.9 units off it.
+  check("a ray that clips a bone outside `obj+0x124` finds nothing",
+        fireAt(bonesAt[3]) === 0, `${boss.shotBones[0]}`);
+  boss.hitRadius = 30;
+  frame();
+  check("...and finds that bone once the broad sphere reaches it",
+        fireAt(bonesAt[3]) === 3, `${boss.shotBones[0]}`);
+  boss.hitRadius = 12;
+  frame();
+
+  // The fork.
+  boss.flags &= ~ActorFlag.ShootPerBone;
+  frame();
+  check("without bit 0x80 the actor is hit whole, and `MarkActorShot` "
+        + "records bone byte 1", fireAt(bonesAt[2]) === 1,
+        `${boss.shotBones[0]}`);
+  check("...even where no bone sphere is, inside `obj+0x124`",
+        fireAt(vec3(8, 6, Z)) === 1, `${boss.shotBones[0]}`);
+  boss.flags |= ActorFlag.ShootPerBone;
+  frame();
+  check("with bit 0x80 the same off-bone shot misses: the bones decide",
+        fireAt(vec3(8, 6, Z)) === 0, `${boss.shotBones[0]}`);
+  // `ShotTestBoneTree`'s `rec[0] != 0` and `ShotTestBoneSphere`'s radius
+  // test. Bone 2 is four units from bone 1, whose own sphere is three, so a
+  // shot at bone 2 that bone 2 does not answer finds nothing.
+  RemoveBoneSubtree(boss, 2);
+  frame();
+  check("a severed bone draws slot 0 and is not tested",
+        fireAt(bonesAt[2]) === 0, `${boss.shotBones[0]}`);
+  boss.removed.length = 0;
+  frame();
+  check("...and with the bone put back it answers again",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+  // `ShotTestBoneSphere`'s `r == 0` skip has no check here, deliberately: a
+  // line whose direction is quantised to BAMS angles never passes exactly
+  // through a centre, so a zero radius finds nothing with or without the skip
+  // and a check of it would pass either way (measured: removing the skip left
+  // such a check green).
+  // Bit 0x8000 raised after the actor registered: the fork's third test.
+  frame();
+  boss.flags |= ActorFlag.NoShotTest;
+  check("bit 0x8000 raised after registering sends the fork to the whole "
+        + "arm", fireAt(bonesAt[2]) === 1, `${boss.shotBones[0]}`);
+  check("...and keeps the actor out of the list from then on",
+        G.g_shot_test_list.length === 0, `${G.g_shot_test_list.length}`);
+  boss.flags &= ~ActorFlag.NoShotTest;
+  frame();
+
+  // The depth test in `RegisterForShotTest`.
+  bonesAt[1] = vec3(0, 0, 40);
+  frame();
+  check("a point behind the camera (view z > 0) is not registered",
+        G.g_shot_test_list.length === 0, JSON.stringify(G.g_shot_test_list));
+  boss.flags |= ActorFlag.ShotTestMesh;
+  frame();
+  check("...unless the object is a mesh, which is taken at any depth",
+        G.g_shot_test_list.length === 1, `${G.g_shot_test_list.length}`);
+  boss.flags &= ~ActorFlag.ShotTestMesh;
+  bonesAt[1] = vec3(0, 0, 0);
+  boss.shotCentre = vec3(0, 0, 0);
+  G.g_shot_test_list = [];
+  RegisterForShotTest(boss, host);
+  check("...and a point exactly on the camera plane (z == 0) is taken: "
+        + "`TEST AH,0x41` passes on equal", G.g_shot_test_list.length === 1);
+  bonesAt[1] = vec3(0, 0, Z);
+
+  // The render-side pick for the classes that have not opted in knows
+  // nothing of this one; the merge weighs the two by distance along the ray.
+  frame();
+  const legacyNear: ShotPick = { kind: "prop", propId: 1, point: vec3(), t: 10 };
+  const reg = ProcessPlayerShotsTestList(
+    { origin: vec3(0, 0, 0), dir: vec3(0, 0, -1) }, host);
+  check("the registered test answers on its own",
+        reg?.at === 0x2000 && reg.bone === 1 && reg.t === 40,
+        JSON.stringify(reg));
+  check("...a nearer pick from `render/` wins the merge",
+        MergeShotPicks(legacyNear, reg) === legacyNear);
+  check("...and a farther one loses it",
+        MergeShotPicks({ ...legacyNear, t: 50 }, reg)?.kind === "actor");
+
+  delete g_class_handlers[CLS];
+  ResetGameGlobals();
+}
+
+/**
+ * `ColiSortHitCandidatesByDistance` (`FUN_00405080`) and the arithmetic under
+ * it, checked against what the bytes say rather than against the port's own
+ * idea of "nearest".
+ */
+console.log("\nthe candidate sort and `RayTestSphere`:");
+{
+  const c = (key: number, id: number) => ({ key, id });
+  const sorted = ColiSortHitCandidatesByDistance(
+    [c(50, 0), c(30, 1), c(30, 2), c(0x10000 + 30, 3), c(-1, 4), c(0, 5)]);
+  check("nearest first, and two equal keys keep the order they were pushed "
+        + "in", sorted.map((x) => x.id).join() === "5,1,2,3,0,4",
+        sorted.map((x) => x.id).join());
+  check("only sixteen bits are sorted: 0x1001E ties with 30, and a point "
+        + "behind the eye (-1 -> 0xFFFF) sorts last",
+        sorted[3].id === 3 && sorted[5].id === 4);
+  check("the key is `__ftol(-z * 10)`: -12.37 -> 123, and it truncates",
+        ShotCandidateKey(-12.37) === 123 && ShotCandidateKey(-0.09) === 0,
+        `${ShotCandidateKey(-12.37)} ${ShotCandidateKey(-0.09)}`);
+
+  // `RayTestSphere`'s rotation is the perpendicular distance from the shot's
+  // line, and the order of `VecToAngles`' outputs is what makes it so: a shot
+  // along +x must measure from the x axis (L48: not only the identity).
+  const along = (d: Vec3, p: Vec3) => {
+    const l = Math.hypot(d.x, d.y, d.z);
+    const u = { x: d.x / l, y: d.y / l, z: d.z / l };
+    const t = p.x * u.x + p.y * u.y + p.z * u.z;
+    return Math.hypot(p.x - u.x * t, p.y - u.y * t, p.z - u.z * t);
+  };
+  let worst = 0;
+  const dirs = [vec3(0, 0, -1), vec3(1, 0, 0), vec3(0.3, -0.4, -0.8),
+                vec3(-0.6, 0.2, -0.5), vec3(0.1, 0.9, -0.2)];
+  const pts = [vec3(3, 1, -20), vec3(20, 2, 0.5), vec3(-4, 7, -15)];
+  for (const d of dirs) {
+    const a = ShotRayAnglesFromView(d);
+    for (const p of pts) {
+      const want = along(d, p);
+      // Just inside and just outside the exact distance: the BAMS angles
+      // quantise the direction to 1/65536 of a turn, so allow for that.
+      const slack = 0.02 * (1 + Math.hypot(p.x, p.y, p.z) / 20);
+      if (RayTestSphere(a, p.x, p.y, p.z, want + slack) !== 1
+          || RayTestSphere(a, p.x, p.y, p.z, Math.max(0, want - slack)) !== -1) {
+        worst = Math.max(worst, want);
+      }
+    }
+  }
+  check("`RayTestSphere` is the distance from the shot's line, in every "
+        + "direction including +x", worst === 0, `failed near ${worst}`);
+  check("...and it is a line, not a ray: a point behind the eye is measured "
+        + "the same way", RayTestSphere(ShotRayAnglesFromView(vec3(0, 0, -1)),
+                                        1, 0, 30, 1.5) === 1);
+  check("...and `TEST AH,0x41` makes a NaN distance a hit",
+        RayTestSphere(ShotRayAnglesFromView(vec3(0, 0, -1)), NaN, 0, -5, 1)
+          === 1);
+}
+
+/**
+ * `ActorBuildSkinnedModel` (`FUN_00410440`) raises bit 0x80 through
+ * `SkeletonBuildAndPose` for every skinned class it serves, and `CatInit`
+ * takes it back -- from the real spawn path, not a flag set by hand (L49).
+ */
+console.log("\nthe per-bone bit, from the skeleton build:");
+{
+  const rng = new Rng(3);
+  scene(0, rng);
+  const z = spawnZombie(0x3000, 1, "zombie");
+  check("a zombie, built on a type with bones, carries bit 0x80",
+        (z.flags & ActorFlag.ShootPerBone) !== 0, `0x${z.flags.toString(16)}`);
+  const cat = ActorSpawn(0x3001, SpawnClass.SkinnedNpc, 1, "cat",
+                         { class53: { set: 0, subtype: 0 } } as never);
+  check("...a cat does not: `CatInit` clears it after its build",
+        (cat.flags & ActorFlag.ShootPerBone) === 0,
+        `0x${cat.flags.toString(16)}`);
+  const none = ActorSpawn(0x3002, SpawnClass.Zombie, 0x77, "no type");
+  check("...and a type the tables do not know has no nodes to raise it for",
+        (none.flags & ActorFlag.ShootPerBone) === 0);
+  ResetGameGlobals();
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

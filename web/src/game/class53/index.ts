@@ -77,8 +77,14 @@ function SubType(obj: Actor): number {
  *
  * **The mode gate is in the Init**, so an arcade run never has a trigger cat
  * standing inert — it has no cat at all in that slot.
+ *
+ * Both of its `ActorBuildSkinnedModel` calls (`0x004312C8`, `0x00431319`) are
+ * followed by `AND AL,0x7F` on `obj+0x34` (`0x004312D3`, `0x00431324`), which
+ * takes back the per-bone bit the build has just raised: a cat is shot as one
+ * sphere. `ActorSpawn` runs the build before this, so the clear is here.
  */
 export function CatInit(obj: Actor): void {
+  obj.flags &= ~ActorFlag.ShootPerBone;
   if (SubType(obj) < CAT_FIRST_TRIGGER_SUBTYPE) return;
   if (G.g_GameMode !== GameMode.Original) {
     obj.dead = true;

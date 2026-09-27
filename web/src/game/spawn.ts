@@ -10,11 +10,12 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
-import { makeActor, type Actor } from "./actor";
+import { ActorFlag, makeActor, type Actor } from "./actor";
 import { G } from "./globals";
 import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
   from "./hit_slots";
 import { g_class_handlers } from "./registry";
+import { CharacterTypeOf } from "./tables";
 import type { SpawnClass } from "./spawn_class";
 
 /**
@@ -35,15 +36,54 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
   // before Init runs -- `EnemyZombieInit` starts the actor in `initialState`.
   if (descriptor) Object.assign(obj, descriptor);
   ActorInitFlags(obj, obj.flags);
-  // `ActorBuildSkinnedModel` (`FUN_00410440`) claims the actor's `g_hit_slots`
-  // entry, and 35 class `Init`s call it -- every one that builds a skinned
-  // character. The port has no model build, so the claim runs here, for the
-  // classes whose `Init` is a proved caller and no others. `obj+0x3C` is the
-  // phase of every cel a class-0x30 bone draws; see `class30/bonecels.ts`.
-  if (HIT_SLOT_CLAIMING_CLASSES.has(cls)) ActorClaimHitSlot(obj);
+  // 35 class `Init`s call `ActorBuildSkinnedModel` -- every one that builds a
+  // skinned character. The port has no model build, so what the build leaves
+  // on the actor is done here, for the classes whose `Init` is a proved
+  // caller and no others. `obj+0x3C` is the phase of every cel a class-0x30
+  // bone draws; see `class30/bonecels.ts`.
+  if (HIT_SLOT_CLAIMING_CLASSES.has(cls)) ActorBuildSkinnedModel(obj);
   g_class_handlers[cls]?.init(obj, rng, events);
   G.g_object_list.push(obj);
   return obj;
+}
+
+/**
+ * `ActorBuildSkinnedModel` — `FUN_00410440`, for the two things it leaves on
+ * the actor.
+ *
+ * The routine builds the skeletal model record at `obj+0x194`, and that
+ * record is the renderer's hierarchy here. What it also does to the actor's
+ * own state is two things, and both are ported:
+ *
+ * * `ActorClaimHitSlot` (`FUN_00409270`) — the actor's `g_hit_slots` entry.
+ * * `SkeletonBuildAndPose` (`FUN_00410590`), which it calls, raises
+ *   {@link ActorFlag.ShootPerBone} on `g_cur_actor` when the character's
+ *   skeleton has root nodes:
+ *
+ *   ```
+ *   004105CC  CMP word ptr [EAX + 0x16], 0x0   ; g_character_skeletons[type]
+ *   004105D5  JZ  0x004105E5
+ *   004105D7  MOV EAX, [0x009A26A0]            ; g_cur_actor
+ *   004105DC  MOV ECX, dword ptr [EAX + 0x34]
+ *   004105DF  OR  CL, 0x80
+ *   004105E2  MOV dword ptr [EAX + 0x34], ECX
+ *   ```
+ *
+ *   Every `Init` that calls the build points `g_cur_actor` at itself first,
+ *   so the bit lands on the actor being built. It is the bit
+ *   `ShotTestSphere` (`FUN_00404630`) forks on: with it, and bones, the shot
+ *   is resolved bone by bone.
+ *
+ * The engine runs it from inside `Init`; the port runs it just before, which
+ * is the same for every class it serves because each of their `Init`s only
+ * ORs and ANDs `obj+0x34` afterwards. `CatInit` is the one that takes the bit
+ * back, and it does so itself.
+ */
+export function ActorBuildSkinnedModel(obj: Actor): void {
+  ActorClaimHitSlot(obj);
+  if ((CharacterTypeOf(obj)?.bones ?? []).some((b) => b.parent === null)) {
+    obj.flags |= ActorFlag.ShootPerBone;
+  }
 }
 
 /**

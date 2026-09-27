@@ -241,7 +241,7 @@
 00598ab0	g_SrcBlendTable
 00598ad0	g_DstBlendTable
 00598af0	g_TexAddressModeTable
-00598b00	g_ZFuncTable
+00598b00	g_ZFuncTable	PVR2 ISP depth-compare mode (bits 29..31) -> D3DCMPFUNC, read by TranslatePvr2StateToD3D for D3DRENDERSTATE_ZFUNC: [1, 7, 3, 5, 4, 6, 2, 8] = NEVER, GREATEREQUAL, EQUAL, GREATER, LESSEQUAL, NOTEQUAL, LESS, ALWAYS. DrawSpriteQuadCommand takes the mode from a sprite's flags bits 8..10 (0 meaning 4), so a plain screen sprite is LESSEQUAL and a queued one (ScreenSpriteQueuePush ORs 0x700) ALWAYS. [proved]
 00598b20	g_CullModeTable
 00598b78	g_sprite_quad_corners	s32 {1,3},{3,3},{1,1},{3,1}: DrawSpriteQuadCommand's corner multipliers of the half extents, less the anchor (1,1 by default) -- so a sprite's (x,y) is its top-left and the strip's first vertex is the BOTTOM-left, carrying (u0,v0). [proved]
 00598c5c	g_texture_palette_current	The palette TextureSlotAcquire hands DecodeTextureToSurface; -1 (palette 0) otherwise. [proved]

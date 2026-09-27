@@ -251,7 +251,7 @@ export class EffectLayer implements System<RenderContext> {
    * (`FUN_00437AC0`)'s draw loop:
    *
    * ```
-   * FUN_004759C0(yaw); MatrixStackPush(0); MatrixLoadIdentity()
+   * CurlModelSlot3F7ByYaw(yaw); MatrixStackPush(0); MatrixLoadIdentity()
    * MatrixTranslate(x, y, z); MatrixRotateY(yaw); MatrixScale(s, s, s)
    * AssetDrawSlot(slot); MatrixStackPop(1)
    * ```

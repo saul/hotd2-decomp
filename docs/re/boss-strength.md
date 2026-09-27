@@ -85,8 +85,8 @@ nothing in the class `[proved]`.
 | `+0x06` | u8 | saved state (a reaction's return) | `Boss4ResolveShot` |
 | `+0x07` | u8 | saved sub | `Boss4ResolveShot` |
 | `+0x08` | u8 | phase 0..17 (`0xFF` until the entrance) | Init, entrance, `Boss4AdvancePhaseAtFloor`, ChooseAction, Withdraw |
-| `+0x09` | u8 | carried props left (2) | Init, `Boss4StatePinPlayer` |
-| `+0x0A` | u8 | carried props used, bit per record | Init, `Boss4StatePinPlayer` |
+| `+0x09` | u8 | carried props left (2) | Init, `Boss4StateThrowHeldProp` |
+| `+0x0A` | u8 | carried props used, bit per record | Init, `Boss4StateThrowHeldProp` |
 | `+0x0B` | s8 | rank 0..15 | Init (`GetDamageRank`), `Boss4AdjustRank` |
 | `+0x0C` | u8 | head hits since the last rank step | Init, `Boss4ResolveShot`, `Boss4AdjustRank` |
 | `+0x0D`,`+0x0E` | u8 | lives snapshot, players 0/1 | Init, `Boss4AdjustRank` |
@@ -96,7 +96,7 @@ nothing in the class `[proved]`.
 | `+0x1C` | f32 | camera cue: step per frame; **0.0 = no cue running** | Init, `Boss4PlayCameraCue` |
 | `+0x20` | s16 | camera cue: path | `Boss4PlayCameraCue` |
 | `+0x22` | s16 | queued cue, -1 none | Init, `Boss4QueueCameraCue`, `Boss4PlayCameraCue` |
-| `+0x24` | f32 | this phase's hit-point floor | Init, entrance, `Boss4AdvancePhaseWhenWalkDone` |
+| `+0x24` | f32 | this phase's hit-point floor | Init, entrance, `Boss4ArmPhaseWhenInsideArena` |
 | `+0x28..+0x6F` | vec3[6] | P0..P5, the phase's arena (y = pos.y at load) | `Boss4LoadPhaseArena` |
 | `+0x70` | f32 | `ActorRegisterCameraPoint`'s rise: 6.0; -15.0 in the charge | Init, charge, flinch, knockdown |
 | `+0x74` | s32 | one slot, many uses: next state (approach, turn), countdown (hold), charge start frame, carried-prop index, saved clip (flinch), death dwell | several |
@@ -118,12 +118,12 @@ TSV said so before; it was wrong).
 | bit | meaning | set | cleared |
 |---|---|---|---|
 | `0x01` | riding the carrier | Init (entrances 0,1) | entrance sub 1 |
-| `0x02` | fenced: the arena quad is enforced in `Boss4Update` | entrance (`|= 0x12`), `Boss4AdvancePhaseWhenWalkDone` | death, ChooseAction phase 3, Withdraw, every arena tail |
+| `0x02` | fenced: the arena quad is enforced in `Boss4Update` | entrance (`|= 0x12`), `Boss4ArmPhaseWhenInsideArena` | death, ChooseAction phase 3, Withdraw, every arena tail |
 | `0x04` | would cycle bone 5's slot `0x444..0x447` | **nothing** (image-wide `OR ..., 0x4` sweep) | — |
 | `0x08` | arena transition pending | `Boss4AdvancePhaseAtFloor`, WalkToPoint, Withdraw | every arena tail |
 | `0x10` | footfalls armed (`Boss4FootfallShake`) | `Boss4ChainsawOn` (`0x410`), entrance (`0x12`), WalkToPoint | `Boss4ChainsawOff`, entrance states 2/3, WalkToPoint sub 0, death at 0x46 |
-| `0x20` | untracked-until-inside pending | `Boss4LoadPhaseArena` | `Boss4EndPlacementWalk` |
-| `0x40` | arm-when-inside pending | `Boss4LoadPhaseArena` | `Boss4AdvancePhaseWhenWalkDone` |
+| `0x20` | untracked-until-inside pending | `Boss4LoadPhaseArena` | `Boss4TrackWhenInsideArena` |
+| `0x40` | arm-when-inside pending | `Boss4LoadPhaseArena` | `Boss4ArmPhaseWhenInsideArena` |
 | `0x80` | camera cue queued | `Boss4QueueCameraCue` | `Boss4PlayCameraCue` (not for cues 5, 7, 11, 16) |
 | `0x100` | foot on bone 15 raised | `Boss4FootfallShake` | `Boss4FootfallShake` |
 | `0x200` | foot on bone 12 raised | `Boss4FootfallShake` | `Boss4FootfallShake` |
@@ -203,8 +203,8 @@ zeroed the radius. So **surface 61 = `0x3D` is flesh (one hit point), 60 =
 publish the four globals
 Boss4ResolveShot(obj)                                  00491a03
 Boss4AdvanceArenaWaypoint(obj)                         00491a09
-Boss4AdvancePhaseWhenWalkDone(obj)                     00491a0f
-Boss4EndPlacementWalk(obj)                             00491a15
+Boss4ArmPhaseWhenInsideArena(obj)                     00491a0f
+Boss4TrackWhenInsideArena(obj)                             00491a15
 g_class19_states[st+0x04](obj)                         00491a26
 Boss4FootfallShake(obj)                                00491a2e
 Boss4AdvanceMotionAndDrawHeldProps(obj)                00491a34
@@ -374,7 +374,7 @@ camera frame passes the phase's threshold, is seated at the next spot.
 `frac[phase]` = 8/9, 7/9 … 1/9, 0 for phases 0..8 and again for 9..17.
 `st+0x24 = maxhp * frac[phase]`. The frame the hit points reach it,
 `Boss4ResolveShot` raises `obj+0x34` bit `0x100` and every later shot does
-nothing until `Boss4AdvancePhaseWhenWalkDone` clears it. Damage is not clamped
+nothing until `Boss4ArmPhaseWhenInsideArena` clears it. Damage is not clamped
 to the floor: a hit that crosses it keeps its excess.
 
 ### 7.2 `Boss4AdvancePhaseAtFloor` — `FUN_00492790` `[proved]`
@@ -572,7 +572,7 @@ For i in 0..5: `st+0x28+i*0xC = g_boss4_phase_arenas[phase*6+i].x`,
 | 17 | -515,-2100 | -515,-1680 | -495,-1650 | -495,-2050 | -535,-2050 | -535,-1650 |
 
 P0 is a facing point (ChooseAction, Withdraw and the flinch turn by
-`P0 - pos`), P1 the point `WaitForCameraInRange` tests, P2..P5 the quad.
+`P0 - pos`), P1 the point `Boss4StateFaceCamera` tests, P2..P5 the quad.
 
 ### 7.6 `Boss4KeepInsideEdge` — `FUN_00493330` `[proved]`
 
@@ -607,7 +607,7 @@ because the exe has two functions.
 
 ### 7.7 The two arm-when-inside checks `[proved]`
 
-`Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`, **misnamed**):
+`Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`):
 
 ```
 if (!(st.flags & 0x40)) return
@@ -620,7 +620,7 @@ if (!(st.flags & 2)) {
 obj.flags &= ~0x100; st+0x24 = maxhp * frac[phase]; st.flags &= ~0x40
 ```
 
-`Boss4EndPlacementWalk` (`FUN_004922C0`, **misnamed**):
+`Boss4TrackWhenInsideArena` (`FUN_004922C0`):
 
 ```
 if (!(st.flags & 0x20)) return
@@ -692,8 +692,7 @@ the knock-down. The port's generic `ActorAdvanceMotion` stands in for the
 motion half; the carrier transform while riding and the two held props are
 the class's own.
 
-The held-prop records (`g_boss4_pin_picks` — **true base `0x005704F8`**; the
-TSV label at `0x00570510` is the record's `+0x18`), 0x20 bytes each:
+The held-prop records (`g_boss4_held_props`, `0x005704F8`), 0x20 bytes each:
 
 | rec | offset (f32) | rx, ry, rz | bone | clip | take | throw |
 |---|---|---|---|---|---|---|
@@ -827,7 +826,7 @@ sub 1: if (cursor != len-1) return
        state 4; sub 0
 ```
 
-### 8.6 State 7 — `Boss4StateWaitForCameraInRange` `FUN_004944A0` `[proved]` (a facing test, not a range)
+### 8.6 State 7 — `Boss4StateFaceCamera` `FUN_004944A0` `[proved]` (a facing test, not a range)
 
 ```
 if (!(st.flags & 8) && !(char+0x37 & 1)) turn(pos - eye, 0x100)
@@ -837,7 +836,7 @@ if (!ActorPointIsAhead(obj+0x64, obj+0x40, P1)) return        -- st+0x34
 Boss4PickApproachAttack(obj); state 4; sub 1
 ```
 
-### 8.7 State 8 — `Boss4StateRiseThenIdle` `FUN_004945A0` `[proved]`
+### 8.7 State 8 — `Boss4StatePlayArrivalClip` `FUN_004945A0` `[proved]`
 
 `sub 0: set(0x72); sub 1.` `sub 1: if (cursor == len) — exactly the length, not
 len-1 — { blend(0x78, 0, 10); state 7; sub 0 }`. (Class 14's port reaches
@@ -857,7 +856,7 @@ sub 1: q = (st+0x84, pos.y, st+0x88)
 passes only while the boss still has the point nearly behind him (by the
 convention above). Transcribe it as it is.
 
-### 8.9 State 0xA — `Boss4StateLookAtCamera` `FUN_00494730` `[proved]`
+### 8.9 State 0xA — `Boss4StateTurnClipThenApproach` `FUN_00494730` `[proved]`
 
 ```
 sub 0: unless 0x76 blend(0x76, 0, 10); sub 1
@@ -897,7 +896,7 @@ sub 1: the turn window
        cursor == len-1: state 5; sub 0; obj.flags &= 0xEFFFDFFF
 ```
 
-### 8.11 State 0x12 — `Boss4StatePinPlayer` `FUN_00494D60` (**misnamed: it throws a carried prop**) `[proved]`
+### 8.11 State 0x12 — `Boss4StateThrowHeldProp` `FUN_00494D60` `[proved]`
 
 ```
 sub 0: if (players <= 0 || (players == 1 && g_attack_permits[g_active_player] != 0))
@@ -1077,8 +1076,8 @@ Arena 1 (block 23), from the entrance:
 4. `Boss4AdvanceArenaWaypoint` phase 1: at `g_cam_path_frame` ≥ 260 the boss is
    seated (or kept) and made state 7; `Boss4LoadPhaseArena` loads phase 1's
    quad and raises `0x60`; the fence is off (flag 2 down).
-5. `Boss4AdvancePhaseWhenWalkDone`: 5 inside the new quad → damageable, floor
-   7/9, fenced. `Boss4EndPlacementWalk`: inside → tracked.
+5. `Boss4ArmPhaseWhenInsideArena`: 5 inside the new quad → damageable, floor
+   7/9, fenced. `Boss4TrackWhenInsideArena`: inside → tracked.
 6. Phases 2, 4, 6 → state 8 on arrival; 5 and 7 → the charge (frozen until the
    cue passes 820 / 1130, tracked from 810 / 1110, hits at clip frame 0x47).
 7. Phase 3 is the throw phase: approach at 180, throw both carried props; then
@@ -1195,9 +1194,9 @@ state 7).
   arm-when-inside checks.
 * The death placement is `42.6`, not `42.65`.
 
-## 12. Proposed renames (deferred to the port commit, so each is global in one commit)
+## 12. Renames (applied in phase 2, in one commit)
 
-| address | now | proposed | why |
+| address | was | now | why |
 |---|---|---|---|
 | `0x004922C0` | `Boss4EndPlacementWalk` | `Boss4TrackWhenInsideArena` | no walk; clears `0x10000` when inside |
 | `0x00492350` | `Boss4AdvancePhaseWhenWalkDone` | `Boss4ArmPhaseWhenInsideArena` | no walk, no phase change |
@@ -1207,8 +1206,11 @@ state 7).
 | `0x004945A0` | `Boss4StateRiseThenIdle` | `Boss4StatePlayArrivalClip` | clip content is unknown; entered on arrival |
 | `0x00570510` | `g_boss4_pin_picks` | `g_boss4_held_props` at `0x005704F8` | the label sits at the record's `+0x18` |
 
-Each name is cited in `web/src/game/class19/*.ts` and docs, so the rename has
-to land with the TypeScript that uses it.
+Each was cited in `web/src/game/class19/*.ts` and in this document, so each
+rename landed in one commit across Ghidra, the TSVs, the TypeScript and the
+docs. The enum members moved with them: `Boss4State.FaceCamera`,
+`PlayArrivalClip`, `TurnClipThenApproach`, `ThrowHeldProp`, and
+`Boss4Flag.TrackPending` / `ArmPending` for the two gates.
 
 ## 13. Open questions
 

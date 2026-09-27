@@ -171,7 +171,7 @@ function Boss4Entrance(obj: Actor, b: Blk, placedState: number,
   // `FUN_004932C0()` and `FUN_00435E50(320.0f, 35.0f)` — `[open]`, and both
   // are camera or effect work rather than state. Not ported.
   b.flags |= Boss4Flag.Placed | Boss4Flag.Bit4;
-  b.state = Boss4State.WaitForCameraInRange;
+  b.state = Boss4State.FaceCamera;
   b.sub = 0;
   Boss4SetMotionBlended(obj, Boss4Clip.Idle, IDLE_FADE);
   // `MOV byte ptr [0x009ca0ea], BL` — `[open]`. One more byte raised on this

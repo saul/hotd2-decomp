@@ -37,7 +37,7 @@ const DEATH_SOUND_FRAME = 0x82;
 
 /**
  * The clip `Boss4StateFlinch` puts back when it interrupted
- * {@link Boss4State.RiseThenIdle} — `PUSH 0x78` at `0x004954E8`, the same clip
+ * {@link Boss4State.PlayArrivalClip} — `PUSH 0x78` at `0x004954E8`, the same clip
  * that state itself ends in.
  */
 const BOSS4_RISE_IDLE_CLIP = 0x78;
@@ -135,7 +135,7 @@ function Boss4DeathRetire(b: Blk): void {
  */
 export function Boss4StateFlinch(obj: Actor, b: Blk): void {
   if (b.sub === 0) {
-    if (b.savedState === Boss4State.WaitForCameraInRange) {
+    if (b.savedState === Boss4State.FaceCamera) {
       // `MOV [EAX + 0x74], obj+0x1B4` — the clip to put back afterwards, in
       // the slot four other states use for four other things.
       b.timer = obj.motion;
@@ -162,19 +162,19 @@ export function Boss4StateFlinch(obj: Actor, b: Blk): void {
   // oversight to tidy: the very next frame runs this same tail again.
   switch (b.savedState) {
     case Boss4State.HoldThenApproach:      // case 6
-    case Boss4State.LookAtCamera:          // case 10
+    case Boss4State.TurnClipThenApproach:          // case 10
       b.state = Boss4State.ApproachCamera;
       b.sub = 0;
       break;
-    case Boss4State.WaitForCameraInRange:  // case 7
+    case Boss4State.FaceCamera:  // case 7
       // `FUN_004119A0(char, state+0x74, 0, 10)` — the clip it interrupted.
       Boss4SetMotionBlended(obj, b.timer);
-      b.state = Boss4State.WaitForCameraInRange;
+      b.state = Boss4State.FaceCamera;
       b.sub = 0;
       break;
-    case Boss4State.RiseThenIdle:          // case 8
+    case Boss4State.PlayArrivalClip:          // case 8
       Boss4SetMotionBlended(obj, BOSS4_RISE_IDLE_CLIP);
-      b.state = Boss4State.WaitForCameraInRange;
+      b.state = Boss4State.FaceCamera;
       b.sub = 0;
       break;
     case Boss4State.TurnToStoredPoint:     // case 9
@@ -186,7 +186,7 @@ export function Boss4StateFlinch(obj: Actor, b: Blk): void {
     case Boss4State.StrikeClip65:
     case Boss4State.StrikeClip7A:
     case Boss4State.StrikeClip7B:
-    case Boss4State.PinPlayer:             // cases 0xF..0x12
+    case Boss4State.ThrowHeldProp:             // cases 0xF..0x12
       b.state = Boss4State.ChooseAction;
       b.sub = 0;
       break;
@@ -218,6 +218,6 @@ export function Boss4ResumeAfterHit(obj: Actor, b: Blk): void {
     return;
   }
   Boss4SetMotionBlended(obj, Boss4Clip.Idle);
-  b.state = Boss4State.WaitForCameraInRange;
+  b.state = Boss4State.FaceCamera;
   b.sub = 0;
 }

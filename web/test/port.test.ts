@@ -13954,7 +13954,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
           `shutter ${G.g_bHudShutterState} flag `
           + `${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
     check("...and hands over to state 7, which is where every flinch returns",
-          obj.boss4?.state === Boss4State.WaitForCameraInRange,
+          obj.boss4?.state === Boss4State.FaceCamera,
           `state ${obj.boss4?.state}`);
   }
 

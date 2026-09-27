@@ -18,7 +18,7 @@
  * share of the bar, and the frame the hit points reach it `obj+0x34` bit
  * `0x100` goes up and **every later shot is refused** —
  * `TEST AH, 0x1; JNZ` at `0x00491DC5`, before any of the arithmetic. Only
- * `Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`) clears it, and only when
+ * `Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`) clears it, and only when
  * the arena progression has moved the boss to its next phase. So the fight is
  * paced by the arena and not by the player's aim, and **a port that does not
  * run the phases cannot take the boss below `8/9` of its bar.** See
@@ -164,7 +164,7 @@ function Boss4ApplyDamage(obj: Actor, b: Blk, bone: number): void {
     obj.flags |= ActorFlag.ShotImmune;
     // `CMP CL, 0x12; JZ; CMP CL, 0x13; JZ; AND AH, 0xDF` — the strike bit is
     // left alone while the boss is pinning a player or charging.
-    if (b.state !== Boss4State.PinPlayer
+    if (b.state !== Boss4State.ThrowHeldProp
         && b.state !== Boss4State.ChargePastCamera) {
       obj.flags &= ~ActorFlag.NoHitReaction;
     }

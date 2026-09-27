@@ -42,17 +42,17 @@ export enum Boss4State {
   /** `Boss4StateHoldThenApproach` (`FUN_004943B0`). */
   HoldThenApproach = 6,
   /**
-   * `Boss4StateWaitForCameraInRange` (`FUN_004944A0`) — the state the
+   * `Boss4StateFaceCamera` (`FUN_004944A0`) — the state the
    * entrance hands over to on the frame it raises `g_script_flags[31]`, and
    * the state every flinch comes back to.
    */
-  WaitForCameraInRange = 7,
-  /** `Boss4StateRiseThenIdle` (`FUN_004945A0`). */
-  RiseThenIdle = 8,
+  FaceCamera = 7,
+  /** `Boss4StatePlayArrivalClip` (`FUN_004945A0`). */
+  PlayArrivalClip = 8,
   /** `Boss4StateTurnToStoredPoint` (`FUN_00494610`). */
   TurnToStoredPoint = 9,
-  /** `Boss4StateLookAtCamera` (`FUN_00494730`). */
-  LookAtCamera = 0x0a,
+  /** `Boss4StateTurnClipThenApproach` (`FUN_00494730`). */
+  TurnClipThenApproach = 0x0a,
   /** `Boss4StateWalkToPoint` (`FUN_004958F0`). */
   WalkToPoint = 0x0b,
   /** `Boss4StateWithdrawAndAdvancePhase` (`FUN_00495A20`). */
@@ -67,8 +67,8 @@ export enum Boss4State {
   StrikeClip7A = 0x10,
   /** `Boss4StateStrikeClip7B` (`FUN_00494C70`). */
   StrikeClip7B = 0x11,
-  /** `Boss4StatePinPlayer` (`FUN_00494D60`). */
-  PinPlayer = 0x12,
+  /** `Boss4StateThrowHeldProp` (`FUN_00494D60`). */
+  ThrowHeldProp = 0x12,
   /** `Boss4StateChargePastCamera` (`FUN_00495070`). */
   ChargePastCamera = 0x13,
   /** `Boss4StateFlinch` (`FUN_00495340`), the low head hit. */
@@ -96,7 +96,7 @@ export enum Boss4Flag {
   OnCarrier = 0x01,
   /**
    * Bit 1 — **placed**: the two- or three-leg walk that puts the actor where
-   * its phase wants it has finished. `Boss4AdvancePhaseWhenWalkDone`
+   * its phase wants it has finished. `Boss4ArmPhaseWhenInsideArena`
    * (`FUN_00492350`) raises it and `Boss4Update` runs the four spline steps
    * behind `0x00491A5B` only while it is up.
    */
@@ -108,17 +108,17 @@ export enum Boss4Flag {
   AtWaypoint = 0x08,
   /** Bit 4 — raised by the entrance and by `Boss4StateWalkToPoint`. `[open]` */
   Bit4 = 0x10,
-  /** Bit 5 — `Boss4EndPlacementWalk` (`FUN_004922C0`)'s gate. */
-  PlacementWalk = 0x20,
-  /** Bit 6 — `Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`)'s gate. */
-  PhaseWalk = 0x40,
+  /** Bit 5 — `Boss4TrackWhenInsideArena` (`FUN_004922C0`)'s gate. */
+  TrackPending = 0x20,
+  /** Bit 6 — `Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`)'s gate. */
+  ArmPending = 0x40,
 }
 
 /**
  * `g_boss4_phase_hp_fraction` — `0x00570490`. Nine floats, then the same nine
  * again for the second arena, indexed by the phase at `state+0x08`.
  *
- * `Boss4StateEntranceCarried` and `Boss4AdvancePhaseWhenWalkDone` both compute
+ * `Boss4StateEntranceCarried` and `Boss4ArmPhaseWhenInsideArena` both compute
  * `state+0x24 = obj+0x11E * g_boss4_phase_hp_fraction[phase]`
  * (`FMUL float ptr [EDX*0x4 + 0x570490]` at `0x00493AD0`), and
  * `Boss4ResolveShot` raises `obj+0x34` bit `0x100` — which refuses every
@@ -224,7 +224,7 @@ export interface Boss4Block {
    * second. `Boss4Init` writes 0xFF and the entrance writes 0 or 9.
    */
   phase: number;
-  /** `+0x09` — how many of `g_boss4_pin_picks`' entries are unused. */
+  /** `+0x09` — how many of `g_boss4_held_props`' entries are unused. */
   pinsLeft: number;
   /** `+0x0A` — the bitmask of the ones that have been used. */
   pinsUsed: number;

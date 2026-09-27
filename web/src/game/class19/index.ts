@@ -61,7 +61,7 @@
  * `Boss4ResolveShot` refuses every shot once they reach this phase's share of
  * the bar (`g_boss4_phase_hp_fraction[0]`, so 8/9 of 300), and only
  * `Boss4AdvanceArenaWaypoint` (`FUN_004928D0`) and
- * `Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`) move the phase on. Those
+ * `Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`) move the phase on. Those
  * two are the arena — they teleport the boss between waypoints as
  * `g_cam_path_frame` passes seventeen thresholds — and they are the next piece
  * of work, not this one.
@@ -162,10 +162,10 @@ const BOSS4_STATES: readonly ((obj: Actor, b: Blk) => void)[] = [
   Boss4StateNotPorted,        // 4  Boss4StateApproachCamera  FUN_00493DC0
   Boss4StateNotPorted,        // 5  Boss4StateChooseAction    FUN_00494010
   Boss4StateNotPorted,        // 6  Boss4StateHoldThenApproach FUN_004943B0
-  Boss4StateNotPorted,        // 7  Boss4StateWaitForCameraInRange FUN_004944A0
-  Boss4StateNotPorted,        // 8  Boss4StateRiseThenIdle    FUN_004945A0
+  Boss4StateNotPorted,        // 7  Boss4StateFaceCamera FUN_004944A0
+  Boss4StateNotPorted,        // 8  Boss4StatePlayArrivalClip    FUN_004945A0
   Boss4StateNotPorted,        // 9  Boss4StateTurnToStoredPoint FUN_00494610
-  Boss4StateNotPorted,        // 10 Boss4StateLookAtCamera    FUN_00494730
+  Boss4StateNotPorted,        // 10 Boss4StateTurnClipThenApproach    FUN_00494730
   Boss4StateNotPorted,        // 11 Boss4StateWalkToPoint     FUN_004958F0
   Boss4StateNotPorted,        // 12 Boss4StateWithdrawAndAdvancePhase FUN_00495A20
   Boss4StateNotPorted,        // 13 Boss4StateWaitForPlayer   FUN_00495D30
@@ -173,7 +173,7 @@ const BOSS4_STATES: readonly ((obj: Actor, b: Blk) => void)[] = [
   Boss4StateNotPorted,        // 15 Boss4StateStrikeClip65    FUN_00494A80
   Boss4StateNotPorted,        // 16 Boss4StateStrikeClip7A    FUN_00494B80
   Boss4StateNotPorted,        // 17 Boss4StateStrikeClip7B    FUN_00494C70
-  Boss4StateNotPorted,        // 18 Boss4StatePinPlayer       FUN_00494D60
+  Boss4StateNotPorted,        // 18 Boss4StateThrowHeldProp       FUN_00494D60
   Boss4StateNotPorted,        // 19 Boss4StateChargePastCamera FUN_00495070
   Boss4StateFlinch,           // 20
   Boss4StateNotPorted,        // 21 Boss4StateKnockDown       FUN_00495570
@@ -208,8 +208,8 @@ export function Boss4Update(obj: Actor, f: ClassFrame): void {
 
   Boss4ResolveShot(obj, b);
   // `Boss4AdvanceArenaWaypoint` (`FUN_004928D0`),
-  // `Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`) and
-  // `Boss4EndPlacementWalk` (`FUN_004922C0`) run here, in that order. **Not
+  // `Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`) and
+  // `Boss4TrackWhenInsideArena` (`FUN_004922C0`) run here, in that order. **Not
   // ported**, and between them they are the whole arena progression: the phase
   // at `state+0x08` never moves in this port, so `Boss4ResolveShot`'s floor
   // never lifts. See this file's header.

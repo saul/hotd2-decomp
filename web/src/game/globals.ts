@@ -32,6 +32,7 @@ import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
 import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
   from "./effects/owl";
 import type { RingEffect } from "./effects/ring_effect";
+import type { WaterRing } from "./effects/water_ring";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
@@ -995,6 +996,13 @@ export const G = {
   g_prop_strip_effects: [] as PropStripEffect[],
   /** `[port-only]` — see {@link PropStripEffect.id}. */
   g_prop_strip_effect_seq: 0,
+  /**
+   * `[port-only]` — the rings `SpawnWaterRing` (`FUN_004567C0`) has put on a
+   * wet surface. `game/effects/water_ring.ts`.
+   */
+  g_water_rings: [] as WaterRing[],
+  /** `[port-only]` — see {@link WaterRing.id}. */
+  g_water_ring_seq: 0,
   /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
@@ -1970,6 +1978,14 @@ export const G = {
    * with `RotY(camera_yaw) * p + camera_eye` at draw time.
    */
   g_rain_particles: [] as RainParticle[],
+  /**
+   * `g_rain_enabled` — 0x009C8E50. `EvtOpEnableRain1D` (`FUN_0045F340`)
+   * stores its operand here and `ResetSceneOnEnter` zeroes it (`0x0045EE78`).
+   * The draw of the rain itself reads the walker's copy; what reads this one
+   * is gameplay: `ZombieDeathEffectCueTick` and `ZombieDeathLandingEffect`
+   * splash rather than raise dust while it is `1`.
+   */
+  g_rain_enabled: 0,
 
   /** 60 Hz frames since the scene reset. Not an exe global; the port's clock. */
   g_frame: 0,
@@ -2054,7 +2070,8 @@ export type Globals = typeof G;
  *   the hit-slot system are ported and which are not. |
  * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
  * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
- * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
+ * | `g_backdrop_mode = 0` | ❌ the global does not exist |
+ * | `g_rain_enabled = 0` (`0x0045EE78`) | ✅ |
  * | `g_nFiringGate = 0` | ✅ |
  * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
@@ -2118,6 +2135,8 @@ export function ResetSceneOnEnter(): void {
   G.g_bHudShutterState = 2;
   // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
   G.g_screen_shake_frames = 0;
+  // `g_rain_enabled`, `MOV [0x009c8e50], EBX` at `0x0045EE78`.
+  G.g_rain_enabled = 0;
   // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
   // again in a new scene.
   G.g_force_rail_advance = 0;
@@ -2195,6 +2214,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  G.g_water_rings = [];
+  G.g_water_ring_seq = 0;
   // ...and the owl's and the fish's tasks, which the scene's list takes
   // with it like every other task.
   G.g_owl_feathers = [];

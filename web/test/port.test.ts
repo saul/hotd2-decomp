@@ -198,6 +198,20 @@ import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
 import { g_class30_bone_cels, ZombieBoneCelSlots }
   from "../src/game/class30/bonecels";
 import { HIT_SLOT_CLAIMED } from "../src/game/hit_slots";
+import {
+  COND_HEAVY_LANDING, LANDING_HEAVY_SHAKE, SND_LANDING, SND_LANDING_HEAVY,
+  ZOMBIE_DEATH_EFFECT_CUES,
+} from "../src/game/class30/death_effects";
+import { SpawnGroundRingEffect, type RingEffect }
+  from "../src/game/effects/ring_effect";
+import { WATER_RING_FRAMES, WATER_RING_SLOT }
+  from "../src/game/effects/water_ring";
+import { ZombieStateArcScriptedEntrance } from "../src/game/class30/entrance";
+import { ZombieStateDelayedLeap } from "../src/game/class30/emerge";
+import { ArcPhase } from "../src/game/class31/arc";
+import { OPS as SCENE_OPS } from "../src/script/ops/scene";
+import type { SpriteEffect } from "../src/game/effects/sprite";
+import { UpdateScreenShake } from "../src/game/effects/damage_overlay";
 import { ActorIsEnemy, type ClassFrame, DeadSweep, ENEMY_CLASSES, g_class_handlers, registerClass }
   from "../src/game/registry";
 import { PORTED_CLASSES } from "../src/game/classes";
@@ -12227,8 +12241,10 @@ console.log("the skinned model's draw gates, as state:");
   // `ActorBuildSkinnedModel` (`FUN_00410440`): `model+0x64 = 3`, and one
   // eight-byte record per `g_pCharacterExtraParts` entry with byte `+1` at 1.
   const z = spawnZombie(0x3080, 1, "built");
+  // ...and then `EnemyZombieInit` ORs bit 4 in (`0x00452E21`), the trace the
+  // corpse's ring and the shadow take -- so a class-0x30 actor carries 7.
   check("the build leaves the skeleton drawn and one byte per part, all 1",
-        z.motionFlags === MOTION_FLAGS_INIT
+        z.motionFlags === (MOTION_FLAGS_INIT | MotionFlag.TraceGround)
         && (z.motionFlags & MotionFlag.Drawn) !== 0
         && z.partVisible.length === TYPE.parts!.length
         && z.partVisible.every((v) => v === 1),
@@ -12742,6 +12758,308 @@ console.log("class 0x30 state 12, with no clip to wait on:");
         `state ${z.state} sub ${z.sub}`);
   check("...and `g_enemies_present` is leaked for the rest of the stage",
         G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
+}
+
+/**
+ * **What a body throws up when it goes down**, which the port used to leave
+ * out: `ZombieInstallDeathEffectCues` (`FUN_004563F0`) and
+ * `ZombieDeathEffectCueTick` (`FUN_004569B0`) put dust or a splash at the
+ * death clip's cue frames, `ZombieDeathLandingEffect` (`FUN_00456B70`) at a
+ * landing, `SpawnWaterRing` (`FUN_004567C0`) on the wet surfaces, and
+ * `SpawnGroundRingEffect` (`FUN_00407DA0`) opens a ring under the corpse.
+ * Every assertion that names an effect, a sound or the shake fails on the old
+ * port, which drew none of them.
+ */
+console.log("class 0x30, the dust, the splash and the rings a death leaves:");
+{
+  const SPRITES = {
+    blood_scale: { "1": 0.75, "2": 0.5, "3": 1.0 },
+    impact_sprite: {
+      [String(SpriteEffectKind.Dust)]: [0x94, 0xa2, 0.7],
+      [String(SpriteEffectKind.Splash)]: [0x1339, 0x1356, 1.0],
+    },
+    impact_sprite_default: [0x0904, 0x0904, 0.1],
+    ricochet: {},
+    impact: [], head_impact: [],
+    voice: { hurt: [], kill: [], head: [],
+             attack: [[{ id: 40, file: "" }], [{ id: 50, file: "" }]] },
+    voice_set_a_types: [1],
+  };
+  const WET_BLOB = coliQuad([0, 1, 0, 0], 1,
+                            [-200, 0, 200, 200, 0, 200, 200, 0, -200,
+                             -200, 0, -200], 5);
+  // `SetGameTables` puts `T.coli` back, so the floor goes in after it.
+  const dying = (at: number, condition: number, wet = false) => {
+    const rng = new Rng(31);
+    const events = scene(0, rng);
+    SetGameTables({ ...CHARS, combat: SPRITES } as unknown as CharactersJson);
+    T.coli = { files: ["test"], blobs: { floor: wet ? WET_BLOB : FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    const z = spawnZombie(at, 1, "dying");
+    z.visible = true;
+    z.hp = 0;
+    z.dead = true;
+    z.flags |= ActorFlag.Dead;
+    z.condition = condition;
+    z.pos = vec3(3, 2, 40);
+    z.lookAt = vec3(5, 6, 44);
+    z.state = ZombieState.Death;
+    z.sub = 0;
+    return { z, rng, events };
+  };
+  const newSprites = (since: number) =>
+    G.g_sprite_effects.filter((e) => e.id >= since);
+
+  // -- the cue list and the dust ---------------------------------------------
+  {
+    const { z, rng, events } = dying(0x3700, 5);
+    check("`EnemyZombieInit` raises `obj+0x1F8` bit 4 -- the ring traces the floor",
+          (z.motionFlags & MotionFlag.TraceGround) !== 0,
+          `0x${z.motionFlags.toString(16)}`);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    // Body condition 5 with no remap bits takes clip 0x3DB, whose list is the
+    // one at 0x005930C4: a single cue, play frame 25.
+    check("a condition-5 death plays 0x3DB and installs its cue list",
+          z.motion === 0x3db && z.zom.deathCue === 6
+          && ZOMBIE_DEATH_EFFECT_CUES[z.zom.deathCue] === 25,
+          `motion 0x${z.motion.toString(16)} cue ${z.zom.deathCue}`);
+    const seq0 = G.g_sprite_effect_seq;
+    let at = -1;
+    let dust: SpriteEffect | undefined;
+    for (let i = 0; i < 60 && z.state === ZombieState.Death; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      const fresh = newSprites(seq0);
+      if (fresh.length && at < 0) { at = MotionPlayFrame(z); dust = fresh[0]; }
+    }
+    check("the dust goes up on the cue frame and not before",
+          at === 25, `first effect at play frame ${at}`);
+    check("...one of it, kind 0x46", G.g_sprite_effect_seq - seq0 === 1
+          && dust?.kind === SpriteEffectKind.Dust,
+          `${G.g_sprite_effect_seq - seq0} spawned, kind ${dust?.kind}`);
+    check("...on the traced floor, not at the body's own height",
+          dust?.pos.y === 0 && dust.pos.x === 3 && dust.pos.z === 40,
+          JSON.stringify(dust?.pos));
+    check("...stretched by the cue's own override, not the kind's 0.7",
+          dust?.scale.x === 0.5 && dust.scale.y === 1.5 && dust.scale.z === 1.5,
+          JSON.stringify(dust?.scale));
+    check("...and the cursor steps on to the list's terminator",
+          ZOMBIE_DEATH_EFFECT_CUES[z.zom.deathCue] === -1,
+          `cue ${z.zom.deathCue}`);
+    check("no water rings on a dry floor", G.g_water_rings.length === 0);
+
+    // The corpse: the ring opens under the tracked bone on the corpse state's
+    // first frame, at the traced floor plus 0.05.
+    for (let i = 0; i < 10 && z.state === ZombieState.Death; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    check("the death clip ends in a sinking corpse",
+          z.state === ZombieState.CorpseSink, `state ${z.state}`);
+    // The corpse state's first frame is the next one.
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    const ring = G.g_ring_effects[0];
+    check("...which opens one ring task", G.g_ring_effects.length === 1,
+          `${G.g_ring_effects.length}`);
+    check("...at the tracked bone's x and z, not the origin's",
+          ring?.x === 5 && ring.z === 44, JSON.stringify(ring));
+    check("...on the traced floor plus 0.05, at scale 1",
+          ring !== undefined && ring.y === Math.fround(0.05)
+          && ring.scale === 1, `${ring?.y}`);
+    check("...and the frame that spawned it already shows the spread",
+          ring !== undefined && ring.drawnStrips.length === 4
+          && ring.count === RING_EFFECT_SPREAD_FRAMES - 1, `${ring?.count}`);
+
+    // 120 frames spreading, 30 holding, 39 fading, and gone on the 40th --
+    // outliving the corpse, which leaves after its own 120.
+    const drew = (r: RingEffect) => r.drawnStrips.length === 4 ? "spread"
+      : r.drawnAlpha < 1 ? "fade" : "hold";
+    const drawn: string[] = [];
+    if (ring) drawn.push(drew(ring));
+    for (let i = 0; i < 400 && G.g_ring_effects.length; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (G.g_ring_effects[0]) drawn.push(drew(G.g_ring_effects[0]));
+    }
+    const count = (s: string) => drawn.filter((d) => d === s).length;
+    check("the ring spreads for 120 frames, holds 30 and fades for 39",
+          count("spread") === 120 && count("hold") === 30
+          && count("fade") === 39 && drawn.length === 189,
+          `${count("spread")}/${count("hold")}/${count("fade")} `
+          + `of ${drawn.length}`);
+    check("...and the corpse it opened under is long gone by then", z.despawned);
+  }
+
+  // -- in the attract demo, no ring --------------------------------------------
+  {
+    const { z } = dying(0x3710, 5);
+    G.g_app_state = AppState.Attract;
+    SpawnGroundRingEffect(z);
+    check("`SpawnGroundRingEffect` does nothing outside play",
+          G.g_ring_effects.length === 0);
+    G.g_app_state = AppState.InPlay;
+    z.motionFlags &= ~MotionFlag.TraceGround;
+    SpawnGroundRingEffect(z);
+    check("...and without bit 4 the ring sits at the body's own height",
+          G.g_ring_effects[0]?.y === Math.fround(2 + Math.fround(0.05)),
+          `${G.g_ring_effects[0]?.y}`);
+  }
+
+  // -- on water: the rings, then the splash ----------------------------------
+  {
+    const { z, rng, events } = dying(0x3720, 5, true);
+    const seq0 = G.g_sprite_effect_seq;
+    for (let i = 0; i < 60 && z.state === ZombieState.Death; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (G.g_water_rings.length) break;
+    }
+    const splash = newSprites(seq0);
+    const rings = G.g_water_rings;
+    check("on a wet surface the cue puts down two water rings",
+          rings.length === 2 && rings.every((r) => r.slot === WATER_RING_SLOT),
+          `${rings.length}`);
+    check("...at 1.0 and 0.5, each give or take a tenth or two",
+          rings.length === 2
+          && [0.8, 0.9, 1.0, 1.1, 1.2].some((s) =>
+            Math.abs(rings[0]!.size - s) < 1e-6)
+          && [0.3, 0.4, 0.5, 0.6, 0.7].some((s) =>
+            Math.abs(rings[1]!.size - s) < 1e-6),
+          rings.map((r) => r.size).join(", "));
+    check("...on the floor, and a splash beside them there too",
+          rings.every((r) => r.pos.y === 0) && splash.length === 1
+          && splash[0]!.kind === SpriteEffectKind.Splash
+          && splash[0]!.pos.y === 0,
+          `${splash.map((s) => `${s.kind}@${s.pos.y}`).join(",")}`);
+    check("...and the rings are once per death: the latch is up",
+          (z.flags2 & ZombieFlag2.OneShotFired) !== 0);
+    // Sixty frames drawn, the spawn frame the first of them.
+    let alive = 1;
+    const first = rings[0]!;
+    while (G.g_water_rings.includes(first) && alive < 200) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (G.g_water_rings.some((r) => r.id === first.id)) alive++;
+      else break;
+    }
+    check("a water ring lives sixty frames, widening and fading",
+          alive === WATER_RING_FRAMES, `${alive}`);
+  }
+
+  // -- in the rain, a splash at the body -------------------------------------
+  {
+    const { rng, events } = dying(0x3730, 5);
+    // `EvtOpEnableRain1D` stores its operand in `g_rain_enabled`, and the
+    // scene reset takes it back to 0.
+    SCENE_OPS[0x1d]!.run!({} as Walker, { value: 1 } as never, true);
+    check("the rain opcode writes `g_rain_enabled`", G.g_rain_enabled === 1);
+    const seq0 = G.g_sprite_effect_seq;
+    for (let i = 0; i < 60 && !newSprites(seq0).length; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    const s = newSprites(seq0)[0];
+    check("in the rain the cue splashes instead of raising dust",
+          s?.kind === SpriteEffectKind.Splash, `kind ${s?.kind}`);
+    check("...at the body's own height, and puts down no rings",
+          s?.pos.y === 2 && G.g_water_rings.length === 0,
+          `${s?.pos.y}, ${G.g_water_rings.length} rings`);
+    ResetSceneOnEnter();
+    check("...and `ResetSceneOnEnter` puts `g_rain_enabled` back to 0",
+          G.g_rain_enabled === 0);
+  }
+
+  // -- the landing: state 12 -------------------------------------------------
+  {
+    const { z, rng, events } = dying(0x3740, 0);
+    z.flags |= ActorFlag.HoldingWeapon;
+    z.pos = vec3(0, 40, 40);
+    const seq0 = G.g_sprite_effect_seq;
+    const seen = new Map<number, SpriteEffect>();
+    for (let i = 0; i < 500 && z.state !== ZombieState.CorpseSink; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      for (const e of newSprites(seq0)) seen.set(e.id, e);
+    }
+    const spawned = [...seen.values()];
+    check("a body that falls and bounces raises dust where it lands, once",
+          spawned.length === 1 && spawned[0]!.kind === SpriteEffectKind.Dust
+          && spawned[0]!.pos.y === 0 && z.state === ZombieState.CorpseSink,
+          `${spawned.map((e) => `${e.kind}@${e.pos.y}`)}, state ${z.state}`);
+  }
+
+  // -- the arc entrance's landing: the sound, the shake ----------------------
+  const landArc = (condition: number) => {
+    const { z, rng, events } = dying(0x3750 + condition, condition);
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    z.dead = false;
+    z.flags &= ~ActorFlag.Dead;
+    z.hp = 10;
+    z.state = ZombieState.ArcScriptedEntrance;
+    z.sub = 4;
+    z.arcPhase = ArcPhase.Settled;
+    z.flags2 |= ZombieFlag2.Carried;
+    G.g_screen_shake_frames = 0;
+    const seq0 = G.g_sprite_effect_seq;
+    ZombieStateArcScriptedEntrance(z, 1 / 60, rng, NULL_HOST, events);
+    return { z, heard, spawned: newSprites(seq0) };
+  };
+  {
+    const light = landArc(0);
+    check("an arc entrance lands with the footfall and the landing hook's dust",
+          light.heard.includes(SND_LANDING)
+          && light.spawned.some((e) => e.kind === SpriteEffectKind.Dust),
+          `${light.heard.map((h) => h.toString(16))}`);
+    check("...and no shake", G.g_screen_shake_frames === 0,
+          `${G.g_screen_shake_frames}`);
+    check("...clearing the carried bit on the settled phase",
+          (light.z.flags2 & ZombieFlag2.Carried) === 0);
+    const heavy = landArc(COND_HEAVY_LANDING);
+    check("body condition 5 lands heavy: the knock and a 0x20-frame shake",
+          heavy.heard.includes(SND_LANDING_HEAVY)
+          && !heavy.heard.includes(SND_LANDING)
+          && G.g_screen_shake_frames === LANDING_HEAVY_SHAKE,
+          `${heavy.heard.map((h) => h.toString(16))}, `
+          + `shake ${G.g_screen_shake_frames}`);
+    check("...and no dust", heavy.spawned.length === 0);
+    // Sub 3 arms the arc and drops the landing's latch -- `AND ECX,
+    // 0xfffeffff` at `0x00458BA1`, bit 0x10000 -- so a latch left up by
+    // anything earlier cannot swallow this landing. The port used to clear
+    // the carried bit there instead, one hex digit over.
+    const armed = landArc(0);
+    armed.z.sub = 3;
+    armed.z.entry = { dest: [0, 0, 60], frames: 20, step: 1 };
+    armed.z.flags2 |= ZombieFlag2.OneShotFired;
+    ZombieStateArcScriptedEntrance(armed.z, 1 / 60, new Rng(3), NULL_HOST,
+                                   new Events());
+    check("arming the arc drops the landing latch, bit 0x10000",
+          (armed.z.flags2 & ZombieFlag2.OneShotFired) === 0,
+          `sub ${armed.z.sub} flags2 0x${armed.z.flags2.toString(16)}`);
+    // `UpdateScreenShake` is what turns the count into the camera's nod.
+    G.g_screen_shake_frames = LANDING_HEAVY_SHAKE;
+    UpdateScreenShake();
+    check("...which `UpdateScreenShake` counts down into a nod",
+          G.g_screen_shake_frames === LANDING_HEAVY_SHAKE - 1
+          && G.g_screen_shake_pitch !== 0, `pitch ${G.g_screen_shake_pitch}`);
+  }
+
+  // -- the delayed leap's landing, the same pair and the attack cry ----------
+  {
+    const { z, rng, events } = dying(0x3760, 0);
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    z.dead = false;
+    z.flags &= ~ActorFlag.Dead;
+    z.hp = 10;
+    z.state = ZombieState.DelayedLeap;
+    z.sub = 3;
+    z.delayedLeap = { delay: 0, dest: [0, 0, 40], gravity: -0.03 };
+    z.zom.holdFrames = 0;
+    const seq0 = G.g_sprite_effect_seq;
+    ZombieStateDelayedLeap(z, 1 / 60, rng, NULL_HOST, events);
+    check("a delayed leap lands with the footfall, the dust and the attack cry",
+          heard.includes(SND_LANDING) && heard.includes(40)
+          && newSprites(seq0).some((e) => e.kind === SpriteEffectKind.Dust),
+          `heard ${heard.map((h) => h.toString(16))}`);
+    check("...and the cry comes after the footfall, as the exe plays them",
+          heard.includes(SND_LANDING)
+          && heard.indexOf(SND_LANDING) < heard.indexOf(40),
+          heard.map((h) => h.toString(16)).join(","));
+  }
 }
 
 console.log("`ActorKillAll` routes class 0x30 through its death chain:");

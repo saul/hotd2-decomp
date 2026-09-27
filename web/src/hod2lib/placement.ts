@@ -435,6 +435,13 @@ export class Placement {
   /** Class 0x23's tail -- JUDGMENT's walker. See `characters.class23Tail`. */
   class23: Record<string, unknown> | null = null;
   /**
+   * Class 0x16 -- the wave field. A marker (`{}`): `WaterFieldCreate` reads
+   * no tail, only the spawn's own `y`.
+   */
+  class16: Record<string, unknown> | null = null;
+  /** Class 0x17's tail -- one wave source: kind, amplitude, wavelength, speed. */
+  class17: Record<string, unknown> | null = null;
+  /**
    * Class 0x45's descriptor byte -- `{subtype}`, `desc+0x25`, which picks
    * which of six inits the stage-3 boss's actor runs. See `game/class45/`.
    */
@@ -528,6 +535,8 @@ export class Placement {
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;
     if (this.class14) d.class14 = this.class14;
+    if (this.class16 !== null) d.class16 = this.class16;
+    if (this.class17 !== null) d.class17 = this.class17;
     if (this.class22) d.class22 = this.class22;
     if (this.class23) d.class23 = this.class23;
     if (this.class45) d.class45 = this.class45;

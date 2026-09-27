@@ -249,8 +249,11 @@
  *   register the engine's way (`RegisterForShotTest`, `FUN_00405160`) -- at
  *   the point each published (`obj+0x70`, `Actor.shotCentre`), projected
  *   through the camera the trigger casts through (`__hotd2Drive.shotTargets`,
- *   drive version 3). The grid still follows. Never at a class-0x10 civilian,
- *   and the civilian guard on the gate is unchanged.
+ *   drive version 3). The grid still follows, **one frame later**: a class
+ *   that resolves its own mark on its next update (class 0x14) reads back the
+ *   one pull that marked it, as the engine's once-a-frame trigger guarantees,
+ *   and a grid on the same frame overwrites the mark. Never at a class-0x10
+ *   civilian, and the civilian guard on the gate is unchanged.
  *
  * **`--watch 0x22,0x23`** (not part of `--boss`) prints the drive rows of
  * the named classes -- `at`, class, `state.sub`, hit points, position --
@@ -1082,7 +1085,19 @@ try {
       // the actor that writes a branch arm — stage 2's rescue target is one
       // rider on a moving car — so a `--route` block gets the dense sweep too.
       const dense = playingForArm || s.policy === "flag";
-      if (AIM) aimed += await aimedPulls(page, box);
+      if (AIM) {
+        const n = await aimedPulls(page, box);
+        aimed += n;
+        // **The aimed pulls get a frame of their own.** The engine polls the
+        // trigger once a frame, and a class that resolves its own shot on
+        // its next update reads back the one pull that marked it --
+        // `Class14ResolveShotBone` takes bone 1 only, and its gates test that
+        // pull's ray against the weak point. Fired on the grid's frame, the
+        // aimed pull's mark is overwritten by whichever grid pull crossed the
+        // boss's 30-unit sphere last, which is almost never the weak point,
+        // and stage 2's end block measured zero damage in 33 volleys.
+        if (n) frames = await advance(1);
+      }
       await volley(page, box, dense ? 13 : 5, dense ? 10 : 4);
       // After the volley, so a hit that landed on this exact frame counts.
       const p = await roomPressure(page);

@@ -35,6 +35,7 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
+import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
@@ -357,6 +358,37 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       a.visible = true;
       return;
     }
+    // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
+    // sources. They draw nothing and kill themselves the frame they run, so
+    // they have no character type either; the position is the one thing
+    // either reads off the spawn (the field's plane is its `y`), and it goes
+    // in the descriptor so the `Init` sees it.
+    if (s.class === SpawnClassValue.WaterWaveField) {
+      if (!pl.class16) return;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveField, -1,
+                           "wave field",
+                           { class16: pl.class16, yaw: pl.yaw ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      return;
+    }
+    if (s.class === SpawnClassValue.WaterWaveSource) {
+      if (!pl.class17) return;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveSource, -1,
+                           "wave source",
+                           { class17: pl.class17, hp: pl.hp, maxHp: pl.hp,
+                             yaw: pl.yaw ?? 0, pitch: pl.class17.pitch,
+                             roll: pl.class17.roll,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      return;
+    }
     // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
     // no character type and never reaches `render/characters.ts` either.
     // A **group header** goes through here as well: its `FishInit` sets
@@ -642,6 +674,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     }
     G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
   }
+
+  // The stage-2 boss arena's wave sources, which class 0x17 allocated as
+  // tasks ahead of the boss that samples them -- see `WaterWaveSourcesTick`.
+  WaterWaveSourcesTick();
 
   const f = { eye, dt, rng, host, events };
   for (const obj of G.g_object_list) {

@@ -688,6 +688,42 @@ class ExeTables:
                 out[i] = (name, cnt)
         return out
 
+    #: ``PTR_DAT_004c4990`` -- one pointer per scene to an ``s16`` list of cam
+    #: file indices ending in -1, which ``FUN_004040A0`` walks for
+    #: ``g_scene_index``, queuing file ``0x16`` (``op_org``) after each entry
+    #: in Original Mode. Scene 4 (stage 5) is ``{10, 20, 16}`` -- ``cp_st5``,
+    #: ``op_st5`` and ``op_st1``. Twin of ``ExeTables.sceneCamFiles``.
+    SCENE_CAM_FILES = 0x004C4990
+    ORIGINAL_CAM_FILE = 0x16
+
+    def scene_cam_files(self, scene: int, original: bool) -> list[str]:
+        """The cam file stems ``FUN_004040A0`` loads for a scene, in order."""
+        out: list[str] = []
+        if not 0 <= scene < self.SCENE_COUNT:
+            return out
+        ptr = self._u32(self.SCENE_CAM_FILES + scene * 4)
+        r = self._v2r(ptr) if ptr else None
+        if r is None:
+            return out
+        files = self.cam_files()
+
+        def add(fi: int) -> None:
+            rec = files.get(fi)
+            if rec is None:
+                return
+            stem = rec[0][:-4] if rec[0].endswith(".bin") else rec[0]
+            if stem not in out:
+                out.append(stem)
+
+        for k in range(self.MAX_CAM_FILES):
+            fi = struct.unpack_from("<h", self.data, r + k * 2)[0]
+            if fi == -1:
+                break
+            add(fi)
+            if original:
+                add(self.ORIGINAL_CAM_FILE)
+        return out
+
     def cam_path_slots(self) -> dict[int, tuple[str, int]]:
         """global path slot id -> (cam filename, path index within that file).
 

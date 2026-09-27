@@ -72,6 +72,7 @@ export interface JudgmentCompanionTail {
   ring: { x: number; y: number; z: number; yaw: number; frame: number } | null;
 }
 
+/** `[port-only]` as a function. */
 export function makeJudgmentCompanionTail(): JudgmentCompanionTail {
   return {
     subtype: 0, strike: 0, hpStage: 0, counter: 0, savedSub: 0,

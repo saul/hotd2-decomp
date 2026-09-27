@@ -206,7 +206,7 @@ export interface JudgmentTail {
   enemySlot: boolean;
 }
 
-/** A fresh tail, as the engine's zeroed allocation leaves it before `Init`. */
+/** A fresh tail, as the engine's zeroed allocation leaves it before `Init`. `[port-only]` as a function. */
 export function makeJudgmentTail(): JudgmentTail {
   return {
     isSubActor: false, variant: 0, hpStage: 0, hint: 0, hintFrames: 0,

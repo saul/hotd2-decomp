@@ -66,6 +66,7 @@ const RDATA: DataView = (() => {
 /**
  * One `float` of the block, by its image address — `float ptr [va]`. `NaN`
  * outside the block, which no shipped landing reaches (see the module note).
+ * `[port-only]` as a function.
  */
 export function Class22RdataF32(va: number): number {
   const off = va - CLASS22_RDATA_BASE;
@@ -73,7 +74,7 @@ export function Class22RdataF32(va: number): number {
   return RDATA.getFloat32(off, true);
 }
 
-/** One `short` of the block, by its image address — `MOVSX word ptr [va]`. */
+/** One `short` of the block, by its image address — `MOVSX word ptr [va]`. `[port-only]` as a function. */
 export function Class22RdataS16(va: number): number {
   const off = va - CLASS22_RDATA_BASE;
   if (off < 0 || off + 2 > RDATA.byteLength) return 0;
@@ -245,7 +246,7 @@ export const CLASS22_SUBACTOR_CLIP = 0x10;
  */
 export const CLASS22_SUBACTOR_AT_BIT = 0x20000000;
 
-/** The sub-actor's address, from the flier's. */
+/** The sub-actor's address, from the flier's. `[port-only]` as a function. */
 export function Class22SubActorAt(flierAt: number): number {
   return (flierAt | CLASS22_SUBACTOR_AT_BIT) >>> 0;
 }

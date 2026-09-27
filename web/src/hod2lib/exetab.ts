@@ -812,6 +812,44 @@ export class ExeTables {
     });
   }
 
+  /**
+   * `PTR_DAT_004c4990` — one pointer per scene, to an `s16` list of cam file
+   * indices ending in -1. `FUN_004040A0` walks the entry for
+   * `g_scene_index` and queues each file (`AssetQueueLoadCamFile`), and in
+   * Original Mode (`g_GameMode == 1`) queues file `0x16`, `op_org.bin`, after
+   * every one of them. Read from the image: scene 4 (stage 5) is
+   * `{10, 20, 16}` -- `cp_st5`, `op_st5` **and `op_st1`**, whose paths stage
+   * 5's JUDGMENT flies -- and scene 6 (Training) takes `cp_st2` as well.
+   */
+  static readonly SCENE_CAM_FILES = 0x004c4990;
+  static readonly ORIGINAL_CAM_FILE = 0x16;
+
+  /**
+   * The cam files `FUN_004040A0` loads for a scene, as stems, in its order and
+   * without repeats -- the Original Mode file appears once, after the first.
+   */
+  sceneCamFiles(scene: number, original: boolean): string[] {
+    const out: string[] = [];
+    if (scene < 0 || scene >= ExeTables.SCENE_COUNT) return out;
+    const ptr = this.ru32(ExeTables.SCENE_CAM_FILES + scene * 4);
+    const r = ptr ? this.v2r(ptr) : null;
+    if (r === null) return out;
+    const files = this.camFiles();
+    const add = (fi: number): void => {
+      const rec = files.get(fi);
+      if (!rec) return;
+      const stem = rec[0].endsWith(".bin") ? rec[0].slice(0, -4) : rec[0];
+      if (!out.includes(stem)) out.push(stem);
+    };
+    for (let k = 0; k < ExeTables.MAX_CAM_FILES; k++) {
+      const fi = i16(this.data, r + k * 2);
+      if (fi === -1) break;
+      add(fi);
+      if (original) add(ExeTables.ORIGINAL_CAM_FILE);
+    }
+    return out;
+  }
+
   /** global path slot id -> `[cam filename, path index within that file]`. */
   camPathSlots(): Map<number, [string, number]> {
     return this.cached("camPathSlots", () => {

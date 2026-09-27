@@ -106,6 +106,7 @@ function AtCamFrame(frame: number): boolean {
  * position and angles, and `+0x22` into both hit-point words. The bundle
  * carries the nested descriptor as a placement at its own evt offset,
  * `parent_at` this flier and `synthetic` -- see `CharacterPlacement`.
+ * `[port-only]` as a function.
  */
 export function Class22SpawnCompanion(d: Class22Descriptor,
                                       f: ClassFrame): number {
@@ -467,6 +468,7 @@ export function Class22DescendAndJoinFight(obj: JudgmentActor,
 /**
  * The despawn cue three states test first:
  * `g_active_cam_path == (s16)tail[6] && g_cam_path_frame >= (s16)tail[8]`.
+ * `[port-only]` as a function.
  */
 export function Class22TailCueReached(d: Class22Descriptor): boolean {
   return G.g_active_cam_path === d.despawn_path
@@ -485,7 +487,7 @@ export function Class22Kill(obj: JudgmentActor): void {
   Class22DropSubActor(obj);
 }
 
-/** `ActorDespawn` (`FUN_00409CC0`) on the flier, and its sub-actor with it. */
+/** `ActorDespawn` (`FUN_00409CC0`) on the flier, and its sub-actor with it. `[port-only]` as a function. */
 export function Class22Despawn(obj: JudgmentActor): void {
   ActorDespawn(obj);
   Class22DropSubActor(obj);

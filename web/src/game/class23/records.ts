@@ -58,7 +58,7 @@ export const CLASS23_BACK_OFF = 0x005703d0;
 export const CLASS23_REACT = 0x005703d8;
 export const CLASS23_REACT_FOLLOW = 0x005703dc;
 
-/** One s16 of the table at `va + stage * 2` — `MOVSX EAX, word ptr [va + stage*2]`. */
+/** One s16 of the table at `va + stage * 2` — `MOVSX EAX, word ptr [va + stage*2]`. `[port-only]` as a function. */
 export function Class23Motion(va: number, stage: number): number {
   return s16(va + stage * 2);
 }
@@ -92,6 +92,7 @@ export const CLASS23_STRIKES: readonly Class23Strike[] =
 export const CLASS23_BLEND_WALK = 0x00570410;
 export const CLASS23_BLEND_AFTER_STRIKE = 0x00570414;
 export const CLASS23_BLEND_AFTER_REACT = 0x00570418;
+/** `[port-only]` as a function. */
 export function Class23BlendStart(va: number, stage: number): number {
   return s16(va + stage * 2);
 }

@@ -64,7 +64,7 @@ const BOTH_PLAYERS = 2;
  */
 export const ORIGINAL_WEAPON_SCALE: number = 1.0;
 
-/** `PlaySoundId` — the class's sounds go out as the port's `sound.play`. */
+/** `PlaySoundId` — the class's sounds go out as the port's `sound.play`. `[port-only]` as a function. */
 export function Class22PlaySound(f: ClassFrame, id: number): void {
   f.events?.emit("sound.play", { id });
 }
@@ -109,7 +109,7 @@ export function Class22DropUnlistedShot(obj: Actor,
  * The call `RegisterForShotTest` (`FUN_00405160`) at one of this class's own
  * call sites. `[port-only]` as a function: the latch above, and the point
  * the engine publishes at `obj+0x70` -- node 1's world point, `obj+0x100`,
- * carried through the view (`FUN_0049C0F2`..`0x0049C128`) -- in the port's
+ * carried through the view (`0x0049C0F2`..`0x0049C128`) -- in the port's
  * world space. The routine skips an object with bit `0x8000`, and so does
  * this.
  */
@@ -138,6 +138,7 @@ export function JudgmentRegisterEnemySlot(t: { enemySlot: boolean }): void {
 /**
  * `ReleaseCameraEnemySlot` (`FUN_004092B0`) at one of the two classes' call
  * sites: `g_enemy_slots[obj+0x120] = 0; obj+0x120 = 0xFF`.
+ * `[port-only]` as a function.
  */
 export function JudgmentReleaseEnemySlot(t: { enemySlot: boolean;
                                              cameraListed: boolean }): void {
@@ -340,7 +341,7 @@ export function Class22Phase2TakeShots(obj: JudgmentActor,
   t.aggression -= 2;
 }
 
-/** A player's damage from a strike: `PlayerTakeDamage(p, 1, kind)` by `g_active_player`. */
+/** A player's damage from a strike: `PlayerTakeDamage(p, 1, kind)` by `g_active_player`. `[port-only]` as a function. */
 export function Class22StrikePlayers(obj: Actor, f: ClassFrame,
                                      kind: number): void {
   if (G.g_active_player === 0) {

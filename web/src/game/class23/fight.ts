@@ -132,7 +132,7 @@ export function Class23Draw(obj: JudgmentCompanionActor): void {
   Class22SampleCursor(obj, obj.companion);
 }
 
-/** `Class23Draw(obj); obj+0x194++` — the tail most paths end in. */
+/** `Class23Draw(obj); obj+0x194++` — the tail most paths end in. `[port-only]` as a function. */
 export function Class23DrawAndStep(obj: JudgmentCompanionActor,
                                    f: ClassFrame): void {
   Class23Draw(obj);
@@ -332,6 +332,7 @@ export function Class23FightBesideCompanion(obj: JudgmentCompanionActor,
  * The call `ActorRegisterCameraPoint(6.0)` (`FUN_00409B70`), which runs
  * `RegisterForShotTest` and registers the camera candidate. See
  * `Class22ActorRegisterCameraPoint`.
+ * `[port-only]` as a function.
  */
 export function Class23ActorRegisterCameraPoint(obj: JudgmentCompanionActor,
                                                 f: ClassFrame,

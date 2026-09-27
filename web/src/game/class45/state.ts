@@ -481,8 +481,17 @@ export interface Boss3Splash {
   shown: number; done: boolean;
 }
 
-/** `Boss3MeshBulgeUpdate`'s task: `+0x34` the step, `+0x38` the latch. */
-export interface Boss3MeshBulge { step: number; stopped: number }
+/**
+ * `Boss3MeshBulgeUpdate`'s task: `+0x34` the step, `+0x38` the latch. The
+ * ten piece positions at `+0x54` are constants (`BOSS3_BULGE_PIECE_XZ`).
+ * `deformed` and `at*` are `[port-only]`: whether this frame's update walked
+ * the water patch's vertices, and the body's `obj+0x100` it measured from --
+ * the engine edits the model in place, and the port's model is `render/`'s.
+ */
+export interface Boss3MeshBulge {
+  step: number; stopped: number;
+  deformed: boolean; atX: number; atY: number; atZ: number;
+}
 
 /**
  * `Boss3PathEffectUpdate`'s task: `+0x1330` the step, `+0x1334` the row of

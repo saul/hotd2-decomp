@@ -30,7 +30,7 @@
  * the camera. {@link EffectLayer.bones} is what answers that here.
  */
 import {
-  Group, type Material, Matrix4, Object3D, Ray, Vector3,
+  type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
 import { BAMS_TO_RAD } from "../core/bams";
@@ -98,13 +98,16 @@ export interface BoneSphereSource {
 
 /**
  * Free the materials a fading draw gave its clone -- see `setSlotAlpha` in
- * `boss3_effects.ts`. The geometry is the template's and is not ours.
+ * `boss3_effects.ts` -- and the geometry a deforming one copied (the water
+ * mound). Anything else is the template's and is not ours.
  */
 function disposeOwned(node: Object3D): void {
   const owned = node.userData.ownedMaterials as Material[] | undefined;
-  if (!owned) return;
-  for (const m of owned) m.dispose();
+  if (owned) for (const m of owned) m.dispose();
   node.userData.ownedMaterials = undefined;
+  const geos = node.userData.ownedGeometries as BufferGeometry[] | undefined;
+  if (geos) for (const g of geos) g.dispose();
+  node.userData.ownedGeometries = undefined;
 }
 
 /** One drawn node, and the slot it was cloned for. */

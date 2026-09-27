@@ -185,6 +185,23 @@ export const BOSS3_PATH_EFFECT_CELS = 15;
 export const BOSS3_BULGE_SLOT = 0x1850;
 export const BOSS3_BULGE_PIECE_FIRST_SLOT = 0x183e;
 export const BOSS3_BULGE_PIECES = 10;
+/**
+ * The pieces' `(x, z)`, `+0x54` of the task as `Boss3SpawnMeshBulge`
+ * (`FUN_00424D90`) writes it (`0x00424DBC`..`0x00424E04`); the five it does
+ * not write are left 0 by `ActorAlloc`'s clear (`FUN_004A73D0`, from `+0x34`
+ * to the end). Each is drawn at `T(x, 0, z)` -- the models carry their own
+ * place.
+ */
+export const BOSS3_BULGE_PIECE_XZ: readonly (readonly [number, number])[] = [
+  [7, -24.5], [15, 2], [0, 0], [55, -0.5], [0, 0],
+  [0, 0], [0, 0], [-2.5, -20], [-10, 10], [0, 0],
+];
+/** The mound: under `[0x0055CBB4]`, within `[0x004C43A4]`, `[0x0055CBB0]`, `[0x0055CBA8]`, `[0x0055CBA0]`. */
+export const BOSS3_BULGE_BELOW = -13.5;
+export const BOSS3_BULGE_REACH = 10;
+export const BOSS3_BULGE_ARC = Math.fround(1638.4);
+export const BOSS3_BULGE_LIFT = 5.5;
+export const BOSS3_BULGE_BASE = 13.475379943847656;
 /** `Boss3DrawBoneParts` (`FUN_004219E0`): the bite flash's two flipbooks. */
 export const BOSS3_FLASH_A_FIRST_SLOT = 0x97a;
 export const BOSS3_FLASH_A_CELS = 0x27;

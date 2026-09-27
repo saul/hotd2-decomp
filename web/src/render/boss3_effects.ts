@@ -33,12 +33,18 @@
  *   by `AssetDrawSlotWithAlpha`.
  * * **shadow** (`Boss3OpeningBystanderUpdate`, `FUN_00420550`): world,
  *   `T(x, y + 0.3, z) Scale(10, 1, 10)`, slot `0x10D0`.
+ * * **the water mound** (`Boss3MeshBulgeUpdate`, `FUN_00424C10`): slot
+ *   `0x1850` in the world with its vertices raised where the body swam, and
+ *   ten pieces at `T(x, 0, z)`. The raise is kept on this node's own copy of
+ *   the geometry, as the engine keeps it in the loaded model; a seek or a
+ *   load rebuilds the node flat, which the engine, having neither, never
+ *   has to.
  */
 import {
-  type Group, type Material, Matrix4, type Mesh, type Object3D, Quaternion,
-  Vector3,
+  type BufferGeometry, type Group, type Material, Matrix4, type Mesh,
+  type Object3D, Quaternion, Vector3,
 } from "three";
-import { BAMS_TO_RAD } from "../core/bams";
+import { BAMS_TO_RAD, BAMS_TO_RAD_F64 } from "../core/bams";
 import type { Boss3Actor } from "../game/actor";
 import {
   BLOOD_DEPTH_BASE, BLOOD_DEPTH_FAR, BLOOD_DEPTH_RATE,
@@ -46,7 +52,9 @@ import {
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
 import {
-  BOSS3_BYSTANDER_SHADOW_SLOT, BOSS3_CARD_PIECE_SLOTS,
+  BOSS3_BULGE_ARC, BOSS3_BULGE_BASE, BOSS3_BULGE_BELOW, BOSS3_BULGE_LIFT,
+  BOSS3_BULGE_PIECE_FIRST_SLOT, BOSS3_BULGE_PIECE_XZ, BOSS3_BULGE_REACH,
+  BOSS3_BULGE_SLOT, BOSS3_BYSTANDER_SHADOW_SLOT, BOSS3_CARD_PIECE_SLOTS,
   BOSS3_FLASH_A_CELS, BOSS3_FLASH_A_FIRST_SLOT, BOSS3_FLASH_B_CELS,
   BOSS3_FLASH_B_FIRST_SLOT, BOSS3_PATH_EFFECTS, BOSS3_PATH_EFFECT_FIRST_SLOT,
   BOSS3_SPARK_FIRST_SLOT, BOSS3_WAKE_CELS, BOSS3_WAKE_FIRST_SLOT,
@@ -138,6 +146,7 @@ export function drawBoss3Effects(h: Boss3EffectHost, seen: Set<string>): void {
   drawSparks(h, seen);
   drawSplashes(h, seen);
   drawPathEffects(h, seen);
+  drawMound(h, seen);
 }
 
 function drawCard(h: Boss3EffectHost, seen: Set<string>): void {
@@ -275,5 +284,81 @@ function drawPathEffects(h: Boss3EffectHost, seen: Set<string>): void {
     S(R(T(_m, row.x, row.y, row.z), AY, e.shownYaw), 2, 2, 2);
     place(node, _m);
     setSlotAlpha(node, e.shownAlpha);
+  });
+}
+
+const _l = new Vector3();
+const _toModel = new Matrix4();
+const _toMesh = new Matrix4();
+
+/**
+ * The mound's vertex walk, on the node's own geometry: every vertex within
+ * `BOSS3_BULGE_REACH` of the body in x and z is raised to the arc's height
+ * if that is higher. Copied from the template the first time, so the stage's
+ * shared model is never touched; the copies go with the node.
+ */
+function raiseMound(node: Object3D, x: number, z: number): void {
+  node.updateMatrixWorld(true);
+  node.traverse((o) => {
+    const mesh = o as Mesh;
+    let geo = mesh.geometry as BufferGeometry | undefined;
+    if (!mesh.isMesh || !geo?.attributes?.position) return;
+    if (!mesh.userData.boss3OwnGeometry) {
+      geo = geo.clone();
+      mesh.geometry = geo;
+      mesh.userData.boss3OwnGeometry = true;
+      const owned = (node.userData.ownedGeometries ??= []) as BufferGeometry[];
+      owned.push(geo);
+    }
+    // Model space is the node's; a mesh below it may carry a transform.
+    _toModel.identity();
+    for (let p: Object3D | null = mesh; p && p !== node; p = p.parent) {
+      p.updateMatrix();
+      _toModel.premultiply(p.matrix);
+    }
+    _toMesh.copy(_toModel).invert();
+    const pos = geo.attributes.position;
+    let moved = false;
+    for (let i = 0; i < pos.count; i += 1) {
+      _l.fromBufferAttribute(pos, i).applyMatrix4(_toModel);
+      const dx = _l.x - x;
+      const dz = _l.z - z;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (!(d < BOSS3_BULGE_REACH)) continue;
+      // `FLD 10.0; FSUB ST0,ST1; FMUL [0x0055CBB0]; __ftol` -- on the FPU stack.
+      const a = Math.trunc((BOSS3_BULGE_REACH - d) * BOSS3_BULGE_ARC);
+      const y = Math.fround(Math.sin(a * BAMS_TO_RAD_F64) * BOSS3_BULGE_LIFT
+                            - BOSS3_BULGE_BASE);
+      if (!(y > _l.y)) continue;
+      _l.y = y;
+      _l.applyMatrix4(_toMesh);
+      pos.setXYZ(i, _l.x, _l.y, _l.z);
+      moved = true;
+    }
+    if (moved) {
+      pos.needsUpdate = true;
+      geo.computeBoundingSphere();
+    }
+  });
+}
+
+function drawMound(h: Boss3EffectHost, seen: Set<string>): void {
+  G.g_boss3_mesh_bulges.forEach((b, n) => {
+    const key = `b3mound${n}`;
+    const node = h.node(key, BOSS3_BULGE_SLOT, h.world);
+    if (node) {
+      seen.add(key);
+      place(node, _m.identity());
+      if (b.deformed && b.atY < BOSS3_BULGE_BELOW) {
+        raiseMound(node, b.atX, b.atZ);
+      }
+    }
+    BOSS3_BULGE_PIECE_XZ.forEach(([x, z], i) => {
+      const k = `b3mound${n}_${i}`;
+      const piece = h.node(k, BOSS3_BULGE_PIECE_FIRST_SLOT + i, h.world);
+      if (!piece) return;
+      seen.add(k);
+      place(piece, T(_m.identity(), x, 0, z));
+    });
   });
 }

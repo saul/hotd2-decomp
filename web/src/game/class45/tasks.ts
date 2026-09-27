@@ -12,8 +12,8 @@
 import type { Events } from "../../core/events";
 import { ActorByAt, G } from "../globals";
 import {
-  Boss3BodyState, type Boss3IntroCard, type Boss3PathEffect, type Boss3Spark,
-  type Boss3Splash,
+  Boss3BodyState, type Boss3IntroCard, type Boss3MeshBulge,
+  type Boss3PathEffect, type Boss3Spark, type Boss3Splash,
 } from "./state";
 import {
   BOSS3_PATH_EFFECTS, BOSS3_SPARK_LAST_CEL, BOSS3_SPLASH_KIND0_END,
@@ -204,20 +204,36 @@ export function Boss3SplashUpdate(s: Boss3Splash): boolean {
  * (`render/`'s constants).
  */
 export function Boss3SpawnMeshBulge(): void {
-  G.g_boss3_mesh_bulges.push({ step: G.g_evt_step_index, stopped: 0 });
+  G.g_boss3_mesh_bulges.push({ step: G.g_evt_step_index, stopped: 0,
+                               deformed: false, atX: 0, atY: 0, atZ: 0 });
 }
 
 /**
  * `Boss3MeshBulgeUpdate` — `FUN_00424C10`. Dies on `g_script_flags[4]`;
- * latches once the body (`g_boss3_heads[0]`) is dead; until then, while the
- * canal mesh's own flag allows, presses the canal's vertices near the body
- * down -- which is `render/`'s, from the body's point and this latch -- and
- * draws `st1_1.bin[35]` and ten `st3_tika_bos.bin` pieces.
+ * latches `+0x38` once `g_boss3_heads[0]` -- the body, by now -- is in state
+ * 14; and while the latch is down and slot `0x1850`'s model is loaded
+ * (`[0x009BEBAC]` bit `0x8000`, the asset record at `0x009A66A4 +
+ * 0x1850 * 0x10`), walks that model's vertices: with the body's `obj+0x100`
+ * below -13.5 (`[0x0055CBB4]`), a vertex within 10 units of it in x and z is
+ * raised to `sin(ftol((10 - d) * 1638.4)) * 5.5 - 13.47538` if that is
+ * higher -- a mound of water over the swimming body, left behind where it
+ * went. Then it draws the patch (`AssetDrawSlot(0x1850)`, in the world) and
+ * the ten `st3_tika_bos.bin` pieces at `T(x, 0, z)`.
+ *
+ * The vertices are the renderer's (`render/boss3_effects.ts`); this says
+ * whether the walk ran and where from. `[port-only]` in one respect: the
+ * bundle is whole before the first frame, so the load flag is always up.
  */
-export function Boss3MeshBulgeUpdate(b: { stopped: number }): boolean {
+export function Boss3MeshBulgeUpdate(b: Boss3MeshBulge): boolean {
   if (G.g_script_flags[4] === 1) return false;
   const body = ActorByAt(G.g_boss3_heads[0]);
   if (body && body.state === Boss3BodyState.Dead) b.stopped = 1;
+  b.deformed = b.stopped === 0 && body !== null;
+  if (body) {
+    b.atX = body.lookAt.x;
+    b.atY = body.lookAt.y;
+    b.atZ = body.lookAt.z;
+  }
   return true;
 }
 

@@ -867,7 +867,75 @@ frames a room on stage 1, scaled to how far the last enemy had pulled it. The
 other 5 run under `CameraDriverFromDeferredPose`, which frees the room as soon
 as the slot table empties. The player had that second rule on every shot, so
 every room handed over two frames after the last zombie died; `npm run
-handback` is what measures it.
+handback` is what measures it. With the camera now running as the exe's own
+tasks (below), stage 1 block 1's four fought rooms hand back in 50 to 76
+frames from a 7 to 14 degree swing, and an empty one in 2.
+
+**A room also waits for its last corpse when the spawn says so.** Six shipped
+class-0x30 spawns carry `KeepCameraWhenLast` (`0x800000` in the record's init
+flags: stage 1's three are its opening room's, stage 3's three are block 2
+step 4's). `ZombieReleasePermitAndUntrack` skips its untrack
+arm for the last enemy alive that carries it, so that actor keeps registering
+as a camera candidate through its death clip, keeps a slot, and the mode
+machine stays on `TrackEnemies` until `ZombieStateCorpseSink` raises
+`NoCameraTrack` unconditionally. Stage 1's opening room therefore holds its
+gate for the corpse and then the turn, about 180 frames longer than the port
+used to, because the port's slot table used to be rebuilt from a list that
+dropped the dead.
+
+### The camera is the exe's two tasks, in the exe's order
+
+The camera used to be seated from outside the game: `Walker.tick` advanced a
+shot, retired it and released `wait_queued_events_done` inside one call, and an
+`app/` system then wrote the camera block from the walker's shot before the
+actors ran. Everything that followed from that was a task out of place, and
+several things could not be done at all -- the rail could not pause, because
+the seat put the block back on it every frame.
+
+The scene's task list (`0x00460710`, `[proved]`) runs, in creation order: the
+interpreter, the light push, **`CameraActorTick`**, the backdrop,
+**`CameraUpdateTick`** (the scene state's hook, then the player bodies), the
+two player tasks, `SelectAttackablePlayer`, the shutter, the scene lights, the
+region draw, the rain, `UpdateCameraEnemySlots`, `RankEnemiesByDistance`, the
+shot resolution -- and then every actor. `SceneTaskWalk` (`game/director.ts`)
+is that list now, and the camera lives entirely inside it:
+
+* `queue_event` pushes onto the action ring (`EvtQueueAction`), and
+  `EvtRunQueuedActions` inside `CameraActorTick` calls the current handler and
+  dequeues at most one action a frame. A `cam_play` starts the frame after it is
+  queued, a `wait_queued_events_done` passes on the frame the ring is empty, and
+  a skip ends a play where it stands.
+* `UpdateSceneViewAndLight` builds the view from the block's **angles**, with
+  the shake's nod, into `G.g_camera_view_to_world` / `g_camera_world_to_view`,
+  and stamps the scene state as entered. The renderer draws that matrix.
+* The scene state's hook writes the **gameplay eye** `g_camera_eye` -- the
+  `-15` is its, not the drawn camera's -- and, on a stashed rail, the deferred
+  pose block. The rail pauses while the screen shakes or nobody is in play.
+* The drivers read what the hook left the frame before: the deferred-pose
+  driver copies the pose block whole; the mode machine eases the block eye a
+  sixteenth a frame onto the pose (`CameraEaseBlockEyeToPathPose`) or onto the
+  path (`CameraEaseEyeToPath`), and turns the aim in whole BAMS.
+* Every tracked class files itself as a candidate from its own update
+  (`ActorRegisterCameraPoint` / `RegisterForCameraTracking`), the next frame's
+  `UpdateCameraEnemySlots` deals the slots, and the camera reads them the frame
+  after that. The camera is two frames behind the room, as the exe's is.
+
+Waits yield on their first visit, as every wait opcode but `0x40` does, and
+`wait_frames n` passes after `n + 1` frames. A seek walks the script without
+running frames, so every wait it steps over runs the camera's two tasks to the
+state the wait claims (`CameraReplayUntil`, `CameraReplayFor`,
+`CameraReplaySettle` in `game/camera/actor.ts`).
+
+Three questions this table used to list as open are answered by the same
+reading. The `path.y - 15` is the gameplay eye's: the path hooks write
+`g_camera_eye` fifteen units below the pose (or at `g_camera_fixed_eye_y`), and
+the drawn camera is the block's eye unchanged. `0x009C70C0` is the deferred pose
+block: the (2,6)/(2,7) hooks evaluate the rail into it, and the two drivers
+read it -- `CameraDriverFromDeferredPose` copies it whole,
+`CameraEaseBlockEyeToPathPose` eases the block eye toward it. And
+`CameraStepRailTick` (`0x0040C790`) makes the gameplay eye yaw-only (pitch and
+roll zeroed, the yaw turned half round) while the drawn camera takes the pose's
+full angles through the driver. `[proved]`
 
 A replay also has to honour what a wait *leaves behind*, not only what it
 blocks on. `wait_enemies_alive` and `wait_enemies_present` open only when the
@@ -1162,9 +1230,6 @@ Ranked by what they would actually change on screen.
 | Open | Effect | Where the work is |
 |---|---|---|
 | What starts a stage's own BGM | the player names the stage track by convention and says so | decomp — the scene-entry path, not an xref sweep over 496 callers |
-| `path.y - 15` compensation | nothing today; the player is correct without it | decomp — `0x009A60C0` is the camera block's eye at block+0x80, and `CameraFromViewAngles` reads a **4x4 matrix** at the block base (0x009A6040) instead, offsetting `(0, -15, 0)` in its own frame. Which of the two the shipped hooks agree on is the remaining question |
-| `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`) | the block eye is taken straight off the curve; the engine can ease it a sixteenth a frame toward a *second* pose block at 0x009C70C0 | decomp — what writes 0x009C70C0 outside the deferred-rail hooks |
-| `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
 | Spawn class → model | enemies stay markers | decomp, large — the class table holds handler addresses |
 | W6 harness | no regression safety net | client |
 
@@ -1380,6 +1445,11 @@ slider all seat through `Player.syncCameraToWalker`, which calls
 `CameraRig.sync` directly. The **draw** is deliberately still ungated — placing
 the three.js camera from a block that has not changed is idempotent, and a
 resize needs it.
+
+Since then the seat has gone altogether. The camera's two tasks run inside the
+game tick (`game/camera/actor.ts`), so a frame that owes no tick runs none of
+the camera, and the draw places the three.js camera from the matrix the last
+tick built.
 
 `test/camera.test.ts` is the guard: it plays stage 1 at 60 and 120 Hz through
 the real `Loop`, `Walker`, `CameraRig` and `CameraTrackEnemiesTick`, and
@@ -4546,7 +4616,7 @@ missed. Meanings and confidence marks live in
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | pushes onto the action ring and nothing more; the actions run in `CameraActorTick`'s `EvtRunQueuedActions`, one at a time, behind whatever handler holds the slot (`game/camera/actions.ts`) — see the selector table below |
 | `31` | `goto_scene_state` | flow | **done** | the end-of-room instruction: enters scene state (1, minor) and stamps it, drops the camera mode, the override latch and the eye ease, parks the action slot and retires the `queue_event 0x21` whose driver never retires itself. (1,3)'s hook, `CameraFromViewAngles`, puts the gameplay eye fifteen down the view's own axis |
-| `32` | `goto_scene_state_when_alive` | flow | *tracked* | as `0x31`, minus two clears, plus a park until a player is out of the death → continue → revive chain. No player death here, so the gate is always open [diverges] |
+| `32` | `goto_scene_state_when_alive` | flow | done | as `0x31`, minus two clears, behind a gate: while either player is in state 4, 5 or 6 (`g_player_state_handlers` `+0x10` is 0) with no lives, it re-runs every frame (`Walker.holdHere`). The nineteen sites are the boss rooms |
 | `33` | `set_action_drain_mode` | flow | **done** | `g_evt_action_advance = mode; pending += delta` — all 128 in the game carry `2, −1`: the `finish_sequence` in the slot taken back, what is queued behind it dequeued now and first called next frame |
 | `34` | `unused_34` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `35` | `enable_camera_path_roll` | camera | **done** | **gates the camera roll channel**, exactly as CamEvalPath7 does |

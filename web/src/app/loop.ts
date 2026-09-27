@@ -54,7 +54,9 @@
  * back on the rail, the ease was skipped, and the un-eased aim was drawn. At
  * 60 Hz there are no such frames and nothing showed. At 120 Hz there is one
  * every other frame, and the camera flickered between two aims by up to ten
- * degrees. `test/camera.test.ts` is the guard.
+ * degrees. `test/camera.test.ts` is the guard. The system is gone: the
+ * camera's two tasks run inside the game tick now (`game/camera/actor.ts`),
+ * so a frame that owes no tick cannot run half of one.
  *
  * ## Owed time is spread, never dropped
  *

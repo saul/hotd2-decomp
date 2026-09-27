@@ -20360,6 +20360,74 @@ through an accessor on `G`, each with flag 248 as it stood.
 sets 0x20" and calls the bit dead; the chapter card sets it on every stage.
 Left for its own change -- it is bundle-writer text with a Python twin.
 
+## 2026-09-27 -- the bats: every sub-type drawn, the wing on its body, the splash
+
+Class 0x46 had two declared divergences: the scatter's and the swarm's members
+undrawn, and `SpawnBatSplash` a sound with no picture. Both are gone; reading
+the routines around them again found six more things the first transcription
+had wrong.
+
+* **What draws a bat** `[proved]`: every arm of `PlaceBats` writes
+  `obj+0x1F4 = 0x1E`, clip `0x407`, `obj+0x1FC = 5`, builds the model and
+  installs `BatDrawBoneSlot` (`FUN_0042E020`), which draws the node's own slot
+  and nothing else. The model is the character type's; a member's descriptor,
+  or its lack of one, never enters the draw. The port's character layer binds
+  geometry by spawn address, so the exporter now emits a synthetic body row
+  and wing row per runtime child at the port's own address for it, parented to
+  the placer -- the horde's arrangement.
+* **`BatChildAt` collided.** It gave the member four bits; the scatter has 25,
+  so members 16..24 took 0..8's addresses and `tools/bats.mjs` had been
+  counting 16 scatter bats, not 25, for as long as it had run.
+* **The wing seat** `[proved]`: `g_camera_blocks[cur] * body+0x2C4 *
+  (0, 1, 2)`, and `body+0x2C4` is node 1's draw record `+0x28` --
+  `SkeletonEmitNode` (`FUN_004114C0`) stores it straight after
+  `FUN_00411700` has translated and turned the node, and the matrix under it is
+  `SkeletonApplyRootMotion`'s `T Rz Ry Rx S(model+0x116C)` and closing
+  translate, then `SkeletonPoseRootFrame`'s three turns. The port had
+  `(0, 1, 2)` in the body's yaw alone; the clip's root record is a half turn
+  tipped by 3679, so the wing sat four units off, on the far side. Ported as
+  `BatBodyNodeMatrix` in `game/`, cross-checked in `test:render` against the
+  pose the character layer actually makes. The bat's and the wing's roots are
+  now drawn in order 5 with pitch and roll and at 0.6 / 0.7.
+* **The shot.** The bat now registers the engine's way. The wing never
+  registers (the routine ends on its draw at `0x0042F7D8`), but the render
+  pick had walked every drawn bone and the wing's bone 3 has a 0.3 sphere, so a
+  wing could take a bullet meant for its bat. The dive registers in every
+  state and clears bit 3 only when its gate takes the hit: a bat shot during
+  its launch delay dies at launch. The port had cleared the bit every frame.
+  A sweep for `AND ..., 0xF7`/`0xFFFFFFF7` finds no clear in the task walk or
+  the shot processor `[likely]`.
+* **The scatter takes its hit inside its flying arm** (its `AND AL, 0xF7` is at `0x0042EB04`), and
+  the arm runs on: the kill frame is a flying frame (`* 1.05`, `* 1.08`), and
+  only that arm registers.
+* **The swarm's dive bobs by 5.0.** `FMUL [0x0055D2B4]` at `0x0042F035`; the
+  port used the orbit's 8.0 (`FMUL double [0x0055D2D0]`, `0x0042F2FE`).
+* **`PlaceBats`' dive member keeps the placer's pitch and yaw** (it had
+  zeroed the yaw), and every member and wing builds its model, which claims a
+  `g_hit_slots` entry -- a scatter fills the table.
+* **The splash** `[proved]`: `BatSplashUpdate` at `0x0042F930` was a bare label
+  (`SpawnBatSplash` passes `&LAB_0042f930` to `ActorAlloc`); created and named.
+  Translate to `(x, -25, z)`, `AssetDrawSlot(0x1339 + n)`, `n` 0..0x1D, one a
+  frame from the frame it is made. Stepped after the actors like the owl's and
+  the fish's tasks; `common.bin` 307..336 is the same run theirs use.
+
+**Wrong turns.** I first planned to key the draw on the character type with a
+runtime clone path in the character layer, as the task suggested; the layer's
+whole lifetime model (pending, adopted, spent, released on unlisting) is keyed
+on rows, and the horde, JUDGMENT's sub-actor and the players' bodies already
+use synthetic rows, so a second mechanism for one class would have been the
+wrong refactor. And the scratchpad this session was given is shared with other
+agents: my first bundle log was overwritten by a sibling's, and the size
+comparison was made against their export until a baseline was rebuilt from
+`git archive HEAD` in a private directory.
+
+**Mutation-checked:** the four-bit address, a per-frame hit clear, the yaw-only
+seat, a seat without the model scale, the orbit's bob, the scatter's hit ahead
+of the switch, a registering wing, a scatter registering while it waits, a
+zeroed dive yaw, no hit slot, a splash at the caller's y, the splash stepped
+at the head of the frame, and a splash drawn one frame late each fail
+`npm run test:port`.
+
 ## 2026-09-27 -- class 0x31 state 23, the delayed pounce, read against the listing
 
 `ThrowerStateDelayedPounce` (`FUN_0044E830`) re-ported from the disassembly;

@@ -39,11 +39,18 @@ export enum SpawnClass {
   Boss4 = 0x19,
   /** `FUN_00441750` — row spawner for floating props. */
   FloatingPropRow = 0x15,
-  /** `FUN_00442290` — creates the water-wave field and records its plane Y. */
+  /**
+   * `WaterFieldCreate` (`FUN_00442290`) — creates the water-wave field the
+   * stage-2 boss's summons are seated under, with the spawn's `y` as its
+   * plane, and kills itself. Four spawns, stage 2 blocks 35, 37, 39 and 41.
+   * **Ported** (`game/class16/`).
+   */
   WaterWaveField = 0x16,
   /**
-   * `FUN_004422D0` — one wave source on the 0x16 field. `obj+0x11C` selects
-   * travelling or circular; amplitude, wavelength and speed come off its tail.
+   * `WaterWaveSourceAdd` (`FUN_004422D0`) — one wave source on the 0x16
+   * field. `obj+0x11C` selects travelling or circular; amplitude, wavelength
+   * and speed come off its tail. Four spawns, two each in blocks 35 and 39.
+   * **Ported** (`game/class17/`).
    */
   WaterWaveSource = 0x17,
   /**

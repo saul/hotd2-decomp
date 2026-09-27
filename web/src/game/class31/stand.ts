@@ -11,17 +11,17 @@
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, ThrowerStance, type ThrowerActor }
   from "../actor";
-import { TurnActorTowardCameraEye } from "../actor_turn";
+import { TurnActorAwayFromPointTestArrival } from "../actor_turn";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { QueryGroundSurfaceAt } from "../coli";
 import { MotionOf } from "../tables";
-import { bamsDelta, dist2d, type Vec3 } from "../vec";
+import { dist2d, type Vec3 } from "../vec";
 import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
 import { MotionFade } from "../class30/states";
 import { ThrowerPickNextState, ThrowerTryEnterState } from "./router";
 import {
-  STAND_TURN_RATE, ThrowerMotion, ThrowerState,
+  STAND_AIM_TOLERANCE, STAND_TURN_RATE, ThrowerMotion, ThrowerState,
 } from "./states";
 import { ThrowerMotionOf } from "./tables";
 
@@ -141,17 +141,24 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
 }
 
 /**
- * `TurnActorAwayFromPointTestArrival` (`FUN_00409FE0`) as state 7 calls it —
- * step the yaw 0x200 toward the camera and report whether it has arrived
- * within 0x200. Ghidra types the routine `void`; the value falls through EAX.
+ * `TurnActorAwayFromPointTestArrival` (`FUN_00409FE0`) as state 7 calls it:
+ * `(obj, g_camera_eye_x, 0, g_camera_eye_z, 0x200, 0x200)` at `0044b309` and
+ * `0044b355` -- step the yaw 0x200 toward the camera and report whether it is
+ * now within 0x200 of it.
+ *
+ * It was an inline copy with `atan2` rounded where `VecToAngles` truncates and
+ * a `bamsDelta` window standing in for `AngleWithinTolerance`; the routine is
+ * ported in `actor_turn.ts` now and this calls it.
  */
 function TurnTowardCameraAndTest(obj: ThrowerActor, eye: Vec3,
                                  dt: number): boolean {
-  TurnActorTowardCameraEye(obj, eye, STAND_TURN_RATE, dt);
-  const want = Math.atan2(obj.pos.x - eye.x, obj.pos.z - eye.z);
-  const bams = Math.round((want * 65536) / (Math.PI * 2)) & 0xffff;
-  return Math.abs(bamsDelta(bams, obj.yaw)) <= STAND_TURN_RATE;
+  _eyeAtFloor.x = eye.x;
+  _eyeAtFloor.z = eye.z;
+  return TurnActorAwayFromPointTestArrival(obj, _eyeAtFloor, STAND_TURN_RATE,
+                                           STAND_AIM_TOLERANCE, dt);
 }
+/** The point the routine is handed: the eye's x and z, and a height of 0. */
+const _eyeAtFloor: Vec3 = { x: 0, y: 0, z: 0 };
 
 /**
  * `ThrowerStateWaitForPermit` — `FUN_0044B3E0`, class 0x31 state 8.

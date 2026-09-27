@@ -12,12 +12,12 @@
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type ZombieActor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
-import { FirstBakedOf, MotionRowOf } from "../tables";
+import { MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
 import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
-import { MotionFade, MotionRow, QUEUE_CAP } from "./states";
+import { MotionFade, QUEUE_CAP, ZombieWaitMotion } from "./states";
 
 export function ZombieStateApproach(obj: ZombieActor, eye: Vec3, rng: Rng,
                                     host: GameHost): void {
@@ -30,11 +30,11 @@ export function ZombieStateApproach(obj: ZombieActor, eye: Vec3, rng: Rng,
   }
 
   // `row[(obj+0x136C >> 0x15) & 1]` -- the two walk variants. Bit 0x200000 is
-  // set by `ZombieStateAttackRun` from a random table when an actor drops out
-  // of the queue, and it is not otherwise read here, so the port takes row 0.
-  ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
-    rng, "clip", MotionFade.Quick);
+  // set by `ZombieStateAttackRun` from `g_wait_turn_variant` when an actor
+  // drops out of the queue; an actor that starts here has not been through
+  // there, so this is `row[0]` unless something else raised the bit.
+  ZombieSetMotionIfIdle(obj, ZombieWaitMotion(obj, MotionRowOf(obj)),
+                        rng, "clip", MotionFade.Quick);
 
   if (obj.rank < obj.allowance && obj.queueRank < QUEUE_CAP
       && TryClaimAttackSlot(obj, host)) {

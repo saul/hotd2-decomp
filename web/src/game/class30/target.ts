@@ -53,7 +53,7 @@ import type { TargetScriptEntry, TargetScriptJson }
   from "../../bundle/characters";
 import { ActorFlag, MotionFlag, type Actor, type ZombieActor } from "../actor";
 import type { GameHost } from "../host";
-import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleToward }
+import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleTowardFrames }
   from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
 import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
@@ -588,34 +588,38 @@ export function ZombieRetireAndCredit(obj: ZombieActor, rng: Rng): void {
  * the rescue is credited with the captors that simply gave up.
  *
  * **A captor waiting here is not drawn**, and that is the whole of the
- * "they were in the water the entire time" report. Sub 0 does four things,
- * `0x0045BB0F..0x0045BB3A`:
+ * "they were in the water the entire time" report. Sub 0 does four things
+ * and then **falls into sub 1 on the same frame** — the `INC` at `0x0045BB3A`
+ * is followed by sub 1's first instruction, not a `RET`:
  *
  * ```
- * obj+0x1350 = obj+0x34                  ; save the flags whole
- * obj+0x34  |= 0x18000
- * obj+0x1F8 &= 0xFFFFFFFE                ; model+0x64 bit 0 -- the shadow
- * 0045bb31  MOV  EAX, [ESI + 0x1d4]      ; 8b86d4010000  model+0x40, the parts
- * 0045bb37  MOV  byte ptr [EAX + 1], DL  ; 885001        DL = 0 -- do not draw
+ * 0045bb12  obj+0x1350 = obj+0x34        ; save the flags whole
+ * 0045bb1b  OR   EAX, 0x18000            ; out of the shot test and the camera
+ * 0045bb29  AND  AL, 0xfe                ; obj+0x1F8 &= ~1: the skeleton
+ * 0045bb31  MOV  EAX, [ESI + 0x1d4]      ; model+0x40, the parts' records
+ * 0045bb37  MOV  byte ptr [EAX + 1], DL  ; DL = 0: part 0, not drawn
  * ```
  *
- * and taking the order puts all four back. That byte is the draw gate
- * `SkeletonDrawWalk` (`FUN_004110D0`) reads before it emits a part —
- * `if (parts[i*8 + 1] != 0)` — and it is the same byte `FUN_00409D10` writes
- * for every part at once, which is how {@link ZombieStateCorpseBlink} makes a
- * body flicker. `obj+0x1F8` bit 0 is what `FUN_0040A590` reads before the
- * ground decal, so the shadow goes with it.
+ * `obj+0x1F8` bit 0 is {@link MotionFlag.Drawn}: with it clear
+ * `SkeletonEmitNode` (`FUN_004114C0`) draws no node of the skeleton, and
+ * `ActorDrawShadow` (`FUN_0040A590`) no shadow. The byte is part 0's in
+ * {@link Actor.partVisible}, the waist, which the skeleton does not draw —
+ * `SkeletonDrawWalk` (`FUN_004110D0`) tests it before the part. **Only part
+ * 0**: this does not call `ActorSetPartVisibility` (`FUN_00409D10`), so a
+ * character with a skirt as part 1 keeps drawing it. `[proved]`
  *
- * [diverges] The engine writes part **0** here and the port has one draw flag
- * for the whole actor, which is the same divergence the corpse blink declares
- * against `FUN_00409D10` and for the same reason: `game/` has no per-part
- * model, because the parts live in the skeleton and the skeleton lives in
- * `render/`.
- *
- * The engine also **runs the new state on the same frame** — the last line of
- * the order arm is `g_class30_states[obj+0x1310](obj)`, a tail call through
- * the table — so `runState` is handed in the way {@link
+ * The order arm puts both back — `obj+0x34 = obj+0x1350`, `obj+0x1F8 |= 1`,
+ * `MOV byte ptr [ECX + 0x1], AL` with `AL = 1` at `0x0045BBF3` — and then
+ * **runs the new state on the same frame**: its last line is
+ * `CALL dword ptr [EDX*0x4 + 0x592ae8]`, a tail call through
+ * `g_class30_states`, so `runState` is handed in the way {@link
  * ZombieStateHoldForCameraCue} takes it, rather than losing the frame.
+ *
+ * The die arm credits the civilian's `sub+0x6C` player, or — when that is
+ * `-1` — `g_active_player` while `g_players_in_play` is 1 and `rand() % 2`
+ * otherwise (`0x0045BB69..0x0045BBA4`), and gives both enemy counts back on
+ * the spot: `ReleaseEnemyAliveCount` (`FUN_00456560`) and
+ * `ReleaseEnemyPresentCount` (`FUN_00456580`) at `0x0045BBAB`/`0x0045BBB1`.
  */
 export function ZombieStateAwaitCivilianOrder(
     obj: ZombieActor, rng: Rng,
@@ -624,9 +628,12 @@ export function ZombieStateAwaitCivilianOrder(
   if (obj.sub === 0) {
     obj.zom.targetLoops = obj.flags;          // `obj+0x1350` holds the saved flags
     obj.flags |= 0x18000;
-    obj.alpha = 0;
+    obj.motionFlags &= ~MotionFlag.Drawn;
+    // The engine writes the byte whatever the count; a model with no parts
+    // record has no byte here to write, and nothing reads one.
+    if (obj.partVisible.length > 0) obj.partVisible[0] = 0;
     obj.sub += 1;
-    return;
+    // No return: sub 0 runs on into sub 1.
   }
   if (obj.sub === 2) { ActorDespawn(obj); return; }
   if (obj.sub !== 1 || !t?.civ) return;
@@ -635,15 +642,20 @@ export function ZombieStateAwaitCivilianOrder(
   if (t.civ.childOrder === ZombieState.OrderDie) {
     obj.flags |= ActorFlag.Dead;
     const named = t.civ.rescuePlayer;
-    obj.killedBy = named === -1 ? (rng.next() < 0.5 ? 0 : 1) : named;
+    if (named !== -1) obj.killedBy = named;
+    else if (G.g_players_in_play === 1) obj.killedBy = G.g_active_player;
+    else obj.killedBy = rng.int(2);
     obj.dead = true;
+    ReleaseEnemyAliveCount(obj);
+    ReleaseEnemyPresentCount(obj);
     obj.sub += 1;
     return;
   }
   obj.state = t.civ.childOrder;
   obj.sub = 0;
   obj.flags = obj.zom.targetLoops;
-  obj.alpha = 1;
+  obj.motionFlags |= MotionFlag.Drawn;
+  if (obj.partVisible.length > 0) obj.partVisible[0] = 1;
   runState?.(obj, obj.state);
 }
 
@@ -844,7 +856,10 @@ export function ZombieStateDragTarget(obj: ZombieActor, dt: number): void {
     }
   } else if (obj.sub === 3) {                               // 0x0045C27E
     // The whole arm: turn and fall to the tail. It never advances the sub.
-    obj.yaw = TurnAngleToward(obj.yaw, DRAG_SETTLE_YAW, TARGET_TURN_RATE, dt);
+    // `0045c27e`: `obj+0x68 = TurnAngleToward(obj+0x68, 0x2000, 0x1A0)`, one
+    // step a frame.
+    obj.yaw = TurnAngleTowardFrames(obj.yaw, DRAG_SETTLE_YAW, TARGET_TURN_RATE,
+                                    SecondsToTicks(dt));
   }
 
   // The tail — `0x0045C1AD`, reached from sub 0, 1, 2 and 3 alike, and on the

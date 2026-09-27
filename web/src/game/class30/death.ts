@@ -30,7 +30,10 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, CountFlag, ZombieFlag2, type ZombieActor } from "../actor";
+import {
+  ActorFlag, CountFlag, MotionFlag, ZombieFlag2, type ZombieActor,
+} from "../actor";
+import { ActorSetPartVisibility } from "../model_draw";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
@@ -67,17 +70,6 @@ const CORPSE_BLINK_TYPES: readonly number[] = [0x12, 3];
  * reader should see that it was seen.
  */
 const CORPSE_UNREAD_BIT = 0x8000;
-
-/**
- * `obj+0x34 |= 0x80000` — raised with {@link ActorFlag.Airborne} by both
- * corpse states (`OR EAX, 0xa0000`).
- *
- * `[likely]` it suppresses the ground decal: `FUN_0040A590` is
- * `if (!(obj+0x34 & 0x80000) && (obj+0x1F8 & 1)) FUN_0040A620(obj, w, h)` with
- * two sizes per character type, and it is the only reader found. The port does
- * not draw one, so this write has no consequence here.
- */
-const CORPSE_NO_DECAL_BIT = 0x80000;
 
 /** `ZombieStateDeathFallAndBounce`'s `obj+0x5C` — `0xbd16872b` = -0.03675f. */
 const BOUNCE_GRAVITY = -0.03675;
@@ -389,8 +381,9 @@ function ZombieCorpseBegin(obj: ZombieActor): void {
   // `ZombieFlag2.HitReactionAlt` used to name this instruction as the thing
   // that clears bit 0x100; `0xdffffdff` has bit 8 set, so it does not.
   obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.HitReactionPending);
-  // `OR EAX, 0xa0000` — off the floor for the sink, and no ground decal.
-  obj.flags |= ActorFlag.Airborne | CORPSE_NO_DECAL_BIT;
+  // `OR EAX, 0xa0000` — off the floor for the sink, and no ground shadow:
+  // `ActorDrawShadow` (`FUN_0040A590`) tests `0x80000` first.
+  obj.flags |= ActorFlag.Airborne | ActorFlag.NoShadow;
   obj.zom.corpseTimer = CORPSE_FRAMES;
   // `obj+0x1350 = obj+0x68` — the spawn yaw stashed in the field the port
   // calls `landSurface`. `[open]`: nothing in the ported call graph reads it
@@ -454,26 +447,47 @@ export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
  * `ZombieStateCorpseBlink` — `FUN_00454FD0`, class 0x30 state 8. Character
  * types 0x12 and 3 only.
  *
- * The same two seconds without the sink: the countdown's **parity** drives the
- * whole skinned model's per-part draw flag through `FUN_00409D10`, which walks
- * `model+0x3C` parts and writes the byte at `model+0x40 + i*8 - 7`. `obj+0x1F8`
- * bit 0 takes the same value and is what `FUN_0040A590` reads before it draws
- * the ground decal.
+ * The same two seconds without the sink: the countdown's **parity** is the
+ * whole body's visibility, and it is written to the two places the draw reads
+ * it from — `obj+0x1F8` bit 0, which is {@link MotionFlag.Drawn} and
+ * gates every node of the skeleton, and every part's byte through
+ * `ActorSetPartVisibility` (`FUN_00409D10`), which gates the waist:
  *
- * [diverges] The port has one draw alpha per actor rather than a byte per
- * part, which is `ThrowerStateCorpse`'s answer to the same routine.
+ * ```
+ * 0045502f  AND  ECX, 0x80000001 / JNS ...   ; obj+0x1330 % 2, signed
+ * 00455042  JZ   0x00455057                  ; even:
+ * 00455057  OR   EDI, 0x1 / PUSH 0x1         ;   obj+0x1F8 |= 1, and 1
+ * 00455044  AND  EDI, 0xfffffffe / PUSH 0x0  ; odd: obj+0x1F8 &= ~1, and 0
+ * 00455069  CALL 0x00409d10                  ; ActorSetPartVisibility(model, _)
+ * 0045508c  AND  EDX, 0xfffffffe             ; at the end: both closed ...
+ * 00455096  CALL 0x00409d10                  ; ... (model, 0), then despawn
+ * ```
+ *
+ * `[proved]`. Parity is read before the decrement and the count starts at
+ * `0x78`, so the first frame is drawn. The last frame is **hidden**, not
+ * shown: at the end the routine clears both gates before it despawns.
+ *
+ * Neither is an alpha, and nothing of the actor's `obj+0x138C` is involved.
+ * Class 0x31's corpse blinks another way — `ThrowerStateCorpseBlink` writes
+ * that alpha and `obj+0x136C` bit 2 for its hook to draw at — so the two are
+ * not the same answer to one routine.
  */
 export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
-  // Parity is read **before** the decrement, so the first frame is visible.
-  obj.alpha = (Math.floor(obj.zom.corpseTimer) & 1) ? 0 : 1;
+  // `& 0x80000001` with the sign fix-up is `timer % 2`, and the timer is a
+  // positive count here, so even is the low bit clear.
+  const even = (Math.floor(obj.zom.corpseTimer) & 1) === 0 ? 1 : 0;
+  if (even) obj.motionFlags |= MotionFlag.Drawn;
+  else obj.motionFlags &= ~MotionFlag.Drawn;
+  ActorSetPartVisibility(obj, even);
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
   if (obj.zom.corpseTimer >= 1) return;
-  obj.alpha = 1;
+  obj.motionFlags &= ~MotionFlag.Drawn;
+  ActorSetPartVisibility(obj, 0);
   ZombieCorpseLeave(obj);
 }
 

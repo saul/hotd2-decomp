@@ -40,7 +40,7 @@ import {
   ActorArcBegin, ActorArcStep, ArcPhase, InstallArcMotionScript,
 } from "../class31/arc";
 import {
-  FirstBakedOf, MotionPlayFrame, MotionPlayLength, MotionRowOf, T,
+  MotionPlayFrame, MotionPlayLength, MotionRowOf, T,
 } from "../tables";
 import { ActorSetMotion, ActorSetMotionBlended, ZombieSetMotionIfIdle }
   from "./motion_cue";
@@ -232,9 +232,7 @@ export function ZombieStateRunInPlaceTimed(obj: ZombieActor, dt: number,
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — the run pair, the same selection
   // `ZombieStateAttackRun` and `ZombieStateWalkDistance` make.
-  const motion = ZombieRunMotion(obj, row) ?? FirstBakedOf(obj, row,
-                                        MotionRow.Run, MotionRow.RunAlt,
-                              MotionRow.Walk, MotionRow.WalkAlt);
+  const motion = ZombieRunMotion(obj, row);
 
   if (obj.sub === 0) {
     obj.zom.holdFrames = obj.entry?.frames ?? 0;
@@ -414,8 +412,7 @@ export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
   }
 
   const row = MotionRowOf(obj);
-  ZombieSetMotionIfIdle(obj, FirstBakedOf(obj, row, MotionRow.Walk), rng, 5,
-                        MotionFade.Normal);
+  ZombieSetMotionIfIdle(obj, row[MotionRow.Walk], rng, 5, MotionFade.Normal);
 
   const carrier = G.g_carrier_object >= 0
     ? ActorByAt(G.g_carrier_object) : undefined;

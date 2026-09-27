@@ -106,13 +106,6 @@ const PITCH_STEP = 0x100;
  */
 const ARC_TARGET_VETO = 0x10;
 
-/**
- * `obj+0x34 |= 0x80000` at 0x0045546A — the same bit both corpse states raise,
- * and `[likely]` the ground-decal suppressor. See `class30/death.ts`'s
- * `CORPSE_NO_DECAL_BIT`, which cites the one reader found.
- */
-const NO_DECAL_BIT = 0x80000;
-
 /** `g_coli_hit_surface` — the two wet materials, which have no ground height
  *  of their own and no bounce. */
 const SURFACE_WATER = 5;
@@ -325,7 +318,9 @@ export function ZombieStateDeathKnockbackArc(obj: ZombieActor, dt: number, rng: 
     obj.vel.y *= BOUNCE_NORMAL;
     return;
   }
-  if (water) obj.flags |= NO_DECAL_BIT;
+  // `obj+0x34 |= 0x80000` at 0x0045546A -- the bit both corpse states raise,
+  // and what `ActorDrawShadow` (`FUN_0040A590`) tests before the disc.
+  if (water) obj.flags |= ActorFlag.NoShadow;
   ClearCurrentActorVelocityAndAccel(obj);
   ZombieEnterCorpseState(obj);
 }

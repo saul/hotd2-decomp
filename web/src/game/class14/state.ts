@@ -218,7 +218,7 @@ export interface Boss2Tail {
   /** `+0x88` — flipbook B, whose frame **is the damage window**. */
   bookB: Class14Flipbook;
   /** `+0x94` s16 — the row of `g_class14_window_timing` B runs on, 0..7. */
-  window: number;
+  timing: number;
   /** `+0x96` s8 — the adaptive rank, 0..15; `+0x97` the pending bump. */
   rank: number;
   rankBump: number;
@@ -253,8 +253,8 @@ function makeFlipbook(): Class14Flipbook {
 }
 
 /**
- * `ActorAllocSub(0xBC)` — zeroed, which is why the phase at `+0x08` starts at
- * 0 without Init writing it.
+ * `[port-only]` `ActorAllocSub(0xBC)`'s block — zeroed, which is why the phase
+ * at `+0x08` starts at 0 without Init writing it.
  */
 export function makeBoss2Tail(): Boss2Tail {
   return {
@@ -275,7 +275,7 @@ export function makeBoss2Tail(): Boss2Tail {
     legs: [0, 0, 0, 0, 0, 0],
     bookA: makeFlipbook(),
     bookB: makeFlipbook(),
-    window: 0,
+    timing: 0,
     rank: 0,
     rankBump: 0,
     lives: [0, 0],

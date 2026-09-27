@@ -12,14 +12,14 @@ import type {
 } from "../../bundle/characters";
 import { T } from "../tables";
 
-/** The whole block, or null for a bundle written before it existed. */
+/** `[port-only]` The whole block, or null for a bundle written before it existed. */
 export function Class14Tables(): Class14Json | null {
   const t = T.chars?.class14;
-  return t && "anim_slots" in t ? t : null;
+  return t && "anim_slots" in t ? t as Class14Json : null;
 }
 
 /**
- * `g_class14_anim_slots[slot]` — `0x00596408`, 30 pointers into
+ * `[port-only]` accessor: `g_class14_anim_slots[slot]` — `0x00596408`, 30 pointers into
  * `g_class14_anim_cues` (`0x0059626C`). The first short of each record is the
  * motion.
  */
@@ -27,19 +27,19 @@ export function Class14AnimSlot(slot: number): Class14AnimCue | null {
   return Class14Tables()?.anim_slots[slot] ?? null;
 }
 
-/** `*(s16 *)g_class14_anim_slots[slot]` — the motion an anim slot names. */
+/** `[port-only]` `*(s16 *)g_class14_anim_slots[slot]` — the motion an anim slot names. */
 export function Class14AnimMotion(slot: number): number {
   return Class14AnimSlot(slot)?.motion ?? 0;
 }
 
-/** `g_class14_window_timing[row]` — `0x005965C0`, 8 rows of 12 bytes. */
+/** `[port-only]` `g_class14_window_timing[row]` — `0x005965C0`, 8 rows of 12 bytes. */
 export function Class14WindowTimingRow(row: number): Class14WindowTiming {
   return Class14Tables()?.window_timing[row]
     ?? { open_hold: 0, shut_hold: 0, open_rate: 1, close_rate: -1 };
 }
 
 /**
- * `g_class14_damage_cones[i]` — `0x00596480`, 40 rows of
+ * `[port-only]` accessor: `g_class14_damage_cones[i]` — `0x00596480`, 40 rows of
  * `{maxYaw, rotX, minPitch, maxPitch}` s16, by the weak point's frame less
  * its first. Rows 0..18 are all zero: the window is shut.
  */
@@ -47,13 +47,13 @@ export function Class14DamageCone(i: number): [number, number, number, number] {
   return Class14Tables()?.damage_cones[i] ?? [0, 0, 0, 0];
 }
 
-/** `g_class14_phase_hp_frac[phase]` — `0x00596670`, ten floats. */
+/** `[port-only]` `g_class14_phase_hp_frac[phase]` — `0x00596670`, ten floats. */
 export function Class14PhaseHpFrac(phase: number): number {
   return Class14Tables()?.phase_hp_frac[phase] ?? 0;
 }
 
 /**
- * `g_class14_bone_damage[rank][players - 1]` — `0x00596698`, read through
+ * `[port-only]` accessor: `g_class14_bone_damage[rank][players - 1]` — `0x00596698`, read through
  * `[EAX + EDX*2 + 0x596697]` with `EAX = g_players_in_play` and `EDX` the
  * rank: the player count is folded into the base, so one player reads
  * column 0.
@@ -64,7 +64,7 @@ export function Class14BoneDamage(rank: number, players: number): number {
 }
 
 /**
- * `g_class14_summon_counts[rank*3 + round]` — `0x00596640`. Read with the
+ * `[port-only]` accessor: `g_class14_summon_counts[rank*3 + round]` — `0x00596640`. Read with the
  * round counter `+0x9C` **after** the decrement, so its column 0 is the last
  * round, not the first.
  */
@@ -72,12 +72,12 @@ export function Class14SummonCount(rank: number, round: number): number {
   return Class14Tables()?.summon_counts[rank]?.[round] ?? 0;
 }
 
-/** `g_class14_summon_delays_a[rank]` — `0x00596620`. Frames between fish. */
+/** `[port-only]` `g_class14_summon_delays_a[rank]` — `0x00596620`. Frames between fish. */
 export function Class14SummonDelayA(rank: number): number {
   return Class14Tables()?.summon_delays_a[rank] ?? 0;
 }
 
-/** `g_class14_summon_delays_b[rank]` — `0x00596630`. */
+/** `[port-only]` `g_class14_summon_delays_b[rank]` — `0x00596630`. */
 export function Class14SummonDelayB(rank: number): number {
   return Class14Tables()?.summon_delays_b[rank] ?? 0;
 }

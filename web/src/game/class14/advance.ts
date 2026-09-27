@@ -263,7 +263,7 @@ function Class14StepBookB(obj: Actor, t: Boss2Tail): void {
     B.hold = -1;
   } else {
     B.frame = FtolS16(B.frame + B.rate);
-    const row = Class14WindowTimingRow(t.window);
+    const row = Class14WindowTimingRow(t.timing);
     if (B.frame >= B.high) {
       B.frame = B.high;
       B.hold = row.open_hold;

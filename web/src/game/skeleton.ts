@@ -701,3 +701,57 @@ export function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
   MatCopy(skel.rootMat, top);
   for (const c of tree.children[0]) SkeletonEmitNode(obj, skel, tree, c, top, 0);
 }
+
+/**
+ * `ActorShiftToHoldBone1Position` — `FUN_0045CE70`. Called where a state has
+ * just put a new motion in `+0x20` and a cursor in `+0x08`: moves the actor
+ * so that bone 1 stays where the last draw put it.
+ *
+ * ```
+ * f  = MotionFrameAddress(type, +0x20, +0x08 / 2)
+ * P1 = translation of cam * R(1)+0x28                  ; bone 1, drawn
+ * P2 = translation of T(pos) RotX(pitch) RotZ(roll) RotY(yaw)
+ *                     T(f.root) RotZ(f.a2) RotY(f.a1) RotX(f.a0)
+ *                     T(first root node's offset)      ; bone 1, new clip
+ * pos += P1 - P2;  +0x6C = f.root
+ * ```
+ *
+ * Both points are world space: `cam * R(1)` is how every reader takes the
+ * view-space record to world, and `P2` is built from the actor's own world
+ * position. The actor's rotation goes on in X, Z, Y whatever `+0x68` says,
+ * the root's full translation goes on (not the root-motion `(0, y, 0)`), and
+ * nothing is scaled -- that is the routine. Its callers here are class 0x14's
+ * deaths (`0x0047BD95`, `0x0047C3A9`); class 0x30's drag (`0x0045C25A`) and
+ * class 0x19's (`0x004955E7`) have no model block in the port.
+ */
+export function ActorShiftToHoldBone1Position(obj: Actor): void {
+  const skel = obj.skel;
+  const tree = TreeOf(obj);
+  if (!skel || !tree) return;
+  const m = MotionOf(obj, skel.motion);
+  const b1 = skel.bones[SKELETON_TRACKED_BONE];
+  const node = tree.children[0][0];
+  if (!m || !b1 || node === undefined) return;
+  const f = Math.trunc(skel.cursor / 2);
+  const root = FrameRoot(m, f);
+  const a = FrameAngles(m, tree.boneCount, f, 0);
+  const P1 = { x: 0, y: 0, z: 0 };
+  MatrixGetTranslation(b1.mat, P1);
+  const top = MatIdentity();
+  MatrixTranslate(top, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixRotateX(top, obj.pitch);
+  MatrixRotateZ(top, obj.roll);
+  MatrixRotateY(top, obj.yaw);
+  MatrixTranslate(top, root[0], root[1], root[2]);
+  MatrixRotateZ(top, a[2]);
+  MatrixRotateY(top, a[1]);
+  MatrixRotateX(top, a[0]);
+  const off = tree.offset[node];
+  MatrixTranslate(top, off[0], off[1], off[2]);
+  const P2 = { x: 0, y: 0, z: 0 };
+  MatrixGetTranslation(top, P2);
+  obj.pos.x = Math.fround((P1.x - P2.x) + obj.pos.x);
+  obj.pos.y = Math.fround((P1.y - P2.y) + obj.pos.y);
+  obj.pos.z = Math.fround((P1.z - P2.z) + obj.pos.z);
+  skel.rootCur = [...root];
+}

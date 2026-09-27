@@ -44,8 +44,7 @@ import { G } from "../globals";
 import type { GameHost } from "../host";
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixInvert, MatrixRotateX,
-  MatrixTransformPoint, MatrixTransformVector, MatrixTranslate, RADIANS_TO_BAMS,
-  FtolS16,
+  MatrixTransformPoint, MatrixTranslate, RADIANS_TO_BAMS, FtolS16,
 } from "../matrix";
 import { SpawnClass } from "../spawn_class";
 import { vec3, type Vec3 } from "../vec";
@@ -78,11 +77,11 @@ const WINDOW_MAX = 7;
 
 const _p = vec3();
 const _pv = vec3();
-const _dv = vec3();
+const _e = vec3();
+const _ov = vec3();
+const _ev = vec3();
 const _w = vec3();
 const _l = vec3();
-const _w2v = MatIdentity();
-const _v2w = MatIdentity();
 
 function Tail(obj: Actor): Boss2Tail | null {
   return obj.cls === SpawnClass.Boss2 ? obj.boss2 : null;
@@ -109,25 +108,35 @@ export function Class14SpawnNoDamageHitEffect(obj: Actor, bone: number,
  * Gate 1: `RayTestSphere(player, P, 3.5) >= 0` with `P` the translation of
  * bone 1's **view** matrix times `Translate(0, 4.0, 1.0)`.
  *
- * `[port-only]` as a function, and in how it gets its numbers: the bone's
- * matrix is world here, so `P` goes to view space through the host's
- * `g_camera_world_to_view`, and the shot's four angles are `BuildShotRay`'s
- * from the view-space direction of the ray the player fired. Without a
- * camera there is no view space and no hit -- the engine is never without
- * one.
+ * `[port-only]` in how it gets its numbers, and the same way the port's
+ * `ProcessPlayerShotsTestList` gets them (`combat/shot_test.ts`): the bone's
+ * matrix is world here, so `P` and the fired ray go to view space through
+ * the host's camera, the ray's direction becomes `BuildShotRay`'s four
+ * angles, and `P` is measured from the eye, where the engine's line starts.
+ * Without a camera there is no view space and no hit -- the engine is never
+ * without one.
  */
 function Class14WeakPointInReach(W1: ArrayLike<number>, player: number,
                                  host: GameHost | undefined): boolean {
   const ray = G.g_crosshair_ray[player];
-  if (!ray || !host?.cameraMatrices?.(_w2v, _v2w)) return false;
+  const toView = host?.viewSpaceOfPoint;
+  if (!ray || !toView) return false;
   const m = MatCopy(MatIdentity(), W1);
   MatrixTranslate(m, WEAK_POINT_OFFSET.x, WEAK_POINT_OFFSET.y,
                   WEAK_POINT_OFFSET.z);
   MatrixGetTranslation(m, _p);
-  MatrixTransformPoint(_w2v, _p, _pv);
-  MatrixTransformVector(_w2v, ray.dir, _dv);
-  const a = ShotRayAnglesFromView(_dv);
-  return RayTestSphere(a, _pv.x, _pv.y, _pv.z, WEAK_POINT_RADIUS) >= 0;
+  _e.x = ray.origin.x + ray.dir.x;
+  _e.y = ray.origin.y + ray.dir.y;
+  _e.z = ray.origin.z + ray.dir.z;
+  if (!toView(_p, _pv) || !toView(ray.origin, _ov) || !toView(_e, _ev)) {
+    return false;
+  }
+  const dx = _ev.x - _ov.x, dy = _ev.y - _ov.y, dz = _ev.z - _ov.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (!(len > 0)) return false;
+  const a = ShotRayAnglesFromView({ x: dx / len, y: dy / len, z: dz / len });
+  return RayTestSphere(a, _pv.x - _ov.x, _pv.y - _ov.y, _pv.z - _ov.z,
+                       WEAK_POINT_RADIUS) >= 0;
 }
 
 /**
@@ -262,8 +271,8 @@ export function Class14ApplyBoneDamage(obj: Actor, bone: number,
     events?.emit("sound.play", { id: Class14Sound.React });
   }
   // `ADD word ptr [EAX + 0x94], 2; CMP 8; JL` -- then 7.
-  t.window += WINDOW_STEP;
-  if (t.window >= WINDOW_MAX + 1) t.window = WINDOW_MAX;
+  t.timing += WINDOW_STEP;
+  if (t.timing >= WINDOW_MAX + 1) t.timing = WINDOW_MAX;
 }
 
 /**

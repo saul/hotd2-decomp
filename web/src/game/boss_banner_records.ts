@@ -127,6 +127,47 @@ export const BOSS_INTRO_BANNERS: Readonly<Record<number, BossIntroBannerRecord>>
   },
 };
 
+/**
+ * The card backs, `PUSH 0x7ed` / `PUSH 0x7ee` at `0x00437BBF`/`0x00437BC9`:
+ * `etc_2.bin`. Card 0 draws the first and every card but 0 and 6 the second.
+ */
+export const BANNER_CARD_BACK_FIRST = 0x7ed;
+export const BANNER_CARD_BACK = 0x7ee;
+
+/**
+ * Which records each spawn class hands `BossIntroBannerSpawn`, by the call
+ * site: `Boss4StateEntranceCarried`/`Dropped` (0x19), `Class22Init` (0x22),
+ * `Class14StateEntranceA`/`B` (0x14), `0x00426B4B` (0x2D) and `Class32Init`
+ * (0x32). The seven `get_xrefs_to 0x00437A70` returns, and no others.
+ */
+export const BANNER_RECORDS_BY_CLASS:
+    Readonly<Record<number, readonly number[]>> = {
+  0x14: [0x005966b8, 0x005966f8],
+  0x19: [0x005972f8, 0x00597338],
+  0x22: [0x00570ec8],
+  0x2d: [0x005898c8],
+  0x32: [0x00596ac0],
+};
+
+/**
+ * `[port-only]` -- every model a banner could draw in a stage whose script
+ * spawns `classes`:
+ * the two card backs and each record's boss card. The exporter's list for
+ * the view-space rig `render/effects.ts` draws the cards from.
+ */
+export function bannerCardSlots(classes: Iterable<number>): number[] {
+  const out: number[] = [];
+  for (const cls of classes) {
+    for (const r of BANNER_RECORDS_BY_CLASS[cls] ?? []) {
+      const rec = BOSS_INTRO_BANNERS[r];
+      for (const s of [BANNER_CARD_BACK_FIRST, BANNER_CARD_BACK, rec.cardSlot]) {
+        if (!out.includes(s)) out.push(s);
+      }
+    }
+  }
+  return out;
+}
+
 /** Every name sprite a banner can draw -- the exporter's list. */
 export const BOSS_BANNER_SPRITES: readonly number[] = [
   ...new Set(Object.values(BOSS_INTRO_BANNERS)

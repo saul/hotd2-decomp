@@ -41,7 +41,8 @@ import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
 // from, as data, and the exporter must put exactly those textures in.
 import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
 // ...and the boss-name banner's, whose record table is data in the same way.
-import { BOSS_BANNER_SPRITES } from "../game/boss_banner_records";
+import { BOSS_BANNER_SPRITES, bannerCardSlots }
+  from "../game/boss_banner_records";
 // And the game-over screen's: its logo sprites are immediates in
 // `GameOverLogoTask`, its route tiles are `.rdata` read below.
 import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
@@ -1593,6 +1594,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the game-over route map's: the figures' ground disc and the two
     // footprints, drawn in view space by `render/game_over_scene.ts`.
     ROUTE_FIGURE_SHADOW_SLOT, ...ROUTE_MARK_SLOTS,
+    // ...and the boss-name banner's cards, for the classes this stage spawns
+    // that make one: drawn in view space too, by `render/effects.ts`.
+    ...bannerCardSlots(spawnRecords.map((r) => r.cls)),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.

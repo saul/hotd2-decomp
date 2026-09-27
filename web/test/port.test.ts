@@ -217,6 +217,7 @@ import { BOSS_HP_BAR_KILL, BossHpBarSpawn, BossHpBarsTick, BossHpFractionOf }
   from "../src/game/boss_hp_bar";
 import { BannerStep, BossBannersTick, BossIntroBannerSpawn }
   from "../src/game/boss_banner";
+import { bannerCardSlots } from "../src/game/boss_banner_records";
 import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
   ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
   from "../src/game/screen_sprite";
@@ -19188,6 +19189,12 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   ResetGameGlobals();
   check("a scene reset takes the banner and its hold on the camera with it",
         G.g_boss_banners.length === 0 && G.g_camera_driver_held === 0);
+  check("the exporter ships each spawning class's cards: the two backs and "
+        + "the boss's own, and nothing for a class with no banner",
+        bannerCardSlots([0x19]).join() === [0x7ed, 0x7ee, 0x1873].join()
+        && bannerCardSlots([0x22, 0x14]).join()
+           === [0x7ed, 0x7ee, 0x181d, 0x1821].join()
+        && bannerCardSlots([0x45, 0x30]).length === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

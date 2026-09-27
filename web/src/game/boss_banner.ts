@@ -33,11 +33,12 @@
  *
  * All of the state and the camera flight, and the two name sprites. The cards
  * are plain data here -- position, yaw and scale per card, and the slot each
- * draws -- because `AssetDrawSlot` is the render side's; nothing in `render/`
- * draws them yet. `[diverges]` visual only: the cards are never drawn. The
- * per-card `FUN_004759C0(yaw)` call, which rewrites a float in each entry of a
- * render-state list at `0x009AE584` from `sin(yaw)`, is the renderer's too and
- * is `[open]`.
+ * draws -- and `render/effects.ts` draws them from it in the camera's space,
+ * which is where `MatrixLoadIdentity` puts them. The per-card
+ * `FUN_004759C0(yaw)` call, which rewrites a float in each entry of a
+ * render-state list at `0x009AE584` from `sin(yaw)`, is the renderer's and is
+ * `[open]`: `[diverges]` visual, whatever it changes on a card is not
+ * changed.
  *
  * ## Why this is a pool in `G`
  *
@@ -51,13 +52,13 @@ import { G } from "./globals";
 import type { GameHost } from "./host";
 import type { CamPose } from "./camera/curve";
 import {
-  BOSS_INTRO_BANNERS, type BossIntroBannerRecord,
+  BANNER_CARD_BACK, BANNER_CARD_BACK_FIRST, BOSS_INTRO_BANNERS,
+  type BossIntroBannerRecord,
 } from "./boss_banner_records";
 import { vec3, type Vec3 } from "./vec";
 
-/** The card-back slots, `PUSH 0x7ed` / `PUSH 0x7ee` at `0x00437BBF`. */
-export const BANNER_CARD_BACK_FIRST = 0x7ed;
-export const BANNER_CARD_BACK = 0x7ee;
+export { BANNER_CARD_BACK, BANNER_CARD_BACK_FIRST } from "./boss_banner_records";
+
 /** Eight cards, `CMP ECX, 0x8` at `0x00437BAE`; the boss's is the seventh. */
 export const BANNER_CARDS = 8;
 const BOSS_CARD = 6;
@@ -286,7 +287,8 @@ function BannerSlide(b: BossBanner, rec: BossIntroBannerRecord,
     }
   }
   // Then all eight are drawn -- `FUN_004759C0(yaw)`, identity, translate,
-  // yaw, scale, `AssetDrawSlot(slot)` -- which is the render side's.
+  // yaw, scale, `AssetDrawSlot(slot)` -- which `render/effects.ts` does from
+  // this state, in its camera-space group.
 }
 
 /**

@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 61008 | 211 | engine |
-| `hod2lib/` | 17198 | 34 | engine |
-| `render/` | 11246 | 37 | render |
+| `game/` | 61051 | 211 | engine |
+| `hod2lib/` | 17202 | 34 | engine |
+| `render/` | 11277 | 37 | render |
 | `app/` | 7795 | 29 | app |
 | `script/` | 4808 | 27 | engine |
 | `ui/` | 3161 | 27 | ui |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 943 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **109349** | **387** | |
+| **total** | **109427** | **387** | |
 
 The largest files, which is where the pressure to split next is:
 

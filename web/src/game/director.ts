@@ -33,6 +33,7 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
+import { Boss3TasksTick } from "./class45/tasks";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -725,6 +726,9 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // here, with the camera driver parked so nothing above undoes it.
   BossBannersTick(host);
   BossHpBarsTick();
+  // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
+  // bulge and the wake -- allocated by its actors above, so after them.
+  Boss3TasksTick(events);
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the

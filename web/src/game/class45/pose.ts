@@ -151,7 +151,9 @@ export function Boss3ComposeBonePose(obj: Boss3Actor): void {
         }
         break;
       case Boss3HeadState.Attack: {
-        let apply = true;
+        // A zero hit frame skips the division (`0x00422136`), and `t` is then
+        // the last one computed -- which is what the unwritten frame slot
+        // holds, so it carries over from the bone before.
         let skipExtras = false;
         const cur = t.cursor;
         const hit = blk.hitFrame;
@@ -159,21 +161,18 @@ export function Boss3ComposeBonePose(obj: Boss3Actor): void {
         if (idx === 2) {
           skipExtras = true;
         } else if (idx === 1 || idx === 3) {
-          if (hit > cur) {
-            if (hit === 0) apply = false; else tt = Math.fround(cur / hit);
-          } else if (hit === 0) apply = false;
-          else tt = Math.fround((len - cur) / (len - hit));
+          if (hit !== 0) {
+            tt = hit > cur ? Math.fround(cur / hit)
+              : Math.fround((len - cur) / (len - hit));
+          }
         } else if (cur > ATTACK_HOLD_CURSOR && cur < hit) {
-          if (hit === 0) apply = false;
-          else tt = Math.fround((cur - ATTACK_HOLD_CURSOR)
-                                / (hit - ATTACK_HOLD_CURSOR));
+          tt = Math.fround((cur - ATTACK_HOLD_CURSOR)
+                           / (hit - ATTACK_HOLD_CURSOR));
         } else if (hit > cur) {
           skipExtras = true;
-        } else if (hit === 0) apply = false;
-        else tt = Math.fround((len - cur) / (len - hit));
-        // `0x00422136`: a `t` that was not recomputed is the last one, which
-        // is what the unwritten frame slot holds.
-        void apply;
+        } else if (hit !== 0) {
+          tt = Math.fround((len - cur) / (len - hit));
+        }
         if (!skipExtras) {
           blk.extraX[i] = Ftol(b * tt);
           blk.extraY[i] = Ftol(a * tt);

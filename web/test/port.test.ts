@@ -10659,6 +10659,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.PropContainerPlacer, "0x41 prop container placer"],
     [SpawnClass.FlyingEnemy, "0x43 owl"],
     [SpawnClass.PropPlacer, "0x44 prop placer"],
+    [SpawnClass.Boss3, "0x45 stage-3 boss"],
     [SpawnClass.HordeSpawner, "0x40 horde"],
     [SpawnClass.Bat, "0x46 bat"],
     [SpawnClass.WaterEnemy, "0x51 fish"],

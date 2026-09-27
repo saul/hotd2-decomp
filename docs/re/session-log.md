@@ -19408,3 +19408,44 @@ Named: `RouteFigureTick`, `RoutePartnerTick`, `RouteMarkSpawn`, `RouteMarkTick`,
 `RouteCameraTaskCreate`, `SpawnRouteMapTask`; `g_route_count`,
 `g_route_map_tiles`, `g_route_waypoints`, `g_route_default`, and the walk's
 `0x007DCCD8`..`0x007DCCFE`.
+
+## 2026-09-27 -- JUDGMENT (classes 0x22 and 0x23), read for the port
+
+Phase 1 of the boss port: the whole of classes 0x22 and 0x23 read, named and
+written up in [`boss-judgment.md`](boss-judgment.md); no TypeScript.
+
+* Class 0x22 is the small flier (character type 0x45, `_ZE`/`_ZEA` voice
+  files, *"The small one must be the brain!?"*), class 0x23 the large walker
+  (0x44). The walker never loses hit points outside Training; each hit on it
+  adds 1 to the flier's `obj+0x132C`, which the flier's phase-1 damage step
+  subtracts in four of its fourteen sub-states and otherwise discards.
+* `obj+0x1310` is relative: the three variant updates index
+  `g_class22_states` from `0x598000`, `0x598008` and `0x598018`.
+* The gates: `wait_script_flag 3` (stage 1 blocks 14/16) is opened at
+  `0x0049CC95`, `wait_script_flag 0` (stage 5 block 1) at `0x0049CC85`, both
+  in `Class22Death` sub 5, 300 frames into the death orbit. The banner
+  (variant 1 only) waits on `g_script_flags[2]`, which the ride-in raises at
+  camera frame 830.
+* Stage 5 flies `op_st1` paths: the engine's per-scene cam list
+  (`0x004C4990`) loads `op_st1` in scene 4, and the web loader does not.
+
+Wrong turns:
+
+* The brief said the four spawns were opcode `0x09` and asked how `0x09`
+  reaches `obj+0x1390`. It does not: `dump_stage_script.py` prints opcode
+  `0x0B` as `spawn_obj` and `0x09` as `spawn_placed`; the evt table at
+  `0x005931D8` settles it (entry 9 `0x004088A0`, entry `0xB` `0x00408AA0`).
+* An earlier, abandoned session's names were kept where the code agreed and
+  changed where it did not: `Class22AdvanceAndSeatRider` is the draw, not an
+  advance (the callers advance `obj+0x194`), so it is
+  `Class22DrawAndPoseSubActor`; `Class23StateShared1`/`Class23Subtype2State1`
+  are `Class23FightBesideCompanion`/`Class23TrainingFightAlone`. Its notes had
+  variant 3 as unused (it is `advevtbl.bin`'s) and phase 2 as setting
+  `obj+0x1310` to 5 (it writes 3, relative).
+* Four routines are truncated at a `MatrixStackPop` in Ghidra (L35): the
+  draw, `Class22FightPhase1` (whose tail publishes `g_boss_hp_fraction` and
+  registers the shot), `Class22Death` (`CamBlockSetAnglesFromLookAt`) and
+  `Class22Phase1TakeShots`. The draw's hidden half is the whole sub-actor.
+
+Named: every routine of both classes (Ghidra had no function at `0x00490B00`,
+`0x00490D00` or `0x0049D980`), three renamed, and their tables; see the TSVs.

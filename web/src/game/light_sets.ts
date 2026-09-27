@@ -20,7 +20,7 @@
  * | `FrogDrawAndCycleBone2Slot` (`FUN_0043A440`) | 0x11 |
  * | `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) | 0x14 |
  * | `OneHitTargetUpdate` and its three states (`FUN_00449020`..) | 0x20 |
- * | `Class22AdvanceAndSeatRider` (`FUN_0049D770`) | 0x22 |
+ * | `Class22DrawAndPoseSubActor` (`FUN_0049D770`) | 0x22 |
  * | `SetPiecePropDrawAndTick` (`FUN_004834F0`) | 0x24 |
  * | `ScriptedHumanoidDraw` (`FUN_00484FF0`) | 0x25 |
  * | `HordeMemberUpdate` (`FUN_0043C440`), `HordeDeformedPropUpdate` (`FUN_0043F010`) | 0x40, members and the rug |

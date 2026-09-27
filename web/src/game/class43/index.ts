@@ -60,9 +60,14 @@
  * leaves the four sets of literals out. The corpse lands at the wrong height
  * for 121 frames and then goes, which is the visible cost.
  *
- * `[diverges]` **The feathers, the impact ring and the splash.** Three
- * effect objects, each its own task with its own flipbook — 40 feathers on the
- * death and 8 on every strike. Their sounds are ported; the sprites are not.
+ * ## The effects
+ *
+ * Three effect tasks, in `game/effects/owl.ts`: the feathers
+ * (`OwlSpawnFeatherBurst`, `FUN_00448900`) -- 40 on the death and 8 on every
+ * strike -- the ground impact ring and the water splash. The death also leaves
+ * a spray of blood at the owl's camera-space point, `SpawnBloodSprayAtPoint`
+ * (`FUN_00430C50`). The ring and the splash are made only by the corpse's
+ * four landing arms, above, so they are ported and wait on those.
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
@@ -70,11 +75,14 @@ import { ActorFlag, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
+import { SpawnBloodSprayAtPoint } from "../effects/blood";
+import { OwlSpawnFeatherBurst } from "../effects/owl";
 import { G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { vec3 } from "../vec";
 import { OwlDiveKind, OwlState, type OwlTail } from "./state";
 
 export { OwlDiveKind, OwlState } from "./state";
@@ -174,7 +182,6 @@ export const OWL_BODY_DEAD_SLOT = 0xbc0;
 /** `owl.bin` 4..33 — the thirty-frame beat, and the rest of the chain. */
 export const OWL_BEAT_FIRST_SLOT = 0xbc1;
 export const OWL_HEAD_FIRST_SLOT = 0xbf8;
-export const OWL_FEATHER_SLOT = 0xbf0;
 
 /** `COMMON2\FUKUROU1_22.wav` and `FUKUROU2_22.wav`, and the wing-flap cue. */
 export const SND_OWL_KILLED_A = 0x4117a9;
@@ -452,6 +459,13 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   if (sub.state === OwlState.Dead) return false;
   if (!(obj.flags & ActorFlag.Hit)) return false;
 
+  // `SpawnBloodSprayAtPoint(obj + 0x40)` at `0x00446123`, which reads 0x30
+  // past its argument: the owl's `obj+0x70`, its position through the camera
+  // as the end of its last update left it -- the owl has not moved yet this
+  // frame, and the host's camera is the one last drawn with.
+  const at = vec3();
+  f.host.viewSpaceOfPoint?.(obj.pos, at);
+  SpawnBloodSprayAtPoint(at);
   play(f.events, f.rng.int(2) !== 0 ? SND_OWL_KILLED_A : SND_OWL_KILLED_B);
   const byP0 = (obj.flags & ActorFlag.HitByPlayer0) !== 0;
   const byP1 = (obj.flags & ActorFlag.HitByPlayer1) !== 0;
@@ -478,6 +492,8 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   sub.timer = 0;
   sub.bounced = 0;
   sub.settled = 0;
+  // `0x004462E7`, the block's last call before it swaps `obj[0]`.
+  OwlSpawnFeatherBurst(OWL_FEATHERS_DEATH, obj, f.rng);
   return true;
 }
 
@@ -797,6 +813,8 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   sub.centreZ = Math.cos(a) * r + obj.pos.z;
   sub.orbitPhase = dir > 0 ? 0 : 0xffff;
   sub.strikeToggle = 1 - sub.strikeToggle;
+  // `0x00447605`: after the toggle, before the pull-out's `rand()`.
+  OwlSpawnFeatherBurst(OWL_FEATHERS_STRIKE, obj, f.rng);
   sub.fromX = obj.pos.x;
   sub.fromY = obj.pos.y;
   sub.fromZ = obj.pos.z;
@@ -934,10 +952,10 @@ export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
     OwlCorpseFallAndSettle(obj);
     return;
   }
-  if (OwlResolveShot(obj, f)) {
-    obj.flags &= ~ActorFlag.Hit;
-    return;
-  }
+  // **The death block falls through** (`0x004462EF` into `0x004462F5`): the
+  // state it has just set is 6, whose table entry is a bare `RET`, and the
+  // yaw below still steers on the frame the owl dies.
+  OwlResolveShot(obj, f);
   obj.flags &= ~ActorFlag.Hit;
   g_class43_states[sub.state]?.(obj, f);
 

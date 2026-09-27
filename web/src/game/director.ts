@@ -36,6 +36,9 @@ import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { FishEffectsTick } from "./effects/fish";
+import { OwlEffectsTick } from "./effects/owl";
+import { RingEffectsTick } from "./effects/ring_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -748,6 +751,12 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);
+  // ...and the owl's and the fish's, for the same reason: every one of them
+  // runs on the frame its actor made it, after that actor, and draws what it
+  // stepped to. See `game/effects/owl.ts`.
+  OwlEffectsTick(rng);
+  FishEffectsTick();
+  RingEffectsTick();
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the

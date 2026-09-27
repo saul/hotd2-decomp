@@ -194,9 +194,9 @@ export enum Boss3PoseHook {
   /** `Boss3BystanderPoseHook` (`FUN_004208F0`) -- the civilians'. */
   Bystander = 1,
   /**
-   * `FUN_00411050`, which `ActorBuildSkinnedModel` (`FUN_00410440`) installs
-   * at `0x00410522`: `NoOpStub(model+0x116C); AssetDrawSlot(node's slot)`.
-   * The opening head keeps it.
+   * `SkeletonDrawNodeSlot` (`FUN_00411050`), which `ActorBuildSkinnedModel`
+   * (`FUN_00410440`) installs at `0x00410522`: `NoOpStub(model+0x116C);
+   * AssetDrawSlot(node's slot)`. The opening head keeps it.
    */
   Default = 2,
 }

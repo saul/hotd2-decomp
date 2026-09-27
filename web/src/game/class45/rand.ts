@@ -19,6 +19,7 @@ const CRT_RAND_RANGE = 0x8000;
 /**
  * CRT `rand()` (`0x004ABE60`), drawn from the world's generator: a value in
  * `0..0x7FFF`, which every caller here then reduces itself.
+ * `[port-only]` as a function.
  */
 export function CrtRand(rng: Rng): number {
   return rng.int(CRT_RAND_RANGE);

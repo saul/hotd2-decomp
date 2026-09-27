@@ -33,11 +33,12 @@
 import type { Boss3Actor } from "../actor";
 import { MotionFlag } from "../actor";
 import {
-  MatIdentity, MatrixInterpolateSwingTwist, MatrixRotateX, MatrixRotateY,
+  MatIdentity, MatrixRotateX, MatrixRotateY,
   MatrixRotateZ, MatrixScale, MatrixToEulerZYX, MatrixTransformPoint,
   MatrixTranslate, type Mat,
 } from "../matrix";
 import { ApplyRootMotion } from "../root_motion";
+import { MatrixInterpolateSwingTwist, type Mat3 } from "../class44/swing_twist";
 import { CharacterTypeOf, MotionOf, MotionPlayLength } from "../tables";
 import type { BakedMotion, CharacterBone } from "../../bundle";
 import { BOSS3_MAX_BONES, Boss3PoseHook, type Boss3Tail } from "./state";
@@ -132,6 +133,8 @@ export function Boss3SetMotion(obj: Boss3Actor, clip: number): void {
  *
  * The counter itself is **not** touched: the blend runs on it, and
  * `Boss3DrawModel` rewrites it to `cursor + 1` on the frame the blend ends.
+ * `[port-only]` as a name: `ActorSetMotionBlended`'s writes, on the fields
+ * this class keeps.
  */
 export function Boss3SetMotionBlended(obj: Boss3Actor, clip: number,
                                       frame: number, fade: number): void {
@@ -182,7 +185,10 @@ export function Boss3SetMotionBlended(obj: Boss3Actor, clip: number,
   snapshot();
 }
 
-/** `INC dword ptr [model]` -- the one step the class's routines write. */
+/**
+ * `INC dword ptr [model]` -- the one step the class's routines write.
+ * `[port-only]` as a function: each routine makes it inline.
+ */
 export function Boss3ModelStep(obj: Boss3Actor): void {
   obj.boss3.modelFrame += 1;
   obj.playTicks = obj.boss3.modelFrame;
@@ -276,12 +282,20 @@ function Boss3PoseAngles(obj: Boss3Actor, m: BakedMotion,
     }
     RotZYX(a, t.slotA[o], t.slotA[o + 1], t.slotA[o + 2]);
     RotZYX(b, t.slotB[o], t.slotB[o + 1], t.slotB[o + 2]);
-    MatrixInterpolateSwingTwist(r, a, b, w);
+    const q = MatrixInterpolateSwingTwist(Mat3Of(a), Mat3Of(b), w);
+    r[0] = q[0]; r[1] = q[1]; r[2] = q[2];
+    r[4] = q[3]; r[5] = q[4]; r[6] = q[5];
+    r[8] = q[6]; r[9] = q[7]; r[10] = q[8];
     const e = MatrixToEulerZYX(r);
     t.boneRot[o] = e.rx;
     t.boneRot[o + 1] = e.ry;
     t.boneRot[o + 2] = e.rz;
   }
+}
+
+/** A 4x4's rotation rows, as the 3x3 `class44/swing_twist.ts` works in. */
+function Mat3Of(m: Mat): Mat3 {
+  return [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
 }
 
 /** `LoadIdentity; RotateZ; RotateY; RotateX` -- a slot's rotation. */
@@ -368,6 +382,7 @@ const _p = { x: 0, y: 0, z: 0 };
  * `MatrixStore(bone+0x28)` and `bone+0x68 = MatrixTransformPoint(bone+0x7C)`
  * are the origin and the point. The jaws hang off the weak bone in both
  * walks, which is the bundle's own parenting.
+ * `[port-only]` as a function: the two walks' matrix products, shared.
  */
 export function Boss3PoseMatrices(obj: Boss3Actor, composed: boolean): void {
   const t = obj.boss3;

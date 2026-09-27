@@ -4286,6 +4286,54 @@ instead.
   and `tools/verify_skeletons.py` now holds every skeleton to the EXE's bone
   count.
 
+## The Tower: class 0x45, stage 3's boss and stage 6's return
+
+Five heads rise out of a canal and a sixth thing is under it. Class 0x45 is
+all of them -- the opening head and the civilian it takes, the two civilians
+heads 0 and 4 hold, the five fighting heads, the body -- plus its own intro
+card, and it is `game/class45/`. Every routine is transcribed under its exe
+name; `docs/re/boss-tower.md` has the reading.
+
+* **Three frames to start.** `Boss3ClassHandler` (`FUN_0041FC00`) picks the
+  variant from the block (11 and 13 on stage 3, 2 on stage 6, 15/17 in Boss
+  Mode), re-seeds the fight's globals and installs the sub-type's Init, which
+  installs its update: handler, init and update on three consecutive frames.
+* **Its own clock.** The class steps `model[0]` itself, behind state tests --
+  a dead head holds its last frame by not stepping -- so it declares
+  `ClassHandler.ownsMotionClock` and the director leaves its motion alone. The
+  cursor, the cross-fade (swing-twist, as `MatrixInterpolateSwingTwist`), the
+  half-frame lerp and the root damper are the class's own, which is what makes
+  the jaw test read the pose the engine reads.
+* **The heads.** Shootable only in the fight, on the weak bone, with the jaws
+  open by more than `0x1700`, and not while the neck is turned away; 45 over 3
+  (or 5 with two players) off the head and the shared pool, the bar reading
+  pool/180. Head 2 cannot be hurt on stage 3 and dies with the fourth small
+  one; 180 frames later it drops both enemy counters -- the first gate. Head 2
+  schedules the bites: at most two heads armed, never itself on stage 3.
+* **The body.** Builds its path from eight or nine `op_` curves (2313 points),
+  holds the camera (mode 6, `g_camera_driver_held`) and drives the eye along
+  `cp_` curves, aiming by the camera block's yaw and pitch at its weak bone.
+  It can be shot only surfaced or lunging, 10 a hit (6 with two players) of
+  120; its death opens the second gate and hands the camera back.
+* **The shot test.** Registered the engine's way (`registersForShotTest`): a
+  head unless dead, the body in states 10..13 only, the opening head and the
+  civilians never. The body's broad sphere is 95 units.
+* **Drawn from its own matrices.** The heads and the body are drawn by
+  `Boss3DrawBoneParts`, not by the skeleton walk, from
+  `Boss3ComposeBonePose`'s matrices -- extra rotations for the bite, the body's
+  spine in `Rx Ry Rz` along its path. `render/characters/boss3.ts` places those;
+  `render/boss3_effects.ts` draws the intro card (the "TOWER" / "Type 8000"
+  plates fade in beside it), the bite flash, the wake, sparks, splashes, the
+  path effects, the civilian's shadow and variant 1's water mound, which the
+  body raises as it swims under it.
+
+**Played.** `playthrough.mjs --stage 3 --play-end` (and `--entry 7` for block
+13) plays the fight through by shooting: the tool's grid of shots finds the
+open jaws and the surfaced body, and the debug clear -- which refuses this
+class -- is never what opens a gate. Stage 6 plays past block 2's heads.
+`--no-damage` is on for the zombies before the boss, and `--shoot-for 1500`
+because a diving body is unshootable for longer than the default window.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

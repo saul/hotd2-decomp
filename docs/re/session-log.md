@@ -19653,3 +19653,80 @@ playthroughs are identical to the baseline to the frame.
 Named: `ProcessPlayerShotsTaskCreate`, `ProcessPlayerShotsTask` (the thunk
 had the same name as the routine), `ShotPushWorldCandidate`,
 `ShotPushColiHitCandidate`.
+
+---
+
+## Session — the Tower, class 0x45, ported (branch `boss/tower`)
+
+**Outcome:** the stage-3 boss and its stage-6 return run in the port, drawn,
+shootable through the faithful shot test, and both stage-3 routes play through
+their end block by shooting alone (`--no-damage`, a declared cheat, for the
+zombies before it). `game/class45/` is ten files; `render/characters/boss3.ts`
+and `render/boss3_effects.ts` draw it.
+
+**What is ported, function for function.** `Boss3ClassHandler` (handler,
+init and update on three frames, as the exe installs them); the two opening
+routines and the two civilians' (`Boss3Opening*`, `Boss3Held*`);
+`Boss3FightHeadInit/Update` with the intro grab, the scheduler, the two-head
+cap, the jaw and neck gates, the big head's immunity on stage 3 and its
+180-frame gate; `Boss3BodyInit/Update` with the path build, the camera hold
+(mode 6), the swim, surfacing, lunge, recovery and death, and the second gate;
+`Boss3ComposeBonePose` and `Boss3DrawBoneParts` (its flash clock, splash cue,
+bite flash and wake); the intro card, sparks, splashes, path effects and the
+water mound. The model block is the class's own (`ownsMotionClock`): every
+`INC dword ptr [model]` sits behind a state test, so the shared clock could
+not be used.
+
+**Readings that changed the port or the phase-1 doc.**
+
+* The heads' and the body's skeleton walk draws **nothing**. `SkeletonEmitNode`
+  draws only through the pose hook at `model+0x1158`; `ActorBuildSkinnedModel`
+  installs `SkeletonDrawNodeSlot` there and `PoseHookNone` at `+0x115C`, and
+  the class's Inits put `PoseHookNone` at `+0x1158`. `Boss3DrawBoneParts` is
+  what draws them -- and the body skips it in states 8 and 9.
+* The body registers for the shot test in states 10..13 **only**
+  (`0x00424062`..`0x00424082` jump past the call). The coordinator's note said
+  no gate; the listing says otherwise.
+* The water mound **raises** vertices (`FCOMPP; TEST AH,0x41` skips the store
+  unless the arc is higher), and the model it edits is its own slot `0x1850`:
+  `0x009BEBA4` is `0x009A66A4 + 0x1850*0x10`, the table the horde's sheet
+  reads at `0x009B7394`.
+* `0x009C88AC` is an Original Mode item effect (items `0x0C`/`0x14`, through
+  `FUN_00416240`'s byte table at `0x00416314`). `g_original_damage_scale`'s
+  writers all store 1.0.
+* The wake's cursor is the path cursor, not the play cursor.
+
+**Behaviour changes outside the class, all small:** `ClassHandler` gained
+`ownsMotionClock`; the director steps `Boss3TasksTick` after the boss bars;
+the walker's enemy-gate set has 0x45; `EffectLayer` frees what a fading or a
+deforming clone owns; `playthrough.mjs` has `--play-end` and counts class
+0x45's hit points.
+
+**Wrong turns.**
+
+* I first gated the body's shot test with a latch and a new
+  `ClassHandler.shotTestable`, and wrote that it also kept the opening head
+  and the civilians out. It did not need to: their Inits raise `0x8000`, which
+  the pick already refused. When main landed `RegisterForShotTest` the stand-in
+  went, and the merge commit corrects the claim.
+* I "fixed" the body's `obj+0x124` from the radius table to `[0x004C4E48]`.
+  That address **is** `g_actor_radius_by_char[0x48]`, 95.0, the same number.
+* My `MatrixInterpolateSwingTwist` duplicated class 0x44's; verify_port caught
+  it and the class now calls that one.
+* The first playthroughs "passed" by stopping on arrival at block 11: every
+  boss is in an end block, and the tool broke out there. Then the boss gates
+  read as unshootable because the tool's damage meter counted only classes
+  0x30/0x31. Both are fixed in the tool, and a diving body still needs
+  `--shoot-for 1500`.
+* The body test expected 6 damage a hit; one player in play is 10.
+* A seek straight onto the stage-6 gate opens it at once: the heads' Inits run
+  two frames after the spawn, so on the seek's first frame `g_enemies_present`
+  is still 0. The engine has no seek; a seek one wait earlier is fine.
+
+**Next actions.**
+
+* A seek that lands on a gate right after a class-0x45 spawn opens it (above).
+  The fix is the seek's (run the replayed spawns' handler frames), not the
+  class's.
+* The bystanders' Original Mode part scaling waits on the item system
+  (`FUN_00475E40`), as class 0x10's does.

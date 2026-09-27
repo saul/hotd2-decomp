@@ -19717,6 +19717,9 @@ console.log("\nclass 0x45: the stage-3 boss -- heads, gates and the body:");
           early > 0 && early < 0.2 && bar?.shown === 1,
           `after 2 frames ${early}, after 122 ${bar?.shown}`);
 
+    const headSnap = JSON.stringify(clonePlain(heads[2])).length;
+    console.log(`  (a head mid-fight snapshots to ${headSnap} bytes)`);
+
     // A shot on the weak bone with the mouth shut is a miss.
     MarkActorShot(heads[0], 0, 17);
     tick(1);

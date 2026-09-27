@@ -14,6 +14,7 @@ import type { CamPose } from "../camera/curve";
 import { BossHpBarSpawn } from "../boss_hp_bar";
 import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
+import { BAMS_TO_RAD_F64 } from "../../core/bams";
 import { PlayerTakeDamage } from "../combat/player";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { ActorBuildSkinnedModel } from "../spawn";
@@ -801,7 +802,7 @@ function Boss3BodyStateDead(obj: Boss3Actor, f: ClassFrame): boolean {
       Boss3SpawnSplashAt(w.x, SPLASH_Y_A, w.z, 0);
     }
     if (cur >= DEATH_CUE) {
-      obj.pos.y = Math.fround(Math.sin(blk.bobPhase * 9.587379924285257e-05)
+      obj.pos.y = Math.fround(Math.sin(blk.bobPhase * BAMS_TO_RAD_F64)
                               * t.bob - WATER_LINE);
       blk.bobPhase = (blk.bobPhase + blk.bobRate) | 0;
       if (blk.bobPhase % 0x10000 === 0) {

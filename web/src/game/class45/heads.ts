@@ -142,6 +142,7 @@ function BystanderAt(i: number): Boss3Actor | null {
 /**
  * `rand() % (spread + 1) + base` of `g_boss3_attack_delay_by_rank[rank]`
  * (`0x005890E0`), as the handler, the bite and the scheduler each draw it.
+ * `[port-only]` as a function: three sites write this arithmetic inline.
  */
 export function Boss3DrawAttackDelay(f: { rng: ClassFrame["rng"] },
                                      rank: number): number {
@@ -391,6 +392,7 @@ function Shooter(obj: Actor, f: ClassFrame): number {
  * The Original Mode weapon's damage scale, `[0x009A224C + q*0x14]` with
  * -1.0 standing for 2.0 (`FCOM [0x004C4C64]`; `FLD [0x004E30F0]`), and 1.0
  * in any other mode. `q` is a second draw when both players fired.
+ * `[port-only]` as a function: the two hit routines inline it.
  */
 export function Boss3WeaponScale(obj: Actor, f: ClassFrame): number {
   if (G.g_GameMode !== GameMode.Original) return 1;

@@ -1167,7 +1167,11 @@ The bodies continue past `MatrixStackPop` at `0x00421D6F` and `0x00421E56`.
 * `Boss3SpawnSplashAt` — `0x004248B0` / `Boss3SplashUpdate` — `0x00424800`:
   kind 0 cels `0x1339..0x1355` (scale 3), kind 1 `0x94..0xA1`.
 * `Boss3SpawnMeshBulge` — `0x00424D90` / `Boss3MeshBulgeUpdate` —
-  `0x00424C10`: variant 1 only; pushes a mesh's vertices near the body down to
+  `0x00424C10`: variant 1 only; **raises** (phase 1 said "pushes down": the
+  store is skipped by `FCOMPP; TEST AH,0x41` unless the arc is higher) the
+  vertices of slot `0x1850`'s own model -- the asset record at `0x009BEBA4` is
+  `0x009A66A4 + 0x1850*0x10`, the table the horde's sheet reads at
+  `0x009B7394` -- near the body up to
   `sin(..)*5.5 − 13.475` within 10 units, draws `st1_1.bin[35]` and
   `st3_tika_bos.bin[0..9]`; stops at body state 14, dies on flag 4.
 * `Boss3SpawnPathEffects` — `0x00424FE0` / `Boss3PathEffectUpdate` —
@@ -1403,18 +1407,42 @@ The **Boss Mode stage-select** routines after the class
 
 ## Open questions
 
-* What `0x009CA0EA` is (set 1 when a Boss-Mode fight starts, 0 at the body's
-  death; read at `0x00434CF9`/`0x00434D35`). `[open]`
 * What `obj+0x34` bits `0x80000` and `0x80000000` do for this class. `[open]`
-* What `FUN_004759C0` does (walks the mesh at `0x009AE584` and sets vertex y
-  from `sin(yaw)*4`; called once per card piece in step 1). `[open]`
-* The byte at `0x009C88AC` that enables the bystanders' Original-Mode
-  scaling. `[open]`
+  The port carries both as the Inits write them.
 * Whether any stage-6 actor raises `g_script_flags[0]` before block 2's
   `set_script_flag 0` at `0x001E9C` — it would start the stage-6 fight at
-  once. Flags are zeroed only per scene. `[open]`; the port will answer it by
-  running the same actors.
-* That handler → init → update is three frames. `[likely]`
-* The content of screen sprites `0xBC`/`0xCA`. `[likely]` the name.
-* Model draw byte 5 (`obj+0x1FC`): which bones `SkeletonDrawWalk` draws when
-  the class redraws bones 1..n itself. `[open]`, render side.
+  once. Flags are zeroed only per scene. `[open]`; the port runs the same
+  actors, and its stage-6 playthrough reaches the fight on the script's own
+  write.
+
+Answered since phase 1:
+
+* `0x009CA0EA` is `g_boss_engaged` (named on main). `[proved]`
+* `FUN_004759C0` is `CurlModelSlot3F7ByYaw`, and main proved it inert for the
+  shared banner (`405c17c`); the card's calls are the same routine. `[proved]`
+* The byte at `0x009C88AC` is an **Original Mode item effect**:
+  `FUN_00416240` (called only from `FUN_004163D0`) walks the player's two item
+  slots and, through the byte table at `0x00416314`, sets it for item `0x0C`
+  (arm `0x00416284`, which also resets the weapon block) or `0x14` (arm
+  `0x0041629A`); `ResetOriginalModeLoadout` clears it. The port fills no item
+  slot (`FUN_00475E40` is unported), so the byte is never set there and the
+  bystanders' scaling never applies -- as in the engine without the item.
+  `[proved]`
+* Handler → init → update is three frames: the handler stores the init in
+  `obj+0x00` and returns (`0x0041FD54`..`0x0041FD89`), each init stores the
+  update and returns, and the task walk calls `obj+0x00` once a frame.
+  `[proved]`
+* Screen sprites `0xBC`/`0xCA`, exported and looked at: the gold-on-black
+  **"TOWER"** plate and the **"Type 8000"** line. `[proved]`
+* Draw byte 5 and what is drawn: `SkeletonEmitNode` (`FUN_004114C0`) draws a
+  node **only through the pose hook** at `model+0x1158` (then computes the
+  bone point unless `obj+0x34 & 0x8000`). `ActorBuildSkinnedModel` installs
+  `SkeletonDrawNodeSlot` (`FUN_00411050`) there -- `NoOpStub(model scale);
+  AssetDrawSlot(node slot)` -- and `PoseHookNone` at `+0x115C`. The opening
+  head keeps the build's draw hook; the civilians install
+  `Boss3BystanderPoseHook`; the heads and the body install `PoseHookNone` at
+  `+0x1158`, so their `DrawSkinnedModelAndShadow` draws **nothing**, and
+  `Boss3DrawBoneParts` draws bones `1..n-1` from the (possibly composed)
+  matrices. The body skips `Boss3DrawBoneParts` in states 8 and 9, so it is
+  not drawn at all while it builds its path. Draw byte 5 is the object
+  matrix's form, `T(pos) Rz Ry Rx S(scale) T(root)`. `[proved]`

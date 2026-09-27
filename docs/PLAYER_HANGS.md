@@ -922,6 +922,16 @@ recorded here rather than changed under three concurrent workstreams.
 
 Until it is, the evidence for anything inside a terminal block has to come from
 `web/test/port.test.ts`, which is where class 0x19's gate chain is asserted.
+
+**Opt-in since 2026-09-27: `--play-end`** (or `--boss`, which adds
+`--meter-all` and `--aim`). The default contract is unchanged -- a run still
+stops on entering an end block -- but with the flag it plays the block through
+and succeeds only when the walker leaves it. Measured with `--boss`: stage 1
+block 14 (JUDGMENT) leaves after 4065 frames and 19 instructions, stage 5's
+block 7 after 1620; stage 5's block 1 (JUDGMENT's return, not an end block)
+is left 3495 frames after it is entered. `--meter-all` was the other half: the damage
+meter counted classes 0x30/0x31 only, so a boss being shot down read as a
+fruitless room and was called a hang after `--hang` frames.
 ## 17. A boss gate is a room clear the harness will not shoot at
 
 **Open, and it is a decision rather than a bug.**

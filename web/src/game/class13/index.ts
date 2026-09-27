@@ -57,6 +57,7 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
+import { CarrierPropRoutine2 } from "./routine2";
 import { QueryGroundHeightAt } from "../coli";
 import { CarrierTransformPoint } from "../carrier";
 import {
@@ -194,9 +195,10 @@ export function ScriptedPropInit13(obj: Actor): void {
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
  * routines chosen through the jump table at `0x004401E4` — see
  * {@link g_carrier_prop_routines}. Selectors 0, 1 and 6 are ported (stage
- * 2's block-16 boat and stage 3's two); the other four routines —
- * `0x004408A0` (2 and 9), `0x00440AD0` (3), `0x00440C20` (4 and 7) and
- * `0x00441000` (5 and 8), all stage 4's — are unread. `[open]`
+ * 2's block-16 boat and stage 3's two), and 2 and 9 (`FUN_004408A0`,
+ * `class13/routine2.ts`, the stage-4 boss's transport); the other three
+ * routines — `0x00440AD0` (3), `0x00440C20` (4 and 7) and `0x00441000` (5
+ * and 8), all stage 4's — are unread. `[open]`
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -537,7 +539,10 @@ export const g_carrier_prop_routines: Partial<Record<number,
   (obj: Actor, f: ClassFrame) => void>> = {
   0: CarrierPropRoutine0,
   [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
+  // `FUN_004408A0` is installed for both: 9 is 2 arriving parked.
+  2: CarrierPropRoutine2,
   6: CarrierPropRoutine6,
+  9: CarrierPropRoutine2,
 };
 
 function ScriptedPropDebug(obj: Actor): ActorDebug {

@@ -1,60 +1,96 @@
 /**
- * Class 0x19's four entrance states — and both writers of
+ * Class 0x19's four entrance states -- and both writers of
  * `g_script_flags[31]`.
  *
  * `Boss4StateEntranceCarried` (`FUN_004938B0`) is entries 0 **and** 2 of
  * `g_class19_states`; `Boss4StateEntranceDropped` (`FUN_00493B40`) is entries
  * 1 and 3. Each pair is one routine that reads its own state index back to
- * tell the two apart, and the two routines are the same code but for two
- * constants: the banner record and the arena phase.
+ * tell the two apart, and the two routines are the same code but for three
+ * constants: the banner record, the arena phase and the "standing" state.
  *
  * The entrance index comes off the descriptor tail's byte `+0x01`, and the
- * four shipped class-0x19 spawns carry 0, 1, 2 and 3 — one each, in stage 4's
- * blocks 23, 25, 27 and 29. So every one of the game's four is a different
- * entrance, and the eight `wait_script_flag` gates behind them are two per
- * block.
+ * four shipped class-0x19 spawns carry 0, 1, 2 and 3 -- one each, in stage 4's
+ * blocks 23, 25, 27 and 29. Entrances 0 and 1 ride the transport in
+ * (`class13/routine2.ts`, selector 2) and jump down on `g_script_flags[30]`;
+ * 2 and 3 are already standing beside the parked one (selector 9).
+ *
+ * ```
+ * sub 0: BossIntroBannerSpawn(banner); phase = 0 or 9; state+0x24 = maxhp * frac[phase]
+ *        standing: ActorSetMotion(0x75); Boss4ChainsawOn(); flags &= ~0x10; sub = 2
+ *        riding:   ActorSetMotion(0x7C); sub++
+ * sub 1: !g_script_flags[30]: return
+ *        Boss4ChainsawOn(); flags &= ~1
+ *        the carrier's T RotX RotZ RotY times the boss's -> pos and angles, world space
+ *        blend(0x75, 0, 10); PlaySoundId(0x231BA9); sub++
+ * sub 2: char+0x20 == 0x75 && cursor == 0x5A: blend(0x74, 0, 10)
+ *        g_bHudShutterState != 1: return
+ *        g_script_flags[31] = 1; Boss4QueueCameraCue(phase); obj+0x34 &= ~0x8000
+ *        Boss4LoadPhaseArena(); BossHpBarSpawn(320.0, 35.0); flags |= 0x12
+ *        state 7; sub 0; blend(0x6B, 0, 0x16); g_boss_engaged = 1
+ * ```
  *
  * ## Three writes, not two
  *
  * The survey that scheduled this work named `0x0049390C` and `0x004958C7`.
  * There is a third: `0x00493B99`, `Boss4StateEntranceDropped`'s own copy of
  * the flag-31 write, `MOV byte ptr [0x009c721f], 0x1` where the other routine
- * has `MOV byte ptr [0x009c721f], BL`. It raises no *new* flag — both are 31 —
+ * has `MOV byte ptr [0x009c721f], BL`. It raises no *new* flag -- both are 31 --
  * but a sweep that had missed it would have concluded that blocks 25 and 29
  * had no writer at all. Searching the bare `9c72` over the class's range is
  * what found it (L32).
  */
 import type { Actor } from "../actor";
-import { G } from "../globals";
-import { ActorSetMotion, ActorStartFade } from "../class30/motion_cue";
-import { MotionPlayFrame } from "../tables";
+import { ActorFlag } from "../actor";
 import { BossIntroBannerSpawn } from "../boss_banner";
+import { BossHpBarSpawn } from "../boss_hp_bar";
+import { CarrierBakeWorldPose } from "../carrier";
+import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
+import { ActorByAt, G } from "../globals";
+import type { ClassFrame } from "../registry";
+import { MotionPlayFrame } from "../tables";
+import { Boss4LoadPhaseArena } from "./arena";
+import { Boss4QueueCameraCue } from "./camera";
+import { Boss4ChainsawOn } from "./frame";
 import {
-  BOSS4_PHASE_HP_FRACTION, Boss4Clip, Boss4Flag, Boss4State,
+  Boss4Clip, Boss4Flag, Boss4PhaseFloor, Boss4Sound, Boss4State,
 } from "./state";
 import type { Boss4Block as Blk } from "./state";
 
 /**
- * `g_script_flags` — `0x009C7200`, index 31.
+ * `g_script_flags` -- `0x009C7200`, index 31.
  *
  * The byte both entrance routines write, at `0x0049390C` and `0x00493B99`, on
  * the frame the shutter reaches state 1. Five `wait_script_flag 31` gates in
  * the shipped scripts: stage 4's blocks 23, 25, 27 and 29, plus stage 5's
- * block 3 — that last one is class 0x14's, not this class's.
+ * block 3 -- that last one is class 0x14's, not this class's.
  */
 export const BOSS4_FIGHT_READY_FLAG = 31;
 
-/** The shutter state the entrance waits for — `CMP AL, BL` at `0x004938FD`. */
+/**
+ * `g_script_flags` -- `0x009C7200`, index 30.
+ *
+ * The script's own `set_script_flag 30` -- block 23 step 1 op 51, and the same
+ * op in blocks 25, 27 and 29. It is read here at `0x0049397B` and by
+ * `BossIntroBannerUpdate`, and it is the only flag in this chain the script
+ * raises itself.
+ */
+export const BOSS4_DROP_FLAG = 30;
+
+/** The shutter state the entrance waits for -- `CMP AL, BL` at `0x004938FD`. */
 const SHUTTER_OPENING = 1;
 
 /**
  * The frame of {@link Boss4Clip.Land} sub 2 blends into
- * {@link Boss4Clip.Settle} on — `CMP dword ptr [EAX + 0x8], 0x5A`.
+ * {@link Boss4Clip.Settle} on -- `CMP dword ptr [EAX + 0x8], 0x5A`.
  */
 const LAND_SETTLE_FRAME = 0x5a;
 
-/** The fade sub 2 gives the idle it hands over to — `PUSH 0x16`. */
+/** The fade sub 2 gives the idle it hands over to -- `PUSH 0x16`. */
 const IDLE_FADE = 0x16;
+
+/** `PUSH 0x420C0000; PUSH 0x43A00000` -- the health bar at (320.0, 35.0). */
+const HP_BAR_X = 320.0;
+const HP_BAR_Y = 35.0;
 
 /** The entrance's sub-states, all reached by counting up by one. */
 enum Sub {
@@ -67,26 +103,28 @@ enum Sub {
 }
 
 /**
- * `Boss4StateEntranceCarried` — `FUN_004938B0`. States 0 and 2.
+ * `Boss4StateEntranceCarried` -- `FUN_004938B0`. States 0 and 2.
  *
  * State 0 rides the transport and state 2 is already on the ground; the two
  * are told apart by `CMP byte ptr [EDX + 0x4], BL` with `BL` 2 at
  * `0x00493AE0`, which is the only place either constant appears.
  */
-export function Boss4StateEntranceCarried(obj: Actor, b: Blk): void {
-  Boss4Entrance(obj, b, Boss4State.EntranceCarriedPlaced, 0x005972f8, 0);
+export function Boss4StateEntranceCarried(obj: Actor, b: Blk,
+                                          f: ClassFrame): void {
+  Boss4Entrance(obj, b, f, Boss4State.EntranceCarriedPlaced, 0x005972f8, 0);
 }
 
 /**
- * `Boss4StateEntranceDropped` — `FUN_00493B40`. States 1 and 3.
+ * `Boss4StateEntranceDropped` -- `FUN_00493B40`. States 1 and 3.
  *
  * Byte for byte the routine above, with three constants changed: the state it
  * compares against is 3, the banner record is the second one and the phase it
- * seats is 9 rather than 0 — the second arena's half of
+ * seats is 9 rather than 0 -- the second arena's half of
  * `g_boss4_phase_hp_fraction`, which holds the same nine fractions again.
  */
-export function Boss4StateEntranceDropped(obj: Actor, b: Blk): void {
-  Boss4Entrance(obj, b, Boss4State.EntranceDroppedPlaced, 0x00597338, 9);
+export function Boss4StateEntranceDropped(obj: Actor, b: Blk,
+                                          f: ClassFrame): void {
+  Boss4Entrance(obj, b, f, Boss4State.EntranceDroppedPlaced, 0x00597338, 9);
 }
 
 /**
@@ -95,28 +133,28 @@ export function Boss4StateEntranceDropped(obj: Actor, b: Blk): void {
  * `[port-only]` as a *function*: the engine has two copies of this code, one
  * per pair, and they differ only in `placedState`, `banner` and `phase`.
  * Writing it twice would be two chances to transcribe it differently, and the
- * three constants are exactly what the two exe routines disagree about — so
+ * three constants are exactly what the two exe routines disagree about -- so
  * the parameters are the diff, not an invention.
  */
-function Boss4Entrance(obj: Actor, b: Blk, placedState: number,
+function Boss4Entrance(obj: Actor, b: Blk, f: ClassFrame, placedState: number,
                        banner: number, phase: number): void {
   if (b.sub === Sub.Setup) {
-    // `PUSH 0x5972f8; CALL BossIntroBannerSpawn` — the boss makes its own
+    // `PUSH 0x5972f8; CALL BossIntroBannerSpawn` -- the boss makes its own
     // name banner, and that banner is what will open the shutter. It is a
     // task of its own from here on (`game/boss_banner.ts`); the boss keeps
     // no hold on it, as the engine keeps none.
     BossIntroBannerSpawn(banner);
-    // `MOV byte ptr [ECX + 0x8], 0x0` (or 9) — the arena phase.
     b.phase = phase;
-    // `FILD obj+0x11E; FMUL [EDX*4 + g_boss4_phase_hp_fraction]; FSTP
-    // state+0x24` at `0x00493ACC`. Read **after** the phase is written, so
-    // the floor is this phase's and not the previous one's.
-    b.phaseHpFloor = obj.maxHp * (BOSS4_PHASE_HP_FRACTION[b.phase] ?? 0);
+    // `FILD obj+0x11E; FMUL [EDX*4 + g_boss4_phase_hp_fraction]; FSTP float
+    // state+0x24` at `0x00493ACC`. Read **after** the phase is written.
+    b.phaseHpFloor = Math.fround(Boss4PhaseFloor(obj.maxHp, b.phase));
     if (b.state === placedState) {
-      // Already on the ground: land pose, and straight to the shutter wait.
+      // Already on the ground: land pose, the chainsaw, and straight to the
+      // shutter wait. `AND ECX, 0xFFFFFFEF` after `Boss4ChainsawOn` takes the
+      // footfalls back down: a standing boss does not shake the screen yet.
       ActorSetMotion(obj, Boss4Clip.Land);
-      Boss4EntranceHold(b);
-      b.flags &= ~Boss4Flag.Bit4;
+      Boss4ChainsawOn(b, f.events);
+      b.flags &= ~Boss4Flag.Footfalls;
       b.sub = Sub.WaitForShutter;
       return;
     }
@@ -126,38 +164,40 @@ function Boss4Entrance(obj: Actor, b: Blk, placedState: number,
   }
 
   if (b.sub === Sub.RideCarrier) {
-    // `MOV AL, [0x009c721e]; TEST AL, AL; JZ` — the script's
+    // `MOV AL, [0x009c721e]; TEST AL, AL; JZ` -- the script's
     // `set_script_flag 30`, and the same flag the banner is waiting on.
     if (!G.g_script_flags[BOSS4_DROP_FLAG]) return;
-    Boss4EntranceHold(b);
+    Boss4ChainsawOn(b, f.events);
     b.flags &= ~Boss4Flag.OnCarrier;
-    // `[diverges]` The engine now composes the transport's transform into the
-    // actor's: `MatrixTranslate(carrier+0x40); MatrixRotateX/Y/Z(carrier+0x64
-    // ..+0x6C); MatrixTranslate(obj+0x40); MatrixRotateX/Y/Z(obj+0x64..)`,
-    // reads the result back into `obj+0x40` and decomposes the rotation with
-    // `FUN_00401AE0`. That turns a pose expressed **in the transport's space**
-    // into a world pose — the boss stops being carried and stands where it was
-    // standing. The port does not do it, because `state+0x10` is
-    // `g_civilian_carrier` and the port has no carrier actor for stage 4's
-    // transport: `Boss4Init` latches `-1` and there is nothing to compose. The
-    // spawn record's own position is used unchanged, which is where the engine
-    // would have put it if the transport were at the origin. Visual, and it
-    // does not touch the gate.
-    Boss4SetMotionBlended(obj, Boss4Clip.Land);
+    // `Push; LoadIdentity; Translate(carrier+0x40); RotX(c+0x64);
+    // RotZ(c+0x6C); RotY(c+0x68); Translate(obj+0x40); RotX; RotZ; RotY;
+    // MatrixGetTranslation -> obj+0x40; MatrixToEulerBams -> obj+0x64..0x6C;
+    // Pop` -- the boss's carrier-relative pose made world, inline here and the
+    // same six calls `CarrierBakeWorldPose` (`FUN_0045D920`) makes for the
+    // class-0x30 riders. The translation is stored as floats.
+    const carrier = ActorByAt(b.carrierAt);
+    if (carrier) {
+      CarrierBakeWorldPose(obj, carrier);
+      obj.pos.x = Math.fround(obj.pos.x);
+      obj.pos.y = Math.fround(obj.pos.y);
+      obj.pos.z = Math.fround(obj.pos.z);
+    }
+    ActorSetMotionBlended(obj, Boss4Clip.Land, 0, 10);
+    f.events?.emit("sound.play", { id: Boss4Sound.Hashiri });
     b.sub += 1;
     return;
   }
 
   if (b.sub !== Sub.WaitForShutter) return;
 
-  // `if (obj+0x1B4 == 0x75 && obj+0x19C == 0x5A) FUN_004119A0(char, 0x74, 0,
-  // 10)` — the landing settles into the standing pose on one exact frame.
+  // `if (char+0x20 == 0x75 && char+0x08 == 0x5A) blend(0x74, 0, 10)` -- the
+  // landing settles into the standing pose on one exact frame, unguarded.
   if (obj.motion === Boss4Clip.Land
       && MotionPlayFrame(obj) === LAND_SETTLE_FRAME) {
-    Boss4SetMotionBlended(obj, Boss4Clip.Settle);
+    ActorSetMotionBlended(obj, Boss4Clip.Settle, 0, 10);
   }
 
-  // `MOV AL, [0x009ca0f4]; CMP AL, BL` — and `BL` is 1, the same register the
+  // `MOV AL, [0x009ca0f4]; CMP AL, BL` -- and `BL` is 1, the same register the
   // flag write below stores. The shutter only reaches state 1 from
   // `BossIntroBannerUpdate`, 300 frames after `g_script_flags[30]`.
   if (G.g_bHudShutterState !== SHUTTER_OPENING) return;
@@ -165,57 +205,16 @@ function Boss4Entrance(obj: Actor, b: Blk, placedState: number,
   // `MOV byte ptr [0x009c721f], BL` at `0x0049390C`, and its twin at
   // `0x00493B99`. This is the gate.
   G.g_script_flags[BOSS4_FIGHT_READY_FLAG] = 1;
-  // `FUN_004932A0(state+0x08)` — the phase cue. `[open]`, not ported.
-  // `AND CH, 0x7F` — obj+0x34 &= ~0x8000, the bit `Boss4Init` raised.
-  obj.flags &= ~0x8000;
-  // `FUN_004932C0()` and `FUN_00435E50(320.0f, 35.0f)` — `[open]`, and both
-  // are camera or effect work rather than state. Not ported.
-  b.flags |= Boss4Flag.Placed | Boss4Flag.Bit4;
+  Boss4QueueCameraCue(b, b.phase);
+  // `AND CH, 0x7F` -- obj+0x34 &= ~0x8000, the bit `Boss4Init` raised: from
+  // here on the shot test takes him.
+  obj.flags &= ~ActorFlag.NoShotTest;
+  Boss4LoadPhaseArena(obj, b);
+  BossHpBarSpawn(HP_BAR_X, HP_BAR_Y);
+  b.flags |= Boss4Flag.Fenced | Boss4Flag.Footfalls;
   b.state = Boss4State.FaceCamera;
   b.sub = 0;
-  Boss4SetMotionBlended(obj, Boss4Clip.Idle, IDLE_FADE);
-  // `MOV byte ptr [0x009ca0ea], BL` — `[open]`. One more byte raised on this
-  // frame that nothing read so far reads back.
-}
-
-/**
- * `g_script_flags` — `0x009C7200`, index 30.
- *
- * The script's own `set_script_flag 30` — block 23 step 1 op 51, and the same
- * op in blocks 25, 27 and 29. It is read here at `0x0049397B` and by
- * `BossIntroBannerUpdate`, and it is the only flag in this chain the script
- * raises itself.
- */
-export const BOSS4_DROP_FLAG = 30;
-
-/**
- * `FUN_00493870`, called on the way out of subs 0 and 1 and by two more
- * states. `[open]` — not read, and not ported.
- *
- * Named here rather than inlined as a comment because the two entrance
- * routines both call it and a reader should see that the port skips one call,
- * not a line of arithmetic.
- */
-function Boss4EntranceHold(b: Blk): void {
-  void b;
-}
-
-/**
- * A blended motion set with the engine's own start frame of 0, as
- * `ActorSetMotionBlended` (`FUN_004119A0`) does it.
- *
- * `[port-only]` as a wrapper: `class30/motion_cue.ts`'s
- * `ZombieSetMotionIfIdle` is the port's blended setter and it draws a random
- * start frame, which is right for a crowd of zombies and wrong for a boss —
- * every one of this class's calls passes a literal `0` as the third argument
- * (`PUSH 0x0` before every `CALL 0x004119A0` in the range). One boss, one
- * pose, no spread.
- */
-export function Boss4SetMotionBlended(obj: Actor, motion: number,
-                                      fade = 10): void {
-  if (obj.motion === motion) return;
-  ActorStartFade(obj, obj.motion, obj.playTicks, fade);
-  obj.motion = motion;
-  obj.playTicks = 0;
-  obj.rootFrame = -1;
+  ActorSetMotionBlended(obj, Boss4Clip.Idle, 0, IDLE_FADE);
+  // `MOV byte ptr [0x009ca0ea], BL` -- `g_boss_engaged`.
+  G.g_boss_engaged = 1;
 }

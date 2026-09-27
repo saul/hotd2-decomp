@@ -667,6 +667,14 @@ export const G = {
    */
   g_pad_state: 0,
   /**
+   * `g_pad_held` — 0x009C9020, the held-button word beside `g_pad_state`.
+   * Its one reader in the port is `Boss4StateDebugFreeMove` (`FUN_00495E20`),
+   * a state nothing enters, which moves the stage-4 boss while bit 8 is held.
+   * `[port-only]` in that nothing feeds it: the page raises no held bits, so
+   * the word stays 0 and the debug state stands still.
+   */
+  g_pad_held: 0,
+  /**
    * `g_trigger_down` — 0x009C8FD4 + player*0x28, the trigger bit in the aim
    * record `PollPlayerAimInput` (`FUN_0040CBB0`) fills. The continue
    * countdown reads it to skip a digit. `[port-only]` Raised for the tick a

@@ -1,6 +1,6 @@
 /**
- * Class 0x19 — **the stage-4 boss**, and the eight `wait_script_flag` gates
- * behind it.
+ * Class 0x19 — **the stage-4 boss**, Strength, and the eight
+ * `wait_script_flag` gates behind it.
  *
  * Four spawns in the whole game, one per block, all in stage 4: blocks 23, 25,
  * 27 and 29 of `st4.bin`'s script, each `spawn_obj_c` with 300 hit points and
@@ -19,215 +19,258 @@
  * writes either flag anywhere in stage 4.
  *
  * The tail's byte `+0x00` is the **character type**, `0x4A` — `boss4.bin`,
- * fifteen nodes — and the fifteen dwords after it are one model pointer per
- * node, which is the "~15 per-bone model slots straight from its tail" that
- * `spawns.md` records. The exporter had this class's character type recorded as
- * a literal `0x7C`; `0x7C` is the **clip** `Boss4Init` seats at `obj+0x1B4`
- * two instructions later, and that mistake is why no class-0x19 placement had
- * ever reached a bundle. Fixed in both halves of `hod2lib` in the same commit
- * as this module.
+ * fifteen nodes — and the fifteen dwords after it are **per-bone collision
+ * meshes** in `coli4.bin` (ten of them; five are -1 and keep their hit
+ * spheres), which is why a shot at his body sparks or bleeds by where it lands.
+ * `+0x40`/`+0x42` are the camera path and frame that despawn him.
  *
- * ## What runs here, and what does not
+ * ## The fight
  *
- * This is a twenty-four state boss with a nine-phase arena progression, and
- * **the port has its spine and not its fight.** What is here:
+ * Nine **phases** per arena — 0..8 on camera path 185 (entrances 0 and 2),
+ * 9..17 on path 193 (1 and 3). Each phase's share of the hit points is a floor
+ * (`g_boss4_phase_hp_fraction`); head shots do the damage, by rank and player
+ * count (`g_boss4_head_damage`), and reaching the floor makes him refuse shots
+ * until the arena moves him on. The move is his own: he plays a camera cue
+ * (`camera.ts`), and when `g_cam_path_frame` passes the phase's threshold he is
+ * seated at the next spot with the next phase's arena (`arena.ts`). Between
+ * moves he approaches the camera and strikes, charges past it, or — in phases
+ * 3 and 13 — throws the two props he carries (`attack.ts`, `fight.ts`). The
+ * last phase's floor is 0; the death (`death.ts`) raises `g_script_flags[32]`
+ * on clip frame 0x46 and he is despawned when the camera reaches the tail's
+ * pair. `docs/re/boss-strength.md` has the whole reading.
  *
  * | | |
  * |---|---|
- * | `Boss4Init` (`FUN_004917E0`) | whole |
- * | `Boss4Update` (`FUN_004919D0`) | the dispatch and the despawn test |
- * | states 0–3, the entrance | whole, and `g_script_flags[31]` |
- * | the banner | `game/boss_banner.ts`, a task of its own, spawned by the entrance |
- * | `Boss4ResolveShot` (`FUN_00491B40`) | the damage half; the effects are not |
- * | state `0x14`, the flinch | whole but for the turn |
- * | `Boss4ResumeAfterHit` (`FUN_004952A0`) | whole but for the phase cue |
- * | state `0x16`, the death | whole, and `g_script_flags[32]` |
- *
- * and **the other seventeen states are not ported**. They are named in
- * {@link Boss4State} with their addresses, and an actor that reaches one of
- * them holds the pose it is in: {@link Boss4Handler} routes them to
- * {@link Boss4StateNotPorted}, which does nothing at all rather than
- * pretending.
- *
- * That is not a shape that finishes the fight, and it is not claimed to be.
- * The chain the gates need is
- *
- * ```
- *   entrance -> banner -> shutter -> flag 31 -> state 7 -> shot -> flinch
- *            -> state 7 -> … -> hit points out -> state 0x16 -> flag 32
- * ```
- *
- * and every link of it is here **except** that the hit points cannot run out:
- * `Boss4ResolveShot` refuses every shot once they reach this phase's share of
- * the bar (`g_boss4_phase_hp_fraction[0]`, so 8/9 of 300), and only
- * `Boss4AdvanceArenaWaypoint` (`FUN_004928D0`) and
- * `Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`) move the phase on. Those
- * two are the arena — they teleport the boss between waypoints as
- * `g_cam_path_frame` passes seventeen thresholds — and they are the next piece
- * of work, not this one.
- *
- * **So this module declares `raisesScriptFlag` for 31 and not for 32.**
- * `script/waits/flag.ts` will hold stage 4's four flag-31 gates for real and
- * go on excusing its four flag-32 ones, which is the honest half: the port can
- * open the first and cannot yet open the second, and saying so in the table is
- * how the escape shrinks by the amount that was actually earned.
+ * | `Boss4Init` (`FUN_004917E0`) | here |
+ * | `Boss4Update` (`FUN_004919D0`) | here |
+ * | states 0–3, the entrances | `entrance.ts` |
+ * | states 4–0xE | `fight.ts` |
+ * | states 0xF–0x13, `Boss4SpawnHeldProp` | `attack.ts` |
+ * | states 0x14–0x17, `Boss4ResumeAfterHit` | `death.ts` |
+ * | `Boss4ResolveShot` and the damage | `shot.ts` |
+ * | the bone hit marks | `hit_mark.ts` |
+ * | the arena progression, the fence | `arena.ts` |
+ * | the camera cues | `camera.ts` |
+ * | footfalls, the draw half, the rank, the chainsaw | `frame.ts` |
  */
 import type { Actor } from "../actor";
 import { ActorFlag } from "../actor";
-import { G } from "../globals";
+import { ActorSetMotion } from "../class30/motion_cue";
+import { ActorDespawn } from "../despawn";
+import { G, HIT_SLOT_NONE } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import {
-  BOSS4_DEAD_FLAG, Boss4StateDeath, Boss4StateFlinch,
+  Boss4AdvanceArenaWaypoint, Boss4AdvancePhaseAtFloor,
+  Boss4ArmPhaseWhenInsideArena, Boss4KeepInsideEdge, Boss4TrackWhenInsideArena,
+  FENCE_MARGIN,
+} from "./arena";
+import {
+  Boss4StateChargePastCamera, Boss4StateStrikeClip65, Boss4StateStrikeClip7A,
+  Boss4StateStrikeClip7B, Boss4StateThrowHeldProp,
+} from "./attack";
+import { Boss4PlayCameraCue } from "./camera";
+import {
+  BOSS4_DEAD_FLAG, Boss4StateDeath, Boss4StateDebugFreeMove,
+  Boss4StateFlinch, Boss4StateKnockDown,
 } from "./death";
 import {
   BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG,
   Boss4StateEntranceCarried, Boss4StateEntranceDropped,
 } from "./entrance";
+import {
+  Boss4StateApproachCamera, Boss4StateChooseAction, Boss4StateFaceCamera,
+  Boss4StateHoldThenApproach, Boss4StateHoldUntilPlayerFree,
+  Boss4StatePlayArrivalClip, Boss4StateTurnClipThenApproach,
+  Boss4StateTurnToStoredPoint, Boss4StateWaitForPlayer, Boss4StateWalkToPoint,
+  Boss4StateWithdrawAndAdvancePhase,
+} from "./fight";
+import {
+  Boss4AdjustRank, Boss4AdvanceMotionAndDrawHeldProps,
+  Boss4ChainsawCueByCameraFrame, Boss4FootfallShake,
+} from "./frame";
 import { Boss4ResolveShot } from "./shot";
-import { Boss4State, Boss4BlockNew } from "./state";
+import {
+  BOSS4_BLADE_BONE, BOSS4_CAMERA_RISE, Boss4BlockNew, Boss4Clip, Boss4Flag,
+  Boss4State,
+} from "./state";
 import type { Boss4Block as Blk } from "./state";
+import { BOSS4_BLADE_FIRST } from "./slots";
 
-/** `MOV dword ptr [ESI + 0x124], 0x41F00000` at `0x00491885`. */
+/** `MOV dword ptr [ESI + 0x124], 0x41F00000` at `0x00491885` -- 30.0. */
 const BOSS4_HIT_RADIUS = 30;
+/** `MOV byte ptr [ECX + 0x9], 0x2` -- the props he carries in. */
+const BOSS4_PROPS = 2;
+/** `MOV byte ptr [EDX + 0x8], 0xFF` -- no phase until the entrance seats one. */
+const BOSS4_NO_PHASE = 0xff;
+/** The tail's per-bone words cover records 1..15. */
+const BOSS4_TAIL_BONES = 15;
 
 /**
  * `Boss4Init` — `FUN_004917E0`. The whole of the constructor.
  *
- * The engine's version also installs the character hierarchy
- * (`FUN_00410440(char, obj+0x40, char+0x78)`), seats `char+0x348 = 0x444` and
- * calls `FUN_00408E80`; all three are the render side's and `render/` builds
- * the hierarchy from the bundle instead.
+ * ```
+ * st = ActorAllocSub(0xA4); obj+0x34 |= 0x8000
+ * char+0x60 = tail[0]; char+0x20 = 0x7C; char+0x00 = char+0x08 = 0
+ * ActorBuildSkinnedModel(char, obj+0x40, char+0x78); char+0x68 = 1
+ * char+0x348 = 0x444                       -- bone 5's model
+ * obj+0x124 = 30.0; g_enemies_present++; g_enemies_alive++
+ * obj+0x121 = obj+0x120 = 0xFF; RegisterEnemySlot(obj)
+ * st.state = tail[1]; st.flags = state <= 1 ? 1 : 0; st+0x10 = g_civilian_carrier (<= 1)
+ * st.sub = 0; st.rank = GetDamageRank(); st.hits = 0; st.lives = (u8) both players'
+ * for bone 1..15: record +0x88 = tail dword; != -1: record +0x74 |= 0x51, +0x78 = 0
+ * st.phase = 0xFF; st+0x24 = 0; st+0x09 = 2; st+0x0A = 0; st+0x1C = 0; st+0x22 = -1; st+0x70 = 6.0
+ * ```
  *
- * The fifteen per-bone model pointers at `tail+0x04`..`+0x3C` are **not**
- * applied. They go into `char + i*0x90 + 0x100` for `i = 1..15`, raising
- * `0x51` in each part's `+0xEC` flags — a per-instance model override on top
- * of the skeleton's own slots. The port draws the skeleton's, which is what
- * every other class here does, and the difference is which mesh a bone wears.
- * `[diverges]`, visual, and the tail is not in the bundle to apply.
+ * * `char+0x60` is the character type, which the descriptor already carries.
+ * * `ActorBuildSkinnedModel` is the renderer's and the hit-slot claim's
+ *   (`spawn.ts`); `char+0x68 = 1` is the rotation order `RotX RotZ RotY`,
+ *   which is how every actor is drawn.
+ * * `RegisterEnemySlot` (`FUN_00408E80`, `0x004918AB`) is the port's
+ *   per-frame slot pass, `camera/slots.ts`.
+ * * The per-bone words are `obj.boneColi`: a record with one is shot-tested
+ *   against its mesh (`ShotTestBoneMesh`) and not its sphere, which is what
+ *   `+0x74 |= 0x51` and the zeroed radius say to `ShotTestBoneTree`.
  */
 export function Boss4Init(obj: Actor): void {
   const b = Boss4BlockNew();
   obj.boss4 = b;
-  // `MOV EBP, [ESI+0x34]; OR EBP, 0x8000` at `0x00491820`. Cleared again by
-  // the entrance on the frame it raises flag 31.
-  obj.flags |= 0x8000;
-  // `MOV dword ptr [ESI + 0x124], 0x41F00000`.
+  obj.flags |= ActorFlag.NoShotTest;
+  ActorSetMotion(obj, Boss4Clip.Entrance);
+  obj.boneSlot[String(BOSS4_BLADE_BONE)] = BOSS4_BLADE_FIRST;
   obj.hitRadius = BOSS4_HIT_RADIUS;
   obj.radius = BOSS4_HIT_RADIUS;
-  // `INC word ptr [0x009c7006]` and `INC word ptr [0x009c904a]` — **both**
-  // counters, which is what `spawns.md` records for this class and what makes
-  // `wait_enemies_alive` and `wait_enemies_present` wait for it.
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
-  // `MOV byte ptr [ESI + 0x121], 0xFF` and `+0x120` — no attack permit.
+  // `MOV byte ptr [ESI + 0x121], 0xFF` and `+0x120`.
   obj.attackPermit = -1;
-  // `MOV byte ptr [EAX + 0x4], DL` — the entrance state, from the tail's byte
-  // `+0x01`. The exporter carries that byte as the placement's
-  // `initial_state`, which is the same field class 0x30 reads it as.
-  b.state = obj.initialState & 0xff;
-  b.sub = 0;
+  // `RegisterEnemySlot(obj)` -- `FUN_00408E80` at `0x004918AB`: the port's
+  // per-frame slot pass (`UpdateCameraEnemySlots`) stands in for it.
+  b.state = (obj.class19?.entrance ?? obj.initialState) & 0xff;
   if (b.state <= 1) {
-    // `CMP byte ptr [EAX+0x4], 0x1; JA` — 0 and 1 ride the transport, 2 and 3
-    // are already standing.
-    b.flags |= 0x01;
-    // `MOV EDX, [0x009a2c88]; MOV [ECX+0x10], EDX` — `g_civilian_carrier`.
-    // `[diverges]` The port has no carrier actor for stage 4's transport and
-    // records `-1`; see `Boss4Block.carrierAt` and the entrance's sub 1.
-    b.carrierAt = -1;
+    b.flags = Boss4Flag.OnCarrier;
+    // `MOV EDX, [0x009a2c88]; MOV [ECX+0x10], EDX` -- `g_civilian_carrier`,
+    // the transport `CarrierPropSelectRoutine` made current earlier in the
+    // same `spawn_obj_c`.
+    b.carrierAt = G.g_civilian_carrier;
+  } else {
+    b.flags = 0;
   }
-  // `CALL 0x0040A8A0; MOV byte ptr [ECX + 0xB], AL` — the difficulty rank the
-  // head-damage table is indexed by. `[open]`, and `G.g_difficulty` is the
-  // port's nearest equivalent; the two are not proved to be the same number,
-  // so the rank is left at 0 rather than guessed at.
-  b.rank = 0;
+  b.sub = 0;
+  // `CALL GetDamageRank; MOV byte ptr [ECX + 0xB], AL` -- the low byte of
+  // `g_damage_rank`, signed.
+  b.rank = (G.g_damage_rank << 24) >> 24;
+  b.headHits = 0;
+  b.lives = [(G.g_player_lives[0] ?? 0) & 0xff,
+             (G.g_player_lives[1] ?? 0) & 0xff];
+  const coli = obj.class19?.bone_coli ?? [];
+  for (let bone = 1; bone <= BOSS4_TAIL_BONES; bone++) {
+    const key = coli[bone - 1];
+    if (key) obj.boneColi[String(bone)] = key;
+  }
+  b.phase = BOSS4_NO_PHASE;
+  b.phaseHpFloor = 0;
+  b.propsLeft = BOSS4_PROPS;
+  b.propsUsed = 0;
+  b.cueStep = 0;
+  b.cueQueued = -1;
+  b.cameraRise = BOSS4_CAMERA_RISE;
 }
 
+/** One entry of `g_class19_states`. */
+type Boss4StateFn = (obj: Actor, b: Blk, f: ClassFrame) => void;
+
 /**
- * The dispatch table `Boss4Update` indexes — `g_class19_states`, `0x00597298`.
- *
- * A literal array in state order, so the numbers next to it are the engine's
- * own indices and a reader can check them against the memory dump. Every entry
- * whose routine is not ported is {@link Boss4StateNotPorted}, **not** a hole:
- * the engine has twenty-four function pointers and so does this, and an actor
- * that reaches one of them stops rather than falling into a neighbour's body.
+ * The dispatch table `Boss4Update` indexes — `g_class19_states`, `0x00597298`,
+ * read from memory. A literal array in state order, so the numbers next to it
+ * are the engine's own indices.
  */
-const BOSS4_STATES: readonly ((obj: Actor, b: Blk) => void)[] = [
-  Boss4StateEntranceCarried,  // 0
-  Boss4StateEntranceDropped,  // 1
-  Boss4StateEntranceCarried,  // 2
-  Boss4StateEntranceDropped,  // 3
-  Boss4StateNotPorted,        // 4  Boss4StateApproachCamera  FUN_00493DC0
-  Boss4StateNotPorted,        // 5  Boss4StateChooseAction    FUN_00494010
-  Boss4StateNotPorted,        // 6  Boss4StateHoldThenApproach FUN_004943B0
-  Boss4StateNotPorted,        // 7  Boss4StateFaceCamera FUN_004944A0
-  Boss4StateNotPorted,        // 8  Boss4StatePlayArrivalClip    FUN_004945A0
-  Boss4StateNotPorted,        // 9  Boss4StateTurnToStoredPoint FUN_00494610
-  Boss4StateNotPorted,        // 10 Boss4StateTurnClipThenApproach    FUN_00494730
-  Boss4StateNotPorted,        // 11 Boss4StateWalkToPoint     FUN_004958F0
-  Boss4StateNotPorted,        // 12 Boss4StateWithdrawAndAdvancePhase FUN_00495A20
-  Boss4StateNotPorted,        // 13 Boss4StateWaitForPlayer   FUN_00495D30
-  Boss4StateNotPorted,        // 14 Boss4StateHoldUntilPlayerFree FUN_00495D90
-  Boss4StateNotPorted,        // 15 Boss4StateStrikeClip65    FUN_00494A80
-  Boss4StateNotPorted,        // 16 Boss4StateStrikeClip7A    FUN_00494B80
-  Boss4StateNotPorted,        // 17 Boss4StateStrikeClip7B    FUN_00494C70
-  Boss4StateNotPorted,        // 18 Boss4StateThrowHeldProp       FUN_00494D60
-  Boss4StateNotPorted,        // 19 Boss4StateChargePastCamera FUN_00495070
-  Boss4StateFlinch,           // 20
-  Boss4StateNotPorted,        // 21 Boss4StateKnockDown       FUN_00495570
-  Boss4StateDeath,            // 22
-  Boss4StateNotPorted,        // 23 Boss4StateDebugFreeMove   FUN_00495E20
+const BOSS4_STATES: readonly Boss4StateFn[] = [
+  Boss4StateEntranceCarried,         // 0     FUN_004938B0
+  Boss4StateEntranceDropped,         // 1     FUN_00493B40
+  Boss4StateEntranceCarried,         // 2     FUN_004938B0
+  Boss4StateEntranceDropped,         // 3     FUN_00493B40
+  Boss4StateApproachCamera,          // 4     FUN_00493DC0
+  Boss4StateChooseAction,            // 5     FUN_00494010
+  Boss4StateHoldThenApproach,        // 6     FUN_004943B0
+  Boss4StateFaceCamera,              // 7     FUN_004944A0
+  Boss4StatePlayArrivalClip,         // 8     FUN_004945A0
+  Boss4StateTurnToStoredPoint,       // 9     FUN_00494610
+  Boss4StateTurnClipThenApproach,    // 0xA   FUN_00494730
+  Boss4StateWalkToPoint,             // 0xB   FUN_004958F0
+  Boss4StateWithdrawAndAdvancePhase, // 0xC   FUN_00495A20
+  Boss4StateWaitForPlayer,           // 0xD   FUN_00495D30
+  Boss4StateHoldUntilPlayerFree,     // 0xE   FUN_00495D90
+  Boss4StateStrikeClip65,            // 0xF   FUN_00494A80
+  Boss4StateStrikeClip7A,            // 0x10  FUN_00494B80
+  Boss4StateStrikeClip7B,            // 0x11  FUN_00494C70
+  Boss4StateThrowHeldProp,           // 0x12  FUN_00494D60
+  Boss4StateChargePastCamera,        // 0x13  FUN_00495070
+  Boss4StateFlinch,                  // 0x14  FUN_00495340
+  Boss4StateKnockDown,               // 0x15  FUN_00495570
+  Boss4StateDeath,                   // 0x16  FUN_00495770
+  Boss4StateDebugFreeMove,           // 0x17  FUN_00495E20
 ];
 
 /**
- * A state this port does not run.
+ * `Boss4Update` — `FUN_004919D0`. One boss, one 60 Hz frame, in the engine's
+ * order:
  *
- * `[diverges]`, and deliberately inert: an actor parked here keeps its clip
- * and its position, which is the same thing a class with no module at all
- * gets. The alternative — falling through to some other state — would be a
- * boss doing something the engine never has it do, and that is worse than a
- * boss standing still.
- */
-function Boss4StateNotPorted(obj: Actor, b: Blk): void {
-  void obj; void b;
-}
-
-/**
- * `Boss4Update` — `FUN_004919D0`. One boss, one 60 Hz frame.
- *
- * The engine's body is eleven calls around one indirect dispatch. Six of them
- * are the arena and the render side and are not ported; each is named on its
- * own line so that the shape of the frame survives the omissions.
+ * ```
+ * Boss4ResolveShot; Boss4AdvanceArenaWaypoint; Boss4ArmPhaseWhenInsideArena
+ * Boss4TrackWhenInsideArena; g_class19_states[state]()
+ * Boss4FootfallShake; Boss4AdvanceMotionAndDrawHeldProps; Boss4AdvancePhaseAtFloor
+ * ActorRegisterCameraPoint(state+0x70); Boss4PlayCameraCue()
+ * flags & 2: the fence -- KeepInsideEdge(P2,P3,5,1) && (P4,P5,5,1); (P3,P4,5,1) && (P5,P2,0,1)
+ * Boss4AdjustRank(); Boss4ChainsawCueByCameraFrame()
+ * g_active_cam_path == tail+0x40 && g_cam_path_frame == tail+0x42: release the hit slot, ActorDespawn
+ * ```
  */
 export function Boss4Update(obj: Actor, f: ClassFrame): void {
-  void f;
   const b = obj.boss4;
   if (!b) return;
+  const { host, rng, events } = f;
 
-  Boss4ResolveShot(obj, b);
-  // `Boss4AdvanceArenaWaypoint` (`FUN_004928D0`),
-  // `Boss4ArmPhaseWhenInsideArena` (`FUN_00492350`) and
-  // `Boss4TrackWhenInsideArena` (`FUN_004922C0`) run here, in that order. **Not
-  // ported**, and between them they are the whole arena progression: the phase
-  // at `state+0x08` never moves in this port, so `Boss4ResolveShot`'s floor
-  // never lifts. See this file's header.
+  Boss4ResolveShot(obj, b, host, rng, events);
+  Boss4AdvanceArenaWaypoint(obj, b);
+  Boss4ArmPhaseWhenInsideArena(obj, b);
+  Boss4TrackWhenInsideArena(obj, b);
+  BOSS4_STATES[b.state]?.(obj, b, f);
+  Boss4FootfallShake(obj, b, f.eye, host, events);
+  Boss4AdvanceMotionAndDrawHeldProps(obj, b, host);
+  Boss4AdvancePhaseAtFloor(obj, b);
+  // ---- `ActorRegisterCameraPoint(state+0x70)` -- `FUN_00409B70`, called at
+  // `0x00491A49`, every frame and ungated. The director makes this call for
+  // every actor (`director.ts`), with this class's rise from
+  // `Boss4Handler.cameraRise` -- `state+0x70` -- and its candidacy from
+  // `tracksCamera`; the call is here in the engine's frame order. ----
+  Boss4PlayCameraCue(b, host);
+  if (b.flags & Boss4Flag.Fenced) {
+    const a = b.arena;
+    if (Boss4KeepInsideEdge(obj.pos, a[2], a[3], FENCE_MARGIN, true)) {
+      Boss4KeepInsideEdge(obj.pos, a[4], a[5], FENCE_MARGIN, true);
+    }
+    // `PUSH 0` for the last margin -- a float 0.0, not the 5.0 the other
+    // three are given (`0x00491AE8`).
+    if (Boss4KeepInsideEdge(obj.pos, a[3], a[4], FENCE_MARGIN, true)) {
+      Boss4KeepInsideEdge(obj.pos, a[5], a[2], 0, true);
+    }
+  }
+  Boss4AdjustRank(b);
+  Boss4ChainsawCueByCameraFrame(b, events);
 
-  (BOSS4_STATES[b.state] ?? Boss4StateNotPorted)(obj, b);
-
-  // `FUN_00492460`, `FUN_00492620` and `FUN_00492790` — the per-frame
-  // movement and the part placement. `[open]`, and the render side's.
-  // `ActorRegisterCameraPoint(state+0x70)` (`FUN_00409B70`) follows them; the
-  // director makes that call for every actor, with this class's rise from
-  // `Boss4Handler.cameraRise` and its camera candidacy from `tracksCamera`. `FUN_00493090`, `FUN_004934D0` and `FUN_004935E0` likewise.
-
-  // `MOVSX EAX, word ptr [EDI + 0x40]; CMP [g_active_cam_path], EAX` — the
-  // despawn, on the camera reaching the pair in the descriptor tail at `+0x40`
-  // and `+0x42`. `[diverges]` the port has no path to that tail: the bundle
-  // carries a placement's fields by name and these two have none, so the boss
-  // is retired by the block ending rather than by the camera. It is the last
-  // thing in the engine's frame and it never fires before the death state has.
+  // `MOVSX EAX, word ptr [EDI + 0x40]; CMP [g_active_cam_path], EAX` and the
+  // frame against `+0x42` -- the despawn, on the outro cut's first frame.
+  const tail = obj.class19;
+  if (tail && G.g_active_cam_path === tail.despawn_path
+      && G.g_cam_path_frame === tail.despawn_frame) {
+    // `if (obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0` -- inline, and then
+    // `ActorDespawn`'s own release finds the flag and does it again.
+    if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+    ActorDespawn(obj);
+  }
 }
 
 /** The sidebar's line for this class. */
@@ -235,44 +278,52 @@ function Boss4Debug(obj: Actor): ActorDebug {
   const b = obj.boss4;
   if (!b) return { summary: "boss 4 · no state block" };
   const name = Boss4State[b.state] ?? `state ${b.state}`;
-  const ported = BOSS4_STATES[b.state] !== Boss4StateNotPorted;
   const detail = [
     `hp ${obj.hp}/${obj.maxHp}, floor ${b.phaseHpFloor.toFixed(1)}`,
-    `phase ${b.phase}, head hits ${b.headHits}`,
+    `phase ${b.phase}, rank ${b.rank}, head hits ${b.headHits}`,
+    `props left ${b.propsLeft}, cue ${b.cueStep !== 0
+      ? `path ${b.cuePath} frame ${b.cueFrame.toFixed(1)}/${b.cueEnd}`
+      : b.flags & Boss4Flag.CueQueued ? `queued ${b.cueQueued}` : "none"}`,
     obj.flags & ActorFlag.ShotImmune
-      ? "refusing shots — the phase floor is reached"
+      ? "refusing damage -- the phase floor or a transition"
       : "damageable on bone 2",
   ];
   detail.push(`flags 30/31/32: ${G.g_script_flags[BOSS4_DROP_FLAG] ? 1 : 0}`
     + `/${G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ? 1 : 0}`
     + `/${G.g_script_flags[BOSS4_DEAD_FLAG] ? 1 : 0}`);
   return {
-    summary: `boss 4 · ${name} sub ${b.sub}${ported ? "" : " (not ported)"}`,
+    summary: `boss 4 · ${name} sub ${b.sub}`,
     detail,
-    hot: !ported || b.state === Boss4State.Death,
+    hot: b.state === Boss4State.Death,
   };
 }
 
 export const Boss4Handler: ClassHandler = {
   init: Boss4Init,
   update: Boss4Update,
-  // The death is four sub-states long and the flag lands seventy frames into
-  // it, so stopping on the frame the hit points run out would hold the gate
-  // shut for ever. Class 0x31 is under the same rule for the same reason.
+  // The death is several sub-states long and the flag lands seventy frames
+  // into it. The class never sets `obj.dead` -- its death is its own state
+  // machine off `obj+0x34` bit `0x4000000` -- so this is a declaration of
+  // intent rather than a path taken.
   updatesWhenDead: true,
   // `Boss4ResolveShot` reads `obj+0x34` bit 3 itself: the boss has one weak
-  // bone and a damage table of its own, and `ResolveHit` would charge it off
-  // the zombie's.
+  // bone and a damage table of its own.
   ownsShotResult: true,
-  // 31 and not 32 — see this file's header. The flag whose whole chain this
-  // module runs is declared; the one it cannot reach is not.
-  raisesScriptFlag: BOSS4_FIGHT_READY_FLAG,
-  // `Boss4Update` (`FUN_004919D0`) calls `ActorRegisterCameraPoint(state
-  // +0x70)` at `0x00491A49` every frame, ungated, and so registers for the
-  // camera whenever `obj+0x34` bit `0x10000` is clear -- `Boss4StateDeath`
-  // is what sets it. Not in `ENEMY_CLASSES`, so this is the only way in.
+  // `Boss4StateEntranceCarried`/`Dropped` raise 31 and `Boss4StateDeath` 32
+  // (`0x004958C7`); every link between them is ported.
+  raisesScriptFlag: [BOSS4_FIGHT_READY_FLAG, BOSS4_DEAD_FLAG],
+  // `Boss4Update` calls `ActorRegisterCameraPoint(state+0x70)` at
+  // `0x00491A49` every frame, ungated, and so registers for the camera
+  // whenever `obj+0x34` bit `0x10000` is clear. Not in `ENEMY_CLASSES`, so
+  // this is the only way in.
   tracksCamera: () => true,
-  cameraRise: (obj) => obj.boss4?.walkSpeed ?? 0,
+  cameraRise: (obj) => obj.boss4?.cameraRise ?? BOSS4_CAMERA_RISE,
+  // **Nothing to give back.** The engine has no sweep, and this class's own
+  // states keep both enemy counts. Its `obj+0x121` is the player an attack is
+  // aimed at (`ActorPickTargetPlayer`), not a permit it holds -- the generic
+  // release would free `g_attack_permits[target]`, which may be the one the
+  // thrown prop holds.
+  onDeadSweep: () => {},
   debug: Boss4Debug,
 };
 

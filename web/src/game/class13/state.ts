@@ -52,6 +52,24 @@ export enum CarrierRoutine0State {
 }
 
 /**
+ * `sub+0x0C` as `CarrierPropRoutine2` (`FUN_004408A0`) switches on it -- a
+ * third reading of the word (`L3`). Jump table `0x00440AB4`, four entries;
+ * 4 and above is past it and runs only the draw.
+ */
+export enum CarrierRoutine2State {
+  /** `0x004408C4` -- allocate the 0xC-byte ride block; selector 9 parks. */
+  Begin = 0,
+  /** `0x00440944` -- ride `op_` path 0x175 over camera frames 190..360. */
+  Ride = 1,
+  /** `0x004409B4` -- landed: wait for paths 180/188 at frame 250. */
+  Wait = 2,
+  /** `0x004409E2` -- the doors swing open over 59 frames. */
+  Open = 3,
+  /** Past the table: the doors hold, and only the draw runs. */
+  Parked = 4,
+}
+
+/**
  * The `CarrierPropSelectRoutine` (`FUN_00440190`) selectors this port runs —
  * the keys of `g_carrier_prop_routines` in `class13/index.ts`, which
  * `test/port.test.ts` holds equal to this.
@@ -154,10 +172,11 @@ export interface ScriptedPropTail {
   selector: number;
   /**
    * `sub+0x0C` — the behaviour's own state word, and whose it is depends on
-   * the selector: {@link CarrierState} for 1, {@link CarrierRoutine0State}
-   * for 0.
+   * the selector: {@link CarrierState} for 1 and 6,
+   * {@link CarrierRoutine0State} for 0, {@link CarrierRoutine2State} for 2
+   * and 9.
    */
-  state: CarrierState | CarrierRoutine0State;
+  state: CarrierState | CarrierRoutine0State | CarrierRoutine2State;
   /** `sub+0x0E` — the camera path that despawns the prop. */
   camPath: number;
   /** `sub+0x10` — ...and the frame on it. */

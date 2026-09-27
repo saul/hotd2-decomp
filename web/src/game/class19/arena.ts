@@ -21,7 +21,8 @@ import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
 import { G } from "../globals";
 import { Boss4QueueCameraCue } from "./camera";
 import {
-  Boss4Clip, Boss4Flag, Boss4PhaseFloor, Boss4State, Boss4Tables,
+  Boss4BlendUnlessPlaying, Boss4Clip, Boss4Enter, Boss4Flag, Boss4PhaseFloor,
+  Boss4State, Boss4Tables,
 } from "./state";
 import type { Boss4Block as Blk } from "./state";
 import type { Vec3 } from "../vec";
@@ -147,13 +148,13 @@ export function Boss4ArmPhaseWhenInsideArena(obj: Actor, b: Blk): void {
     if (!Boss4KeepInsideEdge(obj.pos, a[3], a[4], FENCE_MARGIN, false)) return;
     if (!Boss4KeepInsideEdge(obj.pos, a[4], a[5], FENCE_MARGIN, false)) return;
     obj.flags &= ~ActorFlag.ShotImmune;
-    b.phaseHpFloor = Boss4PhaseFloor(obj.maxHp, b.phase);
+    b.phaseHpFloor = Math.fround(Boss4PhaseFloor(obj.maxHp, b.phase));
     b.flags |= Boss4Flag.Fenced;
     b.flags &= ~Boss4Flag.ArmPending;
     return;
   }
   obj.flags &= ~ActorFlag.ShotImmune;
-  b.phaseHpFloor = Boss4PhaseFloor(obj.maxHp, b.phase);
+  b.phaseHpFloor = Math.fround(Boss4PhaseFloor(obj.maxHp, b.phase));
   b.flags &= ~Boss4Flag.ArmPending;
 }
 
@@ -289,7 +290,7 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
   if (phase === 17) {
     if (b.state >= Boss4State.StrikeClip65) return;
     ActorSetMotionBlended(obj, Boss4Clip.Walk6D, 0, 10);
-    Enter(b, Boss4State.FaceCamera);
+    Boss4Enter(b, Boss4State.FaceCamera);
     TailA(obj, b);
     return;
   }
@@ -304,7 +305,7 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
       return;
     }
     if (ActorPointIsAhead(obj, { x: pt[0], y: obj.pos.y, z: pt[1] })) {
-      Enter(b, Boss4State.ChooseAction);
+      Boss4Enter(b, Boss4State.ChooseAction);
     }
     return;
   }
@@ -313,36 +314,30 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
     case 1:
     case 10:
       if (ActorPointIsAhead(obj, { x: seat.x, y: obj.pos.y, z: seat.z })) {
-        if (obj.motion !== Boss4Clip.Idle) {
-          ActorSetMotionBlended(obj, Boss4Clip.Idle, 0, 10);
-        }
+        Boss4BlendUnlessPlaying(obj, Boss4Clip.Idle, 10);
       } else {
         Seat(obj, seat);
         ActorSetMotion(obj, Boss4Clip.Idle);
       }
-      Enter(b, Boss4State.FaceCamera);
+      Boss4Enter(b, Boss4State.FaceCamera);
       TailA(obj, b);
       return;
     case 3:
       Seat(obj, seat);
-      if (obj.motion !== Boss4Clip.Idle) {
-        ActorSetMotionBlended(obj, Boss4Clip.Idle, 0, 2);
-      }
-      Enter(b, Boss4State.FaceCamera);
+      Boss4BlendUnlessPlaying(obj, Boss4Clip.Idle, 2);
+      Boss4Enter(b, Boss4State.FaceCamera);
       TailA(obj, b);
       return;
     case 4:
       Seat(obj, seat);
       ActorSetMotion(obj, Boss4Clip.Idle);
-      Enter(b, Boss4State.FaceCamera);
+      Boss4Enter(b, Boss4State.FaceCamera);
       TailA(obj, b);
       return;
     case 8:
       Seat(obj, seat);
-      if (obj.motion !== Boss4Clip.Walk6D) {
-        ActorSetMotionBlended(obj, Boss4Clip.Walk6D, 0, 5);
-      }
-      Enter(b, Boss4State.FaceCamera);
+      Boss4BlendUnlessPlaying(obj, Boss4Clip.Walk6D, 5);
+      Boss4Enter(b, Boss4State.FaceCamera);
       TailA(obj, b);
       return;
     case 2:
@@ -350,7 +345,7 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
     case 12:
     case 15:
       Seat(obj, seat);
-      Enter(b, Boss4State.PlayArrivalClip);
+      Boss4Enter(b, Boss4State.PlayArrivalClip);
       TailA(obj, b);
       obj.flags &= ~ActorFlag.NoCameraTrack;
       return;
@@ -359,16 +354,14 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
     case 11:
     case 16:
       Seat(obj, seat);
-      Enter(b, Boss4State.ChargePastCamera);
+      Boss4Enter(b, Boss4State.ChargePastCamera);
       b.w74 = CHARGE[phase][0];
       b.w78 = CHARGE[phase][1];
       TailA(obj, b);
       return;
     case 13:
-      if (obj.motion !== Boss4Clip.Idle) {
-        ActorSetMotionBlended(obj, Boss4Clip.Idle, 0, 5);
-      }
-      Enter(b, Boss4State.TurnToStoredPoint);
+      Boss4BlendUnlessPlaying(obj, Boss4Clip.Idle, 5);
+      Boss4Enter(b, Boss4State.TurnToStoredPoint);
       b.w74 = Boss4State.TurnClipThenApproach;
       b.f84 = obj.pos.x;
       b.f88 = PHASE13_TURN_Z;
@@ -379,7 +372,7 @@ export function Boss4AdvanceArenaWaypoint(obj: Actor, b: Blk): void {
       // `PUSH 0; PUSH 0xA; PUSH 0x6B` -- a start **cursor** of 10, which is
       // authored frame 5 in the port's unit, and no fade.
       ActorSetMotionBlended(obj, Boss4Clip.Idle, 5, 0);
-      Enter(b, Boss4State.FaceCamera);
+      Boss4Enter(b, Boss4State.FaceCamera);
       TailA(obj, b);
       obj.flags &= ~(ActorFlag.NoCameraTrack | ActorFlag.PoseFrozen);
       return;
@@ -391,12 +384,6 @@ function Seat(obj: Actor, s: Seat): void {
   obj.pos.x = s.x;
   obj.pos.z = s.z;
   obj.yaw = s.yaw;
-}
-
-/** `state = n; sub = 0`. `[port-only]` as a function. */
-function Enter(b: Blk, state: Boss4State): void {
-  b.state = state;
-  b.sub = 0;
 }
 
 /**

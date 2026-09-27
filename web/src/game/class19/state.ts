@@ -26,6 +26,9 @@
  * routines, each with its instruction. `docs/formats/bundle.md`'s rule.
  */
 import type { Boss4TablesJson } from "../../bundle/stage";
+import type { Actor } from "../actor";
+import { ActorSetMotionBlended } from "../class30/motion_cue";
+import { G } from "../globals";
 import { T } from "../tables";
 import { vec3, type Vec3 } from "../vec";
 
@@ -252,7 +255,12 @@ export interface Boss4Block {
   cuePath: number;
   /** `+0x22` -- s16, the cue queued to start, -1 none. */
   cueQueued: number;
-  /** `+0x24` -- f32, this phase's hit-point floor. */
+  /**
+   * `+0x24` -- f32, this phase's hit-point floor, stored rounded
+   * (`FSTP float`) by the entrance and `Boss4ArmPhaseWhenInsideArena`.
+   * `Boss4ResolveShot` compares against it; the arena and the choice state
+   * form the product afresh ({@link Boss4PhaseFloor}).
+   */
   phaseHpFloor: number;
   /**
    * `+0x28..+0x6F` -- P0..P5, the phase's arena, y = `pos.y` at the load.
@@ -361,3 +369,56 @@ export const BOSS4_CAMERA_RISE = 6;
 /** The hands the throw swaps on bone 8, and bone 5's blade. */
 export const BOSS4_HAND_BONE = 8;
 export const BOSS4_BLADE_BONE = 5;
+
+/**
+ * "Unless playing `clip`, blend to it" -- `CMP dword ptr [char+0x20], clip;
+ * JZ` around `ActorSetMotionBlended(char, clip, 0, fade)` (`FUN_004119A0`),
+ * the guard almost every clip change in this class is written with. The
+ * engine's primitive has no guard of its own, and the port's does not either,
+ * so the test is here where the exe has it. `[port-only]` as a function.
+ */
+export function Boss4BlendUnlessPlaying(obj: Actor, clip: number,
+                                        fade: number): void {
+  if (obj.motion === clip) return;
+  ActorSetMotionBlended(obj, clip, 0, fade);
+}
+
+/**
+ * `|pos - (x, z)|` in x/z -- the distance every range test in the class forms
+ * inline (`FLD pos.z; FSUB z; FLD pos.x; FSUB x; ...; FSQRT`). `[port-only]`
+ * as a function.
+ */
+export function Boss4DistanceXZ(obj: Actor, x: number, z: number): number {
+  const dz = obj.pos.z - z;
+  const dx = obj.pos.x - x;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+/**
+ * No player can be attacked: none in play, or the only one holds a taken
+ * attack permit on his last life. `Boss4StateChooseAction`'s phase-3 and
+ * phase-13 arms (`0x00494173`) and `Boss4StateHoldUntilPlayerFree`'s sub 1
+ * (`0x00495DA3`) test exactly this inline:
+ *
+ * ```
+ * g_players_in_play == 0
+ * || (g_players_in_play == 1 && g_attack_permits[g_active_player] != 0
+ *     && g_player_lives[g_active_player] == 1)
+ * ```
+ *
+ * The engine's free permit is 0 and the port's -1. `[port-only]` as a
+ * function.
+ */
+export function Boss4NoPlayerFree(): boolean {
+  if (G.g_players_in_play === 0) return true;
+  if (G.g_players_in_play !== 1) return false;
+  const p = G.g_active_player;
+  return (G.g_attack_permits[p] ?? -1) !== -1
+    && (G.g_player_lives[p] ?? 0) === 1;
+}
+
+/** `state = n; sub = 0` -- the two byte stores every transition makes. */
+export function Boss4Enter(b: Boss4Block, state: Boss4State): void {
+  b.state = state;
+  b.sub = 0;
+}

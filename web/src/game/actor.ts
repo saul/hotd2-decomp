@@ -920,6 +920,16 @@ export enum ThrowerStance {
  * a frame test written `===` could be stepped over -- which is what the
  * `struck` latch on this interface's owner used to exist to work around.
  */
+/**
+ * One skeleton record's rotation in a fade's snapshot, overriding the clip's:
+ * `(rx, ry, rz)` BAMS, applied `RotZ RotY RotX` like every record. See
+ * {@link ActorBase.fadeFrom}.
+ */
+export interface FadeRecord {
+  record: number;
+  rot: [number, number, number];
+}
+
 export interface ActorClip { motion: number; ticks: number; loop: boolean }
 
 /**
@@ -1770,8 +1780,14 @@ export interface ActorBase {
    *
    * Without it every transition is a cut, which is what made the bite jump
    * straight into the walk-back.
+   *
+   * `records` are skeleton records whose snapshotted rotation is **not** the
+   * clip's: a state that writes the drawn pose's records before it blends
+   * (`Boss4StateTurnClipThenApproach`, `FUN_00494730`, rewrites records 1 and
+   * 9 at `char+0x10C` and `+0x58C`) hands the renderer the BAMS it wrote, and
+   * the fade dissolves from those.
    */
-  fadeFrom: { motion: number; ticks: number } | null;
+  fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
   /**
    * Frames of the cross-fade left. It starts at the fade length and the
    * fade is over when it goes **below zero**, so the incoming clip is held on

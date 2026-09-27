@@ -100,7 +100,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x61` | `ResultCardInstall` (`FUN_00434EF0`) | 5 | **The stage-clear card**, and `wait_script_flag 0xFE`'s only opener: a whole-image byte search for `0x009C72FE` finds exactly one instruction, `MOV byte ptr [0x009C72FE], 0x1` at `0x0043567C`, and it is this actor's last act. Sub 0 drops `g_nFiringGate`, latches `obj+0x11C = 0x1A4` (420 frames) and falls into the tally; sub 1 hands over to the score count-up once the dwell is at or below `0x78`; every arm ends on the same decrement. **Ported** (`game/class61/`), on the same terms as 0x60. | `[proved]` |
 | `0x62` | `ResultCardTally` (`FUN_00435930`) | 5 | The result card's companion, placed by `spawn_simple 0x00977244` immediately before it. Loads texbank `0x16A` and sound `0x7C`, then walks the per-scene rescue list at `0x0055DF50` against `g_civilians_rescued_by_scene`. **Writes no script flag** — every writer in the image falls outside its range — so the port names it and gives it no module. | `[proved]` |
 | `0x63` | `InitCutsceneSkipWatcher` (`FUN_00435F20`) | 45 | The commonest `spawn_simple` record (`0x0097724C`), at the top of most steps in every stage. Installs `CheckCutsceneSkipRequest` from the task table at `0x005934E4`; the installed update `ActorKill`s outright while `DAT_009A2D7C` is zero. **Writes no script flag.** | `[proved]` |
-| `0x46` | `PlaceBats` (`FUN_0042D9C0`) | 27 | **The bat**, and two things say so: character type `0x1E` is `zabat.bin` and the wing actor's `0x1F` is `zabat_wing.bin`, and every death plays `COMMON2\KOUMORI1_22.wav` or `KOUMORI2_22.wav` — *kōmori*. (These are the records the owl row notes as existing and unplayed by class `0x43`; this is the class that plays them.) A **placer**: every path through the handler ends in `ActorKill`. `obj+0x130C`, the opcode-0x09 descriptor's `+0x25`, picks one of three flights, and each member is a `0x13D8`-byte actor with clip `0x407`, a 4.0 shot sphere, `BatDrawBoneSlot` at `obj+0x12EC` and a separate wing actor from `SpawnBatWings`. **Sub-type 0** (24 spawns, four flights of six) is one bat per descriptor running `BatDiveUpdate`; **sub-type 1** (1 spawn) builds 25 running `BatScatterUpdate`; **sub-type 2** (2 spawns) builds 6, or 8 with two players, running `BatSwarmUpdate`. Sub-types 0 and 2 increment **both** enemy counters and give them back on despawn; sub-type 1 touches neither. 80 points, no hit points at all — `obj+0x11C` is a member index, not health. **Ported** (`game/class46/`) — all three sub-types, the wing actor, the shot and the splash. Sub-type 0 draws in full, wings included, off a synthetic placement the exporter emits for the wing. The two placers' runtime children run but are not drawn: they have no descriptor to key a row on. See *The bat's four flights* below. | `[proved]` |
+| `0x46` | `PlaceBats` (`FUN_0042D9C0`) | 27 | **The bat**, and two things say so: character type `0x1E` is `zabat.bin` and the wing actor's `0x1F` is `zabat_wing.bin`, and every death plays `COMMON2\KOUMORI1_22.wav` or `KOUMORI2_22.wav` — *kōmori*. (These are the records the owl row notes as existing and unplayed by class `0x43`; this is the class that plays them.) A **placer**: every path through the handler ends in `ActorKill`. `obj+0x130C`, the opcode-0x09 descriptor's `+0x25`, picks one of three flights, and each member is a `0x13D8`-byte actor with clip `0x407`, a 4.0 shot sphere, `BatDrawBoneSlot` at `obj+0x12EC` and a separate wing actor from `SpawnBatWings`. **Sub-type 0** (24 spawns, four flights of six) is one bat per descriptor running `BatDiveUpdate`; **sub-type 1** (1 spawn) builds 25 running `BatScatterUpdate`; **sub-type 2** (2 spawns) builds 6, or 8 with two players, running `BatSwarmUpdate`. Sub-types 0 and 2 increment **both** enemy counters and give them back on despawn; sub-type 1 touches neither. 80 points, no hit points at all — `obj+0x11C` is a member index, not health. **Ported** (`game/class46/`) — all three sub-types, the wing actor, the shot and the splash, and every bat and wing is drawn: the exporter emits a synthetic row at the address the port's placer gives each runtime child (`BatChildAt`, `BatWingAt`), parented to the placer's descriptor — one wing row per sub-type-0 descriptor, 25 bodies and 25 wings behind the scatter's, 8 and 8 behind each swarm's. See *The bat's four flights* below. | `[proved]` |
 | `0x45` | `Boss3ClassHandler` (`FUN_0041FC00`) | 37 | **The stage-3 boss** ("the Tower"): `boss3.bin` (`0x49`) and `boss3l.bin` (`0x48`), sounds `STAGE3_SE\BOSS3_n` / `STAGE6_SE\BOSS3_n`. `desc+0x25` is a subtype (jump table `0x0041FD8C`): 0 the opening head and 1 its bystander (blocks 11/13), **2 the five heads** (`desc+0x22` = index 0..4; idx 2 is the big `boss3l` head and the only one that counts), 3 two held bystanders, 5 **the body** that swims a path, drives the camera and lunges; 4 is `NoOpStub`. `g_boss3_variant` from the block: stage 3 blocks 11/15 → 0, 13/17 → 1, stage 6 block 2 → 2 (heads only). Writes **no** script flag; reads 0–4. Opens the `wait_enemies_present 0` gates: head idx 2 decrements both counters 180 frames after the heads fall, the body at its death. Heads 45 hp (30 in stage 6) on the weak bone with the jaw open; the body 120 hp. `BossHpBarSpawn(320, 35)` twice per stage-3 fight. Read in full, not ported: [`docs/re/boss-tower.md`](../re/boss-tower.md). | `[proved]` |
 
 The row above used to read *"`0x20`, `0x45`, `0x46` … Not reached. `0x20`
@@ -150,18 +150,46 @@ permit: an unshot bat always connects, and always leaves.** That is also why
 the `wait_enemies_present 0` at the end of each of these steps cannot deadlock
 — the flight ends itself.
 
-A hit is only taken while `obj+0x1376` is 1 or 2, so a **sub-type-0 bat is
-invulnerable for its whole launch delay**. Sub-type 2 gates only on
-`!= 2`, so a swarm bat *is* killable while it is still orbiting; the two
-handlers differ in that one comparison and nowhere else that matters.
+A diving bat takes a hit only while `obj+0x1376` is 1 — the test is
+`!= 2 && != 0` (`0x0042E294`..`0x0042E29F`) — so it **cannot die during its
+launch delay; but it is registered for the shot test in every state**, and
+bit 3 of `obj+0x34` is cleared only by the arm that takes the hit
+(`AND AL, 0xF7` at `0x0042E2A5`). A shot that lands while it waits is still
+standing on its first flying frame, and kills it then. Sub-type 2 gates only
+on `!= 2`, so a swarm bat *is* killable while it is still orbiting. The
+scatter has no test at all: it takes its hit **inside** its flying arm, which
+then runs on — the kill frame is still a flying frame — and it registers for
+the shot test at the end of that arm alone (`0x0042ED16`), so a waiting or
+falling scatter bat cannot be hit.
 
 The wing is a second skinned actor, not a part of the body. `BatWingUpdate`
 (`FUN_0042F660`) finds its body each frame in `g_bat_members`
-(`0x007DC918`, 25 slots per sub-type), seats itself on the body's bone matrix
-translated `(0, 1, 2)`, copies the body's motion frame counter, and **despawns
-the frame its body's slot goes empty**. Its clip comes from a paired lookup in
+(`0x007DC918`, 25 slots per sub-type), seats itself at
+`g_camera_blocks[cur] * body+0x2C4 * (0, 1, 2)` — `body+0x2C4` being node 1's
+draw record `+0x28`, the matrix `SkeletonEmitNode` (`FUN_004114C0`) stores
+after the node's own translate and turn, so the seat carries the body's pitch
+and roll, its 0.6 model scale, the clip's root height and both of the clip's
+rotations — takes `obj+0x64 = 0xE800` and `obj+0x68 = body+0x68 + 0x8000`,
+copies the body's motion frame counter, and **despawns the frame its body's
+slot goes empty**. It never registers for the shot test or the camera: the
+routine ends on its draw (`0x0042F7D8`). Its clip comes from a paired lookup in
 `g_bat_body_motions` / `g_bat_wing_motions`, both of which ship five identical
 rows, so the answer is always `0x406`.
+
+Every body and every wing builds its model (`ActorBuildSkinnedModel`, so each
+claims a `g_hit_slots` entry in build order), is drawn in rotation order 5
+(`obj+0x1FC = 5`: `Rz Ry Rx` after the translate) and at its character type's
+size (0.6 for `0x1E`, 0.7 for `0x1F`).
+
+**The splash** `[proved]`: a scatter or swarm corpse that falls past
+`y = -25` calls `SpawnBatSplash` (`FUN_0042F980`) with its own `x, y, z`,
+which allocates a `0x50`-byte task running `BatSplashUpdate` (`FUN_0042F930`)
+at `(x, -25.0, z)` — the `y` argument is not read. The task draws
+`AssetDrawSlot(0x1339 + n)` under a bare `MatrixTranslate`, `n` running 0 to
+`0x1D` one a frame from the frame it is made, and kills itself after the
+thirtieth: `common.bin` 307..336, the same run the owl's and the fish's water
+splashes use. The sound (`SIBUKI8`) is the caller's, and the swarm plays it in
+stage 3 only.
 
 `tools/verify_bats.py` asserts the whole chain — the 24/1/2 sub-type split,
 the four complete flights, the twelve spline slots they reach, both motion

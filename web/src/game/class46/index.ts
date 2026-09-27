@@ -991,7 +991,7 @@ export function BatDiveUpdate(obj: Actor, f: ClassFrame): void {
  * heavier gravity than the other two sub-types', to a splash at `y = -25`.
  * Its one descriptor is stage 3 block 2 step 4, over water.
  *
- * **The hit is taken inside the flying arm** (`0x0042EAF9`..`0x0042EBD3`),
+ * **The hit is taken inside the flying arm** (`0x0042EB04`..`0x0042EBD3`),
  * not ahead of the switch as the other two take theirs, and the arm then
  * carries on: the kill frame is a flying frame, with the damped velocity put
  * through the flight's `1.05`/`1.08` and the flight's own despawn test and

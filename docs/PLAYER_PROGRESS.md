@@ -1831,7 +1831,7 @@ Three sub-types, and they disagree about more than their trajectory:
 | descriptors | 24 | 1 | 2 |
 | members each | 1 | 25 | 6, or 8 with two players |
 | enemy counters | both | **neither** | both |
-| killable while waiting | no | no | **yes** |
+| killable while waiting | no, but a hit then is kept and kills it at launch | cannot be hit | **yes** |
 | how it ends | reaches the eye, takes a life | passes `z = -3500` | reaches the eye, takes a life |
 | corpse gravity | `0.02722`, 80 frames | `0.04083`, to `y = -25` | `0.02722`, to `y = -25` |
 
@@ -1873,9 +1873,11 @@ Four readings from this that are worth keeping:
   arithmetic now.
 * **Two objects collapsed into one, and the order of reads survived it.** The
   engine's placer seeds the new object's previous position from `sin`/`cos` of
-  *its own* yaw, which is still zero, and only then copies the placer's yaw
-  over it. The port's sub-type-0 member *is* the placement's actor, whose yaw
-  is already the descriptor's `0x8000`, so the zero is written out explicitly.
+  *its own* yaw, which is still zero, and only then copies the placer's pitch
+  and yaw over it. The port's sub-type-0 member *is* the placement's actor, so
+  the seed is taken at an explicit zero and the member keeps the descriptor's
+  `0x8000`. (The first cut zeroed the yaw itself as well, and every waiting bat
+  faced the wrong way until its spline turned it.)
 
 ### The wings, and the bundle's first synthetic placement
 
@@ -1910,11 +1912,43 @@ instance whose bones carry no sphere, and the actor publishes `obj+0x70` as
 `(x, y + 1, z)` the way its update does. See `L47` for how the false
 verification happened.
 
-**The splash divergence stands; the wing one is gone.** What is still not
-ported: the **scatter's twenty-five and the swarm's six** are runtime children
-of a placer with no descriptor to key a row on, so they run — hits, score,
-counters, the strike — and are not drawn; and the **splash** is a sound and a
-despawn rather than thirty frames of `common.bin`.
+### Every bat drawn, the wing where the exe seats it, and the splash
+
+**The scatter's twenty-five and the swarm's six are drawn**, bodies and wings.
+All three sub-types draw the same way in the exe — character type `0x1E` or
+`0x1F` through the skinned draw, keyed on the type alone — and the port's
+character layer binds geometry by spawn address, so the exporter now emits a
+synthetic row at the address the port's `PlaceBats` gives each runtime child,
+parented to the placer: 25 bodies and 25 wings behind the scatter's
+descriptor, 8 and 8 behind each swarm's. `BatChildAt` had given the member four
+bits and the scatter has twenty-five, so members 16..24 shared 0..8's
+addresses and wings rode the wrong bodies; it has five now.
+`tools/bats_look.mjs` drives stage 3 block 2 in the page, screenshots both
+flights and a splash, and checks every live body has a live wing on every
+frame.
+
+**The wing sits on the body.** `BatWingUpdate` seats it at node 1's matrix
+times `(0, 1, 2)`; the port had `(0, 1, 2)` in the body's yaw alone, which,
+against a clip whose root record is a half turn tipped 21°, put the wings four
+units off the body on the far side. The matrix is built in `game/` the way the
+draw builds it (`BatBodyNodeMatrix`), and `test:render` checks it against the
+pose the character layer makes. `render/characters/bat.ts` draws both roots in
+order 5 with their pitch and roll — a corpse tumbles, a wing is pitched
+`0xE800` — and at their model's own size, 0.6 and 0.7; every other skinned
+actor is still drawn at 1.0 (`ActorModelScale`'s declared divergence).
+
+**The splash** is `BatSplashUpdate`'s thirty models of `common.bin` 307..336 on
+the water plane, `game/class46/splash.ts` and `render/bat_splash.ts`.
+
+**And the shot is the engine's.** The bat registers for the shot test from its
+own routines (`registersForShotTest`): the dive and the swarm in every state,
+the scatter only at the end of its flying arm, and **the wing never** — the
+character layer's pick had walked every drawn bone, and the wing's bone 3
+carries a 0.3 sphere, so a wing could take a bullet meant for the bat behind
+it. The hit bit is cleared only by the arm that takes it, so a diving bat hit
+during its launch delay dies when it launches; the scatter's kill frame is a
+flying frame; the swarm's dive bobs by 5.0, not the orbit's 8.0; and every
+member and wing claims its hit slot.
 
 ## A fifth: the horde, class 0x40 — worms that come up out of the street
 

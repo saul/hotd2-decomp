@@ -36,7 +36,10 @@ import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
+import { ActorHeadingErrorTo, ActorTurnTowardXZ } from "../src/game/actor_turn";
+import { CamStashPathRange, CameraPlayStashedPath, CameraStepRailTick }
+  from "../src/game/camera/rail";
+import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
@@ -211,7 +214,16 @@ import {
 import {
   RELOAD_VOICE, SHOOT_VOICE,
 } from "../src/game/hud_readout";
-import { HUD_READOUT_SPRITES, HudSprite } from "../src/game/hud_sprites";
+import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
+  from "../src/game/hud_sprites";
+import { BOSS_HP_BAR_KILL, BossHpBarSpawn, BossHpBarsTick, BossHpFractionOf }
+  from "../src/game/boss_hp_bar";
+import { BannerStep, BossBannersTick, BossIntroBannerSpawn }
+  from "../src/game/boss_banner";
+import { bannerCardSlots } from "../src/game/boss_banner_records";
+import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
+  ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
+  from "../src/game/screen_sprite";
 import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
@@ -13857,6 +13869,9 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
   const tickBoss = (obj: Actor, n: number): void => {
     for (let i = 0; i < n; i++) {
       g_class_handlers[SpawnClass.Boss4]?.update(obj, bossFrame);
+      // The name banner the entrance spawns is a task of its own, stepped
+      // after the boss the way the task walk reaches it.
+      BossBannersTick(NULL_HOST);
       // `ActorAdvanceMotion` is the engine's `obj+0x194` step and it is what
       // moves the play cursor these states test against; without it every clip
       // test in this class is frozen on frame 0.
@@ -18974,6 +18989,297 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   step();
   check("a player out of lives draws no readout", G.g_screen_sprite_draws.length === 0,
         `${G.g_screen_sprite_draws.length}`);
+}
+
+// The boss health bar -- `BossHpBarSpawn` (`FUN_00435E50`) and
+// `BossHpBarUpdate` (`FUN_00435C80`) -- driven the way a boss drives it: by
+// writing `g_boss_hp_fraction` and nothing else.
+{
+  ResetGameGlobals();
+  /** One task-walk's worth: reset the queue, step the bars, flush. */
+  const frame = () => {
+    G.g_screen_sprite_draws = [];
+    ScreenSpriteQueueReset();
+    BossHpBarsTick();
+    ScreenSpriteQueueFlush();
+    return G.g_screen_sprite_draws;
+  };
+  BossHpBarSpawn(320, 35);
+  const bar = G.g_boss_hp_bars[0];
+  check("BossHpBarSpawn seats a full fill and an empty bar",
+        G.g_boss_hp_fraction === 1 && G.g_boss_hp_bars.length === 1
+        && bar.shown === 0 && bar.trail === 1 && bar.blink === 0);
+
+  let drawn = frame();
+  check("the flush draws the four sprites newest first: frame, fill, trail, "
+        + "empty", drawn.map((d) => d.id).join() === [
+          BossHpBarSprite.Frame, BossHpBarSprite.Fill, BossHpBarSprite.Trail,
+          BossHpBarSprite.Empty].join(),
+        drawn.map((d) => d.id.toString(16)).join());
+  const fill = drawn[1];
+  check("the fill runs from x - 144, 18 tiles to a full track, anchor (1, 2)",
+        fill.x === 320 - 144 && fill.y === 35
+        && fill.sx === bar.shown * 18 && (fill.flags & 0xf) === 9
+        && (fill.flags & 0x700) === 0x700,
+        JSON.stringify(fill));
+  check("...and the frame is centred on the spawn point, 1.2 x 0.8",
+        drawn[0].x === 320 && drawn[0].sx === 1.2
+        && Math.abs(drawn[0].sy - 0.8) < 1e-6 && (drawn[0].flags & 0xf) === 10);
+  check("a filling bar has no trail", bar.trail === bar.shown);
+
+  // 0.01 a frame in single precision: a hundred additions fall short of 1.0,
+  // and the hundred-and-first is clamped to it. Doubles would get there on
+  // the hundredth, which is what this is here to notice.
+  let frames = 1;
+  while (bar.shown < 1 && frames < 1000) { frame(); frames++; }
+  check("the bar fills in 101 frames of 0.01 in floats", frames === 101,
+        `${frames}`);
+
+  G.g_boss_hp_fraction = BossHpFractionOf(150, 300);
+  drawn = frame();
+  check("damage shows on the frame it lands, and leaves a trail",
+        bar.shown === 0.5 && bar.trail === Math.fround(1 - 0.001)
+        && drawn[2].sx === (bar.trail - bar.shown) * 18,
+        `${bar.shown} ${bar.trail}`);
+  let drain = 1;
+  while (bar.trail > bar.shown && drain < 2000) { frame(); drain++; }
+  check("the trail drains 0.001 a frame and stops at the fill", drain === 501
+        && bar.trail === bar.shown, `${drain}`);
+
+  // Dead: 0.0 exactly blinks for 120 frames, five hidden in every ten, then
+  // the task kills itself.
+  G.g_boss_hp_fraction = BossHpFractionOf(0, 300);
+  let shown = 0;
+  let hidden = 0;
+  let life = 0;
+  while (G.g_boss_hp_bars.length && life < 1000) {
+    if (frame().length) shown++; else hidden++;
+    life++;
+  }
+  check("a fill of 0 blinks the bar for 120 frames and ends it",
+        life === 120 && G.g_boss_hp_bars.length === 0
+        && hidden > 50 && shown > 50, `${life} ${shown}/${hidden}`);
+
+  BossHpBarSpawn(320, 35);
+  G.g_boss_hp_fraction = BOSS_HP_BAR_KILL;
+  check("-1 kills the bar at once, drawing nothing",
+        frame().length === 0 && G.g_boss_hp_bars.length === 0);
+
+  BossHpBarSpawn(320, 35);
+  check("the bar is plain data a snapshot can copy",
+        JSON.stringify(JSON.parse(JSON.stringify(G.g_boss_hp_bars)))
+        === JSON.stringify(G.g_boss_hp_bars));
+  ResetGameGlobals();
+  check("a scene reset takes the bar task with the task list",
+        G.g_boss_hp_bars.length === 0);
+
+  ScreenSpriteQueueReset();
+  for (let i = 0; i < SCREEN_SPRITE_QUEUE_CELLS + 5; i++) {
+    DrawScreenSpriteLayered(0x59, i, 0, 1, 1, 1, 0, i & 3);
+  }
+  G.g_screen_sprite_draws = [];
+  ScreenSpriteQueueFlush();
+  const layers = G.g_screen_sprite_draws.map((d) => d.x & 3);
+  check("the queue holds 28 cells and draws layer by layer",
+        G.g_screen_sprite_draws.length === SCREEN_SPRITE_QUEUE_CELLS
+        && SCREEN_SPRITE_QUEUE_CELLS === 28
+        && layers.every((l, i) => i === 0 || l >= layers[i - 1]),
+        layers.join());
+  G.g_screen_sprite_draws = [];
+  ScreenSpriteQueueReset();
+}
+
+// The boss-name banner -- `BossIntroBannerSpawn` (`FUN_00437A70`) and
+// `BossIntroBannerUpdate` (`FUN_00437AC0`) -- with Judgment's record: flag 2,
+// camera path 48, the boss's card in slot 0x181D.
+{
+  ResetGameGlobals();
+  // A path whose eye is the frame it was asked for, so the flight is visible.
+  const path = {
+    pose: (t: number, _roll: boolean,
+           out: { eye: Vec3; target: Vec3; roll: number }) => {
+      out.eye.x = t; out.eye.y = 1; out.eye.z = 2;
+      out.target.x = t; out.target.y = 1; out.target.z = 10;
+      out.roll = 0;
+      return out;
+    },
+  };
+  const host: GameHost = {
+    ...NULL_HOST,
+    camPath: (slot) => (slot === 48 ? path as unknown as CamPath : null),
+  };
+  G.g_camera_block_eye = { x: 7, y: 8, z: 9 };
+  G.g_camera_block_target = { x: 70, y: 80, z: 90 };
+  const b = BossIntroBannerSpawn(0x00570ec8);
+  BossBannersTick(host);
+  check("a banner waits on its record's flag", b.step === BannerStep.Waiting
+        && G.g_camera_driver_held === 0, `step ${b.step}`);
+
+  ResetGameGlobals();
+  G.g_camera_block_eye = { x: 7, y: 8, z: 9 };
+  G.g_camera_block_target = { x: 70, y: 80, z: 90 };
+  G.g_script_flags[2] = 1;
+  const j = BossIntroBannerSpawn(0x00570ec8);
+  BossBannersTick(host);
+  check("...and the preload tests the flag on its own frame "
+        + "(`JMP 0x00437d70`), so a raised flag seats it at once",
+        j.step === BannerStep.Seat && j.frame === 1, `${j.step} ${j.frame}`);
+  BossBannersTick(host);
+  check("the seat parks the camera driver and lays out eight cards, the "
+        + "boss's own seventh",
+        G.g_camera_driver_held === 1 && j.step === BannerStep.Slide
+        && j.frame === 2 && j.slots.join() === [0x7ed, 0x7ee, 0x7ee, 0x7ee,
+          0x7ee, 0x7ee, 0x181d, 0x7ee].join()
+        && j.cards[7].z < j.cards[0].z && j.cards[0].scale === Math.fround(0.03),
+        `${j.slots.map((v) => v.toString(16)).join()}`);
+  G.g_camera_mode = CameraMode.TrackEnemies;
+  G.g_camera_free = 1;
+  CameraDriverSelectMode();
+  check("...and a held driver is mode 6, which does nothing and frees nothing",
+        G.g_camera_mode === CameraMode.Held && G.g_camera_free === 0);
+
+  BossBannersTick(host);
+  check("the slide flies the camera block along the record's path",
+        G.g_camera_block_eye.x === 2 && G.g_camera_block_target.z === 10,
+        JSON.stringify(G.g_camera_block_eye));
+  let restacked = -1;
+  while (j.frame < 0x50 && j.step === BannerStep.Slide) {
+    BossBannersTick(host);
+    if (restacked < 0 && j.cards[0].yaw === -0x4200) restacked = j.frame;
+  }
+  check("card 0 turns 0x300 a frame from frame 15, is re-stacked edge-on and "
+        + "stops half way round",
+        restacked === 15 + 22 && j.cards[0].yaw === -0x8000
+        && j.cards[0].z === Math.fround(-1 - 8 * Math.fround(0.01))
+        && j.cards[6].yaw === 0 && j.cards[7].yaw === 0,
+        `${restacked} ${j.cards[0].yaw} ${j.cards[0].z}`);
+
+  G.g_screen_sprite_draws = [];
+  BossBannersTick(host);
+  const names = G.g_screen_sprite_draws.filter((d) => d.id === 0xba
+                                              || d.id === 0xc8);
+  check("frame 0x50 starts the hold and the two names, at alpha 0",
+        j.step === BannerStep.Hold && names.length === 2
+        && names[0].alpha === 0 && names[0].x === 310 && names[1].x === 526,
+        JSON.stringify(names));
+  for (let i = 0; i < 60; i++) BossBannersTick(host);
+  G.g_screen_sprite_draws = [];
+  BossBannersTick(host);
+  check("...and they are fully in sixty frames later",
+        G.g_screen_sprite_draws.some((d) => d.id === 0xba && d.alpha === 1));
+  check("every card but the boss's has shrunk away; the boss's is 0.06 and "
+        + "where the record sends it",
+        j.cards.every((c, i) => i === 6 || c.scale === 0)
+        && j.cards[6].scale === Math.fround(0.06)
+        && j.cards[6].x === Math.fround(0.06)
+        && j.cards[6].y === Math.fround(0.01),
+        JSON.stringify(j.cards[6]));
+
+  let n = 0;
+  while (G.g_boss_banners.length && n < 1000) { BossBannersTick(host); n++; }
+  check("on frame 300 the banner opens the shutter, lets the camera go, puts "
+        + "the block back and ends",
+        G.g_bHudShutterState === 1 && G.g_camera_driver_held === 0
+        && G.g_camera_block_eye.x === 7 && G.g_camera_block_target.z === 90
+        && G.g_boss_banners.length === 0 && j.frame === 300,
+        `${G.g_bHudShutterState} ${j.frame} ${JSON.stringify(G.g_camera_block_eye)}`);
+
+  const k = BossIntroBannerSpawn(0x00570ec8);
+  BossBannersTick(host);
+  BossBannersTick(host);
+  check("a banner mid-flight is plain data a snapshot can copy",
+        JSON.stringify(JSON.parse(JSON.stringify(k))) === JSON.stringify(k));
+  ResetGameGlobals();
+  check("a scene reset takes the banner and its hold on the camera with it",
+        G.g_boss_banners.length === 0 && G.g_camera_driver_held === 0);
+  check("the exporter ships each spawning class's cards: the two backs and "
+        + "the boss's own, and nothing for a class with no banner",
+        bannerCardSlots([0x19]).join() === [0x7ed, 0x7ee, 0x1873].join()
+        && bannerCardSlots([0x22, 0x14]).join()
+           === [0x7ed, 0x7ee, 0x181d, 0x1821].join()
+        && bannerCardSlots([0x45, 0x30]).length === 0);
+}
+
+// `MarkActorShot` (`FUN_00404DB0`)'s per-player byte at `obj+0x190 + player`:
+// the bone's index for a bone hit, 1 for an actor hit whole.
+{
+  ResetGameGlobals();
+  const a = makeActor(0x77, SpawnClass.Zombie, 1, "znassb");
+  MarkActorShot(a, 1, 2);
+  check("a bone hit writes the bone into the shooter's own byte, and the "
+        + "shooter's bit", a.shotBones[1] === 2 && a.shotBones[0] === 0
+        && (a.flags & ActorFlag.HitByPlayer1) !== 0
+        && (a.flags & ActorFlag.Hit) !== 0, JSON.stringify(a.shotBones));
+  MarkActorShot(a, 0, 0, true);
+  check("...and a whole-actor hit writes 1, leaving the other player's",
+        a.shotBones[0] === 1 && a.shotBones[1] === 2,
+        JSON.stringify(a.shotBones));
+}
+
+// `ActorHeadingErrorTo` (`FUN_00426090`) and `ActorTurnTowardXZ`
+// (`FUN_00426120`), at a quarter turn -- where a wrong sign or axis shows (L48).
+{
+  const a = makeActor(0x78, SpawnClass.Zombie, 1, "znassb");
+  a.yaw = 0;
+  check("facing +z, an offset along +z is dead ahead",
+        ActorHeadingErrorTo(a, 0, 1) === 0);
+  check("...and one along +x is a quarter turn round, as VecToAngles "
+        + "measures a yaw", ActorHeadingErrorTo(a, 1, 0) === 0x4000,
+        `${ActorHeadingErrorTo(a, 1, 0)}`);
+  a.yaw = 0x4000;
+  check("turned a quarter, +x is dead ahead and +z a quarter the other way",
+        ActorHeadingErrorTo(a, 1, 0) === 0
+        && ActorHeadingErrorTo(a, 0, 1) === -0x4000,
+        `${ActorHeadingErrorTo(a, 1, 0)} ${ActorHeadingErrorTo(a, 0, 1)}`);
+  a.yaw = 0;
+  ActorTurnTowardXZ(a, 1, 0, 0x200);
+  check("a turn takes at most its step", a.yaw === 0x200, `${a.yaw}`);
+  a.yaw = 0x3f00;
+  ActorTurnTowardXZ(a, 1, 0, 0x200);
+  // The error is `__ftol` of a float: 0x100 comes back as 255.99..., and the
+  // truncation is the engine's, so the turn lands within one BAMS.
+  check("...and closes the error in one step when it is inside it",
+        Math.abs(a.yaw - 0x4000) <= 1, `${a.yaw}`);
+  a.yaw = 0;
+  ActorTurnTowardXZ(a, -1, 0, 0x200);
+  check("...and turns the other way for the other side", a.yaw === -0x200,
+        `${a.yaw}`);
+}
+
+// The stashed rail, owned by `G`: `CameraStepRailTick` (`FUN_0040C790`) and
+// `CameraPlayStashedPath` (`FUN_0040C8A0`) step `g_stashed_path_frame` and
+// publish `g_rail_frame`, and a range written from game code -- the stage-4
+// boss's camera cues -- is what they play next.
+{
+  ResetGameGlobals();
+  const drawn = (tick: () => boolean): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i < 100 && tick(); i++) out.push(G.g_rail_frame);
+    return out;
+  };
+  CamStashPathRange(351, 384);
+  const six = drawn(CameraStepRailTick);
+  check("state (2,6) increments before it publishes and stops at the end: "
+        + "351..384 draws 352..384",
+        six[0] === 352 && six[six.length - 1] === 384 && six.length === 33,
+        `${six[0]}..${six[six.length - 1]} (${six.length})`);
+  CamStashPathRange(351, 384);
+  const seven = drawn(CameraPlayStashedPath);
+  check("...and state (2,7)'s JG lets one frame past the end through: "
+        + "352..385", seven[seven.length - 1] === 385 && seven.length === 34,
+        `${seven[0]}..${seven[seven.length - 1]} (${seven.length})`);
+  check("a finished rail publishes nothing more", !CameraStepRailTick()
+        && G.g_rail_frame === 385);
+  // What `Boss4PlayCameraCue` does: overwrite both stash words from game code.
+  G.g_stashed_path_frame = 600;
+  G.g_stashed_path_end_frame = 640;
+  check("...until game code moves the range on, and it plays from there",
+        CameraStepRailTick() && G.g_rail_frame === 601,
+        `${G.g_rail_frame}`);
+  ResetGameGlobals();
+  check("a reset leaves no stale range for a seek to replay",
+        G.g_stashed_path_frame === 0 && G.g_stashed_path_end_frame === 0
+        && G.g_rail_frame === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

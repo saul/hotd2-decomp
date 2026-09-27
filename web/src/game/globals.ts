@@ -30,7 +30,9 @@ import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
-import type { ScreenSprite } from "./screen_sprite";
+import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
+import type { BossHpBar } from "./boss_hp_bar";
+import type { BossBanner } from "./boss_banner";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
@@ -488,6 +490,73 @@ export const G = {
    * this field was named that until the two were noticed side by side.
    */
   g_screen_sprite_draws: [] as ScreenSprite[],
+  /**
+   * `g_screen_sprite_queue` — `0x007C21A8`. The layered sprite queue
+   * `DrawScreenSpriteLayered` (`FUN_0041C800`) fills and
+   * `ScreenSpriteQueueFlush` (`FUN_0041CF30`) draws after the task walk. The
+   * engine's is four header cells and a chain; the port keeps the cells in
+   * push order and the flush walks them the way the chain would.
+   */
+  g_screen_sprite_queue: [] as QueuedScreenSprite[],
+  /**
+   * `g_boss_hp_fraction` — `0x009C8E10`. The boss health bar's fill, 0..1:
+   * hit points over maximum, written by whichever boss is fighting and read
+   * only by `BossHpBarUpdate` (`FUN_00435C80`). -1.0 kills the bar; 0.0
+   * blinks it out. See `game/boss_hp_bar.ts`.
+   */
+  g_boss_hp_fraction: 0,
+  /**
+   * `g_boss_engaged` — `0x009CA0EA`. 1 while a boss fight is on: every boss
+   * class raises it when it joins and drops it when it dies. Its one reader
+   * is `BossModeChapterCardUpdate` (`FUN_00434920`), Boss Mode's fight clock,
+   * which the port does not run -- so the port writes it where the engine
+   * does and nothing reads it yet.
+   */
+  g_boss_engaged: 0,
+  /**
+   * `[port-only]` as a pool: the `BossHpBarUpdate` tasks `BossHpBarSpawn`
+   * (`FUN_00435E50`) allocates, in creation order. Plain records for the
+   * same reason as `g_severed_heads`.
+   */
+  g_boss_hp_bars: [] as BossHpBar[],
+  /**
+   * `[port-only]` as a pool: the `BossIntroBannerUpdate` tasks
+   * `BossIntroBannerSpawn` (`FUN_00437A70`) allocates, in creation order.
+   * See `game/boss_banner.ts`.
+   */
+  g_boss_banners: [] as BossBanner[],
+  /**
+   * `g_camera_driver_held` — `0x009CA094`. While it is 1,
+   * `CameraDriverSelectMode` (`FUN_00402650`) forces camera mode 6, the hook
+   * that does nothing, and drops `g_camera_free` -- the camera block is left
+   * to whoever is writing it. Its only reader. The boss-name banner raises it
+   * for the length of its flight, and the bosses' own camera takeovers do too;
+   * `ResetSceneCombatState` (`FUN_0045EEC0`, the `checkpoint` opcode) zeroes
+   * it at `0x0045EF12`.
+   */
+  g_camera_driver_held: 0,
+  /**
+   * `g_stashed_path_frame` — `0x009C70AC`, and `g_stashed_path_end_frame` —
+   * `0x009C70B0`. The stashed rail's cursor and its end, as integers.
+   * `CamStashPathRange` (`FUN_00403490`) writes them from a `cam_play` with
+   * `flags & 2`; the hooks scene states (2,6) and (2,7) install step the
+   * cursor; `Boss4PlayCameraCue` overwrites both with its own cue. One owner,
+   * in the data segment -- see `game/camera/rail.ts`.
+   */
+  g_stashed_path_frame: 0,
+  g_stashed_path_end_frame: 0,
+  /**
+   * `g_rail_frame` — `0x009C70BC`. The frame the stashed rail last drew, as a
+   * **float**, which `CameraDriverSelectMode` and
+   * `CameraDriverFromDeferredPose` truncate into `g_cam_path_frame`.
+   */
+  g_rail_frame: 0,
+  /**
+   * `g_force_rail_advance` — `0x009CA098`. At 1 the stashed rail steps even
+   * while the screen shakes or nobody is in play. `EvtOpForceCameraPathAdvance37`
+   * (`FUN_0045FA60`) writes it; `ResetSceneOnEnter` zeroes it at `0x0045EE7E`.
+   */
+  g_force_rail_advance: 0,
   /**
    * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
    * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
@@ -1762,9 +1831,10 @@ export type Globals = typeof G;
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
  *   port loads collision and assets from the bundle, not from here |
  * | `g_scene_tick_counter` (`0x009A2BAC`, at `0x0045EE23`) | ✅ |
+ * | `g_force_rail_advance` (`0x009CA098`, at `0x0045EE7E`) | ✅ |
  * | `g_screen_shake_frames = 0` (`0x0045EE29`) | ✅ |
  * | the unread words: `DAT_009C6F1C`, `DAT_009C6F20`,
- *   `DAT_009C71C0`, `DAT_009CA098`, `DAT_009A5C30`, `DAT_009A34DC = 1` |
+ *   `DAT_009C71C0`, `DAT_009A5C30`, `DAT_009A34DC = 1` |
  *   `[open]` |
  *
  * The ✅ rows are the ported part (a count here rots, L16). The name is the
@@ -1819,6 +1889,9 @@ export function ResetSceneOnEnter(): void {
   G.g_bHudShutterState = 2;
   // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
   G.g_screen_shake_frames = 0;
+  // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
+  // again in a new scene.
+  G.g_force_rail_advance = 0;
 }
 
 /**
@@ -1890,6 +1963,22 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  // The scene's task list is rebuilt on a scene load, and a bar task goes
+  // with it; the fill itself is a data-segment word and is left alone.
+  G.g_boss_hp_bars = [];
+  G.g_boss_banners = [];
+  G.g_screen_sprite_queue = [];
+  // ...and a banner that was flying the camera took its hold with it. The
+  // engine's own reset is the scene's first `checkpoint`; this is the port's
+  // load, which reaches the same state without running one.
+  G.g_camera_driver_held = 0;
+  // `[port-only]`: the stashed rail's words. The engine never clears them on
+  // a scene load -- every stashed play writes both before a scene state reads
+  // them -- but a seek has to arrive at the same world from a cold start and
+  // from 1500 frames in, and left alone they carry the old stage's range.
+  G.g_stashed_path_frame = 0;
+  G.g_stashed_path_end_frame = 0;
+  G.g_rail_frame = 0;
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
   G.g_point_blood_sprays = [];

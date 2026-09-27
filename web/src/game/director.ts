@@ -31,6 +31,9 @@ import { PlayerTasksRun } from "./player_shell";
 import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
+import { BossHpBarsTick } from "./boss_hp_bar";
+import { BossBannersTick } from "./boss_banner";
+import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
@@ -593,6 +596,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
  */
 function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
+  // `ScreenSpriteQueueReset` (`FUN_0041CF00`), from `SetupSceneProjection`
+  // ahead of the walk: the layered queue starts every frame empty.
+  ScreenSpriteQueueReset();
   PlayerTasksRun({ host, rng, events });
   DropDueShotRequests();
   // The heads the burst threw, stepped where the engine steps its tasks.
@@ -709,7 +715,17 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `CamAdvancePathFrame` before any of this.
   CameraActorTick();
   CameraRunQueuedAction();
+  // The tasks a boss allocates: the name banner and the health bar. After
+  // the camera tasks, which the scene created before any boss existed, and
+  // after the boss -- `ActorAlloc` appends. The banner flies the camera block
+  // here, with the camera driver parked so nothing above undoes it.
+  BossBannersTick(host);
+  BossHpBarsTick();
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
+  // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the
+  // layered queue after the task walk, so its sprites land after every one
+  // the frame drew directly.
+  ScreenSpriteQueueFlush();
   return { lookAt: G.g_camera_block_target };
 }

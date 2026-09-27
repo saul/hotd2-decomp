@@ -54,9 +54,13 @@ export const OPS: Record<number, OpImpl> = {
       },
     },
     0x37: {                                     // force_camera_path_advance
-      status: "tracked",
+      // `EvtOpForceCameraPathAdvance37` (`FUN_0045FA60`): the operand into
+      // `g_force_rail_advance`, which the stashed rail's gate reads -- so the
+      // rail keeps stepping through a shake or with nobody in play.
+      status: "done",
       run: (w, op) => {
         w.forcePathAdvance = !!op.force_path_advance;
+        G.g_force_rail_advance = op.force_path_advance ? 1 : 0;
         return undefined;
       },
     },

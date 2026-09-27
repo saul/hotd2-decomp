@@ -46,6 +46,12 @@ export type ShotPick =
       at: number;
       /** The bone whose hit sphere the ray entered. */
       bone: number;
+      /**
+       * Hit **whole**, as the one sphere at `obj+0x124` rather than through
+       * a bone -- `ShotTestSphere` (`FUN_00404630`)'s else arm, which
+       * `MarkActorShot` records as bone byte 1 rather than an index.
+       */
+      whole?: boolean;
       /** Where the ray met it, in world space — for the impact effect. */
       point: Vec3;
     }

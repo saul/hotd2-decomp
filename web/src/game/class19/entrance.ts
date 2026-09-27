@@ -28,7 +28,7 @@ import type { Actor } from "../actor";
 import { G } from "../globals";
 import { ActorSetMotion, ActorStartFade } from "../class30/motion_cue";
 import { MotionPlayFrame } from "../tables";
-import { BossIntroBannerSpawn } from "./banner";
+import { BossIntroBannerSpawn } from "../boss_banner";
 import {
   BOSS4_PHASE_HP_FRACTION, Boss4Clip, Boss4Flag, Boss4State,
 } from "./state";
@@ -74,7 +74,7 @@ enum Sub {
  * `0x00493AE0`, which is the only place either constant appears.
  */
 export function Boss4StateEntranceCarried(obj: Actor, b: Blk): void {
-  Boss4Entrance(obj, b, Boss4State.EntranceCarriedPlaced, 0, 0);
+  Boss4Entrance(obj, b, Boss4State.EntranceCarriedPlaced, 0x005972f8, 0);
 }
 
 /**
@@ -86,7 +86,7 @@ export function Boss4StateEntranceCarried(obj: Actor, b: Blk): void {
  * `g_boss4_phase_hp_fraction`, which holds the same nine fractions again.
  */
 export function Boss4StateEntranceDropped(obj: Actor, b: Blk): void {
-  Boss4Entrance(obj, b, Boss4State.EntranceDroppedPlaced, 1, 9);
+  Boss4Entrance(obj, b, Boss4State.EntranceDroppedPlaced, 0x00597338, 9);
 }
 
 /**
@@ -102,8 +102,10 @@ function Boss4Entrance(obj: Actor, b: Blk, placedState: number,
                        banner: number, phase: number): void {
   if (b.sub === Sub.Setup) {
     // `PUSH 0x5972f8; CALL BossIntroBannerSpawn` — the boss makes its own
-    // name banner, and that banner is what will open the shutter.
-    b.banner = BossIntroBannerSpawn(banner);
+    // name banner, and that banner is what will open the shutter. It is a
+    // task of its own from here on (`game/boss_banner.ts`); the boss keeps
+    // no hold on it, as the engine keeps none.
+    BossIntroBannerSpawn(banner);
     // `MOV byte ptr [ECX + 0x8], 0x0` (or 9) — the arena phase.
     b.phase = phase;
     // `FILD obj+0x11E; FMUL [EDX*4 + g_boss4_phase_hp_fraction]; FSTP

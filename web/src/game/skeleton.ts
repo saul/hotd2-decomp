@@ -42,7 +42,9 @@
  */
 import type { BakedMotion } from "../bundle";
 import type { Actor } from "./actor";
-import { MotionFlag } from "./actor";
+import { ActorFlag, MotionFlag } from "./actor";
+import { ActorClaimHitSlot } from "./hit_slots";
+import { ActorModelScale } from "./root_motion";
 import { MatrixInterpolateSwingTwist, type Mat3 } from "./class44/swing_twist";
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
@@ -82,6 +84,13 @@ export interface SkeletonBone {
    * root and never gets one — the engine never stores it.
    */
   mat: Mat;
+  /**
+   * `+0x68..+0x70` — the bone's hit centre, `+0x7C` (the type's sphere
+   * centre) through the node matrix. Written only by a draw that draws the
+   * node -- a slot, `model+0x64` bit 0 -- and only while `obj+0x34` bit
+   * `0x8000` is clear, so a hidden or untestable model keeps the last one.
+   */
+  hit: number[];
 }
 
 /**
@@ -127,6 +136,13 @@ export interface SkeletonModel {
    * stack; the renderer needs it for bone 0's own part.
    */
   rootMat: Mat;
+  /**
+   * `*(model+0x40) + 1` — the draw byte of the character's first **part**
+   * (the vertex-blended meshes `SkeletonDrawWalk`'s part loop draws, 8 bytes
+   * a part). `ActorBuildSkinnedModel` sets every part's to 1; class 0x14's
+   * entrances clear and restore part 0's with the model's draw bit.
+   */
+  part0: number;
 }
 
 /** `[port-only]` A fresh block with `bones` records, as `ActorBuildSkinnedModel` zeroes it. */
@@ -138,8 +154,10 @@ export function MakeSkeletonModel(bones: number, order: number): SkeletonModel {
     order, baseline: [0, 0, 0],
     bones: Array.from({ length: bones }, () => ({
       a: [0, 0, 0], sa: [0, 0, 0], sb: [0, 0, 0], mat: MatIdentity(),
+      hit: [0, 0, 0],
     })),
     rootMat: MatIdentity(),
+    part0: 1,
   };
 }
 
@@ -150,6 +168,10 @@ interface SkeletonTree {
   offset: number[][];
   /** Bone -> its children, in table order. Index 0 is the root's. */
   children: number[][];
+  /** Bone -> its record's draw slot, `R+0x00`. */
+  slot: number[];
+  /** Bone -> its local hit centre, `R+0x7C..+0x84`. */
+  hitCentre: number[][];
 }
 
 const trees = new Map<string, SkeletonTree>();
@@ -168,13 +190,17 @@ function TreeOf(obj: Actor): SkeletonTree | null {
   const n = type.bone_count;
   const offset = Array.from({ length: n }, () => [0, 0, 0]);
   const children: number[][] = Array.from({ length: n }, () => []);
+  const slot = new Array<number>(n).fill(0);
+  const hitCentre = Array.from({ length: n }, () => [0, 0, 0]);
   for (const b of type.bones) {
     if (b.bone < 0 || b.bone >= n) continue;
     offset[b.bone] = [b.offset[0], b.offset[1], b.offset[2]];
+    slot[b.bone] = b.slot;
+    if (b.hit_centre) hitCentre[b.bone] = [...b.hit_centre];
     const parent = b.parent === null ? 0 : (type.bones[b.parent]?.bone ?? 0);
     children[parent].push(b.bone);
   }
-  const tree = { boneCount: n, offset, children };
+  const tree = { boneCount: n, offset, children, slot, hitCentre };
   trees.set(key, tree);
   return tree;
 }
@@ -433,7 +459,9 @@ function SkeletonApplyRootMotion(obj: Actor, skel: SkeletonModel, T: number[],
   const L = MotionPlayLength(obj, skel.motion);
   // The damper: a jump of more than a quarter clip (a loop wrap) steps the
   // baseline toward T by a clip's worth instead of taking the whole jump.
-  if (Math.abs(skel.prevFrame - skel.frame) > Math.trunc(L / 4)) {
+  // `[port-only]` `L > 0`: a clip the bundle does not carry has no length,
+  // and the engine has no such clip -- every motion it plays is loaded.
+  if (L > 0 && Math.abs(skel.prevFrame - skel.frame) > Math.trunc(L / 4)) {
     skel.baseline = [0, 1, 2].map((c) => Math.fround(
       Math.fround(Math.fround(T[c] - skel.baseline[c]) / L) + T[c]));
   }
@@ -565,11 +593,19 @@ function SkeletonEmitNode(obj: Actor, skel: SkeletonModel, tree: SkeletonTree,
   R.a = a;
   MatCopy(R.mat, top);
   // `CMP [R], 0` (the record has a slot) `&& model+0x64 & 1` (drawn): the
-  // tracked bone's world translation into `obj+0x100`. Bone 1 for a type
-  // outside 0..0x14; the humanoid rules for 2 and 9 do not apply.
-  if (bone === SKELETON_TRACKED_BONE && (obj.motionFlags & 1)
-      && obj.charType >= 0x15) {
-    MatrixGetTranslation(top, obj.lookAt);
+  // tracked bone's world translation into `obj+0x100`, then the hit centre.
+  // Bone 1 for a type outside 0..0x14; the humanoid rules for 2 and 9 do not
+  // apply.
+  if (tree.slot[bone] !== 0 && (obj.motionFlags & MotionFlag.Drawn)) {
+    if (bone === SKELETON_TRACKED_BONE && obj.charType >= 0x15) {
+      MatrixGetTranslation(top, obj.lookAt);
+    }
+    // `if (!(obj+0x34 & 0x8000)) R+0x68 = MatrixTransformPoint(R+0x7C)`.
+    if (!(obj.flags & ActorFlag.NoShotTest)) {
+      const c = tree.hitCentre[bone];
+      MatrixTransformPoint(top, { x: c[0], y: c[1], z: c[2] }, _hit);
+      R.hit[0] = _hit.x; R.hit[1] = _hit.y; R.hit[2] = _hit.z;
+    }
   }
   for (const c of tree.children[bone]) {
     SkeletonEmitNode(obj, skel, tree, c, top, w);
@@ -578,6 +614,8 @@ function SkeletonEmitNode(obj: Actor, skel: SkeletonModel, tree: SkeletonTree,
 
 /** `sVar3 = 1` in `SkeletonEmitNode` for a type outside 0..0x14. */
 const SKELETON_TRACKED_BONE = 1;
+
+const _hit = { x: 0, y: 0, z: 0 };
 
 /**
  * `SkeletonDrawWalk` — `FUN_004110D0`, its pose half: the cursor, the root,
@@ -625,4 +663,77 @@ export function SkeletonBonePoint(obj: Actor, bone: number, local: Vec3,
   if (!m) return false;
   MatrixTransformPoint(m, local, out);
   return true;
+}
+
+/**
+ * `SkeletonBuildAndPose` — `FUN_00410590`. The model's first pose, from frame
+ * 0 of the motion already in `+0x20`: the root translation into `+0x6C` **and
+ * the root-motion baseline** `+0x1160`, bone 0's angles, then every node the
+ * root's children reach (`SkeletonWalkNode`). A skeleton with nodes also puts
+ * the actor in the per-bone shot test: `obj+0x34 |= 0x80`.
+ *
+ * The matrix work is the engine's draw-time stack and is thrown away with it;
+ * the port poses the nodes through {@link SkeletonEmitNode} at frame 0, which
+ * stores the same angles and matrices the first draw would.
+ */
+function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
+  const tree = TreeOf(obj);
+  if (!tree) return;
+  if (tree.children[0].length) obj.flags |= ActorFlag.ShootPerBone;
+  const m = MotionOf(obj, skel.motion);
+  const T = m ? FrameRoot(m, 0) : [0, 0, 0];
+  skel.rootCur = [...T];
+  skel.baseline = [...T];
+  const b0 = skel.bones[0];
+  if (b0 && m) b0.a = FrameAngles(m, tree.boneCount, 0, 0);
+  const top = MatIdentity();
+  MatrixTranslate(top, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixScale(top, obj.scale, obj.scale, obj.scale);
+  // `+0x68` is still 5 here -- the caller writes its own order afterwards --
+  // so the build poses Z, Y, X whatever the class then plays with.
+  MatrixRotateZ(top, obj.roll);
+  MatrixRotateY(top, obj.yaw);
+  MatrixRotateX(top, obj.pitch);
+  if (obj.motionFlags & MotionFlag.RootMotion) MatrixTranslate(top, 0, T[1], 0);
+  else MatrixTranslate(top, T[0], T[1], T[2]);
+  const a = b0?.a ?? [0, 0, 0];
+  MatrixRotateZ(top, a[2]);
+  MatrixRotateY(top, a[1]);
+  MatrixRotateX(top, a[0]);
+  MatCopy(skel.rootMat, top);
+  for (const c of tree.children[0]) SkeletonEmitNode(obj, skel, tree, c, top, 0);
+}
+
+/**
+ * `ActorBuildSkinnedModel` — `FUN_00410440`, for an actor that carries the
+ * model block. The caller has put the motion in `+0x20`.
+ *
+ * ```
+ * M[0x116C] = scale by character type
+ * M[0]=0; M[0x10]=0; M[0x18]=0; M[0x08]=0; M[0x30]=0; M[0x28]=0; M[0x37]=0; M[0x36]=0
+ * SkeletonAssignSubtreeTrack(0, 0)          ; every bone on track 0
+ * M[0x64] = 3; M[0x68] = 5                  ; drawn, root motion; Z, Y, X
+ * M[0x3C] = parts; M[0x40] = ActorAllocSub(parts * 8), each {0, 1}
+ * SkeletonBuildAndPose(M, pos, recs)
+ * hooks; M[0x34] = 0; ActorClaimHitSlot(g_cur_actor)
+ * ```
+ */
+export function ActorBuildSkinnedModel(obj: Actor): void {
+  const skel = obj.skel;
+  if (!skel) return;
+  obj.scale = ActorModelScale(obj.charType);
+  skel.counter = 0;
+  skel.prevFrame = 0;
+  skel.frame = 0;
+  skel.cursor = 0;
+  skel.weightDiv = 0;
+  skel.weightOrigin = 0;
+  skel.flags = 0;
+  obj.motionFlags = MotionFlag.Drawn | MotionFlag.RootMotion;
+  skel.order = 5;
+  skel.part0 = 1;
+  SkeletonBuildAndPose(obj, skel);
+  obj.motion = skel.motion;
+  obj.playTicks = 0;
+  ActorClaimHitSlot(obj);
 }

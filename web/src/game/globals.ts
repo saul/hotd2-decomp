@@ -1712,6 +1712,22 @@ export const G = {
    */
   g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
   /**
+   * `g_original_weapon_damage_scale` — `0x009A224C`, f32, stride 0x14 (the
+   * `+0x0C` of each player's `g_original_item_slots` record). The Original
+   * Mode damage factor the boss shot routines read: `-1.0` doubles, anything
+   * else multiplies (`Boss4ResolveShot` at `0x00491E3E`, `ResolveHit`,
+   * `Class14ApplyBoneDamage` and the other bosses).
+   *
+   * **Every writer stores the same constant**, `[0x004EC92C]` = 1.0f:
+   * `PlayerEnterPlay` at `0x00414917`, `ResetOriginalModeLoadout` at
+   * `0x0048A117` and `FUN_00416240`'s two item arms at `0x0041627F` and
+   * `0x00416297`. `[proved]` from the four stores and the one read of the
+   * constant each makes; so the factor is 1.0 wherever a player can shoot,
+   * and the doubling arm is never taken. Seeded here with that value rather
+   * than written from the four sites, which would write it again.
+   */
+  g_original_weapon_damage_scale: [1, 1] as number[],
+  /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
    * The twenty-segment chains `PlaceChainSegments` builds, by prop id rather

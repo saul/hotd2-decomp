@@ -6,17 +6,18 @@
  * `undefined`.
  *
  * The engine keeps all of this in **one 0xBC-byte block** that `Class14Init`
- * (`FUN_00475E90`) allocates with `ActorAllocSub` (`FUN_004A74E0`) and hangs
- * off `obj+0x1310`, with `g_class14_state` (`0x007DCF20`) pointing at it for
- * the rest of the frame. There is only ever one — the class is a singleton in
- * every shipped script — but it is a *field of the actor*, so the port keeps
- * it as one too and the whole thing survives `clonePlain`.
+ * (`FUN_00475E90`) allocates with `ActorAllocSub` (`FUN_004A74E0`, which
+ * zeroes it) and hangs off `obj+0x1310`, with `g_class14_state` (`0x007DCF20`)
+ * pointing at it for the rest of the frame. There is only ever one -- the
+ * class is a singleton in every shipped script -- but it is a *field of the
+ * actor*, so the port keeps it as one too and the whole thing survives
+ * `clonePlain`.
  */
 import { vec3, type Vec3 } from "../vec";
 
 /**
  * `g_class14_state+0x04` — the index into `g_class14_states` (`0x00596218`),
- * 21 handlers.
+ * 21 handlers, read from memory (L38) and agreeing entry for entry.
  *
  * The first five are **entrances**, and which one an actor starts in is the
  * descriptor tail's byte `+0x01`. Two pairs share a handler — 0 and 3 run
@@ -88,51 +89,87 @@ export enum Class14Phase {
   ShortOpen = 0,
   /** `Class14AdvancePhase` at 0.5333 of full health; the round is state 10. */
   ShortMid = 1,
-  /** `Class14StateSummonRoundA`'s exit, at `0x00479BAE`. Death: flag 17. */
+  /** `Class14StateSummonRoundA`'s exit. Death: flag 17. */
   ShortFinal = 2,
   /** Entrances 1 and 4 leave this, at `0x004783E3`. */
   LongOpen = 3,
   /** 0.5333. `Class14StateScriptedBreak` sends this one to state 11. */
   LongSecond = 4,
-  /** `Class14StateSummonRoundB`'s exit, at `0x0047A29D`. */
+  /** `Class14StateSummonRoundB`'s exit. */
   LongThird = 5,
   /** 0.2222. `Class14StateScriptedBreak` raises flags 13 and 14. */
   LongFourth = 6,
   /** 0.1111. Flags 15 and 16, then the death raises 17. */
   LongFinal = 7,
-  /** Entrance 2 leaves this, at `0x004786A1`. Stage 5's only spawn. */
+  /** Entrance 2 leaves this. Stage 5's only spawn. */
   Stage5Open = 8,
   /** 0.5 of full health. The death raises **flag 31**. */
   Stage5Final = 9,
 }
 
 /**
- * `g_class14_state+0x00`, the block's own flag word. Two bits are read.
+ * `g_class14_state+0x00`, the block's own flag word. `Class14Init` writes 1;
+ * every other writer ORs or ANDs a bit.
  */
 export enum Class14Flag {
   /**
    * Bit 0 — **hold the route steering off.** `Class14Update` runs its three
-   * `Class14FollowSegment` calls only while this is clear; `Class14AdvancePhase`
-   * raises it on three of its five arms and the entrances clear it.
+   * `Class14FollowSegment` calls only while this is clear. Init raises it,
+   * the entrances' hand-over, `Reposition` and `LeapFromSide` clear it,
+   * `Class14AdvancePhase` and the deaths raise it.
    */
   OffRoute = 1,
-  /** Bit 1 — `Class14AdvanceMotionAndPublishPoints` takes its second arm. */
-  ArmPoints = 2,
   /**
-   * Bit 2 — **hold the integration off.** The three leap states end on
-   * `if ((state->flags & 4) == 0) { pos += vel; vel.y += gravity; }`.
+   * Bit 1 — **the feet are no longer read.**
+   * `Class14AdvanceMotionAndPublishPoints` skips the two foot points and the
+   * four contact strengths while it is up (`TEST byte ptr [EAX], 0x2` at
+   * `0x00476B10`). Only the deaths raise it, the frame the body reaches the
+   * water, after zeroing the four strengths themselves.
+   */
+  FeetOff = 2,
+  /**
+   * Bit 2 — **hold the leap integration off.** The three leap states end on
+   * `if ((state->flags & 4) == 0) { pos += vel; vel.y += gravity; }`. Nothing
+   * in the class raises it -- no `OR` of 4 into the word in
+   * `0x00475E90..0x0047C960`, and Init's `MOV [state], 1` is the only
+   * whole-word store -- so the leaps always integrate.
    */
   NoIntegrate = 4,
 }
 
 /**
+ * `obj+0x34` bits this class reads or writes that `ActorFlag` does not name.
+ *
+ * `0x80000` is raised and cleared all over the class and **nothing in
+ * `0x00475E90..0x0047C960` reads it** `[open]`; it is carried so a reader
+ * elsewhere, when one is found, sees the exe's value.
+ */
+export const OBJ_BIT_80000 = 0x80000;
+
+/**
+ * One of the two flipbooks `Class14AdvanceMotionAndPublishPoints` steps and
+ * draws on bone 1: `+0x7C..+0x84` (A) and `+0x88..+0x90` (B).
+ */
+export interface Class14Flipbook {
+  /** `+0x00` s16 — the asset slot drawn. */
+  frame: number;
+  /** `+0x02` / `+0x04` s16 — the strip's first and last slot. */
+  low: number;
+  high: number;
+  /** `+0x06` s16 — frames still to hold; B's `-1` is "held until told". */
+  hold: number;
+  /** `+0x08` f32 — slots a frame, signed. */
+  rate: number;
+}
+
+/**
  * The 0xBC-byte block, with the offsets it has in the engine.
  *
- * Five of these fields are **polymorphic across the states** — L3, and the exe
- * reuses one dword for a round counter, a frame countdown and a camera path
- * slot depending on which state is running. They are named `counter0`..
- * `counter3` rather than for one of those readings, and each state's use is on
- * the state.
+ * Four dwords are **polymorphic across the states** — L3, and the exe reuses
+ * one dword for a round counter, a frame countdown and a camera path slot
+ * depending on which state is running. They are named `counter0`..`counter3`
+ * rather than for one of those readings, and each state's use is on the
+ * state.
  */
 export interface Boss2Tail {
   /** `+0x00` — {@link Class14Flag}. */
@@ -141,66 +178,104 @@ export interface Boss2Tail {
   state: Class14State;
   /** `+0x05` — the sub-state inside it. */
   sub: number;
-  /** `+0x06` / `+0x07` — where `Class14StateCuedMotion` goes back to. */
-  nextState: number;
-  nextSub: number;
+  /**
+   * `+0x06` / `+0x07` — the state and sub `Class14ApplyBoneDamage` saves when
+   * it starts a reaction, and the reaction goes back to.
+   */
+  savedState: number;
+  savedSub: number;
   /** `+0x08` — {@link Class14Phase}. */
   phase: Class14Phase;
-  /** `+0x0C` — the rise `ActorRegisterCameraPoint` is given. */
+  /** `+0x0C` f32 — the rise `ActorRegisterCameraPoint` is given. */
   cameraRise: number;
-  /** `+0x10`..`+0x18` — the point the entrance latched, and `Close` swims to. */
+  /** `+0x10`..`+0x18` — where the boss stood at the hand-over. */
   target: Vec3;
   /** `+0x1C`..`+0x24` — the route's forward direction, descriptor `+0x04`. */
   dir: Vec3;
-  /** `+0x28`, `+0x34`, `+0x40`, `+0x4C` — the four route corners. */
+  /**
+   * `+0x28`, `+0x34`, `+0x40`, `+0x4C` — the four route corners, x and z
+   * from the descriptor; the y words stay 0.
+   */
   route: Vec3[];
-  /** `+0x60` — how many more times `Class14StateRoar` plays its clip. */
+  /** `+0x58` s32 — the deaths' bob phase, BAMS. */
+  bobPhase: number;
+  /** `+0x5C` s32 — its rate. */
+  bobRate: number;
+  /** `+0x60` s16 — how many more times `Class14StateRoar` roars. */
   roars: number;
-  /** `+0x62` — the index into `g_class14_anim_slots` (`0x00596408`). */
+  /**
+   * `+0x62` s16 — the index into `g_class14_anim_slots` (`0x00596408`): the
+   * motion a state plays **and** the cue record the foot contacts read.
+   */
   animSlot: number;
-  /** `+0x94` — the parts count `Class14ApplyBoneDamage` raises by 2, capped 7. */
-  parts: number;
-  /** `+0x96` — the adaptive rank, 0..15; `+0x97` the pending bump. */
+  /**
+   * `+0x64`..`+0x78` s32 — the six eased leg angles: leg A's and leg B's hip
+   * pitch, then their hip yaws, then their knees.
+   */
+  legs: number[];
+  /** `+0x7C` — flipbook A. */
+  bookA: Class14Flipbook;
+  /** `+0x88` — flipbook B, whose frame **is the damage window**. */
+  bookB: Class14Flipbook;
+  /** `+0x94` s16 — the row of `g_class14_window_timing` B runs on, 0..7. */
+  window: number;
+  /** `+0x96` s8 — the adaptive rank, 0..15; `+0x97` the pending bump. */
   rank: number;
   rankBump: number;
   /** `+0x98`, `+0x99` — the two players' life counts as last seen. */
   lives: number[];
   /**
-   * `+0x9C` — the rounds left to summon; **also** the frame countdowns in
-   * `Class14StateKnockedDown`, the leaps and `Class14StateEntranceB`, and the
-   * `cp_` slot `Class14StateScriptedBreak` drives the camera along.
+   * `+0x9C` — the rounds left to summon; **also** the frame countdowns of the
+   * leaps, `KnockedDown` and the entrances, `Close`'s mode, the side coin of
+   * `Reposition`/`LeapFromSide`, and the `cp_` slot `ScriptedBreak` flies.
    */
   counter0: number;
-  /** `+0xA0` — enemies still to place this round; the path frame in state 15. */
+  /** `+0xA0` — fish left this round; the path frame in state 15. */
   counter1: number;
-  /** `+0xA4` — frames until the next one; the hold in state 15's sub 1. */
+  /** `+0xA4` — frames until the next fish; the holds in state 15. */
   counter2: number;
-  /** `+0xA8` — the side coin, and state 11's sub-4 delay. */
+  /** `+0xA8` — the placement side coin, and state 11's sub-4 delay. */
   counter3: number;
-  /** `+0xAC` — "the boss has been hurt since this round began". */
-  hurtThisRound: number;
+  /** `+0xAC` — "no life was lost this round": the round's rank-up. */
+  noLifeLost: number;
+  /**
+   * `[port-only]` — the two knee rest angles and the height step
+   * `Class14AdvanceMotionAndPublishPoints` computes into locals and uses in
+   * its own draw. The engine draws inside the routine; the port draws in
+   * `render/`, which reads them here.
+   */
+  kneeRest: number[];
+  drawDy: number;
+}
+
+function makeFlipbook(): Class14Flipbook {
+  return { frame: 0, low: 0, high: 0, hold: 0, rate: 0 };
 }
 
 /**
- * [port-only] `ActorAllocSub` (`FUN_004A74E0`) hands back memory the engine
- * then writes field by field; `Class14Init` sets every field this port reads,
- * so this is only what a `Boss2` actor looks like before its `Init` runs.
+ * `ActorAllocSub(0xBC)` — zeroed, which is why the phase at `+0x08` starts at
+ * 0 without Init writing it.
  */
 export function makeBoss2Tail(): Boss2Tail {
   return {
     flags: 0,
     state: Class14State.Entrance0,
     sub: 0,
-    nextState: 0,
-    nextSub: 0,
+    savedState: 0,
+    savedSub: 0,
     phase: Class14Phase.ShortOpen,
     cameraRise: 0,
     target: vec3(),
     dir: vec3(),
     route: [vec3(), vec3(), vec3(), vec3()],
+    bobPhase: 0,
+    bobRate: 0,
     roars: 0,
     animSlot: 0,
-    parts: 0,
+    legs: [0, 0, 0, 0, 0, 0],
+    bookA: makeFlipbook(),
+    bookB: makeFlipbook(),
+    window: 0,
     rank: 0,
     rankBump: 0,
     lives: [0, 0],
@@ -208,7 +283,9 @@ export function makeBoss2Tail(): Boss2Tail {
     counter1: 0,
     counter2: 0,
     counter3: 0,
-    hurtThisRound: 0,
+    noLifeLost: 0,
+    kneeRest: [0, 0],
+    drawDy: 0,
   };
 }
 

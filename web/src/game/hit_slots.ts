@@ -61,7 +61,10 @@ export const HIT_SLOT_CLAIMED = 0x40;
  * line up is the thing this list exists to avoid.
  */
 export const HIT_SLOT_CLAIMING_CLASSES: ReadonlySet<SpawnClass> = new Set([
-  SpawnClass.Civilian, SpawnClass.Frog, SpawnClass.Boss2, SpawnClass.Boss4,
+  // Not class 0x14: its actor carries the model block, and `Class14Init`
+  // claims the slot where the engine does, inside `ActorBuildSkinnedModel`
+  // (`game/skeleton.ts`).
+  SpawnClass.Civilian, SpawnClass.Frog, SpawnClass.Boss4,
   SpawnClass.OneHitTarget, SpawnClass.RankScaledEnemy,
   SpawnClass.SetPieceProp, SpawnClass.ScriptedHumanoid, SpawnClass.Zombie,
   SpawnClass.Thrower, SpawnClass.SkinnedNpc,

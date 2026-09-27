@@ -90,9 +90,9 @@ export function MatrixRotateZ(m: Mat, bams: number): void {
 }
 
 /**
- * `MatrixScale` — `FUN_004A9CC0`. Scales the top's three basis rows in
- * place: row 0 by `x`, row 1 by `y`, row 2 by `z`, four floats each -- which
- * is the scale applied before everything the top already holds.
+ * `MatrixScale` — `FUN_004A9CC0`. Row 0 by `x`, row 1 by `y`, row 2 by `z`,
+ * all four columns of each: the scale is applied before everything already
+ * on the stack, as every other post-multiplying call here is.
  */
 export function MatrixScale(m: Mat, x: number, y: number, z: number): void {
   for (let k = 0; k < 4; k++) {

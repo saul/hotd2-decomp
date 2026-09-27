@@ -4218,6 +4218,54 @@ debug clear. The corpse step-off (`state 7 sub 1`, `obj+0x1330 == 2`) now
 bakes the angles too. `[open]`: `RegisterForDistanceRank` still admits class
 0x30 only; whether a rider registers, and with which position, is unread.
 
+## The bosses' shared furniture: the health bar, the name banner, the shot test
+
+Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),
+the Hierophant (0x14), the Tower (0x45) and Strength (0x19) -- and three things
+every one of them leans on belong to none of them. They are ported once, in
+`game/`, and each boss calls into them where its exe routine does.
+
+**The health bar** -- `game/boss_hp_bar.ts`. `BossHpBarSpawn` (`FUN_00435E50`)
+is called from every boss's entrance with a screen point (`(320, 35)` for all
+the ones read), and from then on the boss only writes a float,
+`g_boss_hp_fraction` (`0x009C8E10`), hit points over maximum. The bar is a task
+of its own (`BossHpBarUpdate`, `FUN_00435C80`): the shown fill climbs 0.01 a
+frame to meet the fraction -- the fill-up at the start of a fight, which in
+single precision takes 101 frames, not 100 -- an amber trail drains 0.001 a
+frame behind damage, `-1.0` kills it and `0.0` blinks it out over 120 frames.
+Four sprites from `tex/scr_bosmater.bin`: blue fill, amber trail, red empty
+track, and the metal frame. They go through `DrawScreenSpriteLayered`
+(`FUN_0041C800`), a layered queue flushed after the task walk, which the port
+now has too (`screen_sprite.ts`). The class-0x14 port had listed `0x00435E50`
+as "the screen shake".
+
+**The name banner** -- `game/boss_banner.ts`. `BossIntroBannerUpdate`
+(`FUN_00437AC0`) had been ported inside class 0x19 as its lifetime and one
+shutter write. It is the tarot intro. On its script flag it stashes the camera
+block, holds the camera driver off (`g_camera_driver_held`, `0x009CA094`, which
+now makes `CameraDriverSelectMode` run mode 6, the hook that does nothing) and
+flies the camera along its own `cp_` path for 300 frames. Eight pages of a file
+turn over in camera space and the boss's own page grows beside its name --
+"JUDGMENT / Type 28", "STRENGTH / Type 205", from `scr_bosmater_stN.bin` on
+palette 10 of `TexBankPaletteIndex`. On the last frame it puts the camera back
+and sets the shutter to 1, the gate every entrance waits on. Seven records,
+one per call site (`boss_banner_records.ts`); the Tower has its own intro card
+instead.
+
+**The shot test**:
+
+* `RegisterForShotTest` (`FUN_00405160`) never lists an actor whose `obj+0x34`
+  has bit `0x8000`. The port's picks shot everything visible; they honour the
+  bit now (`ActorFlag.NoShotTest`), which is what makes a boss unshootable
+  through its entrance.
+* `MarkActorShot` keeps one hit byte per shooter at `obj+0x190 + player`, which
+  the port had merged into one `pendingHit`; `Actor.shotBones` is the engine's
+  shape, for the bosses' own shot routines.
+* A skeleton walk capped at depth 12 in both `hod2lib` halves had cut the
+  stage-3 boss's heads to 13 of their 19/26 nodes -- no jaws, no weak bones --
+  and `tools/verify_skeletons.py` now holds every skeleton to the EXE's bone
+  count.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in
@@ -4298,7 +4346,7 @@ missed. Meanings and confidence marks live in
 | `34` | `unused_34` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `35` | `enable_camera_path_roll` | camera | **done** | **gates the camera roll channel**, exactly as CamEvalPath7 does |
 | `36` | `pin_view_to_ground_plane` | camera | *tracked* | selects the fixed camera eye height; see the eye-height note |
-| `37` | `force_camera_path_advance` | camera | *tracked* | forces camera path advance past the room-cleared gate |
+| `37` | `force_camera_path_advance` | camera | done | `EvtOpForceCameraPathAdvance37` writes `g_force_rail_advance` (`0x009CA098`): at 1 the stashed rail steps through a screen shake or with nobody in play. The rail's gate itself is a declared divergence in `game/camera/rail.ts` |
 | `38` | `se_play` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
 | `39` | `se_play_3d` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
 | `3A` | `se_play_unless_skip` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |

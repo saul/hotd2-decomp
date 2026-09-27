@@ -159,6 +159,17 @@ over bundle keys and never needed three.js — and `CamSeatPathFrame` runs
 lives in `app/systems.ts`; the rig keeps the pose scratch, the rails and the
 draw.
 
+**The stashed rail's range moved into `G` for the same reason (rule 1b).** A
+`cam_play` with `flags & 2` stashes its range, and scene states (2,6)/(2,7)
+step it; the walker used to hold that range on its shot, where no game routine
+could reach it, and the stage-4 boss writes it. `g_stashed_path_frame`,
+`g_stashed_path_end_frame` and the published `g_rail_frame` are the engine's
+own globals now, stepped by `game/camera/rail.ts`'s `CameraStepRailTick` and
+`CameraPlayStashedPath`; the walker's shot mirrors them, and every writer of a
+shot's frame goes through `Walker.setCameraFrame`. The rail's pause while the
+screen shakes is transcribed and not applied -- see the note in `rail.ts` for
+why it depends on the seat leaving a (2,6) play's aim to the driver.
+
 **What the queue buys, and what is still missing.** `g_shot_requests` is plain
 data in the data segment, so a snapshot carries any pull the frame has not
 drained and recording it per frame gives an **input log** — the regression

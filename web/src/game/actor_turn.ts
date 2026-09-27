@@ -9,6 +9,10 @@
 import { SecondsToTicks } from "./tables";
 import type { Actor } from "./actor";
 import { VecToAngles, bamsDelta, bamsWrap, type Vec3 } from "./vec";
+import {
+  FtolS16, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixTransformPoint, RADIANS_TO_BAMS,
+} from "./matrix";
 
 /**
  * How much of the remaining angle is taken per second when no rate is given.
@@ -100,4 +104,56 @@ export function ActorFacePlayerTarget(obj: Actor, eye: Vec3): void {
   obj.target.z = eye.z;
   obj.yaw = bamsWrap(
     VecToAngles(obj.pos.x - eye.x, 0, obj.pos.z - eye.z).yaw);
+}
+
+const _heading: Vec3 = { x: 0, y: 0, z: 0 };
+
+/**
+ * `ActorHeadingErrorTo` — `FUN_00426090`. The signed BAMS heading of an x/z
+ * offset **in the actor's own frame**: `(dx, 0, dz)` through the inverse of
+ * the actor's rotation, then `atan2(x, z)`.
+ *
+ * ```
+ * MatrixStackPush(0); MatrixLoadIdentity()
+ * MatrixRotateY(-obj+0x68); MatrixRotateZ(-obj+0x6C); MatrixRotateX(-obj+0x64)
+ * MatrixTransformPoint({dx, 0, dz}, &out); MatrixStackPop(1)
+ * 004260f3  FLD [out.x]; FLD [out.z]; FPATAN        ; atan2(x', z')
+ * 00426100  FMUL double ptr [0x004c4378]            ; * 65536/2pi
+ * 00426106  CALL __ftol; MOVSX EAX, AX
+ * ```
+ *
+ * The tail after `MatrixStackPop` is where the answer is computed, and
+ * Ghidra's listing stops at the pop (L35). The pitch and roll are part of the
+ * transform: a class whose actor is tilted gets the heading in its tilted
+ * frame, which a plain `atan2` of the offset against the yaw does not give.
+ */
+export function ActorHeadingErrorTo(obj: Actor, dx: number, dz: number): number {
+  const m = MatIdentity();
+  MatrixRotateY(m, -obj.yaw);
+  MatrixRotateZ(m, -obj.roll);
+  MatrixRotateX(m, -obj.pitch);
+  MatrixTransformPoint(m, { x: dx, y: 0, z: dz }, _heading);
+  return FtolS16(Math.atan2(_heading.x, _heading.z) * RADIANS_TO_BAMS);
+}
+
+/**
+ * `ActorTurnTowardXZ` — `FUN_00426120`. Turn the yaw toward an x/z offset by
+ * at most `step` BAMS:
+ *
+ * ```
+ * e = ActorHeadingErrorTo(obj, dx, dz)
+ * 0042613c  CMP EAX, ECX; JLE      ; e >  step: yaw += step
+ * 0042614e  CMP EAX, EDX; JGE      ; e < -step: yaw -= step
+ *           otherwise               ;            yaw += e
+ * ```
+ *
+ * The yaw is an `int` and is not wrapped -- `ADD`/`SUB` on the dword -- so
+ * neither is it here.
+ */
+export function ActorTurnTowardXZ(obj: Actor, dx: number, dz: number,
+                                  step: number): void {
+  const e = ActorHeadingErrorTo(obj, dx, dz);
+  if (e > step) { obj.yaw = (obj.yaw + step) | 0; return; }
+  if (e < -step) { obj.yaw = (obj.yaw - step) | 0; return; }
+  obj.yaw = (obj.yaw + e) | 0;
 }

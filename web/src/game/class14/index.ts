@@ -218,8 +218,9 @@ export function Class14FollowSegment(p: Vec3, a: Vec3, b: Vec3,
 }
 
 /**
- * `ActorTurnTowardXZ` — `FUN_00426120`, over `ActorHeadingErrorTo`
- * (`FUN_00426090`).
+ * `ActorTurnTowardXZ` (`FUN_00426120`), over `ActorHeadingErrorTo`
+ * (`FUN_00426090`) -- a yaw-only simplification of the shared port in
+ * `game/actor_turn.ts`, which this class should call instead.
  *
  * The engine builds the inverse of the actor's own rotation and transforms the
  * offset through it; with only a yaw in play — the boss's pitch and roll at

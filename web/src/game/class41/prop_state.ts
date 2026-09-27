@@ -152,6 +152,14 @@ export enum PropFamily {
    * `class41/type48.ts`.
    */
   Type48 = 18,
+  /**
+   * `FallingContainerFragmentUpdate` (`FUN_0046AD20`) — one of the **two**
+   * 0x378 pieces `FallingContainerUpdate` throws when its second shot lands.
+   * Allocated into the same pool, cleared by `ActorClearGameFields`, and
+   * drawn as slot `0xA55`. Not shootable: the routine has no
+   * `RegisterForShotTest`. See `class44/container_fragment.ts`.
+   */
+  ContainerFragment = 19,
 }
 
 /**
@@ -402,6 +410,39 @@ export interface BreakableProp {
    * offsets `L3` is about — check the family.
    */
   shake: number;          // +0x2C0
+  /**
+   * [port-only] The rattle `BreakablePropUpdate` (`FUN_00464620`) adds to x
+   * and z at draw time: `(rand() % 0x97 - 75) * shake * 0.01`, two draws, x
+   * first, taken while `shake > 0.01` and zero otherwise. Stack locals in the
+   * engine (`[ESP+0x14]`, `[ESP+0x10]` at `0x004649A7`/`0x004649D2`); here
+   * because the draw is in `render/` and the two `rand()` calls are the
+   * game's, so they must be drawn from the game's generator. Only the group
+   * family writes them.
+   */
+  shakeX: number;
+  shakeZ: number;
+  /**
+   * `obj+0x2E4` — what `MatrixStore` saves at the end of every one of
+   * `BreakablePropUpdate`'s three draw blocks: the model matrix of the prop as
+   * it was last drawn, rattle included, in `g_MatrixStackTop`'s layout.
+   * `BreakablePropSpawnShatter` (`FUN_00465170`) places its fifteen pieces
+   * off it. Empty until the first draw, and only the group family writes it.
+   *
+   * **World space here; the engine's has the camera's world-to-view on it**,
+   * because the draw composes onto the live stack. That half is
+   * {@link BreakableProp.drawView}, kept apart so the renderer can read this
+   * one as it is.
+   */
+  drawMatrix: number[];   // +0x2E4
+  /**
+   * [port-only] The world-to-view matrix that was on the stack under
+   * {@link BreakableProp.drawMatrix} when it was stored — `GameHost`'s
+   * `cameraMatrices`, or empty with no camera. The spawn undoes the *current*
+   * view with `MatrixInvert(0)`, so a camera that moved between the prop's
+   * last draw and the break carries the pieces with it by that one frame; this
+   * is what lets the port do the same.
+   */
+  drawView: number[];
   /** `obj+0x34` — the flag word. */
   flags: number;          // +0x34
   /** `obj+0x324` — the break effect id the puff draws. */
@@ -614,6 +655,12 @@ export interface BreakableProp {
   drawScale: [number, number, number];
   effectPoses: PosedNode[];
   /**
+   * [port-only] The routine returned before its `AssetDrawSlot` this frame.
+   * Only {@link PropFamily.ContainerFragment} ever sets it: a settled piece
+   * past count 0x96 draws on even counts only.
+   */
+  drawSkipped: boolean;
+  /**
    * [port-only] Where the last shot on this prop was aimed, at the prop's own
    * camera depth — `g_crosshair_x/y` unprojected by `obj+0x78`, which is what
    * `SpawnPropHitEffectScaled` (`FUN_004666B0`) computes when a routine calls
@@ -682,6 +729,10 @@ export function makeBreakableProp(id: number, group: number,
     contact: 0,
     restX: 0, restY: 0, restZ: 0,
     shake: 0,
+    shakeX: 0,
+    shakeZ: 0,
+    drawMatrix: [],
+    drawView: [],
     flags: 0,
     effect: 0,
     effectFrames: 0,
@@ -712,6 +763,7 @@ export function makeBreakableProp(id: number, group: number,
     stackDrawn: 0,
     drawScale: [1, 1, 1],
     effectPoses: [],
+    drawSkipped: false,
     hitAim: null,
     dead: false,
     flicker: null,

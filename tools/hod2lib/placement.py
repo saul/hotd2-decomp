@@ -395,6 +395,11 @@ class Placement:
     #: Class 0x14's tail -- the stage-2 boss's state, route quad and despawn
     #: cue; see :func:`characters.class14_tail`.
     class14: dict | None = None
+    #: Class 0x16 -- the wave field. A marker (``{}``): `WaterFieldCreate`
+    #: reads no tail, only the spawn's own ``y``.
+    class16: dict | None = None
+    #: Class 0x17's tail -- one wave source; see :func:`characters.class17_tail`.
+    class17: dict | None = None
     #: Class 0x19's tail -- the stage-4 boss's entrance, per-bone collision
     #: meshes and despawn cue; see :func:`characters.class19_tail`.
     class19: dict | None = None
@@ -496,6 +501,10 @@ class Placement:
             d["class53"] = self.class53
         if self.class14:
             d["class14"] = self.class14
+        if self.class16 is not None:
+            d["class16"] = self.class16
+        if self.class17 is not None:
+            d["class17"] = self.class17
         if self.class19:
             d["class19"] = self.class19
         if self.class22:

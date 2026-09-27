@@ -133,6 +133,22 @@ export interface ClassHandler {
    */
   updatesWhenDead?: boolean;
   /**
+   * This class steps its own clip counter, so the director must not.
+   *
+   * `obj+0x194` is `model[0]`, the counter `SkeletonAdvancePlayCursor`
+   * (`FUN_004111A0`) derives the play cursor from, and **nothing in the
+   * sampler advances it**: the owning class does, and holds a clip by not
+   * doing so. Most classes step it once a frame, after their draw, on every
+   * path, which is what the director's `ActorAdvanceMotion` call before the
+   * update stands in for. Classes 0x22 and 0x23 do not: their states return
+   * undrawn on some frames, and `Class22Death` (`FUN_0049C910`) counts the
+   * counter itself — held at `0x84` while the body falls, stepped twice a
+   * frame on landing, tested against `0x1C`, `0x92` and the play length. A
+   * class that says so here calls `ActorAdvanceMotion` itself, at each of
+   * the engine's increments.
+   */
+  advancesOwnMotion?: boolean;
+  /**
    * Can this actor be hurt at all, right now?
    *
    * Class 0x10's answer is `sub.onShotScript < 0` — a civilian with no on-shot

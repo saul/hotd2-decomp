@@ -10645,6 +10645,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Civilian, "0x10 civilian"],
     [SpawnClass.Frog, "0x11 frog"],
     [SpawnClass.Boss4, "0x19 stage-4 boss"],
+    [SpawnClass.Judgment, "0x22 JUDGMENT's flier"],
+    [SpawnClass.JudgmentCompanion, "0x23 JUDGMENT's walker"],
     [SpawnClass.Boss2, "0x14 stage-2 boss"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],

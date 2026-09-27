@@ -22,12 +22,22 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
- * 14: `characters.class14` carries the stage-2 boss's `.rdata` -- its cue,
+ * 15: `characters.class14` carries the stage-2 boss's `.rdata` -- its cue,
  * damage-cone, weak-point timing, summon and damage tables -- the placements
  * carry `class16`/`class17` for the wave field the boss's summons sample, and
  * class 0x14's two flipbooks (`boss2.bin` 2..76) travel as actor slots. A
  * bundle without them cannot let the boss be damaged at all, which is why
  * this is a refusal and not a warning.
+ *
+ * 14: the stage-3 boss -- two 13s had been cut on two branches, the
+ * stage-4 boss's and this one, so the merged layout is its own number.
+ * Class 0x45 has a character-type and a motion rule,
+ * so stages 3 and 6 carry its placements -- each with a `class45` block, the
+ * sub-type -- and `boss3.bin`, `boss3l.bin` and the civilians' clips; the
+ * effect slots gain its card pieces, sparks, splashes and flashes, and
+ * `screen_sprites` its two card sprites. A bundle before it has no class-0x45
+ * placement at all, and a client reading one would stage the fight with no
+ * boss in it and hold both gates for ever.
  *
  * 13: the stage-4 boss. `script.json` carries a `boss4` block -- class 0x19's
  * seven `.rdata` tables (`ExeTables.boss4Tables`): the phase floors, the head
@@ -96,7 +106,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 14;
+export const SUPPORTED_FORMAT = 15;
 
 /**
  * The exporter's digest of the declarations in this directory.

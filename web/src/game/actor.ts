@@ -32,6 +32,7 @@ import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
 import { makeBatTail, type BatTail } from "./class46/state";
+import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
@@ -1440,6 +1441,13 @@ export interface ActorBase {
    */
   class46: CharacterPlacement["class46"];
   /**
+   * Class 0x45's descriptor byte, `desc+0x25` -- the sub-type
+   * `Boss3ClassHandler` (`FUN_0041FC00`) dispatches on. Its own field for the
+   * reason class 0x46's is: nothing else in the descriptor says which of the
+   * stage-3 boss's six inits this actor runs.
+   */
+  class45: CharacterPlacement["class45"];
+  /**
    * Class 0x40's one descriptor byte that anything reads: `desc+0x25`, the
    * selector `PlaceHorde` (`FUN_0043BD30`) switches on — a horde, or the prop
    * it pushes up. Only the placer carries it; a member is built with none.
@@ -1985,6 +1993,7 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
+  | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
   | (ActorBase & { cls: SpawnClass.ScriptedScenery;
                    scenery: ScriptedSceneryTail })
@@ -1995,6 +2004,7 @@ export type Actor =
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
       | SpawnClass.Mouse | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
+      | SpawnClass.Boss3
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
       | SpawnClass.HordeSpawner> });
@@ -2032,6 +2042,9 @@ export type OwlActor = Extract<Actor, { cls: SpawnClass.FlyingEnemy }>;
 
 /** An actor already narrowed to class 0x46, for that class's own routines. */
 export type BatActor = Extract<Actor, { cls: SpawnClass.Bat }>;
+
+/** An actor already narrowed to class 0x45, the stage-3 boss. */
+export type Boss3Actor = Extract<Actor, { cls: SpawnClass.Boss3 }>;
 
 /** An actor already narrowed to class 0x11, for that class's own routines. */
 export type FrogActor = Extract<Actor, { cls: SpawnClass.Frog }>;
@@ -2137,6 +2150,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     carrierYaw: 0,
     class43: null,
     class46: null,
+    class45: null,
     class40: null,
     class51: null,
     class52: null,
@@ -2251,6 +2265,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };
+  }
+  if (cls === SpawnClass.Boss3) {
+    return { ...head, cls, boss3: makeBoss3Tail() };
   }
   if (cls === SpawnClass.HordeSpawner) {
     return { ...head, cls, horde: makeHordeTail() };

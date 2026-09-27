@@ -4462,6 +4462,72 @@ head shots delivered as `MarkActorShot` leaves them. The same step spawns eight
 bats that nothing in it shoots, so the post-fight `wait_enemies_present 0` and
 the outro camera that despawns him are asserted by `port.test.ts`, not played.
 
+## The Tower: class 0x45, stage 3's boss and stage 6's return
+
+Five heads rise out of a canal and a sixth thing is under it. Class 0x45 is
+all of them -- the opening head and the civilian it takes, the two civilians
+heads 0 and 4 hold, the five fighting heads, the body -- plus its own intro
+card, and it is `game/class45/`. Every routine is transcribed under its exe
+name; `docs/re/boss-tower.md` has the reading.
+
+* **Three frames to start.** `Boss3ClassHandler` (`FUN_0041FC00`) picks the
+  variant from the block (11 and 13 on stage 3, 2 on stage 6, 15/17 in Boss
+  Mode), re-seeds the fight's globals and installs the sub-type's Init, which
+  installs its update: handler, init and update on three consecutive frames.
+* **Its own clock.** The class steps `model[0]` itself, behind state tests --
+  a dead head holds its last frame by not stepping -- so it declares
+  `ClassHandler.advancesOwnMotion` (JUDGMENT's flag, the same rule) and
+  the director leaves its motion alone. The
+  cursor, the cross-fade (swing-twist, as `MatrixInterpolateSwingTwist`), the
+  half-frame lerp and the root damper are the class's own, which is what makes
+  the jaw test read the pose the engine reads.
+* **The heads.** Shootable only in the fight, on the weak bone, with the jaws
+  open by more than `0x1700`, and not while the neck is turned away; 45 over 3
+  (or 5 with two players) off the head and the shared pool, the bar reading
+  pool/180. Head 2 cannot be hurt on stage 3 and dies with the fourth small
+  one; 180 frames later it drops both enemy counters -- the first gate. Head 2
+  schedules the bites: at most two heads armed, never itself on stage 3.
+* **The body.** Builds its path from eight or nine `op_` curves (2313 points),
+  holds the camera (mode 6, `g_camera_driver_held`) and drives the eye along
+  `cp_` curves, aiming by the camera block's yaw and pitch at its weak bone.
+  It can be shot only surfaced or lunging, 10 a hit (6 with two players) of
+  120; its death opens the second gate and hands the camera back.
+* **The shot test.** Registered the engine's way (`registersForShotTest`): a
+  head unless dead, the body in states 10..13 only, the opening head and the
+  civilians never. The body's broad sphere is 95 units.
+* **Drawn from its own matrices.** The heads and the body are drawn by
+  `Boss3DrawBoneParts`, not by the skeleton walk, from
+  `Boss3ComposeBonePose`'s matrices -- extra rotations for the bite, the body's
+  spine in `Rx Ry Rz` along its path. `render/characters/boss3.ts` places those;
+  `render/boss3_effects.ts` draws the intro card (the "TOWER" / "Type 8000"
+  plates fade in beside it), the bite flash, the wake, sparks, splashes, the
+  path effects, the civilian's shadow and variant 1's water mound, which the
+  body raises as it swims under it.
+
+**Played**, with `playthrough.mjs --boss` (JUDGMENT's `--play-end`,
+`--meter-all` and `--aim`; `--meter-all` reads the Tower's hit points, which
+are `obj+0x11C` like everyone's). The debug clear refuses this class, so
+nothing but shooting opens its gates.
+
+* Stage 6 `--boss --continue` passes block 2's five heads by shooting (the
+  gate opens at frame 7350) and runs out of credits in block 3, which main's
+  default run does too (frame 7125).
+* Stage 3 `--boss --continue` kills two heads and then runs out of credits in
+  the fight (frames 10920 and 11085 on the two routes): the zombies before it
+  spend five of the six. The bites are the heads' own schedule, and the grid
+  rarely finds a radius-3 weak bone in an open mouth.
+* With `--no-damage`, block 13's fight plays through (6285 frames in the
+  block), and block 11's body is still hittable but hangs the harness: a hit
+  counts only surfaced or lunging, on the weak bone with the jaws open, so
+  a dive plus a surfacing the grid misses runs past `--hang`'s 900
+  fruitless frames. `--hang 12000 --shoot-for 1500` plays it through (frame
+  17865). `--aim` does not help here: it aims at `obj+0x70`, which the class
+  publishes as the actor's position -- the body's tail on its path and the
+  heads' necks -- not at the weak bone the shot must hit.
+* Default stage 6 now hangs at block 2's gate, because the boss exists: the
+  default meter cannot see its damage and 900 frames is shorter than the
+  fight.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

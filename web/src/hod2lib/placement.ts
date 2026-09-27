@@ -442,6 +442,11 @@ export class Placement {
   /** Class 0x17's tail -- one wave source: kind, amplitude, wavelength, speed. */
   class17: Record<string, unknown> | null = null;
   /**
+   * Class 0x45's descriptor byte -- `{subtype}`, `desc+0x25`, which picks
+   * which of six inits the stage-3 boss's actor runs. See `game/class45/`.
+   */
+  class45: Record<string, unknown> | null = null;
+  /**
    * Class 0x33 **selector 1's** tail -- the draw slot, the `op_` path it
    * rides, and the four cues that raise its two `obj+0x34` bits and take it
    * off the field. Selector 1 only: the other ten sub-handlers read the same
@@ -534,6 +539,7 @@ export class Placement {
     if (this.class17 !== null) d.class17 = this.class17;
     if (this.class22) d.class22 = this.class22;
     if (this.class23) d.class23 = this.class23;
+    if (this.class45) d.class45 = this.class45;
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.attachments.length) d.attachments = [...this.attachments];

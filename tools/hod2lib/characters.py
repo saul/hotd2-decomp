@@ -86,6 +86,7 @@ seven arms that are not yet ported.
 from __future__ import annotations
 
 import math
+import struct
 
 from . import degraded, spawnres
 from .bams import (  # noqa: F401
@@ -96,7 +97,7 @@ from .arcscript import (  # noqa: F401
                         arc_script)
 from .charmotion import (  # noqa: F401
     BODY_CREATURE_HOST_CLIPS,
-    BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS,
+    BOSS3_CLIPS, BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS,
     CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS, humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
@@ -221,6 +222,7 @@ __all__ = [
     "class14_tail",
     "class17_tail",
     "class19_tail",
+    "class45_tail",
     "CLASS14_MOTIONS",
     "class22_tail",
     "class23_tail",
@@ -603,6 +605,16 @@ def class19_tail(rec, sets=None) -> dict:
         "despawn_path": rec.param(0x40, "i16") or 0,
         "despawn_frame": rec.param(0x42, "i16") or 0,
     }
+def class45_tail(rec) -> dict:
+    """Class 0x45's descriptor: ``desc+0x25``, the sub-type
+    `Boss3ClassHandler` (`FUN_0041FC00`) dispatches on -- 0 the opening head,
+    1 its civilian, 2 a fighting head, 3 a held civilian, 4 nothing, 5 the
+    body. The index is ``desc+0x22`` (``hp``) and the civilians' character
+    type ``desc+0x24``, which `spawnres` reads."""
+    raw = rec.evt.raw if getattr(rec, "evt", None) is not None else None
+    at = rec.offset + 0x25
+    sub = struct.unpack_from("<b", raw, at)[0] if raw and at < len(raw) else 0
+    return {"subtype": sub}
 
 
 def class14_tail(rec) -> dict:
@@ -1062,6 +1074,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                    if sp["class"] == 0x19 else None)
         class22 = class22_tail(rec) if sp["class"] == 0x22 else None
         class23 = class23_tail(rec) if sp["class"] == 0x23 else None
+        class45 = class45_tail(rec) if sp["class"] == 0x45 else None
         # **Gated on the selector, not on the class.** Class 0x33 is
         # eleven objects behind one id and these two blocks are two of
         # them reading the same bytes; emitting both for one spawn, or
@@ -1152,6 +1165,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class19=class19,
             class22=class22,
             class23=class23,
+            class45=class45,
             class33=class33,
             class33_push=class33_push,
             hp=sp.get("hp", 0)))
@@ -1220,6 +1234,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             entry_clips += list(CLASS22_MOTIONS)
         if sp["class"] == 0x23:
             entry_clips += list(CLASS23_MOTIONS)
+        # The stage-3 boss's clips, all three of its skeletons' -- see
+        # `BOSS3_CLIPS`.
+        if sp["class"] == 0x45:
+            entry_clips += list(BOSS3_CLIPS)
         # Class 0x10 chooses its clips from the **exe's** command streams, and
         # from every stream those can branch to: ops 0x0E/0x0F/0x1E/0x1F carry
         # pointers to further streams, and a civilian that is shot spends the

@@ -45,13 +45,16 @@
  *
  * ## What is not ported
  *
- * `[diverges]` **The three cosmetic tasks.** `FishSpawnWaterSplash`
- * (`FUN_00439EA0`, slot `0x1339`), `FishSpawnSurfaceRing` (`FUN_00439FA0`, slot
- * `0xB71`) and `SpawnFishBloodCloud` (`FUN_00439DC0`, slot `0x3A` upward) each
- * allocate a 0x68-byte task whose update draws and steps a slot cursor. Their
- * **sounds** are ported, because those are what a player hears; the sprites
- * are not, because `[open]` — none of the three updates has a termination, so
- * porting them would mean inventing a lifetime the routines do not contain.
+ * ## The effects
+ *
+ * Three tasks of the class's own -- the splash (`FishSpawnWaterSplash`,
+ * `FUN_00439EA0`), the surface ring (`FishSpawnSurfaceRing`, `FUN_00439FA0`)
+ * and the blood cloud (`SpawnFishBloodCloud`, `FUN_00439DC0`) -- live in
+ * `game/effects/fish.ts`, and every one of them ends: the kill in each update
+ * is past the `MatrixStackPop` the decompiler stops at. The corpse's meeting
+ * with the water is a fourth, shared one: `SpawnRingEffectAtPose`
+ * (`FUN_00408370`), `game/effects/ring_effect.ts`. The surface ring is only
+ * ever `FishStateSink`'s; the deaths make the ring task.
  *
  * `[diverges]` **The camera gate is coarser here.** `FishRegisterForCameraTracking`
  * (`FUN_00439D70`) offers the fish to the camera only in states 0, 1 and 2;
@@ -79,6 +82,10 @@ import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount } from "../combat/coun
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
+import {
+  FishSpawnSurfaceRing, FishSpawnWaterSplash, SpawnFishBloodCloud,
+} from "../effects/fish";
+import { SpawnRingEffectAtPose } from "../effects/ring_effect";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import {
@@ -202,9 +209,20 @@ export const FISH_SLOTS_PER_PLAYER = 2;
 export const SND_FISH_KILLED = 0x716a9;
 /** `COMMON\ENE_WALK3_16.WAV` — a corpse hitting something that is not water. */
 export const SND_FISH_LANDED = 0x2616a9;
-/** `COMMON\SIBUKI2_16.WAV` and `SIBUKI3` — *shibuki*, a splash. */
-export const SND_SPLASH_BIG = 0x4116a9;
-export const SND_SPLASH_SMALL = 0x4216a9;
+/**
+ * What a death that meets the water leaves on it: `SpawnRingEffectAtPose`
+ * at `(x, g_water_level + [0x004E3100], z)` -- 0.02 -- or, for the sub-type-1
+ * corpse on solid ground, at `[0x004D1D24]` 0.2 above it, and at 0.8 either
+ * way.
+ */
+export const FISH_DEATH_RING_ABOVE_WATER = 0.02;
+export const FISH_DEATH_RING_ABOVE_GROUND = 0.2;
+export const FISH_DEATH_RING_SCALE = 0.8;
+/**
+ * The corpse's yaw: `rand() & 0xFFFF`, and `rand()` is `0..0x7FFF`
+ * (`0x004ADED2` ends `AND EAX, 0x7FFF`) -- so half a turn, not a whole one.
+ */
+export const FISH_CORPSE_YAW_SPREAD = 0x8000;
 
 function Tail(obj: Actor): FishTail | null {
   return (obj as Actor & { fish?: FishTail }).fish ?? null;
@@ -240,42 +258,18 @@ function FishCorpseSlot(inPlaySlot: number): number {
   return G.g_app_state === 6 ? inPlaySlot : FISH_FIRST_SLOT;
 }
 
-// -- the effects, which are sounds here and sprites in the engine -----------
-
 /**
- * `FishSpawnWaterSplash` — `FUN_00439EA0`.
+ * The pose `SpawnRingEffectAtPose` is handed at every one of the class's
+ * three calls: a point on the stack, and nothing written to the pose's yaw.
  *
- * `kind` is the caller's: 1 for a body going into the water, 0 for the surface
- * being crossed or clipped. It picks the sound, and in the engine it also ends
- * up on the sprite at `+0x64`.
- *
- * `[diverges]` The sprite is not built — see the file's note. The sound is.
+ * [diverges] The engine builds `x, y, z` in a local array and passes its
+ * address; the routine then reads `p[4]` as the ring's yaw, and at
+ * `0x0043956D`, `0x004396CD` and `0x00438D95` that word is a local nothing in
+ * the frame writes -- whatever an earlier call left on the stack. It turns
+ * where the four strips stand about the ring. The port passes 0.
  */
-export function FishSpawnWaterSplash(_obj: Actor, _scale: number, kind: number,
-                                 events?: Events): void {
-  play(events, kind === 0 ? SND_SPLASH_SMALL : SND_SPLASH_BIG);
-}
-
-/**
- * `FishSpawnSurfaceRing` — `FUN_00439FA0`. Slot `0xB71`, silent.
- *
- * `[diverges]` Not built, and it makes no sound, so this is a name with
- * nothing behind it — kept as a call site so the two places the engine fires
- * it are visible in the port.
- */
-export function FishSpawnSurfaceRing(_obj: Actor, _scale: number): void {
-  // Nothing: see the file's note on the three cosmetic tasks.
-}
-
-/**
- * `SpawnFishBloodCloud` — `FUN_00439DC0`. Slot `0x3A` upward, in play only.
- *
- * `[diverges]` Not built. It is **not** `SpawnBloodSpray` (`FUN_00407310`)
- * despite starting at the same slot: this one draws at the actor's camera-space
- * point with an identity matrix and steps its cursor with no last frame at all.
- */
-export function SpawnFishBloodCloud(_obj: Actor): void {
-  // Nothing: see the file's note on the three cosmetic tasks.
+function FishDeathRingPose(obj: Actor, y: number) {
+  return { x: obj.pos.x, y, z: obj.pos.z, yaw: 0 };
 }
 
 // -- claiming and releasing ------------------------------------------------
@@ -736,17 +730,20 @@ export function FishStateFlung(obj: Actor, f: ClassFrame): void {
     sub.vx = FISH_SINK_DRIFT;
     sub.vz = -FISH_SINK_DRIFT;
     sub.yawStep = FISH_SINK_YAW_STEP;
-    sub.yaw = f.rng.int(0x10000);
+    sub.yaw = f.rng.int(FISH_CORPSE_YAW_SPREAD);
   };
 
   if (sub.subtype === 1) {
     const h = QueryGroundHeightAt(obj.pos.x, obj.pos.y + 10.0, obj.pos.z);
     if (y > h) { obj.pos.y = y; return; }
+    // The ring's point is built in each arm and the ring made after both
+    // join, at `0x004396CD`.
+    let ringY: number;
     if (G.g_coli_hit_surface === 0) {
       obj.pos.y = y;
       intoWater();
+      ringY = G.g_water_level + FISH_DEATH_RING_ABOVE_WATER;
       FishSpawnWaterSplash(obj, 0.8, 1, f.events);
-      FishSpawnSurfaceRing(obj, 0.8);
     } else {
       obj.pos.y = h;
       sub.bobRate = 0;
@@ -757,13 +754,15 @@ export function FishStateFlung(obj: Actor, f: ClassFrame): void {
       sub.vz = 0;
       sub.yaw = 0;
       sub.yawStep = 0;
+      ringY = obj.pos.y + FISH_DEATH_RING_ABOVE_GROUND;
       play(f.events, SND_FISH_LANDED);
-      FishSpawnSurfaceRing(obj, 0.8);
     }
     ReleaseEnemyPresentCount(obj);
     sub.dy = FISH_SINK_BOB;
     sub.state = FishState.Sink;
     sub.frame = FishCorpseSlot(FISH_FLUNG_SLOT);
+    SpawnRingEffectAtPose(FishDeathRingPose(obj, ringY),
+                          FISH_DEATH_RING_SCALE);
     sub.timer = 0;
     obj.pos.y = y;
     return;
@@ -779,7 +778,9 @@ export function FishStateFlung(obj: Actor, f: ClassFrame): void {
   sub.dy = FISH_SINK_BOB;
   intoWater();
   sub.timer = 0;
-  FishSpawnSurfaceRing(obj, 0.8);
+  SpawnRingEffectAtPose(
+    FishDeathRingPose(obj, G.g_water_level + FISH_DEATH_RING_ABOVE_WATER),
+    FISH_DEATH_RING_SCALE);
   FishSpawnWaterSplash(obj, 0.8, 1, f.events);
   ReleaseEnemyPresentCount(obj);
 }
@@ -925,13 +926,15 @@ export function FishCheckShot(obj: Actor, f: ClassFrame): void {
     sub.vx = FISH_SINK_DRIFT;
     sub.vz = -FISH_SINK_DRIFT;
     sub.yawStep = FISH_SINK_YAW_STEP;
-    sub.yaw = f.rng.int(0x10000);
+    sub.yaw = f.rng.int(FISH_CORPSE_YAW_SPREAD);
     sub.timer = 0;
-    FishSpawnSurfaceRing(obj, 0.8);
+    SpawnRingEffectAtPose(
+      FishDeathRingPose(obj, G.g_water_level + FISH_DEATH_RING_ABOVE_WATER),
+      FISH_DEATH_RING_SCALE);
   }
 
   obj.flags &= ~ActorFlag.Hit;
-  SpawnFishBloodCloud(obj);
+  SpawnFishBloodCloud(obj, f.host);
   obj.flags |= ActorFlag.NoCameraTrack;
   ReleaseEnemyAliveCount(obj);
   FishReleaseAttackPermit(obj);

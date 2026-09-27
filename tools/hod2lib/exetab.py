@@ -832,6 +832,21 @@ class ExeTables:
     #: `FUN_0046B040` as `(&DAT_00594788, 0x30)`.
     FALLING_HULL = 0x00594788
     FALLING_HULL_POINTS = 48
+    #: `g_container_fragment_hull_points` -- the 55-point hull
+    #: `FallingContainerFragmentUpdate` (`FUN_0046AD20`) passes
+    #: `FallingContainerGroundContact` as `(0x005948A8, 0x37)`. Both bounds are
+    #: the callers' own `PUSH` immediates (L6).
+    FRAGMENT_HULL = 0x005948A8
+    FRAGMENT_HULL_POINTS = 55
+    #: `g_shatter_fragment_slots_a` / `_b`, `g_shatter_fragment_offsets` and
+    #: `g_shatter_fragment_angles`: what `BreakablePropSpawnShatter`
+    #: (`FUN_00465170`) and `BreakablePropShatterUpdate` (`FUN_004653B0`) read
+    #: per piece. Fifteen is the spawn loop's `CMP ESI, 0x5A` in steps of six.
+    SHATTER_SLOTS_A = 0x00593A38
+    SHATTER_SLOTS_B = 0x00593A58
+    SHATTER_OFFSETS = 0x00593A78
+    SHATTER_ANGLES = 0x00593AD4
+    SHATTER_PIECES = 15
     #: `g_class41_constructors` (79 entries) and, immediately after it, the
     #: table of *update* routines `PlaceGenericProp` allocates against.
     CLASS41_CTORS = 0x00593580
@@ -1464,6 +1479,52 @@ class ExeTables:
             x, y, z = struct.unpack_from("<3h", self.data, o)
             out.append((x * 0.001, y * 0.001, z * 0.001))
         return out
+
+    def fragment_hull_points(self) -> list[tuple[float, float, float]]:
+        """The 55-point hull a falling container's two pieces rest on.
+
+        Same shape as `falling_hull_points`; `FallingContainerGroundContact`
+        is one routine that both callers hand a hull and a count.
+        """
+        base = self._v2r(self.FRAGMENT_HULL)
+        if base is None:
+            return []
+        out: list[tuple[float, float, float]] = []
+        for i in range(self.FRAGMENT_HULL_POINTS):
+            o = base + i * 6
+            if o + 6 > len(self.data):
+                break
+            x, y, z = struct.unpack_from("<3h", self.data, o)
+            out.append((x * 0.001, y * 0.001, z * 0.001))
+        return out
+
+    def shatter_pieces(self) -> dict:
+        """The per-piece tables of a shattering stacked prop.
+
+        ``slots_a``/``slots_b`` are the two s16 slot tables
+        `BreakablePropShatterUpdate` picks between on the prop's ``+0x324``;
+        ``offsets`` (thousandths, left raw) and ``angles`` (BAMS, the
+        ``Rz Ry Rx`` order the spawn composes) place each piece relative to
+        the matrix the prop's last draw stored.
+        """
+        n = self.SHATTER_PIECES
+
+        def s16s(va: int, count: int) -> list[int]:
+            base = self._v2r(va)
+            if base is None or base + count * 2 > len(self.data):
+                return []
+            return list(struct.unpack_from("<%dh" % count, self.data, base))
+
+        def triples(va: int) -> list[tuple[int, int, int]]:
+            flat = s16s(va, n * 3)
+            return [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
+
+        return {
+            "slots_a": s16s(self.SHATTER_SLOTS_A, n),
+            "slots_b": s16s(self.SHATTER_SLOTS_B, n),
+            "offsets": triples(self.SHATTER_OFFSETS),
+            "angles": triples(self.SHATTER_ANGLES),
+        }
 
     def breakable_hull_points(self) -> list[tuple[float, float, float]]:
         """`g_breakable_hull_points` -- the breakable prop's collision hull.

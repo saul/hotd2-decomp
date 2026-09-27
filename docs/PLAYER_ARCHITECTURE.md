@@ -670,6 +670,12 @@ web/src/
                   clocks it inside its own update, the director does not, and
                   render/ draws it from its matrices
                   (render/characters/model_block.ts)
+    model_draw.ts what every skinned actor's draw is gated on, as state:
+                  `model+0x64` bit 0 (`MotionFlag.Drawn`), the part records
+                  (`Actor.partVisible`), `ActorDrawShadow`'s gate, and the node
+                  walk a class's draw hook runs from when its pose is
+                  render/'s. render/characters/draw_gates.ts applies them node
+                  by node; none of it is an alpha
     original_mode.ts  the two-slot inventory, and the one query the branch
                   triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class
@@ -720,6 +726,8 @@ web/src/
     prop_parts.ts the class-0x41 routines that draw several models at
                   several poses (types 38, 39, 40, 44) as lists of parts;
                   breakables.ts clones and poses them
+    prop_shatter.ts  a stacked prop's fifteen shatter pieces
+                  (`G.g_prop_shatters`), off breakables.ts's templates
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
     characters/boss3.ts, boss3_effects.ts  class 0x45 composes its own bone
                   matrices in `game/class45/`; these place them, and draw

@@ -28,13 +28,13 @@ import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
 import { ActorByAt, G } from "../globals";
 import {
-  AttackListOf, FirstBakedOf, MotionPlayFrame, MotionPlayLength, MotionRowOf,
+  AttackListOf, MotionPlayFrame, MotionPlayLength, MotionRowOf,
 } from "../tables";
 import { ActorStrikeConnect, ZombiePickAttack } from "./strike";
 import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotion, ActorSetMotionBlended, ZombieSetMotionIfIdle }
   from "./motion_cue";
-import { MotionFade, MotionRow, ZombieState } from "./states";
+import { MotionFade, ZombieState, ZombieWaitMotion } from "./states";
 import type { Vec3 } from "../vec";
 
 /**
@@ -455,12 +455,8 @@ function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
  */
 function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
   if (obj.flags & ActorFlag.Committed) return;
-  const row = MotionRowOf(obj);
-  const alt = (obj.flags2 >>> 0x15) & 1;
-  const motion = FirstBakedOf(obj, row,
-                              alt ? MotionRow.WalkAlt : MotionRow.Walk,
-                              MotionRow.Walk, MotionRow.WalkAlt);
-  ZombieSetMotionIfIdle(obj, motion, rng, 5, MotionFade.Quick);
+  ZombieSetMotionIfIdle(obj, ZombieWaitMotion(obj, MotionRowOf(obj)), rng, 5,
+                        MotionFade.Quick);
 }
 
 /**

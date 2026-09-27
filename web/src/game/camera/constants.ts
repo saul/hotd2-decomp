@@ -39,12 +39,15 @@ export const CAMERA_ATTACK_SLOTS = 2;
 export const CAMERA_SLOTS = 16;
 
 /**
- * `TurnActorTowardCamera` (`FUN_00409ED0`) faces an actor at a point this far
- * in front of the camera, not at the eye.
+ * `SelectCameraLookAtTarget` (`FUN_00403050`) lifts the stand-in look-at point
+ * off an actor's origin by this much while the renderer has not yet posed it
+ * and found the real bone.
  *
- * `SelectCameraLookAtTarget` (`FUN_00403050`) reuses the number to lift the
- * stand-in look-at point off an actor's origin while the renderer has not yet
- * posed it and found the real bone.
+ * This used to be described as the distance `TurnActorTowardCamera`
+ * (`FUN_00409ED0`) faces an actor at "in front of the camera". That routine
+ * does use a 1.5 (`0x3fc00000` at `0x00409F24`), but along world +Z turned by
+ * the eye's *height* rather than in front of anything; it keeps its own
+ * constant in `actor_turn.ts`.
  */
 export const ACTOR_FACE_OFFSET = 1.5;
 

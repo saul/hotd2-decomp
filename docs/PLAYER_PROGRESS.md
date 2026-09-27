@@ -2040,12 +2040,20 @@ and watches the cursor wrap.
 
 The **Track** checkbox turns it off, restoring the authored path exactly.
 
-**Zombies do not aim their torso or head** — that was asked and is now a
-settled negative, not an omission. The per-frame pose hook has exactly two
-implementations in the whole program, a no-op and a collision push-out, and
-`SkeletonWalkNode` reads every bone rotation straight from the motion bank.
-The aiming you see is the whole body turning plus directionally selected
-motion variants. See [`formats/combat.md`](formats/combat.md) §10.
+**The body turns at the exe's rate, and the head is not yet aimed.** Every
+turn goes through `TurnAngleToward` (`FUN_00409E00`) as the exe has it: a flat
+rate a frame -- `0x1A0` for a jogging zombie's run and `0x410` for a sprinting
+one's, `0x40` in the hold and the wait -- the short way round, with a negative
+rate turning the long way and dithering about the opposite heading, which is
+how the retreat faces away from where its swing began. The run used to ease a
+fifteenth of the angle a frame instead, and a zombie half a turn off came round
+in about half a second where the game's takes 79 frames. The torso is not
+aimed. **The head is, and the port does not do it**: the class-0x30 and
+class-0x31 per-bone draw hooks step `obj+0x1320`/`+0x1324` toward the camera
+at `0xC0` a draw and rotate bone 2 by them, up to a quarter turn either way of
+the body. That had been recorded here as a settled negative, from a search of
+the pose hook, which is empty; the aim is in the draw hook beside it. See
+[`formats/combat.md`](formats/combat.md) §10.
 
 **The strike and player damage are in.** An attack entry names its lunge
 distance, its strike clip and the exact frame the hit lands on; a **cancel

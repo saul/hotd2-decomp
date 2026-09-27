@@ -19921,3 +19921,94 @@ and `--meter-all` already reads class 0x45's `obj+0x11C`.)
   class's.
 * The bystanders' Original Mode part scaling waits on the item system
   (`FUN_00475E40`), as class 0x10's does.
+
+## 2026-09-27 -- the turn routines as the exe has them, and the run pair that was already right
+
+**Outcome:** `TurnAngleToward` (`FUN_00409E00`) is transcribed instruction for
+instruction and every turn in `game/` goes through it at the rate the exe
+passes; `ZombieStateAttackRun` is the exe's routine rather than an
+approximation of it; two stale divergence notes about the Run/RunAlt pair are
+gone because the thing they described had been fixed weeks ago.
+
+**What the binary says.** `[proved]` throughout, from the listings:
+
+* `TurnAngleToward` masks both angles, forms the direct distance and the two
+  distances through the seam, lands on the target when the rate is `>=` any of
+  them, and otherwise steps `a ± rate` the short way -- **unwrapped**, and with
+  a signed compare that makes a **negative rate** never land and step the long
+  way, so the angle runs to the opposite heading and dithers about it. The port
+  had the destination right and the arithmetic wrong: an ease for the attack
+  run, `|rate| * frames` with a wrapped result elsewhere, and a 0x8000 flip of
+  the target standing in for the negative rate.
+* `TurnActorTowardCamera` (`FUN_00409ED0`) turns toward
+  `eye + RotY(__ftol(g_camera_eye_y)) * (0, 0, 1.5)`. The rotation is by the
+  eye's **height** -- `FLD [0x009C71E4]` -- not by any angle; the doc and
+  `ACTOR_FACE_OFFSET` both said "1.5 in front of the camera". The whole turn
+  is past `MatrixStackPop` and the pseudocode shows none of it.
+* Its only callers are `ZombieStateAttackRun`'s two, with
+  `ftol((bit27 * 1.5 + 1.0) * 416.0)`: **0x1A0 jogging, 0x410 sprinting**.
+* `ZombieStateAttackRun`: the 1-in-64 roll into `ActorAbortAttackAndLeave` is
+  drawn every frame; bands 2..4 turn, then drop to `WaitTurn` with
+  `g_wait_turn_variant[(rand() >> 4) % 10] << 21` OR-ed into `obj+0x136C`
+  **without ending the frame**, and only bands 3 and 4 ask
+  `ZombieShouldStandAndThrow`. The port returned on the drop-out, never wrote
+  the variant bit, and asked from band 2 too -- which takes a permit.
+* `ZombieStateBackOff` clears `obj+0x136C` bit 0x400000 and `obj+0x34` bit
+  0x10000000 on its first frame, and turns at `+0x40` while that bit is up,
+  `-0x40` otherwise. The port always used `-0x40`, though the shove timer that
+  flips the bit was already ported.
+* `ZombieStateWaitTurn` plays `row[(obj+0x136C >> 21) & 1]` through
+  `ActorSetMotionBlended`; the port took the first baked of the pair.
+* `AngleWithinTolerance` (`FUN_0040A040`, named this session in Ghidra and the
+  TSV) is an inclusive window the short way round, and it is what
+  `TurnActorAwayFromPointTestArrival` returns through `EAX`.
+* Class 0x31: `ThrowerStateThrow` calls **no** turn routine -- the port turned
+  the thrower with the zombie's ease before every throw; `ThrowerStateWithdraw`
+  has a type-0x17 arm (turn at -0x100, 30 units, no clip wait, no flinch) the
+  port did not; `ThrowerStateDelayedPounce` levels `obj+0x6C` at 0xCCC a frame
+  where the port's line wrapped the yaw.
+
+**The Run/RunAlt item was already done.** `ActorInitFlags` carries the spawn
+record's flags word whole onto `obj.flags`, the bundle exports it as
+`init_flags`, and `ZombieRunMotion` has read bit 27 since the entry "Every
+zombie in the game jogged, and half of them should sprint". The notes in `walk_distance.ts` and `tables.ts` saying otherwise were
+stale, and so was the one's count: **192** of the 402 class-0x30 spawns set
+the bit, not 141. The `tables.ts` claim that `znchain`'s sprint (968) is
+another skeleton's clip is also false: `znchain` has 16 bones and 968 bakes for
+it, and every class-0x30 spawn's `row[2 + bit27]`, `row[0]`, `row[1]` and
+`row[4]` is baked for every condition row its type has, across all twelve
+bundles. The engine would not refuse such a clip in any case --
+`MotionFrameAddress` reads any motion at the character's own stride -- so
+`FirstBakedOf` went, and every state indexes the row the way the exe does.
+
+**Found and not done** (chips raised): the head is aimed. `ZombieDrawBonePart`
+and `ThrowerDrawBonePart` call an undefined routine at `0x00453BE0` for bone 2
+that steps `obj+0x1320`/`+0x1324` toward the camera with `TurnAngleToward` at
+0xC0 and rotates the bone -- `combat.md` had recorded "zombies do not aim their
+head" as a settled negative from a search of the (empty) pose hook, which is
+L39 again. Class 0x25 has a twin at `0x00485BA0`. Also: `ZombieStateStrike`
+sets `obj+0x34` bit 0x10000000 and clears 0x100 and the port does neither; and
+`ThrowerStateDelayedPounce` differs from the exe beyond its roll.
+
+**What it changes in play.** Zombies no longer whip round: a jogger half a turn
+off takes 79 frames to face you, a sprinter 32, where the ease had them nine
+tenths of the way in about half a second. Stage 3 block 1's hand-back harness
+now measures one gate where it measured three: the harness clears a room by
+dropping the counter and the camera slot while leaving the actors alive, and
+with the zombies arriving on different frames two of them re-claim a permit and
+hold the camera off its rail for the rest of the run. The harness makes that
+state, not the port -- the camera branch's rewrite of `handback.mjs` already
+kills the room through the death states for exactly this reason.
+
+**Wrong turns.**
+
+* My first `verify_all` "baseline" ran while I was already editing, so its
+  handback failure was a half-edited tree. A second worktree of `HEAD` in the
+  scratch directory is what gave a real baseline (L30's advice, taken late).
+* The first draft of the class-0x31 arrival test asserted "not there" with a
+  window of 0x1FF around a yaw 0x100 off, which is there.
+* I first wrote the stand's two `0x200` constants the wrong way round against
+  the push order: the tolerance is pushed first, the rate second.
+* The scratch directory is shared with sibling agents: two of my scratch files
+  were overwritten by another agent's between writing and rereading. Scripts
+  now live in a subdirectory of their own.

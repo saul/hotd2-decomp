@@ -25,7 +25,6 @@ import {
   type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { TurnActorTowardCamera } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import {
@@ -587,8 +586,12 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
       return ThrowerStatePathFollow(obj, dt);
+    // No turn here. `TurnActorTowardCamera` (`FUN_00409ED0`) has two callers
+    // in the image and both are `ZombieStateAttackRun`'s; `ThrowerStateThrow`
+    // calls no turn routine at all, so a thrower throws on the facing
+    // `ThrowerStateStandAndDecide` left it with. The port turned it here with
+    // an ease from before any of this was read.
     case ThrowerState.Throw:
-      TurnActorTowardCamera(obj, eye, dt);
       return ThrowerStateThrow(obj, host, eye, rng, events);
     // State 0 is the engine's shared no-op: an actor placed in it does nothing
     // for ever, which is what the engine does too.

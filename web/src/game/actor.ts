@@ -732,10 +732,25 @@ export enum ZombieFlag2 {
   CollideActors = 0x40000000,
   /** Bit `0x800000` — set for the frame a push actually moved this actor. */
   Shoved = 0x800000,
-  /** Bit `0x400000` — which way `ZombieStateBackOff` turns; the shove flips it. */
+  /**
+   * Bit `0x400000` — which way `ZombieStateBackOff` turns: clear, it passes
+   * `-0x40` and turns away from where its strike began; set, `+0x40`, toward
+   * it. The retreat's own first frame clears it (`00455cc0 81e1ffffbfff`)
+   * and the shove timer flips it every sixty frames while the actor is being
+   * pushed, so a wedged one tries the other way.
+   */
   BackOffTurnFlip = 0x400000,
   /** Bit `0x2000000` — the bounding sphere sits a half unit up, not one. */
   LowSphere = 0x2000000,
+  /**
+   * Bit `0x1000000` — with {@link LowSphere}, what arms
+   * `ZombieStateAttackRun`'s one-in-64 roll into `ActorAbortAttackAndLeave`
+   * (`FUN_0045D9F0`); the roll clears it when it fires (`00455540 25fffffffe`).
+   * Its one writer found so far is `g_class30_states[53]` at `0045e6a2`
+   * (`OR EAX, 0x1000000`), a state the port does not have. What the bit means
+   * beyond that is `[open]`.
+   */
+  AbortRollArmed = 0x1000000,
   /**
    * Bit `0x100000` — the actor is being **carried**: riding
    * `g_carrier_object` in `ZombieStateRideCarrier`, or in flight in

@@ -19921,3 +19921,60 @@ and `--meter-all` already reads class 0x45's `obj+0x11C`.)
   class's.
 * The bystanders' Original Mode part scaling waits on the item system
   (`FUN_00475E40`), as class 0x10's does.
+
+## 2026-09-27 -- the HUD shutter as the scene's task, and no pause at a branch
+
+Two of the script layer's declared divergences, both removed.
+
+**The shutter.** The port reset `g_bHudShutterState` to 2 where
+`ResetSceneOnEnter` stores 5, and declared it. Reading the routines rather
+than the note showed more than the reset was off. `[proved]`, from the
+disassembly and the jump table at `0x00413C80`:
+
+* `EvtOpSetHudShutterState1F` (`FUN_0045F380`) is one store. The seeding,
+  the slide and every write of `g_nFiringGate` are `HudDrawShutterState`'s.
+* That routine is a task: `HudShutterTaskCreate` (`FUN_00413950`, named this
+  session) is the eighth call of the scene's task-list builder at
+  `0x00460710`, after `PlayerTasksCreate` and `SpawnAttackablePlayerTask`.
+  `ActorAlloc` appends and `TaskRunTree` walks from the head, so a frame is:
+  the script, the players, the shutter, then every actor.
+* The script task's first handler, `EvtTaskInstallInterpreter`
+  (`FUN_0045ECB0`, named this session), only installs `EvtInterpreterLoop`:
+  a scene's first frame runs no script, and draws the reset's 5 shut.
+* State 1 steps the counter before drawing and hands over on the 41st frame;
+  state 3 likewise from `0x28`. 4 is hidden by `g_screen_furniture_flags &
+  0x30` (both screen cards). 7 draws nothing on its own frame.
+
+The port ran the machine in `script/state/shutter.ts` at the top of the
+walker's *next* tick, with the opcode seeding the counter and raising the gate
+itself. So besides the reset: a shot on the frame of a `hud_shutter_state 6`
+fired where the engine's player task has already met a dead gate; the slide
+drew a counter behind; and `hud/hud.ts` drew the shut states from the
+counter, so a 5 after a finished open drew **no bars** -- thirteen such 5s
+inside a block across the six stages. The machine is `game/hud_shutter.ts`
+now, run by `SceneTaskWalk` after `PlayerTasksRun`; its four words are in `G`;
+what it draws is recorded in `G.g_hud_shutter_bars` for `hud/` to draw.
+
+Every stage's block 0 step 1 writes its own 5 before its first wait, so the
+reset's 5 is visible on the first frame only; the note's worry that it "would
+shut the bars on every freshly loaded stage" is the engine's picture and the
+scripts' own.
+
+**The branch.** `EvtAdvanceStepOrRoute` (`FUN_0045F000`) assigns
+`next[g_script_branch_var]` in the same call, `[proved]`. The walker's 1.5 s
+hold is `WalkerOptions.branchPause` now, off by default, set by a sidebar
+switch -- "Pause at branches", in the route panel under a new "debug aids"
+kind of toggle, persisted with the other view preferences. `playthrough.mjs`
+turns it on for `--route`, which reads the bar.
+
+**Wrong turns.**
+
+* I first planned to keep the machine in `script/` and only move its step to
+  the end of the walker's tick. That puts it after the script but still
+  before the players, so the fire routine would still see this frame's gate
+  a frame early; only `SceneTaskWalk` has the players in it.
+* Drawing from the record would have left a paused load or a seek with no
+  bars, because nothing there runs a frame (caught in the design, not in the
+  page). `PlayerTasksDrawWithoutAFrame` already existed for
+  the readouts; it runs the shutter's task too now, and the plain load path
+  calls it.

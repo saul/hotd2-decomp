@@ -238,7 +238,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // No seed: the walker draws no random numbers. `?seed=` reseeds the world's
   // generator, `p.rng`, a few lines above -- which is the only random source
   // in the player.
-  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script));
+  // `branchPause` is the sidebar's debug aid, read at every branch; the
+  // toggles above were applied before this walker existed.
+  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script),
+                        { branchPause: p.toggles.branchPause });
   p.script.walker = p.walker;
 
   // The dialogue table for the stage. The walker carries the group; the words
@@ -376,6 +379,10 @@ function applyIncomingState(p: Player): void {
     // camera command, so opening there is a truthful black screen. Prime to
     // where the stage actually starts instead.
     w.primeToFirstWait();
+    // No frame has run here either, and the letterbox is drawn from what
+    // `HudDrawShutterState` recorded on one -- so without this a stage that
+    // opens paused showed no bars over what the engine draws shut.
+    PlayerTasksDrawWithoutAFrame();
     p.syncCameraToWalker(true);
   }
   if (p.state.all) {

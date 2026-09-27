@@ -50,6 +50,7 @@ import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   PlayerStartGameFromTitle, PlayerTasksCreate, PlayerTasksRunFirstTurn,
   type PlayerBlock }
   from "./player_shell";
+import { HudShutterTaskCreate, type ShutterBar } from "./hud_shutter";
 
 /**
  * `g_app_state` (`0x009C8E98`) — the game's top-level screen, and something
@@ -820,7 +821,7 @@ export const G = {
    * states 0, 1 and 6 and drops it in state 5 and at the end of a state-3
    * close — so states 0 and 5 both draw a *closed* shutter and set it to 1 and
    * 0 respectively. A boss intro can be letterboxed and still let you shoot.
-   * The state machine that drives it is `script/state/shutter.ts`, which is
+   * The port's `HudDrawShutterState` is in `game/hud_shutter.ts`, and it is
    * the only writer here too.
    *
    * The rule it enforces is `PlayerFireAndReloadUpdate`'s (`FUN_00414940`),
@@ -831,43 +832,53 @@ export const G = {
    * the same.
    *
    * **In `G` rather than on the walker, because the exe has one word and the
-   * port must have one field.** The shutter's own three fields are script
-   * state and stay with the script; this one is read by the player's fire
-   * routine, so it lives where the rest of the data segment does and
-   * `script/state/shutter.ts` reaches it through an accessor. `Walker`'s save
-   * slice still carries it under the old name, but only as a copy taken from
-   * here at save time — the script slice is restored before the game slice, so
-   * this is what a load ends up holding either way.
+   * port must have one field.** `Walker`'s save slice still carries it under
+   * the old name, but only as a copy taken from here at save time — the script
+   * slice is restored before the game slice, so this is what a load ends up
+   * holding either way.
    *
    * BSS, so it starts **down**, and `ResetSceneOnEnter` puts it back down on
-   * every scene: nothing raises it until the script's first `hud_shutter_state`
-   * of 0, 1 or 6. All eleven shipped `evt/` tables issue those — 87 ones and
-   * 104 sixes across the game — so gating on it does not lock the player out.
+   * every scene: nothing raises it until the shutter's first state 0, 1 or 6.
+   * All eleven shipped `evt/` tables issue those — 87 ones and 104 sixes
+   * across the game — so gating on it does not lock the player out.
    */
   g_nFiringGate: 0,
   /**
-   * `g_bHudShutterState` — `0x009CA0F4`. The HUD letterbox, states 0..8.
+   * `g_bHudShutterState` — `0x009CA0F4`. The HUD letterbox, states 0..8 (see
+   * `ShutterState` in `game/hud_shutter.ts`).
    *
-   * **Here for exactly the reason `g_nFiringGate` above is here**, and it is
-   * the same argument one step on: routines in `game/` now read and write it,
-   * so a copy kept on the walker and mirrored across would be the second
-   * owner of one byte. `BossIntroBannerUpdate` (`FUN_00437AC0`) sets it to 1
-   * at `0x00437F1E` — the only instruction in the image that puts the shutter
-   * into state 1 from inside a stage — and **both bosses read it to decide
-   * that their fight has started**: `Boss4StateEntranceCarried`
-   * (`FUN_004938B0`) at `0x004938F6`, and every one of class 0x14's
-   * entrances, `Class14StateEntranceA` (`FUN_00478160`) at `0x0047834E`.
-   * None of the three is script code.
+   * evt `0x1F` stores it and does nothing else; `HudDrawShutterState` turns it
+   * into bars and a firing gate once a frame. Gameplay writes it too, and
+   * reads it: `BossIntroBannerUpdate` (`FUN_00437AC0`) sets it to 1 at
+   * `0x00437F1E` and `Class22FightPhase1` at `0x0049B899`, and **the bosses
+   * read it to decide that their fight has started** --
+   * `Boss4StateEntranceCarried` (`FUN_004938B0`) at `0x004938F6`, and every
+   * one of class 0x14's entrances, `Class14StateEntranceA` (`FUN_00478160`)
+   * at `0x0047834E`. The script's accessor in `script/state/shutter.ts`
+   * reaches this byte, so there is one owner.
    *
-   * `script/state/shutter.ts` remains the machine: `evt 0x1F` and the
-   * 40-frame slide are its, and it reaches this byte through an accessor. The
-   * two fields that stay with it, `g_bHudShutterPrev` and the draw task's
-   * counter, nothing outside the script reads.
-   *
-   * 2 rather than the engine's 5 at reset, which is the standing `[diverges]`
-   * that file already carries and names.
+   * 5 at a scene's start, as `ResetSceneOnEnter` leaves it: the bars are shut
+   * until the script opens them.
    */
-  g_bHudShutterState: 2,
+  g_bHudShutterState: 5,
+  /**
+   * `g_bHudShutterPrev` — `0x009C8E9C`. The state `HudDrawShutterState` last
+   * settled on: a state that differs from it seeds the slide, and state 7
+   * puts it back. The routine writes it on every path but a blackout's, and
+   * `ResetSceneOnEnter` sets it to 5 beside the state.
+   */
+  g_bHudShutterPrev: 5,
+  /**
+   * `HudDrawShutterState`'s slide counter -- its task's `+0x50`, 0 shut and
+   * 0x28 open. `HudShutterTaskCreate` starts it at 0; the routine seeds it on
+   * a change of state and steps it in states 1 and 3.
+   */
+  g_hud_shutter_counter: 0,
+  /**
+   * `[port-only]` -- the bars `HudDrawShutterState` drew this frame, for
+   * `hud/hud.ts` to put on the screen. See `ShutterBar`.
+   */
+  g_hud_shutter_bars: [] as ShutterBar[],
   /**
    * The trigger pulls this frame has not resolved yet.
    *
@@ -1967,8 +1978,8 @@ export type Globals = typeof G;
  *   released and cleared. `obj+0x3C` is the phase of every cel a class-0x30
  *   bone draws, so the port needed it; `game/hit_slots.ts` says which parts of
  *   the hit-slot system are ported and which are not. |
- * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
- * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
+ * | `g_bHudShutterState` back to 5 (`0x0045EE5F`) | ✅ |
+ * | `g_bHudShutterPrev` back to 5 (`0x0045EE64`) | ✅ |
  * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
  * | `g_nFiringGate = 0` | ✅ |
  * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
@@ -2019,18 +2030,16 @@ export function ResetSceneOnEnter(): void {
   // stage that never issues `hud_shutter_state 1` or `6` is a stage the engine
   // would not let you shoot in either.
   G.g_nFiringGate = 0;
-  // `MOV [0x009ca0f4], AL` at `0x0045EE5F`, with `AL` 5 -- and `g_bHudShutterPrev`
-  // beside it, which is `script/state/shutter.ts`'s and stays there.
-  //
-  // The port writes **2**, not 5, and that is `Shutter.reset`'s standing
-  // `[diverges]` seen from the other side rather than a second one: a 5 draws
-  // the closed bars and hands over to 4 -- which the port's shutter machine
-  // now does too (`Shutter.step`), so what is left is the picture: a 5 here
-  // would shut the bars on every freshly loaded stage until its script opens
-  // them. It is written at all only because the byte moved into
-  // `G` for class 0x19 -- until then the walker owned it and this routine
-  // could not reach it.
-  G.g_bHudShutterState = 2;
+  // `MOV AL, 5` at `0x0045EE58`, then `MOV [0x009ca0f4], AL` and
+  // `MOV [0x009c8e9c], AL`: the state and the one `HudDrawShutterState` last
+  // settled on, both 5. They are equal, so the routine's first frame seeds
+  // nothing, draws the shut bars and leaves 4 with the gate down -- which is
+  // the picture of a scene before its script has opened them, and on that
+  // first frame the script has not run at all: its task's first handler,
+  // `EvtTaskInstallInterpreter` (`FUN_0045ECB0`), only installs the
+  // interpreter.
+  G.g_bHudShutterState = 5;
+  G.g_bHudShutterPrev = 5;
   // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
   G.g_screen_shake_frames = 0;
   // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
@@ -2110,6 +2119,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  // The shutter's task is one of the list the scene load builds, so its
+  // counter starts again at 0 -- `HudShutterTaskCreate`, at `0x00460733`.
+  HudShutterTaskCreate();
   // The scene's task list is rebuilt on a scene load, and a bar task goes
   // with it; the fill itself is a data-segment word and is left alone.
   G.g_boss_hp_bars = [];

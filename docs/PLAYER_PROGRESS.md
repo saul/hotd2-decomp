@@ -925,7 +925,7 @@ enumerable place, it can be shown:
 | **W1** | Vite + TS + Three scaffold, bundle loader, static render, URL state | ✅ typechecks and builds clean; all state URL-addressable including `freeze=1` |
 | **W2** | Hermite eval, rails, free-roam camera | ✅ curves evaluated client-side; rails per path with the active sub-range highlighted |
 | **W3** | Script walker, region visibility, step mode | ✅ every op reachable and seekable; only the current region drawn |
-| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; the live-enemy waits are the real gate |
+| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; a branch goes on the frame its steps run out, as the engine's does (the sidebar's *Pause at branches* debug aid holds it for an override); the live-enemy waits are the real gate |
 | **W5** | Audio, fog, route minimap, Arcade/Original toggle, event feed, inspector | ✅ BGM, SE and voice all play, dispatched by namespace; scene fog rendered radially |
 | **W6** | Visual regression harness | deferred — `freeze=1` and the URL state it needs are already in place |
 
@@ -942,7 +942,7 @@ each one.
 | Most of a stage never ran; regions and camera barely changed | **A block's steps are sequential.** `advance_step` advances to the next *step*; only an exhausted step table reaches the route table. Treating every `advance_step` as a block exit ran one step per block | read `EvtAdvanceStepOrRoute` |
 | Scene ended early | Route **kind 2 is not "end"** — it falls through to `block + 1`. The scene ends when that block is a hole | same |
 | Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; every writer of `branch_choice` is gameplay code | same |
-| The branch was the viewer's choice, not the game's | `branch_choice` resets on every **step** advance, not every block change, and the writer the port reaches is a rescued civilian's `SetRouteBranch` (`CivilianRunScript` op `0x19`). An unanswered branch used to take the lowest block number; it takes `next[g_script_branch_var]` now, and the bar is a 1.5 s override of a decision the game has already made | read `EvtAdvanceStepOrRoute`'s tail; `tools/verify_branches.py` |
+| The branch was the viewer's choice, not the game's | `branch_choice` resets on every **step** advance, not every block change, and the writer the port reaches is a rescued civilian's `SetRouteBranch` (`CivilianRunScript` op `0x19`). An unanswered branch used to take the lowest block number; it takes `next[g_script_branch_var]` now. The bar was a 1.5 s override of a decision the game has already made, held at every branch; it is a debug aid now, off by default, because the engine has no window at all | read `EvtAdvanceStepOrRoute`'s tail; `tools/verify_branches.py` |
 | Clicking a branch button did nothing | The countdown re-announced the branch every frame, so the UI rebuilt the buttons 60×/s and the click never landed between `pointerdown` and `pointerup` | notify on *change*, not on tick |
 | Branch preview showed an unrelated shot | The `store_six` preview was carried across block changes. All four in stage 2 sit *inside* branch blocks | discard on block change, same lifetime as `branch_choice` |
 | Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |
@@ -3446,6 +3446,45 @@ the HUD readouts"), and in the page: six live shots each play
 frames `vo_SHOOT_16.wav`, R and the right button `RELOAD1_44.WAV`, R on a full
 gun nothing.
 
+## The letterbox is a task of the scene's, not a part of the script
+
+`HudDrawShutterState` (`FUN_00413970`) is ported whole in
+`game/hud_shutter.ts`, and it runs where the engine's task list runs it:
+`HudShutterTaskCreate` (`FUN_00413950`) is the eighth call of the scene's
+task-list builder, after both player tasks, so `SceneTaskWalk` calls it after
+`PlayerTasksRun` and before any actor. evt `0x1F` is one store into
+`g_bHudShutterState` and nothing else. See `formats/evt.md` for the frame by
+frame.
+
+What that fixed, all inside the one routine:
+
+* **The reset.** `ResetSceneOnEnter` stores 5 in the state and in
+  `g_bHudShutterPrev`; the port stored 2, so a freshly loaded stage drew no
+  bars on the frame the engine draws them shut. The picture this was held back
+  for -- the bars shut on every freshly loaded stage until its script opens
+  them -- is the engine's, and every stage's own script writes a 5 before its
+  first wait anyway, so the only frame it moves is the first.
+* **The order.** The machine used to step at the top of the walker's next
+  tick, and the opcode raised the firing gate itself. So a shot on the frame
+  of a `hud_shutter_state 6` fired, where the engine's player task has already
+  run against the old gate; the slide drew one counter behind; a close dropped
+  the gate a frame early.
+* **The picture.** `hud/hud.ts` turned a state and a counter into bars, and
+  drew the shut states 0, 4 and 5 from the slide counter, which a finished
+  open leaves at 40: a 5 after a 1 with no close between drew **no bars at
+  all**, where the engine draws them shut at 0.35 whatever the counter says.
+  The six stages have thirteen such 5s inside a block alone. It draws what the
+  routine recorded now (`G.g_hud_shutter_bars`), so a shut state is shut, a 7
+  draws nothing on its frame, and the chapter and result cards'
+  `g_screen_furniture_flags & 0x30` hide the held bars. (Classes 0x60 and 0x61
+  do not model their bits yet, so in the page the last is dormant.)
+* **A seek or a paused load** runs no frame, so the next frame's bars are drawn
+  on a copy with the readouts (`PlayerTasksDrawWithoutAFrame`).
+
+Pinned by `test:port`'s "the shutter frame by frame" section, driven from
+`ResetGameGlobals`: each of the reset, the order, the slide's timing, the card
+flags, the 7 and the no-frame draw fails its own assertions when reverted.
+
 ## Scripted scenery: doors, shutters and vans
 
 ### Class 0x33 selector 4 — the scenery an actor shoves aside
@@ -4526,7 +4565,7 @@ missed. Meanings and confidence marks live in
 | `1C` | `set_backdrop_mode` | scenery | **done** | dome mode: 0 off, 2 frozen, anything else spins at the preset's rate |
 | `1D` | `enable_rain` | scenery | **done** | **50 particles**, transcribed from `DrawRainParticles` — only stage 1 ever turns it on |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
-| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide, sized from asset `0x93E`'s own quad; the UI names each state and says what it does to the firing gate |
+| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**: the opcode's one store, and `HudDrawShutterState`'s 9 states with the 40-frame slide run as the scene's own task after the players (`game/hud_shutter.ts`), drawn from the bars it records and sized from asset `0x93E`'s own quad; the UI names each state and says what it does to the firing gate |
 | `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour, light colour and ambient all applied** |
 | `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |

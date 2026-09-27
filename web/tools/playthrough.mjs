@@ -186,6 +186,16 @@
  * the run** rather than being ignored — a flag that quietly does nothing is
  * exactly what `--entry` did here, and it cost a session the finding.
  *
+ * ### The branch bar is a debug aid, so `--route` turns it on
+ *
+ * The engine has no window at a branch: `EvtAdvanceStepOrRoute` takes
+ * `next[g_script_branch_var]` on the frame the steps run out, and the player
+ * does the same unless the sidebar's **Pause at branches** is on. Without it
+ * there is no bar for this tool to read or click. So `--route` seeds that one
+ * view preference before the page's first line runs (`hod2.viewPrefs`, the
+ * key the sidebar's toggles persist under), and a run **without** `--route`
+ * plays the engine's own pause-free branches and reports none of them.
+ *
  * ### `--original`, because a slot-2 arm is not an arcade road at all
  *
  * A route record has three slots and **every write of `2` into
@@ -684,6 +694,12 @@ const { page, state, close } = await openPlayer({
        + (entry === null ? "" : `&entry=${entry}`),
   size: opt("size", "1280x800"),
   headless: flag("headless"), quiet: !flag("loud"),
+  // `--route` reads and clicks the branch bar, which only exists with the
+  // debug aid on. See the header.
+  init: ROUTE.size
+    ? () => localStorage.setItem("hod2.viewPrefs",
+                                 JSON.stringify({ toggles: { branchPause: true } }))
+    : null,
 });
 
 let exit = 1;

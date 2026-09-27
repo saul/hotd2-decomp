@@ -35,6 +35,7 @@ import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
+import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -673,12 +674,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {
-      // An actor that carries the engine's model block (`game/skeleton.ts`)
-      // is posed and clocked by its own class, from inside its update, where
-      // the exe does it: the class's `DrawSkinnedModelAndShadow` call runs
-      // after the state and the counter steps after that. Stepping it here as
-      // well would run every cue a frame early.
-      if (!obj.skel) ActorAdvanceMotion(obj, dt);
+      // ...unless the class steps `obj+0x194` itself, where the engine does:
+      // see `ClassHandler.advancesOwnMotion`.
+      if (!g_class_handlers[obj.cls]?.advancesOwnMotion) {
+        ActorAdvanceMotion(obj, dt);
+      }
       // `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), which the engine asks
       // per node inside `SkeletonEmitNode`. Its input is `bone_records[9].slot`
       // -- what bone 9 is *currently* drawing -- so it cannot be baked into
@@ -776,6 +776,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // here, with the camera driver parked so nothing above undoes it.
   BossBannersTick(host);
   BossHpBarsTick();
+  // ...and the marks the stage-4 boss's flesh hits leave, which
+  // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
+  // after the bar, so after it in the walk.
+  Boss4HitMarksTick(host);
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the

@@ -261,6 +261,9 @@ export const Boss2Handler: ClassHandler = {
   // `Class14Update` makes the `ActorRegisterCameraPoint` call itself, at the
   // exe's site, and that call is the class's `RegisterForShotTest`.
   registersForShotTest: true,
+  // `obj+0x194` steps inside `Class14AdvanceMotionAndPublishPoints`
+  // (`FUN_00476AD0`), after the state and the draw -- not before the update.
+  advancesOwnMotion: true,
   raisesScriptFlag: [
     CLASS14_FLAG_BANNER, CLASS14_FLAG_INTRO_DONE, CLASS14_FLAG_ROUND_B_OPEN,
     CLASS14_FLAG_ROUND_B_DONE, CLASS14_FLAG_BREAK_A_OPEN,

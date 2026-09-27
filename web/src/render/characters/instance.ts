@@ -8,7 +8,7 @@
  */
 import type { Group, Mesh, Object3D } from "three";
 import type { Actor } from "../../game/actor";
-import type { CharacterType } from "../../bundle";
+import type { BakedMotion, CharacterType } from "../../bundle";
 import type { CelRunNode } from "./cels";
 
 /**
@@ -119,4 +119,18 @@ export interface Instance {
    * civilian holding two of the same thing keeps both.
    */
   held?: Map<number, Object3D>;
+  /**
+   * The one clip and authored frame the last pose took every bone from, or
+   * `null` when it mixed two (a cross-fade, a reaction). Render bookkeeping,
+   * rewritten by every pose: it is what lets {@link Poser.drawnAngles} hand
+   * back the draw record's integer triple exactly rather than re-deriving it
+   * from a quaternion. See `render/characters/pose.ts`.
+   */
+  drawnFrom?: { motion: BakedMotion; frame: number } | null;
+  /**
+   * `Class22DrawBonePart`'s (`FUN_0049D980`) two extra models on the flier's
+   * body node, slots `0x2B5` and `0x2B4`. Render bookkeeping; the angles they
+   * take are read off the pose each frame. See `render/characters/judgment.ts`.
+   */
+  judgmentWings?: Object3D[];
 }

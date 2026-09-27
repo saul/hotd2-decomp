@@ -36,6 +36,7 @@ import type { BossHpBar } from "./boss_hp_bar";
 import type { BossBanner } from "./boss_banner";
 import type { WaterWaveField } from "./class16/state";
 import type { ScreenSpriteAnim } from "./game_over";
+import type { Boss4HitMark } from "./class19/hit_mark";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
@@ -516,6 +517,46 @@ export const G = {
    */
   g_boss_engaged: 0,
   /**
+   * `[port-only]` as a pool: the `Boss4DrawAndAgeBoneHitMark` tasks
+   * `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates -- the marks a flesh
+   * hit leaves on the stage-4 boss, riding the bone that took it. Plain
+   * records for the same reason as `g_severed_heads`. See
+   * `game/class19/hit_mark.ts`.
+   */
+  g_boss4_hit_marks: [] as Boss4HitMark[],
+  /** `[port-only]` -- the next hit mark's identity, for the renderer. */
+  g_boss4_hit_mark_seq: 0,
+  /**
+   * `g_shot_hit_records` — `0x009A2C40`, stride 0x1C, one per player: the
+   * hit `SpawnWorldImpact` (`FUN_00405260`) last resolved for that player's
+   * shot -- the point at `+0x00`, the collision surface at `+0x0C` and the
+   * normal at `+0x10`, all world space. Written for every shot whose winning
+   * candidate was a collision quad: the level's, or a bone's mesh (the
+   * `MarkActorShot` arm for a record with `+0x74 & 0x10`). `Boss4ResolveShot`
+   * reads the point and the surface back and `Boss4SpawnBoneHitMark` the
+   * point and the normal; nothing else in the image reads it.
+   */
+  g_shot_hit_records: [
+    { x: 0, y: 0, z: 0, surface: 0, nx: 0, ny: 0, nz: 0 },
+    { x: 0, y: 0, z: 0, surface: 0, nx: 0, ny: 0, nz: 0 },
+  ],
+  /**
+   * `g_original_weapon_damage_scale` — `0x009A224C`, f32, stride 0x14 (the
+   * `+0x0C` of each player's `g_original_item_slots` record). The Original
+   * Mode damage factor the boss shot routines read: `-1.0` doubles, anything
+   * else multiplies (`Boss4ResolveShot` at `0x00491E3E`, `ResolveHit`,
+   * `Class14ApplyBoneDamage` and the other bosses).
+   *
+   * **Every writer stores the same constant**, `[0x004EC92C]` = 1.0f:
+   * `PlayerEnterPlay` at `0x00414917`, `ResetOriginalModeLoadout` at
+   * `0x0048A117` and `FUN_00416240`'s two item arms at `0x0041627F` and
+   * `0x00416297`. `[proved]` from the four stores and the one read of the
+   * constant each makes; so the factor is 1.0 wherever a player can shoot,
+   * and the doubling arm is never taken. Seeded here with that value rather
+   * than written from the four sites, which would write it again.
+   */
+  g_original_weapon_damage_scale: [1, 1] as number[],
+  /**
    * `[port-only]` as a pool: the `BossHpBarUpdate` tasks `BossHpBarSpawn`
    * (`FUN_00435E50`) allocates, in creation order. Plain records for the
    * same reason as `g_severed_heads`.
@@ -627,6 +668,14 @@ export const G = {
    * `[port-only]` The page raises a bit for one tick when START is pressed.
    */
   g_pad_state: 0,
+  /**
+   * `g_pad_held` — 0x009C9020, the held-button word beside `g_pad_state`.
+   * Its one reader in the port is `Boss4StateDebugFreeMove` (`FUN_00495E20`),
+   * a state nothing enters, which moves the stage-4 boss while bit 8 is held.
+   * `[port-only]` in that nothing feeds it: the page raises no held bits, so
+   * the word stays 0 and the debug state stands still.
+   */
+  g_pad_held: 0,
   /**
    * `g_trigger_down` — 0x009C8FD4 + player*0x28, the trigger bit in the aim
    * record `PollPlayerAimInput` (`FUN_0040CBB0`) fills. The continue
@@ -1725,22 +1774,6 @@ export const G = {
    */
   g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
   /**
-   * `g_original_weapon_damage_scale` — `0x009A224C`, f32, stride 0x14 (the
-   * `+0x0C` of each player's `g_original_item_slots` record). The Original
-   * Mode damage factor the boss shot routines read: `-1.0` doubles, anything
-   * else multiplies (`Boss4ResolveShot` at `0x00491E3E`, `ResolveHit`,
-   * `Class14ApplyBoneDamage` and the other bosses).
-   *
-   * **Every writer stores the same constant**, `[0x004EC92C]` = 1.0f:
-   * `PlayerEnterPlay` at `0x00414917`, `ResetOriginalModeLoadout` at
-   * `0x0048A117` and `FUN_00416240`'s two item arms at `0x0041627F` and
-   * `0x00416297`. `[proved]` from the four stores and the one read of the
-   * constant each makes; so the factor is 1.0 wherever a player can shoot,
-   * and the doubling arm is never taken. Seeded here with that value rather
-   * than written from the four sites, which would write it again.
-   */
-  g_original_weapon_damage_scale: [1, 1] as number[],
-  /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
    * The twenty-segment chains `PlaceChainSegments` builds, by prop id rather
@@ -2022,6 +2055,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // with it; the fill itself is a data-segment word and is left alone.
   G.g_boss_hp_bars = [];
   G.g_boss_banners = [];
+  G.g_boss4_hit_marks = [];
   G.g_screen_sprite_queue = [];
   // ...and a banner that was flying the camera took its hold with it. The
   // engine's own reset is the scene's first `checkpoint`; this is the port's

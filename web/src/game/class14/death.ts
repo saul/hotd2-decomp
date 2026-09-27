@@ -30,7 +30,7 @@ import { PropStripKind, SpawnPropStripEffect } from "../effects/prop_strip";
 import { G } from "../globals";
 import { MatrixGetTranslation } from "../matrix";
 import type { ClassFrame } from "../registry";
-import { ActorShiftToHoldBone1Position } from "../skeleton";
+import { ActorShiftToHoldBone1Position } from "../actor_pose";
 import { vec3, type Vec3 } from "../vec";
 import { OBJ_BIT_80000, Class14Flag, type Boss2Tail } from "./state";
 import { Class14FollowSegment } from "./steer";
@@ -194,13 +194,14 @@ function Class14DeathGone(obj: Boss2Actor, t: Boss2Tail): void {
  *
  * `[port-only]` as a function.
  */
-function Class14DeathSurface(obj: Boss2Actor, t: Boss2Tail): void {
+function Class14DeathSurface(obj: Boss2Actor, t: Boss2Tail,
+                             f: ClassFrame): void {
   t.animSlot = 0x12;
   if (obj.skel) {
     obj.skel.motion = MOTION_FLOAT;
     obj.skel.cursor = 0;
   }
-  ActorShiftToHoldBone1Position(obj);
+  ActorShiftToHoldBone1Position(obj, f.host);
   ActorSetMotionBlended(obj, MOTION_FLOAT, 0, 10);
   obj.vel.x = DRIFT_X;
   obj.vel.z = DRIFT_Z;
@@ -259,7 +260,7 @@ export function Class14StateDeathA(obj: Boss2Actor, f: ClassFrame): void {
     }
     case 3:
       if (Class14Cursor(obj) === Class14ClipLength(obj)) {
-        Class14DeathSurface(obj, t);
+        Class14DeathSurface(obj, t, f);
       }
       break;
     case 4:
@@ -343,7 +344,7 @@ export function Class14StateDeathB(obj: Boss2Actor, f: ClassFrame): void {
     case 4:
       Class14DeathIntegrate(obj);
       if (Class14Cursor(obj) === Class14ClipLength(obj)) {
-        Class14DeathSurface(obj, t);
+        Class14DeathSurface(obj, t, f);
       }
       break;
     case 5:

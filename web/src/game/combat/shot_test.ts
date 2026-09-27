@@ -61,7 +61,11 @@ import { ActorFlag, type Actor } from "../actor";
 import type { CharacterBone } from "../../bundle/characters";
 import { ActorByAt, G } from "../globals";
 import type { GameHost, ShotRay } from "../host";
-import { CharacterTypeOf } from "../tables";
+import { ColiSegmentVsMesh, type ColiHit } from "../coli";
+import {
+  MatCopy, MatrixInvert, MatrixTransformPoint, MatrixTransformVector,
+} from "../matrix";
+import { CharacterTypeOf, T } from "../tables";
 import { VecToAngles, type Vec3 } from "../vec";
 
 /**
@@ -102,10 +106,13 @@ export const SHOT_CANDIDATE_KEY_SCALE = 10.0;
  * The flags word a bone's draw record carries at `+0x74`.
  *
  * `SkeletonWalkNode` (`FUN_004107E0`) writes `rec+0x74 = 0x21` for every node
- * as the skeleton is built, and nothing afterwards raises `0x10` in it, so
- * `ShotTestBoneTree` always takes the sphere arm. `MarkActorShot`
- * (`FUN_00404DB0`) ORs the shooter's bits into it and tests `0x10` to decide
- * whether to throw a world impact as well.
+ * as the skeleton is built. One `Init` raises `0x10` afterwards: `Boss4Init`
+ * (`FUN_004917E0`, `0x00491956`) ORs `0x51` into the record of every bone its
+ * descriptor gives a collision mesh, and writes that mesh to `rec+0x88` --
+ * the port's {@link Actor.boneColi}. Those bones take `ShotTestBoneTree`'s
+ * mesh arm; every other bone of every character takes the sphere arm.
+ * `MarkActorShot` (`FUN_00404DB0`) ORs the shooter's bits into it and tests
+ * `0x10` to decide whether to throw a world impact as well.
  */
 export enum BoneRecordFlag {
   /** Test this bone as its collision mesh (`ShotTestBoneMesh`). */
@@ -134,6 +141,13 @@ export interface ShotCandidate {
   whole: boolean;
   /** Where, in world space — the port's effects need the point. */
   point: Vec3;
+  /**
+   * A bone hit on its collision mesh (`ShotTestBoneMesh`): the surface code
+   * and the face's normal the segment test found, which the candidate record
+   * carries at `+0x30` and `+0x18..0x20` and `MarkActorShot` hands to the
+   * world impact. Absent for a sphere hit.
+   */
+  mesh?: { surface: number; normal: Vec3 };
   /**
    * `[port-only]` The distance along the shot to {@link point}. The engine
    * has one list and needs no second measure; the port merges this list's
@@ -479,15 +493,94 @@ function ShotTestBoneTree(obj: Actor, bones: readonly CharacterBone[],
                           node: number, shot: ShotTest,
                           out: ShotCandidate[]): void {
   const b = bones[node];
-  if (BoneDrawSlot(obj, b) !== 0
-      && !(BONE_RECORD_BUILT & BoneRecordFlag.Mesh)) {
-    ShotTestBoneSphere(obj, b, shot, out);
+  if (BoneDrawSlot(obj, b) !== 0) {
+    const mesh = obj.boneColi[String(b.bone)];
+    if (!(BoneRecordFlags(obj, b) & BoneRecordFlag.Mesh)) {
+      ShotTestBoneSphere(obj, b, shot, out);
+    } else if (mesh !== undefined) {
+      // `CMP dword [rec+0x88], -1; JZ` -- a flagged record with no mesh
+      // tests nothing. `Boss4Init` never makes one.
+      ShotTestBoneMesh(obj, b, mesh, shot, out);
+    }
   }
   for (let i = 0; i < bones.length; i++) {
     if (bones[i].parent === node) {
       ShotTestBoneTree(obj, bones, i, shot, out);
     }
   }
+}
+
+/**
+ * `rec+0x74` for one bone: `0x21` as the skeleton builds it, `| 0x51` where
+ * `Boss4Init` gave the bone a mesh. `[port-only]` as a function: the engine
+ * reads the word; the port keeps the one fact that varies,
+ * {@link Actor.boneColi}.
+ */
+function BoneRecordFlags(obj: Actor, b: CharacterBone): number {
+  return obj.boneColi[String(b.bone)] !== undefined
+    ? BONE_RECORD_BUILT | 0x51 : BONE_RECORD_BUILT;
+}
+
+/** `ShotBuildSegment` (`FUN_00404AD0`): the crosshair's line, this long. */
+const SHOT_SEGMENT_LENGTH = 1000;
+
+const _bm = new Array<number>(16).fill(0);
+const _inv = new Array<number>(16).fill(0);
+const _far = { x: 0, y: 0, z: 0 };
+const _a = { x: 0, y: 0, z: 0 };
+const _b = { x: 0, y: 0, z: 0 };
+const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
+                        distSq: 0 };
+
+/**
+ * `ShotTestBoneMesh` — `FUN_004048A0`. One bone's collision mesh.
+ *
+ * ```
+ * 004048A6  Push; SetTop(g_camera_blocks[block]); Multiply(rec+0x28)     ; the bone, world
+ * 004048F4  g_coli_dynamic_matrix = top; Pop; [0x005A4C88] = rec+0x88   ; the blob
+ * 00404935  ShotBuildSegment(player)            ; the shot against the mesh, in its frame
+ * 0040493A  [0x009CAC40] == 0: out              ; no surface: no hit
+ * 0040494A  normal [0x009CAC64..6C] = g_coli_dynamic_matrix rotation * normal
+ * 004049C2  candidate +0x24 = node, +0x28 = obj, +0x2C = rec+0x74 | 0x40
+ * 004049E8  ShotPushColiHitCandidate()          ; key = __ftol(-view z * 10.0), point, normal,
+ *                                               ; surface at +0x30, +0x2C |= 0x10
+ * ```
+ *
+ * `g_coli_dynamic_matrix` is the bone's world matrix -- `GameHost.boneMatrix`,
+ * the pose three.js last drew. The segment (`ShotBuildSegment`,
+ * `FUN_00404AD0`: the crosshair's origin to a thousand units along it) goes
+ * through its inverse into the bone's frame, `ColiSegmentVsMesh`
+ * (`FUN_004AAA40`) finds the quad nearest the eye by testing **from the far
+ * end back**, as the world trace does, and the point comes back through the
+ * matrix and the normal through its rotation (`MatrixTransformVector` at
+ * `0x00404982`, not renormalised). The key is taken from the point, as
+ * `ShotPushColiHitCandidate` (`FUN_00404CB0`) takes it.
+ */
+function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
+                          shot: ShotTest, out: ShotCandidate[]): void {
+  const blob = T.coli?.blobs?.[mesh];
+  if (!blob || !shot.host.boneMatrix?.(obj.at, node.bone, _bm)) return;
+  MatCopy(_inv, _bm);
+  MatrixInvert(_inv);
+  const o = shot.ray.origin, d = shot.ray.dir;
+  _far.x = o.x + d.x * SHOT_SEGMENT_LENGTH;
+  _far.y = o.y + d.y * SHOT_SEGMENT_LENGTH;
+  _far.z = o.z + d.z * SHOT_SEGMENT_LENGTH;
+  MatrixTransformPoint(_inv, _far, _a);
+  MatrixTransformPoint(_inv, o, _b);
+  if (!ColiSegmentVsMesh(blob, _a.x, _a.y, _a.z, _b.x, _b.y, _b.z, _hit,
+                         false)) {
+    return;
+  }
+  if (_hit.surface === 0) return;
+  const point = { x: 0, y: 0, z: 0 };
+  const normal = { x: 0, y: 0, z: 0 };
+  MatrixTransformPoint(_bm, _hit, point);
+  MatrixTransformVector(_bm, { x: _hit.nx, y: _hit.ny, z: _hit.nz }, normal);
+  if (!shot.host.viewSpaceOfPoint?.(point, _c)) return;
+  out.push({ key: ShotCandidateKey(_c.z), at: obj.at, bone: node.bone,
+             whole: false, point, mesh: { surface: _hit.surface, normal },
+             t: alongShot(shot.ray, point) });
 }
 
 /**

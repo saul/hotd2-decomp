@@ -37,6 +37,8 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
 import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
+// ...and `class19/slots.ts` for the stage-4 boss's prop and hit mark.
+import { Boss4EffectSlots } from "../game/class19/slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
@@ -88,7 +90,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 13;
+export const BUNDLE_FORMAT = 14;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -905,7 +907,36 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // `HordeDeformedPropUpdate` (`FUN_0043F010`) reshapes every frame.
   0x40: [0x17cc, 0x10d0, 0x1a38, 0x10cf,
          ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)],
+  // Class 0x22, JUDGMENT's flier: the impact flipbook `Class22Death` leaves
+  // at its landing (`Class22ImpactFlipbookUpdate`, `FUN_0049DEA0`: slot
+  // `0x94 + n`, `common.bin` 25..39) and the walker's landing ring
+  // (`Class23LandingRingUpdate`, `FUN_00491700`: slot `0x17C8`, `boss1q.bin`
+  // 94). The walker is only ever made by the flier, so the flier carries both.
+  0x22: [...Array.from({ length: 15 }, (_, i) => 0x94 + i), 0x17c8],
 };
+
+/**
+ * The **sprite-effect** slots a stage's classes draw -- the ones
+ * `render/effects.ts` clones from `slots_effect` rather than
+ * `render/slotmodels.ts` from `slots_actor`.
+ *
+ * One class today: JUDGMENT's walker's sparks, which only its flier's
+ * presence brings. `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind
+ * 0x5B through `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
+ * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load.
+ */
+export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
+  0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
+};
+
+/** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */
+export function classEffectSlots(spawnClasses: readonly number[]): number[] {
+  const out: number[] = [];
+  for (const cls of new Set(spawnClasses)) {
+    for (const slot of EFFECT_SLOTS_BY_CLASS[cls] ?? []) out.push(slot);
+  }
+  return out;
+}
 
 /**
  * The extra asset slots a stage's class-0x25 **descriptors** ask for.
@@ -1610,6 +1641,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the boss-name banner's cards, for the classes this stage spawns
     // that make one: drawn in view space too, by `render/effects.ts`.
     ...bannerCardSlots(spawnRecords.map((r) => r.cls)),
+    // ...and the stage-4 boss's carried prop and hit mark, which
+    // `render/effects.ts` draws on its bones and in flight.
+    ...Boss4EffectSlots(spawnRecords.map((r) => r.cls)),
+    // ...and the sprite effects a class draws off the shot path.
+    ...classEffectSlots(spawnRecords.map((r) => r.cls)),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -1665,6 +1701,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // the route map's 4 x 75 tiles.
   const gameOver = tables.gameOverTables();
   scriptJson.game_over = gameOver;
+  // Class 0x19's `.rdata`, and the doors of the carrier it rides in on. Every
+  // stage gets them, as every stage gets `game_over`: they are the exe's, not
+  // the stage's, and a few kilobytes is not worth a per-stage decision.
+  scriptJson.boss4 = tables.boss4Tables();
+  scriptJson.carrier_door_yaw = tables.carrierDoorYaw();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   scriptJson.screen_sprites = await screenSpritesJson(

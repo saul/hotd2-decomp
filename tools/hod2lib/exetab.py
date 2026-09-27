@@ -641,6 +641,27 @@ class ExeTables:
                 out.setdefault(slot, (name, k))
         return out
 
+    def pol_file_slots(self, name: str) -> list[int] | None:
+        """One pol file's slot list, ``POL_SLOT_LIST[file]`` (0x004E794C).
+
+        Entry k of the file loads into slot ``list[k]``; it is the list the
+        whole-file load walks (``FUN_00418E40`` points 0x007C2134 at it and
+        ``FUN_00418EC0`` installs one model per slot that is not already
+        resident). Twin of ``ExeTables.polFileSlots``.
+        """
+        for fi, (n, cnt) in self.pol_files().items():
+            if n != name:
+                continue
+            lst = self._u32(self.POL_SLOT_LIST + fi * 4)
+            if not lst:
+                return None
+            r = self._v2r(lst)
+            if r is None:
+                return None
+            return [struct.unpack_from("<h", self.data, r + k * 2)[0]
+                    for k in range(cnt)]
+        return None
+
     def slot_pol_file(self, slot: int) -> str | None:
         fi = self._u16(self.SLOT_TO_POL + slot * 2)
         if fi is None:
@@ -686,6 +707,42 @@ class ExeTables:
             cnt = self._u16(self.CAM_PATH_COUNT + i * 2) or 0
             if cnt:
                 out[i] = (name, cnt)
+        return out
+
+    #: ``PTR_DAT_004c4990`` -- one pointer per scene to an ``s16`` list of cam
+    #: file indices ending in -1, which ``FUN_004040A0`` walks for
+    #: ``g_scene_index``, queuing file ``0x16`` (``op_org``) after each entry
+    #: in Original Mode. Scene 4 (stage 5) is ``{10, 20, 16}`` -- ``cp_st5``,
+    #: ``op_st5`` and ``op_st1``. Twin of ``ExeTables.sceneCamFiles``.
+    SCENE_CAM_FILES = 0x004C4990
+    ORIGINAL_CAM_FILE = 0x16
+
+    def scene_cam_files(self, scene: int, original: bool) -> list[str]:
+        """The cam file stems ``FUN_004040A0`` loads for a scene, in order."""
+        out: list[str] = []
+        if not 0 <= scene < self.SCENE_COUNT:
+            return out
+        ptr = self._u32(self.SCENE_CAM_FILES + scene * 4)
+        r = self._v2r(ptr) if ptr else None
+        if r is None:
+            return out
+        files = self.cam_files()
+
+        def add(fi: int) -> None:
+            rec = files.get(fi)
+            if rec is None:
+                return
+            stem = rec[0][:-4] if rec[0].endswith(".bin") else rec[0]
+            if stem not in out:
+                out.append(stem)
+
+        for k in range(self.MAX_CAM_FILES):
+            fi = struct.unpack_from("<h", self.data, r + k * 2)[0]
+            if fi == -1:
+                break
+            add(fi)
+            if original:
+                add(self.ORIGINAL_CAM_FILE)
         return out
 
     def cam_path_slots(self) -> dict[int, tuple[str, int]]:
@@ -1214,6 +1271,60 @@ class ExeTables:
             "default_route": [[s8(0x0059351C + st * 16 + i) for i in range(16)]
                               for st in range(6)],
         }
+
+    def boss4_tables(self) -> dict:
+        """Class 0x19's ``.rdata``, for ``script.json``'s ``boss4`` block. The
+        TypeScript half's ``boss4Tables`` says what each field is and which
+        routine reads it; this is the same read.
+        """
+        def s8(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<b", self.data, r)[0] if r is not None else 0
+
+        def s16(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<h", self.data, r)[0] if r is not None else 0
+
+        def s32(va: int) -> int:
+            r = self._v2r(va)
+            return struct.unpack_from("<i", self.data, r)[0] if r is not None else 0
+
+        def f32(va: int) -> float:
+            r = self._v2r(va)
+            return struct.unpack_from("<f", self.data, r)[0] if r is not None else 0.0
+
+        def held(i: int) -> dict:
+            b = 0x005704F8 + i * 0x20
+            return {"offset": [f32(b), f32(b + 4), f32(b + 8)],
+                    "rot": [s32(b + 0x0C), s32(b + 0x10), s32(b + 0x14)],
+                    "bone": s16(b + 0x18), "clip": s16(b + 0x1A),
+                    "take": s16(b + 0x1C), "throw": s16(b + 0x1E)}
+
+        return {
+            "phase_hp_fraction": [f32(0x00570490 + i * 4) for i in range(18)],
+            "head_damage": [s8(0x005704D7 + i) for i in range(33)],
+            "held_props": [held(0), held(1)],
+            "camera_cues": [{"start": s16(0x00570538 + i * 12),
+                             "end": s16(0x00570538 + i * 12 + 2),
+                             "step": f32(0x00570538 + i * 12 + 4),
+                             "path": s16(0x00570538 + i * 12 + 8)}
+                            for i in range(22)],
+            "phase_arenas": [[[f32(0x00570640 + (ph * 6 + k) * 8),
+                               f32(0x00570640 + (ph * 6 + k) * 8 + 4)]
+                              for k in range(6)] for ph in range(18)],
+            "head_slot_by_bar": [s16(0x005709A0 + i * 2) for i in range(9)],
+            "approach_picks": [[s8(0x005709B4 + rank * 9 + i) for i in range(9)]
+                               for rank in range(16)],
+        }
+
+    def carrier_door_yaw(self) -> list[int]:
+        """``g_carrier2_door_yaw`` (0x005926D0), s16[59] -- the swing
+        `CarrierPropRoutine2` (FUN_004408A0) steps its two doors through."""
+        out = []
+        for i in range(59):
+            r = self._v2r(0x005926D0 + i * 2)
+            out.append(struct.unpack_from("<h", self.data, r)[0] if r is not None else 0)
+        return out
 
     def sound_name(self, sound_id: int) -> str | None:
         """The filename a `PlaySoundId` id names, if it is a category-0 id."""

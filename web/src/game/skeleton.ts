@@ -703,9 +703,11 @@ export function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
 }
 
 /**
- * `ActorShiftToHoldBone1Position` — `FUN_0045CE70`. Called where a state has
- * just put a new motion in `+0x20` and a cursor in `+0x08`: moves the actor
- * so that bone 1 stays where the last draw put it.
+ * `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) for an actor that carries
+ * the model block -- `[port-only]` as a function; `game/actor_pose.ts` holds
+ * the routine and sends such an actor here. Called where a state has just put
+ * a new motion in `+0x20` and a cursor in `+0x08`: moves the actor so that
+ * bone 1 stays where the last draw put it.
  *
  * ```
  * f  = MotionFrameAddress(type, +0x20, +0x08 / 2)
@@ -720,11 +722,11 @@ export function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
  * view-space record to world, and `P2` is built from the actor's own world
  * position. The actor's rotation goes on in X, Z, Y whatever `+0x68` says,
  * the root's full translation goes on (not the root-motion `(0, y, 0)`), and
- * nothing is scaled -- that is the routine. Its callers here are class 0x14's
- * deaths (`0x0047BD95`, `0x0047C3A9`); class 0x30's drag (`0x0045C25A`) and
- * class 0x19's (`0x004955E7`) have no model block in the port.
+ * nothing is scaled -- that is the routine. The block's own bone-1 record is
+ * P1 here, so this arm needs no renderer; the callers that reach it are class
+ * 0x14's deaths (`0x0047BD95`, `0x0047C3A9`).
  */
-export function ActorShiftToHoldBone1Position(obj: Actor): void {
+export function SkeletonShiftToHoldBone1Position(obj: Actor): void {
   const skel = obj.skel;
   const tree = TreeOf(obj);
   if (!skel || !tree) return;

@@ -64,8 +64,22 @@ export enum SpawnClass {
    * overwritten from the table at `0x00565F0C`, 1 or 2 by difficulty rank.
    */
   RankScaledEnemy = 0x21,
-  /** `FUN_0049B0D0` — enemy with four behaviour variants and a companion. */
-  VariantEnemy = 0x22,
+  /**
+   * `Class22Init` (`FUN_0049B0D0`) — **JUDGMENT's flier**, the stage-1 boss
+   * and its stage-5 return: character type 0x45, four variants on the
+   * descriptor's byte `+0x01`, the only one of the pair that takes damage.
+   * It spawns {@link SpawnClass.JudgmentCompanion} from its own descriptor
+   * tail. **Ported** — `game/class22/`.
+   */
+  Judgment = 0x22,
+  /**
+   * `Class23Init` (`FUN_0048FD90`) — **JUDGMENT's walker**, character type
+   * 0x44: the companion class 0x22 spawns from the nested descriptor at its
+   * `tail+0x10`, and trains in `trnevtbl.bin`. Strikes the player, cannot be
+   * hurt outside Training, and hands every hit it takes to the flier.
+   * **Ported** — `game/class23/`.
+   */
+  JudgmentCompanion = 0x23,
   /** `FUN_004329D0` — path-riding vehicle; swaps model and lights a flame. */
   PathRidingVehicle = 0x27,
   /** `FUN_00432610` — path-riding prop. */

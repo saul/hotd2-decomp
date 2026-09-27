@@ -44,6 +44,8 @@ export const HIT_SLOT_CLAIMED = 0x40;
  * | `0x19` | `Boss4Init` (`FUN_004917E0`) |
  * | `0x20` | `OneHitTargetInit` (`FUN_00448ED0`) |
  * | `0x21` | `RescueTargetInit` (`FUN_00451720`) |
+ * | `0x22` | `Class22Init` (`FUN_0049B0D0`), twice: the flier, then its sub-actor |
+ * | `0x23` | `Class23Init` (`FUN_0048FD90`) |
  * | `0x24` | `SetPiecePropInit` (`FUN_00482CE0`) |
  * | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) |
  * | `0x30` | `EnemyZombieInit` (`FUN_00452DA0`) |
@@ -66,6 +68,7 @@ export const HIT_SLOT_CLAIMING_CLASSES: ReadonlySet<SpawnClass> = new Set([
   // (`game/skeleton.ts`).
   SpawnClass.Civilian, SpawnClass.Frog, SpawnClass.Boss4,
   SpawnClass.OneHitTarget, SpawnClass.RankScaledEnemy,
+  SpawnClass.Judgment, SpawnClass.JudgmentCompanion,
   SpawnClass.SetPieceProp, SpawnClass.ScriptedHumanoid, SpawnClass.Zombie,
   SpawnClass.Thrower, SpawnClass.SkinnedNpc,
   // `CarriedZombieInit18` (`FUN_0045CD60`) opens on `EnemyZombieInit`.

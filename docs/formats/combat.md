@@ -240,9 +240,22 @@ the player tasks. `ActorSpawn` runs `ActorBuildSkinnedModel`, which raises
 `obj+0x70..0x78` in world space (`Actor.shotCentre`) and takes the depth
 through the camera its frame reads.
 
-**No class on `main` has set the flag yet.** The four bosses are being
-ported in other workstreams and each will set it with its own module. Their
-sites:
+**The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)
+for a record whose `+0x74` has bit `0x10` and whose `+0x88` names a blob; the
+skeleton build writes `0x21`, and the only `Init` that raises the bit is
+`Boss4Init`, for the ten bones its descriptor gives a `coli4.bin` mesh
+(`Actor.boneColi`). The port tests the shot segment (`ShotBuildSegment`, a
+thousand units) against the blob in the bone's frame, over
+`GameHost.boneMatrix` and `ColiSegmentVsMesh`, and the candidate
+(`ShotPushColiHitCandidate`, `FUN_00404CB0`) carries the point, the normal and
+the quad's surface; `MarkActorShot` hands them to `SpawnWorldImpact`, which
+fills `g_shot_hit_records` for the boss's own `Boss4ResolveShot` to read.
+
+JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), and
+so does Strength (`game/class19/`: `Boss4Update` calls
+`ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line, and the mesh
+arm above is its alone), at the sites below; the other bosses are being ported
+in other workstreams and each will set it with its own module. The sites:
 
 | class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
 |---|---|---|---|---|---|---|

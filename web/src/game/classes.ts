@@ -30,6 +30,8 @@ import "./class16";
 import "./class17";
 import "./class20";
 import "./class21";
+import "./class22";
+import "./class23";
 import "./class24";
 import "./class25";
 import "./class30";

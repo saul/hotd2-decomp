@@ -46,6 +46,7 @@ import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          bake, humanoidMotionIds, introFor, motionFor,
          BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
+import { class14Tables } from "./class14";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
          difficultyTables, playerDamage, reactionGroups,
          STAND_AND_THROW_STATES } from "./combat";
@@ -119,9 +120,44 @@ export function class20Tail(rec: Spawn): Record<string, unknown> {
  * Classes whose actors are drawn by `AssetDrawSlot` rather than by a skeleton,
  * so `spawnres` can never identify one and the placement has to survive that
  * anyway. See the note in `resolveForStage`.
+ *
+ * Classes 0x16 and 0x17 draw nothing at all -- `WaterFieldCreate` and
+ * `WaterWaveSourceAdd` build the stage-2 boss arena's wave field and kill
+ * themselves -- but they are here for the same reason: no character type,
+ * and the port still needs the placement to build them.
  */
-export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x26, 0x33, 0x40, 0x43, 0x51,
-                                           0x52]);
+export const SLOT_DRAWN_CLASSES = new Set([0x13, 0x16, 0x17, 0x26, 0x33, 0x40,
+                                           0x43, 0x51, 0x52]);
+
+/**
+ * Class 0x17's descriptor tail, as `WaterWaveSourceAdd` (`FUN_004422D0`) and
+ * the source's first tick read it.
+ *
+ * ```
+ * obj+0x11C  s16  the kind: g_wave_source_kinds[kind] (0x005644E4) is
+ *                 {tick, size}, 0 travelling (0x004420C0), 1 circular
+ *                 (0x004421B0)                          -> the spawn's hp
+ * tail+0x00  f32  amplitude                             -> src+0x5C
+ * tail+0x04  f32  wavelength                            -> src+0x60
+ * tail+0x08  f32  speed                                 -> src+0x64
+ * obj+0x64 / +0x6C  pitch and roll                      -> src+0x48 / +0x50
+ * ```
+ *
+ * The source's position and yaw are the spawn record's own, which the port
+ * has from the script. Stage 2 blocks 35 and 39 place two, both kind 0.
+ */
+export function class17Tail(rec: Spawn, orient: number[]):
+    Record<string, unknown> {
+  const f = (at: number): number => rec.param(at, "f32") ?? 0;
+  return {
+    kind: rec.hp,
+    amplitude: f(0x00),
+    wavelength: f(0x04),
+    speed: f(0x08),
+    pitch: ((orient[0] ?? 0) << 16) >> 16,
+    roll: ((orient[2] ?? 0) << 16) >> 16,
+  };
+}
 
 export function class52Tail(rec: Spawn): Record<string, unknown> {
   return { subtype: rec.param(0x00, "i16") || 0 };
@@ -1312,6 +1348,12 @@ export async function resolveForStage(
     const class52 = cls === 0x52 ? class52Tail(rec) : null;
     const class53 = cls === 0x53 ? class53Tail(rec) : null;
     const class14 = cls === 0x14 ? class14Tail(rec) : null;
+    // Class 0x16 reads no tail -- the plane is the spawn's `y` -- so its
+    // block is a marker. Class 0x17's is the source.
+    const class16 = cls === 0x16 ? {} : null;
+    const class17 = cls === 0x17
+      ? class17Tail(rec, (sp.orient as number[] | undefined) ?? [0, 0, 0])
+      : null;
     const class22 = cls === CLASS22 ? class22Tail(rec) : null;
     const class23 = cls === CLASS23 ? class23Tail(rec) : null;
     const class45 = cls === 0x45 ? class45Tail(rec) : null;
@@ -1419,6 +1461,8 @@ export async function resolveForStage(
     p.class52 = class52;
     p.class53 = class53;
     p.class14 = class14;
+    p.class16 = class16;
+    p.class17 = class17;
     p.class22 = class22;
     p.class23 = class23;
     // The walker: made by its flier's class, never by the script.
@@ -1739,6 +1783,9 @@ export function charactersJson(chars: Map<number, Character>,
     player: playerDamage(),
     bone_zones: tables !== null ? boneZones(tables) : [],
     class31: tables !== null ? class31Tables(tables) : {},
+    // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
+    // round tables. See `class14.ts`.
+    class14: tables !== null ? class14Tables(tables) : {},
     // `g_actor_attachment_records` -- one table for the whole game, indexed
     // by the ids in a placement's `attachments`.
     attachments: tables !== null ? tables.attachmentRecords() : [],

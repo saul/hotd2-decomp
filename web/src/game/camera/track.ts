@@ -144,12 +144,23 @@ export function SkeletonRecordCameraPoint(obj: Actor, host: GameHost): boolean {
  */
 export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
                                          rise: number): void {
-  const posed = SkeletonRecordCameraPoint(obj, host);
-  if (g_class_handlers[obj.cls]?.registersForShotTest) {
+  // An actor that carries the engine's model block (`game/skeleton.ts`) has
+  // no host to ask: its own skeleton walk wrote `obj+0x100` this frame, as
+  // the engine's does, and the routine's arithmetic applies as it stands --
+  // `FLD rise; FADD [obj+0x104]; FSTP [obj+0x104]`, climbing too on a frame
+  // whose walk drew nothing, which is the engine's own behaviour for a
+  // hidden model (`SkeletonEmitNode` writes the point only while it draws).
+  const posed = obj.skel ? true : SkeletonRecordCameraPoint(obj, host);
+  if (obj.skel || g_class_handlers[obj.cls]?.registersForShotTest) {
     obj.shotCentre.x = obj.lookAt.x;
     obj.shotCentre.y = obj.lookAt.y;
     obj.shotCentre.z = obj.lookAt.z;
     RegisterForShotTest(obj, host);
+  }
+  if (obj.skel) {
+    obj.lookAt.y = Math.fround(rise + obj.lookAt.y);
+    RegisterForCameraTracking(obj);
+    return;
   }
   if (posed) obj.lookAt.y += rise;
   RegisterForCameraTracking(obj);

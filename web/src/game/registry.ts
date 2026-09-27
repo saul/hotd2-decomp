@@ -273,15 +273,6 @@ export interface ClassHandler {
    */
   tracksCamera?(obj: Actor): boolean;
   /**
-   * `[port-only]` -- **a transitional hook for class 0x14**: the float its
-   * `Update` would push to `ActorRegisterCameraPoint` (`FUN_00409B70`),
-   * `state+0x0C` (`Class14Update`, `0x0047621E`). `SceneTaskWalk` makes the
-   * call for it after the update while this is set. A class that makes the
-   * call itself -- every other class that has one -- must not set it, or it
-   * is filed twice.
-   */
-  cameraRise?(obj: Actor): number;
-  /**
    * **This class registers for the shot test the engine's way.**
    *
    * Its own update calls `RegisterForShotTest` (`FUN_00405160`) where the

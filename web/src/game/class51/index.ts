@@ -1057,10 +1057,8 @@ export function SpawnWaterEnemyAt(x: number, y: number, z: number, lifetime: num
   sub.homeX = x;
   sub.homeY = y;
   sub.homeZ = z;
-  sub.frame = FISH_FIRST_SLOT;
-  sub.firstFrame = FISH_FIRST_SLOT;
-  sub.lastFrame = FISH_LAST_SLOT;
-  sub.alpha = 1;
+  // No strip or alpha here: `ActorAllocSub` leaves them zero and
+  // `FishClaimSlotAndLunge` below writes all four, as the engine's does.
   G.g_enemies_alive += 1;
   G.g_enemies_present += 1;
   obj.attackPermit = -1;

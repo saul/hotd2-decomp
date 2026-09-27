@@ -19,36 +19,36 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 75902 | 253 | engine |
-| `hod2lib/` | 17863 | 34 | engine |
-| `render/` | 12113 | 40 | render |
-| `app/` | 7705 | 29 | app |
-| `script/` | 4368 | 25 | engine |
+| `game/` | 79097 | 267 | engine |
+| `hod2lib/` | 18050 | 35 | engine |
+| `render/` | 12352 | 41 | render |
+| `app/` | 7707 | 29 | app |
+| `script/` | 4393 | 25 | engine |
 | `ui/` | 3161 | 27 | ui |
-| `bundle/` | 2502 | 11 | engine |
+| `bundle/` | 2585 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **125412** | **430** | |
+| **total** | **129143** | **446** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2480
-* `game/actor.ts` — 2256
+* `game/globals.ts` — 2506
+* `game/actor.ts` — 2309
 * `app/main.ts` — 2151
-* `game/class14/index.ts` — 2127
 * `hod2lib/exetab.ts` — 2126
+* `script/walker.ts` — 2022
 
 ## The port
 
 | | |
 |---|---|
 | Gameplay coverage | **192 of 285** annotated functions in the gameplay address ranges have a port (67%) |
-| Ported outside those ranges | 420 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 612 ported functions match `functions.tsv` under the same name |
-| Spawn classes | **27 of 44** read classes have a module, covering 1526 of 1626 placements |
-| Declared `[diverges]` | **171** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **181** — questions the port is honest about not having answered |
+| Ported outside those ranges | 438 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 630 ported functions match `functions.tsv` under the same name |
+| Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
+| Declared `[diverges]` | **162** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **169** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1239 in `ghidra/annotations/functions.tsv` |
-| Named globals | 623 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1242 in `ghidra/annotations/functions.tsv` |
+| Named globals | 626 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 40 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

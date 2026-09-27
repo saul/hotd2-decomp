@@ -680,13 +680,22 @@ web/src/
     rng.ts        seeded, state exposed — snapshots need it
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
-    class10/ class11/ class14/ class19/ class20/ class21/ class22/ class23/
-    class24/ class25/ class30/ class31/ class33/ class40/ class41/ class43/
-    class44/ class45/ class46/ class51/ class52/ class53/ class60/ class61/
+    class10/ class11/ class14/ class16/ class17/ class19/ class20/ class21/
+    class22/ class23/ class24/ class25/ class30/ class31/ class33/ class40/
+    class41/ class43/ class44/ class45/ class46/ class51/ class52/ class53/
+    class60/ class61/
                   one module per class. Each calls `registerClass` itself.
                   The ones that write the actor struct's tail words directly
                   also have a `state.ts`: the discriminated union's arm for
-                  that class, and the only place its tail words are named
+                  that class, and the only place its tail words are named.
+                  class14/ is split by concern -- state, tables (its .rdata
+                  from the bundle), shot, advance (pose, feet, legs,
+                  flipbooks), steer, entrance, fight, summon, react, death
+    skeleton.ts   the engine's skeletal model block, for an actor that carries
+                  one (`Actor.skel`, class 0x14 today): the class poses and
+                  clocks it inside its own update, the director does not, and
+                  render/ draws it from its matrices
+                  (render/characters/model_block.ts)
     original_mode.ts  the two-slot inventory, and the one query the branch
                   triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class

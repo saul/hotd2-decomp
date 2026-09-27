@@ -31,7 +31,7 @@ import { authoredFrameHeld, authoredFrameOfTicks,
          ticksOfAuthoredFrame } from "../src/core/play_cursor";
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
-import { ActorKillAll } from "../src/game/combat/resolve_hit";
+import { ActorKillAll, RemoveBoneSubtree } from "../src/game/combat/resolve_hit";
 import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
@@ -19363,12 +19363,19 @@ console.log("\nthe shot test, for a class that registers the engine's way:");
   };
   const boss = ActorSpawn(0x2000, CLS, 0x60, "boss", { visible: true });
   const frame = () => GameUpdate(EYE, 1 / 60, host, rng, events);
+  // A gun reloads by pulling off the screen, and pulls on one frame land in
+  // order: reload, then fire, both on the frame under test, so the
+  // registration that frame's pull sees is exactly last frame's.
+  const fired = () => G.g_nPlayerFired[0];
   const fireAt = (t: Vec3) => {
     boss.shotBones[0] = 0;
     const l = Math.hypot(t.x, t.y, t.z);
+    const before = fired();
+    QueueOffscreenPull(0);
     QueueShotRequest(0, { origin: vec3(0, 0, 0),
                           dir: vec3(t.x / l, t.y / l, t.z / l) });
     frame();
+    if (fired() !== before + 1) throw new Error("the gun did not fire");
     return boss.shotBones[0];
   };
 
@@ -19422,6 +19429,22 @@ console.log("\nthe shot test, for a class that registers the engine's way:");
   frame();
   check("with bit 0x80 the same off-bone shot misses: the bones decide",
         fireAt(vec3(8, 6, Z)) === 0, `${boss.shotBones[0]}`);
+  // `ShotTestBoneTree`'s `rec[0] != 0` and `ShotTestBoneSphere`'s radius
+  // test. Bone 2 is four units from bone 1, whose own sphere is three, so a
+  // shot at bone 2 that bone 2 does not answer finds nothing.
+  RemoveBoneSubtree(boss, 2);
+  frame();
+  check("a severed bone draws slot 0 and is not tested",
+        fireAt(bonesAt[2]) === 0, `${boss.shotBones[0]}`);
+  boss.removed.length = 0;
+  frame();
+  check("...and with the bone put back it answers again",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+  // `ShotTestBoneSphere`'s `r == 0` skip has no check here, deliberately: a
+  // line whose direction is quantised to BAMS angles never passes exactly
+  // through a centre, so a zero radius finds nothing with or without the skip
+  // and a check of it would pass either way (measured: removing the skip left
+  // such a check green).
   // Bit 0x8000 raised after the actor registered: the fork's third test.
   frame();
   boss.flags |= ActorFlag.NoShotTest;

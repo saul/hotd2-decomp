@@ -366,6 +366,9 @@ import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
 import { RouteFigureTick } from "../src/game/route_map";
 import { CamPath } from "../src/game/camera/curve";
+import { Class22SubActorAt } from "../src/game/class22/records";
+import { Class22Relative } from "../src/game/class22/state";
+import { Class23State } from "../src/game/class23/state";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -10651,6 +10654,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Civilian, "0x10 civilian"],
     [SpawnClass.Frog, "0x11 frog"],
     [SpawnClass.Boss4, "0x19 stage-4 boss"],
+    [SpawnClass.Judgment, "0x22 JUDGMENT's flier"],
+    [SpawnClass.JudgmentCompanion, "0x23 JUDGMENT's walker"],
     [SpawnClass.Boss2, "0x14 stage-2 boss"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
@@ -19286,6 +19291,268 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("a reset leaves no stale range for a seek to replay",
         G.g_stashed_path_frame === 0 && G.g_stashed_path_end_frame === 0
         && G.g_rail_frame === 0);
+}
+
+// JUDGMENT -- classes 0x22 and 0x23, `game/class22/` and `game/class23/`. The
+// gates the fight holds, the split of the damage between the flier and the
+// walker, the phase change at 90, the walker's fall, the bar, and the flags
+// the death raises -- driven from a reset, through the classes' own updates.
+console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
+{
+  const clips = (ids: number[], frames: number) =>
+    Object.fromEntries(ids.map((id) => [String(id), motion(frames)]));
+  const range = (lo: number, hi: number) =>
+    Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+  const JT = (type: number, name: string,
+              motions: Record<string, unknown>): CharacterType =>
+    ({ ...TYPE, type, name, bones: [], motions }) as unknown as CharacterType;
+  // The death clip must outlast counter 0x92, which the landing reaches.
+  const FLIER = JT(0x45, "boss1z", { ...clips(range(0x408, 0x416), 30),
+                                     "1034": motion(120) });
+  const WALKER = JT(0x44, "boss1q", clips(range(0x383, 0x394), 40));
+  const WINGS = JT(0x46, "boss1z_wing", clips([0x0f, 0x10, 0x12, 0x13, 0x14], 10));
+  const FLIER_AT = 24948;
+  const WALKER_AT = 25004;
+  const flierRow = (variant: number, walkerSub: number) => [
+    { at: FLIER_AT, class: 0x22, char_type: 0x45, motion: 0x40b, hp: 300,
+      class22: { variant, clip: 0x40b, frame: 0,
+                 despawn_path: variant === 1 ? 0x31 : 0xcf,
+                 despawn_frame: variant === 1 ? 400 : 0x8c, hp: 300,
+                 hp_stage: 210, phase1_floor: 90, companion_at: WALKER_AT,
+                 sub_actor_at: Class22SubActorAt(FLIER_AT) } },
+    { at: WALKER_AT, class: 0x23, char_type: 0x44, motion: 0x38d, hp: 90,
+      parent_at: FLIER_AT, synthetic: true,
+      class23: { subtype: walkerSub, despawn_path: 0x31, despawn_frame: 400,
+                 pos: [0, 0, 0], angles: [0, 0, 0] } },
+    { at: Class22SubActorAt(FLIER_AT), class: 0x22, char_type: 0x46,
+      motion: 0x10, hp: 0, parent_at: FLIER_AT, synthetic: true },
+  ];
+  const host = {
+    ...NULL_HOST,
+    objectPath: (_slot: number, frame: number) =>
+      ({ x: 0, y: 20, z: frame * 0.1, pitch: 0, yaw: 0, roll: 0 }),
+  };
+  const jf = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host };
+  const tick = (n: number): void => {
+    for (let i = 0; i < n; i++) {
+      for (const o of [...G.g_object_list]) {
+        if (!o.visible || o.despawned) continue;
+        g_class_handlers[o.cls]?.update(o, jf);
+      }
+      BossBannersTick(host);
+      BossHpBarsTick();
+    }
+  };
+  const spawnFlier = (variant: number, walkerSub: number): Actor => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables({ ...CHARS,
+                    types: { "1": TYPE, "68": WALKER, "69": FLIER,
+                             "70": WINGS },
+                    placements: flierRow(variant, walkerSub),
+                  } as unknown as CharactersJson);
+    const p = T.chars!.placements.find((x) => x.at === FLIER_AT);
+    return ActorSpawn(FLIER_AT, SpawnClass.Judgment, 0x45, "judgment",
+                      { ...DescriptorFromPlacement(p), hp: 300, maxHp: 300,
+                        visible: true });
+  };
+  const flier = spawnFlier(1, 0);
+  const sub = ActorByAt(Class22SubActorAt(FLIER_AT));
+  check("Class22Init builds the sub-actor -- type 0x46, clip 0x10, out of the "
+        + "shot test -- and the banner, and counts nothing",
+        sub?.cls === SpawnClass.Judgment && sub.judgment.isSubActor
+        && sub.charType === 0x46 && sub.motion === 0x10
+        && (sub.flags & 0x8000) !== 0 && G.g_boss_banners.length === 1
+        && G.g_enemies_alive === 0 && G.g_enemies_present === 0,
+        `${sub?.charType} ${G.g_boss_banners.length} ${G.g_enemies_alive}`);
+  check("...and is in the pool before the walker it will make: the flier is "
+        + "updated first", G.g_object_list[0]?.at === FLIER_AT);
+  G.g_active_cam_path = 0x2f;
+  G.g_cam_path_frame = 0x100;
+  tick(1);
+  const walker = ActorByAt(WALKER_AT);
+  check("the ride-in's first frame spawns the walker from the nested "
+        + "descriptor, and the walker counts itself into both counters",
+        walker?.cls === SpawnClass.JudgmentCompanion
+        && walker.companion.companionAt === FLIER_AT
+        && flier.cls === SpawnClass.Judgment
+        && flier.judgment.companionAt === WALKER_AT
+        && G.g_enemies_alive === 1 && G.g_enemies_present === 1
+        && walker.hp === 90,
+        `${walker?.cls} alive ${G.g_enemies_alive}`);
+  check("...which is what holds `wait_enemies_alive 0` before the flier "
+        + "joins", G.g_enemies_alive > 0);
+  G.g_cam_path_frame = 829;
+  tick(1);
+  check("no banner flag before the camera's frame 830",
+        !G.g_script_flags[2]);
+  G.g_cam_path_frame = 830;
+  tick(1);
+  check("on the integer camera frame 830 the ride-in raises g_script_flags[2]",
+        G.g_script_flags[2] === 1 && flier.sub === 2, `sub ${flier.sub}`);
+  tick(299);
+  check("...and waits: not in the fight until 300 frames later",
+        flier.state === Class22Relative.Entrance && G.g_boss_hp_bars.length === 0,
+        `state ${flier.state}`);
+  tick(1);
+  check("frame 300 joins the fight: both counters, the health bar at "
+        + "(320, 35), g_boss_engaged, 300 hit points",
+        flier.state === Class22Relative.Phase1 && G.g_enemies_alive === 2
+        && G.g_enemies_present === 2 && G.g_boss_hp_bars.length === 1
+        && G.g_boss_hp_bars[0].x === 320 && G.g_boss_hp_bars[0].y === 35
+        && G.g_boss_engaged === 1 && flier.hp === 300,
+        `state ${flier.state} alive ${G.g_enemies_alive} bars `
+        + `${G.g_boss_hp_bars.length}`);
+  check("the banner, waiting on flag 2, opens the shutter on its own frame 300",
+        G.g_boss_banners.length === 0 && G.g_bHudShutterState === 1,
+        `${G.g_boss_banners.length} shutter ${G.g_bHudShutterState}`);
+  check("the walker waited for the flier's phase 1, and fights",
+        walker?.state === Class23State.Fight
+        || walker?.state === Class23State.Entrance,
+        `${walker?.state}`);
+  tick(2);
+  check("phase 1's tail writes g_boss_hp_fraction every frame: 300/300",
+        G.g_boss_hp_fraction === 1, `${G.g_boss_hp_fraction}`);
+  // The shot test the engine's way: each class puts itself on the list at
+  // its own sites (docs/formats/combat.md, "The shot test").
+  G.g_shot_test_list = [];
+  tick(1);
+  const listed = (at: number): boolean =>
+    G.g_shot_test_list.some((e) => e.at === at);
+  check("phase 1 registers the flier for the shot test, and not as a camera "
+        + "candidate (RegisterForShotTest at 0x0049C145)",
+        listed(FLIER_AT) && flier.cls === SpawnClass.Judgment
+        && !flier.judgment.cameraListed);
+  check("...the walker in state 1 through ActorRegisterCameraPoint(6.0) "
+        + "(0x00490917), a camera candidate as well",
+        walker?.state === Class23State.Fight
+        && listed(WALKER_AT) && walker.cls === SpawnClass.JudgmentCompanion
+        && walker.companion.cameraListed,
+        `walker state ${walker?.state}`);
+  check("...and never the sub-actor, which is not updated and has 0x8000",
+        !listed(Class22SubActorAt(FLIER_AT)));
+
+  // The damage split. A flier hit is 30 and ten points; a walker hit is ten
+  // points and one hit point off the flier, the frame after.
+  if (flier.cls === SpawnClass.Judgment) {
+    flier.sub = 1;
+    flier.flags &= ~0x40000100;
+    const score = G.g_player_score[0];
+    MarkActorShot(flier, 0, 1, true);
+    tick(1);
+    check("a hit on the flier in a damage-taking sub is 30 hit points and 10 "
+          + "points, and a flinch",
+          flier.hp === 270 && G.g_player_score[0] === score + 10
+          && (flier.flags & 0x40000000) !== 0,
+          `hp ${flier.hp} score ${G.g_player_score[0] - score}`);
+    check("...and the bar reads it", Math.abs(G.g_boss_hp_fraction - 0.9) < 1e-6,
+          `${G.g_boss_hp_fraction}`);
+  }
+  if (walker?.cls === SpawnClass.JudgmentCompanion
+      && flier.cls === SpawnClass.Judgment) {
+    walker.state = Class23State.Fight;
+    walker.sub = 3;
+    flier.sub = 1;
+    flier.flags &= ~0x40000100;
+    const hp = flier.hp;
+    const score = G.g_player_score[0];
+    MarkActorShot(walker, 0, 1, true);
+    tick(1);
+    check("a hit on the walker costs it nothing and hands one hit point to "
+          + "the flier", walker.hp === 90 && flier.judgment.transfer === 1
+          && G.g_player_score[0] === score + 10,
+          `walker ${walker.hp} transfer ${flier.judgment.transfer}`);
+    flier.sub = 1;
+    flier.flags &= ~0x40000100;
+    tick(1);
+    check("...which the flier's next damage-taking frame subtracts",
+          flier.hp === hp - 1 && flier.judgment.transfer === 0,
+          `${hp} -> ${flier.hp}`);
+
+    // Phase 1 to phase 2 at 90.
+    flier.hp = 100;
+    flier.sub = 1;
+    flier.flags &= ~0x40000100;
+    MarkActorShot(flier, 0, 1, true);
+    tick(1);
+    check("a hit that takes the flier to or below 90 starts phase 2 with "
+          + "exactly 90 hit points", flier.state === Class22Relative.Phase2
+          && flier.hp === 90
+          && Math.abs(G.g_boss_hp_fraction - 0.3) < 1e-6,
+          `state ${flier.state} hp ${flier.hp} bar ${G.g_boss_hp_fraction}`);
+    check("...and the walker falls on the same frame: the alive count drops",
+          walker.state === Class23State.Collapse && G.g_enemies_alive === 1,
+          `walker ${walker.state} alive ${G.g_enemies_alive}`);
+    check("...still on the shot list: the falling arm registers too "
+          + "(0x004901E9)", listed(WALKER_AT));
+    G.g_shot_test_list = [];
+    flier.flags &= ~0x40000100;
+    tick(1);
+    check("phase 2 registers the flier through ActorRegisterCameraPoint(2.0) "
+          + "while bit 0x100 is down: the list and the camera",
+          listed(FLIER_AT) && flier.judgment.cameraListed
+          && listed(WALKER_AT),
+          `listed ${listed(FLIER_AT)} camera ${flier.judgment.cameraListed}`);
+    let n = 0;
+    while (walker.state === Class23State.Collapse && n++ < 400) tick(1);
+    check("the collapse ends on its clip's play length: out of the present "
+          + "count and the shot test, lying",
+          walker.state === Class23State.Lie && G.g_enemies_present === 1
+          && (walker.flags & 0x8000) !== 0,
+          `state ${walker.state} present ${G.g_enemies_present} after ${n}`);
+    G.g_shot_test_list = [];
+    tick(1);
+    check("...and a lying walker is never on the list again",
+          !listed(WALKER_AT));
+
+    // The kill, and the death's gate.
+    flier.sub = 3;
+    flier.flags &= ~0x40000100;
+    flier.hp = 20;
+    tick(1);
+    const score2 = G.g_player_score[0];
+    MarkActorShot(flier, 0, 1, true);
+    flier.sub = 3;
+    flier.flags &= ~0x40000100;
+    tick(1);
+    check("the killing hit: relative state 3, g_boss_engaged 0, 1500 and 10",
+          flier.state === Class22Relative.Death && G.g_boss_engaged === 0
+          && G.g_player_score[0] === score2 + 1510,
+          `state ${flier.state} score ${G.g_player_score[0] - score2}`);
+    tick(1);
+    check("death sub 0: the bar to 0 and both counters down -- the room is "
+          + "clear", G.g_boss_hp_fraction === 0 && G.g_enemies_alive === 0
+          && G.g_enemies_present === 0,
+          `${G.g_boss_hp_fraction} ${G.g_enemies_alive} ${G.g_enemies_present}`);
+    G.g_camera_free = 1;
+    tick(2);
+    check("once the camera is free the flier holds the camera driver",
+          G.g_camera_driver_held === 1 && G.g_bHudShutterState === 5,
+          `${G.g_camera_driver_held}`);
+    // What sub 2 saved -- the block as it stood on the frame it took it.
+    const eye = { ...flier.judgment.point };
+    n = 0;
+    while (!G.g_script_flags[3] && n++ < 1200) tick(1);
+    check("300 orbit frames later: g_script_flags[3], the driver let go, the "
+          + "block put back (Arcade)",
+          G.g_script_flags[3] === 1 && G.g_camera_driver_held === 0
+          && G.g_camera_block_eye.x === eye.x
+          && G.g_camera_block_eye.z === eye.z,
+          `flag ${G.g_script_flags[3]} after ${n}`);
+    check("...and never g_script_flags[0], which is stage 5's",
+          !G.g_script_flags[0]);
+  }
+
+  // Stage 5's variant raises flag 0 instead, and no banner.
+  const f5 = spawnFlier(2, 1);
+  check("variant 2 spawns no banner", G.g_boss_banners.length === 0);
+  f5.state = Class22Relative.Death;
+  f5.sub = 0;
+  G.g_camera_free = 1;
+  let n5 = 0;
+  while (!G.g_script_flags[0] && n5++ < 1200) tick(1);
+  check("variant 2's death raises g_script_flags[0], and not 3",
+        G.g_script_flags[0] === 1 && !G.g_script_flags[3], `after ${n5}`);
 }
 
 // -- the shot test the engine's way: registration, the sphere, the fork -----

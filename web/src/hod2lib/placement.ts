@@ -425,6 +425,10 @@ export class Placement {
   class53: Record<string, unknown> | null = null;
   /** Class 0x14's tail -- the stage-2 boss's state, route quad and cue. */
   class14: Record<string, unknown> | null = null;
+  /** Class 0x22's tail -- JUDGMENT's flier. See `characters.class22Tail`. */
+  class22: Record<string, unknown> | null = null;
+  /** Class 0x23's tail -- JUDGMENT's walker. See `characters.class23Tail`. */
+  class23: Record<string, unknown> | null = null;
   /**
    * Class 0x33 **selector 1's** tail -- the draw slot, the `op_` path it
    * rides, and the four cues that raise its two `obj+0x34` bits and take it
@@ -513,6 +517,8 @@ export class Placement {
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;
     if (this.class14) d.class14 = this.class14;
+    if (this.class22) d.class22 = this.class22;
+    if (this.class23) d.class23 = this.class23;
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.attachments.length) d.attachments = [...this.attachments];

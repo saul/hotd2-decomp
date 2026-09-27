@@ -1120,7 +1120,11 @@ export class ExeTables {
       const walk = (nodePtr: number, depth: number,
                     parent: number | null): void => {
         const o = this.v2r(nodePtr);
-        if (o === null || seen.has(nodePtr) || depth > 12) return;
+        // No depth cap: `seen` visits each node once, which bounds the walk
+        // by its input (L22). It stopped at depth 12 until the stage-3 boss's
+        // heads -- `boss3.bin` nests 17 deep and `boss3l.bin`/`b6boss3.bin`
+        // 24 -- came out with 13 of their nodes, and neither weak bone.
+        if (o === null || seen.has(nodePtr)) return;
         if (o + 0x18 > this.data.length) return;
         seen.add(nodePtr);
         const slot = u32(this.data, o);

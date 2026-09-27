@@ -10,7 +10,7 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
-import { ActorFlag, makeActor, type Actor } from "./actor";
+import { ActorFlag, MOTION_FLAGS_INIT, makeActor, type Actor } from "./actor";
 import { G } from "./globals";
 import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
   from "./hit_slots";
@@ -64,8 +64,15 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  *
  * The routine builds the skeletal model record at `obj+0x194`, and that
  * record is the renderer's hierarchy here. What it also does to the actor's
- * own state is two things, and both are ported:
+ * own state is three things, and all three are ported:
  *
+ * * The draw state: `model+0x64 = 3` — {@link MOTION_FLAGS_INIT}, `c7466403`
+ *   at `0x004104C5` — and the vertex-blended parts' records. `model+0x3C` is
+ *   `g_pCharacterExtraParts[type]->count` (`0x0052ED08`), `model+0x40` is
+ *   `ActorAllocSub(count * 8)`, and the loop at `0x004104D8` writes each
+ *   record's `+0` to 0 and its `+1` to 1: every part starts visible. The
+ *   count comes from the character's `parts` in the bundle, which keeps a
+ *   `null` for a null descriptor precisely so that its length is this count.
  * * `ActorClaimHitSlot` (`FUN_00409270`) — the actor's `g_hit_slots` entry.
  * * `SkeletonBuildAndPose` (`FUN_00410590`), which it calls, raises
  *   {@link ActorFlag.ShootPerBone} on `g_cur_actor` when the character's
@@ -91,8 +98,11 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  * back, and it does so itself.
  */
 export function ActorBuildSkinnedModel(obj: Actor): void {
+  const type = CharacterTypeOf(obj);
+  obj.motionFlags = MOTION_FLAGS_INIT;
+  obj.partVisible = new Array<number>(type?.parts?.length ?? 0).fill(1);
   ActorClaimHitSlot(obj);
-  if ((CharacterTypeOf(obj)?.bones ?? []).some((b) => b.parent === null)) {
+  if ((type?.bones ?? []).some((b) => b.parent === null)) {
     obj.flags |= ActorFlag.ShootPerBone;
   }
 }

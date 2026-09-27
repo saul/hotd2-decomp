@@ -18,7 +18,8 @@
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
-import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
+import { ActorFlag, MotionFlag, ZombieFlag2, type ZombieActor } from "../actor";
+import { ActorSetPartVisibility } from "../model_draw";
 import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ActorSetMotion, ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
@@ -117,16 +118,15 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     // ported, which is why a zombie halfway out of the water stumbled.
     obj.flags |= ActorFlag.ShotImmune | ActorFlag.NoHitReaction;
     // `0x0045854A  CMP byte [EBP+3], 1` -- descriptor `tail+0x03`, which the
-    // port carries as `attackState` -- then `ActorSetPartVisibility`
-    // (`FUN_00409D10`) with 0: an actor whose byte is 1 is **not drawn** while
-    // it waits. `obj.alpha` is the port's stand-in for the per-part draw byte
-    // (see `render/characters.ts`), as it is for
-    // `ZombieStateAwaitCivilianOrder`. The same arm raises `obj+0x34 |=
-    // 0x90000` (`ActorFlag.NoCameraTrack` and an unnamed `0x80000`) and clears
-    // `model+0x64` bit 0; the clip start below takes all three back.
+    // port carries as `attackState` -- and an actor whose byte is 1 is **not
+    // drawn** while it waits: `ActorSetPartVisibility` (`FUN_00409D10`) with
+    // 0 at `0x0045855A` for the waist, `obj+0x1F8 &= ~1` (`24fe` at
+    // `0x00458571`) for the skeleton, and `obj+0x34 |= 0x90000` for the
+    // camera and the shadow. The clip start below takes all of it back.
     if (obj.attackState === 1) {
-      obj.alpha = 0;
-      obj.flags |= ActorFlag.NoCameraTrack;
+      ActorSetPartVisibility(obj, 0);
+      obj.flags |= ActorFlag.NoCameraTrack | ActorFlag.NoShadow;
+      obj.motionFlags &= ~MotionFlag.DrawSkeleton;
     }
     ActorSetMotion(obj, SUBMERGED_MOTION);
     obj.zom.holdFrames = p.delay;              // +0x1330
@@ -137,14 +137,18 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
   if (obj.sub === 1) {
     obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames > 0) return;
-    // `0x004585DC  ActorSetPartVisibility(model, 1)` -- drawn again.
-    obj.alpha = 1;
+    // `0x004585DC  ActorSetPartVisibility(model, 1)` and `OR AL, 0x1` into
+    // `obj+0x1F8` at `0x004585EA` -- drawn again, and **whatever `tail+0x03`
+    // said**: neither write is guarded.
+    ActorSetPartVisibility(obj, 1);
+    obj.motionFlags |= MotionFlag.DrawSkeleton;
     // `004585EC  81e2fffef6ff  AND EDX, 0xfff6feff` — the clip that lifts the
-    // actor out has started, so it is shootable again. The mask drops
-    // `0x90100`; the port names two of those three bits and `0x80000` has no
-    // field here. **`0x2000` is not in it** — the stagger stays suppressed for
-    // the whole clip, and only the hand-over below takes it back down.
-    obj.flags &= ~(ActorFlag.ShotImmune | ActorFlag.NoCameraTrack);
+    // actor out has started, so it is shootable again, and has a camera point
+    // and a shadow. **`0x2000` is not in the mask** — the stagger stays
+    // suppressed for the whole clip, and only the hand-over below takes it
+    // back down.
+    obj.flags &= ~(ActorFlag.ShotImmune | ActorFlag.NoCameraTrack
+                   | ActorFlag.NoShadow);
     ActorSetMotion(obj, p.motion);
     obj.sub = 2;
     // No return: case 1 falls into case 2 as well.

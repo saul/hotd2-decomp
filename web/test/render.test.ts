@@ -2036,6 +2036,120 @@ console.log("\nthe pelvis veto: bone 9's own draw, and not its legs");
 }
 
 /**
+ * The draw gates: the skeleton's, and each vertex-blended part's.
+ *
+ * `SkeletonEmitNode` (`FUN_004114C0`) draws no node while `model+0x64` bit 0
+ * is down, and `SkeletonDrawWalk` (`FUN_004110D0`) draws part *i* only while
+ * its byte in `model+0x40` is set. The two are separate, and a hidden
+ * captor closes the first and **only part 0** of the second -- so the scene
+ * has to be able to show a skirt with no body. The port used to fold all of
+ * it into one alpha that hid the root.
+ */
+console.log("\nthe draw gates: the skeleton, and each part by index");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { MotionFlag } = await import("../src/game/actor");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+  const { alphaGatesWholeActor } =
+    await import("../src/render/characters/draw_gates");
+  const { BoxGeometry, Mesh, MeshBasicMaterial, Object3D } =
+    await import("three");
+
+  const part = (slot: number) => ({
+    slot, draw_bone: 9, bones: [9, null, null, null], deformed: [0], rows: 1,
+    supported: true,
+  });
+  const TYPE = {
+    type: 0x2e, name: "t46", file: "t.bin", bone_count: 2, actor_radius: 10,
+    bones: [
+      { bone: 9, part: "bone09_0f31", slot: 0x0f31, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, steps: [] },
+      { bone: 10, part: "bone10_1111", slot: 0x1111, offset: [0, 0, 0],
+        parent: 0, damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    parts: [part(0x0f22), part(0x0f23)],
+    head_bone: 2, reactions: {}, attacks: {},
+    motions: { "660": { bank: "b", frames: 1, fps: 30, root: [0, 0, 0],
+                        rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 } },
+  };
+  const CHARS = {
+    types: { "46": TYPE },
+    placements: [{ at: 0x30, class: 0x10, char_type: 0x2e, motion: 660,
+                   hp: 0, yaw: 0, body_condition: 0, initial_state: 0,
+                   attack_state: 0, ring_set: 0 }],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_t46_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_t46", hod2_spawn_at: 0x30 };
+  const mesh = (name: string) => {
+    const m = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial());
+    m.name = name;
+    return m;
+  };
+  const pelvis = mesh("chr_t46_spawn000_bone09_0f31");
+  const leg = mesh("chr_t46_spawn000_bone10_1111");
+  pelvis.add(leg);
+  // The exporter's vertex-blended parts: top-level, no parent, by index.
+  const waist = mesh("chr_t46_spawn000_part0_0f22");
+  const skirt = mesh("chr_t46_spawn000_part1_0f23");
+  rig.add(pelvis, waist, skirt);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const [a] = SpawnScriptedCharacters(chars.readySpawns([{ at: 0x30 }]));
+  a.visible = true;
+  chars.syncSpawns([{ at: 0x30 }], [a]);
+  chars.update({} as never);
+  const drawn = (o: InstanceType<typeof Object3D>) =>
+    o.visible && o.layers.isEnabled(0);
+  check("built: skeleton and both parts drawn, one byte per part",
+        a.partVisible.join() === "1,1" && drawn(pelvis) && drawn(leg)
+        && drawn(waist) && drawn(skirt), a.partVisible.join());
+
+  // A captor's hold: the skeleton's bit and part 0's byte, and nothing else.
+  a.motionFlags &= ~MotionFlag.DrawSkeleton;
+  a.partVisible[0] = 0;
+  chars.update({} as never);
+  check("the skeleton's gate takes every bone's geometry off",
+        !pelvis.layers.isEnabled(0) && !leg.layers.isEnabled(0));
+  check("...by layer, so the nodes stay visible and the pose stays live",
+        pelvis.visible && leg.visible && rig.visible);
+  check("part 0's byte takes the waist off, and the skirt is still drawn",
+        !waist.visible && drawn(skirt));
+
+  a.motionFlags |= MotionFlag.DrawSkeleton;
+  a.partVisible[0] = 1;
+  chars.update({} as never);
+  check("...and opening both puts everything back",
+        drawn(pelvis) && drawn(leg) && drawn(waist) && drawn(skirt));
+
+  // `Actor.alpha` is not a whole-actor gate for the two classes whose
+  // `obj+0x138C` the engine draws with, part by part.
+  const fake = (cls: number) => ({ a: { cls } }) as never;
+  check("alpha gates the whole actor only for the classes that write it as "
+        + "'drawn'", alphaGatesWholeActor(fake(SpawnClass.Judgment))
+        && !alphaGatesWholeActor(fake(SpawnClass.Zombie))
+        && !alphaGatesWholeActor(fake(SpawnClass.Thrower)));
+
+  stage.dispose();
+}
+
+/**
  * The player's own character, in the scene, in the cut scene that spawns it.
  *
  * Stage 3's block 2 step 5 puts two class-0x25 humanoids at one point --

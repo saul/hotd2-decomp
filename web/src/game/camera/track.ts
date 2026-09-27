@@ -44,6 +44,7 @@ import { SelectCameraLookAtTarget } from "./select_target";
 import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
   from "./turn";
 import { vec3 } from "../vec";
+import { RegisterForShotTest } from "../combat/shot_test";
 
 /**
  * The bone the camera follows.
@@ -100,11 +101,13 @@ const CAMERA_TRACK_BONE = 1;
  * invent a lift the engine never applies to them.
  *
  * [diverges] *Who* is registered is still not the engine's set: `director.ts`
- * calls this for every visible actor, where the engine calls it from fifteen
- * places. Narrowing it to the three proved classes would leave `lookAt` at the
- * origin for the rest, which `SelectCameraLookAtTarget` and the HUD marker
- * both read. That is a separate change from the lift, and this table is what
- * makes it possible to make later.
+ * calls {@link ActorLiftCameraPoint} for every visible actor of a class that
+ * has not set `ClassHandler.registersForShotTest`, where the engine calls
+ * `ActorRegisterCameraPoint` from these seventeen sites. Narrowing it would
+ * leave `lookAt` at the origin for the rest, which `SelectCameraLookAtTarget`
+ * and the HUD marker both read. A class that sets the flag calls the real
+ * routine from its own update, at its row above, and leaves this list; this
+ * table is what makes that possible one class at a time.
  */
 const CAMERA_POINT_RISE: Partial<Record<SpawnClass, number>> = {
   [SpawnClass.Civilian]: 4,
@@ -135,14 +138,81 @@ const _bone = vec3();
 
 /**
  * `ActorRegisterCameraPoint` — `FUN_00409B70`. Where the camera follows this
- * actor.
+ * actor, and where the shot test finds it.
  *
- * It transforms `obj+0x100` into view space for the shot test, registers the
- * actor for both, and raises the height by its float argument — `rise`, which
- * the caller supplies exactly as the engine's caller pushes it. The port's
- * half is the height and the registration: the world position of the bone is
- * the skeleton's, and the skeleton is three.js's, so it comes across
- * `GameHost`.
+ * ```
+ * 00409B74  ESI = g_cur_actor
+ * 00409B7A  MatrixStackPush(0); MatrixStackSetTopFromArray(g_camera_world_to_view)
+ * 00409BA3  obj+0x70..0x78 = MatrixTransformPoint(obj+0x100..0x108)
+ * 00409BE7  MatrixStackPop(1)                 ; Ghidra: no-return, so ...
+ * 00409BEC  PUSH ESI; CALL 0x00405160         ; ... RegisterForShotTest is in no xref list
+ * 00409BF2  obj+0x104 += rise                 ; FLD [ESP+0x38]; FADD [ESI+0x104]
+ * 00409C03  RegisterForCameraTracking(obj)
+ * ```
+ *
+ * **This is the call that puts its callers in the shot test.** Ghidra's
+ * function body and its pseudocode both end at the `MatrixStackPop`, so
+ * `get_xrefs_to 0x00405160` does not list it, and no update that reaches
+ * `RegisterForShotTest` only through here shows up as a caller (`L35`).
+ * `[proved]` from the bytes.
+ *
+ * `obj+0x100` is what `SkeletonEmitNode` (`FUN_004114C0`) recorded as it drew
+ * the tracked bone -- bone 1 for any character type past `0x14`, which is
+ * every boss, and 1, 2 or 9 by flags below that (see {@link CAMERA_TRACK_BONE})
+ * -- and it goes into the shot test **before** the lift, so the sphere sits
+ * on the bone and the camera aims `rise` above it. The port has the bone's world position across
+ * `GameHost` and keeps `obj+0x70..0x78` in world space
+ * ({@link Actor.shotCentre}); `RegisterForShotTest` takes the depth.
+ *
+ * Called by the classes that register the engine's way, from their own
+ * update, at the exe's site. The rest still get {@link ActorLiftCameraPoint}
+ * from `director.ts`. `RegisterForCameraTracking` is not called: the port's
+ * candidate list is `camera/slots.ts`'s predicate over the pool, which
+ * `ClassHandler.tracksCamera` already answers per class.
+ *
+ * `[port-only]` in one respect: a host with no pose for this actor refreshes
+ * nothing and lifts nothing. The engine's callers have always drawn the bone
+ * the line before, so its `+= rise` lands on a fresh point every frame; with
+ * no draw, the port's would climb.
+ */
+export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
+                                         rise: number): void {
+  // An actor that carries the engine's model block (`game/skeleton.ts`) has
+  // no host to ask: its own skeleton walk wrote `obj+0x100` this frame, as
+  // the engine's does, and the routine's arithmetic applies as it stands --
+  // `FLD rise; FADD [obj+0x104]; FSTP [obj+0x104]`, climbing too on a frame
+  // whose walk drew nothing, which is the engine's own behaviour for a
+  // hidden model (`SkeletonEmitNode` writes the point only while it draws).
+  if (obj.skel) {
+    obj.shotCentre.x = obj.lookAt.x;
+    obj.shotCentre.y = obj.lookAt.y;
+    obj.shotCentre.z = obj.lookAt.z;
+    RegisterForShotTest(obj, host);
+    obj.lookAt.y = Math.fround(rise + obj.lookAt.y);
+    return;
+  }
+  const posed = host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone);
+  if (posed) {
+    obj.lookAt.x = _bone.x;
+    obj.lookAt.y = _bone.y;
+    obj.lookAt.z = _bone.z;
+  }
+  obj.shotCentre.x = obj.lookAt.x;
+  obj.shotCentre.y = obj.lookAt.y;
+  obj.shotCentre.z = obj.lookAt.z;
+  RegisterForShotTest(obj, host);
+  if (posed) obj.lookAt.y += rise;
+}
+
+/**
+ * `[port-only]` The camera half of `ActorRegisterCameraPoint`, for a class
+ * that has not moved the call into its own update: the tracked bone, lifted.
+ *
+ * `director.ts` runs this for every visible actor of such a class, before its
+ * update, which is what the port has always done. It registers nothing for
+ * the shot test, because those classes are still picked by `render/` without
+ * one. When a class sets `ClassHandler.registersForShotTest` it calls the
+ * real routine above instead, and this is no longer run for it.
  *
  * This ran in `render/characters.ts` until step 21, writing `a.lookAt` from a
  * renderer — which meant turning the Characters view toggle off froze the
@@ -153,19 +223,8 @@ const _bone = vec3();
  * A host with no pose for this actor leaves the point where it was, which is
  * what a character with no skeleton in the scene should look like.
  */
-export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
-                                         rise: number): void {
-  // An actor that carries the engine's model block has had `obj+0x100`
-  // written by its own skeleton walk this frame (`SkeletonEmitNode`), and
-  // the routine's own arithmetic applies: `FLD rise; FADD [obj+0x104];
-  // FSTP [obj+0x104]` at `0x00409BF2`, in place. `RegisterForShotTest`
-  // (`FUN_00405160`) and `RegisterForCameraTracking` (`FUN_00408EC0`) run
-  // beside it in the exe; the port's shot test and camera list are fed
-  // elsewhere today.
-  if (obj.skel) {
-    obj.lookAt.y = Math.fround(rise + obj.lookAt.y);
-    return;
-  }
+export function ActorLiftCameraPoint(obj: Actor, host: GameHost,
+                                     rise: number): void {
   if (!host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone)) return;
   obj.lookAt.x = _bone.x;
   obj.lookAt.y = _bone.y + rise;

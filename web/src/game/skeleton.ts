@@ -43,8 +43,6 @@
 import type { BakedMotion } from "../bundle";
 import type { Actor } from "./actor";
 import { ActorFlag, MotionFlag } from "./actor";
-import { ActorClaimHitSlot } from "./hit_slots";
-import { ActorModelScale } from "./root_motion";
 import { MatrixInterpolateSwingTwist, type Mat3 } from "./class44/swing_twist";
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
@@ -676,7 +674,7 @@ export function SkeletonBonePoint(obj: Actor, bone: number, local: Vec3,
  * the port poses the nodes through {@link SkeletonEmitNode} at frame 0, which
  * stores the same angles and matrices the first draw would.
  */
-function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
+export function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
   const tree = TreeOf(obj);
   if (!tree) return;
   if (tree.children[0].length) obj.flags |= ActorFlag.ShootPerBone;
@@ -702,38 +700,4 @@ function SkeletonBuildAndPose(obj: Actor, skel: SkeletonModel): void {
   MatrixRotateX(top, a[0]);
   MatCopy(skel.rootMat, top);
   for (const c of tree.children[0]) SkeletonEmitNode(obj, skel, tree, c, top, 0);
-}
-
-/**
- * `ActorBuildSkinnedModel` — `FUN_00410440`, for an actor that carries the
- * model block. The caller has put the motion in `+0x20`.
- *
- * ```
- * M[0x116C] = scale by character type
- * M[0]=0; M[0x10]=0; M[0x18]=0; M[0x08]=0; M[0x30]=0; M[0x28]=0; M[0x37]=0; M[0x36]=0
- * SkeletonAssignSubtreeTrack(0, 0)          ; every bone on track 0
- * M[0x64] = 3; M[0x68] = 5                  ; drawn, root motion; Z, Y, X
- * M[0x3C] = parts; M[0x40] = ActorAllocSub(parts * 8), each {0, 1}
- * SkeletonBuildAndPose(M, pos, recs)
- * hooks; M[0x34] = 0; ActorClaimHitSlot(g_cur_actor)
- * ```
- */
-export function ActorBuildSkinnedModel(obj: Actor): void {
-  const skel = obj.skel;
-  if (!skel) return;
-  obj.scale = ActorModelScale(obj.charType);
-  skel.counter = 0;
-  skel.prevFrame = 0;
-  skel.frame = 0;
-  skel.cursor = 0;
-  skel.weightDiv = 0;
-  skel.weightOrigin = 0;
-  skel.flags = 0;
-  obj.motionFlags = MotionFlag.Drawn | MotionFlag.RootMotion;
-  skel.order = 5;
-  skel.part0 = 1;
-  SkeletonBuildAndPose(obj, skel);
-  obj.motion = skel.motion;
-  obj.playTicks = 0;
-  ActorClaimHitSlot(obj);
 }

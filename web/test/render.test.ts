@@ -2282,6 +2282,25 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
         JSON.stringify(chars.pickShot(ray(0, 1))));
   a.flags &= ~ActorFlag.NoShotTest;
 
+  // The distance along the shot comes back with the pick: it is what
+  // `MergeShotPicks` weighs this answer against the registered classes' by.
+  // The centre is (0, 1, -30) and the ray runs straight at it.
+  const along = chars.pickShot(ray(0, 1))?.t ?? NaN;
+  check("the pick says how far along the shot it is",
+        Math.abs(along - Math.hypot(1, 30)) < 1e-6, `${along}`);
+  // A class that registers the engine's way is `game/combat/shot_test.ts`'s:
+  // this pick passes it by, registered or not, so the one answer it gets is
+  // the one its own registration earns.
+  const { g_class_handlers } = await import("../src/game/registry");
+  const h = g_class_handlers[SpawnClass.Bat]!;
+  h.registersForShotTest = true;
+  check("a class that registers the engine's way is not picked here",
+        chars.pickShot(ray(0, 1)) === null,
+        JSON.stringify(chars.pickShot(ray(0, 1))));
+  delete h.registersForShotTest;
+  check("...and is again once it stops", chars.pickShot(ray(0, 1))?.kind
+        === "actor");
+
   stage.dispose();
   G.g_object_list.length = 0;
 }

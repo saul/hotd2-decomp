@@ -235,7 +235,7 @@ import {
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
-         CivilianTarget,
+         CivilianSpherePoint, CivilianTarget,
          CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
@@ -8239,10 +8239,13 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   for (let i = 0; i < 10; i++) PoseHookGrowAndPushOutOfWorld(c);
   check("...from either side", c.bodyRadius === 2, String(c.bodyRadius));
 
-  // And the push it does only when the wait word asks for it.
+  // And the push it does only when the wait word asks for it -- measured at
+  // the sphere `CivilianUpdate`'s switch left at `obj+0x12C`, which the hook
+  // passes straight in (`LEA EDX, [ESI+0x12C]` at `0x0048D0F8`).
   T.coli = { files: ["t"], blobs: { wall: WALL_BLOB } };
   G.g_coli_full_set = ["wall"];
   c.pos = vec3(29, 0, 45);
+  c.sphereCentre = vec3(29, 2, 45);
   c.civ!.scaleTarget = c.bodyRadius;
   c.civ!.scaleStep = 0;
   PoseHookGrowAndPushOutOfWorld(c);
@@ -8251,6 +8254,112 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   c.civ!.wait |= CivilianWait.PushOutOfWorld;
   PoseHookGrowAndPushOutOfWorld(c);
   check("with it, it is pushed out", c.pos.x < 29, c.pos.x.toFixed(2));
+  check("...and the hook moves the actor, never the sphere",
+        c.sphereCentre.x === 29 && c.sphereCentre.y === 2,
+        `(${c.sphereCentre.x}, ${c.sphereCentre.y})`);
+
+  // **The sphere is the class's, not class 0x30's.** The hook used to call
+  // `ActorUpdateBoundingSphere` (`FUN_00454AC0`) first -- feet plus the
+  // radius plus one -- which the engine's routine never does. So it pushed a
+  // civilian whose feet were at a wall and whose sphere was not, and let one
+  // whose sphere was in it stand there.
+  c.pos = vec3(29, 0, 45);
+  c.sphereCentre = vec3(20, 2, 45);
+  PoseHookGrowAndPushOutOfWorld(c);
+  check("a civilian whose sphere is clear of a wall is not pushed, though "
+        + "its feet are at it",
+        c.pos.x === 29, c.pos.x.toFixed(2));
+  c.pos = vec3(20, 0, 45);
+  c.sphereCentre = vec3(29, 2, 45);
+  PoseHookGrowAndPushOutOfWorld(c);
+  check("...and one whose sphere is a unit into it is pushed that unit, "
+        + "though its feet are clear",
+        Math.abs(c.pos.x - 19) < 1e-9, c.pos.x.toFixed(4));
+}
+
+console.log("\nclass 0x10's sphere switch -- which point `obj+0x12C` is:");
+{
+  // `CivilianUpdate` (`FUN_0048A920`) ends by writing one of four points to
+  // `obj+0x12C`, chosen by `sub+0x80`. Only the position was ported; the
+  // other three were written off as matrices `game/` could not reach, and
+  // they are bone draw records -- the decompiler printed `int *` offsets, and
+  // `ADD ECX, 0x1C0` at `0x0048AE24` is bone 2's. **Mode 2 is the default**
+  // (`0x0048A4FD`), so most civilians in the game were never written at all.
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
+  const rng = new Rng(3);
+  const events = new Events();
+  const c = ActorSpawn(0x7310, SpawnClass.Civilian, 1, "civ", undefined, rng);
+  c.visible = true;
+  c.pos = vec3(40, 0, 60);
+  const BONES: Record<number, Vec3> = {
+    1: vec3(41, 9, 61), 2: vec3(42, 14, 62),
+    15: vec3(38, 3, 60), 12: vec3(44, 5, 64),
+  };
+  const posed: GameHost = {
+    ...NULL_HOST,
+    boneWorld: (_at, bone, out) => {
+      const b = BONES[bone];
+      if (!b) return false;
+      out.x = b.x; out.y = b.y; out.z = b.z;
+      return true;
+    },
+  };
+  const run = (host: GameHost) =>
+    CivilianUpdate(c, { eye: EYE, dt: 1 / 60, rng, host, events });
+  const at = (p: Vec3) => `(${c.sphereCentre.x}, ${c.sphereCentre.y}, `
+    + `${c.sphereCentre.z}) vs (${p.x}, ${p.y}, ${p.z})`;
+  const is = (p: Vec3) => Math.abs(c.sphereCentre.x - p.x) < 1e-9
+    && Math.abs(c.sphereCentre.y - p.y) < 1e-9
+    && Math.abs(c.sphereCentre.z - p.z) < 1e-9;
+
+  check("`CivilianInit` leaves the switch on bone 1",
+        c.civ!.cameraPointMode === CivilianSpherePoint.Bone1,
+        String(c.civ!.cameraPointMode));
+  run(posed);
+  check("mode 2, the default, publishes bone 1's drawn point",
+        is(BONES[1]), at(BONES[1]));
+  c.civ!.cameraPointMode = CivilianSpherePoint.Bone2;
+  run(posed);
+  check("mode 1 publishes bone 2's", is(BONES[2]), at(BONES[2]));
+  c.civ!.cameraPointMode = CivilianSpherePoint.Bones15And12;
+  run(posed);
+  const mid = vec3(41, 4, 62);
+  check("mode 3 the midpoint of bones 15 and 12", is(mid), at(mid));
+  c.civ!.cameraPointMode = CivilianSpherePoint.Position;
+  run(posed);
+  check("mode 0 the position", is(c.pos), at(c.pos));
+  c.civ!.cameraPointMode = 4;
+  c.sphereCentre = vec3(1, 2, 3);
+  run(posed);
+  check("a selector past 3 writes nothing (`JA 0x0048AF7D`)",
+        is(vec3(1, 2, 3)), at(vec3(1, 2, 3)));
+  c.civ!.cameraPointMode = CivilianSpherePoint.Bone1;
+  run(NULL_HOST);
+  check("with no pose to read, the position stands in rather than the origin",
+        is(c.pos), at(c.pos));
+
+  // **The order.** The draw at `0x0048AA02` runs the pose hook before the
+  // switch at `0x0048ADC4`, so the world push tests *last* frame's point and
+  // the switch then moves the sphere to where the actor is now. The port ran
+  // the switch first and then re-derived the sphere from the feet.
+  T.coli = { files: ["t"], blobs: { wall: WALL_BLOB } };
+  G.g_coli_full_set = ["wall"];
+  c.civ!.cameraPointMode = CivilianSpherePoint.Position;
+  c.bodyRadius = 2;
+  c.civ!.scaleTarget = 2;
+  c.civ!.scaleStep = 0;
+  c.sphereCentre = vec3(29, 2, 45);
+  c.pos = vec3(20, 0, 45);
+  c.civ!.wait |= CivilianWait.PushOutOfWorld;
+  run(NULL_HOST);
+  check("the pose hook pushes by last frame's sphere, and the switch then "
+        + "follows the actor",
+        Math.abs(c.pos.x - 19) < 1e-9 && is(c.pos),
+        `pos ${c.pos.x.toFixed(4)} sphere ${at(c.pos)}`);
 }
 
 console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");

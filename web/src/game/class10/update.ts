@@ -27,10 +27,18 @@ import { CivilianStepTurnToTarget } from "./turn";
 /**
  * `CivilianUpdate` — `FUN_0048A920`. One frame of a civilian.
  *
- * The order is the engine's: prune, hook, turn, interpolate, advance the clip,
- * step the script, then the shot branch, the sound queue and the removal. The
- * shot branch runs **after** the script step on purpose — a shot taken this
- * frame switches the script the step just resumed.
+ * The order is the engine's: prune, hook, turn, interpolate, draw (and with it
+ * the pose hook), advance the clip, step the script, then the shot branch, the
+ * sound queue, the registration, the sphere switch and the removal. The shot
+ * branch runs **after** the script step on purpose — a shot taken this frame
+ * switches the script the step just resumed.
+ *
+ * **Three things read `obj+0x12C` before the switch rewrites it**, and all
+ * three see last frame's point: the pose hook's world push, inside the draw at
+ * `0x0048AA02`; `RegisterForShotTest` (`FUN_00405160`), through
+ * `ActorRegisterCameraPoint` at `0x0048ADB0`; and so every other actor's
+ * `ColiTestSphereAgainstActors` (`FUN_00405B10`), which tests what was
+ * registered. The switch at `0x0048ADC4` comes after all of them.
  */
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
@@ -60,6 +68,14 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
       obj.pos.z += obj.vel.z;
     }
   }
+
+  // `DrawSkinnedModelAndShadow` (`FUN_00411090`) at `0x0048AA02`, and inside
+  // it the pose hook: `SkeletonApplyRootMotion` (`FUN_00410C50`) calls
+  // `model+0x115C` at `0x00410E93`, which `CivilianInit` fills with
+  // `PoseHookGrowAndPushOutOfWorld`. The draw is `render/`'s; the hook is
+  // gameplay, so it runs here, where the draw is -- before the script and the
+  // sphere switch, not after them.
+  PoseHookGrowAndPushOutOfWorld(obj);
 
   // The loop counter. The clip clock itself is `ActorAdvanceMotion`'s; this is
   // the part class 0x10 owns — how many more times it may come round.
@@ -91,14 +107,58 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // per-class lift from `camera/track.ts`'s `CAMERA_POINT_RISE` — so class
   // 0x10 gets its 4.0 from the same table the other two classes get theirs
   // from. What stays here is the *radius*, `obj+0x124`, which `CivilianInit`
-  // sets, and the sphere-centre switch below.
-  CivilianWriteSphereCentre(obj);
-  PoseHookGrowAndPushOutOfWorld(obj);
+  // sets, and the sphere-centre switch below -- which the engine makes
+  // **after** that call, so what it registers is the switch's last frame.
+  CivilianWriteSphereCentre(obj, f.host);
   CivilianCheckRemoval(obj, f.host);
   // `LAB_0048B0CE`, the tail every path out of `CivilianUpdate` falls into
   // except the two that despawn.
   if (!obj.despawned) CivilianReleaseCaptors(obj);
 }
+
+/**
+ * `sub+0x80`, the byte op 0x17 writes and `CivilianUpdate`'s switch at
+ * `0x0048ADC4` dispatches on (`CMP EAX, 3; JA` past it, then `JMP [EAX*4 +
+ * 0x0048B12C]`): which point becomes `obj+0x12C`.
+ *
+ * The three bone arms read a draw record through the camera block's
+ * view-to-world matrix, and the record offsets in the listing are **bytes**
+ * — `ADD ECX, 0x1C0` at `0x0048AE24`, `ADD EDX, 0x130` at `0x0048AE88`, `ADD
+ * EAX, 0x910` / `ADD ECX, 0x760` at `0x0048AEEB` / `0x0048AF28`. The
+ * decompiler prints them as `g_cur_actor_model + 0x70` and so on, because
+ * `g_cur_actor_model` is an `int *`, and read as byte offsets those are not
+ * records at all. Bone `n`'s record is `model + 0xA0 + n*0x90` — the
+ * `obj+0x20C + n*0x90 + 0x28` that `GameHost.boneMatrix` documents — so the
+ * four are bones 2, 1, 15 and 12.
+ */
+export enum CivilianSpherePoint {
+  /** `obj+0x12C = g_cur_actor_xform[0..2]`, the position (`0x0048ADDB`). */
+  Position = 0,
+  /** Bone 2's drawn point (`model+0x1C0`, `0x0048ADFC`). */
+  Bone2 = 1,
+  /**
+   * Bone 1's drawn point (`model+0x130`, `0x0048AE60`). **The default**:
+   * `CivilianInit` writes `MOV byte ptr [ECX+0x80], 0x2` at `0x0048A4FD`, so
+   * a civilian whose stream never runs op 0x17 is measured here.
+   */
+  Bone1 = 2,
+  /**
+   * The midpoint of bones 15 and 12 (`model+0x910`, `model+0x760`,
+   * `0x0048AEC4`), halved by `FMUL [0x004C43AC]`, `0.5`.
+   */
+  Bones15And12 = 3,
+}
+
+/** The draw records the bone arms read — see {@link CivilianSpherePoint}. */
+const SPHERE_BONE_2 = 2;
+const SPHERE_BONE_1 = 1;
+const SPHERE_BONE_15 = 15;
+const SPHERE_BONE_12 = 12;
+/** `[0x004C43AC]`, read as `0.5`: mode 3 halves the two bones' sum. */
+const SPHERE_MIDPOINT = 0.5;
+
+const _boneA = { x: 0, y: 0, z: 0 };
+const _boneB = { x: 0, y: 0, z: 0 };
 
 /**
  * The collision-sphere switch at the tail of `CivilianUpdate`: `sub+0x80` (op
@@ -107,17 +167,49 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
  * and `ColiTestSphereAgainstActors` (`FUN_00405B10`) read. It is class 0x10's
  * `ActorUpdateBoundingSphere`, not a camera point; the camera's is `obj+0x100`.
  *
- * [open] Only mode 0 is ported. Modes 1, 2 and 3 multiply the camera matrix by
- * a matrix inside the model block (`model+0x70`, `model+0x4C`, and the
- * midpoint of `model+0x244` and `model+0x1D8`) and those are not bone records
- * — they are matrices the pose leaves behind, which `game/` cannot reach.
- * Eight of the shipped streams ask for mode 1, four for mode 2, two for mode 3.
+ * Each bone arm is `MatrixStackSetTopFromArray(g_camera_blocks + camera)`,
+ * `MatrixMultiply(record)`, `MatrixGetTranslation` — the bone's origin in the
+ * world, as this frame's draw at `0x0048AA02` left it — which is what
+ * `GameHost.boneWorld` answers. A selector past 3 writes nothing (`JA
+ * 0x0048AF7D`).
+ *
+ * `[port-only]` A host that has not posed the skeleton — a headless run, or
+ * the frames before the character layer first draws it — has no record to
+ * read, and the engine never lacks one. The point falls back to the
+ * position, mode 0's answer, rather than keeping whatever was there: an
+ * unwritten sphere is the origin, and both the pose hook and every other
+ * actor's push would measure against it.
  */
-function CivilianWriteSphereCentre(obj: Actor): void {
-  if (obj.civ?.cameraPointMode !== 0) return;
-  obj.sphereCentre.x = obj.pos.x;
-  obj.sphereCentre.y = obj.pos.y;
-  obj.sphereCentre.z = obj.pos.z;
+function CivilianWriteSphereCentre(obj: Actor, host: GameHost): void {
+  const sub = obj.civ;
+  if (!sub) return;
+  const out = obj.sphereCentre;
+  switch (sub.cameraPointMode as CivilianSpherePoint) {
+    case CivilianSpherePoint.Position:
+      break;
+    case CivilianSpherePoint.Bone2:
+      if (!host.boneWorld(obj.at, SPHERE_BONE_2, _boneA)) break;
+      out.x = _boneA.x; out.y = _boneA.y; out.z = _boneA.z;
+      return;
+    case CivilianSpherePoint.Bone1:
+      if (!host.boneWorld(obj.at, SPHERE_BONE_1, _boneA)) break;
+      out.x = _boneA.x; out.y = _boneA.y; out.z = _boneA.z;
+      return;
+    case CivilianSpherePoint.Bones15And12:
+      if (!host.boneWorld(obj.at, SPHERE_BONE_15, _boneA)
+          || !host.boneWorld(obj.at, SPHERE_BONE_12, _boneB)) {
+        break;
+      }
+      out.x = (_boneB.x + _boneA.x) * SPHERE_MIDPOINT;
+      out.y = (_boneB.y + _boneA.y) * SPHERE_MIDPOINT;
+      out.z = (_boneB.z + _boneA.z) * SPHERE_MIDPOINT;
+      return;
+    default:
+      return;
+  }
+  out.x = obj.pos.x;
+  out.y = obj.pos.y;
+  out.z = obj.pos.z;
 }
 
 /**

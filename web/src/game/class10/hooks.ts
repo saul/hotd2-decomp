@@ -9,7 +9,7 @@
  * **pose hook**, installed once by `CivilianInit` (`FUN_0048A3E0`) and one of
  * only two in the whole program.
  */
-import { type Actor, ActorUpdateBoundingSphere } from "../actor";
+import type { Actor } from "../actor";
 import { ColiTestSphereAgainstFullSet, QueryGroundHeightAt } from "../coli";
 import { G } from "../globals";
 import { CivilianHook, CivilianWait } from "./ops";
@@ -84,10 +84,20 @@ export function CivilianRunFrameHook(obj: Actor, frames: number): void {
  * against the full collision set and moves the actor out along the hit normal
  * by the **whole** penetration.
  *
+ * **The sphere is the one already at `obj+0x12C`**: `LEA EDX, [ESI+0x12C]` at
+ * `0x0048D0F8`, straight into `ColiTestSphereAgainstFullSet`. Nothing in the
+ * routine writes it — it makes no call but that one — so what it tests is
+ * where `CivilianUpdate`'s switch put the point last frame. The port used to
+ * call `ActorUpdateBoundingSphere` (`FUN_00454AC0`) first, which is class
+ * 0x30's sphere, feet plus the radius plus one; a civilian's is a bone by
+ * default, so the push measured a point the engine never tests and then wrote
+ * that point over the class's own. The actor moves; the sphere does not
+ * follow it until the switch runs again.
+ *
  * The engine runs it from the pose walk; the port runs it from the update,
- * for the same reason `ActorAdvanceMotion` lives in `game/` — a hook that only
- * fires while something is drawing is a hook that a headless run and a
- * restored save both lose.
+ * at the draw's own place, for the same reason `ActorAdvanceMotion` lives in
+ * `game/` — a hook that only fires while something is drawing is a hook that
+ * a headless run and a restored save both lose.
  */
 export function PoseHookGrowAndPushOutOfWorld(obj: Actor): void {
   const sub = obj.civ;
@@ -103,7 +113,6 @@ export function PoseHookGrowAndPushOutOfWorld(obj: Actor): void {
     }
   }
   if (!(sub.wait & CivilianWait.PushOutOfWorld)) return;
-  ActorUpdateBoundingSphere(obj);
   if (!ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,
                                     obj.sphereCentre.z, obj.bodyRadius)) {
     return;

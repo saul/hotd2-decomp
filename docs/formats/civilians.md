@@ -205,7 +205,7 @@ Two consequences worth knowing, both the engine's:
 | `0x14` | `AddPickedItem` | value |
 | `0x15` | `PickHeldItem` | weighted table |
 | `0x16` | `SetRadiusRamp` | target radius, frames |
-| `0x17` | `SetCameraPointMode` | which point the shot test registers |
+| `0x17` | `SetCameraPointMode` | **[proved]** `sub+0x80`: which point `CivilianUpdate`'s tail switch (`0x0048ADC4`) writes to `obj+0x12C`, the body sphere -- 0 the position, 1 bone 2, 2 bone 1, 3 the midpoint of bones 15 and 12, each bone read as `g_camera_blocks` x its draw record (`model+0x1C0`, `+0x130`, `+0x910`/`+0x760` in bytes; the decompiler prints them as `int *` offsets). **2 is the default** (`CivilianInit`, `0x0048A4FD`). `ActorRegisterCameraPoint` at `0x0048ADB0` registers the sphere *before* the switch runs, so the shot list and the crowd push carry last frame's point, and so does `PoseHookGrowAndPushOutOfWorld`, which runs inside the draw at `0x0048AA02` |
 | `0x18` | `SetPose` | pointer to six floats |
 | `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |

@@ -618,7 +618,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
     // civilian's line goes through the player's own subtitles and voice rather
     // than out as a bare sound id.
-    this.events.on("civilian.dialogue", (d) => {
+    const playDialogue = (d: { group: number }): void => {
       const v = this.dialogue?.messages?.[String(d.group)]?.[0] ?? null;
       if (!v || !this.walker) return;
       if (v.voice) this.bgm.play(v.voice);
@@ -627,7 +627,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // evt 0x2D. It goes in the snapshot with the rest.
       this.walker.captionGroup = d.group;
       this.walker.captionFrames = v.frames;
-    });
+    };
+    this.events.on("civilian.dialogue", playDialogue);
+    // ...and the stage-3 boss's body, which makes the same call.
+    this.events.on("actor.dialogue", playDialogue);
     this.events.on("civilian.rescued", (d) => {
       this.onFeed({
         seq: -1, block: this.walker?.block ?? -1, step: -1, opIndex: -1,

@@ -216,9 +216,13 @@ export interface Boss3Block {
   extraX: number[];
   extraY: number[];
   extraZ: number[];
-  /** `+0x2F4`, `+0x360`, `+0x3CC` -- the chain's yaw anchors per bone. */
+  /**
+   * `+0x2F4`, `+0x3CC` -- the chain's yaw anchors per bone, x and z. The y
+   * between them at `+0x360` is written from a frame slot nothing
+   * initialises before bone 1 reads it, and read by no instruction; it is not
+   * carried.
+   */
   anchorX: number[];
-  anchorY: number[];
   anchorZ: number[];
   /** `+0x438`, `+0x4A4`, `+0x510` -- the chain's pitch anchors per bone. */
   anchor2X: number[];
@@ -302,7 +306,7 @@ const zeros = (): number[] => new Array<number>(BOSS3_MAX_BONES).fill(0);
 export function Boss3BlockNew(): Boss3Block {
   return {
     extraX: zeros(), extraY: zeros(), extraZ: zeros(),
-    anchorX: zeros(), anchorY: zeros(), anchorZ: zeros(),
+    anchorX: zeros(), anchorZ: zeros(),
     anchor2X: zeros(), anchor2Y: zeros(), anchor2Z: zeros(),
     boneCount: 0, weakBone: 0, jawA: 0, jawB: 0, idleCount: 0,
     attackCount: 0, idleSet: 0, eventIndex: 0, hits: 0, splashLatch: 0,
@@ -345,22 +349,53 @@ export interface Boss3Tail {
   prevRoot: Vec3;
   /** `model+0x1158` (`obj+0x12EC`) -- the per-node draw hook. */
   poseHook: Boss3PoseHook;
-  /** `model+0x64` (`obj+0x1F8`) bit 2, cleared by `Boss3HeldBystanderInit`. */
-  modelFlags: number;
-  /**
-   * `model+0x08` (`obj+0x19C`) -- the play cursor, as the sampler left it at
-   * the last draw. The routines read this, not a cursor derived afresh, which
-   * is the difference whenever a state steps the clock after its draw.
-   */
+  // -- the skinned model's words, `obj+0x194` onward. The class reads the
+  //    play cursor and the clip-ended byte as the last draw left them and
+  //    steps the frame counter itself, so the port keeps these as the engine
+  //    does rather than deriving them afresh -- see `class45/model.ts`.
+  /** `model[0]` (`obj+0x194`) -- the frame counter the class steps. */
+  modelFrame: number;
+  /** `model[2]` (`obj+0x19C`) -- the play cursor, as the sampler left it. */
   cursor: number;
+  /** `model[4]` (`obj+0x1A4`) -- the authored frame the last root delta was at. */
+  prevAuthored: number;
+  /** `model[6]` (`obj+0x1AC`) -- the authored frame, `cursor / 2`. */
+  authored: number;
+  /** `model[10]` (`obj+0x1BC`) -- the counter a blend is measured from, less one. */
+  fadeBase: number;
+  /** `model+0x30` (`obj+0x1C4`), a char -- the blend's length plus one. */
+  fadeLen: number;
+  /** `model+0x37` (`obj+0x1CB`) -- bit 0 a cross-fade, bit 5 a half frame. */
+  trackBits: number;
   /** `model+0x5D` (`obj+0x1F1`) -- the cursor had reached the play length. */
   clipEnded: number;
+  /** `model+0x44`, `+0x50` -- pose slots A and B's root translations. */
+  rootA: Vec3;
+  rootB: Vec3;
+  /** `model+0x6C` -- the root translation the last draw posed. */
+  rootNow: Vec3;
+  /** `model+0x1160` -- `SkeletonApplyRootMotion`'s baseline. */
+  rootBase: Vec3;
+  /**
+   * Bone records `+0x10..+0x18` and `+0x1C..+0x24`, three BAMS per bone:
+   * pose slots A (the outgoing pose, or a frame) and B (the incoming).
+   */
+  slotA: number[];
+  slotB: number[];
   /**
    * The bone records' rotations, `obj+0x20C + bone*0x90 + 0x04/0x08/0x0C`,
    * three BAMS per bone: what the sampler posed, and for the body's chain
    * what `Boss3ComposeBonePose` wrote over it.
    */
   boneRot: number[];
+  /**
+   * `[port-only]` -- the translation the last pose put at bone 0 (the root's
+   * height for the plain draw, the whole root for a composed head, none for
+   * the body), and whether that pose was `Boss3ComposeBonePose`'s. What
+   * `render/` needs to draw the matrices the engine stored.
+   */
+  pivot: Vec3;
+  composed: boolean;
   /**
    * The bone records' matrices' origins (`+0x28`, translation) and hit-sphere
    * centres (`+0x68`), three floats per bone. The engine keeps both in view
@@ -385,8 +420,13 @@ export function makeBoss3Tail(): Boss3Tail {
     routine: Boss3Routine.ClassHandler, subtype: 0, index: 0, counter: 0,
     camFrame: 0, camFrames: 0, unread133C: 0, blend: 0, bob: 0,
     bitePlayer: -1, prevRoot: vec3(), poseHook: Boss3PoseHook.None,
-    modelFlags: 0, cursor: 0, clipEnded: 0,
+    modelFrame: 0, cursor: 0, prevAuthored: 0, authored: 0, fadeBase: 0,
+    fadeLen: 0, trackBits: 0, clipEnded: 0,
+    rootA: vec3(), rootB: vec3(), rootNow: vec3(), rootBase: vec3(),
+    slotA: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
+    slotB: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
     boneRot: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
+    pivot: vec3(), composed: false,
     boneOrigin: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
     bonePoint: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
     cameraTracked: false, block: null,
@@ -401,12 +441,20 @@ export interface Boss3CardPiece {
 /** `Boss3IntroCardUpdate`'s task: step at `+0x1310`, frame at `+0x1320`. */
 export interface Boss3IntroCard { step: number; frame: number }
 
-/** `Boss3SparkUpdate`'s task: the actor `+0x34`, bone `+0x46`, cel `+0x44`. */
-export interface Boss3Spark { at: number; bone: number; cel: number }
+/**
+ * `Boss3SparkUpdate`'s task: the actor `+0x34`, bone `+0x46`, cel `+0x44`.
+ * `shown` is the cel this frame drew and `done` the kill it then made --
+ * `[port-only]`, because the engine draws and steps in one call and the
+ * port's draw comes after the step.
+ */
+export interface Boss3Spark {
+  at: number; bone: number; cel: number; shown: number; done: boolean;
+}
 
 /** `Boss3SplashUpdate`'s task: world point `+0x38`, kind `+0x44`, slot `+0x4C`. */
 export interface Boss3Splash {
   x: number; y: number; z: number; kind: number; slot: number;
+  shown: number; done: boolean;
 }
 
 /** `Boss3MeshBulgeUpdate`'s task: `+0x34` the step, `+0x38` the latch. */
@@ -414,6 +462,10 @@ export interface Boss3MeshBulge { step: number; stopped: number }
 
 /**
  * `Boss3PathEffectUpdate`'s task: `+0x1330` the step, `+0x1334` the row of
- * `g_boss3_path_effects`, `+0x1338` the cel.
+ * `g_boss3_path_effects`, `+0x1338` the cel. `shown`, `shownRow` and
+ * `shownAlpha` are what this frame drew (`shown` -1 for nothing).
  */
-export interface Boss3PathEffect { step: number; row: number; cel: number }
+export interface Boss3PathEffect {
+  step: number; row: number; cel: number;
+  shown: number; shownRow: number; shownAlpha: number;
+}

@@ -9,25 +9,46 @@
  *
  * It plays the **in-place** walk — `row[0]`/`row[1]`, the clips that carry no
  * root motion — so an actor waiting its turn marks time on the spot rather
- * than closing. That is the shape of a crowd in this game.
+ * than closing. That is the shape of a crowd in this game. `[proved]`, the
+ * whole routine:
+ *
+ * ```
+ * 00455699  motion = row[(obj+0x136C >> 0x15) & 1]
+ * 004556b1  sub 0 -> 1, falling through; any other sub but 1 returns
+ * 004556b9  if (obj+0x1B4 != motion) ActorSetMotionBlended(motion, rand() % 5, 10)
+ * 004556e4  TurnActorTowardCameraEye(obj, 0x40)
+ * 004556f9  if ((s8)obj+0x131D < obj+0x1358) state 1, sub 0
+ * ```
+ *
+ * Which of the pair is `ZombieStateAttackRun`'s doing: it ORs a draw from
+ * `g_wait_turn_variant` into bit 21 on the frame it sends the actor here. The
+ * port took the first baked of the two instead, which is always `row[0]`, and
+ * so never played the clip seven of the table's ten entries ask for.
  */
 import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
-import { FirstBakedOf, MotionRowOf } from "../tables";
+import { MotionRowOf } from "../tables";
 import type { Vec3 } from "../vec";
-import { ZombieSetMotionIfIdle } from "./motion_cue";
-import { MotionFade, MotionRow, ZombieState } from "./states";
+import { ActorSetMotionBlended } from "./motion_cue";
+import { MotionFade, ZombieState, ZombieWaitMotion } from "./states";
 
-/** `FUN_00409E80`'s rate here is the same literal 0x40 the hold uses. */
+/** `PUSH 0x40` at `0x004556E1`: `TurnActorTowardCameraEye`'s rate here. */
 const WAIT_TURN_RATE = 0x40;
+/** `rand() % 5` at `0x004556C9`: the spread of the wait clip's first frame. */
+const WAIT_START_SPREAD = 5;
 
 export function ZombieStateWaitTurn(obj: ZombieActor, eye: Vec3, rng: Rng): void {
+  const motion = ZombieWaitMotion(obj, MotionRowOf(obj));
   if (obj.sub === 0) obj.sub = 1;
+  else if (obj.sub !== 1) return;
 
-  ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk, MotionRow.WalkAlt),
-    rng, 5, MotionFade.Normal);
+  // The engine's own setter, behind its own test: `ActorSetMotionBlended`
+  // (`FUN_004119A0`) at `004556d9`, not `ZombieSetMotionIfIdle`.
+  if (motion !== undefined && obj.motion !== motion) {
+    ActorSetMotionBlended(obj, motion, rng.int(WAIT_START_SPREAD),
+                          MotionFade.Normal);
+  }
   TurnActorTowardCameraEye(obj, eye, WAIT_TURN_RATE);
 
   // `(s8)obj+0x131D < obj+0x1358` -- back in the allowed slice, so go again.

@@ -1674,9 +1674,11 @@ assertion behind it kept a hang alive for two sessions.
    which changes how the whole game looks. Tagged on `ActorModelScale` in
    `game/root_motion.ts`.
 
-Still `[open]`, and deliberately left so: `MotionFlag.RootMotionY`, bit `0x10`
-of the same word, has no writer anywhere that has been read — nine other classes
-write `model+0x64` and none of their values were read here. And the engine's
+`MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
+no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
+clip (`0x0044E863`), and `ApplyRootMotion` now honours it — the height store at
+`0x00410E48`. The shipped wait clip's root height is flat, so no stage moves
+differently for it. And the engine's
 wrap damper makes the applied delta `(baseline_old - root)/play_length` where
 `rootDelta` computes `(root - root[0])/frames`; both are small, neither was
 touched, they are not the same number and nothing asserts either.
@@ -2105,6 +2107,18 @@ so the stab connects because the flight put it there on that frame. And the
 difference between the four character types that share this machine is
 *data* — the behaviour set is a byte in the spawn descriptor, and `zsass`'s
 picks contain only the throw where `zstin`'s contain the climb.
+
+**State 23, the delayed pounce, is transcribed whole** (`class31/entrance.ts`,
+stage 2 block 21's pair). The port had the shape and little else: it played
+the wait as a one-shot that ran out after one cycle, left the actor shootable,
+raised `BackingOff` (`0x20000000`) where the exe raises `0x10000000`, aimed at
+the actor's own tracked height for `g_camera_eye_y`, and never raised the
+flinch veto. Now the wait loops on the ordinary track and walks, every shot in
+it ricochets, the flight ends six units in front of the eye at the eye's own
+height — `ThrowerPickLandingPoint` switches on the *state*, and nothing in the
+port had read that — and past the pounce row's hit frame the actor stops
+reacting to shots. `ThrowerLoadAttackArcScript` no longer latches the stance
+the connect reads: the exe's does not, so the swing connects on row 0's frame.
 
 **And it now dies its own death.** Class 0x31 does not use the shared stagger
 or the shared *directional* death clip — it has a four-state chain of its own,

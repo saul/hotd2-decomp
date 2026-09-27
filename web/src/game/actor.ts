@@ -76,8 +76,10 @@ export enum MotionFlag {
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
    * clear it writes back `obj+0x40` and `obj+0x48` only, with it set it writes
-   * `obj+0x44` too. Nothing in the port sets it, and no routine read so far
-   * writes it. `[open]`
+   * `obj+0x44` too (`0x00410E48`). `[proved]` Its one writer found is
+   * `ThrowerStateDelayedPounce` (`FUN_0044E830`), which raises it for its wait
+   * clip (`OR ECX, 0x10` at `0x0044E863`) and drops it when the wait ends;
+   * `ApplyRootMotion` in `game/root_motion.ts` honours it.
    */
   RootMotionY = 0x10,
   /**
@@ -121,7 +123,9 @@ export enum ActorFlag {
   /**
    * `obj+0x34` bit 8. While it is set `ThrowerShotFeedback` forces the hit
    * result to 5, so a downed thrower only ricochets — a real invulnerability
-   * window, counted down by `obj+0x133C`.
+   * window, counted down by `obj+0x133C`. `ThrowerStateDelayedPounce`
+   * (`FUN_0044E830`) holds it up for the whole of its wait instead
+   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`).
    */
   ShotImmune = 0x100,
   /**
@@ -231,7 +235,10 @@ export enum ActorFlag {
    * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
    * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
    * of the throw clip and `ZombieStateTargetMotionScript` for an entry whose
-   * mode is not negative.
+   * mode is not negative. Class 0x31's pounces raise it for the flight --
+   * `ThrowerStateLeapDown` at `0x0044B6F0`, `ThrowerStateLeapStrike` and
+   * `ThrowerStateDelayedPounce` at `0x0044E8E6` -- and not
+   * {@link BackingOff}, which is the next bit up.
    */
   Committed = 0x10000000,
   /**

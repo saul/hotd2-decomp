@@ -20019,3 +20019,41 @@ own before the grid. The port test that pins the first fails on the old read.
 3, end block 7 played through); stage 2 reaches its boss only with
 `--no-damage` -- the harness spends five credits by block 14 -- and with it
 end block 35 goes 300 → -10 and the script leaves the block for stage 3.
+
+## 2026-09-27 -- class 0x31 state 23, the delayed pounce, read against the listing
+
+`ThrowerStateDelayedPounce` (`FUN_0044E830`) re-ported from the disassembly;
+the roll turn is the turn-routines branch's and was left alone here. What the
+port had wrong, all `[proved]`:
+
+* The wait clip was a one-shot. The exe calls `ActorSetMotionBlended`
+  (`0x004119A0`) directly, so it is the ordinary motion and loops for the
+  whole wait -- its root walks the actor. It also raises `obj+0x1F8` bit
+  `0x10`, which is `MotionFlag.RootMotionY` and had no known writer; that is
+  the height store at `0x00410E48`, now honoured by `ApplyRootMotion`.
+* `obj+0x34 |= 0x100` (`ShotImmune`) for the wait was missing, so the pair
+  could be knocked down before they moved.
+* `ActorFlag.BackingOff` (`0x20000000`) for the exe's `0x10000000`
+  (`Committed`). `ThrowerStateLeapDown` and `ThrowerStateLeapStrike` make the
+  same substitution; they were left to their owners and reported.
+* The flight aimed at `obj.lookAt.y`, the actor's own tracked point, for
+  `g_camera_eye_y`.
+* The `obj+0x34 |= 0x2000` raise past the live row's hit frame was not there.
+* **`ThrowerPickLandingPoint` switches on the state** (`obj+0x1310`, at
+  `0x0044CBB1`): states 22 and 23 take -350 px, and 23 unprojects at -6.0. The
+  annotation already said so; the port ignored it and had no sideways offset
+  either. State 23 was landing 9.5 units short.
+* `ThrowerLoadAttackArcScript` wrote `obj+0x1364`. The exe's does not; the only
+  store to that word on a thrower is `ThrowerStateLeapDown`'s at `0x0044B6FB`.
+
+**Wrong turns.** I first wrote that seven `+0x1364` instructions in class
+0x31's range held one store. There are five stores: `SpawnThrownWeapon`'s
+three go through `ESI`, the projectile, and `FUN_00450930`'s through an object
+it has just allocated. The claim is now "one store on a thrower". And the first
+port test pinned the flinch veto to cursor 67. The port shows 68, because
+`ActorArcStep`'s `playStage` starts stage 2 on its start frame with no fade
+hold, and the state never sees 67. That is the arc's approximation, not state
+23's, so the test now asserts "past 66" and the hold is reported.
+
+Checks: 29 new assertions in `port.test.ts`, 2223 passing. Mutating the veto
+to read `obj.thr.stance` fails it at cursor 63.

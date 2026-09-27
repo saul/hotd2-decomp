@@ -128,8 +128,8 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // (`00410cf8`..`00410d29`), which is every frame of a fade: nothing moves
     // the actor until the clip is playing again, and the first step is from
     // the held start frame to the one after it.
-    const d = fading ? { x: 0, z: 0 } : rootDelta(base, wasBase, f);
-    ApplyRootMotion(obj, d.x, d.z);
+    const d = fading ? { x: 0, y: 0, z: 0 } : rootDelta(base, wasBase, f);
+    ApplyRootMotion(obj, d.x, d.z, d.y);
     obj.rootFrame = f;
   } else {
     // A one-shot owns the body, and the base clock keeps running underneath
@@ -158,7 +158,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // immediately.
       const f = authoredFrameHeld(act.ticks, am.fps, am.frames);
       const d = rootDelta(am, wasAct, f);
-      ApplyRootMotion(obj, d.x, d.z);
+      ApplyRootMotion(obj, d.x, d.z, d.y);
       obj.rootActionFrame = f;
       if (act.ticks >= ticksOfAuthoredFrame(am.frames, am.fps)) {
         if (act.loop) {

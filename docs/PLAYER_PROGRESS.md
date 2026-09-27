@@ -1781,9 +1781,7 @@ Three readings from these that are worth keeping:
 
 **What is not ported**, and each is declared where it lives: the owl's body
 chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has; and the frog's
-head-look fix-up and its actor-versus-actor push, whose transformed point is
-`[open]` between view and world space.
+per actor) and the four per-sub-type landings its corpse has.
 
 **Their effects are.** The owl sheds forty feathers when it dies and eight
 on every strike, and leaves blood at its camera-space point; the fish leaves a
@@ -1797,6 +1795,24 @@ surface ring the port had them make: all three call `SpawnRingEffectAtPose`
 (`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
 ground impact ring and water splash are ported and wait on the landings, which
 are their only callers.
+
+The frog's two gaps, which this list used to name, are closed. Its **turn fix-up** — not a
+head look: after each 45° pass the engine turns bone 1, the node the whole of
+`frog.bin` hangs from, back by the turn it just put into the yaw, so the
+blend out of the turn clip starts from the pose on screen — rides the fade's
+snapshot as `Actor.fadeFrom.records`, the mechanism class 0x19's turn already
+uses. Its **actor-versus-actor push** is ported, and its point was never in
+doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
+view-space draw record, so the product is bone 1 in the world. The push is
+scaled by bone 1's travel between two readings of that record through one
+camera block — relative to the camera — and the pushed point is the sphere
+the frog publishes; `ClassHandler.ownsSphereCentre` keeps
+`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+Reading the two states whole also found four wrong ports inside them: the
+wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
+was inverted; both launch frames run on into the flight and halve the turn
+that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
+over a fade of 2, where the port had played it from the start over 61.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
@@ -4288,6 +4304,41 @@ modelled.
 `DrawSkinnedModelAndShadow` does draw the shadow (`ActorDrawShadow`, past the
 no-return pop); the port does not draw a character's shadow yet, and
 `ActorDrawShadow`'s gate is ported for when it does.
+
+### A stacked prop shatters, and a falling container breaks in two
+
+Both were written off as "render-only effects nothing in `game/` observes" and
+let go with an event. Both draw `rand()`s — 75 for a shatter, 10 for the
+container's pieces — so the port ran the rest of any stage in which one broke
+on a different random stream from the game. They are objects now, stepped
+where the engine steps them:
+
+* **The shatter** is one `0x2B4` object with fifteen pieces
+  (`game/class41/shatter.ts`, `G.g_prop_shatters`, drawn by
+  `render/prop_shatter.ts`). The pieces start off `obj+0x2E4`, the matrix the
+  prop's last draw stored — so `BreakablePropUpdate`'s draw composition moved
+  into the port (`drawMatrix`, with the view it was drawn under in
+  `drawView`), and the renderer now places a group prop with it. That fixed a
+  second thing: a falling or settled prop is drawn under
+  `Translate(0, -3.770148, 0)`, which the renderer had left out, so a toppling
+  prop jumped up by half a level the frame it started to fall.
+* **The container's pieces** are two, not three (the loop runs for 1 and -1),
+  0x378 objects in the prop pool (`PropFamily.ContainerFragment`,
+  `game/class44/container_fragment.ts`) that tumble, land, blink and go after
+  181 frames. `FallingContainerGroundContact` takes the hull as an argument
+  now, as the engine's does, and has the scene-1 block-0x12 wall it was
+  missing.
+
+Around them, in the same two routines: the rattle's two `rand()`s a frame are
+drawn by the port rather than by the renderer's own generator; group 4 breaks
+on `g_script_flags[0x65]` and never on a shot; the hit gate's scene-1 block
+0x11 hold (flag 0x28) and the scene-1 `0x77` sweep are in; a crack or a knock
+turns the prop to `g_camera_block_yaw_bams`; the ground-level destroy no longer
+zeroes `+0x324` and does hand `+0x11C` the lifetime byte; the container
+despawns on camera path `0x2F` frame `0x96`, its knock throws the
+one-and-a-half-size impact instead of a spark, and its story item comes out
+half a unit above the floor. The bundle carries both slot tables, the offsets
+and angles, and the 55-point piece hull.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

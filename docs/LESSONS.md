@@ -737,3 +737,15 @@ my name. **Make a subdirectory named for your task and keep every scratch
 file in it**, and treat a name at the scratch root as something another agent
 may already own. It is L28 and L36 pointed at the one directory that is
 outside every worktree by design.
+
+**L52 -- An arm that bumps the substate and does not return runs the next arm
+in the same frame.** Class 0x11's two launch substates end `INC byte ptr
+[EAX+5]` and then carry straight on into the code the jump table gives the
+next substate -- `0x0043B03E` into `0x0043B044`, `0x0043B6F2` into
+`0x0043B6F7` -- so the launch frame also halves the turn still owed. The port
+had each arm end in `return`, which is what a `switch` in TypeScript wants and
+what reading the arms one at a time suggests, and every hop turned one halving
+short for as long as it existed. The tell is in the addresses: an arm whose
+last instruction is not a `RET`, a `JMP` to the epilogue or a `JMP` elsewhere
+falls through, and the jump table says where to. Check each arm's last
+instruction against the next arm's first address before writing its `return`.

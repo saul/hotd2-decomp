@@ -20237,3 +20237,121 @@ kills the room through the death states for exactly this reason.
 * The scratch directory is shared with sibling agents: two of my scratch files
   were overwritten by another agent's between writing and rereading. Scripts
   now live in a subdirectory of their own.
+
+## 2026-09-27 -- the shatter and the container's pieces are objects
+
+`BreakablePropSpawnShatter` (`FUN_00465170`) and the falling container's
+destroy arm were both ported as an event and a despawn, under a divergence
+note that called their pieces render-only. Read from the disassembly, not the
+pseudocode: Ghidra ends `BreakablePropSpawnShatter`,
+`BreakablePropShatterUpdate` (`FUN_004653B0`, named here) and
+`BreakablePropUpdate` at a `MatrixStackPop` it takes for no-return (L37), so
+two of the three loops and every draw block's tail were invisible.
+
+What the engine does: one `0x2B4` object carries fifteen pieces placed off
+`obj+0x2E4` -- the matrix the prop's last draw `MatrixStore`d, view included --
+75 `rand()`s at the spawn; and the container throws **two** 0x378 pieces
+(`FallingContainerFragmentUpdate`, `FUN_0046AD20`, named here), ten `rand()`s.
+`FUN_0046B040` is one routine taking `(obj, hull, count)` for both, named
+`FallingContainerGroundContact` to match the port.
+
+**What the old reading got wrong**, besides dropping the objects: "three
+fragments" in the TSV, the port and `spawns.md` -- the loop is `1, -1` and
+stops at `-3`. The `[open]` hit gate over "three script globals that have not
+been read out" was `g_scene_index`, `g_evt_block_index` and
+`g_script_flags[0x28]`, all already named. The ground-level destroy wrote
+`+0x324` where the engine writes `+0x294`. The rattle's `rand()`s were drawn by
+the renderer. The renderer left out `Translate(0, -3.770148, 0)` on falling and
+settled props. And three things were missing outright: group 4's script break
+on `g_script_flags[0x65]` (a second caller of the shatter), the scene-1 `0x77`
+sweep in both routines, and the container's camera cue and wall.
+
+**Wrong turn.** The first port test for piece 2's angles asserted the Euler
+triple `(0, -26260, 0)`; `MatrixToEulerZYX` returns the half-turn-flipped
+spelling `(-0x7FFF, -6508, -0x8000)` of the same rotation. The check compares
+rotation matrices now. And the first lifetime checks looped on the constants
+under test, so a mutation of either lifetime passed; they are literals.
+
+`[open]`: `FUN_004702E0`, a second caller of the shatter that forces group 99
+(no floor), is not in `g_class41_updates`; what allocates it is unread.
+
+## 2026-09-27 -- the frog's turn fix-up and push-out, and four wrong ports beside them
+
+Class 0x11 declared two things unported: a "head-look fix-up" after each 45°
+turn, and `FrogPushOutOfActorCollision`, whose point was called undecided
+between view and world space because "the matrix chain says one and the use
+says the other". Both notes were wrong about the code, and reading the two
+turning states whole found four more wrong ports inside them.
+
+**The push-out's point is world space.** The chain is `MatrixStackPush(0);
+MatrixStackSetTopFromArray(g_camera_blocks[g_camera_index]);
+MatrixMultiply(part+0x130); MatrixGetTranslation` (`0x0043A504`..`0x0043A563`).
+`g_camera_blocks` is the camera block's `+0x40` matrix, which `globals.tsv`
+already had as view-to-world, and `part+0x130` is bone 1's draw record --
+records are `0x90` apart from `part+0x78`, the matrix at `+0x28` -- which
+`SkeletonEmitNode` stores under the camera, so in view space. View-to-world
+times view is world; `ActorShiftToHoldBone1Position` reads the identical chain
+the same way. The note had taken `g_camera_blocks` for world-to-view. The rest,
+from the listing with its FPU operands: skipped in state 6 but the point still
+written; `ColiTestSphereAgainstActors(point, obj+0x128)`; on a hit the push is
+`g_coli_hit_depth` times 0.05 below 0.1 of travel, times the travel times 0.3
+up to 0.6, times 0.3 above, added along the normal's x and z to both the
+position and the point; the point goes to `obj+0x12C` either way. The travel
+is measured from `0x007DCBB8`, now `g_frog_bone1_on_entry`, which `FrogUpdate`
+fills before any state runs from the same record through the same camera
+block -- one writer and one reader, by xref and by byte search. So the travel
+is between two readings of one record through one camera, the last draw's and
+this one's: bone 1's motion relative to the camera, not in the world.
+
+**The fix-up is not a head look.** `frog.bin`'s bone 1 is the node every other
+bone hangs from, and its turn clips carry their 45° in the root record (bone
+0's ry, 32767 to -24577 for `0x142`). After a pass the state adds the turn to
+the yaw and rewrites bone 1's angles as `MatrixToEulerZYX(R0⁻¹ RotY(-turn) R0
+R1)` -- there is no `MatrixDecomposeEuler`. Every draw rewrites those angles
+(`FUN_00411700`, now `SkeletonPoseNode`, stores all three of its arms at
+`record+0x04` -- the decompiler shows the fade arm returning early, the listing
+falls through to the store), so the rewrite survives only when the blend to the
+next clip snapshots it, which is exactly when the turn is done. The port
+already had that snapshot: `Actor.fadeFrom.records`, written for class 0x19's
+turn. Class 0x30 has no counterpart; neither Euler decomposition is called
+from a class-0x30 routine, so the note's "the same gap stops class 0x30's" was
+not so.
+
+**Four wrong ports in the same two routines**, each now pinned by a check that
+fails without its fix:
+
+* `0x004AD0B0` is `acos`, now `CrtAcos`: `atan2(sqrt((1+x)(1-x)), x)`, with
+  `FLDZ` at +1 and `FLDPI` at -1. The port had `asin`, marked likely because
+  asin "vanishes at the boundary" -- a reason about the result, not the code.
+* State 1's middle heading band was inverted: `[0x004C4D0C]` is -0.25, and the
+  frog between the two quarter lines gets the full `0x3000` window.
+* Both launch substates bump the substate and run on into substate 3's code
+  (`0x0043B03E`, `0x0043B6F2`), so the launch frame halves the owed turn too.
+  The port returned. That is now `L52`.
+* The leap's recovery is `ActorSetMotionBlended(0x13E, 0x3D, 2)`: the third
+  argument is the start cursor and the fourth the fade. The port had read a
+  61-frame fade from cursor 0, so the frog replayed its take-off.
+
+**What the port does, and how.** The draw half of `FrogDrawAndCycleBone2Slot`
+stores bone 1's record in view space on the frog's tail (`bone1View`) from the
+host's posed bone through this frame's camera; `FrogUpdate` and the push-out
+read it back through `viewPoint`, the camera block's view-to-world. The pose
+is the renderer's, so the record is the bone as last drawn -- the reading
+`ActorRegisterCameraPoint` takes. `ColiTestSphereAgainstActors` re-derives
+every other actor's sphere with class 0x30's formula; a new
+`ClassHandler.ownsSphereCentre` keeps the frog's published point. Classes
+0x31, 0x33 and 0x10 also write their own sphere and are still overwritten
+there; that is the shared routine's, not this change's.
+
+**Wrong turns.** A first draft named the constant and helpers "body" because
+bone 1 is what the corpse model replaces; that is naming by resemblance, and
+they are `FROG_BONE1` and `FrogBone1World` now.
+
+**Next actions.**
+
+* `ColiTestSphereAgainstActors`'s re-derivation should honour every class
+  that publishes its own `obj+0x12C` (0x31, 0x33, 0x10), or walk the
+  registered list as the engine does.
+* The death state plays `ActorSetMotionBlended(0x13F, 0, 2)` after writing
+  `obj.motion` itself, so the port's blend sees no change and cuts; and its
+  `SpawnGroundRingEffect` is not called. Neither was read for this.

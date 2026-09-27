@@ -55,6 +55,10 @@ export const CHAR_TYPE_RULES: Record<number, CharTypeRule> = {
   // cannot be answered.
   0x21: ["desc24"],
   0x22: ["literal", 0x45],       // FUN_0049B0D0 stores 0x45
+  // `Class23Init` (`FUN_0048FD90`): `MOV word ptr [..+0x60], 0x44` at
+  // `0x0048FDD9`. The nested descriptor's own `tail+0x00` holds 0x44 as well
+  // and is never read.
+  0x23: ["literal", 0x44],
   0x24: ["tail", 0x04, "i8"],    // set-piece prop: tail+4 -> obj+0x1F4
   0x25: ["tail", 0x00, "i8"],    // scripted humanoid
   0x2d: ["literal", 0x4c],       // FUN_00426A70 stores 0x4C

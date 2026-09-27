@@ -100,5 +100,12 @@ export function ActorUpdateSuppressedBones(obj: Actor): void {
       mask |= 1 << PELVIS_BONE;
     }
   }
+  // `AssetDrawSlot` (`FUN_00418560`) opens `if (param_1 == 0) { NoOpStub();
+  // return; }`: a bone whose draw record holds slot 0 draws nothing. The
+  // record is `obj.boneSlot`'s override when there is one; the skeletons the
+  // bundle carries never author a 0.
+  for (const [bone, slot] of Object.entries(obj.boneSlot)) {
+    if (slot === 0) mask |= 1 << Number(bone);
+  }
   obj.suppressedBones = mask;
 }

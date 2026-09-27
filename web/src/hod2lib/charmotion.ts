@@ -259,6 +259,12 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // placement names -- see `game/class46/`.
   0x46: ["literal", 0x407],
   0x14: ["literal", 33],
+  // `Class22Init` (`FUN_0049B0D0`): `MOVSX ECX, word ptr [EBP + 0x2]; MOV
+  // [EDI + 0x20], ECX` at `0x0049B11C` -- the clip is `tail+0x02`, 0x415 for
+  // the stage-1 cameo and 0x40B for both fights.
+  0x22: ["param", 0x02, "i16"],
+  // `Class23Init` (`FUN_0048FD90`) seats the literal 0x38D at `0x0048FDDF`.
+  0x23: ["literal", 0x38d],
   // `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same
   // shape as class 0x19's: `MOV dword ptr [EDI + 0x20], 0x3E6`
   // (`c74720e6030000`) at `0x00451747` with `EDI = obj+0x194`, so

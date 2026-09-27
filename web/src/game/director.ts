@@ -638,9 +638,9 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {
-      // ...unless the class steps its own, at the instructions the engine
-      // does -- see `ClassHandler.ownsMotionClock`.
-      if (!g_class_handlers[obj.cls]?.ownsMotionClock) {
+      // ...unless the class steps `obj+0x194` itself, where the engine does:
+      // see `ClassHandler.advancesOwnMotion`.
+      if (!g_class_handlers[obj.cls]?.advancesOwnMotion) {
         ActorAdvanceMotion(obj, dt);
       }
       // `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), which the engine asks

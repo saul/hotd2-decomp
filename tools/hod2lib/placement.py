@@ -395,6 +395,12 @@ class Placement:
     #: Class 0x14's tail -- the stage-2 boss's state, route quad and despawn
     #: cue; see :func:`characters.class14_tail`.
     class14: dict | None = None
+    #: Class 0x22's tail -- JUDGMENT's flier; see
+    #: :func:`characters.class22_tail`.
+    class22: dict | None = None
+    #: Class 0x23's tail -- JUDGMENT's walker; see
+    #: :func:`characters.class23_tail`.
+    class23: dict | None = None
     #: Class 0x45's descriptor byte -- ``{subtype}``, ``desc+0x25``, which
     #: picks which of six inits the stage-3 boss's actor runs; see
     #: :func:`characters.class45_tail`.
@@ -487,6 +493,10 @@ class Placement:
             d["class53"] = self.class53
         if self.class14:
             d["class14"] = self.class14
+        if self.class22:
+            d["class22"] = self.class22
+        if self.class23:
+            d["class23"] = self.class23
         if self.class45:
             d["class45"] = self.class45
         if self.class33:

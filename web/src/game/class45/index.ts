@@ -200,7 +200,7 @@ export const Boss3Handler: ClassHandler = {
   ownsShotResult: true,
   // Every `INC dword ptr [model]` in the class sits behind a state test --
   // see `class45/model.ts`.
-  ownsMotionClock: true,
+  advancesOwnMotion: true,
   // `RegisterForCameraTracking` (`FUN_00408EC0`) is called by a fighting
   // head's tail at `0x00421871`, and by nothing else in the class.
   tracksCamera: (obj) => obj.cls === SpawnClass.Boss3

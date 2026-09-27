@@ -13,7 +13,7 @@
  * them**, after it may already have stepped the counter for the next frame.
  * A cursor derived afresh at the read is one frame out on exactly the tests
  * that fire cues (state 4's idle change, the death sounds at cursor 0x4B and
- * 0x70). So the class owns its clock (`ClassHandler.ownsMotionClock`), and
+ * 0x70). So the class owns its clock (`ClassHandler.advancesOwnMotion`), and
  * the model's words live on the actor's tail at their offsets:
  *
  * * `Boss3ModelStep` is the `INC dword ptr [model]` every routine writes.

@@ -221,6 +221,10 @@ __all__ = [
     "class14_tail",
     "class45_tail",
     "CLASS14_MOTIONS",
+    "class22_tail",
+    "class23_tail",
+    "CLASS22_MOTIONS",
+    "CLASS23_MOTIONS",
     "DEATH_BACK",
     "DEATH_FRONT",
     "DEATH_LEFT",
@@ -635,6 +639,93 @@ def class14_tail(rec) -> dict:
 CLASS14_MOTIONS: tuple[int, ...] = tuple(range(21, 59))
 
 
+#: Every clip JUDGMENT's flier names, 0x408..0x416, and its walker's,
+#: 0x383..0x394 -- all in ``mot/boss1.bin``. Twin of ``game/class22/records.ts``
+#: and ``game/class23/records.ts``.
+CLASS22_MOTIONS: tuple[int, ...] = tuple(range(0x408, 0x417))
+CLASS23_MOTIONS: tuple[int, ...] = tuple(range(0x383, 0x395))
+
+#: ``[port-only]`` -- the address the port's sub-actor row takes: the flier's
+#: own with bit 29 set. Twin of ``Class22SubActorAt``.
+CLASS22_SUBACTOR_AT_BIT = 0x20000000
+
+
+#: JUDGMENT's three character types: the walker, the flier, its sub-actor.
+JUDGMENT_CHAR_TYPES = frozenset({0x44, 0x45, 0x46})
+
+
+def judgment_build(prog, stage, tables, ct: int, fallback: str | None):
+    """One of JUDGMENT's types, built from the file the script loads it from.
+
+    A whole-file load (opcode 0x52) makes a file's models resident in its
+    slots (``FUN_00418E40``/``FUN_00418EC0``), and stages 1 and 5 load
+    ``boss1q``/``boss1z``/``boss1z_wing`` -- never ``char_adv04.bin``, the
+    exe's first listing for the same slots. The walker's models differ
+    between the two. Twin of ``characters.judgmentBuild``.
+    """
+    want = [n["slot"] for n in tables.character_skeleton(ct) if n["slot"]]
+    file = own = None
+    for blk in prog.blocks:
+        for step in blk.steps:
+            for op in step.ops:
+                if file is not None or op.opcode != 0x52:
+                    continue
+                f = op.detail.get("file")
+                if not isinstance(f, str):
+                    continue
+                lst = tables.pol_file_slots(f)
+                if lst and all(sl in lst for sl in want):
+                    file, own = f, lst
+    use = file or fallback
+    if use is None:
+        return None
+    built = build(stage, tables, ct, use)
+    if built is not None and own is not None:
+        built.own_slots = {sl: k for k, sl in enumerate(own)}
+    return built
+
+
+def class22_tail(rec) -> dict:
+    """Class 0x22's tail -- JUDGMENT's flier, as `Class22Init` reads it.
+
+    ``+0x01`` the variant, ``+0x02``/``+0x04`` the first clip and counter,
+    ``+0x06``/``+0x08`` the despawn cue, ``+0x0A``/``+0x0C``/``+0x0E`` the
+    hit points, the stage threshold and the phase-1 floor, and ``+0x10`` --
+    for variants 1 and 2 only -- the pointer to the nested class-0x23
+    descriptor, as its evt offset. Twin of ``characters.class22Tail``.
+    """
+    variant = rec.param(0x01, "i8") or 0
+    fights = variant in (1, 2)
+    ptr = rec.param(0x10, "u32") if fights else None
+    hp = rec.param(0x0A, "i16")
+    return {
+        "variant": variant,
+        "clip": rec.param(0x02, "i16") or 0,
+        "frame": rec.param(0x04, "i16") or 0,
+        "despawn_path": rec.param(0x06, "i16") or 0,
+        "despawn_frame": rec.param(0x08, "i16") or 0,
+        "hp": -1 if hp is None else hp,
+        "hp_stage": (rec.param(0x0C, "i16") or 0) if fights else 0,
+        "phase1_floor": (rec.param(0x0E, "i16") or 0) if fights else 0,
+        "companion_at": (rec.evt.to_offset(ptr)
+                         if ptr and rec.evt is not None else None),
+        "sub_actor_at": rec.offset | CLASS22_SUBACTOR_AT_BIT,
+    }
+
+
+def class23_tail(rec) -> dict:
+    """Class 0x23's tail -- JUDGMENT's walker: the subtype, the despawn cue,
+    and the descriptor's own position and angles. Twin of
+    ``characters.class23Tail``."""
+    return {
+        "subtype": rec.param(0x01, "i8") or 0,
+        "despawn_path": rec.param(0x06, "i16") or 0,
+        "despawn_frame": rec.param(0x08, "i16") or 0,
+        "pos": list(rec.pos),
+        "angles": list(rec.orient),
+    }
+
+
 def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                       pose_motion: int | None = None):
     """Characters, their placements, and glTF rig entries for the geometry.
@@ -711,6 +802,28 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                 "desc_flags": kid.desc_flags,
                 "civilian_child": rec.offset,
             })
+
+    # JUDGMENT's walker: the class-0x23 descriptor nested at the flier's
+    # tail+0x10, which `Class22RideInAndJoinFight` / `...DescendAndJoinFight`
+    # hand to `SpawnFromDescriptor` themselves. Twin of the TS resolver.
+    for rec in list(recs.values()):
+        if rec.cls != 0x22 or (rec.param(0x01, "i8") or 0) not in (1, 2):
+            continue
+        w = rec.param(0x10, "u32")
+        off = prog.evt.to_offset(w) if w else None
+        if off is None or off in recs or off > len(prog.evt.raw) - 0x24:
+            continue
+        kid = evtlib.read_spawn(prog.evt, off, 0x0B)
+        if kid.cls != 0x23:
+            continue
+        recs[off] = kid
+        by_at.setdefault(off, {
+            "at": off, "class": kid.cls, "flags": kid.init_flags,
+            "pos": list(kid.pos), "yaw_deg": kid.yaw_deg,
+            "orient": list(kid.orient), "hp": kid.hp,
+            "desc_flags": kid.desc_flags,
+            "nested_in": rec.offset,
+        })
 
     chars: dict[int, Character] = {}
     placements: list[Placement] = []
@@ -899,6 +1012,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class52 = class52_tail(rec) if sp["class"] == 0x52 else None
         class53 = class53_tail(rec) if sp["class"] == 0x53 else None
         class14 = class14_tail(rec) if sp["class"] == 0x14 else None
+        class22 = class22_tail(rec) if sp["class"] == 0x22 else None
+        class23 = class23_tail(rec) if sp["class"] == 0x23 else None
         class45 = class45_tail(rec) if sp["class"] == 0x45 else None
         # **Gated on the selector, not on the class.** Class 0x33 is
         # eleven objects behind one id and these two blocks are two of
@@ -987,6 +1102,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class52=class52,
             class53=class53,
             class14=class14,
+            class22=class22,
+            class23=class23,
             class45=class45,
             class33=class33,
             class33_push=class33_push,
@@ -994,7 +1111,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         if motion is None:
             continue                      # marker only -- see the module note
         if res.char_type not in chars:
-            built = build(stage, tables, res.char_type, res.asset_file)
+            built = (judgment_build(prog, stage, tables, res.char_type,
+                                    res.asset_file)
+                     if res.char_type in JUDGMENT_CHAR_TYPES else
+                     build(stage, tables, res.char_type, res.asset_file))
             if built is None:
                 continue
             chars[res.char_type] = built
@@ -1048,6 +1168,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
         if sp["class"] == 0x14:
             entry_clips += list(CLASS14_MOTIONS)
+        # JUDGMENT's two classes -- see `CLASS22_MOTIONS`.
+        if sp["class"] == 0x22:
+            entry_clips += list(CLASS22_MOTIONS)
+        if sp["class"] == 0x23:
+            entry_clips += list(CLASS23_MOTIONS)
         # The stage-3 boss's clips, all three of its skeletons' -- see
         # `BOSS3_CLIPS`.
         if sp["class"] == 0x45:

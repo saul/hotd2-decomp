@@ -82,6 +82,8 @@ const SPLASH0_AT: readonly [number, number, number] =
   [-1181.71, -18.908, -1508.41];
 const SPLASH0_YAW = 0x18e3;
 const SPLASH0_SCALE = 0.6;
+/** `PUSH 0x17C8` -- `boss1q.bin` 94, the walker's landing ring. */
+const LANDING_RING_SLOT = 0x17c8;
 
 /** Scratch matrices for the carrier draws; the layer is single-threaded. */
 const _m = new Matrix4();
@@ -103,6 +105,34 @@ function mRotZ(m: Matrix4, b: number): void {
 }
 function mScale(m: Matrix4, x: number, y: number, z: number): void {
   m.multiply(_t.makeScale(x, y, z));
+}
+
+/**
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s alpha, on a clone. The clone
+ * shares its template's materials, so it gets its own before its opacity is
+ * touched -- and only once something has faded it, so an opaque draw keeps
+ * sharing.
+ */
+function setDrawAlpha(c: Object3D, alpha: number): void {
+  if (alpha >= 1 && c.userData.drawAlpha === undefined) return;
+  if (c.userData.drawAlpha === undefined) {
+    c.traverse((o) => {
+      const mesh = o as Mesh;
+      if (!mesh.material) return;
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((x) => x.clone()) : mesh.material.clone();
+    });
+  }
+  c.userData.drawAlpha = alpha;
+  c.traverse((o) => {
+    const mesh = o as Mesh;
+    const mats = !mesh.material ? []
+      : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      mat.transparent = true;
+      mat.opacity = Math.max(0, Math.min(1, alpha));
+    }
+  });
 }
 
 /**
@@ -445,6 +475,7 @@ export class SlotModelLayer implements System<RenderContext> {
 
     this.drawCarrierEffects(seen);
     this.drawPropStrips(seen);
+    this.drawLandingRings(seen);
 
     for (const [key, l] of this.extras) {
       if (seen.has(key)) continue;
@@ -468,7 +499,7 @@ export class SlotModelLayer implements System<RenderContext> {
    * on, and placed by the matrix the routine composed.
    */
   private extra(key: string, slot: number, m: Matrix4,
-                seen: Set<number | string>): void {
+                seen: Set<number | string>, alpha = 1): void {
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
       live?.node.removeFromParent();
@@ -481,6 +512,7 @@ export class SlotModelLayer implements System<RenderContext> {
     }
     live.node.matrix.copy(m);
     live.node.visible = true;
+    setDrawAlpha(live.node, alpha);
     seen.add(key);
   }
 
@@ -558,6 +590,24 @@ export class SlotModelLayer implements System<RenderContext> {
   }
 
   /**
+   * `Class23LandingRingUpdate` (`FUN_00491700`)'s draw, on the frames
+   * `game/class23/` says it drew: `T(pos) RotY(yaw) Scale(e)` and slot
+   * `0x17C8` at `1.0 - fade`, all of it off the ring's record.
+   */
+  private drawLandingRings(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.dead || a.cls !== SpawnClass.JudgmentCompanion) continue;
+      const r = a.companion.ring;
+      if (!r || !r.drawn) continue;
+      _m.identity();
+      mTranslate(_m, r.x, r.y, r.z);
+      mRotY(_m, r.yaw);
+      mScale(_m, r.scale.x, r.scale.y, r.scale.z);
+      this.extra(`ring:${a.at}`, LANDING_RING_SLOT, _m, seen, 1.0 - r.fade);
+    }
+  }
+
+  /**
    * One group holding every model in a **chain** class's draw, placed.
    *
    * The group is the actor root; each child carries the matrix
@@ -613,29 +663,8 @@ export class SlotModelLayer implements System<RenderContext> {
       c.visible = true;
       if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
       // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the one fading draw in a
-      // chain, class 0x40's ripple. The clone shares its template's
-      // materials, so it gets its own before its opacity is touched.
-      const alpha = (parts[i] as Partial<HordePart>).alpha ?? 1;
-      if (alpha < 1 || c.userData.hordeAlpha !== undefined) {
-        if (c.userData.hordeAlpha === undefined) {
-          c.traverse((o) => {
-            const mesh = o as Mesh;
-            if (!mesh.material) return;
-            mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((x) => x.clone()) : mesh.material.clone();
-          });
-        }
-        c.userData.hordeAlpha = alpha;
-        c.traverse((o) => {
-          const mesh = o as Mesh;
-          const mats = !mesh.material ? []
-            : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const mat of mats) {
-            mat.transparent = true;
-            mat.opacity = Math.max(0, Math.min(1, alpha));
-          }
-        });
-      }
+      // chain, class 0x40's ripple.
+      setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? 1);
     }
     while (live.node.children.length > parts.length) {
       live.node.children.pop();

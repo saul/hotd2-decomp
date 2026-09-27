@@ -98,6 +98,18 @@ import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
 import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
   OwlUpdateAndResolveShot } from "../src/game/class43";
 import {
+  OWL_RING_PULSE_FRAMES, OwlEffectsTick, OwlGroundRingPhase,
+  OwlSpawnGroundImpactRing, OwlSpawnWaterSplashFlipbook,
+} from "../src/game/effects/owl";
+import {
+  BloodCloudTickInScreenSpace, FISH_BLOOD_LAST_SLOT, FISH_SPLASH_LAST_SLOT,
+  FishEffectsTick, type FishBloodCloud,
+} from "../src/game/effects/fish";
+import {
+  RING_EFFECT_SPREAD_FRAMES, RingEffectPhase, RingEffectsTick,
+  SpawnRingEffectAtPose,
+} from "../src/game/effects/ring_effect";
+import {
   HordeFormation, HordeKind, HordeMemberAt, HordeState, HordeUpdate,
   PlaceHorde, SubModelAdvanceClock, SubModelBlendToMotion, SubModelSetMotion,
   HORDE_CHAR_TYPE, HORDE_CLIP_CRAWL, HORDE_CLIP_DEATH, HORDE_CLIP_LEAP,
@@ -16868,6 +16880,305 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     }
     check("the run-in's pitch closes on 0x3000 rather than running away",
           rising && held > 0 && held <= 0x3000, `${held}`);
+  }
+
+  // -- the owl's and the fish's effect tasks -----------------------------------
+  //
+  // Every one of them is a task of its own that runs on the frame it is made,
+  // after its maker, and every one of them ENDS -- the kills are past a
+  // `MatrixStackPop` the decompiler stops at, which is what the port's old
+  // note ("none of the three updates has a termination") was reading.
+  {
+    // The death: blood at the owl's camera point, forty feathers, and the
+    // corpse's yaw still steered on the frame it dies.
+    const rng = new Rng(53);
+    scene(0, rng);
+    G.g_players_in_play = 2;
+    check("the effect tests run in play", G.g_app_state === AppState.InPlay,
+          `${G.g_app_state}`);
+    const seen: Vec3[] = [];
+    const host: GameHost = {
+      ...HOST,
+      viewSpaceOfPoint: (p, out) => {
+        seen.push(vec3(p.x, p.y, p.z));
+        out.x = p.x; out.y = p.y; out.z = p.z - 100;
+        return true;
+      },
+    };
+    const o = ActorSpawn(0x9b00, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(3, 4, 40), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    t().prevX = o.pos.x;
+    t().prevZ = o.pos.z;
+    o.yaw = 0x4000;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const blood = G.g_point_blood_sprays.length;
+    OwlUpdateAndResolveShot(o, { ...frame(rng), host });
+    check("a shot owl sheds forty feathers",
+          t().state === OwlState.Dead && G.g_owl_feathers.length === 40,
+          `${OwlState[t().state]} ${G.g_owl_feathers.length}`);
+    check("...in a unit box about it",
+          G.g_owl_feathers.every((f) => Math.abs(f.x - 3) <= 0.5
+            && Math.abs(f.y - 4) <= 0.5 && Math.abs(f.z - 40) <= 0.5));
+    // `rand() & 0x8000FFFF` of a `rand()` that is never above 0x7FFF.
+    check("...each turned by half a turn at most, not a whole one",
+          G.g_owl_feathers.every((f) => f.yaw >= 0 && f.yaw < 0x8000),
+          `${Math.max(...G.g_owl_feathers.map((f) => f.yaw))}`);
+    check("...and leaves blood at its camera-space point",
+          G.g_point_blood_sprays.length === blood + 1
+          && seen.length === 1 && seen[0].z === 40
+          && G.g_point_blood_sprays[blood].pos.z === -60,
+          `${G.g_point_blood_sprays.length - blood} ${JSON.stringify(seen)}`);
+    // Standing still, the heading of its own motion is 0, and the death frame
+    // falls through into the yaw steering: a tenth of the way there.
+    check("the death frame still steers the yaw, a tenth of the error",
+          o.yaw === 0x4000 - 1638, `${o.yaw}`);
+
+    // A feather lives nine half turns of its phase and is killed on the frame
+    // it would start a tenth -- without drawing.
+    const f0 = G.g_owl_feathers[0];
+    const x0 = f0.x;
+    const z0 = f0.z;
+    const tx = f0.tx;
+    const tz = f0.tz;
+    const rate = f0.rate;
+    OwlEffectsTick(rng);
+    check("a feather eases x by 1/(0x8000 / rate) and z by a thirty-second",
+          Math.abs(f0.x - (x0 + (tx - x0) / Math.trunc(0x8000 / rate))) < 1e-9
+          && Math.abs(f0.z - (z0 + (tz - z0) / 32)) < 1e-9,
+          `${f0.x} ${f0.z}`);
+    let frames = 1;
+    let lastTurns = 0;
+    while (G.g_owl_feathers.includes(f0) && frames < 5000) {
+      lastTurns = f0.turns;
+      OwlEffectsTick(rng);
+      frames += 1;
+    }
+    // The first half turn takes 0x8000 / (0x200..0x400) frames, every one
+    // after it 0x8000 / (0x100..0x500).
+    check("...and is gone after its ninth half turn",
+          !G.g_owl_feathers.includes(f0) && lastTurns === 8
+          && frames >= 32 + 8 * 26 && frames <= 64 + 8 * 128 + 1,
+          `${frames} frames, ${lastTurns} turns`);
+    for (let i = 0; i < 2000 && G.g_owl_feathers.length; i += 1) {
+      OwlEffectsTick(rng);
+    }
+    check("...as are all forty", G.g_owl_feathers.length === 0,
+          `${G.g_owl_feathers.length}`);
+  }
+
+  {
+    // The strike sheds eight.
+    const rng = new Rng(59);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const o = ActorSpawn(0x9c00, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 2), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    t().state = OwlState.Dive;
+    t().dive = OwlDiveKind.Home;
+    o.attackPermit = 0;
+    OwlStateDiveAtCamera(o, frame(rng));
+    check("an owl's strike sheds eight feathers",
+          t().state === OwlState.OrbitAway && G.g_owl_feathers.length === 8,
+          `${OwlState[t().state]} ${G.g_owl_feathers.length}`);
+  }
+
+  {
+    // The corpse's ground ring: 120 frames opening, 29 held, 39 fading.
+    const rng = new Rng(61);
+    const events = scene(0, rng);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    OwlSpawnGroundImpactRing(1, 2, 3, 0.75, 0x1000, 0xdc00, events);
+    const r = G.g_owl_ground_rings[0];
+    check("the owl's ground ring plays its bobble",
+          sounds.length === 1 && sounds[0] === 0x118a9, `${sounds}`);
+    let drawn = 0;
+    let lastPulse = -1;
+    while (G.g_owl_ground_rings.length && drawn < 1000) {
+      OwlEffectsTick(rng);
+      if (!G.g_owl_ground_rings.length) break;
+      drawn += 1;
+      if (r.drew === OwlGroundRingPhase.Pulse) lastPulse = drawn;
+    }
+    check("...pulses for 120 frames and fades for 68 more, then goes",
+          lastPulse === OWL_RING_PULSE_FRAMES && drawn === 120 + 29 + 39,
+          `${lastPulse} ${drawn}`);
+
+    OwlSpawnWaterSplashFlipbook(5, 99, 6);
+    const s = G.g_owl_water_splashes[0];
+    check("the owl's water splash sits on y = -25, whatever it is handed",
+          s.y === -25 && s.x === 5 && s.z === 6, `${s.x},${s.y},${s.z}`);
+    const cels: number[] = [];
+    for (let i = 0; i < 40 && G.g_owl_water_splashes.length; i += 1) {
+      OwlEffectsTick(rng);
+      if (G.g_owl_water_splashes.length) cels.push(s.shown);
+    }
+    check("...and draws its thirty cels once each, the last one included",
+          cels.length === 30 && cels[0] === 0 && cels[29] === 29,
+          `${cels.length} ${cels[0]}..${cels[cels.length - 1]}`);
+  }
+
+  {
+    // A fish shot above the water, flung, and falling back in: the ring task
+    // on the water, the splash, and on the next frame the two surface rings.
+    const rng = new Rng(67);
+    const events = scene(0, rng);
+    G.g_water_level = -10;
+    const f = ActorSpawn(0x9d00, SpawnClass.WaterEnemy, -1, "fish", {
+      pos: vec3(0, 0, 30),
+      class51: {
+        water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+        entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+        lunge_frames: 40,
+      },
+    }, rng);
+    const ft = (f as { fish: FishTail }).fish;
+    f.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    FishUpdate(f, frame(rng, events));
+    check("a shot fish leaves a blood cloud", G.g_fish_blood_clouds.length === 1,
+          `${G.g_fish_blood_clouds.length}`);
+    let n = 0;
+    while (ft.state === FishState.Flung && n < 600) {
+      FishUpdate(f, frame(rng, events));
+      n += 1;
+    }
+    check("...and a flung one meeting the water makes the ring task there",
+          ft.state === FishState.Sink && G.g_ring_effects.length === 1
+          && Math.abs(G.g_ring_effects[0].y - (-10 + 0.02 + 0.05)) < 1e-9
+          && G.g_ring_effects[0].scale === 0.8,
+          `${FishState[ft.state]} ${G.g_ring_effects.length}`);
+    check("...with the splash, and no surface ring yet",
+          G.g_fish_water_splashes.length === 1
+          && G.g_fish_water_splashes[0].y === -10 - 0.4
+          && G.g_fish_surface_rings.length === 0,
+          `${G.g_fish_water_splashes.length} ${G.g_fish_surface_rings.length}`);
+    check("...its corpse turned by half a turn at most",
+          ft.yaw >= 0 && ft.yaw < 0x8000, `${ft.yaw}`);
+    // `FishStateSink` tests its timer for 1 **before** stepping it, and the
+    // frame that entered the state left it at 0.
+    FishUpdate(f, frame(rng, events));
+    check("...nor on the sinking corpse's first frame",
+          G.g_fish_surface_rings.length === 0,
+          `${G.g_fish_surface_rings.length}`);
+    FishUpdate(f, frame(rng, events));
+    check("the sinking corpse's second frame makes the two surface rings",
+          G.g_fish_surface_rings.length === 2
+          && G.g_fish_surface_rings[0].scale === 0.6
+          && G.g_fish_surface_rings[1].scale === 0.3,
+          G.g_fish_surface_rings.map((r) => r.scale).join(","));
+  }
+
+  {
+    // Shot under the water: the splash, and the ring task -- never the
+    // surface ring -- in the same update; and every corpse's yaw is half a
+    // turn at most, sixteen deaths over.
+    const rng = new Rng(71);
+    scene(0, rng);
+    G.g_water_level = -10;
+    const yaws: number[] = [];
+    for (let i = 0; i < 16; i += 1) {
+      const f = ActorSpawn(0x9e00 + i, SpawnClass.WaterEnemy, -1, "fish", {
+        pos: vec3(i, -20, 30),
+        class51: {
+          water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+          entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+          lunge_frames: 40,
+        },
+      }, rng);
+      const ft = (f as { fish: FishTail }).fish;
+      ft.flags |= FishFlag.Submerged;
+      f.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      FishUpdate(f, frame(rng));
+      yaws.push(ft.yaw);
+    }
+    check("a fish shot under water makes the ring task and the splash",
+          G.g_ring_effects.length === 16 && G.g_fish_water_splashes.length === 16
+          && G.g_fish_surface_rings.length === 0,
+          `${G.g_ring_effects.length} ${G.g_fish_water_splashes.length} `
+          + `${G.g_fish_surface_rings.length}`);
+    check("...its corpse's yaw drawn from rand() & 0xFFFF, which is half a turn",
+          yaws.every((y) => y >= 0 && y < 0x8000), yaws.join(","));
+
+    // Every one of the tasks ends, and each after exactly its own run: the
+    // tick that finds a finished task is the one that drops it.
+    const clouds = G.g_fish_blood_clouds.length;
+    const splash = G.g_fish_water_splashes[0];
+    const shown: number[] = [];
+    let cloudGone = -1;
+    let splashGone = -1;
+    for (let k = 1; k <= 100; k += 1) {
+      FishEffectsTick();
+      if (G.g_fish_water_splashes.includes(splash)) shown.push(splash.shown);
+      if (cloudGone < 0 && !G.g_fish_blood_clouds.length) cloudGone = k;
+      if (splashGone < 0 && !G.g_fish_water_splashes.length) splashGone = k;
+    }
+    check("the fish's splash draws 0x1339..0x1356 once each and goes",
+          shown.length === 30 && shown[0] === 0x1339
+          && shown[29] === FISH_SPLASH_LAST_SLOT && splashGone === 31,
+          `${shown.length} ${splashGone}`);
+    check("...the blood cloud its twenty-five cels",
+          clouds === 16 && cloudGone === 26, `${clouds} ${cloudGone}`);
+    let ringGone = -1;
+    for (let k = 1; k <= 1000 && ringGone < 0; k += 1) {
+      RingEffectsTick();
+      if (!G.g_ring_effects.length) ringGone = k;
+    }
+    check("...and the ring task spreads, holds and fades out in 189 draws",
+          ringGone === RING_EFFECT_SPREAD_FRAMES + 30 + 40, `${ringGone}`);
+  }
+
+  {
+    // The surface ring and the blood cloud, stepped by hand.
+    const rng = new Rng(73);
+    scene(0, rng);
+    G.g_water_level = 0;
+    const o = ActorSpawn(0x9f00, SpawnClass.WaterEnemy, -1, "fish", {
+      pos: vec3(0, 0, 30),
+      class51: {
+        water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+        entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+        lunge_frames: 40,
+      },
+    }, rng);
+    // FishSpawnSurfaceRing through the sink's own first frame.
+    const ft = (o as { fish: FishTail }).fish;
+    ft.state = FishState.Sink;
+    ft.timer = 1;
+    FishUpdate(o, frame(rng));
+    const ring = G.g_fish_surface_rings[0];
+    const alphas: number[] = [];
+    for (let i = 0; i < 100 && G.g_fish_surface_rings.includes(ring); i += 1) {
+      FishEffectsTick();
+      if (G.g_fish_surface_rings.includes(ring)) alphas.push(ring.shownAlpha);
+    }
+    check("a surface ring fades over sixty frames, widening, and goes",
+          alphas.length === 60 && alphas[0] === 1
+          && Math.abs(alphas[59] - 1 / 60) < 1e-6
+          && Math.abs(ring.shownScale - (0.6 + 59 * 0.02)) < 1e-6,
+          `${alphas.length} ${alphas[59]} ${ring.shownScale}`);
+
+    const c: FishBloodCloud = {
+      id: 0, pos: vec3(), slot: 0x3a, shown: 0x3a, done: false,
+    };
+    let draws = 0;
+    while (BloodCloudTickInScreenSpace(c) && draws < 100) draws += 1;
+    check("a blood cloud draws 0x3A..0x52 and is killed after the last",
+          draws === 25 && c.shown === FISH_BLOOD_LAST_SLOT, `${draws}`);
+
+    SpawnRingEffectAtPose({ x: 0, y: 0, z: 0, yaw: 0 }, 1);
+    const re = G.g_ring_effects[G.g_ring_effects.length - 1];
+    RingEffectsTick();
+    check("the ring task's first frame has four strips spread about it",
+          re.phase === RingEffectPhase.Spread && re.drawnStrips.length === 4
+          && re.drawnStrips[0].x > 1.9 && re.drawnStrips[0].z > 3.9
+          && re.drawnStrips[3].x < -1.9 && re.drawnStrips[3].z < -3.9
+          && re.drawnRing < 0.1,
+          JSON.stringify(re.drawnStrips));
   }
 
   // -- class 0x46, the bat --------------------------------------------------

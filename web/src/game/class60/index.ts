@@ -24,7 +24,9 @@
  * **None of that is ported** — the player draws no chapter card — and none of
  * it is what the script is waiting for. What is ported is the actor's
  * **lifetime**, which is the whole of the gate: the dwell, then the flag,
- * then `ActorKill`.
+ * then `ActorKill` — and the one bit that tells the rest of the frame the
+ * card has the screen, {@link ScreenFurniture.ChapterCard}, which the
+ * shutter, class 0x22's cameo and the world's draw routines stand aside for.
  *
  * ## The port skips every card
  *
@@ -37,7 +39,7 @@
  * latch, the flag and the kill all happen, on the card's first update.
  */
 import type { Actor } from "../actor";
-import { AppState, G } from "../globals";
+import { AppState, G, ScreenFurniture } from "../globals";
 import { GameMode } from "../game_mode";
 import {
   registerClass, type ClassFrame, type ClassHandler,
@@ -84,14 +86,16 @@ const CHAPTER_CARD_SKIPPED_DWELL = 1;
  *
  * Not an {@link AppState} member: that enum names only the screens that have
  * been read, and this one has not. `FUN_00434DA0` raises the same flag 248
- * from `0x00434EC0`, so whatever screen it is, it is the card's counterpart
- * there.
+ * from `0x00434EC0`, and drops the same furniture bit beside it
+ * (`AND AL, 0xDF` at `0x00434ED4`), so whatever screen it is, it is the
+ * card's counterpart there.
  */
 const APP_STATE_INSTALLS_VARIANT = 0x0b;
 
 /** `ChapterCardInstall`'s two sub-states, which it increments once. */
 enum Sub {
-  /** Seat the lights and the text, latch the dwell, fall straight through. */
+  /** Raise the furniture bit, seat the lights and the text, latch the
+   *  dwell, and fall straight through. */
   Setup = 0,
   /** Draw, and count the dwell down. */
   Hold = 1,
@@ -105,16 +109,33 @@ enum Sub {
  * entered in, and `g_app_state == 0x0B` is a screen the port never reaches —
  * in play the state is 6. The tests are transcribed rather than dropped, so
  * that the day either exists the routine says what the engine does; the two
- * installed updates, `FUN_00434920` and `FUN_00434DA0`, are `[open]` and not
- * ported. **An actor that takes either arm therefore never raises the flag in
- * this port**, which is why they return rather than falling through.
+ * installed updates, `BossModeChapterCardUpdate` (`FUN_00434920`) and
+ * `FUN_00434DA0`, are not ported. **An actor that takes either arm therefore
+ * never raises the flag in this port**, which is why they return rather than
+ * falling through.
+ *
+ * Each arm raises {@link ScreenFurniture.ChapterCard} before it hands over
+ * (`OR EDX, 0x20` at `0x004342F6` and `0x00434324`), and that is the head's
+ * own write, so it is here. The clears that pair with them are the
+ * variants' — `0x00434CE7` in `BossModeChapterCardUpdate`'s sub 2,
+ * `0x00434ED6` in `FUN_00434DA0` — so in this port an actor on either arm
+ * holds the bit up for as long as it holds the gate shut.
  */
 export function ChapterCardInstall(obj: Actor, f: ClassFrame): void {
   void f;
-  if (G.g_GameMode === GameMode.Boss) return;
-  if (G.g_app_state === APP_STATE_INSTALLS_VARIANT) return;
+  if (G.g_GameMode === GameMode.Boss) {
+    G.g_screen_furniture_flags |= ScreenFurniture.ChapterCard;
+    return;
+  }
+  if (G.g_app_state === APP_STATE_INSTALLS_VARIANT) {
+    G.g_screen_furniture_flags |= ScreenFurniture.ChapterCard;
+    return;
+  }
 
   if (obj.sub === Sub.Setup) {
+    // `OR AL, 0x20` at `0x0043436B`, the first thing sub 0 does: from here
+    // until the flag goes up, the card has the screen.
+    G.g_screen_furniture_flags |= ScreenFurniture.ChapterCard;
     // `INC word ptr [ESI+0x1312]` then `MOV word ptr [ESI+0x11c], 0xB4` at
     // `0x004345A4`, and that arm **falls through** into the sub-1 body — so
     // the countdown's first decrement is on this same frame.
@@ -141,6 +162,11 @@ export function ChapterCardInstall(obj: Actor, f: ClassFrame): void {
  * then `DEC word ptr [ESI+0x11c]; CMP ..., 0; JG return` — so a dwell of `n`
  * costs `n` frames, a skip costs the frame it is taken on, and the flag lands
  * on the frame the dwell reaches zero.
+ *
+ * At zero, in the engine's order: the flag (`0x004348C1`), then the
+ * furniture bit down (`AND AL, 0xDF` at `0x004348C7`, stored at
+ * `0x004348C9`), then `ActorKill`. So the frame that opens the gate is also
+ * the one that gives the screen back.
  */
 function ChapterCardCountDown(obj: Actor): void {
   const pad = ChapterCardSkipRequested();
@@ -152,6 +178,7 @@ function ChapterCardCountDown(obj: Actor): void {
   obj.hp -= 1;
   if (obj.hp > 0) return;
   G.g_script_flags[CHAPTER_CARD_FLAG] = 1;
+  G.g_screen_furniture_flags &= ~ScreenFurniture.ChapterCard;
   ChapterCardKill(obj);
 }
 
@@ -166,19 +193,19 @@ function ChapterCardCountDown(obj: Actor): void {
  * top of every stage, and the port skips title sequences entirely. Taking
  * the engine's own skip arm keeps the rest of the routine — installer, latch,
  * flag, kill — exactly as the exe runs it for a player who presses skip.
+ *
+ * That includes {@link ScreenFurniture.ChapterCard}: sub 0 raises it and the
+ * countdown drops it **within the same update**, so no other routine ever
+ * sees it up. Where the engine's unskipped card would hide them for three
+ * seconds, the shutter's state-4 bars and class 0x22's cameo draw straight
+ * through — the same picture as the exe's for a player who skips on the
+ * card's first frame.
  */
 export function ChapterCardSkipRequested(): number {
   return PAD_SKIP_ALWAYS;
 }
 
-/**
- * `ActorKill` (`FUN_004A7040`) at `0x004348CE`, and the clear of
- * `g_screen_furniture_flags` bit `0x20` before it.
- *
- * `[port-only]` The bit is not modelled: `g_screen_furniture_flags`
- * (`0x009A5900`) is read by the draw side and the port has no draw side for
- * the cards, so a bit nothing reads would be a global with one writer.
- */
+/** `ActorKill` (`FUN_004A7040`) at `0x004348CE`. */
 function ChapterCardKill(obj: Actor): void {
   obj.dead = true;
   obj.visible = false;

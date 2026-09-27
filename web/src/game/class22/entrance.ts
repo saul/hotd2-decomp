@@ -18,7 +18,7 @@ import { ActorSetMotion, ActorSetMotionBlended }
 import { DescriptorFromPlacement } from "../descriptor";
 import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
-import { ActorByAt, G } from "../globals";
+import { ActorByAt, G, ScreenFurniture } from "../globals";
 import { ActorReleaseHitSlot } from "../hit_slots";
 import {
   MatIdentity, MatrixRotateY, MatrixTransformPoint, MatrixTranslate,
@@ -46,8 +46,6 @@ import { BACK_OFF_DISTANCE } from "../class23/records";
 const CHAPTER_CARD_FLAG = 0xf8;
 /** `g_script_flags[2]` — `MOV byte ptr [0x009C7202], 1`, the banner's start. */
 export const CLASS22_BANNER_FLAG = 2;
-/** `g_screen_furniture_flags` bit `0x20` — the chapter card is showing. */
-const FURNITURE_CHAPTER_CARD = 0x20;
 
 /** The cameo's perch: `(-406.0, 152.5, 142.4)`, yaw `0x717F`. */
 const CAMEO_POS = { x: -406.0, y: 152.5, z: Math.fround(142.4) };
@@ -209,7 +207,7 @@ export function Class22CutsceneHoldUntilChapterCard(obj: JudgmentActor,
       break;
   }
   if (step) obj.sub += 1;
-  if ((G.g_screen_furniture_flags & FURNITURE_CHAPTER_CARD) === 0) {
+  if ((G.g_screen_furniture_flags & ScreenFurniture.ChapterCard) === 0) {
     DrawAndStep(obj, f);
   }
 }

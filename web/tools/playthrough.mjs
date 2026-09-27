@@ -497,7 +497,9 @@ async function readBranch(page) {
  * Only classes 0x30 and 0x31 are counted, because they are the two that have
  * hit points: `obj+0x11C` is a **sub-type selector** on class 0x20 and an
  * asset slot on class 0x65 (`L3`), so summing every actor's would move for
- * reasons that are not damage.
+ * reasons that are not damage. Class 0x45 counts too: the tower's heads and
+ * body keep theirs there (`Boss3FightHeadInit` writes 45, `Boss3BodyInit`
+ * 120), and without it every shot that landed on the boss read as none.
  *
  * It changes when a shot lands, when an actor dies, and when a wave arrives —
  * all three mean the room is still going somewhere. It does **not** change
@@ -508,7 +510,7 @@ async function roomPressure(page) {
   const alive = /\be(-?\d+)/.exec(row.c)?.[1] ?? "?";
   let hp = 0;
   for (const o of row.o) {
-    if (!/ c(48|49) /.test(o)) continue;
+    if (!/ c(48|49|69) /.test(o)) continue;
     hp += Math.max(0, Number(/ h(-?\d+)/.exec(o)?.[1] ?? 0));
   }
   return `${alive}/${hp}`;
@@ -561,6 +563,15 @@ const CONTINUE = flag("continue");
  * stage step's reset boots the player block and clears it.
  */
 const NO_DAMAGE = flag("no-damage");
+/**
+ * `--play-end` -- **play the end block, not just reach it.** Every stage's
+ * boss is in its end block, so stopping on arrival never ran a boss at all:
+ * stage 3's block 11 is entered at frame 8580 and is the whole of the tower
+ * fight. With this the run keeps going, shooting the boss's gates like any
+ * other, until the walk leaves the block -- the scene over, and the next
+ * stage's entry up in the HUD -- and only that is a pass.
+ */
+const PLAY_END = flag("play-end");
 if (NO_DAMAGE) {
   console.log("--no-damage: CHEAT -- g_player_no_damage[0] = 1 (0x009C9FD8), "
               + "no hit costs a life");
@@ -654,6 +665,8 @@ try {
    * reported as: the page is not running.
    */
   let lostThePage = null;
+  /** The end block `--play-end` is playing, once the walk has entered it. */
+  let endBlock = null;
 
   // Nothing in the page navigates — the only `location.reload` in the app is
   // the export screen's, and it is only reachable before a scene is built —
@@ -775,7 +788,24 @@ try {
       break;
     }
 
-    if (/\(end/.test(s.block)) {
+    if (PLAY_END && endBlock !== null && s.block.split(" ")[0] !== endBlock) {
+      const t = ((Date.now() - started) / 1000).toFixed(1);
+      console.log(`\nplayed end block ${endBlock} through: the walk left it `
+                  + `for ${s.block ? `block ${s.block}` : "the next stage"} `
+                  + `after ${frames} game frames `
+                  + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
+                  + `wall clock), ${steps} instructions, START pressed `
+                  + `${continues} time(s)`);
+      exit = state.faults || unclearable.length ? 1 : 0;
+      break;
+    }
+    if (PLAY_END && /\(end/.test(s.block)) {
+      if (endBlock === null) {
+        endBlock = s.block.split(" ")[0];
+        console.log(`  f${String(frames).padStart(6)}  reached end block `
+                    + `${endBlock}; --play-end plays it through`);
+      }
+    } else if (/\(end/.test(s.block)) {
       const t = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`\nreached an end block after ${frames} game frames `
                   + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `

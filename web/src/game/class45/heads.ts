@@ -15,7 +15,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { PlayerTakeDamage } from "../combat/player";
 import { SpawnBoneHitSprite } from "../effects/blood";
-import { ActorClaimHitSlot } from "../hit_slots";
+import { ActorBuildSkinnedModel } from "../spawn";
 import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { PlayerState } from "../player_state";
@@ -214,7 +214,7 @@ export function Boss3FightHeadInit(obj: Boss3Actor): void {
   // `ActorBuildSkinnedModel` (`FUN_00410440`) -- the model block fresh on the
   // clip, and the hit-slot claim the port makes where that routine does.
   Boss3SetMotion(obj, clip);
-  ActorClaimHitSlot(obj);
+  ActorBuildSkinnedModel(obj);
   obj.flags |= ActorFlag.NoShotTest;
   t.modelFrame = 0;
   const radius = CharacterTypeOf(obj)?.actor_radius ?? 0;

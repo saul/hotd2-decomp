@@ -11,7 +11,7 @@ import type { Boss3Actor } from "../actor";
 import { ActorFlag } from "../actor";
 import { ActorByAt, G } from "../globals";
 import type { ClassFrame } from "../registry";
-import { ActorClaimHitSlot } from "../hit_slots";
+import { ActorBuildSkinnedModel } from "../spawn";
 import { ActorDespawn } from "../despawn";
 import {
   MatIdentity, MatrixGetTranslation, MatrixRotateY, MatrixTransformPoint,
@@ -91,7 +91,7 @@ export function Boss3OpeningHeadInit(obj: Boss3Actor): void {
   G.g_boss3_heads[0] = obj.at;
   Boss3SetMotion(obj, G.g_evt_block_index === 0xb
     ? CLIP_OPENING_A : CLIP_OPENING_B);
-  ActorClaimHitSlot(obj);
+  ActorBuildSkinnedModel(obj);
   // `ActorBuildSkinnedModel` leaves its own draw hook, and this Init keeps it.
   t.poseHook = Boss3PoseHook.Default;
   obj.flags |= 0x88000;
@@ -157,7 +157,7 @@ export function Boss3OpeningBystanderInit(obj: Boss3Actor): void {
   const t = obj.boss3;
   G.g_boss3_bystanders[0] = obj.at;
   Boss3SetMotion(obj, CLIP_WALK);
-  ActorClaimHitSlot(obj);
+  ActorBuildSkinnedModel(obj);
   obj.motionFlags |= 4;
   obj.flags |= ActorFlag.NoShotTest;
   t.modelFrame = 0;
@@ -264,7 +264,7 @@ export function Boss3HeldBystanderInit(obj: Boss3Actor): void {
   t.index = (idx << 24) >> 24;
   obj.hp = 1;
   Boss3SetMotion(obj, CLIP_HELD);
-  ActorClaimHitSlot(obj);
+  ActorBuildSkinnedModel(obj);
   t.poseHook = Boss3PoseHook.Bystander;
   obj.motionFlags &= ~MotionFlag.RootMotion;
   obj.flags |= 0x88000;

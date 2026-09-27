@@ -16,7 +16,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { PlayerTakeDamage } from "../combat/player";
 import { SpawnBoneHitSprite } from "../effects/blood";
-import { ActorClaimHitSlot } from "../hit_slots";
+import { ActorBuildSkinnedModel } from "../spawn";
 import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { PlayerState } from "../player_state";
@@ -184,7 +184,7 @@ export function Boss3BodyInit(obj: Boss3Actor): void {
   t.index = BODY_INDEX;
   obj.hp = BODY_HP;
   Boss3SetMotion(obj, CLIP_SWIM);
-  ActorClaimHitSlot(obj);
+  ActorBuildSkinnedModel(obj);
   obj.pos.y = Math.fround(obj.pos.y + 3);
   // `MOV EDX, [0x004C4E48]` at `0x004203BA`: a literal 95.0, not
   // `g_actor_radius_by_char` -- the broad-phase sphere spans the whole body.

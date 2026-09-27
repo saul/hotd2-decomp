@@ -12,6 +12,7 @@
 import type { Events } from "../../core/events";
 import type { Boss3Actor } from "../actor";
 import { G } from "../globals";
+import { BAMS_TO_RAD_F64, RAD_TO_BAMS } from "../../core/bams";
 import { FtolS16 } from "../matrix";
 import { MotionPlayLength } from "../tables";
 import { Boss3BodyState, Boss3HeadState, Boss3Variant } from "./state";
@@ -19,12 +20,8 @@ import { Boss3PoseMatrices } from "./model";
 import { Boss3NextRand } from "./rand";
 import { Boss3SpawnSplashAt } from "./tasks";
 
-/** `FMUL double ptr [0x004C4370]` -- BAMS to radians. */
-const BAMS_TO_RAD = 9.587379924285257e-05;
-/** `FMUL double ptr [0x004C4378]` -- radians to BAMS. */
-const RAD_TO_BAMS = 10430.378350470453;
-/** `FMUL double ptr [0x0055CB20]` -- the same, negated. */
-const RAD_TO_BAMS_NEG = -10430.378350470453;
+/** `FMUL double ptr [0x0055CB20]` -- radians to BAMS (`0x004C4378`), negated. */
+const RAD_TO_BAMS_NEG = -RAD_TO_BAMS;
 /** `[0x0055CB30]`, `[0x0055CB34]` -- 516 and 258: the attack's Y extra, less per index. */
 const ATTACK_Y_BASE = 516;
 const ATTACK_Y_STEP = 258;
@@ -93,7 +90,7 @@ export function Boss3BigHeadJawSway(obj: Boss3Actor): void {
   if (blk.jawSway < 0) return;
   const v = blk.jawSway + SWAY_STEP;
   blk.jawSway = v;
-  const s = Math.sin(v * BAMS_TO_RAD);
+  const s = Math.sin(v * BAMS_TO_RAD_F64);
   blk.extraZ[blk.jawA] = Ftol(s * SWAY_AMPLITUDE - SWAY_OFFSET);
   blk.extraZ[blk.jawB] = Ftol(SWAY_OFFSET - s * SWAY_AMPLITUDE);
   if (blk.jawSway >= SWAY_END) {
@@ -322,7 +319,7 @@ export function Boss3ComposeBonePose(obj: Boss3Actor): void {
       case Boss3BodyState.Dead: {
         if (i <= 0 || i > weak) break;
         const k = Ftol(i * RIPPLE_TURN / weak);
-        t.boneRot[o + 1] = Ftol(Math.sin(k * BAMS_TO_RAD) * RIPPLE_AMPLITUDE
+        t.boneRot[o + 1] = Ftol(Math.sin(k * BAMS_TO_RAD_F64) * RIPPLE_AMPLITUDE
                                 + t.boneRot[o + 1]);
         break;
       }

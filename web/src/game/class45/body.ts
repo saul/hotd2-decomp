@@ -33,7 +33,8 @@ import {
   BOSS3_BODY_OBJ_PATHS_B, type Boss3BodyEvent, type Boss3PathSeg,
 } from "./tables";
 import {
-  Boss3DrawModel, Boss3ModelStep, Boss3SetMotion, Boss3SetMotionBlended,
+  Boss3DrawModel, Boss3ModelStep, Boss3RegisterForShotTest, Boss3SetMotion,
+  Boss3SetMotionBlended,
 } from "./model";
 import {
   Boss3ComposeBonePose, Boss3DrawBoneParts, PoseHookNone, SOUND_SIBUKI2,
@@ -400,6 +401,7 @@ export function Boss3BodyUpdate(obj: Boss3Actor, f: ClassFrame): void {
   if (!blk) return;
   G.g_boss3_heads[0] = obj.at;
   const variant = G.g_boss3_variant;
+  t.shotTested = false;
 
   // -- 1. the shot.
   if (obj.flags & ActorFlag.Hit) {
@@ -506,9 +508,10 @@ export function Boss3BodyUpdate(obj: Boss3Actor, f: ClassFrame): void {
   if (s === Boss3BodyState.Swim || s === Boss3BodyState.Surfaced
       || s === Boss3BodyState.Lunge || s === Boss3BodyState.Recover) {
     Boss3AimCamera(obj);
-    // `RegisterForShotTest` (`FUN_00405160`) at `0x00424160`, states 10..13
-    // only. The port's pick has no per-frame list yet; the body outside these
-    // states is either building its path (two frames) or dead (`obj.dead`).
+    // `PUSH ESI; CALL 0x00405160` at `0x00424160`, on the aim's path: states
+    // 10..13 only. Building its path, taking the camera and dead, the body is
+    // drawn and cannot be shot.
+    Boss3RegisterForShotTest(obj);
   }
 }
 

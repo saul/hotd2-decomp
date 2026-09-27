@@ -60,6 +60,7 @@ import type { Vec3 } from "../game/vec";
 import type { CharacterSpawnRequest } from "../game/director";
 import { Rng } from "../core/rng";
 import { G } from "../game/globals";
+import { g_class_handlers } from "../game/registry";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
@@ -700,6 +701,10 @@ export class CharacterLayer implements System {
     let bestT = Infinity;
     for (const inst of this.instances) {
       if (!inst.root.visible || inst.a.dead) continue;
+      // A class that registers only on some frames says whether it did --
+      // see `ClassHandler.shotTestable`.
+      const testable = g_class_handlers[inst.a.cls]?.shotTestable;
+      if (testable && !testable(inst.a)) continue;
       // `RegisterForShotTest` (`FUN_00405160`) never appends an actor whose
       // `obj+0x34` has bit `0x8000`, so no shot can find it.
       if (inst.a.flags & ActorFlag.NoShotTest) continue;

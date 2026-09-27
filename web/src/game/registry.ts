@@ -280,6 +280,22 @@ export interface ClassHandler {
    * literal from `CameraPointRiseFor` in `camera/track.ts`.
    */
   cameraRise?(obj: Actor): number;
+  /**
+   * `[port-only]` **Did this actor's last update call `RegisterForShotTest`
+   * (`FUN_00405160`)?** The engine's shot test walks a list its objects
+   * append themselves to, one call per frame from each class's own routine,
+   * and `ProcessPlayerShots` (`FUN_00404570`) runs before the object pass --
+   * so the list a shot is tested against is the one the previous frame's
+   * updates built. An object that did not register is not in it, and a
+   * bullet passes through it to whatever is behind.
+   *
+   * The port's pick (`render/characters.ts`) takes every visible, living
+   * actor instead. A class whose routine registers only sometimes -- or
+   * never, for some of its sub-types -- answers here, from a latch its update
+   * writes where the exe makes the call. Absent means the pick's answer
+   * stands.
+   */
+  shotTestable?(obj: Actor): boolean;
 }
 
 /**

@@ -31,8 +31,8 @@ import {
   type Boss3Attack,
 } from "./tables";
 import {
-  Boss3DrawModel, Boss3ModelStep, Boss3SetMotion, Boss3SetMotionBlended,
-  TRACK_FADING,
+  Boss3DrawModel, Boss3ModelStep, Boss3RegisterForShotTest, Boss3SetMotion,
+  Boss3SetMotionBlended, TRACK_FADING,
 } from "./model";
 import { Boss3ComposeBonePose, Boss3DrawBoneParts, PoseHookNone } from "./pose";
 import {
@@ -163,10 +163,9 @@ function ClearExtras(blk: Boss3Block): void {
 }
 
 /**
- * Enter state 7. `[port-only]` in one respect: `obj.dead`, which is what the
- * port's shot pick refuses a dead actor by -- the head no longer calls
- * `RegisterForShotTest` (`FUN_00405160`) in this state, and the port's pick
- * has no per-frame registration list for that to be the absence of.
+ * Enter state 7. `[port-only]` in one respect: `obj.dead`, the port's own
+ * mark of a dead actor, which its inspectors read. What keeps a shot off the
+ * head is its not registering from here on -- see `Boss3RegisterForShotTest`.
  */
 function EnterDead(obj: Boss3Actor): void {
   obj.state = Boss3HeadState.Dead;
@@ -412,6 +411,7 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
   const idx = t.index;
   if (idx >= 0 && idx < G.g_boss3_heads.length) G.g_boss3_heads[idx] = obj.at;
   t.cameraTracked = false;
+  t.shotTested = false;
 
   // -- 1. the shot, only in the fight and outside the flinch and death;
   //       outside that window the hit bits are left latched.
@@ -532,9 +532,8 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
   obj.shotCentre.x = obj.pos.x;
   obj.shotCentre.y = obj.pos.y;
   obj.shotCentre.z = obj.pos.z;
-  // `RegisterForShotTest` (`FUN_00405160`) at `0x004215AF` unless the head is
-  // dead. The port's pick refuses `obj.dead`, which state 7 sets; a live head
-  // is in it by being visible.
+  // `if (state != 7) RegisterForShotTest(obj)` at `0x004215AF`.
+  if (obj.state !== Boss3HeadState.Dead) Boss3RegisterForShotTest(obj);
   let track = false;
   if (G.g_boss3_phase === Boss3Phase.Intro) {
     track = idx === 2;

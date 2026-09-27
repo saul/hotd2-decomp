@@ -324,6 +324,22 @@ function Boss3ApplyRootMotion(obj: Boss3Actor): void {
 }
 
 /**
+ * `RegisterForShotTest` — `FUN_00405160`, **the call**, made where the
+ * class's routines make it: `Boss3FightHeadUpdate` at `0x004215AF`,
+ * `Boss3BodyUpdate` at `0x00424160`.
+ *
+ * `[port-only]` in what it does: the port has no `g_shot_test_list` yet, so
+ * the call raises the tail's latch and the class's `shotTestable` reports it
+ * to the pick, which refuses an actor of this class whose last update did not
+ * register. The routine's own refusal of `obj+0x34` bit `0x8000` is the
+ * pick's `ActorFlag.NoShotTest` test; its depth test is the pick's `t > 0`.
+ * Once `combat/shot_test.ts` holds the engine's list, this is its call.
+ */
+export function Boss3RegisterForShotTest(obj: Boss3Actor): void {
+  obj.boss3.shotTested = true;
+}
+
+/**
  * `[port-only]` -- the state `DrawSkinnedModelAndShadow` (`FUN_00411090`)
  * leaves on the model, which is everything this class reads back from its
  * draw: the cursor and end flag, the angles, the root motion and the bone

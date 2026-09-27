@@ -410,6 +410,14 @@ export interface Boss3Tail {
    * (`FUN_00408EC0`). Read by the class's `tracksCamera`.
    */
   cameraTracked: boolean;
+  /**
+   * `[port-only]` -- this actor's last update called `RegisterForShotTest`
+   * (`FUN_00405160`): a fighting head that is not dead (`0x004215AF`), the
+   * body in states 10..13 (`0x00424160`). The opening head and the three
+   * civilians never make the call, so no shot can find them. Read by the
+   * class's `shotTestable`; see {@link Boss3RegisterForShotTest}.
+   */
+  shotTested: boolean;
   /** `obj+0x1390` -- the state block, heads and body only. */
   block: Boss3Block | null;
 }
@@ -429,7 +437,7 @@ export function makeBoss3Tail(): Boss3Tail {
     pivot: vec3(), composed: false,
     boneOrigin: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
     bonePoint: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
-    cameraTracked: false, block: null,
+    cameraTracked: false, shotTested: false, block: null,
   };
 }
 

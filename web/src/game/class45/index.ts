@@ -205,6 +205,15 @@ export const Boss3Handler: ClassHandler = {
   // The class does its own counting in and out -- head 2 and the body, by
   // `INC`/`DEC` at the addresses their routines cite -- and nothing else.
   onDeadSweep: () => {},
+  // A head and the body register for the shot test on some frames and the
+  // opening head and the civilians on none -- see `Boss3RegisterForShotTest`.
+  shotTestable: (obj) => obj.cls === SpawnClass.Boss3 && obj.boss3.shotTested,
+  // Nothing in the class dies but by its own routine reading the hit bits: a
+  // head's death moves `g_boss3_heads_left` and the phase, the body's opens
+  // the second gate and hands the camera back. The debug clear's `dead` and
+  // zero hit points would do neither and strand both gates, so it is refused
+  // and the fight has to be shot.
+  invulnerable: () => true,
   debug: Boss3Debug,
 };
 

@@ -4447,12 +4447,29 @@ name; `docs/re/boss-tower.md` has the reading.
   path effects, the civilian's shadow and variant 1's water mound, which the
   body raises as it swims under it.
 
-**Played.** `playthrough.mjs --stage 3 --play-end` (and `--entry 7` for block
-13) plays the fight through by shooting: the tool's grid of shots finds the
-open jaws and the surfaced body, and the debug clear -- which refuses this
-class -- is never what opens a gate. Stage 6 plays past block 2's heads.
-`--no-damage` is on for the zombies before the boss, and `--shoot-for 1500`
-because a diving body is unshootable for longer than the default window.
+**Played**, with `playthrough.mjs --boss` (JUDGMENT's `--play-end`,
+`--meter-all` and `--aim`; `--meter-all` reads the Tower's hit points, which
+are `obj+0x11C` like everyone's). The debug clear refuses this class, so
+nothing but shooting opens its gates.
+
+* Stage 6 `--boss --continue` passes block 2's five heads by shooting (the
+  gate opens at frame 7350) and runs out of credits in block 3, which main's
+  default run does too (frame 7125).
+* Stage 3 `--boss --continue` kills two heads and then runs out of credits in
+  the fight (frames 10920 and 11085 on the two routes): the zombies before it
+  spend five of the six. The bites are the heads' own schedule, and the grid
+  rarely finds a radius-3 weak bone in an open mouth.
+* With `--no-damage`, block 13's fight plays through (6285 frames in the
+  block), and block 11's body is still hittable but hangs the harness: a hit
+  counts only surfaced or lunging, on the weak bone with the jaws open, so
+  a dive plus a surfacing the grid misses runs past `--hang`'s 900
+  fruitless frames. `--hang 12000 --shoot-for 1500` plays it through (frame
+  17865). `--aim` does not help here: it aims at `obj+0x70`, which the class
+  publishes as the actor's position -- the body's tail on its path and the
+  heads' necks -- not at the weak bone the shot must hit.
+* Default stage 6 now hangs at block 2's gate, because the boss exists: the
+  default meter cannot see its damage and 900 frames is shorter than the
+  fight.
 
 ## Every opcode, and what the player does with it
 

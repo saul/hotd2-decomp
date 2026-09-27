@@ -19887,8 +19887,9 @@ not be used.
 `ownsMotionClock`, since merged into JUDGMENT's `advancesOwnMotion`; the
 director steps `Boss3TasksTick` after the boss bars;
 the walker's enemy-gate set has 0x45; `EffectLayer` frees what a fading or a
-deforming clone owns; `playthrough.mjs` has `--play-end` and counts class
-0x45's hit points.
+deforming clone owns. (This branch's own `playthrough.mjs --play-end` went
+in the merge of main's: JUDGMENT's `--play-end`/`--meter-all` do the same,
+and `--meter-all` already reads class 0x45's `obj+0x11C`.)
 
 **Wrong turns.**
 
@@ -19904,9 +19905,10 @@ deforming clone owns; `playthrough.mjs` has `--play-end` and counts class
 * The first playthroughs "passed" by stopping on arrival at block 11: every
   boss is in an end block, and the tool broke out there. Then the boss gates
   read as unshootable because the tool's damage meter counted only classes
-  0x30/0x31. Both are fixed in the tool (`--play-end`, and class 0x45 in the
-  meter -- JUDGMENT's entry above met both too), and a diving body still
-  needs `--shoot-for 1500`.
+  0x30/0x31. JUDGMENT's `--boss` fixes both; a diving body still needs a
+  long `--hang` and `--shoot-for`, because a hit counts only surfaced or
+  lunging, and `--aim` aims at `obj+0x70`, which for this class is the
+  actor's position and not its weak bone.
 * The body test expected 6 damage a hit; one player in play is 10.
 * A seek straight onto the stage-6 gate opens it at once: the heads' Inits run
   two frames after the spawn, so on the seek's first frame `g_enemies_present`

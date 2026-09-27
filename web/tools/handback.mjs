@@ -20,8 +20,17 @@
  * Nothing else in the tree could see it. `port.test.ts` drives the mode
  * machine directly and proves the rule; this proves the *pacing*, which needs
  * the stage's own camera path, its own script and its own enemies — so it
- * plays them, kills the room the frame a gate starts waiting, and measures
- * the frames between the counter reaching zero and the gate letting go.
+ * plays them, lets each room's fight run for `FIGHT_FRAMES` once its gate
+ * starts waiting, kills the room, and measures the frames between the counter
+ * reaching zero and the gate letting go.
+ *
+ * The fight has to run first because the camera is two frames behind the
+ * room: an actor files itself as a candidate in its update, the next frame's
+ * `UpdateCameraEnemySlots` deals the slots, and the camera actor reads them
+ * the frame after that (`SceneTaskWalk`'s order). A room cleared the frame its
+ * gate is reached -- the enemies placed a frame or two before -- has not
+ * pulled the aim at all, and hands back at once, which is right and measures
+ * nothing about the turn.
  */
 
 import { readFileSync } from "node:fs";
@@ -65,6 +74,14 @@ const FRAMES = Number(process.env.HANDBACK_FRAMES ?? 5400);
  * frames of turn -- so the threshold sits just above the test's own.
  */
 const OFF_RAIL_DEGREES = 0.5;
+
+/**
+ * Frames a room's fight runs, from the frame its gate starts waiting, before
+ * the harness clears it: long enough for the slot table to deal and the camera
+ * to turn onto the fight. The player cannot be hurt meanwhile
+ * (`g_player_no_damage`, the game's own cheat word), so no bite ends the run.
+ */
+const FIGHT_FRAMES = Number(process.env.HANDBACK_FIGHT ?? 60);
 
 /** The harness's stand-in for bone 1's height above an actor's `pos`. */
 const TRACK_BONE_RISE = 5;
@@ -217,16 +234,6 @@ for (const [name, stage, block, step] of CASES) {
 
     const w = walker.wait;
     const onEnemyGate = !!w && w.policy?.kind === "enemies";
-    if (process.env.HANDBACK_DBG && walker.step === 4 && f % 20 === 0) {
-      const e = G.g_camera_block_eye, t = G.g_camera_block_target, l = G.g_camera_lookat_target;
-      console.log(`   dbg f${f} mode=${G.g_camera_mode} free=${G.g_camera_free} started=${G.g_camera_hand_back_started} `
-        + `slots=${G.g_enemy_slots.slice(0, 4).map((x) => x.occupied).join("")} alive=${G.g_enemies_alive} `
-        + `path=${G.g_active_cam_path} frame=${G.g_cam_path_frame} rail=${G.g_rail_frame} ov=${G.g_evt_cam_override_valid} `
-        + `eye=${e.x.toFixed(2)},${e.y.toFixed(2)},${e.z.toFixed(2)} tgt=${t.x.toFixed(2)},${t.y.toFixed(2)},${t.z.toFixed(2)} `
-        + `look=${l.x.toFixed(2)},${l.y.toFixed(2)},${l.z.toFixed(2)} rate=${G.g_camera_turn_rate} off=${offRailDegrees().toFixed(3)}`
-        + ` slotacts=${G.g_enemy_slots.slice(0, 4).map((x) => x.occupied ? x.at.toString(16) : "-").join(",")}`
-        + ` acts=${G.g_object_list.filter((o) => G.g_enemy_slots.slice(0,4).some((x) => x.occupied && x.at === o.at)).map((o) => `${o.at.toString(16)}:c${o.cls.toString(16)}:permit${o.attackPermit}:look${o.lookAt.x.toFixed(1)},${o.lookAt.y.toFixed(1)},${o.lookAt.z.toFixed(1)}:pos${o.pos.x.toFixed(1)},${o.pos.y.toFixed(1)},${o.pos.z.toFixed(1)}:dead${o.dead?1:0}:vis${o.visible?1:0}:fl${(o.flags>>>0).toString(16)}`).join(" ")}`);
-    }
     if (process.env.HANDBACK_TRACE && f % 30 === 0) {
       console.log(`   f${f} ${walker.block}/${walker.step}/${walker.op} `
         + `wait=${w ? w.policy?.kind + ":" + w.blocksOn : "-"} `
@@ -249,7 +256,9 @@ for (const [name, stage, block, step] of CASES) {
       // permit back, raises `NoCameraTrack` and drops the alive count. Less
       // than that leaves a live permit holder, which is a camera target in
       // slot 0 or 1 for as long as it stands, in the engine as here.
-      if (waiting.zero < 0) {
+      // A room with nobody left in it has no fight to wait for.
+      if (waiting.zero < 0 && (f - waiting.since >= FIGHT_FRAMES
+                               || G.g_enemies_alive === 0)) {
         for (const o of G.g_object_list) {
           if (!o.visible || o.dead || !ActorIsEnemy(o.cls)) continue;
           o.hp = 0;

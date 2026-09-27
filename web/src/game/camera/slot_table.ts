@@ -14,6 +14,11 @@ import { CAMERA_SLOTS } from "./constants";
 export interface CameraSlot {
   occupied: number;
   at: number;
+  /**
+   * `[port-only]` -- set instead of {@link at} when the slot was dealt to a
+   * carried prop, which is no actor in the port. See `camera/slots.ts`.
+   */
+  prop: number | null;
 }
 
 /**
@@ -30,5 +35,5 @@ export interface CameraCandidate {
 
 /** Sixteen empty slots, the shape `ResetCameraEnemySlots` leaves. */
 export function makeCameraSlots(): CameraSlot[] {
-  return Array.from({ length: CAMERA_SLOTS }, () => ({ occupied: 0, at: 0 }));
+  return Array.from({ length: CAMERA_SLOTS }, () => ({ occupied: 0, at: 0, prop: null }));
 }

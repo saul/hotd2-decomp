@@ -26,10 +26,9 @@
  * origin lifted by 1.5 while the renderer had not yet posed it; the engine
  * reads whatever the last draw left, zero included.
  */
-import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { Vec3 } from "../vec";
-import { CameraSlotActor } from "./slots";
+import { CameraSlotActor, CameraSlotObject } from "./slots";
 
 /** The actor the camera is locked on, for the UI. Derived, not state. */
 export function CameraFocusActor(): number {
@@ -40,14 +39,17 @@ export function CameraFocusActor(): number {
   return -1;
 }
 
-function LookAtOne(out: Vec3, a: Actor): void {
+/** What the routine reads off a slot's object: `obj+0x100` and `obj+0x121`. */
+interface Tracked { lookAt: Vec3; attackPermit: number }
+
+function LookAtOne(out: Vec3, a: Tracked): void {
   out.x = a.lookAt.x;
   out.y = a.lookAt.y;
   out.z = a.lookAt.z;
 }
 
 /** `(a + b) * 0.5` per axis -- `FMUL [0x004C43AC]`, which is 0.5. */
-function LookAtMid(out: Vec3, a: Actor, b: Actor): void {
+function LookAtMid(out: Vec3, a: Tracked, b: Tracked): void {
   out.x = (b.lookAt.x + a.lookAt.x) * 0.5;
   out.y = (b.lookAt.y + a.lookAt.y) * 0.5;
   out.z = (b.lookAt.z + a.lookAt.z) * 0.5;
@@ -56,7 +58,7 @@ function LookAtMid(out: Vec3, a: Actor, b: Actor): void {
 /** Writes `g_camera_lookat_target`; clears `g_camera_is_tracking` when idle. */
 export function SelectCameraLookAtTarget(): void {
   const out = G.g_camera_lookat_target;
-  const s0 = CameraSlotActor(0), s1 = CameraSlotActor(1);
+  const s0 = CameraSlotObject(0), s1 = CameraSlotObject(1);
   if (s0 && s1) {
     const p0 = s0.attackPermit !== -1, p1 = s1.attackPermit !== -1;
     if (p0 && !p1) LookAtOne(out, s0);
@@ -66,7 +68,7 @@ export function SelectCameraLookAtTarget(): void {
   }
   if (s0) { LookAtOne(out, s0); return; }
   if (s1) { LookAtOne(out, s1); return; }
-  const s2 = CameraSlotActor(2), s3 = CameraSlotActor(3);
+  const s2 = CameraSlotObject(2), s3 = CameraSlotObject(3);
   if (s2 && s3) { LookAtMid(out, s3, s2); return; }
   if (s2) { LookAtOne(out, s2); return; }
   if (s3) { LookAtOne(out, s3); return; }

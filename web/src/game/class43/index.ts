@@ -70,6 +70,8 @@ import { ActorFlag, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
+import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
+  from "../camera/slots";
 import { G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -390,6 +392,8 @@ export function PlaceOwlFlockMember(obj: Actor, rng?: Rng): void {
   sub.beat = OWL_BEAT_START;
   sub.launchYaw = s16(BamsOf(G.g_camera_block_eye.x - obj.pos.x,
                              G.g_camera_block_eye.z - obj.pos.z));
+  // `obj+0x120 = 0xFF` at `0x00445E8A`, `RegisterEnemySlot` at `0x00445EFA`.
+  RegisterEnemySlot(obj);
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
   G.g_class43_attack_token = -1;
@@ -464,7 +468,7 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   G.g_enemies_alive -= 1;
   G.g_enemies_present -= 1;
   obj.flags |= ActorFlag.NoCameraTrack;
-  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  CameraSlotVacate(obj);
   if (sub.state === OwlState.WaitLaunch || sub.state === OwlState.FlyToCircle) {
     obj.flags |= ActorFlag.Reacting;
   }
@@ -952,10 +956,26 @@ export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
     const e = s16(h - s16(obj.yaw));
     obj.yaw += Math.trunc(sub.state === OwlState.Circle ? e / 4 : e / 10);
   }
+  // `OwlDrawBodyChain`, then the camera point: the circle's centre four units
+  // up while circling (`obj+0x1DC`, `+0x1E0 + 4.0`), the owl itself otherwise,
+  // and `RegisterForCameraTracking` -- on every frame the owl is alive.
+  if (sub.state === OwlState.Circle) {
+    obj.lookAt.x = sub.centreX;
+    obj.lookAt.y = sub.centreY + OWL_CIRCLE_LOOK_RISE;
+    obj.lookAt.z = sub.centreZ;
+  } else {
+    obj.lookAt.x = obj.pos.x;
+    obj.lookAt.y = obj.pos.y;
+    obj.lookAt.z = obj.pos.z;
+  }
+  RegisterForCameraTracking(obj);
   sub.prevX = obj.pos.x;
   sub.prevY = obj.pos.y;
   sub.prevZ = obj.pos.z;
 }
+
+/** `+ 4.0` on the circling owl's camera point, `OwlUpdateAndResolveShot`. */
+export const OWL_CIRCLE_LOOK_RISE = 4.0;
 
 // -- the class -------------------------------------------------------------
 

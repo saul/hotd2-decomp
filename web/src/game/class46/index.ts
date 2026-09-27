@@ -100,6 +100,8 @@ import { ActorFlag, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
+import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
+  from "../camera/slots";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
@@ -602,6 +604,8 @@ export function PlaceBats(obj: Actor, rng?: Rng): void {
     sub.segment = 0;
     sub.segT = 0;
     sub.wobble = 1.0;
+    // `obj+0x120 = 0xFF`, `RegisterEnemySlot` at `0x0042DF82`, both `INC`s.
+    RegisterEnemySlot(obj);
     G.g_enemies_present += 1;
     G.g_enemies_alive += 1;
     SpawnBatWings(obj, sub, rng);
@@ -695,6 +699,8 @@ function BatSpawnSwarmMember(placer: Actor, i: number, rng?: Rng): void {
   sub.prevZ = placer.pos.z;
   sub.timer = BAT_SWARM_ORBIT_BASE + i * BAT_SWARM_ORBIT_STAGGER;
   sub.orbitPhase = i << BAT_SWARM_PHASE_SHIFT;
+  // `obj+0x120 = 0xFF`, `RegisterEnemySlot` at `0x0042DB58`, both `INC`s.
+  RegisterEnemySlot(child);
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
   SpawnBatWings(child, sub, rng);
@@ -744,7 +750,7 @@ export function BatResolveShot(obj: Actor, f: ClassFrame): boolean {
 
   if (sub.subtype === BatSubtype.Dive) {
     obj.flags |= ActorFlag.NoCameraTrack;
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
     // Flung backwards along its own yaw at a half unit a frame.
     const a = (obj.yaw + 0x8000) * BAMS;
     sub.vx = Math.sin(a) * BAT_DIVE_CORPSE_FLING;
@@ -754,7 +760,7 @@ export function BatResolveShot(obj: Actor, f: ClassFrame): boolean {
     sub.vz *= BAT_SCATTER_CORPSE_DAMP;
   } else {
     obj.flags |= ActorFlag.NoCameraTrack;
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
     sub.vx *= BAT_SWARM_CORPSE_DAMP;
     sub.vz *= BAT_SWARM_CORPSE_DAMP;
   }
@@ -1125,9 +1131,20 @@ export function BatUpdate(obj: Actor, f: ClassFrame): void {
   if (sub.subtype === BatSubtype.Scatter) BatScatterUpdate(obj, f);
   else if (sub.subtype === BatSubtype.Swarm) BatSwarmUpdate(obj, f);
   else BatDiveUpdate(obj, f);
+  if (obj.despawned) return;
+  // `BatDiveUpdate` and `BatSwarmUpdate` -- not `BatScatterUpdate` -- end
+  // `obj+0x100 = obj+0x40` and `RegisterForCameraTracking` (`0x0042E973`,
+  // `0x0042F3BD`) on every path that does not despawn; a corpse carries
+  // `0x10000` and is refused.
+  if (sub.subtype !== BatSubtype.Scatter) {
+    obj.lookAt.x = obj.pos.x;
+    obj.lookAt.y = obj.pos.y;
+    obj.lookAt.z = obj.pos.z;
+    RegisterForCameraTracking(obj);
+  }
   // Last, as the engine has it: all three routines end by transforming
   // `(x, y + 1, z)` into `obj+0x70` and calling `RegisterForShotTest`.
-  if (!obj.despawned) BatPublishShotSphere(obj);
+  BatPublishShotSphere(obj);
 }
 
 const handler: ClassHandler = {

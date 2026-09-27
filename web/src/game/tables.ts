@@ -5,6 +5,7 @@
  * whole life of a stage, so they are deliberately **not** part of a snapshot —
  * a save state carries the state, and the tables come back with the bundle.
  */
+import type { CamPaths } from "./camera/curve";
 import type {
   AttackJson, BakedMotion, BreakablesJson, CharactersJson, CharacterType,
   ColiJson, ThrowHandJson,
@@ -49,6 +50,14 @@ export const T = {
   coli: null as ColiJson | null,
   types: {} as Record<string, CharacterType>,
   /**
+   * The stage's `cam/` paths, by global slot -- what `CamEvalPath7`
+   * (`FUN_004041E0`) evaluates. Bundle data like the rest of this object:
+   * read-only for the life of the stage and not in a snapshot. Set by
+   * {@link SetCameraPaths}, apart from {@link SetGameTables} so a caller that
+   * refreshes the gameplay tables does not drop the curves.
+   */
+  camPaths: null as CamPaths | null,
+  /**
    * The game-over screen's `.rdata`: the bodies' types, clips and stands, the
    * route map's tiles, waypoints and default route. One block for the whole
    * game. Null in a bundle written before it, which draws no body and no map.
@@ -73,6 +82,11 @@ let warnedNoColi = false;
 /** `[port-only]` -- the game-over block, from the same `script.json`. */
 export function SetGameOverTables(json: GameOverJson | undefined): void {
   T.gameOver = json ?? null;
+}
+
+/** Install the stage's camera paths. See {@link T.camPaths}. */
+export function SetCameraPaths(paths: CamPaths | null): void {
+  T.camPaths = paths;
 }
 
 export function SetGameTables(chars: CharactersJson | undefined,

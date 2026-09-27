@@ -915,27 +915,56 @@ export const G = {
    */
   g_camera_block_target: vec3(),
   /**
-   * `[port-only]` — where the block's angles face once
-   * `UpdateSceneViewAndLight` has applied the screen shake: see
-   * `SceneViewApplyShake` in `camera/shake.ts`. The engine keeps it as the
-   * block's pitch and yaw; the port's block is two points, so this is the
-   * third. Read by the draw only while `g_screen_shake_pitch` is non-zero.
+   * `[port-only]` — the view `UpdateSceneViewAndLight` (`FUN_00401F40`) built
+   * this frame, as the draw reads it: the block's eye, the point its (nodded)
+   * angles face, and its roll. The engine builds its view matrices from the
+   * block **at the end of `CameraActorTick`**, before the scene state's hook
+   * and every actor run, and draws with those; anything that writes the block
+   * later in the frame shows on the next one. These three are that snapshot.
+   * See `SceneViewApplyShake` in `camera/shake.ts`.
    */
+  g_camera_block_view_eye: vec3(),
   g_camera_block_view_target: vec3(),
+  g_camera_block_view_roll_bams: 0,
   /**
-   * `g_cam_path_target` — 0x009C70D8. The look-at `CamEvalPath7` evaluates
-   * from the active path's target channels, and the fallback
-   * `SelectCameraLookAtTarget` uses when nothing is registered.
+   * `g_cam_path_target` — 0x009C70D8. The deferred pose block's target, and
+   * the fallback `SelectCameraLookAtTarget` uses when nothing is registered.
    *
-   * [diverges] The engine writes this only from the deferred-rail hooks
-   * (`CameraStepRailTick`, `CameraPlayStashedPath`, `CameraArmStashedPath`),
-   * so after an ordinary `cam_play` action retires it can hold the target of
-   * whichever shot last ran through one of those. The port keeps it current
-   * with the playing path every frame. In the case that motivated this —
-   * stage 2 block 17 step 5, where `finish_sequence 6` had just run the
-   * 121..150 range through `CameraPlayStashedPath` — the two agree exactly.
+   * Written by the stashed rail's hooks and `CameraArmStashedPath` (the path's
+   * own target channels at the rail frame), and by the minor-4 and minor-6
+   * starters (thirty units ahead of the block's eye). A plain `cam_play` never
+   * writes it: after one, the fallback aims wherever the last of those left.
    */
   g_cam_path_target: vec3(),
+  /**
+   * `g_cam_path_eye` — `0x009C70C0`, and its angle words `g_cam_path_pitch_bams`
+   * / `g_cam_path_yaw_bams` / `g_cam_path_roll_bams` (`0x009C70CC`/`D0`/`D4`):
+   * the **deferred pose block**, laid out as the camera block's `+0x80` on --
+   * eye, pitch, yaw, roll, then `g_cam_path_target` at `+0x18`.
+   *
+   * The stashed rail (`CameraStepRailTick`, `CameraPlayStashedPath`) and
+   * `CameraArmStashedPath` evaluate the path into it; `CameraSnapToPathEye`
+   * copies the block's eye in. The camera block reaches it only through the
+   * drivers: `CameraEaseBlockEyeToPathPose` eases or snaps the block eye onto
+   * it, `SelectCameraLookAtTarget` falls back to its target, and
+   * `CameraDriverFromDeferredPose` copies the whole of it across.
+   */
+  g_cam_path_eye: vec3(),
+  g_cam_path_pitch_bams: 0,
+  g_cam_path_yaw_bams: 0,
+  g_cam_path_roll_bams: 0,
+  /**
+   * `g_camera_eye_x/y/z` — `0x009C71E0`, and `g_camera_pitch_bams` /
+   * `g_camera_roll_bams` (`0x009C71EC`, `0x009C71F4`) beside
+   * {@link g_camera_yaw_bams}: the **gameplay eye**, where the enemies measure
+   * to. Not the camera: only the scene state's hook writes it (the rail at the
+   * pose's eye less fifteen in y, the held eye, the view-angle camera fifteen
+   * units down its own axis), and `UpdateSceneViewAndLight` draws from the
+   * block. See `camera/hooks.ts`.
+   */
+  g_camera_eye: vec3(),
+  g_camera_pitch_bams: 0,
+  g_camera_roll_bams: 0,
   /**
    * `g_camera_turn_rate` — 0x009C6F36, and `g_camera_turn_curve` — 0x009C6F38.
    *
@@ -1024,6 +1053,75 @@ export const G = {
    * which is where the engine writes and parks it.
    */
   g_camera_action_driver: 0,
+  /**
+   * `[port-only]` — the handler in {@link g_camera_action_driver} was
+   * installed by an action the interpreter ran **this frame**, which has
+   * already made the call `EvtRunQueuedActions` would make: a `cam_play`'s
+   * `CamStartPathPlayback` publishes its first frame itself, and a
+   * `finish_sequence` leaves its starter for the next frame. The port runs an
+   * action the moment it is queued, so the frame's queued-action call skips
+   * once. See `CameraRunQueuedAction`.
+   */
+  g_camera_action_fresh: 0,
+  /**
+   * `g_camera_starter_reseats` — `0x009C6F3C`. While set, the three camera
+   * action starters run `CameraResetForPathShot` and seat before installing
+   * their driver. Every writer stores 1.
+   */
+  g_camera_starter_reseats: 1,
+  /**
+   * `g_camera_update_hook` — `0x009C7080`, the scene state's camera routine,
+   * as the port's {@link CameraUpdateHook} identity. `CameraUpdateTick` jumps
+   * through it once a frame, after the camera actor. See `camera/hooks.ts`.
+   */
+  g_camera_update_hook: 0,
+  /**
+   * `g_cam_path_cursor` — `0x009A6144`, the next frame `CamAdvancePathFrame`
+   * publishes, and `g_cam_path_end_frame` — `0x009A6148`, the last of the
+   * range. Camera block 0's `+0x104` and `+0x108`.
+   */
+  g_cam_path_cursor: 0,
+  g_cam_path_end_frame: 0,
+  /**
+   * `g_cam_path_frames_left` — `0x009C6F28`. `end - cursor` as the last path
+   * routine left it: `CamAdvancePathFrame` and the two rail hooks write it
+   * every frame, `CameraHoldEyeTick` writes -1, the resets `0x7FFFFFFF`.
+   * `wait_camera_path_frame 0` reads it, and `CameraTrackEnemiesTick` arms
+   * the branch preview while it is negative.
+   */
+  g_cam_path_frames_left: 0x7fffffff,
+  /**
+   * `g_camera_ease_eye` — `0x009C6F33`. Set, `CameraEaseBlockEyeToPathPose`
+   * eases the block's eye onto the pose a sixteenth a frame; clear, it snaps.
+   * `EvtActionSetFlag15` raises it; `ResetSceneCombatState` and
+   * `goto_scene_state` clear it.
+   */
+  g_camera_ease_eye: 0,
+  /**
+   * `g_evt_cam_override_valid` — `0x009C6FD8`, and the three `{path, frame}`
+   * pairs `g_evt_cam_override_pairs` (`0x009C6FDC`) that `store_six`
+   * (`EvtActionStoreSixOperands60`) writes with it. `CameraArmStashedPath`
+   * re-arms the camera on the pair `g_script_branch_var` picks.
+   */
+  g_evt_cam_override_valid: 0,
+  g_evt_cam_override_pairs: [] as { path: number; frame: number }[],
+  /**
+   * `g_camera_impulse_*` — `0x009C70F8`..`0x009C7104`, `0x007C1760`/`70`:
+   * scene state (2,5)'s push. See `CameraImpulseShakeTick` in
+   * `camera/hooks.ts`. No shipped script enters (2,5).
+   */
+  g_camera_impulse_yaw_bams: 0,
+  g_camera_impulse_request: 0,
+  g_camera_impulse_lock: 0,
+  g_camera_impulse_frames: 0,
+  g_camera_impulse_offset: vec3(),
+  g_camera_impulse_velocity: vec3(),
+  /**
+   * `g_camera_use_fixed_y` — `0x009C70F4`. At 1 the path hooks put the
+   * gameplay eye at `g_camera_fixed_eye_y` rather than fifteen below the
+   * pose. Evt opcode 0x36 writes it; no shipped script uses it.
+   */
+  g_camera_use_fixed_y: 0,
   /**
    * `g_evt_wait_alive_hysteresis` — 0x007DCCA8. The extra frame
    * `wait_enemies_alive` (0x44) costs, and nothing else in the program reads
@@ -1545,24 +1643,34 @@ export const G = {
    */
   g_camera_block_eye: vec3(),
   /**
-   * `g_camera_yaw_bams` — 0x009C71F0. Which way the camera is pointing, in
-   * BAMS, beside the eye at `g_camera_eye_x/y/z` (0x009C71E0).
+   * `g_camera_yaw_bams` — 0x009C71F0. The gameplay eye's heading, in BAMS,
+   * beside {@link g_camera_eye}: the scene state's hook writes it -- the
+   * rail as its pose's yaw turned half round, the view-angle camera from the
+   * block -- and it faces *forward*, where the block's own yaw faces back.
    *
-   * Class 0x31 needs the *yaw alone* rather than the whole camera matrix:
+   * Class 0x31 needs the yaw alone rather than the whole camera matrix:
    * `ThrowerStateLeapAside` builds its landing point with a Y rotation only,
    * and `ThrowerFindWallBeside` refuses to leap unless the actor is facing
-   * within 0x2000 of it. The host writes it once a frame.
+   * within 0x2000 of it.
    */
   g_camera_yaw_bams: 0,
   /**
    * `g_camera_block_pitch_bams` — 0x009A60CC, `g_camera_blocks + 0x8C`: the
    * camera block's X rotation. `UpdateSceneViewAndLight` (`FUN_00401F40`)
    * builds the camera as `T(eye) Ry(yaw) Rx(this) Rz(roll)` looking down its
-   * own -z, so this is `asin` of the view direction's y — positive looking
-   * up. The horde's dive lifts its arc by `2 * sin(this)`. The host writes it
-   * once a frame beside the yaw.
+   * own -z, and `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) derives it from
+   * the block's eye and target with `VecToAngles(eye - target)` -- positive
+   * looking up. The horde's dive lifts its arc by `2 * sin(this)`.
    */
   g_camera_block_pitch_bams: 0,
+  /**
+   * `g_camera_block_yaw_bams` — `0x009A60D0`, and `g_camera_block_roll_bams`
+   * — `0x009A60D4`: the block's other two angle words.
+   * `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) derives pitch and yaw from
+   * the eye and target and stores its third argument as the roll.
+   */
+  g_camera_block_yaw_bams: 0,
+  g_camera_block_roll_bams: 0,
   /**
    * `g_coli_hit_surface` — 0x009CAC40. The material id of whatever the last
    * collision trace hit, and a **side output**: every caller reads it straight
@@ -2008,8 +2116,39 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
+  G.g_camera_block_view_eye = vec3();
   G.g_camera_block_view_target = vec3();
+  G.g_camera_block_view_roll_bams = 0;
   G.g_cam_path_target = vec3();
+  G.g_cam_path_eye = vec3();
+  G.g_cam_path_pitch_bams = 0;
+  G.g_cam_path_yaw_bams = 0;
+  G.g_cam_path_roll_bams = 0;
+  // `CameraClearHookAndPose` (`FUN_0040C340`) zeroes these six on a scene
+  // load; the port's reset is that load.
+  G.g_camera_eye = vec3();
+  G.g_camera_pitch_bams = 0;
+  G.g_camera_yaw_bams = 0;
+  G.g_camera_roll_bams = 0;
+  G.g_camera_block_pitch_bams = 0;
+  G.g_camera_block_yaw_bams = 0;
+  G.g_camera_block_roll_bams = 0;
+  G.g_camera_action_fresh = 0;
+  G.g_camera_starter_reseats = 1;
+  G.g_camera_update_hook = 0;
+  G.g_cam_path_cursor = 0;
+  G.g_cam_path_end_frame = 0;
+  G.g_cam_path_frames_left = 0x7fffffff;
+  G.g_camera_ease_eye = 0;
+  G.g_evt_cam_override_valid = 0;
+  G.g_evt_cam_override_pairs = [];
+  G.g_camera_impulse_yaw_bams = 0;
+  G.g_camera_impulse_request = 0;
+  G.g_camera_impulse_lock = 0;
+  G.g_camera_impulse_frames = 0;
+  G.g_camera_impulse_offset = vec3();
+  G.g_camera_impulse_velocity = vec3();
+  G.g_camera_use_fixed_y = 0;
   G.g_camera_turn_rate = 0;
   G.g_camera_turn_curve = 1;
   G.g_camera_settled = 0;

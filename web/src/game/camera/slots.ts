@@ -134,21 +134,26 @@ export function SortCameraCandidates(): void {
  * `g_camera_is_tracking`; `CameraActorTick` seeds that and
  * `SelectCameraLookAtTarget` clears it.
  *
- * `[open]` A carried prop's `obj+0x121` is `0xFF` -- `CarriedPropInit` and
- * `CarriedPropDrop` write it (`0x00442808`, `0x00442B75`) -- so the engine
- * deals a prop slot `rank + 2`, and the camera then reads the prop's
- * `obj+0x100`, which nothing read so far writes. The port keeps the rank (so
- * the actors behind it get the slots the engine gives them) and leaves the
- * prop's own slot empty, which is the same gap `g_body_creatures` names.
+ * A carried prop's `obj+0x121` is `0xFF` -- `CarriedPropInit` and
+ * `CarriedPropDrop` write it (`0x00442808`, `0x00442B75`), and no other store
+ * of that byte sits in the prop's routines (byte search) -- so a prop is
+ * dealt `rank + 2` like any candidate without a permit. `[likely]` on the
+ * "no other store": a register-form store would not match the immediate
+ * pattern searched for.
  */
 export function UpdateCameraEnemySlots(): void {
   SortCameraCandidates();
   const slots = makeCameraSlots();
   const cand = G.g_camera_candidates;
-  for (let rank = 0; rank < G.g_camera_candidate_count && rank < cand.length;
-       rank++) {
+  const n = Math.min(G.g_camera_candidate_count, cand.length);
+  for (let rank = 0; rank < n; rank++) {
     const e = cand[rank];
-    if (e.prop !== null) continue;
+    if (e.prop !== null) {
+      const s = slots[rank + CAMERA_ATTACK_SLOTS];
+      s.occupied = 1;
+      s.prop = e.prop;
+      continue;
+    }
     const obj = ActorByAt(e.at);
     if (!obj) continue;
     if (obj.attackPermit !== -1) {
@@ -185,6 +190,7 @@ export function RegisterEnemySlot(obj: Actor): void {
     obj.cameraSlot = s;
     slot.occupied = 1;
     slot.at = obj.at;
+    slot.prop = null;
     return;
   }
 }
@@ -215,12 +221,30 @@ export function CameraSlotVacate(obj: Actor): void {
 }
 
 /**
- * The actor in slot `i`, if the slot is occupied and the actor still exists.
- * `[port-only]`: the engine dereferences the pointer.
+ * The actor in slot `i`, if the slot is occupied and holds an actor that
+ * still exists. `[port-only]`: the engine dereferences the pointer.
  */
 export function CameraSlotActor(i: number): Actor | undefined {
   const slot = G.g_enemy_slots[i];
-  return slot && slot.occupied ? ActorByAt(slot.at) : undefined;
+  if (!slot || !slot.occupied || slot.prop !== null) return undefined;
+  return ActorByAt(slot.at);
+}
+
+/**
+ * What `SelectCameraLookAtTarget` reads off the object in slot `i`: its
+ * `obj+0x100` and its `obj+0x121`. A carried prop answers with its own camera
+ * point and no permit. `[port-only]`, for the same reason as
+ * {@link CameraSlotActor}.
+ */
+export function CameraSlotObject(i: number):
+    { lookAt: Vec3; attackPermit: number } | undefined {
+  const slot = G.g_enemy_slots[i];
+  if (!slot || !slot.occupied) return undefined;
+  if (slot.prop !== null) {
+    const p = G.g_carried_props.find((q) => q.id === slot.prop);
+    return p ? { lookAt: p.lookAt, attackPermit: -1 } : undefined;
+  }
+  return ActorByAt(slot.at);
 }
 
 /**
@@ -235,5 +259,6 @@ export function CameraSlotsBusy(): boolean {
 
 /** Whether `obj` sits in an occupied slot. `[port-only]`, for tests and the UI. */
 export function CameraSlotHolds(at: number): boolean {
-  return G.g_enemy_slots.some((s) => s.occupied !== 0 && s.at === at);
+  return G.g_enemy_slots.some((s) => s.occupied !== 0 && s.prop === null
+                                      && s.at === at);
 }

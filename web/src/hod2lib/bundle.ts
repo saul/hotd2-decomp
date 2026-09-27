@@ -109,7 +109,14 @@ export const TOOL_VERSION = "0.8.0";
 /**
  * Every asset slot the three container families can draw. The group props use
  * the first four; `KindedPropUpdate` adds the three kinded models and the
- * smaller shadow, and `FallingContainerUpdate` the whole/loose/fragment trio.
+ * smaller shadow, and `FallingContainerUpdate` the whole/loose pair plus
+ * `0xA55`, which is what its two `FallingContainerFragmentUpdate`
+ * (`FUN_0046AD20`) pieces draw.
+ *
+ * The fifteen pieces a stacked group prop shatters into are **not** listed
+ * here: `BreakablePropShatterUpdate` (`FUN_004653B0`) draws them out of
+ * `g_shatter_fragment_slots_a` and `_b`, so `breakableSlotEntry` takes them
+ * from `ExeTables.shatterPieces` rather than from a second copy.
  */
 export const BREAKABLE_SLOTS = [
   0x19e8, 0x19e6, 0x1a0f, 0x10d0,          // BreakablePropUpdate
@@ -735,6 +742,8 @@ export function breakablesJson(tables: ExeTables,
     groups: tables.breakableGroups(),
     hull: tables.breakableHullPoints().map((p) => [...p]),
     falling_hull: tables.fallingHullPoints().map((p) => [...p]),
+    fragment_hull: tables.fragmentHullPoints().map((p) => [...p]),
+    shatter: tables.shatterPieces(),
     kinds: tables.propKindParams(),
     placements,
     effects,
@@ -1306,6 +1315,13 @@ export async function breakableSlotEntry(
   // name their own slot in the spawn descriptor, so those come from the
   // stage's own placements and differ per stage.
   const want = [...BREAKABLE_SLOTS];
+  // A stacked group prop's fifteen pieces, both tables: which one a shatter
+  // draws is the prop's `+0x324`, a run-time value (Training's one-shot
+  // targets take `_b`), so both travel with every stage.
+  const shatter = stage.tables.shatterPieces();
+  for (const slot of [...shatter.slots_a, ...shatter.slots_b]) {
+    if (!want.includes(slot)) want.push(slot);
+  }
   for (const pl of placements) {
     if (pl.container !== "generic") continue;
     // The literals this type's routine draws, always; plus the descriptor slot

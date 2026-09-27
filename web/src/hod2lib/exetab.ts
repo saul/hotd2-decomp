@@ -909,6 +909,27 @@ export class ExeTables {
   static readonly PROP_KIND_COUNT = 11;
   static readonly FALLING_HULL = 0x00594788;
   static readonly FALLING_HULL_POINTS = 48;
+  /**
+   * `g_container_fragment_hull_points` -- the 55-point hull
+   * `FallingContainerFragmentUpdate` (`FUN_0046AD20`) passes
+   * `FallingContainerGroundContact` as `(0x005948A8, 0x37)`. It begins where
+   * the 48-point container hull ends; both bounds are the callers' own
+   * `PUSH` immediates, not a scan for the end of either table (L6).
+   */
+  static readonly FRAGMENT_HULL = 0x005948a8;
+  static readonly FRAGMENT_HULL_POINTS = 55;
+  /**
+   * `BreakablePropShatterUpdate` (`FUN_004653B0`) draws piece `i` from
+   * `g_shatter_fragment_slots_a[i]` or `_b[i]`, and `BreakablePropSpawnShatter`
+   * (`FUN_00465170`) places it from `g_shatter_fragment_offsets[i]` and
+   * `g_shatter_fragment_angles[i]`. The loop bound, `CMP ESI, 0x5A` in steps
+   * of six, is what says fifteen.
+   */
+  static readonly SHATTER_SLOTS_A = 0x00593a38;
+  static readonly SHATTER_SLOTS_B = 0x00593a58;
+  static readonly SHATTER_OFFSETS = 0x00593a78;
+  static readonly SHATTER_ANGLES = 0x00593ad4;
+  static readonly SHATTER_PIECES = 15;
   static readonly CLASS41_CTORS = 0x00593580;
   static readonly CLASS41_UPDATES = 0x005936bc;
   static readonly CLASS41_TYPES = 79;
@@ -1601,6 +1622,46 @@ export class ExeTables {
                 i16(this.data, o + 4) * 0.001]);
     }
     return out;
+  }
+
+  /** The 55-point hull a falling container's two pieces come to rest on. */
+  fragmentHullPoints(): [number, number, number][] {
+    return this.hullPoints(ExeTables.FRAGMENT_HULL,
+                           ExeTables.FRAGMENT_HULL_POINTS);
+  }
+
+  /**
+   * What `BreakablePropSpawnShatter` and `BreakablePropShatterUpdate` read per
+   * piece: the two slot tables, and the offset (thousandths, left raw) and
+   * `Rz Ry Rx` angles (BAMS) each piece starts at relative to the prop.
+   */
+  shatterPieces(): { slots_a: number[]; slots_b: number[];
+                     offsets: [number, number, number][];
+                     angles: [number, number, number][] } {
+    const n = ExeTables.SHATTER_PIECES;
+    const s16s = (va: number, count: number): number[] => {
+      const base = this.v2r(va);
+      if (base === null) return [];
+      const out: number[] = [];
+      for (let i = 0; i < count && base + i * 2 + 2 <= this.data.length; i++) {
+        out.push(i16(this.data, base + i * 2));
+      }
+      return out;
+    };
+    const triples = (va: number): [number, number, number][] => {
+      const flat = s16s(va, n * 3);
+      const out: [number, number, number][] = [];
+      for (let i = 0; i + 2 < flat.length; i += 3) {
+        out.push([flat[i], flat[i + 1], flat[i + 2]]);
+      }
+      return out;
+    };
+    return {
+      slots_a: s16s(ExeTables.SHATTER_SLOTS_A, n),
+      slots_b: s16s(ExeTables.SHATTER_SLOTS_B, n),
+      offsets: triples(ExeTables.SHATTER_OFFSETS),
+      angles: triples(ExeTables.SHATTER_ANGLES),
+    };
   }
 
   /** The 48-point hull `FallingContainerUpdate` comes to rest on. */

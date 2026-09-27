@@ -133,15 +133,19 @@ export function GameOverPlaceBody(player: number): void {
  * frame has reached the body's cue.
  *
  * ```
- * DrawSkinnedModelAndShadow(body);         // no shadow in it: push, walk, pop
+ * DrawSkinnedModelAndShadow(body);         // push, walk, pop, shadow
  * if (cursor == g_motion_play_length[motion] - 1) { hook = SetCurActor; return; }
  * if (g_game_over_players == 2) { if (0x004EC8C4[p] <= g_cam_path_frame) cursor++; }
  * else if (0x3B < g_cam_path_frame) cursor++;
  * ```
  *
  * `DrawSkinnedModelAndShadow` (`FUN_00411090`) is `MatrixStackPush`,
- * `SkeletonDrawWalk`, `MatrixStackPop` and nothing else: the name promises a
- * shadow the routine does not draw. `[proved]`
+ * `SkeletonDrawWalk`, `MatrixStackPop` -- and then `ActorDrawShadow`
+ * (`FUN_0040A590`) on **`g_cur_actor`**, past the `MatrixStackPop` Ghidra
+ * marks no-return (`L35`); this note said "no shadow" until that was read. So
+ * the shadow drawn here is whatever actor `g_cur_actor` last named, not the
+ * body's. `[proved]` for the call, `[open]` for which actor that is in app
+ * state 7; the port draws no character shadow either way.
  */
 export function PlayerHookDrawBodyUntilMotionEnd(player: number): boolean {
   const b = G.g_player_bodies[player];

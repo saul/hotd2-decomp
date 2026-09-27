@@ -51,6 +51,8 @@ import {
 } from "./stand";
 import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { ThrowerDrawBonePart } from "./draw";
 import { ThrowerOnShot } from "./on_shot";
 import {
   ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
@@ -508,6 +510,18 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // wall-crawler on its wall; a snap applied before the state moves the actor
   // would be undone every frame.
   ThrowerPushOutOfWorld(obj);
+  // `ThrowerAdvanceMotion` (`FUN_00449EF0`), at `0x0044998A`: the draw, and
+  // with it the node hook -- which is where the hand grows back. The clock
+  // half of that routine is the director's `ActorAdvanceMotion`.
+  //
+  // [diverges] The hook is always `ThrowerDrawBonePart`. `EnemyThrowerInit`
+  // installs `ThrowerDrawWithEnlargedHead` (`FUN_0044A300`) instead in
+  // Original Mode with `DAT_009C88A8` up, and in Training
+  // `ThrowerAdvanceMotion` swaps in `ThrowerDrawNodePart` (`FUN_0044A2B0`),
+  // which grows nothing, for the next frame whenever it holds the clock
+  // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
+  // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
+  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart);
 }
 
 /**
@@ -549,7 +563,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Rearm:
       return ThrowerStateRearm(obj, host);
     case ThrowerState.RestoreBothHands:
-      return ThrowerStateRestoreBothHands(obj, dt, stance, host);
+      return ThrowerStateRestoreBothHands(obj, stance, host);
     case ThrowerState.StrikeOnTheSpot:
       return ThrowerStateStrikeOnTheSpot(obj, dt, rng, host, events);
     case ThrowerState.KnockedTumbling:

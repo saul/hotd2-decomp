@@ -20093,3 +20093,56 @@ landings.
 fall-through, the feather's kill-without-draw, the ring task's fortieth-frame
 kill, the owl's blood, or putting the surface ring back on the underwater death
 each fails `npm run test:port`.
+
+## 2026-09-27 -- per-part draw gates: hiding a character is not an alpha
+
+The port hid class-0x30 actors (the corpse blink, the captor's hold, the
+emerge) by writing one alpha for the whole actor, and the renderer hid the root
+on it; three sites declared as divergences said the engine keeps "a draw flag per
+model part". Read again, instruction by instruction:
+
+* **Two gates, not one.** `SkeletonEmitNode` skips a node's hook on
+  `model+0x64` bit 0 (`TEST byte ptr [ECX+0x64],0x1` at `0x00411505`), so that
+  bit is the whole skeleton's gate -- main had just named it
+  `MotionFlag.Drawn`. The `model+0x40` records `ActorSetPartVisibility`
+  writes are the **vertex-blended parts** (`g_pCharacterExtraParts`: the waist,
+  the skirt), not bones: part *i* is the exporter's `part<i>_<slot>` node.
+  `ActorBuildSkinnedModel` sizes them from that table and sets every byte to 1.
+  The attachment list runs with no gate at all.
+* **`DrawSkinnedModelAndShadow` draws the shadow** (`ActorDrawShadow` on
+  `g_cur_actor`, past the no-return pop, L35). Main's Hierophant branch found
+  the same thing the same day; the rows were merged.
+* **State 19 was misread.** `ZombieStateWaitForCameraFrame`'s `tail+0x0C == 0`
+  arm was ported as a freeze ("FUN_00409D10 stops the clip", "obj+0x1F8 bit 0
+  is root motion") and froze `obj+0x1324`. It is a hide; the clip plays. The
+  exporter's `freeze` field has the right polarity and the wrong name.
+* **`ZombieStateAwaitCivilianOrder`'s sub 0 falls into sub 1**, and its die
+  arm releases both counts on the spot and credits `g_active_player` with one
+  player in play; the port returned, deferred the counts to the sweep and drew
+  a random killer. It writes part 0 alone, so a skirt would stay drawn.
+* **Class 0x31's blink is an alpha after all** -- `obj+0x138C` with
+  `obj+0x136C` bit 2, which `ThrowerDrawBonePart` draws each bone at, and which
+  `DrawCharacterPartSlot` draws types 9, 0x12, 0x17 and 0x18's parts at with no
+  test of the bit. So the note that it was "the same answer" to class 0x30's
+  routine was wrong: different routine, different mechanism.
+* **The regrow is per node and takes 41.** `ThrowerDrawBonePart` adds 0.025f
+  for each regrowing node it is handed, so two bare hands grow twice as fast,
+  a hidden skeleton not at all, and forty f32 additions stop at 0.99999958.
+  `ThrowerStateRestoreBothHands` also raises `0x2000` for its length and
+  blends to its idle, both missing.
+* **Ghidra's xrefs to `ActorSetPartVisibility` list eight calls; a rel32 scan
+  finds ten.** The other two are class 0x30 state 28 (`0x004586E0`), which has
+  no Ghidra function.
+
+**Wrong turn.** This branch first ported `SkeletonDrawWalk` and
+`SkeletonEmitNode` (the hook half) under their own names, and called bit 0
+`DrawSkeleton`; main had landed `game/skeleton.ts` with both routines whole
+for an actor carrying the model block, and `SkeletonModel.part0` for class
+0x14's part byte. On the merge the walk became the port-only
+`ActorRunNodeDrawHooks`, the bit took main's name, and `part0` became
+`Actor.partVisible[0]`, so there is one array of part records.
+
+**Measured**: the port tests drive the corpse blink through both gates to a
+hidden last frame, the captor's hide with part 1 still drawn, state 19's hide
+without a frozen clock, and the regrow at 40, 41 and 42 frames; the render
+test draws a skirt with no body.

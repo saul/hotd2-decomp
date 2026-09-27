@@ -40,6 +40,8 @@ const MOTION_FLAG_4 = 4;
 /** The ring's life, `CMP EAX, 0x50`, and its turn, `ADD EDX, 8`. */
 const RING_FRAMES = 0x50;
 const RING_TURN = 8;
+/** `PUSH 0x147` -- `op_st1`'s last path, the ring's spread and fade. */
+const RING_CURVE = 0x147;
 
 /**
  * `Class23Init` — `FUN_0048FD90`.
@@ -120,20 +122,45 @@ export function Class23Update(obj: Actor, f: ClassFrame): void {
       break;
   }
   // The ring task runs after its walker: `ActorAlloc` appended it.
-  if (t.ring) Class23LandingRingUpdate(obj);
+  if (t.ring) Class23LandingRingUpdate(obj, f);
 }
 
 /**
- * `Class23LandingRingUpdate` — `FUN_00491700`. The ring's state step: `yaw +=
- * 8`, the draw (the renderer's: slot `0x17C8` scaled by `CamEvalPath7(0x147,
- * frame)` and faded by it), `frame++`, `ActorKill` past `0x50`.
+ * `Class23LandingRingUpdate` — `FUN_00491700`.
+ *
+ * ```
+ * push; MatrixTranslate(obj+0x40..0x48)
+ * obj+0x68 += 8; MatrixRotateY(obj+0x68)
+ * CamEvalPath7(0x147, (float)obj+0x1320, &e, &t, &r, &b)
+ * MatrixScale(e.x, e.y, e.z); NoOpStub(max(e.x, e.y))
+ * AssetDrawSlotWithAlpha(0x17C8, 1.0 - t.x); pop
+ * if (++obj+0x1320 > 0x50) ActorKill()
+ * ```
+ *
+ * The curve is read here, where the engine reads it, and what the draw was
+ * handed is left on the record for the renderer: the frame it was drawn at
+ * is the one before the increment. The kill comes after the draw, so the
+ * last frame is drawn and the record goes on the next update.
+ * `CamEvalPath7` reads the same slot table `CamEvalObjectPath6` does, and slot
+ * `0x147` is `op_st1`'s -- the host's object path is that curve, channels
+ * as floats.
  */
-export function Class23LandingRingUpdate(obj: JudgmentCompanionActor): void {
+export function Class23LandingRingUpdate(obj: JudgmentCompanionActor,
+                                         f: ClassFrame): void {
   const r = obj.companion.ring;
   if (!r) return;
+  if (r.killed) { obj.companion.ring = null; return; }
   r.yaw = (r.yaw + RING_TURN) | 0;
+  const e = f.host.objectPath?.(RING_CURVE, r.frame) ?? null;
+  r.drawn = e !== null;
+  if (e) {
+    r.scale.x = Math.fround(e.x);
+    r.scale.y = Math.fround(e.y);
+    r.scale.z = Math.fround(e.z);
+    r.fade = Math.fround(e.pitch ?? 0);
+  }
   r.frame += 1;
-  if (r.frame > RING_FRAMES) obj.companion.ring = null;
+  if (r.frame > RING_FRAMES) r.killed = true;
 }
 
 /** The sidebar's line. */

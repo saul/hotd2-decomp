@@ -35,6 +35,30 @@ export enum Class23State {
   Lie = 3,
 }
 
+/**
+ * The landing ring's object: `obj+0x40` (where the walker stood when it
+ * landed), `+0x68` (turned 8 a frame), `+0x1320` (the frame, 1 to `0x50`),
+ * and what the update's draw was given this frame -- `CamEvalPath7(0x147,
+ * frame)`'s first triple as the scale and its fourth channel as the fade,
+ * drawn at `1.0 - fade`.
+ */
+export interface JudgmentLandingRing {
+  x: number; y: number; z: number;
+  yaw: number;
+  frame: number;
+  /** `MatrixScale(e.x, e.y, e.z)` -- the curve's first triple. */
+  scale: { x: number; y: number; z: number };
+  /** The curve's fourth channel; the draw's alpha is `1.0 - fade`. */
+  fade: number;
+  /** The update drew it this frame: false only with no curve to read. */
+  drawn: boolean;
+  /**
+   * `ActorKill` ran after this frame's draw (`+0x1320 > 0x50`). The ring is
+   * still drawn this frame and gone on the next update.
+   */
+  killed: boolean;
+}
+
 export interface JudgmentCompanionTail {
   /** `+0x130C` — {@link Class23Subtype}. */
   subtype: number;
@@ -64,12 +88,11 @@ export interface JudgmentCompanionTail {
   enemySlot: boolean;
   /**
    * The ring `Class23Subtype0Entrance` leaves at its landing — the object
-   * `Class23LandingRingUpdate` (`FUN_00491700`) runs: its position, its yaw
-   * (`+0x68`, turned 8 a frame) and its frame (`+0x1320`, 1..0x50). Null when
-   * there is none. `[port-only]` as a field of the walker: the ring is a task
-   * of its own that nothing reads, and this is where the renderer finds it.
+   * `Class23LandingRingUpdate` (`FUN_00491700`) runs. Null when there is
+   * none. `[port-only]` as a field of the walker: the ring is a task of its
+   * own that nothing reads, and this is where the renderer finds it.
    */
-  ring: { x: number; y: number; z: number; yaw: number; frame: number } | null;
+  ring: JudgmentLandingRing | null;
 }
 
 /** `[port-only]` as a function. */

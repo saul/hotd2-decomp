@@ -92,6 +92,9 @@ import { Poser } from "./characters/pose";
 import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
   from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
+import {
+  placeJudgmentRoot, seatJudgmentSubActors, syncJudgmentWings,
+} from "./characters/judgment";
 import { restoreGore, swapGore } from "./characters/gore";
 export type { Instance };
 
@@ -510,6 +513,9 @@ export class CharacterLayer implements System {
       if (placeHordeRoot(inst)) {
         // Class 0x40's sub-model: its own object transform. See
         // `render/characters/horde.ts`.
+      } else if (placeJudgmentRoot(inst)) {
+        // Classes 0x22 and 0x23: all three angles, in each model's own order
+        // (`model+0x68`). See `render/characters/judgment.ts`.
       } else if (inst.a.carrierAt >= 0) {
         inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
                                inst.a.carrierWorld.z);
@@ -524,6 +530,7 @@ export class CharacterLayer implements System {
       // position across a save state. This only reads them.
       this.poser.pose(inst);
       poseHordeJaw(inst, this.poser);
+      syncJudgmentWings(this.goreParts, inst, this.poser);
       syncHordeMirror(inst, true);
       // A bone `RemoveBoneSubtree` took off is hidden here rather than where
       // the shot resolved: `ResolveHit` runs in the port now, and what a
@@ -546,6 +553,10 @@ export class CharacterLayer implements System {
       this.syncAttachments(inst);
       if (inst.a.civ) this.syncHeldItems(inst);
     }
+    // `Class22DrawAndPoseSubActor` seats the sub-actor on the flier's node 1
+    // *after* drawing the flier, so it reads this frame's pose: every
+    // instance is posed by now.
+    seatJudgmentSubActors(this.instances);
   }
 
   /**
@@ -1100,6 +1111,8 @@ export class CharacterLayer implements System {
       inst.root.visible = this.enabled && inst.a.visible && inst.a.alpha > 0;
       if (placeHordeRoot(inst)) {
         // See `update`.
+      } else if (placeJudgmentRoot(inst)) {
+        // See `update`.
       } else if (inst.a.carrierAt >= 0) {
         inst.root.position.set(inst.a.carrierWorld.x, inst.a.carrierWorld.y,
                                inst.a.carrierWorld.z);
@@ -1111,8 +1124,10 @@ export class CharacterLayer implements System {
       }
       this.poser.pose(inst);
       poseHordeJaw(inst, this.poser);
+      syncJudgmentWings(this.goreParts, inst, this.poser);
       syncHordeMirror(inst, inst.root.visible);
     }
+    seatJudgmentSubActors(this.instances);
   }
 
   get describe(): string {

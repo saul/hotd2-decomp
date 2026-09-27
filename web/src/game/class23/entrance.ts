@@ -68,6 +68,7 @@ const FLIER_PHASE1 = 1;
 function Class23SpawnLandingRing(obj: JudgmentCompanionActor): void {
   obj.companion.ring = {
     x: obj.pos.x, y: obj.pos.y, z: obj.pos.z, yaw: 0, frame: 1,
+    scale: { x: 0, y: 0, z: 0 }, fade: 0, drawn: false, killed: false,
   };
 }
 

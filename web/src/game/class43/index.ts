@@ -75,13 +75,15 @@ import { ActorFlag, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
-import { SpawnBloodSprayAtPoint } from "../effects/blood";
-import { OwlSpawnFeatherBurst } from "../effects/owl";
 import { G } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+// The effect tasks this class spawns (`game/effects/owl.ts`), and the blood
+// its death leaves at a point.
+import { SpawnBloodSprayAtPoint } from "../effects/blood";
+import { OwlSpawnFeatherBurst } from "../effects/owl";
 import { vec3 } from "../vec";
 import { OwlDiveKind, OwlState, type OwlTail } from "./state";
 

@@ -103,6 +103,7 @@ import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
+import { PropShatterLayer } from "../render/prop_shatter";
 import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
@@ -257,6 +258,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   readonly deepSprites = new ScreenSpritesDeep();
   readonly props = new PropLayer();
   readonly breakables = new BreakableLayer();
+  /** A stacked prop's fifteen pieces, off the breakables' templates. */
+  readonly shatters = new PropShatterLayer();
   /**
    * The actors drawn from an asset slot rather than a skeleton — see
    * `render/slotmodels.ts`. Its own layer because the character pool cannot
@@ -495,6 +498,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // boxes round the ones the sidebar has ticked.
     this.scene.add(this.rigs.group);
     this.scene.add(this.breakables.group);
+    this.scene.add(this.shatters.group);
+    this.shatters.source = this.breakables;
     this.scene.add(this.slotModels.group);
     this.lighting.addRoot(this.slotModels.group);
     this.scene.add(this.effects.group);
@@ -554,6 +559,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.gunLights);
     this.world.add("render", this.props);
     this.world.add("render", this.breakables);
+    this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);
     this.world.add("render", this.effects);
     this.world.add("render", this.bullets);

@@ -369,7 +369,7 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // a civilian *means*: a life, two hundred points and the on-shot script.
   // Scoring it here would be a second implementation of that rule.
   if (g_class_handlers[obj.cls as SpawnClass]?.ownsShotResult) {
-    MarkActorShot(obj, player, pick.bone);
+    MarkActorShot(obj, player, pick.bone, pick.whole ?? false);
     G.g_head_combo_bonus[player] = 0;
     events?.emit("shot.resolved", {
       player, kind: "marked", ray: req.ray, point: pick.point,
@@ -491,9 +491,15 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
  * [diverges] The engine's version also runs the blood effect and, in Original
  * Mode, the item-drop test. Neither is state, and both are the renderer's.
  */
-export function MarkActorShot(obj: Actor, player: number, bone = 0): void {
+export function MarkActorShot(obj: Actor, player: number, bone = 0,
+                              whole = false): void {
   obj.flags |= (1 << ((player + 1) & 0x1f)) | ActorFlag.Hit;
   obj.pendingHit = { bone, result: 0 };
+  // `MOV byte ptr [ECX + EAX + 0x190], ...` -- the bone's own index for a
+  // bone hit (the node's `+0x14`), and a literal 1 for an actor hit whole.
+  if (player >= 0 && player < obj.shotBones.length) {
+    obj.shotBones[player] = whole ? 1 : bone;
+  }
 }
 
 /**

@@ -39,7 +39,10 @@ import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
-import { HUD_READOUT_SPRITES } from "../game/hud_sprites";
+import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
+// ...and the boss-name banner's, whose record table is data in the same way.
+import { BOSS_BANNER_SPRITES, bannerCardSlots }
+  from "../game/boss_banner_records";
 // And the game-over screen's: its logo sprites are immediates in
 // `GameOverLogoTask`, its route tiles are `.rdata` read below.
 import { GAME_OVER_LOGO_SPRITES, ROUTE_FIGURE_SHADOW_SLOT, ROUTE_MARK_SLOTS }
@@ -1591,6 +1594,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the game-over route map's: the figures' ground disc and the two
     // footprints, drawn in view space by `render/game_over_scene.ts`.
     ROUTE_FIGURE_SHADOW_SLOT, ...ROUTE_MARK_SLOTS,
+    // ...and the boss-name banner's cards, for the classes this stage spawns
+    // that make one: drawn in view space too, by `render/effects.ts`.
+    ...bannerCardSlots(spawnRecords.map((r) => r.cls)),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.
@@ -1642,14 +1648,16 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};
   // The game-over screen's `.rdata`, and every sprite the game draws by id:
-  // the HUD's readouts, the logo, and the route map's 4 x 75 tiles.
+  // the HUD's readouts, the boss health bar and name banners, the logo, and
+  // the route map's 4 x 75 tiles.
   const gameOver = tables.gameOverTables();
   scriptJson.game_over = gameOver;
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   scriptJson.screen_sprites = await screenSpritesJson(
     tables, stage.source, deflate,
-    [...HUD_READOUT_SPRITES, ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
+    [...HUD_READOUT_SPRITES, ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES,
+     ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;

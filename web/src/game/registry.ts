@@ -317,11 +317,34 @@ export interface ClassHandler {
    * re-derives each actor's sphere with `ActorUpdateBoundingSphere`
    * (`FUN_00454AC0`) — class 0x30's formula, feet plus the body radius plus
    * one — which is right for class 0x30 and overwrites anything another class
-   * wrote. Set, the sphere is left as the class left it. Class 0x11 sets it:
-   * `FrogPushOutOfActorCollision` (`FUN_0043A500`) publishes bone 1's drawn
-   * point, not its feet.
+   * wrote. Set, the sphere is left as the class left it.
+   *
+   * Set only for a class whose writer is ported **and** whose update then
+   * reaches `RegisterForShotTest`, so that what the push reads is what the
+   * engine's list would have carried. Each was read in the exe:
+   *
+   * * **0x10** — `CivilianUpdate` (`FUN_0048A920`)'s tail switch, the
+   *   position or one of three bone points, written just after
+   *   `ActorRegisterCameraPoint` at `0x0048ADB0`.
+   * * **0x11** — `FrogPushOutOfActorCollision` (`FUN_0043A500`), bone 1's
+   *   drawn point, not its feet.
+   * * **0x31** — `ThrowerPlaceCollisionSphere` (`FUN_00449E80`), the last
+   *   write of the hook `SkeletonApplyRootMotion` runs inside
+   *   `ThrowerAdvanceMotion`'s draw, before `ActorRegisterCameraPoint(0)` at
+   *   `0x00449991`. It lifts 1.4 radii, and *drops* them on a ceiling.
+   * * **0x33 selector 4** — `ScriptedPushableSyncSphere33` (`FUN_00433E00`),
+   *   the radius up and no more, re-seated after every move, then
+   *   `RegisterForShotTest` at `0x00433CC7`.
+   *
+   * ## Why a class may answer with a function
+   *
+   * Class 0x33 is twelve objects behind one class id, and only selector 4's
+   * writer is ported; an actor of another selector has written no sphere at
+   * all, so for it the answer is no. The function is asked about the actor,
+   * the same question `ScriptedSceneryDispatch33` (`FUN_00432FF0`) answers once
+   * by installing a different update.
    */
-  ownsSphereCentre?: boolean;
+  ownsSphereCentre?: boolean | ((obj: Actor) => boolean);
 }
 
 /**

@@ -20355,3 +20355,79 @@ they are `FROG_BONE1` and `FrogBone1World` now.
 * The death state plays `ActorSetMotionBlended(0x13F, 0, 2)` after writing
   `obj.motion` itself, so the port's blend sees no change and cuts; and its
   `SpawnGroundRingEffect` is not called. Neither was read for this.
+
+## 2026-09-27 -- the crowd push stops re-deriving published spheres
+
+**The question.** `ColiTestSphereAgainstActors` (`FUN_00405B10`) walked the
+pool and called `ActorUpdateBoundingSphere` (`FUN_00454AC0`, class 0x30's
+formula) on every candidate, overwriting `obj+0x12C`. The frog had just opted
+out through `ClassHandler.ownsSphereCentre`; classes 0x31, 0x33 selector 4
+and 0x10 also write their own. Either opt them out too, or walk the
+registered list as the engine does.
+
+**What the engine does** [proved]. `RegisterForShotTest` (`FUN_00405160`)
+appends `{obj, obj+0x34, obj+0x12C..0x134}` -- a **copy** of the sphere --
+at `0x004051D7`..`0x00405212`; the mesh arm falls through into the append
+(the decompiler's early `return` there is `MatrixStackPop`'s no-return mark
+again). `ColiPublishDynamicList` (`FUN_00405360`) copies the list to
+`g_coli_dynamic_list` at the end of `ProcessPlayerShots`, and the crowd push
+reads the centre out of the entry (`0x00405B96`..`0x00405BA3`) and the flags
+and radius live off the object.
+
+**Why the list walk was not done.** Only five classes register in the port
+(`registersForShotTest`: 0x14, 0x19, 0x22, 0x23, 0x45), so walking the list
+would drop every zombie, thrower, civilian and frog out of the push. A hybrid
+-- the list for those five, the pool for the rest -- was weighed and left:
+none of the five writes `sphereCentre` in the port, so their entries would
+carry the origin, and frogs push against the Hierophant. The walk is now a
+declared `[diverges]` naming membership, timing and the re-derivation, and
+what clears it (the registration half of the shot-test conversion).
+
+**Each writer, read to its registration site** [proved]:
+
+* 0x31: `EnemyThrowerUpdate` has no call to the hook. `obj+0x12F0` is
+  `model+0x115C`, which `SkeletonApplyRootMotion` calls at `0x00410E93`,
+  inside `ThrowerAdvanceMotion`'s draw; the hook's last write is
+  `ThrowerPlaceCollisionSphere`, and `ActorRegisterCameraPoint(0)` at
+  `0x00449991` follows. That routine's tail is `PUSH ESI; CALL 0x00405160` at
+  `0x00409BEC`, confirmed in bytes.
+* 0x33 selector 4: `ScriptedPushableApplyPush33` re-seats through
+  `ScriptedPushableSyncSphere33` after every move, then the draw, `obj+0x70`,
+  and `RegisterForShotTest` at `0x00433CC7`. Both writers are called only from
+  their per-frame routines, never an `Init`.
+* 0x10: the order is the other way round. The draw at `0x0048AA02` runs the
+  pose hook, `ActorRegisterCameraPoint(4.0)` at `0x0048ADB0` registers, and
+  only then does the switch at `0x0048ADC4` write the sphere.
+
+**Two wrong ports in class 0x10, found on the way.**
+
+* The switch had one arm of four, and the note said the other three read
+  "matrices the pose leaves behind". They are bone draw records: the
+  decompiler's `g_cur_actor_model + 0x70` is an `int *` offset, and the
+  listing's `ADD ECX, 0x1C0` / `0x130` / `0x910`, `0x760` are bones 2, 1, 15
+  and 12 at `model+0xA0 + bone*0x90`. Mode 2 is the default (`0x0048A4FD`), so
+  most civilians were never written. Now `L53`.
+* `PoseHookGrowAndPushOutOfWorld` (`FUN_0048D070`) called
+  `ActorUpdateBoundingSphere` before its world test; the routine's only call
+  is `ColiTestSphereAgainstFullSet(obj+0x12C, ...)` (`LEA EDX,[ESI+0x12C]` at
+  `0x0048D0F8`). It also ran after the switch; it runs in the draw, before it.
+
+**Wrong turns.** `ownsSphereCentre` was on the frog branch, not main; a first
+merge of its tip conflicted in four files the frog session was resolving at
+the same moment, and was aborted rather than resolved twice -- the class 0x10
+half was committed on its own and the frog's merge commit taken when it
+landed. And `ownsSphereCentre` as a plain boolean would have measured class
+0x33's eleven unported selectors at the origin; it takes a function now.
+
+**Checks.** Twenty new assertions in `port.test.ts`; eight fail on the old
+class-0x10 code and seven fail with the three handler rows removed. The
+unported-selector check fails if class 0x33 answers `true` outright. The
+other four pin what did not change: the default mode, mode 0, a selector past
+3 writing nothing, and the chair's own lift.
+
+**Next actions.**
+
+* The registration half of the shot-test conversion, class by class, then
+  walk `g_coli_dynamic_list` and delete the `[diverges]`.
+* `ThrowerPushOutOfWorld`'s `zslman` special case wants `g_coli_hit_object`,
+  which the crowd push now has in hand as `best` and does not publish.

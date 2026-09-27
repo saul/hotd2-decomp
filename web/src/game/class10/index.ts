@@ -157,6 +157,10 @@ export const CivilianHandler: ClassHandler = {
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj: Actor) => (obj.civ?.onShotScript ?? -1) < 0,
   leave: CivilianLeaveField,
+  // `CivilianUpdate`'s tail switch writes `obj+0x12C` -- the position or a
+  // bone, bone 1 by default -- and that is what the crowd push measures, not
+  // class 0x30's feet-plus-one. See `CivilianSpherePoint`.
+  ownsSphereCentre: true,
   // **Always**, and the wait word decides. `CivilianUpdate` pushes 4.0 and
   // calls `ActorRegisterCameraPoint` (`FUN_00409B70`) at `0x0048ADB0` on every
   // path that does not despawn -- the shot branch included -- and that routine

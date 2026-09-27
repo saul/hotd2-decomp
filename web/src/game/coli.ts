@@ -372,11 +372,50 @@ export function QueryGroundSurfaceAt(x: number, y: number, z: number): number {
 }
 
 /**
+ * `[port-only]` `ClassHandler.ownsSphereCentre`, asked about one actor.
+ */
+function ColiActorOwnsSphere(o: Actor): boolean {
+  const owns = g_class_handlers[o.cls]?.ownsSphereCentre;
+  return typeof owns === "function" ? owns(o) : owns === true;
+}
+
+/**
  * `ColiTestSphereAgainstActors` — `FUN_00405B10`. The actor-versus-actor test.
  *
- * The engine walks a per-frame list of registered body spheres; the port walks
- * `g_object_list`, which is the same set — an actor is in that list exactly
- * while it is alive and placed. Everything else is transcribed:
+ * The engine walks `g_coli_dynamic_list` (`0x005A3098`, counted by
+ * `g_coli_dynamic_count`, `0x0059D8E4`): what `RegisterForShotTest`
+ * (`FUN_00405160`) collected during the **previous** frame's actor walk,
+ * copied by `ColiPublishDynamicList` (`FUN_00405360`) at the end of
+ * `ProcessPlayerShots`' task. Each entry is the object and **a copy of its
+ * `obj+0x12C..0x134` taken when it registered** — the centre is read out of
+ * the entry at `0x00405B96`..`0x00405BA3` — while the flags and the body
+ * radius are read live off the object (`0x00405B74`, `0x00405B8A`).
+ *
+ * [diverges] The port walks `g_object_list`, because most classes do not
+ * register yet: only a class with `ClassHandler.registersForShotTest` calls
+ * `RegisterForShotTest` at its own sites, and walking the list today would
+ * take every zombie out of the push. What that costs, all of it here:
+ *
+ * * **Membership.** The engine's list holds what registered last frame: not
+ *   an actor whose `obj+0x78` put it behind the camera, not one with `0x8000`
+ *   up as it registered, not a class that never registers, not one that has
+ *   yet to run its first update. The pool holds every placed actor.
+ * * **Timing.** The engine measures every candidate where it stood when it
+ *   registered last frame; the port measures the sphere as it is now, which
+ *   for an actor that has already run this frame is this frame's.
+ * * **Whose sphere.** A class that has not set `ownsSphereCentre` is
+ *   re-derived with `ActorUpdateBoundingSphere` (`FUN_00454AC0`) — class
+ *   0x30's own writer, and a stand-in for every class whose writer is unread.
+ *   One that has set it is measured at the point its routine wrote, and one of
+ *   those that has not run yet is measured wherever its sphere is, where the
+ *   engine would not have it at all.
+ *
+ * What clears it is the registration half of the shot-test conversion
+ * (`docs/formats/combat.md`, "What converting the rest takes"): once every
+ * class that registers does so at its site, this walks the list
+ * `ShotTestListReset` publishes, and the three bullets go with it.
+ *
+ * Everything else is transcribed:
  *
  * * the caller itself is skipped, as are actors carrying `obj+0x34` bits
  *   `0x80008000` or `0x10`;
@@ -416,14 +455,11 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
     // "engine fallback" assertion is on the field after the call, for that
     // reason.
     if (o.bodyRadius === 0) o.bodyRadius = o.radius;
-    // The engine tests a list every actor registers into once a frame; the
-    // port derives the sphere from the position instead, so an actor that has
-    // not ticked yet is still measured where it actually is. The derivation is
-    // class 0x30's, so a class whose own routine publishes a different point
-    // says so and keeps it -- the frog's is bone 1 as drawn, not its feet.
-    if (!g_class_handlers[o.cls]?.ownsSphereCentre) {
-      ActorUpdateBoundingSphere(o);
-    }
+    // The engine reads the centre its list copied at registration; the port
+    // reads the actor's own `obj+0x12C` -- as its class wrote it when the
+    // class says so, and otherwise re-derived with class 0x30's formula. See
+    // the divergence declared above.
+    if (!ColiActorOwnsSphere(o)) ActorUpdateBoundingSphere(o);
     const dx = cx - o.sphereCentre.x;
     const dy = cy - o.sphereCentre.y;
     const dz = cz - o.sphereCentre.z;

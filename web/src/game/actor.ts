@@ -2181,10 +2181,12 @@ const LOW_SPHERE = 0x2000000;
  * unit — or a half when `obj+0x136C` bit `0x2000000` is set.
  *
  * It lives here rather than beside its caller because both the class-0x30 push
- * and `ColiTestSphereAgainstActors` need it, and the second must be able to
- * ask it about an actor that has not ticked yet. The engine solves that with a
- * per-frame registration list; deriving the sphere from the position is the
- * same answer without the ordering hazard.
+ * and `ColiTestSphereAgainstActors` call it. The second is a stand-in: the
+ * engine's test reads the sphere each class published into its registration
+ * list, and the port's walks the pool and re-derives with this for every class
+ * that has not said its own writer is ported (`ClassHandler.ownsSphereCentre`)
+ * -- right for class 0x30 and a guess for the rest. The divergence declared on
+ * that walk says what it costs.
  */
 export function ActorUpdateBoundingSphere(obj: Actor): void {
   obj.sphereCentre.x = obj.pos.x;

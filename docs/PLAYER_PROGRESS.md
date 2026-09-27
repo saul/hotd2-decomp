@@ -1814,6 +1814,34 @@ was inverted; both launch frames run on into the flight and halve the turn
 that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
 over a fade of 2, where the port had played it from the start over 61.
 
+**The crowd push measures each class's own sphere, for every class whose
+writer is ported.** `ColiTestSphereAgainstActors` (`FUN_00405B10`) tests what
+`RegisterForShotTest` copied out of `obj+0x12C` when each actor registered
+last frame; the port walks the pool and used to write class 0x30's sphere —
+feet, plus the body radius, plus one — over every candidate. Three more
+classes now keep theirs, each read in the exe down to its registration site:
+the thrower's `ThrowerPlaceCollisionSphere`, which hangs 1.4 radii *below* a
+ceiling perch (it runs inside the draw, `SkeletonApplyRootMotion`'s hook, just
+before `ActorRegisterCameraPoint(0)`); selector 4's chair, the radius up and
+no more; and the civilian's tail switch. `ownsSphereCentre` may now be a
+function, because class 0x33's other eleven selectors have written nothing.
+The walk itself is a declared `[diverges]` — membership (the engine's list
+drops actors behind the camera and classes that never register), timing (last
+frame's copy against this frame's field) and the re-derivation for everyone
+else — and what clears it is the registration half of the shot-test
+conversion.
+
+**The civilian's sphere is a bone, and it had never been written.** The
+switch at the tail of `CivilianUpdate` picks the position or one of three
+bone points by `sub+0x80`, and **`CivilianInit` starts every civilian on bone
+1**. The port had only the position arm: the other three were noted as
+matrices it could not reach, and they are bone draw records the decompiler
+printed as `int *` offsets (`L53`). All four arms are in, through
+`GameHost.boneWorld`. `PoseHookGrowAndPushOutOfWorld` tests that sphere
+against the world — it used to re-derive class 0x30's first — and it runs
+where the engine's draw runs it, before the script and the switch, so it
+sees last frame's point.
+
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
 Reported as "bat zombies that fly out" in stage 4 block 0 step 6, with the

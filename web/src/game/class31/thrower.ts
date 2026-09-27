@@ -812,6 +812,10 @@ export const EnemyThrowerHandler: ClassHandler = {
   onDeadSweep: EnemyThrowerDeadSweep,
   updatesWhenDead: true,
   debug: EnemyThrowerDebug,
+  // `ThrowerPlaceCollisionSphere` (`FUN_00449E80`) is class 0x31's sphere --
+  // 1.4 radii up, or down on a ceiling -- and its last write is what
+  // `ActorRegisterCameraPoint(0)` at `0x00449991` publishes.
+  ownsSphereCentre: true,
 };
 
 registerClass(SpawnClass.Thrower, EnemyThrowerHandler);

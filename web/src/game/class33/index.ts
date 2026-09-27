@@ -391,6 +391,11 @@ export const ScriptedSceneryHandler: ClassHandler = {
   init: ScriptedSceneryInit33,
   update: ScriptedSceneryUpdate33,
   debug: ScriptedSceneryDebug33,
+  // Selector 4 only: `ScriptedPushableSyncSphere33` (`FUN_00433E00`) is the
+  // one sphere writer of the twelve that is ported, and it rises by the
+  // radius alone. The carrier carries `0x80000000` and is never a candidate.
+  ownsSphereCentre: (obj: Actor) =>
+    obj.hp === ScriptedScenerySelector.Pushable,
 };
 
 registerClass(SpawnClass.ScriptedScenery, ScriptedSceneryHandler);

@@ -127,7 +127,7 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
  * EAX, 0x910` / `ADD ECX, 0x760` at `0x0048AEEB` / `0x0048AF28`. The
  * decompiler prints them as `g_cur_actor_model + 0x70` and so on, because
  * `g_cur_actor_model` is an `int *`, and read as byte offsets those are not
- * records at all. Bone `n`'s record is `model + 0xA0 + n*0x90` — the
+ * records at all (`L53`). Bone `n`'s record is `model + 0xA0 + n*0x90` — the
  * `obj+0x20C + n*0x90 + 0x28` that `GameHost.boneMatrix` documents — so the
  * four are bones 2, 1, 15 and 12.
  */

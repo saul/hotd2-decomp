@@ -45,11 +45,14 @@
  * * **The draw.** `MatrixTranslate(obj+0x40..0x48)` / `RotZ(obj+0x6C)` /
  *   `RotY(obj+0x68)` / `RotX(obj+0x64)` / `AssetDrawSlot(obj+0x13F0)` is
  *   `render/slotmodels.ts`', the same arrangement class 0x52's mouse has.
- * * **`RegisterForShotTest` (`FUN_00405160`)**, at `0x00433CC6` in the tail
- *   the decompiler does not show (`L35`). It is the call that puts the object
- *   in the per-frame dynamic list, and the port has no list: `game/coli.ts`
- *   walks `g_object_list` instead, which is that list's own declared
- *   divergence and covers this object without a line here.
+ * * **`RegisterForShotTest` (`FUN_00405160`)**, at `0x00433CC7` in the tail
+ *   the decompiler does not show (`L35`), after `obj+0x70..0x78` is written.
+ *   It is the call that puts the object in the per-frame dynamic list, and
+ *   the port has no list: `game/coli.ts` walks `g_object_list` instead, which
+ *   is that routine's declared divergence. What the list would have carried
+ *   is the sphere {@link ScriptedPushableSyncSphere33} left, and the class
+ *   row's `ownsSphereCentre` is what makes the pool walk read that rather
+ *   than class 0x30's feet-plus-one.
  */
 import { type Actor, type ScriptedSceneryActor } from "../actor";
 import { ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet }

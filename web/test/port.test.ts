@@ -176,6 +176,7 @@ import { ActorFlag, CountFlag, DamageZone, ThrowerFlag, ThrowerStance,
 import { ScriptedCarrierUpdate33, ScriptedPushableUpdate33,
          ScriptedScenerySelector } from "../src/game/class33";
 import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
+import { ThrowerPlaceCollisionSphere } from "../src/game/class31/collide";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { CheckPlayerCanBeHit, IsPlayerAttackable, PlayerTakeDamage }
   from "../src/game/combat/player";
@@ -8735,6 +8736,29 @@ console.log("\nclass 0x10's sphere switch -- which point `obj+0x12C` is:");
         + "follows the actor",
         Math.abs(c.pos.x - 19) < 1e-9 && is(c.pos),
         `pos ${c.pos.x.toFixed(4)} sphere ${at(c.pos)}`);
+
+  // **And every other actor measures it there.** The class sets
+  // `ownsSphereCentre`, so `ColiTestSphereAgainstActors` (`FUN_00405B10`)
+  // reads the switch's point rather than writing class 0x30's feet-plus-one
+  // over it -- which, for a civilian on bone 1, is seven units too low.
+  T.coli = null;
+  c.civ!.wait &= ~CivilianWait.PushOutOfWorld;
+  c.civ!.cameraPointMode = CivilianSpherePoint.Bone1;
+  c.pos = vec3(40, 0, 60);
+  c.bodyRadius = 1;
+  c.civ!.scaleTarget = 1;
+  run(posed);
+  const pusher = spawnZombie(0x3310, 1, "pusher");
+  pusher.visible = true;
+  const found = ColiTestSphereAgainstActors(pusher, 41, 10.5, 61, 1);
+  check("the crowd push finds a civilian at bone 1, where its switch put it",
+        found && G.g_coli_hit_y === BONES[1].y,
+        `hit ${found} at y ${G.g_coli_hit_y}`);
+  check("...and leaves the sphere there, not at its feet",
+        is(BONES[1]), at(BONES[1]));
+  check("...so a probe at the height class 0x30's formula gives finds nothing",
+        !ColiTestSphereAgainstActors(pusher, 40.5, 2, 60, 0.5),
+        at(BONES[1]));
 }
 
 console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
@@ -10974,6 +10998,31 @@ console.log("\nrain: DrawRainParticles' simulation half");
     check("the sphere sits 1.4 radii above a grounded thrower",
           Math.abs(z.sphereCentre.y - (z.pos.y + z.bodyRadius * 1.4)) < 1e-6,
           `${z.sphereCentre.y} vs ${z.pos.y}`);
+  }
+
+  // **...and the crowd push measures it there.** `ThrowerPlaceCollisionSphere`
+  // (`FUN_00449E80`) is what `ActorRegisterCameraPoint(0)` at `0x00449991`
+  // publishes, and on a ceiling it hangs 1.4 radii *below* the attachment.
+  // `ColiTestSphereAgainstActors` used to write class 0x30's sphere -- the
+  // radius plus one *above* -- over it, so another actor passing under a
+  // ceiling thrower's body went through it.
+  {
+    const z = thrower(ThrowerState.StandAndDecide);
+    z.pos = vec3(0, 50, 45);
+    z.flags2 |= ThrowerFlag.Ceiling;
+    ThrowerPlaceCollisionSphere(z);
+    const hang = z.pos.y - z.bodyRadius * 1.4;
+    const other = ActorSpawn(0x9001, SpawnClass.Thrower, 0x19, "zstin", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    other.visible = true;
+    const found = ColiTestSphereAgainstActors(other, 0, hang - 3, 45, 1);
+    check("a thrower on a ceiling is found hanging below its attachment point",
+          found && Math.abs(G.g_coli_hit_y - hang) < 1e-6,
+          `hit ${found} at y ${G.g_coli_hit_y} vs ${hang}`);
+    check("...and its sphere is left where its class put it",
+          Math.abs(z.sphereCentre.y - hang) < 1e-6,
+          `${z.sphereCentre.y} vs ${hang}`);
   }
 
   // **The order.** The hook runs *after* the state, because every state here
@@ -16715,6 +16764,47 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           c.scenery.slot === CHAIR_SLOT, String(c.scenery.slot));
     check("`obj+0x1312` is incremented, so the seed runs once",
           c.sub === 1, String(c.sub));
+  }
+
+  // -- C1b. the sphere the crowd push measures is the chair's own ----------
+  //
+  // `ScriptedPushableSyncSphere33` (`FUN_00433E00`) lifts the centre by the
+  // radius alone, and `RegisterForShotTest` at `0x00433CC7` publishes that.
+  // `ColiTestSphereAgainstActors` used to overwrite it with class 0x30's
+  // radius-plus-one, so a zombie whose body reached the chair's lower half
+  // passed through it. Only selector 4's writer is ported, so only selector 4
+  // keeps its own; another selector has written nothing to keep.
+  {
+    reset();
+    const c = makeChair();
+    G.g_script_flags[PUSH_FLAG] = 1;
+    tick(c, 1);
+    const top = c.pos.y + CHAIR_SPHERE;
+    check("an armed chair's sphere rises by its radius and no more",
+          c.sphereCentre.y === top, `${c.sphereCentre.y} vs ${top}`);
+    const pusher = spawnZombie(0x3320, 1, "pusher");
+    pusher.visible = true;
+    const found = ColiTestSphereAgainstActors(pusher, c.pos.x, top - 4.4,
+                                              c.pos.z, 1);
+    check("the crowd push finds it there: 4.4 below its centre is inside "
+          + "1 + 3.5",
+          found && G.g_coli_hit_y === top, `hit ${found} y ${G.g_coli_hit_y}`);
+    check("...and leaves it there, rather than a unit higher",
+          c.sphereCentre.y === top, String(c.sphereCentre.y));
+
+    reset();
+    const other = ActorSpawn(0x1a41, SpawnClass.ScriptedScenery, -1, "prop",
+                             { hp: 2, maxHp: 2 });
+    other.visible = true;
+    other.pos = vec3(60, 0, 60);
+    other.radius = 2;
+    const probe = spawnZombie(0x3321, 1, "pusher");
+    probe.visible = true;
+    check("a selector whose writer is not ported is not measured at a sphere "
+          + "it never wrote",
+          ColiTestSphereAgainstActors(probe, 60, 3, 61.5, 1),
+          `(${other.sphereCentre.x}, ${other.sphereCentre.y}, `
+          + `${other.sphereCentre.z})`);
   }
 
   // -- C2. the freeze, and the one flag that lifts it -----------------------

@@ -148,7 +148,12 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
       seated = true;
     }
     members = Math.max(members, ms.length);
-    if (forceFlag !== undefined && ms.length && f > 60
+    // Raised once every member's hold (`idx * 20` frames) has run out, as it
+    // has by the time step 2 raises it in the game: `HordeStateHold` counts a
+    // member in on every frame of its hold that finds the flag at 1, so a
+    // flag raised at a fixed frame counts a late spawn's member more than once.
+    if (forceFlag !== undefined && ms.length
+        && ms.every((o) => o.horde.hold < 0)
         && !G.g_script_flags[forceFlag]) {
       console.log(`   override: g_script_flags[${forceFlag}] = 1 at frame ${f}`);
       G.g_script_flags[forceFlag] = 1;

@@ -61,6 +61,7 @@
 004032e0	EvtActionHoldCameraPreset20
 00403360	EvtActionCamPlay40
 004033b0	CamEvalStaticPose
+00403490	CamStashPathRange	EvtActionCamPlay40's flags & 2 branch: stash rather than play. g_active_cam_path from the action's path; g_stashed_path_frame = operand 0, or g_cam_path_frame + 1 when it is -1; g_stashed_path_end_frame = operand 1; DAT_009C70B8 from the action block; then retires the action (queue 0) or parks its handler on NoOpStub. Scene state (2,6)/(2,7)'s hooks play the range later. [proved]
 00403510	CamStartPathPlayback
 004035e0	CamAdvancePathFrame	One frame of a non-deferred cam_play, and the action handler EvtRunQueuedActions calls once per frame while the play is queued. Read from the instruction stream at 0x00403605..0x0040368D: cur = g_cam_path_cursor (+0x104); g_cam_path_frame (+0xD0) = cur; CamEvalPath7(g_active_cam_path, (float)cur, &g_camera_block_eye, &g_camera_block_target, &roll, &_); CamBlockSetAnglesFromLookAt(...); g_cam_path_frames_left = end - cur; if (cur >= end) { slot 0: g_queued_events_pending--, g_evt_action_advance = 1, cur++, return; else park the handler on NoOpStub } cur++.  **The publish, the curve evaluation and the block write all happen BEFORE the 'cur >= end' test that retires the action**, so the block holds the pose of the frame a shot ends on -- start..end inclusive, one frame each -- and only the frame AFTER the end is left unwritten. CameraPlayStashedPath (FUN_0040C8A0) and CameraStepRailTick (FUN_0040C790) are the deferred twins and increment first instead.
 004036b0	EvtActionSceneState11

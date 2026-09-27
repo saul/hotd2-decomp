@@ -38,6 +38,7 @@ import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
+import { makeCameraSlots, type CameraCandidate } from "./camera/slot_table";
 import { makeEntityLights } from "./entity_light";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
@@ -1041,16 +1042,26 @@ export const G = {
    */
   g_evt_wait_alive_hysteresis: 0,
   /**
-   * `g_enemy_slots` — 0x009A5EC0. The actors the camera considers, nearest
-   * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
+   * `g_enemy_slots` — 0x009A5EC0. Sixteen `{u8 occupied; void *actor}`
+   * records, stride 8, **indexed**: slots 0 and 1 are the permit holders the
+   * last fill dealt and every other candidate sits at its distance rank plus
+   * two, so the table has holes. `at` stands in for the pointer. See
+   * `camera/slots.ts`.
    */
-  g_enemy_slots: [] as number[],
+  g_enemy_slots: makeCameraSlots(),
   /**
-   * `g_camera_candidate_count` — 0x009CA93C. How many objects called
-   * `RegisterForCameraTracking` (`FUN_00408EC0`) this frame: the actors
-   * `UpdateCameraEnemySlots` ranks **and** the carried props, which register
-   * too but which `g_enemy_slots` cannot hold (see `game/carried_prop.ts`).
-   * `EvtOpWaitTargetsClear47` (`FUN_0045FD20`) waits for it to reach zero.
+   * `g_camera_candidates` — 0x005A4DC8. The `{key, obj}` pairs
+   * `RegisterForCameraTracking` (`FUN_00408EC0`) has filed since the last
+   * `UpdateCameraEnemySlots` (`FUN_00408DD0`), at most fourteen, in the order
+   * they registered. The fill sorts and empties it.
+   */
+  g_camera_candidates: [] as CameraCandidate[],
+  /**
+   * `g_camera_candidate_count` — 0x009CA93C. How many objects have called
+   * `RegisterForCameraTracking` since the last fill -- the actors and the
+   * carried props alike. `EvtOpWaitTargetsClear47` (`FUN_0045FD20`) waits for
+   * it to reach zero; the interpreter reads it before the fill empties it, so
+   * it is the count the previous frame's objects registered.
    */
   g_camera_candidate_count: 0,
 
@@ -2013,7 +2024,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // otherwise carry the previous scene's count of refused frames into the
   // first gate of the new one.
   G.g_evt_wait_alive_hysteresis = 0;
-  G.g_enemy_slots = [];
+  G.g_enemy_slots = makeCameraSlots();
+  G.g_camera_candidates = [];
   G.g_camera_candidate_count = 0;
   G.g_water_level = -24.9;
   G.g_water_attack_slots = [0, 0, 0, 0];

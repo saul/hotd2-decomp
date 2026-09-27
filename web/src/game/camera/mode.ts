@@ -67,6 +67,7 @@ import { G } from "../globals";
 import { TURN_RATE_UNTRACKED } from "./constants";
 import { CameraDriverFromDeferredPose, CameraTrackEnemiesTick } from "./track";
 import { LookAtCosineSquared, TurnLookAtToward } from "./turn";
+import { CameraSlotsBusy } from "./slots";
 import { vec3 } from "../vec";
 
 /**
@@ -165,7 +166,7 @@ export function CameraActorTick(): void {
  * the walk is a length test.
  */
 export function CameraDriverSelectMode(): void {
-  const busy = G.g_enemy_slots.length !== 0;
+  const busy = CameraSlotsBusy();
   const variant = G.g_camera_hand_back_variant;
   if (variant >= 0) {
     const count = variant === CameraHandBackVariant.PresentCountAndTurn

@@ -55,6 +55,7 @@ import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieAttachToCarrier } from "./carrier";
+import { ActorRegisterCameraPoint } from "../camera/track";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
@@ -100,7 +101,15 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   obj.pos.y += obj.vel.y;
   obj.pos.z += obj.vel.z;
   ZombiePushOutOfWorldAndActors(obj, SecondsToTicks(dt));
+  // `PUSH 0x40800000; CALL 0x00409b70` at `0x00453475`, on every path through
+  // the routine and after the draw (`ZombieAdvanceMotion`, `0x00453457`): the
+  // camera point lifted by 4 and the actor filed as a candidate. A death
+  // chain's `0x10000` is what keeps a corpse off the list, not a test here.
+  ActorRegisterCameraPoint(obj, host, ZOMBIE_CAMERA_RISE);
 }
+
+/** `PUSH 0x40800000` at `0x00453475`: `ActorRegisterCameraPoint`'s 4.0. */
+export const ZOMBIE_CAMERA_RISE = 4.0;
 
 function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
                         host: GameHost, events?: Events): void {

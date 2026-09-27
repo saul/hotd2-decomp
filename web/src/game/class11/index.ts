@@ -52,6 +52,7 @@
  * Porting it under the wrong reading would push frogs the wrong way, which is
  * worse than not pushing them.
  */
+import { ActorRegisterCameraPoint } from "../camera/track";
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, type Actor } from "../actor";
@@ -990,7 +991,13 @@ export function FrogUpdate(obj: Actor, f: ClassFrame): void {
   g_class11_states[sub.state]?.(obj, f);
   FrogIntegrateVelocityAndGravity(obj);
   FrogDrawAndCycleBone2Slot(obj, f);
+  // `PUSH 0x3F800000; CALL 0x00409b70` at `0x0043A2C2`, straight after the
+  // draw and on every path.
+  ActorRegisterCameraPoint(obj, f.host, FROG_CAMERA_RISE);
 }
+
+/** `PUSH 0x3F800000` at `0x0043A2C2`: `ActorRegisterCameraPoint`'s 1.0. */
+export const FROG_CAMERA_RISE = 1.0;
 
 // -- the class -------------------------------------------------------------
 

@@ -38,9 +38,9 @@
 import type { Actor } from "../actor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
-import { SpawnClass } from "../spawn_class";
 import { TURN_RATE_UNTRACKED } from "./constants";
 import { SelectCameraLookAtTarget } from "./select_target";
+import { CameraSlotsBusy, RegisterForCameraTracking } from "./slots";
 import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
   from "./turn";
 import { vec3 } from "../vec";
@@ -52,113 +52,71 @@ import { vec3 } from "../vec";
  * into `obj+0x100` as it walks the skeleton, and that is what
  * `SelectCameraLookAtTarget` aims at — never `obj+0x40`. The bone is **1** for
  * an ordinary humanoid (character types 0..0x14); 2 and 9 are selected by
- * flags this port does not model.
+ * flags this port does not model, and so is the `-3.5` the same routine takes
+ * off the height for a close-ranked enemy. `[open]` -- see
+ * `docs/PLAYER_PROGRESS.md`'s camera section.
  */
 const CAMERA_TRACK_BONE = 1;
-
-/**
- * The lift each class asks `ActorRegisterCameraPoint` for.
- *
- * **It is the routine's float argument, not a field on the actor.**
- * `FUN_00409B70` reads it off the stack — `FLD float ptr [ESP + 0x38]`, bytes
- * `d9442438`, at 0x00409BF2, which with the prologue's `SUB ESP, 0x18` and one
- * `PUSH ESI` still live is the first argument — and adds it to `obj+0x104`
- * (`FADD float ptr [ESI + 0x104]`, `FSTP float ptr [ESI + 0x104]`). `[proved]`
- *
- * All fifteen call sites, re-read with `disassemble_bytes` and the raw hex
- * quoted, because the decompiler drops float arguments:
- *
- * | site | caller | push | value | gate before the call |
- * |---|---|---|---|---|
- * | 0x0045347A | `EnemyZombieUpdate`, class 0x30 | `6800008040` | **4.0** | none |
- * | 0x00449991 | `EnemyThrowerUpdate`, class 0x31 | `6a00` | **0.0** | none |
- * | 0x0048ADB0 | `CivilianUpdate`, class 0x10 | `6800008040` | **4.0** | none |
- * | 0x0043A2C7 | `FrogUpdate`, class 0x11 | `680000803f` | 1.0 | none |
- * | 0x0047621E | `Class14Update`, class 0x14 | `state+0x0C` | **runtime** | none |
- * | 0x00491A49 | `Boss4Update`, class 0x19 | `PUSH EAX` = `[EDX + 0x70]` | **runtime** | none |
- * | 0x00427D01 / 0x004283D2 / 0x00428AB2 | `Class2DState3` / `4` / `5`, class 0x2D | `680000a040` | 5.0 | none |
- * | 0x0042C273 | `Class2DChildKind0Update` | `6800000040` | 2.0 | `obj+0x34` bit `0x100` clear |
- * | 0x0042C986, 0x0042D5D0 | `Class2DChildKind1Update`, `Class2DChildKind3Update` | `6800007041` | 15.0 | bit `0x100` clear |
- * | 0x0042CF93 | `Class2DChildKind2Update` | `6a00` | 0.0 | bit `0x100` clear |
- * | 0x0049C8CE | `Class22FightPhase2`, class 0x22 | `6800000040` | 2.0 | bit `0x100` clear |
- * | 0x0047CA3A | `Class32Update`, class 0x32 | `6a00` | 0.0 | none |
- * | 0x00490917, 0x004912EA | `Class23StateShared1`, `Class23Subtype2State1`, class 0x23 | `680000c040` | 6.0 | none |
- *
- * `Class2DState4` (`FUN_00427D40`) is what builds the four child kinds, one
- * `ActorAlloc(init, 0x13F4)` each on `obj+0x1320` 0..3 (`0x004282C5..0x0042831B`),
- * with the inits at `0x0042C0B0`, `0x0042C830`, `0x0042CD30` and `0x0042D490`.
- * Classes 0x2D, 0x22, 0x23 and 0x32 have no port, so their rows are recorded
- * and not admitted: an actor with no behaviour registering for the camera
- * would hold every room gate with nothing to shoot. `[open]` until they are.
- *
- * So it is per-call-site, and a constant at all but two -- class 0x14's and
- * class 0x19's are fields, which `ClassHandler.cameraRise` answers.
- *
- * **Classes 0x24, 0x25, 0x41 and 0x44 never call the routine at all**: the
- * sixteen rows above are every reference to 0x00409B70 in the binary and none
- * of them is in those classes' code. They get 0 here, because 0 is the only value that does not
- * invent a lift the engine never applies to them.
- *
- * [diverges] *Who* is registered is still not the engine's set: `director.ts`
- * calls this for every visible actor, where the engine calls it from fifteen
- * places. Narrowing it to the three proved classes would leave `lookAt` at the
- * origin for the rest, which `SelectCameraLookAtTarget` and the HUD marker
- * both read. That is a separate change from the lift, and this table is what
- * makes it possible to make later.
- */
-const CAMERA_POINT_RISE: Partial<Record<SpawnClass, number>> = {
-  [SpawnClass.Civilian]: 4,
-  [SpawnClass.Zombie]: 4,
-  // `CarriedZombieUpdate18` runs `EnemyZombieUpdate`, whose call this is.
-  [SpawnClass.CarriedZombie]: 4,
-  [SpawnClass.Thrower]: 0,
-  // `FrogUpdate` (`FUN_0043A1E0`): `ActorRegisterCameraPoint(1.0)`.
-  [SpawnClass.Frog]: 1,
-};
-
-/** What {@link CAMERA_POINT_RISE} gives a class with no exe call site. */
-const CAMERA_POINT_RISE_NONE = 0;
-
-/**
- * The float argument this class's `Update` pushes. See
- * {@link CAMERA_POINT_RISE}.
- *
- * [port-only] The engine has no such lookup: each `Update` pushes its own
- * literal at its own call site. The port calls `ActorRegisterCameraPoint` from
- * one place, so the fifteen literals have to be a table, and this is it.
- */
-export function CameraPointRiseFor(cls: SpawnClass): number {
-  return CAMERA_POINT_RISE[cls] ?? CAMERA_POINT_RISE_NONE;
-}
 
 const _bone = vec3();
 
 /**
+ * `[port-only]` -- the `obj+0x100` write `SkeletonEmitNode` (`FUN_004114C0`)
+ * makes while it draws the actor: the tracked bone's world position, unlifted.
+ *
+ * The engine draws every skeleton actor inside its own update, so every one of
+ * them carries the point whether or not it ever registers for the camera; the
+ * port's skeleton is three.js's, so the point comes across `GameHost` from the
+ * pose the renderer last drew, and `SceneTaskWalk` records it for each
+ * visible actor before its update runs. A host with no pose for the actor
+ * leaves the point where it was.
+ *
+ * Returns whether the point was recorded.
+ */
+export function SkeletonRecordCameraPoint(obj: Actor, host: GameHost): boolean {
+  if (!host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone)) return false;
+  obj.lookAt.x = _bone.x;
+  obj.lookAt.y = _bone.y;
+  obj.lookAt.z = _bone.z;
+  return true;
+}
+
+/**
  * `ActorRegisterCameraPoint` — `FUN_00409B70`. Where the camera follows this
- * actor.
+ * actor, and the call that makes it a camera candidate at all.
  *
- * It transforms `obj+0x100` into view space for the shot test, registers the
- * actor for both, and raises the height by its float argument — `rise`, which
- * the caller supplies exactly as the engine's caller pushes it. The port's
- * half is the height and the registration: the world position of the bone is
- * the skeleton's, and the skeleton is three.js's, so it comes across
- * `GameHost`.
+ * ```
+ * obj+0x70 = g_camera_world_to_view * obj+0x100      ; the shot test's point
+ * RegisterForShotTest(obj)                            ; FUN_00405160
+ * obj+0x104 += rise                                   ; FLD [ESP+0x38] -- the float argument
+ * RegisterForCameraTracking(obj)                      ; 0x00409C03
+ * ```
  *
- * This ran in `render/characters.ts` until step 21, writing `a.lookAt` from a
- * renderer — which meant turning the Characters view toggle off froze the
- * camera's idea of where everything was. A view switch is not allowed to
- * change what the game thinks; that it could is the shape
- * `no-actor-writes-in-render` exists to catch.
+ * `rise` is **the routine's float argument**, pushed at each call site as a
+ * literal -- 4.0 for class 0x30 and 0x10, 1.0 for class 0x11, 0.0 for class
+ * 0x31 -- or, for classes 0x14 and 0x19, a field. `[proved]`: `d9442438` at
+ * `0x00409BF2` is the first argument with the prologue's `SUB ESP, 0x18` and
+ * one `PUSH ESI` live. The routine works on `g_cur_actor` (`[0x009A26A0]`),
+ * which is `obj` here. Every exe call site immediately follows the class's own
+ * draw, which is where `obj+0x100` was just written; the port re-records that
+ * point here first for the same reason, so the lift lands on this frame's
+ * bone and never on last frame's lifted one.
  *
- * A host with no pose for this actor leaves the point where it was, which is
- * what a character with no skeleton in the scene should look like.
+ * The view-space point is computed on demand by the host's `viewSpaceOf`, and
+ * the shot test is the renderer's pick, so the port's routine is the lift and
+ * the registration. A host with no pose leaves the point unlifted, but the
+ * actor still registers: the engine registers it whatever its draw did.
+ *
+ * **Who calls it is each class's own business**, exactly as in the engine:
+ * `EnemyZombieUpdate`, `EnemyThrowerUpdate`, `CivilianUpdate` and `FrogUpdate`
+ * here, and the boss classes in their own directories. A class with no port
+ * has no update and so never registers -- it cannot hold a room gate with
+ * nothing to shoot.
  */
 export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
                                          rise: number): void {
-  if (!host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone)) return;
-  obj.lookAt.x = _bone.x;
-  obj.lookAt.y = _bone.y + rise;
-  obj.lookAt.z = _bone.z;
+  if (SkeletonRecordCameraPoint(obj, host)) obj.lookAt.y += rise;
+  RegisterForCameraTracking(obj);
 }
 
 /** `FUN_00403C00`'s numerator. Every call site in the engine passes 1. */
@@ -240,5 +198,5 @@ export function CameraTrackEnemiesTick(): void {
  * above. What is left is the flag. [diverges]
  */
 export function CameraDriverFromDeferredPose(): void {
-  G.g_camera_free = G.g_enemy_slots.length === 0 ? 1 : 0;
+  G.g_camera_free = CameraSlotsBusy() ? 0 : 1;
 }

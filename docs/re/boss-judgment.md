@@ -492,10 +492,10 @@ switch sub (jump table 0x0049CDCC)
 |---|---|
 | 0 `0x0049C970` | `g_boss_hp_fraction = 0` (`0x0049C974`); `NoOpStub(obj, 2)`; `SpawnBoneHitSprite(obj, 2)`; `DEC g_enemies_alive` `0x0049C98E`; `DEC g_enemies_present` `0x0049C995`; release camera/hit slots of obj **and of the sub-actor**; sub++; `+0x1330 = 0`; fall into 1 |
 | 1 `0x0049C9F9` | `obj+0x194++`; if `g_camera_free == 1`: `g_bHudShutterState = 5` (`0x0049CA16`), `ActorSetMotion(char, [0x00570BE8]=0x40A)`, sub++; v1: pos = (`C4854666` -1066.2, `42200000` 40.0, `C3F5199A` -490.2); v2: y = 40.0, z < `[0x00570F48]` -1238.0 → -1238.0 (`C49AC000`), z > `[0x00570F44]` -1180.0 → -1180.0 (`C4938000`) |
-| 2 `0x0049CA99` | `+0x1330 = 0`; **`[0x009CA094] = 1`** (`0x0049CAAD`); save `g_camera_block_eye` → `+0x13C0..C8`, `g_camera_block_target` → `+0x13CC..D4`; sub++; into 3 |
+| 2 `0x0049CA99` | `+0x1330 = 0`; **`g_camera_driver_held` (`0x009CA094`) `= 1`** (`0x0049CAAD`); save `g_camera_block_eye` → `+0x13C0..C8`, `g_camera_block_target` → `+0x13CC..D4`; sub++; into 3 |
 | 3 `0x0049CAF3` | `obj+0x194 >= 0x1C`: v1 `EvtOpPlayDialogue2D(0x1D)` (*"Sir Go-l-d..."*, `ST1\33_ZEA.WAV`); `+0x1338 = 2`; `+0x50 = +0x5C = 0`; sub++. `obj+0x194++` |
 | 4 `0x0049CB2D` | `obj+0x194 < 0x84` → ++. If `g_camera_fixed_eye_y + 7.4 ([0x00570F40] 40ECCCCD) < y`: `+0x5C -= [0x00570F38]` (double 1.3611111e-4), `+0x50 += +0x5C`, `y += +0x50`. Else: `obj+0x194 < 0x8D` → `y = ground + float[0x00570C78 + obj+0x194*4]`; `if (++obj+0x194 == 0x92)`: `ActorAlloc(Class22ImpactFlipbookUpdate, 0x13F4)` at pos with `+0x1320 = 0`, `PlaySoundId(0x002A16A9)` (`COMMON\ENE_WALK7_22`); `obj+0x194 == g_motion_play_length[clip]` → sub++, `+0x1338 = 0`. Then either way `y = max(y, ground + 1.1 ([0x00570F30]))` |
-| 5 `0x0049CC14` | `+0x1330 >= 300`: `[0x009CA094] = 0`; **Arcade only** (`g_GameMode == 0`): restore `g_camera_block_eye/target` from `+0x13C0..D4`; v1: **`g_script_flags[3] = 1`** (`MOV byte [0x009C7203],1` at `0x0049CC95`); v2: **`g_script_flags[0] = 1`** (`MOV byte [0x009C7200],1` at `0x0049CC85`); sub++ |
+| 5 `0x0049CC14` | `+0x1330 >= 300`: `g_camera_driver_held = 0`; **Arcade only** (`g_GameMode == 0`): restore `g_camera_block_eye/target` from `+0x13C0..D4`; v1: **`g_script_flags[3] = 1`** (`MOV byte [0x009C7203],1` at `0x0049CC95`); v2: **`g_script_flags[0] = 1`** (`MOV byte [0x009C7200],1` at `0x0049CC85`); sub++ |
 | ≥ 6 | nothing (drawn each frame until the tail cue) |
 
 After the switch, for `2 <= sub <= 5` (sub read **after** the switch):
@@ -510,9 +510,10 @@ pop
 CamBlockSetAnglesFromLookAt(&g_camera_block_eye, &g_camera_block_target, 0)   ; 0x0049CDBC
 ```
 
-`[0x009CA094]` is unnamed; `CameraDriverSelectMode` (`0x004026AB`) forces
-`g_camera_mode` 6 (`PoseHookNone`, the camera stops) while it is 1, which is
-what lets this routine write the camera block by hand.
+`g_camera_driver_held` (`0x009CA094`, named by the banner's port);
+`CameraDriverSelectMode` (`0x004026AB`) forces `g_camera_mode` 6
+(`PoseHookNone`, the camera stops) while it is 1, which is what lets this
+routine write the camera block by hand.
 
 `g_class22_landing_bounce` (`0x00570E88`) is `float[0x00570C78 + frame*4]` at
 frames `0x84..0x8C`: 7.4 6.6 4.55 4.0 3.1 2.8 2.4 1.8 1.3. The counter is
@@ -701,7 +702,7 @@ for p in 0, 1:                                                  ; EBX = 0x009A22
                 acc += g_GameMode == 1 ? (*EBX == -1.0 ? 2.0 : *EBX) : 1.0
         push; SetTop(g_camera_blocks[idx])
         pt = (rec+0x68, rec+0x6C, rec+0x70 + rec+0x78)    ; rec = obj+0x20C + part*0x90
-        FUN_00407BC0(&M·pt, part in {1,2,3,4,6,7,9,11,14} ? 0x5A : 0x5C, p)  ; byte table 0x004916C0
+        SpawnSpriteEffectsTowardEye(&M·pt, part in {1,2,3,4,6,7,9,11,14} ? 0x5A : 0x5C, p)  ; FUN_00407BC0; byte table 0x004916C0
         PlaySoundId(same split: 0x001216A9 BULLET_OTH1 | 0x001316A9 BULLET_SND1); pop
     obj+0x190[p] = 0
     rec(part).flags (obj+0x280 + part*0x90) &= ~(1 << (p+1)) & ~8
@@ -828,7 +829,7 @@ the compiler folded the index): `[0x2F]` 830 at `0x00576DF4`, `[0x30]` 300 at
 | `g_bHudShutterState` | 1 / 5 | `0x0049B899` (hint pause over), `0x0049BE49`/`0x0049BE7B` (hint lines), `0x0049CA16` (death) |
 | `g_screen_shake_frames` | 0x30 / 0x18 | `0x00490026`; `0x00490314 0x0049038E 0x00490581 0x004906E0` (only if 0), `0x00490B34` |
 | `g_camera_block_eye/target` | orbit / restore | `0x0049CD2F..0x0049CD7E`, `0x0049CD93`/`0x0049CD9F` (eye.y), `0x0049CC43..0x0049CC74` (Arcade restore) |
-| `[0x009CA094]` | 1 / 0 | `0x0049CAAD`, `0x0049CC29` |
+| `g_camera_driver_held` `0x009CA094` | 1 / 0 | `0x0049CAAD`, `0x0049CC29` |
 
 ## 9. Boss health bar and banner
 
@@ -868,12 +869,21 @@ exactly `Class22DescendAndJoinFight`'s 840.
   placement the class can spawn; class 0x10's children in `characters.ts` are
   the precedent. `spawnres` needs a class-0x23 rule (literal 0x44).
 * **Character types** 0x44, 0x45, 0x46 — all three resolve through
-  `g_character_skeletons` into `char_adv04.bin` slots per the asset-slot table
-  (16/16/7 nodes). `[open]` The blocks load `boss1z.bin` (34 entries),
-  `boss1z_wing.bin` (8) and `boss1q.bin` (95) and not `char_adv04.bin`;
-  `boss1z.bin`'s 34 matches the 33 slots `0x2A0..0x2C0` plus `0x181D`, and
-  `boss1z_wing.bin`'s 8 matches `0x2C1..0x2C8`, but the slot table names
-  `char_adv04.bin` for those slots. Which file the game draws is not settled.
+  `g_character_skeletons` into slots `0x28F..0x2C8` (16/16/7 nodes), which the
+  exe lists first under `char_adv04.bin`. **The game draws them from
+  `boss1q.bin`, `boss1z.bin` and `boss1z_wing.bin`.** `[proved]` A whole-file
+  load (opcode `0x52`) makes a file resident slot by slot: `FUN_00418E40`
+  points `0x007C2134` at `POL_SLOT_LIST[file]` (`0x004E794C`, at
+  `0x00418E84`) and the file's texture table at `0x0055B9B8 + file*4`, and
+  `FUN_00418EC0` installs each model into its slot unless the slot is already
+  resident. Stage 1's blocks 0, 14 and 16 and stage 5's blocks 0 and 1 load
+  those three files; no block of either stage loads `char_adv04.bin`. Compared
+  model for model: the flier's 33 and the sub-actor's 8 are the same geometry
+  and the same texture images in both files, numbered from each file's own
+  bank; the walker's are not — slot `0x29D`'s meshes 4 and 6 are different
+  geometry in `boss1q.bin`, and its texture 1 (64×128) is not
+  `char_adv04.bin`'s texture 79 (64×64). The exporter builds all three from
+  the stage's own loads (`characters.ts`, `judgmentBuild`).
 * **Motions**, all in `mot/boss1.bin` (bank 4): flier 0x408..0x416; companion
   0x383..0x391, 0x393, 0x394 (0x387, 0x392 unused by these classes); sub-actor
   0x0F, 0x10, 0x12, 0x13, 0x14; with `g_motion_play_length` for each.
@@ -893,6 +903,11 @@ exactly `Class22DescendAndJoinFight`'s 840.
 
 ## 12. What the port will need
 
+Written before the port, and kept as the reading's statement of need. How
+each point was met -- the node-1 seat and extras in `render/`, the camera
+block under `g_camera_driver_held`, the per-player shot bytes, the draw-site
+clocks -- is in [`PLAYER_PROGRESS.md`](../PLAYER_PROGRESS.md), "JUDGMENT".
+
 * **`GameHost`:** `objectPath` (`CamEvalObjectPath6`) for every path above;
   node 1's **world matrix** of the flier (position *and* ZYX Euler) to seat the
   sub-actor — `boneWorld` returns a position only; node 1's world point for
@@ -900,7 +915,7 @@ exactly `Class22DescendAndJoinFight`'s 840.
   sphere of a hit part (`Class23TakeShots`' spark point) — render-only, can be
   dropped; `CamEvalPath7` for the ring — render-only.
 * **Camera:** `Class22Death` drives `g_camera_block_eye/target` itself under
-  `[0x009CA094] = 1` (camera mode 6) and calls `CamBlockSetAnglesFromLookAt`.
+  `g_camera_driver_held = 1` (camera mode 6) and calls `CamBlockSetAnglesFromLookAt`.
   `game/camera/mode.ts` records that override as not modelled. The faithful
   port needs mode 6 in the camera driver and the block eye/target as the
   camera's source of truth during the orbit; this is shared with class 0x14's
@@ -924,14 +939,34 @@ exactly `Class22DescendAndJoinFight`'s 840.
 
 ## 13. Open questions
 
-1. `char_adv04.bin` vs `boss1z/boss1q/boss1z_wing.bin` — which pol file
-   supplies the drawn models (§11).
-2. `[0x009CA094]` has no name; its only reader is `CameraDriverSelectMode`.
-   Shared with the banner, class 0x14 and class 0x19 — the coordinator's call.
-3. `obj+0x13C0` on class 0x23 (x − 50) has no reader found in the class.
-4. `FUN_00445050` also writes `g_script_flags[3]` literally; which class it is
-   and whether it runs in stage 1 blocks 14/16.
-5. `Class22Phase2TakeShots` with bit 3 up and no part code would pay player −1.
-6. The Training subtype-2 routines were read from the decompilation only.
-7. `char+0x68` (`obj+0x1FC` = 5 flier, 1 companion) and sub-actor bit
-   `0x80000` — meaning not read.
+Settled in the port's phase:
+
+* ~~Which pol file supplies the drawn models~~ — the stage's own loads
+  (§11). `[proved]`
+* ~~`[0x009CA094]` has no name~~ — `g_camera_driver_held`, named with the
+  banner.
+* ~~`FUN_00445050` also writes `g_script_flags[3]`~~ — it is
+  `g_prop_behaviours[9]` (its only reference is the pointer at `0x005926CC`,
+  `0x005926A8 + 9*4`), a behaviour of the prop classes 0x12/0x13/0x15. Stage
+  1's only such spawn is class 0x12 in block 6; none is in blocks 14 or 16.
+  Flag 3 there is `Class22Death`'s alone. `[proved]`
+* ~~`char+0x68`~~ — the object rotation order `SkeletonApplyRootMotion`
+  (`FUN_00410C50`) switches on through the table at `0x00411038`: 0
+  `Rx Ry Rz`, 1 `Rx Rz Ry`, 2 `Ry Rx Rz`, 3 `Ry Rz Rx`, 4 `Rz Rx Ry`, else
+  `Rz Ry Rx`, after `T(obj+0x40)`. The flier and its sub-actor (5) draw
+  `T · Rz · Ry · Rx`; the walker (1) `T · Rx · Rz · Ry`. `[proved]`
+* ~~`Class22DrawBonePart`'s node-1 arm~~ — it keys on the node's **slot**
+  (`0x2BB`, the flier's bone 1), not the node, and draws `0x2B5` under
+  `T(-0.778, 1.49, 0) RotZ(trunc(9102·rz₃/26396)) RotX(trunc(21845·rx₃/32768))`
+  and `0x2B4` under the mirror with node 6's angles, `rx`/`rz` being the draw
+  record's `+0x04`/`+0x0C` (`FUN_00411700` writes them as it rotates the
+  node). `[proved]` from `0x0049DA01`..`0x0049DB36`.
+
+Still open:
+
+1. `obj+0x13C0` on class 0x23 (x − 50) has no reader found in the class.
+2. `Class22Phase2TakeShots` with bit 3 up and no part code would pay player −1.
+3. The Training subtype-2 routines were read from the decompilation only, and
+   are not ported: no bundle carries `trnevtbl.bin`.
+4. The sub-actor's `obj+0x34` bit `0x80000`: nothing reads it for an actor
+   that is never updated, and no reader elsewhere has been found.

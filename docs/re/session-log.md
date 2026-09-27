@@ -19694,3 +19694,52 @@ playthroughs are identical to the baseline to the frame.
 Named: `ProcessPlayerShotsTaskCreate`, `ProcessPlayerShotsTask` (the thunk
 had the same name as the routine), `ShotPushWorldCandidate`,
 `ShotPushColiHitCandidate`.
+
+## 2026-09-27 -- JUDGMENT ported: classes 0x22 and 0x23, and what the draw had hidden
+
+Phase 2 of the boss port: both classes transcribed routine by routine into
+`game/class22/` and `game/class23/`, the exporter taught the nested walker,
+the sub-actor and every scene's cam files, the draw ported in
+`render/characters/judgment.ts`, and both classes moved onto the faithful
+shot test once it landed. Stage 1 block 14 plays through: phase 1, the
+walker's fall, phase 2, the death orbit and `g_script_flags[3]`.
+
+* The draw is where most of the unread engine was. `SkeletonApplyRootMotion`
+  switches the object rotation order on `model+0x68` (table `0x00411038`);
+  the flier and its wings are order 5, the walker 1 -- `open question 7` of
+  phase 1, which had the byte and not its meaning. `Class22DrawBonePart`'s
+  second arm keys on the node's **slot** `0x2BB`, not on node 1, and turns its
+  two models by nodes 3 and 6's drawn angles, which `FUN_00411700` writes to
+  the draw record as it rotates each node.
+* `Class23LandingRingUpdate` draws, then increments, then kills past `0x50`:
+  the port's first cut drew one frame late and lost the last frame.
+* **The models were the wrong file.** The exe lists the boss's slots under
+  `char_adv04.bin` first and the exporter took that; the stages load
+  `boss1q`/`boss1z`/`boss1z_wing`, and `FUN_00418EC0` fills a slot from
+  whatever file is loaded while it is free. The flier matched byte for byte
+  bar texture numbering; the walker's arm and one texture did not.
+* `FUN_00445050` writing flag 3 is `g_prop_behaviours[9]`, and no prop in
+  stage 1's boss blocks runs it.
+
+Wrong turns:
+
+* An early phase-2 note had both classes without bit `0x80`, and so hit as
+  one sphere. Wrong: `ActorBuildSkinnedModel` raises `0x80` for both (the
+  shot-test workstream's reading), so they are hit bone by bone after the
+  `obj+0x124` sphere.
+* A port-only "was this actor on the shot list last frame" latch stood in for
+  the list itself, dropping shots that landed on unlisted frames. It went
+  when the list arrived; nothing it did survives.
+* `Class22Init` ran its first update inline, as the engine's `Init` does from
+  the task walk -- which, with the director's walk also updating it, was two
+  updates on the spawn frame. The engine's `Init` *is* the task walk's call,
+  so the port's spawn-frame walk is that update and the inline one went.
+* A hand-split `.rdata` hex image for `0x00570BE0` was off by a line; the
+  image is generated now and checked against Ghidra's bytes.
+* The first stage-1 playthrough stopped at block 14 as "reached an end block"
+  -- the harness ends on arrival -- and a copy that played on was killed by
+  its own debug clear after 480 frames of volleys the room-pressure meter could
+  not see land (it does not read the flier). A long `--shoot-for` shows the
+  fight; `--no-damage` shows the end.
+
+Named: `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`).

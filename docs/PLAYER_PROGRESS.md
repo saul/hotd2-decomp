@@ -4286,6 +4286,85 @@ instead.
   and `tools/verify_skeletons.py` now holds every skeleton to the EXE's bone
   count.
 
+## JUDGMENT: stage 1's boss, and its return in stage 5
+
+Classes 0x22 and 0x23, `game/class22/` and `game/class23/`, read in
+[`re/boss-judgment.md`](re/boss-judgment.md). Two actors and a third riding
+one of them: the **flier** (class 0x22, character type 0x45) takes the damage,
+carries the health bar and the banner; the **walker** (class 0x23, type 0x44)
+cannot be hurt, strikes with its axe and hands every hit it takes to the
+flier, one hit point at a time; and the flier's **sub-actor** (type 0x46, its
+wings) is a second skinned actor seated on the flier's node 1 every frame.
+
+**Where they come from.** The flier is an opcode-0x0B spawn: stage 1 block 0
+(variant 0, the cameo over the cathedral), blocks 14 and 16 (variant 1, the
+fight), stage 5 block 1 (variant 2, the return). The walker is not a script
+spawn at all: it is the class-0x23 descriptor nested at the flier's
+`tail+0x10`, spawned from the flier's own entrance. The exporter follows the
+pointer and emits it as a synthetic placement parented to the flier, the
+sub-actor likewise, as the bat's wings are.
+
+**The fight.** 300 hit points. Phase 1 rides `op_st1` paths `0x104..0x13F` in
+the walker's frame while the walker walks at the camera and swings; a hit is
+30 (25 with both players attackable), 10 points (120 for part 2), and a
+flinch. At 90 the flier leaves the walker's shoulder -- the walker falls the
+same frame, out of the alive count, and out of the present count when it
+lands -- and phase 2 flies camera-relative paths `0x140..0x144` until the
+last 90 go. The death is a fall, a bounce, an impact flipbook and a
+300-frame orbit the class drives by writing the camera block itself under
+`g_camera_driver_held`; it raises `g_script_flags[3]` in stage 1 and
+`g_script_flags[0]` in stage 5, which is what the blocks wait on. Driven end
+to end through block 14 (`--no-damage`, the grid volley): 300 → 97, the
+walker's fall, 90 → 0 in phase 2, 1510 for the kill, the orbit, and the
+script walks off the end of the block.
+
+**What is drawn, and how.** `render/characters/judgment.ts`:
+
+* each root with **all three angles, in its own order** -- the order is
+  `model+0x68` (`obj+0x1FC`), which `SkeletonApplyRootMotion` switches on;
+  the flier's is `T · Rz · Ry · Rx`, the walker's `T · Rx · Rz · Ry`. The
+  ordinary path draws yaw alone, and the cameo's path `0x100` banks;
+* the sub-actor **seated on the flier's posed node 1**, after every instance
+  is posed, through `MatrixGetTranslation` and `MatrixToEulerZYX` as the
+  engine does it;
+* node 1's **two extra models**, `0x2B5` and `0x2B4`, turned by the angles
+  nodes 3 and 6 were drawn with (`Poser.drawnAngles`);
+* node 2's slot cycling through `0x2A5 + cycle[n]` while the flier swoops.
+
+The walker's landing ring is `render/slotmodels.ts`'s: `boss1q.bin` 94 spread
+and faded along `CamEvalPath7(0x147)`, read in the ring's own update.
+
+**The models are the stage's own.** The exe lists slots `0x28F..0x2C8` under
+`char_adv04.bin` first, and that is what the exporter drew -- but stages 1
+and 5 never load it; they load `boss1q.bin`, `boss1z.bin` and
+`boss1z_wing.bin`, and a whole-file load is what makes a slot resident. The
+flier's and the wings' data are the same in both; the walker's arm (slot
+`0x29D`) and one texture are not. The exporter now builds the three types
+from the file the stage loads.
+
+**The shot test is the engine's.** Both classes register at the exe's sites
+(`formats/combat.md` §3): phase 1's `RegisterForShotTest`, phase 2's
+`ActorRegisterCameraPoint(2.0)` while the flinch bit is down, the walker's
+`ActorRegisterCameraPoint(6.0)`, its falling frame and its collapse. The
+sub-actor never registers.
+
+**Behaviour that changed outside the two classes:**
+
+* `ActorSpawn` pushes to `g_object_list` **before** the class's `Init`, as
+  `SpawnFromDescriptor` links the task before the handler runs. An object an
+  `Init` makes is now updated after its maker.
+* A bone whose draw record is slot 0 draws nothing (`AssetDrawSlot(0)`
+  returns at once). That is the walker's node 2 -- and the frog corpse's
+  bones 2 and 3, which were drawn before.
+* Every scene's cam files come from the exe's per-scene list
+  (`0x004C4990`): stage 5 gains `op_st1` (JUDGMENT's paths `0xFD..0x147`),
+  and every Original Mode bundle gains `op_org`.
+* `game/matrix.ts` is pure maths a render layer may call, beside
+  `game/vec.ts` (`tools/verify_layers.py`).
+
+Not ported: Training's subtype 2 (`trnevtbl.bin` block 9), which no bundle
+carries. Stage 1 blocks 14 and 16 are the same descriptor.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

@@ -281,21 +281,27 @@ export interface ClassHandler {
    */
   cameraRise?(obj: Actor): number;
   /**
-   * `[port-only]` **Did this actor's last update call `RegisterForShotTest`
-   * (`FUN_00405160`)?** The engine's shot test walks a list its objects
-   * append themselves to, one call per frame from each class's own routine,
-   * and `ProcessPlayerShots` (`FUN_00404570`) runs before the object pass --
-   * so the list a shot is tested against is the one the previous frame's
-   * updates built. An object that did not register is not in it, and a
-   * bullet passes through it to whatever is behind.
+   * **This class registers for the shot test the engine's way.**
    *
-   * The port's pick (`render/characters.ts`) takes every visible, living
-   * actor instead. A class whose routine registers only sometimes -- or
-   * never, for some of its sub-types -- answers here, from a latch its update
-   * writes where the exe makes the call. Absent means the pick's answer
-   * stands.
+   * Its own update calls `RegisterForShotTest` (`FUN_00405160`) where the
+   * exe's routine does -- directly, or through `ActorRegisterCameraPoint`
+   * (`FUN_00409B70`), which ends in that call -- and writes
+   * {@link Actor.shotCentre} and {@link Actor.hitRadius} where the exe writes
+   * `obj+0x70..0x78` and `obj+0x124`. Set, two things change for the class
+   * and nothing else does:
+   *
+   * * `director.ts` stops calling the camera point for it: the class makes
+   *   that call itself, at its own site, with its own gate.
+   * * The pick finds it through `G.g_shot_test_list` only, with
+   *   `ShotTestSphere` (`FUN_00404630`)'s broad phase and its fork into the
+   *   bones, and `render/`'s own pick passes it by. An actor of this class
+   *   that did not register this frame cannot be shot, which is the engine's
+   *   rule and the point of the flag.
+   *
+   * Absent means the class is picked the way it always has been. See
+   * `combat/shot_test.ts`.
    */
-  shotTestable?(obj: Actor): boolean;
+  registersForShotTest?: boolean;
 }
 
 /**

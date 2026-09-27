@@ -19586,3 +19586,70 @@ Under the standing rule that a divergence is fixed rather than declared.
   (`[1,7,3,5,4,6,2,8]`) to `D3DRENDERSTATE_ZFUNC`: 4 is `LESSEQUAL`, 7 is
   `ALWAYS`. The boss health bar is never hidden by the scene; the port's
   camera-riding sprite quads now take their depth function from the flags.
+
+## 2026-09-27 -- the shot test: who registers, the sphere first, and the fork
+
+The brief was to make the port's candidate set, broad phase and sort the
+exe's. Mid-session it was narrowed to the machinery plus the four boss
+classes, which other workstreams are porting, and every other class was to be
+left picked as before.
+
+**How the classes register.** `get_xrefs_to 0x00405160` returns 53 callers,
+and not one of them is class 0x30, 0x31, 0x10, 0x14 or 0x19. A rel32 scan of
+the image (capstone and a byte loop over `.text`, every `E8`/`E9` whose target
+is `0x00405160`) finds **95**. A search for the address as an absolute pointer
+finds none, so the 95 are the set. The 42 Ghidra misses are in undisassembled
+bytes, most past a `MatrixStackPop` it calls no-return. One of them is
+`ActorRegisterCameraPoint`'s own tail, `0x00409BED`, and the seventeen call
+sites of that routine are how the combat classes and the bosses register.
+That is `L35` again, for a second routine in the same function.
+
+**Where `ProcessPlayerShots` runs.** It is a task: `FUN_00404480`, now
+`ProcessPlayerShotsTaskCreate`, is the last creator in the scene list
+(`0x00460751`), and tasks run in creation order. So it runs after the players
+fire and before any actor. That makes the list it tests last frame's, and the
+bone spheres it reads last frame's draw. `host.ts` had a divergence note saying
+the engine tests "the pose it is about to draw". It was wrong, and the note now
+says so.
+
+**Bit 0x80.** A sweep for every instruction that can set bit 7 of `+0x34`
+finds one: `SkeletonBuildAndPose`'s `OR CL,0x80` at `0x004105DF`, on
+`g_cur_actor`, whenever the skeleton has roots. Every skinned `Init` sets
+`g_cur_actor` to itself and calls the build, so civilians, zombies and every
+boss are per-bone. The docs said "no class-0x10 script ever sets it", which is
+true and beside the point: no script needs to. Six builders clear it with
+`AND 0x7F`, the cat among them.
+
+**Smaller readings.** `SkeletonWalkNode` has one caller, the build, and not the
+per-frame draw its row claimed. `RayTestSphere`'s record words are
+sin/cos(-pitch) then sin/cos(-yaw); a shot along +x is the case that tells the
+two orders apart. The candidate sort is a stable LSD radix sort on the low 16
+bits of `__ftol(-z * 10)`. `ShotTestWorld` pushes the static collision into
+the same list on every pull, so in the engine a nearer wall wins. The port
+still traces the world only on a miss, now declared on `ShotHitWorld`.
+
+**Port.** `game/combat/shot_test.ts` has all of it, behind
+`ClassHandler.registersForShotTest`. `ActorRegisterCameraPoint` carries the
+tail call; the director's old lift is `ActorLiftCameraPoint`, for classes not
+yet moved. `ActorSpawn` raises 0x80 through an `ActorBuildSkinnedModel` stand-in
+and `CatInit` clears it. No class opts in on this branch, and the six
+playthroughs are identical to the baseline to the frame.
+
+**Wrong turns.**
+
+* I first planned to transcribe the whole of `ProcessPlayerShots` into one
+  sort for every class, world candidates included, before the scope was
+  narrowed. What is left of that plan is a declared divergence in two places
+  (`MergeShotPicks` and `ShotHitWorld`) and a list in `combat.md` §3.
+* I took `CharacterBone.parent` for a bone number. It is an index into the
+  list, as `exetab.ts` writes it. `tsc` could not tell, and the first tree walk
+  would have found no children.
+* The new tests fired seven shots from a six-round magazine, and two checks
+  failed for the wrong reason. They reload now, and assert that the gun fired.
+* A check that a zero-radius bone is skipped passed with the skip removed. A
+  line quantised to BAMS angles never passes exactly through a centre, so the
+  skip cannot be seen through a shot. The check is gone and the test says why.
+
+Named: `ProcessPlayerShotsTaskCreate`, `ProcessPlayerShotsTask` (the thunk
+had the same name as the routine), `ShotPushWorldCandidate`,
+`ShotPushColiHitCandidate`.

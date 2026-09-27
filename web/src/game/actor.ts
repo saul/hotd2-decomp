@@ -270,9 +270,30 @@ export enum ActorFlag {
   /**
    * `obj+0x34` bit 7 — shoot this actor **per bone**. `ShotTestSphere`
    * descends into `ShotTestSkeleton` only when it is set; without it the actor
-   * is one sphere of radius `obj+0x124`. No class-0x10 script ever sets it.
+   * is one sphere of radius `obj+0x124`.
+   *
+   * **The skeleton build raises it, not a script.** `SkeletonBuildAndPose`
+   * (`FUN_00410590`) does `obj+0x34 |= 0x80` on `g_cur_actor` whenever the
+   * character's skeleton has root nodes (`0x004105CC`..`0x004105E2`,
+   * `or cl,0x80`), and that is the only instruction in the image that sets
+   * the bit. It runs once, from `ActorBuildSkinnedModel` (`FUN_00410440`),
+   * which every skinned class's `Init` calls after pointing `g_cur_actor` at
+   * itself -- so a civilian, a zombie, a thrower and every boss carry it.
+   * Six builders clear it again with `AND 0x7F` straight after: `PlaceBats`,
+   * `SpawnBatWings`, `CatInit`, `SpawnGoldenFrog` and two class-0x41 builders
+   * (`0x00463E50`, `0x004641F0`). `ActorBuildSkinnedModel` in `spawn.ts` is
+   * where the port raises it.
    */
   ShootPerBone = 0x80,
+  /**
+   * `obj+0x34` bit `0x10` — test this object as **a collision mesh**, not a
+   * sphere. `ProcessPlayerShots` (`FUN_00404570`) sends it to `ShotTestMesh`
+   * (`FUN_00404A00`) instead of `ShotTestSphere`, and `RegisterForShotTest`
+   * takes it whatever its depth. Class 0x26's boat raises it with
+   * `obj+0x34 |= 0x51`, and so does a story switch whose descriptor names a
+   * mesh.
+   */
+  ShotTestMesh = 0x10,
   /**
    * `obj+0x34` bit `0x8000` — **not in the shot test at all.**
    * `RegisterForShotTest` (`FUN_00405160`) returns before it appends the

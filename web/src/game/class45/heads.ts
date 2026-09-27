@@ -12,6 +12,7 @@ import { ActorByAt, G } from "../globals";
 import type { ClassFrame } from "../registry";
 import { BossHpBarSpawn } from "../boss_hp_bar";
 import { ScoreAddForPlayer } from "../combat/score";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { PlayerTakeDamage } from "../combat/player";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { ActorClaimHitSlot } from "../hit_slots";
@@ -31,8 +32,8 @@ import {
   type Boss3Attack,
 } from "./tables";
 import {
-  Boss3DrawModel, Boss3ModelStep, Boss3RegisterForShotTest, Boss3SetMotion,
-  Boss3SetMotionBlended, TRACK_FADING,
+  Boss3DrawModel, Boss3ModelStep, Boss3SetMotion, Boss3SetMotionBlended,
+  TRACK_FADING,
 } from "./model";
 import { Boss3ComposeBonePose, Boss3DrawBoneParts, PoseHookNone } from "./pose";
 import {
@@ -165,7 +166,7 @@ function ClearExtras(blk: Boss3Block): void {
 /**
  * Enter state 7. `[port-only]` in one respect: `obj.dead`, the port's own
  * mark of a dead actor, which its inspectors read. What keeps a shot off the
- * head is its not registering from here on -- see `Boss3RegisterForShotTest`.
+ * head is its tail's `RegisterForShotTest` gate, `state != 7`.
  */
 function EnterDead(obj: Boss3Actor): void {
   obj.state = Boss3HeadState.Dead;
@@ -411,7 +412,6 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
   const idx = t.index;
   if (idx >= 0 && idx < G.g_boss3_heads.length) G.g_boss3_heads[idx] = obj.at;
   t.cameraTracked = false;
-  t.shotTested = false;
 
   // -- 1. the shot, only in the fight and outside the flinch and death;
   //       outside that window the hit bits are left latched.
@@ -532,8 +532,9 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
   obj.shotCentre.x = obj.pos.x;
   obj.shotCentre.y = obj.pos.y;
   obj.shotCentre.z = obj.pos.z;
-  // `if (state != 7) RegisterForShotTest(obj)` at `0x004215AF`.
-  if (obj.state !== Boss3HeadState.Dead) Boss3RegisterForShotTest(obj);
+  // `if (state != 7) RegisterForShotTest(obj)` at `0x004215AF`, with
+  // `obj+0x70` the position just written.
+  if (obj.state !== Boss3HeadState.Dead) RegisterForShotTest(obj, f.host);
   let track = false;
   if (G.g_boss3_phase === Boss3Phase.Intro) {
     track = idx === 2;

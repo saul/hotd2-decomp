@@ -15,7 +15,7 @@ import { ActorDeadSweep, ActorDespawn } from "./despawn";
 import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraActorTick, CameraRunQueuedAction } from "./camera/mode";
 import { SceneViewApplyShake } from "./camera/shake";
-import { ActorRegisterCameraPoint, CameraPointRiseFor } from "./camera/track";
+import { ActorLiftCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { PropContainerType } from "./class41";
@@ -25,6 +25,7 @@ import { SpawnHordePlacers } from "./class40";
 import { SecondsToTicks, T } from "./tables";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { DropDueShotRequests } from "./combat/shot";
+import { ShotTestListReset } from "./combat/shot_test";
 import { CommitAppState } from "./app_state";
 import { GameOverRunPhase } from "./game_over";
 import { PlayerTasksRun } from "./player_shell";
@@ -602,6 +603,12 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   ScreenSpriteQueueReset();
   PlayerTasksRun({ host, rng, events });
   DropDueShotRequests();
+  // `ProcessPlayerShots` (`FUN_00404570`) is a task of its own, created after
+  // the two player tasks and before any actor, and it ends by emptying
+  // `g_shot_test_list`: the trigger pulls above were tested against what the
+  // actors registered last frame, and what they register below is for the
+  // next one. See `combat/shot_test.ts`.
+  ShotTestListReset();
   // The heads the burst threw, stepped where the engine steps its tasks.
   SeveredHeadsTick(rng, events);
 
@@ -642,17 +649,24 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
       // the export, and it is a decision, so it cannot live in `render/`.
       // Once a frame here, read as state there.
       ActorUpdateSuppressedBones(obj);
-      // `ActorRegisterCameraPoint` (`FUN_00409B70`): the tracked bone, lifted,
-      // is where the camera follows this actor. Off the pose the renderer last
-      // drew, which is the frame the engine's own reader sees too.
+      // `ActorRegisterCameraPoint` (`FUN_00409B70`)'s camera half: the
+      // tracked bone, lifted, is where the camera follows this actor. Off the
+      // pose the renderer last drew, which is the frame the engine's own
+      // reader sees too.
       //
       // The lift is the routine's **float argument**, pushed by whichever
       // class's `Update` makes the call -- 4.0 for a zombie or a civilian,
       // **0 for a thrower**. `CameraPointRiseFor` is that table; see it for
-      // all fifteen call sites and for what the port does differently.
-      ActorRegisterCameraPoint(obj, host,
-        g_class_handlers[obj.cls]?.cameraRise?.(obj)
-          ?? CameraPointRiseFor(obj.cls));
+      // every call site and for what the port does differently.
+      //
+      // A class that registers for the shot test the engine's way makes the
+      // real call itself, from its own update at its own site, so it is not
+      // made for it here.
+      if (!g_class_handlers[obj.cls]?.registersForShotTest) {
+        ActorLiftCameraPoint(obj, host,
+          g_class_handlers[obj.cls]?.cameraRise?.(obj)
+            ?? CameraPointRiseFor(obj.cls));
+      }
     }
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {

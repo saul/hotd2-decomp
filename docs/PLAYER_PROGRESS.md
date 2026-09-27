@@ -3275,10 +3275,24 @@ itself `[open]`, and the port writes none rather than guessing.
   identical ray. Range 1000 units, as `FUN_00404AD0` builds it.
 * The test walks **the same skeleton tree the renderer uses** and intersects a
   **per-bone sphere** from `PTR_DAT_004D032C` — `{slot, centre, radius}` indexed
-  `bone − 1`, copied into the bone's draw record each frame so it follows the
-  animation. A zombie's radii read as anatomy: torso 2.55, head 1.3, upper arm
-  1.4, hand 0.8, pelvis 1.75, thigh 2.15. Nearest along the ray wins, as
-  `FUN_00404DB0` sorts.
+  `bone − 1`, copied into the bone's draw record when the skeleton is built and
+  moved into view space by the draw each frame, so it follows the animation. A
+  zombie's radii read as anatomy: torso 2.55, head 1.3, upper arm 1.4, hand 0.8,
+  pelvis 1.75, thigh 2.15.
+* **Who is a candidate, and the sphere first — for the classes that register
+  the engine's way.** `game/combat/shot_test.ts` ports `RegisterForShotTest`
+  (`FUN_00405160`), `ShotTestSphere` (`FUN_00404630`)'s broad phase and its
+  fork into the bones, and `MarkActorShot`'s stable 16-bit depth sort. A class
+  opts in with `ClassHandler.registersForShotTest` and calls the routine at the
+  exe's sites. `ActorRegisterCameraPoint` now carries the call it ends in, at
+  `0x00409BED`, which no xref list shows (`L35`). **No class has opted in on
+  `main` yet**: the four bosses will, from their own modules, and
+  `formats/combat.md` §3 has their sites. Every other class is still picked by
+  `render/` the old way: every visible, living actor, no broad phase, nearest
+  along the ray. That section lists what converting each one takes.
+* Bit `0x80`, the per-bone bit the fork tests, is raised by the skeleton build
+  in every skinned `Init` (`SkeletonBuildAndPose`, `0x004105DF`), and the port
+  now raises it in `ActorSpawn`. This file used to say no civilian ever had it.
 * Damage escalates **per bone, per hit on that bone**: `g_pBoneDamage` indexed
   `bone*6 + hits_already_taken`. `char_adv02`'s head runs **100, 120, 140, 160**
   and its torso 30/40/50/60/70, plus `DamageRankModifier` — `g_pBoneDamageByRank`
@@ -4258,6 +4272,12 @@ instead.
   has bit `0x8000`. The port's picks shot everything visible; they honour the
   bit now (`ActorFlag.NoShotTest`), which is what makes a boss unshootable
   through its entrance.
+* The registration itself is ported now (`game/combat/shot_test.ts`), with
+  `ShotTestSphere`'s `obj+0x124` broad phase and the bit-`0x80` fork. A boss
+  opts in with `ClassHandler.registersForShotTest` and calls
+  `ActorRegisterCameraPoint` or `RegisterForShotTest` where its routine does.
+  Every boss's site, gate, `obj+0x124` and `0x8000` writers are tabulated in
+  `formats/combat.md` §3.
 * `MarkActorShot` keeps one hit byte per shooter at `obj+0x190 + player`, which
   the port had merged into one `pendingHit`; `Actor.shotBones` is the engine's
   shape, for the bosses' own shot routines.

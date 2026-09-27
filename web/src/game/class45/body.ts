@@ -13,13 +13,14 @@ import type { GameHost } from "../host";
 import type { CamPose } from "../camera/curve";
 import { BossHpBarSpawn } from "../boss_hp_bar";
 import { ScoreAddForPlayer } from "../combat/score";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { PlayerTakeDamage } from "../combat/player";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { ActorClaimHitSlot } from "../hit_slots";
 import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { PlayerState } from "../player_state";
-import { CharacterTypeOf, MotionPlayLength } from "../tables";
+import { MotionPlayLength } from "../tables";
 import { FtolS16 } from "../matrix";
 import { vec3, VecToAngles } from "../vec";
 import {
@@ -33,8 +34,7 @@ import {
   BOSS3_BODY_OBJ_PATHS_B, type Boss3BodyEvent, type Boss3PathSeg,
 } from "./tables";
 import {
-  Boss3DrawModel, Boss3ModelStep, Boss3RegisterForShotTest, Boss3SetMotion,
-  Boss3SetMotionBlended,
+  Boss3DrawModel, Boss3ModelStep, Boss3SetMotion, Boss3SetMotionBlended,
 } from "./model";
 import {
   Boss3ComposeBonePose, Boss3DrawBoneParts, PoseHookNone, SOUND_SIBUKI2,
@@ -168,6 +168,9 @@ function Events(blk: Boss3Block): readonly Boss3BodyEvent[] {
     ? BOSS3_BODY_EVENTS_A : BOSS3_BODY_EVENTS_B;
 }
 
+/** `[0x004C4E48]` -- the body's `obj+0x124`, 95.0. */
+const BODY_SHOT_RADIUS = 95;
+
 /**
  * `Boss3BodyInit` — `FUN_00420360`. Index 8, 120 hit points, `boss3l.bin` on
  * the swim clip, three units up, shootable (`obj+0x34 |= 0x80080000`), state
@@ -183,9 +186,10 @@ export function Boss3BodyInit(obj: Boss3Actor): void {
   Boss3SetMotion(obj, CLIP_SWIM);
   ActorClaimHitSlot(obj);
   obj.pos.y = Math.fround(obj.pos.y + 3);
-  const radius = CharacterTypeOf(obj)?.actor_radius ?? 0;
-  obj.hitRadius = radius;
-  obj.radius = radius;
+  // `MOV EDX, [0x004C4E48]` at `0x004203BA`: a literal 95.0, not
+  // `g_actor_radius_by_char` -- the broad-phase sphere spans the whole body.
+  obj.hitRadius = BODY_SHOT_RADIUS;
+  obj.radius = BODY_SHOT_RADIUS;
   t.poseHook = Boss3PoseHook.None;
   obj.state = Boss3BodyState.BuildPath;
   obj.flags = (obj.flags | 0x80080000) | 0;
@@ -401,7 +405,6 @@ export function Boss3BodyUpdate(obj: Boss3Actor, f: ClassFrame): void {
   if (!blk) return;
   G.g_boss3_heads[0] = obj.at;
   const variant = G.g_boss3_variant;
-  t.shotTested = false;
 
   // -- 1. the shot.
   if (obj.flags & ActorFlag.Hit) {
@@ -508,10 +511,11 @@ export function Boss3BodyUpdate(obj: Boss3Actor, f: ClassFrame): void {
   if (s === Boss3BodyState.Swim || s === Boss3BodyState.Surfaced
       || s === Boss3BodyState.Lunge || s === Boss3BodyState.Recover) {
     Boss3AimCamera(obj);
-    // `PUSH ESI; CALL 0x00405160` at `0x00424160`, on the aim's path: states
-    // 10..13 only. Building its path, taking the camera and dead, the body is
-    // drawn and cannot be shot.
-    Boss3RegisterForShotTest(obj);
+    // `PUSH ESI; CALL 0x00405160` at `0x00424160`, on the aim's path: the
+    // state test at `0x00424062`..`0x00424082` jumps past it to the `RET`
+    // for anything but 10..13, so building its path, taking the camera and
+    // dead the body cannot be shot.
+    RegisterForShotTest(obj, f.host);
   }
 }
 

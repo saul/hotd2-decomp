@@ -542,7 +542,7 @@ const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
  * 0040493A  [0x009CAC40] == 0: out              ; no surface: no hit
  * 0040494A  normal [0x009CAC64..6C] = g_coli_dynamic_matrix rotation * normal
  * 004049C2  candidate +0x24 = node, +0x28 = obj, +0x2C = rec+0x74 | 0x40
- * 004049E8  ColiPushHitCandidate()              ; key = __ftol(-view z * 10.0), point, normal,
+ * 004049E8  ShotPushColiHitCandidate()          ; key = __ftol(-view z * 10.0), point, normal,
  *                                               ; surface at +0x30, +0x2C |= 0x10
  * ```
  *
@@ -554,7 +554,7 @@ const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
  * end back**, as the world trace does, and the point comes back through the
  * matrix and the normal through its rotation (`MatrixTransformVector` at
  * `0x00404982`, not renormalised). The key is taken from the point, as
- * `0x00404CB0` takes it.
+ * `ShotPushColiHitCandidate` (`FUN_00404CB0`) takes it.
  */
 function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
                           shot: ShotTest, out: ShotCandidate[]): void {

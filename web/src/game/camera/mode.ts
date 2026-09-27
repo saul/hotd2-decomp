@@ -50,10 +50,10 @@
  *
  * What is **not** modelled, and would be a guess to model:
  *
- * * The two overrides. `[0x009CA094] == 1` forces mode 6 (`PoseHookNone`,
- *   which stops the camera entirely) and `[0x009C6F30]` / `[0x009C6F32]`
- *   force mode 7 (`FUN_00402A40`). Sixteen routines write the first and none
- *   of them is read yet. `[open]`
+ * * The second override. `[0x009C6F30]` / `[0x009C6F32]` force mode 7
+ *   (`FUN_00402A40`). `[open]` The first, `g_camera_driver_held` forcing
+ *   mode 6, is modelled: the boss-name banner is its first writer the port
+ *   has.
  * * `CameraEaseEyeToPath` (`FUN_00402E60`), the 1/16 ease of the block **eye**
  *   toward the path's. The port takes the eye straight off the playing path
  *   every frame, which is the same call it already makes about
@@ -82,6 +82,12 @@ export enum CameraMode {
   HandBackToPath = 2,
   /** `CameraTrackEnemiesTick` (`FUN_00402890`). */
   TrackEnemies = 3,
+  /**
+   * `PoseHookNone` (`FUN_00420810`) -- nothing at all. Forced while
+   * `g_camera_driver_held` is 1, so whatever is writing the camera block (the
+   * boss-name banner's flight) has it to itself.
+   */
+  Held = 6,
 }
 
 /**
@@ -168,12 +174,16 @@ export function CameraDriverSelectMode(): void {
     G.g_camera_mode = count === 0 && !busy
       ? CameraMode.HandBackToPath : CameraMode.TrackEnemies;
   }
+  // `CMP dword ptr [0x009ca094], 0x1` at `0x004026AB`: held, the mode is 6
+  // whatever the counters said, and the room is not free.
+  if (G.g_camera_driver_held === 1) G.g_camera_mode = CameraMode.Held;
   if (G.g_camera_mode !== CameraMode.HandBackToPath) {
     G.g_camera_free = 0;
     G.g_camera_hand_back_started = 0;
   }
   if (G.g_camera_mode === CameraMode.HandBackToPath) CameraDispatchHandBack();
-  else CameraTrackEnemiesTick();
+  else if (G.g_camera_mode === CameraMode.TrackEnemies) CameraTrackEnemiesTick();
+  // `CameraMode.Held`: `PoseHookNone`, which does nothing.
 }
 
 /**

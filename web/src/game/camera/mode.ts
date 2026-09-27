@@ -1,82 +1,69 @@
 /**
- * Which camera runs this frame, and when the room is allowed to hand back.
- *
- * The player used to have one camera routine and one rule for
- * `g_camera_free`: the slot table is empty, so the room is clear. The engine
- * has **two drivers and a mode machine**, and the difference between them is
- * the second between a zombie dying and the script moving on.
+ * The camera actor, the queued action it runs, and the mode machine that
+ * decides when a room is allowed to hand back.
  *
  * ```
- * EvtActionFinishSequence21 (FUN_00403710)
- *   g_camera_mode = 3
- *   EvtEnterSceneState(2, minor)
- *   g_evt_action_handler = g_camera_action_starters[g_scene_state_minor]
- *                              |
- *        minor 4 -> CameraActionStartWithEyeSnap    -+
- *        minor 6 -> CameraActionStartWithEyeMatrix  -+-> CameraDriverSelectMode
- *        minor 7 -> CameraActionStartDeferredPose    -> CameraDriverFromDeferredPose
- *        minor 3 -> null  (what goto_scene_state leaves behind)
+ * CameraActorTick (FUN_004022B0) -- the scene's third task
+ *   g_camera_settled = 0;  g_camera_is_tracking = 1
+ *   g_camera_actor_major_hooks[g_scene_state_major_entered]
+ *     rows 1 and 2 -> EvtRunQueuedActions: g_evt_action_handler(0)
+ *        CamAdvancePathFrame                      a cam_play still playing
+ *        CameraActionStartWithEyeSnap   (minor 4) -+
+ *        CameraActionStartWithEyeMatrix (minor 6) -+-> CameraDriverSelectMode
+ *        CameraActionStartDeferredPose  (minor 7)  -> CameraDriverFromDeferredPose
+ *        NoOpStub                                 goto_scene_state parked it
+ *   the evt-action blocks 1..3's handlers
+ *   UpdateSceneViewAndLight                       the view drawn this frame
  * ```
  *
  * and `CameraDriverSelectMode` is the mode machine:
  *
  * ```c
  * busy = any of the first four g_enemy_slots occupied;
- * if (g_camera_hand_back_variant >= 0)
- *     g_camera_mode = (counter == 0 && !busy) ? 2 : 3;
+ * if (variant is 0..2) g_camera_mode = (counter == 0 && !busy) ? 2 : 3;
+ * if (g_camera_driver_held == 1) g_camera_mode = 6;
  * if (g_camera_mode != 2) { g_camera_free = 0; g_camera_hand_back_started = 0; }
  * g_camera_mode_hooks[g_camera_mode]();
+ * g_cam_path_frame = __ftol(g_rail_frame);
  * ```
  *
  * **`g_camera_free` is not raised by anything an enemy does.** Mode 2 is only
  * the permission to *start* turning; `CameraTurnOntoPathTarget` eases the aim
  * back onto the path's own target at the untracked rate and raises the flag on
- * the frame the two converge. Measured with the port's own ease, that is 41
- * frames from five degrees off the rail and 77 from ninety — two thirds of a
- * second to one and a third.
+ * the frame the two converge.
  *
- * Two objections the old code recorded, and what the binary says to each:
- *
- * * *"`g_enemies_alive == 0` and the aim converging belong to a different
- *   driver; ANDing them holds a gate for ever whenever anything is alive."*
- *   They belong to the driver **572 of 836 shots install**, against 264 for
- *   the one the port modelled, and the conjunction cannot deadlock: every one
- *   of the 278 room-clear gates in the shipped scripts has operand 0, so the
- *   gate's own counter test and the selector's are the same test.
- * * *"Every enemy death site frees the flag outright."* Two do —
- *   `0x0048042C` and `0x00428B44` — and neither is on class 0x30's path.
- *   `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) clears the actor's slot
- *   and its alive count and never touches `g_camera_free`.
- *
- * What is **not** modelled, and would be a guess to model:
- *
- * * The second override. `[0x009C6F30]` / `[0x009C6F32]` force mode 7
- *   (`FUN_00402A40`). `[open]` The first, `g_camera_driver_held` forcing
- *   mode 6, is modelled: the boss-name banner is its first writer the port
- *   has.
- * * `CameraEaseEyeToPath` (`FUN_00402E60`), the 1/16 ease of the block **eye**
- *   toward the path's. The port takes the eye straight off the playing path
- *   every frame, which is the same call it already makes about
- *   `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`) in the tracking hook.
- *   [diverges]
- * * `CameraHandBackToPath` (`FUN_00402860`), `g_camera_hand_back_hooks[1]`.
- *   Unreachable: `CameraResetForPathShot` is the variant's only writer and it
- *   writes 0.
+ * All of this runs **before** the scene state's hook, the players and every
+ * actor (`SceneTaskWalk`, `game/director.ts`), so a driver reads the slots the
+ * fill dealt on the previous frame and the pose the rail drew on the previous
+ * frame. `[proved]` from the task list at `0x00460710`.
  */
 import { G } from "../globals";
-import { TURN_RATE_UNTRACKED } from "./constants";
-import { CameraDriverFromDeferredPose, CameraTrackEnemiesTick } from "./track";
-import { LookAtCosineSquared, TurnLookAtToward } from "./turn";
-import { CameraSlotsBusy } from "./slots";
+import { MatIdentity, MatrixRotateX, MatrixRotateY, MatrixTransformPoint,
+         MatrixTranslate } from "../matrix";
 import { vec3 } from "../vec";
+import { TURN_RATE_UNTRACKED } from "./constants";
+import { CameraActionDriver } from "./driver";
+import { CamAdvancePathFrame, CamBlockSetAnglesFromLookAt, CamEvalPath7,
+         CameraPoseBlock } from "./path";
+import { CAMERA_EYE_DROP } from "./rail";
+import { SceneViewApplyShake } from "./shake";
+import { CameraSlotsBusy } from "./slots";
+import { CameraArmStashedPath, CameraDriverFromDeferredPose,
+         CameraTrackEnemiesTick } from "./track";
+import { LerpWeighted, LookAtCosineSquared, TurnLookAtToward } from "./turn";
+
+export { CameraActionDriver } from "./driver";
 
 /**
  * `g_camera_mode` — `0x009C6F20`, an index into `g_camera_mode_hooks`
  * (`0x00576CBC`).
  *
- * Only the two `CameraDriverSelectMode` can choose are members. 6 and 7 are
- * reached solely through the overrides above; 0, 1, 4 and 8 are
- * `SceneStateInvalidHang` and 5 is null.
+ * Only the modes `CameraDriverSelectMode` can choose are members. Mode 7 is
+ * `FUN_00402A40`, forced by `0x009C6F30`/`0x009C6F32`; those two bytes are
+ * written only by that routine itself and zeroed by `CameraResetForPathShot`
+ * (byte search for `306f9c00` and `326f9c00`), so nothing ever raises them
+ * and the mode cannot be reached. `[proved]` 0, 1, 4 and 8 are
+ * `SceneStateInvalidHang`; 5 is null.
  */
 export enum CameraMode {
   /** `CameraDispatchHandBack` (`FUN_00402720`). */
@@ -108,67 +95,220 @@ export enum CameraHandBackVariant {
 }
 
 /**
- * `[port-only]` — the identity of the driver a camera action installed, which
- * stands in for the function pointer in `g_evt_action_handler` (0x009A610C).
- * See {@link G.g_camera_action_driver}.
- */
-export enum CameraActionDriver {
-  /** Nothing queued, or `goto_scene_state` parked the slot on a `RET`. */
-  None = 0,
-  /** `CameraDriverSelectMode` (`FUN_00402650`) — scene-state minors 4 and 6. */
-  SelectMode = 1,
-  /** `CameraDriverFromDeferredPose` (`FUN_00402E00`) — minor 7. */
-  DeferredPose = 2,
-}
-
-/**
  * `g_camera_action_starters` — `0x00576B20`, the table
  * `EvtActionFinishSequence21` indexes with the scene-state minor at
- * `0x00403765`.
- *
- * Only the driver each starter installs is modelled; the seating each does
- * first is the camera pose, which the host already writes from the path.
+ * `0x00403765`: `[4]` `0x00402460`, `[6]` `0x00402580`, `[7]` `0x00402DB0`,
+ * the rest null. `[proved]` (`read_memory`)
  */
 export const CAMERA_ACTION_STARTERS: Readonly<Record<number, CameraActionDriver>> = {
-  4: CameraActionDriver.SelectMode,
-  6: CameraActionDriver.SelectMode,
-  7: CameraActionDriver.DeferredPose,
+  4: CameraActionDriver.StartWithEyeSnap,
+  6: CameraActionDriver.StartWithEyeMatrix,
+  7: CameraActionDriver.StartDeferredPose,
 };
 
 /**
- * `FUN_004022B0` — the camera actor's own tick, minus everything the port has
- * no model for.
+ * `CameraActorTick` — `FUN_004022B0`. The camera actor's task, third in every
+ * scene's list.
  *
- * Two stores, and both matter. `g_camera_settled` is a **this-frame** answer
- * and is cleared here, before any driver can raise it; it used to be cleared
- * at the top of `CameraTrackEnemiesTick`, which was fine while that routine
- * ran unconditionally and wrong the moment the hand-back could run instead —
- * a latched `g_camera_settled` opens every `wait_targets_clear` for the rest
- * of the stage. `g_camera_is_tracking` is seeded to 1 and
- * `SelectCameraLookAtTarget` clears it when no slot is claimed.
+ * `g_camera_settled` is a **this-frame** answer and is cleared here, before
+ * any driver can raise it; `g_camera_is_tracking` is seeded to 1 and
+ * `SelectCameraLookAtTarget` clears it when no slot is claimed. Then the queued
+ * action (`EvtRunQueuedActions`, for rows 1 and 2 of the scene state) and the
+ * view (`UpdateSceneViewAndLight`).
  *
- * Not modelled: the per-major dispatch through `[0x00576B10]`, the walk over
- * the camera blocks calling each block's own hook, and
- * `UpdateSceneViewAndLight` (`FUN_00401F40`). [diverges]
+ * Not modelled: the handlers of evt-action blocks 1..3 (`0x009A62B0`, stride
+ * `0x1A4`), which only the two-player camera blocks use, and row 1's
+ * `EvtRunQueuedActionsSyncViewBlock` copy into block 2, which feeds camera
+ * block 2 -- neither is a block the port draws. A major of 0 or 3 runs no
+ * queued action at all (`NoOpStub`); the port's walker never enters either
+ * after the scene's own (1,1), so the dispatch is not a switch here.
  */
 export function CameraActorTick(): void {
   G.g_camera_settled = 0;
   G.g_camera_is_tracking = 1;
+  CameraRunQueuedAction();
+  SceneViewApplyShake();
 }
 
 /**
- * `CameraDriverSelectMode` — `FUN_00402650`.
+ * `[port-only]` — `EvtRunQueuedActions` (`FUN_00402320`) calling whatever
+ * `g_evt_action_handler` holds. A switch over {@link CameraActionDriver}
+ * stands in for the indirect call.
  *
- * The mode machine, and the only writer of `g_camera_free` that can take it
- * away. The slot walk is over the **first four** entries in the engine; the
- * port's `g_enemy_slots` holds only claimed slots and fills from 0, and
- * nothing but a permit holder can sit above index 3 while index 2 is free, so
- * the walk is a length test.
+ * The port runs a `queue_event` action the moment the interpreter reaches it,
+ * which is two tasks earlier in the same frame than the engine's
+ * `EvtRunQueuedActions` would; with the ring idle -- which is how the shipped
+ * scripts queue -- that is the same frame and the same order relative to
+ * everything that reads the camera. What it would double is the handler's
+ * first call: a `cam_play`'s `CamStartPathPlayback` publishes its first frame
+ * itself, and a `finish_sequence`'s starter is not called until the frame
+ * after. `G.g_camera_action_fresh` is that one skipped call.
+ */
+export function CameraRunQueuedAction(): void {
+  if (G.g_camera_action_fresh !== 0) {
+    G.g_camera_action_fresh = 0;
+    return;
+  }
+  switch (G.g_camera_action_driver as CameraActionDriver) {
+    case CameraActionDriver.None: return;
+    case CameraActionDriver.PathPlay: return CamAdvancePathFrame();
+    case CameraActionDriver.SelectMode: return CameraDriverSelectMode();
+    case CameraActionDriver.DeferredPose: return CameraDriverFromDeferredPose();
+    case CameraActionDriver.StartWithEyeSnap:
+      return CameraActionStartWithEyeSnap();
+    case CameraActionDriver.StartWithEyeMatrix:
+      return CameraActionStartWithEyeMatrix();
+    case CameraActionDriver.StartDeferredPose:
+      return CameraActionStartDeferredPose();
+  }
+}
+
+/**
+ * `CameraResetForPathShot` — `FUN_004031E0`. The first thing every starter
+ * does.
+ *
+ * ```c
+ * player flags &= ~1 (both);  g_rail_frame = (float)g_cam_path_frame;
+ * g_camera_index = 0;  g_camera_free = 0;  g_camera_hand_back_started = 0;
+ * 0x9C6F30 = 0x9C6F31 = 0x9C6F32 = 0;  g_camera_hand_back_variant = 0;
+ * g_cam_path_frames_left = 0x7FFFFFFF;  g_camera_turn_rate = 0x200;
+ * ```
+ *
+ * The rate of `0x200` is what makes a new shot's first turn nearly nothing:
+ * `TurnLookAtToward` steps `1 / (1 + 512)` of the angle on the frame before
+ * `ComputeLookAtAngleError` or the untracked constant replaces it. The two
+ * players' flag bit 0 is the on-screen body, which the port does not draw.
+ */
+export function CameraResetForPathShot(): void {
+  G.g_rail_frame = G.g_cam_path_frame;
+  G.g_camera_free = 0;
+  G.g_camera_hand_back_started = 0;
+  G.g_camera_hand_back_variant = CameraHandBackVariant.AliveCountAndTurn;
+  G.g_cam_path_frames_left = 0x7fffffff;
+  G.g_camera_turn_rate = CAMERA_TURN_RATE_ON_RESET;
+}
+
+/** `MOV word ptr [0x009C6F36], 0x200` at `0x0040323C`. */
+export const CAMERA_TURN_RATE_ON_RESET = 0x200;
+
+/** `(0, 0, -30)`, `0xC1F00000`: the starters' seat for `g_cam_path_target`. */
+const STARTER_TARGET_DEPTH = 30.0;
+
+const _m = MatIdentity();
+const _a = vec3();
+
+/**
+ * `[port-only]` as a function -- the seat both the minor-4 and minor-6
+ * starters write inline (`0x004024CE`..`0x0040254F`, `0x0040259A`..
+ * `0x0040261D`):
+ *
+ * ```c
+ * Push; LoadIdentity; Translate(block.eye); RotateY(block.yaw); RotateX(block.pitch);
+ * g_cam_path_target = M * (0, 0, -30);
+ * Pop;
+ * ```
+ *
+ * A point thirty units straight ahead of the block along its own angles: the
+ * fallback aim the shot starts with, until a rail publishes a pose.
+ */
+function CameraStarterSeatPathTarget(): void {
+  const m = _m;
+  for (let i = 0; i < 16; i++) m[i] = i % 5 === 0 ? 1 : 0;
+  const e = G.g_camera_block_eye;
+  MatrixTranslate(m, e.x, e.y, e.z);
+  MatrixRotateY(m, G.g_camera_block_yaw_bams);
+  MatrixRotateX(m, G.g_camera_block_pitch_bams);
+  _a.x = 0; _a.y = 0; _a.z = -STARTER_TARGET_DEPTH;
+  MatrixTransformPoint(m, _a, G.g_cam_path_target);
+}
+
+/**
+ * `CameraActionStartWithEyeSnap` — `FUN_00402460`, `g_camera_action_starters[4]`.
+ * Called by `EvtRunQueuedActions` on the frame after its `finish_sequence`.
+ *
+ * ```c
+ * if (g_camera_starter_reseats) {
+ *     CameraResetForPathShot();
+ *     g_camera_eye = block.eye with y - 15.0;
+ *     g_camera_pitch_bams = 0;  g_camera_roll_bams = 0;
+ *     g_camera_yaw_bams = (block.yaw - 0x8000) & 0xFFFF;
+ *     g_cam_path_target = T(block.eye) Ry(block.yaw) Rx(block.pitch) * (0, 0, -30);
+ * }
+ * g_camera_starter_reseats = 1;
+ * g_evt_action_handler = CameraDriverSelectMode;  CameraDriverSelectMode();
+ * ```
+ *
+ * The decompilation stops at the `MatrixStackPop` Ghidra marks no-return and
+ * shows a `return` there (L35); the bytes go on at `0x00402557` into the
+ * install for both arms. `[proved]`
+ */
+export function CameraActionStartWithEyeSnap(): void {
+  if (G.g_camera_starter_reseats !== 0) {
+    CameraResetForPathShot();
+    const e = G.g_camera_block_eye;
+    G.g_camera_eye.x = e.x;
+    G.g_camera_eye.y = e.y - CAMERA_EYE_DROP;
+    G.g_camera_eye.z = e.z;
+    G.g_camera_pitch_bams = 0;
+    G.g_camera_yaw_bams = (G.g_camera_block_yaw_bams - 0x8000) & 0xffff;
+    G.g_camera_roll_bams = 0;
+    CameraStarterSeatPathTarget();
+  }
+  G.g_camera_starter_reseats = 1;
+  G.g_camera_action_driver = CameraActionDriver.SelectMode;
+  CameraDriverSelectMode();
+}
+
+/**
+ * `CameraActionStartWithEyeMatrix` — `FUN_00402580`, `g_camera_action_starters[6]`.
+ * {@link CameraActionStartWithEyeSnap} without the gameplay-eye write: the
+ * reset and the `g_cam_path_target` seat, then the same install. `[proved]`
+ */
+export function CameraActionStartWithEyeMatrix(): void {
+  if (G.g_camera_starter_reseats !== 0) {
+    CameraResetForPathShot();
+    CameraStarterSeatPathTarget();
+  }
+  G.g_camera_starter_reseats = 1;
+  G.g_camera_action_driver = CameraActionDriver.SelectMode;
+  CameraDriverSelectMode();
+}
+
+/**
+ * `CameraActionStartDeferredPose` — `FUN_00402DB0`, `g_camera_action_starters[7]`.
+ *
+ * ```c
+ * if (g_camera_starter_reseats) { CameraResetForPathShot(); g_camera_free = 1; g_camera_mode = 0; }
+ * g_camera_starter_reseats = 1;
+ * g_evt_action_handler = CameraDriverFromDeferredPose;  CameraDriverFromDeferredPose();
+ * ```
+ */
+export function CameraActionStartDeferredPose(): void {
+  if (G.g_camera_starter_reseats !== 0) {
+    CameraResetForPathShot();
+    G.g_camera_free = 1;
+    G.g_camera_mode = 0;
+  }
+  G.g_camera_starter_reseats = 1;
+  G.g_camera_action_driver = CameraActionDriver.DeferredPose;
+  CameraDriverFromDeferredPose();
+}
+
+/**
+ * `CameraDriverSelectMode` — `FUN_00402650`. The mode machine, and the only
+ * writer of `g_camera_free` that can take it away.
+ *
+ * The counter is chosen by the variant -- 0 and 1 `g_enemies_alive`, 2
+ * `g_enemies_present` -- and a variant outside 0..2 leaves the mode alone.
+ * Last, **after** the mode's routine, `g_cam_path_frame = __ftol(g_rail_frame)`
+ * (`FLD [0x009C70BC]` at `0x004026F7`): the frame every camera cue reads is
+ * the one the stashed rail drew on the previous frame, since the rail's hook
+ * runs after this in the frame. `[proved]`
  */
 export function CameraDriverSelectMode(): void {
   const busy = CameraSlotsBusy();
   const variant = G.g_camera_hand_back_variant;
-  if (variant >= 0) {
+  if (variant >= 0 && variant <= CameraHandBackVariant.PresentCountAndTurn) {
     const count = variant === CameraHandBackVariant.PresentCountAndTurn
       ? G.g_enemies_present
       : G.g_enemies_alive;
@@ -185,47 +325,84 @@ export function CameraDriverSelectMode(): void {
   if (G.g_camera_mode === CameraMode.HandBackToPath) CameraDispatchHandBack();
   else if (G.g_camera_mode === CameraMode.TrackEnemies) CameraTrackEnemiesTick();
   // `CameraMode.Held`: `PoseHookNone`, which does nothing.
+  G.g_cam_path_frame = Math.trunc(G.g_rail_frame);
 }
 
 /**
  * `CameraDispatchHandBack` — `FUN_00402720`. One jump through
- * `g_camera_hand_back_hooks`.
- *
- * Variant 1 is `CameraHandBackToPath` (`FUN_00402860`) and has no port,
- * because nothing writes 1 — see {@link CameraHandBackVariant}.
+ * `g_camera_hand_back_hooks`: `[0]` and `[2]` are
+ * {@link CameraTurnOntoPathTarget}, `[1]` {@link CameraHandBackToPath}.
  */
 export function CameraDispatchHandBack(): void {
+  if (G.g_camera_hand_back_variant === CameraHandBackVariant.AliveCountAndHandBack) {
+    CameraHandBackToPath();
+    return;
+  }
   CameraTurnOntoPathTarget();
 }
 
 /** `FUN_00403C00`'s numerator. Every call site in the engine passes 1. */
 const TURN_NUMERATOR = 1;
 
-/** `[0x004C439C]` — the convergence test, against the *square* of the cosine. */
+/** `[0x004C439C]`, `0x3F7FFF58` -- the convergence test, against the cosine *squared*. */
 const HAND_BACK_CONVERGED = 0.99999;
 
+/**
+ * `[0x00576C0C]`'s first byte: the rate both eases here turn at. It is
+ * {@link TURN_RATE_UNTRACKED}, the byte `CameraTrackEnemiesTick` reads at
+ * `0x004029F2` too.
+ */
+const HAND_BACK_TURN_RATE = TURN_RATE_UNTRACKED;
+
 const _eased = vec3();
+const _pathEye = vec3();
+const _discard = vec3();
 
 /**
  * `StepCameraLookAtDamped` — `FUN_00402F80`. One frame of the turn back.
  *
- * The engine re-evaluates the playing path into `g_camera_lookat_target` with
- * `CamEvalPath7` and then eases `g_camera_block_target` onto it at the rate
- * byte `[[0x00576C0C]]`, which is 12 — the identical expression
- * `CameraTrackEnemiesTick` uses at `0x004029F2` for
- * {@link TURN_RATE_UNTRACKED}. The path's own aim is already in
- * `g_cam_path_target`, which is where `CamSetPathTarget` publishes it.
+ * ```c
+ * CamEvalPath7(g_active_cam_path, (float)g_cam_path_frame, &eye_local, &g_camera_lookat_target, ...);
+ * TurnLookAtToward(block.eye, g_camera_lookat_target, block.target, &out, 1, (s8)*[0x00576C0C]);
+ * block.target = out;
+ * ```
+ *
+ * The desired aim is the **path's** target at the published frame -- not the
+ * deferred pose's, and not `g_cam_path_target`. `[proved]`
  */
 export function StepCameraLookAtDamped(): void {
-  const want = G.g_camera_lookat_target;
-  want.x = G.g_cam_path_target.x;
-  want.y = G.g_cam_path_target.y;
-  want.z = G.g_cam_path_target.z;
-  TurnLookAtToward(G.g_camera_block_eye, want, G.g_camera_block_target,
-                   _eased, TURN_NUMERATOR, TURN_RATE_UNTRACKED);
+  CamEvalPath7(G.g_active_cam_path, G.g_cam_path_frame, _discard,
+               G.g_camera_lookat_target);
+  TurnLookAtToward(G.g_camera_block_eye, G.g_camera_lookat_target,
+                   G.g_camera_block_target, _eased, TURN_NUMERATOR,
+                   HAND_BACK_TURN_RATE);
   G.g_camera_block_target.x = _eased.x;
   G.g_camera_block_target.y = _eased.y;
   G.g_camera_block_target.z = _eased.z;
+}
+
+/** `LerpWeighted(a, b, 1, 15)`'s weights: a sixteenth of the way a frame. */
+const EASE_NUM = 1;
+const EASE_DEN = 15;
+
+/**
+ * `CameraEaseEyeToPath` — `FUN_00402E60`. The hand-back's eye:
+ *
+ * ```c
+ * CamEvalPath7(g_active_cam_path, (float)g_cam_path_frame, &0x009C6F90, &local, ...);
+ * block.eye.x = LerpWeighted(block.eye.x, 0x009C6F90.x, 1, 15);   // and y, z
+ * ```
+ *
+ * A sixteenth of the way to the **path's** eye at the published frame, every
+ * frame of the turn. `0x009C6F90` is a scratch triple nothing else reads.
+ * `[proved]`
+ */
+export function CameraEaseEyeToPath(): void {
+  CamEvalPath7(G.g_active_cam_path, G.g_cam_path_frame, _pathEye, _discard);
+  const e = G.g_camera_block_eye;
+  e.x = LerpWeighted(e.x, _pathEye.x, EASE_NUM, EASE_DEN);
+  e.y = LerpWeighted(e.y, _pathEye.y, EASE_NUM, EASE_DEN);
+  e.z = LerpWeighted(e.z, _pathEye.z, EASE_NUM, EASE_DEN);
 }
 
 /**
@@ -233,62 +410,67 @@ export function StepCameraLookAtDamped(): void {
  *
  * ```c
  * switch ((g_camera_free ? 2 : 0) | (g_camera_hand_back_started ? 1 : 0)) {
- *   case 0: g_camera_hand_back_started = 1;   // and fall through
- *   case 1: CameraEaseEyeToPath(); StepCameraLookAtDamped();
- *           if (|cos2(blockAim, pathAim)| >= 0.99999) {
+ *   case 0: g_camera_hand_back_started = 1;             // and fall through
+ *   case 1: if (g_evt_cam_override_valid) CameraArmStashedPath(&block);
+ *           CameraEaseEyeToPath();  StepCameraLookAtDamped();
+ *           if (|cos2(lookat - eye, block.target - eye)| > 0.99999) {
  *               g_camera_hand_back_started = 0;
- *               g_camera_free = 1; g_camera_settled = 1;
+ *               g_camera_free = 1;  g_camera_settled = 1;
  *           }
  *           break;
- *   default: CamEvalPath7(...);                // already back on the rail
+ *   default:                                            // free: back on the rail
+ *           CamEvalPath7(g_active_cam_path, (float)g_cam_path_frame, &block.eye, &block.target);
  * }
- * CamBlockSetAnglesFromLookAt(...);
+ * CamBlockSetAnglesFromLookAt(&block, &block.target, 0);
  * ```
  *
- * The degenerate guard is the one `CameraTrackEnemiesTick` already carries and
- * for the same reason: `FUN_00401DF0` divides by both lengths and answers 0
- * rather than NaN when either is zero, which is a look-at sitting on the eye
- * before any path has seated the block. Zero fails the test, so without the
- * guard a stage whose camera has never been posed could never hand back and
- * every room-clear gate in it would wait for good. [diverges]
+ * The arm here has **no frames-left test**, unlike `CameraTrackEnemiesTick`'s
+ * (`0x0040279F`). Once free, the camera block is the path at the published
+ * frame, eye and aim, every frame, with the roll zeroed.
+ *
+ * The degenerate guard is the port's, and for the same reason the tracking
+ * tick carries one: `VecCosSquaredSigned` (`FUN_00401DF0`) answers 0 rather
+ * than NaN when either direction is degenerate -- a look-at sitting on the eye
+ * before any path has seated the block -- and 0 fails the test, so a camera
+ * that had never been posed could never hand back. [diverges]
  */
 export function CameraTurnOntoPathTarget(): void {
-  // Back on the rail: the engine re-evaluates the path into the camera block,
-  // which the host has already done for this frame. [diverges]
-  if (G.g_camera_free !== 0) return;
-  G.g_camera_hand_back_started = 1;
-  StepCameraLookAtDamped();
-  const eye = G.g_camera_block_eye;
-  const want = G.g_camera_lookat_target;
-  const have = G.g_camera_block_target;
-  const gap = Math.abs(want.x - have.x) + Math.abs(want.y - have.y)
-            + Math.abs(want.z - have.z);
-  if (gap < 1e-4
-      || Math.abs(LookAtCosineSquared(eye, want, have)) > HAND_BACK_CONVERGED) {
-    G.g_camera_hand_back_started = 0;
-    G.g_camera_free = 1;
-    G.g_camera_settled = 1;
+  const state = (G.g_camera_free !== 0 ? 2 : 0)
+              | (G.g_camera_hand_back_started !== 0 ? 1 : 0);
+  if (state >= 2) {
+    CamEvalPath7(G.g_active_cam_path, G.g_cam_path_frame,
+                 G.g_camera_block_eye, G.g_camera_block_target);
+  } else {
+    if (state === 0) G.g_camera_hand_back_started = 1;
+    if (G.g_evt_cam_override_valid !== 0) CameraArmStashedPath();
+    CameraEaseEyeToPath();
+    StepCameraLookAtDamped();
+    const eye = G.g_camera_block_eye;
+    const want = G.g_camera_lookat_target;
+    const have = G.g_camera_block_target;
+    const gap = Math.abs(want.x - have.x) + Math.abs(want.y - have.y)
+              + Math.abs(want.z - have.z);
+    if (gap < 1e-4
+        || Math.abs(LookAtCosineSquared(eye, want, have)) > HAND_BACK_CONVERGED) {
+      G.g_camera_hand_back_started = 0;
+      G.g_camera_free = 1;
+      G.g_camera_settled = 1;
+    }
   }
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target, 0);
 }
 
 /**
- * `[port-only]` — `EvtRunQueuedActions` (`FUN_00402320`) calling whatever
- * `EvtActionFinishSequence21` last parked in `g_evt_action_handler`. It is
- * port-only because the engine's is an indirect call through a pointer and
- * this is a switch over {@link CameraActionDriver}, which is the same thing
- * with an identity a snapshot can hold.
- *
- * A shot with no action running — between a `goto_scene_state` and the next
- * `finish_sequence` — leaves the aim and `g_camera_free` exactly where they
- * were, because in the engine the slot holds a bare `RET`. Four of the 278
- * room-clear gates are reached in that state.
+ * `CameraHandBackToPath` — `FUN_00402860`, `g_camera_hand_back_hooks[1]`: free
+ * at once, then the same eye ease and aim step as the turn, with no
+ * convergence test. Unreachable -- `CameraResetForPathShot` is the variant's
+ * only writer and it writes 0 -- and ported because it is five lines of the
+ * table.
  */
-export function CameraRunQueuedAction(): void {
-  if (G.g_camera_action_driver === CameraActionDriver.SelectMode) {
-    CameraDriverSelectMode();
-    return;
-  }
-  if (G.g_camera_action_driver === CameraActionDriver.DeferredPose) {
-    CameraDriverFromDeferredPose();
-  }
+export function CameraHandBackToPath(): void {
+  G.g_camera_hand_back_started = 0;
+  G.g_camera_free = 1;
+  CameraEaseEyeToPath();
+  StepCameraLookAtDamped();
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target, 0);
 }

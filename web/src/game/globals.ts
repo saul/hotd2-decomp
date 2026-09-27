@@ -1136,6 +1136,21 @@ export const G = {
    */
   g_camera_use_fixed_y: 0,
   /**
+   * `g_cam_roll_enabled` — `0x009A21B0`. `CamEvalPath7` evaluates a path's
+   * roll channel only while this is set; evt opcode 0x35 writes it and
+   * `ResetSceneCombatState` clears it.
+   */
+  g_cam_roll_enabled: 0,
+  /**
+   * `g_queued_events_pending` — `0x009A2C8C`. Outstanding queued actions:
+   * `queue_event` adds one, every handler takes one back as it completes --
+   * except `EvtActionFinishSequence21`, whose persistent driver
+   * `goto_scene_state` retires. `wait_queued_events_done` blocks on it. In
+   * `G` because `CamAdvancePathFrame`, a game routine, is what retires a
+   * playing `cam_play`. See `script/state/queued.ts`.
+   */
+  g_queued_events_pending: 0,
+  /**
    * `g_evt_wait_alive_hysteresis` — 0x007DCCA8. The extra frame
    * `wait_enemies_alive` (0x44) costs, and nothing else in the program reads
    * or writes it — `0045FC42` reads, `0045FC4B` and `0045FC60` write, and
@@ -2165,6 +2180,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_impulse_offset = vec3();
   G.g_camera_impulse_velocity = vec3();
   G.g_camera_use_fixed_y = 0;
+  G.g_cam_roll_enabled = 0;
+  G.g_queued_events_pending = 0;
   G.g_camera_turn_rate = 0;
   G.g_camera_turn_curve = 1;
   G.g_camera_settled = 0;

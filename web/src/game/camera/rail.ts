@@ -1,45 +1,57 @@
 /**
- * The stashed rail: the camera hook scene states (2,6) and (2,7) install, and
- * the three globals it steps.
+ * The stashed rail: the camera hooks scene states (2,6) and (2,7) install,
+ * and the words they step.
  *
- * A `cam_play` whose flags have bit 2 does not play. `FUN_00403490` stashes
- * its range into `g_stashed_path_frame` / `g_stashed_path_end_frame` (and the
- * path into `g_active_cam_path`), and a later `finish_sequence 6` or `7` hands
- * the camera to a hook that steps that range one frame at a time:
+ * A `cam_play` whose flags have bit 2 does not play. `CamStashPathRange`
+ * stashes its range into `g_stashed_path_frame` / `g_stashed_path_end_frame`
+ * and its path into `g_active_cam_path`, and a later `finish_sequence 6` or
+ * `7` enters a scene state whose camera hook steps that range one frame at a
+ * time:
  *
  * ```
  *   (2,6)  CameraStepDeferredRailWithFrameExport, then CameraStepRailTick
  *   (2,7)  CameraPlayStashedPath
  * ```
  *
- * Both publish the frame they drew as a **float** at `0x009C70BC`
- * (`g_rail_frame`), and it is that float -- not the walker's shot -- which
- * `CameraDriverSelectMode` and `CameraDriverFromDeferredPose` truncate into
- * `g_cam_path_frame` for every camera cue in the game to read.
+ * Every frame they step, both evaluate the path into the **deferred pose
+ * block** -- `g_cam_path_eye` / `g_cam_path_target` and the angle words -- and
+ * put the **gameplay eye** (`g_camera_eye`, the yaw) there, fifteen units
+ * below the pose. **They never write the camera block.** The block reaches the
+ * rail only through the queued action's driver, which runs earlier in the
+ * frame (`CameraActorTick` before `CameraUpdateTick`) and so reads the pose
+ * the rail left the frame before:
  *
- * ## Why the range lives here, in `G`
+ * * minor 6's `CameraDriverSelectMode` -- `CameraTrackEnemiesTick` snaps or
+ *   eases the block eye onto the pose (`CameraEaseBlockEyeToPathPose`) and
+ *   eases the aim onto whatever `SelectCameraLookAtTarget` wants, the pose's
+ *   target when nobody is registered; the hand-back re-evaluates the path at
+ *   `g_cam_path_frame`;
+ * * minor 7's `CameraDriverFromDeferredPose` -- copies the pose block into the
+ *   camera block whole.
  *
- * Because the stage-4 boss writes it. Its camera-cue routine at `0x00493090`
- * overwrites both stash words with its own cue's range and publishes its own
- * float frame while it flies the camera, and the arena thresholds it waits on
- * read the `g_cam_path_frame` that produces. With the range held by the script
- * walker, as it was, no game routine could reach it and the fight could never
- * leave its first phase. `G` is the one owner now; the walker's shot for a
- * deferred play mirrors it for the UI and the camera seat.
+ * Both drivers end `g_cam_path_frame = __ftol(g_rail_frame)`, and that is the
+ * frame every camera cue in the game reads: the one the rail drew on the
+ * *previous* frame.
  *
- * ## What is not here
- *
- * The pose. Both hooks also `CamEvalPath7` the frame into the deferred pose
- * block at `0x009C70C0` / `g_cam_path_target` and derive the gameplay eye from
- * it; the port seats the camera block from the playing path in `app/`, which
- * is the same arrangement `CameraDriverFromDeferredPose` records. This file is
- * the frame arithmetic, which is what anything else reads.
+ * The range lives in `G` because the stage-4 boss writes it too:
+ * `Boss4PlayCameraCue` (`0x00493090`) overwrites both stash words with its own
+ * cue's range and publishes its own float frame while it flies the camera.
  */
 import { G } from "../globals";
+import { IsDemoRun } from "../player_shell";
+import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock,
+         EvtActionRetire } from "./path";
+import { CameraUpdateHook } from "./driver";
+
+/**
+ * `[0x004C4398]`, read as `00007041`: `15.0`. The path hooks put the gameplay
+ * eye this far below the pose's eye.
+ */
+export const CAMERA_EYE_DROP = 15.0;
 
 /**
  * `[port-only]` as a function -- the gate both hooks put on the increment,
- * which each has inline, byte for byte:
+ * which each has inline, byte for byte (`0x0040C7A6`, `0x0040C8C6`):
  *
  * ```c
  * if (g_force_rail_advance == 1
@@ -48,73 +60,119 @@ import { G } from "../globals";
  *     g_stashed_path_frame += 1;
  * ```
  *
- * so a hit -- `g_screen_shake_frames` is 0x30 after one -- holds the rail
- * where it is, and so does the continue screen; the frame is still published.
- *
- * [diverges] **Not applied: the rail always advances.** Honouring it is
- * correct and exposes a second, older divergence it depends on. Under scene
- * state (2,6) the engine never writes the camera block from the rail -- the
- * rail draws into the deferred pose block and `CameraDriverSelectMode` eases
- * the aim -- but the port's seat (`seatCamera` in `app/systems.ts`, through
- * `CamSeatPathFrame`) snaps the block's eye **and aim** onto a stashed play
- * for as long as it is live. With the gate on, a hit mid-rail keeps the play
- * live past where the room clears, the seat snaps the aim back onto the rail,
- * and the room hands back in two frames instead of easing: `tools/handback.mjs`
- * measured stage 1's 1/4 go from 55 frames to 2 and stage 3's 1/2 from 43 to
- * 2. Switching this on needs the seat to leave a (2,6) play's aim to the
- * driver first, which changes how the camera aims in every stage, and is put
- * to the user rather than done here. `g_force_rail_advance` is written by the
- * script regardless, so the state is ready for it.
+ * So a hit -- `g_screen_shake_frames` is 0x30 after one -- holds the rail
+ * where it is for the length of the shake, and so does the continue screen;
+ * the frame is still published and the pose still evaluated. The shake is
+ * the value `UpdateScreenShake` left on the *previous* frame: its task runs
+ * after this one.
  */
 function RailMayAdvance(): boolean {
-  return true;
+  return G.g_force_rail_advance === 1
+      || IsDemoRun()
+      || (G.g_screen_shake_frames === 0 && G.g_players_in_play !== 0);
+}
+
+/**
+ * `[port-only]` as a function -- the tail both hooks share after the
+ * increment, `0x0040C7D1`..`0x0040C883` and `0x0040C8F1`..`0x0040C9A3`:
+ *
+ * ```c
+ * g_rail_frame = (float)g_stashed_path_frame;
+ * CamEvalPath7(g_active_cam_path, g_rail_frame, &g_cam_path_eye, &g_cam_path_target, &roll);
+ * CamBlockSetAnglesFromLookAt(&g_cam_path_eye, &g_cam_path_target, roll);
+ * g_camera_eye_x = g_cam_path_eye.x;
+ * g_camera_eye_y = g_camera_use_fixed_y == 1 ? g_camera_fixed_eye_y
+ *                                            : g_cam_path_eye.y - 15.0;
+ * g_camera_eye_z = g_cam_path_eye.z;
+ * g_camera_roll_bams = 0;  g_camera_pitch_bams = 0;
+ * g_camera_yaw_bams = (g_cam_path_yaw_bams + 0x8000) & 0xFFFF;
+ * ```
+ */
+function CameraRailPublishPose(): void {
+  G.g_rail_frame = G.g_stashed_path_frame;
+  const roll = CamEvalPath7(G.g_active_cam_path, G.g_rail_frame,
+                            G.g_cam_path_eye, G.g_cam_path_target);
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Path, G.g_cam_path_target, roll);
+  G.g_camera_eye.x = G.g_cam_path_eye.x;
+  G.g_camera_eye.y = G.g_camera_use_fixed_y === 1
+    ? G.g_camera_fixed_eye_y : G.g_cam_path_eye.y - CAMERA_EYE_DROP;
+  G.g_camera_eye.z = G.g_cam_path_eye.z;
+  G.g_camera_roll_bams = 0;
+  G.g_camera_pitch_bams = 0;
+  G.g_camera_yaw_bams = (G.g_cam_path_yaw_bams + 0x8000) & 0xffff;
+}
+
+/**
+ * `CameraStepDeferredRailWithFrameExport` — `FUN_0040C770`. Scene state
+ * (2,6)'s hook on its first call: it copies `g_stashed_path_frame` into
+ * `0x009C709C` -- a word nothing in the image reads (no other reference, and
+ * no byte pattern naming it), so the port keeps no field for it -- re-points
+ * the hook at {@link CameraStepRailTick} and falls into it.
+ */
+export function CameraStepDeferredRailWithFrameExport(): void {
+  G.g_camera_update_hook = CameraUpdateHook.StepRail;
+  CameraStepRailTick();
 }
 
 /**
  * `CameraStepRailTick` — `FUN_0040C790`. Scene state (2,6)'s steady body.
- * Returns whether it published a frame this call.
  *
  * ```
- * 0040c79e  CMP ECX, EAX; JGE 0040c889     ; cur >= end: only the tail
- *           if (gate) INC [0x9c70ac]        ; cur += 1 -- BEFORE it publishes
- * 0040c7d1  FILD [0x9c70ac]; FSTP [0x9c70bc]
+ * 0040c79e  CMP ECX,EAX; JGE 0040c889     ; cur >= end: only the tail
+ *           if (gate) INC [0x9c70ac]      ; cur += 1 -- BEFORE it publishes
+ *           ...publish and evaluate...
  * 0040c889  g_cam_path_frames_left = end - cur
  * ```
  *
  * So a stashed `351..384` publishes `352..384`.
  */
-export function CameraStepRailTick(): boolean {
-  if (G.g_stashed_path_end_frame <= G.g_stashed_path_frame) return false;
-  // `RailMayAdvance`'s three tests, inline in the routine at `0x0040C7A6`.
-  if (RailMayAdvance()) G.g_stashed_path_frame += 1;
-  G.g_rail_frame = G.g_stashed_path_frame;
-  return true;
+export function CameraStepRailTick(): void {
+  if (G.g_stashed_path_frame < G.g_stashed_path_end_frame) {
+    if (RailMayAdvance()) G.g_stashed_path_frame += 1;
+    CameraRailPublishPose();
+  }
+  G.g_cam_path_frames_left = G.g_stashed_path_end_frame
+                           - G.g_stashed_path_frame;
 }
 
 /**
- * `CameraPlayStashedPath` — `FUN_0040C8A0`. Scene state (2,7)'s hook: the same
- * routine with its guard one byte different -- `JG` at `0x0040C8C0` where the
- * rail has `JGE` -- so it stops only once `cur > end` and a stashed
- * `351..384` publishes `352..385`, one frame past its end. Stage 2's block 9
- * times a civilian's cue to that frame.
+ * `CameraPlayStashedPath` — `FUN_0040C8A0`. Scene state (2,7)'s hook: it
+ * re-points `g_camera_update_hook` at its own body (`0x0040C8B0`) and is
+ * otherwise {@link CameraStepRailTick} with its guard one byte different --
+ * `JG` at `0x0040C8C0` where the rail has `JGE` -- so it stops only once
+ * `cur > end` and a stashed `351..384` publishes `352..385`, one frame past
+ * its end. Stage 2's block 9 times a civilian's cue to that frame.
  */
-export function CameraPlayStashedPath(): boolean {
-  if (G.g_stashed_path_end_frame < G.g_stashed_path_frame) return false;
-  // The same three tests, at `0x0040C8C6`.
-  if (RailMayAdvance()) G.g_stashed_path_frame += 1;
-  G.g_rail_frame = G.g_stashed_path_frame;
-  return true;
+export function CameraPlayStashedPath(): void {
+  G.g_camera_update_hook = CameraUpdateHook.PlayStashedPath;
+  if (G.g_stashed_path_frame <= G.g_stashed_path_end_frame) {
+    if (RailMayAdvance()) G.g_stashed_path_frame += 1;
+    CameraRailPublishPose();
+  }
+  G.g_cam_path_frames_left = G.g_stashed_path_end_frame
+                           - G.g_stashed_path_frame;
 }
 
 /**
- * `CamStashPathRange` — `FUN_00403490`, the stash half of
- * `EvtActionCamPlay40`: the range into the two stash words. `start == -1`
- * means "from the frame the camera is on, plus one", which the caller has
- * already resolved into `start`. The routine's other writes -- the path into
- * `g_active_cam_path` and retiring the action -- are the walker's, in
- * `script/state/camera_action.ts`, which owns the shot and the ring.
+ * `CamStashPathRange` — `FUN_00403490`, the `flags & 2` arm of
+ * `EvtActionCamPlay40`:
+ *
+ * ```c
+ * g_active_cam_path        = operand[2];
+ * g_stashed_path_frame     = operand[0] != -1 ? operand[0] : g_cam_path_frame + 1;
+ * g_stashed_path_end_frame = operand[1];
+ * [0x009C70B8]             = operand[3];      // the flags; nothing reads it
+ * retire;
+ * ```
+ *
+ * `start == -1` means "from the frame the camera is on, plus one". Four plays
+ * in the game say -1 and all four are deferred: stage 1 blocks 3 and 8, in
+ * both the Arcade and Original bundles.
  */
-export function CamStashPathRange(start: number, end: number): void {
-  G.g_stashed_path_frame = start;
+export function CamStashPathRange(slot: number, start: number,
+                                  end: number): void {
+  G.g_active_cam_path = slot;
+  G.g_stashed_path_frame = start !== -1 ? start : G.g_cam_path_frame + 1;
   G.g_stashed_path_end_frame = end;
+  EvtActionRetire();
 }

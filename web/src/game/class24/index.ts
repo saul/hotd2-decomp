@@ -244,7 +244,10 @@ export function SetPiecePropUpdate(obj: SetPiecePropActor, f: ClassFrame): void 
 
   // `SetPiecePropDrawAndTick`'s tail — `if (obj+0x1324 == 0) obj+0x194++` —
   // is `ActorAdvanceMotion`, which returns early on `frozen`. Nothing to do
-  // here but leave the flag where the states put it.
+  // here but leave the flag where the states put it. The routine's chapter-
+  // card test (`g_screen_furniture_flags & 0x20`, `0x004834FB`) is no gate on
+  // this: its `JNZ 0x00483520` steps over the skeleton draw alone, so the
+  // tick runs while a card is up. The draw is the renderer's.
 
   // Three of the six freeze again on the motion's last frame.
   if (obj.prop.selector === SetPieceState.DropToGround

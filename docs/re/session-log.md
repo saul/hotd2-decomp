@@ -20093,3 +20093,70 @@ landings.
 fall-through, the feather's kill-without-draw, the ring task's fortieth-frame
 kill, the owl's blood, or putting the surface ring back on the underwater death
 each fails `npm run test:port`.
+
+## 2026-09-27 -- `obj_484ff0_props`: the `0x20` gate is the chapter card's, not dead
+
+The rig's note (`tools/hod2lib/rigs.py`, and `rigs_data.ts` generated from it)
+ended: "gated on DAT_009A5900 & 0x20, and [likely] that bit is dead: of 54
+references ... nothing sets 0x20, so the early-out never fires". **Wrong.**
+`[proved]` from the disassembly of all 67 references `get_xrefs_to 0x009A5900`
+returns now:
+
+* **Set only by `ChapterCardInstall`** (`FUN_004342E0`): `OR AL, 0x20` at
+  `0x0043436B` in sub 0, and `OR EDX, 0x20` at `0x004342F6` / `0x00434324` in
+  the Boss Mode and app-state-`0x0B` installer arms. Every other writer ORs
+  1, 2, 8, `0x10` or `0x18`, or ANDs one of those out (`PlayerTryStartPress`'s
+  `OR EAX, EBP` is `EBP = 1`, loaded at `0x00415018`).
+* **Cleared** at `0x004348C7` after flag 248, by `BossModeChapterCardUpdate`
+  at `0x00434CE4` and by `FUN_00434DA0` at `0x00434ED4`; and wholesale by
+  `CommitAppState`'s `AND 0xFFFFFFC7` (`0x0040E8C5`) and `FUN_0040A920`'s
+  `MOV [0x009A5900], 3` (`0x0040AA85`).
+
+So the early-out fires for every chapter card's 180 frames. Why the earlier
+sweep missed three plain `OR`s is `[open]`; the reference count it quoted (54)
+is not the count there is now (67), so it was read off a different list.
+
+**The early-out is a draw gate, not a routine gate** -- the note's "the whole
+routine is gated" was also wrong. `ScriptedHumanoidDraw`'s `JNZ` at
+`0x0048500D` lands on the tick at `0x0048523A` (`if obj+0x1324 == 0,
+obj+0x194++`), not the `RET`; `SetPiecePropDrawAndTick`'s at `0x00483503`
+lands on the type-`0x55` test at `0x00483520`, past the skeleton draw only. So
+classes 0x24 and 0x25 **keep animating** behind the card and are only undrawn;
+this log's chapter-card entry above lists them among routines that "hold
+still", which is right for `Class22CutsceneHoldUntilChapterCard` (its gate is
+on `DrawAndStep`) and not for these two.
+
+**The port has nothing to gate.** What sits under the test in both routines is
+the draw, which is the renderer's; the tick, which is the port's
+(`ActorAdvanceMotion`), is outside it. The bit itself is modelled on the peer
+branch `claude/loving-matsumoto-7d3a6c` (`c1e6e721`, `ScreenFurniture` in
+`game/globals.ts`), and under the user's skip-every-card decision (NEW-BUGS 13)
+sub 0 raises it and the countdown drops it inside one `ChapterCardInstall`
+update, so no draw could observe it. A render-side gate is worth writing only
+if the card is ever held for its dwell. Comments at class 0x24's tail and
+class 0x25's `ScriptedHumanoidIdle` say so where the next reader will look.
+
+**Wrong turn.** The pseudocode of both routines `return`s after the
+`MatrixStackPop` that ends each decoration arm, and after
+`SetPiecePropDrawAndTick`'s type-`0x53` draw of slot `0x1382` -- which read as
+"those arms never tick". The disassembly falls through into the tick every
+time (`0x00485237`, `JMP 0x0048523A` at `0x004851F3`, `0x004835BA`): **L35**,
+the no-return `MatrixStackPop`. Nothing is lost here in practice: no class-0x24
+placement in the six stages has character type `0x53` or `0x55` -- the 28
+reached use `0x22`/`0x26`/`0x2E`/`0x30`/`0x31`/`0x33`/`0x34`/`0x35`/`0x37`/`0x47`.
+
+**Bundle.** The note is data, and it travels twice: `rigsJson` writes it into
+`rigs[].note` of the script JSON, and the glTF carries it as the rig node's
+`extras.hod2_note` -- stages 2 and 3, both modes, eight files. All twelve
+bundles were exported before and after the change and diffed chunk by chunk:
+those eight notes, and `rigs_data.ts`'s entry and the builder stamp in
+`manifest.json`, are the whole difference. Every `.glb` BIN chunk and every
+other file is byte-identical.
+
+**Two more slips, both caught.** (1) The first "after" export was started
+before `tools/gen_builder_hash.py` had run -- **L33** exactly; `rigs_data.ts`
+is in the builder digest, and `verify_exporters.py` said so. Stopped, hash
+regenerated, re-exported. (2) `grep -rl` over the bundle listed only the four
+script JSONs, which read as "the glTF does not carry the note". macOS `grep`
+exits 1 on these `.glb` files and prints nothing, even with `-c` -- **L13**.
+Counting the bytes in Python found it in all four.

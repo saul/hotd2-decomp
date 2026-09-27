@@ -1413,6 +1413,87 @@ export class ExeTables {
     };
   }
 
+  /**
+   * Class 0x19's `.rdata` -- the stage-4 boss's tables, for `script.json`'s
+   * `boss4` block. Every one is `[proved]` from the routine named beside it;
+   * see `docs/re/boss-strength.md` for the readings.
+   *
+   * * `phase_hp_fraction` -- `g_boss4_phase_hp_fraction`, `0x00570490`,
+   *   f32[18]: the floor of each phase as a fraction of `obj+0x11E`
+   *   (`Boss4StateEntranceCarried`, `Boss4ArmPhaseWhenInsideArena`,
+   *   `Boss4AdvancePhaseAtFloor`).
+   * * `head_damage` -- `g_boss4_head_damage`, `0x005704D7`, s8[33], indexed
+   *   `g_players_in_play + rank * 2` (`Boss4ResolveShot`).
+   * * `held_props` -- `g_boss4_held_props`, `0x005704F8`, two 0x20-byte
+   *   records `{f32 offset[3]; s32 rx, ry, rz; s16 bone, clip, take, throw}`
+   *   (`Boss4AdvanceMotionAndDrawHeldProps`, `Boss4StateThrowHeldProp`).
+   * * `camera_cues` -- `g_boss4_camera_cues`, `0x00570538`, 22 x 12 bytes
+   *   `{s16 start, s16 end, f32 step, s16 path, s16 pad}`
+   *   (`Boss4PlayCameraCue`).
+   * * `phase_arenas` -- `g_boss4_phase_arenas`, `0x00570640`, 18 x 6 x
+   *   `{f32 x, f32 z}` (`Boss4LoadPhaseArena`).
+   * * `head_slot_by_bar` -- `g_boss4_head_slot_by_bar`, `0x005709A0`, s16[9]
+   *   (`Boss4ResolveShot`'s head swap).
+   * * `approach_picks` -- `g_boss4_approach_picks`, `0x005709B4`, s8[16][9]
+   *   (`Boss4PickApproachAttack`).
+   */
+  boss4Tables(): Record<string, unknown> {
+    const s8 = (va: number): number => {
+      const r = this.v2r(va);
+      if (r === null) return 0;
+      const v = this.data[r];
+      return v >= 0x80 ? v - 0x100 : v;
+    };
+    const s16 = (va: number): number => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const f = (va: number): number => this.rf32(va) ?? 0;
+    const heldProp = (i: number): Record<string, unknown> => {
+      const b = 0x005704f8 + i * 0x20;
+      return {
+        offset: [f(b), f(b + 4), f(b + 8)],
+        rot: [this.ri32(b + 0x0c) ?? 0, this.ri32(b + 0x10) ?? 0,
+              this.ri32(b + 0x14) ?? 0],
+        bone: s16(b + 0x18), clip: s16(b + 0x1a),
+        take: s16(b + 0x1c), throw: s16(b + 0x1e),
+      };
+    };
+    return {
+      phase_hp_fraction: Array.from({ length: 18 },
+                                    (_u, i) => f(0x00570490 + i * 4)),
+      head_damage: Array.from({ length: 33 }, (_u, i) => s8(0x005704d7 + i)),
+      held_props: [heldProp(0), heldProp(1)],
+      camera_cues: Array.from({ length: 22 }, (_u, i) => {
+        const b = 0x00570538 + i * 12;
+        return { start: s16(b), end: s16(b + 2), step: f(b + 4),
+                 path: s16(b + 8) };
+      }),
+      phase_arenas: Array.from({ length: 18 }, (_p, ph) =>
+        Array.from({ length: 6 }, (_q, k) => {
+          const b = 0x00570640 + (ph * 6 + k) * 8;
+          return [f(b), f(b + 4)];
+        })),
+      head_slot_by_bar: Array.from({ length: 9 },
+                                   (_u, i) => s16(0x005709a0 + i * 2)),
+      approach_picks: Array.from({ length: 16 }, (_r, rank) =>
+        Array.from({ length: 9 }, (_u, i) => s8(0x005709b4 + rank * 9 + i))),
+    };
+  }
+
+  /**
+   * `g_carrier2_door_yaw` -- `0x005926D0`, s16[59]: the angle
+   * `CarrierPropRoutine2` (`FUN_004408A0`) swings its two doors through, one
+   * entry a frame, `door0 = 0xC000 + t[i]`, `door1 = 0xC000 - t[i]`. Entry 58
+   * (`0x00592744`) is also what selector 9 seats them at, already open.
+   */
+  carrierDoorYaw(): number[] {
+    return Array.from({ length: 59 }, (_u, i) => {
+      const v = this.ru16(0x005926d0 + i * 2) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    });
+  }
+
   soundName(soundId: number): string | null {
     return this.soundRecords().get(soundId) ?? null;
   }

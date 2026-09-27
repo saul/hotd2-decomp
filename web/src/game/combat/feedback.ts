@@ -284,13 +284,22 @@ function PlayShotVoice(obj: Actor, result: HitResultCode, rng: Rng,
  * and the material are the engine's numbers rather than a raycast against
  * whatever happened to be drawn.
  *
- * [diverges] The engine also copies the hit into a per-player record at
- * 0x009A2C40, stride 0x1C. Nothing in the image reads it back, so the port
- * does not carry it.
+ * It also copies the hit into the shooter's `g_shot_hit_records` entry
+ * (`0x009A2C40 + p*0x1C`, at `0x004052EA`..`0x0040531C`) -- the point, the
+ * surface and the normal -- before the sprite. The stage-4 boss reads that
+ * record back: `Boss4ResolveShot` for the point and surface of a hit on one
+ * of its mesh bones, `Boss4SpawnBoneHitMark` for the point and normal. This
+ * said nothing read it, which was true until class 0x19 was ported.
  */
 export function SpawnWorldImpact(player: number, point: Vec3, normal: Vec3,
                                  surface: number, host: GameHost,
                                  events?: Events): void {
+  const rec = G.g_shot_hit_records[player];
+  if (rec) {
+    rec.x = point.x; rec.y = point.y; rec.z = point.z;
+    rec.surface = surface;
+    rec.nx = normal.x; rec.ny = normal.y; rec.nz = normal.z;
+  }
   const a = AnglesToward(normal.x, normal.y, normal.z);
   const face = WET_SURFACES.has(surface) ? 1 : 0;
   SpawnSpriteEffect(point, a.pitch, a.yaw, surface, face, player, host, events);

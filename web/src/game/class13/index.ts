@@ -57,6 +57,7 @@ import {
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
+import { CarrierPropRoutine2 } from "./routine2";
 import { QueryGroundHeightAt } from "../coli";
 import { CarrierTransformPoint } from "../carrier";
 import {
@@ -131,14 +132,20 @@ const CARRIER_BOW_BIT = 0x400000;
  * {@link CarrierPropSelectRoutine}. Entries 1, 3, 4 and 5 are the carried
  * props' — class 0x30 state 37's barrels, which reach the table through the
  * state-37 script rather than through a class-0x13 descriptor; 1 and 4 are
- * ported in `game/carried_prop.ts`. The rest — `0x00443200`, `0x0043FFC0`,
- * `0x004400D0` and `0x00445050` — are not read. `[open]`
+ * ported in `game/carried_prop.ts`, and so is 2, the stage-4 boss's. The
+ * rest — `0x0043FFC0`, `0x004400D0` and `0x00445050` — are not read.
+ * `[open]`
  */
 export enum PropBehaviour {
   /** `NoOpStub` (`0x0041EBB0`) — a static prop, drawn and nothing else. */
   None = 0,
   /** `CarriedPropHeldUpdate` (`FUN_00442820`) — `game/carried_prop.ts`. */
   CarriedPropHeld = 1,
+  /**
+   * `CarriedPropHeldInBone8Update` (`FUN_00443200`) — `game/carried_prop.ts`.
+   * The stage-4 boss's props; `Boss4SpawnHeldProp` is its only allocator.
+   */
+  CarriedPropHeldInBone8 = 2,
   /** `CarriedPropThrowAtTarget` (`FUN_004432D0`) — not ported. */
   CarriedPropThrowAtTarget = 3,
   /** `CarriedPropThrowAtCamera` (`FUN_00443B90`) — `game/carried_prop.ts`. */
@@ -188,9 +195,10 @@ export function ScriptedPropInit13(obj: Actor): void {
  * Sets `g_civilian_carrier` and then overwrites `sub+0x00` with one of seven
  * routines chosen through the jump table at `0x004401E4` — see
  * {@link g_carrier_prop_routines}. Selectors 0, 1 and 6 are ported (stage
- * 2's block-16 boat and stage 3's two); the other four routines —
- * `0x004408A0` (2 and 9), `0x00440AD0` (3), `0x00440C20` (4 and 7) and
- * `0x00441000` (5 and 8), all stage 4's — are unread. `[open]`
+ * 2's block-16 boat and stage 3's two), and 2 and 9 (`FUN_004408A0`,
+ * `class13/routine2.ts`, the stage-4 boss's transport); the other three
+ * routines — `0x00440AD0` (3), `0x00440C20` (4 and 7) and `0x00441000` (5
+ * and 8), all stage 4's — are unread. `[open]`
  *
  * The carrier global is written **whatever the selector**, because the engine
  * writes it before it dispatches, and a rider placed after an unported carrier
@@ -531,7 +539,10 @@ export const g_carrier_prop_routines: Partial<Record<number,
   (obj: Actor, f: ClassFrame) => void>> = {
   0: CarrierPropRoutine0,
   [CARRIER_ROUTINE_PORTED]: CarrierPropRoutine1,
+  // `FUN_004408A0` is installed for both: 9 is 2 arriving parked.
+  2: CarrierPropRoutine2,
   6: CarrierPropRoutine6,
+  9: CarrierPropRoutine2,
 };
 
 function ScriptedPropDebug(obj: Actor): ActorDebug {

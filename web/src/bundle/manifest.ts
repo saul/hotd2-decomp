@@ -22,13 +22,26 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
- * 13: the stage-3 boss. Class 0x45 has a character-type and a motion rule,
+ * 14: the stage-3 boss -- two 13s had been cut on two branches, the
+ * stage-4 boss's and this one, so the merged layout is its own number.
+ * Class 0x45 has a character-type and a motion rule,
  * so stages 3 and 6 carry its placements -- each with a `class45` block, the
  * sub-type -- and `boss3.bin`, `boss3l.bin` and the civilians' clips; the
  * effect slots gain its card pieces, sparks, splashes and flashes, and
- * `screen_sprites` its two card sprites. A format-12 bundle has no class-0x45
+ * `screen_sprites` its two card sprites. A bundle before it has no class-0x45
  * placement at all, and a client reading one would stage the fight with no
  * boss in it and hold both gates for ever.
+ *
+ * 13: the stage-4 boss. `script.json` carries a `boss4` block -- class 0x19's
+ * seven `.rdata` tables (`ExeTables.boss4Tables`): the phase floors, the head
+ * damage, the two held props, the 22 camera cues, the 18 phase arenas, the
+ * head models by bar and the approach picks -- and `carrier_door_yaw`, the
+ * swing class 0x13's carrier routine 2 steps its doors through. Class-0x19
+ * placements carry `class19`: the entrance, the per-bone `coli4.bin` meshes
+ * `ShotTestBoneMesh` tests instead of spheres, and the camera pair that
+ * despawns the boss. The boss's clips gain 0x67 and 0x68, the throws. A
+ * format-12 bundle has none of it, and a client reading one would run a
+ * fight with no arena, no cues and no floors.
  *
  * 12: the game-over screen's sprites and route map. `script.json`'s
  * `hud_sprites` is `screen_sprites` -- the HUD's images and now the logo's
@@ -86,7 +99,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 13;
+export const SUPPORTED_FORMAT = 14;
 
 /**
  * The exporter's digest of the declarations in this directory.

@@ -54,6 +54,18 @@ export type ShotPick =
       whole?: boolean;
       /** Where the ray met it, in world space — for the impact effect. */
       point: Vec3;
+      /**
+       * **A bone shot-tested against its collision mesh** rather than its
+       * sphere (`Actor.boneColi`): the quad's surface id, which is the
+       * decision's input, and its normal in world space. `ShotTestBoneMesh`
+       * (`FUN_004048A0`) traces the shot segment through the bone's own
+       * frame against the blob and pushes the nearest quad as the
+       * candidate; `MarkActorShot` then runs `SpawnWorldImpact` on it, which
+       * is what leaves the point, surface and normal in
+       * `g_shot_hit_records`. What a surface *means* is the class's --
+       * `Boss4ResolveShot`'s `0x3D` is flesh. Absent for a sphere hit.
+       */
+      mesh?: { surface: number; normal: Vec3 };
     }
   | { kind: "prop"; propId: number; point: Vec3 }
   /**

@@ -19744,6 +19744,105 @@ Wrong turns:
 
 Named: `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`).
 
+## 2026-09-27 -- Strength (class 0x19), the whole fight
+
+Branch `boss/strength`. Phase 1 read every routine in `0x004917E0..0x00495EAF`
+into `docs/re/boss-strength.md`; phase 2 ported all of it into
+`web/src/game/class19/`, and the fight now plays from the entrance to
+`g_script_flags[32]` in both arenas (`web/tools/boss4_fight.mjs`).
+
+**Renames**, applied in one commit (`fdabb64`) across Ghidra, the TSVs, the
+TypeScript and the doc: `Boss4EndPlacementWalk` -> `Boss4TrackWhenInsideArena`
+(`0x004922C0`), `Boss4AdvancePhaseWhenWalkDone` ->
+`Boss4ArmPhaseWhenInsideArena` (`0x00492350`), `Boss4StatePinPlayer` ->
+`Boss4StateThrowHeldProp` (`0x00494D60`), `Boss4StateWaitForCameraInRange` ->
+`Boss4StateFaceCamera` (`0x004944A0`), `Boss4StateLookAtCamera` ->
+`Boss4StateTurnClipThenApproach` (`0x00494730`), `Boss4StateRiseThenIdle` ->
+`Boss4StatePlayArrivalClip` (`0x004945A0`), and `g_boss4_pin_picks` at
+`0x00570510` -> `g_boss4_held_props` at `0x005704F8` (the label sat at the
+record's `+0x18`). Named new: `CarriedPropHeldInBone8Update` (`0x00443200`),
+`CarriedPropDeflectedFlight` (`0x00444F70`, which had no function in the
+database at all -- it is installed through `obj+0`), `CarrierPropRoutine2`
+(`0x004408A0`), `g_shot_hit_records` (`0x009A2C40`),
+`g_original_weapon_damage_scale` (`0x009A224C`), `g_carrier2_door_yaw`
+(`0x005926D0`).
+
+**Readings that changed on a second look.**
+
+* `Boss4ResolveShot`'s sphere arm takes the crossing with the **larger** view
+  z when both are in front -- the one nearer the camera -- not the smaller;
+  the doc had the two arms of `0x00491CB5`'s `JZ` the wrong way round.
+* The strikes' `obj+0x34 &= ~0x2000` after the hit is **inside** the flag-8
+  test (`0x00494B43`): a strike that lands during an arena transition leaves
+  the bit up until the clip's end. The doc had it outside.
+* `ActorPickTargetPlayer` favours the player **ahead** on lives, `(n+1)/(n+2)`
+  for a lead of `n`; its row said the one behind. The two bytes it tests first
+  are `g_player_invuln_frames`, not "forced-target flags".
+* `ActorShiftToHoldBone1Position`'s two points are both world (view-to-world
+  times the bone's view-space record, and a pose built from identity), which
+  closes that row's `[open]`.
+* A type-2 carried prop hits the player with `PlayerTakeDamage(p, 1, 1)`, not
+  the drums' 7.
+* `ShotTestBoneTree`'s mesh arm is not dead: `Boss4Init` raises `0x51` in ten
+  bone records. The row said the arm was never taken.
+
+**The camera, and the one thing in the fight's way.** The four boss blocks
+play `cam_play 185 0..0` -- a **static** pose, since `EvtActionCamPlay40`
+tests `start == end` before the stash flag -- and then `finish_sequence 6`
+over no stash. They are the only 6|7 installs in the shipped scripts without
+one. The walker refused the install ("nothing stashed"), so the (2,6) rail
+never ran, `g_cam_path_frame` sat at 0 and the fight stalled in phase 1: the
+harness found it on its first run. `CameraStepRailTick` evaluates
+`g_active_cam_path` over the stash words whoever wrote them, so the install
+now rides the current shot's path when nothing is stashed; every other stage
+is byte-identical.
+
+**The shot test.** Main's `combat/shot_test.ts` landed mid-port. Class 0x19
+opts in; the mesh arm (`ShotTestBoneMesh`) is in `game/` over
+`GameHost.boneMatrix` and `ColiSegmentVsMesh`, and the candidate carries the
+surface to `SpawnWorldImpact` and `g_shot_hit_records`.
+
+**Wrong turns.**
+
+* I first put the mesh test in `render/characters.ts`'s pick, behind a new
+  host method. `verify_layers` refused it (`render-drives-the-port`: the
+  renderer called `ColiSegmentVsMesh`), and main's shot test then made the
+  render pick skip registered classes anyway. The arithmetic belongs in
+  `game/`; the renderer only answers the bone's matrix.
+* I wrote the harness to seek to step 0 of the boss block; the blocks' steps
+  are numbered from 1 there, so the seek ran the block to its end and
+  reported failure.
+* The harness's first damage count attributed every hit on the player to the
+  boss. They were the step's eight bats, which keep the player invulnerable
+  and so refuse most of the boss's strikes; the count is split by source now.
+* I had the phase-2 summary say the port's `ActorSetMotionBlended` needs an
+  "already playing" guard. It does not; the exe's callers write the guard at
+  each site, and so does the port (`Boss4BlendUnlessPlaying`).
+
+## 2026-09-27 -- the playthrough can play a boss to its end
+
+`web/tools/playthrough.mjs` gains four opt-ins, default behaviour unchanged
+(stage 1 still reports its end block at frame 9150, 97 instructions):
+`--play-end` plays an end block through, `--meter-all` counts every class's hit
+points and `g_boss_hp_fraction` in the no-damage clock, `--aim` pulls at every
+object on `G.g_shot_test_list` through the new `__hotd2Drive.shotTargets`
+(drive version 3, projected through the trigger's own camera), and `--watch`
+prints named classes' rows as they change. `--boss` is the first three.
+
+Stage 5 block 1, reported stuck at the flier's 169 hit points, was the meter:
+it read `2/0` for the whole of phase 1 because the flier is class 0x22, so a
+fight being won was called fruitless and the run hung at `--hang` (900)
+whatever `--shoot-for` said. With `--boss` the flier goes 300 to 0 in 1920
+frames, `wait_script_flag 0` (op 72) opens, and the script leaves block 1 --
+no cheat, no debug clear. Nothing in the port changed. Phase 1 takes damage in
+subs 1, 5, 7 and 11 (byte table `0x0049D498`) and the walker's hits reach
+`obj+0x132C` in both subtypes; stage 5 needs neither more than stage 1 does.
+
+Stage 1's block 16 is the same descriptor as 14 and is on no route and no
+Arcade or Original entry; `--link ...block=16` lands in block 14 and the stage
+ends three instructions later, which is the seek and not the block. It is not
+exercised.
+
 ## 2026-09-27 -- the Tower, class 0x45, ported (branch `boss/tower`)
 
 **Outcome:** the stage-3 boss and its stage-6 return run in the port, drawn,
@@ -19780,7 +19879,7 @@ not be used.
   `0x009BEBA4` is `0x009A66A4 + 0x1850*0x10`, the table the horde's sheet
   reads at `0x009B7394`.
 * `0x009C88AC` is an Original Mode item effect (items `0x0C`/`0x14`, through
-  `FUN_00416240`'s byte table at `0x00416314`). `g_original_damage_scale`'s
+  `FUN_00416240`'s byte table at `0x00416314`). `g_original_weapon_damage_scale`'s
   writers all store 1.0.
 * The wake's cursor is the path cursor, not the play cursor.
 

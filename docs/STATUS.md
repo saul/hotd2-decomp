@@ -19,36 +19,36 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 70703 | 237 | engine |
-| `hod2lib/` | 17715 | 34 | engine |
-| `render/` | 12138 | 40 | render |
-| `app/` | 7798 | 29 | app |
-| `script/` | 4900 | 27 | engine |
+| `game/` | 74042 | 248 | engine |
+| `hod2lib/` | 17863 | 34 | engine |
+| `render/` | 12188 | 40 | render |
+| `app/` | 7861 | 29 | app |
+| `script/` | 4913 | 27 | engine |
 | `ui/` | 3161 | 27 | ui |
-| `bundle/` | 2422 | 11 | engine |
+| `bundle/` | 2502 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **120635** | **416** | |
+| **total** | **124328** | **427** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2244
-* `game/actor.ts` — 2207
+* `game/globals.ts` — 2284
+* `game/actor.ts` — 2242
+* `app/main.ts` — 2158
 * `script/walker.ts` — 2149
-* `app/main.ts` — 2143
 * `game/class14/index.ts` — 2127
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **175 of 283** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 367 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 542 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **177 of 283** annotated functions in the gameplay address ranges have a port (62%) |
+| Ported outside those ranges | 403 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 580 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **27 of 44** read classes have a module, covering 1526 of 1626 placements |
-| Declared `[diverges]` | **198** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **199** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **186** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **186** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,8 +56,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1215 in `ghidra/annotations/functions.tsv` |
-| Named globals | 603 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1232 in `ghidra/annotations/functions.tsv` |
+| Named globals | 608 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 40 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
@@ -115,6 +115,7 @@ nothing exits 3 and is never counted as green.
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
+| `boss4_fight` | that the stage-4 boss's fight runs from its entrance to `g_script_flags[32]` in both arenas, against the stage's own script and camera paths -- the only check that plays a boss's phases, its camera cues and the (2,6) rail they move, since the playthrough stops on entering the end block the fight is in | bundle |
 | `handback` | that a room waits for the camera to turn back onto its rail after the last enemy dies and not merely for the counter -- the only check that measures the *pacing* of a room-clear gate rather than whether it opens at all, and the one that separates the two drivers a `finish_sequence` can install | bundle |
 | `civ_speech` | that a rescued civilian holds a camera slot while her script asks, and that the room-clear gate therefore waits for her lines and her shutter -- the only check that plays a real civilian stream against the stage's own gate, and the reason a non-enemy can be a camera candidate at all | bundle |
 | `props43` | where in a real script a class-0x41 prop is actually placed, and that it takes a frame of `GameUpdate` to appear -- the only check that separates `spawn_placed` putting a *placer* in the pool from the constructor that builds the prop, which is the difference between a room the player has not cleared and a placement the player dropped. It is also the only harness that reports the address the walker reached rather than the one it asked for | bundle |
@@ -139,7 +140,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-17 of them need the installed game and 14 need an exported
+17 of them need the installed game and 15 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

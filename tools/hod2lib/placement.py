@@ -395,6 +395,9 @@ class Placement:
     #: Class 0x14's tail -- the stage-2 boss's state, route quad and despawn
     #: cue; see :func:`characters.class14_tail`.
     class14: dict | None = None
+    #: Class 0x19's tail -- the stage-4 boss's entrance, per-bone collision
+    #: meshes and despawn cue; see :func:`characters.class19_tail`.
+    class19: dict | None = None
     #: Class 0x22's tail -- JUDGMENT's flier; see
     #: :func:`characters.class22_tail`.
     class22: dict | None = None
@@ -493,6 +496,8 @@ class Placement:
             d["class53"] = self.class53
         if self.class14:
             d["class14"] = self.class14
+        if self.class19:
+            d["class19"] = self.class19
         if self.class22:
             d["class22"] = self.class22
         if self.class23:

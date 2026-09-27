@@ -53,7 +53,8 @@ import type { TargetScriptEntry, TargetScriptJson }
   from "../../bundle/characters";
 import { ActorFlag, MotionFlag, type Actor, type ZombieActor } from "../actor";
 import type { GameHost } from "../host";
-import { TurnActorAwayFromPoint, TurnAngleToward } from "../actor_turn";
+import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleToward }
+  from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
 import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
@@ -63,7 +64,7 @@ import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 
 /** `ZombieStateWalkToTarget`'s turn rate, and every other walk's — `0x1A0`. */
 const TARGET_TURN_RATE = 0x1a0;
@@ -705,44 +706,10 @@ export function ZombieStateWalkToPoint(obj: ZombieActor): void {
   reblend(obj);
 }
 
-/**
- * `ActorPointIsAhead` — `FUN_0045BC10`. Is the point in front of the actor?
- *
- * The engine rotates the delta by the inverse of all three angles and tests
- * the local `z`. Yaw alone is exact for anything upright, which every actor in
- * this family is.
- */
-export function ActorPointIsAhead(obj: ZombieActor, p: Vec3): boolean {
-  const a = obj.yaw * ((Math.PI * 2) / 65536);
-  const dx = p.x - obj.pos.x;
-  const dz = p.z - obj.pos.z;
-  return PointLocalZ(dx, dz, a) > 0;
-}
-
-/**
- * The z of a world delta in an actor's own frame — `MatrixRotateY(-yaw)`.
- *
- * **The inverse rotation, which is where this was wrong.** The engine builds
- * `MatrixRotateY(-yaw)` and reads the transformed z; this computed
- * `dz·cos - dx·sin`, which is the *forward* rotation's z, so the `dx` term
- * carried the opposite sign. The two agree exactly when the delta is along the
- * actor's own axis and disagree by the whole of the sideways component
- * otherwise — which is every case that matters, because a point directly
- * ahead or behind is not one anybody tests.
- *
- * `MatrixRotateY(θ)` is `x' = x·cosθ + z·sinθ, z' = -x·sinθ + z·cosθ` — the
- * convention `ApplyRootMotion` already rotates the root delta by, and the one
- * that makes the measured walk speeds come out right. Its inverse is therefore
- * `z' = dx·sin + dz·cos`.
- *
- * Stage 1's block-1 captor is what found it: after killing the civilian he
- * enters `ZombieStateWalkPastPoint` **already past** his point, walks away
- * from it for ever, and never reaches `ZombieScriptEnded` — which is the
- * routine that turns a captor on the player. He just kept walking.
- */
-function PointLocalZ(dx: number, dz: number, yaw: number): number {
-  return dx * Math.sin(yaw) + dz * Math.cos(yaw);
-}
+// `ActorPointIsAhead` (`FUN_0045BC10`) is in `game/actor_turn.ts`, whole --
+// all three angles -- because the stage-4 boss calls it too. Re-exported so
+// this file's callers and tests keep their import.
+export { ActorPointIsAhead };
 
 /**
  * The zombie and the civilian are **one animation**, and this is the copy:

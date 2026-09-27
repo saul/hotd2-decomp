@@ -19,13 +19,13 @@
 /** The per-file digests, so a mismatch can name the block that moved. */
 export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "cameras.ts": "e711fd29f97441deae96406d95600d68fc9b5e9ccb1c170b46f23120cd8d67ce",
-  "characters.ts": "5fcea74bc2150f9b8e6f39019a265b6130743733da8ae0a6b11a0e392ab8bfe2",
-  "manifest.ts": "3a997346dabe6a0bb4ebfbf1c46e4a7ee7c1271cc2cecd2503130890e6270bcf",
+  "characters.ts": "3de638681195e5563a603291adfc2c105a6137091d9a2f4cbfabf12557765b63",
+  "manifest.ts": "f322a8b24ffb04a11a1bfee1dfc7ee9b8b1b93412292e079b2292b3bb0babb0b",
   "scene.ts": "18f6aa8d22d87c043cb38e440adb932f1a9495fe170873e44776c64c9b0d6100",
   "script.ts": "05e0793ed5c5771b326f7a1e094f250a25a96bf2805849da33bbf846ab132100",
   "sound.ts": "69f5c5cdf7a96b4ef01e41cbee9805c81e709f15a396ed2456b017389b3cefd8",
-  "stage.ts": "6192b7951852a2af199183f3ed00ec85a27f004066b33404e61719d0233b1b59",
+  "stage.ts": "2fbd35dfd80b92fabedfd964ef6a10a6d67c80295d1fb0ce28fda8b97279c498",
 };
 
 /** One digest over {@link SCHEMA_FILES}, in filename order. */
-export const SCHEMA_HASH = "ad5e4eec5358acb8aeafda30be050c8e8382b9302474abe058ae87d902957938";
+export const SCHEMA_HASH = "ca7a8fece649c1cf6d20c312ddd8b6303eeb137b56329f6a65a337fa2b66be27";

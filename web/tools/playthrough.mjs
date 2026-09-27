@@ -214,6 +214,44 @@
  * START whenever the HUD shows the continue countdown, spending the game's own
  * credits -- five continues in Arcade at the factory options -- and the count
  * taken is printed with the result.
+ *
+ * ### `--play-end`, `--meter-all` and `--aim`: a boss, played to its end
+ *
+ * Three opt-ins, off by default, so every run above keeps the contract it has
+ * always had. `--boss` is all three.
+ *
+ * * **`--play-end`** plays an end block through instead of stopping on
+ *   entering it (`docs/PLAYER_HANGS.md`, the first item 17: "stops on
+ *   entering an end block"). Stage 1's block 14, stage 4's 23/25/27/29 and
+ *   stage 5's boss blocks are end blocks, so without this every boss fight
+ *   whose room is the last one is never executed. With it the run succeeds
+ *   only when the walker **leaves** the end block -- the script ran off its
+ *   last step and the stage handed over -- and a gate inside the block is
+ *   shot at, timed out and reported like any other.
+ * * **`--meter-all`** widens the damage meter ({@link roomPressure}) from
+ *   classes 0x30/0x31 to every class whose `obj+0x11C` is hit points, and
+ *   adds `G.g_boss_hp_fraction`, which every boss writes each fight frame.
+ *   Without it a boss's damage is invisible to the no-damage clock, so a
+ *   fight that is being won reads as fruitless and is called a hang after
+ *   `--hang` frames.
+ * * **`--aim`** fires, before each volley's grid, one pull at every object on
+ *   the frame's shot-test list -- `G.g_shot_test_list`, the classes that
+ *   register the engine's way (`RegisterForShotTest`, `FUN_00405160`) -- at
+ *   the point each published (`obj+0x70`, `Actor.shotCentre`), projected
+ *   through the camera the trigger casts through (`__hotd2Drive.shotTargets`,
+ *   drive version 3). The grid still follows. Never at a class-0x10 civilian,
+ *   and the civilian guard on the gate is unchanged.
+ *
+ * **`--watch 0x22,0x23`** (not part of `--boss`) prints the drive rows of
+ * the named classes -- `at`, class, `state.sub`, hit points, position --
+ * whenever one of them changes state or hit points, at most once a second,
+ * with the walker's address. It is how a boss run shows the fight rather
+ * than only its outcome.
+ *
+ * Flag gates are shot at by default, as the second item 17 of
+ * `PLAYER_HANGS.md` records; none of these flags changes that.
+ *
+ *   node tools/playthrough.mjs --stage 5 --headless --continue --boss
  */
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -497,9 +535,7 @@ async function readBranch(page) {
  * Only classes 0x30 and 0x31 are counted, because they are the two that have
  * hit points: `obj+0x11C` is a **sub-type selector** on class 0x20 and an
  * asset slot on class 0x65 (`L3`), so summing every actor's would move for
- * reasons that are not damage. Class 0x45 counts too: the tower's heads and
- * body keep theirs there (`Boss3FightHeadInit` writes 45, `Boss3BodyInit`
- * 120), and without it every shot that landed on the boss read as none.
+ * reasons that are not damage.
  *
  * It changes when a shot lands, when an actor dies, and when a wave arrives —
  * all three mean the room is still going somewhere. It does **not** change
@@ -510,10 +546,51 @@ async function roomPressure(page) {
   const alive = /\be(-?\d+)/.exec(row.c)?.[1] ?? "?";
   let hp = 0;
   for (const o of row.o) {
-    if (!/ c(48|49|69) /.test(o)) continue;
+    const cls = Number(/ c(\d+) /.exec(o)?.[1] ?? -1);
+    if (METER_ALL ? NOT_HIT_POINTS.has(cls) : cls !== 0x30 && cls !== 0x31) {
+      continue;
+    }
     hp += Math.max(0, Number(/ h(-?\d+)/.exec(o)?.[1] ?? 0));
   }
-  return `${alive}/${hp}`;
+  if (!METER_ALL) return `${alive}/${hp}`;
+  // `g_boss_hp_fraction` (`0x009C8E10`): the bar's input, which every boss
+  // writes on each fight frame and which moves only when its hit points do.
+  const bar = await page.evaluate(async () => {
+    const { G } = await import("/src/game/globals.ts");
+    return G.g_boss_hp_fraction;
+  });
+  return `${alive}/${hp}/${bar}`;
+}
+
+/**
+ * The classes whose `obj+0x11C` is **not** hit points, which `--meter-all`
+ * leaves out: a sub-type selector on class 0x20 and an asset slot on class
+ * 0x65 (`L3`). Everything else is counted, dead or alive.
+ */
+const NOT_HIT_POINTS = new Set([0x20, 0x65]);
+
+/**
+ * `--aim`: one pull at every object on the frame's shot-test list, where its
+ * class published it. Returns how many were fired.
+ *
+ * The list is the one the next frame's shot test walks, so a pull here is at
+ * something the game will test the ray against. Off the screen, behind the
+ * lens or a civilian: not fired at.
+ */
+async function aimedPulls(page, box) {
+  const targets = await page.evaluate(
+    () => globalThis.__hotd2Drive.shotTargets?.() ?? []);
+  let n = 0;
+  for (const t of targets) {
+    if (t.cls === 0x10) continue;
+    if (!(t.z >= -1 && t.z <= 1)) continue;
+    if (Math.abs(t.x) > 1 || Math.abs(t.y) > 1) continue;
+    if (n % 6 === 0) await page.keyboard.press("KeyR");
+    await page.mouse.click(box.x + ((t.x + 1) / 2) * box.width,
+                           box.y + ((1 - t.y) / 2) * box.height);
+    n += 1;
+  }
+  return n;
 }
 
 const started = Date.now();
@@ -555,6 +632,21 @@ if (ROUTE.size) {
 const original = flag("original");
 /** Press START on every continue countdown; see the loop. */
 const CONTINUE = flag("continue");
+/** `--boss`: the three flags below together. See the header. */
+const BOSS = flag("boss");
+/** Play an end block through rather than stopping on it. See the header. */
+const PLAY_END = BOSS || flag("play-end");
+/** Count every class's hit points and the boss bar. See the header. */
+const METER_ALL = BOSS || flag("meter-all");
+/** Pull at every registered shot-test object first. See the header. */
+const AIM = BOSS || flag("aim");
+/** `--watch`: the classes whose rows are printed as they change. */
+const WATCH = new Set((opt("watch", "") ?? "").split(",").filter(Boolean)
+  .map((v) => Number(v)));
+if (PLAY_END || METER_ALL || AIM) {
+  console.log(`boss flags: ${[PLAY_END && "--play-end",
+    METER_ALL && "--meter-all", AIM && "--aim"].filter(Boolean).join(" ")}`);
+}
 /**
  * `--no-damage` -- **a cheat, and printed as one (L45).** Raises player 0's
  * `g_player_no_damage` (`0x009C9FD8`), the engine's own byte that makes
@@ -563,15 +655,6 @@ const CONTINUE = flag("continue");
  * stage step's reset boots the player block and clears it.
  */
 const NO_DAMAGE = flag("no-damage");
-/**
- * `--play-end` -- **play the end block, not just reach it.** Every stage's
- * boss is in its end block, so stopping on arrival never ran a boss at all:
- * stage 3's block 11 is entered at frame 8580 and is the whole of the tower
- * fight. With this the run keeps going, shooting the boss's gates like any
- * other, until the walk leaves the block -- the scene over, and the next
- * stage's entry up in the HUD -- and only that is a pass.
- */
-const PLAY_END = flag("play-end");
 if (NO_DAMAGE) {
   console.log("--no-damage: CHEAT -- g_player_no_damage[0] = 1 (0x009C9FD8), "
               + "no hit costs a life");
@@ -612,6 +695,10 @@ try {
     throw new Error("the page has no drive seam — is ?drive=1 wired up? "
                     + "see web/src/app/harness.ts");
   }
+  if (AIM && version < 3) {
+    throw new Error(`--aim needs drive version 3 (shotTargets); the page `
+                    + `answers ${version}`);
+  }
   await page.keyboard.press("Space");                 // play
   const box = await page.locator("#viewport").boundingBox();
   if (!box) throw new Error("#viewport has no box");
@@ -621,6 +708,16 @@ try {
     page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
 
   let addr = null;
+  /** `--play-end`: the end block being played through, and when it began. */
+  let endBlock = null;
+  let endAt = 0;
+  /** `--play-end`: instructions run inside the end block. */
+  let stepsAtEnd = 0;
+  /** `--aim`: pulls fired at registered shot-test objects. */
+  let aimed = 0;
+  /** `--watch`: the last rows printed, and when. */
+  let watched = "";
+  let watchedAt = -Infinity;
   /** The frame the current address was first seen on. */
   let addrAt = 0;
   /** The last {@link roomPressure} reading, and the frame it last changed on. */
@@ -665,8 +762,6 @@ try {
    * reported as: the page is not running.
    */
   let lostThePage = null;
-  /** The end block `--play-end` is playing, once the walk has entered it. */
-  let endBlock = null;
 
   // Nothing in the page navigates — the only `location.reload` in the app is
   // the export screen's, and it is only reachable before a scene is built —
@@ -788,30 +883,45 @@ try {
       break;
     }
 
-    if (PLAY_END && endBlock !== null && s.block.split(" ")[0] !== endBlock) {
+    if (WATCH.size && frames - watchedAt >= 60) {
+      const row = await page.evaluate(() => globalThis.__hotd2Drive.now());
+      const rows = row.o.filter((o) => WATCH.has(Number(/ c(\d+) /.exec(o)?.[1])));
+      // The state and hit points only: a moving actor is not news.
+      const key = rows.map((o) => o.replace(/ @\S+ y-?\d+/, "")).join("|");
+      if (key !== watched) {
+        watched = key;
+        watchedAt = frames;
+        console.log(`  f${String(frames).padStart(6)}  ${row.a}  `
+                    + `${row.c.split(" b")[0]}  ${rows.join(" | ")}`);
+      }
+    }
+    // `--play-end`: the walker has left the end block it entered -- the
+    // script ran off the block's last step and the stage handed over.
+    if (PLAY_END && endBlock !== null && s.block && s.block !== endBlock) {
       const t = ((Date.now() - started) / 1000).toFixed(1);
-      console.log(`\nplayed end block ${endBlock} through: the walk left it `
-                  + `for ${s.block ? `block ${s.block}` : "the next stage"} `
-                  + `after ${frames} game frames `
-                  + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
-                  + `wall clock), ${steps} instructions, START pressed `
-                  + `${continues} time(s)`);
+      console.log(`\nplayed end block ${endBlock.split(" ")[0]} through: the `
+                  + `script left it after ${frames - endAt} frames and `
+                  + `${steps - stepsAtEnd} instructions in it (${frames} game `
+                  + `frames in all, ${t}s of wall clock), ${steps} `
+                  + `instructions, START pressed ${continues} time(s)`
+                  + `${AIM ? `, ${aimed} aimed pulls` : ""}; the walker is `
+                  + `now at block ${s.block}`);
       if (unclearable.length) {
-        console.log(`\n${unclearable.length} gate(s) went ${SHOOT_FOR} frames `
-                    + `with no damage landing (a boss that dives between `
-                    + `surfacings can do that honestly; --shoot-for widens it):`);
+        console.log(`\n${unclearable.length} rooms could NOT be cleared by `
+                    + `shooting — the stage is not playable through:`);
         for (const g of unclearable) console.log(`  block ${g}`);
       }
       exit = state.faults || unclearable.length ? 1 : 0;
       break;
     }
-    if (PLAY_END && /\(end/.test(s.block)) {
-      if (endBlock === null) {
-        endBlock = s.block.split(" ")[0];
-        console.log(`  f${String(frames).padStart(6)}  reached end block `
-                    + `${endBlock}; --play-end plays it through`);
-      }
-    } else if (/\(end/.test(s.block)) {
+    if (PLAY_END && endBlock === null && /\(end/.test(s.block)) {
+      endBlock = s.block;
+      endAt = frames;
+      stepsAtEnd = steps;
+      console.log(`  f${String(frames).padStart(6)}  entered end block `
+                  + `${s.block}: --play-end, playing it through`);
+    }
+    if (!PLAY_END && /\(end/.test(s.block)) {
       const t = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`\nreached an end block after ${frames} game frames `
                   + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
@@ -956,6 +1066,7 @@ try {
       // the actor that writes a branch arm — stage 2's rescue target is one
       // rider on a moving car — so a `--route` block gets the dense sweep too.
       const dense = playingForArm || s.policy === "flag";
+      if (AIM) aimed += await aimedPulls(page, box);
       await volley(page, box, dense ? 13 : 5, dense ? 10 : 4);
       // After the volley, so a hit that landed on this exact frame counts.
       const p = await roomPressure(page);

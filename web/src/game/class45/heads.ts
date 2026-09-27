@@ -397,7 +397,7 @@ function Shooter(obj: Actor, f: ClassFrame): number {
 export function Boss3WeaponScale(obj: Actor, f: ClassFrame): number {
   if (G.g_GameMode !== GameMode.Original) return 1;
   const q = Shooter(obj, f);
-  const m = G.g_original_damage_scale[q] ?? 1;
+  const m = G.g_original_weapon_damage_scale[q] ?? 1;
   return m === -1 ? 2 : m;
 }
 

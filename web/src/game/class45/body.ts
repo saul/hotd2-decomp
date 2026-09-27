@@ -430,8 +430,8 @@ export function Boss3BodyUpdate(obj: Boss3Actor, f: ClassFrame): void {
       blk.hits = (blk.hits + 1) & 0xff;
       // The body's weapon scale is the shooter's own: no second draw.
       const m = G.g_GameMode === GameMode.Original
-        ? ((G.g_original_damage_scale[p] ?? 1) === -1
-          ? 2 : (G.g_original_damage_scale[p] ?? 1))
+        ? ((G.g_original_weapon_damage_scale[p] ?? 1) === -1
+          ? 2 : (G.g_original_weapon_damage_scale[p] ?? 1))
         : 1;
       const d = Math.trunc(m * (G.g_players_in_play === 2
         ? BODY_DAMAGE_2P : BODY_DAMAGE_1P));

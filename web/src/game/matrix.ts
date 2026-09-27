@@ -90,6 +90,19 @@ export function MatrixRotateZ(m: Mat, bams: number): void {
 }
 
 /**
+ * `MatrixScale` — `FUN_004A9CC0`. Row 0 by `x`, row 1 by `y`, row 2 by `z`,
+ * all four columns of each: the scale is applied before everything already
+ * on the stack, as every other post-multiplying call here is.
+ */
+export function MatrixScale(m: Mat, x: number, y: number, z: number): void {
+  for (let k = 0; k < 4; k++) {
+    m[k] *= x;
+    m[4 + k] *= y;
+    m[8 + k] *= z;
+  }
+}
+
+/**
  * `MatrixMultiply` — `FUN_004A92A0`. `top = p * top`: the argument is applied
  * **first**, which is what lets a bone matrix be multiplied onto the view.
  */
@@ -274,11 +287,4 @@ export function VecAngleBetween(ax: number, ay: number, az: number,
   const s = Math.sqrt((bz * bz + by * by + bx * bx)
                       * (az * az + ay * ay + ax * ax) - dot * dot);
   return FtolS16(Math.atan2(s, dot) * RADIANS_TO_BAMS);
-}
-
-/** `MatrixScale` — `FUN_004A9CC0`. Rows 0, 1 and 2 by `x`, `y` and `z`. */
-export function MatrixScale(m: Mat, x: number, y: number, z: number): void {
-  for (let k = 0; k < 4; k++) {
-    m[k] *= x; m[4 + k] *= y; m[8 + k] *= z;
-  }
 }

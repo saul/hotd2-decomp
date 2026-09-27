@@ -20274,3 +20274,58 @@ under test, so a mutation of either lifetime passed; they are literals.
 
 `[open]`: `FUN_004702E0`, a second caller of the shatter that forces group 99
 (no floor), is not in `g_class41_updates`; what allocates it is unread.
+
+## 2026-09-27 -- `ActorArcStep`'s stages, and the hold `ActorSetMotionBlended` puts on the cursor
+
+Reported from the state-23 port: its `obj+0x19C > 66` test first fired at 68
+in the port. Read `ActorArcStep` (`FUN_0044D860`) from the listing. All three
+stages are `CALL 0x004119a0` -- `ActorSetMotionBlended` itself, not the
+`SetCurrentActorMotionBlended` thunk -- with `{motion, start, fade}` straight
+out of `g_arc_scripts`. `ActorSetMotionBlended` writes `start` into the cursor
+and raises `track+0x37` bit 0; `SkeletonAdvancePlayCursor` (`FUN_004111A0`)
+then leaves the cursor alone until `counter - track+0x28` reaches
+`(s8)track+0x30 + 1`, i.e. `fade + 2` (`MOVSX ECX, byte [ESI+0x30]; INC ECX` at
+`0x004111BB`), and rewrites the counter to `start + 1`. The port's one-shot
+channel started the stage running, so a stage's start frame was never seen by
+a state that reads the cursor before stepping the arc.
+
+The port now has `ActorSetOneShotBlended`, the channel's `ActorSetMotionBlended`,
+and a `held` one-shot is held by `ActorAdvanceMotion` through the fade. The
+alternative, moving the stages onto the base track as `ThrowerStateThrow`
+did, was rejected: every script plays the same clip in its first two stages
+and the port's base-track `ActorSetMotionBlended` skips the fade when the
+motion is unchanged (the exe does not), which is class 0x30's shared setter
+to change; and the leap states' waits on `obj.action` would all have moved.
+
+`ActorArcStep` was also wrong in ways that had nothing to do with the hold,
+and those are fixed with it: the phases fall into each other; phase 2 ignores
+`ActorArcInterpolate`'s result (the port jumped to phase 4 and dropped the
+landing clip); `obj+0x1330 -= step` before phase 3 flies the frame again; the
+`0x100` windup immunity and its `0x136C & 0x200` memory, and `0x180000` on
+landing, for types 0x16..0x19. The annotation said it "returns 0 once the frame
+counter passes the duration" -- it returns 0 when the **landing clip** reaches
+stage 2's threshold.
+
+**And one annotation was wrong outright.** `InstallArcMotionScript` said every
+script names the same motion in all three stages. Seven of the 38 do not:
+`zslman`'s aside in stances 1 and 3 and set 3's attack 3 in all five end on a
+different clip (504/504/506, 490/490/493). `verify_combat.py` check 16 now
+reads all 38 and asserts every start and threshold lies inside its own stage's
+`g_motion_play_length`.
+
+**Wrong turn.** The first run failed the port test's climb: the fixture put the
+generic script (thresholds 46 and 47) over a 23-frame clip, play length 44.
+That is data the engine would hang on -- the cursor wraps at 45 -- and the old
+port only got off the wall because it gave up waiting when the arc landed. The
+fixture has the exe's wall script now; the port did not get a guard for it.
+
+**Found, not fixed: the port's states read the cursor one tick ahead of the
+engine's.** `EnemyThrowerUpdate` (and class 0x30's update) run the state, then
+the draw computes `obj+0x19C` from the counter, then the counter steps -- so a
+state reads the cursor the *previous* frame's draw computed. The director
+advances the port's clocks before the update, so every cursor a port state
+reads is the one the engine will draw this frame: one tick ahead, on every
+frame but the one that set the clip. The draws agree. The held start frame is
+therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
+Not this change's to fix -- it is every cursor test in the port.
+

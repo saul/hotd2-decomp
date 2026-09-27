@@ -4324,6 +4324,44 @@ one-and-a-half-size impact instead of a spark, and its story item comes out
 half a unit above the floor. The bundle carries both slot tables, the offsets
 and angles, and the 55-point piece hull.
 
+### A leap's stages hold their start frame through the fade
+
+`ActorArcStep` (`FUN_0044D860`) plays each of an arc script's three stages with
+a direct `ActorSetMotionBlended` call, and that call writes the stage's start
+frame into the cursor at `obj+0x19C` and holds it there until the fade is over.
+The port's one-shot channel started each stage running at once, so every
+threshold the arc and the attack entries compare against that cursor came up
+early, by the whole of every fade before it -- and
+`ThrowerStateDelayedPounce`'s `cursor > 66` first fired at 68, because stage 2
+started at 67 on the frame the cursor reached 66 and nothing ever saw 67. It
+matters more than a fade usually does: the fit that stretches a script onto a
+long arc does it **by growing the fades**, so on a long leap the hold is most
+of the flight, and a pounce's hit frame and its landing are timed against it.
+
+`ActorSetOneShotBlended` (`class30/motion_cue.ts`) is the channel's
+`ActorSetMotionBlended` now: it fades out of whatever is on screen and marks
+the clip `held`, and `ActorAdvanceMotion` holds a held clip -- not the base
+clip underneath it -- for the fade, `fade + 1` frames, as it already did for
+the base track. The renderer was already fading into a one-shot; it now fades
+into each stage as well, where it used to cut.
+
+`ActorArcStep` itself is transcribed whole with it. Its phases fall into each
+other; its flight phase ignores whether the arc has landed and waits for the
+clip, where the port used to skip straight to the end and drop the landing
+clip; `obj+0x1330` gives back the frame the flight flew twice; the four
+thrower types cannot be shot in a leap's windup (outside the leap aside) and
+land colliding; and the arc no longer zeroes a velocity the engine leaves
+alone. The landing dust (`ThrowerEmitGroundDust`) is the one thing left out,
+declared.
+
+Two test fixtures had to change with it, and the reason is the engine's: the
+wall leaps played a generic script whose last two thresholds, 46 and 47, lie
+past the 44-frame play length of the 23-frame clips under them. The engine's
+cursor wraps there, so an actor on that data would wait out its landing for
+ever; the old port only finished because it bailed out when the arc landed.
+The fixture carries the exe's own wall script now, and `verify_combat.py`
+check 16 asserts that none of the 38 shipped scripts does that.
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),

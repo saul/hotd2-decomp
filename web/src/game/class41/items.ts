@@ -124,9 +124,14 @@ export function SpawnStoryModeItem(p: BreakableProp, events?: Events): void {
  * That difference is `rise`; everything else is one routine here rather than
  * three, because three transcriptions of one switch is three places for it to
  * drift.
+ *
+ * `storyRise` is the one copy whose two arms differ: `FallingContainerUpdate`
+ * (`FUN_0046A580`) seats a story item at its floor **plus 0.5**
+ * (`FADD [0x004C43AC]` at `0x0046A9FA`) and a set's item at the floor itself.
+ * Everywhere else it is `rise`.
  */
 export function ReleaseHiddenItem(p: BreakableProp, events?: Events,
-                                  rise = 0): void {
+                                  rise = 0, storyRise = rise): void {
   // [open] `g_GameMode == 1 && DAT_009C88AA != 0` forces `itemSet = 1` on
   // every prop, so each one drops an extra life. What sets that flag has not
   // been read, so the port does not reproduce it.
@@ -138,8 +143,10 @@ export function ReleaseHiddenItem(p: BreakableProp, events?: Events,
 
   // The per-family height tweak, applied for the release and taken straight
   // back off — the engine does exactly this, `+0x1A0 += r` then `-= r`.
-  p.y += rise;
-  if (G.g_GameMode === 1 && p.storyItem !== -1) {
+  const story = G.g_GameMode === 1 && p.storyItem !== -1;
+  const lift = story ? storyRise : rise;
+  p.y += lift;
+  if (story) {
     SpawnStoryModeItem(p, events);
   } else {
     switch (p.itemSet) {
@@ -161,5 +168,5 @@ export function ReleaseHiddenItem(p: BreakableProp, events?: Events,
         break;
     }
   }
-  p.y -= rise;
+  p.y -= lift;
 }

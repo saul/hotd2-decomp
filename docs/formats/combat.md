@@ -55,32 +55,102 @@ The per-player shot record is 0x68 bytes at `0x009A2CB8`:
 
 ## 3. The hit test — `FUN_00404570`
 
-Once per frame, for each player that fired:
+`ProcessPlayerShots` is a **task**, and where it sits in the task list is half
+of how the shot test behaves. `ProcessPlayerShotsTaskCreate` (`FUN_00404480`)
+makes it last in the scene's list (`0x00460751`), after the two player tasks,
+and tasks run in creation order, so every actor, being allocated later, runs
+after it. So each frame goes: the player task reads the trigger and
+`BuildShotRay` writes the shot record, then `ProcessPlayerShots` tests the list
+the actors registered **on the previous frame**, against the draw records that
+frame drew. Then it empties the list, and the actors read their hit bit and
+register again. `[proved]`
 
 ```
-for every registered actor (DAT_0059D8E8, count DAT_005A4C80):
-    FUN_00404630  -- broad phase, then per bone
-FUN_00404B80      -- the world: ColiSegmentVsMesh against the collision meshes
-if (hits) FUN_00404DB0  -- sort and commit
+per player (shot records 0x009A5C78, stride 0x130):
+    g_coli_candidate_count = 0;  g_shot_hit_something[p] = 0
+    if (!fired) continue;   fired = 0
+    for each g_shot_test_list entry (0x0059D8E8, count g_shot_test_count 0x005A4C80):
+        obj+0x34 & 0x10 ? ShotTestMesh (FUN_00404A00) : ShotTestSphere (FUN_00404630)
+    ShotTestWorld (FUN_00404B80)            -- every time, not only on a miss
+    if (g_coli_candidate_count) { MarkActorShot(p); g_shot_hit_something[p] = 1 }
+ColiPublishDynamicList(); g_shot_test_count = 0     -- 0x0040461E
 ```
 
-The segment is **origin → origin + direction × 1000**.
+### Registration — `RegisterForShotTest`, `FUN_00405160`
 
-### Broad phase — `FUN_00404630`
+An object is a candidate for exactly one frame: the one after its own update
+called this. The caller writes `obj+0x70..0x78` (a point **in view space**)
+first, then:
 
-One sphere per actor: centre `obj+0x70`, radius `obj+0x124`. Miss and the actor
-is skipped entirely. Hit, and if the actor has a skeleton (`obj+0x34 & 0x80`,
-node count > 0, and not `& 0x8000`) it descends into the bones; otherwise the
-whole actor is recorded as a single hit.
+```
+if (obj+0x34 & 0x8000) return;                             ; never
+if (!(obj+0x34 & 0x10) && !(obj+0x78 <= 0.0)) return;       ; behind the eye
+list[n++] = {obj, obj+0x34, obj+0x12C, obj+0x130, obj+0x134}
+```
+
+The depth test is `FCOMP [0x004C436C]` (`0.0`) / `TEST AH,0x41`, which passes
+on less, equal and unordered. A mesh object (`0x10`) is taken at any depth.
+
+**Who calls it.** `get_xrefs_to 0x00405160` lists 53 callers. A scan of the
+image for `E8`/`E9` rel32 whose target is `0x00405160` finds **95**, and there
+is no absolute pointer to it anywhere, so the 95 are the set. The 42 Ghidra
+misses are in bytes it has not disassembled, most past a `MatrixStackPop` it
+calls no-return (`L35`). The one that matters is `ActorRegisterCameraPoint`
+(`FUN_00409B70`):
+
+```
+00409BA3  obj+0x70..0x78 = g_camera_world_to_view * obj+0x100..0x108
+00409BE7  CALL MatrixStackPop               ; Ghidra: no-return
+00409BEC  PUSH ESI                          ; ESI = g_cur_actor
+00409BED  CALL RegisterForShotTest
+00409BF2  obj+0x104 += rise;  RegisterForCameraTracking(obj)
+```
+
+Its seventeen call sites are the registration of classes 0x10, 0x11, 0x14,
+0x19, 0x2D and 0x32, and one of the routes of 0x22, 0x23, 0x30 and 0x31. None
+of those classes' updates shows up as a caller of `0x00405160`, which is the
+whole reason this was hard to see.
+
+### Broad phase and fork — `ShotTestSphere`, `FUN_00404630`
+
+```
+if (RayTestSphere(p, obj+0x70, obj+0x74, obj+0x78, obj+0x124) <= 0) return;
+if ((obj+0x34 & 0x80) && g_character_skeletons[obj+0x1F4]->+0x16 > 0
+    && !(obj+0x34 & 0x8000))
+    ShotTestSkeleton(obj, p);
+else
+    push {key __ftol(-obj+0x78 * 10.0), point obj+0x70.., obj, flags obj+0x34}
+```
+
+**The sphere at `obj+0x124` is the broad phase for everything**, per-bone or
+not: a shot that would clip a bone lying outside it never reaches the bone
+walk. The fork re-reads `obj+0x34` live, so `0x8000` raised after the object
+registered sends a per-bone actor to the whole arm.
+
+**Bit `0x80` is set by the skeleton build and by nothing else.**
+`SkeletonBuildAndPose` (`FUN_00410590`), called only from
+`ActorBuildSkinnedModel` (`FUN_00410440`), does `OR CL,0x80` on `g_cur_actor`'s
+`+0x34` when the character's skeleton has root nodes (`0x004105CC`..
+`0x004105E2`). A linear sweep of `.text` finds no other instruction that sets
+the bit. Every skinned class's `Init` points `g_cur_actor` at itself before it
+builds, so civilians, zombies, throwers and every boss carry it. Six builders
+clear it again with `AND 0x7F` straight after: `PlaceBats`, `SpawnBatWings`,
+`CatInit`, `SpawnGoldenFrog`, and `0x00463E50` / `0x004641F0` (class 0x41). This
+file used to say that no civilian ever has the bit; the build gives it to
+every one of them.
 
 ### Per bone — `FUN_00404700` → `FUN_00404750` → `FUN_004047D0`
 
-`FUN_00404700` walks **the same skeleton tree the renderer uses** —
-`PTR_DAT_004E0430[char_type]`, node count at `+0x16`, children at `+0x18` — and
-tests each bone in turn, recursing into children.
+`ShotTestSkeleton` sets `g_cur_actor` and walks **the same skeleton tree the
+renderer uses**, `g_character_skeletons[char_type]`: the root count at `+0x16`,
+the roots at `+0x18`. `ShotTestBoneTree` tests a node only if its draw record's
+slot (`rec+0x00`) is non-zero. A severed bone and its subtree have zero, from
+`RemoveBoneSubtree`. If the node is tested, `rec+0x74 & 0x10` picks the mesh
+test over the sphere. Then it recurses into the node's children **whether or
+not the node was tested**.
 
-Each bone carries a hit sphere, from `PTR_DAT_004D032C[char_type]`, stride
-`0x14`, indexed `bone − 1`:
+Each bone's hit sphere comes from `PTR_DAT_004D032C[char_type]`, stride `0x14`,
+indexed `bone − 1`:
 
 ```
 +0x00  u32  asset slot this entry belongs to
@@ -88,40 +158,137 @@ Each bone carries a hit sphere, from `PTR_DAT_004D032C[char_type]`, stride
 +0x10  f32  radius
 ```
 
-`FUN_004107E0` copies it into the bone's draw record each frame (record base
-`obj+0x20C`, stride `0x90`), scaling the radius by the actor's own scale at
-`obj+0x1300`, so the sphere follows the animation. A zombie's radii read as
-anatomy: **torso 2.55, head 1.3, upper arm 1.4, hand 0.8, pelvis 1.75, thigh
-2.15**.
+`SkeletonWalkNode` (`FUN_004107E0`) copies it into the bone's draw record
+(base `obj+0x20C`, stride `0x90`) **once, when the skeleton is built**. Its only
+caller is `SkeletonBuildAndPose`. (This said "each frame" until the callers
+were counted.) It scales the radius by `obj+0x1300` and zeroes the sphere
+unless the entry's slot equals the node's. It writes `rec+0x74 = 0x21`, so the
+mesh arm is never taken for a built skeleton. The view-space centre at
+`rec+0x68..0x70` is what `SkeletonEmitNode` (`FUN_004114C0`) writes every
+frame as it draws the bone, and only while `obj+0x34 & 0x8000` is clear
+(`0x00411682`..`0x004116C9`, past a pop the decompiler stops at). A zombie's
+radii read as anatomy: **torso 2.55, head 1.3, upper arm 1.4, hand 0.8,
+pelvis 1.75, thigh 2.15**.
 
-The intersection, `FUN_004062A0`, is the sphere centre rotated into the shot's
-frame with the precomputed sines and cosines, then a perpendicular distance:
+`ShotTestBoneSphere` skips a radius of exactly `0.0` (`TEST AH,0x40`), tests
+with `RayTestSphere`, and pushes `{key __ftol(-rec+0x70 * 10.0), node, obj,
+flags rec+0x74}`.
+
+The intersection, `RayTestSphere` (`FUN_004062A0`), rotates the centre into
+the shot's frame with the four numbers `BuildShotRay` left in the record:
+`+0x38/+0x3C` = sin/cos(−pitch), `+0x40/+0x44` = sin/cos(−yaw), the angles
+being `VecToAngles` of the view-space crosshair vector, as BAMS. The pitch is
+the **first** output: only that order measures a shot along +x from the x
+axis. Then:
 
 ```c
 u = -(cx * cos_yaw) - cz * sin_yaw;
-v = cz * cos_yaw * sin_pitch - (cy * cos_pitch + cx * sin_yaw * sin_pitch);
-hit = sqrt(u*u + v*v) <= radius;
+v = cz * cos_yaw * sin_pitch - (cx * sin_yaw * sin_pitch + cy * cos_pitch);
+return sqrt(u*u + v*v) <= radius ? 1 : -1;      // TEST AH,0x41: NaN hits
 ```
 
-An **infinite ray**, not a segment: the test has no near or far bound, because
-the broad phase and the 1000-unit world segment already bound it.
+A **line** through the eye, not a ray and not a segment: nothing asks whether
+the point is in front. `RegisterForShotTest`'s depth test is what keeps an
+object behind the camera out.
 
-A bone that also has a collision mesh (`record+0x88 != -1`, flag `0x10`) gets a
-precise second test, `FUN_004048A0`, against that mesh in the bone's own space —
-the bone's world matrix is kept at `record+0x28`.
+### The world is in the same sort — `FUN_00404B80`
+
+`ShotTestWorld` traces the segment (**origin → origin + direction × 1000**)
+against each blob of the two script-selected sets. Each blob that
+`ColiSegmentVsMesh` hits pushes its nearest-to-eye hit through
+`ShotPushWorldCandidate` (`FUN_00404C80`): flags `0`, no object, then
+`ShotPushColiHitCandidate` (`FUN_00404CB0`) — key `__ftol(-z * 10.0)` of the
+hit point in view space, flags `|= 0x10`. `ShotTestMesh` pushes a mesh object
+the same way with flags `obj+0x34 | 0x40` (`0x00404B50`). **A wall nearer than
+the zombie behind it wins the shot.**
 
 ### Commit — `FUN_00404DB0`
 
-Hits are collected with their distance into a list at `0x0059F4D0` (stride
-`0x3C`) with sort keys at `0x0059ECD8`. `FUN_00405080` sorts, and the **nearest**
-wins:
+`ColiSortHitCandidatesByDistance` (`FUN_00405080`) sorts the keys: an LSD
+radix sort on **`key & 0xFFFF`**, two 8-bit passes, each placing entries from
+the last one back, so it is **stable**. Equal low-16 keys keep push order,
+which is registration order across objects, tree order within one, and the
+world last. A key past 6553.5 units wraps, and so does a negative key from a
+point behind the eye. `MarkActorShot` takes element 0 and forks on its flags
+word (`+0x2C`):
 
 ```c
-actor->flags   |= (1 << (player + 1)) | 8;
-actor[400 + player] = node.bone_index;     /* obj+0x190+player: the bone hit */
+if (flags & 0x20) {                       /* a bone */
+    obj->+0x34 |= (1 << (player + 1)) | 8;  rec->+0x74 |= the same;
+    obj[0x190 + player] = node->+0x14;      /* the bone's own index */
+} else if (!(flags & 0x10) || (flags & 0x40)) {   /* whole, or a mesh object */
+    obj->+0x34 |= (1 << (player + 1)) | 8;
+    obj[0x190 + player] = 1;                /* a literal 1, not a bone */
+}
+if (flags & 0x10) SpawnWorldImpact(player);   /* the world, a mesh, a bone mesh */
 ```
 
-A whole-actor hit records bone **1**, the torso.
+Then, in Original Mode with weapon kind 3, sprite effect `0x53` at the hit.
+
+### The port
+
+`web/src/game/combat/shot_test.ts` ports `RegisterForShotTest`,
+`ShotTestSphere`, the three bone routines, `RayTestSphere` (with
+`BuildShotRay`'s angle quantisation) and `ColiSortHitCandidatesByDistance`, for
+the classes that set `ClassHandler.registersForShotTest`. Such a class calls
+`RegisterForShotTest`, or `ActorRegisterCameraPoint` (`camera/track.ts`, which
+now carries the tail call), from its own update at the exe's site. The
+director stops calling the camera point for it, and `render/`'s pick passes it
+by. `ShotTestListReset` runs where `ProcessPlayerShots` does, straight after
+the player tasks. `ActorSpawn` runs `ActorBuildSkinnedModel`, which raises
+`0x80` on a type with bones, and `CatInit` clears it. The port holds
+`obj+0x70..0x78` in world space (`Actor.shotCentre`) and takes the depth
+through the camera its frame reads.
+
+**No class on `main` has set the flag yet.** The four bosses are being
+ported in other workstreams and each will set it with its own module. Their
+sites:
+
+| class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
+|---|---|---|---|---|---|---|
+| `0x14` | `Class14Update` `0x0047621E` | `ActorRegisterCameraPoint(state+0x0C)` | none | 30.0, `Class14Init` `0x00475F4F` | build `0x00475F2E` | set `0x00475ECF`; cleared by the entrances `0x00478349`, `0x004785D2`, `0x0047880F` |
+| `0x19` | `Boss4Update` `0x00491A49` | `ActorRegisterCameraPoint(state+0x70)` | none | 30.0, `Boss4Init` `0x00491885` | build `0x00491866` | set `0x00491820`; cleared by the entrances `0x00493922`, `0x00493BB0` |
+| `0x22` | `Class22FightPhase1` `0x0049C145` | `RegisterForShotTest`, after writing `obj+0x70 = view(obj+0x100)` inline and clearing bits 1-3 | tail of the phase | `g_actor_radius_by_char[0x45]`, `Class22Init` `0x0049B15A` | build `0x0049B126` | — |
+| `0x22` | `Class22FightPhase2` `0x0049C8CE` | `ActorRegisterCameraPoint(2.0)` | `obj+0x34 & 0x100` clear | | | |
+| `0x22` rider | — | a plain `FUN_004A74E0` allocation at `obj+0x13B0`, not a task | never updates | — | build `0x0049B1B0` | set `0x0049B1BC` (`|= 0x88000`) |
+| `0x23` | state 1 (`0x00490150`) `0x004901E9` | `RegisterForShotTest`, `obj+0x70` left from last frame | companion's HP ≤ own | `g_actor_radius_by_char[0x44]`, `Class23Init` `0x0048FE04` | build `0x0048FDE6` | set by `0x00490B00` at `0x00490B92` |
+| `0x23` | state 1 `0x00490917`; subtype-2 state 1 (`0x00490FD0`) `0x004912EA` | `ActorRegisterCameraPoint(6.0)` | none | | | |
+| `0x23` | state 2 (`0x00490B00`) `0x00490C3B` | `RegisterForShotTest`, after `obj+0x70 = view(obj+0x100)` inline | after its own `0x8000` | | | |
+| `0x45` head | `Boss3FightHeadUpdate` `0x004215AF` | `RegisterForShotTest`, after `obj+0x100 = obj+0x40` and `obj+0x70 = view(obj+0x100)` | `obj+0x1310 != 7` | `g_actor_radius_by_char`, `Boss3FightHeadInit` `0x0041FF81` | build `0x0041FF5C` | set `0x0041FF68`; cleared at `0x00420E81`, `0x00420F96`, `0x00422DD5` |
+| `0x45` body | `Boss3BodyUpdate` `0x00424160` | `RegisterForShotTest`, `obj+0x70 = view(obj+0x40..0x48)` at `0x00423FD1` | none at the call | `[0x004C4E48]`, `Boss3BodyInit` `0x004203C0` | build `0x004203A0` | — (`|= 0x80080000`) |
+
+Ghidra's live database has other workstreams' newer names for some class-0x23
+routines (`Class23FightBesideCompanion` at `0x00490150`, `Class23Collapse` at
+`0x00490B00`, `Class23TrainingFightAlone` at `0x00490FD0`). The addresses are
+the reading.
+
+**What converting the rest takes.** Each class below is picked by `render/`
+with no registration and no broad phase, which is that file's declared
+divergence. Converting one means setting the flag and calling the routine at
+these sites. The pools that already model their own registration (class
+0x41's props, the carried props, the body creatures) would move into the one
+list instead:
+
+* `0x10` `CivilianUpdate` `0x0048ADB0` (camera point, 4.0); `0x11` `FrogUpdate`
+  `0x0043A2C7` (1.0); `0x30` `EnemyZombieUpdate` `0x0045347A` (4.0),
+  `ZombieTwinFollowHost` `0x004533CB`, the thrown weapon `0x0045A612`; `0x31`
+  `EnemyThrowerUpdate` `0x00449991` (0.0), its projectile
+  (`ThrownWeaponUpdate`) `0x004508AA`; `0x18` through `EnemyZombieUpdate`.
+* `0x13` `0x0043FFA4`; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
+  `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
+  `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
+  `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
+  `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
+  `0x51` `FishProjectToScreen` `0x00439BE3`; `0x52` and the class-0x53 trigger
+  through `FUN_0043F950` (`0x0043F9C2`, `0x0043FB76`), which both branch
+  triggers call.
+* Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
+  routine that registers is accounted for above. The exception is
+  `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
+  is `[open]`. Class `0x42`'s falling breakables register through
+  `FUN_0042FCA0` (`0x00430AF6`), which `PlaceFallingBreakableBatch` installs.
+* And `ShotTestWorld` into the same sort, which `combat/shot.ts`'s
+  `ShotHitWorld` declares it does not yet do.
 
 ## 4. Resolving the hit — `DispatchHit` -> `ResolveHit`
 

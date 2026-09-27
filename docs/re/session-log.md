@@ -19565,3 +19565,24 @@ user. `test:state` also caught the stash words surviving a seek's reset; the
 port's reset clears them now (`[port-only]` -- the engine never needs to).
 
 Named: `CamStashPathRange`, `g_rail_frame`, `g_force_rail_advance`.
+
+## 2026-09-27 -- two `[open]`s in the boss furniture, closed
+
+Under the standing rule that a divergence is fixed rather than declared.
+
+* **`CurlModelSlot3F7ByYaw` (`0x004759C0`)**, which the banner calls per card
+  with its yaw, is a page curl -- every full vertex of a model gets
+  `z = 4.8e-05 - 4 * sin(ftol(x * 2058.11)) * sin(yaw)` -- but the model is
+  asset slot `0x3F7`, not a card: the slot table is `0x009A66A0 + slot*0x20`
+  with the pointer at `+4` and the flags at `+0xC` (as `AssetDrawSlot` reads
+  it), and `0x009AE584` is slot `0x3F7`'s pointer. That is
+  `boss4_kls_hod1.bin[30]`, which no shipped stage script loads (all twelve
+  bundles scanned), and the routine is gated on the slot being resident. So in
+  every stage the port plays it does nothing, and flat cards are the engine's
+  own picture. The Tower's intro card calls it too.
+* **The `0x700` the sprite queue ORs into a flags word** is the quad's depth
+  compare: `DrawSpriteQuadCommand` puts `flags >> 8 & 7` (0 meaning 4) in the
+  PVR2 ISP word and `TranslatePvr2StateToD3D` maps it through `g_ZFuncTable`
+  (`[1,7,3,5,4,6,2,8]`) to `D3DRENDERSTATE_ZFUNC`: 4 is `LESSEQUAL`, 7 is
+  `ALWAYS`. The boss health bar is never hidden by the scene; the port's
+  camera-riding sprite quads now take their depth function from the flags.

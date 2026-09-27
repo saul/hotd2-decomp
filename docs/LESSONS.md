@@ -737,3 +737,20 @@ my name. **Make a subdirectory named for your task and keep every scratch
 file in it**, and treat a name at the scratch root as something another agent
 may already own. It is L28 and L36 pointed at the one directory that is
 outside every worktree by design.
+
+**L52 — A Ghidra rename by address overwrites whatever a peer named there,
+and says so only in its result.** Porting the ring a class-0x30 corpse leaves,
+I found three routines with no Ghidra function, created them, and named them
+over MCP. `rename_function` succeeded every time. Its message read *"Renamed
+function at 0x00407e30 from 'RingEffectSpread' to ..."* -- a peer porting the
+fish had created and named the same three an hour earlier, uncommitted in its
+own worktree, and the shared database is the one place both of us wrote. The
+peer's TSV and TypeScript used its names, the database now used mine, and the
+task had two ports in two trees.
+
+Before naming anything in the shared database, **grep every live worktree's
+`ghidra/annotations/*.tsv` for the address** -- a peer's uncommitted row is
+there before it is anywhere else -- and read the `from` in every rename
+result, which is the only report that the name replaced was not `FUN_...`.
+It is `L17` pointed at a write: "I did not see a name" and "there was no
+name" are different claims.

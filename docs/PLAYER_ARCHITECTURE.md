@@ -736,6 +736,8 @@ web/src/
     creature_effects.ts  the owl's and the fish's effect tasks and the ring
                   task, from `game/effects/owl.ts`, `fish.ts` and
                   `ring_effect.ts`' records, the same way
+    water_rings.ts  the flat ring a class-0x30 death leaves on water, from
+                  `game/effects/water_ring.ts`' records
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand

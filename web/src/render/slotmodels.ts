@@ -48,7 +48,9 @@
 import { Group, Matrix4, Object3D, Ray, Vector3, type Mesh } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
-import { ActorFlag, type Actor, type HumanoidActor } from "../game/actor";
+import { ActorFlag, MotionFlag, type Actor, type HumanoidActor }
+  from "../game/actor";
+import { Boss2FlipbookMatrix } from "./characters/model_block";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import type { CamPaths } from "../game/camera/curve";
@@ -85,6 +87,8 @@ const SPLASH0_SCALE = 0.6;
 
 /** Scratch matrices for the carrier draws; the layer is single-threaded. */
 const _m = new Matrix4();
+/** Scratch: the camera's +y in world space, for the stage-2 boss's draw. */
+const _up = { x: 0, y: 1, z: 0 };
 const _t = new Matrix4();
 
 /** `M = M · T(x, y, z)`. */
@@ -445,6 +449,7 @@ export class SlotModelLayer implements System<RenderContext> {
 
     this.drawCarrierEffects(seen);
     this.drawPropStrips(seen);
+    this.drawBoss2Flipbooks(ctx, seen);
 
     for (const [key, l] of this.extras) {
       if (seen.has(key)) continue;
@@ -554,6 +559,30 @@ export class SlotModelLayer implements System<RenderContext> {
       mRotX(_m, e.pitch); mRotZ(_m, e.roll); mRotY(_m, e.yaw);
       if (e.scale !== 1) mScale(_m, e.scale, e.scale, e.scale);
       this.extra(`p:${e.id}`, e.slot, _m, seen);
+    }
+  }
+
+  /**
+   * The two flipbooks the stage-2 boss draws on bone 1:
+   * `AssetDrawSlot((s16)state+0x7C); AssetDrawSlot((s16)state+0x88)` under
+   * bone 1's matrix, inside `Class14AdvanceMotionAndPublishPoints`'s draw
+   * (`0x0047791A..`) and only while `char+0x64` bit 0 is up. The slots step
+   * every frame in `game/class14/advance.ts`; B's frame is the weak point's
+   * damage window, so what is drawn here is what the gate reads.
+   */
+  private drawBoss2Flipbooks(ctx: RenderContext,
+                             seen: Set<number | string>): void {
+    // `g_camera_blocks[cam]`'s row 1, the camera's up in world space. A
+    // context with no camera has drawn nothing yet; world up stands in.
+    const e = ctx.camera?.matrixWorld.elements;
+    _up.x = e ? e[4] : 0; _up.y = e ? e[5] : 1; _up.z = e ? e[6] : 0;
+    for (const a of G.g_object_list) {
+      if (a.despawned || a.cls !== SpawnClass.Boss2 || !a.skel) continue;
+      if (!(a.motionFlags & MotionFlag.Drawn)) continue;
+      if (!Boss2FlipbookMatrix(a, _up, _m)) continue;
+      const t = a.boss2;
+      if (t.bookA.frame) this.extra(`bA:${a.at}`, t.bookA.frame, _m, seen);
+      if (t.bookB.frame) this.extra(`bB:${a.at}`, t.bookB.frame, _m, seen);
     }
   }
 

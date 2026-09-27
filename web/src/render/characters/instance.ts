@@ -40,6 +40,11 @@ export interface GoreSwap {
 
 export interface Instance {
   /**
+   * The part-0 node of a character drawn from the model block, found once
+   * (`render/characters/model_block.ts`). `null` when the type has none.
+   */
+  part0?: Object3D | null;
+  /**
    * Class 0x40's second draw of a member, where stage 1 block 3 reflects it.
    * A copy of {@link Instance.root}'s tree, re-posed from it each frame; see
    * `render/characters/horde.ts`.

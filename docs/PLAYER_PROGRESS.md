@@ -1781,11 +1781,22 @@ Three readings from these that are worth keeping:
 
 **What is not ported**, and each is declared where it lives: the owl's body
 chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has; the frog's
+per actor) and the four per-sub-type landings its corpse has; and the frog's
 head-look fix-up and its actor-versus-actor push, whose transformed point is
-`[open]` between view and world space; and the fish's three cosmetic tasks,
-whose sounds are ported and whose sprites are not because none of the three
-engine routines has a termination to copy.
+`[open]` between view and world space.
+
+**Their effects are.** The owl sheds forty feathers when it dies and eight
+on every strike, and leaves blood at its camera-space point; the fish leaves a
+blood cloud, splashes on every surface crossing, and its corpse leaves the ring
+task on the water and two widening rings as it sinks (`game/effects/owl.ts`,
+`fish.ts`, `ring_effect.ts`; drawn by `render/creature_effects.ts`). The notes
+used to say the fish's three had no termination to copy. They have one each --
+twenty-five, thirty and sixty frames -- in bytes past the `MatrixStackPop` the
+decompiler stops at (`L35`). And the deaths that meet the water never made the
+surface ring the port had them make: all three call `SpawnRingEffectAtPose`
+(`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
+ground impact ring and water splash are ported and wait on the landings, which
+are their only callers.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
@@ -2040,12 +2051,20 @@ and watches the cursor wrap.
 
 The **Track** checkbox turns it off, restoring the authored path exactly.
 
-**Zombies do not aim their torso or head** — that was asked and is now a
-settled negative, not an omission. The per-frame pose hook has exactly two
-implementations in the whole program, a no-op and a collision push-out, and
-`SkeletonWalkNode` reads every bone rotation straight from the motion bank.
-The aiming you see is the whole body turning plus directionally selected
-motion variants. See [`formats/combat.md`](formats/combat.md) §10.
+**The body turns at the exe's rate, and the head is not yet aimed.** Every
+turn goes through `TurnAngleToward` (`FUN_00409E00`) as the exe has it: a flat
+rate a frame -- `0x1A0` for a jogging zombie's run and `0x410` for a sprinting
+one's, `0x40` in the hold and the wait -- the short way round, with a negative
+rate turning the long way and dithering about the opposite heading, which is
+how the retreat faces away from where its swing began. The run used to ease a
+fifteenth of the angle a frame instead, and a zombie half a turn off came round
+in about half a second where the game's takes 79 frames. The torso is not
+aimed. **The head is, and the port does not do it**: the class-0x30 and
+class-0x31 per-bone draw hooks step `obj+0x1320`/`+0x1324` toward the camera
+at `0xC0` a draw and rotate bone 2 by them, up to a quarter turn either way of
+the body. That had been recorded here as a settled negative, from a search of
+the pose hook, which is empty; the aim is in the draw hook beside it. See
+[`formats/combat.md`](formats/combat.md) §10.
 
 **The strike and player damage are in.** An attack entry names its lunge
 distance, its strike clip and the exact frame the hit lands on; a **cancel
@@ -2742,8 +2761,9 @@ origin for one player, and drawn by `PlayerHookDrawBodyUntilMotionEnd`: motion
 player at 6 falls on `0x338`: the fly-over list's `PlayerTasksCreate` re-arms
 a player whose own countdown put them at 6 in play. The bundle is format 11 for
 it: every stage's `cam.json` carries `cp_gmovr`, and its `characters` two
-synthetic `player_body` rows. `DrawSkinnedModelAndShadow` draws no shadow,
-whatever its name says.
+synthetic `player_body` rows. `DrawSkinnedModelAndShadow` does draw a shadow
+after all -- `ActorDrawShadow(g_cur_actor)` past the no-return pop (`L35`),
+which this paragraph once denied -- and it is `g_cur_actor`'s, not the body's.
 
 **The logo and the route map are the game's own pictures now** (format 12).
 Every screen sprite goes through `DrawScreenSprite`'s record in
@@ -4232,6 +4252,43 @@ default road, the 1-2-3-4-5-6-7-8-10 road and the 5→21→16 road with no
 debug clear. The corpse step-off (`state 7 sub 1`, `obj+0x1330 == 2`) now
 bakes the angles too. `[open]`: `RegisterForDistanceRank` still admits class
 0x30 only; whether a rider registers, and with which position, is unread.
+
+### Hiding a character is two gates and a hook, not an alpha
+
+The port hid a class-0x30 actor by setting one alpha for the whole actor,
+and the renderer hid the root on it. The engine has no such thing `[proved]`:
+
+* **`model+0x64` bit 0** (`MotionFlag.Drawn`) is `SkeletonEmitNode`'s gate:
+  with it down no node of the skeleton is drawn, hook and all, and
+  `ActorDrawShadow` draws no shadow.
+* **`model+0x40`'s part bytes** (`Actor.partVisible`) gate the vertex-blended
+  parts -- `g_pCharacterExtraParts`' waist and skirt, the exporter's
+  `part<i>_<slot>` nodes, **not bones**. `ActorSetPartVisibility`
+  (`FUN_00409D10`) writes all of them; `ZombieStateAwaitCivilianOrder` and
+  class 0x14's entrances write part 0 alone, so a captor held off screen
+  would still draw a skirt.
+* **The attachment list is not gated at all.**
+
+The corpse blink, the emerge, the captor's hold and state 19's wait now write
+the two gates as the exe does, and `render/characters/draw_gates.ts` applies
+them node by node (layers for the skeleton, so the child bones stay, and
+`visible` on the part nodes). Class 0x31's blink is a third mechanism: an
+alpha at `obj+0x138C` that `ThrowerDrawBonePart` draws each bone at while
+`obj+0x136C` bit 2 is up and `DrawCharacterPartSlot` draws type 0x18's waist
+at unconditionally -- the port's hook records the alpha per bone and the
+renderer hides a bone drawn at 0.
+
+State 19's `tail+0x0C == 0` arm was ported as a **freeze** (the clock held,
+"root motion off"); it is a hide, and the clip plays. And `zslman`'s hands grow
+back in the draw now, not in the state: `ThrowerDrawBonePart` adds 0.025f per
+regrowing **node** drawn, so a hidden skeleton does not re-arm, two bare hands
+grow twice as fast, and the latch drops on the 41st node, not the 40th, because
+the sum is an f32. One divergence is declared for it: the hook is always
+`ThrowerDrawBonePart` -- Training's swap and the big-head item's hook are not
+modelled.
+`DrawSkinnedModelAndShadow` does draw the shadow (`ActorDrawShadow`, past the
+no-return pop); the port does not draw a character's shadow yet, and
+`ActorDrawShadow`'s gate is ported for when it does.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

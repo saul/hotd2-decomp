@@ -29,7 +29,7 @@ import { ZombieFlag2, type ZombieActor } from "../actor";
 import { G } from "../globals";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { TryClaimAttackSlot } from "../combat/permits";
-import { CharacterTypeOf, FirstBakedOf, MotionPlayFrame, MotionPlayLength,
+import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
 import { dist2d, type Vec3 } from "../vec";
@@ -174,8 +174,9 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
   // (see its own note). Playing on the intent rather than on the fact would
   // groan every frame of a stumble; playing on the fact is the same event the
   // engine plays it on.
-  const idle = FirstBakedOf(obj, MotionRowOf(obj), MotionRow.Walk,
-                            MotionRow.WalkAlt);
+  // `row[0]`, always -- `**(g_class30_motion_rows[type] + condition * 4)` --
+  // with no bit picking between the pair, unlike the wait and the approach.
+  const idle = MotionRowOf(obj)[MotionRow.Walk];
   const wasIdling = obj.motion === idle;
   ZombieSetMotionIfIdle(obj, idle, rng, 5, MotionFade.Normal);
   if (!wasIdling && idle !== undefined && obj.motion === idle) {

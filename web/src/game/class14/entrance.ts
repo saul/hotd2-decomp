@@ -93,7 +93,8 @@ function Class14ShowModel(obj: Actor, shown: boolean): void {
   if (!obj.skel) return;
   if (shown) obj.motionFlags |= MotionFlag.Drawn;
   else obj.motionFlags &= ~MotionFlag.Drawn;
-  obj.skel.part0 = shown ? 1 : 0;
+  // `Actor.partVisible` is the part records; part 0 alone, as the exe writes.
+  if (obj.partVisible.length > 0) obj.partVisible[0] = shown ? 1 : 0;
 }
 
 /**

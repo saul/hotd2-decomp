@@ -33,7 +33,7 @@ import { ActorDespawn } from "../despawn";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
   from "../combat/counts";
-import { FirstBakedOf, MotionRowOf } from "../tables";
+import { MotionRowOf } from "../tables";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
 
@@ -81,20 +81,13 @@ export function ZombieStateWalkDistance(obj: ZombieActor, rng: Rng): void {
 
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]` normally, `row[4]` when bit
-  // 0x20000000 is set — the same pair `ZombieStateAttackRun` picks between,
-  // and the same fallback for a skeleton with no run clip of its own.
-  //
-  // [diverges] The engine selects Run vs RunAlt on `obj+0x34` bit 27, which is
-  // the spawn record's own flags word — `SpawnFromDescriptor` does
-  // `obj+0x34 = spawn.flags | 1` — and 141 class-0x30 spawns set it. The port
-  // does not carry that word onto the actor at all, so this takes whichever
-  // variant the bundle bakes. See `ZombieStateAttackRun`, which has the same
-  // gap.
+  // 0x20000000 is set — the same pair `ZombieStateAttackRun` picks between.
+  // `obj+0x34` is the spawn record's own flags word, carried whole by
+  // `ActorInitFlags` (`FUN_00408970`) as `obj.flags`; 192 of the 402
+  // class-0x30 spawns set bit 27 and take the sprint.
   const motion = (obj.flags & ActorFlag.BackingOff)
-    ? FirstBakedOf(obj, row, MotionRow.BackAway)
-    : ZombieRunMotion(obj, row) ?? FirstBakedOf(obj, row,
-                            MotionRow.Run, MotionRow.RunAlt,
-                   MotionRow.Walk, MotionRow.WalkAlt);
+    ? row[MotionRow.BackAway]
+    : ZombieRunMotion(obj, row);
   ZombieSetMotionIfIdle(obj, motion, rng, "clip", MotionFade.Quick);
 
   // 2D, on x and z: `obj+0x1374` is the distance travelled, and the engine

@@ -20020,6 +20020,80 @@ own before the grid. The port test that pins the first fails on the old read.
 `--no-damage` -- the harness spends five credits by block 14 -- and with it
 end block 35 goes 300 → -10 and the script leaves the block for stage 3.
 
+## 2026-09-27 -- the owl's and the fish's effect tasks
+
+**Outcome:** the owl (class 0x43) and the fish (class 0x51) draw their
+effects. Six tasks of their own and one shared one, each stepped after the
+actors and drawn from its record: `game/effects/owl.ts` (feathers, ground
+impact ring, water splash), `game/effects/fish.ts` (blood cloud, splash,
+surface ring), `game/effects/ring_effect.ts` (the ring task), all drawn by
+`render/creature_effects.ts`. The bundle carries their slots for classes 0x43
+and 0x51 in `slots_effect`.
+
+**What the exe does.**
+
+* **All three fish tasks end** `[proved]`. The class's note said "none of the
+  three updates has a termination, so porting them would mean inventing a
+  lifetime", and the TSV comments said "No termination" three times. Every
+  kill is past the `MatrixStackPop` Ghidra marks no-return (`L35`, `L37`):
+  `BloodCloudTickInScreenSpace` kills past slot `0x52` (`0x00439E87`),
+  `WaterSplashUpdate` past `0x1356` (`0x00439F83`), and
+  `SurfaceRingDrawAndFade` widens by 0.02, fades by a sixtieth and kills on
+  its sixtieth frame (`0x0043A04D`..`0x0043A071`). The same trap hid the fade
+  and the kill in the owl's ring and the owl splash's step, which the TSV had
+  right.
+* **The deaths that meet the water never made the surface ring.**
+  `FishSpawnSurfaceRing`'s only callers are `FishStateSink`'s two
+  (`search_instructions` over every `CALL`); the port also called it from
+  `FishCheckShot` and three times from `FishStateFlung`, where the exe calls
+  `FUN_00408370` -- now `SpawnRingEffectAtPose` -- which allocates the task
+  `SpawnGroundRingEffect` (`0x00407DA0`) allocates too: three routines through
+  `obj[0]`, `RingEffectSpread` / `RingEffectHold` / `RingEffectFadeOut`
+  (`0x00407E30`, `0x00408100`, `0x00408220`), a ring opening over 120 frames
+  with four strips closing in, 30 held, 39 fading.
+* **`SpawnRingEffectAtPose` reads the pose's `p[4]` as the ring's yaw**, and
+  the fish's three calls build only `x, y, z` on the stack: the yaw is an
+  unwritten local `[open]`. The port passes 0 and declares it.
+* **The corpse's yaw is half a turn.** `rand() & 0xFFFF` of an MSVC `rand()`
+  that ends `AND EAX, 0x7FFF` (`0x004ADED2`); the port drew `rng.int(0x10000)`.
+  Both fish death paths fixed. The owl's feathers draw their yaw the same way.
+* **The owl's death leaves blood** -- `SpawnBloodSprayAtPoint(obj + 0x40)` at
+  `0x00446123`, reading the owl's `obj+0x70` -- which the port did not spawn
+  (`blood.ts` even said so). And **the death block falls through** into the
+  state dispatch (state 6 is a bare `RET`) and the yaw steering; the port
+  returned early and skipped a tenth of a turn on the death frame.
+* **A task runs on the frame it is made** `[proved]`: `ActorAlloc` links it at
+  the tail of the running task's sibling list and `TaskRunTree` reads each
+  `+0x1C` only after the task before it has run. So these pools are stepped
+  after the actors, like `Boss3TasksTick`'s, and each record says what its
+  routine drew. `director.ts`'s comment on `ShotEffectsTick` ("the walk that
+  would step a new task has already gone past the end") says the opposite; it
+  is not this session's to change, and the head tick there happens to give the
+  right drawn sequence for draw-then-step flipbooks.
+
+**Not wired:** the owl's ground impact ring and water splash are called only
+from `OwlCorpseFallAndSettle`'s four landing arms (`0x00448319`,
+`0x00448376`, `0x00448710`, `0x00448758`), and the landings are another
+workstream's. The tasks are ported and tested; the calls go in with the
+landings.
+
+**Wrong turns.**
+
+* My first names for the ring task's routines were `SpawnImpactRing` and
+  `ImpactRingFadeOut`; the MCP gate refused both as token subsets of the owl's
+  `OwlSpawnGroundImpactRing` / `OwlGroundImpactRingFadeOut`, and a peer had
+  already named `0x00407DA0` `SpawnGroundRingEffect`. The family is now named
+  after that one.
+* Two test expectations were wrong on the first draft: the sinking fish makes
+  its surface rings on its **second** frame in state 5 (the timer is tested for
+  1 before it is stepped), and a feather's first half turn is 32..64 frames but
+  every later one 26..128.
+
+**Mutation-checked:** removing either fish kill, the corpse's half-turn, the
+fall-through, the feather's kill-without-draw, the ring task's fortieth-frame
+kill, the owl's blood, or putting the surface ring back on the underwater death
+each fails `npm run test:port`.
+
 ## 2026-09-27 -- the HUD shutter as the scene's task, and no pause at a branch
 
 Two of the script layer's declared divergences, both removed.

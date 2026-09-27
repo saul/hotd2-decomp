@@ -38,6 +38,9 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { FishEffectsTick } from "./effects/fish";
+import { OwlEffectsTick } from "./effects/owl";
+import { RingEffectsTick } from "./effects/ring_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -790,6 +793,13 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.
   Boss4HitMarksTick(host);
+  // The owl's and the fish's tasks, allocated by their actors above, so
+  // after them: every one runs on the frame its actor made it and draws what
+  // it stepped to. See `game/effects/owl.ts`.
+  OwlEffectsTick(rng);
+  FishEffectsTick();
+  RingEffectsTick();
+
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);

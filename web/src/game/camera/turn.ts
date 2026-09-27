@@ -23,34 +23,14 @@ import { G } from "../globals";
 import { T } from "../tables";
 import { FtolS16, MatIdentity, MatrixLoadIdentity, MatrixRotateX,
          MatrixRotateY, MatrixRotateZ, MatrixTransformPoint, MatrixTranslate,
-         RADIANS_TO_BAMS, VecAimXAxisZThenY } from "../matrix";
+         RADIANS_TO_BAMS, VecAimXAxisZThenY, VecAngleBetween } from "../matrix";
 import { LOOKAT_RADIUS, TURN_ERROR_CLAMP } from "./constants";
 import { vec3, type Vec3 } from "../vec";
 
 /**
- * `VecAngleBetween` — `FUN_00401D70`. The angle between two directions in
- * BAMS, as the engine takes it:
- *
- * ```c
- * dot = a . b;
- * return (s16)__ftol(atan2(sqrt(|a|^2 |b|^2 - dot^2), dot) * 65536 / 2pi);
- * ```
- *
- * Truncated, not rounded, and with no degenerate test: two zero vectors are
- * `atan2(0, 0)`, which is 0. `[proved]`
- */
-export function VecAngleBetween(ax: number, ay: number, az: number,
-                                bx: number, by: number, bz: number): number {
-  const dot = az * bz + ay * by + ax * bx;
-  const cross2 = (bz * bz + by * by + bx * bx) * (az * az + ay * ay + ax * ax)
-               - dot * dot;
-  return FtolS16(Math.atan2(Math.sqrt(Math.max(0, cross2)), dot)
-                 * RADIANS_TO_BAMS);
-}
-
-/**
- * `sign(cos) * cos^2` between two directions. `VecCosSquaredSigned`,
- * `FUN_00401DF0`, with each direction taken from `eye`.
+ * `sign(cos) * cos^2` between two directions, each taken from `eye`: what
+ * `VecCosSquaredSigned` (`FUN_00401DF0`) answers for the camera's two
+ * look-ats. `[port-only]` as a signature -- the engine's takes six floats.
  *
  * The engine never takes the square root, so its `> 0.99999` convergence test
  * is against the **square** of the cosine — about 0.18 degrees, not 0.26. A
@@ -155,19 +135,3 @@ export function TurnLookAtToward(eye: Vec3, desired: Vec3, current: Vec3,
 
 /** `FMUL double ptr [0x004C4370]`: `2pi / 65536`, as a double. */
 const BAMS_TO_RADIANS_D = 9.587379924285257e-05;
-
-/**
- * `LerpWeighted` — `FUN_00401E60`, `(a, b, num, den)`:
- *
- * ```
- * 00401E60  FILD [den]; FMUL [a]; FILD [num]; FMUL [b]; FADDP
- * 00401E80  FIDIV [num + den]
- * ```
- *
- * `(den * a + num * b) / (num + den)`: with the camera's `(1, 15)`, a
- * sixteenth of the way from `a` to `b`. `[proved]`
- */
-export function LerpWeighted(a: number, b: number, num: number,
-                             den: number): number {
-  return (den * a + num * b) / (num + den);
-}

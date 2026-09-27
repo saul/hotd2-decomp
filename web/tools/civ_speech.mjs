@@ -201,8 +201,11 @@ function play([name, bundle, block, step, killAt, frames]) {
         o.pendingHit = { bone: 1, result: HitResultCode.Damaged };
       }
     }
-    const inSlots = !!civ && G.g_enemy_slots.includes(civ.at);
-    if (t.rescue === f) t.trackedAtRescue = inSlots;
+    const inSlots = !!civ && G.g_enemy_slots.some((x) => x.occupied === 1
+      && x.prop === null && x.at === civ.at);
+    // Filed as a candidate by her own update, dealt a slot by the next
+    // frame's fill: the slot table is two frames behind what the actors did.
+    if (t.rescue >= 0 && f <= t.rescue + 2 && inSlots) t.trackedAtRescue = true;
     if (t.rescue >= 0 && t.untracked < 0 && !inSlots && f > t.rescue) {
       t.untracked = f;
       log("civilian leaves the camera's slots");

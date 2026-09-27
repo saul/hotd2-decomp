@@ -49,11 +49,11 @@ import { GameSystem, ScriptSystem, syncCharacterSpawns, syncPortGlobals }
   from "../src/app/systems.ts";
 import { ResetPropContainers } from "../src/game/class41/index.ts";
 import { CamPaths } from "../src/game/camera/curve.ts";
-import { CamSeatPathFrame } from "../src/game/camera/path.ts";
 import { G } from "../src/game/globals.ts";
 import { ActorFlag } from "../src/game/actor.ts";
 import { Boss4State } from "../src/game/class19/state.ts";
-import { SetBoss4Tables, SetGameTables } from "../src/game/tables.ts";
+import { SetBoss4Tables, SetCameraPaths, SetGameTables }
+  from "../src/game/tables.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
 import { hasBundle, skipNoBundle, stageFile } from "./lib/bundle_root.ts";
@@ -120,6 +120,7 @@ for (const [name, block, lastPhase] of CASES) {
   world.attach(ctx);
   SetGameTables(chars, script.breakables, script.set_pieces, script.humanoids,
                 script.coli, script.civilians);
+  SetCameraPaths(cam);
   SetBoss4Tables(script.boss4, script.carrier_door_yaw);
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
   G.g_player_no_damage = [1, 1];
@@ -130,11 +131,10 @@ for (const [name, block, lastPhase] of CASES) {
   }
   world.resync(ctx);
 
+  // The eye the next tick's frame is handed, as the app's `CameraTakeSystem`
+  // hands it: the camera the last tick drew. The camera block itself is the
+  // port's -- the action ring and the drivers seat it inside `GameUpdate`.
   const seat = () => {
-    const c = walker.cam;
-    const p = c && cam.paths.get(c.slot);
-    if (!p) return;
-    CamSeatPathFrame(p, c.frame, walker.rollEnabled, !c.retired);
     ctx.view.eye.x = G.g_camera_block_eye.x;
     ctx.view.eye.y = G.g_camera_block_eye.y;
     ctx.view.eye.z = G.g_camera_block_eye.z;

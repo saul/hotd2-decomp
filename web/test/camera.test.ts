@@ -34,7 +34,9 @@ import { CameraDrawSystem, CameraRig } from "../src/render/camera";
 import type { CameraPose } from "../src/render/campath";
 import { G, ResetGameGlobals } from "../src/game/globals";
 import { SetCameraPaths, SetGameTables } from "../src/game/tables";
-import { EvtActionHandler } from "../src/game/camera/driver";
+import { CameraUpdateHook, EvtActionHandler }
+  from "../src/game/camera/driver";
+import { CameraMode } from "../src/game/camera/mode";
 import { ActorSpawn, GameUpdate } from "../src/game/director";
 import { SpawnClass } from "../src/game/spawn_class";
 import { NULL_HOST } from "../src/game/host";
@@ -204,9 +206,27 @@ function play(hz: number, rafs: number, spawnAt: number,
       syncPortGlobals(w, false, camera.position);
       // A shot still playing as the tick starts is one whose handler,
       // `CamAdvancePathFrame`, writes the block's eye at the frame it
-      // publishes on this tick -- its last included.
-      playing = G.g_evt_action_handler === EvtActionHandler.PathPlay;
+      // publishes on this tick -- its last included. So is a stashed rail
+      // under an installed driver: `CameraDriverSelectMode` snaps the eye onto
+      // the pose the rail drew last frame and publishes that frame, and
+      // `CameraDriverFromDeferredPose` copies the pose and does the same. Not
+      // on a starter's frame, whose reset publishes the frame before the rail
+      // took over, and not while `set_flag` has the eye easing.
+      const h = G.g_evt_action_handler;
+      const hook = G.g_camera_update_hook;
+      const rail = hook === CameraUpdateHook.StepRail
+        || hook === CameraUpdateHook.PlayStashedPath;
+      const railDriven = rail && G.g_camera_ease_eye === 0
+        && (h === EvtActionHandler.SelectMode
+            || h === EvtActionHandler.DeferredPose);
       world(DRIVEN);
+      // ...and under the selector only in the tracking mode, whose
+      // `CameraEaseBlockEyeToPathPose` snaps the eye: the hand-back eases it
+      // a sixteenth a frame (`CameraEaseEyeToPath`), and once free evaluates
+      // the path at the frame published the tick before.
+      playing = h === EvtActionHandler.PathPlay
+        || (railDriven && (h === EvtActionHandler.DeferredPose
+                           || G.g_camera_mode === CameraMode.TrackEnemies));
       return !w.finished;
     }).frames;
     out.ticks += ran;

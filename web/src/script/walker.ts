@@ -28,7 +28,7 @@
 import { G } from "../game/globals";
 import { CameraUpdateHook, EvtActionHandler } from "../game/camera/driver";
 import { EvtGotoSceneState, EvtLoadBlockProgramRing, EvtQueueAction,
-         EvtSetActionDrainMode } from "../game/camera/actions";
+         EvtOpSetActionDrainMode33 } from "../game/camera/actions";
 import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
   from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
@@ -1059,8 +1059,9 @@ export class Walker {
     if (!this.wait) return;
     // A yield's condition was never going to be held on, and its enter has
     // already done what the pass does: stepping it is the frame and nothing
-    // more.
+    // more -- one pass of the camera's tasks.
     if (this.wait.policy.kind === "yield") {
+      CameraReplayFor(1);
       this.wait = null;
       this.opIndex++;
       return;
@@ -1668,7 +1669,7 @@ export class Walker {
 
   /** `set_action_drain_mode` (0x33): `advance = mode; pending += delta`. */
   setActionDrainMode(mode: number, delta: number): void {
-    EvtSetActionDrainMode(mode, delta);
+    EvtOpSetActionDrainMode33(mode, delta);
   }
 
   /**

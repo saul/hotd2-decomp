@@ -12786,8 +12786,9 @@ console.log("\na stashed path is played by a hook that steps first:");
         ] }],
       }],
     } as unknown as ScriptJson;
+    EnterPlay();
     const wb = new Walker(bossScript, host);
-    for (let f = 0; f < 5; f++) wb.tick(1 / 60);
+    for (let f = 0; f < 5; f++) WalkerCameraFrame(wb);
     check("finish_sequence 6 after a static pose rides the pose's path on "
           + "the rail",
           wb.cam?.slot === 185 && wb.cam.deferred === true,
@@ -12796,13 +12797,20 @@ console.log("\na stashed path is played by a hook that steps first:");
     G.g_stashed_path_frame = 20;
     G.g_stashed_path_end_frame = 30;
     const drawn: number[] = [];
+    const cue: number[] = [];
     for (let f = 0; f < 15; f++) {
-      wb.tick(1 / 60);
-      drawn.push(wb.cam ? Math.trunc(wb.cam.frame) : -1);
+      WalkerCameraFrame(wb);
+      drawn.push(G.g_rail_frame);
+      cue.push(G.g_cam_path_frame);
     }
     check("...and a range moved on under it is drawn frame by frame",
           drawn.slice(0, 10).join() === "21,22,23,24,25,26,27,28,29,30"
           && drawn[14] === 30, drawn.join(","));
+    // `CameraDriverSelectMode` publishes `__ftol(g_rail_frame)` in the camera
+    // actor, a task before the hook steps the rail.
+    check("...and published a frame behind, by the driver ahead of the hook",
+          cue.slice(1, 11).every((c, i) => c === drawn[i]),
+          `${cue.join(",")} against ${drawn.join(",")}`);
   }
 
   // And the seek's half: `seekTo` observes no waits, so an address behind

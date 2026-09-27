@@ -11,7 +11,7 @@ import type { WaitPolicy } from "../walker";
 import type { WaitRule } from "./types";
 
 /**
- * `EvtOpWaitFrames42` — `FUN_0045FB30`:
+ * `EvtOpWaitFrames42` (`FUN_0045FB30`):
  *
  * ```c
  * if (skip) { pc += 8; return; }
@@ -35,7 +35,7 @@ export const waitFrames: WaitRule = {
 };
 
 /**
- * `EvtOpWaitCameraPathFrame41` — `FUN_0045FAC0`:
+ * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`):
  *
  * ```c
  * if (!skip) {

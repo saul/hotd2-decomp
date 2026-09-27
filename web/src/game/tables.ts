@@ -105,7 +105,7 @@ export function SetGameOverTables(json: GameOverJson | undefined): void {
   T.gameOver = json ?? null;
 }
 
-/** Install the stage's camera paths. See {@link T.camPaths}. */
+/** Install the stage's camera paths. See {@link T.camPaths}. `[port-only]`. */
 export function SetCameraPaths(paths: CamPaths | null): void {
   T.camPaths = paths;
 }

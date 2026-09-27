@@ -23,9 +23,12 @@ import { EvtOpSpawnIfOnePlayer, EvtOpSpawnIfTwoPlayers }
   from "../src/script/ops/spawn";
 import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../src/game/globals";
-import type { OpJson, ScriptJson } from "../src/bundle";
+import type { CamJson, OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
+import { EvtActionHandler } from "../src/game/camera/driver";
+import { CamPaths } from "../src/game/camera/curve";
+import { SetCameraPaths } from "../src/game/tables";
 import { PlayerTasksRun } from "../src/game/player_shell";
 import { NULL_HOST } from "../src/game/host";
 import { Rng } from "../src/core/rng";
@@ -100,12 +103,17 @@ function shot(w: Walker): string {
 
 /**
  * A fresh data segment with a player in play, as a stage load leaves it: the
- * reset, then the first player turn (which is where the start press the reset
+ * reset, the stage's camera paths, then the first player turn (which is where the start press the reset
  * made becomes a player). The stashed rail's gate holds it while nobody is in
  * play, so a run with no player never finishes a rail shot.
  */
-function freshGame(): void {
+function freshGame(scriptFile: string): void {
   ResetGameGlobals();
+  // The stage's camera paths, which `CamEvalPath7` evaluates: without them
+  // no shot seats the block and no hand-back converges.
+  const cam = scriptFile.replace(/\.script\.json$/, ".cam.json");
+  SetCameraPaths(existsSync(cam)
+    ? new CamPaths(JSON.parse(readFileSync(cam, "utf8")) as CamJson) : null);
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
 }
 
@@ -119,6 +127,23 @@ function clockFrame(w: Walker): void {
   CameraActorTick();
   CameraUpdateTick();
 }
+
+/**
+ * The room gates' camera term for a walker with no object pool, whose
+ * enemies are all dead before the room starts: the camera's own
+ * `g_camera_free`, and -- the harness's stand-in for a fight taking time --
+ * not while a shot is still playing or an action still waits in the ring.
+ * The script flags have the same stand-in without the camera term: every
+ * flag an actor would raise comes up once the shots in front of its wait are
+ * done. A
+ * room in the game is never cleared inside the shot that opens it; one here
+ * would let `goto_scene_state` park the slot ahead of a `finish_sequence`
+ * queued behind that shot, which the engine would then run with nothing left
+ * to retire it.
+ */
+const shotsDone = (): boolean => G.g_evt_action_ring.length === 0
+  && G.g_evt_action_handler !== EvtActionHandler.PathPlay;
+const roomOver = (): boolean => G.g_camera_free !== 0 && shotsDone();
 
 /** Private members the drive loop needs; the player reaches them through UI. */
 type Inner = { executeOne(quiet: boolean): boolean };
@@ -206,7 +231,7 @@ for (const stage of STAGES) {
 
   // Drive the stage the way playing does, sampling as it goes -- from the
   // data segment a stage load leaves, as a seek starts from.
-  freshGame();
+  freshGame(file);
   const live = new Walker(script, mkHost());
   live.reset();
   // This loop is a replay standing in for playback -- it steps over waits
@@ -231,7 +256,7 @@ for (const stage of STAGES) {
   let firstDiff = "";
   for (const smp of samples) {
     // `Player.seekTo` resets the data segment before it replays.
-    freshGame();
+    freshGame(file);
     const w = new Walker(script, mkHost());
     if (!seekTo(w, smp.b, smp.s, smp.o)) { missed++; continue; }
     const got = shot(w);
@@ -399,7 +424,7 @@ for (const stage of STAGES) {
   const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
   if (!existsSync(file)) continue;
   const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
-  freshGame();
+  freshGame(file);
   const w = new Walker(script, mkHost());
   w.reset();
   w.replaying = true;
@@ -423,13 +448,23 @@ for (const stage of STAGES) {
   const file = join(ROOT, "stage1", "stage1.script.json");
   if (existsSync(file)) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
-    freshGame();
+    freshGame(file);
     const w = new Walker(script, mkHost());
     const arrived = seekTo(w, 8, 4, 25);
-    check("a deferred `start == -1` resumes forward, it does not rewind",
-          arrived && !!w.cam && w.cam.slot === 44 && w.cam.startFrame > 500
-            && w.cam.endFrame === 685,
-          `cam ${w.cam?.slot} ${w.cam?.startFrame}..${w.cam?.endFrame}`);
+    // The seek lands with the two actions pushed and not yet run, behind the
+    // `cam_play 506..681` still playing: they wait in the ring until it
+    // retires on 681, and the stash then resolves -1 from there. Play the
+    // frames that takes.
+    for (let i = 0; i < 12 && !w.cam?.deferred; i++) {
+      CameraActorTick();
+      CameraUpdateTick();
+    }
+    check("a deferred `start == -1` resumes forward, from the frame the "
+          + "shot in front of it ended on",
+          arrived && !!w.cam && w.cam.slot === 44 && w.cam.deferred
+            && w.cam.endFrame === 685 && G.g_rail_frame >= 682,
+          `cam ${w.cam?.slot} deferred ${w.cam?.deferred} `
+          + `..${w.cam?.endFrame} rail ${G.g_rail_frame}`);
   }
 }
 
@@ -902,9 +937,12 @@ for (const stage of STAGES) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
     // Everything already dead, so the combat gates never hold: what is left
     // holding the script is the camera and the ring.
-    freshGame();
+    freshGame(file);
     const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
-                                   aliveCivilians: () => 0 });
+                                   presentEnemies: () => 0,
+                                   aliveCivilians: () => 0,
+                                   cameraFree: roomOver,
+                                   scriptFlagRaised: shotsDone });
     const CAP = 60 * 60 * 20;            // twenty simulated minutes
     const STALL = 60 * 60 * 5;           // five on one instruction is a park
     let frames = 0, stalls = 0, at = "";
@@ -966,9 +1004,12 @@ for (const stage of STAGES) {
 
     let stuck = 0, seeks = 0, worst = "";
     for (const [b, s] of addrs) {
-      freshGame();
+      freshGame(file);
       const v = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
-                                     aliveCivilians: () => 0 });
+                                     presentEnemies: () => 0,
+                                     aliveCivilians: () => 0,
+                                     cameraFree: roomOver,
+                                     scriptFlagRaised: shotsDone });
       if (!seekTo(v, b, s, 0)) continue;
       seeks++;
       let at = "", stalls = 0;

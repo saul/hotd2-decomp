@@ -33,7 +33,7 @@ export interface CameraCandidate {
   prop: number | null;
 }
 
-/** Sixteen empty slots, the shape `ResetCameraEnemySlots` leaves. */
+/** Sixteen empty slots, the shape `ResetCameraEnemySlots` leaves. `[port-only]`. */
 export function makeCameraSlots(): CameraSlot[] {
   return Array.from({ length: CAMERA_SLOTS }, () => ({ occupied: 0, at: 0, prop: null }));
 }

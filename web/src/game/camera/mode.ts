@@ -30,7 +30,8 @@ import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "./path";
 import { CameraSlotsBusy } from "./slots";
 import { CameraArmStashedPath, CameraTrackEnemiesTick } from "./track";
-import { LerpWeighted, LookAtCosineSquared, TurnLookAtToward } from "./turn";
+import { LookAtCosineSquared, TurnLookAtToward } from "./turn";
+import { LerpWeighted } from "../vec";
 
 
 /**

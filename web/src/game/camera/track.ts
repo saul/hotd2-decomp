@@ -34,9 +34,9 @@ import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "./path";
 import { SelectCameraLookAtTarget } from "./select_target";
 import { CameraSlotsBusy, RegisterForCameraTracking } from "./slots";
-import { ComputeLookAtAngleError, LerpWeighted, LookAtCosineSquared,
-         TurnLookAtToward } from "./turn";
-import { vec3 } from "../vec";
+import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
+  from "./turn";
+import { LerpWeighted, vec3 } from "../vec";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { g_class_handlers } from "../registry";
 

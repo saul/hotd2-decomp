@@ -63,8 +63,8 @@ export interface EvtQueuedAction {
 }
 
 /**
- * The push half of `EvtOpQueueEvent30` (`FUN_0045F7F0`) -- the skip test in
- * front of it is the interpreter's:
+ * `[port-only]` as a function -- the push half of `EvtOpQueueEvent30`
+ * (`FUN_0045F7F0`); the skip test in front of it is the interpreter's:
  *
  * ```c
  * ring[DAT_009CA108] = g_evt_ip;
@@ -403,7 +403,8 @@ function CameraActionStartDeferredPose(): void {
 // -- the interpreter's side --------------------------------------------------
 
 /**
- * The action half of `EvtOpGotoSceneState31` (`FUN_0045F870`) and
+ * `[port-only]` as a function -- the action half of `EvtOpGotoSceneState31`
+ * (`FUN_0045F870`) and
  * `EvtOpGotoSceneStateWhenPlayersAlive32` (`FUN_0045F900`) once its gate is
  * open:
  *
@@ -436,19 +437,19 @@ export function EvtGotoSceneState(minor: number, clearsLatches: boolean): void {
 }
 
 /**
- * `EvtOpSetActionDrainMode33` — `FUN_0045F9F0`:
+ * `EvtOpSetActionDrainMode33` — `FUN_0045F9F0`, less the program counter:
  * `g_evt_action_advance = op0; g_queued_events_pending += op1`. All 128
  * shipped sites pass `2, -1`: take back a `finish_sequence` that never
  * retires, and dequeue what is behind it now but call it next frame.
  */
-export function EvtSetActionDrainMode(mode: number, delta: number): void {
+export function EvtOpSetActionDrainMode33(mode: number, delta: number): void {
   G.g_evt_action_advance = mode;
   G.g_queued_events_pending += delta;
 }
 
 /**
- * The camera half of `ResetSceneCombatState` (`FUN_0045EEC0`), the
- * `checkpoint` opcode (0x4D) every block opens with:
+ * `[port-only]` as a function -- the camera half of `ResetSceneCombatState`
+ * (`FUN_0045EEC0`), the `checkpoint` opcode (0x4D) every block opens with:
  *
  * ```c
  * g_cam_path_frame = 0;
@@ -530,8 +531,8 @@ export function CameraActorInit(): void {
 }
 
 /**
- * The ring half of `EvtLoadBlockProgram` (`FUN_0045EBC0`), which the
- * interpreter runs on every block it loads:
+ * `[port-only]` as a function -- the ring half of `EvtLoadBlockProgram`
+ * (`FUN_0045EBC0`), which the interpreter runs on every block it loads:
  *
  * ```c
  * DAT_009CA108 = DAT_009A34D0 = 0;  g_queued_events_pending = 0;  g_evt_action_advance = 2;

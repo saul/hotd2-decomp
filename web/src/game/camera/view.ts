@@ -42,11 +42,11 @@
  * 0 by every shipped writer.
  */
 import { AppState, G } from "../globals";
-import { FtolS16, MatIdentity, MatCopy, MatrixGetTranslation,
-         MatrixLoadIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
-         MatrixTransformPoint, MatrixTransformVector, MatrixTranslate,
-         RADIANS_TO_BAMS } from "../matrix";
-import { vec3, VecToAngles } from "../vec";
+import { MatrixGetAngles, type Rot3 } from "../carrier";
+import { MatIdentity, MatCopy, MatrixGetTranslation, MatrixLoadIdentity,
+         MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTransformPoint,
+         MatrixTranslate } from "../matrix";
+import { vec3 } from "../vec";
 import { CameraUpdateHook } from "./driver";
 import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "./path";
@@ -55,38 +55,16 @@ import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
 export const SHAKE_LOOK_DISTANCE = 1000.0;
 
 const _m = MatIdentity();
-const _r = MatIdentity();
 const _p = vec3();
 const _q = vec3();
-const _u = vec3();
-const _v = vec3();
-const X_AXIS = { x: 1, y: 0, z: 0 };
-const Z_AXIS = { x: 0, y: 0, z: 1 };
 
 /**
- * `MatrixGetAngles` — `FUN_004018E0`. The pitch, yaw and roll that rebuild the
- * rotation of `m` as `RotateY(yaw); RotateX(pitch); RotateZ(roll)`:
- *
- * ```
- * v = M * (0, 0, 1) as a vector;  (pitch, yaw) = VecToAngles(v)
- * u = M * (1, 0, 0);  u = Rx(-pitch) Ry(-yaw) * u;  roll = (s16)ftol(atan2(u.y, u.x) * B)
- * ```
- *
- * Each angle truncated to whole BAMS, so the round trip can lose one. `[proved]`
+ * The view-to-world matrix's rotation as `game/carrier.ts`'s `Rot3`: the
+ * matrix stack keeps row vectors, so its `+X` image is row 0 where `Rot3`'s is
+ * column 0. `[port-only]`.
  */
-export function MatrixGetAngles(m: ArrayLike<number>):
-    { pitch: number; yaw: number; roll: number } {
-  MatrixTransformVector(m, Z_AXIS, _v);
-  const a = VecToAngles(_v.x, _v.y, _v.z);
-  const pitch = FtolS16(a.pitch);
-  const yaw = FtolS16(a.yaw);
-  MatrixTransformVector(m, X_AXIS, _u);
-  MatrixLoadIdentity(_r);
-  MatrixRotateX(_r, -pitch);
-  MatrixRotateY(_r, -yaw);
-  MatrixTransformVector(_r, _u, _v);
-  const roll = FtolS16(Math.atan2(_v.y, _v.x) * RADIANS_TO_BAMS);
-  return { pitch, yaw, roll };
+function RotationOf(m: ArrayLike<number>): Rot3 {
+  return [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]];
 }
 
 /**
@@ -137,10 +115,12 @@ export function CameraBuildView(): void {
   MatrixRotateX(m, G.g_camera_block_pitch_bams);
   MatrixRotateZ(m, G.g_camera_block_roll_bams);
   MatCopy(G.g_camera_view_to_world, m);
-  const a = MatrixGetAngles(m);
-  G.g_camera_block_pitch_bams = a.pitch;
-  G.g_camera_block_yaw_bams = a.yaw;
-  G.g_camera_block_roll_bams = a.roll;
+  // `MatrixGetAngles` (`FUN_004018E0`): each angle truncated to whole BAMS,
+  // so the round trip can lose one.
+  const a = MatrixGetAngles(RotationOf(m));
+  G.g_camera_block_pitch_bams = a.x;
+  G.g_camera_block_yaw_bams = a.y;
+  G.g_camera_block_roll_bams = a.z;
   MatrixGetTranslation(m, e);
   MatrixLoadIdentity(m);
   MatrixRotateZ(m, -G.g_camera_block_roll_bams);

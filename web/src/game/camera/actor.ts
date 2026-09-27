@@ -125,12 +125,26 @@ export function CameraReplaySettle(): void {
  * frames on (`EvtOpWaitFrames42`), the shot or the rail carried that far.
  */
 export function CameraReplayFor(frames: number): void {
-  const hook = G.g_camera_update_hook as CameraUpdateHook;
-  const rail = hook === CameraUpdateHook.StepRail
-    || hook === CameraUpdateHook.DeferredRailInstall
-    || hook === CameraUpdateHook.PlayStashedPath;
-  const from = rail ? G.g_stashed_path_frame
-    : G.g_evt_action_handler === EvtActionHandler.PathPlay
-      ? G.g_cam_path_cursor : G.g_cam_path_frame;
-  CameraReplayUntil(() => true, from + frames, Math.min(frames, 2));
+  // The frames the camera tasks really run: at most two, which is enough for
+  // the ring to dequeue and call what is waiting; the rest are skipped by
+  // carrying the cursor, or the rail's stash, forward by as many.
+  const run = Math.min(frames, 2);
+  const skip = frames - run;
+  if (skip > 0) {
+    if (G.g_evt_action_handler === EvtActionHandler.PathPlay) {
+      G.g_cam_path_cursor = Math.min(G.g_cam_path_cursor + skip,
+                                     G.g_cam_path_end_frame);
+    }
+    const hook = G.g_camera_update_hook as CameraUpdateHook;
+    if ((hook === CameraUpdateHook.StepRail
+         || hook === CameraUpdateHook.DeferredRailInstall
+         || hook === CameraUpdateHook.PlayStashedPath) && RailMayAdvance()) {
+      G.g_stashed_path_frame = Math.min(G.g_stashed_path_frame + skip,
+                                        G.g_stashed_path_end_frame);
+    }
+  }
+  for (let i = 0; i < run; i++) {
+    CameraActorTick();
+    CameraUpdateTick();
+  }
 }

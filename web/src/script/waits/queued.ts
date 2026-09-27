@@ -1,7 +1,7 @@
 /**
  * `wait_queued_events_done` (0x40).
  *
- * `EvtOpWaitQueuedEventsDone40` (`FUN_0045FA90`):
+ * `EvtOpWaitQueuedEventsDone40` (`FUN_0045FA80`):
  *
  * ```c
  * if (!skip) { if (g_queued_events_pending != 0) { g_evt_yield = 1; return; } ... }

@@ -13,8 +13,9 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
-import { MotionOf } from "../tables";
-import { bamsWrap, vec3 } from "../vec";
+import { MotionOf, SecondsToTicks } from "../tables";
+import { vec3 } from "../vec";
+import { TurnAngleTowardFrames } from "../actor_turn";
 import { ZombieSetMotionIfIdle } from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
@@ -77,6 +78,9 @@ export function ThrowerStateEntranceClip(obj: ThrowerActor): void {
   obj.sub = 0;
 }
 
+/** `PUSH 0xccc` at `0x0044E980`: the roll's return to level, BAMS a frame. */
+const POUNCE_ROLL_RATE = 0xccc;
+
 /**
  * `ThrowerStateDelayedPounce` — `FUN_0044E830`, class 0x31 state 23.
  *
@@ -122,8 +126,12 @@ export function ThrowerStateDelayedPounce(obj: ThrowerActor, dt: number,
     obj.sub = 2;
   }
 
-  // Roll back to level at 0xCCC a frame — it comes in off the vertical.
-  obj.yaw = bamsWrap(obj.yaw);
+  // Roll back to level at 0xCCC a frame -- it comes in off the vertical.
+  // `0044e97d`: `obj+0x6C = TurnAngleToward(obj+0x6C, 0, 0xCCC)`, on the
+  // **roll**, every frame of sub 2 and on the frame sub 1 falls into it. This
+  // line wrapped the yaw instead and never touched the roll.
+  obj.roll = TurnAngleTowardFrames(obj.roll, 0, POUNCE_ROLL_RATE,
+                                   SecondsToTicks(dt));
   if (obj.attackPermit >= 0) ThrowerStrikeConnect(obj, events);
   if (ActorArcStep(obj, 1, dt)) return;
 

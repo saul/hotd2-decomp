@@ -135,8 +135,13 @@ export const CLOSE_RANGE = 30;
 export const BAND_NEAR_MIN = 40;
 export const BAND_NEAR_MAX = 50;
 
-/** `ThrowerStateStandAndDecide` turns this fast and calls it aimed this close. */
+/**
+ * `ThrowerStateStandAndDecide` turns this fast -- the fifth argument of
+ * `TurnActorAwayFromPointTestArrival`, `PUSH 0x200` at `0044b2ff`...
+ */
 export const STAND_TURN_RATE = 0x200;
+/** ...and calls it aimed this close: the sixth, pushed first at `0044b2fa`. */
+export const STAND_AIM_TOLERANCE = 0x200;
 
 /** `ThrowerStateLeapAside` and `ThrowerStateWithdraw`'s two exits. */
 export const LEAP_ASIDE_FRAMES = 0x5a;

@@ -213,7 +213,16 @@ import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue }
   from "../src/game/class30/target";
 import { ActorModelScale } from "../src/game/root_motion";
-import { ZOMBIE_SPRINTS, ZombieRunMotion } from "../src/game/class30/states";
+import { ZOMBIE_SPRINTS, ZombieRunMotion, ZombieWaitMotion }
+  from "../src/game/class30/states";
+import {
+  AngleWithinTolerance, TurnActorAwayFromPoint,
+  TurnActorAwayFromPointTestArrival, TurnActorTowardCamera, TurnAngleToward,
+} from "../src/game/actor_turn";
+import { ZombieRunTurnRate, ZombieStateAttackRun, g_wait_turn_variant }
+  from "../src/game/class30/attack_run";
+import { ThrowerStateWithdraw } from "../src/game/class31/pounce";
+import { ThrowerStateDelayedPounce } from "../src/game/class31/entrance";
 import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
@@ -21583,6 +21592,308 @@ console.log("\nclass 0x45: the stage-3 boss -- heads, gates and the body:");
   }
   G.g_GameMode = GameMode.Arcade;
   ResetGameGlobals();
+}
+
+// -- the turn routines, as the exe has them ---------------------------------
+//
+// `TurnAngleToward` (`FUN_00409E00`) was an ease for the attack run and a
+// wrapped rate limit everywhere else, with a 0x8000 flip standing in for what
+// a negative rate does. These pin the routine itself and what its callers
+// hand it.
+
+console.log("\nTurnAngleToward: the rate limit, the seam, the tie, and a negative rate:");
+{
+  check("within the rate it lands on the target",
+        TurnAngleToward(0x1000, 0x1030, 0x40) === 0x1030);
+  check("...masked to sixteen bits, both of them",
+        TurnAngleToward(0x21000, 0x31030, 0x40) === 0x1030);
+  check("outside it, one step of the rate toward the target",
+        TurnAngleToward(0x1000, 0x3000, 0x40) === 0x1040
+        && TurnAngleToward(0x3000, 0x1000, 0x40) === 0x2fc0);
+  // Short way through the seam -- and the result is the caller's to store as
+  // it is: `a + rate` past 0xFFFF, `a - rate` below zero. The old port
+  // wrapped both.
+  check("across the seam it goes the short way, and does not wrap the result",
+        TurnAngleToward(0xfff0, 0x0100, 0x10) === 0x10000
+        && TurnAngleToward(0x0010, 0xff00, 0x20) === -0x10,
+        `${TurnAngleToward(0xfff0, 0x0100, 0x10)} `
+        + `${TurnAngleToward(0x0010, 0xff00, 0x20)}`);
+  check("exactly half a turn apart: up from below, down from above",
+        TurnAngleToward(0, 0x8000, 0x40) === 0x40
+        && TurnAngleToward(0x8000, 0, 0x40) === 0x7fc0);
+  // A negative rate never lands -- not even on a target it is already on --
+  // and steps the long way.
+  check("a negative rate steps away even from where it stands",
+        TurnAngleToward(0x1000, 0x1000, -0x40) === 0x1040);
+  let y = 0x1000;
+  const seen: number[] = [];
+  for (let i = 0; i < 1000; i++) {
+    y = TurnAngleToward(y, 0x1000, -0x40);
+    if (i >= 996) seen.push(y & 0xffff);
+  }
+  check("...runs to the opposite heading and dithers about it, a step each way",
+        seen.every((v) => v === 0x9000 || v === 0x9040)
+        && seen[0] !== seen[1] && seen[1] !== seen[2],
+        seen.map((v) => v.toString(16)).join(" "));
+}
+
+console.log("\nAngleWithinTolerance, `FUN_0040A040`:");
+{
+  check("both ends of the window count, across the seam",
+        AngleWithinTolerance(0xfff0, 0x10, 0x20)
+        && AngleWithinTolerance(0x30, 0x10, 0x20));
+  check("...and one past either end does not",
+        !AngleWithinTolerance(0xffef, 0x10, 0x20)
+        && !AngleWithinTolerance(0x31, 0x10, 0x20));
+  check("an unwrapped angle is masked first",
+        AngleWithinTolerance(0x10030, 0x10, 0x20));
+}
+
+console.log("\nTurnActorTowardCamera: the point 1.5 from the eye, turned by its height:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  const z = spawnZombie(0x7a00, 1, "turner");
+  // Eye at the origin and level: the point is (0, 0, 1.5). An actor at z = 1
+  // is *behind* that point, so the heading it takes is 0x8000 -- measured to
+  // the eye itself it would be 0, which is what the port used to aim at.
+  z.pos = vec3(0, 0, 1);
+  z.yaw = 0x8000 - 0x100;
+  TurnActorTowardCamera(z, vec3(0, 0, 0), 0x1a0, 1 / 60);
+  check("it faces the point, not the eye", (z.yaw & 0xffff) === 0x8000,
+        z.yaw.toString(16));
+  // `MatrixRotateY(__ftol(g_camera_eye_y))`: at a height of 0x4000 the point
+  // swings a quarter turn, onto (1.5, y, 0), and an actor at (1.5, 0, 1) is
+  // then straight "ahead" of it at heading 0.
+  z.pos = vec3(1.5, 0, 1);
+  z.yaw = 0x100;
+  TurnActorTowardCamera(z, vec3(0, 0x4000, 0), 0x1a0, 1 / 60);
+  check("...and the point turns with the eye's height, not its yaw",
+        (z.yaw & 0xffff) === 0, z.yaw.toString(16));
+  // One engine frame per step: a tick of three frames is three steps.
+  z.pos = vec3(0, 0, 40);
+  z.yaw = 0x4000;
+  TurnActorTowardCamera(z, vec3(0, 0, 0), 0x1a0, 3 / 60);
+  check("a three-frame tick turns three steps of the rate",
+        z.yaw === 0x4000 - 3 * 0x1a0, z.yaw.toString(16));
+}
+
+console.log("\nZombieStateAttackRun: the turn rate, the bands, and the wait clip:");
+{
+  const WAIT_ALT = 11;
+  const TYPE_PAIRS: CharacterType = {
+    ...TYPE,
+    // Two different waits and two different runs, so which one is taken
+    // shows. The fixture's own row names 10 twice and 12 twice.
+    motion_row: { "0": [10, WAIT_ALT, 12, 13, 14],
+                  "8": [10, WAIT_ALT, 12, 13, 14] },
+    motions: { ...TYPE.motions, "11": motion(20, 0, 37),
+               "13": motion(16, 2.5) },
+  };
+  const CHARS_PAIRS =
+    { ...CHARS, types: { "1": TYPE_PAIRS } } as unknown as CharactersJson;
+  const runner = (flags: number, z0: number, cond = 0) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_PAIRS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_fixed_eye_y = 0;
+    const z = spawnZombie(0x7b00, 1, "runner", {
+      initialState: ZombieState.AttackRun, condition: cond,
+    });
+    z.flags |= flags;
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, z0);
+    z.state = ZombieState.AttackRun;
+    z.sub = 0;
+    return z;
+  };
+
+  check("the jog turns 0x1A0 a frame and the sprint 0x410",
+        ZombieRunTurnRate(runner(0, 45)) === 0x1a0
+        && ZombieRunTurnRate(runner(ZOMBIE_SPRINTS, 45)) === 0x410);
+  {
+    // Band 3, a quarter turn off the line to the camera: one frame is one
+    // step of the rate, not a fifteenth of the angle.
+    const jog = runner(0, 45);
+    jog.yaw = 0x4000;
+    ZombieStateAttackRun(jog, EYE, 1 / 60, new Rng(1));
+    const sprint = runner(ZOMBIE_SPRINTS, 45);
+    sprint.yaw = 0x4000;
+    ZombieStateAttackRun(sprint, EYE, 1 / 60, new Rng(1));
+    check("...and one frame of the run is one step of it",
+          jog.yaw === 0x4000 - 0x1a0 && sprint.yaw === 0x4000 - 0x410,
+          `${jog.yaw.toString(16)} ${sprint.yaw.toString(16)}`);
+    check("...on the run the spawn record picked",
+          jog.motion === 12 && sprint.motion === 13,
+          `${jog.motion} ${sprint.motion}`);
+  }
+  {
+    // Dropping out of the queue: state 5, and the wait clip drawn from
+    // `g_wait_turn_variant` into bit 21 -- seven of ten set it.
+    let set = 0;
+    let waits = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const z = runner(0, 45);
+      z.rank = 9;
+      ZombieStateAttackRun(z, EYE, 1 / 60, new Rng(seed));
+      if (z.state === ZombieState.WaitTurn) waits += 1;
+      if (z.flags2 & ZombieFlag2.WaitTurnVariant) set += 1;
+    }
+    check("an actor out of the queue goes to WaitTurn", waits === 40,
+          `${waits} of 40`);
+    check("...with the table's coin in bit 21, and not always the same side",
+          set > 0 && set < 40 && g_wait_turn_variant.length === 10,
+          `${set} of 40 set it`);
+    const z = runner(0, 45);
+    z.rank = 9;
+    ZombieStateAttackRun(z, EYE, 1 / 60, new Rng(3));
+    z.flags2 |= ZombieFlag2.WaitTurnVariant;
+    ZombieStateWaitTurn(z, EYE, new Rng(1));
+    check("...and WaitTurn plays the clip the bit picks",
+          z.motion === WAIT_ALT
+          && ZombieWaitMotion(z, [10, WAIT_ALT, 12, 13, 14]) === WAIT_ALT,
+          String(z.motion));
+  }
+  {
+    // A condition-8 walker facing the camera, a free permit, both hands
+    // armed. From band 3 it stops and throws; from band 2 the engine never
+    // asks, and the port used to.
+    const near = runner(0, 30, 8);
+    G.g_camera_yaw_bams = 0x8000;
+    near.yaw = 0;
+    ZombieStateAttackRun(near, EYE, 1 / 60, new Rng(1));
+    check("band 2 does not ask to throw, and takes no permit",
+          near.state === ZombieState.AttackRun && near.attackPermit === -1,
+          `${ZombieState[near.state]} permit ${near.attackPermit}`);
+    const far = runner(0, 45, 8);
+    G.g_camera_yaw_bams = 0x8000;
+    far.yaw = 0;
+    ZombieStateAttackRun(far, EYE, 1 / 60, new Rng(1));
+    check("...band 3 does",
+          far.state === ZombieState.StandAndThrow && far.attackPermit >= 0,
+          `${ZombieState[far.state]} permit ${far.attackPermit}`);
+  }
+}
+
+console.log("\nZombieStateBackOff: which way the retreat turns:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  const z = spawnZombie(0x7c00, 1, "retreat");
+  z.pos = vec3(0, 0, 10);
+  // Where the swing began, further out: the heading from there to the actor
+  // is 0x8000. The remembered player point is the eye, so it stays inside
+  // the ring and does not leave.
+  z.strikeStart = vec3(0, 0, 20);
+  z.target = vec3(0, 0, 0);
+  z.flags2 |= ZombieFlag2.StrikeAnchor | ZombieFlag2.BackOffTurnFlip;
+  z.flags |= ActorFlag.Committed;
+  z.state = ZombieState.BackOff;
+  z.sub = 0;
+  z.yaw = 0x9000;
+  ZombieStateBackOff(z, EYE, 1 / 60, new Rng(1));
+  check("the first frame clears the flip, and the swing's commitment",
+        (z.flags2 & ZombieFlag2.BackOffTurnFlip) === 0
+        && (z.flags & ActorFlag.Committed) === 0
+        && (z.flags & ActorFlag.BackingOff) !== 0);
+  check("...and turns at -0x40, away from where the swing began",
+        z.yaw === 0x9040, z.yaw.toString(16));
+  z.flags2 |= ZombieFlag2.BackOffTurnFlip;
+  ZombieStateBackOff(z, EYE, 1 / 60, new Rng(1));
+  check("with the flip up it turns at +0x40, back toward it",
+        z.yaw === 0x9000, z.yaw.toString(16));
+  // Standing on the point: `atan2(0, 0)` is 0 and the engine turns off it.
+  const on = spawnZombie(0x7c01, 1, "on the point");
+  on.pos = vec3(0, 0, 20);
+  on.yaw = 0x100;
+  TurnActorAwayFromPoint(on, vec3(0, 0, 20), 0x1a0, 1 / 60);
+  check("an actor on its own point still turns, to heading 0",
+        on.yaw === 0, on.yaw.toString(16));
+}
+
+console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce's roll:");
+{
+  const TYPE31_ZSKAMERE: CharacterType = {
+    ...TYPE31, type: 0x17, name: "zskamere", file: "zskamere.bin",
+  };
+  const CHARS31_TURN = {
+    ...CHARS31,
+    types: { "1": TYPE, "22": TYPE31_ZSASS, "23": TYPE31_ZSKAMERE,
+             "24": TYPE31_ZSLMAN, "25": TYPE31 },
+  } as unknown as CharactersJson;
+  const spawn = (type: number, z0: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS31_TURN);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9a00, SpawnClass.Thrower, type, "t", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = 100;
+    a.pos = vec3(0, 0, z0);
+    return a;
+  };
+
+  {
+    const t = spawn(0x19, 80);
+    t.yaw = 0x300;
+    // One step of 0x200 from 0x300 leaves it 0x100 off: outside a window of
+    // 0xFF, inside one of 0xF0 after a further step of 0x10.
+    check("the arrival test turns first, then answers for the new yaw",
+          !TurnActorAwayFromPointTestArrival(t, vec3(0, 0, 0), 0x200, 0xff,
+                                             1 / 60)
+          && t.yaw === 0x100, t.yaw.toString(16));
+    check("...and there, inclusive, once it is within the window",
+          TurnActorAwayFromPointTestArrival(t, vec3(0, 0, 0), 0x10, 0xf0,
+                                            1 / 60) && t.yaw === 0xf0,
+          t.yaw.toString(16));
+  }
+  {
+    // Type 0x17 withdraws its own way: thirty units is clear, no clip wait,
+    // and it turns out of the swing at -0x100 as it goes.
+    const k = spawn(0x17, 40);
+    k.state = ThrowerState.Withdraw;
+    k.sub = 0;
+    ThrowerStateWithdraw(k, EYE, 1 / 60, new Rng(1));
+    check("zskamere forty units out is already clear, and back at the hub",
+          k.state === ThrowerState.StandAndDecide
+          && (k.flags & (ActorFlag.BackingOff | ActorFlag.NoHitReaction)) === 0,
+          ThrowerState[k.state]);
+    const s = spawn(0x19, 40);
+    s.state = ThrowerState.Withdraw;
+    s.sub = 0;
+    ThrowerStateWithdraw(s, EYE, 1 / 60, new Rng(1));
+    check("...where any other type still has fifty to go",
+          s.state === ThrowerState.Withdraw, ThrowerState[s.state]);
+    const n = spawn(0x17, 20);
+    n.strikeStart = vec3(0, 0, 30);
+    n.yaw = 0x9000;
+    n.state = ThrowerState.Withdraw;
+    n.sub = 0;
+    ThrowerStateWithdraw(n, EYE, 1 / 60, new Rng(1));
+    check("...and inside thirty it turns, the long way, a step of 0x100",
+          n.state === ThrowerState.Withdraw && n.yaw === 0x9100
+          && (n.flags & ActorFlag.NoHitReaction) !== 0, n.yaw.toString(16));
+  }
+  {
+    // `obj+0x6C = TurnAngleToward(obj+0x6C, 0, 0xCCC)` every frame of the
+    // leap. With no arc left it hands to the withdraw on the same frame.
+    const p = spawn(0x19, 60);
+    p.pounce = { motion: 283, frames: 10 };
+    p.state = ThrowerState.DelayedPounce;
+    p.sub = 2;
+    p.attackPermit = -1;
+    p.roll = 0x2000;
+    ThrowerStateDelayedPounce(p, 2 / 60, new Rng(1), NULL_HOST);
+    check("the pounce levels its roll at 0xCCC a frame",
+          p.roll === 0x2000 - 2 * 0xccc, p.roll.toString(16));
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

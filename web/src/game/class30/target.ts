@@ -53,7 +53,7 @@ import type { TargetScriptEntry, TargetScriptJson }
   from "../../bundle/characters";
 import { ActorFlag, MotionFlag, type Actor, type ZombieActor } from "../actor";
 import type { GameHost } from "../host";
-import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleToward }
+import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleTowardFrames }
   from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
 import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
@@ -856,7 +856,10 @@ export function ZombieStateDragTarget(obj: ZombieActor, dt: number): void {
     }
   } else if (obj.sub === 3) {                               // 0x0045C27E
     // The whole arm: turn and fall to the tail. It never advances the sub.
-    obj.yaw = TurnAngleToward(obj.yaw, DRAG_SETTLE_YAW, TARGET_TURN_RATE, dt);
+    // `0045c27e`: `obj+0x68 = TurnAngleToward(obj+0x68, 0x2000, 0x1A0)`, one
+    // step a frame.
+    obj.yaw = TurnAngleTowardFrames(obj.yaw, DRAG_SETTLE_YAW, TARGET_TURN_RATE,
+                                    SecondsToTicks(dt));
   }
 
   // The tail — `0x0045C1AD`, reached from sub 0, 1, 2 and 3 alike, and on the

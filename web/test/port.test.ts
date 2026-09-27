@@ -160,7 +160,11 @@ import { ThrownWeaponUpdate, THROWN_SPIN_RATE }
 import { ActorPlayHitVoice, ActorVoice }
   from "../src/game/combat/voice";
 import { ZombieReleaseWeaponLoopSe } from "../src/game/class30/weapon_loop";
-import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, ZombieFlag2,
+import { ActorDrawShadow, ActorSetPartVisibility, PART_ALPHA_CHAR_TYPES,
+         ActorRunNodeDrawHooks } from "../src/game/model_draw";
+import { REGROW_FULL, ThrowerDrawBonePart } from "../src/game/class31/draw";
+import { ActorFlag, CountFlag, DamageZone, ThrowerFlag, ThrowerStance,
+         ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type ScriptedSceneryActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
@@ -209,7 +213,16 @@ import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue }
   from "../src/game/class30/target";
 import { ActorModelScale } from "../src/game/root_motion";
-import { ZOMBIE_SPRINTS, ZombieRunMotion } from "../src/game/class30/states";
+import { ZOMBIE_SPRINTS, ZombieRunMotion, ZombieWaitMotion }
+  from "../src/game/class30/states";
+import {
+  AngleWithinTolerance, TurnActorAwayFromPoint,
+  TurnActorAwayFromPointTestArrival, TurnActorTowardCamera, TurnAngleToward,
+} from "../src/game/actor_turn";
+import { ZombieRunTurnRate, ZombieStateAttackRun, g_wait_turn_variant }
+  from "../src/game/class30/attack_run";
+import { ThrowerStateWithdraw } from "../src/game/class31/pounce";
+import { ThrowerStateDelayedPounce } from "../src/game/class31/entrance";
 import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
 import type { TargetScriptJson } from "../src/bundle/characters";
@@ -244,7 +257,10 @@ import { bannerCardSlots } from "../src/game/boss_banner_records";
 import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
   ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
   from "../src/game/screen_sprite";
-import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
+import { ThrowerBeginKnockbackArc, ThrowerStateCorpse }
+  from "../src/game/class31/death";
+import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
+import { ActorClipLength } from "../src/game/class31/arc";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
@@ -449,6 +465,16 @@ const TYPE: CharacterType = {
     // `damage_rank`, which `DamageRankModifier` indexes with `g_damage_rank`.
     { bone: 2, part: "head", slot: 0x30, offset: [0, 0, 0], parent: null,
       damage_rank: new Array(16).fill(5), hit_radius: 2, steps: [] },
+  ],
+  // Two vertex-blended parts -- a waist and a skirt, as the humanoids with a
+  // skirt carry -- so that `model+0x3C` is 2 and "part 0 alone" and "every
+  // part" are different answers. `ActorBuildSkinnedModel` sizes
+  // `Actor.partVisible` from this list's length.
+  parts: [
+    { slot: 0x40, draw_bone: 1, bones: [1, null, null, null], deformed: [0],
+      rows: 1, supported: true },
+    { slot: 0x41, draw_bone: 1, bones: [1, null, null, null], deformed: [0],
+      rows: 1, supported: true },
   ],
   // Two rows, because the engine picks one with `obj+0x130C` — the shipped
   // characters carry a second set at body condition 3 (motions 257-263) and
@@ -7399,11 +7425,27 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
           civ.civ!.childOrder === ZombieState.OrderDie
           && civ.civ!.childOrderFrames === 2,
           `order ${civ.civ!.childOrder}/${civ.civ!.childOrderFrames}`);
-    zFrame(z, events);            // sub 0 -> 1, saves the flags
-    zFrame(z, events);            // takes the order
-    check("...and the captor obeys it: 0x31 is die",
-          z.dead && (z.flags & ActorFlag.Dead) !== 0,
-          `dead ${z.dead} state ${z.state}`);
+    // Sub 0 runs on into sub 1 -- the `INC` at 0x0045BB3A is followed by sub
+    // 1's first instruction -- so an order already waiting is taken on the
+    // captor's first frame.
+    G.g_players_in_play = 1;
+    G.g_active_player = 1;
+    zFrame(z, events);            // hides, then takes the order
+    check("...and the captor obeys it on its first frame: 0x31 is die",
+          z.dead && (z.flags & ActorFlag.Dead) !== 0 && z.sub === 2,
+          `dead ${z.dead} state ${z.state} sub ${z.sub}`);
+    // The civilian names nobody (`sub+0x6C` is -1 until a rescue), so with one
+    // player in play the kill goes to `g_active_player` -- no `rand()`.
+    check("...credited to `g_active_player` while one player is in play",
+          z.killedBy === 1, `killedBy ${z.killedBy}`);
+    // `ReleaseEnemyAliveCount` and `ReleaseEnemyPresentCount` at
+    // 0x0045BBAB/0x0045BBB1, on the frame of the order, not on a later sweep.
+    check("...and both enemy counts are given back on that same frame",
+          (z.flags38 & (CountFlag.LeftAlive | CountFlag.LeftPresent))
+            === (CountFlag.LeftAlive | CountFlag.LeftPresent),
+          `flags38 ${z.flags38.toString(16)}`);
+    zFrame(z, events);            // sub 2: gone
+    check("...and it leaves the pool the frame after", z.despawned);
   }
 
   // **B6 — an ordered captor still needs its target script.**
@@ -7431,8 +7473,8 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
         { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
         { op: CivilianOp.Wait, args: [0] },
         { op: CivilianOp.End, args: [] }]]);
-    zFrame(z, events);                       // sub 0 -> 1
-    zFrame(z, events);                       // takes the order
+    zFrame(z, events);                       // hides, takes the order
+    zFrame(z, events);                       // and walks
     check("an ordered captor enters the state its civilian named",
           z.state === ZombieState.WalkToTarget, `state ${z.state}`);
     zFrame(z, events);
@@ -7448,11 +7490,14 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
   }
 
   // **A captor waiting on the order is not drawn.** `FUN_0045BAD0` sub 0
-  // clears `obj+0x1F8` bit 0 and writes 0 to the model's first part-draw byte
-  // through `obj+0x1D4`, and taking the order puts both back — so the two
-  // `znebi2` of stage 2 block 16 are in the water, invisible, until their
-  // civilian calls them up. Reported as "they're always visible"; the port had
-  // neither write, and nothing in `render/` read the flag that models them.
+  // clears `obj+0x1F8` bit 0 -- the skeleton's draw gate -- and writes 0 to
+  // the model's first part-draw byte through `obj+0x1D4`, and taking the order
+  // puts both back — so the two `znebi2` of stage 2 block 16 are in the water,
+  // invisible, until their civilian calls them up.
+  //
+  // **Part 0 alone**, not `ActorSetPartVisibility`: a character with a second
+  // vertex-blended part keeps drawing it. The port used to hold one alpha for
+  // the whole actor here and could not say either thing.
   //
   // And the order arm ends in `g_class30_states[obj+0x1310](obj)`, a tail call
   // through the table, so the state it hands over to runs on the **same**
@@ -7463,21 +7508,31 @@ console.log("\nclass 0x30's captor family — the zombies work on the civilian:"
       head: { arrive: 12, loops: 1, motion: 10, frame: 0 },
       entries: [{ motion: 10, frame: 0, loops: 1, mode: 5 }],
     };
-    const { z, events } = captorScene(ZombieState.AwaitCivilianOrder,
+    const { civ, z, events } = captorScene(ZombieState.AwaitCivilianOrder,
       ZombieState.WalkPastPoint, ordered,
       [[{ op: CivilianOp.Wait, args: [CivilianWait.Free] },
         { op: CivilianOp.SetChildCue, args: [ZombieState.WalkToTarget, 2] },
         { op: CivilianOp.Wait, args: [0] },
         { op: CivilianOp.End, args: [] }]]);
-    check("a captor awaiting the order starts drawn",
-          z.alpha === 1, `alpha ${z.alpha}`);
-    zFrame(z, events);                       // sub 0 -> 1, and the hide
-    check("...and sub 0 takes it off screen",
-          z.alpha === 0 && z.sub === 1, `alpha ${z.alpha} sub ${z.sub}`);
+    const skeleton = () => (z.motionFlags & MotionFlag.Drawn) !== 0;
+    check("a captor awaiting the order starts drawn, skeleton and both parts",
+          skeleton() && z.partVisible.join() === "1,1",
+          `flags ${z.motionFlags} parts ${z.partVisible}`);
+    // Nothing ordered yet, so the hide is all the first frame does.
+    const count = civ.civ!.childOrderFrames;
+    civ.civ!.childOrderFrames = 0;
+    zFrame(z, events);                       // sub 0, into sub 1
+    check("...and sub 0 takes the skeleton and part 0 off screen, not part 1",
+          !skeleton() && z.partVisible.join() === "0,1" && z.sub === 1,
+          `flags ${z.motionFlags} parts ${z.partVisible} sub ${z.sub}`);
+    check("...and the shadow with it: `ActorDrawShadow` reads the same bit",
+          ActorDrawShadow(z) === null);
     const flagsWhileHidden = z.flags;
+    civ.civ!.childOrderFrames = count;
     zFrame(z, events);                       // takes the order
-    check("...the order puts it back",
-          z.alpha === 1, `alpha ${z.alpha}`);
+    check("...the order puts both back",
+          skeleton() && z.partVisible.join() === "1,1",
+          `flags ${z.motionFlags} parts ${z.partVisible}`);
     // `obj+0x34 = obj+0x1350` restores the word whole, so the two bits sub 0
     // raised come off. Not an equality: the state it hands over to runs on
     // this same frame and writes its own bits on top.
@@ -7803,13 +7858,26 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     w.attackState = 1;
     w.state = ZombieEntryState(ZombieState.Emerge);
     EnemyZombieUpdate(w, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
-    check("`tail+0x03 == 1` is not drawn while it waits", w.alpha === 0,
+    // Both gates: `obj+0x1F8 &= ~1` for the skeleton and
+    // `ActorSetPartVisibility(model, 0)` for every part -- and the
+    // `obj+0x34 |= 0x90000` that takes the shadow and the camera with it.
+    check("`tail+0x03 == 1` is not drawn while it waits: no skeleton, no parts",
+          (w.motionFlags & MotionFlag.Drawn) === 0
+          && w.partVisible.join() === "0,0"
+          && (w.flags & ActorFlag.NoShadow) !== 0 && ActorDrawShadow(w) === null,
+          `flags ${w.motionFlags} parts ${w.partVisible}`);
+    check("...and the port's alpha is not what hides it", w.alpha === 1,
           `alpha ${w.alpha}`);
+    check("...while the one with `tail+0x03 != 1` is drawn from the start",
+          (z.motionFlags & MotionFlag.Drawn) !== 0
+          && z.partVisible.join() === "1,1");
     for (let i = 0; i < 14; i++) {
       EnemyZombieUpdate(w, { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST });
     }
-    check("...and is drawn again as the clip starts",
-          w.motion === 12 && w.alpha === 1, `motion ${w.motion} alpha ${w.alpha}`);
+    check("...and is drawn again as the clip starts, shadow and all",
+          w.motion === 12 && (w.motionFlags & MotionFlag.Drawn) !== 0
+          && w.partVisible.join() === "1,1" && ActorDrawShadow(w) !== null,
+          `motion ${w.motion} flags ${w.motionFlags} parts ${w.partVisible}`);
   }
 
   // **The hand-over does not sink the actor back into the water.** Stage 2
@@ -8413,10 +8481,25 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     const z = spawn(ZombieState.WaitForCameraFrame,
                     { motion: 700, cue_frame: 10, freeze: true, claim: true,
                       delay: 5, cooldown: 90 });
-    check("state 19's freeze arm stops the clock", z.frozen === 1 || z.sub === 0,
-          `frozen ${z.frozen}`);
+    // `tail+0x0C == 0` -- the exporter's `freeze` -- is a **hide**, not a
+    // freeze: `ActorSetPartVisibility(model, 0)` at 0x00457653 and
+    // `obj+0x1F8 &= ~1` at 0x0045766A, and nothing that touches the clock.
+    run(z, 1);
+    check("state 19's `tail+0x0C == 0` arm hides the actor, skeleton and parts",
+          (z.motionFlags & MotionFlag.Drawn) === 0
+          && z.partVisible.join() === "0,0"
+          && (z.flags & ActorFlag.NoShadow) !== 0,
+          `flags ${z.motionFlags} parts ${z.partVisible}`);
+    check("...and does not stop the clock", z.frozen === 0
+          && (z.flags & ActorFlag.PoseFrozen) === 0, `frozen ${z.frozen}`);
     G.g_cam_path_frame = 10;
-    run(z, 20);
+    run(z, 1);
+    check("...until the cue, which draws it again",
+          (z.motionFlags & MotionFlag.Drawn) !== 0
+          && z.partVisible.join() === "1,1"
+          && (z.flags & ActorFlag.NoShadow) === 0,
+          `flags ${z.motionFlags} parts ${z.partVisible}`);
+    run(z, 19);
     check("state 19 claims a permit on its cue and goes to the strike",
           z.state === ZombieState.Strike && z.attackPermit >= 0,
           `${z.state}/${z.attackPermit}`);
@@ -11752,16 +11835,241 @@ console.log("class 0x30, the corpse that blinks:");
   z.charType = 3;
   z.state = ZombieState.CorpseBlink;
   z.sub = 0;
-  const alpha: number[] = [];
+  // Two gates, one value: `obj+0x1F8` bit 0 for the skeleton and every part's
+  // byte through `ActorSetPartVisibility` (`FUN_00409D10`) for the waist and
+  // the skirt. The body is hidden by closing them, not by an alpha.
+  const seen: string[] = [];
+  const shadow: boolean[] = [];
   const y0 = z.pos.y;
   for (let i = 0; i < 4; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-    alpha.push(z.alpha);
+    seen.push(`${z.motionFlags & MotionFlag.Drawn}:${z.partVisible}`);
+    shadow.push(ActorDrawShadow(z) !== null);
   }
-  check("the blink is the countdown's parity, first frame visible",
-        alpha[0] === 1 && alpha[1] === 0 && alpha[2] === 1 && alpha[3] === 0,
-        JSON.stringify(alpha));
+  check("the blink is the countdown's parity on both gates, first frame drawn",
+        seen.join(" ") === "1:1,1 0:0,0 1:1,1 0:0,0", seen.join(" "));
+  check("...the alpha is not what does it", z.alpha === 1, `alpha ${z.alpha}`);
+  // `0xA0000` at the corpse's opening raises `0x80000`, so the shadow is off
+  // for the whole corpse and not only on the odd frames.
+  check("...and the corpse has no shadow on any frame",
+        shadow.every((s) => !s), JSON.stringify(shadow));
   check("...and it does not sink", z.pos.y === y0, `${y0} -> ${z.pos.y}`);
+  // The way out closes both gates before the despawn -- `AND EDX, ~1` at
+  // 0x0045508C and `ActorSetPartVisibility(model, 0)` at 0x00455096 -- so the
+  // corpse's last frame is a hidden one, whichever parity it ends on.
+  for (let i = 0; i < 200 && !z.despawned; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  }
+  check("...and it leaves hidden, skeleton and parts both closed",
+        z.despawned && (z.motionFlags & MotionFlag.Drawn) === 0
+        && z.partVisible.join() === "0,0",
+        `despawned ${z.despawned} flags ${z.motionFlags} parts ${z.partVisible}`);
+}
+
+console.log("the skinned model's draw gates, as state:");
+{
+  const rng = new Rng(14);
+  scene(0, rng);
+  // `ActorBuildSkinnedModel` (`FUN_00410440`): `model+0x64 = 3`, and one
+  // eight-byte record per `g_pCharacterExtraParts` entry with byte `+1` at 1.
+  const z = spawnZombie(0x3080, 1, "built");
+  check("the build leaves the skeleton drawn and one byte per part, all 1",
+        z.motionFlags === MOTION_FLAGS_INIT
+        && (z.motionFlags & MotionFlag.Drawn) !== 0
+        && z.partVisible.length === TYPE.parts!.length
+        && z.partVisible.every((v) => v === 1),
+        `flags ${z.motionFlags} parts ${z.partVisible}`);
+  // `ActorSetPartVisibility` (`FUN_00409D10`) takes 0 or 1 and nothing else:
+  // `CMP EDX, 0x1` / `TEST EDX, EDX` / `JNZ` past the loop.
+  ActorSetPartVisibility(z, 0);
+  const off = z.partVisible.join();
+  ActorSetPartVisibility(z, 2);
+  check("ActorSetPartVisibility writes every part, and ignores anything but 0/1",
+        off === "0,0" && z.partVisible.join() === "0,0",
+        `${off} then ${z.partVisible}`);
+  ActorSetPartVisibility(z, 1);
+  check("...and reaches the parts only, never the skeleton's gate",
+        z.partVisible.join() === "1,1"
+        && (z.motionFlags & MotionFlag.Drawn) !== 0);
+
+  // `ActorDrawShadow` (`FUN_0040A590`): `obj+0x34` bit 0x80000 and
+  // `obj+0x1F8` bit 0, then 11x10 -- or 50x30 for types 0x44 and 0x47.
+  const small = ActorDrawShadow(z);
+  check("an ordinary character's shadow is 11 by 10",
+        small?.w === 11 && small?.d === 10, JSON.stringify(small));
+  z.charType = 0x47;
+  const large = ActorDrawShadow(z);
+  z.charType = 1;
+  check("...and types 0x44 and 0x47 get 50 by 30",
+        large?.w === 50 && large?.d === 30, JSON.stringify(large));
+  z.motionFlags &= ~MotionFlag.Drawn;
+  const noSkel = ActorDrawShadow(z);
+  z.motionFlags |= MotionFlag.Drawn;
+  z.flags |= ActorFlag.NoShadow;
+  const flagged = ActorDrawShadow(z);
+  check("...and none while the skeleton is not drawn or 0x80000 is up",
+        noSkel === null && flagged === null);
+
+  // `DrawCharacterPartSlot`'s alpha arms, from its jump table at 0x00419DCC:
+  // types 9, 0x12, 0x17 and 0x18, and no others.
+  check("the parts drawn at `obj+0x138C` are types 9, 0x12, 0x17 and 0x18",
+        PART_ALPHA_CHAR_TYPES.join() === [9, 0x12, 0x17, 0x18].join());
+
+  // `SkeletonEmitNode` (`FUN_004114C0`): a node's hook runs only with a slot,
+  // the skeleton drawn and no veto -- and in the skeleton's own order.
+  const walked: string[] = [];
+  const hook = (_o: Actor, bone: number, slot: number) => {
+    walked.push(`${bone}:${slot.toString(16)}`);
+  };
+  z.boneSlot["1"] = 0x77;
+  RemoveBoneSubtree(z, 4);
+  ActorRunNodeDrawHooks(z, hook);
+  check("the walk hands each drawn node its current slot, in skeleton order",
+        walked.join() === "1:77,2:30", walked.join());
+  z.motionFlags &= ~MotionFlag.Drawn;
+  walked.length = 0;
+  ActorRunNodeDrawHooks(z, hook);
+  check("...and no node at all while `obj+0x1F8` bit 0 is down",
+        walked.length === 0, walked.join());
+}
+
+console.log("class 0x31, the hand grows back in the draw:");
+{
+  // Bones 5 and 8 are the two hands `ThrowerStateRestoreBothHands` swaps.
+  const ZS: CharacterType = {
+    ...TYPE31_ZSLMAN,
+    bones: [
+      ...TYPE31_ZSLMAN.bones,
+      { bone: 8, part: "l_forearm", slot: 8, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 2, steps: [] },
+    ],
+    // The ground stance's idle, `0x208`, which sub 0 blends to and sub 2
+    // waits out.
+    motions: { ...TYPE31_ZSLMAN.motions, "520": motion(40) },
+  };
+  const tables = {
+    ...CHARS31, types: { ...CHARS31.types, "24": ZS },
+  } as unknown as CharactersJson;
+  const zslman = (at: number): ThrowerActor => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables);
+    const a = ActorSpawn(at, SpawnClass.Thrower, 0x18, "zslman");
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.state = ThrowerState.RestoreBothHands;
+    a.sub = 0;
+    return a;
+  };
+  // One frame of `EnemyThrowerUpdate`'s order: the state, then
+  // `ThrowerAdvanceMotion`'s walk with `ThrowerDrawBonePart` on each node.
+  const frame = (a: ThrowerActor) => {
+    ThrowerStateRestoreBothHands(a, 0, NULL_HOST);
+    ActorRunNodeDrawHooks(a, ThrowerDrawBonePart);
+  };
+
+  // One bare hand: one regrowing node a frame. Forty f32 additions of 0.025f
+  // come to 0.99999958, so it is the forty-first that drops the latch -- and
+  // the state sees that on the frame after.
+  const one = zslman(0x9300);
+  one.boneSlot["5"] = 0x1ff1;
+  for (let i = 0; i < 40; i++) frame(one);
+  check("the state holds off the stagger while it waits, as sub 0 raises",
+        (one.flags & ActorFlag.NoHitReaction) !== 0 && one.motion === 0x208,
+        `flags ${one.flags.toString(16)} motion ${one.motion}`);
+  check("forty drawn frames are not enough: the latch is still up",
+        (one.flags2 & ThrowerFlag.Regrowing) !== 0
+        && one.thr.handRegrow < REGROW_FULL
+        && one.thr.handRegrow === Math.fround(0.9999995827674866),
+        `regrow ${one.thr.handRegrow}`);
+  frame(one);
+  check("...the forty-first drops it, pinned at 1.0, in the draw",
+        (one.flags2 & ThrowerFlag.Regrowing) === 0
+        && one.thr.handRegrow === REGROW_FULL
+        && one.boneSlot["5"] === 0x1ff1,
+        `regrow ${one.thr.handRegrow} slot ${one.boneSlot["5"]}`);
+  frame(one);
+  check("...and the state puts the weapon back on the next frame",
+        one.boneSlot["5"] === 0x1ff3 && one.sub === 2,
+        `slot ${one.boneSlot["5"]} sub ${one.sub}`);
+  one.playTicks = ActorClipLength(one, one.motion) - 1;
+  frame(one);
+  check("...and leaves for the hub on the idle's last frame, stagger allowed",
+        one.state === ThrowerState.StandAndDecide
+        && (one.flags & ActorFlag.NoHitReaction) === 0,
+        `state ${one.state} flags ${one.flags.toString(16)}`);
+
+  // Both bare: the hook runs once per node, so two regrowing nodes a frame.
+  const two = zslman(0x9310);
+  two.boneSlot["5"] = 0x1ff1;
+  two.boneSlot["8"] = 0x1fed;
+  for (let i = 0; i < 21; i++) frame(two);
+  const early = (two.flags2 & ThrowerFlag.Regrowing) === 0;
+  frame(two);
+  check("both hands bare grow twice as fast: 21 frames, and both come back",
+        early && two.boneSlot["5"] === 0x1ff3 && two.boneSlot["8"] === 0x1fef,
+        `early ${early} slots ${two.boneSlot["5"]}/${two.boneSlot["8"]}`);
+
+  // A skeleton that is not drawn does not grow.
+  const hidden = zslman(0x9320);
+  hidden.boneSlot["5"] = 0x1ff1;
+  hidden.motionFlags &= ~MotionFlag.Drawn;
+  for (let i = 0; i < 60; i++) frame(hidden);
+  check("...and a thrower whose skeleton is not drawn does not re-arm at all",
+        hidden.thr.handRegrow === 0
+        && (hidden.flags2 & ThrowerFlag.Regrowing) !== 0,
+        `regrow ${hidden.thr.handRegrow}`);
+
+  // What the hook drew each bone at, for the renderer. `zslman` goes through
+  // `ThrowerDrawPartAlphaIfBlinking`: the alpha under bit 2, solid without.
+  const blink = zslman(0x9330);
+  blink.state = ThrowerState.StandAndDecide;
+  blink.flags2 |= ThrowerFlag.Blinking;
+  blink.alpha = 0;
+  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart);
+  const at0 = [4, 5, 1, 2, 8].map((b) => blink.thr.boneDrawAlpha[b]).join();
+  blink.flags2 &= ~ThrowerFlag.Blinking;
+  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart);
+  const solid = [4, 5, 1, 2, 8].map((b) => blink.thr.boneDrawAlpha[b]).join();
+  check("a blinking zslman's bones are drawn at its alpha, and solid without",
+        at0 === "0,0,0,0,0" && solid === "1,1,1,1,1", `${at0} / ${solid}`);
+
+  // Every other type: solid while `obj+0x34` has 0x4000000, whatever bit 2.
+  SetGameTables(CHARS31);
+  const tin = ActorSpawn(0x9340, SpawnClass.Thrower, 0x19, "zstin");
+  if (tin.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  tin.flags2 |= ThrowerFlag.Blinking;
+  tin.alpha = 0;
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart);
+  const live = tin.thr.boneDrawAlpha[1];
+  tin.flags |= ActorFlag.Dead;
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart);
+  check("...another type blinks too, but a dead one is drawn solid",
+        live === 0 && tin.thr.boneDrawAlpha[1] === 1,
+        `${live} then ${tin.thr.boneDrawAlpha[1]}`);
+  // And `0x1FB9` writes the alpha, so every node after it in the walk draws
+  // at the ramp: bone 4 is the first root.
+  tin.flags &= ~ActorFlag.Dead;
+  tin.boneSlot["4"] = 0x1fb9;
+  G.g_blink_frame_counter = 90;
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart);
+  check("...and the 0x1FB9 node writes a 120-frame ramp into `obj+0x138C`",
+        Math.abs(tin.alpha - 0.5) < 1e-6
+        && Math.abs(tin.thr.boneDrawAlpha[2] - 0.5) < 1e-6,
+        `alpha ${tin.alpha} bone 2 ${tin.thr.boneDrawAlpha[2]}`);
+
+  // `ThrowerStateCorpseBlink`'s way out: alpha 0 and bit 2 down.
+  const corpse = zslman(0x9350);
+  corpse.state = ThrowerState.CorpseBlink;
+  corpse.sub = 0;
+  const rng = new Rng(15);
+  for (let i = 0; i < 200 && !corpse.despawned; i++) {
+    ThrowerStateCorpse(corpse, 1 / 60, rng, true);
+  }
+  check("the zslman corpse leaves with `obj+0x138C` at 0 and bit 2 down",
+        corpse.despawned && corpse.alpha === 0
+        && (corpse.flags2 & ThrowerFlag.Blinking) === 0,
+        `alpha ${corpse.alpha} flags2 ${corpse.flags2.toString(16)}`);
 }
 
 console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
@@ -21582,6 +21890,308 @@ console.log("\nclass 0x45: the stage-3 boss -- heads, gates and the body:");
   }
   G.g_GameMode = GameMode.Arcade;
   ResetGameGlobals();
+}
+
+// -- the turn routines, as the exe has them ---------------------------------
+//
+// `TurnAngleToward` (`FUN_00409E00`) was an ease for the attack run and a
+// wrapped rate limit everywhere else, with a 0x8000 flip standing in for what
+// a negative rate does. These pin the routine itself and what its callers
+// hand it.
+
+console.log("\nTurnAngleToward: the rate limit, the seam, the tie, and a negative rate:");
+{
+  check("within the rate it lands on the target",
+        TurnAngleToward(0x1000, 0x1030, 0x40) === 0x1030);
+  check("...masked to sixteen bits, both of them",
+        TurnAngleToward(0x21000, 0x31030, 0x40) === 0x1030);
+  check("outside it, one step of the rate toward the target",
+        TurnAngleToward(0x1000, 0x3000, 0x40) === 0x1040
+        && TurnAngleToward(0x3000, 0x1000, 0x40) === 0x2fc0);
+  // Short way through the seam -- and the result is the caller's to store as
+  // it is: `a + rate` past 0xFFFF, `a - rate` below zero. The old port
+  // wrapped both.
+  check("across the seam it goes the short way, and does not wrap the result",
+        TurnAngleToward(0xfff0, 0x0100, 0x10) === 0x10000
+        && TurnAngleToward(0x0010, 0xff00, 0x20) === -0x10,
+        `${TurnAngleToward(0xfff0, 0x0100, 0x10)} `
+        + `${TurnAngleToward(0x0010, 0xff00, 0x20)}`);
+  check("exactly half a turn apart: up from below, down from above",
+        TurnAngleToward(0, 0x8000, 0x40) === 0x40
+        && TurnAngleToward(0x8000, 0, 0x40) === 0x7fc0);
+  // A negative rate never lands -- not even on a target it is already on --
+  // and steps the long way.
+  check("a negative rate steps away even from where it stands",
+        TurnAngleToward(0x1000, 0x1000, -0x40) === 0x1040);
+  let y = 0x1000;
+  const seen: number[] = [];
+  for (let i = 0; i < 1000; i++) {
+    y = TurnAngleToward(y, 0x1000, -0x40);
+    if (i >= 996) seen.push(y & 0xffff);
+  }
+  check("...runs to the opposite heading and dithers about it, a step each way",
+        seen.every((v) => v === 0x9000 || v === 0x9040)
+        && seen[0] !== seen[1] && seen[1] !== seen[2],
+        seen.map((v) => v.toString(16)).join(" "));
+}
+
+console.log("\nAngleWithinTolerance, `FUN_0040A040`:");
+{
+  check("both ends of the window count, across the seam",
+        AngleWithinTolerance(0xfff0, 0x10, 0x20)
+        && AngleWithinTolerance(0x30, 0x10, 0x20));
+  check("...and one past either end does not",
+        !AngleWithinTolerance(0xffef, 0x10, 0x20)
+        && !AngleWithinTolerance(0x31, 0x10, 0x20));
+  check("an unwrapped angle is masked first",
+        AngleWithinTolerance(0x10030, 0x10, 0x20));
+}
+
+console.log("\nTurnActorTowardCamera: the point 1.5 from the eye, turned by its height:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  const z = spawnZombie(0x7a00, 1, "turner");
+  // Eye at the origin and level: the point is (0, 0, 1.5). An actor at z = 1
+  // is *behind* that point, so the heading it takes is 0x8000 -- measured to
+  // the eye itself it would be 0, which is what the port used to aim at.
+  z.pos = vec3(0, 0, 1);
+  z.yaw = 0x8000 - 0x100;
+  TurnActorTowardCamera(z, vec3(0, 0, 0), 0x1a0, 1 / 60);
+  check("it faces the point, not the eye", (z.yaw & 0xffff) === 0x8000,
+        z.yaw.toString(16));
+  // `MatrixRotateY(__ftol(g_camera_eye_y))`: at a height of 0x4000 the point
+  // swings a quarter turn, onto (1.5, y, 0), and an actor at (1.5, 0, 1) is
+  // then straight "ahead" of it at heading 0.
+  z.pos = vec3(1.5, 0, 1);
+  z.yaw = 0x100;
+  TurnActorTowardCamera(z, vec3(0, 0x4000, 0), 0x1a0, 1 / 60);
+  check("...and the point turns with the eye's height, not its yaw",
+        (z.yaw & 0xffff) === 0, z.yaw.toString(16));
+  // One engine frame per step: a tick of three frames is three steps.
+  z.pos = vec3(0, 0, 40);
+  z.yaw = 0x4000;
+  TurnActorTowardCamera(z, vec3(0, 0, 0), 0x1a0, 3 / 60);
+  check("a three-frame tick turns three steps of the rate",
+        z.yaw === 0x4000 - 3 * 0x1a0, z.yaw.toString(16));
+}
+
+console.log("\nZombieStateAttackRun: the turn rate, the bands, and the wait clip:");
+{
+  const WAIT_ALT = 11;
+  const TYPE_PAIRS: CharacterType = {
+    ...TYPE,
+    // Two different waits and two different runs, so which one is taken
+    // shows. The fixture's own row names 10 twice and 12 twice.
+    motion_row: { "0": [10, WAIT_ALT, 12, 13, 14],
+                  "8": [10, WAIT_ALT, 12, 13, 14] },
+    motions: { ...TYPE.motions, "11": motion(20, 0, 37),
+               "13": motion(16, 2.5) },
+  };
+  const CHARS_PAIRS =
+    { ...CHARS, types: { "1": TYPE_PAIRS } } as unknown as CharactersJson;
+  const runner = (flags: number, z0: number, cond = 0) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS_PAIRS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_fixed_eye_y = 0;
+    const z = spawnZombie(0x7b00, 1, "runner", {
+      initialState: ZombieState.AttackRun, condition: cond,
+    });
+    z.flags |= flags;
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, z0);
+    z.state = ZombieState.AttackRun;
+    z.sub = 0;
+    return z;
+  };
+
+  check("the jog turns 0x1A0 a frame and the sprint 0x410",
+        ZombieRunTurnRate(runner(0, 45)) === 0x1a0
+        && ZombieRunTurnRate(runner(ZOMBIE_SPRINTS, 45)) === 0x410);
+  {
+    // Band 3, a quarter turn off the line to the camera: one frame is one
+    // step of the rate, not a fifteenth of the angle.
+    const jog = runner(0, 45);
+    jog.yaw = 0x4000;
+    ZombieStateAttackRun(jog, EYE, 1 / 60, new Rng(1));
+    const sprint = runner(ZOMBIE_SPRINTS, 45);
+    sprint.yaw = 0x4000;
+    ZombieStateAttackRun(sprint, EYE, 1 / 60, new Rng(1));
+    check("...and one frame of the run is one step of it",
+          jog.yaw === 0x4000 - 0x1a0 && sprint.yaw === 0x4000 - 0x410,
+          `${jog.yaw.toString(16)} ${sprint.yaw.toString(16)}`);
+    check("...on the run the spawn record picked",
+          jog.motion === 12 && sprint.motion === 13,
+          `${jog.motion} ${sprint.motion}`);
+  }
+  {
+    // Dropping out of the queue: state 5, and the wait clip drawn from
+    // `g_wait_turn_variant` into bit 21 -- seven of ten set it.
+    let set = 0;
+    let waits = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const z = runner(0, 45);
+      z.rank = 9;
+      ZombieStateAttackRun(z, EYE, 1 / 60, new Rng(seed));
+      if (z.state === ZombieState.WaitTurn) waits += 1;
+      if (z.flags2 & ZombieFlag2.WaitTurnVariant) set += 1;
+    }
+    check("an actor out of the queue goes to WaitTurn", waits === 40,
+          `${waits} of 40`);
+    check("...with the table's coin in bit 21, and not always the same side",
+          set > 0 && set < 40 && g_wait_turn_variant.length === 10,
+          `${set} of 40 set it`);
+    const z = runner(0, 45);
+    z.rank = 9;
+    ZombieStateAttackRun(z, EYE, 1 / 60, new Rng(3));
+    z.flags2 |= ZombieFlag2.WaitTurnVariant;
+    ZombieStateWaitTurn(z, EYE, new Rng(1));
+    check("...and WaitTurn plays the clip the bit picks",
+          z.motion === WAIT_ALT
+          && ZombieWaitMotion(z, [10, WAIT_ALT, 12, 13, 14]) === WAIT_ALT,
+          String(z.motion));
+  }
+  {
+    // A condition-8 walker facing the camera, a free permit, both hands
+    // armed. From band 3 it stops and throws; from band 2 the engine never
+    // asks, and the port used to.
+    const near = runner(0, 30, 8);
+    G.g_camera_yaw_bams = 0x8000;
+    near.yaw = 0;
+    ZombieStateAttackRun(near, EYE, 1 / 60, new Rng(1));
+    check("band 2 does not ask to throw, and takes no permit",
+          near.state === ZombieState.AttackRun && near.attackPermit === -1,
+          `${ZombieState[near.state]} permit ${near.attackPermit}`);
+    const far = runner(0, 45, 8);
+    G.g_camera_yaw_bams = 0x8000;
+    far.yaw = 0;
+    ZombieStateAttackRun(far, EYE, 1 / 60, new Rng(1));
+    check("...band 3 does",
+          far.state === ZombieState.StandAndThrow && far.attackPermit >= 0,
+          `${ZombieState[far.state]} permit ${far.attackPermit}`);
+  }
+}
+
+console.log("\nZombieStateBackOff: which way the retreat turns:");
+{
+  ResetGameGlobals();
+  SetGameTables(CHARS);
+  const z = spawnZombie(0x7c00, 1, "retreat");
+  z.pos = vec3(0, 0, 10);
+  // Where the swing began, further out: the heading from there to the actor
+  // is 0x8000. The remembered player point is the eye, so it stays inside
+  // the ring and does not leave.
+  z.strikeStart = vec3(0, 0, 20);
+  z.target = vec3(0, 0, 0);
+  z.flags2 |= ZombieFlag2.StrikeAnchor | ZombieFlag2.BackOffTurnFlip;
+  z.flags |= ActorFlag.Committed;
+  z.state = ZombieState.BackOff;
+  z.sub = 0;
+  z.yaw = 0x9000;
+  ZombieStateBackOff(z, EYE, 1 / 60, new Rng(1));
+  check("the first frame clears the flip, and the swing's commitment",
+        (z.flags2 & ZombieFlag2.BackOffTurnFlip) === 0
+        && (z.flags & ActorFlag.Committed) === 0
+        && (z.flags & ActorFlag.BackingOff) !== 0);
+  check("...and turns at -0x40, away from where the swing began",
+        z.yaw === 0x9040, z.yaw.toString(16));
+  z.flags2 |= ZombieFlag2.BackOffTurnFlip;
+  ZombieStateBackOff(z, EYE, 1 / 60, new Rng(1));
+  check("with the flip up it turns at +0x40, back toward it",
+        z.yaw === 0x9000, z.yaw.toString(16));
+  // Standing on the point: `atan2(0, 0)` is 0 and the engine turns off it.
+  const on = spawnZombie(0x7c01, 1, "on the point");
+  on.pos = vec3(0, 0, 20);
+  on.yaw = 0x100;
+  TurnActorAwayFromPoint(on, vec3(0, 0, 20), 0x1a0, 1 / 60);
+  check("an actor on its own point still turns, to heading 0",
+        on.yaw === 0, on.yaw.toString(16));
+}
+
+console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce's roll:");
+{
+  const TYPE31_ZSKAMERE: CharacterType = {
+    ...TYPE31, type: 0x17, name: "zskamere", file: "zskamere.bin",
+  };
+  const CHARS31_TURN = {
+    ...CHARS31,
+    types: { "1": TYPE, "22": TYPE31_ZSASS, "23": TYPE31_ZSKAMERE,
+             "24": TYPE31_ZSLMAN, "25": TYPE31 },
+  } as unknown as CharactersJson;
+  const spawn = (type: number, z0: number) => {
+    ResetGameGlobals();
+    SetGameTables(CHARS31_TURN);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9a00, SpawnClass.Thrower, type, "t", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = 100;
+    a.pos = vec3(0, 0, z0);
+    return a;
+  };
+
+  {
+    const t = spawn(0x19, 80);
+    t.yaw = 0x300;
+    // One step of 0x200 from 0x300 leaves it 0x100 off: outside a window of
+    // 0xFF, inside one of 0xF0 after a further step of 0x10.
+    check("the arrival test turns first, then answers for the new yaw",
+          !TurnActorAwayFromPointTestArrival(t, vec3(0, 0, 0), 0x200, 0xff,
+                                             1 / 60)
+          && t.yaw === 0x100, t.yaw.toString(16));
+    check("...and there, inclusive, once it is within the window",
+          TurnActorAwayFromPointTestArrival(t, vec3(0, 0, 0), 0x10, 0xf0,
+                                            1 / 60) && t.yaw === 0xf0,
+          t.yaw.toString(16));
+  }
+  {
+    // Type 0x17 withdraws its own way: thirty units is clear, no clip wait,
+    // and it turns out of the swing at -0x100 as it goes.
+    const k = spawn(0x17, 40);
+    k.state = ThrowerState.Withdraw;
+    k.sub = 0;
+    ThrowerStateWithdraw(k, EYE, 1 / 60, new Rng(1));
+    check("zskamere forty units out is already clear, and back at the hub",
+          k.state === ThrowerState.StandAndDecide
+          && (k.flags & (ActorFlag.BackingOff | ActorFlag.NoHitReaction)) === 0,
+          ThrowerState[k.state]);
+    const s = spawn(0x19, 40);
+    s.state = ThrowerState.Withdraw;
+    s.sub = 0;
+    ThrowerStateWithdraw(s, EYE, 1 / 60, new Rng(1));
+    check("...where any other type still has fifty to go",
+          s.state === ThrowerState.Withdraw, ThrowerState[s.state]);
+    const n = spawn(0x17, 20);
+    n.strikeStart = vec3(0, 0, 30);
+    n.yaw = 0x9000;
+    n.state = ThrowerState.Withdraw;
+    n.sub = 0;
+    ThrowerStateWithdraw(n, EYE, 1 / 60, new Rng(1));
+    check("...and inside thirty it turns, the long way, a step of 0x100",
+          n.state === ThrowerState.Withdraw && n.yaw === 0x9100
+          && (n.flags & ActorFlag.NoHitReaction) !== 0, n.yaw.toString(16));
+  }
+  {
+    // `obj+0x6C = TurnAngleToward(obj+0x6C, 0, 0xCCC)` every frame of the
+    // leap. With no arc left it hands to the withdraw on the same frame.
+    const p = spawn(0x19, 60);
+    p.pounce = { motion: 283, frames: 10 };
+    p.state = ThrowerState.DelayedPounce;
+    p.sub = 2;
+    p.attackPermit = -1;
+    p.roll = 0x2000;
+    ThrowerStateDelayedPounce(p, 2 / 60, new Rng(1), NULL_HOST);
+    check("the pounce levels its roll at 0xCCC a frame",
+          p.roll === 0x2000 - 2 * 0xccc, p.roll.toString(16));
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

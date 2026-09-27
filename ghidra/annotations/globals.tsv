@@ -232,6 +232,7 @@
 00592fc8	g_pHitReactionMotions	Per character type -> per body condition (obj+0x130C) -> u32[8] motion ids indexed by g_bone_reaction_group. Only two distinct rows exist for the humanoids: the ordinary one is head 977, torso 982, r.arm 981, l.arm 979, pelvis 974, r.leg 961, l.leg 960.
 00593084	g_pDeathMotionsArc8000	6 death motions for the 0x8000 arc: 985, 989, 987, 988, 989, 990. Their root carries z by +7.4/+8.2
 0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
+005930ac	g_zombie_death_effect_cues	ZombieInstallDeathEffectCues' lists, three dwords apart: play-cursor frames ending in -1. 0x005930AC {30, 56} clip 0x3D9, 0x5930B8 {40} 0x3DA, 0x5930C4 {25} 0x3DB, 0x5930D0 {37, 104} 0x3DC, 0x5930DC {48} 0x3DD, 0x5930E8 {48} 0x3DE, 0x5930F4 {41} 0x3DF, 0x593100 {39} 0x3E0, 0x593124 {} every other clip; 0x59310C and 0x593118 are two more empty lists no case names. ZombieDeathEffectCueTick walks a pointer through it at obj+0x13A0. [proved]
 00593170	g_zombie_thrown_weapon_states	The four states ZombieThrownWeaponUpdate dispatches on: 0 the shared no-op, 1 ZombieThrownWeaponStateStraight (the axe), 2 ZombieThrownWeaponStateArc, 3 ZombieThrownWeaponStateShotDown. Class 0x30's projectile is a separate family from class 0x31's at g_thrown_weapon_states (0x00592AE0), which has two states rather than four.
 00593358	g_class_handler_pairs	{class_id, handler}, 56 entries, negative id terminates
 0059351c	g_route_default	s8[6][16]: the route GameOverRouteMapArm copies over an empty history. [proved]
@@ -568,7 +569,7 @@
 009c8e44	g_enemy_approach_steps_mid	Added to g_enemy_approach_steps when the actor starts between the middle and outer rings.
 009c8e48	g_enemy_approach_steps_outer	Added on top of g_enemy_approach_steps_mid when the actor starts outside the outer ring, so a distant enemy walks further before it can attack.
 009c8e4c	g_cur_enemy
-009c8e50	g_rain_enabled
+009c8e50	g_rain_enabled	EvtOpEnableRain1D (0x0045F340) stores its operand here; ResetSceneOnEnter zeroes it at 0x0045EE78. DrawRainParticles draws only while it is 1, and ZombieDeathEffectCueTick / ZombieDeathLandingEffect (and ThrowerEmitGroundDust) splash rather than raise dust while it is 1. [proved]
 009c8e58	g_camera_fixed_eye_y	also labelled g_ground_plane_y; the two are the same word
 009c8e60	g_credits	s32, stride 8: the credits (starts and continues) left -- one shared count unless g_credits_per_player. SetBothPlayerCounters seeds it from ModeStartCounterValue on the title's confirm. [proved]
 009c8e64	g_credit_tier	s32, stride 8: CreditTiersUpdate's 0/1/2 beside each count. [proved]

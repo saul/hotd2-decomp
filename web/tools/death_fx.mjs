@@ -39,7 +39,6 @@ const { page, close } = await openPlayer({
 /** The page's own pools, via the module graph the dev server already built. */
 const pools = () => page.evaluate(async () => {
   const { G } = await import("/src/game/globals.ts");
-  const { GroundRingDrawnBy } = await import("/src/game/effects/ground_ring.ts");
   return {
     enemies: G.g_object_list.filter((a) => a.cls === 0x30 && a.visible
                                      && !a.dead).length,
@@ -54,10 +53,11 @@ const pools = () => page.evaluate(async () => {
                      scale: +e.scale.x.toFixed(2) })),
     water: G.g_water_rings.map((r) => ({ size: +r.size.toFixed(3),
                                          alpha: +r.alpha.toFixed(3) })),
-    rings: G.g_ground_rings.map((r) => ({ drawn: GroundRingDrawnBy(r),
-                                          frames: r.frames,
-                                          fade: r.fadeFrames,
-                                          at: [r.pos.x, r.pos.y, r.pos.z]
+    // What each ring's routine drew this frame: four cels is the spread,
+    // one at full alpha the hold, one fading the fade.
+    rings: G.g_ring_effects.map((r) => ({
+      drawn: r.drawnStrips.length === 4 ? 0 : r.drawnAlpha < 1 ? 2 : 1,
+      frames: r.count, fade: r.fade, at: [r.x, r.y, r.z]
                                             .map((v) => +v.toFixed(1)) })),
     eye: [G.g_camera_block_eye.x, G.g_camera_block_eye.y,
           G.g_camera_block_eye.z].map((v) => +v.toFixed(1)),
@@ -154,8 +154,8 @@ try {
     const placed = await page.evaluate(async () => {
       const { G } = await import("/src/game/globals.ts");
       const { QueryGroundHeightAt } = await import("/src/game/coli.ts");
-      const { SpawnGroundRingEffect, GroundRingStep } =
-        await import("/src/game/effects/ground_ring.ts");
+      const { SpawnGroundRingEffect, RingEffectPhase } =
+        await import("/src/game/effects/ring_effect.ts");
       const { SpawnWaterRing } = await import("/src/game/effects/water_ring.ts");
       const { SpawnSpriteEffect } = await import("/src/game/effects/sprite.ts");
       const { Rng } = await import("/src/core/rng.ts");
@@ -168,19 +168,19 @@ try {
         const x = e.x + ux * ahead + rx * side, z = e.z + uz * ahead + rz * side;
         return { x, y: QueryGroundHeightAt(x, e.y + 20, z), z };
       };
-      G.g_ground_rings = [];
+      G.g_ring_effects = [];
       G.g_water_rings = [];
       const phases = [
-        { side: -12, set: (r) => { r.frames = 61; } },
-        { side: 0, set: (r) => { r.step = GroundRingStep.Hold; r.frames = 5; } },
+        { side: -12, set: (r) => { r.count = 61; } },
+        { side: 0, set: (r) => { r.phase = RingEffectPhase.Hold; r.count = 5; } },
         { side: 12, set: (r) => {
-          r.step = GroundRingStep.FadeOut; r.fadeFrames = 19; r.alpha = 0.55;
+          r.phase = RingEffectPhase.FadeOut; r.fade = 19; r.alpha = 0.55;
         } },
       ];
       for (const ph of phases) {
         const p = at(ph.side, 60);
         SpawnGroundRingEffect({ pos: p, lookAt: p, yaw: 0, motionFlags: 4 });
-        ph.set(G.g_ground_rings[G.g_ground_rings.length - 1]);
+        ph.set(G.g_ring_effects[G.g_ring_effects.length - 1]);
       }
       const w = at(0, 45);
       const rng = new Rng(9);
@@ -190,9 +190,9 @@ try {
       SpawnSpriteEffect(at(8, 40), 0, 0, 0x61, 1, -1);
       return { eye: [e.x, e.y, e.z].map((v) => +v.toFixed(1)),
                target: [t.x, t.y, t.z].map((v) => +v.toFixed(1)),
-               ring: [G.g_ground_rings[1].pos.x, G.g_ground_rings[1].pos.y,
-                      G.g_ground_rings[1].pos.z].map((v) => +v.toFixed(1)),
-               rings: G.g_ground_rings.length };
+               ring: [G.g_ring_effects[1].x, G.g_ring_effects[1].y,
+                      G.g_ring_effects[1].z].map((v) => +v.toFixed(1)),
+               rings: G.g_ring_effects.length };
     });
     console.log(`staged ${JSON.stringify(placed)}`);
     await advance(1);

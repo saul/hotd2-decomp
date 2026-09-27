@@ -15,6 +15,7 @@ import {
   MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
   MatrixRotateZ, MatrixTranslate,
 } from "./matrix";
+import { SkeletonShiftToHoldBone1Position } from "./skeleton";
 import { CharacterTypeOf, MotionOf, MotionPlayFrame } from "./tables";
 import { vec3, type Vec3 } from "./vec";
 
@@ -75,10 +76,17 @@ const _p2 = vec3();
  * caller makes next, which re-seeds it from the same frame.
  *
  * `GameHost.boneWorld` is P1; without a posed skeleton -- headless -- there is
- * no drawn bone to hold, and the actor is left where it is.
+ * no drawn bone to hold, and the actor is left where it is. An actor that
+ * carries the engine's model block (`Actor.skel`, class 0x14) has its bone-1
+ * record in the game, as the engine does, and takes P1 and the frame from
+ * there: `SkeletonShiftToHoldBone1Position`.
  */
 export function ActorShiftToHoldBone1Position(obj: Actor,
                                               host: GameHost): void {
+  if (obj.skel) {
+    SkeletonShiftToHoldBone1Position(obj);
+    return;
+  }
   const t = CharacterTypeOf(obj);
   const f = MotionFrameOf(obj, obj.motion, MotionPlayFrame(obj) >> 1);
   if (!t || !f) return;

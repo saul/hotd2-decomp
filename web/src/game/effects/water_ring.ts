@@ -21,9 +21,10 @@
  * if (+0x1330 >= 0x3C) ActorKill()
  * ```
  *
- * **It draws, then steps** -- the sprite effects' order and not the ground
- * ring's -- so this steps where they do, at the head of the frame, and
- * `render/rings.ts` draws what the record holds.
+ * **It draws, then steps** -- the sprite effects' order, and the opposite
+ * of the ring task's -- so this steps where they do, at the head of the
+ * frame, and
+ * `render/water_rings.ts` draws what the record holds.
  */
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";

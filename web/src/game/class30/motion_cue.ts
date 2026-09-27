@@ -18,6 +18,8 @@ import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { FrameToTicks, MotionOf } from "../tables";
 import { MotionFade } from "./states";
+import { SkeletonModelSetMotion, SkeletonModelSetMotionBlended }
+  from "../skeleton";
 
 export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
                                      rng: Rng, spread: number | "clip",
@@ -55,6 +57,12 @@ export function ZombieSetMotionIfIdle(obj: Actor, motion: number | undefined,
  * is nothing left of the outgoing clip to blend from.
  */
 export function ActorSetMotion(obj: Actor, motion: number): void {
+  // An actor that carries the engine's own model block gets the engine's own
+  // body -- see `game/skeleton.ts`. Class 0x14 is the only one today.
+  if (obj.skel) {
+    SkeletonModelSetMotion(obj, obj.skel, motion);
+    return;
+  }
   // The cut takes the swing with it — see {@link ActorEndOneShot}. This one
   // leaves nothing to blend from, so the swing is dropped rather than faded.
   obj.action = null;
@@ -118,6 +126,14 @@ function ActorEndOneShot(obj: Actor, fade: number): void {
  */
 export function ActorSetMotionBlended(obj: Actor, motion: number,
                                       frame: number, fade: number): void {
+  // The model block's arm takes the engine's own argument -- a **play
+  // cursor**, not the authored frame this function's other callers pass --
+  // because that block keeps the engine's cursor and the rest of the port
+  // does not. See `SkeletonModelSetMotionBlended`.
+  if (obj.skel) {
+    SkeletonModelSetMotionBlended(obj, obj.skel, motion, frame, fade);
+    return;
+  }
   const m = MotionOf(obj, motion);
   if (!m) return;
   // One track: writing it ends whatever one-shot was on it. See

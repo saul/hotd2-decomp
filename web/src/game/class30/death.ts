@@ -40,7 +40,7 @@ import { QueryGroundHeightAt } from "../coli";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
 import type { GameHost } from "../host";
-import { SpawnGroundRingEffect } from "../effects/ground_ring";
+import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import {
   ZombieDeathEffectCueTick, ZombieDeathLandingEffect,

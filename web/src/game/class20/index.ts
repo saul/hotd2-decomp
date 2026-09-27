@@ -57,7 +57,7 @@
  *   that writes nothing to the actor. The renderer's.
  * * `SpawnGroundRingEffect` (`FUN_00407DA0`) and `SpawnBoneHitSprite`
  *   (`FUN_00407200`) used to be listed here and are ported now — see
- *   `game/effects/ground_ring.ts` and `game/effects/blood.ts`.
+ *   `game/effects/ring_effect.ts` and `game/effects/blood.ts`.
  * * The damaged-part swap `g_pBoneEffectSlots[type][bone][0]`. The port has
  *   `ActorSwapDamagedPart` for the combat classes; wiring class 0x20's
  *   single-index read of the same table to it is a renderer question and is
@@ -66,7 +66,7 @@
 import { ActorFlag, type Actor, type OneHitTargetActor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
-import { SpawnGroundRingEffect } from "../effects/ground_ring";
+import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G } from "../globals";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
@@ -377,7 +377,7 @@ export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
  * 00449415  CALL SpawnGroundRingEffect
  * ```
  *
- * The ring (`game/effects/ground_ring.ts`) is spawned there, on the frame of
+ * The ring (`game/effects/ring_effect.ts`) is spawned there, on the frame of
  * the hand-over, and only in `g_app_state` 6 -- the test is the spawner's own.
  *
  * The port's clock is `ActorAdvanceMotion`'s and it is shared, so "does not

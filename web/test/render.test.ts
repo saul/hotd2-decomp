@@ -1603,97 +1603,41 @@ console.log("\nthe shot effects are models, one per frame:");
 }
 
 
-console.log("\nthe two rings are drawn from their records alone:");
+console.log("\nthe water ring is drawn from its record alone:");
 {
-  const { GroundRingStep } = await import("../src/game/effects/ground_ring");
   const root = new Obj3D();
-  const slots = [0x1a38, 0xe23];
-  for (let n = 0x15e4; n <= 0x1601; n++) slots.push(n);
-  for (const slot of slots) {
-    const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
-    part.name =
-      `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
-    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
-    root.add(part);
-  }
+  const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  part.name = "slots_effect_fixed000_slot_0e23";
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+  root.add(part);
   ResetGameGlobals();
   const layer = new EffectLayer();
   layer.adopt(root);
   const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
   camera.updateMatrixWorld(true);
   const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
-  const nodesOf = (slot: number) => layer.group.children.filter((c) =>
-    c.name.endsWith(`_slot_${slot.toString(16).padStart(4, "0")}`));
-  const scaleOf = (o: InstanceType<typeof Obj3D>) => {
-    const e = o.matrix.elements;
-    return [Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]),
-            Math.hypot(e[8], e[9], e[10])];
-  };
 
-  // Sixty frames into the spread: a quarter turn times 60/120 is 0x2000 BAMS,
-  // so the ring is `cos(45 deg) * 4` wide and the cels stand `2 sin 45` out.
-  G.g_blink_frame_counter = 7;
-  G.g_ground_rings.push({
-    id: 1, step: GroundRingStep.Spread, pos: { x: 10, y: 0.05, z: -20 },
-    yaw: 0, frames: 60, fadeFrames: 0, alpha: 0, size: 1,
-  });
-  layer.update(ctx);
-  const ring = nodesOf(0x1a38)[0];
-  const cels = layer.group.children.filter((c) =>
-    /_slot_(15e[4-9a-f]|15f[0-9a-f]|160[01])$/.test(c.name));
-  check("a spreading ground ring draws the ring and four cels",
-        ring !== undefined && cels.length === 4,
-        `${layer.group.children.map((c) => c.name).join(",")}`);
-  const [sx, sy] = ring ? scaleOf(ring) : [0, 0];
-  check("...the ring flat and cos(a) * 4 across",
-        Math.abs(sx - Math.fround(Math.cos(0x2000 * (Math.PI * 2) / 65536) * 4))
-          < 1e-5 && Math.abs(sy - 1) < 1e-6, `${sx} x ${sy}`);
-  const d = Math.fround(Math.sin(0x2000 * (Math.PI * 2) / 65536) * 2);
-  const at = cels.map((c) => [c.matrix.elements[12] - 10,
-                              c.matrix.elements[14] + 20]);
-  check("...the cels at (+-d, +-2d) about it, in the exe's order",
-        at.length === 4 && Math.abs(at[0]![0]! - d) < 1e-5
-        && Math.abs(at[0]![1]! - 2 * d) < 1e-5
-        && Math.abs(at[3]![0]! + d) < 1e-5
-        && Math.abs(at[3]![1]! + 2 * d) < 1e-5, JSON.stringify(at));
-  check("...each its own phase of the strip",
-        cels[0]!.name.endsWith("_slot_15eb")
-        && cels[1]!.name.endsWith("_slot_15f3"), cels.map((c) => c.name).join());
-
-  // The hold: the ring at 4, one cel.
-  const r = G.g_ground_rings[0]!;
-  r.step = GroundRingStep.Hold;
-  r.frames = 5;
-  layer.update(ctx);
-  const held = nodesOf(0x1a38)[0];
-  check("a held ring is four wide with one cel at its middle",
-        held !== undefined && Math.abs(scaleOf(held)[0]! - 4) < 1e-6
-        && layer.group.children.length === 2,
-        `${layer.group.children.length} nodes`);
-  // The fade: the same, through the alpha.
-  r.step = GroundRingStep.FadeOut;
-  r.fadeFrames = 20;
-  r.alpha = 0.5;
-  layer.update(ctx);
-  const faded = nodesOf(0x1a38)[0] as InstanceType<typeof Mesh> | undefined;
-  const mat = faded?.material as InstanceType<typeof MeshBasicMaterial>;
-  check("a fading ring is drawn at the record's alpha",
-        mat?.transparent === true && Math.abs(mat.opacity - 0.5) < 1e-6,
-        `${mat?.opacity}`);
-
-  // The water ring: flat to 0.2, in the world's own layer.
-  G.g_ground_rings.length = 0;
+  // `WaterRingUpdate` (`FUN_00456880`): `T(pos) Scale(s, 0.2, s)` and the
+  // record's alpha, in the world's own layer.
   G.g_water_rings.push({
     id: 2, pos: { x: 1, y: 0, z: 2 }, size: 1.5, growth: 0.02, alpha: 0.25,
     frames: 45, slot: 0xe23,
   });
   layer.update(ctx);
-  const water = nodesOf(0xe23)[0];
-  const ws = water ? scaleOf(water) : [0, 0, 0];
-  check("a water ring is its size across and 0.2 high",
+  const water = layer.group.children[0] as InstanceType<typeof Mesh>
+    | undefined;
+  const e = water?.matrix.elements ?? [];
+  const ws = [Math.hypot(e[0]!, e[1]!, e[2]!), Math.hypot(e[4]!, e[5]!, e[6]!),
+              Math.hypot(e[8]!, e[9]!, e[10]!)];
+  check("a water ring is its size across and 0.2 high, at its point",
         water !== undefined && Math.abs(ws[0]! - 1.5) < 1e-6
         && Math.abs(ws[1]! - Math.fround(0.2)) < 1e-6
-        && Math.abs(ws[2]! - 1.5) < 1e-6, JSON.stringify(ws));
+        && Math.abs(ws[2]! - 1.5) < 1e-6 && e[12] === 1 && e[14] === 2,
+        JSON.stringify(ws));
+  const mat = water?.material as InstanceType<typeof MeshBasicMaterial>;
+  check("...at the record's alpha",
+        mat?.transparent === true && Math.abs(mat.opacity - 0.25) < 1e-6,
+        `${mat?.opacity}`);
   check("...drawn in the world's order, not over it",
         water?.renderOrder === 0, `${water?.renderOrder}`);
   G.g_water_rings.length = 0;

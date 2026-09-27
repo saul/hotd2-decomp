@@ -34,11 +34,14 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
+import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { FishEffectsTick } from "./effects/fish";
+import { OwlEffectsTick } from "./effects/owl";
+import { RingEffectsTick } from "./effects/ring_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
-import { GroundRingsTick } from "./effects/ground_ring";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
 import { DescriptorFromPlacement } from "./descriptor";
@@ -357,6 +360,37 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       a.visible = true;
       return;
     }
+    // Classes 0x16 and 0x17 -- the stage-2 boss arena's wave field and its
+    // sources. They draw nothing and kill themselves the frame they run, so
+    // they have no character type either; the position is the one thing
+    // either reads off the spawn (the field's plane is its `y`), and it goes
+    // in the descriptor so the `Init` sees it.
+    if (s.class === SpawnClassValue.WaterWaveField) {
+      if (!pl.class16) return;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveField, -1,
+                           "wave field",
+                           { class16: pl.class16, yaw: pl.yaw ?? 0,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      return;
+    }
+    if (s.class === SpawnClassValue.WaterWaveSource) {
+      if (!pl.class17) return;
+      G.g_slot_actors_built.push(s.at);
+      const a = ActorSpawn(s.at, SpawnClassValue.WaterWaveSource, -1,
+                           "wave source",
+                           { class17: pl.class17, hp: pl.hp, maxHp: pl.hp,
+                             yaw: pl.yaw ?? 0, pitch: pl.class17.pitch,
+                             roll: pl.class17.roll,
+                             pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                       s.pos?.[2] ?? 0) },
+                           rng);
+      a.visible = true;
+      return;
+    }
     // Class 0x51 -- the fish. Drawn by asset slot from `fish.bin`, so it has
     // no character type and never reaches `render/characters.ts` either.
     // A **group header** goes through here as well: its `FishInit` sets
@@ -635,6 +669,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     G.g_object_list = G.g_object_list.filter((o) => !o.despawned);
   }
 
+  // The stage-2 boss arena's wave sources, which class 0x17 allocated as
+  // tasks ahead of the boss that samples them -- see `WaterWaveSourcesTick`.
+  WaterWaveSourcesTick();
+
   const f = { eye, dt, rng, host, events };
   for (const obj of G.g_object_list) {
     // Every actor's clips run, handler or not: a class with no behaviour still
@@ -746,12 +784,13 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.
   Boss4HitMarksTick(host);
-  // The rings `SpawnGroundRingEffect` (`FUN_00407DA0`) puts under the bodies
-  // that died above. `ActorAlloc` appends the task behind its spawner and the
-  // walk reaches it the same frame, and each of its routines steps before it
-  // draws -- so the step is here, after the actors, and the frame that spawns
-  // a ring already shows its first picture. See `effects/ground_ring.ts`.
-  GroundRingsTick();
+  // The owl's and the fish's tasks, allocated by their actors above, so
+  // after them: every one runs on the frame its actor made it and draws what
+  // it stepped to. See `game/effects/owl.ts`.
+  OwlEffectsTick(rng);
+  FishEffectsTick();
+  RingEffectsTick();
+
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);

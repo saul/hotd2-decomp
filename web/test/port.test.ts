@@ -39,7 +39,8 @@ import { ActorAdvanceMotion } from "../src/game/motion";
 import { ActorHeadingErrorTo, ActorTurnTowardXZ } from "../src/game/actor_turn";
 import { CamStashPathRange, CameraPlayStashedPath, CameraStepRailTick }
   from "../src/game/camera/rail";
-import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor }
+import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor,
+  type FishActor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
@@ -72,8 +73,8 @@ import {
 } from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
-import { ActorByAt, AppState, G, PlayerState, PlayerTask, ResetGameGlobals,
-  ResetSceneOnEnter, RunPhase }
+import { ActorByAt, AppState, G, HIT_SLOT_NONE, PlayerState, PlayerTask,
+  ResetGameGlobals, ResetSceneOnEnter, RunPhase }
   from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
@@ -84,7 +85,8 @@ import {
   CarriedPropRoutine, MarkCarriedPropShot, type CarriedProp,
 } from "../src/game/carried_prop";
 import {
-  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixToEulerZYX,
+  MatCopy, MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixToEulerZYX, MatrixTransformVector, MatrixTranslate,
   VecAimXAxisYThenZ,
 } from "../src/game/matrix";
 import { CameraTargetsClear, waitTargetsClear }
@@ -95,6 +97,18 @@ import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
 import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
   OwlUpdateAndResolveShot } from "../src/game/class43";
+import {
+  OWL_RING_PULSE_FRAMES, OwlEffectsTick, OwlGroundRingPhase,
+  OwlSpawnGroundImpactRing, OwlSpawnWaterSplashFlipbook,
+} from "../src/game/effects/owl";
+import {
+  BloodCloudTickInScreenSpace, FISH_BLOOD_LAST_SLOT, FISH_SPLASH_LAST_SLOT,
+  FishEffectsTick, type FishBloodCloud,
+} from "../src/game/effects/fish";
+import {
+  RING_EFFECT_SPREAD_FRAMES, RingEffectPhase, RingEffectsTick,
+  SpawnRingEffectAtPose,
+} from "../src/game/effects/ring_effect";
 import {
   HordeFormation, HordeKind, HordeMemberAt, HordeState, HordeUpdate,
   PlaceHorde, SubModelAdvanceClock, SubModelBlendToMotion, SubModelSetMotion,
@@ -119,8 +133,8 @@ import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
 import { ShotEffectsTick } from "../src/game/effects/tick";
 import { SpawnSpriteEffect, SpriteEffectKind }
   from "../src/game/effects/sprite";
-import { MarkActorShot, MergeShotPicks, QueueOffscreenPull, QueueShotRequest,
-  g_gunshot_sound_ids }
+import { FireShotRequest, MarkActorShot, MergeShotPicks, QueueOffscreenPull,
+  QueueShotRequest, g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
          SetBoss4Tables, SetGameTables, T } from "../src/game/tables";
@@ -184,10 +198,8 @@ import {
   COND_HEAVY_LANDING, LANDING_HEAVY_SHAKE, SND_LANDING, SND_LANDING_HEAVY,
   ZOMBIE_DEATH_EFFECT_CUES,
 } from "../src/game/class30/death_effects";
-import {
-  GROUND_RING_GROW_FRAMES, GroundRingDrawnBy, GroundRingStep,
-  SpawnGroundRingEffect,
-} from "../src/game/effects/ground_ring";
+import { SpawnGroundRingEffect, type RingEffect }
+  from "../src/game/effects/ring_effect";
 import { WATER_RING_FRAMES, WATER_RING_SLOT }
   from "../src/game/effects/water_ring";
 import { ZombieStateArcScriptedEntrance } from "../src/game/class30/entrance";
@@ -273,11 +285,13 @@ import {
 import { ZombieAux } from "../src/game/actor";
 import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
 import { seekTo } from "../src/script/seek";
-import {
-  Boss2Handler, CLASS14_FLAG_DEAD, CLASS14_FLAG_DEAD_STAGE5,
-  CLASS14_FLAG_INTRO_DONE, CLASS14_FLAG_ROUND_B_OPEN, Class14AdvancePhase,
-  Class14Phase, Class14State,
-} from "../src/game/class14";
+import { Boss2Handler, Class14Phase, Class14State } from "../src/game/class14";
+import { Class14AdvanceMotionAndPublishPoints }
+  from "../src/game/class14/advance";
+import { Class14ResolveShotBone } from "../src/game/class14/shot";
+import { Class14AdvancePhase, Class14TrackAdaptiveRank }
+  from "../src/game/class14/steer";
+import type { Class14Json } from "../src/bundle/characters";
 import { ScriptFlagsThisBundleCanRaise }
   from "../src/script/waits/flag";
 import {
@@ -10677,6 +10691,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Judgment, "0x22 JUDGMENT's flier"],
     [SpawnClass.JudgmentCompanion, "0x23 JUDGMENT's walker"],
     [SpawnClass.Boss2, "0x14 stage-2 boss"],
+    [SpawnClass.WaterWaveField, "0x16 the stage-2 boss arena's wave field"],
+    [SpawnClass.WaterWaveSource, "0x17 one wave source on it"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
@@ -12159,35 +12175,34 @@ console.log("class 0x30, the dust, the splash and the rings a death leaves:");
           z.state === ZombieState.CorpseSink, `state ${z.state}`);
     // The corpse state's first frame is the next one.
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-    const ring = G.g_ground_rings[0];
-    check("...which opens one ground ring", G.g_ground_rings.length === 1,
-          `${G.g_ground_rings.length}`);
+    const ring = G.g_ring_effects[0];
+    check("...which opens one ring task", G.g_ring_effects.length === 1,
+          `${G.g_ring_effects.length}`);
     check("...at the tracked bone's x and z, not the origin's",
-          ring?.pos.x === 5 && ring.pos.z === 44, JSON.stringify(ring?.pos));
-    check("...on the traced floor plus 0.05",
-          ring !== undefined && ring.pos.y === Math.fround(0.05),
-          `${ring?.pos.y}`);
+          ring?.x === 5 && ring.z === 44, JSON.stringify(ring));
+    check("...on the traced floor plus 0.05, at scale 1",
+          ring !== undefined && ring.y === Math.fround(0.05)
+          && ring.scale === 1, `${ring?.y}`);
     check("...and the frame that spawned it already shows the spread",
-          ring !== undefined
-          && GroundRingDrawnBy(ring) === GroundRingStep.Spread
-          && ring.frames === GROUND_RING_GROW_FRAMES - 1,
-          `${ring?.frames}`);
+          ring !== undefined && ring.drawnStrips.length === 4
+          && ring.count === RING_EFFECT_SPREAD_FRAMES - 1, `${ring?.count}`);
 
     // 120 frames spreading, 30 holding, 39 fading, and gone on the 40th --
     // outliving the corpse, which leaves after its own 120.
-    const drawn: (GroundRingStep | null)[] = [];
-    if (ring) drawn.push(GroundRingDrawnBy(ring));
-    for (let i = 0; i < 400 && G.g_ground_rings.length; i++) {
+    const drew = (r: RingEffect) => r.drawnStrips.length === 4 ? "spread"
+      : r.drawnAlpha < 1 ? "fade" : "hold";
+    const drawn: string[] = [];
+    if (ring) drawn.push(drew(ring));
+    for (let i = 0; i < 400 && G.g_ring_effects.length; i++) {
       GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-      if (G.g_ground_rings[0]) drawn.push(GroundRingDrawnBy(G.g_ground_rings[0]));
+      if (G.g_ring_effects[0]) drawn.push(drew(G.g_ring_effects[0]));
     }
-    const count = (s: GroundRingStep) => drawn.filter((d) => d === s).length;
+    const count = (s: string) => drawn.filter((d) => d === s).length;
     check("the ring spreads for 120 frames, holds 30 and fades for 39",
-          count(GroundRingStep.Spread) === 120
-          && count(GroundRingStep.Hold) === 30
-          && count(GroundRingStep.FadeOut) === 39 && drawn.length === 189,
-          `${count(GroundRingStep.Spread)}/${count(GroundRingStep.Hold)}/`
-          + `${count(GroundRingStep.FadeOut)} of ${drawn.length}`);
+          count("spread") === 120 && count("hold") === 30
+          && count("fade") === 39 && drawn.length === 189,
+          `${count("spread")}/${count("hold")}/${count("fade")} `
+          + `of ${drawn.length}`);
     check("...and the corpse it opened under is long gone by then", z.despawned);
   }
 
@@ -12197,13 +12212,13 @@ console.log("class 0x30, the dust, the splash and the rings a death leaves:");
     G.g_app_state = AppState.Attract;
     SpawnGroundRingEffect(z);
     check("`SpawnGroundRingEffect` does nothing outside play",
-          G.g_ground_rings.length === 0);
+          G.g_ring_effects.length === 0);
     G.g_app_state = AppState.InPlay;
     z.motionFlags &= ~MotionFlag.TraceGround;
     SpawnGroundRingEffect(z);
     check("...and without bit 4 the ring sits at the body's own height",
-          G.g_ground_rings[0]?.pos.y === Math.fround(2 + Math.fround(0.05)),
-          `${G.g_ground_rings[0]?.pos.y}`);
+          G.g_ring_effects[0]?.y === Math.fround(2 + Math.fround(0.05)),
+          `${G.g_ring_effects[0]?.y}`);
   }
 
   // -- on water: the rings, then the splash ----------------------------------
@@ -14801,129 +14816,546 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
  * Class 0x14 — the stage-2 boss, and the twenty-one `wait_script_flag` gates
  * it is the only writer of.
  *
- * Every assertion here fails without `game/class14/`: the flags come off the
- * boss's own phase ladder and its own death, and with no module the actor has
- * no update at all.
+ * Every frame here is either a real `GameUpdate` or the class's own
+ * `Class14Update`, and nothing the engine sets is set by hand: the stage-2
+ * shutter comes from the boss-name banner the entrance spawns (L49), the
+ * damage from a ray that has to find the weak point through both of the
+ * engine's gates, and the deaths from the reactions' own cue frames. The
+ * boss carries the model block (`game/skeleton.ts`), so its pose is the
+ * game's own and needs no renderer.
+ *
+ * The fixture is `boss2.bin` as the bundle carries it -- the real skeleton,
+ * the real clip lengths -- with every clip's angles and root at zero, and
+ * class 0x14's `.rdata` read out of `Hod2.exe` by `tools/hod2lib/class14.py`.
  */
+console.log("\nclass 0x14, the stage-2 boss:");
 {
-
-  /**
-   * `boss2.bin`, with the clips the states name. Play lengths are the real
-   * ones out of the exported bundle, because **every state measures its exit
-   * on the play clock**: deriving them from the frame count would be a second
-   * implementation of the thing the bundle carries.
-   */
+  const C14_TABLES = {"anim_slots":[{"motion":21,"cues":[[11,0],[45,2],[60,0]],"end_code":3},
+    {"motion":22,"cues":[[30,0],[53,2],[82,0]],"end_code":3},{"motion":23,
+    "cues":[[30,0],[53,2],[82,0]],"end_code":3},{"motion":24,"cues":[[25,0],
+    [50,2],[75,0]],"end_code":3},{"motion":25,"cues":[[30,2]],"end_code":3},
+    {"motion":26,"cues":[[40,2]],"end_code":3},{"motion":27,"cues":[],
+    "end_code":6},{"motion":28,"cues":[],"end_code":0},{"motion":29,"cues":[],
+    "end_code":0},{"motion":30,"cues":[[2,0],[13,6],[20,4],[50,2]],
+    "end_code":0},{"motion":31,"cues":[[1,0],[10,6],[20,4],[40,2]],
+    "end_code":0},{"motion":33,"cues":[],"end_code":0},{"motion":34,"cues":[],
+    "end_code":0},{"motion":37,"cues":[[32,6],[55,3]],"end_code":0},
+    {"motion":38,"cues":[],"end_code":0},{"motion":39,"cues":[],"end_code":0},
+    {"motion":40,"cues":[],"end_code":6},{"motion":43,"cues":[[30,0],[50,2],
+    [93,0],[110,3]],"end_code":6},{"motion":44,"cues":[],"end_code":6},
+    {"motion":45,"cues":[[32,6],[45,1]],"end_code":0},{"motion":47,"cues":[],
+    "end_code":6},{"motion":49,"cues":[[25,0],[47,2]],"end_code":0},
+    {"motion":50,"cues":[[20,0],[105,3]],"end_code":0},{"motion":51,
+    "cues":[[35,2],[45,1],[100,6],[130,1]],"end_code":0},{"motion":52,
+    "cues":[[35,3]],"end_code":2},{"motion":53,"cues":[[12,3]],"end_code":2},
+    {"motion":54,"cues":[[25,3]],"end_code":2},{"motion":55,"cues":[],
+    "end_code":0},{"motion":58,"cues":[[7,2],[41,3]],"end_code":2},
+    {"motion":46,"cues":[],"end_code":0}],"damage_cones":[[0,0,0,0],[0,0,0,0],
+    [0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,
+    0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,
+    0],[0,0,0,0],[0,0,0,0],[2560,-20480,6144,16384],[4096,-18432,4096,16384],
+    [4096,-16384,2048,16384],[4352,-12288,-2048,16384],[4352,-8192,-6144,
+    16384],[4352,-6144,-8192,16384],[5120,-4096,-10240,16384],[5376,-4096,
+    -10240,16384],[5632,-4096,-10240,16384],[5888,-4096,-10240,16384],[6144,
+    -4096,-10240,16384],[6400,-4096,-10240,16384],[6656,-4096,-10240,16384],
+    [6912,-4096,-10240,16384],[7168,-4096,-10240,16384],[7424,-4096,-10240,
+    16384],[7680,-4096,-10240,16384],[7936,-4096,-10240,16384],[8192,-4096,
+    -10240,16384],[8192,-4096,-10240,16384],[8192,-4096,-10240,16384]],
+    "window_timing":[{"open_hold":100,"shut_hold":30,"open_rate":2.0,
+    "close_rate":-1.0},{"open_hold":50,"shut_hold":25,"open_rate":2.0,
+    "close_rate":-1.0},{"open_hold":30,"shut_hold":20,"open_rate":2.5,
+    "close_rate":-1.25},{"open_hold":15,"shut_hold":10,"open_rate":2.5,
+    "close_rate":-1.25},{"open_hold":10,"shut_hold":5,"open_rate":3.0,
+    "close_rate":-1.5},{"open_hold":2,"shut_hold":1,"open_rate":4.0,
+    "close_rate":-2.0},{"open_hold":1,"shut_hold":0,"open_rate":5.0,
+    "close_rate":-2.5},{"open_hold":0,"shut_hold":0,"open_rate":6.0,
+    "close_rate":-3.0}],"summon_delays_a":[75,75,70,70,65,65,60,60,55,55,50,
+    50,45,45,40,40],"summon_delays_b":[70,70,65,65,60,60,55,55,50,50,45,45,40,
+    40,35,35],"summon_counts":[[5,4,3],[6,5,4],[6,5,4],[6,5,4],[6,5,4],[7,6,
+    5],[7,6,5],[7,6,5],[7,6,5],[8,7,6],[8,7,6],[8,7,6],[8,7,6],[9,8,7],[9,8,
+    7],[9,8,7]],"phase_hp_frac":[0.5333340167999268,0.3333339989185333,0.0,
+    0.5333340167999268,0.3333339989185333,0.22222299873828888,
+    0.11111199855804443,0.0,0.5,0.0],"bone_damage":[[30,28],[28,26],[27,24],
+    [26,23],[25,22],[25,22],[24,21],[24,21],[23,20],[23,20],[22,19],[22,19],
+    [21,18],[20,17],[18,15],[16,13]]} as unknown as Class14Json;
+  const C14_BONES = [{"bone":1,"part":"bone01_031f","slot":799,"offset":[0,0,0],"parent":null,
+    "hit_centre":[0,2.25,0],"hit_radius":5.550000190734863},{"bone":2,
+    "part":"bone02_0319","slot":793,"offset":[-0.0020000000949949026,
+    8.369799613952637,0.6215000152587891],"parent":0,"hit_centre":[0,
+    0.20000000298023224,2.4000000953674316],"hit_radius":2.4000000953674316},
+    {"bone":3,"part":"bone03_031b","slot":795,"offset":[-4.504000186920166,
+    4.659999847412109,0.23800000548362732],"parent":0,
+    "hit_centre":[0.20000000298023224,-2.0999999046325684,0],
+    "hit_radius":3.299999952316284},{"bone":4,"part":"bone04_0323","slot":803,
+    "offset":[0,-5.77400016784668,0],"parent":2,"hit_centre":[0,
+    -2.450000047683716,0],"hit_radius":2.799999952316284},{"bone":5,
+    "part":"bone05_0321","slot":801,"offset":[0,-5.776000022888184,0],
+    "parent":3,"hit_centre":[0,-1.649999976158142,0],
+    "hit_radius":2.1500000953674316},{"bone":6,"part":"bone06_031a",
+    "slot":794,"offset":[4.504000186920166,4.659999847412109,
+    0.23800000548362732],"parent":0,"hit_centre":[0.20000000298023224,
+    -2.0999999046325684,0],"hit_radius":3.299999952316284},{"bone":7,
+    "part":"bone07_0322","slot":802,"offset":[0,-5.77400016784668,0],
+    "parent":5,"hit_centre":[0,-2.450000047683716,0],
+    "hit_radius":2.799999952316284},{"bone":8,"part":"bone08_0320","slot":800,
+    "offset":[0,-5.776000022888184,0],"parent":6,"hit_centre":[0,
+    -1.649999976158142,0],"hit_radius":2.1500000953674316},{"bone":9,
+    "part":"bone09_031c","slot":796,"offset":[0,-1.8480000495910645,0],
+    "parent":null,"hit_centre":[0,-2.700000047683716,0],"hit_radius":3.5},
+    {"bone":10,"part":"bone10_031e","slot":798,"offset":[-1.9019999504089355,
+    -4.1539998054504395,-0.004000000189989805],"parent":8,"hit_centre":[0,
+    -3.6500000953674316,0],"hit_radius":3.6500000953674316},{"bone":11,
+    "part":"bone11_0318","slot":792,"offset":[0,-8.432000160217285,0],
+    "parent":9,"hit_centre":[0,-3.4000000953674316,0],
+    "hit_radius":4.550000190734863},{"bone":12,"part":"bone12_02ca",
+    "slot":714,"offset":[0,-9.513999938964844,0],"parent":10,"hit_centre":[0,
+    -0.30000001192092896,1.600000023841858],"hit_radius":2.3499999046325684},
+    {"bone":13,"part":"bone13_031d","slot":797,"offset":[1.9019999504089355,
+    -4.1539998054504395,-0.004000000189989805],"parent":8,"hit_centre":[0,
+    -3.6500000953674316,0],"hit_radius":3.6500000953674316},{"bone":14,
+    "part":"bone14_0317","slot":791,"offset":[0,-8.432000160217285,0],
+    "parent":12,"hit_centre":[0,-3.4000000953674316,0],
+    "hit_radius":4.550000190734863},{"bone":15,"part":"bone15_02c9",
+    "slot":713,"offset":[0,-9.513999938964844,0],"parent":13,"hit_centre":[0,
+    -0.30000001192092896,1.600000023841858],"hit_radius":2.3499999046325684}] as CharacterType["bones"];
+  const C14_LENGTHS: Record<string, [number, number]> = {"21":[50,98],"22":[55,108],"23":[55,108],"24":[50,98],"25":[25,48],
+    "26":[33,64],"27":[31,59],"28":[30,58],"29":[18,34],"30":[61,119],
+    "31":[35,68],"32":[65,128],"33":[60,118],"34":[56,109],"35":[30,58],
+    "36":[31,59],"37":[61,119],"38":[76,149],"39":[20,38],"40":[26,49],
+    "41":[35,68],"42":[30,58],"43":[66,129],"44":[2,1],"45":[41,79],"46":[26,
+    50],"47":[25,48],"48":[51,99],"49":[101,199],"50":[96,189],"51":[86,169],
+    "52":[35,68],"53":[15,28],"54":[25,48],"55":[61,119],"56":[66,129],
+    "57":[66,129],"58":[40,78]};
   const TYPE14: CharacterType = {
-    ...TYPE,
-    type: 0x47, name: "boss2", file: "boss2.bin",
-    motions: {
-      ...TYPE.motions,
-      "21": motion(50, 0, 98), "23": motion(55, 0, 108),
-      "24": motion(50, 0, 98), "25": motion(25, 0, 48),
-      "26": motion(33, 0, 64), "29": motion(25, 0, 48),
-      "31": motion(35, 0, 68), "32": motion(65, 0, 128),
-      "33": motion(60, 0, 118), "34": motion(56, 0, 109),
-      "35": motion(30, 0, 58), "36": motion(31, 0, 59),
-      "37": motion(41, 0, 79), "38": motion(76, 0, 149),
-      "39": motion(20, 0, 38), "40": motion(26, 0, 50),
-      "41": motion(35, 0, 68), "42": motion(30, 0, 58),
-      "45": motion(61, 0, 119), "46": motion(25, 0, 48),
-      "47": motion(25, 0, 48), "48": motion(51, 0, 99),
-      "49": motion(101, 0, 199), "51": motion(86, 0, 169),
-      "53": motion(15, 0, 28), "54": motion(25, 0, 48),
-      "55": motion(61, 0, 119), "56": motion(66, 0, 129),
-      "57": motion(66, 0, 129), "58": motion(40, 0, 78),
-    },
+    ...TYPE, type: 0x47, name: "boss2", file: "boss2.bin", bone_count: 16,
+    bones: C14_BONES,
+    motions: Object.fromEntries(Object.entries(C14_LENGTHS)
+      .map(([k, [n, p]]) => [k, motion(n, 0, p)])),
   };
   const CHARS14 = {
-    ...CHARS, types: { "1": TYPE, "71": TYPE14 },
+    ...CHARS, types: { ...CHARS.types, "71": TYPE14 }, class14: C14_TABLES,
   } as unknown as CharactersJson;
 
-  /** Stage 5 block 3's descriptor tail, as the bundle now carries it. */
+  /** Stage 5 block 3's descriptor tail, as the bundle carries it. */
   const desc14 = (state: number) => ({
     char_type: 0x47, state,
     dir: [0, 0, 1] as [number, number, number],
-    route: [[660, 0, -4900], [660, 0, -5000],
-            [510, 0, -5000], [510, 0, -4900]] as [number, number, number][],
+    route: [[60, 0, -40], [60, 0, -140],
+            [-90, 0, -140], [-90, 0, -40]] as [number, number, number][],
     despawn_path: 209, despawn_frame: 0,
   });
 
   /**
-   * Narrowing, not a cast — the same proof `spawnZombie` makes: `makeActor`
-   * picks the union arm from `cls`, so a fixture that wants to read the boss's
-   * tail has to establish the class rather than assert it.
+   * A camera at `eye` looking at `at` (down -Z when `at` is not given), in
+   * the engine's sign: `-z` is in front.
    */
-  const spawnBoss = (state: number, hp: number): Boss2Actor => {
-    ResetGameGlobals();
-    EnterPlay();
-    SetGameTables(CHARS14);
-    const a = ActorSpawn(0x2400, SpawnClass.Boss2, 0x47, "boss2",
-                         { class14: desc14(state) }, new Rng(7));
-    if (a.cls !== SpawnClass.Boss2) throw new Error("not class 0x14");
-    a.pos = vec3(580, 0, -5010);
-    a.hp = hp;
-    a.maxHp = hp;
-    a.visible = true;
-    return a;
+  const camHost = (eye: Vec3, at?: Vec3): GameHost => {
+    const f = at ? vec3(at.x - eye.x, at.y - eye.y, at.z - eye.z)
+      : vec3(0, 0, -1);
+    const fl = Math.hypot(f.x, f.y, f.z);
+    f.x /= fl; f.y /= fl; f.z /= fl;
+    // right = f x up, up' = right x f
+    let r = vec3(-f.z, 0, f.x);
+    const rl = Math.hypot(r.x, r.z);
+    r = rl > 1e-6 ? vec3(r.x / rl, 0, r.z / rl) : vec3(1, 0, 0);
+    const u = vec3(r.y * f.z - r.z * f.y, r.z * f.x - r.x * f.z,
+                   r.x * f.y - r.y * f.x);
+    return {
+      ...NULL_HOST,
+      viewSpaceOfPoint: (p, out) => {
+        const dx = p.x - eye.x, dy = p.y - eye.y, dz = p.z - eye.z;
+        out.x = dx * r.x + dy * r.y + dz * r.z;
+        out.y = dx * u.x + dy * u.y + dz * u.z;
+        out.z = -(dx * f.x + dy * f.y + dz * f.z);
+        return true;
+      },
+      viewPoint: (x, y, z, out) => {
+        out.x = eye.x + r.x * x + u.x * y - f.x * z;
+        out.y = eye.y + r.y * x + u.y * y - f.y * z;
+        out.z = eye.z + r.z * x + u.z * y - f.z * z;
+      },
+    };
   };
 
-  const boss14Frame = () =>
-    ({ eye: vec3(580, 0, -4880), dt: 1 / 60, rng: new Rng(11),
-       host: NULL_HOST });
+  const spawnBoss = (state: number, hp: number, rng: Rng): Boss2Actor => {
+    const a = ActorSpawn(0x2400, SpawnClass.Boss2, 0x47, "boss2",
+                         { class14: desc14(state), pos: vec3(0, 0, -90),
+                           hp, maxHp: hp, visible: true }, rng);
+    if (a.cls !== SpawnClass.Boss2) throw new Error("not class 0x14");
+    return a;
+  };
+  const c14Scene = (rng: Rng): Events => {
+    const events = scene(0, rng);
+    SetGameTables(CHARS14);
+    G.g_player_no_damage[0] = 1;
+    return events;
+  };
 
-  /**
-   * The entrance's one hand-over: `g_bHudShutterState == 1` and nothing else.
-   * Entrances 0/1/3/4 raise flag 10 on the way through and entrance 2 does not
-   * -- which is exactly why stage 5's block 3 gates on 31 alone.
-   */
+  // -- Init: the model block, the flipbooks, the rank --------------------
   {
-    const a = spawnBoss(Class14State.Entrance0, 300);
-    const f = boss14Frame();
-    G.g_bHudShutterState = 2;
-    for (let i = 0; i < 4000 && a.boss2.state !== Class14State.Hunt; i++) {
-      // The shutter opens well into the entrance, as the script's own
-      // `hud_shutter_state 1` does.
-      if (i === 600) G.g_bHudShutterState = 1;
-      Boss2Handler.update(a, f);
-      ActorAdvanceMotion(a, 1 / 60);
-    }
-    check("entrance 0 hands over to Hunt when the shutter opens",
-          a.boss2.state === Class14State.Hunt,
-          `state ${Class14State[a.boss2.state]} sub ${a.boss2.sub}`);
-    check("...and raises g_script_flags[10] doing it",
-          G.g_script_flags[CLASS14_FLAG_INTRO_DONE] === 1,
-          `flag10 ${G.g_script_flags[CLASS14_FLAG_INTRO_DONE]}`);
-    check("...leaving the phase at ShortOpen",
-          a.boss2.phase === Class14Phase.ShortOpen,
-          `phase ${Class14Phase[a.boss2.phase]}`);
-  }
-  {
-    const a = spawnBoss(Class14State.Entrance2, 200);
-    const f = boss14Frame();
-    G.g_bHudShutterState = 2;
-    // Entrance 2's sub 1 waits on `g_script_flags[11]`, which stage 5's script
-    // raises four instructions before the spawn.
-    G.g_script_flags[CLASS14_FLAG_ROUND_B_OPEN] = 1;
-    for (let i = 0; i < 4000 && a.boss2.state !== Class14State.Hunt; i++) {
-      if (i === 600) G.g_bHudShutterState = 1;
-      Boss2Handler.update(a, f);
-      ActorAdvanceMotion(a, 1 / 60);
-    }
-    check("entrance 2 hands over on the same shutter",
-          a.boss2.state === Class14State.Hunt,
-          `state ${Class14State[a.boss2.state]}`);
-    check("...and raises no flag 10, which is why stage 5 waits on 31 alone",
-          (G.g_script_flags[CLASS14_FLAG_INTRO_DONE] ?? 0) === 0,
-          `flag10 ${G.g_script_flags[CLASS14_FLAG_INTRO_DONE]}`);
-    check("...leaving the phase at Stage5Open",
-          a.boss2.phase === Class14Phase.Stage5Open,
-          `phase ${Class14Phase[a.boss2.phase]}`);
+    const rng = new Rng(3);
+    c14Scene(rng);
+    const a = spawnBoss(Class14State.Entrance0, 300, rng);
+    const t = a.boss2;
+    check("Init builds the model block: sixteen bones, rotation order 1",
+          a.skel?.bones.length === 16 && a.skel.order === 1,
+          `${a.skel?.bones.length} order ${a.skel?.order}`);
+    check("...seats the camera rise at 6.0 and the shot sphere at 30",
+          t.cameraRise === 6 && a.hitRadius === 30,
+          `${t.cameraRise} ${a.hitRadius}`);
+    check("...is out of the shot test (0x8000) with the per-bone bit up",
+          (a.flags & ActorFlag.NoShotTest) !== 0
+          && (a.flags & ActorFlag.ShootPerBone) !== 0,
+          `0x${a.flags.toString(16)}`);
+    check("...and seeds both flipbooks: A 0x2CB..0x2ED at 1.0, B 0x2EE..0x315 "
+          + "at window 0's open rate 2.0",
+          t.bookA.frame === 0x2cb && t.bookA.high === 0x2ed
+          && t.bookA.rate === 1 && t.bookB.frame === 0x2ee
+          && t.bookB.high === 0x315 && t.bookB.rate === 2,
+          JSON.stringify([t.bookA, t.bookB]));
+    check("...both enemy counters, and the hit slot the model build claims",
+          G.g_enemies_present === 1 && G.g_enemies_alive === 1
+          && a.hitSlot !== HIT_SLOT_NONE,
+          `${G.g_enemies_present} ${G.g_enemies_alive} slot ${a.hitSlot}`);
   }
 
-  // `Class14AdvancePhase` -- the ladder, walked by the hit points and by
-  // nothing else. Stage 5's half of it is one step: 0.5 of full health.
+  // -- the stage-2 gate chain, driven by the banner ----------------------
+  //
+  // Entrance A raises flag 9; the banner record `0x005966B8` waits on it,
+  // flies for 300 frames and opens the shutter; the entrance hands over on
+  // the shutter and raises flag 10. No line of this test writes the shutter.
   {
-    const a = spawnBoss(Class14State.Entrance2, 200);
+    const rng = new Rng(5);
+    const events = c14Scene(rng);
+    G.g_bHudShutterState = 2;
+    const a = spawnBoss(Class14State.Entrance0, 300, rng);
+    const host = camHost(EYE);
+    let flag9At = -1, shutterAt = -1, huntAt = -1;
+    for (let i = 0; i < 3000 && huntAt < 0; i++) {
+      GameUpdate(EYE, 1 / 60, host, rng, events);
+      if (flag9At < 0 && G.g_script_flags[9]) flag9At = i;
+      if (shutterAt < 0 && G.g_bHudShutterState === 1) shutterAt = i;
+      if (a.boss2.state === Class14State.Hunt) huntAt = i;
+    }
+    check("entrance A raises flag 9 from its own clip",
+          flag9At > 0, `frame ${flag9At}`);
+    check("...the banner it spawned opens the shutter 300 frames on",
+          shutterAt > flag9At && shutterAt - flag9At >= 300,
+          `flag 9 at ${flag9At}, shutter at ${shutterAt}`);
+    check("...and the boss hands over to Hunt on that shutter",
+          huntAt >= shutterAt && huntAt - shutterAt <= 1,
+          `shutter ${shutterAt} hunt ${huntAt}`);
+    check("...raising g_script_flags[10], the stage's first gate",
+          G.g_script_flags[10] === 1);
+    check("...spawning the health bar at (320, 35) and engaging the boss",
+          G.g_boss_hp_bars.length === 1 && G.g_boss_hp_bars[0].x === 320
+          && G.g_boss_hp_bars[0].y === 35 && G.g_boss_engaged === 1
+          && G.g_boss_hp_fraction === 1,
+          `${JSON.stringify(G.g_boss_hp_bars)} engaged ${G.g_boss_engaged}`);
+    check("...and joining the shot test", (a.flags & ActorFlag.NoShotTest) === 0
+          && G.g_shot_test_list.some((e) => e.at === a.at),
+          `0x${a.flags.toString(16)}`);
+  }
+
+  // -- the weak point: bone 1, the 3.5 sphere, the window, the cone ------
+  //
+  // A direction search rather than a hand-built shot: the cone is the
+  // engine's own table and the bone's frame is the pose's, so the test asks
+  // which of 2048 directions around the boss would land, and asserts what
+  // the gates allow and refuse among them.
+  const gateRig = (seed: number) => {
+    const rng = new Rng(seed);
+    const events = c14Scene(rng);
+    const a = spawnBoss(Class14State.Hunt, 300, rng);
+    a.flags &= ~ActorFlag.NoShotTest;
+    a.boss2.state = Class14State.Hunt;
+    Class14AdvanceMotionAndPublishPoints(a);     // pose with hit centres
+    return { rng, events, a };
+  };
+  /** A camera 40 out along `d` in bone 1's frame, aiming at `aim`. */
+  const shootFrom = (a: Boss2Actor, d: Vec3, off: Vec3, rng: Rng,
+                     events: Events, bone = 1): number => {
+    const W1 = a.skel!.bones[1].mat;
+    const P = vec3();
+    const m = MatCopy(MatIdentity(), W1);
+    MatrixTranslate(m, 0, 4, 1);
+    MatrixGetTranslation(m, P);
+    const dw = vec3();
+    MatrixTransformVector(W1, d, dw);
+    const eye = vec3(P.x + dw.x * 40, P.y + dw.y * 40, P.z + dw.z * 40);
+    const aim = vec3(P.x + off.x, P.y + off.y, P.z + off.z);
+    const l = Math.hypot(aim.x - eye.x, aim.y - eye.y, aim.z - eye.z);
+    G.g_crosshair_ray[0] = {
+      origin: eye,
+      dir: vec3((aim.x - eye.x) / l, (aim.y - eye.y) / l, (aim.z - eye.z) / l),
+    };
+    const hp = a.hp;
+    MarkActorShot(a, 0, bone);
+    Class14ResolveShotBone(a, rng, camHost(eye, aim), events);
+    return hp - a.hp;
+  };
+  const dirs: Vec3[] = [];
+  for (let i = 0; i < 64; i++) {
+    for (let j = 1; j < 32; j++) {
+      const th = (j / 32) * Math.PI, ph = (i / 64) * Math.PI * 2;
+      dirs.push(vec3(Math.sin(th) * Math.sin(ph), Math.cos(th),
+                     Math.sin(th) * Math.cos(ph)));
+    }
+  }
+  const ZERO = vec3();
+  let goodDir: Vec3 | null = null;
+  {
+    const { rng, events, a } = gateRig(7);
+    const t = a.boss2;
+    t.bookB.frame = t.bookB.low + 18;
+    t.bookB.hold = -1;
+    let shutHits = 0;
+    for (const d of dirs) {
+      a.flags &= ~ActorFlag.Reacting;
+      shutHits += shootFrom(a, d, ZERO, rng, events) > 0 ? 1 : 0;
+    }
+    check("with flipbook B less than 19 frames open no shot damages the boss",
+          shutHits === 0 && a.hp === 300, `${shutHits} landed, hp ${a.hp}`);
+    t.bookB.frame = t.bookB.low + 30;
+    let open = 0;
+    /** The bone the registered shot test would hand a shot along `d`. */
+    const pickBone = (d: Vec3): number => {
+      const W1 = a.skel!.bones[1].mat;
+      const P = vec3();
+      const m = MatCopy(MatIdentity(), W1);
+      MatrixTranslate(m, 0, 4, 1);
+      MatrixGetTranslation(m, P);
+      const dw = vec3();
+      MatrixTransformVector(W1, d, dw);
+      const eye = vec3(P.x + dw.x * 60, P.y + dw.y * 60, P.z + dw.z * 60);
+      const host = camHost(eye, P);
+      MatrixGetTranslation(W1, a.shotCentre);
+      G.g_shot_test_list = [];
+      RegisterForShotTest(a, host);
+      const l = Math.hypot(P.x - eye.x, P.y - eye.y, P.z - eye.z);
+      const c = ProcessPlayerShotsTestList({ origin: eye, dir: vec3(
+        (P.x - eye.x) / l, (P.y - eye.y) / l, (P.z - eye.z) / l) }, host);
+      return c ? c.bone : 0;
+    };
+    for (const d of dirs) {
+      a.hp = 300;
+      a.flags &= ~(ActorFlag.Reacting | ActorFlag.ShotImmune);
+      t.state = Class14State.Hunt;
+      if (shootFrom(a, d, ZERO, rng, events) > 0) {
+        open += 1;
+        if (!goodDir && pickBone(d) === 1) goodDir = d;
+      }
+    }
+    check("...among them a direction the shot test itself resolves to bone 1",
+          goodDir !== null);
+    check("...and with it 30 open, some directions land and most do not: "
+          + "the cone", open > 0 && open < dirs.length / 2,
+          `${open} of ${dirs.length}`);
+    if (goodDir) {
+      a.hp = 300;
+      a.flags &= ~(ActorFlag.Reacting | ActorFlag.ShotImmune);
+      t.state = Class14State.Hunt;
+      check("a landing direction aimed 3.6 off the weak point misses: the "
+            + "3.5 sphere", shootFrom(a, goodDir, vec3(3.6, 0, 0), rng,
+                                     events) === 0 && a.hp === 300,
+            `hp ${a.hp}`);
+      check("...and the same direction on bone 2 is a ricochet",
+            shootFrom(a, goodDir, ZERO, rng, events, 2) === 0);
+      a.flags |= ActorFlag.ShotImmune;
+      check("...and on bone 1 under the phase immunity (0x100) as well",
+            shootFrom(a, goodDir, ZERO, rng, events) === 0);
+    }
+  }
+
+  // -- two pulls in one frame -------------------------------------------
+  // The engine polls the trigger once a frame, so the shot record the gates
+  // read back is always the pull that marked the boss. The port's queue lets
+  // a whole volley into one frame, and the gates read the marking pull's ray
+  // (`Actor.shotRays`), not the frame's last.
+  if (goodDir) {
+    const { rng, events, a } = gateRig(11);
+    a.boss2.bookB.frame = a.boss2.bookB.low + 30;
+    const W1 = a.skel!.bones[1].mat;
+    const P = vec3();
+    const m = MatCopy(MatIdentity(), W1);
+    MatrixTranslate(m, 0, 4, 1);
+    MatrixGetTranslation(m, P);
+    const dw = vec3();
+    MatrixTransformVector(W1, goodDir, dw);
+    const eye = vec3(P.x + dw.x * 60, P.y + dw.y * 60, P.z + dw.z * 60);
+    const host = camHost(eye, P);
+    MatrixGetTranslation(W1, a.shotCentre);
+    G.g_shot_test_list = [];
+    RegisterForShotTest(a, host);
+    const pull = (q: Vec3): void => {
+      const l = Math.hypot(q.x - eye.x, q.y - eye.y, q.z - eye.z);
+      FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: {
+        origin: vec3(eye.x, eye.y, eye.z),
+        dir: vec3((q.x - eye.x) / l, (q.y - eye.y) / l, (q.z - eye.z) / l),
+      } }, host, rng, events);
+    };
+    pull(P);                                          // lands: bone 1
+    const marked = a.shotBones[0];
+    pull(vec3(P.x + 200, P.y + 200, P.z));            // hits nothing
+    Class14ResolveShotBone(a, rng, host, events);
+    check("two pulls in one frame: the gates read the ray of the pull that "
+          + "marked the boss, not the frame's last one",
+          marked === 1 && a.hp < 300, `bone ${marked}, hp ${a.hp}`);
+  }
+
+  // -- the damage: Arcade takes the table, Original multiplies ------------
+  if (goodDir) {
+    const hit = (mode: GameMode, scale: number): number => {
+      const { rng, events, a } = gateRig(9);
+      G.g_GameMode = mode;
+      G.g_original_weapon_damage_scale[0] = scale;
+      a.boss2.bookB.frame = a.boss2.bookB.low + 30;
+      a.boss2.rank = 4;
+      return shootFrom(a, goodDir!, ZERO, rng, events);
+    };
+    const table = C14_TABLES.bone_damage[4][0];
+    check("Arcade takes g_class14_bone_damage[rank][0] as it stands -- no "
+          + "doubling", hit(GameMode.Arcade, 1) === table,
+          `${hit(GameMode.Arcade, 1)} vs ${table}`);
+    check("Original multiplies by the weapon factor, 1.0 for every weapon "
+          + "the game hands out", hit(GameMode.Original, 1) === table);
+    check("...doubles on the -1.0 factor",
+          hit(GameMode.Original, -1) === Math.min(33, table * 2),
+          `${hit(GameMode.Original, -1)}`);
+    check("...and caps at g_boss_shot_damage_cap, 33",
+          hit(GameMode.Original, 3) === 33, `${hit(GameMode.Original, 3)}`);
+    G.g_GameMode = GameMode.Arcade;
+    G.g_original_weapon_damage_scale[0] = 1;
+  }
+
+  // -- the bar, the rank bump, the immunity, the reaction ----------------
+  if (goodDir) {
+    const { rng, events, a } = gateRig(13);
+    const t = a.boss2;
+    t.phase = Class14Phase.Stage5Open;
+    t.bookB.frame = t.bookB.low + 30;
+    const d = shootFrom(a, goodDir, ZERO, rng, events);
+    check("a damaging hit writes g_boss_hp_fraction = hp / maxhp as a float",
+          d > 0 && G.g_boss_hp_fraction === Math.fround(a.hp / 300),
+          `${G.g_boss_hp_fraction}`);
+    check("...bumps the rank, starts the reaction and opens the window a row",
+          t.rankBump === 1 && t.state === Class14State.CuedMotion
+          && (a.flags & ActorFlag.Reacting) !== 0 && t.timing === 2,
+          `bump ${t.rankBump} state ${Class14State[t.state]} timing ${t.timing}`);
+    a.flags &= ~ActorFlag.Reacting;
+    a.hp = 151;
+    shootFrom(a, goodDir, ZERO, rng, events);
+    check("a hit that crosses the phase's fraction raises the immunity",
+          (a.flags & ActorFlag.ShotImmune) !== 0 && a.hp <= 150,
+          `hp ${a.hp} 0x${a.flags.toString(16)}`);
+    a.flags &= ~(ActorFlag.Reacting | ActorFlag.ShotImmune);
+    a.hp = 5;
+    shootFrom(a, goodDir, ZERO, rng, events);
+    check("the killing hit writes 0.0, marks the boss dead and drops the "
+          + "alive count", G.g_boss_hp_fraction === 0
+          && (a.flags & ActorFlag.Dead) !== 0 && G.g_enemies_alive === 0,
+          `${G.g_boss_hp_fraction} alive ${G.g_enemies_alive}`);
+  }
+
+  // -- the adaptive rank --------------------------------------------------
+  {
+    const rng = new Rng(17);
+    c14Scene(rng);
+    const a = spawnBoss(Class14State.Hunt, 300, rng);
+    const t = a.boss2;
+    t.state = Class14State.SummonRoundA;
+    t.rank = 8;
+    t.lives = [3, 3];
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    G.g_player_lives[0] = 2;
+    Class14TrackAdaptiveRank(a);
+    check("one player: a lost life costs 3, even in a summoning round",
+          t.rank === 5 && t.lives[0] === 2, `${t.rank}`);
+    t.rankBump = 1;
+    Class14TrackAdaptiveRank(a);
+    check("...a pending bump is +1", t.rank === 6 && t.rankBump === 0);
+    G.g_players_in_play = 2;
+    G.g_player_lives[1] = 2;
+    Class14TrackAdaptiveRank(a);
+    check("two players: 2 in a summoning round", t.rank === 4, `${t.rank}`);
+    t.state = Class14State.Hunt;
+    G.g_player_lives[1] = 1;
+    Class14TrackAdaptiveRank(a);
+    check("...3 outside one", t.rank === 1, `${t.rank}`);
+    G.g_player_lives[0] = 0;
+    Class14TrackAdaptiveRank(a);
+    check("...and the rank is clamped at 0", t.rank === 0, `${t.rank}`);
+    G.g_players_in_play = 1;
+  }
+
+  // -- the summons: sub-types 1 and 2, paced -----------------------------
+  {
+    const rng = new Rng(19);
+    const events = c14Scene(rng);
+    G.g_water_wave_field = {
+      count: 0, mask: 0, planeY: -25, sources: new Array(8).fill(null),
+    };
+    const a = spawnBoss(Class14State.Hunt, 300, rng);
+    const t = a.boss2;
+    const f = { eye: EYE, dt: 1 / 60, rng, host: camHost(EYE), events };
+    const fish = () => G.g_object_list.filter(
+      (o) => o.cls === SpawnClass.WaterEnemy && !o.despawned) as FishActor[];
+    t.state = Class14State.SummonRoundA;
+    t.sub = 4;
+    t.counter0 = 2;
+    t.counter1 = 3;
+    t.counter2 = 0;
+    t.rank = 0;
+    G.g_screen_shake_frames = 5;
+    Boss2Handler.update(a, f);
+    check("round A places nothing while the screen still shakes",
+          fish().length === 0 && t.counter1 === 3, `${fish().length}`);
+    G.g_screen_shake_frames = 0;
+    Boss2Handler.update(a, f);
+    const first = fish();
+    check("...then one fish, sub-type 1, 100 frames, one under the surface",
+          first.length === 1 && first[0].fish.subtype === 1
+          && first[0].fish.lungeFrames === 100
+          && first[0].pos.y === Math.fround(-25 - 1),
+          first.map((o) => `${o.fish.subtype}/${o.fish.lungeFrames}`
+                           + `@${o.pos.y}`).join());
+    check("...and waits g_class14_summon_delays_a[rank] frames for the next",
+          t.counter1 === 2 && t.counter2 === C14_TABLES.summon_delays_a[0],
+          `${t.counter1} ${t.counter2}`);
+    t.counter2 = 0;
+    Boss2Handler.update(a, f);
+    check("while the first fish holds a water slot the next is refused -- "
+          + "and the round's count still goes down, as the engine's does",
+          fish().length === 1 && t.counter1 === 1,
+          `${fish().length} fish, ${t.counter1} left`);
+    G.g_enemies_alive = 4;
+    G.g_water_attack_slots = [0, 0, 0, 0];
+    t.counter2 = 0;
+    Boss2Handler.update(a, f);
+    check("...and with four enemies alive nothing is placed",
+          fish().length === 1 && t.counter1 === 1);
+    // Round B: sub-type 2, 0x50 frames, ten under, three draws a fish.
+    G.g_enemies_alive = 2;
+    t.state = Class14State.SummonRoundB;
+    t.sub = 6;
+    t.counter1 = 1;
+    t.counter2 = 0;
+    const before = rng.state;
+    Boss2Handler.update(a, f);
+    const b = fish().find((o) => o.fish.subtype === 2);
+    check("round B places sub-type 2, 0x50 frames, ten under the surface",
+          b !== undefined && b.fish.lungeFrames === 0x50
+          && b.pos.y === Math.fround(-25 - 10),
+          `${b?.fish.lungeFrames} @${b?.pos.y}`);
+    check("...drawing three rand()s for it", rng.state !== before);
+  }
+
+  // -- Class14AdvancePhase ------------------------------------------------
+  {
+    const rng = new Rng(23);
+    c14Scene(rng);
+    const a = spawnBoss(Class14State.Entrance2, 200, rng);
     a.boss2.state = Class14State.Hunt;
     a.boss2.phase = Class14Phase.Stage5Open;
     a.hp = 101;
@@ -14939,99 +15371,111 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
           stepped === Class14Phase.Stage5Final
           && steppedState === Class14State.Close,
           `phase ${Class14Phase[stepped]} state ${Class14State[steppedState]}`);
-    // The gate every arm carries: a boss mid-leap finishes it first.
-    const b = spawnBoss(Class14State.Entrance2, 200);
-    b.boss2.state = Class14State.LeapAttack;
-    b.boss2.phase = Class14Phase.Stage5Open;
-    b.hp = 1;
-    Class14AdvancePhase(b);
-    const mid: number = b.boss2.phase;
+    a.boss2.state = Class14State.LeapAttack;
+    a.boss2.phase = Class14Phase.Stage5Open;
+    a.hp = 1;
+    Class14AdvancePhase(a);
+    const mid: number = a.boss2.phase;
     check("...and no arm is taken while the boss is not in state 5, 6 or 7",
           mid === Class14Phase.Stage5Open, `${Class14Phase[mid]}`);
   }
 
-  // The death fork, which is where all twenty-one gates are finally opened.
-  // Phase alone picks the flag.
+  // -- the death fork, where all twenty-one gates are finally opened -----
   for (const [phase, flag, state] of [
-    [Class14Phase.ShortFinal, CLASS14_FLAG_DEAD, Class14State.DeathA],
-    [Class14Phase.LongFinal, CLASS14_FLAG_DEAD, Class14State.DeathB],
-    [Class14Phase.Stage5Final, CLASS14_FLAG_DEAD_STAGE5, Class14State.DeathC],
+    [Class14Phase.ShortFinal, 17, Class14State.DeathA],
+    [Class14Phase.LongFinal, 17, Class14State.DeathB],
+    [Class14Phase.Stage5Final, 31, Class14State.DeathC],
   ] as [Class14Phase, number, Class14State][]) {
-    const a = spawnBoss(Class14State.Entrance2, 200);
-    const f = boss14Frame();
+    const rng = new Rng(29);
+    const events = c14Scene(rng);
+    // Above the body, so the fixture's still clips reach the water: the real
+    // sink clip carries bone 1 down to it.
+    G.g_water_wave_field = {
+      count: 0, mask: 0, planeY: 5, sources: new Array(8).fill(null),
+    };
+    const a = spawnBoss(Class14State.Hunt, 200, rng);
+    const f = { eye: EYE, dt: 1 / 60, rng, host: camHost(EYE), events };
     a.boss2.phase = phase;
     a.boss2.state = Class14State.CuedMotion;
     a.boss2.sub = 0;
-    a.boss2.nextState = Class14State.Hunt;
+    a.boss2.savedState = Class14State.Hunt;
     a.hp = 0;
     a.flags |= ActorFlag.Dead;
+    let cueFrame = -1;
     for (let i = 0; i < 400 && a.boss2.state === Class14State.CuedMotion; i++) {
+      cueFrame = a.skel?.cursor ?? -1;
       Boss2Handler.update(a, f);
-      ActorAdvanceMotion(a, 1 / 60);
     }
-    check(`a death in ${Class14Phase[phase]} raises `
-          + `g_script_flags[${flag}] and enters ${Class14State[state]}`,
-          G.g_script_flags[flag] === 1 && a.boss2.state === state,
-          `flag ${G.g_script_flags[flag]} `
-          + `state ${Class14State[a.boss2.state]}`);
+    check(`a death in ${Class14Phase[phase]} raises g_script_flags[${flag}] `
+          + `and enters ${Class14State[state]} on the reaction's cursor 0x14`,
+          G.g_script_flags[flag] === 1 && a.boss2.state === state
+          && cueFrame === 0x14,
+          `flag ${G.g_script_flags[flag]} state ${Class14State[a.boss2.state]}`
+          + ` cursor ${cueFrame}`);
     check("...and raises nothing else",
-          [10, 11, 12, 13, 14, 15, 16, 17, 31]
+          [9, 10, 11, 12, 13, 14, 15, 16, 17, 31]
             .filter((n) => n !== flag)
-            .every((n) => (G.g_script_flags[n] ?? 0) === 0),
-          `${G.g_script_flags.map((v, i) => (v ? i : -1))
-              .filter((i) => i >= 0).join(",")}`);
-    // All three deaths raise `obj+0x34` bit `0x10000` -- DeathC in its sub 0,
-    // A and B with the present decrement -- so the dead boss stops holding
-    // the camera, and with it `wait_enemies_present 0`.
-    a.flags &= ~ActorFlag.NoCameraTrack;
-    for (let i = 0; i < 600 && (a.flags & ActorFlag.NoCameraTrack) === 0; i++) {
+            .every((n) => (G.g_script_flags[n] ?? 0) === 0));
+    const present = G.g_enemies_present;
+    for (let i = 0; i < 4000 && G.g_enemies_present === present; i++) {
       Boss2Handler.update(a, f);
-      ActorAdvanceMotion(a, 1 / 60);
     }
-    check(`...and ${Class14State[state]} takes the boss off the camera's list`,
-          (a.flags & ActorFlag.NoCameraTrack) !== 0);
+    check(`...and ${Class14State[state]} takes the body out of `
+          + "g_enemies_present, off the camera's list",
+          G.g_enemies_present === present - 1
+          && (a.flags & ActorFlag.NoCameraTrack) !== 0,
+          `present ${G.g_enemies_present} sub ${a.boss2.sub}`);
   }
 
-  /**
-   * End to end, on stage 5 block 3's own descriptor: the entrance, the
-   * shutter, the fight, two hundred hit points of shooting, and
-   * `g_script_flags[31]`.
-   *
-   * The shots go through `MarkActorShot`, which is what the real shot path
-   * does for a class that owns its own result -- `Class14ResolveShotBone`
-   * reads `obj+0x34` bit 3 and runs `Class14ApplyBoneDamage` itself, and
-   * nothing here goes near `ResolveHit`.
-   */
-  {
-    const a = spawnBoss(Class14State.Entrance2, 200);
-    const f = boss14Frame();
+  // -- stage 5's cameo, end to end ----------------------------------------
+  //
+  // Entrance C waits for flag 11, the script's shutter hands the fight over,
+  // and a player who keeps a landing direction on bone 1 -- the camera
+  // follows the boss round, as a rail camera would -- shoots it through the
+  // window to death: flag 31, and the body gone from `g_enemies_present`.
+  if (goodDir) {
+    const rng = new Rng(31);
+    const events = c14Scene(rng);
     G.g_bHudShutterState = 2;
-    G.g_script_flags[CLASS14_FLAG_ROUND_B_OPEN] = 1;
-    let shots = 0;
-    let frames = 0;
-    for (; frames < 60000
-           && (G.g_script_flags[CLASS14_FLAG_DEAD_STAGE5] ?? 0) === 0;
-         frames++) {
-      if (frames === 300) G.g_bHudShutterState = 1;
-      if (frames > 400 && frames % 12 === 0) {
-        MarkActorShot(a, 0, 1);
-        shots += 1;
+    const a = spawnBoss(Class14State.Entrance2, 200, rng);
+    G.g_script_flags[11] = 1;
+    let eye = vec3(0, 0, 0);
+    let look = vec3(0, 0, -90);
+    let landed = 0, fired = 0, frames = 0;
+    for (; frames < 40000 && G.g_enemies_present > 0; frames++) {
+      if (frames === 200) G.g_bHudShutterState = 1;
+      if (a.skel && frames > 250 && frames % 8 === 0) {
+        const W1 = a.skel.bones[1].mat;
+        const P = vec3();
+        const m = MatCopy(MatIdentity(), W1);
+        MatrixTranslate(m, 0, 4, 1);
+        MatrixGetTranslation(m, P);
+        const dw = vec3();
+        MatrixTransformVector(W1, goodDir, dw);
+        eye = vec3(P.x + dw.x * 60, P.y + dw.y * 60, P.z + dw.z * 60);
+        look = P;
+        const l = Math.hypot(P.x - eye.x, P.y - eye.y, P.z - eye.z);
+        QueueOffscreenPull(0);
+        QueueShotRequest(0, { origin: eye,
+          dir: vec3((P.x - eye.x) / l, (P.y - eye.y) / l, (P.z - eye.z) / l) });
+        fired += 1;
       }
-      Boss2Handler.update(a, f);
-      ActorAdvanceMotion(a, 1 / 60);
+      const hp = a.hp;
+      GameUpdate(eye, 1 / 60, camHost(eye, look), rng, events);
+      if (a.hp < hp) landed += 1;
     }
-    check("shot to death from stage 5's descriptor, the boss raises "
-          + "g_script_flags[31]",
-          G.g_script_flags[CLASS14_FLAG_DEAD_STAGE5] === 1,
-          `after ${frames} frames and ${shots} shots, `
-          + `hp ${a.hp} phase ${Class14Phase[a.boss2.phase]} `
-          + `state ${Class14State[a.boss2.state]}`);
-    check("...having walked the phase ladder to Stage5Final on the way",
-          a.boss2.phase === Class14Phase.Stage5Final,
-          `phase ${Class14Phase[a.boss2.phase]}`);
-    check("...and raised flag 17 nowhere, which is stage 2's flag",
-          (G.g_script_flags[CLASS14_FLAG_DEAD] ?? 0) === 0,
-          `flag17 ${G.g_script_flags[CLASS14_FLAG_DEAD]}`);
+    check("stage 5: the cameo is shot to death through its window and "
+          + "raises g_script_flags[31]", G.g_script_flags[31] === 1,
+          `${frames} frames, ${landed} of ${fired} landed, hp ${a.hp}, `
+          + `${Class14State[a.boss2.state]} sub ${a.boss2.sub}`);
+    check("...having walked the ladder to Stage5Final, raising no 17",
+          a.boss2.phase === Class14Phase.Stage5Final
+          && (G.g_script_flags[17] ?? 0) === 0);
+    check("...and DeathC takes it out of g_enemies_present",
+          G.g_enemies_present === 0 && a.boss2.state === Class14State.DeathC,
+          `present ${G.g_enemies_present}`);
+    check("...never raising flag 10 or engaging the stage-2 boss flag",
+          (G.g_script_flags[10] ?? 0) === 0 && G.g_boss_engaged === 0);
   }
 
   // ...and the coverage set, which decides whether `wait_script_flag` even
@@ -15055,7 +15499,7 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
       }],
     } as unknown as ScriptJson);
     const withBoss = ScriptFlagsThisBundleCanRaise(spawnScript(0x14));
-    check("a stage that spawns class 0x14 can raise all nine of its flags",
+    check("a stage that spawns class 0x14 can raise all nine of its gates",
           [10, 11, 12, 13, 14, 15, 16, 17, 31].every((n) => withBoss.has(n)),
           `${[...withBoss].sort((x, y) => x - y).join(",")}`);
     const without = ScriptFlagsThisBundleCanRaise(spawnScript(0x30));
@@ -15063,6 +15507,7 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
           ![10, 17, 31].some((n) => without.has(n)),
           `${[...without].sort((x, y) => x - y).join(",")}`);
   }
+  ResetGameGlobals();
 }
 
 // -- class 0x33 selector 1: the carrier -------------------------------------
@@ -16452,6 +16897,305 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     }
     check("the run-in's pitch closes on 0x3000 rather than running away",
           rising && held > 0 && held <= 0x3000, `${held}`);
+  }
+
+  // -- the owl's and the fish's effect tasks -----------------------------------
+  //
+  // Every one of them is a task of its own that runs on the frame it is made,
+  // after its maker, and every one of them ENDS -- the kills are past a
+  // `MatrixStackPop` the decompiler stops at, which is what the port's old
+  // note ("none of the three updates has a termination") was reading.
+  {
+    // The death: blood at the owl's camera point, forty feathers, and the
+    // corpse's yaw still steered on the frame it dies.
+    const rng = new Rng(53);
+    scene(0, rng);
+    G.g_players_in_play = 2;
+    check("the effect tests run in play", G.g_app_state === AppState.InPlay,
+          `${G.g_app_state}`);
+    const seen: Vec3[] = [];
+    const host: GameHost = {
+      ...HOST,
+      viewSpaceOfPoint: (p, out) => {
+        seen.push(vec3(p.x, p.y, p.z));
+        out.x = p.x; out.y = p.y; out.z = p.z - 100;
+        return true;
+      },
+    };
+    const o = ActorSpawn(0x9b00, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(3, 4, 40), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    t().prevX = o.pos.x;
+    t().prevZ = o.pos.z;
+    o.yaw = 0x4000;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    const blood = G.g_point_blood_sprays.length;
+    OwlUpdateAndResolveShot(o, { ...frame(rng), host });
+    check("a shot owl sheds forty feathers",
+          t().state === OwlState.Dead && G.g_owl_feathers.length === 40,
+          `${OwlState[t().state]} ${G.g_owl_feathers.length}`);
+    check("...in a unit box about it",
+          G.g_owl_feathers.every((f) => Math.abs(f.x - 3) <= 0.5
+            && Math.abs(f.y - 4) <= 0.5 && Math.abs(f.z - 40) <= 0.5));
+    // `rand() & 0x8000FFFF` of a `rand()` that is never above 0x7FFF.
+    check("...each turned by half a turn at most, not a whole one",
+          G.g_owl_feathers.every((f) => f.yaw >= 0 && f.yaw < 0x8000),
+          `${Math.max(...G.g_owl_feathers.map((f) => f.yaw))}`);
+    check("...and leaves blood at its camera-space point",
+          G.g_point_blood_sprays.length === blood + 1
+          && seen.length === 1 && seen[0].z === 40
+          && G.g_point_blood_sprays[blood].pos.z === -60,
+          `${G.g_point_blood_sprays.length - blood} ${JSON.stringify(seen)}`);
+    // Standing still, the heading of its own motion is 0, and the death frame
+    // falls through into the yaw steering: a tenth of the way there.
+    check("the death frame still steers the yaw, a tenth of the error",
+          o.yaw === 0x4000 - 1638, `${o.yaw}`);
+
+    // A feather lives nine half turns of its phase and is killed on the frame
+    // it would start a tenth -- without drawing.
+    const f0 = G.g_owl_feathers[0];
+    const x0 = f0.x;
+    const z0 = f0.z;
+    const tx = f0.tx;
+    const tz = f0.tz;
+    const rate = f0.rate;
+    OwlEffectsTick(rng);
+    check("a feather eases x by 1/(0x8000 / rate) and z by a thirty-second",
+          Math.abs(f0.x - (x0 + (tx - x0) / Math.trunc(0x8000 / rate))) < 1e-9
+          && Math.abs(f0.z - (z0 + (tz - z0) / 32)) < 1e-9,
+          `${f0.x} ${f0.z}`);
+    let frames = 1;
+    let lastTurns = 0;
+    while (G.g_owl_feathers.includes(f0) && frames < 5000) {
+      lastTurns = f0.turns;
+      OwlEffectsTick(rng);
+      frames += 1;
+    }
+    // The first half turn takes 0x8000 / (0x200..0x400) frames, every one
+    // after it 0x8000 / (0x100..0x500).
+    check("...and is gone after its ninth half turn",
+          !G.g_owl_feathers.includes(f0) && lastTurns === 8
+          && frames >= 32 + 8 * 26 && frames <= 64 + 8 * 128 + 1,
+          `${frames} frames, ${lastTurns} turns`);
+    for (let i = 0; i < 2000 && G.g_owl_feathers.length; i += 1) {
+      OwlEffectsTick(rng);
+    }
+    check("...as are all forty", G.g_owl_feathers.length === 0,
+          `${G.g_owl_feathers.length}`);
+  }
+
+  {
+    // The strike sheds eight.
+    const rng = new Rng(59);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const o = ActorSpawn(0x9c00, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 2), class43: { subtype: 1, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    t().state = OwlState.Dive;
+    t().dive = OwlDiveKind.Home;
+    o.attackPermit = 0;
+    OwlStateDiveAtCamera(o, frame(rng));
+    check("an owl's strike sheds eight feathers",
+          t().state === OwlState.OrbitAway && G.g_owl_feathers.length === 8,
+          `${OwlState[t().state]} ${G.g_owl_feathers.length}`);
+  }
+
+  {
+    // The corpse's ground ring: 120 frames opening, 29 held, 39 fading.
+    const rng = new Rng(61);
+    const events = scene(0, rng);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    OwlSpawnGroundImpactRing(1, 2, 3, 0.75, 0x1000, 0xdc00, events);
+    const r = G.g_owl_ground_rings[0];
+    check("the owl's ground ring plays its bobble",
+          sounds.length === 1 && sounds[0] === 0x118a9, `${sounds}`);
+    let drawn = 0;
+    let lastPulse = -1;
+    while (G.g_owl_ground_rings.length && drawn < 1000) {
+      OwlEffectsTick(rng);
+      if (!G.g_owl_ground_rings.length) break;
+      drawn += 1;
+      if (r.drew === OwlGroundRingPhase.Pulse) lastPulse = drawn;
+    }
+    check("...pulses for 120 frames and fades for 68 more, then goes",
+          lastPulse === OWL_RING_PULSE_FRAMES && drawn === 120 + 29 + 39,
+          `${lastPulse} ${drawn}`);
+
+    OwlSpawnWaterSplashFlipbook(5, 99, 6);
+    const s = G.g_owl_water_splashes[0];
+    check("the owl's water splash sits on y = -25, whatever it is handed",
+          s.y === -25 && s.x === 5 && s.z === 6, `${s.x},${s.y},${s.z}`);
+    const cels: number[] = [];
+    for (let i = 0; i < 40 && G.g_owl_water_splashes.length; i += 1) {
+      OwlEffectsTick(rng);
+      if (G.g_owl_water_splashes.length) cels.push(s.shown);
+    }
+    check("...and draws its thirty cels once each, the last one included",
+          cels.length === 30 && cels[0] === 0 && cels[29] === 29,
+          `${cels.length} ${cels[0]}..${cels[cels.length - 1]}`);
+  }
+
+  {
+    // A fish shot above the water, flung, and falling back in: the ring task
+    // on the water, the splash, and on the next frame the two surface rings.
+    const rng = new Rng(67);
+    const events = scene(0, rng);
+    G.g_water_level = -10;
+    const f = ActorSpawn(0x9d00, SpawnClass.WaterEnemy, -1, "fish", {
+      pos: vec3(0, 0, 30),
+      class51: {
+        water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+        entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+        lunge_frames: 40,
+      },
+    }, rng);
+    const ft = (f as { fish: FishTail }).fish;
+    f.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    FishUpdate(f, frame(rng, events));
+    check("a shot fish leaves a blood cloud", G.g_fish_blood_clouds.length === 1,
+          `${G.g_fish_blood_clouds.length}`);
+    let n = 0;
+    while (ft.state === FishState.Flung && n < 600) {
+      FishUpdate(f, frame(rng, events));
+      n += 1;
+    }
+    check("...and a flung one meeting the water makes the ring task there",
+          ft.state === FishState.Sink && G.g_ring_effects.length === 1
+          && Math.abs(G.g_ring_effects[0].y - (-10 + 0.02 + 0.05)) < 1e-9
+          && G.g_ring_effects[0].scale === 0.8,
+          `${FishState[ft.state]} ${G.g_ring_effects.length}`);
+    check("...with the splash, and no surface ring yet",
+          G.g_fish_water_splashes.length === 1
+          && G.g_fish_water_splashes[0].y === -10 - 0.4
+          && G.g_fish_surface_rings.length === 0,
+          `${G.g_fish_water_splashes.length} ${G.g_fish_surface_rings.length}`);
+    check("...its corpse turned by half a turn at most",
+          ft.yaw >= 0 && ft.yaw < 0x8000, `${ft.yaw}`);
+    // `FishStateSink` tests its timer for 1 **before** stepping it, and the
+    // frame that entered the state left it at 0.
+    FishUpdate(f, frame(rng, events));
+    check("...nor on the sinking corpse's first frame",
+          G.g_fish_surface_rings.length === 0,
+          `${G.g_fish_surface_rings.length}`);
+    FishUpdate(f, frame(rng, events));
+    check("the sinking corpse's second frame makes the two surface rings",
+          G.g_fish_surface_rings.length === 2
+          && G.g_fish_surface_rings[0].scale === 0.6
+          && G.g_fish_surface_rings[1].scale === 0.3,
+          G.g_fish_surface_rings.map((r) => r.scale).join(","));
+  }
+
+  {
+    // Shot under the water: the splash, and the ring task -- never the
+    // surface ring -- in the same update; and every corpse's yaw is half a
+    // turn at most, sixteen deaths over.
+    const rng = new Rng(71);
+    scene(0, rng);
+    G.g_water_level = -10;
+    const yaws: number[] = [];
+    for (let i = 0; i < 16; i += 1) {
+      const f = ActorSpawn(0x9e00 + i, SpawnClass.WaterEnemy, -1, "fish", {
+        pos: vec3(i, -20, 30),
+        class51: {
+          water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+          entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+          lunge_frames: 40,
+        },
+      }, rng);
+      const ft = (f as { fish: FishTail }).fish;
+      ft.flags |= FishFlag.Submerged;
+      f.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      FishUpdate(f, frame(rng));
+      yaws.push(ft.yaw);
+    }
+    check("a fish shot under water makes the ring task and the splash",
+          G.g_ring_effects.length === 16 && G.g_fish_water_splashes.length === 16
+          && G.g_fish_surface_rings.length === 0,
+          `${G.g_ring_effects.length} ${G.g_fish_water_splashes.length} `
+          + `${G.g_fish_surface_rings.length}`);
+    check("...its corpse's yaw drawn from rand() & 0xFFFF, which is half a turn",
+          yaws.every((y) => y >= 0 && y < 0x8000), yaws.join(","));
+
+    // Every one of the tasks ends, and each after exactly its own run: the
+    // tick that finds a finished task is the one that drops it.
+    const clouds = G.g_fish_blood_clouds.length;
+    const splash = G.g_fish_water_splashes[0];
+    const shown: number[] = [];
+    let cloudGone = -1;
+    let splashGone = -1;
+    for (let k = 1; k <= 100; k += 1) {
+      FishEffectsTick();
+      if (G.g_fish_water_splashes.includes(splash)) shown.push(splash.shown);
+      if (cloudGone < 0 && !G.g_fish_blood_clouds.length) cloudGone = k;
+      if (splashGone < 0 && !G.g_fish_water_splashes.length) splashGone = k;
+    }
+    check("the fish's splash draws 0x1339..0x1356 once each and goes",
+          shown.length === 30 && shown[0] === 0x1339
+          && shown[29] === FISH_SPLASH_LAST_SLOT && splashGone === 31,
+          `${shown.length} ${splashGone}`);
+    check("...the blood cloud its twenty-five cels",
+          clouds === 16 && cloudGone === 26, `${clouds} ${cloudGone}`);
+    let ringGone = -1;
+    for (let k = 1; k <= 1000 && ringGone < 0; k += 1) {
+      RingEffectsTick();
+      if (!G.g_ring_effects.length) ringGone = k;
+    }
+    check("...and the ring task spreads, holds and fades out in 189 draws",
+          ringGone === RING_EFFECT_SPREAD_FRAMES + 30 + 40, `${ringGone}`);
+  }
+
+  {
+    // The surface ring and the blood cloud, stepped by hand.
+    const rng = new Rng(73);
+    scene(0, rng);
+    G.g_water_level = 0;
+    const o = ActorSpawn(0x9f00, SpawnClass.WaterEnemy, -1, "fish", {
+      pos: vec3(0, 0, 30),
+      class51: {
+        water_level: 0.3, speed_x: 0.3, speed_z: 0.3, bob_amplitude: 4,
+        entry_mode: 0, subtype: 0, rise_frames: 30, bob_cycles: 1,
+        lunge_frames: 40,
+      },
+    }, rng);
+    // FishSpawnSurfaceRing through the sink's own first frame.
+    const ft = (o as { fish: FishTail }).fish;
+    ft.state = FishState.Sink;
+    ft.timer = 1;
+    FishUpdate(o, frame(rng));
+    const ring = G.g_fish_surface_rings[0];
+    const alphas: number[] = [];
+    for (let i = 0; i < 100 && G.g_fish_surface_rings.includes(ring); i += 1) {
+      FishEffectsTick();
+      if (G.g_fish_surface_rings.includes(ring)) alphas.push(ring.shownAlpha);
+    }
+    check("a surface ring fades over sixty frames, widening, and goes",
+          alphas.length === 60 && alphas[0] === 1
+          && Math.abs(alphas[59] - 1 / 60) < 1e-6
+          && Math.abs(ring.shownScale - (0.6 + 59 * 0.02)) < 1e-6,
+          `${alphas.length} ${alphas[59]} ${ring.shownScale}`);
+
+    const c: FishBloodCloud = {
+      id: 0, pos: vec3(), slot: 0x3a, shown: 0x3a, done: false,
+    };
+    let draws = 0;
+    while (BloodCloudTickInScreenSpace(c) && draws < 100) draws += 1;
+    check("a blood cloud draws 0x3A..0x52 and is killed after the last",
+          draws === 25 && c.shown === FISH_BLOOD_LAST_SLOT, `${draws}`);
+
+    SpawnRingEffectAtPose({ x: 0, y: 0, z: 0, yaw: 0 }, 1);
+    const re = G.g_ring_effects[G.g_ring_effects.length - 1];
+    RingEffectsTick();
+    check("the ring task's first frame has four strips spread about it",
+          re.phase === RingEffectPhase.Spread && re.drawnStrips.length === 4
+          && re.drawnStrips[0].x > 1.9 && re.drawnStrips[0].z > 3.9
+          && re.drawnStrips[3].x < -1.9 && re.drawnStrips[3].z < -3.9
+          && re.drawnRing < 0.1,
+          JSON.stringify(re.drawnStrips));
   }
 
   // -- class 0x46, the bat --------------------------------------------------

@@ -20274,3 +20274,52 @@ under test, so a mutation of either lifetime passed; they are literals.
 
 `[open]`: `FUN_004702E0`, a second caller of the shatter that forces group 99
 (no floor), is not in `g_class41_updates`; what allocates it is unread.
+
+## 2026-09-27 -- the two pounces raise 0x10000000, and what else LeapDown did
+
+`ThrowerStateLeapDown` (`FUN_0044B670`) and `ThrowerStateLeapStrike`
+(`FUN_0044E6B0`) re-read from the listing. Both raise `obj+0x34 |= 0x10000000`
+as they leave (`0x0044B6F0`, `0x0044E72B`) and clear it with `0xefffffff` as
+they land (`0x0044B841`, `0x0044E7F0`); the port raised and cleared
+`ActorFlag.BackingOff`, `0x20000000`. `ThrowerStateDelayedPounce` had the same
+slip and was fixed on its own branch (`333da630`); this is the other two.
+
+LeapDown's four arms (jump table `0x0044B868`) held five more departures, all
+fixed in `class31/pounce.ts`:
+
+* the attack cry: `if (obj+0x32C == 0x2002) ActorPlayHitVoice(obj, 3)` at
+  `0x0044B6F6`..`0x0044B709`. `obj+0x32C` is the head's draw record, and
+  `0x2002` is the head `ThrowerShotFeedback` swaps for `0x2015`;
+* the surface clear is `0xfffff61f`, `~0x9E0` -- the port's `| 0x200` cleared a
+  bit the engine keeps;
+* type 0x18's arm (`0x0044B72E`): only `0x800` goes, and `obj+0x40..0x48` is
+  stored into `obj+0x13D8..0x13E0`. The port did neither;
+* `obj+0x136C &= ~0x180000` on landing (`0x0044B791`);
+* the exit is `obj+0x19C >= g_motion_play_length[obj+0x1B4] - 2`
+  (`0x0044B82A`), where the port waited for the swing channel to empty.
+
+LeapStrike's connect is gated on `IsPlayerAttackable((s8)obj+0x121) == 1`
+(`0x0044E7C1`), not on `attackPermit >= 0`. A sub past 1 returns.
+
+**The brief was wrong about why it matters, and so was the port's own
+comment.** Both said `RankEnemiesByDistance` would drop a mid-pounce thrower
+from the queue. `RegisterForDistanceRank` (`0x00409010`) has exactly one
+caller, `EnemyZombieUpdate` at `0x0045346D` `[proved]`, so no thrower is ranked
+and the bit is invisible there (L3 again: which readers see a bit depends on
+the class). Where the difference does show: `ThrowerStateFallToSurface` tests
+`0x20000000` at `0x0044BE87` and picks state 10 over 7, and
+`ThrowerEmitGroundDust` (`FUN_0044D260`) branches on `0x10000000` at
+`0x0044D296` -- found by a program-wide search for `TEST ..., 0x10000000`,
+which catches single-bit tests only; a combined mask on a thrower is `[open]`.
+
+`[diverges]`, declared on the spot: sub 2's re-snap is skipped in Training
+Mode while `DAT_009C72F2` is up. Its one writer is `FUN_00497760`, the training
+lesson driver, which raises it as a lesson ends and is not ported; the name of
+both is `[open]`.
+
+Left as they were, and noted: `ThrowerStrikeConnect` (`FUN_0044CE60`) in the
+port tests `0x800` itself and fires on `frame >= hit_frame`; the engine's has
+no `0x800` test -- its callers make it -- and fires on `frame == hit_frame`
+(`JZ` at `0x0044CEA1`). Every class-0x31 attack state calls it, so it is its
+own change. 16 new `port.test.ts` assertions; 11 of them fail against the old
+two files.

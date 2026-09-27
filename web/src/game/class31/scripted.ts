@@ -111,6 +111,29 @@ const RIDE_FRAMES = 0xc4;
  * no permit actually held. Nothing else in the class does that.
  *
  * **Dead code**: no shipped spawn starts in it, and no state reaches it.
+ *
+ * `[proved]` from the listing, two arms and a `RET` for anything else:
+ *
+ * ```
+ * sub 0  0044e6dc  if (!ThrowerTryClaimAttackSlot(obj))
+ *                    obj+0x121 = g_active_player 1 ? 1 : 2 ? rand() % 2 : 0
+ *        0044e72b  obj+0x34 |= 0x10000000; obj+0x136C |= 0x20000
+ *        0044e76f  obj+0x131A = the attack pick
+ *        0044e775  ThrowerLoadAttackArcScript(obj)
+ *        0044e780  ThrowerPickLandingPoint(obj, &p)
+ *        0044e7a4  ActorArcBegin(obj+0x40..0x48, p, desc+4)
+ *        0044e7b3  sub 1; obj+0x1360 = 0, and on
+ * sub 1  0044e7c1  if (IsPlayerAttackable((s8)obj+0x121) == 1)
+ *                    ThrowerStrikeConnect(obj)
+ *        0044e7da  if (ActorArcStep(obj, 1) == 1) return
+ *        0044e7f0  obj+0x34 &= ~0x10000000; obj+0x136C &= ~0x20000
+ *                  state 10, sub 0
+ * ```
+ *
+ * It used to raise and clear `ActorFlag.BackingOff` (`0x20000000`) for
+ * `0x10000000`, and to gate the connect on holding a permit rather than on
+ * the player it names being attackable -- which, since the claim's failure
+ * arm forces a player in, was a test that almost never said no.
  */
 export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
                                        host: GameHost,
@@ -121,18 +144,20 @@ export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
       obj.attackPermit = G.g_active_player === 1 ? 1
         : G.g_active_player === 2 ? rng.int(2) : 0;
     }
-    obj.flags |= ActorFlag.BackingOff;
+    obj.flags |= ActorFlag.Committed;
     obj.flags2 |= ThrowerFlag.Pouncing;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
     ThrowerLoadAttackArcScript(obj);
     ThrowerPickLandingPoint(obj, host, _p);
     ActorArcBegin(obj, _p, obj.leapStrikeFrames);
-    obj.arcPhase = 0;
     obj.sub = 1;
+    obj.arcPhase = 0;
+  } else if (obj.sub !== 1) {
+    return;
   }
-  if (obj.attackPermit >= 0) ThrowerStrikeConnect(obj, events);
+  if (IsPlayerAttackable(obj.attackPermit)) ThrowerStrikeConnect(obj, events);
   if (ActorArcStep(obj, 1, dt)) return;
-  obj.flags &= ~ActorFlag.BackingOff;
+  obj.flags &= ~ActorFlag.Committed;
   obj.flags2 &= ~ThrowerFlag.Pouncing;
   obj.state = ThrowerState.LeapAside;
   obj.sub = 0;

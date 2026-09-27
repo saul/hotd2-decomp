@@ -221,7 +221,9 @@ import {
 } from "../src/game/actor_turn";
 import { ZombieRunTurnRate, ZombieStateAttackRun, g_wait_turn_variant }
   from "../src/game/class30/attack_run";
-import { ThrowerStateWithdraw } from "../src/game/class31/pounce";
+import { ThrowerStateLeapDown, ThrowerStateWithdraw }
+  from "../src/game/class31/pounce";
+import { ThrowerStateLeapStrike } from "../src/game/class31/scripted";
 import { ThrowerStateDelayedPounce } from "../src/game/class31/entrance";
 import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
@@ -22264,6 +22266,207 @@ console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce
     ThrowerStateDelayedPounce(p, 2 / 60, new Rng(1), NULL_HOST);
     check("the pounce levels its roll at 0xCCC a frame",
           p.roll === 0x2000 - 2 * 0xccc, p.roll.toString(16));
+  }
+}
+
+/**
+ * Class 0x31's two pounces raise `obj+0x34` bit `0x10000000` for the flight --
+ * `OR ECX, 0x10000000` at `0x0044B6F0` in `ThrowerStateLeapDown` and at
+ * `0x0044E72B` in `ThrowerStateLeapStrike` -- and clear it with `0xefffffff` as
+ * they land. The port raised `BackingOff`, `0x20000000`, the next bit up, and
+ * `ThrowerStateFallToSurface` branches on that one (`0x0044BE87`).
+ */
+console.log("\nclass 0x31: the pounces commit, they do not back off:");
+{
+  const heard: number[] = [];
+  const events = new Events();
+  events.on("sound.play", (d) => heard.push(d.id));
+  // Stance row 4, the pounce rows: `ThrowerStateLeapStrike` raises
+  // `Pouncing` before it loads the script, so without it the script is null
+  // and the state lands on the frame it leaves.
+  const set0 = CLASS31.sets[0];
+  const CHARS31_POUNCE = {
+    ...CHARS31,
+    class31: {
+      ...CLASS31,
+      sets: [{ ...set0, attacks: { ...set0.attacks, "4": set0.attacks["0"] } }],
+    },
+    combat: {
+      impact: [], head_impact: [],
+      voice: {
+        hurt: [], kill: [], head: [],
+        attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                 [{ id: 50, file: "" }, { id: 51, file: "" }]],
+      },
+      voice_set_a_types: [0, 2, 5, 6, 9, 0x0e, 0x0f, 0x10, 0x11],
+      ricochet: {},
+    },
+  } as unknown as CharactersJson;
+  const pouncer = (state: ThrowerState, head?: number) => {
+    const t = thrower(state);
+    SetGameTables(CHARS31_POUNCE);
+    t.state = state;
+    t.sub = 0;
+    if (head !== undefined) t.boneSlot["2"] = head;
+    return t;
+  };
+  const hex = (n: number) => `0x${(n >>> 0).toString(16)}`;
+
+  {
+    const t = pouncer(ThrowerState.Pounce);
+    t.flags2 |= ThrowerFlag.OffGround | ThrowerFlag.Struck | 0x200;
+    heard.length = 0;
+    ThrowerStateLeapDown(t, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("ThrowerStateLeapDown raises 0x10000000 as it goes, not 0x20000000",
+          (t.flags & ActorFlag.Committed) !== 0
+          && (t.flags & ActorFlag.BackingOff) === 0
+          && t.state === ThrowerState.Pounce && t.sub === 1, hex(t.flags));
+    // `AND EAX, 0xfffff61f` at `0x0044B721` is `~0x9E0`: bit 0x200 is not in it.
+    check("...clears OffGround and Struck with 0xfffff61f, and keeps 0x200",
+          (t.flags2 & (ThrowerFlag.OffGround | ThrowerFlag.Struck)) === 0
+          && (t.flags2 & 0x200) !== 0, hex(t.flags2));
+    check("...and a head that is not 0x2002 pounces in silence",
+          heard.length === 0, JSON.stringify(heard));
+
+    // The whole flight, clip and all, to the frame it hands to the leap aside.
+    let backedOff = false;
+    let droppedEarly = false;
+    let collideInFlight = true;
+    let collideDown = true;
+    for (let i = 0; i < 600 && t.state === ThrowerState.Pounce; i++) {
+      ActorAdvanceMotion(t, 1 / 60);
+      ThrowerStateLeapDown(t, 1 / 60, new Rng(1), CAM_HOST, events);
+      if (t.flags & ActorFlag.BackingOff) backedOff = true;
+      if (t.state !== ThrowerState.Pounce) break;
+      if (!(t.flags & ActorFlag.Committed)) droppedEarly = true;
+      if (t.sub === 1 && (t.flags2 & ThrowerFlag.Collide) !== ThrowerFlag.Collide) {
+        collideInFlight = false;
+      }
+      if (t.sub === 2 && (t.flags2 & ThrowerFlag.Collide) !== 0) {
+        collideDown = false;
+      }
+    }
+    check("it stays committed for the whole pounce and never backs off",
+          !backedOff && !droppedEarly);
+    check("...lands in the leap aside with 0x10000000 down again",
+          t.state === ThrowerState.LeapAside
+          && (t.flags & (ActorFlag.Committed | ActorFlag.BackingOff)) === 0,
+          `${ThrowerState[t.state]} ${hex(t.flags)}`);
+    // `AND ECX, 0xffe7ffff` at `0x0044B791`, on the frame the arc comes down.
+    check("...colliding in the air and with nothing once it is down",
+          collideInFlight && collideDown);
+  }
+  {
+    // `obj+0x19C` against `g_motion_play_length[obj+0x1B4] - 2`, at
+    // `0x0044B82A`. The port used to wait for the clip to run out.
+    const t = pouncer(ThrowerState.Pounce);
+    const len = MotionPlayLength(t, 303);
+    t.sub = 2;
+    t.flags |= ActorFlag.Committed;
+    t.flags2 |= ThrowerFlag.Struck;
+    t.action = { motion: 303, ticks: len - 3, loop: false };
+    ThrowerStateLeapDown(t, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("three frames short of the play length it is still down on the spot",
+          t.state === ThrowerState.Pounce && t.sub === 2
+          && (t.flags & ActorFlag.Committed) !== 0,
+          `${ThrowerState[t.state]} sub ${t.sub}`);
+    t.action.ticks = len - 2;
+    ThrowerStateLeapDown(t, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("...and two short, with the clip still running, it leaves",
+          t.state === ThrowerState.LeapAside && t.action !== null
+          && (t.flags & ActorFlag.Committed) === 0
+          && (t.flags2 & ThrowerFlag.Struck) === 0,
+          `${ThrowerState[t.state]} ${hex(t.flags)}`);
+  }
+  {
+    // `CMP EAX, 0x2002` / `PUSH 0x3` / `CALL ActorPlayHitVoice` at
+    // `0x0044B6F6`..`0x0044B709`. zstin is type 0x19, voice set B.
+    const t = pouncer(ThrowerState.Pounce, 0x2002);
+    heard.length = 0;
+    ThrowerStateLeapDown(t, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("a thrower with head 0x2002 cries out as it pounces",
+          heard.length === 1 && (heard[0] === 50 || heard[0] === 51),
+          JSON.stringify(heard));
+    const shot = pouncer(ThrowerState.Pounce, 0x2015);
+    heard.length = 0;
+    ThrowerStateLeapDown(shot, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("...and one whose head was shot to 0x2015 does not",
+          heard.length === 0, JSON.stringify(heard));
+  }
+  {
+    // Type 0x18's arm at `0x0044B72E`: only Struck goes, and the start of the
+    // pounce is stored at `obj+0x13D8`.
+    ResetGameGlobals();
+    SetGameTables(CHARS31_POUNCE);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const z = ActorSpawn(0x9b00, SpawnClass.Thrower, 0x18, "zslman", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    if (z.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    z.visible = true;
+    z.hp = 100;
+    z.pos = vec3(5, 7, 80);
+    z.state = ThrowerState.Pounce;
+    z.sub = 0;
+    z.flags2 |= ThrowerFlag.OffGround | ThrowerFlag.Struck;
+    ThrowerStateLeapDown(z, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("zslman keeps its surface bits, drops Struck, and commits",
+          (z.flags2 & ThrowerFlag.OffGround) !== 0
+          && (z.flags2 & ThrowerFlag.Struck) === 0
+          && (z.flags & ActorFlag.Committed) !== 0, hex(z.flags2));
+    check("...and remembers where the pounce left from",
+          z.strikeStart.x === 5 && z.strikeStart.y === 7
+          && z.strikeStart.z === 80,
+          `(${z.strikeStart.x}, ${z.strikeStart.y}, ${z.strikeStart.z})`);
+  }
+  {
+    const t = pouncer(ThrowerState.LeapStrike);
+    t.leapStrikeFrames = 30;
+    ThrowerStateLeapStrike(t, 1 / 60, new Rng(1), CAM_HOST, events);
+    check("ThrowerStateLeapStrike raises 0x10000000 as it goes, not 0x20000000",
+          t.state === ThrowerState.LeapStrike && t.sub === 1
+          && (t.flags & ActorFlag.Committed) !== 0
+          && (t.flags & ActorFlag.BackingOff) === 0, hex(t.flags));
+    let backedOff = false;
+    for (let i = 0; i < 600 && t.state === ThrowerState.LeapStrike; i++) {
+      ActorAdvanceMotion(t, 1 / 60);
+      ThrowerStateLeapStrike(t, 1 / 60, new Rng(1), CAM_HOST, events);
+      if (t.flags & ActorFlag.BackingOff) backedOff = true;
+    }
+    check("...and clears it, and nothing else, as it lands in the leap aside",
+          !backedOff && t.state === ThrowerState.LeapAside
+          && (t.flags & ActorFlag.Committed) === 0
+          && (t.flags2 & ThrowerFlag.Pouncing) === 0,
+          `${ThrowerState[t.state]} ${hex(t.flags)}`);
+  }
+  {
+    // `IsPlayerAttackable((s8)obj+0x121) == 1` at `0x0044E7C1`, not a permit
+    // test: the claim's failure arm forces a player in, so the old
+    // `attackPermit >= 0` let it strike at a player who is not in the game.
+    // Player 1 is out; player 0 is in. The swing is due -- attack 0's hit
+    // frame is 62 -- and the arc is over, so it lands on the same frame.
+    const strikeAt = (player: number) => {
+      const t = pouncer(ThrowerState.LeapStrike);
+      t.sub = 1;
+      t.attack = 0;
+      t.thr.stance = 0;
+      t.attackPermit = player;
+      t.flags |= ActorFlag.Committed;
+      t.action = { motion: 303, ticks: 62, loop: false };
+      ThrowerStateLeapStrike(t, 1 / 60, new Rng(1), CAM_HOST, events);
+      return t;
+    };
+    const out = strikeAt(1);
+    check("with player 1 out of the game, a pounce at player 1 never connects",
+          !IsPlayerAttackable(1) && (out.flags2 & ThrowerFlag.Struck) === 0
+          && out.state === ThrowerState.LeapAside,
+          hex(out.flags2));
+    const inPlay = strikeAt(0);
+    check("...where one at player 0 does",
+          IsPlayerAttackable(0) && (inPlay.flags2 & ThrowerFlag.Struck) !== 0,
+          hex(inPlay.flags2));
   }
 }
 

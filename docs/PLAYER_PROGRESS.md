@@ -2152,6 +2152,22 @@ pair**: `PlaySoundId` walks two parallel tables — the looping ids at
 non-blinking frame of the hold, not once; the engine has no edge test there and
 `PlaySoundId` does not de-duplicate.
 
+**The pounce commits; it does not back off.** `ThrowerStateLeapDown` (states
+9, 12, 13) and `ThrowerStateLeapStrike` (22) raise `obj+0x34` bit
+`0x10000000` for the flight, and the port raised `BackingOff`, `0x20000000`,
+the next bit up. It is not the distance queue that sees the difference -- no
+thrower ever registers for it -- but `ThrowerStateFallToSurface`, which sends
+an actor with `0x20000000` up to the leap aside instead of the hub. Re-reading
+`ThrowerStateLeapDown` against its listing turned up five more things it did
+not do: it **cries out** as it pounces, `ActorPlayHitVoice` kind 3, when its
+head is still model `0x2002`, so a thrower whose head has been shot pounces in
+silence; `zslman` keeps its surface bits and stores where it left from; both
+collision bits drop on landing until the next claim; it leaves two frames short
+of the clip's end, not at it; and it had been clearing bit `0x200` with the
+surface bits, which the engine's mask keeps. State 22 now strikes only at a
+player `IsPlayerAttackable` allows -- its claim's failure arm forces a player
+in, so the old test on holding a permit almost never said no.
+
 ### The noise a standing zombie makes, and the chainsaw
 
 Both were silent, and both had been looked for in the wrong routine. There is

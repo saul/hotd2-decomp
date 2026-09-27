@@ -2396,8 +2396,24 @@ dest  = ThrowerPickLandingPoint()       /* a place on the SCREEN */
 yaw   = g_camera_yaw_bams
 ActorArcBeginToWaypoint(dest, <null script>, 1)
 obj+0x1364 = the stance, latched before the surface bits are cleared
-...every frame: ThrowerStrikeConnect()
+obj+0x34  |= 0x10000000                 /* 0x0044B6F0, Committed */
+if (obj+0x32C == 0x2002) ActorPlayHitVoice(obj, 3)       /* the attack cry */
+type != 0x18: obj+0x136C &= 0xfffff61f  /* ~0x9E0 -- 0x200 survives */
+type == 0x18: obj+0x136C &= ~0x800; obj+0x13D8.. = obj+0x40..
+...every frame: ThrowerStrikeConnect()  /* unless 0x800; not type 0x18 in the air */
+landed:  obj+0x136C &= ~0x180000        /* collides with nothing */
+then every frame: re-snap to the landing point, unless Training with
+         DAT_009C72F2 up; leave at g_motion_play_length - 2
+exit:    obj+0x136C &= ~0x800; obj+0x34 &= ~0x10000000; state 10
 ```
+
+The bit is `0x10000000`, not `BackingOff`'s `0x20000000`, and so is state
+22's. `[proved]` The difference is visible: `ThrowerStateFallToSurface`
+(`FUN_0044BC70`) sends an actor with `0x20000000` up to state 10 rather than 7
+(`TEST EAX, 0x20000000` at `0x0044BE87`), and `ThrowerEmitGroundDust`
+(`FUN_0044D260`) branches on `0x10000000` at `0x0044D296`. It is **not**
+`RankEnemiesByDistance`: `RegisterForDistanceRank` (`FUN_00409010`) has one
+caller, `EnemyZombieUpdate` at `0x0045346D`, so no thrower is ever ranked.
 
 Three things worth naming.
 

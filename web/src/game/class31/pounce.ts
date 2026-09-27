@@ -17,16 +17,17 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 import { ColiTraceSegmentAllSets } from "../coli";
 import { G } from "../globals";
-import { MotionPlayFrame, MotionPlayLength } from "../tables";
+import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import type { GameHost } from "../host";
 import { vec3, type Vec3 } from "../vec";
 import { SetCurrentActorMotionBlended, ZombieSetMotionIfIdle }
   from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorArcBeginToWaypoint, ActorArcStep, ActorLocalPoint,
+  ActorArcBeginToWaypoint, ActorArcStep, ActorClipFrame, ActorLocalPoint,
   InstallArcMotionScript,
 } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
@@ -58,6 +59,32 @@ const WITHDRAW_TURN_RATE = -0x100;
 /** Type 0x17 is clear of the camera at thirty units, not fifty. */
 const WITHDRAW_CLEAR_BACKING = 30;
 
+/** The head bone, whose draw record is `obj+0x20C + 2 * 0x90` = `obj+0x32C`. */
+const HEAD_BONE = 2;
+/**
+ * `CMP EAX, 0x2002` at `0x0044B6F6`, against `obj+0x32C`: the head model the
+ * pounce cries out with -- the one `ThrowerShotFeedback` (`FUN_00449B20`)
+ * swaps for `0x2015` on a damaging head hit, so a thrower whose head has been
+ * shot pounces in silence.
+ */
+const CRYING_HEAD_SLOT = 0x2002;
+
+/**
+ * `obj+0x32C`, the head's draw record as it stands.
+ *
+ * [port-only] A lookup, not a routine: `boneSlot` holds only what a swap or
+ * the part bind wrote, and the record is the skeleton's own slot until then --
+ * zero once `RemoveBoneSubtree` has taken the head off. The same fallback as
+ * `nodeSlotOf` in `game/model_draw.ts` and `BoneDrawSlot` in
+ * `combat/shot_test.ts`.
+ */
+function headSlotOf(obj: ThrowerActor): number {
+  if (obj.removed.includes(HEAD_BONE)) return 0;
+  return obj.boneSlot[String(HEAD_BONE)]
+    ?? CharacterTypeOf(obj)?.bones.find((b) => b.bone === HEAD_BONE)?.slot
+    ?? 0;
+}
+
 /**
  * `ThrowerStateLeapDown` — `FUN_0044B670`, class 0x31 states 9, 12 and 13.
  *
@@ -69,6 +96,38 @@ const WITHDRAW_CLEAR_BACKING = 30;
  * thrower that pounces off a wall swings the wall's attack, and arrives on the
  * ground. And the attack index is not chosen here at all: passing the null
  * script sentinel to `ActorArcBeginToWaypoint` is what makes it roll one.
+ *
+ * `[proved]` from the listing, four arms off the jump table at `0x0044B868`,
+ * the first two falling into the next:
+ *
+ * ```
+ * sub 0  0044b695  ThrowerPickLandingPoint(obj, &p); obj+0x68 = g_camera_yaw_bams
+ *        0044b6b0  ActorArcBeginToWaypoint(obj, &p, &DAT_007DCC70, 1)
+ *        0044b6fb  obj+0x1364 = the stance row
+ *        0044b6f0  obj+0x34 |= 0x10000000                     ; Committed
+ *        0044b709  if (obj+0x32C == 0x2002) ActorPlayHitVoice(obj, 3)
+ *        0044b721  type != 0x18: obj+0x136C &= 0xfffff61f       ; ~0x9E0
+ *        0044b734  type == 0x18: obj+0x136C &= ~0x800; obj+0x13D8.. = obj+0x40..
+ *        sub 1, and on
+ * sub 1  0044b76f  if (!(obj+0x136C & 0x800) && type != 0x18)
+ *                    ThrowerStrikeConnect(obj)
+ *        0044b77a  if (ActorArcStep(obj, 1) == 1) return
+ *        0044b791  obj+0x136C &= ~0x180000; sub 2, and on
+ * sub 2  0044b7b0  if (!(obj+0x136C & 0x800)) ThrowerStrikeConnect(obj)
+ *        0044b7c8  unless Training with DAT_009C72F2 up: obj+0x40.. = the
+ *                  landing point again
+ *        0044b82c  if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+ *        sub 3, and on
+ * sub 3  0044b83e  obj+0x136C &= ~0x800; obj+0x34 &= ~0x10000000
+ *                  state 10, sub 0
+ * ```
+ *
+ * It used to raise and clear `ActorFlag.BackingOff` (`0x20000000`, the bit
+ * `RankEnemiesByDistance` drops from the queue) for `0x10000000`, so a thrower
+ * in mid-pounce left the ranking the engine keeps it in. It also cleared bit
+ * `0x200` with the surface bits, which `0xfffff61f` keeps; never cried out;
+ * gave `zslman` neither of its two stores; left both collision bits up on
+ * landing; and waited for the clip to run out rather than two frames short.
  */
 export function ThrowerStateLeapDown(obj: ThrowerActor, dt: number, rng: Rng,
                                      host: GameHost, events?: Events): void {
@@ -84,37 +143,67 @@ export function ThrowerStateLeapDown(obj: ThrowerActor, dt: number, rng: Rng,
       InstallArcMotionScript(obj,
         ThrowerAttackOf(obj, obj.thr.stance, obj.attack)?.script ?? null);
     });
-    obj.flags |= ActorFlag.BackingOff;      // 0x10000000 -- registered as busy
+    // `OR ECX, 0x10000000` at `0x0044B6F0`: mid-attack, and kept in the
+    // ranking for it.
+    obj.flags |= ActorFlag.Committed;
+    if (headSlotOf(obj) === CRYING_HEAD_SLOT) {
+      ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                        (id) => events?.emit("sound.play", { id }));
+    }
     if (obj.charType !== CHAR_ZSLMAN) {
       // Off the wall. The stance the swing was drawn against is already
       // latched in `obj.thr.stance`, so clearing these does not change the
-      // attack.
+      // attack. `0xfffff61f` leaves bit `0x200` alone.
       obj.flags2 &= ~(ThrowerFlag.Surface | ThrowerFlag.OffGround
-                    | ThrowerFlag.Struck | 0x200);
+                    | ThrowerFlag.Struck);
+    } else {
+      // `zslman` keeps its surface bits, and stores where the pounce left
+      // from in `obj+0x13D8`..`0x13E0`.
+      obj.flags2 &= ~ThrowerFlag.Struck;
+      obj.strikeStart.x = obj.pos.x;
+      obj.strikeStart.y = obj.pos.y;
+      obj.strikeStart.z = obj.pos.z;
     }
     obj.sub = 1;
   }
 
   if (obj.sub === 1) {
-    if (obj.charType !== CHAR_ZSLMAN) ThrowerStrikeConnect(obj, events);
+    if (!(obj.flags2 & ThrowerFlag.Struck) && obj.charType !== CHAR_ZSLMAN) {
+      ThrowerStrikeConnect(obj, events);
+    }
     if (ActorArcStep(obj, 1, dt)) return;
+    // Down: `AND ECX, 0xffe7ffff` at `0x0044B791`. It collides with nothing
+    // until a claim in `ThrowerStateStandAndDecide` raises both again.
+    obj.flags2 &= ~ThrowerFlag.Collide;
     obj.sub = 2;
   }
 
   if (obj.sub === 2) {
-    ThrowerStrikeConnect(obj, events);
-    // The engine re-snaps to the landing point every frame outside Training
-    // Mode, so the actor tracks a camera that is still moving.
+    if (!(obj.flags2 & ThrowerFlag.Struck)) ThrowerStrikeConnect(obj, events);
+    // The engine re-snaps to the landing point every frame, so the actor
+    // tracks a camera that is still moving.
+    //
+    // [diverges] ...except in Training Mode while `DAT_009C72F2` is up
+    // (`0x0044B7B8`..`0x0044B7EE`). That byte's one writer is the training
+    // lesson driver `FUN_00497760`, which raises it as a lesson ends and is
+    // not ported, so the port's byte is always down and it always snaps --
+    // which is the engine's own answer in every other mode.
     ThrowerPickLandingPoint(obj, host, _dest);
     obj.pos.x = _dest.x;
     obj.pos.y = _dest.y;
     obj.pos.z = _dest.z;
-    if (obj.action) return;
+    // `obj+0x19C` against `g_motion_play_length[obj+0x1B4] - 2` at
+    // `0x0044B82A`: two frames short of the end of the clip, not the end.
+    if (obj.action
+        && ActorClipFrame(obj) < MotionPlayLength(obj, obj.action.motion) - 2) {
+      return;
+    }
     obj.sub = 3;
   }
 
+  if (obj.sub !== 3) return;
   obj.flags2 &= ~ThrowerFlag.Struck;
-  obj.flags &= ~ActorFlag.BackingOff;
+  obj.flags &= ~ActorFlag.Committed;
   obj.state = ThrowerState.LeapAside;
   obj.sub = 0;
 }

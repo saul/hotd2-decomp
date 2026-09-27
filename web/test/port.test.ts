@@ -329,6 +329,15 @@ import {
 } from "../src/game/class41";
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import {
+  BreakablePropSpawnShatter, PropShattersTick,
+  SHATTER_GRAVITY, SHATTER_PIECES,
+} from "../src/game/class41/shatter";
+import { MsvcRand } from "../src/game/class41/group";
+import {
+  FallingContainerGroundContact, FALLING_REMOVE_CAM_FRAME,
+  FALLING_REMOVE_CAM_PATH, FALLING_SLOT_FRAGMENT,
+} from "../src/game/class44/container";
+import {
   SCRIPT_FLAG_TYPE13_DROP, SFX_TYPE13_BEEP, SFX_TYPE13_LAND,
   SFX_TYPE13_RELEASE, TYPE13_FLOOR_Y, TYPE13_PANEL_LIT_SLOT,
   TYPE13_PANEL_SLOT, Type13Phase,
@@ -1578,12 +1587,42 @@ const BREAKABLES: BreakablesJson = {
       { index: 0, x: 40, z: 0, item_set: 1, story_item: -1, level: 0,
         y_offset: 0, supports: [] },
     ],
+    // group 3: none here.
+    [],
+    // group 4: the group the player cannot break and the script can -- a
+    // two-high stack, like group 0's.
+    [
+      { index: 0, x: 60, z: 0, item_set: 0, story_item: -1, level: 0,
+        y_offset: 0, supports: [] },
+      { index: 1, x: 60, z: 0, item_set: 0, story_item: -1, level: 1,
+        y_offset: 7.540296, supports: [0] },
+    ],
   ],
   // Four corners of a box. A single point is not enough: the settle picks the
   // *lowest corner that is not the current one*, so a one-point hull can never
   // re-seat and the object sinks to wherever the fall left it.
   hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
   falling_hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
+  fragment_hull: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]],
+  // The exe's own four tables, as `ExeTables.shatterPieces` reads them: the
+  // fifteen slots of each, and each piece's prop-local offset and angles.
+  shatter: {
+    slots_a: [0x19ea, 0x19f1, 0x19f2, 0x19f5, 0x19f6, 0x19f7, 0x19eb, 0x19ec,
+              0x19ed, 0x19ee, 0x19ef, 0x19f0, 0x19f8, 0x19f4, 0x19f3],
+    slots_b: [0x1a11, 0x1a18, 0x1a19, 0x1a1c, 0x1a1d, 0x1a1e, 0x1a12, 0x1a13,
+              0x1a14, 0x1a15, 0x1a16, 0x1a17, 0x1a1f, 0x1a1b, 0x1a1a],
+    offsets: [[327, 7540, 1391], [759, 7540, -322], [-327, 7540, -1391],
+              [1530, 6538, 2111], [2207, 3446, 1756], [-1493, 6538, 2138],
+              [2283, 5025, -335], [1377, 5025, -1852], [295, 5025, -2289],
+              [-1852, 5025, -1377], [-2283, 5025, 335], [322, -4, 759],
+              [-2060, 1934, 1508], [-290, 2862, 2878], [469, 6283, 2598]],
+    angles: [[0, 1681, -32768], [-32768, 4185, 0], [0, 22892, 0],
+             [-7818, -1499, 21723], [-10504, -8102, 23474],
+             [12520, 25008, -9453], [104, -4854, 16337], [8865, -3339, 12797],
+             [-16301, -42, 21237], [24079, 3398, 12853],
+             [104, 27914, -16338], [0, -830, -32768], [8224, 641, 18803],
+             [-17527, -1775, 22662], [-14423, 1669, 25123]],
+  },
   // Synthetic, except for kinds 2 and 3: those two carry `g_prop_kind_params`'
   // own rows, because `PropUpdateType43` branches on the effect id and stage
   // 3's seven spawns are all one or the other. Kind 3's effect is **0**, which
@@ -1996,6 +2035,335 @@ console.log("\nclass 0x44 selector 16, the falling container:");
   check("it pays ten", G.g_player_score[0] === before + 10);
   check("and the extra life comes out", released === ItemSet.ExtraLife,
         String(released));
+}
+
+/** A copy of `rng` advanced by `n` of the engine's `rand()`s. */
+function RandAhead(rng: Rng, n: number): number {
+  const probe = new Rng(0);
+  probe.state = rng.state;
+  for (let i = 0; i < n; i++) MsvcRand(probe);
+  return probe.state;
+}
+
+console.log("\nclass 0x41, a stacked prop shatters into fifteen pieces:");
+{
+  const rng = new Rng(21);
+  const events = propScene(rng);
+  let shattered = 0;
+  events.on("prop.shattered", () => shattered++);
+  const [, top] = PlaceBreakableGroup(0, 4, rng);
+  // A quarter turn, so the matrix the pieces come off is not the identity
+  // (L48): the crack turns a standing prop to the camera block's yaw.
+  G.g_camera_block_yaw_bams = 0x4000;
+  shoot(top, 1, rng, events);
+  check("the crack turns a standing prop to the camera block's yaw",
+        top.yaw === 0x4000 && top.hp === 1, `${top.yaw} hp ${top.hp}`);
+  check("...and its draw stored a matrix, rattle and all",
+        top.drawMatrix.length === 16
+        && Math.abs(top.drawMatrix[12] - (top.x + top.shakeX)) < 1e-9
+        && Math.abs(top.drawMatrix[14] - (top.z + top.shakeZ)) < 1e-9
+        && top.shakeX !== 0,
+        `${top.drawMatrix[12]} vs ${top.x}+${top.shakeX}`);
+  const origin = { x: top.drawMatrix[12], y: top.drawMatrix[13],
+                   z: top.drawMatrix[14] };
+
+  // The destroy: the award draws nothing with one player in, and the arm
+  // `ActorKill`s the prop before the rattle, so every draw is the shatter's.
+  const expect = RandAhead(rng, 15 * 5);
+  shoot(top, 1, rng, events);
+  check("the second shot on a stacked prop draws exactly 75 rand()s",
+        rng.state === expect, `${rng.state} vs ${expect}`);
+  check("...kills the prop and leaves ONE object carrying fifteen pieces",
+        top.dead && G.g_prop_shatters.length === 1
+        && G.g_prop_shatters[0].pieces.length === SHATTER_PIECES
+        && shattered === 1,
+        `${top.dead} ${G.g_prop_shatters.length}`);
+  const s = G.g_prop_shatters[0];
+  // Piece 0's offset is (0.327, 7.54, 1.391); a quarter turn under the
+  // engine's `MatrixRotateY` carries (x, y, z) to (z, y, -x).
+  const p0 = s.pieces[0];
+  check("each piece starts at its offset through the prop's stored matrix",
+        Math.abs(p0.x - (origin.x + 1.391)) < 1e-4
+        && Math.abs(p0.y - (origin.y + 7.54)) < 1e-4
+        && Math.abs(p0.z - (origin.z - 0.327)) < 1e-4,
+        `${p0.x - origin.x}, ${p0.y - origin.y}, ${p0.z - origin.z}`);
+  const p2 = s.pieces[2];
+  // Piece 2's angles are a pure Y turn of 22892; the prop's quarter turn
+  // after it makes 39276. `MatrixToEulerZYX` reads that back as whichever
+  // triple its aim routine lands on -- here (-0x7FFF, -6508, -0x8000), the
+  // half-turn-flipped spelling -- so compare the rotations, not the words.
+  const want = MatIdentity();
+  MatrixRotateY(want, 0x4000);
+  MatrixRotateY(want, 22892);
+  const got = MatIdentity();
+  MatrixRotateZ(got, p2.rz);
+  MatrixRotateY(got, p2.ry);
+  MatrixRotateX(got, p2.rx);
+  check("...and at its own angles composed with the prop's",
+        want.every((v, i) => Math.abs(v - got[i]) < 1e-3),
+        `${p2.rx} ${p2.ry} ${p2.rz}`);
+  check("every piece is thrown up at 1.0 and out at 0.1..0.3",
+        s.pieces.every((q) => q.vy === 1.0
+          && Math.hypot(q.vx, q.vz) >= 0.1 - 1e-6
+          && Math.hypot(q.vx, q.vz) <= 0.3 + 1e-6));
+  // Bearing i * 0x1000: piece 0 goes along +z, piece 4 along +x.
+  check("...along bearing i * 0x1000",
+        Math.abs(s.pieces[0].vx) < 1e-9 && s.pieces[0].vz > 0
+        && Math.abs(s.pieces[4].vz) < 1e-6 && s.pieces[4].vx > 0);
+  check("...each spinning by at most 0x400 on each axis",
+        s.pieces.every((q) => [q.sx, q.sy, q.sz].every(
+          (v) => v >= -0x400 && v <= 0x400)));
+  check("piece i draws g_shatter_fragment_slots_a[i] for an ordinary prop",
+        s.pieces[0].slot === 0x19ea && s.pieces[14].slot === 0x19f3
+        && s.effect === 0);
+  check("the object is plain data a snapshot can copy",
+        JSON.stringify(structuredClone(G.g_prop_shatters))
+        === JSON.stringify(G.g_prop_shatters));
+
+  // Its frames: gravity 0.06805, a floor one unit above the ground plane,
+  // and 73 of them before the 74th kills it.
+  const y0 = p0.y, x0 = p0.x, vx0 = p0.vx, rx0 = p0.rx, sx0 = p0.sx;
+  PropShattersTick();
+  check("a frame takes 0.06805 off every piece's rise and then moves it",
+        s.pieces.every((q) => Math.abs(q.vy - (1.0 - SHATTER_GRAVITY)) < 1e-12)
+        && Math.abs(p0.y - (y0 + p0.vy)) < 1e-12
+        && Math.abs(p0.x - (x0 + vx0)) < 1e-12
+        && p0.rx === (((rx0 + sx0) << 16) >> 16),
+        `${p0.vy} ${p0.y - y0}`);
+  let lowest = Infinity;
+  let bounced = false;
+  // Literals, not the constants: a count read back from the code under test
+  // cannot catch that code being wrong. `CMP EAX, 0x48`, pre-increment.
+  for (let f = 1; f <= 0x48; f++) {
+    const falling = s.pieces.map((q) => q.vy < 0);
+    PropShattersTick();
+    s.pieces.forEach((q, i) => {
+      lowest = Math.min(lowest, q.y);
+      if (falling[i] && q.vy > 0) bounced = true;
+    });
+  }
+  check("no piece goes below g_camera_fixed_eye_y + 1, and they bounce",
+        lowest >= G.g_camera_fixed_eye_y + 1 - 1e-9 && bounced,
+        `lowest ${lowest}`);
+  check("...it is still up after 73 frames",
+        G.g_prop_shatters.length === 1 && s.frames === 73,
+        `${G.g_prop_shatters.length} f${s.frames}`);
+  PropShattersTick();
+  check("...and gone on the 74th", G.g_prop_shatters.length === 0);
+  G.g_camera_block_yaw_bams = 0;
+}
+
+{
+  // A one-shot target carries +0x324 = 6, which is the other table.
+  const rng = new Rng(22);
+  propScene(rng, GameMode.Training);
+  G.g_training_lesson = 0;
+  const p = makeBreakableProp(9001, 0, 1);
+  p.effect = 6;
+  p.drawMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1];
+  const s = BreakablePropSpawnShatter(p, rng, null);
+  check("a one-shot target's pieces are g_shatter_fragment_slots_b",
+        s.pieces[0].slot === 0x1a11 && s.pieces[12].slot === 0x1a1f);
+
+  // The spawn takes the *current* view off a matrix stored under the view it
+  // was drawn with: `MatrixInvert(0) * obj+0x2E4`. A camera that moved a unit
+  // along x and two along z between the two carries every piece with it.
+  const a = new Rng(5), b = new Rng(5);
+  p.drawView = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const still = BreakablePropSpawnShatter(p, a, null);
+  const moved = BreakablePropSpawnShatter(p, b, {
+    w2v: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -1, 0, -2, 1],
+    v2w: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 2, 1],
+  });
+  check("the view the prop was drawn under and the one on the stack now both "
+        + "count",
+        still.pieces.every((q, i) =>
+          Math.abs(moved.pieces[i].x - (q.x + 1)) < 1e-9
+          && Math.abs(moved.pieces[i].y - q.y) < 1e-9
+          && Math.abs(moved.pieces[i].z - (q.z + 2)) < 1e-9));
+  G.g_GameMode = GameMode.Arcade;
+}
+
+console.log("\nclass 0x41, what else BreakablePropUpdate does around the break:");
+{
+  // The rattle's two draws per frame are the game's.
+  const rng = new Rng(31);
+  const events = propScene(rng);
+  const [p] = PlaceBreakableGroup(1, 4, rng);
+  let expect = RandAhead(rng, 2);
+  shoot(p, 1, rng, events);
+  check("a crack's rattle draws two rand()s on the frame it starts",
+        rng.state === expect && p.shake > 0.8 && p.shake < 0.9,
+        `${p.shake}`);
+  for (let i = 0; i < 40; i++) BreakablePropUpdate(p, rng, events);
+  expect = rng.state;
+  BreakablePropUpdate(p, rng, events);
+  check("...and none once the shake has died under 0.01",
+        rng.state === expect && p.shakeX === 0 && p.shakeZ === 0);
+
+  // A falling prop is drawn under `Translate(0, -3.770148, 0)`.
+  const [bottom, top] = PlaceBreakableGroup(0, 4, rng);
+  shoot(bottom, 2, rng, events);
+  BreakablePropUpdate(top, rng, events);
+  const at = (q: BreakableProp) => Math.hypot(
+    q.drawMatrix[12] - (q.x + q.shakeX), q.drawMatrix[13] - q.y,
+    q.drawMatrix[14] - (q.z + q.shakeZ));
+  check("the frame a prop starts to fall it is still drawn by the standing "
+        + "block", top.state === BreakableState.Falling && at(top) < 1e-9,
+        `${BreakableState[top.state]} ${at(top)}`);
+  BreakablePropUpdate(top, rng, events);
+  check("...and after that 3.770148 below its origin, however it is turned",
+        Math.abs(at(top) - 3.770148) < 1e-6, `${at(top)}`);
+}
+
+{
+  // The hit gate's exception, and the stage-2 sweep.
+  const rng = new Rng(32);
+  const events = propScene(rng);
+  const [p, q] = PlaceBreakableGroup(1, 4, rng);
+  G.g_scene_index = 1;
+  G.g_evt_block_index = 0x11;
+  G.g_script_flags[0x28] = 0;
+  shoot(p, 1, rng, events);
+  check("scene 1 block 0x11: a shot does nothing until flag 0x28 is up",
+        p.hp === 2 && p.slot === BreakableSlot.Default, `hp ${p.hp}`);
+  G.g_script_flags[0x28] = 1;
+  shoot(p, 1, rng, events);
+  check("...and cracks the prop once it is", p.hp === 1);
+  G.g_script_flags[0x77] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("scene 1 with flag 0x77 up despawns every group prop",
+        p.dead && q.dead && G.g_breakable_props.length === 0);
+}
+
+{
+  // Group 4: the player cannot break it and the script can.
+  const rng = new Rng(33);
+  const events = propScene(rng);
+  const [bottom, top] = PlaceBreakableGroup(4, 4, rng);
+  BreakablePropPoolUpdate(rng, events);
+  shoot(bottom, 2, rng, events);
+  check("a shot never breaks group 4", bottom.hp === 2 && !bottom.dead);
+  const score = G.g_player_score[0];
+  G.g_script_flags[0x65] = 1;
+  BreakablePropPoolUpdate(rng, events);
+  check("flag 0x65 turns its ground member into the puff, effect 0x1D9",
+        bottom.family === PropFamily.Effect
+        && bottom.state === BreakableState.Removed
+        && bottom.effectVariant === 0x1d9 && bottom.effect === 0);
+  check("...and shatters its stacked one, for no score",
+        top.dead && G.g_prop_shatters.length === 1
+        && G.g_player_score[0] === score);
+}
+
+console.log("\nclass 0x44 selector 16's two pieces:");
+{
+  const rng = new Rng(78);
+  const events = propScene(rng);
+  let settled = 0;
+  events.on("prop.settled", () => settled++);
+  const c = PlaceFallingContainer(0xf300, 1, ItemSet.None, -1, 1, 6,
+                                  0, 20, 0, 0x1000, rng);
+  G.g_breakable_props.push(c);
+  // The knock: the camera block's yaw, and the one-and-a-half-size impact.
+  G.g_camera_block_yaw_bams = 0x2345;
+  c.hitAim = { x: 1, y: 2 };
+  const fx = G.g_sprite_effects.length;
+  BreakablePropTakeShot(c, 0);
+  FallingContainerUpdate(c, rng, events);
+  check("the knock turns the container to the camera block's yaw",
+        c.yaw === 0x2345, `${c.yaw}`);
+  check("...and throws SpawnPropHitEffectScaled's impact at the aim point",
+        G.g_sprite_effects.length === fx + 1
+        && G.g_sprite_effects[fx].pos.x === 1
+        && G.g_sprite_effects[fx].pos.z === c.z);
+  for (let i = 0; i < 600 && c.state !== BreakableState.Settled; i++) {
+    FallingContainerUpdate(c, rng, events);
+  }
+  settled = 0;
+
+  // The break: one draw for the sound, then five for each of two pieces.
+  const expect = RandAhead(rng, 1 + 2 * 5);
+  BreakablePropTakeShot(c, 0);
+  FallingContainerUpdate(c, rng, events);
+  check("the break draws 11 rand()s: the sound and two pieces of five",
+        rng.state === expect, `${rng.state} vs ${expect}`);
+  const frags = G.g_breakable_props.filter(
+    (p) => p.family === PropFamily.ContainerFragment);
+  check("it throws TWO pieces, not three and not none",
+        c.dead && frags.length === 2, `${frags.length}`);
+  const [f0, f1] = frags;
+  check("each draws 0xA55 and cannot be shot",
+        frags.every((f) => f.slot === FALLING_SLOT_FRAGMENT
+                    && f.hitRadius === 0));
+  check("they start on the container's floor, the second two units up",
+        f0.y === c.floorY && f1.y === c.floorY + 2 && f0.x === c.x
+        && f0.floorY === c.floorY);
+  check("one each way along x and z",
+        f0.vx > 0 && f0.vz > 0 && f1.vx < 0 && f1.vz < 0
+        && Math.abs(f0.vx) >= 0.1 && Math.abs(f0.vx) <= 0.2 + 1e-9);
+  check("thrown up at 1.5..1.7 and 2.0..2.2, a half turn apart in pitch",
+        f0.vy >= 1.5 && f0.vy <= 1.7 + 1e-9 && f1.vy >= 2.0
+        && f1.vy <= 2.2 + 1e-9 && f0.pitch === 0x4000
+        && f1.pitch === -0x4000, `${f0.vy} ${f1.vy}`);
+  check("...with the container's yaw and a cleared frame count",
+        f0.yaw === c.yaw && f0.storyItem === 0 && f0.roll === 0);
+
+  // Its frames: it lands (with a sound), lies there, blinks, and goes on the
+  // 182nd update.
+  let skippedOdd = 0, skippedWrong = 0;
+  // `CMP EAX, 0xB4` before the increment: 181 updates live, as literals.
+  for (let n = 1; n <= 181; n++) {
+    BreakablePropPoolUpdate(rng, events);
+    const blinkFrame = f0.state === BreakableState.Settled
+      && f0.storyItem > 0x96 && (f0.storyItem & 1) === 1;
+    if (f0.drawSkipped && blinkFrame) skippedOdd++;
+    else if (f0.drawSkipped || blinkFrame) skippedWrong++;
+  }
+  check("both pieces land, and are announced",
+        f0.state === BreakableState.Settled
+        && f1.state === BreakableState.Settled && settled === 2,
+        `${BreakableState[f0.state]} ${settled}`);
+  check("a settled piece skips its draw on odd counts past 0x96, and only then",
+        skippedOdd > 0 && skippedWrong === 0, `${skippedOdd} ${skippedWrong}`);
+  check("...on its own floor",
+        f0.y >= c.floorY - 1e-3 && f0.y - c.floorY < 3, `${f0.y}`);
+  check("...and is still there after 181 updates",
+        G.g_breakable_props.includes(f0) && !f0.dead);
+  BreakablePropPoolUpdate(rng, events);
+  check("...and gone on the 182nd", f0.dead && f1.dead
+        && G.g_breakable_props.length === 0);
+  G.g_camera_block_yaw_bams = 0;
+}
+
+{
+  // `FallingContainerGroundContact`'s wall, scene 1 block 0x12.
+  const rng = new Rng(79);
+  propScene(rng);
+  const f = makeBreakableProp(9002, 0, 0);
+  f.state = BreakableState.Falling;
+  f.x = -845; f.y = 100; f.floorY = 0; f.vx = -0.2;
+  FallingContainerGroundContact(f, [[-1, 0, 0]]);
+  check("outside scene 1 block 0x12 there is no wall", f.x === -845);
+  G.g_scene_index = 1;
+  G.g_evt_block_index = 0x12;
+  FallingContainerGroundContact(f, [[-1, 0, 0]]);
+  check("...inside it a point past x = -840 pushes the piece back and turns "
+        + "it round", f.x === -839 && f.vx === 0.2, `${f.x} ${f.vx}`);
+
+  // And the container's camera cue: path 0x2F, frame 0x96 exactly.
+  G.g_scene_index = 0;
+  const c = PlaceFallingContainer(0xf400, 1, ItemSet.None, -1, 1, 6,
+                                  0, 20, 0, 0, rng);
+  G.g_breakable_props.push(c);
+  G.g_active_cam_path = FALLING_REMOVE_CAM_PATH;
+  G.g_cam_path_frame = FALLING_REMOVE_CAM_FRAME - 1;
+  FallingContainerUpdate(c, rng);
+  check("the container's camera cue is an equality: one frame early, nothing",
+        !c.dead);
+  G.g_cam_path_frame = FALLING_REMOVE_CAM_FRAME;
+  FallingContainerUpdate(c, rng);
+  check("...and on the frame itself it goes", c.dead);
 }
 
 console.log("\nall three families share one item-set countdown:");
@@ -5168,10 +5536,13 @@ console.log("\nclass 0x41, Training's one-shot targets:");
 
   const before = G.g_player_score[0];
   shoot(target!, 1, rng, events);
-  // Note what it does *not* do: `hp` is still 1. A one-shot target is removed
-  // outright rather than damaged, so nothing decrements the shot count.
-  check("one shot removes it, without spending its hit point",
-        target!.state === BreakableState.Removed && target!.hp === 1,
+  // Note what it does *not* do: decrement `hp`. A one-shot target is removed
+  // outright rather than damaged -- and the destroy arm then hands `+0x11C`
+  // the lifetime byte (`MOVSX DX, byte [ESI+0x199]` at `0x004648A3`, stored
+  // at `0x004648C3`), which is 4 here.
+  check("one shot removes it; +0x11C takes the lifetime byte, not a decrement",
+        target!.state === BreakableState.Removed
+        && target!.hp === target!.lifetime && target!.lifetime === 4,
         `hp ${target!.hp} state ${target!.state}`);
   check("and it pays no score", G.g_player_score[0] === before,
         `${G.g_player_score[0]} vs ${before}`);

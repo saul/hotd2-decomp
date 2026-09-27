@@ -20238,6 +20238,43 @@ kills the room through the death states for exactly this reason.
   were overwritten by another agent's between writing and rereading. Scripts
   now live in a subdirectory of their own.
 
+## 2026-09-27 -- the shatter and the container's pieces are objects
+
+`BreakablePropSpawnShatter` (`FUN_00465170`) and the falling container's
+destroy arm were both ported as an event and a despawn, under a divergence
+note that called their pieces render-only. Read from the disassembly, not the
+pseudocode: Ghidra ends `BreakablePropSpawnShatter`,
+`BreakablePropShatterUpdate` (`FUN_004653B0`, named here) and
+`BreakablePropUpdate` at a `MatrixStackPop` it takes for no-return (L37), so
+two of the three loops and every draw block's tail were invisible.
+
+What the engine does: one `0x2B4` object carries fifteen pieces placed off
+`obj+0x2E4` -- the matrix the prop's last draw `MatrixStore`d, view included --
+75 `rand()`s at the spawn; and the container throws **two** 0x378 pieces
+(`FallingContainerFragmentUpdate`, `FUN_0046AD20`, named here), ten `rand()`s.
+`FUN_0046B040` is one routine taking `(obj, hull, count)` for both, named
+`FallingContainerGroundContact` to match the port.
+
+**What the old reading got wrong**, besides dropping the objects: "three
+fragments" in the TSV, the port and `spawns.md` -- the loop is `1, -1` and
+stops at `-3`. The `[open]` hit gate over "three script globals that have not
+been read out" was `g_scene_index`, `g_evt_block_index` and
+`g_script_flags[0x28]`, all already named. The ground-level destroy wrote
+`+0x324` where the engine writes `+0x294`. The rattle's `rand()`s were drawn by
+the renderer. The renderer left out `Translate(0, -3.770148, 0)` on falling and
+settled props. And three things were missing outright: group 4's script break
+on `g_script_flags[0x65]` (a second caller of the shatter), the scene-1 `0x77`
+sweep in both routines, and the container's camera cue and wall.
+
+**Wrong turn.** The first port test for piece 2's angles asserted the Euler
+triple `(0, -26260, 0)`; `MatrixToEulerZYX` returns the half-turn-flipped
+spelling `(-0x7FFF, -6508, -0x8000)` of the same rotation. The check compares
+rotation matrices now. And the first lifetime checks looped on the constants
+under test, so a mutation of either lifetime passed; they are literals.
+
+`[open]`: `FUN_004702E0`, a second caller of the shatter that forces group 99
+(no floor), is not in `g_class41_updates`; what allocates it is unread.
+
 ## 2026-09-27 -- the HUD shutter as the scene's task, and no pause at a branch
 
 Two of the script layer's declared divergences, both removed.

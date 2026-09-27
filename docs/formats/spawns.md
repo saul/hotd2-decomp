@@ -848,13 +848,55 @@ them:
   overwritten with `BreakableEffectUpdate` (`FUN_00465500`) — it becomes a
   puff for `0x48` frames and is gone. It does not fall.
 * A prop **above** level 0 that is destroyed bursts through
-  `BreakablePropSpawnShatter` (`FUN_00465170`) into 15 fragments and dies.
+  `BreakablePropSpawnShatter` (`FUN_00465170`) into 15 fragments and dies
+  (`ActorKill`, not `ActorDespawn`). See *The shatter* below.
 * A prop only *falls* when the members it names as supports have all gone. It
   then drops under `0.01361` a frame, spinning by at least `0x80`, until
   `BreakablePropGroundContact` (`FUN_00465590`) finds one of the 96 points of
   `g_breakable_hull_points` below the floor — at which point it settles onto
   that corner. That is the whole stack collapse: nothing pushes anything, and
   each prop only ever checks what it is standing on.
+
+**Group 4 is broken by the script, never by a shot.** The hit block skips it,
+and while `g_script_flags[0x65]` reads 1 every standing group-4 member breaks
+by itself: a stacked one shatters, a ground one becomes the puff with effect
+variant `0x1D9` — no score, no sound, no item (`0x004648FE`). `[proved]`
+
+**The hit gate has one more exception:** in scene 1 (stage 2), block `0x11`,
+a shot does nothing until `g_script_flags[0x28]` is raised; and in scene 1
+`g_script_flags[0x77]` despawns every group prop, the same sweep
+`PropExpireByStepLifetime` makes for the generic props. `[proved]`
+
+#### The shatter
+
+`BreakablePropSpawnShatter` allocates **one** `0x2B4` object running
+`BreakablePropShatterUpdate` (`FUN_004653B0`), with the fifteen pieces as
+parallel arrays inside it — not fifteen objects. Read from the disassembly:
+Ghidra ends both bodies at the `MatrixStackPop` it believes is no-return, so
+the pseudocode shows piece 0 and no loop (`L37`). `[proved]`
+
+* Piece `i` starts at `MatrixInvert(0) * prop+0x2E4 * Translate(
+  g_shatter_fragment_offsets[i] * 0.001) * Rz Ry Rx(g_shatter_fragment_angles[i])`,
+  read back with `MatrixGetTranslation` and `MatrixToEulerZYX`. `prop+0x2E4` is
+  what each of `BreakablePropUpdate`'s three draw blocks `MatrixStore`s — the
+  model on top of the view it was drawn under — so the pieces start where the
+  prop was *last drawn*, rattle included, and a camera that moved since carries
+  them by that frame's motion.
+* Velocity `(sin b, 1.0, cos b)` with `b = i * 0x1000` and a horizontal speed of
+  `rand() % 0x15 * 0.01 + 0.1`, drawn separately for x and z; spins
+  `rand() % 0x801 - 0x400` on each axis. **75 `rand()`s per shatter.**
+* Each frame: `vy -= 0.06805`, move, add the spins as 16-bit words, and below
+  `g_camera_fixed_eye_y + 1.0` sit on that plane with `vy *= -0.8` — unless the
+  object's `+0x35` (the prop's group) is `0x63`, which no shipped group is.
+  Drawn `Translate; RotZ; RotY; RotX` with `g_shatter_fragment_slots_a[i]`
+  (`0x19EA`..`0x19F8`) or, when the prop's `+0x324` is non-zero — Training's
+  one-shot targets — `_b[i]` (`0x1A11`..`0x1A1F`).
+* The count is tested **before** the increment: 73 frames drawn, killed on the
+  74th. No shot test, no `rand()` after the spawn.
+
+A second caller, `FUN_004702E0` (`0x004704DD`), shatters with its group forced
+to 99 first — the no-floor case. It is not in `g_class41_updates` and is
+unported; what allocates it is `[open]`.
 
 **Lifetime is measured in event-script blocks, not frames.** Each prop keeps
 `obj+0x199` from `desc+0x24`, and despawns once the evt block counter
@@ -914,6 +956,24 @@ instead. Four of the seven are kind 3 — `0x19E8`, the ordinary breakable, two
 shots — and three are kind 2, which draws no body at all and bursts in one
 because its `g_prop_kind_params` effect id is non-zero. See
 `game/class41/type43.ts`.
+
+**The falling container breaks into two pieces, not three.** Its destroy arm's
+loop counts `1, -1` and stops at `-3` (`0x0046A7E2`..`0x0046A95D`), allocating
+each piece as a 0x378 object in the container's own pool with the container's
+layout, running `FallingContainerFragmentUpdate` (`FUN_0046AD20`) and drawing
+`0xA55`. One goes each way along x and z at `rand() % 11 * 0.01 + 0.1`, up at
+`rand() % 0x15 * 0.01 + i * 0.5 + 1.5` from the floor `+ 2i`, a half-turn
+apart in pitch — ten `rand()`s. It tumbles under `0.05444` (its pitch spin
+easing toward level, its roll free), settles on the 55-point
+`g_container_fragment_hull_points` through the same
+`FallingContainerGroundContact` (`FUN_0046B040`) the container uses with its
+48, plays `0x1916A9`/`0x1816A9`, blinks on odd counts past `0x96`, and is
+killed after 181 frames. Not shootable. `FallingContainerGroundContact` also
+holds a wall in scene 1 block `0x12`: a hull point past `x = -840` pushes the
+object back and negates `vx`. The container itself is despawned by the scene-1
+`0x77` sweep and by camera path `0x2F` at frame `0x96`, and its knock turns it
+to `g_camera_block_yaw_bams` and calls `SpawnPropHitEffectScaled(obj, p, 1.5)`
+rather than the spark. `[proved]`
 
 **They all decrement the same `g_item_set_countdown`,** so an item set is not
 owned by a class. Stage 2's set 2 is spread across the group placer, seven

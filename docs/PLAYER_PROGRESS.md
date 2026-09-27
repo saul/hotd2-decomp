@@ -4334,6 +4334,41 @@ modelled.
 no-return pop); the port does not draw a character's shadow yet, and
 `ActorDrawShadow`'s gate is ported for when it does.
 
+### A stacked prop shatters, and a falling container breaks in two
+
+Both were written off as "render-only effects nothing in `game/` observes" and
+let go with an event. Both draw `rand()`s — 75 for a shatter, 10 for the
+container's pieces — so the port ran the rest of any stage in which one broke
+on a different random stream from the game. They are objects now, stepped
+where the engine steps them:
+
+* **The shatter** is one `0x2B4` object with fifteen pieces
+  (`game/class41/shatter.ts`, `G.g_prop_shatters`, drawn by
+  `render/prop_shatter.ts`). The pieces start off `obj+0x2E4`, the matrix the
+  prop's last draw stored — so `BreakablePropUpdate`'s draw composition moved
+  into the port (`drawMatrix`, with the view it was drawn under in
+  `drawView`), and the renderer now places a group prop with it. That fixed a
+  second thing: a falling or settled prop is drawn under
+  `Translate(0, -3.770148, 0)`, which the renderer had left out, so a toppling
+  prop jumped up by half a level the frame it started to fall.
+* **The container's pieces** are two, not three (the loop runs for 1 and -1),
+  0x378 objects in the prop pool (`PropFamily.ContainerFragment`,
+  `game/class44/container_fragment.ts`) that tumble, land, blink and go after
+  181 frames. `FallingContainerGroundContact` takes the hull as an argument
+  now, as the engine's does, and has the scene-1 block-0x12 wall it was
+  missing.
+
+Around them, in the same two routines: the rattle's two `rand()`s a frame are
+drawn by the port rather than by the renderer's own generator; group 4 breaks
+on `g_script_flags[0x65]` and never on a shot; the hit gate's scene-1 block
+0x11 hold (flag 0x28) and the scene-1 `0x77` sweep are in; a crack or a knock
+turns the prop to `g_camera_block_yaw_bams`; the ground-level destroy no longer
+zeroes `+0x324` and does hand `+0x11C` the lifetime byte; the container
+despawns on camera path `0x2F` frame `0x96`, its knock throws the
+one-and-a-half-size impact instead of a spark, and its story item comes out
+half a unit above the floor. The bundle carries both slot tables, the offsets
+and angles, and the 55-point piece hull.
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),

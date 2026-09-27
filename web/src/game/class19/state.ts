@@ -327,7 +327,10 @@ const EMPTY_TABLES: Boss4TablesJson = {
   phase_arenas: [], head_slot_by_bar: [], approach_picks: [],
 };
 
-/** `g_boss4_phase_hp_fraction[phase]` (`0x00570490`), 0 past the table. */
+/**
+ * `g_boss4_phase_hp_fraction[phase]` (`0x00570490`), 0 past the table.
+ * `[port-only]` as an accessor.
+ */
 export function Boss4PhaseFraction(phase: number): number {
   return Boss4Tables().phase_hp_fraction[phase] ?? 0;
 }
@@ -335,7 +338,8 @@ export function Boss4PhaseFraction(phase: number): number {
 /**
  * `obj+0x11E * g_boss4_phase_hp_fraction[phase]` -- the product every reader
  * forms inline (`FILD obj+0x11E; FMUL [phase*4 + 0x570490]`). Kept in the
- * FPU's precision and compared unrounded, as they compare it.
+ * FPU's precision and compared unrounded, as they compare it. `[port-only]`
+ * as a function.
  */
 export function Boss4PhaseFloor(maxHp: number, phase: number): number {
   return maxHp * Boss4PhaseFraction(phase);
@@ -417,7 +421,10 @@ export function Boss4NoPlayerFree(): boolean {
     && (G.g_player_lives[p] ?? 0) === 1;
 }
 
-/** `state = n; sub = 0` -- the two byte stores every transition makes. */
+/**
+ * `state = n; sub = 0` -- the two byte stores every transition makes.
+ * `[port-only]` as a function.
+ */
 export function Boss4Enter(b: Boss4Block, state: Boss4State): void {
   b.state = state;
   b.sub = 0;

@@ -30,6 +30,7 @@ import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
+import type { ShotTestEntry } from "./combat/shot_test";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
 import type { BossHpBar } from "./boss_hp_bar";
 import type { BossBanner } from "./boss_banner";
@@ -815,6 +816,18 @@ export const G = {
    * Normally empty by the end of the frame that read it.
    */
   g_shot_requests: [] as ShotRequest[],
+  /**
+   * `g_shot_test_list` — `0x0059D8E8`, with its count `g_shot_test_count`
+   * (`0x005A4C80`) as the array's length. What `RegisterForShotTest`
+   * (`FUN_00405160`) appends to, one five-dword record per object, and what
+   * `ProcessPlayerShots` (`FUN_00404570`) tests the next frame's trigger
+   * pulls against before emptying it.
+   *
+   * Only the classes that register the engine's way are in it — see
+   * `combat/shot_test.ts`. Plain records, so a snapshot carries a frame's
+   * registrations like any other part of the data segment.
+   */
+  g_shot_test_list: [] as ShotTestEntry[],
   /**
    * `[port-only]` — the heads the 1-in-4 headshot burst has thrown.
    *
@@ -2006,6 +2019,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // Input, and a scene that is starting has none pending. A seek that left a
   // click queued would otherwise fire it into the replayed world.
   G.g_shot_requests = [];
+  // [port-only] The engine's list holds object pointers into a pool the scene
+  // load has just emptied; nothing registered survives into the new scene.
+  G.g_shot_test_list = [];
   G.g_severed_heads = [];
   G.g_severed_head_seq = 0;
   G.g_sprite_effects = [];

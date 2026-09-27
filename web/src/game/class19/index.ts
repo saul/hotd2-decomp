@@ -55,6 +55,7 @@
  */
 import type { Actor } from "../actor";
 import { ActorFlag } from "../actor";
+import { ActorRegisterCameraPoint } from "../camera/track";
 import { ActorSetMotion } from "../class30/motion_cue";
 import { ActorDespawn } from "../despawn";
 import { G, HIT_SLOT_NONE } from "../globals";
@@ -125,8 +126,9 @@ const BOSS4_TAIL_BONES = 15;
  * ```
  *
  * * `char+0x60` is the character type, which the descriptor already carries.
- * * `ActorBuildSkinnedModel` is the renderer's and the hit-slot claim's
- *   (`spawn.ts`); `char+0x68 = 1` is the rotation order `RotX RotZ RotY`,
+ * * `ActorBuildSkinnedModel` is the renderer's, the hit-slot claim's and
+ *   the per-bone shot bit's (`obj+0x34 |= 0x80`, `ActorSpawn` in
+ *   `spawn.ts`); `char+0x68 = 1` is the rotation order `RotX RotZ RotY`,
  *   which is how every actor is drawn.
  * * `RegisterEnemySlot` (`FUN_00408E80`, `0x004918AB`) is the port's
  *   per-frame slot pass, `camera/slots.ts`.
@@ -141,7 +143,6 @@ export function Boss4Init(obj: Actor): void {
   ActorSetMotion(obj, Boss4Clip.Entrance);
   obj.boneSlot[String(BOSS4_BLADE_BONE)] = BOSS4_BLADE_FIRST;
   obj.hitRadius = BOSS4_HIT_RADIUS;
-  obj.radius = BOSS4_HIT_RADIUS;
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
   // `MOV byte ptr [ESI + 0x121], 0xFF` and `+0x120`.
@@ -241,11 +242,11 @@ export function Boss4Update(obj: Actor, f: ClassFrame): void {
   Boss4FootfallShake(obj, b, f.eye, host, events);
   Boss4AdvanceMotionAndDrawHeldProps(obj, b, host);
   Boss4AdvancePhaseAtFloor(obj, b);
-  // ---- `ActorRegisterCameraPoint(state+0x70)` -- `FUN_00409B70`, called at
-  // `0x00491A49`, every frame and ungated. The director makes this call for
-  // every actor (`director.ts`), with this class's rise from
-  // `Boss4Handler.cameraRise` -- `state+0x70` -- and its candidacy from
-  // `tracksCamera`; the call is here in the engine's frame order. ----
+  // `ActorRegisterCameraPoint(state+0x70)` -- `FUN_00409B70` at
+  // `0x00491A49`, every frame and ungated. It is also this class's only way
+  // into the shot test: the routine ends in `RegisterForShotTest` at
+  // `0x00409BED`, and the boss has no other call to it.
+  ActorRegisterCameraPoint(obj, host, b.cameraRise);
   Boss4PlayCameraCue(b, host);
   if (b.flags & Boss4Flag.Fenced) {
     const a = b.arena;
@@ -317,7 +318,11 @@ export const Boss4Handler: ClassHandler = {
   // whenever `obj+0x34` bit `0x10000` is clear. Not in `ENEMY_CLASSES`, so
   // this is the only way in.
   tracksCamera: () => true,
-  cameraRise: (obj) => obj.boss4?.cameraRise ?? BOSS4_CAMERA_RISE,
+  // ...and the same call puts him in the shot test. `Boss4Update` makes it
+  // itself, so the director's lift does not run for this class, and `render/`
+  // does not pick him: a frame he did not register is a frame he cannot be
+  // shot, which is the entrance's `0x8000` at work.
+  registersForShotTest: true,
   // **Nothing to give back.** The engine has no sweep, and this class's own
   // states keep both enemy counts. Its `obj+0x121` is the player an attack is
   // aimed at (`ActorPickTargetPlayer`), not a permit it holds -- the generic

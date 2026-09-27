@@ -28,14 +28,19 @@
  * `ShotTestSphere` (`FUN_00404630`) is the fork. It tests a sphere at the
  * actor's registered point with radius `obj+0x124`, and only descends into the
  * skeleton — `ShotTestSkeleton` (`FUN_00404700`) — when `obj+0x34` bit `0x80`
- * is set and the character has bones. A class-0x10 civilian never has that bit:
- * none of the 136 command streams raises it. So a civilian is a ten-unit ball
- * with no hit table, no damage and no gore, and the hit does not go through
- * `ResolveHit` at all.
+ * is set and the character has bones. That bit is raised by the skeleton
+ * build every skinned `Init` runs, a civilian's included (see
+ * `ActorFlag.ShootPerBone`), so a civilian is a ten-unit ball first and a set
+ * of bone spheres inside it. It still has no hit table, no damage and no
+ * gore: its hit does not go through `ResolveHit` at all.
  *
  * What it goes through instead is this: the sort picks the nearest candidate
  * and marks it, and the actor's own update decides what being marked means.
  * For a civilian that is a life, two hundred points and the on-shot script.
+ *
+ * The classes that register the engine's way are tested by
+ * `combat/shot_test.ts`; the rest are still picked by `render/`. See
+ * {@link MergeShotPicks} for how the two answers meet.
  *
  * ## The score, from `FUN_00409430`
  *
@@ -74,12 +79,13 @@ import { PlayerShotEffectSpawn } from "../effects/shot_effects";
 import { SpawnPropHitSpark } from "../effects/sprite";
 import { ActorShotFeedback, SpawnWorldImpact } from "./feedback";
 import { ActorByAt, G } from "../globals";
-import type { GameHost, ShotRay } from "../host";
+import type { GameHost, ShotPick, ShotRay } from "../host";
 import type { Vec3 } from "../vec";
 import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
 import { DispatchHit, HitResultCode } from "./resolve_hit";
 import { ScoreAddForPlayer } from "./score";
+import { ProcessPlayerShotsTestList, type ShotCandidate } from "./shot_test";
 
 /**
  * One queued trigger pull.
@@ -260,6 +266,33 @@ export function DropDueShotRequests(): void {
 }
 
 /**
+ * `[port-only]` The nearer of the two picks a trigger pull gets.
+ *
+ * The engine has one candidate list and one sort, `MarkActorShot`
+ * (`FUN_00404DB0`)'s, keyed on each candidate's view-space depth. The port
+ * has that list for the classes that register the engine's way
+ * (`combat/shot_test.ts`, which sorts it exactly) and `render/`'s own pick for
+ * the rest, which answers with the nearest thing by distance along the ray.
+ *
+ * [diverges] Between the two, the nearer **along the ray** wins, which is the
+ * order `render/` has always merged its own sources in. The engine would
+ * compare `__ftol(-z * 10)` depths and break ties by registration order, so
+ * two candidates within a tenth of a unit of the same depth, one from each
+ * side, can land differently. The rule goes when the last class is converted
+ * -- see `docs/formats/combat.md`, "The shot test", for what that takes.
+ */
+export function MergeShotPicks(picked: ShotPick | null,
+                               registered: ShotCandidate | null):
+                               ShotPick | null {
+  if (!registered) return picked;
+  if (picked && (picked.t ?? Infinity) <= registered.t) return picked;
+  return { kind: "actor", at: registered.at, bone: registered.bone,
+           whole: registered.whole, point: registered.point,
+           ...(registered.mesh ? { mesh: registered.mesh } : {}),
+           t: registered.t };
+}
+
+/**
  * One shot, from `BuildShotRay` to the score -- the fire block of
  * `PlayerFireAndReloadUpdate` (`FUN_00414940`) from its `g_nPlayerFired` on,
  * and what `ProcessPlayerShots` (`FUN_00404570`) then does with the ray.
@@ -307,7 +340,10 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // that order. The Original Mode twin picks its own id first, which is why
   // the caller hands it in.
   events?.emit("sound.play", { id: gunshot });
-  const pick = host.pickShot?.(req.ray) ?? null;
+  // Two answers to one question: the classes that register the engine's way,
+  // through `g_shot_test_list`, and everything else through `render/`.
+  const pick = MergeShotPicks(host.pickShot?.(req.ray) ?? null,
+                              ProcessPlayerShotsTestList(req.ray, host));
   // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
   // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its
   // second frame, which is what makes a hit a stub of streak and a miss a
@@ -532,6 +568,19 @@ export function MarkActorShot(obj: Actor, player: number, bone = 0,
  * `render/shooting.ts` used to answer this by raycasting the drawn geometry
  * and calling every surface material 3, because there was no collision in the
  * bundle. There is now.
+ *
+ * [diverges] **The engine does not wait for a miss.** `ProcessPlayerShots`
+ * (`FUN_00404570`) calls `ShotTestWorld` (`FUN_00404B80`) on every trigger
+ * pull, after the objects, and each blob it hits is pushed into the same
+ * candidate list (`0x00404C80`: flags `0x10`, no object, key
+ * `__ftol(-z * 10)` of the hit point). The sort then decides, and a wall
+ * nearer than the zombie behind it wins: `MarkActorShot` sees flag `0x10`
+ * without `0x40`, marks nobody, and throws the impact. Here the world is
+ * traced only when nothing was picked, so a shot through a wall still finds
+ * what is behind it. It is also traced against the moving objects' blobs,
+ * which the engine reaches through `ShotTestMesh` from the registration list
+ * instead. Folding the world into the one sort is part of converting the
+ * remaining classes -- see `docs/formats/combat.md`, "The shot test".
  */
 function ShotHitWorld(req: ShotRequest, host: GameHost,
                       events?: Events): boolean {

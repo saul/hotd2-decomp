@@ -40,12 +40,10 @@
  * `obj+0x124`. {@link SlotModelLayer.pickSphere} is that else-arm, and it is
  * what makes the mouse shootable.
  *
- * [diverges] **The port does not test the bounding sphere first.**
- * `render/characters.ts` goes straight to the bone spheres for a skinned
- * actor, where the engine rejects the shot outright unless it is inside
- * `obj+0x124` as well. Changing that would alter every zombie hit in the game
- * and wants its own measurement, so it stays as it is and is recorded here
- * beside the routine that says otherwise.
+ * The whole routine, broad phase and fork included, is
+ * `game/combat/shot_test.ts`'s, for the classes that register the engine's
+ * way. This layer tests the ones that do not; `CharacterLayer.pickShot` says
+ * what that costs them.
  */
 import { Group, Matrix4, Object3D, Ray, Vector3, type Mesh } from "three";
 import type { System } from "../core/system";
@@ -55,6 +53,7 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import type { CamPaths } from "../game/camera/curve";
 import { G } from "../game/globals";
+import { g_class_handlers } from "../game/registry";
 import { ScriptedScenerySelector } from "../game/class33/state";
 import { OwlBodyChain, type OwlPart } from "./owl";
 import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
@@ -685,6 +684,8 @@ export class SlotModelLayer implements System<RenderContext> {
     let best: { at: number; point: Vector3; t: number } | null = null;
     for (const a of G.g_object_list) {
       if (a.dead || a.hitRadius <= 0) continue;
+      // A class that registers the engine's way is `game/`'s to test.
+      if (g_class_handlers[a.cls]?.registersForShotTest) continue;
       // `RegisterForShotTest` (`FUN_00405160`) skips bit `0x8000`.
       if (a.flags & ActorFlag.NoShotTest) continue;
       if (!this.nodes.has(a.at)) continue;       // not drawn, not shootable

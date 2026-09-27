@@ -29,7 +29,7 @@ import { vec3 } from "../vec";
 import { Boss4ResumeAfterHit } from "./death";
 import {
   BOSS4_CAMERA_RISE, BOSS4_HAND_BONE, Boss4Clip, Boss4Enter, Boss4Flag,
-  Boss4NoPlayerFree, Boss4Sound, Boss4State, Boss4Tables,
+  Boss4Sound, Boss4State, Boss4Tables,
 } from "./state";
 import type { Boss4Block as Blk } from "./state";
 import { BOSS4_HAND_EMPTY, BOSS4_HAND_HOLDING } from "./slots";

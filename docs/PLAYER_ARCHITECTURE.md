@@ -124,7 +124,13 @@ should take it:
 
 * **The renderer answers questions; it never decides.** `GameHost.pickShot`
   (`ShotTestSphere`, `FUN_00404630`) returns the nearest actor-and-bone or prop
-  along a segment. `GameHost.boneWorld` returns where a bone is.
+  along a segment, for the classes that do not register for the shot test.
+  For those that do (`ClassHandler.registersForShotTest`), **who is a
+  candidate is the game's**. Their updates call `RegisterForShotTest` into
+  `G.g_shot_test_list`, and `game/combat/shot_test.ts` runs the broad phase,
+  the fork and the sort itself. It asks the host only for what a pose knows:
+  `boneSphere` and `viewSpaceOfPoint`. `MergeShotPicks` puts the two answers
+  together until every class has moved across. `GameHost.boneWorld` returns where a bone is.
   `CharacterLayer.readySpawns` returns which adopted hierarchies the script is
   currently asking for and where the exporter put them. Each is a fact only
   three.js can produce, and each crosses the seam as plain numbers.
@@ -176,6 +182,9 @@ drained and recording it per frame gives an **input log** — the regression
 harness the plan has wanted since the beginning. The half that is not built is
 the other end: replaying a log headlessly needs a `pickShot` that a run with no
 renderer can answer, which means the skeleton's forward kinematics in `game/`.
+The registered half is most of the way there. It needs only a bone's sphere
+and a view transform from the host, and an object hit whole needs no pose at
+all.
 Until that exists a headless replay resolves every shot as a miss, so the
 harness is deliberately not shipped rather than shipped half-working.
 `web/test/port.test.ts` drives the queue with a stubbed `pickShot`, which is

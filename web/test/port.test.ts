@@ -31,7 +31,7 @@ import { authoredFrameHeld, authoredFrameOfTicks,
          ticksOfAuthoredFrame } from "../src/core/play_cursor";
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
   from "../src/game/director";
-import { ActorKillAll } from "../src/game/combat/resolve_hit";
+import { ActorKillAll, RemoveBoneSubtree } from "../src/game/combat/resolve_hit";
 import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
@@ -58,8 +58,14 @@ import {
   SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
 } from "../src/game/class13/routine0";
 import { CarriedZombieUpdate18 } from "../src/game/class18";
-import { CameraPointRiseFor, CameraDriverFromDeferredPose }
+import { ActorRegisterCameraPoint, CameraPointRiseFor,
+         CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
+import { ActorBuildSkinnedModel } from "../src/game/spawn";
+import {
+  ColiSortHitCandidatesByDistance, ProcessPlayerShotsTestList, RayTestSphere,
+  RegisterForShotTest, ShotCandidateKey, ShotRayAnglesFromView,
+} from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
@@ -113,11 +119,11 @@ import { OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_LAST_FRAME,
 import { ShotEffectsTick } from "../src/game/effects/tick";
 import { SpawnSpriteEffect, SpriteEffectKind }
   from "../src/game/effects/sprite";
-import { MarkActorShot, QueueOffscreenPull, QueueShotRequest,
+import { MarkActorShot, MergeShotPicks, QueueOffscreenPull, QueueShotRequest,
   g_gunshot_sound_ids }
   from "../src/game/combat/shot";
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
-         SetGameTables, T } from "../src/game/tables";
+         SetBoss4Tables, SetGameTables, T } from "../src/game/tables";
 import {
   ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
   ColiTraceSegmentAllSets,
@@ -268,10 +274,8 @@ import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
 import { BOSS4_DEAD_FLAG, BOSS4_DEATH_DWELL }
   from "../src/game/class19/death";
 import { Boss4ResolveShot } from "../src/game/class19/shot";
-import {
-  BOSS4_HEAD_DAMAGE, BOSS4_PHASE_HP_FRACTION, BOSS4_SOFT_SURFACE,
-  BOSS4_WEAK_BONE, Boss4State,
-} from "../src/game/class19/state";
+import { Boss4State } from "../src/game/class19/state";
+import type { Boss4TablesJson } from "../src/bundle/stage";
 import {
   BreakableState, BreakableFlag, BreakablePropTakeShot, BreakablePropUpdate,
   BreakableSlot, GrantExtraLife, ItemSet, MEMBERS_PER_GROUP,
@@ -13829,95 +13833,200 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
   }
 }
 
-console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:");
+console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
 {
   /**
-   * `boss4.bin`'s clips, as `charmotion.BOSS4_CLIPS` bakes them. Only the ones
-   * the ported states name need real lengths; the death clip matters most,
-   * because `Boss4StateDeath` writes `g_script_flags[32]` on its frame 0x46
-   * and a clip shorter than that could never reach it.
+   * The seven `.rdata` tables, as `hod2lib/exetab.ts`'s `boss4Tables()` reads
+   * them out of `Hod2.exe` -- the bundle's `script.json` `boss4` block. Copied
+   * here once so the suite runs with no game directory.
+   */
+  const BOSS4_TABLES: Boss4TablesJson = {
+    phase_hp_fraction: [0.8888890147209167, 0.7777780294418335, 0.6666669845581055, 0.5555559992790222, 0.44444501399993896, 0.3333339989185333, 0.22222299873828888, 0.11111199855804443, 0.0, 0.8888890147209167, 0.7777780294418335, 0.6666669845581055, 0.5555559992790222, 0.44444501399993896, 0.3333339989185333, 0.22222299873828888, 0.11111199855804443, 0.0],
+    head_damage: [0, 26, 22, 24, 20, 23, 19, 22, 18, 21, 17, 20, 16, 19, 15, 18, 14, 17, 13, 16, 12, 15, 11, 15, 11, 14, 10, 14, 10, 13, 9, 13, 9],
+    held_props: [
+      { offset: [4.468969821929932, -7.174769878387451, 1.9704699516296387], rot: [30229, 53341, 38188], bone: 13, clip: 103, take: 20, throw: 68 },
+      { offset: [-4.053530216217041, 6.648230075836182, 3.688149929046631], rot: [40704, 62912, 32411], bone: 1, clip: 104, take: 20, throw: 68 },
+    ],
+    camera_cues: [
+      { start: 0, end: 220, step: 0.699999988079071, path: 185 },
+      { start: 231, end: 350, step: 0.550000011920929, path: 185 },
+      { start: 361, end: 560, step: 0.7300000190734863, path: 185 },
+      { start: 571, end: 680, step: 0.550000011920929, path: 185 },
+      { start: 721, end: 750, step: 0.4000000059604645, path: 185 },
+      { start: 751, end: 860, step: 0.4000000059604645, path: 185 },
+      { start: 881, end: 1020, step: 0.5, path: 185 },
+      { start: 1031, end: 1175, step: 0.6000000238418579, path: 185 },
+      { start: 1211, end: 1310, step: 0.6000000238418579, path: 185 },
+      { start: 0, end: 100, step: 0.5, path: 193 },
+      { start: 111, end: 200, step: 0.5, path: 193 },
+      { start: 211, end: 388, step: 0.6000000238418579, path: 193 },
+      { start: 451, end: 590, step: 0.5, path: 193 },
+      { start: 601, end: 670, step: 0.4000000059604645, path: 193 },
+      { start: 681, end: 850, step: 0.75, path: 193 },
+      { start: 861, end: 1030, step: 0.6000000238418579, path: 193 },
+      { start: 1041, end: 1180, step: 0.6000000238418579, path: 193 },
+      { start: 1221, end: 1310, step: 0.5, path: 193 },
+      { start: 861, end: 880, step: 0.5, path: 185 },
+      { start: 1176, end: 1210, step: 0.6000000238418579, path: 185 },
+      { start: 389, end: 440, step: 0.44999998807907104, path: 193 },
+      { start: 1181, end: 1220, step: 0.44999998807907104, path: 193 },
+    ],
+    phase_arenas: [
+      [[-300.0,-1625.0],[190.0,-1625.0],[230.0,-1650.0],[-195.0,-1650.0],[-195.0,-1600.0],[230.0,-1600.0]],
+      [[265.0,-1550.0],[265.0,-1750.0],[240.0,-1775.0],[240.0,-1600.0],[290.0,-1600.0],[290.0,-1775.0]],
+      [[200.0,-1700.0],[410.0,-1700.0],[430.0,-1725.0],[310.0,-1725.0],[310.0,-1675.0],[430.0,-1675.0]],
+      [[475.0,-1600.0],[475.0,-1740.0],[450.0,-1900.0],[450.0,-1675.0],[500.0,-1675.0],[500.0,-1900.0]],
+      [[750.0,-1925.0],[490.0,-1925.0],[465.0,-1900.0],[680.0,-1900.0],[680.0,-1950.0],[465.0,-1950.0]],
+      [[370.0,-1900.0],[370.0,-2040.0],[330.0,-2070.0],[330.0,-1955.0],[410.0,-1955.0],[410.0,-2070.0]],
+      [[400.0,-2035.0],[250.0,-2035.0],[230.0,-2010.0],[310.0,-2010.0],[310.0,-2060.0],[230.0,-2060.0]],
+      [[200.0,-1922.5],[80.0,-1922.5],[60.0,-1897.5],[155.0,-1897.5],[155.0,-1947.5],[60.0,-1947.5]],
+      [[-100.0,-1820.0],[120.0,-1820.0],[145.0,-1845.0],[-25.0,-1845.0],[-25.0,-1795.0],[145.0,-1795.0]],
+      [[-100.0,-1625.0],[-395.0,-1625.0],[-410.0,-1600.0],[-185.0,-1600.0],[-185.0,-1650.0],[-410.0,-1650.0]],
+      [[-460.0,-1600.0],[-460.0,-1745.0],[-480.0,-1765.0],[-480.0,-1600.0],[-440.0,-1600.0],[-440.0,-1765.0]],
+      [[-500.0,-1720.0],[-300.0,-1720.0],[-280.0,-1740.0],[-420.0,-1740.0],[-420.0,-1700.0],[-280.0,-1700.0]],
+      [[-195.0,-1600.0],[-195.0,-1885.0],[-215.0,-1905.0],[-215.0,-1700.0],[-175.0,-1700.0],[-175.0,-1905.0]],
+      [[-100.0,-1940.0],[-185.0,-1940.0],[-300.0,-1920.0],[-170.0,-1920.0],[-170.0,-1960.0],[-300.0,-1960.0]],
+      [[-345.0,-1900.0],[-345.0,-2160.0],[-365.0,-2180.0],[-365.0,-1920.0],[-325.0,-1920.0],[-325.0,-2180.0]],
+      [[-300.0,-2095.0],[-435.0,-2095.0],[-460.0,-2075.0],[-380.0,-2075.0],[-380.0,-2115.0],[-460.0,-2115.0]],
+      [[-515.0,-2100.0],[-515.0,-1870.0],[-495.0,-1850.0],[-495.0,-2050.0],[-535.0,-2050.0],[-535.0,-1850.0]],
+      [[-515.0,-2100.0],[-515.0,-1680.0],[-495.0,-1650.0],[-495.0,-2050.0],[-535.0,-2050.0],[-535.0,-1650.0]],
+    ] as Boss4TablesJson["phase_arenas"],
+    head_slot_by_bar: [982, 981, 980, 979, 978, 977, 976, 975, 974],
+    approach_picks: [
+      [0,0,0,0,0,0,0,1,1],
+      [0,0,0,0,0,0,0,1,1],
+      [0,0,0,0,0,0,1,1,1],
+      [0,0,0,0,0,1,1,1,1],
+      [0,0,0,0,0,1,1,1,1],
+      [0,0,0,0,1,1,1,1,1],
+      [0,0,0,0,1,1,1,1,1],
+      [0,0,0,1,1,1,1,1,1],
+      [0,0,1,1,1,1,1,1,1],
+      [0,0,1,1,1,1,1,1,1],
+      [0,1,1,1,1,1,1,1,1],
+      [0,1,1,1,1,1,1,1,1],
+      [1,1,1,1,1,1,1,1,1],
+      [1,1,1,1,1,1,1,1,1],
+      [1,1,1,1,1,1,1,1,1],
+      [1,1,1,1,1,1,1,1,1],
+    ],
+  };
+
+  /**
+   * `boss4.bin`'s clips, as `charmotion.BOSS4_CLIPS` bakes them, with lengths
+   * long enough for every cursor the states test: the death's 0x82, the
+   * throw's 68, the strikes' 0x37, the charge's 0x47.
    */
   const BOSS4_TYPE = {
     ...TYPE,
     motions: {
+      "101": motion(60),    // 0x65, strike 0xF
+      "103": motion(60),    // 0x67, the first throw
+      "104": motion(60),    // 0x68, the second
       "105": motion(120),   // 0x69, the death fall
       "107": motion(20),    // 0x6B, the fighting idle
+      "108": motion(20),    // 0x6C, the choice
+      "109": motion(20),    // 0x6D
+      "110": motion(20),    // 0x6E
       "111": motion(20),    // 0x6F, the flinch out of state 7
+      "112": motion(60),    // 0x70, the charge
+      "113": motion(40),    // 0x71, the knock-down
+      "114": motion(20),    // 0x72, the arrival
       "115": motion(20),    // 0x73, the ordinary flinch
       "116": motion(30),    // 0x74, the settle
       "117": motion(60),    // 0x75, the landing
+      "118": motion(20),    // 0x76, the turn
+      "120": motion(20),    // 0x78, the walk
+      "122": motion(40),    // 0x7A, strike 0x10
+      "123": motion(40),    // 0x7B, strike 0x11
       "124": motion(40),    // 0x7C, the entrance
+      "125": motion(40),    // 0x7D
     },
   } as unknown as CharacterType;
   const BOSS_CHARS = {
     ...CHARS, types: { "1": TYPE, "74": BOSS4_TYPE },
   } as unknown as CharactersJson;
+  /** The per-bone mesh words of every shipped descriptor: ten bones. */
+  const BONE_COLI = ["4:23984", null, "4:7264", "4:40880", "4:21504",
+                     "4:11328", "4:37680", null, null, "4:15392", "4:0",
+                     null, "4:18448", "4:3632", null];
 
-  /** One boss, straight out of `Boss4Init`, with the entrance `entrance`. */
-  const spawnBoss = (entrance: number): Actor => {
-    ResetGameGlobals();
-    EnterPlay();
-    SetGameTables(BOSS_CHARS);
-    // `ActorSpawn` runs the class's `Init` itself, the way
-    // `SpawnFromDescriptor` does; calling it again here would count the boss
-    // into both enemy counters twice.
+  /**
+   * One boss, straight out of `Boss4Init`, with the entrance `entrance`, from
+   * `ResetGameGlobals` (L49). `carrier` is an actor already spawned to be
+   * `g_civilian_carrier`, as the transport is in stage 4's `spawn_obj_c`.
+   */
+  const spawnBoss = (entrance: number, reset = true): Actor => {
+    if (reset) {
+      ResetGameGlobals();
+      EnterPlay();
+      SetGameTables(BOSS_CHARS);
+      SetBoss4Tables(BOSS4_TABLES, []);
+    }
     return ActorSpawn(35976, SpawnClass.Boss4, 74, "boss4",
                       { hp: 300, maxHp: 300, initialState: entrance,
-                        visible: true });
+                        visible: true,
+                        class19: { char_type: 0x4a, entrance,
+                                   bone_coli: BONE_COLI,
+                                   despawn_path: 182, despawn_frame: 0 } });
   };
-  const bossFrame = { eye: EYE, dt: 1 / 60, rng: new Rng(5), host: NULL_HOST };
-  const tickBoss = (obj: Actor, n: number): void => {
+  const bossFrame = (host: GameHost = NULL_HOST) =>
+    ({ eye: EYE, dt: 1 / 60, rng: new Rng(5), host });
+  const tickBoss = (obj: Actor, n: number,
+                    f: ReturnType<typeof bossFrame> = bossFrame()): void => {
     for (let i = 0; i < n; i++) {
-      g_class_handlers[SpawnClass.Boss4]?.update(obj, bossFrame);
+      // The motion clock first, as the director runs it, then the update.
+      ActorAdvanceMotion(obj, 1 / 60);
+      g_class_handlers[SpawnClass.Boss4]?.update(obj, f);
       // The name banner the entrance spawns is a task of its own, stepped
       // after the boss the way the task walk reaches it.
       BossBannersTick(NULL_HOST);
-      // `ActorAdvanceMotion` is the engine's `obj+0x194` step and it is what
-      // moves the play cursor these states test against; without it every clip
-      // test in this class is frozen on frame 0.
-      ActorAdvanceMotion(obj, 1 / 60);
     }
   };
+  /** A shot by player 0 on `bone`, as `MarkActorShot` leaves it. */
+  const shoot = (obj: Actor, bone: number, surface = 0,
+                 host: GameHost = NULL_HOST): void => {
+    obj.flags |= ActorFlag.Hit | 2;
+    obj.shotBones[0] = bone;
+    G.g_shot_hit_records[0].surface = surface;
+    Boss4ResolveShot(obj, obj.boss4!, host, new Rng(1));
+  };
+  /** Through the banner to flag 31: the fight, standing, in state 7. */
+  const bossFighting = (entrance = 2): Actor => {
+    const obj = spawnBoss(entrance);
+    G.g_script_flags[BOSS4_DROP_FLAG] = 1;
+    tickBoss(obj, 420);
+    return obj;
+  };
 
-  // **The boss holds the camera.** `Boss4Update` (`FUN_004919D0`) calls
-  // `ActorRegisterCameraPoint(state+0x70)` at `0x00491A49` every frame, and
-  // that tail-calls `RegisterForCameraTracking` (`FUN_00408EC0`), whose only
-  // test is `obj+0x34` bit `0x10000`. Class 0x19 is not in `ENEMY_CLASSES`,
-  // so the port never let the camera look at it.
-  {
-    const obj = spawnBoss(0);
-    obj.flags &= ~ActorFlag.NoCameraTrack;
-    UpdateCameraEnemySlots(EYE);
-    check("the stage-4 boss is a camera candidate while bit 0x10000 is clear",
-          G.g_enemy_slots.includes(obj.at),
-          `[${G.g_enemy_slots.join(",")}]`);
-    G.g_enemies_alive = 0;
-    G.g_camera_free = 1;
-    CameraDriverSelectMode();
-    check("...so it keeps the camera tracking and the room held",
-          G.g_camera_mode === CameraMode.TrackEnemies && G.g_camera_free === 0,
-          `${G.g_camera_mode} ${G.g_camera_free}`);
-    check("...and it is lifted by its own state+0x70, 6.0",
-          g_class_handlers[SpawnClass.Boss4]?.cameraRise?.(obj) === 6);
-    obj.flags |= ActorFlag.NoCameraTrack;
-    UpdateCameraEnemySlots(EYE);
-    check("...until `Boss4StateDeath` raises the bit",
-          !G.g_enemy_slots.includes(obj.at));
-  }
-
+  // **Init.**
   {
     const obj = spawnBoss(0);
     check("Boss4Init counts the boss in both enemy counters",
           G.g_enemies_alive === 1 && G.g_enemies_present === 1,
           `alive ${G.g_enemies_alive} present ${G.g_enemies_present}`);
-    check("...hangs its 0xA4 block off obj+0x1310 and takes the entrance "
-          + "state from the descriptor tail",
-          obj.boss4?.state === 0 && obj.boss4?.sub === 0,
-          `state ${obj.boss4?.state} sub ${obj.boss4?.sub}`);
-    check("...and rides the transport for entrances 0 and 1 only",
-          (obj.boss4!.flags & 1) === 1
+    check("...takes the entrance state from the descriptor tail, and rides "
+          + "the transport for entrances 0 and 1 only",
+          obj.boss4?.state === 0 && (obj.boss4!.flags & 1) === 1
           && (spawnBoss(2).boss4!.flags & 1) === 0,
-          `flags ${obj.boss4!.flags}`);
+          `state ${obj.boss4?.state} flags ${obj.boss4?.flags}`);
+    const b = spawnBoss(0).boss4!;
+    check("...seats phase 0xFF, two props, no cue, the rise 6.0 and the rank "
+          + "from GetDamageRank",
+          b.phase === 0xff && b.propsLeft === 2 && b.cueQueued === -1
+          && b.cueStep === 0 && b.cameraRise === 6
+          && b.rank === G.g_damage_rank,
+          JSON.stringify({ phase: b.phase, rank: b.rank }));
+    const o2 = spawnBoss(0);
+    check("...keeps him out of the shot test (0x8000) and puts bone 5 on "
+          + "model 0x444",
+          (o2.flags & ActorFlag.NoShotTest) !== 0
+          && o2.boneSlot["5"] === 0x444);
+    check("...and gives the ten tail words to their bones as collision meshes",
+          Object.keys(o2.boneColi).length === 10
+          && o2.boneColi["1"] === "4:23984" && o2.boneColi["2"] === undefined
+          && o2.boneColi["14"] === "4:3632",
+          JSON.stringify(o2.boneColi));
   }
 
   // The gate chain, one link at a time. Entrance 0 must wait for the script's
@@ -13931,15 +14040,17 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
           && (G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ?? 0) === 0,
           `sub ${obj.boss4?.sub} flag `
           + `${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
+    check("...and a boss out of the shot test registers nothing",
+          !G.g_shot_test_list.some((e) => e.at === obj.at));
 
     G.g_script_flags[BOSS4_DROP_FLAG] = 1;
     tickBoss(obj, 2);
-    check("...the flag drops it off, and it stands to wait for the shutter",
-          obj.boss4?.sub === 2 && (obj.boss4!.flags & 1) === 0,
+    check("...the flag drops it off, the chainsaw starts, and it stands to "
+          + "wait for the shutter",
+          obj.boss4?.sub === 2 && (obj.boss4!.flags & 1) === 0
+          && (obj.boss4!.flags & 0x400) !== 0,
           `sub ${obj.boss4?.sub} flags ${obj.boss4!.flags}`);
 
-    // The banner is the middle link, and it is the one a reader of the two
-    // addresses this work was scheduled from would have missed entirely.
     tickBoss(obj, 200);
     check("...and 200 frames later the shutter is still shut, because the "
           + "banner has not finished",
@@ -13953,9 +14064,28 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
           && G.g_script_flags[BOSS4_FIGHT_READY_FLAG] === 1,
           `shutter ${G.g_bHudShutterState} flag `
           + `${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
-    check("...and hands over to state 7, which is where every flinch returns",
-          obj.boss4?.state === Boss4State.FaceCamera,
-          `state ${obj.boss4?.state}`);
+    check("...and hands over to state 7 with the phase-0 floor, 8/9 of 300",
+          obj.boss4?.state === Boss4State.FaceCamera
+          && obj.boss4.phase === 0
+          && obj.boss4.phaseHpFloor
+             === Math.fround(300 * BOSS4_TABLES.phase_hp_fraction[0]),
+          `state ${obj.boss4?.state} floor ${obj.boss4?.phaseHpFloor}`);
+    check("...with the health bar at (320, 35), g_boss_engaged up and his "
+          + "0x8000 gone",
+          G.g_boss_hp_bars.length === 1 && G.g_boss_hp_bars[0].x === 320
+          && G.g_boss_hp_bars[0].y === 35 && G.g_boss_engaged === 1
+          && (obj.flags & ActorFlag.NoShotTest) === 0,
+          `bars ${G.g_boss_hp_bars.length} engaged ${G.g_boss_engaged}`);
+    check("...and the phase's camera cue already running: cue 0 on path 185",
+          obj.boss4!.cueStep !== 0 && obj.boss4!.cuePath === 185
+          && G.g_camera_driver_held === 1,
+          `step ${obj.boss4!.cueStep} path ${obj.boss4!.cuePath}`);
+    tickBoss(obj, 1);
+    check("...and from here Boss4Update registers him for the shot test "
+          + "through ActorRegisterCameraPoint",
+          G.g_shot_test_list.some((e) => e.at === obj.at)
+          && g_class_handlers[SpawnClass.Boss4]?.registersForShotTest === true,
+          `${G.g_shot_test_list.length}`);
   }
 
   // Entrances 2 and 3 are already standing: no transport, no flag-30 wait.
@@ -13966,96 +14096,279 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
           obj.boss4?.sub === 2
           && (G.g_script_flags[BOSS4_DROP_FLAG] ?? 0) === 0,
           `sub ${obj.boss4?.sub}`);
-    // The banner still waits on flag 30 -- its record names it -- so the fight
-    // does not start until the script says so even here.
     tickBoss(obj, 400);
     check("...but its banner still waits on flag 30, so flag 31 stays down",
           (G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ?? 0) === 0,
           `flag ${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
   }
 
-  // The damage model: one weak bone, and a floor the arena has to lift.
+  // **The boss holds the camera**, while bit 0x10000 is clear.
   {
-    const obj = spawnBoss(2);
-    obj.boss4!.phaseHpFloor = 0;
-    const hit = (bone: number, result = 0) => {
-      obj.pendingHit = { bone, result };
-      Boss4ResolveShot(obj, obj.boss4!);
-    };
-    const before = obj.hp;
-    hit(4);
-    check("a shot anywhere but bone 2 costs the boss nothing",
-          obj.hp === before, `${before} -> ${obj.hp}`);
-    hit(BOSS4_WEAK_BONE);
-    check(`a shot on bone ${BOSS4_WEAK_BONE} costs `
-          + "g_boss4_head_damage[players + rank*2]",
-          obj.hp === before - BOSS4_HEAD_DAMAGE[G.g_players_in_play],
-          `${before} -> ${obj.hp}, table `
-          + `${BOSS4_HEAD_DAMAGE[G.g_players_in_play]}`);
-    check("...and it is counted for the head bonus",
-          obj.boss4?.headHits === 1, `${obj.boss4?.headHits}`);
-    hit(4, BOSS4_SOFT_SURFACE);
-    check("...while a soft-surface hit anywhere costs exactly one",
-          obj.hp === before - BOSS4_HEAD_DAMAGE[G.g_players_in_play] - 1,
-          `${obj.hp}`);
+    const obj = bossFighting();
+    obj.flags &= ~ActorFlag.NoCameraTrack;
+    UpdateCameraEnemySlots(EYE);
+    check("the stage-4 boss is a camera candidate while bit 0x10000 is clear",
+          G.g_enemy_slots.includes(obj.at),
+          `[${G.g_enemy_slots.join(",")}]`);
+    obj.flags |= ActorFlag.NoCameraTrack;
+    UpdateCameraEnemySlots(EYE);
+    check("...and not once it is raised",
+          !G.g_enemy_slots.includes(obj.at));
   }
 
+  // **The damage model**: the head by table, flesh by one, the rest nothing.
   {
-    const obj = spawnBoss(2);
-    tickBoss(obj, 1);
-    check("the entrance seats the phase floor from "
-          + "g_boss4_phase_hp_fraction[0], 8/9 of the bar",
-          Math.abs(obj.boss4!.phaseHpFloor
-                   - 300 * BOSS4_PHASE_HP_FRACTION[0]) < 0.01,
-          `${obj.boss4!.phaseHpFloor}`);
+    const obj = bossFighting();
+    const b = obj.boss4!;
+    const before = obj.hp;
+    const headDamage = BOSS4_TABLES.head_damage[
+      G.g_players_in_play + b.rank * 2];
+    shoot(obj, 4, 0x3c);
+    check("a spark surface on a mesh bone costs the boss nothing",
+          obj.hp === before, `${before} -> ${obj.hp}`);
+    shoot(obj, 4, 0x35);
+    check("...nor does the silent one",
+          obj.hp === before, `${obj.hp}`);
+    // A posed bone for the mark to be taken into: identity, a unit up.
+    const posed: GameHost = {
+      ...NULL_HOST,
+      boneMatrix: (_at, _bone, out) => {
+        for (let i = 0; i < 16; i++) out[i] = i % 5 === 0 ? 1 : 0;
+        out[13] = 1;
+        return true;
+      },
+    };
+    shoot(obj, 4, 0x3d, posed);
+    check("...while flesh (surface 0x3D) costs exactly one and leaves a mark "
+          + "on the bone",
+          obj.hp === before - 1 && G.g_boss4_hit_marks.length === 1
+          && G.g_boss4_hit_marks[0].bone === 4,
+          `${obj.hp} marks ${G.g_boss4_hit_marks.length}`);
+    const score = G.g_player_score[0];
+    shoot(obj, 2);
+    check("a head shot costs g_boss4_head_damage[players + rank*2], scores "
+          + "ten and counts a head hit",
+          obj.hp === before - 1 - headDamage && b.headHits === 1
+          && G.g_player_score[0] === score + 10,
+          `${obj.hp} (table ${headDamage}) hits ${b.headHits}`);
+    check("...writes the bar's fraction, hp / maxhp as a float",
+          G.g_boss_hp_fraction === Math.fround(obj.hp / 300),
+          `${G.g_boss_hp_fraction}`);
+    check("...and puts him in the flinch, feet on the ground",
+          b.state === Boss4State.Flinch && b.savedState === Boss4State.FaceCamera
+          && (obj.flags & ActorFlag.Reacting) !== 0,
+          `state ${b.state}`);
+  }
+
+  // **Knock-down against flinch**: the feet decide.
+  {
+    const obj = bossFighting();
+    const air: GameHost = {
+      ...NULL_HOST,
+      boneWorld: (_at, _bone, out) => {
+        out.x = 0; out.y = G.g_camera_fixed_eye_y + 12; out.z = 0;
+        return true;
+      },
+    };
+    shoot(obj, 2, 0, air);
+    check("a head shot with both feet ten above the ground is the knock-down",
+          obj.boss4?.state === Boss4State.KnockDown, `${obj.boss4?.state}`);
+    tickBoss(obj, 1, bossFrame(air));
+    check("...which throws him back and down: velocity away from the camera "
+          + "and -2.0 of drop, the fall's gravity, the Yarare sound",
+          obj.vel.y < -1.5 && obj.accY < 0 && obj.boss4?.sub === 1,
+          `vel ${obj.vel.x},${obj.vel.y},${obj.vel.z} sub ${obj.boss4?.sub}`);
+    let n = 0;
+    while (obj.boss4?.sub === 1 && n < 200) { tickBoss(obj, 1); n++; }
+    check("...until he is below the ground, set on it, and waits out the clip",
+          obj.boss4?.sub === 2 && obj.pos.y === G.g_camera_fixed_eye_y
+          && (obj.flags & ActorFlag.PoseFrozen) === 0,
+          `sub ${obj.boss4?.sub} y ${obj.pos.y} after ${n}`);
+    n = 0;
+    while (obj.boss4?.state === Boss4State.KnockDown && n < 300) {
+      tickBoss(obj, 1); n++;
+    }
+    check("...and then back to state 7 with the reaction over",
+          obj.boss4?.state === Boss4State.FaceCamera
+          && (obj.flags & ActorFlag.Reacting) === 0,
+          `state ${obj.boss4?.state} after ${n}`);
+  }
+
+  // **The floor, and the camera cue that lifts it.**
+  {
+    const obj = bossFighting();
+    const b = obj.boss4!;
     let shots = 0;
     while (shots < 40 && !(obj.flags & ActorFlag.ShotImmune)) {
-      obj.pendingHit = { bone: BOSS4_WEAK_BONE, result: 0 };
-      Boss4ResolveShot(obj, obj.boss4!);
+      obj.flags &= ~ActorFlag.Reacting;
+      b.state = Boss4State.FaceCamera;
+      shoot(obj, 2);
       shots += 1;
     }
-    check("...and the boss stops taking damage the moment it is reached, "
-          + "which is why the arena phases are the next piece of work",
+    check("the boss refuses damage the moment the phase floor is reached",
           (obj.flags & ActorFlag.ShotImmune) !== 0 && obj.hp > 0
-          && obj.hp <= obj.boss4!.phaseHpFloor,
-          `${shots} shots, hp ${obj.hp}, floor ${obj.boss4!.phaseHpFloor}`);
+          && obj.hp <= b.phaseHpFloor,
+          `${shots} shots, hp ${obj.hp}, floor ${b.phaseHpFloor}`);
+    const hp = obj.hp;
+    shoot(obj, 2);
+    check("...and a shot then costs nothing", obj.hp === hp, `${obj.hp}`);
+    obj.flags &= ~ActorFlag.Reacting;
+    b.state = Boss4State.FaceCamera;
+    b.sub = 0;
+    // Cue 0 runs out at frame 220 of path 185, 0.7 a frame.
+    let n = 0;
+    while (b.phase === 0 && n < 600) { tickBoss(obj, 1); n++; }
+    check("once the entrance's cue has run out, the floor moves the phase on: "
+          + "phase 1, cue 1 queued, the transition up, off the camera",
+          b.phase === 1 && (b.flags & 8) !== 0
+          && (obj.flags & ActorFlag.NoCameraTrack) !== 0,
+          `phase ${b.phase} flags ${b.flags} after ${n}`);
+    G.g_cam_path_frame = 0x104;
+    tickBoss(obj, 1);
+    check("...the camera passing frame 0x104 seats him for phase 1 and loads "
+          + "its arena",
+          (b.flags & 8) === 0 && b.state === Boss4State.FaceCamera
+          && b.arena[2].x === BOSS4_TABLES.phase_arenas[1][2][0],
+          `flags ${b.flags} state ${b.state} P2 ${b.arena[2].x}`);
+    check("...still refusing damage while he is outside it",
+          (obj.flags & ActorFlag.ShotImmune) !== 0);
+    obj.pos.x = 265;
+    obj.pos.z = -1700;
+    tickBoss(obj, 1);
+    check("...and five inside the new quad the floor lifts to 7/9 and he is "
+          + "fenced",
+          (obj.flags & ActorFlag.ShotImmune) === 0
+          && b.phaseHpFloor
+             === Math.fround(300 * BOSS4_TABLES.phase_hp_fraction[1])
+          && (b.flags & 2) !== 0,
+          `floor ${b.phaseHpFloor} flags ${b.flags}`);
   }
 
-  // The death, and the second gate.
+  // **A strike costs a life** -- unless an arena transition is pending.
   {
-    const obj = spawnBoss(2);
+    const obj = bossFighting();
+    const b = obj.boss4!;
+    b.state = Boss4State.StrikeClip65;
+    b.sub = 0;
+    obj.attackPermit = 0;
+    const lives = G.g_player_lives[0];
+    let n = 0;
+    while (b.state === Boss4State.StrikeClip65 && n < 300) {
+      tickBoss(obj, 1); n++;
+    }
+    check("strike 0xF lands on cursor 0x37 and costs player 0 one life, then "
+          + "state 5",
+          G.g_player_lives[0] === lives - 1
+          && b.state === Boss4State.ChooseAction,
+          `lives ${lives} -> ${G.g_player_lives[0]} state ${b.state}`);
+    const o2 = bossFighting();
+    RunOutInvulnerability();
+    const b2 = o2.boss4!;
+    b2.state = Boss4State.StrikeClip65;
+    b2.sub = 0;
+    b2.flags |= 8;
+    o2.attackPermit = 0;
+    const l2 = G.g_player_lives[0];
+    for (let i = 0; i < 200 && MotionPlayFrame(o2) !== 0x38; i++) {
+      tickBoss(o2, 1);
+    }
+    check("...and with flag 8 up it lands on nobody and leaves 0x2000 raised",
+          G.g_player_lives[0] === l2
+          && (o2.flags & ActorFlag.NoHitReaction) !== 0,
+          `lives ${G.g_player_lives[0]} flags ${o2.flags.toString(16)}`);
+  }
+
+  // **The throw**: phase 3, a prop into the hand, out on frame 68.
+  {
+    const obj = bossFighting();
+    const b = obj.boss4!;
+    b.phase = 3;
+    b.state = Boss4State.ThrowHeldProp;
+    b.sub = 0;
     tickBoss(obj, 1);
-    obj.boss4!.phaseHpFloor = 0;
+    const rec = BOSS4_TABLES.held_props[b.w74];
+    check("the throw picks one of the two props and plays its clip",
+          (b.w74 === 0 || b.w74 === 1) && obj.motion === rec.clip,
+          `w74 ${b.w74} motion ${obj.motion}`);
+    while (MotionPlayFrame(obj) <= rec.take) tickBoss(obj, 1);
+    const prop = G.g_carried_props.find((q) => q.id === b.heldProp);
+    check("...on its take frame a carried prop appears in the hand -- "
+          + "behaviour 2, type 2, slot 0x396, refusing damage -- and bone 8 "
+          + "changes to 0x442",
+          prop !== undefined && prop.routine === 2 && prop.type === 2
+          && prop.slot === 0x396 && (prop.flags & ActorFlag.ShotImmune) !== 0
+          && obj.boneSlot["8"] === 0x442 && b.propsLeft === 1
+          && b.propsUsed === 1 << b.w74,
+          `prop ${JSON.stringify(prop && { r: prop.routine, s: prop.slot })}`);
+    while (MotionPlayFrame(obj) <= rec.throw) tickBoss(obj, 1);
+    check("...on frame 68 it is let go at a player, who is marked as "
+          + "attacked, and the hand is empty again",
+          prop!.mode === 4 && prop!.player === 0
+          && G.g_attack_permits[0] === 1 && obj.boneSlot["8"] === 0x441,
+          `mode ${prop!.mode} player ${prop!.player} `
+          + `permit ${G.g_attack_permits[0]}`);
+    let n = 0;
+    while (b.state === Boss4State.ThrowHeldProp && n < 300) {
+      tickBoss(obj, 1); n++;
+    }
+    check("...and at the clip's end he goes to state 5",
+          b.state === Boss4State.ChooseAction, `${b.state}`);
+  }
+
+  // **The death, and the second gate.**
+  {
+    const obj = bossFighting(3);
+    const b = obj.boss4!;
+    let n = 0;
+    b.phaseHpFloor = 0;
+    b.phase = 17;
     let shots = 0;
     while (shots < 40 && obj.hp > 0) {
-      obj.pendingHit = { bone: BOSS4_WEAK_BONE, result: 0 };
-      Boss4ResolveShot(obj, obj.boss4!);
+      obj.flags &= ~ActorFlag.Reacting;
+      b.state = Boss4State.FaceCamera;
+      shoot(obj, 2);
       shots += 1;
     }
-    check("the hit points running out sends the boss to state 0x16",
-          obj.boss4?.state === Boss4State.Death
-          && (obj.flags & ActorFlag.Dead) !== 0
-          && G.g_enemies_alive === 0,
-          `state ${obj.boss4?.state} alive ${G.g_enemies_alive}`);
+    check("the hit points running out send the boss to state 0x16 and empty "
+          + "the bar",
+          b.state === Boss4State.Death && (obj.flags & ActorFlag.Dead) !== 0
+          && G.g_enemies_alive === 0 && G.g_boss_hp_fraction === 0,
+          `state ${b.state} alive ${G.g_enemies_alive}`);
     check("...and nothing has raised flag 32 yet: it is on a clip frame, not "
           + "on the frame the bar empties",
           (G.g_script_flags[BOSS4_DEAD_FLAG] ?? 0) === 0);
     tickBoss(obj, 40);
-    check("...still down forty frames into the fall",
-          (G.g_script_flags[BOSS4_DEAD_FLAG] ?? 0) === 0,
+    check("...still down forty frames into the fall, g_boss_engaged down",
+          (G.g_script_flags[BOSS4_DEAD_FLAG] ?? 0) === 0
+          && G.g_boss_engaged === 0,
           `cursor ${MotionPlayFrame(obj)}`);
-    tickBoss(obj, 60);
+    n = 0;
+    while (MotionPlayFrame(obj) < 0x46 && n < 200) { tickBoss(obj, 1); n++; }
     check("...and up once the death clip reaches frame 0x46, which is "
           + `g_script_flags[${BOSS4_DEAD_FLAG}]`,
           G.g_script_flags[BOSS4_DEAD_FLAG] === 1,
           `cursor ${MotionPlayFrame(obj)} flag `
           + `${G.g_script_flags[BOSS4_DEAD_FLAG]}`);
+    check("...with the body laid at the second arena's spot, facing 0x8000",
+          obj.pos.x === Math.fround(-515.1) && obj.pos.z === Math.fround(-1718.4)
+          && obj.yaw === 0x8000,
+          `${obj.pos.x},${obj.pos.z} yaw ${obj.yaw}`);
+    tickBoss(obj, 70);
+    check("...the landing on frame 0x82 stops the chainsaw and shakes the "
+          + "screen",
+          (b.flags & 0x400) === 0 && G.g_screen_shake_frames > 0,
+          `flags ${b.flags} shake ${G.g_screen_shake_frames}`);
     check("...and g_enemies_present is not given back until the 240-frame "
           + "dwell runs out",
           G.g_enemies_present === 1, `${G.g_enemies_present}`);
     tickBoss(obj, BOSS4_DEATH_DWELL + 240);
     check("...and then it is, exactly once",
           G.g_enemies_present === 0, `${G.g_enemies_present}`);
+    G.g_active_cam_path = 182;
+    G.g_cam_path_frame = 0;
+    tickBoss(obj, 1);
+    check("the camera reaching the tail's pair (182, 0) despawns him",
+          obj.despawned === true);
   }
 
   // The half that decides whether the gate is evaluated at all.
@@ -14078,12 +14391,9 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
       }],
     } as unknown as ScriptJson;
     const can = ScriptFlagsThisBundleCanRaise(bossScript);
-    check("a stage that spawns class 0x19 can raise flag 31",
-          can.has(BOSS4_FIGHT_READY_FLAG),
+    check("a stage that spawns class 0x19 can raise flag 31 and flag 32",
+          can.has(BOSS4_FIGHT_READY_FLAG) && can.has(BOSS4_DEAD_FLAG),
           `${[...can].sort((a, b) => a - b).join(",")}`);
-    check("...and cannot yet raise flag 32, because the arena phases that let "
-          + "the boss die are not ported",
-          !can.has(BOSS4_DEAD_FLAG));
   }
 
   // The shutter byte lives in `G` because `game/` writes it, and the machine
@@ -14105,6 +14415,7 @@ console.log("\nclass 0x19: the stage-4 boss, and the flag its entrance raises:")
     check("...and the slide still finishes into state 2",
           sh.state === 2, `state ${sh.state}`);
   }
+  SetBoss4Tables(undefined, undefined);
 }
 
 /**
@@ -17498,7 +17809,9 @@ console.log("\nclass 0x40, the horde:");
         && CarrierDrawSlots(0).includes(0x1031)
         && CarrierDrawSlots(1).includes(0x275) && CarrierDrawSlots(1).includes(0x1ad2)
         && CarrierDrawSlots(1).includes(0x174a) && CarrierDrawSlots(1).includes(0x1785)
-        && CarrierDrawSlots(2).length === 0);
+        && CarrierDrawSlots(2).join() === "2386,2387"
+        && CarrierDrawSlots(9).join() === "2386,2387"
+        && CarrierDrawSlots(3).length === 0);
 }
 
 console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
@@ -19280,6 +19593,288 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("a reset leaves no stale range for a seek to replay",
         G.g_stashed_path_frame === 0 && G.g_stashed_path_end_frame === 0
         && G.g_rail_frame === 0);
+}
+
+// -- the shot test the engine's way: registration, the sphere, the fork -----
+
+/**
+ * **`RegisterForShotTest`, `ShotTestSphere` and the fork into the bones, for a
+ * class that registers the way the engine does.**
+ *
+ * The class under test is a stand-in shaped like the bosses: its `Init`
+ * writes `obj+0x124` and runs the skeleton build, and its update ends in
+ * `ActorRegisterCameraPoint` the way `Class14Update` (`0x0047621E`) and
+ * `Boss4Update` (`0x00491A49`) do. Class 0x2D has no module, so its row is
+ * free to borrow; the real bosses' modules are other workstreams'.
+ *
+ * Every assertion reads what only a shot can write -- `obj+0x190 + player`,
+ * the bone byte `MarkActorShot` leaves (L47) -- and every frame is a real
+ * `GameUpdate` from `ResetGameGlobals`, so the list is emptied and refilled
+ * where the director does it and not where the test would like it (L49).
+ * The host is the only stub: a camera at the origin looking down -Z, so view
+ * space is world space, and three bone spheres.
+ */
+console.log("\nthe shot test, for a class that registers the engine's way:");
+{
+  const rng = new Rng(29);
+  const events = scene(0, rng);
+  const CLS = SpawnClass.LargeCreature;
+  if (g_class_handlers[CLS]) throw new Error("class 0x2D is ported now");
+  // A root at the actor and two children beside it: bone 2 four units to the
+  // side, inside a twelve-unit `obj+0x124`, and bone 3 twenty units out,
+  // beyond it. Parents are indices into this list, as the exporter writes
+  // them.
+  const BOSS: CharacterType = {
+    ...TYPE, type: 0x60, name: "test boss", bone_count: 4,
+    bones: [
+      { bone: 1, part: "b1", slot: 0x100, offset: [0, 0, 0], parent: null,
+        hit_radius: 3, hit_centre: [0, 0, 0] },
+      { bone: 2, part: "b2", slot: 0x101, offset: [0, 0, 0], parent: 0,
+        hit_radius: 1, hit_centre: [0, 0, 0] },
+      { bone: 3, part: "b3", slot: 0x102, offset: [0, 0, 0], parent: 0,
+        hit_radius: 1, hit_centre: [0, 0, 0] },
+    ],
+  };
+  SetGameTables({ ...CHARS, types: { ...CHARS.types, "96": BOSS } } as
+                unknown as CharactersJson);
+  const Z = -40;
+  const bonesAt: Record<number, Vec3> = {
+    1: vec3(0, 0, Z), 2: vec3(4, 0, Z), 3: vec3(20, 0, Z),
+  };
+  const radii: Record<number, number> = { 1: 3, 2: 1, 3: 1 };
+  const host: GameHost = {
+    ...NULL_HOST,
+    viewSpaceOfPoint: (p, out) => { out.x = p.x; out.y = p.y; out.z = p.z;
+                                    return true; },
+    boneWorld: (_at, bone, out) => {
+      const b = bonesAt[bone]; if (!b) return false;
+      out.x = b.x; out.y = b.y; out.z = b.z; return true;
+    },
+    boneSphere: (_at, bone, out) => {
+      const b = bonesAt[bone]; if (!b) return null;
+      out.x = b.x; out.y = b.y; out.z = b.z; return radii[bone] ?? null;
+    },
+  };
+  let register = true;
+  const RISE = 5;
+  g_class_handlers[CLS] = {
+    init(obj) {
+      obj.hitRadius = 12;                  // what Class14Init/Boss4Init do
+      ActorBuildSkinnedModel(obj);         // ...and the build that raises 0x80
+    },
+    update(obj, f) {
+      if (register) ActorRegisterCameraPoint(obj, f.host, RISE);
+    },
+    registersForShotTest: true,
+    ownsShotResult: true,
+  };
+  const boss = ActorSpawn(0x2000, CLS, 0x60, "boss", { visible: true });
+  const frame = () => GameUpdate(EYE, 1 / 60, host, rng, events);
+  // A gun reloads by pulling off the screen, and pulls on one frame land in
+  // order: reload, then fire, both on the frame under test, so the
+  // registration that frame's pull sees is exactly last frame's.
+  const fired = () => G.g_nPlayerFired[0];
+  const fireAt = (t: Vec3) => {
+    boss.shotBones[0] = 0;
+    const l = Math.hypot(t.x, t.y, t.z);
+    const before = fired();
+    QueueOffscreenPull(0);
+    QueueShotRequest(0, { origin: vec3(0, 0, 0),
+                          dir: vec3(t.x / l, t.y / l, t.z / l) });
+    frame();
+    if (fired() !== before + 1) throw new Error("the gun did not fire");
+    return boss.shotBones[0];
+  };
+
+  check("the skeleton build raised the per-bone bit on a type with bones",
+        (boss.flags & ActorFlag.ShootPerBone) !== 0, `0x${boss.flags.toString(16)}`);
+
+  frame();
+  check("its update registers it: one entry in `g_shot_test_list`",
+        G.g_shot_test_list.length === 1 && G.g_shot_test_list[0].at === 0x2000,
+        JSON.stringify(G.g_shot_test_list));
+  check("...at the tracked bone, before the lift: `obj+0x70` on the bone and "
+        + "`obj+0x100` five above it",
+        boss.shotCentre.y === 0 && boss.lookAt.y === RISE,
+        `shot ${boss.shotCentre.y} look ${boss.lookAt.y}`);
+
+  check("a shot at bone 2 lands on bone 2 -- the byte is the bone's own index",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+
+  // L47: the byte, not a count. And the one-frame order: the pull is tested
+  // against what the actors registered on the frame before.
+  register = false;
+  check("a class that stopped registering is still hit on the frame after "
+        + "its last registration -- the list is last frame's",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+  check("...and not on the frame after that: unregistered is unshootable",
+        fireAt(bonesAt[2]) === 0 && G.g_shot_test_list.length === 0,
+        `${boss.shotBones[0]} list ${G.g_shot_test_list.length}`);
+  register = true;
+  frame();
+
+  // The broad phase. Bone 3's own sphere is on this ray, and the actor's
+  // twelve-unit sphere at bone 1 is 17.9 units off it.
+  check("a ray that clips a bone outside `obj+0x124` finds nothing",
+        fireAt(bonesAt[3]) === 0, `${boss.shotBones[0]}`);
+  boss.hitRadius = 30;
+  frame();
+  check("...and finds that bone once the broad sphere reaches it",
+        fireAt(bonesAt[3]) === 3, `${boss.shotBones[0]}`);
+  boss.hitRadius = 12;
+  frame();
+
+  // The fork.
+  boss.flags &= ~ActorFlag.ShootPerBone;
+  frame();
+  check("without bit 0x80 the actor is hit whole, and `MarkActorShot` "
+        + "records bone byte 1", fireAt(bonesAt[2]) === 1,
+        `${boss.shotBones[0]}`);
+  check("...even where no bone sphere is, inside `obj+0x124`",
+        fireAt(vec3(8, 6, Z)) === 1, `${boss.shotBones[0]}`);
+  boss.flags |= ActorFlag.ShootPerBone;
+  frame();
+  check("with bit 0x80 the same off-bone shot misses: the bones decide",
+        fireAt(vec3(8, 6, Z)) === 0, `${boss.shotBones[0]}`);
+  // `ShotTestBoneTree`'s `rec[0] != 0` and `ShotTestBoneSphere`'s radius
+  // test. Bone 2 is four units from bone 1, whose own sphere is three, so a
+  // shot at bone 2 that bone 2 does not answer finds nothing.
+  RemoveBoneSubtree(boss, 2);
+  frame();
+  check("a severed bone draws slot 0 and is not tested",
+        fireAt(bonesAt[2]) === 0, `${boss.shotBones[0]}`);
+  boss.removed.length = 0;
+  frame();
+  check("...and with the bone put back it answers again",
+        fireAt(bonesAt[2]) === 2, `${boss.shotBones[0]}`);
+  // `ShotTestBoneSphere`'s `r == 0` skip has no check here, deliberately: a
+  // line whose direction is quantised to BAMS angles never passes exactly
+  // through a centre, so a zero radius finds nothing with or without the skip
+  // and a check of it would pass either way (measured: removing the skip left
+  // such a check green).
+  // Bit 0x8000 raised after the actor registered: the fork's third test.
+  frame();
+  boss.flags |= ActorFlag.NoShotTest;
+  check("bit 0x8000 raised after registering sends the fork to the whole "
+        + "arm", fireAt(bonesAt[2]) === 1, `${boss.shotBones[0]}`);
+  check("...and keeps the actor out of the list from then on",
+        G.g_shot_test_list.length === 0, `${G.g_shot_test_list.length}`);
+  boss.flags &= ~ActorFlag.NoShotTest;
+  frame();
+
+  // The depth test in `RegisterForShotTest`.
+  bonesAt[1] = vec3(0, 0, 40);
+  frame();
+  check("a point behind the camera (view z > 0) is not registered",
+        G.g_shot_test_list.length === 0, JSON.stringify(G.g_shot_test_list));
+  boss.flags |= ActorFlag.ShotTestMesh;
+  frame();
+  check("...unless the object is a mesh, which is taken at any depth",
+        G.g_shot_test_list.length === 1, `${G.g_shot_test_list.length}`);
+  boss.flags &= ~ActorFlag.ShotTestMesh;
+  bonesAt[1] = vec3(0, 0, 0);
+  boss.shotCentre = vec3(0, 0, 0);
+  G.g_shot_test_list = [];
+  RegisterForShotTest(boss, host);
+  check("...and a point exactly on the camera plane (z == 0) is taken: "
+        + "`TEST AH,0x41` passes on equal", G.g_shot_test_list.length === 1);
+  bonesAt[1] = vec3(0, 0, Z);
+
+  // The render-side pick for the classes that have not opted in knows
+  // nothing of this one; the merge weighs the two by distance along the ray.
+  frame();
+  const legacyNear: ShotPick = { kind: "prop", propId: 1, point: vec3(), t: 10 };
+  const reg = ProcessPlayerShotsTestList(
+    { origin: vec3(0, 0, 0), dir: vec3(0, 0, -1) }, host);
+  check("the registered test answers on its own",
+        reg?.at === 0x2000 && reg.bone === 1 && reg.t === 40,
+        JSON.stringify(reg));
+  check("...a nearer pick from `render/` wins the merge",
+        MergeShotPicks(legacyNear, reg) === legacyNear);
+  check("...and a farther one loses it",
+        MergeShotPicks({ ...legacyNear, t: 50 }, reg)?.kind === "actor");
+
+  delete g_class_handlers[CLS];
+  ResetGameGlobals();
+}
+
+/**
+ * `ColiSortHitCandidatesByDistance` (`FUN_00405080`) and the arithmetic under
+ * it, checked against what the bytes say rather than against the port's own
+ * idea of "nearest".
+ */
+console.log("\nthe candidate sort and `RayTestSphere`:");
+{
+  const c = (key: number, id: number) => ({ key, id });
+  const sorted = ColiSortHitCandidatesByDistance(
+    [c(50, 0), c(30, 1), c(30, 2), c(0x10000 + 30, 3), c(-1, 4), c(0, 5)]);
+  check("nearest first, and two equal keys keep the order they were pushed "
+        + "in", sorted.map((x) => x.id).join() === "5,1,2,3,0,4",
+        sorted.map((x) => x.id).join());
+  check("only sixteen bits are sorted: 0x1001E ties with 30, and a point "
+        + "behind the eye (-1 -> 0xFFFF) sorts last",
+        sorted[3].id === 3 && sorted[5].id === 4);
+  check("the key is `__ftol(-z * 10)`: -12.37 -> 123, and it truncates",
+        ShotCandidateKey(-12.37) === 123 && ShotCandidateKey(-0.09) === 0,
+        `${ShotCandidateKey(-12.37)} ${ShotCandidateKey(-0.09)}`);
+
+  // `RayTestSphere`'s rotation is the perpendicular distance from the shot's
+  // line, and the order of `VecToAngles`' outputs is what makes it so: a shot
+  // along +x must measure from the x axis (L48: not only the identity).
+  const along = (d: Vec3, p: Vec3) => {
+    const l = Math.hypot(d.x, d.y, d.z);
+    const u = { x: d.x / l, y: d.y / l, z: d.z / l };
+    const t = p.x * u.x + p.y * u.y + p.z * u.z;
+    return Math.hypot(p.x - u.x * t, p.y - u.y * t, p.z - u.z * t);
+  };
+  let worst = 0;
+  const dirs = [vec3(0, 0, -1), vec3(1, 0, 0), vec3(0.3, -0.4, -0.8),
+                vec3(-0.6, 0.2, -0.5), vec3(0.1, 0.9, -0.2)];
+  const pts = [vec3(3, 1, -20), vec3(20, 2, 0.5), vec3(-4, 7, -15)];
+  for (const d of dirs) {
+    const a = ShotRayAnglesFromView(d);
+    for (const p of pts) {
+      const want = along(d, p);
+      // Just inside and just outside the exact distance: the BAMS angles
+      // quantise the direction to 1/65536 of a turn, so allow for that.
+      const slack = 0.02 * (1 + Math.hypot(p.x, p.y, p.z) / 20);
+      if (RayTestSphere(a, p.x, p.y, p.z, want + slack) !== 1
+          || RayTestSphere(a, p.x, p.y, p.z, Math.max(0, want - slack)) !== -1) {
+        worst = Math.max(worst, want);
+      }
+    }
+  }
+  check("`RayTestSphere` is the distance from the shot's line, in every "
+        + "direction including +x", worst === 0, `failed near ${worst}`);
+  check("...and it is a line, not a ray: a point behind the eye is measured "
+        + "the same way", RayTestSphere(ShotRayAnglesFromView(vec3(0, 0, -1)),
+                                        1, 0, 30, 1.5) === 1);
+  check("...and `TEST AH,0x41` makes a NaN distance a hit",
+        RayTestSphere(ShotRayAnglesFromView(vec3(0, 0, -1)), NaN, 0, -5, 1)
+          === 1);
+}
+
+/**
+ * `ActorBuildSkinnedModel` (`FUN_00410440`) raises bit 0x80 through
+ * `SkeletonBuildAndPose` for every skinned class it serves, and `CatInit`
+ * takes it back -- from the real spawn path, not a flag set by hand (L49).
+ */
+console.log("\nthe per-bone bit, from the skeleton build:");
+{
+  const rng = new Rng(3);
+  scene(0, rng);
+  const z = spawnZombie(0x3000, 1, "zombie");
+  check("a zombie, built on a type with bones, carries bit 0x80",
+        (z.flags & ActorFlag.ShootPerBone) !== 0, `0x${z.flags.toString(16)}`);
+  const cat = ActorSpawn(0x3001, SpawnClass.SkinnedNpc, 1, "cat",
+                         { class53: { set: 0, subtype: 0 } } as never);
+  check("...a cat does not: `CatInit` clears it after its build",
+        (cat.flags & ActorFlag.ShootPerBone) === 0,
+        `0x${cat.flags.toString(16)}`);
+  const none = ActorSpawn(0x3002, SpawnClass.Zombie, 0x77, "no type");
+  check("...and a type the tables do not know has no nodes to raise it for",
+        (none.flags & ActorFlag.ShootPerBone) === 0);
+  ResetGameGlobals();
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

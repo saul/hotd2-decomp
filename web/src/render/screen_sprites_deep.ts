@@ -19,13 +19,25 @@
  * the picture is the engine's.
  */
 import {
-  DoubleSide, Group, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace,
-  type Texture, TextureLoader,
+  AlwaysDepth, DoubleSide, Group, LessEqualDepth, Mesh, MeshBasicMaterial,
+  PlaneGeometry, SRGBColorSpace, type Texture, TextureLoader,
 } from "three";
 import type { System } from "../core/system";
 import { G } from "../game/globals";
 import { PROJECTION_DISTANCE_PX } from "../game/scene_lights";
 import type { RenderContext } from "./context";
+
+/** The PVR2 compare mode whose `g_ZFuncTable` entry is `D3DCMP_ALWAYS`. */
+const ZFUNC_MODE_ALWAYS = 7;
+
+/**
+ * `DrawSpriteQuadCommand`'s compare mode for a sprite's flags word: bits 8..10,
+ * with 0 standing for 4 (`if (uVar7 == 0) uVar7 = 4`).
+ */
+function ScreenSpriteZFuncMode(flags: number): number {
+  const m = (flags >> 8) & 7;
+  return m === 0 ? 4 : m;
+}
 
 /** The HUD's plane: sprites at this depth or nearer are the HUD layer's. */
 export const SCREEN_SPRITE_HUD_DEPTH = 1;
@@ -81,6 +93,15 @@ export class ScreenSpritesDeep implements System<RenderContext> {
         q.material.needsUpdate = true;
       }
       q.material.opacity = Math.max(0, Math.min(1, s.alpha));
+      // The depth test is the sprite's own: `DrawSpriteQuadCommand`
+      // (`FUN_004A7AB0`) puts `flags >> 8 & 7` (0 meaning 4) into the PVR2
+      // ISP word's compare mode, and `TranslatePvr2StateToD3D` sends
+      // `g_ZFuncTable[mode]` as `D3DRENDERSTATE_ZFUNC`. The table is
+      // `[1, 7, 3, 5, 4, 6, 2, 8]`, so the default 4 is `D3DCMP_LESSEQUAL`
+      // and the 7 every queued sprite carries is `D3DCMP_ALWAYS` -- the boss
+      // health bar is never hidden by anything in the scene.
+      q.material.depthFunc = ScreenSpriteZFuncMode(s.flags) === ZFUNC_MODE_ALWAYS
+        ? AlwaysDepth : LessEqualDepth;
       // The anchor, in half-extents from the top-left -- as the HUD layer
       // places it -- then the quad's centre in screen pixels.
       const w = img.w * s.sx;

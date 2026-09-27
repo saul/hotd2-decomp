@@ -40,7 +40,7 @@ export interface ShotRay {
  * shape with two optional halves.
  */
 export type ShotPick =
-  | {
+  ({
       kind: "actor";
       /** The actor's spawn address, which is the port's identity for it. */
       at: number;
@@ -85,7 +85,16 @@ export type ShotPick =
    * `G.g_carried_props`, by `id`. Its own kind for the reason the creature's
    * is: a separate pool in the port, one list in the engine.
    */
-  | { kind: "carried"; carriedId: number; point: Vec3 };
+  | { kind: "carried"; carriedId: number; point: Vec3 })
+  & {
+    /**
+     * `[port-only]` How far along the shot the pick is, which is how two
+     * picks are compared when they come from different places -- see
+     * `MergeShotPicks` in `combat/shot.ts`. A pick without it loses to any
+     * candidate from the registration list.
+     */
+    t?: number;
+  };
 
 export interface GameHost {
   /**
@@ -194,15 +203,18 @@ export interface GameHost {
    * queues no shots, and one that did would get `undefined` here and resolve
    * every request as a miss.
    *
-   * **[diverges] The spheres are where the *last drawn frame* put them.**
-   * The engine tests against the pose it is about to draw, because
-   * `ShotTestSphere` runs inside the same frame's object pass. Here the port's
-   * update comes first and the character layer poses the skeleton afterwards,
-   * so a pick made at the head of tick *n* runs against tick *n-1*'s matrices.
-   * At 60 Hz that is 16 ms of lag on a target the player was tracking, which
-   * is under a fast zombie's own reaction window and has never been the
-   * reported cause of a missed shot — but it is a divergence and it was
-   * untagged.
+   * **The spheres are where the last drawn frame put them, and so are the
+   * engine's.** `ProcessPlayerShots` (`FUN_00404570`) is a task of its own,
+   * created after the player tasks and before any actor (`0x00460751`), so it
+   * runs *before* the object pass and reads the draw records the previous
+   * frame's pass wrote. A pick made at the head of tick *n* against tick
+   * *n-1*'s pose is therefore the engine's arrangement, not a lag. `[proved]`
+   * from the task order; see `combat/shot_test.ts`. (This said the opposite
+   * for a long time -- that the engine tests the pose it is about to draw.)
+   *
+   * [diverges] What is left is the case where more than one tick runs between
+   * two draws: the engine draws every frame, and the port's pose is then more
+   * than one tick old.
    *
    * **Under `Harness.pump` the lag is not one frame, it is all of them.**
    * Nothing draws, so the skeleton holds whatever pose the last real render

@@ -49,7 +49,7 @@
  * trying to derive that.
  */
 
-import { Box3, Group, Matrix3, Matrix4, Object3D, Ray, Vector3 } from "three";
+import { Box3, Group, Object3D, Ray, Vector3 } from "three";
 import type {
   CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
@@ -60,11 +60,10 @@ import type { Vec3 } from "../game/vec";
 import type { CharacterSpawnRequest } from "../game/director";
 import { Rng } from "../core/rng";
 import { G } from "../game/globals";
+import { g_class_handlers } from "../game/registry";
 import type { Scope } from "../core/scope";
 import type { Context, System } from "../core/system";
 import type { ShotPick, ShotRay } from "../game/host";
-import { ColiSegmentVsMesh, type ColiHit } from "../game/coli";
-import { T } from "../game/tables";
 import type { BreakableLayer } from "./breakables";
 import type { SlotModelLayer } from "./slotmodels";
 import type { CreatureSphereSource } from "./effects";
@@ -95,9 +94,6 @@ import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
   from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { restoreGore, swapGore } from "./characters/gore";
-
-/** `ShotBuildSegment` (`FUN_00404AD0`): origin plus direction times this. */
-const SHOT_SEGMENT_LENGTH = 1000;
 export type { Instance };
 
 
@@ -681,13 +677,21 @@ export class CharacterLayer implements System {
   }
 
   /**
-   * `ShotTestSphere` (`FUN_00404630`) — what one shot segment hits first.
+   * `ShotTestSphere` (`FUN_00404630`) — what one shot segment hits first,
+   * among the classes that do not register for the shot test the engine's
+   * way.
    *
-   * The **renderer's half of a shot, and only that half.** The engine
-   * broad-phases on the actor's own sphere before descending into the bones;
-   * here the bone spheres are cheap enough (fifteen per character, a few dozen
-   * characters) that the broad phase would cost more than it saves, so it is
-   * skipped — the answer is the same.
+   * The **renderer's half of a shot, and only that half.** The classes that
+   * set `ClassHandler.registersForShotTest` are not here at all: they are
+   * tested by `game/combat/shot_test.ts` against `G.g_shot_test_list`, with
+   * the broad phase, and `MergeShotPicks` puts the two answers together.
+   *
+   * [diverges] For everything else there is no registration and no broad
+   * phase: every visible, living actor is a candidate, and a skinned one goes
+   * straight to its bone spheres, where the engine would first reject any
+   * shot outside `obj+0x124`. Moving a class across is setting that flag and
+   * calling `RegisterForShotTest` where its routine does; `combat.md`, "The
+   * shot test", lists the sites.
    *
    * The sphere is `PTR_DAT_004D032C`'s centre and radius, carried on the bone
    * and therefore moving with the animation exactly as `FUN_004107E0` makes it.
@@ -705,6 +709,9 @@ export class CharacterLayer implements System {
     let bestT = Infinity;
     for (const inst of this.instances) {
       if (!inst.root.visible || inst.a.dead) continue;
+      // A class that registers the engine's way is found through its
+      // registration or not at all -- see `game/combat/shot_test.ts`.
+      if (g_class_handlers[inst.a.cls]?.registersForShotTest) continue;
       // `RegisterForShotTest` (`FUN_00405160`) never appends an actor whose
       // `obj+0x34` has bit `0x8000`, so no shot can find it.
       if (inst.a.flags & ActorFlag.NoShotTest) continue;
@@ -741,27 +748,10 @@ export class CharacterLayer implements System {
         continue;
       }
       for (const b of inst.type.bones) {
+        if (!b.hit_radius) continue;
         // A removed bone has a zero draw slot, and `ShotTestBoneTree` never
         // descends into one -- so a blown-off arm cannot be shot again.
         if (inst.a.removed.includes(b.bone)) continue;
-        // **A bone with a collision mesh is tested against the mesh, not a
-        // sphere.** `ShotTestBoneTree` (`FUN_00404750`) takes
-        // `ShotTestBoneMesh` (`FUN_004048A0`) for a record whose `+0x74` has
-        // bit `0x10` and whose `+0x88` names a blob -- `Actor.boneColi` --
-        // and the class that set them zeroed the sphere's radius beside
-        // them, so the sphere below never runs for such a bone.
-        const coli = inst.a.boneColi[String(b.bone)];
-        if (coli) {
-          const hit = this.pickBoneMesh(inst, b.bone, coli);
-          if (hit && hit.t < bestT) {
-            bestT = hit.t;
-            best = { kind: "actor", at: inst.at, bone: b.bone,
-                     point: hit.point,
-                     mesh: { surface: hit.surface, normal: hit.normal } };
-          }
-          continue;
-        }
-        if (!b.hit_radius) continue;
         const node = inst.bones.get(b.bone);
         if (!node) continue;
         this._c.set(b.hit_centre![0], b.hit_centre![1], b.hit_centre![2]);
@@ -817,6 +807,7 @@ export class CharacterLayer implements System {
     // the same list: a drum in front of the zombie holding it takes the shot.
     const carried = this.effects?.pickCarried(this._ray) ?? null;
     if (carried && carried.t < bestT) {
+      bestT = carried.t;
       best = { kind: "carried", carriedId: carried.id,
                point: { x: carried.point.x, y: carried.point.y,
                         z: carried.point.z } };
@@ -831,7 +822,9 @@ export class CharacterLayer implements System {
         "[characters] no hit-reaction data in this bundle — re-export it "
         + "(`npm run export`). Zombies will not stagger when shot.");
     }
-    return best;
+    // How far along the shot, so `MergeShotPicks` can weigh this against the
+    // registered classes' answer.
+    return best ? { ...best, t: bestT } : null;
   }
 
   /**
@@ -1063,54 +1056,6 @@ export class CharacterLayer implements System {
     if (r === null) return null;
     out.x = this._bone.x; out.y = this._bone.y; out.z = this._bone.z;
     return r;
-  }
-
-  private readonly _meshInv = new Matrix4();
-  private readonly _meshRot = new Matrix3();
-  private readonly _meshA = new Vector3();
-  private readonly _meshB = new Vector3();
-  private readonly _meshHit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0,
-                                         nz: 0, surface: 0, distSq: 0 };
-
-  /**
-   * `ShotTestBoneMesh` — `FUN_004048A0`, for one bone of one instance.
-   *
-   * `g_coli_dynamic_matrix = g_camera_blocks · bone record` is the bone's
-   * world matrix; the shot segment (`ShotBuildSegment`, `FUN_00404AD0`: the
-   * crosshair's origin to a thousand units along it) goes through its inverse
-   * into the bone's frame, `ColiSegmentVsMesh` (`FUN_004AAA40`) finds the
-   * nearest quad **from the far end back** -- the argument order that makes
-   * the quad nearest the eye win, as the world trace has it -- and the point
-   * comes back through the matrix and the normal through its rotation
-   * (`MatrixTransformVector` at `0x00404982`, no renormalising). `t` is the
-   * distance along the ray, the number every candidate here is sorted on.
-   */
-  private pickBoneMesh(inst: Instance, bone: number, key: string):
-      { t: number; point: Vec3; normal: Vec3; surface: number } | null {
-    const blob = T.coli?.blobs?.[key];
-    const node = inst.bones.get(bone);
-    if (!blob || !node) return null;
-    node.updateWorldMatrix(true, false);
-    this._meshInv.copy(node.matrixWorld).invert();
-    const o = this._ray.origin;
-    const d = this._ray.direction;
-    this._meshA.set(o.x + d.x * SHOT_SEGMENT_LENGTH,
-                    o.y + d.y * SHOT_SEGMENT_LENGTH,
-                    o.z + d.z * SHOT_SEGMENT_LENGTH).applyMatrix4(this._meshInv);
-    this._meshB.copy(o).applyMatrix4(this._meshInv);
-    const h = this._meshHit;
-    if (!ColiSegmentVsMesh(blob, this._meshA.x, this._meshA.y, this._meshA.z,
-                           this._meshB.x, this._meshB.y, this._meshB.z,
-                           h, false)) {
-      return null;
-    }
-    const p = new Vector3(h.x, h.y, h.z).applyMatrix4(node.matrixWorld);
-    this._meshRot.setFromMatrix4(node.matrixWorld);
-    const n = new Vector3(h.nx, h.ny, h.nz).applyMatrix3(this._meshRot);
-    const t = p.clone().sub(o).dot(d);
-    if (t <= 0) return null;
-    return { t, point: { x: p.x, y: p.y, z: p.z },
-             normal: { x: n.x, y: n.y, z: n.z }, surface: h.surface };
   }
 
   /**

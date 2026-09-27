@@ -1,19 +1,18 @@
 /**
- * The camera's two halves run together, or not at all.
+ * The camera is one frame of the game, drawn: nothing of it runs on a frame
+ * that owes no tick.
  *
- * A camera frame is two systems either side of the game phase:
- * `CameraSeatSystem` writes the block from the rail, and
- * `CameraTrackEnemiesTick` — inside `GameSystem` — eases that block's aim onto
- * whatever the fight wants. `render/camera.ts` says so at the top, and has
- * since it was written.
- *
- * What nothing checked is that they actually run **together**. `Player.frame`
- * draws once per `requestAnimationFrame` and ticks at a fixed 60 Hz, so on a
- * display faster than that most frames owe no tick and take the `tickStopped`
- * path — which runs the whole tick order with `Loop.idle`. The seat had no
- * guard, `GameSystem` did, and the frame that resulted was half a camera
- * frame: the block back on the rail, the ease skipped, and that drawn. One
- * frame eased, the next on the rail, at the refresh rate.
+ * The camera block is the port's from end to end -- the queued action seats
+ * it, the driver eases it and `UpdateSceneViewAndLight` builds the view, all
+ * inside `CameraActorTick` at the head of `GameUpdate` -- and the draw only
+ * places the three.js camera from that view. It used to be two systems either
+ * side of the game phase, a seat in `app/` and the ease in the port, and
+ * `Player.frame` draws once per `requestAnimationFrame` and ticks at a fixed
+ * 60 Hz: on a display faster than that most frames owe no tick and take the
+ * `tickStopped` path, the seat ran there and the ease did not, and the frame
+ * that resulted was half a camera frame -- the block back on the rail, the
+ * ease skipped, and that drawn. One frame eased, the next on the rail, at the
+ * refresh rate.
  *
  * It is invisible at 60 Hz, which is the whole reason it needs a test: the
  * measurement below puts it at 785 flicker frames in 1200 on a 120 Hz panel
@@ -33,9 +32,9 @@ import { Walker, type WalkerHost } from "../src/script/walker";
 import { CamPaths } from "../src/game/camera/curve";
 import { CameraDrawSystem, CameraRig } from "../src/render/camera";
 import type { CameraPose } from "../src/render/campath";
-import { CameraSeatSystem } from "../src/app/systems";
 import { G, ResetGameGlobals } from "../src/game/globals";
-import { SetGameTables } from "../src/game/tables";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables";
+import { EvtActionHandler } from "../src/game/camera/driver";
 import { ActorSpawn, GameUpdate } from "../src/game/director";
 import { SpawnClass } from "../src/game/spawn_class";
 import { NULL_HOST } from "../src/game/host";
@@ -152,6 +151,7 @@ function play(hz: number, rafs: number, spawnAt: number,
   ResetGameGlobals();
   SetGameTables(script.characters, script.breakables, script.set_pieces,
                 script.humanoids, script.coli, script.civilians);
+  SetCameraPaths(paths);
   const w = new Walker(script, mkHost());
   if (bundle.at) w.goToBlock(bundle.at[0], bundle.at[1]);
   const rig = new CameraRig();
@@ -162,12 +162,10 @@ function play(hz: number, rafs: number, spawnAt: number,
     scope: null, session: null, stage: 1, frame: 0,
   } as unknown as Parameters<CameraRig["draw"]>[0];
 
-  // The three systems `app/main.ts` registers, in the order it registers
-  // them: seat in `script`, `GameSystem` in `game`, draw first in `render`.
-  const seat = new CameraSeatSystem(rig);
+  // What `app/main.ts` runs: the port's frame in `game` -- whose camera actor
+  // seats, eases and builds the view -- and the draw first in `render`.
   const draw = new CameraDrawSystem(rig);
   const world = (t: Tick): void => {
-    seat.update(ctx, t);
     if (!t.frozen && t.dt > 0) {
       const e = camera.position;
       GameUpdate({ x: e.x, y: e.y, z: e.z }, t.dt, NULL_HOST, ctx.rng,
@@ -194,13 +192,20 @@ function play(hz: number, rafs: number, spawnAt: number,
         z.pos.x = t.x + (t.z - e.z) * 0.06;
         z.pos.y = t.y;
         z.pos.z = t.z - (t.x - e.x) * 0.06;
+        // No skeleton here to record the tracked bone: its point is its feet.
+        z.lookAt.x = z.pos.x; z.lookAt.y = z.pos.y; z.lookAt.z = z.pos.z;
         z.visible = true;
         z.dead = false;
       }
     }
+    let playing = false;
     const ran = loop.advance(wall, () => {
       if (!w.finished && !w.branch) w.tick(TICK);
       syncPortGlobals(w, false, camera.position);
+      // A shot still playing as the tick starts is one whose handler,
+      // `CamAdvancePathFrame`, writes the block's eye at the frame it
+      // publishes on this tick -- its last included.
+      playing = G.g_evt_action_handler === EvtActionHandler.PathPlay;
       world(DRIVEN);
       return !w.finished;
     }).frames;
@@ -216,10 +221,11 @@ function play(hz: number, rafs: number, spawnAt: number,
     out.drawn.push([fwd.x, fwd.y, fwd.z]);
     const e = camera.position;
     out.eyes.push([e.x, e.y, e.z]);
-    // The same four exclusions `seatCamera` makes, read off the state it read.
+    // The shots whose eye the rail determines: a playing `cam_play`. A static
+    // pose, a driver easing the eye onto a stashed rail and a branch preview
+    // in play are not.
     const c = w.cam;
-    const over = !!(c?.done && w.camOverrideValid);
-    const rail = c && !c.isStatic && !over && paths.paths.has(c.slot);
+    const rail = c && ran > 0 && playing && paths.paths.has(c.slot);
     out.shot.push(rail ? [c.slot, c.frame] as const : null);
     if (rail && c.frame >= c.endFrame) out.ends += 1;
     out.ran.push(ran);
@@ -260,8 +266,8 @@ function flickers(drawn: Fwd[]): { n: number; worst: number; at: number } {
  * into `g_camera_block_eye` at that cursor, and only **then** tests
  * `cursor >= end`. So on every frame a shot is queued — its last one included
  * — the block holds the pose of the frame the port itself says the camera is
- * on, and the draw copies the block straight into `camera.position`
- * (`APPLY_EYE_Y_RULE` is off, so `cameraEyeY` is the identity).
+ * on, and the draw places `camera.position` at the view `UpdateSceneViewAndLight`
+ * built from the block that frame.
  *
  * That makes this an equality rather than a tolerance, and it is the one
  * measurement that is on the **drawn camera** rather than on some layer's

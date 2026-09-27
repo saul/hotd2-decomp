@@ -29,7 +29,8 @@ import { G } from "../game/globals";
 import { CameraUpdateHook, EvtActionHandler } from "../game/camera/driver";
 import { EvtGotoSceneState, EvtLoadBlockProgramRing, EvtQueueAction,
          EvtSetActionDrainMode } from "../game/camera/actions";
-import { CameraReplayUntil } from "../game/camera/actor";
+import { CameraReplayFor, CameraReplaySettle, CameraReplayUntil }
+  from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
@@ -134,6 +135,12 @@ export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
   /** `wait_camera_path_frame`: blocks until the path frame passes `arg`. */
   | { kind: "camera"; arg: number }
+  /**
+   * The first-visit yield of a wait whose condition this client cannot hold
+   * on (`why` says which): it costs the frame the engine's does, and passes
+   * on the next visit.
+   */
+  | { kind: "yield"; why: string }
   /** The real gate: blocks until the player has killed them. */
   | { kind: "enemies" }
   /** `wait_scripted_actors`: blocks until the civilians have left play. */
@@ -1050,13 +1057,26 @@ export class Walker {
    */
   stepOverWait(): void {
     if (!this.wait) return;
+    // A yield's condition was never going to be held on, and its enter has
+    // already done what the pass does: stepping it is the frame and nothing
+    // more.
+    if (this.wait.policy.kind === "yield") {
+      this.wait = null;
+      this.opIndex++;
+      return;
+    }
     const rule = WAIT_RULES.get(this.wait.op.op);
     const retires = rule?.retires;
     if (retires) this.retireGated(retires === "civilians"
       ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
     if (rule?.clearsRoom) this.civilianRoomsCleared();
+    // The camera half of the postcondition. Every wait but `0x40` spends at
+    // least the frame it yields on, so the camera actor has run past it.
+    const policy = this.wait.policy;
     if (rule?.skipRunsCameraOn) this.runCameraOnPast(this.wait.op);
-    if (rule?.drainsQueuedActions) this.runQueuedActionsOut();
+    else if (rule?.drainsQueuedActions) this.runQueuedActionsOut();
+    else if (policy.kind === "frames") CameraReplayFor(policy.framesLeft);
+    else CameraReplaySettle();
     // The third postcondition: a `wait_script_flag` is only ever passed in
     // play with the byte already a 1, so a replay that steps over one has to
     // raise it. Without this a seek lands past a gate whose flag is still 0,
@@ -1196,9 +1216,11 @@ export class Walker {
    */
   private runCameraOnPast(op: OpJson): void {
     const arg = op.arg ?? 0;
+    // At least the frame the wait yields on: whatever was pushed in front of
+    // it has been dequeued before the condition is ever read.
     CameraReplayUntil(arg === 0
       ? () => G.g_cam_path_frames_left < 1
-      : () => G.g_cam_path_frame > arg, arg === 0 ? null : arg + 1);
+      : () => G.g_cam_path_frame > arg, arg === 0 ? null : arg + 1, 1);
     this.civilianCuesSeen();
   }
 
@@ -1414,6 +1436,8 @@ export class Walker {
   private waitSatisfied(): boolean {
     const w = this.wait;
     if (!w) return true;
+    // The yield is spent; the next visit passes.
+    if (w.policy.kind === "yield") return true;
     const rule = WAIT_RULES.get(w.op.op);
     return rule?.satisfied?.(w.policy, w.op, this.waitContext) ?? true;
   }
@@ -1667,13 +1691,19 @@ export class Walker {
       const start = op.start ?? 0;
       const end = op.end ?? 0;
       const flags = op.flags ?? 0;
+      const deferred = start !== end && (flags & 2) !== 0;
       this.shot = {
         slot: op.slot ?? -1,
-        startFrame: start,
+        // `-1` resumes from the frame the camera is on -- plus one for a
+        // stash (`CamStashPathRange`), as it is for a play
+        // (`CamStartPathPlayback`). Read here, at the push, which is the
+        // frame the action runs on whenever the ring is idle.
+        startFrame: start !== -1 ? start
+          : G.g_cam_path_frame + (deferred ? 1 : 0),
         endFrame: end,
         flags,
         isStatic: start === end,
-        deferred: start !== end && (flags & 2) !== 0,
+        deferred,
         file: op.cam?.file ?? null,
         pathIndex: op.cam?.path ?? null,
       };
@@ -1720,7 +1750,7 @@ export class Walker {
     const policy = rule
       ? rule.enter(op, this.waitContext)
       : passedBecause(op);
-    if (policy.kind === "passed") {
+    if (policy.kind === "passed" || policy.kind === "yield") {
       // **A replay that walks past a gate has to leave the gate's world
       // behind it.** `wait_enemies_alive 0` is only reached in play once the
       // enemies are dead, so a seek that steps over it and keeps their spawns
@@ -1735,6 +1765,9 @@ export class Walker {
       // flag *already* raised, so there is nothing to reproduce. The
       // postcondition belongs to `stepOverWait`, which is the path that walks
       // past a gate whose condition is false.
+      if (policy.kind === "passed") return `${blocksOn} -- ${policy.why}`;
+      // ...and a yield still costs the frame it is reached on.
+      this.wait = { op, blocksOn, policy };
       return `${blocksOn} -- ${policy.why}`;
     }
     this.wait = { op, blocksOn, policy };

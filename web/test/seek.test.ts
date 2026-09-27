@@ -25,6 +25,10 @@ import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../src/game/globals";
 import type { OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
+import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
+import { PlayerTasksRun } from "../src/game/player_shell";
+import { NULL_HOST } from "../src/game/host";
+import { Rng } from "../src/core/rng";
 import { BUNDLE_ROOT, finishOrSkip }
   from "../tools/lib/bundle_root";
 
@@ -92,6 +96,28 @@ function shot(w: Walker): string {
     // standing behind the camera, and nothing in this snapshot noticed.
     spawns: w.spawns.map((s) => [s.at, s.class]),
   });
+}
+
+/**
+ * A fresh data segment with a player in play, as a stage load leaves it: the
+ * reset, then the first player turn (which is where the start press the reset
+ * made becomes a player). The stashed rail's gate holds it while nobody is in
+ * play, so a run with no player never finishes a rail shot.
+ */
+function freshGame(): void {
+  ResetGameGlobals();
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+}
+
+/**
+ * One frame of the clock for a walker with no object pool: the interpreter,
+ * then the camera's two tasks as `SceneTaskWalk` runs them. `queue_event`
+ * only pushes; the actions run in the camera actor.
+ */
+function clockFrame(w: Walker): void {
+  w.tick(1 / 60);
+  CameraActorTick();
+  CameraUpdateTick();
 }
 
 /** Private members the drive loop needs; the player reaches them through UI. */
@@ -178,7 +204,9 @@ for (const stage of STAGES) {
   ran++;
   const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
 
-  // Drive the stage the way playing does, sampling as it goes.
+  // Drive the stage the way playing does, sampling as it goes -- from the
+  // data segment a stage load leaves, as a seek starts from.
+  freshGame();
   const live = new Walker(script, mkHost());
   live.reset();
   // This loop is a replay standing in for playback -- it steps over waits
@@ -202,6 +230,8 @@ for (const stage of STAGES) {
   let exact = 0, differ = 0, missed = 0;
   let firstDiff = "";
   for (const smp of samples) {
+    // `Player.seekTo` resets the data segment before it replays.
+    freshGame();
     const w = new Walker(script, mkHost());
     if (!seekTo(w, smp.b, smp.s, smp.o)) { missed++; continue; }
     const got = shot(w);
@@ -369,6 +399,7 @@ for (const stage of STAGES) {
   const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
   if (!existsSync(file)) continue;
   const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+  freshGame();
   const w = new Walker(script, mkHost());
   w.reset();
   w.replaying = true;
@@ -392,6 +423,7 @@ for (const stage of STAGES) {
   const file = join(ROOT, "stage1", "stage1.script.json");
   if (existsSync(file)) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    freshGame();
     const w = new Walker(script, mkHost());
     const arrived = seekTo(w, 8, 4, 25);
     check("a deferred `start == -1` resumes forward, it does not rewind",
@@ -736,10 +768,15 @@ for (const stage of STAGES) {
 
     // Shoot off: nothing can rescue a civilian, so the gate is not a condition
     // this client can evaluate and it passes rather than deadlocking.
+    // It still spends the frame the engine's first visit yields on.
     const noSim = new Walker(script, { ...mkHost(), aliveCivilians: () => null });
     noSim.applyWait(gate);
-    check("with no simulation the civilian gate passes instead of hanging",
-          noSim.wait === null);
+    const yielded = noSim.wait?.policy.kind === "yield";
+    noSim.tick(1 / 60);
+    check("with no simulation the civilian gate passes instead of hanging, "
+          + "one yield later",
+          yielded && noSim.wait?.op !== gate,
+          `${yielded} ${noSim.wait?.policy.kind ?? "idle"}`);
   }
 }
 
@@ -865,6 +902,7 @@ for (const stage of STAGES) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
     // Everything already dead, so the combat gates never hold: what is left
     // holding the script is the camera and the ring.
+    freshGame();
     const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
                                    aliveCivilians: () => 0 });
     const CAP = 60 * 60 * 20;            // twenty simulated minutes
@@ -873,7 +911,7 @@ for (const stage of STAGES) {
     let negative = false;
     while (!w.finished && frames < CAP) {
       if (w.branch) w.takeBranch(0);
-      w.tick(1 / 60);
+      clockFrame(w);
       frames++;
       if (w.queuedEventsPending < 0) negative = true;
       const now = `${w.block}/${w.step}/${w.opIndex}`;
@@ -928,6 +966,7 @@ for (const stage of STAGES) {
 
     let stuck = 0, seeks = 0, worst = "";
     for (const [b, s] of addrs) {
+      freshGame();
       const v = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
                                      aliveCivilians: () => 0 });
       if (!seekTo(v, b, s, 0)) continue;
@@ -935,7 +974,7 @@ for (const stage of STAGES) {
       let at = "", stalls = 0;
       for (let i = 0; i < 60 * 60 * 8 && !v.finished; i++) {
         if (v.branch) v.takeBranch(0);
-        v.tick(1 / 60);
+        clockFrame(v);
         const p = `${v.block}/${v.step}/${v.opIndex}`;
         if (p === at) { if (++stalls > 60 * 90) break; } else { stalls = 0; at = p; }
       }
@@ -1169,7 +1208,7 @@ for (const stage of STAGES) {
     const play = new Walker(script, mkHost());
     seekTo(play, 1, 1, 36);
     play.replaying = false;
-    play.enterSceneState(1, 3);
+    play.gotoSceneState(3, true);
     check("...and leaving scene row 2 in playback retires nobody",
           play.spawns.some((s) => s.at === 4348));
   }

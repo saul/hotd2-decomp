@@ -44,7 +44,7 @@
 import type { OpJson } from "../../bundle";
 import { G } from "../../game/globals";
 import type { WaitPolicy } from "../walker";
-import { passedBecause, type WaitContext, type WaitRule } from "./types";
+import { YieldBecause, type WaitContext, type WaitRule } from "./types";
 
 /**
  * `EvtOpWaitEnemiesPresent43` (`FUN_0045FBC0`) — `g_enemies_present <= operand`
@@ -60,7 +60,7 @@ export const waitEnemiesPresent: WaitRule = {
   clearsRoom: true,
   retires: "enemies",
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
-    if (ctx.host.presentEnemies() === null) return passedBecause(op);
+    if (ctx.host.presentEnemies() === null) return YieldBecause(op);
     // `if (g_evt_yield == 0) { g_evt_yield = 1; return; }` — the condition is
     // not read on this frame at all.
     return { kind: "enemies" };
@@ -95,7 +95,7 @@ export const waitEnemiesAlive: WaitRule = {
   clearsRoom: true,
   retires: "enemies",
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
-    if (ctx.host.aliveEnemies() === null) return passedBecause(op);
+    if (ctx.host.aliveEnemies() === null) return YieldBecause(op);
     return { kind: "enemies" };
   },
   satisfied(_policy, op: OpJson, ctx: WaitContext): boolean {
@@ -126,7 +126,7 @@ export const waitScriptedActors: WaitRule = {
   // held the *next* one of these open for ever.
   retires: "civilians",
   enter(op: OpJson, ctx: WaitContext): WaitPolicy {
-    if (ctx.host.aliveCivilians() === null) return passedBecause(op);
+    if (ctx.host.aliveCivilians() === null) return YieldBecause(op);
     return { kind: "civilians" };
   },
   satisfied(_policy, op: OpJson, ctx: WaitContext): boolean {

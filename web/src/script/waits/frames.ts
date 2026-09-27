@@ -10,11 +10,24 @@ import { G } from "../../game/globals";
 import type { WaitPolicy } from "../walker";
 import type { WaitRule } from "./types";
 
+/**
+ * `EvtOpWaitFrames42` — `FUN_0045FB30`:
+ *
+ * ```c
+ * if (skip) { pc += 8; return; }
+ * if (g_evt_yield == 0) { counter = operand; g_evt_yield = 1; return; }     // the first visit
+ * if ((counter < 0 || --counter < 0) && g_evt_gameplay_live) { g_evt_yield = 0; pc += 8; }
+ * ```
+ *
+ * The counter is loaded on the visit that yields and decremented *before* it
+ * is tested, so the instruction behind `wait_frames n` runs `n + 1` frames
+ * after the one the wait was reached on. `[proved]`
+ */
 export const waitFrames: WaitRule = {
   ops: [0x42],
   skippable: true,
   enter(op: OpJson): WaitPolicy {
-    return { kind: "frames", framesLeft: op.arg ?? 0 };
+    return { kind: "frames", framesLeft: (op.arg ?? 0) + 1 };
   },
   satisfied(policy: WaitPolicy): boolean {
     return policy.kind !== "frames" || policy.framesLeft <= 0;

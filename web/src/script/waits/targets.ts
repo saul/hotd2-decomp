@@ -30,7 +30,7 @@
 import type { OpJson } from "../../bundle";
 import { G } from "../../game/globals";
 import type { WaitPolicy } from "../walker";
-import { passedBecause, type WaitContext, type WaitRule } from "./types";
+import { YieldBecause, type WaitContext, type WaitRule } from "./types";
 
 /**
  * The condition itself, off the port's globals: what the player's walker host
@@ -48,7 +48,7 @@ export const waitTargetsClear: WaitRule = {
     // A host with no camera and no pool cannot answer, and passes -- the same
     // contract the enemy gates keep for the walker-only harnesses.
     if ((ctx.host.cameraTargetsClear?.() ?? null) === null) {
-      return passedBecause(op);
+      return YieldBecause(op);
     }
     // The first-visit yield: the condition is not read on this frame.
     return { kind: "targets" };

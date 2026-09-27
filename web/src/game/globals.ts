@@ -2263,6 +2263,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // leaves the scene state's hook a no-op.
   CameraActorInit();
   G.g_camera_update_hook = 0;
+  G.g_camera_fixed_eye_y = 0;
   G.g_camera_eye = vec3();
   G.g_camera_pitch_bams = 0;
   G.g_camera_yaw_bams = 0;

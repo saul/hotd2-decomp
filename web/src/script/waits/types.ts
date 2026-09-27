@@ -125,14 +125,14 @@ export interface WaitRule {
    * that returns a blocking policy from here unconditionally and does the
    * whole test in {@link satisfied}.
    *
-   * `0x41`, `0x43`, `0x44` and `0x46` model it — see `waits/enemies.ts`,
-   * where it is the whole of two bugs, and `waits/frames.ts`. **`0x42` and
-   * `0x45` do not**, and that is `[diverges]`: each would cost a frame it does
-   * not currently cost, and `0x42`'s countdown would become `operand + 2`
-   * frames rather than `operand` (`EvtOpWaitFrames42` loads the counter on
-   * the yield frame and then decrements *before* testing). Both are the
-   * script's clock rather than the camera's, and moving them is a retiming of
-   * every stage that wants its own change.
+   * Every rule models it -- `0x41`, `0x42`, `0x43`, `0x44`, `0x45`, `0x46` and
+   * `0x47` -- by never passing from here: a condition it cannot hold on is a
+   * `yield` policy, which spends the frame and passes on the next visit. See
+   * `waits/enemies.ts`, where it is the whole of two bugs. It is also what
+   * keeps the action ring honest: a `finish_sequence` queued in front of a
+   * wait has a camera-actor pass to run in before the `goto_scene_state`
+   * behind the wait parks its slot, and a wait that passed on sight let the
+   * `goto` run first and left the driver installed for good.
    */
   enter(op: OpJson, ctx: WaitContext): WaitPolicy;
   /**
@@ -170,4 +170,12 @@ export const WAIT_NOTES: Record<number, string> = {
 /** The fallback: a wait this client cannot evaluate does not block. */
 export function passedBecause(op: OpJson): WaitPolicy {
   return { kind: "passed", why: WAIT_NOTES[op.op] ?? "needs the runtime" };
+}
+
+/**
+ * The same excuse for a wait whose engine routine yields on its first visit:
+ * the frame is still spent, the condition is still not held on.
+ */
+export function YieldBecause(op: OpJson): WaitPolicy {
+  return { kind: "yield", why: WAIT_NOTES[op.op] ?? "needs the runtime" };
 }

@@ -66,21 +66,25 @@ export function CameraActorTick(): void {
 const REPLAY_FRAMES = 16;
 
 /**
- * `[port-only]` -- a replay's camera: the camera's two tasks, run until
- * `done` holds, with a playing shot's cursor and the stashed rail's frame
- * carried forward to `target` (its end when `null`) before each.
+ * `[port-only]` -- a replay's camera: the camera's two tasks, run at least
+ * `minFrames` times and then until `done` holds, with a playing shot's cursor
+ * and the stashed rail's frame carried forward to `target` (the end of the
+ * range when `null`) before each.
  *
  * A seek walks the script without running frames, and a wait it steps over is
- * a claim about where the camera is -- `wait_queued_events_done` that the
- * ring is empty, `wait_camera_path_frame` that the path has passed a frame.
+ * a claim about the world past it: every wait but `0x40` spends at least the
+ * frame it yields on, so the camera actor has run by then -- the action ring
+ * has dequeued what was pushed in front of the wait -- and some claim more:
+ * `wait_queued_events_done` that the ring is empty, `wait_camera_path_frame`
+ * that the path has passed a frame, a room gate that the fight is over.
  * Running the engine's own routines to that state, rather than writing the
- * words that describe it, is what keeps the landing one the game could be in:
- * the action ring dequeues as it would, the scene state's hook evaluates the
- * rail, and the drivers seat the block. What is skipped is the frames between.
+ * words that describe it, keeps the landing one the game could be in: the
+ * ring dequeues as it would, the scene state's hook evaluates the rail, the
+ * drivers seat the block. What is skipped is the frames between.
  */
-export function CameraReplayUntil(done: () => boolean,
-                                  target: number | null): void {
-  for (let i = 0; i < REPLAY_FRAMES && !done(); i++) {
+export function CameraReplayUntil(done: () => boolean, target: number | null,
+                                  minFrames = 0): void {
+  for (let i = 0; i < REPLAY_FRAMES && (i < minFrames || !done()); i++) {
     if (G.g_evt_action_handler === EvtActionHandler.PathPlay) {
       const end = G.g_cam_path_end_frame;
       const to = target === null ? end : Math.min(target, end);
@@ -103,4 +107,30 @@ export function CameraReplayUntil(done: () => boolean,
     CameraActorTick();
     CameraUpdateTick();
   }
+}
+
+/**
+ * `[port-only]` -- the camera a replay leaves past a wait that holds for a
+ * long time and names no frame: a room gate, a script flag, the targets. The
+ * ring runs until nothing is queued and no shot is still playing -- each shot
+ * carried to its end -- or a driver it cannot get past holds the slot.
+ */
+export function CameraReplaySettle(): void {
+  CameraReplayUntil(() => G.g_evt_action_ring.length === 0
+    && G.g_evt_action_handler !== EvtActionHandler.PathPlay, null, 1);
+}
+
+/**
+ * `[port-only]` -- the camera a replay leaves past `wait_frames n`: `n + 1`
+ * frames on (`EvtOpWaitFrames42`), the shot or the rail carried that far.
+ */
+export function CameraReplayFor(frames: number): void {
+  const hook = G.g_camera_update_hook as CameraUpdateHook;
+  const rail = hook === CameraUpdateHook.StepRail
+    || hook === CameraUpdateHook.DeferredRailInstall
+    || hook === CameraUpdateHook.PlayStashedPath;
+  const from = rail ? G.g_stashed_path_frame
+    : G.g_evt_action_handler === EvtActionHandler.PathPlay
+      ? G.g_cam_path_cursor : G.g_cam_path_frame;
+  CameraReplayUntil(() => true, from + frames, Math.min(frames, 2));
 }

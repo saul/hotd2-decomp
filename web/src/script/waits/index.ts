@@ -38,5 +38,5 @@ export const WAIT_RULES: ReadonlyMap<number, WaitRule> = (() => {
   return byOp;
 })();
 
-export { passedBecause, WAIT_NOTES } from "./types";
+export { passedBecause, WAIT_NOTES, YieldBecause } from "./types";
 export type { WaitContext, WaitRule } from "./types";

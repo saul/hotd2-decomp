@@ -23,6 +23,8 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import type { SkeletonModel } from "./skeleton";
+import type { ShotRay } from "./host";
 import { makeJudgmentTail, type JudgmentTail } from "./class22/state";
 import { makeJudgmentCompanionTail, type JudgmentCompanionTail }
   from "./class23/state";
@@ -51,24 +53,25 @@ import { makeZombieTail, type ZombieTail } from "./class30/state";
  */
 export enum MotionFlag {
   /**
-   * Bit `0x01` — **draw the skeleton's nodes**, and the ground shadow with
-   * them.
+   * Bit 0 — **the skeleton is drawn**, and the ground shadow with it.
    *
-   * `SkeletonEmitNode` (`FUN_004114C0`) tests it before it calls the node draw
-   * hook at `model+0x1158` — `TEST byte ptr [ECX + 0x64], 0x1` / `JZ` at
-   * `0x00411505`, `ECX` being `g_skeleton_model` — so with it clear **no
-   * node of the skeleton is drawn**, hook and all, while the walk still
-   * recurses into the children. `ActorDrawShadow` (`FUN_0040A590`) and
-   * `ActorDrawGroundShadow` (`FUN_0040A620`) both test it again before the
-   * shadow disc. `[proved]`
+   * `SkeletonEmitNode` (`FUN_004114C0`) runs a node's draw hook, updates its
+   * hit-centre and writes the camera point only while it is set —
+   * `TEST byte ptr [ECX + 0x64], 0x1` / `JZ` at `0x00411505`, `ECX` being
+   * `g_skeleton_model` — so with it clear **no node of the skeleton is
+   * drawn**, hook and all; the pose itself is walked either way.
+   * `ActorDrawShadow` (`FUN_0040A590`) and `ActorDrawGroundShadow`
+   * (`FUN_0040A620`) both test it again before the shadow disc.
+   * `ActorBuildSkinnedModel` sets it; class 0x14's entrances clear it to hide
+   * the boss under the water and set it again. `[proved]`
    *
    * It is **not** the gate on the vertex-blended parts: those have a byte
    * each, {@link Actor.partVisible}, and `ActorSetPartVisibility`
-   * (`FUN_00409D10`) is what writes them. Every class-0x30 state that hides
-   * an actor writes both, and `ZombieStateAwaitCivilianOrder` writes this and
-   * only part 0's byte.
+   * (`FUN_00409D10`) is what writes them. Every state that hides an actor
+   * writes both, and `ZombieStateAwaitCivilianOrder` and class 0x14's
+   * entrances write this and only part 0's byte.
    */
-  DrawSkeleton = 0x01,
+  Drawn = 0x01,
   /**
    * **Does this clip's root translation carry the actor?**
    *
@@ -89,6 +92,12 @@ export enum MotionFlag {
    * writes it. `[open]`
    */
   RootMotionY = 0x10,
+  /**
+   * Bit 3 — on an odd play cursor, blend the bones by swing-twist rather
+   * than linearly (`FUN_00411700`). `Class32Init` sets it; nothing the port
+   * runs does. `[proved]`
+   */
+  SwingTwistBetween = 0x08,
 }
 
 /**
@@ -97,7 +106,7 @@ export enum MotionFlag {
  * bytes `c7466403000000`. `[proved]`
  *
  * It is unconditional, so **every skeletal actor in the game starts drawn and
- * with root motion on** — {@link MotionFlag.DrawSkeleton} and
+ * with root motion on** — {@link MotionFlag.Drawn} and
  * {@link MotionFlag.RootMotion}. Class 0x10's script rewrites the second on
  * every clip change; class 0x30's hiding states clear and restore the first.
  */
@@ -189,7 +198,7 @@ export enum ActorFlag {
   /**
    * `obj+0x34` bit `0x80000` — **no ground shadow.** `ActorDrawShadow`
    * (`FUN_0040A590`) draws the disc only while this is clear and
-   * {@link MotionFlag.DrawSkeleton} is set, and `ActorDrawGroundShadow`
+   * {@link MotionFlag.Drawn} is set, and `ActorDrawGroundShadow`
    * (`FUN_0040A620`) tests the pair again: `TEST dword ptr [ESI + 0x34],
    * 0x80000` (`f7463400000800`) at `0x0040A625`. `[proved]` for that reader.
    *
@@ -1119,12 +1128,23 @@ export interface ActorBase {
    * is the renderer's and not carried). `SkeletonDrawWalk` (`FUN_004110D0`)
    * skips part *i* while its byte is 0, and so does `DrawCharacterPartSlot`
    * (`FUN_00419B40`). `ActorSetPartVisibility` (`FUN_00409D10`) writes all of
-   * them; `ZombieStateAwaitCivilianOrder` writes part 0's alone. `[proved]`
+   * them; `ZombieStateAwaitCivilianOrder` and class 0x14's entrances write
+   * part 0's alone. `[proved]`
    *
-   * Empty for an actor whose class `Init` the port does not run the build
-   * for; see `spawn.ts`.
+   * On the actor rather than in {@link SkeletonModel}, because every skinned
+   * actor has these records and only class 0x14 carries the rest of the
+   * block. Empty for an actor whose class `Init` the port does not run the
+   * build for; see `spawn.ts`.
    */
   partVisible: number[];    // model+0x40, byte +1 of each record
+  /**
+   * The engine's own model block (`obj+0x194`), for an actor whose class
+   * poses it the way the exe does -- see `game/skeleton.ts`. Null for every
+   * actor the port still poses in `render/`; class 0x14's `Init` builds one.
+   * When it is set the director leaves the actor's clock alone and the class
+   * steps it from its own update.
+   */
+  skel: SkeletonModel | null;
   /** Display name, for the feed. Copied from the type at spawn. */
   name: string;
 
@@ -1509,6 +1529,17 @@ export interface ActorBase {
    */
   class14: CharacterPlacement["class14"];
   /**
+   * Class 0x16's marker -- `WaterFieldCreate` (`FUN_00442290`) reads no tail,
+   * only the spawn's `y`. Present only on a wave-field spawn.
+   */
+  class16: CharacterPlacement["class16"];
+  /**
+   * Class 0x17's tail -- one wave source's kind, amplitude, wavelength and
+   * speed, as `WaterWaveSourceAdd` (`FUN_004422D0`) and its first tick read
+   * them.
+   */
+  class17: CharacterPlacement["class17"];
+  /**
    * Class 0x19's descriptor tail -- the stage-4 boss's entrance, its per-bone
    * collision meshes and the camera pair that despawns it. See
    * `game/class19/`.
@@ -1649,6 +1680,20 @@ export interface ActorBase {
    */
   shotBones: number[];
   /**
+   * `[port-only]` -- the ray of the pull that wrote {@link shotBones}`[p]`,
+   * per player: `G.g_crosshair_ray[p]` as it stood when `MarkActorShot` ran.
+   *
+   * The engine polls the trigger once a frame, so the shot record a class
+   * reads back after being marked (`g_shot_records[p] + 0x18/+0x24`,
+   * `G.g_crosshair_ray` here) is always the pull that marked it. The port's
+   * queue lets several pulls into one frame -- a driver's volley arrives
+   * whole between two driven frames -- and the last of them, not the one
+   * that landed, would be what the class read. A class that reads the record
+   * back (class 0x14's weak-point gates) reads this instead; with one pull a
+   * frame the two are the same object.
+   */
+  shotRays: (ShotRay | null)[];
+  /**
    * `obj+0x131C` — which player's shot killed this actor.
    *
    * `CivilianPruneDeadChildren` reads it off a dead captor to decide who is
@@ -1787,7 +1832,7 @@ export interface ActorBase {
    *   states write it for.
    *
    * It is not a draw gate for the whole actor and not a stand-in for one:
-   * hiding a class-0x30 actor is {@link MotionFlag.DrawSkeleton} and
+   * hiding a class-0x30 actor is {@link MotionFlag.Drawn} and
    * {@link Actor.partVisible}. Classes 0x22, 0x23 and 0x40 still write it as
    * a port-only "drawn this frame", which `render/characters.ts` honours for
    * them alone.
@@ -2206,6 +2251,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class51: null,
     class52: null,
     class14: null,
+    class16: null,
+    class17: null,
+    skel: null,
     class19: null,
     boneColi: {},
     class22: null,
@@ -2222,6 +2270,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     leapStrikeFrames: 0,
     pendingHit: null,
     shotBones: [0, 0],
+    shotRays: [null, null],
     killedBy: -1,
     despawned: false,
     radius: 0,

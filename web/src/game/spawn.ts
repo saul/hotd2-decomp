@@ -15,6 +15,8 @@ import { G } from "./globals";
 import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
   from "./hit_slots";
 import { g_class_handlers } from "./registry";
+import { ActorModelScale } from "./root_motion";
+import { SkeletonBuildAndPose } from "./skeleton";
 import { CharacterTypeOf } from "./tables";
 import type { SpawnClass } from "./spawn_class";
 
@@ -59,12 +61,14 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
 }
 
 /**
- * `ActorBuildSkinnedModel` — `FUN_00410440`, for the two things it leaves on
+ * `ActorBuildSkinnedModel` — `FUN_00410440`, for what it leaves on
  * the actor.
  *
  * The routine builds the skeletal model record at `obj+0x194`, and that
- * record is the renderer's hierarchy here. What it also does to the actor's
- * own state is three things, and all three are ported:
+ * record is the renderer's hierarchy here -- but for an actor that carries
+ * the whole block (`Actor.skel`, `game/skeleton.ts`), which gets the whole
+ * build. What it does to every actor's own state is three things, and all
+ * three are ported:
  *
  * * The draw state: `model+0x64 = 3` — {@link MOTION_FLAGS_INIT}, `c7466403`
  *   at `0x004104C5` — and the vertex-blended parts' records. `model+0x3C` is
@@ -99,12 +103,40 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  */
 export function ActorBuildSkinnedModel(obj: Actor): void {
   const type = CharacterTypeOf(obj);
+  // `M[0x64] = 3` -- drawn, root motion -- and the part records, each
+  // `{0, 1}`: the half of the build every skinned actor has.
   obj.motionFlags = MOTION_FLAGS_INIT;
   obj.partVisible = new Array<number>(type?.parts?.length ?? 0).fill(1);
-  ActorClaimHitSlot(obj);
-  if ((type?.bones ?? []).some((b) => b.parent === null)) {
+  const skel = obj.skel;
+  if (skel) {
+    // An actor that carries the model block (`game/skeleton.ts`, class 0x14
+    // alone today) gets the whole build, from its own `Init`, which has put
+    // the motion in `+0x20` first:
+    //
+    // ```
+    // M[0x116C] = scale by character type
+    // M[0]=0; M[0x10]=0; M[0x18]=0; M[0x08]=0; M[0x30]=0; M[0x28]=0
+    // M[0x37]=0; M[0x36]=0; SkeletonAssignSubtreeTrack(0, 0)
+    // M[0x64] = 3; M[0x68] = 5                 ; drawn, root motion; Z, Y, X
+    // parts: M[0x40] = ActorAllocSub(n * 8), each {0, 1}
+    // SkeletonBuildAndPose(M, pos, recs)       ; the first pose, and the 0x80
+    // ```
+    obj.scale = ActorModelScale(obj.charType);
+    skel.counter = 0;
+    skel.prevFrame = 0;
+    skel.frame = 0;
+    skel.cursor = 0;
+    skel.weightDiv = 0;
+    skel.weightOrigin = 0;
+    skel.flags = 0;
+    skel.order = 5;
+    SkeletonBuildAndPose(obj, skel);
+    obj.motion = skel.motion;
+    obj.playTicks = 0;
+  } else if ((type?.bones ?? []).some((b) => b.parent === null)) {
     obj.flags |= ActorFlag.ShootPerBone;
   }
+  ActorClaimHitSlot(obj);
 }
 
 /**

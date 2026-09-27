@@ -600,7 +600,7 @@ export function ZombieRetireAndCredit(obj: ZombieActor, rng: Rng): void {
  * 0045bb37  MOV  byte ptr [EAX + 1], DL  ; DL = 0: part 0, not drawn
  * ```
  *
- * `obj+0x1F8` bit 0 is {@link MotionFlag.DrawSkeleton}: with it clear
+ * `obj+0x1F8` bit 0 is {@link MotionFlag.Drawn}: with it clear
  * `SkeletonEmitNode` (`FUN_004114C0`) draws no node of the skeleton, and
  * `ActorDrawShadow` (`FUN_0040A590`) no shadow. The byte is part 0's in
  * {@link Actor.partVisible}, the waist, which the skeleton does not draw —
@@ -628,7 +628,7 @@ export function ZombieStateAwaitCivilianOrder(
   if (obj.sub === 0) {
     obj.zom.targetLoops = obj.flags;          // `obj+0x1350` holds the saved flags
     obj.flags |= 0x18000;
-    obj.motionFlags &= ~MotionFlag.DrawSkeleton;
+    obj.motionFlags &= ~MotionFlag.Drawn;
     // The engine writes the byte whatever the count; a model with no parts
     // record has no byte here to write, and nothing reads one.
     if (obj.partVisible.length > 0) obj.partVisible[0] = 0;
@@ -654,7 +654,7 @@ export function ZombieStateAwaitCivilianOrder(
   obj.state = t.civ.childOrder;
   obj.sub = 0;
   obj.flags = obj.zom.targetLoops;
-  obj.motionFlags |= MotionFlag.DrawSkeleton;
+  obj.motionFlags |= MotionFlag.Drawn;
   if (obj.partVisible.length > 0) obj.partVisible[0] = 1;
   runState?.(obj, obj.state);
 }

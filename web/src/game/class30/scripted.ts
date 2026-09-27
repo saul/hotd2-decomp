@@ -119,7 +119,7 @@ function atLastFrame(obj: ZombieActor): boolean {
  * This used to say that `FUN_00409D10` "stops the clip" and `obj+0x1F8` bit 0
  * is root motion, and froze the clock (`obj+0x1324`) for the wait. The first
  * is `ActorSetPartVisibility` and the second is {@link
- * MotionFlag.DrawSkeleton}; root motion is bit 1, and nothing here writes
+ * MotionFlag.Drawn}; root motion is bit 1, and nothing here writes
  * `obj+0x1324` or `obj+0x34` bit `0x4000`. The clip plays. The exporter's
  * name for the byte, `freeze`, is the same misreading, and its polarity is
  * right: `freeze` is `tail+0x0C == 0`.
@@ -139,7 +139,7 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
       ActorSetPartVisibility(obj, 0);
       obj.flags |= ActorFlag.NoCameraTrack | ActorFlag.ShotImmune
                  | ActorFlag.NoShadow;
-      obj.motionFlags &= ~MotionFlag.DrawSkeleton;
+      obj.motionFlags &= ~MotionFlag.Drawn;
     }
     // `INC word ptr [ESI + 0x1312]` at `0x00457675` and on into sub 1.
     obj.sub = 1;
@@ -157,7 +157,7 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
   if (obj.sub === 2) {
     ActorSetPartVisibility(obj, 1);
     if (hide) {
-      obj.motionFlags |= MotionFlag.DrawSkeleton;
+      obj.motionFlags |= MotionFlag.Drawn;
       obj.flags &= ~(ActorFlag.NoCameraTrack | ActorFlag.ShotImmune
                    | ActorFlag.NoShadow);
     }

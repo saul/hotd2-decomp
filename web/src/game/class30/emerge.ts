@@ -126,7 +126,7 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     if (obj.attackState === 1) {
       ActorSetPartVisibility(obj, 0);
       obj.flags |= ActorFlag.NoCameraTrack | ActorFlag.NoShadow;
-      obj.motionFlags &= ~MotionFlag.DrawSkeleton;
+      obj.motionFlags &= ~MotionFlag.Drawn;
     }
     ActorSetMotion(obj, SUBMERGED_MOTION);
     obj.zom.holdFrames = p.delay;              // +0x1330
@@ -141,7 +141,7 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     // `obj+0x1F8` at `0x004585EA` -- drawn again, and **whatever `tail+0x03`
     // said**: neither write is guarded.
     ActorSetPartVisibility(obj, 1);
-    obj.motionFlags |= MotionFlag.DrawSkeleton;
+    obj.motionFlags |= MotionFlag.Drawn;
     // `004585EC  81e2fffef6ff  AND EDX, 0xfff6feff` — the clip that lifts the
     // actor out has started, so it is shootable again, and has a camera point
     // and a shadow. **`0x2000` is not in the mask** — the stagger stays

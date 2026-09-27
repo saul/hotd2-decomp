@@ -3,7 +3,7 @@
  *
  * `EnemyThrowerInit` (`FUN_00449620`) installs `ThrowerDrawBonePart` at
  * `obj+0x12EC` (`model+0x1158`), and `SkeletonEmitNode` (`FUN_004114C0`)
- * calls it for every node that has a slot, while `MotionFlag.DrawSkeleton`
+ * calls it for every node that has a slot, while `MotionFlag.Drawn`
  * is up and the node is not vetoed. `ThrowerAdvanceMotion` (`FUN_00449EF0`)
  * is where that walk happens: the last act of `EnemyThrowerUpdate`
  * (`FUN_00449910`) but the camera point, after the state and the integration.

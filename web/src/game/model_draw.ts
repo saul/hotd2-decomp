@@ -18,11 +18,12 @@
  * Three things then decide what is drawn, and **none of them is an alpha for
  * the whole actor**:
  *
- * 1. `model+0x64` bit 0 — {@link MotionFlag.DrawSkeleton}. `SkeletonEmitNode`
- *    (below) calls the node draw hook only while it is set, and the shadow
- *    reads it too. This is the skeleton, every node of it.
+ * 1. `model+0x64` bit 0 — {@link MotionFlag.Drawn}. `SkeletonEmitNode`
+ *    (`FUN_004114C0`) calls the node draw hook only while it is set, and the
+ *    shadow reads it too. This is the skeleton, every node of it.
  * 2. `model+0x40`'s part bytes — {@link Actor.partVisible}. `SkeletonDrawWalk`
- *    draws vertex-blended part *i* only while byte `+1` of record *i* is set.
+ *    (`FUN_004110D0`) draws vertex-blended part *i* only while byte `+1` of
+ *    record *i* is set.
  *    These are `g_pCharacterExtraParts`' waist and skirt, which no node names;
  *    part *i* is not bone *i*.
  * 3. The class's node hook at `model+0x1158`, which decides how each node is
@@ -35,7 +36,8 @@
  * to it.
  *
  * The matrices, the draws and the `+0` "has a model" byte beside each part's
- * visibility byte are `render/`'s. What is here is the half that is state, or
+ * visibility byte are `render/`'s -- or `game/skeleton.ts`'s, for an actor
+ * that carries the model block. What is here is the half that is state, or
  * that writes state: the gates, and the walk a class's hook is called from.
  */
 import type { CharacterBone, CharacterType } from "../bundle";
@@ -63,7 +65,7 @@ import { CharacterTypeOf } from "./tables";
  * `ZombieStateWaitForCameraFrame` twice, state 28 twice, and the unnamed
  * routines at `0x0045DBC0` and `0x00480810` (the latter installed by class
  * 0x32's `0x004807B0`) once each. Every caller that hides an actor
- * also clears {@link MotionFlag.DrawSkeleton}, because this reaches the parts
+ * also clears {@link MotionFlag.Drawn}, because this reaches the parts
  * and not the skeleton.
  */
 export function ActorSetPartVisibility(obj: Actor, visible: number): void {
@@ -92,34 +94,30 @@ function nodeSlotOf(obj: Actor, node: CharacterBone): number {
 }
 
 /**
- * `SkeletonDrawWalk` — `FUN_004110D0`, the half of it that is state: the node
- * loop, and the hook each node is handed to.
+ * The node half of `SkeletonDrawWalk` (`FUN_004110D0`) and `SkeletonEmitNode`
+ * (`FUN_004114C0`): every node the engine would hand the class's draw hook,
+ * handed to it, in the engine's order.
  *
- * The engine walks `g_character_skeletons[type]`'s roots in order and
- * `SkeletonEmitNode` recurses depth-first; the exporter flattened the same
- * tree in the same order (`ExeTables.characterSkeleton`), so
- * `CharacterType.bones` is this walk's order and a node's `parent` is an index
- * into it. The rest of the routine is the renderer's: the pose, the matrices,
- * the vertex-blended parts — whose only gate is {@link Actor.partVisible},
- * read there — and the attachment list, which has no gate.
- */
-export function SkeletonDrawWalk(obj: Actor, hook: NodeDrawHook): void {
-  const type = CharacterTypeOf(obj);
-  if (!type) return;
-  for (let i = 0; i < type.bones.length; i++) {
-    if (type.bones[i].parent === null) SkeletonEmitNode(obj, type, i, hook);
-  }
-}
-
-/**
- * `SkeletonEmitNode` — `FUN_004114C0`, the gate: whether this node's hook is
- * called at all.
+ * [port-only] as a function. Those two routines are ported whole in
+ * `game/skeleton.ts` — pose, matrices and all — for an actor that carries
+ * the model block, which class 0x14 does and classes 0x30 and 0x31 do not:
+ * their pose is still `render/`'s. What their hooks write back is state, and
+ * the renderer may not call into the port, so the part of the walk the hook
+ * sees is here for them: the order, and the gate.
+ *
+ * The order is the skeleton's own. The engine walks
+ * `g_character_skeletons[type]`'s roots in order and recurses depth-first;
+ * the exporter flattened the same tree the same way
+ * (`ExeTables.characterSkeleton`), so `CharacterType.bones` is this walk's
+ * order and a node's `parent` is an index into it.
+ *
+ * The gate is `SkeletonEmitNode`'s:
  *
  * ```
  * 004114f2  MOV  EAX, dword ptr [ESI]            ; the draw record's slot
  * 004114f7  TEST EAX, EAX / JZ 0x004116cc        ; none: skip to the children
  * 004114ff  MOV  ECX, [0x009ca0a0]               ; g_skeleton_model
- * 00411505  TEST byte ptr [ECX + 0x64], 0x1      ; MotionFlag.DrawSkeleton
+ * 00411505  TEST byte ptr [ECX + 0x64], 0x1      ; MotionFlag.Drawn
  * 00411509  JZ   0x004116cc
  * 00411510  CALL 0x004122e0                      ; SkeletonNodeDrawSuppressed
  * 0041151a  JNZ  ...
@@ -127,22 +125,30 @@ export function SkeletonDrawWalk(obj: Actor, hook: NodeDrawHook): void {
  * ```
  *
  * `[proved]`. `0x004116CC` is the recursion into the children, so a closed
- * gate stops the draw and not the walk. It also skips the two things the
- * routine records past the hook — the tracked bone's world point at
- * `obj+0x100` and each bone's world sphere centre — which the port takes from
- * the renderer's pose instead; every state that closes the gate also raises
+ * gate stops the draw and not the walk. The tracked bone's world point and
+ * each bone's sphere centre, which the same gate skips, are the renderer's
+ * pose for these classes; every state that closes the gate also raises
  * `obj+0x34` bits that take the actor out of the camera and the shot test.
  */
-export function SkeletonEmitNode(obj: Actor, type: CharacterType, index: number,
-                                 hook: NodeDrawHook): void {
+export function ActorRunNodeDrawHooks(obj: Actor, hook: NodeDrawHook): void {
+  const type = CharacterTypeOf(obj);
+  if (!type) return;
+  for (let i = 0; i < type.bones.length; i++) {
+    if (type.bones[i].parent === null) emitNodeHook(obj, type, i, hook);
+  }
+}
+
+/** One node and its subtree, for {@link ActorRunNodeDrawHooks}. */
+function emitNodeHook(obj: Actor, type: CharacterType, index: number,
+                      hook: NodeDrawHook): void {
   const node = type.bones[index];
   const slot = nodeSlotOf(obj, node);
-  if (slot !== 0 && (obj.motionFlags & MotionFlag.DrawSkeleton) !== 0
+  if (slot !== 0 && (obj.motionFlags & MotionFlag.Drawn) !== 0
       && !SkeletonNodeDrawSuppressed(obj, node.bone, slot)) {
     hook(obj, node.bone, slot);
   }
   for (let j = index + 1; j < type.bones.length; j++) {
-    if (type.bones[j].parent === index) SkeletonEmitNode(obj, type, j, hook);
+    if (type.bones[j].parent === index) emitNodeHook(obj, type, j, hook);
   }
 }
 
@@ -184,7 +190,7 @@ const SHADOW_LARGE_TYPES: readonly number[] = [0x44, 0x47];
  * ```
  * 0040a595  TEST dword ptr [ECX + 0x34], 0x80000   ; ActorFlag.NoShadow
  * 0040a59c  JNZ  exit
- * 0040a59e  TEST byte ptr [ECX + 0x1f8], 0x1       ; MotionFlag.DrawSkeleton
+ * 0040a59e  TEST byte ptr [ECX + 0x1f8], 0x1       ; MotionFlag.Drawn
  * 0040a5a5  JZ   exit
  * 0040a5a7  MOV  AX, word ptr [ECX + 0x1f4]        ; character type
  * ```
@@ -201,6 +207,6 @@ const SHADOW_LARGE_TYPES: readonly number[] = [0x44, 0x47];
  */
 export function ActorDrawShadow(obj: Actor): Readonly<ShadowEllipse> | null {
   if ((obj.flags & ActorFlag.NoShadow) !== 0) return null;
-  if ((obj.motionFlags & MotionFlag.DrawSkeleton) === 0) return null;
+  if ((obj.motionFlags & MotionFlag.Drawn) === 0) return null;
   return SHADOW_LARGE_TYPES.includes(obj.charType) ? SHADOW_LARGE : SHADOW_SMALL;
 }

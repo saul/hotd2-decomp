@@ -47,13 +47,14 @@ Modules::
     combat      what a shot does: damage, reactions, attacks, gore, death
     approach    the rings an enemy advances through, and the camera on it
     class31     class 0x31's four behaviour sets
+    class14     class 0x14's tables: the stage-2 boss's cues, cones and rounds
     actorscript the bytecode blobs an actor state steps through
     placement   one spawn's descriptor tail, decoded
     charbuild   assembling one character type and its glTF rig
     characters  the two functions that need all of the above, and the
                 package's front door for every name they moved out of
 
-The last ten form a small DAG: ``characters`` is the front door, and the rows
+The last eleven form a small DAG: ``characters`` is the front door, and the rows
 above it are what it stands on.
 
 Phase status is in ``docs/PROGRESS.md`` and every count is in

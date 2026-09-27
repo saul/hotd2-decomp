@@ -439,7 +439,7 @@ export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
  *
  * The same two seconds without the sink: the countdown's **parity** is the
  * whole body's visibility, and it is written to the two places the draw reads
- * it from — `obj+0x1F8` bit 0, which is {@link MotionFlag.DrawSkeleton} and
+ * it from — `obj+0x1F8` bit 0, which is {@link MotionFlag.Drawn} and
  * gates every node of the skeleton, and every part's byte through
  * `ActorSetPartVisibility` (`FUN_00409D10`), which gates the waist:
  *
@@ -469,14 +469,14 @@ export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
   // `& 0x80000001` with the sign fix-up is `timer % 2`, and the timer is a
   // positive count here, so even is the low bit clear.
   const even = (Math.floor(obj.zom.corpseTimer) & 1) === 0 ? 1 : 0;
-  if (even) obj.motionFlags |= MotionFlag.DrawSkeleton;
-  else obj.motionFlags &= ~MotionFlag.DrawSkeleton;
+  if (even) obj.motionFlags |= MotionFlag.Drawn;
+  else obj.motionFlags &= ~MotionFlag.Drawn;
   ActorSetPartVisibility(obj, even);
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
   if (obj.zom.corpseTimer >= 1) return;
-  obj.motionFlags &= ~MotionFlag.DrawSkeleton;
+  obj.motionFlags &= ~MotionFlag.Drawn;
   ActorSetPartVisibility(obj, 0);
   ZombieCorpseLeave(obj);
 }

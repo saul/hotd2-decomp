@@ -2122,7 +2122,7 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
         && drawn(waist) && drawn(skirt), a.partVisible.join());
 
   // A captor's hold: the skeleton's bit and part 0's byte, and nothing else.
-  a.motionFlags &= ~MotionFlag.DrawSkeleton;
+  a.motionFlags &= ~MotionFlag.Drawn;
   a.partVisible[0] = 0;
   chars.update({} as never);
   check("the skeleton's gate takes every bone's geometry off",
@@ -2132,7 +2132,7 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
   check("part 0's byte takes the waist off, and the skirt is still drawn",
         !waist.visible && drawn(skirt));
 
-  a.motionFlags |= MotionFlag.DrawSkeleton;
+  a.motionFlags |= MotionFlag.Drawn;
   a.partVisible[0] = 1;
   chars.update({} as never);
   check("...and opening both puts everything back",

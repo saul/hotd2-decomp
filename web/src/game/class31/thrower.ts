@@ -51,7 +51,7 @@ import {
 } from "./stand";
 import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
-import { SkeletonDrawWalk } from "../model_draw";
+import { ActorRunNodeDrawHooks } from "../model_draw";
 import { ThrowerDrawBonePart } from "./draw";
 import { ThrowerOnShot } from "./on_shot";
 import {
@@ -521,7 +521,7 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // which grows nothing, for the next frame whenever it holds the clock
   // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
   // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
-  SkeletonDrawWalk(obj, ThrowerDrawBonePart);
+  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart);
 }
 
 /**

@@ -5,7 +5,7 @@
  * three gates, not one:
  *
  * * **The skeleton.** `SkeletonEmitNode` (`FUN_004114C0`) calls a node's draw
- *   hook only while `model+0x64` bit 0 is up, {@link MotionFlag.DrawSkeleton}.
+ *   hook only while `model+0x64` bit 0 is up, {@link MotionFlag.Drawn}.
  *   Everything the hook draws goes with it: each bone's own model, a gore
  *   swap's pieces, the cels `ZombieDrawBonePart` (`FUN_004534A0`) adds. The
  *   veto (`SkeletonNodeDrawSuppressed`, `FUN_004122E0`) takes one bone's
@@ -97,7 +97,7 @@ export function applyDrawGates(inst: Instance): void {
   }
 
   // The skeleton, the veto and the hook's alpha.
-  const skeleton = (a.motionFlags & MotionFlag.DrawSkeleton) !== 0;
+  const skeleton = (a.motionFlags & MotionFlag.Drawn) !== 0;
   const alphas = a.cls === SpawnClass.Thrower ? a.thr.boneDrawAlpha : null;
   const drawn = (bone: number): boolean =>
     skeleton && (alphas === null || (alphas[bone] ?? 1) > 0);

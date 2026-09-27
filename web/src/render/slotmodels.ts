@@ -60,7 +60,8 @@ import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import {
-  CARRIER_GROUND_WAKE_DRAW, CARRIER_WAKE_PAIR, type ScriptedPropTail,
+  CARRIER2_DOOR_AT, CARRIER2_DOOR_SLOTS, CARRIER_GROUND_WAKE_DRAW,
+  CARRIER_WAKE_PAIR, type ScriptedPropTail,
 }
   from "../game/class13/state";
 
@@ -82,6 +83,8 @@ const SPLASH0_AT: readonly [number, number, number] =
   [-1181.71, -18.908, -1508.41];
 const SPLASH0_YAW = 0x18e3;
 const SPLASH0_SCALE = 0.6;
+/** `PUSH 0x17C8` -- `boss1q.bin` 94, the walker's landing ring. */
+const LANDING_RING_SLOT = 0x17c8;
 
 /** Scratch matrices for the carrier draws; the layer is single-threaded. */
 const _m = new Matrix4();
@@ -103,6 +106,34 @@ function mRotZ(m: Matrix4, b: number): void {
 }
 function mScale(m: Matrix4, x: number, y: number, z: number): void {
   m.multiply(_t.makeScale(x, y, z));
+}
+
+/**
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s alpha, on a clone. The clone
+ * shares its template's materials, so it gets its own before its opacity is
+ * touched -- and only once something has faded it, so an opaque draw keeps
+ * sharing.
+ */
+function setDrawAlpha(c: Object3D, alpha: number): void {
+  if (alpha >= 1 && c.userData.drawAlpha === undefined) return;
+  if (c.userData.drawAlpha === undefined) {
+    c.traverse((o) => {
+      const mesh = o as Mesh;
+      if (!mesh.material) return;
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((x) => x.clone()) : mesh.material.clone();
+    });
+  }
+  c.userData.drawAlpha = alpha;
+  c.traverse((o) => {
+    const mesh = o as Mesh;
+    const mats = !mesh.material ? []
+      : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      mat.transparent = true;
+      mat.opacity = Math.max(0, Math.min(1, alpha));
+    }
+  });
 }
 
 /**
@@ -445,6 +476,7 @@ export class SlotModelLayer implements System<RenderContext> {
 
     this.drawCarrierEffects(seen);
     this.drawPropStrips(seen);
+    this.drawLandingRings(seen);
 
     for (const [key, l] of this.extras) {
       if (seen.has(key)) continue;
@@ -468,7 +500,7 @@ export class SlotModelLayer implements System<RenderContext> {
    * on, and placed by the matrix the routine composed.
    */
   private extra(key: string, slot: number, m: Matrix4,
-                seen: Set<number | string>): void {
+                seen: Set<number | string>, alpha = 1): void {
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
       live?.node.removeFromParent();
@@ -481,6 +513,7 @@ export class SlotModelLayer implements System<RenderContext> {
     }
     live.node.matrix.copy(m);
     live.node.visible = true;
+    setDrawAlpha(live.node, alpha);
     seen.add(key);
   }
 
@@ -510,6 +543,20 @@ export class SlotModelLayer implements System<RenderContext> {
           mRotY(_m, SPLASH0_YAW);
           mScale(_m, SPLASH0_SCALE, SPLASH0_SCALE, SPLASH0_SCALE);
           this.extra(`s0:${a.at}`, t.splashDrawn, _m, seen);
+        }
+      } else if (t.selector === 2 || t.selector === 9) {
+        // `CarrierPropRoutine2` (`FUN_004408A0`)'s tail, every frame from the
+        // one its ride block exists: under `T(pos) RotX RotZ RotY`, each door
+        // at its own offset turned by its own yaw.
+        if (!t.riding) continue;
+        for (let i = 0; i < 2; i++) {
+          _m.identity();
+          mTranslate(_m, a.pos.x, a.pos.y, a.pos.z);
+          mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
+          mTranslate(_m, CARRIER2_DOOR_AT[i][0], CARRIER2_DOOR_AT[i][1],
+                     CARRIER2_DOOR_AT[i][2]);
+          mRotY(_m, i === 0 ? t.door0Yaw : t.door1Yaw);
+          this.extra(`d${i}:${a.at}`, CARRIER2_DOOR_SLOTS[i], _m, seen);
         }
       } else if (CARRIER_GROUND_WAKE_DRAW[t.selector]) {
         // Selectors 1 and 6: one shape of draw, their own literals.
@@ -554,6 +601,24 @@ export class SlotModelLayer implements System<RenderContext> {
       mRotX(_m, e.pitch); mRotZ(_m, e.roll); mRotY(_m, e.yaw);
       if (e.scale !== 1) mScale(_m, e.scale, e.scale, e.scale);
       this.extra(`p:${e.id}`, e.slot, _m, seen);
+    }
+  }
+
+  /**
+   * `Class23LandingRingUpdate` (`FUN_00491700`)'s draw, on the frames
+   * `game/class23/` says it drew: `T(pos) RotY(yaw) Scale(e)` and slot
+   * `0x17C8` at `1.0 - fade`, all of it off the ring's record.
+   */
+  private drawLandingRings(seen: Set<number | string>): void {
+    for (const a of G.g_object_list) {
+      if (a.dead || a.cls !== SpawnClass.JudgmentCompanion) continue;
+      const r = a.companion.ring;
+      if (!r || !r.drawn) continue;
+      _m.identity();
+      mTranslate(_m, r.x, r.y, r.z);
+      mRotY(_m, r.yaw);
+      mScale(_m, r.scale.x, r.scale.y, r.scale.z);
+      this.extra(`ring:${a.at}`, LANDING_RING_SLOT, _m, seen, 1.0 - r.fade);
     }
   }
 
@@ -613,29 +678,8 @@ export class SlotModelLayer implements System<RenderContext> {
       c.visible = true;
       if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
       // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the one fading draw in a
-      // chain, class 0x40's ripple. The clone shares its template's
-      // materials, so it gets its own before its opacity is touched.
-      const alpha = (parts[i] as Partial<HordePart>).alpha ?? 1;
-      if (alpha < 1 || c.userData.hordeAlpha !== undefined) {
-        if (c.userData.hordeAlpha === undefined) {
-          c.traverse((o) => {
-            const mesh = o as Mesh;
-            if (!mesh.material) return;
-            mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((x) => x.clone()) : mesh.material.clone();
-          });
-        }
-        c.userData.hordeAlpha = alpha;
-        c.traverse((o) => {
-          const mesh = o as Mesh;
-          const mats = !mesh.material ? []
-            : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const mat of mats) {
-            mat.transparent = true;
-            mat.opacity = Math.max(0, Math.min(1, alpha));
-          }
-        });
-      }
+      // chain, class 0x40's ripple.
+      setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? 1);
     }
     while (live.node.children.length > parts.length) {
       live.node.children.pop();

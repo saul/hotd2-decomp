@@ -246,6 +246,7 @@ function CivilianInFront(obj: Actor, word: number): boolean {
   const a = obj.yaw * ((Math.PI * 2) / 65536);
   const dx = sub.target.x - obj.pos.x;
   const dz = sub.target.z - obj.pos.z;
-  // The rotated delta's z, `MatrixRotateY(-yaw)`. See `PointLocalZ`.
+  // The rotated delta's z, `MatrixRotateY(-yaw)`. See `ActorPointIsAhead`
+  // in `game/actor_turn.ts`.
   return dx * Math.sin(a) + dz * Math.cos(a) > 0;
 }

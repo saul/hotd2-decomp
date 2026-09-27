@@ -45,6 +45,25 @@ export function VecToAngles(dx: number, dy: number, dz: number):
 }
 
 /**
+ * `LerpWeighted` — `FUN_00401E60`. `(den * a + num * b) / (num + den)`.
+ *
+ * ```
+ * 00401e60  FILD [den]; FMUL [a]; FILD [num]; FMUL [b]; FADDP
+ * 00401e80  FIDIV [num + den]                ; returned in ST0
+ * ```
+ *
+ * `num` and `den` are ints. The camera eases call it with `(1, 15)`; class
+ * 0x22's glides call it with `(1, 60 - n)`, and on the frame `n` reaches 61
+ * the divisor is zero and the x87 hands back an infinity -- which the same
+ * frame's snap overwrites. The port divides the way the FPU does, so it does
+ * too. The caller stores the result as a float.
+ */
+export function LerpWeighted(a: number, b: number, num: number,
+                             den: number): number {
+  return (den * a + num * b) / ((num + den) | 0);
+}
+
+/**
  * The angle helpers live in `core/bams.ts` and are re-exported here.
  *
  * There is one definition of a BAMS turn in the player, and `core/` is where

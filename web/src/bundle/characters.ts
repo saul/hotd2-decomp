@@ -465,6 +465,21 @@ export interface CharacterPlacement {
    * collision trace tests in the object's own space. See `game/class26/`.
    */
   class26?: { coli: string | null } | null;
+  /**
+   * Class 0x19's tail -- the stage-4 boss. `entrance` is `tail+0x01`, the
+   * `g_class19_states` index it starts in; `bone_coli[i]` the `coli.blobs`
+   * key bone `i + 1` is shot-tested against instead of its sphere (the tail
+   * dword `Boss4Init` copies to the bone record's `+0x88`), `null` for a
+   * sphere bone; `despawn_path`/`despawn_frame` are `tail+0x40`/`+0x42`. See
+   * `game/class19/`.
+   */
+  class19?: {
+    char_type: number;
+    entrance: number;
+    bone_coli: (string | null)[];
+    despawn_path: number;
+    despawn_frame: number;
+  } | null;
   class43?: { subtype: number; member: number } | null;
   /**
    * Class 0x46's three descriptor bytes — the bat, and the whole descriptor.
@@ -490,9 +505,17 @@ export interface CharacterPlacement {
    */
   parent_at?: number | null;
   /**
-   * **Not an evt descriptor.** Nothing in the script places it, and
+   * **Not an evt spawn.** Nothing in the script places it, and
    * `SpawnScriptedCharacters` refuses to build one: the object is made by the
    * class that owns it. The row carries geometry and an address to adopt by.
+   *
+   * Usually not a descriptor either -- the bat's wings, the horde's members,
+   * the players' bodies, JUDGMENT's sub-actor. The one exception is class
+   * 0x23: a real descriptor, nested in its class-0x22 parent's tail, that
+   * `Class22RideInAndJoinFight` (`FUN_0049B640`) and
+   * `Class22DescendAndJoinFight` (`FUN_0049CE10`) hand to
+   * `SpawnFromDescriptor` themselves. It is synthetic in the same sense:
+   * nothing but its parent's class may make it.
    */
   synthetic?: boolean;
   /**
@@ -552,6 +575,62 @@ export interface CharacterPlacement {
     route: [number, number, number][];
     despawn_path: number;
     despawn_frame: number;
+  } | null;
+  /**
+   * Class 0x22's tail — JUDGMENT's flier, as `Class22Init` (`FUN_0049B0D0`)
+   * and its states read it.
+   *
+   * `variant` is `tail+0x01`, the `obj+0x130C` that picks which of four
+   * updates the actor runs (0 the stage-1 block-0 cameo, 1 the stage-1
+   * fight, 2 stage 5's, 3 the attract loop); `clip` and `frame` are
+   * `tail+0x02`/`+0x04`, the first clip and the counter it starts on;
+   * `despawn_path`/`despawn_frame` the camera cue at `tail+0x06`/`+0x08`;
+   * `hp`, `hp_stage` and `phase1_floor` the three s16s at `+0x0A`, `+0x0C`
+   * and `+0x0E` -- the hit points the fight seats, the hit points at which
+   * the second clip column starts, and the floor where phase 2 begins.
+   *
+   * `companion_at` is the pointer at `tail+0x10`, as the nested class-0x23
+   * descriptor's own spawn address: the placement whose `parent_at` is this
+   * one. Null for variants 0 and 3, whose tails end before it.
+   *
+   * `sub_actor_at` is **not in the tail**: `Class22Init` builds a second
+   * skinned actor with `ActorAllocSub` (character type 0x46) and no
+   * descriptor, and this is the address of the synthetic row the bundle
+   * carries for it, so the client has geometry to bind -- the bat's wing's
+   * arrangement.
+   */
+  class22?: {
+    variant: number;
+    clip: number;
+    frame: number;
+    despawn_path: number;
+    despawn_frame: number;
+    hp: number;
+    hp_stage: number;
+    phase1_floor: number;
+    companion_at: number | null;
+    sub_actor_at: number;
+  } | null;
+  /**
+   * Class 0x23's tail — JUDGMENT's walker, as `Class23Init` (`FUN_0048FD90`)
+   * and `Class23LieUntilCameraCue` (`FUN_00490C50`) read it: `subtype` is
+   * `tail+0x01` (0 stage 1, 1 stage 5, 2 Training), and the camera cue at
+   * `tail+0x06`/`+0x08` takes the fallen walker off the field. Its `tail+0x00`
+   * and `+0x02` are never read: the `Init` stores the literals 0x44 and 0x38D.
+   */
+  class23?: {
+    subtype: number;
+    despawn_path: number;
+    despawn_frame: number;
+    /**
+     * The nested descriptor's own position and BAMS angles, `desc+0x08`..
+     * `+0x1F`, which `SpawnFromDescriptor` (`FUN_00408A20`) copies onto the
+     * object before `Class23Init` runs. The port's other placements take
+     * their position from the glTF node; this one is spawned by the flier's
+     * class, not by the script, so it carries its own.
+     */
+    pos: [number, number, number];
+    angles: [number, number, number];
   } | null;
   /**
    * Class 0x33 **selector 1's** tail — the object `g_carrier_object` points

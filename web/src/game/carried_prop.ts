@@ -85,6 +85,11 @@ export enum CarriedPropRoutine {
   Init = -1,
   /** `CarriedPropHeldUpdate` (`FUN_00442820`), `g_prop_behaviours[1]`. */
   Held = PropBehaviour.CarriedPropHeld,
+  /**
+   * `CarriedPropHeldInBone8Update` (`FUN_00443200`), `g_prop_behaviours[2]`
+   * -- the stage-4 boss's props, held in its bone 8 and shot-checked there.
+   */
+  HeldInBone8 = PropBehaviour.CarriedPropHeldInBone8,
   /** `CarriedPropThrowAtTarget` (`FUN_004432D0`), `g_prop_behaviours[3]`. */
   ThrowAtTarget = PropBehaviour.CarriedPropThrowAtTarget,
   /** `CarriedPropThrowAtCamera` (`FUN_00443B90`), `g_prop_behaviours[4]`. */
@@ -97,6 +102,12 @@ export enum CarriedPropRoutine {
   FallFree = 17,
   /** `CarriedPropBreakUpdate` (`FUN_00444EE0`). */
   Break = 18,
+  /**
+   * `CarriedPropDeflectedFlight` (`FUN_00444F70`), installed by
+   * `CarriedPropCheckShot`'s type-2 arm: a type-2 prop shot out of the air
+   * is knocked sideways instead of breaking.
+   */
+  Deflected = 19,
 }
 
 /** `sub+0x10 == 10`: still in the hands. Anything else is the release mode. */
@@ -698,9 +709,9 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
       p.ry = a.ry;
       p.rz = a.rz;
     }
-    // `[open]` Type 2 is deflected along the ground instead of breaking
-    // (`0x0044257C`..`0x004426D0`, which installs `0x00444F70`). No state-37
-    // script in the six stages names type 2, so that arm is not ported.
+    // Type 2 -- the stage-4 boss's -- is knocked aside instead of breaking:
+    // `0x0044257C`..`0x004426D0`, which installs `CarriedPropDeflectedFlight`.
+    else CarriedPropDeflect(p, cam);
     //
     // **Both arms then share a tail Ghidra leaves out of the function** (`L37`
     // -- the break arm ends `JMP 0x004426D6`): the permit the prop was thrown
@@ -721,6 +732,131 @@ export function CarriedPropCheckShot(p: CarriedProp, m: Mat,
     p.slot = rec.slots[p.hp] ?? p.slot;
     events?.emit("sound.play", { id: rec.hitSound });
   }
+}
+
+/** `[0x004C4398]` 15.0 and `[0x004C4C78]` -15.0 -- the deflect's aim. */
+const DEFLECT_SIDE = 15.0;
+const DEFLECT_DEPTH = -15.0;
+
+/**
+ * `CarriedPropCheckShot`'s type-2 arm, `0x0044257C`..`0x004426D0`, as a
+ * function. `[port-only]` as a function; the body is the engine's, inline in
+ * its caller.
+ *
+ * The prop is turned, about the world's up, by the angle between its
+ * velocity and a direction off to the side of the camera -- to the right of
+ * the view when the prop is right of centre, to the left otherwise, fifteen
+ * units out and fifteen deep -- and loses its vertical speed and its gravity:
+ *
+ * ```
+ * a = (view.x > 0 ? 15 : -15) - view.x;  b = -15 - view.z
+ * o = g_camera_blocks(rotation) * (a, 0, b)
+ * dot = o.z*v.z + o.x*v.x
+ * ang = s16(atan2(sqrt((ox^2+oz^2)(vx^2+vz^2) - dot^2), dot) * K)
+ * v = RotY(view.x <= 0 ? -ang : ang) * v;  v.y = 0;  gravity = -0.0
+ * routine = CarriedPropDeflectedFlight
+ * ```
+ */
+function CarriedPropDeflect(p: CarriedProp, cam: CameraPair | null): void {
+  const x = p.shotPoint.x;
+  const a = (x > 0 ? DEFLECT_SIDE : DEFLECT_DEPTH) - x;
+  const b = DEFLECT_DEPTH - p.shotPoint.z;
+  const o = vec3();
+  MatrixTransformVector(cam?.v2w ?? MatIdentity(), { x: a, y: 0, z: b }, o);
+  const dot = o.z * p.vel.z + o.x * p.vel.x;
+  const vv = p.vel.z * p.vel.z + p.vel.x * p.vel.x;
+  const oo = o.z * o.z + o.x * o.x;
+  const ang = FtolS16(Math.atan2(Math.sqrt(oo * vv - dot * dot), dot)
+                      * RADIANS_TO_BAMS);
+  const r = MatIdentity();
+  MatrixRotateY(r, Math.trunc(x <= 0 ? -ang : ang));
+  const v = vec3();
+  MatrixTransformPoint(r, { x: p.vel.x, y: p.vel.y, z: p.vel.z }, v);
+  p.vel.x = v.x;
+  p.vel.z = v.z;
+  p.vel.y = 0;
+  // `MOV dword ptr [ESI + 0x5C], 0x80000000` -- negative zero.
+  p.gravity = -0;
+  p.routine = CarriedPropRoutine.Deflected;
+}
+
+/**
+ * `CarriedPropDeflectedFlight` — `FUN_00444F70`. A type-2 prop shot out of
+ * the air: it flies on along the turned velocity with no gravity, spinning,
+ * drawn under `g_camera_world_to_view`, and is despawned the frame
+ * `CarriedPropIsOnScreen` (`FUN_004459C0`) says it has left the screen. No
+ * shot test, no camera tracking, no hit on the player. Returns `false` on
+ * the frame it calls `ActorDespawn`.
+ */
+export function CarriedPropDeflectedFlight(p: CarriedProp,
+                                           cam: CameraPair | null): boolean {
+  p.pos.x += p.vel.x;
+  p.pos.y += p.vel.y;
+  p.pos.z += p.vel.z;
+  p.vel.y += p.gravity;
+  p.ry += p.spin[1];
+  p.rx += p.spin[0];
+  p.rz += p.spin[2];
+  const m = MatCopy(MatIdentity(), cam?.w2v ?? MatIdentity());
+  MatrixTranslate(m, p.pos.x, p.pos.y, p.pos.z);
+  MatrixRotateZ(m, p.rz);
+  MatrixRotateY(m, p.ry);
+  MatrixRotateX(m, p.rx);
+  p.draw = { m: m.slice(0, 16), view: true };
+  MatrixGetTranslation(m, p.shotPoint);
+  // `if (FUN_004459C0(obj) == 0) ActorDespawn(obj)`. With no camera there is
+  // no screen to leave, and the prop is kept rather than despawned blind.
+  if (cam && !CarriedPropIsOnScreen(p)) return false;
+  return true;
+}
+
+/** `Translate(0xBF000000, 0xC0000000, 0)` -- the seat below bone 8. */
+const BONE8_SEAT: Vec3 = { x: -0.5, y: -2.0, z: 0 };
+/** The bone behaviour 2 holds its prop in -- `parent char + 0x520`. */
+const BONE8 = 8;
+
+/**
+ * `CarriedPropHeldInBone8Update` — `FUN_00443200`. `g_prop_behaviours[2]`.
+ *
+ * ```
+ * Push; SetTop(parent char + 0x520)          ; bone 8's view-space record
+ * Translate(-0.5, -2.0, 0); Translate(+0x40); RotX(+0x64); RotZ(+0x6C); RotY(+0x68)
+ * AssetDrawSlot(sub+0x0C)
+ * if (sub+0x10 != 0x0A) CarriedPropRelease(obj)
+ * Push; MatrixGetTranslation -> obj+0x70; RegisterForShotTest(obj); Pop
+ * CarriedPropCheckShot(obj); Pop
+ * ```
+ *
+ * Unlike {@link CarriedPropHeldUpdate} it **checks shots while held**; the
+ * prop arrives shot-immune (`obj+0x34` bit `0x100`, `Boss4SpawnHeldProp`) and
+ * `CarriedPropRelease` clears the bit, so a shot at a held prop is taken and
+ * costs nothing. Its only allocator is `Boss4SpawnHeldProp` (`FUN_00494F70`).
+ */
+export function CarriedPropHeldInBone8Update(p: CarriedProp, host: GameHost,
+                                             cam: CameraPair | null,
+                                             rng: Rng,
+                                             events?: Events): void {
+  const parent = ActorByAt(p.carrier);
+  const bone = parent && cam ? boneViewMatrix(parent, BONE8, host, cam.w2v)
+    : null;
+  const m = MatIdentity();
+  if (bone) {
+    MatCopy(m, bone);
+    MatrixTranslate(m, BONE8_SEAT.x, BONE8_SEAT.y, BONE8_SEAT.z);
+    MatrixTranslate(m, p.pos.x, p.pos.y, p.pos.z);
+    MatrixRotateX(m, p.rx);
+    MatrixRotateZ(m, p.rz);
+    MatrixRotateY(m, p.ry);
+    p.draw = { m, view: true };
+  } else if (p.draw) {
+    // `[port-only]`: no skeleton or no camera -- a headless run -- so the
+    // last matrix stands, as the other held routine keeps it.
+    MatCopy(m, p.draw.m);
+  }
+  if (p.mode !== CARRIED_PROP_HELD) CarriedPropRelease(p, m, host, cam);
+  MatrixGetTranslation(m, p.shotPoint);
+  RegisterForShotTest(p);
+  CarriedPropCheckShot(p, m, cam, rng, events);
 }
 
 /**
@@ -1331,6 +1467,11 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
       case CarriedPropRoutine.Held:
         CarriedPropHeldUpdate(p, host, cam);
         return true;
+      case CarriedPropRoutine.HeldInBone8:
+        CarriedPropHeldInBone8Update(p, host, cam, rng, events);
+        return true;
+      case CarriedPropRoutine.Deflected:
+        return CarriedPropDeflectedFlight(p, cam);
       case CarriedPropRoutine.ThrowAtCamera:
         CarriedPropThrowAtCamera(p, cam, rng, events);
         return true;

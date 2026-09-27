@@ -64,12 +64,15 @@ export type MotionRule =
  * path, and guessing the rarer one wrong would be worse.
  */
 /**
- * Every clip class 0x19's twenty-four states name as a literal, read out of
- * `g_class19_states`' routines: 0x65 and 0x7A/0x7B are the three strikes, 0x69
- * the death, 0x6B the fighting idle, 0x6C..0x6E the walks, 0x6F and 0x73 the
- * two flinches, 0x70 the charge, 0x71 the knock-down, 0x72 the rise, 0x74 and
- * 0x75 the landing pair, 0x76 the look, 0x78 the stand, and 0x7C/0x7D the
- * entrance and the roar.
+ * Every clip class 0x19's twenty-four states play, read out of
+ * `g_class19_states`' routines -- named by the state that plays each, not by
+ * what the clip looks like: 0x65 and 0x7A/0x7B the three strikes, 0x67 and
+ * 0x68 the two throws (from `g_boss4_held_props`, not a literal), 0x69 the
+ * death, 0x6B the state-7 idle, 0x6C/0x6E `Boss4StateChooseAction`'s, 0x6D and
+ * 0x78 the approach's, 0x6F and 0x73 the two flinches, 0x70 the charge, 0x71
+ * the knock-down, 0x72 `Boss4StatePlayArrivalClip`'s, 0x74 and 0x75 the
+ * entrance's, 0x76 `Boss4StateTurnClipThenApproach`'s, and 0x7C/0x7D the
+ * entrance and `Boss4StateHoldThenApproach`'s.
  *
  * They are baked because **an unbaked clip is an actor that waits for ever**:
  * half of this class's states leave on
@@ -79,7 +82,7 @@ export type MotionRule =
  * bundle the gate behind the stage-4 boss cannot open at all.
  */
 export const BOSS4_CLIPS: readonly number[] = [
-  0x65, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72,
+  0x65, 0x67, 0x68, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72,
   0x73, 0x74, 0x75, 0x76, 0x78, 0x7a, 0x7b, 0x7c, 0x7d,
 ];
 
@@ -229,6 +232,12 @@ export const MOTION_RULES: Record<number, MotionRule> = {
   // placement names -- see `game/class46/`.
   0x46: ["literal", 0x407],
   0x14: ["literal", 33],
+  // `Class22Init` (`FUN_0049B0D0`): `MOVSX ECX, word ptr [EBP + 0x2]; MOV
+  // [EDI + 0x20], ECX` at `0x0049B11C` -- the clip is `tail+0x02`, 0x415 for
+  // the stage-1 cameo and 0x40B for both fights.
+  0x22: ["param", 0x02, "i16"],
+  // `Class23Init` (`FUN_0048FD90`) seats the literal 0x38D at `0x0048FDDF`.
+  0x23: ["literal", 0x38d],
   // `RescueTargetInit` (`FUN_00451720`) seats the clip as a literal, the same
   // shape as class 0x19's: `MOV dword ptr [EDI + 0x20], 0x3E6`
   // (`c74720e6030000`) at `0x00451747` with `EDI = obj+0x194`, so

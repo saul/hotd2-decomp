@@ -82,6 +82,16 @@ export interface ScriptJson {
    * exporter for where each field is read from.
    */
   game_over?: GameOverJson;
+  /**
+   * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. See
+   * `ExeTables.boss4Tables` in the exporter for where each is read from.
+   */
+  boss4?: Boss4TablesJson;
+  /**
+   * `g_carrier2_door_yaw` (`0x005926D0`), s16[59]: the swing class 0x13's
+   * carrier routine 2 steps its two doors through.
+   */
+  carrier_door_yaw?: number[];
   rain?: RainJson;
   /** The `coli/` blobs this scene loads — see {@link ColiJson}. */
   coli?: ColiJson;
@@ -100,6 +110,47 @@ export interface StageBundle {
  * texture as a PNG data URL, already the right way up (the game's quad draws
  * texture row 0 at the bottom -- see `docs/formats/texbank.md`).
  */
+/** One `g_boss4_held_props` record (`0x005704F8`, 0x20 bytes). */
+export interface Boss4HeldPropJson {
+  /** `+0x00` f32[3], the draw offset on its bone. */
+  offset: number[];
+  /** `+0x0C` s32 rx, ry, rz -- drawn `RotZ; RotY; RotX`. */
+  rot: number[];
+  /** `+0x18`..`+0x1E` s16: the bone, the throw clip, and its two frames. */
+  bone: number;
+  clip: number;
+  take: number;
+  throw: number;
+}
+
+/** One `g_boss4_camera_cues` record (`0x00570538`, 12 bytes). */
+export interface Boss4CameraCueJson {
+  start: number;
+  end: number;
+  /** f32, frames a game frame. */
+  step: number;
+  /** The `cp_` slot. */
+  path: number;
+}
+
+/** `script.json`'s `boss4` block -- class 0x19's `.rdata`. */
+export interface Boss4TablesJson {
+  /** `g_boss4_phase_hp_fraction`, `0x00570490`, f32[18]. */
+  phase_hp_fraction: number[];
+  /** `g_boss4_head_damage`, `0x005704D7`, s8[33]. */
+  head_damage: number[];
+  /** `g_boss4_held_props`, `0x005704F8`, two records. */
+  held_props: Boss4HeldPropJson[];
+  /** `g_boss4_camera_cues`, `0x00570538`, 22 records. */
+  camera_cues: Boss4CameraCueJson[];
+  /** `g_boss4_phase_arenas`, `0x00570640`: `[phase][6] = [x, z]`. */
+  phase_arenas: number[][][];
+  /** `g_boss4_head_slot_by_bar`, `0x005709A0`, s16[9]. */
+  head_slot_by_bar: number[];
+  /** `g_boss4_approach_picks`, `0x005709B4`: `[rank][9]`. */
+  approach_picks: number[][];
+}
+
 /** `script.json`'s `game_over` block. */
 export interface GameOverJson {
   /** `0x00579F50`: each player's body character type. */

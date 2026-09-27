@@ -150,8 +150,10 @@ export async function loadAsset(source: AssetSource, tables: ExeTables | null,
 }
 
 /**
- * The `cam/` files belonging to a stage: `cp_stN` then `op_stN`, and for a
- * stage `cp_gmovr` after them.
+ * The `cam/` files belonging to a stage: the scene's own list, as the engine
+ * loads it (`ExeTables.sceneCamFiles`), and for a stage `cp_gmovr` after
+ * them. `stems` is that list; without one -- a caller with no tables -- a
+ * stage falls back to `cp_stN` then `op_stN`.
  *
  * `cp_gmovr.bin` is the game-over screen's: `GameOverRunPhase`
  * (`FUN_00460960`) loads it (`AssetQueueLoadCamFile(5)`) and
@@ -165,10 +167,13 @@ export async function loadAsset(source: AssetSource, tables: ExeTables | null,
 export const GAME_OVER_CAM_FILE = "cp_gmovr";
 
 export async function loadCamPaths(source: AssetSource, stage: number | null,
-                                   name: string | null):
+                                   name: string | null,
+                                   sceneStems: readonly string[] | null = null):
     Promise<camlib.CamFile[]> {
   let stems: string[] = [];
-  if (stage !== null) {
+  if (stage !== null && sceneStems) {
+    stems = [...sceneStems, GAME_OVER_CAM_FILE];
+  } else if (stage !== null) {
     stems = [`cp_st${stage}`, `op_st${stage}`, GAME_OVER_CAM_FILE];
   } else if (name) {
     const m = /^st(\d+)_/.exec(name);           // st2_07 -> stage 2
@@ -476,10 +481,15 @@ export class Stage {
 
   // -- cameras -----------------------------------------------------------
 
-  /** `[cp_st<N>, op_st<N>]`, parsed. */
+  /**
+   * The scene's cam files, parsed: the list `FUN_004040A0` loads for this
+   * scene (with `op_org` in Original Mode), then `cp_gmovr`.
+   */
   camFiles(): Promise<camlib.CamFile[]> {
     if (this.camFilesP === null) {
-      this.camFilesP = loadCamPaths(this.source, this.stage, null);
+      this.camFilesP = loadCamPaths(
+        this.source, this.stage, null,
+        this.tables.sceneCamFiles(this.scene, this.original));
     }
     return this.camFilesP;
   }

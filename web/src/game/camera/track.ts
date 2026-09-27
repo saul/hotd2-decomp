@@ -117,7 +117,7 @@ export function SkeletonRecordCameraPoint(obj: Actor, host: GameHost): boolean {
  * | 0x0042CF93 | `Class2DChildKind2Update` | `6a00` | 0.0 | bit `0x100` clear |
  * | 0x0049C8CE | `Class22FightPhase2`, class 0x22 | `6800000040` | 2.0 | bit `0x100` clear |
  * | 0x0047CA3A | `Class32Update`, class 0x32 | `6a00` | 0.0 | none |
- * | 0x00490917, 0x004912EA | `Class23StateShared1`, `Class23Subtype2State1`, class 0x23 | `680000c040` | 6.0 | none |
+ * | 0x00490917, 0x004912EA | `Class23FightBesideCompanion`, `Class23TrainingFightAlone`, class 0x23 | `680000c040` | 6.0 | none |
  *
  * **Each class's update makes the call itself, at its row above**, as the
  * engine's do: classes 0x30, 0x31, 0x10 and 0x11 in their updates here, and

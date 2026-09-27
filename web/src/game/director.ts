@@ -13,7 +13,8 @@ import type { Actor } from "./actor";
 import { ActorSpawn } from "./spawn";
 export { ActorInitFlags, ActorSpawn } from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
-import { UpdateCameraEnemySlots } from "./camera/slots";
+import { RegisterForCameraTracking, UpdateCameraEnemySlots }
+  from "./camera/slots";
 import { CameraActorTick, CameraUpdateTick } from "./camera/actor";
 import { ActorRegisterCameraPoint, SkeletonRecordCameraPoint }
   from "./camera/track";
@@ -35,6 +36,7 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
+import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -655,7 +657,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {
-      ActorAdvanceMotion(obj, dt);
+      // ...unless the class steps `obj+0x194` itself, where the engine does:
+      // see `ClassHandler.advancesOwnMotion`.
+      if (!g_class_handlers[obj.cls]?.advancesOwnMotion) {
+        ActorAdvanceMotion(obj, dt);
+      }
       // `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), which the engine asks
       // per node inside `SkeletonEmitNode`. Its input is `bone_records[9].slot`
       // -- what bone 9 is *currently* drawing -- so it cannot be baked into
@@ -710,14 +716,26 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // object collision passes skip it. See `Globals.g_cur_actor`.
     G.g_cur_actor = obj.at;
     handler?.update(obj, f);
-    // **The boss classes' camera point, until their updates make the call.**
-    // `Class14Update` (`0x0047621E`, rise `state+0x0C`) and `Boss4Update`
-    // (`0x00491A49`, rise `state+0x70`) call `ActorRegisterCameraPoint`
-    // themselves; their ports do not yet, and a class says so by exposing
-    // `cameraRise`. Classes 0x30, 0x31, 0x10 and 0x11 make the call in their
-    // own updates and set no `cameraRise`. `[port-only]` bridge.
+    // **The boss classes' camera candidacy, until their updates make it.**
+    // `[port-only]` bridge, for the classes whose ports still answer with a
+    // handler hook rather than the call:
+    //
+    // * `cameraRise` -- `Class14Update` (`0x0047621E`, rise `state+0x0C`)
+    //   calls `ActorRegisterCameraPoint` itself; its port does not yet.
+    // * `tracksCamera` -- the old predicate over the pool. Classes 0x22 and
+    //   0x23 answer `RegisterEnemySlot` with a latch it reads; a class that
+    //   says it tracks and filed nothing this frame is filed here, through
+    //   `RegisterForCameraTracking` and its `NoCameraTrack` test.
+    //
+    // Every other class makes its calls from its own update, where the
+    // engine's routine does, and sets neither. See `camera/track.ts`.
     if (handler?.cameraRise) {
       ActorRegisterCameraPoint(obj, host, handler.cameraRise(obj));
+    }
+    if (handler?.tracksCamera?.(obj)
+        && !G.g_camera_candidates.some((c) => c.prop === null
+                                           && c.at === obj.at)) {
+      RegisterForCameraTracking(obj);
     }
     G.g_cur_actor = -1;
   }
@@ -741,6 +759,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // draws is built from it.
   BossBannersTick(host);
   BossHpBarsTick();
+  // ...and the marks the stage-4 boss's flesh hits leave, which
+  // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
+  // after the bar, so after it in the walk.
+  Boss4HitMarksTick(host);
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the
   // layered queue after the task walk, so its sprites land after every one
   // the frame drew directly.

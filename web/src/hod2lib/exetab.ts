@@ -773,6 +773,28 @@ export class ExeTables {
     });
   }
 
+  /**
+   * One pol file's slot list, `POL_SLOT_LIST[file]` (`0x004E794C`): entry k
+   * of the file loads into slot `list[k]`. It is the list the whole-file
+   * load walks -- `FUN_00418E40` points `0x007C2134` at it (`0x00418E84`)
+   * and `FUN_00418EC0` takes one slot off it per model, installing the model
+   * only into a slot that is not already resident. Null for a file the table
+   * does not know.
+   */
+  polFileSlots(file: string): number[] | null {
+    for (const [fi, [name, cnt]] of this.polFiles()) {
+      if (name !== file) continue;
+      const lst = this.ru32(ExeTables.POL_SLOT_LIST + fi * 4);
+      if (!lst) return null;
+      const r = this.v2r(lst);
+      if (r === null) return null;
+      const out: number[] = [];
+      for (let k = 0; k < cnt; k++) out.push(i16(this.data, r + k * 2));
+      return out;
+    }
+    return null;
+  }
+
   slotPolFile(slot: number): string | null {
     const fi = this.ru16(ExeTables.SLOT_TO_POL + slot * 2);
     if (fi === null) return null;
@@ -810,6 +832,44 @@ export class ExeTables {
       }
       return out;
     });
+  }
+
+  /**
+   * `PTR_DAT_004c4990` — one pointer per scene, to an `s16` list of cam file
+   * indices ending in -1. `FUN_004040A0` walks the entry for
+   * `g_scene_index` and queues each file (`AssetQueueLoadCamFile`), and in
+   * Original Mode (`g_GameMode == 1`) queues file `0x16`, `op_org.bin`, after
+   * every one of them. Read from the image: scene 4 (stage 5) is
+   * `{10, 20, 16}` -- `cp_st5`, `op_st5` **and `op_st1`**, whose paths stage
+   * 5's JUDGMENT flies -- and scene 6 (Training) takes `cp_st2` as well.
+   */
+  static readonly SCENE_CAM_FILES = 0x004c4990;
+  static readonly ORIGINAL_CAM_FILE = 0x16;
+
+  /**
+   * The cam files `FUN_004040A0` loads for a scene, as stems, in its order and
+   * without repeats -- the Original Mode file appears once, after the first.
+   */
+  sceneCamFiles(scene: number, original: boolean): string[] {
+    const out: string[] = [];
+    if (scene < 0 || scene >= ExeTables.SCENE_COUNT) return out;
+    const ptr = this.ru32(ExeTables.SCENE_CAM_FILES + scene * 4);
+    const r = ptr ? this.v2r(ptr) : null;
+    if (r === null) return out;
+    const files = this.camFiles();
+    const add = (fi: number): void => {
+      const rec = files.get(fi);
+      if (!rec) return;
+      const stem = rec[0].endsWith(".bin") ? rec[0].slice(0, -4) : rec[0];
+      if (!out.includes(stem)) out.push(stem);
+    };
+    for (let k = 0; k < ExeTables.MAX_CAM_FILES; k++) {
+      const fi = i16(this.data, r + k * 2);
+      if (fi === -1) break;
+      add(fi);
+      if (original) add(ExeTables.ORIGINAL_CAM_FILE);
+    }
+    return out;
   }
 
   /** global path slot id -> `[cam filename, path index within that file]`. */
@@ -1351,6 +1411,87 @@ export class ExeTables {
       route_waypoints: waypoints,
       default_route: route,
     };
+  }
+
+  /**
+   * Class 0x19's `.rdata` -- the stage-4 boss's tables, for `script.json`'s
+   * `boss4` block. Every one is `[proved]` from the routine named beside it;
+   * see `docs/re/boss-strength.md` for the readings.
+   *
+   * * `phase_hp_fraction` -- `g_boss4_phase_hp_fraction`, `0x00570490`,
+   *   f32[18]: the floor of each phase as a fraction of `obj+0x11E`
+   *   (`Boss4StateEntranceCarried`, `Boss4ArmPhaseWhenInsideArena`,
+   *   `Boss4AdvancePhaseAtFloor`).
+   * * `head_damage` -- `g_boss4_head_damage`, `0x005704D7`, s8[33], indexed
+   *   `g_players_in_play + rank * 2` (`Boss4ResolveShot`).
+   * * `held_props` -- `g_boss4_held_props`, `0x005704F8`, two 0x20-byte
+   *   records `{f32 offset[3]; s32 rx, ry, rz; s16 bone, clip, take, throw}`
+   *   (`Boss4AdvanceMotionAndDrawHeldProps`, `Boss4StateThrowHeldProp`).
+   * * `camera_cues` -- `g_boss4_camera_cues`, `0x00570538`, 22 x 12 bytes
+   *   `{s16 start, s16 end, f32 step, s16 path, s16 pad}`
+   *   (`Boss4PlayCameraCue`).
+   * * `phase_arenas` -- `g_boss4_phase_arenas`, `0x00570640`, 18 x 6 x
+   *   `{f32 x, f32 z}` (`Boss4LoadPhaseArena`).
+   * * `head_slot_by_bar` -- `g_boss4_head_slot_by_bar`, `0x005709A0`, s16[9]
+   *   (`Boss4ResolveShot`'s head swap).
+   * * `approach_picks` -- `g_boss4_approach_picks`, `0x005709B4`, s8[16][9]
+   *   (`Boss4PickApproachAttack`).
+   */
+  boss4Tables(): Record<string, unknown> {
+    const s8 = (va: number): number => {
+      const r = this.v2r(va);
+      if (r === null) return 0;
+      const v = this.data[r];
+      return v >= 0x80 ? v - 0x100 : v;
+    };
+    const s16 = (va: number): number => {
+      const v = this.ru16(va) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    };
+    const f = (va: number): number => this.rf32(va) ?? 0;
+    const heldProp = (i: number): Record<string, unknown> => {
+      const b = 0x005704f8 + i * 0x20;
+      return {
+        offset: [f(b), f(b + 4), f(b + 8)],
+        rot: [this.ri32(b + 0x0c) ?? 0, this.ri32(b + 0x10) ?? 0,
+              this.ri32(b + 0x14) ?? 0],
+        bone: s16(b + 0x18), clip: s16(b + 0x1a),
+        take: s16(b + 0x1c), throw: s16(b + 0x1e),
+      };
+    };
+    return {
+      phase_hp_fraction: Array.from({ length: 18 },
+                                    (_u, i) => f(0x00570490 + i * 4)),
+      head_damage: Array.from({ length: 33 }, (_u, i) => s8(0x005704d7 + i)),
+      held_props: [heldProp(0), heldProp(1)],
+      camera_cues: Array.from({ length: 22 }, (_u, i) => {
+        const b = 0x00570538 + i * 12;
+        return { start: s16(b), end: s16(b + 2), step: f(b + 4),
+                 path: s16(b + 8) };
+      }),
+      phase_arenas: Array.from({ length: 18 }, (_p, ph) =>
+        Array.from({ length: 6 }, (_q, k) => {
+          const b = 0x00570640 + (ph * 6 + k) * 8;
+          return [f(b), f(b + 4)];
+        })),
+      head_slot_by_bar: Array.from({ length: 9 },
+                                   (_u, i) => s16(0x005709a0 + i * 2)),
+      approach_picks: Array.from({ length: 16 }, (_r, rank) =>
+        Array.from({ length: 9 }, (_u, i) => s8(0x005709b4 + rank * 9 + i))),
+    };
+  }
+
+  /**
+   * `g_carrier2_door_yaw` -- `0x005926D0`, s16[59]: the angle
+   * `CarrierPropRoutine2` (`FUN_004408A0`) swings its two doors through, one
+   * entry a frame, `door0 = 0xC000 + t[i]`, `door1 = 0xC000 - t[i]`. Entry 58
+   * (`0x00592744`) is also what selector 9 seats them at, already open.
+   */
+  carrierDoorYaw(): number[] {
+    return Array.from({ length: 59 }, (_u, i) => {
+      const v = this.ru16(0x005926d0 + i * 2) ?? 0;
+      return v >= 0x8000 ? v - 0x10000 : v;
+    });
   }
 
   soundName(soundId: number): string | null {

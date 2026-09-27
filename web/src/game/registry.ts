@@ -133,6 +133,22 @@ export interface ClassHandler {
    */
   updatesWhenDead?: boolean;
   /**
+   * This class steps its own clip counter, so the director must not.
+   *
+   * `obj+0x194` is `model[0]`, the counter `SkeletonAdvancePlayCursor`
+   * (`FUN_004111A0`) derives the play cursor from, and **nothing in the
+   * sampler advances it**: the owning class does, and holds a clip by not
+   * doing so. Most classes step it once a frame, after their draw, on every
+   * path, which is what the director's `ActorAdvanceMotion` call before the
+   * update stands in for. Classes 0x22 and 0x23 do not: their states return
+   * undrawn on some frames, and `Class22Death` (`FUN_0049C910`) counts the
+   * counter itself — held at `0x84` while the body falls, stepped twice a
+   * frame on landing, tested against `0x1C`, `0x92` and the play length. A
+   * class that says so here calls `ActorAdvanceMotion` itself, at each of
+   * the engine's increments.
+   */
+  advancesOwnMotion?: boolean;
+  /**
    * Can this actor be hurt at all, right now?
    *
    * Class 0x10's answer is `sub.onShotScript < 0` — a civilian with no on-shot
@@ -240,31 +256,26 @@ export interface ClassHandler {
    */
   debug?(obj: Actor): ActorDebug;
   /**
-   * Did this actor's own update call `RegisterForCameraTracking`
-   * (`FUN_00408EC0`) this frame?
-   *
-   * The engine's registration is a **call**, made or not made by each class's
-   * routine; the port's is a predicate over the pool, and for most classes
-   * "an enemy, visible, without bit `0x10000`" is the same answer. A class
-   * whose routine calls it only under a condition of its own says so here.
-   * Class 0x40's member calls it unless its formation is waiting for a script
-   * flag, and its corpse only while it is the horde's last. Absent means the
-   * predicate's answer stands.
-   *
-   * **For a class that is not an enemy this is the only way in**: the
-   * predicate's enemy test stands in for the call site, so a non-enemy whose
-   * routine does make the call has to say so. Class 0x10 is one —
-   * `CivilianUpdate` (`FUN_0048A920`) calls `ActorRegisterCameraPoint` at
-   * `0x0048ADB0` every frame — and its `obj+0x34` bit `0x10000`, written from
-   * the wait word, is then what decides. See `camera/slots.ts`.
+   * `[port-only]` -- **a transitional hook for the boss classes**, and every
+   * other class leaves it unset. The engine has no predicate: a class is a
+   * camera candidate on the frames its update calls `RegisterForCameraTracking`
+   * (`FUN_00408EC0`) -- almost always as the tail of `ActorRegisterCameraPoint`
+   * (`FUN_00409B70`) -- or holds a slot on the frames it calls
+   * `RegisterEnemySlot` (`FUN_00408E80`), and the classes ported to that shape
+   * make those calls from their own updates (`camera/track.ts` lists the
+   * sites). A class whose port still answers with this predicate is filed by
+   * `SceneTaskWalk` after its update when it answers true and filed nothing
+   * itself; see `director.ts`. Classes 0x22 and 0x23 read their
+   * `RegisterEnemySlot` latch here.
    */
   tracksCamera?(obj: Actor): boolean;
   /**
-   * The float this class's `Update` pushes to `ActorRegisterCameraPoint`
-   * (`FUN_00409B70`), when it is a **field** rather than a literal. Class 0x14
-   * pushes `state+0x0C` (`Class14Update`, `0x0047621E`) and class 0x19
-   * `state+0x70` (`Boss4Update`, `0x00491A49`). Absent means the class's
-   * literal from `CameraPointRiseFor` in `camera/track.ts`.
+   * `[port-only]` -- **a transitional hook for class 0x14**: the float its
+   * `Update` would push to `ActorRegisterCameraPoint` (`FUN_00409B70`),
+   * `state+0x0C` (`Class14Update`, `0x0047621E`). `SceneTaskWalk` makes the
+   * call for it after the update while this is set. A class that makes the
+   * call itself -- every other class that has one -- must not set it, or it
+   * is filed twice.
    */
   cameraRise?(obj: Actor): number;
   /**

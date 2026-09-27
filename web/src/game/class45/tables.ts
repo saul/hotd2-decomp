@@ -163,7 +163,10 @@ export const BOSS3_CARD_PIECE_SLOTS: readonly number[] = [
 /**
  * The two screen sprites `Boss3IntroCardUpdate` (`FUN_00424900`) fades in,
  * `SpriteDrawCheckedBank` ids `0xBC` and `0xCA`, at `(344, 96)` and
- * `(492, 96)` -- `scr_bosmater_st3` entries 0 and 1, 256x64 each.
+ * `(492, 96)` -- `scr_bosmater_st3` entries 0 and 1, 256x64 each. Exported
+ * and looked at: `0xBC` is the gold-on-black **"TOWER"** plate and `0xCA`
+ * the **"Type 8000"** line beside it -- the boss's name and number, as the
+ * shared banner shows the other bosses' ("JUDGMENT / Type 28").
  */
 export const BOSS3_CARD_SPRITES: readonly number[] = [0xbc, 0xca];
 

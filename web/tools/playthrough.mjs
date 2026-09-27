@@ -796,6 +796,12 @@ try {
                   + `(${(frames / 60).toFixed(1)}s of game time, ${t}s of `
                   + `wall clock), ${steps} instructions, START pressed `
                   + `${continues} time(s)`);
+      if (unclearable.length) {
+        console.log(`\n${unclearable.length} gate(s) went ${SHOOT_FOR} frames `
+                    + `with no damage landing (a boss that dives between `
+                    + `surfacings can do that honestly; --shoot-for widens it):`);
+        for (const g of unclearable) console.log(`  block ${g}`);
+      }
       exit = state.faults || unclearable.length ? 1 : 0;
       break;
     }

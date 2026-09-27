@@ -168,7 +168,7 @@ function Events(blk: Boss3Block): readonly Boss3BodyEvent[] {
     ? BOSS3_BODY_EVENTS_A : BOSS3_BODY_EVENTS_B;
 }
 
-/** `[0x004C4E48]` -- the body's `obj+0x124`, 95.0. */
+/** `[0x004C4E48]` -- `g_actor_radius_by_char[0x48]`, the body's `obj+0x124`. */
 const BODY_SHOT_RADIUS = 95;
 
 /**
@@ -186,8 +186,9 @@ export function Boss3BodyInit(obj: Boss3Actor): void {
   Boss3SetMotion(obj, CLIP_SWIM);
   ActorBuildSkinnedModel(obj);
   obj.pos.y = Math.fround(obj.pos.y + 3);
-  // `MOV EDX, [0x004C4E48]` at `0x004203BA`: a literal 95.0, not
-  // `g_actor_radius_by_char` -- the broad-phase sphere spans the whole body.
+  // `MOV EDX, [0x004C4E48]` at `0x004203BA`: `g_actor_radius_by_char[0x48]`
+  // (`0x004C4D28 + 0x48*4`) read at its own address, 95.0 -- the broad-phase
+  // sphere the whole body sits in.
   obj.hitRadius = BODY_SHOT_RADIUS;
   obj.radius = BODY_SHOT_RADIUS;
   t.poseHook = Boss3PoseHook.None;

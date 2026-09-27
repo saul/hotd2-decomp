@@ -655,8 +655,8 @@ web/src/
     bams.ts       BAMS_TO_RAD and the angle helpers. One definition.
   game/         the port. The only rules that matter live here.
     class10/ class11/ class14/ class19/ class20/ class21/ class24/ class25/
-    class30/ class31/ class33/ class40/ class41/ class43/ class44/ class46/
-    class51/ class52/ class53/ class60/ class61/
+    class30/ class31/ class33/ class40/ class41/ class43/ class44/ class45/
+    class46/ class51/ class52/ class53/ class60/ class61/
                   one module per class. Each calls `registerClass` itself.
                   The ones that write the actor struct's tail words directly
                   also have a `state.ts`: the discriminated union's arm for
@@ -712,6 +712,10 @@ web/src/
                   several poses (types 38, 39, 40, 44) as lists of parts;
                   breakables.ts clones and poses them
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
+    characters/boss3.ts, boss3_effects.ts  class 0x45 composes its own bone
+                  matrices in `game/class45/`; these place them, and draw
+                  what its routines drew beside them (card, flash, wake,
+                  sparks, splashes, path effects, shadow) from its records
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand

@@ -53,11 +53,14 @@ const CARD_BOSS_GROW = Math.fround(0.001);
 /** `[0x0055CB90]` 0.004 and `[0x0055CB88]` 0.002, both doubles. */
 const CARD_BOSS_SLIDE_X = 0.004;
 const CARD_BOSS_SLIDE_Y = 0.002;
-/** The two sprites, and `[0x0055CB80]` -- a sixtieth -- for their fade. */
-const CARD_SPRITE_A = 0xbc;
-const CARD_SPRITE_B = 0xca;
-const CARD_SPRITE_AX = 344;
-const CARD_SPRITE_BX = 492;
+/**
+ * The two sprites -- the "TOWER" plate and the "Type 8000" line -- and
+ * `[0x0055CB80]`, a sixtieth, for their fade.
+ */
+const CARD_SPRITE_NAME = 0xbc;
+const CARD_SPRITE_TYPE = 0xca;
+const CARD_SPRITE_NAME_X = 344;
+const CARD_SPRITE_TYPE_X = 492;
 const CARD_SPRITE_Y = 96;
 const CARD_FADE = Math.fround(1 / 60);
 
@@ -132,9 +135,9 @@ export function Boss3IntroCardUpdate(c: Boss3IntroCard): boolean {
     // `SpriteDrawCheckedBank` (`FUN_0041C630`) records with the anchor at the
     // top left, scale 1 -- `ScreenSpriteDraw`'s shape with flags 0.
     G.g_screen_sprite_draws.push(
-      { id: CARD_SPRITE_A, x: CARD_SPRITE_AX, y: CARD_SPRITE_Y, depth: 1,
+      { id: CARD_SPRITE_NAME, x: CARD_SPRITE_NAME_X, y: CARD_SPRITE_Y, depth: 1,
         sx: 1, sy: 1, alpha: a, flags: 0 },
-      { id: CARD_SPRITE_B, x: CARD_SPRITE_BX, y: CARD_SPRITE_Y, depth: 1,
+      { id: CARD_SPRITE_TYPE, x: CARD_SPRITE_TYPE_X, y: CARD_SPRITE_Y, depth: 1,
         sx: 1, sy: 1, alpha: a, flags: 0 });
   }
   c.frame += 1;

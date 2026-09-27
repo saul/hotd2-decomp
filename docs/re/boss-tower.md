@@ -1146,7 +1146,8 @@ per bone `[proved]`:
   this routine runs every frame from the update, but it is a gameplay clock in
   a draw routine (L7).
 * body state 11 at the weak bone: the same flash, `+0x7640++` uncapped.
-* variant 0, body states 10..13, `i < weak`, cursor in `0x5F..0x519` or
+* variant 0, body states 10..13, `i < weak`, **path** cursor (`+0x762C`, not
+  the play cursor) in `(0x5E, 0x519]` or
   `>= 0x57A`, and not (clip 0x3D before cursor 0x37) nor (clips 0x3B/0x3C and
   `i > 0xF`): two `car_pl.bin` wake cels `0x8CE + g_frame_counter % 24` at
   `(4, −1.5, ∓3.2)`.

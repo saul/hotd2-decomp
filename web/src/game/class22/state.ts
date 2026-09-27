@@ -182,14 +182,6 @@ export interface JudgmentTail {
   cursor: number;
   done: number;
   /**
-   * `[port-only]` — did this actor's last update call `RegisterForShotTest`
-   * (`FUN_00405160`)? The engine's shot test walks only the objects
-   * registered on the frame before, and this class registers on some frames
-   * and not others; the port's pick has no such list, so the class drops any
-   * shot that lands on an actor that was not listed. See `Class22ShotList`.
-   */
-  shotListed: boolean;
-  /**
    * `[port-only]` — did this frame's update call `ActorRegisterCameraPoint`
    * (`FUN_00409B70`)? The call is the camera candidacy, and the port's is a
    * predicate over the pool read after the update; `tracksCamera` reads this.
@@ -216,7 +208,7 @@ export function makeJudgmentTail(): JudgmentTail {
     strikesLanded: 0, taunt: 0, companionDist: 0, companionAt: -1,
     subActorAt: -1, point: vec3(), savedTarget: vec3(),
     subClipWanted: 0, subClipShown: 0, cursor: 0, done: 0,
-    shotListed: false, cameraListed: false, enemySlot: false,
+    cameraListed: false, enemySlot: false,
   };
 }
 

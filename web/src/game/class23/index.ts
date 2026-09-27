@@ -23,10 +23,9 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { Class22DropUnlistedShot, JudgmentRegisterEnemySlot }
-  from "../class22/shot";
+import { JudgmentRegisterEnemySlot } from "../class22/shot";
 import {
-  CLASS23_CAMERA_RISE, Class23Collapse, Class23FightBesideCompanion,
+  Class23Collapse, Class23FightBesideCompanion,
   Class23LieUntilCameraCue,
 } from "./fight";
 import { Class23Subtype0Entrance, Class23Subtype1Entrance } from "./entrance";
@@ -91,14 +90,14 @@ export function Class23Init(obj: Actor, rng?: Rng, events?: Events): void {
 /**
  * `Class23UpdateSubtype0` / `1` / `2` — `CALL [obj+0x1310 * 4 + table]`.
  * `[port-only]` as one function over the three tables, with the frame's two
- * port-only openings (the shot list and the drawn alpha, as class 0x22's).
+ * port-only openings (the camera latches and the drawn alpha, as class
+ * 0x22's).
  */
 export function Class23Update(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.JudgmentCompanion) return;
   const t = obj.companion;
   t.cameraListed = false;
   t.enemySlot = false;
-  Class22DropUnlistedShot(obj, t);
   obj.alpha = 0;
   switch (obj.state) {
     case Class23State.Entrance:
@@ -188,7 +187,10 @@ export const Class23Handler: ClassHandler = {
   // `RegisterEnemySlot` in the `Init`.
   tracksCamera: (obj) => obj.cls === SpawnClass.JudgmentCompanion
     && (obj.companion.cameraListed || obj.companion.enemySlot),
-  cameraRise: () => CLASS23_CAMERA_RISE,
+  // State 1's `RegisterForShotTest` (`0x004901E9`) and
+  // `ActorRegisterCameraPoint(6.0)` (`0x00490917`), and the collapse's
+  // `RegisterForShotTest` (`0x00490C3B`), made from `fight.ts` at those sites.
+  registersForShotTest: true,
   debug: Class23Debug,
 };
 

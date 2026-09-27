@@ -56,7 +56,6 @@ import {
   CLASS22_CHAR_TYPE, CLASS22_SUBACTOR_CHAR_TYPE, CLASS22_SUBACTOR_CLIP,
   Class22SubActorAt,
 } from "./records";
-import { Class22DropUnlistedShot } from "./shot";
 import {
   CLASS22_STATE_BASE, CLASS22_STATE_TABLE, Class22State, Class22Variant,
   type Class22Descriptor,
@@ -222,8 +221,9 @@ export function Class22RunFromDescent(obj: JudgmentActor, f: ClassFrame): void {
  * The installed update, one frame. `[port-only]` as a wrapper: the engine's
  * handler slot holds the variant's routine itself; the port's table holds
  * one function per class, so this picks the routine the `Init` installed and
- * opens the frame the two port-only ways the class needs -- the shot list
- * and the "drawn this frame" alpha (see `draw.ts`).
+ * opens the frame the two port-only ways the class needs -- the camera
+ * candidacy latches (see `JudgmentTail.cameraListed`) and the "drawn this
+ * frame" alpha (see `draw.ts`).
  */
 export function Class22Update(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.Judgment) return;
@@ -232,7 +232,6 @@ export function Class22Update(obj: Actor, f: ClassFrame): void {
   if (t.isSubActor) return;
   t.cameraListed = false;
   t.enemySlot = false;
-  Class22DropUnlistedShot(obj, t);
   obj.alpha = 0;
   const sub = ActorByAt(t.subActorAt);
   if (sub && sub !== obj) sub.alpha = 0;
@@ -306,8 +305,11 @@ export const Class22Handler: ClassHandler = {
   tracksCamera: (obj) => obj.cls === SpawnClass.Judgment
     && !obj.judgment.isSubActor
     && (obj.judgment.cameraListed || obj.judgment.enemySlot),
-  // `PUSH 0x40000000` at `0x0049C8CE`.
-  cameraRise: () => 2.0,
+  // Phase 1's `RegisterForShotTest` (`0x0049C145`) and phase 2's
+  // `ActorRegisterCameraPoint` (`0x0049C8CE`), made from `fight.ts` at those
+  // sites. The sub-actor never registers: it is never updated, and its
+  // `0x8000` would refuse it anyway.
+  registersForShotTest: true,
   debug: Class22Debug,
 };
 

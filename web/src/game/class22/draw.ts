@@ -14,7 +14,9 @@ import type { Actor, JudgmentActor } from "../actor";
 import { ActorSetMotion } from "../class30/motion_cue";
 import { ActorByAt, G } from "../globals";
 import { ActorAdvanceMotion } from "../motion";
+import type { GameHost } from "../host";
 import type { ClassFrame } from "../registry";
+import type { Vec3 } from "../vec";
 import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import {
   CLASS22_NODE2_CYCLE_A, CLASS22_NODE2_CYCLE_B, CLASS22_NODE2_SLOT_BASE,
@@ -53,6 +55,35 @@ export function Class22SampleCursor(obj: Actor,
 }
 
 /**
+ * `SkeletonEmitNode`'s (`FUN_004114C0`) tracked bone. **Bone 1**: the routine
+ * picks 1 for any character type outside `0..0x14` (`sVar3 = 1`), and the
+ * flier is 0x45, its walker 0x44.
+ */
+const JUDGMENT_TRACKED_BONE = 1;
+const _tracked: Vec3 = { x: 0, y: 0, z: 0 };
+
+/**
+ * `[port-only]` — the one write `SkeletonEmitNode` (`FUN_004114C0`) leaves on
+ * the actor as the draw walks the skeleton: when it emits the tracked node,
+ * that node's world translation goes to `obj+0x100..0x108` (through
+ * `g_camera_blocks[g_camera_index]`, `0x0041162B`..`0x00411660`).
+ *
+ * Both classes read the point straight back: class 0x22's phase 1 and class
+ * 0x23's collapse carry `obj+0x100` into `obj+0x70` for `RegisterForShotTest`
+ * on the lines after their draw, and `ActorRegisterCameraPoint` lifts it. The
+ * pose is the renderer's, so the point is the bone as it was last drawn --
+ * the same reading `ActorRegisterCameraPoint` itself takes (`camera/track.ts`).
+ * With no pose the field keeps what it had, as the engine's does on a frame
+ * the tracked node is not emitted.
+ */
+export function JudgmentEmitTrackedBone(obj: Actor, host: GameHost): void {
+  if (!host.boneWorld(obj.at, JUDGMENT_TRACKED_BONE, _tracked)) return;
+  obj.lookAt.x = _tracked.x;
+  obj.lookAt.y = _tracked.y;
+  obj.lookAt.z = _tracked.z;
+}
+
+/**
  * `Class22DrawAndPoseSubActor` — `FUN_0049D770`. The flier's draw, and its
  * sub-actor's. **Not an advance**: every caller steps `obj+0x194` itself,
  * after this returns.
@@ -82,10 +113,10 @@ export function Class22SampleCursor(obj: Actor,
  */
 export function Class22DrawAndPoseSubActor(obj: JudgmentActor,
                                            f: ClassFrame): void {
-  void f;
   const t = obj.judgment;
   obj.alpha = 1;
   Class22SampleCursor(obj, t);
+  JudgmentEmitTrackedBone(obj, f.host);
   Class22DrawBonePart(obj, t, f.host);
 
   const sub = ActorByAt(t.subActorAt);

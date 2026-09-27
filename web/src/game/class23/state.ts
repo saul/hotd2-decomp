@@ -80,8 +80,6 @@ export interface JudgmentCompanionTail {
   /** `obj+0x19C` and `char+0x5D` as the last draw left them. See `JudgmentTail.cursor`. */
   cursor: number;
   done: number;
-  /** `[port-only]` — see `JudgmentTail.shotListed`. */
-  shotListed: boolean;
   /** `[port-only]` — see `JudgmentTail.cameraListed`. */
   cameraListed: boolean;
   /** `[port-only]` — see `JudgmentTail.enemySlot`. */
@@ -100,6 +98,6 @@ export function makeJudgmentCompanionTail(): JudgmentCompanionTail {
   return {
     subtype: 0, strike: 0, hpStage: 0, counter: 0, savedSub: 0,
     companionAt: -1, point: vec3(), cursor: 0, done: 0,
-    shotListed: false, cameraListed: false, enemySlot: false, ring: null,
+    cameraListed: false, enemySlot: false, ring: null,
   };
 }

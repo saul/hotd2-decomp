@@ -19413,6 +19413,24 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
   tick(2);
   check("phase 1's tail writes g_boss_hp_fraction every frame: 300/300",
         G.g_boss_hp_fraction === 1, `${G.g_boss_hp_fraction}`);
+  // The shot test the engine's way: each class puts itself on the list at
+  // its own sites (docs/formats/combat.md, "The shot test").
+  G.g_shot_test_list = [];
+  tick(1);
+  const listed = (at: number): boolean =>
+    G.g_shot_test_list.some((e) => e.at === at);
+  check("phase 1 registers the flier for the shot test, and not as a camera "
+        + "candidate (RegisterForShotTest at 0x0049C145)",
+        listed(FLIER_AT) && flier.cls === SpawnClass.Judgment
+        && !flier.judgment.cameraListed);
+  check("...the walker in state 1 through ActorRegisterCameraPoint(6.0) "
+        + "(0x00490917), a camera candidate as well",
+        walker?.state === Class23State.Fight
+        && listed(WALKER_AT) && walker.cls === SpawnClass.JudgmentCompanion
+        && walker.companion.cameraListed,
+        `walker state ${walker?.state}`);
+  check("...and never the sub-actor, which is not updated and has 0x8000",
+        !listed(Class22SubActorAt(FLIER_AT)));
 
   // The damage split. A flier hit is 30 and ten points; a walker hit is ten
   // points and one hit point off the flier, the frame after.
@@ -19434,7 +19452,6 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
       && flier.cls === SpawnClass.Judgment) {
     walker.state = Class23State.Fight;
     walker.sub = 3;
-    walker.companion.shotListed = true;
     flier.sub = 1;
     flier.flags &= ~0x40000100;
     const hp = flier.hp;
@@ -19466,6 +19483,16 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
     check("...and the walker falls on the same frame: the alive count drops",
           walker.state === Class23State.Collapse && G.g_enemies_alive === 1,
           `walker ${walker.state} alive ${G.g_enemies_alive}`);
+    check("...still on the shot list: the falling arm registers too "
+          + "(0x004901E9)", listed(WALKER_AT));
+    G.g_shot_test_list = [];
+    flier.flags &= ~0x40000100;
+    tick(1);
+    check("phase 2 registers the flier through ActorRegisterCameraPoint(2.0) "
+          + "while bit 0x100 is down: the list and the camera",
+          listed(FLIER_AT) && flier.judgment.cameraListed
+          && listed(WALKER_AT),
+          `listed ${listed(FLIER_AT)} camera ${flier.judgment.cameraListed}`);
     let n = 0;
     while (walker.state === Class23State.Collapse && n++ < 400) tick(1);
     check("the collapse ends on its clip's play length: out of the present "
@@ -19473,6 +19500,10 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
           walker.state === Class23State.Lie && G.g_enemies_present === 1
           && (walker.flags & 0x8000) !== 0,
           `state ${walker.state} present ${G.g_enemies_present} after ${n}`);
+    G.g_shot_test_list = [];
+    tick(1);
+    check("...and a lying walker is never on the list again",
+          !listed(WALKER_AT));
 
     // The kill, and the death's gate.
     flier.sub = 3;

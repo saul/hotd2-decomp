@@ -12,11 +12,14 @@
  * its own (90, the flier's phase-2 floor).
  */
 import { ActorFlag, type Actor, type JudgmentCompanionActor } from "../actor";
+import { ActorRegisterCameraPoint } from "../camera/track";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScoreAddForPlayer } from "../combat/score";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { GameMode } from "../game_mode";
 import { ActorByAt, G } from "../globals";
 import { ActorReleaseHitSlot } from "../hit_slots";
+import type { GameHost } from "../host";
 import {
   MatIdentity, MatrixRotateY, MatrixTransformPoint,
 } from "../matrix";
@@ -25,12 +28,13 @@ import type { ClassFrame } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { MotionPlayLength } from "../tables";
 import { VecToAngles, type Vec3 } from "../vec";
-import { Class22SampleCursor } from "../class22/draw";
+import { Class22SampleCursor, JudgmentEmitTrackedBone }
+  from "../class22/draw";
 import { ActorDespawn } from "../despawn";
 import type { SpriteEffect } from "../effects/sprite";
 import { Class22FaceCamera } from "../class22/paths";
 import {
-  Class22PlaySound, Class22RegisterForShotTest, Class22StrikePlayers,
+  Class22PlaySound, Class22StrikePlayers,
   JudgmentReleaseEnemySlot, ORIGINAL_WEAPON_SCALE,
 } from "../class22/shot";
 import {
@@ -41,7 +45,7 @@ import {
   CLASS23_REACT_FOLLOW, CLASS23_STRIKES, CLASS23_WALK, Class23BlendStart,
   Class23Motion, LIE_X_MAX,
 } from "./records";
-import { Class23State, Class23Subtype, type JudgmentCompanionTail }
+import { Class23State, Class23Subtype }
   from "./state";
 
 /** `obj+0x34` bits the pair signal each other with. */
@@ -127,15 +131,17 @@ function Flier(obj: JudgmentCompanionActor): Actor | undefined {
  * recorded where it stands, and the frame is marked drawn -- see
  * `Class22DrawAndPoseSubActor`.
  */
-export function Class23Draw(obj: JudgmentCompanionActor): void {
+export function Class23Draw(obj: JudgmentCompanionActor,
+                            host: GameHost): void {
   obj.alpha = 1;
   Class22SampleCursor(obj, obj.companion);
+  JudgmentEmitTrackedBone(obj, host);
 }
 
 /** `Class23Draw(obj); obj+0x194++` — the tail most paths end in. `[port-only]` as a function. */
 export function Class23DrawAndStep(obj: JudgmentCompanionActor,
                                    f: ClassFrame): void {
-  Class23Draw(obj);
+  Class23Draw(obj, f.host);
   ActorAdvanceMotion(obj, f.dt);
 }
 
@@ -189,7 +195,9 @@ export function Class23FightBesideCompanion(obj: JudgmentCompanionActor,
     obj.sub = 0;
     Class23DrawAndStep(obj, f);
     obj.flags &= ~ActorFlag.Hit;
-    Class22RegisterForShotTest(obj, f.host, t);
+    // `RegisterForShotTest` at `0x004901E9`, on the `obj+0x70` the last
+    // frame's `ActorRegisterCameraPoint` left: this arm writes no point.
+    RegisterForShotTest(obj, f.host);
     return;
   }
   if (comp && (comp.flags & REACTING) !== 0 && (obj.flags & REACTING) === 0) {
@@ -323,21 +331,10 @@ export function Class23FightBesideCompanion(obj: JudgmentCompanionActor,
   }
   Class23DrawAndStep(obj, f);
   obj.flags &= ~ActorFlag.Hit;
-  // `ActorRegisterCameraPoint(6.0)` at `0x00490917`: the shot list and the
-  // camera candidacy.
-  Class23ActorRegisterCameraPoint(obj, f, t);
-}
-
-/**
- * The call `ActorRegisterCameraPoint(6.0)` (`FUN_00409B70`), which runs
- * `RegisterForShotTest` and registers the camera candidate. See
- * `Class22ActorRegisterCameraPoint`.
- * `[port-only]` as a function.
- */
-export function Class23ActorRegisterCameraPoint(obj: JudgmentCompanionActor,
-                                                f: ClassFrame,
-                                                t: JudgmentCompanionTail): void {
-  Class22RegisterForShotTest(obj, f.host, t);
+  // `ActorRegisterCameraPoint(6.0)` at `0x00490917`, no gate: the shot list
+  // (its own tail call) and the camera candidacy, which the port answers
+  // with `tracksCamera` reading `cameraListed`.
+  ActorRegisterCameraPoint(obj, f.host, CLASS23_CAMERA_RISE);  // 0x00490917
   t.cameraListed = true;
 }
 
@@ -428,7 +425,7 @@ export function Class23Collapse(obj: JudgmentCompanionActor,
   const t = obj.companion;
   const training = G.g_GameMode === GameMode.Training;
   if (!training) Class23TakeShots(obj, f);
-  Class23Draw(obj);
+  Class23Draw(obj, f.host);
   if (t.cursor === COLLAPSE_IMPACT) {
     G.g_screen_shake_frames = SHAKE_STEP;
     Class22PlaySound(f, SND_COLLAPSE);
@@ -445,9 +442,14 @@ export function Class23Collapse(obj: JudgmentCompanionActor,
   ActorAdvanceMotion(obj, f.dt);
   if (!training) {
     // `obj+0x70 = g_camera_world_to_view * obj+0x100; obj+0x34 &= ~8;
-    // RegisterForShotTest(obj)` -- past the pop, read from the bytes.
+    // RegisterForShotTest(obj)` at `0x00490BBF`..`0x00490C3B` -- past the
+    // pop, read from the bytes. `obj+0x100` is the draw's
+    // (`JudgmentEmitTrackedBone`); the port keeps `obj+0x70` in world space.
+    obj.shotCentre.x = obj.lookAt.x;
+    obj.shotCentre.y = obj.lookAt.y;
+    obj.shotCentre.z = obj.lookAt.z;
     obj.flags &= ~ActorFlag.Hit;
-    Class22RegisterForShotTest(obj, f.host, t);
+    RegisterForShotTest(obj, f.host);                // 0x00490C3B
   }
 }
 
@@ -469,7 +471,7 @@ export function Class23LieUntilCameraCue(obj: JudgmentCompanionActor,
     ActorDespawn(obj);
     return;
   }
-  Class23Draw(obj);
+  Class23Draw(obj, f.host);
   const comp = Flier(obj);
   if (obj.sub === 0 && G.g_GameMode !== GameMode.Training
       && comp && comp.state === FLIER_DEATH && comp.sub === FLIER_DEATH_ORBIT) {

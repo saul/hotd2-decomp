@@ -240,9 +240,9 @@ the player tasks. `ActorSpawn` runs `ActorBuildSkinnedModel`, which raises
 `obj+0x70..0x78` in world space (`Actor.shotCentre`) and takes the depth
 through the camera its frame reads.
 
-**No class on `main` has set the flag yet.** The four bosses are being
-ported in other workstreams and each will set it with its own module. Their
-sites:
+JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), at
+the sites below; the other bosses are being ported in other workstreams and
+each will set it with its own module. The sites:
 
 | class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
 |---|---|---|---|---|---|---|

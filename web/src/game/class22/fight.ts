@@ -13,11 +13,13 @@
  */
 import type { JudgmentActor } from "../actor";
 import { BossHpFractionOf } from "../boss_hp_bar";
+import { ActorRegisterCameraPoint } from "../camera/track";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ActorByAt, G } from "../globals";
 import {
   MatIdentity, MatrixRotateY, MatrixTransformPoint, MatrixTranslate,
 } from "../matrix";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorAdvanceMotion } from "../motion";
 import type { ClassFrame } from "../registry";
 import { MotionPlayLength } from "../tables";
@@ -35,7 +37,7 @@ import {
 } from "./records";
 import {
   Class22ChargeShots, Class22Phase1TakeShots, Class22Phase2TakeShots,
-  Class22PlaySound, Class22RegisterForShotTest, Class22StepAggression,
+  Class22PlaySound, Class22StepAggression,
   Class22StrikePlayers, JudgmentRegisterEnemySlot,
 } from "./shot";
 import {
@@ -82,6 +84,11 @@ const SND_TAUNT: Readonly<Record<number, number>> = {
 };
 /** `PlaySoundId(0x004317A9)` — `COMMON2\HABATAK1_16`, the wing-beat. */
 export const SND_FLAP = 0x4317a9;
+/**
+ * `PUSH 0x40000000` at `0x0049C8C9` -- `ActorRegisterCameraPoint`'s lift in
+ * phase 2: the camera aims 2.0 above node 1.
+ */
+export const CLASS22_CAMERA_RISE = 2.0;
 
 /** `0x3E19999A` — phase 2's rise, and its acceleration seed. */
 const RISE_ACCEL = Math.fround(0.15);
@@ -385,11 +392,16 @@ export function Class22FightPhase1(obj: JudgmentActor, f: ClassFrame,
   Class22DrawAndPoseSubActor(obj, f);
   ActorAdvanceMotion(obj, f.dt);
   // `obj+0x70 = g_camera_world_to_view * obj+0x100; obj+0x34 &= ~0xE;
-  // RegisterForShotTest(obj)` at `0x0049C145`. Never a camera candidate in
-  // this phase: the call is `RegisterForShotTest`, not
-  // `ActorRegisterCameraPoint`.
+  // RegisterForShotTest(obj)` at `0x0049C0F2`..`0x0049C145`. Never a camera
+  // candidate in this phase: the call is `RegisterForShotTest`, not
+  // `ActorRegisterCameraPoint`. `obj+0x100` is the point the draw above left
+  // (`JudgmentEmitTrackedBone`); the port keeps `obj+0x70` in world space and
+  // the routine takes the depth.
+  obj.shotCentre.x = obj.lookAt.x;
+  obj.shotCentre.y = obj.lookAt.y;
+  obj.shotCentre.z = obj.lookAt.z;
   obj.flags &= ~0xe;
-  Class22RegisterForShotTest(obj, f.host, t);
+  RegisterForShotTest(obj, f.host);                  // 0x0049C145
 }
 
 /** `LAB_0049BFF1` — `Class22PickPhase1Path; sub = 4`, reached from subs 3, 9 and 13. */
@@ -620,10 +632,13 @@ export function Class22FightPhase2(obj: JudgmentActor, f: ClassFrame): void {
   const was = obj.flags;
   obj.flags = was & ~0xe;
   // `if (!(obj+0x34 & 0x100)) ActorRegisterCameraPoint(2.0)` at `0x0049C8CE`
-  // -- the shot list **and** the camera candidacy, on the flags as they were
-  // before the clear.
+  // -- the shot list (its own tail call, `0x00409BED`) **and** the camera
+  // candidacy, on the flags as they were before the clear. The candidacy is
+  // `RegisterForCameraTracking` at `0x00409C03`, which the port answers with
+  // `tracksCamera` reading `cameraListed`.
   if ((was & Class22Flag.Flinched) === 0) {
-    Class22ActorRegisterCameraPoint(obj, f, t);
+    ActorRegisterCameraPoint(obj, f.host, CLASS22_CAMERA_RISE);  // 0x0049C8CE
+    t.cameraListed = true;
   }
 }
 
@@ -636,18 +651,3 @@ function Phase2NextPass(obj: JudgmentActor, f: ClassFrame): void {
   obj.sub = 12;
 }
 
-/**
- * The call `ActorRegisterCameraPoint(2.0)` (`FUN_00409B70`) at `0x0049C8CE`.
- * The routine transforms `obj+0x100` for the shot test, runs
- * `RegisterForShotTest`, registers the camera candidate and lifts
- * `obj+0x104` by its argument. `[port-only]` as a function: the director's
- * `ActorRegisterCameraPoint` computes the lifted point for every actor from
- * `cameraRise`, and the candidacy is `tracksCamera`, which reads the latch
- * this raises.
- */
-export function Class22ActorRegisterCameraPoint(obj: JudgmentActor,
-                                                f: ClassFrame,
-                                                t: JudgmentTail): void {
-  Class22RegisterForShotTest(obj, f.host, t);
-  t.cameraListed = true;
-}

@@ -21,9 +21,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { GameMode } from "../game_mode";
 import { G } from "../globals";
-import type { GameHost } from "../host";
 import type { ClassFrame } from "../registry";
-import type { Vec3 } from "../vec";
 import { Class22DrawAndPoseSubActor } from "./draw";
 import { Class22FaceCamera } from "./paths";
 import { BossHpFractionOf } from "../boss_hp_bar";
@@ -82,48 +80,6 @@ const SND_KILLED: Readonly<Record<number, number>> = {
   [Class22Variant.Stage1]: 0x2818a9, [Class22Variant.Stage5]: 0x2d23a9,
 };
 
-/**
- * `[port-only]` — the engine's shot-test list, as far as this class is on it.
- *
- * `RegisterForShotTest` (`FUN_00405160`) appends an object to the list the
- * next frame's shot test walks; this class calls it on some frames and not
- * others (phase 2 skips it while `obj+0x34` bit `0x100` is up, the entrances
- * and the death never call it). The port's pick has no list, so a shot can
- * land on a frame the engine's could not. Each update opens by dropping a
- * shot that arrived while the actor was off the list, and the class raises
- * the latch at each of its own `RegisterForShotTest` call sites.
- */
-export function Class22DropUnlistedShot(obj: Actor,
-                                        t: { shotListed: boolean }): void {
-  if (!t.shotListed) {
-    obj.flags &= ~(ActorFlag.Hit | ActorFlag.HitByPlayer0
-                   | ActorFlag.HitByPlayer1);
-    obj.shotBones[0] = 0;
-    obj.shotBones[1] = 0;
-    obj.pendingHit = null;
-  }
-  t.shotListed = false;
-}
-
-/**
- * The call `RegisterForShotTest` (`FUN_00405160`) at one of this class's own
- * call sites. `[port-only]` as a function: the latch above, and the point
- * the engine publishes at `obj+0x70` -- node 1's world point, `obj+0x100`,
- * carried through the view (`0x0049C0F2`..`0x0049C128`) -- in the port's
- * world space. The routine skips an object with bit `0x8000`, and so does
- * this.
- */
-export function Class22RegisterForShotTest(obj: Actor, host: GameHost,
-                                           t: { shotListed: boolean }): void {
-  if (obj.flags & ActorFlag.NoShotTest) return;
-  t.shotListed = true;
-  if (host.boneWorld(obj.at, 1, _node1)) {
-    obj.shotCentre.x = _node1.x;
-    obj.shotCentre.y = _node1.y;
-    obj.shotCentre.z = _node1.z;
-  }
-}
-const _node1: Vec3 = { x: 0, y: 0, z: 0 };
 
 /**
  * The call `RegisterEnemySlot` (`FUN_00408E80`) at one of the two classes'

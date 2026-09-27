@@ -17,7 +17,7 @@ import type { BakedMotion } from "../../bundle";
 import { BAMS_TO_RAD } from "../../core/bams";
 import { authoredFrameHeld, authoredFrameOfTicks }
   from "../../core/play_cursor";
-import { MotionFlag } from "../../game/actor";
+import { MotionFlag, type FadeRecord } from "../../game/actor";
 import type { Instance } from "./instance";
 
 /** The port's clock. `mot/` authors at 30; the engine's frames are 60 Hz. */
@@ -140,7 +140,8 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
   // was stopping the clock.
   const pf = authoredFrameOfTicks(fade.ticks, pm.fps, pm.frames);
   const w = 1 - inst.a.fade / inst.a.fadeLen;
-  this.applyBlend(inst, pm, pf, m, f, Math.min(1, Math.max(0, w)));
+  this.applyBlend(inst, pm, pf, m, f, Math.min(1, Math.max(0, w)),
+                  undefined, fade.records);
   return true;
 }
 
@@ -154,7 +155,8 @@ private blendFromFade(inst: Instance, m: BakedMotion, f: number): boolean {
  */
 private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
                    mB: BakedMotion, fB: number, w: number,
-                   full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0):
+                   full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0,
+                   overA?: readonly FadeRecord[]):
     void {
   const ra = fA * 3;
   const rb = fB * 3;
@@ -179,8 +181,12 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
     const oa = ba + bone * 3;
     const ob = bb + bone * 3;
     if (oa + 2 >= mA.rot.length || ob + 2 >= mB.rot.length) continue;
+    // A record the state rewrote before it blended dissolves from what it
+    // wrote -- see `Actor.fadeFrom`'s `records`.
+    const o = overA?.find((r) => r.record === bone);
     node.quaternion
-      .copy(this.bams(mA.rot[oa], mA.rot[oa + 1], mA.rot[oa + 2]))
+      .copy(o ? this.bams(o.rot[0], o.rot[1], o.rot[2])
+              : this.bams(mA.rot[oa], mA.rot[oa + 1], mA.rot[oa + 2]))
       .slerp(this.bams(mB.rot[ob], mB.rot[ob + 1], mB.rot[ob + 2]), w);
   }
 }

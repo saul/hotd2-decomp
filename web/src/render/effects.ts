@@ -33,6 +33,7 @@ import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
+import { BOSS4_HIT_MARK_DRAW_SLOT } from "../game/class19/hit_mark";
 import {
   BLOOD_DEPTH_BASE, BLOOD_DEPTH_FAR, BLOOD_DEPTH_RATE, BLOOD_FIRST_SLOT,
   BLOOD_SCALE,
@@ -211,6 +212,7 @@ export class EffectLayer implements System<RenderContext> {
     this.drawPointBlood(seen);
     this.drawBodyCreatures(seen);
     this.drawCarriedProps(seen);
+    this.drawBoss4Extras(seen);
     this.drawShotRings(seen);
     this.drawDamageOverlays(seen);
     this.drawBossBanners(seen);
@@ -441,6 +443,33 @@ export class EffectLayer implements System<RenderContext> {
       node.matrixWorldNeedsUpdate = true;
       // A prop is scenery, not a click effect: draw it in the world's order.
       node.renderOrder = 0;
+    }
+  }
+
+  /**
+   * The stage-4 boss's two draws besides his skeleton, each a world matrix
+   * `game/class19/` built on a bone's: the props he carries in until he
+   * throws them (`Boss4AdvanceMotionAndDrawHeldProps`, `FUN_00492620`,
+   * `AssetDrawSlot(0x396)` per prop) and the marks his flesh hits leave
+   * (`Boss4DrawAndAgeBoneHitMark`, `FUN_00492210`, `AssetDrawSlot(0x3CD)`).
+   */
+  private drawBoss4Extras(seen: Set<string>): void {
+    const place = (key: string, slot: number, m: number[]): void => {
+      const node = this.node(key, slot, this.group);
+      if (!node) return;
+      seen.add(key);
+      node.matrixAutoUpdate = false;
+      node.matrix.fromArray(m);
+      node.matrixWorldNeedsUpdate = true;
+      node.renderOrder = 0;
+    };
+    for (const a of G.g_object_list) {
+      const b = a.boss4;
+      if (!b || a.despawned || !a.visible) continue;
+      b.propDraws.forEach((d, i) => place(`b4p${a.at}_${i}`, d.slot, d.m));
+    }
+    for (const m of G.g_boss4_hit_marks) {
+      if (m.draw) place(`b4m${m.id}`, BOSS4_HIT_MARK_DRAW_SLOT, m.draw);
     }
   }
 

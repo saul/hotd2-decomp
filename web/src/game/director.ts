@@ -34,6 +34,7 @@ import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
 import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
+import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -735,6 +736,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // here, with the camera driver parked so nothing above undoes it.
   BossBannersTick(host);
   BossHpBarsTick();
+  // ...and the marks the stage-4 boss's flesh hits leave, which
+  // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
+  // after the bar, so after it in the walk.
+  Boss4HitMarksTick(host);
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
   // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the

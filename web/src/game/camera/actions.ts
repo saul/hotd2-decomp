@@ -437,6 +437,42 @@ export function EvtGotoSceneState(minor: number, clearsLatches: boolean): void {
 }
 
 /**
+ * `g_player_state_handlers` (`0x00579CD0`, `0x14` a row) `+0x10`, by
+ * `g_player_state`: 0 for 4 (`PlayerStateArmContinue`), 5 (in play) and 6
+ * (`PlayerStateArmGameOver`), 1 for the other nine. `[proved]`
+ * (`read_memory`).
+ */
+const PLAYER_STATE_CLEAR_OF_DEATH = [1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1];
+
+/**
+ * `[port-only]` as a function -- the gate `EvtOpGotoSceneStateWhenPlayersAlive32`
+ * (`FUN_0045F900`) puts in front of {@link EvtGotoSceneState}:
+ *
+ * ```c
+ * if (g_evt_yield == 0) g_evt_yield = 1;
+ * for p in 0, 1:
+ *     if (g_player_state_handlers[g_player_state[p]].f10 == 0
+ *         && g_player_lives[p] <= 0) return;           // re-run next frame
+ * ...EvtGotoSceneState..., g_evt_yield = 0, pc += 8
+ * ```
+ *
+ * So the scene state waits while either player is dead and in the
+ * continue-or-game-over chain; a player in any other state, or one with lives
+ * left, lets it through on the frame it is reached. The nineteen shipped sites
+ * are the bosses' rooms, each straight after the wait for the boss's death.
+ */
+export function EvtPlayersClearOfDeath(): boolean {
+  for (let p = 0; p < 2; p++) {
+    const st = G.g_player_state[p];
+    if ((PLAYER_STATE_CLEAR_OF_DEATH[st] ?? 1) === 0
+        && (G.g_player_lives[p] ?? 0) <= 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * `EvtOpSetActionDrainMode33` — `FUN_0045F9F0`, less the program counter:
  * `g_evt_action_advance = op0; g_queued_events_pending += op1`. All 128
  * shipped sites pass `2, -1`: take back a `finish_sequence` that never

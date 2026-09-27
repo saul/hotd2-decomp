@@ -12534,6 +12534,64 @@ console.log("\nthe camera path publishes every frame, ends included:");
 }
 
 /**
+ * `goto_scene_state_when_alive` (0x32) waits for the players.
+ *
+ * `EvtOpGotoSceneStateWhenPlayersAlive32` (`FUN_0045F900`) returns with the
+ * pointer where it was while either player sits in a state whose
+ * `g_player_state_handlers` row has `+0x10 == 0` (4, 5 and 6) with no lives
+ * left, and runs again next frame. The port let it through always.
+ */
+console.log("\ngoto_scene_state_when_alive holds while a player is out of lives:");
+{
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x32, name: "goto_scene_state_when_alive",
+          cat: "flow", scene_state_minor: 3 },
+        { i: 1, at: 1, op: 0x42, name: "wait_frames", cat: "wait", arg: 100,
+          blocks_on: "arg frames elapsed" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  ResetGameGlobals();
+  G.g_scene_state_major = 2;
+  G.g_scene_state_minor = 4;
+  // Player 0 dead on the continue countdown; player 1 never started.
+  G.g_player_state[0] = PlayerState.Continue;
+  G.g_player_lives[0] = 0;
+  G.g_player_state[1] = PlayerState.Out;
+  G.g_player_lives[1] = 0;
+  w.tick(1 / 60);
+  w.tick(1 / 60);
+  check("a player at 4 with no lives holds it",
+        w.opIndex === 0 && G.g_scene_state_major === 2,
+        `op ${w.opIndex}, state ${G.g_scene_state_major}/${G.g_scene_state_minor}`);
+  G.g_player_state[0] = PlayerState.InPlay;
+  check("...in play with no lives still holds it",
+        (w.tick(1 / 60), w.opIndex === 0 && G.g_scene_state_major === 2));
+  G.g_player_lives[0] = 3;
+  w.tick(1 / 60);
+  check("...and with lives it enters (1, 3) and moves on",
+        w.opIndex === 1 && G.g_scene_state_major === 1
+        && G.g_scene_state_minor === 3,
+        `op ${w.opIndex}, state ${G.g_scene_state_major}/${G.g_scene_state_minor}`);
+}
+
+/**
  * `wait_camera_path_frame <n>` releases on `n + 1`, not on `n`.
  *
  * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`) advances the instruction

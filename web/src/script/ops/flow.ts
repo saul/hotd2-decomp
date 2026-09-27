@@ -7,7 +7,8 @@
  */
 import type { OpImpl } from "../walker";
 import { G } from "../../game/globals";
-import { CheckpointResetCamera } from "../../game/camera/actions";
+import { CheckpointResetCamera, EvtPlayersClearOfDeath }
+  from "../../game/camera/actions";
 
 export const OPS: Record<number, OpImpl> = {
 
@@ -53,17 +54,22 @@ export const OPS: Record<number, OpImpl> = {
       },
     },
     0x32: {
-      // `EvtOpGotoSceneStateWhenPlayersAlive32` is 0x31 plus a park: it sets
-      // the yield latch and re-runs every frame until a player is out of the
-      // death -> continue -> revive chain (or still has lives), and it leaves
-      // the override latch and the eye ease alone. The gate is not modelled
-      // here -- it is the players', not the camera's -- so it behaves as open.
-      // [diverges]
-      status: "tracked",
-      run: (w, op) => {
+      // `EvtOpGotoSceneStateWhenPlayersAlive32` (`FUN_0045F900`) is 0x31 behind
+      // a gate: while either player is dead and in the continue-or-game-over
+      // chain it returns with the yield latch up and the pointer where it was,
+      // so it runs again next frame (`EvtPlayersClearOfDeath`). Open, it
+      // enters the scene state as 0x31 does but leaves the override latch and
+      // the eye ease alone. A replay steps over the gate the way it steps over
+      // a wait: the game only ever got past it with the players clear.
+      status: "done",
+      run: (w, op, quiet) => {
         const minor = op.scene_state_minor ?? 3;
+        if (!quiet && !EvtPlayersClearOfDeath()) {
+          w.holdHere();
+          return `scene state 1/${minor} -- held: a player is out of lives`;
+        }
         w.gotoSceneState(minor, false);
-        return `scene state 1/${minor} -- the alive gate is always open here`;
+        return `scene state 1/${minor}`;
       },
     },
     0x33: {

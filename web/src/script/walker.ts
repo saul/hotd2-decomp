@@ -1509,6 +1509,13 @@ export class Walker {
     const pcStep = this.step;
     const pcOp = this.opIndex;
     const note = this.apply(op, quiet);
+    // An instruction that returned without moving the program counter and
+    // with the yield latch up runs again next frame (see `holdHere`). It has
+    // not happened yet, so the feed does not show it.
+    if (this.held) {
+      this.held = false;
+      return false;
+    }
     if (!quiet) {
       this.host.onFeed({
         seq: this.seq++,
@@ -1669,6 +1676,18 @@ export class Walker {
       this.retireCiviliansOffCamera();
     }
   }
+
+  /**
+   * The instruction being run returns without moving the program counter, and
+   * the interpreter's frame ends: `g_evt_yield` up and no `pc +=`. It runs
+   * again from the top on the next frame, as `EvtInterpreterLoop` re-enters
+   * the instruction the pointer still names. Only `0x32`'s gate uses it; the
+   * waits keep their state in {@link wait} because the panels show it.
+   */
+  holdHere(): void {
+    this.held = true;
+  }
+  private held = false;
 
   /** `set_action_drain_mode` (0x33): `advance = mode; pending += delta`. */
   setActionDrainMode(mode: number, delta: number): void {

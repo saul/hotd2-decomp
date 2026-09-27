@@ -28,7 +28,7 @@
 import { G } from "../globals";
 import { T } from "../tables";
 import { VecToAngles, type Vec3 } from "../vec";
-import { CameraActionDriver } from "./driver";
+import { EvtActionHandler } from "./driver";
 
 /**
  * The two pose blocks `CamBlockSetAnglesFromLookAt` is handed a pointer to.
@@ -100,18 +100,14 @@ export function CamBlockSetAnglesFromLookAt(block: CameraPoseBlock,
 }
 
 /**
- * `[port-only]` -- the `pending--` every action handler ends on, for slot 0:
- * `g_evt_action_advance = 1; g_queued_events_pending--`, and the handler slot
- * left for `EvtRunQueuedActions` to replace, which with the ring empty it
- * parks on `NoOpStub`. The port runs an action the moment it is queued, so
- * the ring is always empty by the time this happens.
- *
- * The count floors at zero where the engine's would go negative: a
- * `goto_scene_state` whose `queue_event` a skip dropped still retires.
+ * `[port-only]` as a function -- the tail every slot-0 action handler ends on
+ * when it completes: `g_evt_action_advance = 1; g_queued_events_pending--`.
+ * The handler stays in the slot; `EvtRunQueuedActions` replaces it, with the
+ * next action or with `NoOpStub`. See `camera/actions.ts`.
  */
 export function EvtActionRetire(): void {
-  if (G.g_queued_events_pending > 0) G.g_queued_events_pending -= 1;
-  G.g_camera_action_driver = CameraActionDriver.None;
+  G.g_evt_action_advance = 1;
+  G.g_queued_events_pending -= 1;
 }
 
 /**
@@ -139,41 +135,49 @@ export function CamAdvancePathFrame(): void {
                             G.g_camera_block_eye, G.g_camera_block_target);
   CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
                               roll);
-  G.g_cam_path_frames_left = G.g_cam_path_end_frame - cur;
+  G.g_cam_path_frames_left = G.g_cam_path_end_frame - G.g_cam_path_cursor;
   G.g_cam_path_cursor = cur + 1;
-  if (cur >= G.g_cam_path_end_frame) EvtActionRetire();
+  if (G.g_cam_path_end_frame <= cur) EvtActionRetire();
 }
 
 /**
- * `CamStartPathPlayback` — `FUN_00403510`. The non-deferred half of
+ * `CamStartPathPlayback` — `FUN_00403510`. The playing half of
  * `EvtActionCamPlay40`.
  *
  * ```c
- * g_active_cam_path = operand[2];
- * if (operand[0] != -1) { g_cam_path_frame = cursor = operand[0]; end = operand[1]; }
- * else                  { cursor = g_cam_path_frame;              end = operand[1]; }
- * block+0x110 = flags;
+ * if (!(flags & 4)) {
+ *     g_active_cam_path = operand[2];
+ *     if (operand[0] == -1) { cursor = g_cam_path_frame;              end = operand[1]; }
+ *     else                  { g_cam_path_frame = cursor = operand[0]; end = operand[1]; }
+ * } else {
+ *     g_cam_path_frame = operand[0];  cursor = g_stashed_path_frame;  end = g_stashed_path_end_frame;
+ * }
+ * block+0x114 = flags;
  * g_evt_action_handler = CamAdvancePathFrame;  CamAdvancePathFrame(slot);
  * ```
  *
  * `start == -1` resumes from the frame the camera is on, with no `+ 1`: the
- * handler publishes before it increments. (Its `flags & 4` arm takes the
- * cursor from the stash words instead; no shipped play sets that bit.) The
- * first frame is published here, so the frame's own queued-action call is
- * skipped once -- `G.g_camera_action_fresh`.
+ * handler publishes before it increments. No shipped play sets `flags & 4`,
+ * and none passes -1 here. Its training-mode arm, which swaps the path for
+ * the lesson's own, belongs to a mode the port does not play.
  */
 export function CamStartPathPlayback(slot: number, start: number,
-                                     end: number): void {
-  G.g_active_cam_path = slot;
-  if (start !== -1) {
-    G.g_cam_path_frame = start;
-    G.g_cam_path_cursor = start;
+                                     end: number, flags = 0): void {
+  if ((flags & 4) === 0) {
+    G.g_active_cam_path = slot;
+    if (start === -1) {
+      G.g_cam_path_cursor = G.g_cam_path_frame;
+    } else {
+      G.g_cam_path_frame = start;
+      G.g_cam_path_cursor = start;
+    }
+    G.g_cam_path_end_frame = end;
   } else {
-    G.g_cam_path_cursor = G.g_cam_path_frame;
+    G.g_cam_path_frame = start;
+    G.g_cam_path_cursor = G.g_stashed_path_frame;
+    G.g_cam_path_end_frame = G.g_stashed_path_end_frame;
   }
-  G.g_cam_path_end_frame = end;
-  G.g_camera_action_driver = CameraActionDriver.PathPlay;
-  G.g_camera_action_fresh = 1;
+  G.g_evt_action_handler = EvtActionHandler.PathPlay;
   CamAdvancePathFrame();
 }
 
@@ -227,39 +231,4 @@ export function CamEvalStaticPose(slot: number, frame: number): void {
  */
 export function CamPathCueReached(path: number, frame: number): boolean {
   return G.g_active_cam_path === path && G.g_cam_path_frame >= frame;
-}
-
-/**
- * `[port-only]` -- put the camera where the path words say, for a seek, the
- * frame scrubber or a stage opening at a deep link: the three places the
- * player moves the camera without running the frames that would have written
- * it. The engine has no seek, so there is no routine to cite; each half is the
- * routine that would have written that block had the frames run:
- * `CamAdvancePathFrame` for a playing or held shot, the rail's `CamEvalPath7`
- * for a stashed one.
- *
- * `deferred` says which the script's shot is. Everything read and written is
- * `G`'s.
- */
-export function CameraReseatFromFrame(deferred: boolean): void {
-  const slot = G.g_active_cam_path;
-  if (slot < 0) return;
-  if (deferred) {
-    const roll = CamEvalPath7(slot, G.g_rail_frame, G.g_cam_path_eye,
-                              G.g_cam_path_target);
-    CamBlockSetAnglesFromLookAt(CameraPoseBlock.Path, G.g_cam_path_target, roll);
-    G.g_camera_block_eye.x = G.g_cam_path_eye.x;
-    G.g_camera_block_eye.y = G.g_cam_path_eye.y;
-    G.g_camera_block_eye.z = G.g_cam_path_eye.z;
-    G.g_camera_block_target.x = G.g_cam_path_target.x;
-    G.g_camera_block_target.y = G.g_cam_path_target.y;
-    G.g_camera_block_target.z = G.g_cam_path_target.z;
-    CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
-                              roll);
-    return;
-  }
-  const roll = CamEvalPath7(slot, G.g_cam_path_frame, G.g_camera_block_eye,
-                            G.g_camera_block_target);
-  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
-                              roll);
 }

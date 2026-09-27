@@ -25,11 +25,11 @@
  * block on, and `WaitPolicy` says what the walker did instead.
  */
 
-import { CameraActionDriver } from "../game/camera/mode";
 import { G } from "../game/globals";
-import { CameraPlayStashedPath, CameraStepRailTick }
-  from "../game/camera/rail";
-import { SceneStateInstallPlayerHooks } from "../game/effects/damage_overlay";
+import { CameraUpdateHook, EvtActionHandler } from "../game/camera/driver";
+import { EvtGotoSceneState, EvtLoadBlockProgramRing, EvtQueueAction,
+         EvtSetActionDrainMode } from "../game/camera/actions";
+import { CameraReplayUntil } from "../game/camera/actor";
 import { SpawnClass } from "../game/spawn_class";
 import type { BlockJson, OpJson, ScriptJson, SpawnJson } from "../bundle";
 import type { OpStatus } from "./opstatus";
@@ -43,9 +43,7 @@ import {
 import {
   ChannelBlock, type ChannelTween, type FogState, type LightState,
 } from "./state/channels";
-import { ActionRing } from "./state/queued";
 import { Shutter } from "./state/shutter";
-import { ACTIONS, UNMODELLED } from "./state/camera_action";
 
 export type { ChannelTween, FogState, LightState };
 export {
@@ -91,102 +89,51 @@ export interface CamCommand {
   slot: number;
   startFrame: number;
   endFrame: number;
+  /** `g_cam_path_frame`, the frame the camera published last. */
   frame: number;
   flags: number;
   isStatic: boolean;
-  /** `flags & 2`: the game stashes these for a later scene state to play. */
+  /** The shot is the stashed rail's: scene state (2,6) or (2,7) steps it. */
   deferred: boolean;
   file: string | null;
   pathIndex: number | null;
+  /** `g_cam_path_frames_left <= 0`: the last frame has been published. */
   done: boolean;
   /**
-   * Whether the camera task has already published a frame for this shot on
-   * this tick.
-   *
-   * `CamStartPathPlayback` (`FUN_00403510`) ends by calling
-   * `CamAdvancePathFrame` itself, and `EvtRunQueuedActions` calls the action
-   * handler once a frame — so the frame a shot *starts* on is published by the
-   * start, and the path does not step again until the next frame. Without
-   * this the port's own advance would run over the top of it in the same tick
-   * and every shot would be a frame ahead of the engine's.
-   */
-  started: boolean;
-  /**
-   * The action handler has been dequeued: nothing writes the camera block
-   * from this shot again.
-   *
-   * **This is one tick later than {@link done}, and the tick between them is
-   * the shot's last frame.** `CamAdvancePathFrame` (`FUN_004035E0`) is the
-   * handler `EvtRunQueuedActions` calls once a frame while the play is
-   * queued, and read off the instruction stream at `0x00403605` it goes:
-   *
-   * ```
-   * MOV  EAX,[ESI + 0x9a6144]      ; cur = g_cam_path_cursor
-   * MOV  [ESI + 0x9a6110],EAX      ; g_cam_path_frame = cur
-   * CALL 0x004041e0                ; CamEvalPath7 -> block eye and target
-   * CALL 0x00403ac0                ; CamBlockSetAnglesFromLookAt
-   * MOV  [0x009c6f28],EDX          ; g_cam_path_frames_left = end - cur
-   * CMP  ECX,EAX / JL              ; cur >= end ?
-   * ...                            ; g_queued_events_pending--   (slot 0)
-   * ```
-   *
-   * The publish, the curve evaluation and the block write all happen **before**
-   * the end test, so the block holds the pose of every frame from `start` to
-   * `end` **inclusive**; it is the frame *after* the end that is never
-   * written. `[proved]`
-   *
-   * The port used to seat the block on `!done`, which is one tick short: on
-   * the frame a shot ended the block kept the previous frame's pose, and the
-   * next shot then moved the eye by two frames' travel at once. With the
-   * gameplay camera live it also cost the aim its per-frame reseat, so
-   * `CameraTrackEnemiesTick`'s ease took one unopposed step towards the enemy
-   * and snapped back the frame after -- a one-frame flick of 9.6 degrees at
-   * stage 3 block 2 step 4's `cam_play 1430..1660`.
+   * Nothing writes the camera block from this shot any more: the action slot
+   * no longer holds `CamAdvancePathFrame`. One frame after {@link done} for a
+   * playing shot -- the end frame is published, then the slot is replaced.
    */
   retired: boolean;
   /**
-   * **This play publishes one frame past {@link endFrame}.**
-   *
-   * True for a stashed range taken over by scene state **(2,7)** and for
-   * nothing else. The two routines that play a stashed range differ by one
-   * byte of guard, and they both increment *before* they publish:
-   *
-   * ```
-   * CameraStepRailTick    (FUN_0040C790), state (2,6):
-   *   0040c79e  CMP ECX,EAX     ; cur, end
-   *   0040c7a0  JGE 0040c889    ; cur >= end -> stop
-   *   0040c7cb  INC [0x9c70ac]  ; cur += 1
-   *   0040c7d1  FILD [0x9c70ac] ; ...then publish
-   *
-   * CameraPlayStashedPath (FUN_0040C8A0), state (2,7):
-   *   0040c8be  CMP ECX,EAX
-   *   0040c8c0  JG  0040c9a9    ; cur >  end -> stop
-   *   0040c8eb  INC [0x9c70ac]
-   *   0040c8f1  FILD [0x9c70ac]
-   * ```
-   *
-   * So a stashed `351..384` publishes `352..384` under (2,6) and
-   * `352..385` under (2,7): the `JG` lets the last step through and the
-   * increment carries it one past. `[proved]`
-   *
-   * The port published `352..384` for both, which is (2,6)'s answer, and that
-   * one frame is exactly what the data times the *end* of a stashed shot to.
-   * Stage 2's block 9 is the case: the civilian whose stream raises
-   * `g_script_flags[3]` waits on camera path 66 frame **385** — `on cue
-   * (66,385) now (66,384)` in her own debug row — while the script stashes
-   * `351..384` and hands it to state 7. She never raised the flag, and
-   * `wait_script_flag 3` held the block for ever.
-   *
-   * It is deliberately **not** folded into {@link endFrame}: the range's own
-   * end is what `wait_camera_path_frame 0` reads (`waits/frames.ts`) and what
-   * `g_cam_path_frames_left` is measured against, and both of those are the
-   * engine's `end`.
+   * **This play publishes one frame past {@link endFrame}**: a stashed range
+   * under scene state (2,7), whose `CameraPlayStashedPath` guards with `JG`
+   * where (2,6)'s `CameraStepRailTick` has `JGE` (`0x0040C8C0` against
+   * `0x0040C7A0`). Stage 2's block 9 times a civilian's cue to that frame.
    */
   pastEnd: boolean;
 }
 
+/**
+ * What the last `cam_play` queued said about its shot: the description the
+ * player's own panels show. `[port-only]` -- the game reads the path words in
+ * `G`, never this.
+ */
+export interface ShotMeta {
+  slot: number;
+  startFrame: number;
+  endFrame: number;
+  flags: number;
+  isStatic: boolean;
+  deferred: boolean;
+  file: string | null;
+  pathIndex: number | null;
+}
+
 export type WaitPolicy =
   | { kind: "frames"; framesLeft: number }
+  /** `wait_camera_path_frame`: blocks until the path frame passes `arg`. */
+  | { kind: "camera"; arg: number }
   /** The real gate: blocks until the player has killed them. */
   | { kind: "enemies" }
   /** `wait_scripted_actors`: blocks until the civilians have left play. */
@@ -406,17 +353,15 @@ export interface OpImpl {
  * since it sat at 1 through every shape change either side ever made.
  */
 export const WALKER_RESTORED_KEYS = [
-  "block", "step", "opIndex", "region", "rollEnabled", "useFixedEyeY",
-  "fixedEyeY", "groundY", "forcePathAdvance", "backdropPreset",
+  "block", "step", "opIndex", "region", "groundY", "backdropPreset",
   "backdropMode", "shutterState", "shutterPrev", "shutterCounter",
   "captionGroup", "captionFrames", "firingGate",
   "skippable", "skipRequested", "rain", "gunLights", "sceneLighting",
   "sceneAmbient",
   "branchChoice", "parked", "channels", "tweens", "fogSet", "lightDir",
-  "lightSet", "light1", "checkpointBlock", "branchPreview", "camOverrideValid",
-  "stashedCam", "spawns", "simpleSpawns",
-  "sceneState", "queuedEventsPending", "camPending",
-  "cam", "finished", "nextEntryBlock", "bgmTrack", "lastSound", "loopingSe",
+  "lightSet", "light1", "checkpointBlock", "branchPreview",
+  "spawns", "simpleSpawns", "shot",
+  "finished", "nextEntryBlock", "bgmTrack", "lastSound", "loopingSe",
   "seq",
 ] as const;
 
@@ -471,15 +416,16 @@ export class Walker {
   opIndex = 0;
 
   region = -1;
-  rollEnabled = false;
-  /** `g_camera_use_fixed_y` (0x36) and `g_camera_fixed_eye_y` (0x1A). */
-  useFixedEyeY = false;
-  fixedEyeY = 0;
+  /** `g_cam_roll_enabled` (0x35), which is `G`'s. */
+  get rollEnabled(): boolean { return G.g_cam_roll_enabled !== 0; }
+  /** `g_camera_use_fixed_y` (0x36) and `g_camera_fixed_eye_y` (0x1A), `G`'s. */
+  get useFixedEyeY(): boolean { return G.g_camera_use_fixed_y === 1; }
+  get fixedEyeY(): number { return G.g_camera_fixed_eye_y; }
   /** `g_ground_plane_y` -- the same global as `fixedEyeY`, named for its
    *  other job: the height a missed downward ray falls back to. */
   groundY: number | null = null;
-  /** 0x37: advance the camera path every frame, bypassing the room gate. */
-  forcePathAdvance = false;
+  /** 0x37: `g_force_rail_advance`, `G`'s. */
+  get forcePathAdvance(): boolean { return G.g_force_rail_advance === 1; }
   /** The backdrop dome: 0x1B picks the preset, 0x1C the mode. */
   backdropPreset = -1;
   backdropMode = 0;
@@ -681,44 +627,23 @@ export class Walker {
     return this.tweens.some((t) => t !== null);
   }
   /**
-   * A `cam_play` with `flags & 2` stashed a range for a later 0x21: the path
-   * it names. The range itself is `G.g_stashed_path_frame` /
-   * `g_stashed_path_end_frame`, which `CamStashPathRange` (`FUN_00403490`)
-   * writes and the rail hooks step -- one owner, because the stage-4 boss
-   * writes it too. See `game/camera/rail.ts`.
+   * `g_scene_state_major` / `g_scene_state_minor` (0x009C6F0C / 0x009C6F14),
+   * which are `G`'s: `EvtEnterSceneState` and its unstamped twin write them
+   * from the queued actions, the checkpoint and `goto_scene_state`. See
+   * `game/camera/hooks.ts`.
    */
-  stashedCam: { slot: number } | null = null;
+  get sceneState(): { major: number; minor: number } {
+    return { major: G.g_scene_state_major, minor: G.g_scene_state_minor };
+  }
 
   /**
-   * `g_scene_state_major` / `g_scene_state_minor` (0x009C6F0C / 0x009C6F14).
-   *
-   * `EvtEnterSceneState` (`FUN_00403BD0`) records the pair and jumps to
-   * `g_scene_state_table[major * 9 + minor]`, which *installs* that phase's
-   * camera hook rather than doing any work itself. Three instructions reach
-   * it: `queue_event` selector `0x21` with major 2 (the `cam/` path cameras),
-   * selector `0x11` with the current major, and `goto_scene_state` with major
-   * fixed at 1. The port tracked only the first, so the state was never a
-   * state -- it is one now.
+   * `g_queued_events_pending` -- 0x009A2C8C, `G`'s. What
+   * `wait_queued_events_done` (`0x40`) blocks on: `queue_event` adds one per
+   * action and each action handler takes one back when it completes --
+   * except `EvtActionFinishSequence21`, whose driver `goto_scene_state` and
+   * `set_action_drain_mode` retire. See `game/camera/actions.ts`.
    */
-  sceneState = { major: 0, minor: 0 };
-
-  /**
-   * `g_queued_events_pending` -- 0x009A2C8C. What `wait_queued_events_done`
-   * (`0x40`) blocks on.
-   *
-   * `queue_event` adds one per action and each action handler takes one back
-   * when it completes -- *except* `EvtActionFinishSequence21`, which installs
-   * a persistent camera driver and never retires itself. `goto_scene_state`
-   * and `set_action_drain_mode` are its script-side retirement, which is why
-   * they trail almost every room: measured over the shipped scripts, all 316
-   * `goto_scene_state` sites have exactly one outstanding `queue_event 0x21`
-   * at that point.
-   */
-  /** The action ring. See `script/state/queued.ts`. */
-  readonly ring = new ActionRing();
-
-  get queuedEventsPending(): number { return this.ring.pending; }
-  set queuedEventsPending(v: number) { this.ring.pending = v; }
+  get queuedEventsPending(): number { return G.g_queued_events_pending; }
 
   /**
    * How many block transitions found the action ring still owing work.
@@ -731,46 +656,15 @@ export class Walker {
   ringResidue = 0;
 
   /**
-   * Whether the `cam_play` now running still owes its retirement.
-   *
-   * `CamAdvancePathFrame` retires the action when the path reaches its end; a
-   * held pose (`CamEvalStaticPose`) and a deferred stash (`FUN_00403490`)
-   * retire at once, so only a real playback is outstanding. The camera a
-   * scene state 6/7 starts is *not* one: its `cam_play` was retired when it
-   * was stashed.
-   */
-  private get camPending(): boolean { return this.ring.camPending; }
-  private set camPending(v: boolean) { this.ring.camPending = v; }
-  /**
    * The arcade branch-preview shots, from the most recent `store_six`
    * (`queue_event` sel 0x60): one camera pose per route the next branch can
-   * take, indexed by `branch_choice`.
+   * take, indexed by `branch_choice`. The panels' copy; the game's is
+   * `G.g_evt_cam_override_pairs`.
    */
   branchPreview: NonNullable<OpJson["branch_preview"]> | null = null;
 
-  /**
-   * `g_evt_cam_override_valid` — `0x009C6FD8`.
-   *
-   * Selector 0x60 (`store_six`) stores three `(frame, path)` pairs *and* sets
-   * this, and the row-5 camera hooks `FUN_00402890` / `FUN_00402740` open with
-   *
-   *     if (g_cam_path_frames_left < 0 && g_evt_cam_override_valid)
-   *         FUN_00403DB0(&g_camera_block);
-   *
-   * which re-seats `g_active_cam_path` and the path frame from the pair
-   * `g_script_branch_var` selects. So a shot that has run out does not sit at
-   * its own last frame — it moves to where the *next* shot will pick up, and
-   * stays there until it does.
-   *
-   * The port had the pairs (as `branchPreview`) and neither the flag nor the
-   * re-seat, so the camera held the old shot's final frame through the whole
-   * fight and then cut. Stage 1 block 3 step 3 is the shape: the stashed shot
-   * ends at path frame 525, the `store_six` names 555, and step 4 opens at
-   * 556 — so the engine spends the fight at 555 and continues, and this port
-   * spent it at 525 and jerked **27 degrees** on the frame the fight ended,
-   * against a median frame-to-frame turn of 0.09.
-   */
-  camOverrideValid = false;
+  /** `g_evt_cam_override_valid` — `0x009C6FD8`, `G`'s. */
+  get camOverrideValid(): boolean { return G.g_evt_cam_override_valid !== 0; }
   checkpointBlock = 0;
   /**
    * There is no `flags` set here any more.
@@ -796,7 +690,41 @@ export class Walker {
    * would have to test for the difference otherwise.
    */
   simpleSpawns: ActiveSimpleSpawn[] = [];
-  cam: CamCommand | null = null;
+  /** The last `cam_play` queued, as the panels describe it. */
+  shot: ShotMeta | null = null;
+
+  /**
+   * The shot the camera is on, **read out of `G`**: the path, the frame it
+   * published, the range the action slot or the stashed rail is playing.
+   * `[port-only]` -- a view for the panels, the harnesses and the seek; the
+   * game reads the words. The description (file, start) is the last queued
+   * `cam_play`'s when it names the same path.
+   */
+  get cam(): CamCommand | null {
+    const slot = G.g_active_cam_path;
+    if (slot < 0) return null;
+    const hook = G.g_camera_update_hook as CameraUpdateHook;
+    const deferred = hook === CameraUpdateHook.DeferredRailInstall
+      || hook === CameraUpdateHook.StepRail
+      || hook === CameraUpdateHook.PlayStashedPath;
+    const m = this.shot && this.shot.slot === slot ? this.shot : null;
+    const frame = G.g_cam_path_frame;
+    const endFrame = deferred ? G.g_stashed_path_end_frame
+      : G.g_evt_action_handler === EvtActionHandler.PathPlay
+        ? G.g_cam_path_end_frame : m?.endFrame ?? frame;
+    return {
+      slot, frame, endFrame,
+      startFrame: m?.startFrame ?? frame,
+      flags: m?.flags ?? 0,
+      isStatic: m?.isStatic ?? false,
+      deferred,
+      file: m?.file ?? null,
+      pathIndex: m?.pathIndex ?? null,
+      done: G.g_cam_path_frames_left <= 0,
+      retired: G.g_evt_action_handler !== EvtActionHandler.PathPlay,
+      pastEnd: hook === CameraUpdateHook.PlayStashedPath,
+    };
+  }
   /**
    * True while a **replay** is walking the script rather than playback.
    *
@@ -943,11 +871,7 @@ export class Walker {
     this.step = n > entry ? entry : 0;
     this.opIndex = 0;
     this.region = -1;
-    this.rollEnabled = false;
-    this.useFixedEyeY = false;
-    this.fixedEyeY = 0;
     this.groundY = null;
-    this.forcePathAdvance = false;
     this.backdropPreset = -1;
     this.backdropMode = 0;
     this.shutter.reset();
@@ -961,11 +885,7 @@ export class Walker {
     this.sceneAmbient = [0.5, 0.5, 0.5];
     this.branchChoice = 0;
     this.parked = false;
-    this.stashedCam = null;
-    this.sceneState = { major: 0, minor: 0 };
-    this.ring.reset();
     this.branchPreview = null;
-    this.camOverrideValid = false;
     this.lightBlock.reset();
     this.lightBlock1.reset();
     // `entryBlock` rather than `this.script.entry_block`: a stage no longer
@@ -980,7 +900,7 @@ export class Walker {
     this.spawns = [];
     this.civilianLives.clear();
     this.simpleSpawns = [];
-    this.cam = null;
+    this.shot = null;
     this.wait = null;
     this.branch = null;
     this.finished = false;
@@ -1002,9 +922,7 @@ export class Walker {
   saveState(): unknown {
     return {
       block: this.block, step: this.step, opIndex: this.opIndex,
-      region: this.region, rollEnabled: this.rollEnabled,
-      useFixedEyeY: this.useFixedEyeY, fixedEyeY: this.fixedEyeY,
-      groundY: this.groundY, forcePathAdvance: this.forcePathAdvance,
+      region: this.region, groundY: this.groundY,
       backdropPreset: this.backdropPreset, backdropMode: this.backdropMode,
       shutterState: this.shutterState, firingGate: this.firingGate,
       shutterPrev: this.shutterPrev, shutterCounter: this.shutterCounter,
@@ -1014,18 +932,14 @@ export class Walker {
       gunLights: this.gunLights, sceneLighting: this.sceneLighting,
       sceneAmbient: this.sceneAmbient,
       branchChoice: this.branchChoice, parked: this.parked,
-      sceneState: { ...this.sceneState },
-      queuedEventsPending: this.queuedEventsPending,
-      camPending: this.camPending,
       channels: [...this.channels], tweens: this.tweens.map((t) => t && {...t}),
       fogSet: this.fogSet, lightDir: { ...this.lightDir },
       lightSet: this.lightSet, light1: this.light1,
       checkpointBlock: this.checkpointBlock,
       branchPreview: this.branchPreview,
-      camOverrideValid: this.camOverrideValid, stashedCam: this.stashedCam,
       spawns: this.spawns.map((s) => ({ ...s })),
       simpleSpawns: this.simpleSpawns.map((s) => ({ ...s })),
-      cam: this.cam && { ...this.cam },
+      shot: this.shot && { ...this.shot },
       // The wait, countdown and all. `web/test/state.test.ts` is what caught
       // this missing: a save taken three seconds into a five-second
       // `wait_frames` used to come back as a fresh five-second one, because
@@ -1074,7 +988,8 @@ export class Walker {
     // is how the scene comes back with the right rooms streamed in.
     this.host.enterRegion(this.region);
     for (const slot of this.loadedSlots) this.host.loadSlot(slot);
-    if (this.cam) this.host.startCamera(this.cam);
+    const cam = this.cam;
+    if (cam) this.host.startCamera(cam);
   }
 
   /**
@@ -1141,6 +1056,7 @@ export class Walker {
       ? CIVILIAN_GATE_CLASSES : ENEMY_GATE_CLASSES);
     if (rule?.clearsRoom) this.civilianRoomsCleared();
     if (rule?.skipRunsCameraOn) this.runCameraOnPast(this.wait.op);
+    if (rule?.drainsQueuedActions) this.runQueuedActionsOut();
     // The third postcondition: a `wait_script_flag` is only ever passed in
     // play with the byte already a 1, so a replay that steps over one has to
     // raise it. Without this a seek lands past a gate whose flag is still 0,
@@ -1266,30 +1182,34 @@ export class Walker {
    * {@link WaitRule.skipRunsCameraOn}.
    *
    * Put the shot where the script would have been standing when the wait it
-   * is stepping over opened: at `endFrame` for the operand-0 form, which is
-   * "to the end of the path", and one frame past the operand otherwise, which
-   * is the strict `operand < g_cam_path_frame` of
-   * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`).
+   * is stepping over opened: at the end for the operand-0 form, which is
+   * `g_cam_path_frames_left < 1`, and one frame past the operand otherwise,
+   * which is the strict `operand < g_cam_path_frame` of
+   * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`). The camera's own tasks do
+   * it -- `CameraReplayUntil` runs them with the cursor carried forward -- so
+   * the landing is the state those routines leave, rail and all.
    *
    * The frames in between are **not** published, and cannot be: a seek jumps
    * where playback steps, so nothing that reads `g_cam_path_frame` once a
    * frame — a class-0x30 camera cue, a civilian's `CameraCue` wait — sees
-   * them. What this buys is the landing state, not the trip: the shot is over
-   * where the address says it is over, and the cues timed to its end are
-   * satisfiable rather than one frame out of reach for ever.
+   * them. What this buys is the landing state, not the trip.
    */
   private runCameraOnPast(op: OpJson): void {
-    const cam = this.cam;
-    if (!cam || cam.isStatic) return;
     const arg = op.arg ?? 0;
-    const to = arg === 0 ? cam.endFrame : Math.min(arg + 1, cam.endFrame);
-    if (to <= cam.frame) return;
-    this.setCameraFrame(to);
-    cam.started = false;
-    if (cam.frame >= cam.endFrame) cam.done = true;
+    CameraReplayUntil(arg === 0
+      ? () => G.g_cam_path_frames_left < 1
+      : () => G.g_cam_path_frame > arg, arg === 0 ? null : arg + 1);
     this.civilianCuesSeen();
-    this.settleCameraAction();
-    this.host.startCamera(cam);
+  }
+
+  /**
+   * `wait_queued_events_done`'s postcondition: the ring has run dry. The
+   * camera's tasks run until it has, a playing shot carried to its end --
+   * see {@link WaitRule.drainsQueuedActions}.
+   */
+  private runQueuedActionsOut(): void {
+    CameraReplayUntil(() => G.g_queued_events_pending === 0, null);
+    this.civilianCuesSeen();
   }
 
   /**
@@ -1352,139 +1272,40 @@ export class Walker {
    * Advance simulated time. `dt` is in seconds; the game runs at 60 Hz and
    * every frame-valued quantity in the data is on that clock.
    *
-   * **The camera moves after the instructions, and that is not cosmetic.**
-   * The engine runs two tasks here, not one: `EvtInterpreterLoop` and
-   * `EvtRunQueuedActions` (`FUN_00402320`), created in that order — first and
-   * third — by the scene's task list at `0x00460710`. That *is* the execution
-   * order: `ActorAlloc` (`FUN_004A6FA0`) appends a task at its parent's tail
-   * (`+0x2C`) and `TaskRunTree` (`FUN_004A71A0`) walks the `+0x28` list from
-   * the head through `+0x1C`. `CamAdvancePathFrame` (`FUN_004035E0`) lives in
-   * the second task and does three things in one call, in this order:
-   *
-   * ```c
-   * g_cam_path_frame = cur;          // publish -- BEFORE the end test
-   * DAT_009C6F28 = end - cur;        // what wait_camera_path_frame 0 reads
-   * if (end <= cur) { cur++; g_evt_action_advance = 1;
-   *                   g_queued_events_pending--; return; }
-   * cur++;
-   * ```
-   *
-   * so on the frame a path reaches its end the engine **publishes that last
-   * frame** and only then retires the action — and the interpreter, which ran
-   * earlier in the same frame, cannot act on either the retirement or the
-   * `end - cur` it just wrote until the next one. Every object update in
-   * between sees the path's final frame.
-   *
-   * The port collapses both tasks into this method, and it used to run the
-   * camera half first. So the frame a shot ended on was advanced past,
-   * `wait_queued_events_done` and `wait_camera_path_frame 0` both fell through
-   * in the *same* tick, and the `cam_play` behind them moved the camera on
-   * before `syncPortGlobals` ever read it: stage 1's `cam_play 115..179`
-   * published 178 and then 180. Frame 179 — which is what three class-0x30
-   * zombies wait on with an exact `==`, because the game times an entrance to
-   * the end of a shot by writing the shot's own end frame as the cue — was
-   * never a value the port held, and those zombies stood in their entrance
-   * clip for the rest of the stage. `tools/cam_cues.mjs` is the harness for it.
+   * **This is the interpreter's task and nothing else.** The engine's scene
+   * runs `EvtInterpreterLoop` first and the camera actor third (the task
+   * list at `0x00460710`; `ActorAlloc` appends and `TaskRunTree` walks from
+   * the head), and `queue_event` only *pushes* onto the action ring: the
+   * actions run in `CameraActorTick`'s `EvtRunQueuedActions`, which is
+   * `game/`'s and runs at the head of `GameUpdate`. So an instruction that
+   * waits on the camera reads what the camera published on the frame before,
+   * and a shot queued this frame is on screen this frame. A walker-only
+   * harness has no camera and has to run `CameraActorTick` and
+   * `CameraUpdateTick` itself after this.
    */
   tick(dt: number, fps = 60): void {
     if (this.finished || this.branch || this.parked) return;
     this.runInstructions(dt, fps);
-    this.advanceCameraPath(dt * fps);
   }
 
   /**
-   * `EvtRunQueuedActions`' share of one frame: step the path, then retire the
-   * action if the path has ended. See {@link tick} for why it is last.
-   */
-  private advanceCameraPath(frames: number): void {
-    const cam = this.cam;
-    if (cam && cam.deferred) {
-      // A stashed range is the rail's, and the rail is `G`'s: scene state
-      // (2,6)'s `CameraStepRailTick` or (2,7)'s `CameraPlayStashedPath` steps
-      // it, and the shot mirrors what the hook published. The hook runs every
-      // frame it is installed -- after its end too, where it only recomputes
-      // the frames left -- so a range moved on under it (the stage-4 boss's
-      // camera cues) starts it drawing again. `[port-only]` guard: a tick with
-      // no frame in it steps nothing, as the old `min(frames, ...)` did.
-      if (frames > 0) this.stepStashedRail(cam);
-      this.settleCameraAction();
-      return;
-    }
-    if (cam && !cam.isStatic) {
-      if (cam.done) {
-        // The handler published the shot's last frame on the tick `done` was
-        // set and was dequeued in the same call, so this is the first tick on
-        // which nothing writes the camera block. See {@link CamCommand.retired}.
-        cam.retired = true;
-      } else if (cam.started) {
-        // A shot that started during this tick's instructions has already
-        // published its first frame — `CamStartPathPlayback` calls
-        // `CamAdvancePathFrame` itself and the ring calls the handler once.
-        cam.started = false;
-      } else {
-        // The last frame this play publishes. One past the range's end for a
-        // stashed play under scene state 7 — see {@link CamCommand.pastEnd}.
-        const last = cam.endFrame + (cam.pastEnd ? 1 : 0);
-        const remaining = last - cam.frame;
-        const used = Math.min(frames, Math.max(0, remaining));
-        cam.frame += used;
-        if (cam.frame >= last) cam.done = true;
-      }
-    }
-    // `CamAdvancePathFrame` retires its action on the frame the path ends.
-    this.settleCameraAction();
-  }
-
-  /**
-   * One frame of a stashed play: the scene state's hook, then the shot's
-   * mirror of it. `done` is the frame the hook stopped publishing -- `cur >=
-   * end` under (2,6), `cur > end` under (2,7), whose `JG` lets one frame past
-   * the end through ({@link CamCommand.pastEnd}) -- and `retired` the frame
-   * after, exactly as the path play's are.
-   *
-   * [diverges] The order within the frame. The engine's `CameraActorTick`
-   * task runs `EvtRunQueuedActions` -- where `CameraDriverSelectMode` stores
-   * `g_cam_path_frame = __ftol(g_rail_frame)` -- **before** the rail hook's
-   * task steps the rail, so what the frame's actors read is the float the
-   * rail (or the stage-4 boss) left at the end of the previous frame. The
-   * port steps here and `app/`'s `syncPortGlobals` reads the result, so a
-   * frame written by a game routine reaches `g_cam_path_frame` one step on.
-   * Every value is still published in order; only its frame moves, and the
-   * stashed-range cues the port has matched were tuned against this order.
-   */
-  private stepStashedRail(cam: CamCommand): void {
-    const wasDone = cam.done;
-    const drew = cam.pastEnd ? CameraPlayStashedPath() : CameraStepRailTick();
-    if (drew) cam.frame = G.g_rail_frame;
-    cam.endFrame = G.g_stashed_path_end_frame;
-    const atEnd = cam.pastEnd
-      ? G.g_stashed_path_frame > G.g_stashed_path_end_frame
-      : G.g_stashed_path_frame >= G.g_stashed_path_end_frame;
-    if (wasDone && atEnd) {
-      cam.retired = true;
-    } else if (wasDone) {
-      // The range was moved on under the hook: it is drawing again.
-      cam.done = false;
-      cam.retired = false;
-    } else if (atEnd) {
-      cam.done = true;
-    }
-  }
-
-  /**
-   * `[port-only]` -- put the shot's cursor at `frame`, for a seek, the
-   * scrubber or a restored URL. A stashed play's cursor is the rail's, which
-   * `G` owns, so that is written too; writing only the shot would have the
-   * next rail tick put the old frame back.
+   * `[port-only]` -- put the camera at `frame` of the shot it is on, for a
+   * seek, the scrubber or a restored URL: the playing shot's cursor, or the
+   * stashed rail's, and the published frame. The block is reseated from the
+   * words by `CameraReseatFromFrame`, which the caller runs.
    */
   setCameraFrame(frame: number): void {
+    const f = Math.trunc(frame);
     const cam = this.cam;
     if (!cam) return;
-    cam.frame = frame;
     if (cam.deferred) {
-      G.g_stashed_path_frame = Math.trunc(frame);
-      G.g_rail_frame = frame;
+      G.g_stashed_path_frame = f;
+      G.g_rail_frame = f;
+    } else if (G.g_evt_action_handler === EvtActionHandler.PathPlay) {
+      G.g_cam_path_cursor = f;
     }
+    G.g_cam_path_frame = f;
+    G.g_cam_path_frames_left = cam.endFrame - f;
   }
 
   /** `EvtInterpreterLoop`'s share of one frame. See {@link tick}. */
@@ -1552,20 +1373,15 @@ export class Walker {
     if (!this.canSkip) return false;
     this.skipRequested = true;
 
-    // `if (cam_end != cam_frame) cam_end = cam_frame`. Note what this is *not*:
-    // the camera does not fast-forward to the end of its path. The move is
-    // ended where it stands, which retires the queued event and lets
-    // `wait_queued_events_done` fall through on the next frame.
-    if (this.cam && !this.cam.done) {
-      this.cam.endFrame = this.cam.frame;
-      // A stashed play's end is the rail's, in `G`; end it there too, or the
-      // next rail tick would put the old end back.
-      if (this.cam.deferred) {
-        G.g_stashed_path_end_frame = G.g_stashed_path_frame;
-      }
-      this.cam.done = true;
-      this.settleCameraAction();
-      this.host.startCamera(this.cam);
+    // `if (g_cam_path_end_frame != g_cam_path_cursor) g_cam_path_end_frame =
+    // g_cam_path_cursor` (`CheckCutsceneSkipRequest`, `0x00435F40`). Note
+    // what this is *not*: the camera does not fast-forward to the end of its
+    // path. The play is ended where it stands -- `CamAdvancePathFrame`
+    // publishes the cursor and retires on its next call -- which lets
+    // `wait_queued_events_done` fall through. The stashed rail's words are
+    // not touched: a rail under way plays out.
+    if (G.g_cam_path_end_frame !== G.g_cam_path_cursor) {
+      G.g_cam_path_end_frame = G.g_cam_path_cursor;
     }
 
     // DrawDialogueSubtitleTask tests the flag every frame and ends the task,
@@ -1813,66 +1629,70 @@ export class Walker {
   }
 
   /**
-   * `EvtEnterSceneState` -- `FUN_00403BD0`.
-   *
-   * The table cell is a hook *installer*, and the only hook this client draws
-   * from is the `cam/` path, so what the port keeps is the state itself. It
-   * matters because the row decides who owns the camera: row 2 is the path
-   * cameras, row 1 hands the camera to the player's own view angles, and
-   * leaving row 2 is what ends a scripted shot.
+   * `goto_scene_state` (0x31) and its players-alive twin (0x32): the camera
+   * handed back and the `finish_sequence` driver retired, which is `game/`'s
+   * (`EvtGotoSceneState`), and a replay's civilians -- leaving scene state 2
+   * is the one condition of `CivilianUpdate`'s off-camera arm a replay can
+   * see. See `script/civilian_life.ts`.
    */
-  enterSceneState(major: number, minor: number): void {
-    this.sceneState = { major, minor };
-    if (major !== SCENE_MAJOR_PATH_CAMERA) this.retireCiviliansOffCamera();
-    // The installer's write of both players' camera hook, which is what
-    // decides whether a hit shows its damage overlay.
-    SceneStateInstallPlayerHooks(major, minor);
+  gotoSceneState(minor: number, clearsLatches: boolean): void {
+    EvtGotoSceneState(minor, clearsLatches);
+    if (G.g_scene_state_major !== SCENE_MAJOR_PATH_CAMERA) {
+      this.retireCiviliansOffCamera();
+    }
+  }
+
+  /** `set_action_drain_mode` (0x33): `advance = mode; pending += delta`. */
+  setActionDrainMode(mode: number, delta: number): void {
+    EvtSetActionDrainMode(mode, delta);
   }
 
   /**
-   * `goto_scene_state`'s retirement of the outstanding `queue_event 0x21`.
+   * `queue_event` (0x30): push one action onto the ring.
    *
-   * Also drops the camera the `finish_sequence` was driving: opcode 0x31
-   * parks the ring's handler slot on a bare `RET`, which is what stops the
-   * per-minor camera driver running. In this client that means the deferred
-   * play stops advancing -- it is already at its end in every shipped case,
-   * because a `wait_camera_path_frame 0` precedes the `goto_scene_state`.
-   */
-  retireSceneSequence(): void {
-    // Parking the handler slot is what stops the driver, and the driver is
-    // what owns `g_camera_free`: with none installed the flag keeps whatever
-    // value the last shot left it, which is the engine's bare `RET`.
-    G.g_camera_action_driver = CameraActionDriver.None;
-    this.settleCameraAction();
-    this.ring.retire();
-  }
-
-  /** `set_action_drain_mode`'s signed `pending += delta`. */
-  addQueuedEvents(delta: number): void {
-    this.ring.add(delta);
-  }
-
-  /** Public because `wait_queued_events_done` settles it. See `waits/`. */
-  settleCameraAction(): void {
-    this.ring.settle(this.cam);
-  }
-
-  /**
-   * `queue_event` (0x30): queue one action and run it.
+   * `EvtOpQueueEvent30` (`FUN_0045F7F0`) runs nothing: it records the
+   * instruction, adds one to `g_queued_events_pending` and moves on. The
+   * action runs when `EvtRunQueuedActions` reaches it, inside
+   * `CameraActorTick` -- this frame if the slot is free, later if a shot or
+   * a driver still holds it. See `game/camera/actions.ts`.
    *
-   * The action is a table lookup — `script/state/camera_action.ts` — and not a
-   * chain of `if (op.action === "...")` here. It was 140 lines of that, which
-   * is the shape `ops/` exists to remove: which branch retires the ring was a
-   * fact spread over the whole method, and the ring and camera accounting bugs
-   * lived in exactly that spread.
-   *
-   * `EvtOpQueueEvent30` adds one to `g_queued_events_pending` for every action
-   * it queues; each handler says for itself whether it takes that one back.
+   * What is kept here is the panels' description: the shot a `cam_play`
+   * names and the branch previews a `store_six` carries.
    */
   applyQueueEvent(op: OpJson): string | undefined {
-    this.ring.queued();
-    const action = (op.action ? ACTIONS[op.action] : undefined) ?? UNMODELLED;
-    return action(this, op);
+    const sel = op.sel ?? 0;
+    const args = (op.args ?? []).map((v) => v | 0);
+    EvtQueueAction(sel, args);
+    if (op.action === "cam_play") {
+      const start = op.start ?? 0;
+      const end = op.end ?? 0;
+      const flags = op.flags ?? 0;
+      this.shot = {
+        slot: op.slot ?? -1,
+        startFrame: start,
+        endFrame: end,
+        flags,
+        isStatic: start === end,
+        deferred: start !== end && (flags & 2) !== 0,
+        file: op.cam?.file ?? null,
+        pathIndex: op.cam?.path ?? null,
+      };
+      this.host.startCamera({
+        ...this.shot, frame: start, done: false, retired: false,
+        pastEnd: false,
+      });
+      return this.shot.deferred
+        ? `stashes ${start}..${end} for scene state 6/7`
+        : this.shot.isStatic ? "static pose" : undefined;
+    }
+    if (op.action === "store_six" && op.branch_preview) {
+      this.branchPreview = op.branch_preview;
+      return `${op.branch_preview.length} branch preview shots`;
+    }
+    if (op.action === "finish_sequence") {
+      return op.camera_state ? `camera state ${op.camera_state}` : undefined;
+    }
+    return undefined;
   }
 
   /**
@@ -2046,7 +1866,7 @@ export class Walker {
     // That is a real bound, not a tidy-up: it is why a miscounted action costs
     // at most one block rather than deadlocking the stage.
     if (this.queuedEventsPending !== 0) this.ringResidue += 1;
-    this.ring.reset();
+    EvtLoadBlockProgramRing();
     // **The spawn markers do not clear here, and they used to.**
     //
     // `FUN_0045EBC0` is the whole of the engine's block change: it picks the

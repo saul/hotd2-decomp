@@ -23,6 +23,7 @@ import { sourceOf } from "./bundles";
 import type { StageSlot } from "./bundles";
 import { StageScene } from "../render/stagescene";
 import { CamPaths } from "../game/camera/curve";
+import { SetCameraPaths } from "../game/tables";
 import { RailLayer } from "../render/overlays";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
@@ -119,6 +120,9 @@ export async function loadStageInto(p: Player): Promise<void> {
   const bundle = await loadStage(src, entry);
   if (superseded()) return;
   p.paths = new CamPaths(bundle.cam);
+  // The same curves, for the port's `CamEvalPath7`: every camera routine in
+  // `game/camera/` evaluates them there, with no renderer attached.
+  SetCameraPaths(p.paths);
   const scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
   // A bundle read out of the browser's own cache hands over a `blob:` URL, and
   // a 58 MB blob nothing revokes is 58 MB the tab keeps until it closes. The

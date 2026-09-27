@@ -7,6 +7,7 @@
  */
 import type { OpImpl } from "../walker";
 import { G } from "../../game/globals";
+import { CheckpointResetCamera } from "../../game/camera/actions";
 
 export const OPS: Record<number, OpImpl> = {
 
@@ -37,59 +38,46 @@ export const OPS: Record<number, OpImpl> = {
     //     advance_step
     //
     // `EvtOpGotoSceneState31` (`FUN_0045F870`) enters scene state (1, minor),
-    // parks the action ring's handler on a bare RET -- which is what tears
-    // down the camera driver the `finish_sequence` installed -- and takes one
-    // off `g_queued_events_pending`, retiring that `0x21`. Cell (1,3) is
-    // `CameraFromViewAngles`: the pose stops coming from the `cam/` path and
-    // starts coming from the player's own view angles at 0x009A60CC/D0/D4.
-    //
-    // The port draws the camera from the path, not from a view struct, so what
-    // it takes from this is the state, the retirement and the camera-override
-    // clear. `g_evt_cam_override_valid` used to be listed here as read-but-not-
-    // modelled, on the grounds that only the row-5 hooks read it and the port
-    // had none; `seatCamera` is one now, so the clear is real work and is done.
-    // Two effects remain unmodelled and are listed rather than buried:
-    // clearing `g_camera_ease_eye`, and clearing bit 0 of both players' flags,
-    // which hides the on-screen player rigs -- this client draws none.
-    // [diverges]
+    // stamps it, drops the camera mode, the override latch and the eye ease,
+    // parks the action slot and takes one off `g_queued_events_pending` --
+    // retiring the `0x21`, whose driver never retires itself. Cell (1,3) is
+    // `CameraFromViewAngles`. All of it is `EvtGotoSceneState` in
+    // `game/camera/actions.ts`; clearing bit 0 of both players' flags hides the
+    // on-screen player bodies, which this client draws none of.
     0x31: {
-      status: "tracked",
+      status: "done",
       run: (w, op) => {
         const minor = op.scene_state_minor ?? 3;
-        w.enterSceneState(1, minor);
-        w.retireSceneSequence();
-        w.camOverrideValid = false;
+        w.gotoSceneState(minor, true);
         return `scene state 1/${minor}`;
       },
     },
     0x32: {
       // `EvtOpGotoSceneStateWhenPlayersAlive32` is 0x31 plus a park: it sets
       // the yield latch and re-runs every frame until a player is out of the
-      // death -> continue -> revive chain (or still has lives). It also omits
-      // two of 0x31's clears. This client has no player death, so the gate is
-      // always open and the two omitted clears are ones it does not model
-      // either -- it behaves as 0x31. [diverges]
+      // death -> continue -> revive chain (or still has lives), and it leaves
+      // the override latch and the eye ease alone. The gate is not modelled
+      // here -- it is the players', not the camera's -- so it behaves as open.
+      // [diverges]
       status: "tracked",
       run: (w, op) => {
         const minor = op.scene_state_minor ?? 3;
-        w.enterSceneState(1, minor);
-        w.retireSceneSequence();
-        // 0x32 omits two of 0x31's clears; the override is not one of them.
-        w.camOverrideValid = false;
+        w.gotoSceneState(minor, false);
         return `scene state 1/${minor} -- the alive gate is always open here`;
       },
     },
     0x33: {
-      // `EvtOpSetActionDrainMode33`: `mode = op0; pending += op1`, a signed
-      // add. All 128 in the game carry -1, so this is the *other* script-side
-      // retirement -- it cuts a running `cam_play` short and lets the queued
-      // `finish_sequence` behind it start. The dequeue mode itself is not
-      // modelled; the ring here runs an action the moment it is queued.
-      status: "tracked",
+      // `EvtOpSetActionDrainMode33` (`FUN_0045F9F0`):
+      // `g_evt_action_advance = op0; g_queued_events_pending += op1`. All 128
+      // in the game carry `2, -1`: take back the `finish_sequence` in the slot
+      // and let the ring dequeue what is queued behind it, first calling it on
+      // the frame after.
+      status: "done",
       run: (w, op) => {
+        const mode = op.drain_mode ?? 0;
         const delta = (op.pending_delta ?? 0) | 0;
-        w.addQueuedEvents(delta);
-        return `drain mode ${op.drain_mode ?? 0}, pending ${delta >= 0 ? "+" : ""}${delta}`;
+        w.setActionDrainMode(mode, delta);
+        return `drain mode ${mode}, pending ${delta >= 0 ? "+" : ""}${delta}`;
       },
     },
 
@@ -121,9 +109,10 @@ export const OPS: Record<number, OpImpl> = {
       status: "tracked",
       run: (w) => {
         w.checkpointBlock = w.block;
-        // `MOV dword ptr [0x009ca094], EBX` at `0x0045EF12`, EBX zeroed at
-        // `0x0045EEC7`: a checkpoint lets go of a held camera driver.
-        G.g_camera_driver_held = 0;
+        // The camera half: the published frame to 0, scene state (1,3), the
+        // frames-left sentinel, the override latch, the starters' reseat, the
+        // eye ease, the held driver, the roll channel and the fixed eye.
+        CheckpointResetCamera();
         // The walker's scene, which `G.g_scene_index` mirrors a frame
         // later: the first block's checkpoint runs before that copy.
         const row = G.g_route_history[w.script.scene ?? G.g_scene_index];

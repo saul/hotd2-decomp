@@ -40,6 +40,8 @@ import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
 import { vec3, type Vec3 } from "./vec";
 import { makeCameraSlots, type CameraCandidate } from "./camera/slot_table";
+import { CameraActorInit } from "./camera/actions";
+import { MatIdentity } from "./matrix";
 import { makeEntityLights } from "./entity_light";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
@@ -928,17 +930,24 @@ export const G = {
    */
   g_camera_block_target: vec3(),
   /**
-   * `[port-only]` — the view `UpdateSceneViewAndLight` (`FUN_00401F40`) built
-   * this frame, as the draw reads it: the block's eye, the point its (nodded)
-   * angles face, and its roll. The engine builds its view matrices from the
-   * block **at the end of `CameraActorTick`**, before the scene state's hook
-   * and every actor run, and draws with those; anything that writes the block
-   * later in the frame shows on the next one. These three are that snapshot.
-   * See `SceneViewApplyShake` in `camera/shake.ts`.
+   * `g_camera_blocks` — `0x009A6040` (block 0's `+0x40`), and
+   * `g_camera_world_to_view` — `0x009A6000` (`+0x00`): the view-to-world and
+   * world-to-view matrices `UpdateSceneViewAndLight` (`FUN_00401F40`) builds
+   * from the block's eye and angles at the end of `CameraActorTick`, sixteen
+   * floats each in the matrix stack's own layout. Everything after the camera
+   * actor in the frame -- the players, the shot test, every actor's
+   * `ActorRegisterCameraPoint` -- sees the camera through these, and the draw
+   * places the three.js camera from them. See `camera/view.ts`.
    */
-  g_camera_block_view_eye: vec3(),
-  g_camera_block_view_target: vec3(),
-  g_camera_block_view_roll_bams: 0,
+  g_camera_view_to_world: MatIdentity(),
+  g_camera_world_to_view: MatIdentity(),
+  /**
+   * `g_camera_index` — `0x009C6F00`. Which of the four camera blocks the view
+   * is built from and the shake nods. `set_global` (`EvtActionSetGlobal14`),
+   * `CameraBlocksReset` and `CameraResetForPathShot` write it, and every
+   * shipped write is 0 -- the only block the port has.
+   */
+  g_camera_index: 0,
   /**
    * `g_cam_path_target` — 0x009C70D8. The deferred pose block's target, and
    * the fallback `SelectCameraLookAtTarget` uses when nothing is registered.
@@ -1005,7 +1014,7 @@ export const G = {
    * **Which of two rules produces it depends on the shot**, and the shot says
    * so: `EvtActionFinishSequence21` installs a per-frame driver out of
    * `g_camera_action_starters` (0x00576B20), indexed by the scene-state minor
-   * it has just entered. See {@link g_camera_action_driver}.
+   * it has just entered. See {@link g_evt_action_handler}.
    *
    * * Minors 4 and 6 — 572 of the 836 `finish_sequence` sites — install
    *   `CameraDriverSelectMode` (`FUN_00402650`), which clears this on every
@@ -1055,27 +1064,36 @@ export const G = {
    */
   g_camera_hand_back_variant: 0,
   /**
-   * `[port-only]` — which starter last ran, standing in for the function
-   * pointer `EvtActionFinishSequence21` parks in `g_evt_action_handler`
-   * (0x009A610C).
-   *
-   * The port cannot put a function pointer in a snapshot, and the identity is
-   * all anything needs: the three starters install two different drivers, and
-   * `goto_scene_state` parks the slot on a bare `RET`. Written by the
-   * `finish_sequence` action and cleared by `Walker.retireSceneSequence`,
-   * which is where the engine writes and parks it.
+   * `g_evt_action_handler` — `0x009A610C`, as the port's `EvtActionHandler`
+   * identity: the routine `EvtRunQueuedActions` calls once a frame from
+   * inside `CameraActorTick`. The ten `queue_event` actions are dequeued into
+   * it, and the persistent ones put their own per-frame routine there -- a
+   * `cam_play`'s `CamAdvancePathFrame`, a `finish_sequence`'s starter and
+   * then its driver. See `camera/actions.ts`.
    */
-  g_camera_action_driver: 0,
+  g_evt_action_handler: 0,
   /**
-   * `[port-only]` — the handler in {@link g_camera_action_driver} was
-   * installed by an action the interpreter ran **this frame**, which has
-   * already made the call `EvtRunQueuedActions` would make: a `cam_play`'s
-   * `CamStartPathPlayback` publishes its first frame itself, and a
-   * `finish_sequence` leaves its starter for the next frame. The port runs an
-   * action the moment it is queued, so the frame's queued-action call skips
-   * once. See `CameraRunQueuedAction`.
+   * `g_evt_action_advance` — `0x009A1A10`. What `EvtRunQueuedActions` does
+   * with the ring after the handler's call: 0, the handler is still running;
+   * 1, it finished -- dequeue the next action and call it now; 2, dequeue it
+   * and call it next frame. Every retiring handler writes 1;
+   * `finish_sequence` writes 0; `set_action_drain_mode` writes its operand;
+   * a scene starts at 2.
    */
-  g_camera_action_fresh: 0,
+  g_evt_action_advance: 2,
+  /**
+   * The ring of queued actions -- `0x009C9060`, sixteen instruction pointers
+   * between the read cursor `0x009A34D0` and the write cursor `0x009CA108` --
+   * as the records themselves. `queue_event` pushes; `EvtRunQueuedActions`
+   * shifts.
+   */
+  g_evt_action_ring: [] as { sel: number; args: number[] }[],
+  /**
+   * `g_evt_action_operands` — `0x009A6184`, the eight dwords a dequeued
+   * action's operands are copied into. A handler reads them every frame it
+   * runs, and `hold_camera_preset` counts its first one down in place.
+   */
+  g_evt_action_operands: [0, 0, 0, 0, 0, 0, 0, 0],
   /**
    * `g_camera_starter_reseats` — `0x009C6F3C`. While set, the three camera
    * action starters run `CameraResetForPathShot` and seat before installing
@@ -1394,6 +1412,15 @@ export const G = {
    * (`FUN_00403BB0`), which leaves the stamp alone.
    */
   g_scene_state_major: 0,
+  /**
+   * `g_scene_state_minor` — `0x009C6F14`, and `g_scene_state_minor_entered`
+   * — `0x009C6F10`: the minor halves of the two pairs. `EvtEnterSceneState`
+   * writes both, its unstamped twin the live one only, and
+   * `UpdateSceneViewAndLight` copies live into stamped at the end of every
+   * camera actor's task. See `camera/hooks.ts`.
+   */
+  g_scene_state_minor: 0,
+  g_scene_state_minor_entered: 0,
   /**
    * `g_app_state` — 0x009C8E98. Which of the game's top-level screens is
    * running. **The port sits at {@link AppState.InPlay}, 6**, because that
@@ -2147,9 +2174,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
-  G.g_camera_block_view_eye = vec3();
-  G.g_camera_block_view_target = vec3();
-  G.g_camera_block_view_roll_bams = 0;
+  G.g_camera_view_to_world = MatIdentity();
+  G.g_camera_world_to_view = MatIdentity();
   G.g_cam_path_target = vec3();
   G.g_cam_path_eye = vec3();
   G.g_cam_path_pitch_bams = 0;
@@ -2164,7 +2190,6 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_block_pitch_bams = 0;
   G.g_camera_block_yaw_bams = 0;
   G.g_camera_block_roll_bams = 0;
-  G.g_camera_action_fresh = 0;
   G.g_camera_starter_reseats = 1;
   G.g_camera_update_hook = 0;
   G.g_cam_path_cursor = 0;
@@ -2189,7 +2214,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_mode = 0;
   G.g_camera_hand_back_started = 0;
   G.g_camera_hand_back_variant = 0;
-  G.g_camera_action_driver = 0;
+  G.g_evt_action_operands = [0, 0, 0, 0, 0, 0, 0, 0];
   // Not in `ResetSceneOnEnter` — the engine's copy is only ever zeroed by the
   // wait that owns it. It is here because this is the port's "nothing is
   // half-done" call, and a seek that lands mid-`wait_enemies_alive` would
@@ -2230,9 +2255,18 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
-  G.g_scene_state_major_entered = 0;
-  G.g_scene_state_major = 0;
   G.g_cam_path_frame = 0;
+  // The scene's task list: `EvtLoadBlockProgram`'s ring reset and
+  // `CameraActorInit` -- which resets the camera block, enters scene state
+  // (1, 1) and parks the action slot -- then `CameraClearHookAndPose`
+  // (`FUN_0040C340`), which `LoadSceneAndReset` calls after the list and so
+  // leaves the scene state's hook a no-op.
+  CameraActorInit();
+  G.g_camera_update_hook = 0;
+  G.g_camera_eye = vec3();
+  G.g_camera_pitch_bams = 0;
+  G.g_camera_yaw_bams = 0;
+  G.g_camera_roll_bams = 0;
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;

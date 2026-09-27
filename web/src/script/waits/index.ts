@@ -21,8 +21,7 @@ const RULES: readonly WaitRule[] = [
 ];
 
 /**
- * The rules by opcode, with the same duplicate check `ops/` and
- * `state/camera_action.ts` carry: `new Map(entries)` keeps the last of two
+ * The rules by opcode, with the same duplicate check `ops/` carries: `new Map(entries)` keeps the last of two
  * entries for one key and says nothing, and two rules claiming one wait is a
  * gate evaluated by the rule that happens to be listed second.
  */

@@ -26,8 +26,10 @@
  * players, the slot fill, every actor -- sees the eye it wrote. `[proved]`
  */
 import { G } from "../globals";
-import { MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
-         MatrixRotateZ, MatrixTransformPoint, MatrixTranslate,
+import { SceneStateInstallPlayerHooks } from "../effects/damage_overlay";
+import { MatCopy, MatIdentity, MatrixGetTranslation, MatrixLoadIdentity,
+         MatrixRotateY,
+         MatrixTransformPoint, MatrixTranslate,
          RADIANS_TO_BAMS } from "../matrix";
 import { vec3 } from "../vec";
 import { CameraUpdateHook } from "./driver";
@@ -58,15 +60,39 @@ export function CameraUpdateTick(): void {
 }
 
 /**
- * `[port-only]` -- the camera half of the `g_scene_state_table` installers,
- * the `g_camera_update_hook` store each makes. The players' half is
- * `SceneStateInstallPlayerHooks` in `effects/damage_overlay.ts`; the walker's
- * `enterSceneState` calls both, which is what `EvtEnterSceneState`'s jump into
- * the cell does. Every other cell is `SceneStateInvalidHang` and the shipped
- * scripts reach none of them, so they install nothing here.
+ * `EvtEnterSceneState` — `FUN_00403BD0`.
+ *
+ * ```
+ * g_scene_state_minor = g_scene_state_minor_entered = minor;
+ * g_scene_state_major = g_scene_state_major_entered = major;
+ * JMP g_scene_state_table[major * 9 + minor]           ; 0x00576C14
+ * ```
+ *
+ * Its callers are `CameraActorInit`, `CameraBlocksReset` and
+ * `EvtActionSceneState11`. `[proved]`
  */
-export function SceneStateInstallCameraHook(major: number,
-                                            minor: number): void {
+export function EvtEnterSceneState(major: number, minor: number): void {
+  G.g_scene_state_major_entered = major;
+  G.g_scene_state_minor_entered = minor;
+  EvtEnterSceneStateUnstamped(major, minor);
+}
+
+/**
+ * `EvtEnterSceneStateUnstamped` — `FUN_00403BB0`: the same without the
+ * `_entered` pair, which `UpdateSceneViewAndLight` stamps at the end of the
+ * camera actor's task. `EvtActionFinishSequence21`, the checkpoint's
+ * `ResetSceneCombatState` and the two `goto_scene_state` opcodes call it; the
+ * last two stamp the pair themselves. `[proved]`
+ *
+ * The cell is an installer: both players' camera hook
+ * (`SceneStateInstallPlayerHooks`) and `g_camera_update_hook`. Every other
+ * cell is `SceneStateInvalidHang` (`FUN_00402710`) and the shipped scripts
+ * reach none of them, so they install nothing here.
+ */
+export function EvtEnterSceneStateUnstamped(major: number, minor: number): void {
+  G.g_scene_state_minor = minor;
+  G.g_scene_state_major = major;
+  SceneStateInstallPlayerHooks(major, minor);
   const hook = SCENE_STATE_CAMERA_HOOKS[major * 9 + minor];
   if (hook !== undefined) G.g_camera_update_hook = hook;
 }
@@ -129,23 +155,17 @@ const _q = vec3();
  * ```
  *
  * `g_camera_blocks` is the matrix `UpdateSceneViewAndLight` built earlier in
- * the frame, `T(eye) Ry(yaw) Rx(pitch) Rz(roll)` of the block. `[proved]` for
- * the eye. The three angles are what `FUN_00401C50` recovers from the matrix
- * the routine built out of the block's -- `(block.yaw - 0x8000) & 0xFFFF`,
- * `-block.pitch` and `block.roll` -- `[likely]`: a decomposition of the
- * rotation it was just given, and nothing in the port reads them in (1,3).
+ * the frame. `[proved]` for the eye. The three angles are what `FUN_00401C50`
+ * recovers from the matrix the routine built out of the block's --
+ * `(block.yaw - 0x8000) & 0xFFFF`, `-block.pitch` and `block.roll` --
+ * `[likely]`: a decomposition of the rotation it was just given, and nothing
+ * the port has reads them in (1,3).
  */
 export function CameraFromViewAngles(): void {
   G.g_camera_yaw_bams = (G.g_camera_block_yaw_bams - 0x8000) & 0xffff;
   G.g_camera_pitch_bams = -G.g_camera_block_pitch_bams;
   G.g_camera_roll_bams = G.g_camera_block_roll_bams;
-  const e = G.g_camera_block_view_eye;
-  const m = _m;
-  for (let i = 0; i < 16; i++) m[i] = i % 5 === 0 ? 1 : 0;
-  MatrixTranslate(m, e.x, e.y, e.z);
-  MatrixRotateY(m, G.g_camera_block_yaw_bams);
-  MatrixRotateX(m, G.g_camera_block_pitch_bams);
-  MatrixRotateZ(m, G.g_camera_block_roll_bams);
+  const m = MatCopy(_m, G.g_camera_view_to_world);
   MatrixTranslate(m, 0, -CAMERA_EYE_DROP, 0);
   MatrixGetTranslation(m, G.g_camera_eye);
 }
@@ -257,7 +277,7 @@ export function CameraImpulseShakeTick(): void {
   if (G.g_camera_impulse_request !== 0 && G.g_camera_impulse_frames === 0
       && G.g_camera_impulse_lock === 0) {
     const m = _m;
-    for (let i = 0; i < 16; i++) m[i] = i % 5 === 0 ? 1 : 0;
+    MatrixLoadIdentity(m);
     MatrixRotateY(m, G.g_camera_impulse_yaw_bams);
     _p.x = 0; _p.y = 0; _p.z = -1;
     MatrixTransformPoint(m, _p, _q);

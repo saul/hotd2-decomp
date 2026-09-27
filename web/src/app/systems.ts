@@ -8,8 +8,9 @@
 import type { Context, System, Tick } from "../core/system";
 import type { RenderContext } from "../render/context";
 import type { CameraRig } from "../render/camera";
-import { CamSeatPathFrame } from "../game/camera/path";
+import { CameraReseatFromFrame } from "../game/camera/view";
 import type { CamPaths } from "../game/camera/curve";
+import { MatCopy, MatrixTransformPoint } from "../game/matrix";
 import { GameUpdate } from "../game/director";
 import { SceneLightArrayUpdate } from "../game/scene_lights";
 import { ActorIsEnemy } from "../game/registry";
@@ -30,6 +31,8 @@ import { SpawnHordePlacers } from "../game/class40";
 import { T } from "../game/tables";
 import type { Rng } from "../core/rng";
 import type { Events } from "../core/events";
+
+const _p = { x: 0, y: 0, z: 0 };
 
 /** What the renderer answers for the port. See `game/host.ts`. */
 export interface HostBackend {
@@ -85,13 +88,6 @@ export class GameSystem implements System {
   /** Filled in by the host once the character layer exists. */
   backend: HostBackend | null = null;
 
-  /**
-   * The camera, as the port sees it: `ctx.view`, held for the closures below.
-   *
-   * `update` is the only writer and it writes it every tick before it runs
-   * the frame, so the host never reads one from a previous stage.
-   */
-  private view: CameraFrame | null = null;
   /** The stage's camera paths, held for `camPath` the same way. */
   private paths: CamPaths | null = null;
   private readonly host: GameHost = {
@@ -101,11 +97,12 @@ export class GameSystem implements System {
       this.backend?.boneMatrix?.(at, bone, out) ?? false,
     boneSphere: (at, bone, out) =>
       this.backend?.boneSphereWorld?.(at, bone, out) ?? null,
-    // The two matrices of the engine's camera block. `ctx.view` already holds
-    // both; the carried props cross between the spaces with them.
+    // The two matrices of the engine's camera block, as
+    // `UpdateSceneViewAndLight` built them in this tick's `CameraActorTick`.
+    // The carried props cross between the spaces with them.
     cameraMatrices: (w2v, v2w) => {
-      if (!this.view) return false;
-      this.view.copyMatrices(w2v, v2w);
+      MatCopy(w2v, G.g_camera_world_to_view);
+      MatCopy(v2w, G.g_camera_view_to_world);
       return true;
     },
     // `CamEvalObjectPath6`. The curves are in the camera bundle and their
@@ -116,11 +113,17 @@ export class GameSystem implements System {
     // the game-over fly-over's. The curves are the camera bundle's.
     camPath: (slot) => this.paths?.paths.get(slot) ?? null,
     // The camera looks down its own local -Z, which is where the player is.
-    aimPoint: (ahead, out) => this.view?.toWorld(0, 0, -ahead, out),
+    aimPoint: (ahead, out) => {
+      _p.x = 0; _p.y = 0; _p.z = -ahead;
+      MatrixTransformPoint(G.g_camera_view_to_world, _p, out);
+    },
     // A point in the camera's own space, in world coordinates. The engine
     // unprojects a screen offset at a depth to get one -- see
     // `ThrowerPickLandingPoint`.
-    viewPoint: (x, y, z, out) => this.view?.toWorld(x, y, z, out),
+    viewPoint: (x, y, z, out) => {
+      _p.x = x; _p.y = y; _p.z = z;
+      MatrixTransformPoint(G.g_camera_view_to_world, _p, out);
+    },
     // `obj+0x70/74/78`: the actor's tracked point in the camera's own space,
     // handed over exactly as the engine holds it. Camera-local -Z is forward
     // in three.js and in the engine both, so `toView` is already the right
@@ -134,15 +137,14 @@ export class GameSystem implements System {
     // bodies at the viewer instead of away.
     viewSpaceOf: (at, out) => {
       const a = ActorByAt(at);
-      if (!a || !this.view) return false;              // no camera at all
-      this.view.toView(a.lookAt.x, a.lookAt.y, a.lookAt.z, out);
+      if (!a) return false;
+      MatrixTransformPoint(G.g_camera_world_to_view, a.lookAt, out);
       return true;
     },
     // The same transform as `viewSpaceOf`, for a point nothing owns: an
     // impact sprite's size and the muzzle effects' aim both come from it.
     viewSpaceOfPoint: (p, out) => {
-      if (!this.view) return false;
-      this.view.toView(p.x, p.y, p.z, out);
+      MatrixTransformPoint(G.g_camera_world_to_view, p, out);
       return true;
     },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),
@@ -186,25 +188,13 @@ export class GameSystem implements System {
   }
 
   update(ctx: Context, t: Tick): void {
-    this.view = ctx.view;
     this.paths = (ctx as Partial<RenderContext>).paths ?? null;
-    // `g_camera_yaw_bams` — class 0x31 wants the yaw on its own, not the whole
-    // matrix: the leap aside builds its landing point with a bare
-    // `MatrixRotateY` and the wall search refuses unless the actor faces
-    // within 0x2000 of it. `ResolveHit`'s directional death reads it too.
-    //
-    // **Above the frozen return, because where the camera points is not a
-    // function of elapsed time.** It was below, and the paused path then
-    // drained the shot queue against whatever yaw the last unpaused tick had
-    // left: pause, turn to look at something, shoot it, and the kill picked
-    // its direction from where you had been facing. That drain is gone — see
-    // below — so what still wants this line is everything else that reads the
-    // yaw while the transport is stopped: the globals panel, and a snapshot
-    // taken in free roam, which turns the camera every frame with no tick
-    // under it.
-    G.g_camera_yaw_bams = ctx.view.yawBams;
-    // ...and the pitch beside it: the horde's dive lifts its arc by it.
-    G.g_camera_block_pitch_bams = ctx.view.pitchBams;
+    // No camera word is written here. `g_camera_yaw_bams` and the gameplay
+    // eye are the scene state's hook's (`CameraUpdateTick`), and the view is
+    // `UpdateSceneViewAndLight`'s, both inside the tick; they used to be
+    // copied in from the three.js camera, which put the drawn camera's heading
+    // where the engine keeps the players' -- two different things under (2,4),
+    // whose hook holds the heading while the aim swings.
     // The gun lights are **not** built here -- see `GunLightBuildSystem`.
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes
@@ -386,11 +376,9 @@ export function drawSystem<C extends Context>(id: string,
  */
 export function syncPortGlobals(w: Walker, freeRoam: boolean,
                                 eye: { x: number; y: number; z: number }): void {
-  G.g_camera_fixed_eye_y = w.fixedEyeY;
-  // `g_camera_block_eye` is the camera block's own eye, and `cam_play`
-  // owns it — `CamAdvancePathFrame` writes it from the curve. Free roam has
-  // no path and therefore no block, so there it is taken from the viewer's
-  // camera instead, which is the only thing standing in for one.
+  // `g_camera_block_eye` is the camera block's own eye, and the camera's
+  // routines own it. Free roam has no camera running and no tick, so there it
+  // is taken from the viewer's camera instead, for the panels.
   if (freeRoam) {
     G.g_camera_block_eye.x = eye.x;
     G.g_camera_block_eye.y = eye.y;
@@ -399,26 +387,11 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
   // `ColiLoadForScene` indexes its file list with this, so it is zero-based
   // and scene 1 is stage 2.
   G.g_scene_index = w.script.scene ?? 0;
-  // Class 0x24's set-pieces are choreographed against the camera: every one
-  // of their removal and freeze triggers is a `cp_` slot plus a frame.
-  G.g_active_cam_path = w.cam ? w.cam.slot : -1;
-  // `g_scene_state_major_entered` — 0x009C6F08, and the first thing
-  // `IsPlayerAttackable` (`FUN_00409DC0`) tests. The walker already tracks the
-  // pair `EvtEnterSceneState` records; this is the half the combat code reads,
-  // and without it here nothing in the game would ever be allowed to attack.
-  G.g_scene_state_major_entered = w.sceneState.major;
-  // ...and the live one beside it, which the walker does not keep apart --
-  // see `g_scene_state_major` in `game/globals.ts`.
-  G.g_scene_state_major = w.sceneState.major;
-  // `__ftol` -- both camera drivers end on `g_cam_path_frame = __ftol(...)`,
-  // so this global is an **integer** that steps by exactly one a frame. The
-  // walker's clock is a float (`dt * 60`), and handing that straight over
-  // made every `===` test against it a coin toss: at a fixed 1/60 the value
-  // stays integral and matches, but under a browser's variable frame time it
-  // goes fractional and a cue frame is simply never equal to it. Class 0x10's
-  // removal cue never fired, so a civilian never left `g_civilians_alive` and
-  // `wait_scripted_actors` waited for ever.
-  G.g_cam_path_frame = w.cam ? Math.trunc(w.cam.frame) : 0;
+  // No camera word and no scene state is copied in here any more: the path,
+  // the published frame and the scene state are the engine's own globals,
+  // written by the action ring, the scene state's hook and the goto opcodes
+  // where the engine writes them. They used to be copied out of the walker
+  // once a frame, which put every one of them a task out of place.
   // `g_script_flags` is **not** copied here any more, and that is the point.
   // The walker used to keep its own `Set` of the flags `set_script_flag` had
   // raised and this line rebuilt `G.g_script_flags` from it once a frame — so
@@ -433,151 +406,25 @@ export function syncPortGlobals(w: Walker, freeRoam: boolean,
 }
 
 /**
- * Seat the camera block on this frame of the shot the script is playing.
- *
- * **Why this lives in `app/` and not in `render/camera.ts`, where it used to.**
- * Seating the block is an engine decision: it evaluates a `cam/` curve and
- * writes `g_camera_block_eye` and `g_cam_path_target`, two globals a snapshot
- * carries. A renderer that calls `CamAdvancePathFrame` is the port being
- * driven from `render/`, which is exactly what `render-drives-the-port`
- * counts. The evaluation itself moved to `game/camera/curve.ts` — it is
- * Hermite maths over bundle keys and never needed three.js — and what is left
- * is composition: taking the walker's shot, the walker's roll flag and the
- * rig's two chrome toggles and handing them to `CamSeatPathFrame`. That is
- * this layer's whole job, and it is the same job `syncPortGlobals` above does.
- *
- * `force` seats the block even though the shot's action has retired. The
- * engine never needs it — it has no seek — but arriving at a deep link with an
- * eased look-at of (0,0,0) points the camera at the world origin.
+ * Draw the port's camera now, for a path that runs no game tick -- a branch
+ * taken by hand, a preview ended, a toggle. The view is `G`'s and nothing is
+ * written.
  */
-export function seatCamera(rig: CameraRig, ctx: RenderContext,
-                           force = false): void {
-  const w = ctx.walker;
-  if (!w || !rig.scripted) return;
-  const cam = w.cam;
-  if (!cam) return;
-  // **The game-over screen's camera is the port's.** Phase 0 of
-  // `GameOverRunPhase` replaces the scene's task list, so the queued camera
-  // action the walker's shot stands for is gone, and `GameOverCameraFlyTick`
-  // writes the block itself -- level, roll 0.
-  if (G.g_stage_unloaded !== 0) {
-    rig.pose.roll = 0;
-    return;
-  }
-  // **A shot that has run out moves to where the next one picks up.**
-  //
-  // `FUN_00402890` and `FUN_00402740`, the two row-5 camera hooks, both open
-  // with `if (g_cam_path_frames_left < 0 && g_evt_cam_override_valid)
-  // FUN_00403DB0(...)`, and that routine re-seats `g_active_cam_path` and the
-  // path frame from the `(path, frame)` pair `g_script_branch_var` selects out
-  // of the last `store_six`. So the camera does not hold its own last frame
-  // through a fight; it sits at the frame the script has already said the next
-  // shot continues from, and the join is seamless.
-  //
-  // It lives here rather than in `game/` because the port's shot is the
-  // walker's `CamCommand`, not `g_active_cam_path` — the composition root is
-  // the layer that can see both. [diverges] the engine tests
-  // `g_cam_path_frames_left < 0`, strictly past the end; `cam.done` is true at
-  // the end, so the re-seat happens one frame earlier here. Both spend the
-  // whole wait at the same frame, which is what is on screen.
-  //
-  // **`CamCommand.retired` is now exactly that test**, and closing this
-  // divergence is one token — `cam.retired` here. It is deliberately not
-  // taken: `CamAdvancePathFrame` writes `g_cam_path_frames_left = end - cur`
-  // *before* `cur++`, so on the end frame it is 0 and only the tick after is
-  // it negative, which is `retired` and not `done`. What that would change is
-  // which frame a branch's preview shot arms on, at every `store_six` in the
-  // game — a second behaviour change, and one nothing has reported. The cost
-  // of leaving it is that a shot whose end lands while `camOverrideValid` is
-  // up still loses its last frame to the override, which is the same one-tick
-  // error `retired` was added to fix, in the one place it is not fixed.
-  const over = cam.done && w.camOverrideValid
-    ? w.branchPreview?.[w.branchChoice] ?? null : null;
-  const slot = over?.slot ?? cam.slot;
-  const at = over ? over.frame : cam.frame;
-  const p = ctx.paths?.paths.get(slot);
-  if (!p) return;
-  // **The override writes the path pose and nothing else.** `FUN_00403DB0`
-  // calls `CamEvalPath7` into `g_cam_path_eye` / `g_cam_path_target` -- the
-  // path's own pose -- and never touches the camera block. The block reaches
-  // it the only way it ever reaches anything: `CameraEaseBlockEyeToPathPose`
-  // eases the eye and `TurnLookAtToward` eases the aim, both inside the same
-  // hook, one frame at a time. So `advance` stays false here; forcing it
-  // hard-wrote the block and simply moved the 27-degree cut one frame earlier.
-  //
-  // **`retired`, not `done`.** `CamAdvancePathFrame` (`FUN_004035E0`)
-  // evaluates the curve into the camera block *before* it tests the end and
-  // retires, so the frame a shot ends on is written like any other and only
-  // the frame after it is not -- the two flags differ by exactly that tick.
-  // Seating on `!done` dropped it: the block held frame `end - 1`'s pose while
-  // everything else read `end`, and the next shot then moved the eye by two or
-  // three frames' travel in one. See `CamCommand.retired`.
-  const pose = CamSeatPathFrame(p, at, w.rollEnabled,
-                                force || (!over && !cam.retired)
-                                      || !rig.trackEnabled);
-  // Roll is the one channel the camera block has no word for, so the draw
-  // takes it off the pose the seat evaluated. See `CamSeatPathFrame`.
-  rig.pose.roll = pose.roll;
-}
-
-/** Seat and draw in one go, for the paths that have no game tick between. */
-export function syncCamera(rig: CameraRig, ctx: RenderContext,
-                           force = false): void {
-  seatCamera(rig, ctx, force);
+export function drawCamera(rig: CameraRig, ctx: RenderContext): void {
   rig.draw(ctx);
 }
 
 /**
- * The first half of a camera frame, in the `script` phase: the shot writes the
- * camera block before the port's frame reads it.
- *
- * ## Why this refuses a frame that advances no game time
- *
- * Seating the block is the **first half** of a camera frame;
- * `CameraTrackEnemiesTick`, inside `GameSystem`, is the second, and it is the
- * half that eases the aim off the rail and onto whatever the fight wants. So
- * the two have to run together or not at all, and `GameSystem` already
- * refuses a tick with no time in it — this makes the same test, deliberately
- * spelled the same way.
- *
- * Without it the camera **flickered between two aims at the display's refresh
- * rate**, and only on a display faster than 60 Hz. `Player.frame` draws every
- * rAF but ticks at a fixed 60, so on a 120 Hz panel every other frame owes no
- * tick and takes the `tickStopped` path — which runs the whole tick order
- * with `Loop.idle`. This system seated the block back on the rail, `GameSystem`
- * returned early, and the draw put the *un-eased* aim on screen. One frame
- * eased, the next on the rail, sixty times a second: a stage-1 measurement put
- * it at 3.5 degrees each way with one enemy registered.
- *
- * Nothing else needed it. The seek, the stage load and the frame slider all
- * seat the block through `Player.syncCameraToWalker`, which calls
- * {@link syncCamera} directly and never went through this system; and the draw
- * still runs every rendered frame, because placing the three.js camera from a
- * block that has not changed is idempotent and a resize needs it.
+ * `[port-only]` -- put the camera block where the camera words say, then draw:
+ * for a seek, the frame scrubber, a reset and a stage opening at an address,
+ * the four places the player moves the script without running the frames that
+ * would have written the block. `CameraReseatFromFrame` is the game's; this
+ * is the composition. Never after a snapshot load, whose `G` already holds
+ * the block and its view.
  */
-export class CameraSeatSystem implements System<RenderContext> {
-  readonly id = "camera.seat";
-  constructor(private readonly rig: CameraRig) {}
-
-  update(ctx: RenderContext, t: Tick): void {
-    if (!this.rig.driving) return;
-    if (t.frozen || t.dt <= 0) return;
-    seatCamera(this.rig, ctx);
-  }
-
-  /**
-   * A load or a seek replaced the walker's camera command wholesale.
-   *
-   * `force`, because the restored shot's action may already have retired and
-   * the eased look-at that came back with it has nothing to ease *from* until
-   * the block is on the rail. This is the half `CameraDrawSystem.resync` used
-   * to do for it, back when the rig could seat the block itself; the `script`
-   * phase resyncs before the `render` one, so the draw still finds a seated
-   * block.
-   */
-  resync(ctx: RenderContext): void {
-    seatCamera(this.rig, ctx, true);
-  }
+export function reseatCamera(rig: CameraRig, ctx: RenderContext): void {
+  CameraReseatFromFrame();
+  rig.draw(ctx);
 }
 
 /**

@@ -66,7 +66,7 @@ export const CAMERA_EYE_DROP = 15.0;
  * the value `UpdateScreenShake` left on the *previous* frame: its task runs
  * after this one.
  */
-function RailMayAdvance(): boolean {
+export function RailMayAdvance(): boolean {
   return G.g_force_rail_advance === 1
       || IsDemoRun()
       || (G.g_screen_shake_frames === 0 && G.g_players_in_play !== 0);

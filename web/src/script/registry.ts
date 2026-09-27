@@ -5,9 +5,11 @@
  * `{ ...camera, ...collision, ...region }` has exactly one behaviour for a
  * collision — the last spread silently wins — and a table assembled that way
  * cannot tell "this opcode moved" from "this opcode is now handled twice by
- * two modules that disagree". `ops/` has ten modules and `state/camera_action`
- * four handlers; the two tables that grow are the two where a name landing in
- * the wrong file is a plausible mistake and an invisible one.
+ * two modules that disagree". `ops/` has ten modules, and a table that grows
+ * is where a name landing in the wrong file is a plausible mistake and an
+ * invisible one. (The `queue_event` actions had a table here too; they are
+ * the engine's action ring now, `game/camera/actions.ts`, dispatched by
+ * selector as `EvtRunQueuedActions` dispatches them.)
  *
  * It throws at **module load**, which is the point: every entry point that
  * imports `script/` imports the table, so a duplicate cannot reach a build.

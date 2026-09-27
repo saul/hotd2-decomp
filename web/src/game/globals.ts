@@ -40,6 +40,7 @@ import type {
 } from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { Boss4HitMark } from "./class19/hit_mark";
+import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
@@ -1264,6 +1265,15 @@ export const G = {
    * because no two of them are ever in play at once.
    */
   g_bat_members: [] as number[],
+  /**
+   * `[port-only]` as a pool: the `0x50`-byte objects `SpawnBatSplash`
+   * (`FUN_0042F980`) allocates, each running `BatSplashUpdate`
+   * (`FUN_0042F930`). Plain records for the same reason as
+   * `g_severed_heads`. `game/class46/splash.ts`.
+   */
+  g_bat_splashes: [] as BatSplash[],
+  /** `[port-only]` — see {@link BatSplash.id}. */
+  g_bat_splash_seq: 0,
 
   // -- the horde, class 0x40 ---------------------------------------------
   /**
@@ -2195,6 +2205,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
+  // The splash is a task, and the scene's task list goes with the scene.
+  G.g_bat_splashes = [];
+  G.g_bat_splash_seq = 0;
   G.g_horde_members = [];
   G.g_horde_live_count = 0;
   G.g_horde_diver = 0;

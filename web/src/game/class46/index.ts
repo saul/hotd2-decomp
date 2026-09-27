@@ -47,31 +47,44 @@
  * always leaves**, which is also why the `wait_enemies_present 0` behind each
  * flight cannot deadlock: the flight ends itself.
  *
- * ## What is not ported
- *
- * ## The wings are a second actor, and the bundle carries a row for them
+ * ## The wings are a second actor
  *
  * `SpawnBatWings` (`FUN_0042E060`) builds a second skinned actor per bat:
  * character type `0x1F`, six nodes in two three-segment chains, running clip
  * `0x406` off its body's own motion clock, seated on the body's bone matrix
  * and translated `(0, 1, 2)`. It finds its body in {@link G.g_bat_members}
  * every frame and **despawns the frame that slot goes empty**, which is the
- * whole of how a bat's wings follow it and die with it.
+ * whole of how a bat's wings follow it and die with it -- and the only way a
+ * wing ever goes.
  *
- * The port builds it exactly there, in the placer, as the engine does. What it
- * needed in addition is a **placement**: the client binds a drawable hierarchy
- * to a placement by spawn address, so an actor with no descriptor has no
- * geometry. The exporter emits a synthetic row per sub-type-0 bat, parented to
- * the body's, marked `synthetic` so that `SpawnScriptedCharacters` refuses to
- * build from it, and the layer adopts the object the placer already made.
+ * ## How every bat is drawn, and how the port finds the geometry
  *
- * `[diverges]` **Sub-type 1's twenty-five and sub-type 2's six are undrawn**,
- * bodies and wings alike, and their wing actors despawn immediately for want
- * of anything to draw. They are runtime children of a placer with no
- * descriptor to hang a row on, so the trick above has nothing to key. All of
- * them still run: they take hits, they score, they hold and release the enemy
- * counters, and the swarm's strike lands. Sub-type 0, which is 24 of the 27
- * shipped descriptors and every bat in stage 4, draws in full.
+ * **All three sub-types draw the same way** `[proved]`: each arm of
+ * `PlaceBats` writes `obj+0x1F4 = 0x1E`, clip `0x407`, `obj+0x1FC = 5`, calls
+ * `ActorBuildSkinnedModel` and installs `BatDrawBoneSlot` (`FUN_0042E020`,
+ * the per-bone hook, which draws the node's own slot and nothing else), and
+ * each update opens `DrawSkinnedModelAndShadow` (`FUN_00411090`). The model is keyed on the
+ * character type alone: `zabat.bin`'s one node, and for the wing
+ * `zabat_wing.bin`'s six. Nothing about a member's descriptor, or its lack of
+ * one, enters the draw.
+ *
+ * The port's character layer binds a drawable hierarchy to a **spawn
+ * address**, so an actor the script did not place needs a row in the bundle
+ * to be drawn at all -- the arrangement the horde's members, JUDGMENT's
+ * sub-actor and the players' bodies already have. The exporter emits a
+ * **synthetic** row, of character type `0x1E` or `0x1F`, at the address the
+ * port's placer gives each actor it makes ({@link BatChildAt},
+ * {@link BatWingAt}), parented to the descriptor that placed it, so the row
+ * is wanted exactly while the placer is: one wing per sub-type-0 bat, and 25
+ * bodies and 25 wings behind the scatter's descriptor, 8 and 8 behind each
+ * swarm's (the most a two-player game makes). `SpawnScriptedCharacters`
+ * refuses to build from a synthetic row, and the layer adopts the object the
+ * placer already made -- the row is geometry and an address, no more.
+ *
+ * `render/characters/bat.ts` then places each root the way
+ * `SkeletonApplyRootMotion` (`FUN_00410C50`) does for `obj+0x1FC = 5`:
+ * `T(pos) Rz(roll) Ry(yaw) Rx(pitch)` and `MatrixScale(model+0x116C)`, 0.6
+ * for the body and 0.7 for the wing.
  *
  * ## Shot as one sphere, and it took a bug report to find out why
  *
@@ -84,22 +97,44 @@
  * around the point the update publishes at `obj+0x70`, which is
  * `(x, y + 1, z)`.
  *
- * The port's first cut let the bat through the character path's bone test
- * alone, which meant **no bone sphere and therefore no way to shoot one at
- * all**. `render/characters.ts` now takes the engine's own `else` arm for an
- * instance whose bones carry no sphere.
+ * ## Who registers, and when
  *
- * `[diverges]` **The splash is a sound and a despawn, not a sprite.**
- * `SpawnBatSplash` (`FUN_0042F980`) draws `common.bin` 307..336 over thirty
- * frames at the water plane. The port plays the sound and drops the actor.
+ * The bat registers **the engine's way** (`ClassHandler.registersForShotTest`):
+ * each routine calls `RegisterForShotTest` (`FUN_00405160`) at its own site,
+ * and the pick finds a bat through `g_shot_test_list` and nothing else. The
+ * three routines do not agree about when, and that is the point of doing it
+ * at their sites rather than once for the class:
+ *
+ * * `BatDiveUpdate` and `BatSwarmUpdate` register at their tails, in **every**
+ *   state -- waiting, flying and falling. A diving bat can therefore be hit
+ *   during its launch delay; its gate refuses the hit and leaves bit 3 of
+ *   `obj+0x34` standing, and the first frame it flies, the same gate takes
+ *   it. Nothing between the two frames clears that bit: a sweep of the image
+ *   for `AND` with `0xFFFFFFF7` or `0xF7` finds no site in the task walk,
+ *   `TaskRunTree` (`FUN_004A71A0`), or in the shot processor, only class
+ *   routines consuming their own hit. `[likely]` -- a clear by some other
+ *   encoding is not excluded.
+ * * `BatScatterUpdate` registers only at the end of its flying arm, so a
+ *   scattering bat is a target only while it flies, and its hit is taken
+ *   **inside** that arm -- the kill frame still runs the flight's
+ *   acceleration, and the corpse's first fall is the frame after.
+ * * `BatWingUpdate` never registers. A wing is drawn and never shot; the
+ *   wing's bone 3 carries a 0.3 sphere in `g_character_bone_spheres`, and a
+ *   pick that walked every drawn bone -- this class's first cut -- let a wing
+ *   take a bullet meant for the bat behind it.
  */
 import { BAMS_TO_RAD, RAD_TO_BAMS } from "../../core/bams";
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, MotionFlag, type Actor } from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
+import {
+  MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixScale, MatrixTranslate, type Mat,
+} from "../matrix";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
@@ -109,13 +144,19 @@ import { G, PlayerState } from "../globals";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
-import { ActorSpawn } from "../spawn";
+import { ActorBuildSkinnedModel, ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
-import { MotionAuthoredFrame, MotionOf } from "../tables";
+import { CharacterTypeOf, MotionAuthoredFrame, MotionOf } from "../tables";
+import type { Vec3 } from "../vec";
+import { SpawnBatSplash } from "./splash";
 import { BatState, BatSubtype, type BatTail } from "./state";
 
 export { BatState, BatSubtype } from "./state";
 export type { BatDescriptor, BatTail } from "./state";
+export {
+  BAT_SPLASH_FIRST_SLOT, BAT_SPLASH_LAST_FRAME, BAT_SPLASH_Y,
+  BatSplashesTick, SpawnBatSplash, type BatSplash,
+} from "./splash";
 
 /** BAMS to radians, and back. One definition, and it is `core/bams.ts`'s. */
 const BAMS = BAMS_TO_RAD;
@@ -132,6 +173,18 @@ export const BAT_CLIP = 0x407;
 export const BAT_WING_CLIP = 0x406;
 /** `obj+0x124` — the sphere `ShotTestSphere` measures. There are no bones. */
 export const BAT_HIT_RADIUS = 4.0;
+/**
+ * `obj+0x34`'s bit `0x80000`, which every arm of `PlaceBats` ORs in after the
+ * model is built, and `SpawnBatWings` writes whole as `0x80001` before it.
+ * `[open]` what it does for a bat. Class 0x30's `FUN_0040A590` tests it before
+ * a ground decal; nothing the port runs reads it, and it is kept so the flag
+ * word is the engine's.
+ */
+export const BAT_FLAG_80000 = 0x80000;
+/** `obj+0x34 = 1` -- `PlaceBats` overwrites the word before the build. */
+export const BAT_FLAGS_INIT = 1;
+/** `obj+0x34 = 0x80001` -- `SpawnBatWings`, before the build. */
+export const BAT_WING_FLAGS_INIT = 0x80001;
 /** `ScoreAddForPlayer(p, 0x50)`. */
 export const BAT_SCORE = 0x50;
 /** `PlayerTakeDamage(player, 1, 9)`. */
@@ -457,8 +510,7 @@ function BatPayForKill(obj: Actor, f: ClassFrame): void {
 }
 
 /**
- * `RegisterForShotTest` (`FUN_00405160`)'s point, which every one of the three
- * updates publishes on its last two lines:
+ * The last lines of each routine that registers:
  *
  * ```c
  * p = (obj+0x40, obj+0x44 + 1.0, obj+0x48);
@@ -466,19 +518,39 @@ function BatPayForKill(obj: Actor, f: ClassFrame): void {
  * RegisterForShotTest(obj);
  * ```
  *
- * The engine's is in view space because the shot test is; the port's ray is in
- * world space, and the transform between them is the camera matrix, so the
- * **`+1.0` in y is the whole of what has to travel**. Without it the bat's
- * four-unit sphere sits a quarter of its own radius low.
+ * at `0x0042E9B7` in the dive, `0x0042F401` in the swarm and `0x0042ED16` at
+ * the end of the scatter's flying arm, and nowhere in the wing.
+ *
+ * The engine's point is in view space because the shot test is; the port's is
+ * in world space ({@link Actor.shotCentre}) and `RegisterForShotTest` takes
+ * the depth itself, so the **`+1.0` in y is the whole of what has to travel**.
+ * Without it the bat's four-unit sphere sits a quarter of its own radius low.
  */
-function BatPublishShotSphere(obj: Actor): void {
+function BatRegisterForShotTest(obj: Actor, f: ClassFrame): void {
   obj.shotCentre.x = obj.pos.x;
   obj.shotCentre.y = obj.pos.y + BAT_SHOT_SPHERE_LIFT;
   obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, f.host);
 }
 
 /** The `+1.0` above. */
 export const BAT_SHOT_SPHERE_LIFT = 1.0;
+
+/**
+ * `obj+0x100 = obj+0x40; RegisterForCameraTracking(obj)` -- the dive's and
+ * the swarm's tail, on every path that does not despawn (the calls are at
+ * `0x0042E973` and `0x0042F3BD`).
+ *
+ * The camera aims at the bat's **position**, not at a bone: the draw at the
+ * top of the update has just written `obj+0x100` from node 1, and this
+ * overwrites it. The registration is the port's predicate over the pool
+ * (`camera/slots.ts`), which a corpse's `NoCameraTrack` refuses.
+ */
+function BatPublishCameraPoint(obj: Actor): void {
+  obj.lookAt.x = obj.pos.x;
+  obj.lookAt.y = obj.pos.y;
+  obj.lookAt.z = obj.pos.z;
+}
 
 /** The pitch and yaw tumble all three corpses share. */
 function BatTumble(obj: Actor): void {
@@ -504,6 +576,13 @@ export function SpawnBatWings(obj: Actor, sub: BatTail, rng?: Rng): void {
   const wing = ActorSpawn(BatWingAt(obj.at), SpawnClass.Bat,
                           BAT_WING_CHAR_TYPE, "bat wing",
                           { motion: BAT_WING_CLIP, visible: true }, rng);
+  // `obj+0x34 = 0x80001` and then the build, which claims the wing a hit slot
+  // and raises `0x80` -- which, unlike `PlaceBats`, this never takes back. It
+  // cannot matter: the wing never registers for the shot test.
+  wing.flags = BAT_WING_FLAGS_INIT;
+  ActorBuildSkinnedModel(wing);
+  // `obj+0x194 = 0`; `BatWingUpdate` copies the body's over it every frame.
+  wing.playTicks = 0;
   // `[port-only]` — the engine's wing never calls `RegisterForCameraTracking`
   // (`FUN_00408EC0`), and neither does a scatter member; the port's is a
   // predicate over the whole pool rather than a call, so the actors that would
@@ -516,22 +595,40 @@ export function SpawnBatWings(obj: Actor, sub: BatTail, rng?: Rng): void {
   w.member = sub.member;
 }
 
-/** `[port-only]` — the wing's spawn address, derived from its body's. */
+/**
+ * `[port-only]` — the wing's spawn address, derived from its body's: bit 30,
+ * which neither an evt offset nor {@link BatChildAt} ever sets.
+ *
+ * `hod2lib/characters.ts` writes the same address on the wing's synthetic
+ * row (`CLASS46_WING_AT_BIT`), and `verify_port.py` cannot see that the two
+ * agree -- so each names the other, and `render.test.ts` adopts one through
+ * the other.
+ */
 export function BatWingAt(bodyAt: number): number {
-  return bodyAt | 0x40000000;
+  return bodyAt | BAT_WING_AT_BIT;
 }
+
+/** `[port-only]` — {@link BatWingAt}'s bit. */
+export const BAT_WING_AT_BIT = 0x40000000;
 
 /**
  * The part of `PlaceBats` every member of every flight shares.
  *
- * `obj+0x1F4 = 0x1E`, clip `0x407`, `ActorBuildSkinnedModel`, the draw hook,
- * the sphere, and `obj+0x34 = (obj+0x34 & ~0x80) | 0x80000` — the bit that
- * takes the actor out of the skeleton shot test.
+ * `obj+0x1F4 = 0x1E`, clip `0x407`, `obj+0x34 = 1`, `obj+0x3C = -1`,
+ * `ActorBuildSkinnedModel` -- which claims the member a hit slot and raises
+ * `obj+0x34` bit `0x80` -- then `obj+0x1FC = 5`, the draw hook, and
+ * `obj+0x34 = (obj+0x34 & ~0x80) | 0x80000`: the bit that takes the actor
+ * out of the skeleton shot test. `obj+0x1FC` is the rotation order, and the
+ * port's is the class's: `render/characters/bat.ts` draws every class-0x46
+ * root in order 5.
  */
 function BatSeatCommon(obj: Actor, sub: BatTail, subtype: BatSubtype,
                        member: number): void {
   obj.charType = BAT_CHAR_TYPE;
   obj.motion = BAT_CLIP;
+  obj.flags = BAT_FLAGS_INIT;
+  ActorBuildSkinnedModel(obj);
+  obj.flags = (obj.flags & ~ActorFlag.ShootPerBone) | BAT_FLAG_80000;
   obj.hitRadius = BAT_HIT_RADIUS;
   // **The descriptor's `+0x11C` is the member index, not health**, and the
   // engine's member object carries 0 there because it is a fresh allocation
@@ -555,9 +652,13 @@ function BatSeatCommon(obj: Actor, sub: BatTail, subtype: BatSubtype,
  *
  * `[port-only]` the collapse of two objects into one. The engine allocates a
  * *second* actor and kills the placer; sub-type 0 is one member per descriptor
- * and the port lets the placement's own actor be that member, because a runtime
- * child would have no hierarchy to draw with. Sub-types 1 and 2 build real
- * children, as the engine does, and the placer despawns behind them.
+ * and the port lets the placement's own actor be that member, so the
+ * descriptor's own row in the bundle is the member's geometry. Sub-types 1
+ * and 2 build real children, as the engine does, the placer despawns behind
+ * them, and each child is drawn from a synthetic row at {@link BatChildAt}.
+ * The one thing the collapse moves is the member's place in the task list --
+ * the placer's, where the engine's is appended after everything alive -- and
+ * nothing a bat reads depends on another actor's update in the same frame.
  *
  * **The order of the reads matters and is preserved.** The engine seeds the
  * new object's `obj+0x1348/0x1350` from `sin`/`cos` of *its own* `obj+0x68`,
@@ -596,8 +697,12 @@ export function PlaceBats(obj: Actor, rng?: Rng): void {
     const a = 0x8000 * BAMS;
     sub.prevX = Math.sin(a) + obj.pos.x;
     sub.prevZ = Math.cos(a) + obj.pos.z;
-    obj.pitch = 0;
-    obj.yaw = 0;
+    // ...and **then** `obj+0x64 = placer+0x64; obj+0x68 = placer+0x68;
+    // obj+0x6C = 0`. The member faces the way the descriptor does -- `0x8000`
+    // for all twenty-four -- until the first frame of the spline turns it.
+    // The placer's own angles are this actor's already, so only the roll is
+    // written.
+    obj.roll = 0;
     sub.timer = sub.member * BAT_DIVE_LAUNCH_STAGGER;
     sub.segment = 0;
     sub.segT = 0;
@@ -704,28 +809,46 @@ function BatSpawnSwarmMember(placer: Actor, i: number, rng?: Rng): void {
  * `[port-only]` — a spawn address for a placer's child.
  *
  * The engine has no such thing: a child is a pointer and nothing keys it. The
- * port's pool is keyed on `at`, so a placer's members take a derived address
- * out of the same high range {@link BatWingAt} uses.
+ * port's pool is keyed on `at`, and so is the character layer's hierarchy, so
+ * a placer's members take a derived address: bit 29 for "a bat's child", the
+ * sub-type in bits 25..26, the member in bits 20..24 and the placer's own
+ * address in the low twenty. Five bits because the scatter has **twenty-five**
+ * members; the first cut gave the member four, so members 16..24 took the
+ * addresses of 0..8 and two bats answered to one row.
+ *
+ * `hod2lib/characters.ts` (`batChildAt`) writes the same address on each
+ * member's synthetic row, which is how the member is drawn; the two carry each
+ * other's names because nothing checks that they agree but the adoption.
  */
 export function BatChildAt(placerAt: number, subtype: BatSubtype,
                            member: number): number {
-  return 0x20000000 | (placerAt & 0xfffff) | (subtype << 24) | (member << 20);
+  return BAT_CHILD_AT_BIT | ((subtype & 0x3) << 25) | ((member & 0x1f) << 20)
+    | (placerAt & 0xfffff);
 }
+
+/** `[port-only]` — {@link BatChildAt}'s marker bit. */
+export const BAT_CHILD_AT_BIT = 0x20000000;
 
 // -- being shot -------------------------------------------------------------
 
 /**
- * `[port-only]` — the shot half of the three updates, which have it inline.
+ * `[port-only]` — the shot half of the three updates, which have it inline,
+ * and each calls this from the place its own copy sits: the dive and the
+ * swarm at the top, before the state switch, the scatter inside its flying
+ * arm.
  *
  * `obj+0x34` bit 3 is the whole damage model: no `ResolveHit`, no
  * `ActorApplyDamage`, nothing decrements `obj+0x11C`. One bullet.
  *
- * **The gate is not the same in all three, and that is the point.** Sub-types
- * 0 and 1 refuse a hit in {@link BatState.Wait}, so a diving bat is
- * invulnerable for its whole launch delay and a scattering one until it
- * leaves; sub-type 2 tests only `state != Dead`, so a swarm bat can be shot
- * while it is still orbiting. Folding the three into one test is exactly the
- * kind of thing `L11` is about.
+ * **The gate is not the same in all three, and that is the point.** The dive
+ * refuses a hit in {@link BatState.Wait} (`0x0042E29D`), so a diving bat
+ * cannot die during its launch delay -- but the bit **stays up**, because only
+ * the arm that takes the hit clears it (`AND AL, 0xF7` at `0x0042E2A5`), and
+ * it takes the bat on its first flying frame. The scatter has no test at all:
+ * it is only ever asked in {@link BatState.Fly}. The swarm tests only
+ * `state != Dead`, so a swarm bat can be shot while it is still orbiting.
+ * Folding the three into one test is exactly the kind of thing `L11` is
+ * about.
  */
 export function BatResolveShot(obj: Actor, f: ClassFrame): boolean {
   const sub = Tail(obj);
@@ -735,6 +858,7 @@ export function BatResolveShot(obj: Actor, f: ClassFrame): boolean {
   if (sub.subtype !== BatSubtype.Swarm && sub.state === BatState.Wait) {
     return false;
   }
+  obj.flags &= ~ActorFlag.Hit;
 
   // Sub-type 1 is in neither counter, so its death takes nothing out.
   if (sub.subtype !== BatSubtype.Scatter) BatReleaseCounts(obj);
@@ -781,6 +905,10 @@ export function BatDiveUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   G.g_bat_members[MemberSlot(sub)] = obj.at;
+  // The shot, before the state switch -- and the engine **falls straight on**
+  // into the switch with the state already `Dead`, so the corpse takes its
+  // first step on the frame of the kill.
+  BatResolveShot(obj, f);
 
   if (sub.state === BatState.Wait) {
     const before = sub.timer;
@@ -844,6 +972,9 @@ export function BatDiveUpdate(obj: Actor, f: ClassFrame): void {
       return;
     }
   }
+  // Every state that is still here, waiting and falling included.
+  BatPublishCameraPoint(obj);
+  BatRegisterForShotTest(obj, f);
 }
 
 // -- sub-type 1 -------------------------------------------------------------
@@ -859,6 +990,14 @@ export function BatDiveUpdate(obj: Actor, f: ClassFrame): void {
  * A shot member bounces its horizontal velocity by `-0.3` and falls under a
  * heavier gravity than the other two sub-types', to a splash at `y = -25`.
  * Its one descriptor is stage 3 block 2 step 4, over water.
+ *
+ * **The hit is taken inside the flying arm** (`0x0042EAF9`..`0x0042EBD3`),
+ * not ahead of the switch as the other two take theirs, and the arm then
+ * carries on: the kill frame is a flying frame, with the damped velocity put
+ * through the flight's `1.05`/`1.08` and the flight's own despawn test and
+ * shot registration, and the corpse's gravity starts on the frame after.
+ * Only that arm registers for the shot test (`0x0042ED16`), so a waiting or
+ * falling member cannot be hit at all.
  */
 export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
@@ -872,6 +1011,7 @@ export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
     return;
   }
   if (sub.state === BatState.Fly) {
+    BatResolveShot(obj, f);
     sub.vx *= BAT_SCATTER_ACCEL_XZ;
     sub.vy *= BAT_SCATTER_ACCEL_Y;
     obj.pos.x += sub.vx;
@@ -885,10 +1025,13 @@ export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
       return;
     }
     // The decompiler loses this one to an `extraout_ST0` left on the FPU stack
-    // by the `fpatan` above; the surrounding stores make it the new x, which
-    // is what the other two routines write here.
+    // by the `fpatan` above: `FADD [EBX]; FST [EBX]` at `0x0042EC01` leaves
+    // the new x on the stack, the `FPATAN` consumes the two above it, and the
+    // leftover is what is stored here -- the new x, as the other two routines
+    // write.
     sub.prevX = obj.pos.x;
     sub.prevZ = obj.pos.z;
+    BatRegisterForShotTest(obj, f);
     return;
   }
   sub.vy -= BAT_SCATTER_CORPSE_GRAVITY;
@@ -898,7 +1041,7 @@ export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
   BatTumble(obj);
   if (obj.pos.y < BAT_CORPSE_SPLASH_Y) {
     BatLeaveMemberSlot(obj, sub);
-    SpawnBatSplash(obj);
+    SpawnBatSplash(obj.pos.x, obj.pos.y, obj.pos.z);
     ActorReleaseHitSlot(obj);
     play(f.events, SND_BAT_SPLASH);
     ActorDespawn(obj);
@@ -928,6 +1071,9 @@ export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   G.g_bat_members[MemberSlot(sub)] = obj.at;
+  // The shot, before the switch, as the dive has it -- with the swarm's own
+  // gate, which lets an orbiting bat die.
+  BatResolveShot(obj, f);
 
   if (sub.state === BatState.Wait) {
     sub.orbitPhase += BAT_SWARM_ORBIT_STEP;
@@ -957,15 +1103,15 @@ export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
       sub.wobble = 1.0;
     }
     BatEaseYaw(obj, sub.prevX - obj.pos.x, sub.prevZ - obj.pos.z, 2);
-    return;
-  }
-  if (sub.state === BatState.Fly) {
+  } else if (sub.state === BatState.Fly) {
     if (sub.t > BAT_WOBBLE_HOLD) {
       sub.wobble = (1.0 - sub.t) * BAT_WOBBLE_DECAY;
     }
     const eye = G.g_camera_block_eye;
     obj.pos.x = (eye.x - sub.fromX) * sub.t + sub.fromX;
-    obj.pos.y = ClipRootY(obj) * sub.wobble * BAT_SWARM_BOB_SCALE
+    // `FMUL [0x0055D2B4]` at `0x0042F035`: **5.0**, the dive's bob, and not
+    // the orbit's 8.0 (`FMUL double [0x0055D2D0]` at `0x0042F2FE`).
+    obj.pos.y = ClipRootY(obj) * sub.wobble * BAT_DIVE_BOB_SCALE
       + (eye.y - sub.fromY) * sub.t + sub.fromY;
     sub.prevX = obj.pos.x;
     obj.pos.z = (eye.z - sub.fromZ) * sub.t + sub.fromZ;
@@ -980,38 +1126,27 @@ export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
       BatStrikeAndLeave(obj, sub, f);
       return;
     }
-    return;
+  } else {
+    sub.vy -= BAT_CORPSE_GRAVITY;
+    obj.pos.x += sub.vx;
+    obj.pos.z += sub.vz;
+    obj.pos.y += sub.vy;
+    BatTumble(obj);
+    // No frame limit: a swarm corpse falls until it reaches the water plane.
+    if (obj.pos.y < BAT_CORPSE_SPLASH_Y) {
+      BatLeaveMemberSlot(obj, sub);
+      ActorReleaseHitSlot(obj);
+      SpawnBatSplash(obj.pos.x, obj.pos.y, obj.pos.z);
+      // Heard in stage 3 alone. The class's other swarm is stage 4 block 7,
+      // and its corpses splash silently.
+      if (G.g_scene_index === BAT_SPLASH_SCENE) play(f.events, SND_BAT_SPLASH);
+      ActorDespawn(obj);
+      return;
+    }
   }
-  sub.vy -= BAT_CORPSE_GRAVITY;
-  obj.pos.x += sub.vx;
-  obj.pos.z += sub.vz;
-  obj.pos.y += sub.vy;
-  BatTumble(obj);
-  // No frame limit: a swarm corpse falls until it reaches the water plane.
-  if (obj.pos.y < BAT_CORPSE_SPLASH_Y) {
-    BatLeaveMemberSlot(obj, sub);
-    ActorReleaseHitSlot(obj);
-    SpawnBatSplash(obj);
-    // Heard in stage 3 alone. The class's other swarm is stage 4 block 7, and
-    // its corpses splash silently.
-    if (G.g_scene_index === BAT_SPLASH_SCENE) play(f.events, SND_BAT_SPLASH);
-    ActorDespawn(obj);
-  }
-}
-
-/**
- * `SpawnBatSplash` — `FUN_0042F980`.
- *
- * `[diverges]` A `0x50`-byte actor that draws `common.bin` 307..336 over
- * thirty frames at `y = -25`, the plane the fall tests against. The port
- * records the point and draws nothing; the sound belongs to the caller and is
- * played there.
- */
-export function SpawnBatSplash(_obj: Actor): void {
-  // Nothing. Kept as a function, and called from both places the engine calls
-  // it, so the divergence has a name and one line of `rg` finds every site --
-  // rather than being a comment at two call sites that the next person to add
-  // a third would not see.
+  // Every state that is still here, orbiting and falling included.
+  BatPublishCameraPoint(obj);
+  BatRegisterForShotTest(obj, f);
 }
 
 // -- the wing ---------------------------------------------------------------
@@ -1025,12 +1160,38 @@ export function SpawnBatSplash(_obj: Actor): void {
  * turn and a fixed pitch of `0xE800`, copies the body's motion clock, and
  * draws.
  *
+ * ```c
+ * MatrixStackPush(0);
+ * MatrixStackSetTopFromArray(&g_camera_blocks[g_camera_index]);  // view -> world
+ * MatrixMultiply(body + 0x2C4);            // node 1's record: body -> view
+ * MatrixTranslate(0, 1.0, 2.0);
+ * MatrixGetTranslation(&obj+0x40);
+ * MatrixStackPop(1);
+ * ```
+ *
+ * `body+0x2C4` is node 1's draw record `+0x28` (records are `obj+0x20C +
+ * bone*0x90`), the matrix `SkeletonEmitNode` (`FUN_004114C0`) stores there
+ * after the node's own translate and turn -- so the seat is `(0, 1, 2)` in
+ * **the body node's frame**, which carries the body's pitch and roll, its
+ * model scale, the clip's root height and both of the clip's rotations. The
+ * port's first cut took `(0, 1, 2)` in the body's yaw alone, and the clip's
+ * root record turns the bat a half-turn about y and tips it by ~21 degrees,
+ * so its wings sat four units off the body, on the wrong side.
+ * {@link BatBodyNodeMatrix} is that matrix, built the way the draw builds it.
+ *
+ * The seat is the only thing the matrix is used for: the wing's own angles
+ * are `obj+0x64 = 0xE800` and `obj+0x68 = body+0x68 + 0x8000`, written, not
+ * read off the body's node.
+ *
  * Its clip comes from a paired lookup: walk the five entries of
  * `g_bat_body_motions` for one equal to the body's own clip and take
  * `g_bat_wing_motions` at that index. Both tables ship five identical rows, so
  * the answer is always `0x406` — the search is reproduced in
  * {@link BatWingClip} rather than folded away, because it is the only thing
  * that would ever give a different answer.
+ *
+ * It never registers for the shot test and never for the camera: the routine
+ * ends on the draw (`0x0042F7D8`) and returns.
  */
 export function BatWingUpdate(obj: Actor, _f: ClassFrame): void {
   const sub = Tail(obj);
@@ -1042,24 +1203,86 @@ export function BatWingUpdate(obj: Actor, _f: ClassFrame): void {
     ActorDespawn(obj);
     return;
   }
-  obj.motion = BatWingClip(body.motion);
-  // `MatrixMultiply(body + 0x2C4)` — the body's bone matrix — then
-  // `MatrixTranslate(0, 1, 2)`. With one bone that matrix is the body's own
-  // root, so the offset is applied in the body's frame.
-  const a = body.yaw * BAMS;
-  obj.pos.x = body.pos.x + Math.sin(a) * BAT_WING_OFFSET_Z;
-  obj.pos.y = body.pos.y + BAT_WING_OFFSET_Y;
-  obj.pos.z = body.pos.z + Math.cos(a) * BAT_WING_OFFSET_Z;
+  const m = BatBodyNodeMatrix(body);
+  MatrixTranslate(m, 0, BAT_WING_OFFSET_Y, BAT_WING_OFFSET_Z);
+  MatrixGetTranslation(m, obj.pos);
   obj.pitch = BAT_WING_PITCH;
-  obj.yaw = (body.yaw + 0x8000) & 0xffff;
+  obj.yaw = body.yaw + 0x8000;
+  obj.motion = BatWingClip(body.motion, obj.motion);
   obj.playTicks = body.playTicks;
 }
 
-/** `MatrixTranslate(0, 0x3F800000, 0x40000000)` in the body's own frame. */
+/** `MatrixTranslate(0, 0x3F800000, 0x40000000)` in the body node's frame. */
 export const BAT_WING_OFFSET_Y = 1.0;
 export const BAT_WING_OFFSET_Z = 2.0;
 /** `obj+0x64 = 0xE800`, a fixed pitch the wing never leaves. */
 export const BAT_WING_PITCH = 0xe800;
+/** The node `body+0x2C4` is the record of: the bat's one, bone 1. */
+export const BAT_BODY_SEAT_BONE = 1;
+
+/**
+ * `[port-only]` — `body+0x2C4`, node 1's draw-record matrix, in the world.
+ *
+ * The engine's is left behind by the body's own draw a moment earlier in the
+ * same frame; the port draws nothing in `game/`, so it is built here from the
+ * body's state by the calls that build it there, in their order:
+ *
+ * ```
+ * T(obj+0x40) Rz(obj+0x6C) Ry(obj+0x68) Rx(obj+0x64)   SkeletonApplyRootMotion,
+ * S(model+0x116C)                                       obj+0x1FC = 5's arm
+ * T(0, root.y, 0)             -- model+0x64 bit 1 up; T(root) with it down
+ * Rz Ry Rx(frame record 0)                              SkeletonPoseRootFrame
+ * T(node offset) Rz Ry Rx(frame record 1)               FUN_00411700
+ * ```
+ *
+ * with the frame the renderer poses the body at, so the wing sits on the body
+ * it is drawn next to. A body whose clip the bundle did not bake -- a
+ * headless run -- is posed at zero, which is the skeleton's bind pose.
+ *
+ * `[proved]` for the sequence: `SkeletonApplyRootMotion` (`FUN_00410C50`)'s
+ * default arm and its `MatrixScale(model+0x116C)` and closing translate,
+ * `SkeletonPoseRootFrame` (`FUN_00410920`)'s three rotations, and
+ * `SkeletonEmitNode`'s `MatrixStore(record + 0x28)` straight after
+ * `FUN_00411700` has translated and turned the node.
+ */
+export function BatBodyNodeMatrix(body: Actor): Mat {
+  const m = MatIdentity();
+  MatrixTranslate(m, body.pos.x, body.pos.y, body.pos.z);
+  MatrixRotateZ(m, body.roll);
+  MatrixRotateY(m, body.yaw);
+  MatrixRotateX(m, body.pitch);
+  MatrixScale(m, body.scale, body.scale, body.scale);
+  const clip = MotionOf(body, body.motion);
+  const f = clip ? MotionAuthoredFrame(body, clip) : -1;
+  const at = (arr: readonly number[], i: number): number => arr[i] ?? 0;
+  const root: Vec3 = f < 0 || !clip ? { x: 0, y: 0, z: 0 }
+    : { x: at(clip.root, f * 3), y: at(clip.root, f * 3 + 1),
+        z: at(clip.root, f * 3 + 2) };
+  if (body.motionFlags & MotionFlag.RootMotion) {
+    MatrixTranslate(m, 0, root.y, 0);
+  } else {
+    MatrixTranslate(m, root.x, root.y, root.z);
+  }
+  const type = CharacterTypeOf(body);
+  const records = type?.bone_count ?? 0;
+  const rot = (record: number): [number, number, number] => {
+    if (f < 0 || !clip) return [0, 0, 0];
+    const o = (f * records + record) * 3;
+    return [at(clip.rot, o), at(clip.rot, o + 1), at(clip.rot, o + 2)];
+  };
+  const r0 = rot(0);
+  MatrixRotateZ(m, r0[2]);
+  MatrixRotateY(m, r0[1]);
+  MatrixRotateX(m, r0[0]);
+  const node = type?.bones.find((b) => b.bone === BAT_BODY_SEAT_BONE);
+  const off = node?.offset ?? [0, 0, 0];
+  MatrixTranslate(m, off[0], off[1], off[2]);
+  const r1 = rot(BAT_BODY_SEAT_BONE);
+  MatrixRotateZ(m, r1[2]);
+  MatrixRotateY(m, r1[1]);
+  MatrixRotateX(m, r1[0]);
+  return m;
+}
 
 /**
  * `g_bat_body_motions` (`0x0058992C`) and `g_bat_wing_motions` (`0x00589938`),
@@ -1084,9 +1307,10 @@ export const BAT_WING_MOTIONS: readonly number[] = [0x406, 0x406, 0x406,
  * A body clip with no row leaves the wing on the clip it already had, which is
  * the loop falling through — not a default of `0x406`.
  */
-export function BatWingClip(bodyClip: number): number {
+export function BatWingClip(bodyClip: number,
+                            current: number = BAT_WING_CLIP): number {
   const i = BAT_BODY_MOTIONS.indexOf(bodyClip);
-  return i < 0 ? BAT_WING_CLIP : (BAT_WING_MOTIONS[i] ?? BAT_WING_CLIP);
+  return i < 0 ? current : (BAT_WING_MOTIONS[i] ?? current);
 }
 
 /** `[port-only]` — `g_bat_members` holds a spawn address; this is the actor. */
@@ -1116,18 +1340,11 @@ export function BatUpdate(obj: Actor, f: ClassFrame): void {
     BatWingUpdate(obj, f);
     return;
   }
-  // The engine has the shot inline at the top of each update and **falls
-  // straight on into the state machine**, with the state already `Dead`, so
-  // the corpse takes its first step on the frame of the kill. There is no
-  // early return here for the same reason.
-  BatResolveShot(obj, f);
-  obj.flags &= ~ActorFlag.Hit;
+  // Each routine takes its own shot and registers itself -- see the file
+  // comment, "Who registers, and when".
   if (sub.subtype === BatSubtype.Scatter) BatScatterUpdate(obj, f);
   else if (sub.subtype === BatSubtype.Swarm) BatSwarmUpdate(obj, f);
   else BatDiveUpdate(obj, f);
-  // Last, as the engine has it: all three routines end by transforming
-  // `(x, y + 1, z)` into `obj+0x70` and calling `RegisterForShotTest`.
-  if (!obj.despawned) BatPublishShotSphere(obj);
 }
 
 const handler: ClassHandler = {
@@ -1135,6 +1352,7 @@ const handler: ClassHandler = {
   update: BatUpdate,
   updatesWhenDead: true,
   ownsShotResult: true,
+  registersForShotTest: true,
   leave(obj: Actor): void {
     const sub = Tail(obj);
     if (sub) {

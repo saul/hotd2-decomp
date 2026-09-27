@@ -909,11 +909,12 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
  * `render/effects.ts` clones from `slots_effect` rather than
  * `render/slotmodels.ts` from `slots_actor`.
  *
- * Two classes today. JUDGMENT's walker's sparks, which only its flier's
- * presence brings. `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind
- * 0x5B through `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
- * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. And the
- * Tower's, class 0x45, every one of which its routines draw themselves.
+ * JUDGMENT's walker's sparks, which only its flier's presence brings.
+ * `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind 0x5B through
+ * `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
+ * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. The
+ * Tower's, class 0x45, every one of which its routines draw themselves. And
+ * the bat's splash, class 0x46's.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
@@ -921,6 +922,11 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // Class 0x46, the bat: the splash a shot one falls into.
+  // `BatSplashUpdate` (`FUN_0042F930`) draws `AssetDrawSlot(0x1339 + n)` for
+  // n in 0..0x1D -- `common.bin` 307..336 -- under a bare translation. See
+  // `game/class46/splash.ts`.
+  0x46: Array.from({ length: 0x1e }, (_, i) => 0x1339 + i),
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */

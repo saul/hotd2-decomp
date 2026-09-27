@@ -33,6 +33,7 @@ import {
   type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { drawBatSplashes } from "./bat_splash";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
@@ -245,6 +246,8 @@ export class EffectLayer implements System<RenderContext> {
     this.drawShotRings(seen);
     this.drawDamageOverlays(seen);
     this.drawBossBanners(seen);
+    drawBatSplashes({ node: (key, slot, parent) => this.node(key, slot, parent),
+                      world: this.group }, seen);
     if (this.bones) {
       const bones = this.bones;
       this._view.copy(ctx.camera.matrixWorldInverse);

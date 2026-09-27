@@ -23,11 +23,11 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "8a62bedf274c97b1d6d7dfe8e64934a767bbeb694a7de3fee1b4c73ad35fb2e1",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "95f4579c21ddb372032f6c1698a47c5239c0d042076eaafb740d677f2849f746",
+  "bundle.ts": "4d839ede8776cf9d45d87c911a339afce2d3b4199ad111d728e6f7aca8147b92",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "ed9f1705d31a27d166b947f3b27b8afd8f7cabb90c7fafd47d4ef3263dc151be",
+  "characters.ts": "9e080018c180632314d8421b1cba057fea32b84349db67db34f0a92b4399b5d4",
   "charbuild.ts": "4bee40165d6a93e13cc579235e41be150c59f0685f4fa5c002cd4bab347533cc",
   "charmotion.ts": "e6440210e79e688210b0f8502214ca572485056c9f1b4338f0cf731288df8433",
   "class31.ts": "5bbe8a9b8b78a71e574659a40fc2c6917763607edb4d4e05f0478e8268726c80",
@@ -66,4 +66,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "885e0c8d9a955a089099aa9210c4068699c9e9bb03f6d3207674a459b67d80a2";
+export const BUILDER_HASH = "e05d5374c27920c09ec8356dfbcb13112b7ea11af318e378da799086ad613728";

@@ -36,6 +36,7 @@ import { BossHpBarsTick } from "./boss_hp_bar";
 import { BossBannersTick } from "./boss_banner";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { BatSplashesTick } from "./class46/splash";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
@@ -745,6 +746,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `Boss4SpawnBoneHitMark` (`FUN_004920C0`) allocates during the fight --
   // after the bar, so after it in the walk.
   Boss4HitMarksTick(host);
+  // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
+  // after the bats, so the first is drawn on the frame it is made. See
+  // `game/class46/splash.ts`.
+  BatSplashesTick();
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);

@@ -273,6 +273,17 @@ export enum ActorFlag {
    */
   ShootPerBone = 0x80,
   /**
+   * `obj+0x34` bit `0x8000` — **not in the shot test at all.**
+   * `RegisterForShotTest` (`FUN_00405160`) returns before it appends the
+   * actor when the bit is set, so no shot can find it and it takes no part in
+   * the crowd push either. The spawn record's flags word carries it into
+   * `ActorInitFlags`; bosses raise it for their entrances, `ActorDespawn`
+   * raises it with `0x80018000`, and class 0x30's order wait with `0x18000`.
+   * `render/`'s pick honours it, and `class41/shot_test.ts` does the same for
+   * the props.
+   */
+  NoShotTest = 0x8000,
+  /**
    * `obj+0x34` bit `0x200` — **this actor's parts do not get swapped.**
    * `ActorSwapDamagedPart` (`FUN_004098E0`) returns before it touches
    * anything, so the bone keeps the model it has, `obj+0x78` is not cleared
@@ -1491,6 +1502,19 @@ export interface ActorBase {
   pendingHit:
     { bone: number; result: number; player?: number } | null;  // +0x190
   /**
+   * `obj+0x190 + player` — the byte `MarkActorShot` (`FUN_00404DB0`) writes
+   * for **each** shooter: the index of the bone the shot entered, or 1 when
+   * the actor was hit whole, as one sphere (`ShotTestSphere`'s else arm).
+   * Zero is "this player's shot did not land".
+   *
+   * {@link pendingHit} is the same byte merged into one record for the
+   * classes whose damage the port resolves at shot time; this is the engine's
+   * own shape, per player, for the classes that read it themselves -- the
+   * bosses' shot routines walk both entries. Whoever consumes a shot clears
+   * its byte, as the engine's routines do.
+   */
+  shotBones: number[];
+  /**
    * `obj+0x131C` — which player's shot killed this actor.
    *
    * `CivilianPruneDeadChildren` reads it off a dead captor to decide who is
@@ -2017,6 +2041,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     cue: null,
     leapStrikeFrames: 0,
     pendingHit: null,
+    shotBones: [0, 0],
     killedBy: -1,
     despawned: false,
     radius: 0,

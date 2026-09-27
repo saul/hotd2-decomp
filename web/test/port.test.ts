@@ -36,7 +36,7 @@ import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
-import { MOTION_FLAGS_INIT, MotionFlag, type Boss2Actor }
+import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
   CameraMode } from "../src/game/camera/mode";
@@ -19195,6 +19195,22 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
         && bannerCardSlots([0x22, 0x14]).join()
            === [0x7ed, 0x7ee, 0x181d, 0x1821].join()
         && bannerCardSlots([0x45, 0x30]).length === 0);
+}
+
+// `MarkActorShot` (`FUN_00404DB0`)'s per-player byte at `obj+0x190 + player`:
+// the bone's index for a bone hit, 1 for an actor hit whole.
+{
+  ResetGameGlobals();
+  const a = makeActor(0x77, SpawnClass.Zombie, 1, "znassb");
+  MarkActorShot(a, 1, 2);
+  check("a bone hit writes the bone into the shooter's own byte, and the "
+        + "shooter's bit", a.shotBones[1] === 2 && a.shotBones[0] === 0
+        && (a.flags & ActorFlag.HitByPlayer1) !== 0
+        && (a.flags & ActorFlag.Hit) !== 0, JSON.stringify(a.shotBones));
+  MarkActorShot(a, 0, 0, true);
+  check("...and a whole-actor hit writes 1, leaving the other player's",
+        a.shotBones[0] === 1 && a.shotBones[1] === 2,
+        JSON.stringify(a.shotBones));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

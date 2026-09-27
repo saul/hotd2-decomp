@@ -89,7 +89,7 @@ const { BloodColourLayer } = await import("../src/render/bloodcolour");
 const { FLASH_SMOKE_SCALE, FLASH_SMOKE_SCALE_KIND4 }
   = await import("../src/game/effects/shot_effects");
 const { G, ResetGameGlobals } = await import("../src/game/globals");
-const { makeActor } = await import("../src/game/actor");
+const { ActorFlag, makeActor } = await import("../src/game/actor");
 const { SpawnClass } = await import("../src/game/spawn_class");
 const { MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS }
   = await import("../src/game/class52");
@@ -2270,6 +2270,17 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   check("...and so does one wide of it",
         chars.pickShot(ray(9, 1)) === null,
         JSON.stringify(chars.pickShot(ray(9, 1))));
+  check("a sphere hit is reported whole, which `MarkActorShot` records as 1",
+        (chars.pickShot(ray(0, 1)) as { whole?: boolean } | null)?.whole
+          === true);
+  // `RegisterForShotTest` (`FUN_00405160`) never appends an actor with
+  // `obj+0x34` bit `0x8000`: a boss mid-entrance, a zombie waiting on an
+  // order, a spawn whose record carries the bit.
+  a.flags |= ActorFlag.NoShotTest;
+  check("an actor with bit 0x8000 is not in the shot test at all",
+        chars.pickShot(ray(0, 1)) === null,
+        JSON.stringify(chars.pickShot(ray(0, 1))));
+  a.flags &= ~ActorFlag.NoShotTest;
 
   stage.dispose();
   G.g_object_list.length = 0;

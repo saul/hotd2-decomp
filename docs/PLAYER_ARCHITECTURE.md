@@ -720,6 +720,8 @@ web/src/
     prop_parts.ts the class-0x41 routines that draw several models at
                   several poses (types 38, 39, 40, 44) as lists of parts;
                   breakables.ts clones and poses them
+    prop_shatter.ts  a stacked prop's fifteen shatter pieces
+                  (`G.g_prop_shatters`), off breakables.ts's templates
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
     characters/boss3.ts, boss3_effects.ts  class 0x45 composes its own bone
                   matrices in `game/class45/`; these place them, and draw

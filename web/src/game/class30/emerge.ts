@@ -21,6 +21,13 @@ import type { Events } from "../../core/events";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ActorSetMotion, ActorSetMotionBlended } from "./motion_cue";
+import {
+  COND_HEAVY_LANDING, LANDING_HEAVY_SHAKE, SND_LANDING, SND_LANDING_HEAVY,
+  ZombieDeathLandingEffect,
+} from "./death_effects";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
+import { G } from "../globals";
+import type { GameHost } from "../host";
 import { ZombieState } from "./states";
 
 /** The pose `ZombieStateEmerge` holds while it waits — `FUN_00411930(0xB9)`. */
@@ -193,8 +200,16 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
  * is the slump, played on someone who is not dead, and then stood out of.
  * A live actor plays **no landing clip at all**; it keeps 0x3BB and holds on
  * its tail for `play_length - rand() % 30 - 1` frames.
+ *
+ * **And it lands with a sound.** `0x00458403`..`0x0045843C`: body condition 5
+ * plays {@link SND_LANDING_HEAVY} and shakes the screen; every other calls
+ * `ZombieDeathLandingEffect` (`FUN_00456B70`) through `g_class30_states[0x38]`
+ * and plays {@link SND_LANDING}; then `ActorPlayHitVoice(obj, 3)`, the attack
+ * cry, either way. The port landed in silence until these were read.
  */
-export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): void {
+export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng,
+                                       host?: GameHost,
+                                       events?: Events): void {
   const p = obj.delayedLeap;
   if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
   const frames = SecondsToTicks(dt);
@@ -289,6 +304,15 @@ export function ZombieStateDelayedLeap(obj: ZombieActor, dt: number, rng: Rng): 
     // comes back, unless something else is still holding the actor up. That
     // bit is unported and never set, so this always clears.
     obj.flags &= ~ActorFlag.Airborne;
+    if (obj.condition === COND_HEAVY_LANDING) {
+      events?.emit("sound.play", { id: SND_LANDING_HEAVY });
+      G.g_screen_shake_frames = LANDING_HEAVY_SHAKE;
+    } else {
+      ZombieDeathLandingEffect(obj, rng, host, events);
+      events?.emit("sound.play", { id: SND_LANDING });
+    }
+    ActorPlayHitVoice(obj, ActorVoice.Attack, rng,
+                      (id) => events?.emit("sound.play", { id }));
     obj.sub = 4;
   }
 

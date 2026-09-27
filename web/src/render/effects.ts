@@ -33,6 +33,7 @@ import {
   type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { drawRingEffects } from "./rings";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
@@ -237,6 +238,10 @@ export class EffectLayer implements System<RenderContext> {
     const seen = new Set<string>();
 
     this.drawSpriteEffects(seen);
+    drawRingEffects({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.group,
+    }, seen);
     this.drawBlood(ctx, seen);
     this.drawPointBlood(seen);
     this.drawBodyCreatures(seen);

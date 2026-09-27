@@ -55,9 +55,9 @@
  *   arms that reach it. The two gate bytes are `[open]`.
  * * `OneHitTargetBoneDrawHook` (`FUN_00449530`) — a per-bone draw callback
  *   that writes nothing to the actor. The renderer's.
- * * `SpawnGroundRingEffect`, which allocates its own drawing task and does
- *   not touch this actor. `SpawnBoneHitSprite` (`FUN_00407200`) used to be
- *   listed beside it and is ported now — see `game/effects/blood.ts`.
+ * * `SpawnGroundRingEffect` (`FUN_00407DA0`) and `SpawnBoneHitSprite`
+ *   (`FUN_00407200`) used to be listed here and are ported now — see
+ *   `game/effects/ground_ring.ts` and `game/effects/blood.ts`.
  * * The damaged-part swap `g_pBoneEffectSlots[type][bone][0]`. The port has
  *   `ActorSwapDamagedPart` for the combat classes; wiring class 0x20's
  *   single-index read of the same table to it is a renderer question and is
@@ -66,6 +66,7 @@
 import { ActorFlag, type Actor, type OneHitTargetActor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
+import { SpawnGroundRingEffect } from "../effects/ground_ring";
 import { G } from "../globals";
 import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
@@ -373,7 +374,11 @@ export function OneHitTargetUpdate(obj: Actor, f: ClassFrame): void {
  * ...
  * 004493e3  MOV  [EDI], EAX          ; ...and put it back
  * 004493e5  MOV  dword ptr [ESI + 0x1330], 0x78
+ * 00449415  CALL SpawnGroundRingEffect
  * ```
+ *
+ * The ring (`game/effects/ground_ring.ts`) is spawned there, on the frame of
+ * the hand-over, and only in `g_app_state` 6 -- the test is the spawner's own.
  *
  * The port's clock is `ActorAdvanceMotion`'s and it is shared, so "does not
  * step it" has to be written as an undo — {@link OneHitTargetPinLastFrame}.
@@ -392,6 +397,7 @@ export function OneHitTargetPlayDeathClip(obj: OneHitTargetActor): void {
     // `g_motion_play_length` -- so rather than park for ever (which is what
     // class 0x25 did, and was bug B13) the body goes straight to the sink.
     obj.arcFrames = CLASS20_SINK_FRAMES;
+    SpawnGroundRingEffect(obj);
     obj.tgt.state = OneHitTargetState.Sinking;
     return;
   }
@@ -400,6 +406,7 @@ export function OneHitTargetPlayDeathClip(obj: OneHitTargetActor): void {
     // See `class20/state.ts`.
     OneHitTargetPinLastFrame(obj);
     obj.arcFrames = CLASS20_SINK_FRAMES;
+    SpawnGroundRingEffect(obj);
     obj.tgt.state = OneHitTargetState.Sinking;
   }
 }
@@ -426,11 +433,8 @@ function OneHitTargetPinLastFrame(obj: OneHitTargetActor): void {
 }
 
 /**
- * `OneHitTargetSinkAndDespawn` — `FUN_00449430`.
- *
- * [diverges] `SpawnGroundRingEffect` fires once on the way in — but only in
- * `g_app_state` 6, and it allocates a drawing task rather than touching this
- * actor, so it is the renderer's and is not called here.
+ * `OneHitTargetSinkAndDespawn` — `FUN_00449430`. The ring the body sinks
+ * through was spawned by the hand-over into this state, not here.
  */
 export function OneHitTargetSinkAndDespawn(obj: OneHitTargetActor): void {
   // The engine's sink draws the model and never steps `obj+0x194`, so the body

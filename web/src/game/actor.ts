@@ -62,6 +62,20 @@ export enum MotionFlag {
    */
   RootMotion = 0x02,
   /**
+   * Bit `0x04` — **the ground-anchored draws trace the floor.**
+   *
+   * Two readers, and they make the same choice `[proved]`:
+   * `SpawnGroundRingEffect` (`FUN_00407DA0`, `TEST byte ptr [EDI+0x1F8], 4`
+   * at `0x00407DCD`) puts its ring on `QueryGroundHeightAt(x, y + 20, z)`
+   * with the bit up and on `obj+0x44` without it, and `ActorDrawGroundShadow`
+   * (`FUN_0040A620`, `TEST AL, 4` at `0x0040A649`) does the same for the
+   * shadow. `EnemyZombieInit` (`OR EDX, 4` at `0x00452E21`) and
+   * `EnemyThrowerInit` (`0x00449694`) raise it straight after
+   * `ActorBuildSkinnedModel`; `OneHitTargetInit` (`FUN_00448ED0`) raises only
+   * bit 1, so a class-0x20 ring sits at the body's own height.
+   */
+  TraceGround = 0x04,
+  /**
    * Bit `0x10` — take the root's **y** as well.
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit

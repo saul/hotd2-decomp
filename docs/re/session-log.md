@@ -19653,3 +19653,64 @@ playthroughs are identical to the baseline to the frame.
 Named: `ProcessPlayerShotsTaskCreate`, `ProcessPlayerShotsTask` (the thunk
 had the same name as the routine), `ShotPushWorldCandidate`,
 `ShotPushColiHitCandidate`.
+
+## 2026-09-27 -- the Hierophant, phase 2: the model block, the window, the rest of the fight
+
+Class 0x14 was ported as a state machine with the flags and nothing a player
+fights: no banner (so stage 2's gate chain could never open -- the old test
+set the shutter by hand), any bone damaging it, Arcade damage doubled, no
+flipbooks, no feet, the deaths a 180-frame hold. Phase 2 transcribed the rest
+against the instruction stream.
+
+**The engine's model block moved into `game/`.** Every read the fight makes
+of the body -- the weak point on bone 1, the feet the y-follow stands on, the
+leg IK, the deaths waiting for bones 1 and 2 to reach the water -- is of the
+pose the same frame's draw wrote, and the port posed in `render/`, a frame
+late and never headless. `game/skeleton.ts` is `SkeletonDrawWalk` and
+everything under it (read by a sub-agent from the bytes, the tails past
+`MatrixStackPop` included), `SkeletonBuildAndPose`, and
+`ActorShiftToHoldBone1Position` (`FUN_0045CE70`, which the annotation had as
+"not ported" with its frame of reference `[open]`: both points are world
+space, `cam * R(1)` and a build from `obj+0x40`). `Class14Update` poses and
+clocks the block after the state, which is the exe's order and not the
+director's; the director now leaves an actor that carries one alone.
+
+**Corrections to the phase-1 reading**, all `[proved]` and now in
+`boss-hierophant.md`:
+
+* Flipbook B's rate clamp is **not** symmetric: `0 <= rate < 1` becomes 1.0
+  and `rate < -1.0` becomes **-1.0** (`FCOMP [-1.0]; TEST AH,1; JZ` then
+  `FCOMP [0.0]; TEST AH,0x41; JZ`). The window therefore always closes at
+  -1.0, whatever `g_class14_window_timing`'s close rate says -- the row's value
+  lives only until the same frame's clamp.
+* `Class14StateSummonRoundA`'s dispatch runs the approach **and then** the
+  switch (`0x004796FB` through `0x00479BC4`), so its "unreachable" case 0 is
+  reached on every frame the boss is still far off: anim 0x1A, sub 1.
+* `Class14StateLeapFromSide`'s sub 2 has no break: sub 3's landing runs every
+  frame of sub 2 as well.
+* DeathA's second splash is the same point with the yaw word zeroed, kind 2
+  at 3.0; the two-attacker arm of `LeapFromSide` is the aim point
+  `cam * T(+-3 or +-5, 0, 0)` then `yaw = atan2(x - aim.x, z - aim.z)`, with
+  the speed still taken from the eye.
+* `char+0x37` bit 0, which skips the y-follow and the IK, is the model
+  block's cross-fade flag; `DrawSkinnedModelAndShadow` does draw the shadow.
+* The phase fractions are the floats in the image (0.533334, 0.333334, ...),
+  not the thirds the old constants rounded to.
+* `SpawnWaterEnemyAt` decrements the round's count after the call **whatever
+  it returned**: a refused spawn spends a fish.
+* One-player rank loss is always 3; the "2 in a round" is the two-player arm.
+
+**Wrong turns.** The first rewrite built `ActorBuildSkinnedModel` in
+`skeleton.ts` and a `RayTestSphere` copy; main landed both (the faithful shot
+test) mid-work, so the model-block arm went into main's `spawn.ts` and the
+gate uses main's `shot_test.ts`. `ActorPointIsAhead`, `ActorPickTargetPlayer`,
+`BossModeRecordGrade` and `g_original_weapon_damage_scale` were taken verbatim
+from `boss/strength`, which found them first, so the two branches merge clean.
+The end-to-end test's first camera looked down -Z whatever the boss's side,
+so `RegisterForShotTest`'s depth test dropped the boss behind it and three
+shots in five thousand landed; the test camera looks at its target now.
+
+**Measured**: stage 5's cameo, shot through its window by `GameUpdate` from
+spawn to `DeathC` in under a thousand frames (the port test's debug trace:
+entrance to Hunt at frame 200, `DeathC` at 807); the three death forks
+through to the present decrement; 2094 port checks.

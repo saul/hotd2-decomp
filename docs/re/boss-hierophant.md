@@ -1,6 +1,7 @@
 # Class 0x14 — the stage-2 boss (the Hierophant): a transcription-grade reading
 
-This is the phase-1 reading for porting the stage-2 boss faithfully. It is
+This is the reading the stage-2 boss was ported from -- phase 1's, with the
+corrections phase 2 made while transcribing marked **(corrected)**. It is
 written to be transcribed from: every routine class 0x14 runs, every branch,
 every constant with the instruction it comes from, every field and global it
 touches. The second half checks the existing port (`web/src/game/class14/`)
@@ -300,7 +301,7 @@ Ghidra's body stops at `0x00476F6F`; the switch at `0x00476D21` jumps through
 ### 6.1 Draw and clock
 ```
 LightsUseSecondarySet()                               ; 0x0041DC70
-DrawSkinnedModelAndShadow(char, xform, char+0x78)     ; 0x00411090 (also poses the bones)
+DrawSkinnedModelAndShadow(char, xform, char+0x78)     ; 0x00411090 (poses the bones, then ActorDrawShadow -- (corrected): it does draw the shadow)
 if !(obj+0x34 & 0x4000): char+0x00++
 ```
 
@@ -377,7 +378,7 @@ kneeB = the same for bone 10 / bone 11 (char+0x640, +0x6D0)                     
 the animated knee bend — bone 14's +y seen from the knee; only the draw (§6.8)
 adds it to the eased knee angles.
 
-### 6.5 Ground-follow y (skipped when `obj+0x34 & 0x20000` or `char+0x37 & 1`) — `0x00476F91..0x004770AF`
+### 6.5 Ground-follow y (skipped when `obj+0x34 & 0x20000` or `char+0x37 & 1`, the model block's cross-fade flag **(corrected)**) — `0x00476F91..0x004770AF`
 ```
 h15 = QueryGroundHeightAt(p15.x, p15.y + 100.0, p15.z)
 h12 = QueryGroundHeightAt(p12.x, p12.y + 100.0, p12.z)
@@ -400,8 +401,20 @@ three angles per leg (hip yaw, hip pitch, knee). A foot not planted targets 0.
 Then `Class14EaseAngleToward(&state+0x64.., target, 0.5)` for the six:
 `+0x64 ← legA hip pitch (EBX)`, `+0x68 ← legB hip pitch (EDI)`, `+0x6C ← legA hip
 yaw`, `+0x70 ← legB hip yaw`, `+0x74 ← legA knee (EBP)`, `+0x78 ← legB knee (ESI)`.
-The per-angle expressions between `0x0047711E` and `0x004775A9` are `[open]`
-beyond this shape; they only feed the draw.
+**(corrected)** The per-angle expressions, `[proved]` (read from the bytes):
+```
+q = translation of T(0, 1.25, 0) * (V15 * cam with row 3 = p15)     ; the ankle above the sole
+H = V13 * cam * T(0, dy, 0)                                          ; dy = the step just taken
+r = q * inverse(H);  yaw = (|r.x| < 1 || |r.z| < 1) ? 0 : (s16)ftol(atan2(-r.x, -r.z) * K)
+s = q * inverse(RotY(yaw) * H);  d2 = s.y^2 + s.z^2                  ; x unused
+a = IkJointAngle(9.514^2, d2, 8.432^2, sqrt(d2), 8.432)             ; leg A: sqrt of the 80-bit d2
+pitch = (s16)ftol(atan2(-s.z, -s.y) * K) - a                         ; 32-bit
+k = IkJointAngle(d2, 9.514^2, 8.432^2, 9.514, 8.432);  knee = 0x8000 - kneeRest - k
+```
+Leg B is the same over bones 10..12 with the float `d2` under the root. A
+foot not planted targets 0 on all three; the IK skipped entirely eases all six
+toward 0 and draws with `dy = 0`. The draw applies `dy` in **view** space
+(`V(i) * T(dy)`), the IK in world space.
 
 `Class14IkJointAngle(d2, a2, b2, a, b)` — `0x00477BF0`: `c = (a2 + b2 - d2) /
 (2ab)`; `c ≥ 1 → 0`, `c ≤ -1 → 0x8000`, `c == 0 → 0x4000`, else
@@ -436,8 +449,12 @@ else:
 done:
 clamp:
     if 0 <= B.rate < 1.0: B.rate = 1.0
-    elif -1.0 < B.rate < 0: B.rate = -1.0      ; 0x004778EA..0x00477910 (clamps small rates away from 0)
+    elif B.rate < -1.0: B.rate = -1.0          ; 0x004778EA..0x00477910 (corrected)
 ```
+**(corrected)** The second arm is `FCOMP [-1.0]; TEST AH,1; JZ end` then
+`FCOMP [0.0]; TEST AH,0x41; JZ end; MOV rate, -1.0`: it takes a rate **below**
+-1.0 up to -1.0, so every close runs at -1.0 whatever the timing row says. The
+row's close rate lives only until the same frame's clamp.
 `g_class14_window_timing` (`0x005965C0`), `{s16 openHold, s16 shutHold, f32 openRate, f32 closeRate}`:
 
 | +0x94 | open hold | shut hold | open rate | close rate |
@@ -579,8 +596,12 @@ tail (every frame, any sub): if char+0x20 == 0x19 or 0x1A:
 ```
 
 ### 8.5 Close (6) — `0x00478C00`
-Port-identical except it is exactly `local = RotX(pitch)·RotZ(-roll)·RotY(-yaw)·(target - pos)`
-and tests `local.z < 5.0`. Sub 0 picks slot 0x19 for phases 2,4,5,6,7,9 else 0x1A.
+`MatrixLoadIdentity; MatrixRotateY(-yaw); MatrixRotateZ(-roll); MatrixRotateX(+pitch)`
+-- the pitch pushed as it is -- then `local = (target - pos)` through it; `local.z < 5.0`
+hands over to Roar with `+0x60 = 2`, else the swim toward `target - dir * 50`.
+Mode `+0x9C == 1` swims along the middle route edge (`FollowSegment(route1,
+route2, 10)`) and, past it, goes to ScriptedBreak. Sub 0 picks slot 0x19 for
+phases 2,4,5,6,7,9 else 0x1A (jump table `0x00478E04`).
 
 ### 8.6 Roar (7) — `0x00478E30`
 Port-identical plus `PlaySoundId(0xD17A9 COMMON2\ZOMBIE_018_16.wav)` at sub 0 and
@@ -659,7 +680,13 @@ sub 5: anim(0xC); sub = 6; (falls into 6)
 sub 6: if +0xAC: rank = min(15, rank+1); +0xAC = 0
        if g_enemies_present == 1 and players > 0: state 5; sub 0; phase 2; obj+0x34 |= 0x10000000
 ```
-(The `sub 0` case in the inner switch — anim 0x1A, sub++ — is unreachable.)
+**(corrected)** The dispatch is not what the pseudocode shows: subs 0 and 1
+run the approach **and then** the switch (`0x004796FB` through `0x00479BC4`,
+case 1 a bare return), so on every frame the boss is still far off, sub 0 also
+takes case 0 -- anim 0x1A, sub 1 -- and a frame that enters sub 2 runs case 2 at
+once. The placement's `SpawnWaterEnemyAt` result is not tested: `+0xA0--` and
+the delay follow the call whatever it did, so **a refused spawn spends a
+fish** (round B the same).
 
 ### 8.10 SummonRoundB (11) — `0x00479BE0`
 ```
@@ -712,12 +739,15 @@ sub 0: m as above; x = (+0x9C == 0) ? m - 60.0 : m + 60.0; blend(0x33, 0x23, 0);
            yaw = ftol(atan2(x - eye.x, z - eye.z) * K)
            s = hypot(...) * -0.0076923077; vel = (sin(yaw)*s, 4.0, cos(yaw)*s); gravity = -0.068055555
            obj+0x34 = (&~0x84000) | 0x10000000; sub++
-       else: T = cam * Translate(obj+0x121 == 0 ? (+0x9C==0 ? -3 : -5) : (+0x9C==0 ? +5 : +3), 0, 0) … (continues past the pop) [open: the launch after it]
+       else: T = cam * Translate(obj+0x121 == 0 ? (+0x9C==0 ? -3 : -5) : (+0x9C==0 ? +5 : +3), 0, 0)
+             yaw = ftol(atan2(x - T.x, z - T.z) * K)      ; past the pop, 0x0047AAC2..0x0047AAF9 (corrected)
+             then the same launch, its speed from the EYE's distance, not T's
 sub 1: if F == 0x41: obj+0x34 |= 0x4000
        elif F == 0x28: SpawnPropStripEffect(&{pos, 0, camyaw, 0}, 0, 4.5)
        elif F == 0x2D: EvtOpPlayDialogue2D(+0x9C == 0 ? 0x56 : 0x55); obj+0x34 &= ~0x10000
        if vel.y < 0: obj+0x34 &= ~0x6100; B.hold = (rand() signed-mod 4)*8 + 1; sub++
-sub 2: if B.hold == 0 and B.frame == B.low: state+0x00 &= ~1; sub++; (falls into 3)
+sub 2: if B.hold == 0 and B.frame == B.low: state+0x00 &= ~1; sub++
+       (falls into 3 **whether or not** it advanced -- no break (corrected))
 sub 3: landing as §8.8 sub 3 but sets sub = 4 directly; +0x94 = 7 always
 sub 4/5: as §8.8, exit to state 6 with +0x9C = 0 and obj+0x34 &= ~0x10000000
 all subs: integrate unless state+0x00 & 4
@@ -809,7 +839,8 @@ sub 2: if F == 0xF: obj+0x34 |= 0x80000
        B1 = world point of bone 1 (cam * char+0x130)
        if WaterFieldSampleHeight(&B1) >= B1.y:                     ; past the pop, 0x0047BCA6..0x0047BD56
            obj+0x34 |= 0x20000; state+0x00 |= 2; the four foot-contact strengths = 0
-           SpawnPropStripEffect(&{B1, 0, camyaw, 0}, 0, 3.0f); SpawnPropStripEffect(&{…}, 2, 3.0f)   ; [open] which pose words the second call changes
+           SpawnPropStripEffect(&{B1, 0, camyaw, 0}, 0, 3.0f); SpawnPropStripEffect(&{B1, 0, 0, 0}, 2, 3.0f)
+           ; (corrected) the second is the same block with the yaw word zeroed (`MOV [ESP+0x40], EBX` at 0x0047BD45)
            sub++
 sub 3: if F == len: anim(0x12); char+0x20 = 0x2C; char+0x08 = 0; ActorShiftToHoldBone1Position(obj)
        blend(0x2C,0,10); vel = (-0.03 (0xBCF5C28F), 0, -0.005 (0xBBA3D70A)); gravity = 0.0006805556 (0x3A326750); yaw = 0x4000; sub++
@@ -957,7 +988,16 @@ for a live one within its test window it pushes the prop by `strength *
 
 ---
 
-## 13. Verification of the existing port (`web/src/game/class14/`)
+## 13. Verification of the phase-1 port (`web/src/game/class14/`)
+
+**Phase 2 fixed every item below** (D1–D17 and the shared director order); the
+list is kept as the record of what the first port got wrong. The phase-2
+port is transcribed from §3–§11 with the corrections marked above, carries the
+model block (`game/skeleton.ts`), and declares no `[diverges]` of its own; the
+places it cannot be the engine are marked `[port-only]` at the line (a host
+with no camera has no view space for the weak point; a bundle without the
+tables or a clip has nothing to read).
+
 
 The header says "the whole state machine" is ported. Routine by routine, the
 table dispatch, the phase ladder, the flag writes and the numbers in the
@@ -1053,7 +1093,13 @@ first, then the clock (§4). Every cue frame in this class is read on the frame
 the exe reads it only if the port's order matches; that is a general question
 for the director, not for this class.
 
-## 14. Phase 2: what it takes
+## 14. Phase 2: what it took
+
+*(Written before phase 2 as its plan; each decision below was taken as
+proposed, except that the pose moved into `game/` -- item 4 -- rather than
+being declared, and the flipbooks and leg IK are drawn from the class's own
+state -- item 5.)*
+
 
 **Files.** `game/class14/` (split by concern: shot/damage, tracks+feet,
 entrances, fight states, summons, deaths), a `game/class16/` + `game/class17/`
@@ -1099,11 +1145,10 @@ the shot path; today `pendingHit` carries only `{bone, result, player}`.
 ## 15. Open questions
 * What `obj+0x34` bits `0x80000` and `0x10000000` do for this class (set and
   cleared here, no reader found in the class).
-* `char+0x37` bit 0 (suppresses ground-follow and IK) — who sets it.
-* The byte at `*(char+0x40)+1` the entrances toggle with the draw flag
-  (`[likely]` the shadow).
-* The leg IK's per-angle expressions (§6.6).
-* The pose words of DeathA's second splash and LeapFromSide's two-attacker launch
-  after its pop.
+* ~~The leg IK's per-angle expressions~~ -- read (§6.6).
+* ~~DeathA's second splash; LeapFromSide's two-attacker launch~~ -- read (§8.12, §8.16).
+* ~~`char+0x37` bit 0~~ -- the model block's cross-fade flag; ~~the byte at
+  `*(char+0x40)+1`~~ -- part 0's draw byte (`ActorBuildSkinnedModel` seeds
+  every part's to 1; boss2's part 0 is the vertex-blended waist, slot 0x316).
 * The banner message `0x1821` text and the flipbook models' appearance
   (render them before naming them).

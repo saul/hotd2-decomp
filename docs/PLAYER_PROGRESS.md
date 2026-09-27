@@ -4286,6 +4286,62 @@ instead.
   and `tools/verify_skeletons.py` now holds every skeleton to the EXE's bone
   count.
 
+## The Hierophant, class 0x14: the stage-2 boss, whole
+
+Stage 2's four endings and stage 5's cameo are one class, and it opens 21 of
+the game's `wait_script_flag` gates. The first port had the state machine and
+the flags and none of what makes the fight a fight; phase 2 transcribed the
+rest, and the reading is `docs/re/boss-hierophant.md`.
+
+**The gate chain on stage 2 is the banner's.** No stage-2 boss block sets the
+shutter; the entrance spawns the boss-name banner (records `0x005966B8`,
+`0x005966F8`) and raises flag 9, the banner flies the camera for 300 frames and
+opens the shutter, and the entrance hands over on it -- flag 10, the health
+bar at (320, 35), `g_boss_engaged`. The old test set the shutter by hand (L49).
+
+**The engine's own model block, in `game/`.** The boss's weak point is a
+sphere and a cone on bone 1, its feet pull its `y` onto the pier, its legs are
+solved against the ground and its deaths wait for bones 1 and 2 to reach the
+water -- all gameplay, all reading the pose the same frame's draw wrote. So
+`game/skeleton.ts` carries the engine's skeletal model block
+(`SkeletonDrawWalk` and everything under it, `ActorBuildSkinnedModel`,
+`ActorShiftToHoldBone1Position`), and `Class14Update` poses and clocks it after
+the state, where the exe does -- the director's clip-advance-before-the-state
+order no longer applies to an actor that carries the block. `render/` draws it
+from those matrices (`render/characters/model_block.ts`): the y-follow step
+along the camera's up, the legs composed from the eased IK angles, the two
+flipbooks on bone 1.
+
+**Shot through a window.** Only bone 1 damages it, through a 3.5 sphere four
+units up the bone (`RayTestSphere`, in view space, the shot record's angles),
+with flipbook B at least 19 frames open and the entry point inside that
+frame's cone. The flipbook's close is always at -1.0 whatever the timing row
+says: the exe's own rate clamp takes anything below -1.0 up to it. Damage is
+`g_class14_bone_damage[rank][players-1]` as it stands in Arcade -- the port had
+doubled it everywhere -- and multiplied by the weapon factor only in Original
+Mode (the factor is 1.0 for every weapon the game hands out). The boss joins
+the faithful shot test through `ActorRegisterCameraPoint` at `0x0047621E`.
+
+**The summons are paced by three things at once**: `SpawnWaterEnemyAt`
+refuses while a water slot is held, the placement waits for fewer than four
+enemies alive and for the screen shake to stop, and a round ends only with the
+boss alone. The fish are sub-types 1 (round A, one under the surface) and 2
+(round B, ten under, three `rand()`s a fish), seated on the wave field of
+classes 0x16/0x17, ported for this. A refused spawn still spends the round's
+count -- the exe decrements after the call whatever it returned.
+
+**What changed for a player, plainly**: the stage-2 fight now starts (it could
+not before); the boss can no longer be shot during its entrance, nor anywhere
+but its weak point, nor through a phase change; Arcade damage is halved back to
+the exe's; losing a life always costs 3 rank with one player; a round's rank-up
+needs no life lost; summons wait for the shake; the boss's `y` follows the
+pier; Reposition and the side leap land at the latched target's z; the camera
+sees the boss again at Reposition's frame 10; Strike turns the boss; round B
+swims away the right way round; the scripted breaks fly the camera along
+`cp_` 0x6C/0x6D for 161 frames; the deaths teleport, sink, splash and float
+the body on the wave field before it leaves `g_enemies_present`; the sounds and
+the partner's "Left."/"Right." play.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

@@ -941,9 +941,9 @@ const CREATURE_SPLASH_SLOTS: readonly number[] =
  * `render/effects.ts` clones from `slots_effect` rather than
  * `render/slotmodels.ts` from `slots_actor`.
  *
- * Five classes today. JUDGMENT's walker's sparks, which only its flier's
- * presence brings. `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind
- * 0x5B through `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
+ * JUDGMENT's walker's sparks, which only its flier's presence brings.
+ * `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind 0x5B through
+ * `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
  * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. The
  * Tower's, class 0x45, every one of which its routines draw themselves. The
  * owl's and the fish's effect tasks, classes 0x43 and 0x51.
@@ -954,7 +954,8 @@ const CREATURE_SPLASH_SLOTS: readonly number[] =
  * 0x46, `0x94..0xA2`, and 0x61, `0x1339..0x1356`), its water ring
  * (`SpawnWaterRing`, `0xE23`), and the ring task `SpawnGroundRingEffect`
  * opens under its corpse -- and under class 0x20's -- `0x1A38` and the
- * thirty-cel strip `0x15E4..0x1601`.
+ * thirty-cel strip `0x15E4..0x1601`. And the bat's splash, class
+ * 0x46's, which is the kind-0x61 run again.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
@@ -979,6 +980,14 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // task its corpse leaves (`RingEffectSpread`, `FUN_00407E30`: 371 and
   // 338..367). The blood cloud's cels are the shot path's, already carried.
   0x51: [...CREATURE_SPLASH_SLOTS, 0xb71, ...CREATURE_RING_SLOTS],
+  // Class 0x46, the bat: the splash a shot one falls into.
+  // `BatSplashUpdate` (`FUN_0042F930`) draws `AssetDrawSlot(0x1339 + n)` for
+  // n in 0..0x1D -- `common.bin` 307..336, the run class 0x30, the owl and
+  // the fish draw too -- under a bare translation. Listed for the class all
+  // the same: `effectSlotEntry` carries a slot once however many ask, and a
+  // stage with bats and none of those would otherwise have no splash. See
+  // `game/class46/splash.ts`.
+  0x46: [...CREATURE_SPLASH_SLOTS],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */

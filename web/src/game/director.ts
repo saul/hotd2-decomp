@@ -37,6 +37,7 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
@@ -790,6 +791,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+  // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
+  // after the bats, so the first is drawn on the frame it is made. See
+  // `game/class46/splash.ts`.
+  BatSplashesTick();
 
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.

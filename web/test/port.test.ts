@@ -66,6 +66,7 @@ import { ActorBuildSkinnedModel } from "../src/game/spawn";
 import {
   ColiSortHitCandidatesByDistance, ProcessPlayerShotsTestList, RayTestSphere,
   RegisterForShotTest, ShotCandidateKey, ShotRayAnglesFromView,
+  ShotTestListReset,
 } from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
@@ -116,8 +117,12 @@ import {
   EmergePropState, type HordeTail,
 } from "../src/game/class40";
 import { makeSubModel, SubModelFlag } from "../src/game/class40/submodel";
-import { BatDiveUpdate, BatUpdate, BAT_CHAR_TYPE, BAT_SPLINE_POINTS,
-  BAT_WING_CHAR_TYPE } from "../src/game/class46";
+import { BatChildAt, BatDiveUpdate, BatSplashesTick, BatUpdate, BatWingAt,
+  BAT_CHAR_TYPE, BAT_CLIP, BAT_DIVE_BOB_SCALE, BAT_FLAG_80000,
+  BAT_SCATTER_ACCEL_XZ, BAT_SCATTER_ACCEL_Y, BAT_SCATTER_CORPSE_DAMP,
+  BAT_SCATTER_CORPSE_GRAVITY, BAT_SPLASH_LAST_FRAME, BAT_SPLASH_Y,
+  BAT_SPLINE_POINTS, BAT_WING_CHAR_TYPE, BAT_WING_CLIP, BAT_WING_PITCH,
+  SND_BAT_SPLASH, SpawnBatSplash } from "../src/game/class46";
 import { BatState, type BatTail } from "../src/game/class46/state";
 import { OwlDiveKind, OwlState, type OwlTail }
   from "../src/game/class43/state";
@@ -18043,6 +18048,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           bat(six[0]).group === bat(six[3]).group
           && six[0].pos.x === six[3].pos.x && six[0].pos.z === six[3].pos.z,
           `${six[0].pos.x} vs ${six[3].pos.x}`);
+    // `obj+0x64/0x68 = placer+0x64/0x68; obj+0x6C = 0`, after the heading
+    // seed: the member faces the descriptor's way until its spline turns it.
+    check("...and each faces its descriptor's yaw, not zero, while it waits",
+          six[1].yaw === 0x8000 && six[1].pitch === 0 && six[1].roll === 0,
+          `${six[1].yaw.toString(16)}`);
     // Twenty frames apart. Member 0 leaves on its first update; member 1 is
     // still waiting twenty updates later.
     BatDiveUpdate(six[0], frame(rng));
@@ -18069,9 +18079,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
   }
 
   {
-    // The hit gate. A diving bat is invulnerable for its whole launch delay --
-    // the engine tests `state != 2 && state != 0` -- and killable once it is
-    // flying, for 80.
+    // The hit gate. A diving bat cannot die during its launch delay -- the
+    // engine tests `state != 2 && state != 0` -- but **only the arm that takes
+    // a hit clears bit 3** (`AND AL, 0xF7` at `0x0042E2A5`), so a shot that
+    // lands while it waits is still standing when it launches, and the same
+    // gate takes it on its first flying frame.
     const rng = new Rng(61);
     scene(0, rng);
     G.g_players_in_play = 1;
@@ -18084,15 +18096,18 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and is still in both counters",
           G.g_enemies_alive === 1 && G.g_enemies_present === 1,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
-    for (let i = 0; i < 41; i += 1) BatUpdate(o, frame(rng));
-    check("...it is flying once its stagger is up",
-          bat(o).state === BatState.Fly, BatState[bat(o).state]);
+    check("...but the hit is not dropped: bit 3 is still up",
+          (o.flags & ActorFlag.Hit) !== 0, o.flags.toString(16));
+    for (let i = 0; i < 40; i += 1) BatUpdate(o, frame(rng));
+    check("...it launches when its stagger is up, the hit still pending",
+          bat(o).state === BatState.Fly && (o.flags & ActorFlag.Hit) !== 0,
+          `${BatState[bat(o).state]} ${o.flags.toString(16)}`);
     const score = G.g_player_score[0];
-    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
     BatUpdate(o, frame(rng));
-    check("...and one bullet kills it then, for 80",
+    check("...and the pending hit kills it on its first flying frame, for 80",
           bat(o).state === BatState.Dead
-          && G.g_player_score[0] - score === 80,
+          && G.g_player_score[0] - score === 80
+          && (o.flags & ActorFlag.Hit) === 0,
           `${BatState[bat(o).state]} +${G.g_player_score[0] - score}`);
     check("...dropping both counters on the hit, not on the corpse",
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
@@ -18100,6 +18115,17 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     for (let i = 0; i < 0x51; i += 1) BatUpdate(o, frame(rng));
     check("...and the corpse lasts eighty frames", o.despawned,
           `${o.despawned}`);
+
+    // ...and one that nobody shot while it waited dies to its first bullet.
+    const p = mkBat(0x9d40, 0, 0, 0, rng);
+    BatUpdate(p, frame(rng));
+    const before = G.g_player_score[0];
+    p.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    BatUpdate(p, frame(rng));
+    check("a flying bat dies to one bullet, for 80",
+          bat(p).state === BatState.Dead
+          && G.g_player_score[0] - before === 80,
+          `${BatState[bat(p).state]} +${G.g_player_score[0] - before}`);
   }
 
   {
@@ -18255,17 +18281,247 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...of character type 0x1F, on its own clip",
           wing!.charType === BAT_WING_CHAR_TYPE && wing!.motion === 0x406,
           `${wing!.charType.toString(16)} clip ${wing!.motion.toString(16)}`);
-    for (let i = 0; i < 3; i += 1) BatUpdate(o, frame(rng));
-    BatUpdate(wing!, frame(rng));
-    check("...which follows its body a unit above it",
-          Math.abs(wing!.pos.y - (o.pos.y + 1)) < 1e-3,
-          `${wing!.pos.y.toFixed(2)} vs ${o.pos.y.toFixed(2)}`);
+    check("...at its body's address with bit 30 set",
+          wing!.at === BatWingAt(o.at) && wing!.at === (0xa200 | 0x40000000),
+          wing!.at.toString(16));
     // The body leaves; the wing reads an empty slot and goes on the next frame.
     ActorDespawn(o);
     G.g_bat_members[bat(o).subtype * 0x19 + bat(o).member] = 0;
     BatUpdate(wing!, frame(rng));
     check("...and despawns the frame its body's slot goes empty",
           wing!.despawned, `${wing!.despawned}`);
+  }
+
+  {
+    // **The seat is the body's node matrix, not its yaw.** `BatWingUpdate`
+    // multiplies `body+0x2C4` -- node 1's draw record -- and translates
+    // `(0, 1, 2)` in it, so the offset is turned by the clip's root record,
+    // lifted by its root height and shrunk by the model's 0.6 before the
+    // body's own yaw turns it. A clip whose root record is a plain half-turn
+    // about y and whose root height is -0.5, a body at a quarter turn (L48):
+    //
+    //   Ry(0x8000) (0, 1, 2)  = (0, 1, -2)
+    //   T(0, -0.5, 0)         = (0, 0.5, -2)
+    //   S(0.6)                = (0, 0.3, -1.2)
+    //   Ry(0x4000)            = (-1.2, 0.3, 0)     x' = x cos + z sin
+    //   + (10, -5, -100)      = (8.8, -4.7, -100)
+    //
+    // The first cut took `(0, 1, 2)` in the yaw alone -- (12, -4, -100) -- which
+    // for the real clip put the wings four units off, on the wrong side.
+    const rng = new Rng(97);
+    const SEAT_CLIP = { bank: "t", frames: 1, fps: 30, root: [0, -0.5, 0],
+                        rot: [0, 0x8000, 0, 0, 0, 0] };
+    const BAT_T = { ...TYPE, type: BAT_CHAR_TYPE, name: "zabat",
+      bone_count: 2,
+      bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01,
+                offset: [0, 0, 0], parent: null, steps: [] }],
+      motions: { [String(BAT_CLIP)]: SEAT_CLIP } } as unknown as CharacterType;
+    const WING_T = { ...BAT_T, type: BAT_WING_CHAR_TYPE, name: "zabat_wing",
+      motions: { [String(BAT_WING_CLIP)]: SEAT_CLIP } } as unknown as
+      CharacterType;
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, types: { ...CHARS.types,
+      [String(BAT_CHAR_TYPE)]: BAT_T, [String(BAT_WING_CHAR_TYPE)]: WING_T },
+    } as CharactersJson);
+    G.g_players_in_play = 1;
+    const o = mkBat(0xa240, 0, 0, 0, rng);
+    const wing = G.g_object_list.find(
+      (a) => a.cls === SpawnClass.Bat && bat(a).isWing)!;
+    o.pos = vec3(10, -5, -100);
+    o.yaw = 0x4000;
+    o.pitch = 0;
+    BatUpdate(wing, frame(rng));
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+    check("a wing sits on its body's node: (0, 1, 2) through the clip's root "
+          + "record, its height and the 0.6 model scale",
+          near(wing.pos.x, 8.8) && near(wing.pos.y, -4.7)
+          && near(wing.pos.z, -100),
+          `${wing.pos.x.toFixed(3)},${wing.pos.y.toFixed(3)},`
+          + `${wing.pos.z.toFixed(3)}`);
+    check("...turned half round from its body and pitched 0xE800",
+          wing.yaw === 0x4000 + 0x8000 && wing.pitch === BAT_WING_PITCH,
+          `${wing.yaw.toString(16)} ${wing.pitch.toString(16)}`);
+    check("...on its body's motion clock",
+          wing.playTicks === o.playTicks, `${wing.playTicks} ${o.playTicks}`);
+
+    // The bob the swarm dives with is the dive's 5.0 -- `FMUL [0x0055D2B4]` at
+    // `0x0042F035` -- and not the orbit's 8.0.
+    mkBat(0xa280, 2, 0, 0, rng, vec3(0, 0, -40));
+    const m = G.g_object_list.find((a) => a.cls === SpawnClass.Bat
+      && !bat(a).isWing && bat(a).subtype === 2)!;
+    bat(m).timer = 0;
+    BatUpdate(m, frame(rng));
+    check("a swarm member whose orbit has run out turns to dive",
+          bat(m).state === BatState.Fly, BatState[bat(m).state]);
+    const fromY = bat(m).fromY;
+    BatUpdate(m, frame(rng));
+    check("...and dives bobbing by the clip's root height times 5, not 8",
+          near(m.pos.y - fromY, -0.5 * BAT_DIVE_BOB_SCALE),
+          `${(m.pos.y - fromY).toFixed(3)}`);
+  }
+
+  {
+    // **A placer's members need an address each**, because the port keys both
+    // the pool and the drawn hierarchy on one. The scatter has twenty-five,
+    // and four bits of member index gave members 16..24 the addresses of
+    // 0..8: two bats per row, and a wing seated on the wrong one.
+    const rng = new Rng(101);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    mkBat(0xa300, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const bodies = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && !bat(a).isWing && !a.despawned);
+    const wings = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && bat(a).isWing && !a.despawned);
+    check("a scatter's twenty-five members answer to twenty-five addresses",
+          bodies.length === 25 && new Set(bodies.map((a) => a.at)).size === 25,
+          `${new Set(bodies.map((a) => a.at)).size}`);
+    check("...and their wings to twenty-five more, none shared",
+          new Set([...bodies, ...wings].map((a) => a.at)).size === 50,
+          `${new Set([...bodies, ...wings].map((a) => a.at)).size}`);
+    check("...each at BatChildAt(placer, 1, member)",
+          bodies.every((a) => a.at === BatChildAt(0xa300, 1, bat(a).member)));
+    // `obj+0x34 = 1`, the build raises `0x80`, then `& ~0x80 | 0x80000`.
+    check("...with the engine's flag word, 0x80001, bit 0x80 taken back",
+          bodies.every((a) => (a.flags & ~ActorFlag.NoCameraTrack)
+                              === (BAT_FLAG_80000 | 1)),
+          bodies[0].flags.toString(16));
+    // `ActorBuildSkinnedModel` claims a hit slot for every member and every
+    // wing, body then wing, and the fourteenth claim fills the table.
+    const w0 = wings.find((a) => bat(a).member === 0)!;
+    const b6 = bodies.find((a) => bat(a).member === 6)!;
+    const b7 = bodies.find((a) => bat(a).member === 7)!;
+    check("...and each claims a hit slot, body then wing, until the table fills",
+          bodies[0].hitSlot === 0 && w0.hitSlot === 1 && b6.hitSlot === 12
+          && b7.hitSlot === HIT_SLOT_NONE,
+          `${bodies[0].hitSlot} ${w0.hitSlot} ${b6.hitSlot} ${b7.hitSlot}`);
+  }
+
+  {
+    // **Who registers for the shot test, and when.** The dive and the swarm at
+    // their tails in every state; the scatter only at the end of its flying
+    // arm; the wing never. The engine's list is the whole of what a shot can
+    // find (`ClassHandler.registersForShotTest`).
+    const rng = new Rng(103);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const listed = (a: Actor) => G.g_shot_test_list.some((e) => e.at === a.at);
+    const dive = mkBat(0xa340, 0, 0, 3, rng);
+    const wing = G.g_object_list.find((a) => a.at === BatWingAt(0xa340))!;
+    ShotTestListReset();
+    BatUpdate(dive, frame(rng));
+    BatUpdate(wing, frame(rng));
+    check("a waiting dive bat is in the shot test", listed(dive)
+          && bat(dive).state === BatState.Wait);
+    check("...its sphere a unit above it",
+          dive.shotCentre.y === dive.pos.y + 1
+          && dive.shotCentre.x === dive.pos.x,
+          `${dive.shotCentre.y} vs ${dive.pos.y}`);
+    check("...and the camera aims at its position, not at a bone",
+          dive.lookAt.x === dive.pos.x && dive.lookAt.y === dive.pos.y
+          && dive.lookAt.z === dive.pos.z);
+    check("...and its wing never is", !listed(wing));
+
+    mkBat(0xa380, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const m0 = G.g_object_list.find((a) => a.at === BatChildAt(0xa380, 1, 0))!;
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    check("a scattering bat is no target while it waits",
+          !listed(m0), BatState[bat(m0).state]);
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    check("...and is once it flies",
+          listed(m0) && bat(m0).state === BatState.Fly);
+
+    // The kill is taken inside the flying arm, and the arm carries on: the
+    // damped velocity goes through the flight's own 1.05 and 1.08, and the
+    // corpse's gravity starts on the next frame.
+    const vx = bat(m0).vx, vy = bat(m0).vy, vz = bat(m0).vz;
+    const y = m0.pos.y;
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+    check("...a shot one dies inside its flying arm",
+          bat(m0).state === BatState.Dead, BatState[bat(m0).state]);
+    check("...and the kill frame is still a flying frame: x and z bounce by "
+          + "-0.3 and accelerate, y climbs by 1.08",
+          near(bat(m0).vx, vx * BAT_SCATTER_CORPSE_DAMP * BAT_SCATTER_ACCEL_XZ)
+          && near(bat(m0).vz, vz * BAT_SCATTER_CORPSE_DAMP)
+          && near(bat(m0).vy, vy * BAT_SCATTER_ACCEL_Y)
+          && near(m0.pos.y, y + vy * BAT_SCATTER_ACCEL_Y),
+          `vy ${bat(m0).vy} vs ${vy * BAT_SCATTER_ACCEL_Y}`);
+    check("...registered for the shot test on that frame too", listed(m0));
+    const vy1 = bat(m0).vy;
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    check("...and falling from the next, and no longer a target",
+          near(bat(m0).vy, vy1 - BAT_SCATTER_CORPSE_GRAVITY) && !listed(m0),
+          `${bat(m0).vy}`);
+  }
+
+  {
+    // `SpawnBatSplash` (`FUN_0042F980`) and `BatSplashUpdate`
+    // (`FUN_0042F930`): the caller's x and z, **y forced to -25**, thirty
+    // models drawn once each, and gone.
+    ResetGameGlobals();
+    SpawnBatSplash(3, -40, 7);
+    const s = G.g_bat_splashes[0];
+    check("a splash sits on the water plane, whatever height it was given",
+          !!s && s.x === 3 && s.y === BAT_SPLASH_Y && s.y === -25 && s.z === 7,
+          `${s?.x},${s?.y},${s?.z}`);
+    const drawn: number[] = [];
+    for (let i = 0; i < 40 && G.g_bat_splashes.length; i += 1) {
+      BatSplashesTick();
+      if (G.g_bat_splashes.length) drawn.push(G.g_bat_splashes[0].drawn);
+    }
+    check("...draws its thirty models once each, the first first",
+          drawn.length === BAT_SPLASH_LAST_FRAME + 1
+          && drawn.every((d, i) => d === i), drawn.join(","));
+    check("...and is gone on the tick after the thirtieth",
+          G.g_bat_splashes.length === 0);
+  }
+
+  {
+    // Both corpses that reach the water leave one, and the frame they do is
+    // the splash's first: the pool is stepped after the actors, as a task the
+    // bat allocated would be walked after it.
+    const rng = new Rng(107);
+    const events = scene(0, rng);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    G.g_players_in_play = 1;
+    mkBat(0xa3c0, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const m = G.g_object_list.find((a) => a.at === BatChildAt(0xa3c0, 1, 0))!;
+    bat(m).state = BatState.Dead;
+    m.pos = vec3(5, -24.99, -3600);
+    bat(m).vx = 0;
+    bat(m).vy = 0;
+    bat(m).vz = 0;
+    GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    const sp = G.g_bat_splashes[0];
+    check("a scattering bat's corpse that reaches the water splashes",
+          m.despawned && !!sp && sp.x === 5 && sp.y === -25 && sp.z === -3600,
+          `${m.despawned} ${sp?.x},${sp?.y},${sp?.z}`);
+    check("...drawing its first model on that same frame",
+          sp?.drawn === 0, `${sp?.drawn}`);
+    check("...to the sound of SIBUKI8", sounds.includes(SND_BAT_SPLASH),
+          sounds.map((x) => x.toString(16)).join(","));
+
+    // The swarm's corpse falls with no frame limit to the same plane, and is
+    // heard only in stage 3.
+    G.g_scene_index = 3;
+    mkBat(0xa400, 2, 0, 0, rng, vec3(0, 0, -40));
+    const w = G.g_object_list.find((a) => a.at === BatChildAt(0xa400, 2, 0))!;
+    bat(w).state = BatState.Dead;
+    w.pos = vec3(-6, -24.999, -40);
+    const heard = sounds.length;
+    GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    check("a swarm corpse splashes too, silently outside stage 3",
+          w.despawned && G.g_bat_splashes.some((q) => q.x === -6 && q.y === -25)
+          && !sounds.slice(heard).includes(SND_BAT_SPLASH),
+          `${w.despawned} ${G.g_bat_splashes.length}`);
   }
 
   // -- class 0x13, the prop that carries, and class 0x18, what rides it -----

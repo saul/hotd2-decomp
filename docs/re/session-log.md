@@ -19505,6 +19505,36 @@ nothing in `render/` draws them yet (`[diverges]`, visual). `FUN_004759C0`,
 called per card with the yaw, rewrites a float in a render-state list from
 `sin(yaw)` and is left `[open]`.
 
+## 2026-09-27 -- a skeleton walk that stopped at depth 12, and the shot test's bit 0x8000
+
+Two shared fixes the boss readings turned up, both outside any one boss.
+
+**Skeletons.** `character_skeleton` (both `hod2lib` halves) refused to walk
+past depth 12. The bound was arbitrary -- `seen` already visits each node once,
+which bounds the walk by its input (L22) -- and it cut exactly three types:
+`boss3.bin` (0x49, 17 deep) and `boss3l.bin`/`b6boss3.bin` (0x48/0x50, 24
+deep) came out with 13 of their 19/26 nodes. Those are the stage-3 boss's
+heads, and the lost nodes were their jaws and weak bones. Found by the Tower
+reading. `tools/verify_skeletons.py` now asserts every skeleton carries bones
+1..n-1 of `DAT_004E0724`'s count exactly once: 86 of 86 pass, and with the old
+cap put back it fails on exactly the three.
+
+**The shot test.** `RegisterForShotTest` (`0x00405160`) skips an actor whose
+`obj+0x34` has bit `0x8000` -- the Hierophant reading's claim, checked. The
+port's actor picks ignored the bit, so a boss mid-entrance, a zombie in the
+civilian-order wait (`0x18000`) and every spawn whose record carries it could
+be shot. `ActorFlag.NoShotTest` is honoured by both picks now. `ShotTestSphere`'s
+other gate, bit `0x80` for descending into the bones, is **not** applied: no
+ported Init sets that bit, so honouring it today would turn every zombie into
+one sphere. That is an audit of every class's Init before it can be switched
+on, and it is recorded here rather than done.
+
+`MarkActorShot` (`0x00404DB0`) keeps one byte per shooter at `obj+0x190 +
+player` -- the bone's index, or 1 for an actor hit whole -- and the port's
+merged `pendingHit` loses the second player. `Actor.shotBones` is that byte
+array; the bosses' shot routines walk it. The ray each player fired was
+already in `G.g_crosshair_ray`.
+
 ## 2026-09-27 -- JUDGMENT (classes 0x22 and 0x23), read for the port
 
 Phase 1 of the boss port: the whole of classes 0x22 and 0x23 read, named and

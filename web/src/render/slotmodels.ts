@@ -50,7 +50,7 @@
 import { Group, Matrix4, Object3D, Ray, Vector3, type Mesh } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
-import type { Actor, HumanoidActor } from "../game/actor";
+import { ActorFlag, type Actor, type HumanoidActor } from "../game/actor";
 import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
   from "../game/class25/state";
 import type { CamPaths } from "../game/camera/curve";
@@ -670,6 +670,8 @@ export class SlotModelLayer implements System<RenderContext> {
     let best: { at: number; point: Vector3; t: number } | null = null;
     for (const a of G.g_object_list) {
       if (a.dead || a.hitRadius <= 0) continue;
+      // `RegisterForShotTest` (`FUN_00405160`) skips bit `0x8000`.
+      if (a.flags & ActorFlag.NoShotTest) continue;
       if (!this.nodes.has(a.at)) continue;       // not drawn, not shootable
       this._c.set(a.pos.x, a.pos.y, a.pos.z);
       ray.closestPointToPoint(this._c, this._p);

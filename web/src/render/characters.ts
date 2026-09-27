@@ -54,7 +54,7 @@ import type {
   CharacterPlacement, CharacterType, CharactersJson,
 } from "../bundle";
 import type { CiviliansJson, CivilianItemJson } from "../bundle/scene";
-import type { Actor } from "../game/actor";
+import { ActorFlag, type Actor } from "../game/actor";
 import { ATTACHMENT_REPLACES_BELOW } from "../game/attachments";
 import type { Vec3 } from "../game/vec";
 import type { CharacterSpawnRequest } from "../game/director";
@@ -700,6 +700,9 @@ export class CharacterLayer implements System {
     let bestT = Infinity;
     for (const inst of this.instances) {
       if (!inst.root.visible || inst.a.dead) continue;
+      // `RegisterForShotTest` (`FUN_00405160`) never appends an actor whose
+      // `obj+0x34` has bit `0x8000`, so no shot can find it.
+      if (inst.a.flags & ActorFlag.NoShotTest) continue;
       // **A skinned actor with no bone sphere anywhere is hit whole**, at
       // `obj+0x124`, and that is the engine's own `else` arm rather than a
       // fallback invented here: `ShotTestSphere` (`FUN_00404630`) hands over
@@ -726,7 +729,7 @@ export class CharacterLayer implements System {
           if (t > 0 && this._ray.distanceSqToPoint(this._c) <= r * r
               && t < bestT) {
             bestT = t;
-            best = { kind: "actor", at: inst.at, bone: 0,
+            best = { kind: "actor", at: inst.at, bone: 0, whole: true,
                      point: { x: this._c.x, y: this._c.y, z: this._c.z } };
           }
         }
@@ -770,7 +773,7 @@ export class CharacterLayer implements System {
     const slot = this.slotModels?.pickSphere(this._ray) ?? null;
     if (slot && slot.t < bestT) {
       bestT = slot.t;
-      best = { kind: "actor", at: slot.at, bone: 0,
+      best = { kind: "actor", at: slot.at, bone: 0, whole: true,
                point: { x: slot.point.x, y: slot.point.y, z: slot.point.z } };
     }
     // ...and the creatures `znjoe` releases, which are the third pool in this

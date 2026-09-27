@@ -308,6 +308,14 @@ CHECKS: list[Check] = [
           "standing between a hand-written run and `char_adv02` losing its "
           "midriff again",
           NEEDS_GAME),
+    Check("verify_skeletons", ".",
+          ["python3", "tools/verify_skeletons.py", "--game-dir",
+           "{game_dir}"],
+          "that every character skeleton is walked whole -- one node per bone "
+          "of the EXE's own motion-frame count -- which no rig, bake or render "
+          "check notices when a walk comes up short: the stage-3 boss's heads "
+          "lost thirteen nodes, their jaws and their weak bones to a depth cap",
+          NEEDS_GAME),
     Check("verify_parts", ".",
           ["python3", "tools/verify_parts.py", "--game-dir", "{game_dir}"],
           "that every vertex-blended part in a bundle is skinned the way the "

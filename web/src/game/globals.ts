@@ -29,6 +29,7 @@ import { makeDamageOverlays, PlayerCameraHook, type DamageOverlay }
 import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
+import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
 import type { ShotTestEntry } from "./combat/shot_test";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
@@ -1359,6 +1360,14 @@ export const G = {
   g_item_set_countdown: [] as number[],
   /** Hands out `BreakableProp.id`. State, so ids never collide across a load. */
   g_breakable_next_id: 1,
+  /**
+   * `[port-only]` — the 0x2B4 objects `BreakablePropSpawnShatter`
+   * (`FUN_00465170`) has allocated, fifteen pieces each, stepped by
+   * `BreakablePropShatterUpdate`. `game/class41/shatter.ts`.
+   */
+  g_prop_shatters: [] as PropShatter[],
+  /** `[port-only]` — see {@link PropShatter.id}. */
+  g_prop_shatter_seq: 1,
 
   // -- the camera the script is playing ----------------------------------
   /**
@@ -2210,6 +2219,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_breakable_members = [];
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
+  G.g_prop_shatters = [];
+  G.g_prop_shatter_seq = 1;
   G.g_evt_step_index = 0;
   G.g_evt_block_index = 0;
   G.g_script_branch_var = 0;

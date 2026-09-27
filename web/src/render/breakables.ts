@@ -17,27 +17,33 @@
  * MatrixRotateY(obj+0x1D0);
  * MatrixRotateZ(obj+0x1D4);          // only once it is falling
  * MatrixRotateX(obj+0x1CC);
+ * MatrixTranslate(0, -3.770148, 0);  // likewise
  * AssetDrawSlot(obj+0x28C);
+ * MatrixStore(obj+0x2E4);
  * MatrixStackPop(1);
  * ```
  *
  * plus a ground shadow at slot `0x10D0`, drawn flat at the floor for a prop
- * that is either at stack level 0 or already destroyed.
+ * that is either at stack level 0 or no longer standing. The stored matrix is
+ * state -- a stacked prop's shatter places its pieces off it -- so for the
+ * group family the port composes it (`drawMatrix`) and this places the model
+ * with it. The pieces themselves are `render/prop_shatter.ts`'s.
  *
- * The **shake** is the one thing that is a draw offset and not state: the
- * engine adds `(rand() % 0x97 - 75) * shake * 0.01` to x and z at draw time
- * and never writes it back, so the prop rattles without its hull or its hit
- * test moving. It is applied here for that reason, and it is the only place
- * this file draws its own random numbers — they do not reach the port, so the
- * save state is unaffected.
+ * The **shake** is a draw offset and not state: the engine adds
+ * `(rand() % 0x97 - 75) * shake * 0.01` to x and z at draw time and never
+ * writes it back, so the prop rattles without its hull or its hit test
+ * moving. For the group family those two `rand()`s are the game's own and are
+ * drawn in `BreakablePropUpdate`; every other family's rattle is still drawn
+ * here, from this layer's own generator, where it does not reach the port.
  */
-import { Group, Object3D, Ray, Vector3 } from "three";
+import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
 import {
   BreakableState, PropFamily, type BreakableProp,
 } from "../game/class41/prop_state";
+import { T } from "../game/tables";
 import { KIND_SHADOW } from "../game/class41/kinded";
 import {
   GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, GENERIC_SLOT_STRIP, PoseOrder,
@@ -197,6 +203,9 @@ const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
   // tumble drives all three angles, so this is the one family where the order
   // is visible on every frame rather than only at placement.
   [PropFamily.Type43]: PoseOrder.RollYawPitch,
+  // `FallingContainerFragmentUpdate` (`FUN_0046AD20`): `RotZ; RotY; RotX`
+  // in both draw blocks, the container's own order.
+  [PropFamily.ContainerFragment]: PoseOrder.RollYawPitch,
 };
 
 /**
@@ -287,6 +296,8 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // `PropUpdateType13` (`FUN_00467F50`) is two `AssetDrawSlot` calls and
   // neither is a shadow.
   if (p.family === PropFamily.Type13) return null;
+  // `FallingContainerFragmentUpdate` draws its piece and nothing else.
+  if (p.family === PropFamily.ContainerFragment) return null;
   // Nor does `PropUpdateType48FlickerLight`: a lamp, and three draws, none a
   // shadow.
   if (p.family === PropFamily.Type48) return null;
@@ -350,9 +361,18 @@ export class BreakableLayer implements System<RenderContext> {
   private readonly _hit = new Vector3();
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
+  private readonly _m = new Matrix4();
 
   constructor() {
     this.group.name = "breakables";
+  }
+
+  /**
+   * A template by slot, for `render/prop_shatter.ts`: a stacked prop's fifteen
+   * pieces are in the same hidden rig as the props themselves.
+   */
+  cloneSlot(slot: number): Object3D | null {
+    return this.clone(slot);
   }
 
   /**
@@ -469,7 +489,9 @@ export class BreakableLayer implements System<RenderContext> {
         || p.family === PropFamily.Effect
         || p.slot === SLOT_NONE
         || (p.family === PropFamily.Kinded && p.effectFrames > 0);
-      l.node.visible = !gone;
+      // A settled container piece skips its draw on odd counts at the end;
+      // `FallingContainerFragmentUpdate` says so on the piece.
+      l.node.visible = !gone && !p.drawSkipped;
 
       const [sx, sz] = this.shake(p);
       // `MatrixTranslate(0, 0.8, 0)` after the pose, for the one piece a
@@ -478,7 +500,15 @@ export class BreakableLayer implements System<RenderContext> {
         ? TYPE43_EFFECT7_RISE : 0;
       l.node.position.set(p.x + sx, p.y + rise, p.z + sz);
       l.node.rotation.set(0, 0, 0);
-      if (p.family === PropFamily.Type48) {
+      if (p.family === PropFamily.Group && p.drawMatrix.length === 16) {
+        // `BreakablePropUpdate`'s draw blocks, which the port composes and
+        // keeps -- `MatrixStore(obj+0x2E4)` is state, the shatter reads it --
+        // so the model goes exactly where the routine drew it: rattle, and
+        // the `Translate(0, -3.770148, 0)` a falling or settled prop is drawn
+        // under, included.
+        this._m.fromArray(p.drawMatrix);
+        this._m.decompose(l.node.position, l.node.quaternion, l.node.scale);
+      } else if (p.family === PropFamily.Type48) {
         this.poseFlicker(l, p);
       } else if (p.family === PropFamily.Type13) {
         // `AssetDrawSlot(obj+0x28C)` under no matrix of its own: the panel is
@@ -531,8 +561,14 @@ export class BreakableLayer implements System<RenderContext> {
 
       if (l.shadow) {
         // `AssetDrawSlot(0x10D0)` at `g_camera_fixed_eye_y + 0.2`, flat, and
-        // only while the prop is whole enough to cast one.
-        l.shadow.visible = !gone;
+        // only while the prop is whole enough to cast one. A group prop's
+        // routine skips it for a member standing on another (`0x00464FF3`:
+        // level non-zero and state 0), which is every stacked prop until it
+        // falls.
+        const stacked = p.family === PropFamily.Group
+          && p.state === BreakableState.Standing
+          && (T.breakables?.groups?.[p.group]?.[p.member]?.level ?? 0) !== 0;
+        l.shadow.visible = !gone && !stacked;
         const floor = p.family === PropFamily.Falling
           ? p.floorY : G.g_camera_fixed_eye_y;
         l.shadow.position.set(p.x, floor + SHADOW_RISE, p.z);
@@ -701,6 +737,10 @@ export class BreakableLayer implements System<RenderContext> {
    * the engine's `rand()` is seeded is that the arcade run is reproducible.
    */
   private shake(p: BreakableProp): [number, number] {
+    // `BreakablePropUpdate`'s two draws are the game's -- they come out of
+    // its `rand()` stream -- so the port takes them and leaves them on the
+    // prop; they are already in `drawMatrix`.
+    if (p.family === PropFamily.Group) return [p.shakeX, p.shakeZ];
     const draw = ([mod, centre]: readonly [number, number]) =>
       (this.rng.int(mod) - centre) * p.shake * SHAKE_SCALE;
     if (p.family === PropFamily.RisingDoor) {

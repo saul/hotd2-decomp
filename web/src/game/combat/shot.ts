@@ -68,11 +68,14 @@ import { PropFamily } from "../class41/prop_state";
 /**
  * The prop families whose routine never calls `SpawnPropHitSpark`
  * (`FUN_00465860`) — read off that function's nine call sites, none of which
- * is in `PropUpdateType38`, `PropUpdateType39`, `PropUpdateType40` or
- * `PropUpdateType44`.
+ * is in `PropUpdateType38`, `PropUpdateType39`, `PropUpdateType40`,
+ * `PropUpdateType44` or `FallingContainerUpdate` -- the container's knock
+ * calls `SpawnPropHitEffectScaled` at one and a half size instead, and its
+ * break calls neither.
  */
 const NO_PROP_SPARK: ReadonlySet<PropFamily> = new Set([
   PropFamily.Type38, PropFamily.Type39, PropFamily.Type40, PropFamily.Type44,
+  PropFamily.Falling,
 ]);
 import { ColiTraceSegmentAllSets } from "../coli";
 import { PlayerShotEffectSpawn } from "../effects/shot_effects";

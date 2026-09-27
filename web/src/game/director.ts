@@ -723,7 +723,7 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   CarriedPropPoolUpdate(rng, host, events);
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
-  BreakablePropPoolUpdate(rng, events);
+  BreakablePropPoolUpdate(rng, events, host);
 
   // `FUN_00408DD0` drains the candidates the actor updates above registered.
   UpdateCameraEnemySlots(eye);

@@ -1264,6 +1264,15 @@ export const G = {
    */
   g_water_level: -24.9,
   /**
+   * `g_frog_bone1_on_entry` — 0x007DCBB8, three floats beside the water
+   * level. Class 0x11's: `FrogUpdate` (`FUN_0043A1E0`) writes it before any
+   * state runs, as bone 1 where the **last** draw left it, carried into the
+   * world through this frame's camera block; `FrogPushOutOfActorCollision`
+   * (`FUN_0043A500`) reads its x and z as where the frame's travel started.
+   * Nothing else touches it, and y is written and never read.
+   */
+  g_frog_bone1_on_entry: vec3(),
+  /**
    * `g_water_wave_field` — 0x007DCC4C. The block `WaterFieldCreate`
    * (`FUN_00442290`, class 0x16) allocates: a plane, a slot mask, a count of
    * sources that have ticked and eight wave sources, which class 0x17's
@@ -2316,6 +2325,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_enemy_slots = [];
   G.g_camera_candidate_count = 0;
   G.g_water_level = -24.9;
+  G.g_frog_bone1_on_entry = vec3();
   G.g_water_attack_slots = [0, 0, 0, 0];
   // The engine leaves the pointer dangling into the freed pool; nothing
   // samples it until the next class-0x16 spawn replaces it.

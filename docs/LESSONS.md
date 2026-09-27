@@ -754,3 +754,15 @@ there before it is anywhere else -- and read the `from` in every rename
 result, which is the only report that the name replaced was not `FUN_...`.
 It is `L17` pointed at a write: "I did not see a name" and "there was no
 name" are different claims.
+
+**L53 -- An arm that bumps the substate and does not return runs the next arm
+in the same frame.** Class 0x11's two launch substates end `INC byte ptr
+[EAX+5]` and then carry straight on into the code the jump table gives the
+next substate -- `0x0043B03E` into `0x0043B044`, `0x0043B6F2` into
+`0x0043B6F7` -- so the launch frame also halves the turn still owed. The port
+had each arm end in `return`, which is what a `switch` in TypeScript wants and
+what reading the arms one at a time suggests, and every hop turned one halving
+short for as long as it existed. The tell is in the addresses: an arm whose
+last instruction is not a `RET`, a `JMP` to the epilogue or a `JMP` elsewhere
+falls through, and the jump table says where to. Check each arm's last
+instruction against the next arm's first address before writing its `return`.

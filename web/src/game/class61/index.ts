@@ -19,12 +19,15 @@
  * The card is screen furniture: the rescue list out of
  * `g_civilians_rescued_by_scene`, the per-scene tables at `0x0055DF50`, a
  * score tally that counts up, two texbanks and a fade. **None of it is
- * ported.** What is ported is the actor's lifetime and the one side effect the
- * port has a global for: `g_nFiringGate = 0` at `0x00434FCA`, which is the
- * engine putting the trigger down for the results screen.
+ * ported.** What is ported is the actor's lifetime and the two side effects
+ * the port has globals for: `g_nFiringGate = 0` at `0x00434FCA`, which is the
+ * engine putting the trigger down for the results screen, and
+ * {@link ScreenFurniture.ResultCard}, the bit that says the card has the
+ * screen — the shutter holds no bars in state 4 and `HudDrawLives` blinks no
+ * "HOLD YOUR FIRE!" for as long as it is up.
  */
 import type { Actor } from "../actor";
-import { G } from "../globals";
+import { G, ScreenFurniture } from "../globals";
 import {
   registerClass, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -47,7 +50,8 @@ export const RESULT_CARD_TALLY_AT = 0x78;
 
 /** `ResultCardInstall`'s sub-states. */
 enum Sub {
-  /** Drop the trigger, latch the dwell, fall through into the tail. */
+  /** Drop the trigger, raise the furniture bit, latch the dwell, fall
+   *  through into the tail. */
   Setup = 0,
   /** Hold, until the dwell reaches {@link RESULT_CARD_TALLY_AT}. */
   Hold = 1,
@@ -71,6 +75,9 @@ export function ResultCardInstall(obj: Actor, f: ClassFrame): void {
     // exact global — the shutter's gate — so it is transcribed rather than
     // dropped.
     G.g_nFiringGate = 0;
+    // `OR EDX, 0x10` at `0x00434FD0`, stored at `0x00434FD6`: the card has
+    // the screen from its first frame until the frame it raises its flag.
+    G.g_screen_furniture_flags |= ScreenFurniture.ResultCard;
     obj.hp = RESULT_CARD_FRAMES;
     obj.sub = Sub.Hold;
   } else if (obj.sub === Sub.Hold && obj.hp <= RESULT_CARD_TALLY_AT) {
@@ -79,21 +86,24 @@ export function ResultCardInstall(obj: Actor, f: ClassFrame): void {
   ResultCardCountDown(obj);
 }
 
-/** The tail at `0x00435663`: `DEC obj+0x11C`, and at zero the flag. */
+/**
+ * The tail at `0x00435663`: `DEC obj+0x11C`, and at zero the flag.
+ *
+ * `CMP word ptr [EBP+0x11c], BX` at `0x0043566A` compares against zero:
+ * `EBX` is cleared at `0x00435188` and nothing in the draw after it writes
+ * it. At zero, in the engine's order: the flag (`0x0043567C`), the furniture
+ * bit down (`AND AL, 0xEF` at `0x00435683`, stored at `0x00435685`), then
+ * `ActorKill`.
+ */
 function ResultCardCountDown(obj: Actor): void {
   obj.hp -= 1;
   if (obj.hp > 0) return;
   G.g_script_flags[RESULT_CARD_FLAG] = 1;
+  G.g_screen_furniture_flags &= ~ScreenFurniture.ResultCard;
   ResultCardKill(obj);
 }
 
-/**
- * `ActorKill` (`FUN_004A7040`) at `0x0043568A`.
- *
- * `[port-only]` The clear of `g_screen_furniture_flags` bit `0x10` before it
- * is not modelled, for the same reason as the chapter card's `0x20`: nothing
- * in the port reads that word.
- */
+/** `ActorKill` (`FUN_004A7040`) at `0x0043568A`. */
 function ResultCardKill(obj: Actor): void {
   obj.dead = true;
   obj.visible = false;

@@ -74,7 +74,7 @@ import {
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
 import { ActorByAt, AppState, G, HIT_SLOT_NONE, PlayerState, PlayerTask,
-  ResetGameGlobals, ResetSceneOnEnter, RunPhase }
+  ResetGameGlobals, ResetSceneOnEnter, RunPhase, ScreenFurniture }
   from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
@@ -259,7 +259,7 @@ import {
   RELOAD_SOUND,
 } from "../src/game/player_gun";
 import {
-  RELOAD_VOICE, SHOOT_VOICE,
+  HudDrawLives, RELOAD_VOICE, SHOOT_VOICE,
 } from "../src/game/hud_readout";
 import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
   from "../src/game/hud_sprites";
@@ -15055,6 +15055,98 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
           `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
   }
 
+  /**
+   * Every value written to `g_screen_furniture_flags` while `run` runs, each
+   * with `g_script_flags[flag]` as it stood at that write.
+   *
+   * A skipped chapter card raises its bit and drops it inside one call, so
+   * the word before and after that call is the same whether the card wrote
+   * it twice or never touched it. Only the writes themselves can tell.
+   */
+  const furnitureWrites = (flag: number, run: () => void) => {
+    let word = G.g_screen_furniture_flags;
+    const writes: { word: number; flag: number }[] = [];
+    Object.defineProperty(G, "g_screen_furniture_flags", {
+      configurable: true, enumerable: true,
+      get: () => word,
+      set: (v: number) => {
+        word = v;
+        writes.push({ word: v, flag: G.g_script_flags[flag] ?? 0 });
+      },
+    });
+    try {
+      run();
+    } finally {
+      Object.defineProperty(G, "g_screen_furniture_flags", {
+        configurable: true, enumerable: true, writable: true, value: word,
+      });
+    }
+    return writes;
+  };
+  /** What a card must leave alone: start bits 0 and 1, and the other card. */
+  const OTHER_FURNITURE = 0x3;
+
+  // The chapter card's bit: `OR AL, 0x20` at `0x0043436B` first thing in
+  // sub 0, and `AND AL, 0xDF` at `0x004348C7` straight after flag 248 goes
+  // up at `0x004348C1`. The skip (NEW-BUGS bug 13) runs both in the one
+  // update, which is the exe's own skip path -- so the bit is up for exactly
+  // the stretch of that call between sub 0's head and the flag, and down
+  // again before any other routine runs.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    const before = OTHER_FURNITURE | ScreenFurniture.ResultCard;
+    G.g_screen_furniture_flags = before;
+    const writes = furnitureWrites(CHAPTER_CARD_FLAG, () => {
+      if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
+    });
+    const shown = writes.map((x) => `0x${x.word.toString(16)}@${x.flag}`);
+    check("the chapter card raises g_screen_furniture_flags bit 0x20 before "
+          + "flag 248 and drops it after, both in its one skipped update",
+          writes.length === 2
+          && writes[0].word === (before | ScreenFurniture.ChapterCard)
+          && writes[0].flag === 0
+          && writes[1].word === before && writes[1].flag === 1
+          && card?.dead === true,
+          `${shown.join(" ")} dead ${card?.dead}`);
+    check("...so the update ends with the bit down and every other bit as "
+          + "it found them",
+          G.g_screen_furniture_flags === before,
+          `0x${G.g_screen_furniture_flags.toString(16)}`);
+  }
+
+  // The installer's two arms raise the same bit before they hand over:
+  // `OR EDX, 0x20` at `0x004342F6` (Boss Mode) and `0x00434324` (app state
+  // 0x0B). The clears are in the variants, which the port does not run, so
+  // neither the flag nor the drop comes.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    G.g_GameMode = GameMode.Boss;
+    G.g_screen_furniture_flags = OTHER_FURNITURE;
+    if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
+    check("in Boss Mode the installer raises bit 0x20 and hands over, with "
+          + "no latch, no flag and no kill of its own",
+          G.g_screen_furniture_flags
+            === (OTHER_FURNITURE | ScreenFurniture.ChapterCard)
+          && (G.g_script_flags[CHAPTER_CARD_FLAG] ?? 0) === 0
+          && card?.sub === 0 && card?.dead === false,
+          `0x${G.g_screen_furniture_flags.toString(16)} `
+          + `flag ${G.g_script_flags[CHAPTER_CARD_FLAG]} sub ${card?.sub}`);
+  }
+
   // The result card: 420 frames, and it drops the trigger on its first.
   {
     ResetGameGlobals();
@@ -15066,15 +15158,40 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     w.tick(1 / 60);
     const card = G.g_object_list.find((o) => o.cls === SpawnClass.ResultCard);
     const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    /** `HudDrawLives`' state-4 arm, the reader of bit 0x10 on this side:
+     *  how many "HOLD YOUR FIRE!" it draws, on a frame it would blink on. */
+    const holdYourFire = (): number => {
+      G.g_bHudShutterState = 4;
+      G.g_frame_counter = 60;
+      G.g_screen_sprite_draws = [];
+      HudDrawLives(0);
+      return G.g_screen_sprite_draws
+        .filter((d) => d.id === HudSprite.HoldYourFire).length;
+    };
+    G.g_screen_furniture_flags = OTHER_FURNITURE;
     if (card) g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
     check("the result card drops `g_nFiringGate` on its first frame",
           card !== undefined && G.g_nFiringGate === 0,
           `card ${card !== undefined} gate ${G.g_nFiringGate}`);
+    // `OR EDX, 0x10` at `0x00434FD0`, in sub 0 beside the gate.
+    check("...and raises g_screen_furniture_flags bit 0x10 there, leaving "
+          + "the other bits alone",
+          G.g_screen_furniture_flags
+            === (OTHER_FURNITURE | ScreenFurniture.ResultCard)
+          && (G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0,
+          `0x${G.g_screen_furniture_flags.toString(16)}`);
+    check("...so shutter state 4 blinks no 'HOLD YOUR FIRE!' under it",
+          holdYourFire() === 0);
     let frames = 1;
+    let upThroughout = true;
     while (card && frames < RESULT_CARD_FRAMES + 60
            && (G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0) {
       g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
       frames += 1;
+      if ((G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0
+          && (G.g_screen_furniture_flags & ScreenFurniture.ResultCard) === 0) {
+        upThroughout = false;
+      }
       w.tick(1 / 60);
     }
     check(`...holds ${RESULT_CARD_FRAMES} frames, then raises `
@@ -15082,6 +15199,15 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
           frames === RESULT_CARD_FRAMES
           && G.g_script_flags[RESULT_CARD_FLAG] === 1,
           `${frames} frames, flag ${G.g_script_flags[RESULT_CARD_FLAG]}`);
+    // `AND AL, 0xEF` at `0x00435683`, after the flag at `0x0043567C`.
+    check("...with bit 0x10 up on every frame before the flag, and down on "
+          + "the frame the flag goes up",
+          upThroughout && card?.dead === true
+          && G.g_screen_furniture_flags === OTHER_FURNITURE,
+          `up ${upThroughout} dead ${card?.dead} `
+          + `0x${G.g_screen_furniture_flags.toString(16)}`);
+    check("...and 'HOLD YOUR FIRE!' is back once the card has gone",
+          holdYourFire() === 1);
     check("...and the gate behind it opens, so the script runs on",
           w.wait === null && !(w.step === 0 && w.opIndex === 1)
           && (G.g_script_flags[9] ?? 0) === 1,

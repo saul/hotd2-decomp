@@ -1287,7 +1287,15 @@ export function FrogUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   sub.camDist = Math.hypot(obj.pos.z - f.eye.z, obj.pos.x - f.eye.x);
-  FrogBone1World(sub, f.host, G.g_frog_bone1_on_entry);
+  if (!FrogBone1World(sub, f.host, G.g_frog_bone1_on_entry)) {
+    // `[port-only]`: no draw the host could pose has left a record yet. What
+    // the engine's record holds before its first draw is `[open]` -- zero is
+    // what a cleared block would give, and it keeps another frog's reading
+    // from standing in for this one's.
+    G.g_frog_bone1_on_entry.x = 0;
+    G.g_frog_bone1_on_entry.y = 0;
+    G.g_frog_bone1_on_entry.z = 0;
+  }
   FrogAwardKillAndEnterDeath(obj, f);
   FrogReadNextScriptCommand(obj, f);
   g_class11_states[sub.state]?.(obj, f);

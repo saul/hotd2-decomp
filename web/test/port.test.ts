@@ -294,12 +294,9 @@ import {
 import { BreakablePropPoolUpdate } from "../src/game/class41/pool";
 import {
   BreakablePropSpawnShatter, PropShattersTick,
-  SHATTER_FRAMES, SHATTER_GRAVITY, SHATTER_PIECES,
+  SHATTER_GRAVITY, SHATTER_PIECES,
 } from "../src/game/class41/shatter";
 import { MsvcRand } from "../src/game/class41/group";
-import {
-  FRAGMENT_LIFE_FRAMES,
-} from "../src/game/class44/container_fragment";
 import {
   FallingContainerGroundContact, FALLING_REMOVE_CAM_FRAME,
   FALLING_REMOVE_CAM_PATH, FALLING_SLOT_FRAGMENT,
@@ -2076,7 +2073,9 @@ console.log("\nclass 0x41, a stacked prop shatters into fifteen pieces:");
         `${p0.vy} ${p0.y - y0}`);
   let lowest = Infinity;
   let bounced = false;
-  for (let f = 1; f <= SHATTER_FRAMES; f++) {
+  // Literals, not the constants: a count read back from the code under test
+  // cannot catch that code being wrong. `CMP EAX, 0x48`, pre-increment.
+  for (let f = 1; f <= 0x48; f++) {
     const falling = s.pieces.map((q) => q.vy < 0);
     PropShattersTick();
     s.pieces.forEach((q, i) => {
@@ -2088,7 +2087,7 @@ console.log("\nclass 0x41, a stacked prop shatters into fifteen pieces:");
         lowest >= G.g_camera_fixed_eye_y + 1 - 1e-9 && bounced,
         `lowest ${lowest}`);
   check("...it is still up after 73 frames",
-        G.g_prop_shatters.length === 1 && s.frames === SHATTER_FRAMES + 1,
+        G.g_prop_shatters.length === 1 && s.frames === 73,
         `${G.g_prop_shatters.length} f${s.frames}`);
   PropShattersTick();
   check("...and gone on the 74th", G.g_prop_shatters.length === 0);
@@ -2254,7 +2253,8 @@ console.log("\nclass 0x44 selector 16's two pieces:");
   // Its frames: it lands (with a sound), lies there, blinks, and goes on the
   // 182nd update.
   let skippedOdd = 0, skippedWrong = 0;
-  for (let n = 1; n <= FRAGMENT_LIFE_FRAMES + 1; n++) {
+  // `CMP EAX, 0xB4` before the increment: 181 updates live, as literals.
+  for (let n = 1; n <= 181; n++) {
     BreakablePropPoolUpdate(rng, events);
     const blinkFrame = f0.state === BreakableState.Settled
       && f0.storyItem > 0x96 && (f0.storyItem & 1) === 1;

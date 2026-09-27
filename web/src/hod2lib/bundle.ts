@@ -918,15 +918,26 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
 };
 
 /**
+ * Two runs of `common.bin` the owl's and the fish's tasks share: the ring
+ * (371, slot `0x1A38`) with the thirty-frame strip that stands in it (338..367,
+ * `0x15E4 + n`), and the thirty-frame splash (307..336, `0x1339 + n`).
+ */
+const CREATURE_RING_SLOTS: readonly number[] = [
+  0x1a38, ...Array.from({ length: 30 }, (_, i) => 0x15e4 + i)];
+const CREATURE_SPLASH_SLOTS: readonly number[] =
+  Array.from({ length: 30 }, (_, i) => 0x1339 + i);
+
+/**
  * The **sprite-effect** slots a stage's classes draw -- the ones
  * `render/effects.ts` clones from `slots_effect` rather than
  * `render/slotmodels.ts` from `slots_actor`.
  *
- * Two classes today. JUDGMENT's walker's sparks, which only its flier's
+ * Four classes today. JUDGMENT's walker's sparks, which only its flier's
  * presence brings. `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind
  * 0x5B through `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
- * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. And the
- * Tower's, class 0x45, every one of which its routines draw themselves.
+ * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. The
+ * Tower's, class 0x45, every one of which its routines draw themselves. And
+ * the owl's and the fish's effect tasks, classes 0x43 and 0x51.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
@@ -934,6 +945,18 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
   0x45: [...BOSS3_EFFECT_SLOTS],
+  // The owl's three tasks (`game/effects/owl.ts`): the feather
+  // (`OwlFeatherDriftAndDraw`, `FUN_00448A80`: `owl.bin` 51), the ground
+  // impact ring and its strip (`OwlGroundImpactRingPulse`, `FUN_00448CE0`:
+  // `common.bin` 371 and 338..367) and the water splash
+  // (`OwlWaterSplashFlipbookStep`, `FUN_00448800`: `common.bin` 307..336).
+  0x43: [0xbf0, ...CREATURE_RING_SLOTS, ...CREATURE_SPLASH_SLOTS],
+  // The fish's (`game/effects/fish.ts`): the splash (`WaterSplashUpdate`,
+  // `FUN_00439F10`: the same 307..336), the surface ring
+  // (`SurfaceRingDrawAndFade`, `FUN_0043A000`: `fish.bin` 2) and the ring
+  // task its corpse leaves (`RingEffectSpread`, `FUN_00407E30`: 371 and
+  // 338..367). The blood cloud's cels are the shot path's, already carried.
+  0x51: [...CREATURE_SPLASH_SLOTS, 0xb71, ...CREATURE_RING_SLOTS],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */

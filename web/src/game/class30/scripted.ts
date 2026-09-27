@@ -19,8 +19,10 @@
 import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor }
-  from "../actor";
+import {
+  ActorFlag, MotionFlag, ZombieAux, ZombieFlag2, type ZombieActor,
+} from "../actor";
+import { ActorSetPartVisibility } from "../model_draw";
 import { ActorFacePlayerTarget, TurnActorTowardCameraEye }
   from "../actor_turn";
 import { CARRIER_TURN_RATE, CamCueHit } from "./entrance";
@@ -28,24 +30,14 @@ import { IsPlayerAttackable, PlayerTakeDamage } from "../combat/player";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
 import { ActorByAt, G } from "../globals";
 import {
-  AttackListOf, FirstBakedOf, MotionPlayFrame, MotionPlayLength, MotionRowOf,
+  AttackListOf, MotionPlayFrame, MotionPlayLength, MotionRowOf,
 } from "../tables";
 import { ActorStrikeConnect, ZombiePickAttack } from "./strike";
 import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotion, ActorSetMotionBlended, ZombieSetMotionIfIdle }
   from "./motion_cue";
-import { MotionFade, MotionRow, ZombieState } from "./states";
+import { MotionFade, ZombieState, ZombieWaitMotion } from "./states";
 import type { Vec3 } from "../vec";
-
-/**
- * `obj+0x34` bit `0x80000`, raised with {@link ActorFlag.NoCameraTrack} and
- * {@link ActorFlag.ShotImmune} by `ZombieStateWaitForCameraFrame`'s freeze arm
- * and cleared again on the cue — `obj+0x34 |= 0x90100`, then `&= 0xFFF6FEFF`.
- *
- * [open] Nothing else in the ported call graph reads it. Kept as a literal
- * rather than given a name from where it sits.
- */
-const WAIT_FREEZE_BIT = 0x80000;
 
 /**
  * `ZombieStateScriptedGrabAndDespawn`'s special clip pair. When the
@@ -105,10 +97,32 @@ function atLastFrame(obj: ZombieActor): boolean {
 /**
  * `ZombieStateWaitForCameraFrame` — `FUN_00457620`, class 0x30 state 19.
  *
- * Four spawns. Holds — optionally *frozen*, which is what its `tail+0x0C`
+ * Four spawns. Holds — optionally **hidden**, which is what its `tail+0x0C`
  * selects — until the camera path reaches an exact frame, then optionally
  * claims an attack permit and, having claimed one, counts a delay down and
  * goes straight to the strike.
+ *
+ * The hide is `tail+0x0C == 0` — `MOV AL, [EDI + 0xc]` / `TEST AL, AL` /
+ * `JNZ` past it at `0x00457643` — and it is three writes, none of which
+ * touches the clock:
+ *
+ * ```
+ * 00457653  CALL 0x00409d10          ; ActorSetPartVisibility(model, 0)
+ * 00457664  OR   ECX, 0x90100        ; no camera, no shot, no shadow
+ * 0045766a  AND  AL, 0xfe            ; obj+0x1F8 &= ~1: no skeleton
+ * ```
+ *
+ * The cue undoes it: `ActorSetPartVisibility(model, 1)` at `0x004576CA`
+ * **unconditionally**, and `obj+0x1F8 |= 1` / `obj+0x34 &= 0xfff6feff` only
+ * for the hidden kind. `[proved]`
+ *
+ * This used to say that `FUN_00409D10` "stops the clip" and `obj+0x1F8` bit 0
+ * is root motion, and froze the clock (`obj+0x1324`) for the wait. The first
+ * is `ActorSetPartVisibility` and the second is {@link
+ * MotionFlag.Drawn}; root motion is bit 1, and nothing here writes
+ * `obj+0x1324` or `obj+0x34` bit `0x4000`. The clip plays. The exporter's
+ * name for the byte, `freeze`, is the same misreading, and its polarity is
+ * right: `freeze` is `tail+0x0C == 0`.
  *
  * **This is the only place in class 0x30 that arms the attack cooldown.** It
  * sets `obj+0x1368` bit 0 and `obj+0x133C` from `tail+0x10`; every other
@@ -118,21 +132,16 @@ function atLastFrame(obj: ZombieActor): boolean {
  */
 export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): void {
   const t = obj.entry;
+  const hide = t?.freeze === true;
 
   if (obj.sub === 0) {
-    if (t?.freeze) {
-      // `FUN_00409D10(model, 0)` stops the clip and `obj+0x1F8 &= ~1` takes
-      // the root motion off so it cannot drift; 0x90100 hides it from the
-      // camera and the shot test.
-      //
-      // The port has no per-actor root-motion switch and does not need one:
-      // root motion is the frame-to-frame delta of a clip, so freezing the
-      // clock freezes it too. See `root_motion.ts` — `obj+0x1F8` is 3 for
-      // every skeletal actor in the game and nothing else ever clears it.
-      obj.frozen = 1;
+    if (hide) {
+      ActorSetPartVisibility(obj, 0);
       obj.flags |= ActorFlag.NoCameraTrack | ActorFlag.ShotImmune
-                 | WAIT_FREEZE_BIT;
+                 | ActorFlag.NoShadow;
+      obj.motionFlags &= ~MotionFlag.Drawn;
     }
+    // `INC word ptr [ESI + 0x1312]` at `0x00457675` and on into sub 1.
     obj.sub = 1;
   }
 
@@ -146,10 +155,11 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
   }
 
   if (obj.sub === 2) {
-    obj.frozen = 0;
-    if (t?.freeze) {
+    ActorSetPartVisibility(obj, 1);
+    if (hide) {
+      obj.motionFlags |= MotionFlag.Drawn;
       obj.flags &= ~(ActorFlag.NoCameraTrack | ActorFlag.ShotImmune
-                   | WAIT_FREEZE_BIT);
+                   | ActorFlag.NoShadow);
     }
     // `tail+0x0D` says whether to claim at all, and a failed claim is not an
     // error: the actor simply takes the descriptor's branch instead.
@@ -455,12 +465,8 @@ function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
  */
 function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
   if (obj.flags & ActorFlag.Committed) return;
-  const row = MotionRowOf(obj);
-  const alt = (obj.flags2 >>> 0x15) & 1;
-  const motion = FirstBakedOf(obj, row,
-                              alt ? MotionRow.WalkAlt : MotionRow.Walk,
-                              MotionRow.Walk, MotionRow.WalkAlt);
-  ZombieSetMotionIfIdle(obj, motion, rng, 5, MotionFade.Quick);
+  ZombieSetMotionIfIdle(obj, ZombieWaitMotion(obj, MotionRowOf(obj)), rng, 5,
+                        MotionFade.Quick);
 }
 
 /**

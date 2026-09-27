@@ -131,8 +131,8 @@ export function BloodSpraysTick(): void {
  * {@link SpawnBloodSpray} with a fixed point instead of a bone.
  *
  * Five routines call it, and the ones the port already has are
- * `OwlUpdateAndResolveShot` (`FUN_004460C0`) — class 0x43's death, which does
- * not spawn one today — and `BodyCreatureUpdate` (`FUN_0043E880`).
+ * `OwlUpdateAndResolveShot` (`FUN_004460C0`) — class 0x43's death, at
+ * `0x00446123` — and `BodyCreatureUpdate` (`FUN_0043E880`).
  *
  * The point is whatever the caller's `obj+0x70..0x78` holds, which is the
  * shot-test sphere's centre, and that is **camera space** — the same space

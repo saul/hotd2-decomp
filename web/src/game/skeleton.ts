@@ -134,13 +134,8 @@ export interface SkeletonModel {
    * stack; the renderer needs it for bone 0's own part.
    */
   rootMat: Mat;
-  /**
-   * `*(model+0x40) + 1` — the draw byte of the character's first **part**
-   * (the vertex-blended meshes `SkeletonDrawWalk`'s part loop draws, 8 bytes
-   * a part). `ActorBuildSkinnedModel` sets every part's to 1; class 0x14's
-   * entrances clear and restore part 0's with the model's draw bit.
-   */
-  part0: number;
+  // `model+0x3C`/`+0x40`, the parts' records, are `Actor.partVisible`: every
+  // skinned actor has them, and only this class carries the rest of the block.
 }
 
 /** `[port-only]` A fresh block with `bones` records, as `ActorBuildSkinnedModel` zeroes it. */
@@ -155,7 +150,6 @@ export function MakeSkeletonModel(bones: number, order: number): SkeletonModel {
       hit: [0, 0, 0],
     })),
     rootMat: MatIdentity(),
-    part0: 1,
   };
 }
 

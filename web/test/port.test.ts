@@ -36,6 +36,7 @@ import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
+import { ActorHeadingErrorTo, ActorTurnTowardXZ } from "../src/game/actor_turn";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor }
   from "../src/game/actor";
 import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
@@ -19211,6 +19212,36 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("...and a whole-actor hit writes 1, leaving the other player's",
         a.shotBones[0] === 1 && a.shotBones[1] === 2,
         JSON.stringify(a.shotBones));
+}
+
+// `ActorHeadingErrorTo` (`FUN_00426090`) and `ActorTurnTowardXZ`
+// (`FUN_00426120`), at a quarter turn -- where a wrong sign or axis shows (L48).
+{
+  const a = makeActor(0x78, SpawnClass.Zombie, 1, "znassb");
+  a.yaw = 0;
+  check("facing +z, an offset along +z is dead ahead",
+        ActorHeadingErrorTo(a, 0, 1) === 0);
+  check("...and one along +x is a quarter turn round, as VecToAngles "
+        + "measures a yaw", ActorHeadingErrorTo(a, 1, 0) === 0x4000,
+        `${ActorHeadingErrorTo(a, 1, 0)}`);
+  a.yaw = 0x4000;
+  check("turned a quarter, +x is dead ahead and +z a quarter the other way",
+        ActorHeadingErrorTo(a, 1, 0) === 0
+        && ActorHeadingErrorTo(a, 0, 1) === -0x4000,
+        `${ActorHeadingErrorTo(a, 1, 0)} ${ActorHeadingErrorTo(a, 0, 1)}`);
+  a.yaw = 0;
+  ActorTurnTowardXZ(a, 1, 0, 0x200);
+  check("a turn takes at most its step", a.yaw === 0x200, `${a.yaw}`);
+  a.yaw = 0x3f00;
+  ActorTurnTowardXZ(a, 1, 0, 0x200);
+  // The error is `__ftol` of a float: 0x100 comes back as 255.99..., and the
+  // truncation is the engine's, so the turn lands within one BAMS.
+  check("...and closes the error in one step when it is inside it",
+        Math.abs(a.yaw - 0x4000) <= 1, `${a.yaw}`);
+  a.yaw = 0;
+  ActorTurnTowardXZ(a, -1, 0, 0x200);
+  check("...and turns the other way for the other side", a.yaw === -0x200,
+        `${a.yaw}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

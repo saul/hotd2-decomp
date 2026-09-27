@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 61088 | 211 | engine |
+| `game/` | 61145 | 211 | engine |
 | `hod2lib/` | 17206 | 34 | engine |
 | `render/` | 11282 | 37 | render |
 | `app/` | 7795 | 29 | app |
@@ -29,13 +29,13 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 943 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **109473** | **387** | |
+| **total** | **109530** | **387** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `app/main.ts` — 2140
 * `game/actor.ts` — 2138
-* `game/class14/index.ts` — 2126
+* `game/class14/index.ts` — 2127
 * `game/globals.ts` — 2077
 * `script/walker.ts` — 2069
 
@@ -44,8 +44,8 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **174 of 282** annotated functions in the gameplay address ranges have a port (61%) |
-| Ported outside those ranges | 295 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 469 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 297 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 471 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **24 of 43** read classes have a module, covering 1482 of 1623 placements |
 | Declared `[diverges]` | **195** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **195** — questions the port is honest about not having answered |

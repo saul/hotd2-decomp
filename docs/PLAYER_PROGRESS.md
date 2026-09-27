@@ -1781,11 +1781,22 @@ Three readings from these that are worth keeping:
 
 **What is not ported**, and each is declared where it lives: the owl's body
 chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has; the frog's
+per actor) and the four per-sub-type landings its corpse has; and the frog's
 head-look fix-up and its actor-versus-actor push, whose transformed point is
-`[open]` between view and world space; and the fish's three cosmetic tasks,
-whose sounds are ported and whose sprites are not because none of the three
-engine routines has a termination to copy.
+`[open]` between view and world space.
+
+**Their effects are.** The owl sheds forty feathers when it dies and eight
+on every strike, and leaves blood at its camera-space point; the fish leaves a
+blood cloud, splashes on every surface crossing, and its corpse leaves the ring
+task on the water and two widening rings as it sinks (`game/effects/owl.ts`,
+`fish.ts`, `ring_effect.ts`; drawn by `render/creature_effects.ts`). The notes
+used to say the fish's three had no termination to copy. They have one each --
+twenty-five, thirty and sixty frames -- in bytes past the `MatrixStackPop` the
+decompiler stops at (`L35`). And the deaths that meet the water never made the
+surface ring the port had them make: all three call `SpawnRingEffectAtPose`
+(`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
+ground impact ring and water splash are ported and wait on the landings, which
+are their only callers.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 

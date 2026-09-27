@@ -91,7 +91,11 @@ import { CameraTargetsClear, waitTargetsClear }
   from "../src/script/waits/targets";
 import { FishUpdate } from "../src/game/class51";
 import { FishFlag, FishState, type FishTail } from "../src/game/class51/state";
-import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
+import {
+  FROG_LEAP_RECOVER_CURSOR, FrogMotion, FrogReadNextScriptCommand,
+  FrogStateHopWithinScreenWedge, FrogStateLeapAtPlayer, FrogUpdate,
+  PROJECTION_DISTANCE_PX,
+} from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
 import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
   OwlUpdateAndResolveShot } from "../src/game/class43";
@@ -15949,6 +15953,321 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and a second one idles rather than leaping without one",
           bt().state === FrogState.IdleAndCroak && b.attackPermit === -1,
           `${FrogState[bt().state]} permit ${b.attackPermit}`);
+  }
+
+  // -- class 0x11: the two turning states, and the push-out -----------------
+  //
+  // `frog.bin`, cut down to the clips the states below play. The turn clip
+  // carries its turn in the **root record** as the real one does (`0x142`
+  // ends at ry -24577), and both records get an rx and an rz as well, so a
+  // rebase about the wrong axis, in the wrong order or with the wrong sign
+  // cannot come out right by symmetry (L48).
+  {
+    const BONES = 15;
+    type Rot = [number, number, number];
+    const clip = (frames: number, play: number, r0: Rot = [0, 0x7fff, 0],
+                  r1: Rot = [0, 0, 0]) => ({
+      bank: "frog", frames, fps: 30, play,
+      root: Array.from({ length: frames * 3 }, (_, i) => (i % 3 === 1 ? 2.6 : 0)),
+      rot: Array.from({ length: frames * BONES * 3 }, (_, i) => {
+        const k = i % (BONES * 3);
+        return k < 3 ? r0[k] : k < 6 ? r1[k - 3] : 0;
+      }),
+    });
+    const TURN_R0: Rot = [0x300, -24577, 0x100];
+    const TURN_R1: Rot = [0x200, 0x400, -0x180];
+    const FROG_TYPE = {
+      ...TYPE, type: 0x1b, name: "frog", file: "frog.bin", bone_count: BONES,
+      motions: {
+        [FrogMotion.Leap]: clip(61, 119),
+        [FrogMotion.Death]: clip(6, 10),
+        [FrogMotion.Hop]: clip(31, 60),
+        [FrogMotion.Idle]: clip(31, 59),
+        [FrogMotion.TurnLeft]: clip(16, 30, TURN_R0, TURN_R1),
+        [FrogMotion.TurnRight]: clip(16, 30),
+        [FrogMotion.HopInPlace]: clip(31, 59),
+      },
+    };
+    const frogScene = (rng: Rng): void => {
+      scene(0, rng);
+      SetGameTables({
+        ...CHARS, types: { "1": TYPE, "27": FROG_TYPE },
+      } as unknown as CharactersJson);
+    };
+    // Camera path 999 never comes, so a frog left in state 0 does nothing.
+    const spawnFrog = (at: number, pos: Vec3, rng: Rng) =>
+      ActorSpawn(at, SpawnClass.Frog, 0x1b, "frog", {
+        pos,
+        class11: {
+          char_type: 0x1b, motion: 0x141, cam_path: 999, cam_frame: 0,
+          wedge: 0, commands: [],
+        },
+      }, rng);
+    const tailOf = (a: Actor) => (a as { frog: FrogTail }).frog;
+    const s16 = (v: number) => (v << 16) >> 16;
+    const TO_BAMS = 65536 / (Math.PI * 2);
+
+    // The turn's fix-up. When a pass of the turn clip ends the yaw takes the
+    // 45 degrees, and bone 1 is turned back by them in the root's frame, so
+    // the blend out of the turn clip starts from the pose on screen.
+    {
+      const rng = new Rng(31);
+      frogScene(rng);
+      const a = spawnFrog(0x9310, vec3(0, 0, -40), rng);
+      const t = tailOf(a);
+      a.yaw = 0x1234;
+      t.state = FrogState.HopToHeading;
+      t.sub = 0;
+      t.a = 0x2800;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("a frog owed more than 30 degrees starts the left turn clip",
+            a.motion === FrogMotion.TurnLeft && t.sub === 1,
+            `motion 0x${a.motion.toString(16)} sub ${t.sub}`);
+      a.playTicks = 30;          // the clip's play length: this pass is done
+      a.fade = 0;                // ...and the fade into it long over
+      const yaw0 = a.yaw;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("...the pass goes into the yaw, and what is left into the hop",
+            a.yaw === s16(yaw0 + 0x2000) && t.a === 0x800
+            && a.motion === FrogMotion.Hop && t.sub === 2,
+            `yaw ${a.yaw} owed ${t.a} motion 0x${a.motion.toString(16)}`);
+      const rec = a.fadeFrom?.records?.find((r) => r.record === 1);
+      check("...which dissolves from the turn clip with bone 1 rewritten",
+            a.fadeFrom?.motion === FrogMotion.TurnLeft && rec !== undefined,
+            JSON.stringify(a.fadeFrom));
+      // The invariant the rewrite exists for: the actor's yaw, the root
+      // record and bone 1, composed as the draw composes them, put bone 1
+      // where it was drawn before the yaw moved.
+      const orient = (yaw: number, r0: Rot, r1: Rot) => {
+        const m = MatIdentity();
+        MatrixRotateY(m, yaw);
+        MatrixRotateZ(m, r0[2]); MatrixRotateY(m, r0[1]); MatrixRotateX(m, r0[0]);
+        MatrixRotateZ(m, r1[2]); MatrixRotateY(m, r1[1]); MatrixRotateX(m, r1[0]);
+        return m;
+      };
+      const before = orient(yaw0, TURN_R0, TURN_R1);
+      const after = orient(a.yaw, TURN_R0, rec?.rot ?? TURN_R1);
+      let err = 0;
+      for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) {
+        err = Math.max(err, Math.abs(before[i] - after[i]));
+      }
+      check("...so bone 1 keeps the world orientation it was drawn with",
+            err < 2e-3, `max element error ${err}`);
+
+      // With a pass still to go there is no blend, and nothing to carry the
+      // rewrite: the draw overwrites it, so the snapshot is not touched.
+      t.sub = 1;
+      t.a = 0x5000;
+      a.motion = FrogMotion.TurnLeft;
+      a.playTicks = 30;
+      a.fadeFrom = null;
+      a.fade = 0;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("...and a pass with another to follow blends nothing",
+            t.sub === 1 && t.a === 0x3000 && a.fadeFrom === null,
+            `sub ${t.sub} owed 0x${t.a.toString(16)}`);
+    }
+
+    // The launch frame runs on into the flight: both states' substate 2
+    // bumps the substate and falls into substate 3's code, which halves the
+    // turn still owed.
+    {
+      const rng = new Rng(37);
+      frogScene(rng);
+      const a = spawnFrog(0x9311, vec3(0, 0, -40), rng);
+      const t = tailOf(a);
+      t.state = FrogState.HopToHeading;
+      t.sub = 2;
+      t.a = 0x800;
+      a.motion = FrogMotion.Hop;
+      a.playTicks = 0x12;
+      const yaw0 = a.yaw;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("the hop's launch frame also halves the turn it still owes",
+            t.sub === 3 && t.a === 0x400 && a.yaw === s16(yaw0 + 0x400)
+            && Math.hypot(a.vel.x, a.vel.z) > 0.99,
+            `sub ${t.sub} owed 0x${t.a.toString(16)} yaw ${a.yaw - yaw0}`);
+
+      t.state = FrogState.LeapAtPlayer;
+      t.sub = 2;
+      t.a = 0x400;
+      a.motion = FrogMotion.Leap;
+      a.playTicks = 0x1e;
+      FrogStateLeapAtPlayer(a, frame(rng));
+      check("...and so does the leap's",
+            t.sub === 3 && t.a === 0x200
+            && (t.flags & FrogFlag.CycleRunning) !== 0,
+            `sub ${t.sub} owed 0x${t.a.toString(16)}`);
+
+      // The recovery: `ActorSetMotionBlended(0x13E, 0x3D, 2)` -- the leap
+      // clip resumed one past the frame it connected on, over a fade of 2.
+      t.sub = 4;
+      t.flags = FrogFlag.CycleRunning | FrogFlag.CycleWrapped
+        | FrogFlag.NoGravity;
+      a.motion = FrogMotion.Idle;
+      a.playTicks = 7;
+      a.fadeFrom = null;
+      a.fade = 0;
+      FrogStateLeapAtPlayer(a, frame(rng));
+      check("after the bone-2 cycle wraps the leap resumes where it "
+            + "connected, over a fade of 2 and not 61",
+            a.motion === FrogMotion.Leap
+            && MotionPlayFrame(a) === FROG_LEAP_RECOVER_CURSOR
+            && a.fadeLen === 3 && t.sub === 5
+            && (t.flags & (FrogFlag.CycleRunning | FrogFlag.CycleWrapped
+                           | FrogFlag.NoGravity)) === 0,
+            `motion 0x${a.motion.toString(16)} cursor ${MotionPlayFrame(a)} `
+            + `fadeLen ${a.fadeLen} sub ${t.sub}`);
+    }
+
+    // State 1's heading window has three bands across the screen, and the
+    // middle one is the full 0x3000. A frog 100 units out, clear of both
+    // wedge rays, so the clamp leaves the window alone; its yaw makes the
+    // aim at the camera exactly 0.
+    {
+      const pos = vec3(1, 0, -100);
+      const yaw = Math.trunc(Math.atan2(pos.x, pos.z) * TO_BAMS);
+      const picks = (viewX: number): number[] => {
+        const out: number[] = [];
+        for (let seed = 1; seed <= 24; seed++) {
+          const rng = new Rng(seed);
+          frogScene(rng);
+          G.g_camera_yaw_bams = 0;
+          const a = spawnFrog(0x9312, vec3(pos.x, 0, pos.z), rng);
+          a.yaw = yaw;
+          const t = tailOf(a);
+          t.state = FrogState.HopAcross;
+          t.sub = 0;
+          const host: GameHost = {
+            ...HOST,
+            viewSpaceOf: (_at, o) => { o.x = viewX; o.y = 0; o.z = -100; return true; },
+          };
+          FrogStateHopWithinScreenWedge(a, { eye: EYE, dt: 1 / 60, rng, host });
+          out.push(t.a);
+        }
+        return out;
+      };
+      const mid = picks(0);
+      check("a frog in the middle of the screen may turn either way",
+            mid.some((v) => v < 0) && mid.some((v) => v > 0)
+            && mid.every((v) => v >= -0x1800 && v <= 0x1800),
+            mid.join(","));
+      const left = picks(-40);
+      check("...and one left of the z/4 line only one way",
+            left.every((v) => v >= 0 && v <= 0x1800), left.join(","));
+    }
+
+    // The wedge clamp is `acos`, not `asin`: `FUN_004AD0B0` is the C
+    // runtime's arc cosine. A frog standing exactly on the first screen-edge
+    // ray is 0 from it, and acos(0) moves the window a quarter turn where
+    // asin(0) would not move it at all. HopToward with no camera point takes
+    // [aim, aim + 0x1800]; a base past 0x2000 is taken as it is, so the
+    // heading is the clamp's own number.
+    {
+      const rng = new Rng(41);
+      frogScene(rng);
+      G.g_camera_yaw_bams = 0;
+      const a = spawnFrog(0x9313, vec3(0, 0, 0), rng);
+      const t = tailOf(a);
+      const ray = s16(t.wedge - 0x8000) * (Math.PI * 2) / 65536;
+      a.pos.x = Math.sin(ray) * 50;
+      a.pos.z = Math.cos(ray) * 50;
+      a.yaw = 20000;
+      t.state = FrogState.HopToward;
+      t.sub = 0;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      const halfFov = Math.trunc(Math.atan2(320, PROJECTION_DISTANCE_PX)
+                                 * TO_BAMS);
+      const withAcos = s16(halfFov + 0x4000 - 20000 + 0x4000);
+      const withAsin = s16(halfFov - 20000 + 0x4000);
+      check("a frog on a wedge ray has its window moved by acos(0), "
+            + "a quarter turn",
+            Math.abs(t.a - withAcos) <= 2 && Math.abs(t.a - withAsin) > 2,
+            `heading ${t.a}, acos ${withAcos}, asin ${withAsin}`);
+    }
+
+    // `FrogPushOutOfActorCollision`. The camera is a quarter turn about Y and
+    // an offset, so a point taken in the wrong space lands nowhere near the
+    // other frog (L48). The push is in the world, scaled by bone 1's travel
+    // since the last draw, and the pushed point is what the frog publishes.
+    {
+      const rng = new Rng(43);
+      frogScene(rng);
+      const cam = vec3(10, 5, 20);
+      const toView = (p: Vec3, o: Vec3): void => {
+        const dx = p.x - cam.x, dy = p.y - cam.y, dz = p.z - cam.z;
+        o.x = -dz; o.y = dy; o.z = dx;
+      };
+      const a = spawnFrog(0x9314, vec3(0, 0, -50), rng);
+      const b = spawnFrog(0x9315, vec3(40, 0, -50), rng);
+      const g = a.pos.y;
+      const drawn = vec3(0, g + 2.6, -50);
+      const host: GameHost = {
+        ...NULL_HOST,
+        boneWorld: (at, bone, o) => {
+          if (at !== a.at || bone !== 1) return false;
+          o.x = drawn.x; o.y = drawn.y; o.z = drawn.z;
+          return true;
+        },
+        viewPoint: (x, y, z, o) => {
+          o.x = cam.x + z; o.y = cam.y + y; o.z = cam.z - x;
+        },
+        viewSpaceOfPoint: (p, o) => { toView(p, o); return true; },
+      };
+      const pf = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+      // The other frog has published a sphere two units to A's +x.
+      b.visible = true;
+      b.sphereCentre.x = 2;
+      b.sphereCentre.y = g + 2.6;
+      b.sphereCentre.z = -50;
+      // The last draw left bone 1 0.4 behind where this frame draws it.
+      const last = vec3();
+      toView(vec3(0, g + 2.6, -50.4), last);
+      tailOf(a).bone1View = { x: last.x, y: last.y, z: last.z };
+      FrogUpdate(a, pf());
+      const near = (u: number, v: number) => Math.abs(u - v) < 1e-5;
+      // depth 3 + 3 - 2 = 4, normal -x, travel 0.4: 4 * 0.4 * 0.3.
+      check("a frog in another's sphere is pushed out along the world normal, "
+            + "at the depth times its travel times 0.3",
+            near(a.pos.x, -0.48) && near(a.pos.z, -50),
+            `pos ${a.pos.x}, ${a.pos.z}`);
+      check("...and publishes bone 1, pushed, as its sphere",
+            near(a.sphereCentre.x, -0.48) && near(a.sphereCentre.y, g + 2.6)
+            && near(a.sphereCentre.z, -50),
+            JSON.stringify(a.sphereCentre));
+      check("...having measured the other frog where it published itself",
+            b.sphereCentre.x === 2 && b.pushedBy === a.at,
+            `${JSON.stringify(b.sphereCentre)} pushedBy ${b.pushedBy}`);
+      check("...and the travel from bone 1 as last drawn, through the camera",
+            near(G.g_frog_bone1_on_entry.z, -50.4)
+            && near(G.g_frog_bone1_on_entry.x, 0),
+            JSON.stringify(G.g_frog_bone1_on_entry));
+
+      // Drawn in the same place again: no travel, a twentieth of the depth.
+      FrogUpdate(a, pf());
+      check("a frog that has not moved is nudged at a twentieth of the depth",
+            near(a.pos.x, -0.48 - 0.2), `pos ${a.pos.x}`);
+
+      // The camera moves 0.4 and the frog does not. The travel is measured
+      // between two readings of one record through one camera block, so it
+      // is travel relative to the camera -- the engine's arrangement.
+      cam.x += 0.4;
+      FrogUpdate(a, pf());
+      check("...but under a camera that moved 0.4, at the rate for 0.4",
+            near(a.pos.x, -0.48 - 0.2 - 0.48), `pos ${a.pos.x}`);
+
+      // The leap skips the test, and still publishes where bone 1 is.
+      const t = tailOf(a);
+      t.state = FrogState.LeapAtPlayer;
+      t.sub = 4;
+      t.flags = 0;
+      const x0 = a.pos.x;
+      FrogUpdate(a, pf());
+      check("the leap is never pushed, but its point is still published",
+            a.pos.x === x0 && near(a.sphereCentre.x, 0)
+            && near(a.sphereCentre.z, -50),
+            `pos ${a.pos.x} sphere ${JSON.stringify(a.sphereCentre)}`);
+    }
   }
 
   // -- class 0x43, the owl --------------------------------------------------

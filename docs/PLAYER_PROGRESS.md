@@ -1781,11 +1781,27 @@ Three readings from these that are worth keeping:
 
 **What is not ported**, and each is declared where it lives: the owl's body
 chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has; the frog's
-head-look fix-up and its actor-versus-actor push, whose transformed point is
-`[open]` between view and world space; and the fish's three cosmetic tasks,
-whose sounds are ported and whose sprites are not because none of the three
-engine routines has a termination to copy.
+per actor) and the four per-sub-type landings its corpse has; and the fish's
+three cosmetic tasks, whose sounds are ported and whose sprites are not
+because none of the three engine routines has a termination to copy.
+
+The frog's two gaps from this list are closed. Its **turn fix-up** — not a
+head look: after each 45° pass the engine turns bone 1, the node the whole of
+`frog.bin` hangs from, back by the turn it just put into the yaw, so the
+blend out of the turn clip starts from the pose on screen — rides the fade's
+snapshot as `Actor.fadeFrom.records`, the mechanism class 0x19's turn already
+uses. Its **actor-versus-actor push** is ported, and its point was never in
+doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
+view-space draw record, so the product is bone 1 in the world. The push is
+scaled by bone 1's travel between two readings of that record through one
+camera block — relative to the camera — and the pushed point is the sphere
+the frog publishes; `ClassHandler.ownsSphereCentre` keeps
+`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+Reading the two states whole also found four wrong ports inside them: the
+wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
+was inverted; both launch frames run on into the flight and halve the turn
+that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
+over a fade of 2, where the port had played it from the start over 61.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 

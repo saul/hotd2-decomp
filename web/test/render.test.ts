@@ -1603,6 +1603,52 @@ console.log("\nthe shot effects are models, one per frame:");
 }
 
 
+console.log("\nthe water ring is drawn from its record alone:");
+{
+  const root = new Obj3D();
+  const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  part.name = "slots_effect_fixed000_slot_0e23";
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // `WaterRingUpdate` (`FUN_00456880`): `T(pos) Scale(s, 0.2, s)` and the
+  // record's alpha, in the world's own layer.
+  G.g_water_rings.push({
+    id: 2, pos: { x: 1, y: 0, z: 2 }, size: 1.5, growth: 0.02, alpha: 0.25,
+    frames: 45, slot: 0xe23,
+  });
+  layer.update(ctx);
+  const water = layer.group.children[0] as InstanceType<typeof Mesh>
+    | undefined;
+  const e = water?.matrix.elements ?? [];
+  const ws = [Math.hypot(e[0]!, e[1]!, e[2]!), Math.hypot(e[4]!, e[5]!, e[6]!),
+              Math.hypot(e[8]!, e[9]!, e[10]!)];
+  check("a water ring is its size across and 0.2 high, at its point",
+        water !== undefined && Math.abs(ws[0]! - 1.5) < 1e-6
+        && Math.abs(ws[1]! - Math.fround(0.2)) < 1e-6
+        && Math.abs(ws[2]! - 1.5) < 1e-6 && e[12] === 1 && e[14] === 2,
+        JSON.stringify(ws));
+  const mat = water?.material as InstanceType<typeof MeshBasicMaterial>;
+  check("...at the record's alpha",
+        mat?.transparent === true && Math.abs(mat.opacity - 0.25) < 1e-6,
+        `${mat?.opacity}`);
+  check("...drawn in the world's order, not over it",
+        water?.renderOrder === 0, `${water?.renderOrder}`);
+  G.g_water_rings.length = 0;
+  layer.update(ctx);
+  check("and a ring that has gone takes its node with it",
+        layer.group.children.length === 0,
+        `${layer.group.children.length}`);
+  ResetGameGlobals();
+}
+
+
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {
   // A 2x1 image and just enough canvas to transpose it. The file's own stub is

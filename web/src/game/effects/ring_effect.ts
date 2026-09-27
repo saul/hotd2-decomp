@@ -13,16 +13,20 @@
  * all of it under `T(pos) RotY(yaw)` in draw layer `0xC`, the strip's cel
  * from `g_blink_frame_counter`.
  *
- * Two routines allocate it. `SpawnGroundRingEffect` (`FUN_00407DA0`) puts one
- * under a falling class-0x20 or class-0x30 body at scale 1; its callers are
- * not ported here. `SpawnRingEffectAtPose` takes a six-word pose and a scale,
- * and it is what a class-0x51 fish's corpse makes when it meets the water, and
- * a severed head when it meets the floor.
+ * Two routines allocate it. `SpawnGroundRingEffect` puts one under a body on
+ * its way out of the world, at scale 1 -- the first frame of class 0x30's two
+ * corpse states and class 0x20's hand-over into its sink call it here; class
+ * 0x31's corpses, the frog and the freed rescue target call it in the exe and
+ * not yet in the port. `SpawnRingEffectAtPose` takes a six-word pose and a
+ * scale, and it is what a class-0x51 fish's corpse makes when it meets the
+ * water, and a severed head when it meets the floor.
  *
  * Like every task this runs on the frame it is made, after its maker
  * (`game/effects/owl.ts` says why), so the pool is stepped after the actors
  * and the draw -- `render/creature_effects.ts` -- is of what the step recorded.
  */
+import { MotionFlag, type Actor } from "../actor";
+import { QueryGroundHeightAt } from "../coli";
 import { AppState, G } from "../globals";
 
 /** The engine's `9.587379924285257e-05`, BAMS to radians. */
@@ -131,6 +135,38 @@ export function SpawnRingEffectAtPose(p: RingEffectPose, scale: number): void {
   G.g_ring_effects.push({
     id: G.g_creature_effect_seq++,
     x: p.x, y: p.y + RING_EFFECT_LIFT, z: p.z, yaw: p.yaw, scale,
+    count: RING_EFFECT_SPREAD_FRAMES, fade: 0, alpha: 0,
+    phase: RingEffectPhase.Spread,
+    drawnRing: 0, drawnStrip: 0, drawnStrips: [], drawnAlpha: 1,
+  });
+}
+
+/** `FADD [0x004C4C8C]` -- 20.0, where `SpawnGroundRingEffect`'s trace starts. */
+export const RING_EFFECT_GROUND_PROBE_RISE = 20.0;
+/** `+0x118 = 0x3F800000` -- `SpawnGroundRingEffect`'s scale. */
+export const RING_EFFECT_GROUND_SCALE = 1.0;
+
+/**
+ * `SpawnGroundRingEffect` — `FUN_00407DA0`. In app state 6 only.
+ *
+ * The ring goes at `obj+0x100`/`obj+0x108` -- the tracked bone's world `x`
+ * and `z`, {@link Actor.lookAt} -- and **not** at the origin, so it opens
+ * under the torso of a body lying on its back. The height does come from the
+ * origin: `QueryGroundHeightAt(x, y + 20, z)` for an actor whose
+ * {@link MotionFlag.TraceGround} is up (`TEST byte ptr [EDI+0x1F8], 4` at
+ * `0x00407DCD` -- class 0x30 and 0x31 raise it in their `Init`), `obj+0x44`
+ * otherwise (class 0x20), plus 0.05. The yaw is the actor's `obj+0x68`.
+ */
+export function SpawnGroundRingEffect(obj: Actor): void {
+  if (G.g_app_state !== AppState.InPlay) return;
+  const y = (obj.motionFlags & MotionFlag.TraceGround)
+    ? QueryGroundHeightAt(obj.pos.x, obj.pos.y + RING_EFFECT_GROUND_PROBE_RISE,
+                          obj.pos.z)
+    : obj.pos.y;
+  G.g_ring_effects.push({
+    id: G.g_creature_effect_seq++,
+    x: obj.lookAt.x, y: Math.fround(y + Math.fround(RING_EFFECT_LIFT)),
+    z: obj.lookAt.z, yaw: obj.yaw, scale: RING_EFFECT_GROUND_SCALE,
     count: RING_EFFECT_SPREAD_FRAMES, fade: 0, alpha: 0,
     phase: RingEffectPhase.Spread,
     drawnRing: 0, drawnStrip: 0, drawnStrips: [], drawnAlpha: 1,

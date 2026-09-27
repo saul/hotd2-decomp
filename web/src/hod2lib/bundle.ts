@@ -946,11 +946,24 @@ const CREATURE_SPLASH_SLOTS: readonly number[] =
  * `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
  * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. The
  * Tower's, class 0x45, every one of which its routines draw themselves. The
- * owl's and the fish's effect tasks, classes 0x43 and 0x51. And the bat's
- * splash, class 0x46's.
+ * owl's and the fish's effect tasks, classes 0x43 and 0x51.
+ *
+ * And what a class-0x30 body throws up and leaves behind, all of it
+ * `common.bin`: its death and landing dust and splash
+ * (`ZombieDeathEffectCueTick`, `ZombieDeathLandingEffect` -- sprite kinds
+ * 0x46, `0x94..0xA2`, and 0x61, `0x1339..0x1356`), its water ring
+ * (`SpawnWaterRing`, `0xE23`), and the ring task `SpawnGroundRingEffect`
+ * opens under its corpse -- and under class 0x20's -- `0x1A38` and the
+ * thirty-cel strip `0x15E4..0x1601`. And the bat's splash, class
+ * 0x46's, which is the kind-0x61 run again.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
+  0x30: [
+    ...Array.from({ length: 0xa2 - 0x94 + 1 }, (_, i) => 0x94 + i),
+    ...CREATURE_SPLASH_SLOTS, 0xe23, ...CREATURE_RING_SLOTS,
+  ],
+  0x20: [...CREATURE_RING_SLOTS],
   // The stage-3 boss's own: its intro card's pieces (view space), its
   // sparks, splashes, bite flashes, wake, path effects, the civilian's
   // shadow and the water mound. See `game/class45/tables.ts`.
@@ -969,8 +982,11 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x51: [...CREATURE_SPLASH_SLOTS, 0xb71, ...CREATURE_RING_SLOTS],
   // Class 0x46, the bat: the splash a shot one falls into.
   // `BatSplashUpdate` (`FUN_0042F930`) draws `AssetDrawSlot(0x1339 + n)` for
-  // n in 0..0x1D -- `common.bin` 307..336, the owl's and the fish's run --
-  // under a bare translation. See `game/class46/splash.ts`.
+  // n in 0..0x1D -- `common.bin` 307..336, the run class 0x30, the owl and
+  // the fish draw too -- under a bare translation. Listed for the class all
+  // the same: `effectSlotEntry` carries a slot once however many ask, and a
+  // stage with bats and none of those would otherwise have no splash. See
+  // `game/class46/splash.ts`.
   0x46: [...CREATURE_SPLASH_SLOTS],
 };
 
@@ -1223,9 +1239,11 @@ export async function actorSlotEntry(
  *
  * What is **not** here, deliberately: the boss and set-piece kinds of
  * `SpawnSpriteEffectFromParams`' switch — 0x41, 0x44, 0x45, 0x50, 0x53, 0x5A,
- * 0x5B, 0x5C, 0x5D, 0x61 — which live in `water_hamon`, `eff_dokan`,
- * `eff_shop`, `eff_2`, `eff_org5b` and `boss1q`, and which nothing on the shot
- * path can reach. Kind 0x51 is the one exception a shot could reach — a
+ * 0x5B, 0x5C, 0x5D — which live in `water_hamon`, `eff_dokan`, `eff_shop`,
+ * `eff_2`, `eff_org5b` and `boss1q`, and which nothing on the shot path can
+ * reach. Nor the splash, 0x61, and the dust, 0x46: those are `common.bin`
+ * (307..336 and 25..39) and ride {@link EFFECT_SLOTS_BY_CLASS} with the class
+ * whose routines spawn them. Kind 0x51 is the one exception a shot could reach — a
  * ricochet off character type 3 — and it is in `eff_2.bin`; it is carried, and
  * a bundle whose stage does not ship that file simply has no models for it.
  */

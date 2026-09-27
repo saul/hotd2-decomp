@@ -33,6 +33,7 @@ import type { ShotRequest } from "./combat/shot";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
 import type { BossHpBar } from "./boss_hp_bar";
 import type { BossBanner } from "./boss_banner";
+import type { WaterWaveField } from "./class16/state";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
@@ -1061,10 +1062,32 @@ export const G = {
    * A data initialiser puts -24.90 there, and it is **rewritten by every
    * class-0x51 group header**: a descriptor whose `tail+0x0E` is 6 is not a
    * fish at all, it is the surface, and `FishInit` (`FUN_00438540`) copies its
-   * `tail+0x00` float here before killing itself. Class 0x16 records the same
-   * plane for the wave field.
+   * `tail+0x00` float here before killing itself. Class 0x16's wave field
+   * keeps a plane of its own ({@link g_water_wave_field}), which nothing
+   * copies here.
    */
   g_water_level: -24.9,
+  /**
+   * `g_water_wave_field` — 0x007DCC4C. The block `WaterFieldCreate`
+   * (`FUN_00442290`, class 0x16) allocates: a plane, a slot mask, a count of
+   * sources that have ticked and eight wave sources, which class 0x17's
+   * spawns add (`game/class16/`, `game/class17/`).
+   * `WaterFieldSampleHeight` (`FUN_00442390`) is the surface at a point, and
+   * the stage-2 boss is its only reader. Null until a class-0x16 spawn runs.
+   */
+  g_water_wave_field: null as WaterWaveField | null,
+  /**
+   * `g_class14_foot_contacts` — 0x009A3500, four `{f32 strength; f32 x, y,
+   * z}` records: bone 15's toe, bone 12's toe, bone 15's heel, bone 12's heel,
+   * as `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) publishes them
+   * every frame the stage-2 boss's feet are live. The strengths come from the
+   * clip's contact cue; the y-follow reads `[0]` and `[1]` to decide which
+   * foot is planted.
+   */
+  g_class14_foot_contacts: [
+    { strength: 0, x: 0, y: 0, z: 0 }, { strength: 0, x: 0, y: 0, z: 0 },
+    { strength: 0, x: 0, y: 0, z: 0 }, { strength: 0, x: 0, y: 0, z: 0 },
+  ],
   /**
    * `g_water_attack_slots` — 0x009A2C20, four dwords.
    *
@@ -2017,6 +2040,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_candidate_count = 0;
   G.g_water_level = -24.9;
   G.g_water_attack_slots = [0, 0, 0, 0];
+  // The engine leaves the pointer dangling into the freed pool; nothing
+  // samples it until the next class-0x16 spawn replaces it.
+  G.g_water_wave_field = null;
   G.g_summoned_actor_at = -1;
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;

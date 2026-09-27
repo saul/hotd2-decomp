@@ -1401,6 +1401,17 @@ export interface ActorBase {
    */
   class14: CharacterPlacement["class14"];
   /**
+   * Class 0x16's marker -- `WaterFieldCreate` (`FUN_00442290`) reads no tail,
+   * only the spawn's `y`. Present only on a wave-field spawn.
+   */
+  class16: CharacterPlacement["class16"];
+  /**
+   * Class 0x17's tail -- one wave source's kind, amplitude, wavelength and
+   * speed, as `WaterWaveSourceAdd` (`FUN_004422D0`) and its first tick read
+   * them.
+   */
+  class17: CharacterPlacement["class17"];
+  /**
    * Class 0x33 **selector 1's** descriptor tail — the draw slot, the `op_`
    * path it rides, and the four cues that raise its two `obj+0x34` bits and
    * take it off the field.
@@ -2030,6 +2041,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class51: null,
     class52: null,
     class14: null,
+    class16: null,
+    class17: null,
     class33: null,
     class33Push: null,
     class53: null,

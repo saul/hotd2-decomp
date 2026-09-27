@@ -426,6 +426,13 @@ export class Placement {
   /** Class 0x14's tail -- the stage-2 boss's state, route quad and cue. */
   class14: Record<string, unknown> | null = null;
   /**
+   * Class 0x16 -- the wave field. A marker (`{}`): `WaterFieldCreate` reads
+   * no tail, only the spawn's own `y`.
+   */
+  class16: Record<string, unknown> | null = null;
+  /** Class 0x17's tail -- one wave source: kind, amplitude, wavelength, speed. */
+  class17: Record<string, unknown> | null = null;
+  /**
    * Class 0x33 **selector 1's** tail -- the draw slot, the `op_` path it
    * rides, and the four cues that raise its two `obj+0x34` bits and take it
    * off the field. Selector 1 only: the other ten sub-handlers read the same
@@ -513,6 +520,8 @@ export class Placement {
     if (this.class52) d.class52 = this.class52;
     if (this.class53) d.class53 = this.class53;
     if (this.class14) d.class14 = this.class14;
+    if (this.class16 !== null) d.class16 = this.class16;
+    if (this.class17 !== null) d.class17 = this.class17;
     if (this.class33) d.class33 = this.class33;
     if (this.class33_push) d.class33_push = this.class33_push;
     if (this.attachments.length) d.attachments = [...this.attachments];

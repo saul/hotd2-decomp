@@ -142,6 +142,7 @@ from .class31 import (  # noqa: F401
                       CLASS31_STANCES, CLASS31_STATE_PICKS,
                       CLASS31_THROW_ENTRIES, CLASS31_THROW_TABLE,
                       class31_motion_ids, class31_tables)
+from .class14 import class14_tables  # noqa: F401
 from .actorscript import (  # noqa: F401
                           TARGET_SCRIPT_SHAPE, civilian_item_slots,
                           civilian_motion_ids, civilian_ordered_states,
@@ -218,6 +219,7 @@ __all__ = [
     "class52_tail",
     "class53_tail",
     "class14_tail",
+    "class17_tail",
     "CLASS14_MOTIONS",
     "DEATH_BACK",
     "DEATH_FRONT",
@@ -300,6 +302,7 @@ __all__ = [
     "civilian_motion_ids",
     "class31_motion_ids",
     "class31_tables",
+    "class14_tables",
     "combat_tables",
     "compose_bams",
     "damage_rank_row",
@@ -605,6 +608,34 @@ def class14_tail(rec) -> dict:
         ],
         "despawn_path": rec.param(0x30, "i16") or 0,
         "despawn_frame": rec.param(0x32, "i16") or 0,
+    }
+
+
+def class17_tail(rec, orient) -> dict:
+    """Class 0x17's descriptor tail, as `WaterWaveSourceAdd`
+    (`FUN_004422D0`) and the source's first tick read it.
+
+    ``obj+0x11C`` (the spawn's hp) is the kind, the index into
+    ``g_wave_source_kinds`` (0x005644E4): 0 travelling, 1 circular.
+    ``tail+0x00..+0x08`` are the amplitude, wavelength and speed the first
+    tick copies to ``src+0x5C..+0x64``; the pitch and roll are the spawn's
+    own ``obj+0x64``/``+0x6C``. Class 0x16, `WaterFieldCreate`, reads no tail
+    at all -- its plane is the spawn's ``y`` -- and so has no function here.
+    """
+    def f(at: int) -> float:
+        v = rec.param(at, "f32")
+        return 0.0 if v is None else v
+
+    def s16(v: int) -> int:
+        v &= 0xFFFF
+        return v - 0x10000 if v >= 0x8000 else v
+    return {
+        "kind": rec.hp,
+        "amplitude": f(0x00),
+        "wavelength": f(0x04),
+        "speed": f(0x08),
+        "pitch": s16(orient[0] if len(orient) > 0 else 0),
+        "roll": s16(orient[2] if len(orient) > 2 else 0),
     }
 
 

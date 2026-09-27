@@ -26,6 +26,8 @@ import "./class10";
 import "./class11";
 import "./class19";
 import "./class14";
+import "./class16";
+import "./class17";
 import "./class20";
 import "./class21";
 import "./class24";

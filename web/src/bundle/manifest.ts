@@ -22,6 +22,13 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 13: `characters.class14` carries the stage-2 boss's `.rdata` -- its cue,
+ * damage-cone, weak-point timing, summon and damage tables -- the placements
+ * carry `class16`/`class17` for the wave field the boss's summons sample, and
+ * class 0x14's two flipbooks (`boss2.bin` 2..76) travel as actor slots. A
+ * bundle without them cannot let the boss be damaged at all, which is why
+ * this is a refusal and not a warning.
+ *
  * 12: the game-over screen's sprites and route map. `script.json`'s
  * `hud_sprites` is `screen_sprites` -- the HUD's images and now the logo's
  * (`scr_gameover.bin`) and the route map's 300 tiles (`scr_bunki.bin`) -- and a
@@ -78,7 +85,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 12;
+export const SUPPORTED_FORMAT = 13;
 
 /**
  * The exporter's digest of the declarations in this directory.

@@ -88,7 +88,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 12;
+export const BUNDLE_FORMAT = 13;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -882,6 +882,13 @@ export const ACTOR_SLOTS: Record<number, number[]> = {
   // 90 are drawn by nothing in the image at all.
   0x43: Array.from({ length: 106 }, (_, i) => 0xbbd + i),
   0x52: Array.from({ length: 10 }, (_, i) => 0x1385 + i),
+  // Class 0x14, the stage-2 boss: the two flipbooks
+  // `Class14AdvanceMotionAndPublishPoints` (`FUN_00476AD0`) draws under bone
+  // 1's matrix beside the bone's own part -- `state+0x7C` steps 0x2CB..0x2ED
+  // and `state+0x88`, the weak point whose frame is the damage window,
+  // 0x2EE..0x315. `boss2.bin` entries 2..76. The skeleton itself rides the
+  // character path.
+  0x14: Array.from({ length: 0x315 - 0x2cb + 1 }, (_, i) => 0x2cb + i),
   // Class 0x40, the horde: the emerge prop `HordeEmergePropUpdate`
   // (`FUN_0043DD00`) draws twice (`komono_st1b.bin` 12, slot 0x17CC), the
   // member's ground shadow (`common.bin` 200, 0x10D0), and its death splash --

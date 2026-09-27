@@ -10646,6 +10646,8 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.Frog, "0x11 frog"],
     [SpawnClass.Boss4, "0x19 stage-4 boss"],
     [SpawnClass.Boss2, "0x14 stage-2 boss"],
+    [SpawnClass.WaterWaveField, "0x16 the stage-2 boss arena's wave field"],
+    [SpawnClass.WaterWaveSource, "0x17 one wave source on it"],
     [SpawnClass.OneHitTarget, "0x20 one-hit target"],
     [SpawnClass.RankScaledEnemy, "0x21 rescue target"],
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],

@@ -1057,6 +1057,11 @@ than a proxy for it, and the distinction has bitten. `render-drives-the-port`
 counts engine functions **called** from `render/`, not `FUN_00…` strings —
 a doc comment citing an address is the evidence `CLAUDE.md` requires, so
 counting citations would have meant deleting the evidence trail to reach zero.
+Two engine modules are not counted as "driving" when `render/` calls them:
+`game/vec.ts` and `game/matrix.ts`, both pure maths over plain numbers with no
+module state, so a draw that has to take a matrix apart the way the engine does
+(`MatrixToEulerZYX` for class 0x22's sub-actor) calls the one transcription
+instead of writing a second. A module with state does not qualify.
 `no-dom-insertion` bans `appendChild` and its siblings but explicitly not
 `document.createElement`, because two canvases are created as three.js textures
 and never enter the document.

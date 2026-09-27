@@ -670,6 +670,12 @@ web/src/
                   clocks it inside its own update, the director does not, and
                   render/ draws it from its matrices
                   (render/characters/model_block.ts)
+    model_draw.ts what every skinned actor's draw is gated on, as state:
+                  `model+0x64` bit 0 (`MotionFlag.Drawn`), the part records
+                  (`Actor.partVisible`), `ActorDrawShadow`'s gate, and the node
+                  walk a class's draw hook runs from when its pose is
+                  render/'s. render/characters/draw_gates.ts applies them node
+                  by node; none of it is an alpha
     original_mode.ts  the two-slot inventory, and the one query the branch
                   triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class

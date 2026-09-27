@@ -20,7 +20,6 @@
  */
 
 import type { Actor } from "../actor";
-import { FirstBakedOf, MotionOf } from "../tables";
 export enum ZombieState {
   /** `g_class30_states[0]` is the engine's no-op. */
   NoOp = 0,
@@ -269,6 +268,10 @@ export enum StrikeSub {
  * so every zombie in the game jogged and none of them ever ran — including the
  * 48% the data says should. There is no fallback to lose by reading the bit:
  * the pair is baked for every character type that has a row.
+ *
+ * The same bit sets how fast the run **turns**: `ZombieStateAttackRun` passes
+ * `ftol((bit * 1.5 + 1.0) * 416.0)` to `TurnActorTowardCamera`, `0x1A0` or
+ * `0x410` BAMS a frame. See `ZombieRunTurnRate` in `attack_run.ts`.
  */
 export const ZOMBIE_SPRINTS = 0x08000000;
 
@@ -295,19 +298,36 @@ export enum MotionRow {
  * `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — which of the run pair this actor takes.
  *
  * `[port-only]` — one expression out of `ZombieStateAttackRun`
- * (`FUN_004554D0`), named because three states index the pair the same way and
- * two of them were getting it wrong in the same place.
+ * (`FUN_004554D0`), named because four states index the pair the same way:
+ * that one, `ZombieStateRunInPlaceTimed`, `ZombieStateWalkDistance` and state
+ * 16's routine at `0x00457360`, which the port does not have.
  *
- * Falls back to the walk only when the row has no run at all, which is a
- * property of the bundle rather than of the engine: a skeleton with no run
- * clip baked would otherwise be handed `undefined` and stand still.
+ * **No fallback, because the engine has none.** It used to drop to the first
+ * baked entry of the row when this one was missing, on the belief that a row
+ * can name a clip authored for another skeleton -- `znchain`'s sprint, motion
+ * 968, was the example. It is not: `znchain` is a 16-bone skeleton and 968
+ * bakes for it, and across the twelve bundles every class-0x30 spawn's
+ * `row[2 + bit27]` is baked for every condition row its type has. Nor would
+ * the engine refuse one: `MotionFrameAddress` (`FUN_00412F50`) reads any
+ * motion at the *character's* stride, so a foreign clip plays as whatever its
+ * bytes make at that stride. A clip missing from a bundle is the bundle's
+ * fault and `ZombieSetMotionIfIdle` already declines it.
  */
-export function ZombieRunMotion(obj: Actor, row: number[]): number | undefined {
-  const want = MotionRow.Run + ((obj.flags >>> 27) & 1);
-  const m = row[want];
-  if (m !== undefined && MotionOf(obj, m)) return m;
-  return FirstBakedOf(obj, row, MotionRow.Run, MotionRow.RunAlt,
-                      MotionRow.Walk, MotionRow.WalkAlt);
+export function ZombieRunMotion(obj: Actor, row: readonly number[]):
+    number | undefined {
+  return row[MotionRow.Run + ((obj.flags >>> 27) & 1)];
+}
+
+/**
+ * `row[(obj+0x136C >> 0x15) & 1]` — which of the two in-place walks an actor
+ * waits on. `[port-only]` as a name: `ZombieStateWaitTurn` (`FUN_00455670`),
+ * `ZombieStateApproach` (`FUN_004579A0`) and state 32's idle each index the
+ * row with it, and the bit is `ZombieStateAttackRun`'s `g_wait_turn_variant`
+ * draw. See {@link ZombieFlag2.WaitTurnVariant}.
+ */
+export function ZombieWaitMotion(obj: Actor, row: readonly number[]):
+    number | undefined {
+  return row[MotionRow.Walk + ((obj.flags2 >>> 0x15) & 1)];
 }
 
 /**

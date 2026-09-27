@@ -723,3 +723,20 @@ while one pull every three frames at the same point killed it. Before calling
 a fight unwinnable from a harness, fire at it one pull a frame; and a class
 that reads the shot record back must read the pull that marked it
 (`Actor.shotRays`), not the frame's last.
+
+**L51 — A Ghidra rename by address overwrites whatever a peer named there,
+and says so only in its result.** Porting the ring a class-0x30 corpse leaves,
+I found three routines with no Ghidra function, created them, and named them
+over MCP. `rename_function` succeeded every time. Its message read *"Renamed
+function at 0x00407e30 from 'RingEffectSpread' to ..."* -- a peer porting the
+fish had created and named the same three an hour earlier, uncommitted in its
+own worktree, and the shared database is the one place both of us wrote. The
+peer's TSV and TypeScript used its names, the database now used mine, and the
+task had two ports in two trees.
+
+Before naming anything in the shared database, **grep every live worktree's
+`ghidra/annotations/*.tsv` for the address** -- a peer's uncommitted row is
+there before it is anywhere else -- and read the `from` in every rename
+result, which is the only report that the name replaced was not `FUN_...`.
+It is `L17` pointed at a write: "I did not see a name" and "there was no
+name" are different claims.

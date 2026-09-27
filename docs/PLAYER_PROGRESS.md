@@ -3148,6 +3148,50 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+### What a death throws up, what a corpse leaves, and what a landing sounds like
+
+Five `[diverges]` notes said class 0x30 drew none of this; it draws all of it
+now, from the exe's own routines (`game/class30/death_effects.ts`):
+
+* **The death clip's cue frames.** `ChooseDeathMotion`'s tail,
+  `ZombieInstallDeathEffectCues` (`FUN_004563F0`), points `obj+0x13A0` into
+  `g_zombie_death_effect_cues` (`0x005930AC`) -- one list per directional
+  death `0x3D9..0x3E0`, an empty one for every other clip -- and
+  `ZombieDeathEffectCueTick` (`FUN_004569B0`), `g_class30_states[0x37]`, runs
+  every frame of state 6 and fires when `obj+0x19C` equals the next cue. Dry
+  and no rain: sprite kind 0x46 (`common.bin` 25..39) on the traced floor,
+  stretched `(0.5, 1.5, 1.5)` through `SpawnSpriteEffectFromParamsThunk`
+  (`FUN_004073A0`). Wet (surfaces 5, 0x37) or raining: kind 0x61, the
+  `SIBUKI` splash strip, and on water two `SpawnWaterRing`s (`FUN_004567C0`)
+  once per death.
+* **The landing.** `ZombieDeathLandingEffect` (`FUN_00456B70`),
+  `g_class30_states[0x38]`, is called by states 9, 12, 26 and 30: once per
+  latch (`obj+0x136C` bit 0x10000), a splash and two rings on water, a splash
+  in the rain, dust otherwise. Its trace moves `g_coli_hit_surface`, which
+  state 9 reads again straight after.
+* **The ring task under the corpse.** `SpawnGroundRingEffect`
+  (`FUN_00407DA0`) is the first call of both corpse states and of class 0x20's
+  hand-over into its sink. It allocates the ring task `game/effects/
+  ring_effect.ts` already ran for the fish -- a red pool that opens over 120
+  frames, holds 30 and fades over 39 -- at the **tracked bone's** `x`/`z`
+  (`obj+0x100`), and at the traced floor only when `obj+0x1F8` bit 4 is up:
+  `EnemyZombieInit` raises it (`MotionFlag.TraceGround`), class 0x20 does not.
+* **The landings' sound and shake.** `ZombieStateArcScriptedEntrance` and
+  `ZombieStateDelayedLeap` land with `COMMON\ENE_WALK7_22.WAV` after the landing
+  hook, or -- body condition 5 -- `COMMON\DAMAGE3_22.WAV` and
+  `g_screen_shake_frames = 0x20` in its place; the leap then plays the attack
+  cry. The shake is the one global the engine writes; `UpdateScreenShake`
+  already turns it into the camera's nod.
+* **`g_rain_enabled`** (`0x009C8E50`) is a `G` global now: `EvtOpEnableRain1D`
+  stores its operand, `ResetSceneOnEnter` zeroes it.
+
+Three wrong ports inside the same routines went with it: the arc entrance's
+crouch is **blended** in (fade 5) where the port cut to it; its sub 3 and its
+exit clear the landing latch, `0xfffeffff`, where the port cleared the carried
+bit one hex digit over; and `ZombieStateDelayedLeap` landed in silence.
+`web/tools/death_fx.mjs` kills what is on screen and photographs each effect;
+`--staged` puts one of each in front of the camera.
+
 ## A cross-fade dissolves from a still, and holds the new clip
 
 Emerging zombies in stage 2's block 16 finished their climb out of the water,

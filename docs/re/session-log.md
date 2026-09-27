@@ -20093,3 +20093,49 @@ landings.
 fall-through, the feather's kill-without-draw, the ring task's fortieth-frame
 kill, the owl's blood, or putting the surface ring back on the underwater death
 each fails `npm run test:port`.
+
+## 2026-09-27 -- class 0x30's death effects, the corpse's ring, the landings' thud
+
+Five declared divergences in `class30/death.ts`, `knockback.ts`, `entrance.ts`
+and `class20/index.ts` said the dust, the splash, the ring under a corpse and
+the entrance landing's sound and shake were not drawn. All five are ported;
+`PLAYER_PROGRESS.md` has what the exe does. What is worth keeping here:
+
+* **`g_class30_states[0x37]` and `[0x38]` are not states.** The xrefs to
+  `PTR_FUN_00592BC4` / `PTR_FUN_00592BC8` are state 6, and states 9, 12, 26
+  and 30 -- the delayed leap's call was in no note at all, and the port's leap
+  landed without its sound, shake, dust or attack cry.
+* **The decompiler folds the cue tick's parameter block.** Which of the dust,
+  the wader's flat splash and the wet splash sit on the traced floor and which
+  on `obj+0x44` is only readable from the stores (`0x00456A4B`, `0x00456B1B`).
+* **`SpawnGroundRingEffect` reads `obj+0x1F8` bit 4**, which nothing in the
+  port had: `EnemyZombieInit` and `EnemyThrowerInit` raise it after
+  `ActorBuildSkinnedModel`, and `ActorDrawGroundShadow` is its other reader.
+  `MotionFlag.TraceGround`.
+* **The ring task's three routines step, then draw**, the opposite of the
+  sprite effects -- each installs its successor into `obj[0]` and still draws
+  its own picture that frame.
+* **Two wrong ports in `ZombieStateArcScriptedEntrance`**, both from the
+  bytes: `CALL 0x004119A0` with fade 5 for the crouch (the port cut), and
+  `AND ECX, 0xfffeffff` -- the landing latch -- at sub 3 and on the way out,
+  where the port cleared `0x100000`, the carried bit.
+
+**Wrong turns.**
+
+* **I ported the ring task a second time.** A peer (the owl and fish effects)
+  had it in `ring_effect.ts` in their tree, uncommitted, and had named the
+  three routines in Ghidra an hour before; I created the functions, named them
+  `GroundRingEffect*`, and my `rename_function` calls **overwrote their names**
+  -- the tool's result said "from 'RingEffectSpread'", which is the only place
+  it showed. The names were put back, and once their branch reached `main` my
+  copy was folded onto theirs: `SpawnGroundRingEffect` now lives in
+  `ring_effect.ts` and feeds its pool. See `L51`.
+* The first staged screenshot showed nothing: the effects were thirty units
+  ahead of a camera fifteen above the water, under the bottom of the frame.
+  Sixty units ahead, all six draw -- the red pools, the strip cels, the two
+  white water rings, the splash and the grey dust.
+
+**Mutation-checked:** the cue tick reduced to a no-op, the landing effect
+reduced to its latch, `SpawnGroundRingEffect` returning early, the entrance's
+and the leap's sounds and shake removed, the rain opcode not writing `G`, and
+the sub-3 latch put back on the carried bit each fail `npm run test:port`.

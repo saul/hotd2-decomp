@@ -19535,6 +19535,37 @@ merged `pendingHit` loses the second player. `Actor.shotBones` is that byte
 array; the bosses' shot routines walk it. The ray each player fired was
 already in `G.g_crosshair_ray`.
 
+## 2026-09-27 -- the stashed rail belongs to `G`, and its pause is a divergence
+
+The stage-4 boss reading found the one thing that would have stalled its
+fight: `Boss4PlayCameraCue` (`0x00493090`) overwrites the stashed rail's range
+(`g_stashed_path_frame`/`_end_frame`, `0x009C70AC`/`B0`) and publishes its own
+float frame into `0x009C70BC`, and its arena waits on the `g_cam_path_frame`
+that produces. The port held that range on the walker's shot. The user chose
+the refactor over a declared divergence.
+
+`game/camera/rail.ts` ports the two hooks (`CameraStepRailTick`,
+`CameraPlayStashedPath`) and the stash (`CamStashPathRange`, `0x00403490`,
+named here); the walker's stashed shot mirrors `G`, and the scrubber, a
+restored URL and the seek write through `Walker.setCameraFrame`. Stage 2's
+headless playthrough with continues is identical before and after -- same
+block, same 9300 frames, same route -- and `handback` matches its baseline.
+
+**What went wrong on the way.** The first cut transcribed the hooks' increment
+gate as well: the rail only steps with no screen shake and a player in play,
+unless `g_force_rail_advance` (`0x009CA098`, opcode 0x37) forces it. That is
+the engine, and it broke `handback`: stage 1's gate 1/4 went from 55 frames to
+2, stage 3's 1/2 from 43 to 2. The trace said why -- a hit's 0x30-frame shake
+held the rail at frame 265, the play was still live when the room cleared, and
+the port's seat snaps the block's aim onto a live stashed play, which the
+engine never does under (2,6). So the gate depends on an older divergence
+(the seat), and fixing that changes how the camera aims in every stage. The
+gate is written out and not applied, `[diverges]` at the line, and put to the
+user. `test:state` also caught the stash words surviving a seek's reset; the
+port's reset clears them now (`[port-only]` -- the engine never needs to).
+
+Named: `CamStashPathRange`, `g_rail_frame`, `g_force_rail_advance`.
+
 ## 2026-09-27 -- JUDGMENT (classes 0x22 and 0x23), read for the port
 
 Phase 1 of the boss port: the whole of classes 0x22 and 0x23 read, named and

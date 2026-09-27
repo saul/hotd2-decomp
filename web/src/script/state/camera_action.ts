@@ -25,6 +25,7 @@ import type { OpJson } from "../../bundle";
 import { CAMERA_ACTION_STARTERS, CameraActionDriver, CameraMode }
   from "../../game/camera/mode";
 import { G } from "../../game/globals";
+import { CamStashPathRange } from "../../game/camera/rail";
 import type { Walker } from "../walker";
 import { mergeTables } from "../registry";
 
@@ -79,7 +80,10 @@ const CAM_PLAY: Record<string, ActionImpl> = {
       // it is `started: false` on the command `finish_sequence` builds below,
       // and while that was missing it was a `[diverges]` written here.
       const at = op.resume ? (w.cam ? w.cam.frame + 1 : 0) : start;
-      w.stashedCam = { slot, start: at, end };
+      // The range into `g_stashed_path_frame`/`g_stashed_path_end_frame`,
+      // which `G` owns; the walker keeps the path it names.
+      CamStashPathRange(at, end);
+      w.stashedCam = { slot };
       // `FUN_00403490` stashes and returns; the action is done.
       w.ring.retire();
       return `stashed ${at}..${end} for a later scene state 6/7`;
@@ -161,17 +165,21 @@ const SCENE: Record<string, ActionImpl> = {
       if (!st) return "state 6/7 with nothing stashed";
       // The stashed play takes the camera over; whatever was on it is done.
       w.ring.supersede();
+      // The range is the stash words', read where `FUN_00403490` left them
+      // -- or wherever the stage-4 boss has put them since.
+      const stStart = G.g_stashed_path_frame;
+      const stEnd = G.g_stashed_path_end_frame;
       w.cam = {
         slot: st.slot,
-        startFrame: st.start,
-        endFrame: st.end,
-        frame: st.start,
+        startFrame: stStart,
+        endFrame: stEnd,
+        frame: stStart,
         flags: 0,
-        isStatic: st.start === st.end,
+        isStatic: stStart === stEnd,
         deferred: true,
         file: op.cam?.file ?? null,
         pathIndex: op.cam?.path ?? null,
-        done: st.start === st.end,
+        done: stStart === stEnd,
         // **Not `started`, and that is the difference between the engine's
         // two ways of playing a path.**
         //
@@ -212,7 +220,7 @@ const SCENE: Record<string, ActionImpl> = {
         started: false,
         // As above: a stashed range whose start equals its end is the static
         // case and owes nothing; anything else owes its frames.
-        retired: st.start === st.end,
+        retired: stStart === stEnd,
         // **And minor 7 goes one frame further than minor 6**, because its
         // guard is `JG` where the rail's is `JGE` and both increment before
         // they publish. See `CamCommand.pastEnd` for both listings and for
@@ -221,7 +229,7 @@ const SCENE: Record<string, ActionImpl> = {
       };
       w.stashedCam = null;
       w.host.startCamera(w.cam);
-      return `plays the stashed range ${st.start}..${st.end}`
+      return `plays the stashed range ${stStart}..${stEnd}`
              + (minor === 7 ? " (and one frame past it)" : "");
     }
     if (minor === 4 && w.cam) {

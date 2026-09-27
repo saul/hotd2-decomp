@@ -4365,6 +4365,46 @@ sub-actor never registers.
 Not ported: Training's subtype 2 (`trnevtbl.bin` block 9), which no bundle
 carries. Stage 1 blocks 14 and 16 are the same descriptor.
 
+## Strength, the stage-4 boss (class 0x19), is ported whole
+
+Every routine of class 0x19 is in `game/class19/` -- the four entrances, the
+fourteen fight states, the three attacks, the reactions and the death -- and
+`web/tools/boss4_fight.mjs` plays both routed arenas (stage 4 blocks 23 and 25)
+from their first step to `g_script_flags[32]` and past the script's wait on it.
+`docs/re/boss-strength.md` is the reading.
+
+**How the fight moves.** Nine phases per arena, each a share of the 300 hit
+points (`g_boss4_phase_hp_fraction`). A head shot costs
+`g_boss4_head_damage[players + rank*2]` -- 26 down to 13 for one player as his
+own rank climbs with every two head hits and falls three with every life the
+player loses -- and a shot on a collision-mesh bone only bleeds when it lands
+on a flesh quad. At the floor he refuses damage; once the camera is still he
+plays the next phase's camera move himself (`Boss4PlayCameraCue`, on the
+(2,6) rail), and when the rail passes the phase's frame he is seated at the
+next spot with the next phase's arena, damageable again once he is five units
+inside it. Phases 5, 7, 11 and 16 end in a charge past the camera; 3 and 13 in
+a throw of one of the two props he carries (`g_prop_behaviours[2]`, a type-2
+carried prop in his hand, which a shot knocks aside rather than breaks); the
+rest in chainsaw strikes, one life each.
+
+**What it took outside the class.** The seven `.rdata` tables travel in the
+bundle (format 13); the descriptor tail's fifteen words are per-bone
+`coli4.bin` meshes, which the shot test (`ShotTestBoneMesh`) now takes for the
+boss, carrying the quad's surface to `SpawnWorldImpact` and the per-player
+`g_shot_hit_records`; the transport he rides is `CarrierPropRoutine2`
+(selectors 2 and 9, with its two doors); and the four boss blocks' camera --
+`cam_play 185 0..0`, a static pose, then `finish_sequence 6` over no stash --
+now installs the rail the fight's frame comes from, which the walker used to
+refuse. That last one had held every arena threshold, charge and chainsaw cue
+at camera frame 0.
+
+**What is still not measured in a browser.** `tools/playthrough.mjs` stops on
+entering an end block (`PLAYER_HANGS.md` item 17), and the boss blocks are
+stage 4's end blocks; the headless harness plays the fight with the player's
+head shots delivered as `MarkActorShot` leaves them. The same step spawns eight
+bats that nothing in it shoots, so the post-fight `wait_enemies_present 0` and
+the outro camera that despawns him are asserted by `port.test.ts`, not played.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

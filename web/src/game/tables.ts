@@ -14,7 +14,7 @@ import { authoredFrameOfTicks, ticksOfAuthoredFrame, ticksOfSeconds }
 import type { Actor } from "./actor";
 import type { SetPieceParams } from "./class24";
 import type { CiviliansJson } from "../bundle/scene";
-import type { GameOverJson } from "../bundle/stage";
+import type { Boss4TablesJson, GameOverJson } from "../bundle/stage";
 import type { HumanoidProgram } from "./class25";
 import { G } from "./globals";
 import { TURN_CURVE_DEFAULT, TURN_RATE_UNTRACKED } from "./camera/constants";
@@ -55,6 +55,17 @@ export const T = {
    */
   gameOver: null as GameOverJson | null,
   /**
+   * Class 0x19's `.rdata` -- the stage-4 boss's seven tables. One block for
+   * the whole game, read by `game/class19/`. Null in a bundle written before
+   * format 13, and the boss then has no arena to fight in.
+   */
+  boss4: null as Boss4TablesJson | null,
+  /**
+   * `g_carrier2_door_yaw` (`0x005926D0`) -- the swing class 0x13's carrier
+   * routine 2 steps its two doors through. Empty in a pre-13 bundle.
+   */
+  carrierDoorYaw: [] as number[],
+  /**
    * The turn-rate curves and the approach radii — the two `.rdata` tables the
    * camera director reads. The immediates that used to sit beside them in this
    * block are in `game/camera/constants.ts` now; see `docs/formats/bundle.md`.
@@ -69,6 +80,16 @@ export const T = {
  */
 /** Said once: a headless fixture legitimately has no collision. */
 let warnedNoColi = false;
+
+/**
+ * `[port-only]` -- the stage-4 boss's `.rdata` and its carrier's door swing,
+ * from the same `script.json`.
+ */
+export function SetBoss4Tables(json: Boss4TablesJson | undefined,
+                               doorYaw: number[] | undefined): void {
+  T.boss4 = json ?? null;
+  T.carrierDoorYaw = doorYaw ?? [];
+}
 
 /** `[port-only]` -- the game-over block, from the same `script.json`. */
 export function SetGameOverTables(json: GameOverJson | undefined): void {

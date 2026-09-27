@@ -157,3 +157,36 @@ export function ActorTurnTowardXZ(obj: Actor, dx: number, dz: number,
   if (e < -step) { obj.yaw = (obj.yaw - step) | 0; return; }
   obj.yaw = (obj.yaw + e) | 0;
 }
+
+const _ahead: Vec3 = { x: 0, y: 0, z: 0 };
+
+/**
+ * `ActorPointIsAhead` — `FUN_0045BC10`. Is the point in front of the actor?
+ *
+ * ```
+ * MatrixStackPush(0); MatrixLoadIdentity()
+ * MatrixRotateY(-angles[1]); MatrixRotateZ(-angles[2]); MatrixRotateX(-angles[0])
+ * MatrixTransformPoint(p - pos, &out); MatrixStackPop(1)
+ * 0045bc7e  FLD [out.z]; FCOMP 0.0; TEST AH, 0x41; JNZ -> 0     ; z > 0
+ * ```
+ *
+ * The inverse of **all three** angles, as {@link ActorHeadingErrorTo} takes
+ * them -- the arguments are pointers to `obj+0x64` and `obj+0x40`. It lived in
+ * `class30/target.ts` as the yaw alone, which is the same number for an
+ * upright actor and every zombie is one; the stage-4 boss is a second caller,
+ * so there is one copy of it here now. `z` alone for the yaw-only case is
+ * `dx·sin(yaw) + dz·cos(yaw)`, the inverse rotation -- the sign that stage 1's
+ * block-1 captor found.
+ */
+export function ActorPointIsAhead(obj: Pick<Actor, "pos" | "yaw" | "pitch"
+                                           | "roll">, p: Vec3): boolean {
+  const m = MatIdentity();
+  MatrixRotateY(m, -obj.yaw);
+  // `|| 0`: a caller holding an upright actor may hand over one with no
+  // pitch or roll fields at all, and those are zero.
+  MatrixRotateZ(m, -(obj.roll || 0));
+  MatrixRotateX(m, -(obj.pitch || 0));
+  MatrixTransformPoint(m, { x: p.x - obj.pos.x, y: p.y - obj.pos.y,
+                            z: p.z - obj.pos.z }, _ahead);
+  return _ahead.z > 0;
+}

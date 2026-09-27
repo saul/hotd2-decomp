@@ -382,6 +382,11 @@ export class Placement {
   class18: Record<string, unknown> | null = null;
   /** Class 0x26 subtype 2's collision blob -- the boat the player rides. */
   class26: Record<string, unknown> | null = null;
+  /**
+   * Class 0x19's tail -- the stage-4 boss's entrance, per-bone collision
+   * meshes and despawn cue; see `class19Tail`.
+   */
+  class19: Record<string, unknown> | null = null;
   class11: Record<string, unknown> | null = null;
   /** Class 0x43's two bytes -- the owl's member index and sub-type. */
   class43: Record<string, unknown> | null = null;
@@ -506,6 +511,7 @@ export class Placement {
     if (this.class13) d.class13 = this.class13;
     if (this.class18) d.class18 = this.class18;
     if (this.class26) d.class26 = this.class26;
+    if (this.class19) d.class19 = this.class19;
     if (this.class11) d.class11 = this.class11;
     if (this.class43) d.class43 = this.class43;
     if (this.class46) d.class46 = this.class46;

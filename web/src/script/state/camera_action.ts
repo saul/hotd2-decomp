@@ -161,8 +161,21 @@ const SCENE: Record<string, ActionImpl> = {
     G.g_camera_action_driver =
       CAMERA_ACTION_STARTERS[minor ?? -1] ?? CameraActionDriver.None;
     if (minor === 6 || minor === 7) {
-      const st = w.stashedCam;
-      if (!st) return "state 6/7 with nothing stashed";
+      // **The hook does not need a stash; it needs a path and two words.**
+      // `CameraStepRailTick` (`FUN_0040C790`) and `CameraPlayStashedPath`
+      // (`FUN_0040C8A0`) evaluate `g_active_cam_path` over
+      // `g_stashed_path_frame`/`g_stashed_path_end_frame` every frame the
+      // state is installed, whoever wrote them. Every other `finish_sequence
+      // 6|7` in the shipped scripts follows a stash (`FUN_00403490`), which
+      // is what names the path; stage 4's four boss blocks do not -- they
+      // play `cam_play 185 0..0` (or 193), a **static** pose, which is what
+      // leaves `g_active_cam_path` on the fight's path, and then install
+      // (2,6) over the stash words as they stand, for the boss's own camera
+      // cues (`Boss4PlayCameraCue`, `FUN_00493090`) to move. Refusing that
+      // left the fight's `g_cam_path_frame` at 0 for its whole length, so no
+      // arena seat, charge or chainsaw cue could ever fire.
+      const st = w.stashedCam ?? (w.cam ? { slot: w.cam.slot } : null);
+      if (!st) return "state 6/7 with no path";
       // The stashed play takes the camera over; whatever was on it is done.
       w.ring.supersede();
       // The range is the stash words', read where `FUN_00403490` left them

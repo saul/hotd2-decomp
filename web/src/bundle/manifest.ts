@@ -22,6 +22,17 @@
  * 3: the manifest carries a schema digest and every stage carries its own
  * `format`. See `docs/formats/bundle.md`.
  *
+ * 13: the stage-4 boss. `script.json` carries a `boss4` block -- class 0x19's
+ * seven `.rdata` tables (`ExeTables.boss4Tables`): the phase floors, the head
+ * damage, the two held props, the 22 camera cues, the 18 phase arenas, the
+ * head models by bar and the approach picks -- and `carrier_door_yaw`, the
+ * swing class 0x13's carrier routine 2 steps its doors through. Class-0x19
+ * placements carry `class19`: the entrance, the per-bone `coli4.bin` meshes
+ * `ShotTestBoneMesh` tests instead of spheres, and the camera pair that
+ * despawns the boss. The boss's clips gain 0x67 and 0x68, the throws. A
+ * format-12 bundle has none of it, and a client reading one would run a
+ * fight with no arena, no cues and no floors.
+ *
  * 12: the game-over screen's sprites and route map. `script.json`'s
  * `hud_sprites` is `screen_sprites` -- the HUD's images and now the logo's
  * (`scr_gameover.bin`) and the route map's 300 tiles (`scr_bunki.bin`) -- and a
@@ -78,7 +89,7 @@
  * files rather than everything in this directory, so the loader's refusal
  * strings are no longer part of what invalidates a bundle.
  */
-export const SUPPORTED_FORMAT = 12;
+export const SUPPORTED_FORMAT = 13;
 
 /**
  * The exporter's digest of the declarations in this directory.

@@ -218,6 +218,7 @@ __all__ = [
     "class52_tail",
     "class53_tail",
     "class14_tail",
+    "class19_tail",
     "CLASS14_MOTIONS",
     "class22_tail",
     "class23_tail",
@@ -570,6 +571,34 @@ def class33_push_tail(rec) -> dict:
         "shot_radius": f(0x08),
         "push_flag": u8(0x0C),
         "despawn_flag": u8(0x0D),
+    }
+
+
+def class19_tail(rec, sets=None) -> dict:
+    """Class 0x19's descriptor tail, as `Boss4Init` (`FUN_004917E0`) and
+    `Boss4Update` (`FUN_004919D0`) read it. The TypeScript half's
+    ``class19Tail`` says what each field is; this is the same read.
+
+    ``bone_coli[i]`` is bone ``i + 1``'s collision mesh -- the tail dword at
+    ``+0x04 + 4*i`` resolved through `coli.pointer_to_offset` to the
+    ``"<file>:<offset>"`` key the bundle's ``coli.blobs`` uses, or None for -1
+    (a sphere bone) and when ``sets`` is not given.
+    """
+    from . import coli as colilib
+    bone_coli = []
+    for i in range(15):
+        word = rec.param(0x04 + i * 4, "u32")
+        if word is None or word == 0xFFFFFFFF or not sets:
+            bone_coli.append(None)
+            continue
+        hit = colilib.pointer_to_offset(word, sets[0], sets[1])
+        bone_coli.append(f"{hit[0]}:{hit[1]}" if hit else None)
+    return {
+        "char_type": rec.param(0x00, "u8") or 0,
+        "entrance": rec.param(0x01, "u8") or 0,
+        "bone_coli": bone_coli,
+        "despawn_path": rec.param(0x40, "i16") or 0,
+        "despawn_frame": rec.param(0x42, "i16") or 0,
     }
 
 
@@ -998,6 +1027,8 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class52 = class52_tail(rec) if sp["class"] == 0x52 else None
         class53 = class53_tail(rec) if sp["class"] == 0x53 else None
         class14 = class14_tail(rec) if sp["class"] == 0x14 else None
+        class19 = (class19_tail(rec, stage.colisets() or None)
+                   if sp["class"] == 0x19 else None)
         class22 = class22_tail(rec) if sp["class"] == 0x22 else None
         class23 = class23_tail(rec) if sp["class"] == 0x23 else None
         # **Gated on the selector, not on the class.** Class 0x33 is
@@ -1087,6 +1118,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class52=class52,
             class53=class53,
             class14=class14,
+            class19=class19,
             class22=class22,
             class23=class23,
             class33=class33,

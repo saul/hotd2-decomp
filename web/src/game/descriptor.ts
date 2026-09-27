@@ -105,6 +105,10 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // `tail+0x00` as a character type and `tail+0x01` as the state the boss
     // starts in, which are class 0x30's body condition and initial state.
     class14: p?.class14 ?? null,
+    // Class 0x19's: `tail+0x01` is the entrance (carried as `initial_state`
+    // too), the fifteen dwords are the bones' collision meshes, and
+    // `+0x40`/`+0x42` the despawn pair.
+    class19: p?.class19 ?? null,
     // Classes 0x22's and 0x23's, on the same terms: `Class22Init`
     // (`FUN_0049B0D0`) reads `tail+0x01` as a variant and `Class23Init`
     // (`FUN_0048FD90`) as a subtype, where class 0x30 reads a state.

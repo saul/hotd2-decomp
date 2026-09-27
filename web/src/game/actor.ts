@@ -944,6 +944,16 @@ export enum ThrowerStance {
  * a frame test written `===` could be stepped over -- which is what the
  * `struck` latch on this interface's owner used to exist to work around.
  */
+/**
+ * One skeleton record's rotation in a fade's snapshot, overriding the clip's:
+ * `(rx, ry, rz)` BAMS, applied `RotZ RotY RotX` like every record. See
+ * {@link ActorBase.fadeFrom}.
+ */
+export interface FadeRecord {
+  record: number;
+  rot: [number, number, number];
+}
+
 export interface ActorClip { motion: number; ticks: number; loop: boolean }
 
 /**
@@ -1425,6 +1435,23 @@ export interface ActorBase {
    */
   class14: CharacterPlacement["class14"];
   /**
+   * Class 0x19's descriptor tail -- the stage-4 boss's entrance, its per-bone
+   * collision meshes and the camera pair that despawns it. See
+   * `game/class19/`.
+   */
+  class19: CharacterPlacement["class19"];
+  /**
+   * `bone record +0x88` per bone, for the bones that are shot-tested against
+   * a **collision mesh** rather than a sphere -- the `coli.blobs` key, by
+   * bone index. `ShotTestBoneTree` (`FUN_00404750`) takes `ShotTestBoneMesh`
+   * (`FUN_004048A0`) for a record whose `+0x74` has bit `0x10` and whose
+   * `+0x88` is not -1, and the sphere test otherwise; the only writer in the
+   * image is `Boss4Init` (`FUN_004917E0`), which also raises `+0x74 |= 0x51`
+   * and zeroes the sphere's radius at `+0x78` for each. An entry here is all
+   * three.
+   */
+  boneColi: Record<string, string>;
+  /**
    * Class 0x22's descriptor tail — JUDGMENT's flier: variant, first clip,
    * despawn cue, the three hit-point words and the nested companion. Its own
    * field for the reason class 0x14's is: `tail+0x01` is class 0x30's
@@ -1786,8 +1813,14 @@ export interface ActorBase {
    *
    * Without it every transition is a cut, which is what made the bite jump
    * straight into the walk-back.
+   *
+   * `records` are skeleton records whose snapshotted rotation is **not** the
+   * clip's: a state that writes the drawn pose's records before it blends
+   * (`Boss4StateTurnClipThenApproach`, `FUN_00494730`, rewrites records 1 and
+   * 9 at `char+0x10C` and `+0x58C`) hands the renderer the BAMS it wrote, and
+   * the fade dissolves from those.
    */
-  fadeFrom: { motion: number; ticks: number } | null;
+  fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
   /**
    * Frames of the cross-fade left. It starts at the fade length and the
    * fade is over when it goes **below zero**, so the incoming clip is held on
@@ -2074,6 +2107,8 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class51: null,
     class52: null,
     class14: null,
+    class19: null,
+    boneColi: {},
     class22: null,
     class23: null,
     class33: null,

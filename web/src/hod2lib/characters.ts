@@ -39,6 +39,7 @@ import { civilianItemSlots, civilianMotionIds, civilianOrderedStates,
 import type { CivBlock, TargetScript } from "./actorscript";
 import { approachTables, cameraTracking, RING_SET_FOR_CHAR0 } from "./approach";
 import { build, goreEntry, rigEntry } from "./charbuild";
+import { Boss4SwapSlots } from "../game/class19/slots";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
@@ -261,6 +262,43 @@ export function class26Tail(
   const hit = word !== null && sets
     ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
   return { coli: hit ? `${hit[0]}:${hit[1]}` : null };
+}
+
+/**
+ * Class 0x19's descriptor tail, as `Boss4Init` (`FUN_004917E0`) and
+ * `Boss4Update` (`FUN_004919D0`) read it.
+ *
+ * * `+0x00` the character type (0x4A, `boss4.bin`) and `+0x01` the entrance,
+ *   the index into `g_class19_states` the boss starts in (0..3, one per
+ *   shipped spawn).
+ * * `+0x04`..`+0x3C`, fifteen dwords -- one per skeleton bone 1..15 --
+ *   copied into each bone record's `+0x88`. Each is `-1` or a **relocated
+ *   pointer into the collision buffers** (`0x0CEDxxxx`), the same kind of
+ *   operand opcodes 0x10/0x11 carry; `ShotTestBoneTree` (`FUN_00404750`)
+ *   tests a bone with one against that blob in the bone's own space
+ *   (`ShotTestBoneMesh`, `FUN_004048A0`) instead of its hit sphere. Resolved
+ *   here to the `"<file>:<offset>"` key `coli.blobs` is keyed by: ten land
+ *   on `coli4.bin` blobs, bones 2, 8, 9, 12 and 15 are `-1`.
+ * * `+0x40`/`+0x42` the camera path and frame that despawn it
+ *   (`Boss4Update`'s tail, `0x00491AF5`..).
+ */
+export function class19Tail(
+    rec: Spawn,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): Record<string, unknown> {
+  const boneColi: (string | null)[] = [];
+  for (let i = 0; i < 15; i++) {
+    const word = rec.param(0x04 + i * 4, "u32");
+    if (word === null || word === 0xffffffff) { boneColi.push(null); continue; }
+    const hit = sets ? colilib.pointerToOffset(word, sets[0], sets[1]) : null;
+    boneColi.push(hit ? `${hit[0]}:${hit[1]}` : null);
+  }
+  return {
+    char_type: rec.param(0x00, "u8") ?? 0,
+    entrance: rec.param(0x01, "u8") ?? 0,
+    bone_coli: boneColi,
+    despawn_path: rec.param(0x40, "i16") ?? 0,
+    despawn_frame: rec.param(0x42, "i16") ?? 0,
+  };
 }
 
 export function class13Tail(rec: Spawn): Record<string, unknown> {
@@ -1249,6 +1287,7 @@ export async function resolveForStage(
     const class13 = cls === 0x13 ? class13Tail(rec) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
+    const class19 = cls === 0x19 ? class19Tail(rec, coliSets) : null;
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
@@ -1354,6 +1393,7 @@ export async function resolveForStage(
     p.class13 = class13;
     p.class18 = class18;
     p.class26 = class26;
+    p.class19 = class19;
     p.class20 = class20;
     p.class11 = class11;
     p.class43 = class43;
@@ -1527,6 +1567,14 @@ export async function resolveForStage(
       const which = rec.param(0x01, "i8") || 0;
       entryClips.push(...civilianMotionIds(civscripts, which));
       for (const s of civilianItemSlots(civscripts, which)) c.heldSlots.add(s);
+    }
+    // The models the stage-4 boss swaps onto its bones -- the hand that holds
+    // a prop, the blade `Boss4Init` seats, and the nine heads
+    // `Boss4ResolveShot` steps through as the bar falls. See
+    // `game/class19/slots.ts`.
+    if (cls === 0x19) {
+      const heads = (tables.boss4Tables().head_slot_by_bar as number[]) ?? [];
+      for (const s of Boss4SwapSlots(heads)) c.heldSlots.add(s);
     }
     for (const mid of [motion, intro ? intro[0] : null,
                        ...deaths, ...reacts, ...entryClips]) {

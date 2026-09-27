@@ -60,7 +60,8 @@ import { deformHordeSheet, HordeDrawParts, type HordePart } from "./horde";
 import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import {
-  CARRIER_GROUND_WAKE_DRAW, CARRIER_WAKE_PAIR, type ScriptedPropTail,
+  CARRIER2_DOOR_AT, CARRIER2_DOOR_SLOTS, CARRIER_GROUND_WAKE_DRAW,
+  CARRIER_WAKE_PAIR, type ScriptedPropTail,
 }
   from "../game/class13/state";
 
@@ -542,6 +543,20 @@ export class SlotModelLayer implements System<RenderContext> {
           mRotY(_m, SPLASH0_YAW);
           mScale(_m, SPLASH0_SCALE, SPLASH0_SCALE, SPLASH0_SCALE);
           this.extra(`s0:${a.at}`, t.splashDrawn, _m, seen);
+        }
+      } else if (t.selector === 2 || t.selector === 9) {
+        // `CarrierPropRoutine2` (`FUN_004408A0`)'s tail, every frame from the
+        // one its ride block exists: under `T(pos) RotX RotZ RotY`, each door
+        // at its own offset turned by its own yaw.
+        if (!t.riding) continue;
+        for (let i = 0; i < 2; i++) {
+          _m.identity();
+          mTranslate(_m, a.pos.x, a.pos.y, a.pos.z);
+          mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
+          mTranslate(_m, CARRIER2_DOOR_AT[i][0], CARRIER2_DOOR_AT[i][1],
+                     CARRIER2_DOOR_AT[i][2]);
+          mRotY(_m, i === 0 ? t.door0Yaw : t.door1Yaw);
+          this.extra(`d${i}:${a.at}`, CARRIER2_DOOR_SLOTS[i], _m, seen);
         }
       } else if (CARRIER_GROUND_WAKE_DRAW[t.selector]) {
         // Selectors 1 and 6: one shape of draw, their own literals.

@@ -37,6 +37,8 @@ import { HumanoidDrawVariant, HUMANOID_VARIANT3_SLOT }
 // Same argument: `class13/state.ts` is data only, `class13/index.ts` registers.
 import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
+// ...and `class19/slots.ts` for the stage-4 boss's prop and hit mark.
+import { Boss4EffectSlots } from "../game/class19/slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
@@ -88,7 +90,7 @@ import type { CamPaths } from "./campaths";
  * fire.** It says "the *layout* moved"; the digest beside it, which nobody has
  * to remember, catches the field-level drift.
  */
-export const BUNDLE_FORMAT = 12;
+export const BUNDLE_FORMAT = 13;
 
 /**
  * `hod2lib.__version__`, which lands in the manifest as `tool_version`.
@@ -1626,6 +1628,9 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     // ...and the boss-name banner's cards, for the classes this stage spawns
     // that make one: drawn in view space too, by `render/effects.ts`.
     ...bannerCardSlots(spawnRecords.map((r) => r.cls)),
+    // ...and the stage-4 boss's carried prop and hit mark, which
+    // `render/effects.ts` draws on its bones and in flight.
+    ...Boss4EffectSlots(spawnRecords.map((r) => r.cls)),
     // ...and the sprite effects a class draws off the shot path.
     ...classEffectSlots(spawnRecords.map((r) => r.cls)),
   ]);
@@ -1683,6 +1688,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   // the route map's 4 x 75 tiles.
   const gameOver = tables.gameOverTables();
   scriptJson.game_over = gameOver;
+  // Class 0x19's `.rdata`, and the doors of the carrier it rides in on. Every
+  // stage gets them, as every stage gets `game_over`: they are the exe's, not
+  // the stage's, and a few kilobytes is not worth a per-stage decision.
+  scriptJson.boss4 = tables.boss4Tables();
+  scriptJson.carrier_door_yaw = tables.carrierDoorYaw();
   const routeTiles = (gameOver.route_tiles as number[]).flatMap((base) =>
     Array.from({ length: ROUTE_TILES_PER_SCREEN }, (_u, i) => base + i));
   scriptJson.screen_sprites = await screenSpritesJson(

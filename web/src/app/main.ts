@@ -110,7 +110,8 @@ import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
 import {
   PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame,
 } from "../game/player_shell";
-import { SetGameOverTables, SetGameTables } from "../game/tables";
+import { SetBoss4Tables, SetGameOverTables, SetGameTables }
+  from "../game/tables";
 
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
 const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
@@ -775,6 +776,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     SetGameTables(script.characters, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
     SetGameOverTables(script.game_over);
+    SetBoss4Tables(script.boss4, script.carrier_door_yaw);
   }
 
   /**

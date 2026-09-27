@@ -267,6 +267,28 @@ export interface ClassHandler {
    * literal from `CameraPointRiseFor` in `camera/track.ts`.
    */
   cameraRise?(obj: Actor): number;
+  /**
+   * **This class registers for the shot test the engine's way.**
+   *
+   * Its own update calls `RegisterForShotTest` (`FUN_00405160`) where the
+   * exe's routine does -- directly, or through `ActorRegisterCameraPoint`
+   * (`FUN_00409B70`), which ends in that call -- and writes
+   * {@link Actor.shotCentre} and {@link Actor.hitRadius} where the exe writes
+   * `obj+0x70..0x78` and `obj+0x124`. Set, two things change for the class
+   * and nothing else does:
+   *
+   * * `director.ts` stops calling the camera point for it: the class makes
+   *   that call itself, at its own site, with its own gate.
+   * * The pick finds it through `G.g_shot_test_list` only, with
+   *   `ShotTestSphere` (`FUN_00404630`)'s broad phase and its fork into the
+   *   bones, and `render/`'s own pick passes it by. An actor of this class
+   *   that did not register this frame cannot be shot, which is the engine's
+   *   rule and the point of the flag.
+   *
+   * Absent means the class is picked the way it always has been. See
+   * `combat/shot_test.ts`.
+   */
+  registersForShotTest?: boolean;
 }
 
 /**

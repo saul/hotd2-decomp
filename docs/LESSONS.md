@@ -713,7 +713,18 @@ line writes a global, ask what writes it in the page; if the answer is
 least one check from the reset the page runs (`ResetGameGlobals`), not from a
 state assembled for the test.
 
-**L50 -- An arm that bumps the substate and does not return runs the next arm
+**L50 — A driven volley is not a trigger.** `playthrough.mjs` fires its whole
+grid between two driven frames, so the port's shot queue hands **one frame** a
+hundred and thirty pulls; the engine polls the trigger once a frame and has
+never seen two. A class that resolves its own mark on its next update -- class
+0x14 reads back the bone byte and the shot record -- sees only the last pull
+that crossed it, and stage 2's boss took **zero** damage in 33 dense volleys
+while one pull every three frames at the same point killed it. Before calling
+a fight unwinnable from a harness, fire at it one pull a frame; and a class
+that reads the shot record back must read the pull that marked it
+(`Actor.shotRays`), not the frame's last.
+
+**L51 -- An arm that bumps the substate and does not return runs the next arm
 in the same frame.** Class 0x11's two launch substates end `INC byte ptr
 [EAX+5]` and then carry straight on into the code the jump table gives the
 next substate -- `0x0043B03E` into `0x0043B044`, `0x0043B6F2` into

@@ -177,6 +177,20 @@ const _bone = vec3();
  */
 export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
                                          rise: number): void {
+  // An actor that carries the engine's model block (`game/skeleton.ts`) has
+  // no host to ask: its own skeleton walk wrote `obj+0x100` this frame, as
+  // the engine's does, and the routine's arithmetic applies as it stands --
+  // `FLD rise; FADD [obj+0x104]; FSTP [obj+0x104]`, climbing too on a frame
+  // whose walk drew nothing, which is the engine's own behaviour for a
+  // hidden model (`SkeletonEmitNode` writes the point only while it draws).
+  if (obj.skel) {
+    obj.shotCentre.x = obj.lookAt.x;
+    obj.shotCentre.y = obj.lookAt.y;
+    obj.shotCentre.z = obj.lookAt.z;
+    RegisterForShotTest(obj, host);
+    obj.lookAt.y = Math.fround(rise + obj.lookAt.y);
+    return;
+  }
   const posed = host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone);
   if (posed) {
     obj.lookAt.x = _bone.x;

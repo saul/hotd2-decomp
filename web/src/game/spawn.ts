@@ -10,11 +10,13 @@
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
-import { ActorFlag, makeActor, type Actor } from "./actor";
+import { ActorFlag, MotionFlag, makeActor, type Actor } from "./actor";
 import { G } from "./globals";
 import { ActorClaimHitSlot, HIT_SLOT_CLAIMING_CLASSES }
   from "./hit_slots";
 import { g_class_handlers } from "./registry";
+import { ActorModelScale } from "./root_motion";
+import { SkeletonBuildAndPose } from "./skeleton";
 import { CharacterTypeOf } from "./tables";
 import type { SpawnClass } from "./spawn_class";
 
@@ -91,10 +93,39 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  * back, and it does so itself.
  */
 export function ActorBuildSkinnedModel(obj: Actor): void {
-  ActorClaimHitSlot(obj);
-  if ((CharacterTypeOf(obj)?.bones ?? []).some((b) => b.parent === null)) {
+  const skel = obj.skel;
+  if (skel) {
+    // An actor that carries the model block (`game/skeleton.ts`, class 0x14
+    // alone today) gets the whole build, from its own `Init`, which has put
+    // the motion in `+0x20` first:
+    //
+    // ```
+    // M[0x116C] = scale by character type
+    // M[0]=0; M[0x10]=0; M[0x18]=0; M[0x08]=0; M[0x30]=0; M[0x28]=0
+    // M[0x37]=0; M[0x36]=0; SkeletonAssignSubtreeTrack(0, 0)
+    // M[0x64] = 3; M[0x68] = 5                 ; drawn, root motion; Z, Y, X
+    // parts: M[0x40] = ActorAllocSub(n * 8), each {0, 1}
+    // SkeletonBuildAndPose(M, pos, recs)       ; the first pose, and the 0x80
+    // ```
+    obj.scale = ActorModelScale(obj.charType);
+    skel.counter = 0;
+    skel.prevFrame = 0;
+    skel.frame = 0;
+    skel.cursor = 0;
+    skel.weightDiv = 0;
+    skel.weightOrigin = 0;
+    skel.flags = 0;
+    obj.motionFlags = MotionFlag.Drawn | MotionFlag.RootMotion;
+    skel.order = 5;
+    skel.part0 = 1;
+    SkeletonBuildAndPose(obj, skel);
+    obj.motion = skel.motion;
+    obj.playTicks = 0;
+  } else if ((CharacterTypeOf(obj)?.bones ?? [])
+      .some((b) => b.parent === null)) {
     obj.flags |= ActorFlag.ShootPerBone;
   }
+  ActorClaimHitSlot(obj);
 }
 
 /**

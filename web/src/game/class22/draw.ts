@@ -86,7 +86,7 @@ export function Class22DrawAndPoseSubActor(obj: JudgmentActor,
   const t = obj.judgment;
   obj.alpha = 1;
   Class22SampleCursor(obj, t);
-  Class22DrawBonePart(obj, t);
+  Class22DrawBonePart(obj, t, f.host);
 
   const sub = ActorByAt(t.subActorAt);
   if (!sub || sub.cls !== obj.cls) return;
@@ -158,7 +158,8 @@ function Class22ReclipSubActor(sub: JudgmentActor): void {
  * `(+0.778, 1.49, 0)` under rotations taken from node 3's and node 6's pose --
  * is the renderer's alone; see `render/characters/judgment.ts`.
  */
-export function Class22DrawBonePart(obj: JudgmentActor, t: JudgmentTail): void {
+export function Class22DrawBonePart(obj: JudgmentActor, t: JudgmentTail,
+                                    host: ClassFrame["host"]): void {
   t.node2Count += 1;
   let slot = CLASS22_NODE2_SLOT;
   if (t.node2Mode === 1) {
@@ -168,5 +169,11 @@ export function Class22DrawBonePart(obj: JudgmentActor, t: JudgmentTail): void {
     slot = CLASS22_NODE2_SLOT_BASE
       + CLASS22_NODE2_CYCLE_B[t.node2Count % CLASS22_NODE2_CYCLE_B.length];
   }
-  obj.boneSlot["2"] = slot;
+  // The record the renderer draws node 2 from, and the swap itself when it
+  // changes -- `setBoneSlot` is how the port's per-bone draw record reaches
+  // the pose, as `ActorSwapDamagedPart`'s does.
+  if (obj.boneSlot["2"] !== slot) {
+    obj.boneSlot["2"] = slot;
+    host.setBoneSlot(obj.at, 2, slot);
+  }
 }

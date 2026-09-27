@@ -846,6 +846,64 @@ const CLASS23 = 0x23;
 const CLASS22_VARIANT_STAGE1 = 1;
 const CLASS22_VARIANT_STAGE5 = 2;
 
+/** JUDGMENT's three character types: the walker, the flier, its sub-actor. */
+const JUDGMENT_CHAR_TYPES: ReadonlySet<number> = new Set([0x44, 0x45, 0x46]);
+
+/**
+ * Build one of JUDGMENT's character types from the file the stage's own
+ * script loads it from.
+ *
+ * `AssetDrawSlot` draws what is resident in a slot, and a whole-file load
+ * (`asset_load_polfile`, opcode `0x52`) makes it resident: `FUN_00418E40`
+ * points `0x007C2134` at the file's slot list and `FUN_00418EC0` installs
+ * each of the file's models into its slot, binding its textures through the
+ * **file's** texture table (`0x0055B9B8 + file * 4`). The exe's first listing
+ * for slots `0x28F`..`0x2C8` is `char_adv04.bin`, which is what
+ * `characterAssetFile` answers -- and no stage-1 or stage-5 block loads it.
+ * Stage 1's blocks 0, 14 and 16 and stage 5's blocks 0 and 1 load
+ * `boss1z.bin`, `boss1z_wing.bin` and `boss1q.bin` instead. `[proved]`
+ *
+ * For the flier and its sub-actor the difference is only the texture
+ * numbering (each file indexes its own bank, and the images are the same);
+ * for the walker it is not -- slot `0x29D`'s meshes 4 and 6 are different
+ * geometry in `boss1q.bin`, and its texture 1 is a different image. So the
+ * walker drawn from `char_adv04.bin` was not the one the game draws.
+ *
+ * The file is the first one the script loads whose slot list covers every
+ * node of the skeleton; null when none does, and the caller keeps the exe's
+ * first listing. Only JUDGMENT's types come through here: the rule is the
+ * engine's for every character, but moving the others is not this class's
+ * change to make.
+ */
+function judgmentBuild(prog: Program, tables: ExeTables, ct: number,
+                       fallback: string | null): Character | null {
+  let file: string | null = null;
+  let own: number[] | null = null;
+  const want = tables.characterSkeleton(ct).map((n) => n.slot)
+    .filter((sl) => sl !== 0);
+  for (const blk of prog.blocks) {
+    for (const step of blk.steps) {
+      for (const op of step.ops) {
+        if (file !== null || op.opcode !== 0x52) continue;
+        const f = op.detail.file;
+        if (typeof f !== "string") continue;
+        const list = tables.polFileSlots(f);
+        if (list && want.every((sl) => list.includes(sl))) {
+          file = f;
+          own = list;
+        }
+      }
+    }
+  }
+  const use = file ?? fallback;
+  if (use === null) return null;
+  const built = build(tables, ct, use);
+  if (built !== null && own !== null) {
+    built.ownSlots = new Map(own.map((sl, k) => [sl, k]));
+  }
+  return built;
+}
+
 /**
  * The synthetic placement JUDGMENT's sub-actor is drawn from: character type
  * 0x46 (`boss1z_wing`'s six nodes), clip 0x10, at the address
@@ -854,14 +912,13 @@ const CLASS22_VARIANT_STAGE5 = 2;
  * wing's arrangement. Null when the type or its clips will not build.
  */
 async function class22SubActorPlacement(stage: Stage, tables: ExeTables,
-                                        sp: SpawnJson,
+                                        prog: Program, sp: SpawnJson,
                                         chars: Map<number, Character>):
     Promise<Placement | null> {
   const ct = CLASS22_SUBACTOR_CHAR_TYPE;
   if (!chars.has(ct)) {
-    const file = tables.characterAssetFile(ct);
-    if (!file) return null;
-    const built = build(tables, ct, file);
+    const built = judgmentBuild(prog, tables, ct,
+                                tables.characterAssetFile(ct));
     if (built === null) return null;
     chars.set(ct, built);
   }
@@ -1340,7 +1397,9 @@ export async function resolveForStage(
     // to the compiler, which cannot see that the two are the same set.
     if (res.charType === null) continue;
     if (!chars.has(res.charType)) {
-      const built = build(tables, res.charType, res.assetFile!);
+      const built = JUDGMENT_CHAR_TYPES.has(res.charType)
+        ? judgmentBuild(prog, tables, res.charType, res.assetFile)
+        : build(tables, res.charType, res.assetFile!);
       if (built === null) continue;
       chars.set(res.charType, built);
     }
@@ -1522,7 +1581,8 @@ export async function resolveForStage(
   // node's own slot, so each rides the character's hidden template rig.
   for (const p of [...placements]) {
     if (p.cls !== CLASS22 || p.synthetic || p.motion === null) continue;
-    const sub = await class22SubActorPlacement(stage, tables, p.spawn, chars);
+    const sub = await class22SubActorPlacement(stage, tables, prog, p.spawn,
+                                               chars);
     if (sub) {
       placements.push(sub);
       let slist = perType.get(CLASS22_SUBACTOR_CHAR_TYPE);

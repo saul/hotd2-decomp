@@ -27,8 +27,8 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
-  "characters.ts": "cbf52a2000a0af2840ef9f4815072d2f5cd6ed75cf3952b5dc7eb58b91f101c3",
-  "charbuild.ts": "361a125d13404ac2bca62de1ca916a68579cfe0bf5fc397a118096ab9691e639",
+  "characters.ts": "0bc08c1d5456213328f17e54bfbd6b4d3f942b63b90a0e13f1126be2b477ded8",
+  "charbuild.ts": "4bee40165d6a93e13cc579235e41be150c59f0685f4fa5c002cd4bab347533cc",
   "charmotion.ts": "a8c7a7f036fca47377be4e1deb567607dbb5cd62f2b09142baa5619fdbcbe035",
   "class31.ts": "5bbe8a9b8b78a71e574659a40fc2c6917763607edb4d4e05f0478e8268726c80",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
@@ -36,7 +36,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "4004cb37faed0192ad4c09044c9a5af6162b8ed874a28b0a47e2397fe0349228",
-  "exetab.ts": "7f33c6edad5e58175d6ae0ed8dabff5a104b698158c77a36b198a985c8dee2e4",
+  "exetab.ts": "1cbd428fb7c160b9f895be55635ebe541dc8af1fbac624952ad52c9750679138",
   "game/boss_banner_records.ts": "1be8c2fe41dd39e9c2b638bbe4cb4e274fad9426261014bb358159d09300aaa5",
   "game/class13/state.ts": "e3d20421a1274502fcdfb9996a699c4d124b51cec1047c4f30a96e8cc4eb008a",
   "game/class22/records.ts": "57874272e772536b9bdf7584b9e2ba3b6a337253cb4a645b3fe4aac188208d58",
@@ -64,4 +64,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "6493caf0ba77d63c2ad90ef041235baf0bc9826ec8a9de97cd90af20c0687383";
+export const BUILDER_HASH = "8dfb9e49d09a016baff1adde85303059762649bbc9774ba1e7fab0a246df83f3";

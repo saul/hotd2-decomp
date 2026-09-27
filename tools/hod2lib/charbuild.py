@@ -92,6 +92,11 @@ class Character:
     #: ``{body_condition: [motion, ...]}`` -- see :func:`motion_row`. Index 4
     #: is the back-away walk `ZombieStateBackOff` plays.
     motion_row: dict = field(default_factory=dict)
+    #: Slot -> entry index in this character's own file, when that file is
+    #: not the exe's first listing for its slots -- JUDGMENT's three types,
+    #: which stages 1 and 5 load from ``boss1q``/``boss1z``/``boss1z_wing``.
+    #: Twin of ``Character.ownSlots``; see ``characters.judgment_build``.
+    own_slots: dict | None = None
 
     def to_json(self) -> dict:
         return {
@@ -288,7 +293,7 @@ def rig_entry(stage, tables, char: Character, spawns: list[dict],
                     if b["parent"] is not None else ""),
             note=f"bone {b['bone']} of character type {char.char_type:#04x}")
         rec = slots.get(b["slot"])
-        idx = rec[1] if rec else None
+        idx = (char.own_slots or {}).get(b["slot"], rec[1] if rec else None)
         model = models[idx] if idx is not None and idx < len(models) else None
         parts.append((part, [(model, bank, char.name)] if model else []))
 
@@ -299,7 +304,7 @@ def rig_entry(stage, tables, char: Character, spawns: list[dict],
     host = _second_root(char.bones)
     for i, slot in enumerate(char.extras):
         rec = slots.get(slot)
-        idx = rec[1] if rec else None
+        idx = (char.own_slots or {}).get(slot, rec[1] if rec else None)
         model = models[idx] if idx is not None and idx < len(models) else None
         if model is None:
             continue
@@ -365,7 +370,10 @@ def gore_entry(stage, tables, char: Character) -> dict | None:
     for h in (char.zombie_throw or {}).get("hands", []):
         want.update(v for v in (h["held"], h["bare"], h["projectile"]) if v)
     for slot in sorted(want):
-        rec = slots.get(slot)
+        # A slot this character's own file loads comes from that file, as the
+        # bones do -- see ``Character.own_slots``.
+        own = (char.own_slots or {}).get(slot)
+        rec = (char.file, own) if own is not None else slots.get(slot)
         if not rec:
             continue
         stem = rec[0].removesuffix(".bin")

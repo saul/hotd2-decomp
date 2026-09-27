@@ -773,6 +773,28 @@ export class ExeTables {
     });
   }
 
+  /**
+   * One pol file's slot list, `POL_SLOT_LIST[file]` (`0x004E794C`): entry k
+   * of the file loads into slot `list[k]`. It is the list the whole-file
+   * load walks -- `FUN_00418E40` points `0x007C2134` at it (`0x00418E84`)
+   * and `FUN_00418EC0` takes one slot off it per model, installing the model
+   * only into a slot that is not already resident. Null for a file the table
+   * does not know.
+   */
+  polFileSlots(file: string): number[] | null {
+    for (const [fi, [name, cnt]] of this.polFiles()) {
+      if (name !== file) continue;
+      const lst = this.ru32(ExeTables.POL_SLOT_LIST + fi * 4);
+      if (!lst) return null;
+      const r = this.v2r(lst);
+      if (r === null) return null;
+      const out: number[] = [];
+      for (let k = 0; k < cnt; k++) out.push(i16(this.data, r + k * 2));
+      return out;
+    }
+    return null;
+  }
+
   slotPolFile(slot: number): string | null {
     const fi = this.ru16(ExeTables.SLOT_TO_POL + slot * 2);
     if (fi === null) return null;

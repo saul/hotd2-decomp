@@ -84,6 +84,16 @@ export class Character {
    * `g_character_part_bones` and `g_character_part_drawers`.
    */
   parts: (CharacterPart | null)[] = [];
+  /**
+   * Slot -> entry index **in this character's own file**, when the file is
+   * not the exe's first listing for its slots and so `assetSlots()` would
+   * index the wrong container. Null for every character built from that
+   * first listing, which is all of them but JUDGMENT's three: stages 1 and 5
+   * load those from `boss1q.bin`, `boss1z.bin` and `boss1z_wing.bin`, and the
+   * exe lists the same slots under `char_adv04.bin` first. See
+   * `characters.ts`' `judgmentAssetFile`.
+   */
+  ownSlots: Map<number, number> | null = null;
 
   constructor(
     readonly charType: number,
@@ -418,7 +428,7 @@ export async function rigEntry(stage: Stage, tables: ExeTables,
         + `0x${char.charType.toString(16).padStart(2, "0")}`,
     };
     const rec = slots.get(b.slot);
-    const idx = rec ? rec[1] : null;
+    const idx = char.ownSlots?.get(b.slot) ?? (rec ? rec[1] : null);
     const model = idx !== null && idx < models.length ? models[idx] : null;
     parts.push([part, model ? [[model, bank as Bank | null, char.name]] : []]);
   }
@@ -440,7 +450,7 @@ export async function rigEntry(stage: Stage, tables: ExeTables,
     // name; emitting the table's slot instead would be inventing geometry.
     if (cp === null || !cp.supported) return;
     const rec = slots.get(cp.slot);
-    const idx = rec ? rec[1] : null;
+    const idx = char.ownSlots?.get(cp.slot) ?? (rec ? rec[1] : null);
     const model = idx !== null && idx < models.length ? models[idx] : null;
     if (model === null) return;
     const skin = skinFor(char, cp, model);
@@ -545,7 +555,11 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
     }
   }
   for (const slot of [...want].sort((a, b) => a - b)) {
-    const rec = slots.get(slot);
+    // A slot this character's own file loads comes from that file, as the
+    // bones do -- see `Character.ownSlots`.
+    const own = char.ownSlots?.get(slot);
+    const rec: [string, number] | undefined =
+      own !== undefined ? [char.file, own] : slots.get(slot);
     if (!rec) continue;
     const stem = rec[0].endsWith(".bin") ? rec[0].slice(0, -4) : rec[0];
     const [models, bank] = await cache.get(

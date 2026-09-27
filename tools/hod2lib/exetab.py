@@ -641,6 +641,27 @@ class ExeTables:
                 out.setdefault(slot, (name, k))
         return out
 
+    def pol_file_slots(self, name: str) -> list[int] | None:
+        """One pol file's slot list, ``POL_SLOT_LIST[file]`` (0x004E794C).
+
+        Entry k of the file loads into slot ``list[k]``; it is the list the
+        whole-file load walks (``FUN_00418E40`` points 0x007C2134 at it and
+        ``FUN_00418EC0`` installs one model per slot that is not already
+        resident). Twin of ``ExeTables.polFileSlots``.
+        """
+        for fi, (n, cnt) in self.pol_files().items():
+            if n != name:
+                continue
+            lst = self._u32(self.POL_SLOT_LIST + fi * 4)
+            if not lst:
+                return None
+            r = self._v2r(lst)
+            if r is None:
+                return None
+            return [struct.unpack_from("<h", self.data, r + k * 2)[0]
+                    for k in range(cnt)]
+        return None
+
     def slot_pol_file(self, slot: int) -> str | None:
         fi = self._u16(self.SLOT_TO_POL + slot * 2)
         if fi is None:

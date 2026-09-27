@@ -636,6 +636,41 @@ CLASS23_MOTIONS: tuple[int, ...] = tuple(range(0x383, 0x395))
 CLASS22_SUBACTOR_AT_BIT = 0x20000000
 
 
+#: JUDGMENT's three character types: the walker, the flier, its sub-actor.
+JUDGMENT_CHAR_TYPES = frozenset({0x44, 0x45, 0x46})
+
+
+def judgment_build(prog, stage, tables, ct: int, fallback: str | None):
+    """One of JUDGMENT's types, built from the file the script loads it from.
+
+    A whole-file load (opcode 0x52) makes a file's models resident in its
+    slots (``FUN_00418E40``/``FUN_00418EC0``), and stages 1 and 5 load
+    ``boss1q``/``boss1z``/``boss1z_wing`` -- never ``char_adv04.bin``, the
+    exe's first listing for the same slots. The walker's models differ
+    between the two. Twin of ``characters.judgmentBuild``.
+    """
+    want = [n["slot"] for n in tables.character_skeleton(ct) if n["slot"]]
+    file = own = None
+    for blk in prog.blocks:
+        for step in blk.steps:
+            for op in step.ops:
+                if file is not None or op.opcode != 0x52:
+                    continue
+                f = op.detail.get("file")
+                if not isinstance(f, str):
+                    continue
+                lst = tables.pol_file_slots(f)
+                if lst and all(sl in lst for sl in want):
+                    file, own = f, lst
+    use = file or fallback
+    if use is None:
+        return None
+    built = build(stage, tables, ct, use)
+    if built is not None and own is not None:
+        built.own_slots = {sl: k for k, sl in enumerate(own)}
+    return built
+
+
 def class22_tail(rec) -> dict:
     """Class 0x22's tail -- JUDGMENT's flier, as `Class22Init` reads it.
 
@@ -1060,7 +1095,10 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         if motion is None:
             continue                      # marker only -- see the module note
         if res.char_type not in chars:
-            built = build(stage, tables, res.char_type, res.asset_file)
+            built = (judgment_build(prog, stage, tables, res.char_type,
+                                    res.asset_file)
+                     if res.char_type in JUDGMENT_CHAR_TYPES else
+                     build(stage, tables, res.char_type, res.asset_file))
             if built is None:
                 continue
             chars[res.char_type] = built

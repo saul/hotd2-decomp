@@ -107,6 +107,37 @@ export enum AppState {
   Boot = 0x10,
 }
 
+/**
+ * `g_screen_furniture_flags` — `0x009A5900`, the bits a screen card holds
+ * while it has the screen.
+ *
+ * Each card ORs its bit in when it starts and ANDs it out on the frame it
+ * raises its gate's flag, and the readers are draw routines that stand aside
+ * for it: `HudDrawShutterState` (`FUN_00413970`) holds no bars in state 4
+ * while either is up (`TEST byte ptr [0x009a5900], 0x30` at `0x00413BB5`),
+ * `HudDrawLives` (`FUN_004174A0`) drops "HOLD YOUR FIRE!" under the result
+ * card, and `Class22CutsceneHoldUntilChapterCard` (`FUN_0049B280`) draws
+ * only while the chapter card is down. `[proved]`
+ *
+ * Only the two cards' bits are members. Bits 0, 1 and 3 have writers of
+ * their own -- `PlayerTryStartPress` and `UpdateSceneViewAndLight` for 0,
+ * `CommitAppState` for 1, `EvtLoadBlockProgram` for 3 -- and are still
+ * literals where the port uses them.
+ */
+export enum ScreenFurniture {
+  /**
+   * `ResultCardInstall` (`FUN_00434EF0`): `OR EDX, 0x10` at `0x00434FD0` in
+   * sub 0, `AND AL, 0xEF` at `0x00435683` beside `g_script_flags[0xFE]`.
+   */
+  ResultCard = 0x10,
+  /**
+   * `ChapterCardInstall` (`FUN_004342E0`): `OR AL, 0x20` at `0x0043436B` in
+   * sub 0 (and in both installer arms), `AND AL, 0xDF` at `0x004348C7`
+   * beside `g_script_flags[0xF8]`.
+   */
+  ChapterCard = 0x20,
+}
+
 export { PlayerState, PlayerTask, RunPhase } from "./player_state";
 
 /**
@@ -1486,7 +1517,8 @@ export const G = {
   /**
    * `g_screen_furniture_flags` — 0x009A5900. Bit 0 lets a start press take
    * effect at once (else it waits in state 10); bit 1 is raised by
-   * `CommitAppState` and required by `PlayerTryStartPress`.
+   * `CommitAppState` and required by `PlayerTryStartPress`. Bits `0x10` and
+   * `0x20` are the two screen cards' — see {@link ScreenFurniture}.
    */
   g_screen_furniture_flags: 0,
   /**

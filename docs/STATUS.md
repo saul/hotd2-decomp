@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 79097 | 267 | engine |
-| `hod2lib/` | 18050 | 35 | engine |
-| `render/` | 12352 | 41 | render |
+| `game/` | 79996 | 270 | engine |
+| `hod2lib/` | 18073 | 35 | engine |
+| `render/` | 12522 | 42 | render |
 | `app/` | 7707 | 29 | app |
 | `script/` | 4393 | 25 | engine |
 | `ui/` | 3161 | 27 | ui |
@@ -29,11 +29,11 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **129143** | **446** | |
+| **total** | **130235** | **450** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2506
+* `game/globals.ts` — 2537
 * `game/actor.ts` — 2309
 * `app/main.ts` — 2151
 * `hod2lib/exetab.ts` — 2126
@@ -44,11 +44,11 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **192 of 285** annotated functions in the gameplay address ranges have a port (67%) |
-| Ported outside those ranges | 438 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 630 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 447 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 639 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **162** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **169** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **158** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **168** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,7 +56,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1242 in `ghidra/annotations/functions.tsv` |
+| Named functions | 1246 in `ghidra/annotations/functions.tsv` |
 | Named globals | 626 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 40 under `tools/`, run together by `verify_all.py` |
 

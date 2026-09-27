@@ -762,6 +762,9 @@ web/src/
                   matrices in `game/class45/`; these place them, and draw
                   what its routines drew beside them (card, flash, wake,
                   sparks, splashes, path effects, shadow) from its records
+    creature_effects.ts  the owl's and the fish's effect tasks and the ring
+                  task, from `game/effects/owl.ts`, `fish.ts` and
+                  `ring_effect.ts`' records, the same way
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand

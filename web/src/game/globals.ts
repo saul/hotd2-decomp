@@ -27,6 +27,11 @@ import type { SpriteEffect } from "./effects/sprite";
 import { makeDamageOverlays, PlayerCameraHook, type DamageOverlay }
   from "./effects/damage_overlay";
 import type { PropStripEffect } from "./effects/prop_strip";
+import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
+  from "./effects/fish";
+import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
+  from "./effects/owl";
+import type { RingEffect } from "./effects/ring_effect";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
@@ -961,6 +966,22 @@ export const G = {
   g_prop_strip_effects: [] as PropStripEffect[],
   /** `[port-only]` — see {@link PropStripEffect.id}. */
   g_prop_strip_effect_seq: 0,
+  /**
+   * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
+   * the fish's corpse leaves on the water: `game/effects/owl.ts`,
+   * `game/effects/fish.ts` and `game/effects/ring_effect.ts`. Each is an
+   * `ActorAlloc`'d task in the engine; here each kind is a pool of plain
+   * records, stepped after the actors, which is where the task list runs them.
+   */
+  g_owl_feathers: [] as OwlFeather[],
+  g_owl_ground_rings: [] as OwlGroundRing[],
+  g_owl_water_splashes: [] as OwlWaterSplash[],
+  g_fish_blood_clouds: [] as FishBloodCloud[],
+  g_fish_water_splashes: [] as FishWaterSplash[],
+  g_fish_surface_rings: [] as FishSurfaceRing[],
+  g_ring_effects: [] as RingEffect[],
+  /** `[port-only]` — the seven pools' ids, one sequence between them. */
+  g_creature_effect_seq: 0,
   /**
    * `[port-only]` — the blood `SpawnBloodSpray` (`FUN_00407310`) and
    * `SpawnBoneHitSprite` (`FUN_00407200`) have allocated. Each one holds an
@@ -2287,6 +2308,16 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  // ...and the owl's and the fish's tasks, which the scene's list takes
+  // with it like every other task.
+  G.g_owl_feathers = [];
+  G.g_owl_ground_rings = [];
+  G.g_owl_water_splashes = [];
+  G.g_fish_blood_clouds = [];
+  G.g_fish_water_splashes = [];
+  G.g_fish_surface_rings = [];
+  G.g_ring_effects = [];
+  G.g_creature_effect_seq = 0;
   // The scene's task list is rebuilt on a scene load, and a bar task goes
   // with it; the fill itself is a data-segment word and is left alone.
   G.g_boss_hp_bars = [];

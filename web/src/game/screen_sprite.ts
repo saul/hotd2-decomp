@@ -83,3 +83,82 @@ export function ScreenSpriteDraw(id: number, x: number, y: number,
   G.g_screen_sprite_draws.push({ id, x, y, depth, sx, sy, alpha,
                                  flags: SCREEN_SPRITE_DRAW_FLAGS });
 }
+
+/**
+ * One cell of the layered queue: the record `DrawScreenSpriteLayered` builds,
+ * and the layer it was pushed on.
+ */
+export interface QueuedScreenSprite {
+  sprite: ScreenSprite;
+  /** `+0x38` — which of the four header cells it is linked behind. */
+  layer: number;
+}
+
+/**
+ * The queue's record cells: from the cell after the fourth header
+ * (`0x007C22A8`) to the bound `ScreenSpriteQueuePush` refuses at
+ * (`CMP ECX, 0x7c29a8` at `0x0041C766`), 0x40 bytes each.
+ */
+export const SCREEN_SPRITE_QUEUE_CELLS = (0x007c29a8 - 0x007c22a8) / 0x40;
+
+/** The four header cells `ScreenSpriteQueueReset` chains, one per layer. */
+export const SCREEN_SPRITE_QUEUE_LAYERS = 4;
+
+/**
+ * `ScreenSpriteQueuePush` flags every cell with this: `OR DH, 0x7` at
+ * `0x0041C7D0`. What the three bits mean to `SubmitScreenSpriteQuad` is
+ * `[open]`; they are carried, and the HUD layer reads only the anchor nibble.
+ */
+const QUEUED_FLAG_BITS = 0x700;
+
+/**
+ * `DrawScreenSpriteLayered` — `FUN_0041C800`. `DrawScreenSprite`'s record,
+ * with a ninth argument, the **layer**, and handed to the queue instead of
+ * drawn. The rotation argument is 0 at every call and is not carried.
+ */
+export function DrawScreenSpriteLayered(id: number, x: number, y: number,
+                                        depth: number, sx: number, sy: number,
+                                        flags: number, layer: number): void {
+  ScreenSpriteQueuePush({ id, x, y, depth, sx, sy, alpha: 1, flags }, layer);
+}
+
+/**
+ * `ScreenSpriteQueuePush` — `FUN_0041C760`. The next free cell, the flags
+ * word ORed with `0x700`, and the cell linked in **directly behind its
+ * layer's header**, so the newest record of a layer is the first drawn.
+ * Refused, silently, once the cells run out.
+ *
+ * The port keeps the cells in push order and lets the flush walk them the
+ * way the chain would; the order that comes out is the same.
+ */
+export function ScreenSpriteQueuePush(s: ScreenSprite, layer: number): void {
+  if (G.g_screen_sprite_queue.length >= SCREEN_SPRITE_QUEUE_CELLS) return;
+  G.g_screen_sprite_queue.push({
+    sprite: { ...s, flags: s.flags | QUEUED_FLAG_BITS }, layer,
+  });
+}
+
+/**
+ * `ScreenSpriteQueueReset` — `FUN_0041CF00`. The four headers re-chained and
+ * the cursor back at the first cell: the queue is empty. Once a frame, from
+ * `SetupSceneProjection`, ahead of the task walk.
+ */
+export function ScreenSpriteQueueReset(): void {
+  G.g_screen_sprite_queue = [];
+}
+
+/**
+ * `ScreenSpriteQueueFlush` — `FUN_0041CF30`. Walk the chain from the first
+ * header and draw every live cell: layer 0's records newest first, then
+ * layer 1's, 2's and 3's. Drawn here means appended to the frame's
+ * `g_screen_sprite_draws`, after everything the frame drew directly, which is
+ * where `FUN_00418550` puts the flush in the engine's frame.
+ */
+export function ScreenSpriteQueueFlush(): void {
+  const q = G.g_screen_sprite_queue;
+  for (let layer = 0; layer < SCREEN_SPRITE_QUEUE_LAYERS; layer++) {
+    for (let i = q.length - 1; i >= 0; i--) {
+      if (q[i].layer === layer) G.g_screen_sprite_draws.push(q[i].sprite);
+    }
+  }
+}

@@ -211,7 +211,13 @@ import {
 import {
   RELOAD_VOICE, SHOOT_VOICE,
 } from "../src/game/hud_readout";
-import { HUD_READOUT_SPRITES, HudSprite } from "../src/game/hud_sprites";
+import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
+  from "../src/game/hud_sprites";
+import { BOSS_HP_BAR_KILL, BossHpBarSpawn, BossHpBarsTick, BossHpFractionOf }
+  from "../src/game/boss_hp_bar";
+import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
+  ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
+  from "../src/game/screen_sprite";
 import { ThrowerBeginKnockbackArc } from "../src/game/class31/death";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
@@ -18974,6 +18980,104 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   step();
   check("a player out of lives draws no readout", G.g_screen_sprite_draws.length === 0,
         `${G.g_screen_sprite_draws.length}`);
+}
+
+// The boss health bar -- `BossHpBarSpawn` (`FUN_00435E50`) and
+// `BossHpBarUpdate` (`FUN_00435C80`) -- driven the way a boss drives it: by
+// writing `g_boss_hp_fraction` and nothing else.
+{
+  ResetGameGlobals();
+  /** One task-walk's worth: reset the queue, step the bars, flush. */
+  const frame = () => {
+    G.g_screen_sprite_draws = [];
+    ScreenSpriteQueueReset();
+    BossHpBarsTick();
+    ScreenSpriteQueueFlush();
+    return G.g_screen_sprite_draws;
+  };
+  BossHpBarSpawn(320, 35);
+  const bar = G.g_boss_hp_bars[0];
+  check("BossHpBarSpawn seats a full fill and an empty bar",
+        G.g_boss_hp_fraction === 1 && G.g_boss_hp_bars.length === 1
+        && bar.shown === 0 && bar.trail === 1 && bar.blink === 0);
+
+  let drawn = frame();
+  check("the flush draws the four sprites newest first: frame, fill, trail, "
+        + "empty", drawn.map((d) => d.id).join() === [
+          BossHpBarSprite.Frame, BossHpBarSprite.Fill, BossHpBarSprite.Trail,
+          BossHpBarSprite.Empty].join(),
+        drawn.map((d) => d.id.toString(16)).join());
+  const fill = drawn[1];
+  check("the fill runs from x - 144, 18 tiles to a full track, anchor (1, 2)",
+        fill.x === 320 - 144 && fill.y === 35
+        && fill.sx === bar.shown * 18 && (fill.flags & 0xf) === 9
+        && (fill.flags & 0x700) === 0x700,
+        JSON.stringify(fill));
+  check("...and the frame is centred on the spawn point, 1.2 x 0.8",
+        drawn[0].x === 320 && drawn[0].sx === 1.2
+        && Math.abs(drawn[0].sy - 0.8) < 1e-6 && (drawn[0].flags & 0xf) === 10);
+  check("a filling bar has no trail", bar.trail === bar.shown);
+
+  // 0.01 a frame in single precision: a hundred additions fall short of 1.0,
+  // and the hundred-and-first is clamped to it. Doubles would get there on
+  // the hundredth, which is what this is here to notice.
+  let frames = 1;
+  while (bar.shown < 1 && frames < 1000) { frame(); frames++; }
+  check("the bar fills in 101 frames of 0.01 in floats", frames === 101,
+        `${frames}`);
+
+  G.g_boss_hp_fraction = BossHpFractionOf(150, 300);
+  drawn = frame();
+  check("damage shows on the frame it lands, and leaves a trail",
+        bar.shown === 0.5 && bar.trail === Math.fround(1 - 0.001)
+        && drawn[2].sx === (bar.trail - bar.shown) * 18,
+        `${bar.shown} ${bar.trail}`);
+  let drain = 1;
+  while (bar.trail > bar.shown && drain < 2000) { frame(); drain++; }
+  check("the trail drains 0.001 a frame and stops at the fill", drain === 501
+        && bar.trail === bar.shown, `${drain}`);
+
+  // Dead: 0.0 exactly blinks for 120 frames, five hidden in every ten, then
+  // the task kills itself.
+  G.g_boss_hp_fraction = BossHpFractionOf(0, 300);
+  let shown = 0;
+  let hidden = 0;
+  let life = 0;
+  while (G.g_boss_hp_bars.length && life < 1000) {
+    if (frame().length) shown++; else hidden++;
+    life++;
+  }
+  check("a fill of 0 blinks the bar for 120 frames and ends it",
+        life === 120 && G.g_boss_hp_bars.length === 0
+        && hidden > 50 && shown > 50, `${life} ${shown}/${hidden}`);
+
+  BossHpBarSpawn(320, 35);
+  G.g_boss_hp_fraction = BOSS_HP_BAR_KILL;
+  check("-1 kills the bar at once, drawing nothing",
+        frame().length === 0 && G.g_boss_hp_bars.length === 0);
+
+  BossHpBarSpawn(320, 35);
+  check("the bar is plain data a snapshot can copy",
+        JSON.stringify(JSON.parse(JSON.stringify(G.g_boss_hp_bars)))
+        === JSON.stringify(G.g_boss_hp_bars));
+  ResetGameGlobals();
+  check("a scene reset takes the bar task with the task list",
+        G.g_boss_hp_bars.length === 0);
+
+  ScreenSpriteQueueReset();
+  for (let i = 0; i < SCREEN_SPRITE_QUEUE_CELLS + 5; i++) {
+    DrawScreenSpriteLayered(0x59, i, 0, 1, 1, 1, 0, i & 3);
+  }
+  G.g_screen_sprite_draws = [];
+  ScreenSpriteQueueFlush();
+  const layers = G.g_screen_sprite_draws.map((d) => d.x & 3);
+  check("the queue holds 28 cells and draws layer by layer",
+        G.g_screen_sprite_draws.length === SCREEN_SPRITE_QUEUE_CELLS
+        && SCREEN_SPRITE_QUEUE_CELLS === 28
+        && layers.every((l, i) => i === 0 || l >= layers[i - 1]),
+        layers.join());
+  G.g_screen_sprite_draws = [];
+  ScreenSpriteQueueReset();
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

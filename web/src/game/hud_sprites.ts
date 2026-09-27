@@ -70,3 +70,25 @@ export const HUD_READOUT_SPRITES: readonly number[] = [
   HudSprite.Reload, HudSprite.PressReloadButton, HudSprite.ShootOutside,
   ...ORIGINAL_AMMO_HUD_ROWS.map((r) => r.sprite),
 ];
+
+/**
+ * The boss health bar's four sprites, as `BossHpBarUpdate` (`FUN_00435C80`)
+ * pushes them. All four resolve to `tex/scr_bosmater.bin` (entries 0..3):
+ * three 16x16 tiles the bar stretches along its track, and the 256x32 frame.
+ */
+export enum BossHpBarSprite {
+  /** The hit points the bar shows, `PUSH 0xB5` at `0x00435E0B`. */
+  Fill = 0xb5,
+  /** The empty track past the trail, `PUSH 0xB6` at `0x00435D87`. */
+  Empty = 0xb6,
+  /** The hit points just lost, draining, `PUSH 0xB7` at `0x00435DD0`. */
+  Trail = 0xb7,
+  /** The frame, `PUSH 0xB8` at `0x00435E32`. */
+  Frame = 0xb8,
+}
+
+/** Every sprite `BossHpBarUpdate` can draw -- the exporter's list. */
+export const BOSS_HP_BAR_SPRITES: readonly number[] = [
+  BossHpBarSprite.Fill, BossHpBarSprite.Empty, BossHpBarSprite.Trail,
+  BossHpBarSprite.Frame,
+];

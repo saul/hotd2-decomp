@@ -30,7 +30,8 @@ import type { PropStripEffect } from "./effects/prop_strip";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { ShotRequest } from "./combat/shot";
-import type { ScreenSprite } from "./screen_sprite";
+import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
+import type { BossHpBar } from "./boss_hp_bar";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
@@ -488,6 +489,35 @@ export const G = {
    * this field was named that until the two were noticed side by side.
    */
   g_screen_sprite_draws: [] as ScreenSprite[],
+  /**
+   * `g_screen_sprite_queue` — `0x007C21A8`. The layered sprite queue
+   * `DrawScreenSpriteLayered` (`FUN_0041C800`) fills and
+   * `ScreenSpriteQueueFlush` (`FUN_0041CF30`) draws after the task walk. The
+   * engine's is four header cells and a chain; the port keeps the cells in
+   * push order and the flush walks them the way the chain would.
+   */
+  g_screen_sprite_queue: [] as QueuedScreenSprite[],
+  /**
+   * `g_boss_hp_fraction` — `0x009C8E10`. The boss health bar's fill, 0..1:
+   * hit points over maximum, written by whichever boss is fighting and read
+   * only by `BossHpBarUpdate` (`FUN_00435C80`). -1.0 kills the bar; 0.0
+   * blinks it out. See `game/boss_hp_bar.ts`.
+   */
+  g_boss_hp_fraction: 0,
+  /**
+   * `g_boss_engaged` — `0x009CA0EA`. 1 while a boss fight is on: every boss
+   * class raises it when it joins and drops it when it dies. Its one reader
+   * is `BossModeChapterCardUpdate` (`FUN_00434920`), Boss Mode's fight clock,
+   * which the port does not run -- so the port writes it where the engine
+   * does and nothing reads it yet.
+   */
+  g_boss_engaged: 0,
+  /**
+   * `[port-only]` as a pool: the `BossHpBarUpdate` tasks `BossHpBarSpawn`
+   * (`FUN_00435E50`) allocates, in creation order. Plain records for the
+   * same reason as `g_severed_heads`.
+   */
+  g_boss_hp_bars: [] as BossHpBar[],
   /**
    * `g_player_continue_timer` — 0x009A5CC8 + player*0x130. The continue
    * digit is `>> 12`: `PlayerStateArmContinue` seeds `0x9FFF` and
@@ -1890,6 +1920,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  // The scene's task list is rebuilt on a scene load, and a bar task goes
+  // with it; the fill itself is a data-segment word and is left alone.
+  G.g_boss_hp_bars = [];
+  G.g_screen_sprite_queue = [];
   G.g_blood_sprays = [];
   G.g_blood_spray_seq = 0;
   G.g_point_blood_sprays = [];

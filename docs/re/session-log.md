@@ -19408,3 +19408,55 @@ Named: `RouteFigureTick`, `RoutePartnerTick`, `RouteMarkSpawn`, `RouteMarkTick`,
 `RouteCameraTaskCreate`, `SpawnRouteMapTask`; `g_route_count`,
 `g_route_map_tiles`, `g_route_waypoints`, `g_route_default`, and the walk's
 `0x007DCCD8`..`0x007DCCFE`.
+
+## 2026-09-27 -- the boss health bar, and the layered sprite queue
+
+The first piece of the boss work (the four bosses that end stages 1-4 and their
+late-game returns), done first because every boss writes to it.
+
+**`0x00435E50` is not the screen shake.** `game/class14/`'s header listed it as
+one. It is `BossHpBarSpawn`: `ActorAlloc(BossHpBarUpdate, 0x4C)` with the
+caller's `(x, y)` and `g_boss_hp_fraction = 1.0`. Thirteen call sites, one or
+more in every boss class; class 0x19 passes `(320.0, 35.0)` from both
+entrances. `g_boss_hp_fraction` (`0x009C8E10`) has fourteen writers and one
+reader, `BossHpBarUpdate` (`0x00435C80`), which is what settles the name.
+
+The bar keeps two fills of its own: the shown fill rises 0.01 a frame to meet
+the global (the fill-up when a fight starts) and then tracks it exactly; the
+trail falls 0.001 a frame and never below it, so the hit points just lost stay
+on the bar in amber and drain. Exactly -1.0 kills the task; exactly 0.0 blinks
+it for 120 frames (hidden while `counter % 10 < 5`) and then it dies. The
+arithmetic is single precision -- `FST float` -- and a hundred additions of
+0.01 in floats fall short of 1.0, so the bar fills on the 101st frame, not the
+100th; the test says so and would catch a port in doubles.
+
+It draws through a routine the port had not met: `DrawScreenSpriteLayered`
+(`0x0041C800`), `DrawScreenSprite`'s record plus a layer, pushed onto a queue
+(`ScreenSpriteQueuePush`, `0x0041C760`) rather than drawn. The queue is four
+header cells at `0x007C21A8` chained through `+0x3C`; a push links the new cell
+directly behind its layer's header, so the newest of a layer draws first, and
+`ScreenSpriteQueueFlush` (`0x0041CF30`) walks the chain from `FUN_00418550`
+after the task walk. 28 record cells (`0x007C22A8`..`0x007C29A8`); the push
+ORs `0x700` into the flags, `[open]` what those bits do.
+
+The sprites are `tex/scr_bosmater.bin` entries 0..3: `0xB5` the fill (blue),
+`0xB6` the empty track (red), `0xB7` the trail (amber), all 16x16 and
+stretched, and `0xB8` the 256x32 frame. Their depths are 1.0, 1.002, 1.001 and
+1.003, so the fill lands on the HUD canvas and the other three on the camera-
+riding quads `render/screen_sprites_deep.ts` already draws deeper sprites
+with; the depths then stack them in the engine's order.
+
+`g_boss_engaged` (`0x009CA0EA`) is raised by every boss on joining and dropped
+on dying, and its only reader is `BossModeChapterCardUpdate` (`0x00434920`) --
+the chapter card `ChapterCardInstall` swaps in for `g_GameMode == 3`, which
+times the fight with `GetTickCount`. So outside Boss Mode nothing reads it; the
+port keeps it in `G` for the bosses to write.
+
+`[open]`: the unfunctioned routine at `0x00497A70` that writes -1.0 into the
+fill (a ten-way switch on `obj+0x1350`, reading `0x009A2234` and the players'
+lives) -- not a boss class.
+
+Named: `BossHpBarSpawn`, `BossHpBarUpdate`, `DrawScreenSpriteLayered`,
+`ScreenSpriteQueuePush`, `ScreenSpriteQueueReset`, `ScreenSpriteQueueFlush`,
+`BossModeChapterCardUpdate`, `BossModeClockStart`/`Read`/`Set`;
+`g_boss_hp_fraction`, `g_boss_engaged`, `g_screen_sprite_queue`.

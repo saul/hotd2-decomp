@@ -68,6 +68,17 @@ export const PALETTE_TABLE = 0x0057a010;
  */
 export const BANK_PALETTE_INDEX: ReadonlyMap<number, number> =
   new Map([[0x147, 0x0057a524]]);
+/**
+ * `TexBankPaletteIndex`'s arms that return a constant, for the banks whose
+ * sprites the port draws: `scr_bosmater` (0x177) and the six
+ * `scr_bosmater_st1`..`st6` (0x186..0x18B), which the byte table at
+ * `0x0041CB90` all sends to jump-table entry 10, `MOV EAX, 0xA` at
+ * `0x0041CA1A`. The boss health bar and the boss-name banner draw from them.
+ */
+export const BANK_PALETTE_CONST: ReadonlyMap<number, number> = new Map([
+  [0x177, 10], [0x186, 10], [0x187, 10], [0x188, 10], [0x189, 10],
+  [0x18a, 10], [0x18b, 10],
+]);
 
 export class TexEntry {
   constructor(
@@ -1109,7 +1120,11 @@ export class ExeTables {
       const walk = (nodePtr: number, depth: number,
                     parent: number | null): void => {
         const o = this.v2r(nodePtr);
-        if (o === null || seen.has(nodePtr) || depth > 12) return;
+        // No depth cap: `seen` visits each node once, which bounds the walk
+        // by its input (L22). It stopped at depth 12 until the stage-3 boss's
+        // heads -- `boss3.bin` nests 17 deep and `boss3l.bin`/`b6boss3.bin`
+        // 24 -- came out with 13 of their nodes, and neither weak bone.
+        if (o === null || seen.has(nodePtr)) return;
         if (o + 0x18 > this.data.length) return;
         seen.add(nodePtr);
         const slot = u32(this.data, o);
@@ -1267,8 +1282,11 @@ export class ExeTables {
     if (!entry) return null;
     let pal: number[] | null = null;
     if (entry.layout === LAYOUT_PAL4) {
+      const fixed = BANK_PALETTE_CONST.get(bank!);
       const table = BANK_PALETTE_INDEX.get(bank!);
-      if (table !== undefined) {
+      if (fixed !== undefined) {
+        pal = this.palette(fixed);
+      } else if (table !== undefined) {
         const r = this.v2r(table + entry.index * 2);
         if (r !== null) pal = this.palette(i16(this.data, r));
       }

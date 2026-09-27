@@ -19408,3 +19408,129 @@ Named: `RouteFigureTick`, `RoutePartnerTick`, `RouteMarkSpawn`, `RouteMarkTick`,
 `RouteCameraTaskCreate`, `SpawnRouteMapTask`; `g_route_count`,
 `g_route_map_tiles`, `g_route_waypoints`, `g_route_default`, and the walk's
 `0x007DCCD8`..`0x007DCCFE`.
+
+## 2026-09-27 -- the boss health bar, and the layered sprite queue
+
+The first piece of the boss work (the four bosses that end stages 1-4 and their
+late-game returns), done first because every boss writes to it.
+
+**`0x00435E50` is not the screen shake.** `game/class14/`'s header listed it as
+one. It is `BossHpBarSpawn`: `ActorAlloc(BossHpBarUpdate, 0x4C)` with the
+caller's `(x, y)` and `g_boss_hp_fraction = 1.0`. Thirteen call sites, one or
+more in every boss class; class 0x19 passes `(320.0, 35.0)` from both
+entrances. `g_boss_hp_fraction` (`0x009C8E10`) has fourteen writers and one
+reader, `BossHpBarUpdate` (`0x00435C80`), which is what settles the name.
+
+The bar keeps two fills of its own: the shown fill rises 0.01 a frame to meet
+the global (the fill-up when a fight starts) and then tracks it exactly; the
+trail falls 0.001 a frame and never below it, so the hit points just lost stay
+on the bar in amber and drain. Exactly -1.0 kills the task; exactly 0.0 blinks
+it for 120 frames (hidden while `counter % 10 < 5`) and then it dies. The
+arithmetic is single precision -- `FST float` -- and a hundred additions of
+0.01 in floats fall short of 1.0, so the bar fills on the 101st frame, not the
+100th; the test says so and would catch a port in doubles.
+
+It draws through a routine the port had not met: `DrawScreenSpriteLayered`
+(`0x0041C800`), `DrawScreenSprite`'s record plus a layer, pushed onto a queue
+(`ScreenSpriteQueuePush`, `0x0041C760`) rather than drawn. The queue is four
+header cells at `0x007C21A8` chained through `+0x3C`; a push links the new cell
+directly behind its layer's header, so the newest of a layer draws first, and
+`ScreenSpriteQueueFlush` (`0x0041CF30`) walks the chain from `FUN_00418550`
+after the task walk. 28 record cells (`0x007C22A8`..`0x007C29A8`); the push
+ORs `0x700` into the flags, `[open]` what those bits do.
+
+The sprites are `tex/scr_bosmater.bin` entries 0..3: `0xB5` the fill (blue),
+`0xB6` the empty track (red), `0xB7` the trail (amber), all 16x16 and
+stretched, and `0xB8` the 256x32 frame. Their depths are 1.0, 1.002, 1.001 and
+1.003, so the fill lands on the HUD canvas and the other three on the camera-
+riding quads `render/screen_sprites_deep.ts` already draws deeper sprites
+with; the depths then stack them in the engine's order.
+
+`g_boss_engaged` (`0x009CA0EA`) is raised by every boss on joining and dropped
+on dying, and its only reader is `BossModeChapterCardUpdate` (`0x00434920`) --
+the chapter card `ChapterCardInstall` swaps in for `g_GameMode == 3`, which
+times the fight with `GetTickCount`. So outside Boss Mode nothing reads it; the
+port keeps it in `G` for the bosses to write.
+
+`[open]`: the unfunctioned routine at `0x00497A70` that writes -1.0 into the
+fill (a ten-way switch on `obj+0x1350`, reading `0x009A2234` and the players'
+lives) -- not a boss class.
+
+Named: `BossHpBarSpawn`, `BossHpBarUpdate`, `DrawScreenSpriteLayered`,
+`ScreenSpriteQueuePush`, `ScreenSpriteQueueReset`, `ScreenSpriteQueueFlush`,
+`BossModeChapterCardUpdate`, `BossModeClockStart`/`Read`/`Set`;
+`g_boss_hp_fraction`, `g_boss_engaged`, `g_screen_sprite_queue`.
+
+## 2026-09-27 -- the boss-name banner is a camera flight, and a shared task
+
+`BossIntroBannerUpdate` (`0x00437AC0`) was ported inside `game/class19/` as
+"screen furniture": its lifetime and the one shutter write the stage-4 gate
+needs. Reading it whole for the other bosses (seven call sites -- 0x14, 0x19,
+0x22, 0x2D and 0x32; class 0x45 has none) found three things that description
+left out.
+
+* **It flies the camera.** Steps 2 and 3 call `CamEvalPath7(record+0x02,
+  frame)` straight into `g_camera_block_eye`/`target`, and step 1 raises
+  `0x009CA094` -- now `g_camera_driver_held` -- whose one reader,
+  `CameraDriverSelectMode` (`0x004026AB`), forces camera mode 6, the hook that
+  does nothing, and drops `g_camera_free`. The block is stashed on entry and
+  put back on the last frame. Class 0x14's scripted break, class 0x22's death,
+  class 0x45 and class 0x19 write the same word, so it is shared.
+* **It is the tarot-card intro.** Eight cards in camera space (slots `0x7ED`,
+  `0x7EE` from `etc_2.bin`, and the boss's own card from its pol file at
+  `record+0x06`), six of them turning over in a staggered sequence and
+  re-stacked the frame they are edge-on; then all but the boss's shrink away
+  and the boss's grows and slides. The decompile shows only card 0 being drawn:
+  the loop's increment sits after `MatrixStackPop`, which Ghidra marks
+  no-return, so both eight-card loops were cut off at their first iteration
+  (L35 again).
+* **It draws the boss's name**: two sprites per record, `scr_bosmater_stN.bin`,
+  fading in over sixty frames from frame 0x50. They are PAL4 and their banks
+  (0x186..0x18B, and the health bar's 0x177) take palette 10 from
+  `TexBankPaletteIndex`'s constant arm -- read from the byte table at
+  `0x0041CB90` and jump table `0x0041CB38`, not from the case labels. Stage 1's
+  pair decodes as "JUDGMENT" and "Type 28".
+
+And one off-by-one in the old port: step 0 does not end the frame after queuing
+the card backs -- `JMP 0x00437d70` goes into the flag test, so a flag already
+up seats the banner on its first frame.
+
+It is a pool in `G` now (`game/boss_banner.ts`), stepped after the camera
+tasks and the actors, because `ActorAlloc` appends and the scene made its
+camera tasks before any boss existed. Class 0x19 spawns into it and keeps no
+hold. The records are `.rdata`, and they are kept in `game/` as cited
+constants -- the precedent class 0x19 set for its two -- in a data-only file
+the exporter imports for the name-sprite list. The cards are state only;
+nothing in `render/` draws them yet (`[diverges]`, visual). `FUN_004759C0`,
+called per card with the yaw, rewrites a float in a render-state list from
+`sin(yaw)` and is left `[open]`.
+
+## 2026-09-27 -- a skeleton walk that stopped at depth 12, and the shot test's bit 0x8000
+
+Two shared fixes the boss readings turned up, both outside any one boss.
+
+**Skeletons.** `character_skeleton` (both `hod2lib` halves) refused to walk
+past depth 12. The bound was arbitrary -- `seen` already visits each node once,
+which bounds the walk by its input (L22) -- and it cut exactly three types:
+`boss3.bin` (0x49, 17 deep) and `boss3l.bin`/`b6boss3.bin` (0x48/0x50, 24
+deep) came out with 13 of their 19/26 nodes. Those are the stage-3 boss's
+heads, and the lost nodes were their jaws and weak bones. Found by the Tower
+reading. `tools/verify_skeletons.py` now asserts every skeleton carries bones
+1..n-1 of `DAT_004E0724`'s count exactly once: 86 of 86 pass, and with the old
+cap put back it fails on exactly the three.
+
+**The shot test.** `RegisterForShotTest` (`0x00405160`) skips an actor whose
+`obj+0x34` has bit `0x8000` -- the Hierophant reading's claim, checked. The
+port's actor picks ignored the bit, so a boss mid-entrance, a zombie in the
+civilian-order wait (`0x18000`) and every spawn whose record carries it could
+be shot. `ActorFlag.NoShotTest` is honoured by both picks now. `ShotTestSphere`'s
+other gate, bit `0x80` for descending into the bones, is **not** applied: no
+ported Init sets that bit, so honouring it today would turn every zombie into
+one sphere. That is an audit of every class's Init before it can be switched
+on, and it is recorded here rather than done.
+
+`MarkActorShot` (`0x00404DB0`) keeps one byte per shooter at `obj+0x190 +
+player` -- the bone's index, or 1 for an actor hit whole -- and the port's
+merged `pendingHit` loses the second player. `Actor.shotBones` is that byte
+array; the bosses' shot routines walk it. The ray each player fired was
+already in `G.g_crosshair_ray`.

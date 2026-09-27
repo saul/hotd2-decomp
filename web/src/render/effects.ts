@@ -32,6 +32,7 @@
 import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
+import { BannerStep } from "../game/boss_banner";
 import {
   BLOOD_DEPTH_BASE, BLOOD_DEPTH_FAR, BLOOD_DEPTH_RATE, BLOOD_FIRST_SLOT,
   BLOOD_SCALE,
@@ -212,6 +213,7 @@ export class EffectLayer implements System<RenderContext> {
     this.drawCarriedProps(seen);
     this.drawShotRings(seen);
     this.drawDamageOverlays(seen);
+    this.drawBossBanners(seen);
 
     for (const [key, l] of this.nodes) {
       if (seen.has(key)) continue;
@@ -242,6 +244,35 @@ export class EffectLayer implements System<RenderContext> {
     parent.add(node);
     this.nodes.set(key, { node, slot });
     return node;
+  }
+
+  /**
+   * The boss-name banner's eight cards, `BossIntroBannerUpdate`
+   * (`FUN_00437AC0`)'s draw loop:
+   *
+   * ```
+   * FUN_004759C0(yaw); MatrixStackPush(0); MatrixLoadIdentity()
+   * MatrixTranslate(x, y, z); MatrixRotateY(yaw); MatrixScale(s, s, s)
+   * AssetDrawSlot(slot); MatrixStackPop(1)
+   * ```
+   *
+   * Identity, so camera space, like the damage overlay. Only in the two steps
+   * that draw -- the slide and the hold -- and straight from the banner's own
+   * state, so a snapshot mid-flight draws what it says.
+   */
+  private drawBossBanners(seen: Set<string>): void {
+    G.g_boss_banners.forEach((b, n) => {
+      if (b.step !== BannerStep.Slide && b.step !== BannerStep.Hold) return;
+      b.cards.forEach((c, i) => {
+        const key = `bb${n}_${i}`;
+        const node = this.node(key, b.slots[i], this.viewGroup);
+        if (!node) return;
+        seen.add(key);
+        node.position.set(c.x, c.y, c.z);
+        node.rotation.set(0, c.yaw * BAMS_TO_RAD, 0);
+        node.scale.setScalar(c.scale);
+      });
+    });
   }
 
   /**

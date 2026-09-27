@@ -37,7 +37,7 @@
  * | `Boss4Init` (`FUN_004917E0`) | whole |
  * | `Boss4Update` (`FUN_004919D0`) | the dispatch and the despawn test |
  * | states 0–3, the entrance | whole, and `g_script_flags[31]` |
- * | `BossIntroBannerUpdate` (`FUN_00437AC0`) | its lifetime and its shutter write |
+ * | the banner | `game/boss_banner.ts`, a task of its own, spawned by the entrance |
  * | `Boss4ResolveShot` (`FUN_00491B40`) | the damage half; the effects are not |
  * | state `0x14`, the flinch | whole but for the turn |
  * | `Boss4ResumeAfterHit` (`FUN_004952A0`) | whole but for the phase cue |
@@ -79,7 +79,6 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { BossIntroBannerUpdate } from "./banner";
 import {
   BOSS4_DEAD_FLAG, Boss4StateDeath, Boss4StateFlinch,
 } from "./death";
@@ -207,12 +206,6 @@ export function Boss4Update(obj: Actor, f: ClassFrame): void {
   const b = obj.boss4;
   if (!b) return;
 
-  // The banner the entrance spawned. `[diverges]` — it is a task of its own in
-  // the engine, driven from the task list rather than from here; see
-  // `state.ts`. It has to run **before** the state machine, because the frame
-  // it opens the shutter is a frame the entrance must see state 1 on.
-  if (b.banner && BossIntroBannerUpdate(b.banner)) b.banner = null;
-
   Boss4ResolveShot(obj, b);
   // `Boss4AdvanceArenaWaypoint` (`FUN_004928D0`),
   // `Boss4AdvancePhaseWhenWalkDone` (`FUN_00492350`) and
@@ -250,9 +243,6 @@ function Boss4Debug(obj: Actor): ActorDebug {
       ? "refusing shots — the phase floor is reached"
       : "damageable on bone 2",
   ];
-  if (b.banner) {
-    detail.push(`banner step ${b.banner.step}, frame ${b.banner.frame}`);
-  }
   detail.push(`flags 30/31/32: ${G.g_script_flags[BOSS4_DROP_FLAG] ? 1 : 0}`
     + `/${G.g_script_flags[BOSS4_FIGHT_READY_FLAG] ? 1 : 0}`
     + `/${G.g_script_flags[BOSS4_DEAD_FLAG] ? 1 : 0}`);

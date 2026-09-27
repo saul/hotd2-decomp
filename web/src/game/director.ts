@@ -666,7 +666,12 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // Every actor's clips run, handler or not: a class with no behaviour still
     // loops the motion the script gave it.
     if (obj.visible) {
-      ActorAdvanceMotion(obj, dt);
+      // An actor that carries the engine's model block (`game/skeleton.ts`)
+      // is posed and clocked by its own class, from inside its update, where
+      // the exe does it: the class's `DrawSkinnedModelAndShadow` call runs
+      // after the state and the counter steps after that. Stepping it here as
+      // well would run every cue a frame early.
+      if (!obj.skel) ActorAdvanceMotion(obj, dt);
       // `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), which the engine asks
       // per node inside `SkeletonEmitNode`. Its input is `bone_records[9].slot`
       // -- what bone 9 is *currently* drawing -- so it cannot be baked into
@@ -681,9 +686,15 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
       // class's `Update` makes the call -- 4.0 for a zombie or a civilian,
       // **0 for a thrower**. `CameraPointRiseFor` is that table; see it for
       // all fifteen call sites and for what the port does differently.
-      ActorRegisterCameraPoint(obj, host,
-        g_class_handlers[obj.cls]?.cameraRise?.(obj)
-          ?? CameraPointRiseFor(obj.cls));
+      //
+      // ...and an actor with the model block makes this call from its own
+      // update too, at the exe's call site: its skeleton walk writes
+      // `obj+0x100` and the call lifts it once.
+      if (!obj.skel) {
+        ActorRegisterCameraPoint(obj, host,
+          g_class_handlers[obj.cls]?.cameraRise?.(obj)
+            ?? CameraPointRiseFor(obj.cls));
+      }
     }
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {

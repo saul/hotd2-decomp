@@ -23,6 +23,7 @@ import { makeOneHitTargetTail, type OneHitTargetTail }
 import { makeRescueTargetTail, type RescueTargetTail }
   from "./class21/state";
 import { makeBoss2Tail, type Boss2Tail } from "./class14/state";
+import type { SkeletonModel } from "./skeleton";
 import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
@@ -47,6 +48,14 @@ import { makeZombieTail, type ZombieTail } from "./class30/state";
  */
 export enum MotionFlag {
   /**
+   * Bit 0 — **the skeleton is drawn.** `SkeletonEmitNode` (`FUN_004114C0`)
+   * runs a node's draw hook, updates its hit-centre and writes the camera
+   * point only while it is set; the pose itself is walked either way.
+   * `ActorBuildSkinnedModel` sets it; class 0x14's entrances clear it to hide
+   * the boss under the water and set it again. `[proved]`
+   */
+  Drawn = 0x01,
+  /**
    * **Does this clip's root translation carry the actor?**
    *
    * `SkeletonApplyRootMotion` (`FUN_00410C50`) tests exactly this and nothing
@@ -66,6 +75,12 @@ export enum MotionFlag {
    * writes it. `[open]`
    */
   RootMotionY = 0x10,
+  /**
+   * Bit 3 — on an odd play cursor, blend the bones by swing-twist rather
+   * than linearly (`FUN_00411700`). `Class32Init` sets it; nothing the port
+   * runs does. `[proved]`
+   */
+  SwingTwistBetween = 0x08,
 }
 
 /**
@@ -1024,6 +1039,14 @@ export interface ActorBase {
    * skeletal actor is built with.
    */
   motionFlags: number;      // +0x1F8
+  /**
+   * The engine's own model block (`obj+0x194`), for an actor whose class
+   * poses it the way the exe does -- see `game/skeleton.ts`. Null for every
+   * actor the port still poses in `render/`; class 0x14's `Init` builds one.
+   * When it is set the director leaves the actor's clock alone and the class
+   * steps it from its own update.
+   */
+  skel: SkeletonModel | null;
   /** Display name, for the feed. Copied from the type at spawn. */
   name: string;
 
@@ -2043,6 +2066,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     class14: null,
     class16: null,
     class17: null,
+    skel: null,
     class33: null,
     class33Push: null,
     class53: null,

@@ -155,6 +155,17 @@ const _bone = vec3();
  */
 export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
                                          rise: number): void {
+  // An actor that carries the engine's model block has had `obj+0x100`
+  // written by its own skeleton walk this frame (`SkeletonEmitNode`), and
+  // the routine's own arithmetic applies: `FLD rise; FADD [obj+0x104];
+  // FSTP [obj+0x104]` at `0x00409BF2`, in place. `RegisterForShotTest`
+  // (`FUN_00405160`) and `RegisterForCameraTracking` (`FUN_00408EC0`) run
+  // beside it in the exe; the port's shot test and camera list are fed
+  // elsewhere today.
+  if (obj.skel) {
+    obj.lookAt.y = Math.fround(rise + obj.lookAt.y);
+    return;
+  }
   if (!host.boneWorld(obj.at, CAMERA_TRACK_BONE, _bone)) return;
   obj.lookAt.x = _bone.x;
   obj.lookAt.y = _bone.y + rise;

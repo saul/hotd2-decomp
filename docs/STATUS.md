@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 102742 | 338 | engine |
+| `game/` | 103334 | 338 | engine |
 | `hod2lib/` | 19197 | 35 | engine |
 | `render/` | 15016 | 54 | render |
 | `app/` | 8554 | 29 | app |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 978 | 9 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **158269** | **528** | |
+| **total** | **158861** | **528** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2819
-* `game/actor.ts` — 2636
+* `game/actor.ts` — 2644
 * `app/main.ts` — 2581
 * `hod2lib/bundle.ts` — 2322
 * `hod2lib/exetab.ts` — 2269
@@ -43,18 +43,18 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **230 of 297** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 527 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 757 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **231 of 297** annotated functions in the gameplay address ranges have a port (77%) |
+| Ported outside those ranges | 533 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 764 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **30 of 42** read classes have a module, covering 1541 of 1619 placements |
-| Declared `[diverges]` | **133** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 119 | 121 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 121 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -65,7 +65,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 
 | | |
 |---|---|
-| Named functions | 1373 in `ghidra/annotations/functions.tsv` |
+| Named functions | 1377 in `ghidra/annotations/functions.tsv` |
 | Named globals | 675 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
 

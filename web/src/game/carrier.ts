@@ -28,8 +28,24 @@ import type { Actor } from "./actor";
 import { BAMS_TO_RAD } from "../core/bams";
 import type { Vec3 } from "./vec";
 
-/** `obj+0x34` bit `0x4000000` — the carrier is leaving and its riders step off. */
-export const CARRIER_LEAVING_BIT = 0x4000000;
+/**
+ * `obj+0x34` bit `0x400000` on a carrier — **its riders are finished.**
+ *
+ * Raised by the run-past arm of the two carriers stage 3's riders stand on:
+ * `OR dword ptr [EBP+0x34], 0x400000` at `0x00440610` in `CarrierPropRoutine1`
+ * (path frame `0x55A`, ten frames after the bow strikes and throws its
+ * effect) and at `0x0044151A` in `CarrierPropRoutine6` (with its state 5).
+ * Its one reader is `ZombieStateRetireOffScreen` (`FUN_0045B7B0`), at
+ * `0x0045B9A5`: a class-0x18 rider in state 38 whose carrier has the bit
+ * retires on the spot (`game/class30/target.ts`). A search of the image for
+ * the immediate at `[reg+0x34]` finds those three and no other, and none as a
+ * byte test at `+0x36`.
+ *
+ * This file used to export `0x4000000` here as "the carrier is leaving and
+ * its riders step off", with no reader: that bit is `ActorFlag.Dead`, which
+ * routine 1's state 6 raises on the boat itself as it goes to state 7.
+ */
+export const CARRIER_RIDERS_DONE_BIT = 0x400000;
 
 /**
  * `[port-only]` — `T · Rx · Rz · Ry` applied to a carrier-relative point.

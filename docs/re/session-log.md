@@ -24484,6 +24484,121 @@ past the throw leaves both cars seated and burning, because the replay does
 not run the game -- a seek artefact, not the engine; in play they are gone.
 Still undrawn: each sprite's cel loop -- the rig carries only the first cel.
 
+## 2026-09-28 -- the jetty zombies' fall back looped: class 0x25's `op 17`
+
+Reported: at the end of stage 2, in the scripted sequence where the two zombies
+are shot from the boat, they play their fall-back animation on a loop. The
+scene is block 16 step 15 (block 20 step 2 on the other route): two class-0x25
+humanoids of character type 15, evt `43584` and `43740` (`55372`/`55536`),
+whose programs end `op 3 972` (the fall back, fade 5), **`op 17` mode 0**,
+`op -1`. Never worked: `op 17` has been stepped over since class 0x25 was
+ported (`77e235af`), so the actor ran into `op -1`, sat in
+`ScriptedHumanoidIdle` on clip 972 with `obj+0x1324` clear, and the clip
+wrapped every 60 frames until camera path 100 frame 65 removed it. Measured
+driven from `?stage=2&block=16&step=15&op=0&drive=1&seed=1`: handed over at
+frame 210, cursor 40 at 250, 30 at 300, 20 at 350, still at y -23 at 457.
+
+`op 17` (`0x004849CE`, mode table `0x00484D20`, read) is five things, all
+shipped: modes 0, 1 and 4 write a routine over `obj+0x00` and end the frame;
+2 and 3 spawn a sprite and run on; anything else steps past and ends the frame.
+Mode 0's routine at `0x00484DF0` had no Ghidra function (created, named
+`ScriptedHumanoidFallAndSplash`): gravity 0.02 from rest, the freeze when the
+cursor its last draw showed is `g_motion_play_length - 1`, and at
+`y <= -27.9998` a kind-0x61 splash at `(x, -24.9998, z)`, `ActorFreeHitSlot`,
+`ActorReleasePartList`, `ActorKill`. So the zombies sink 5 units and are gone
+22 frames after the hand-off. The other three were `FUN_`s, named
+`ScriptedHumanoidLaunchAndDrop` (`0x00484EA0`, sub 0 falls through into sub 1,
+L53), `ScriptedHumanoidSpawnFixedImpact` (`0x00484F50`) and
+`ScriptedHumanoidFallTimed` (`0x00484F90`). The routine installed is
+`HumanoidTail.routine` now, with the exe's pointer values; `pc = -1` is gone.
+
+**Rule 4, what the reading overturned.** The freeze test reads `obj+0x19C`, and
+so do the VM's `mode 2` waits -- the cursor, for equality -- where the port
+read the authored frame with `>=`. 24 of the 40 shipped literal cursors are
+past a clip's end in authored frames (`a=66`/`68` on a 35-frame clip, `a=73` on
+the 41-frame 855 in this same scene), so those actors parked. The port also
+steps the counter before the class runs, so a state reading it is a tick ahead
+(L62); the class keeps the cursor its draw sampled, `HumanoidTail.playCursor`,
+as the frog does. The same "authored frame" belief sat under `op 2`'s `b` and
+the Init's phase (both write the counter; the port doubled them and took -1 as
+0 where the exe draws `rand() % 10`) and `op 3` ignored its start and fade.
+`op 2` mode 1/2 and the Init's `blk+2 == 2` write `obj+0x1F8` bit 4, which the
+port did not. The two condition switches are the exe's own now (`op 0/1` have
+no mode 4 and `op 0` never passes mode 2 -- `CMP BP,BX / JZ` at `0x004843CD`,
+not `0x00484386` as the TSV row said, which is the table's `JMP`; `op 4` has no
+-1), an out-of-range opcode parks, and the removal paths free the hit slot they
+had left claimed. Three of the class-0x25 citations in `index.ts` were the
+parenthesised form of routines the file ports (L42): now bare addresses, and
+`verify_port`'s ported count went 754 to 761.
+
+Wrong turns: I first read the post-boss cut scene in block 35 (two class-0x25
+spawns on camera path 0x71) as the sequence -- they are the player characters.
+The zombies are identified by character type 15 against the players' 59/60.
+And the builder hash moved: `class25/state.ts` is in the exporter's closure
+because `hod2lib/bundle.ts` imports `HUMANOID_VARIANT3_SLOT` from it, so the
+tail fields regenerate `builder_hash.ts` although no exported byte changes.
+
+Test: `test:port`'s five new class-0x25 blocks (the jetty program driven by
+`GameUpdate`; the freeze holding on cursor 18 of an 18-long clip; the wait on
+`a=66`; `op 2` and the Init's counter; `op 17` modes 1-4 and 7; the removal's
+hit slot) -- 22 assertions that fail on `a3f5d167`. Counts: divergences 133
+held (the `op 9`/`op 16` stub keeps its tag), uncited exports 82 held.
+
+## 2026-09-28 -- stage 3's boat riders: the boat took the shots, and nothing ended them
+
+Reported: at the start of stage 3 the zombies on the boat with the first
+civilian "don't seem to die when shot", and "when the boat explodes they
+still stay alive". Three faults, all read from the exe, none a regression.
+
+* **The boat was in the shot test.** `SpawnFromDescriptorSmall`
+  (`FUN_00408BC0`) runs `ActorInitFlags` (`FUN_00408970`: `OR ECX, 1; MOV
+  [EAX+0x34], ECX`) on the record's flags word, all fifteen class-0x13
+  records carry `0x8000`, and `RegisterForShotTest` refuses that at
+  `0x00405168`. `SpawnSlotActor`'s class-0x13 arm passed no `flags`, so the
+  boat had `obj+0x34 == 1`, and the 40.0 that `CarrierPropRoutine1` state 0
+  writes at `obj+0x124` was a live sphere in `render/slotmodels.ts`' pick,
+  merged with the engine pick by distance along the ray: every pull at a
+  rider standing behind the boat's origin was the boat's. Since `902de88a`.
+* **`ZombieStateRetireOffScreen` has a carrier arm** after its mode switch
+  (`0x0045B997`): `*obj == CarriedZombieUpdate18` (the only reader of that
+  pointer -- a byte search for `0x0045CD90` finds it and the Init's store)
+  and the carrier's `obj+0x34 & 0x400000` -> `ZombieRetireAndCredit`, `*obj =
+  EnemyZombieUpdate`, no bake. Routines 1 (`0x00440610`) and 6
+  (`0x0044151A`) raise the bit running past the mooring; nothing else in the
+  image touches it at `[reg+0x34]`. The port's `ZombieRetireAndCredit` was
+  short too: `rng.next() < 0.5` for `rand() % 2`, no one-player arm, no
+  count releases, no hit slot. The same state's mode-0/1 `[diverges]`
+  (`ActorIsOnScreen` for `ActorBoundsOnScreen`) is gone, since the latter
+  has been ported for class 0x10 for a while.
+* **`ZombieStateHoldOnCarrier` has an exit** (`0x0045D0B4`..`0x0045D0DD`),
+  after the `MatrixStackPop` at `0x0045D0AF` the pseudocode ends on (`L35`):
+  on `g_active_cam_path == tail+0x0C && g_cam_path_frame == tail+0x0E` the
+  rider takes `(s8)tail[3]`. The port, the annotation and PLAYER_PROGRESS
+  all said "no exit, aboard until shot".
+
+`port.test.ts` "stage 3 block 0's boat" drives the boat's whole ride through
+`GameUpdate` from the reset; eleven assertions there and in the stage-2 rider
+block fail on the old code. In the page, one seed, the same pulls replayed:
+before, the first ten took nothing (the boat's flags read back `0x8`, marked);
+after, the captor dies on the ninth. Free-run, the captor now vanishes on the
+frame the boat raises `0x400000` (`g_enemies_alive` 2 -> 1) and `0xADC` leaps
+to the player's boat on camera frame 1080.
+
+**Wrong turns.** The brief suspected the class-0x30 pick moving into the
+engine (`629832ca`) and a class-0x18 handler that did not register. The
+handler spreads class 0x30's row, `registersForShotTest` included, and the
+engine pick does test the riders (`shotTargets` lists them, and the pulls
+that were not blocked took hit points). A bundle exported at `51b0f657`, the
+merge before that change, answers the same replayed pulls identically, which
+closed it. The probe's first run read "hits start landing after ten pulls"
+as flaky aim; clearing the boat's hit bit before each pull and reading it
+back after was what named the boat.
+
+`[open]`: the retire frame. The port's `carrierAt` is the task pointer as
+well as the carrier (declared on the field), so `render/` places that one
+last frame at the rider's carrier-relative point, where the engine draws it
+in the carrier's matrix; the actor is gone at the next update in both.
+
 ## 2026-09-28 -- stage 1's burning cars: the fire and smoke play their cels
 
 `PathRidingPropDraw` (`FUN_00432840`), re-read past the no-return

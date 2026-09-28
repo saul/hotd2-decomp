@@ -94,8 +94,9 @@ export enum MotionFlag {
    * (`FUN_0040A620`, `TEST AL, 4` at `0x0040A649`) does the same for the
    * shadow. `EnemyZombieInit` (`OR EDX, 4` at `0x00452E21`) and
    * `EnemyThrowerInit` (`0x00449694`) raise it straight after
-   * `ActorBuildSkinnedModel`; `OneHitTargetInit` (`FUN_00448ED0`) raises only
-   * bit 1, so a class-0x20 ring sits at the body's own height.
+   * `ActorBuildSkinnedModel`, and so does `FrogInit` (`OR EDX, 4` at
+   * `0x0043A170`); `OneHitTargetInit` (`FUN_00448ED0`) raises only bit 1, so a
+   * class-0x20 ring sits at the body's own height.
    */
   TraceGround = 0x04,
   /**
@@ -2123,6 +2124,19 @@ export interface ActorBase {
   /** Per-bone asset slot overrides — the draw record at +0x20C + bone*0x90. */
   boneSlot: Record<string, number>;
   /**
+   * Per-bone **hit-sphere radius** overrides — the same record's `+0x78`,
+   * `obj + 0x284 + bone*0x90`, which `SkeletonWalkNode` (`FUN_004107E0`)
+   * fills from the character type's table as the skeleton is built.
+   *
+   * A routine that writes the record wins over the table, as the engine's
+   * record does: `ShotTestBoneSphere` (`FUN_004047D0`) skips a bone whose
+   * radius is zero, and `BoneHitSpriteDrawAndTick` (`FUN_00407120`) and
+   * `DrawBloodSpray` (`FUN_00407230`) add it to the view-space depth. Empty
+   * until one does; `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) zeroes the
+   * frog's bone 2 (`part+0x210`, `0x0043A35D`).
+   */
+  boneRadius: Record<string, number>;
+  /**
    * Bones whose own rigid draw is vetoed, one bit per bone.
    *
    * `SkeletonNodeDrawSuppressed` (`FUN_004122E0`) — see `game/parts.ts` for
@@ -2439,6 +2453,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     latched: [],
     removed: [],
     boneSlot: {},
+    boneRadius: {},
     suppressedBones: 0,
     attachments: [],
   };

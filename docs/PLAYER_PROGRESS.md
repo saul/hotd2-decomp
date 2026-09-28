@@ -1912,7 +1912,7 @@ Each pays 80.
 | drawn as | a skeleton, `frog.bin` | a hand-built slot chain | one slot of `fish.bin` |
 | how it attacks | a 30-frame ballistic leap; the hit is **timed**, on motion frame 60 | a dive; the hit is a **distance**, five units from the eye | a lunge to one of four points in camera space |
 | what limits it | `g_attack_permits`, the same array class 0x30 uses | `g_class43_attack_token`, one per flock | `g_water_attack_slots`, four |
-| when it leaves | despawns after a landed leap, **without dying** | never: dive and orbit for ever | falls back and despawns |
+| when it leaves | despawns after a landed leap, **without dying**; shot, it tumbles, leaves the ground ring as it settles and sinks | never: dive and orbit for ever | falls back and despawns |
 
 Three readings from these that are worth keeping:
 
@@ -1964,6 +1964,25 @@ wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
 was inverted; both launch frames run on into the flight and halve the turn
 that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
 over a fade of 2, where the port had played it from the start over 61.
+
+**The frog's death is ported, and a shot one no longer stands for ever.**
+`FrogStateDieTumbleAndSink` freezes the death clip on the frame it reads
+`len - 1` and waits to read `len`; the engine's states read the cursor the
+last draw computed, one tick behind the counter the port's director has
+already stepped, so in the port the freeze stopped the clip one short and
+the corpse held `g_enemies_present` for ever. With the corpses stopping
+bullets too -- the kill raised `0x100` where the engine raises `0x8000`, out
+of the shot test -- stage 1's frog room could not be cleared by shooting.
+The class now reads `part+0x08` as the engine's states do
+(`FrogTail.playCursor`), which also puts every hop, leap and turn on the
+engine's frame rather than one early. The death blends into its clip rather
+than cutting, runs its first substate on into the bounce (`L53`), opens
+`SpawnGroundRingEffect` under bone 1 as the corpse settles, and sinks for 181
+frames before it goes. The kill keeps bone 3's model on the corpse -- its
+third write zeroes bone 2's **hit radius** (`Actor.boneRadius`) -- and calls
+`ChooseHitPlayerOrder`, which is a draw with two players in. `FrogInit`
+raises the trace-the-floor bit the ring and shadow read. The real-bundle
+check is `tools/animals.mjs`'s `frog death` row.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
@@ -5395,7 +5414,8 @@ sub-actor never registers.
   `Init` makes is now updated after its maker.
 * A bone whose draw record is slot 0 draws nothing (`AssetDrawSlot(0)`
   returns at once). That is the walker's node 2 -- and the frog corpse's
-  bones 2 and 3, which were drawn before.
+  bone 2, which was drawn before. (This said bones 2 and 3: the kill's third
+  write, `part+0x210`, is bone 2's hit radius, not bone 3's slot.)
 * Every scene's cam files come from the exe's per-scene list
   (`0x004C4990`): stage 5 gains `op_st1` (JUDGMENT's paths `0xFD..0x147`),
   and every Original Mode bundle gains `op_org`.

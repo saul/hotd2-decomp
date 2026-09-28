@@ -23172,3 +23172,128 @@ against the plain draw -- its textures have no transparent texels there).
   `L6`, in a checker, latent until a bundle carried type 9. Bounded at `nb`
   now; the count went from 79 to 77, the two dropped being those two reads,
   and the shared bundle gives 77 as well.
+
+## 2026-09-28 -- the civilian's collision sphere: modes 1, 2 and 3 are draw records (branch `worktree-agent-a2f32c8a45a21688b`)
+
+**The report.** `class10/update.ts` and `actor.ts` carried an open question:
+of `CivilianUpdate`'s switch on `sub+0x80` (op 0x17), only mode 0 -- the
+position -- was ported, because modes 1-3 "multiply the camera matrix by a
+matrix inside the model block (`model+0x70`, `model+0x4C`, and the midpoint of
+`model+0x244` and `model+0x1D8`)", which "are not bone records". The brief
+called it the camera-point switch and asked for the camera look-at, the shot
+sphere, the HUD marker and the rescue logic to be checked as readers.
+
+**What the switch is.** `0x0048ADB5`..`0x0048AF83`, after
+`ActorRegisterCameraPoint`: `MOVSX EAX, byte [sub+0x80]; CMP EAX, 3; JA past;
+JMP [EAX*4 + 0x0048B12C]`, cells `0x0048ADDB`, `0x0048ADFC`, `0x0048AE60`,
+`0x0048AEC4`. It writes `obj+0x12C..0x134`, the collision-sphere centre, and
+nothing else. `[proved]`
+
+* 0: `obj+0x40` -- the position (carrier-relative on a carrier: the arm reads
+  `g_cur_actor_xform`).
+* 1, 2: `MatrixStackSetTopFromArray(0x009A6040 + cam*0x1A4)`,
+  `MatrixMultiply(model + 0x1C0 / 0x130)`, `MatrixGetTranslation`.
+* 3: the same for `model+0x910` and `model+0x760`, halved (`0x004C43AC` =
+  `0x3F000000`).
+
+The offsets are **bytes** -- `ADD ECX, 0x1C0`, `ADD EDX, 0x130`, `ADD EAX,
+0x910`, `ADD ECX, 0x760` -- and `model` is `g_cur_actor_model`, `obj+0x194`.
+Ghidra's pseudocode types it `int *`, so it prints `0x70`, `0x4C`, `0x244`,
+`0x1D8`; the old note read those as byte offsets. As bytes they are
+`model+0xA0 + bone*0x90`: the matrix `SkeletonEmitNode` stores with
+`MatrixStore(record+0x28)` just after `SkeletonPoseNode`, record =
+`g_skeleton_node_out + bone*0x90` = `obj+0x20C + bone*0x90` (the base
+`DrawSkinnedModelAndShadow` is handed as `model+0x78`). **Bones 2, 1, 15 and
+12.** The shot branch's own read of the op-0x28 bone, `LEA ECX,[EAX+EAX*8];
+SHL ECX,4; LEA EAX,[ECX+EDX+0xA0]` at `0x0048ABD2`, is the same formula, which
+is the check on it. `[proved]`
+
+`MatrixMultiply` post-multiplies (`top = top x arg` in `Matrix4`'s element
+layout, from the sixteen sums), so each arm is view-to-world times the
+bone's view-space frame: the bone's origin in the world, from the draw a few
+lines up in the same routine. `SkeletonEmitNode` takes the same product for
+`obj+0x100` through `FUN_004A9570`, which pre-multiplies (`top = arg x top`)
+and is named `MatrixPremultiplyTop` now. `GameHost.boneWorld` answers exactly
+that point, so no new host query was needed. `CivilianInit` writes mode **2**
+(`MOV byte [sub+0x80], 2`), so the arm the port left out was the one nearly
+every civilian runs. In the skeletons of the civilian types, bone 1 is the
+root node (offset zero), bone 2 its child 3.2-5.5 up, and 12 and 15 the
+children of 11 and 14, 4.76 below them -- `[likely]` the lower leg joints,
+from the tree only.
+
+**Who uses which.** Streams 5, 6, 18, 24, 31, 43, 45, 89 set mode 1; 5, 28,
+31, 89 mode 2; 28 and 30 mode 3; 38 mode 0. Through `entries`: mode 1,
+stage 1's `0x4AE4`, stage 2's `0x51AC`, `0x8510`, `0x8620`, `0xBBA8`,
+`0xEA54`, `0xEA8C`, stage 4's `0x59C8`; mode 3, stage 2's `0x8598` (stream 28
+is her on-shot script: the fall, radius 4, the sphere between the knees);
+mode 0, stage 2's `0xA134`.
+
+**The readers.** A sweep for `0x12c` in operands (both `[r + 0x12c]` and
+`ADD r, 0x12c`) and for `+ 0x130]` finds, for a civilian, two:
+`RegisterForShotTest` (through `ActorRegisterCameraPoint`, *before* the switch,
+so it publishes last frame's centre; `ColiPublishDynamicList` copies it for
+`ColiTestSphereAgainstActors`), and `PoseHookGrowAndPushOutOfWorld`
+(`LEA EDX, [ESI+0x12C]` at `0x0048D0F8`), which the draw calls through
+`model+0x115C` from `SkeletonApplyRootMotion` at `0x00410E93` -- both of that
+routine's arms reach the call; the root-motion arm does so past a
+`MatrixStackPop` Ghidra marks no-return (L35). The gunshot does not read it:
+`ShotTestSphere` measures `obj+0x70`. Nor does the camera:
+`SelectCameraLookAtTarget` aims at `obj+0x100`, which `SkeletonEmitNode`
+writes, and the sweep finds only stores with a `+0x130` displacement, no
+load. So **the brief's camera, HUD and rescue readers do not read this
+field** (`[proved]` for the displacement forms the sweep covers, L32); the
+camera point is untouched by any mode.
+
+**What was wrong in the port, and is fixed.**
+
+* Modes 1-3 were missing; `CivilianWriteSphereCentre` has all four arms, and
+  anything else writes nothing (signed byte, unsigned compare).
+* Op 0x17 stored the whole dword; it stores the signed low byte now. Renamed
+  `SetCameraPointMode` -> `SetSphereCentreMode`, `cameraPointMode` ->
+  `sphereCentreMode`, with a `CivilianSphereMode` enum.
+* Class 0x10 did not set `ClassHandler.ownsSphereCentre`, so the actor push
+  rebuilt class 0x30's feet-plus-radius-plus-one over every civilian.
+* `PoseHookGrowAndPushOutOfWorld` rebuilt that same point with
+  `ActorUpdateBoundingSphere` before tracing it; the engine traces `obj+0x12C`
+  as it stands. And it ran after the switch; it runs where the draw is now,
+  so it reads the previous frame's centre, as the engine's does.
+* `CivilianInit`'s note said both pose hooks and the part list were the
+  renderer's; the part list is bound in the port and the grow-and-push hook
+  is the game's.
+
+**Declared.** A divergence: the switch reads the pose the renderer last drew,
+a tick behind the engine's same-routine draw for a moving civilian -- the
+same reading the camera point and the frog take, closed only by the
+skeleton's forward kinematics in `game/`. `[port-only]`: with no pose (a
+headless host, or the tick before the renderer adopts a spawn) a bone arm
+takes the position.
+
+**In the page** (`?drive=1`, stage bundles exported in this worktree): on
+mode 2 the sphere equals bone 1 to the digit -- bone 1 is also the tracked
+camera bone for every civilian type, so it is `lookAt - (0, 4, 0)` --
+through stage 1 block 9, stage 2 blocks 9, 14, 16 and 17, stage 3 block 2,
+stage 4 (entry 4) block 9. Mode 1 on `0xBBA8` sits 3.11-3.15 above bone 1,
+which is `hitoc.bin`'s bone-2 offset of 3.22 with the pose's bend; on
+`0xEA54` about 5 above, `hito_oyaji`'s 5.45. Mode 3 on `0x8598` after a
+(cheated, printed) shot follows the legs down through the fall and hands
+back to bone 1 when stream 28 reaches its mode-2 command. The camera stays in
+front of each, converging to within a few degrees of her; screenshots
+`web/shots/civ-sphere-8598-f150.png` and `civ-sphere-8510-f150.png`.
+
+**Wrong turns.**
+
+* My first map from spawns to streams used the spawn's `script` as a stream
+  index. It is an index into `entries`, and the list that came out -- mode 0
+  "stage 4's `0x59C8`", mode 3 "stage 3's `0x32A4`" -- was a list of other
+  women. The first two page runs watched the wrong civilians and reported
+  mode 2 throughout, which read like a port that never changes mode.
+* The first fallback kept the field when the host had no pose, as the camera
+  point does. The pool clears the field, so a headless run would have kept a
+  sphere at the world origin for every civilian and the push would have
+  measured it there.
+* One mutant for the mutation run was a syntax error (a second `default:`);
+  the run printed "exit 1, 0 failing", which is a build failure and not a
+  check failing. Rewritten, it failed six checks.
+* `web/tools/civilians.mjs` fails (`moved 17/37`, `rescued 0/21`, `mauled
+  14/10`) -- identically on the base commit, so it is not this change; it is
+  not in `verify_all.py`.

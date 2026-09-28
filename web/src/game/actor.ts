@@ -1887,9 +1887,12 @@ export interface ActorBase {
    * class-agnostic routines read. Renamed for that reason; the writers are
    * `ActorUpdateBoundingSphere` (`FUN_00454AC0`) for class 0x30,
    * `ThrowerPlaceCollisionSphere` (`FUN_00449E80`) for class 0x31, and that
-   * switch for class 0x10. Of the switch, only mode 0 — the actor's own
-   * position — is ported; modes 1-3 read matrices out of the model block and
-   * are `[open]`.
+   * switch for class 0x10 — the actor's position, bone 2, bone 1 (the
+   * default), or halfway between bones 12 and 15, each bone read out of its
+   * draw record as a world point (`class10/update.ts`,
+   * `CivilianWriteSphereCentre`). A class that sets
+   * `ClassHandler.ownsSphereCentre` keeps what it wrote; for any other the
+   * actor push rebuilds class 0x30's point over it.
    *
    * It is **not** what the camera aims at: that is `obj+0x100`
    * ({@link Actor.lookAt}), which the skeleton walk writes and

@@ -17,7 +17,7 @@ import { T, SecondsToTicks } from "../tables";
 import { CivilianPruneDeadChildren } from "./children";
 import { CivilianRunFrameHook, PoseHookGrowAndPushOutOfWorld } from "./hooks";
 import { CivilianCountMotionLoops } from "./loops";
-import { CivilianTarget, CivilianWait } from "./ops";
+import { CivilianSphereMode, CivilianTarget, CivilianWait } from "./ops";
 import { ActorBoundsOnScreen } from "../combat/permits";
 import type { GameHost } from "../host";
 import { CivilianRunScript } from "./script";
@@ -28,10 +28,11 @@ import { CivilianStepTurnToTarget } from "./turn";
 /**
  * `CivilianUpdate` — `FUN_0048A920`. One frame of a civilian.
  *
- * The order is the engine's: prune, hook, turn, interpolate, advance the clip,
- * step the script, then the shot branch, the sound queue and the removal. The
- * shot branch runs **after** the script step on purpose — a shot taken this
- * frame switches the script the step just resumed.
+ * The order is the engine's: prune, hook, turn, interpolate, draw, advance
+ * the clip, step the script, then the shot branch, the sound queue, the
+ * camera point, the sphere switch and the removal. The shot branch runs
+ * **after** the script step on purpose — a shot taken this frame switches the
+ * script the step just resumed.
  */
 export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   const sub = obj.civ;
@@ -62,6 +63,11 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
     }
   }
 
+  // `DrawSkinnedModelAndShadow` (`FUN_00411090`) at `0x0048AA02`. The pose is
+  // the renderer's; what the draw runs that is the game's is the pose hook at
+  // `model+0x115C`, which reads the sphere the switch below left last frame.
+  PoseHookGrowAndPushOutOfWorld(obj);
+
   // The loop counter. The clip clock itself is `ActorAdvanceMotion`'s; this is
   // the part class 0x10 owns — how many more times it may come round.
   CivilianCountMotionLoops(obj);
@@ -88,8 +94,7 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // `obj+0x34` bit `0x10000` (`class10/script.ts`), which is what decides
   // whether `RegisterForCameraTracking` takes her -- the whole of bug 18.
   ActorRegisterCameraPoint(obj, f.host, CIVILIAN_CAMERA_RISE);
-  CivilianWriteSphereCentre(obj);
-  PoseHookGrowAndPushOutOfWorld(obj);
+  CivilianWriteSphereCentre(obj, f.host);
   CivilianCheckRemoval(obj, f.host);
   // `LAB_0048B0CE`, the tail every path out of `CivilianUpdate` falls into
   // except the two that despawn.
@@ -100,23 +105,133 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
 export const CIVILIAN_CAMERA_RISE = 4.0;
 
 /**
- * The collision-sphere switch at the tail of `CivilianUpdate`: `sub+0x80` (op
- * 0x17) picks which point goes to `obj+0x12C` — the centre
- * `RegisterForShotTest` (`FUN_00405160`) publishes and both the gunshot test
- * and `ColiTestSphereAgainstActors` (`FUN_00405B10`) read. It is class 0x10's
- * `ActorUpdateBoundingSphere`, not a camera point; the camera's is `obj+0x100`.
- *
- * [open] Only mode 0 is ported. Modes 1, 2 and 3 multiply the camera matrix by
- * a matrix inside the model block (`model+0x70`, `model+0x4C`, and the
- * midpoint of `model+0x244` and `model+0x1D8`) and those are not bone records
- * — they are matrices the pose leaves behind, which `game/` cannot reach.
- * Eight of the shipped streams ask for mode 1, four for mode 2, two for mode 3.
+ * Where a bone's draw-record matrix sits off `g_cur_actor_model`
+ * (`0x007DD09C`, `obj+0x194`): `model+0xA0 + bone*0x90`. That is
+ * `SkeletonEmitNode`'s `g_skeleton_node_out + bone*0x90 + 0x28`, with the
+ * record base `DrawSkinnedModelAndShadow` is handed as `model+0x78`
+ * (`obj+0x20C`); the same stride `LEA ECX,[EAX+EAX*8]; SHL ECX,4` builds at
+ * `0x0048ABD2` for the shot branch's `model + 0xA0 + bone*0x90`.
  */
-function CivilianWriteSphereCentre(obj: Actor): void {
-  if (obj.civ?.cameraPointMode !== 0) return;
-  obj.sphereCentre.x = obj.pos.x;
-  obj.sphereCentre.y = obj.pos.y;
-  obj.sphereCentre.z = obj.pos.z;
+const RECORD_MATRIX = 0xa0;
+const RECORD_STRIDE = 0x90;
+
+/** The bone whose record sits at `model + off`. */
+function RecordBone(off: number): number {
+  return (off - RECORD_MATRIX) / RECORD_STRIDE;
+}
+
+/**
+ * The bones the switch reads, from the offsets it adds: `ADD ECX, 0x1C0` at
+ * `0x0048AE24`, `ADD EDX, 0x130` at `0x0048AE88`, `ADD EAX, 0x910` at
+ * `0x0048AEEB` and `ADD ECX, 0x760` at `0x0048AF28`. Bone 1 is the root node
+ * of every civilian skeleton (its offset is zero), bone 2 its child five-odd
+ * units above it, and 12 and 15 the children of 11 and 14, 4.76 below them
+ * — `[likely]` the two legs' lower joints, from the tree and not from any
+ * name the engine gives them.
+ */
+export const CIVILIAN_SPHERE_BONE_MODE1 = RecordBone(0x1c0);   // 2
+export const CIVILIAN_SPHERE_BONE_MODE2 = RecordBone(0x130);   // 1
+export const CIVILIAN_SPHERE_BONE_MODE3_A = RecordBone(0x910); // 15
+export const CIVILIAN_SPHERE_BONE_MODE3_B = RecordBone(0x760); // 12
+
+/** `FMUL float ptr [0x004C43AC]`, `0x3F000000`: mode 3's midpoint. */
+const HALF = 0.5;
+
+const _a = { x: 0, y: 0, z: 0 };
+const _b = { x: 0, y: 0, z: 0 };
+
+/**
+ * The collision-sphere switch at the tail of `CivilianUpdate`,
+ * `0x0048ADB5`..`0x0048AF83`: `sub+0x80` (op 0x17) picks which point goes to
+ * `obj+0x12C`, the centre `RegisterForShotTest` (`FUN_00405160`) publishes
+ * and `ColiTestSphereAgainstActors` (`FUN_00405B10`) and
+ * `PoseHookGrowAndPushOutOfWorld` read. It is class 0x10's
+ * `ActorUpdateBoundingSphere`, not a camera point; the camera's is
+ * `obj+0x100`. See {@link CivilianSphereMode} for the four arms. `[proved]`
+ *
+ * ```
+ * MatrixStackPush(0)
+ * switch ((s8)sub+0x80) {
+ * case 0: obj+0x12C = obj+0x40                                   ; position
+ * case 1: MatrixStackSetTopFromArray(g_camera_blocks[g_camera_index])
+ *         MatrixMultiply(model+0x1C0); obj+0x12C = translation   ; bone 2
+ * case 2: ...           MatrixMultiply(model+0x130) ...          ; bone 1
+ * case 3: ... model+0x910 -> a;  ... model+0x760 -> b
+ *         obj+0x12C = (a + b) * 0.5                               ; 15 and 12
+ * }
+ * MatrixStackPop(1)
+ * ```
+ *
+ * `MatrixMultiply` (`FUN_004A92A0`) post-multiplies (`top = top * arg`, in
+ * the element layout `Matrix4` shares), so each arm is
+ * `viewToWorld * record`, and its translation is the bone's origin in the
+ * world — the product `SkeletonEmitNode` itself takes for `obj+0x100` when it
+ * emits the tracked node, through the pre-multiplying twin
+ * `MatrixPremultiplyTop` (`FUN_004A9570`) at `0x004115F7`.
+ * `GameHost.boneWorld` is that point.
+ *
+ * Mode 0 copies `obj+0x40`, which on a carrier is the carrier-relative
+ * position — the engine does exactly that, and so does this. The bone arms
+ * are drawn under the carrier's matrix and come out in the world.
+ *
+ * **What was wrong before.** Only mode 0 was ported, on a note that the other
+ * arms read "matrices the pose leaves behind" at `model+0x70`, `+0x4C`,
+ * `+0x244` and `+0x1D8`, and are not bone records. Those were Ghidra's
+ * `int *` indices, not byte offsets — times four they are `0x1C0`, `0x130`,
+ * `0x910` and `0x760`, four draw records exactly. And `CivilianInit` writes
+ * mode 2, so the arm left out was the one nearly every civilian runs: only
+ * the one stream that selects mode 0 (stage 2's `0xA134`) ever wrote the
+ * sphere, and both
+ * readers re-derived class 0x30's feet-plus-radius-plus-one over whatever
+ * was there.
+ *
+ * [diverges] The engine reads the pose it drew **this** frame, a few lines
+ * up in the same routine, after the move step and the pose hook's push; the
+ * port's pose is the renderer's and so the one it last drew, a tick behind
+ * for a civilian that is moving. That is the reading `ActorRegisterCameraPoint`
+ * and the frog's bone 1 take too, and closing it is the skeleton's forward
+ * kinematics in `game/` (`docs/PLAYER_ARCHITECTURE.md`, the input replay
+ * harness).
+ *
+ * `[port-only]` With no posed skeleton — a headless host, or the tick before
+ * the renderer adopts a new spawn — a bone arm has no record to read, which
+ * the engine never lacks: its draw is on the lines above. The arm then takes
+ * mode 0's point, the position, and mode 3 does so unless both of its bones
+ * answer. Keeping what the field held instead would leave a sphere at the
+ * world origin for every civilian a headless run makes — the pool clears it —
+ * and `ColiTestSphereAgainstActors` measures it there, which is a collision
+ * the game cannot have.
+ */
+export function CivilianWriteSphereCentre(obj: Actor, host: GameHost): void {
+  const sub = obj.civ;
+  if (!sub) return;
+  const c = obj.sphereCentre;
+  switch (sub.sphereCentreMode as CivilianSphereMode) {
+    case CivilianSphereMode.Position:
+      break;
+    case CivilianSphereMode.Bone2:
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE1, _a)) break;
+      c.x = _a.x; c.y = _a.y; c.z = _a.z;
+      return;
+    case CivilianSphereMode.Bone1:
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE2, _a)) break;
+      c.x = _a.x; c.y = _a.y; c.z = _a.z;
+      return;
+    case CivilianSphereMode.Bones12And15:
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE3_A, _a)) break;
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE3_B, _b)) break;
+      c.x = (_b.x + _a.x) * HALF;
+      c.y = (_b.y + _a.y) * HALF;
+      c.z = (_b.z + _a.z) * HALF;
+      return;
+    default:
+      // `JA 0x0048AF7D`: any other byte writes nothing.
+      return;
+  }
+  // Mode 0, `0x0048ADDB`: `obj+0x40..0x48` -- and the fallback above.
+  c.x = obj.pos.x;
+  c.y = obj.pos.y;
+  c.z = obj.pos.z;
 }
 
 /**

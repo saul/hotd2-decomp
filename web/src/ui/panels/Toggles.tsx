@@ -111,8 +111,8 @@ export const TOGGLES: readonly ToggleSpec[] = [
   // `trackEnemies` was here. It switched off the gameplay camera --
   // `SelectCameraLookAtTarget` aiming at the permit holder -- which is the game
   // and not a view of it, so it is always on now and is not a switch.
-  { name: "muzzle", kind: "game", label: "Muzzle flash", on: false, group: "shooting",
-    title: "The nine-frame flash and its second draw, at the crosshair on every shot \u2014 PlayerShotEffectSpawn's first ring. Off by default: it sits under the aim point because the cabinet's gun needed something bright there, and with a mouse it mostly covers what you are shooting. The port spawns the records either way; this only decides whether they are drawn." },
+  { name: "muzzle", kind: "game", label: "Muzzle flash", on: true, group: "shooting",
+    title: "The nine-frame flash and its second draw, at the crosshair on every shot \u2014 PlayerShotEffectSpawn's first ring. The game draws it, so it is on. It sits under the aim point because the cabinet's gun needed something bright there, and with a mouse it can cover what you are shooting, which is why it is a switch. The port spawns the records either way; this only decides whether they are drawn." },
   { name: "redBlood", kind: "game", label: "Red blood", on: true, group: "shooting",
     title: "The game's own Blood Color option. tex/scr_blood_red.bin and tex/scr_blood_green.bin are the same 39 images at the same texture slots, and the game loads one bank over the other; the bundle carries the green one, so this swaps the red and green channels on every material that draws blood \u2014 the spray, the gore parts a zombie swaps in, and the decals." },
   { name: "branchPause", kind: "aid", label: "Pause at branches", on: false, group: "route",

@@ -142,7 +142,7 @@ export class EffectLayer implements System<RenderContext> {
    * the ring records either way -- this decides only whether they are drawn,
    * so a snapshot is identical with it on or off.
    */
-  private muzzle = false;
+  private muzzle = true;
   private readonly templates = new Map<number, Object3D>();
   private readonly nodes = new Map<string, Live>();
   private enabled = true;

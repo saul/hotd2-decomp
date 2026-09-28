@@ -7029,13 +7029,13 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   G.g_attack_permits[0] = z.at;
   z.attack = 0;
   z.thr.stance = 0;
-  z.action = { motion: 303, ticks: 62, loop: false };
+  z.action = { motion: 303, ticks: 62 };
   check("a swing on its hit frame connects from four hundred units away",
         ThrowerStrikeConnect(z, events) && hits === 1, `${hits} hits`);
   // ...and the cancel mask is the only thing that stops it.
   z.flags2 = 0;
   z.zones = 2;                          // attack 0 names zone 2, the right arm
-  z.action = { motion: 303, ticks: 62, loop: false };
+  z.action = { motion: 303, ticks: 62 };
   RunOutInvulnerability();
   const before = hits;
   ThrowerStrikeConnect(z, events);
@@ -14379,7 +14379,7 @@ console.log("class 0x30, a fatal hit lands *during* the swing:");
   z.state = ZombieState.Strike;
   z.sub = StrikeSub.Swinging;
   z.attack = 1;
-  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  z.action = { motion: atk.strike, ticks: 4 };
   z.hp = 1;
 
   ActorSetMotionBlended(z, TYPE.motion_row["0"][MotionRow.BackAway], 0, 10);
@@ -14392,7 +14392,7 @@ console.log("class 0x30, a fatal hit lands *during* the swing:");
   // ...and the whole path: shoot it dead while the swing runs.
   z.state = ZombieState.Strike;
   z.sub = StrikeSub.Swinging;
-  z.action = { motion: atk.strike, ticks: 4, loop: false };
+  z.action = { motion: atk.strike, ticks: 4 };
   ResolveHit(z, 1, 0, NULL_HOST, rng);
   check("the shot kills it mid-swing", z.dead && z.pendingHit !== null);
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
@@ -14507,7 +14507,7 @@ console.log("class 0x30, the lunge and the swing hold through their fades:");
     // ...but with a one-shot over it, the one-shot is what is on screen.
     const z = striker(atk.distance + 20, {
       motion: atk.lunge, playTicks: 23,
-      action: { motion: 700, ticks: 9, loop: false },
+      action: { motion: 700, ticks: 9 },
     });
     ZombieStateStrike(z, EYE, rng);
     check("...while one under a one-shot is set again, out of the one-shot",

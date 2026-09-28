@@ -931,3 +931,20 @@ comparison asks ("is it taken"), not its constant** -- and before calling any
 reader of such a value faithful, grep every reader for the exe's literals.
 It is a cousin of `L3`: there one field means two things in two classes, here
 one table means one thing in two encodings.
+
+**L64 -- A count a check was calibrated on is a reading, and it can be the
+bug.** `verify_combat.py` check 16 asserted that exactly nine arc-script
+stage changes switch clips, and its docstring named two of them: "zslman's
+aside in stances 1 and 3". Those two were not leap-aside scripts at all. The
+exporter read `zslman`'s four at `0x30` apart -- one script's width -- where
+`ThrowerStateLeapAside` names them `0x60` apart with four `MOV ESI, imm32`,
+and the extra `0x30` between each pair is that stance's *pounce* script,
+which ends on a different clip. The check was written by counting what the
+export produced, so it passed the misread and would have failed the fix. The
+comment beside the address said "+0x60 a stance"; the code beside it said
+`0x30`; the annotation said "stride 0x30" and listed four motions that sit
+`0x60` apart. **When a check's expected number was measured rather than
+derived, say what it was measured from, and prefer asserting the thing the
+engine names** -- here the immediates in `.text` -- to asserting a total
+that includes whatever the reader got wrong. It is `L6` seen from the
+checker's side: the adjacent-array trap, calibrated into the test.

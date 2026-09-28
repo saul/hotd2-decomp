@@ -19,8 +19,8 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 88914 | 291 | engine |
-| `hod2lib/` | 18393 | 35 | engine |
+| `game/` | 89232 | 291 | engine |
+| `hod2lib/` | 18407 | 35 | engine |
 | `render/` | 14185 | 51 | render |
 | `app/` | 7901 | 28 | app |
 | `script/` | 4388 | 25 | engine |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 890 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **141451** | **474** | |
+| **total** | **141783** | **474** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -47,8 +47,8 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 474 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 695 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **139** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **165** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **140** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **168** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 47 members against `PlayerView`'s 30** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -57,7 +57,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 47 
 | | |
 |---|---|
 | Named functions | 1316 in `ghidra/annotations/functions.tsv` |
-| Named globals | 660 in `ghidra/annotations/globals.tsv` |
+| Named globals | 661 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 44 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

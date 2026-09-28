@@ -54,6 +54,8 @@ import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
 import { ActorRunNodeDrawHooks } from "../model_draw";
 import { ThrowerDrawBonePart } from "./draw";
+import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
+  from "../class30/head_aim";
 import { ThrowerOnShot } from "./on_shot";
 import {
   ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
@@ -522,7 +524,9 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // which grows nothing, for the next frame whenever it holds the clock
   // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
   // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
-  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart);
+  HeadAimBeginDraw(obj, obj.thr, host);
+  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
+  HeadAimEndDraw(obj, obj.thr);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
   // death chain's `0x10000` keeps a corpse off the list.
@@ -598,7 +602,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.EntranceClip:
       return ThrowerStateEntranceClip(obj);
     case ThrowerState.DelayedPounce:
-      return ThrowerStateDelayedPounce(obj, dt, rng, host, events);
+      return ThrowerStateDelayedPounce(obj, eye, dt, rng, host, events);
     case ThrowerState.Withdraw:
       return ThrowerStateWithdraw(obj, eye, dt, rng);
     case ThrowerState.LeapToPoint:
@@ -663,6 +667,10 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // The word is **sign-extended**, not zero-extended, so a descriptor setting
   // `0x8000` would raise the whole high half. None does; the shift pair says
   // so anyway rather than pretending the question is not there.
+  // `004496FE  TEST dword ptr [ESI + 0x34], 0x40000` and the `VecToAngles`
+  // after it, between the body radius and the flag word: the head aim's seed,
+  // the same as class 0x30's -- see `HeadAimSeed`.
+  HeadAimSeed(obj, obj.thr);
   obj.flags2 = ((obj.descFlags << 16) >> 16) | ThrowerFlag.Collide;
   // Then the stance, from bits 6/7/8 of what the descriptor just supplied —
   // `ECX = 3*bit8 + 2*bit7 + bit6` at 0x00449770..0x00449794, a four-arm jump

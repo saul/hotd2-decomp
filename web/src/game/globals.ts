@@ -1181,6 +1181,13 @@ export const G = {
    * pose's eye less fifteen in y, the held eye, the view-angle camera fifteen
    * units down its own axis), and `UpdateSceneViewAndLight` draws from the
    * block. See `camera/hooks.ts`.
+   *
+   * Read by routines with no `ClassFrame` as well: `EnemyZombieInit`
+   * (`FUN_00452DA0`) and `EnemyThrowerInit` (`FUN_00449620`) seed the head's
+   * aim toward `eye + (0, 15, 0)` from these three words. A spawn runs in the
+   * interpreter's task, ahead of this frame's hook, so it reads what the
+   * previous frame's hook wrote, as the engine's does. `CameraClearHookAndPose`
+   * (`FUN_0040C340`) zeroes all six words on a scene load. `[proved]`
    */
   g_camera_eye: vec3(),
   g_camera_pitch_bams: 0,

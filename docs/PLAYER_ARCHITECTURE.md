@@ -701,7 +701,10 @@ web/src/
                   (`Actor.partVisible`), `ActorDrawShadow`'s gate, and the node
                   walk a class's draw hook runs from when its pose is
                   render/'s. render/characters/draw_gates.ts applies them node
-                  by node; none of it is an alpha
+                  by node; none of it is an alpha. The head aim both combat
+                  hooks run from that walk is class30/head_aim.ts; the angles
+                  are state on each arm, and render/characters/head_aim.ts
+                  turns bone 2's own meshes around their draw
     original_mode.ts  the two-slot inventory, and the one query the branch
                   triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class

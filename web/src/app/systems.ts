@@ -194,7 +194,9 @@ export class GameSystem implements System {
     // `UpdateSceneViewAndLight`'s, both inside the tick; they used to be
     // copied in from the three.js camera, which put the drawn camera's heading
     // where the engine keeps the players' -- two different things under (2,4),
-    // whose hook holds the heading while the aim swings.
+    // whose hook holds the heading while the aim swings. The two combat
+    // `Init`s' head-aim seed reads `g_camera_eye` as the engine's hook last
+    // wrote it, which is what the exe's reads.
     // The gun lights are **not** built here -- see `GunLightBuildSystem`.
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes

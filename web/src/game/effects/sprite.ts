@@ -67,6 +67,20 @@ export enum SpriteEffectKind {
    * kind 3. Seeds a random roll, and takes the 35-unit scale law.
    */
   OriginalBlast = 0x53,
+  /**
+   * The dry-ground arm of `ZombieDeathEffectCueTick` (`FUN_004569B0`) and
+   * `ZombieDeathLandingEffect` (`FUN_00456B70`), whose wet arm is
+   * {@link Splash}: slots `0x94..0xA2`, `common.bin` 25..39, base scale 0.7.
+   * `[likely]` dust, from that choice and nothing else.
+   */
+  Dust = 0x46,
+  /**
+   * Slots `0x1339..0x1356`, `common.bin` 307..336 -- the strip the bat's and
+   * the owl's water splashes flip through -- and `PlayImpactSoundForMaterial`
+   * gives it `COMMON\BOMB2_16.WAV`. What those two routines spawn on the wet
+   * surfaces and in the rain.
+   */
+  Splash = 0x61,
   /** Exempt from the distance scale law altogether. */
   BigSand = 0x63,
 }
@@ -112,7 +126,11 @@ export interface SpriteEffect {
   pitch: number;
   yaw: number;
   roll: number;
-  /** `+0x50`, `+0x54`, `+0x58`. All three are always the same number. */
+  /**
+   * `+0x50`, `+0x54`, `+0x58`. The kind's base scale and the distance law
+   * write one number into all three; a caller's override at `params[6..8]`
+   * writes each its own (`ZombieDeathEffectCueTick`'s dust is 0.5, 1.5, 1.5).
+   */
   scale: Vec3;
   /** `+0x60` — the asset slot being drawn, and the cursor. */
   slot: number;
@@ -151,6 +169,21 @@ export function SpawnSpriteEffect(pos: Vec3, pitch: number, yaw: number,
   SpawnSpriteEffectFromParams({
     pos, pitch, yaw, scale: null, kind, faceCamera, player,
   }, host, events);
+}
+
+/**
+ * `SpawnSpriteEffectFromParamsThunk` — `FUN_004073A0`.
+ *
+ * `SpawnSpriteEffectFromParams(params)` and nothing else: the entry point the
+ * callers use that build the whole twelve-word block themselves -- which is
+ * how a caller gets a scale override in at `params[6..8]`, since
+ * `SpawnSpriteEffect` always writes `-1.0` there. `ZombieDeathEffectCueTick`'s
+ * dust is one. A separate function in the exe, so a separate one here.
+ */
+export function SpawnSpriteEffectFromParamsThunk(p: SpriteEffectParams,
+                                                 host?: GameHost,
+                                                 events?: Events): void {
+  SpawnSpriteEffectFromParams(p, host, events);
 }
 
 /**

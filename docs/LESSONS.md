@@ -341,7 +341,9 @@ at `0x00409bec`–`0x00409c03`, **after** the `JMP` to `MatrixStackPop` that
 Ghidra has marked no-return: the function body ends there, the pseudocode ends
 there with a `WARNING: Subroutine does not return`, and the call past it is in
 no xref list. `disassemble_bytes` from the last address the body claims is what
-finds it.
+finds it. The same thing hides a **loop**: `RegionDrawResidentSet`'s body ends
+at `0x0040143E` and its loop tail, `0x00401443..0x0040145F`, lies outside it,
+so the decompile of a list walk draws one entry and stops.
 
 It is **L32** one level down — that lesson is about a search over decoded
 operands seeing one addressing mode; this is about a search over Ghidra's
@@ -723,3 +725,57 @@ while one pull every three frames at the same point killed it. Before calling
 a fight unwinnable from a harness, fire at it one pull a frame; and a class
 that reads the shot record back must read the pull that marked it
 (`Actor.shotRays`), not the frame's last.
+
+**L51 — A subagent's scratch directory is its parent session's, and the
+siblings share it.** Every agent a coordinator launches is handed the same
+`scratchpad/` path, so a helper named `mutate.py` or `test_block.ts` is one
+file for all of them. Two of mine were overwritten by a sibling working on a
+different class between my writing them and my running them again, and the
+only tell was a harness notice that the file had changed on disk -- the
+insertion script had already consumed my copy, so nothing broke, which is
+luck and not a guarantee. A test block pasted into `port.test.ts` from a file
+another agent had just rewritten would have committed their assertions under
+my name. **Make a subdirectory named for your task and keep every scratch
+file in it**, and treat a name at the scratch root as something another agent
+may already own. It is L28 and L36 pointed at the one directory that is
+outside every worktree by design.
+
+**L52 — A Ghidra rename by address overwrites whatever a peer named there,
+and says so only in its result.** Porting the ring a class-0x30 corpse leaves,
+I found three routines with no Ghidra function, created them, and named them
+over MCP. `rename_function` succeeded every time. Its message read *"Renamed
+function at 0x00407e30 from 'RingEffectSpread' to ..."* -- a peer porting the
+fish had created and named the same three an hour earlier, uncommitted in its
+own worktree, and the shared database is the one place both of us wrote. The
+peer's TSV and TypeScript used its names, the database now used mine, and the
+task had two ports in two trees.
+
+Before naming anything in the shared database, **grep every live worktree's
+`ghidra/annotations/*.tsv` for the address** -- a peer's uncommitted row is
+there before it is anywhere else -- and read the `from` in every rename
+result, which is the only report that the name replaced was not `FUN_...`.
+It is `L17` pointed at a write: "I did not see a name" and "there was no
+name" are different claims.
+
+**L53 -- An arm that bumps the substate and does not return runs the next arm
+in the same frame.** Class 0x11's two launch substates end `INC byte ptr
+[EAX+5]` and then carry straight on into the code the jump table gives the
+next substate -- `0x0043B03E` into `0x0043B044`, `0x0043B6F2` into
+`0x0043B6F7` -- so the launch frame also halves the turn still owed. The port
+had each arm end in `return`, which is what a `switch` in TypeScript wants and
+what reading the arms one at a time suggests, and every hop turned one halving
+short for as long as it existed. The tell is in the addresses: an arm whose
+last instruction is not a `RET`, a `JMP` to the epilogue or a `JMP` elsewhere
+falls through, and the jump table says where to. Check each arm's last
+instruction against the next arm's first address before writing its `return`.
+
+**L54 -- "The script loaded it" is not "something draws it".** Opcode 0x50 and
+`asset_load_polfile` make a slot resident and nothing more; the model is on
+screen only if a region lists it or some routine calls `AssetDrawSlot` on it.
+The player's `StageScene` stood in for the second case with "loaded and in no
+region, so drawn", which looked right for as long as the stand-in happened to
+agree with the drawer -- and made stage 2's block 16 canal, loaded but listed
+by other regions, simply absent, while nothing said a drawer was missing. The
+drawer was class 0x41 type 1, a task no port had read. When a loaded model is
+missing or wrong, search `.text` for its slot as an immediate (and as bytes,
+for the ones in unfunctioned code): what draws it is whatever names it.

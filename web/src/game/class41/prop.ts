@@ -2,16 +2,19 @@
  * `BreakablePropUpdate` and the routines it calls.
  *
  * One prop, one frame. The engine interleaves this with its drawing — the
- * `MatrixStackPush` / `AssetDrawSlot` block is inside the same function — but
- * the port keeps only the state half, and the renderer reads `x/y/z`,
- * `pitch/yaw/roll`, `slot` and `state` back out. That seam is the `game/`
- * boundary and nothing about the behaviour crosses it.
+ * `MatrixStackPush` / `AssetDrawSlot` block is inside the same function. The
+ * port keeps the state half and the **matrix** half: each draw block ends in
+ * `MatrixStore(obj+0x2E4)`, and that matrix is state, because the shatter
+ * reads it on a later frame. So the draw's composition is computed here, into
+ * `drawMatrix`, and the renderer places the model with it; only the
+ * `AssetDrawSlot` itself is `render/`'s.
  *
  * There are **two** lifecycles here and they are easy to conflate:
  *
  * * **Destroyed** — two shots. A prop at stack level 0 turns into the break
  *   puff (`BreakableEffectUpdate`) and releases whatever it was hiding; one
- *   above level 0 bursts into fragments and is gone. Neither falls.
+ *   above level 0 bursts into fifteen pieces (`class41/shatter.ts`) and is
+ *   gone. Neither falls.
  * * **Toppled** — a prop whose supporting members have all left notices the
  *   floor beneath it has gone and falls under gravity until a hull corner
  *   touches the ground. That is the entire stack collapse: nothing pushes
@@ -33,6 +36,10 @@ import {
   BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, PropFamily,
   type BreakableProp,
 } from "./prop_state";
+import { BreakablePropSpawnShatter, type ShatterCamera } from "./shatter";
+import {
+  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+} from "../matrix";
 
 // -- the constants the routine spells out ----------------------------------
 
@@ -50,6 +57,38 @@ export const BREAKABLE_SHAKE = 1.0;
 export const BREAKABLE_SHAKE_DECAY = 0.85;
 /** A prop standing on a cracked one is shaken by half as much. */
 export const BREAKABLE_SHAKE_NEIGHBOUR = 0.5;
+/**
+ * The rattle's draw: `(rand() % 0x97 - 75.0) * shake * 0.01` (`0x00464980`),
+ * once for x and once for z, and only while `shake > 0.01`.
+ */
+export const BREAKABLE_SHAKE_SPREAD = 0x97;
+export const BREAKABLE_SHAKE_CENTRE = 75;
+export const BREAKABLE_SHAKE_SCALE = 0.01;
+/** The rattle stops being drawn once `shake` falls to this. */
+export const BREAKABLE_SHAKE_FLOOR = 0.01;
+
+/**
+ * `g_script_flags[0x77]` — raised in scene 1 (stage 2), it despawns every
+ * group prop on its next frame (`0x004646B3`).
+ */
+export const SCRIPT_FLAG_PROP_SWEEP = 0x77;
+/**
+ * The hit gate's one exception: in scene 1, block `0x11`, a shot does nothing
+ * until `g_script_flags[0x28]` is raised (`0x004646E5`..`0x004646FD`).
+ */
+export const PROP_HIT_HOLD_SCENE = 1;
+export const PROP_HIT_HOLD_BLOCK = 0x11;
+export const SCRIPT_FLAG_PROP_HIT_RELEASE = 0x28;
+/**
+ * `g_script_flags[0x65]` — while it reads 1, every standing group-4 prop
+ * breaks by itself (`0x004648FE`): the script's own demolition, and the only
+ * way group 4 ever breaks, since the hit gate skips it.
+ */
+export const SCRIPT_FLAG_GROUP4_BREAK = 0x65;
+/** The group the player's shots never break. */
+export const SCRIPT_BROKEN_GROUP = 4;
+/** `MOV [ESI+0x328], 0x1D9` — the effect variant the script break's puff plays. */
+export const GROUP4_BREAK_EFFECT_VARIANT = 0x1d9;
 
 /** The pitch a topple eases toward, signed by which way it went. */
 export const BREAKABLE_REST_PITCH = 0x4000;
@@ -173,25 +212,6 @@ export function BreakablePropGroundContact(p: BreakableProp): boolean {
 }
 
 /**
- * `BreakablePropSpawnShatter` — `FUN_00465170`.
- *
- * A prop above stack level 0 does not topple, it bursts: fifteen fragments,
- * each thrown along its own bearing at 0.1..0.3 and spinning by up to
- * +/-0x400 on each axis.
- *
- * [diverges] The port raises an event and lets the prop go; the fragments are
- * a render-only effect that nothing in `game/` observes, and modelling fifteen
- * of them per break would put state in the snapshot that no rule reads back.
- * The offsets and angles are exported as `g_shatter_fragment_offsets` and
- * `g_shatter_fragment_angles` for whoever draws them.
- */
-export function BreakablePropSpawnShatter(p: BreakableProp,
-                                          events?: Events): void {
-  events?.emit("prop.shattered", { id: p.id, x: p.x, y: p.y, z: p.z });
-  ActorDespawnProp(p);
-}
-
-/**
  * `BreakableEffectUpdate` — `FUN_00465500`. What a destroyed ground-level prop
  * becomes: the engine overwrites the object's entry point with this, so the
  * prop stops being a prop and spends 0x48 frames as a puff before it dies.
@@ -241,9 +261,20 @@ export function ActorKillProp(p: BreakableProp): void {
 
 /**
  * `BreakablePropUpdate` — `FUN_00464620`. One prop, one 60 Hz frame.
+ *
+ * `cam` is the host's two camera matrices, or null with none: the draw blocks
+ * compose onto the live view and `MatrixStore` keeps the result, and the
+ * shatter takes that view back off. See {@link BreakableProp.drawView}.
+ *
+ * Ghidra's body for this routine is twelve instructions long and its
+ * pseudocode returns out of every draw block; the routine is read here from
+ * the disassembly of `0x00464620`..`0x004650C2`, where each draw block runs on
+ * into a common tail at `0x00464FD9` -- the shadow and the shot-test
+ * registration (L37).
  */
 export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
-                                    events?: Events): void {
+                                    events?: Events,
+                                    cam: ShatterCamera | null = null): void {
   // A destroyed ground-level prop has had its entry point replaced; it runs
   // the puff and nothing else.
   if (p.family === PropFamily.Effect) { BreakableEffectUpdate(p); return; }
@@ -260,43 +291,86 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
     p.lastStepIndex = G.g_evt_step_index;
   }
 
+  // `CMP word ptr [g_scene_index], 1; MOV AL, [0x009C7277]` -- stage 2's
+  // sweep, the same one `PropExpireByStepLifetime` makes for the generic
+  // props, inlined here.
+  if (G.g_scene_index === 1
+      && (G.g_script_flags[SCRIPT_FLAG_PROP_SWEEP] ?? 0) !== 0) {
+    ActorDespawnProp(p);
+    return;
+  }
+
   const rec = BreakableGroupMembers(p.group)[p.member];
   const level = rec?.level ?? 0;
 
   // -- the hit ------------------------------------------------------------
-  // Gated on bit 3, and skipped entirely for group 4, whose props are scenery
-  // the script breaks rather than the player.
-  //
-  // [open] The engine also gates on a scene condition — `!(g_scene == 1 &&
-  // DAT_009A2BC0 == 0x11 && DAT_009C7228 == 0)` — over three script globals
-  // that have not been read out. Nothing here reproduces it.
-  if ((p.flags & BreakableFlag.Hit) !== 0 && p.group !== 4) {
+  // Gated on bit 3; skipped entirely for group 4, whose props the script
+  // breaks rather than the player; and held in scene 1's block 0x11 until
+  // `g_script_flags[0x28]` is raised -- `g_evt_block_index` is `0x009A2BC0`
+  // and the flag byte `0x009C7228`.
+  if ((p.flags & BreakableFlag.Hit) !== 0 && p.group !== SCRIPT_BROKEN_GROUP
+      && !(G.g_scene_index === PROP_HIT_HOLD_SCENE
+           && G.g_evt_block_index === PROP_HIT_HOLD_BLOCK
+           && (G.g_script_flags[SCRIPT_FLAG_PROP_HIT_RELEASE] ?? 0) === 0)) {
     if (p.hp === 1) {
-      BreakDestroy(p, level, rng, events);
-      // `BreakDestroy` may have swapped the entry point out from under us.
-      if (p.dead || (p.family as PropFamily) === PropFamily.Effect) {
-        p.flags &= ~HIT_FLAG_MASK;
-        return;
-      }
+      // `BreakablePropSpawnShatter(obj); ActorKill();` -- the kill longjmps
+      // out of the walk, so nothing below runs for a stacked prop.
+      if (BreakDestroy(p, level, rng, events, cam)) return;
     } else if (p.hp === 2) {
       BreakCrack(p, level, rng, events);
     }
   }
+  // `AND ECX, 0xFFFFFFF1` at `0x004648F8` -- after a ground-level destroy too:
+  // that one swaps the entry point and then carries on with the rest of this
+  // frame, rattle draws and all.
   p.flags &= ~HIT_FLAG_MASK;
 
-  // -- the shake ----------------------------------------------------------
-  // Purely a draw offset in the engine: `(rand() % 0x97 - 75) * shake * 0.01`
-  // on x and z, added at draw time and never written back. The renderer
-  // applies it; the port only decays it, because a shake that moved the prop
-  // would drag its hull and its hit test along with it.
-  if (p.shake > 0.01) p.shake *= BREAKABLE_SHAKE_DECAY;
+  // -- the script's own break of group 4 ------------------------------------
+  // `if (g_script_flags[0x65] == 1 && group == 4 && state == 0)` -- no score,
+  // no sound, no item: the stack comes down because the script says so.
+  if ((G.g_script_flags[SCRIPT_FLAG_GROUP4_BREAK] ?? 0) === 1
+      && p.group === SCRIPT_BROKEN_GROUP
+      && p.state === BreakableState.Standing) {
+    p.state = BreakableState.Removed;
+    if (level !== 0) {
+      BreakablePropSpawnShatter(p, rng, cam, events);
+      ActorKillProp(p);
+      return;
+    }
+    // `+0x294 = 0` is written here and in the destroy arm; nothing the port
+    // has read reads it, so it is not carried.
+    p.effect = 0;
+    p.effectVariant = GROUP4_BREAK_EFFECT_VARIANT;
+    p.effectFrames = 0;
+    p.effectPrevFrame = 0;
+    p.family = PropFamily.Effect;
+  }
 
+  // -- the rattle -----------------------------------------------------------
+  // Two `rand()`s a frame for as long as `shake > 0.01` -- a draw offset only,
+  // added to the translate and never written back, so the hull and the shot
+  // test stay put. The draws are the game's: they come out of the same
+  // generator every other `rand()` in the frame does.
+  p.shakeX = 0;
+  p.shakeZ = 0;
+  if (p.shake > BREAKABLE_SHAKE_FLOOR) {
+    p.shakeX = ((MsvcRand(rng) % BREAKABLE_SHAKE_SPREAD)
+      - BREAKABLE_SHAKE_CENTRE) * p.shake * BREAKABLE_SHAKE_SCALE;
+    p.shakeZ = ((MsvcRand(rng) % BREAKABLE_SHAKE_SPREAD)
+      - BREAKABLE_SHAKE_CENTRE) * p.shake * BREAKABLE_SHAKE_SCALE;
+    p.shake *= BREAKABLE_SHAKE_DECAY;
+  }
+
+  // The draw block is picked by the state the switch read, so the frame a
+  // prop starts to fall is still drawn by the standing block.
+  const drawn = p.state;
   switch (p.state) {
     case BreakableState.Standing: StandingStep(p, rec, level, rng); break;
     case BreakableState.Falling: FallStep(p, events); break;
     case BreakableState.Settled: SettleStep(p); break;
     case BreakableState.Removed: break;
   }
+  BreakablePropStoreDrawMatrix(p, drawn, cam);
 
   // `if (obj+0x192 != 3) { ...transform...; RegisterForShotTest(obj); }` --
   // the routine's last four lines. The rise is assigned **only** inside the
@@ -310,25 +384,76 @@ export function BreakablePropUpdate(p: BreakableProp, rng: Rng,
   }
 }
 
-/** The second shot. Ten points, and then one of two ways to leave. */
+/**
+ * `[port-only]` as a function: the matrix half of `BreakablePropUpdate`'s
+ * three draw blocks, each of which ends `AssetDrawSlot(obj+0x28C);
+ * MatrixStore(obj+0x2E4)`.
+ *
+ * ```
+ * standing  Translate(x+sx, y, z+sz); RotY(yaw)
+ * falling   Translate(x+sx, y, z+sz); RotY(yaw); RotZ(roll); RotX(pitch);
+ *           Translate(0, -3.770148, 0)
+ * settled   Translate(restX+sx, restY, restZ+sz); RotY; RotZ; RotX;
+ *           Translate(-hull[c].x, -(hull[c].y - 3.770148), -hull[c].z);
+ *           Translate(0, -3.770148, 0)
+ * ```
+ *
+ * `0xC0714A1B` is the `-3.770148` both lower blocks push (`0x00464B0D`,
+ * `0x00464D39`); a removed prop draws nothing and stores nothing.
+ */
+function BreakablePropStoreDrawMatrix(p: BreakableProp, drawn: BreakableState,
+                                      cam: ShatterCamera | null): void {
+  if (drawn === BreakableState.Removed) return;
+  const m = MatIdentity();
+  if (drawn === BreakableState.Settled) {
+    MatrixTranslate(m, p.restX + p.shakeX, p.restY, p.restZ + p.shakeZ);
+  } else {
+    MatrixTranslate(m, p.x + p.shakeX, p.y, p.z + p.shakeZ);
+  }
+  MatrixRotateY(m, p.yaw);
+  if (drawn !== BreakableState.Standing) {
+    MatrixRotateZ(m, p.roll);
+    MatrixRotateX(m, p.pitch);
+    if (drawn === BreakableState.Settled) {
+      const [cx, cy, cz] = T.breakables?.hull?.[p.contact] ?? [0, 0, 0];
+      MatrixTranslate(m, -cx, -(cy - BREAKABLE_HEIGHT), -cz);
+    }
+    MatrixTranslate(m, 0, -BREAKABLE_HEIGHT, 0);
+  }
+  p.drawMatrix = m;
+  p.drawView = cam ? cam.w2v.slice(0, 16) : [];
+}
+
+/**
+ * The second shot. Ten points, and then one of two ways to leave. Returns true
+ * when the object has been killed and the frame is over for it.
+ */
 function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
-                      events?: Events): void {
+                      events: Events | undefined,
+                      cam: ShatterCamera | null): boolean {
   BreakablePropAwardHit(p.flags, true, rng);
   p.state = BreakableState.Removed;
   SetBreakableMemberSlot(p.group, p.member, 0);
   events?.emit("prop.broken", { id: p.id, sound: SFX_PROP_BREAK });
 
   if (level !== 0) {
-    // Stacked: it bursts where it stands and is gone this frame.
-    BreakablePropSpawnShatter(p, events);
-    return;
+    // Stacked: `BreakablePropSpawnShatter(obj); ActorKill();` at
+    // `0x00464BBD`. It bursts where its last draw put it and is gone -- an
+    // `ActorKill`, not an `ActorDespawn`; the member slot is already clear.
+    BreakablePropSpawnShatter(p, rng, cam, events);
+    ActorKillProp(p);
+    return true;
   }
   // Ground level: the object's entry point is replaced with the puff, and
-  // this is where whatever it was hiding comes out.
-  p.family = PropFamily.Effect;
-  p.effect = 0;
+  // this is where whatever it was hiding comes out. The arm writes `+0x294`,
+  // `+0x32C` and `+0x330` -- **not** `+0x324`, so a one-shot target's puff
+  // keeps its own effect id -- and hands the lifetime byte to `+0x11C`.
   p.effectFrames = 0;
+  p.effectPrevFrame = 0;
+  p.family = PropFamily.Effect;
+  p.hp = p.lifetime;
   ReleaseHiddenItem(p, events);
+  return false;
 }
 
 /** The first shot. No score at all — only the hit count and the crack. */
@@ -338,9 +463,11 @@ function BreakCrack(p: BreakableProp, level: number, rng: Rng,
     BreakablePropAwardHit(p.flags, false, rng);
   }
   p.slot = BreakableSlot.Broken;
-  // [diverges] A prop cracked while still standing is turned to face the
-  // camera — `obj+0x1D0 = g_camera_angles[g_camera_index].y`. The port has no
-  // camera record, so the yaw the group placer drew is kept.
+  // `if (obj+0x192 == 0) obj+0x1D0 = g_camera_block_yaw_bams[g_camera_index]`
+  // (`0x0046473E`, the `* 0x69` dword stride): a prop cracked while still
+  // standing turns to face the camera. `g_camera_block_yaw_bams` —
+  // `0x009A60D0` — is the one block the port keeps.
+  if (p.state === BreakableState.Standing) p.yaw = G.g_camera_block_yaw_bams;
   p.hp -= 1;
   p.shake = BREAKABLE_SHAKE;
   events?.emit("prop.cracked", { id: p.id, sound: SFX_PROP_CRACK });

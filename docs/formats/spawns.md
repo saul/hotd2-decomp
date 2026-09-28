@@ -64,7 +64,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 
 | Class | Handler | Spawns | What it is | Confidence |
 |---|---|---|---|---|
-| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported, see PLAYER_PROGRESS *Three stage-2 set pieces*. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
+| `0x41` | `PropContainerPlacerUpdate` (`FUN_00461CD0`) | 441 | **Breakable-prop / item-container placer.** A transient stub: dispatches on `obj+0x130C` through `g_class41_constructors`, 79 entries at `0x00593580`, builds child actors, then `ActorKill`s itself. Never drawn, never damaged. Type 0 is the breakable group (8 spawns) and is **ported**; **type 1** (`PlaceWaterSurface`, `FUN_00462F70`, 15 spawns) is not a prop at all but the task that draws and ripples a canal water tile, `WaterSurfaceUpdate` (`FUN_0046E3A0`) -- the tile is `g_water_surface_slots[+0x1F4]` (`0x00593DA4`) and `+0x11C` a step lifetime -- and is **ported**, see `docs/formats/water.md` §2; type 4 (`PlaceKindedProp`, 70 spawns) and **type 43** (`PropUpdateType43`, 7) both read `obj+0x6C` as an object kind; type 32 is the **lift** (`LiftUpdate`) and is ported; type 13 (`PropUpdateType13`, `FUN_00467F50`) is the part that drops out of stage 2's clock tower on script flag `0x6D`, and type 35 (`PropUpdateType35`, `FUN_0046B320`) the double door stage 2's block-5 civilian stands behind, drawn at **literal world coordinates** whatever its placement -- both ported, see PLAYER_PROGRESS *Three stage-2 set pieces*. Types **38, 39 and 44** (`PlaceTable38Props`, `PlaceTable39Stacks`, `PlaceTable44Props`) and **40** (`PlaceFragmentProps` / `PropUpdateType40`, all twenty sub-kinds) build their objects from tables in the image and are ported whole — see *Stage 1's church* below. The 44 types `PlaceGenericProp` serves share one constructor and a jump table — `g_place_generic_prop_arm_index` at `0x00462978` and `g_place_generic_prop_arms` at `0x004628D4`, indexed `type - 6` — so which arm sets what is read and not guessed. The retail stages reach 74 of the 79. See *The generic props' `+0x11C`* below. | `[proved]` |
 | `0x30` | `FUN_00452DA0` | 288 | **The zombie.** HP, per-body-part damage zones, 80 points on kill / 10 per hit / 120 + combo on a head hit, a 54-state machine at `0x00592AE8`. Increments `g_enemies_alive`. State 2 (`FUN_00455720`) plays `COMMON2\ZOMBIE_041_16.wav`; the type-2 setup plays `CHAIN_SAW_22.wav` and a later state `KNIFE1_44.wav`. State 37, `ZombieStateCarryProp`, carries a **classless prop** (`CarriedPropInit`, `FUN_00442740`) typed by its script's `+0x00` out of `g_carried_prop_types` and throws it through `g_prop_behaviours` 1/3/4/5 -- stage 3's drums and stage 1's barrel; see `game/carried_prop.ts`. | `[proved]`, by the game's own sound record **Eleven of the 54 states never look at the camera**: they work on `obj+0x1394`, the object the actor was built for, and for 47 of the 59 spawns that reach one that is the class-0x10 civilian whose `CivilianInit` built them. See docs/formats/civilians.md. |
 | `0x44` | `PropPlacerDispatch44` (`FUN_00472B10`) | 204 | **Prop placer.** Same shape as 0x41: dispatches on `obj+0x11C` through `g_class44_subtypes`, 18 entries at `0x00595AB8`, builds a child, `ActorKill`s. Selectors 0 (`PropBuildScriptFlagEffect`), 11 (`PropBuildRisingDoor`), 16 (`PlaceFallingContainer`) and 17 (`PlaceStoryModeSwitch`) are read and ported; 1, 2 and 4 are the hinges (`HingeUpdate`, see PLAYER_PROGRESS *Scripted scenery*); 9 (`PropBuildFlagLiftedProp`, `0x00473300` — one asset slot that rises 0.8 a frame to y 10 on one script flag and is killed by another; no collision) is read and unported; 15 is `PropBuildKindedProp`; the rest are unread. | `[proved]` |
 | `0x25` | `ScriptedHumanoidInit` (`FUN_004840D0`) | 142 | **Script-driven humanoid actor.** A bytecode VM (`FUN_004842A0`) drives a skinned character. Not an enemy, not damageable, awards nothing — shots land in its hit slot and nothing consumes them. **It is also how the game draws the player's own body in a cut scene** — see *`op 10` is an `if`* below. | `[proved]` |
@@ -96,11 +96,11 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. | `[proved]` |
 | `0x20` | `OneHitTargetInit` (`FUN_00448ED0`) | 36 | **The one-hit target.** A skinned actor — all 36 are character type 7, `char_adv00.bin` — that **dies to any single hit**: nothing in the class subtracts from `obj+0x11C`, so the branch on `obj+0x34` bit 3 is the whole damage model. Scores like the combat classes — 10 a bone, 120 + `g_head_combo_bonus` on bone 2, 80 for the kill — then plays motion 988, holds its last frame and sinks 0.04 a frame for 120 frames before despawning. Not an enemy: the Init increments no counter, so no `wait_enemies_alive` gate sees one. Un-shot it is removed when the camera reaches `tail+0x02` at frame `tail+0x04`. `obj+0x130C` is a sub-type: 0 stands (7 spawns), 1 spins ±0x40 BAMS a frame with `obj+0x11C` as the direction (5), 2 is clamped into an x/z box at `tail+0x08`..`+0x14` and turns 0x100 away at each wall (24). Motion comes from `tail+0x06`, and **0 there means `g_class20_idle_motions[rand() & 3]`**. **Ported** (`game/class20/`). | `[proved]` |
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
-| `0x60` | `ChapterCardInstall` (`FUN_004342E0`) | 8 | **The chapter card**, and the actor `wait_script_flag 0xF8` waits for. Placed by `spawn_simple` (0x0A), not by a placement descriptor: its whole record is `{class 0x60, hp 0}` in `comevtbl.bin` at `0x00977234`, so it has no position at all. An installer first — `g_GameMode == 3` and `g_app_state == 0x0B` each swap in a different update — then a two-sub card: sub 0 seats the lights and the eight text slots at `0x007DCBA0` and latches `obj+0x11C = 0xB4`, sub 1 draws and counts it down, and at zero it raises **`g_script_flags[0xF8]`** at `0x004348C1` and `ActorKill`s. That one instruction is the only literal writer of flag 248 in the image. A pad press (`g_pad_state` bit 2) cuts the dwell short once it is below `0xA0`, and bit `0x20000` cuts it at any time (`0x00434802`–`0x00434826`: the dwell is set to 1 and the decrement straight after takes it to zero). While it is up, bit `0x20` of `g_screen_furniture_flags` is set, and `RegionDrawResidentSet`, `ScriptedHumanoidDraw`, `SetPiecePropDrawAndTick`, `St1VehicleUpdate` and `Class22CutsceneHoldUntilChapterCard` all test it — the card is a full screen with the world stopped behind it. **Ported** (`game/class60/`) — the lifetime and the flag; the card itself is screen furniture the player does not draw, and by the user's decision the port takes the `0x20000` skip on every card, so the flag is up on the card's first update. | `[proved]` |
-| `0x61` | `ResultCardInstall` (`FUN_00434EF0`) | 5 | **The stage-clear card**, and `wait_script_flag 0xFE`'s only opener: a whole-image byte search for `0x009C72FE` finds exactly one instruction, `MOV byte ptr [0x009C72FE], 0x1` at `0x0043567C`, and it is this actor's last act. Sub 0 drops `g_nFiringGate`, latches `obj+0x11C = 0x1A4` (420 frames) and falls into the tally; sub 1 hands over to the score count-up once the dwell is at or below `0x78`; every arm ends on the same decrement. **Ported** (`game/class61/`), on the same terms as 0x60. | `[proved]` |
+| `0x60` | `ChapterCardInstall` (`FUN_004342E0`) | 8 | **The chapter card**, and the actor `wait_script_flag 0xF8` waits for. Placed by `spawn_simple` (0x0A), not by a placement descriptor: its whole record is `{class 0x60, hp 0}` in `comevtbl.bin` at `0x00977234`, so it has no position at all. An installer first — `g_GameMode == 3` and `g_app_state == 0x0B` each swap in a different update — then a two-sub card: sub 0 seats the lights and the eight text slots at `0x007DCBA0` and latches `obj+0x11C = 0xB4`, sub 1 draws and counts it down, and at zero it raises **`g_script_flags[0xF8]`** at `0x004348C1` and `ActorKill`s. That one instruction is the only literal writer of flag 248 in the image. A pad press (`g_pad_state` bit 2) cuts the dwell short once it is below `0xA0`, and bit `0x20000` cuts it at any time (`0x00434802`–`0x00434826`: the dwell is set to 1 and the decrement straight after takes it to zero). While it is up, bit `0x20` of `g_screen_furniture_flags` is set, and `RegionDrawResidentSet`, `ScriptedHumanoidDraw`, `SetPiecePropDrawAndTick`, `St1VehicleUpdate` and `Class22CutsceneHoldUntilChapterCard` all test it — the card is a full screen with the world stopped behind it. **Ported** (`game/class60/`) — the lifetime, the flag and the furniture bit (`OR AL, 0x20` at `0x0043436B` in sub 0 and in both installer arms, `AND AL, 0xDF` at `0x004348C7` after the flag); the card itself is screen furniture the player does not draw, and by the user's decision the port takes the `0x20000` skip on every card, so the flag is up on the card's first update — and bit `0x20` goes up and down inside that one update, as it does in the exe for a player who skips on the first frame, so no reader ever sees it. | `[proved]` |
+| `0x61` | `ResultCardInstall` (`FUN_00434EF0`) | 5 | **The stage-clear card**, and `wait_script_flag 0xFE`'s only opener: a whole-image byte search for `0x009C72FE` finds exactly one instruction, `MOV byte ptr [0x009C72FE], 0x1` at `0x0043567C`, and it is this actor's last act. Sub 0 drops `g_nFiringGate`, latches `obj+0x11C = 0x1A4` (420 frames) and falls into the tally; sub 1 hands over to the score count-up once the dwell is at or below `0x78`; every arm ends on the same decrement. Bit `0x10` of `g_screen_furniture_flags` is up from sub 0 (`OR EDX, 0x10` at `0x00434FD0`) until the frame the flag goes up (`AND AL, 0xEF` at `0x00435683`), and `HudDrawShutterState` (state 4) and `HudDrawLives` stand aside for it. **Ported** (`game/class61/`), on the same terms as 0x60, bit included. | `[proved]` |
 | `0x62` | `ResultCardTally` (`FUN_00435930`) | 5 | The result card's companion, placed by `spawn_simple 0x00977244` immediately before it. Loads texbank `0x16A` and sound `0x7C`, then walks the per-scene rescue list at `0x0055DF50` against `g_civilians_rescued_by_scene`. **Writes no script flag** — every writer in the image falls outside its range — so the port names it and gives it no module. | `[proved]` |
 | `0x63` | `InitCutsceneSkipWatcher` (`FUN_00435F20`) | 45 | The commonest `spawn_simple` record (`0x0097724C`), at the top of most steps in every stage. Installs `CheckCutsceneSkipRequest` from the task table at `0x005934E4`; the installed update `ActorKill`s outright while `DAT_009A2D7C` is zero. **Writes no script flag.** | `[proved]` |
-| `0x46` | `PlaceBats` (`FUN_0042D9C0`) | 27 | **The bat**, and two things say so: character type `0x1E` is `zabat.bin` and the wing actor's `0x1F` is `zabat_wing.bin`, and every death plays `COMMON2\KOUMORI1_22.wav` or `KOUMORI2_22.wav` — *kōmori*. (These are the records the owl row notes as existing and unplayed by class `0x43`; this is the class that plays them.) A **placer**: every path through the handler ends in `ActorKill`. `obj+0x130C`, the opcode-0x09 descriptor's `+0x25`, picks one of three flights, and each member is a `0x13D8`-byte actor with clip `0x407`, a 4.0 shot sphere, `BatDrawBoneSlot` at `obj+0x12EC` and a separate wing actor from `SpawnBatWings`. **Sub-type 0** (24 spawns, four flights of six) is one bat per descriptor running `BatDiveUpdate`; **sub-type 1** (1 spawn) builds 25 running `BatScatterUpdate`; **sub-type 2** (2 spawns) builds 6, or 8 with two players, running `BatSwarmUpdate`. Sub-types 0 and 2 increment **both** enemy counters and give them back on despawn; sub-type 1 touches neither. 80 points, no hit points at all — `obj+0x11C` is a member index, not health. **Ported** (`game/class46/`) — all three sub-types, the wing actor, the shot and the splash. Sub-type 0 draws in full, wings included, off a synthetic placement the exporter emits for the wing. The two placers' runtime children run but are not drawn: they have no descriptor to key a row on. See *The bat's four flights* below. | `[proved]` |
+| `0x46` | `PlaceBats` (`FUN_0042D9C0`) | 27 | **The bat**, and two things say so: character type `0x1E` is `zabat.bin` and the wing actor's `0x1F` is `zabat_wing.bin`, and every death plays `COMMON2\KOUMORI1_22.wav` or `KOUMORI2_22.wav` — *kōmori*. (These are the records the owl row notes as existing and unplayed by class `0x43`; this is the class that plays them.) A **placer**: every path through the handler ends in `ActorKill`. `obj+0x130C`, the opcode-0x09 descriptor's `+0x25`, picks one of three flights, and each member is a `0x13D8`-byte actor with clip `0x407`, a 4.0 shot sphere, `BatDrawBoneSlot` at `obj+0x12EC` and a separate wing actor from `SpawnBatWings`. **Sub-type 0** (24 spawns, four flights of six) is one bat per descriptor running `BatDiveUpdate`; **sub-type 1** (1 spawn) builds 25 running `BatScatterUpdate`; **sub-type 2** (2 spawns) builds 6, or 8 with two players, running `BatSwarmUpdate`. Sub-types 0 and 2 increment **both** enemy counters and give them back on despawn; sub-type 1 touches neither. 80 points, no hit points at all — `obj+0x11C` is a member index, not health. **Ported** (`game/class46/`) — all three sub-types, the wing actor, the shot and the splash, and every bat and wing is drawn: the exporter emits a synthetic row at the address the port's placer gives each runtime child (`BatChildAt`, `BatWingAt`), parented to the placer's descriptor — one wing row per sub-type-0 descriptor, 25 bodies and 25 wings behind the scatter's, 8 and 8 behind each swarm's. See *The bat's four flights* below. | `[proved]` |
 | `0x45` | `Boss3ClassHandler` (`FUN_0041FC00`) | 37 | **The stage-3 boss** ("the Tower"): `boss3.bin` (`0x49`) and `boss3l.bin` (`0x48`), sounds `STAGE3_SE\BOSS3_n` / `STAGE6_SE\BOSS3_n`. `desc+0x25` is a subtype (jump table `0x0041FD8C`): 0 the opening head and 1 its bystander (blocks 11/13), **2 the five heads** (`desc+0x22` = index 0..4; idx 2 is the big `boss3l` head and the only one that counts), 3 two held bystanders, 5 **the body** that swims a path, drives the camera and lunges; 4 is `NoOpStub`. `g_boss3_variant` from the block: stage 3 blocks 11/15 → 0, 13/17 → 1, stage 6 block 2 → 2 (heads only). Writes **no** script flag; reads 0–4. Opens the `wait_enemies_present 0` gates: head idx 2 decrements both counters 180 frames after the heads fall, the body at its death. Heads 45 hp (30 in stage 6) on the weak bone with the jaw open; the body 120 hp. `BossHpBarSpawn(320, 35)` twice per stage-3 fight. Read in full, not ported: [`docs/re/boss-tower.md`](../re/boss-tower.md). | `[proved]` |
 
 The row above used to read *"`0x20`, `0x45`, `0x46` … Not reached. `0x20`
@@ -150,18 +150,46 @@ permit: an unshot bat always connects, and always leaves.** That is also why
 the `wait_enemies_present 0` at the end of each of these steps cannot deadlock
 — the flight ends itself.
 
-A hit is only taken while `obj+0x1376` is 1 or 2, so a **sub-type-0 bat is
-invulnerable for its whole launch delay**. Sub-type 2 gates only on
-`!= 2`, so a swarm bat *is* killable while it is still orbiting; the two
-handlers differ in that one comparison and nowhere else that matters.
+A diving bat takes a hit only while `obj+0x1376` is 1 — the test is
+`!= 2 && != 0` (`0x0042E294`..`0x0042E29F`) — so it **cannot die during its
+launch delay; but it is registered for the shot test in every state**, and
+bit 3 of `obj+0x34` is cleared only by the arm that takes the hit
+(`AND AL, 0xF7` at `0x0042E2A5`). A shot that lands while it waits is still
+standing on its first flying frame, and kills it then. Sub-type 2 gates only
+on `!= 2`, so a swarm bat *is* killable while it is still orbiting. The
+scatter has no test at all: it takes its hit **inside** its flying arm, which
+then runs on — the kill frame is still a flying frame — and it registers for
+the shot test at the end of that arm alone (`0x0042ED16`), so a waiting or
+falling scatter bat cannot be hit.
 
 The wing is a second skinned actor, not a part of the body. `BatWingUpdate`
 (`FUN_0042F660`) finds its body each frame in `g_bat_members`
-(`0x007DC918`, 25 slots per sub-type), seats itself on the body's bone matrix
-translated `(0, 1, 2)`, copies the body's motion frame counter, and **despawns
-the frame its body's slot goes empty**. Its clip comes from a paired lookup in
+(`0x007DC918`, 25 slots per sub-type), seats itself at
+`g_camera_blocks[cur] * body+0x2C4 * (0, 1, 2)` — `body+0x2C4` being node 1's
+draw record `+0x28`, the matrix `SkeletonEmitNode` (`FUN_004114C0`) stores
+after the node's own translate and turn, so the seat carries the body's pitch
+and roll, its 0.6 model scale, the clip's root height and both of the clip's
+rotations — takes `obj+0x64 = 0xE800` and `obj+0x68 = body+0x68 + 0x8000`,
+copies the body's motion frame counter, and **despawns the frame its body's
+slot goes empty**. It never registers for the shot test or the camera: the
+routine ends on its draw (`0x0042F7D8`). Its clip comes from a paired lookup in
 `g_bat_body_motions` / `g_bat_wing_motions`, both of which ship five identical
 rows, so the answer is always `0x406`.
+
+Every body and every wing builds its model (`ActorBuildSkinnedModel`, so each
+claims a `g_hit_slots` entry in build order), is drawn in rotation order 5
+(`obj+0x1FC = 5`: `Rz Ry Rx` after the translate) and at its character type's
+size (0.6 for `0x1E`, 0.7 for `0x1F`).
+
+**The splash** `[proved]`: a scatter or swarm corpse that falls past
+`y = -25` calls `SpawnBatSplash` (`FUN_0042F980`) with its own `x, y, z`,
+which allocates a `0x50`-byte task running `BatSplashUpdate` (`FUN_0042F930`)
+at `(x, -25.0, z)` — the `y` argument is not read. The task draws
+`AssetDrawSlot(0x1339 + n)` under a bare `MatrixTranslate`, `n` running 0 to
+`0x1D` one a frame from the frame it is made, and kills itself after the
+thirtieth: `common.bin` 307..336, the same run the owl's and the fish's water
+splashes use. The sound (`SIBUKI8`) is the caller's, and the swarm plays it in
+stage 3 only.
 
 `tools/verify_bats.py` asserts the whole chain — the 24/1/2 sub-type split,
 the four complete flights, the twelve spline slots they reach, both motion
@@ -848,13 +876,55 @@ them:
   overwritten with `BreakableEffectUpdate` (`FUN_00465500`) — it becomes a
   puff for `0x48` frames and is gone. It does not fall.
 * A prop **above** level 0 that is destroyed bursts through
-  `BreakablePropSpawnShatter` (`FUN_00465170`) into 15 fragments and dies.
+  `BreakablePropSpawnShatter` (`FUN_00465170`) into 15 fragments and dies
+  (`ActorKill`, not `ActorDespawn`). See *The shatter* below.
 * A prop only *falls* when the members it names as supports have all gone. It
   then drops under `0.01361` a frame, spinning by at least `0x80`, until
   `BreakablePropGroundContact` (`FUN_00465590`) finds one of the 96 points of
   `g_breakable_hull_points` below the floor — at which point it settles onto
   that corner. That is the whole stack collapse: nothing pushes anything, and
   each prop only ever checks what it is standing on.
+
+**Group 4 is broken by the script, never by a shot.** The hit block skips it,
+and while `g_script_flags[0x65]` reads 1 every standing group-4 member breaks
+by itself: a stacked one shatters, a ground one becomes the puff with effect
+variant `0x1D9` — no score, no sound, no item (`0x004648FE`). `[proved]`
+
+**The hit gate has one more exception:** in scene 1 (stage 2), block `0x11`,
+a shot does nothing until `g_script_flags[0x28]` is raised; and in scene 1
+`g_script_flags[0x77]` despawns every group prop, the same sweep
+`PropExpireByStepLifetime` makes for the generic props. `[proved]`
+
+#### The shatter
+
+`BreakablePropSpawnShatter` allocates **one** `0x2B4` object running
+`BreakablePropShatterUpdate` (`FUN_004653B0`), with the fifteen pieces as
+parallel arrays inside it — not fifteen objects. Read from the disassembly:
+Ghidra ends both bodies at the `MatrixStackPop` it believes is no-return, so
+the pseudocode shows piece 0 and no loop (`L37`). `[proved]`
+
+* Piece `i` starts at `MatrixInvert(0) * prop+0x2E4 * Translate(
+  g_shatter_fragment_offsets[i] * 0.001) * Rz Ry Rx(g_shatter_fragment_angles[i])`,
+  read back with `MatrixGetTranslation` and `MatrixToEulerZYX`. `prop+0x2E4` is
+  what each of `BreakablePropUpdate`'s three draw blocks `MatrixStore`s — the
+  model on top of the view it was drawn under — so the pieces start where the
+  prop was *last drawn*, rattle included, and a camera that moved since carries
+  them by that frame's motion.
+* Velocity `(sin b, 1.0, cos b)` with `b = i * 0x1000` and a horizontal speed of
+  `rand() % 0x15 * 0.01 + 0.1`, drawn separately for x and z; spins
+  `rand() % 0x801 - 0x400` on each axis. **75 `rand()`s per shatter.**
+* Each frame: `vy -= 0.06805`, move, add the spins as 16-bit words, and below
+  `g_camera_fixed_eye_y + 1.0` sit on that plane with `vy *= -0.8` — unless the
+  object's `+0x35` (the prop's group) is `0x63`, which no shipped group is.
+  Drawn `Translate; RotZ; RotY; RotX` with `g_shatter_fragment_slots_a[i]`
+  (`0x19EA`..`0x19F8`) or, when the prop's `+0x324` is non-zero — Training's
+  one-shot targets — `_b[i]` (`0x1A11`..`0x1A1F`).
+* The count is tested **before** the increment: 73 frames drawn, killed on the
+  74th. No shot test, no `rand()` after the spawn.
+
+A second caller, `FUN_004702E0` (`0x004704DD`), shatters with its group forced
+to 99 first — the no-floor case. It is not in `g_class41_updates` and is
+unported; what allocates it is `[open]`.
 
 **Lifetime is measured in event-script blocks, not frames.** Each prop keeps
 `obj+0x199` from `desc+0x24`, and despawns once the evt block counter
@@ -914,6 +984,24 @@ instead. Four of the seven are kind 3 — `0x19E8`, the ordinary breakable, two
 shots — and three are kind 2, which draws no body at all and bursts in one
 because its `g_prop_kind_params` effect id is non-zero. See
 `game/class41/type43.ts`.
+
+**The falling container breaks into two pieces, not three.** Its destroy arm's
+loop counts `1, -1` and stops at `-3` (`0x0046A7E2`..`0x0046A95D`), allocating
+each piece as a 0x378 object in the container's own pool with the container's
+layout, running `FallingContainerFragmentUpdate` (`FUN_0046AD20`) and drawing
+`0xA55`. One goes each way along x and z at `rand() % 11 * 0.01 + 0.1`, up at
+`rand() % 0x15 * 0.01 + i * 0.5 + 1.5` from the floor `+ 2i`, a half-turn
+apart in pitch — ten `rand()`s. It tumbles under `0.05444` (its pitch spin
+easing toward level, its roll free), settles on the 55-point
+`g_container_fragment_hull_points` through the same
+`FallingContainerGroundContact` (`FUN_0046B040`) the container uses with its
+48, plays `0x1916A9`/`0x1816A9`, blinks on odd counts past `0x96`, and is
+killed after 181 frames. Not shootable. `FallingContainerGroundContact` also
+holds a wall in scene 1 block `0x12`: a hull point past `x = -840` pushes the
+object back and negates `vx`. The container itself is despawned by the scene-1
+`0x77` sweep and by camera path `0x2F` at frame `0x96`, and its knock turns it
+to `g_camera_block_yaw_bams` and calls `SpawnPropHitEffectScaled(obj, p, 1.5)`
+rather than the spark. `[proved]`
 
 **They all decrement the same `g_item_set_countdown`,** so an item set is not
 owned by a class. Stage 2's set 2 is spread across the group placer, seven

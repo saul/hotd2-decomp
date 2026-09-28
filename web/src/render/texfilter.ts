@@ -103,6 +103,20 @@ export class TextureFilter implements System {
     this.applyAll();
   }
 
+  /**
+   * A texture minted after the stage loaded, to be treated like one of its
+   * own: what it samples with now is what `"asset"` puts back, and the
+   * current mode applies. `render/water_surfaces.ts`'s bilinear tiles.
+   */
+  adopt(tex: Texture): void {
+    if (this.seen.has(tex)) return;
+    const was = {
+      min: tex.minFilter, mag: tex.magFilter, aniso: tex.anisotropy,
+    };
+    this.seen.set(tex, was);
+    this.applyOne(tex, was);
+  }
+
   setMode(mode: TextureFilterMode): void {
     if (mode === this.mode) return;
     this.mode = mode;

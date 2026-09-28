@@ -37,6 +37,7 @@
  * `g_camera_fixed_eye_y` rather than from the trace — and a bounce at a
  * quarter of the impact speed until the body settles or 0x78 frames pass.
  */
+import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import {
   ActorFlag, ZombieFlag2, type Actor, type ZombieActor,
@@ -50,6 +51,7 @@ import { vec3 } from "../vec";
 import {
   ChooseDeathMotion, ZombieEnterCorpseState, ZombieReleasePermitAndUntrack,
 } from "./death";
+import { ZombieDeathLandingEffect } from "./death_effects";
 import { GAME_HZ } from "./states";
 
 /** `obj+0x130C` — the body conditions the landing point branches on. */
@@ -104,13 +106,6 @@ const PITCH_STEP = 0x100;
  */
 const ARC_TARGET_VETO = 0x10;
 
-/**
- * `obj+0x34 |= 0x80000` at 0x0045546A — the same bit both corpse states raise,
- * and `[likely]` the ground-decal suppressor. See `class30/death.ts`'s
- * `CORPSE_NO_DECAL_BIT`, which cites the one reader found.
- */
-const NO_DECAL_BIT = 0x80000;
-
 /** `g_coli_hit_surface` — the two wet materials, which have no ground height
  *  of their own and no bounce. */
 const SURFACE_WATER = 5;
@@ -128,9 +123,6 @@ const BOUNCE_NORMAL = -0.25;
 const SETTLE_SPEED = 0.15;
 /** `CMP EAX, 0x78` on `obj+0x1334` — and after two seconds it settles anyway. */
 const FALL_FRAME_CAP = 0x78;
-/** `FADD [0x004c4c8c]` — `0000a041` = 20.0f, `ZombieDeathLandingEffect`'s own
- *  probe rise. */
-const LANDING_PROBE_RISE = 20.0;
 
 const _view = vec3();
 const _dest = vec3();
@@ -199,18 +191,17 @@ export function ActorArcVelocityY(obj: Actor, step: number): boolean {
  * takes that back to world space, and unless the actor was shot next to an arc
  * target it was already flying at, that is where the body goes.
  *
- * [diverges] The sub-2 landing hook `PTR_FUN_00592BC8` —
- * `ZombieDeathLandingEffect` (`FUN_00456B70`), which is `g_class30_states[0x38]`
- * — spawns a splash on the wet surfaces and a dust puff otherwise, and the
- * port draws neither. Its two effects on *state* are ported here rather than
- * skipped: the once-only latch {@link ZombieFlag2.OneShotFired}, and the
- * ground query twenty units above the body whose `g_coli_hit_surface` the
- * bounce test below then reads — the hook runs between the two reads of that
- * global at 0x004553D4 and 0x00455411, so dropping it would silently change
- * which surface the bounce is decided on.
+ * Every landing of sub 2 calls the hook at `PTR_FUN_00592BC8` (`00455405`)
+ * — `g_class30_states[0x38]`, `ZombieDeathLandingEffect` (`FUN_00456B70`) —
+ * unconditionally; the hook's own {@link ZombieFlag2.OneShotFired} test is
+ * what makes it once per throw. It is not only a picture: its trace, twenty
+ * units above the body, runs between the two reads of `g_coli_hit_surface` at
+ * 0x004553D4 and 0x00455411, so the bounce below is decided on the surface
+ * **it** found.
  */
 export function ZombieStateDeathKnockbackArc(obj: ZombieActor, dt: number, rng: Rng,
-                                             host: GameHost): void {
+                                             host: GameHost,
+                                             events?: Events): void {
   const frames = dt * GAME_HZ;
 
   if (obj.sub === 0) {
@@ -318,11 +309,8 @@ export function ZombieStateDeathKnockbackArc(obj: ZombieActor, dt: number, rng: 
   if (obj.pos.y + obj.vel.y > ground) return;
 
   obj.pos.y = ground;
-  // The landing hook, and the probe it makes — see the `[diverges]` above.
-  if (!(obj.flags2 & ZombieFlag2.OneShotFired)) {
-    QueryGroundHeightAt(obj.pos.x, obj.pos.y + LANDING_PROBE_RISE, obj.pos.z);
-    obj.flags2 |= ZombieFlag2.OneShotFired;
-  }
+  // The landing hook, and the trace it makes -- see above.
+  ZombieDeathLandingEffect(obj, rng, host, events);
   const water = G.g_coli_hit_surface === SURFACE_WATER
              || G.g_coli_hit_surface === SURFACE_WATER_ALT;
   if (obj.arcTotal < FALL_FRAME_CAP && !water
@@ -330,7 +318,9 @@ export function ZombieStateDeathKnockbackArc(obj: ZombieActor, dt: number, rng: 
     obj.vel.y *= BOUNCE_NORMAL;
     return;
   }
-  if (water) obj.flags |= NO_DECAL_BIT;
+  // `obj+0x34 |= 0x80000` at 0x0045546A -- the bit both corpse states raise,
+  // and what `ActorDrawShadow` (`FUN_0040A590`) tests before the disc.
+  if (water) obj.flags |= ActorFlag.NoShadow;
   ClearCurrentActorVelocityAndAccel(obj);
   ZombieEnterCorpseState(obj);
 }

@@ -211,10 +211,17 @@ export interface BreakablePlacement {
    * build their objects from tables in the image rather than from the spawn:
    * the placement carries only the step lifetime, and for `table44` the
    * effect and motion its two breakable rows draw. See `game/class41/`.
+   *
+   * `water_surface` is constructor 1, `PlaceWaterSurface` (`FUN_00462F70`):
+   * not a prop but the task that draws a canal water tile and ripples it.
+   * `slot` is the tile, already looked up in `g_water_surface_slots`
+   * (`0x00593DA4`) by `field_1f4`, and `lifetime_evt_steps` is the
+   * descriptor's `+0x11C`. See `game/class41/water.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door" | "flicker_light" | "table38" | "table39" | "table44";
+    | "rising_door" | "flicker_light" | "table38" | "table39" | "table44"
+    | "water_surface";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */
@@ -364,6 +371,21 @@ export interface PropKindParams {
   y_offset: number;
 }
 
+/**
+ * The per-piece tables `BreakablePropSpawnShatter` (`FUN_00465170`) and
+ * `BreakablePropShatterUpdate` (`FUN_004653B0`) read, fifteen rows each.
+ */
+export interface ShatterPiecesJson {
+  /** `g_shatter_fragment_slots_a` — drawn when the prop's `+0x324` is 0. */
+  slots_a: number[];
+  /** `g_shatter_fragment_slots_b` — drawn when it is not. */
+  slots_b: number[];
+  /** `g_shatter_fragment_offsets` — raw s16 thousandths, prop-local. */
+  offsets: [number, number, number][];
+  /** `g_shatter_fragment_angles` — `[rx, ry, rz]` BAMS for `Rz Ry Rx`. */
+  angles: [number, number, number][];
+}
+
 export interface BreakablesJson {
   /** All nine groups, indexed by group id. */
   groups: BreakableMember[][];
@@ -371,6 +393,13 @@ export interface BreakablesJson {
   hull: [number, number, number][];
   /** The 48-point hull `FallingContainerUpdate` settles against. */
   falling_hull: [number, number, number][];
+  /**
+   * `g_container_fragment_hull_points` — the 55-point hull the falling
+   * container's two pieces settle against, already scaled by 0.001.
+   */
+  fragment_hull: [number, number, number][];
+  /** What a stacked group prop's fifteen shatter pieces are made of. */
+  shatter: ShatterPiecesJson;
   /** `g_prop_kind_params`, indexed by kind. */
   kinds: PropKindParams[];
   placements: BreakablePlacement[];

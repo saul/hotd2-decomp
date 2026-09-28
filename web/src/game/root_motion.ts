@@ -89,7 +89,10 @@
  * what its clip authored. `render/characters/pose.ts` applies the offset
  * unscaled -- deliberately, because nothing in this port scales a drawn
  * character at all: neither `hod2lib.characters` nor `render/characters.ts`
- * writes that field to a node, so every skinned actor is drawn at 1.0.
+ * writes that field to a node, so every skinned actor is drawn at 1.0 --
+ * except class 0x46's bat and wing, whose roots `render/characters/bat.ts`
+ * scales whole (pose offset included, as the engine's stack does), because
+ * `BatWingUpdate` seats the wing through the body's scaled node matrix.
  * Scaling the offset alone would be worse than leaving it, because the offset
  * would shrink while the model it offsets did not.
  *

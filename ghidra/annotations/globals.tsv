@@ -102,6 +102,8 @@
 005679f4	g_initial_damage_rank	s8[5], difficulty -> starting g_damage_rank: -3, -1, 1, 4, 8. Not clamped on the way in; UpdateDamageRank clamps to [0,15] on its first pass.
 005679fc	g_route_map_tiles	s16[4]: the first DrawScreenSprite id of each of the route map's four 640x480 screens (5 x 15 tiles of 128x32, id base + row*5 + col; scr_bunki.bin). [proved]
 00567a04	g_route_waypoints	{s16 x, s16 y}, indexed wp + (stage * 0x27 + block) * 6: the map points each block's walk visits, x -1 after the last. [proved]
+00569108	g_water_surface_uv_step	f64 0.00075: what WaterSurfaceUpdate adds to a vertex's u and v per frame, times the sine and cosine of its phase. [proved]
+00569110	g_water_surface_z_limit	f32 -1870.0: with index 0 (slot 0x13A7, the boss arena's water) WaterSurfaceUpdate moves only the vertices at z <= this. [proved]
 0056b0e4	g_hp_percent_by_rank	u8[16], g_damage_rank -> the percentage of a spawn's descriptor hit points it actually starts with: 60 60 70 80 90 100 100 100 105 110 115 120 125 125 130 130. CivilianInit applies it to every child it builds.
 005702a8	g_civilian_scripts	Class 0x10's script table: 67 dword pointers into 0x0056B9E4..0x005702A8, indexed by the spawn tail's byte +0x01. CivilianRunScript walks the stream it names. Ops 0x0E/0x0F/0x1E/0x1F point at further streams that live in the gaps between the table's own entries, so the whole set is 136 streams and 1967 commands. Decoded by ExeTables.civilian_scripts.
 005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
@@ -233,16 +235,20 @@
 00592fc8	g_pHitReactionMotions	Per character type -> per body condition (obj+0x130C) -> u32[8] motion ids indexed by g_bone_reaction_group. Only two distinct rows exist for the humanoids: the ordinary one is head 977, torso 982, r.arm 981, l.arm 979, pelvis 974, r.leg 961, l.leg 960.
 00593084	g_pDeathMotionsArc8000	6 death motions for the 0x8000 arc: 985, 989, 987, 988, 989, 990. Their root carries z by +7.4/+8.2
 0059309c	g_pDeathMotionsArc0	4 death motions for the 0x0000 arc: 985, 986, 988, 990. Their root carries z by -8.7/-9.5/-9.3
+005930ac	g_zombie_death_effect_cues	ZombieInstallDeathEffectCues' lists, three dwords apart: play-cursor frames ending in -1. 0x005930AC {30, 56} clip 0x3D9, 0x5930B8 {40} 0x3DA, 0x5930C4 {25} 0x3DB, 0x5930D0 {37, 104} 0x3DC, 0x5930DC {48} 0x3DD, 0x5930E8 {48} 0x3DE, 0x5930F4 {41} 0x3DF, 0x593100 {39} 0x3E0, 0x593124 {} every other clip; 0x59310C and 0x593118 are two more empty lists no case names. ZombieDeathEffectCueTick walks a pointer through it at obj+0x13A0. [proved]
 00593170	g_zombie_thrown_weapon_states	The four states ZombieThrownWeaponUpdate dispatches on: 0 the shared no-op, 1 ZombieThrownWeaponStateStraight (the axe), 2 ZombieThrownWeaponStateArc, 3 ZombieThrownWeaponStateShotDown. Class 0x30's projectile is a separate family from class 0x31's at g_thrown_weapon_states (0x00592AE0), which has two states rather than four.
 00593358	g_class_handler_pairs	{class_id, handler}, 56 entries, negative id terminates
 0059351c	g_route_default	s8[6][16]: the route GameOverRouteMapArm copies over an empty history. [proved]
 00593580	g_class41_constructors	79 entries, indexed by obj+0x130C
 005936bc	g_class41_updates	79 child entry functions
 005937f8	g_breakable_hull_points	96 x {s16 x, s16 y, s16 z}, scaled by 0.001, the prop's collision hull. BreakablePropGroundContact transforms all 96 to find which corner a toppling prop lands on.
+00593a38	g_shatter_fragment_slots_a	15 s16 asset slots (0x19EA..0x19F8, then a 0 pad) -- the piece BreakablePropShatterUpdate draws for piece i when the shatter object's +0x36 (the prop's +0x324) is 0. [proved]
+00593a58	g_shatter_fragment_slots_b	15 s16 asset slots (0x1A11..0x1A1F, then a 0 pad) -- the piece BreakablePropShatterUpdate draws for piece i when the prop's +0x324 is non-zero; PlaceBreakableGroup writes 6 there only for a Training one-shot target (slot 0x1A0F). [proved] for the selector, [likely] that only the target reaches it.
 00593a78	g_shatter_fragment_offsets	15 x {s16 x, s16 y, s16 z} in thousandths -- where each shatter fragment starts, relative to the prop.
 00593ad4	g_shatter_fragment_angles	15 x {s16 rx, s16 ry, s16 rz} in BAMS -- each shatter fragment's initial orientation.
 00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
 00593d14	g_breakable_group_counts	nine member counts: {4,2,3,9,5,3,3,6,7}
+00593da4	g_water_surface_slots	s16[10], indexed by a class-0x41 type-1 placer's obj+0x1F4: 0x13A7 komono_boss2[0], 0x13A0 st2_07[0], 0x13B5 st2_07[3], 0x13B7 komono_venis[4], 0x13AD/0x13AE/0x13B0/0x13B2 st1_1[9/10/12/14], 0x183C st1_1[34], 0x13A4 komono_venis[3] -- every one a flat water tile at y -25 (-15 for 0x183C). Read only by PlaceWaterSurface (0x00462FA5). [proved]
 00593db8	g_prop_kind_params	Per class-0x41-type-4 object kind, stride 0xC: {s16 effect_id @+0, s16 effect_arg @+2, ..., s16 radius @+8}. PlaceKindedProp copies them into the prop's +0x324/+0x328/+0x124.
 00593e70	g_prop_table38	PlaceTable38Props' nine rows, stride 0x18: {f32 x, y, z; f32 rx, ry, rz in DEGREES}. The constructor reads it from 0x00593E74 as [-1],[0],[1] and scales the angles by 182.0444 (0x00569010).
 00593f48	g_prop_table39	PlaceTable39Stacks' eight rows, the same {x,y,z, three angles in degrees} shape as g_prop_table38 and immediately after it.
@@ -258,6 +264,8 @@
 0059468c	g_fragment_subkind12_yaws	Four s32 BAMS yaws for sub-kind 12: 3129, 3129, 29830, 39322.
 0059469c	g_fragment_burst_scales	One byte per type-40 sub-kind: the burst fragments' uniform scale in hundredths (70, 100 or 125). Ghidra labels it as a string.
 005946f8	g_prop_table44	PlaceTable44Props' seven rows, stride 20: {s16 x, y, z (* 0.01); s16 pad; s32 rx, ry, rz (BAMS)}. Rows 2..6 are the whole chairs PropUpdateType44 draws; row 6 lies on its side at (-22.3, 9.06, -97.86).
+00594788	g_falling_container_hull_points	48 x {s16 x, s16 y, s16 z} in thousandths -- the hull FallingContainerUpdate passes FallingContainerGroundContact as (0x00594788, 0x30). [proved]
+005948a8	g_container_fragment_hull_points	55 x {s16 x, s16 y, s16 z} in thousandths -- the hull FallingContainerFragmentUpdate passes FallingContainerGroundContact as (0x005948A8, 0x37). It starts where the 48-point container hull ends. [proved]
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 0059505a	g_item_score_table	per-kind pickup score, stride 0xC
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
@@ -348,6 +356,7 @@
 007dc80c	g_boss3_rank	s8 0..15: the heads' own adaptive rank, seeded from GetDamageRank, +1 per head hit, -3 per bite that lands; indexes g_boss3_attack_delay_by_rank. [proved]
 007dc918	g_bat_members	The live class 0x46 actors, 25 slots per sub-type indexed obj+0x1374 * 0x19 + obj+0x1377. Written every frame by each bat's own update and cleared on despawn. It is not bookkeeping: BatWingUpdate reads it to find the body it is drawn on, and despawns itself the frame the slot goes empty, which is the whole mechanism by which the wings follow the bat and die with it. The four sub-type-0 flights all share slots 0..5, which is safe only because no two of them are ever in play at once.
 007dcbb0	g_water_level	seeded to -24.90; class 0x16/0x17 own the wave field
+007dcbb8	g_frog_bone1_on_entry	Class 0x11's file-scope vec3 (0x007DCBB8/BC/C0): FrogUpdate writes it once per frame, before any state runs (0x0043A282..0x0043A28D), as the translation of g_camera_blocks[g_camera_index] (view to world) times part+0x130 -- bone 1's draw record, which the LAST draw left in view space -- so it is bone 1 where it was last drawn, carried into the world through THIS frame's camera. FrogPushOutOfActorCollision reads x and z only (0x0043A5A9, 0x0043A59F) as the start of the frame's travel; y is written and never read. No other reference, by xref and by byte search. [proved]
 007dcbd0	g_horde_live_count	Members PlaceHorde made, less the ones killed while more than one remained. HordeCorpseSinkUpdate registers the corpse for camera tracking only while this is 1.
 007dcbd4	g_horde_diver	The member index whose turn it is to dive. Passed to the next non-empty g_horde_members slot (modulo side+0x6C) by every path that ends or refuses a dive.
 007dcbd8	g_body_creature_hosts	The creature's link back to the zombie that released it, and the ONLY thing this table does: three xrefs in the whole image, all three in SpawnBodyCreature / BodyCreatureInit / BodyCreatureUpdate. SpawnBodyCreature writes g_body_creature_hosts[host+0x3C] = host and gives the new object that index at +0x1350; the creature reads the host back through it every frame. Indexed by the HOST's g_hit_slots index (obj+0x3C, 14 slots, claimed by ActorClaimHitSlot) -- so a host that never claimed one indexes -1, which is [open] and unreachable in the shipped data only if every znjoe claims a slot.
@@ -464,7 +473,7 @@
 009a3794	g_damage_rank_pending	Accumulates rank adjustments -- PlayerTakeDamage subtracts 2 -- and UpdateDamageRank adds it in and clears it on its next pass.
 009a37e0	g_motion_slots	motion id -> {u32 base; u32 state}, state 2 = resident
 009a58f8	g_hit_result	int[2], per player, written by ResolveHit: 0 = nothing, 1 = damaged and part swapped, 2 = damaged only, 3 = severed, 5 = no effect (the effect table's `2` sentinel). Result 5 scores nothing.
-009a5900	g_screen_furniture_flags	A bit set the screen-furniture classes own. ChapterCardInstall ORs 0x20 in on its first frame and clears it as it raises g_script_flags[0xF8]; ResultCardInstall does the same with 0x10 against g_script_flags[0xFE]. Read by the HUD/draw side, which the port does not have.
+009a5900	g_screen_furniture_flags	A bit set the screen-furniture classes own. ChapterCardInstall ORs 0x20 in -- at 0x0043436D in sub 0, and at 0x004342FA / 0x00434328 in its Boss Mode and app-state-0x0B arms before it hands over -- and clears it at 0x004348C9, after raising g_script_flags[0xF8] at 0x004348C1; BossModeChapterCardUpdate (0x00434CE7) and FUN_00434DA0 (0x00434ED6) clear it for their arms. ResultCardInstall ORs 0x10 in at 0x00434FD6 in sub 0 and clears it at 0x00435685, after g_script_flags[0xFE] at 0x0043567C. Readers stand aside while a card is up: HudDrawShutterState draws no state-4 bars while & 0x30 (0x00413BB5), HudDrawLives drops HOLD YOUR FIRE under 0x10, Class22CutsceneHoldUntilChapterCard draws only while 0x20 is clear; RegionDrawResidentSet, ScriptedHumanoidDraw, SetPiecePropDrawAndTick and St1VehicleUpdate also test 0x20. Bit 0: start press takes effect at once (PlayerTryStartPress, UpdateSceneViewAndLight, EvtActionFinishSequence21); bit 1: CommitAppState; bit 3 (0x8): EvtLoadBlockProgram. [proved]
 009a5920	g_route_history	s8[10][16]: the blocks this run entered, per scene, -1 after the last -- ResetSceneCombatState appends g_evt_block_index at g_route_count; ResetGameOnStart fills all 0x28 dwords with -1. GameOverRouteMapArm replaces it with the default route 0x0059351C when scene 0's first entry is -1 or its second is 0; RouteMapDrawTask walks it (flat, stage*16 + i). [proved]
 009a59e0	g_scene_light_block1
 009a5c30	g_route_count	s8: the next g_route_history entry for this scene. ResetSceneCombatState (the checkpoint opcode 0x4D) stores the block at it and -1 after it, then counts it up; ResetSceneOnEnter zeroes it. [proved]
@@ -579,7 +588,7 @@
 009c8e44	g_enemy_approach_steps_mid	Added to g_enemy_approach_steps when the actor starts between the middle and outer rings.
 009c8e48	g_enemy_approach_steps_outer	Added on top of g_enemy_approach_steps_mid when the actor starts outside the outer ring, so a distant enemy walks further before it can attack.
 009c8e4c	g_cur_enemy
-009c8e50	g_rain_enabled
+009c8e50	g_rain_enabled	EvtOpEnableRain1D (0x0045F340) stores its operand here; ResetSceneOnEnter zeroes it at 0x0045EE78. DrawRainParticles draws only while it is 1, and ZombieDeathEffectCueTick / ZombieDeathLandingEffect (and ThrowerEmitGroundDust) splash rather than raise dust while it is 1. [proved]
 009c8e58	g_camera_fixed_eye_y	also labelled g_ground_plane_y; the two are the same word
 009c8e60	g_credits	s32, stride 8: the credits (starts and continues) left -- one shared count unless g_credits_per_player. SetBothPlayerCounters seeds it from ModeStartCounterValue on the title's confirm. [proved]
 009c8e64	g_credit_tier	s32, stride 8: CreditTiersUpdate's 0/1/2 beside each count. [proved]

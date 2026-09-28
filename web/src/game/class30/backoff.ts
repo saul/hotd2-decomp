@@ -14,15 +14,20 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
-import { FirstBakedOf, MotionPlayFrame, MotionRowOf } from "../tables";
+import { MotionPlayFrame, MotionRowOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
 import { BACKOFF_MAX_FRAMES, MotionFade, MotionRow, ZombieState }
   from "./states";
 
-/** `FUN_00409F90`'s rate here, positive when `obj+0x136C & 0x400000` is set. */
-const BACKOFF_TURN_RATE = -0x40;
+/**
+ * `TurnActorAwayFromPoint`'s rate here: `PUSH -0x40` at `00455d1f`, or
+ * `PUSH 0x40` at `00455d0d` when `obj+0x136C & 0x400000`
+ * ({@link ZombieFlag2.BackOffTurnFlip}) is up. Negative is the ordinary case,
+ * and a negative rate turns the long way -- see `TurnAngleToward`.
+ */
+const BACKOFF_TURN_RATE = 0x40;
 /**
  * The clip the engine names by id in its exit test, and the frame it must
  * reach. `g_motion_play_length` runs at about twice the authored frame count,
@@ -58,14 +63,19 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
     // paces attacks.
     obj.zom.shoveTimer = 0x3c;            // +0x1338
     obj.zom.backoffFrames = 0;            // +0x1334
-    // `obj+0x34 |= 0x20000000`: out of the compacted queue while retreating,
-    // so whoever is behind moves up and can take its turn.
-    obj.flags |= ActorFlag.BackingOff;
+    // `obj+0x34 = obj+0x34 & ~0x10000000 | 0x20000000` (`00455ca1`,
+    // `00455cb1`): no longer committed to the swing, and out of the compacted
+    // queue while retreating, so whoever is behind moves up and can take its
+    // turn.
+    obj.flags = (obj.flags & ~ActorFlag.Committed) | ActorFlag.BackingOff;
+    // `obj+0x136C &= ~0x400000` (`00455cc0`): every retreat starts turning
+    // the ordinary way. Only the shove timer flips it after this.
+    obj.flags2 &= ~ZombieFlag2.BackOffTurnFlip;
     obj.sub = 1;
   }
 
-  ZombieSetMotionIfIdle(obj,
-    FirstBakedOf(obj, MotionRowOf(obj), MotionRow.BackAway), rng, 5, MotionFade.Normal);
+  ZombieSetMotionIfIdle(obj, MotionRowOf(obj)[MotionRow.BackAway], rng, 5,
+                        MotionFade.Normal);
   // Back toward where *this* actor's strike began — `obj+0x13D8/E0`, captured
   // when it started the swing — and not simply away from the player.
   //
@@ -81,10 +91,14 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
   // that while airborne. It is not ported, and porting it would change how a
   // crowd packs and therefore how often the one with the permit is in range.
   //
-  // The negative rate turns to the *opposite* of `VecToAngles(obj - p)`: the
-  // anchor is further out than the actor now is, so the unflipped angle points
-  // inward and the back-away clip's +Z root would carry it into the camera.
-  TurnActorAwayFromPoint(obj, obj.strikeStart, BACKOFF_TURN_RATE, dt);
+  // The negative rate turns the long way, toward the *opposite* of
+  // `VecToAngles(obj - p)`: the anchor is further out than the actor now is,
+  // so the heading itself points inward, and the back-away clip's +Z root
+  // would carry it into the camera. The routine does that with the sign of
+  // the step, not by flipping the target -- see `TurnAngleToward`.
+  TurnActorAwayFromPoint(obj, obj.strikeStart,
+    (obj.flags2 & ZombieFlag2.BackOffTurnFlip)
+      ? BACKOFF_TURN_RATE : -BACKOFF_TURN_RATE, dt);
   // `00455d29 8b8e34130000` / `00455d32 41` — `MOV ECX,[ESI+0x1334]; INC ECX`.
   // One increment per **update**, not `dt` seconds' worth: the exe has no
   // frame time here at all, and the 0xF0 it is compared against below counts

@@ -52,7 +52,7 @@ import {
 } from "./death";
 import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
-import { ZombieFlag2 } from "../actor";
+import { MotionFlag, ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieAttachToCarrier } from "./carrier";
 import { ActorRegisterCameraPoint } from "../camera/track";
@@ -142,14 +142,15 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
 
     // The death chain. `updatesWhenDead` on the handler below is what lets
     // these run at all -- see `class30/death.ts` for the whole graph.
-    case ZombieState.Death:       return ZombieStateDeath6(obj, rng, events);
+    case ZombieState.Death:
+      return ZombieStateDeath6(obj, rng, host, events);
     // The other death, and the reason `ZombieRunState` is handed the host at
     // all on a dead actor: state 9's landing point is a point in the camera's
     // own space. See `class30/knockback.ts`.
     case ZombieState.DeathKnockbackArc:
-      return ZombieStateDeathKnockbackArc(obj, dt, rng, host);
+      return ZombieStateDeathKnockbackArc(obj, dt, rng, host, events);
     case ZombieState.DeathFallAndBounce:
-      return ZombieStateDeathFallAndBounce(obj, dt, rng);
+      return ZombieStateDeathFallAndBounce(obj, dt, rng, host, events);
     case ZombieState.CorpseSink:  return ZombieStateCorpseSink(obj, dt);
     case ZombieState.CorpseBlink: return ZombieStateCorpseBlink(obj, dt);
 
@@ -189,7 +190,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.RideCarrier:
       return ZombieStateRideCarrier(obj, eye, rng, dt);
     case ZombieState.ArcScriptedEntrance:
-      return ZombieStateArcScriptedEntrance(obj, dt);
+      return ZombieStateArcScriptedEntrance(obj, dt, rng, host, events);
     case ZombieState.WaitScriptFlagThenEnter:
       return ZombieStateWaitScriptFlagThenEnter(obj, dt, rng);
     case ZombieState.DelayedStrikeInPlace:
@@ -201,7 +202,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.Emerge:
       return ZombieStateEmerge(obj, dt, events);
     case ZombieState.DelayedLeap:
-      return ZombieStateDelayedLeap(obj, dt, rng);
+      return ZombieStateDelayedLeap(obj, dt, rng, host, events);
     case ZombieState.FallToGround:
       return ZombieStateFallToGround(obj, dt, rng);
 
@@ -271,6 +272,10 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
 export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
                                 events?: Events): void {
   obj.attackPermit = -1;
+  // `OR EDX, 0x4` into `obj+0x1F8` at `0x00452E21`, straight after
+  // `ActorBuildSkinnedModel`: this class's corpse ring and shadow sit on the
+  // traced floor, not at the body's own y.
+  obj.motionFlags |= MotionFlag.TraceGround;
   // `EnemyZombieInit`: `obj+0x124 = g_actor_radius_by_char[type]`, the shot
   // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
   // every zombie collided as a point and walked through walls.

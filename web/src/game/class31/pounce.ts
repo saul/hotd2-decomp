@@ -19,12 +19,14 @@ import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ColiTraceSegmentAllSets } from "../coli";
 import { G } from "../globals";
+import { MotionPlayFrame, MotionPlayLength } from "../tables";
 import type { GameHost } from "../host";
 import { vec3, type Vec3 } from "../vec";
-import { ZombieSetMotionIfIdle } from "../class30/motion_cue";
+import { SetCurrentActorMotionBlended, ZombieSetMotionIfIdle }
+  from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
-  ActorArcBeginToWaypoint, ActorArcStep, ActorClipFrame, ActorLocalPoint,
+  ActorArcBeginToWaypoint, ActorArcStep, ActorLocalPoint,
   InstallArcMotionScript,
 } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
@@ -43,7 +45,18 @@ const _dest = vec3();
 const ASIDE_PROBE = 1000;
 
 const CHAR_ZSASS = 0x16;
+/** `CMP word ptr [ESI + 0x1F4], 0x17` at `0x0044ECF8`: `zskamere`. */
+const CHAR_ZSKAMERE = 0x17;
 const CHAR_ZSLMAN = 0x18;
+/**
+ * `PUSH 0xffffff00` at `0x0044BB1B`: the leap aside's turn, a negative rate,
+ * so the long way round, away from where the leap began.
+ */
+const LEAP_ASIDE_TURN_RATE = -0x100;
+/** `PUSH 0xffffff00` at `0x0044ED0E`: type 0x17's turn out of the swing. */
+const WITHDRAW_TURN_RATE = -0x100;
+/** Type 0x17 is clear of the camera at thirty units, not fifty. */
+const WITHDRAW_CLEAR_BACKING = 30;
 
 /**
  * `ThrowerStateLeapDown` — `FUN_0044B670`, class 0x31 states 9, 12 and 13.
@@ -155,7 +168,7 @@ export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
 
   if (obj.sub === 1) {
     if (!(obj.flags2 & ThrowerFlag.OffGround)) {
-      TurnActorAwayFromPoint(obj, obj.strikeStart, -0x100, dt);
+      TurnActorAwayFromPoint(obj, obj.strikeStart, LEAP_ASIDE_TURN_RATE, dt);
     }
     if (ActorArcStep(obj, 1, dt)) return;
     obj.thr.sinceLanding = 0;
@@ -187,29 +200,62 @@ function dist2(obj: ThrowerActor, eye: Vec3): number {
  * `ThrowerStateWithdraw` — `FUN_0044EC80`, class 0x31 state 25.
  *
  * The retreat the two *scripted* attacks end in — state 22's and state 23's —
- * where the ordinary pounce ends in the leap aside instead. Same shape: play
- * the landing clip, and go back to standing once ninety frames have passed or
- * the actor is fifty units clear.
+ * where the ordinary pounce ends in the leap aside instead. Play the landing
+ * clip, and go back to standing once ninety frames have passed or the actor
+ * is clear of the camera. `[proved]`, the whole routine:
+ *
+ * ```
+ * sub 0     obj+0x34 |= 0x20000000; obj+0x136C |= 0x180000
+ *           type 0x17: obj+0x34 |= 0x2000
+ *           SetCurrentActorMotionBlended(g_class31_motion_sets[cond][4], 0, 1)
+ *           sub 1, obj+0x1338 = 0, and on into sub 1
+ * type 0x17 TurnActorAwayFromPoint(obj, obj+0x13D8, obj+0x13E0, -0x100)   0044ed16
+ *           if (++obj+0x1338 < 0x5A && 2D distance to the eye < 30) return
+ * others    if (++obj+0x1338 < 0x5A && 2D distance to the eye < 50) return
+ *           if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+ * exit      obj+0x1338 = 0; ThrowerReleaseAttackPermit; state 7, sub 0
+ *           obj+0x34 &= ~0x20002000
+ * ```
+ *
+ * **Character type 0x17 is a different retreat**: it keeps turning to face
+ * where its strike began -- the negative rate turns the long way, so away
+ * from it -- it only has to get thirty units clear, it does not wait for the
+ * clip, and it will not flinch while it goes. The port had one retreat for
+ * every type, with no turn at all, a pooled "if idle" motion call at fade 10,
+ * and an exit that waited on the swing channel instead of the clip.
  */
 export function ThrowerStateWithdraw(obj: ThrowerActor, eye: Vec3, dt: number,
-                                     rng: Rng): void {
+                                     _rng: Rng): void {
+  const backsOff = obj.charType === CHAR_ZSKAMERE;
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.BackingOff;
     obj.flags2 |= 0x180000;
-    ZombieSetMotionIfIdle(obj, ThrowerMotionOf(obj, ThrowerMotion.Land), rng,
-                          0, MotionFade.Normal);
-    obj.thr.sinceLanding = 0;
+    if (backsOff) obj.flags |= ActorFlag.NoHitReaction;
+    const land = ThrowerMotionOf(obj, ThrowerMotion.Land);
+    if (land !== undefined) SetCurrentActorMotionBlended(obj, land, 0, 1);
     obj.sub = 1;
+    obj.thr.sinceLanding = 0;
+  } else if (obj.sub !== 1) {
+    return;
   }
 
-  obj.thr.sinceLanding += dt * GAME_HZ;
-  if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
-      && dist2(obj, eye) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) return;
-  if (obj.action && ActorClipFrame(obj) >= 0) return;
+  if (backsOff) {
+    TurnActorAwayFromPoint(obj, obj.strikeStart, WITHDRAW_TURN_RATE, dt);
+    obj.thr.sinceLanding += dt * GAME_HZ;
+    if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
+        && dist2(obj, eye) < WITHDRAW_CLEAR_BACKING * WITHDRAW_CLEAR_BACKING) {
+      return;
+    }
+  } else {
+    obj.thr.sinceLanding += dt * GAME_HZ;
+    if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
+        && dist2(obj, eye) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) return;
+    if (MotionPlayFrame(obj) < MotionPlayLength(obj) - 2) return;
+  }
 
   obj.thr.sinceLanding = 0;
   ThrowerReleaseAttackPermit(obj);
-  obj.flags &= ~ActorFlag.BackingOff;
   obj.state = ThrowerState.StandAndDecide;
+  obj.flags &= ~(ActorFlag.BackingOff | ActorFlag.NoHitReaction);
   obj.sub = 0;
 }

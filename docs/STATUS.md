@@ -19,36 +19,36 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 79980 | 270 | engine |
-| `hod2lib/` | 18073 | 35 | engine |
-| `render/` | 12522 | 42 | render |
-| `app/` | 7707 | 29 | app |
-| `script/` | 4402 | 25 | engine |
+| `game/` | 83318 | 279 | engine |
+| `hod2lib/` | 18316 | 35 | engine |
+| `render/` | 13346 | 48 | render |
+| `app/` | 7726 | 29 | app |
+| `script/` | 4408 | 25 | engine |
 | `ui/` | 3161 | 27 | ui |
-| `bundle/` | 2585 | 11 | engine |
+| `bundle/` | 2615 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `hud/` | 459 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **130228** | **450** | |
+| **total** | **134688** | **465** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2537
-* `game/actor.ts` — 2309
-* `app/main.ts` — 2151
-* `hod2lib/exetab.ts` — 2126
-* `script/walker.ts` — 2031
+* `game/globals.ts` — 2643
+* `game/actor.ts` — 2421
+* `hod2lib/exetab.ts` — 2212
+* `app/main.ts` — 2164
+* `hod2lib/bundle.ts` — 2074
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **192 of 285** annotated functions in the gameplay address ranges have a port (67%) |
-| Ported outside those ranges | 447 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 639 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **203 of 288** annotated functions in the gameplay address ranges have a port (70%) |
+| Ported outside those ranges | 455 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 658 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **158** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **168** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **142** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **169** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1246 in `ghidra/annotations/functions.tsv` |
-| Named globals | 626 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 40 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1259 in `ghidra/annotations/functions.tsv` |
+| Named globals | 635 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 41 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -73,7 +73,7 @@ in a checker**, and there is deliberately no suppression comment.
 
 | Ratchet | Where | Now | Baseline |
 |---|---|---:|---:|
-| `uncited-exports` | `tools/verify_port.py` | 87 | 87 |
+| `uncited-exports` | `tools/verify_port.py` | 85 | 85 |
 
 All 14 rules in `verify_layers.py` are `error` at zero;
 a new violation of any of them fails the build rather than moving
@@ -132,6 +132,7 @@ nothing exits 3 and is never counted as green.
 | `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
+| `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
 | `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
@@ -140,7 +141,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-17 of them need the installed game and 15 need an exported
+18 of them need the installed game and 15 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

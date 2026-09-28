@@ -381,6 +381,15 @@ export class SlotModelLayer implements System<RenderContext> {
     this.group.visible = v;
   }
 
+  /**
+   * A fresh copy of one template, for a layer that draws a slot this one
+   * does not -- `render/water_surfaces.ts`'s canal tiles, which ride the same
+   * rig. The copy shares the template's geometry.
+   */
+  cloneTemplate(slot: number): Object3D | null {
+    return this.clone(slot);
+  }
+
   private clone(slot: number): Object3D | null {
     const t = this.templates.get(slot);
     if (!t) return null;

@@ -265,26 +265,17 @@ export function AttackPicksOf(a: Actor): number[] {
 }
 
 /**
- * The first entry of the row that is actually baked into this bundle.
+ * The general motion row: 0/1 walk, 2/3 attack run, `backoff_index` retreat.
  *
- * [diverges] The engine picks between the two variants with a flag bit —
- * `row[2 + ((obj+0x34 >> 0x1B) & 1)]` for the run — and nothing ported sets
- * it, so this takes whichever exists. It matters because a row entry can name
- * a clip authored for **another skeleton**: `znchain`'s run is `zom.bin` 968,
- * which bakes for the 16-bone humanoids and is refused for it. Asking for the
- * first entry by index and getting a number that has no clip behind it is
- * what left every zombie standing still.
+ * Every state indexes it the way the engine does -- a fixed entry, or one of
+ * a pair chosen by a flag bit (`ZombieRunMotion`, `ZombieWaitMotion` in
+ * `class30/states.ts`) -- and hands the number to the motion setter, which
+ * declines a clip the bundle does not carry. There used to be a
+ * "first baked entry of these" helper here that stood in for both bits, on
+ * the belief that a row could name a clip authored for another skeleton; no
+ * shipped class-0x30 row does, and the engine reads any clip at the
+ * character's own stride regardless.
  */
-export function FirstBakedOf(a: Actor, row: number[],
-                             ...indices: number[]): number | undefined {
-  for (const i of indices) {
-    const m = row[i];
-    if (m !== undefined && MotionOf(a, m)) return m;
-  }
-  return undefined;
-}
-
-/** The general motion row: 0/1 walk, 2/3 attack run, `backoff_index` retreat. */
 export function MotionRowOf(a: Actor): number[] {
   const t = CharacterTypeOf(a);
   return t?.motion_row?.[String(a.condition)] ?? t?.motion_row?.["0"] ?? [];

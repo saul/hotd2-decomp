@@ -198,6 +198,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // measures against.
   p.slotModels.adopt(p.scene3d.root);
   p.chars.slotModels = p.slotModels;
+  // ...and the canal water, which draws the stage's own tiles where it has
+  // them and clones the rest from the same rig.
+  p.waterSurfaces.scene = p.scene3d;
+  p.waterSurfaces.templates = p.slotModels;
+  p.waterSurfaces.textures = p.texFilter;
+  p.waterSurfaces.props = p.breakables;
   // ...and once more for the shot effects. `chars` owns the bones, and the
   // blood is glued to one for its whole life -- see `render/effects.ts`.
   p.effects.adopt(p.scene3d.root);

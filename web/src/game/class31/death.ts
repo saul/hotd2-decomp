@@ -397,6 +397,14 @@ function ThrowerCorpsePoseFrame(obj: ThrowerActor, rng: Rng): number {
  * Both pin the motion cursor to one pose frame and hold it, which is why a
  * corpse does not finish its death animation: it is frozen on a chosen frame
  * of it.
+ *
+ * **The flicker is an alpha, not a draw flag.** Where class 0x30's
+ * `ZombieStateCorpseBlink` (`FUN_00454FD0`) closes `obj+0x1F8` bit 0 and the
+ * parts' bytes, this writes `obj+0x138C` — 1.0 on an even count, 0 on an odd
+ * one — and `obj+0x136C` bit 2 with it, and neither `ActorSetPartVisibility`
+ * nor `obj+0x1F8` appears in the routine. `ThrowerDrawBonePart` draws each
+ * bone at that alpha while the bit is up, and `DrawCharacterPartSlot` draws
+ * `zslman`'s waist at it whatever the bit, so the whole body goes. `[proved]`
  */
 export function ThrowerStateCorpse(obj: ThrowerActor, dt: number, rng: Rng,
                                    blink: boolean): void {
@@ -431,8 +439,12 @@ export function ThrowerStateCorpse(obj: ThrowerActor, dt: number, rng: Rng,
 
   obj.slideTimer -= dt * GAME_HZ;
   if (obj.slideTimer > 0) return;
-  obj.alpha = 1;
-  obj.flags2 &= ~ThrowerFlag.Blinking;
+  if (blink) {
+    // `ThrowerStateCorpseBlink`'s way out: `obj+0x138C = 0` and bit 2 down.
+    // The sink writes neither.
+    obj.alpha = 0;
+    obj.flags2 &= ~ThrowerFlag.Blinking;
+  }
   ThrowerLeave(obj);
 }
 

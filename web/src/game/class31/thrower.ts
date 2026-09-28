@@ -27,7 +27,6 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { ActorRegisterCameraPoint } from "../camera/track";
 import { RegisterEnemySlot } from "../camera/slots";
-import { TurnActorTowardCamera } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import {
@@ -53,6 +52,8 @@ import {
 } from "./stand";
 import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { ThrowerDrawBonePart } from "./draw";
 import { ThrowerOnShot } from "./on_shot";
 import {
   ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
@@ -510,6 +511,18 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // wall-crawler on its wall; a snap applied before the state moves the actor
   // would be undone every frame.
   ThrowerPushOutOfWorld(obj);
+  // `ThrowerAdvanceMotion` (`FUN_00449EF0`), at `0x0044998A`: the draw, and
+  // with it the node hook -- which is where the hand grows back. The clock
+  // half of that routine is the director's `ActorAdvanceMotion`.
+  //
+  // [diverges] The hook is always `ThrowerDrawBonePart`. `EnemyThrowerInit`
+  // installs `ThrowerDrawWithEnlargedHead` (`FUN_0044A300`) instead in
+  // Original Mode with `DAT_009C88A8` up, and in Training
+  // `ThrowerAdvanceMotion` swaps in `ThrowerDrawNodePart` (`FUN_0044A2B0`),
+  // which grows nothing, for the next frame whenever it holds the clock
+  // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
+  // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
+  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
   // death chain's `0x10000` keeps a corpse off the list.
@@ -558,7 +571,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Rearm:
       return ThrowerStateRearm(obj, host);
     case ThrowerState.RestoreBothHands:
-      return ThrowerStateRestoreBothHands(obj, dt, stance, host);
+      return ThrowerStateRestoreBothHands(obj, stance, host);
     case ThrowerState.StrikeOnTheSpot:
       return ThrowerStateStrikeOnTheSpot(obj, dt, rng, host, events);
     case ThrowerState.KnockedTumbling:
@@ -596,8 +609,12 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
       return ThrowerStatePathFollow(obj, dt);
+    // No turn here. `TurnActorTowardCamera` (`FUN_00409ED0`) has two callers
+    // in the image and both are `ZombieStateAttackRun`'s; `ThrowerStateThrow`
+    // calls no turn routine at all, so a thrower throws on the facing
+    // `ThrowerStateStandAndDecide` left it with. The port turned it here with
+    // an ease from before any of this was read.
     case ThrowerState.Throw:
-      TurnActorTowardCamera(obj, eye, dt);
       return ThrowerStateThrow(obj, host, eye, rng, events);
     // State 0 is the engine's shared no-op: an actor placed in it does nothing
     // for ever, which is what the engine does too.

@@ -107,6 +107,10 @@ import {
   LIFT_FAR_CLOSED, LIFT_NEAR_CLOSED, LIFT_PANEL_CLOSED,
 } from "./lift";
 import { PlaceGenericPropType43 } from "./type43";
+import { PlaceGenericPropOriginalItem } from "./original_item";
+import { PlaceGenericPropType72 } from "./type72";
+import { PlaceGenericPropType74 } from "./type74";
+import { PlaceGenericPropType76 } from "./type76";
 
 /**
  * The composition a class-0x41 generic type's routine applies the spawn
@@ -144,10 +148,13 @@ export enum PoseOrder {
   NoRotation = "",
   /**
    * `[open]` — the routine rotates from something the scanner cannot attribute
-   * to a descriptor word. Two types: **75** poses from the object path it
-   * rides (`PropUpdateType75`, `FUN_004710C0`), and **41**
-   * (`FUN_0046CC50`) takes its Z from a register the read did not follow.
-   * The renderer leaves these on the family default rather than guess.
+   * to a descriptor word. **41** (`FUN_0046CC50`) takes its Z from a register
+   * the read did not follow, and the renderer leaves it on the family default
+   * rather than guess. The scanner reports **75** and **77** here too, and
+   * both are read: each poses from the `op_` path it rides and each is a
+   * family of its own, drawn by `render/prop_parts.ts` from the routine
+   * (`PropUpdateType75` (`FUN_004710C0`), `PropUpdateType77`
+   * (`FUN_004717A0`)).
    */
   Unread = "?",
 }
@@ -229,16 +236,17 @@ export const GENERIC_HP: Partial<Record<number, number>> = {
  * 2. its arm of `PlaceGenericProp`'s switch does not overwrite that field with
  *    a **literal** — nine such writes across seven arms, and they are what
  *    rule out **13** (`0x1A4A`), **34** (`0x0A50`) and **67** (`0x1A36`,
- *    `0x1A35`, `0x1A0F`). A `MOV word ptr [ESI+0x28C], r16` is *not* an
- *    overwrite: those arms re-write the value the prologue already put there,
- *    out of the placer's own `+0x11C`;
+ *    `0x1A35`, `0x1A0F`) — **nor call `PickOriginalModeItem`**
+ *    (`FUN_004629C0`), which writes the chosen item's model over it and
+ *    rules out the Original Mode collectibles **70**, **71** and **72**. A
+ *    `MOV word ptr [ESI+0x28C], r16` is *not* an overwrite: those arms
+ *    re-write the value the prologue already put there, out of the placer's
+ *    own `+0x11C`;
  * 3. the descriptor's `+0x11C` is not *also* being charged as this type's
  *    lifetime — either the arm replaces `obj+0x11C` with the placer's `+0x1F4`
  *    ({@link GENERIC_LIFETIME_FROM_1F4}) or the routine never ages that field
- *    at all. This is what rules out **43** and the Original Mode collectibles
- *    **70** and **71**: all three inline a variant of
- *    `PropExpireByStepLifetime` that tests `obj+0x11C`, so the word in it is a
- *    lifetime and the model they hand `AssetDrawSlot` is that lifetime;
+ *    at all. This is what rules out **43**, which inlines a variant of
+ *    `PropExpireByStepLifetime` that tests `obj+0x11C`;
  * 4. and the shipped data agrees. Across all twelve scenes a class-0x41
  *    generic descriptor's `+0x11C` is one of **0, 1, 2, 3, 4, 5, 7** or one of
  *    **0x2B..0x18BF**, with nothing in the band between — 54 words below and
@@ -246,16 +254,14 @@ export const GENERIC_HP: Partial<Record<number, number>> = {
  *    asset slot. The check asserts the band is still empty, because the rule
  *    is unsound the moment it is not.
  *
- * `[open]` **Type 72 passes all three code clauses and fails the fourth.**
- * `FUN_00470750` takes `obj+0x28C` into the draw it makes for its first 25
- * frames (`obj+0x2A0 < 0x19`), posed `Rz·Ry·Rx` and scaled by `obj+0x2C4`; its
- * arm writes no literal over that field and it never ages `obj+0x11C`. And its
- * one shipped spawn — stage 2 block 16, Original Mode only — carries
- * `+0x11C == 1`, so the engine really does hand `AssetDrawSlot` a 1. Whether
- * anything is resident at slot 1 in that region has not been read, so whether
- * that draw shows a model or nothing is undetermined. It is **not** in this
- * set: carrying `bg_adv10.bin[0]` for it would be the same mistake that put
- * characters and effects where stage 2's scenery should be.
+ * **Type 72 used to pass all three code clauses and fail the fourth**, and
+ * was carried as an open question — does its one shipped spawn, whose
+ * `+0x11C` is 1, draw slot 1? It does not. `PropUpdateType72` (`FUN_00470750`)
+ * does draw `obj+0x28C`, but its arm calls `PickOriginalModeItem`, which
+ * overwrites the field with the item record's model before the routine ever
+ * runs; the check had looked for a literal store and not for a call. Clause 2
+ * now counts the call, for 70, 71 and 72 alike, and `tools/verify_prop_pose.py`
+ * with it. See `class41/original_item.ts`.
  */
 export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> =
   new Set([5, 12, 31, 33, 51, 53, 54]);
@@ -406,8 +412,7 @@ export const GENERIC_DRAW_SLOT: Partial<Record<number, number | null>> = {
   58: 0x01d1,       // `FUN_0046F580`
   60: 0x01d8,       // `FUN_0046F840`
   64: 0x1a39,       // `FUN_0046FBE0`
-  75: 0x0a6b,       // `PropUpdateType75`, riding object path 0x178
-  77: 0x10ab,       // `FUN_004717A0`, Original Mode only
+  // 70..77 are families of their own and draw through `render/prop_parts.ts`.
 };
 
 /**
@@ -456,6 +461,13 @@ const TYPE13 = 13;
 const TYPE33 = 33;
 const TYPE53 = 53;
 const TYPE54 = 54;
+/** Class 0x41 types 70 and 71: `OriginalItemPropUpdate`'s two arms. */
+const TYPE70 = 70;
+const TYPE71 = 71;
+const TYPE72 = 72;
+const TYPE74 = 74;
+const TYPE76 = 76;
+const TYPE77 = 77;
 
 /**
  * `PlaceGenericProp` case 0x36's five literals — the whole of type 54's drift,
@@ -513,29 +525,16 @@ export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
   // stepped at the head of the frame rather than in the pool's walk. See
   // `class41/draw_only.ts`.
   [TYPE33]: PropFamily.DrawOnlyType33,
+  // Original Mode's collectibles and the three routines beside them. Each
+  // has its own mode head, its own lifetime rule or none, its own mask of
+  // `obj+0x34` and its own registration, so none can ride the generic arm.
+  [TYPE70]: PropFamily.OriginalItem,
+  [TYPE71]: PropFamily.OriginalItem,
+  [TYPE72]: PropFamily.Type72,
+  [TYPE74]: PropFamily.Type74,
+  [TYPE76]: PropFamily.Type76,
+  [TYPE77]: PropFamily.Type77,
 };
-
-/**
- * The types whose update routine's **first line** is
- * `if (g_GameMode != 1) { ActorDespawn(obj); return; }`.
- *
- * They are Original Mode's collectibles — `FUN_004675A0` (70, 71),
- * `FUN_00470750` (72) and `FUN_004717A0` (77), which also wants item 0x1F in
- * the inventory and otherwise plays a refusal sound on its way out. Arcade
- * Mode places them and they vanish on their first frame, so in the port they
- * have to vanish too: without this they stand in the level for ever wearing
- * whatever `obj+0x28C` happens to hold, which for these is a lifetime rather
- * than a slot and draws `eff_3.bin`.
- *
- * `PropUpdateType75` (`FUN_004710C0`, type 75) **is** gated on the same test
- * and is deliberately *not* in here: its arm raises `g_script_flags[20]`
- * before it despawns, and a plain despawn would hold stage 4's block-2 gate
- * shut for the whole of Arcade Mode. It has its own family — see
- * `class41/flag_prop.ts`. `FUN_00470E20` (74) and `PropUpdateType76`
- * (`FUN_00471330`, 76) are still `[open]`.
- */
-export const GENERIC_ORIGINAL_MODE_ONLY: ReadonlySet<number> =
-  new Set([70, 71, 72, 77]);
 
 /**
  * `PlaceGenericProp` — `FUN_00461CF0`.
@@ -637,6 +636,15 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // effect and variant, the bob's centre and its rand()-seeded motion, and
   // the two-case kind switch on the slot. All of it in `class41/type43.ts`.
   if (type === TYPE43) PlaceGenericPropType43(p, pl, rng);
+  // Cases 0x46..0x4C: `class41/original_item.ts` and the type files beside
+  // it. 70, 71 and 72 call `PickOriginalModeItem`, which draws from `rand()`
+  // and writes the model over `obj+0x28C`.
+  if (type === TYPE70 || type === TYPE71) {
+    PlaceGenericPropOriginalItem(p, pl, type, rng);
+  }
+  if (type === TYPE72) PlaceGenericPropType72(p, pl, rng);
+  if (type === TYPE74) PlaceGenericPropType74(p);
+  if (type === TYPE76) PlaceGenericPropType76(p, pl);
 
   if (type === PropContainerType32) {
     p.yaw = LIFT_NEAR_CLOSED;

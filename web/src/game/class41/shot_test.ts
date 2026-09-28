@@ -84,8 +84,6 @@ export interface PropShotOffset {
   z?: number;
   /** A world point the routine uses **instead** of its own position. */
   world?: readonly [number, number, number];
-  /** `y += hitRadius * 0.5` before the constant. Only type 74 does this. */
-  halfRadius?: boolean;
 }
 
 /**
@@ -95,9 +93,9 @@ export interface PropShotOffset {
  * There is no general rule and this table does not invent one. Type 7
  * registers **57 units below** its origin against a radius of 12; type 11
  * registers its raw origin while its draw orbits around it; type 57 ignores
- * its position entirely; type 74's offset is a function of its own radius.
- * Eight of the twenty are a plain zero, which is why an absent entry means
- * that and not "unread" — {@link PROP_SHOT_READ} is what says which is which.
+ * its position entirely. Several are a plain zero, which is why an absent
+ * entry means that and not "unread" — {@link PROP_SHOT_READ} is what says
+ * which is which.
  */
 export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
   7: { y: -57.0 },     // `FUN_00466930`, against a radius of 12
@@ -113,16 +111,10 @@ export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
   58: {},              // `FUN_0046F580`
   60: {},              // `FUN_0046F840`
   69: { y: 1.5 },      // `PropUpdateType69`
-  70: { y: 1.5 },      // `OriginalItemPropUpdate`; y is live on the bobbing one
-  71: { y: 1.5 },      // the same routine
   73: { y: 8.0 },      // `PropUpdateType73`; its DRAW adds +0x1C8 to z, this does not
-  // `PropUpdateType76` arm 0. The same three magnitudes the sub-model is drawn
-  // at -- but the draw applies them INSIDE its rotation frame and this applies
-  // them on world axes. That is the exe's own inconsistency, not a reading.
-  76: { x: -2.5, y: -30.0, z: -17.5 },
-  72: { y: 1.5 },      // `FUN_00470750`, and only while it is falling
-  74: { y: -2.0, halfRadius: true },    // `FUN_00470E20`; r*0.5 - 2, so 2.5 at r=9
-  75: {},              // `FUN_004710C0`; the sphere stays put while the model flies
+  // 70..77 are families of their own and each routine registers its own
+  // point: `class41/original_item.ts`, `flag_prop.ts` and `type72.ts` ..
+  // `type77.ts`.
 };
 
 /**
@@ -133,10 +125,10 @@ export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
  * `obj+0x34 |= 0x44000000` and bit 26 removes it from the shot test
  * permanently, which is why its route can only be opened once.
  *
- * [port-only] as a *function*: three routines put their own test around their
+ * [port-only] as a *function*: a few routines put their own test around their
  * own registration, and they are gathered here so a reader can see there are
- * three and not thirty. (Type 40 was the fourth; it has its own routine now,
- * `class41/type40.ts`, and its own tail.)
+ * a few and not thirty. (Types 40 and 72 had rows; each has its own routine
+ * now, and its own tail.)
  */
 export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
   switch (p.kind) {
@@ -144,8 +136,6 @@ export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
     case 14: return p.state <= BreakableState.Falling;
     // `TEST [ESI+0x34], 0x4000000 / JNZ` -- one scoring hit ends it.
     case 25: return (p.flags & PROP_SHOT_TEST_DONE) === 0;
-    // The registration lives inside the state-1 arm; states 0 and 2 jump past.
-    case 72: return p.state === BreakableState.Falling;
     default: return true;
   }
 }
@@ -174,12 +164,11 @@ export const PROP_SHOT_TEST_DONE = 0x04000000;
  *   prop, so only the constant `RotY(0xC000)` is missing at rest.
  * * **49** — the position is rewritten each frame by resting one of thirteen
  *   hull vertices on the floor; the port does not run the tumble.
- * * **75** — the model flies `CamEvalObjectPath6(0x178, ...)` and the sphere
- *   stays at the spawn point. **That is the engine's own behaviour**, not a
- *   divergence, and it is here so nobody `fixes` it.
- * * **77** — `pos + RotY(obj+0x1D0) * CamEvalObjectPath6(0x195, ...)`.
+ *
+ * Types 75 and 77 used to be here; both routines are ported whole and
+ * register their own points (`class41/flag_prop.ts`, `class41/type77.ts`).
  */
-export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([19, 49, 75, 77]);
+export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([19, 49]);
 
 /**
  * Every generic type whose routine has been read for its shot point.
@@ -190,8 +179,7 @@ export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([19, 49, 75, 77]);
  * having the set.
  */
 export const PROP_SHOT_READ: ReadonlySet<number> = new Set([
-  7, 11, 14, 19, 20, 25, 41, 49, 56, 57, 58, 60, 69, 70, 71, 72, 73, 74, 75,
-  76, 77,
+  7, 11, 14, 19, 20, 25, 41, 49, 56, 57, 58, 60, 69, 73,
 ]);
 
 /**
@@ -283,7 +271,7 @@ export function GenericPropRegisterForShotTest(p: BreakableProp): void {
     PropRegisterForShotTest(p, off.world[0], off.world[1], off.world[2]);
     return;
   }
-  const rise = (off?.halfRadius ? p.hitRadius * 0.5 : 0) + (off?.y ?? 0);
+  const rise = off?.y ?? 0;
   PropRegisterForShotTest(p, p.x + (off?.x ?? 0), p.y + rise,
                           p.z + (off?.z ?? 0));
 }

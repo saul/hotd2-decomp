@@ -321,7 +321,7 @@ export function FallingContainerUpdate(p: BreakableProp, rng: Rng,
       // The release is measured from the floor, not from wherever the tumble
       // left the model -- and a story item from half a unit above it.
       p.y = p.floorY;
-      ReleaseHiddenItem(p, events, 0, FALLING_STORY_ITEM_RISE);
+      ReleaseHiddenItem(p, rng, events, 0, FALLING_STORY_ITEM_RISE);
       ActorDespawnProp(p);
       return;
     }

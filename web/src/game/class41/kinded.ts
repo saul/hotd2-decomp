@@ -143,7 +143,7 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
       const params = T.breakables?.kinds?.[p.kind];
       events?.emit("prop.broken",
                    { id: p.id, sound: params?.sound ?? SFX_KINDED_CRACK });
-      ReleaseKindedItem(p, events);
+      ReleaseKindedItem(p, rng, events);
     }
   }
   p.flags &= ~HIT_FLAG_MASK;
@@ -195,9 +195,10 @@ function EffectFrames(_variant: number): number {
  * do not: set 6 lifts the drop by 0.5 for kinds 2, 8 and 9, and set 7 by 0.9
  * when the prop is wearing `0x17AB`.
  */
-function ReleaseKindedItem(p: BreakableProp, events?: Events): void {
+function ReleaseKindedItem(p: BreakableProp, rng: Rng,
+                           events?: Events): void {
   let rise = 0;
   if (p.itemSet === 6 && SET6_RAISED_KINDS.includes(p.kind)) rise = SET6_RISE;
   else if (p.itemSet === 7 && p.slot === 0x17ab) rise = SET7_RISE;
-  ReleaseHiddenItem(p, events, rise);
+  ReleaseHiddenItem(p, rng, events, rise);
 }

@@ -36,7 +36,10 @@
  * drawn in `BreakablePropUpdate`; every other family's rattle is still drawn
  * here, from this layer's own generator, where it does not reach the port.
  */
-import { Group, Matrix4, Object3D, Ray, Vector3 } from "three";
+import {
+  Group, Matrix4, type Mesh, Object3D, Quaternion, Ray, Vector3,
+} from "three";
+import { setMeshDrawAlpha } from "./draw_order";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
@@ -362,6 +365,19 @@ function SecondSlotFor(p: BreakableProp): number | null {
   return null;
 }
 
+/**
+ * Every mesh under `n` that is not under another of `parts`: one part's own
+ * draw, where the parts of a composite prop hang off each other.
+ */
+function ForOwnMeshes(n: Object3D, parts: readonly Object3D[],
+                      f: (m: Mesh) => void): void {
+  const walk = (o: Object3D): void => {
+    if ((o as Mesh).isMesh) f(o as Mesh);
+    for (const c of o.children) if (!parts.includes(c)) walk(c);
+  };
+  walk(n);
+}
+
 export class BreakableLayer implements System<RenderContext> {
   readonly id = "render.breakables";
   readonly group = new Group();
@@ -374,6 +390,11 @@ export class BreakableLayer implements System<RenderContext> {
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
   private readonly _m = new Matrix4();
+  /** The camera's world pose this frame, for `MatrixClearRotation` parts. */
+  private readonly _cp = new Vector3();
+  private readonly _cq = new Quaternion();
+  private readonly _cs = new Vector3();
+  private readonly _v = new Vector3();
 
   constructor() {
     this.group.name = "breakables";
@@ -463,10 +484,16 @@ export class BreakableLayer implements System<RenderContext> {
     return c;
   }
 
-  update(): void {
+  update(ctx?: RenderContext): void {
     this.group.visible = this.enabled;
     if (!this.enabled) return;
     const seen = new Set<number>();
+    // The camera's world rotation, for the parts drawn after a
+    // `MatrixClearRotation` (`FUN_004A9F70`) -- see `drawParts`.
+    if (ctx?.camera) {
+      ctx.camera.updateMatrixWorld();
+      ctx.camera.matrixWorld.decompose(this._cp, this._cq, this._cs);
+    }
 
     for (const p of G.g_breakable_props) {
       if (p.dead) continue;
@@ -685,12 +712,30 @@ export class BreakableLayer implements System<RenderContext> {
       if (!n) return;
       n.position.set(q.x, q.y, q.z);
       n.rotation.set(0, 0, 0);
+      if (q.billboard) {
+        // `MatrixClearRotation` writes the top 3x3 to the identity -- the
+        // view's rotation with it -- so what follows is in the camera's axes:
+        // the part takes the camera's world rotation, and `view` is a
+        // translate along those axes. Only a world-space part can be one.
+        n.quaternion.copy(this._cq);
+        if (q.view) {
+          this._v.set(q.view[0], q.view[1], q.view[2])
+            .applyQuaternion(this._cq);
+          n.position.add(this._v);
+        }
+      }
       for (const axis of q.order) {
         if (axis === "Z") n.rotateZ(q.roll * BAMS_TO_RAD);
         else if (axis === "Y") n.rotateY(q.yaw * BAMS_TO_RAD);
         else if (axis === "X") n.rotateX(q.pitch * BAMS_TO_RAD);
       }
       n.scale.set(q.sx, q.sy, q.sz);
+      // `AssetDrawSlot` or `AssetDrawSlotWithAlpha`, for a part that says
+      // which: on its own meshes only, since its children are other parts,
+      // each with its own draw.
+      if (q.alpha !== undefined) {
+        ForOwnMeshes(n, kids, (m) => setMeshDrawAlpha(m, q.alpha ?? null));
+      }
     });
   }
 
@@ -837,7 +882,7 @@ export class BreakableLayer implements System<RenderContext> {
    */
   resync(ctx: RenderContext): void {
     this.claimSession(ctx);
-    this.update();
+    this.update(ctx);
   }
 
   /**
@@ -885,6 +930,15 @@ export class BreakableLayer implements System<RenderContext> {
     let effects = 0;
     const noTemplate = new Set<number>();
     for (const p of live) {
+      // A composite family's slots are its parts', not `obj+0x28C`.
+      if (COMPOSITE_FAMILIES.has(p.family)) {
+        for (const q of PropParts(p) ?? []) {
+          if (q.slot && q.slot !== SLOT_NONE && !this.templates.has(q.slot)) {
+            noTemplate.add(q.slot);
+          }
+        }
+        continue;
+      }
       const slot = DrawSlotFor(p);
       if (slot !== null) {
         if (!this.templates.has(slot)) noTemplate.add(slot);

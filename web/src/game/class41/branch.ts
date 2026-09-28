@@ -5,9 +5,9 @@
  * are props**: a shootable thing standing in a branch block whose one job is
  * to answer `EvtAdvanceStepOrRoute`'s `next[]` index. They are here rather
  * than one file apiece because they are one mechanism written nine ways, and
- * reading them side by side is the only way the shape is visible. Type 40 is
- * ported whole and lives in `class41/type40.ts`; the table keeps its row so
- * the nine are still read together:
+ * reading them side by side is the only way the shape is visible. Types 40,
+ * 70 and 76 are ported whole and live in their own files; the table keeps
+ * their rows so the nine are still read together:
  *
  * ```
  * type 14  first hit          -> 1 - obj+0x11C     both modes
@@ -16,9 +16,9 @@
  * type 40  both sub-kind 9 broken, flag 0x11 -> 2  original only  (type40.ts)
  * type 56  script flag 5, block 9 -> 2             original only
  * type 69  flag 0x23, already 1, shot -> 2         original only
- * type 70  scene 2, block 4, flag 0x13 -> scene    original only
+ * type 70  scene 2, block 4, flag 0x13 -> scene    original only  (original_item.ts)
  * type 73  first hit, block 7, flag 0x12, key -> 2 original only
- * type 76  first hit, block 5 or 0x0E + key -> 2   original only
+ * type 76  first hit, block 5 or 0x0E + key -> 2   original only  (type76.ts)
  * chain    any link, group 1, block 0x16 -> 2      original only
  * switch   scene/block table, its own flag -> 2    original only
  * ```
@@ -72,7 +72,10 @@ export enum BranchScriptFlag {
   FragmentPair = 0x11,
   /** `PropUpdateType73`. */
   Type73Trigger = 0x12,
-  /** `OriginalItemPropUpdate`, in scene 2 block 4. */
+  /**
+   * `OriginalItemPropUpdate` (`FUN_004675A0`), in scene 2 block 4 -- see
+   * `class41/original_item.ts`.
+   */
   OriginalItemRoute = 0x13,
   /** `PropUpdateType69`, which promotes an existing 1 to a 2. */
   Type69Promote = 0x23,
@@ -80,7 +83,7 @@ export enum BranchScriptFlag {
 
 /** The event blocks a trigger is live in, where it names one. */
 export enum BranchBlock {
-  /** `PropUpdateType76`'s first arm. */
+  /** `PropUpdateType76` (`FUN_00471330`)'s first arm -- `class41/type76.ts`. */
   Type76First = 5,
   /** `PropUpdateType73`. */
   Type73 = 7,
@@ -96,8 +99,6 @@ export enum BranchBlock {
 
 /** The original items `PropUpdateType73` will open its route for. */
 const TYPE73_KEYS = [5, 6, 0x0c];
-/** The original items `PropUpdateType76`'s block-0x0E arm will open for. */
-const TYPE76_KEYS = [0, 2, 0x0b];
 
 /** `g_script_flags[n]`, defaulted — an unraised flag is *absent* from the
  *  array, and an undefined slips straight through a bare `=== 1`. */
@@ -282,35 +283,6 @@ export function PropUpdateType69(p: BreakableProp): void {
 }
 
 /**
- * `OriginalItemPropUpdate` — `FUN_004675A0`. `g_class41_updates[70]` **and**
- * `[71]`, 23 spawns — Original Mode's collectible.
- *
- * ```c
- * if (g_scene_index == 2 && g_evt_block_index == 4 && g_script_flags[0x13] != 0)
- *     g_script_branch_var = g_scene_index;
- * ```
- *
- * `g_scene_index` on both sides, so the value written **is 2** — the routine
- * spells the route number as the scene it is standing in. Scene 2 is stage 3,
- * whose block 4 record is `{5, -1, 10}`: slot 2, exactly.
- *
- * The write does not depend on the item having been taken; it fires while the
- * flag is up, every frame, which is harmless because the value never changes.
- *
- * Not transcribed: the pickup itself — the `g_original_items_taken` tally, the
- * `FUN_00475E40` award and the 0x32-frame animation — the bob-and-spin idle,
- * and the two draws. The mode gate is already in `pool.ts` through
- * `GENERIC_ORIGINAL_MODE_ONLY`, which lists both types.
- */
-export function OriginalItemPropUpdate(p: BreakableProp): void {
-  void p;
-  if (G.g_scene_index !== 2) return;
-  if (G.g_evt_block_index !== 4) return;
-  if (ScriptFlag(BranchScriptFlag.OriginalItemRoute) === 0) return;
-  G.g_script_branch_var = G.g_scene_index;
-}
-
-/**
  * `PropUpdateType73` — `FUN_00470B70`. `g_class41_updates[73]`.
  *
  * ```c
@@ -339,49 +311,6 @@ export function PropUpdateType73(p: BreakableProp): void {
   if (!TYPE73_KEYS.some(PlayerHoldsOriginalItem)) return;
   p.branchLatched = true;
   G.g_script_branch_var = 2;
-}
-
-/**
- * `PropUpdateType76` — `FUN_00471330`. `g_class41_updates[76]`.
- *
- * Two arms, and only one of them wants a key:
- *
- * ```c
- * if ((obj->+0x34 & 8) && obj->+0x192 == 0) {
- *     ...pay, spark, PlaySoundId(0xF16A9)...
- *     if ((obj->+0x194 == 1 && g_evt_block_index == 5)
- *      || (g_evt_block_index == 0x0E
- *          && (HasItem(0) || HasItem(2) || HasItem(0x0B)))) {
- *         obj->+0x192 = 1;
- *         g_script_branch_var = 2;
- *         obj->+0x34 |= 0x40000000;
- *     }
- * }
- * ```
- *
- * `obj+0x194` is a byte the placer copies, and it separates the two shipped
- * spawns: stage 4 block 5 opens on the shot alone, stage 4 block 14 — 0x0E —
- * wants item 0, 2 or 0x0B first. Their records are `{7, -1, 21}` and
- * `{15, -1, 20}`.
- *
- * [open] The port has no `+0x194` for a generic prop, so the block-5 arm is
- * gated on the block alone. That is the same condition for the shipped data —
- * only the block-5 spawn is in block 5 — and it would differ only for a
- * spawn that does not exist.
- *
- * Not transcribed: the spark, the 60 frames of `g_pHingeCurvesXYZ` that swing
- * the door open, and the three draws.
- */
-export function PropUpdateType76(p: BreakableProp): void {
-  if (G.g_GameMode !== GameMode.Original) return;
-  if ((p.flags & BreakableFlag.Hit) === 0 || p.branchLatched) return;
-  const first = G.g_evt_block_index === BranchBlock.Type76First;
-  const keyed = G.g_evt_block_index === BranchBlock.Type76Keyed
-    && TYPE76_KEYS.some(PlayerHoldsOriginalItem);
-  if (!first && !keyed) return;
-  p.branchLatched = true;
-  G.g_script_branch_var = 2;
-  p.flags |= PROP_BRANCH_ANSWERED;
 }
 
 /**

@@ -172,6 +172,37 @@ export enum PropFamily {
    * `class41/draw_only.ts`.
    */
   DrawOnlyType33 = 20,
+  // The five below take their **type number** as their value, so that two
+  // workstreams adding families at once cannot hand out the same one.
+  /**
+   * `OriginalItemPropUpdate` (`FUN_004675A0`) — class 0x41 types 70 **and**
+   * 71, Original Mode's collectible: one routine, and bit `0x200000` of
+   * `obj+0x34` (set by type 71's arm) is what makes it bob. Its own family
+   * because it masks only bit 3 of `obj+0x34` and registers its own point.
+   * See `class41/original_item.ts`.
+   */
+  OriginalItem = 70,
+  /**
+   * `PropUpdateType72` (`FUN_00470750`) — the collectible that pops up on a
+   * camera cue and falls. No lifetime of any kind. See `class41/type72.ts`.
+   */
+  Type72 = 72,
+  /**
+   * `PropUpdateType74` (`FUN_00470E20`) — three shots and it drops an item;
+   * raises `g_script_flags[0x13]` on its Arcade exit. See
+   * `class41/type74.ts`.
+   */
+  Type74 = 74,
+  /**
+   * `PropUpdateType76` (`FUN_00471330`) — the stage-4 door pair a shot swings
+   * open, and a route. See `class41/type76.ts`.
+   */
+  Type76 = 76,
+  /**
+   * `PropUpdateType77` (`FUN_004717A0`) — the flying bonus that rides object
+   * path 0x195 while item 0x1F is held. See `class41/type77.ts`.
+   */
+  Type77 = 77,
 }
 
 /**
@@ -694,6 +725,41 @@ export interface BreakableProp {
   dead: boolean;
   /** {@link PropFamily.Type48}'s own words, and null for every other family. */
   flicker: FlickerLightState | null;
+  /**
+   * `obj+0x290` as `PickOriginalModeItem` (`FUN_004629C0`) writes it: the
+   * Original Mode item id a collectible is, `-1` for none. The **same engine
+   * word** as {@link BreakableProp.kind}, which for a generic prop the port
+   * uses for the class-0x41 type; separate here for the reason
+   * {@link BreakableProp.cuePhase} is (`L3`). Only
+   * {@link PropFamily.OriginalItem} and {@link PropFamily.Type72} read it.
+   */
+  originalItem: number;     // +0x290
+  /**
+   * `obj+0x28E` — a collectible's second model, from its item record's
+   * `+0x02`: drawn camera-facing, 1.5 toward the viewer. `0xFFFF` for none.
+   */
+  slotB: number;            // +0x28E
+  /**
+   * `obj+0x2C4` — a collectible's draw scale, from its item record's `+0x04`
+   * (1.0 or 1.5), and 1.0 for an item id of -1.
+   */
+  itemScale: number;        // +0x2C4
+  /**
+   * `obj+0x199` for {@link PropFamily.Type74}: the shots it takes before it
+   * drops its item, 3 from `PlaceGenericProp` case 0x4A. The group props keep
+   * their lifetime in this byte; a generic prop keeps its in `+0x11C`, which
+   * the port holds in {@link BreakableProp.lifetime} — check the family.
+   */
+  shotsLeft: number;        // +0x199
+  /**
+   * `[port-only]` The pose `CamEvalObjectPath6` (`FUN_004042D0`) handed the
+   * routine this frame, for the two that ride an `op_` path —
+   * {@link PropFamily.Type75} draws at all six values, {@link PropFamily.Type77}
+   * translates by the three positions. The engine keeps it in a stack local;
+   * the port leaves it here for `render/`, which draws it, and it is
+   * recomputed every update. `null` before the first, or with no path.
+   */
+  pathPose: PosedNode | null;
 }
 
 /** `obj+0x34` bits `BreakablePropUpdate` tests. */
@@ -779,5 +845,10 @@ export function makeBreakableProp(id: number, group: number,
     hitAim: null,
     dead: false,
     flicker: null,
+    originalItem: -1,
+    slotB: 0,
+    itemScale: 1,
+    shotsLeft: 0,
+    pathPose: null,
   };
 }

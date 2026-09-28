@@ -38,6 +38,7 @@ import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
+import type { OriginalItemBanner } from "./class41/item_banner";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
 import type { ShotTestEntry } from "./combat/shot_test";
@@ -2130,13 +2131,47 @@ export const G = {
    * reads it, and three branch triggers only open their route while the
    * player is carrying the right id.
    *
-   * [diverges] **Nothing in the port ever fills it.** The pickup path is
-   * `FUN_00475E40`, which is unported, so every slot stays at -1 and the
-   * three key-gated routes are unreachable — as they would be for a player
-   * who had not found the key. That is the honest state, not a stub: the
-   * alternative is to pretend the player is carrying something.
+   * [diverges] **Nothing in the port ever fills it.** Shooting a collectible
+   * does not: `OriginalItemPropUpdate` counts the id into
+   * {@link g_original_items_taken} and raises a banner
+   * (`SpawnOriginalItemBanner`, `FUN_00475E40`), and neither writes here. The
+   * writer of the ids is not ported, so every slot stays at -1 and the three
+   * key-gated routes are unreachable — as they would be for a player who had
+   * not found the key. That is the honest state, not a stub: the alternative
+   * is to pretend the player is carrying something.
    */
   g_original_item_slots: [[-1, -1], [-1, -1]] as number[][],
+  /**
+   * `g_original_items_taken` — 0x009C90C0, one byte per Original Mode item
+   * id, 33 of them. `OriginalItemPropUpdate` and `PropUpdateType72` count a
+   * pickup in, capped at 0x63.
+   *
+   * **Persistent, not per game**: `FUN_0040AB50` copies all 33 in from the
+   * options block at `0x009C9F3D` with the lives and difficulty settings, and
+   * nothing in a game's reset clears it. The port has no save block, so it
+   * starts at zero with the page and survives every reset.
+   */
+  g_original_items_taken: new Array(33).fill(0) as number[],
+  /**
+   * `g_original_item_pickup_blocked` — 0x007DCD14. While non-zero,
+   * `OriginalItemPropUpdate` skips its whole pick-up arm. `PlaceGenericProp`
+   * clears it for each collectible it builds; type 75 sets it when its ride
+   * ends and clears it when it is shot, type 74 clears it when it drops its
+   * item.
+   */
+  g_original_item_pickup_blocked: 0,
+  /**
+   * `g_original_item_banner_count` — 0x007DCD04, how many
+   * `OriginalItemBannerUpdate` banners are up. In scene 5 a banner that finds
+   * more than one dies.
+   */
+  g_original_item_banner_count: 0,
+  /**
+   * The banners `SpawnOriginalItemBanner` (`FUN_00475E40`) allocates, in
+   * allocation order. [port-only] as a list: each is a 0x378 task in the
+   * engine. See `game/class41/item_banner.ts`.
+   */
+  g_original_item_banners: [] as OriginalItemBanner[],
   /**
    * `g_chain_segments` — 0x007DCD18, `[group * 0x14 + segment]`.
    *
@@ -2604,6 +2639,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_branch_prop_shot_count = 0;
   ResetFragmentSubkind1Intact();
   G.g_original_item_slots = [[-1, -1], [-1, -1]];
+  // `g_original_items_taken` is not here on purpose: it is the options
+  // block's, and a game's reset leaves it alone.
+  G.g_original_item_pickup_blocked = 0;
+  G.g_original_item_banner_count = 0;
+  G.g_original_item_banners = [];
   G.g_chain_segments = [];
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();

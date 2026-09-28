@@ -383,7 +383,7 @@ function Type43ReleaseOnSecondHit(p: BreakableProp, rng: Rng,
                { id: p.id, player: who, sound: SFX_TYPE43_PICKUP });
   p.storyItem = 1;
   // `[open]` `g_original_items_taken[obj+0x290]++`, capped at 0x63, and the
-  // award `FUN_00475E40(g_original_item_records[id].pickup)`. Neither is
+  // banner `SpawnOriginalItemBanner` (`FUN_00475E40`). Neither is
   // ported; the port shows the pickup's model and records the shot.
   p.slot = TYPE43_PICKUP_SLOT + TYPE43_PICKUP_SLOT_STRIDE * who;
 }

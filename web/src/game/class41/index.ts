@@ -279,6 +279,12 @@ export * from "./items";
 export * from "./lift";
 export * from "./lifetime";
 export * from "./flag_prop";
+export * from "./original_item";
+export * from "./item_banner";
+export * from "./type72";
+export * from "./type74";
+export * from "./type76";
+export * from "./type77";
 export {
   BreakableGroupMembers, BreakableMemberSlot, BreakablePropAt,
   BreakableGroupFloor, MsvcRand, PROP_TARGET_SETS, MEMBERS_PER_GROUP,

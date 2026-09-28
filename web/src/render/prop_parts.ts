@@ -18,6 +18,10 @@ import {
   FRAGMENT_SUBKIND9_EXTRA_SLOT,
 } from "../game/class41/type40";
 import {
+  OriginalItemParts, Type72Parts, Type74Parts, Type75Parts, Type76Parts,
+  Type77Parts,
+} from "./prop_parts_items";
+import {
   TYPE44_FIRST_WHOLE_ROW, TYPE44_SHADOW_RISE,
   TYPE44_SHADOW_SCALE, TYPE44_SHADOW_SLOT, TYPE44_WHOLE_SLOT,
 } from "../game/class41/type44";
@@ -33,11 +37,26 @@ export interface PropPart {
   sx: number; sy: number; sz: number;
   /** Index of the part this one hangs off, or -1 for world space. */
   parent: number;
+  /**
+   * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s alpha, or null/absent for a
+   * plain `AssetDrawSlot`. Applied to this part's own meshes only.
+   */
+  alpha?: number | null;
+  /**
+   * `MatrixClearRotation` (`FUN_004A9F70`) after the part's translate: it
+   * takes the camera's rotation instead of any of its own, and {@link view}
+   * is a translate in the camera's axes after it.
+   */
+  billboard?: boolean;
+  view?: [number, number, number];
 }
 
 /** The families this file draws. */
 export const COMPOSITE_FAMILIES: ReadonlySet<PropFamily> = new Set([
   PropFamily.Type38, PropFamily.Type39, PropFamily.Type40, PropFamily.Type44,
+  // Types 70..77, in `render/prop_parts_items.ts`.
+  PropFamily.OriginalItem, PropFamily.Type72, PropFamily.Type74,
+  PropFamily.Type75, PropFamily.Type76, PropFamily.Type77,
 ]);
 
 function part(slot: number, x: number, y: number, z: number,
@@ -58,6 +77,12 @@ export function PropParts(p: BreakableProp): PropPart[] | null {
     case PropFamily.Type39: return Type39Parts(p);
     case PropFamily.Type40: return Type40Parts(p);
     case PropFamily.Type44: return Type44Parts(p);
+    case PropFamily.OriginalItem: return OriginalItemParts(p);
+    case PropFamily.Type72: return Type72Parts(p);
+    case PropFamily.Type74: return Type74Parts(p);
+    case PropFamily.Type75: return Type75Parts(p);
+    case PropFamily.Type76: return Type76Parts(p);
+    case PropFamily.Type77: return Type77Parts(p);
     default: return null;
   }
 }

@@ -8,8 +8,12 @@
  * *random* one of the set's props that pays out, not the last.
  */
 import type { Events } from "../../core/events";
+import type { Rng } from "../../core/rng";
 import { G } from "../globals";
-import { ItemSet, type BreakableProp } from "./prop_state";
+import { PickOriginalModeItem } from "./original_item";
+import {
+  BreakableState, ItemSet, makeBreakableProp, PropFamily, type BreakableProp,
+} from "./prop_state";
 
 /**
  * The character type `SpawnGoldenFrog` gives its actor. All eighteen of its
@@ -98,16 +102,79 @@ export function SpawnScorePickup(p: BreakableProp, kind: number,
 
 /**
  * `SpawnStoryModeItem` — `FUN_00467B90`. Taken while `g_GameMode` is 1 by a
- * prop whose own `+0x2A0` names a kind, *instead of* its item set's release.
- * Three shipped members carry one: group 0's member 0 and group 7's members
- * 3 and 4.
+ * prop whose own `+0x2A0` names a row of the scene's Original Mode item
+ * table, *instead of* its item set's release; types 74 and 75 call it with
+ * rows 2 and 1 of their own. Three shipped group members carry one: group 0's
+ * member 0 and group 7's members 3 and 4.
  *
- * [diverges] Released as an event; the object is not ported.
+ * **The item is a collectible**, the same object class 0x41 types 70 and 71
+ * are:
+ *
+ * ```c
+ * q = ActorAlloc(OriginalItemPropUpdate, 0x378);  ActorClearGameFields(q);
+ * q+0x34 = 0x80000001;  q+0x194 = (s8)p+0x2A0;  q+0x19C..0x1A4 = p's;
+ * q+0x1D0 = (s16)ftol(atan2(x - eye.x, z - eye.z) * 32768/pi) + 0x8000;
+ * q+0x197 = p+0x197;  q+0x196 = p+0x196;  q+0x11C = p+0x11C;  q+0x124 = 3.0;
+ * PickOriginalModeItem(q, q+0x194);  g_original_item_banner_count = 0;
+ * ```
+ *
+ * It inherits the prop's step counters and its `+0x11C`, so it ages on the
+ * prop's clock from where the prop was. `ActorAlloc` appends it to the task
+ * list the prop is on, so it runs on the frame it is made.
+ *
+ * The `item.released` event is the port's own notice for its feed; the
+ * engine has no counterpart and the game reads nothing from it.
  */
-export function SpawnStoryModeItem(p: BreakableProp, events?: Events): void {
+export function SpawnStoryModeItem(p: BreakableProp, rng: Rng,
+                                   events?: Events): void {
+  const q = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
+  q.family = PropFamily.OriginalItem;
+  q.flags = STORY_ITEM_FLAGS;
+  q.state = BreakableState.Standing;
+  // `ActorClearGameFields` zeroes the pickup strip's frame and base.
+  q.storyItem = 0;
+  q.removeFlag = 0;
+  q.group = (p.storyItem << 24) >> 24;
+  q.x = p.x;
+  q.y = p.y;
+  q.z = p.z;
+  // `FPATAN; FMUL g_rad_to_bams; __ftol; MOVSX; ADD 0x8000`, off the camera
+  // block's eye -- `g_camera_index` is 0 in every shipped write.
+  const b = Math.trunc(Math.atan2(p.x - G.g_camera_block_eye.x,
+                                  p.z - G.g_camera_block_eye.z)
+                       * STORY_ITEM_RAD_TO_BAMS);
+  q.yaw = ((b << 16) >> 16) + 0x8000;
+  q.stepsElapsed = p.stepsElapsed;
+  q.lastStepIndex = p.lastStepIndex;
+  q.lifetime = PropWord11C(p);
+  q.hitRadius = STORY_ITEM_RADIUS;
+  PickOriginalModeItem(q, q.group, rng);
+  G.g_original_item_banner_count = 0;
+  G.g_breakable_props.push(q);
   events?.emit("item.released", {
     set: -1, kind: p.storyItem, from: p.id, x: p.x, y: p.y, z: p.z,
   });
+}
+
+/** `MOV dword ptr [EAX + 0x34], 0x80000001` — live, and bit 31. */
+const STORY_ITEM_FLAGS = 0x80000001;
+/** `MOV dword ptr [EAX + 0x124], 0x40400000` — a collectible's 3.0. */
+const STORY_ITEM_RADIUS = 3.0;
+/** `g_rad_to_bams` — `0x004C4378`, the double `32768/pi`. */
+const STORY_ITEM_RAD_TO_BAMS = 32768 / Math.PI;
+
+/**
+ * `obj+0x11C` of a prop, whichever port field holds it.
+ *
+ * `[port-only]` — the engine reads one word; the port keeps that word in
+ * `hp` for the families whose routines count shots in it (the group props
+ * and the falling container) and in `lifetime` for the ones that count steps
+ * against it (the kinded and generic props). The question is the engine's,
+ * the answer is where the port put it (`L3`).
+ */
+function PropWord11C(p: BreakableProp): number {
+  return p.family === PropFamily.Group || p.family === PropFamily.Falling
+    ? p.hp : p.lifetime;
 }
 
 /**
@@ -130,7 +197,8 @@ export function SpawnStoryModeItem(p: BreakableProp, events?: Events): void {
  * (`FADD [0x004C43AC]` at `0x0046A9FA`) and a set's item at the floor itself.
  * Everywhere else it is `rise`.
  */
-export function ReleaseHiddenItem(p: BreakableProp, events?: Events,
+export function ReleaseHiddenItem(p: BreakableProp, rng: Rng,
+                                  events?: Events,
                                   rise = 0, storyRise = rise): void {
   // [open] `g_GameMode == 1 && DAT_009C88AA != 0` forces `itemSet = 1` on
   // every prop, so each one drops an extra life. What sets that flag has not
@@ -147,7 +215,7 @@ export function ReleaseHiddenItem(p: BreakableProp, events?: Events,
   const lift = story ? storyRise : rise;
   p.y += lift;
   if (story) {
-    SpawnStoryModeItem(p, events);
+    SpawnStoryModeItem(p, rng, events);
   } else {
     switch (p.itemSet) {
       case ItemSet.ExtraLife:

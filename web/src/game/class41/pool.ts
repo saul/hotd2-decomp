@@ -20,17 +20,22 @@ import { PropShattersTick, type ShatterCamera } from "./shatter";
 import { RisingDoorUpdate } from "../class44/rising_door";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
-  ChainSegmentUpdate, OriginalItemPropUpdate, StoryModeSwitchUpdate,
+  ChainSegmentUpdate, StoryModeSwitchUpdate,
   PropUpdateType14,
   PropUpdateType19, PropUpdateType25, PropUpdateType56,
-  PropUpdateType69, PropUpdateType73, PropUpdateType76,
+  PropUpdateType69, PropUpdateType73,
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
 import { PropUpdateType75 } from "./flag_prop";
 import {
   PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
 } from "./draw_only";
-import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
+import { OriginalItemBannersTick } from "./item_banner";
+import { OriginalItemPropUpdate } from "./original_item";
+import { PropUpdateType72 } from "./type72";
+import { PropUpdateType74 } from "./type74";
+import { PropUpdateType76 } from "./type76";
+import { PropUpdateType77 } from "./type77";
 import { PropUpdateType13 } from "./type13";
 import { PropUpdateType35 } from "./type35";
 import { PropUpdateType43 } from "./type43";
@@ -101,7 +106,16 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // around this one: `PropUpdateType75` inlines its own variant of the
       // prologue and has no `AND` on `obj+0x34` anywhere in it. Adding either
       // here would be two lines the engine does not run.
-      case PropFamily.Type75: PropUpdateType75(p, rng, events); break;
+      case PropFamily.Type75: PropUpdateType75(p, rng, events, host); break;
+      // Original Mode's collectibles and their neighbours, each with its own
+      // head, its own lifetime rule or none, its own mask of `obj+0x34` and
+      // its own registration. See `class41/original_item.ts` and
+      // `class41/type72.ts`..`type77.ts`.
+      case PropFamily.OriginalItem: OriginalItemPropUpdate(p, rng, events); break;
+      case PropFamily.Type72: PropUpdateType72(p, rng, events); break;
+      case PropFamily.Type74: PropUpdateType74(p, rng, events); break;
+      case PropFamily.Type76: PropUpdateType76(p, rng, events); break;
+      case PropFamily.Type77: PropUpdateType77(p, rng, events, host); break;
       // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
       // own variant of it and 54 has no lifetime at all — so neither can ride
       // the generic arm, which runs that prologue before it dispatches.
@@ -139,6 +153,8 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
   // from earlier frames. Each is its own task in the engine, appended behind
   // the prop that made it, so a new one steps on the frame it is made.
   PropShattersTick();
+  // ...and the banners a taken collectible raises, allocated the same way.
+  OriginalItemBannersTick();
 }
 
 /**
@@ -146,9 +162,9 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
  *
  * This table **is** the engine's indirect call: `ActorAlloc` was handed
  * `g_class41_updates[obj->+0x130C]` and the object calls through it every
- * frame, so switching on the type here is that call written out. Eight of the
- * eleven entries are branch triggers — see `class41/branch.ts` — because a route
- * the stage takes is worth more than a swing.
+ * frame, so switching on the type here is that call written out. Most of the
+ * entries are branch triggers — see `class41/branch.ts` — because a route the
+ * stage takes is worth more than a swing.
  *
  * A type absent here is placed, drawn and otherwise inert, which is the
  * standing divergence `class41/generic.ts` declares.
@@ -167,10 +183,7 @@ const GENERIC_UPDATE: Partial<Record<number,
   25: PropUpdateType25,
   56: PropUpdateType56,
   69: PropUpdateType69,
-  70: OriginalItemPropUpdate,
-  71: OriginalItemPropUpdate,
   73: PropUpdateType73,
-  76: PropUpdateType76,
 };
 
 /**
@@ -186,12 +199,6 @@ const GENERIC_UPDATE: Partial<Record<number,
  * bit survived the frame would answer its branch on every frame afterwards.
  */
 function GenericPropUpdate(p: BreakableProp, events?: Events): void {
-  // `if (g_GameMode != 1) { ActorDespawn(obj); return; }` — Original Mode's
-  // collectibles, gone on their first frame in Arcade.
-  if (GENERIC_ORIGINAL_MODE_ONLY.has(p.kind) && G.g_GameMode !== 1) {
-    ActorDespawnProp(p);
-    return;
-  }
   if (PropExpireByStepLifetime(p)) return;
   if (p.chainGroup > 0) {
     ChainSegmentUpdate(p, ChainSegmentZero(p.chainGroup));

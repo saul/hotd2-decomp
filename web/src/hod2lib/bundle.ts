@@ -230,7 +230,13 @@ export const GENERIC_STATIC_SLOTS: Record<number, number[]> = {
   58: [0x01d1],                       // FUN_0046F580
   60: [0x01d8],                       // FUN_0046F840
   64: [0x1a39, 0x0c27],               // FUN_0046FBE0
-  77: [0x10ab],                       // FUN_004717A0, Original Mode only
+  74: [0x0a64],                       // PropUpdateType74 (FUN_00470E20)
+  75: [0x0a6b],                       // PropUpdateType75, on op_ path 0x178
+  // PropUpdateType76 (FUN_00471330): the near door 0xA6D and the plate 0x10D3
+  // on it for the +0x194 == 0 arm; the two leaves 0xA67/0xA68 and the same
+  // plate for the +0x194 == 1 arm.
+  76: [0x0a6d, 0x10d3, 0x0a67, 0x0a68],
+  77: [0x10ab],                       // PropUpdateType77 (FUN_004717A0)
 };
 
 /**
@@ -764,9 +770,10 @@ export function scriptedHumanoidsJson(evt: evtlib.EvtFile,
  */
 export function breakablesJson(tables: ExeTables,
                                placements: Record<string, unknown>[],
-                               effects: Record<string, unknown> = {}):
+                               effects: Record<string, unknown> = {},
+                               scene = 0):
     Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     groups: tables.breakableGroups(),
     hull: tables.breakableHullPoints().map((p) => [...p]),
     falling_hull: tables.fallingHullPoints().map((p) => [...p]),
@@ -776,7 +783,124 @@ export function breakablesJson(tables: ExeTables,
     placements,
     effects,
     level_height: 7.540296,
+    original_items: originalItemsJson(tables, placements, scene),
   };
+  // `PropUpdateType76` (`FUN_00471330`) reads `*g_pHingeCurvesXYZ` -- curve
+  // 0 -- straight out of the table, `MOV EDX, [0x005960B4]`.
+  if (placements.some((pl) => pl.container === "generic"
+                      && pl.type === HINGE_CURVE_0_TYPE)) {
+    out.hinge_curves = { "0": propslib.hingeCurve(tables, 0) };
+  }
+  return out;
+}
+
+/** Class 0x41 type 76, whose routine swings its doors on hinge curve 0. */
+const HINGE_CURVE_0_TYPE = 76;
+
+/**
+ * The class-0x41 types whose arm calls `PickOriginalModeItem`
+ * (`FUN_004629C0`) with the placer's `+0x1F4` byte as the row: 70, 71 and 72
+ * (`0x0046273F`, `0x00462797`, `0x00462860`).
+ */
+export const ORIGINAL_ITEM_TYPES = [70, 71, 72];
+
+/**
+ * The pickup the collectible becomes when shot: `OriginalItemPropUpdate`
+ * (`FUN_004675A0`) and `PropUpdateType72` (`FUN_00470750`) both draw
+ * `AssetDrawSlot(obj+0x2A4 - 1 + obj+0x2A0)` with `obj+0x2A0` running 1..0x31
+ * and `obj+0x2A4` 0x116A for player 0 or 0x119C (`0x116A + 50`) for player 1.
+ * Two strips of 49 frames each.
+ */
+export const ORIGINAL_ITEM_PICKUP_STRIPS = [0x116a, 0x119c];
+export const ORIGINAL_ITEM_PICKUP_FRAMES = 0x31;
+
+/**
+ * `OriginalItemBannerUpdate` (`FUN_00475D00`)'s frame sprite, drawn behind
+ * the item's own `g_original_item_records[id].sprite`.
+ */
+export const ORIGINAL_ITEM_BANNER_FRAME = 0x5e0;
+
+/**
+ * The rows `SpawnStoryModeItem` (`FUN_00467B90`) is handed by the two generic
+ * types that call it with a row of their own: `MOV dword ptr [ESI+0x2A0], 2`
+ * in `PropUpdateType74` (`0x00470F4A`) and `MOV [ESI+0x2A0], EDI` with `EDI =
+ * 1` in `PropUpdateType75` (`0x004711C9`). Join keys: the exporter has to
+ * know them to carry those rows.
+ */
+export const STORY_ITEM_ROW_BY_TYPE: Record<number, number> = { 74: 2, 75: 1 };
+
+/**
+ * This scene's Original Mode item rows and records, cut to what its
+ * placements can reach. See `OriginalItemsJson`.
+ *
+ * A row is named by the placer's byte for a collectible (types 70, 71, 72),
+ * by a routine's own immediate for types 74 and 75, and by a story item --
+ * `obj+0x2A0` -- for a group member or a falling container, whose destroy
+ * path hands `SpawnStoryModeItem` that word in Original Mode.
+ */
+export function originalItemsJson(tables: ExeTables,
+                                  placements: Record<string, unknown>[],
+                                  scene: number): Record<string, unknown> {
+  const rows: Record<string, unknown> = {};
+  const records: Record<string, unknown> = {};
+  const named: number[] = [];
+  const groups = tables.breakableGroups() as { story_item: number }[][];
+  for (const pl of placements) {
+    const type = pl.type as number;
+    if (pl.container === "generic" && ORIGINAL_ITEM_TYPES.includes(type)) {
+      named.push((pl.field_1f4 as number) ?? 0);
+    } else if (pl.container === "generic" && type in STORY_ITEM_ROW_BY_TYPE) {
+      named.push(STORY_ITEM_ROW_BY_TYPE[type]);
+    } else if (pl.container === "group") {
+      for (const m of groups[pl.group as number] ?? []) named.push(m.story_item);
+    } else if (pl.container === "falling") {
+      named.push((pl.story_item as number) ?? -1);
+    }
+  }
+  for (const row of named) {
+    if (row < 0 || String(row) in rows) continue;
+    const r = tables.originalItemRow(scene, row);
+    if (!r) continue;
+    rows[String(row)] = r;
+    for (const id of r.ids) {
+      if (id < 0 || String(id) in records) continue;
+      const rec = tables.originalItemRecord(id);
+      if (rec) records[String(id)] = rec;
+    }
+  }
+  return { scene, rows, records };
+}
+
+/**
+ * Every asset slot a collectible placement can draw: both models of each id
+ * its row names (0xFFFF is none), and both pickup strips.
+ */
+export function originalItemSlots(original: Record<string, unknown>): number[] {
+  const out: number[] = [];
+  const recs = (original.records ?? {}) as
+    Record<string, { slot: number; slot2: number }>;
+  for (const rec of Object.values(recs)) {
+    for (const s of [rec.slot, rec.slot2]) {
+      if (s && s !== 0xffff && !out.includes(s)) out.push(s);
+    }
+  }
+  if (Object.keys(recs).length) {
+    for (const base of ORIGINAL_ITEM_PICKUP_STRIPS) {
+      for (let i = 0; i < ORIGINAL_ITEM_PICKUP_FRAMES; i++) {
+        if (!out.includes(base + i)) out.push(base + i);
+      }
+    }
+  }
+  return out;
+}
+
+/** The banner sprites a collectible placement can raise, and its frame. */
+export function originalItemSprites(original: Record<string, unknown>):
+    number[] {
+  const recs = (original.records ?? {}) as Record<string, { sprite: number }>;
+  const out = Object.values(recs).map((r) => r.sprite);
+  if (out.length) out.push(ORIGINAL_ITEM_BANNER_FRAME);
+  return out;
 }
 
 /**
@@ -1432,6 +1556,14 @@ export async function breakableSlotEntry(
       }
     }
   }
+  // The collectibles' models are not in the descriptor at all:
+  // `PickOriginalModeItem` overwrites `obj+0x28C` from the item record the
+  // row names, so what travels is every model of every id the placed rows can
+  // draw, and the two pickup strips.
+  const original = originalItemsJson(stage.tables, placements, stage.scene);
+  for (const slot of originalItemSlots(original)) {
+    if (!want.includes(slot)) want.push(slot);
+  }
   for (const pl of placements) {
     if (pl.container !== "flicker_light") continue;
     for (const slot of FLICKER_LIGHT_SLOTS) {
@@ -1838,7 +1970,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   scriptJson.rain = rain;
   scriptJson.characters = charactersJson(charDefs, charPlaces, tables);
   scriptJson.props = propslib.propsJson(tables, hinges, statics);
-  scriptJson.breakables = breakablesJson(tables, placements, effectDefs);
+  scriptJson.breakables = breakablesJson(tables, placements, effectDefs,
+                                         stage.scene);
   scriptJson.set_pieces = evt ? setPiecesJson(evt, spawnRecords) : {};
   scriptJson.humanoids = humanoids;
   scriptJson.civilians = evt ? civiliansJson(tables, evt, spawnRecords) : {};
@@ -1858,7 +1991,11 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     tables, stage.source, deflate,
     [...HUD_READOUT_SPRITES, ...CONTINUE_SCREEN_SPRITES,
      ...BOSS_HP_BAR_SPRITES, ...BOSS_BANNER_SPRITES, ...BOSS3_CARD_SPRITES,
-     ...GAME_OVER_LOGO_SPRITES, ...routeTiles]);
+     ...GAME_OVER_LOGO_SPRITES, ...routeTiles,
+     // `OriginalItemBannerUpdate`'s two sprites, for the ids this stage's
+     // collectibles can be.
+     ...originalItemSprites(originalItemsJson(tables, placements,
+                                              stage.scene))]);
   await sink.write(`${outDir}/${name}.script.json`, dumpsStrict(scriptJson));
 
   let nSpawns = 0;

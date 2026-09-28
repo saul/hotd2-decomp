@@ -5480,6 +5480,57 @@ slot `0x1FB9`. With the alpha now in the images, drawing them through
 `setAssetDrawAlpha` would be faithful as it stands. (Done since: see the next
 section.)
 
+## Original Mode's collectibles, and the four routines beside them: class 0x41 types 70 to 77
+
+Types 70, 71, 72, 74, 75, 76 and 77 were placed and drawn with whatever
+`obj+0x28C` held and did nothing, or -- 70, 71 and 76 -- ran their route
+write and nothing else. Each is now its own family, its routine transcribed
+from the listing (`PlaySoundId` is marked no-return in the database, so every
+one of these pseudocodes stops at its first sound; `L35`):
+
+* **70 and 71, `OriginalItemPropUpdate` (`FUN_004675A0`)** -- the collectible.
+  Its model is **not** the descriptor's word: the constructor's arm calls
+  `PickOriginalModeItem` (`FUN_004629C0`), which draws an item id out of the
+  scene's `g_original_item_tables` row by weight and copies the item's model,
+  its camera-facing second model and its scale from `g_original_item_records`.
+  A 70 turns in place (item 29's model faces the camera); a 71 bobs and
+  tumbles. Shot, it pays a hit, counts into `g_original_items_taken`, raises
+  `SpawnOriginalItemBanner` (`FUN_00475E40`) -- the item's picture and a frame
+  at the bottom of the screen for 150 frames -- and plays a 49-frame pickup
+  strip while the item fades. Its scene rules (the stage-3 route write, the
+  removals, `g_original_item_pickup_blocked`) are the routine's.
+* **72, `PropUpdateType72` (`FUN_00470750`)** -- the same collectible, thrown
+  up out of stage 2's canal at camera path `0x4E` frame `0x276` if
+  `g_script_flags[0x12]` is up. Stage 2's script never raises that flag.
+* **74, `PropUpdateType74` (`FUN_00470E20`)** -- three shots, and it drops a
+  story item and falls away tipping forward; its Arcade exit raises
+  `g_script_flags[0x13]`.
+* **75, `PropUpdateType75`** -- now drawn: `0xA6B` at `op_` path `0x178`'s pose,
+  riding it when shot, with its sounds and the blocked byte.
+* **76, `PropUpdateType76` (`FUN_00471330`)** -- stage 4's door (block 14) and
+  pair of leaves (block 5), drawn, swung open on hinge curve 0, with the route.
+  The block-14 door stood missing from the level until now.
+* **77, `PropUpdateType77` (`FUN_004717A0`)** -- a UFO (item 31's own model)
+  flying `op_` path `0x195` while item 0x1F is held, worth 2000 points.
+
+**`SpawnStoryModeItem` (`FUN_00467B90`) makes a collectible** -- the same
+object -- where the port used to emit an event and nothing else, so a group
+member's, a falling container's, type 74's and type 75's story item now
+appears, turns and can be taken.
+
+The bundle carries `breakables.original_items` (the rows the stage's
+placements can name and the records they name), `hinge_curves` for type 76,
+every model an item can wear and both pickup strips, and the banner's
+pictures, which needed `TexBankPaletteIndex`'s palette `0x14` for banks
+`0x156` and `0x193..0x1B4`. `render/prop_parts_items.ts` draws the seven,
+including the two things none of the other props did: `AssetDrawSlotWithAlpha`
+and `MatrixClearRotation`. `web/tools/collectibles_look.mjs` looks at them in
+the page.
+
+**One declared divergence**: on an odd blink frame a shot type 77 registers
+three stack locals only its draw block writes; the port keeps the point its
+last draw computed.
+
 ## Character fades: every node drawn the way its hook draws it
 
 `render/characters/draw_gates.ts` drew a bone or a part at any alpha above 0

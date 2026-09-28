@@ -410,6 +410,58 @@ export interface BreakablesJson {
   effects: Record<string, EffectDefJson>;
   /** 7.540296 — one stack level, in world units. */
   level_height: number;
+  /**
+   * What `PickOriginalModeItem` (`FUN_004629C0`) reads for this scene's
+   * collectibles: class 0x41 types 70, 71 and 72, and the story items
+   * `SpawnStoryModeItem` (`FUN_00467B90`) makes. Written by every export;
+   * optional so a hand-built table without collectibles still type-checks.
+   */
+  original_items?: OriginalItemsJson;
+  /**
+   * `g_pHingeCurvesXYZ` curves a class-0x41 routine reads directly, by
+   * selector: `PropUpdateType76` (`FUN_00471330`) swings its doors on curve
+   * 0. Present when the stage places a routine that reads one.
+   */
+  hinge_curves?: Record<string, [number, number, number][]>;
+}
+
+/** One `g_original_item_tables` row: four item ids and their weights. */
+export interface OriginalItemRowJson {
+  /** s8 item ids at `+0..+3`; -1 is "nothing", and the prop despawns. */
+  ids: number[];
+  /** Cumulative s8 `rand()` weights at `+4..+7`; the last is the modulus. */
+  weights: number[];
+}
+
+/** One `g_original_item_records` record, per Original Mode item id. */
+export interface OriginalItemRecordJson {
+  /** `+0x00` -> `obj+0x28C`, the model. */
+  slot: number;
+  /** `+0x02` -> `obj+0x28E`, the camera-facing second model; 0xFFFF none. */
+  slot2: number;
+  /** `+0x04` -> `obj+0x2C4`, the draw scale. */
+  scale: number;
+  /** `+0x08` — the banner sprite `SpawnOriginalItemBanner` is handed. */
+  sprite: number;
+}
+
+/**
+ * The Original Mode item tables, cut to what this scene's spawns can reach.
+ *
+ * `g_original_item_tables[g_scene_index]` is the scene's row list. The rows
+ * carried are the ones the stage's placements can name -- a collectible's
+ * placer byte (types 70, 71, 72), types 74's and 75's own immediates, and the
+ * story item a group member or a falling container hands `SpawnStoryModeItem`
+ * -- and the records are the ids those rows name. Nothing is read by
+ * adjacency (`L6`).
+ */
+export interface OriginalItemsJson {
+  /** `g_scene_index` the rows were read for. */
+  scene: number;
+  /** By row number. */
+  rows: Record<string, OriginalItemRowJson>;
+  /** By item id. */
+  records: Record<string, OriginalItemRecordJson>;
 }
 
 /** One class-0x24 set-piece's parameter tail — see `game/class24`. */

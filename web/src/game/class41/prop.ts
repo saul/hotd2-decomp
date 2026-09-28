@@ -452,7 +452,7 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
   p.effectPrevFrame = 0;
   p.family = PropFamily.Effect;
   p.hp = p.lifetime;
-  ReleaseHiddenItem(p, events);
+  ReleaseHiddenItem(p, rng, events);
   return false;
 }
 

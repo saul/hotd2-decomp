@@ -353,12 +353,12 @@ export function SpriteEffectsTick(): void {
 
 /**
  * `SpawnPropHitSpark` — `FUN_00465860`, with its per-frame body at
- * `FUN_00465950`.
+ * `PropHitSparkUpdate` (`FUN_00465950`).
  *
  * The spark a breakable prop makes. Its own object type in the engine rather
  * than a sprite effect — no kind switch, no sound, no distance law — but the
  * same flipbook shape, so it is one of these records with the range written
- * out. `FUN_00465950` steps the cursor **before** it draws, so the slot it
+ * out. `PropHitSparkUpdate` steps the cursor **before** it draws, so the slot it
  * starts from is never seen and the first drawn frame is `0x905`.
  *
  * ## Where it goes, which is not where the blood goes
@@ -381,6 +381,28 @@ export function SpawnPropHitSpark(x: number, y: number, z: number): void {
     pos: vec3(x, y, z),
     pitch: 0, yaw: 0, roll: 0,
     scale: vec3(1, 1, 1),
+    slot: PROP_SPARK_FIRST_SLOT,
+    lastSlot: PROP_SPARK_LAST_SLOT,
+  });
+}
+
+/**
+ * `SpawnScaledPropSpark` — `FUN_00471AB0`, with the same per-frame body as
+ * {@link SpawnPropHitSpark}, `PropHitSparkUpdate` (`FUN_00465950`).
+ *
+ * The spark with a size: the one difference from `SpawnPropHitSpark` is
+ * `MOV [ESI+0x4C], EAX` from the third argument where the spark writes 1.0,
+ * and `PropHitSparkUpdate` draws through `MatrixScale(+0x4C x3)`. Its one
+ * caller is `PropUpdateType77`, with 4.0. Placed as the spark is.
+ */
+export function SpawnScaledPropSpark(x: number, y: number, z: number,
+                                     scale: number): void {
+  G.g_sprite_effects.push({
+    id: G.g_sprite_effect_seq++,
+    kind: PROP_SPARK_KIND,
+    pos: vec3(x, y, z),
+    pitch: 0, yaw: 0, roll: 0,
+    scale: vec3(scale, scale, scale),
     slot: PROP_SPARK_FIRST_SLOT,
     lastSlot: PROP_SPARK_LAST_SLOT,
   });

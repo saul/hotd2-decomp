@@ -85,7 +85,7 @@ import {
   transportProjection,
 } from "./projection/chrome";
 import { SceneFog } from "../render/fog";
-import { TextureFilter } from "../render/texfilter";
+import { TextureFilter, type TextureFilterMode } from "../render/texfilter";
 import { type LightingMode, SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
 import { ActorDrawsUnderSecondaryLights } from "../game/light_sets";
@@ -424,14 +424,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /**
    * Canvas pixels per CSS pixel -- `WebGLRenderer.setPixelRatio`.
    *
-   * **1 on a touch screen**, the screen's own up to 2 on a desktop. The game
-   * drew 640x480; a phone's screen is 3x denser than its CSS pixels, so its
-   * own ratio is nine times the pixels of 1x for a picture that was 640 wide,
-   * and 2 is still four -- which on a phone GPU is dropped frames, for detail
-   * the textures do not have. The debug sidebar's Scene panel offers the
-   * rest ({@link pixelRatioOptions}).
+   * **The screen's own**, on every device. It was 1 on a touch screen for a
+   * while, on the reasoning that a phone's 3x is nine times the pixels of a
+   * 640x480 game; measured on an iPhone 17 Pro Max it made no difference at
+   * all -- still 60 fps at 3x, because the frame was bound by draw calls and
+   * never by pixels (`app/perf.ts` is how that was seen). The debug sidebar's
+   * Scene panel still offers less ({@link pixelRatioOptions}).
    */
-  pixelRatio = touchFirst() ? 1 : Math.min(devicePixelRatio, 2);
+  pixelRatio = devicePixelRatio;
   /**
    * What a frame costs, measured where it runs -- the Perf meter overlay, and
    * the URL's A/B switches, which the renderer reads as it is built. See
@@ -444,7 +444,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * array every frame.
    */
   readonly pixelRatioOptions: readonly number[] = Object.freeze(
-    [1, 1.5, 2, 3].filter((r) => r === 1 || r <= devicePixelRatio));
+    [...new Set([1, 1.5, 2, 3, devicePixelRatio]
+      .filter((r) => r === 1 || r <= devicePixelRatio))].sort((a, b) => a - b));
   /**
    * The 4:3 switch and the resolution **as choices**, apart from the state,
    * for the reason {@link mutePref} is: the defaults depend on the device,
@@ -453,6 +454,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   private boxPref: boolean | undefined = undefined;
   private lightPref: string | undefined = undefined;
+  private filterPref: string | undefined = undefined;
   private ratioPref: number | undefined = undefined;
   /** The camera's own state: the pose scratch and the rails. */
   readonly cam = new CameraRig();
@@ -1301,6 +1303,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.resize();
   }
 
+  /** The Filter select, as a choice. See {@link boxPref}. */
+  setFiltering(mode: string): void {
+    this.filterPref = mode;
+    this.texFilter.setMode(mode as TextureFilterMode);
+  }
+
   /** The Light select, as a choice. See {@link boxPref}. */
   setLighting(mode: string): void {
     this.lightPref = mode;
@@ -1327,7 +1335,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // Not `anisotropyLimit`: that is what the hardware allows, not something
       // the viewer chose, and persisting it would carry one machine's ceiling
       // to another.
-      filterMode: this.texFilter.filterMode,
+      filterMode: this.filterPref,
       // Choices, not state: undefined until the viewer has moved them, so a
       // device's own default is never written down as if somebody chose it.
       fourByThree: this.boxPref,

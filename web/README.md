@@ -155,8 +155,8 @@ the sidebar and say so for a moment over the game.
 
 **On a phone** (iOS Safari or Android Chrome), hold it sideways — the page
 asks you to, and on Android Start also goes fullscreen and locks landscape.
-The frame is boxed to the game's 4:3 and drawn at 1x by default; both are in
-the sidebar's Scene panel (4:3 frame, Resolution). A
+The frame is boxed to the game's 4:3 by default, at the screen's own pixel
+ratio; both are in the sidebar's Scene panel (4:3 frame, Resolution). A
 tap is a shot. To reload, flick the phone sharply (top edge towards you or
 away), or tap with a second finger while the first is down, or tap the black
 bar beside the frame: all three are a pull *off the screen*,

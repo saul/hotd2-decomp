@@ -54,11 +54,18 @@ console.log("\ntexture filtering: an override, not a setting:");
   const layer = new TextureFilter();
   layer.prepare(rootOf(crisp.mesh, smooth.mesh));
 
-  check("the default is the asset's own filter", layer.filterMode === "asset",
-        layer.filterMode);
-  check("...so a nearest mesh stays nearest",
+  // Anisotropic is the default: the nicer picture, chosen. What has to hold
+  // is that the game's own filter is still one switch away -- `prepare`
+  // recorded it before the default overwrote it.
+  check("the default is anisotropic, which takes a mip chain",
+        layer.filterMode === "aniso"
+        && crisp.tex.minFilter === LinearMipmapLinearFilter
+        && crisp.tex.generateMipmaps,
+        `${layer.filterMode} ${crisp.tex.minFilter}`);
+  layer.setMode("asset");
+  check("...and `as the game` puts a nearest mesh back to nearest",
         crisp.tex.minFilter === NearestFilter, String(crisp.tex.minFilter));
-  check("...and a linear one stays linear",
+  check("...and a linear one back to linear",
         smooth.tex.minFilter === LinearFilter, String(smooth.tex.minFilter));
 
   layer.setMode("nearest");
@@ -105,6 +112,8 @@ console.log("\nre-uploads only when something actually changed:");
   const { mesh, tex } = meshWith(LinearFilter, LinearFilter);
   const layer = new TextureFilter();
   layer.prepare(rootOf(mesh));
+  // Off the anisotropic default and back onto the sampler's own linear.
+  layer.setMode("asset");
 
   const v0 = tex.version;
   layer.setMode("bilinear");

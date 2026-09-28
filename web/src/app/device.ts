@@ -116,8 +116,8 @@ export class TiltReload {
 
 /**
  * A finger rather than a mouse: the only devices any of this is for, and the
- * ones whose defaults differ -- a phone gets the 4:3 frame and 1x rendering
- * (`Player.pillarbox`, `Player.pixelRatio`).
+ * ones whose default frame differs -- a phone gets the 4:3 box
+ * (`Player.pillarbox`).
  */
 export function touchFirst(): boolean {
   return typeof window !== "undefined"

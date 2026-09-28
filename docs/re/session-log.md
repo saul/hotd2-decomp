@@ -23251,3 +23251,59 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+
+## 2026-09-28 -- the stage-2 car's draw, checked a second time; its push translations were the wrong float32s (branch `claude/adoring-lehmann-1b16dc`)
+
+The brief was to port what `St2CarDraw` (`FUN_00452320`) does and the player
+did not draw -- the post-crash asset row, the door's `RotY(obj+0x1334)`, the
+two spun parts on the roll-limited frame -- and to export row 1's slots. **All
+of it was already on `main`**, in `00061004` from this morning's
+`fix/newbugs2-crashed-car`; the brief had been written before that landed. So
+this session re-read the routine and checked the landed work instead of
+redoing it (L17: one agent's reading is not a fact, a positive one included).
+
+**Re-read, `[proved]`.** `disassemble_bytes 0x00452320..0x0045253F`
+matches `car.ts`'s pseudocode instruction for instruction: the four rows at
+`0x565F2C`/`30`/`34`/`38` after `SHL EAX, 0x4`; the door push nested inside
+the body's (two `Pop(1)` at `0x004523BD`/`0x004523C4`); `MatrixGetAngles`'
+three outputs at `[ESP0-0xC]`, `[ESP0-8]`, `[ESP0-4]` re-applied as
+`RotY(out2)`, `RotX(out1)`, `RotZ(limited out3)` at `0x0045247B`..
+`0x0045248B`; the dead zone's five arms. `MatrixGetAngles` (`FUN_004018E0`)
+decompiled: out1 and out2 are `VecToAngles`' pitch and yaw, out3 is
+`fpatan(y, x)` of `M·(1,0,0)` after `RotX(-p)·RotY(-y)` -- which is the
+`{x, y, z}` `carrier.ts` returns and `applyTaskDraw` composes as `"YXZ"`. The
+real stage-2 glb has three roots of eight parts each, the door under its own
+row's body and the four spun parts on the root, all at identity rotation --
+the hierarchy `applyTaskDraw`'s `root⁻¹ · limited` arithmetic assumes.
+
+In the page (`?stage=2&mode=play&entry=0&block=0&step=2&op=0&drive=1`, headless,
+private bundle), unshot: the draw names `2d 2f 34 31` through `0x39` frame 369
+and `2e 30 35 32` from 370; the door runs `-27` at 371 to `-14009` at 404; the
+spin holds at `2260992`. The screenshots show the intact car on `0x38` frame
+100, the crash fireball at `0x39` 369, and the scorched row-1 body parked nose
+first in the storefront at 404 with its door swung out about the front hinge
+and both wheels seated.
+
+**What was wrong: the translations.** The three pushes are `PUSH imm32`s --
+`0x4110EECC 0x40CBC84B 0x410F17C2` (x y z) at `0x00452377`, `0 0x404AB852
+0x415A61E5` at `0x00452497`, `0 0x404AB852 0xC117AE14` at `0x004524E8` -- and
+those are 9.0583, 6.3682, 8.9433, 3.1675, 13.6489 and -9.48. `rigs.py` has
+carried 9.0582619, 6.368186, 8.9433079, 3.1674952, 13.6489019 and -9.4799995
+since `8684c7bf`: five of six components 2 to 40 ulps off, while the note
+beside them quoted the right hex. Invisible (under 4e-5 of a unit) and still a
+wrong number, so fixed in `rigs.py` and regenerated into `rigs_data.ts` and
+`builder_hash.ts`; `car.ts`'s pseudocode had copied them too. A scan of every
+rig part whose note quotes raw hex: 21 components, all agree now, and the car's
+were the only ones that ever did not.
+
+**What pins it.** `render.test.ts`'s car block used to build its graph from
+hand-typed numbers, so nothing tied it to what the exporter ships: it now
+builds from `RIGS` itself and asserts first that both rows of
+`ST2CAR_ASSET_VARIANTS` are one part a slot, that column 1 sits in its own
+row's body and the rest on the root, and that each translation is the float32
+of its push. Mutations: `HEAD`'s decimals fail the third; re-parenting row 1's
+door to row 0's body fails the second and then "row 1 is drawn".
+
+**Wrong turns.** None in the code. The time went on establishing that the task
+was done before starting it -- `git log` on the four files the brief names is
+the first thing to run, not the last.

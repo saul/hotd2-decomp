@@ -75,15 +75,19 @@ pose(inst: Instance): void {
   if (!m || m.frames <= 0) return;
   const f = authoredFrameOfTicks(inst.a.playTicks, m.fps, m.frames);
 
-  // A strike or lunge the director started: it owns the body, and it reports
-  // its own play position back so the hit can land on its frame.
+  // A one-shot a state started -- a swing, an arc stage, an entrance: it owns
+  // the body, and it reports its own play position back so the hit can land
+  // on its frame.
   const act = inst.a.action;
   if (act) {
     const am = inst.type.motions[String(act.motion)];
     if (am) {
       const af = authoredFrameHeld(act.ticks, am.fps, am.frames);
-      // Fading *into* the swing: the lunge is set with a fade of 10 and the
-      // strike with 5, so the arm comes up rather than appearing raised.
+      // Fading *into* the one-shot. `ZombieStateStrike` sets its swing with a
+      // fade of 5 and the game holds `act.ticks` on the start frame for it,
+      // so the arm comes up out of the lunge rather than appearing raised.
+      // The lunge itself is not here: it plays on the ordinary track, and
+      // its fade of 10 is the base clip's, below.
       if (!this.blendFromFade(inst, am, af)) this.apply(inst, am, af);
       return;
     }

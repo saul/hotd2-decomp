@@ -21166,3 +21166,52 @@ bit-8 clear: 1, BackOff clear: 2, fall-through: 1, latch: 1).
 No reachable shipped attack has a hit frame of 0 or a one-frame strike clip
 (`hod2lib.combat.attack_tables` over all 64 types), so the fall-through changes
 nothing in shipped data.
+
+
+## 2026-09-28 -- `ZombieStateStrike`'s two motion calls: the fade holds, and the lunge's test is the track's
+
+Re-read the two calls from the listing. The lunge is `PUSH 0xa; PUSH 0x0;
+PUSH entry->lunge; PUSH obj+0x194; CALL SetCurrentActorMotionBlended` at
+`0x00455B49`, behind `00455b31 CMP [ESI+0x1b4], EAX` / `00455b37 JZ` to the
+`RET`. The swing is `PUSH 0x5; PUSH 0x0; ...; CALL 0x004119a0` at
+`0x00455B63`. `ActorEndOneShot`'s doc quoted both at the wrong addresses: the
+lunge at `0x00455B54`, which is the strike branch's first instruction, with
+`6a00 6a00` for `6a0a 6a00`; the strike at `0x00455B8A`, which is the
+`ActorPlayHitVoice` call; and the play-length read at `0x00455BD6` rather than
+`0x00455C02`. Corrected from `disassemble_bytes`.
+
+Proved the class-0x30 half of the phase the arc session found.
+`EnemyZombieUpdate` calls the state at `0x00453434`, then
+`ZombieAdvanceMotion` at `0x00453457`. That calls `DrawSkinnedModelAndShadow`
+-> `SkeletonDrawWalk`, whose first call is `SkeletonAdvancePlayCursor` at
+`0x004110F3` (its only caller), and only then `INC [obj+0x194]`. So the swing's
+frame 0 is drawn 6 times, the state reads it 7 times, and the hit lands
+`6 + hit_frame` frames after the swing starts.
+
+**The lunge gate.** The port tested `obj.action?.motion !== atk.lunge`, which
+cannot see a lunge clip that is on the base track. Measured on the disc with
+`hod2lib.combat`: 155 of 311 picked entries name a lunge that is `row[2]` or
+`row[3]`, the run. `ZombieStateHoldAtRange`'s claim (`0x0045583B`) hands over
+and returns before its idle's `ActorSetMotionBlended` (`0x004558CC`), so on a
+first-frame claim the run is still on the track and the engine never calls the
+setter. The lunge was moved to the base track rather than kept on the
+one-shot channel with a wider test, because that is where the engine has it.
+On the base track the hold, the wrap and the gate all come from code that
+already exists. `ActorSetOneShotBlended` would have needed a `loop` argument
+the engine does not have.
+
+Checked before moving it: nothing in class 0x30 reads `obj.action` as "is
+attacking" except the IfIdle guard, the root-motion gate and the poser. No
+shipped row has `row[4]`, the back-away clip, equal to the lunge or to the run.
+So `obj.motion` still naming the lunge after the swing cannot make
+`ZombieStateBackOff`'s IfIdle test skip where the engine's track holds the
+strike.
+
+Port test: the lunge holds 11 frames and its root motion with it, then wraps
+without a restart. A lunge clip already on the track is left alone, and one
+under a one-shot is set again, out of the one-shot. The swing holds 6 frames,
+and the hit lands at swing + 5 + `hit_frame`, where it was swing +
+`hit_frame`. Reverting `strike.ts` fails nine of the ten and B4. The tenth,
+that the lunge's root motion stands still through its hold, passes vacuously
+when there is no hold. Reverting only the gate fails the three lunge-gate
+checks.

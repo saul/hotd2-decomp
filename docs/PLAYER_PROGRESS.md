@@ -4567,6 +4567,31 @@ ever; the old port only finished because it bailed out when the arc landed.
 The fixture carries the exe's own wall script now, and `verify_combat.py`
 check 16 asserts that none of the 38 shipped scripts does that.
 
+### A zombie's swing holds its first frame, and its run becomes its lunge
+
+`ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track
+with a fade: the lunge through `SetCurrentActorMotionBlended(obj+0x194, lunge,
+0, 10)` at `0x00455B49`, and the swing through `ActorSetMotionBlended(obj+0x194,
+strike, 0, 5)` at `0x00455B63`. Each call holds the cursor on frame 0 for the
+fade. The port started both on its one-shot channel with no fade, so the arm
+snapped up. Worse, the swing's cursor left 0 on the next frame, so every hit
+landed six frames before the engine's. The swing now goes through
+`ActorSetOneShotBlended`. Its cursor holds 0 for six frames and the hit lands
+five frames later than it did, one frame short of the engine's. That last frame
+is the port's clocks-before-states phase, which the arc work above found and
+which covers every cursor test in the port.
+
+The lunge moved to the ordinary track, where the engine has it. That is what
+makes the engine's own test work: `00455b31 CMP [ESI+0x1b4], EAX` skips the
+call while **the track** is playing the lunge. In 155 of the 311 shipped
+attack entries the lunge is the same clip as the actor's run (`row[2]` or
+`row[3]`), and `ZombieStateHoldAtRange` claims before it sets its idle. So an
+actor that runs straight into its attack just keeps running into it, and the
+run *is* its lunge. The port tested only its one-shot channel, so it cut back to
+the lunge's frame 0 every time. On the base track the lunge also gets its
+11-frame hold, stands still for it, and wraps as the engine's clip does; the
+lunge was the one looping one-shot, and nothing sets `loop` any more.
+
 ### The canal is drawn by a task: class 0x41 type 1
 
 Stage 2's block 16 stood on a dock over **no water at all** --

@@ -30,7 +30,9 @@ import { dist2d, type Vec3 } from "../vec";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorFacePlayerTarget } from "../actor_turn";
-import { ActorStartFade } from "./motion_cue";
+import {
+  ActorSetOneShotBlended, ActorStartFade, SetCurrentActorMotionBlended,
+} from "./motion_cue";
 import { MotionFade, StrikeSub, ZombieState } from "./states";
 import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 
@@ -186,14 +188,50 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     if (dist2d(obj.pos, obj.target) > atk.distance && !obj.zom.hasCooldown) {
       // Still short: play the lunge. Its own root motion is what closes the
       // gap -- the state writes no velocity.
-      if (obj.action?.motion !== atk.lunge) {
-        obj.action = { motion: atk.lunge, ticks: 0, loop: true };
-        obj.rootActionFrame = -1;
+      //
+      // ```
+      // 00455b2d  MOVSX EAX, word ptr [EDI + 0x2]      ; entry->lunge
+      // 00455b31  CMP   dword ptr [ESI + 0x1b4], EAX   ; the track's motion
+      // 00455b37  JZ    0x00455c21                     ; already on it: RET
+      // 00455b3d  PUSH 0xa / PUSH 0x0 / PUSH EAX / PUSH obj+0x194
+      // 00455b49  CALL SetCurrentActorMotionBlended
+      // ```
+      //
+      // The lunge is an ordinary motion on the one track, fade 10, and the
+      // test is against **whatever that track is playing** -- not against a
+      // lunge this state set. In 155 of the 311 shipped attack entries the
+      // lunge is the same clip as the run the attack run was playing
+      // (`row[2]` or `row[3]`), and `ZombieStateHoldAtRange` tries its claim
+      // before it sets its idle -- `TryClaimAttackSlot` at `0x0045583B` hands
+      // over and returns before the idle's `ActorSetMotionBlended` at
+      // `0x004558CC` -- so an actor that runs straight into its
+      // attack is still on that clip here: the engine leaves it running, and
+      // the run *becomes* the lunge without a seam. The port put the lunge on
+      // the one-shot channel and tested only that, so it restarted the clip
+      // from frame 0 every time.
+      //
+      // On the base track, `ActorSetMotionBlended` holds the clip's cursor on
+      // frame 0 for `fade + 1` = 11 frames and the root motion with it, and
+      // the clip wraps, which is the engine's loop -- nothing here restarts
+      // it. While a one-shot is up it is the one-shot that is on screen, so
+      // that is what the test compares.
+      const onTrack = obj.action ? obj.action.motion : obj.motion;
+      if (onTrack !== atk.lunge) {
+        SetCurrentActorMotionBlended(obj, atk.lunge, 0, MotionFade.Normal);
       }
       return;
     }
-    obj.action = { motion: atk.strike, ticks: 0, loop: false };
-    obj.rootActionFrame = -1;
+    // `ActorSetMotionBlended(obj+0x194, entry->strike, 0, 5)` at `0x00455B63`,
+    // on the same track. It writes the cursor `obj+0x19C` = 0 outright and
+    // `SkeletonAdvancePlayCursor` (`FUN_004111A0`) holds it there for the
+    // fade, so the hit test below -- `obj+0x19C == entry+0x08` -- and the end
+    // test both wait the fade out before the clip moves. The port used to
+    // start the swing running on the frame it was set, with no fade: the arm
+    // snapped up, and every hit landed `fade + 1` = six frames before the
+    // engine's. The hold gives back five of them. The sixth is the port's
+    // phase, not this call's -- its clocks advance before its states -- which
+    // `ActorSetOneShotBlended` explains.
+    ActorSetOneShotBlended(obj, atk.strike, 0, MotionFade.Quick);
     // `00455b77 81e2fffffeff` / `00455b7e 81ca00000800` on `obj+0x136C`: the
     // new clip's one-shot latch comes down with the swing.
     //

@@ -798,7 +798,7 @@ export async function exportLevel(
   const nodes: Doc[] = [];
   const sceneNodes: number[] = [];
 
-  const imgWritten = new Map<string, number>();   // part/tex/opaque -> image
+  const imgWritten = new Map<string, number>();   // part/tex -> image
   const texWritten = new Map<string, number>();   // image + sampler -> texture
   const samplerCache = new Map<string, number>();
   const matCache = new Map<string, number>();
@@ -806,19 +806,32 @@ export async function exportLevel(
   /**
    * Decode a texture to a PNG and return its glTF *image* index.
    *
-   * ARGB1555/ARGB4444 textures are also used on meshes whose TSP sets
-   * IgnoreTexAlpha, where the hardware discards the alpha channel. Emitting
-   * the stored alpha for those would punch spurious holes, so they get a
-   * separate fully-opaque image variant.
+   * **One image per texture, with the alpha the bank stores**, because that is
+   * the one surface the game makes of it. `BindModelTextureHandles`
+   * (`FUN_004AC980`) decodes each bank texture once, into its global slot,
+   * from the bank entry and its data alone -- no mesh word is an input -- and
+   * `DecodeTextureToSurface` (`FUN_004AC270`) copies every texel verbatim into
+   * a surface whose format keeps the alpha (ARGB1555 goes to the `A1R5G5B5`
+   * slot of `g_texture_formats`, not the `X1R5G5B5` one). `IgnoreTexAlpha` is
+   * read by nothing on that path: the D3D translation uses TSP bit 19 only as
+   * half of the pass selector. Where the texture's alpha does not show -- the
+   * opaque pass, blend and alpha test both off -- that is the *draw state's*
+   * doing, which the material carries, not the image's.
+   *
+   * This used to write a second, alpha-stripped `_opaque` variant for every
+   * `IgnoreTexAlpha` mesh. It changed nothing in the opaque pass and took the
+   * alpha away from the 101 translucent-pass meshes that set the bit and
+   * blend by it -- `zslman`'s and `zndina`'s additive blades among them, which
+   * drew as solid bars -- and from every opaque mesh a faded draw blends.
    *
    * Note this returns an **image**, not a texture. In glTF a texture is an
    * (image, sampler) pair, and the same image is routinely used by meshes with
    * different TSP addressing bits -- so images and textures must be cached
    * separately.
    */
-  const getImage = async (part: string, bank: Bank | null, texId: number,
-                          stripAlpha: boolean): Promise<number | null> => {
-    const key = `${part} ${texId} ${stripAlpha}`;
+  const getImage = async (part: string, bank: Bank | null,
+                          texId: number): Promise<number | null> => {
+    const key = `${part} ${texId}`;
     const hit = imgWritten.get(key);
     if (hit !== undefined) return hit;
     if (bank === null) return null;
@@ -829,12 +842,8 @@ export async function exportLevel(
       w = h = 128;
       pixels = checker();
     }
-    if (stripAlpha) {
-      pixels = pixels.slice();
-      for (let i = 3; i < pixels.length; i += 4) pixels[i] = 0xff;
-    }
     const sub = `textures/${part}`;
-    const suffix = uvCheck ? "_uvcheck" : (stripAlpha ? "_opaque" : "");
+    const suffix = uvCheck ? "_uvcheck" : "";
     const fn = `${sub}/tex_${String(texId).padStart(3, "0")}${suffix}.png`;
     if (glb) {
       // In a GLB the image is a buffer view, not a file. The name is kept so a
@@ -879,9 +888,9 @@ export async function exportLevel(
    * every other mesh using that image, smearing a single row or column of
    * texels across whole walls.
    */
-  const getTexture = async (part: string, bank: Bank | null, mesh: Mesh,
-                            stripAlpha: boolean): Promise<number | null> => {
-    const img = await getImage(part, bank, mesh.textureId, stripAlpha);
+  const getTexture = async (part: string, bank: Bank | null,
+                            mesh: Mesh): Promise<number | null> => {
+    const img = await getImage(part, bank, mesh.textureId);
     if (img === null) return null;
     const smp = getSampler(mesh);
     const key = `${img} ${smp}`;
@@ -899,9 +908,7 @@ export async function exportLevel(
     const hit = matCache.get(key);
     if (hit !== undefined) return hit;
 
-    const stripAlpha = mesh.ignoreTextureAlpha;
-    const texIdx = mesh.textured
-      ? await getTexture(part, bank, mesh, stripAlpha) : null;
+    const texIdx = mesh.textured ? await getTexture(part, bank, mesh) : null;
 
     const [a, r, g, b] = mesh.baseColour;
     const clamp01 = (v: number) => Math.min(Math.max(v, 0.0), 1.0);
@@ -936,20 +943,19 @@ export async function exportLevel(
     const blood = mesh.textured
       && (opts.isBloodTexture?.(part, mesh.textureId) ?? false);
 
-    // Alpha mode follows the PowerVR2 *list type*, which is what selects the
-    // hardware's blending pass. It must not depend on the TSP UseAlpha bit:
-    // that governs whether the vertex/base colour alpha participates, not
-    // whether blending happens. Keying on it marked every translucent mesh
-    // with UseAlpha=0 as opaque -- 8554 meshes in this game, including most of
-    // the glass and foliage.
-    if (mesh.punchThrough) {
-      mat.alphaMode = "MASK";
-      mat.alphaCutoff = 0.5;
-    } else if (mesh.translucent) {
-      mat.alphaMode = "BLEND";
-    } else {
-      mat.alphaMode = "OPAQUE";
-    }
+    // Alpha mode is the **pass** the PC port draws the mesh in, the TSP pair
+    // `WalkMeshChainAndDraw` (`FUN_004A7EF0`) tests,
+    // `(tsp & 0x180000) != 0x80000` -- not the PowerVR2 list type, which
+    // `TranslatePvr2StateToD3D` never reads, and not `UseAlpha` alone, which
+    // marked 8554 translucent meshes opaque when it was tried. `OPAQUE` is
+    // also what that pass does with the texture's alpha: blend and alpha test
+    // are both off there, and a glTF viewer ignores alpha under `OPAQUE`.
+    // Over every mesh in `pol/` the list type agrees with the pass except the
+    // untextured list-2 meshes of `zndina` (4) and `zslman` (1), which the
+    // port draws opaque; `tools/verify_texture_alpha.py` holds that.
+    // The player does not read this: `render/draw_order.ts` rebuilds the
+    // state from the words in `extras.pvr2`.
+    mat.alphaMode = mesh.opaquePass ? "OPAQUE" : "BLEND";
 
     const hex8 = (v: number) =>
       `0x${(v >>> 0).toString(16).toUpperCase().padStart(8, "0")}`;
@@ -969,7 +975,10 @@ export async function exportLevel(
         // src_alpha / one. glTF has no additive alphaMode, so this is exported
         // as BLEND and flagged for the target engine.
         additive: mesh.additive,
-        texture_alpha_used: mesh.textured && !stripAlpha,
+        // Whether a plain draw lets the texture's alpha show: the translucent
+        // pass blends and alpha-tests it, the opaque pass does neither. A
+        // faded draw blends it in either pass.
+        texture_alpha_used: mesh.textured && !mesh.opaquePass,
         clamp_uv: mesh.clampUv,
         flip_uv: mesh.flipUv,
         filter_mode: mesh.filterMode,

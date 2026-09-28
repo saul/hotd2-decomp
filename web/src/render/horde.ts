@@ -24,8 +24,8 @@ import { SpawnClass } from "../game/spawn_class";
 export interface HordePart {
   slot: number;
   m: Matrix4;
-  /** `AssetDrawSlotWithAlpha`'s second argument; 1 for a plain draw. */
-  alpha: number;
+  /** `AssetDrawSlotWithAlpha`'s second argument; absent for `AssetDrawSlot`. */
+  alpha?: number;
   /**
    * The sheet: this part's geometry is its own copy, and
    * {@link deformHordeSheet} rewrites it.
@@ -90,16 +90,15 @@ export function HordeDrawParts(a: Actor, out: HordePart[]): HordePart[] {
   if (t.kind === HordeKind.Member && t.shadow) {
     const m = T(a.pos.x, t.shadowY, a.pos.z).multiply(RY(a.yaw))
       .multiply(T(0, 0, -1)).multiply(S(4, 1, 8));
-    out.push({ slot: HORDE_SHADOW_SLOT, m, alpha: 1 });
+    out.push({ slot: HORDE_SHADOW_SLOT, m });
   } else if (t.kind === HordeKind.EmergeProp) {
     if (t.propState === EmergePropState.Settle) {
       const [rx, ry] = EMERGE_PROP_RIM_POINTS[t.rimPoint] ?? [0, 0];
       const base = T(t.pivotX, t.pivotY, t.pivotZ).multiply(RY(t.propYaw))
         .multiply(RZ(t.propRoll)).multiply(RX(t.propPitch))
         .multiply(T(-rx, -ry, 0)).multiply(S(1, PROP_HALF_STRETCH, 1));
-      out.push({ slot: EMERGE_PROP_SLOT, m: base.clone(), alpha: 1 });
-      out.push({ slot: EMERGE_PROP_SLOT, m: base.multiply(RY(0x8000)),
-                 alpha: 1 });
+      out.push({ slot: EMERGE_PROP_SLOT, m: base.clone() });
+      out.push({ slot: EMERGE_PROP_SLOT, m: base.multiply(RY(0x8000)) });
     } else {
       const base = T(t.propX, t.propY, t.propZ).multiply(RY(t.propYaw))
         .multiply(RZ(t.propRoll)).multiply(RX(t.propPitch));
@@ -107,25 +106,24 @@ export function HordeDrawParts(a: Actor, out: HordePart[]): HordePart[] {
           || t.propState === EmergePropState.Lift) {
         base.multiply(T(0, PROP_LIFT_Y, 0));
       }
-      out.push({ slot: EMERGE_PROP_SLOT, m: base.clone(), alpha: 1 });
+      out.push({ slot: EMERGE_PROP_SLOT, m: base.clone() });
       out.push({ slot: EMERGE_PROP_SLOT,
                  m: base.multiply(RY(0x8000))
-                   .multiply(S(1, PROP_HALF_STRETCH, 1)), alpha: 1 });
+                   .multiply(S(1, PROP_HALF_STRETCH, 1)) });
     }
   } else if (t.kind === HordeKind.Splash) {
     const ang = Math.trunc(t.frame * SPLASH_BAMS_PER_FRAME) * BAMS_TO_RAD;
     const base = T(a.pos.x, a.pos.y, a.pos.z).multiply(RY(a.yaw));
     const c = Math.cos(ang) * t.size * 3.0;
-    out.push({ slot: HORDE_RIPPLE_SLOT, m: base.clone().multiply(S(c, 1, c)),
-               alpha: 1 });
+    out.push({ slot: HORDE_RIPPLE_SLOT, m: base.clone().multiply(S(c, 1, c)) });
     const k = Math.sin(ang) * t.size;
     out.push({ slot: HORDE_SPLASH_SLOT
                  + (Math.trunc(G.g_frame_counter) % HORDE_SPLASH_FRAMES),
-               m: base.multiply(S(k, k, k)), alpha: 1 });
+               m: base.multiply(S(k, k, k)) });
   } else if (t.kind === HordeKind.Sheet) {
     // `HordeDeformedPropUpdate`: `MatrixTranslate(+0x194)`, no rotation.
     out.push({ slot: HORDE_SHEET_SLOT, m: T(t.propX, t.propY, t.propZ),
-               alpha: 1, deform: true });
+               deform: true });
   } else if (t.kind === HordeKind.Ripple) {
     const k = t.size * 3.0;
     const m = T(a.pos.x, a.pos.y, a.pos.z).multiply(RY(a.yaw))

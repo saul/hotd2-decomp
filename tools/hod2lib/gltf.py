@@ -665,25 +665,38 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
     nodes: list[dict] = []
     scene_nodes: list[int] = []
 
-    img_written: dict[tuple, int] = {}     # (part, texture_id, opaque) -> glTF image
+    img_written: dict[tuple, int] = {}     # (part, texture_id) -> glTF image
     tex_written: dict[tuple, int] = {}     # image + sampler -> glTF texture
     sampler_cache: dict[tuple, int] = {}
     mat_cache: dict[tuple, int] = {}
 
-    def get_image(part: str, bank, tex_id: int, strip_alpha: bool) -> int | None:
+    def get_image(part: str, bank, tex_id: int) -> int | None:
         """Decode a texture to a PNG and return its glTF *image* index.
 
-        ARGB1555/ARGB4444 textures are also used on meshes whose TSP sets
-        IgnoreTexAlpha, where the hardware discards the alpha channel. Emitting
-        the stored alpha for those would punch spurious holes, so they get a
-        separate fully-opaque image variant.
+        **One image per texture, with the alpha the bank stores**, because
+        that is the one surface the game makes of it.
+        `BindModelTextureHandles` (`FUN_004AC980`) decodes each bank texture
+        once, into its global slot, from the bank entry and its data alone --
+        no mesh word is an input -- and `DecodeTextureToSurface`
+        (`FUN_004AC270`) copies every texel verbatim into a surface whose
+        format keeps the alpha (ARGB1555 goes to the `A1R5G5B5` slot of
+        `g_texture_formats`, not the `X1R5G5B5` one). `IgnoreTexAlpha` is read
+        by nothing on that path: the D3D translation uses TSP bit 19 only as
+        half of the pass selector. Where the texture's alpha does not show --
+        the opaque pass, blend and alpha test both off -- that is the draw
+        state's doing, which the material carries (`alphaMode`), not the
+        image's.
+
+        This used to write a second, alpha-stripped `_opaque` variant for
+        every `IgnoreTexAlpha` mesh, which took the alpha away from the 101
+        translucent-pass meshes that set the bit and blend by it.
 
         Note this returns an **image**, not a texture. In glTF a texture is a
         (image, sampler) pair, and the same image is routinely used by meshes
         with different TSP addressing bits -- so images and textures must be
         cached separately. See `get_texture`.
         """
-        key = (part, tex_id, strip_alpha)
+        key = (part, tex_id)
         if key in img_written:
             return img_written[key]
         if bank is None:
@@ -695,11 +708,8 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
         if uv_check:
             w = h = 128
             rgba = _checker()
-        if strip_alpha:
-            rgba = bytearray(rgba)
-            rgba[3::4] = b"\xff" * (len(rgba) // 4)
         sub = f"textures/{part}"
-        suffix = "_uvcheck" if uv_check else ("_opaque" if strip_alpha else "")
+        suffix = "_uvcheck" if uv_check else ""
         fn = f"{sub}/tex_{tex_id:03d}{suffix}.png"
         if glb:
             # In a GLB the image is a buffer view, not a file. The name is
@@ -715,7 +725,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
         img_written[key] = len(images) - 1
         return img_written[key]
 
-    def get_texture(part: str, bank, mesh, strip_alpha: bool) -> int | None:
+    def get_texture(part: str, bank, mesh) -> int | None:
         """glTF texture = (image, sampler) for this mesh's TSP addressing bits.
 
         Deduplicating on the image alone and then stamping the sampler onto the
@@ -726,7 +736,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
         column of texels across whole walls. The carved marble plinths in
         stage 2 rendered as flat streaks because of it.
         """
-        img = get_image(part, bank, mesh.texture_id, strip_alpha)
+        img = get_image(part, bank, mesh.texture_id)
         if img is None:
             return None
         smp = get_sampler(mesh)
@@ -758,9 +768,7 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
         if key in mat_cache:
             return mat_cache[key]
 
-        strip_alpha = mesh.ignore_texture_alpha
-        tex_idx = (get_texture(part, bank, mesh, strip_alpha)
-                   if mesh.textured else None)
+        tex_idx = get_texture(part, bank, mesh) if mesh.textured else None
 
         a, r, g, b = mesh.base_colour
         pbr: dict = {
@@ -791,21 +799,17 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
             "doubleSided": mesh.double_sided,
         }
 
-        # Alpha mode follows the PowerVR2 *list type*, which is what selects
-        # the hardware's blending pass.
-        #
-        # It must not depend on the TSP UseAlpha bit: that governs whether the
-        # vertex/base colour alpha participates, not whether blending happens.
-        # Keying on it marked every translucent mesh with UseAlpha=0 as opaque
-        # -- 8554 meshes in this game, including most of the glass and
-        # foliage.
-        if mesh.punch_through:
-            mat["alphaMode"] = "MASK"
-            mat["alphaCutoff"] = 0.5
-        elif mesh.translucent:
-            mat["alphaMode"] = "BLEND"
-        else:
-            mat["alphaMode"] = "OPAQUE"
+        # Alpha mode is the **pass** the PC port draws the mesh in, the TSP
+        # pair `WalkMeshChainAndDraw` (`FUN_004A7EF0`) tests,
+        # `(tsp & 0x180000) != 0x80000` -- not the PowerVR2 list type, which
+        # `TranslatePvr2StateToD3D` never reads, and not `UseAlpha` alone,
+        # which marked 8554 translucent meshes opaque when it was tried.
+        # `OPAQUE` is also what that pass does with the texture's alpha: blend
+        # and alpha test are both off there, and a glTF viewer ignores alpha
+        # under `OPAQUE`. Over every mesh in `pol/` the list type agrees with
+        # the pass except the untextured list-2 meshes of `zndina` (4) and
+        # `zslman` (1); `tools/verify_texture_alpha.py` holds that.
+        mat["alphaMode"] = "OPAQUE" if mesh.opaque_pass else "BLEND"
 
         # Raw hardware state, so a target engine can be exact.
         mat["extras"] = {
@@ -822,7 +826,10 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
                 # src_alpha / one. glTF has no additive alphaMode, so this is
                 # exported as BLEND and flagged for the target engine.
                 "additive": mesh.additive,
-                "texture_alpha_used": mesh.textured and not strip_alpha,
+                # Whether a plain draw lets the texture's alpha show: the
+                # translucent pass blends and alpha-tests it, the opaque pass
+                # does neither. A faded draw blends it in either pass.
+                "texture_alpha_used": mesh.textured and not mesh.opaque_pass,
                 "clamp_uv": mesh.clamp_uv,
                 "flip_uv": mesh.flip_uv,
                 "filter_mode": mesh.filter_mode,

@@ -177,6 +177,13 @@ export function isOpaquePass(tsp: number): boolean {
  * * Pass 0 has blending off; three.js already turns `NormalBlending` off for a
  *   material that is not transparent, and it is left as `NormalBlending` so
  *   that a later fade (`applyForcedAlphaBlend`) only has to flip the pass.
+ *   It is also what makes pass 0 ignore the **texture's alpha**, which the
+ *   exporter keeps as the bank stores it (`DecodeTextureToSurface`,
+ *   `FUN_004AC270`, copies it into the device's texture and nothing on the
+ *   D3D path drops it): with `transparent` false and `NormalBlending`,
+ *   `WebGLPrograms` compiles `#define OPAQUE`, whose chunk sets the fragment's
+ *   alpha to 1 -- as D3D's pass 0, with `ALPHABLENDENABLE` and
+ *   `ALPHATESTENABLE` both off, writes the texel's colour whatever its alpha.
  * * Pass 1 blends with the TSP's own factors, and alpha-tests at
  *   `ALPHA_REF / 255`: three.js discards `a < alphaTest`, D3D keeps
  *   `a * 255 >= ALPHAREF`.
@@ -185,8 +192,10 @@ export function isOpaquePass(tsp: number): boolean {
  * Not here, because the port does them elsewhere: `FOGENABLE` is
  * `render/fog.ts`', the texture address and filter are the exporter's
  * sampler, and the alpha op -- `SELECTARG1` for shading mode 1, `MODULATE`
- * otherwise -- is `MeshBasicMaterial`'s texel-times-opacity, which agrees
- * because every translucent mode-1 mesh in the game has a base alpha of 1.
+ * otherwise, with `ALPHAARG1` the texture and `ALPHAARG2` the diffuse
+ * (`InitD3DDeviceAndTextureStages`, `FUN_004A4DA0`) -- is `MeshBasicMaterial`'s
+ * texel-times-opacity, which agrees because every translucent mode-1 mesh in
+ * the game has a base alpha of 1.
  */
 export function applyPvr2DrawState(mat: Material, w: Pvr2Words): void {
   const translucent = !isOpaquePass(w.tsp);
@@ -226,6 +235,12 @@ export function applyPvr2DrawState(mat: Material, w: Pvr2Words): void {
  * kept, so the alpha test is still the mesh's own pass's, and the ISP word is
  * untouched, so it still writes depth.
  *
+ * So an opaque-pass mesh's **texture alpha**, which pass 0 ignores, blends
+ * here -- at any alpha, 1 included, because `AssetDrawSlotWithAlpha` takes
+ * this path without testing its argument. Flipping `transparent` drops
+ * three.js's `OPAQUE` define and lets the texel's alpha through, which is
+ * that.
+ *
  * `baseOpacity` is the unfaded material's; the port's fading draws clone the
  * template's material and record it there.
  */
@@ -247,6 +262,76 @@ export function applyForcedAlphaBlend(mat: Material, alpha: number,
     mat.needsUpdate = true;
   }
   mat.opacity = baseOpacity * Math.max(0, Math.min(1, alpha));
+}
+
+/** What {@link setAssetDrawAlpha} keeps on a node it has faded. */
+interface FadedNode {
+  /** The alpha last applied; absent while the node draws plainly. */
+  hod2DrawAlpha?: number;
+  /** The clones the fade drew with, freed with the node (`effects.ts`). */
+  ownedMaterials?: Material[];
+  /** Each mesh's material before the fade, to go back to. */
+  hod2PlainMaterials?: [Mesh, Material | Material[]][];
+}
+
+/**
+ * One cloned slot node's draw: `AssetDrawSlot` (`FUN_00418560`) when `alpha`
+ * is `null`, `AssetDrawSlotWithAlpha` (`FUN_004185A0`) otherwise.
+ *
+ * **A number is the forced state at any value, 1 included.**
+ * `AssetDrawSlotWithAlpha` hands its argument to
+ * `RenderSubmitModelFadedDefaultLight` (`FUN_004AA350`) without testing it,
+ * so a draw at 1.0 is still `DrawModelWithForcedAlphaBlend`'s: deferred,
+ * blended `SRCALPHA`/`INVSRCALPHA`, and alpha-modulating -- which puts an
+ * opaque-pass mesh's texture alpha on screen, where the plain draw ignores
+ * it. The layers used to skip the clone at 1, which was the same picture
+ * only while the exporter stripped that alpha, and the fading draws do sit at
+ * exactly 1: the horde ripple for thirty frames, the owl ring for
+ * twenty-nine, and the fish and water rings open on it. (Every slot those
+ * draw today is translucent-pass `SRCALPHA`/`INVSRCALPHA` at base alpha 1,
+ * so the picture did not move; the draw is the engine's all the same.) The
+ * plain draw shares the template's materials;
+ * the first fade clones them, recording each one's own opacity as the base
+ * the fade multiplies, and a plain draw after a fade goes back to the
+ * template's.
+ */
+export function setAssetDrawAlpha(node: Object3D, alpha: number | null): void {
+  const ud = node.userData as FadedNode;
+  if (alpha === null) {
+    if (ud.hod2DrawAlpha === undefined) return;
+    for (const [mesh, m] of ud.hod2PlainMaterials ?? []) mesh.material = m;
+    for (const m of ud.ownedMaterials ?? []) m.dispose();
+    ud.hod2DrawAlpha = undefined;
+    ud.ownedMaterials = undefined;
+    ud.hod2PlainMaterials = undefined;
+    return;
+  }
+  const a = Math.max(0, Math.min(1, alpha));
+  if (ud.hod2DrawAlpha === a) return;
+  if (ud.hod2DrawAlpha === undefined) {
+    const owned: Material[] = [];
+    const plain: [Mesh, Material | Material[]][] = [];
+    node.traverse((o) => {
+      const mesh = o as Mesh;
+      if (!mesh.material) return;
+      plain.push([mesh, mesh.material]);
+      const clone = (x: Material): Material => {
+        const c = x.clone();
+        c.userData.hod2BaseOpacity = x.opacity;
+        owned.push(c);
+        return c;
+      };
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(clone) : clone(mesh.material);
+    });
+    ud.ownedMaterials = owned;
+    ud.hod2PlainMaterials = plain;
+  }
+  ud.hod2DrawAlpha = a;
+  for (const mat of ud.ownedMaterials ?? []) {
+    applyForcedAlphaBlend(
+      mat, a, (mat.userData.hod2BaseOpacity as number | undefined) ?? 1);
+  }
 }
 
 /**

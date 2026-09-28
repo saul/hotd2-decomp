@@ -32,11 +32,28 @@
  * measured pixel counts were red under *both* settings, with green never
  * appearing at all. Setting `needsUpdate` and varying `customProgramCacheKey`
  * did not rebuild it. So the transpose is done to the **texture** instead —
- * a second `CanvasTexture` built once per distinct map, and the toggle
- * assigns `material.map`. Reassigning a map is a path three.js takes every
- * frame for every video texture in the world, and it cannot be cached past.
+ * a second texture built once per distinct map, and the toggle assigns
+ * `material.map`. Reassigning a map is a path three.js takes every frame for
+ * every video texture in the world, and it cannot be cached past.
+ *
+ * ## Why the pixels are read back through WebGL and not a 2D canvas
+ *
+ * The images carry the alpha the bank stores, because the game's textures
+ * do (`DecodeTextureToSurface`, `FUN_004AC270`), and 904 of the blood meshes
+ * are gore parts drawn in the **opaque** pass on ARGB1555/4444 textures with
+ * transparent texels. That pass ignores alpha and shows the colour under it.
+ * A 2D canvas stores premultiplied, so `getImageData` hands back black for
+ * every texel at alpha 0 and a colour rounded to the alpha's own steps for
+ * the rest -- a transpose made that way turns those texels black on screen.
+ * This used to be harmless because the exporter stripped the alpha of every
+ * opaque-pass texture; it no longer does. A texture uploaded to WebGL with
+ * premultiplication off and read back with `readPixels` is the file's bytes
+ * exactly, so that is how the transpose gets them.
  */
-import { CanvasTexture, type Material, type Mesh, type Texture } from "three";
+import {
+  DataTexture, RGBAFormat, UnsignedByteType,
+  type Material, type Mesh, type Texture,
+} from "three";
 import type { System } from "../core/system";
 
 /** Which of the game's two blood banks the player is looking at. */
@@ -65,10 +82,12 @@ export class BloodColourLayer implements System {
   /**
    * One transpose per distinct source texture.
    *
-   * 153 materials in stage 1 share far fewer maps than that, and a
-   * `CanvasTexture` per material would upload the same image many times.
+   * 153 materials in stage 1 share far fewer maps than that, and a texture
+   * per material would upload the same image many times.
    */
   private readonly swaps = new Map<Texture, Texture>();
+  /** The readback context, for the length of one `prepare`. */
+  private reader: WebGLRenderingContext | null = null;
   /** Said once: a headless run has no `document` and cannot build one. */
   private warned = false;
 
@@ -96,6 +115,7 @@ export class BloodColourLayer implements System {
         if (swapped) this.seen.set(bm, { bundle, swapped });
       }
     });
+    this.releaseReader();
     this.applyAll();
   }
 
@@ -126,44 +146,97 @@ export class BloodColourLayer implements System {
     const img = src.image as
       { width?: number; height?: number } | null | undefined;
     if (!img?.width || !img.height) return null;
-    if (typeof document === "undefined") {
-      if (!this.warned) {
-        this.warned = true;
-        console.warn("[bloodcolour] no document: blood stays as exported");
-      }
-      return null;
-    }
-    const c = document.createElement("canvas");
-    c.width = img.width;
-    c.height = img.height;
-    const g = c.getContext("2d");
-    if (!g) return null;
-    g.drawImage(img as CanvasImageSource, 0, 0);
-    const d = g.getImageData(0, 0, c.width, c.height);
-    for (let i = 0; i < d.data.length; i += 4) {
-      const r = d.data[i];
-      d.data[i] = d.data[i + 1];
-      d.data[i + 1] = r;
-    }
-    g.putImageData(d, 0, 0);
-    const out = new CanvasTexture(c);
+    const px = this.straightPixels(img as TexImageSource, img.width, img.height);
+    if (!px) return null;
+    transposeRedGreen(px);
+    const out = new DataTexture(px, img.width, img.height, RGBAFormat,
+                                UnsignedByteType);
     out.colorSpace = src.colorSpace;
     out.wrapS = src.wrapS;
     out.wrapT = src.wrapT;
     out.magFilter = src.magFilter;
     out.minFilter = src.minFilter;
     out.anisotropy = src.anisotropy;
+    // `readPixels` returns rows in the order the upload below put them in,
+    // which is the source's with `flipY` off: the same order for the same
+    // flag. Mipmaps as the canvas texture this replaced had them, so that a
+    // forced trilinear filter (`texfilter.ts`) finds a complete texture.
     out.flipY = src.flipY;
+    out.generateMipmaps = true;
     out.needsUpdate = true;
     this.swaps.set(src, out);
     return out;
   }
 
   /**
+   * The image's RGBA bytes exactly as the file holds them, alpha and the
+   * colour under a transparent texel included -- or null, said once, where
+   * there is no WebGL to ask (a headless run).
+   *
+   * `GLTFLoader`'s `ImageBitmapLoader` decodes with `premultiplyAlpha: "none"`,
+   * so an upload with `UNPACK_PREMULTIPLY_ALPHA_WEBGL` off and no colour-space
+   * conversion puts the file's bytes in the texture, and a framebuffer over it
+   * reads them back.
+   */
+  private straightPixels(img: TexImageSource, w: number,
+                         h: number): Uint8Array<ArrayBuffer> | null {
+    const gl = this.readerContext();
+    if (!gl) return null;
+    const tex = gl.createTexture();
+    const fb = gl.createFramebuffer();
+    try {
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+                              gl.TEXTURE_2D, tex, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER)
+          !== gl.FRAMEBUFFER_COMPLETE) {
+        return null;
+      }
+      const out = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+      return out;
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(tex);
+    }
+  }
+
+  /** The one context the readback uses, made on first need. */
+  private readerContext(): WebGLRenderingContext | null {
+    if (this.reader) return this.reader;
+    const canvas = typeof document === "undefined"
+      ? null : document.createElement("canvas");
+    this.reader = canvas?.getContext("webgl", { premultipliedAlpha: false })
+      ?? null;
+    if (!this.reader && !this.warned) {
+      this.warned = true;
+      console.warn("[bloodcolour] no WebGL to read the images back: blood "
+        + "stays as exported");
+    }
+    return this.reader;
+  }
+
+  /** Let the readback context go: `prepare` is done with it. */
+  private releaseReader(): void {
+    this.reader?.getExtension("WEBGL_lose_context")?.loseContext();
+    this.reader = null;
+  }
+
+  /**
    * Give the transposes back.
    *
-   * They are `CanvasTexture`s this layer minted, so nothing else will free
-   * them, and a stage change makes every one of them unreachable.
+   * They are textures this layer minted, so nothing else will free them, and
+   * a stage change makes every one of them unreachable.
    */
   dispose(): void {
     for (const t of this.swaps.values()) t.dispose();
@@ -181,5 +254,18 @@ export class BloodColourLayer implements System {
     for (const [m, pair] of this.seen) if (m.map === pair.swapped) swapped++;
     return `${this.mode}, ${swapped}/${this.seen.size} swapped, `
       + `${this.swaps.size} maps`;
+  }
+}
+
+/**
+ * Exchange the red and green bytes of every RGBA texel, in place, and touch
+ * nothing else: the alpha and the blue stay the file's, and so does the
+ * colour under a transparent texel, which the opaque pass shows.
+ */
+export function transposeRedGreen(rgba: Uint8Array): void {
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const r = rgba[i];
+    rgba[i] = rgba[i + 1];
+    rgba[i + 1] = r;
   }
 }

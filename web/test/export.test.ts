@@ -324,5 +324,122 @@ console.log("\na rig route parked on its path:");
         String(holdFrameOf({ slot: 1, frame: "(age % 24)" })));
 }
 
+// -- a texture's alpha is the bank's, whatever the mesh's IgnoreTexAlpha -----
+
+/**
+ * **One image per texture, carrying the alpha the bank stores.**
+ *
+ * `BindModelTextureHandles` (`FUN_004AC980`) decodes each bank texture once,
+ * from the bank entry and its data -- no mesh word is an input -- and
+ * `DecodeTextureToSurface` (`FUN_004AC270`) copies every texel verbatim into
+ * a surface that keeps the alpha. TSP bit 19, `IgnoreTexAlpha`, reaches none
+ * of it: the D3D translation reads it only as half of the pass selector. The
+ * exporter used to write an alpha-stripped `_opaque` copy for every mesh with
+ * the bit set, and the 101 translucent-pass meshes that set it -- the
+ * additive blades of `zslman` and `zndina` among them -- drew as solid bars.
+ *
+ * Two meshes on one ARGB4444 texture: a translucent-pass one with
+ * `IgnoreTexAlpha` and `UseAlpha` both set, and an opaque-pass one. The
+ * opaque pass ignores the texture's alpha by its draw state, which the
+ * material carries (`alphaMode: OPAQUE`), not by a second image.
+ */
+console.log("\na texture's alpha is the bank's, not the mesh's:");
+{
+  const { exportLevel } = await import("../src/hod2lib/gltf");
+  const { Mesh, Model } = await import("../src/hod2lib/nl1");
+  const { bankDecode } = await import("../src/hod2lib/texbank");
+  const { deflateSync, inflateSync } = await import("node:zlib");
+
+  // 8 x 8 ARGB4444, linear: texel i has alpha nibble i % 16.
+  const data = new Uint8Array(8 * 8 * 2);
+  for (let i = 0; i < 64; i++) {
+    const p = ((i % 16) << 12) | 0x0f00 | ((i * 3) & 0xff);
+    data[i * 2] = p & 0xff;
+    data[i * 2 + 1] = p >>> 8;
+  }
+  const bank = {
+    data, complete: true, residual: 0,
+    descs: new Map([[0, { width: 8, height: 8, pixfmt: 2, vq: false,
+                          mipmap: false, twiddled: false }]]),
+    offsets: new Map([[0, 0]]),
+  };
+  // texture_control: pixel format 2 (ARGB4444) at bits 27-29, bit 26 linear.
+  const TC = (2 << 27) | (1 << 26);
+  const mesh = (pc: number, tsp: number) => {
+    const m = new Mesh(0, pc, 0x83000000, tsp, TC, [0, 0, 0], 1, 0, 0,
+                       [1, 1, 1, 1], [0, 0, 0, 0]);
+    for (const pos of [[0, 0, 0], [1, 0, 0], [0, 1, 0]] as const) {
+      m.vertices.push({ pos: [pos[0], pos[1], pos[2]], normal: [0, 0, 1],
+                        uv: [pos[0], pos[1]], colour: null });
+    }
+    m.triangles.push([0, 1, 2]);
+    return m;
+  };
+  const model = new Model(0, 0, [0, 0, 0], 1);
+  // List 2, TSP 0x94180000: SRCALPHA/INVSRCALPHA, UseAlpha and IgnoreTexAlpha.
+  model.meshes.push(mesh(0x02000008, 0x94180000));
+  // List 0, TSP 0x20080000: ONE/ZERO, IgnoreTexAlpha alone -- the opaque pass.
+  model.meshes.push(mesh(0x00000008, 0x20080000));
+
+  const files = new Map<string, Uint8Array | string>();
+  const sink = {
+    write: async (path: string, d: Uint8Array | string) => {
+      files.set(path, d);
+    },
+    readJson: async () => null,
+    exists: async () => false,
+  };
+  const deflate = async (d: Uint8Array, level: number) =>
+    new Uint8Array(deflateSync(d, { level }));
+  await exportLevel("t", [["part", [model], bank]], "out", sink, deflate);
+
+  const doc = JSON.parse(String(files.get("out/t.gltf"))) as {
+    images: { uri: string }[];
+    materials: { alphaMode: string;
+                 extras: { pvr2: { texture_alpha_used: boolean } } }[];
+  };
+  check("both meshes share one image: there is no alpha-stripped copy",
+        doc.images.length === 1 && !doc.images[0].uri.includes("_opaque"),
+        JSON.stringify(doc.images));
+
+  /** The RGBA rows of an 8-bit RGBA PNG, filter 0 on every row. */
+  const pixels = (png: Uint8Array): Uint8Array => {
+    const idat: Uint8Array[] = [];
+    let w = 0;
+    for (let at = 8; at < png.length;) {
+      const len = new DataView(png.buffer, png.byteOffset + at).getUint32(0);
+      const tag = String.fromCharCode(...png.subarray(at + 4, at + 8));
+      const body = png.subarray(at + 8, at + 8 + len);
+      if (tag === "IHDR") w = new DataView(body.buffer, body.byteOffset).getUint32(0);
+      if (tag === "IDAT") idat.push(body);
+      at += 12 + len;
+    }
+    const raw = inflateSync(Buffer.concat(idat));
+    const rows: number[] = [];
+    for (let y = 0; y * (w * 4 + 1) < raw.length; y++) {
+      const start = y * (w * 4 + 1) + 1;
+      rows.push(...raw.subarray(start, start + w * 4));
+    }
+    return new Uint8Array(rows);
+  };
+  const png = files.get(`out/${doc.images[0]?.uri}`);
+  const got = png instanceof Uint8Array ? pixels(png) : new Uint8Array();
+  const want = bankDecode(bank, 0)!.pixels;
+  const alphas = (px: Uint8Array) => Array.from(px.filter((_, i) => i % 4 === 3));
+  check("...and it carries the bank's alpha, byte for byte",
+        got.length === want.length
+        && alphas(got).every((a, i) => a === alphas(want)[i])
+        && new Set(alphas(got)).size === 16,
+        `alphas ${alphas(got).slice(0, 16)}`);
+  check("the translucent-pass mesh blends (BLEND), and uses the texture's alpha",
+        doc.materials[0]?.alphaMode === "BLEND"
+        && doc.materials[0].extras.pvr2.texture_alpha_used === true,
+        JSON.stringify(doc.materials[0]?.extras.pvr2.texture_alpha_used));
+  check("the opaque-pass mesh is OPAQUE: its pass, not its image, drops alpha",
+        doc.materials[1]?.alphaMode === "OPAQUE"
+        && doc.materials[1].extras.pvr2.texture_alpha_used === false,
+        `${doc.materials[1]?.alphaMode}`);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

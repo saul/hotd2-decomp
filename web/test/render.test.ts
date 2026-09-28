@@ -1728,19 +1728,35 @@ console.log("\nthe water ring is drawn from its record alone:");
 
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {
-  // A 2x1 image and just enough canvas to transpose it. The file's own stub is
+  // A 2x1 image and just enough WebGL to read it back. The file's own stub is
   // for text labels and has no pixel calls, so this one is local and put back.
+  // The second texel is transparent, as 904 opaque-pass gore texels are: the
+  // readback has to keep the colour under it, which a 2D canvas -- stored
+  // premultiplied -- hands back as black. That canvas is what this used, and
+  // the stub asks only for `webgl`, so going back to it fails here.
   const doc = globalThis.document;
-  const px = new Uint8ClampedArray([10, 200, 30, 255, 40, 50, 60, 255]);
-  const held = new Uint8ClampedArray(px);
+  const px = new Uint8Array([10, 200, 30, 255, 40, 50, 60, 0]);
+  const asked: string[] = [];
+  const gl = {
+    TEXTURE_2D: 1, FRAMEBUFFER: 2, COLOR_ATTACHMENT0: 3,
+    FRAMEBUFFER_COMPLETE: 4, RGBA: 5, UNSIGNED_BYTE: 6, NONE: 0,
+    createTexture: () => ({}), createFramebuffer: () => ({}),
+    bindTexture: () => undefined, bindFramebuffer: () => undefined,
+    pixelStorei: () => undefined, texParameteri: () => undefined,
+    texImage2D: () => undefined, framebufferTexture2D: () => undefined,
+    checkFramebufferStatus: () => 4,
+    readPixels: (_x: number, _y: number, _w: number, _h: number,
+                 _f: number, _t: number, out: Uint8Array) => out.set(px),
+    deleteTexture: () => undefined, deleteFramebuffer: () => undefined,
+    getExtension: () => ({ loseContext: () => undefined }),
+  };
   (globalThis as unknown as { document: unknown }).document = {
     createElement: () => ({
       width: 0, height: 0,
-      getContext: () => ({
-        drawImage: () => undefined,
-        getImageData: () => ({ data: held }),
-        putImageData: () => undefined,
-      }),
+      getContext: (kind: string) => {
+        asked.push(kind);
+        return kind === "webgl" ? gl : null;
+      },
     }),
   };
 
@@ -1760,9 +1776,14 @@ console.log("\nthe blood colour switch moves the map, not the shader:");
         /1\/1 swapped/.test(layer.describe), layer.describe);
   check("red is the default, and it is the transposed map",
         mat.map !== map && layer.colour === "red", layer.describe);
+  const held = ((mat.map as { image?: { data?: Uint8Array } } | null)
+    ?.image?.data) ?? new Uint8Array();
   check("...and the transpose really exchanges R and G",
         held[0] === 200 && held[1] === 10 && held[2] === 30,
         `${held[0]},${held[1]},${held[2]}`);
+  check("...keeping the alpha, and the colour under a transparent texel",
+        held.join() === "200,10,30,255,50,40,60,0" && asked.includes("webgl"),
+        `${held.join()} via ${asked.join()}`);
 
   // **The regression this exists for.** The first cut did the swap in the
   // fragment shader through `onBeforeCompile`; the material's mode changed and
@@ -3127,6 +3148,40 @@ console.log("\nthe engine's two passes, and the translucent order");
   check("...every frame, not from the last frame's",
         Math.abs((slotNode.material as InstanceType<typeof MeshBasicMaterial>)
           .opacity - 0.15) < 1e-9);
+
+  // `AssetDrawSlotWithAlpha` (`FUN_004185A0`) does not test its argument: at
+  // 1.0 it is still `DrawModelWithForcedAlphaBlend`, which blends an
+  // opaque-pass mesh -- and so its texture's alpha, now that the exporter
+  // keeps it. The layers used to keep the plain draw at 1.
+  const wallMat = exported(0x83000000, 0x2008045B, false);
+  applyPvr2DrawState(wallMat, { isp: 0x83000000, tsp: 0x2008045B });
+  const wallNode = new Mesh(new PlaneGeometry(1, 1), wallMat);
+  setSlotAlpha(wallNode, 1);
+  const forcedWall = wallNode.material as InstanceType<typeof MeshBasicMaterial>;
+  check("a draw with alpha at 1 still blends an opaque-pass mesh",
+        forcedWall !== wallMat && forcedWall.transparent
+        && forcedWall.blendSrc === three.SrcAlphaFactor
+        && forcedWall.blendDst === three.OneMinusSrcAlphaFactor
+        && forcedWall.opacity === 1,
+        `${forcedWall === wallMat} ${forcedWall.transparent}`);
+  check("...and leaves the template's material alone",
+        wallMat.transparent === false);
+  check("...untested: the opaque pass's alpha test stays off (bits 19-20 kept)",
+        forcedWall.alphaTest === 0, `${forcedWall.alphaTest}`);
+  setSlotAlpha(wallNode, null);
+  check("a plain draw (`AssetDrawSlot`) after it goes back to the template's",
+        wallNode.material === wallMat && wallMat.transparent === false);
+  const untouched = new Mesh(new PlaneGeometry(1, 1), wallMat);
+  setSlotAlpha(untouched, null);
+  check("...and a plain draw never clones", untouched.material === wallMat);
+
+  // The blood transpose swaps red and green and nothing else: an opaque-pass
+  // gore texel at alpha 0 keeps the colour the pass shows.
+  const { transposeRedGreen } = await import("../src/render/bloodcolour");
+  const texel = new Uint8Array([10, 200, 30, 0, 1, 2, 3, 255]);
+  transposeRedGreen(texel);
+  check("the blood transpose keeps the alpha, and the colour under alpha 0",
+        texel.join() === "200,10,30,0,2,1,3,255", texel.join());
 
   // ---- the order ---------------------------------------------------------
   // Commands as the loader delivers them: a node Group of primitive Meshes,

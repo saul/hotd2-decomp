@@ -339,6 +339,17 @@ CHECKS: list[Check] = [
           "painter's order this repo's docs had -- plus that no mesh in `pol/` "
           "turns its depth write off, which is why translucent meshes occlude",
           NEEDS_GAME),
+    Check("verify_texture_alpha", ".",
+          ["python3", "tools/verify_texture_alpha.py", "--game-dir",
+           "{game_dir}"],
+          "that a texture's alpha reaches the bundle as the bank stores it, "
+          "because the EXE's D3D path keeps it: the upload's format table and "
+          "the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the "
+          "D3D module finding TSP bit 19 read only as half of the pass "
+          "selector -- plus the corpus premise that makes a glTF alphaMode "
+          "from the pass right, and, on a current bundle, no `_opaque` image "
+          "and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha",
+          NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],
           "that the class-0x46 bat's flight paths still line up with the "

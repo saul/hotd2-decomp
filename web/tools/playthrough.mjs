@@ -719,8 +719,11 @@ try {
                     + `answers ${version}`);
   }
   await page.keyboard.press("Space");                 // play
-  const box = await page.locator("#viewport").boundingBox();
-  if (!box) throw new Error("#viewport has no box");
+  // The canvas, not `#viewport`: the ray is cast through the 4:3 frame, which
+  // is centred in the viewport with bars beside it, and a press on a bar is a
+  // pull off the screen -- a reload -- rather than a shot.
+  const box = await page.locator("#view").boundingBox();
+  if (!box) throw new Error("#view has no box");
 
   /** Run n whole game frames. The only thing in this file that advances time. */
   const advance = (n) =>

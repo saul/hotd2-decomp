@@ -61,8 +61,8 @@ const check = (what, ok, detail = "") => {
 /** Frames the page has asked for, and the game frame it has reached. */
 async function probe(page) {
   return page.evaluate(() => {
-    const t = document.querySelector("#transport")?.innerText ?? "";
-    // The transport bar's own readout: `cp_st1[0] slot 32 frame 79 / 230`.
+    const t = document.querySelector("#cam-label")?.innerText ?? "";
+    // The debug sidebar's camera readout: `cp_st1[0] slot 32 frame 79 / 230`.
     // The camera path's frame is the one number on the page that moves once
     // per *game* frame, which is exactly what has to be distinguished from a
     // frame that was merely drawn.
@@ -128,11 +128,10 @@ try {
         `frame ${c.frame} -> ${d.frame}`);
 
   console.log("\nAn input wakes it, for a frame and not a tick:\n");
-  // A key the player binds nothing to. Every bound key changes a mode or the
-  // address, and two of them — Step mode among them — legitimately start the
-  // loop again, because in Step mode the port keeps running while the script
-  // stands still. This asks the narrower question: does the *waking* work,
-  // with nothing else riding on it.
+  // A key the player binds nothing to. Every bound key changes a mode, the
+  // transport or the address, and some of them legitimately start the loop
+  // again -- free roam flies on wall time. This asks the narrower question:
+  // does the *waking* work, with nothing else riding on it.
   await page.keyboard.press("KeyZ");
   await sleep(400);
   const e = await probe(page);
@@ -155,11 +154,13 @@ try {
   check("...the loop went back to sleep first", g.raf - f.raf <= 2,
         `${g.raf - f.raf} frames in ~0.5s`);
 
-  // The middle of the viewport, which is where the crosshair is. Whether it
-  // hits anything is not the question; `fire` runs either way, and with the
-  // clock stopped the composition root refuses to make it input at all.
-  const box = await page.locator("#viewport").boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  // A point on the frame, clear of the pause screen's card: the middle of the
+  // frame is its Resume button now, and a press there is Play rather than a
+  // shot. Whether the shot hits anything is not the question; `fire` runs
+  // either way, and with the clock stopped the composition root refuses to
+  // make it input at all.
+  const box = await page.locator("#view").boundingBox();
+  await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.3);
   await sleep(400);
   const h = await probe(page);
   const shotRaf = h.raf - g.raf;

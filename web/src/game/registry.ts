@@ -32,7 +32,6 @@ import type { Rng } from "../core/rng";
 import type { Actor } from "./actor";
 import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
-import type { Vec3 } from "./vec";
 
 /**
  * The half of a spawn record {@link ClassHandler.raisesScriptFlag} is given.
@@ -49,8 +48,37 @@ export interface SpawnRecord {
   at?: number;
 }
 
+/**
+ * `[port-only]` A spawn record as a **replay** has seen it: the record, the
+ * block its instruction ran in, and the route the replay then left that block
+ * by. What {@link ClassHandler.outlivedByReplay} is handed.
+ */
+export interface ReplaySpawnRecord extends SpawnRecord {
+  /** The block whose instruction pushed the record. */
+  block: number;
+  /**
+   * The slot of that block's route the replay left it by -- the value of
+   * `g_script_branch_var` the route read -- once it has left through a
+   * `branch` route; undefined while it has not.
+   */
+  armOut?: number;
+}
+
+/**
+ * What every class update is handed.
+ *
+ * **No eye.** It carried `eye`, the drawn camera the app read out of the last
+ * draw, and about thirty routines measured to it -- where the engine reads one
+ * of three different points, each by its own address: `g_camera_eye`
+ * (`0x009C71E0`), the gameplay eye the scene state's hook writes fifteen under
+ * the rail's pose, which every enemy state measures to; camera block 0's eye
+ * by address (`0x009A60C0`); or the block `g_camera_index` names
+ * (`[g_camera_index * 0x1A4 + 0x009A60C0]`). A routine reads the one its
+ * instruction names, from `G`: `G.g_camera_eye`, `G.g_camera_block_eye`, or
+ * `CameraBlockEye(G.g_camera_index)` in `camera/view.ts`. The per-site table
+ * is `docs/formats/cam.md` § *Which eye*.
+ */
 export interface ClassFrame {
-  eye: Vec3;
   dt: number;
   rng: Rng;
   host: GameHost;
@@ -265,6 +293,21 @@ export interface ClassHandler {
    * {@link ClassHandler.raisesScriptFlag}'s is.
    */
   countsForEnemyGate?(rec: SpawnRecord): boolean;
+  /**
+   * `[port-only]` Whether a **replay** has gone past this spawn record's own
+   * way out, so that the object is gone at the address the replay lands on
+   * and must not be rebuilt there.
+   *
+   * A seek replays the evt with no actor running and rebuilds every record
+   * still listed at its `Init`. For most classes the gates a replay steps over
+   * say when their objects are gone (`Walker.retireGated`, the civilian
+   * arms in `script/civilian_life.ts`); a class whose exit is its **own**
+   * test of something the replay also moves -- a script flag, the camera, the
+   * route it wrote -- answers here, from those and the record. The walker asks
+   * after every instruction, every wait it steps over and every block change,
+   * and only while replaying.
+   */
+  outlivedByReplay?(rec: ReplaySpawnRecord): boolean;
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

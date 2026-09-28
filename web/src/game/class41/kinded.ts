@@ -21,6 +21,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { T } from "../tables";
 import { PropRegisterForShotTest } from "./shot_test";
 import { MsvcRand } from "./group";
@@ -134,7 +135,7 @@ export function KindedPropUpdate(p: BreakableProp, rng: Rng,
       // turns to face the camera block (`0x009A60D0`) as it cracks, the same
       // write `BreakablePropUpdate` and `PropUpdateType43` make. The port had
       // left it out. `[proved]`
-      p.yaw = G.g_camera_block_yaw_bams;
+      p.yaw = CameraBlockYaw(G.g_camera_index);
       p.shake = 1.0;
       events?.emit("prop.cracked", { id: p.id, sound: SFX_KINDED_CRACK });
     } else {

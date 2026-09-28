@@ -242,6 +242,13 @@ unless the source column says otherwise.
   instance by `obj+0x11C`. Recording `0x2F` as a route gate produced a cp_st1
   gate on op_st2 routes — a gate that could never fire — which is exactly what
   the same-stage-file check in `verify_objects.py` caught.
+* **A cel loop is one part per cel.** A `RigPart`'s `slots` are drawn
+  together, so a routine that names one slot of a strip each frame has every
+  cel exported as a part of its own -- `FUN_00432840`'s fire and smoke,
+  `0x135F + g_frame_counter % 15` and `0xB67 + (g_frame_counter & 7)`, are
+  23 parts, the way `obj_452320` carries both of its asset rows -- and the
+  player shows the one the counter names. Until 2026-09-28 that rig carried
+  only each loop's first cel and both stood still. `[proved]`
 * **Latent bug in `0x004521B0`** `[proved]`: if `g_active_cam_path` is not
   `0x38`/`0x39`/`0x3A`, `ECX` still holds the *object pointer* and is
   sign-extended as the slot id. Unreachable only because the object spawns

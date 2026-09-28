@@ -1051,15 +1051,26 @@ console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
                    hod2_slots: [`0x${slot.toString(16).padStart(4, "0")}`] };
     return g;
   };
+  // Every cel of both loops, one part each, as the rig writer exports them:
+  // the body, then `0x135F..0x136D`, then `0xB67..0xB6E`.
+  const FIRE = Array.from({ length: 15 }, (_, i) => 0x135f + i);
+  const SMOKE = Array.from({ length: 8 }, (_, i) => 0xb67 + i);
   const rigRoot = (name: string, data: Record<string, unknown>) => {
     const g = new Group();
     g.name = name;
     g.userData = { hod2_kind: "rig", hod2_rig: "obj_432840",
                    hod2_routine: "FUN_00432840", ...data };
     g.add(part(0x33, [0, 0, 0], [1, 1, 1]),
-          part(0x135f, [0, 5, 0], [1.5, 2, 1]),
-          part(0xb67, [0, 0, 12], [7, 7, 7]));
+          ...FIRE.map((s) => part(s, [0, 5, 0], [1.5, 2, 1])),
+          ...SMOKE.map((s) => part(s, [0, 0, 12], [7, 7, 7])));
     return g;
+  };
+  /** The one part of `slots` a root shows, as its slot; -1 for none or two. */
+  const celOf = (r: InstanceType<typeof Obj3D>, slots: number[]) => {
+    const on = r.children.filter((c) => c.visible && slots.includes(
+      Number.parseInt((c.userData.hod2_slots as string[])[0], 16)));
+    return on.length === 1
+      ? Number.parseInt((on[0].userData.hod2_slots as string[])[0], 16) : -1;
   };
   const root = new Group();
   const r325 = rigRoot("obj_432840_325", { hod2_path_slot: 325 });
@@ -1108,7 +1119,9 @@ console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
         && s0.position.x === a.pos.x && s0.position.z === a.pos.z,
         shown().join(" "));
   root.updateMatrixWorld(true);
-  const [, fire, smoke] = s0.children;
+  // `ResetGameGlobals` left `g_frame_counter` at 0: each loop's first cel.
+  const fire = s0.children[1];
+  const smoke = s0.children[1 + FIRE.length];
   const wp = (o: InstanceType<typeof Obj3D>) =>
     o.getWorldPosition(new Vector3());
   const yaw = Math.trunc(Math.atan2(30, 40) * 32768 / Math.PI)
@@ -1143,12 +1156,42 @@ console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
         && near(sm2.z, a.pos.z + 12 * Math.cos(yaw2)),
         `${sm2.x},${sm2.z}`);
   G.g_camera_index = 0;
+  // The cel is the exe's: `MOV EAX,[0x009A32A0]; XOR EDX,EDX; MOV ECX,0xF;
+  // DIV ECX; ADD EDX,0x135F` at `0x0043292C`, and `MOV EDX,[0x009A32A0];
+  // AND EDX,7; ADD EDX,0xB67` at `0x004329A7` -- `g_frame_counter`, not the
+  // scene tick class 0x41 type 53 reads for the same two loops.
+  const cels: string[] = [];
+  let posed = true;
+  for (const n of [0, 22, 100, 101]) {
+    G.g_frame_counter = n;
+    G.g_scene_tick_counter = n + 3;         // must not be the one read
+    rigs.update(ctx);
+    root.updateMatrixWorld(true);
+    const f = celOf(s0, FIRE);
+    const k = celOf(s0, SMOKE);
+    cels.push(`${n}:${f.toString(16)}/${k.toString(16)}`);
+    if (f !== 0x135f + n % 15 || k !== 0xb67 + (n & 7)) posed = false;
+    // ...and whichever cel it is stands where the first one stood.
+    const on = s0.children.find((c) => c.visible
+      && (c.userData.hod2_slots as string[])[0] === `0x${f.toString(16)}`);
+    const at = on ? wp(on) : null;
+    if (!at || !near(at.x, a.pos.x) || !near(at.y, a.pos.y + 5)) posed = false;
+  }
+  check("each loop draws one cel, `0x135F + g_frame_counter % 15` and "
+        + "`0xB67 + (g_frame_counter & 7)`, posed as the first",
+        posed, cels.join(" "));
+  check("...so the drawn cels at two counters differ",
+        cels[1].split(":")[1] !== cels[0].split(":")[1], cels.join(" "));
+  G.g_frame_counter = 0;
+  G.g_scene_tick_counter = 0;
+  rigs.update(ctx);
   const tail = (a as unknown as { pathProp?: { launched: number } }).pathProp;
   check("the actor carries class 0x28's tail", tail !== undefined);
   if (tail) tail.launched = 1;
   rigs.update(ctx);
   check("once obj+0x1320 is up the sprites are not drawn and the body is",
-        s0.visible && !fire.visible && !smoke.visible
+        s0.visible && celOf(s0, FIRE) === -1 && celOf(s0, SMOKE) === -1
+        && s0.children.slice(1).every((c) => !c.visible)
         && s0.children[0].visible);
   a.despawned = true;
   rigs.update(ctx);
@@ -3205,7 +3248,7 @@ console.log("\nthe player's character survives its own op 10:");
   const rng = new Rng(1);
   const events = new Events();
   for (let i = 0; i < 4; i++) {
-    ScriptedHumanoidUpdate(a, { eye: { x: 0, y: 6, z: 0 }, dt: 1 / 60, rng,
+    ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng,
                                 host: NULL_HOST, events });
   }
   chars.update({} as never);

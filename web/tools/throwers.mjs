@@ -22,6 +22,7 @@ import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -141,7 +142,8 @@ for (let stage = 1; stage <= 6; stage++) {
     let leftAt = null;
     let goneBy = null;
     for (let i = 0; i < SECONDS * 60; i++) {
-      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      SeatHarnessEye(EYE);
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
       if (process.env.TRACE && String(p.at) === process.env.TRACE && i % 30 === 0) {
         console.log(`   f${i} ${ZombieState[a.state]}/${a.sub} `
           + `pos ${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)} motion=${a.motion} `

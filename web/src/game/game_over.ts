@@ -390,9 +390,16 @@ export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
       // slot back to the resident set, every cam file out. Then the screen's
       // own assets are queued; the port's bundle carries them already.
       G.g_stage_unloaded = 1;
-      // `g_camera_eye_x/y/z` and the three angles (`0x009C71E0`..`F4`), which
-      // the port does not keep: they are what `GameOverPlaceBody` pushes the
-      // body's table point through, and zero makes that the identity.
+      // `g_camera_eye_x/y/z` and the three angles (`0x009C71E0`..`F4`), each
+      // stored 0 (`0x00460A6E`..`0x00460AA0`): they are what
+      // `GameOverPlaceBody` pushes the body's table point through, and zero
+      // makes that the identity.
+      G.g_camera_eye.x = 0;
+      G.g_camera_eye.y = 0;
+      G.g_camera_eye.z = 0;
+      G.g_camera_pitch_bams = 0;
+      G.g_camera_yaw_bams = 0;
+      G.g_camera_roll_bams = 0;
       GameOverBuildFlyTasks();
       for (let p = 0; p < 2; p++) {
         if (G.g_player_state[p] === PlayerState.Continue) {

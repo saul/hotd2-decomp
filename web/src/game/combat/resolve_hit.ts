@@ -17,6 +17,7 @@ import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
 import { AppState, G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { SpawnClass } from "../spawn_class";
 import { ZombieState } from "../class30/states";
 import { ScoreAddForPlayer } from "./score";
@@ -572,7 +573,7 @@ export function ChooseDeathMotionDirectional(obj: Actor,
                                              rng: Rng): number | undefined {
   const d = T.chars?.deaths;
   if (!d || !d.front?.length) return undefined;
-  const rel = (G.g_camera_block_yaw_bams - obj.yaw) & 0xffff;
+  const rel = (CameraBlockYaw(G.g_camera_index) - obj.yaw) & 0xffff;
   let motion: number | undefined;
   if (AngleWithinTolerance(rel, 0x4000, DEATH_ARC)) motion = DEATH_RIGHT;
   if (AngleWithinTolerance(rel, 0xc000, DEATH_ARC)) motion = DEATH_LEFT;

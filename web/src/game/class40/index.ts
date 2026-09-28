@@ -56,6 +56,7 @@ import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
   from "../camera/slots";
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
 import { G, PlayerState } from "../globals";
+import { CameraBlockEye, CameraBlockPitch } from "../camera/view";
 import type { GameHost } from "../host";
 import {
   registerClass, DeadSweep, type ActorDebug, type ClassFrame,
@@ -668,7 +669,8 @@ export function HordeTryStartDive(obj: Actor, rng: Rng, host: GameHost):
     if (G.g_active_player === 1) obj.attackPermit = 1;
   }
   obj.yaw &= 0xffff;
-  const eye = G.g_camera_block_eye;
+  // The block `g_camera_index` names (`0x0043D61E`, `0x0043D627`).
+  const eye = CameraBlockEye(G.g_camera_index);
   const h = BamsOf(eye.x - obj.pos.x, eye.z - obj.pos.z) & 0xffff;
   t.windCount = 0;
   const yaw = obj.yaw;
@@ -991,12 +993,14 @@ function HordeStateWindUp(obj: Actor, t: HordeTail): void {
  */
 function HordeStateDive(obj: Actor, t: HordeTail, f: ClassFrame): void {
   if (t.diveT < HORDE_DIVE_TRACK_UNTIL) {
-    const eye = G.g_camera_block_eye;
+    // The block `g_camera_index` names, its eye (`0x0043CA99`, `0x0043CAF6`,
+    // `0x0043CB38`) and its pitch alike.
+    const eye = CameraBlockEye(G.g_camera_index);
     obj.pos.x = ((eye.x + t.aimX) - t.diveFromX) * t.diveT * HORDE_DIVE_REACH
       + t.diveFromX;
     const arc = Math.trunc(t.diveT * HORDE_DIVE_ARC_BAMS) & 0xffff;
     const lift = HORDE_DIVE_PITCH_LIFT
-      * Math.sin(G.g_camera_block_pitch_bams * BAMS_TO_RAD);
+      * Math.sin(CameraBlockPitch(G.g_camera_index) * BAMS_TO_RAD);
     obj.pos.y = (lift + (eye.y - t.diveFromY)
                  * Math.sin(arc * BAMS_TO_RAD)) * HORDE_DIVE_ARC_K
       + t.diveFromY;

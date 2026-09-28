@@ -49,7 +49,6 @@ import type { Rng } from "../../core/rng";
 import { ZombieFlag2, type ZombieActor } from "../actor";
 import { TurnActorTowardCamera } from "../actor_turn";
 import { MotionRowOf } from "../tables";
-import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionFade, ZOMBIE_SPRINTS, ZombieRunMotion, ZombieState }
@@ -98,7 +97,7 @@ export function ZombieRunTurnRate(obj: ZombieActor): number {
                     * RUN_TURN_RATE);
 }
 
-export function ZombieStateAttackRun(obj: ZombieActor, eye: Vec3, dt: number,
+export function ZombieStateAttackRun(obj: ZombieActor, dt: number,
                                     rng: Rng): void {
   const row = MotionRowOf(obj);
   // `row[2 + ((obj+0x34 >> 0x1B) & 1)]` — the spawn record says which of the
@@ -122,14 +121,14 @@ export function ZombieStateAttackRun(obj: ZombieActor, eye: Vec3, dt: number,
     // the port does not have either.
   }
 
-  const band = TestApproachRing(obj, eye);
+  const band = TestApproachRing(obj);
   if (band === 1) {
     obj.state = ZombieState.HoldAtRange;
     obj.sub = 0;
     return;
   }
 
-  TurnActorTowardCamera(obj, eye, ZombieRunTurnRate(obj), dt);
+  TurnActorTowardCamera(obj, ZombieRunTurnRate(obj), dt);
   // `TestApproachRing` only answers 1 to 4, so the engine's own
   // `band < 2 || band > 4` arm -- turn and return -- is unreachable, and is
   // written out anyway because the routine has it.

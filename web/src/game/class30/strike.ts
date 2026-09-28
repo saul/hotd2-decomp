@@ -26,7 +26,7 @@ import { ActorFlag, DamageZone, ZombieFlag2, type ZombieActor }
   from "../actor";
 import { PlayerTakeDamage } from "../combat/player";
 import { AttackListOf, AttackPicksOf, MotionOf } from "../tables";
-import { dist2d, type Vec3 } from "../vec";
+import { dist2d } from "../vec";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorFacePlayerTarget } from "../actor_turn";
@@ -133,11 +133,11 @@ function endStrike(obj: ZombieActor): void {
   obj.sub = 0;
 }
 
-export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
+export function ZombieStateStrike(obj: ZombieActor, rng: Rng,
                                   events?: Events, host?: GameHost): void {
   // Every frame of the strike, before anything else: face the player and
   // record where they are.
-  ActorFacePlayerTarget(obj, eye);
+  ActorFacePlayerTarget(obj);
   const list = AttackListOf(obj);
   if (obj.sub === StrikeSub.Pick) {
     // The first thing sub 0 does, before it draws:

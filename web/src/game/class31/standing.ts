@@ -26,13 +26,14 @@ import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, DamageZone, ThrowerFlag, type ThrowerActor }
   from "../actor";
-import { ActorFacePlayerTarget } from "../actor_turn";
+import { G } from "../globals";
+import { FtolS16 } from "../matrix";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, SecondsToTicks, T } from "../tables";
 import type { CharacterType } from "../../bundle";
-import { vec3, type Vec3 } from "../vec";
+import { VecToAngles, vec3 } from "../vec";
 import { ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
@@ -100,14 +101,21 @@ function ThrowerStrikeEntry(obj: ThrowerActor, index: number) {
  * row, which is what gives `zskamere` the always-connect entries 0, 1 and 3
  * here and the limb-gated 4, 5 and 6 in state 32.
  */
-export function ThrowerStateCloseAndStrike(obj: ThrowerActor, eye: Vec3,
+export function ThrowerStateCloseAndStrike(obj: ThrowerActor,
                                            rng: Rng,
                                            host: GameHost,
                                            events?: Events): void {
   if (obj.sub === 0) {
     ThrowerPickLandingPoint(obj, host, _dest);
     obj.target = { x: _dest.x, y: _dest.y, z: _dest.z };
-    ActorFacePlayerTarget(obj, eye);
+    // `VecToAngles(obj+0x40 - g_camera_eye_x, 0, obj+0x48 - g_camera_eye_z,
+    // &pitch, &obj+0x68)` at `0x0044EAA3..EABC`: the yaw alone, turned to the
+    // gameplay eye. **Not** `ActorFacePlayerTarget`, which the port called
+    // here: that routine also stores the eye into `obj+0x13E4`, so the
+    // landing point just written was overwritten with the eye and the range
+    // test below measured to the camera rather than to the mark.
+    obj.yaw = FtolS16(VecToAngles(obj.pos.x - G.g_camera_eye.x, 0,
+                                  obj.pos.z - G.g_camera_eye.z).yaw);
     // The 0x17 override: set 0's picks, set 2's entries.
     obj.attack = obj.charType === CHAR_ZSKAMERE
       ? ThrowerPickAttackFromSet0(obj, rng.int(10))

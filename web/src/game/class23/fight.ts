@@ -18,6 +18,7 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { GameMode } from "../game_mode";
 import { ActorByAt, G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import { ActorReleaseHitSlot } from "../hit_slots";
 import type { GameHost } from "../host";
 import {
@@ -179,10 +180,12 @@ function Footfall(obj: JudgmentCompanionActor, f: ClassFrame,
  */
 export function Class23FightBesideCompanion(obj: JudgmentCompanionActor,
                                             f: ClassFrame): void {
+  // `g_camera_eye` by address (`0x0049015B`, `0x00490294`): the gameplay eye.
+  const eye = G.g_camera_eye;
   const t = obj.companion;
   const comp = Flier(obj);
-  const dz = obj.pos.z - f.eye.z;
-  const dx = obj.pos.x - f.eye.x;
+  const dz = obj.pos.z - eye.z;
+  const dx = obj.pos.x - eye.x;
   const d = Math.fround(Math.sqrt(dz * dz + dx * dx));
   if (comp?.cls === SpawnClass.Judgment) comp.judgment.companionDist = d;
   Class23TakeShots(obj, f);
@@ -216,7 +219,7 @@ export function Class23FightBesideCompanion(obj: JudgmentCompanionActor,
   }
   switch (obj.sub) {
     case 1: {
-      obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, f.eye.x, f.eye.z);
+      obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, eye.x, eye.z);
       if ((WALK_STEPS[obj.motion] ?? []).includes(cursor)) {
         Footfall(obj, f, SND_WALK1);
       }
@@ -512,7 +515,7 @@ export function SpawnSpriteEffectsTowardEye(pt: Vec3, kind: number,
     scale: { x: 0, y: 0, z: 0 },
     slot: 0, lastSlot: 0,
   };
-  const eye = G.g_camera_block_eye;
+  const eye = CameraBlockEye(G.g_camera_index);
   const a = VecToAngles(eye.x - pt.x, eye.y - pt.y, eye.z - pt.z);
   e.pitch = Math.trunc(a.pitch);
   e.yaw = Math.trunc(a.yaw);

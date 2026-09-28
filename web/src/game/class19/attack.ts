@@ -214,6 +214,8 @@ const THROW_MODE = CarriedPropRoutine.ThrowAtCamera;
  */
 export function Boss4StateThrowHeldProp(obj: Actor, b: Blk,
                                         f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   const recs = Boss4Tables().held_props;
   if (b.sub === 0) {
     const players = G.g_players_in_play;
@@ -265,7 +267,7 @@ export function Boss4StateThrowHeldProp(obj: Actor, b: Blk,
     Boss4Enter(b, Boss4State.ChooseAction);
   }
   if (rec.take < c && c < rec.throw) {
-    ActorTurnTowardXZ(obj, obj.pos.x - f.eye.x, obj.pos.z - f.eye.z, 0x200);
+    ActorTurnTowardXZ(obj, obj.pos.x - eye.x, obj.pos.z - eye.z, 0x200);
   }
 }
 

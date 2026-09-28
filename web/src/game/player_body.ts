@@ -22,6 +22,8 @@
  */
 import { MotionFlag, MOTION_FLAGS_INIT } from "./actor";
 import { G } from "./globals";
+import { MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+         MatrixTransformPoint, MatrixTranslate } from "./matrix";
 import { PLAYER_BODY_AT } from "./player_body_data";
 import { ActorModelScale, rootDelta } from "./root_motion";
 import { T } from "./tables";
@@ -109,20 +111,34 @@ export function PlayerBodySetMotion(b: PlayerBody, motion: number): void {
 
 /**
  * `GameOverPlaceBody` — `FUN_00415A80`. The body's position is a table point
- * pushed through the camera's own matrix -- `T(g_camera_eye) Rz Ry Rx` -- and
- * on the game-over screen that matrix is the identity: `GameOverRunPhase`
- * zeroes the eye and all three angles in phase 0, and the only other writers
- * are camera hooks the fly-over's scene state (0, 0) does not install.
- * `[proved]` So the point is the position.
+ * pushed through the gameplay eye's own matrix. `[proved]`:
+ *
+ * ```
+ * 00415aa2  MatrixLoadIdentity()
+ * 00415abb  MatrixTranslate(g_camera_eye_x, _y, _z)      ; 0x009C71E0..E8
+ * 00415ac6  MatrixRotateZ([0x009c71f4])                  ; roll
+ * 00415ad2  MatrixRotateY(g_camera_yaw_bams)             ; 0x009C71F0
+ * 00415ade  MatrixRotateX(g_camera_pitch_bams)           ; 0x009C71EC
+ * 00415b1d  MatrixTransformPoint((row.x, 0, row.z), &body+0x40)
+ * ```
+ *
+ * On the game-over screen that matrix is the identity: `GameOverRunPhase`
+ * zeroes the eye and all three angles in phase 0 (`0x00460A6E..AA0`), and the
+ * only other writers are camera hooks the fly-over's scene state (0, 0) does
+ * not install. So the point is the position -- here as in the engine, by the
+ * same arithmetic.
  */
 export function GameOverPlaceBody(player: number): void {
   const b = G.g_player_bodies[player];
   if (!b) return;
   const row = T.gameOver?.body_offsets[player - 2 + G.g_game_over_players * 2]
     ?? [0, 0];
-  b.pos.x = row[0];
-  b.pos.y = 0;
-  b.pos.z = row[1];
+  const m = MatIdentity();
+  MatrixTranslate(m, G.g_camera_eye.x, G.g_camera_eye.y, G.g_camera_eye.z);
+  MatrixRotateZ(m, G.g_camera_roll_bams);
+  MatrixRotateY(m, G.g_camera_yaw_bams);
+  MatrixRotateX(m, G.g_camera_pitch_bams);
+  MatrixTransformPoint(m, { x: row[0], y: 0, z: row[1] }, b.pos);
 }
 
 /**

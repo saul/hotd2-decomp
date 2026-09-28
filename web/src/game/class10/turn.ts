@@ -8,7 +8,7 @@
  * written out twice before it did.
  */
 import type { Actor } from "../actor";
-import type { ClassFrame } from "../registry";
+import { G } from "../globals";
 import { CivilianTarget } from "./ops";
 
 /** `CivilianStepTurnToTarget`'s own cap, the literal at `0x0048C8FE`. */
@@ -22,16 +22,19 @@ const CIVILIAN_TURN_CAP = 0x100;
  * point inline, by the same three rules. One copy, because two is how they
  * drift.
  */
-export function CivilianTargetPoint(obj: Actor, f: ClassFrame):
+export function CivilianTargetPoint(obj: Actor):
     { x: number; y: number; z: number } {
   const sub = obj.civ;
   if (!sub) return { x: 0, y: 0, z: 0 };
   if (sub.targetMode >= 0) return sub.target;
+  // Both inline copies read `g_camera_eye` by address -- `0x0048C878..8B3`
+  // here, `0x0048B356..38F` in the step -- the gameplay eye.
+  const eye = G.g_camera_eye;
   if (sub.targetMode === CivilianTarget.Camera) {
-    return { x: f.eye.x, y: f.eye.y, z: f.eye.z };
+    return { x: eye.x, y: eye.y, z: eye.z };
   }
-  return { x: obj.pos.x * 2 - f.eye.x, y: f.eye.y,
-           z: obj.pos.z * 2 - f.eye.z };
+  return { x: obj.pos.x * 2 - eye.x, y: eye.y,
+           z: obj.pos.z * 2 - eye.z };
 }
 
 /**
@@ -66,10 +69,10 @@ export function HeadingError(obj: Actor, to: { x: number; z: number }): number {
  * nearly a minute at ten. `wait_scripted_actors` at block 30 waited behind
  * her the whole time.
  */
-export function CivilianStepTurnToTarget(obj: Actor, f: ClassFrame): void {
+export function CivilianStepTurnToTarget(obj: Actor): void {
   const sub = obj.civ;
   if (!sub) return;
-  ActorTurnTowardPoint(obj, CivilianTargetPoint(obj, f), CIVILIAN_TURN_CAP);
+  ActorTurnTowardPoint(obj, CivilianTargetPoint(obj), CIVILIAN_TURN_CAP);
 }
 
 /**

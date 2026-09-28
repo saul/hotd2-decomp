@@ -61,7 +61,7 @@ import { MatrixGetAngles, type Rot3 } from "../carrier";
 import { MatIdentity, MatCopy, MatrixGetTranslation, MatrixLoadIdentity,
          MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTransformPoint,
          MatrixTranslate, type Mat } from "../matrix";
-import { vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
 import { CameraUpdateHook } from "./driver";
 import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "./path";
@@ -110,6 +110,40 @@ export function CameraBlockViewToWorld(i: number): Mat {
 export function CameraBlockWorldToView(i: number): Mat {
   return i === CAMERA_INDEX_VIEW_ANGLES ? G.g_camera_block2_world_to_view
     : G.g_camera_world_to_view;
+}
+
+/**
+ * `[port-only]` -- `g_camera_blocks + i * 0x1A4 + 0x80` (`0x009A60C0`), camera
+ * block `i`'s eye, as {@link CameraBlockViewToWorld}: how a reader the engine
+ * points at `[g_camera_index * 0x1A4 + 0x9A60C0]` reads it. Handed
+ * `G.g_camera_index`, it is the eye of the block the frame is drawn from --
+ * block 2's under scene state (1, 3), block 0's otherwise. A reader that
+ * names `0x009A60C0` by address reads `G.g_camera_block_eye` whatever the
+ * index, and one that names `0x009C71E0` reads `G.g_camera_eye`, the gameplay
+ * eye; `docs/formats/cam.md` § *Which eye* has the table.
+ */
+export function CameraBlockEye(i: number): Vec3 {
+  return i === CAMERA_INDEX_VIEW_ANGLES ? G.g_camera_block2_eye
+    : G.g_camera_block_eye;
+}
+
+/**
+ * `[port-only]` -- `g_camera_blocks + i * 0x1A4 + 0x90` (`0x009A60D0`), camera
+ * block `i`'s yaw, as {@link CameraBlockEye}: what a reader of
+ * `[g_camera_index * 0x1A4 + 0x9A60D0]` reads.
+ */
+export function CameraBlockYaw(i: number): number {
+  return i === CAMERA_INDEX_VIEW_ANGLES ? G.g_camera_block2_yaw_bams
+    : G.g_camera_block_yaw_bams;
+}
+
+/**
+ * `[port-only]` -- `g_camera_blocks + i * 0x1A4 + 0x8C` (`0x009A60CC`), camera
+ * block `i`'s pitch, as {@link CameraBlockYaw}.
+ */
+export function CameraBlockPitch(i: number): number {
+  return i === CAMERA_INDEX_VIEW_ANGLES ? G.g_camera_block2_pitch_bams
+    : G.g_camera_block_pitch_bams;
 }
 
 /**

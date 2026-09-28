@@ -26,6 +26,7 @@
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { AppState, G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import type { GameHost } from "../host";
 import { vec3, type Vec3 } from "../vec";
 
@@ -157,7 +158,7 @@ export function FishSpawnWaterSplash(obj: Actor, scale: number, kind: number,
 export function WaterSplashUpdate(s: FishWaterSplash): boolean {
   if (s.done) return false;
   s.shown = s.slot;
-  s.shownYaw = G.g_camera_block_yaw_bams;
+  s.shownYaw = CameraBlockYaw(G.g_camera_index);
   s.slot += 1;
   if (s.slot > FISH_SPLASH_LAST_SLOT) s.done = true;
   return true;

@@ -123,6 +123,7 @@ import type { BreakablePlacement } from "../../bundle";
 import { BAMS_TO_RAD_F64 } from "../../core/bams";
 import { SpawnPropHitEffectScaled, SpawnPropHitSpark } from "../effects/sprite";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { GameMode } from "../game_mode";
 import {
   MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale, MatrixTranslate,
@@ -466,7 +467,7 @@ function Type43FirstHits(p: BreakableProp, w: Type43Words, rng: Rng,
     // camera block's heading (`g_camera_block_yaw_bams`, `0x0046CF9C`).
     BreakablePropAwardHit(p.flags, false, rng);
     p.slot = BreakableSlot.Broken;
-    p.yaw = G.g_camera_block_yaw_bams;
+    p.yaw = CameraBlockYaw(G.g_camera_index);
     // `SpawnPropHitSpark(obj, player)` (`FUN_00465860`) -- on the crack only.
     if (p.hitAim) SpawnPropHitSpark(p.hitAim.x, p.hitAim.y, p.z);
     return;

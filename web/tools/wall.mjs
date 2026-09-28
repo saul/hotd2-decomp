@@ -18,6 +18,7 @@ import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ColiTraceSegmentAllSets } from "../src/game/coli.ts";
@@ -143,7 +144,8 @@ const trace = actors.map(({ a }) => [[a.pos.x, a.pos.y, a.pos.z]]);
 const crossings = { selected: 0, level: 0 };
 const total = Number(seconds) * 60;
 for (let n = 0; n <= total; n++) {
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, host, rng, events);
   actors.forEach(({ a, at }, i) => {
     if (crossed(prev[i], a.pos, selected)) {
       crossings.selected++;

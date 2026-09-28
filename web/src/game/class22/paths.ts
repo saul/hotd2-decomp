@@ -62,11 +62,13 @@ const _p: Vec3 = { x: 0, y: 0, z: 0 };
  * T(0, 0, -10)`, into `+0x13C0`. Phase 2's flight is drawn around the viewer.
  */
 export function Class22EvalCameraRelativePath(t: JudgmentTail, host: GameHost,
-                                              eye: Vec3, slot: number,
+                                              slot: number,
                                               frame: number): void {
   const p = host.objectPath?.(slot, frame);
   if (!p) return;
   for (let i = 0; i < 16; i++) _m[i] = i % 5 === 0 ? 1 : 0;
+  // `g_camera_eye`, the three words by address (`0x0049DC03..0E`).
+  const eye = G.g_camera_eye;
   MatrixTranslate(_m, eye.x, eye.y, eye.z);
   MatrixRotateY(_m, G.g_camera_yaw_bams + 0x8000);
   MatrixTranslate(_m, 0, 0, CAMERA_PATH_DEPTH);

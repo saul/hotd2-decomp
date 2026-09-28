@@ -24,6 +24,7 @@ import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
@@ -103,7 +104,8 @@ for (let stage = 1; stage <= 6; stage++) {
     // better -- sub 4 can hand over to `AttackRun` at sub 0 on the same frame.
     let lowest = a.pos.y, playedLimp = false, landedAt = -1, yLanded = a.pos.y;
     for (let f = 0; f < 900; f++) {
-      GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+      SeatHarnessEye(eye);
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
       if (a.motion === LIMP_MOTION) playedLimp = true;
       const flying = landedAt < 0 && a.sub >= 1 && a.sub <= 3
                   && a.state === ZombieState.DelayedLeap;

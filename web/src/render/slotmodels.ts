@@ -584,7 +584,11 @@ export class SlotModelLayer implements System<RenderContext> {
           mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
           mTranslate(_m, 0, 0, lit.stripZ);
           mRotY(_m, -a.yaw); mRotZ(_m, a.roll); mRotX(_m, a.pitch);
-          mRotY(_m, G.g_camera_block_yaw_bams);
+          // `CameraBlockYaw(g_camera_index)`, read rather than called, as
+          // `render/camera.ts` reads the view: the exe indexes the block
+          // (`[ECX*4 + 0x9a60d0]` at `0x004406AD`).
+          mRotY(_m, G.g_camera_index === 2 ? G.g_camera_block2_yaw_bams
+            : G.g_camera_block_yaw_bams);
           this.extra(`t1:${a.at}`, t.stripDrawn, _m, seen);
         }
       }

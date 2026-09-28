@@ -110,6 +110,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { FALLING_CONTAINER_RADIUS, PropRegisterForShotTest }
   from "../class41/shot_test";
 import { T } from "../tables";
@@ -569,7 +570,7 @@ function FallingContainerKnock(p: BreakableProp, rng: Rng,
   BreakablePropAwardHit(p.flags, false, rng);
   events?.emit("prop.cracked", { id: p.id, sound: SFX_FALLING_KNOCKED });
   p.slot = FALLING_SLOT_LOOSE;
-  p.yaw = G.g_camera_block_yaw_bams;
+  p.yaw = CameraBlockYaw(G.g_camera_index);
   // `SpawnPropHitEffectScaled(obj, player, 1.5f)` (`FUN_004666B0`) at the
   // point the shot was aimed, which `combat/shot.ts` left on the prop.
   if (p.hitAim) {

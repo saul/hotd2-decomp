@@ -348,6 +348,19 @@ const ENEMY_GATE_CLASSES: ReadonlySet<number> = new Set<number>([
   SpawnClass.Boss3,                 // 0x45 — head 2 (`INC` 0x00420082/89,
                                     //        `DEC` 0x00421623/2A) and the body
                                     //        (0x00420522/29, 0x0042340C/13)
+  // The two a replay used to rebuild behind a gate, both counted in their
+  // `Init`: `CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` with
+  // a carrier, so it is class 0x30's two `INC`s exactly, and
+  // `RescueTargetInit` (`FUN_00451720`) does both on its straight line.
+  // `registry.ts`'s `ENEMY_CLASSES` has carried 0x18 since stage 3's riders
+  // held its first room; this list is the script's and had not. Left out, a
+  // reload past stage 3's `1/1/40` rebuilt the rider `0xADC` and held every
+  // later gate, and the boat hostage `0x3208` -- whose rescue waits on
+  // `g_enemies_present` -- sobbed in front of a captor already dead.
+  SpawnClass.CarriedZombie,         // 0x18
+  SpawnClass.RankScaledEnemy,       // 0x21 — and its own ways out, which come
+                                    //        before any gate: see
+                                    //        `ClassHandler.outlivedByReplay`
 ]);
 
 /**
@@ -788,6 +801,13 @@ export class Walker {
    * seek is one call, so it is not saved; {@link reset} clears it.
    */
   private civilianLives = new Map<number, CivilianLife>();
+  /**
+   * The route slot a replay left each block by, when the route was a
+   * `branch` -- the `g_script_branch_var` it read. What
+   * {@link retireOutlivedSpawns} hands a class as `armOut`. Filled only while
+   * {@link replaying}; {@link reset} clears it.
+   */
+  private replayArms = new Map<number, number>();
   wait: PendingWait | null = null;
   branch: BranchChoice | null = null;
   finished = false;
@@ -953,6 +973,7 @@ export class Walker {
     this.loadedSlots.clear();
     this.spawns = [];
     this.civilianLives.clear();
+    this.replayArms.clear();
     this.simpleSpawns = [];
     this.shot = null;
     this.wait = null;
@@ -1158,6 +1179,29 @@ export class Walker {
     }
     this.wait = null;
     this.opIndex++;
+    // The camera has run on and a flag may be up: both are ways out a class
+    // tests for itself.
+    this.retireOutlivedSpawns();
+  }
+
+  /**
+   * Retire every listed spawn whose class says the replay has gone past its
+   * own way out -- {@link ClassHandler.outlivedByReplay}. Replay only, for the
+   * reason {@link retireGated} is: in play the object leaves through its own
+   * states, and its marker is what `render/characters.ts` keeps as `spent`.
+   *
+   * Asked after every instruction the replay runs, every wait it steps over
+   * and every block it enters, so a way out is seen the moment the replay
+   * makes it true -- the flag the instruction raised, the camera frame the
+   * wait ran to, the route the block change read -- and never before the
+   * spawn exists to be retired.
+   */
+  private retireOutlivedSpawns(): void {
+    if (!this.replaying) return;
+    this.spawns = this.spawns.filter((s) => {
+      const outlived = g_class_handlers[s.class as SpawnClass]?.outlivedByReplay;
+      return !outlived?.({ ...s, armOut: this.replayArms.get(s.block) });
+    });
   }
 
   /**
@@ -1605,6 +1649,7 @@ export class Walker {
     const pcStep = this.step;
     const pcOp = this.opIndex;
     const note = this.apply(op, quiet);
+    this.retireOutlivedSpawns();
     // An instruction that returned without moving the program counter and
     // with the yield latch up runs again next frame (see `holdHere`). It has
     // not happened yet, so the feed does not show it.
@@ -2016,7 +2061,23 @@ export class Walker {
     else if (route.kind === "branch") next = route.next[this.branchChoice] ?? -1;
     else next = this.block + 1;              // kind 2: fall through
 
-    return this.goToBlock(next);
+    return this.leaveBlock(route.kind, next);
+  }
+
+  /**
+   * The block change both route paths end in, and what a replay learns from
+   * it: which slot of a `branch` the route read. `[port-only]` bookkeeping --
+   * the engine's route read is {@link advanceStepOrRoute}'s and nothing
+   * remembers it -- kept because a class whose way out *is* that write asks
+   * for it ({@link ClassHandler.outlivedByReplay}).
+   */
+  private leaveBlock(kind: string, next: number): boolean {
+    if (this.replaying && kind === "branch") {
+      this.replayArms.set(this.block, this.branchChoice);
+    }
+    const entered = this.goToBlock(next);
+    this.retireOutlivedSpawns();
+    return entered;
   }
 
   /**
@@ -2130,7 +2191,7 @@ export class Walker {
     this.branchChoice = choice;
     this.branch = null;
     const next = route?.next[choice] ?? -1;
-    this.goToBlock(next);
+    this.leaveBlock(route?.kind ?? "branch", next);
   }
 
   tickBranchCountdown(dt: number): void {

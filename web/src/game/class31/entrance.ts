@@ -15,7 +15,8 @@ import { ActorFlag, MotionFlag, ThrowerFlag, type ThrowerActor }
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { MotionOf, SecondsToTicks } from "../tables";
-import { vec3, type Vec3 } from "../vec";
+import { G } from "../globals";
+import { vec3 } from "../vec";
 import { TurnAngleTowardFrames } from "../actor_turn";
 import { ActorSetMotionBlended, ZombieSetMotionIfIdle }
   from "../class30/motion_cue";
@@ -150,7 +151,7 @@ const POUNCE_ROLL_RATE = 0xccc;
  * connect's stance itself; aim at `obj.lookAt.y`, the actor's own tracked
  * point, for the eye's height; and never raise `0x2000`.
  */
-export function ThrowerStateDelayedPounce(obj: ThrowerActor, eye: Vec3,
+export function ThrowerStateDelayedPounce(obj: ThrowerActor,
                                           dt: number, rng: Rng,
                                           host: GameHost,
                                           events?: Events): void {
@@ -178,7 +179,9 @@ export function ThrowerStateDelayedPounce(obj: ThrowerActor, eye: Vec3,
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
     ThrowerLoadAttackArcScript(obj);
     ThrowerPickLandingPoint(obj, host, _dest);
-    _dest.y = eye.y;                      // `g_camera_eye_y`, `0x009C71E4`
+    // `g_camera_eye_y` by address at `0x0044E940`: the gameplay eye, fifteen
+    // under the drawn camera, so the arc lands at the rail's own height.
+    _dest.y = G.g_camera_eye.y;
     ActorArcBegin(obj, _dest, p.frames);
     obj.sub = 2;
     obj.arcPhase = ArcPhase.Windup;

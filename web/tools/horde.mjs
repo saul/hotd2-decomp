@@ -24,6 +24,7 @@ import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { g_class_handlers } from "../src/game/registry.ts";
@@ -158,7 +159,8 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
       console.log(`   override: g_script_flags[${forceFlag}] = 1 at frame ${f}`);
       G.g_script_flags[forceFlag] = 1;
     }
-    GameUpdate(eye, 1 / 60, host, rng, events);
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, host, rng, events);
     G.g_frame_counter; // stepped by GameUpdate
     for (const o of ms) {
       const d = g_class_handlers[0x40]?.debug?.(o);

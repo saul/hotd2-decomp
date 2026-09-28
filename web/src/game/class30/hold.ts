@@ -33,7 +33,7 @@ import { ActorIsOnScreen, AttackClaimRefusal, TryClaimAttackSlot }
 import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
-import { dist2d, type Vec3 } from "../vec";
+import { dist2d } from "../vec";
 import { ActorBodyConditionFromHands } from "./condition";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius, TestApproachRing } from "./ring";
@@ -80,12 +80,12 @@ const HOLD_TURN_RATE = 0x40;
  */
 const ZOMBIE_HOLD_GROAN = 0x1917a9;
 
-export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
+export function ZombieStateHoldAtRange(obj: ZombieActor, rng: Rng,
                                        host: GameHost,
                                        events?: Events): void {
   // Called for its side effect: it refreshes `obj+0x1358`, the queue depth
   // this actor is allowed to sit at.
-  TestApproachRing(obj, eye);
+  TestApproachRing(obj);
   // And immediately after it, in the engine's own order: the body condition is
   // re-derived from the hands. This is the **only** call site of it in the
   // binary, and leaving it out is not a missing detail — it is what let a
@@ -142,8 +142,10 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
   // that is still playing the clip it was authored with.
   const exempt = (obj.flags2
     & (ZombieFlag2.StrikeAnchor | ZombieFlag2.EntryClipPlaying)) !== 0;
+  // The ground distance to `g_camera_eye`, by address (`0x0045578B`,
+  // `0x00455794`) -- the gameplay eye, as every range in this class is.
   const tooClose = charType !== 0 && !exempt
-    && dist2d(obj.pos, eye) < ApproachInnerRadius(obj) - 1.0;
+    && dist2d(obj.pos, G.g_camera_eye) < ApproachInnerRadius(obj) - 1.0;
   if (tooClose) {
     obj.state = ZombieState.BackOff;
     obj.sub = 0;
@@ -235,7 +237,7 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
       && MotionPlayFrame(obj) >= MotionPlayLength(obj) - 2) {
     obj.flags2 &= ~ZombieFlag2.EntryClipPlaying;
   }
-  TurnActorTowardCameraEye(obj, eye, HOLD_TURN_RATE);
+  TurnActorTowardCameraEye(obj, HOLD_TURN_RATE);
 }
 
 /**

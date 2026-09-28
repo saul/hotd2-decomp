@@ -25,6 +25,7 @@
  */
 import { SecondsToTicks } from "./tables";
 import type { Actor } from "./actor";
+import { G } from "./globals";
 import { VecToAngles, bamsWrap, type Vec3 } from "./vec";
 import {
   FtolS16, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -143,9 +144,14 @@ const _p: Vec3 = { x: 0, y: 0, z: 0 };
  *
  * Its only callers are the two in `ZombieStateAttackRun` (`0045559d`,
  * `00455642`), which pass `ftol((bit27 * 1.5 + 1.0) * 416.0)`.
+ *
+ * **The eye is `g_camera_eye`**, read here by address (`0x00409EE0..EFA`) --
+ * the gameplay eye, fifteen under the rail's pose -- and not a parameter. It
+ * used to be handed the drawn camera.
  */
-export function TurnActorTowardCamera(obj: Actor, eye: Vec3, rate: number,
+export function TurnActorTowardCamera(obj: Actor, rate: number,
                                       dt: number): void {
+  const eye = G.g_camera_eye;
   const m = MatIdentity();
   MatrixTranslate(m, eye.x, eye.y, eye.z);
   MatrixRotateY(m, Math.trunc(eye.y));
@@ -157,10 +163,12 @@ export function TurnActorTowardCamera(obj: Actor, eye: Vec3, rate: number,
 /**
  * `TurnActorTowardCameraEye` — `FUN_00409E80`. The same turn with no offset:
  * `VecToAngles(obj+0x40 - g_camera_eye_x, 0, obj+0x48 - g_camera_eye_z)`, then
- * {@link TurnAngleToward} at the caller's rate. `[proved]`
+ * {@link TurnAngleToward} at the caller's rate. `[proved]` -- the two words
+ * by address, `0x00409E91` and `0x00409EA0`.
  */
-export function TurnActorTowardCameraEye(obj: Actor, eye: Vec3,
-                                         rate: number, dt = 1 / 60): void {
+export function TurnActorTowardCameraEye(obj: Actor, rate: number,
+                                         dt = 1 / 60): void {
+  const eye = G.g_camera_eye;
   obj.yaw = TurnAngleTowardFrames(obj.yaw,
     YawOf(obj.pos.x - eye.x, 0, obj.pos.z - eye.z), rate, SecondsToTicks(dt));
 }
@@ -244,8 +252,23 @@ export function AngleWithinTolerance(angle: number, centre: number,
  * offset from it, per permit index, which is why the point is stored on the
  * actor rather than recomputed: the strike's lunge and the retreat both
  * measure against the same remembered spot.
+ *
+ * The one-player arm, which is all the port plays (`[proved]`, the three
+ * words by address at `0x00455F6F..7A`):
+ *
+ * ```
+ * VecToAngles(obj+0x40 - g_camera_eye_x, obj+0x44 - g_camera_eye_y,
+ *             obj+0x48 - g_camera_eye_z, &pitch, &obj+0x68);
+ * obj+0x13E4..EC = g_camera_eye;
+ * ```
+ *
+ * So the remembered point is the **gameplay** eye, fifteen under the drawn
+ * one, and every lunge and retreat measured from it in 3D is measured there.
+ * The height term changes only the pitch, which is discarded; the port hands
+ * `VecToAngles` zero for it.
  */
-export function ActorFacePlayerTarget(obj: Actor, eye: Vec3): void {
+export function ActorFacePlayerTarget(obj: Actor): void {
+  const eye = G.g_camera_eye;
   obj.target.x = eye.x;
   obj.target.y = eye.y;
   obj.target.z = eye.z;

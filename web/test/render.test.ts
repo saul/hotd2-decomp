@@ -1015,6 +1015,330 @@ console.log("\nrigs: the boat the port's actor poses");
   void G;
 }
 
+console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
+            + "camera frame");
+{
+  // `PathRidingPropDraw` (`FUN_00432840`) is stage 1's two burning cars, and
+  // the object is class 0x28's, `game/class28/`. This layer used to pose the
+  // rig itself: both route roots grouped as one ungated object, the first
+  // drawn at `path(min(len, camera frame))` of **whatever camera was
+  // playing** -- sliding along the path extrapolated back from frame 671
+  // before the throw, thrown again by every later camera move past 671, and
+  // drawn from stage load whether or not anything had spawned. Now the
+  // spawn roots are posed from the live actor at their address, one root per
+  // actor, and the route roots are never drawn.
+  const { ActorSpawn } = await import("../src/game/director");
+  const { Rng } = await import("../src/core/rng");
+  const { Quaternion } = await import("three");
+  ResetGameGlobals();
+  const route = (slot: number, length: number) => ({
+    slot, bias: [0, 0, 0] as [number, number, number], cam_paths: [],
+    file: "op_st1", index: slot - 253, duration: 54, length,
+    hold_frame: null, stop_frame: null, note: "",
+  });
+  const RIGS = {
+    rigs: [{ name: "obj_432840", routine: "FUN_00432840", note: "",
+             spawn_class: 0x28, spawn_ats: null,
+             routes: [route(325, 725), route(326, 765)] }],
+    blocked: [], note: "",
+  };
+  const part = (slot: number, pos: [number, number, number],
+                scale: [number, number, number]) => {
+    const g = new Group();
+    g.position.set(...pos);
+    g.scale.set(...scale);
+    g.userData = { hod2_kind: "rig_part", hod2_rig: "obj_432840",
+                   hod2_slots: [`0x${slot.toString(16).padStart(4, "0")}`] };
+    return g;
+  };
+  // Every cel of both loops, one part each, as the rig writer exports them:
+  // the body, then `0x135F..0x136D`, then `0xB67..0xB6E`.
+  const FIRE = Array.from({ length: 15 }, (_, i) => 0x135f + i);
+  const SMOKE = Array.from({ length: 8 }, (_, i) => 0xb67 + i);
+  const rigRoot = (name: string, data: Record<string, unknown>) => {
+    const g = new Group();
+    g.name = name;
+    g.userData = { hod2_kind: "rig", hod2_rig: "obj_432840",
+                   hod2_routine: "FUN_00432840", ...data };
+    g.add(part(0x33, [0, 0, 0], [1, 1, 1]),
+          ...FIRE.map((s) => part(s, [0, 5, 0], [1.5, 2, 1])),
+          ...SMOKE.map((s) => part(s, [0, 0, 12], [7, 7, 7])));
+    return g;
+  };
+  /** The one part of `slots` a root shows, as its slot; -1 for none or two. */
+  const celOf = (r: InstanceType<typeof Obj3D>, slots: number[]) => {
+    const on = r.children.filter((c) => c.visible && slots.includes(
+      Number.parseInt((c.userData.hod2_slots as string[])[0], 16)));
+    return on.length === 1
+      ? Number.parseInt((on[0].userData.hod2_slots as string[])[0], 16) : -1;
+  };
+  const root = new Group();
+  const r325 = rigRoot("obj_432840_325", { hod2_path_slot: 325 });
+  const r326 = rigRoot("obj_432840_326", { hod2_path_slot: 326 });
+  const s0 = rigRoot("obj_432840_spawn000",
+                     { hod2_spawn_at: 24472, hod2_spawn_class: 0x28 });
+  const s1 = rigRoot("obj_432840_spawn001",
+                     { hod2_spawn_at: 24512, hod2_spawn_class: 0x28 });
+  // The same descriptor spawned in a second block: a second record, one
+  // object.
+  const s2 = rigRoot("obj_432840_spawn002",
+                     { hod2_spawn_at: 24472, hod2_spawn_class: 0x28 });
+  root.add(r325, r326, s0, s1, s2);
+  // A real curve, so a root the layer placed on a path is distinguishable
+  // from one it left alone: x is the frame.
+  const ramp = [[0, 0, 1, 1], [2000, 2000, 1, 1]];
+  const flat = (v: number) => [[0, v, 0, 0], [2000, v, 0, 0]];
+  const curve = { channels: { pos_x: ramp, pos_y: flat(-8), pos_z: flat(-497) },
+                  file: "op_st1", index: 72, start: 0, duration: 2000 };
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {}, object_paths: { "325": curve, "326": curve },
+  } as never));
+  // The post-fight cutscene's camera, frame 700 -- inside route 0's throw.
+  const ctx = { walker: { cam: { slot: 50, frame: 700 }, spawns: [] } } as
+    unknown as Parameters<typeof rigs.update>[0];
+  rigs.update(ctx);
+  const shown = () => [r325, r326, s0, s1, s2].filter((r) => r.visible)
+    .map((r) => `${r.name}@${r.position.x}`);
+  check("with no class-0x28 actor nothing is drawn -- not the route roots "
+        + "at another camera's frame 700",
+        shown().length === 0, shown().join(" "));
+
+  const a = ActorSpawn(24472, SpawnClass.PathRidingProp, -1, "car",
+                       { hp: 0 }, new Rng(28));
+  a.visible = true;
+  a.pos.x = -1021.62; a.pos.y = -8.04; a.pos.z = -497.51;
+  a.yaw = 0x1ca6;
+  a.roll = 0x4000;                         // on its side: not the identity
+  G.g_camera_block_eye.x = a.pos.x + 30;
+  G.g_camera_block_eye.y = 0;
+  G.g_camera_block_eye.z = a.pos.z + 40;
+  rigs.update(ctx);
+  check("with one, exactly its first spawn root is drawn, at the actor",
+        shown().length === 1 && s0.visible
+        && s0.position.x === a.pos.x && s0.position.z === a.pos.z,
+        shown().join(" "));
+  root.updateMatrixWorld(true);
+  // `ResetGameGlobals` left `g_frame_counter` at 0: each loop's first cel.
+  const fire = s0.children[1];
+  const smoke = s0.children[1 + FIRE.length];
+  const wp = (o: InstanceType<typeof Obj3D>) =>
+    o.getWorldPosition(new Vector3());
+  const yaw = Math.trunc(Math.atan2(30, 40) * 32768 / Math.PI)
+    * Math.PI / 32768;
+  const f = wp(fire);
+  const sm = wp(smoke);
+  const near = (u: number, v: number) => Math.abs(u - v) < 1e-3;
+  check("before the throw the fire stands 5.0 above the object, whatever "
+        + "the object's roll",
+        fire.visible && near(f.x, a.pos.x) && near(f.y, a.pos.y + 5)
+        && near(f.z, a.pos.z), `${f.x},${f.y},${f.z}`);
+  check("...and the smoke 8.0 above and 12 toward the camera block's eye",
+        smoke.visible && near(sm.x, a.pos.x + 12 * Math.sin(yaw))
+        && near(sm.y, a.pos.y + 8) && near(sm.z, a.pos.z + 12 * Math.cos(yaw)),
+        `${sm.x},${sm.y},${sm.z}`);
+  const up = new Vector3(0, 1, 0).applyQuaternion(
+    fire.getWorldQuaternion(new Quaternion()));
+  check("...both carrying the yaw alone: the fire stands upright",
+        near(up.y, 1), `${up.x},${up.y},${up.z}`);
+  // The eye is `[g_camera_index * 0x1A4 + 0x009A60C0]`: under scene state
+  // (1, 3) the index is 2, and the smoke turns to block 2's eye.
+  G.g_camera_index = 2;
+  G.g_camera_block2_eye.x = a.pos.x - 40;
+  G.g_camera_block2_eye.z = a.pos.z + 30;
+  rigs.update(ctx);
+  root.updateMatrixWorld(true);
+  const yaw2 = Math.trunc(Math.atan2(-40, 30) * 32768 / Math.PI)
+    * Math.PI / 32768;
+  const sm2 = wp(smoke);
+  check("...toward the eye of the block g_camera_index names (block 2)",
+        near(sm2.x, a.pos.x + 12 * Math.sin(yaw2))
+        && near(sm2.z, a.pos.z + 12 * Math.cos(yaw2)),
+        `${sm2.x},${sm2.z}`);
+  G.g_camera_index = 0;
+  // The cel is the exe's: `MOV EAX,[0x009A32A0]; XOR EDX,EDX; MOV ECX,0xF;
+  // DIV ECX; ADD EDX,0x135F` at `0x0043292C`, and `MOV EDX,[0x009A32A0];
+  // AND EDX,7; ADD EDX,0xB67` at `0x004329A7` -- `g_frame_counter`, not the
+  // scene tick class 0x41 type 53 reads for the same two loops.
+  const cels: string[] = [];
+  let posed = true;
+  for (const n of [0, 22, 100, 101]) {
+    G.g_frame_counter = n;
+    G.g_scene_tick_counter = n + 3;         // must not be the one read
+    rigs.update(ctx);
+    root.updateMatrixWorld(true);
+    const f = celOf(s0, FIRE);
+    const k = celOf(s0, SMOKE);
+    cels.push(`${n}:${f.toString(16)}/${k.toString(16)}`);
+    if (f !== 0x135f + n % 15 || k !== 0xb67 + (n & 7)) posed = false;
+    // ...and whichever cel it is stands where the first one stood.
+    const on = s0.children.find((c) => c.visible
+      && (c.userData.hod2_slots as string[])[0] === `0x${f.toString(16)}`);
+    const at = on ? wp(on) : null;
+    if (!at || !near(at.x, a.pos.x) || !near(at.y, a.pos.y + 5)) posed = false;
+  }
+  check("each loop draws one cel, `0x135F + g_frame_counter % 15` and "
+        + "`0xB67 + (g_frame_counter & 7)`, posed as the first",
+        posed, cels.join(" "));
+  check("...so the drawn cels at two counters differ",
+        cels[1].split(":")[1] !== cels[0].split(":")[1], cels.join(" "));
+  G.g_frame_counter = 0;
+  G.g_scene_tick_counter = 0;
+  rigs.update(ctx);
+  const tail = (a as unknown as { pathProp?: { launched: number } }).pathProp;
+  check("the actor carries class 0x28's tail", tail !== undefined);
+  if (tail) tail.launched = 1;
+  rigs.update(ctx);
+  check("once obj+0x1320 is up the sprites are not drawn and the body is",
+        s0.visible && celOf(s0, FIRE) === -1 && celOf(s0, SMOKE) === -1
+        && s0.children.slice(1).every((c) => !c.visible)
+        && s0.children[0].visible);
+  a.despawned = true;
+  rigs.update(ctx);
+  check("...and once the actor is killed nothing is", shown().length === 0,
+        shown().join(" "));
+  ResetGameGlobals();
+}
+
+console.log("\nrigs: class 0x28's sprite cels draw in their own meshes' state -- "
+            + "translucent, depth-writing, nearest first");
+{
+  // `PathRidingPropDraw` (`FUN_00432840`) sets no render state of its own
+  // around the two sprites: from `0x0043288C` to its `RET` at `0x004329C8` it
+  // calls MatrixStackPush/Pop, MatrixTranslate, MatrixRotateY, MatrixScale,
+  // VecToAngles, NoOpStub and `AssetDrawSlot` (`0x00432941`, `0x004329B7`) --
+  // the plain draw, no alpha -- and nothing else. So each cel composites by
+  // its own mesh's words through `TranslatePvr2StateToD3D`: ISP `0x83000000`
+  // (LESSEQUAL, depth write on) and TSP `0x94002453` for the 0x135F loop,
+  // `0x9400241B` for the 0xB67 loop -- SRCALPHA / INVSRCALPHA, pass bits
+  // clear so the translucent pass, alpha-tested at ALPHAREF 1. Then
+  // `RenderCommandCompare` (`FUN_004A8A20`) draws the nearer command first,
+  // and the 0xB67 cel stands 12.0 toward the eye: it draws before the 0x135F
+  // cel and writes depth wherever its texel alpha is at least 1, so the
+  // column is cut away round every flame. That pale fringe is the exe's
+  // picture, not a port fault; these checks hold the state that makes it.
+  //
+  // The loops are named by slot, not by what they show: the cel commit
+  // called 0x135F "fire" and 0xB67 "smoke", and the textures read the other
+  // way round (a 32x64 near-black column, a 64x64 flame) -- `[likely]`, from
+  // the pictures and nothing else.
+  const { prepareDrawCommands, RenderCommandOrder, ALPHA_REF }
+    = await import("../src/render/draw_order");
+  const { ActorSpawn } = await import("../src/game/director");
+  const { Rng } = await import("../src/core/rng");
+  const { CustomBlending, LessEqualDepth, OneMinusSrcAlphaFactor,
+          SrcAlphaFactor } = await import("three");
+  ResetGameGlobals();
+  const RIGS = {
+    rigs: [{ name: "obj_432840", routine: "FUN_00432840", note: "",
+             spawn_class: 0x28, spawn_ats: null, routes: [] }],
+    blocked: [], note: "",
+  };
+  // The parts as the bundle carries them (`stage1.glb`, `obj_432840_*`): one
+  // single-primitive node per cel, so the node is the mesh and the command,
+  // its material carrying the mesh header's words and its geometry the
+  // header's sphere.
+  const assoc = new Map<InstanceType<typeof Obj3D>, { nodes?: number }>();
+  let node = 0;
+  const cel = (slot: number, tsp: string, sphere: number[],
+               pos: [number, number, number], scale: [number, number, number]) => {
+    const g = new PlaneGeometry(1, 1);
+    g.userData = { hod2_chain_index: 0, hod2_model: 0, hod2_sphere: sphere };
+    const mat = new MeshBasicMaterial({ transparent: true, depthWrite: false });
+    mat.userData = { pvr2: { isp_tsp_instruction: "0x83000000",
+                             tsp_instruction: tsp } };
+    const m = new Mesh(g, mat);
+    m.position.set(...pos);
+    m.scale.set(...scale);
+    m.userData = { hod2_kind: "rig_part", hod2_rig: "obj_432840",
+                   hod2_slots: [`0x${slot.toString(16).padStart(4, "0")}`] };
+    assoc.set(m, { nodes: node++ });
+    return m;
+  };
+  const LOOP_135F = Array.from({ length: 15 }, (_, i) =>
+    cel(0x135f + i, "0x94002453", [0, 38.037654, 0, 40.183147],
+        [0, 5, 0], [1.5, 2, 1]));
+  const LOOP_B67 = Array.from({ length: 8 }, (_, i) =>
+    cel(0xb67 + i, "0x9400241B", [0, 1.6, 0, 2.262742],
+        [0, 0, 12], [7, 7, 7]));
+  const body = new Group();
+  body.userData = { hod2_kind: "rig_part", hod2_rig: "obj_432840",
+                    hod2_slots: ["0x0033"] };
+  const s0 = new Group();
+  s0.name = "obj_432840_spawn000";
+  s0.userData = { hod2_kind: "rig", hod2_rig: "obj_432840",
+                  hod2_routine: "FUN_00432840", hod2_spawn_at: 24472,
+                  hod2_spawn_class: 0x28 };
+  s0.add(body, ...LOOP_135F, ...LOOP_B67);
+  const root = new Group();
+  root.add(s0);
+  // What `StageScene.load` does to the whole stage glTF, rigs included,
+  // before anything else sees it.
+  prepareDrawCommands(root, assoc as never);
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {}, object_paths: {},
+  } as never));
+  const a = ActorSpawn(24472, SpawnClass.PathRidingProp, -1, "car",
+                       { hp: 0 }, new Rng(28));
+  a.visible = true;
+  a.pos.x = -1021.62; a.pos.y = -8.04; a.pos.z = -497.51;
+  G.g_camera_block_eye.x = a.pos.x + 30;
+  G.g_camera_block_eye.y = a.pos.y + 10;
+  G.g_camera_block_eye.z = a.pos.z + 40;
+  const ctx = { walker: { cam: { slot: 47, frame: 191 }, spawns: [] } } as
+    unknown as Parameters<typeof rigs.update>[0];
+  rigs.update(ctx);
+  root.updateMatrixWorld(true);
+  const on135f = LOOP_135F.filter((m) => m.visible);
+  const onB67 = LOOP_B67.filter((m) => m.visible);
+  check("one cel of each loop is drawn", s0.visible
+        && on135f.length === 1 && onB67.length === 1,
+        `${on135f.length} + ${onB67.length}`);
+  type M = InstanceType<typeof MeshBasicMaterial>;
+  const state = (m: InstanceType<typeof Mesh>) => {
+    const t = m.material as M;
+    return `${t.transparent}/${t.blending}/${t.blendSrc}/${t.blendDst}`
+      + `/${t.alphaTest.toFixed(5)}/${t.depthTest}/${t.depthWrite}/${t.depthFunc}`;
+  };
+  const exe = `true/${CustomBlending}/${SrcAlphaFactor}/${OneMinusSrcAlphaFactor}`
+    + `/${(ALPHA_REF / 255).toFixed(5)}/true/true/${LessEqualDepth}`;
+  const drawn = [...on135f, ...onB67];
+  check("both drawn cels are translucent-pass, SRCALPHA/INVSRCALPHA, "
+        + "alpha-tested at ALPHAREF 1 and depth-writing under LESSEQUAL -- "
+        + "their words' state, not the loader's",
+        drawn.length === 2 && drawn.every((m) => state(m) === exe),
+        drawn.map(state).join(" | "));
+  check("...and every cel of both loops carries it, drawn or not",
+        [...LOOP_135F, ...LOOP_B67].every((m) => state(m) === exe));
+
+  // The translucent order, from the eye the sprites turn to.
+  const cam = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  const e = G.g_camera_block_eye;
+  cam.position.set(e.x, e.y, e.z);
+  cam.lookAt(a.pos.x, a.pos.y, a.pos.z);
+  cam.updateMatrixWorld(true);
+  const order = new RenderCommandOrder(cam);
+  order.beginFrame();
+  let id = 0;
+  const item = (o: InstanceType<typeof Obj3D>) => ({
+    id: id++, object: o, groupOrder: 0, renderOrder: 0, z: 0,
+    geometry: null, material: null, program: null, group: null,
+  }) as unknown as Parameters<typeof order.compare>[0];
+  if (on135f.length === 1 && onB67.length === 1) {
+    const [c135f, cB67] = [on135f[0], onB67[0]];
+    const first = [item(c135f), item(cB67)].sort(order.compare)[0].object;
+    check("the 0xB67 cel, 12 toward the eye, is drawn before the 0x135F "
+          + "cel: RenderCommandCompare puts the nearer command first",
+          first === cB67,
+          `keys ${order.key(cB67).depth.toFixed(2)} / `
+          + `${order.key(c135f).depth.toFixed(2)}`);
+  }
+  a.despawned = true;
+  rigs.update(ctx);
+  ResetGameGlobals();
+}
+
 console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
 {
   // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2
@@ -3095,7 +3419,7 @@ console.log("\nthe player's character survives its own op 10:");
   const rng = new Rng(1);
   const events = new Events();
   for (let i = 0; i < 4; i++) {
-    ScriptedHumanoidUpdate(a, { eye: { x: 0, y: 6, z: 0 }, dt: 1 / 60, rng,
+    ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng,
                                 host: NULL_HOST, events });
   }
   chars.update({} as never);
@@ -4215,6 +4539,81 @@ console.log("\na skinned part's joints stay current under a hidden node:");
   updateVisibleMatrixWorld(scene);
   check("...and a hidden part costs its joints nothing",
         new V3().setFromMatrixPosition(joint.matrixWorld).x === 10);
+}
+
+// The boss-name banner's flight, drawn. Reported as "the camera no longer
+// yaws when showing the boss banner" at stage 1 block 14's `wait_frames 300`.
+// `BossIntroBannerUpdate` (`FUN_00437AC0`) writes camera block 0's eye and
+// look-at off its path and no angle, and the view is built from angles -- but
+// stage 1's banner runs under scene state (1, 3), whose installer
+// `CameraInstallViewAngles` (`FUN_004039D0`) makes `g_camera_index` 2, and
+// `EvtRunQueuedActionsSyncViewBlock` aims block 2 at block 0's look-at every
+// frame. So the camera drawn turns with the flight while block 0's heading
+// stays put. Driven through the engine's own frame order -- the camera
+// actor's task, then the banner's -- and read off the three.js camera the
+// rig places.
+{
+  console.log("\nthe boss-name banner's flight, drawn:");
+  const { CameraRig } = await import("../src/render/camera");
+  const { CameraActorTick } = await import("../src/game/camera/actor");
+  const { CheckpointResetCamera } = await import("../src/game/camera/actions");
+  const { CamBlockSetAnglesFromLookAt, CameraPoseBlock }
+    = await import("../src/game/camera/path");
+  const { BossBannersTick, BossIntroBannerSpawn }
+    = await import("../src/game/boss_banner");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { PerspectiveCamera } = await import("three");
+  type HostT = import("../src/game/host").GameHost;
+  type CamPathT = import("../src/game/camera/curve").CamPath;
+  type V = { x: number; y: number; z: number };
+  ResetGameGlobals();
+  // Judgment's record (`0x00570EC8`) flies path 48. This one circles the
+  // origin at radius 20, a quarter turn over the slide, looking at it.
+  const R = 20;
+  const orbit = {
+    pose: (t: number, _roll: boolean,
+           out: { eye: V; target: V; roll: number }) => {
+      const a = (t * Math.PI / 2) / 0x50;
+      out.eye.x = R * Math.sin(a); out.eye.y = 0; out.eye.z = R * Math.cos(a);
+      out.target.x = 0; out.target.y = 0; out.target.z = 0;
+      out.roll = 0;
+      return out;
+    },
+  };
+  const host: HostT = {
+    ...NULL_HOST,
+    camPath: (slot) => (slot === 48 ? orbit as unknown as CamPathT : null),
+  };
+  CheckpointResetCamera();               // every block opens in (1, 3)
+  G.g_camera_block_eye = { x: 0, y: 0, z: R };
+  G.g_camera_block_target = { x: 0, y: 0, z: 0 };
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
+                              0);
+  CameraActorTick();
+  const yaw0 = G.g_camera_block_yaw_bams;
+  G.g_script_flags[2] = 1;
+  const banner = BossIntroBannerSpawn(0x00570ec8);
+  for (let f = 0; f < 60; f++) {
+    CameraActorTick();
+    BossBannersTick(host);
+  }
+  CameraActorTick();                     // the next frame's view: last pose
+  const cam = new PerspectiveCamera();
+  new CameraRig().draw({ walker: {}, camera: cam } as unknown as RenderContextT);
+  const e = G.g_camera_block_eye;
+  const fwd = cam.getWorldDirection(new Vector3());
+  const want = new Vector3(-e.x, -e.y, -e.z).normalize();
+  const deg = (fwd.angleTo(want) * 180) / Math.PI;
+  check("the banner is flying, a long way round from where it started",
+        banner.frame > 50 && Math.abs(e.x) > 15, `${banner.frame} ${e.x}`);
+  check("under (1, 3) the drawn camera turns with the flight onto its "
+        + "look-at, and sits at its eye",
+        deg < 0.05 && cam.position.distanceTo(new Vector3(e.x, e.y, e.z)) < 1e-3,
+        `${deg.toFixed(3)} deg off; drawn at ${cam.position.toArray()
+          .map((v) => v.toFixed(2)).join()}`);
+  check("...while camera block 0 keeps the heading it had",
+        Math.abs(G.g_camera_block_yaw_bams - yaw0) <= 1,
+        `${yaw0} -> ${G.g_camera_block_yaw_bams}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

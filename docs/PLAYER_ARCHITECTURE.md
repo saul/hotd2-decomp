@@ -864,9 +864,9 @@ web/src/
                   protocol.ts, bytes.ts, hash.ts. No DOM, no three
   game/         the port. The only rules that matter live here.
     class10/ class11/ class14/ class16/ class17/ class19/ class20/ class21/
-    class22/ class23/ class24/ class25/ class30/ class31/ class33/ class40/
-    class41/ class43/ class44/ class45/ class46/ class51/ class52/ class53/
-    class60/ class61/
+    class22/ class23/ class24/ class25/ class28/ class30/ class31/ class33/
+    class40/ class41/ class43/ class44/ class45/ class46/ class51/ class52/
+    class53/ class60/ class61/
                   one module per class. Each calls `registerClass` itself.
                   The ones that write the actor struct's tail words directly
                   also have a `state.ts`: the discriminated union's arm for

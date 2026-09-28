@@ -32,6 +32,8 @@ import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
+import { makePathRidingPropTail, type PathRidingPropTail }
+  from "./class28/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
@@ -1629,6 +1631,14 @@ export interface ActorBase {
    * snapshot and is what every other cross-actor reference here uses. `-1`
    * once the actor has stepped off, which is `CarriedZombieUpdate18` putting
    * the plain zombie update back.
+   *
+   * That makes this field the task pointer as well, which the engine keeps
+   * apart (`*obj`, read at one site, `0x0045B999`). Four routines swap it:
+   * the step off, the two leaps and `ZombieStateRetireOffScreen`'s carrier
+   * arm. The first three bake the carrier into the pose first; the retire
+   * does not, so the one frame it still draws -- the engine's in the
+   * carrier's matrix, the swap taking effect at the next update, which is the
+   * despawn -- `render/` places at the carrier-relative point.
    */
   carrierAt: number;
   /**
@@ -2323,6 +2333,8 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
+  | (ActorBase & { cls: SpawnClass.PathRidingProp;
+                   pathProp: PathRidingPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
@@ -2338,7 +2350,7 @@ export type Actor =
       | SpawnClass.Boss3
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
-      | SpawnClass.HordeSpawner> });
+      | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2612,6 +2624,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Vehicle) {
     return { ...head, cls, vehicle: makeVehicleTail() };
+  }
+  if (cls === SpawnClass.PathRidingProp) {
+    return { ...head, cls, pathProp: makePathRidingPropTail() };
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };

@@ -26,7 +26,7 @@ import { SpawnBoneHitSprite } from "../effects/blood";
 import { ReleaseAttackSlot } from "../combat/permits";
 import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength } from "../tables";
 import type { GameHost } from "../host";
-import type { Vec3 } from "../vec";
+import { G } from "../globals";
 import { ApproachInnerRadius } from "./ring";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieState } from "./states";
@@ -77,7 +77,7 @@ enum Sub {
   Done = 4,
 }
 
-export function ZombieStateReleaseBodyCreature(obj: ZombieActor, eye: Vec3,
+export function ZombieStateReleaseBodyCreature(obj: ZombieActor,
                                                rng: Rng,
                                                host: GameHost): void {
   if (obj.sub === Sub.Arm) {
@@ -95,7 +95,9 @@ export function ZombieStateReleaseBodyCreature(obj: ZombieActor, eye: Vec3,
     // 0x9A2BE0]` with `EAX = obj+0x131F * 3`, and `g_enemy_approach_rings`
     // is the inner of the three floats of each ring set — 25 units for most
     // characters, 37 for set 2, against the outer's 51. The distance is to
-    // the **camera**, in xz, like every other range test in this class.
+    // the gameplay eye, in xz, like every other range test in this class:
+    // `g_camera_eye_z` and `_x` by address, `0x00458004` and `0x0045800D`.
+    const eye = G.g_camera_eye;
     const dx = obj.pos.x - eye.x;
     const dz = obj.pos.z - eye.z;
     if (Math.sqrt(dx * dx + dz * dz) < ApproachInnerRadius(obj)) {

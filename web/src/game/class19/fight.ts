@@ -116,6 +116,8 @@ export function Boss4PickApproachAttack(obj: Actor, b: Blk,
  */
 export function Boss4StateApproachCamera(obj: Actor, b: Blk,
                                          f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   if (b.sub === 0) {
     Boss4PickApproachAttack(obj, b, f);
     switch (b.phase) {
@@ -144,10 +146,10 @@ export function Boss4StateApproachCamera(obj: Actor, b: Blk,
     return;
   }
   if (!(b.flags & Boss4Flag.Transition)) {
-    ActorTurnTowardXZ(obj, obj.pos.x - f.eye.x, obj.pos.z - f.eye.z,
+    ActorTurnTowardXZ(obj, obj.pos.x - eye.x, obj.pos.z - eye.z,
                       TURN_STEP);
   }
-  if (Boss4DistanceXZ(obj, f.eye.x, f.eye.z) < b.f84) {
+  if (Boss4DistanceXZ(obj, eye.x, eye.z) < b.f84) {
     Boss4Enter(b, b.w74 & 0xff);
     // `MOV byte ptr [obj+0x121], AL` inside the pick: whom the attack goes
     // for. The boss holds no permit by it -- see `Boss4Handler.onDeadSweep`.
@@ -185,7 +187,9 @@ const PHASE3_EXIT_TURN_Z = -1720.0; // 0xC4D70000
  * `FILD hp; FILD maxhp; FMUL frac[phase]; FCOMPP` -- "floor < hp".
  */
 export function Boss4StateChooseAction(obj: Actor, b: Blk,
-                                       f: ClassFrame): void {
+                                       _f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   if (b.sub === 0) {
     if (b.phase === 8 || b.phase === 17) {
       Boss4BlendUnlessPlaying(obj, Boss4Clip.ChooseLast, 3);
@@ -198,7 +202,7 @@ export function Boss4StateChooseAction(obj: Actor, b: Blk,
   }
   const p0 = b.arena[0];
   ActorTurnTowardXZ(obj, p0.x - obj.pos.x, p0.z - obj.pos.z, TURN_STEP);
-  const d = Boss4DistanceXZ(obj, f.eye.x, f.eye.z);
+  const d = Boss4DistanceXZ(obj, eye.x, eye.z);
   const floorBelow = Boss4PhaseFloor(obj.maxHp, b.phase) < obj.hp;
 
   switch (b.phase) {
@@ -313,13 +317,15 @@ const FACE_TOLERANCE = 0x800;
  * `char+0x37` bit 0 is the base track's fade, the port's `obj.fadeFrom`.
  */
 export function Boss4StateFaceCamera(obj: Actor, b: Blk, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   if (!(b.flags & Boss4Flag.Transition) && obj.fadeFrom === null) {
-    ActorTurnTowardXZ(obj, obj.pos.x - f.eye.x, obj.pos.z - f.eye.z,
+    ActorTurnTowardXZ(obj, obj.pos.x - eye.x, obj.pos.z - eye.z,
                       FACE_TURN_STEP);
   }
   if (obj.flags & ActorFlag.NoCameraTrack) return;
-  const err = ActorHeadingErrorTo(obj, obj.pos.x - f.eye.x,
-                                  obj.pos.z - f.eye.z);
+  const err = ActorHeadingErrorTo(obj, obj.pos.x - eye.x,
+                                  obj.pos.z - eye.z);
   if (Math.abs(err) >= FACE_TOLERANCE) return;
   if (!ActorPointIsAhead(obj, b.arena[1])) return;
   Boss4PickApproachAttack(obj, b, f);
@@ -517,6 +523,8 @@ const CHAINSAW_NEAR = 150.0;
  * ```
  */
 export function Boss4StateWalkToPoint(obj: Actor, b: Blk, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   if (b.sub === 0) {
     obj.flags |= ActorFlag.NoCameraTrack;
     Boss4BlendUnlessPlaying(obj, Boss4Clip.Idle, 10);
@@ -533,7 +541,7 @@ export function Boss4StateWalkToPoint(obj: Actor, b: Blk, f: ClassFrame): void {
     b.flags |= Boss4Flag.Transition;
   }
   if (!(b.flags & Boss4Flag.Footfalls)
-      && Boss4DistanceXZ(obj, f.eye.x, f.eye.z) < CHAINSAW_NEAR) {
+      && Boss4DistanceXZ(obj, eye.x, eye.z) < CHAINSAW_NEAR) {
     b.flags |= Boss4Flag.Footfalls;
     Boss4ChainsawOn(b, f.events);
   }
@@ -571,7 +579,9 @@ const WITHDRAW_TURN_Z = -1990.0;
  * frozen, and `Boss4AdvanceArenaWaypoint`'s phase-14 arm thaws it.
  */
 export function Boss4StateWithdrawAndAdvancePhase(obj: Actor, b: Blk,
-                                                  f: ClassFrame): void {
+                                                  _f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   const advance = (): void => {
     b.flags &= ~Boss4Flag.Fenced;
     obj.flags |= ActorFlag.ShotImmune;
@@ -581,7 +591,7 @@ export function Boss4StateWithdrawAndAdvancePhase(obj: Actor, b: Blk,
   };
   switch (b.sub) {
     case 0: {
-      const d = Boss4DistanceXZ(obj, f.eye.x, f.eye.z);
+      const d = Boss4DistanceXZ(obj, eye.x, eye.z);
       if (d < WITHDRAW_NEAR) {
         Boss4BlendUnlessPlaying(obj, Boss4Clip.Choose, 10);
         b.sub = 2;
@@ -596,9 +606,9 @@ export function Boss4StateWithdrawAndAdvancePhase(obj: Actor, b: Blk,
       return;
     }
     case 1:
-      ActorTurnTowardXZ(obj, obj.pos.x - f.eye.x, obj.pos.z - f.eye.z,
+      ActorTurnTowardXZ(obj, obj.pos.x - eye.x, obj.pos.z - eye.z,
                         TURN_STEP);
-      if (Boss4DistanceXZ(obj, f.eye.x, f.eye.z) < WITHDRAW_MID) {
+      if (Boss4DistanceXZ(obj, eye.x, eye.z) < WITHDRAW_MID) {
         b.sub = 3;
         advance();
       }
@@ -606,7 +616,7 @@ export function Boss4StateWithdrawAndAdvancePhase(obj: Actor, b: Blk,
     case 2: {
       const p0 = b.arena[0];
       ActorTurnTowardXZ(obj, p0.x - obj.pos.x, p0.z - obj.pos.z, TURN_STEP);
-      if (Boss4DistanceXZ(obj, f.eye.x, f.eye.z) > WITHDRAW_MID) {
+      if (Boss4DistanceXZ(obj, eye.x, eye.z) > WITHDRAW_MID) {
         Boss4BlendUnlessPlaying(obj, Boss4Clip.Idle, 10);
         b.sub = 3;
         advance();

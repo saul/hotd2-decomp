@@ -31,6 +31,7 @@ import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, PlayerState, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { vec3 } from "../src/game/vec.ts";
@@ -131,7 +132,8 @@ for (const [name, stage, block, step, entry] of CASES) {
       live.set(o.at, o);
     }
     peak = Math.max(peak, bs.length);
-    GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
     if (state0 === null) state0 = [...G.g_player_state];
     for (const [at, o] of live) {
       if (!o.despawned) continue;

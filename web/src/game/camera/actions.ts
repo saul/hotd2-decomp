@@ -164,8 +164,8 @@ function EvtActionSceneState11(): void {
 
 /**
  * `EvtActionSetGlobal14` — `FUN_004037E0`: `g_camera_index = operand`. The
- * block `UpdateSceneViewAndLight` nods and draws. Both shipped sites pass 0,
- * the only block the port has.
+ * block `UpdateSceneViewAndLight` nods and draws. Both shipped sites pass 0;
+ * the other value the index takes, 2, is `CameraInstallViewAngles`'s.
  */
 function EvtActionSetGlobal14(): void {
   G.g_camera_index = G.g_evt_action_operands[0];

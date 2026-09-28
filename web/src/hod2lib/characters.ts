@@ -43,13 +43,15 @@ import { Boss4SwapSlots } from "../game/class19/slots";
 import type { Character } from "./charbuild";
 import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
          CLASS20_IDLE_MOTIONS, CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS,
-         bake, humanoidMotionIds, introFor, motionFor,
+         bake, humanoidModelCommands, humanoidMotionIds, introFor, motionFor,
          BOSS3_CLIPS, BOSS4_CLIPS, FROG_CLIPS } from "./charmotion";
 import { class31MotionIds, class31Tables } from "./class31";
 import { class14Tables } from "./class14";
-import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
-         difficultyTables, PART_SPHERE_FALLBACK_TYPES, partSphereRows,
-         playerDamage, reactionGroups, STAND_AND_THROW_STATES } from "./combat";
+import { boneEffectSlot, boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT,
+         deathMotions, difficultyTables, HIT_STEPS,
+         PART_SPHERE_FALLBACK_TYPES, partSphereRows, PLAYER_HAND_VARIANTS,
+         playerDamage, playerHandSlots, reactionGroups,
+         STAND_AND_THROW_STATES } from "./combat";
 import * as colilib from "./coli";
 import * as degraded from "./degraded";
 import * as evtlib from "./evt";
@@ -1202,6 +1204,35 @@ async function class22SubActorPlacement(stage: Stage, tables: ExeTables,
   return w;
 }
 
+/**
+ * The asset slots a class-0x25 program's `op 9` and `op 16` can write into a
+ * bone's draw record, resolved as `ScriptedHumanoidUpdate` (`FUN_004842A0`)
+ * resolves them.
+ *
+ * `op 9` stores `g_player_hand_slots[3*a + mode]` unconditionally. In Original
+ * Mode an `a` of 0 or 1 is replaced by `g_original_character[a]`, whose one
+ * writer, `ResetOriginalModeLoadout` (`FUN_0048A0D0`), stores the player
+ * index -- so that is row `a` again, and one row per command covers both
+ * modes. `op 16` stores the character's effect-table entry `6*a + b` only
+ * when it is above 2: 0, 1 and 2 are the table's control codes and the
+ * command leaves the bone alone for them.
+ */
+export function humanoidModelSlots(tables: ExeTables, evt: evtlib.EvtFile,
+                                   rec: Spawn, charType: number): number[] {
+  const hand = playerHandSlots(tables);
+  const out: number[] = [];
+  for (const [op, mode, a, b] of humanoidModelCommands(evt, rec)) {
+    if (op === 9) {
+      const s = hand[a * PLAYER_HAND_VARIANTS + mode];
+      if (s !== undefined && s > 0) out.push(s);
+    } else {
+      const s = boneEffectSlot(tables, charType, a * HIT_STEPS + b);
+      if (s > 2) out.push(s);
+    }
+  }
+  return out;
+}
+
 export interface ResolvedCharacters {
   chars: Map<number, Character>;
   placements: Placement[];
@@ -1795,6 +1826,14 @@ export async function resolveForStage(
     // has none is not merely undrawn -- its `op 1` mode 2 wait on the clip's
     // last frame can never fire, so the VM parks for the rest of the stage.
     if (cls === 0x25) entryClips.push(...humanoidMotionIds(evt, rec));
+    // ...and the models its `op 9` and `op 16` put on a bone. Each is a slot
+    // the skeleton may not name -- the hand another character holds, a
+    // wound -- and the swap clones by slot, so they ride the hidden template.
+    if (cls === 0x25) {
+      for (const s of humanoidModelSlots(tables, evt, rec, res.charType)) {
+        c.heldSlots.add(s);
+      }
+    }
     // Class 0x20's four idles -- `OneHitTargetInit` picks between them with
     // `rand() & 3`, so all four have to exist before the draw is made -- and
     // the clip `OneHitTargetUpdate` cues the frame the actor is shot.
@@ -2021,6 +2060,9 @@ export function charactersJson(chars: Map<number, Character>,
     player: playerDamage(),
     bone_zones: tables !== null ? boneZones(tables) : [],
     part_spheres: tables !== null ? partSpheres(tables, chars) : {},
+    // `g_player_hand_slots` -- class 0x25's `op 9` reads it at run time,
+    // because in Original Mode the row is a global's and not the command's.
+    player_hand_slots: tables !== null ? playerHandSlots(tables) : [],
     class31: tables !== null ? class31Tables(tables) : {},
     // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
     // round tables. See `class14.ts`.

@@ -95,6 +95,7 @@
  */
 import type { Events } from "../../core/events";
 import { G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import {
   MatrixRotateX, MatrixRotateY, MatrixTranslate,
 } from "../matrix";
@@ -195,8 +196,9 @@ export function LiftUpdate(p: BreakableProp, events?: Events): void {
   if (PropExpireByStepLifetime(p)) return;
 
   if (ScriptFlagUp(LiftFlag.RideCamera)) {
-    // `FLD float; FSUB float; FSTP float [ESI+0x1a0]`.
-    p.y = Math.fround(G.g_camera_block_eye.y - LIFT_RIDE_DROP);
+    // `FLD float [index * 0x1A4 + 0x9A60C4]` (`0x0046A38C`) -- the eye of the
+    // block `g_camera_index` names; `FSUB float; FSTP float [ESI+0x1a0]`.
+    p.y = Math.fround(CameraBlockEye(G.g_camera_index).y - LIFT_RIDE_DROP);
   }
 
   if (ScriptFlagUp(LiftFlag.OpenNear)) {

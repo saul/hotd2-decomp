@@ -163,7 +163,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x18` | `CarriedZombieInit18` (`FUN_0045CD60`) | 3 | **A zombie that rides a carrier.** The Init is `EnemyZombieInit` plus `obj+0x13B0 = g_civilian_carrier`, so the actor *is* a class-0x30 zombie -- same tail, same 54-state machine, same counters -- whose descriptor position is relative to the carrier. `CarriedZombieUpdate18` (`FUN_0045CD90`) pushes `Translate; RotX; RotZ; RotY` off the carrier around the whole ordinary update. Two exits: while the camera is on path `tail+0x0C` and **before** frame `tail+0x0E` (`JGE` past the arm at `0x0045CE07`), it is sent to state `0x2E` from the state at `tail[3]`, and reaching state 7 sub 1 with `obj+0x1330 == 2` bakes the carrier transform into the position and puts the plain `EnemyZombieUpdate` back -- the zombie stepping off. The three script spawns are stage 3 block 0 step 6 on the boat above, and civilians' captors are class 0x18 too (3072, 29136), character type 5 (`znnick`). Its update runs `EnemyZombieUpdate` and so `ZombieOnShot`, which is how a shot rider dies. Its initial clip is class 0x30's, 0x3BC — without that `MOTION_RULES` row the exporter emitted the spawns as markers and no rider was ever built. When its script ends it enters its descriptor's attack state (`tail[3]`), and the class's own cue picks between two outcomes: short of the cue frame it holds aboard facing the camera (`ZombieStateHoldOnCarrier`, state 46, `FUN_0045CFC0`); past it, it leaps off (`ZombieStateLeapOffCarrierForward`, 47, `FUN_0045D120`, or aimed at a mark on the bank, `ZombieStateLeapOffCarrierAtMark`, 48, `FUN_0045D500`), baking the carrier's matrix into its own pose with `CarrierBakeWorldPose` (`FUN_0045D920`). The cue fires while `g_cam_path_frame < tail+0x0E`, not after it. Stage 2 block 16's boat rider (evt `0xA174`, state 47) is the fourth spawn. **Ported** (`game/class18/`, `game/class30/carrier_rider.ts`); the same carrier transform serves `CivilianUpdateOnCarrier` (`FUN_0048B140`), which is the seven civilians whose `obj+0x11C` is non-zero. | `[proved]` |
 | `0x22` | `Class22Init` (`FUN_0049B0D0`) | 4 | **JUDGMENT's flier, stage 1's boss and stage 5's re-appearance.** Character type `0x45` (literal; the tail's byte `+0x00` is unread), plus a character-type-`0x46` sub-actor at `obj+0x13B0` seated on node 1 every frame. `tail+0x01` is the variant and picks the table base `obj+0x1310` is relative to (`g_class22_states`, `0x00598000`): **0** stage 1 block 0's cutscene cameo (rides `op_st1` 0x100..0x102, waits `g_script_flags[0xF8]`, no counters); **1** stage 1 blocks 14/16 (banner, ride-in on `op_st1` 0x103, fight, death raises **`g_script_flags[3]`** at `0x0049CC95`); **2** stage 5 block 1 (descent on `op_st5` 0x17F, fight, death raises **`g_script_flags[0]`** at `0x0049CC85`); **3** only in `advevtbl.bin`. Variants 1/2 spawn the class-0x23 companion from the nested descriptor at `tail+0x10` and fight in two phases: 300 hit points, phase 1 riding `op_st1` paths 0x104..0x13F in the companion's frame down to `tail+0x0E` (90), phase 2 flying camera-relative paths 0x140..0x144. Its own damage model (`Class22ChargeShots`: 30 a hit, 25 with both players attackable, 120/10 points, 1500 for the kill), `BossHpBarSpawn(320, 35)` and `g_boss_hp_fraction` every fight frame. **Ported** (`game/class22/`, all four variants), drawn by `render/characters/judgment.ts` (object rotation order 5, the sub-actor's seat, node 1's two extra models) and registered for the shot test at the exe's two sites. See [`docs/re/boss-judgment.md`](../re/boss-judgment.md). | `[proved]` |
 | `0x23` | `Class23Init` (`FUN_0048FD90`) | 3 | **JUDGMENT's walker, the flier's companion.** (Two of the three are nested descriptors no spawn opcode names, the third is Training's.) Character type `0x44` (literal), 90 hit points it never loses outside Training. Spawned only by class 0x22's `SpawnFromDescriptor(tail+0x10)` (stage 1 `0x61AC` subtype 0, stage 5 `0x14E4` subtype 1) and directly by `trnevtbl.bin` block 9 (subtype 2). Walks at the camera by root motion, strikes with `PlayerTakeDamage(p, 1, 4)`, and every hit it takes adds 1 to the flier's `obj+0x132C` (`Class23TakeShots`) -- the only way it hurts the flier. Holds both enemy counters from spawn; collapses (alive -1, then present -1) the frame the flier's hit points fall to its own, which is the flier entering phase 2. **Ported** (`game/class23/`) for subtypes 0 and 1, with the landing ring (`Class23LandingRingUpdate`) drawn by `render/slotmodels.ts`; Training's subtype 2 is read but not ported, because no bundle carries `trnevtbl.bin`. See [`docs/re/boss-judgment.md`](../re/boss-judgment.md). | `[proved]` |
-| `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. | `[proved]` |
+| `0x27`, `0x28` | `004329D0`/`00432610` | 2/6 | **Path-riding vehicles/props**; `0x27` swaps model and lights a flame at path frame `0xBE`. `0x28` is `PathRidingPropUpdate` (`FUN_00432610`), stage 1's two burning cars: `spawn_placed` (opcode 9, no tail) in blocks 5, 11 and 14 with `obj+0x11C` 0 and 1, the index into `g_class28_route_table` (`0x00589AE0`, `{s16 op_ slot, s16 freeze frame}`: `{0x145, 671}`, `{0x146, 667}`, `{0x149, 0}`, `{0x14A, 0}`). `obj+0x1312` 0 writes `obj+0x13F0 = 0x33`, `obj+0x1320 = 0` and poses the object once at `CamEvalObjectPath6(slot, freeze)`; 1 launches (`obj+0x1320 = 1`) the first frame `g_active_cam_path == 0x2F` and `freeze <= g_cam_path_frame`; 2 `ActorKill`s once `g_cam_path_length[slot] <= g_cam_path_frame` (725, 765), with no camera test; while launched the pose is the path at `g_cam_path_frame`. In `g_app_state` 10 the first frame instead copies a literal pose from `g_class28_fixed_poses` (`0x0055DD18`) and installs `PathRidingPropFixedPoseUpdate` (`0x00432810`, killed on camera path 8). `PathRidingPropDraw` (`0x00432840`) draws slot `0x33` under the pose and, until the launch, two camera-facing sprite loops. **Ported** (`game/class28/`), drawn by `render/rigs.ts` from the actor. | `[proved]` |
 | `0x20` | `OneHitTargetInit` (`FUN_00448ED0`) | 36 | **The one-hit target.** A skinned actor — all 36 are character type 7, `char_adv00.bin` — that **dies to any single hit**: nothing in the class subtracts from `obj+0x11C`, so the branch on `obj+0x34` bit 3 is the whole damage model. Scores like the combat classes — 10 a bone, 120 + `g_head_combo_bonus` on bone 2, 80 for the kill — then plays motion 988, holds its last frame and sinks 0.04 a frame for 120 frames before despawning. Not an enemy: the Init increments no counter, so no `wait_enemies_alive` gate sees one. Un-shot it is removed when the camera reaches `tail+0x02` at frame `tail+0x04`. `obj+0x130C` is a sub-type: 0 stands (7 spawns), 1 spins ±0x40 BAMS a frame with `obj+0x11C` as the direction (5), 2 is clamped into an x/z box at `tail+0x08`..`+0x14` and turns 0x100 away at each wall (24). Motion comes from `tail+0x06`, and **0 there means `g_class20_idle_motions[rand() & 3]`**. **Ported** (`game/class20/`). | `[proved]` |
 | `0x2A` | `FUN_00432D40` | 4 | **Dead class** — the whole handler is `JMP ActorKill`. | `[proved]` |
 | `0x60` | `ChapterCardInstall` (`FUN_004342E0`) | 8 | **The chapter card**, and the actor `wait_script_flag 0xF8` waits for. Placed by `spawn_simple` (0x0A), not by a placement descriptor: its whole record is `{class 0x60, hp 0}` in `comevtbl.bin` at `0x00977234`, so it has no position at all. An installer first — `g_GameMode == 3` and `g_app_state == 0x0B` each swap in a different update — then a two-sub card: sub 0 seats the lights and the eight text slots at `0x007DCBA0` and latches `obj+0x11C = 0xB4`, sub 1 draws and counts it down, and at zero it raises **`g_script_flags[0xF8]`** at `0x004348C1` and `ActorKill`s. That one instruction is the only literal writer of flag 248 in the image. A pad press (`g_pad_state` bit 2) cuts the dwell short once it is below `0xA0`, and bit `0x20000` cuts it at any time (`0x00434802`–`0x00434826`: the dwell is set to 1 and the decrement straight after takes it to zero). While it is up, bit `0x20` of `g_screen_furniture_flags` is set, and `RegionDrawResidentSet`, `ScriptedHumanoidDraw`, `SetPiecePropDrawAndTick`, `St1VehicleUpdate` and `Class22CutsceneHoldUntilChapterCard` all test it — the card is a full screen with the world stopped behind it. **Ported** (`game/class60/`) — the lifetime, the flag and the furniture bit (`OR AL, 0x20` at `0x0043436B` in sub 0 and in both installer arms, `AND AL, 0xDF` at `0x004348C7` after the flag); the card itself is screen furniture the player does not draw, and by the user's decision the port takes the `0x20000` skip on every card, so the flag is up on the card's first update — and bit `0x20` goes up and down inside that one update, as it does in the exe for a player who skips on the first frame, so no reader ever sees it. | `[proved]` |
@@ -712,7 +712,7 @@ six stages reach carry a literal frame.
 block**:
 
 ```
-tail+0x00  s8   character type   (Boss Mode remaps 0x39/0x3A to the player's)
+tail+0x00  s8   character type   (Original Mode remaps 0x39/0x3A through g_original_character)
 tail+0x02  s16  removal: cam path, or a script-flag index
 tail+0x04  s16  removal: cam frame threshold
 tail+0x08  u32  a model handle
@@ -736,7 +736,7 @@ reach decode with every opcode in `0..18` or `-1`.
 | 3 | set the motion, with a blend | 195 |
 | 14 | set the draw mode | 155 |
 | 0 | wait, and record which condition released it | 145 |
-| 9 | swap the model in a hand, from `0x004EC9E0` | 114 |
+| 9 | bone 5's draw slot from `g_player_hand_slots` (`0x004EC9E0`) — see below | 117 |
 | 10 | skip an arm unless the player count matches | 100 |
 | 1 | as 0, with the mark set to 1 | 88 |
 | -1 | leave the VM for the idle routine | 69 |
@@ -744,23 +744,77 @@ reach decode with every opcode in `0..18` or `-1`.
 | 11 | ride an `op_` object path | 24 |
 | 13 | `PlaySoundId` | 14 |
 | 8 | set the position | 13 |
-| 17 | hand the object to another routine | 12 |
+| 17 | by mode: install one of three routines (0, 1, 4), or spawn a sprite and run on (2, 3) — see below | 12 |
 | 2 | set the motion | 10 |
-| 16 | swap one bone's draw slot | 8 |
+| 16 | blood on bone `a`, then its draw slot from the effect table — see below | 8 |
 | 6 | stop turning, or face the camera | 8 |
 | 7 | face a point once | 4 |
 | 5 | turn by a fixed amount over N frames | 1 |
 
-The condition modes opcodes 0, 1 and 4 share: `0` a frame count, `1` the camera
-reaching a path at a frame, `2` a motion frame (`-1` for the clip's last), `3` a
-script flag, `4` "am I closer to this point than I was last frame", `-1`
-unconditional.
+The condition modes: `0` a frame count, `1` the camera reaching a path at a
+frame, `2` the play cursor `obj+0x19C` **equal** to `a` (`-1` for
+`g_motion_play_length - 1`) -- the engine's 60 Hz cursor, not an authored frame:
+`a=66` ships on a 35-frame clip whose play length is 68 -- `3` a script flag,
+`4` "am I **farther** from this point than I was last frame", `-1`
+unconditional. The two switches differ `[proved]`: `op 0`/`op 1` take 0, 1, 2,
+3 and -1 and block on anything else (so no mode 4), and `op 0` never proceeds
+on mode 2 (`CMP BP, BX; JZ` at `0x004843CD` tests the opcode); `op 4` takes 0 to 4 and blocks on -1.
+An opcode outside -1..18 parks the VM (`JA 0x00484a8d` at `0x0048436B`).
 
 **A command that cannot proceed does not advance the cursor.** It falls through
 to the per-frame tail and is retried next frame, so a run of setup commands all
 take effect at once and only a wait costs a frame. `op 11` evaluates its path
 at the **camera's** frame, which is what keeps a scripted actor in step with
 the shot it belongs to.
+
+`op 2` is `ActorSetMotion` and then a write to the **counter** `obj+0x194`: `b`,
+or `rand() % 10` for -1, the same as the Init's `blk+0x06`; its mode 1 clears
+`obj+0x1F8` bit 4 and mode 2 raises it (the Init raises it for `blk+0x02 == 2`).
+`op 3` is `ActorSetMotionBlended(obj+0x194, a, b, mode)` -- `b` the start
+cursor, `mode` the fade length.
+
+**`op 17` is five things by mode** (`0x004849CE`, jump table `0x00484D20`),
+all shipped:
+
+| Mode | What it does | Users |
+|---|---|---|
+| 0 | installs `ScriptedHumanoidFallAndSplash` (`FUN_00484DF0`) and ends the frame: `vel.y -= 0.02` a frame from rest, the freeze raised on the last cursor, and at `y <= -27.9998` a kind-0x61 splash at `(x, -24.9998, z)`, the hit slot freed, `ActorKill` | stage 2's four jetty zombies, evt 43584/43740 (block 16), 55372/55536 (block 20) |
+| 1 | installs `ScriptedHumanoidLaunchAndDrop` (`FUN_00484EA0`): `vel = (x - 231.5, 20)`, then a gravity that grows by 0.027222222 a frame, dead below y = 0 | stage 2 block 37's five, on script flag 95 |
+| 2 | calls `ScriptedHumanoidSpawnFixedImpact` (`FUN_00484F50`): kind 0x34 at `(-999.5, 3.24, -1296.2)`, yaw `0xC000`, and runs on | stage 2 evt 65768, 66004, three each |
+| 3 | kind 0x41 at `(-189.3, -24.9, -1505.0)` in evt block 9, `(-1264.0, -24.9, -1353.0)` elsewhere, faced by yaw, and runs on | stage 2 evt 21948, 42264, twice each |
+| 4 | `vel.y = -0.40833333`, installs `ScriptedHumanoidFallTimed` (`FUN_00484F90`): the same gravity step, dead past 200 frames | stage 6 evt 18820 |
+
+The three installed routines run no removal test and never read the command
+block again. A mode above 4 (or negative) steps past the command and ends the
+frame. Ported in `game/class25/`.
+
+**`op 9` and `op 16` write a bone's draw record, and nothing else** `[proved]`
+(`0x00484739`, `0x00484972`). Both run on into the next command in the same
+frame.
+
+* `op 9` stores `g_player_hand_slots[3*row + mode]` (`s16`, `0x004EC9E0`) into
+  `obj+0x4DC`, bone 5's `+0x00`, unconditionally. `row` is `a`, except in
+  Original Mode (`g_GameMode == 1`), where an `a` of 0 or 1 is
+  `g_original_character[a]` (`0x009A2242 + p*0x14`) -- which its one writer,
+  `ResetOriginalModeLoadout`, sets to the player index, so the row is the same.
+  The table is ten rows of three, one per character the byte can name (0..7
+  are types 0x39..0x40, 8 is 0x21, 9 is 0x34), and `PlayerBodySetHandSlot`
+  (`FUN_00416810`) is its other reader. Each character's own skeleton slot
+  for bone 5 is in its row (variant 1 for rows 0-3, variant 0 for row 4).
+  117 commands in 114 programs, in all six stages, name rows 0 to 4; stage 3
+  block 11's James takes row 0's variant 2 (`0x1592`) for the closing scene.
+* `op 16` calls `SpawnBloodSpray(obj, a, 0.75)` and then reads the character's
+  effect table (`g_pBoneEffectSlots`, `0x004C7160`) at `6*a + b`, storing it
+  into bone `a`'s record only when it is above 2 -- 0, 1 and 2 are the table's
+  control codes. It is **not** `ActorSwapDamagedPart`: no `NoPartSwap` test,
+  no hit sphere, no step counter, no zone bit. 8 commands, all in stage 2's four
+  jetty zombies (type 0xF, `znebi2`): 43584 and 55372 take the head, `0x1BFA`
+  and then `0x1BFB`; 43740 and 55536 take bone 3, `0x1C00`, then the head.
+
+The bundle carries the hand table as `characters.player_hand_slots`, and every
+slot either command can write rides the character's hidden template
+(`humanoidModelSlots` in `web/src/hod2lib/characters.ts`);
+`tools/verify_attachments.py` check 6 holds both to the exe.
 
 ## Two name tables, not none
 

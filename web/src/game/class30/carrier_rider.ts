@@ -17,10 +17,12 @@
  * ```
  *
  * so a rider whose script ends **before** the camera cue holds on the boat in
- * state 46 for good, and one whose script ends after it leaps (47, or 48 at a
- * point). Stage 2's boat rider (evt `0xA174`) mauls its civilian while the
- * boat is still on its way to the wall and so stays aboard, turning to face
- * the camera, until it is shot. The port had none of the three: the default
+ * state 46 until the cue frame itself and then leaps (47, or 48 at a point),
+ * and one whose script ends after it leaps at once. Stage 2's boat rider (evt
+ * `0xA174`) mauls its civilian while the boat is still on its way to the wall
+ * and so stays aboard, turning to face the camera, until camera path 78
+ * reaches frame 630 -- `0x276`, the same number as the ride frame its boat
+ * strikes the wall on. The port had none of the three: the default
  * arm sent it to `AttackRun` in the carrier's frame, where it walked off
  * across the canal in carrier-relative coordinates — 1,660 units from the
  * camera and unhittable — and stage 2 block 16 step 12's `wait_enemies_alive`
@@ -39,7 +41,7 @@ import { SpawnSpriteEffect } from "../effects/sprite";
 import { ActorByAt, G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionPlayFrame, MotionPlayLength, MotionRowOf } from "../tables";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieFlag2 } from "../actor";
 import { ZombieState } from "./states";
@@ -94,26 +96,54 @@ function turnTowardInCarrier(obj: ZombieActor, x: number, y: number,
  *
  * Sub 0 blends to the actor's own idle — row 0 of
  * `g_class30_motion_rows` for its body condition, the clip
- * `ZombieStateApproach` walks on — and remembers it at `obj+0x1320`; sub 1
- * turns toward the camera eye, taken into the carrier's frame, at `0x68` a
- * frame; later subs only re-blend to the remembered clip. **No exit**: the
- * actor stays on the carrier until it is shot.
+ * `ZombieStateApproach` walks on — remembers it at `obj+0x1320`, and runs on
+ * into sub 1 (the `INC` at `0x0045D022` is followed by sub 1's first
+ * instruction). Sub 1 turns toward the camera eye, taken into the carrier's
+ * frame, at `0x68` a frame -- and then **leaves on the camera cue**:
+ *
+ * ```
+ * 0045d0af  CALL MatrixStackPop           ; Ghidra: no-return, and the body ends
+ * 0045d0b4  MOVSX EAX, word [EBP+0xc]     ; EBP = obj+0x1390, the tail
+ * 0045d0b8  CMP [g_active_cam_path], EAX ; JNZ out
+ * 0045d0c5  MOVSX ECX, word [EBP+0xe]
+ * 0045d0c9  CMP [g_cam_path_frame], ECX  ; JNZ out
+ * 0045d0d1  state = (s8)[EBP+3]; sub = 0  ; the attack state
+ * 0045d0e6  if (!(obj+0x34 & 0x40000000) && obj+0x1B4 != obj+0x1320)
+ *               blend(obj+0x1320, 0, 10)  ; every sub ends here
+ * ```
+ *
+ * `CarriedZombieUpdate18` sends a rider here while the camera is **short** of
+ * `tail+0x0E`; this sends it on to its attack state on the frame the camera
+ * **reaches** it. So a rider whose maul ends early holds on the boat facing
+ * the camera and leaps on its cue, and one whose maul ends late leaps at once.
+ * Everything after the pop was `L35`'s: the port read the pseudocode, called
+ * this state "no exit, the actor stays on the carrier until it is shot", and
+ * stage 3 block 0's `0xADC` stood on its boat through the crash.
  */
-export function ZombieStateHoldOnCarrier(obj: ZombieActor, eye: Vec3,
+export function ZombieStateHoldOnCarrier(obj: ZombieActor,
                                          dt: number): void {
   if (obj.sub === 0) {
     const m = MotionRowOf(obj)[0] ?? 0;
     if (obj.motion !== m) ActorSetMotionBlended(obj, m, 0, 0x14);
     obj.sub += 1;
     obj.zom.scriptMotion = obj.motion;
-  } else if (obj.sub !== 1) {
-    if ((obj.flags & ActorFlag.Reacting) === 0
-        && obj.motion !== obj.zom.scriptMotion) {
-      ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
-    }
-    return;
   }
-  turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt);
+  if (obj.sub === 1) {
+    // `g_camera_eye` by address, all three words (`0x0045D06D`..`0x0045D078`).
+    const eye = G.g_camera_eye;
+    turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt);
+    // The same three tail fields the wrapper's cue reads, compared equal.
+    const cue = obj.class18;
+    if (cue && G.g_active_cam_path === cue.cue_path
+        && G.g_cam_path_frame === cue.cue_frame) {
+      obj.state = cue.from_state;
+      obj.sub = 0;
+    }
+  }
+  if ((obj.flags & ActorFlag.Reacting) === 0
+      && obj.motion !== obj.zom.scriptMotion) {
+    ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
+  }
 }
 
 /**
@@ -123,7 +153,7 @@ export function ZombieStateHoldOnCarrier(obj: ZombieActor, eye: Vec3,
  * halving both instead.
  */
 function LeapOffCarrierFlight(obj: ZombieActor, flagFrame: number,
-                              knockOnWood: boolean, eye: Vec3, dt: number,
+                              knockOnWood: boolean, dt: number,
                               host: GameHost | undefined,
                               events: Events | undefined): void {
   obj.vel.y += obj.accY;
@@ -172,7 +202,7 @@ function LeapOffCarrierFlight(obj: ZombieActor, flagFrame: number,
         obj.flags2 |= ZombieFlag2.CollideWorld;
       }
     }
-    TurnActorAwayFromPoint(obj, eye, LANDED_TURN_RATE, dt);
+    TurnActorAwayFromPoint(obj, G.g_camera_eye, LANDED_TURN_RATE, dt);
     return;
   }
   // `MatrixGetAngles` of the pose, then half the pitch and roll back through
@@ -186,13 +216,13 @@ function LeapOffCarrierFlight(obj: ZombieActor, flagFrame: number,
 }
 
 /** Sub 3 of both leaps: face the camera until the landing clip ends. */
-function LeapOffCarrierLanded(obj: ZombieActor, eye: Vec3, dt: number): void {
+function LeapOffCarrierLanded(obj: ZombieActor, dt: number): void {
   const len = MotionPlayLength(obj);
   if (MotionPlayFrame(obj) === len - 1) {
     obj.state = ZombieState.AttackRun;
     obj.sub = 0;
   }
-  TurnActorAwayFromPoint(obj, eye, LANDED_TURN_RATE, dt);
+  TurnActorAwayFromPoint(obj, G.g_camera_eye, LANDED_TURN_RATE, dt);
 }
 
 /**
@@ -221,7 +251,7 @@ function LeapOffCarrierRelease(obj: ZombieActor, frame: number): boolean {
  * `-0.109`; sub 2 flies and lands; sub 3 faces the camera out and goes to
  * `AttackRun`.
  */
-export function ZombieStateLeapOffCarrierForward(obj: ZombieActor, eye: Vec3,
+export function ZombieStateLeapOffCarrierForward(obj: ZombieActor,
                                           dt: number, host?: GameHost,
                                           events?: Events): void {
   const h = ZombieScriptForState(obj)?.head;
@@ -245,15 +275,16 @@ export function ZombieStateLeapOffCarrierForward(obj: ZombieActor, eye: Vec3,
         obj.vel.y = h.vy ?? 0;
         obj.sub += 1;
       }
+      const eye = G.g_camera_eye;           // `0x0045D232`..`0x0045D23E`
       turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt, c);
       return;
     }
     case 2:
-      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, false, eye, dt, host,
+      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, false, dt, host,
                            events);
       return;
     case 3:
-      LeapOffCarrierLanded(obj, eye, dt);
+      LeapOffCarrierLanded(obj, dt);
       return;
   }
 }
@@ -268,7 +299,7 @@ export function ZombieStateLeapOffCarrierForward(obj: ZombieActor, eye: Vec3,
  * Aboard it turns toward that point rather than the camera, and a landing on
  * surface `0x35` knocks.
  */
-export function ZombieStateLeapOffCarrierAtMark(obj: ZombieActor, eye: Vec3,
+export function ZombieStateLeapOffCarrierAtMark(obj: ZombieActor,
                                                  dt: number, host?: GameHost,
                                                  events?: Events): void {
   const h = ZombieScriptForState(obj)?.head;
@@ -292,15 +323,17 @@ export function ZombieStateLeapOffCarrierAtMark(obj: ZombieActor, eye: Vec3,
         obj.accY = g;
         obj.sub += 1;
       }
-      turnTowardInCarrier(obj, pt[0], eye.y, pt[2], RIDER_TURN_RATE, dt, c);
+      // The mark on the bank, at the height of `g_camera_eye_y` (`0x0045D627`).
+      turnTowardInCarrier(obj, pt[0], G.g_camera_eye.y, pt[2], RIDER_TURN_RATE,
+                          dt, c);
       return;
     }
     case 2:
-      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, true, eye, dt, host,
+      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, true, dt, host,
                            events);
       return;
     case 3:
-      LeapOffCarrierLanded(obj, eye, dt);
+      LeapOffCarrierLanded(obj, dt);
       return;
   }
 }

@@ -24286,3 +24286,673 @@ sprint change (`30a0ebf0`), which alters which strike a shot zombie picks and
 so which poses show up in a given run; it was not that. A measurement that
 refreshes the state it measures agrees with any claim about it -- `L69`'s
 shape, one layer further in.
+
+
+## 2026-09-28 -- zombies' heads always pitched up: the head aim read the lens
+
+Reported as "zombies heads are now always pitched up". The cause is in the
+head aim's own commit, `d274af2b` (merged `39a7065e`), not a later one:
+`ActorAimHeadAtCamera` passed `ClassFrame.eye` to `ActorHeadAimAngles`, which
+added the exe's 15.0 to it. `ClassFrame.eye` is `ctx.view.eye`, the lens --
+the camera the renderer drew -- and the exe's routine reads `g_camera_eye`
+(`0x009C71E0..E8`) in both branches and nothing else (`MOV`s at
+`0x00453DA3..0x00453DAE`, `FLD`s at `0x00453E66`/`0x00453E7B`/`0x00453E8E`;
+its one argument is `pt`) `[proved]`. `g_camera_eye` is the gameplay eye,
+which the path hooks write as `pose.y - 15.0` (`0x004C4398`), so the exe's
+`+ 15` lands the target back on the lens; the port's landed it fifteen above
+the camera. At 39a7065e the port had no gameplay eye at all -- `GameSystem`
+copied the lens into `G.g_camera_eye` -- so reading `G` then would have been
+wrong the same way; since the camera-faithful merge the hooks write it, and
+only the head aim was still reading the frame's copy of the lens. The doc
+comment on `ActorHeadAimAngles` had said the two "coincide on a path"; they
+differ by exactly the fifteen.
+
+**Bisected numerically, not by eye.** A driven page (`?stage=1&block=1&
+mode=play&drive=1&seed=1`, 900 frames, every 15th sampled) read every
+class-0x30 actor's `headPitch` and the world point of its record. At
+`39a7065e` (on a bundle that commit's exporter wrote) the mean aimed pitch
+was -6333 BAMS, -34.8 degrees; at `58c0c60f` -6323, -34.7 -- the same fault,
+with 22 of 104 samples identical to the unit. After the fix +415 (+2.3), and
+the miss against the pitch that looks into the lens falls from 37.0 degrees
+to 0.3. At frame 285 the nearest zombie, ten units off, had its head thrown
+back 58 degrees at the ceiling; after, it looks into the camera.
+
+**The suspects that were not it.** (1) The hit-sphere gate in
+`ActorBuildSkinnedModel` (`629832ca`): `SkeletonWalkNode` does zero the
+centre as well as the radius when the row's slot is not the node's -- `XOR
+EBP, EBP` at `0x004107EE`, then `MOV [ESI+0x78/0x84/0x80/0x7C], EBP` at
+`0x00410876..0x00410885` `[proved]` -- so the port's gate is right, and stage
+1's zombies carry bone 2's row anyway (`[0, 0.5, 0.35]`, radius 1.3 in the
+page). `SkeletonEmitNode` writes `+0x68 = MatrixTransformPoint(top, +0x7C)`
+at `0x0041168A..0x004116C9` `[proved]`, the record the aim reads. (2)
+`host.cameraMatrices`: the record's world point came back at head height
+(y 22.6 against a lens at 21), so the round trip was sound.
+
+**And a second, smaller fault in the same routine.** The record the aim reads
+is in the view of the frame that drew it, and the aim reads it back through
+this frame's `g_camera_blocks`, so in the exe it moves with the camera for one
+frame. The port took it through this tick's world-to-view -- since
+`3a28137a` that is the matrix the camera actor built this tick, before the
+head aim ran, and before that it was the renderer's, the same at both ends --
+so it always came back as exactly the posed point. `HeadAimEndDraw` now keeps
+the view its frame's draw used (`HeadAimWords.headRecordView`, port-only) and
+`HeadAimBeginDraw` takes the record through it. Under a degree at the speeds
+the rails move, but it is what the engine computes.
+
+Two checks in `port.test.ts`, both seen failing on a mutant that restored the
+old reads (pitch -3040 where 0 is right, record z 60 where 50 is): a head
+level with the lens settles level when the eye is written by
+`CameraHoldEyeTick` rather than by hand (`L49`), and a camera that backs off
+ten between two frames leaves the record where the first view put it. The
+existing fixture set `G.g_camera_eye` to the lens by hand, which is the one
+arrangement under which the fault cannot show; it now says so.
+
+**Open, not touched:** `ClassFrame.eye` is the lens for every class. Where
+an exe routine that the port hands `f.eye` actually reads `g_camera_eye`,
+the port is fifteen high there too; x and z agree, so turns and ground
+ranges cannot show it, but a height or a 3D distance to the eye could.
+`[open]` -- not audited here.
+
+
+## 2026-09-28 -- the boss banner's camera stopped turning: cutscenes are drawn from camera block 2
+
+Reported as "the camera no longer yaws when showing the boss banner", at
+`?stage=1&block=14&step=1&op=52&frame=830` -- JUDGMENT's tarot cards, on
+block 14's `wait_frames 300` after its last `cam_play`. Measured in the
+headless page with `__hotd2Drive`: at `96e4e31b` (main before the camera
+merge) the drawn forward swung from `(-0.57, 0.37, -0.74)` to
+`(-0.90, 0.12, 0.42)` across the banner; at `6706e323` (the merge of
+fix/camera-faithful) it held `(-0.97, 0.17, 0.16)` for all 300 frames while
+the banner's look-at swept round the boss. The regressing change is
+`3a28137a` ("the view from angles"): `UpdateSceneViewAndLight` built the view
+from **camera block 0's** angles and `render/camera.ts` drew
+`G.g_camera_view_to_world`, block 0's, on the claim written beside
+`g_camera_index` in `globals.ts` -- "every shipped write is 0 -- the only block
+the port has".
+
+It is not. `CameraInstallViewAngles` (`FUN_004039D0`), the installer of scene
+state (1, 3), is `MOV dword ptr [0x009c6f00], 0x2` at `0x004039D5`, and
+`functions.tsv` had said so, `[proved]`, the whole time. Every block's
+checkpoint enters (1, 3), so every cutscene is drawn from **block 2**, which
+`EvtRunQueuedActionsSyncViewBlock` refills at the head of every frame with
+block 0's eye and aims at block 0's **look-at**. The banner writes block 0's
+eye and look-at off its own path and no angle -- that reading was right --
+so block 0 keeps its heading, and the drawn block turns to the path's target
+a frame later. Before the camera became two tasks the port drew
+`lookAt(block eye, block target)` with no angles at all, which happened to be
+block 2's view. The nod was on the wrong block too: `UpdateSceneViewAndLight`
+nods only `g_camera_index`'s block (`CMP EBP, [0x009c6f00]` at `0x00401F4E`),
+so under (1, 3) block 0 is never nodded and its pitch does not creep --
+the port's had crept from 1614 to 1790 BAMS over the banner.
+
+Fixed: the (1, 3) cell writes the index (`CameraInstallViewAngles` in
+`camera/hooks.ts`); `UpdateSceneViewAndLight` nods the indexed block and
+builds block 2's two matrices (`g_camera_block2_view_to_world` `0x009A6388`,
+`..._world_to_view` `0x009A6348`); `CameraBlockViewToWorld` and
+`CameraBlockWorldToView` (`camera/view.ts`) read "block `i`" for the two
+blocks the port keeps; the
+host's view seams (`app/systems.ts`), the draw, `PropMatrixClearRotation` and
+type 76's third door read the indexed block; the seek's reseat syncs block 2
+under (1, 3). `CameraFromViewAngles` stays on block 0: it pushes `0x9a6040`
+by address. After: the drawn forward follows the banner's aim one frame late,
+about 77 degrees of yaw over the 300 frames, and block 0 holds 18042/1614.
+`render.test.ts` "the boss-name banner's flight, drawn" fails 66.4 degrees off
+on the old tree; of five new `port.test.ts` checks, three -- the index, the
+nod, the drawn view -- fail there.
+
+**Wrong turns.** Reading only the writers first, I got as far as "the exe does
+not turn the camera either": the banner calls no `CamBlockSetAnglesFromLookAt`,
+its callers are all inactive under a held driver, no writer of `0x009A60CC..D4`
+runs, and the view is built from angles. Every step of that was true. The
+step missing was the **reader**: which block `MatrixStackSetTopFromArray`
+puts on the stack, and that needs every writer of the index. An xref list and
+the `MOV [0x009c6f00], reg` forms found only zeroes; the byte pattern
+`C7 05 00 6F 9C 00` -- a store of an immediate -- found the 2. The existing
+port test "leaves the block's heading alone, so the view keeps it" was
+asserting the true half of that argument; it is reworded, and still passes.
+
+**Left open.** About thirty readers under `game/` and one in `render/` take
+block 0's eye or yaw where the exe reads `[... + g_camera_index * 0x1A4]`
+(the carrier strip's `0x004406AD` is `[ECX*4 + 0x9a60d0]`). Under (1, 3) they
+agree with block 2 except while something writes block 0's look-at without its
+angles, and several carry the old "0 in every shipped write" claim in a
+comment (`class41/items.ts`, `type62.ts`, `type72.ts`, `original_item.ts`,
+`draw_only.ts`, `class46/index.ts`). `type72.ts` is the one that could change
+play: by its own comment the exe reads the block's frame through the index,
+and block 2's `+0x110` is never written. `[open]`, handed on as its own sweep.
+
+
+## 2026-09-28 -- stage 1's burning cars: class 0x28, seated once, thrown once
+
+Reported as "the cars that the boss at the end of stage 1 pushes out of the
+way start in the wrong place. also occasionally the cars repeat their 'move
+out of the way' arc". The cars are **class 0x28**, `PathRidingPropUpdate`
+(`FUN_00432610`, the `{0x28, 0x00432610}` row of the class table at
+`0x005933F8`), drawn by `PathRidingPropDraw` (`0x00432840`, created in the
+database: Ghidra had no function there, and its body stops at the first
+`MatrixStackPop`, L35). Two descriptors, `24472` and `24512`, placed by
+`spawn_placed` in blocks 5, 11 and 14 with `obj+0x11C` 0 and 1.
+
+`[proved]` from the listing (`0x00432610`..`0x0043280F`): a switch on
+`obj+0x1312`. 0 writes `obj+0x13F0 = 0x33`, `obj+0x1320 = 0`, poses the object
+**once** at `CamEvalObjectPath6(g_class28_route_table[obj+0x11C])` -- slot
+`0x145` at frame 671, `0x146` at 667, the paths' first keys -- and falls into
+1; 1 launches on the first frame `g_active_cam_path == 0x2F` and `freeze <=
+g_cam_path_frame` (`FCOMPP` / `TEST AH, 0x41`); 2 `ActorKill`s once
+`g_cam_path_length[slot] <= g_cam_path_frame` (725, 765) with no camera test.
+While launched the pose is the path at `g_cam_path_frame`. `g_app_state` 10
+takes a literal pose from `g_class28_fixed_poses` (`0x0055DD18`, rows 0 and 1
+are the same first keys) and installs `PathRidingPropFixedPoseUpdate`
+(`0x00432810`). The draw's tail draws two sprites under `T(pos + lift) .
+RotY(VecToAngles(eye - pos))` -- the yaw alone -- until the launch.
+
+The port had **no class 0x28**. `render/rigs.ts` drew the rig's route roots as
+one ungated object, the first one only, at `path(min(len, camera frame))` of
+whatever camera played, from stage load: before the throw that is the path
+extrapolated back from frame 671 -- 2.2 million units away at `cp_st1` 47
+frame 120, 2634 at frame 618, closing in through the sky -- and `cp_st1` 50
+after the fight runs through 671..725 and threw it again in front of the
+players. The second car was never drawn; stages 2 and 5 drew a phantom
+`obj_432840` with no class 0x28 in them. Now: `game/class28/` is the routine,
+`SpawnSlotActor` builds it from the spawn record (opcode 9 reads no tail, so
+`ScriptSpawn` carries `hp`, `orient` and `flags`), and `RigLayer` poses the
+rig's spawn roots from the actor, one root per actor (the exporter places one
+per spawn *record*, three per address here), and hides the route roots.
+Measured on seed 1 through the whole fight (368 pulls at the shot-test list's
+JUDGMENT targets, a scratch driver over `tools/lib/player.mjs`): the old
+root moved on
+1562 of 4401 frames and threw on `cp` 47 and `cp` 50; the actor moves on 53,
+all on `cp` 47, and is gone at 725. `port.test` and `render.test` blocks fail
+10 and 7 assertions on the old tree.
+
+**Not a regression.** The coordinator's brief asked for the regressing commit
+of the last day. There is none: the sweep is `8458978d` (2026-08-29, "a rig
+holds its final pose instead of vanishing"), and `docs/re/rig-survey.md` had
+recorded it as open ("the player still sweeps those four routes from frame 0")
+since the rig survey.
+
+**Wrong turns.** (1) The brief's candidate, class 0x33 selector 4, is stage 1
+block 1's two chairs and nothing else; the boss blocks place none. (2) Block
+14's class-0x33 selector-2 spawns are the van and the estate car parked in the
+street -- `ScriptedPropDrawUntilFlag`, static, and drawn by `render/props.ts`
+-- which are cars, and are not the ones that move; `rigs.rigs` in the bundle is
+where `obj_432840` was. (3) `block=14&step=0` lands on 14/3/0, as the memory
+note says; seek to step 1. (4) "Kill all" does not end the JUDGMENT fight and
+flags every visible actor dead, props included; shooting the shot-test list's
+targets one pull every four frames does end it, in 1600 frames. (5) A seek
+past the throw leaves both cars seated and burning, because the replay does
+not run the game -- a seek artefact, not the engine; in play they are gone.
+Still undrawn: each sprite's cel loop -- the rig carries only the first cel.
+
+## 2026-09-28 -- the jetty zombies' fall back looped: class 0x25's `op 17`
+
+Reported: at the end of stage 2, in the scripted sequence where the two zombies
+are shot from the boat, they play their fall-back animation on a loop. The
+scene is block 16 step 15 (block 20 step 2 on the other route): two class-0x25
+humanoids of character type 15, evt `43584` and `43740` (`55372`/`55536`),
+whose programs end `op 3 972` (the fall back, fade 5), **`op 17` mode 0**,
+`op -1`. Never worked: `op 17` has been stepped over since class 0x25 was
+ported (`77e235af`), so the actor ran into `op -1`, sat in
+`ScriptedHumanoidIdle` on clip 972 with `obj+0x1324` clear, and the clip
+wrapped every 60 frames until camera path 100 frame 65 removed it. Measured
+driven from `?stage=2&block=16&step=15&op=0&drive=1&seed=1`: handed over at
+frame 210, cursor 40 at 250, 30 at 300, 20 at 350, still at y -23 at 457.
+
+`op 17` (`0x004849CE`, mode table `0x00484D20`, read) is five things, all
+shipped: modes 0, 1 and 4 write a routine over `obj+0x00` and end the frame;
+2 and 3 spawn a sprite and run on; anything else steps past and ends the frame.
+Mode 0's routine at `0x00484DF0` had no Ghidra function (created, named
+`ScriptedHumanoidFallAndSplash`): gravity 0.02 from rest, the freeze when the
+cursor its last draw showed is `g_motion_play_length - 1`, and at
+`y <= -27.9998` a kind-0x61 splash at `(x, -24.9998, z)`, `ActorFreeHitSlot`,
+`ActorReleasePartList`, `ActorKill`. So the zombies sink 5 units and are gone
+22 frames after the hand-off. The other three were `FUN_`s, named
+`ScriptedHumanoidLaunchAndDrop` (`0x00484EA0`, sub 0 falls through into sub 1,
+L53), `ScriptedHumanoidSpawnFixedImpact` (`0x00484F50`) and
+`ScriptedHumanoidFallTimed` (`0x00484F90`). The routine installed is
+`HumanoidTail.routine` now, with the exe's pointer values; `pc = -1` is gone.
+
+**Rule 4, what the reading overturned.** The freeze test reads `obj+0x19C`, and
+so do the VM's `mode 2` waits -- the cursor, for equality -- where the port
+read the authored frame with `>=`. 24 of the 40 shipped literal cursors are
+past a clip's end in authored frames (`a=66`/`68` on a 35-frame clip, `a=73` on
+the 41-frame 855 in this same scene), so those actors parked. The port also
+steps the counter before the class runs, so a state reading it is a tick ahead
+(L62); the class keeps the cursor its draw sampled, `HumanoidTail.playCursor`,
+as the frog does. The same "authored frame" belief sat under `op 2`'s `b` and
+the Init's phase (both write the counter; the port doubled them and took -1 as
+0 where the exe draws `rand() % 10`) and `op 3` ignored its start and fade.
+`op 2` mode 1/2 and the Init's `blk+2 == 2` write `obj+0x1F8` bit 4, which the
+port did not. The two condition switches are the exe's own now (`op 0/1` have
+no mode 4 and `op 0` never passes mode 2 -- `CMP BP,BX / JZ` at `0x004843CD`,
+not `0x00484386` as the TSV row said, which is the table's `JMP`; `op 4` has no
+-1), an out-of-range opcode parks, and the removal paths free the hit slot they
+had left claimed. Three of the class-0x25 citations in `index.ts` were the
+parenthesised form of routines the file ports (L42): now bare addresses, and
+`verify_port`'s ported count went 754 to 761.
+
+Wrong turns: I first read the post-boss cut scene in block 35 (two class-0x25
+spawns on camera path 0x71) as the sequence -- they are the player characters.
+The zombies are identified by character type 15 against the players' 59/60.
+And the builder hash moved: `class25/state.ts` is in the exporter's closure
+because `hod2lib/bundle.ts` imports `HUMANOID_VARIANT3_SLOT` from it, so the
+tail fields regenerate `builder_hash.ts` although no exported byte changes.
+
+Test: `test:port`'s five new class-0x25 blocks (the jetty program driven by
+`GameUpdate`; the freeze holding on cursor 18 of an 18-long clip; the wait on
+`a=66`; `op 2` and the Init's counter; `op 17` modes 1-4 and 7; the removal's
+hit slot) -- 22 assertions that fail on `a3f5d167`. Counts: divergences 133
+held (the `op 9`/`op 16` stub keeps its tag), uncited exports 82 held.
+
+## 2026-09-28 -- stage 3's boat riders: the boat took the shots, and nothing ended them
+
+Reported: at the start of stage 3 the zombies on the boat with the first
+civilian "don't seem to die when shot", and "when the boat explodes they
+still stay alive". Three faults, all read from the exe, none a regression.
+
+* **The boat was in the shot test.** `SpawnFromDescriptorSmall`
+  (`FUN_00408BC0`) runs `ActorInitFlags` (`FUN_00408970`: `OR ECX, 1; MOV
+  [EAX+0x34], ECX`) on the record's flags word, all fifteen class-0x13
+  records carry `0x8000`, and `RegisterForShotTest` refuses that at
+  `0x00405168`. `SpawnSlotActor`'s class-0x13 arm passed no `flags`, so the
+  boat had `obj+0x34 == 1`, and the 40.0 that `CarrierPropRoutine1` state 0
+  writes at `obj+0x124` was a live sphere in `render/slotmodels.ts`' pick,
+  merged with the engine pick by distance along the ray: every pull at a
+  rider standing behind the boat's origin was the boat's. Since `902de88a`.
+* **`ZombieStateRetireOffScreen` has a carrier arm** after its mode switch
+  (`0x0045B997`): `*obj == CarriedZombieUpdate18` (the only reader of that
+  pointer -- a byte search for `0x0045CD90` finds it and the Init's store)
+  and the carrier's `obj+0x34 & 0x400000` -> `ZombieRetireAndCredit`, `*obj =
+  EnemyZombieUpdate`, no bake. Routines 1 (`0x00440610`) and 6
+  (`0x0044151A`) raise the bit running past the mooring; nothing else in the
+  image touches it at `[reg+0x34]`. The port's `ZombieRetireAndCredit` was
+  short too: `rng.next() < 0.5` for `rand() % 2`, no one-player arm, no
+  count releases, no hit slot. The same state's mode-0/1 `[diverges]`
+  (`ActorIsOnScreen` for `ActorBoundsOnScreen`) is gone, since the latter
+  has been ported for class 0x10 for a while.
+* **`ZombieStateHoldOnCarrier` has an exit** (`0x0045D0B4`..`0x0045D0DD`),
+  after the `MatrixStackPop` at `0x0045D0AF` the pseudocode ends on (`L35`):
+  on `g_active_cam_path == tail+0x0C && g_cam_path_frame == tail+0x0E` the
+  rider takes `(s8)tail[3]`. The port, the annotation and PLAYER_PROGRESS
+  all said "no exit, aboard until shot".
+
+`port.test.ts` "stage 3 block 0's boat" drives the boat's whole ride through
+`GameUpdate` from the reset; eleven assertions there and in the stage-2 rider
+block fail on the old code. In the page, one seed, the same pulls replayed:
+before, the first ten took nothing (the boat's flags read back `0x8`, marked);
+after, the captor dies on the ninth. Free-run, the captor now vanishes on the
+frame the boat raises `0x400000` (`g_enemies_alive` 2 -> 1) and `0xADC` leaps
+to the player's boat on camera frame 1080.
+
+**Wrong turns.** The brief suspected the class-0x30 pick moving into the
+engine (`629832ca`) and a class-0x18 handler that did not register. The
+handler spreads class 0x30's row, `registersForShotTest` included, and the
+engine pick does test the riders (`shotTargets` lists them, and the pulls
+that were not blocked took hit points). A bundle exported at `51b0f657`, the
+merge before that change, answers the same replayed pulls identically, which
+closed it. The probe's first run read "hits start landing after ten pulls"
+as flaky aim; clearing the boat's hit bit before each pull and reading it
+back after was what named the boat.
+
+`[open]`: the retire frame. The port's `carrierAt` is the task pointer as
+well as the carrier (declared on the field), so `render/` places that one
+last frame at the rider's carrier-relative point, where the engine draws it
+in the carrier's matrix; the actor is gone at the next update in both.
+
+## 2026-09-28 -- stage 1's burning cars: the fire and smoke play their cels
+
+`PathRidingPropDraw` (`FUN_00432840`), re-read past the no-return
+`MatrixStackPop` at `0x00432887` (L35): the fire's cel is `MOV EAX,
+[0x009A32A0]; XOR EDX,EDX; MOV ECX,0xF; DIV ECX; ADD EDX,0x135F` at
+`0x0043292C`, and the smoke's `MOV EDX,[0x009A32A0]; AND EDX,7; ADD
+EDX,0xB67` at `0x004329A7`. `0x009A32A0` is `g_frame_counter`, not
+`g_scene_tick_counter` (`0x009A2BAC`), which `PropDrawOnlyType53` reads for
+the same two loops; the `DIV` is unsigned. `[proved]`
+
+The rig `obj_432840` carried only `0x135F` and `0xB67`, so both loops stood on
+their first cel. A `RigPart` with several slots draws them all at once, so the
+fix is the stage-2 car's shape: one part per cel, 15 fire (`0x135F..0x136D`)
+and 8 smoke (`0xB67..0xB6E`), each at the first cel's translation and scale,
+in `tools/hod2lib/rigs.py` and regenerated into `rigs_data.ts`.
+`PathRidingPropDraw` in `render/rigs.ts` (`PATH_PROP_SPRITES`) now shows the
+cel the counter names and hides the loop's others; render reads
+`G.g_frame_counter` and calls nothing in `game/`. Class 0x41's way -- every
+slot in `slots_breakable` and a clone per draw -- was the other candidate; it
+belongs to a layer that clones by slot, and this one already poses rig parts
+by slot, so the cels went where the draw is.
+
+`render.test`'s class-0x28 block fails 3 assertions on the old code (the
+cels at `g_frame_counter` 0, 22, 100, 101, with `g_scene_tick_counter` set to
+something else, and every sprite part hidden after the launch). Measured in
+headless Chrome over 30 driven frames of `cp_st1` 47 on seed 1, reading the
+scene graph through three's devtools hook: the old tree drew `0x135F`/`0xB67`
+on every frame (0 of 30 matching the exe), the new one the exe's cel on 30
+of 30, all 15 and all 8 seen. On that seek `g_frame_counter` and
+`g_scene_tick_counter` hold the same value, so the page cannot tell the two
+apart; the unit test is what does. Stage 1's glb grows by 0.3 MB.
+
+**Wrong turns.** (1) A first harness run died composing the frame strip with
+`page.context().newPage()` -- the default context of `browser.newPage` takes
+one page; a second `browser.newPage()` does it. (2) The worktree guard refuses
+`git -C <shared checkout>`, so the L28 check that `annotate.py` wrote only
+here was a `grep -c` of both copies instead.
+
+## 2026-09-28 -- civilians sobbing behind dead captors: a reload rebuilt the enemies the room had got rid of
+
+Reported as "hangs with some civilians, e.g. the first one in stage 2 (after
+the burnt out car) sits there sobbing still even after both enemies are
+killed". That civilian is `0x6830`, block 11 step 2, on the unrescued road.
+
+**Where it hangs, and where it does not.** Every driven run from the entry
+block, or from block 11 step 1 through the crash, released her: captors shot
+while still walking at her, shot mid-maul, and left to kill her first, and a
+`playthrough.mjs --stage 2` passed block 11 twice over with two continues.
+Seeked to her own step -- `?stage=2&block=11&step=2&op=0`, the address the page
+writes while she is on screen -- it hung on every run, at
+`11/2/34 wait_enemies_alive` with `e1 p1` and the panel naming nobody. The one
+counted actor was class 0x21's rescue target `0x7D0`, rebuilt by the landing
+at its `Init` in `RescueTargetRideInState` with flag 0 already up. Read in the
+listing: the ride-in does not test flag 0 and hands over only at frame
+`>= 0xBE` (`0x004518A3`); step 2's shot stays at 30 until the room clears, and
+her rescue waits for frame 100 of it. The held/freed/sinking/abandoned states
+all despawn on flag 0; the held state abandons at path `0x39` frame `>= 0x122`
+(counters back, then -- which the port had dropped -- the camera and hit slots
+freed at `0x00451C5B`..`0x00451C77`), and the abandoned state despawns at
+`== 0x181`. Every one of those ways out precedes any room gate, so nothing in
+the replay could retire it. `ClassHandler.outlivedByReplay` is the question a
+replay now asks each listed record after every instruction, wait and block
+change, and class 0x21 answers it from flag 0, path `0x39` at or past `0x181`,
+and route slot 1 out of its own block.
+
+**A sweep made it a class of bug.** A headless page harness seeked to each of
+the 40 captor civilians' spawn steps and shot at them. Stage 2's blocks 11
+and 14 hung on the same phantom target; stage 3 past `1/1/40` hung on a
+different one, the class-0x18 boat rider `0xADC`, which `registry.ts`'s
+`ENEMY_CLASSES` counts and the walker's `ENEMY_GATE_CLASSES` -- the classes a
+replay retires at a room gate -- had never listed (the riders were ported in
+902de88a, after the list was written). The boat hostage `0x3208` waits on
+`g_enemies_present`. 0x18 and 0x21 are in the list now, and a port test drives
+every class in `ENEMY_CLASSES` through a gate, which is what then found class
+0x46: its swarm and dive flights count member by member (`INC`s at
+`0x0042DB5D`/`64` and `0x0042DF87`/`8E`) and its scatter flight does not, so
+it answers `countsForEnemyGate` per record.
+
+**Wrong turns.** (1) I started from the brief's suspects -- today's headshot
+change, the shot-test move, the permit claim -- and drove kills every way I
+could think of before trying the URL; `CivilianPruneDeadChildren` was right
+all along. (2) The first sweep shot only the captors, so every civilian whose
+rescue waits for *all* enemies (`0x2`) read as stuck; the second shot every
+counted actor the shot-test list offers. (3) That sweep then died with
+"Execution context was destroyed": saving a file under `web/src/` made Vite
+reload the page onto its URL -- a seek. Which is exactly how the user lands
+on these: the checkout they play in is merged into every few minutes. `L75`.
+(4) The first route fixture used `kind: "end"` for the leaf blocks, which the
+walker and `reaches` treat as fall-through, so the seek to block 2 went down
+arm 0 and the assertion failed for the fixture's reason, not the code's.
+
+**Measured.** Same URL and seed, before and after: `0x6830` never left the
+count in 1,500 frames before; after, the captors die at f34, she leaves the
+count at f243 and the walker leaves 11/2 at f263. Stage 3's `0x3208`: stuck at
+`2/3/35 wait_script_flag 30` before; after the merge with `eb232a6e`, f467 and
+f468. All 37 one-player captor civilians pass from their own spawn step on the
+merged tree (the three two-player spawns are not placed). A seek past stage
+3's `2/4/32` read `e7 p7` with 62 bat objects and the rider before, `e0 p0`
+with the 50 uncounted scatter bats after.
+
+
+## 2026-09-28 -- which eye: the frame stops carrying the lens
+
+Asked to audit every place the port reads the drawn camera where the exe reads
+the gameplay eye `g_camera_eye` (`0x009C71E0`), after the head-aim fix
+(`74db148b`) found one such reader, and -- once `5ec8cd4c` made scene state
+(1, 3) draw from camera block 2 -- to fold in the readers the exe points at
+`[g_camera_index * 0x1A4 + ...]`.
+
+**The exe side.** A byte search of the image's code for each address
+(`e0719c00`/`e4`/`e8`: 328 hits; the block eye `c0609a00`/`c4`/`c8`: 259; the
+block angles `cc`/`d0`/`d4`: 92), every hit decoded to its instruction and
+mapped to a routine, and cross-checked against `get_xrefs_to` (the xref lists
+agreed on `0x009C71E0..E8`; they cannot say which addressing mode a read uses,
+and that was half the question). An indexed read is `[reg + 0x9a60c0]` or
+`[reg*4 + ...]` after `MOV reg, [0x009c6f00]`; I spot-checked the load in the
+owl (`0x00446C9D`), the bats (`0x0042EFFF`), the carried prop (`0x004450B3`)
+and `PropUpdateType72` (`0x00470945`). The table is `docs/formats/cam.md`
+§ *Which eye*.
+
+**The port side.** `GameUpdate(eye, ...)` took `ctx.view.eye` -- the
+three.js camera the last draw placed, which is the previous tick's drawn
+block -- and handed it to every class as `ClassFrame.eye`, to
+`RankEnemiesByDistance` and to the thrown weapons. About sixty readers used
+it; all but two (`head_aim.ts`, `camera/slots.ts`) should have read
+`g_camera_eye` or a camera block. Rather than fix them one by one and leave
+the field for the next reader to reach for, the field is gone: `GameUpdate`
+takes no eye, `ClassFrame` has none, and the leaf routines that read the
+global in the exe read it themselves (`TurnActorTowardCamera`,
+`TurnActorTowardCameraEye`, `ActorFacePlayerTarget`, `TestApproachRing`, and
+so the class-0x30 and 0x31 states lost their `eye` parameters). A reader has
+to spell `G.g_camera_eye`, `G.g_camera_block_eye` or
+`CameraBlockEye(G.g_camera_index)` (new in `camera/view.ts`, with
+`CameraBlockYaw` and `CameraBlockPitch`). Nothing in `game/` can see the lens
+any more except through `GameHost`, which is where the render half's camera
+belongs.
+
+Found on the way, each a transcription:
+
+* `RegisterForDistanceRank` (`FUN_00409010`) keys on the **ground** distance
+  to `g_camera_eye` (`0x0040903B`, `0x00409032`) and is called from
+  `EnemyZombieUpdate` after its draw (`0x0045346D`, behind `obj+0x136C` bit
+  `0x8000000`); `RankEnemiesByDistance` sorts that list on the next frame. The
+  port built the list at rank time from the pool and sorted on the 3D
+  distance to the lens. The list is `G.g_distance_rank_list` now.
+* `ThrowerStateCloseAndStrike` called `ActorFacePlayerTarget`, which writes
+  the eye into `obj+0x13E4` -- over the landing point the state had just put
+  there -- so its range test measured to the camera. The exe turns the yaw
+  alone (`0x0044EAA3`).
+* `ThrowerPickLandingPoint` (`FUN_0044CBA0`) has a `zslman` tail past the
+  `MatrixStackPop` Ghidra marks no-return (`L35`): the screen point is
+  replaced by `T(g_camera_eye) Ry(g_camera_yaw_bams + 0x8000) (x, y, -10)`,
+  `y` from the stance table at `0x0044CE44`. Its `x`/`y` live in the argument
+  slots, so the stance > 3 arm reads the `out` pointer's bits as `y` -- a
+  float below `1e-28`, which the port writes as 0.
+* Class 0x10's op `0x26` with no point walks to `g_camera_eye`
+  (`0x0048C0FE`); the port walked it to the world origin.
+* `GameOverRunPhase` zeroes the gameplay eye and its angles in phase 0
+  (`0x00460A6E..AA0`), and `GameOverPlaceBody` is transcribed through them.
+* `ThrowerIsClear` had no caller and no citation, and is deleted (uncited
+  exports 82 -> 81, baseline lowered).
+
+**Wrong turns.** My first byte scan decoded each hit from the first backward
+offset that parsed, and `FSUB [EAX + 0x9a60c0]` (`d8 a0 c0 60 9a 00`) parses
+one byte in as `MOV AL, [0x9a60c0]` -- an absolute read. About forty indexed
+readers came out as block 0 by address; a majority vote over sliding
+disassembly starts put them right, and `disassemble_bytes` at `0x004170FB`
+confirmed one. Mapping hits to routines by the nearest named entry in
+`functions.tsv` misattributed four runs of unfunctioned code
+(`0x0044CDCD` is `ThrowerPickLandingPoint`'s tail, `0x0045E6C2` is
+`ZombieStateCollapseToCondition4` -- named in the database, not in the TSV --
+`0x0048D2D7` is class 0x10's bone hook `0x0048D1F0`, `0x004889DE` an
+unfunctioned writer of the drawn block); `get_function_by_address` on every
+offset over a few hundred bytes caught them. The first rank test drove two
+zombies through `GameUpdate`, where the floor snaps both to one height and
+the lens and ground orders then agree; the test calls the two routines on a
+hook-written eye instead. The `animals` harness then failed its owl: it had
+no camera paths, so the camera tasks wrote zeros over the eye it invented and
+the owl dived at the origin -- the frame's eye had been hiding that its camera
+was fiction. It loads the stage's paths now, as `dives.mjs` does. The
+worktree guard refused a `git worktree add` for the before tree, so the
+baseline ran from `git archive HEAD web`; one measurement hit vite's shared
+dependency cache mid-rebuild (504, "Outdated Optimize Dep") and was retried.
+
+**Proof.** Eleven new checks in `port.test.ts` ("which eye"), each driven through
+`EvtEnterSceneState` and the hooks rather than a hand-set eye, and the
+delayed-pounce checks re-pointed at the hook-written eye; putting each read
+back on the lens (or block 0) one at a time fails them (seven mutants, nine
+checks). Measured in the page before -> after: the delayed pounce's target
+height 51 -> 36, `zslman`'s hang over the gameplay eye 45 -> 30, stage 6's
+first `zslman` landing 12.98/3.52 -> 10.00/4.50 from `g_camera_eye`, the first
+strike's remembered y 8.28 -> -6.72. Playthroughs: stage 4 now ends in a game
+over at block 6 on its sixth credit where it reached the end on five;
+restoring either the old rank or `TurnActorTowardCamera`'s old eye alone
+restores the old run, so it is the butterfly, not a new fault. The other five
+stages end where they did.
+
+**Left open.** `PropUpdateType72` reads the drawn block's path frame
+(`0x0047095A`), and block 2's frame word has no writer found; the three
+effect spawners that read the drawn block's eye through `GameHost.viewPoint`
+are `[likely]` equal and unchanged; `ThrowerStateCloseAndStrike` also raises
+and clears `BackingOff` (`0x20000000`) where the exe raises and clears
+`0x10000000` (`0x0044EA50` sub 0, and the exit) -- not an eye, not touched.
+
+## 2026-09-28 -- class 0x25's `op 9` and `op 16`: the hands and the wounds
+
+The last declared divergence in `ScriptedHumanoidUpdate`'s switch said the two
+slot-writing commands "need routines this port has not read". There were no
+routines: the jump table at `0x00484CA8` (indexed `op + 1`, `LEA EDX,[EAX+1];
+CMP EDX,0x13` at `0x00484365`) sends `op 9` to `0x00484739` and `op 16` to
+`0x00484972`, and both are fourteen-odd instructions inline, read whole from
+the listing `[proved]`:
+
+* `op 9`: `EAX = g_GameMode; DEC EAX`; `a`; `JNZ` to the plain arm. In Original
+  Mode an `a` of 0 or 1 becomes the character byte at `0x009A2242` /
+  `0x009A2256` (`MOVSX EAX, byte ptr`), any other `a` stands; then
+  `MOVSX EAX, word ptr [(3*row + mode)*2 + 0x4ec9e0]` into `[EDI+0x4dc]` --
+  bone 5's `+0x00` (`0x20C + 5*0x90`). No filter.
+* `op 16`: `PUSH 0x3f400000; PUSH a; PUSH obj; CALL 0x00407310` --
+  `SpawnBloodSpray`, already ported in `effects/blood.ts` -- then `EBP =
+  [charType*4 + 0x4c7160]`, `XOR EAX,EAX; MOV AX,[EBP + (6a+b)*2]`, and bone
+  `a`'s record (`LEA ECX,[a*0x90 + EDI + 0x20c]`) takes it past `CMP EAX,EBX;
+  JL` / `CMP EAX,2; JLE`. The `JL` arm is dead on a zero-extended `u16`.
+
+Both end `MOV [EDI+0x1320], EBX; ADD ESI, 8; JMP 0x0048435D`: the next command
+runs in the same frame.
+
+**Wrong turns.** The brief expected `op 16` to be `ActorSwapDamagedPart` or to
+share its sphere search; it calls neither, and writes no sphere, no step
+counter and no zone bit, so `combat.md` §8a's writer table gains a note, not a
+row. The Init's declared divergence and both class-0x25 rows in
+`functions.tsv` said the character remap was **Boss Mode**; the test is `DEC
+EAX; JZ` on `g_GameMode` at `0x00484106`, which is 1, **Original** Mode. And I
+nearly collapsed `op 9`'s Original-Mode arm the way `PlayerBodiesCreate`'s note
+does ("the byte is only ever `p`"); it is transcribed instead, against a new
+`G.g_original_character` seeded as `ResetOriginalModeLoadout` leaves it, and
+`test:port` moves the byte to show the arm reads it. The one-writer claim is
+`[proved]` for every literal reference (byte searches `42229a00`: 8 hits,
+`56229a00`: 5, all loads); a masked search over the record's other bases came
+back inconsistent with the unmasked one, so "no other base reaches `+0x02`" is
+`[likely]`, and says so in `globals.tsv`.
+
+Named: `PlayerBodySetHandSlot` (`FUN_00416810`, the other reader of the hand
+table, same row arithmetic), `g_original_character` (`0x009A2242`); the rows
+for `g_player_hand_slots`, `ScriptedHumanoidInit` and `ScriptedHumanoidUpdate`
+rewritten. The hand table is **ten rows**: bounded by the index -- the readers
+of the character byte decode 0..9 -- and the word after row 9 is 0 (`L6`).
+
+Exporter, both halves: `playerHandSlots` / `player_hand_slots` and
+`boneEffectSlot` / `bone_effect_slot` in `combat`, `humanoidModelCommands` /
+`humanoid_model_commands` in `charmotion`, `humanoidModelSlots` /
+`humanoid_model_slots` in `characters`, which puts every slot either command
+can write on the character's hidden template, and
+`characters.player_hand_slots` in the bundle. Before, only the jetty wounds
+were in the bundle, and only because they have damaged-part sphere rows; none
+of the 117 `op 9` hands was. `verify_attachments.py` check 6 reads the table
+address and both strides out of the instructions, holds the bundle's copy to
+the exe's words and every written slot to a glTF model: 246 problems on the
+bundle from `eb232a6e`, 0 on this one, and 6 on a stage-2 export with the
+table address moved by one word.
+
+Survey (the six arcade stages; the Original Mode bundles repeat them): `op 9`
+117 commands in 114 programs, every stage -- rows 0 to 4, modes 0 to 2;
+`op 16` 8 commands in stage 2's four jetty zombies. Verified in the page on
+one seed with the step-over put back as the control: stage 2 block 16 step 15
+(the head and the bone-3 wound, frames 166 and 214) and stage 3 block 11
+step 1 (James's hand, frame 170); identical elsewhere, frame 150 byte for
+byte. Counts: divergences 132 -> 131, uncited exports 82 held.
+
+## 2026-09-28 -- class 0x28's sprites: the fringe and the dark column are the exe's
+
+Reported after the cels landed: the burning cars' sprites "don't render
+nicely" -- two huge dark columns rising into the sky, and a jagged pale-grey
+fringe round each flame. The question was whether the port draws them with
+the exe's blend, alpha test, depth, size and order. It does, in every term;
+nothing in the port changed.
+
+**The draw sets no state.** `PathRidingPropDraw` (`FUN_00432840`), read to
+its `RET` at `0x004329C8` past the first `MatrixStackPop` (L35): its only
+calls are MatrixStackPush/Pop, MatrixTranslate, MatrixRotateY, MatrixScale,
+`VecToAngles`, `NoOpStub` (`0x00432927` with 2.0 and `0x004329A2` with 7.0 --
+a bare `RET`) and the plain `AssetDrawSlot` (`0x00432941`, `0x004329B7`).
+So each cel composites by its own mesh header through
+`TranslatePvr2StateToD3D` (`FUN_004A7780`): ISP `0x83000000` -- LESSEQUAL,
+depth write on -- and TSP `0x94002453` (the `0x135F` loop) / `0x9400241B`
+(the `0xB67` loop): SRCALPHA / INVSRCALPHA, pass bits 0 so the translucent
+pass with ALPHATESTENABLE at ALPHAREF 1, bilinear (TSP 14-13 = 1, MIN/MAG
+LINEAR), and WRAP both ways (`g_TexAddressModeTable` at `0x00598AF0` starts
+`1`). `[proved]` The rig's parts are in the stage glTF, so
+`prepareDrawCommands` gives them exactly that at load -- measured on the live
+page: transparent, CustomBlending 204/205, alphaTest 1/255, depthWrite true,
+LessEqualDepth, on every drawn cel.
+
+**The size.** `Scale(1.5, 2.0, 1.0)` at `0x0043290E..0x0043291D` and
+`Scale(7, 7, 7)` at `0x00432989..0x00432998`, lifts 5.0 (`0x0055D2B4`) and
+8.0 (`0x004C43A0`), `T(0, 0, 12.0)` -- all `[proved]` from the bytes. The
+`0x135F` quad is a trapezoid, x +-14.2 at y 2.0 to +-17.8 at y 74.1, so the
+column is 43-53 wide and stands from 9 to 153 above the object: the "huge"
+is the model's own vertices times the exe's scale. The `0xB67` quad is
+3.2 square, 22.4 under the scale. The same models and the same textures
+(decoded and hashed) are in every file that lists those slots --
+`eff_1.bin`, `char_adv04.bin`, `char_adv00.bin` -- so which file supplied a
+slot does not matter.
+
+**Which end is dense.** The quads carry v = 0 at the top and v = -1 at the
+bottom, and the address mode is WRAP, so the texture's first row lands at the
+**bottom** of each quad: `DecodeTextureToSurface` writes rows top-down in
+texture order (layouts 0x100 and 0xD00: `0x2AAAB & 0x55555` steps the row
+into the even bits, `0x55556 & 0xAAAAA` the column into the odd, as `texbank`
+decodes), and
+glTF's v = 0 is the PNG's first row with `flipY` off. So the column is
+densest where it meets the car. The port passes the UVs through unchanged
+and matches.
+
+**The fringe is the sort.** `RenderCommandCompare` (`FUN_004A8A20`) puts the
+nearer command first (`verify_draw_order.py` holds that from the bytes). The
+`0xB67` cel stands 12.0 toward the eye, so it draws before the `0x135F`
+column and writes depth wherever its ARGB4444 texel alpha is at least 1 --
+including the faint rim round the flame, alpha 17/255 and up -- and the
+column behind is depth-rejected there. What shows through is the building.
+On `cp_st1` 47 frame 191, seed 1, the keys are -296.2 and -301.6 for the two
+flames against -310.1 and -315.5 for the two columns, and the page's draw
+order is those four in that order. Two diagnostics settle it (in-page, not
+fixes): with the `0x135F` loop's materials off the flames have no pale rim;
+with the `0xB67` loop's depth write off the rim goes and the column, drawn
+after, paints over the flames entirely. The filter is not it: the game's own
+filter ("as the game", bilinear, no mipmaps) gives the same rim as the
+default anisotropic one at this distance. On the Dreamcast the PVR2 sorts a
+translucent list per pixel and none of this would show; the PC port sorts
+commands nearest first and writes depth, and the browser port is the PC
+port.
+
+**Names.** The cel commit called `0x135F` "fire" and `0xB67` "smoke". The
+textures read the other way round -- a 32x64 near-black column, a 64x64
+flame -- `[likely]`, from the pictures and nothing else; the brief carried
+the old labels. New text names the loops by slot. The rig note in
+`tools/hod2lib/rigs.py` ("15 fire and 8 smoke") still has them backwards and
+is exporter output, so it waits for a commit that re-exports anyway.
+
+**Proof.** `render.test`, "class 0x28's sprite cels draw in their own meshes'
+state": the rig built as the bundle carries it, `prepareDrawCommands` over it
+as `StageScene.load` does, `RigLayer` driving it from a class-0x28 actor --
+each drawn cel's material is the words' state, and `RenderCommandOrder` sorts
+the `0xB67` cel first from the eye the sprites turn to. It is a pin, not a
+failing-first check: it passes on the tree as it was, because nothing was
+wrong. It fails when `RenderCommandOrder` is turned to farthest first (1
+check) and when `applyPvr2DrawState` drops the depth write for the
+translucent pass (2 checks) -- the two "fixes" that would make the picture
+nicer and the port wrong.
+
+**Wrong turn.** The stage-5 seek for class 0x41 type 53 (the same two loops,
+`?stage=5&block=4&step=0&op=25`) landed in block 7 both with and without the
+Space press, where type 53 draws no strips; that comparison was dropped. Its
+draw clones the same stage nodes (`Object3D.clone` shares materials), so it
+carries the same state by construction. Stage 2's type-33 strip
+(`?stage=2&block=11&step=1&op=20`, cam 57/371) is one sprite with no second
+one behind it to cut.

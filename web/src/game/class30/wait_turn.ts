@@ -29,7 +29,6 @@ import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { MotionRowOf } from "../tables";
-import type { Vec3 } from "../vec";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { MotionFade, ZombieState, ZombieWaitMotion } from "./states";
 
@@ -38,7 +37,7 @@ const WAIT_TURN_RATE = 0x40;
 /** `rand() % 5` at `0x004556C9`: the spread of the wait clip's first frame. */
 const WAIT_START_SPREAD = 5;
 
-export function ZombieStateWaitTurn(obj: ZombieActor, eye: Vec3, rng: Rng): void {
+export function ZombieStateWaitTurn(obj: ZombieActor, rng: Rng): void {
   const motion = ZombieWaitMotion(obj, MotionRowOf(obj));
   if (obj.sub === 0) obj.sub = 1;
   else if (obj.sub !== 1) return;
@@ -49,7 +48,7 @@ export function ZombieStateWaitTurn(obj: ZombieActor, eye: Vec3, rng: Rng): void
     ActorSetMotionBlended(obj, motion, rng.int(WAIT_START_SPREAD),
                           MotionFade.Normal);
   }
-  TurnActorTowardCameraEye(obj, eye, WAIT_TURN_RATE);
+  TurnActorTowardCameraEye(obj, WAIT_TURN_RATE);
 
   // `(s8)obj+0x131D < obj+0x1358` -- back in the allowed slice, so go again.
   if (obj.rank < obj.allowance) {

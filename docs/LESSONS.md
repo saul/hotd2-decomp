@@ -1108,7 +1108,50 @@ together (`tools/verify_combat.py`, check 17). It is `L1`'s family: the
 decompiler presents the instruction stream as something it is not, and nothing
 marks the substitution.
 
-**L74 -- A fuzzer whose generator cannot make the real data's shape proves
+**L74 -- A proved fact about what a routine writes is not a proved fact about
+what the frame shows; the draw is a reader, and it reads through an index.**
+The boss-name banner writes camera block 0's eye and look-at and no angle, and
+the view is built from angles: both `[proved]`, and the port concluded the
+banner's flight "keeps the heading it found". The camera had turned in the
+port before the view became angle-built, and a player reported it had
+stopped. What the argument skipped was the reader -- *which* block
+`UpdateSceneViewAndLight` leaves on the matrix stack -- and that is
+`g_camera_index`, which the port had pinned at 0 with "every shipped write is
+0 -- the only block the port has" and then collapsed the four blocks into
+one on the strength of it. Scene state (1, 3)'s installer writes it **2**,
+with `MOV dword ptr [0x009c6f00], 0x2`: a store of an immediate, which the
+register-form writes the author found do not include (L32's shape), and
+which `functions.tsv`'s row for `CameraInstallViewAngles` had recorded as
+`[proved]` the whole time. Block 2 is block 0's eye aimed at block 0's
+look-at, so every cutscene is drawn by look-at after all. **Before collapsing
+an indexed structure because its index "is always N", enumerate the index's
+writers by byte pattern in every `MOV` form and grep the annotations for the
+index's address** -- and when a proof about a writer ends in a claim about the
+picture, follow the value to the instruction that draws it.
+
+**L75 -- A bug that only shows from a deep link is a bug the user plays into,
+because every source change reloads the page onto its own URL.** Stage 2's
+civilian after the burnt-out car was reported sobbing in front of her dead
+captors, and played from the stage's entry she never did: driven runs killed
+her captors early, mid-maul and after she had died, and every one released
+her. From the address the page writes into its URL she hung every time --
+the replay had rebuilt the class-0x21 rescue target, whose ways out all come
+before any room gate, and it held `g_enemies_alive` with nothing on screen. The
+same session's sweep harness then died with *"Execution context was
+destroyed"* the moment a file under `web/src/` was saved: Vite reloads the
+page on a change to a module nothing hot-accepts, and the page reloads to the
+URL it last wrote, which is a seek. With a coordinator merging into the
+checkout the user plays in every few minutes, **a seek is the ordinary way into
+a stage mid-session**, not a debug path. So a report that does not reproduce
+from the entry block is not a report that does not reproduce: take the URL
+the page would have written at that point and run it. And the rebuild has two
+lists to keep true -- `registry.ts`'s `ENEMY_CLASSES`, the classes the game
+counts, and the walker's `ENEMY_GATE_CLASSES`, the ones a replay retires at a
+room gate -- which had drifted apart by two classes (`L24`'s shape: "I fixed
+it" was true of one copy); `test/port.test.ts` now drives every member of the
+first through a gate and fails on any the second forgets.
+
+**L76 -- A fuzzer whose generator cannot make the real data's shape proves
 nothing about it.** Netplay's codec (`core/net/codec.ts`) passed ninety
 thousand fuzzed checks while the one array it was designed around -- the actor
 pool, diffed by identity so a filtered list does not re-send every actor after
@@ -1121,7 +1164,7 @@ pool on 22 of 2,400 ticks. **Run a generator's assumptions past the real data
 before trusting what it generated, and measure the property the design is
 for** (here: which arrays are pools), not only the one the test asserts.
 
-**L75 -- Playwright's `browser.newPage()` is a new browser context.** Two
+**L77 -- Playwright's `browser.newPage()` is a new browser context.** Two
 pages opened that way share nothing -- not a `BroadcastChannel`, not
 `localStorage`, not a cookie -- exactly as two browser profiles would not. The
 first two-tab netplay run (`tools/net_pair.mjs`) paired with nobody and
@@ -1129,7 +1172,7 @@ reported every figure at zero, which read as a transport that did not work.
 Pages that must see each other take one `browser.newContext()` and call
 `context.newPage()` twice.
 
-**L76 -- A hash of what was handed over says nothing about what was made of
+**L78 -- A hash of what was handed over says nothing about what was made of
 it.** Netplay's replica hashes the tree the deltas land in every tick, and it
 agreed with the host's on every tick of every run. But every slice of that
 tree except `G` is then handed to its system's `load`, and the page plays what

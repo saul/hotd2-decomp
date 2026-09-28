@@ -42,6 +42,7 @@ import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
 import type { ShotTestEntry } from "./combat/shot_test";
+import type { DistanceRankEntry } from "./combat/rank";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
 import type { BossHpBar } from "./boss_hp_bar";
 import type { BossBanner } from "./boss_banner";
@@ -432,6 +433,20 @@ export const G = {
    * every loadout the port can reach.
    */
   g_original_fire_mode: [0, 0] as number[],
+  /**
+   * `g_original_character` — 0x009A2242 + player*0x14, `+0x02` of the same
+   * Original Mode block: the character a player plays in Original Mode. Its
+   * readers decode 0..7 as character types 0x39..0x40, 8 as 0x21 and 9 as
+   * 0x34, and take `3*c` as a row of `g_player_hand_slots` -- class 0x25's
+   * Init and its `op 9` among them, both only while `g_GameMode` is 1.
+   *
+   * Seeded as `ResetOriginalModeLoadout` (`FUN_0048A0D0`) leaves it -- the
+   * player index, `puVar1[-5] = cVar2` -- like the rest of this block, whose
+   * reset is part of the stage load the port has already done
+   * (`ResetGameOnStart`). Every instruction that names `0x009A2242` or
+   * `0x009A2256` as a literal reads it; that reset is the one writer found.
+   */
+  g_original_character: [0, 1] as number[],
   /**
    * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
    * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
@@ -1096,10 +1111,27 @@ export const G = {
   g_camera_view_to_world: MatIdentity(),
   g_camera_world_to_view: MatIdentity(),
   /**
-   * `g_camera_index` — `0x009C6F00`. Which of the four camera blocks the view
-   * is built from and the shake nods. `set_global` (`EvtActionSetGlobal14`),
-   * `CameraBlocksReset` and `CameraResetForPathShot` write it, and every
-   * shipped write is 0 -- the only block the port has.
+   * Camera block 2's two matrices, `0x009A6388` (its `+0x40`, view to world)
+   * and `0x009A6348` (`+0x00`, world to view): what `UpdateSceneViewAndLight`
+   * builds for it every frame, as for block 0, and what the frame is drawn
+   * from while {@link g_camera_index} is 2. See `camera/view.ts`.
+   */
+  g_camera_block2_view_to_world: MatIdentity(),
+  g_camera_block2_world_to_view: MatIdentity(),
+  /**
+   * `g_camera_index` — `0x009C6F00`. Which of the four camera blocks the shake
+   * nods, the frame is drawn from (`MatrixStackSetTopFromArray` at
+   * `0x00402136`), and every reader that indexes the blocks by it reads.
+   *
+   * **0 or 2.** `CameraBlocksReset`, `CameraResetForPathShot` (every starter's
+   * first call) and `CameraTaskCreateAtOrigin` write 0, `set_global`
+   * (`EvtActionSetGlobal14`) its operand -- 0 at both shipped sites -- and
+   * `CameraInstallViewAngles` (`FUN_004039D0`), scene state (1, 3)'s
+   * installer, writes **2** (`MOV dword ptr [0x009c6f00], 0x2` at
+   * `0x004039D5`). Nothing else: every `MOV` form with the address as its
+   * destination was searched for. `[proved]` Every block's checkpoint enters
+   * (1, 3), so every cutscene is drawn from block 2 until a
+   * `finish_sequence`'s starter puts it back to 0.
    */
   g_camera_index: 0,
   /**
@@ -1138,12 +1170,16 @@ export const G = {
    * units down its own axis), and `UpdateSceneViewAndLight` draws from the
    * block. See `camera/hooks.ts`.
    *
-   * Read by routines with no `ClassFrame` as well: `EnemyZombieInit`
-   * (`FUN_00452DA0`) and `EnemyThrowerInit` (`FUN_00449620`) seed the head's
-   * aim toward `eye + (0, 15, 0)` from these three words. A spawn runs in the
+   * Every routine that measures to it reads it here, by name: the frame
+   * carries no eye (`ClassFrame`), because the one it carried was the drawn
+   * camera, fifteen above this. `EnemyZombieInit` (`FUN_00452DA0`) and
+   * `EnemyThrowerInit` (`FUN_00449620`) seed the head's aim toward
+   * `eye + (0, 15, 0)` from these three words. A spawn runs in the
    * interpreter's task, ahead of this frame's hook, so it reads what the
    * previous frame's hook wrote, as the engine's does. `CameraClearHookAndPose`
-   * (`FUN_0040C340`) zeroes all six words on a scene load. `[proved]`
+   * (`FUN_0040C340`) zeroes all six words on a scene load, and
+   * `GameOverRunPhase` (`FUN_00460960`) in its first phase. The readers, by
+   * address, are in `docs/formats/cam.md` § *Which eye*. `[proved]`
    */
   g_camera_eye: vec3(),
   g_camera_pitch_bams: 0,
@@ -1369,6 +1405,15 @@ export const G = {
    * it is the count the previous frame's objects registered.
    */
   g_camera_candidate_count: 0,
+  /**
+   * `g_distance_rank_list` — `0x005A4D58`, with `g_distance_rank_count`
+   * (`0x005A4D50`) as its length: the `{key, obj}` pairs
+   * `RegisterForDistanceRank` (`FUN_00409010`) filed from `EnemyZombieUpdate`
+   * since the last `RankEnemiesByDistance` (`FUN_004090B0`), at most
+   * fourteen, in the order they filed. The rank task sorts and empties it;
+   * `DistanceRankTaskCreate` (`FUN_00409080`) empties it at scene setup.
+   */
+  g_distance_rank_list: [] as DistanceRankEntry[],
 
   // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
   /**
@@ -1987,8 +2032,12 @@ export const G = {
    * `FUN_00403B00` reads it as the eye when it measures the angle to the
    * look-at target, which is what proves the three words are a position.
    *
-   * Only one camera block is ever active in this port, so the array collapses
-   * to one entry.
+   * This is block 0's. The port keeps block 0 and block 2
+   * ({@link g_camera_block2_eye}) -- the two {@link g_camera_index} is ever
+   * written. Most readers in the engine index it by `g_camera_index`; the
+   * port's read block 0's, which is block 2's eye under (1, 3) too, since
+   * `EvtRunQueuedActionsSyncViewBlock` copies it across at the head of every
+   * frame -- until something later in that frame moves block 0's.
    */
   g_camera_block_eye: vec3(),
   /**
@@ -2035,14 +2084,17 @@ export const G = {
    * `0x009A6420`: camera block **2**'s eye, angles and look-at, at
    * `g_camera_blocks + 2 * 0x1A4` plus the same offsets as block 0's.
    *
-   * Nothing draws from it -- `g_camera_index` is 0 in every shipped write --
-   * but one routine reads its yaw by address: the frog's screen wedge
-   * (`0x0043AB62`). `CameraBlocksReset` zeroes it with the other three,
+   * **It is the block drawn under scene state (1, 3)**, whose installer
+   * writes {@link g_camera_index} 2, and one routine reads its yaw by address
+   * whatever the index: the frog's screen wedge (`0x0043AB62`).
+   * `CameraBlocksReset` zeroes it with the other three,
    * `EvtRunQueuedActionsSyncViewBlock` copies block 0's eye and look-at into
-   * it while the scene state is (1, 3) and derives its angles, and
-   * `UpdateSceneViewAndLight` rebuilds its angles through `MatrixGetAngles`
-   * every frame. So outside a view-angle turn it holds the last one's
-   * heading, or zero. `[proved]`
+   * it while the scene state is (1, 3) and aims it at the look-at, and
+   * `UpdateSceneViewAndLight` nods it while it is the index's and rebuilds its
+   * matrices and angles every frame. So under (1, 3) it is block 0's eye
+   * looking where block 0's look-at says -- whether or not block 0's own
+   * angles were derived from it -- and outside a view-angle turn it holds the
+   * last one's heading, or zero. `[proved]`
    */
   g_camera_block2_eye: vec3(),
   g_camera_block2_pitch_bams: 0,
@@ -2616,6 +2668,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_block_target = vec3();
   G.g_camera_view_to_world = MatIdentity();
   G.g_camera_world_to_view = MatIdentity();
+  G.g_camera_block2_view_to_world = MatIdentity();
+  G.g_camera_block2_world_to_view = MatIdentity();
   G.g_cam_path_target = vec3();
   G.g_cam_path_eye = vec3();
   G.g_cam_path_pitch_bams = 0;
@@ -2669,6 +2723,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_enemy_slots = makeCameraSlots();
   G.g_camera_candidates = [];
   G.g_camera_candidate_count = 0;
+  G.g_distance_rank_list = [];
   G.g_water_level = -24.9;
   G.g_frog_bone1_on_entry = vec3();
   G.g_water_attack_slots = [0, 0, 0, 0];

@@ -298,7 +298,8 @@ export function ThrownWeaponFlyToTarget(w: ThrownWeapon,
 function ThrownWeaponLand(w: ThrownWeapon, f: ThrownWeaponFrame): void {
   w.flags |= ThrownWeaponFlag.Spent | ThrownWeaponFlag.NoShotTest
     | ThrownWeaponFlag.Landed;
-  const a = VecToAngles(f.eye.x - w.pos.x, 0, f.eye.z - w.pos.z);
+  const eye = G.g_camera_eye;
+  const a = VecToAngles(eye.x - w.pos.x, 0, eye.z - w.pos.z);
   w.ry = FtolS16(a.yaw);
   w.rx = 0;
   let kick: number;

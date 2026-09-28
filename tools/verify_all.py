@@ -293,7 +293,8 @@ CHECKS: list[Check] = [
           ["python3", "tools/verify_prop_tables.py", "--game-dir", "{game_dir}"],
           "that the tables class 0x41 types 38, 39, 40 and 44 build their "
           "objects from -- positions, angles, hull corners, slots, counts, "
-          "scales -- are the EXE's own words: the port carries them as "
+          "scales -- are the EXE's own words, and class 0x28's route, "
+          "length and pose tables with them: the port carries them as "
           "literals, and a mistyped row would put a church chair somewhere "
           "the engine does not, with nothing else to notice",
           NEEDS_GAME),

@@ -54,6 +54,7 @@
 import { ActorFlag, MotionFlag, ThrowerFlag, type Actor } from "../actor";
 import { AngleWithinTolerance, TurnAngleToward } from "../actor_turn";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import type { GameHost } from "../host";
 import {
   FtolS16, MatIdentity, MatrixRotateY, MatrixTransformPoint, MatrixTranslate,
@@ -83,8 +84,10 @@ export const HEAD_AIM_REACH = 0x4000;
 export const HEAD_AIM_FACING = 0x8000;
 /**
  * `FADD double ptr [0x00565DD8]` -- `0x402E000000000000`, 15.0. The head looks
- * at a point this far above the camera eye, and the two `Init`s seed it
- * toward the same one.
+ * at a point this far above `g_camera_eye`, and the two `Init`s seed it
+ * toward the same one. `g_camera_eye` is the gameplay eye, which the path
+ * hooks put fifteen below the pose (`0x004C4398`), so on a path the point is
+ * the lens -- see {@link ActorHeadAimAngles}.
  */
 export const HEAD_AIM_RISE = 15.0;
 /**
@@ -150,19 +153,38 @@ const _aim = vec3();
  * in front of the camera, which is the reading that makes the point one the
  * head can see.
  *
- * The eye is `g_camera_eye` (`0x009C71E0`, both branches); the callers pass
- * `ClassFrame.eye`, which is still the camera the renderer last drew rather
- * than the gameplay eye the scene state's hook writes. They coincide on a
- * path (the hook's eye is the pose's, fifteen units down, and the target here
- * is fifteen up) but not under a fixed eye height or while the eye eases.
+ * **The eye is `g_camera_eye`, in both branches**, and nothing else: the
+ * routine takes one argument, `pt`, and reads the actor through `g_cur_actor`
+ * (`0x009A26A0`). `[proved]`:
+ *
+ * ```
+ * 00453da3  MOV  EAX, [0x009c71e8] / ECX, [0x009c71e4] / EDX, [0x009c71e0]
+ * 00453db7  CALL 0x004a9d80                         ; MatrixTranslate(eye)
+ * 00453e66  FLD  float ptr [0x009c71e8]             ; eye.z - pt.z
+ * 00453e7b  FLD  float ptr [0x009c71e4]
+ * 00453e81  FADD double ptr [0x00565dd8]            ; eye.y + 15.0 - pt.y
+ * 00453e8e  FLD  float ptr [0x009c71e0]             ; eye.x - pt.x
+ * ```
+ *
+ * That is the **gameplay** eye, not the lens. The path hooks write it
+ * `pose.y - 15.0` (`CameraHoldEyeTick`, `CameraRailPublishPose`'s tail)
+ * `[proved]`, and the view is built from the camera block's eye, which on a
+ * path is the pose's `[likely]` -- in the page, stage 1 block 1, the lens
+ * sits at exactly `g_camera_eye.y + 15`. So the `+ 15.0` gives the drop back
+ * and the head looks into the camera. The port used to read the
+ * `ClassFrame`'s eye, which is the lens itself -- the camera the renderer
+ * drew -- and fifteen up from the lens is a point above the camera: every
+ * aimed head in the game was pitched up, by `atan(15 / distance)`, a third of
+ * a right angle at arm's length.
  */
-export function ActorHeadAimAngles(obj: Actor, pt: Vec3, eye: Vec3):
+export function ActorHeadAimAngles(obj: Actor, pt: Vec3):
     { pitch: number; yaw: number } {
+  const eye = G.g_camera_eye;
   let tx: number, ty: number, tz: number;
   if (G.g_max_attackers === 2 && obj.attackPermit !== -1) {
     const m = MatIdentity();
     MatrixTranslate(m, eye.x, eye.y, eye.z);
-    MatrixRotateY(m, G.g_camera_block_yaw_bams);
+    MatrixRotateY(m, CameraBlockYaw(G.g_camera_index));
     _aim.x = Math.fround((1 - 2 * obj.attackPermit) * HEAD_AIM_SHOULDER);
     _aim.y = HEAD_AIM_TWO_RISE;
     _aim.z = HEAD_AIM_AHEAD;
@@ -216,11 +238,12 @@ const _pt = vec3();
  * {@link HeadAimWords.headAimed} is how it is told to draw it.
  *
  * The camera block's matrix is `host.cameraMatrices`' view-to-world, which is
- * the camera the renderer last drew with; the record is in that space too
- * (see {@link HeadAimBeginDraw}), so a fresh record comes back as exactly the
- * point the renderer posed. A host with no camera -- a headless run -- cannot
- * place the head at all, and the aim holds: no routine in the game reads
- * these two angles but the draw.
+ * `g_camera_blocks` as this frame's camera actor built it. The record is in
+ * the view of the frame that drew it (see {@link HeadAimBeginDraw}), so it
+ * comes back as the point the renderer posed moved by the camera's own move
+ * between the two frames, as the engine's does. A host with no camera -- a
+ * headless run -- cannot place the head at all, and the aim holds: no routine
+ * in the game reads these two angles but the draw.
  */
 export function ActorAimHeadAtCamera(obj: Actor, aim: HeadAimWords,
                                      f: ClassFrame): void {
@@ -230,7 +253,7 @@ export function ActorAimHeadAtCamera(obj: Actor, aim: HeadAimWords,
   _pt.x = Math.fround(_pt.x);
   _pt.y = Math.fround(_pt.y);
   _pt.z = Math.fround(_pt.z);
-  const want = ActorHeadAimAngles(obj, _pt, f.eye);
+  const want = ActorHeadAimAngles(obj, _pt);
   const pitch = want.pitch & 0xffff;
   const yaw = want.yaw & 0xffff;
   const p = TurnAngleToward(aim.headPitch, pitch, HEAD_AIM_RATE);
@@ -270,11 +293,14 @@ const _world = vec3();
  * draw, not yet turned.
  *
  * [port-only]. The engine's `SkeletonEmitNode` (`FUN_004114C0`) writes the
- * record inside the draw; the port's draw is the renderer's, and the point it
- * would have written is the hit-sphere centre of the pose it drew --
- * `host.boneSphere`, `obj + bone*0x90 + 0x274` -- brought into the view that
- * draw used, which is `host.cameraMatrices`' world-to-view. Called once a
- * frame, before the node walk, by both classes' updates.
+ * record inside the draw -- `+0x68 = MatrixTransformPoint(top, +0x7C)` at
+ * `0x0041168A..0x004116C9`, the stack top being that frame's view times the
+ * node -- and the port's draw is the renderer's. The point it would have
+ * written is the hit-sphere centre of the pose it drew -- `host.boneSphere`,
+ * `obj + bone*0x90 + 0x274` -- brought into the view that draw used, which
+ * {@link HeadAimEndDraw} kept in {@link HeadAimWords.headRecordView}: not this
+ * frame's, which the camera actor has already built by the time this runs.
+ * Called once a frame, before the node walk, by both classes' updates.
  *
  * Only when {@link HeadAimWords.headRecordDue} says the engine's draw would
  * have written it. Otherwise the record keeps what it had, which is the
@@ -287,8 +313,7 @@ export function HeadAimBeginDraw(obj: Actor, aim: HeadAimWords,
   aim.headRecordDue = false;
   const r = host.boneSphere?.(obj.at, HEAD_AIM_BONE, _world);
   if (r === null || r === undefined) return;
-  if (!host.cameraMatrices?.(_w2v, _v2w)) return;
-  MatrixTransformPoint(_w2v, _world, aim.headRecord);
+  MatrixTransformPoint(aim.headRecordView, _world, aim.headRecord);
   aim.headRecord.x = Math.fround(aim.headRecord.x);
   aim.headRecord.y = Math.fround(aim.headRecord.y);
   aim.headRecord.z = Math.fround(aim.headRecord.z);
@@ -309,10 +334,14 @@ export function HeadAimBeginDraw(obj: Actor, aim: HeadAimWords,
  * 004116c3  MOV  [ESI + 0x68], ECX           ; ...+0x6C, +0x70
  * ```
  *
- * `[proved]`. Called after the node walk, by both classes' updates.
+ * `[proved]`. Called after the node walk, by both classes' updates. The view
+ * this frame's draw writes the record in is this frame's world-to-view, and it
+ * is kept beside the latch: a host with no camera writes no record.
  */
-export function HeadAimEndDraw(obj: Actor, aim: HeadAimWords): void {
+export function HeadAimEndDraw(obj: Actor, aim: HeadAimWords,
+                               host: GameHost): void {
   aim.headRecordDue = DrawRecordSlot(obj, HEAD_AIM_BONE) !== 0
     && (obj.motionFlags & MotionFlag.Drawn) !== 0
-    && (obj.flags & ActorFlag.NoShotTest) === 0;
+    && (obj.flags & ActorFlag.NoShotTest) === 0
+    && (host.cameraMatrices?.(aim.headRecordView, _v2w) ?? false);
 }

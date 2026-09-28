@@ -128,6 +128,7 @@ import type { BreakablePlacement } from "../../bundle";
 import { BAMS_TO_RAD_F64 } from "../../core/bams";
 import { PROP_SPARK_KIND, SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import {
   MatrixGetTranslation, MatrixLoadIdentity, MatrixMultiply, MatrixRotateX,
   MatrixRotateY, MatrixRotateZ, MatrixScale, MatrixTransformPoint,
@@ -401,7 +402,7 @@ export function SpawnPropSplash(x: number, y: number, z: number): void {
     kind: PROP_SPARK_KIND,
     pos: vec3(x, y, z),
     pitch: 0,
-    yaw: G.g_camera_block_yaw_bams,
+    yaw: CameraBlockYaw(G.g_camera_index),
     roll: 0,
     scale: vec3(TYPE8_SPLASH_SCALE, TYPE8_SPLASH_SCALE, TYPE8_SPLASH_SCALE),
     slot: TYPE8_SPLASH_FIRST_SLOT,

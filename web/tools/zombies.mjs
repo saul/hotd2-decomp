@@ -20,6 +20,7 @@ import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnPropContainers }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables, CharacterTypeOf } from "../src/game/tables.ts";
 import { ActorIsEnemy } from "../src/game/registry.ts";
@@ -162,7 +163,8 @@ for (let i = 0; i < frames; i++) {
   G.g_active_cam_path = walker.cam ? walker.cam.slot : -1;
   G.g_script_flags = [];
   for (const f of walker.flags) G.g_script_flags[f] = 1;
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, host, rng, events);
   trace(i);
   if (killWho && !killed && i > 120) {
     const live = G.g_object_list.filter((o) => ActorIsEnemy(o.cls) && !o.dead);

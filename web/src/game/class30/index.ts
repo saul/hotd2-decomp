@@ -20,7 +20,7 @@ import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
 import type { GameHost } from "../host";
-import type { Vec3 } from "../vec";
+import { RegisterForDistanceRank } from "../combat/rank";
 import { ZombieStateApproach } from "./approach";
 import { ZombieStateAttackRun } from "./attack_run";
 import { ZombieStateBackOff } from "./backoff";
@@ -46,7 +46,8 @@ import { ZombieStateReleaseBodyCreature } from "./release_creature";
 import { ZombieState } from "./states";
 import { ZombieOnShot } from "./on_shot";
 import {
-  ZombieStateCorpseBlink, ZombieStateCorpseSink, ZombieStateDeath6,
+  COND4_SPECIAL_BIT, ZombieStateCorpseBlink, ZombieStateCorpseSink,
+  ZombieStateDeath6,
   ZombieStateDeathFallAndBounce,
 } from "./death";
 import { ZombieStateDeathKnockbackArc } from "./knockback";
@@ -84,7 +85,7 @@ import {
 const ZOMBIE_BODY_RADIUS = 3.5;
 
 export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
-  const { eye, dt, rng, host, events } = f;
+  const { dt, rng, host, events } = f;
   // `EnemyZombieUpdate` (`FUN_004533F0`) runs the shot response **before** the
   // state, at 0x0045340E: the shot that killed this actor puts it in a death
   // state on the same frame that state first runs. Without this call class
@@ -97,7 +98,7 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // these four spawns never do. That is the whole of why stage 5 block 2's
   // `znnick` ride the car while sitting in `DelayedStrikeInPlace`.
   if (obj.flags2 & ZombieFlag2.AttachedToCarrier) ZombieAttachToCarrier(obj);
-  ZombieRunState(obj, eye, dt, rng, host, events);
+  ZombieRunState(obj, dt, rng, host, events);
   // The engine's own order, and the two halves the port did not have.
   // `EnemyZombieUpdate` integrates the velocity straight after the state —
   // which is what carries a leap through its arc — and then draws, and the
@@ -127,7 +128,11 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // which goes with the item.
   HeadAimBeginDraw(obj, obj.zom, host);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
-  HeadAimEndDraw(obj, obj.zom);
+  HeadAimEndDraw(obj, obj.zom, host);
+  // `TEST EAX, 0x8000000; JNZ` on `obj+0x136C` at `0x00453465`, then `CALL
+  // 0x00409010` at `0x0045346D`: the actor files itself for next frame's
+  // distance rank, measured to this frame's gameplay eye.
+  if (!(obj.flags2 & COND4_SPECIAL_BIT)) RegisterForDistanceRank(obj);
   // `PUSH 0x40800000; CALL 0x00409b70` at `0x00453475`, on every path through
   // the routine and after the draw (`ZombieAdvanceMotion`, `0x00453457`): the
   // camera point lifted by 4 and the actor filed as a candidate. A death
@@ -138,18 +143,18 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
 /** `PUSH 0x40800000` at `0x00453475`: `ActorRegisterCameraPoint`'s 4.0. */
 export const ZOMBIE_CAMERA_RISE = 4.0;
 
-function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
+function ZombieRunState(obj: ZombieActor, dt: number, rng: Rng,
                         host: GameHost, events?: Events): void {
   switch (obj.state) {
-    case ZombieState.Approach:    return ZombieStateApproach(obj, eye, rng, host);
-    case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, eye, dt, rng);
-    case ZombieState.MotionCue:   return ZombieStateMotionCue21(obj, eye, dt);
+    case ZombieState.Approach:    return ZombieStateApproach(obj, rng, host);
+    case ZombieState.AttackRun:   return ZombieStateAttackRun(obj, dt, rng);
+    case ZombieState.MotionCue:   return ZombieStateMotionCue21(obj, dt);
     case ZombieState.HoldAtRange:
-      return ZombieStateHoldAtRange(obj, eye, rng, host, events);
+      return ZombieStateHoldAtRange(obj, rng, host, events);
     case ZombieState.Strike:
-      return ZombieStateStrike(obj, eye, rng, events, host);
-    case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
-    case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
+      return ZombieStateStrike(obj, rng, events, host);
+    case ZombieState.BackOff:     return ZombieStateBackOff(obj, dt, rng);
+    case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, rng);
     // **State 10 is terminal, and the table says so.** `g_class30_states`
     // (`0x00592AE8`) holds `0x00455490` at index 10 -- the dwords at
     // `+0x28` are `90 54 45 00` -- and that is `ZombieReleaseAndDespawn`
@@ -186,7 +191,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     // moves the actor at all, which is exactly why folding it into
     // `AttackRun` was so visible: the tutorial's axe man charged the camera.
     case ZombieState.StandAndThrow:
-      return ZombieStateStandAndThrow(obj, eye, rng, host, events);
+      return ZombieStateStandAndThrow(obj, rng, host, events);
 
     // The scripted walk-in. Fifty spawns across the game start here, and
     // folding it into `AttackRun` is what had them turn to the camera on
@@ -210,19 +215,19 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.WaitScriptFlagThenBranch:
       return ZombieStateWaitScriptFlagThenBranch(obj);
     case ZombieState.ScriptedGrabAndDespawn:
-      return ZombieStateScriptedGrabAndDespawn(obj, eye, rng, host, events);
+      return ZombieStateScriptedGrabAndDespawn(obj, rng, host, events);
     case ZombieState.ReleaseBodyCreature:
-      return ZombieStateReleaseBodyCreature(obj, eye, rng, host);
+      return ZombieStateReleaseBodyCreature(obj, rng, host);
     case ZombieState.LeapToPoint:
-      return ZombieStateLeapToPoint(obj, eye, dt, rng, events);
+      return ZombieStateLeapToPoint(obj, dt, rng, events);
     case ZombieState.RideCarrier:
-      return ZombieStateRideCarrier(obj, eye, rng, dt);
+      return ZombieStateRideCarrier(obj, rng, dt);
     case ZombieState.ArcScriptedEntrance:
       return ZombieStateArcScriptedEntrance(obj, dt, rng, host, events);
     case ZombieState.WaitScriptFlagThenEnter:
       return ZombieStateWaitScriptFlagThenEnter(obj, dt, rng);
     case ZombieState.DelayedStrikeInPlace:
-      return ZombieStateDelayedStrikeInPlace(obj, eye, dt, rng, events);
+      return ZombieStateDelayedStrikeInPlace(obj, dt, rng, events);
 
     // The two entrances that place the actor. Without them a spawn stands at
     // the y its record names — under the water at stage 2 block 16, and in
@@ -250,7 +255,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.AwaitCivilianOrder:
       return ZombieStateAwaitCivilianOrder(obj, rng, (o, st) => {
         o.state = st;
-        ZombieRunState(o, eye, dt, rng, host, events);
+        ZombieRunState(o, dt, rng, host, events);
       });
     case ZombieState.WalkPastPoint:
       return ZombieStateWalkPastPoint(obj);
@@ -268,22 +273,22 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
       return ZombieStateHoldForCameraCue(obj, (o, st) => {
         const was = o.state;
         o.state = st;
-        ZombieRunState(o, eye, dt, rng, host, events);
+        ZombieRunState(o, dt, rng, host, events);
         // The delegate may have changed the state; state 42 reads that back.
         if (o.state === st) o.state = was;
       });
     // The barrel-carrier: it allocates the prop it holds (`game/carried_prop.ts`)
     // and throws it on its script's cue. See `class30/carry_prop.ts`.
     case ZombieState.CarryProp:
-      return ZombieStateCarryProp(obj, eye, host);
+      return ZombieStateCarryProp(obj, host);
     // A class-0x18 rider's three ways off its script. See
     // `class30/carrier_rider.ts`.
     case ZombieState.HoldOnCarrier:
-      return ZombieStateHoldOnCarrier(obj, eye, dt);
+      return ZombieStateHoldOnCarrier(obj, dt);
     case ZombieState.LeapOffCarrierForward:
-      return ZombieStateLeapOffCarrierForward(obj, eye, dt, host, events);
+      return ZombieStateLeapOffCarrierForward(obj, dt, host, events);
     case ZombieState.LeapOffCarrierAtMark:
-      return ZombieStateLeapOffCarrierAtMark(obj, eye, dt, host, events);
+      return ZombieStateLeapOffCarrierAtMark(obj, dt, host, events);
 
     default:                      return ZombieGiveUpAttack(obj);
   }

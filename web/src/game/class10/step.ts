@@ -12,7 +12,6 @@
 import type { Actor } from "../actor";
 import { CamPathCueReached } from "../camera/path";
 import { G } from "../globals";
-import type { ClassFrame } from "../registry";
 import { MotionPlayFrame } from "../tables";
 import { CivilianOp, CivilianTarget, CivilianWait, CmdAt } from "./ops";
 import { CivilianReapplyWaitCommand } from "./script";
@@ -32,7 +31,7 @@ import { CivilianTargetPoint, HeadingError } from "./turn";
  * `CivilianReapplyWaitCommand`, which re-applies the state the *skipped*
  * block's wait conditions read without running its actions.
  */
-export function CivilianStepScript(obj: Actor, f: ClassFrame): boolean {
+export function CivilianStepScript(obj: Actor): boolean {
   const sub = obj.civ;
   if (!sub || sub.script < 0) return false;
 
@@ -54,7 +53,7 @@ export function CivilianStepScript(obj: Actor, f: ClassFrame): boolean {
     if (word & CivilianWait.Blocked) break;
 
     if (CivilianWaitStillHolds(obj, word)
-        && CivilianArrived(obj, word, f) === "wait") break;
+        && CivilianArrived(obj, word) === "wait") break;
 
     sub.timer = -1;
     ran = true;
@@ -181,8 +180,7 @@ function CivilianCueMet(obj: Actor, word: number): boolean {
  * dropped the cue and the timer instead, so an actor that had not arrived
  * skipped both.
  */
-function CivilianArrived(obj: Actor, word: number,
-                         f: ClassFrame): "advance" | "wait" {
+function CivilianArrived(obj: Actor, word: number): "advance" | "wait" {
   const sub = obj.civ;
   if (!sub) return "wait";
 
@@ -201,7 +199,7 @@ function CivilianArrived(obj: Actor, word: number,
 
   if ((word & (CivilianWait.Reach | CivilianWait.Face)) === 0) return tail();
 
-  const to = CivilianTargetPoint(obj, f);
+  const to = CivilianTargetPoint(obj);
   if ((word & CivilianWait.Reach) === 0) {
     // Turn only: arrived the frame the heading error rounds to zero.
     if (HeadingError(obj, to) === 0) {

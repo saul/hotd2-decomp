@@ -31,6 +31,7 @@ import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -103,7 +104,10 @@ for (let stage = 1; stage <= 6; stage++) {
   }
 
   const events = new Events();
-  for (let i = 0; i < SETTLE; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  for (let i = 0; i < SETTLE; i++) {
+    SeatHarnessEye(EYE);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+  }
 
   // A **negative** loop count is the engine's own "play for ever", and one
   // death script in the game asks for it: stage 4's `4484` ends on
@@ -125,7 +129,8 @@ for (let stage = 1; stage <= 6; stage++) {
       if (prev !== undefined && prev !== key) restless.add(a.at);
       last.set(a.at, key);
     }
-    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    SeatHarnessEye(EYE);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
   }
   total += dead.length;
   moved += restless.size;

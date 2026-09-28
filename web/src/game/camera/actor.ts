@@ -25,13 +25,11 @@
  * execution order, and every actor is allocated after the list is built.
  */
 import { G } from "../globals";
-import { vec3 } from "../vec";
 import { EvtRunQueuedActions } from "./actions";
 import { CameraUpdateHook, EvtActionHandler } from "./driver";
 import { CameraUpdateTick } from "./hooks";
-import { CamBlockSetAnglesFromLookAt, CameraPoseBlock } from "./path";
 import { RailMayAdvance } from "./rail";
-import { UpdateSceneViewAndLight } from "./view";
+import { CameraSyncViewBlock2, UpdateSceneViewAndLight } from "./view";
 
 export { CameraUpdateTick };
 
@@ -86,22 +84,21 @@ export function CameraActorTick(): void {
  * unreachable, which is why the port has no word for it.
  *
  * So while a scripted view-angle turn -- scene state (1, 3) -- is running,
- * camera block 2 follows block 0 frame by frame, and when the turn ends it
- * keeps the last heading. The frog's screen wedge reads block 2's yaw
- * (`0x0043AB62`), which is the only reason the port keeps the block.
+ * camera block 2 follows block 0 frame by frame, aimed at block 0's
+ * **look-at**, and when the turn ends it keeps the last heading. It is the
+ * block drawn under (1, 3): that scene state's installer writes
+ * `g_camera_index` 2 (`camera/hooks.ts`), so every cutscene is seen through
+ * block 0's eye and look-at whatever block 0's own angles say -- which is how
+ * the boss-name banner's flight turns the camera without writing an angle.
+ * The frog's screen wedge reads block 2's yaw by address (`0x0043AB62`).
  * `[proved]`
+ *
+ * The tail from `0x004023F0` is {@link CameraSyncViewBlock2}, which the seek's
+ * reseat runs too.
  */
 export function EvtRunQueuedActionsSyncViewBlock(): void {
   EvtRunQueuedActions();
-  if (G.g_scene_state_minor_entered !== 3) return;
-  const e = G.g_camera_block_eye, t = G.g_camera_block_target;
-  G.g_camera_block2_eye = vec3(e.x, e.y, e.z);
-  G.g_camera_block2_pitch_bams = G.g_camera_block_pitch_bams;
-  G.g_camera_block2_yaw_bams = G.g_camera_block_yaw_bams;
-  G.g_camera_block2_roll_bams = G.g_camera_block_roll_bams;
-  G.g_camera_block2_target = vec3(t.x, t.y, t.z);
-  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Block2, G.g_camera_block2_target,
-                              G.g_camera_block_roll_bams);
+  CameraSyncViewBlock2();
 }
 
 /** A replay's camera frames are cheap, and no postcondition needs more. */

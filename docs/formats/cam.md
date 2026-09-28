@@ -254,6 +254,131 @@ copies the camera block's eye into it. It is read by
 and by the (2,4)-(2,7) hooks for the gameplay eye. An ordinary `cam_play`
 neither reads nor writes it.
 
+### Which eye — [proved], per reader
+
+The engine has three camera points, and every reader names one by address:
+
+| name | address | written by | is |
+|---|---|---|---|
+| `g_camera_eye` | `0x009C71E0..E8` | the scene state's hook (`CameraUpdateTick`, task 5), `CameraActionStartWithEyeSnap`, `CameraClearHookAndPose`, `GameOverRunPhase` | the **gameplay eye**: the rail pose's eye less 15.0 in y (`0x004C4398`), or `g_camera_fixed_eye_y` |
+| block 0's eye | `0x009A60C0..C8` (`[0x9a60c0]`) | the camera actor's driver (task 3), the boss banner, class 0x14's flight, class 0x22's death, class 0x45's body | the camera block, by address |
+| the drawn block's eye | `[g_camera_index * 0x1A4 + 0x9A60C0]` | as block 0, and block 2 is block 0's eye copied at the head of every (1, 3) frame | block 2 under scene state (1, 3), whose installer writes `g_camera_index = 2` (`0x004039D5`); block 0 otherwise |
+
+and the lens -- the view matrix `UpdateSceneViewAndLight` builds from the drawn
+block -- whose origin is that block's eye. The port handed every class update
+the lens as the last draw left it (`ClassFrame.eye`, from
+`app/systems.ts`'s `ctx.view.eye`): a frame old, and fifteen **above** the
+gameplay eye on a rail. It is gone. `GameUpdate` takes no eye and
+`ClassFrame` carries none, so a routine has to name the point its
+instruction names: `G.g_camera_eye`, `G.g_camera_block_eye`, or
+`CameraBlockEye(G.g_camera_index)` (`game/camera/view.ts`); the same goes for
+the yaw, `G.g_camera_block_yaw_bams` against `CameraBlockYaw(G.g_camera_index)`.
+
+The readers were enumerated by the bytes of each address in the image's code
+(`e0719c00`/`e4`/`e8`: 328 hits; `c0609a00`/`c4`/`c8`: 259; the block angles
+`cc609a00`/`d0`/`d4`: 92), each hit decoded by majority vote over sliding
+disassembly starts and checked against `get_xrefs_to`, and each mapped to its
+routine; an indexed read is `[reg + 0x9a60c0]` (or `[reg*4 + ...]`) with the
+register loaded from `[0x009c6f00]` on the lines before. What each port reader
+takes now:
+
+**The gameplay eye, `g_camera_eye`.** All of these read the lens before.
+
+| port | exe routine | reads at | what moved |
+|---|---|---|---|
+| `TurnActorTowardCamera` | `FUN_00409ED0` | `0x00409EE0..EFA` | the point 1.5 from the eye, and its `RotY(ftol(eye.y))` |
+| `TurnActorTowardCameraEye` | `FUN_00409E80` | `0x00409E91`, `0x00409EA0` | ground only |
+| `ActorFacePlayerTarget` (one-player arm) | `FUN_00455F40` | `0x00455F6F..7A` | **the remembered strike point, `obj+0x13E4`, 15 lower** |
+| `TestApproachRing` | `FUN_00456650` | `0x0045665B`, `0x00456664` | ground only |
+| `ZombieStateApproach`, `ZombieStateMotionCue21` (inlined ring) | `FUN_004579A0`, `FUN_004577F0` | `0x00457A71/7A`, `0x004578CF/D8` | ground only |
+| `ZombieStateHoldAtRange`'s too-close test | `FUN_00455720` | `0x0045578B`, `0x00455794` | ground only |
+| `ZombieStateReleaseBodyCreature` | `FUN_00457FB0` | `0x00458004`, `0x0045800D` | ground only |
+| `ZombieStateCarryProp`'s tail | `FUN_0045B380` | `0x0045B564..7E` | ground only |
+| `ZombieStateHoldOnCarrier`, `...LeapOffCarrierForward`, `...LeapOffCarrierAtMark` | `FUN_0045CFC0`, `FUN_0045D120`, `FUN_0045D500` | `0x0045D06D..78`, `0x0045D232..3E`, `0x0045D47E..4D3`, `0x0045D627`, `0x0045D89B..8EF` | **the turn in a tilted carrier's frame takes the height** |
+| `ZombieStateBackOff`'s `[diverges]` fallback | -- | -- | the point `ActorFacePlayerTarget` would have stored |
+| `RegisterForDistanceRank` | `FUN_00409010` | `0x00409032`, `0x0040903B` | **the rank: ground distance, filed from `EnemyZombieUpdate` (`0x0045346D`) and sorted next frame** -- it was 3D to the lens at rank time |
+| `ThrowerPickNextState` | `FUN_0044ADB0` | `0x0044ADD0`, `0x0044ADDA` | ground only |
+| `ThrowerStateStandAndDecide`'s turn | `FUN_0044B180` | `0x0044B2EE..340` | ground only |
+| `ThrowerStateWaitForPermit`'s perch | `FUN_0044B3E0` | `0x0044B56F` | **`zskamere` perches 15 lower** |
+| `ThrowerStateLeapAside`, `ThrowerStateWithdraw` | `FUN_0044B880`, `FUN_0044EC80` | `0x0044B8F3..FE`, `0x0044BC04/0D`, `0x0044ED39..8B` | ground only |
+| `ThrowerStateDelayedPounce` | `FUN_0044E830` | `0x0044E940` | **the leap's height** |
+| `ThrowerStateCloseAndStrike` | `FUN_0044EA50` | `0x0044EAA3`, `0x0044EABC` | the yaw; it also called `ActorFacePlayerTarget`, which overwrote the landing point with the eye |
+| `ThrowerStateGrabPlayer` | `FUN_0044EF90` | `0x0044F015..0x0044F4E2` (19) | **`zslman` hangs and drops 15 lower** |
+| `ThrowerPickLandingPoint`'s `zslman` tail | `FUN_0044CBA0` | `0x0044CDCD..D8` | **the whole arm was missing** (past a no-return `MatrixStackPop`): `zslman` lands `T(eye) Ry(yaw + 0x8000) (x, 4.5/15.5/27, -10)` |
+| `ThrownWeaponFlyToTarget`'s landing | `FUN_0044FD40` | `0x0044FE71`, `0x0044FE83` | ground only |
+| `CivilianTargetPoint` | `FUN_0048C850`, `FUN_0048B1E0` | `0x0048C878..8B3`, `0x0048B356..38F` | the height of the target |
+| `CivilianRunScript` op `0x26` with no point | `FUN_0048B9E0` | `0x0048C0FE..114` | **it moved to the world origin** |
+| the frog | `FUN_0043A1E0`, `FUN_0043AA10`, `FUN_0043B0E0` | `0x0043A212/1A`, `0x0043AA97..AFE1`, `0x0043B1DC..F6` | ground only |
+| class 0x14 | `Class14StateHunt`, `...LungeAtCamera`, `...LeapAttack`, `...LeapFromSide`, `...KnockedDown` | `0x00478993..0x0047B562` | **the knock-back's pitch** |
+| class 0x19 | `Boss4FootfallShake`, `Boss4StateApproachCamera`, `...ChooseAction`, `...FaceCamera`, `...ThrowHeldProp`, `...Flinch`, `...KnockDown`, `...WalkToPoint`, `...WithdrawAndAdvancePhase` | `0x00492597..0x00495C00` | **the knock-down's pitch and lift** |
+| class 0x22 | `Class22DescendAndJoinFight`, `...FightPhase1`, `...FightPhase2`, `...Phase1TakeShots`, `Class22EvalCameraRelativePath` | `0x0049C003..0x0049DC0E` | **phase 2's flight point, 15 lower** |
+| class 0x23 | `Class23FightBesideCompanion` | `0x0049015B/64`, `0x00490294/9A` | ground only |
+| class 0x25 | `ScriptedHumanoidUpdate`'s face-camera turn | `0x00484AB3`, `0x00484ACA` | ground only |
+| `GameOverPlaceBody` | `FUN_00415A80` | `0x00415AA7..B2` | transcribed; `GameOverRunPhase` now zeroes the six words (`0x00460A6E..AA0`) |
+
+Already right: `ActorHeadAimAngles` and the two `Init`s' head seed
+(`0x00453DA3..E8E`, `0x00452EB7..EE1`, `0x00449704..2E`),
+`RegisterForCameraTracking` (`0x00408EDD..EF`), the hooks that write it.
+
+**Block 0's eye, by address.** `BossIntroBannerUpdate`, `Boss4PlayCameraCue`,
+`Class22Death`, class 0x14's scripted break (`CamEvalPath7(&0x9a60c0)`),
+`Boss3BodyUpdate`/`...MoveAndDriveCamera`/`Boss3ComposeBonePose`, the camera's
+own routines and `BatSwarmUpdate`'s yaw (`FPATAN` of `[0x9a60c0]`/`[0x9a60c8]`
+at `0x0042F147`/`53`) -- each already read `G.g_camera_block_eye`.
+
+**The drawn block's eye, `[g_camera_index * 0x1A4 + 0x9A60C0]`.** Now
+`CameraBlockEye(G.g_camera_index)`:
+
+| port | exe routine | reads at | was |
+|---|---|---|---|
+| the owl: placement, sway, dive, strike, facing, aim | `PlaceOwlFlockMember`, `OwlStateRideApproachSpline`, `OwlStateOrbitAwayAfterStrike`, `OwlStateDiveAtCamera`, `OwlUpdateAndResolveShot`, `OwlPickTargetPlayerAndAimOffset` | `0x00445ECB/D4`, `0x00446CC4/CD`, `0x00447B74/7D`, `0x00446F76..0x0044737C`, `0x0044638B/94`, `0x00448028/31` | the lens, or block 0 |
+| the fish | `FishBeginRise`, `FishLungeTestBite`, `FishCheckShot` | `0x0043879B/A4`, `0x004397E1..F3`, `0x00438DE3/EC` | block 0, the lens, the lens |
+| the bats' homing | `BatDiveUpdate`, `BatSwarmUpdate` | `0x0042E6C5..73A`, `0x0042EFE4..F05B` | block 0 |
+| the horde's dive (eye and pitch) | `HordeTryStartDive`, `HordeMemberUpdate` | `0x0043D61E/27`, `0x0043CA99..CB38` | block 0 |
+| class 0x41 | `PropDrawOnlyType53`, `PropUpdateType62`, `LiftUpdate`, `OriginalItemPropUpdate`, `SpawnStoryModeItem` | `0x0046EC9F/AB`, `0x0046FAB2/BC`, `0x0046A38C`, `0x004677D7/E3`, `0x00467C03/0F` | block 0 |
+| class 0x23's sparks | `SpawnSpriteEffectsTowardEye` | `0x00407C1D..36` | block 0 |
+
+`SpawnSpriteEffectFromParams` (`0x00407423..48D`), `PlayerShotEffectSpawn`
+(`0x004170FB..15`) and `BuildEntitySpotlightArray` (`0x00480BC2..DD`) read the
+indexed word; the port reads the origin of the same block's matrix through
+`GameHost.viewPoint`, which `UpdateSceneViewAndLight` builds from that word
+every frame. `[likely]` equal -- they differ only after a later task in the
+same frame rewrites block 0's eye (the banner) -- and not changed.
+
+**The drawn block's yaw, `[g_camera_index * 0x1A4 + 0x9A60D0]`.** Now
+`CameraBlockYaw(G.g_camera_index)` (it read block 0's): `ActorHeadAimAngles`'
+two-player arm (`0x00453DD1`), `ZombieStateTargetMotionScript`,
+`ZombieShouldStandAndThrow` (`0x00458E48`), `ChooseDeathMotionDirectional`
+(`0x00456248`), `SeveredHeadUpdate` (`0x0040A2A6`), `WaterSplashUpdate`,
+`PropUpdateType43`, `BreakablePropUpdate`'s crack, `KindedPropUpdate`,
+`SpawnPropSplash`, `FallingContainerUpdate`, `Class26Subtype2Update`,
+`CarrierPropRoutine1`/`6` and the drawn strip (`render/slotmodels.ts`,
+`0x004406AD`), class 0x14's six (`...DeathA/B/C`, `...Reposition`,
+`...LeapFromSide`, `...ScriptedBreak`), the owl's two and the bats' wobble.
+`Boss3BodyUpdate` and `Boss3PathEffectUpdate` read block 0's by address and
+still do. Under scene state (1, 3) the two differ by whatever block 0's own
+angles say against its look-at: the test in `port.test.ts` ("which eye")
+puts block 0 a quarter turn off, and a body facing the drawn camera falls
+back rather than sideways.
+
+**Not ported, so nothing to change**: class 0x2D and 0x32 (every one of their
+reads); `ZombieStateCollapseToCondition4` (`0x0045E6C2/D0`); the two-player
+arm of `ActorFacePlayerTarget` (`0x0045604D..9A`); `Class23TrainingFightAlone`;
+class 0x25's head aim (`0x00485C3D..DA0`); the unfunctioned code at
+`0x004889C0` that evaluates path `0x36` into the **drawn** block's eye and
+look-at (`LEA [EAX + 0x9a60c0]` at `0x004889DE`/`0x00488A16`, then
+`CamBlockSetAnglesFromLookAt` -- a writer, whose owner is `[open]`); class 0x10's bone
+hook `0x0048D1F0` (`0x0048D2D7..E9`, `g_camera_eye + 15`);
+`PlacePlayerEntityFromViewPose`; the camera-facing sprites drawn by
+`CarriedPropDeflectedFlight`, `CatBranchTriggerUpdate`,
+`ScriptedCarrierUpdate33` and `Class26InstallSubtypeUpdate`;
+`PropHitSparkUpdate`; `PlaceFallingBreakableBatch`.
+
+**Left open**: `PropUpdateType72` reads the drawn block's **path frame**,
+`[g_camera_index * 0x1A4 + 0x9A6110]` (`0x0047095A`), and the port reads
+`g_cam_path_frame`; block 2's frame word has no writer found yet, so under
+(1, 3) the exe's cue may never fire. Not an eye, and Original Mode only.
+
 ## Timebase
 
 Times are **frame numbers at 60 Hz**. 99.68 % of the 44,750 real keyframe times

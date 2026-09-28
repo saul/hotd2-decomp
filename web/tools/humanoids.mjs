@@ -27,6 +27,7 @@ import { authoredFrameOfTicks } from "../src/core/play_cursor.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables, T } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -108,9 +109,13 @@ function clip(a) {
 
 function line(a) {
   const p = script.humanoids?.[String(a.at)];
-  const cmd = p && a.hum.pc >= 0 ? p.cmds[a.hum.pc] : null;
+  // `hum.routine` is the code pointer at `obj+0x00`; only the VM
+  // (`0x004842A0`) reads the command block.
+  const inVm = a.hum.routine === 0x004842a0;
+  const cmd = p && inVm ? p.cmds[a.hum.pc] : null;
   return `0x${a.at.toString(16)} ${a.name} pc=${a.hum.pc}`
-       + (cmd ? ` op=${cmd.op}/${cmd.mode} a=${cmd.a} b=${cmd.b}` : " (idle)")
+       + (cmd ? ` op=${cmd.op}/${cmd.mode} a=${cmd.a} b=${cmd.b}`
+              : ` (routine 0x${a.hum.routine.toString(16)})`)
        + ` frozen=${a.frozen} stall=${a.hum.stallFrames} ${clip(a)}`
        + ` pos=(${a.pos.x.toFixed(1)},${a.pos.y.toFixed(1)},${a.pos.z.toFixed(1)})`
        + ` dead=${a.dead} vis=${a.visible}`;
@@ -135,7 +140,8 @@ for (let i = 0; i <= frames; i++) {
     walker.tick(1 / 60);
     syncSpawns();
     syncCam();
-    GameUpdate(eye, 1 / 60, host, rng, events);
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, host, rng, events);
   } else {
     syncSpawns();
     syncCam();

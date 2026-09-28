@@ -95,8 +95,10 @@ export const DEATH_CLIP_HOLDING_WEAPON = 0x3f9;
  * strength of a class-0x31 reader. Nothing found writes it on a class-0x30
  * actor, and naming a bit after the other class's use of the offset is exactly
  * the guess this project bans. A literal until someone reads its writer.
+ * `EnemyZombieUpdate` tests the same bit before it files the actor for the
+ * distance rank (`TEST EAX, 0x8000000` at `0x00453465`).
  */
-const COND4_SPECIAL_BIT = 0x8000000;
+export const COND4_SPECIAL_BIT = 0x8000000;
 
 /** Body condition 4 with both `obj+0x136C` bits 0x2000000 and 0x8000000. */
 const DEATH_CLIP_COND4_SPECIAL = 0x3da;

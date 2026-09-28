@@ -35,7 +35,7 @@
  * ```
  *
  * `eye` is `g_camera_block_eye` — `0x009A60C0`, indexed by
- * `g_camera_index * 0x1A4`, which the port's single camera block collapses.
+ * `g_camera_index * 0x1A4` (`0x0046FAB2`, `0x0046FABC`): `CameraBlockEye`.
  * `obj+0x2A0[i]` is the dword at `+0x2A0 + 4i`, eight play cursors, one per
  * copy, all driving the one state block at `obj+0x324`.
  *
@@ -64,6 +64,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import {
   FtolS16, MatrixRotateY, MatrixScale, MatrixTranslate, RADIANS_TO_BAMS,
 } from "../matrix";
@@ -198,7 +199,7 @@ export function PropUpdateType62(p: BreakableProp, rng: Rng,
     return;
   }
   const w = PropWords(p, TYPE62_WORDS_ZERO);
-  const eye = G.g_camera_block_eye;
+  const eye = CameraBlockEye(G.g_camera_index);
   for (let i = 0; i < TYPE62_COPIES; i++) {
     let x: number, z: number;
     if (i < TYPE62_ROW) {

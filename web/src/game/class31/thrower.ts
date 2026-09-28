@@ -39,7 +39,6 @@ import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionPlayLength, ThrowHandsOf }
   from "../tables";
-import type { Vec3 } from "../vec";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import { ThrowerStateLeapToPoint } from "./leap";
@@ -424,7 +423,7 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
  * channel emptied, re-arming one hand on the way out; that is the divergence
  * this replaces.
  */
-export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, _eye: Vec3,
+export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost,
                                   rng: Rng, events?: Events): void {
   if (obj.sub === ThrowSub.Draw) {
     // `if (obj+0x121 == 0xFF && !ThrowerTryClaimAttackSlot(obj)) obj+0x121 = 0`
@@ -500,7 +499,7 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, _eye: Vec3,
  * use it at all: they write the position outright from the arc's closed form.
  */
 export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
-  const { eye, dt, rng, host, events } = f;
+  const { dt, rng, host, events } = f;
   // The cooldown is also the post-knockdown window in which shots ricochet:
   // `EnemyThrowerUpdate` clears `obj+0x34` bit 0x100 when it reaches zero.
   if (obj.cooldown > 0) {
@@ -510,7 +509,7 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // The shot drain, in the engine's own place: before the state runs.
   ThrowerOnShot(obj);
 
-  ThrowerRunState(obj, eye, dt, rng, host, events);
+  ThrowerRunState(obj, dt, rng, host, events);
 
   // `ThrowerPushOutOfWorld` (`FUN_00449D40`), the collision hook at
   // `obj+0x12F0`, and it runs **after** the state — the same place
@@ -541,7 +540,7 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // `FADD ST0,ST0` at `0x004498E1`), which goes with the item.
   HeadAimBeginDraw(obj, obj.thr, host);
   ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
-  HeadAimEndDraw(obj, obj.thr);
+  HeadAimEndDraw(obj, obj.thr, host);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
   // death chain's `0x10000` keeps a corpse off the list.
@@ -555,12 +554,12 @@ export const THROWER_CAMERA_RISE = 0.0;
  * The state table, dispatched. `g_class31_states` (0x00592960) is 35 entries
  * and every one has an arm here.
  */
-function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
+function ThrowerRunState(obj: ThrowerActor, dt: number, rng: Rng,
                          host: GameHost, events?: Events): void {
   const stance = ThrowerStanceOf(obj) & 3;
   switch (obj.state) {
     case ThrowerState.HitReaction:
-      return ThrowerStateHitReaction(obj, eye, rng, host);
+      return ThrowerStateHitReaction(obj, rng, host);
     case ThrowerState.FallAndLand:
       return ThrowerStateFallAndLand(obj, host, dt, rng, events);
     case ThrowerState.Death:
@@ -576,15 +575,15 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.FallToSurface:
       return ThrowerStateFallToSurface(obj, dt);
     case ThrowerState.GetUp:
-      return ThrowerStateGetUp(obj, eye, rng, host);
+      return ThrowerStateGetUp(obj, rng, host);
     case ThrowerState.RideObjectPath:
       return ThrowerStateRideObjectPath(obj, dt, rng, host);
     case ThrowerState.LeapStrike:
       return ThrowerStateLeapStrike(obj, dt, rng, host, events);
     case ThrowerState.CloseAndStrike:
-      return ThrowerStateCloseAndStrike(obj, eye, rng, host, events);
+      return ThrowerStateCloseAndStrike(obj, rng, host, events);
     case ThrowerState.GrabPlayer:
-      return ThrowerStateGrabPlayer(obj, eye, dt, rng, events);
+      return ThrowerStateGrabPlayer(obj, dt, rng, events);
     case ThrowerState.WaitForCue:
       return ThrowerStateWaitForCue(obj, dt, rng);
     case ThrowerState.Rearm:
@@ -598,16 +597,16 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.BlinkIn:
       return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:
-      return ThrowerStateStandAndDecide(obj, eye, dt, rng, host, events);
+      return ThrowerStateStandAndDecide(obj, dt, rng, host, events);
     case ThrowerState.WaitForPermit:
-      return ThrowerStateWaitForPermit(obj, eye, rng, host);
+      return ThrowerStateWaitForPermit(obj, rng, host);
     // Three ids, one handler: the router names 12 and 13, the wait names 9.
     case ThrowerState.Pounce:
     case ThrowerState.PounceNear:
     case ThrowerState.PounceFar:
       return ThrowerStateLeapDown(obj, dt, rng, host, events);
     case ThrowerState.LeapAside:
-      return ThrowerStateLeapAside(obj, eye, dt, rng, host, events);
+      return ThrowerStateLeapAside(obj, dt, rng, host, events);
     case ThrowerState.LeapToWallA:
     case ThrowerState.LeapToWallB:
     case ThrowerState.LeapToCeiling:
@@ -617,9 +616,9 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.EntranceClip:
       return ThrowerStateEntranceClip(obj);
     case ThrowerState.DelayedPounce:
-      return ThrowerStateDelayedPounce(obj, eye, dt, rng, host, events);
+      return ThrowerStateDelayedPounce(obj, dt, rng, host, events);
     case ThrowerState.Withdraw:
-      return ThrowerStateWithdraw(obj, eye, dt, rng);
+      return ThrowerStateWithdraw(obj, dt, rng);
     case ThrowerState.LeapToPoint:
       // No `ActorIntegrate`: the arc **interpolates** the position, the way
       // `ActorArcStep` does for every other leap in this class. Integrating a
@@ -634,7 +633,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     // `ThrowerStateStandAndDecide` left it with. The port turned it here with
     // an ease from before any of this was read.
     case ThrowerState.Throw:
-      return ThrowerStateThrow(obj, host, eye, rng, events);
+      return ThrowerStateThrow(obj, host, rng, events);
     // State 0 is the engine's shared no-op: an actor placed in it does nothing
     // for ever, which is what the engine does too.
     case ThrowerState.Idle:

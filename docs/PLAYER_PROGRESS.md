@@ -2719,6 +2719,31 @@ instructions and observes no waits, so it stepped over that step's
 `WaitRule.skipRunsCameraOn` runs the shot on to where the wait would have left
 it, the same way `WaitRule.retires` already settled the enemy gates.
 
+**And then it reached the cue holding the only permit** (NEW-BUGS-2: "if the
+first zombie mauls the civilian, the zombie then never attacks the player").
+With the cue reachable, `0xA030` graduated on frame 660 and stood in
+`ZombieStateHoldAtRange` for the rest of the stage with `g_attack_permits[0]`
+naming itself. That is the engine's shape, not a port slip:
+`ZombieStateHoldForCameraCue` (`FUN_0045BFD0`) runs its delegate first and tests
+the cue before its `Strike` bounce, so a captor already at the ring claims on
+the cue frame too and graduates into the hub still owning the permit, and its
+own permit refuses every claim after it. Nothing in class 0x30 lets it go; the
+**script** does. `EvtActionFinishSequence21` (`FUN_00403710`) opens by zeroing
+both permits, and queueing a `finish_sequence` clears `g_attack_committed`
+(`EvtOpQueueEvent30`, `FUN_0045F7F0`) — and block 16 step 6 queues one right
+after the cue, as block 9 step 3 does for the other two held spawns. The port
+had neither, and now has both (`script/state/camera_action.ts`,
+`Walker.applyQueueEvent`). Three smaller transcriptions came with it, all on
+the same path: the bounce frees the table entry only and not the whole
+`ReleaseAttackSlot`; `TryClaimAttackSlot` voids `obj+0x121` before it tests
+anything; and the hub calls the claim itself behind its own four tests instead
+of predicting its refusal — which kept a stale index, and refused a two-player
+claim whenever either permit was out — and drops an off-screen latch while the
+actor is still off screen (`0x00455748`). Driven under `?drive=1`
+(`web/tools/maul_then_attack.mjs`): the civilian dies on frame 200, the captor
+graduates on 321 and strikes on 322, and shot dead it releases the two
+`znebi2`, who both strike in turn.
+
 ### `IsPlayerAttackable`: two of three clauses
 
 The engine's gate is three tests and the port had none of them, standing in

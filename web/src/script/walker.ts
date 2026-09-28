@@ -389,6 +389,13 @@ const CIVILIAN_GATE_CLASSES: ReadonlySet<number> =
 const SCENE_MAJOR_PATH_CAMERA = 2;
 
 /**
+ * `queue_event`'s `finish_sequence` selector: the one value
+ * `EvtOpQueueEvent30` tests its selector dword against itself
+ * (`CMP EDX, 0x21` at `0x0045F82E`) rather than leaving to the action table.
+ */
+const QUEUE_SEL_FINISH_SEQUENCE = 0x21;
+
+/**
  * One opcode's implementation and how far this client honours it.
  *
  * `run` and `status` travel together on purpose -- see {@link Walker.OPS}.
@@ -1873,6 +1880,19 @@ export class Walker {
    * it queues; each handler says for itself whether it takes that one back.
    */
   applyQueueEvent(op: OpJson): string | undefined {
+    // **Queueing a `finish_sequence` drops the off-screen attack latch**, at
+    // queue time and before the action has run:
+    //
+    //     if (*(int *)(g_evt_ip + 4) == 0x21) g_attack_committed = 0;
+    //
+    // `MOV dword ptr [0x009a34f0], 0x0` at `0x0045F833` in
+    // `EvtOpQueueEvent30` (`FUN_0045F7F0`), after the skip test -- which the
+    // `0x30` op has already made -- and ahead of the ring bump. The action
+    // itself then frees both permits (`finish_sequence` in
+    // `state/camera_action.ts`). So a scene
+    // change hands the attack back to whoever claims next, whatever state the
+    // last holder was left in. `[proved]`
+    if (op.sel === QUEUE_SEL_FINISH_SEQUENCE) G.g_attack_committed = 0;
     this.ring.queued();
     const action = (op.action ? ACTIONS[op.action] : undefined) ?? UNMODELLED;
     return action(this, op);

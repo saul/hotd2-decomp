@@ -1351,6 +1351,33 @@ claiming one stores its index in `obj+0x121` and returns 1, which is what lets
 the approach state hand over to the attack state named by the descriptor tail.
 Fail, and the enemy keeps walking.
 
+**[proved]** How it claims, from `0x00455DE0` (and `ThrowerTryClaimAttackSlot`,
+`0x0044CA40`, instruction for instruction):
+
+* its **first** store is `obj+0x121 = 0xFF`, before any test — a refused claim
+  always leaves the actor holding no index, whatever it held;
+* `g_attack_committed` set refuses at once;
+* it offers **one** player's permit, not the first free one: `g_active_player`'s
+  with one attacker; with two, `rand() % 2`'s while one player is in play, the
+  same pick `NOT`'d if taken while one enemy is present, and otherwise the
+  player on the actor's half of the screen (`ActorScreenHalfSign`,
+  `0x00409C90`); `IsPlayerAttackable` then voids the pick;
+* the permit table holds **0 or 1** — whether a permit is out, not who has it
+  (the port stores the holder's id and `-1` for free, for its debug panel);
+* it does **not** write `obj+0x34`.
+
+Two things free a permit other than its holder. `ZombieStateHoldForCameraCue`
+(`0x0045BFD0`) zeroes `g_attack_permits[obj+0x121]` when its delegate reaches
+`Strike` — the table entry only, leaving `obj+0x121` and the off-screen latch —
+and **every `finish_sequence`** (`EvtActionFinishSequence21`, `0x00403710`)
+zeroes both. That second one is load-bearing: the hold tests its camera cue
+*before* its `Strike` bounce, so a captor already at the ring claims on the cue
+frame and graduates into `ZombieStateHoldAtRange` still owning the permit, and
+its own permit refuses its every claim after that until the script's next
+`finish_sequence` — queued right after the cue for all three held spawns in the
+game — lets it go. The hub itself (`0x00455748`) gives `g_attack_committed` back
+when the actor holding it is back at the ring and still off screen.
+
 That single byte does double duty: it gates the attack *and* it is what
 `SelectCameraLookAtTarget` tests. **The camera focuses on the enemy that holds
 the attack permit** — the one about to attack — and otherwise frames the pair.

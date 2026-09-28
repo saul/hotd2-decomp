@@ -12,9 +12,10 @@
  *
  * * **parked on a command whose condition is not met** — the normal way the VM
  *   waits, and the line names the condition and the value it is waiting on;
- * * **out of the VM** (`pc < 0`) — `ScriptedHumanoidIdle` (`FUN_00484D40`) is
- *   running, which does nothing but the removal test, so the actor is
- *   *supposed* to stand there;
+ * * **out of the VM** — `routine` is no longer the VM's. `ScriptedHumanoidIdle`
+ *   (`FUN_00484D40`) does nothing but the removal test, so the actor is
+ *   *supposed* to stand there; the three routines `op 17` installs move it
+ *   and end it themselves;
  * * **holding a pose** (`frozen`) — `obj+0x1324`, written by `op 1`, which
  *   stops `ActorAdvanceMotion` where it stands.
  *
@@ -31,7 +32,7 @@ import { T } from "../tables";
 import {
   HumanoidCond, HumanoidOp, HumanoidProgramOf, HumanoidTurn, type HumanoidCmd,
 } from "./index";
-import { HumanoidPath } from "./state";
+import { HumanoidPath, HumanoidRoutine } from "./state";
 
 /** What a command's condition is waiting on, in the condition's own terms. */
 function CondText(obj: HumanoidActor, c: HumanoidCmd): string {
@@ -42,7 +43,8 @@ function CondText(obj: HumanoidActor, c: HumanoidCmd): string {
       return `cam (${c.a},${c.b}) now (${G.g_active_cam_path},`
         + `${G.g_cam_path_frame})`;
     case HumanoidCond.MotionFrame:
-      return c.a === -1 ? "last motion frame" : `motion frame ==${c.a}`;
+      return `cursor ${obj.hum.playCursor}==`
+        + (c.a === -1 ? "play length - 1" : `${c.a}`);
     case HumanoidCond.ScriptFlag:
       return `script flag ${c.a}`;
     case HumanoidCond.FartherThanBefore:
@@ -67,10 +69,10 @@ export function ScriptedHumanoidDebug(a: Actor): ActorDebug {
   if (!p) return { summary: "no program in the bundle", hot: true };
 
   const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
-  // The gap that produced B13. `MotionFrame` divides by `m.frames`, so a clip
-  // with none pins the frame at 0 and a `MotionFrame` wait on it can never be
-  // met — the VM parks and the renderer holds one pose for the rest of the
-  // stage. It is the bundle's fault and not the state's, so say which.
+  // The gap that produced B13. A clip with no frames has no play length, so
+  // the cursor sits at 0 and a `MotionFrame` wait on it can never be met —
+  // the VM parks and the renderer holds one pose for the rest of the stage.
+  // It is the bundle's fault and not the state's, so say which.
   const clip = m
     ? `motion ${obj.motion} frame `
       + `${authoredFrameOfTicks(obj.playTicks, m.fps, m.frames)}/${m.frames}`
@@ -80,8 +82,11 @@ export function ScriptedHumanoidDebug(a: Actor): ActorDebug {
   let summary: string;
   let hot = !m;
 
-  if (obj.hum.pc < 0) {
-    summary = "program ended · idle";
+  if (obj.hum.routine !== HumanoidRoutine.Update) {
+    summary = obj.hum.routine === HumanoidRoutine.Idle
+      ? "program ended · idle"
+      : `handed to ${HumanoidRoutine[obj.hum.routine] ?? obj.hum.routine}`
+        + ` · y ${obj.pos.y.toFixed(2)} vy ${obj.vel.y.toFixed(3)}`;
   } else {
     const c = p.cmds[obj.hum.pc];
     if (!c) {

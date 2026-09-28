@@ -66,6 +66,7 @@ import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 import { ActorDespawn } from "../despawn";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { ActorFreeHitSlot } from "../hit_slots";
 import { ActorAdvanceMotion } from "../motion";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -485,14 +486,10 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
     // 00451c7f  MOV dword ptr [ESI], 0x451d20      ; RescueTargetAbandonedState
     // ```
     //
-    // `ActorFreeHitSlot` (`FUN_004092D0`) is `g_hit_slots[obj+0x3C] = 0;
-    // obj+0x3C = -1` and no flag test -- the same two stores the rescue
-    // makes inline at `0x00451BCB`, written the same way here.
+    // `ActorFreeHitSlot` (`FUN_004092D0`) tests nothing, so the index test
+    // is the caller's, here as at `0x00451C71`.
     if (obj.cameraSlot >= 0) ReleaseCameraEnemySlot(obj);
-    if (obj.hitSlot !== HIT_SLOT_NONE) {
-      G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
-      obj.hitSlot = HIT_SLOT_NONE;
-    }
+    if (obj.hitSlot !== HIT_SLOT_NONE) ActorFreeHitSlot(obj);
     t.state = RescueTargetState.Abandoned;
   }
 }

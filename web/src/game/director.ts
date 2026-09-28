@@ -103,6 +103,15 @@ export interface ScriptSpawn {
   at: number;
   class: number;
   pos?: [number, number, number];
+  /**
+   * The descriptor's own words, for the one class built from them alone:
+   * `desc+0x22` (`obj+0x11C`), the three angles at `+0x14`..`+0x1C` and the
+   * flags word at `+0x04`. The walker's `ActiveSpawn` carries all three; see
+   * {@link SpawnPathRidingProp}.
+   */
+  hp?: number;
+  orient?: [number, number, number];
+  flags?: number;
 }
 
 /**
@@ -312,6 +321,10 @@ export function SlotActorsForgetUnlisted(spawns: readonly ScriptSpawn[]): void {
  * `[port-only]`, as {@link SpawnSlotActors} is.
  */
 export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
+  if (s.class === SpawnClassValue.PathRidingProp) {
+    SpawnPathRidingProp(s, rng);
+    return;
+  }
   const placements = T.chars?.placements;
   if (!placements?.length) return;
   {
@@ -337,11 +350,23 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
     // through `render/characters.ts`. Opcode 0x0C, `SpawnFromDescriptorSmall`
     // (`FUN_00408BC0`): all three angles, which a static prop keeps for its
     // whole life and draws `RotX` first.
+    //
+    // **And the record's flags word**, which `SpawnFromDescriptorSmall` hands
+    // `ActorInitFlags` (`FUN_00408970`) before the `Init` runs. All fifteen
+    // class-0x13 descriptors in the game carry `0x8000`, no class-0x13 routine
+    // read (the Init, the selector, routines 0, 1, 2 and 6, the update)
+    // clears it, and `RegisterForShotTest` (`FUN_00405160`) refuses an object
+    // with it (`TEST AH, 0x80` at `0x00405168`): no class-0x13 prop is ever in
+    // the shot test. This arm used to drop the word, so stage 3's two boats --
+    // whose routines seat a 40-unit sphere at `obj+0x124` -- were shootable,
+    // and a sphere that size round the boat's origin took every pull aimed
+    // at a rider standing behind it: the riders "did not die when shot".
     if (s.class === SpawnClassValue.ScriptedProp) {
       if (!pl.class13) return;
       G.g_slot_actors_built.push(s.at);
       const a = ActorSpawn(s.at, SpawnClassValue.ScriptedProp, -1, "prop",
                            { class13: pl.class13, ...PlacementOrientation(pl),
+                             flags: pl.init_flags ?? 0,
                              pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                                        s.pos?.[2] ?? 0) },
                            rng);
@@ -455,6 +480,38 @@ export function SpawnSlotActor(s: ScriptSpawn, rng: Rng): void {
       return;
     }
   }
+}
+
+/**
+ * Class 0x28, as `EvtOpSpawnPlaced09` (`FUN_004088A0`) builds it.
+ *
+ * Opcode 9 allocates `g_class_handlers[desc[0]]`, runs `ActorInitFlags` on
+ * the descriptor's flags word, and copies `desc+0x22` into `obj+0x11C` (and
+ * `+0x11E`), the position into `obj+0x40..0x48` and the three angles into
+ * `obj+0x64..0x6C` -- and calls no `Init` and reads no tail. So there is no
+ * placement row to look up: everything the object starts with is on the
+ * spawn record, and the handler seats it on its first frame
+ * (`game/class28/`).
+ *
+ * `[port-only]` as a *function*, for the reason {@link SpawnSlotActors}
+ * gives: built once per listed spawn, which is the port's answer to a replay.
+ * Before this arm the spawn built nothing, and the object's draw ran in
+ * `render/rigs.ts` off the rig table with no object behind it.
+ */
+function SpawnPathRidingProp(s: ScriptSpawn, rng: Rng): void {
+  if (G.g_slot_actors_built.includes(s.at)) return;
+  if (ActorByAt(s.at)) return;
+  G.g_slot_actors_built.push(s.at);
+  const a = ActorSpawn(s.at, SpawnClassValue.PathRidingProp, -1,
+                       `path prop ${s.hp ?? 0}`,
+                       { hp: s.hp ?? 0, maxHp: s.hp ?? 0,
+                         flags: s.flags ?? 0,
+                         pitch: s.orient?.[0] ?? 0, yaw: s.orient?.[1] ?? 0,
+                         roll: s.orient?.[2] ?? 0,
+                         pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
+                                   s.pos?.[2] ?? 0) },
+                       rng);
+  a.visible = true;
 }
 
 /**

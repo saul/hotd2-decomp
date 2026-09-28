@@ -35,14 +35,17 @@ import { EvtActionHandler } from "./driver";
  * `[port-only]` as an enum: the engine passes the block's address.
  */
 export enum CameraPoseBlock {
-  /** `g_camera_blocks + 0x80` -- `g_camera_block_eye`, the block drawn. */
+  /**
+   * `g_camera_blocks + 0x80` -- `g_camera_block_eye`, camera block 0: the
+   * block every driver writes, and the one drawn outside scene state (1, 3).
+   */
   Camera = 0,
   /** `0x009C70C0` -- `g_cam_path_eye`, the deferred pose block. */
   Path = 1,
   /**
    * `0x009A6408` -- `g_camera_block2_eye`, camera block 2, which
    * `EvtRunQueuedActionsSyncViewBlock` passes (`PUSH 0x9a6408` at
-   * `0x00402450`).
+   * `0x00402450`), and `UpdateSceneViewAndLight` while it is the drawn block.
    */
   Block2 = 2,
 }

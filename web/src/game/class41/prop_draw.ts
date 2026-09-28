@@ -30,6 +30,7 @@
 import type { Rng } from "../../core/rng";
 import type { EffectDefJson } from "../../bundle";
 import { G } from "../globals";
+import { CameraBlockViewToWorld } from "../camera/view";
 import { T } from "../tables";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale,
@@ -75,13 +76,14 @@ export function PropMatrixPush(m?: Mat): Mat {
  * same result there is the camera's own view-to-world rotation under the
  * translation: `[I | t_view] . view_to_world = [R_v2w | p]`.
  *
- * `g_camera_view_to_world` is the one `UpdateSceneViewAndLight`
- * (`FUN_00401F40`) left this tick, which is the view the engine's draw is
- * under. `[port-only]` as a *signature*: the engine's call takes no argument
- * and edits the stack's top.
+ * The view-to-world is that of the block `g_camera_index` names, as
+ * `UpdateSceneViewAndLight` (`FUN_00401F40`) left it this tick -- the block
+ * whose world-to-view it put on the top of the stack (`0x0040212E`), which is
+ * the view the engine's draw is under. `[port-only]` as a *signature*: the
+ * engine's call takes no argument and edits the stack's top.
  */
 export function PropMatrixClearRotation(m: Mat): void {
-  const v = G.g_camera_view_to_world;
+  const v = CameraBlockViewToWorld(G.g_camera_index);
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) m[r * 4 + c] = v[r * 4 + c];
   }

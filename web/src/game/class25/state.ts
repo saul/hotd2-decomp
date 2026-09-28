@@ -75,6 +75,35 @@ export enum HumanoidDrawVariant {
  */
 export const HUMANOID_VARIANT3_SLOT = 0x1a37;
 
+/**
+ * `obj+0x00` — which routine the engine calls for this object every frame.
+ *
+ * The values **are** the exe's: the engine keeps a code pointer in the
+ * object's first word, `ScriptedHumanoidInit` (`FUN_004840D0`) writes the VM
+ * there, and the VM overwrites it -- `op -1` with the idle routine at
+ * `0x00484A87`, and `op 17` modes 0, 1 and 4 with one of three routines of
+ * their own at `0x004849E2`, `0x004849EA` and `0x00484A61`. Once one of those
+ * three is installed the VM never runs again: none of them reads the command
+ * block, and none of them runs the removal test.
+ *
+ * This used to be `pc = -1`, which could say "out of the VM" and nothing about
+ * *where to*, so every `op 17` fell through to the idle routine and an actor
+ * the engine drops into the canal stood on the jetty playing its fall for
+ * ever.
+ */
+export enum HumanoidRoutine {
+  /** `ScriptedHumanoidUpdate` (`FUN_004842A0`) — the VM. */
+  Update = 0x004842a0,
+  /** `ScriptedHumanoidIdle` (`FUN_00484D40`) — what `op -1` installs. */
+  Idle = 0x00484d40,
+  /** `ScriptedHumanoidFallAndSplash` (`FUN_00484DF0`) — `op 17` mode 0. */
+  FallAndSplash = 0x00484df0,
+  /** `ScriptedHumanoidLaunchAndDrop` (`FUN_00484EA0`) — `op 17` mode 1. */
+  LaunchAndDrop = 0x00484ea0,
+  /** `ScriptedHumanoidFallTimed` (`FUN_00484F90`) — `op 17` mode 4. */
+  FallTimed = 0x00484f90,
+}
+
 /** `op 11`'s mode, `obj+0x1358`. Modes above 2 write nothing at all. */
 export enum HumanoidPath {
   /** Not riding a path. */
@@ -86,9 +115,14 @@ export enum HumanoidPath {
 }
 
 export interface HumanoidTail {
+  /** `obj+0x00` — the routine installed. See {@link HumanoidRoutine}. */
+  routine: HumanoidRoutine;
   /**
-   * `obj+0x1394` — the command cursor. `-1` has left the VM, and
-   * `ScriptedHumanoidIdle` (`FUN_00484D40`) is what runs from then on.
+   * `obj+0x1394` — the command cursor. It is only a cursor: which routine
+   * runs is {@link routine}, and a program that has ended leaves this on its
+   * last command, as the engine does -- the frame that runs `op -1` stores the
+   * cursor it stopped on (`MOV [EDI+0x1394], ESI` at `0x00484A9C`), and
+   * nothing reads it again.
    *
    * A {@link ListCursor}. The engine keeps a **pointer** here — `MOV dword ptr
    * [EDI + 0x1394], ESI` (`89b794130000`) at `0x00484A9C`, with `ESI` stepped
@@ -204,6 +238,36 @@ export interface HumanoidTail {
    * cannot be read as "the arc's origin" for every class.
    */
   prevPos: Vec3;              // +0x13C0, also the shared arc record's start
+  /**
+   * `obj+0x19C` — the play cursor **the class's last draw sampled**, which is
+   * the one every motion test in this class reads: the VM's `mode 2` waits
+   * (`MOV EAX,[EDI+0x19C]`, `puVar5[0x67]` in the listing) and
+   * `ScriptedHumanoidFallAndSplash`'s freeze.
+   *
+   * Not {@link Actor.playTicks}, and the difference is `L62`. The engine's
+   * draw samples `obj+0x19C` from the counter at `obj+0x194` and only then
+   * steps the counter, so a routine reads the cursor its previous frame
+   * **showed**; the port steps the counter before the class runs, so reading
+   * `playTicks` here is reading a tick ahead. The port writes this where
+   * `ScriptedHumanoidDraw` (`FUN_00484FF0`) runs -- at the end of each of the
+   * class's routines -- and where the two motion primitives write it:
+   * `ActorSetMotion` (`FUN_00411930`) zeroes it and `ActorSetMotionBlended`
+   * (`FUN_004119A0`) sets it to its start.
+   *
+   * In the engine's units, a 60 Hz cursor over the 30 Hz clip -- the numbers
+   * the programs carry are these: `op 4 mode 2 a=66` on a 35-frame clip whose
+   * play length is 68. `[port-only]` placement: the word is the model block's,
+   * shared by every skinned class; the port keeps a copy on this arm because
+   * this is the class that reads it.
+   */
+  playCursor: number;         // +0x19C
+  /**
+   * `obj+0x1338` — `ScriptedHumanoidFallTimed` (`FUN_00484F90`)'s frame
+   * count, stepped every frame and fatal past 200. `ScriptedHumanoidInit`
+   * zeroes it (`param_1[0x4ce] = 0`); nothing else in the class touches it.
+   * Class 0x30 keeps a different clock in the same word.
+   */
+  fallFrames: number;         // +0x1338
 }
 
 /**
@@ -220,6 +284,7 @@ export interface HumanoidTail {
  */
 export function makeHumanoidTail(): HumanoidTail {
   return {
+    routine: HumanoidRoutine.Update,
     pc: 0,
     stallFrames: 0,
     turnMode: 0,
@@ -234,5 +299,7 @@ export function makeHumanoidTail(): HumanoidTail {
     bonePropFrame: 0,
     aimsHead: 0,
     prevPos: { x: 0, y: 0, z: 0 },
+    playCursor: 0,
+    fallFrames: 0,
   };
 }

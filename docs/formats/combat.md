@@ -290,7 +290,7 @@ The sites:
 | `0x23` | state 2 (`0x00490B00`) `0x00490C3B` | `RegisterForShotTest`, after `obj+0x70 = view(obj+0x100)` inline | after its own `0x8000` | | | |
 | `0x30` | `EnemyZombieUpdate` `0x0045347A`, every path through `ZombieAdvanceMotion` | `ActorRegisterCameraPoint(4.0)` | none | `g_actor_radius_by_char[type]`, `EnemyZombieInit` `0x00452E72` | build `0x00452E13` | — |
 | `0x30` twin | `ZombieTwinFollowHost` `0x004533CB` | `RegisterForShotTest` | none | | | |
-| `0x18` | through `EnemyZombieUpdate`, as `0x30` | | | | | |
+| `0x18` | through `EnemyZombieUpdate`, as `0x30`, inside `CarriedZombieUpdate18`'s carrier matrix | | | | | |
 | `0x45` head | `Boss3FightHeadUpdate` `0x004215AF` | `RegisterForShotTest`, after `obj+0x100 = obj+0x40` and `obj+0x70 = view(obj+0x100)` | `obj+0x1310 != 7` | `g_actor_radius_by_char`, `Boss3FightHeadInit` `0x0041FF81` | build `0x0041FF5C` | set `0x0041FF68`; cleared at `0x00420E81`, `0x00420F96`, `0x00422DD5` |
 | `0x45` body | `Boss3BodyUpdate` `0x00424160` | `RegisterForShotTest`, `obj+0x70 = view(obj+0x40..0x48)` at `0x00423FD1` | none at the call | `[0x004C4E48]`, `Boss3BodyInit` `0x004203C0` | build `0x004203A0` | — (`|= 0x80080000`) |
 
@@ -310,7 +310,11 @@ list instead:
   `0x0043A2C7` (1.0); `0x30`'s thrown weapon `0x0045A612`; `0x31`
   `EnemyThrowerUpdate` `0x00449991` (0.0), its projectile
   (`ThrownWeaponUpdate`) `0x004508AA`.
-* `0x13` `0x0043FFA4`; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
+* `0x13` `0x0043FFA4` -- which takes nothing: all fifteen class-0x13 records
+  carry `0x8000` in their flags word (`ActorInitFlags`), no class-0x13 routine
+  read clears it, so stage 3's boats and their 40-unit `obj+0x124` are never in
+  the list. The port's spawn arm dropped the word until 2026-09-28, and the
+  boat's sphere took the pulls aimed at its riders; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
   `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
@@ -2376,6 +2380,16 @@ camera eye raised **15.0** (`FADD double [0x00565DD8]`) -- unless
 `T(eye) Ry(g_camera_block_yaw_bams)` applied to `((1 - 2*permit) * -1.2, 15,
 -1.5)`: 1.2 to the side of the player whose permit it holds. `[proved]`
 
+The eye in both branches is `g_camera_eye` (`0x009C71E0..E8`: the three
+`MOV`s at `0x00453DA3..0x00453DAE` that feed `MatrixTranslate`, and the
+`FLD`s at `0x00453E66`, `0x00453E7B`, `0x00453E8E`), and the routine takes no
+other eye -- its one argument is `pt`. `[proved]` That is the **gameplay** eye,
+which the path hooks write as the pose's eye with `y - 15.0` (`0x004C4398`),
+while the view is built from the camera block's eye. So on a path the `+ 15`
+undoes the drop and the target is the lens: a head level with the camera looks
+level into it. `[likely]` for "the block's eye is the pose's" -- in the port's
+page, stage 1 block 1, the lens sits at exactly `g_camera_eye.y + 15`.
+
 What follows from it, each `[proved]` from the same listings:
 
 * **A quarter turn each way, at `0xC0` a drawn frame.** A step that would
@@ -2393,7 +2407,11 @@ What follows from it, each `[proved]` from the same listings:
   class-0x30 corpse does (`ZombieEnterCorpseState` raises `0xC000` at
   `0x0045675E`), and nothing in the hook tests death, so a corpse's head keeps
   turning toward the camera from the point where it died, re-projected through
-  wherever the camera is now.
+  wherever the camera is now. The same holds for one frame on a live actor:
+  the record was written through the previous frame's view (`+0x68 =
+  MatrixTransformPoint(top, +0x7C)`, `0x0041168A..0x004116C9`) and is read
+  back through this frame's `g_camera_blocks`, so it comes back moved by the
+  camera's own move between the two.
 * **The angles start aimed.** `EnemyZombieInit` (`0x00452EAB`) and
   `EnemyThrowerInit` (`0x004496FE`) both seed `obj+0x1320`/`+0x1324` with
   `VecToAngles(eye + (0, 15, 0) - pos)` under the same `0x40000` test.

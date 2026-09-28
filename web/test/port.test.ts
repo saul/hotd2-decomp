@@ -406,6 +406,13 @@ import {
   MouseBranchTriggerUpdate, MouseState, MouseWanderUpdate,
 } from "../src/game/class52";
 import {
+  CAT_BRANCH_BLOCK, CAT_LIFE_FRAMES, CAT_TRIGGER_CUE_MOTION,
+  CAT_TRIGGER_FLEE_MOTION,
+  CAT_TRIGGER_HIT_RADIUS, CAT_TRIGGER_IDLE_MOTION, CAT_TRIGGER_REMOVE_FLAG,
+  CAT_TRIGGER_STOP_X, CatTriggerState, type CatTail,
+} from "../src/game/class53";
+import { CAT_CLIPS, CAT_MOTIONS } from "../src/game/class53/records";
+import {
   PlaceChainSegments, PlaceStoryModeSwitch,
 } from "../src/game/class41/triggers";
 import {
@@ -894,17 +901,19 @@ console.log("an unread class:");
 {
   const rng = new Rng(7);
   const events = scene(0, rng);
-  // The cat. It has no module in `g_class_handlers`, so it must not move.
-  const cat = ActorSpawn(0x2000, SpawnClass.SkinnedNpc, 1, "cat");
-  cat.visible = true;
-  cat.attackState = 1;
-  cat.hp = 10;
-  cat.pos = vec3(0, 0, 60);
-  const start = { ...cat.pos };
+  // Class 0x42 has no module in `g_class_handlers`, so it must not move. This
+  // used to be the cat, until the cat was read: class 0x53 has a module now,
+  // and its clips are *meant* to carry it -- see "class 0x53, the cat".
+  const idle = ActorSpawn(0x2000, SpawnClass.FallingBreakables, 1, "unread");
+  idle.visible = true;
+  idle.attackState = 1;
+  idle.hp = 10;
+  idle.pos = vec3(0, 0, 60);
+  const start = { ...idle.pos };
   run(600, rng, events);
-  check("class 0x53 stayed where the script put it",
-        cat.pos.x === start.x && cat.pos.z === start.z);
-  check("class 0x53 took no permit", cat.attackPermit === -1);
+  check("class 0x42 stayed where the script put it",
+        idle.pos.x === start.x && idle.pos.z === start.z);
+  check("class 0x42 took no permit", idle.attackPermit === -1);
 }
 
 // -- 3. `attack_state` does not gate the swing ------------------------------
@@ -4387,6 +4396,165 @@ console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");
     tick(b);
     check("...but it will not overwrite a route already chosen",
           G.g_script_branch_var === 1, String(G.g_script_branch_var));
+  }
+}
+
+console.log("\nclass 0x53, the cat: the playlist, the run and the flight:");
+{
+  // `cat.bin`'s clips as `nya.bin` bakes them: the frame counts and the real
+  // `g_motion_play_length` (0x004E07D0) -- 0x305 58, 0x2FC 79, 0x2FD 44,
+  // 0x2FA 48 -- because every step of the playlist is measured against the
+  // play length, and a fixture that derived it would pass a bundle that got
+  // it wrong. The travel is the shape of the real clips': 0x305 stands,
+  // 0x2FC creeps 2.6 units, 0x2FD runs 12.7 a pass.
+  const CAT_TYPE = {
+    ...TYPE, type: 0x1a, name: "cat", file: "cat.bin", bone_count: 19,
+    motions: {
+      [String(CAT_TRIGGER_IDLE_MOTION)]: motion(30, 0, 58),
+      "764": motion(41, 0.066, 79),
+      [String(CAT_TRIGGER_FLEE_MOTION)]: motion(23, 0.58, 44),
+      [String(CAT_TRIGGER_CUE_MOTION)]: motion(25, 0.16, 48),
+    },
+  } as unknown as CharacterType;
+  const CAT_CHARS = { ...CHARS,
+    types: { ...CHARS.types, "26": CAT_TYPE } } as CharactersJson;
+  const catScene = (tail: { anim_set: number; subtype: number },
+                    at: Partial<Actor>, mode = GameMode.Original) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CAT_CHARS, undefined, undefined, undefined);
+    G.g_GameMode = mode;
+    const a = ActorSpawn(0x6e98, SpawnClass.SkinnedNpc, 0x1a, "cat",
+                         { class53: tail, ...at }, new Rng(5));
+    a.visible = true;
+    return a;
+  };
+  const tailOf = (a: Actor) => (a as Actor & { cat: CatTail }).cat;
+  // One frame the way `SceneTaskWalk` runs it: the clip clock first -- the
+  // engine's draw and `model[0] += 1` -- then the class's routine, which
+  // reads the counter after the increment as the engine's does.
+  const frame = (a: Actor) => {
+    G.g_shot_test_list = [];
+    ActorAdvanceMotion(a, 1 / 60);
+    g_class_handlers[a.cls]?.update(
+      a, { eye: EYE, dt: 1 / 60, rng: new Rng(1), host: NULL_HOST });
+  };
+
+  check("CAT_CLIPS carries every clip the playlist and the trigger name",
+        CAT_MOTIONS.every((m) => m < 0 || CAT_CLIPS.includes(m))
+        && [CAT_TRIGGER_IDLE_MOTION, CAT_TRIGGER_CUE_MOTION,
+            CAT_TRIGGER_FLEE_MOTION].every((m) => CAT_CLIPS.includes(m)),
+        CAT_CLIPS.map((m) => m.toString(16)).join(","));
+
+  // Stage 2 block 11's cat, as it ships: set 5, sub-type 1, at evt 0x6E98.
+  // The report was that it never moves; the exe has it stand, creep, and then
+  // run until it is taken away at frame 1001.
+  {
+    const a = catScene({ anim_set: 5, subtype: 1 },
+                       { pos: vec3(-890, -6, -1015), yaw: 36864 });
+    const sub = tailOf(a);
+    check("CatInit seats entry 0 of set 5, 0x305",
+          a.motion === CAT_TRIGGER_IDLE_MOTION, a.motion.toString(16));
+    check("...raises obj+0x38 bit 3 for sub-type 1",
+          (a.flags38 & ZombieAux.SceneLit) !== 0, String(a.flags38));
+    check("...and takes the per-bone shot bit back",
+          (a.flags & ActorFlag.ShootPerBone) === 0, a.flags.toString(16));
+    const start = { ...a.pos };
+    const clip: number[] = [];
+    let registered = 0;
+    let at192 = { ...a.pos };
+    let aliveAt1000 = false;
+    for (let f = 1; f <= CAT_LIFE_FRAMES + 1; f++) {
+      frame(a);
+      clip[f] = a.motion;
+      if (G.g_shot_test_list.some((e) => e.at === a.at)) registered++;
+      if (f === 192) at192 = { ...a.pos };
+      if (f === CAT_LIFE_FRAMES) aliveAt1000 = !a.despawned;
+    }
+    check("0x305 plays twice, 57 frames a pass, then 0x2FC",
+          clip[113] === CAT_TRIGGER_IDLE_MOTION && clip[114] === 764,
+          `${clip[113]?.toString(16)} ${clip[114]?.toString(16)}`);
+    check("0x2FC plays once, 78 frames, then 0x2FD",
+          clip[191] === 764 && clip[192] === CAT_TRIGGER_FLEE_MOTION,
+          `${clip[191]?.toString(16)} ${clip[192]?.toString(16)}`);
+    check("...and 0x2FD is the last: -2 plays it for ever",
+          clip[CAT_LIFE_FRAMES] === CAT_TRIGGER_FLEE_MOTION,
+          clip[CAT_LIFE_FRAMES]?.toString(16));
+    const crept = Math.hypot(at192.x - start.x, at192.z - start.z);
+    const ran = Math.hypot(a.pos.x - at192.x, a.pos.z - at192.z);
+    check("it only creeps before the run", crept > 0.5 && crept < 5,
+          crept.toFixed(2));
+    // 808 frames of a clip worth 12.7 units every 43: about 230 units, which
+    // is off the screen from anywhere the camera stands in that room.
+    check("and runs a long way after it", ran > 150, ran.toFixed(1));
+    check("it is still there on frame 1000", aliveAt1000);
+    check("...and gone on frame 1001", a.despawned);
+    check("a cat that plays its list is never in the shot test",
+          registered === 0, String(registered));
+    check("...and its life counter is what took it", sub.frames === 1001,
+          String(sub.frames));
+  }
+
+  // Block 8's trigger: set 0, sub-type 2, facing -x at x = -411.3.
+  {
+    const a = catScene({ anim_set: 0, subtype: 2 },
+                       { pos: vec3(-411.3, -5, -1271.5), yaw: 0x4000 });
+    const sub = tailOf(a);
+    check("the trigger is seated on 0x305 with the 4.0 sphere",
+          a.motion === CAT_TRIGGER_IDLE_MOTION
+          && a.hitRadius === CAT_TRIGGER_HIT_RADIUS
+          && sub.set === CatTriggerState.Waiting,
+          `${a.motion.toString(16)} ${a.hitRadius} ${sub.set}`);
+    G.g_evt_block_index = 3;
+    const clip: number[] = [];
+    let registered = 0;
+    for (let f = 1; f <= 200; f++) {
+      frame(a);
+      clip[f] = a.motion;
+      if (G.g_shot_test_list.some((e) => e.at === a.at)) registered++;
+    }
+    check("it cues 0x2FA once 200 frames have passed, not before",
+          clip[199] === CAT_TRIGGER_IDLE_MOTION
+          && clip[200] === CAT_TRIGGER_CUE_MOTION,
+          `${clip[199]?.toString(16)} ${clip[200]?.toString(16)}`);
+    check("...registering its feet for the shot test every frame",
+          registered === 200
+          && a.shotCentre.x === a.pos.x && a.shotCentre.y === a.pos.y,
+          String(registered));
+    check("...and it stands while it waits", a.pos.x === -411.3,
+          String(a.pos.x));
+    G.g_evt_block_index = CAT_BRANCH_BLOCK;
+    MarkActorShot(a, 0, 0);
+    frame(a);
+    check("shot in block 8, it writes route 2 and runs on 0x2FD",
+          G.g_script_branch_var === 2 && a.motion === CAT_TRIGGER_FLEE_MOTION
+          && sub.set === CatTriggerState.Fleeing,
+          `${G.g_script_branch_var} ${a.motion.toString(16)} ${sub.set}`);
+    let frames = 0;
+    let lastX = a.pos.x;
+    let backwards = false;
+    while (sub.set === CatTriggerState.Fleeing && frames < 3000) {
+      frame(a);
+      if (a.pos.x > lastX + 1e-6) backwards = true;
+      lastX = a.pos.x;
+      frames++;
+    }
+    check("its clip carries it along -x until it is past -478",
+          sub.set === CatTriggerState.Stopped
+          && a.pos.x < CAT_TRIGGER_STOP_X && !backwards,
+          `${sub.set} x ${a.pos.x.toFixed(2)} after ${frames}`);
+    check("...where it settles on 0x305 again",
+          a.motion === CAT_TRIGGER_IDLE_MOTION, a.motion.toString(16));
+    G.g_script_flags[CAT_TRIGGER_REMOVE_FLAG] = 1;
+    frame(a);
+    check("g_script_flags[0x83] takes it away", a.despawned);
+  }
+
+  // The mode gate is in the Init: in arcade there is no trigger at all.
+  {
+    const a = catScene({ anim_set: 0, subtype: 2 }, { pos: vec3(0, 0, 0) },
+                       GameMode.Arcade);
+    check("an arcade trigger despawns in its Init", a.despawned);
   }
 }
 

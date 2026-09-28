@@ -63,6 +63,12 @@ const CASES = [
   ["bat st4 b0", 4, 0, 6, 0x46, ["Wait", "Fly"]],
   ["bat st4 b2", 4, 2, 6, 0x46, ["Wait", "Fly"]],
   ["bat st3 b4", 3, 4, 5, 0x46, ["Wait", "Fly"]],
+  // The cat that plays its list (class 0x53 sub-type 1, set 5): its summary
+  // leads with the clip, so these are the three entries of the row. The last
+  // one, 0x2FD, is the run -- and it is only reachable if the bundle baked the
+  // whole row, which is the half of the block-11 report the port could not
+  // fix on its own: with entry 0 alone the cat stood on 0x305 for ever.
+  ["cat st2 b11", 2, 11, 7, 0x53, ["0x305", "0x2fc", "0x2fd"], undefined, 100],
 ];
 
 let failures = 0;
@@ -77,7 +83,7 @@ function check(name, ok, detail = "") {
 // asserted nothing. `verify_all.py` counts a 3 separately and names it.
 if (!hasBundle()) skipNoBundle("animals");
 
-for (const [name, stage, block, step, cls, wanted, entry] of CASES) {
+for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
   const dir = join(BUNDLE_ROOT, `stage${stage}`);
   const script = JSON.parse(
     readFileSync(join(dir, `stage${stage}.script.json`), "utf8"));
@@ -118,6 +124,9 @@ for (const [name, stage, block, step, cls, wanted, entry] of CASES) {
   // may be anywhere in it.
   let found = 0;
   const seen = new Map();
+  // Where each actor was first seen, and the furthest it has been from there.
+  const home = new Map();
+  let travel = 0;
   if (!seekTo(walker, block, step, 0, 500000, entry)) {
     check(`${name}: seek to ${stage}/${block}/${step}`, false);
     continue;
@@ -148,6 +157,9 @@ for (const [name, stage, block, step, cls, wanted, entry] of CASES) {
     for (const o of G.g_object_list) {
       if (o.cls !== cls) continue;
       found = Math.max(found, 1);
+      const h = home.get(o.at);
+      if (!h) home.set(o.at, { x: o.pos.x, z: o.pos.z });
+      else travel = Math.max(travel, Math.hypot(o.pos.x - h.x, o.pos.z - h.z));
       const d = g_class_handlers[cls]?.debug?.(o);
       if (d) {
         const k = `${o.at.toString(16)} ${d.summary}`;
@@ -169,6 +181,14 @@ for (const [name, stage, block, step, cls, wanted, entry] of CASES) {
   for (const want of wanted) {
     check(`${name}: it reaches ${want}`, states.has(want),
           [...states].join(","));
+  }
+  // A state name can be reached by a clip id that has no frames behind it:
+  // the cat's playlist steps onto 0x2FD whether or not the bundle baked it,
+  // and an unbaked clip carries nobody anywhere. Where the behaviour *is* the
+  // travel, the travel is what is asserted.
+  if (minTravel !== undefined) {
+    check(`${name}: it travels at least ${minTravel} units`,
+          travel >= minTravel, travel.toFixed(1));
   }
   // The counters are the reason these three were worth porting: a class that
   // joins them and never gives them back is a gate that never opens, and one

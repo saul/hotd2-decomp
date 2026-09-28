@@ -37,6 +37,7 @@ import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
+import { makeCatTail, type CatTail } from "./class53/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
   from "./class33/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
@@ -1678,7 +1679,9 @@ export interface ActorBase {
   hitRadius: number;        // +0x124
   /**
    * Class 0x53's descriptor tail — the animation set and the sub-type. Sub-type
-   * 2 and up is a shootable route-branch trigger, and only in event block 8.
+   * 2 and up is a shootable route-branch trigger, and only in event block 8;
+   * 0 and 1 play their set's playlist. `CatInit` copies what it keeps into
+   * the class's own sub-block, `cat` (`class53/state.ts`).
    */
   class53: CharacterPlacement["class53"];
   /**
@@ -2157,6 +2160,7 @@ export type Actor =
                    companion: JudgmentCompanionTail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
+  | (ActorBase & { cls: SpawnClass.SkinnedNpc; cat: CatTail })
   | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
   | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
@@ -2172,7 +2176,7 @@ export type Actor =
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
-      | SpawnClass.Mouse | SpawnClass.WaterEnemy
+      | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.Boss3
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
@@ -2421,6 +2425,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };
+  }
+  if (cls === SpawnClass.SkinnedNpc) {
+    return { ...head, cls, cat: makeCatTail() };
   }
   if (cls === SpawnClass.WaterEnemy) {
     return { ...head, cls, fish: makeFishTail() };

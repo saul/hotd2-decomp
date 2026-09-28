@@ -21107,3 +21107,75 @@ port's own routine. `web/tools/drop_pitch.mjs` is that check: it fails on
   database; the `export-annotations` round trip has to be run from the main
   checkout.
 
+## 2026-09-28 -- the cat runs: `CatMotionListUpdate`, and the clip no bundle carried
+
+Report: stage 2 block 11's cat (`?stage=2&original=1&mode=play&block=11&step=7&op=32&frame=1012`)
+stands still where the game has it run off screen. The spawn is evt `0x6E98`,
+class 0x53, tail set 5 / sub-type 1. `CatInit` (`FUN_00431250`) sends sub-types
+0 and 1 to `FUN_00431340`, which nothing had named or ported: the port's
+class-0x53 module had the trigger arm only, and an empty update for the other
+three spawns. Read it whole and named it `CatMotionListUpdate`: a playlist per
+animation set in `g_cat_motions` (`0x00589A64`, 6x5 s16, `-1` ends a row) with
+pass counts in `g_cat_motion_repeats` (`0x00589AA0`, same shape, `-2` for ever);
+the counter resets on reaching `play_length - 1`, the next clip is written
+straight into `obj+0x1B4` (no `ActorSetMotion`, no fade), and `ActorDespawn`
+comes once `sub+0x12` passes 1000. It writes no position. The travel is
+`0x2FD`'s root motion through `SkeletonApplyRootMotion` from the draw -- 12.7
+units a 44-frame pass. The tables' length is the routine's own: it names both
+bases, 0x3C bytes apart.
+
+Read the rest of the class in the same pass. `CatBranchTriggerUpdate`'s annotation
+was right about the gate and silent about the flight, the 200-frame cue and the
+`g_script_flags[0x83]` despawn (stage 2 sets flag 131 right after freeing
+`cat.bin`); its last call, `FUN_0043F950`, is named
+`ActorRegisterOriginInViewSpace` -- `obj+0x70 = view(obj+0x40)` and then
+`RegisterForShotTest`, the call past the `MatrixStackPop` that Ghidra's
+pseudocode stops at (`L35`, read from the bytes at `0x0043F9C2`). Its first
+name, `ActorRegisterPositionForShotTest`, was refused by the Ghidra bridge as a
+token-superset of `RegisterForShotTest`. Nothing in the trigger clears
+`obj+0x34` bit 3; the port's did, and set `dead` on the shot. `CatInit` also
+raises `obj+0x38` bit 3 (scene-lit) for sub-type 1 and writes `obj+0x124 = 4.0`
+for the trigger, neither of which the port did.
+
+Ported all three in `game/class53/` (the tables in `records.ts`, data-only and
+imported by the exporter), with `registersForShotTest`: the list cat never
+registers and cannot be shot. The class's routines test the counter after the
+draw's increment, which is the value the director's `ActorAdvanceMotion` leaves
+before the update -- so the one-tick cursor lead recorded in the entry above
+does not reach this class.
+
+**The other half was the bundle.** The exporter's class-0x53 rule baked entry 0
+of each spawn's set, so character type `0x1A` carried `0x2FC`, `0x2FF`, `0x301`
+and `0x305` -- and not `0x2FD`, in any stage. With the port fixed and the old
+bundle, the cat crept 2.7 units on `0x2FC` and stopped on a clip with no frames
+and a play length of zero. `CAT_CLIPS` (every id in the table) is baked now.
+`tools/animals.mjs` got a stage-2 block-11 case with a travel floor: it fails
+on the shared `extract/player` (2.7 units) and passes on a fresh export; its
+state check alone passed on both, because the clip *id* steps whether or not
+the clip exists.
+
+**Wrong turns.**
+
+* The first `--all` export I made reported the cat with its old four clips,
+  and a single-stage export of the same tree had nine. It was not a stale
+  build: `compare_bundles.py` showed that directory's manifest naming a
+  different `arcscript.ts` and a class-0x31 table I had not touched. The
+  scratchpad directory is shared by every agent of the session, and another one
+  had exported into the same `scratchpad/bundle` at the same time; its
+  manifest won. Re-exported into a directory named for this task. The memory
+  note about `extract/player` contending applies to any shared path, the
+  scratchpad included.
+* The first animals case asserted only the states the cat reached, and passed
+  on the old bundle; see above.
+
+**Found, not fixed.** `rootDelta` (`game/root_motion.ts`) gives a clip's wrap
+frame `(root[next] - root[0]) / frames` -- zero on the wrap itself -- and its
+comment says the engine's damped reset contributes "very nearly nothing". The
+bytes (`0x00410C8A`..`0x00410CEC`, then the ordinary delta at `0x00410DA8`)
+reset the baseline to `r + (r - b) / L` and then take `r - baseline`, which is
+`(b - r) / L`: one *average* step, in the direction of travel. The port loses
+that step on every loop of every looping clip -- about 2% of `0x2FD`'s travel,
+and the same for every zombie's walk -- and the port also has no stored
+baseline, so a clip written without `ActorSetMotion` (this class) is measured
+from the old clip's frame index in the new clip's table. Shared by every class,
+so left for its own change.

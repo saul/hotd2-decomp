@@ -83,7 +83,7 @@ holding paths like `COM\220_Y_M.WAV`, which is decisive.
 | `0x16`/`0x17` | `WaterFieldCreate` (`FUN_00442290`) / `WaterWaveSourceAdd` (`FUN_004422D0`) | 6/8 | **The water-wave field.** `0x16` allocates the 0x2C-byte field `g_water_wave_field` points at, with its spawn's own `y` as the plane, and kills itself; `0x17` hangs one 0x68-byte wave-source task in the field's first free slot (a full field leaves the spawn alive to try again), `obj+0x11C` selecting travelling (`WaveEvalTravelling`, `FUN_00442110`) or circular (`WaveEvalCircular`, `FUN_00442210`), `{amplitude, wavelength, speed}` from its tail and the orientation from the spawn. `WaterFieldSampleHeight` (`FUN_00442390`) is the plane plus every ticked source's wave. Stage 2's boss blocks alone place them -- 35 and 39 at `y = -25.5007` with two travelling sources, 37 and 41 at `-25.0` with none -- and the stage-2 boss alone reads them: its fish are seated 1 (round A) or 10 (round B) under the surface, and its breaks and deaths ride it. **Ported** (`game/class16/`, `game/class17/`). | `[proved]` |
 | `0x15` | `FUN_00441750` | 4 | **Row spawner for floating props** — N copies spaced by a delta vector, each sampling the wave field. | `[proved]` |
 | `0x52` | `MouseInit` (`FUN_0043F4C0`) | 10 | **The mouse.** Its ten draw slots `0x1385`..`0x138E` are `mouse.bin` entries 0 to 9 — an asset filename, which is one of the binary's two name tables and settles a species this section had as `[open]` on the grounds that the class plays no sound. Subtypes 0 and 1 run `MouseWanderUpdate` (`FUN_0043F5C0`): 0.4 units a frame along the spawn yaw, a 40% chance every hundredth frame to hold for 60 and turn by the difference of two twelve-bit draws, and a despawn at 600 frames. Subtypes 2–4 run `MouseBranchTriggerUpdate` (`FUN_0043F720`), a **shootable route-branch trigger**: the first hit writes `g_script_branch_var` from the signed byte at `0x00564442 + subtype` — **2, 1, 2** for subtypes 2, 3, 4 — and it then runs the strip and flees until it passes its own bound. **Only in Original Mode**: the Init despawns subtypes 2–4 outright unless `g_GameMode == 1`. Stage 4 block 10 is the clean case, `next = [12, 18, 19]` with one subtype-3 and one subtype-4 mouse in it. **Ported** (`game/class52/`), drawn and shot through `render/slotmodels.ts` and `ShotTestSphere`. | `[proved]` |
-| `0x53` | `CatInit` (`FUN_00431250`) | 4 | **Skinned NPC.** Subtype ≥2 runs `CatBranchTriggerUpdate` (`FUN_00431430`), a shootable branch trigger that writes `g_script_branch_var = 2` — but **only in event block 8, and only while the variable is still 0** — then reacts and runs away. **Only in Original Mode.** All four spawns are stage 2, in blocks 3, 5, 8 and 11; the block gate is what keeps the three outside block 8 from writing a 2 into a record that has no slot 2, and `tools/verify_branches.py` fails if it is dropped. **Ported** (`game/class53/`). | `[proved]` |
+| `0x53` | `CatInit` (`FUN_00431250`) | 4 | **The cat** (character type `0x1A`, `cat.bin`). Subtypes 0 and 1 run `CatMotionListUpdate` (`FUN_00431340`): the set's row of `g_cat_motions` (`0x00589A64`), each clip repeated per `g_cat_motion_repeats` (`0x00589AA0`), and a despawn once 1000 frames have passed — the last clip of four of the six rows is `0x2FD`, whose root motion is what carries the cat out of the room. Subtype ≥2 runs `CatBranchTriggerUpdate` (`FUN_00431430`), a shootable branch trigger that writes `g_script_branch_var = 2` — but **only in event block 8, and only while the variable is still 0** — then runs on `0x2FD` until `x < -478`. **The trigger only in Original Mode.** All four spawns are stage 2, in blocks 3, 5, 8 and 11; the block gate is what keeps the three outside block 8 from writing a 2 into a record that has no slot 2, and `tools/verify_branches.py` fails if it is dropped. **Ported** (`game/class53/`). See [the cat's two routines](#the-cats-two-routines). | `[proved]` |
 | `0x40` | `PlaceHorde` (`FUN_0043BD30`) | 9 | **The horde — worms (`[likely]`, from the model) that come up out of the street, and the prop they push aside.** A placer on `obj+0x130C` (the opcode-0x09 descriptor's `+0x25`): **1** allocates N `0x13F4`-byte members running `HordeMemberInit` (`FUN_0043BEF0`) into `g_horde_members` (`0x007DCC20`, 10 slots) — 8, or 10 with two players; 6/8 in evt blocks 0x0E/0x12; 4 in block 0x19 — each carrying its index at `+0x131B`, then `ActorKill`s itself; **2** is `SpawnHordeEmergeProp` (`FUN_0043DC30`), a `0x1F8`-byte prop at `(x, -9.2769, -538.8)` drawing `komono_st1b.bin` 12 twice (`HordeEmergePropUpdate`, `FUN_0043DD00`); **0** builds one member (unshipped). Seven descriptors, nine spawn instructions: five selector 1 (stage 1 blocks 3, 8; stage 2 blocks 0x0E, 0x12, 0x19) and four selector 2 (stage 1 blocks 3, 7, 8, 12) — this row used to say all nine were hordes. Every member is character type **0x1D = `mol.bin`**, drawn by the side-block **sub-model** (`SubModelInit`, `FUN_0040EAE0`, and its family), formation (`side+0x68`) and skin (`obj+0x1350`, a row of `g_submodel_bone_slots`) chosen from `g_evt_block_index`. `HordeMemberUpdate` (`FUN_0043C440`): hold, walk the `g_horde_formation` spline, wander a grid (`g_horde_wander_origin`/`_cell`) avoiding members inside 6.0, and — one member at a time, by `g_horde_diver`, 90 frames apart, on screen (`HordeTryStartDive`, `FUN_0043D4F0`) — wind up, leap and **bite** (`PlayerTakeDamage(p, 1, 10)`), pull out. Both enemy counters (formation 2 only once `g_script_flags[94]` rises); one shot, 80 points, `PDMG_MORR1/2_44.wav` from `STAGE1_SE`/`STAGE2_SE`, a splash (`SpawnHordeDeathSplash`, `FUN_0043E4C0`) and a sixty-frame corpse (`HordeCorpseSinkUpdate`, `FUN_0043DA20`). Ghidra truncates both updates at a `MatrixStackPop` (`L35`). **Ported** (`game/class40/`) — all of it, including formation 2's rug the first three members crawl under (`SpawnHordeDeformedProp`, `FUN_0043EF70`; its reshape in `render/horde.ts`). `tools/verify_horde.py` checks every table against the EXE. | `[proved]` mechanism; species `[likely]` |
 | `0x11` | `FrogInit` (`FUN_0043A080`) | 4 | **The frog**, and three things say so: the descriptor tail's character type is `0x1B`, which `g_character_skeletons` resolves to **`frog.bin`** (15 bones); every draw slot it writes, `0xB90`..`0xBB2`, is a `frog.bin` entry; and `FrogStateIdleAndCroak` plays `COMMON\KAERU4_22.WAV` — *kaeru*. Both enemy counters, **no hit points** (`obj+0x11C` is stored once and never read), 80 points. A ten-entry state machine at `g_class11_states` (`0x00592660`) driven by a **command list in the descriptor tail**, `tail+0x0A` onward, whose opcode *is* the state; past its `0xFFFF` terminator the class chooses for itself — inside fifty units of the camera it claims an attack permit and leaps, and outside it hops about. The leap's hit is **timed**, on motion frame 60, and a frog that lands one despawns without ever dying or scoring. All four spawns are stage 1 block 3. **Ported** (`game/class11/`). | `[proved]` |
 | `0x19` | `Boss4Init` (`FUN_004917E0`) | 4 | **The stage-4 boss.** Character type **`0x4A` = `boss4.bin`**, fifteen nodes, 300 hit points, and the four spawns in the game are stage 4's blocks 23, 25, 27 and 29 — one per entrance. Its tail is `+0x00` the character type, `+0x01` the entrance state (0..3, one of each), `+0x04`..`+0x3C` **fifteen per-bone `coli4.bin` collision meshes** (ten of them; -1 keeps the bone's sphere) written to each bone record's `+0x88` with `+0x74 |= 0x51`, and `+0x40`/`+0x42` the camera path and frame it despawns on. Entrances 0 and 1 ride a class-0x13 transport (selector 2, `CarrierPropRoutine2`) and jump down on `g_script_flags[30]`. A 0xA4-byte state block at `obj+0x1310` carries a 24-entry state index (`g_class19_states`, `0x00597298`), a sub-state, and a **nine-phase arena counter** per arena whose `g_boss4_phase_hp_fraction` share of the bar is a floor under the damage: `Boss4ResolveShot` (`FUN_00491B40`) takes hit points only on **bone 2** (head damage by rank and player count) or a flesh (`0x3D`) surface, and refuses every shot below the floor until the boss's own camera cue has run and the arena seats him for the next phase. He approaches and strikes, charges past the camera, and in phases 3 and 13 throws the two props he carries (`g_prop_behaviours[2]`). The gates: the entrance raises `g_script_flags[31]` (`0x0049390C`, `0x00493B99`) once its own intro banner (`BossIntroBannerUpdate`, `FUN_00437AC0`) has run 300 frames and set the shutter to 1, and `Boss4StateDeath` raises `g_script_flags[32]` (`0x004958C7`) on frame 0x46 of the death clip. **Ported** (`game/class19/`, every state; `docs/re/boss-strength.md`), and `web/tools/boss4_fight.mjs` plays both routed arenas to flag 32. | `[proved]` |
@@ -726,6 +726,56 @@ sit immediately after the flying-creature block, which is `zabat.bin`, the
 bats. Rendering the eighteen parts corroborates it: each is about two units
 across, and they read as head, torso, hips, limb segments and tail.
 
+### The cat's two routines
+
+`CatInit` (`FUN_00431250`) reads two s16s off the tail — an **animation set**
+and a **sub-type** — seats `obj+0x1B4 = g_cat_motions[set * 5]`, and installs
+one of two updates for good. `[proved]`, every line of all three read.
+
+| Spawn | Block | Set | Sub-type | Routine | What it plays |
+|---|---|---|---|---|---|
+| `0x21F4` | 3 | 2 | 0 | `CatMotionListUpdate` | `0x301`×2, `0x304`, `0x2FA`, `0x2FC`, then `0x2FD` for ever |
+| `0x221C` | 5 | 4 | 0 | `CatMotionListUpdate` | `0x2FC` for ever |
+| `0x44A4` | 8 | 0 | 2 | `CatBranchTriggerUpdate` | `0x305`; `0x2FA` at 200 frames; `0x2FD` when shot; `0x305` past `x = -478` |
+| `0x6E98` | 11 | 5 | 1 | `CatMotionListUpdate` | `0x305`×2, `0x2FC`, then `0x2FD` for ever |
+
+**`CatMotionListUpdate` (`FUN_00431340`)** draws, steps `model[0]` and its
+life counter `sub+0x12`, and when `model[0]` reaches
+`g_motion_play_length[clip] - 1` resets it and counts a pass in `sub+0x1E`.
+When `g_cat_motion_repeats[set * 5 + i]` is not `-2` and equals the passes, the
+index `sub+0x1C` steps — wrapping on a `-1` — and the next clip is **written
+straight into `obj+0x1B4`**: no `ActorSetMotion`, no fade. Past 1000 frames of
+life, `ActorDespawn`. Sub-type 1 also raises `obj+0x38` bit 3, the scene-lit
+draw. It never registers for the shot test, so this cat cannot be shot.
+
+**Nothing in either routine writes the cat's position.** It moves because
+`SkeletonApplyRootMotion` (`FUN_00410C50`) runs from the draw on every skinned
+actor and `0x2FD` carries 12.7 units of root translation a pass (22 authored
+frames, play length 44) — against 2.6 for `0x2FC` and none for `0x305`. So the
+block-11 cat stands for 114 frames, creeps for 78, and runs about 230 units
+before it is taken away at frame 1001.
+
+The two tables are six rows of five s16s each, and the length is the code's,
+not the data's: the routine names both bases, `0x00589A64` and `0x00589AA0`,
+0x3C bytes apart. The repeat table ends at `0x00589ADB`; `g_class28_route_table`
+starts at `0x00589AE0`.
+
+**`CatBranchTriggerUpdate` (`FUN_00431430`)** despawns on
+`g_script_flags[0x83]` (stage 2 raises flag 131 in block 8, the line after it
+frees `cat.bin`), keeps its state in `sub+0x10` — the same word the list cat
+keeps its set in (`L3`) — and ends in `ActorRegisterOriginInViewSpace`
+(`FUN_0043F950`): the actor's own origin through the camera into `obj+0x70`,
+then `RegisterForShotTest`, a call Ghidra's pseudocode drops because it follows
+the `MatrixStackPop` it believes does not return (`L35`). So the trigger is hit
+as one 4.0 sphere about its feet (`obj+0x124`, `CatInit`), and **nothing clears
+its `obj+0x34` bit 3** once a shot has raised it.
+
+The exporter bakes every clip the table names for character type `0x1A`
+(`CAT_CLIPS`, `game/class53/records.ts`). It used to bake entry 0 of each
+spawn's set alone — `0x2FC`, `0x2FF`, `0x301` and `0x305` — so `0x2FD` was
+in no bundle, and a playlist stepping on to it would have found no frames and no
+play length: the block-11 cat crept 2.7 units on `0x2FC` and stopped.
+
 ### 2. Sound records
 
 The sound records at **`0x005845F8`**:
@@ -772,7 +822,8 @@ report gives:
 * **`0x21F4` and `0x221C` sit immediately after the flying-creature block**
   (`0x1FF8`–`0x20C0`), which is one of the two reported sightings.
 * **It moves**: `FUN_00431430` runs motion `0x2FD`, then swaps to `0x305` once
-  `x < -478` — it runs away along X.
+  `x < -478` — it runs away along X. (And the other three run too — see
+  [the cat's two routines](#the-cats-two-routines).)
 * **It makes no sound** — no `PlaySoundId` in its range.
 * **It is branch machinery**, which is what "non-crash branch" points at:
   `if ((obj+0x34 & 8) && g_script_branch_var == 0 && DAT_009A2BC0 == 8)

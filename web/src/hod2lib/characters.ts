@@ -75,6 +75,8 @@ import {
   CLASS22_SUBACTOR_MOTIONS, Class22SubActorAt,
 } from "../game/class22/records";
 import { CLASS23_MOTIONS } from "../game/class23/records";
+// Data only, for the same reason: every clip the cat's two routines play.
+import { CAT_CLIPS } from "../game/class53/records";
 
 const finite = (v: number | null | undefined): v is number =>
   v !== null && v !== undefined && Number.isFinite(v);
@@ -1614,6 +1616,10 @@ export async function resolveForStage(
     if (cls === 0x19) entryClips.push(...BOSS4_CLIPS);
     // The frog's whole bank -- see `FROG_CLIPS`.
     if (cls === 0x11) entryClips.push(...FROG_CLIPS);
+    // The cat's whole playlist -- see `CAT_CLIPS`. Entry 0 of its set comes
+    // from `MOTION_RULES`; the rest are what `CatMotionListUpdate` steps on
+    // to, and the last of them is the clip that carries it out of the room.
+    if (cls === 0x53) entryClips.push(...CAT_CLIPS);
     // The stage-2 boss's whole bank -- see `CLASS14_MOTIONS`.
     if (cls === 0x14) entryClips.push(...CLASS14_MOTIONS);
     // JUDGMENT's two: every clip the flier's and the walker's states name,

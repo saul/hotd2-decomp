@@ -1,43 +1,33 @@
 /**
- * The camera, as the engine's own two halves.
+ * The camera, drawn.
  *
- * `CamStartPathPlayback` evaluates the path and writes the camera **block**;
- * `CameraTrackEnemiesTick`, inside `GameUpdate`, eases that block's look-at
- * towards whatever `SelectCameraLookAtTarget` picked; and only then does the
- * draw read the block back. Three things, in that order, with the port's frame
- * in the middle of them.
- *
- * So this is two systems over one piece of state, and they sit either side of
- * the `game` phase:
+ * The camera is the port's from end to end: the queued action writes the
+ * camera block, the driver eases it, and `UpdateSceneViewAndLight` builds the
+ * view matrices out of the block's eye and **angles** -- all inside
+ * `CameraActorTick`, at the head of `GameUpdate` (`game/camera/`). What is
+ * left here is the draw: the three.js camera placed from
+ * `G.g_camera_view_to_world`, the matrix every task after the camera actor
+ * read the frame through, and the rails overlay.
  *
  * ```
- * script:  CameraSeat   -- CamSeatPathFrame writes the block      (app/systems)
- * game:    CameraTake   -- the camera becomes thirty-two floats
- *          GameSystem   -- the hook eases the block's look-at
- * render:  CameraDraw   -- the block becomes the three.js camera
+ * game:    CameraTake   -- the camera as the last draw left it, for render/
+ *          GameSystem   -- the camera actor builds this frame's view
+ * render:  CameraDraw   -- the view becomes the three.js camera
  * ```
  *
- * `CameraTake` is the seam: the port reads the camera it was drawn with last
- * frame, which is what it has always read, and now reads it as plain numbers.
- *
- * Doing all three in one place is what the player used to do, and it is why
- * the aim could only ever be a frame stale or a frame early.
- *
- * **The seat is not in this file.** Seating the block is an engine decision —
- * it evaluates a `cam/` curve and writes `g_camera_block_eye` — and a renderer
- * that calls `CamAdvancePathFrame` is the port being driven from `render/`.
- * The evaluation is `game/camera/curve.ts` and the frame is
- * `CamSeatPathFrame`; the system that runs it is `app/systems.ts`, which is
- * the composition root and the one layer allowed to hand the script's state to
- * the port. What is left here is the rig — the pose scratch, the rails and the
- * two chrome toggles — and the two systems that only read.
+ * Nothing here evaluates a path or writes `G`: a renderer that seats the
+ * block is the port being driven from `render/`, which is exactly what
+ * `render-drives-the-port` counts.
  */
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { G } from "../game/globals";
-import { Vector3 } from "three";
-import { applyPose, cameraEyeY, type CameraPose } from "./campath";
+import { Matrix4, Vector3 } from "three";
+import { applyPose, type CameraPose } from "./campath";
 import type { RailLayer } from "./overlays";
+
+const _view = new Matrix4();
+const _scale = new Vector3();
 
 /**
  * The state both halves share: the pose scratch, the rails, and whether the
@@ -55,9 +45,10 @@ export class CameraRig {
    */
   scripted = true;
   // `driving` and `trackEnabled` were here: the frame slider's hold on the
-  // pose, and a switch that pinned the block to the rail. The slider went with
-  // the bottom bar, and the gameplay camera is the game rather than a view of
-  // it, so it is not a switch any more.
+  // pose, and the Track switch, which drew the authored shot off the curve
+  // instead of the port's block. The slider went with the bottom bar, and the
+  // gameplay camera is the game rather than a view of it, so it is not a
+  // switch any more.
 
   readonly pose: CameraPose = {
     eye: new Vector3(0, 0, 0),
@@ -66,64 +57,35 @@ export class CameraRig {
   };
 
   /**
-   * The pose the view is built from: {@link pose} aimed at the port's
-   * `g_camera_block_view_target` while the screen shake runs -- the nod
-   * `UpdateSceneViewAndLight` (`FUN_00401F40`) applies before it builds the
-   * view. A separate scratch because the block itself -- its eye and its eased
-   * target -- is not moved by the nod, and the rails read the un-nodded pair.
+   * The draw: the three.js camera placed from the view the port built this
+   * frame -- `g_camera_blocks`, `T(eye) Ry(yaw) Rx(pitch) Rz(roll)` of the
+   * block after the shake's nod. The matrix stack's row-vector layout is
+   * three.js's column-major `elements`, so the sixteen floats cross as they
+   * are. A frame that runs no tick draws what the last tick built.
    */
-  private readonly viewed: CameraPose = {
-    eye: new Vector3(0, 0, 0),
-    target: new Vector3(0, 0, -1),
-    roll: 0,
-  };
-
-  /** The draw: the block, after the hook has eased it. */
   draw(ctx: RenderContext): void {
-    const w = ctx.walker;
-    if (!w || !this.scripted) return;
-    if (!w.cam || !ctx.paths?.paths.get(w.cam.slot)) return;
-    this.pose.eye.set(G.g_camera_block_eye.x, G.g_camera_block_eye.y,
-                      G.g_camera_block_eye.z);
+    if (!ctx.walker || !this.scripted) return;
+    const cam = ctx.camera;
+    _view.fromArray(G.g_camera_view_to_world);
+    _view.decompose(cam.position, cam.quaternion, _scale);
+    cam.updateMatrixWorld(true);
+    this.pose.eye.copy(cam.position);
     this.pose.target.set(G.g_camera_block_target.x, G.g_camera_block_target.y,
                          G.g_camera_block_target.z);
-    // A block with its eye on its look-at has no direction -- the game-over
-    // screen's `CameraBlocksReset` leaves both at the origin, over nothing
-    // drawn -- so the camera stays where the last frame put it.
-    if (this.pose.eye.equals(this.pose.target)) return;
-    // The orientation comes from the block's eye/target pair; only the eye's
-    // height is adjusted, and only after. Doing it the other way round tilts
-    // the shot.
-    // The block holds the **raw** curve eye, as `CamEvalPath7` leaves it. The
-    // `path.y - 15` rule is a property of the draw (`g_camera_eye_y`), not of
-    // the block, so it is applied here -- see the note on `APPLY_EYE_Y_RULE`
-    // in render/campath.ts for why it is off anyway.
-    // The nod, as the port left it (`SceneViewApplyShake`): state a game
-    // tick writes, so a no-tick frame draws exactly what the tick before it
-    // drew, and a reset -- which zeroes the pitch -- falls back to the block.
-    this.viewed.eye.copy(this.pose.eye);
-    this.viewed.roll = this.pose.roll;
-    if (G.g_screen_shake_pitch !== 0) {
-      const v = G.g_camera_block_view_target;
-      this.viewed.target.set(v.x, v.y, v.z);
-    } else {
-      this.viewed.target.copy(this.pose.target);
-    }
-    applyPose(ctx.camera, this.viewed,
-              cameraEyeY(this.pose, w.useFixedEyeY, w.fixedEyeY));
-    this.rails?.setCameraPose(ctx.camera.position, this.pose.target);
+    this.pose.roll = 0;
+    this.rails?.setCameraPose(cam.position, this.pose.target);
   }
 
   /** `?slot=59&frame=170`: pose straight off a path, no script. */
   poseFromSlot(ctx: RenderContext, walkerRoll: boolean,
-               useFixedEyeY: boolean, fixedEyeY: number,
                slot: number, frame: number): boolean {
     const camera = ctx.camera;
     const p = ctx.paths?.paths.get(slot);
     if (!p) return false;
     p.pose(frame, walkerRoll, this.pose);
-    applyPose(camera, this.pose,
-              cameraEyeY(this.pose, useFixedEyeY, fixedEyeY));
+    // The raw eye: the `- 15` the path hooks apply is to the gameplay eye,
+    // never to the drawn camera. See `render/campath.ts`.
+    applyPose(camera, this.pose);
     this.rails?.highlight(slot, p.start, p.end);
     this.rails?.setCameraPose(camera.position, this.pose.target);
     return true;
@@ -131,14 +93,10 @@ export class CameraRig {
 }
 
 /**
- * The seam, at the head of the `game` phase: the three.js camera, taken.
- *
- * It reads `matrixWorld` and `matrixWorldInverse` as the renderer left them —
- * which is one frame behind the block, because `CameraDraw` runs after this
- * and `WebGLRenderer` computes the inverse during `render`. That staleness is
- * the port's own and predates this system; moving the read out of
- * `GameSystem` and into a system of its own preserves it exactly, by sitting
- * in the same place in the order that the read used to sit in.
+ * The seam, at the head of the `game` phase: the three.js camera, taken, as
+ * the last draw left it -- which is the view the port built on the tick
+ * before, or free roam's. `ctx.view` is what the render half reads the camera
+ * through; the port reads its own `g_camera_view_to_world`, built this tick.
  */
 export class CameraTakeSystem implements System<RenderContext> {
   readonly id = "camera.take";
@@ -176,13 +134,10 @@ export class CameraDrawSystem implements System<RenderContext> {
   }
 
   /**
-   * A load replaced the walker's camera command wholesale.
-   *
-   * Only the draw. `CameraSeatSystem.resync` has already put the block back on
-   * the rail — it runs in the `script` phase, which `World.resync` reaches
-   * first — so by the time this runs there is something to draw. It used to
-   * seat the block itself, which is how a renderer came to be calling
-   * `CamAdvancePathFrame`.
+   * A load or a seek replaced `G`: draw the view it carries. The block and
+   * its matrices are the port's and come back with the snapshot, or are
+   * rebuilt by the seek (`CameraReseatFromFrame`), so there is nothing to
+   * seat here.
    */
   resync(ctx: RenderContext): void {
     this.rig.draw(ctx);

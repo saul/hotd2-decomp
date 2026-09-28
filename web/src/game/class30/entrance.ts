@@ -42,7 +42,13 @@ import {
 import {
   MotionPlayFrame, MotionPlayLength, MotionRowOf, T,
 } from "../tables";
-import { ActorSetMotion, ZombieSetMotionIfIdle } from "./motion_cue";
+import { ActorSetMotion, ActorSetMotionBlended, ZombieSetMotionIfIdle }
+  from "./motion_cue";
+import type { GameHost } from "../host";
+import {
+  COND_HEAVY_LANDING, LANDING_HEAVY_SHAKE, SND_LANDING, SND_LANDING_HEAVY,
+  ZombieDeathLandingEffect,
+} from "./death_effects";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
 
@@ -451,12 +457,27 @@ export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
  * here it reads 30 and for one routed from state 29 it reads 29 — never 0x16.
  * No shipped record takes it; the countdown arm is the only live one.
  *
- * [diverges] The engine's landing plays sound `0x2A16A9`, or `0x1C16A9` with a
- * screen shake at `DAT_009C8E8C = 0x20` for body condition 5. The port has
- * neither sound nor shake here, so the landing is silent.
+ * **The landing** is the one frame the arc step has reported
+ * {@link ArcPhase.Settled} and {@link ZombieFlag2.OneShotFired} is still down
+ * (the switch on `obj+0x1360` at `0x00458BC9`, table `0x00458CC8`): body
+ * condition 5 plays {@link SND_LANDING_HEAVY}, shakes the screen for
+ * {@link LANDING_HEAVY_SHAKE} frames and raises the latch itself; every other
+ * condition calls `ZombieDeathLandingEffect` (`FUN_00456B70`) through
+ * `g_class30_states[0x38]` -- the dust or the splash, and the latch -- and then
+ * plays {@link SND_LANDING}. The shake is the global
+ * `g_screen_shake_frames`, which is all the engine writes; the nod is
+ * `UpdateScreenShake`'s.
+ *
+ * Two words this used to write wrongly, both `[proved]` from the bytes: the
+ * crouch is **blended** in (`CALL 0x004119A0` with fade 5 at `0x00458AFC`,
+ * where the port cut to it), and sub 3's `AND ECX, 0xfffeffff` at
+ * `0x00458BA1` -- and the same mask on the way out at `0x00458C62` -- clears
+ * the landing's latch, bit 0x10000, and not {@link ZombieFlag2.Carried}
+ * (0x100000), which only the phase switch touches.
  */
-export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
-                                               dt: number): void {
+export function ZombieStateArcScriptedEntrance(obj: ZombieActor, dt: number,
+                                               rng: Rng, host?: GameHost,
+                                               events?: Events): void {
   const t = obj.entry;
 
   if (obj.sub === 0) {
@@ -468,7 +489,7 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
     obj.zom.holdFrames -= SecondsToTicks(dt);
     if (obj.zom.holdFrames >= 1) return;
     const crouch = obj.charType === 0 ? ARC_CROUCH_TYPE0 : ARC_CROUCH_OTHER;
-    ActorSetMotion(obj, crouch.motion);
+    ActorSetMotionBlended(obj, crouch.motion, 0, MotionFade.Quick);
     obj.zom.holdFrames = crouch.hold;
     obj.sub = 2;
     // `obj+0x34 |= 0x2000` — the no-hit-reaction latch, raised as the arc is
@@ -488,20 +509,39 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor,
     ActorArcBegin(obj, { x: d[0], y: d[1], z: d[2] }, t?.frames ?? 1);
     InstallArcMotionScript(obj, ZombieArcEntranceScript(obj));
     obj.arcPhase = ArcPhase.Windup;
-    obj.flags2 &= ~ZombieFlag2.Carried;
+    obj.flags2 &= ~ZombieFlag2.OneShotFired;
     obj.sub = 4;
   }
 
   if (obj.sub !== 4) return;
 
-  const flying = obj.arcPhase === ArcPhase.Flight
-              || obj.arcPhase === ArcPhase.Landing;
-  if (flying) obj.flags2 |= ZombieFlag2.Carried;
-  else obj.flags2 &= ~ZombieFlag2.Carried;
+  // The phase the step left last frame, before this frame's step moves it.
+  switch (obj.arcPhase) {
+    case ArcPhase.Windup:
+    case ArcPhase.Crouched:
+    case ArcPhase.Settled: {
+      obj.flags2 &= ~ZombieFlag2.Carried;
+      if (obj.arcPhase !== ArcPhase.Settled
+          || (obj.flags2 & ZombieFlag2.OneShotFired)) break;
+      if (obj.condition !== COND_HEAVY_LANDING) {
+        ZombieDeathLandingEffect(obj, rng, host, events);
+        events?.emit("sound.play", { id: SND_LANDING });
+        break;
+      }
+      events?.emit("sound.play", { id: SND_LANDING_HEAVY });
+      G.g_screen_shake_frames = LANDING_HEAVY_SHAKE;
+      obj.flags2 |= ZombieFlag2.OneShotFired;
+      break;
+    }
+    case ArcPhase.Flight:
+    case ArcPhase.Landing:
+      obj.flags2 |= ZombieFlag2.Carried;
+      break;
+  }
 
-  if (ActorArcStep(obj, t?.step ?? 1, dt)) return;
+  if (ActorArcStep(obj, t?.step ?? 1, dt, host, events)) return;
 
-  obj.flags2 &= ~ZombieFlag2.Carried;
+  obj.flags2 &= ~ZombieFlag2.OneShotFired;
   obj.flags &= ~ActorFlag.NoHitReaction;
   // The engine keeps the permit if it somehow has one and goes straight to the
   // strike; otherwise it joins the attack run.

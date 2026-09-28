@@ -51,7 +51,7 @@
  *
  * ## What is not here
  *
- * * **The shake's nod** is `game/camera/shake.ts`, applied by the camera
+ * * **The shake's nod** is `game/camera/view.ts`, applied by the camera
  *   draw the way `UpdateSceneViewAndLight` (`FUN_00401F40`) applies it: this
  *   file computes `g_screen_shake_pitch`, that one re-aims the view by it.
  *   The shake's other writers (entrances, boss deaths) are not wired yet.

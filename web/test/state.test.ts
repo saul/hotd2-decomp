@@ -62,7 +62,6 @@ import { Walker, WALKER_RESTORED_BY_HAND, WALKER_RESTORED_KEYS,
 import { seekTo } from "../src/script/seek";
 import { OPS } from "../src/script/ops";
 import { WAIT_RULES } from "../src/script/waits";
-import { ACTIONS } from "../src/script/state/camera_action";
 import { hexKey, mergeTables } from "../src/script/registry";
 import type { ScriptJson } from "../src/bundle";
 import { BUNDLE_ROOT, finishOrSkip } from "../tools/lib/bundle_root";
@@ -176,13 +175,13 @@ function build(stage: number, script: ScriptJson): Rig {
 /**
  * One frame, in the order `Player.frame` runs it.
  *
- * A branch is taken the moment it appears, always down the first route. The
- * player lets an arcade countdown pick; the point here is only that the choice
- * is a function of the script and not of the wall clock — and that the drive
- * never *stops* on one, because `Walker.loadState` deliberately drops the
- * branch prompt and a snapshot taken while parked at one therefore cannot
- * round-trip. That divergence is declared where it is made; this harness
- * stays out of its way rather than asserting against it.
+ * A branch goes on the frame its steps run out, as the engine's does -- the
+ * walker only holds at one with the sidebar's debug aid on, and this rig
+ * builds its walker without it. The line below is for a walker that has it:
+ * a held branch is taken the moment it appears, down the first route, so
+ * the drive never *stops* on one, because `Walker.loadState` deliberately
+ * drops the branch prompt and a snapshot taken while parked at one therefore
+ * cannot round-trip.
  */
 function step(r: Rig): void {
   r.walker.tick(TICK);
@@ -480,17 +479,15 @@ console.log("\nNo two modules register the same name:\n");
   // was a chain of string comparisons where the *second* `if` for a name was
   // simply unreachable.
   //
-  // Every one of the three is assembled with a check now, and the check
-  // throws at **module load** -- so importing the tables at all is most of
-  // this test. If `OPS`, `WAIT_RULES` and `ACTIONS` are here, no name in them
-  // is claimed twice.
+  // Both are assembled with a check now, and the check throws at **module
+  // load** -- so importing the tables at all is most of this test. If `OPS`
+  // and `WAIT_RULES` are here, no name in them is claimed twice. (The
+  // actions are the engine's selector table now, `EVT_ACTION_TABLE` in
+  // `game/camera/driver.ts`, a literal that cannot hold a key twice.)
   check("the opcode table loaded, so no opcode is registered twice",
         Object.keys(OPS).length > 0, `${Object.keys(OPS).length} opcodes`);
   check("the wait rules loaded, so no wait opcode is registered twice",
         WAIT_RULES.size > 0, `${WAIT_RULES.size} rules`);
-  check("the action table loaded, so no action name is registered twice",
-        Object.keys(ACTIONS).length > 0,
-        Object.keys(ACTIONS).sort().join(", "));
 
   // And the check itself fires, which is the half that a passing import
   // cannot demonstrate. A guard nobody has watched fail is a comment.

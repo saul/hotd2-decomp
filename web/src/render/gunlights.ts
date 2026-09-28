@@ -74,6 +74,7 @@ import { G } from "../game/globals";
 import { GUN_LIGHT_FIRST, RenderLightType } from "../game/scene_lights";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
+import { copyDrawState } from "./draw_order";
 import type { SceneLighting } from "./lighting";
 
 /**
@@ -190,6 +191,7 @@ function makeGunLitMaterial(base: Material): Material {
     fog: b.fog,
     name: b.name,
   });
+  copyDrawState(b, m);
   m.userData = { ...base.userData, gunLit: true };
   const inner = base.onBeforeCompile;
   m.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms,

@@ -15,8 +15,9 @@
  *   to be events on the bus, not host methods; the script is telling, not
  *   asking.
  * * **Questions about the world** — `aliveEnemies`, `presentEnemies`,
- *   `aliveCivilians`, `cameraFree`. The genuinely irreducible part, and the
- *   read-only port the doc says should be all that survives.
+ *   `aliveCivilians`, `cameraFree`, `gameplayLive`. The genuinely
+ *   irreducible part, and the read-only port the doc says should be all
+ *   that survives.
  * * **Output devices** — `playSound`, `setShutter`, `showMessage`,
  *   `endDialogue`. Audio and the screen-space layer, reached directly.
  *
@@ -29,6 +30,7 @@ import { Walker, type WalkerHost } from "../script/walker";
 import type { ScriptJson } from "../bundle";
 import { G } from "../game/globals";
 import { CameraTargetsClear } from "../script/waits/targets";
+import { EvtGameplayLiveUpdate } from "../game/player_shell";
 import { screenMessage } from "./projection/message";
 import type { Player } from "./main";
 
@@ -82,6 +84,10 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // `EvtOpWaitTargetsClear47` (`FUN_0045FD20`): the camera is settled or
     // free, and nothing registered for camera tracking this frame.
     cameraTargetsClear: () => CameraTargetsClear(),
+    // `g_evt_gameplay_live`, recomputed as `EvtInterpreterLoop` does before
+    // its first instruction: the continue screen holds the script at its
+    // wait.
+    gameplayLive: () => EvtGameplayLiveUpdate() !== 0,
     // The shutter is the walker's own state now: there is nothing to tell.
     showMessage: (g) => {
       // Variant 0 is the 1P / player-1 configuration, which is what a
@@ -100,13 +106,16 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
       };
     },
     // The subtitle task tests the skip flag every frame and ends itself, so
-    // the caption goes at once. The voice is a fire-and-forget PlaySoundId
-    // that the game leaves playing; it is stopped here because the player
-    // owns the audio element and a line talking over a scene you have just
-    // skipped past reads as a bug rather than as fidelity.
-    endDialogue: () => {
-      p.bgm.stopVoice();
-    },
+    // the caption goes at once -- and that is all a skip does to a dialogue
+    // at the moment it is taken. The voice is stopped by the script, where it
+    // is stopped at all: skippable regions carry `stop_voice_if_skipped` (evt
+    // 0x2E), whose `PlaySoundId(0x80000002)` is the voice channel's stop, and
+    // the walker reaches it a few frames later as it races through the
+    // skipped waits. A region without one leaves the line playing, in the
+    // game as here. This used to stop the voice here instead, on the belief
+    // that the game never did; that belief was the misreading of 0x2E as
+    // "resume the BGM".
+    endDialogue: () => {},
   };
 }
 

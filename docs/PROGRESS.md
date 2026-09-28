@@ -106,7 +106,8 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 
 - [x] Global device state decoded (`RenderInitStates`) — `CULLMODE` is
       `D3DCULL_NONE`, `COLORVERTEX` off, all material sources `D3DMCS_MATERIAL`,
-      global alpha test at `GREATEREQUAL`/ref 1
+      alpha test at `GREATEREQUAL`/ref 1 (enabled per mesh, for the
+      translucent pass only)
 - [x] **PVR2 → D3D7 translation located and fully decoded** —
       `TranslatePvr2StateToD3D` at `0x004A7780`, with all five lookup tables
       resolved against the SDK. See [`formats/materials.md`](formats/materials.md)
@@ -132,6 +133,15 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       semantics measured corpus-wide
 - [x] Opaque/translucent two-pass selector decoded
       (`(tsp & 0x180000) != 0x80000`)
+- [x] What the pass switches: `ALPHATESTENABLE` per mesh (state 0x0F, not
+      blending), `ALPHABLENDENABLE` per pass (`RenderBeginCommandList` off,
+      `RenderFlushCommandList` on); depth write and test per mesh, and on in
+      all 82,494 meshes
+- [x] Translucent order: whole commands, `+4` descending, where `+4` is the
+      least stack eye z of the origin and the skipped meshes and the stack
+      looks down -z (`g_view_flip_z`) -- **nearest first**, not the painter's
+      order the docs had. Checked by `tools/verify_draw_order.py`; drawn by
+      `web/src/render/draw_order.ts`
 
 ## Phase 6 — Remaining formats ✅ `evt/`, `cam/`, `coli/` and `mot/` all solved
 
@@ -361,6 +371,11 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       not a renderer: a global plane plus up to eight travelling or circular
       sinusoid sources, sampled by floating props and the water enemy and by
       nothing that draws. See [`formats/water.md`](formats/water.md).
+      **And a third, found 2026-09-28:** class 0x41 type 1
+      (`PlaceWaterSurface` / `WaterSurfaceUpdate`) draws ten script-loaded
+      tiles no region lists -- stage 2's block 16 canal and boss arena, stage
+      3's -- and ripples their UVs. "Solved" above had missed it; the canal
+      was absent in the player for as long as it did.
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.
       This is now the primary identification tool for the decomp.
@@ -446,12 +461,13 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 18. Are `+0x14` / `+0x1C` of the spawn descriptor really the other two Euler
     angles? They sit either side of a confirmed BAMS yaw but do not look like
     angles. (Phase 6)
-19. What starts a stage's own BGM? No `bgm_entry_play` in any of the six stage
-    scripts names its stage track — they only switch to boss and transition
-    music. The tables and the dispatcher are solved
-    ([`formats/sound.md`](formats/sound.md)); the scene-entry path that plays
-    `ST1_AR`..`ST6_AR` is not. `PlaySoundId` has 496 callers, so this wants the
-    scene-entry path, not an xref sweep. **Which of the two tables it plays
+19. ~~What starts a stage's own BGM?~~ **Closed: the script does**, with a
+    `se_play` of the track at step 2 of each entry block (stage 5 uses
+    `bgm_entry_play`). The question was asked of `bgm_entry_play` alone, which
+    only switches to boss and transition music; `se_play` reaches the same
+    `PlaySoundId`. The stream the track is played as -- no loop points, the
+    file from its first sample to end of file, three ids unlooped -- is in
+    [`formats/sound.md`](formats/sound.md#the-music-stream-no-loop-points). **Which of the two tables it plays
     from is closed**: `g_app_state == 6 && g_GameMode == 0` is not the
     unreachable state it was written up as — mode 0 is **Arcade** — so the
     plain names are the arcade mix and `_AR` is Original, Training and Boss.

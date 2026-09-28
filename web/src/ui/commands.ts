@@ -16,7 +16,7 @@ export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
   | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
   | "breakables" | "propBoxes"
-  | "muzzle" | "redBlood";
+  | "muzzle" | "redBlood" | "branchPause";
 
 export type UiCommand =
   | { kind: "toggle"; name: ToggleName; on: boolean }
@@ -60,6 +60,8 @@ export type UiCommand =
   | { kind: "setLightMode"; mode: string }
   | { kind: "setFogMode"; mode: string }
   | { kind: "setFilterMode"; mode: string }
+  /** The debug sidebar's 4:3 switch. See {@link UiProjection.pillarbox}. */
+  | { kind: "setPillarbox"; on: boolean }
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
   | { kind: "requestSkip" }

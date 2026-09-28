@@ -17,10 +17,18 @@ also call `AssetDrawSlot`:
 ## The trap in that split
 
 The split is a useful filter but **not** a definition of "rig". The stage-2
-opening vehicle is a counter-example: its poser `FUN_004521B0` evaluates the
-path and never draws, while its rig lives in `FUN_00452320`. Reading only the
-9 direct drawers misses it entirely. When looking for a rig, follow the poser
-to its `obj[0]`.
+opening vehicle is a counter-example: its poser `St2CarRouteUpdate`
+(`FUN_004521B0`) evaluates the path and never calls `AssetDrawSlot` itself,
+while its rig lives in `St2CarDraw` (`FUN_00452320`). Reading only the 9
+direct drawers misses it entirely. When looking for a rig, follow the poser to
+the draw it calls.
+
+**Correction (2026-09-28).** This paragraph used to say the poser "never
+draws" and to send the reader to its `obj[0]`. Both are wrong for the car:
+`FUN_004521B0` *is* the car's `obj[0]`, and it draws by calling
+`FUN_00452320` directly, at `0x0045228C`, as its last act -- as does
+`St2CarHeldUpdate` (`FUN_004522A0`) at `0x00452308`. "Never draws" was true
+only of `AssetDrawSlot`.
 
 ## A route is not always ridden
 
@@ -129,6 +137,17 @@ table; variant 0 is exported and variant 1 is the post-crash set.
 Eight further instances run as traffic on `0x19A`–`0x1A1`, which are
 **`op_train` paths** — so they are not in any numbered stage export.
 
+**Its lifetime `[proved]`.** The object is a task, `ActorAlloc(St2CarInit,
+0x13F4)` in `St2CarSpawn` (`FUN_00452120`), and the only two calls to that are
+`RescueTargetInit`'s (`0x00451800` with index 0; `0x0045183B` with
+`obj+0x11C`, Training). So the car does not exist before class 0x21 does --
+stage 2 block 0 step 2 -- and it is killed by `St2CarHeldUpdate` once parked
+and `g_script_flags[0] == 1` (block 3 step 3, or block 11). On a camera path
+other than the three, `St2CarRouteUpdate` uses its own pointer as the path
+index (`MOV ECX, [ESP+0x20]` at `0x004521F2`); no shipped run reaches that. The
+arcade routines are ported in `web/src/game/class21/car.ts`, and the player
+draws this rig from that task.
+
 None of this was reachable from the 9 direct drawers. Its posers evaluate the
 path and never draw; only following `obj[0]` gets you here.
 
@@ -170,8 +189,8 @@ unless the source column says otherwise.
 | `0x00440130` | `0x151`,`0x15E`–`0x161`,`0x175`–`0x177` | pure setter; callers pass literals | each caller draws | small |
 | `0x0044E5D0` | `0x14F` | literal | `FUN_00449EF0` | no — class `0x31` |
 | `0x00451E50` / `0x00451EB0` | `0x148`,`0x14D`,`0x14E`,`0x19A`–`0x1A1` | table `0x00565EF4` | `FUN_00451FF0` | no — near-identical pair |
-| `0x004521B0` | `0x148`/`0x14E`/`0x14D` | cam `0x38`/`0x39`/`0x3A` = cp_st2 1/2/3 | `FUN_00452320` | **transcribed** — the stage-2 car |
-| `0x004522A0` | `0x153` | literal | `FUN_00452320` | **yes** (same rig) |
+| `0x004521B0` | `0x148`/`0x14E`/`0x14D` | cam `0x38`/`0x39`/`0x3A` = cp_st2 1/2/3 | `FUN_00452320` | **transcribed** — the stage-2 car; `St2CarRouteUpdate`, ported |
+| `0x004522A0` | `0x153` | literal | `FUN_00452320` | **yes** (same rig); `St2CarHeldUpdate`, ported |
 | `0x004525C0` | `0x00565EF4[obj+0x4D4]` | table | `FUN_00451FF0` | no |
 | `0x00452930` | same table | table | `FUN_00452320` | **yes** (same rig) |
 | `0x004659D0` / `0x00465BC0` | `0xFD`/`0xFE`/`0xFF` | literals | **nothing** | n/a — a 0x88-byte invisible controller that uses the path only to derive a texture/material scroll rate |

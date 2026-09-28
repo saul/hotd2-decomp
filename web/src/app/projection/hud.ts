@@ -276,6 +276,16 @@ export function groupRows(w: Walker, x: HudInputs):
       ["effects", d.effects],
       ["blood", d.blood],
     ],
+    // What the next branch will take, and whether the debug aid is holding
+    // one open. `g_script_branch_var` is cleared on every step advance, so
+    // this is mostly 0 and moves only when gameplay writes a route.
+    route: [
+      ["g_script_branch_var", String(w.branchChoice), w.branchChoice !== 0],
+      ["at a branch", w.branch
+        ? `holding block ${w.branch.block} (the aid is on)`
+        : w.options.branchPause ? "— · the aid will hold the next one"
+        : "—"],
+    ],
   };
 }
 

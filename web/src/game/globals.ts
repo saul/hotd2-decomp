@@ -18,6 +18,7 @@
 import type { BloodSpray, PointBloodSpray } from "./effects/blood";
 import type { BodyCreature } from "./body_creature";
 import type { CarriedProp } from "./carried_prop";
+import type { ThrownWeapon } from "./thrown_weapon";
 import type { SeveredHead } from "./effects/severed_head";
 import type { ShotFlash, ShotTracer, ShotWeaponEffect }
   from "./effects/shot_effects";
@@ -32,6 +33,9 @@ import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
 import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
   from "./effects/owl";
 import type { RingEffect } from "./effects/ring_effect";
+import type { WaterRing } from "./effects/water_ring";
+import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
+import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
@@ -47,16 +51,21 @@ import type {
 } from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { Boss4HitMark } from "./class19/hit_mark";
+import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
-import { vec3, type Vec3 } from "./vec";
+import { vec3 } from "./vec";
+import { makeCameraSlots, type CameraCandidate } from "./camera/slot_table";
+import { CameraActorInit } from "./camera/actions";
+import { MatIdentity } from "./matrix";
 import { makeEntityLights } from "./entity_light";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
   PlayerStartGameFromTitle, PlayerTasksCreate, PlayerTasksRunFirstTurn,
   type PlayerBlock }
   from "./player_shell";
+import { HudShutterTaskCreate, type ShutterBar } from "./hud_shutter";
 
 /**
  * `g_app_state` (`0x009C8E98`) — the game's top-level screen, and something
@@ -113,6 +122,37 @@ export enum AppState {
   Boot = 0x10,
 }
 
+/**
+ * `g_screen_furniture_flags` — `0x009A5900`, the bits a screen card holds
+ * while it has the screen.
+ *
+ * Each card ORs its bit in when it starts and ANDs it out on the frame it
+ * raises its gate's flag, and the readers are draw routines that stand aside
+ * for it: `HudDrawShutterState` (`FUN_00413970`) holds no bars in state 4
+ * while either is up (`TEST byte ptr [0x009a5900], 0x30` at `0x00413BB5`),
+ * `HudDrawLives` (`FUN_004174A0`) drops "HOLD YOUR FIRE!" under the result
+ * card, and `Class22CutsceneHoldUntilChapterCard` (`FUN_0049B280`) draws
+ * only while the chapter card is down. `[proved]`
+ *
+ * Only the two cards' bits are members. Bits 0, 1 and 3 have writers of
+ * their own -- `PlayerTryStartPress` and `UpdateSceneViewAndLight` for 0,
+ * `CommitAppState` for 1, `EvtLoadBlockProgram` for 3 -- and are still
+ * literals where the port uses them.
+ */
+export enum ScreenFurniture {
+  /**
+   * `ResultCardInstall` (`FUN_00434EF0`): `OR EDX, 0x10` at `0x00434FD0` in
+   * sub 0, `AND AL, 0xEF` at `0x00435683` beside `g_script_flags[0xFE]`.
+   */
+  ResultCard = 0x10,
+  /**
+   * `ChapterCardInstall` (`FUN_004342E0`): `OR AL, 0x20` at `0x0043436B` in
+   * sub 0 (and in both installer arms), `AND AL, 0xDF` at `0x004348C7`
+   * beside `g_script_flags[0xF8]`.
+   */
+  ChapterCard = 0x20,
+}
+
 export { PlayerState, PlayerTask, RunPhase } from "./player_state";
 
 /**
@@ -139,104 +179,6 @@ export interface RainParticle {
   x: number;
   y: number;
   z: number;
-}
-
-/** One weapon in flight — the pool `ThrownWeaponUpdate` walks. */
-export interface ThrownWeapon {
-  /** Unique and stable; the renderer binds its node to this, not to an index. */
-  id: number;
-  /** The thrower's spawn address, so the renderer can source the model. */
-  from: number;
-  /** The asset slot of the projectile model. */
-  slot: number;
-  pos: Vec3;
-  /** Units per 60 Hz frame. */
-  vel: Vec3;
-  /** Frames of flight left. */
-  ttl: number;
-  /**
-   * BAMS per frame. `[diverges]` — see {@link ThrownWeapon.spinAngle}, which
-   * carries the whole of why this number is the port's own.
-   */
-  spin: number;
-  /**
-   * Which axis the tumble turns about, and it is **not the same for both
-   * throwing families**.
-   *
-   * Both draw the weapon the same way — `ThrownWeaponUpdate` (`FUN_00450780`)
-   * and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) each emit
-   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — but they
-   * accumulate the tumble into **different terms**:
-   *
-   * | family | flight step | term | axis |
-   * |---|---|---|---|
-   * | class 0x31 | `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), `0x0044FDE9` | `obj+0x68` | **Y** |
-   * | class 0x30 | `ZombieThrownWeaponStateStraight` (`FUN_00459690`), `0x00459731` | `obj+0x64` | **X** |
-   *
-   * `[proved]`. Class 0x31 also negates the step unless the throwing hand
-   * `obj+0x1358` is bone 5; class 0x30 has no such test and adds it plainly.
-   * The port turned **everything** about Y, so a class-0x30 thrower's axe
-   * cartwheeled while a class-0x31 thrower's looked right — which is exactly
-   * how it was reported: *the spin depends on which zombie is throwing*.
-   *
-   * `axis` is the port's way of carrying the difference to the renderer
-   * without giving the record two nearly-identical angle fields.
-   */
-  axis: "x" | "y";
-  /**
-   * The accumulated tumble — `obj+0x68` for class 0x31, `obj+0x64` for class
-   * 0x30. See {@link ThrownWeapon.axis}.
-   *
-   * `[diverges]` **The rate is the port's invention, because the engine's is
-   * uninitialised memory.** Neither launcher writes the projectile's
-   * `obj+0x135C`: `SpawnThrownWeapon` (`FUN_004504E0`) writes only the model
-   * and `obj+0x1364`, and `ZombieThrowHandWeapon` (`FUN_0045A240`) only the
-   * model and the position. `ThrowerReleaseAttackPermit`'s sibling writes on
-   * `+0x135C` are all onto the *thrower*, where the field holds the hand bone.
-   * And the allocator does not clear it: `FUN_004A6FA0` zeroes exactly the
-   * first 0xD dwords — the task header — and `FUN_004A7400` is a free-list
-   * split that hands back the block as it stands. So every field from
-   * `obj+0x34` up is whatever the previous occupant of that arena block left,
-   * and the tumble rate with it. `[proved]` for the two zeroing bounds; the
-   * consequence is stated as a reading, not measured against a running game.
-   *
-   * The port has no arena to recycle, so there is no faithful value to copy.
-   * It picks a stable one instead and says so here.
-   */
-  spinAngle: number;
-  /**
-   * `obj+0x1364` — a **constant** added to the X term at draw time, per
-   * character type: `0x600` for `zsass` (0x16) and 0 for 0x18, both written by
-   * `SpawnThrownWeapon` (`FUN_004504E0`). Class 0x30's launcher never writes
-   * it at all, so it is 0 there.
-   *
-   * It is a fixed tilt and **not** a rate, which is what the port had been
-   * using it as: `THROWER_SLOTS[0x16].spin = 0x600` drove the Y tumble with a
-   * number the engine adds once, to X.
-   */
-  tilt: number;
-  /** Frames spent in the stick-and-blink tail once the flight is done. */
-  after: number;
-  hit: boolean;
-  stickFrames: number;
-  blinkFrames: number;
-  /** The renderer hides it on alternate frames once it is blinking. */
-  visible: boolean;
-  /**
-   * Constant acceleration, for the one throw that arcs.
-   *
-   * Class 0x31's weapon always flies straight, so this is zero for every one
-   * of its throws. `ZombieThrownWeaponStateArc` (`FUN_004598F0`) is the other
-   * family: char type 1 lobs its weapon with `±0.009` on whichever of X and Z
-   * `ZombieThrownWeaponBeginArc` picks, and the axe throwers do not.
-   */
-  acc?: Vec3;
-  /**
-   * The damage kind `PlayerTakeDamage` is given on arrival — 4 for a flat
-   * throw and 6 for an arced one. Absent means class 0x31's, which passes 6
-   * (`0x0044FE4C`).
-   */
-  hitKind?: number;
 }
 
 export const G = {
@@ -730,9 +672,15 @@ export const G = {
   g_free_play: 0,
   /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
   g_credits_per_player: 0,
-  /** `g_credits_to_start` — 0x009C8E78. `FUN_004066D0` sets 1. */
+  /**
+   * `g_credits_to_start` — 0x009C8E78. `CreditsBootReset` (`FUN_004066D0`)
+   * sets 1, and nothing else writes it.
+   */
   g_credits_to_start: 1,
-  /** `g_credits_to_continue` — 0x009C8E7C. `FUN_004066D0` sets 1. */
+  /**
+   * `g_credits_to_continue` — 0x009C8E7C. `CreditsBootReset`
+   * (`FUN_004066D0`) sets 1, and nothing else writes it.
+   */
   g_credits_to_continue: 1,
   /**
    * `g_title_start_armed` — 0x009A21C0. `TitleMenuUpdateAndSelect` raises it
@@ -793,7 +741,7 @@ export const G = {
   g_screen_shake_frames: 0,
   /**
    * `g_screen_shake_pitch` — 0x009CA0E4. How far the camera nods, in units
-   * up at a look distance of 1000 -- see `camera/shake.ts`.
+   * up at a look distance of 1000 -- see `camera/view.ts`.
    */
   g_screen_shake_pitch: 0,
   /** `g_player_hit_count` — 0x009A5C86 + player*0x98. Hits that scored. */
@@ -827,7 +775,7 @@ export const G = {
    * states 0, 1 and 6 and drops it in state 5 and at the end of a state-3
    * close — so states 0 and 5 both draw a *closed* shutter and set it to 1 and
    * 0 respectively. A boss intro can be letterboxed and still let you shoot.
-   * The state machine that drives it is `script/state/shutter.ts`, which is
+   * The port's `HudDrawShutterState` is in `game/hud_shutter.ts`, and it is
    * the only writer here too.
    *
    * The rule it enforces is `PlayerFireAndReloadUpdate`'s (`FUN_00414940`),
@@ -838,43 +786,53 @@ export const G = {
    * the same.
    *
    * **In `G` rather than on the walker, because the exe has one word and the
-   * port must have one field.** The shutter's own three fields are script
-   * state and stay with the script; this one is read by the player's fire
-   * routine, so it lives where the rest of the data segment does and
-   * `script/state/shutter.ts` reaches it through an accessor. `Walker`'s save
-   * slice still carries it under the old name, but only as a copy taken from
-   * here at save time — the script slice is restored before the game slice, so
-   * this is what a load ends up holding either way.
+   * port must have one field.** `Walker`'s save slice still carries it under
+   * the old name, but only as a copy taken from here at save time — the script
+   * slice is restored before the game slice, so this is what a load ends up
+   * holding either way.
    *
    * BSS, so it starts **down**, and `ResetSceneOnEnter` puts it back down on
-   * every scene: nothing raises it until the script's first `hud_shutter_state`
-   * of 0, 1 or 6. All eleven shipped `evt/` tables issue those — 87 ones and
-   * 104 sixes across the game — so gating on it does not lock the player out.
+   * every scene: nothing raises it until the shutter's first state 0, 1 or 6.
+   * All eleven shipped `evt/` tables issue those — 87 ones and 104 sixes
+   * across the game — so gating on it does not lock the player out.
    */
   g_nFiringGate: 0,
   /**
-   * `g_bHudShutterState` — `0x009CA0F4`. The HUD letterbox, states 0..8.
+   * `g_bHudShutterState` — `0x009CA0F4`. The HUD letterbox, states 0..8 (see
+   * `ShutterState` in `game/hud_shutter.ts`).
    *
-   * **Here for exactly the reason `g_nFiringGate` above is here**, and it is
-   * the same argument one step on: routines in `game/` now read and write it,
-   * so a copy kept on the walker and mirrored across would be the second
-   * owner of one byte. `BossIntroBannerUpdate` (`FUN_00437AC0`) sets it to 1
-   * at `0x00437F1E` — the only instruction in the image that puts the shutter
-   * into state 1 from inside a stage — and **both bosses read it to decide
-   * that their fight has started**: `Boss4StateEntranceCarried`
-   * (`FUN_004938B0`) at `0x004938F6`, and every one of class 0x14's
-   * entrances, `Class14StateEntranceA` (`FUN_00478160`) at `0x0047834E`.
-   * None of the three is script code.
+   * evt `0x1F` stores it and does nothing else; `HudDrawShutterState` turns it
+   * into bars and a firing gate once a frame. Gameplay writes it too, and
+   * reads it: `BossIntroBannerUpdate` (`FUN_00437AC0`) sets it to 1 at
+   * `0x00437F1E` and `Class22FightPhase1` at `0x0049B899`, and **the bosses
+   * read it to decide that their fight has started** --
+   * `Boss4StateEntranceCarried` (`FUN_004938B0`) at `0x004938F6`, and every
+   * one of class 0x14's entrances, `Class14StateEntranceA` (`FUN_00478160`)
+   * at `0x0047834E`. The script's accessor in `script/state/shutter.ts`
+   * reaches this byte, so there is one owner.
    *
-   * `script/state/shutter.ts` remains the machine: `evt 0x1F` and the
-   * 40-frame slide are its, and it reaches this byte through an accessor. The
-   * two fields that stay with it, `g_bHudShutterPrev` and the draw task's
-   * counter, nothing outside the script reads.
-   *
-   * 2 rather than the engine's 5 at reset, which is the standing `[diverges]`
-   * that file already carries and names.
+   * 5 at a scene's start, as `ResetSceneOnEnter` leaves it: the bars are shut
+   * until the script opens them.
    */
-  g_bHudShutterState: 2,
+  g_bHudShutterState: 5,
+  /**
+   * `g_bHudShutterPrev` — `0x009C8E9C`. The state `HudDrawShutterState` last
+   * settled on: a state that differs from it seeds the slide, and state 7
+   * puts it back. The routine writes it on every path but a blackout's, and
+   * `ResetSceneOnEnter` sets it to 5 beside the state.
+   */
+  g_bHudShutterPrev: 5,
+  /**
+   * `HudDrawShutterState`'s slide counter -- its task's `+0x50`, 0 shut and
+   * 0x28 open. `HudShutterTaskCreate` starts it at 0; the routine seeds it on
+   * a change of state and steps it in states 1 and 3.
+   */
+  g_hud_shutter_counter: 0,
+  /**
+   * `[port-only]` -- the bars `HudDrawShutterState` drew this frame, for
+   * `hud/hud.ts` to put on the screen. See `ShutterBar`.
+   */
+  g_hud_shutter_bars: [] as ShutterBar[],
   /**
    * The trigger pulls this frame has not resolved yet.
    *
@@ -964,6 +922,34 @@ export const G = {
   g_prop_strip_effects: [] as PropStripEffect[],
   /** `[port-only]` — see {@link PropStripEffect.id}. */
   g_prop_strip_effect_seq: 0,
+  /**
+   * `[port-only]` — the rings `SpawnWaterRing` (`FUN_004567C0`) has put on a
+   * wet surface. `game/effects/water_ring.ts`.
+   */
+  g_water_rings: [] as WaterRing[],
+  /** `[port-only]` — see {@link WaterRing.id}. */
+  g_water_ring_seq: 0,
+  /**
+   * `[port-only]` — the canal water tasks `PlaceWaterSurface`
+   * (`FUN_00462F70`, class 0x41 type 1) has allocated. `game/class41/water.ts`.
+   */
+  g_water_surfaces: [] as WaterSurface[],
+  /** `[port-only]` — see {@link WaterSurface.id}. */
+  g_water_surface_seq: 0,
+  /**
+   * `[port-only]` — the stage-2 car tasks `St2CarSpawn` (`FUN_00452120`) has
+   * allocated, which `RescueTargetInit` (`FUN_00451720`) is the only caller
+   * of. `game/class21/car.ts`; `render/rigs.ts` draws the car from these.
+   */
+  g_st2_cars: [] as St2Car[],
+  /** `[port-only]` — see {@link St2Car.id}. */
+  g_st2_car_seq: 0,
+  /**
+   * `[port-only]` in shape — what `WaterSurfaceUpdate` (`FUN_0046E3A0`) has
+   * done to each tile's model, which the engine rewrites in place: one entry
+   * per slot the walk has run on. See {@link WaterSurfaceUv}.
+   */
+  g_water_surface_uv: [] as WaterSurfaceUv[],
   /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
@@ -1071,27 +1057,70 @@ export const G = {
    */
   g_camera_block_target: vec3(),
   /**
-   * `[port-only]` — where the block's angles face once
-   * `UpdateSceneViewAndLight` has applied the screen shake: see
-   * `SceneViewApplyShake` in `camera/shake.ts`. The engine keeps it as the
-   * block's pitch and yaw; the port's block is two points, so this is the
-   * third. Read by the draw only while `g_screen_shake_pitch` is non-zero.
+   * `g_camera_blocks` — `0x009A6040` (block 0's `+0x40`), and
+   * `g_camera_world_to_view` — `0x009A6000` (`+0x00`): the view-to-world and
+   * world-to-view matrices `UpdateSceneViewAndLight` (`FUN_00401F40`) builds
+   * from the block's eye and angles at the end of `CameraActorTick`, sixteen
+   * floats each in the matrix stack's own layout. Everything after the camera
+   * actor in the frame -- the players, the shot test, every actor's
+   * `ActorRegisterCameraPoint` -- sees the camera through these, and the draw
+   * places the three.js camera from them. See `camera/view.ts`.
    */
-  g_camera_block_view_target: vec3(),
+  g_camera_view_to_world: MatIdentity(),
+  g_camera_world_to_view: MatIdentity(),
   /**
-   * `g_cam_path_target` — 0x009C70D8. The look-at `CamEvalPath7` evaluates
-   * from the active path's target channels, and the fallback
-   * `SelectCameraLookAtTarget` uses when nothing is registered.
+   * `g_camera_index` — `0x009C6F00`. Which of the four camera blocks the view
+   * is built from and the shake nods. `set_global` (`EvtActionSetGlobal14`),
+   * `CameraBlocksReset` and `CameraResetForPathShot` write it, and every
+   * shipped write is 0 -- the only block the port has.
+   */
+  g_camera_index: 0,
+  /**
+   * `g_cam_path_target` — 0x009C70D8. The deferred pose block's target, and
+   * the fallback `SelectCameraLookAtTarget` uses when nothing is registered.
    *
-   * [diverges] The engine writes this only from the deferred-rail hooks
-   * (`CameraStepRailTick`, `CameraPlayStashedPath`, `CameraArmStashedPath`),
-   * so after an ordinary `cam_play` action retires it can hold the target of
-   * whichever shot last ran through one of those. The port keeps it current
-   * with the playing path every frame. In the case that motivated this —
-   * stage 2 block 17 step 5, where `finish_sequence 6` had just run the
-   * 121..150 range through `CameraPlayStashedPath` — the two agree exactly.
+   * Written by the stashed rail's hooks and `CameraArmStashedPath` (the path's
+   * own target channels at the rail frame), and by the minor-4 and minor-6
+   * starters (thirty units ahead of the block's eye). A plain `cam_play` never
+   * writes it: after one, the fallback aims wherever the last of those left.
    */
   g_cam_path_target: vec3(),
+  /**
+   * `g_cam_path_eye` — `0x009C70C0`, and its angle words `g_cam_path_pitch_bams`
+   * / `g_cam_path_yaw_bams` / `g_cam_path_roll_bams` (`0x009C70CC`/`D0`/`D4`):
+   * the **deferred pose block**, laid out as the camera block's `+0x80` on --
+   * eye, pitch, yaw, roll, then `g_cam_path_target` at `+0x18`.
+   *
+   * The stashed rail (`CameraStepRailTick`, `CameraPlayStashedPath`) and
+   * `CameraArmStashedPath` evaluate the path into it; `CameraSnapToPathEye`
+   * copies the block's eye in. The camera block reaches it only through the
+   * drivers: `CameraEaseBlockEyeToPathPose` eases or snaps the block eye onto
+   * it, `SelectCameraLookAtTarget` falls back to its target, and
+   * `CameraDriverFromDeferredPose` copies the whole of it across.
+   */
+  g_cam_path_eye: vec3(),
+  g_cam_path_pitch_bams: 0,
+  g_cam_path_yaw_bams: 0,
+  g_cam_path_roll_bams: 0,
+  /**
+   * `g_camera_eye_x/y/z` — `0x009C71E0`, and `g_camera_pitch_bams` /
+   * `g_camera_roll_bams` (`0x009C71EC`, `0x009C71F4`) beside
+   * {@link g_camera_yaw_bams}: the **gameplay eye**, where the enemies measure
+   * to. Not the camera: only the scene state's hook writes it (the rail at the
+   * pose's eye less fifteen in y, the held eye, the view-angle camera fifteen
+   * units down its own axis), and `UpdateSceneViewAndLight` draws from the
+   * block. See `camera/hooks.ts`.
+   *
+   * Read by routines with no `ClassFrame` as well: `EnemyZombieInit`
+   * (`FUN_00452DA0`) and `EnemyThrowerInit` (`FUN_00449620`) seed the head's
+   * aim toward `eye + (0, 15, 0)` from these three words. A spawn runs in the
+   * interpreter's task, ahead of this frame's hook, so it reads what the
+   * previous frame's hook wrote, as the engine's does. `CameraClearHookAndPose`
+   * (`FUN_0040C340`) zeroes all six words on a scene load. `[proved]`
+   */
+  g_camera_eye: vec3(),
+  g_camera_pitch_bams: 0,
+  g_camera_roll_bams: 0,
   /**
    * `g_camera_turn_rate` — 0x009C6F36, and `g_camera_turn_curve` — 0x009C6F38.
    *
@@ -1119,7 +1148,7 @@ export const G = {
    * **Which of two rules produces it depends on the shot**, and the shot says
    * so: `EvtActionFinishSequence21` installs a per-frame driver out of
    * `g_camera_action_starters` (0x00576B20), indexed by the scene-state minor
-   * it has just entered. See {@link g_camera_action_driver}.
+   * it has just entered. See {@link g_evt_action_handler}.
    *
    * * Minors 4 and 6 — 572 of the 836 `finish_sequence` sites — install
    *   `CameraDriverSelectMode` (`FUN_00402650`), which clears this on every
@@ -1169,17 +1198,110 @@ export const G = {
    */
   g_camera_hand_back_variant: 0,
   /**
-   * `[port-only]` — which starter last ran, standing in for the function
-   * pointer `EvtActionFinishSequence21` parks in `g_evt_action_handler`
-   * (0x009A610C).
-   *
-   * The port cannot put a function pointer in a snapshot, and the identity is
-   * all anything needs: the three starters install two different drivers, and
-   * `goto_scene_state` parks the slot on a bare `RET`. Written by the
-   * `finish_sequence` action and cleared by `Walker.retireSceneSequence`,
-   * which is where the engine writes and parks it.
+   * `g_evt_action_handler` — `0x009A610C`, as the port's `EvtActionHandler`
+   * identity: the routine `EvtRunQueuedActions` calls once a frame from
+   * inside `CameraActorTick`. The ten `queue_event` actions are dequeued into
+   * it, and the persistent ones put their own per-frame routine there -- a
+   * `cam_play`'s `CamAdvancePathFrame`, a `finish_sequence`'s starter and
+   * then its driver. See `camera/actions.ts`.
    */
-  g_camera_action_driver: 0,
+  g_evt_action_handler: 0,
+  /**
+   * `g_evt_action_advance` — `0x009A1A10`. What `EvtRunQueuedActions` does
+   * with the ring after the handler's call: 0, the handler is still running;
+   * 1, it finished -- dequeue the next action and call it now; 2, dequeue it
+   * and call it next frame. Every retiring handler writes 1;
+   * `finish_sequence` writes 0; `set_action_drain_mode` writes its operand;
+   * a scene starts at 2.
+   */
+  g_evt_action_advance: 2,
+  /**
+   * The ring of queued actions -- `0x009C9060`, sixteen instruction pointers
+   * between the read cursor `0x009A34D0` and the write cursor `0x009CA108` --
+   * as the records themselves. `queue_event` pushes; `EvtRunQueuedActions`
+   * shifts.
+   */
+  g_evt_action_ring: [] as { sel: number; args: number[] }[],
+  /**
+   * `g_evt_action_operands` — `0x009A6184`, the eight dwords a dequeued
+   * action's operands are copied into. A handler reads them every frame it
+   * runs, and `hold_camera_preset` counts its first one down in place.
+   */
+  g_evt_action_operands: [0, 0, 0, 0, 0, 0, 0, 0],
+  /**
+   * `g_camera_starter_reseats` — `0x009C6F3C`. While set, the three camera
+   * action starters run `CameraResetForPathShot` and seat before installing
+   * their driver. Every writer stores 1.
+   */
+  g_camera_starter_reseats: 1,
+  /**
+   * `g_camera_update_hook` — `0x009C7080`, the scene state's camera routine,
+   * as the port's {@link CameraUpdateHook} identity. `CameraUpdateTick` jumps
+   * through it once a frame, after the camera actor. See `camera/hooks.ts`.
+   */
+  g_camera_update_hook: 0,
+  /**
+   * `g_cam_path_cursor` — `0x009A6144`, the next frame `CamAdvancePathFrame`
+   * publishes, and `g_cam_path_end_frame` — `0x009A6148`, the last of the
+   * range. Camera block 0's `+0x104` and `+0x108`.
+   */
+  g_cam_path_cursor: 0,
+  g_cam_path_end_frame: 0,
+  /**
+   * `g_cam_path_frames_left` — `0x009C6F28`. `end - cursor` as the last path
+   * routine left it: `CamAdvancePathFrame` and the two rail hooks write it
+   * every frame, `CameraHoldEyeTick` writes -1, the resets `0x7FFFFFFF`.
+   * `wait_camera_path_frame 0` reads it, and `CameraTrackEnemiesTick` arms
+   * the branch preview while it is negative.
+   */
+  g_cam_path_frames_left: 0x7fffffff,
+  /**
+   * `g_camera_ease_eye` — `0x009C6F33`. Set, `CameraEaseBlockEyeToPathPose`
+   * eases the block's eye onto the pose a sixteenth a frame; clear, it snaps.
+   * `EvtActionSetFlag15` raises it; `ResetSceneCombatState` and
+   * `goto_scene_state` clear it.
+   */
+  g_camera_ease_eye: 0,
+  /**
+   * `g_evt_cam_override_valid` — `0x009C6FD8`, and the three `{path, frame}`
+   * pairs `g_evt_cam_override_pairs` (`0x009C6FDC`) that `store_six`
+   * (`EvtActionStoreSixOperands60`) writes with it. `CameraArmStashedPath`
+   * re-arms the camera on the pair `g_script_branch_var` picks.
+   */
+  g_evt_cam_override_valid: 0,
+  g_evt_cam_override_pairs: [] as { path: number; frame: number }[],
+  /**
+   * `g_camera_impulse_*` — `0x009C70F8`..`0x009C7104`, `0x007C1760`/`70`:
+   * scene state (2,5)'s push. See `CameraImpulseShakeTick` in
+   * `camera/hooks.ts`. No shipped script enters (2,5).
+   */
+  g_camera_impulse_yaw_bams: 0,
+  g_camera_impulse_request: 0,
+  g_camera_impulse_lock: 0,
+  g_camera_impulse_frames: 0,
+  g_camera_impulse_offset: vec3(),
+  g_camera_impulse_velocity: vec3(),
+  /**
+   * `g_camera_use_fixed_y` — `0x009C70F4`. At 1 the path hooks put the
+   * gameplay eye at `g_camera_fixed_eye_y` rather than fifteen below the
+   * pose. Evt opcode 0x36 writes it; no shipped script uses it.
+   */
+  g_camera_use_fixed_y: 0,
+  /**
+   * `g_cam_roll_enabled` — `0x009A21B0`. `CamEvalPath7` evaluates a path's
+   * roll channel only while this is set; evt opcode 0x35 writes it and
+   * `ResetSceneCombatState` clears it.
+   */
+  g_cam_roll_enabled: 0,
+  /**
+   * `g_queued_events_pending` — `0x009A2C8C`. Outstanding queued actions:
+   * `queue_event` adds one, every handler takes one back as it completes --
+   * except `EvtActionFinishSequence21`, whose persistent driver
+   * `goto_scene_state` retires. `wait_queued_events_done` blocks on it. In
+   * `G` because `CamAdvancePathFrame`, a game routine, is what retires a
+   * playing `cam_play`. See `script/state/queued.ts`.
+   */
+  g_queued_events_pending: 0,
   /**
    * `g_evt_wait_alive_hysteresis` — 0x007DCCA8. The extra frame
    * `wait_enemies_alive` (0x44) costs, and nothing else in the program reads
@@ -1198,16 +1320,26 @@ export const G = {
    */
   g_evt_wait_alive_hysteresis: 0,
   /**
-   * `g_enemy_slots` — 0x009A5EC0. The actors the camera considers, nearest
-   * first; slots 0 and 1 are the permit holders. Holds `at`, not pointers.
+   * `g_enemy_slots` — 0x009A5EC0. Sixteen `{u8 occupied; void *actor}`
+   * records, stride 8, **indexed**: slots 0 and 1 are the permit holders the
+   * last fill dealt and every other candidate sits at its distance rank plus
+   * two, so the table has holes. `at` stands in for the pointer. See
+   * `camera/slots.ts`.
    */
-  g_enemy_slots: [] as number[],
+  g_enemy_slots: makeCameraSlots(),
   /**
-   * `g_camera_candidate_count` — 0x009CA93C. How many objects called
-   * `RegisterForCameraTracking` (`FUN_00408EC0`) this frame: the actors
-   * `UpdateCameraEnemySlots` ranks **and** the carried props, which register
-   * too but which `g_enemy_slots` cannot hold (see `game/carried_prop.ts`).
-   * `EvtOpWaitTargetsClear47` (`FUN_0045FD20`) waits for it to reach zero.
+   * `g_camera_candidates` — 0x005A4DC8. The `{key, obj}` pairs
+   * `RegisterForCameraTracking` (`FUN_00408EC0`) has filed since the last
+   * `UpdateCameraEnemySlots` (`FUN_00408DD0`), at most fourteen, in the order
+   * they registered. The fill sorts and empties it.
+   */
+  g_camera_candidates: [] as CameraCandidate[],
+  /**
+   * `g_camera_candidate_count` — 0x009CA93C. How many objects have called
+   * `RegisterForCameraTracking` since the last fill -- the actors and the
+   * carried props alike. `EvtOpWaitTargetsClear47` (`FUN_0045FD20`) waits for
+   * it to reach zero; the interpreter reads it before the fill empties it, so
+   * it is the count the previous frame's objects registered.
    */
   g_camera_candidate_count: 0,
 
@@ -1223,6 +1355,15 @@ export const G = {
    * copies here.
    */
   g_water_level: -24.9,
+  /**
+   * `g_frog_bone1_on_entry` — 0x007DCBB8, three floats beside the water
+   * level. Class 0x11's: `FrogUpdate` (`FUN_0043A1E0`) writes it before any
+   * state runs, as bone 1 where the **last** draw left it, carried into the
+   * world through this frame's camera block; `FrogPushOutOfActorCollision`
+   * (`FUN_0043A500`) reads its x and z as where the frame's travel started.
+   * Nothing else touches it, and y is written and never read.
+   */
+  g_frog_bone1_on_entry: vec3(),
   /**
    * `g_water_wave_field` — 0x007DCC4C. The block `WaterFieldCreate`
    * (`FUN_00442290`, class 0x16) allocates: a plane, a slot mask, a count of
@@ -1309,6 +1450,15 @@ export const G = {
    * because no two of them are ever in play at once.
    */
   g_bat_members: [] as number[],
+  /**
+   * `[port-only]` as a pool: the `0x50`-byte objects `SpawnBatSplash`
+   * (`FUN_0042F980`) allocates, each running `BatSplashUpdate`
+   * (`FUN_0042F930`). Plain records for the same reason as
+   * `g_severed_heads`. `game/class46/splash.ts`.
+   */
+  g_bat_splashes: [] as BatSplash[],
+  /** `[port-only]` — see {@link BatSplash.id}. */
+  g_bat_splash_seq: 0,
 
   // -- the horde, class 0x40 ---------------------------------------------
   /**
@@ -1445,6 +1595,15 @@ export const G = {
    */
   g_scene_state_major: 0,
   /**
+   * `g_scene_state_minor` — `0x009C6F14`, and `g_scene_state_minor_entered`
+   * — `0x009C6F10`: the minor halves of the two pairs. `EvtEnterSceneState`
+   * writes both, its unstamped twin the live one only, and
+   * `UpdateSceneViewAndLight` copies live into stamped at the end of every
+   * camera actor's task. See `camera/hooks.ts`.
+   */
+  g_scene_state_minor: 0,
+  g_scene_state_minor_entered: 0,
+  /**
    * `g_app_state` — 0x009C8E98. Which of the game's top-level screens is
    * running. **The port sits at {@link AppState.InPlay}, 6**, because that
    * is the state the engine is in while a stage is being played, and the port
@@ -1516,7 +1675,8 @@ export const G = {
   /**
    * `g_screen_furniture_flags` — 0x009A5900. Bit 0 lets a start press take
    * effect at once (else it waits in state 10); bit 1 is raised by
-   * `CommitAppState` and required by `PlayerTryStartPress`.
+   * `CommitAppState` and required by `PlayerTryStartPress`. Bits `0x10` and
+   * `0x20` are the two screen cards' — see {@link ScreenFurniture}.
    */
   g_screen_furniture_flags: 0,
   /**
@@ -1598,6 +1758,60 @@ export const G = {
   g_continue_credit_seen: [0, 0, 0, 0] as number[],
   /** `g_no_continue_frames` — 0x007DCCD4, a byte. */
   g_no_continue_frames: 0,
+  /**
+   * `g_input_frame` — 0x009A5C40. `InputReadFrame` (`FUN_0040D590`) adds one
+   * on every frame's input read, before any screen runs; `CreditBlinkTick`
+   * takes the credit line's clock from its difference. The boot reset is its
+   * only other writer. Survives a scene load.
+   */
+  g_input_frame: 0,
+  /**
+   * `g_screen_frames` — 0x009A5C44. Frames the current screen has run:
+   * `RunPhaseInPlay` (`FUN_004601D0`) counts it up after the task walk, and
+   * each attract and title screen zeroes and counts its own. Read by
+   * `CreditBlinkTick`, past 3, for the attract screens' PRESS START.
+   */
+  g_screen_frames: 0,
+  /**
+   * `g_credit_blink_clock` — 0x005A4D44. The credit line's blink clock:
+   * `CreditBlinkTick` (`FUN_004067D0`) adds the frames `g_input_frame` moved
+   * since it last looked, so it steps once a frame. `CreditPromptDrawSingle`
+   * (`FUN_00406860`) hides the line while `(clock >> 5) % 3 == 2`.
+   * `CreditsBootReset` (`FUN_004066D0`) zeroes it at boot.
+   */
+  g_credit_blink_clock: 0,
+  /** `g_credit_blink_seen` — 0x005A4D48: `g_input_frame` as last seen. */
+  g_credit_blink_seen: 0,
+  /**
+   * `g_credit_prompt_player` — 0x005A4D28. Whose credit tier the prompt
+   * reads: `CreditPromptDraw` (`FUN_00406CE0`) writes the player when counts
+   * are per player and 0 when they are shared.
+   */
+  g_credit_prompt_player: 0,
+  /**
+   * `g_score_cheat` — 0x009C87FC. `HudDrawScoreCheat` (`FUN_00413FB0`) draws
+   * a player's score only while it is 7. Its one setter, `FUN_00495EB0` (app
+   * state 3), writes 7 when the L/R presses spell the string at `0x005978C0`,
+   * "LLRRRLR"; it and `TitleMenuUpdateAndSelect` (for Training and Boss)
+   * zero it. The port does not run screen 3, so it stays 0. `[proved]`
+   */
+  g_score_cheat: 0,
+  /**
+   * `[port-only]` -- which players `HudDrawCrosshair` (`FUN_004169C0`) drew
+   * the crosshair for this frame, 1 or 0. The engine draws a sprite; the
+   * port's crosshair is the page's reticle, which follows the pointer between
+   * ticks, so what the routine decides is recorded here and `app/` hands it
+   * across. Cleared with `g_screen_sprite_draws` at the head of the player
+   * walk.
+   */
+  g_crosshair_drawn: [0, 0] as number[],
+  /**
+   * `g_evt_gameplay_live` — 0x007DCCA4. Recomputed at the top of
+   * `EvtInterpreterLoop` (`FUN_0045ECC0`) and read by every wait opcode,
+   * `0x40` to `0x47`: the script may pass a wait only while it is 1. See
+   * `EvtGameplayLiveUpdate`. BSS, so 0 until the first frame computes it.
+   */
+  g_evt_gameplay_live: 0,
   /**
    * `g_script_flags` — 0x009C7200. The byte array `set_script_flag` (evt 0x48)
    * writes and the set-pieces read for their other removal trigger.
@@ -1721,34 +1935,37 @@ export const G = {
    */
   g_camera_block_eye: vec3(),
   /**
-   * `g_camera_yaw_bams` — 0x009C71F0. Which way the camera is pointing, in
-   * BAMS, beside the eye at `g_camera_eye_x/y/z` (0x009C71E0).
+   * `g_camera_yaw_bams` — 0x009C71F0. The gameplay eye's heading, in BAMS,
+   * beside {@link g_camera_eye}: the scene state's hook writes it -- the
+   * rail as its pose's yaw turned half round, the view-angle camera from the
+   * block -- and it faces *forward*, where the block's own yaw faces back.
    *
-   * Class 0x31 needs the *yaw alone* rather than the whole camera matrix:
+   * Class 0x31 needs the yaw alone rather than the whole camera matrix:
    * `ThrowerStateLeapAside` builds its landing point with a Y rotation only,
    * and `ThrowerFindWallBeside` refuses to leap unless the actor is facing
-   * within 0x2000 of it. The host writes it once a frame.
+   * within 0x2000 of it.
    */
   g_camera_yaw_bams: 0,
   /**
    * `g_camera_block_pitch_bams` — 0x009A60CC, `g_camera_blocks + 0x8C`: the
    * camera block's X rotation. `UpdateSceneViewAndLight` (`FUN_00401F40`)
    * builds the camera as `T(eye) Ry(yaw) Rx(this) Rz(roll)` looking down its
-   * own -z, so this is `asin` of the view direction's y — positive looking
-   * up. The horde's dive lifts its arc by `2 * sin(this)`. The host writes it
-   * once a frame beside the yaw.
+   * own -z, and `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) derives it from
+   * the block's eye and target with `VecToAngles(eye - target)` -- positive
+   * looking up. The horde's dive lifts its arc by `2 * sin(this)`.
    */
   g_camera_block_pitch_bams: 0,
   /**
-   * `g_camera_block_yaw_bams` — `0x009A60D0`, `g_camera_blocks + 0x90`: the
-   * camera block's Y rotation, which `UpdateSceneViewAndLight`
-   * (`FUN_00401F40`) builds the view from beside the pitch. The port's view
-   * is built from the block's eye and look-at instead, so this is only
-   * written by the one routine that aims the camera by angle rather than by
-   * point -- the stage-3 boss's body, `Boss3BodyUpdate` (`FUN_004231C0`) --
-   * which then publishes the look-at those angles give.
+   * `g_camera_block_yaw_bams` — `0x009A60D0`, and `g_camera_block_roll_bams`
+   * — `0x009A60D4`: the block's other two angle words, which
+   * `UpdateSceneViewAndLight` (`FUN_00401F40`) builds the view from beside
+   * the pitch. `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) derives pitch
+   * and yaw from the eye and target and stores its third argument as the
+   * roll; the stage-3 boss's body, `Boss3BodyUpdate` (`FUN_004231C0`),
+   * writes the yaw itself and aims the camera by angle.
    */
   g_camera_block_yaw_bams: 0,
+  g_camera_block_roll_bams: 0,
   /**
    * `g_coli_hit_surface` — 0x009CAC40. The material id of whatever the last
    * collision trace hit, and a **side output**: every caller reads it straight
@@ -1925,6 +2142,10 @@ export const G = {
   g_script_branch_var: 0,
 
   // -- thrown weapons ----------------------------------------------------
+  /**
+   * The weapons class 0x30 and class 0x31 have thrown, each an `ActorAlloc`'d
+   * task in the engine running one of two routines. See `game/thrown_weapon.ts`.
+   */
   g_thrown_weapons: [] as ThrownWeapon[],
   /** Hands out `ThrownWeapon.id`. Part of the state, so ids never collide. */
   g_thrown_next_id: 1,
@@ -1938,6 +2159,14 @@ export const G = {
    * with `RotY(camera_yaw) * p + camera_eye` at draw time.
    */
   g_rain_particles: [] as RainParticle[],
+  /**
+   * `g_rain_enabled` — 0x009C8E50. `EvtOpEnableRain1D` (`FUN_0045F340`)
+   * stores its operand here and `ResetSceneOnEnter` zeroes it (`0x0045EE78`).
+   * The draw of the rain itself reads the walker's copy; what reads this one
+   * is gameplay: `ZombieDeathEffectCueTick` and `ZombieDeathLandingEffect`
+   * splash rather than raise dust while it is `1`.
+   */
+  g_rain_enabled: 0,
 
   /** 60 Hz frames since the scene reset. Not an exe global; the port's clock. */
   g_frame: 0,
@@ -2020,9 +2249,10 @@ export type Globals = typeof G;
  *   released and cleared. `obj+0x3C` is the phase of every cel a class-0x30
  *   bone draws, so the port needed it; `game/hit_slots.ts` says which parts of
  *   the hit-slot system are ported and which are not. |
- * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
- * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
- * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
+ * | `g_bHudShutterState` back to 5 (`0x0045EE5F`) | ✅ |
+ * | `g_bHudShutterPrev` back to 5 (`0x0045EE64`) | ✅ |
+ * | `g_backdrop_mode = 0` | ❌ the global does not exist |
+ * | `g_rain_enabled = 0` (`0x0045EE78`) | ✅ |
  * | `g_nFiringGate = 0` | ✅ |
  * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
@@ -2072,20 +2302,20 @@ export function ResetSceneOnEnter(): void {
   // stage that never issues `hud_shutter_state 1` or `6` is a stage the engine
   // would not let you shoot in either.
   G.g_nFiringGate = 0;
-  // `MOV [0x009ca0f4], AL` at `0x0045EE5F`, with `AL` 5 -- and `g_bHudShutterPrev`
-  // beside it, which is `script/state/shutter.ts`'s and stays there.
-  //
-  // The port writes **2**, not 5, and that is `Shutter.reset`'s standing
-  // `[diverges]` seen from the other side rather than a second one: a 5 draws
-  // the closed bars and hands over to 4 -- which the port's shutter machine
-  // now does too (`Shutter.step`), so what is left is the picture: a 5 here
-  // would shut the bars on every freshly loaded stage until its script opens
-  // them. It is written at all only because the byte moved into
-  // `G` for class 0x19 -- until then the walker owned it and this routine
-  // could not reach it.
-  G.g_bHudShutterState = 2;
+  // `MOV AL, 5` at `0x0045EE58`, then `MOV [0x009ca0f4], AL` and
+  // `MOV [0x009c8e9c], AL`: the state and the one `HudDrawShutterState` last
+  // settled on, both 5. They are equal, so the routine's first frame seeds
+  // nothing, draws the shut bars and leaves 4 with the gate down -- which is
+  // the picture of a scene before its script has opened them, and on that
+  // first frame the script has not run at all: its task's first handler,
+  // `EvtTaskInstallInterpreter` (`FUN_0045ECB0`), only installs the
+  // interpreter.
+  G.g_bHudShutterState = 5;
+  G.g_bHudShutterPrev = 5;
   // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
   G.g_screen_shake_frames = 0;
+  // `g_rain_enabled`, `MOV [0x009c8e50], EBX` at `0x0045EE78`.
+  G.g_rain_enabled = 0;
   // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
   // again in a new scene.
   G.g_force_rail_advance = 0;
@@ -2163,6 +2393,16 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  G.g_water_rings = [];
+  G.g_water_ring_seq = 0;
+  // The water tasks go with the scene's list, and the tiles they rewrote go
+  // with the scene's assets.
+  G.g_water_surfaces = [];
+  G.g_water_surface_seq = 0;
+  G.g_water_surface_uv = [];
+  // ...and the stage-2 car, a task like them: no class 0x21, no car.
+  G.g_st2_cars = [];
+  G.g_st2_car_seq = 0;
   // ...and the owl's and the fish's tasks, which the scene's list takes
   // with it like every other task.
   G.g_owl_feathers = [];
@@ -2173,6 +2413,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_fish_surface_rings = [];
   G.g_ring_effects = [];
   G.g_creature_effect_seq = 0;
+  // The shutter's task is one of the list the scene load builds, so its
+  // counter starts again at 0 -- `HudShutterTaskCreate`, at `0x00460733`.
+  HudShutterTaskCreate();
   // The scene's task list is rebuilt on a scene load, and a bar task goes
   // with it; the fill itself is a data-segment word and is left alone.
   G.g_boss_hp_bars = [];
@@ -2234,8 +2477,39 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_is_tracking = 0;
   G.g_camera_lookat_target = vec3();
   G.g_camera_block_target = vec3();
-  G.g_camera_block_view_target = vec3();
+  G.g_camera_view_to_world = MatIdentity();
+  G.g_camera_world_to_view = MatIdentity();
   G.g_cam_path_target = vec3();
+  G.g_cam_path_eye = vec3();
+  G.g_cam_path_pitch_bams = 0;
+  G.g_cam_path_yaw_bams = 0;
+  G.g_cam_path_roll_bams = 0;
+  // `CameraClearHookAndPose` (`FUN_0040C340`) zeroes these six on a scene
+  // load; the port's reset is that load.
+  G.g_camera_eye = vec3();
+  G.g_camera_pitch_bams = 0;
+  G.g_camera_yaw_bams = 0;
+  G.g_camera_roll_bams = 0;
+  G.g_camera_block_pitch_bams = 0;
+  G.g_camera_block_yaw_bams = 0;
+  G.g_camera_block_roll_bams = 0;
+  G.g_camera_starter_reseats = 1;
+  G.g_camera_update_hook = 0;
+  G.g_cam_path_cursor = 0;
+  G.g_cam_path_end_frame = 0;
+  G.g_cam_path_frames_left = 0x7fffffff;
+  G.g_camera_ease_eye = 0;
+  G.g_evt_cam_override_valid = 0;
+  G.g_evt_cam_override_pairs = [];
+  G.g_camera_impulse_yaw_bams = 0;
+  G.g_camera_impulse_request = 0;
+  G.g_camera_impulse_lock = 0;
+  G.g_camera_impulse_frames = 0;
+  G.g_camera_impulse_offset = vec3();
+  G.g_camera_impulse_velocity = vec3();
+  G.g_camera_use_fixed_y = 0;
+  G.g_cam_roll_enabled = 0;
+  G.g_queued_events_pending = 0;
   G.g_camera_turn_rate = 0;
   G.g_camera_turn_curve = 1;
   G.g_camera_settled = 0;
@@ -2243,16 +2517,18 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_mode = 0;
   G.g_camera_hand_back_started = 0;
   G.g_camera_hand_back_variant = 0;
-  G.g_camera_action_driver = 0;
+  G.g_evt_action_operands = [0, 0, 0, 0, 0, 0, 0, 0];
   // Not in `ResetSceneOnEnter` — the engine's copy is only ever zeroed by the
   // wait that owns it. It is here because this is the port's "nothing is
   // half-done" call, and a seek that lands mid-`wait_enemies_alive` would
   // otherwise carry the previous scene's count of refused frames into the
   // first gate of the new one.
   G.g_evt_wait_alive_hysteresis = 0;
-  G.g_enemy_slots = [];
+  G.g_enemy_slots = makeCameraSlots();
+  G.g_camera_candidates = [];
   G.g_camera_candidate_count = 0;
   G.g_water_level = -24.9;
+  G.g_frog_bone1_on_entry = vec3();
   G.g_water_attack_slots = [0, 0, 0, 0];
   // The engine leaves the pointer dangling into the freed pool; nothing
   // samples it until the next class-0x16 spawn replaces it.
@@ -2261,6 +2537,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
+  // The splash is a task, and the scene's task list goes with the scene.
+  G.g_bat_splashes = [];
+  G.g_bat_splash_seq = 0;
   G.g_horde_members = [];
   G.g_horde_live_count = 0;
   G.g_horde_diver = 0;
@@ -2288,9 +2567,19 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_scene_index = 0;
   G.g_camera_block_eye = vec3();
   G.g_active_cam_path = -1;
-  G.g_scene_state_major_entered = 0;
-  G.g_scene_state_major = 0;
   G.g_cam_path_frame = 0;
+  // The scene's task list: `EvtLoadBlockProgram`'s ring reset and
+  // `CameraActorInit` -- which resets the camera block, enters scene state
+  // (1, 1) and parks the action slot -- then `CameraClearHookAndPose`
+  // (`FUN_0040C340`), which `LoadSceneAndReset` calls after the list and so
+  // leaves the scene state's hook a no-op.
+  CameraActorInit();
+  G.g_camera_update_hook = 0;
+  G.g_camera_fixed_eye_y = 0;
+  G.g_camera_eye = vec3();
+  G.g_camera_pitch_bams = 0;
+  G.g_camera_yaw_bams = 0;
+  G.g_camera_roll_bams = 0;
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;

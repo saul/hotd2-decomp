@@ -83,6 +83,10 @@ CHECKS: list[Check] = [
           "that `docs/STATUS.md` still matches the tree it describes"),
     Check("test:port", "web", ["npm", "run", "--silent", "test:port"],
           "the state machines, driven headless against hand-written tables"),
+    Check("test:audio", "web", ["npm", "run", "--silent", "test:audio"],
+          "`PlaySoundId`'s dispatch -- the loop flag, the three one-shot "
+          "tracks, the three control words -- and the byte stream channel 0xF "
+          "plays, tail and channel swap included, with no browser"),
     Check("test:bundle", "web", ["npm", "run", "--silent", "test:bundle"],
           "that the bundle reader refuses what it should refuse"),
     Check("test:export", "web", ["npm", "run", "--silent", "test:export"],
@@ -130,6 +134,12 @@ CHECKS: list[Check] = [
           "rather than running out, and are still there when the stage is "
           "reached by a deep link -- the only check in the tree that measures "
           "the mixer rather than the intent",
+          NEEDS_BUNDLE),
+    Check("bgm_loop", "web", ["npm", "run", "--silent", "bgm-loop"],
+          "that the page's music is the engine's stream -- the buffer the "
+          "script's own track reaches Web Audio as is one period of the file "
+          "from its first sample to end of file, looped, sample for sample -- "
+          "and that it is audible",
           NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
@@ -255,6 +265,15 @@ CHECKS: list[Check] = [
           "control word rather than a sound, and so the only thing that makes "
           "the chainsaw a loop rather than a one-shot",
           NEEDS_GAME),
+    Check("verify_bgm_stream", ".",
+          ["python3", "tools/verify_bgm_stream.py", "--game-dir",
+           "{game_dir}"],
+          "that the music has no loop points to find -- the exe's own bytes "
+          "stream channel 0xF and seek it back to the first sample at end of "
+          "file, the port's one-shot ids are the exe's three, and every "
+          "looping track in both tables is long enough for that model to be "
+          "exact",
+          NEEDS_GAME),
     Check("verify_root_pose", ".",
           ["python3", "tools/verify_root_pose.py", "--game-dir",
            "{game_dir}"],
@@ -289,6 +308,36 @@ CHECKS: list[Check] = [
           "the emerge prop's corners -- is the EXE's, and that the seven "
           "descriptors split five hordes to two props on the byte PlaceHorde "
           "switches on",
+          NEEDS_GAME),
+    Check("verify_continue", ".",
+          ["python3", "tools/verify_continue.py", "--game-dir", "{game_dir}"],
+          "that the continue screen the port draws -- the run's CONTINUE? "
+          "and digit, the two-player small ones, the small GAME OVER and the "
+          "credit line -- is at the EXE's positions, scales and sprite ids, "
+          "read as instruction bytes and `.rdata` rows; that only one "
+          "credit-line drawer can run, because the credit costs are stored "
+          "once, as 1; and that all eight wait opcodes read the gameplay gate "
+          "that holds the script while nobody is in play. Nothing else looks "
+          "at a picture that, when wrong, is simply not there",
+          NEEDS_GAME),
+    Check("verify_water", ".",
+          ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],
+          "that class 0x41 type 1, the canal water task, starts from the table "
+          "the EXE indexes -- ten flat water tiles -- and that every slot, "
+          "flag, camera cue and multiplier the port's copy of it tests is the "
+          "immediate at the instruction that holds it; its fifteen spawns sit "
+          "at the origin, so a wrong reading draws nothing and looks like "
+          "nothing",
+          NEEDS_GAME),
+    Check("verify_draw_order", ".",
+          ["python3", "tools/verify_draw_order.py", "--game-dir",
+           "{game_dir}"],
+          "that the player's two passes and translucent order are the EXE's: "
+          "the blend and depth tables `render/draw_order.ts` copies, the "
+          "alpha-test and blend-enable pushes, and the VIEW matrix and "
+          "comparator bytes that make the sort nearest-first rather than the "
+          "painter's order this repo's docs had -- plus that no mesh in `pol/` "
+          "turns its depth write off, which is why translucent meshes occlude",
           NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],

@@ -199,6 +199,10 @@ const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
   [PropFamily.RisingDoor]: PoseOrder.YawOnly,
   [PropFamily.DrawOnlyType53]: PoseOrder.RollYawPitch,
   [PropFamily.DrawOnlyType54]: PoseOrder.RollYawPitch,
+  // `PropDrawOnlyType33` (`FUN_00472950`): `RotZ(+0x1D4); RotY(+0x1D0);
+  // RotX(+0x1CC)` at `0x0047297D`..`0x00472995`, its own row in
+  // `GENERIC_POSE_ORDER` too.
+  [PropFamily.DrawOnlyType33]: PoseOrder.RollYawPitch,
   // `PropUpdateType43`'s two draw blocks both compose `Rz.Ry.Rx`, and its
   // tumble drives all three angles, so this is the one family where the order
   // is visible on every frame rather than only at placement.
@@ -251,6 +255,11 @@ function DrawSlotFor(p: BreakableProp): number | null {
   // The two draw-only families each draw `obj+0x28C` and nothing else.
   if (p.family === PropFamily.DrawOnlyType53
       || p.family === PropFamily.DrawOnlyType54) return p.slot;
+  // `AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)` at `0x0047299A`: type
+  // 33's strip, and `storyItem` is the cursor `PropDrawOnlyType33` steps --
+  // at the head of the frame, so what is here is what the engine's draw of
+  // this frame is handed.
+  if (p.family === PropFamily.DrawOnlyType33) return p.slot + p.storyItem;
   // `PropUpdateType43` has two draw blocks and picks between them on its
   // effect id: with none it draws `obj+0x28C`, and with one -- kind 2, whose
   // `obj+0x28C` is `0xFFFF` -- it draws `0x17A9` lifted 0.8 while the prop is
@@ -263,9 +272,10 @@ function DrawSlotFor(p: BreakableProp): number | null {
   // writes over a prop it has hidden.
   if (p.slot === SLOT_NONE && p.family !== PropFamily.Generic) return null;
   if (p.family !== PropFamily.Generic) return p.slot;
-  // `AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)` — types 31 and 33 play a
-  // strip, and `storyItem` is the cursor their routine steps. Everything else
-  // in the family passes `obj+0x2A0` to nothing.
+  // `AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)` — type 31 plays a strip,
+  // and `storyItem` is the cursor its routine steps (type 33 is the other
+  // strip, and its own family above). Everything else in the family passes
+  // `obj+0x2A0` to nothing.
   if (GENERIC_SLOT_STRIP.has(p.kind)) return p.slot + p.storyItem;
   const drawn = GENERIC_DRAW_SLOT[p.kind];
   return drawn === undefined ? p.slot : drawn;
@@ -301,6 +311,8 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // Nor does `PropUpdateType48FlickerLight`: a lamp, and three draws, none a
   // shadow.
   if (p.family === PropFamily.Type48) return null;
+  // `PropDrawOnlyType33` is one `AssetDrawSlot`, the strip's, and no other.
+  if (p.family === PropFamily.DrawOnlyType33) return null;
   if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
   return KIND_SHADOW[p.kind] ?? null;
 }
@@ -424,6 +436,20 @@ export class BreakableLayer implements System<RenderContext> {
   setEnabled(v: boolean): void {
     this.enabled = v;
     this.group.visible = v;
+  }
+
+  /**
+   * The live nodes drawing one slot. `render/water_surfaces.ts` asks, because
+   * a prop can draw a canal tile -- `PropDrawOnlyType12` puts `0x13B5` in the
+   * stage-2 boss's blocks -- and in the engine that is the same model the
+   * water task ripples, not a copy of it.
+   */
+  nodesForSlot(slot: number): Object3D[] {
+    const out: Object3D[] = [];
+    for (const l of this.nodes.values()) {
+      if (l.slot === slot && l.node.parent) out.push(l.node);
+    }
+    return out;
   }
 
   private clone(slot: number): Object3D | null {

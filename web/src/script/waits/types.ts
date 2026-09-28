@@ -33,8 +33,6 @@ export interface WaitContext {
    */
   readonly script: ScriptJson;
   readonly host: WalkerHost;
-  /** Retire the action the current shot installed, if it has finished. */
-  settleCameraAction(): void;
   /**
    * Whether the camera has finished the move it was on.
    *
@@ -42,6 +40,11 @@ export interface WaitContext {
    * open while a scripted shot is still playing.
    */
   cameraHasHandedBack(): boolean;
+  /**
+   * `g_evt_gameplay_live` (`0x007DCCA4`): a player is in play with a life.
+   * Every wait opcode tests it; a host with no player answers true.
+   */
+  gameplayLive(): boolean;
 }
 
 export interface WaitRule {
@@ -90,11 +93,18 @@ export interface WaitRule {
    * and its civilian's 650 — could ever be reached at that address, and the
    * `wait_enemies_alive 0` two instructions later held for ever.
    *
-   * Only `0x41` carries it. `0x40` is a count of outstanding actions rather
-   * than a statement about the path, and the ring already has `supersede` for
-   * what a seek does to it.
+   * Only `0x41` carries it.
    */
   readonly skipRunsCameraOn?: boolean;
+  /**
+   * True if stepping past it means the action ring has run dry: `0x40`,
+   * `wait_queued_events_done`, whose condition is
+   * `g_queued_events_pending == 0`. The actions a replay queued have to have
+   * run -- a `cam_play` played to its end, a `store_six` stored -- or the
+   * landing holds a ring the script has already waited out. The camera's own
+   * tasks run them; see `CameraReplayUntil` in `game/camera/actor.ts`.
+   */
+  readonly drainsQueuedActions?: boolean;
   /**
    * True if stepping past it means the flag it names is now raised.
    *
@@ -120,14 +130,14 @@ export interface WaitRule {
    * that returns a blocking policy from here unconditionally and does the
    * whole test in {@link satisfied}.
    *
-   * `0x43`, `0x44` and `0x46` model it — see `waits/enemies.ts`, where it is
-   * the whole of two bugs. **`0x41`, `0x42` and `0x45` do not**, and that is
-   * `[diverges]`: each would cost a frame it does not currently cost, and
-   * `0x42`'s countdown would become `operand + 2` frames rather than `operand`
-   * (`EvtOpWaitFrames42` loads the counter on the yield frame and then
-   * decrements *before* testing). Every camera cue in six stages is timed
-   * against that clock, so moving them is a retiming of the whole player and
-   * wants its own change rather than a ride on this one.
+   * Every rule models it -- `0x41`, `0x42`, `0x43`, `0x44`, `0x45`, `0x46` and
+   * `0x47` -- by never passing from here: a condition it cannot hold on is a
+   * `yield` policy, which spends the frame and passes on the next visit. See
+   * `waits/enemies.ts`, where it is the whole of two bugs. It is also what
+   * keeps the action ring honest: a `finish_sequence` queued in front of a
+   * wait has a camera-actor pass to run in before the `goto_scene_state`
+   * behind the wait parks its slot, and a wait that passed on sight let the
+   * `goto` run first and left the driver installed for good.
    */
   enter(op: OpJson, ctx: WaitContext): WaitPolicy;
   /**
@@ -165,4 +175,12 @@ export const WAIT_NOTES: Record<number, string> = {
 /** The fallback: a wait this client cannot evaluate does not block. */
 export function passedBecause(op: OpJson): WaitPolicy {
   return { kind: "passed", why: WAIT_NOTES[op.op] ?? "needs the runtime" };
+}
+
+/**
+ * The same excuse for a wait whose engine routine yields on its first visit:
+ * the frame is still spent, the condition is still not held on.
+ */
+export function YieldBecause(op: OpJson): WaitPolicy {
+  return { kind: "yield", why: WAIT_NOTES[op.op] ?? "needs the runtime" };
 }

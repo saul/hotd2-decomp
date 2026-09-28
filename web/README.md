@@ -151,8 +151,8 @@ Taking it does what the game does: ends the current camera move where it
 stands, drops every `queue_event`, releases `wait_queued_events_done`,
 `wait_camera_path_frame` and `wait_frames`, suppresses `spawn_obj_unless_skip`
 and the two `se_play*_unless_skip` variants, cuts any dialogue mid-line, and
-restarts the interrupted track through `resume_bgm_if_skipped` — until
-`set_skippable_region` closes.
+stops the voice line through `stop_voice_if_skipped` — until
+`set_skippable_region` closes. The music plays on.
 
 The script panel is deliberately narrow — the viewport is the point of the
 tool and the tree is a navigator, not the content. Drag the splitter to widen
@@ -318,8 +318,11 @@ so is the event feed.
   and checkpoint paths. Those are read from the binary. That step 0 is
   *therefore* the checkpoint entry is a reading, not a finding; the tree labels
   it as such.
-- **Sound is shown, not played.** BGM track ids from `bgm_entry_play` (`0x5F`)
-  and SE ids appear in the feed and the HUD.
+- **Sound is played, from the install.** Music, SE and voice stream from the
+  game directory the bundle names. The music is the engine's own stream --
+  the file from its first sample to end of file, looped gaplessly, tail bytes
+  and all (`docs/formats/sound.md`) -- and a browser will not start it until
+  the sound button has been clicked.
 
 ### Opcodes without a meaning show their operands
 

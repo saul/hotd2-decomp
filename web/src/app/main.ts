@@ -3,7 +3,8 @@
  *
  * Two modes over one scene and one script walker:
  *
- *   Play       the game, at 60 Hz, pausing at every branch point
+ *   Play       the game, at 60 Hz; a branch goes as the game's does, unless
+ *              the sidebar's "Pause at branches" debug aid holds it
  *   Free roam  orbit and fly, detached from the rail
  *
  * A seek -- a click in the debug sidebar's script tab -- replays to an
@@ -11,9 +12,10 @@
  *
  * The camera is the game's own: 41.100 degrees vertical, 4:3, near 0.8, far
  * 8000, recovered from `SetupSceneProjection`. It is a compile-time constant
- * for the whole game -- there is no zoom and no per-camera FOV -- so the frame
- * is always pillarboxed to 4:3: filling a wider window would either stretch
- * the image or silently widen the shot.
+ * for the whole game -- there is no zoom and no per-camera FOV -- so the
+ * frame either fills the window, keeping the vertical FOV and showing more at
+ * the sides than the game did, or is boxed to the game's own 4:3. Filling is
+ * the default; the debug sidebar has the switch.
  */
 
 import {
@@ -36,6 +38,7 @@ import {
 import { CameraDrawSystem, CameraRig, CameraTakeSystem }
   from "../render/camera";
 import { StageScene } from "../render/stagescene";
+import { RenderCommandOrder } from "../render/draw_order";
 import { SpawnLayer } from "../render/overlays";
 import { FreeRoam, ownsKey } from "../render/freeroam";
 import { Walker, type CamCommand, type FeedEntry } from "../script/walker";
@@ -45,6 +48,7 @@ import { hasThumb, rememberedInstall, runExport,
 import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { seekTo as seekWalkerTo } from "../script/seek";
+import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { Bgm } from "../audio/bgm";
 import { Backdrop } from "../render/backdrop";
@@ -94,9 +98,9 @@ import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing } from "./ring";
 import { TiltReload, unlockDevice } from "./device";
 import {
-  CameraSeatSystem, CharacterBindSystem, GameSystem, GunLightBuildSystem,
+  CharacterBindSystem, GameSystem, GunLightBuildSystem,
   ScriptSystem, drawSystem,
-  seatCamera, syncCamera, syncCharacterSpawns, syncPortGlobals,
+  drawCamera, reseatCamera, syncCharacterSpawns, syncPortGlobals,
 } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { SeveredHeadLayer } from "../render/severed_heads";
@@ -109,6 +113,7 @@ import { PropShatterLayer } from "../render/prop_shatter";
 import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
+import { WaterSurfaceLayer } from "../render/water_surfaces";
 import { ResetPropContainers } from "../game/class41";
 import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
 import {
@@ -120,12 +125,13 @@ import { SetBoss4Tables, SetGameOverTables, SetGameTables }
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
 const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
   camera: [], scene: [], actors: [], props: [], collision: [], shooting: [],
+  route: [],
 };
 
 /** The commands that change something worth remembering across a reload. */
 const PREF_COMMANDS: ReadonlySet<string> = new Set([
   "toggle", "setLightMode", "setFogMode", "setFilterMode", "toggleMute",
-  "setVolume",
+  "setVolume", "setPillarbox",
 ]);
 
 /**
@@ -138,6 +144,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
+  /** The translucent pass's order. See `render/draw_order.ts`. */
+  private readonly drawOrder: RenderCommandOrder;
   /** React's, handed over once it has them. See `app/ui_root.ts`. */
   private readonly viewport: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -267,6 +275,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * hold one: those actors have no character type to resolve.
    */
   readonly slotModels = new SlotModelLayer();
+  /** Class 0x41 type 1's canal water: the tiles it draws and ripples. */
+  readonly waterSurfaces = new WaterSurfaceLayer();
   /**
    * The shot effects — blood, muzzle flash, tracer, impacts. Its own layer
    * because it draws in two spaces at once: one group in the world and one
@@ -384,6 +394,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private mutePref: boolean | undefined = undefined;
   /** Reload by flicking the phone. See `app/device.ts`. */
   private readonly tilt: TiltReload;
+  /** Box the frame to 4:3; off fills the window. See {@link resize}. */
+  pillarbox = false;
   /** The camera's own state: the pose scratch and the rails. */
   readonly cam = new CameraRig();
   /** Everything a system is handed. Built once; the stage index moves. */
@@ -474,6 +486,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
     // SetupSceneProjection: BuildPerspectiveProjection(0x1D3B, 4/3, 0.8, 8000).
     this.camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+    // `RenderFlushCommandList`'s qsort: whole draw commands, nearest first,
+    // each walked in chain order -- not three.js's per-primitive far-first.
+    this.drawOrder = new RenderCommandOrder(this.camera);
+    this.renderer.setTransparentSort(this.drawOrder.compare);
     // Shooting needs a camera to cast through and a scene to cast at, and
     // this is the first moment both exist. It used to be handed them by the
     // Shoot toggle's command, which meant a click did nothing at all until
@@ -512,6 +528,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.shatters.source = this.breakables;
     this.scene.add(this.slotModels.group);
     this.lighting.addRoot(this.slotModels.group);
+    this.scene.add(this.waterSurfaces.group);
+    this.lighting.addRoot(this.waterSurfaces.group);
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
 
@@ -535,10 +553,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // the port decides where it is and what it is doing, and the renderer
     // reads that. Adding a layer is one `add` and never touches the loop.
     this.world.add("script", this.script);
-    // The camera's two halves straddle the game phase: the shot writes the
-    // block, `CameraTrackEnemiesTick` eases it, and only then does the draw
-    // read it back. See `render/camera.ts`.
-    this.world.add("script", new CameraSeatSystem(this.cam));
     // At the head of the game phase, where `GameSystem` used to read the
     // camera for itself. Same place in the order, same values.
     this.world.add("game", new CameraTakeSystem());
@@ -571,6 +585,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.breakables);
     this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);
+    // After the slot models, whose templates its clones come from.
+    this.world.add("render", this.waterSurfaces);
     this.world.add("render", this.effects);
     this.world.add("render", this.bullets);
     this.world.add("render", this.heads);
@@ -585,13 +601,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.deepSprites.group);
     this.world.add("render", this.deepSprites);
     // The screen-space layer, and the last thing the tick does: it draws the
-    // shutter and the caption straight off the walker, and holds no state of
-    // its own for a snapshot to miss. The projection is *not* built here --
+    // caption straight off the walker and the shutter bars and screen sprites
+    // the engine recorded in `G`, and holds no state of its own for a
+    // snapshot to miss. The projection is *not* built here --
     // it is built at the end of `frame`, outside the tick, because a world
     // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
                                     (ctx) => this.hudLayer.draw(ctx.walker,
-                                                            G.g_screen_sprite_draws)));
+                                                            G.g_screen_sprite_draws,
+                                                            G.g_hud_shutter_bars)));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore
@@ -1067,6 +1085,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (prefs.filterMode) {
       this.runCommand({ kind: "setFilterMode", mode: prefs.filterMode });
     }
+    if (prefs.fourByThree) this.runCommand({ kind: "setPillarbox", on: true });
     // Volume before mute, because `setVolume` does not unmute and the restored
     // pair has to land in the same state it was saved in.
     if (prefs.volume !== undefined) {
@@ -1112,6 +1131,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // the viewer chose, and persisting it would carry one machine's ceiling
       // to another.
       filterMode: this.texFilter.filterMode,
+      fourByThree: this.pillarbox,
       // The choice, not the state: undefined until the viewer has pressed
       // the speaker, and then whatever they pressed it to.
       muted: this.mutePref,
@@ -1307,11 +1327,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // A seek replaces the world exactly as a snapshot load does, so it takes
     // the same rebuild path. Running only half of it is what let a rig keep a
     // held pose across a seek.
+    // The replay ran the camera's own tasks at every wait it stepped over,
+    // but the words it landed on may be newer than the block (a checkpoint
+    // since the last drain): put the block on them before the resync draws
+    // it. A snapshot load does not, because its `G` holds the block and the
+    // view exactly.
+    CameraReseatFromFrame();
     this.world.resync(this.ctx);
-    // No `syncCameraToWalker` and no `props.reset` here any more: the resync
-    // pass does both, and the camera's is the stronger of the two -- it seats
-    // the block on the rail even where the restored shot's action has already
-    // retired. Two rebuild paths that nearly agree is the thing being removed.
     this.syncBgmToWalker();
     this.state.block = block;
     this.state.step = step;
@@ -1323,8 +1345,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
   poseFromSlot(slot: number, frame: number): void {
     this.cam.poseFromSlot(this.ctx, this.walker?.rollEnabled ?? false,
-                          this.walker?.useFixedEyeY ?? false,
-                          this.walker?.fixedEyeY ?? 0, slot, frame);
+                          slot, frame);
   }
 
   // -- walker callbacks --------------------------------------------------
@@ -1344,13 +1365,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       });
       return;
     }
-    // `CamStartPathPlayback` (`FUN_00403510`) ends by calling
-    // `CamAdvancePathFrame` itself, and `CamEvalStaticPose` writes the block
-    // outright: a new shot always seats the camera on its own pose rather
-    // than swinging onto it. That is what keeps the script's cuts sharp — and
-    // 148 of the 631 consecutive `cam_play` pairs in stages 1-6 are cuts, some
-    // of them a full 173 degrees.
-    seatCamera(this.cam, this.ctx, true);
+    // The shot is queued, not started: the action ring runs it in the next
+    // `CameraActorTick`, which seats the block itself. Nothing to seat here.
   }
 
   /** The feed is capped so a long session cannot grow without bound. */
@@ -1408,20 +1424,22 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * `Walker.loopingSe`.
    */
   syncBgmToWalker(): void {
-    const t = this.walker?.bgmTrack;
-    if (t !== null && t !== undefined && t !== 0) this.bgm.play(t);
+    // `syncTrack`, not `play`: `PlaySoundId` restarts a track it is handed
+    // even when that track is already sounding, which is right for the
+    // script and wrong for a seek that merely confirms what is playing.
+    this.bgm.syncTrack(this.walker?.bgmTrack ?? null);
     this.bgm.syncLoopingSe(this.walker?.loopingSe ?? []);
   }
 
   /**
-   * Seat and draw in one go, for the paths that have no game tick between —
-   * a seek, a slider drag, a stage that has just finished loading.
-   *
-   * `force` puts the aim on the rail even though the shot's action has
-   * retired. See `seatCamera` in `app/systems.ts`.
+   * Draw the camera for a path that runs no game tick. `reseat` first puts
+   * the block where the camera words say -- a seek, a slider drag, a stage
+   * that has just finished loading, a reset -- which writes `G`; without it
+   * the view `G` already holds is drawn. See `app/systems.ts`.
    */
-  syncCameraToWalker(force = false): void {
-    syncCamera(this.cam, this.ctx, force);
+  syncCameraToWalker(reseat = false): void {
+    if (reseat) reseatCamera(this.cam, this.ctx);
+    else drawCamera(this.cam, this.ctx);
   }
 
   // -- what a frame is made of -------------------------------------------
@@ -1676,6 +1694,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   /** Draw, then publish. Every frame, whether or not it owed a tick. */
   endFrame(): void {
+    this.drawOrder.beginFrame();
     this.renderer.render(this.scene, this.camera);
     this.keepThumb();
     // The one update path, and it is unconditional on purpose. A projection a
@@ -2077,24 +2096,31 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   // -- chrome ------------------------------------------------------------
 
   /**
-   * Fit the 4:3 frame into the viewport, centred.
+   * Size the frame to the viewport: the whole of it, or the game's 4:3 centred
+   * in it.
    *
-   * Always pillarboxed or letterboxed: the game is 4:3 and its vertical FOV is
-   * fixed, so filling a wider window would either stretch the image or
-   * silently widen the shot. There used to be a switch to fill the window
-   * instead; nothing used it, and on a phone held sideways it would have
-   * shown half as much again of every scene as the game ever does.
+   * Filling is the default, because the page is the game and a phone held
+   * sideways is twice as wide as it is tall. The vertical FOV is the game's
+   * compile-time constant either way, so filling a wider window shows more at
+   * the sides than the cabinet did -- which is what `pillarbox` is for, as a
+   * debug sidebar switch, when what the game framed is the question.
    */
   resize(): void {
     const w = this.viewport.clientWidth;
     const h = this.viewport.clientHeight;
     if (w === 0 || h === 0) return;
-    const aspect = 4 / 3;
-    const cw = Math.min(w, h * aspect);
-    const ch = cw / aspect;
-    this.renderer.setSize(cw, ch, true);
-    this.canvas.style.margin = `${(h - ch) / 2}px ${(w - cw) / 2}px`;
-    this.camera.aspect = aspect;
+    if (this.pillarbox) {
+      const aspect = 4 / 3;
+      const cw = Math.min(w, h * aspect);
+      const ch = cw / aspect;
+      this.renderer.setSize(cw, ch, true);
+      this.canvas.style.margin = `${(h - ch) / 2}px ${(w - cw) / 2}px`;
+      this.camera.aspect = aspect;
+    } else {
+      this.renderer.setSize(w, h, true);
+      this.canvas.style.margin = "0";
+      this.camera.aspect = w / h;
+    }
     this.camera.updateProjectionMatrix();
   }
 

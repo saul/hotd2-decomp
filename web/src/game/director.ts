@@ -3,8 +3,9 @@
  *
  * This is the order the engine runs them in, and the order matters:
  * `RankEnemiesByDistance` writes the rank that `ZombieStateApproach` reads
- * this same frame, and the camera reads the permits the states just changed.
- * The old client had the camera reading last frame's answer and it showed.
+ * this same frame, and the camera runs **first** -- its action, its view and
+ * the scene state's hook are settled before any player or actor moves, so the
+ * camera reads what the actors did on the frames before. See `SceneTaskWalk`.
  */
 import type { Events } from "../core/events";
 import type { Rng } from "../core/rng";
@@ -12,12 +13,16 @@ import type { Actor } from "./actor";
 import { ActorSpawn } from "./spawn";
 export { ActorInitFlags, ActorSpawn } from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
-import { UpdateCameraEnemySlots } from "./camera/slots";
-import { CameraActorTick, CameraRunQueuedAction } from "./camera/mode";
-import { SceneViewApplyShake } from "./camera/shake";
-import { ActorLiftCameraPoint, CameraPointRiseFor } from "./camera/track";
-import { ThrownWeaponUpdate } from "./class31/projectile";
+import { RegisterForCameraTracking, UpdateCameraEnemySlots }
+  from "./camera/slots";
+import { CameraActorTick, CameraUpdateTick } from "./camera/actor";
+import { SkeletonRecordCameraPoint }
+  from "./camera/track";
+import { ThrownWeaponPoolUpdate } from "./class31/projectile";
+import { ThrownWeaponCameraOf } from "./thrown_weapon";
 import { BreakablePropPoolUpdate } from "./class41/pool";
+import { WaterSurfacesTick } from "./class41/water";
+import { St2CarsTick } from "./class21/car";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
@@ -29,6 +34,7 @@ import { ShotTestListReset } from "./combat/shot_test";
 import { CommitAppState } from "./app_state";
 import { GameOverRunPhase } from "./game_over";
 import { PlayerTasksRun } from "./player_shell";
+import { HudDrawShutterState } from "./hud_shutter";
 import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
@@ -37,10 +43,12 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
+import { CreditBlinkTick, InputReadFrameCounters } from "./credit_prompt";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
@@ -208,7 +216,11 @@ export function SpawnScriptedCharacters(
                          { ...DescriptorFromPlacement(p),
                            motion: req.motion,
                            hp, maxHp: hp,
-                           yaw: p?.yaw ?? 0, pos: { ...req.pos },
+                           // All three words of the record's orientation,
+                           // `obj+0x64`/`+0x68`/`+0x6C`, as
+                           // `SpawnFromDescriptor` copies them.
+                           pitch: p?.pitch ?? 0, yaw: p?.yaw ?? 0,
+                           roll: p?.roll ?? 0, pos: { ...req.pos },
                            visible: true },
                          rng, events));
   }
@@ -539,21 +551,27 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table38" ? PropContainerType.Table38Props
       : pl.container === "table39" ? PropContainerType.Table39Stacks
       : pl.container === "table44" ? PropContainerType.Table44Props
+      : pl.container === "water_surface" ? PropContainerType.WaterSurface
       : PropContainerType.BreakableGroup;
     // The three table constructors read the placer's `+0x11C` as the step
     // lifetime they copy into every object, so that is what goes in `hp` for
     // them; for a group it is the group id.
     const table = pl.container === "table38" || pl.container === "table39"
       || pl.container === "table44";
+    // The water task reads both descriptor fields as themselves: `+0x1F4`
+    // the table index, `+0x11C` the lifetime.
+    const water = pl.container === "water_surface";
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
-                         pl.lifetime_evt_steps,
+                         water ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
                            : pl.container === "flicker_light"
                              ? "flicker light"
-                             : `breakable group ${pl.group}`,
-                         { hp: table ? pl.lifetime_evt_steps
-                                     : pl.group ?? 0,
+                             : water
+                               ? `water surface ${pl.field_1f4}`
+                               : `breakable group ${pl.group}`,
+                         { hp: table || water ? pl.lifetime_evt_steps
+                                              : pl.group ?? 0,
                            condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
@@ -592,6 +610,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   G.g_scene_tick_counter += SecondsToTicks(dt);
   // ...and the tick's next lines, the Hod2.ini auto-reload.
   AutoReloadEmptyGuns(events);
+  // `SetupSceneProjection`'s `ScreenSpriteQueueReset` (`FUN_0041CF00`): the
+  // layered queue starts every frame empty, whatever screen is up.
+  ScreenSpriteQueueReset();
+  // The input read, `FUN_0040E4D0` -> `InputReadFrame`: the frame counter the
+  // credit line's blink runs on, and the credit tiers.
+  InputReadFrameCounters(SecondsToTicks(dt));
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot
@@ -604,10 +628,17 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // `AppStateDispatch` (`FUN_004608A0`): only app state 6 runs the scene.
   // The game-over screen, 7, runs its own phases and task lists
   // (`game/game_over.ts`) and the stage's actors stand still; any other
-  // screen (3, after the game over) runs nothing the port has.
+  // screen (3, after the game over) runs nothing the port has -- not even the
+  // dispatch's last call, `CreditBlinkTick`, since the port has no screen 3
+  // to draw its PRESS START on.
   if (G.g_app_state !== AppState.InPlay) {
+    // The letterbox is one of the scene list's tasks (`HudShutterTaskCreate`,
+    // `0x00460733`), so a screen that does not walk that list draws no bars.
+    G.g_hud_shutter_bars = [];
     if (G.g_app_state === AppState.GameOver) {
       GameOverRunPhase({ host, rng, events }, events);
+      CreditBlinkTick();
+      ScreenSpriteQueueFlush();
     }
     CommitAppState();
     return { lookAt: G.g_camera_block_target };
@@ -620,37 +651,65 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // (`FUN_0040E860`) ends the engine's tick the same way.
   let result: FrameResult = { lookAt: G.g_camera_block_target };
   RunPhaseDispatch(() => {
-    result = SceneTaskWalk(eye, dt, frames, host, rng, events);
+    result = SceneTaskWalk(eye, dt, host, rng, events);
   });
+  // `AppStateDispatch`'s last call, whatever the screen.
+  CreditBlinkTick();
+  // `ScreenSpriteQueueFlush` (`FUN_0041CF30`), from `FUN_00418550`, which
+  // `GameFrameTick` (`FUN_0040E730`) calls after `AppStateDispatch` -- so
+  // after the run phase's own draws as well as the task walk's: the layered
+  // queue lands after the continue screen's CONTINUE? and digit. It was at
+  // the end of the walk, which put it before them.
+  ScreenSpriteQueueFlush();
   CommitAppState();
   return result;
 }
 
 /**
- * `[port-only]` -- the scene's task list, walked in the engine's order: the
- * two player tasks first (`PlayerTasksCreate` allocates them before anything
- * else in a scene), which is where the trigger is polled; then the actors and
- * the non-actor pools; then the camera tasks.
+ * `[port-only]` -- the scene's task list, walked in the engine's order.
+ *
+ * `0x00460710` builds it with fourteen calls, and `TaskRunTree`
+ * (`FUN_004A71A0`) runs a list in creation order, so this is the order every
+ * frame runs in, with every actor after all of it (`[proved]`; see
+ * `camera/actor.ts` for the list):
+ *
+ * 1. the interpreter -- the walker's `tick`, run by the app before this;
+ * 3. `CameraActorTick`: the queued action's handler, then the view;
+ * 5. `CameraUpdateTick`: the scene state's hook -- the gameplay eye, the rail;
+ * 6. the two player tasks and `SelectAttackablePlayer`;
+ * 12. `UpdateCameraEnemySlots`: the candidates the actors filed **last**
+ *    frame, dealt into the slots the camera will read **next** frame;
+ * 13. `RankEnemiesByDistance`;
+ * 14. `ProcessPlayerShots`'s list reset;
+ *
+ * then every actor and pool in allocation order. So the camera a frame draws
+ * is settled before anything moves, and what the actors do this frame reaches
+ * the camera two frames on -- filed this frame, dealt next, read the one
+ * after.
  */
-function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
+function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
-  // `ScreenSpriteQueueReset` (`FUN_0041CF00`), from `SetupSceneProjection`
-  // ahead of the walk: the layered queue starts every frame empty.
-  ScreenSpriteQueueReset();
+  // The layered queue was emptied at the head of the frame, in `GameUpdate`.
+  CameraActorTick();
+  CameraUpdateTick();
   PlayerTasksRun({ host, rng, events });
-  DropDueShotRequests();
-  // `ProcessPlayerShots` (`FUN_00404570`) is a task of its own, created after
-  // the two player tasks and before any actor, and it ends by emptying
-  // `g_shot_test_list`: the trigger pulls above were tested against what the
-  // actors registered last frame, and what they register below is for the
-  // next one. See `combat/shot_test.ts`.
-  ShotTestListReset();
-  // The heads the burst threw, stepped where the engine steps its tasks.
-  SeveredHeadsTick(rng, events);
-
+  // The letterbox, the task `HudShutterTaskCreate` makes on the line after
+  // `SpawnAttackablePlayerTask` (`0x00460733`): after both players have read
+  // the state and the firing gate the script left, before any actor reads
+  // what it turns them into. See `hud_shutter.ts`.
+  HudDrawShutterState();
+  UpdateCameraEnemySlots();
   // Once a frame, for everyone: the rank the approach state tests against the
   // ring table's allowance.
   RankEnemiesByDistance(eye);
+  DropDueShotRequests();
+  // `ProcessPlayerShots` (`FUN_00404570`) is a task of its own, the last the
+  // list makes, and it ends by emptying `g_shot_test_list`: the trigger pulls
+  // above were tested against what the actors registered last frame, and what
+  // they register below is for the next one. See `combat/shot_test.ts`.
+  ShotTestListReset();
+  // The heads the burst threw, stepped where the engine steps its tasks.
+  SeveredHeadsTick(rng, events);
 
   // `ActorDespawn` unlinked these; the pool is a list, so they leave here.
   if (G.g_object_list.some((o) => o.despawned)) {
@@ -689,24 +748,14 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
       // the export, and it is a decision, so it cannot live in `render/`.
       // Once a frame here, read as state there.
       ActorUpdateSuppressedBones(obj);
-      // `ActorRegisterCameraPoint` (`FUN_00409B70`)'s camera half: the
-      // tracked bone, lifted, is where the camera follows this actor. Off the
-      // pose the renderer last drew, which is the frame the engine's own
-      // reader sees too.
-      //
-      // The lift is the routine's **float argument**, pushed by whichever
-      // class's `Update` makes the call -- 4.0 for a zombie or a civilian,
-      // **0 for a thrower**. `CameraPointRiseFor` is that table; see it for
-      // every call site and for what the port does differently.
-      //
-      // A class that registers for the shot test the engine's way makes the
-      // real call itself, from its own update at its own site, so it is not
-      // made for it here.
-      if (!g_class_handlers[obj.cls]?.registersForShotTest) {
-        ActorLiftCameraPoint(obj, host,
-          g_class_handlers[obj.cls]?.cameraRise?.(obj)
-            ?? CameraPointRiseFor(obj.cls));
-      }
+      // `SkeletonEmitNode` (`FUN_004114C0`)'s `obj+0x100` write: the tracked
+      // bone, as the renderer last posed it. The engine draws every skeleton
+      // actor inside its own update, so every one carries the point whether
+      // or not its class ever registers for the camera; the class's own
+      // `ActorRegisterCameraPoint` call re-reads it and lifts it.
+      // An actor carrying the engine's model block walks its own skeleton
+      // inside its update, which writes the point (`game/skeleton.ts`).
+      if (!obj.skel) SkeletonRecordCameraPoint(obj, host);
     }
     const handler = g_class_handlers[obj.cls];
     if (obj.dead || !obj.visible) {
@@ -749,10 +798,30 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     // object collision passes skip it. See `Globals.g_cur_actor`.
     G.g_cur_actor = obj.at;
     handler?.update(obj, f);
+    // **The boss classes' camera candidacy, until their updates make it.**
+    // `[port-only]` bridge for the classes whose ports still answer
+    // `tracksCamera`, the old predicate over the pool, rather than making the
+    // call: a class that says it tracks and filed nothing this frame is filed
+    // here, through `RegisterForCameraTracking` and its `NoCameraTrack` test.
+    // Classes 0x22 and 0x23 answer `RegisterEnemySlot` with a latch it reads.
+    // A class that already filed itself -- 0x14 and 0x19 call
+    // `ActorRegisterCameraPoint` from their updates -- is not filed twice.
+    //
+    // Every other class makes its calls from its own update, where the
+    // engine's routine does, and sets nothing. See `camera/track.ts`.
+    if (handler?.tracksCamera?.(obj)
+        && !G.g_camera_candidates.some((c) => c.prop === null
+                                           && c.at === obj.at)) {
+      RegisterForCameraTracking(obj);
+    }
     G.g_cur_actor = -1;
   }
 
-  ThrownWeaponUpdate(frames, events);
+  // The thrown weapons, each running the routine its launcher installed --
+  // `ThrownWeaponUpdate` (`FUN_00450780`) or `ZombieThrownWeaponUpdate`
+  // (`FUN_0045A4F0`). One engine frame a call, like the other task pools.
+  ThrownWeaponPoolUpdate({ eye, cam: ThrownWeaponCameraOf(host), host, rng,
+                           events });
   // ...and so are the creatures `znjoe` releases: `SpawnBodyCreature`
   // (`FUN_0043E720`) allocates a task with no class id, so it is stepped here
   // beside the other non-actor pools rather than inside the actor walk.
@@ -763,21 +832,21 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events, host);
+  // ...and the canal water tasks, which a class-0x41 placer allocates with
+  // `ActorAlloc` like the props, so after the actors that placed them: a task
+  // made this frame draws this frame. See `game/class41/water.ts`.
+  WaterSurfacesTick();
 
-  // `FUN_00408DD0` drains the candidates the actor updates above registered.
-  UpdateCameraEnemySlots(eye);
-  // Then the two camera tasks, in the engine's own order. The camera actor
-  // clears the this-frame flags; the queued `cam_play` action runs whichever
-  // driver `finish_sequence` installed, which is what decides both where the
-  // aim goes and when the room is allowed to hand back. The block itself is
-  // already seated on the rail for this frame — the host calls
-  // `CamAdvancePathFrame` before any of this.
-  CameraActorTick();
-  CameraRunQueuedAction();
-  // The tasks a boss allocates: the name banner and the health bar. After
-  // the camera tasks, which the scene created before any boss existed, and
-  // after the boss -- `ActorAlloc` appends. The banner flies the camera block
-  // here, with the camera driver parked so nothing above undoes it.
+  // The stage-2 car, which `RescueTargetInit` (`FUN_00451720`) allocates:
+  // an actor's task, so after the scene's own -- the camera's among them --
+  // and it poses from the camera path this frame's camera actor has already
+  // run. See `game/class21/car.ts`.
+  St2CarsTick(host);
+  // The tasks a boss allocates: the name banner and the health bar, after the
+  // boss -- `ActorAlloc` appends. The banner flies the camera block here, with
+  // the camera driver parked (`g_camera_driver_held`) so the next frame's
+  // `CameraDriverSelectMode` leaves it alone, and the view the next frame
+  // draws is built from it.
   BossBannersTick(host);
   BossHpBarsTick();
   // ...and the marks the stage-4 boss's flesh hits leave, which
@@ -790,15 +859,14 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+  // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
+  // after the bats, so the first is drawn on the frame it is made. See
+  // `game/class46/splash.ts`.
+  BatSplashesTick();
 
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.
   Boss3TasksTick(events);
-  // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
-  SceneViewApplyShake();
-  // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the
-  // layered queue after the task walk, so its sprites land after every one
-  // the frame drew directly.
-  ScreenSpriteQueueFlush();
+  // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

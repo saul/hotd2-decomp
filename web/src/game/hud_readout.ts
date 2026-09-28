@@ -34,11 +34,12 @@
  *   the same routine blinks "HOLD YOUR FIRE!" instead, unless a result card
  *   has the screen (`g_screen_furniture_flags` bit `0x10`).
  * * Neither for a player out of lives: the continue countdown has its own
- *   screen, which the port does not draw.
+ *   screen -- `RunPhaseContinueCountdown` (`FUN_00460530`) draws it, and
+ *   `continue_readout.ts` and `credit_prompt.ts` the player's own share.
  */
 import type { Events } from "../core/events";
 import { GameMode } from "./game_mode";
-import { G } from "./globals";
+import { G, ScreenFurniture } from "./globals";
 import { HudSprite, LAMP_CELS, ORIGINAL_AMMO_HUD_ROWS } from "./hud_sprites";
 import { DrawScreenSprite } from "./screen_sprite";
 
@@ -179,7 +180,8 @@ export function HudDrawLives(player: number): void {
     }
     return;
   }
-  if (state === 4 && (G.g_screen_furniture_flags & 0x10) === 0
+  if (state === 4
+      && (G.g_screen_furniture_flags & ScreenFurniture.ResultCard) === 0
       && frame % 60 < 45) {
     DrawScreenSprite(HudSprite.HoldYourFire, player === 0 ? 32 : 416, 422,
                      0.98, 1.5, 1);

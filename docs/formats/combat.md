@@ -300,9 +300,13 @@ list instead:
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
   `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
-  `0x51` `FishProjectToScreen` `0x00439BE3`; `0x52` and the class-0x53 trigger
-  through `FUN_0043F950` (`0x0043F9C2`, `0x0043FB76`), which both branch
-  triggers call.
+  `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
+  `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
+  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),
+  so this line used to be wrong to say both branch triggers call it; the
+  other site it listed, `0x0043FB76`, lies outside it, in the unfunctioned
+  code from `0x0043F9D0`. Whose routine that is, and where `0x52`
+  registers, is `[open]`.
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
@@ -1351,6 +1355,33 @@ claiming one stores its index in `obj+0x121` and returns 1, which is what lets
 the approach state hand over to the attack state named by the descriptor tail.
 Fail, and the enemy keeps walking.
 
+**[proved]** How it claims, from `0x00455DE0` (and `ThrowerTryClaimAttackSlot`,
+`0x0044CA40`, instruction for instruction):
+
+* its **first** store is `obj+0x121 = 0xFF`, before any test — a refused claim
+  always leaves the actor holding no index, whatever it held;
+* `g_attack_committed` set refuses at once;
+* it offers **one** player's permit, not the first free one: `g_active_player`'s
+  with one attacker; with two, `rand() % 2`'s while one player is in play, the
+  same pick `NOT`'d if taken while one enemy is present, and otherwise the
+  player on the actor's half of the screen (`ActorScreenHalfSign`,
+  `0x00409C90`); `IsPlayerAttackable` then voids the pick;
+* the permit table holds **0 or 1** — whether a permit is out, not who has it
+  (the port stores the holder's id and `-1` for free, for its debug panel);
+* it does **not** write `obj+0x34`.
+
+Two things free a permit other than its holder. `ZombieStateHoldForCameraCue`
+(`0x0045BFD0`) zeroes `g_attack_permits[obj+0x121]` when its delegate reaches
+`Strike` — the table entry only, leaving `obj+0x121` and the off-screen latch —
+and **every `finish_sequence`** (`EvtActionFinishSequence21`, `0x00403710`)
+zeroes both. That second one is load-bearing: the hold tests its camera cue
+*before* its `Strike` bounce, so a captor already at the ring claims on the cue
+frame and graduates into `ZombieStateHoldAtRange` still owning the permit, and
+its own permit refuses its every claim after that until the script's next
+`finish_sequence` — queued right after the cue for all three held spawns in the
+game — lets it go. The hub itself (`0x00455748`) gives `g_attack_committed` back
+when the actor holding it is back at the ring and still off screen.
+
 That single byte does double duty: it gates the attack *and* it is what
 `SelectCameraLookAtTarget` tests. **The camera focuses on the enemy that holds
 the attack permit** — the one about to attack — and otherwise frames the pair.
@@ -1657,22 +1688,92 @@ its frames (`PUSH 0x1d / CALL 0x0044afb0`, `6a1d e834fcffff`, at 0x0044B375;
 ttl      = |target - pos| * 0.8333333;      /* = distance / 1.2 */
 velocity = (target - pos) / ttl;            /* constant 1.2 units per frame */
 ...each frame:
-yaw += spin;  pos += velocity;
+yaw += hand == 5 ? spin : -spin;  pos += velocity;
 if (--ttl <= 0) PlayerTakeDamage(permit, 1, 6);
 ```
 
 A **straight line at a constant speed, and a timed hit** — there is no
 collision test at all, exactly like the melee strike landing on a frame number.
-`AimThrownWeapon` puts the target 4 units in front of the camera (offset
-sideways by 0.6 per player in two-player), so the weapon is aimed at where you
-are, not where you will be.
+`AimThrownWeapon` (`FUN_004503D0`) puts the target 4 units down the camera's
+own -Z (offset sideways by 0.6 per player in a two-permit game), through the
+camera block's `+0x40` matrix, so the weapon is aimed at where you are, not
+where you will be. It is the **weapon's** routine — it reads the permit the
+weapon inherited — and the stuck arms call it every frame.
 
-Afterwards it sticks facing the camera for 30 frames and blinks for 60 —
-`obj+0x1F8` bit 0 toggled on alternate frames — before despawning.
+**The spin is `0x2400` BAMS a frame**, fifty degrees: `MOV dword ptr
+[ESI+0x135C], 0x2400` (`c7865c13000000240000`) at `0x0045072C`, the last thing
+`SpawnThrownWeapon` writes, and it goes into `obj+0x68` — the Y term of the
+draw `Rz(obj+0x6C) · Ry(obj+0x68) · Rx(obj+0x1364 + obj+0x64)` — negated
+unless the throwing hand is bone 5. `obj+0x64` and `obj+0x6C` are zero through
+the flight (`ActorClearGameFields` cleared them), so a knife starts square to
+the world, leans by its type's `obj+0x1364` (`0x600` for `zsass`, 0 for
+`zslman`) and spins flat about the vertical. `[proved]` The write is past a
+`MatrixStackPop` the decompiler has marked no-return (`L35`); an earlier
+reading of the pseudocode alone concluded that nothing writes the rate.
 
-It is **shootable in flight**: `ThrownWeaponUpdate` registers it for the shot
-test, and a hit sends it to `ThrownWeaponDeflected`, which sprays an impact,
-plays `BULLET_MET3` and throws it off in a random direction.
+On arrival it faces the **eye** — `VecToAngles(g_camera_eye - pos)` into the
+yaw, pitch zeroed — with a random pitch kick of `±(rand()&2)*0x100` and a yaw
+kick of `(rand()&5)*0x100`, negative for bone 5 (`zslman`'s blades instead
+take a half turn for the other player's blade in a two-permit game and the yaw
+kick alone). It sticks to the screen for 30 frames, re-aimed every frame, and
+blinks for 60 — `obj+0x1F8` bit 0 on the counter's parity — then gives the
+permit back and despawns.
+
+### Shooting one down
+
+Every frame it draws, `ThrownWeaponUpdate` (`FUN_00450780`) writes the
+view-space position to `obj+0x70..0x78` and calls `RegisterForShotTest`
+(`0x00450864`..`0x004508AA`, past the draw's `MatrixStackPop`). With
+`obj+0x34 = 0x80000001` and `obj+0x124 = 2.0`, `ShotTestSphere` takes it
+**whole**, as a two-unit sphere. The next frame's `ThrownWeaponUpdate` finds
+`obj+0x34` bit 8 without `0x4000000`, bumps `g_player_hit_count` — always
+player 0's, since it reads bit `0x10` for the player and `MarkActorShot` writes
+`0x2` or `0x4` — and enters state 1, `ThrownWeaponDeflected` (`FUN_00450050`):
+
+```c
+SpawnSpriteEffect(pos, zsass's 0x1F90/0x1F91 ? 3 : 0x51, 1, -1);
+obj+0x34 |= 0x4008000;  ThrowerReleaseAttackPermit(obj);    /* at once */
+target = view(obj+0x70) + ((rand()%10+1)*10*(±1), (rand()%10+1)*10*(±1), 0)
+spin   = ftol(spin * 1.3 * (±1));  KNIFE2_OFF;  BULLET_MET3;
+wait 5 frames; then each frame: pos += normalize(target - pos) * 1.2;
+         obj+0x64 -= spin (bone 5) or += spin;   /* now about X */
+gone after 180 frames, or once within 1.2 of the target on every axis
+```
+
+It scores nothing. The landing raises `0x400C000` — `0x4000000` and `0x8000`
+among it — so a weapon that has landed is out of the shot test and cannot be
+deflected. `[proved]`
+
+### Class 0x30's weapon
+
+`ZombieThrowHandWeapon` (`FUN_0045A240`) allocates the same `0x13F4` object
+with its own task, `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`), and its own
+four-state table at `0x00593170`: 0 a bare `RET`, 1 the straight flight (the
+axe `0x249`), 2 the arc (everything else — `znassb`'s two blades), 3 shot
+down. It hands the permit over the same way (thrower left on 0; no latch moves
+here), latches `g_max_attackers` into `obj+0x1360`, points the weapon at its
+target with `VecToAngles` and rolls it `0x800`.
+
+| state | spin (`obj+0x135C`) | into | hit kind | speed |
+|---|---|---|---|---|
+| 1, straight | `0xB00` | `obj+0x64`, **X** | 4 | `obj+0x1370`: 1.5 in body condition 7, else 1.0 |
+| 2, arc | `0x1600` | `obj+0x68`, **Y** | 6 | a literal 1.0 |
+
+Neither is signed by the hand, and the draw has **no** `obj+0x1364` term.
+`ZombieThrownWeaponBeginArc` (`FUN_00459B70`) takes the heading from the
+**thrower** to the target: within `0x2000` of 0 or `0x8000` (down Z) the lob
+bends along X with `t = |(dy, dz)| / speed`, otherwise along Z with
+`t = |(dx, dy)| / speed`; the acceleration is `+0.009` for bone 5 and `-0.009`
+otherwise. The aim (`ZombieThrownWeaponAimAtCamera`, `FUN_0045A070`) is
+`(side, axe ? -1.5 : 0, -4)` in camera space. Landing faces back along the
+flight (`VecToAngles(target - pos)` plus `0x8000`) with the pitch kick; shot
+down (`FUN_00459D20`) is class 0x31's deflect with sprite `0x52`, `KNIFE1_OFF`,
+the throw's own `obj+0x1370` for both the speed away and the arrival box, and
+no hand test on the spin.
+
+`znassb` throws **both** blades on one release frame: `ZombieStateStandAndThrow`
+calls `ZombieThrowHandWeapon` a second time for character type 1 after a
+`TryClaimAttackSlot` it does not look at (`0x004592E4`..`0x00459301`).
 
 ## 11. What the player implements
 
@@ -1746,11 +1847,39 @@ moves it to **state 3**, which is the swing:
 ```c
 sub 0:  idx = picks[(rand % 10) + (destroyed_zones & 7) * 10];
         atk = attacks[body_condition][idx];
-sub 1:  if (distance > atk.distance)  { play atk.lunge, keep closing; }
-        else { play atk.strike; ActorPlayHitVoice(obj, 3); sub = 2; }
+sub 1:  if (distance > atk.distance && !cooldown_latch) {
+            if (obj+0x1B4 != atk.lunge)            // the track's own motion
+                SetCurrentActorMotionBlended(obj+0x194, atk.lunge, 0, 10);
+            return;                                // keep closing
+        }
+        ActorSetMotionBlended(obj+0x194, atk.strike, 0, 5);
+        ActorPlayHitVoice(obj, 3); sub = 2;
 sub 2:  if (play_position == atk.hit_frame) ActorStrikeConnect(obj);
         if (play_position >= length - 1) -> state 4, re-approach
 ```
+
+**Both motion calls fade, and the fade holds the cursor.** `ActorSetMotionBlended`
+(`FUN_004119A0`) writes `obj+0x19C` = the start frame and raises
+`track+0x37` bit 0, and `SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not
+recompute the cursor from the clock while that bit is up. It lets go once
+`clock - track+0x28` reaches `fade + 2`. `EnemyZombieUpdate` runs the
+state at `0x00453434` and `ZombieAdvanceMotion` at `0x00453457`. That routine
+draws first (`SkeletonDrawWalk` calls the sampler at `0x004110F3`) and steps the
+clock only after. So the swing's frame 0 is drawn `fade + 1` = 6 times, sub 2
+reads it on `fade + 2` = 7 consecutive frames, and the hit lands
+`6 + hit_frame` frames after the swing starts, not `hit_frame`. The
+lunge's clip is held 11 draws the same way. `[proved]`
+
+**The lunge's test is against the track, not against a lunge the state set.**
+`00455b31 CMP [ESI+0x1b4], EAX` / `00455b37 JZ` skips the call whenever the
+track is already playing that clip. In 155 of the 311 shipped entries the lunge
+*is* the actor's run clip (`row[2]` or `row[3]`). `ZombieStateHoldAtRange`
+tries its claim before it sets its idle: `TryClaimAttackSlot` at `0x0045583B`
+hands to state 3 and returns at `0x0045587B`, and the idle's
+`ActorSetMotionBlended` at `0x004558CC` is only on the path where the claim
+failed. So an actor whose claim succeeds on its first frame at the ring is
+still on its run, and keeps playing it as the lunge, with no restart and no
+fade. `[proved]`
 
 The entry is 0x10 bytes:
 
@@ -1947,39 +2076,98 @@ passes 0 as well. A life is still taken; no overlay and no shake.
 
 ### Do zombies aim their torso and head at the player? The body, and the head.
 
-This section used to answer "no" outright. The first two bullets below are
-still true; the third was wrong, and the head **is** aimed -- by a per-bone
-draw hook rather than by the pose hook, which is why the search that settled
-it looked in the wrong place (L39: a negative result about the wrong question).
+This section answered "no" for a long time, on three bullets. The first is
+still true, the second was about the wrong hook, and the third was wrong: the
+head **is** aimed, by the per-node draw hook rather than the pose hook, which
+is why the search that settled it looked in the wrong place (L39: a negative
+result about the wrong question). The routine that does it had no function in
+Ghidra, so its callers were in no xref list either (L35).
 
 * **The bone pose is pure motion.** `SkeletonWalkNode` takes every bone's
   rotation from `g_frame_bone_rotations`, which points straight into the loaded
   motion bank, and adds nothing derived from the actor.
-* **The per-frame pose hook is empty.** `SkeletonApplyRootMotion` ends by
-  calling a hook stored in the motion block at `+0x115C`. Across the whole
-  197,671-instruction program **exactly two** writes to that field exist:
-  `FUN_00410440` installs `PoseHookNone` — a bare `return`, and the one every
-  skeletal actor including the zombie gets — and one special class installs
-  `PoseHookGrowAndPushOutOfWorld`, which ramps a radius and pushes the actor
-  out of world collision. Neither rotates a bone.
-* **The angles `EnemyZombieInit` computes are read -- by the head.**
-  `EnemyZombieInit` computes a pitch and yaw toward the camera into
-  `obj+0x1320`/`+0x1324`, and the routine at `0x00453BE0` steps both of them
-  toward the camera again every time bone 2 is drawn: `ZombieDrawBonePart`
-  (`FUN_004534A0`) calls it at `004534ea` when the node's bone index is 2 and
-  `obj+0x34` bit `0x40000` is clear, and `ThrowerDrawBonePart`
-  (`FUN_00449F90`) does the same at `00449fd9`. It turns each angle with
-  `TurnAngleToward(.., .., 0xC0)` (`00453caf`, `00453d00`), keeps the result
-  only while `AngleWithinTolerance` says it is within `0x4000` of its centre
-  -- level for the pitch, the body's facing (`obj+0x68 - 0x8000`) for the yaw
-  -- and otherwise turns the angle back toward that centre at the same rate;
-  then it applies `MatrixRotateY` and `MatrixRotateX` of them to the bone. So
-  the head follows the camera, up to a quarter turn either way of the body, at
-  `0xC0` BAMS a draw. Ghidra has no function at `0x00453BE0`, which is why its four
-  calls to `TurnAngleToward` are in no xref list; a byte scan for `E8`
-  finds them (L35). Class 0x25's `ScriptedHumanoidBoneDrawHook` calls a twin
-  at `0x00485BA0`. `[proved]` that they read and turn the angles; the rest of
-  both routines is unread, and **the port has neither**.
+* **The pose hook rotates nothing.** `SkeletonApplyRootMotion` calls the hook
+  at `model+0x115C` -- `obj+0x12F0` -- and for these two classes that is their
+  push-out: `EnemyZombieInit` writes `ZombiePushOutOfWorldAndActors` there and
+  `EnemyThrowerInit` `ThrowerPushOutOfWorld`, both as `obj+0x12F0`, which is
+  why a count of writes to `+0x115C` found only `PoseHookNone` and
+  `PoseHookGrowAndPushOutOfWorld` and called the zombie's hook empty. None of
+  the four rotates a bone. `[proved]`
+* **The node draw hook aims bone 2.** `ZombieDrawBonePart` (`FUN_004534A0`)
+  pushes the matrix, and for bone 2 while `obj+0x34` lacks `0x40000` calls
+  `ActorAimHeadAtCamera` (`FUN_00453BE0`) at `0x004534EA`, before its switch;
+  `ThrowerDrawBonePart` (`FUN_00449F90`) does the same at `0x00449FD9`, but
+  only while `obj+0x136C` has `0x100` or lacks `0x20` -- on the ground or the
+  ceiling, never on a wall. An `E8` scan of `.text` finds no third caller.
+  `[proved]`
+
+`ActorAimHeadAtCamera`, from its listing (`0x00453BE0..0x00453D67`):
+
+```
+centre = (obj+0x68 - 0x8000) & 0xFFFF         ; straight ahead for the head
+pt     = g_camera_blocks[cam] (view to world) * record[bone] + 0x68
+{pitch, yaw} = ActorHeadAimAngles(&pt)        ; FUN_00453D70
+t = TurnAngleToward(obj+0x1320, pitch & 0xFFFF, 0xC0)
+obj+0x1320 = AngleWithinTolerance(t, 0, 0x4000) ? t
+           : TurnAngleToward(obj+0x1320, 0, 0xC0)
+t = TurnAngleToward(obj+0x1324, yaw & 0xFFFF, 0xC0)
+obj+0x1324 = AngleWithinTolerance(t, centre, 0x4000) ? t
+           : TurnAngleToward(obj+0x1324, centre, 0xC0)
+MatrixRotateY(-centre); MatrixRotateY(obj+0x1324); MatrixRotateX(obj+0x1320)
+```
+
+`ActorHeadAimAngles` is `VecToAngles(target - pt)`, and the target is the
+camera eye raised **15.0** (`FADD double [0x00565DD8]`) -- unless
+`g_max_attackers == 2` and the actor holds a permit, when it is
+`T(eye) Ry(g_camera_block_yaw_bams)` applied to `((1 - 2*permit) * -1.2, 15,
+-1.5)`: 1.2 to the side of the player whose permit it holds. `[proved]`
+
+What follows from it, each `[proved]` from the same listings:
+
+* **A quarter turn each way, at `0xC0` a drawn frame.** A step that would
+  leave the window is thrown away and the head steps back toward the centre
+  instead, so a head whose player has gone behind it walks out to the edge and
+  alternates across its last `0xC0`, a frame each way.
+* **Only bone 2's own draw turns.** The rotations land on the matrix the hook
+  pushed. The stored node matrix at `+0x28`, which `ActorDrawAttachedParts`
+  hangs hair and hats from, and the hit-sphere centre and camera point
+  `SkeletonEmitNode` takes, all keep the pose's. Bone 2 is a leaf under bone 1
+  in every skeleton from type 0 to 0x19.
+* **It aims from the previous draw.** `pt` is the bone's view-space hit-sphere
+  centre, which `SkeletonEmitNode` writes at `0x004116C3` **after** it has
+  called the hook, and not at all while `obj+0x34` has `0x8000`. Every
+  class-0x30 corpse does (`ZombieEnterCorpseState` raises `0xC000` at
+  `0x0045675E`), and nothing in the hook tests death, so a corpse's head keeps
+  turning toward the camera from the point where it died, re-projected through
+  wherever the camera is now.
+* **The angles start aimed.** `EnemyZombieInit` (`0x00452EAB`) and
+  `EnemyThrowerInit` (`0x004496FE`) both seed `obj+0x1320`/`+0x1324` with
+  `VecToAngles(eye + (0, 15, 0) - pos)` under the same `0x40000` test.
+* **`0x40000` is a spawn-record bit, and it is what keeps the head apart from
+  the captor script.** Nothing in `.text` writes it -- no dword, byte or
+  register form of an `OR`/`AND` names that bit of `+0x34` -- and eleven
+  class-0x30 states (34-38, 40, 41, 43-46) use `obj+0x1320` for something
+  else, the motion id among them. Across the twelve bundles, 160 of 608
+  class-0x30 spawn rows carry the bit, and they include **all 138** whose
+  start or attack state is one of those eleven, all 114 civilian captors and
+  all twelve class-0x18 rows; none of the 42 class-0x31 rows carries it.
+* **Class 0x25 has a twin** at `0x00485BA0`,
+  `ScriptedHumanoidAimHeadAtCamera`, called by `ScriptedHumanoidBoneDrawHook`
+  for bone 2 while `obj+0x1364 != 0`. The same stepping on other words --
+  pitch `obj+0x1368`, yaw `obj+0x136C` -- toward the eye raised 15 with the yaw
+  offset by `-0x8000`, and an **absolute** turn: `MatrixClearRotation`
+  (`FUN_004A9F70`) wipes the bone's 3x3 before the two rotations. Its seed is
+  `ScriptedHumanoidSeedHeadAim` (`FUN_00485D70`), which op 12 mode 1 calls as
+  it raises `obj+0x1364`; op 12 is in none of the 274 class-0x25 programs the
+  twelve bundles carry, so in the exported data this twin never runs.
+
+**Ported** for classes 0x30 and 0x31: `game/class30/head_aim.ts` steps the
+angles, which live on both arms as `HeadAimWords`, from the two hooks the node
+walk runs in each class's update; `render/characters/head_aim.ts` draws the
+turn around each mesh the hook draws, as the engine's push and pop.
+`web/test/port.test.ts` asserts the seed, the rate, the window and its edge,
+the quarter-turned centre, the stale record, both gates and the two-attacker
+target. Class 0x25's twin is not ported.
 
 So the aiming you see is the **whole actor turning**, plus the head. The body
 turn is `TurnActorTowardCamera` (`FUN_00409ED0`), a rate limit of `0x1A0`
@@ -1993,7 +2181,7 @@ stumbles, and the four-arc deaths.
 The pose-hook half took a hook search rather than an xref sweep to establish,
 because the pose is reached through a stored function pointer -- the same
 shape that made the camera tracking invisible earlier in this file. That hook
-was found and read, and it is empty; the head's aim is in the draw hook
+was found and read, and it rotates nothing; the head's aim is in the draw hook
 beside it.
 
 ### Locomotion is still open, but narrower
@@ -2423,6 +2611,63 @@ between ±1000 to find whatever floor is there — falling back to
 for ninety frames or until it is fifty units clear. That wait **is** the
 cooldown; there is no timer.
 
+### The delayed pounce — `ThrowerStateDelayedPounce`, `FUN_0044E830`
+
+State 23, stage 2 block 21's pair of `zstin` (motion 310 over 45 and 60
+frames). A wait, then the same pounce with three differences. `[proved]` from
+the listing; the three subs fall into each other.
+
+```
+sub 0  obj+0x1F8 |= 0x10                    /* root motion carries y too */
+       ActorSetMotionBlended(desc+4, 0, 5)  /* the ordinary track: it loops */
+       obj+0x34  |= 0x100                   /* shots ricochet */
+       obj+0x1330 = desc+8
+sub 1  if (--obj+0x1330 > 0) return
+       clear both bits; claim (0xFF on failure)
+       obj+0x34 |= 0x10000000; obj+0x136C |= 0x20000
+       draw the attack; ThrowerLoadAttackArcScript
+       ActorArcBegin(pos -> (landing.x, g_camera_eye_y, landing.z), desc+8)
+sub 2  roll -> 0 at 0xCCC a frame; ThrowerStrikeConnect if a permit is held
+       obj+0x34 |= 0x2000 once obj+0x19C > the LIVE row's hit frame
+       arc over: clear 0x10000000 and 0x20000, state 25
+```
+
+* **The landing point depends on the state.** `ThrowerPickLandingPoint`
+  (`FUN_0044CBA0`) switches on `obj+0x1310`: states 22 and 23 take a
+  vertical offset of **-350 px**, and 23 unprojects at **-6.0** instead of
+  -15.5 — six units in front of the eye rather than fifteen and a half. Every
+  other state takes 390 px (type 0x16) or 320 px at -15.5. The sideways offset
+  is ±160 px by the permit held, and zero with one attacker.
+* **Three stances in one state.** The script comes from the live stance, which
+  the pounce bit has just moved to rows 4..7. `ThrowerStrikeConnect` reads its
+  row through `obj+0x1364`, which `ThrowerLoadAttackArcScript` does **not**
+  write — only `ThrowerStateLeapDown` does (`0x0044B6FB`) — so for a spawn that
+  has never leapt down it is row 0. The `0x2000` test reads the live stance
+  again. Stage 2's pair therefore swing row 4's clip 289, connect on row 0's
+  frame 62 or 64, and stop flinching past row 4's 66.
+* **The wait is shot-proof, and it is a climb down a wall.** `ShotImmune` is
+  up for all of it -- sub 1 drops it and `ActorArcStep`'s phase 0 raises it
+  again on the same frame (`0x0044D8BB`), so it stays up until the takeoff --
+  and the clip is the ordinary motion, so it loops and its root carries the
+  actor. Both spawns are placed **on their sides against the clock face**:
+  their records carry orient `(0, 0xC000, 0xC000)`, which
+  `SpawnFromDescriptor` (`FUN_00408A20`) copies whole to `obj+0x64..0x6C`, and
+  `SkeletonApplyRootMotion` (`FUN_00410C50`) turns every root delta by
+  `T · Rz(roll) · Ry(yaw) · Rx(pitch) · S` before it stores it
+  (`0x00410D56`..`0x00410DDE`). Motion 310 walks 7.19 units a cycle along its
+  own -Z; that rotation takes -Z to world -Y, and bit `0x10` of `obj+0x1F8` is
+  the store that lets the height through (`0x00410E48`). So the wait walks the
+  pair straight down the wall -- 8.7 units in 45 frames and 12.6 in 60,
+  measured in the page, the fade holding the first six still -- and sub 2
+  rolls each one level (`0xCCC` a frame, six frames from `0xC000`) as it
+  leaps. `EnemyThrowerInit` sets the draw's rotation order to 1
+  (`obj+0x1FC`, `0x004496A2`): `RotX; RotZ; RotY`.
+* **Where the stab lands.** The arc is 45 (or 60) frames and the connect
+  waits for row 0's frame 62 or 64 on clip 289's flight stage (cut 34..66), so
+  the stab lands thirteen frames before the landing (measured in the page),
+  with the body some thirty units above the eye and closing -- the swing, not
+  the arrival, is what hurts.
+
 ### The arc, and the three-stage script
 
 Nothing in this class walks except state 18 and the hub. Every other move is a
@@ -2437,7 +2682,17 @@ ActorArcInterpolate(n):      /* FUN_0044DD00, an absolute position */
 
 with the duration from `ActorArcBeginToAtSpeed` (`FUN_0044DB50`) for character
 type 0x19 — the horizontal distance at a fixed **30 units per `minFrames`**,
-so 2.0 units a frame — and from `ActorArcBeginTo` for the rest.
+so 2.0 units a frame — and from `ActorArcBeginTo` (`FUN_0044DC70`) for the
+rest: `n = (int)(dist2d * step)`, `T = n - n % step`, x and z only.
+
+**`n` advances by `step` a call, not by one.** `ActorArcStep(obj, step)` hands
+its step to `ActorArcInterpolate`, which adds it to `obj+0x1330` (`ADD EDX,
+ESI` at `0x0044DD85`), and every caller that begins with `ActorArcBeginTo`
+passes the same step to both. So a leg lasts `T / step` frames -- about **one
+unit of ground a frame whatever the step** -- and what the step changes is the
+arc's height, since the parabola is solved over `T = dist * step` parameter
+frames. `ThrowerStatePathFollow`'s waypoints carry step 1 or 3; the pounce, the
+leap aside and the surface leaps pass 1. `[proved]`
 
 Over it runs a **three-stage arc motion script**, twelve dwords that
 `InstallArcMotionScript` (`FUN_0044DA60`) copies into `g_arc_scripts`:
@@ -2446,12 +2701,70 @@ Over it runs a **three-stage arc motion script**, twelve dwords that
 { s32 motion, s32 start frame, s32 fade, s32 threshold } x 3
 ```
 
-Every script in the program names the **same motion** in all three stages, so a
-script is one clip cut into windup, flight and landing. `ActorArcStep`
-(`FUN_0044D860`) plays stage 0 on the spot, stage 1 once the clip frame passes
-stage 0's threshold, stage 2 once it passes stage 1's, and reports the arc over
-past stage 2's. `zstin`'s attack 0 is `{303,0,5,22}{303,23,5,46}{303,47,0,47}`
-and connects on frame **62** of the same clip.
+A script is nearly always one clip cut into windup, flight and landing. Some
+of the ones classes 0x30 and 0x31 can install switch clips — `zslman`'s leap
+aside in stances 1 and 3 (504 then 506, 494 then 496) and set 3's attack 3 in
+all five stances end on a different clip, and `ThrowerStatePathFollow`'s
+style-2 script flies on 300 between two stages of 301 — and every start and
+threshold of every one lies inside the play length of its own stage's clip,
+which `tools/verify_combat.py` check 16 asserts and counts.
+
+`ThrowerStatePathFollow` (`FUN_0044EE00`) picks its leg's script from the
+waypoint's style word, the `s16` at `+0x02`, and the bundle carries all four
+under `class31.scripts`:
+
+| style | address | name | bundle key | stages |
+|---|---|---|---|---|
+| 1 | `0x00565E58` | `g_class31_arc_path_style1` | `path_style1` | `{301,12,1,12}` three times |
+| 2 | `0x00565E88` | `g_class31_arc_path_style2` | `path_style2` | `{301,7,0,11}{300,48,1,65}{301,17,1,22}` |
+| other | `0x00565EB8` | `g_class31_arc_path_style0` | `path_style0` | `{301,0,0,8}{301,9,0,17}{301,18,0,23}` |
+| (type 0x17) | `0x00565E28` | `g_class31_arc_path_c17` | `drop_zskamere` | `{439,0,0,19}{439,20,0,31}{439,32,0,42}` |
+
+Style 1 is a pose, not a clip: 301 held on frame 12 by three stages whose
+thresholds are their own start frames, so the fit grows the fades over the
+whole leg and the actor flies it in one frame of the hop. `ActorArcStep` (`FUN_0044D860`) plays stage 0 on the spot,
+stage 1 once the clip frame reaches stage 0's threshold, stage 2 once it
+reaches stage 1's, and reports the arc over once the landing clip reaches
+stage 2's — **not** when the arc lands: its flight phase ignores
+`ActorArcInterpolate`'s result, so an arc that comes down early waits for the
+clip. `zstin`'s attack 0 is `{303,0,5,22}{303,23,5,46}{303,47,0,47}` and
+connects on frame **62** of the same clip.
+
+**The fade is a hold.** Each stage is played by a direct `CALL 0x004119a0` —
+`ActorSetMotionBlended(obj+0x194, motion, start, fade)`, at `0x0044D901`,
+`0x0044D94D` and `0x0044D9C9` — which writes `start` into the cursor at
+`obj+0x19C` outright and raises `track+0x37` bit 0. While that bit is up
+`SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not recompute the cursor, so
+it sits on `start` until the counter has run `fade + 2` past the call, then
+plays on from `start + 1`. Every threshold the script and the attack entry
+name is compared against that held cursor, and it is what the fit is fitting:
+`FitArcScriptByFadeLength` (`FUN_0044D5F0`) grows stages 1 and 2's fades to
+take up the slack of a long arc, so a long leap holds the flight clip's first
+frame through the air rather than playing it slowly. `[proved]`
+
+The two fits are different routines with different slacks, chosen by
+`CMP CX, 0x19` at `0x0044D8C1`:
+
+```
+FitArcScriptByFadeLength   (every type but 0x19)
+  slack = s1.start - s1.until + T                     ; no fades in it
+  > 0:  while (s1.fade + s2.fade < slack) both++
+        if (slack < s1.fade + s2.fade) s1.fade--      ; the odd frame is stage 2's
+        both clamped at 0x7F
+  < 0:  s1.fade = s2.fade = 1
+        until (fades + s1.until - s1.start <= T and s1.until - s1.start <= 1):
+          s1.start++, s1.until--
+        if (s1.until - s1.start < 1) s1.start--
+
+FitArcScriptByStartFrame   (0x19, zstin)
+  slack = T - s2.fade - s1.fade - s1.until + s1.start
+  k     = __ftol(|slack * 0.5|)
+  > 0:  both fades += k; the rest onto s1.fade; NO clamp
+  <= 0: both starts += k, each clamped at its own until; the rest onto s1.start
+```
+
+The port had one function for both, with the second's slack and `k`, until
+the rooftop route of NEW-BUGS-2 was read.
 
 > ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
 > authored at 30 Hz, so the baked clip's own index is half of it: clip 303

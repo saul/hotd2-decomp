@@ -246,6 +246,13 @@ export interface CharacterPlacement {
   hp: number;
   /** The actor's BAMS yaw — the directional death compares the camera's to it. */
   yaw: number;
+  /**
+   * The record's other two orientation words, `obj+0x64` and `obj+0x6C`, as
+   * `SpawnFromDescriptor` (`FUN_00408A20`) copies them. Absent means zero,
+   * which is every placement but stage 2 block 21's two wall-climbers.
+   */
+  pitch?: number;
+  roll?: number;
   /** Class-0x30 descriptor tail: see `Placement` in hod2lib/characters.py. */
   body_condition: number;
   initial_state: number;
@@ -913,16 +920,21 @@ export interface DifficultyJson {
  * (`FUN_0044DA60`) copies twelve dwords into the actor's slot and
  * `ActorArcStep` (`FUN_0044D860`) walks them.
  *
- * Every script in the program names the **same motion** in all three stages,
- * so a script is one clip cut into windup, flight and landing.
+ * A script is nearly always one clip cut into windup, flight and landing;
+ * some switch clips between stages (`verify_combat.py` check 16 counts
+ * them), so each stage names its own.
  */
 export interface ArcStage {
   motion: number;
   /** Frame of that clip the stage starts at. */
   start: number;
-  /** Cross-fade in, in frames. */
+  /**
+   * Cross-fade in, in frames -- and so the frames the cursor is **held** on
+   * `start`: `ActorSetMotionBlended` writes it to `obj+0x19C` and
+   * `SkeletonAdvancePlayCursor` does not move it until the fade is over.
+   */
   fade: number;
-  /** The clip frame past which the next stage begins. */
+  /** The clip frame the cursor must reach for the next stage to begin. */
   until: number;
 }
 

@@ -23,8 +23,15 @@ import { EvtOpSpawnIfOnePlayer, EvtOpSpawnIfTwoPlayers }
   from "../src/script/ops/spawn";
 import { G, ResetGameGlobals, RestoreGameGlobals, type Globals }
   from "../src/game/globals";
-import type { OpJson, ScriptJson } from "../src/bundle";
+import type { CamJson, OpJson, ScriptJson } from "../src/bundle";
 import { seekTo } from "../src/script/seek";
+import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
+import { EvtActionHandler } from "../src/game/camera/driver";
+import { CamPaths } from "../src/game/camera/curve";
+import { SetCameraPaths } from "../src/game/tables";
+import { PlayerTasksRun } from "../src/game/player_shell";
+import { NULL_HOST } from "../src/game/host";
+import { Rng } from "../src/core/rng";
 import { BUNDLE_ROOT, finishOrSkip }
   from "../tools/lib/bundle_root";
 
@@ -93,6 +100,50 @@ function shot(w: Walker): string {
     spawns: w.spawns.map((s) => [s.at, s.class]),
   });
 }
+
+/**
+ * A fresh data segment with a player in play, as a stage load leaves it: the
+ * reset, the stage's camera paths, then the first player turn (which is where the start press the reset
+ * made becomes a player). The stashed rail's gate holds it while nobody is in
+ * play, so a run with no player never finishes a rail shot.
+ */
+function freshGame(scriptFile: string): void {
+  ResetGameGlobals();
+  // The stage's camera paths, which `CamEvalPath7` evaluates: without them
+  // no shot seats the block and no hand-back converges.
+  const cam = scriptFile.replace(/\.script\.json$/, ".cam.json");
+  SetCameraPaths(existsSync(cam)
+    ? new CamPaths(JSON.parse(readFileSync(cam, "utf8")) as CamJson) : null);
+  PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
+}
+
+/**
+ * One frame of the clock for a walker with no object pool: the interpreter,
+ * then the camera's two tasks as `SceneTaskWalk` runs them. `queue_event`
+ * only pushes; the actions run in the camera actor.
+ */
+function clockFrame(w: Walker): void {
+  w.tick(1 / 60);
+  CameraActorTick();
+  CameraUpdateTick();
+}
+
+/**
+ * The room gates' camera term for a walker with no object pool, whose
+ * enemies are all dead before the room starts: the camera's own
+ * `g_camera_free`, and -- the harness's stand-in for a fight taking time --
+ * not while a shot is still playing or an action still waits in the ring.
+ * The script flags have the same stand-in without the camera term: every
+ * flag an actor would raise comes up once the shots in front of its wait are
+ * done. A
+ * room in the game is never cleared inside the shot that opens it; one here
+ * would let `goto_scene_state` park the slot ahead of a `finish_sequence`
+ * queued behind that shot, which the engine would then run with nothing left
+ * to retire it.
+ */
+const shotsDone = (): boolean => G.g_evt_action_ring.length === 0
+  && G.g_evt_action_handler !== EvtActionHandler.PathPlay;
+const roomOver = (): boolean => G.g_camera_free !== 0 && shotsDone();
 
 /** Private members the drive loop needs; the player reaches them through UI. */
 type Inner = { executeOne(quiet: boolean): boolean };
@@ -178,7 +229,9 @@ for (const stage of STAGES) {
   ran++;
   const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
 
-  // Drive the stage the way playing does, sampling as it goes.
+  // Drive the stage the way playing does, sampling as it goes -- from the
+  // data segment a stage load leaves, as a seek starts from.
+  freshGame(file);
   const live = new Walker(script, mkHost());
   live.reset();
   // This loop is a replay standing in for playback -- it steps over waits
@@ -202,6 +255,8 @@ for (const stage of STAGES) {
   let exact = 0, differ = 0, missed = 0;
   let firstDiff = "";
   for (const smp of samples) {
+    // `Player.seekTo` resets the data segment before it replays.
+    freshGame(file);
     const w = new Walker(script, mkHost());
     if (!seekTo(w, smp.b, smp.s, smp.o)) { missed++; continue; }
     const got = shot(w);
@@ -369,6 +424,7 @@ for (const stage of STAGES) {
   const file = join(ROOT, `stage${stage}`, `stage${stage}.script.json`);
   if (!existsSync(file)) continue;
   const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+  freshGame(file);
   const w = new Walker(script, mkHost());
   w.reset();
   w.replaying = true;
@@ -392,12 +448,23 @@ for (const stage of STAGES) {
   const file = join(ROOT, "stage1", "stage1.script.json");
   if (existsSync(file)) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    freshGame(file);
     const w = new Walker(script, mkHost());
     const arrived = seekTo(w, 8, 4, 25);
-    check("a deferred `start == -1` resumes forward, it does not rewind",
-          arrived && !!w.cam && w.cam.slot === 44 && w.cam.startFrame > 500
-            && w.cam.endFrame === 685,
-          `cam ${w.cam?.slot} ${w.cam?.startFrame}..${w.cam?.endFrame}`);
+    // The seek lands with the two actions pushed and not yet run, behind the
+    // `cam_play 506..681` still playing: they wait in the ring until it
+    // retires on 681, and the stash then resolves -1 from there. Play the
+    // frames that takes.
+    for (let i = 0; i < 12 && !w.cam?.deferred; i++) {
+      CameraActorTick();
+      CameraUpdateTick();
+    }
+    check("a deferred `start == -1` resumes forward, from the frame the "
+          + "shot in front of it ended on",
+          arrived && !!w.cam && w.cam.slot === 44 && w.cam.deferred
+            && w.cam.endFrame === 685 && G.g_rail_frame >= 682,
+          `cam ${w.cam?.slot} deferred ${w.cam?.deferred} `
+          + `..${w.cam?.endFrame} rail ${G.g_rail_frame}`);
   }
 }
 
@@ -736,10 +803,15 @@ for (const stage of STAGES) {
 
     // Shoot off: nothing can rescue a civilian, so the gate is not a condition
     // this client can evaluate and it passes rather than deadlocking.
+    // It still spends the frame the engine's first visit yields on.
     const noSim = new Walker(script, { ...mkHost(), aliveCivilians: () => null });
     noSim.applyWait(gate);
-    check("with no simulation the civilian gate passes instead of hanging",
-          noSim.wait === null);
+    const yielded = noSim.wait?.policy.kind === "yield";
+    noSim.tick(1 / 60);
+    check("with no simulation the civilian gate passes instead of hanging, "
+          + "one yield later",
+          yielded && noSim.wait?.op !== gate,
+          `${yielded} ${noSim.wait?.policy.kind ?? "idle"}`);
   }
 }
 
@@ -865,15 +937,19 @@ for (const stage of STAGES) {
     const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
     // Everything already dead, so the combat gates never hold: what is left
     // holding the script is the camera and the ring.
+    freshGame(file);
     const w = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
-                                   aliveCivilians: () => 0 });
+                                   presentEnemies: () => 0,
+                                   aliveCivilians: () => 0,
+                                   cameraFree: roomOver,
+                                   scriptFlagRaised: shotsDone });
     const CAP = 60 * 60 * 20;            // twenty simulated minutes
     const STALL = 60 * 60 * 5;           // five on one instruction is a park
     let frames = 0, stalls = 0, at = "";
     let negative = false;
     while (!w.finished && frames < CAP) {
       if (w.branch) w.takeBranch(0);
-      w.tick(1 / 60);
+      clockFrame(w);
       frames++;
       if (w.queuedEventsPending < 0) negative = true;
       const now = `${w.block}/${w.step}/${w.opIndex}`;
@@ -888,12 +964,13 @@ for (const stage of STAGES) {
     // retirement parks all six stages on a `wait_queued_events_done` within
     // the first few blocks, because the count never falls back to zero.
     //
-    // This one is the structural complement. `FUN_0045EBC0` zeroes the count
-    // when it loads a block, so the engine absorbs a residue silently; if the
-    // port retires every action from the right instruction, that reset is a
-    // no-op and the ring is *already* empty at each transition. It is, in all
-    // six stages -- which is a statement about the script's shape, not about
-    // the port agreeing with itself.
+    // This one is the structural complement. A block change leaves the ring
+    // alone (`EvtAdvanceStepOrRoute` never calls `FUN_0045EBC0`, which only
+    // a scene's task list does), so a residue would carry into the next
+    // block; if the port retires every action from the right instruction the
+    // ring is *already* empty at each transition. It is, in all six stages
+    // -- which is a statement about the script's shape, not about the port
+    // agreeing with itself.
     check(`stage ${stage}: the action ring balances`,
           !negative && w.ringResidue === 0 && w.queuedEventsPending === 0,
           `${w.ringResidue} block(s) ended owing an action, ended on `
@@ -926,16 +1003,25 @@ for (const stage of STAGES) {
       for (let s = 1; s < blk.steps.length; s++) addrs.push([blk.index, s]);
     }
 
-    let stuck = 0, seeks = 0, worst = "";
+    let stuck = 0, seeks = 0, worst = "", residueAt = "";
     for (const [b, s] of addrs) {
+      freshGame(file);
       const v = new Walker(script, { ...mkHost(), aliveEnemies: () => 0,
-                                     aliveCivilians: () => 0 });
+                                     presentEnemies: () => 0,
+                                     aliveCivilians: () => 0,
+                                     cameraFree: roomOver,
+                                     scriptFlagRaised: shotsDone });
       if (!seekTo(v, b, s, 0)) continue;
       seeks++;
+      // The replay crossed every block boundary with the ring drained, as
+      // play does. A block change does not empty the ring (only a scene's
+      // task list does), so a replay that left an action queued would carry
+      // it into the next block rather than have it wiped.
+      if (v.ringResidue !== 0 && !residueAt) residueAt = `${b}/${s}`;
       let at = "", stalls = 0;
       for (let i = 0; i < 60 * 60 * 8 && !v.finished; i++) {
         if (v.branch) v.takeBranch(0);
-        v.tick(1 / 60);
+        clockFrame(v);
         const p = `${v.block}/${v.step}/${v.opIndex}`;
         if (p === at) { if (++stalls > 60 * 90) break; } else { stalls = 0; at = p; }
       }
@@ -950,6 +1036,9 @@ for (const stage of STAGES) {
     }
     check(`stage ${stage}: every reload point still plays to the end`,
           stuck === 0, `${stuck} of ${seeks} stuck -- ${worst}`);
+    check(`stage ${stage}: ...and every replay crossed its block changes `
+          + `with the ring drained`, residueAt === "",
+          `the seek to ${residueAt} left an action queued`);
   }
 }
 
@@ -1095,6 +1184,97 @@ for (const stage of STAGES) {
   }
 }
 
+// -- the music a seek has to put back ----------------------------------------
+
+/**
+ * Every stage script starts its own track, and a seek has to know it did.
+ *
+ * `PlaySoundId` (`FUN_0041CFD0`) is reached by `se_play` as well as by
+ * `bgm_entry_play`, and the stage tracks are started through the first: at
+ * step 2 of the entry block, a `se_play` of `0x10000000 | index` (stage 5
+ * alone uses `bgm_entry_play`). The walker used to record only `0x5F`, so a
+ * seek past that `se_play` had no music to restore, and the player covered
+ * for it by starting a track "by convention" at load. This asserts the
+ * script's own first track, that the walker records it across a seek, that a
+ * `bgm_entry_play 0` -- `BgmStopThenPlay` (`FUN_0041D450`), a stop then
+ * nothing -- clears it, and that live play hands the mixer the stop before
+ * the track.
+ */
+{
+  const isBgm = (id: number | null | undefined): id is number =>
+    typeof id === "number" && id >>> 28 === 1;
+  for (const name of ["stage1", "stage2", "stage3", "stage4", "stage5",
+                      "stage6", "stage1_original", "stage5_original"]) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    ran++;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const entry = script.entry_block;
+    // The first BGM id the entry block plays, by either instruction, and the
+    // first `bgm_entry_play 0` anywhere.
+    let first: [number, number, number, number] | null = null;
+    let silence: [number, number, number] | null = null;
+    for (let bi = 0; bi < script.blocks.length; bi++) {
+      const steps = script.blocks[bi].steps ?? [];
+      for (let si = 0; si < steps.length; si++) {
+        const ops = steps[si].ops ?? [];
+        for (let oi = 0; oi < ops.length; oi++) {
+          const op = ops[oi] as OpJson;
+          const id = op.op === 0x5f ? op.track : op.sound;
+          if (bi === entry && !first && isBgm(id)) first = [bi, si, oi, id >>> 0];
+          if (op.op === 0x5f && !op.track && !silence && first) {
+            silence = [bi, si, oi];
+          }
+        }
+      }
+    }
+    const want = script.bgm?.stage_track?.id ?? null;
+    check(`${name}: the entry block starts the stage's own track at step 2`,
+          !!first && first[1] === 2 && first[3] === want,
+          first ? `${first.slice(0, 3).join("/")} plays 0x${first[3].toString(16)}`
+                  + `, stage_track 0x${(want ?? 0).toString(16)}`
+                : "no BGM id in the entry block");
+    if (!first) continue;
+    const [fb, fs, fo, fid] = first;
+    const before = new Walker(script, mkHost());
+    seekTo(before, fb, fs, fo);
+    check(`${name}: ...a seek to just before it has no music`,
+          before.bgmTrack === null, String(before.bgmTrack));
+    const after = new Walker(script, mkHost());
+    seekTo(after, fb, fs, fo + 1);
+    check(`${name}: ...and a seek past it has that track on the channel`,
+          after.bgmTrack === fid, String(after.bgmTrack));
+    if (silence) {
+      const [sb, ss, so] = silence;
+      const v = new Walker(script, mkHost());
+      if (seekTo(v, sb, ss, so + 1)) {
+        check(`${name}: a seek past bgm_entry_play 0 at ${sb}/${ss}/${so} `
+              + "leaves the channel empty", v.bgmTrack === null,
+              String(v.bgmTrack));
+      }
+    }
+
+    // Live, not a replay: the instruction reaches the mixer, and a
+    // `bgm_entry_play` reaches it as a stop and then a play.
+    const heard: number[] = [];
+    const host = { ...mkHost(), playSound: (id: number) => {
+      heard.push(id >>> 0);
+      return undefined;
+    } };
+    const live = new Walker(script, host);
+    seekTo(live, fb, fs, fo);
+    live.replaying = false;
+    heard.length = 0;
+    (live as unknown as Inner).executeOne(false);
+    const op = ((script.blocks[fb].steps ?? [])[fs].ops ?? [])[fo] as OpJson;
+    const expect = op.op === 0x5f ? [0x80000000, fid] : [fid];
+    check(`${name}: ...played live, it reaches the mixer as `
+          + expect.map((x) => `0x${x.toString(16)}`).join(" then "),
+          JSON.stringify(heard) === JSON.stringify(expect),
+          heard.map((x) => `0x${x.toString(16)}`).join(" "));
+  }
+}
+
 // **A class-0x18 rider carries class 0x30's script blobs.**
 // `CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` and two stores,
 // so its tail is class 0x30's and `ZombieScriptForState` reads the same two
@@ -1169,7 +1349,7 @@ for (const stage of STAGES) {
     const play = new Walker(script, mkHost());
     seekTo(play, 1, 1, 36);
     play.replaying = false;
-    play.enterSceneState(1, 3);
+    play.gotoSceneState(3, true);
     check("...and leaving scene row 2 in playback retires nobody",
           play.spawns.some((s) => s.at === 4348));
   }

@@ -58,7 +58,7 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 | `bundle/` | engine | one module per exporter block |
 | `core/` | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
 | `hud/` | ui | the shutter and the caption, drawn |
-| `audio/` | ui | `bgm.ts` |
+| `audio/` | ui | `bgm.ts` the mixer; `stream.ts` the music stream, pure |
 
 **Line counts, file counts, the largest files and the divergence count are in
 [`STATUS.md`](STATUS.md), which is generated.** They used to be written here,
@@ -156,14 +156,39 @@ not an assignment — and that is exactly why it is not done. The rule is about
 miss is still the violation. So the intent goes through the composition root,
 which is the layer whose job is to know about both sides.
 
-**The camera followed the same route.** The Hermite evaluation moved from
-`render/campath.ts` to `game/camera/curve.ts` over `Vec3` — it is plain maths
-over bundle keys and never needed three.js — and `CamSeatPathFrame` runs
-`CamEvalPath7` and `CamAdvancePathFrame` in the engine's order.
-`render/campath.ts` keeps `applyPose`, which is genuinely three.js, and the
-`path.y - 15` eye rule, which is a property of the draw. `CameraSeatSystem`
-lives in `app/systems.ts`; the rig keeps the pose scratch, the rails and the
-draw.
+**The camera followed the same route, and then all the way in.** The Hermite
+evaluation moved from `render/campath.ts` to `game/camera/curve.ts` over
+`Vec3` -- it is plain maths over bundle keys and never needed three.js. That
+first move stopped short: a `CameraSeatSystem` in `app/` seated the block from
+the walker's shot once a frame, and `Walker.tick` advanced the shot, retired it
+and released `wait_queued_events_done` inside one call, so every camera word
+was a task out of place and the rail could not pause. The camera is now the
+exe's own two tasks, run by `SceneTaskWalk` in the order the scene's task list
+at `0x00460710` builds them `[proved]`:
+
+* `queue_event` only **pushes** onto `G.g_evt_action_ring`
+  (`EvtQueueAction`).
+* `CameraActorTick` (task 3) runs `EvtRunQueuedActions`, which calls the
+  current handler and dequeues at most one action a frame, then
+  `UpdateSceneViewAndLight` builds the view -- `G.g_camera_view_to_world` and
+  `G.g_camera_world_to_view`, from the block's **angles**, with the shake's
+  nod.
+* `CameraUpdateTick` (task 5) runs the scene state's hook, which writes the
+  **gameplay eye** `g_camera_eye` (`0x009C71E0`) and, on a stashed rail, the
+  deferred pose block the driver copies from on the next frame.
+* The players (task 6), `UpdateCameraEnemySlots` (task 12) and every actor run
+  after both, so they read this frame's view; the actors file themselves as
+  candidates and the next frame's fill deals the slots the camera reads the
+  frame after that.
+
+`render/camera.ts` places the three.js camera from `G.g_camera_view_to_world`
+and decides nothing; `render/campath.ts` keeps `applyPose` for free roam and
+the rails. The `path.y - 15` rule turned out not to be the draw's at all: it is
+the gameplay eye's, which the hooks write and the actors aim at. The one
+`[port-only]` composition left is `reseatCamera` in `app/systems.ts`, for the
+four places the player moves the script without running the frames that would
+have written the block -- a seek, the scrubber, a reset, a deep link --
+which calls `CameraReseatFromFrame` and then the draw.
 
 **The stashed rail's range moved into `G` for the same reason (rule 1b).** A
 `cam_play` with `flags & 2` stashes its range, and scene states (2,6)/(2,7)
@@ -171,10 +196,11 @@ step it; the walker used to hold that range on its shot, where no game routine
 could reach it, and the stage-4 boss writes it. `g_stashed_path_frame`,
 `g_stashed_path_end_frame` and the published `g_rail_frame` are the engine's
 own globals now, stepped by `game/camera/rail.ts`'s `CameraStepRailTick` and
-`CameraPlayStashedPath`; the walker's shot mirrors them, and every writer of a
-shot's frame goes through `Walker.setCameraFrame`. The rail's pause while the
-screen shakes is transcribed and not applied -- see the note in `rail.ts` for
-why it depends on the seat leaving a (2,6) play's aim to the driver.
+`CameraPlayStashedPath`; the walker's `cam` is a view of them, and every
+writer of a shot's frame goes through `Walker.setCameraFrame`. The rail pauses
+while the screen shakes or no player is in play (`RailMayAdvance`), as the
+hooks do: nothing snaps the block onto the rail any more, so the pause is
+applied rather than only transcribed.
 
 **What the queue buys, and what is still missing.** `g_shot_requests` is plain
 data in the data segment, so a snapshot carries any pull the frame has not
@@ -425,7 +451,7 @@ What it is for, in rough order of value:
 | **The VM** — program counter over block/step/op, the dispatch table, `executeOne`, `apply` | `walker.ts`. **Not split into a `vm.ts`**, and not going to be — see below |
 | **The opcodes** | `script/ops/*.ts`, one module per category, merged by `ops/index.ts` |
 | **Resumption** — what makes the VM *stop*: wait policies, the enemy gates, the skip request | `script/waits/*.ts`, one file per policy kind, registered the way `ops/` register |
-| **Script-driven state** — channel tweens, queued events, the shutter and its firing gate, the `queue_event` actions | `script/state/{channels,queued,shutter,camera_action}.ts` |
+| **Script-driven state** — channel tweens, queued events, the shutter's accessors, the `queue_event` actions | `script/state/{channels,queued,shutter,camera_action}.ts` |
 | **Seek** — `seek`, `seekInner`, `reaches`, `takeBranchToward` | `script/seek.ts`, a planner that drives the VM's public surface |
 
 **No `vm.ts`.** The plan had one, at ~250 lines, and the extraction is not
@@ -442,21 +468,22 @@ comes out whole. `queued.ts` is the action ring *and* the outstanding
 engine runs the ring one action at a time, so a shot being replaced **is** the
 previous action completing. Splitting *those* is what would let the count and
 the flag be written down inconsistently, which is the bug that used to park a
-reload for ever. `shutter.ts` is the nine-state machine `HudDrawShutterState`
-runs *and* the firing gate it drives, for the same reason: `g_nFiringGate` is
-written on five of that function's paths and by nothing else that runs inside a
-scene, so a second writer of it would be a second owner of one word — which is
-what the port already had once, when the slide counter existed twice and a seek
-reset one copy while restoring the other.
+reload for ever.
 
-The **word itself** is in `game/globals.ts`, not on the walker, and that is not
-a contradiction: `shutter.ts` remains its only writer and reaches it through an
-accessor. It moved there when the port started honouring it, because the
-routine that *reads* it — `PlayerFireAndReloadUpdate`, whose whole fire block
-sits under `else if (g_nFiringGate != 0)` — is in `game/`, and a copy pushed
-across from `script/` would have been exactly the second owner this paragraph
-is about. The shutter's own three fields stay in `script/`: nothing outside the
-script reads them.
+`shutter.ts` is **not** the shutter's machine any more, only the script's view
+of it. evt `0x1F` is one store into `g_bHudShutterState`; the nine-state
+machine, the 40-frame slide and every write of `g_nFiringGate` are
+`HudDrawShutterState`'s, which is a task of the scene's own that runs **after
+the player tasks and before every actor** (`HudShutterTaskCreate` is the
+eighth call of the task-list builder). The machine was here and stepped at the
+top of the walker's next tick, which put it on the wrong side of the players:
+the opcode raised the gate a frame before the engine lets a shot through and
+the slide drew a counter behind. So it moved to `game/hud_shutter.ts`, where
+`SceneTaskWalk` runs it in the engine's place, and its four words -- the state,
+`g_bHudShutterPrev`, the task's counter and the gate -- are all in `G`, with
+`shutter.ts` holding accessors onto them so the walker's names still read.
+What it draws is recorded into `G.g_hud_shutter_bars` for `hud/` to put on the
+screen, the way `DrawScreenSprite` calls are.
 
 `camera_action.ts` is the one that was still a hidden switch. `queue_event`
 (0x30) dispatches on a selector, and the port had that as ~140 lines of
@@ -637,9 +664,9 @@ itself** is a different matter and is allowed where React's model is the wrong
 tool — the script tree's highlight does it.
 
 **7. State the script drives belongs to the script**, not to the layer that
-draws it. The shutter's state and slide counter and the caption's countdown all
-live on `Walker` and go in the snapshot; `hud/` reads them every tick and holds
-nothing.
+draws it. The caption's countdown lives on `Walker` and goes in the snapshot;
+the shutter's state, slide counter and the bars it drew are the engine's and
+live in `G`. `hud/` reads them every tick and holds nothing.
 
 ### One region dies instead of the page
 
@@ -721,7 +748,10 @@ web/src/
                   (`Actor.partVisible`), `ActorDrawShadow`'s gate, and the node
                   walk a class's draw hook runs from when its pose is
                   render/'s. render/characters/draw_gates.ts applies them node
-                  by node; none of it is an alpha
+                  by node; none of it is an alpha. The head aim both combat
+                  hooks run from that walk is class30/head_aim.ts; the angles
+                  are state on each arm, and render/characters/head_aim.ts
+                  turns bone 2's own meshes around their draw
     original_mode.ts  the two-slot inventory, and the one query the branch
                   triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class
@@ -732,7 +762,14 @@ web/src/
                   to *make* an actor -- the stage-2 boss's summons, the two
                   prop placers' children -- would close an ESM cycle
     globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
-    camera/       curve.ts (the `cam/` Hermite), path.ts, track.ts, slots.ts
+    camera/       the camera's two tasks: actor.ts (`CameraActorTick`) and
+                  hooks.ts (`CameraUpdateTick`, the scene state's hook);
+                  actions.ts the action ring and its handlers; driver.ts the
+                  two function-pointer slots as enums; path.ts the path play;
+                  mode.ts the hand-back; rail.ts the stashed rail; track.ts,
+                  slots.ts, slot_table.ts, select_target.ts the enemies it
+                  follows; turn.ts; view.ts the view matrices; curve.ts the
+                  `cam/` Hermite
     player_shell.ts  the per-player state machine: start, in play, continue,
                   game over, and the stage step's park at 2
     run_phase.ts  the run phases a stage is played in (0, 2, 3, 4, 11, 12),
@@ -744,7 +781,16 @@ web/src/
     player_gun.ts the trigger, the magazine and the reload
     hud_readout.ts  the bullets, the RELOAD prompt and the lives, drawn as
                   screen sprites; hud_sprites.ts their ids, for the exporter
+    hud_shutter.ts  `HudDrawShutterState`: the letterbox, its slide and the
+                  firing gate, run after the player tasks; the bars it draws
+                  are recorded for the HUD layer
     screen_sprite.ts  `DrawScreenSprite`, recorded for the HUD layer to draw
+    continue_readout.ts  what a player's task draws off the play: the small
+                  CONTINUE? and digit, the small GAME OVER, the score cheat,
+                  and the crosshair's decision (the reticle is the page's)
+    credit_prompt.ts  the credit line ("PRESS START BUTTON / CREDIT(S) n")
+                  and the blink clock it runs on; the run's own CONTINUE? is
+                  drawn in run_phase.ts
     credits.ts    what a start and a continue spend
     combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts
     effects/                                 coli.ts, motion.ts, tables.ts, ...
@@ -754,15 +800,20 @@ web/src/
     registry.ts   table assembly that refuses a duplicate key
     ops/          the opcodes, one module per group
     waits/        one module per wait policy
-    state/        channels, queued events, shutter, camera actions
+    state/        channels, the shutter's accessors. The queued events
+                  and the camera actions are `G`'s now
+                  (`game/camera/actions.ts`)
     seek.ts       the planner
     (there is deliberately no `vm.ts`: the machine is the part that was
      never the problem -- see "`script/`: the machine, and the state the
      script drives")
   render/       three.js. Reads engine state, owns nothing.
     context.ts    RenderContext, which adds { scene, camera, paths }
-    camera.ts     the rig, the take and the draw (the *seat* is app/systems)
-    campath.ts    a pose -> a three.js camera (the curves are game/camera/)
+    camera.ts     the rig and the draw: the three.js camera placed from
+                  `G.g_camera_view_to_world`. No seat -- the port's tasks
+                  write the block
+    campath.ts    a pose -> a three.js camera, for free roam and the rails
+                  (the curves are game/camera/)
     stagescene, rigs, props, backdrop, rain, fog, lighting,
     characters, shooting, breakables, projectiles, overlays, debug
     slotmodels.ts an actor whose model is an ASSET SLOT rather than a
@@ -775,6 +826,11 @@ web/src/
     prop_shatter.ts  a stacked prop's fifteen shatter pieces
                   (`G.g_prop_shatters`), off breakables.ts's templates
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
+    draw_order.ts the engine's two passes on every exported material
+                  (`TranslatePvr2StateToD3D`'s blend, depth and alpha-test
+                  state, applied once at load) and the renderer's transparent
+                  sort (`RenderCommandCompare`: whole models, nearest first,
+                  chain order within); `app/` installs the sort
     characters/boss3.ts, boss3_effects.ts  class 0x45 composes its own bone
                   matrices in `game/class45/`; these place them, and draw
                   what its routines drew beside them (card, flash, wake,
@@ -782,6 +838,20 @@ web/src/
     creature_effects.ts  the owl's and the fish's effect tasks and the ring
                   task, from `game/effects/owl.ts`, `fish.ts` and
                   `ring_effect.ts`' records, the same way
+    water_rings.ts  the flat ring a class-0x30 death leaves on water, from
+                  `game/effects/water_ring.ts`' records
+    water_surfaces.ts  the canal water class 0x41 type 1 draws
+                  (`game/class41/water.ts`): the stage's own tile node where
+                  the glTF has one -- `StageScene` shows it while resident --
+                  or a `slots_actor` clone; the ripple's UVs rewritten per
+                  geometry from `G.g_water_surface_uv`, and the bilinear bit
+                  as a per-mesh material clone
+    characters/bat.ts, bat_splash.ts  class 0x46: each root in rotation
+                  order 5 at its model's own scale, and the splash task
+                  `game/class46/splash.ts` steps
+    characters/thrower.ts  class 0x31: the root in rotation order 1
+                  (`RotX; RotZ; RotY`), which is what puts stage 2's
+                  wall-climbers on their wall
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand
@@ -797,10 +867,14 @@ web/src/
                   pause screen, the speaker and the turn-your-phone notice;
                   DebugSidebar.tsx the controls, the tabs and the panels;
                   GameOver.tsx the game-over screen's two buttons
-  hud/          hud.ts — the shutter and the caption, drawn. Holds no state
+  hud/          hud.ts — the shutter bars the engine recorded, the caption
+                and the screen sprites, drawn. Holds no state
                 and imports nothing; React renders its nodes and hands them
                 over through `UiHost`
-  audio/        bgm.ts — audio, not UI
+  audio/        bgm.ts — audio, not UI: `PlaySoundId`'s dispatch, and the
+                mixer (Web Audio for channel 0xF, elements for SE and voice)
+                stream.ts — what channel 0xF plays, byte for byte; no DOM, so
+                `test:audio` runs it headless
 ```
 
 ### The three rules that hold the rest together

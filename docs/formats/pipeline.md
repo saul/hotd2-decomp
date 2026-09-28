@@ -390,7 +390,16 @@ So a frame is ordered:
    submission order. **Not sorted.**
 2. **Translucent pass** — drawn by `RenderFlushCommandList` after sorting the
    whole command list by **(draw layer ascending, sort depth descending)**,
-   i.e. farthest first, painter's order, with the draw layer as the outer key.
+   with the draw layer as the outer key. The sort depth is eye z on the matrix
+   stack, which looks down −z (`RenderInitStates` installs `VIEW = diag(1, 1,
+   −1, 1)` under a left-handed projection), and it is the **least** z of the
+   model's origin and every mesh pass 0 skipped — its farthest point. So
+   descending is **nearest first**. This line said "farthest first, painter's
+   order" until the sign was read; the comparator was right and the direction
+   was assumed. Every mesh in the game writes depth in both passes, so this is
+   not a painter's order at all: a nearer translucent surface drawn first
+   hides the ones behind it. See
+   [`materials.md`](materials.md#the-translucent-order--proved).
 
 Within one command the walker goes in **chain (file) order**, drawing only the
 meshes of the current pass and skipping the rest by `mesh_data_size`. The pass
@@ -404,13 +413,17 @@ directly. `hod2lib.gltf` therefore:
 
 * emits each mesh's primitives **opaque first, then translucent**, each group
   in chain order — a stable sort, so the engine's within-pass order survives;
-* gives every triangle primitive `extras.hod2_pass` and
-  `extras.hod2_chain_index`;
+* gives every triangle primitive `extras.hod2_pass`,
+  `extras.hod2_chain_index`, `extras.hod2_model` (which NL1 model of the glTF
+  mesh it came from -- a rig part that draws two slots is two draw commands)
+  and `extras.hod2_sphere` (the mesh header's centroid and radius, which the
+  walker culls and sorts with);
 * records the whole rule above in the document's `asset.extras.hod2_draw_order`
   (`gltf.DRAW_ORDER`), so a renderer that *can* honour order — the web player —
   does not have to rediscover it.
 
-This makes the exported order deterministic and equal to the engine's. It does
+This makes the exported order deterministic and equal to the engine's. The
+web player honours all of it (`web/src/render/draw_order.ts`). It does
 **not** make a general glTF viewer correct: Blender sorts blended surfaces per
 object, and this game's models genuinely contain two coincident translucent
 copies of the same shell (the stage-2 car's body is prim 0, texture 2, base
@@ -420,6 +433,17 @@ other as a large flat wrong-coloured face. The `blender_*.py` viewers switch
 blended materials to **hashed/dithered** transparency, which resolves per
 fragment and avoids the artefact — not the engine's order, but not a lie about
 the geometry either.
+
+In the engine the two do not fight. Chain order draws the outer shell first
+and it writes depth; the black copy shares no vertex with it and sits just
+inside it (radius 20.16 against 20.32, `char_adv04` model 0 meshes 0 and 7),
+so it fails the depth test everywhere the outer shell drew — which is
+everywhere except the texels whose alpha is 0, where the alpha test threw the
+outer shell away. So the black shows only through the clear parts of the
+glass: it is the car's interior. The web player drew it on top of the
+bodywork for as long as translucent materials had no depth write and sorted
+per primitive (`docs/NEW-BUGS-2.md`: "this car that has translucent windows.
+it's not rendering properly at all").
 
 > ⚠️ The tempting "fix" is to force those black base colours to white. It is
 > wrong. `InitD3DDeviceAndTextureStages` sets `COLOROP = MODULATE`,

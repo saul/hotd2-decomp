@@ -35,6 +35,7 @@
  */
 import { ActorFlag, CountFlag, ThrowerFlag, type Actor } from "../actor";
 import { G } from "../globals";
+import { CameraSlotVacate } from "../camera/slots";
 
 /**
  * `ReleaseEnemyAliveCount` — `FUN_00456560`.
@@ -109,7 +110,7 @@ export function ThrowerReleaseSlotOnDeath(obj: Actor): void {
   if (!(obj.flags & ActorFlag.KeepCameraWhenLast)
       || G.g_enemies_present !== 1) {
     obj.flags |= ActorFlag.NoCameraTrack;
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
   }
   ThrowerRetireFromAliveCount(obj);
 }

@@ -14,9 +14,12 @@
  * shared link carry someone else's overlay choices. They belong in
  * `localStorage`, per browser, and that is all this module does.
  *
- * A browser may still hold `pillarbox` and `speed` from before the 4:3 switch
- * and the speed control went; nothing reads them, and the next write drops
- * them.
+ * A browser may still hold `pillarbox` and `speed` from the old chrome, and
+ * nothing reads either: `speed` went with the transport bar, and `pillarbox`
+ * was written as `true` for every viewer whether or not they had touched it,
+ * because it was the default and every setting saved them all. The 4:3 switch
+ * is back, off by default, under a new name -- `fourByThree` -- so that an
+ * old automatic `true` cannot turn it on. The next write drops both.
  *
  * `allRegions` is deliberately **not** saved. It is URL state, and having two
  * sources of truth for it is how a deep link ends up quietly overridden by
@@ -40,6 +43,8 @@ export interface ViewPrefs {
   lightMode?: string;
   fogMode?: string;
   filterMode?: string;
+  /** The frame boxed to 4:3 rather than filling the window. See the note above. */
+  fourByThree?: boolean;
   /**
    * Whether sound is off, and how loud it is when it is not.
    *

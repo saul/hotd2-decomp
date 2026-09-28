@@ -7,7 +7,11 @@
 export interface BgmJson {
   /** Both filename tables, indexed by `id & 0xFFF`. Holes are real nulls. */
   names: { ar: (string | null)[]; plain: (string | null)[] };
-  /** The stage's own track — named by convention, not started by the script. */
+  /**
+   * The stage's own track -- the one its script starts at step 2 of each
+   * entry block. A label: the player does not read it, because the script's
+   * own `PlaySoundId` is what starts the music.
+   */
   stage_track: {
     index: number;
     id: number;

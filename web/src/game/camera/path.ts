@@ -1,99 +1,208 @@
 /**
- * `CamAdvancePathFrame` — `FUN_004035E0`. The camera block, straight off the
- * rail.
+ * The `cam_play` action: the camera block straight off the rail, and the
+ * path-frame bookkeeping everything else reads.
  *
- * The queued `cam_play` action installs this as its per-frame handler and it
- * runs until the frame counter passes the command's end frame. Every frame it
- * runs it writes the camera block's **eye and look-at both**, with no easing
- * of any kind:
- *
- * ```c
- * CamEvalPath7(g_active_cam_path, (float)frame,
- *              &g_camera_block_eye + i, &g_camera_block_target + i, &roll, &_);
+ * ```
+ * EvtActionCamPlay40 (FUN_00403360)
+ *   start == end  -> CamEvalStaticPose     (FUN_004033B0)  a held pose
+ *   flags & 2     -> CamStashPathRange     (FUN_00403490)  camera/rail.ts
+ *   otherwise     -> CamStartPathPlayback  (FUN_00403510)
+ *                      -> installs and calls CamAdvancePathFrame (FUN_004035E0)
  * ```
  *
- * That is what keeps the script's deliberate cuts sharp: a new shot seats the
- * aim on its own target rather than swinging onto it. 148 of the 631
- * consecutive `cam_play` pairs in stages 1-6 turn the view by more than three
- * degrees at the seam and some by 173, so the cuts are the norm, not an edge
- * case — the smoothness the game is known for comes from
- * {@link CameraTrackEnemiesTick} easing *within* a shot, not from blending
- * between them.
+ * `CamAdvancePathFrame` is the action handler `EvtRunQueuedActions` calls once
+ * a frame, **inside `CameraActorTick`** -- so before the scene state's hook,
+ * the players and every actor. Every frame it runs it writes the camera
+ * block's eye **and** look-at with no easing of any kind, which is what keeps
+ * the script's deliberate cuts sharp: 148 of the 631 consecutive `cam_play`
+ * pairs in stages 1-6 turn the view by more than three degrees at the seam.
+ * The smoothness the game is known for comes from `CameraTrackEnemiesTick`
+ * easing *within* a shot.
  *
- * Once the action retires the block simply stops being written, and the camera
- * hook has it to itself. That is the state stage 2 block 17 step 5 sits in
- * while `wait_enemies_alive` holds.
- *
- * `CamEvalPath7` itself is `camera/curve.ts` — `CamPath.pose`, over `Vec3`,
- * because the Hermite maths is plain numbers over bundle keys and never needed
- * three.js. `CamSeatPathFrame` below runs the two in the engine's order.
+ * Every word here is the engine's and lives in `G`: the cursor, the end, the
+ * published frame and the frames left, the active path, and the handler
+ * identity (`G.g_camera_action_driver`). The walker's `CamCommand` is the
+ * script's description of the shot for the player's own panels; nothing in
+ * the game reads it.
  */
 import { G } from "../globals";
-import { vec3, type Vec3 } from "../vec";
-import type { CamPath, CamPose } from "./curve";
+import { T } from "../tables";
+import { VecToAngles, type Vec3 } from "../vec";
+import { EvtActionHandler } from "./driver";
 
-/** Seat the camera block on the path pose for this frame. */
-export function CamAdvancePathFrame(eye: Vec3, target: Vec3): void {
-  G.g_camera_block_eye.x = eye.x;
-  G.g_camera_block_eye.y = eye.y;
-  G.g_camera_block_eye.z = eye.z;
-  G.g_camera_block_target.x = target.x;
-  G.g_camera_block_target.y = target.y;
-  G.g_camera_block_target.z = target.z;
+/**
+ * The two pose blocks `CamBlockSetAnglesFromLookAt` is handed a pointer to.
+ * `[port-only]` as an enum: the engine passes the block's address.
+ */
+export enum CameraPoseBlock {
+  /** `g_camera_blocks + 0x80` -- `g_camera_block_eye`, the block drawn. */
+  Camera = 0,
+  /** `0x009C70C0` -- `g_cam_path_eye`, the deferred pose block. */
+  Path = 1,
 }
 
 /**
- * The path's own look-at, for `SelectCameraLookAtTarget` to fall back on.
+ * `CamEvalPath7` — `FUN_004041E0`. One frame of a `cp_` path: the eye into
+ * `eye`, the look-at into `target`, and the roll, which is returned.
  *
- * `g_cam_path_target` is 0x009C70D8, the target half of the *second* pose
- * block — the one the deferred-rail hooks (`CameraStepRailTick`,
- * `CameraPlayStashedPath`) evaluate into. See the note on the global for why
- * the port refreshes it every frame and the engine does not.
+ * Channels 0-5 always; channel 6, the roll, only while `g_cam_roll_enabled`
+ * (`DAT_009A21B0`, evt opcode 0x35) is set, and `__ftol`'d -- 0 otherwise.
+ * The curve maths is `CamPath.channel` in `camera/curve.ts`; the paths are
+ * the stage's, from {@link T.camPaths}. A slot the stage has no path for
+ * writes nothing and returns 0 `[port-only]`: the engine's table always has
+ * one.
  */
-export function CamSetPathTarget(target: Vec3): void {
-  G.g_cam_path_target.x = target.x;
-  G.g_cam_path_target.y = target.y;
-  G.g_cam_path_target.z = target.z;
+export function CamEvalPath7(slot: number, frame: number,
+                             eye: Vec3, target: Vec3): number {
+  const p = T.camPaths?.paths.get(slot);
+  if (!p) return 0;
+  eye.x = p.channel(0, frame);
+  eye.y = p.channel(1, frame);
+  eye.z = p.channel(2, frame);
+  target.x = p.channel(3, frame);
+  target.y = p.channel(4, frame);
+  target.z = p.channel(5, frame);
+  return G.g_cam_roll_enabled !== 0 ? Math.trunc(p.channel(6, frame)) : 0;
+}
+
+/** An `s16`, as `VecToAngles` stores its two outputs. */
+const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
+
+/**
+ * `CamBlockSetAnglesFromLookAt` — `FUN_00403AC0`, `(block, target, roll)`.
+ *
+ * ```c
+ * VecToAngles(block.eye - target, &block+0x0C, &block+0x10);   // pitch, yaw
+ * block+0x14 = roll;
+ * ```
+ *
+ * The look-at is its **own argument** (`[ESP+0xC]` at `0x00403ACF`), not the
+ * block's `+0x18`: every caller in the camera passes the block's own target,
+ * but the angle is of whatever it is handed. The vector is **eye minus
+ * target**, so the yaw faces back along the view and the pitch is positive
+ * looking up; the scene-state hooks turn the yaw half round (`+ 0x8000`) when
+ * they copy it into `g_camera_yaw_bams`.
+ */
+export function CamBlockSetAnglesFromLookAt(block: CameraPoseBlock,
+                                            target: Vec3, roll: number): void {
+  const cam = block === CameraPoseBlock.Camera;
+  const eye = cam ? G.g_camera_block_eye : G.g_cam_path_eye;
+  const a = VecToAngles(eye.x - target.x, eye.y - target.y, eye.z - target.z);
+  if (cam) {
+    G.g_camera_block_pitch_bams = s16(a.pitch);
+    G.g_camera_block_yaw_bams = s16(a.yaw);
+    G.g_camera_block_roll_bams = roll;
+  } else {
+    G.g_cam_path_pitch_bams = s16(a.pitch);
+    G.g_cam_path_yaw_bams = s16(a.yaw);
+    G.g_cam_path_roll_bams = roll;
+  }
 }
 
 /**
- * The pose the last seat evaluated.
- *
- * Scratch, not state: it is rewritten every frame the block is seated, and
- * everything that survives a frame is already in `g_camera_block_eye` /
- * `g_camera_block_target`. It is module-level rather than allocated per call
- * because the seat runs every frame of every stage.
+ * `[port-only]` as a function -- the tail every slot-0 action handler ends on
+ * when it completes: `g_evt_action_advance = 1; g_queued_events_pending--`.
+ * The handler stays in the slot; `EvtRunQueuedActions` replaces it, with the
+ * next action or with `NoOpStub`. See `camera/actions.ts`.
  */
-const _pose: CamPose = { eye: vec3(), target: vec3(), roll: 0 };
+export function EvtActionRetire(): void {
+  G.g_evt_action_advance = 1;
+  G.g_queued_events_pending -= 1;
+}
 
 /**
- * One frame of a `cam_play`: evaluate the path, publish its own aim, and —
- * while the action is live — seat the camera block on it.
+ * `CamAdvancePathFrame` — `FUN_004035E0`. One frame of a playing `cam_play`.
  *
- * `[port-only]`. Each half is an exe routine, and this is the order the engine
- * runs them in; what is the port's own is the *condition*. In the engine the
- * queued action simply stops being called once the shot reaches its end frame,
- * so there is no `advance` flag to read — the caller here has to say whether
- * the action is still live, because the player also has a seek, which the
- * engine has not.
+ * Read off the instruction stream at `0x00403605`..`0x0040368D`:
  *
- * The evaluated pose comes back so the draw can take the **roll** off it. Roll
- * is the one channel `CamEvalPath7` (`FUN_004041E0`) produces that the camera
- * block has no word for — the engine hands it straight to the draw — so it is
- * returned rather than parked in a global whose address nobody has read.
+ * ```
+ * cur = g_cam_path_cursor
+ * g_cam_path_frame = cur                                  ; publish -- BEFORE the end test
+ * CamEvalPath7(g_active_cam_path, cur, &block.eye, &block.target, &roll)
+ * CamBlockSetAnglesFromLookAt(&block, &block.target, roll)
+ * g_cam_path_frames_left = end - cur
+ * cursor = cur + 1
+ * if (cur >= end) retire                                   ; CMP ECX,EAX / JL
+ * ```
+ *
+ * So the block holds the pose of every frame from `start` to `end`
+ * **inclusive**, and the frame after the end is the first no handler writes.
  */
-export function CamSeatPathFrame(path: CamPath, frame: number,
-                                 rollEnabled: boolean,
-                                 advance: boolean): CamPose {
-  path.pose(frame, rollEnabled, _pose);
-  // The path's own aim, which `SelectCameraLookAtTarget` falls back to.
-  CamSetPathTarget(_pose.target);
-  // `CamAdvancePathFrame` runs only while the action is live. Once the shot
-  // reaches its end frame the action retires and the block is left where it
-  // is, for the camera hook to ease from -- which is the state the player
-  // spends every fight in.
-  if (advance) CamAdvancePathFrame(_pose.eye, _pose.target);
-  return _pose;
+export function CamAdvancePathFrame(): void {
+  const cur = G.g_cam_path_cursor;
+  G.g_cam_path_frame = cur;
+  const roll = CamEvalPath7(G.g_active_cam_path, cur,
+                            G.g_camera_block_eye, G.g_camera_block_target);
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
+                              roll);
+  G.g_cam_path_frames_left = G.g_cam_path_end_frame - G.g_cam_path_cursor;
+  G.g_cam_path_cursor = cur + 1;
+  if (G.g_cam_path_end_frame <= cur) EvtActionRetire();
+}
+
+/**
+ * `CamStartPathPlayback` — `FUN_00403510`. The playing half of
+ * `EvtActionCamPlay40`.
+ *
+ * ```c
+ * if (!(flags & 4)) {
+ *     g_active_cam_path = operand[2];
+ *     if (operand[0] == -1) { cursor = g_cam_path_frame;              end = operand[1]; }
+ *     else                  { g_cam_path_frame = cursor = operand[0]; end = operand[1]; }
+ * } else {
+ *     g_cam_path_frame = operand[0];  cursor = g_stashed_path_frame;  end = g_stashed_path_end_frame;
+ * }
+ * block+0x114 = flags;
+ * g_evt_action_handler = CamAdvancePathFrame;  CamAdvancePathFrame(slot);
+ * ```
+ *
+ * `start == -1` resumes from the frame the camera is on, with no `+ 1`: the
+ * handler publishes before it increments. No shipped play sets `flags & 4`,
+ * and none passes -1 here. Its training-mode arm, which swaps the path for
+ * the lesson's own, belongs to a mode the port does not play.
+ */
+export function CamStartPathPlayback(slot: number, start: number,
+                                     end: number, flags = 0): void {
+  if ((flags & 4) === 0) {
+    G.g_active_cam_path = slot;
+    if (start === -1) {
+      G.g_cam_path_cursor = G.g_cam_path_frame;
+    } else {
+      G.g_cam_path_frame = start;
+      G.g_cam_path_cursor = start;
+    }
+    G.g_cam_path_end_frame = end;
+  } else {
+    G.g_cam_path_frame = start;
+    G.g_cam_path_cursor = G.g_stashed_path_frame;
+    G.g_cam_path_end_frame = G.g_stashed_path_end_frame;
+  }
+  G.g_evt_action_handler = EvtActionHandler.PathPlay;
+  CamAdvancePathFrame();
+}
+
+/**
+ * `CamEvalStaticPose` — `FUN_004033B0`. `start == end`: one frame, written
+ * into the block, and the action retires on the spot.
+ *
+ * ```c
+ * g_cam_path_frame = operand[0];
+ * CamEvalPath7(g_active_cam_path = operand[2], operand[0], &block.eye, &block.target, &roll);
+ * CamBlockSetAnglesFromLookAt(&block, &block.target, roll);
+ * retire;
+ * ```
+ *
+ * (Its Original Mode arm swaps path `0x1A2` for a character's own; no bundle
+ * the port reads names it.)
+ */
+export function CamEvalStaticPose(slot: number, frame: number): void {
+  G.g_cam_path_frame = frame;
+  G.g_active_cam_path = slot;
+  const roll = CamEvalPath7(slot, frame, G.g_camera_block_eye,
+                            G.g_camera_block_target);
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
+                              roll);
+  EvtActionRetire();
 }
 
 /**
@@ -102,25 +211,23 @@ export function CamSeatPathFrame(path: CamPath, frame: number,
  * The engine writes `g_cam_path_frame` once a frame through `__ftol`, stepping
  * by exactly one, so its own cue tests are plain equality: the counter cannot
  * pass a cue without landing on it, and a script that is waiting is polled on
- * the frame it lands. Neither holds here.
+ * the frame it lands. That holds here too -- the port's clock is the engine's
+ * fixed tick -- except across a **seek**, which restores the camera frame from
+ * the address without running the game, so a script can begin waiting on a
+ * cue the camera is *already past*, on a path that plays once, forward, and
+ * never comes back to it.
  *
- * The clock is real elapsed time, so a slow frame advances it by two or more
- * and steps straight over an exact cue. And `seek` restores the camera frame
- * from the address without running the game, so a script can begin waiting on
- * a cue the camera is *already past* -- on a path that plays once, forward,
- * and never comes back to it.
- *
- * That second one is not hypothetical: it is stage 1's hostage. Its death
- * script waits on `(39, 60)`, and resuming at `block=1&step=8&op=12&frame=100`
- * put the camera at 100 before the civilian had been killed. The cue could
- * never fire, the script never reached its `LeaveCountNow`, and
+ * That is not hypothetical: it is stage 1's hostage. Its death script waits
+ * on `(39, 60)`, and resuming at `block=1&step=8&op=12&frame=100` put the
+ * camera at 100 before the civilian had been killed. The cue could never
+ * fire, the script never reached its `LeaveCountNow`, and
  * `wait_scripted_actors 0` waited for ever.
  *
  * So a cue is what it reads as: **reached**. One-shot, and already-passed
- * counts as reached — which is exactly how classes 0x24 and 0x25 ask the same
- * question. In live play the first frame this is true is the frame the engine's
- * equality is true; the two only differ once something starts waiting late,
- * and there the engine would simply never answer. [diverges]
+ * counts as reached -- which is exactly how classes 0x24 and 0x25 ask the same
+ * question. In live play the first frame this is true is the frame the
+ * engine's equality is true; the two only differ once something starts
+ * waiting late, and there the engine would simply never answer. [diverges]
  */
 export function CamPathCueReached(path: number, frame: number): boolean {
   return G.g_active_cam_path === path && G.g_cam_path_frame >= frame;

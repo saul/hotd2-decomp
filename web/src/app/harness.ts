@@ -123,6 +123,11 @@ export interface ShotTarget {
   y: number;
   /** Depth, NDC: in front of the lens and inside the far plane when < 1. */
   z: number;
+  /**
+   * A thrown weapon, by its id in `g_thrown_weapons`, rather than an actor.
+   * `at` is then its thrower and `cls` is -1: the weapon has no class.
+   */
+  thrown?: number;
 }
 
 /**
@@ -286,6 +291,14 @@ export class Harness {
     const project = this.target.projectWorld?.bind(this.target);
     if (!project) return out;
     for (const e of G.g_shot_test_list) {
+      if (e.thrown !== undefined) {
+        const w = G.g_thrown_weapons.find((x) => x.id === e.thrown);
+        const p = w ? project(w.pos) : null;
+        if (!p) continue;
+        out.push({ at: e.at, cls: -1, x: p.x, y: p.y, z: p.z,
+                   thrown: e.thrown });
+        continue;
+      }
       const obj = G.g_object_list.find((o) => o.at === e.at);
       if (!obj) continue;
       const p = project(obj.shotCentre);

@@ -13,6 +13,7 @@
  * come off a wall, and it is the one path by which a wall-crawler that runs
  * out of wall ends up back on the ground.
  */
+import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import {
   ThrowerReleaseSlotOnDeath, ThrowerRetireFromAliveCount,
@@ -21,6 +22,7 @@ import {
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { G } from "../globals";
+import { CameraSlotVacate } from "../camera/slots";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 import { QueryGroundHeightAt } from "../coli";
@@ -28,6 +30,7 @@ import { ActorDespawn } from "../despawn";
 import { MotionOf, T } from "../tables";
 import { GAME_HZ } from "../class30/states";
 import { ActorArcVelocity, ActorClipFrame, ActorClipLength } from "./arc";
+import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
 import { ThrowerState, ThrowerMotion } from "./states";
 import { ThrowerMotionOf, ThrowerStanceOf } from "./tables";
 
@@ -69,6 +72,11 @@ const BOUNCE_NORMAL = -0.5;
 const BOUNCE_TANGENT = 0.5;
 /** Below this vertical speed the body has settled. */
 const SETTLE_SPEED = 0.15;
+/**
+ * `PlaySoundId(0x2716A9)` at `0x0044A685` -- `COMMON\ENE_WALK4_16.WAV`, the
+ * thump of each bounce. `ThrowerStateKnockedTumbling` plays the same one.
+ */
+export const SND_BOUNCE = 0x2716a9;
 /** ...and it settles regardless after this many frames. */
 const FALL_FRAME_CAP = 0x78;
 /** `QueryGroundHeightAt(x, y + 4.5, z)` for the fall, `+1.0` for the drop. */
@@ -189,7 +197,8 @@ export function ThrowerBeginKnockbackArc(obj: ThrowerActor,
  * get-up clip and goes back to deciding.
  */
 export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
-                                        dt: number, rng: Rng): void {
+                                        dt: number, rng: Rng,
+                                        events?: Events): void {
   const frames = dt * GAME_HZ;
 
   if (obj.sub === 0) {
@@ -264,6 +273,11 @@ export function ThrowerStateFallAndLand(obj: ThrowerActor, host: GameHost,
     obj.vel.y *= BOUNCE_NORMAL;
     obj.vel.x *= BOUNCE_TANGENT;
     obj.vel.z *= BOUNCE_TANGENT;
+    // `PUSH 0x46; CALL ThrowerEmitGroundDust` at `0x0044A658` and
+    // `PUSH 0x2716A9; CALL PlaySoundId` at `0x0044A680`, on every bounce --
+    // the puff latches itself once per landing, the thump does not.
+    ThrowerEmitGroundDust(obj, GroundDustCode.Bounce, host, events);
+    events?.emit("sound.play", { id: SND_BOUNCE });
     if (Math.abs(obj.vel.y) > SETTLE_SPEED
         && obj.thr.sinceLanding < FALL_FRAME_CAP
         && obj.charType !== CHAR_ZSASS) {
@@ -479,7 +493,7 @@ export function ThrowerLeave(obj: ThrowerActor): void {
   // `obj+0x121`. Modelled as a filter by `at` for the same reason
   // `ThrowerReleaseSlotOnDeath` is: the port keeps `g_enemy_slots` as the
   // list of actors rather than a fixed array of eight-byte records.
-  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  CameraSlotVacate(obj);
   // `obj+0x34 &= ~1`. [open] Bit 0 of the flag word has no port: nothing in
   // the ported call graph reads or writes it, so there is nothing to clear.
   // Named here rather than dropped, so the next reader knows it was seen.

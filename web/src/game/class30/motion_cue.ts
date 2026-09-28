@@ -82,17 +82,25 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
  * actor's *ordinary* motion:
  *
  * ```
- * 00455b54  6a00 6a00 ff77 04 57   SetCurrentActorMotionBlended(obj+0x194,
- * 00455b5b  e8..                     entry->lunge, 0, 10)
- * 00455b8a  6a05 6a00 ff37 57      FUN_004119A0(obj+0x194, entry->strike, 0, 5)
- * 00455bd6  0fbf0c4dd0074e00       MOVSX ECX, [g_motion_play_length + 0x1B4*2]
+ * 00455b3d  6a0a 6a00              PUSH 0xa ; PUSH 0x0         ; fade, start
+ * 00455b49  e8e276ffff             SetCurrentActorMotionBlended(obj+0x194,
+ *                                    entry->lunge, 0, 10)
+ * 00455b57  6a05 6a00              PUSH 0x5 ; PUSH 0x0
+ * 00455b63  e838befbff             FUN_004119A0(obj+0x194, entry->strike, 0, 5)
+ * 00455c02  0fbf144dd0074e00       MOVSX EDX, [g_motion_play_length + 0x1B4*2]
  * ```
  *
  * — `obj+0x1B4` and the play cursor at `obj+0x19C`, the same pair every other
  * state reads. The port gives the swing a channel of its own (`obj.action`,
  * `[port-only]`) because the poser needs it at full weight while the walk
  * keeps its clock; the engine needs no such thing, because writing the motion
- * **is** ending the swing.
+ * **is** ending the swing. The lunge is not on that channel: it is an
+ * ordinary motion to the engine, and the port plays it as one, through
+ * {@link SetCurrentActorMotionBlended}.
+ *
+ * (This listing used to put the lunge's call at `0x00455B54`, which is the
+ * strike branch's first instruction, and the strike's at `0x00455B8A`, which
+ * is the `ActorPlayHitVoice` call after it.)
  *
  * So both primitives that write that track end the one-shot, which is the
  * whole of **B5**: `ZombieOnShot` (`FUN_00453EB0`) sets state 6 on the frame
@@ -149,6 +157,75 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
   obj.motion = motion;
   obj.playTicks = FrameToTicks(Math.max(0, frame), m);
   obj.rootFrame = -1;
+}
+
+/**
+ * `[port-only]` — `ActorSetMotionBlended`'s (`FUN_004119A0`) body on the
+ * one-shot channel, {@link Actor.action}, with `start` in the engine's own unit:
+ * a **play cursor**, as the engine takes it.
+ *
+ * The engine has one track, and class 0x31's arc plays its three stages on it:
+ * `ActorArcStep` (`FUN_0044D860`) makes the call directly, not through
+ * {@link SetCurrentActorMotionBlended} -- `CALL 0x004119a0` at `0x0044D901`,
+ * `0x0044D94D` and `0x0044D9C9`, each with the stage's `{motion, start, fade}`.
+ * The port keeps those stages on `obj.action`, and what the call does to the
+ * cursor has to come with them:
+ *
+ * ```
+ * 004119a0  track[2] = start; track[6] = start / 2        ; obj+0x19C, outright
+ *           track[10] = track[0] - 1; track+0x30 = fade + 1
+ *           track+0x37 = (track+0x37 & 0xDF) | 1           ; the fade bit
+ * 004111a0  while bit 0 is up the cursor is NOT recomputed from the counter;
+ *           when counter - track[10] reaches fade + 2:
+ *             track[0] = track[2] + 1; bit 0 down          ; plays on from start+1
+ * ```
+ *
+ * So a routine reading `obj+0x19C` sees the start frame for the whole fade, and
+ * every threshold the arc script and the attack entries name is measured
+ * against that. The port's channel used to start the clip running at once, so
+ * a stage change consumed its start frame unseen: `ThrowerStateDelayedPounce`'s
+ * `cursor > 66` test fired first at 68, because stage 2 started at 67 on the
+ * frame the cursor reached 66.
+ *
+ * The fade is the actor's own ({@link ActorStartFade}), out of whatever is on
+ * screen -- the one-shot if one is running, as {@link ActorEndOneShot} takes
+ * it, else the base clip or the fade already dissolving from it, as
+ * {@link ActorSetMotionBlended} does -- and `held` has `ActorAdvanceMotion`
+ * hold this clip through it rather than the base. The hold is the base
+ * track's, `fade + 1` frames on the start frame counting the frame of the
+ * call; see {@link ActorRestartFade}. That is the engine's count of **draws**
+ * on the start frame. Its states see it once more, `fade + 2` times, because
+ * `EnemyThrowerUpdate` runs the state before `ThrowerAdvanceMotion` draws --
+ * and `EnemyZombieUpdate` (`FUN_004533F0`) its state at `0x00453434` before
+ * `ZombieAdvanceMotion` at `0x00453457`, for the swing `ZombieStateStrike`
+ * sets through this, whose hit waits `fade + 1` frames on it -- so
+ * a state reads the cursor the previous frame's draw computed -- where the
+ * port advances its clocks before its states. That puts every cursor a port
+ * state reads one tick ahead of the engine's on every frame but the one that
+ * set it, held or not; it is the port's phase, not this channel's.
+ *
+ * [diverges] `track+0x30` is a byte, and a fade of `0x7F` stores `0x80`: read
+ * back as `s8` the hold's limit is `-127`, so the engine drops the bit on the
+ * first draw and recomputes the cursor from a counter this call never reset.
+ * The channel keeps no counter apart from its cursor, so this holds `0x80`
+ * frames instead. Only the arc's fits can produce a fade that large --
+ * `FitArcScriptByFadeLength` clamps at `0x7F`, and zstin's
+ * `FitArcScriptByStartFrame` does not clamp at all, so it can go past -- and
+ * either only for a leap of about 250 frames or more, which no shipped spawn
+ * has been shown to make. `[open]` whether one does.
+ */
+export function ActorSetOneShotBlended(obj: Actor, motion: number,
+                                       start: number, fade: number): void {
+  const act = obj.action;
+  if (act) {
+    ActorStartFade(obj, act.motion, act.ticks, fade);
+  } else if (obj.fadeFrom && obj.fade > 0) {
+    ActorRestartFade(obj, fade);
+  } else {
+    ActorStartFade(obj, obj.motion, obj.playTicks, fade);
+  }
+  obj.action = { motion, ticks: start, loop: false, held: true };
+  obj.rootActionFrame = -1;
 }
 
 /**

@@ -23,6 +23,7 @@ import { sourceOf } from "./bundles";
 import type { StageSlot } from "./bundles";
 import { StageScene } from "../render/stagescene";
 import { CamPaths } from "../game/camera/curve";
+import { SetCameraPaths } from "../game/tables";
 import { RailLayer } from "../render/overlays";
 import { attachTo, ownResources } from "../render/scope3d";
 import { Walker } from "../script/walker";
@@ -112,6 +113,9 @@ export async function loadStageInto(p: Player): Promise<void> {
   const bundle = await loadStage(src, entry);
   if (superseded()) return;
   p.paths = new CamPaths(bundle.cam);
+  // The same curves, for the port's `CamEvalPath7`: every camera routine in
+  // `game/camera/` evaluates them there, with no renderer attached.
+  SetCameraPaths(p.paths);
   const scene3d = await StageScene.load(bundle.geometryUrl, bundle.script);
   // A bundle read out of the browser's own cache hands over a `blob:` URL, and
   // a 58 MB blob nothing revokes is 58 MB the tab keeps until it closes. The
@@ -187,6 +191,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // measures against.
   p.slotModels.adopt(p.scene3d.root);
   p.chars.slotModels = p.slotModels;
+  // ...and the canal water, which draws the stage's own tiles where it has
+  // them and clones the rest from the same rig.
+  p.waterSurfaces.scene = p.scene3d;
+  p.waterSurfaces.templates = p.slotModels;
+  p.waterSurfaces.textures = p.texFilter;
+  p.waterSurfaces.props = p.breakables;
   // ...and once more for the shot effects. `chars` owns the bones, and the
   // blood is glued to one for its whole life -- see `render/effects.ts`.
   p.effects.adopt(p.scene3d.root);
@@ -231,7 +241,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // No seed: the walker draws no random numbers. `?seed=` reseeds the world's
   // generator, `p.rng`, a few lines above -- which is the only random source
   // in the player.
-  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script));
+  // `branchPause` is the sidebar's debug aid, read at every branch; the
+  // toggles above were applied before this walker existed.
+  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script),
+                        { branchPause: p.toggles.branchPause });
   p.script.walker = p.walker;
 
   // The dialogue table for the stage. The walker carries the group; the words
@@ -246,6 +259,10 @@ export async function loadStageInto(p: Player): Promise<void> {
     return s ? { w: s.w, h: s.h, url: s.png } : null;
   };
   p.deepSprites.images = p.hudLayer.spriteImages;
+  // `SoundStopAll` (`FUN_0041D350`) -- what `MarkSceneOver` and
+  // `ResetGameOnStart` both call on the way into the next scene -- so the
+  // last stage's music, voice and SE do not carry over into this one.
+  p.bgm.stopAll();
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);
@@ -274,11 +291,13 @@ export async function loadStageInto(p: Player): Promise<void> {
   }
 
   applyIncomingState(p);
-  // No `bgm_entry_play` in any stage script starts the stage's own track --
-  // they only switch to boss and transition music -- so the opening track
-  // is started here and labelled as not script-driven.
-  const st = bundle.script.bgm?.stage_track;
-  if (st) p.bgm.play(st.id, "stage");
+  // Nothing starts the music here. Every stage script starts its own track
+  // at step 2 of each entry block: stages 1-4 and 6 with a `se_play` of it,
+  // stage 5 with a `bgm_entry_play`. This used to play the bundle's
+  // `stage_track` at load "by convention", on the belief that no script did
+  // -- a belief that had looked only at `bgm_entry_play` -- so the music
+  // opened a step early and the script's own `se_play` of the same track,
+  // which in the engine starts it from the top, found it already playing.
   p.setLoading(null);
   // The bundle screen's picker shows a frame of each stage, and this is the
   // **fallback** ask: a few frames along, so the script has placed the camera
@@ -368,6 +387,10 @@ function applyIncomingState(p: Player): void {
     // camera command, so opening there is a truthful black screen. Prime to
     // where the stage actually starts instead.
     w.primeToFirstWait();
+    // No frame has run here either, and the letterbox is drawn from what
+    // `HudDrawShutterState` recorded on one -- so without this a stage that
+    // opens paused showed no bars over what the engine draws shut.
+    PlayerTasksDrawWithoutAFrame();
     p.syncCameraToWalker(true);
   }
   if (p.state.all) {

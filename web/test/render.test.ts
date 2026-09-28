@@ -1015,6 +1015,83 @@ console.log("\nrigs: the boat the port's actor poses");
   void G;
 }
 
+console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
+{
+  // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2
+  // block 0 step 1. `obj_452320` is `St2CarDraw` (`FUN_00452320`); its object
+  // is the task `St2CarSpawn` (`FUN_00452120`) allocates, and the one caller
+  // is `RescueTargetInit` (`FUN_00451720`) -- class 0x21's spawn, a step
+  // later. The rig's three roots are exported at the origin, which is where
+  // Goldman's desk is, and this layer drew the first of them from load.
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { St2CarSpawn, St2CarsTick } = await import("../src/game/class21/car");
+  const { NULL_HOST } = await import("../src/game/host");
+  ResetGameGlobals();
+  const route = (slot: number, cam: number) => ({
+    slot, bias: [0, 0, 0] as [number, number, number], cam_paths: [cam],
+    file: null, index: null, duration: null, length: 200, hold_frame: null,
+    stop_frame: null, note: "",
+  });
+  const RIGS = {
+    rigs: [{ name: "obj_452320", routine: "FUN_00452320", note: "",
+             spawn_ats: null,
+             routes: [route(328, 56), route(334, 57), route(333, 58)] }],
+    blocked: [], note: "",
+  };
+  const root = new Group();
+  const roots = [328, 333, 334].map((slot) => {
+    const g = new Group();
+    g.userData = { hod2_kind: "rig", hod2_rig: "obj_452320",
+                   hod2_routine: "FUN_00452320", hod2_path_slot: slot };
+    root.add(g);
+    return g;
+  });
+  const rigs = new RigLayer();
+  const key = (v: number) => [[0, v, 0, 0], [400, v, 0, 0]];
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {},
+    object_paths: { "328": { channels: { pos_x: key(-1669), pos_y: key(-8),
+                                         pos_z: key(-158) },
+                             file: "op_st2", index: 0, start: 0,
+                             duration: 400 } },
+  } as never));
+  const at = (slot: number, frame: number) => ({
+    walker: { cam: { slot, frame }, spawns: [] },
+  }) as unknown as Parameters<typeof rigs.update>[0];
+  const shown = () => roots.filter((r) => r.visible).length;
+
+  rigs.update(at(55, 35));
+  check("on the Goldman shot, with no car task, no root is drawn",
+        shown() === 0, `${shown()} shown`);
+  rigs.update(at(56, 30));
+  check("...nor on the car's own shot: the route does not make the car",
+        shown() === 0, `${shown()} shown`);
+
+  const car = St2CarSpawn(0);
+  rigs.update(at(56, 30));
+  check("a task that has not yet run is not drawn either", shown() === 0);
+  G.g_active_cam_path = 0x38;
+  G.g_cam_path_frame = 30;
+  St2CarsTick({ ...NULL_HOST,
+                objectPath: () => ({ x: -1457, y: -6, z: -339,
+                                     pitch: 0, yaw: 0x4000, roll: 0 }) });
+  rigs.update(at(56, 30));
+  check("once it has drawn, exactly one root is",
+        shown() === 1 && car.drawn, `${shown()} shown`);
+  const r = roots.find((g) => g.visible)!;
+  check("...at the pose the task wrote",
+        r.position.x === -1457 && r.position.y === -6 && r.position.z === -339,
+        `${r.position.x},${r.position.y},${r.position.z}`);
+  const fwd = new Vector3(0, 0, 1).applyQuaternion(r.quaternion);
+  check("...turned by its yaw (a quarter turn takes +z to +x)",
+        Math.abs(fwd.x - 1) < 1e-6 && Math.abs(fwd.z) < 1e-6,
+        `${fwd.x},${fwd.z}`);
+  G.g_st2_cars = [];
+  rigs.update(at(57, 100));
+  check("...and none once the task has killed itself", shown() === 0);
+  ResetGameGlobals();
+}
+
 console.log("\nthe object-path seam carries six values");
 
 {
@@ -1599,6 +1676,52 @@ console.log("\nthe shot effects are models, one per frame:");
   layer.update(ctx);
   check("a record that has expired takes its node with it",
         layer.describe.startsWith("0 drawn"), layer.describe);
+  ResetGameGlobals();
+}
+
+
+console.log("\nthe water ring is drawn from its record alone:");
+{
+  const root = new Obj3D();
+  const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  part.name = "slots_effect_fixed000_slot_0e23";
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // `WaterRingUpdate` (`FUN_00456880`): `T(pos) Scale(s, 0.2, s)` and the
+  // record's alpha, in the world's own layer.
+  G.g_water_rings.push({
+    id: 2, pos: { x: 1, y: 0, z: 2 }, size: 1.5, growth: 0.02, alpha: 0.25,
+    frames: 45, slot: 0xe23,
+  });
+  layer.update(ctx);
+  const water = layer.group.children[0] as InstanceType<typeof Mesh>
+    | undefined;
+  const e = water?.matrix.elements ?? [];
+  const ws = [Math.hypot(e[0]!, e[1]!, e[2]!), Math.hypot(e[4]!, e[5]!, e[6]!),
+              Math.hypot(e[8]!, e[9]!, e[10]!)];
+  check("a water ring is its size across and 0.2 high, at its point",
+        water !== undefined && Math.abs(ws[0]! - 1.5) < 1e-6
+        && Math.abs(ws[1]! - Math.fround(0.2)) < 1e-6
+        && Math.abs(ws[2]! - 1.5) < 1e-6 && e[12] === 1 && e[14] === 2,
+        JSON.stringify(ws));
+  const mat = water?.material as InstanceType<typeof MeshBasicMaterial>;
+  check("...at the record's alpha",
+        mat?.transparent === true && Math.abs(mat.opacity - 0.25) < 1e-6,
+        `${mat?.opacity}`);
+  check("...drawn in the world's order, not over it",
+        water?.renderOrder === 0, `${water?.renderOrder}`);
+  G.g_water_rings.length = 0;
+  layer.update(ctx);
+  check("and a ring that has gone takes its node with it",
+        layer.group.children.length === 0,
+        `${layer.group.children.length}`);
   ResetGameGlobals();
 }
 
@@ -2300,6 +2423,12 @@ console.log("\nthe player's character survives its own op 10:");
  * spheres, so a bat had no hit test at all and could not be shot. Reported
  * from play, and it is a bug this file could have caught: `pickShot` had no
  * test of its own.
+ *
+ * The bat has since moved to the engine's own registration
+ * (`ClassHandler.registersForShotTest`, `game/class46/`), so this pick passes
+ * it by; it is still the vehicle here because its type is the one with no
+ * sphere, and the flag is lifted for the length of the test to exercise the
+ * arm every class that does not register still takes.
  */
 console.log("\nthe shot: a character with no bone sphere is one sphere");
 {
@@ -2313,6 +2442,12 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   // The real `PlaceBats`, so the radius under test is the one the class
   // actually writes and not one this file made up.
   await import("../src/game/classes");
+  const { g_class_handlers } = await import("../src/game/registry");
+  const h = g_class_handlers[SpawnClass.Bat]!;
+  const registers = h.registersForShotTest;
+  check("the bat registers for the shot test the engine's way",
+        registers === true);
+  delete h.registersForShotTest;
 
   // Character type 0x1E as the exporter emits it: one bone, one slot, and no
   // `hit_radius` at all, because the EXE's row for it is zero.
@@ -2405,8 +2540,6 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   // A class that registers the engine's way is `game/combat/shot_test.ts`'s:
   // this pick passes it by, registered or not, so the one answer it gets is
   // the one its own registration earns.
-  const { g_class_handlers } = await import("../src/game/registry");
-  const h = g_class_handlers[SpawnClass.Bat]!;
   h.registersForShotTest = true;
   check("a class that registers the engine's way is not picked here",
         chars.pickShot(ray(0, 1)) === null,
@@ -2414,6 +2547,7 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   delete h.registersForShotTest;
   check("...and is again once it stops", chars.pickShot(ray(0, 1))?.kind
         === "actor");
+  h.registersForShotTest = registers;
 
   stage.dispose();
   G.g_object_list.length = 0;
@@ -2433,6 +2567,52 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
  *   through `readySpawns`, or the wing is a hierarchy that never learns what
  *   it draws and a bat has no wings.
  */
+console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
+{
+  // `EnemyThrowerInit` writes `obj+0x1FC = 1` (`c686fc01000001` at
+  // `0x004496A2`), and `SkeletonApplyRootMotion`'s draw tail takes arm 1 of
+  // the jump table at `0x00411038`: `T; RotX; RotZ; RotY`. Built here with
+  // the port's own transcriptions of those four calls, and compared element
+  // by element against the node -- three unequal angles, so a wrong order, a
+  // wrong axis or a dropped angle each move some element.
+  const { placeThrowerRoot } = await import("../src/render/characters/thrower");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  } = await import("../src/game/matrix");
+  const { Object3D } = await import("three");
+  type Inst = Parameters<typeof placeThrowerRoot>[0];
+
+  const a = makeActor(59548, SpawnClass.Thrower, 0x19, "zstin");
+  a.pos = { x: -830.3, y: 163.9, z: -1289.8 };
+  a.pitch = 0x1234; a.yaw = 0xc000; a.roll = 0xb000;
+  const inst = { a, root: new Object3D() } as unknown as Inst;
+  const placed = placeThrowerRoot(inst);
+  inst.root.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, a.pos.x, a.pos.y, a.pos.z);
+  MatrixRotateX(want, a.pitch);
+  MatrixRotateZ(want, a.roll);
+  MatrixRotateY(want, a.yaw);
+  const got = inst.root.matrix.elements;
+  const worst = Math.max(...want.map((v, i) => Math.abs(v - got[i])));
+  check("a thrower's root is T * Rx(pitch) * Rz(roll) * Ry(yaw)",
+        placed && worst < 1e-4, `placed ${placed}, worst element ${worst}`);
+
+  // The wall-climber on its wall: its own up (+Y) points out of the wall,
+  // toward +X, and its forward (-Z) points down it.
+  a.pitch = 0; a.yaw = 0xc000; a.roll = 0xc000;
+  placeThrowerRoot(inst);
+  inst.root.updateMatrix();
+  const e = inst.root.matrix.elements;
+  check("stage 2's zstin lies on its wall: up is +X, forward is down",
+        Math.abs(e[4] - 1) < 1e-6 && Math.abs(e[9] - 1) < 1e-6,
+        `up (${e[4]}, ${e[5]}, ${e[6]}) back (${e[8]}, ${e[9]}, ${e[10]})`);
+
+  const z = makeActor(0x30, SpawnClass.Zombie, 1, "zombie");
+  check("...and any other class is left to the ordinary arm",
+        !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
+}
+
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 {
   const { CharacterLayer } = await import("../src/render/characters");
@@ -2511,6 +2691,188 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 
   stage.dispose();
   G.g_object_list.length = 0;
+}
+
+/**
+ * The scatter's and the swarm's members, and their wings: **runtime children**
+ * of a placer, drawn from synthetic rows at the address the port's placer
+ * gives each one (`BatChildAt`, `BatWingAt`), parented to the placer's own
+ * row. `PlaceBats` makes every object and the layer adopts them -- which is
+ * the whole of the change that makes sub-types 1 and 2 visible.
+ *
+ * And the wing's seat, against the renderer rather than against itself:
+ * `BatWingUpdate` builds the body's node matrix in `game/` the way the draw
+ * builds it, and the check is that the point it seats the wing at is where the
+ * pose this layer made puts `(0, 1, 2)` -- rotation order, signs, the root
+ * record's half-turn and the 0.6 model scale all at once.
+ */
+console.log("\nthe bat's runtime children: rows at the placer's addresses");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D, Vector3, Matrix4 } = await import("three");
+  const { BatChildAt, BatUpdate, BatWingAt } =
+    await import("../src/game/class46");
+  const { BatState, BatSubtype } = await import("../src/game/class46/state");
+  await import("../src/game/classes");
+
+  // One frame of `bat.bin` 1031's real shape: the root record is a half-turn
+  // about y, tipped by 3679 about x, and the root sits 0.4 low.
+  const BODY_CLIP = { bank: "z", frames: 1, fps: 30, root: [0, -0.4, 0],
+                      rot: [3679, 32767, 0, 0, 0, 0] };
+  const WING_CLIP = { bank: "z", frames: 1, fps: 30, root: [0, 0, 0],
+                      rot: [0, 0, 0, 0, 0, 0] };
+  const BODY = {
+    type: 0x1e, name: "zabat", file: "zabat.bin", bone_count: 2,
+    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
+              parent: null }],
+    motions: { "1031": BODY_CLIP },
+  };
+  const WING = {
+    type: 0x1f, name: "zabat_wing", file: "zabat_wing.bin", bone_count: 2,
+    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    bones: [{ bone: 1, part: "bone01_1b03", slot: 0x1b03,
+              offset: [0, 1.674, -0.7731], parent: null }],
+    motions: { "1030": WING_CLIP },
+  };
+  const PLACER = 0x3190;
+  const rows: Record<string, unknown>[] = [
+    { at: PLACER, class: 0x46, char_type: 0x1e, motion: 1031, hp: 1, yaw: 0,
+      class46: { subtype: 1, group: 0, member: 0 } },
+  ];
+  for (let i = 0; i < 25; i += 1) {
+    const body = BatChildAt(PLACER, BatSubtype.Scatter, i);
+    rows.push({ at: body, class: 0x46, char_type: 0x1e, motion: 1031, hp: 0,
+                yaw: 0, parent_at: PLACER, synthetic: true });
+    rows.push({ at: BatWingAt(body), class: 0x46, char_type: 0x1f,
+                motion: 1030, hp: 0, yaw: 0, parent_at: PLACER,
+                synthetic: true });
+  }
+  const CHARS = { types: { "30": BODY, "31": WING }, placements: rows };
+
+  const root = new Object3D();
+  let n = 0;
+  for (const r of rows) {
+    const wing = r.char_type === 0x1f;
+    const name = `chr_${wing ? "zabat_wing" : "zabat"}_spawn`
+      + String(n++).padStart(3, "0");
+    const rig = new Object3D();
+    rig.name = name;
+    rig.userData = { hod2_kind: "rig", hod2_rig: name.replace(/_spawn\d+$/, ""),
+                     hod2_spawn_at: r.at };
+    const bone = new Object3D();
+    bone.name = `${name}_bone01_${wing ? "1b03" : "1b01"}`;
+    if (wing) bone.position.set(0, 1.674, -0.7731);
+    rig.add(bone);
+    root.add(rig);
+  }
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_players_in_play = 1;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  const listed = [{ at: PLACER }];
+  const ready = chars.readySpawns(listed);
+  check("every member's row and every wing's is wanted with the placer's",
+        ready.length === 51, `${ready.length}`);
+  const made = SpawnScriptedCharacters(ready);
+  check("...but only the placer is spawned from its row",
+        made.length === 1 && made[0].at === PLACER,
+        made.map((m) => m.at.toString(16)).join(","));
+  chars.syncSpawns(listed, made);
+  const adopted = new Set(chars.actors.map((a) => a.at));
+  const want = rows.slice(1).map((r) => r.at as number);
+  check("...and the layer adopted all twenty-five bats and their wings",
+        want.every((at) => adopted.has(at)),
+        `${want.filter((at) => adopted.has(at)).length} of ${want.length}`);
+  check("...and none of them twice",
+        chars.actors.length === new Set(chars.actors.map((a) => a.at)).size,
+        `${chars.actors.length}`);
+
+  // Put member 0 somewhere a sign or an axis would show (L48), tumbling as a
+  // corpse does, and seat its wing.
+  const bat = (a: unknown) => (a as { bat: { state: number } }).bat;
+  const body = G.g_object_list.find((o) => o.at === want[0])!;
+  const wing = G.g_object_list.find((o) => o.at === want[1])!;
+  body.pos.x = 12; body.pos.y = -8; body.pos.z = -3600;
+  body.yaw = 0x4000; body.pitch = 0x3000; body.roll = 0;
+  BatUpdate(wing, { host: {} } as never);
+  chars.update({} as never);
+  const m = new Matrix4();
+  const e: number[] = new Array(16).fill(0);
+  check("the body is posed", chars.boneMatrix(body.at, 1, e),
+        BatState[bat(body).state] ?? "");
+  m.fromArray(e);
+  const seat = new Vector3(0, 1, 2).applyMatrix4(m);
+  check("the wing sits where the drawn body puts (0, 1, 2)",
+        seat.distanceTo(new Vector3(wing.pos.x, wing.pos.y, wing.pos.z))
+          < 1e-3,
+        `${seat.toArray().map((v) => v.toFixed(3))} vs `
+        + `${[wing.pos.x, wing.pos.y, wing.pos.z].map((v) => v.toFixed(3))}`);
+  const scaleOf = (el: number[]) =>
+    Math.hypot(el[0], el[1], el[2]);
+  check("...and the body is drawn at its model's 0.6",
+        Math.abs(scaleOf(e) - 0.6) < 1e-4, scaleOf(e).toFixed(4));
+  chars.boneMatrix(wing.at, 1, e);
+  check("...and the wing at its 0.7",
+        Math.abs(scaleOf(e) - 0.7) < 1e-4, scaleOf(e).toFixed(4));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
+ * `BatSplashUpdate` (`FUN_0042F930`)'s draw: `common.bin` 307..336, one a
+ * frame, under a bare translation at the water plane.
+ */
+console.log("\nthe bat's splash: thirty models, one a frame, on the water");
+{
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { BatSplashesTick, SpawnBatSplash } =
+    await import("../src/game/class46/splash");
+  const root = new Obj3D();
+  for (let slot = 0x1339; slot <= 0x1356; slot += 1) {
+    const part = new Obj3D();
+    part.name =
+      `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(part);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  SpawnBatSplash(-400, -31.5, -3620);
+  BatSplashesTick();
+  layer.update(ctx);
+  const node = layer.group.children[0];
+  check("a splash is one node in the world, on its first model",
+        layer.group.children.length === 1
+        && !!node?.name.endsWith("slot_1339"),
+        `${layer.group.children.length} ${node?.name}`);
+  check("...at the corpse's x and z and the plane's y, unturned, full size",
+        node?.position.x === -400 && node.position.y === -25
+        && node.position.z === -3620 && node.quaternion.w === 1
+        && node.scale.x === 1, `${node?.position.toArray()}`);
+  for (let i = 0; i < 29; i += 1) BatSplashesTick();
+  layer.update(ctx);
+  check("...and on its thirtieth, the last",
+        !!layer.group.children[0]?.name.endsWith("slot_1356"),
+        layer.group.children[0]?.name ?? "none");
+  BatSplashesTick();
+  layer.update(ctx);
+  check("...and then nothing", layer.group.children.length === 0
+        && G.g_bat_splashes.length === 0, `${layer.group.children.length}`);
 }
 
 // -- class 0x40's sheet ------------------------------------------------------
@@ -2659,6 +3021,220 @@ console.log("\nthe gun lights are built off the camera this frame draws:");
         quads[1]?.material.depthFunc === LessEqualDepth,
         `${quads[1]?.material.depthFunc}`);
   g.g_screen_sprite_draws = [];
+}
+
+// The two passes and the translucent order: `render/draw_order.ts`.
+// `TranslatePvr2StateToD3D` (`FUN_004A7780`) decides a mesh's composite state
+// from its ISP and TSP words; `RenderCommandCompare` (`FUN_004A8A20`) orders
+// the commands `WalkMeshChainAndDraw` (`FUN_004A7EF0`) deferred.
+console.log("\nthe engine's two passes, and the translucent order");
+{
+  const three = await import("three");
+  const {
+    applyPvr2DrawState, applyForcedAlphaBlend, copyDrawState,
+    prepareDrawCommands, RenderCommandOrder, ALPHA_REF, DRAW_LAYER_7_ORDER,
+  } = await import("../src/render/draw_order");
+  const { setSlotAlpha } = await import("../src/render/boss3_effects");
+
+  const hex = (v: number) =>
+    `0x${(v >>> 0).toString(16).toUpperCase().padStart(8, "0")}`;
+  /** A material as `GLTFLoader` delivers an exported one. */
+  const exported = (isp: number, tsp: number, blend = true) => {
+    const m = new MeshBasicMaterial({
+      transparent: blend, depthWrite: !blend });
+    m.userData = { pvr2: { isp_tsp_instruction: hex(isp),
+                           tsp_instruction: hex(tsp) } };
+    return m;
+  };
+
+  // The stage-2 car's body shell: `char_adv04` mesh 0.
+  const body = exported(0x83000000, 0x94000463);
+  applyPvr2DrawState(body, { isp: 0x83000000, tsp: 0x94000463 });
+  check("a translucent mesh is in the second pass: transparent",
+        body.transparent === true);
+  check("...and writes depth: ISP bit 26 is clear in every mesh in the game",
+        body.depthWrite === true, `${body.depthWrite}`);
+  check("...compared LESSEQUAL: g_ZFuncTable[4] is D3DCMP_LESSEQUAL",
+        body.depthFunc === three.LessEqualDepth, `${body.depthFunc}`);
+  check("...blended with its own factors, SRCALPHA / INVSRCALPHA",
+        body.blending === three.CustomBlending
+        && body.blendSrc === three.SrcAlphaFactor
+        && body.blendDst === three.OneMinusSrcAlphaFactor,
+        `${body.blending} ${body.blendSrc} ${body.blendDst}`);
+  check("...and alpha-tested at ALPHAREF 1 of 255",
+        ALPHA_REF === 1 && Math.abs(body.alphaTest - 1 / 255) < 1e-9,
+        `${body.alphaTest}`);
+
+  // src 4, dst 1: an effect. `GLTFLoader` had drawn these as ordinary blends.
+  const glow = exported(0x83000000, 0x84000463);
+  applyPvr2DrawState(glow, { isp: 0x83000000, tsp: 0x84000463 });
+  check("an additive mesh (src_alpha / one) adds: the stage-6 blades glow",
+        glow.blendSrc === three.SrcAlphaFactor
+        && glow.blendDst === three.OneFactor, `${glow.blendDst}`);
+  // src 3, dst 0: `boss6`'s 54 meshes. g_SrcBlendTable[3] is INVDESTCOLOR.
+  const inv = exported(0x83000000, 0x60000463);
+  applyPvr2DrawState(inv, { isp: 0x83000000, tsp: 0x60000463 });
+  check("src 3 is INVDESTCOLOR, not INVSRCCOLOR: the tables differ there",
+        inv.blendSrc === three.OneMinusDstColorFactor
+        && inv.blendDst === three.ZeroFactor,
+        `${inv.blendSrc} ${inv.blendDst}`);
+
+  const wall = exported(0x83000000, 0x2008045B, false);
+  applyPvr2DrawState(wall, { isp: 0x83000000, tsp: 0x2008045B });
+  check("an opaque mesh is in the first pass, unblended and untested",
+        wall.transparent === false && wall.alphaTest === 0
+        && wall.depthWrite === true, `${wall.transparent} ${wall.alphaTest}`);
+  // `pol_zndina`'s ten: list type 2, blend one/one, but the TSP pass bits say
+  // opaque -- and the pass bits are what `WalkMeshChainAndDraw` reads.
+  const listed = exported(0x83000000, 0x24080000, true);
+  applyPvr2DrawState(listed, { isp: 0x83000000, tsp: 0x24080000 });
+  check("the pass is the TSP's (tsp & 0x180000) == 0x80000, not the list type",
+        listed.transparent === false, `${listed.transparent}`);
+  const nowrite = exported(0x87000000, 0x94000463);
+  applyPvr2DrawState(nowrite, { isp: 0x87000000, tsp: 0x94000463 });
+  check("ISP bit 26 set would turn the depth write off (no shipped mesh does)",
+        nowrite.depthWrite === false);
+  const always = exported(0xE3000000, 0x94000463);
+  applyPvr2DrawState(always, { isp: 0xE3000000, tsp: 0x94000463 });
+  check("compare mode 7 is D3DCMP_ALWAYS", always.depthFunc === three.AlwaysDepth,
+        `${always.depthFunc}`);
+
+  // A Lambert twin is built by constructor, not by clone.
+  const twin = new three.MeshLambertMaterial();
+  copyDrawState(glow, twin);
+  check("a lighting twin carries the factors and depth function",
+        twin.blendDst === three.OneFactor && twin.depthFunc === glow.depthFunc
+        && twin.alphaTest === glow.alphaTest);
+
+  // `DrawModelWithForcedAlphaBlend` (`FUN_004A8440`): TSP forced to
+  // SRCALPHA/INVSRCALPHA, the mesh's own base alpha times the command's.
+  const faded = glow.clone();
+  applyForcedAlphaBlend(faded, 0.5, 0.8);
+  check("a fading draw blends SRCALPHA/INVSRCALPHA, additive or not",
+        faded.transparent && faded.blendDst === three.OneMinusSrcAlphaFactor);
+  check("...at its base alpha times the draw's, not the draw's alone",
+        Math.abs(faded.opacity - 0.4) < 1e-9, `${faded.opacity}`);
+  check("...and still writes depth: the ISP word is not rewritten",
+        faded.depthWrite === true);
+  const slotNode = new Mesh(new PlaneGeometry(1, 1), exported(
+    0x83000000, 0x94000463));
+  (slotNode.material as InstanceType<typeof MeshBasicMaterial>).opacity = 0.6;
+  setSlotAlpha(slotNode, 0.5);
+  check("setSlotAlpha fades from the mesh's base alpha",
+        Math.abs((slotNode.material as InstanceType<typeof MeshBasicMaterial>)
+          .opacity - 0.3) < 1e-9);
+  setSlotAlpha(slotNode, 0.25);
+  check("...every frame, not from the last frame's",
+        Math.abs((slotNode.material as InstanceType<typeof MeshBasicMaterial>)
+          .opacity - 0.15) < 1e-9);
+
+  // ---- the order ---------------------------------------------------------
+  // Commands as the loader delivers them: a node Group of primitive Meshes,
+  // each primitive's glTF extras on its geometry.
+  const assoc = new Map<object, { nodes?: number }>();
+  let nodeIndex = 0;
+  const prim = (chain: number, pass: "opaque" | "translucent",
+                sphere: number[], model = 0) => {
+    const g = new PlaneGeometry(0.1, 0.1);
+    g.userData = { hod2_pass: pass, hod2_chain_index: chain,
+                   hod2_model: model, hod2_sphere: sphere };
+    const m = new Mesh(g, pass === "opaque"
+      ? exported(0x83000000, 0x2008045B, false)
+      : exported(0x83000000, 0x94000463));
+    assoc.set(m, {});
+    return m;
+  };
+  const command = (z: number, prims: InstanceType<typeof Mesh>[]) => {
+    const n = new Group();
+    n.position.set(0, 0, z);
+    for (const p of prims) n.add(p);
+    assoc.set(n, { nodes: nodeIndex++ });
+    return n;
+  };
+  const root = new Group();
+  // Near: origin at -10, one translucent mesh on it.
+  const near = command(-10, [prim(0, "translucent", [0, 0, 0, 1])]);
+  // Far: origin at -50.
+  const far = command(-50, [prim(0, "translucent", [0, 0, 0, 1])]);
+  // Deep: origin at -5 -- nearer than `near` -- but a translucent mesh 95
+  // units behind it, which is the command's farthest point.
+  const deep = command(-5, [prim(0, "translucent", [0, 0, -95, 1])]);
+  // Walk: two translucent meshes whose chain order is the reverse of their
+  // depth order.
+  const walkFar = prim(0, "translucent", [0, 0, -30, 1]);
+  const walkNear = prim(1, "translucent", [0, 0, 5, 1]);
+  const walk = command(-20, [walkFar, walkNear]);
+  // Culled: an opaque mesh wholly outside the frustum at z -400 lowers the
+  // depth; a visible opaque one at the same z does not.
+  const culled = command(-30, [prim(0, "translucent", [0, 0, 0, 1]),
+                               prim(1, "opaque", [5000, 0, -370, 1])]);
+  const seen = command(-30, [prim(0, "translucent", [0, 0, 0, 1]),
+                             prim(1, "opaque", [0, 0, -370, 1])]);
+  root.add(near, far, deep, walk, culled, seen);
+  prepareDrawCommands(root, assoc);
+  check("a primitive of a multi-primitive node is marked, the node is not",
+        near.children[0]!.userData.hod2Primitive === true
+        && near.userData.hod2Primitive === undefined);
+  root.updateMatrixWorld(true);
+
+  const cam = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  cam.updateMatrixWorld(true);
+  const order = new RenderCommandOrder(cam);
+  order.beginFrame();
+  let id = 0;
+  const item = (o: InstanceType<typeof Obj3D>, renderOrder = 0,
+                groupOrder = 0) => ({
+    id: id++, object: o, groupOrder, renderOrder, z: 0,
+    geometry: null, material: null, program: null, group: null,
+  }) as unknown as Parameters<typeof order.compare>[0];
+  const sorted = (items: ReturnType<typeof item>[]) =>
+    items.slice().sort(order.compare).map((i) => i.object);
+
+  const a = item(near.children[0]!), b = item(far.children[0]!);
+  check("commands go nearest first: the comparator sorts eye z descending",
+        sorted([b, a])[0] === near.children[0]);
+  check("a command's depth is its farthest skipped mesh, not its origin",
+        Math.abs(order.key(deep.children[0]!).depth - -100) < 1e-6
+        && sorted([item(deep.children[0]!), a])[0] === near.children[0],
+        `${order.key(deep.children[0]!).depth}`);
+  check("a command's own meshes go in chain order, whatever their depths",
+        sorted([item(walkNear), item(walkFar)])[0] === walkFar);
+  check("an opaque mesh outside the frustum lowers the depth (pass 0 skips it)",
+        Math.abs(order.key(culled.children[0]!).depth - -400) < 1e-6,
+        `${order.key(culled.children[0]!).depth}`);
+  check("...and one inside it does not",
+        Math.abs(order.key(seen.children[0]!).depth - -30) < 1e-6,
+        `${order.key(seen.children[0]!).depth}`);
+  check("the layer comes before the depth", sorted([
+    item(near.children[0]!, 0), item(far.children[0]!, DRAW_LAYER_7_ORDER),
+  ])[0] === far.children[0]);
+  const label = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  label.position.set(0, 0, -1);
+  check("the player's own meshes follow the commands of their layer",
+        sorted([item(label), item(far.children[0]!)])[0] === far.children[0]);
+
+  // A rig part that draws two slots is two commands on one node.
+  const twoA = prim(0, "translucent", [0, 0, -100, 1], 0);
+  const twoB = prim(1, "translucent", [0, 0, 0, 1], 1);
+  const two = command(-10, [twoA, twoB]);
+  root.add(two);
+  prepareDrawCommands(two, assoc);
+  root.updateMatrixWorld(true);
+  order.beginFrame();
+  check("hod2_model splits one node into two commands, each keyed apart",
+        order.key(twoA).cmd !== order.key(twoB).cmd
+        && Math.abs(order.key(twoA).depth - -110) < 1e-6
+        && Math.abs(order.key(twoB).depth - -10) < 1e-6
+        && sorted([item(twoA), item(twoB)])[0] === twoB);
+
+  // Region draw mode 2: `RegionDrawResidentSet` between SetDrawLayerNibble(7)
+  // and (8). On the primitives, so the backdrop's -1000 still goes first.
+  const layered = command(-10, [prim(0, "translucent", [0, 0, 0, 1])]);
+  layered.userData.hod2_draw_mode = 2;
+  prepareDrawCommands(layered, assoc);
+  check("a draw-mode-2 region model is layer 7, on its primitives",
+        layered.children[0]!.renderOrder === DRAW_LAYER_7_ORDER
+        && layered.renderOrder === 0);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

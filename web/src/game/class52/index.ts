@@ -50,6 +50,7 @@
  * same model lit or unlit — is a renderer difference the port does not carry.
  */
 import type { Rng } from "../../core/rng";
+import { RegisterEnemySlot } from "../camera/slots";
 import type { Actor } from "../actor";
 import { ActorFlag } from "../actor";
 import { ActorDespawn } from "../despawn";
@@ -206,6 +207,9 @@ export function MouseInit(obj: Actor, rng?: Rng): void {
   sub.firstFrame = MOUSE_FIRST_SLOT;
   sub.lastFrame = MOUSE_LAST_SLOT;
   sub.frame = MOUSE_FIRST_SLOT + (rng?.int(MOUSE_FRAMES) ?? 0);
+  // `RegisterEnemySlot` at `0x0043F557`, straight after the strip's slot
+  // range: a camera slot until the next fill deals the table.
+  RegisterEnemySlot(obj);
   if (sub.subtype < MOUSE_FIRST_TRIGGER_SUBTYPE) return;
   if (G.g_GameMode !== GameMode.Original) {
     ActorDespawn(obj);

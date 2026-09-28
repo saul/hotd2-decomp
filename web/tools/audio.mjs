@@ -169,7 +169,13 @@ try {
       + ` peak ${peak === undefined ? "  n/a" : peak.toFixed(3)}  ${name(u)}`);
   }
   for (const [u, s] of responses) {
-    if (!played.includes(u)) console.log(`   ${s}  (fetched, not played) ${name(u)}`);
+    if (played.includes(u)) continue;
+    // The music is not a media element: channel 0xF is fetched whole and
+    // played as one Web Audio buffer, because that is the only way to play
+    // the engine's stream. `tools/bgm_loop.mjs` is its measurement.
+    console.log(/\/bgm\//.test(u)
+      ? `   ${s}  (fetched for Web Audio -- see bgm_loop.mjs) ${name(u)}`
+      : `   ${s}  (fetched, not played) ${name(u)}`);
   }
 
   const audible = played.filter((u) => (a.peaks[u] ?? 0) > 0.01);

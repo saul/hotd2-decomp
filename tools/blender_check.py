@@ -138,8 +138,8 @@ if render:
                   if e in engines), None)
     if unlit and eevee:
         scn.render.engine = eevee
-    # See hod2lib.gltf.DRAW_ORDER: the engine sorts its translucent pass
-    # back-to-front, glTF cannot carry render order, and Blender sorts blended
+    # See hod2lib.gltf.DRAW_ORDER: the engine sorts its translucent pass by
+    # command, nearest first, with depth writes on; glTF cannot carry render order, and Blender sorts blended
     # surfaces per object -- so two coincident translucent copies of the same
     # shell, which this game's models genuinely contain, resolve arbitrarily
     # and one paints over the other as a large flat wrong-coloured face.

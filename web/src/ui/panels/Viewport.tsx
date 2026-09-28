@@ -105,10 +105,11 @@ export function Viewport(
   // `boolean` in every projection and `undefined` only when there is none.
   const ready = paused !== undefined;
   const hud = useSlice((p) => p?.toggles.hud);
-  // The crosshair follows the firing gate, because the engine's does:
+  // The crosshair is shown on the frames the engine draws one:
   // `HudDrawCrosshair` (0x004169C0) will not draw the reticle while
-  // `g_nFiringGate` is zero, and the same word is what makes the trigger dead.
-  // A cutscene therefore takes the crosshair with it.
+  // `g_nFiringGate` is zero, the same word that makes the trigger dead, nor
+  // for a player with no life -- so a cutscene takes the crosshair with it,
+  // and so does the continue screen.
   //
   // The `shooting` class goes with it, which is a *port* decision and not the
   // engine's: the cabinet has a physical gun and nothing to hide, so hiding
@@ -116,8 +117,16 @@ export function Viewport(
   // away and leave `cursor: none` behind and the viewer has nothing at all to
   // point with for the length of a cutscene. So the pointer comes back exactly
   // while the game's own reticle is gone.
-  const firingGate = useSlice((p) => p?.firingGate);
-  const aiming = ready && firingGate === true;
+  const crosshair = useSlice((p) => p?.crosshair);
+  const aiming = ready && crosshair === true;
+  // The letterbox is a fraction of the *frame*, not of this element: the
+  // engine's bars sit at view-space y = +-0.35 against the frustum's
+  // half-height, so they belong to the rendered view. Pillarboxed, that is the
+  // 4:3 box `Player.resize` gives the canvas, which in a window taller than
+  // 4:3 is shorter than the viewport -- and the bars used to be measured off
+  // the viewport there, covering the frame's black margin and a sliver of the
+  // picture instead of a tenth of it.
+  const boxed = useSlice((p) => p?.pillarbox) === true;
   return (
     <div id="viewport" ref={refs.host}
          className={[paused && "paused", aiming && "shooting"]
@@ -130,8 +139,10 @@ export function Viewport(
           have no height until `Hud.draw` runs, which cannot happen before
           `app/` exists to tick it. */}
       <div className="hud-layer" ref={refs.hud} hidden={!hud}>
-        <div className="shutter shutter-top" ref={refs.shutterTop} />
-        <div className="shutter shutter-bottom" ref={refs.shutterBottom} />
+        <div className={boxed ? "hud-frame boxed" : "hud-frame"}>
+          <div className="shutter shutter-top" ref={refs.shutterTop} />
+          <div className="shutter shutter-bottom" ref={refs.shutterBottom} />
+        </div>
         {/* The caption is the one node on this subtree whose `hidden` stays
             with the layer, and it is deliberately not written here at all:
             whether there is a caption is a countdown on the walker, not a

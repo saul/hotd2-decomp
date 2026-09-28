@@ -18,11 +18,36 @@ import { vec3 } from "../vec";
  * horizontally and `+/-240` vertically, which is how the half-height is known
  * to be 240; the same constant appears in the frustum test at `FUN_0045CA60`
  * with a literal 320 for the half-width.
+ *
+ * `[proved]` from its one writer, `SetupSceneProjection` (`FUN_004184C0`):
+ *
+ * ```
+ * 00418528  FLD   double ptr [0x004ed1d0]   ; 0.35866388296751145, 20.55 deg
+ * 0041852e  FPTAN
+ * 00418533  FSTP  ST0
+ * 00418535  FDIVR float ptr [0x004c49c8]    ; 240.0 / tan
+ * 0041853b  FSTP  float ptr [0x009a2d70]
+ * ```
+ *
+ * so `240 / tan(20.55 deg)` = 640.2079 -- half of the 41.1-degree vertical
+ * field over the half-height. It was written 640.2, derived from the field of
+ * view rather than read.
  */
 const SCREEN_HALF_H = 240;
-export const PROJECTION_DISTANCE_PX = 640.2;
+export const PROJECTION_DISTANCE_PX = 240 / Math.tan(0.35866388296751145);
 
 const _view = vec3();
+
+/**
+ * What a release reads and writes: `obj+0x121` and the latch word `obj+0x136C`.
+ *
+ * An `Actor` is one, and so is a thrown weapon — both launchers hand the
+ * thrower's permit to the projectile, which gives it back through the same two
+ * routines, `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0045001F` and
+ * `ZombieThrownWeaponStateStraight` (`FUN_00459690`) at `0x004598C0`. Nothing
+ * else of the object is touched, which is why the type asks for nothing else.
+ */
+export type PermitHolder = Pick<Actor, "attackPermit" | "flags2">;
 
 /**
  * `ActorIsOnScreen` — `FUN_00409C10`.
@@ -124,8 +149,24 @@ export function ActorBoundsOnScreen(obj: Actor, host: GameHost): boolean {
 export function TryClaimAttackSlot(obj: Actor, host?: GameHost,
                                    offScreenBit: number =
                                      ZombieFlag2.OffScreenPermit): boolean {
+  // **The first write is `obj+0x121 = 0xFF`, before anything is tested** —
+  // `MOV byte ptr [ESI + 0x121], 0xff` (`c68621010000ff`) at `0x00455DE5`
+  // here and at `0x0044CA45` in `ThrowerTryClaimAttackSlot`, straight after
+  // the argument load in both. So a claim that fails leaves the
+  // actor holding *no* index, whatever it held before. It matters because
+  // `ZombieStateHoldForCameraCue` (`FUN_0045BFD0`) frees the permit table's
+  // entry and leaves `obj+0x121` pointing at it; without this, a later refusal
+  // kept that stale index and the actor's own release would free whichever
+  // actor had claimed the slot since. `[proved]`
+  obj.attackPermit = -1;
   // The latch is read first and gives up before a player is even picked.
   if (G.g_attack_committed !== 0) return false;
+  // [diverges] The engine offers **one** player's permit, not the first free
+  // one: `g_active_player`'s when `g_max_attackers` is 1, and with two a
+  // `rand() % 2` or `ActorScreenHalfSign` (`FUN_00409C90`) pick -- see the
+  // `functions.tsv` row. For player 1 alone, the case the port plays, the
+  // two agree; player 2 alone and two players do not. The
+  // faithful pick needs an `Rng` in every claimant, class 0x31's included.
   for (let i = 0; i < G.g_max_attackers; i++) {
     // `obj+0x121` is a **player index**, not a slot: the engine picks which
     // player to come for and then **voids the choice** when
@@ -152,6 +193,15 @@ export function TryClaimAttackSlot(obj: Actor, host?: GameHost,
       }
       G.g_attack_permits[i] = obj.at;
       obj.attackPermit = i;                    // +0x121
+      // [diverges] Neither claim routine writes `obj+0x34`: 0x00455DE0's only
+      // stores are `obj+0x121`, `obj+0x136C` bit 0x20000, `g_attack_committed`
+      // and the permit table. This clear has been here since the first port
+      // and claimants that raise the bit may lean on it to lower it again. It
+      // matters to `ZombieStateHoldForCameraCue`, which keeps
+      // the bit up until the cue and whose delegate claims every frame of the
+      // wait, so the port lets the camera track a held captor early. Moving
+      // it means reading every claimant's own clear first -- class 0x31's
+      // included -- and is left to that job rather than done here.
       obj.flags &= ~ActorFlag.NoCameraTrack;      // the camera may now see it
       return true;
     }
@@ -205,7 +255,7 @@ export function ThrowerTryClaimAttackSlot(obj: Actor,
  * `g_attack_committed`, so forgetting *that* here would stall every enemy in
  * the scene rather than just this one.
  */
-export function ReleaseAttackSlot(obj: Actor,
+export function ReleaseAttackSlot(obj: PermitHolder,
                                   offScreenBit: number =
                                     ZombieFlag2.OffScreenPermit): void {
   if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
@@ -217,6 +267,6 @@ export function ReleaseAttackSlot(obj: Actor,
 }
 
 /** `ThrowerReleaseAttackPermit` — `FUN_0044CFB0`. */
-export function ThrowerReleaseAttackPermit(obj: Actor): void {
+export function ThrowerReleaseAttackPermit(obj: PermitHolder): void {
   ReleaseAttackSlot(obj, ThrowerFlag.OffScreenPermit);
 }

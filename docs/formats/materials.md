@@ -458,6 +458,78 @@ is_translucent = (tsp_instruction & 0x180000) != 0x80000;
 the other pass are skipped by `mesh_data_size` and contribute only their
 transformed Z to the command's sort key.
 
+### What a pass switches, and what it does not — [proved]
+
+The **pass** decides three things; the **mesh** decides the rest, in both
+passes alike.
+
+| State | Opaque pass | Translucent pass | Set by |
+|---|---|---|---|
+| `ALPHABLENDENABLE` (27) | off | **on** | `RenderBeginCommandList` (`0x004A7A10`) clears it when the frame's list opens; `RenderFlushCommandList` (`0x004A88E0`) sets it before the flush |
+| `ALPHATESTENABLE` (15) | off | **on**, ref 1 `GREATEREQUAL` | `TranslatePvr2StateToD3D`, `(tsp & 0x180000) != 0x80000` — the pass bits themselves |
+| when it is drawn | at submission, submission order | after everything, sorted | `RenderEnqueueCommand` / `RenderFlushCommandList` |
+| `ZWRITEENABLE` | ISP bit 26 | ISP bit 26 | `TranslatePvr2StateToD3D` |
+| `ZFUNC` | ISP 31–29 | ISP 31–29 | `TranslatePvr2StateToD3D` |
+| `SRCBLEND` / `DESTBLEND` | (ignored: blending off) | TSP 31–26 | `TranslatePvr2StateToD3D` |
+
+Two corrections to what used to be written here and in the annotations:
+
+* **State 0x0F is `ALPHATESTENABLE`, not `ALPHABLENDENABLE`.** The
+  `TranslatePvr2StateToD3D` row in `functions.tsv` said the pass bits drive
+  blending. They drive the alpha *test*; blending is `0x1B`, and it is switched
+  once per pass, not per mesh.
+* **Translucent meshes write depth.** Over all 82,494 meshes in `pol/`, ISP bit
+  26 is clear and the compare mode is 4 (`LESSEQUAL`) — no mesh in the game
+  turns the depth write off or changes the test. So the order the translucent
+  pass is drawn in decides which translucent surfaces survive, and it is not a
+  painter's order.
+
+`tools/verify_draw_order.py` asserts all of it from the bytes and the corpus.
+
+### The translucent order — [proved]
+
+`RenderFlushCommandList` qsorts **whole commands** — one per model draw —
+with `RenderCommandCompare` (`0x004A8A20`): draw layer ascending, then the
+command's `+0x04` **descending**, and draws each command's translucent meshes
+in chain order. See [`pipeline.md`](pipeline.md#draw-order--solved) for the
+comparator. The two halves of the key:
+
+* **`+0x04` is eye z on the matrix stack, and the stack looks down −z.**
+  `RenderInitStates` installs `VIEW = diag(1, 1, −1, 1)` (`g_view_flip_z`,
+  `0x00598B38`) under the left-handed projection `BuildPerspectiveProjection`
+  builds (`_34 = +1`), so a point in front of the camera is negative on the
+  stack. Descending is therefore **nearest first**.
+* **It is the least z of the command's skipped points.**
+  `RenderSubmitModelDefaultLight` seeds it with the modelview's `_43` (the
+  model origin), and pass 0 lowers it to each skipped mesh's sphere-centre z
+  when that is less — every translucent mesh, and every opaque one whose
+  sphere is wholly outside the frustum. The least z is the farthest point.
+
+So a command is placed by its farthest skipped point, and the command whose
+farthest point is nearest draws first. With depth writes on, a nearer
+translucent surface drawn first hides the translucent surfaces behind it that
+come later, where its alpha passes the test; opaque geometry behind it, drawn
+in pass 0, shows through the blend.
+
+A faded draw — `AssetDrawSlotWithAlpha` (`0x004185A0`) →
+`RenderSubmitModelFadedDefaultLight` (`0x004AA350`) →
+`RenderEnqueueCommandFaded` (`0x004A8390`) — draws nothing in pass 0, so
+every mesh is skipped and counts toward the key, and pass 1 is
+`DrawModelWithForcedAlphaBlend` (`0x004A8440`): every visible mesh, with the
+TSP rewritten `(tsp & 0x03FFFF7F) | 0x94000080` (`SRCALPHA`/`INVSRCALPHA`, an
+alpha-modulating texture mode) and the material alpha the mesh's base alpha
+times the draw's. The ISP word is not touched, so a fading model still writes
+depth.
+
+**In the player** this is `web/src/render/draw_order.ts`: every exported
+material gets the table above at load, and `RenderCommandOrder` is the
+renderer's transparent sort, keyed by the glTF node (split by `hod2_model`)
+and each primitive's exported header sphere (`hod2_sphere`). It replaced
+`GLTFLoader`'s `alphaMode: BLEND` → `depthWrite: false` and three.js's
+per-primitive far-first sort, which between them drew the stage-2 car's
+black inner shells over its bodywork, and turned every additive mesh in the
+game — 5,408 of them — into an ordinary blend.
+
 ## The global D3D7 render state — SOLVED
 
 `RenderInitStates` (`0x004A7630`) sets the device state once, and per-draw code
@@ -488,12 +560,21 @@ Three of these matter for the export:
    Vertex colour does not feed the lighting equation at all; the per-mesh base
    colour must be applied as a *material*, which is what
    *Baked static lighting lives in the base colour* above found the hard way.
-3. **A global alpha test discards alpha-0 texels** (`GREATEREQUAL`, ref 1).
-   That is how the game gets punch-through behaviour without ever using the
-   PowerVR2 punch-through list — which is why no mesh in the game sets it.
+3. **An alpha test discards alpha-0 texels** (`GREATEREQUAL`, ref 1) — in the
+   translucent pass only: `TranslatePvr2StateToD3D` turns the enable on for
+   exactly the meshes whose pass bits say translucent. That is how the game
+   gets punch-through behaviour without ever using the PowerVR2 punch-through
+   list — which is why no mesh in the game sets it. (This said "global" until
+   the per-mesh enable was read.)
 
-**[open]** Whether any per-draw path overrides `ALPHAFUNC`/`ALPHAREF` has not
-been checked; `RenderEnqueueCommand`'s per-command state work is not yet read.
+**No per-draw path overrides `ALPHAFUNC`/`ALPHAREF`** — [likely]. The only
+immediate pushes of state `0x18` and `0x19` in the image are here and in
+`InitD3DDeviceAndTextureStages`, with the same values (the other two `PUSH
+0x19` hits are a glyph routine and CRT code); `TranslatePvr2StateToD3D`,
+`RenderEnqueueCommand` and `RenderFlushCommandList` are read and set neither.
+The caveat is L32's: a state number held in a register would not show in an
+operand search. What *is* per draw is the enable — see *What a pass switches*
+above: the alpha test is on for the translucent pass only.
 
 ### Lighting
 
@@ -545,6 +626,13 @@ look slightly dark.
 Every material also carries the raw register words in `extras.pvr2` —
 `parameter_control`, `isp_tsp_instruction`, `tsp_instruction`,
 `texture_control` — so nothing is lost to the approximate PBR mapping.
+
+**The player does not use `alphaMode`.** It is the list type, which is not the
+pass, and a glTF `BLEND` means "no depth write" to `GLTFLoader` — the opposite
+of what this game does. `web/src/render/draw_order.ts` rebuilds the pass, the
+blend factors, the depth state and the alpha test from `extras.pvr2` for
+every material; see *What a pass switches* above. Blender and other viewers
+still get the approximation.
 
 ### A glTF texture is (image, sampler) — a fixed exporter bug
 

@@ -8,15 +8,19 @@
  * is where that walk happens: the last act of `EnemyThrowerUpdate`
  * (`FUN_00449910`) but the camera point, after the state and the integration.
  *
- * Most of the hook is drawing, which is the renderer's. Two things it does
+ * Most of the hook is drawing, which is the renderer's. Three things it does
  * are state, and they are why it is ported here rather than left to
- * `render/`: it **grows the hand back** — `ThrowerStateRestoreBothHands`
- * sets a latch and waits, and only this clears it — and on one slot it
- * **writes** `obj+0x138C`. The third thing kept is which alpha each bone was
- * drawn at, for the renderer to draw with.
+ * `render/`: it **aims the head** at the camera, it **grows the hand back** —
+ * `ThrowerStateRestoreBothHands` sets a latch and waits, and only this clears
+ * it — and on one slot it **writes** `obj+0x138C`. The fourth thing kept is
+ * which alpha each bone was drawn at, for the renderer to draw with.
  */
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import {
+  ActorAimHeadAtCamera, HEAD_AIM_BONE, ThrowerHeadAims,
+} from "../class30/head_aim";
 import { G } from "../globals";
+import type { ClassFrame } from "../registry";
 import { SpawnClass } from "../spawn_class";
 
 /** Character type 0x18, `zslman` — the one whose hands grow back. */
@@ -93,14 +97,14 @@ const CYCLE_SLOTS: readonly number[] = [0x2016, 0x204a];
  * is drawn at `obj+0x138C` under the blink bit, solid without it. `[proved]`,
  * from the disassembly at `0x00449F90..0x0044A1FC`.
  *
+ * Before any of that, for bone 2 -- while `obj+0x136C` has `0x100` or lacks
+ * `0x20` (`ThrowerHeadAims`) and `obj+0x34` lacks `0x40000` -- the hook calls
+ * `ActorAimHeadAtCamera` (`FUN_00453BE0`) at `0x00449FD9`, on the matrix it
+ * has just pushed: the head is stepped toward the camera and drawn turned.
+ * That routine is class 0x30's code and is shared; see `class30/head_aim.ts`.
+ *
  * What is not here, and why:
  *
- * * `[open]` for bone 2 — while `obj+0x136C` has `0x100` or lacks `0x20`,
- *   and `obj+0x34` lacks `0x40000` — the hook first calls the unnamed
- *   `0x00453BE0`, which reads the bone's record and the camera block and
- *   carries on past
- *   the `MatrixStackPop` its decompilation stops at (`L35`). What it does to
- *   the head is unread; nothing in it has been seen to write the actor.
  * * The draws themselves, the scale and the cels are `render/`'s, and it does
  *   not draw `0x1FF4`, the cycles or a fractional alpha. It is handed the
  *   alpha in {@link ThrowerTail.boneDrawAlpha} and draws a bone whose alpha
@@ -110,9 +114,13 @@ const CYCLE_SLOTS: readonly number[] = [0x2016, 0x204a];
  *   — all fifteen carry a `+0x20` word of 1, so bit 2 is never up.
  */
 export function ThrowerDrawBonePart(obj: Actor, bone: number,
-                                    slot: number): void {
+                                    slot: number, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.Thrower) return;
   const t = obj.thr;
+  if (ThrowerHeadAims(obj) && bone === HEAD_AIM_BONE
+      && (obj.flags & ActorFlag.NoHeadAim) === 0) {
+    ActorAimHeadAtCamera(obj, t, f);
+  }
   let alpha = 1;
   const blinking = (obj.flags2 & ThrowerFlag.Blinking) !== 0;
   if (obj.charType === CHAR_ZSLMAN) {

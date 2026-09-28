@@ -193,6 +193,17 @@ function Inspect() {
         <DebugGroup group="collision" />
       </Panel>
 
+      {/* What is left of the route graph: the branch variable, and the debug
+          aid that holds the script at a branch so another road can be taken
+          by hand. The graph itself went with the move to the sidebar. */}
+      <Panel id="panel-route" title="Route"
+             subTitle={"At a branch the game takes next[g_script_branch_var] "
+               + "on the frame the steps run out; `Pause at branches` is a "
+               + "debug aid that holds there so the other road can be taken "
+               + "by hand."}>
+        <DebugGroup group="route" />
+      </Panel>
+
       <Panel id="panel-shooting" title="Shooting"
              subTitle={"Click or tap to shoot: the ray, the per-bone hit "
                + "spheres, the damage escalation and the score, all the "

@@ -25,6 +25,8 @@ import {
   type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { ActorRegisterCameraPoint } from "../camera/track";
+import { RegisterEnemySlot } from "../camera/slots";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import {
@@ -34,7 +36,7 @@ import { G } from "../globals";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionPlayLength, ThrowHandsOf }
   from "../tables";
-import { vec3, type Vec3 } from "../vec";
+import type { Vec3 } from "../vec";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import { ThrowerStateLeapToPoint } from "./leap";
@@ -52,6 +54,8 @@ import { ThrowerStateLeapToSurface } from "./surface";
 import { ThrowerPushOutOfWorld } from "./collide";
 import { ActorRunNodeDrawHooks } from "../model_draw";
 import { ThrowerDrawBonePart } from "./draw";
+import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
+  from "../class30/head_aim";
 import { ThrowerOnShot } from "./on_shot";
 import {
   ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
@@ -70,7 +74,13 @@ import {
 } from "./scripted";
 import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
-import { THROWN_SPIN_RATE } from "./projectile";
+import {
+  AimThrownWeapon, FlySub, ThrownWeaponState, THROWN_WEAPON_SPIN,
+} from "./projectile";
+import {
+  ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponRoutine,
+  THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_HIT_RADIUS, THROWN_WEAPON_SPAWN_FLAGS,
+} from "../thrown_weapon";
 
 /**
  * How high the hand is above the actor's own origin, for the fallback in
@@ -158,7 +168,7 @@ export function ThrowerPickThrowingHand(obj: ThrowerActor, rng: Rng): number {
  * into the wrong clip. Saying only "23 frames late" understates it. `[proved]`
  *
  * **The index.** `handIdx + 10*stance`, where `handIdx` is `obj+0x131A` — 0
- * for bone 5, 1 for bone 8, from `ThrowerPickThrowingHand` (`FUN_0044F630`) —
+ * for bone 5, 1 for bone 8, from `ThrowerPickThrowingHand` (`0x0044F630`) —
  * and `stance` is `3*bit8 + 2*bit7 + bit6` of `obj+0x136C`
  * (`8b866c130000` at 0x0044FB98, then the shifts and `LEA`s to 0x0044FBBB).
  * That index runs into a 32-byte table of jump-table selectors at
@@ -259,41 +269,59 @@ function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
 }
 
 /**
- * `AimThrownWeapon` — `FUN_004503D0`. A point `aim_ahead` in front of the
- * camera; the camera looks down its own local -Z, which is where the player is.
- */
-export function AimThrownWeapon(obj: ThrowerActor, host: GameHost, eye: Vec3,
-                                out: Vec3): void {
-  const cfg = CharacterTypeOf(obj)?.throw;
-  host.aimPoint(cfg?.aim_ahead ?? 0, out);
-  out.y = eye.y;
-}
-
-/**
  * `SpawnThrownWeapon` — `FUN_004504E0`. The hand goes bare and the weapon
  * takes off.
+ *
+ * ```
+ * w = ActorAlloc(ThrownWeaponUpdate, 0x13F4); ActorClearGameFields(w);
+ * ActorClaimHitSlot(w)
+ * zsass (0x16):  hand 5 -> 0x1F9F bare, w+0x13F0 = 0x1F91;
+ *                hand 8 -> 0x1F9B bare, w+0x13F0 = 0x1F90;  w+0x1364 = 0x600
+ * zslman (0x18): hand 5 -> 0x1FF1 bare, 0x1FE2; hand 8 -> 0x1FED, 0x1FE1;
+ *                w+0x1364 = 0
+ * (both also zero the bone record's +0x78, the hit-sphere radius)
+ * thrower+0x1318 |= 1 << g_bone_damage_zone[hand]
+ * w+0x40 = the hand's bone position, into the world
+ * w+0x34 = 0x80000001; w+0x124 = w+0x128 = 2.0
+ * w+0x121 = thrower+0x121; thrower+0x121 = 0; the off-screen latch moves too
+ * w+0x1F8 = 5; w+0x1F4 = thrower's type; w+0x1390 = thrower
+ * w+0x1358 = hand; w+0x135C = 0x2400; w+0x133C = w+0x1338 = 4
+ * w+0x1310 = w+0x1312 = 0; AimThrownWeapon(w)
+ * w+0x100 = pos; RegisterForCameraTracking(w)
+ * ```
+ *
+ * Everything from `w+0x34` on is a tail Ghidra does not show: the routine's
+ * pseudocode ends at the `MatrixStackPop` at `0x0045069E`, which it has
+ * marked no-return (`L35`), and `0x004506A3`..`0x0045077F` is where the flags,
+ * the permit, the hand, **the spin rate** and the aim all are. Reading only the
+ * pseudocode is how the port came to say that nothing writes the rate.
+ *
+ * **The weapon takes the permit** — `MOV AL, [EDI+0x121]` (`8a8721010000`,
+ * 0x004506BB), `MOV [ESI+0x121], AL` (`888621010000`, 0x004506C4) — and the
+ * thrower is left holding **0, not -1**: `MOV [EDI+0x121], BL`
+ * (`889f21010000`, 0x004506D5) with `EBX` zeroed at 0x0045050A. The
+ * off-screen latch `obj+0x136C` bit `0x8000` moves across with it (`TEST
+ * EAX, ECX` / `JZ` — `85c8 741d` at 0x004506DB, `OR` on the weapon's word and
+ * `AND AH, 0x7F` on the thrower's). The weapon gives the slot back when it has
+ * blinked out, or at once when it is shot down; `ThrowerStateThrow` releases
+ * nothing. The port used to free the permit here, some ninety frames early,
+ * because its weapon could not hold one. `[proved]`
+ *
+ * `[diverges]` The engine reads the hand's own recorded position —
+ * `obj + 0x274 + bone * 0x90`, through the camera block's `+0x40` matrix —
+ * and so it **cannot fail**. The port has no skeleton in `game/`, so it asks
+ * the host, and a host that cannot answer gets the actor's own position lifted
+ * by a chest height rather than no weapon at all: a routine with no path that
+ * declines to make the weapon must not grow one. Three writes are not made,
+ * for the reasons `ZombieThrowHandWeapon` (`FUN_0045A240`) gives for its own
+ * identical three: the hand's hit-sphere radius, the hit slot, and the camera
+ * candidate.
  */
 export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
-                                  host: GameHost, eye: Vec3,
+                                  host: GameHost,
                                   events?: Events): void {
   const cfg = CharacterTypeOf(obj)?.throw;
-  if (!cfg) return;
-  const from = vec3();
-  // [diverges] The engine reads the hand's own recorded position —
-  // `obj + 0x274 + bone * 0x90`, transformed by the camera matrix — and so it
-  // **cannot fail**: `SpawnThrownWeapon` (`FUN_004504E0`) has no path that
-  // declines to make the weapon. The port has no skeleton in `game/`, so it
-  // asks the host, and a host that cannot answer used to make this `return`.
-  // That is the whole of "the thrower plays the animation and no axe appears":
-  // `ThrowerStateThrow` had already advanced its own sub-state to `Thrown`, so
-  // the throw was counted and the weapon was not. Fall back to the actor's own
-  // position lifted by a chest height, exactly as `ZombieThrowHandWeapon`
-  // (`FUN_0045A240`) does on the class-0x30 side.
-  if (!host.boneWorld(obj.at, hand.bone, from)) {
-    from.x = obj.pos.x;
-    from.y = obj.pos.y + HAND_HEIGHT;
-    from.z = obj.pos.z;
-  }
+  const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
 
   // `obj+0x20C + bone*0x90` -- the draw record, recorded on the actor beside
   // the call that asks the renderer for it, so a snapshot carries which model
@@ -301,68 +329,38 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   // made the snapshot depend on whether a hierarchy was in the scene.
   obj.boneSlot[String(hand.bone)] = hand.bare;
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
+  w.slot = hand.projectile;
+  // `obj+0x1364`, the constant the draw adds to the **X** term. `cfg.spin`
+  // is that constant: the exporter reads it out of this routine and the name
+  // is older than the reading.
+  w.tilt = cfg?.spin ?? 0;
   obj.zones |= hand.cancel_mask & DamageZone.All;
 
-  // [diverges] **The engine hands the permit to the weapon**, it does not free
-  // it. `SpawnThrownWeapon` copies `obj+0x121` into the new actor and writes
-  // the thrower's to **0** — not -1; `EBX` is zeroed at 0x0045050A —
-  //
-  //   004506bb  MOV AL, byte ptr [EDI + 0x121]      8a8721010000  the thrower
-  //   004506c4  MOV byte ptr [ESI + 0x121], AL      888621010000  the weapon
-  //   004506d5  MOV byte ptr [EDI + 0x121], BL      889f21010000  BL == 0
-  //
-  // and moves the off-screen latch with it when `obj+0x136C` bit 0x8000 is up
-  // (`TEST EAX, ECX` / `JZ` — `85c8 741d` at 0x004506DB, then `OR` on the
-  // weapon's word and `AND AH, 0x7F` on the thrower's).
-  // The slot is then freed by the weapon, at the very end of its life:
-  // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) calls
-  // `ThrowerReleaseAttackPermit` in its sub-4 arm, after the 30 stick frames
-  // and the 60 blink frames have run out, in the same breath as the despawn.
-  // `ThrowerStateThrow` itself releases nothing — `FUN_0044CFB0` has exactly
-  // eight call sites in the program and it is not one of them.
-  //
-  // The port's weapon is a plain record in `G.g_thrown_weapons`, a pool it
-  // shares with class 0x30's thrown weapon, which has its own state table
-  // (`g_zombie_thrown_weapon_states`, driven by `ZombieThrownWeaponUpdate`
-  // — `FUN_0045A4F0`) and so its own release site. A record cannot hold a
-  // permit and releasing from the shared flight routine would free a class
-  // 0x30 actor's slot through class 0x31's routine, which is the exact
-  // wrong-bit mistake the note on `ThrowerReleaseAttackPermit` warns about.
-  // So the slot goes back here, where the engine hands it over, roughly 90
-  // frames earlier than the engine gives it up. Making the pool carry a permit
-  // is the fix, and it is a change to both classes' projectiles.
-  ThrowerReleaseAttackPermit(obj);
-
-  const target = vec3();
-  AimThrownWeapon(obj, host, eye, target);
-  const d = Math.hypot(target.x - from.x, target.y - from.y,
-                       target.z - from.z);
-  const ttl = Math.max(1, d / cfg.speed);
-  G.g_thrown_weapons.push({
-    id: G.g_thrown_next_id++,
-    from: obj.at,
-    slot: hand.projectile,
-    pos: from,
-    vel: vec3((target.x - from.x) / ttl, (target.y - from.y) / ttl,
-              (target.z - from.z) / ttl),
-    ttl,
-    // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0044FDE9`:
-    // `obj+0x68 += obj+0x135C` when the throwing hand `obj+0x1358` is bone 5
-    // and `-=` otherwise. So the sign is the hand's and the axis is **Y**.
-    // The rate is the port's -- see `ThrownWeapon.spinAngle`.
-    spin: hand.bone === 5 ? THROWN_SPIN_RATE : -THROWN_SPIN_RATE,
-    axis: "y",
-    spinAngle: 0,
-    // `obj+0x1364`, the constant the draw adds to the **X** term. `cfg.spin`
-    // is that constant: the exporter reads it out of `SpawnThrownWeapon` and
-    // the name is older than the reading.
-    tilt: cfg.spin,
-    after: 0,
-    hit: false,
-    stickFrames: cfg.stick_frames,
-    blinkFrames: cfg.blink_frames,
-    visible: true,
-  });
+  if (!host.boneWorld(obj.at, hand.bone, w.pos)) {
+    w.pos.x = obj.pos.x;
+    w.pos.y = obj.pos.y + HAND_HEIGHT;
+    w.pos.z = obj.pos.z;
+  }
+  w.flags = THROWN_WEAPON_SPAWN_FLAGS;
+  w.hitRadius = THROWN_WEAPON_HIT_RADIUS;
+  w.attackPermit = obj.attackPermit;
+  obj.attackPermit = 0;
+  if (obj.flags2 & ThrowerFlag.OffScreenPermit) {
+    w.flags2 |= ThrowerFlag.OffScreenPermit;
+    obj.flags2 &= ~ThrowerFlag.OffScreenPermit;
+  }
+  w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
+  w.charType = obj.charType;
+  w.from = obj.at;
+  w.hand = hand.bone;
+  w.spinRate = THROWN_WEAPON_SPIN;
+  // `obj+0x133C = obj+0x1338 = 4` at `0x00450736`: the `zslman` afterimage
+  // timers, read by `FUN_00450930`, which the port does not run -- see
+  // `ThrownWeaponUpdate` (`FUN_00450780`).
+  w.state = ThrownWeaponState.Fly;
+  w.sub = FlySub.Launch;
+  AimThrownWeapon(w, ThrownWeaponCameraOf(host));
+  G.g_thrown_weapons.push(w);
   events?.emit("enemy.threw", { at: obj.at, who: obj.name });
 }
 
@@ -407,7 +405,7 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
  * channel emptied, re-arming one hand on the way out; that is the divergence
  * this replaces.
  */
-export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, eye: Vec3,
+export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, _eye: Vec3,
                                   rng: Rng, events?: Events): void {
   if (obj.sub === ThrowSub.Draw) {
     // `if (obj+0x121 == 0xFF && !ThrowerTryClaimAttackSlot(obj)) obj+0x121 = 0`
@@ -457,7 +455,7 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, eye: Vec3,
     if (!hand) return;
     const throwCueFrame = ThrowerThrowCue(obj, hand).release;
     if (obj.playTicks < throwCueFrame) return;
-    SpawnThrownWeapon(obj, hand, host, eye, events);
+    SpawnThrownWeapon(obj, hand, host, events);
     obj.sub = ThrowSub.Thrown;
     // ...and falls through again, into 0x0044FCBB.
   }
@@ -520,8 +518,17 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // which grows nothing, for the next frame whenever it holds the clock
   // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
   // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
-  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart);
+  HeadAimBeginDraw(obj, obj.thr, host);
+  ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
+  HeadAimEndDraw(obj, obj.thr);
+  // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
+  // every path: the camera point, not lifted, and the candidate filing. The
+  // death chain's `0x10000` keeps a corpse off the list.
+  ActorRegisterCameraPoint(obj, host, THROWER_CAMERA_RISE);
 }
+
+/** `PUSH 0x0` at `0x0044998F`: `ActorRegisterCameraPoint`'s 0.0. */
+export const THROWER_CAMERA_RISE = 0.0;
 
 /**
  * The state table, dispatched. `g_class31_states` (0x00592960) is 35 entries
@@ -534,7 +541,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.HitReaction:
       return ThrowerStateHitReaction(obj, eye, rng, host);
     case ThrowerState.FallAndLand:
-      return ThrowerStateFallAndLand(obj, host, dt, rng);
+      return ThrowerStateFallAndLand(obj, host, dt, rng, events);
     case ThrowerState.Death:
       return ThrowerStateDeathClip(obj);
     case ThrowerState.Corpse:
@@ -570,7 +577,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.BlinkIn:
       return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:
-      return ThrowerStateStandAndDecide(obj, eye, dt, rng, host);
+      return ThrowerStateStandAndDecide(obj, eye, dt, rng, host, events);
     case ThrowerState.WaitForPermit:
       return ThrowerStateWaitForPermit(obj, eye, rng, host);
     // Three ids, one handler: the router names 12 and 13, the wait names 9.
@@ -579,27 +586,27 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.PounceFar:
       return ThrowerStateLeapDown(obj, dt, rng, host, events);
     case ThrowerState.LeapAside:
-      return ThrowerStateLeapAside(obj, eye, dt, rng);
+      return ThrowerStateLeapAside(obj, eye, dt, rng, host, events);
     case ThrowerState.LeapToWallA:
     case ThrowerState.LeapToWallB:
     case ThrowerState.LeapToCeiling:
-      return ThrowerStateLeapToSurface(obj, dt);
+      return ThrowerStateLeapToSurface(obj, dt, host, events);
     case ThrowerState.WalkDistance:
       return ThrowerStateWalkDistance(obj, rng);
     case ThrowerState.EntranceClip:
       return ThrowerStateEntranceClip(obj);
     case ThrowerState.DelayedPounce:
-      return ThrowerStateDelayedPounce(obj, dt, rng, host, events);
+      return ThrowerStateDelayedPounce(obj, eye, dt, rng, host, events);
     case ThrowerState.Withdraw:
       return ThrowerStateWithdraw(obj, eye, dt, rng);
     case ThrowerState.LeapToPoint:
       // No `ActorIntegrate`: the arc **interpolates** the position, the way
       // `ActorArcStep` does for every other leap in this class. Integrating a
       // velocity on top would move the actor twice.
-      return ThrowerStateLeapToPoint(obj, dt, rng, events);
+      return ThrowerStateLeapToPoint(obj, dt, rng, events, host);
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
-      return ThrowerStatePathFollow(obj, dt);
+      return ThrowerStatePathFollow(obj, dt, events, host);
     // No turn here. `TurnActorTowardCamera` (`FUN_00409ED0`) has two callers
     // in the image and both are `ZombieStateAttackRun`'s; `ThrowerStateThrow`
     // calls no turn routine at all, so a thrower throws on the facing
@@ -654,6 +661,10 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // The word is **sign-extended**, not zero-extended, so a descriptor setting
   // `0x8000` would raise the whole high half. None does; the shift pair says
   // so anyway rather than pretending the question is not there.
+  // `004496FE  TEST dword ptr [ESI + 0x34], 0x40000` and the `VecToAngles`
+  // after it, between the body radius and the flag word: the head aim's seed,
+  // the same as class 0x30's -- see `HeadAimSeed`.
+  HeadAimSeed(obj, obj.thr);
   obj.flags2 = ((obj.descFlags << 16) >> 16) | ThrowerFlag.Collide;
   // Then the stance, from bits 6/7/8 of what the descriptor just supplied —
   // `ECX = 3*bit8 + 2*bit7 + bit6` at 0x00449770..0x00449794, a four-arm jump
@@ -710,6 +721,10 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // `INC word [g_enemies_present]` then `INC word [g_enemies_alive]`, with no
   // guard at all -- unlike class 0x30's, which excludes two kinds.
   CountEnemyThrowerIn();
+  // `obj+0x121 = 0xFF`, then `RegisterEnemySlot` at `0x004498A1`: the thrower
+  // takes a camera slot the moment it exists, until the next
+  // `UpdateCameraEnemySlots` deals the table afresh.
+  RegisterEnemySlot(obj);
 }
 
 /**

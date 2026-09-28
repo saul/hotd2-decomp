@@ -19,46 +19,46 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 79759 | 269 | engine |
-| `hod2lib/` | 18150 | 35 | engine |
-| `render/` | 12835 | 44 | render |
-| `app/` | 7696 | 28 | app |
-| `script/` | 4913 | 27 | engine |
-| `ui/` | 2645 | 21 | ui |
-| `bundle/` | 2607 | 11 | engine |
+| `game/` | 88078 | 290 | engine |
+| `hod2lib/` | 18393 | 35 | engine |
+| `render/` | 14159 | 51 | render |
+| `app/` | 7663 | 28 | app |
+| `script/` | 4388 | 25 | engine |
+| `ui/` | 2693 | 21 | ui |
+| `bundle/` | 2632 | 11 | engine |
 | `core/` | 949 | 9 | engine |
-| `hud/` | 459 | 1 | ui |
-| `audio/` | 390 | 1 | render |
-| **total** | **130403** | **446** | |
+| `audio/` | 878 | 2 | render |
+| `hud/` | 491 | 1 | ui |
+| **total** | **140324** | **473** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/actor.ts` — 2391
-* `game/globals.ts` — 2352
-* `app/main.ts` — 2193
-* `hod2lib/exetab.ts` — 2187
-* `script/walker.ts` — 2149
+* `game/globals.ts` — 2641
+* `game/actor.ts` — 2510
+* `app/main.ts` — 2219
+* `hod2lib/exetab.ts` — 2212
+* `script/walker.ts` — 2140
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **183 of 284** annotated functions in the gameplay address ranges have a port (64%) |
-| Ported outside those ranges | 433 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 616 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **219 of 297** annotated functions in the gameplay address ranges have a port (73%) |
+| Ported outside those ranges | 473 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 692 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **167** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **174** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **142** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **166** — questions the port is honest about not having answered |
 
-The two declared seams between the UI and the player: **`PlayerCommands` has 45 members against `PlayerView`'s 29** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
+The two declared seams between the UI and the player: **`PlayerCommands` has 47 members against `PlayerView`'s 30** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
 ## The decomp
 
 | | |
 |---|---|
-| Named functions | 1243 in `ghidra/annotations/functions.tsv` |
-| Named globals | 615 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 40 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1316 in `ghidra/annotations/functions.tsv` |
+| Named globals | 660 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 44 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -73,7 +73,7 @@ in a checker**, and there is deliberately no suppression comment.
 
 | Ratchet | Where | Now | Baseline |
 |---|---|---:|---:|
-| `uncited-exports` | `tools/verify_port.py` | 88 | 88 |
+| `uncited-exports` | `tools/verify_port.py` | 83 | 83 |
 
 All 14 rules in `verify_layers.py` are `error` at zero;
 a new violation of any of them fails the build rather than moving
@@ -98,6 +98,7 @@ nothing exits 3 and is never counted as green.
 | `verify_exporters` | that no exporter swallows a failure and reports success | — |
 | `status` | that `docs/STATUS.md` still matches the tree it describes | — |
 | `test:port` | the state machines, driven headless against hand-written tables | — |
+| `test:audio` | `PlaySoundId`'s dispatch -- the loop flag, the three one-shot tracks, the three control words -- and the byte stream channel 0xF plays, tail and channel swap included, with no browser | — |
 | `test:bundle` | that the bundle reader refuses what it should refuse | — |
 | `test:export` | the three pieces of the TypeScript exporter that comparing two bundles cannot check -- `json.dumps`'s separators, the case-insensitive path resolve, and an archive something else can open | — |
 | `test:scope` | that lifetimes are given back | — |
@@ -112,6 +113,7 @@ nothing exits 3 and is never counted as green.
 | `test:camera` | that a camera path seats where the exe's own evaluation puts it | bundle |
 | `flag_gates` | that every `wait_script_flag` gate no `set_script_flag` on the *route* to it can open has the actor that opens it placed on that same route -- the only check that reads a gate per entry block rather than per bundle, which is the difference between stage 3's block 2 on the entry-0 route and on the entry-7 one -- and the only check that asks the same question of an ACTOR, for the one class-0x30 state whose sole exit is a script flag a civilian's own stream raises | bundle |
 | `loops` | that the looping sound effects reach an <audio> element, wrap rather than running out, and are still there when the stage is reached by a deep link -- the only check in the tree that measures the mixer rather than the intent | bundle |
+| `bgm_loop` | that the page's music is the engine's stream -- the buffer the script's own track reaches Web Audio as is one period of the file from its first sample to end of file, looped, sample for sample -- and that it is audible | bundle |
 | `animals` | that the frog, the owl and the fish are placed from a real bundle and leave their opening state -- none of the three is a skinned enemy the character layer can build, and two have no character type at all | bundle |
 | `horde` | that each of the five class-0x40 hordes is built from a real bundle, walks in, dives and bites, and that shooting every member gives both counters back and lets the walker past the room's wait_enemies_alive -- the members are runtime children with no descriptor, so only the placer's own spawn can bring them into play | bundle |
 | `dives` | that a class-0x43 dive reaches the camera it is aimed at, strikes and comes round again -- the only check that drives a class against the stage's own `cam_play` rather than an eye the harness made up, which is what every other owl check does and why none of them could see a run-in parked five units under the eye | bundle |
@@ -128,10 +130,14 @@ nothing exits 3 and is never counted as green.
 | `verify_branches` | that every value a branch trigger can write into `g_script_branch_var` names a route slot its own block actually fills -- the one check that ties the gameplay half of branching to the route tables | game-dir |
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
 | `verify_looping_se` | that `PlaySoundId`'s two loop tables really do pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is the only thing that says a stop id is a control word rather than a sound, and so the only thing that makes the chainsaw a loop rather than a one-shot | game-dir |
+| `verify_bgm_stream` | that the music has no loop points to find -- the exe's own bytes stream channel 0xF and seek it back to the first sample at end of file, the port's one-shot ids are the exe's three, and every looping track in both tables is long enough for that model to be exact | game-dir |
 | `verify_root_pose` | that a clip's root translation still either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes because Ghidra shows neither of them whole -- and the only place the set of actors the second arm can move is enumerated: every motion block in the game measured for an absolute horizontal root, paired with the class-0x10 wait word that governs it | game-dir |
 | `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
+| `verify_continue` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run, because the credit costs are stored once, as 1; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play. Nothing else looks at a picture that, when wrong, is simply not there | game-dir |
+| `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
+| `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
 | `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
@@ -140,7 +146,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-17 of them need the installed game and 15 need an exported
+21 of them need the installed game and 16 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

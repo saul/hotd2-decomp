@@ -21,7 +21,7 @@ import type {
 } from "../../ui/projection";
 import type { DebugGroupName } from "../../ui/projection";
 import { stabilise } from "./stable";
-import { gameOverProjection } from "./chrome";
+import { crosshairProjection, gameOverProjection } from "./chrome";
 import { actorsProjection, waitProjection } from "./sidebar";
 
 /**
@@ -52,6 +52,8 @@ export interface PlayerView {
   readonly fogMode: string;
   readonly filterMode: string;
   readonly anisotropyLimit: number;
+  /** See {@link UiProjection.pillarbox}. */
+  readonly pillarbox: boolean;
   readonly toggles: Readonly<Record<ToggleName, boolean>>;
   readonly camEye: { x: number; y: number; z: number };
   readonly boxedClasses: ReadonlySet<number>;
@@ -101,10 +103,9 @@ export function buildProjection(v: PlayerView,
     bundleStale: v.bundleStale,
     paused: v.paused,
     started: v.started,
-    // The walker's accessor, which reads `G.g_nFiringGate`. Off before there
-    // is a walker at all, which is also what the engine's BSS says: the word
-    // is zero until a stage script raises it.
-    firingGate: w?.firingGate ?? false,
+    // `HudDrawCrosshair`'s decision, off `G`. Off before the first player
+    // turn, which is also what the engine's BSS says.
+    crosshair: crosshairProjection(),
     toggles: v.toggles,
     transport: v.transport,
     sound: v.sound,
@@ -112,6 +113,7 @@ export function buildProjection(v: PlayerView,
     fogMode: v.fogMode,
     filterMode: v.filterMode,
     anisotropyLimit: v.anisotropyLimit,
+    pillarbox: v.pillarbox,
     // A slice nothing is showing is not built. Its *selection* still counts,
     // though — the highlight set is computed whatever the panels are showing.
     wait: w && v.wants("wait") ? waitProjection(w, eye) : null,

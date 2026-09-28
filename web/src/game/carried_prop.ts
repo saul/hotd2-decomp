@@ -65,6 +65,7 @@ import {
   VecAngleBetween, type Mat,
 } from "./matrix";
 import { QueryGroundHeightAt } from "./coli";
+import { RegisterPropForCameraTracking } from "./camera/slots";
 import { T } from "./tables";
 import { EffectNodePoseAt } from "./class44/script_flag_effect";
 import { PROJECTION_DISTANCE_PX } from "./combat/permits";
@@ -280,10 +281,12 @@ export interface CarriedProp {
   /** `[port-only]` — `RegisterForShotTest` took it this frame. */
   shootable: boolean;
   /**
-   * `[port-only]` — `RegisterForCameraTracking` (`FUN_00408EC0`) was called
-   * for it this frame, which is what `g_camera_candidate_count` counts.
+   * `obj+0x100` — the point the camera aims at if it deals the prop a slot:
+   * its own position, or its view-space position taken back to the world
+   * while it is stuck to the lens. Written just before every
+   * `RegisterForCameraTracking` call on this path.
    */
-  cameraTracked: boolean;
+  lookAt: Vec3;
 }
 
 /**
@@ -324,7 +327,7 @@ export function CarriedPropAlloc(carrier: Actor,
     bodyRadius: 0,
     draw: null,
     shootable: false,
-    cameraTracked: false,
+    lookAt: vec3(),
   };
   G.g_carried_props.push(p);
   return p.id;
@@ -501,10 +504,9 @@ export function CarriedPropRelease(p: CarriedProp, m: Mat, host: GameHost,
   p.lastPos.z = p.shotPoint.z;
   const e = MatrixToEulerZYX(w);
   p.rx = e.rx; p.ry = e.ry; p.rz = e.rz;
-  // `obj+0x100 = pos; RegisterForCameraTracking(obj)`. It is counted in
-  // `g_camera_candidate_count`; `[open]` it is not aimed at, because the
-  // port's slot list is over actors -- the gap `g_body_creatures` names.
-  RegisterForCameraTracking(p);
+  // `obj+0x100 = pos; RegisterForCameraTracking(obj)` at `0x00442C36`..
+  // `0x00442C4D`.
+  CarriedPropRegisterCameraPoint(p, p.pos);
   const carrier = ActorByAt(p.carrier);
   if (p.mode === CarriedPropRoutine.ThrowAtCamera) {
     const side = G.g_max_attackers === 1 ? 0
@@ -622,8 +624,8 @@ export function CarriedPropThrowAtCamera(p: CarriedProp, cam: CameraPair | null,
   MatrixRotateY(m, p.ry);
   MatrixRotateX(m, p.rx);
   p.draw = { m: m.slice(0, 16), view: true };
-  // `obj+0x100 = pos; RegisterForCameraTracking` -- see the release's note.
-  RegisterForCameraTracking(p);
+  // `obj+0x100 = pos; RegisterForCameraTracking` at `0x00443C70`..`0x00443C87`.
+  CarriedPropRegisterCameraPoint(p, p.pos);
   MatrixGetTranslation(m, p.shotPoint);
   RegisterForShotTest(p);
   CarriedPropCheckShot(p, m, cam, rng, events);
@@ -644,7 +646,8 @@ export function CarriedPropThrowAtCamera(p: CarriedProp, cam: CameraPair | null,
  * blinking for the last sixty, and then the attack permit the carrier claimed
  * goes back — the only place on this path that gives it up.
  */
-export function CarriedPropStuckToScreen(p: CarriedProp): boolean {
+export function CarriedPropStuckToScreen(p: CarriedProp,
+                                         v2w?: ArrayLike<number>): boolean {
   const t = p.stuck;
   p.stuck = t - 1;
   if (t === 0) {
@@ -661,11 +664,17 @@ export function CarriedPropStuckToScreen(p: CarriedProp): boolean {
   MatrixRotateY(m, p.ry);
   MatrixRotateX(m, p.rx);
   p.draw = { m, view: true };
-  // `obj+0x100 = g_camera_blocks * pos; RegisterForCameraTracking(obj)` --
-  // after the blink's early return, so a blinked-out frame is not counted.
-  RegisterForCameraTracking(p);
+  // `obj+0x100 = g_camera_blocks * pos; RegisterForCameraTracking(obj)` at
+  // `0x00444220`..`0x00444244` -- after the blink's early return, so a
+  // blinked-out frame is not counted. The prop sits in view space here, so
+  // the camera's point is taken back to the world.
+  if (v2w) MatrixTransformPoint(v2w, p.pos, _stuckWorld);
+  else { _stuckWorld.x = p.pos.x; _stuckWorld.y = p.pos.y; _stuckWorld.z = p.pos.z; }
+  CarriedPropRegisterCameraPoint(p, _stuckWorld);
   return true;
 }
+
+const _stuckWorld = vec3();
 
 /**
  * `CarriedPropCheckShot` — `FUN_004423F0`. What a hit does.
@@ -1140,7 +1149,8 @@ export function CarriedPropRollAtCamera(p: CarriedProp, cam: CameraPair | null,
   p.lastPos.x = p.pos.x; p.lastPos.y = p.pos.y; p.lastPos.z = p.pos.z;
   const w2v = cam?.w2v ?? MatIdentity();
   const d = CarriedPropDrawWorld(p, w2v);
-  RegisterForCameraTracking(p);
+  // `obj+0x100 = pos; RegisterForCameraTracking` at `0x00443EE4`..`0x00443EFB`.
+  CarriedPropRegisterCameraPoint(p, p.pos);
   RegisterForShotTest(p);
   CarriedPropCheckShot(p, d, cam, rng, events);
   if (!(p.hp > 0)) return;
@@ -1426,11 +1436,14 @@ function RegisterForShotTest(p: CarriedProp): void {
 }
 
 /**
- * `RegisterForCameraTracking` (`FUN_00408EC0`)'s gate for this pool: refused
- * while `obj+0x34` bit `0x10000` is up, which nothing on this path raises.
+ * `obj+0x100 = point; RegisterForCameraTracking(obj)` (`FUN_00408EC0`) --
+ * the pair every call site on this path writes. `[port-only]` as a function.
  */
-function RegisterForCameraTracking(p: CarriedProp): void {
-  p.cameraTracked = (p.flags & ActorFlag.NoCameraTrack) === 0;
+function CarriedPropRegisterCameraPoint(p: CarriedProp, point: Vec3): void {
+  p.lookAt.x = point.x;
+  p.lookAt.y = point.y;
+  p.lookAt.z = point.z;
+  RegisterPropForCameraTracking(p.id, p.flags, p.pos);
 }
 
 /** The two camera matrices, `g_camera_world_to_view` and `g_camera_blocks`. */
@@ -1447,7 +1460,6 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
   const cam = host.cameraMatrices?.(w2v, v2w) ? { w2v, v2w } : null;
   G.g_carried_props = G.g_carried_props.filter((p) => {
     p.shootable = false;
-    p.cameraTracked = false;
     switch (p.routine) {
       case CarriedPropRoutine.Init:
         CarriedPropInit(p);
@@ -1473,7 +1485,7 @@ export function CarriedPropPoolUpdate(rng: Rng, host: GameHost,
         CarriedPropFallFree(p, cam, rng, events);
         return true;
       case CarriedPropRoutine.StuckToScreen:
-        return CarriedPropStuckToScreen(p);
+        return CarriedPropStuckToScreen(p, cam?.v2w);
       case CarriedPropRoutine.Break:
         return CarriedPropBreakUpdate(p);
       default:

@@ -21,6 +21,7 @@ import {
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ScriptJson } from "../bundle";
+import { prepareDrawCommands } from "./draw_order";
 import { subtreeResources } from "./scope3d";
 
 export interface ModelInfo {
@@ -54,9 +55,20 @@ export class StageScene {
   private mode: Visibility = "region";
   private currentRegion = -1;
   private loadedSlots = new Set<number>();
+  /**
+   * The tiles class 0x41's water task draws (`render/water_surfaces.ts`):
+   * every one it can, and the ones it drew this frame. See
+   * {@link setWaterSlots}.
+   */
+  private waterOwned: ReadonlySet<number> = new Set();
+  private waterDrawn: ReadonlySet<number> = new Set();
 
   static async load(url: string, script: ScriptJson): Promise<StageScene> {
     const gltf = await new GLTFLoader().loadAsync(url);
+    // Before anything clones a node: every layer that draws a stage model
+    // copies it, and the copies must carry the engine's draw state and the
+    // primitive marks the translucent sort groups by. See `draw_order.ts`.
+    prepareDrawCommands(gltf.scene, gltf.parser.associations);
     return new StageScene(gltf.scene, script);
   }
 
@@ -109,6 +121,32 @@ export class StageScene {
 
   modelsInRegion(r: number): ModelInfo[] {
     return this.byRegion.get(r) ?? [];
+  }
+
+  /** The model at an asset slot, if the stage glTF holds one. */
+  nodeForSlot(slot: number): Object3D | null {
+    return this.bySlot.get(slot)?.node ?? null;
+  }
+
+  /**
+   * What `WaterSurfaceUpdate` (`FUN_0046E3A0`) drew this frame, of the tiles
+   * this stage holds, and every tile it could.
+   *
+   * A task-drawn tile shows while the player has it resident: loaded with
+   * opcode 0x50, or named by the region the walker is in -- the draw is
+   * `AssetDrawSlot`, which draws nothing that is not loaded. And a tile the
+   * task owns is taken **out** of the unregioned rule below: that rule stands
+   * in for "something draws what the script streams in", and for these the
+   * something is now here. Left in, it drew stage 2's two death-water tiles
+   * one on top of the other and stage 3's before their task existed.
+   */
+  setWaterSlots(owned: ReadonlySet<number>, drawn: ReadonlySet<number>): void {
+    if (sameSet(owned, this.waterOwned) && sameSet(drawn, this.waterDrawn)) {
+      return;
+    }
+    this.waterOwned = new Set(owned);
+    this.waterDrawn = new Set(drawn);
+    this.refresh();
   }
 
   /** Bounding sphere of one region, for framing the camera on it. */
@@ -165,7 +203,15 @@ export class StageScene {
     // Props the script streamed in with 0x50 are not region members; they stay
     // drawn until 0x51 takes them away.
     for (const m of this.unregioned) {
-      if (m.slot !== null && this.loadedSlots.has(m.slot)) m.node.visible = true;
+      if (m.slot === null || this.waterOwned.has(m.slot)) continue;
+      if (this.loadedSlots.has(m.slot)) m.node.visible = true;
+    }
+    for (const slot of this.waterDrawn) {
+      const m = this.bySlot.get(slot);
+      if (!m) continue;
+      if (this.loadedSlots.has(slot) || m.regions.includes(this.currentRegion)) {
+        m.node.visible = true;
+      }
     }
   }
 
@@ -199,6 +245,12 @@ export class StageScene {
     for (const m of materials) m.dispose();
     for (const t of textures) t.dispose();
   }
+}
+
+function sameSet(a: ReadonlySet<number>, b: ReadonlySet<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
 }
 
 function countTriangles(node: Object3D): number {

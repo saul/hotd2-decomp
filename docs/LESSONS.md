@@ -341,7 +341,9 @@ at `0x00409bec`–`0x00409c03`, **after** the `JMP` to `MatrixStackPop` that
 Ghidra has marked no-return: the function body ends there, the pseudocode ends
 there with a `WARNING: Subroutine does not return`, and the call past it is in
 no xref list. `disassemble_bytes` from the last address the body claims is what
-finds it.
+finds it. The same thing hides a **loop**: `RegionDrawResidentSet`'s body ends
+at `0x0040143E` and its loop tail, `0x00401443..0x0040145F`, lies outside it,
+so the decompile of a list walk draws one entry and stops.
 
 It is **L32** one level down — that lesson is about a search over decoded
 operands seeing one addressing mode; this is about a search over Ghidra's
@@ -737,3 +739,162 @@ my name. **Make a subdirectory named for your task and keep every scratch
 file in it**, and treat a name at the scratch root as something another agent
 may already own. It is L28 and L36 pointed at the one directory that is
 outside every worktree by design.
+
+**L52 — A Ghidra rename by address overwrites whatever a peer named there,
+and says so only in its result.** Porting the ring a class-0x30 corpse leaves,
+I found three routines with no Ghidra function, created them, and named them
+over MCP. `rename_function` succeeded every time. Its message read *"Renamed
+function at 0x00407e30 from 'RingEffectSpread' to ..."* -- a peer porting the
+fish had created and named the same three an hour earlier, uncommitted in its
+own worktree, and the shared database is the one place both of us wrote. The
+peer's TSV and TypeScript used its names, the database now used mine, and the
+task had two ports in two trees.
+
+Before naming anything in the shared database, **grep every live worktree's
+`ghidra/annotations/*.tsv` for the address** -- a peer's uncommitted row is
+there before it is anywhere else -- and read the `from` in every rename
+result, which is the only report that the name replaced was not `FUN_...`.
+It is `L17` pointed at a write: "I did not see a name" and "there was no
+name" are different claims.
+
+**L53 -- An arm that bumps the substate and does not return runs the next arm
+in the same frame.** Class 0x11's two launch substates end `INC byte ptr
+[EAX+5]` and then carry straight on into the code the jump table gives the
+next substate -- `0x0043B03E` into `0x0043B044`, `0x0043B6F2` into
+`0x0043B6F7` -- so the launch frame also halves the turn still owed. The port
+had each arm end in `return`, which is what a `switch` in TypeScript wants and
+what reading the arms one at a time suggests, and every hop turned one halving
+short for as long as it existed. The tell is in the addresses: an arm whose
+last instruction is not a `RET`, a `JMP` to the epilogue or a `JMP` elsewhere
+falls through, and the jump table says where to. Check each arm's last
+instruction against the next arm's first address before writing its `return`.
+
+**L54 -- "The script loaded it" is not "something draws it".** Opcode 0x50 and
+`asset_load_polfile` make a slot resident and nothing more; the model is on
+screen only if a region lists it or some routine calls `AssetDrawSlot` on it.
+The player's `StageScene` stood in for the second case with "loaded and in no
+region, so drawn", which looked right for as long as the stand-in happened to
+agree with the drawer -- and made stage 2's block 16 canal, loaded but listed
+by other regions, simply absent, while nothing said a drawer was missing. The
+drawer was class 0x41 type 1, a task no port had read. When a loaded model is
+missing or wrong, search `.text` for its slot as an immediate (and as bytes,
+for the ones in unfunctioned code): what draws it is whatever names it.
+
+**L55 — A body Ghidra cut short at a call may be one flow override, and it
+can be cleared.** `ActorAimHeadAtCamera` (`FUN_00453BE0`) decompiled as a
+transform and a `MatrixStackPop` and nothing else, which is L35's shape --
+and `MatrixStackPop` is not marked no-return: `ActorHeadAimAngles` flows past
+its own pop. What cut this body was a `CALL_RETURN` flow override on the one
+`CALL` instruction at `0x00453C78`, and class 0x25's twin had the same on its
+pop at `0x00485C38`. `clear_instruction_flow_override` with `dry_run: true`
+names it without touching anything; clearing it, disassembling the tail and
+re-creating the function gave both routines their whole pseudocode -- the
+stepping, the tolerance test and the three rotations the listing had been
+hiding for as long as the head aim was believed not to exist. So when a
+decompilation stops at a call that does return, **ask the instruction before
+the function**: L35 says read past the end, and this says the end may be
+movable. The override lives in the database and not in `ghidra/annotations/`,
+so a rebuild can bring it back; say so in the row.
+
+**L56 -- A value computed at module load through an import cycle is a page
+that does not start, behind a green `test:port`.** `game/globals.ts` imports
+`game/hud_shutter.ts` for `HudShutterTaskCreate`, and `hud_shutter.ts` imports
+`G` and the `ScreenFurniture` enum back. Calls across that cycle are fine; a
+top-level `const MASK = ScreenFurniture.ChapterCard | ...` is not. Which module
+of a cycle evaluates first depends on which one the program enters by, and the
+page enters through `app/`, so there `hud_shutter.ts` ran first, found
+`ScreenFurniture` undefined and threw "reading 'ChapterCard'". `tsc` passed,
+and so did `test:port`, which enters the graph elsewhere; only `loops`, a check
+that loads the real page, failed -- as a timeout waiting for a button, with the
+throw two lines above it. **In `game/`, derive anything that touches another
+module's export inside the function that uses it**, and when a page check fails
+after a merge, read its `threw:` line before its timeout.
+
+**L57 -- A divergence parked "until something needs it" is blind if the
+input that would need it is dropped upstream.** `ApplyRootMotion` turned the
+root delta by yaw alone, and the note on it said that was wrong only for a
+class-0x31 actor on a wall, and could wait until something needed it, "because
+the clips those stances play carry no root translation". The premise was true
+of the stance clips and missed the case that needed it. Stage 2 block 21's two
+`zstin` are not put on the wall by a stance at all: their **spawn record**
+places them there, orient `(0, 0xC000, 0xC000)`, and the exporter kept only the
+yaw. With pitch and roll dropped before the port ever saw them, no run of the
+port could have shown the divergence mattering. The actors stood upright a
+hundred units up and walked out into the air, and it went in as "they jump
+from way above the player". **When you park a divergence, name the inputs that
+would make it matter, and check that every one of them reaches the port** --
+here, `grep` the placements for a nonzero pitch or roll. It is `L27` and
+`L34`'s "scan the shipped data" applied one step further upstream: the scan has
+to cover the fields the exporter throws away, not only the ones it keeps.
+
+**L58 -- A dispatcher has more than one caller, and "nothing plays X" was
+asked of one of them.** `sound.md` carried "no stage script starts its own
+track" as an open question, `bundle.ts` wrote it into every bundle's
+`stage_track.note`, and the player started each stage's music at load "by
+convention" to make up for it -- all from a table of every `bgm_entry_play` in
+the six scripts. Every one of those names a boss or transition track. But
+`se_play` hands its operand to the same `PlaySoundId`, and **the same document
+said so**: its operand names nine BGM tracks. Five of them are the stage
+tracks, each at step 2 of its entry block. The convention start opened the
+music a step early, and because the port ignored a request for the track
+already playing, the script's own start -- which in the engine reopens the file
+from its first sample -- was swallowed. The same afternoon found evt `0x2E`
+named `resume_bgm_if_skipped` from the word it plays, `0x80000002`, when
+`PlaySoundControl` sends that word to the **voice**; the mixer had taken every
+namespace-8 id as a music stop, so a cutscene skip silenced the stage. **Before
+recording that nothing reaches a routine, enumerate every instruction and
+every call site that can reach it, and read the routine a word is handed to
+before naming the word.** It is `L17` pointed at a dispatcher: the negative was
+true of the caller that was looked at.
+
+**L59 -- The URL is the walker's address as of the last throttled write, and
+a driven harness outruns the throttle.** Checking that the script stood still
+under the continue screen, a harness read `block/step/op` out of
+`location.search` and saw `11/2/26` become `11/2/34` during the countdown --
+"the gate is broken". It was not: the walker had been at `34` since before
+the player died. `syncUrlToWalker` writes through `Pacer.mayWriteUrl`, a
+wall-clock throttle (the history API is rate-limited), and under `?drive=1`
+hundreds of frames go by between two writes, so the URL answered for a frame
+long past. **Read the walker's own address**, `__hotd2Drive.now().a`, which is
+`L44`'s "print the state, never the request" with the request being the page's
+own bookkeeping.
+
+The same session had the other half of that shape in the port itself: the
+gameplay gate was first transcribed as a term of each wait's condition, where
+it is right for the wait -- and `G.g_evt_gameplay_live` then only moved on the
+frames a wait's earlier terms let the `&&` reach it, so it sat at 1 through the
+whole continue screen. The engine computes that global once, before the frame's
+first instruction. **A value the engine computes once a frame is computed once
+a frame**, not wherever a condition happens to evaluate it.
+
+**L60 -- "The engine leaves it uninitialised" is a claim about the caller,
+not the allocator.** Every thrown weapon in the port tumbled at a rate of its
+own, eighteen times too slow for the knives, behind a divergence that said
+the engine has no value to copy: nothing writes the projectile's `obj+0x135C`,
+and `ActorAlloc` (`FUN_004A6FA0`) hands back its block uncleared, so the rate
+is whatever the arena's previous occupant left. The allocator half was true
+and beside the point -- both launchers call `ActorClearGameFields` on the very
+next line -- and the other half was L35: `SpawnThrownWeapon`'s pseudocode ends
+at a `MatrixStackPop` Ghidra marks no-return, and the rate (`0x2400`), the
+flags, the permit hand-off and the aim are all in the listing after it. A
+divergence whose justification is garbage memory should send you to the
+listing past every no-return call in each writer, and to the line after the
+allocation, before it is written: an engine that really read garbage there
+would spin its knives differently from throw to throw, which is itself a claim
+about the game that nobody had checked.
+
+**L61 -- A loader's default is a claim about the game, and so is the sign of
+an axis.** `GLTFLoader` turns `alphaMode: BLEND` into `depthWrite: false` and a
+normal blend, and three.js sorts transparent primitives farthest first. The
+player took both for as long as it existed, and they were three wrong claims
+about this engine at once: every one of its 82,494 meshes writes depth, 5,408
+of them add rather than blend, and its translucent pass orders whole models,
+nearest first. What made it visible was a car whose interior -- a black shell
+just inside the paint -- was drawn over the paint. The "farthest first,
+painter's order" in the docs came from reading `RenderCommandCompare`
+correctly (descending) and assuming the depth it compares was D3D's +z; it is
+the matrix stack's, and `RenderInitStates` flips z into D3D's view with
+`diag(1, 1, -1, 1)`. **When you port an order, find the matrix that defines
+the axis before you say which end comes first**, and treat any default a
+library supplies for state the exe sets explicitly as a divergence until it is
+shown to agree.

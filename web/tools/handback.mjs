@@ -20,8 +20,17 @@
  * Nothing else in the tree could see it. `port.test.ts` drives the mode
  * machine directly and proves the rule; this proves the *pacing*, which needs
  * the stage's own camera path, its own script and its own enemies — so it
- * plays them, kills the room the frame a gate starts waiting, and measures
- * the frames between the counter reaching zero and the gate letting go.
+ * plays them, lets each room's fight run for `FIGHT_FRAMES` once its gate
+ * starts waiting, kills the room, and measures the frames between the counter
+ * reaching zero and the gate letting go.
+ *
+ * The fight has to run first because the camera is two frames behind the
+ * room: an actor files itself as a candidate in its update, the next frame's
+ * `UpdateCameraEnemySlots` deals the slots, and the camera actor reads them
+ * the frame after that (`SceneTaskWalk`'s order). A room cleared the frame its
+ * gate is reached -- the enemies placed a frame or two before -- has not
+ * pulled the aim at all, and hands back at once, which is right and measures
+ * nothing about the turn.
  */
 
 import { readFileSync } from "node:fs";
@@ -36,15 +45,17 @@ import { GameSystem, ScriptSystem, syncPortGlobals }
   from "../src/app/systems.ts";
 import { ResetPropContainers } from "../src/game/class41/index.ts";
 import { CamPaths } from "../src/game/camera/curve.ts";
-import { CamSeatPathFrame } from "../src/game/camera/path.ts";
 import { ActorFlag } from "../src/game/actor.ts";
-import { CameraActionDriver } from "../src/game/camera/mode.ts";
+import { EvtActionHandler } from "../src/game/camera/driver.ts";
+import { HitResultCode } from "../src/game/combat/resolve_hit.ts";
 import { ReleaseEnemyAliveCount } from "../src/game/combat/counts.ts";
+import { SpawnClass } from "../src/game/spawn_class.ts";
+import { CamEvalPath7 } from "../src/game/camera/path.ts";
 import { ActorIsEnemy } from "../src/game/registry.ts";
 import { SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G } from "../src/game/globals.ts";
-import { SetGameTables } from "../src/game/tables.ts";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
 import { hasBundle, skipNoBundle, stageFile } from "./lib/bundle_root.ts";
@@ -65,6 +76,17 @@ const FRAMES = Number(process.env.HANDBACK_FRAMES ?? 5400);
 const OFF_RAIL_DEGREES = 0.5;
 
 /**
+ * Frames a room's fight runs, from the frame its gate starts waiting, before
+ * the harness clears it: long enough for the slot table to deal and the camera
+ * to turn onto the fight. The player cannot be hurt meanwhile
+ * (`g_player_no_damage`, the game's own cheat word), so no bite ends the run.
+ */
+const FIGHT_FRAMES = Number(process.env.HANDBACK_FIGHT ?? 60);
+
+/** The harness's stand-in for bone 1's height above an actor's `pos`. */
+const TRACK_BONE_RISE = 5;
+
+/**
  * `[name, stage, block, step]`. The step is the block's first *resting*
  * address — a walker stops between steps, not at a block's op 0, so seeking to
  * step 0 fails and runs the stage to its end instead.
@@ -82,11 +104,18 @@ function check(name, ok, detail = "") {
     + (ok || !detail ? "" : ` -- ${detail}`));
 }
 
-/** How far the aim is from the rail's own, in degrees, seen from the eye. */
+/**
+ * How far the aim is from the rail's own, in degrees, seen from the eye: the
+ * block's look-at against the path's target at the published frame, which is
+ * what `CameraTurnOntoPathTarget`'s `StepCameraLookAtDamped` turns it onto.
+ */
+const _railEye = { x: 0, y: 0, z: 0 };
+const _railTarget = { x: 0, y: 0, z: 0 };
 function offRailDegrees() {
   const e = G.g_camera_block_eye;
   const a = G.g_camera_block_target;
-  const b = G.g_cam_path_target;
+  CamEvalPath7(G.g_active_cam_path, G.g_cam_path_frame, _railEye, _railTarget);
+  const b = _railTarget;
   const ax = a.x - e.x, ay = a.y - e.y, az = a.z - e.z;
   const bx = b.x - e.x, by = b.y - e.y, bz = b.z - e.z;
   const la = Math.hypot(ax, ay, az), lb = Math.hypot(bx, by, bz);
@@ -124,7 +153,22 @@ for (const [name, stage, block, step] of CASES) {
   const world = new World();
   const scriptSys = new ScriptSystem();
   world.add("script", scriptSys);
-  world.add("game", new GameSystem());
+  const game = new GameSystem();
+  // No renderer, so no skeleton: the tracked bone -- what `SkeletonEmitNode`
+  // records into `obj+0x100` and the camera aims at -- stands in as a point
+  // `TRACK_BONE_RISE` above the actor's feet. Without it every tracked actor
+  // is aimed at the world origin, and what this measures is how far the
+  // origin is from the rail.
+  game.backend = {
+    boneWorld: (at, _bone, out) => {
+      const a = G.g_object_list.find((o) => o.at === at);
+      if (!a) return false;
+      out.x = a.pos.x; out.y = a.pos.y + TRACK_BONE_RISE; out.z = a.pos.z;
+      return true;
+    },
+    setBoneSlot: () => undefined,
+  };
+  world.add("game", game);
   const walker = new Walker(script, mkHost(), { seed: 1 });
   scriptSys.walker = walker;
   ctx.walker = walker;
@@ -132,6 +176,7 @@ for (const [name, stage, block, step] of CASES) {
   world.attach(ctx);
   SetGameTables(chars, script.breakables, script.set_pieces, script.humanoids,
                 script.coli, script.civilians);
+  SetCameraPaths(cam);
   // In play through the ported routines, not by hand (L49): the reset
   // started the game from the title, and this is the first player turn.
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
@@ -145,19 +190,26 @@ for (const [name, stage, block, step] of CASES) {
   }
   world.resync(ctx);
 
+  // The eye the next tick's frame is handed, as the app's `CameraTakeSystem`
+  // hands it: the camera the last tick drew. The camera block itself is the
+  // port's -- the action ring and the drivers seat it inside `GameUpdate`.
   const seat = () => {
-    const c = walker.cam;
-    const p = c && cam.paths.get(c.slot);
-    if (!p) return;
-    CamSeatPathFrame(p, c.frame, walker.rollEnabled, !c.retired);
     ctx.view.eye.x = G.g_camera_block_eye.x;
     ctx.view.eye.y = G.g_camera_block_eye.y;
     ctx.view.eye.z = G.g_camera_block_eye.z;
   };
+  // Every spawn made once, as `syncCharacterSpawns` makes them: an actor that
+  // died and left is not put back while its marker still stands.
+  const made = new Set();
   const spawn = () => {
     const reqs = [];
     for (const s of walker.spawns) {
-      if (G.g_object_list.some((o) => o.at === s.at)) continue;
+      if (made.has(s.at)) continue;
+      if (G.g_object_list.some((o) => o.at === s.at)) {
+        made.add(s.at);
+        continue;
+      }
+      made.add(s.at);
       const pl = placementAt.get(s.at);
       if (!pl) continue;
       const pos = s.pos ?? pl.pos ?? [0, 0, 0];
@@ -186,30 +238,43 @@ for (const [name, stage, block, step] of CASES) {
       console.log(`   f${f} ${walker.block}/${walker.step}/${walker.op} `
         + `wait=${w ? w.policy?.kind + ":" + w.blocksOn : "-"} `
         + `alive=${G.g_enemies_alive} free=${G.g_camera_free} `
-        + `drv=${G.g_camera_action_driver} minor=${walker.sceneState.minor} `
+        + `drv=${G.g_evt_action_handler} minor=${walker.sceneState.minor} `
         + `objs=[${G.g_object_list.map((o) => `${o.at.toString(16)}:c${o.cls.toString(16)}`
             + `:hp${o.hp}:d${o.dead ? 1 : 0}:v${o.visible ? 1 : 0}`).join(",")}]`);
     }
     if (onEnemyGate && !waiting) {
       waiting = { at: `${walker.block}/${walker.step}`,
                   since: f, zero: -1,
-                  driver: G.g_camera_action_driver };
+                  driver: G.g_evt_action_handler };
     }
     if (onEnemyGate && waiting) {
-      // Clear the room the way a death does, so the only thing left between
-      // here and the gate opening is the camera. These are the exact two
-      // things `ZombieReleasePermitAndUntrack` (`FUN_004565A0`) does on the
-      // death frame -- drop the alive count and take the actor out of the
-      // camera's slots -- and nothing else, because nothing else is what the
-      // hand-back is measured against. Firing a real bullet would add the
-      // death clip's length to every number here and measure the corpse
-      // instead of the camera.
-      if (waiting.zero < 0) {
+      // Clear the room, so the only thing left between here and the gate
+      // opening is the camera. Every enemy is killed the way the sidebar's
+      // Kill button kills (`ActorKillAll`, less the civilians): dead, and a
+      // class that runs its own death is handed a killing hit, so its death
+      // state does the teardown -- `ZombieReleasePermitAndUntrack` gives the
+      // permit back, raises `NoCameraTrack` and drops the alive count. Less
+      // than that leaves a live permit holder, which is a camera target in
+      // slot 0 or 1 for as long as it stands, in the engine as here.
+      // A room with nobody left in it has no fight to wait for.
+      if (waiting.zero < 0 && (f - waiting.since >= FIGHT_FRAMES
+                               || G.g_enemies_alive === 0)) {
         for (const o of G.g_object_list) {
-          if (o.despawned || !ActorIsEnemy(o.cls)) continue;
-          o.flags |= ActorFlag.NoCameraTrack;
-          G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== o.at);
-          ReleaseEnemyAliveCount(o);
+          if (!o.visible || o.dead || !ActorIsEnemy(o.cls)) continue;
+          o.hp = 0;
+          o.dead = true;
+          o.react = null;
+          o.flags |= ActorFlag.Dead;
+          if (o.cls === SpawnClass.Thrower || o.cls === SpawnClass.Zombie
+              || o.cls === SpawnClass.CarriedZombie) {
+            o.pendingHit = { bone: 1, result: HitResultCode.Damaged };
+          } else {
+            // A class with no death route here: its count and its camera
+            // candidacy go the way `ZombieReleasePermitAndUntrack` takes
+            // them. Latched, so a later pass costs nothing.
+            o.flags |= ActorFlag.NoCameraTrack;
+            ReleaseEnemyAliveCount(o);
+          }
         }
         if (G.g_enemies_alive === 0) {
           waiting.zero = f;
@@ -232,7 +297,7 @@ for (const [name, stage, block, step] of CASES) {
         `${gates.length}`);
   check(`${name}: every gate runs under an installed camera driver`,
         gates.length > 0
-        && gates.every((g) => g.driver !== CameraActionDriver.None),
+        && gates.every((g) => g.driver !== EvtActionHandler.None),
         gates.map((g) => `${g.at}:${g.driver}`).join(" "));
   // **The hold is the turn, so it is only as long as the turn has to be.** A
   // room whose aim never left the rail hands back at once and should; a room

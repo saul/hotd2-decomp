@@ -105,20 +105,24 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // engine.
   const ticks = SecondsToTicks(dt);
   let fading = false;
+  // How far the clip being faded **into** moves this frame: every tick with no
+  // fade up, none while one holds it, and what is left over on the frame the
+  // fade ends.
+  let run = ticks;
   if (obj.fadeFrom) {
     obj.fade -= ticks;
     if (obj.fade < 0) {
       // `*model = model[2] + 1`: the fade is over and the clip starts moving,
       // from the frame after the one it was held on.
-      obj.playTicks += -obj.fade;
+      run = -obj.fade;
       obj.fadeFrom = null;
       obj.fade = 0;
     } else {
+      run = 0;
       fading = true;
     }
-  } else {
-    obj.playTicks += ticks;
   }
+  obj.playTicks += run;
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
   if (base && !obj.action) {
@@ -128,8 +132,8 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     // (`00410cf8`..`00410d29`), which is every frame of a fade: nothing moves
     // the actor until the clip is playing again, and the first step is from
     // the held start frame to the one after it.
-    const d = fading ? { x: 0, z: 0 } : rootDelta(base, wasBase, f);
-    ApplyRootMotion(obj, d.x, d.z);
+    const d = fading ? { x: 0, y: 0, z: 0 } : rootDelta(base, wasBase, f);
+    ApplyRootMotion(obj, d.x, d.z, d.y);
     obj.rootFrame = f;
   } else {
     // A one-shot owns the body, and the base clock keeps running underneath
@@ -139,12 +143,18 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     obj.rootFrame = -1;
   }
 
-  // A strike or lunge at full weight. The lunge loops; the strike ends itself,
-  // and the state machine reads the null as "the swing is over".
+  // A one-shot at full weight -- a swing, an arc stage, an entrance. It ends
+  // itself, and the state machine reads the null as "the swing is over". The
+  // `loop` arm below was class 0x30's lunge, which plays on the base track now
+  // as `ZombieStateStrike` (`FUN_00455A40`) plays it; nothing sets it today.
   const act = obj.action;
   if (act) {
     const wasAct = obj.rootActionFrame;
-    act.ticks += SecondsToTicks(dt);
+    // A one-shot set through `ActorSetOneShotBlended` is the clip the fade is
+    // into, so the fade holds **it** on its start frame -- the arc's stages,
+    // whose thresholds are compared against exactly that cursor. See
+    // `ActorClip.held`.
+    act.ticks += act.held ? run : ticks;
     const am = MotionOf(obj, act.motion);
     if (!am) {
       obj.action = null;
@@ -158,7 +168,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       // immediately.
       const f = authoredFrameHeld(act.ticks, am.fps, am.frames);
       const d = rootDelta(am, wasAct, f);
-      ApplyRootMotion(obj, d.x, d.z);
+      ApplyRootMotion(obj, d.x, d.z, d.y);
       obj.rootActionFrame = f;
       if (act.ticks >= ticksOfAuthoredFrame(am.frames, am.fps)) {
         if (act.loop) {

@@ -74,6 +74,8 @@ export interface PlayerCommands {
   toggles: Readonly<Record<ToggleName, boolean>>;
   /** True while the pointer is over the branch bar; freezes the countdown. */
   branchHover: boolean;
+  /** Box the frame to 4:3, or fill the window. See `UiProjection.pillarbox`. */
+  pillarbox: boolean;
 
   // -- reached through --------------------------------------------------
 
@@ -123,7 +125,7 @@ export interface PlayerCommands {
   /** A stage the menu chose, loaded and -- once started -- running. */
   loadAndPlay(): void;
   poseFromSlot(slot: number, frame: number): void;
-  syncCameraToWalker(force?: boolean): void;
+  syncCameraToWalker(reseat?: boolean): void;
   onCamera(cmd: CamCommand): void;
   onFeed(e: FeedEntry): void;
   clearFeed(): void;
@@ -131,6 +133,7 @@ export interface PlayerCommands {
   pushUrl(): void;
   /** Put the bundle screen on the page. See `app/install/ExportScreen.tsx`. */
   openBundles(): void;
+  resize(): void;
 }
 
 export function runCommand(p: PlayerCommands, c: UiCommand): void {
@@ -213,6 +216,10 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       else p.cam.rails?.highlight(null);
       return;
     }
+    case "setPillarbox":
+      p.pillarbox = c.on;
+      p.resize();
+      return;
     // No redraw here, and none needed: the projection is rebuilt every frame
     // from the one tick, so a setting that changes what a layer reports shows
     // up on the next one. Twenty controls each poking the UI was the second
@@ -299,5 +306,15 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     // way, so neither changes a snapshot.
     case "muzzle":       p.effects.setMuzzle(on); return;
     case "redBlood":     p.bloodColour.setColour(on ? "red" : "green"); return;
+    // A debug aid, not a view: it changes when the script moves on. The walker
+    // reads it at the next branch; a stage loads its walker with the current
+    // value (`stage_load.ts`). Turning it off while a branch is being held
+    // lets the script go the way the engine would have on that frame, with the
+    // choice it latched then.
+    case "branchPause":
+      if (!p.walker) return;
+      p.walker.options.branchPause = on;
+      if (!on && p.walker.branch) p.walker.takeBranch();
+      return;
   }
 }

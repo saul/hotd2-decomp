@@ -13,12 +13,16 @@
  * computes the absolute position for frame *n* from the endpoints every time.
  */
 import type { ArcStage } from "../../bundle/characters";
-import type { Actor } from "../actor";
+import type { Events } from "../../core/events";
+import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import { ActorSetOneShotBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
-import { MotionOf } from "../tables";
+import type { GameHost } from "../host";
+import { MotionOf, MotionPlayFrame, SecondsToTicks } from "../tables";
 import { dist2d, vec3, type Vec3 } from "../vec";
+import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
 import {
-  ARC_MIN_FRAMES, ARC_MIN_FRAMES_FAST, ARC_SPEED_UNITS,
+  ARC_MIN_FRAMES, ARC_MIN_FRAMES_FAST, ARC_SPEED_UNITS, ThrowerState,
 } from "./states";
 
 /**
@@ -40,9 +44,31 @@ export function ActorArcBegin(obj: Actor, dest: Vec3, frames: number): void {
  * `ActorArcBeginTo` — `FUN_0044DC70`. An arc whose length comes from the
  * **2D** distance: `n = (int)(dist2d * step)`, duration `n - n % step`.
  *
- * `step` is the arc's parameter-advance rate, not its kind — see `PathPoint`.
- * Ghidra drops the FPU argument to `__ftol` here and shows the distance as
- * nothing at all.
+ * `[proved]` from the listing, because Ghidra drops the FPU argument to
+ * `__ftol` here and shows the distance as nothing at all (`L1`):
+ *
+ * ```
+ * 0044dc70  FLD  src.x; FSUB dst.x; FLD src.z; FSUB dst.z
+ * 0044dc88  dz*dz + dx*dx; FSQRT                      ; x and z only
+ * 0044dcdd  FIMUL dword ptr [ESP + 0x20]              ; * step, the 7th arg
+ * 0044dce1  CALL __ftol                               ; n, truncated
+ * 0044dce8  CDQ; IDIV step; SUB ECX, EDX              ; n - n % step
+ * 0044dcef  MOV [ESI + 0x1334], ECX                   ; the duration
+ * ```
+ *
+ * **`step` is the rate the arc is flown at, not a speed.** `ActorArcStep`
+ * hands the same number to `ActorArcInterpolate`, which advances `obj+0x1330`
+ * by it every frame, so a leg lasts `n / step` frames -- about **one frame per
+ * unit of horizontal distance whatever the step** -- and what a bigger step
+ * buys is height: the parabola is solved over `T = dist * step` parameter
+ * frames, so its apex rises with `step` squared. Stage 2's rooftop route flies
+ * four of its five legs at step 3.
+ *
+ * [diverges] The duration is floored at `step`. The engine's is not: a leg
+ * shorter than one unit gives `T = 0`, and `ActorArcInterpolate`'s
+ * `(dst - src) / T * n` is then `0 / 0` -- a NaN position for the one frame
+ * it runs. The floor keeps the port's position finite; the shipped routes'
+ * shortest leg is eight units, so it is never reached by the path follow.
  */
 export function ActorArcBeginTo(obj: Actor, dest: Vec3, step: number): void {
   const n = Math.trunc(dist2d(obj.pos, dest) * step);
@@ -82,67 +108,110 @@ export function InstallArcMotionScript(obj: Actor,
 }
 
 /**
- * The arc-script timing fit — `FitArcScriptByFadeLength` (`FUN_0044D5F0`) and
- * `FitArcScriptByStartFrame` (`FUN_0044E140`), the variant character type 0x19
- * takes.
- *
- * [diverges] One function here where the engine has two. They share their
- * whole positive branch and their slack formula and differ only in the tight
- * branch, so splitting them would duplicate twenty lines to vary three; the
- * character-type test that chooses between them is kept, in the same place
- * `ActorArcStep` makes it.
+ * `FitArcScriptByFadeLength` — `FUN_0044D5F0`. The timing fit every
+ * character type but 0x19 takes.
  *
  * The script is authored against one clip; the arc it is laid over is however
- * long the distance made it. This is what reconciles them, and the two
- * routines differ in *which end they give*:
+ * long the distance made it. This reconciles them by **growing the fades** of
+ * stages 1 and 2, and a fade is a hold (`ActorSetOneShotBlended`), so a long
+ * leap holds the flight pose through the air rather than playing it slowly.
+ * `[proved]` from the listing, `0x0044D5F0`..`0x0044D77C`:
  *
  * ```
- * slack = T - stage2.fade - stage1.fade - stage1.until + stage1.start
- * k     = trunc(|slack| * 0.5)
- * slack > 0  ->  both fades grow by k, the remainder onto stage 1's
- * slack <= 0 ->  0x19: both start frames advance by k, each clamped at its own
- *                      threshold — a short leap skips into the middle of the
- *                      clip rather than playing it slowly
- *                else: stage 1's start walks up and its threshold walks down
- *                      until the three stages fit
+ * slack = s1.start - s1.until + T                    ; 0044d606..d614
+ * slack == 0  ->  nothing
+ * slack >  0  ->  while (s1.fade + s2.fade < slack)  ; 0044d638
+ *                   s1.fade++, s2.fade++
+ *                 if (slack < s1.fade + s2.fade) s1.fade--   ; 0044d68f
+ *                 each fade clamped at 0x7F                  ; 0044d6af, d6cf
+ * slack <  0  ->  s1.fade = s2.fade = 1                      ; 0044d6f1, d700
+ *                 until (s1.fade + s2.fade - s1.start + s1.until <= T
+ *                        and s1.until - s1.start <= 1):
+ *                   s1.start++, s1.until--                   ; 0044d735
+ *                 if (s1.until - s1.start < 1) s1.start--    ; 0044d772
  * ```
  *
- * The 0.5 is `float ptr [0x004C43AC]` = `0x3F000000`; Ghidra drops it, because
- * it is the argument to `__ftol`.
+ * `ActorArcStep` passes the step as a second argument (`PUSH EDI; PUSH ESI` at
+ * `0x0044D8D2`); the routine reads only the first.
+ *
+ * This used to be one function for both routines, with the zstin routine's
+ * slack -- which subtracts both fades -- and its halved `k` applied to every
+ * type, and the tight branch replaced by a closed form. The sums agree when
+ * both slacks are positive, but the odd frame went to stage 1's fade where
+ * the engine gives it to stage 2's (the rooftop route's first leg, `T = 19`:
+ * 6 and 5 against the engine's 5 and 6), a slack the authored fades already
+ * covered took the tight branch where the engine at most takes one frame off
+ * stage 1's fade, and the tight branch did not reset both fades to 1.
  */
-export function FitArcScriptToDuration(obj: Actor): void {
+export function FitArcScriptByFadeLength(obj: Actor): void {
+  const s = obj.arcScript;
+  if (!s || s.length < 3) return;
+  const T = obj.arcTotal;
+  const slack = s[1].start - s[1].until + T;
+  if (slack === 0) return;
+  if (slack > 0) {
+    while (s[1].fade + s[2].fade < slack) {
+      s[1].fade++;
+      s[2].fade++;
+    }
+    if (slack < s[1].fade + s[2].fade) s[1].fade--;
+    if (s[1].fade > FADE_MAX) s[1].fade = FADE_MAX;
+    if (s[2].fade > FADE_MAX) s[2].fade = FADE_MAX;
+    return;
+  }
+  s[1].fade = 1;
+  s[2].fade = 1;
+  while (s[2].fade + s[1].fade - s[1].start + s[1].until > T
+         || s[1].until - s[1].start > 1) {
+    s[1].start++;
+    s[1].until--;
+  }
+  if (s[1].until - s[1].start < 1) s[1].start--;
+}
+
+/**
+ * `FitArcScriptByStartFrame` — `FUN_0044E140`. Character type 0x19's fit,
+ * which gives the other end: a short leap **skips into the middle** of its
+ * clip rather than holding it. `[proved]`, `0x0044E140`..`0x0044E293`:
+ *
+ * ```
+ * slack = T - s2.fade - s1.fade - s1.until + s1.start   ; 0044e170..e17a
+ * k     = __ftol(|slack * 0.5|)                         ; 0044e186..e1a1
+ * slack >  0  ->  s1.fade += k; s2.fade += k
+ *                 rest = slack - s2.fade - s1.fade; if (rest > 0) s1.fade += rest
+ * slack <= 0  ->  s1.start = min(s1.start + k, s1.until)
+ *                 s2.start = min(s2.start + k, s2.until)
+ *                 rest = |slack| - s2.start - s1.start
+ *                 if (rest > 0) s1.start = min(s1.start + rest, s1.until)
+ * ```
+ *
+ * The 0.5 is `float ptr [0x004C43AC]` = `0x3F000000` and the sign flip
+ * `[0x004C4C64]` = `-1.0`; Ghidra drops both, because they feed `__ftol`.
+ * Unlike {@link FitArcScriptByFadeLength} **nothing here clamps a fade**.
+ */
+export function FitArcScriptByStartFrame(obj: Actor): void {
   const s = obj.arcScript;
   if (!s || s.length < 3) return;
   const T = obj.arcTotal;
   const slack = T - s[2].fade - s[1].fade - s[1].until + s[1].start;
-  const k = Math.trunc(Math.abs(slack) * 0.5);
-
+  const k = Math.trunc(Math.abs(slack * 0.5));
   if (slack > 0) {
-    s[1].fade = Math.min(FADE_MAX, s[1].fade + k);
-    s[2].fade = Math.min(FADE_MAX, s[2].fade + k);
+    s[1].fade += k;
+    s[2].fade += k;
     const rest = slack - s[2].fade - s[1].fade;
-    if (rest > 0) s[1].fade = Math.min(FADE_MAX, s[1].fade + rest);
+    if (rest > 0) s[1].fade += rest;
     return;
   }
-  if (obj.charType === CHAR_ZSTIN) {
-    s[1].start = Math.min(s[1].until, s[1].start + k);
-    s[2].start = Math.min(s[2].until, s[2].start + k);
-    const rest = -slack - s[2].start - s[1].start;
-    if (rest > 0) s[1].start = Math.min(s[1].until, s[1].start + rest);
-    return;
-  }
-  // [diverges] `FitArcScriptByFadeLength`'s tight branch walks stage 1's start
-  // up and its threshold down one frame at a time under two joint conditions;
-  // this is the fixed point of that loop and not the loop itself, which is the
-  // same answer whenever the window is wide enough to close — `[open]` when it
-  // is not.
-  const room = Math.max(0, s[1].until - s[1].start - 1);
-  const take = Math.min(room, -slack);
-  s[1].start += Math.ceil(take / 2);
-  s[1].until -= Math.floor(take / 2);
+  s[1].start = Math.min(s[1].until, s[1].start + k);
+  s[2].start = Math.min(s[2].until, s[2].start + k);
+  const rest = -slack - s[2].start - s[1].start;
+  if (rest > 0) s[1].start = Math.min(s[1].until, s[1].start + rest);
 }
 
-/** `ActorSetMotionBlended` stores the fade as a byte, so the fit clamps here. */
+/**
+ * `CMP EDX, 0x7f` / `MOV dword ptr [EAX], 0x7f` at `0x0044D6AF` and
+ * `0x0044D6CF`: `FitArcScriptByFadeLength`'s ceiling on both fades.
+ */
 const FADE_MAX = 0x7f;
 /** The character type that takes `FitArcScriptByStartFrame`. */
 const CHAR_ZSTIN = 0x19;
@@ -181,6 +250,13 @@ export function ActorArcBeginToWaypoint(obj: Actor, dest: Vec3,
  *
  * Flat on x and z, a parabola on y that arrives exactly on time. Returns false
  * once the arc is over, which is how the leap states know they have landed.
+ *
+ * `[proved]` from the listing, `0x0044DD00`..`0x0044DDD2`: the test is
+ * `CMP EDX, EDI` with `EDI = T + step`, the position is taken at `n` and the
+ * counter then advanced **by `step`**, not by one (`ADD EDX, ESI` at
+ * `0x0044DD85`). `g2` is `float ptr [0x00565E1C]` = `0x3CDF0123` and the 0.5
+ * `[0x004C43AC]`, both re-read in the listing because the pseudocode folds
+ * them (`L1`).
  */
 export function ActorArcInterpolate(obj: Actor, step: number): boolean {
   const T = obj.arcTotal;
@@ -248,61 +324,170 @@ export function ActorClipLength(obj: Actor, motion: number): number {
   return m ? (m.frames / Math.max(1, m.fps)) * GAME_HZ : 0;
 }
 
+/**
+ * `obj+0x19C` whichever clip is on the track: the one-shot's cursor while one
+ * runs, the base motion's otherwise.
+ *
+ * `[port-only]` The engine has one track and one cursor, so a routine that
+ * reads `obj+0x19C` gets whatever was last set on it. The port keeps the arc's
+ * stages on `obj.action` and everything else on the base motion, so where a
+ * routine reads the cursor across that boundary -- `ThrowerStateDelayedPounce`
+ * does, on the frame its wait clip hands to the arc -- this is the one field
+ * the engine would have read. {@link ActorClipFrame} is the reading for a
+ * routine that only ever sees its own one-shot.
+ */
+export function ActorPlayCursor(obj: Actor): number {
+  return obj.action ? obj.action.ticks : MotionPlayFrame(obj);
+}
+
+/**
+ * One stage of the script onto the clip: `ActorSetMotionBlended(obj+0x194,
+ * stage.motion, stage.start, stage.fade)`, on the channel the port keeps the
+ * arc on -- see {@link ActorSetOneShotBlended} for what the call does to the
+ * cursor, which is the whole reason it is not a plain assignment.
+ *
+ * `[port-only]` A stage whose clip the bundle does not carry is skipped,
+ * leaving the stage before it playing; the engine loads every clip it names.
+ */
 function playStage(obj: Actor, stage: ArcStage | undefined): void {
   if (!stage || stage.motion <= 0) return;
   if (!MotionOf(obj, stage.motion)) return;
-  obj.action = { motion: stage.motion, ticks: stage.start, loop: false };
-  obj.rootActionFrame = -1;
+  ActorSetOneShotBlended(obj, stage.motion, stage.start, stage.fade);
+}
+
+/**
+ * `(short)obj+0x1F4` in `0x16..0x19` -- `CMP EAX, 0x16 / JL` then
+ * `CMP EAX, 0x19 / JG`, three times over in `ActorArcStep`: the four class-0x31
+ * character types (`zsass`, `zskamere`, `zslman`, `zstin`), whose arcs raise
+ * and drop the flags below. The routine is shared with class 0x30, whose
+ * types fall outside the range.
+ */
+function ArcTypeTakesFlags(obj: Actor): boolean {
+  return obj.charType >= 0x16 && obj.charType <= 0x19;
 }
 
 /**
  * `ActorArcStep` — `FUN_0044D860`. One frame of an arc, script and all.
  * Returns false once the whole thing — flight *and* clip — is over.
  *
- * Phase 0 runs `FitArcScriptToDuration` first, which is what reconciles a clip
- * authored at one length with an arc that is however long the distance made
- * it.
+ * `[proved]` from the listing. The phase at `obj+0x1360` is a five-way jump
+ * table (`0x0044DA4C`) whose arms **fall into each other** -- each ends by
+ * incrementing `obj+0x1360` and runs straight on into the next -- so a stage
+ * whose start is already past its threshold hands on in the same frame:
+ *
+ * ```
+ * 0  0044d886  type 0x16..0x19 and state != 10 (the leap aside):
+ *                if (obj+0x34 & 0x100) obj+0x136C |= 0x200; obj+0x34 |= 0x100
+ *    0044d8c1  type 0x19 ? FitArcScriptByStartFrame : FitArcScriptByFadeLength
+ *    0044d901  ActorSetMotionBlended(obj+0x194, stage 0)      ; phase 1, on
+ * 1  0044d925  if (obj+0x19C < stage0.until) return 1
+ *    0044d94d  ActorSetMotionBlended(obj+0x194, stage 1)
+ *    0044d95c  type 0x16..0x19: if (!(obj+0x136C & 0x200)) obj+0x34 &= ~0x100
+ *                               obj+0x136C &= ~0x200            ; phase 2, on
+ * 2  0044d98a  ActorArcInterpolate(step)             ; its result is ignored
+ *    0044d9a1  if (obj+0x19C < stage1.until) return 1
+ *    0044d9c9  ActorSetMotionBlended(obj+0x194, stage 2)
+ *    0044d9dd  obj+0x1330 -= step                               ; phase 3, on
+ * 3  0044d9ed  if (ActorArcInterpolate(step) == 1) return 1
+ *    0044d9fc  ThrowerEmitGroundDust(0x50)                      ; phase 4, on
+ * 4  0044da20  if (obj+0x19C < stage2.until) return 1
+ *    0044da39  type 0x16..0x19: obj+0x136C |= 0x180000
+ *    0044da43  return 0
+ * ```
+ *
+ * **The windup cannot be shot.** Phase 0 raises `obj+0x34` bit `0x100`, which
+ * makes `ThrowerShotFeedback` force every hit to a ricochet, and the takeoff
+ * drops it again -- unless it was already up, which `obj+0x136C` bit `0x200`
+ * remembers, so a state that holds it for its own reasons (the leap to a
+ * point) keeps it. The leap aside does not raise it, but its takeoff still
+ * drops it.
+ *
+ * **Phase 2 flies whether or not the arc is over.** `ActorArcInterpolate` only
+ * refuses to move once the frame count passes the duration, so an arc that
+ * lands before the clip reaches stage 1's threshold waits there for the clip,
+ * and the landing clip still plays. `obj+0x1330 -= step` then gives back the
+ * frame phase 2 just flew, because phase 3 flies it again on the same frame.
+ *
+ * The step is per frame, and the port's `dt` may be several:
+ * `SecondsToTicks(dt) * step` stands in for the engine's calls one frame at a
+ * time.
+ *
+ * **The landing is where the dust goes up**: `ThrowerEmitGroundDust(0x50)`
+ * (`FUN_0044D260`) for every class, which answers only a leaping thrower and
+ * then runs `zsass`'s trail. `host` and `events` are what its sprites need to
+ * face the camera and to make their sound; the arc itself reads neither.
  */
-export function ActorArcStep(obj: Actor, _step: number,
-                             dt: number): boolean {
+export function ActorArcStep(obj: Actor, step: number, dt: number,
+                             host?: GameHost, events?: Events): boolean {
   const script = obj.arcScript;
-  if (!script?.length) return false;
-  const frames = dt * GAME_HZ;
+  // `[port-only]` The engine's slot always holds twelve dwords, zeros for the
+  // `&DAT_007DCC70` sentinel; the port's is null when the bundle has none.
+  if (!script || script.length < 3) return false;
+  const frames = SecondsToTicks(dt) * step;
 
   if (obj.arcPhase === ArcPhase.Windup) {
-    // Phase 0 fits the script to the arc *before* the first stage plays, so
-    // the windup, the flight and the landing span the leap however long it is.
-    FitArcScriptToDuration(obj);
+    if (ArcTypeTakesFlags(obj) && obj.state !== ThrowerState.LeapAside) {
+      if (obj.flags & ActorFlag.ShotImmune) {
+        obj.flags2 |= ThrowerFlag.ArcSuppressedShotImmune;
+      }
+      obj.flags |= ActorFlag.ShotImmune;
+    }
+    // The fit runs *before* the first stage plays, so the windup, the flight
+    // and the landing span the leap however long the distance made it.
+    // `CMP CX, 0x19` at `0x0044D8C1`, `CX` being the character type.
+    if (obj.charType === CHAR_ZSTIN) FitArcScriptByStartFrame(obj);
+    else FitArcScriptByFadeLength(obj);
     playStage(obj, script[0]);
     obj.arcPhase = ArcPhase.Crouched;
-    return true;
   }
   if (obj.arcPhase === ArcPhase.Crouched) {
     if (ActorClipFrame(obj) < script[0].until) return true;
     playStage(obj, script[1]);
+    if (ArcTypeTakesFlags(obj)) {
+      if (!(obj.flags2 & ThrowerFlag.ArcSuppressedShotImmune)) {
+        obj.flags &= ~ActorFlag.ShotImmune;
+      }
+      obj.flags2 &= ~ThrowerFlag.ArcSuppressedShotImmune;
+    }
     obj.arcPhase = ArcPhase.Flight;
   }
   if (obj.arcPhase === ArcPhase.Flight) {
-    if (!ActorArcInterpolate(obj, frames)) obj.arcPhase = ArcPhase.Settled;
-    else if (ActorClipFrame(obj) >= script[1].until) {
-      playStage(obj, script[2]);
-      obj.arcPhase = ArcPhase.Landing;
-    }
-    return true;
+    ActorArcInterpolate(obj, frames);
+    if (ActorClipFrame(obj) < script[1].until) return true;
+    playStage(obj, script[2]);
+    obj.arcFrames -= frames;
+    obj.arcPhase = ArcPhase.Landing;
   }
   if (obj.arcPhase === ArcPhase.Landing) {
     if (ActorArcInterpolate(obj, frames)) return true;
-    obj.arcPhase = ArcPhase.Settled;
-    // Snap to the point the arc named rather than to wherever the last
-    // partial frame left it.
+    // `[port-only]` Onto the point the arc named. A one-frame step's last
+    // flight frame is that point already; a `dt` of several frames can step
+    // past it, and the parabola keeps falling.
     obj.pos.x = obj.arcTo.x;
     obj.pos.y = obj.arcTo.y;
     obj.pos.z = obj.arcTo.z;
-    obj.vel.x = obj.vel.y = obj.vel.z = 0;
-    return true;
+    // `0x0044D9FC`. After the snap rather than before it, so that the puff
+    // and the trail point are where a one-frame step would have left the
+    // actor -- the engine's own position here -- whatever `dt` was.
+    ThrowerEmitGroundDust(obj, GroundDustCode.ArcLanding, host, events);
+    obj.arcPhase = ArcPhase.Settled;
   }
-  // Settled: the arc is down, and the state waits for the landing clip.
-  return obj.action !== null && ActorClipFrame(obj) < script[2].until;
+  if (obj.arcPhase === ArcPhase.Settled) {
+    // `[port-only]` `obj.action !== null`: the port's channel ends a one-shot
+    // at twice its authored frame count, past `g_motion_play_length + 1` where
+    // the engine's cursor wraps, so a threshold the clip never reaches -- or a
+    // stage the bundle has no clip for -- cannot park the actor here. No
+    // shipped script names one (`verify_combat.py` check 16), so on real data
+    // this is the engine's own test.
+    if (obj.action !== null && ActorClipFrame(obj) < script[2].until) {
+      return true;
+    }
+    if (ArcTypeTakesFlags(obj)) obj.flags2 |= ThrowerFlag.Collide;
+    return false;
+  }
+  // `JA 0x0044da45` with `EBX = 1`: a phase past 4 does nothing and reports
+  // the arc still running.
+  return true;
 }
 
 /**

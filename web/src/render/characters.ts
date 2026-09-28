@@ -97,10 +97,13 @@ import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
 import { alphaGatesWholeActor, applyDrawGates }
   from "./characters/draw_gates";
+import { applyHeadAim } from "./characters/head_aim";
 import {
   placeJudgmentRoot, seatJudgmentSubActors, syncJudgmentWings,
 } from "./characters/judgment";
 import { restoreGore, swapGore } from "./characters/gore";
+import { placeBatRoot } from "./characters/bat";
+import { placeThrowerRoot } from "./characters/thrower";
 export type { Instance };
 
 
@@ -541,6 +544,12 @@ export class CharacterLayer implements System {
         } else if (placeJudgmentRoot(inst)) {
           // Classes 0x22 and 0x23: all three angles, in each model's own
           // order (`model+0x68`). See `render/characters/judgment.ts`.
+        } else if (placeBatRoot(inst)) {
+          // Class 0x46: all three angles in order 5, at the model's own
+          // size. See `render/characters/bat.ts`.
+        } else if (placeThrowerRoot(inst)) {
+          // Class 0x31: all three angles in order 1. See
+          // `render/characters/thrower.ts`.
         } else if (inst.a.carrierAt >= 0) {
           inst.root.position.set(inst.a.carrierWorld.x,
                                  inst.a.carrierWorld.y,
@@ -581,6 +590,9 @@ export class CharacterLayer implements System {
       // Last, so that a cel or a gore piece hung on a bone this frame arrives
       // under the gate and an attachment made this frame is known to be one.
       applyDrawGates(inst);
+      // ...and the head's turn, for the same reason: it reaches every mesh
+      // the hook draws on bone 2, including one hung there this frame.
+      applyHeadAim(inst);
     }
     // `Class22DrawAndPoseSubActor` seats the sub-actor on the flier's node 1
     // *after* drawing the flier, so it reads this frame's pose: every
@@ -1124,6 +1136,7 @@ export class CharacterLayer implements System {
       // apply do the whole walk.
       inst.gates = undefined;
       applyDrawGates(inst);
+      applyHeadAim(inst);
       inst.root.visible = this.enabled && inst.a.visible
         && (!alphaGatesWholeActor(inst) || inst.a.alpha > 0)
         && boss3Drawn(inst);
@@ -1133,6 +1146,10 @@ export class CharacterLayer implements System {
         if (placeHordeRoot(inst)) {
           // See `update`.
         } else if (placeJudgmentRoot(inst)) {
+          // See `update`.
+        } else if (placeBatRoot(inst)) {
+          // See `update`.
+        } else if (placeThrowerRoot(inst)) {
           // See `update`.
         } else if (inst.a.carrierAt >= 0) {
           inst.root.position.set(inst.a.carrierWorld.x,

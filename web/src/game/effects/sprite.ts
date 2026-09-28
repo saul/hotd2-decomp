@@ -60,13 +60,41 @@ export enum SpriteEffectKind {
   WoodAlt = 0x38,
   /** `ActorShotFeedback`'s ricochet for character type 3. */
   NoEffectType3 = 0x51,
-  /** `ThrownWeaponDeflected` (`FUN_00450050`) — the same range as `Other`. */
+  /**
+   * `ZombieThrownWeaponStateShotDown` (`FUN_00459D20`), for every class-0x30
+   * weapon shot out of the air (`PUSH 0x52` at `0x00459D54`) — the same range
+   * as `Other`. Class 0x31's `ThrownWeaponDeflected` (`FUN_00450050`) spawns
+   * {@link Other} for `zsass`'s knives and {@link NoEffectType3} for
+   * `zslman`'s blades instead (`0x00450086`..`0x004500AD`).
+   */
   DeflectedWeapon = 0x52,
   /**
    * The Original Mode blast `MarkActorShot` (`FUN_00404DB0`) adds for weapon
    * kind 3. Seeds a random roll, and takes the 35-unit scale law.
    */
   OriginalBlast = 0x53,
+  /**
+   * The dry-ground arm of `ZombieDeathEffectCueTick` (`FUN_004569B0`) and
+   * `ZombieDeathLandingEffect` (`FUN_00456B70`), whose wet arm is
+   * {@link Splash}: slots `0x94..0xA2`, `common.bin` 25..39, base scale 0.7.
+   * `[likely]` dust, from that choice and nothing else.
+   */
+  Dust = 0x46,
+  /**
+   * The second label on {@link Dust}'s arm -- `case 0x46: case 0x4B:` -- so
+   * the same strip and the same base scale. `ThrowerEmitGroundDust`
+   * (`FUN_0044D260`) spawns this one: the tall column where a leap lands and
+   * the stretched scuffs of `zsass`'s trail. Why the routine names 0x4B
+   * rather than 0x46 is `[open]`; nothing in the switch tells them apart.
+   */
+  DustAlt = 0x4b,
+  /**
+   * Slots `0x1339..0x1356`, `common.bin` 307..336 -- the strip the bat's and
+   * the owl's water splashes flip through -- and `PlayImpactSoundForMaterial`
+   * gives it `COMMON\BOMB2_16.WAV`. What those two routines spawn on the wet
+   * surfaces and in the rain.
+   */
+  Splash = 0x61,
   /** Exempt from the distance scale law altogether. */
   BigSand = 0x63,
 }
@@ -112,7 +140,11 @@ export interface SpriteEffect {
   pitch: number;
   yaw: number;
   roll: number;
-  /** `+0x50`, `+0x54`, `+0x58`. All three are always the same number. */
+  /**
+   * `+0x50`, `+0x54`, `+0x58`. The kind's base scale and the distance law
+   * write one number into all three; a caller's override at `params[6..8]`
+   * writes each its own (`ZombieDeathEffectCueTick`'s dust is 0.5, 1.5, 1.5).
+   */
   scale: Vec3;
   /** `+0x60` — the asset slot being drawn, and the cursor. */
   slot: number;
@@ -151,6 +183,21 @@ export function SpawnSpriteEffect(pos: Vec3, pitch: number, yaw: number,
   SpawnSpriteEffectFromParams({
     pos, pitch, yaw, scale: null, kind, faceCamera, player,
   }, host, events);
+}
+
+/**
+ * `SpawnSpriteEffectFromParamsThunk` — `FUN_004073A0`.
+ *
+ * `SpawnSpriteEffectFromParams(params)` and nothing else: the entry point the
+ * callers use that build the whole twelve-word block themselves -- which is
+ * how a caller gets a scale override in at `params[6..8]`, since
+ * `SpawnSpriteEffect` always writes `-1.0` there. `ZombieDeathEffectCueTick`'s
+ * dust is one. A separate function in the exe, so a separate one here.
+ */
+export function SpawnSpriteEffectFromParamsThunk(p: SpriteEffectParams,
+                                                 host?: GameHost,
+                                                 events?: Events): void {
+  SpawnSpriteEffectFromParams(p, host, events);
 }
 
 /**

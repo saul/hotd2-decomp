@@ -42,14 +42,13 @@ import { GameSystem, ScriptSystem, syncPortGlobals }
   from "../src/app/systems.ts";
 import { ResetPropContainers } from "../src/game/class41/index.ts";
 import { CamPaths } from "../src/game/camera/curve.ts";
-import { CamSeatPathFrame } from "../src/game/camera/path.ts";
 import { ActorFlag } from "../src/game/actor.ts";
 import { HitResultCode } from "../src/game/combat/resolve_hit.ts";
 import { SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
 import { ActorIsEnemy, g_class_handlers } from "../src/game/registry.ts";
-import { SetGameTables } from "../src/game/tables.ts";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
@@ -115,17 +114,17 @@ function play([name, bundle, block, step, killAt, frames]) {
   world.attach(ctx);
   SetGameTables(chars, script.breakables, script.set_pieces, script.humanoids,
                 script.coli, script.civilians);
+  SetCameraPaths(cam);
   G.g_players_in_play = 1;
   G.g_player_lives = [9999, 9999];
   G.g_GameMode = script.game_mode;
   if (!seekTo(walker, block, step, 0)) throw new Error(`${name}: seek`);
   world.resync(ctx);
 
+  // The eye the next tick's frame is handed, as the app's `CameraTakeSystem`
+  // hands it: the camera the last tick drew. The camera block itself is the
+  // port's -- the action ring and the drivers seat it inside `GameUpdate`.
   const seat = () => {
-    const c = walker.cam;
-    const p = c && cam.paths.get(c.slot);
-    if (!p) return;
-    CamSeatPathFrame(p, c.frame, walker.rollEnabled, !c.retired);
     ctx.view.eye.x = G.g_camera_block_eye.x;
     ctx.view.eye.y = G.g_camera_block_eye.y;
     ctx.view.eye.z = G.g_camera_block_eye.z;
@@ -202,8 +201,11 @@ function play([name, bundle, block, step, killAt, frames]) {
         o.pendingHit = { bone: 1, result: HitResultCode.Damaged };
       }
     }
-    const inSlots = !!civ && G.g_enemy_slots.includes(civ.at);
-    if (t.rescue === f) t.trackedAtRescue = inSlots;
+    const inSlots = !!civ && G.g_enemy_slots.some((x) => x.occupied === 1
+      && x.prop === null && x.at === civ.at);
+    // Filed as a candidate by her own update, dealt a slot by the next
+    // frame's fill: the slot table is two frames behind what the actors did.
+    if (t.rescue >= 0 && f <= t.rescue + 2 && inSlots) t.trackedAtRescue = true;
     if (t.rescue >= 0 && t.untracked < 0 && !inSlots && f > t.rescue) {
       t.untracked = f;
       log("civilian leaves the camera's slots");

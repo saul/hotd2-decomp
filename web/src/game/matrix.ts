@@ -182,6 +182,35 @@ export function VecAimXAxisZThenY(x: number, y: number, z: number):
 }
 
 /**
+ * `VecAimYAxisZThenX` — `FUN_00401870`. The same question for the **up**
+ * axis: the BAMS pair that carries +Y onto `(x, y, z)` as
+ * `MatrixRotateZ(rz); MatrixRotateX(rx)`.
+ *
+ * ```
+ * 00401871  FLD [ESP+8]; FCHS; FLD [ESP+0xC]; FPATAN    ; atan2(-x, y)
+ * 00401893  MOV [ECX], EAX                             ; rz -> 5th argument
+ * 0040189e  TEST AH, 0x40 after ADD EAX, 0x2000        ; cos or sin?
+ * 004018ab  FDIVR [ESP+0xC]  /  004018b3 FDIVR [ESP+8]; FCHS
+ * 004018bd  FXCH; FPATAN                               ; atan2(z, h)
+ * 004018d3  MOV [EAX], EDX                             ; rx -> 4th argument
+ * ```
+ *
+ * `[proved]` from the listing; the rotation order is the one under which the
+ * port's `MatrixRotateZ` then `MatrixRotateX` put +Y back on the input, which
+ * the other order does not. Its one caller is `ThrowerEmitGroundDust`, with a
+ * collision normal.
+ */
+export function VecAimYAxisZThenX(x: number, y: number, z: number):
+    { rx: number; rz: number } {
+  const rz = FtolS16(Math.atan2(-x, y) * RADIANS_TO_BAMS);
+  const a = rz * BAMS_TO_RADIANS;
+  const h = ((rz + 0x2000) & 0x4000) === 0 ? y / Math.cos(a)
+    : -(x / Math.sin(a));
+  const rx = FtolS16(Math.atan2(z, h) * RADIANS_TO_BAMS);
+  return { rx, rz };
+}
+
+/**
  * `MatrixToEulerZYX` — `FUN_004019E0`. The three angles that rebuild the
  * rotation of `m` as `MatrixRotateZ(rz); MatrixRotateY(ry); MatrixRotateX(rx)`.
  *

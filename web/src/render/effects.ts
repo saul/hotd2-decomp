@@ -33,7 +33,9 @@ import {
   type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { drawBatSplashes } from "./bat_splash";
 import { drawCreatureEffects } from "./creature_effects";
+import { drawWaterRings } from "./water_rings";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
@@ -238,6 +240,10 @@ export class EffectLayer implements System<RenderContext> {
     const seen = new Set<string>();
 
     this.drawSpriteEffects(seen);
+    drawWaterRings({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.group,
+    }, seen);
     this.drawBlood(ctx, seen);
     this.drawPointBlood(seen);
     this.drawBodyCreatures(seen);
@@ -252,6 +258,8 @@ export class EffectLayer implements System<RenderContext> {
       node: (key, slot, parent) => this.node(key, slot, parent),
       world: this.group, view: this.viewGroup,
     }, seen);
+    drawBatSplashes({ node: (key, slot, parent) => this.node(key, slot, parent),
+                      world: this.group }, seen);
     if (this.bones) {
       const bones = this.bones;
       this._view.copy(ctx.camera.matrixWorldInverse);
@@ -634,8 +642,8 @@ export class EffectLayer implements System<RenderContext> {
    * `SpriteEffectDrawAndTick`), which blend over it. Every effect here is at
    * `renderOrder` 900 and the world at 0, and three.js sorts transparent
    * objects by `renderOrder` first, so 899 is exactly the exe's slot.
-   * Nothing translucent writes depth (the loader's `BLEND` materials), so the
-   * order is the whole of it.
+   * Translucent meshes write depth (see `draw_order.ts`), so within a layer
+   * `RenderCommandOrder` decides which of two overlapping ones survives.
    *
    * **Only while a task that draws it is the player's.** The draw is inside
    * `DamageOverlayUpdateAndDraw`, which only `PlayerUpdateInPlay` and

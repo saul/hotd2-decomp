@@ -34,19 +34,19 @@
  * rescue behind and step 4's boat shot sailed straight past her and her
  * captor. See `docs/BUGS.md`, "the civilian/enemy are jumped over".
  *
- * `g_evt_gameplay_live` (`0x007DCCA4`) is **not** modelled: it is the engine's
- * "may the script advance" — a player in state 5 with lives left — and the
- * port has no continue screen to freeze for. `[open]`.
+ * `g_evt_gameplay_live` (`0x007DCCA4`) is the engine's "may the script
+ * advance" -- a player in state 5 with lives left -- and it is what holds the
+ * script on the continue screen. `WaitContext.gameplayLive` answers it.
  *
- * The first-visit yield is not modelled either; that is the standing
- * `[diverges]` on `0x41`/`0x42`/`0x45` described in {@link WaitRule.enter}.
+ * The first-visit yield is modelled: the wait is never passed on the frame it
+ * is reached, raised flag or not.
  */
 import type { CiviliansJson, OpJson, ScriptJson } from "../../bundle";
 import { g_class_handlers, type SpawnRecord } from "../../game/registry";
 import type { SpawnClass } from "../../game/spawn_class";
 import { T } from "../../game/tables";
 import type { WaitPolicy } from "../walker";
-import { passedBecause, type WaitContext, type WaitRule } from "./types";
+import { YieldBecause, type WaitContext, type WaitRule } from "./types";
 
 /**
  * `CivilianOp.SetScriptFlag` as a bare number.
@@ -263,11 +263,10 @@ export const waitScriptFlag: WaitRule = {
     // A host with no object pool cannot raise any of these — see
     // `WalkerHost.scriptFlagRaised`.
     const raised = ctx.host.scriptFlagRaised(index);
-    if (raised === null) return passedBecause(op);
-    if (raised) {
-      return { kind: "passed",
-               why: `g_script_flags[${index}] is already raised` };
-    }
+    // `if (g_evt_yield == 0) { g_evt_yield = 1; return; }`: the flag is not
+    // read on the frame the wait is reached, raised already or not.
+    if (raised === null) return YieldBecause(op);
+    if (raised) return { kind: "flag", index };
     // The engine blocks here until the byte comes up, and it always does,
     // because every writer of `g_script_flags` is code the engine is running.
     // This port runs some of those writers and not others, so a gate whose
@@ -276,7 +275,7 @@ export const waitScriptFlag: WaitRule = {
     // {@link ScriptFlagsThisBundleCanRaise} for the derivation and for the
     // five classes that would retire it. [diverges]
     if (!ScriptFlagsThisBundleCanRaise(ctx.script).has(index)) {
-      return { kind: "passed",
+      return { kind: "yield",
                why: "nothing this port runs raises "
                   + `g_script_flags[${index}]` };
     }
@@ -284,6 +283,7 @@ export const waitScriptFlag: WaitRule = {
   },
   satisfied(policy: WaitPolicy, op: OpJson, ctx: WaitContext): boolean {
     return ctx.host.scriptFlagRaised(
-      policy.kind === "flag" ? policy.index : (op.arg ?? 0)) === true;
+      policy.kind === "flag" ? policy.index : (op.arg ?? 0)) === true
+      && ctx.gameplayLive();
   },
 };

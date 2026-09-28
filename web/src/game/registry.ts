@@ -259,33 +259,19 @@ export interface ClassHandler {
    */
   debug?(obj: Actor): ActorDebug;
   /**
-   * Did this actor's own update call `RegisterForCameraTracking`
-   * (`FUN_00408EC0`) this frame?
-   *
-   * The engine's registration is a **call**, made or not made by each class's
-   * routine; the port's is a predicate over the pool, and for most classes
-   * "an enemy, visible, without bit `0x10000`" is the same answer. A class
-   * whose routine calls it only under a condition of its own says so here.
-   * Class 0x40's member calls it unless its formation is waiting for a script
-   * flag, and its corpse only while it is the horde's last. Absent means the
-   * predicate's answer stands.
-   *
-   * **For a class that is not an enemy this is the only way in**: the
-   * predicate's enemy test stands in for the call site, so a non-enemy whose
-   * routine does make the call has to say so. Class 0x10 is one —
-   * `CivilianUpdate` (`FUN_0048A920`) calls `ActorRegisterCameraPoint` at
-   * `0x0048ADB0` every frame — and its `obj+0x34` bit `0x10000`, written from
-   * the wait word, is then what decides. See `camera/slots.ts`.
+   * `[port-only]` -- **a transitional hook for the boss classes**, and every
+   * other class leaves it unset. The engine has no predicate: a class is a
+   * camera candidate on the frames its update calls `RegisterForCameraTracking`
+   * (`FUN_00408EC0`) -- almost always as the tail of `ActorRegisterCameraPoint`
+   * (`FUN_00409B70`) -- or holds a slot on the frames it calls
+   * `RegisterEnemySlot` (`FUN_00408E80`), and the classes ported to that shape
+   * make those calls from their own updates (`camera/track.ts` lists the
+   * sites). A class whose port still answers with this predicate is filed by
+   * `SceneTaskWalk` after its update when it answers true and filed nothing
+   * itself; see `director.ts`. Classes 0x22 and 0x23 read their
+   * `RegisterEnemySlot` latch here.
    */
   tracksCamera?(obj: Actor): boolean;
-  /**
-   * The float this class's `Update` pushes to `ActorRegisterCameraPoint`
-   * (`FUN_00409B70`), when it is a **field** rather than a literal. Class 0x14
-   * pushes `state+0x0C` (`Class14Update`, `0x0047621E`) and class 0x19
-   * `state+0x70` (`Boss4Update`, `0x00491A49`). Absent means the class's
-   * literal from `CameraPointRiseFor` in `camera/track.ts`.
-   */
-  cameraRise?(obj: Actor): number;
   /**
    * **This class registers for the shot test the engine's way.**
    *
@@ -308,6 +294,20 @@ export interface ClassHandler {
    * `combat/shot_test.ts`.
    */
   registersForShotTest?: boolean;
+  /**
+   * **This class writes its own `obj+0x12C..0x134`**, and
+   * `ColiTestSphereAgainstActors` (`FUN_00405B10`) must measure it there.
+   *
+   * The engine's actor-versus-actor test walks the spheres the classes
+   * published, whatever each class put in them. The port's walks the pool and
+   * re-derives each actor's sphere with `ActorUpdateBoundingSphere`
+   * (`FUN_00454AC0`) — class 0x30's formula, feet plus the body radius plus
+   * one — which is right for class 0x30 and overwrites anything another class
+   * wrote. Set, the sphere is left as the class left it. Class 0x11 sets it:
+   * `FrogPushOutOfActorCollision` (`FUN_0043A500`) publishes bone 1's drawn
+   * point, not its feet.
+   */
+  ownsSphereCentre?: boolean;
 }
 
 /**

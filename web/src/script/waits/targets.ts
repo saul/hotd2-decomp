@@ -24,13 +24,13 @@
  * script left for block 4 with a zombie still standing on the bridge holding
  * its drum.
  *
- * `g_evt_gameplay_live` (`0x007DCCA4`) is not modelled, for the reason
- * `waits/flag.ts` gives. `[open]`
+ * `g_evt_gameplay_live` (`0x007DCCA4`) is the first term, and
+ * `WaitContext.gameplayLive` answers it; see `waits/flag.ts`.
  */
 import type { OpJson } from "../../bundle";
 import { G } from "../../game/globals";
 import type { WaitPolicy } from "../walker";
-import { passedBecause, type WaitContext, type WaitRule } from "./types";
+import { YieldBecause, type WaitContext, type WaitRule } from "./types";
 
 /**
  * The condition itself, off the port's globals: what the player's walker host
@@ -48,12 +48,12 @@ export const waitTargetsClear: WaitRule = {
     // A host with no camera and no pool cannot answer, and passes -- the same
     // contract the enemy gates keep for the walker-only harnesses.
     if ((ctx.host.cameraTargetsClear?.() ?? null) === null) {
-      return passedBecause(op);
+      return YieldBecause(op);
     }
     // The first-visit yield: the condition is not read on this frame.
     return { kind: "targets" };
   },
   satisfied(_policy, _op: OpJson, ctx: WaitContext): boolean {
-    return ctx.host.cameraTargetsClear?.() ?? true;
+    return ctx.gameplayLive() && (ctx.host.cameraTargetsClear?.() ?? true);
   },
 };

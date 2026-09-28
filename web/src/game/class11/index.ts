@@ -39,28 +39,44 @@
  * yaw, `g_camera_yaw_bams`, so it uses that for both. Why the engine is
  * asymmetric is `[open]`; nothing in the class explains it.
  *
- * `[diverges]` **The head-look fix-up is not ported.** After each 45° turn the
- * engine counter-rotates bone 1 through `MatrixDecomposeEuler` so the head
- * keeps its world orientation while the body turns. That works on
- * `part+0x10C..0x114`, per-bone Euler angles the port has no field for; the
- * same gap stops class 0x30's equivalent.
+ * ## Bone 1, and the two matrix chains that read it
  *
- * `[diverges]` **`FrogPushOutOfActorCollision` is not ported.** It transforms
- * `part+0x130` through the camera-block matrix and adds the collision normal
- * to the **world** position, and whether that point is view space or world
- * space is `[open]` — the matrix chain says one and the use says the other.
- * Porting it under the wrong reading would push frogs the wrong way, which is
- * worse than not pushing them.
+ * `frog.bin`'s skeleton hangs every other bone off **bone 1** (`bone01_0b90`,
+ * at the root's own origin), and the clips that turn the frog — `0x142`
+ * and `0x143` — carry their 45° in the **root record**, bone 0. Two routines
+ * work on bone 1's draw record, and both used to be declared unported here;
+ * both are now transcribed, and the notes that declared them were wrong about
+ * what they do:
+ *
+ * * the turn's fix-up is not a head look. It counter-rotates **bone 1, and so
+ *   the whole skeleton**, by the turn it has just folded into the yaw, through
+ *   `MatrixToEulerZYX`
+ *   (`FUN_004019E0`) — there is no `MatrixDecomposeEuler` — so that the blend
+ *   out of the turn clip starts from the pose on screen. See
+ *   {@link FrogRebaseBone1ForTurn}. Class 0x30 has no such fix-up: neither
+ *   Euler decomposition is called from any class-0x30 routine.
+ * * the push-out's point is **world** space, and nothing about the chain says
+ *   otherwise: `g_camera_blocks` is the block's `+0x40` matrix, view to world,
+ *   and `part+0x130` is a record the draw stores in view space. See
+ *   {@link FrogPushOutOfActorCollision}.
  */
+import { ActorRegisterCameraPoint } from "../camera/track";
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, type Actor } from "../actor";
+import { MotionFrameOf } from "../actor_pose";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
+import { ColiTestSphereAgainstActors } from "../coli";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { G } from "../globals";
+import type { GameHost } from "../host";
+import {
+  MatCopy, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixToEulerZYX, type Mat,
+} from "../matrix";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -120,7 +136,16 @@ export const FROG_HOP_STOP_FRAME = 0x2c;
 /** ...and the leap's three. */
 export const FROG_LEAP_LAUNCH_FRAME = 0x1e;
 export const FROG_LEAP_CONNECT_FRAME = 0x3c;
-export const FROG_LEAP_RECOVER_FADE = 0x3d;
+/**
+ * `PUSH 0x2; PUSH 0x3D; PUSH 0x13E` at `0x0043B7CC`: the recovery resumes
+ * the leap clip at **play cursor** `0x3D`, one past the connect frame, over
+ * a fade of 2. `ActorSetMotionBlended`'s third argument is the start cursor
+ * and its fourth the fade (`param_1[2] = param_3; *(char *)(param_1 + 0xC)
+ * = param_4 + 1`). This was read as a 61-frame fade from the clip's start.
+ */
+export const FROG_LEAP_RECOVER_CURSOR = 0x3d;
+/** ...and every fade the class asks for. */
+export const FROG_FADE = 2;
 /** `PlayerTakeDamage(player, 1, 9)` — the frog's damage kind. */
 export const FROG_DAMAGE_KIND = 9;
 /** The leap's flight, and the gravity pre-compensation `(n - 1) / 2`. */
@@ -165,6 +190,21 @@ export const FROG_SINK_FRAMES = 0xb4;
 /** The idle's two draws: 64..89 frames, croaking 0..25 frames before the end. */
 export const FROG_IDLE_BASE = 0x40;
 export const FROG_IDLE_SPREAD = 0x1a;
+/**
+ * `part+0x130` is record **1**'s matrix — records are `0x90` apart from
+ * `part+0x78`, the matrix sits at `+0x28` — and record `n` is bone `n`.
+ */
+export const FROG_BONE1 = 1;
+/**
+ * `FrogPushOutOfActorCollision`'s travel bands: below `[0x004C4CC8]` 0.1 the
+ * push is the depth times `[0x004C4C88]` 0.05; up to `[0x0055E1D4]` 0.6 it is
+ * the depth times the travel times `[0x004C4D10]` 0.3; above, the depth
+ * times 0.3.
+ */
+export const FROG_PUSH_SLOW_TRAVEL = 0.1;
+export const FROG_PUSH_SLOW_SCALE = 0.05;
+export const FROG_PUSH_FAST_TRAVEL = 0.6;
+export const FROG_PUSH_SCALE = 0.3;
 
 /** `COMMON\BLOOD07_16.WAV`, and `COMMON\KAERU4_22.WAV`. */
 export const SND_FROG_KILLED = 0x716a9;
@@ -220,9 +260,17 @@ function ClipDone(obj: Actor): boolean {
   return MotionPlayFrame(obj) >= MotionPlayLength(obj, obj.motion);
 }
 
-/** `if (part[0x20] != m) ActorSetMotionBlended(part, m, 0, 2)` — the whole class. */
-function FrogPlay(obj: Actor, m: number, fade = 2): void {
-  if (obj.motion !== m) ActorSetMotionBlended(obj, m, 0, fade);
+/**
+ * `if (part[0x20] != m) ActorSetMotionBlended(part, m, cursor, 2)` — the whole
+ * class, and every call but the leap's recovery starts at cursor 0.
+ *
+ * The engine's third argument is the **play cursor** (`param_1[2] = param_3`,
+ * with `param_3 / 2` as the authored frame); the port's primitive takes the
+ * authored frame and rebuilds the cursor from it, so the cursor is halved on
+ * the way in. `frog.bin` is authored at 30 Hz, which makes that exact.
+ */
+function FrogPlay(obj: Actor, m: number, cursor = 0): void {
+  if (obj.motion !== m) ActorSetMotionBlended(obj, m, cursor / 2, FROG_FADE);
 }
 
 // -- the Init --------------------------------------------------------------
@@ -470,6 +518,21 @@ export function FrogStateWaitForCamPathFrame(obj: Actor): void {
  * turn the hop across the view rather than out of it. State 1 has three arms
  * and state 2 two, and the widths are `0x1800` except for state 1's middle
  * arm, which is the full `0x3000`.
+ *
+ * State 1's arms are three bands across the screen, with `-z` the depth: right
+ * of the `x = -z/4` line, the window is `[aim - 0x1800, aim]`; left of the
+ * `x = z/4` line, `[aim, aim + 0x1800]`; between the two, both. The middle
+ * test is `0x0043AB16`..`0x0043AB2F` —
+ *
+ * ```
+ * FLD [ESP+0x10]; FMUL [0x004C4D0C]   ; -z * -0.25
+ * FCOMP [EBX+0x30]; TEST AH,0x41      ; against x
+ * JZ 0x0043AB41                       ; z/4 > x: [aim, +0x1800]
+ * MOV EDI,0x3000; JMP 0x0043AAF6      ; else:    [aim - 0x1800, +0x3000]
+ * ```
+ *
+ * — and it was ported the wrong way round, giving the frog on the left the
+ * full window and the one in the middle a half.
  */
 function FrogHeadingWindow(state: FrogState, aim: number,
                            view: { x: number; z: number }):
@@ -478,10 +541,10 @@ function FrogHeadingWindow(state: FrogState, aim: number,
     if (-view.z * 0.25 < view.x) {
       return { base: aim - FROG_WINDOW_HALF, width: FROG_WINDOW_HALF };
     }
-    if (view.z * 0.25 >= view.x) {
-      return { base: aim - FROG_WINDOW_HALF, width: FROG_WINDOW_FULL };
+    if (view.z * 0.25 > view.x) {
+      return { base: aim, width: FROG_WINDOW_HALF };
     }
-    return { base: aim, width: FROG_WINDOW_HALF };
+    return { base: aim - FROG_WINDOW_HALF, width: FROG_WINDOW_FULL };
   }
   if (view.x > 0) {
     return { base: aim - FROG_WINDOW_HALF, width: FROG_WINDOW_HALF };
@@ -494,13 +557,16 @@ function FrogHeadingWindow(state: FrogState, aim: number,
  *
  * Two rays leave the camera at `±sub+0x10` from its yaw. For each, the frog's
  * perpendicular distance is measured, and when that is under twenty-six units
- * the window's end is pulled in by `asin(distance / 26)` — so a frog already
- * on the edge is clamped exactly to the edge and one well inside is not
- * clamped at all.
+ * the window's end is moved by `acos(distance / 26)`.
  *
- * `[likely] asin` — `0x004AD0B0` is an FPU intrinsic thunk with no Ghidra
- * function, and `asin` is the only reading under which the correction
- * vanishes at the boundary. `[open]` between `asin` and `acos` from the code.
+ * **`acos`, `[proved]`.** `CrtAcos` (`FUN_004AD0B0`) is the C runtime's: its
+ * body is `FLD1; FADD ST0,ST1; FLD1; FSUB ST0,ST2; FMULP; FSQRT; FXCH;
+ * FPATAN` — `atan2(sqrt(1 - x²), x)` — and its `|x| == 1` arm loads `FLDZ`
+ * for `+1` and `FLDPI` for `-1`. This read `asin`, as a guess made because
+ * `asin` was "the only reading under which the correction vanishes at the
+ * boundary"; the code does not care what vanishes where. So the move is a
+ * quarter turn for a frog standing on a ray and nothing for one twenty-six
+ * units off it.
  *
  * The two blocks' `10430.378` multiplies have **opposite signs**, which is why
  * this is written out twice rather than looped.
@@ -520,7 +586,7 @@ function FrogClampToWedge(obj: Actor, eye: { x: number; z: number },
   const e1 = perp(camYaw + wedge - 0x8000);
   const e2 = perp(camYaw - wedge - 0x8000);
   if (e1 < FROG_STOP_SHORT) {
-    const t = Math.trunc(Math.asin(e1 / FROG_STOP_SHORT) * -TO_BAMS);
+    const t = Math.trunc(Math.acos(e1 / FROG_STOP_SHORT) * -TO_BAMS);
     const v = s16(halfFov - t - s16(obj.yaw) + camYaw + 0x4000);
     if (v > win.base) {
       win.base = v;
@@ -528,13 +594,110 @@ function FrogClampToWedge(obj: Actor, eye: { x: number; z: number },
     }
   }
   if (e2 < FROG_STOP_SHORT) {
-    const t = Math.trunc(Math.asin(e2 / FROG_STOP_SHORT) * TO_BAMS);
+    const t = Math.trunc(Math.acos(e2 / FROG_STOP_SHORT) * TO_BAMS);
     const v = s16(-halfFov - t - s16(obj.yaw) + camYaw - 0x4000);
     if (v < win.base + win.width) {
       if (v >= win.base) win.width = v - win.base;
       else { win.base = v; win.width = 0; }
     }
   }
+}
+
+/**
+ * `[port-only]` as a function: the turn's fix-up, which both turning states
+ * inline after they fold a pass of the turn clip into the yaw — `0x0043AE2E`..`0x0043AEFF` in
+ * `FrogStateHopWithinScreenWedge` and `0x0043B557`..`0x0043B628` in
+ * `FrogStateLeapAtPlayer`, the same forty-four instructions:
+ *
+ * ```
+ * MatrixStackPush(0); MatrixLoadIdentity()
+ * RotX(-r0x) RotY(-r0y) RotZ(-r0z)       ; r0 = part+0x7C/80/84, the root record
+ * RotY(-turn)                            ; the pass just added to obj+0x68
+ * RotZ(r0z) RotY(r0y) RotX(r0x)
+ * RotZ(r1z) RotY(r1y) RotX(r1x)          ; r1 = part+0x10C/110/114, bone 1's
+ * MatrixToEulerZYX(&r1x, &r1y, &r1z); MatrixStackPop(1)
+ * ```
+ *
+ * The yaw has turned the whole frog by `turn`; this turns bone 1 back by the
+ * same amount **in the root's frame**, so that bone 1 — the node every other
+ * bone of `frog.bin` hangs from — is drawn where it was. It matters only
+ * because of what comes next. Every draw rewrites bone 1's record from the
+ * clip (`SkeletonPoseNode` (`FUN_00411700`) stores all three of its arms'
+ * angles at `record+0x04`), so on
+ * a frame that plays on the record is gone before anyone sees it; but when
+ * the turn is done the state calls `ActorSetMotionBlended`, whose
+ * `MotionLoadPoseSlot` (`FUN_00411C20`) mode `0xC` snapshots the records **as
+ * they stand** into the fade's slot A. The fade then dissolves from the
+ * rewritten pose into the next clip facing the new way.
+ *
+ * `frog.bin`'s turn clips carry their 45° in the root record's `ry` and leave
+ * bone 1 at zero, so the rewrite is `(0, -turn, 0)` in practice. Without it
+ * the snapshot is the clip's last pose under the turned yaw — 45° past where
+ * the frog was drawn — and the blend swings the whole frog back through it.
+ *
+ * The drawn records are the clip's frame at the cursor, as
+ * `Boss4StateTurnClipThenApproach` (`FUN_00494730`) reads them in the port:
+ * the port draws whole authored frames. Null for a clip the bundle did not
+ * bake, which leaves the blend to snapshot the clip as it always has.
+ */
+function FrogRebaseBone1ForTurn(obj: Actor, turn: number):
+    [number, number, number] | null {
+  const drawn = MotionFrameOf(obj, obj.motion, MotionPlayFrame(obj) >> 1);
+  if (!drawn) return null;
+  const r0 = drawn.rot(0);
+  const r1 = drawn.rot(FROG_BONE1);
+  const m: Mat = MatIdentity();
+  MatrixRotateX(m, -r0[0]);
+  MatrixRotateY(m, -r0[1]);
+  MatrixRotateZ(m, -r0[2]);
+  MatrixRotateY(m, -turn);
+  MatrixRotateZ(m, r0[2]);
+  MatrixRotateY(m, r0[1]);
+  MatrixRotateX(m, r0[0]);
+  const t = MatCopy(MatIdentity(), m);
+  MatrixRotateZ(t, r1[2]);
+  MatrixRotateY(t, r1[1]);
+  MatrixRotateX(t, r1[0]);
+  const e = MatrixToEulerZYX(t);
+  return [e.rx, e.ry, e.rz];
+}
+
+/**
+ * `[port-only]` as a function. One pass of a turn clip has ended: fold it into
+ * the yaw, rebase bone 1, and
+ * hand to `clip` once what is left is within `settle`. The shape both turning
+ * states' substate 1 share, `0x0043ADE6` and `0x0043B50F`.
+ *
+ * ```
+ * if (part+0x08 < g_motion_play_length[part+0x20]) return
+ * turn = part+0x20 == 0x142 ? 0x2000 : -0x2000
+ * obj+0x68 += turn;  sub+0x18 -= turn
+ * (the fix-up above)
+ * if (|sub+0x18| > settle) return
+ * if (part+0x20 != clip) ActorSetMotionBlended(part, clip, 0, 2);  sub+0x05 = 2
+ * ```
+ *
+ * The rewritten record rides the blend's snapshot as `Actor.fadeFrom`'s
+ * `records`, which `render/characters/pose.ts` already dissolves from. With a
+ * pass still to go there is no blend, and the rewrite has nothing to ride:
+ * the draw overwrites it the same frame, in the engine as here.
+ */
+function FrogFinishTurnPass(obj: Actor, sub: FrogTail, settle: number,
+                            clip: FrogMotion): void {
+  if (!ClipDone(obj)) return;
+  const turn = obj.motion === FrogMotion.TurnLeft
+    ? FROG_TURN_PER_CLIP : -FROG_TURN_PER_CLIP;
+  obj.yaw = s16(obj.yaw + turn);
+  sub.a -= turn;
+  const bone1 = FrogRebaseBone1ForTurn(obj, turn);
+  if (Math.abs(sub.a) > settle) return;
+  if (obj.motion !== clip) {
+    FrogPlay(obj, clip);
+    if (bone1 && obj.motion === clip && obj.fadeFrom) {
+      obj.fadeFrom.records = [{ record: FROG_BONE1, rot: bone1 }];
+    }
+  }
+  sub.sub = 2;
 }
 
 /** Draw a heading out of `[base, base+width]`, clamped to ±0x2000. */
@@ -555,9 +718,11 @@ function FrogPickHeading(base: number, width: number, rng: Rng): number {
  * selector, which is why one routine serves three states.
  *
  * The turn is taken 45° at a time, one pass of clip `0x142` or `0x143` each,
- * until what is left fits inside 45°; then clip `0x140` runs and the launch is
- * on its frame 18, the stop on frame 44. The residual is **halved every
- * frame** through the flight, so the frog keeps turning as it travels.
+ * until what is left fits inside 45°; each pass is folded into the yaw with
+ * bone 1 turned back to match ({@link FrogFinishTurnPass}). Then clip `0x140`
+ * runs and the launch is on its frame 18, the stop on frame 44. The residual
+ * is **halved every frame** through the flight, the launch frame included, so
+ * the frog keeps turning as it travels.
  *
  * State 2's speed is the only one that is not a draw: it falls linearly to
  * zero as the camera distance reaches forty, so the frog stops twenty-six
@@ -593,18 +758,9 @@ export function FrogStateHopWithinScreenWedge(obj: Actor, f: ClassFrame): void {
       }
       return;
     }
-    case 1: {
-      if (!ClipDone(obj)) return;
-      const delta = obj.motion === FrogMotion.TurnLeft
-        ? FROG_TURN_PER_CLIP : -FROG_TURN_PER_CLIP;
-      obj.yaw = s16(obj.yaw + delta);
-      sub.a -= delta;
-      if (Math.abs(sub.a) <= FROG_TURN_PER_CLIP) {
-        FrogPlay(obj, FrogMotion.Hop);
-        sub.sub = 2;
-      }
+    case 1:
+      FrogFinishTurnPass(obj, sub, FROG_TURN_PER_CLIP, FrogMotion.Hop);
       return;
-    }
     case 2: {
       if (MotionPlayFrame(obj) !== FROG_HOP_LAUNCH_FRAME) return;
       const th = s16(obj.yaw + sub.a) * BAMS;
@@ -624,22 +780,37 @@ export function FrogStateHopWithinScreenWedge(obj: Actor, f: ClassFrame): void {
       obj.vel.x = speed * s;
       obj.vel.z = speed * c;
       sub.sub = 3;
+      // **Not a return.** `0x0043B031`..`0x0043B03E` bump the substate and run
+      // straight on into substate 3's code at `0x0043B044`, so the launch
+      // frame halves the residual turn too. This returned, and every hop
+      // turned one halving short.
+      FrogHopInFlight(obj, sub);
       return;
     }
-    case 3: {
-      if (sub.a !== 0) {
-        obj.yaw = s16(obj.yaw + Math.trunc(sub.a / 2));
-        sub.a = Math.trunc(sub.a / 2);
-      }
-      if (MotionPlayFrame(obj) !== FROG_HOP_STOP_FRAME) return;
-      obj.vel.x = 0;
-      obj.vel.z = 0;
-      sub.sub = 4;
+    case 3:
+      FrogHopInFlight(obj, sub);
       return;
-    }
     default:
       if (ClipDone(obj)) sub.flags |= FrogFlag.WantCommand;
   }
+}
+
+/**
+ * `[port-only]` as a function: `FrogStateHopWithinScreenWedge`'s substate 3,
+ * from `0x0043B044` — its own
+ * jump-table arm, and where substate 2 runs on to on the launch frame. The
+ * residual turn is halved into the yaw every frame of the flight, and the
+ * velocity is zeroed on frame `0x2C`.
+ */
+function FrogHopInFlight(obj: Actor, sub: FrogTail): void {
+  if (sub.a !== 0) {
+    obj.yaw = s16(obj.yaw + Math.trunc(sub.a / 2));
+    sub.a = Math.trunc(sub.a / 2);
+  }
+  if (MotionPlayFrame(obj) !== FROG_HOP_STOP_FRAME) return;
+  obj.vel.x = 0;
+  obj.vel.z = 0;
+  sub.sub = 4;
 }
 
 /**
@@ -688,10 +859,16 @@ export function FrogStateHopInPlace(obj: Actor, f: ClassFrame): void {
  * **connects on a motion frame rather than on a range test** — nothing checks
  * whether the frog got there.
  *
- * The launch is a thirty-frame ballistic solve: horizontal velocity is the
- * displacement over thirty, and the vertical adds `-gravity * 14.5` so the
- * constant `-0.0272222` brings it back to the target height twenty-nine frames
- * later.
+ * The turn passes fold into the yaw with bone 1 turned back to match, as the
+ * hop's do ({@link FrogFinishTurnPass}). The launch is a thirty-frame
+ * ballistic solve: horizontal velocity is the displacement over thirty, and
+ * the vertical adds `-gravity * 14.5` so the constant `-0.0272222` brings it
+ * back to the target height twenty-nine frames later.
+ *
+ * Substate 4 holds the frog on the player's face until the bone-2 cycle
+ * wraps, then **resumes the leap clip where it connected** — play cursor
+ * `0x3D`, over a fade of 2 ({@link FROG_LEAP_RECOVER_CURSOR}) — so what plays
+ * is the fall back to the ground and not the take-off again.
  *
  * Substate 5 is the exit, and it is not a death: a frog that lands its attack
  * gives the permit back, drops both enemy counters and despawns, scoring
@@ -729,18 +906,9 @@ export function FrogStateLeapAtPlayer(obj: Actor, f: ClassFrame): void {
       }
       return;
     }
-    case 1: {
-      if (!ClipDone(obj)) return;
-      const delta = obj.motion === FrogMotion.TurnLeft
-        ? FROG_TURN_PER_CLIP : -FROG_TURN_PER_CLIP;
-      obj.yaw = s16(obj.yaw + delta);
-      sub.a -= delta;
-      if (Math.abs(sub.a) <= FROG_LEAP_TURN_THRESHOLD) {
-        FrogPlay(obj, FrogMotion.Leap);
-        sub.sub = 2;
-      }
+    case 1:
+      FrogFinishTurnPass(obj, sub, FROG_LEAP_TURN_THRESHOLD, FrogMotion.Leap);
       return;
-    }
     case 2: {
       if (MotionPlayFrame(obj) !== FROG_LEAP_LAUNCH_FRAME) return;
       const n = 1 / FROG_LEAP_FRAMES;
@@ -750,29 +918,19 @@ export function FrogStateLeapAtPlayer(obj: Actor, f: ClassFrame): void {
         - obj.accY * FROG_LEAP_GRAVITY_COMP;
       sub.flags |= FrogFlag.CycleRunning;
       sub.sub = 3;
+      // Runs on into substate 3 (`0x0043B6E5`..`0x0043B6F2`, then the arm at
+      // `0x0043B6F7`), as the hop's launch does.
+      FrogLeapInFlight(obj, sub, f);
       return;
     }
-    case 3: {
-      if (sub.a !== 0) {
-        obj.yaw = s16(obj.yaw + Math.trunc(sub.a / 2));
-        sub.a = Math.trunc(sub.a / 2);
-      }
-      if (MotionPlayFrame(obj) !== FROG_LEAP_CONNECT_FRAME) return;
-      obj.vel.x = 0;
-      obj.vel.y = 0;
-      obj.vel.z = 0;
-      sub.flags |= FrogFlag.NoGravity;
-      FrogPlay(obj, FrogMotion.Idle);
-      PlayerTakeDamage(obj.attackPermit, 1, FROG_DAMAGE_KIND, f.events, obj,
-                       "strike");
-      sub.sub = 4;
+    case 3:
+      FrogLeapInFlight(obj, sub, f);
       return;
-    }
     case 4: {
       if (!(sub.flags & FrogFlag.CycleWrapped)) return;
       sub.flags &= ~(FrogFlag.CycleRunning | FrogFlag.CycleWrapped
                      | FrogFlag.NoGravity);
-      FrogPlay(obj, FrogMotion.Leap, FROG_LEAP_RECOVER_FADE);
+      FrogPlay(obj, FrogMotion.Leap, FROG_LEAP_RECOVER_CURSOR);
       sub.sub = 5;
       return;
     }
@@ -785,6 +943,30 @@ export function FrogStateLeapAtPlayer(obj: Actor, f: ClassFrame): void {
       ActorDespawn(obj);
     }
   }
+}
+
+/**
+ * `[port-only]` as a function: `FrogStateLeapAtPlayer`'s substate 3, from
+ * `0x0043B6F7` — its own arm, and
+ * where substate 2 runs on to on the launch frame. The residual turn is
+ * halved into the yaw every frame, and on frame `0x3C` the frog stops dead in
+ * the air, turns gravity off, cuts to the idle clip and hurts the player it
+ * holds the permit for, whether or not it got there.
+ */
+function FrogLeapInFlight(obj: Actor, sub: FrogTail, f: ClassFrame): void {
+  if (sub.a !== 0) {
+    obj.yaw = s16(obj.yaw + Math.trunc(sub.a / 2));
+    sub.a = Math.trunc(sub.a / 2);
+  }
+  if (MotionPlayFrame(obj) !== FROG_LEAP_CONNECT_FRAME) return;
+  obj.vel.x = 0;
+  obj.vel.y = 0;
+  obj.vel.z = 0;
+  sub.flags |= FrogFlag.NoGravity;
+  FrogPlay(obj, FrogMotion.Idle);
+  PlayerTakeDamage(obj.attackPermit, 1, FROG_DAMAGE_KIND, f.events, obj,
+                   "strike");
+  sub.sub = 4;
 }
 
 /**
@@ -938,11 +1120,127 @@ export function FrogDrawAndCycleBone2Slot(obj: Actor, f: ClassFrame): void {
       sub.boneSlot = q < FROG_BONE2_MODELS ? q : FROG_BONE2_PERIOD - 1 - q;
     }
   }
+  // `DrawSkinnedModelAndShadow(part, obj+0x40, part+0x78)` at `0x0043A494`,
+  // on every frame, dead or alive -- and what it leaves on the actor.
+  FrogStoreBone1Record(sub, obj, f.host);
   if (obj.flags & ActorFlag.Dead) return;
   const slot = FROG_BONE2_FIRST_SLOT + sub.boneSlot;
   if (obj.boneSlot["2"] === slot) return;
   obj.boneSlot["2"] = slot;
   f.host.setBoneSlot(obj.at, 2, slot);
+}
+
+const _bone1World = { x: 0, y: 0, z: 0 };
+const _bone1View = { x: 0, y: 0, z: 0 };
+
+/**
+ * `[port-only]` — the one thing the draw leaves on the actor that this class
+ * reads back: bone 1's record, `part+0x130`, which `SkeletonEmitNode`
+ * (`FUN_004114C0`) stores with `MatrixStore(record + 0x28)` as it walks the
+ * skeleton **under the camera**, so in view space. Only its translation is
+ * ever read, and that is what {@link FrogTail.bone1View} keeps.
+ *
+ * The pose is the renderer's, so the bone is where it was last drawn — the
+ * reading `ActorRegisterCameraPoint` and `JudgmentEmitTrackedBone` take at
+ * the same point of their classes' frames — and it goes into view space
+ * through the camera this frame reads, which is where the engine's draw puts
+ * it. With no pose, or no camera, the record keeps what it had, as a record
+ * the draw did not reach does.
+ */
+function FrogStoreBone1Record(sub: FrogTail, obj: Actor, host: GameHost): void {
+  if (!host.boneWorld(obj.at, FROG_BONE1, _bone1World)) return;
+  if (!host.viewSpaceOfPoint?.(_bone1World, _bone1View)) return;
+  sub.bone1View = { x: _bone1View.x, y: _bone1View.y, z: _bone1View.z };
+}
+
+/**
+ * `MatrixStackPush(0); MatrixStackSetTopFromArray(g_camera_blocks[g_camera_index]);
+ * MatrixMultiply(part+0x130); MatrixGetTranslation(out); MatrixStackPop(1)` —
+ * the chain `FrogUpdate` and `FrogPushOutOfActorCollision` both open with
+ * (`0x0043A233`..`0x0043A293`, `0x0043A504`..`0x0043A563`).
+ *
+ * **World space, `[proved]`.** `g_camera_blocks` (`0x009A6040`) is the
+ * block's `+0x40` matrix, the inverse of `g_camera_world_to_view`: view to
+ * world. `part+0x130` is bone 1's record, which the draw stores in view space.
+ * The product's translation is bone 1 in the world — the chain
+ * `ActorShiftToHoldBone1Position` (`FUN_0045CE70`) reads the same way, and
+ * the one the push then adds a world normal to. `GameHost.viewPoint` is that
+ * matrix: a camera-space point in world coordinates.
+ *
+ * False before the first draw the host could pose.
+ */
+function FrogBone1World(sub: FrogTail, host: GameHost,
+                       out: { x: number; y: number; z: number }): boolean {
+  const v = sub.bone1View;
+  if (!v) return false;
+  host.viewPoint(v.x, v.y, v.z, out);
+  return true;
+}
+
+const _bone1 = { x: 0, y: 0, z: 0 };
+
+/**
+ * `FrogPushOutOfActorCollision` — `FUN_0043A500`. The last thing a frog does
+ * each frame: keep out of other actors, and publish where it is for them.
+ *
+ * ```
+ * p = translation(g_camera_blocks[cur] * part+0x130)      ; bone 1, just drawn
+ * if (sub+0x04 != 6 && ColiTestSphereAgainstActors(&p, obj+0x128)) {
+ *     d = |p - g_frog_bone1_on_entry| in x and z          ; this frame's travel
+ *     k = d < 0.1 ? g_coli_hit_depth * 0.05
+ *       : g_coli_hit_depth * (d <= 0.6 ? d : 1) * 0.3
+ *     obj+0x40 += g_coli_hit_normal_x * k;  obj+0x48 += g_coli_hit_normal_z * k
+ *     p.x      += g_coli_hit_normal_x * k;  p.z      += g_coli_hit_normal_z * k
+ * }
+ * obj+0x12C..0x134 = p
+ * ```
+ *
+ * **The point is bone 1 in the world** — see {@link FrogBone1World} — so the
+ * normal is added to two world points, and there was never a reading under
+ * which it pushed frogs the wrong way. The test is skipped during the leap,
+ * the one state that means to end up inside the player's space, but the point
+ * is written on every frame, and `RegisterForShotTest` (`FUN_00405160`)
+ * publishes it on the next as the sphere other actors test against — which is
+ * why the class sets `ClassHandler.ownsSphereCentre`.
+ *
+ * The push is **scaled by how far bone 1 moved** since the last draw, not by
+ * the overlap alone: a frog sitting still is nudged at a twentieth of the
+ * depth and one hopping at speed at three tenths of it. `d` measures between
+ * two readings of the same record through the **same** camera block, the one
+ * before this frame's draw and the one after, so it is bone 1's travel
+ * relative to the camera — a still frog under a moving camera travels.
+ *
+ * `[port-only]` in one respect: with no draw record there is no point, and
+ * the frog is neither tested nor published. The engine draws every frame; a
+ * headless host never does.
+ */
+export function FrogPushOutOfActorCollision(obj: Actor, f: ClassFrame): void {
+  const sub = Tail(obj);
+  if (!sub) return;
+  if (!FrogBone1World(sub, f.host, _bone1)) return;
+  if (sub.state !== FrogState.LeapAtPlayer
+      && ColiTestSphereAgainstActors(obj, _bone1.x, _bone1.y, _bone1.z,
+                                     obj.bodyRadius)) {
+    // `FST [ESP+0x20]`: the travel is stored as a float before it is compared.
+    const on = G.g_frog_bone1_on_entry;
+    const d = Math.fround(Math.hypot(_bone1.x - on.x, _bone1.z - on.z));
+    let k = G.g_coli_hit_depth;
+    if (d < FROG_PUSH_SLOW_TRAVEL) {
+      k *= FROG_PUSH_SLOW_SCALE;
+    } else {
+      if (d <= FROG_PUSH_FAST_TRAVEL) k *= d;
+      k *= FROG_PUSH_SCALE;
+    }
+    const nx = G.g_coli_hit_normal[0];
+    const nz = G.g_coli_hit_normal[2];
+    obj.pos.x += nx * k;
+    obj.pos.z += nz * k;
+    _bone1.x += nx * k;
+    _bone1.z += nz * k;
+  }
+  obj.sphereCentre.x = _bone1.x;
+  obj.sphereCentre.y = _bone1.y;
+  obj.sphereCentre.z = _bone1.z;
 }
 
 /** `g_class11_states` — 0x00592660. Ten cells, and the tenth is unreachable. */
@@ -978,6 +1276,11 @@ const g_class11_states: Record<number, (obj: Actor, f: ClassFrame) => void> = {
  * velocity and the integrator applies it afterwards; and the actor-versus-actor
  * push is last, after the draw.
  *
+ * Between the distance and the shot, `0x0043A233`..`0x0043A293` take bone 1
+ * where the **last** draw left it into the world through this frame's camera
+ * and park it in `g_frog_bone1_on_entry` — `0x007DCBB8` — which nothing but
+ * the push reads: it is where the frame's travel is measured from.
+ *
  * `ActorRegisterCameraPoint` takes **1.0** here, against 4.0 for a class-0x30
  * zombie and 0 for a class-0x31 thrower — the height the camera looks at.
  */
@@ -985,12 +1288,28 @@ export function FrogUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   sub.camDist = Math.hypot(obj.pos.z - f.eye.z, obj.pos.x - f.eye.x);
+  if (!FrogBone1World(sub, f.host, G.g_frog_bone1_on_entry)) {
+    // `[port-only]`: no draw the host could pose has left a record yet. What
+    // the engine's record holds before its first draw is `[open]` -- zero is
+    // what a cleared block would give, and it keeps another frog's reading
+    // from standing in for this one's.
+    G.g_frog_bone1_on_entry.x = 0;
+    G.g_frog_bone1_on_entry.y = 0;
+    G.g_frog_bone1_on_entry.z = 0;
+  }
   FrogAwardKillAndEnterDeath(obj, f);
   FrogReadNextScriptCommand(obj, f);
   g_class11_states[sub.state]?.(obj, f);
   FrogIntegrateVelocityAndGravity(obj);
   FrogDrawAndCycleBone2Slot(obj, f);
+  // `PUSH 0x3F800000; CALL 0x00409b70` at `0x0043A2C2`, straight after the
+  // draw and on every path, and before the push-out.
+  ActorRegisterCameraPoint(obj, f.host, FROG_CAMERA_RISE);
+  FrogPushOutOfActorCollision(obj, f);
 }
+
+/** `PUSH 0x3F800000` at `0x0043A2C2`: `ActorRegisterCameraPoint`'s 1.0. */
+export const FROG_CAMERA_RISE = 1.0;
 
 // -- the class -------------------------------------------------------------
 
@@ -1007,6 +1326,7 @@ const handler: ClassHandler = {
   update: FrogUpdate,
   updatesWhenDead: true,
   ownsShotResult: true,
+  ownsSphereCentre: true,
   leave(obj: Actor): void {
     G.g_enemies_alive -= 1;
     G.g_enemies_present -= 1;

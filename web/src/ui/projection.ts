@@ -29,7 +29,8 @@ export type StripRow = readonly [string, string, boolean?];
  * connecting them.
  */
 export type DebugGroupName =
-  "camera" | "scene" | "actors" | "props" | "collision" | "shooting";
+  "camera" | "scene" | "actors" | "props" | "collision" | "shooting"
+  | "route";
 
 /** One route out of a branch point, as a button. */
 export interface BranchOption {
@@ -310,16 +311,16 @@ export interface UiProjection {
    */
   started: boolean;
   /**
-   * The script is letting the player shoot.
+   * The game drew player 1's crosshair this frame.
    *
-   * `g_nFiringGate` as `game/globals.ts` holds it. The UI's only use for it is
-   * the crosshair, which the engine draws under exactly this condition —
-   * `HudDrawCrosshair` (0x004169C0) tests the same word before it draws
-   * anything, and `PlayerUpdateInPlay` (0x00413E90) tests it again before the
-   * ammo readout. A dead trigger with a reticle still on it would be the port
-   * telling the viewer something the game does not.
+   * `HudDrawCrosshair` (0x004169C0) decides it, in `game/`, and it is called
+   * only from `PlayerUpdateInPlay` (0x00413E90): app state 6, a life, and the
+   * firing gate up -- so a cutscene takes the reticle away, and so does the
+   * continue screen, where the player has no life and no in-play task. A
+   * reticle over "CONTINUE?" would be the port telling the viewer something
+   * the game does not.
    */
-  firingGate: boolean;
+  crosshair: boolean;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
   sound: SoundProjection;
@@ -328,6 +329,16 @@ export interface UiProjection {
   /** Texture filtering, and the anisotropy the hardware actually allows. */
   filterMode: string;
   anisotropyLimit: number;
+  /**
+   * Whether the frame is boxed to the game's 4:3, or fills the window.
+   *
+   * Off by default: the page is the game, and a phone held sideways is twice
+   * as wide as it is tall. On is the cabinet's own shape -- the projection is
+   * a compile-time 4:3, so filling a wider window shows more of every shot
+   * than the game ever did -- and the HUD's letterbox measures itself against
+   * whichever frame is drawn.
+   */
+  pillarbox: boolean;
   wait: WaitProjection | null;
   /** The wait panel's `box` checkbox. See the `boxWait` command. */
   waitBoxed: boolean;

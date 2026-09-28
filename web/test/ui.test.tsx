@@ -62,7 +62,7 @@ import { ShortcutsDialog } from "../src/ui/panels/Shortcuts";
 import { SHORTCUT_GROUPS, keyCap } from "../src/ui/shortcuts";
 import { shutterCover } from "../src/hud/hud";
 import { readPersisted, writePersisted } from "../src/ui/persist";
-import { readViewPrefs } from "../src/app/viewprefs";
+import { readViewPrefs, writeViewPrefs } from "../src/app/viewprefs";
 import type { UiProjection } from "../src/ui/projection";
 
 let failures = 0;
@@ -792,6 +792,18 @@ console.log("\nOne key per preference:\n");
             JSON.stringify({ v: 4, toggles: {}, filterMode: "nearest" }));
   check("...and any other filter is kept, being a choice",
         readViewPrefs().filterMode === "nearest");
+  // The muzzle flash is on by default since version 6, and a switch at its
+  // default is not written at all -- so no default is pinned by a save again.
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 5, toggles: { muzzle: false, sky: false } }));
+  const pre6 = readViewPrefs().toggles;
+  check("a pre-6 save's muzzle off is dropped, and its other switches kept",
+        !("muzzle" in pre6) && pre6.sky === false, JSON.stringify(pre6));
+  writeViewPrefs({ toggles: { ...TOGGLE_DEFAULTS, sky: false } });
+  const written = JSON.parse(store.get("hod2.viewPrefs") as string);
+  check("...and a save writes only the switches away from their defaults",
+        JSON.stringify(written.toggles) === JSON.stringify({ sky: false }),
+        JSON.stringify(written.toggles));
   check("...and a version-3 choice either way is kept, the resolution too",
         v3.fourByThree === false && v3.pixelRatio === 1.5, JSON.stringify(v3));
 

@@ -1868,6 +1868,8 @@ console.log("\nthe shot effects are models, one per frame:");
   f.player = 0;
   f.frame = 0;
   f.pos = { x: 0.1, y: -0.2, z: -1 };
+  // On by default -- the game draws it -- so the switch is turned off here.
+  layer.setMuzzle(false);
   layer.update(ctx);
   check("a live muzzle record draws nothing while the toggle is off",
         layer.viewGroup.children.length === 0

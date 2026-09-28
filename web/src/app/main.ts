@@ -2044,6 +2044,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       stage: this.state.stage, original: !!this.state.original,
       boxed: this.pillarbox, ratio: this.pixelRatio,
       playing: this.playing, mode: this.state.mode,
+      // The switches away from their defaults: "not showing" is as often a
+      // setting as a bug.
+      toggles: Object.entries(this.toggles)
+        .filter(([k, on]) => TOGGLE_DEFAULTS[k as ToggleName] !== on)
+        .map(([k, on]) => `${k}=${on ? 1 : 0}`).join(" "),
+      light: this.lighting.lightingMode, filter: this.texFilter.filterMode,
     });
     fetch("/__perf", { method: "POST", body, keepalive: true })
       .catch(() => { /* no dev server behind this page: nothing to tell */ });

@@ -134,5 +134,6 @@ for (let i = 0; i <= frames; i++) {
   prev = line;
   walker.tick(1 / 60);
   syncSpawns();
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, host, rng, events);
 }

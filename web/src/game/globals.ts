@@ -1358,6 +1358,15 @@ export const G = {
    * it is the count the previous frame's objects registered.
    */
   g_camera_candidate_count: 0,
+  /**
+   * `g_distance_rank_list` — `0x005A4D58`, with its count
+   * `g_distance_rank_count` (`0x005A4D50`) as the length. The `{key, obj}`
+   * pairs `RegisterForDistanceRank` (`FUN_00409010`) has filed since the last
+   * `RankEnemiesByDistance` (`FUN_004090B0`), at most fourteen, in the order
+   * they registered; the rank sorts and empties it. `at` stands in for the
+   * pointer. See `combat/rank.ts`.
+   */
+  g_distance_rank_list: [] as { key: number; at: number }[],
 
   // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
   /**
@@ -2546,6 +2555,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_enemy_slots = makeCameraSlots();
   G.g_camera_candidates = [];
   G.g_camera_candidate_count = 0;
+  // `DistanceRankTaskCreate` (`FUN_00409080`), the scene list's thirteenth.
+  G.g_distance_rank_list = [];
   G.g_water_level = -24.9;
   G.g_frog_bone1_on_entry = vec3();
   G.g_water_attack_slots = [0, 0, 0, 0];

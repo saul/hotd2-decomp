@@ -26,6 +26,7 @@
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { AppState, G } from "../globals";
+import { CameraBlockYawAt } from "../camera/blocks";
 import type { GameHost } from "../host";
 import { vec3, type Vec3 } from "../vec";
 
@@ -149,15 +150,14 @@ export function FishSpawnWaterSplash(obj: Actor, scale: number, kind: number,
  * and the slot, then the step; past `0x1356` the task is killed, after that
  * cel has been drawn.
  *
- * The yaw is `g_camera_block_yaw_bams[g_camera_index * 0x69]`, the camera
- * block's heading. The port builds its view from the block's eye and target
- * and keeps that heading in `g_camera_yaw_bams` instead, which is what
- * `OwlUpdateAndResolveShot`'s port reads for the same word.
+ * The yaw is the camera block's, `[EDX*4 + 0x9A60D0]` at `0x00439F5A`
+ * (`g_camera_index`'s block) -- not the gameplay yaw, which under every path
+ * hook is half a turn round from it. `[proved]`
  */
 export function WaterSplashUpdate(s: FishWaterSplash): boolean {
   if (s.done) return false;
   s.shown = s.slot;
-  s.shownYaw = G.g_camera_yaw_bams;
+  s.shownYaw = CameraBlockYawAt(G.g_camera_index);
   s.slot += 1;
   if (s.slot > FISH_SPLASH_LAST_SLOT) s.done = true;
   return true;

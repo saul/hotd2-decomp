@@ -26,12 +26,11 @@ import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, DamageZone, ThrowerFlag, type ThrowerActor }
   from "../actor";
-import { ActorFacePlayerTarget } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import type { GameHost } from "../host";
 import { CharacterTypeOf, MotionOf, SecondsToTicks } from "../tables";
-import { vec3, type Vec3 } from "../vec";
+import { bamsWrap, vec3, VecToAngles, type Vec3 } from "../vec";
 import { ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
@@ -106,7 +105,12 @@ export function ThrowerStateCloseAndStrike(obj: ThrowerActor, eye: Vec3,
   if (obj.sub === 0) {
     ThrowerPickLandingPoint(obj, host, _dest);
     obj.target = { x: _dest.x, y: _dest.y, z: _dest.z };
-    ActorFacePlayerTarget(obj, eye);
+    // The yaw alone, inline, away from the gameplay eye across the floor
+    // (`0x0044EAA0`..`0x0044EAC8`: `VecToAngles(x - eye.x, 0, z - eye.z)`).
+    // Not `ActorFacePlayerTarget`, which would put the eye over the landing
+    // point just picked -- the point the range test below closes on.
+    obj.yaw = bamsWrap(
+      VecToAngles(obj.pos.x - eye.x, 0, obj.pos.z - eye.z).yaw);
     // The 0x17 override: set 0's picks, set 2's entries.
     obj.attack = obj.charType === CHAR_ZSKAMERE
       ? ThrowerPickAttackFromSet0(obj, rng.int(10))

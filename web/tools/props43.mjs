@@ -194,7 +194,9 @@ check("the seek leaves the step's placers in the pool, not its props",
       waiting === 3 && G.g_breakable_props.length === 0,
       `${waiting} placers waiting, ${G.g_breakable_props.length} props built`);
 
-GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+
+GameUpdate(1 / 60, NULL_HOST, rng, events);
 const placed = G.g_breakable_props.length;
 check("...and one frame of `GameUpdate` builds all three",
       placed === 3, `${placed} of 3`);
@@ -204,7 +206,8 @@ const record = () => { for (const p of type43()) seen.set(p.at, p); };
 record();
 for (let i = 0; i < Number(seconds) * 60; i += 1) {
   w.tick(1 / 60);
-  GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
   record();
 }
 
@@ -221,7 +224,8 @@ if (live.length) {
   for (let i = 0; i < 8 && !p.dead && p.effectFrames === 0; i += 1) {
     p.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
     w.tick(1 / 60);
-    GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+    G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
     shots += 1;
   }
   console.log(`  kind ${p.kind}: ${shots} shot(s), slot `

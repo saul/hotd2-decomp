@@ -103,7 +103,10 @@ for (let stage = 1; stage <= 6; stage++) {
   }
 
   const events = new Events();
-  for (let i = 0; i < SETTLE; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  for (let i = 0; i < SETTLE; i++) {
+    G.g_camera_eye = { x: EYE.x, y: EYE.y, z: EYE.z };
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
+  }
 
   // A **negative** loop count is the engine's own "play for ever", and one
   // death script in the game asks for it: stage 4's `4484` ends on
@@ -125,7 +128,8 @@ for (let stage = 1; stage <= 6; stage++) {
       if (prev !== undefined && prev !== key) restless.add(a.at);
       last.set(a.at, key);
     }
-    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    G.g_camera_eye = { x: EYE.x, y: EYE.y, z: EYE.z };
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
   }
   total += dead.length;
   moved += restless.size;

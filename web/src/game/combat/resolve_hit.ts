@@ -16,6 +16,7 @@ import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
 import { AppState, G } from "../globals";
+import { CameraBlockYawAt } from "../camera/blocks";
 import { SpawnClass } from "../spawn_class";
 import { ZombieState } from "../class30/states";
 import { ScoreAddForPlayer } from "./score";
@@ -439,15 +440,23 @@ const RELEASE_CREATURE_SCORE = 0x50;
  * `ChooseDeathMotionDirectional` — `FUN_00456220`: `camera_yaw - actor_yaw`
  * against four ±45° arcs.
  *
+ * The camera yaw is the **camera block's**, `g_camera_blocks[g_camera_index]
+ * + 0x90` (`MOV ESI, [EAX*4 + 0x9A60D0]` at `0x00456248`, then `SUB ESI,
+ * obj+0x68` and `AND 0xFFFF`) -- the view's own heading, down its +z. The port
+ * used to hand it in: the gameplay yaw from the zombie's death (half a turn
+ * off under every path hook) and the gameplay yaw plus half a turn from the
+ * shot (right only while a hook keeps the two half a turn apart). `[proved]`
+ *
  * Named by angle rather than front/back — see the note in
  * `hod2lib/characters.py`, which explains why those labels depend on two
  * conventions at once and why the *data* is the reliable half.
  */
-export function ChooseDeathMotionDirectional(obj: Actor, cameraYawBams: number,
+export function ChooseDeathMotionDirectional(obj: Actor,
                                              rng: Rng): number | undefined {
   const d = T.chars?.deaths;
   if (!d || !d.front?.length) return undefined;
-  const rel = Math.round(cameraYawBams - obj.yaw) & 0xffff;
+  const rel = Math.round(CameraBlockYawAt(G.g_camera_index) - obj.yaw)
+    & 0xffff;
   const inArc = (centre: number): boolean => {
     let x = (rel - centre) & 0xffff;
     if (x > 0x8000) x -= 0x10000;
@@ -565,11 +574,11 @@ const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
  * in as an argument and the marks are the request. This is the gate and the
  * call, which is the part that decides anything.
  */
-export function DispatchHit(obj: Actor, bone: number, cameraYawBams: number,
+export function DispatchHit(obj: Actor, bone: number,
                             host: GameHost, rng: Rng,
                             player = 0): HitResult | null {
   if (obj.flags & ActorFlag.ShotImmune) return null;
-  return ResolveHit(obj, bone, cameraYawBams, host, rng, player);
+  return ResolveHit(obj, bone, host, rng, player);
 }
 
 /**
@@ -580,7 +589,7 @@ export function DispatchHit(obj: Actor, bone: number, cameraYawBams: number,
  * the player is still needed, because `ActorReactToHit`'s `znjoe` arm pays a
  * score to whoever fired.
  */
-export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
+export function ResolveHit(obj: Actor, bone: number,
                            host: GameHost, rng: Rng,
                            player = 0): HitResult {
   // `00409495`: out of play, this hit does nothing visible. Raised on the
@@ -800,7 +809,7 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     // `ThrowerOnShot` reads to tell a killing blow from a survivable one.
     obj.flags |= ActorFlag.Dead;
     if (!ownDeath) {
-      death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
+      death = ChooseDeathMotionDirectional(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, ticks: 0 };
       }
@@ -857,7 +866,7 @@ export interface KillAllResult {
  * the ordinary way — so refusing here is not "this actor can never be
  * cleared", it is "not this frame", which is what a shot would have been told.
  */
-export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
+export function ActorKillAll(rng: Rng): KillAllResult {
   const out: KillAllResult = { enemies: 0, civilians: 0 };
   for (const obj of G.g_object_list) {
     if (!obj.visible || obj.dead) continue;
@@ -893,7 +902,7 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
     // Same rule as `ResolveHit` above: a class that runs its own death gets
     // its own clip, and the shared one would stop the clock it counts on.
     if (!g_class_handlers[obj.cls]?.updatesWhenDead) {
-      const death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
+      const death = ChooseDeathMotionDirectional(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, ticks: 0 };
       }

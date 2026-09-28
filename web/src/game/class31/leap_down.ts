@@ -14,6 +14,8 @@ import type { Actor } from "../actor";
 import { PROJECTION_DISTANCE_PX } from "../combat/permits";
 import { G } from "../globals";
 import type { GameHost } from "../host";
+import { MatIdentity, MatrixRotateY, MatrixTransformPoint, MatrixTranslate }
+  from "../matrix";
 import type { Vec3 } from "../vec";
 import { ThrowerState } from "./states";
 
@@ -86,4 +88,63 @@ export function ThrowerPickLandingPoint(obj: Actor, host: GameHost,
   if (G.g_max_attackers === 1) side = 0;
   host.viewPoint((side * depth) / PROJECTION_DISTANCE_PX,
                  (vert * depth) / PROJECTION_DISTANCE_PX, depth, out);
+  if (obj.charType === CHAR_ZSLMAN) ThrowerPickLandingPointZslman(obj, out);
+}
+
+/** `CMP word ptr [ESI+0x1F4], 0x18` at `0x0044CCAD`. */
+const CHAR_ZSLMAN = 0x18;
+/** `[0x00565DFC]` = -1.2f and `[0x0055D79C]` = -5.0f: the two side scales. */
+const ZSLMAN_SIDE_FLOOR = Math.fround(-1.2);
+const ZSLMAN_SIDE_WALL = -5.0;
+/** `MOV [ESP+0x38], 0xC1200000` at `0x0044CE10`: ten units ahead. */
+const ZSLMAN_AHEAD = -10.0;
+
+/**
+ * `ThrowerPickLandingPoint`'s tail for character type 0x18, `zslman`
+ * (`0x0044CCAD`..`0x0044CE38`, past the end of Ghidra's function body): the
+ * screen point just picked is **thrown away** and the landing re-picked in
+ * the gameplay camera's own frame, by the surface the actor is on:
+ *
+ * ```c
+ * side = (g_max_attackers != 1 && permit != -1) ? (1 - 2*permit) * -1.2 : 0;
+ * switch (bit8*3 + bit7*2 + bit6 of obj+0x136C) {     // table at 0x0044CE44
+ *   0 (floor):   y = 4.5;
+ *   1 (WallA):   side = two && permit ? (1 - 2*permit) * -5.0 : -3.0; y = 15.5;
+ *   2 (WallB):   side = two && permit ? (1 - 2*permit) * -5.0 :  3.0; y = 15.5;
+ *   3 (ceiling): y = 27.0;
+ * }
+ * MatrixLoadIdentity(); MatrixTranslate(g_camera_eye);
+ * MatrixRotateY(g_camera_yaw_bams + 0x8000);
+ * *out = MatrixTransformPoint((side, y, -10.0));
+ * ```
+ *
+ * `[proved]`. Both camera words are the gameplay ones (`0x009C71E0`..`E8` at
+ * `0x0044CDCD`, `0x009C71F0` at `0x0044CDE6`). A selector past 3 needs two
+ * surface bits at once, which no writer raises; the engine would read its
+ * `y` from a stack slot holding the `out` pointer, and the port leaves it on
+ * the floor's.
+ */
+function ThrowerPickLandingPointZslman(obj: Actor, out: Vec3): void {
+  const two = G.g_max_attackers !== 1 && obj.attackPermit !== -1;
+  let side = two ? Math.fround((1 - 2 * obj.attackPermit) * ZSLMAN_SIDE_FLOOR)
+    : 0;
+  const f = obj.flags2;
+  const sel = ((f >> 8) & 1) * 3 + ((f >> 7) & 1) * 2 + ((f >> 6) & 1);
+  let y = 4.5;
+  if (sel === 1 || sel === 2) {
+    side = two ? (1 - 2 * obj.attackPermit) * ZSLMAN_SIDE_WALL
+      : sel === 1 ? -3.0 : 3.0;
+    y = 15.5;
+  } else if (sel === 3) {
+    y = 27.0;
+  }
+  const m = MatIdentity();
+  const e = G.g_camera_eye;
+  MatrixTranslate(m, e.x, e.y, e.z);
+  MatrixRotateY(m, G.g_camera_yaw_bams + 0x8000);
+  const p = { x: side, y, z: ZSLMAN_AHEAD };
+  MatrixTransformPoint(m, p, p);
+  out.x = Math.fround(p.x);
+  out.y = Math.fround(p.y);
+  out.z = Math.fround(p.z);
 }

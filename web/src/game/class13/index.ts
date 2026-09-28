@@ -52,6 +52,7 @@
 import type { Actor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import { CameraBlockYawAt } from "../camera/blocks";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -360,8 +361,11 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
         // follows the spawn.
         const bow = vec3();
         CarrierTransformPoint(obj, 0, 0, CARRIER_GROUND_WAKE_DRAW[1].bowZ, bow);
+        // The yaw is the camera block's (`[EAX*4 + 0x9A60D0]` at
+        // `0x004405DC`), not the gameplay one half a turn round from it.
         SpawnPropStripEffect({ pos: bow, pitch: 0,
-                               yaw: G.g_camera_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYawAt(G.g_camera_index),
+                               roll: 0 },
                              PropStripKind.CarrierBow, 1.0, f.events);
         f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       } else if (sub.pathFrame === FRAME_BOW_FLAG) {
@@ -480,11 +484,13 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
         sub.wakeFade = WAKE_FADE_RATE;
       } else if (sub.pathFrame === CARRIER6_FRAME_BOW_EFFECT) {
         // `0x00441544`..`0x004415EF`: the carrier's `Translate(0, 0, 8.0)`
-        // read back, facing the camera's yaw, kind 3, then the sound.
+        // read back, facing the camera block's yaw (`0x004415D3`), kind 3,
+        // then the sound.
         const bow = vec3();
         CarrierTransformPoint(obj, 0, 0, CARRIER_GROUND_WAKE_DRAW[6].bowZ, bow);
         SpawnPropStripEffect({ pos: bow, pitch: 0,
-                               yaw: G.g_camera_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYawAt(G.g_camera_index),
+                               roll: 0 },
                              PropStripKind.CarrierBow, 1.0, f.events);
         f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       }

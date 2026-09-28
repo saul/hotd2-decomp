@@ -59,6 +59,7 @@ import { ZombieDrawBonePart } from "./draw";
 import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed } from "./head_aim";
 import { ZombieAttachToCarrier } from "./carrier";
 import { ActorRegisterCameraPoint } from "../camera/track";
+import { RegisterForDistanceRank } from "../combat/rank";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
@@ -120,12 +121,21 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   HeadAimBeginDraw(obj, obj.zom, host);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
   HeadAimEndDraw(obj, obj.zom);
+  // `RegisterForDistanceRank` (`FUN_00409010`) at `0x0045346D`, unless
+  // `obj+0x136C` carries `0x8000000` (`TEST EAX, 0x8000000` at `0x00453465`):
+  // the zombie files its floor distance to the gameplay eye for the next
+  // frame's rank. What the bit is on this class is `[open]` -- see
+  // `class30/death.ts`'s `COND4_SPECIAL_BIT`.
+  if (!(obj.flags2 & RANK_EXEMPT_BIT)) RegisterForDistanceRank(obj);
   // `PUSH 0x40800000; CALL 0x00409b70` at `0x00453475`, on every path through
   // the routine and after the draw (`ZombieAdvanceMotion`, `0x00453457`): the
   // camera point lifted by 4 and the actor filed as a candidate. A death
   // chain's `0x10000` is what keeps a corpse off the list, not a test here.
   ActorRegisterCameraPoint(obj, host, ZOMBIE_CAMERA_RISE);
 }
+
+/** `obj+0x136C` bit `0x8000000`, tested at `0x00453465`; a literal, as in `death.ts`. */
+const RANK_EXEMPT_BIT = 0x8000000;
 
 /** `PUSH 0x40800000` at `0x00453475`: `ActorRegisterCameraPoint`'s 4.0. */
 export const ZOMBIE_CAMERA_RISE = 4.0;

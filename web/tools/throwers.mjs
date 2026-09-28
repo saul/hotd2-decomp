@@ -141,7 +141,8 @@ for (let stage = 1; stage <= 6; stage++) {
     let leftAt = null;
     let goneBy = null;
     for (let i = 0; i < SECONDS * 60; i++) {
-      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      G.g_camera_eye = { x: EYE.x, y: EYE.y, z: EYE.z };
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
       if (process.env.TRACE && String(p.at) === process.env.TRACE && i % 30 === 0) {
         console.log(`   f${i} ${ZombieState[a.state]}/${a.sub} `
           + `pos ${a.pos.x.toFixed(2)},${a.pos.z.toFixed(2)} motion=${a.motion} `

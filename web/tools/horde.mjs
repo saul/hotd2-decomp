@@ -158,7 +158,8 @@ for (const [name, stage, block, step, forceFlag] of CASES) {
       console.log(`   override: g_script_flags[${forceFlag}] = 1 at frame ${f}`);
       G.g_script_flags[forceFlag] = 1;
     }
-    GameUpdate(eye, 1 / 60, host, rng, events);
+    G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+    GameUpdate(1 / 60, host, rng, events);
     G.g_frame_counter; // stepped by GameUpdate
     for (const o of ms) {
       const d = g_class_handlers[0x40]?.debug?.(o);

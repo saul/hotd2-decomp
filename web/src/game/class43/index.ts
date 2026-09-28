@@ -78,6 +78,7 @@ import { ActorDespawn } from "../despawn";
 import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
   from "../camera/slots";
 import { G } from "../globals";
+import { CameraBlockEyeAt, CameraBlockYawAt } from "../camera/blocks";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -156,6 +157,11 @@ export const OWL_DIVE_ACCEL = 0.005;
 export const OWL_SWAY_RATE_SCALE = 72817.78;
 /** ...and the amplitude is the horizontal distance to the camera times this. */
 export const OWL_SWAY_FROM_DISTANCE = 0.125;
+/**
+ * `[0x0055CB80]` = 1/60 as a float: the two-player aim offset per whole unit
+ * of floor distance from the camera block's eye.
+ */
+export const OWL_AIM_PER_UNIT = Math.fround(1 / 60);
 /** The pull-out's rate: a smaller base and jitter than the dive's. */
 export const OWL_PULLOUT_RATE_BASE = 0.004;
 export const OWL_PULLOUT_RATE_SPREAD = 21;
@@ -326,10 +332,16 @@ export function OwlPickTargetPlayerAndAimOffset(obj: Actor, sub: OwlTail,
   if (G.g_players_in_play === 2) {
     const p = rng.int(2);
     obj.attackPermit = p;
-    const d = sub.swayRate * (1 / 60);
+    // `ftol(|owl.xz - eye.xz|) * (1/60)` against the camera block's eye, and
+    // the camera block's yaw a quarter turn round (`0x00448013`..`0x004480FF`:
+    // `[EDI + 0x9A60C0/C8]`, `[reg*4 + 0x9A60D0]`, `FMUL [0x0055CB80]`).
+    const e = CameraBlockEyeAt(G.g_camera_index);
+    const d = Math.trunc(Math.hypot(obj.pos.x - e.x, obj.pos.z - e.z))
+      * OWL_AIM_PER_UNIT;
+    const yaw = CameraBlockYawAt(G.g_camera_index);
     const off = p === 0 ? 0xc000 : 0x4000;
-    sub.aimX = Math.sin(s16(G.g_camera_yaw_bams + off) * BAMS) * d;
-    sub.aimZ = Math.cos(s16(G.g_camera_yaw_bams + off) * BAMS) * d;
+    sub.aimX = Math.fround(Math.sin((yaw + off) * BAMS) * d);
+    sub.aimZ = Math.fround(Math.cos((yaw + off) * BAMS) * d);
     return;
   }
   if (G.g_active_player === 0) obj.attackPermit = 0;
@@ -352,7 +364,9 @@ function OwlBeginSwayDive(obj: Actor, sub: OwlTail, f: ClassFrame): void {
   sub.aimZ = 0;
   sub.swayPhase = sub.escapeDir > 0 ? 0x8000 : 0;
   G.g_class43_attack_token = sub.member;
-  sub.sway = Math.hypot(obj.pos.x - f.eye.x, obj.pos.z - f.eye.z)
+  // The camera block's eye, not the gameplay one (`0x00446CC4`, `0x00447B73`).
+  const eye = G.g_camera_block_eye;
+  sub.sway = Math.hypot(obj.pos.x - eye.x, obj.pos.z - eye.z)
     * OWL_SWAY_FROM_DISTANCE;
   sub.swayRate = Math.trunc(sub.rate * OWL_SWAY_RATE_SCALE);
   OwlPickTargetPlayerAndAimOffset(obj, sub, f.rng);
@@ -488,9 +502,10 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   if (sub.state === OwlState.WaitLaunch || sub.state === OwlState.FlyToCircle) {
     obj.flags |= ActorFlag.Reacting;
   }
-  // The corpse is thrown along the camera's own backward yaw at unit speed,
-  // on top of four tenths of whatever it was doing.
-  const a = s16(G.g_camera_yaw_bams + 0x8000) * BAMS;
+  // The corpse is thrown along the camera block's yaw turned half round
+  // (`[reg*4 + 0x9A60D0] + 0x8000` at `0x0044627B`, `0x004462B6`) -- away from
+  // the lens -- at unit speed, on top of four tenths of whatever it was doing.
+  const a = (CameraBlockYawAt(G.g_camera_index) + 0x8000) * BAMS;
   sub.vx = sub.vx * OWL_DEATH_DAMP + Math.sin(a);
   sub.vz = sub.vz * OWL_DEATH_DAMP + Math.cos(a);
   sub.spin = OWL_CORPSE_SPIN;
@@ -745,10 +760,15 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   // half a body out of reach, never strikes, and since nothing clamps
   // `obj+0x270` in this branch it keeps going in a straight line for ever.
   sub.beat = (sub.beat + 1) % OWL_BEAT_FRAMES;
+  // **The camera block's eye**, `g_camera_blocks[g_camera_index] + 0x80`
+  // (`[reg*4 + 0x9A60C0]` at `0x00446F76`, `0x0044711D`, `0x00447369`) -- not
+  // the gameplay eye the ground enemies close on, which sits fifteen under
+  // it on a path.
+  const eye = CameraBlockEyeAt(G.g_camera_index);
   if (sub.dive === OwlDiveKind.Home) {
-    sub.tx = sub.fromX + ((f.eye.x + sub.aimX) - sub.fromX) * sub.t;
-    sub.ty = sub.fromY + (f.eye.y - sub.fromY) * sub.t;
-    sub.tz = sub.fromZ + ((f.eye.z + sub.aimZ) - sub.fromZ) * sub.t;
+    sub.tx = sub.fromX + ((eye.x + sub.aimX) - sub.fromX) * sub.t;
+    sub.ty = sub.fromY + (eye.y - sub.fromY) * sub.t;
+    sub.tz = sub.fromZ + ((eye.z + sub.aimZ) - sub.fromZ) * sub.t;
     OwlSteerVelocityTowardTarget(obj, sub, sub.t * OWL_GAIN_DIVE);
     sub.t += sub.rate;
     sub.rate += OWL_DIVE_ACCEL;
@@ -765,10 +785,10 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
     const outX = Math.cos(a) * off;
     const outZ = -Math.sin(a) * off;
     sub.swayPhase += sub.swayRate;
-    obj.pos.x = sub.fromX + ((f.eye.x + sub.aimX) - sub.fromX) * sub.t;
-    obj.pos.z = sub.fromZ + ((f.eye.z + sub.aimZ) - sub.fromZ) * sub.t;
+    obj.pos.x = sub.fromX + ((eye.x + sub.aimX) - sub.fromX) * sub.t;
+    obj.pos.z = sub.fromZ + ((eye.z + sub.aimZ) - sub.fromZ) * sub.t;
     const k = sub.subtype === 2 || sub.subtype === 0 ? 0.04 : 0.025;
-    obj.pos.y += (f.eye.y - obj.pos.y) * k;
+    obj.pos.y += (eye.y - obj.pos.y) * k;
     obj.pos.x += outX * sub.sway;
     obj.pos.z += outZ * sub.sway;
     sub.t += sub.rate;
@@ -783,8 +803,8 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   sub.limbE = Ease(sub.limbE, 0x3000, -0.2);
   sub.diveFrame += 1;
 
-  const d = Math.hypot(obj.pos.x - f.eye.x, obj.pos.y - f.eye.y,
-                       obj.pos.z - f.eye.z);
+  const d = Math.hypot(obj.pos.x - eye.x, obj.pos.y - eye.y,
+                       obj.pos.z - eye.z);
   // `obj+0x24C` is never incremented in this state, so the distance is the
   // only way out of it.
   if (d >= OWL_STRIKE_RANGE && sub.timer < 1) return;
@@ -972,7 +992,9 @@ export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
       || (sub.state === OwlState.Approach && sub.subtype !== 2)
       || (sub.state === OwlState.OrbitAway && sub.timer > 0)
       || (sub.state === OwlState.Approach && sub.timer > 0);
-    if (faceCamera) h = BamsOf(f.eye.x - obj.pos.x, f.eye.z - obj.pos.z);
+    // The camera block's eye (`0x0044638B`), as the dive's.
+    const eye = G.g_camera_block_eye;
+    if (faceCamera) h = BamsOf(eye.x - obj.pos.x, eye.z - obj.pos.z);
     const e = s16(h - s16(obj.yaw));
     obj.yaw += Math.trunc(sub.state === OwlState.Circle ? e / 4 : e / 10);
   }

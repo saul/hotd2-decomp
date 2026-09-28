@@ -131,9 +131,10 @@ for (const [name, block, lastPhase] of CASES) {
   }
   world.resync(ctx);
 
-  // The eye the next tick's frame is handed, as the app's `CameraTakeSystem`
-  // hands it: the camera the last tick drew. The camera block itself is the
-  // port's -- the action ring and the drivers seat it inside `GameUpdate`.
+  // The drawn view's eye, as the app's `CameraTakeSystem` leaves it: the
+  // camera the last tick drew. The frame no longer reads it -- the actors
+  // measure to `g_camera_eye` -- and the camera block itself is the port's:
+  // the action ring and the drivers seat it inside `GameUpdate`.
   const seat = () => {
     ctx.view.eye.x = G.g_camera_block_eye.x;
     ctx.view.eye.y = G.g_camera_block_eye.y;

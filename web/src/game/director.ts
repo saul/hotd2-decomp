@@ -590,10 +590,11 @@ export interface FrameResult {
 /**
  * Advance the whole game by `dt` seconds of game time.
  *
- * `eye` is the camera, which in this game *is* the player: every range test in
- * the enemy code measures to it.
+ * The eye every range test in the enemy code measures to is not an argument:
+ * it is `g_camera_eye` (`0x009C71E0`), which the scene state's hook writes in
+ * `CameraUpdateTick` ahead of every actor. See `SceneTaskWalk`.
  */
-export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
+export function GameUpdate(dt: number, host: GameHost, rng: Rng,
                            events?: Events): FrameResult {
   const frames = dt * GAME_HZ;
   G.g_frame += frames;
@@ -650,7 +651,7 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // (`FUN_0040E860`) ends the engine's tick the same way.
   let result: FrameResult = { lookAt: G.g_camera_block_target };
   RunPhaseDispatch(() => {
-    result = SceneTaskWalk(eye, dt, host, rng, events);
+    result = SceneTaskWalk(dt, host, rng, events);
   });
   // `AppStateDispatch`'s last call, whatever the screen.
   CreditBlinkTick();
@@ -686,7 +687,7 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
  * the camera two frames on -- filed this frame, dealt next, read the one
  * after.
  */
-function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
+function SceneTaskWalk(dt: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
   // The layered queue was emptied at the head of the frame, in `GameUpdate`.
   CameraActorTick();
@@ -698,9 +699,9 @@ function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
   // what it turns them into. See `hud_shutter.ts`.
   HudDrawShutterState();
   UpdateCameraEnemySlots();
-  // Once a frame, for everyone: the rank the approach state tests against the
-  // ring table's allowance.
-  RankEnemiesByDistance(eye);
+  // The rank the approach state tests against the ring table's allowance,
+  // from the zombies that filed themselves last frame.
+  RankEnemiesByDistance();
   DropDueShotRequests();
   // `ProcessPlayerShots` (`FUN_00404570`) is a task of its own, the last the
   // list makes, and it ends by emptying `g_shot_test_list`: the trigger pulls
@@ -731,6 +732,16 @@ function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
   // tasks ahead of the boss that samples them -- see `WaterWaveSourcesTick`.
   WaterWaveSourcesTick();
 
+  // **The gameplay eye**, `g_camera_eye` (`0x009C71E0`), as this frame's
+  // `CameraUpdateTick` left it: every actor routine that measures to the
+  // camera reads that global, and nothing in the walk writes it. The owl and
+  // the fish read the camera block's eye instead (`0x009A60C0`), and take it
+  // from `G` themselves. It used to be the eye the renderer drew the last
+  // frame with, handed in by the app -- the block's, a frame late, and
+  // fifteen units above the gameplay eye on a path. A copy, so a routine that
+  // keeps the point keeps this frame's.
+  const e = G.g_camera_eye;
+  const eye = vec3(e.x, e.y, e.z);
   const f = { eye, dt, rng, host, events };
   for (const obj of G.g_object_list) {
     // Every actor's clips run, handler or not: a class with no behaviour still

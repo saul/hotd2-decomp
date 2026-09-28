@@ -87,7 +87,8 @@ function run(n) {
     // The engine's own "cannot be hurt" byte, `g_player_no_damage`, rather
     // than a life count the first player turn would overwrite.
     G.g_player_no_damage = [1, 1];
-    GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    G.g_camera_eye = { x: EYE.x, y: EYE.y, z: EYE.z };
+    GameUpdate(1 / 60, HOST, rng, events);
     let atOnce = 0;
     for (let k = 0; k < n; k++) {
       const striking = zs[k].state === ZombieState.Strike;

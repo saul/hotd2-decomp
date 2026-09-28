@@ -162,7 +162,8 @@ for (let i = 0; i < frames; i++) {
   G.g_active_cam_path = walker.cam ? walker.cam.slot : -1;
   G.g_script_flags = [];
   for (const f of walker.flags) G.g_script_flags[f] = 1;
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, host, rng, events);
   trace(i);
   if (killWho && !killed && i > 120) {
     const live = G.g_object_list.filter((o) => ActorIsEnemy(o.cls) && !o.dead);
@@ -176,7 +177,7 @@ for (let i = 0; i < frames; i++) {
     if (cand) {
       const head = CharacterTypeOf(cand)?.head_bone ?? 2;
       for (let s = 0; s < 60 && !cand.dead; s++) {
-        ResolveHit(cand, head, G.g_camera_yaw_bams, host, rng);
+        ResolveHit(cand, head, host, rng);
       }
       console.log(`shot 0x${cand.at.toString(16)} in the head at frame ${i}:`
         + ` state ${cand.state}/${cand.sub} hp ${cand.hp}`

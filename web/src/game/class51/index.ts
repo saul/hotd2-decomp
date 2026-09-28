@@ -633,8 +633,10 @@ export function FishStateLunge(obj: Actor, f: ClassFrame): void {
  * permit gates, not the ending.
  */
 export function FishLungeTestBite(obj: Actor, f: ClassFrame): void {
-  const d = Math.hypot(obj.pos.x - f.eye.x, obj.pos.y - f.eye.y,
-                       obj.pos.z - f.eye.z);
+  // The camera block's eye (`0x004397E0`), not the gameplay one.
+  const eye = G.g_camera_block_eye;
+  const d = Math.hypot(obj.pos.x - eye.x, obj.pos.y - eye.y,
+                       obj.pos.z - eye.z);
   if (d >= FISH_BITE_RANGE) {
     if (d <= FISH_ABANDON_RANGE) return;
   } else if (obj.attackPermit !== -1) {
@@ -893,8 +895,9 @@ export function FishCheckShot(obj: Actor, f: ClassFrame): void {
     sub.state = FishState.Flung;
     sub.frame = FishCorpseSlot(FISH_FLUNG_SLOT);
     sub.vy = FISH_FLUNG_LIFT;
-    const dx = obj.pos.x - f.eye.x;
-    const dz = obj.pos.z - f.eye.z;
+    // Away from the camera block's eye (`0x00438DE2`).
+    const dx = obj.pos.x - G.g_camera_block_eye.x;
+    const dz = obj.pos.z - G.g_camera_block_eye.z;
     const len = Math.hypot(dx, dz) * 2;
     if (len === 0) { sub.vx = 0; sub.vz = 0; }
     else { sub.vx = dx / len; sub.vz = dz / len; }

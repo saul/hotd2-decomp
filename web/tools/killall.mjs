@@ -132,7 +132,8 @@ let killedAt = -1;
 for (let i = 0; i < frames; i++) {
   walker.tick(1 / 60);
   syncSpawns();
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, host, rng, events);
   if (killedAt < 0 && G.g_attack_permits.some((x) => x !== -1)) killedAt = i;
   if (killedAt >= 0 && i >= killedAt) break;
 }
@@ -181,7 +182,7 @@ for (const o of G.g_object_list) {
 }
 console.log(permitOwners());
 
-const n = ActorKillAll(0, rng);
+const n = ActorKillAll(rng);
 console.log(`\nActorKillAll -> ${n.enemies} enemies, ${n.civilians} civilians`);
 
 // Both enemy classes die through a **chain of states** and retire the counts
@@ -219,7 +220,8 @@ function trace(frame) {
 trace(0);
 for (let i = 0; i < after; i++) {
   walker.tick(1 / 60);
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, host, rng, events);
   trace(i + 1);
   if (i === 0 || i === 59 || i === 299 || i === after - 1) {
     console.log(`  +${i + 1}f: ${row()}`

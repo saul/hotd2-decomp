@@ -143,7 +143,8 @@ const trace = actors.map(({ a }) => [[a.pos.x, a.pos.y, a.pos.z]]);
 const crossings = { selected: 0, level: 0 };
 const total = Number(seconds) * 60;
 for (let n = 0; n <= total; n++) {
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, host, rng, events);
   actors.forEach(({ a, at }, i) => {
     if (crossed(prev[i], a.pos, selected)) {
       crossings.selected++;

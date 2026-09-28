@@ -173,9 +173,11 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
       case CivilianOp.SetActorFlags: obj.flags |= a[0]; break;
       case CivilianOp.SetDeathVoice: sub.deathVoice = a[0] & 0xff; break;
       case CivilianOp.MoveOverFrames:
+        // An op with no point moves toward the gameplay eye as it stands now
+        // (`0x0048C0FE`..`0x0048C11A`: `sub+0xB0 = g_camera_eye`).
         sub.moveTo = a[0] >= 1 && c.point
           ? { x: c.point[0], y: c.point[1], z: c.point[2] }
-          : { x: 0, y: 0, z: 0 };
+          : { x: G.g_camera_eye.x, y: G.g_camera_eye.y, z: G.g_camera_eye.z };
         sub.moveFrames = a[1];
         if (sub.moveFrames > 0) {
           obj.vel.x = (sub.moveTo.x - obj.pos.x) / sub.moveFrames;

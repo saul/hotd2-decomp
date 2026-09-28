@@ -170,7 +170,8 @@ for (let f = 0; f < total; f++) {
   syncSpawns(walker.spawns);
   eye.y = walker.groundY ?? 0;
   G.g_camera_fixed_eye_y = eye.y;
-  GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
   // **The counters are the gates.** They are stepped now, not derived, so a
   // missing release parks the script on a `wait_enemies_alive` for ever and a
   // double release takes the count negative and opens one early. Both show up

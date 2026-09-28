@@ -187,23 +187,6 @@ export function QueueOffscreenPull(player: number): void {
 }
 
 /**
- * The yaw the directional death compares against.
- *
- * `FUN_00403AC0` builds the game's camera yaw from `eye - target`, so it is
- * the camera's own local **+Z** — its backward axis, not its forward one.
- * `g_camera_yaw_bams` as the port fills it is the *forward* axis, because
- * `CameraFrame.place` takes it from `getWorldDirection`, and class 0x31's leap
- * aside reads it that way. The two are half a turn apart and which of them the
- * engine's single global really holds is `[open]`, so the port keeps both
- * readings rather than quietly merging them; this is the one the death picker
- * has always been handed. `ChooseDeathMotionDirectional` masks to 16 bits, so
- * the unwrapped sum is fine.
- */
-function CameraBackYawBams(): number {
-  return G.g_camera_yaw_bams + 0x8000;
-}
-
-/**
  * Whether a trigger pull of `player` falls due this frame.
  *
  * `[port-only]` -- the engine polls a trigger bit (`+0x14` of the aim record,
@@ -446,7 +429,7 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   // is behind the shot-immune gate. `null` is that refusal, and it is a
   // **ricochet**, not a miss — the shot marked the actor, so the feedback
   // routine still runs, with the result the class's own copy forces.
-  const out = DispatchHit(obj, pick.bone, CameraBackYawBams(), host, rng,
+  const out = DispatchHit(obj, pick.bone, host, rng,
                           player);
   if (!out) {
     // `ThrowerShotFeedback` (`FUN_00449B20`) opens

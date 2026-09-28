@@ -194,9 +194,9 @@ export class GameSystem implements System {
     // `UpdateSceneViewAndLight`'s, both inside the tick; they used to be
     // copied in from the three.js camera, which put the drawn camera's heading
     // where the engine keeps the players' -- two different things under (2,4),
-    // whose hook holds the heading while the aim swings. The two combat
-    // `Init`s' head-aim seed reads `g_camera_eye` as the engine's hook last
-    // wrote it, which is what the exe's reads.
+    // whose hook holds the heading while the aim swings. Nor is the eye the
+    // actors measure to handed in: it is `g_camera_eye`, as the hook wrote it
+    // this tick, and it used to be the drawn camera's position from here.
     // The gun lights are **not** built here -- see `GunLightBuildSystem`.
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes
@@ -221,11 +221,7 @@ export class GameSystem implements System {
     // in the instant between a playing frame and a pause, which is input the
     // clock genuinely owed, and it resolves on the frame the clock restarts.
     if (t.frozen || t.dt <= 0) return;
-    // A copy, not the live one: the frame object `GameUpdate` builds holds
-    // the reference for the whole pass, and `ctx.view.eye` is written again
-    // next tick.
-    const { x, y, z } = ctx.view.eye;
-    GameUpdate({ x, y, z }, t.dt, this.host, ctx.rng, ctx.events);
+    GameUpdate(t.dt, this.host, ctx.rng, ctx.events);
     ctx.frame = Math.round(G.g_frame);
   }
 

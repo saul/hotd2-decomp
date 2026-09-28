@@ -129,7 +129,8 @@ for (let stage = 1; stage <= 6; stage++) {
       // ...and the script raises its flags. Two states wait on one; nothing
       // else in this harness would ever set them.
       if (f === 120) for (let i = 0; i < 256; i++) G.g_script_flags[i] = 1;
-      GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+      G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
       maxSub = Math.max(maxSub, a.sub);
       const left = DESPAWNS.has(p.initial_state)
         ? (a.despawned || a.dead) : a.state !== p.initial_state;

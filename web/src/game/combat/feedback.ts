@@ -174,6 +174,12 @@ export function ActorShotFeedback(obj: Actor, bone: number, point: Vec3,
                           (id) => events?.emit("sound.play", { id }));
         const at = vec3(point.x, point.y, point.z);
         host.boneWorld(obj.at, HEAD_BONE, at);
+        // [diverges] The head's starting pitch and yaw are `obj+0x330` and
+        // `obj+0x334` (`SpawnSeveredHead`, `0x0040A1C2`..`0x0040A1D5`) --
+        // bone 2's draw record, `+0x04` and `+0x08` -- and what the draw
+        // leaves there is `[open]`. No camera word is read. The port starts
+        // the head level and on the gameplay yaw, which only sets where its
+        // spin begins.
         SpawnSeveredHead(at, BURSTING_HEAD_STUMP, 0, G.g_camera_yaw_bams);
         obj.boneSlot[String(HEAD_BONE)] = BURSTING_HEAD_STUMP;
         SpawnSpriteEffect(point, 0, 0, SpriteEffectKind.Metal, 1, 0, host,

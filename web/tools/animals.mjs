@@ -153,7 +153,8 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel] of CASES) {
       if (a) { eye = vec3(a.pos.x, a.pos.y + 4, a.pos.z + 30); seated = true; }
     }
     if (cls === 0x11) { G.g_active_cam_path = 41; G.g_cam_path_frame = f; }
-    GameUpdate(eye, 1 / 60, host, rng, events);
+    G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+    GameUpdate(1 / 60, host, rng, events);
     for (const o of G.g_object_list) {
       if (o.cls !== cls) continue;
       found = Math.max(found, 1);

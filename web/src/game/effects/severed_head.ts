@@ -24,6 +24,7 @@
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { G } from "../globals";
+import { CameraBlockYawAt } from "../camera/blocks";
 import { QueryGroundHeightAt } from "../coli";
 import { vec3, type Vec3 } from "../vec";
 
@@ -124,10 +125,12 @@ export function SeveredHeadUpdate(h: SeveredHead, rng: Rng,
   if (h.phase === SeveredHeadPhase.Launch) {
     h.gravity = GRAVITY;
     h.vel.y = (rng.int(UP_STEPS) + 1) * UP_STEP + UP_MIN;
-    // `MatrixRotateY(camera yaw)` applied to `(0, 0, -0.2)`: the head is
-    // thrown along the camera's own forward, which is always away from the
-    // viewer whichever way the shot came from.
-    const a = G.g_camera_yaw_bams * ((Math.PI * 2) / 65536);
+    // `MatrixRotateY(block yaw)` applied to `(0, 0, -0.2)` (`[EDX*4 +
+    // 0x9A60D0]` at `0x0040A2A6`): the head is thrown along the camera's own
+    // forward, which is always away from the viewer whichever way the shot
+    // came from. The camera block's yaw, not the gameplay one -- under every
+    // path hook that is half a turn round, and threw the head at the lens.
+    const a = CameraBlockYawAt(G.g_camera_index) * ((Math.PI * 2) / 65536);
     h.vel.x = AWAY_SPEED * Math.sin(a);
     h.vel.z = AWAY_SPEED * Math.cos(a);
     // `rand() & 0x80000001` is a signed `% 2`; `(x * -2 + 1)` turns 0/1 into

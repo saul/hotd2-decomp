@@ -151,14 +151,15 @@ const _aim = vec3();
  * in front of the camera, which is the reading that makes the point one the
  * head can see.
  *
- * The eye is `g_camera_eye` (`0x009C71E0`, both branches); the callers pass
- * `ClassFrame.eye`, which is still the camera the renderer last drew rather
- * than the gameplay eye the scene state's hook writes. They coincide on a
- * path (the hook's eye is the pose's, fifteen units down, and the target here
- * is fifteen up) but not under a fixed eye height or while the eye eases.
+ * The eye is `g_camera_eye` (`0x009C71E0`, both branches: `0x00453DA3`..
+ * `0x00453DAE` and `0x00453E66`..`0x00453E8E`), the gameplay eye the scene
+ * state's hook writes -- on a path fifteen units under the camera block's
+ * eye, so the one-attacker target is the lens itself. It was the camera the
+ * renderer last drew, which put that target fifteen units over the lens.
  */
-export function ActorHeadAimAngles(obj: Actor, pt: Vec3, eye: Vec3):
+export function ActorHeadAimAngles(obj: Actor, pt: Vec3):
     { pitch: number; yaw: number } {
+  const eye = G.g_camera_eye;
   let tx: number, ty: number, tz: number;
   if (G.g_max_attackers === 2 && obj.attackPermit !== -1) {
     const m = MatIdentity();
@@ -217,9 +218,9 @@ const _pt = vec3();
  * {@link HeadAimWords.headAimed} is how it is told to draw it.
  *
  * The camera block's matrix is `host.cameraMatrices`' view-to-world, which is
- * the camera the renderer last drew with; the record is in that space too
- * (see {@link HeadAimBeginDraw}), so a fresh record comes back as exactly the
- * point the renderer posed. A host with no camera -- a headless run -- cannot
+ * `g_camera_view_to_world` as this frame's `CameraActorTick` built it; the
+ * record is in that space too (see {@link HeadAimBeginDraw}), so a fresh
+ * record comes back as exactly the point the draw posed. A host with no camera -- a headless run -- cannot
  * place the head at all, and the aim holds: no routine in the game reads
  * these two angles but the draw.
  */
@@ -231,7 +232,7 @@ export function ActorAimHeadAtCamera(obj: Actor, aim: HeadAimWords,
   _pt.x = Math.fround(_pt.x);
   _pt.y = Math.fround(_pt.y);
   _pt.z = Math.fround(_pt.z);
-  const want = ActorHeadAimAngles(obj, _pt, f.eye);
+  const want = ActorHeadAimAngles(obj, _pt);
   const pitch = want.pitch & 0xffff;
   const yaw = want.yaw & 0xffff;
   const p = TurnAngleToward(aim.headPitch, pitch, HEAD_AIM_RATE);

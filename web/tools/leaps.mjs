@@ -103,7 +103,8 @@ for (let stage = 1; stage <= 6; stage++) {
     // better -- sub 4 can hand over to `AttackRun` at sub 0 on the same frame.
     let lowest = a.pos.y, playedLimp = false, landedAt = -1, yLanded = a.pos.y;
     for (let f = 0; f < 900; f++) {
-      GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+      G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
       if (a.motion === LIMP_MOTION) playedLimp = true;
       const flying = landedAt < 0 && a.sub >= 1 && a.sub <= 3
                   && a.state === ZombieState.DelayedLeap;

@@ -38,6 +38,7 @@
 import { ActorDespawn } from "../despawn";
 import type { Actor } from "../actor";
 import { G } from "../globals";
+import { CameraBlockYawAt } from "../camera/blocks";
 import { ActorClaimHitSlot } from "../hit_slots";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -198,12 +199,10 @@ export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
       obj.pos.y = p.y + BOAT_RIDE_HEIGHT;
       obj.pos.z = p.z;
       obj.pitch = p.pitch ?? obj.pitch;
-      // `g_camera_block_yaw_bams` (`0x009A60D0`) in the engine. The port
-      // keeps one heading, `g_camera_yaw_bams`, and reads it for this as
-      // `PropUpdateType43` and the bat do; whether the two ever differ is the
-      // `[open]` on that row of `globals.tsv`.
+      // The camera block's yaw (`[ECX*4 + 0x9A60D0]` at `0x0048EDC6`, then
+      // `ADD 0x8000`), not the gameplay one half a turn round from it.
       obj.yaw = v.faceCamera
-        ? (G.g_camera_yaw_bams + FACE_CAMERA_TURN) & 0xffff
+        ? (CameraBlockYawAt(G.g_camera_index) + FACE_CAMERA_TURN) & 0xffff
         : (p.yaw ?? obj.yaw);
       obj.roll = p.roll ?? obj.roll;
     }

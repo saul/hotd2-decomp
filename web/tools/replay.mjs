@@ -137,7 +137,8 @@ for (let f = 0; f <= total; f++) {
         + `permit=${a.attackPermit} motion=${a.motion}`);
     }
   }
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  G.g_camera_eye = { x: eye.x, y: eye.y, z: eye.z };
+  GameUpdate(1 / 60, host, rng, events);
   for (const { a } of actors) a.visible = !a.dead;   // what the renderer does
 }
 console.log(`\n${hits} hits on the player over ${seconds}s`);

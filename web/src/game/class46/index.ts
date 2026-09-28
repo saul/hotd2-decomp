@@ -143,6 +143,7 @@ import {
 import { ActorReleaseHitSlot } from "../hit_slots";
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
 import { G, PlayerState } from "../globals";
+import { CameraBlockEyeAt, CameraBlockYawAt } from "../camera/blocks";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -432,7 +433,8 @@ function BatEaseYaw(obj: Actor, dx: number, dz: number, divisor: number): void {
 function BatApplyWobble(obj: Actor, sub: BatTail): void {
   sub.phase += BAT_WOBBLE_STEP;
   const s = Math.sin(sub.phase * BAMS);
-  const a = (G.g_camera_yaw_bams + 0x8000) * BAMS;
+  // `[ECX*4 + 0x9A60D0]` at `0x0042E7FE` / `0x0042F0C9`, `ADD 0x8000`.
+  const a = (CameraBlockYawAt(G.g_camera_index) + 0x8000) * BAMS;
   const k = sub.wobble * BAT_WOBBLE_SCALE;
   obj.pos.x += s * Math.cos(a) * k;
   obj.pos.z += -s * Math.sin(a) * k;
@@ -943,7 +945,8 @@ export function BatDiveUpdate(obj: Actor, f: ClassFrame): void {
       if (sub.t > BAT_WOBBLE_HOLD) {
         sub.wobble = (1.0 - sub.t) * BAT_WOBBLE_DECAY;
       }
-      const eye = G.g_camera_block_eye;
+      // `[EAX*4 + 0x9A60C0]` at `0x0042E6C5`: the active block's eye.
+      const eye = CameraBlockEyeAt(G.g_camera_index);
       obj.pos.x = (eye.x - sub.fromX) * sub.t + sub.fromX;
       obj.pos.y = (eye.y - sub.fromY) * sub.t
         + ClipRootY(obj) * BAT_DIVE_BOB_SCALE * sub.wobble + sub.fromY;
@@ -1064,11 +1067,11 @@ export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
  * {@link BatDiveUpdate}'s homing arm at `0.01` a frame instead of `0.015`, and
  * a yaw eased a quarter of the way rather than an eighth.
  *
- * `[diverges]` **The dive's yaw reads camera block 0**, not the active one.
- * The engine indexes `g_camera_block_eye` by `g_camera_index` for the position
- * and takes the bare symbol for the heading, three lines apart. The two are
- * the same object in a one-player game, which is every shipped case the port
- * runs, and the port uses the active block for both.
+ * **The dive's heading reads camera block 0**, not the active one: the
+ * engine indexes `g_camera_block_eye` by `g_camera_index` for the position
+ * (`0x0042EFE4`) and takes the bare symbol for the heading (`0x0042F147`,
+ * `0x0042F153`). `g_camera_index` is 0 under every shipped writer, so the two
+ * are one block in play; the port reads each as the engine does. `[proved]`
  */
 export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
@@ -1110,7 +1113,7 @@ export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
     if (sub.t > BAT_WOBBLE_HOLD) {
       sub.wobble = (1.0 - sub.t) * BAT_WOBBLE_DECAY;
     }
-    const eye = G.g_camera_block_eye;
+    const eye = CameraBlockEyeAt(G.g_camera_index);
     obj.pos.x = (eye.x - sub.fromX) * sub.t + sub.fromX;
     // `FMUL [0x0055D2B4]` at `0x0042F035`: **5.0**, the dive's bob, and not
     // the orbit's 8.0 (`FMUL double [0x0055D2D0]` at `0x0042F2FE`).
@@ -1124,7 +1127,8 @@ export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
     // **From the eye, not from the last position.** The dive faces away from
     // the camera rather than along its own travel, and it is the one place the
     // three routines feed the ease something different.
-    BatEaseYaw(obj, sub.prevX - eye.x, sub.prevZ - eye.z, 4);
+    BatEaseYaw(obj, sub.prevX - G.g_camera_block_eye.x,
+               sub.prevZ - G.g_camera_block_eye.z, 4);
     if (sub.t > 1.0) {
       BatStrikeAndLeave(obj, sub, f);
       return;

@@ -25,6 +25,8 @@
  */
 import { SecondsToTicks } from "./tables";
 import type { Actor } from "./actor";
+import { G } from "./globals";
+import { CameraBlockYawAt } from "./camera/blocks";
 import { VecToAngles, bamsWrap, type Vec3 } from "./vec";
 import {
   FtolS16, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -238,20 +240,49 @@ export function AngleWithinTolerance(angle: number, centre: number,
 
 /**
  * `ActorFacePlayerTarget` — `FUN_00455F40`. Snap the yaw straight at the
- * player — no easing — and remember where that player was.
+ * player — no easing — and remember where that player was, in `obj+0x13E4`.
  *
- * With one attacker the target is the camera eye. With two it is a shoulder
- * offset from it, per permit index, which is why the point is stored on the
- * actor rather than recomputed: the strike's lunge and the retreat both
- * measure against the same remembered spot.
+ * ```c
+ * if (g_max_attackers != 1 && (s8)obj+0x121 != -1) {
+ *     MatrixLoadIdentity(); MatrixTranslate(g_camera_eye);
+ *     MatrixRotateY(g_camera_block_yaw_bams[g_camera_index]);
+ *     p = MatrixTransformPoint(((1 - 2*permit) * -1.2, 0, -1.5));
+ * } else {
+ *     p = g_camera_eye;
+ * }
+ * VecToAngles(obj+0x40 - p, &pitch, &obj+0x68);
+ * obj+0x13E4 = p;
+ * ```
+ *
+ * `[proved]` (`0x00455F43`..`0x004560A0`). With one attacker the target is
+ * the gameplay eye. With two it is 1.5 in front of the camera and 1.2 to the
+ * side of the player whose permit the actor holds -- the head aim's shoulder
+ * without its rise -- which is why the point is stored on the actor rather
+ * than recomputed: the strike's lunge and the retreat both measure against
+ * the same remembered spot. `eye` is the gameplay eye, `ClassFrame.eye`.
  */
 export function ActorFacePlayerTarget(obj: Actor, eye: Vec3): void {
-  obj.target.x = eye.x;
-  obj.target.y = eye.y;
-  obj.target.z = eye.z;
+  let tx = eye.x, ty = eye.y, tz = eye.z;
+  if (G.g_max_attackers !== 1 && obj.attackPermit !== -1) {
+    const m = MatIdentity();
+    MatrixTranslate(m, eye.x, eye.y, eye.z);
+    MatrixRotateY(m, CameraBlockYawAt(G.g_camera_index));
+    const p = { x: Math.fround((1 - 2 * obj.attackPermit) * FACE_SHOULDER),
+                y: 0, z: FACE_AHEAD };
+    MatrixTransformPoint(m, p, p);
+    tx = Math.fround(p.x); ty = Math.fround(p.y); tz = Math.fround(p.z);
+  }
+  obj.target.x = tx;
+  obj.target.y = ty;
+  obj.target.z = tz;
   obj.yaw = bamsWrap(
-    VecToAngles(obj.pos.x - eye.x, 0, obj.pos.z - eye.z).yaw);
+    VecToAngles(obj.pos.x - tx, obj.pos.y - ty, obj.pos.z - tz).yaw);
 }
+
+/** `[0x00565DFC]` = -1.2f, times `1 - 2 * permit`: the side offset. */
+const FACE_SHOULDER = Math.fround(-1.2);
+/** `MOV [ESP+0x38], 0xBFC00000` at `0x00455FD4`: -1.5, ahead of the camera. */
+const FACE_AHEAD = -1.5;
 
 const _heading: Vec3 = { x: 0, y: 0, z: 0 };
 

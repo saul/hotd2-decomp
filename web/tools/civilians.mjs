@@ -138,7 +138,8 @@ for (let stage = 1; stage <= 6; stage++) {
         if (o.cls === SpawnClass.Zombie) { o.dead = true; }
       }
     }
-    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    G.g_camera_eye = { x: EYE.x, y: EYE.y, z: EYE.z };
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
     steps += 1;
   }
   for (const a of actors) {

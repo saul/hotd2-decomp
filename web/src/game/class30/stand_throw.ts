@@ -31,6 +31,7 @@ import {
 } from "../combat/counts";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import { CameraBlockYawAt } from "../camera/blocks";
 import { CameraSlotVacate } from "../camera/slots";
 import { AttackListOf, CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
@@ -132,10 +133,11 @@ export function ZombiePickThrowingHand(obj: ZombieActor, rng: Rng): number {
  */
 export function ZombieShouldStandAndThrow(obj: ZombieActor): boolean {
   if (obj.condition !== ATTACK_RUN_THROW_CONDITION) return false;
-  // `FUN_0040A040(g_camera_yaw_bams - 0x8000, obj+0x68, 0x400)` — the camera's
-  // *backward* yaw against the actor's facing, because an actor faces away
-  // from what it is walking at. See `TurnActorTowardCamera`.
-  const want = (G.g_camera_yaw_bams - 0x8000) & 0xffff;
+  // `FUN_0040A040((block_yaw - 0x8000) & 0xFFFF, obj+0x68, 0x400)`, the yaw
+  // the camera block's (`[ECX*4 + 0x9A60D0]` at `0x00458E48`, `SUB 0x8000` at
+  // `0x00458E4F`) -- not the gameplay yaw, which under every path hook is
+  // already that half turn round and read here gave the opposite window.
+  const want = (CameraBlockYawAt(G.g_camera_index) - 0x8000) & 0xffff;
   if (Math.abs(bamsDelta(want, obj.yaw & 0xffff)) > FACING_WINDOW) return false;
   if (ZombieArmedHands(obj) === 0) return false;
   return TryClaimAttackSlot(obj);

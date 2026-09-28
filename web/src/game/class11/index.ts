@@ -77,7 +77,7 @@ import { G } from "../globals";
 import type { GameHost } from "../host";
 import {
   MatCopy, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
-  MatrixToEulerZYX, type Mat,
+  MatrixToEulerZYX, MatrixTransformVector, type Mat,
 } from "../matrix";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -1019,7 +1019,7 @@ export function FrogStateIdleAndCroak(obj: Actor, f: ClassFrame): void {
  * zero the flag word — which also turns gravity back on — and release the
  * attack permit.
  */
-export function FrogStateDieTumbleAndSink(obj: Actor, f: ClassFrame): void {
+export function FrogStateDieTumbleAndSink(obj: Actor, _f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   const ground = FrogReadGroundPlaneY();
@@ -1031,14 +1031,12 @@ export function FrogStateDieTumbleAndSink(obj: Actor, f: ClassFrame): void {
       obj.flags |= ActorFlag.NoCameraTrack;
     }
     G.g_enemies_alive -= 1;
-    // `(0, 0, -0.5)` through rows 0..2 of the camera block matrix with a zero
-    // translation: the corpse is thrown along the camera's own -Z, which is
-    // away from the eye and into the screen.
-    const away = { x: 0, y: 0, z: 0 };
-    f.host.viewPoint(0, 0, FROG_DEATH_KICK, away);
-    obj.vel.x = away.x - f.eye.x;
-    obj.vel.y = away.y - f.eye.y;
-    obj.vel.z = away.z - f.eye.z;
+    // `(0, 0, -0.5)` through rows 0..2 of the camera block's view-to-world
+    // (`g_camera_blocks[g_camera_index] + 0x40`, `0x0043BA98`..`0x0043BB36`)
+    // with a zero translation: the corpse is thrown along the camera's own
+    // -Z, which is away from the eye and into the screen. No eye is read.
+    MatrixTransformVector(G.g_camera_view_to_world,
+                          { x: 0, y: 0, z: FROG_DEATH_KICK }, obj.vel);
     sub.flags = 0;
     if (obj.attackPermit !== -1) G.g_attack_permits[obj.attackPermit] = -1;
     sub.sub = 1;

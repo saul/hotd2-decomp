@@ -23251,3 +23251,87 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+
+## 2026-09-28 -- zslman's afterimages, the sprint a shot gives, and the shot voice read off the wrong register
+
+Two behaviours the port declared away, and a misreading found by reading the
+second one's loop whole.
+
+**`ZslmanBladeEmitAfterimage` (`FUN_00450930`) and `ZslmanBladeAfterimageFade`
+(`FUN_00450A30`).** Both were already named; read again from the
+disassembly, which sharpened three things the annotation had loose:
+
+* the cadence is `DEC [EBP+0x1338]` then `JNS` (`0x0045093B`, `0x00450942`),
+  so the launcher's 4 makes the first afterimage on the **fifth** call and
+  every fifth after -- not "every obj+0x133C frames";
+* the emitter swaps `0x1FE1` -> `0x1FE4` and `0x1FE2` -> `0x1FE5` before the
+  fade ever runs, so the fade's `SetRenderLightColour(0, 0, light)` arm for
+  `0x1FE1`/`0x1FE2` is unreachable: every afterimage is lit grey;
+* a spent blade takes nothing back, so a blade shot out of the air trails
+  until its count reaches ten and then stops for good.
+
+`ActorAlloc` links at the tail of the running task's list, so an afterimage
+runs and draws on the frame it is made; the port appends it to the list
+`ThrownWeaponPoolUpdate` is walking, as a third `ThrownWeaponRoutine`. The two
+models are `zslman.bin` parts 13 and 14 (single additive meshes) and no hand
+kit names them, so the exporter now adds them to zslman's hidden rig
+(`THROWER_AFTERIMAGE_SLOTS`, both halves); `render/projectiles.ts` clones a
+tinted node's materials and multiplies their colour by the record's
+`lightColour`, out of gamma space. The light's leak into later draws -- it is
+global, and the fade never puts it back -- is declared in the renderer.
+
+Found on the way, `[proved]`: `ActorKill` (`FUN_004A7040`) `_longjmp`s into
+`TaskRunTree`, so nothing in a weapon's routine runs after its state despawns
+it. Both weapon updates drew the weapon on its despawn frame; both return now.
+
+**`ZombieOnShot` (`FUN_00453EB0`)'s loop head.** `AND DH, 0xFB` at
+`0x00453F14` (the `EntryClipPlaying` clear) and `OR ECX, 0x8000000` at
+`0x00453F17` (the sprint), stored at `0x00453F24`/`0x00453F2A`, for every
+landed shot `ShotImmune` has not refused -- before the death latch, which the
+port had tested after the live/dead split; it is ahead of both arms now. No
+`AND` in class 0x30 clears the sprint bit (the image's three masks that could
+are in `ThrowerDrawBonePart` and the sound code; a whole-word store was not
+swept for).
+
+**The wrong turn this session found in someone else's reading.** The dead
+arm's `CMP EAX, 0x2` at `0x00453F6E` reads `[EBP]`, and `EBP` is `LEA
+[EDI*4 + 0x9A2D88]` -- `g_shot_bone` -- from `0x00453EEE`; the result pointer
+is `EBX`. An earlier session had annotated it "on `g_hit_result`, read back",
+tagged `[proved]`, and rewritten `combat.md` (which had said `bone == 2` from
+the first reading), `feedback.ts` and five port checks to match -- the checks
+passed because they encoded the reading. `ThrowerOnShot` is the same
+(`0x004499D4`, `0x00449A70`, `0x00449A76`). The voice is keyed on the head
+bone again, a latched corpse is silent (the latch test is before both arms:
+`0x00453F3B`, and class 0x31's `0x00449A12`, plus its result-5 gate at
+`0x004499FE`), and `verify_combat.py` check 15 reads the three operands of
+each routine out of the image. `L70`.
+
+**Checks.** `port.test.ts`: nineteen afterimage assertions (cadence, copy,
+remap, fade, the sixteenth-frame despawn, landing, the ten cap on a shot-down
+blade, a blade gone from the list, the despawn frame, zsass not trailing),
+seven for the sprint and the entry bit, and the voice checks rewritten. Every
+new one was mutation-tested: dropping the sprint `OR` fails three, the entry
+clear two, the bone test three, the latch two, the emitter call seven, the
+despawn return one, the fade's give-back two, the fade's landed test one.
+
+**Observed in the running player**, `web/tools/afterimages.mjs`, headless,
+stage 6 block 0, on a private bundle. Two runs of 2400 frames. In the
+first, the harness's pulls took down five of seven blades: each of the five
+made exactly ten afterimages, five frames apart, and stopped; the two that
+landed made five and six, never more than three out, and none outlived its
+blade's landing. In the second, one blade shot down (ten) and one landed
+(sixteen, at most three out). Across both, every afterimage drew `0x1FE4` or
+`0x1FE5`, at most fifteen times, from 0.683 down a fifteenth a frame to
+-0.250, with its light colour in the record; no page faults.
+`web/shots/afterimages-trail*.png` show it: a dimmer copy of the crescent
+behind the blade, the right shape and colour.
+The walker: `znele` 2164, flags `0x40481` -> `0x8040481` on a pull that took
+it from 150 to 100, and in `AttackRun` it then played clip 179, its row's
+sprint, where the jog is 190 (39 samples, no other clip).
+
+**Wrong turns in the harness**, both mine: the light check first compared
+consecutive samples across three frames it had skipped for a screenshot, and
+the shot check read the weapon's mark on the frame the pull was queued, before
+`ProcessShotRequests` had run -- so it reported "no blade shot down" over a run
+in which five had been. And class 0x30 is never on `shotTargets` (bone-sphere
+pick), so the walker is found by a grid of real pulls.

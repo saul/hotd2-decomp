@@ -44,32 +44,41 @@
  * Three things came with the move, and each is a correction rather than a
  * cost.
  *
- * **The kind is the hit-result code and nothing else.** `[proved]`, and from
- * two routines that agree, which is what makes it a rule rather than one
- * function's habit — `ZombieOnShot` (`FUN_00453EB0`):
+ * **The dead arm's kind is the shot bone; the live arm's is the result.**
+ * `[proved]`, and from two routines that agree, which is what makes it a rule
+ * rather than one function's habit. `ZombieOnShot` (`FUN_00453EB0`) loads two
+ * pointers at the head of its per-player loop and holds them to the end of it:
  *
  * ```
+ * 00453eee  8d2cbd882d9a00   LEA  EBP, [EDI*4 + 0x9a2d88]   ; &g_shot_bone[p]
+ * 00453f0d  8d1cbdf8589a00   LEA  EBX, [EDI*4 + 0x9a58f8]   ; &g_hit_result[p]
+ * 00453f3b  a900000080       TEST EAX, 0x80000000  ; the death latch: silent
  * 00453f46  f7463400000004   TEST dword ptr [ESI + 0x34], 0x4000000  ; Dead
- * 00453f4d  0f84c7000000     JZ   0x0045401a                        ; ...alive
- * 00453f6e  83f802           CMP  EAX, 0x2      ; g_hit_result, read back
- * 00453f71  7504             JNZ  0x00453f77
- * 00453f73  6a02             PUSH 0x2           ; dead and result 2 -> kind 2
- * 00453f77  6a01             PUSH 0x1           ; dead otherwise     -> kind 1
+ * 00453f68  8b4500           MOV  EAX, [EBP]    ; the BONE
+ * 00453f6e  83f802           CMP  EAX, 0x2      ; bone 2, the head
+ * 00453f73  6a02             PUSH 0x2           ; dead, head      -> kind 2
+ * 00453f77  6a01             PUSH 0x1           ; dead, elsewhere -> kind 1
  * 00453f7a  e87167fbff       CALL 0x0040a6f0
- * 0045401a  57 e8d0030000    PUSH EDI / CALL ActorReactToHit
+ * 00454020  8b03             MOV  EAX, [EBX]    ; the RESULT
  * 00454025  83f805           CMP  EAX, 0x5
- * 00454028  740b             JZ   0x00454035
  * 0045402a  6a00             PUSH 0x0           ; alive, result != 5 -> kind 0
- * 0045402d  e8be66fbff       CALL 0x0040a6f0
  * ```
  *
- * — and `ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the
- * same two constants at `0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither
- * tests whether the bone was the head, and neither tests whether the actor
- * died of *this* shot.** The render-side copy keyed on `killed` and `head`, so
- * moving it faithfully changes which voice plays: the head pair now goes with
- * `HitResultCode.Plain` rather than with a headshot kill, and a shot that finds
- * an actor already dead says so instead of saying it hurt.
+ * `EBP` is callee-saved and the only calls between the `LEA` and the read are
+ * `ActorShotFeedback` and `NoOpStub`; `DispatchHit` (`FUN_004092F0`) fills
+ * `g_shot_bone[p]` from `obj+0x190 + p`, the byte `MarkActorShot` writes the
+ * hit bone into. `ThrowerOnShot` (`FUN_004499A0`) is the same — `LEA EBP` of
+ * the same address at `0x004499D4`, `MOV EAX, [EBP]` at `0x00449A70`, `CMP
+ * EAX, 0x2` at `0x00449A76`. So **a kill to the head says so**, and one a
+ * body shot finishes does not; neither tests whether the actor died of *this*
+ * shot, only whether it is dead and not yet latched.
+ *
+ * This file said for a while that the `CMP` at `0x00453F6E` was on
+ * `g_hit_result` — reading `[EBP]` as the other of the two pointers the loop
+ * holds, the one `EBX` has — and the head pair went with
+ * `HitResultCode.Plain` instead, which is a result code with the same number
+ * as the head bone. The render-side copy this replaced keyed on the head, and
+ * was right to.
  *
  * What a player hears change is **the impact and only the impact**: kind 2's
  * two voice ids in `g_hit_voice_table` are the *same pair* as kind 1's, so the
@@ -92,7 +101,8 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, type Actor } from "../actor";
+import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor } from "../actor";
+import { SpawnClass } from "../spawn_class";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { T } from "../tables";
@@ -229,13 +239,14 @@ export function ActorShotFeedback(obj: Actor, bone: number, point: Vec3,
   // `00449D09 CALL SpawnBloodSpray`. Why the port raises it from *here* rather
   // than from each class's own on-shot routine is the first bullet of this
   // routine's declared divergence, above.
-  PlayShotVoice(obj, result, rng, events);
+  PlayShotVoice(obj, bone, result, rng, events);
 }
 
 /**
  * The shot voice, as `ZombieOnShot` (`FUN_00453EB0`) and `ThrowerOnShot`
  * (`FUN_004499A0`) choose it — three of `ActorPlayHitVoice`'s five kinds, off
- * nothing but {@link HitResultCode} and whether the actor is dead.
+ * whether the actor is dead, the shot bone if it is and the
+ * {@link HitResultCode} if it is not.
  *
  * **The name is the port's and no exe function bears it** — deliberately, so
  * that nobody goes looking for one (`L38`). This is the *tail* of those two
@@ -243,31 +254,63 @@ export function ActorShotFeedback(obj: Actor, bone: number, point: Vec3,
  * it is a private helper of that merge rather than something claiming to be a
  * function of its own, and it is not exported for the same reason.
  *
- * The three gates, in the engine's order:
+ * The gates, in the engine's order:
  *
  * 1. `00453ec7 f6c401 TEST AH, 0x1` on `obj+0x34` — {@link ActorFlag.ShotImmune}
  *    jumps the whole routine to its tail at `0x0045404e`, so a shot that only
  *    ricochets off a downed body is silent. `ThrowerShotFeedback` agrees from
  *    the other side: its own kind-0 site at `0x00449D11` sits on the *blood*
  *    arm, which result 5 never reaches.
- * 2. `00453f46 TEST dword ptr [ESI + 0x34], 0x4000000` — {@link ActorFlag.Dead}
+ * 2. **The death latch**, which comes before the live/dead split: class 0x30's
+ *    `obj+0x136C` bit `0x80000000` (`00453f3b TEST EAX, 0x80000000` / `JNZ` to
+ *    the loop's tail), class 0x31's bit `0x200000` (`00449a12 TEST ECX,
+ *    0x200000` / `JNZ`), each raised by its own dead arm just before the
+ *    voice. So a corpse says it died **once**, and every later shot into it
+ *    is silent — where this used to replay the death line on every one.
+ *    Class 0x31 refuses result 5 before its latch as well (`004499fe CMP
+ *    [g_hit_result + p*4], 0x5` / `JZ`), for both arms.
+ * 3. `00453f46 TEST dword ptr [ESI + 0x34], 0x4000000` — {@link ActorFlag.Dead}
  *    picks the arm, and the dead arm's only test is `00453f6e CMP EAX, 0x2` on
- *    `g_hit_result`.
- * 3. the live arm's `00454025 CMP EAX, 0x5` refuses only
+ *    **the shot bone** — see the file's header.
+ * 4. the live arm's `00454025 CMP EAX, 0x5` refuses only
  *    {@link HitResultCode.NoEffect}. Result **0** is not refused, and plays
  *    kind 0 like any other.
  */
-function PlayShotVoice(obj: Actor, result: HitResultCode, rng: Rng,
-                       events?: Events): void {
+function PlayShotVoice(obj: Actor, bone: number, result: HitResultCode,
+                       rng: Rng, events?: Events): void {
   if (obj.flags & ActorFlag.ShotImmune) return;
+  if (obj.cls === SpawnClass.Thrower && result === HitResultCode.NoEffect) {
+    return;
+  }
+  if (DeathVoiceLatched(obj)) return;
   const emit = (id: number) => { events?.emit("sound.play", { id }); };
   if (obj.flags & ActorFlag.Dead) {
-    ActorPlayHitVoice(obj, result === HitResultCode.Plain
+    ActorPlayHitVoice(obj, bone === HEAD_BONE
                       ? ActorVoice.HeadKilled : ActorVoice.Killed, rng, emit);
     return;
   }
   if (result === HitResultCode.NoEffect) return;
   ActorPlayHitVoice(obj, ActorVoice.Hurt, rng, emit);
+}
+
+/**
+ * Has this actor's own on-shot routine already dispatched its death? The bit
+ * is each class's, because `obj+0x136C` is (`L3`): class 0x30's
+ * {@link ZombieFlag2.DiedInFlight} — and class 0x18's, whose update runs
+ * `EnemyZombieUpdate` and so `ZombieOnShot` — and class 0x31's
+ * {@link ThrowerFlag.DeathLatched}. A class with no on-shot routine of its own
+ * has no latch, and the port's merged call site keeps voicing it.
+ */
+function DeathVoiceLatched(obj: Actor): boolean {
+  switch (obj.cls) {
+    case SpawnClass.Zombie:
+    case SpawnClass.CarriedZombie:
+      return (obj.flags2 & ZombieFlag2.DiedInFlight) !== 0;
+    case SpawnClass.Thrower:
+      return (obj.flags2 & ThrowerFlag.DeathLatched) !== 0;
+    default:
+      return false;
+  }
 }
 
 /**

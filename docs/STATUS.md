@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 90940 | 293 | engine |
-| `hod2lib/` | 18581 | 35 | engine |
-| `render/` | 14605 | 51 | render |
+| `game/` | 91310 | 293 | engine |
+| `hod2lib/` | 18602 | 35 | engine |
+| `render/` | 14678 | 51 | render |
 | `app/` | 7979 | 28 | app |
 | `script/` | 4388 | 25 | engine |
 | `ui/` | 3031 | 23 | ui |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **144503** | **478** | |
+| **total** | **144967** | **478** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2682
-* `game/actor.ts` — 2556
+* `game/actor.ts` — 2557
 * `app/main.ts` — 2340
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
@@ -43,11 +43,11 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **225 of 297** annotated functions in the gameplay address ranges have a port (75%) |
+| Gameplay coverage | **227 of 297** annotated functions in the gameplay address ranges have a port (76%) |
 | Ported outside those ranges | 481 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 706 ported functions match `functions.tsv` under the same name |
+| Citations checked | 708 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **138** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **139** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **162** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 48 members against `PlayerView`'s 31** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.

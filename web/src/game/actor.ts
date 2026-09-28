@@ -943,7 +943,8 @@ export enum ZombieFlag2 {
    * While it is up the same state exempts the actor from the too-close retreat
    * (`0045577c f7866c13000000040400`, the `0x40400` pair with
    * {@link ZombieFlag2.StrikeAnchor}) and refuses the attack claim outright
-   * (`00455815 f6c404`). `ZombieOnShot` also clears it (`00453efd`).
+   * (`00455815 f6c404`). `ZombieOnShot` also clears it, for every shot that
+ * lands (`00453f14 80e6fb AND DH, 0xFB`, stored at `00453f24`).
    * `[proved]` — the ops. That the clip in question is the *authored entrance*
    * one is `[likely]`: it is what character type 2's spawns carry.
    */

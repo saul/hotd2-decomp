@@ -36,6 +36,11 @@ const HAND_HEIGHT = 4;
  */
 const SPEED_STANDING = 1.5;
 const SPEED = 1.0;
+/**
+ * `obj+0x1338 = obj+0x133C = 7` at `0x0045A419`: the afterimage timers class
+ * 0x31's launcher arms at 4. Nothing in this family reads them.
+ */
+const AFTERIMAGE_PERIOD = 7;
 
 /**
  * `ZombieThrowHandWeapon` — `FUN_0045A240`. The weapon leaves the hand.
@@ -106,9 +111,8 @@ export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
   w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
   w.from = obj.at;
   w.hand = hand;
-  // `obj+0x1338 = obj+0x133C = 7` at `0x0045A419`: the afterimage timers
-  // class 0x31's `zslman` blades count down. Nothing in this family reads
-  // them, so the record does not carry them.
+  w.afterimageTimer = AFTERIMAGE_PERIOD;
+  w.afterimagePeriod = AFTERIMAGE_PERIOD;
   if (w.slot === ZOMBIE_AXE_SLOT) {
     w.spinRate = ZOMBIE_AXE_SPIN;
     w.state = ZombieThrownWeaponState.Straight;

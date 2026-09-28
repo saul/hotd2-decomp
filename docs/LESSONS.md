@@ -1025,3 +1025,25 @@ check that the pixels it should not touch are identical -- which is also what
 tells you the runs stayed in step. It is `L44`'s "a harness that prints its
 arguments as its result" one layer down: a redraw that repeats the frame
 agrees with any claim about it.
+
+**L70 -- A register read is named by the instruction that loaded the register,
+not by the constant it is compared with.** `ZombieOnShot`'s dead arm is `MOV
+EAX, [EBP]` / `CMP EAX, 0x2` at `0x00453F6E`, and a session annotated it "on
+`g_hit_result`, read back": 2 is `HitResultCode.Plain`, and the loop reads
+`g_hit_result` a few lines earlier. `EBP` had been loaded at `0x00453EEE` with
+`LEA EBP, [EDI*4 + 0x9A2D88]` -- `g_shot_bone` -- and the loop keeps the result
+pointer in `EBX`. So "is it the head?" was recorded as "was the result 2?",
+tagged `[proved]`, written into three docs and an annotation row, and pinned by
+five checks that passed because they encoded the reading rather than tested it.
+`ThrowerOnShot` "agreed" because it was read the same way, at the same kind of
+`[EBP]`.
+
+Two things made it stick. It was a **correction**: `combat.md` had said `bone
+== 2` since the routine was first read, and the reversal was believed because
+it came later and was more emphatic. And the port could not hear the
+difference: kinds 1 and 2 share a voice pair, so the only change was an
+impact sample. **When a disassembly note names what a register holds, cite the
+instruction that put it there** -- the `LEA` or the `MOV` -- and when a note
+overturns an earlier reading, it owes the earlier one the same trace, not a
+louder adjective. `verify_combat.py` check 15 now reads the `LEA`'s operand out
+of the image in both routines.

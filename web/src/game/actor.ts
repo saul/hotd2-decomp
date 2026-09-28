@@ -1629,6 +1629,14 @@ export interface ActorBase {
    * snapshot and is what every other cross-actor reference here uses. `-1`
    * once the actor has stepped off, which is `CarriedZombieUpdate18` putting
    * the plain zombie update back.
+   *
+   * That makes this field the task pointer as well, which the engine keeps
+   * apart (`*obj`, read at one site, `0x0045B999`). Four routines swap it:
+   * the step off, the two leaps and `ZombieStateRetireOffScreen`'s carrier
+   * arm. The first three bake the carrier into the pose first; the retire
+   * does not, so the one frame it still draws -- the engine's in the
+   * carrier's matrix, the swap taking effect at the next update, which is the
+   * despawn -- `render/` places at the carrier-relative point.
    */
   carrierAt: number;
   /**

@@ -300,8 +300,8 @@ import { SpawnClass } from "../src/game/spawn_class";
 import { GameSystem, syncCharacterSpawns, syncPortGlobals,
          type CharacterPool } from "../src/app/systems";
 import {
-  CarrierBakeWorldPose, CarrierInverseTransformPoint, CarrierTransformPoint,
-  MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
+  CARRIER_RIDERS_DONE_BIT, CarrierBakeWorldPose, CarrierInverseTransformPoint,
+  CarrierTransformPoint, MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
@@ -30746,9 +30746,180 @@ console.log("class 0x30 states 46-48, a second reading of main's port:");
         late.state === ZombieState.LeapOffCarrierForward,
         `${ZombieState[late.state] ?? late.state}`);
 
+  // ...and the one that held does not hold for good: `ZombieStateHoldOnCarrier`
+  // (`FUN_0045CFC0`) has its own exit, past the `MatrixStackPop` at
+  // `0x0045D0AF` the decompiler stops at (L35) -- `g_active_cam_path ==
+  // tail+0x0C && g_cam_path_frame == tail+0x0E` sends it to `(s8)tail[3]`.
+  const held = ActorSpawn(0xa176, SpawnClass.CarriedZombie, 1, "rider3", {
+    pos: vec3(-1, 3, 7.5),
+    class18: { from_state: 47, cue_path: 78, cue_frame: 630 },
+  }, rng) as ZombieActor;
+  held.attackState = 47;
+  held.state = ZombieState.HoldOnCarrier;
+  held.sub = 0;
+  G.g_cam_path_frame = 629;
+  CarriedZombieUpdate18(held, fr());
+  check("a holding rider is still aboard the frame before its cue",
+        held.state === ZombieState.HoldOnCarrier && held.sub === 1
+        && held.carrierAt === boat.at,
+        `${ZombieState[held.state] ?? held.state}/${held.sub}`);
+  G.g_cam_path_frame = 630;
+  CarriedZombieUpdate18(held, fr());
+  check("...and on camera path 78's frame 630 it takes its attack state, 47 "
+        + "(state 46 is not a dead end)",
+        held.state === ZombieState.LeapOffCarrierForward && held.sub === 0,
+        `${ZombieState[held.state] ?? held.state}/${held.sub}`);
+
   function CarrierPostFrame(a: ZombieActor): void {
     CarriedZombieUpdate18(a, fr());
   }
+}
+
+console.log("stage 3 block 0's boat, and the riders it carries to the wall:");
+{
+  // The report: "the zombies on the boat don't seem to die when shot, and
+  // when the boat explodes they still stay alive". Three faults, all read
+  // from the exe, and this drives each from the reset the page runs.
+  //
+  // **1. The boat is not in the shot test.** `SpawnFromDescriptorSmall`
+  // (`FUN_00408BC0`) hands the record's flags word to `ActorInitFlags`
+  // (`FUN_00408970`, `OR ECX, 1; MOV [EAX+0x34], ECX`), and every class-0x13
+  // record in the game carries `0x8000`; `RegisterForShotTest`
+  // (`FUN_00405160`) refuses it at `0x00405168`. The spawn arm dropped the
+  // word, so the boat's 40-unit sphere (`CarrierPropRoutine1` state 0) sat
+  // round its origin in the render pick and took the pulls aimed at the
+  // riders behind it.
+  const rng = new Rng(0xc00);
+  scene(0, rng);
+  const BOAT = 3184;
+  SetGameTables({
+    ...CHARS,
+    placements: [{
+      at: BOAT, class: 0x13, char_type: -1, motion: null, hp: 0,
+      init_flags: 0x8000, yaw: 57344,
+      class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+                 behaviour: 8, selector: 1 },
+    }],
+  } as unknown as CharactersJson);
+  SpawnSlotActors([{ at: BOAT, class: SpawnClass.ScriptedProp,
+                     pos: [-1055, -26.25, -1620] as [number, number, number] }],
+                  rng);
+  const boat = ActorByAt(BOAT);
+  if (!boat) throw new Error("no boat");
+  check("stage 3's boat is built with its record's flags word: 0x8000 | 1",
+        boat.flags === 0x8001, `0x${boat.flags.toString(16)}`);
+  check("...and g_civilian_carrier names it", G.g_civilian_carrier === BOAT);
+  // A quarter turn, so a wrong frame for the rider shows (L48).
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: -1070, y: -17, z: -2900, pitch: 0, yaw: 0x4000,
+                         roll: 0 }),
+  };
+  G.g_active_cam_path = 124;
+  G.g_civilians_alive = 0;             // the civilian is dead: it runs past
+
+  // The captor, stage 3's evt 0xC00: class 0x18, attack state 38 with mode 2
+  // (turn toward the point and never retire by itself), and no camera cue.
+  const victim = ActorSpawn(0xc01, SpawnClass.Zombie, 1, "its target", {},
+                            rng);
+  const cap = ActorSpawn(0xc00, SpawnClass.CarriedZombie, 1, "captor", {
+    pos: vec3(0, -6, -10), initialState: 38, attackState: 38,
+    flags: 0x60400,
+    script: { target: null, attack: { state: 38, entries: [], head: {
+      point: [-10, -6, -10] as [number, number, number], motion: 10,
+      frame: 0, loops: 1, mode: 2 } } },
+    class18: { from_state: 38, cue_path: -1, cue_frame: -1 },
+  }, rng) as ZombieActor;
+  cap.visible = boat.visible = true;
+  cap.targetAt = victim.at;
+  check("the captor rides the boat", cap.carrierAt === BOAT);
+  const slot = cap.hitSlot;
+
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("one frame in, the boat has seated its 40-unit radius and is still "
+        + "out of the shot test",
+        boat.hitRadius === 40 && (boat.flags & ActorFlag.NoShotTest) !== 0,
+        `r ${boat.hitRadius} flags 0x${boat.flags.toString(16)}`);
+  const listed = G.g_shot_test_list.length;
+  RegisterForShotTest(boat, NULL_HOST);
+  check("...which `RegisterForShotTest` refuses (`TEST AH, 0x80`)",
+        G.g_shot_test_list.length === listed);
+
+  // **2. The boat's strike ends its captor.** `CarrierPropRoutine1` runs past
+  // its mooring with no civilian alive and raises `obj+0x34 |= 0x400000` at
+  // path frame `0x55A`; `ZombieStateRetireOffScreen` (`FUN_0045B7B0`) reads
+  // it off the carrier at `0x0045B9A5` and calls `ZombieRetireAndCredit`
+  // (`FUN_0045BA40`). The port had neither the arm nor a faithful retire.
+  const alive = G.g_enemies_alive;
+  const present = G.g_enemies_present;
+  let n = 0;
+  let aboard = true;
+  // The ride starts at the camera's frame and counts one a frame; with no
+  // path playing here that is 0, so this is the whole ride to `0x55A`.
+  while (!(boat.flags & CARRIER_RIDERS_DONE_BIT) && n++ < 0x600) {
+    aboard &&= cap.state === ZombieState.RetireOffScreen && !cap.dead
+      && cap.carrierAt === BOAT;
+    GameUpdate(EYE, 1 / 60, host, rng);
+  }
+  check("the captor holds in state 38, aboard and alive, while the boat runs "
+        + "past", aboard);
+  check("the boat raises 0x400000 as it runs past its mooring, at path frame "
+        + "0x55A",
+        (boat.flags & CARRIER_RIDERS_DONE_BIT) !== 0
+        && (boat as unknown as { prop13: { pathFrame: number } })
+          .prop13.pathFrame === 0x55a + 1, `${n} frames`);
+  check("...and on that same frame its captor retires: dead, sub 4, "
+        + "0x4008001 on its flags",
+        cap.dead && cap.sub === 4
+        && (cap.flags & 0x4008001) === 0x4008001,
+        `dead ${cap.dead} sub ${cap.sub} 0x${cap.flags.toString(16)}`);
+  check("...credited to g_active_player in a one-player game",
+        G.g_players_in_play === 1 && cap.killedBy === G.g_active_player,
+        `in play ${G.g_players_in_play} credit ${cap.killedBy} active `
+        + `${G.g_active_player}`);
+  check("...with both counts given back on the spot",
+        G.g_enemies_alive === alive - 1 && G.g_enemies_present === present - 1,
+        `${alive} -> ${G.g_enemies_alive}, ${present} -> `
+        + `${G.g_enemies_present}`);
+  check("...its hit slot freed",
+        slot === HIT_SLOT_NONE || G.g_hit_slots[slot] === HIT_SLOT_NONE,
+        `slot ${slot}`);
+  check("...and the plain zombie update back (no longer a rider)",
+        cap.carrierAt === -1);
+  GameUpdate(EYE, 1 / 60, host, rng);
+  check("the next frame it is gone", cap.despawned);
+
+  // **3. A holding rider leaps on its cue.** Stage 3's `0xADC` (attack state
+  // 48, cue path 124 frame 1080) finishes its maul early and holds in 46;
+  // `ZombieStateHoldOnCarrier`'s exit (`0x0045D0B4`) sends it to 48 on the
+  // frame the camera reaches 1080 -- well before the boat strikes.
+  const r = ActorSpawn(0xadc, SpawnClass.CarriedZombie, 5, "rider", {
+    pos: vec3(5, -6, -14), initialState: 46, attackState: 48,
+    flags: 0x60400,
+    class18: { from_state: 48, cue_path: 124, cue_frame: 1080 },
+  }, rng) as ZombieActor;
+  const frame: ClassFrame = { eye: EYE, dt: 1 / 60, rng, host };
+  r.state = ZombieState.HoldOnCarrier;
+  r.sub = 0;
+  G.g_cam_path_frame = 1079;
+  CarriedZombieUpdate18(r, frame);
+  check("the rider holds on the boat the frame before its cue",
+        r.state === ZombieState.HoldOnCarrier && r.sub === 1,
+        `${ZombieState[r.state] ?? r.state}/${r.sub}`);
+  G.g_cam_path_frame = 1080;
+  CarriedZombieUpdate18(r, frame);
+  check("...and at camera path 124's frame 1080 it goes to its attack state, "
+        + "48",
+        r.state === ZombieState.LeapOffCarrierAtMark && r.sub === 0,
+        `${ZombieState[r.state] ?? r.state}/${r.sub}`);
+  r.state = ZombieState.HoldOnCarrier;
+  r.sub = 1;
+  G.g_cam_path_frame = 1081;
+  CarriedZombieUpdate18(r, frame);
+  check("...on that frame and no other: the test is `==`, so one past it "
+        + "holds",
+        r.state === ZombieState.HoldOnCarrier,
+        `${ZombieState[r.state] ?? r.state}`);
 }
 
 {

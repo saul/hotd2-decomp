@@ -290,7 +290,7 @@ The sites:
 | `0x23` | state 2 (`0x00490B00`) `0x00490C3B` | `RegisterForShotTest`, after `obj+0x70 = view(obj+0x100)` inline | after its own `0x8000` | | | |
 | `0x30` | `EnemyZombieUpdate` `0x0045347A`, every path through `ZombieAdvanceMotion` | `ActorRegisterCameraPoint(4.0)` | none | `g_actor_radius_by_char[type]`, `EnemyZombieInit` `0x00452E72` | build `0x00452E13` | — |
 | `0x30` twin | `ZombieTwinFollowHost` `0x004533CB` | `RegisterForShotTest` | none | | | |
-| `0x18` | through `EnemyZombieUpdate`, as `0x30` | | | | | |
+| `0x18` | through `EnemyZombieUpdate`, as `0x30`, inside `CarriedZombieUpdate18`'s carrier matrix | | | | | |
 | `0x45` head | `Boss3FightHeadUpdate` `0x004215AF` | `RegisterForShotTest`, after `obj+0x100 = obj+0x40` and `obj+0x70 = view(obj+0x100)` | `obj+0x1310 != 7` | `g_actor_radius_by_char`, `Boss3FightHeadInit` `0x0041FF81` | build `0x0041FF5C` | set `0x0041FF68`; cleared at `0x00420E81`, `0x00420F96`, `0x00422DD5` |
 | `0x45` body | `Boss3BodyUpdate` `0x00424160` | `RegisterForShotTest`, `obj+0x70 = view(obj+0x40..0x48)` at `0x00423FD1` | none at the call | `[0x004C4E48]`, `Boss3BodyInit` `0x004203C0` | build `0x004203A0` | — (`|= 0x80080000`) |
 
@@ -310,7 +310,11 @@ list instead:
   `0x0043A2C7` (1.0); `0x30`'s thrown weapon `0x0045A612`; `0x31`
   `EnemyThrowerUpdate` `0x00449991` (0.0), its projectile
   (`ThrownWeaponUpdate`) `0x004508AA`.
-* `0x13` `0x0043FFA4`; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
+* `0x13` `0x0043FFA4` -- which takes nothing: all fifteen class-0x13 records
+  carry `0x8000` in their flags word (`ActorInitFlags`), no class-0x13 routine
+  read clears it, so stage 3's boats and their 40-unit `obj+0x124` are never in
+  the list. The port's spawn arm dropped the word until 2026-09-28, and the
+  boat's sphere took the pulls aimed at its riders; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
   `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..

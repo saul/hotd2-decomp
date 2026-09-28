@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 102160 | 336 | engine |
+| `game/` | 102292 | 336 | engine |
 | `hod2lib/` | 19029 | 35 | engine |
 | `render/` | 14873 | 54 | render |
 | `app/` | 8550 | 29 | app |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 978 | 9 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **157372** | **526** | |
+| **total** | **157504** | **526** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2793
-* `game/actor.ts` — 2629
+* `game/actor.ts` — 2637
 * `app/main.ts` — 2581
 * `hod2lib/bundle.ts` — 2322
 * `hod2lib/exetab.ts` — 2269
@@ -47,14 +47,14 @@ The largest files, which is where the pressure to split next is:
 | Ported outside those ranges | 525 (opcodes, and the classes whose handlers sit elsewhere) |
 | Citations checked | 754 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **133** — where the port knowingly departs from the exe, each with its reason on the spot |
+| Declared `[diverges]` | **132** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **123** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 119 | 120 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 118 | 120 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |

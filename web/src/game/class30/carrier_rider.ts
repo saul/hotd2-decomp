@@ -17,10 +17,12 @@
  * ```
  *
  * so a rider whose script ends **before** the camera cue holds on the boat in
- * state 46 for good, and one whose script ends after it leaps (47, or 48 at a
- * point). Stage 2's boat rider (evt `0xA174`) mauls its civilian while the
- * boat is still on its way to the wall and so stays aboard, turning to face
- * the camera, until it is shot. The port had none of the three: the default
+ * state 46 until the cue frame itself and then leaps (47, or 48 at a point),
+ * and one whose script ends after it leaps at once. Stage 2's boat rider (evt
+ * `0xA174`) mauls its civilian while the boat is still on its way to the wall
+ * and so stays aboard, turning to face the camera, until camera path 78
+ * reaches frame 630 -- `0x276`, the same number as the ride frame its boat
+ * strikes the wall on. The port had none of the three: the default
  * arm sent it to `AttackRun` in the carrier's frame, where it walked off
  * across the canal in carrier-relative coordinates — 1,660 units from the
  * camera and unhittable — and stage 2 block 16 step 12's `wait_enemies_alive`
@@ -94,10 +96,29 @@ function turnTowardInCarrier(obj: ZombieActor, x: number, y: number,
  *
  * Sub 0 blends to the actor's own idle — row 0 of
  * `g_class30_motion_rows` for its body condition, the clip
- * `ZombieStateApproach` walks on — and remembers it at `obj+0x1320`; sub 1
- * turns toward the camera eye, taken into the carrier's frame, at `0x68` a
- * frame; later subs only re-blend to the remembered clip. **No exit**: the
- * actor stays on the carrier until it is shot.
+ * `ZombieStateApproach` walks on — remembers it at `obj+0x1320`, and runs on
+ * into sub 1 (the `INC` at `0x0045D022` is followed by sub 1's first
+ * instruction). Sub 1 turns toward the camera eye, taken into the carrier's
+ * frame, at `0x68` a frame -- and then **leaves on the camera cue**:
+ *
+ * ```
+ * 0045d0af  CALL MatrixStackPop           ; Ghidra: no-return, and the body ends
+ * 0045d0b4  MOVSX EAX, word [EBP+0xc]     ; EBP = obj+0x1390, the tail
+ * 0045d0b8  CMP [g_active_cam_path], EAX ; JNZ out
+ * 0045d0c5  MOVSX ECX, word [EBP+0xe]
+ * 0045d0c9  CMP [g_cam_path_frame], ECX  ; JNZ out
+ * 0045d0d1  state = (s8)[EBP+3]; sub = 0  ; the attack state
+ * 0045d0e6  if (!(obj+0x34 & 0x40000000) && obj+0x1B4 != obj+0x1320)
+ *               blend(obj+0x1320, 0, 10)  ; every sub ends here
+ * ```
+ *
+ * `CarriedZombieUpdate18` sends a rider here while the camera is **short** of
+ * `tail+0x0E`; this sends it on to its attack state on the frame the camera
+ * **reaches** it. So a rider whose maul ends early holds on the boat facing
+ * the camera and leaps on its cue, and one whose maul ends late leaps at once.
+ * Everything after the pop was `L35`'s: the port read the pseudocode, called
+ * this state "no exit, the actor stays on the carrier until it is shot", and
+ * stage 3 block 0's `0xADC` stood on its boat through the crash.
  */
 export function ZombieStateHoldOnCarrier(obj: ZombieActor,
                                          dt: number): void {
@@ -106,16 +127,23 @@ export function ZombieStateHoldOnCarrier(obj: ZombieActor,
     if (obj.motion !== m) ActorSetMotionBlended(obj, m, 0, 0x14);
     obj.sub += 1;
     obj.zom.scriptMotion = obj.motion;
-  } else if (obj.sub !== 1) {
-    if ((obj.flags & ActorFlag.Reacting) === 0
-        && obj.motion !== obj.zom.scriptMotion) {
-      ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
-    }
-    return;
   }
-  // `g_camera_eye` by address, all three words (`0x0045D06D`..`0x0045D078`).
-  const eye = G.g_camera_eye;
-  turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt);
+  if (obj.sub === 1) {
+    // `g_camera_eye` by address, all three words (`0x0045D06D`..`0x0045D078`).
+    const eye = G.g_camera_eye;
+    turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt);
+    // The same three tail fields the wrapper's cue reads, compared equal.
+    const cue = obj.class18;
+    if (cue && G.g_active_cam_path === cue.cue_path
+        && G.g_cam_path_frame === cue.cue_frame) {
+      obj.state = cue.from_state;
+      obj.sub = 0;
+    }
+  }
+  if ((obj.flags & ActorFlag.Reacting) === 0
+      && obj.motion !== obj.zom.scriptMotion) {
+    ActorSetMotionBlended(obj, obj.zom.scriptMotion, 0, 10);
+  }
 }
 
 /**

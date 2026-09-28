@@ -66,7 +66,7 @@ import { SpawnClass } from "../spawn_class";
 import { CarrierPropRoutine0 } from "./routine0";
 import { CarrierPropRoutine2 } from "./routine2";
 import { QueryGroundHeightAt } from "../coli";
-import { CarrierTransformPoint } from "../carrier";
+import { CARRIER_RIDERS_DONE_BIT, CarrierTransformPoint } from "../carrier";
 import {
   PropStripKind, SpawnPropStripEffect,
 } from "../effects/prop_strip";
@@ -87,7 +87,14 @@ const STRIP_CEL_LAST = CARRIER1_STRIP_LAST;
 const WAKE_PROBE_RISE = 100.0;
 /** `PlaySoundId(0x000B16A9)` with the bow strip at path frame 0x550. */
 export const SFX_CARRIER_BOW = 0xb16a9;
-/** `obj+0x124 = 40.0` — the shot sphere state 0 seats. */
+/**
+ * `obj+0x124 = 40.0` — the radius state 0 seats.
+ *
+ * Not a shot sphere in practice: every class-0x13 record carries `0x8000` in
+ * its flags word, so `RegisterForShotTest` never takes the boat (see
+ * `SpawnSlotActor` in `game/director.ts`). Its reader is the screen test
+ * state 6 makes, `FUN_004459C0`, which pads the projection by it.
+ */
 const CARRIER_HIT_RADIUS = 40.0;
 /** The two `op_` object paths `CarrierPropRoutine1` rides. */
 export const CARRIER_PATH_MOOR = 0x15e;
@@ -128,8 +135,6 @@ const CARRIER6_FRAME_MOORED = 0x6ae;
 const CARRIER6_FRAME_FADE = 0x668;
 /** `CMP EAX, 0x6A4` at `0x00441539` — the bow splash and its sound. */
 const CARRIER6_FRAME_BOW_EFFECT = 0x6a4;
-/** `obj+0x34` bit the run-past arm raises at path frame `0x55A`. */
-const CARRIER_BOW_BIT = 0x400000;
 
 /**
  * `g_prop_behaviours` — `0x005926A8`, ten entries indexed by the descriptor's
@@ -379,7 +384,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
                              PropStripKind.CarrierBow, 1.0, f.events);
         f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       } else if (sub.pathFrame === FRAME_BOW_FLAG) {
-        obj.flags |= CARRIER_BOW_BIT;
+        obj.flags |= CARRIER_RIDERS_DONE_BIT;
       }
       sub.pathFrame += 1;
       break;
@@ -489,7 +494,7 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
       if (sub.pathFrame >= CARRIER6_PATH_END) {
         sub.stripCel = STRIP_CEL_FIRST;
         sub.state = CarrierState.Wake;
-        obj.flags |= CARRIER_BOW_BIT;
+        obj.flags |= CARRIER_RIDERS_DONE_BIT;
       } else if (sub.pathFrame === CARRIER6_FRAME_FADE) {
         sub.wakeFade = WAKE_FADE_RATE;
       } else if (sub.pathFrame === CARRIER6_FRAME_BOW_EFFECT) {
@@ -587,7 +592,9 @@ export const ScriptedPropHandler: ClassHandler = {
   init: ScriptedPropInit13,
   update: ScriptedPropUpdate13,
   // `ScriptedPropInit13` writes no `obj+0x11C` and the update reads no hit
-  // bit; `RegisterForShotTest` puts it in the list and nothing takes damage.
+  // bit. Nothing marks it either: the record's `0x8000` keeps it out of
+  // `RegisterForShotTest`'s list (`0x00405168`) for its whole life, which is
+  // why a rider behind the boat's origin is still shootable.
   ownsShotResult: true,
   debug: ScriptedPropDebug,
 };

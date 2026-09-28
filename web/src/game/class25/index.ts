@@ -2,10 +2,10 @@
  * Class 0x25 — the script-driven humanoid. 142 spawns, 137 of them reached.
  *
  * The second-largest class in the game, and a **bytecode VM**. The spawn's
- * parameter tail points at a command block; `ScriptedHumanoidInit`
- * (`FUN_004840D0`) installs `ScriptedHumanoidUpdate` (`FUN_004842A0`) as the
- * object's entry point and never runs again, and that routine walks 8-byte
- * commands until one of them blocks.
+ * parameter tail points at a command block; the Init at `0x004840D0`
+ * installs the VM at `0x004842A0` as the object's entry point and never runs
+ * again, and that routine walks 8-byte commands until one of them blocks.
+ * (Both are ported below, so they are named here by address -- `L42`.)
  *
  * It is **not an enemy**: not damageable, awards nothing, and shots land in its
  * hit slot with nothing to consume them. What it is, is the game's cutscene
@@ -38,19 +38,21 @@
  * whole scheduling model: `waitFrames` counts up in `holdFrames` while a
  * condition is unmet.
  */
-import type { Actor, HumanoidActor } from "../actor";
+import type { Rng } from "../../core/rng";
+import { MotionFlag, type Actor, type HumanoidActor } from "../actor";
 import { ActorBindPartList } from "../attachments";
+import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScriptedHumanoidDebug } from "./debug";
-import { authoredFrameOfTicks, ticksOfAuthoredFrame }
-  from "../../core/play_cursor";
-import { G } from "../globals";
+import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
+import { G, HIT_SLOT_NONE } from "../globals";
+import { ActorFreeHitSlot } from "../hit_slots";
 import {
   registerClass, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { HumanoidDrawVariant } from "./state";
-import { T } from "../tables";
-import { VecToAngles } from "../vec";
+import { HumanoidDrawVariant, HumanoidRoutine } from "./state";
+import { MotionPlayFrame, MotionPlayLength, T } from "../tables";
+import { vec3, VecToAngles } from "../vec";
 
 /** The opcodes `ScriptedHumanoidUpdate` switches on. */
 export enum HumanoidOp {
@@ -107,7 +109,7 @@ export enum HumanoidOp {
    * It **is** a draw mode. `ScriptedHumanoidDraw` (`FUN_00484FF0`) never reads
    * it, which had been taken to mean nothing did; the reader is
    * `ScriptedHumanoidBoneDrawHook` (`FUN_00485260`), the per-bone callback
-   * `ScriptedHumanoidInit` (`FUN_004840D0`) installs at `obj+0x12EC`.
+   * the Init at `0x004840D0` installs at `obj+0x12EC`.
    * Mode 2 also zeroes the cel counter at `obj+0x1334`.
    */
   SetBonePropMode = 14,
@@ -115,7 +117,13 @@ export enum HumanoidOp {
   Jump = 15,
   /** Swap one bone's draw slot. */
   SetBoneModel = 16,
-  /** Hand the object to another routine entirely. */
+  /**
+   * Five different things by mode, and only three of them leave the VM:
+   * modes 0, 1 and 4 install {@link HumanoidRoutine.FallAndSplash},
+   * {@link HumanoidRoutine.LaunchAndDrop} and {@link HumanoidRoutine.FallTimed}
+   * over the object's entry point and end the frame; modes 2 and 3 spawn a
+   * sprite at a point the routine names and run on. See {@link HumanoidHandoff}.
+   */
   Handoff = 17,
   /** `ActorKill`. */
   Kill = 18,
@@ -133,7 +141,11 @@ export enum HumanoidCond {
   Frames = 0,
   /** The camera has reached path `a` at frame `b`. */
   CameraAt = 1,
-  /** The motion frame has reached `a`, or its last frame when `a` is -1. */
+  /**
+   * The play cursor **is** `a`, or `g_motion_play_length - 1` when `a` is -1
+   * -- an equality, in the engine's 60 Hz cursor over the 30 Hz clip. See
+   * {@link HumanoidTail.playCursor}. `op 0` never proceeds on it.
+   */
   MotionFrame = 2,
   /** Script flag `a` is set. */
   ScriptFlag = 3,
@@ -285,6 +297,61 @@ export const BONE_PROP_CHAR_HI = 0x3b;
 /** How many commands may run in one frame before the VM is called stuck. */
 export const MAX_COMMANDS_PER_FRAME = 256;
 
+// -- the routines `op 17` hands over to -------------------------------------
+//
+// Immediates and `.rdata` constants, each read at the instruction that loads
+// it. The float ones are the float32 the word holds, not the decimal the
+// decompiler rounds it to.
+
+/** `SpawnSpriteEffect`'s last two: face the camera fully, or by yaw alone. */
+const SPRITE_FACE_CAMERA = 1;
+const SPRITE_FACE_CAMERA_YAW = 2;
+const SPRITE_NO_PLAYER = -1;
+
+/** `FSUB double ptr [0x0055D188]` — `ScriptedHumanoidFallAndSplash`'s gravity. */
+export const FALL_SPLASH_GRAVITY = 0.02;
+/**
+ * `FCOMP double ptr [0x00569480]` then `TEST AH, 0x41` — the height at or
+ * below which the fall ends. `728a8ee4f2ff3bc0` = -27.9998.
+ */
+export const FALL_SPLASH_FLOOR = -27.9998;
+/** `MOV [ESP+0x18], 0xc1c7ff97` — the splash's height, not the actor's. */
+export const FALL_SPLASH_Y = -24.999799728393555;
+
+/** `MOV [ESI+0x50], 0x41a00000` — the launch's first rise per frame. */
+export const LAUNCH_VY = 20.0;
+/** `FSUB float ptr [0x00569488]` — the x the launch throws away from. */
+export const LAUNCH_ORIGIN_X = 231.5;
+/**
+ * `FSUB float ptr [0x00565E1C]` (`2301df3c`) — the per-frame step of the
+ * launch's gravity **and** of the timed fall's, 0.027222222 as a float32.
+ */
+export const GRAVITY_STEP = 0.027222221717238426;
+/** `FCOMP float ptr [0x004C436C]` — 0.0: the launch ends below it. */
+export const LAUNCH_FLOOR = 0.0;
+
+/** `MOV [EDI+0x50], 0xbed11111` — `op 17` mode 4's opening fall speed. */
+export const FALL_TIMED_START_VY = -0.40833333134651184;
+/** `CMP EAX, 0xc8; JLE` — the timed fall dies on its 201st frame. */
+export const FALL_TIMED_FRAMES = 200;
+
+/**
+ * `op 17` mode 3's sprite: kind 0x41 -- `impact_sprite["65"]` in the bundle,
+ * a 76-cel strip with no ricochet sound -- at one of two fixed points.
+ */
+const HANDOFF_SPLASH_KIND = 0x41;
+const HANDOFF_SPLASH_BLOCK = 9;
+/** `c33d4ccd`, `c4bc2000` at `0x00484A05`/`0x00484A15`, for block 9. */
+const HANDOFF_SPLASH_B9 = { x: -189.3000030517578, z: -1505.0 };
+/** `c49e0000`, `c4a92000` at `0x00484A1F`/`0x00484A2F`, anywhere else. */
+const HANDOFF_SPLASH = { x: -1264.0, z: -1353.0 };
+/** `c1c73333` — both points' height. */
+const HANDOFF_SPLASH_Y = -24.899999618530273;
+
+/** `op 17` mode 2's sprite: `c479e000`, `404f5c29`, `c4a20666`, yaw `0xC000`. */
+const FIXED_IMPACT = { x: -999.5, y: 3.240000009536743, z: -1296.199951171875 };
+const FIXED_IMPACT_YAW = 0xc000;
+
 export function HumanoidProgramOf(a: Actor): HumanoidProgram | null {
   return T.humanoids?.[String(a.at)] ?? null;
 }
@@ -297,12 +364,14 @@ export function HumanoidProgramOf(a: Actor): HumanoidProgram | null {
  * chosen character, or 0x21. Nothing in the port chooses a player character,
  * so the descriptor's own type stands.
  */
-export function ScriptedHumanoidInit(obj: HumanoidActor): void {
+export function ScriptedHumanoidInit(obj: HumanoidActor, rng?: Rng): void {
   // `model+0x1170 = *(u32 *)(tail + 8)`, then `ActorBindPartList` --
   // the same two instructions `CivilianInit` runs, at the same tail
   // offset. Five of the game's class-0x25 spawns carry a list.
   ActorBindPartList(obj);
   const p = HumanoidProgramOf(obj);
+  // The Init's last line is `*param_1 = ScriptedHumanoidUpdate`.
+  obj.hum.routine = HumanoidRoutine.Update;
   obj.hum.pc = 0;
   obj.hum.stallFrames = 0;
   // The Init pre-applies the first command: `obj+0x1324 = 1` when the block
@@ -331,14 +400,23 @@ export function ScriptedHumanoidInit(obj: HumanoidActor): void {
   obj.hum.bonePropMode =
     (obj.charType >= BONE_PROP_CHAR_LO && obj.charType <= BONE_PROP_CHAR_HI)
       ? 1 : 0;
+  // `param_1[0x4ce] = 0` -- `ScriptedHumanoidFallTimed`'s frame count.
+  obj.hum.fallFrames = 0;
+  // `ActorBuildSkinnedModel` leaves the sampled cursor at the clip's start.
+  obj.hum.playCursor = 0;
   if (!p) return;
   if (p.cmds[0]?.op === HumanoidOp.WaitThenHold) obj.frozen = 1;
   obj.motion = p.motion;
-  const m = T.types[String(obj.charType)]?.motions[String(p.motion)];
-  const fps = m?.fps ?? 30;
-  // `rand() % 10` rather than a frame anywhere in the clip: the phase here is
-  // a tenth of a second's worth of stagger, not a random pose.
-  obj.playTicks = ticksOfAuthoredFrame(p.phase === -1 ? 0 : p.phase, fps);
+  // `if (*(short *)(blk + 2) == 2) obj+0x1F8 |= 4`, straight after the build.
+  if (p.flags2 === 2) obj.motionFlags |= MotionFlag.TraceGround;
+  // `*piVar1 = blk+6 == -1 ? rand() % 10 : blk+6` -- written to the **counter**
+  // at `obj+0x194`, in the counter's own unit. This took the phase as an
+  // authored frame and doubled it, and took -1 as 0 under a comment that said
+  // `rand() % 10`: twenty spawns ship -1, two a literal.
+  //
+  // [port-only] `?? 0` is an Init called with no generator, which is a unit
+  // test's `ActorSpawn`; the director always hands one over.
+  obj.playTicks = p.phase === -1 ? (rng?.int(10) ?? 0) : p.phase;
 }
 
 /** The removal test, identical in shape to class 0x24's. */
@@ -350,18 +428,55 @@ export function HumanoidShouldRemove(obj: HumanoidActor, p: HumanoidProgram): bo
       && G.g_cam_path_frame >= p.removeFrame;
 }
 
-/** The **authored** frame the clip is showing — not the 60 Hz play cursor. */
-function MotionFrame(obj: HumanoidActor): number {
-  const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
-  return authoredFrameOfTicks(obj.playTicks, m?.fps ?? 30, m?.frames ?? 0);
+/**
+ * The `mode 2` test both switches make: `obj+0x19C` against `a`, or against
+ * `g_motion_play_length[obj+0x1B4] - 1` when `a` is -1 -- `MOVSX ECX, word ptr
+ * [EAX*0x2 + 0x4e07d0]; DEC ECX; CMP EAX, ECX`, the same four instructions
+ * `ScriptedHumanoidFallAndSplash` opens with.
+ *
+ * **An equality, on the cursor.** This read the *authored* frame and tested the
+ * last one with `>=`, and every number the programs carry says otherwise: 40
+ * of the 265 shipped `mode 2` commands name a cursor, and 24 of those name one
+ * past the end of the clip in authored frames -- `a=66` and `a=68` on a
+ * 35-frame clip whose play length is 68, `a=73` on stage 2's 41-frame 855.
+ * Those never fired, so the actor sat on the clip until its removal trigger.
+ */
+function AtMotionCursor(obj: HumanoidActor, a: number): boolean {
+  const want = a === -1 ? MotionPlayLength(obj, obj.motion) - 1 : a;
+  return obj.hum.playCursor === want;
 }
 
-function AtLastMotionFrame(obj: HumanoidActor): boolean {
-  const m = T.types[String(obj.charType)]?.motions[String(obj.motion)];
-  return !!m?.frames && MotionFrame(obj) >= m.frames - 1;
+/**
+ * `op 0` and `op 1`'s conditions: `INC ECX; CMP ECX, 0x4; JA 0x00484a8d` at
+ * `0x0048437C` over the mode, then the table at `0x00484CF8` -- modes -1, 0, 1,
+ * 2 and 3, and **nothing else proceeds**: a mode 4 here is the blocked path,
+ * not the point test `op 4` has.
+ *
+ * Mode 2 tests the **opcode** first (`CMP BP, BX; JZ` at `0x004843CD`, `BP`
+ * the op word and `BX` zero) and blocks when it is zero,
+ * so an `op 0` never proceeds on a motion cursor. No shipped command is either
+ * shape; they are the routine's arms, and so the port's.
+ */
+function WaitCondMet(obj: HumanoidActor, c: HumanoidCmd): boolean {
+  switch (c.mode) {
+    case HumanoidCond.Frames:
+    case HumanoidCond.CameraAt:
+    case HumanoidCond.ScriptFlag:
+      return CondMet(obj, c);
+    case HumanoidCond.MotionFrame:
+      return c.op !== HumanoidOp.WaitThenPlay && AtMotionCursor(obj, c.a);
+    case HumanoidCond.Always:
+      return true;
+    default:
+      return false;
+  }
 }
 
-/** Whether a command's condition is met. Shared by opcodes 0, 1 and 4. */
+/**
+ * `op 4`'s conditions: `CMP EAX, 0x4; JA 0x00484a8d` at `0x004844E1`, unsigned,
+ * then the table at `0x00484D0C` -- modes 0 to 4, and **no** -1: an
+ * `op 4 mode -1` is the blocked path and never proceeds. None ships.
+ */
 function CondMet(obj: HumanoidActor, c: HumanoidCmd): boolean {
   switch (c.mode) {
     case HumanoidCond.Frames:
@@ -369,7 +484,7 @@ function CondMet(obj: HumanoidActor, c: HumanoidCmd): boolean {
     case HumanoidCond.CameraAt:
       return G.g_active_cam_path === c.a && G.g_cam_path_frame >= c.b;
     case HumanoidCond.MotionFrame:
-      return c.a === -1 ? AtLastMotionFrame(obj) : MotionFrame(obj) === c.a;
+      return AtMotionCursor(obj, c.a);
     case HumanoidCond.ScriptFlag:
       return G.g_script_flags[c.a] === 1;
     case HumanoidCond.FartherThanBefore: {
@@ -382,8 +497,6 @@ function CondMet(obj: HumanoidActor, c: HumanoidCmd): boolean {
       const was = Math.hypot(obj.hum.prevPos.x - px, obj.hum.prevPos.z - pz);
       return was < now;
     }
-    case HumanoidCond.Always:
-      return true;
     default:
       return false;
   }
@@ -401,18 +514,8 @@ export function ScriptedHumanoidUpdate(obj: HumanoidActor, f: ClassFrame): void 
   const p = HumanoidProgramOf(obj);
   if (!p) return;
 
-  // Opcode -1 wrote `ScriptedHumanoidIdle` over the object's entry point
-  // (`MOV dword ptr [EDI], 0x484d40` @`0x00484A87`), so from the *next* frame
-  // this routine is not what the engine calls. The port dispatches on the
-  // cursor instead, which is the same call made once removed.
-  if (obj.hum.pc < 0) {
-    ScriptedHumanoidIdle(obj);
-    return;
-  }
-
   if (HumanoidShouldRemove(obj, p)) {
-    obj.dead = true;
-    obj.visible = false;
+    HumanoidKill(obj);
     return;
   }
 
@@ -422,7 +525,70 @@ export function ScriptedHumanoidUpdate(obj: HumanoidActor, f: ClassFrame): void 
     if (!c) break;
     if (!RunCommand(obj, c, f)) break;
   }
+  // `op 18` is `ActorKill`, which does not return: no tail, no draw.
+  if (obj.dead) return;
   HumanoidFrameTail(obj, f);
+}
+
+/**
+ * [port-only] What the engine does by calling `obj+0x00`: run whichever
+ * routine is installed. The engine writes a code pointer and calls it; the
+ * port writes {@link HumanoidRoutine} and switches, which is the same call made
+ * once removed -- class 0x24's `SetPiecePropUpdate` makes the same trade.
+ */
+export function ScriptedHumanoidRun(obj: HumanoidActor, f: ClassFrame): void {
+  switch (obj.hum.routine) {
+    case HumanoidRoutine.Update:
+      ScriptedHumanoidUpdate(obj, f);
+      return;
+    case HumanoidRoutine.Idle:
+      ScriptedHumanoidIdle(obj);
+      return;
+    case HumanoidRoutine.FallAndSplash:
+      ScriptedHumanoidFallAndSplash(obj, f);
+      return;
+    case HumanoidRoutine.LaunchAndDrop:
+      ScriptedHumanoidLaunchAndDrop(obj);
+      return;
+    case HumanoidRoutine.FallTimed:
+      ScriptedHumanoidFallTimed(obj);
+      return;
+  }
+}
+
+/**
+ * The teardown the class writes out inline wherever it dies of its own
+ * accord -- the removal test in the VM and the idle routine, and the three
+ * routines `op 17` installs: `if (obj+0x3C != -1) ActorFreeHitSlot(obj)`,
+ * then `ActorReleasePartList(obj+0x1304)` (all but the one at `0x00484F90`,
+ * which skips it), then `ActorKill`.
+ *
+ * Private, and not an exe function: there is no routine here to name. The
+ * part-list release has no counterpart in the port -- it hands back asset
+ * loads, and the bundle holds every model -- so the two shapes are one here;
+ * `ActorKill` is the port's usual pair, `dead` and not drawn.
+ *
+ * The removal test used to set the pair and leave the hit slot claimed, so
+ * every scripted humanoid that left the stage held one of the fourteen
+ * `g_hit_slots` for the rest of it.
+ */
+function HumanoidKill(obj: HumanoidActor): void {
+  if (obj.hitSlot !== HIT_SLOT_NONE) ActorFreeHitSlot(obj);
+  obj.dead = true;
+  obj.visible = false;
+}
+
+/**
+ * The half of `ScriptedHumanoidDraw` (`FUN_00484FF0`) the game reads back: its
+ * skeleton draw samples `obj+0x19C` from the counter before the counter is
+ * stepped. See {@link HumanoidTail.playCursor}.
+ *
+ * Private, like {@link HumanoidApplyPathOffset}: it is part of another routine,
+ * and the rest of that routine -- the skeleton, the shadow, the decoration and
+ * the counter's step -- is the renderer's and `ActorAdvanceMotion`'s.
+ */
+function HumanoidSampleDrawnCursor(obj: HumanoidActor): void {
+  obj.hum.playCursor = MotionPlayFrame(obj);
 }
 
 /** One command. Returns whether the cursor moved — false parks the VM. */
@@ -430,7 +596,7 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
   switch (c.op) {
     case HumanoidOp.WaitThenPlay:
     case HumanoidOp.WaitThenHold:
-      if (!CondMet(obj, c)) return false;
+      if (!WaitCondMet(obj, c)) return false;
       // `obj+0x1324 = <the opcode>`, and that word is the **freeze flag** the
       // draw routine tests before advancing the motion frame — the same one
       // class 0x24 has. So the opcode number is not a marker: op 0 lets the
@@ -448,16 +614,33 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
       return true;
 
     case HumanoidOp.SetMotion:
+      // `ActorSetMotion(obj+0x194, a)` -- a cut, cursor and counter zeroed --
+      // and then the **counter** is written outright: `b`, or `rand() % 10`
+      // for -1 (`MOV [EBP], ECX` at `0x00484466`, `CALL rand; IDIV 10` at
+      // `0x0048446B`, `EBP = obj+0x194`). In the counter's own unit: this
+      // took `b` as an authored frame and doubled it, and took -1 as 0.
+      ActorSetMotion(obj, c.a);
+      obj.hum.playCursor = 0;
+      obj.playTicks = c.b === -1 ? f.rng.int(10) : c.b;
+      // Mode 1 clears `obj+0x1F8` bit 4 (`AND AL, 0xfb` at `0x0048449E`) and
+      // mode 2 raises it (`OR AL, 0x4` at `0x00484488`); any other mode
+      // leaves it. The bit is the one the Init raises for `blk+2 == 2`.
+      if (c.mode === 1) obj.motionFlags &= ~MotionFlag.TraceGround;
+      else if (c.mode === 2) obj.motionFlags |= MotionFlag.TraceGround;
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
+      return true;
+
     case HumanoidOp.SetMotionBlended: {
-      obj.motion = c.a;
-      obj.playTicks = 0;
-      obj.rootFrame = -1;
-      // Mode 1 clears the draw flag and mode 2 sets it; `SetMotion` also takes
-      // a phase in `b`, and -1 there is the same tenth-of-a-second stagger.
-      if (c.op === HumanoidOp.SetMotion && c.b !== -1) {
-        const m = T.types[String(obj.charType)]?.motions[String(c.a)];
-        obj.playTicks = ticksOfAuthoredFrame(c.b, m?.fps ?? 30);
-      }
+      // `ActorSetMotionBlended(obj+0x194, a, b, mode)`: `b` is the start
+      // **cursor** and `mode` the fade length, as the routine takes them. This
+      // cut to frame 0 and ignored both, so every scripted clip change snapped
+      // -- the zombies' fall back into the canal included (mode 5). The port's
+      // primitive takes an authored frame and rebuilds the cursor from it, so
+      // the cursor is halved on the way in, which at the shipped 30 Hz is
+      // exact (the frog makes the same call the same way).
+      ActorSetMotionBlended(obj, c.a, c.b / 2, c.mode);
+      obj.hum.playCursor = c.b;
       obj.hum.stallFrames = 0;
       obj.hum.pc += 1;
       return true;
@@ -577,35 +760,216 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
         // is what `op -1` does: the actor stays drawn on its current clip,
         // which is wrong but visible, where running the arm regardless is how
         // it came to be deleted.
-        else { obj.hum.pc = -1; return false; }
+        else { obj.hum.routine = HumanoidRoutine.Idle; return false; }
       } else obj.hum.pc += 1;
       return true;
 
     case HumanoidOp.Kill:
-    case HumanoidOp.End:
-      // `-1` installs the idle routine and `18` is `ActorKill`; both leave the
-      // VM. The actor stays drawn for `End` and goes for `Kill`.
-      if (c.op === HumanoidOp.Kill) { obj.dead = true; obj.visible = false; }
-      obj.hum.pc = -1;
+      // `0x00484A80 CALL ActorKill`, which does not return: the actor goes
+      // and nothing after it runs. A bare kill -- the hit slot stays claimed,
+      // unlike the class's other deaths.
+      obj.dead = true;
+      obj.visible = false;
       return false;
 
-    // [diverges] These three need routines this port has not read:
-    // `op 9` and `op 16` swap a model from per-character tables at
-    // `0x004EC9E0` and `PTR_DAT_004C7160`, and `op 17` hands the object to one
-    // of five other update routines. The command is stepped over so the rest
-    // of the program still runs — stalling on it would park the actor for ever.
+    case HumanoidOp.End:
+      // `MOV dword ptr [EDI], 0x484d40` at `0x00484A87`, and on into the tail
+      // with the cursor still on this command: from the next frame the idle
+      // routine is what runs, and the actor stays drawn on its clip.
+      obj.hum.routine = HumanoidRoutine.Idle;
+      return false;
+
+    case HumanoidOp.Handoff:
+      return HumanoidHandoff(obj, c, f);
+
+    // [diverges] These two need routines this port has not read: `op 9` and
+    // `op 16` swap a model from per-character tables at `0x004EC9E0` and
+    // `PTR_DAT_004C7160` (and `op 16` sprays blood from the bone first). The
+    // command is stepped over so the rest of the program still runs —
+    // stalling on it would park the actor for ever.
     case HumanoidOp.SetHandModel:
     case HumanoidOp.SetBoneModel:
-    case HumanoidOp.Handoff:
       obj.hum.stallFrames = 0;
       obj.hum.pc += 1;
       return true;
 
     default:
-      obj.hum.stallFrames = 0;
-      obj.hum.pc += 1;
-      return true;
+      // `LEA EDX,[EAX+1]; CMP EDX,0x13; JA 0x00484a8d` at `0x00484365`: an
+      // opcode outside -1..18 goes to the tail with the cursor on it, so the
+      // VM parks there. None ships -- every command of the 137 programs
+      // decodes in range, which is the check on the command lengths.
+      return false;
   }
+}
+
+/**
+ * `op 17`, `0x004849CE`: a switch on the mode through the five-entry table at
+ * `0x00484D20` (`0x004849E2`, `0x004849EA`, `0x004849F2`, `0x004849FB`,
+ * `0x00484A5A`).
+ *
+ * * **0, 1, 4** write a routine over the object's entry point -- mode 4 first
+ *   sets `obj+0x50 = -0.40833333` (`0xbed11111`) -- and end the frame through
+ *   the VM's tail, with the cursor past this command. The VM never runs again.
+ * * **2, 3** spawn a sprite and **stay**: `MOV CL, 0x1` and the loop runs the
+ *   next command in the same frame.
+ * * Anything else (`CMP EAX,4; JA`, unsigned, so negatives too) steps past
+ *   the command and ends the frame, since `CL` is cleared at the loop's head.
+ *
+ * Returns whether the VM runs on, as {@link RunCommand} does.
+ *
+ * This was stepped over for as long as the class existed, and `op -1` always
+ * follows a mode 0, 1 or 4 in the shipped programs -- so the actor fell into
+ * the idle routine on whatever clip the program had last started. Stage 2's
+ * four zombies at the jetty (evt 43584, 43740, 55372, 55536) had just started
+ * their fall back into the canal, clip 972 with a fade of 5, and the idle
+ * routine never raises the freeze flag: they stood on the jetty playing the
+ * fall on a loop until the boss fight's camera took them away.
+ */
+function HumanoidHandoff(obj: HumanoidActor, c: HumanoidCmd,
+                         f: ClassFrame): boolean {
+  let stays = false;
+  switch (c.mode) {
+    case 0:
+      obj.hum.routine = HumanoidRoutine.FallAndSplash;
+      break;
+    case 1:
+      obj.hum.routine = HumanoidRoutine.LaunchAndDrop;
+      break;
+    case 2:
+      ScriptedHumanoidSpawnFixedImpact(f);
+      stays = true;
+      break;
+    case 3:
+      // `g_evt_block_index == 9` picks the point (`CMP word ptr [0x009a2bc0],
+      // 0x9` at `0x004849FB`), and the sprite turns to the camera by yaw
+      // alone. `params[3..5]` are zeroed (`0x00484A42`-`0x00484A4A`).
+      SpawnSpriteEffect(
+        G.g_evt_block_index === HANDOFF_SPLASH_BLOCK
+          ? vec3(HANDOFF_SPLASH_B9.x, HANDOFF_SPLASH_Y, HANDOFF_SPLASH_B9.z)
+          : vec3(HANDOFF_SPLASH.x, HANDOFF_SPLASH_Y, HANDOFF_SPLASH.z),
+        0, 0, HANDOFF_SPLASH_KIND, SPRITE_FACE_CAMERA_YAW, SPRITE_NO_PLAYER,
+        f.host, f.events);
+      stays = true;
+      break;
+    case 4:
+      obj.vel.y = FALL_TIMED_START_VY;
+      obj.hum.routine = HumanoidRoutine.FallTimed;
+      break;
+  }
+  obj.hum.pc += 1;
+  obj.hum.stallFrames = 0;
+  return stays;
+}
+
+/**
+ * `ScriptedHumanoidSpawnFixedImpact` — `FUN_00484F50`. `op 17` mode 2.
+ *
+ * One sprite at one point, and nothing of the actor's: kind 0x34 -- the
+ * second copy of the metal material's arm, `BULLET_MET1` and all -- at
+ * `(-999.5, 3.24, -1296.2)` facing yaw `0xC000`, not turned to the camera.
+ * Stage 2's two gunmen (evt 65768, 66004) call it three times each, each
+ * straight after a shot's sound.
+ */
+export function ScriptedHumanoidSpawnFixedImpact(f: ClassFrame): void {
+  SpawnSpriteEffect(vec3(FIXED_IMPACT.x, FIXED_IMPACT.y, FIXED_IMPACT.z),
+                    0, FIXED_IMPACT_YAW, SpriteEffectKind.MetalAlt, 0,
+                    SPRITE_NO_PLAYER, f.host, f.events);
+}
+
+/**
+ * `ScriptedHumanoidFallAndSplash` — `FUN_00484DF0`. What `op 17` mode 0
+ * installs, and the end of stage 2's jetty zombies (two a route, blocks 16
+ * and 20).
+ *
+ * ```
+ * 00484dfe  obj+0x50 -= 0.02;  obj+0x44 += obj+0x50         ; from rest
+ * 00484e10  if (obj+0x19C == g_motion_play_length[obj+0x1B4] - 1)
+ *               obj+0x1324 = 1                              ; hold the clip
+ * 00484e33  if (obj+0x44 <= -27.9998) {
+ *               SpawnSpriteEffect({x, -24.9998, z}, 0x61, 1, -1)
+ *               ActorFreeHitSlot; ActorReleasePartList; ActorKill
+ *           }
+ * 00484e91  ScriptedHumanoidDraw(obj)
+ * ```
+ *
+ * So the clip the program left playing -- the fall back, 972 -- plays **once**
+ * and holds its last cursor, and the body sinks from the jetty's -23 past
+ * -27.9998, throws a splash at -24.9998 and is gone 22 frames after the
+ * hand-off, well before a 59-tick clip could loop. Kind 0x61 is the strip the
+ * bat's and the owl's water splashes flip through, so into water is
+ * `[likely]`. No removal test and no cutscene-skip teardown: nothing but the
+ * depth ends it.
+ *
+ * `obj+0x50` is `vel.y`, and nothing in the class writes it before this, so the
+ * fall starts from rest.
+ */
+export function ScriptedHumanoidFallAndSplash(obj: HumanoidActor,
+                                              f: ClassFrame): void {
+  obj.vel.y -= FALL_SPLASH_GRAVITY;
+  obj.pos.y += obj.vel.y;
+  if (AtMotionCursor(obj, -1)) obj.frozen = 1;
+  if (obj.pos.y <= FALL_SPLASH_FLOOR) {
+    SpawnSpriteEffect(vec3(obj.pos.x, FALL_SPLASH_Y, obj.pos.z), 0, 0,
+                      SpriteEffectKind.Splash, SPRITE_FACE_CAMERA,
+                      SPRITE_NO_PLAYER, f.host, f.events);
+    HumanoidKill(obj);
+    return;
+  }
+  HumanoidSampleDrawnCursor(obj);
+}
+
+/**
+ * `ScriptedHumanoidLaunchAndDrop` — `FUN_00484EA0`. What `op 17` mode 1
+ * installs.
+ *
+ * Sub 0 seeds the throw -- `vel.y = 20`, `vel.x = x - 231.5`, both
+ * accumulators zeroed -- bumps the substate and **falls through into sub 1**
+ * (`INC word ptr [ESI+0x1312]` at `0x00484EDF`, then `0x00484EE6`, `L53`), so
+ * the first step is taken on the launch frame. Sub 1 is a gravity that itself
+ * grows: `accY -= 0.0272; vel.y += accY; y += vel.y; x += vel.x`, and the
+ * actor dies below `y = 0`. Any other substate only draws.
+ *
+ * Stage 2 block 37's five bystanders run it on script flag 95.
+ */
+export function ScriptedHumanoidLaunchAndDrop(obj: HumanoidActor): void {
+  if (obj.sub === 0) {
+    obj.vel.y = LAUNCH_VY;
+    obj.accY = 0;
+    obj.accX = 0;
+    obj.vel.x = obj.pos.x - LAUNCH_ORIGIN_X;
+    obj.sub += 1;
+  } else if (obj.sub !== 1) {
+    HumanoidSampleDrawnCursor(obj);
+    return;
+  }
+  obj.accY -= GRAVITY_STEP;
+  obj.vel.y += obj.accY;
+  obj.pos.y += obj.vel.y;
+  obj.pos.x += obj.vel.x;
+  if (obj.pos.y < LAUNCH_FLOOR) {
+    HumanoidKill(obj);
+    return;
+  }
+  HumanoidSampleDrawnCursor(obj);
+}
+
+/**
+ * `ScriptedHumanoidFallTimed` — `FUN_00484F90`. What `op 17` mode 4 installs,
+ * after setting `vel.y` to -0.408.
+ *
+ * `vel.y -= 0.0272; y += vel.y`, and a frame count at `obj+0x1338` that kills
+ * the actor once it passes 200 -- with the hit slot freed and, unlike the
+ * other two, no part-list release. Stage 6's evt 18820 is the one user.
+ */
+export function ScriptedHumanoidFallTimed(obj: HumanoidActor): void {
+  obj.vel.y -= GRAVITY_STEP;
+  obj.pos.y += obj.vel.y;
+  obj.hum.fallFrames += 1;
+  if (obj.hum.fallFrames > FALL_TIMED_FRAMES) {
+    HumanoidKill(obj);
+    return;
+  }
+  HumanoidSampleDrawnCursor(obj);
 }
 
 /**
@@ -673,6 +1037,8 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
   obj.hum.prevPos.x = obj.pos.x;
   obj.hum.prevPos.y = obj.pos.y;
   obj.hum.prevPos.z = obj.pos.z;
+  // `ScriptedHumanoidDraw(obj)`, the tail's last call.
+  HumanoidSampleDrawnCursor(obj);
 }
 
 /**
@@ -746,15 +1112,17 @@ function HumanoidApplyPathOffset(obj: HumanoidActor, rx: number, ry: number,
  * `ScriptedHumanoidIdle` — `FUN_00484D40`. What opcode -1 installs.
  *
  * `[proved]` exhaustively: the cutscene-skip teardown, the same removal test
- * `ScriptedHumanoidUpdate` (`FUN_004842A0`) opens with, then
- * `ScriptedHumanoidDraw` (`FUN_00484FF0`) and `RET` at `0x00484DE2`.
+ * the VM at `0x004842A0` opens with -- hit slot, part list, `ActorKill` --
+ * then `ScriptedHumanoidDraw` (`FUN_00484FF0`) and `RET` at `0x00484DE2`.
  *
  * **And nothing else** — no `obj+0x1320` step, no turn, no object-path follow,
  * no `obj+0x13C0` capture. So a class-0x25 actor whose program has ended stops
  * dead where it stands. The port used to leave `pc` at -1 and keep running
  * `HumanoidFrameTail` every frame, which kept the 69 of the six stages' 137
  * scripted humanoids that reach an `op -1` turning and riding their paths for
- * ever after their programs had finished.
+ * ever after their programs had finished. It is one of five routines the
+ * object can be handed ({@link HumanoidRoutine}); `op 17` installs three
+ * others, which this used to stand in for as well.
  *
  * The skip teardown is not ported: `g_cutscene_skipping` — `0x009A2230` is
  * never raised, because the player has no cutscene skip.
@@ -763,18 +1131,19 @@ export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
   const p = HumanoidProgramOf(obj);
   if (!p) return;
   if (HumanoidShouldRemove(obj, p)) {
-    obj.dead = true;
-    obj.visible = false;
+    HumanoidKill(obj);
+    return;
   }
   // `CALL 0x00484FF0` — the draw, which is the renderer's. Its chapter-card
   // early-out (`ScreenFurniture.ChapterCard`, `0x00484FF8`) skips the body
   // and the decoration but lands on the tick at `0x0048523A`, not the `RET`,
   // so the motion frame advances behind a card either way.
+  HumanoidSampleDrawnCursor(obj);
 }
 
 export const ScriptedHumanoidHandler: ClassHandler = {
   init: ScriptedHumanoidInit,
-  update: ScriptedHumanoidUpdate,
+  update: ScriptedHumanoidRun,
   debug: ScriptedHumanoidDebug,
 };
 

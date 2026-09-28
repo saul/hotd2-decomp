@@ -547,8 +547,9 @@ machine.** The report was stage 2, block 9 step 5, spawns `0x55BC` and
 `0x56C8`: alive, on one frame of one clip, for ever. The VM was running
 correctly; their `op 2` had set motion **180**, and the exporter had never
 baked it. A class-0x25 program's `op 1` mode 2 is *hold when the clip reaches
-its last frame*, measured against `BakedMotion.frames` — so a clip with no
-frames pins the authored frame at 0, the wait can never fire, and the VM parks
+its last frame*, measured then against `BakedMotion.frames` (it is the engine's
+cursor against the play length now -- see *Class 0x25's `op 17`* below) — so a
+clip with no frames pins the authored frame at 0, the wait can never fire, and the VM parks
 on that command with the skeleton stuck where it was. **118 of the six stages'
 263 (program, clip) pairs had no frames at all**: `characters.py` baked the
 command block's *header* motion and nothing the program went on to set.
@@ -599,6 +600,24 @@ it, and a block whose own wait is already satisfied is **skipped** — with
 `CivilianReapplyWaitCommand` re-applying the clip, target and cues the skipped
 block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
 frames and the two score paths.
+
+**A reload no longer brings back an enemy the room already got rid of.** A
+seek rebuilds every spawn still listed at its `Init`, and two classes whose
+`Init` counts into both enemy counters were never taken off the list: stage 2's
+class-0x21 rescue target, whose ways out -- rescue, the crash shot, flag 0 --
+all come before any room gate, and class 0x18's boat riders, which the replay's
+list of gate-counted classes (`ENEMY_GATE_CLASSES`) had never been told about
+although the game's own list had. Rebuilt, either held `g_enemies_alive` with
+nothing on screen to shoot, and every civilian whose rescue waits on that count
+or on a camera cue behind a room gate sat sobbing in front of her dead
+captors: stage 2's `0x6830` after the burnt-out car (block 11 step 2),
+`0x8598` at block 14, stage 3's boat hostage `0x3208`. The rider and the
+target are in the gate list now, class 0x46's bats answer per record (their
+dive and swarm flights count, the scatter does not), and class 0x21 answers
+`ClassHandler.outlivedByReplay` -- flag 0, camera path `0x39` at frame
+`0x181`, route slot 1 out of its own block -- so the landing is the world the
+exe is in at that address. The held target's abandon arm also frees its camera
+and hit slots, which the port's had kept.
 
 **A captor counts as gone only when it dies.** `CivilianPruneDeadChildren`
 tests the child's `obj+0x34` bit `0x4000000` and nothing else; the port also
@@ -1483,6 +1502,49 @@ placed now; `render/effects.ts` draws the kind-5 arm from
 effect templates. Both tracer arms now also face the camera, as
 `MatrixClearRotation` makes them: the ordinary tracer was a quad turned in
 world axes.
+
+**Stage 1's two burning cars are class 0x28's, and are thrown once.** The
+cars the JUDGMENT walker knocks aside when it lands are `obj_432840`, drawn by
+`PathRidingPropDraw` (`FUN_00432840`); the object is `PathRidingPropUpdate`
+(`FUN_00432610`), class 0x28's handler, and six `spawn_placed` records place
+two of them (`obj+0x11C` 0 and 1) in blocks 5, 11 and 14. The routine seats
+each **once** on its route, `g_class28_route_table` (`0x00589AE0`): `op_st1`
+72 at frame 671 and 73 at 667, which are the paths' first keys -- a car at
+`(-1021.6, -8.0, -497.5)` and one on its side at `(-1021.9, 1.2, -460.2)`,
+blocking the street, each under a fire and a smoke sprite. It throws them the
+frame **camera path `0x2F`** -- the boss block's -- reaches that frame, lets
+the pose follow `g_cam_path_frame` from then on, and **kills** them when the
+frame reaches `g_cam_path_length[slot]`, 725 and 765, with no camera test. The
+port had no class 0x28: `RigLayer` drew the first route root from stage load
+at `path(min(len, camera frame))` of every camera, so before the throw the car
+was hundreds of thousands of units away on the extrapolated path (2.2 million
+at `cp_st1` 47 frame 120) and came in through the sky, and the post-fight
+cutscene's `cp_st1` 50, which runs through frames 671..725, threw it again in
+front of the players. The second car was never drawn at all. Now
+`game/class28/` is the routine, `SpawnSlotActor` builds it from the spawn
+record (opcode 9 reads no tail), and `RigLayer` draws the rig's spawn roots
+from the live actor, one root per actor, the route roots never
+(`ACTOR_POSED_ROUTINES`) -- including the two phantom `obj_432840` roots stages
+2 and 5 carried and drew with no class 0x28 in them. The sprites stand on the
+object's position with the camera-facing yaw alone, as the draw's tail has
+them, and stop at the throw. Measured on seed 1 through the whole fight: the
+old root moved on 1562 of 4401 frames and threw on two cameras (`cp` 47 and
+50); the class-0x28 car moves on 53 frames, all on `cp` 47, and is gone at
+frame 725. A seek past the throw leaves the cars seated, because the replay
+does not run the game; in play they are gone by then.
+
+**Their fire and smoke play.** Each sprite is a cel loop on `g_frame_counter`
+(`0x009A32A0`) -- `0x135F + g_frame_counter % 15` (an unsigned `DIV` at
+`0x00432938`) and `0xB67 + (g_frame_counter & 7)` (`0x004329AD`) -- not on
+`g_scene_tick_counter`, which class 0x41 type 53 reads for the same two
+loops. The rig carried only each loop's first cel, so both stood on it. Now
+`obj_432840` exports every cel as a part of its own, 15 fire and 8 smoke, the
+way the stage-2 car's rig carries both of its rows, and `PathRidingPropDraw`
+in `render/rigs.ts` shows the one the counter names and hides the rest.
+Measured from the scene graph over 30 driven frames of `cp_st1` 47 on seed 1:
+the drawn cels matched the exe's on 0 of 30 frames before (always
+`0x135F`/`0xB67`) and on 30 of 30 after, with all 15 and all 8 seen. Stage
+1's glb grows by 0.3 MB.
 
 ## Which instructions the UI strikes through
 
@@ -4961,7 +5023,9 @@ exe:
   in the carrier's frame, so it walked off across the canal in boat-relative
   coordinates. Ported in `game/class30/carrier_rider.ts`:
   `ZombieStateHoldOnCarrier` (46, aboard, turning to face the camera through
-  the inverse carrier matrix, no exit), `ZombieStateLeapOffCarrierForward`
+  the inverse carrier matrix -- and, since 2026-09-28, leaving for the attack
+  state on the cue frame itself; "no exit" was the pseudocode stopping at a
+  `MatrixStackPop`), `ZombieStateLeapOffCarrierForward`
   (47) and `ZombieStateLeapOffCarrierAtMark` (48), which bake the carrier into
   the rider with `CarrierBakeWorldPose` (`FUN_0045D920`, position *and*
   angles, through a transcription of `MatrixToEulerBams`), fly, splash through
@@ -4983,6 +5047,35 @@ default road, the 1-2-3-4-5-6-7-8-10 road and the 5→21→16 road with no
 debug clear. The corpse step-off (`state 7 sub 1`, `obj+0x1330 == 2`) now
 bakes the angles too. `[open]`: `RegisterForDistanceRank` still admits class
 0x30 only; whether a rider registers, and with which position, is unread.
+
+### Stage 3's boat riders can be shot, and go with the boat
+
+Reported: at the start of stage 3 the zombies on the boat with the first
+civilian did not die when shot, and were still standing when the boat blew up.
+Three faults, none of them a regression -- the first dates from the class-0x13
+port (`902de88a`), and a build from before the class-0x30 pick moved into the
+engine (`51b0f657`) answers the same pulls identically.
+
+* **The boat took the shots.** `SpawnFromDescriptorSmall` hands the record's
+  flags word to `ActorInitFlags`, and every class-0x13 record carries `0x8000`
+  -- out of `RegisterForShotTest` for life. The port's spawn arm dropped the
+  word, so the 40-unit radius `CarrierPropRoutine1` seats round the boat's
+  origin was a live sphere in `render/`'s pick, nearer along the ray than any
+  rider standing behind the origin. Measured on one seed, the same pulls
+  replayed one every two frames at the riders' own shot points: before, the
+  first ten took nothing from either (220 and 130 hit points); after, the
+  captor was dead on the ninth (220 to -60) and the rider on the eighteenth.
+* **A captor aboard retires with its boat.** `ZombieStateRetireOffScreen`
+  (state 38) ends with an arm the port had not got: a class-0x18 rider whose
+  carrier has `obj+0x34 & 0x400000` -- raised by routines 1 and 6 as the boat
+  runs past its mooring into the wall -- is retired and credited
+  (`ZombieRetireAndCredit`, now transcribed whole: the one-player credit, both
+  counts on the spot, the hit slot). Stage 3's `0xC00` and `0x71D0`. The
+  mode-0/1 test is `ActorBoundsOnScreen` now, as the engine's is.
+* **A holding rider leaps on its cue.** `ZombieStateHoldOnCarrier` sends the
+  rider to its attack state when the camera reaches `tail+0x0E`; the three
+  `znnick` riders (attack state 48, camera path 124 frame 1080/1075) leap to
+  the player's boat instead of standing on theirs through the crash.
 
 ### Hiding a character is two gates and a hook, not an alpha
 
@@ -6285,6 +6378,70 @@ and every row it refuses (`GATED`), the two restore states' loads, **type
 instruction stream agreeing -- every reachable tail ending in `-1`, both
 searches agreeing wherever both find a slot, `part_sphere_rows` against a raw
 first match, and every mesh-hand spawn naming a blob.
+
+## Class 0x25's `op 17`: the jetty zombies fall back once, into the canal
+
+At the end of stage 2 (block 16 step 15, and block 20 step 2 on the other
+route) the two player characters shoot two zombies off the jetty from the boat.
+Both zombies (character type 15, evt `43584`/`43740`, and `55372`/`55536` on
+block 20) are class-0x25 scripted humanoids, and their programs end
+`op 3 972` -- the fall back, with a fade of 5 -- then **`op 17` mode 0** and
+`op -1`. The port had stepped over `op 17` since the class was ported
+(`77e235af`), so the actor ran on into `op -1`, sat in the idle routine on clip
+972 with the freeze flag clear, and **played its fall on a loop** on the jetty
+until camera path 100 removed it. It never worked; no regression.
+
+`op 17` is five things by mode (`0x004849CE`, table `0x00484D20`), and every one
+ships `[proved]`:
+
+* **0** installs `ScriptedHumanoidFallAndSplash` (`FUN_00484DF0`, a routine
+  Ghidra had no function for): `vel.y -= 0.02` from rest, the freeze raised when
+  the cursor its last draw showed is `g_motion_play_length - 1`, and at
+  `y <= -27.9998` a kind-0x61 splash at `(x, -24.9998, z)`, the hit slot back,
+  and `ActorKill`. The zombies fall 5 units and are gone **22 frames** after the
+  hand-off, before the 59-tick clip could loop.
+* **1** installs `ScriptedHumanoidLaunchAndDrop` (`FUN_00484EA0`): stage 2
+  block 37's five bystanders thrown up at 20 a frame and out along x from 231.5
+  under a gravity that grows 0.0272 a frame, dead below y = 0.
+* **2** calls `ScriptedHumanoidSpawnFixedImpact` (`FUN_00484F50`): a kind-0x34
+  sprite at a fixed point, and the VM runs on.
+* **3** spawns kind 0x41 at one of two fixed points (block 9 or not), and runs
+  on.
+* **4** sets `vel.y = -0.408` and installs `ScriptedHumanoidFallTimed`
+  (`FUN_00484F90`): the same gravity step and death past 200 frames (stage 6).
+
+Which routine runs is `HumanoidTail.routine` now, the code pointer at
+`obj+0x00` with the exe's own values; `pc = -1` is gone, and a finished program
+leaves the cursor on its `op -1` as the engine does.
+
+**The VM's motion waits count the engine's cursor.** `op 0/1/4` mode 2 compare
+`obj+0x19C` -- the cursor the class's last draw sampled, which the port keeps
+as `HumanoidTail.playCursor` (`L62`) -- for **equality** with `a`, or with the
+play length minus one. The port read the authored frame with `>=`, and 24 of
+the 40 shipped literal cursors name one past a clip's end in authored frames
+(`a=66` and `a=68` on stage 2's 35-frame 805, `a=73` on the 41-frame 855 in this
+same cut scene), so those actors parked until their removal triggers. The same
+belief sat under `op 2` and the Init: both write the counter directly, `b` or
+`rand() % 10` for -1, where the port doubled `b` and took -1 as 0. `op 2`'s
+mode also raises or clears `obj+0x1F8` bit 4, as the Init does for `blk+2 == 2`.
+`op 3` goes through `ActorSetMotionBlended` with its start cursor and fade
+(`mode`) instead of cutting to frame 0. The per-opcode condition sets are the
+exe's: `op 0/1` have no mode 4, `op 0` never proceeds on mode 2, `op 4` has no
+-1, and an out-of-range opcode parks the VM. The removal test and the idle
+routine free the hit slot (`ActorFreeHitSlot`, `FUN_004092D0`), which they had
+left claimed for the rest of the stage.
+
+Measured in the page (`?stage=2&block=16&step=15&op=0&drive=1&seed=1`, driven
+frame by frame): before, zombie 43584 is handed over at driven frame 210 and is
+still at y -23 on clip 972 at frame 457, the cursor running 0..58 and wrapping
+(40 at frame 250, 30 at 300, 20 at 350); after, it is handed over at frame 214
+(the fades now cost their frames), falls 0.02 a frame², and dies at frame 236
+with a splash at y -25; 43740 at 263 and 285. Checked by `test:port`'s five
+class-0x25 `op 17` blocks, 17 assertions failing on the base.
+
+Not done: `op 9` and `op 16` (the hand and bone model swaps, and `op 16`'s blood
+spray from the bone -- the zombies' shot wounds in this same scene) stay a
+declared divergence.
 
 ## Every opcode, and what the player does with it
 

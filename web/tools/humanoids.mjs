@@ -109,9 +109,13 @@ function clip(a) {
 
 function line(a) {
   const p = script.humanoids?.[String(a.at)];
-  const cmd = p && a.hum.pc >= 0 ? p.cmds[a.hum.pc] : null;
+  // `hum.routine` is the code pointer at `obj+0x00`; only the VM
+  // (`0x004842A0`) reads the command block.
+  const inVm = a.hum.routine === 0x004842a0;
+  const cmd = p && inVm ? p.cmds[a.hum.pc] : null;
   return `0x${a.at.toString(16)} ${a.name} pc=${a.hum.pc}`
-       + (cmd ? ` op=${cmd.op}/${cmd.mode} a=${cmd.a} b=${cmd.b}` : " (idle)")
+       + (cmd ? ` op=${cmd.op}/${cmd.mode} a=${cmd.a} b=${cmd.b}`
+              : ` (routine 0x${a.hum.routine.toString(16)})`)
        + ` frozen=${a.frozen} stall=${a.hum.stallFrames} ${clip(a)}`
        + ` pos=(${a.pos.x.toFixed(1)},${a.pos.y.toFixed(1)},${a.pos.z.toFixed(1)})`
        + ` dead=${a.dead} vis=${a.visible}`;

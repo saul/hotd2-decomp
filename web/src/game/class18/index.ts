@@ -29,10 +29,19 @@
  *     MatrixStackPop(1);
  * ```
  *
- * Three spawns in the game, all of them stage 3 block 0 step 6 on the boat
- * `CarrierPropRoutine1` drives — one in a single-player game and two more with
- * a second player. All three carry character type 5, `znnick.bin`, which the
- * stage already loads for its ordinary zombies.
+ * Six spawns in the game. Stage 3 block 0 step 6 puts four on the boat
+ * `CarrierPropRoutine1` drives: three riders of character type 5,
+ * `znnick.bin` (`0xADC` in a single-player game, `0xB10` and `0xB68` more with
+ * a second player), attack state 48 on a camera cue, and the civilian's own
+ * captor `0xC00`, attack state 38 with no cue. Stage 3 block 7's captor
+ * `0x71D0` rides `CarrierPropRoutine6`'s boat, and stage 2 block 16's
+ * `0xA174` the boat `CarrierPropRoutine0` runs into the wall.
+ *
+ * **How they leave.** A rider in state 48 or 47 bakes the carrier into itself
+ * and leaps off (`class30/carrier_rider.ts`), on its cue or at once; a captor
+ * in state 38 retires, credited, when its carrier raises
+ * `CARRIER_RIDERS_DONE_BIT` -- the boat running past its mooring into the wall
+ * (`ZombieStateRetireOffScreen`, `class30/target.ts`).
  *
  * ## The two exits, and why the second one matters
  *
@@ -122,9 +131,10 @@ export function CarriedZombieUpdate18(obj: Actor, f: ClassFrame): void {
   //             camera is still SHORT of the frame, not once it passes it
   //
   // So a rider whose script ends before the cue holds on the carrier
-  // (state 0x2E, `ZombieStateHoldOnCarrier`) and one whose script ends after
-  // it takes its attack state and leaps. With `>=` stage 2's boat rider did
-  // the opposite of both.
+  // (state 0x2E, `ZombieStateHoldOnCarrier`) until the camera reaches the
+  // cue frame -- that state's own exit then sends it to the attack state --
+  // and one whose script ends after it takes its attack state and leaps at
+  // once. With `>=` stage 2's boat rider did the opposite of both.
   const cue = obj.class18;
   // **Before** the cue frame, not after: `CMP [0x009a6110], ECX` / `JGE`
   // past the arm at `0x0045CE0D`, so the state is switched while

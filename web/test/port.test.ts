@@ -303,8 +303,8 @@ import { SpawnClass } from "../src/game/spawn_class";
 import { GameSystem, syncCharacterSpawns, syncPortGlobals,
          type CharacterPool } from "../src/app/systems";
 import {
-  CarrierBakeWorldPose, CarrierInverseTransformPoint, CarrierTransformPoint,
-  MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
+  CARRIER_RIDERS_DONE_BIT, CarrierBakeWorldPose, CarrierInverseTransformPoint,
+  CarrierTransformPoint, MatrixGetAngles, MatrixToEulerBams, RotXZY, RotYXZ,
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
@@ -572,7 +572,7 @@ import {
   RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
   RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
-import { SpawnPropContainers, SpawnSlotActors }
+import { SpawnPropContainers, SpawnSlotActor, SpawnSlotActors }
   from "../src/game/director";
 import {
   SetPieceState, SetPiecePropUpdate,
@@ -580,10 +580,11 @@ import {
   type SetPieceParams,
 } from "../src/game/class24";
 import {
-  HumanoidCond, HumanoidOp, HumanoidTurn, ScriptedHumanoidUpdate,
-  g_class25_path_offsets,
+  HumanoidCond, HumanoidOp, HumanoidTurn, ScriptedHumanoidRun,
+  ScriptedHumanoidUpdate, g_class25_path_offsets,
   type HumanoidProgram,
 } from "../src/game/class25";
+import { HumanoidRoutine } from "../src/game/class25/state";
 
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
@@ -6185,9 +6186,10 @@ function humanoidScene(cmds: HumanoidProgram["cmds"],
   return { a, events: new Events() };
 }
 
+// Through the routine the object has installed, as the director calls it:
+// once a program has ended the VM is no longer what runs.
 const hFrame = (a: HumanoidActor, events: Events, rng: Rng) =>
-  ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng, host: NULL_HOST,
-                              events });
+  ScriptedHumanoidRun(a, { dt: 1 / 60, rng, host: NULL_HOST, events });
 
 /**
  * **The union's whole point, checked by the compiler.**
@@ -6392,7 +6394,8 @@ console.log("\nclass 0x25, the camera conditions:");
   G.g_cam_path_frame = 40;
   hFrame(a, events, rng);
   check("then runs on when the camera arrives",
-        a.pos.y === 12 && a.hum.pc === -1, `pc ${a.hum.pc} y ${a.pos.y}`);
+        a.pos.y === 12 && a.hum.routine === HumanoidRoutine.Idle,
+        `pc ${a.hum.pc} y ${a.pos.y}`);
 }
 
 console.log("\nclass 0x25, jumps and the stall guard:");
@@ -6475,7 +6478,7 @@ console.log("\nclass 0x25, op 10 picks an arm by g_active_player:");
     G.g_active_player = 0;
     hFrame(a, events, rng);
     check("a mismatched op 10 with no skip leaves the VM rather than killing",
-          !a.dead && a.visible && a.hum.pc === -1,
+          !a.dead && a.visible && a.hum.routine === HumanoidRoutine.Idle,
           `dead ${a.dead} pc ${a.hum.pc}`);
   }
   G.g_active_player = 0;
@@ -6533,8 +6536,10 @@ console.log("\nclass 0x25, the program ends into ScriptedHumanoidIdle:");
     { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
   ]);
   hFrame(a, events, rng);
+  // The cursor stays on the `op -1` it ran: the tail stores it as it stopped.
   check("the frame that runs op -1 still falls through the normal tail",
-        a.hum.pc === -1 && a.hum.stallFrames === 1 && a.hum.turnMode === HumanoidTurn.FaceCamera,
+        a.hum.routine === HumanoidRoutine.Idle && a.hum.pc === 1
+        && a.hum.stallFrames === 1 && a.hum.turnMode === HumanoidTurn.FaceCamera,
         `pc ${a.hum.pc} hold ${a.hum.stallFrames}`);
 
   const yaw = a.yaw;
@@ -6661,6 +6666,272 @@ console.log("\nclass 0x25, `op 4` mode 4 waits for the actor to RECEDE (B13):");
         `pc ${closing.a.hum.pc}`);
 }
 
+/**
+ * Stage 2's jetty, run the way the page runs it: `GameUpdate` steps the clip
+ * and then the class, one 60 Hz frame at a time, from `ResetGameGlobals`.
+ *
+ * `JETTY_TYPE` is the fixture's type 1 with the three clips the zombies play,
+ * at their real shape from `zom.bin`: 977 (16 frames, play length 29), 1024
+ * (91, 180) and 972 (31, 59) -- the fall back.
+ */
+const JETTY_CHARS = {
+  ...CHARS,
+  types: { "1": { ...TYPE, motions: {
+    ...TYPE.motions,
+    "977": motion(16, 0, 29), "1024": motion(91, 0, 180),
+    "972": motion(31, 0, 59), "805": motion(35, 0, 68), "900": motion(10, 0, 18),
+  } } },
+} as unknown as CharactersJson;
+
+function jettyScene(cmds: HumanoidProgram["cmds"], pos = vec3(-1325, -23, -1834),
+                    motion0 = 1024):
+    { a: Actor; rng: Rng; events: Events; frame: () => void } {
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
+    charType: 1, removePath: 100, removeFrame: 65, flags2: 1,
+    motion: motion0, phase: 0, cmds,
+  } });
+  G.g_active_cam_path = 79;
+  G.g_cam_path_frame = 0;
+  const rng = new Rng(4);
+  const events = new Events();
+  const a = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "jetty",
+                       { pos, visible: true }, rng);
+  return { a, rng, events,
+           frame: () => GameUpdate(1 / 60, NULL_HOST, rng, events) };
+}
+
+console.log("\nclass 0x25, op 17 mode 0: the jetty zombies fall back ONCE, "
+            + "and into the canal:");
+{
+  // Stage 2 block 16 step 15, evt 43584, as the bundle carries it: held until
+  // camera path 79 frame 100, shot at frame 160 (977, the stumble, to its last
+  // cursor), 1024 for twenty frames, then 972 -- the fall back -- and op 17
+  // mode 0. The port stepped over op 17 and ran into op -1, so the actor sat
+  // in the idle routine on clip 972 with the freeze flag clear, and the fall
+  // looped on the jetty until the boss's camera removed it.
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.WaitThenHold, mode: HumanoidCond.Always, a: 0, b: 0 },
+    { op: HumanoidOp.WaitThenPlay, mode: HumanoidCond.CameraAt, a: 79, b: 100 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.CameraAt, a: 79, b: 160 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 977, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: -1, b: 0 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 1024, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 20, b: 0 },
+    { op: HumanoidOp.SetBoneModel, mode: 0, a: 2, b: 1 },
+    { op: HumanoidOp.SetMotionBlended, mode: 5, a: 972, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ]);
+  const slot = a.hitSlot;
+  let handoff = -1;
+  let deadAt = -1;
+  let wrapped = false;
+  let last = -1;
+  for (let f = 1; f <= 600 && deadAt < 0; f++) {
+    G.g_cam_path_frame = Math.min(f, 179);
+    frame();
+    if (handoff < 0 && a.motion === 972) handoff = f;
+    if (a.dead) { deadAt = f; break; }
+    if (handoff >= 0) {
+      const cur = MotionPlayFrame(a);
+      if (cur < last) wrapped = true;
+      last = cur;
+    }
+  }
+  check("the program reaches the fall back and the hand-off",
+        handoff > 0, `handoff frame ${handoff}`);
+  // `ScriptedHumanoidFallAndSplash` (0x00484DF0): vel.y -= 0.02 from rest, so
+  // after n frames y = -23 - 0.01 n (n + 1). n = 21 is -27.62, n = 22 is
+  // -28.06, and the routine ends at y <= -27.9998 -- the 22nd frame.
+  check("it drops through the surface and is gone on the 22nd frame after "
+        + "the hand-off, not left looping on the jetty",
+        deadAt - handoff === 22 && !a.visible,
+        `handoff ${handoff} dead ${deadAt} y ${a.pos.y.toFixed(3)}`);
+  check("...and the fall-back clip never wrapped on the way",
+        !wrapped, `last cursor ${last}`);
+  const splash = G.g_sprite_effects.find(
+    (e) => e.kind === SpriteEffectKind.Splash);
+  check("...splashing at the surface height, -24.9998, where it went in",
+        !!splash && Math.abs(splash.pos.y - -24.999799728393555) < 1e-6
+        && Math.abs(splash.pos.x - a.pos.x) < 1e-6
+        && Math.abs(splash.pos.z - a.pos.z) < 1e-6,
+        JSON.stringify(splash));
+  check("...and handing its hit slot back (`ActorFreeHitSlot`)",
+        slot !== HIT_SLOT_NONE && a.hitSlot === HIT_SLOT_NONE
+        && G.g_hit_slots[slot] === HIT_SLOT_NONE,
+        `slot ${slot} now ${a.hitSlot}`);
+}
+
+console.log("\nclass 0x25, op 17 mode 0 holds the clip on its last cursor:");
+{
+  // Placed high, so the fall outlasts the clip. 900 has a play length of 18:
+  // the routine raises the freeze when the cursor its last draw showed is 17,
+  // and that frame's draw has already stepped to 18 -- which is where the
+  // engine's clip holds, on the cursor that is the clip's last pose.
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.SetMotionBlended, mode: 0, a: 900, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ], vec3(0, 1000, 0));
+  const seen: number[] = [];
+  for (let f = 1; f <= 80; f++) {
+    frame();
+    seen.push(MotionPlayFrame(a));
+  }
+  check("the freeze goes up", a.frozen === 1, `frozen ${a.frozen}`);
+  check("...on the clip's play length, and stays there",
+        seen.slice(19).every((c) => c === 18) && seen[18] === 18
+        && seen[17] === 17,
+        seen.slice(14, 24).join(","));
+  check("...while the body keeps falling",
+        a.pos.y < 1000 - 0.01 * 70 * 71 && !a.dead, `y ${a.pos.y}`);
+}
+
+console.log("\nclass 0x25, a motion wait counts the engine's cursor:");
+{
+  // Stage 2 evt 54508 waits on `op 4 mode 2 a=66` over clip 805, which has 35
+  // authored frames and a play length of 68. The VM compared authored frames,
+  // which never reach 66 on a 35-frame clip, so the actor parked there until
+  // its removal trigger. The engine compares `obj+0x19C`: the frame that runs
+  // op 3 draws cursor 0, frame n draws n - 1, and the VM reads the cursor the
+  // previous frame drew -- 66 on the 68th frame.
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.SetMotionBlended, mode: 0, a: 805, b: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.MotionFrame, a: 66, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 5, f1: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  for (let f = 1; f <= 67; f++) frame();
+  check("not before the cursor it names", a.pos.y === -23, `y ${a.pos.y}`);
+  frame();
+  check("...and on the frame the VM reads 66", a.pos.y === 5, `y ${a.pos.y}`);
+}
+
+console.log("\nclass 0x25, op 2 and the Init write the counter itself:");
+{
+  // Both write `obj+0x194` outright (`*piVar1 = blk+6` in the Init,
+  // `MOV [EBP], ECX` at 0x00484466 for op 2), in the counter's unit -- not an
+  // authored frame to be doubled -- and -1 is `rand() % 10`.
+  const rng = new Rng(4);
+  const { a, events } = humanoidScene([
+    { op: HumanoidOp.SetMotion, mode: 2, a: 10, b: 7 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ], { phase: 5 });
+  check("the Init's phase is the counter", a.playTicks === 5,
+        `${a.playTicks}`);
+  hFrame(a, events, rng);
+  check("...and so is op 2's b", a.playTicks === 7, `${a.playTicks}`);
+  check("...and op 2 mode 2 raises obj+0x1F8 bit 4",
+        (a.motionFlags & MotionFlag.TraceGround) !== 0,
+        `0x${a.motionFlags.toString(16)}`);
+  const want = new Rng(4).int(10);
+  ResetGameGlobals();
+  SetGameTables(JETTY_CHARS, undefined, undefined, { "12288": {
+    charType: 1, removePath: 100, removeFrame: 65, flags2: 2, motion: 900,
+    phase: -1, cmds: [] } });
+  const seeded = ActorSpawn(0x3000, SpawnClass.ScriptedHumanoid, 1, "seed",
+                            { visible: true }, new Rng(4));
+  check("a phase of -1 is rand() % 10, drawn from the spawn's generator",
+        seeded.playTicks === want, `${seeded.playTicks} want ${want}`);
+  check("...and blk+2 == 2 raises bit 4 at the Init",
+        (seeded.motionFlags & MotionFlag.TraceGround) !== 0);
+}
+
+console.log("\nclass 0x25, op 17's other four modes:");
+{
+  // Mode 1, `ScriptedHumanoidLaunchAndDrop` (0x00484EA0): sub 0 seeds
+  // vel = (x - 231.5, 20) and falls through into sub 1, which steps a growing
+  // gravity of 0.027222222 a frame. Stage 2 block 37's bystanders stand near
+  // x = 243.
+  const g = 0.027222221717238426;
+  const up = jettyScene([
+    { op: HumanoidOp.Handoff, mode: 1, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ], vec3(243, 23, -2230));
+  up.frame();
+  check("mode 1 ends the VM's frame and moves nothing yet",
+        up.a.pos.y === 23 && up.a.pos.x === 243, `y ${up.a.pos.y}`);
+  up.frame();
+  check("...then launches: up 20 less one step of gravity, out 11.5 along x",
+        Math.abs(up.a.pos.y - (23 + 20 - g)) < 1e-9
+        && Math.abs(up.a.pos.x - (243 + 11.5)) < 1e-9,
+        `y ${up.a.pos.y} x ${up.a.pos.x}`);
+  // The routine's recurrence on its own, from the constants: step s is the
+  // frame s + 1 (frame 1 was the hand-off), and the actor dies on the first
+  // step that leaves y below 0.
+  let y = 23, vy = 20, acc = 0, step = 0;
+  do { acc -= g; vy += acc; y += vy; step++; } while (y >= 0);
+  let frames = 2;
+  while (!up.a.dead && frames < 400) { up.frame(); frames++; }
+  check("...and dies on the frame it first falls below y = 0",
+        up.a.dead && frames === step + 1,
+        `died on frame ${frames}, expected ${step + 1}`);
+
+  // Mode 4, `ScriptedHumanoidFallTimed` (0x00484F90): vel.y = -0.40833333
+  // at the hand-off, then the same gravity step, and death past 200 frames.
+  const t = jettyScene([
+    { op: HumanoidOp.Handoff, mode: 4, a: 0, b: 0 },
+    { op: HumanoidOp.End, mode: 0, a: 0, b: 0 },
+  ], vec3(1632, 500, -9774.9));
+  t.frame();
+  check("mode 4 sets the opening fall speed",
+        Math.abs(t.a.vel.y - -0.40833333134651184) < 1e-12, `${t.a.vel.y}`);
+  t.frame();
+  check("...and falls by it with one gravity step",
+        Math.abs(t.a.pos.y - (500 - 0.40833333134651184 - g)) < 1e-9,
+        `y ${t.a.pos.y}`);
+  for (let i = 0; i < 199; i++) t.frame();
+  check("...alive through its 200th frame", !t.a.dead);
+  t.frame();
+  check("...and gone on the 201st", t.a.dead && !t.a.visible);
+
+  // Modes 2 and 3 spawn a sprite and stay in the VM: the next command runs in
+  // the same frame. An unknown mode steps past and ends the frame.
+  const s = jettyScene([
+    { op: HumanoidOp.Handoff, mode: 2, a: 0, b: 0 },
+    { op: HumanoidOp.Handoff, mode: 3, a: 0, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 7, f1: 0 },
+    { op: HumanoidOp.Handoff, mode: 7, a: 0, b: 0 },
+    { op: HumanoidOp.SetPos, mode: 1, a: 0, b: 0, f0: 9, f1: 0 },
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  s.frame();
+  const spark = G.g_sprite_effects.find((e) => e.kind === 0x34);
+  const plume = G.g_sprite_effects.find((e) => e.kind === 0x41);
+  check("mode 2 puts kind 0x34 at (-999.5, 3.24, -1296.2), yaw 0xC000",
+        !!spark && spark.pos.x === -999.5
+        && Math.abs(spark.pos.y - 3.24) < 1e-6
+        && Math.abs(spark.pos.z - -1296.2) < 1e-4 && spark.yaw === 0xc000,
+        JSON.stringify(spark));
+  check("mode 3 puts kind 0x41 at (-1264, -24.9, -1353) outside block 9",
+        !!plume && plume.pos.x === -1264 && plume.pos.z === -1353
+        && Math.abs(plume.pos.y - -24.9) < 1e-6, JSON.stringify(plume));
+  check("...both run on into the next command, and mode 7 ends the frame",
+        s.a.pos.y === 7, `y ${s.a.pos.y}`);
+  s.frame();
+  check("...stepped past, so the next frame runs what follows it",
+        s.a.pos.y === 9, `y ${s.a.pos.y}`);
+}
+
+console.log("\nclass 0x25, the removal trigger gives the hit slot back:");
+{
+  const { a, frame } = jettyScene([
+    { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
+  ]);
+  const slot = a.hitSlot;
+  frame();
+  G.g_active_cam_path = 100;
+  G.g_cam_path_frame = 65;
+  frame();
+  check("the removal kills it and frees `g_hit_slots`",
+        a.dead && slot !== HIT_SLOT_NONE && a.hitSlot === HIT_SLOT_NONE
+        && G.g_hit_slots[slot] === HIT_SLOT_NONE,
+        `dead ${a.dead} slot ${slot} now ${a.hitSlot}`);
+}
+
 console.log("\nclass 0x25, an unbaked clip parks the VM (B13's mechanism):");
 {
   // The bug as reported was two stage-2 humanoids frozen on one frame. The
@@ -6701,7 +6972,7 @@ console.log("\nclass 0x25, an unbaked clip parks the VM (B13's mechanism):");
     hFrame(ok.a, ok.events, rng);
   }
   check("a baked clip reaches its last frame and the program ends",
-        ok.a.hum.pc === -1 && ok.a.frozen === 1,
+        ok.a.hum.routine === HumanoidRoutine.Idle && ok.a.frozen === 1,
         `pc ${ok.a.hum.pc} frozen ${ok.a.frozen}`);
 }
 
@@ -7375,6 +7646,263 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
     check("...and still gives its counters back",
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
+  }
+
+  // ...and **both slots**, which the port's arm left held. `0x00451C5B`..
+  // `0x00451C7F`: `if ((s8)obj+0x120 != -1) ReleaseCameraEnemySlot(obj)` and
+  // `if (obj+0x3C != -1) ActorFreeHitSlot(obj)` (`FUN_004092D0`), before the
+  // state is set to `RescueTargetAbandonedState`. The hit slot is the one the
+  // build claimed; the camera slot is written here by hand, because nothing
+  // this fixture runs deals one -- what is asserted is the release.
+  {
+    const { a, events, rng } = rescueScene();
+    a.rescue.state = RescueTargetState.Held;
+    const hit = a.hitSlot;
+    a.cameraSlot = 2;
+    G.g_enemy_slots[2].occupied = 1;
+    G.g_enemy_slots[2].at = a.at;
+    G.g_cam_path_frame = 0x122;
+    rFrame(a, events, rng);
+    check("abandoned at 0x122, it frees the hit slot the build claimed",
+          hit !== HIT_SLOT_NONE && a.hitSlot === HIT_SLOT_NONE
+          && G.g_hit_slots[hit] === HIT_SLOT_NONE,
+          `slot ${hit} -> ${a.hitSlot}, table ${G.g_hit_slots[hit]}`);
+    check("...and the camera slot it held",
+          a.cameraSlot === -1 && G.g_enemy_slots[2].occupied === 0,
+          `slot ${a.cameraSlot}, occupied ${G.g_enemy_slots[2].occupied}`);
+    check("...and is abandoned, not freed",
+          (a.rescue.state as RescueTargetState) === RescueTargetState.Abandoned,
+          String(a.rescue.state));
+  }
+}
+
+/**
+ * A replay does not rebuild a rescue target it has played past.
+ *
+ * The user's report: stage 2's first civilian after the burnt-out car,
+ * `0x6830` at block 11 step 2, "sits there sobbing still even after both
+ * enemies are killed". Played from the stage's entry she does not; from the
+ * address the page writes into its URL -- which is where every reload lands
+ * -- she does, every time. The seek replayed block 0, where class 0x21's
+ * rescue target `0x7D0` is spawned, and left its marker listed, so the
+ * landing **rebuilt** it: `RescueTargetInit` counted it into both enemy
+ * counters, and it sat in `RescueTargetRideInState` for good, because that
+ * state hands over only at camera frame `>= 0xBE` and block 11 step 2's shot
+ * never gets past 30 until the room is clear. Her rescue block waits on
+ * camera cue `(70, 100)`, which the script plays only after
+ * `wait_enemies_alive 0` -- so she sobbed in front of two dead captors with
+ * `g_enemies_alive` at 1 and no enemy on screen.
+ *
+ * The engine is never in that state: by block 11 step 2 the target has been
+ * abandoned at path `0x39` frame `0x122` and despawned at `0x181`, or
+ * rescued, or despawned on `g_script_flags[0]`. Each of those is a way out a
+ * replay can see, and `RescueTargetOutlivedByReplay` names them.
+ */
+console.log("\na replay does not rebuild a rescue target it has played past:");
+{
+  const RESCUE_AT = 0x7d0;
+  const rescueSpawn = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x09, name: "spawn_placed", cat: "spawn",
+    spawns: [{ at: RESCUE_AT, class: SpawnClass.RankScaledEnemy, flags: 0,
+               pos: [0, 0, 0], yaw_deg: 0, orient: [0, 0, 0], hp: 0,
+               desc_flags: 0 }],
+  });
+  const crashShot = (i: number, start: number, end: number) => ({
+    i, at: 0x100 + i * 8, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 0x39, 0],
+    start, end, slot: 0x39, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const shotDone = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x40, name: "wait_queued_events_done",
+    cat: "wait", blocks_on: "queued events pending == 0",
+  });
+  const raiseFlag0 = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x48, name: "set_script_flag", cat: "flow",
+    arg: 0, flag: 0,
+  });
+  const frames = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x42, name: "wait_frames", cat: "wait", arg: 1,
+    blocks_on: "arg frames elapsed",
+  });
+  const block = (index: number, ops: unknown[], route: unknown) => ({
+    index, at: index * 0x1000, route, steps: [{ index: 0, at: 0, ops }],
+  });
+  const END = { kind: "end", next: [-1, -1, -1] };
+  const STOP = { kind: "goto", next: [-1, -1, -1] };
+  const mk = (blocks: unknown[]) => ({
+    scene: 1, stage: 2, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: blocks.map((b) => (b as { route: unknown }).route),
+    regions: [], cam_slots_used: [0x39], warnings: [], blocks,
+  }) as unknown as ScriptJson;
+  const walkerHost = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    cameraFree: () => null, scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  const fresh = () => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetCameraPaths(StillPath(0x39, vec3(0, 10, 0), vec3(0, 10, -100)));
+  };
+  const listed = (w: Walker) => w.spawns.some((s) => s.at === RESCUE_AT);
+  const at = (w: Walker) => `at ${w.block}/${w.step}/${w.opIndex}, `
+    + `spawns ${w.spawns.map((s) => s.at.toString(16)).join(",")}`;
+
+  // The shipped road, in miniature: block 0 spawns it and plays the crash
+  // shot's last stretch on path 0x39 -- stage 2 plays `290..405` in block 11
+  // step 1 -- and the route out is block 0's own `{11, 1}`.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), crashShot(1, 290, 405), shotDone(2),
+                frames(3)], END),
+    ]), walkerHost);
+    seekTo(w, 0, 0, 2);
+    check("a seek that lands before the crash shot has run keeps it listed",
+          listed(w), at(w));
+    seekTo(w, 0, 0, 3);
+    check("**one past the shot's end retires it**: abandoned at 0x122, "
+          + "despawned at 0x181",
+          !listed(w) && G.g_active_cam_path === 0x39
+          && G.g_cam_path_frame >= 0x181,
+          `${at(w)}, path ${G.g_active_cam_path} frame ${G.g_cam_path_frame}`);
+  }
+  // A shot that stops short of 0x181 is not the despawn: an abandoned
+  // target rides on, and one rebuilt there finds 0x122 for itself.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), crashShot(1, 290, 0x180), shotDone(2),
+                frames(3)], END),
+    ]), walkerHost);
+    seekTo(w, 0, 0, 3);
+    check("...and a crash shot that ends at 0x180 does not",
+          listed(w), `${at(w)}, frame ${G.g_cam_path_frame}`);
+  }
+  // `g_script_flags[0]`: stage 2 raises it at 3/3/10 and 11/2/27, and every
+  // state past the ride-in despawns on it.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), raiseFlag0(1), frames(2)], END),
+    ]), walkerHost);
+    seekTo(w, 0, 0, 1);
+    check("a seek that stops before flag 0 keeps it", listed(w), at(w));
+    seekTo(w, 0, 0, 2);
+    check("...and one past `set_script_flag 0` retires it",
+          !listed(w) && (G.g_script_flags[0] ?? 0) === 1, at(w));
+  }
+  // The route: arm 1 out of its own block is its own rescue, the only writer
+  // of `g_script_branch_var = 1` there (L45). Arm 0 is the road on which it
+  // is still held, and still counted, until the crash shot.
+  {
+    fresh();
+    const blocks = [
+      block(0, [rescueSpawn(0), frames(1)],
+            { kind: "branch", next: [1, 2, -1] }),
+      // A `goto` to nothing rather than `END`: a route of any other kind
+      // falls through to the next block, and block 1 would reach block 2.
+      block(1, [frames(0), frames(1)], STOP),
+      block(2, [frames(0), frames(1)], STOP),
+    ];
+    // A route transition enters a block at step 1 (`goToBlock`), so each
+    // block here carries two steps and the seek lands on the second.
+    for (const b of blocks.slice(1)) {
+      (b as { steps: unknown[] }).steps.push({ index: 1, at: 0,
+                                               ops: [frames(0), frames(1)] });
+    }
+    const w = new Walker(mk(blocks), walkerHost);
+    seekTo(w, 1, 1, 1);
+    check("a seek down arm 0 (not rescued) keeps it listed",
+          w.block === 1 && listed(w), at(w));
+    seekTo(w, 2, 1, 1);
+    check("...and a seek down arm 1, its own rescue, retires it",
+          w.block === 2 && !listed(w), at(w));
+  }
+  // The gate half, for both classes: every class whose `Init` counts is gone
+  // on the far side of a room gate the replay steps over. Class 0x18's rider
+  // is class 0x30 on a carrier (`CarriedZombieInit18`, `FUN_0045CD60`), and
+  // the replay's list lacked it: stage 3's `0xADC`, placed at 0/6/6, came
+  // back past `1/1/40` and held every gate after, the boat hostage's rescue
+  // among them.
+  {
+    const RIDER_AT = 0xadc;
+    const riderSpawn = (i: number) => ({
+      i, at: 0x100 + i * 8, op: 0x09, name: "spawn_placed", cat: "spawn",
+      spawns: [{ at: RIDER_AT, class: SpawnClass.CarriedZombie, flags: 0,
+                 pos: [5, -6, -14], yaw_deg: 90, orient: [0, 0x4000, 0],
+                 hp: 130, desc_flags: 0 }],
+    });
+    const roomGate = (i: number) => ({
+      i, at: 0x100 + i * 8, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+      arg: 0, blocks_on: "enemies alive <= arg",
+    });
+    for (const [what, spawn, spawnAt] of [
+      ["class 0x18's rider", riderSpawn, RIDER_AT],
+      ["class 0x21's target", rescueSpawn, RESCUE_AT],
+    ] as const) {
+      fresh();
+      const w = new Walker(mk([
+        block(0, [spawn(0), roomGate(1), frames(2)], END),
+      ]), walkerHost);
+      seekTo(w, 0, 0, 1);
+      const before = w.spawns.some((s) => s.at === spawnAt);
+      seekTo(w, 0, 0, 2);
+      check(`a room gate a replay steps over retires ${what}`,
+            before && !w.spawns.some((s) => s.at === spawnAt), at(w));
+    }
+  }
+  // ...and not two classes but **every class the game counts**
+  // (`ENEMY_CLASSES`): the replay's list is the script's, written from
+  // `spawns.md`, and it had fallen behind the game's twice. Class 0x46
+  // answers per record -- its scatter flight counts nothing -- so its record
+  // here is a swarm, sub-type 2, which `PlaceBats` counts member by member
+  // (`INC` `0x0042DB5D`/`0x0042DB64`; the dive's pair is `0x0042DF87`/`8E`).
+  {
+    const recAt = (cls: number) => 0x5000 + cls * 0x10;
+    SetGameTables({ ...CHARS, placements: [{
+      at: recAt(SpawnClass.Bat), class: SpawnClass.Bat, char_type: 0x1e,
+      motion: 0, hp: 0, body_condition: 0, initial_state: 0,
+      attack_state: 0, ring_set: 0, yaw: 0,
+      class46: { subtype: 2, group: 0, member: 0 },
+    }] } as unknown as CharactersJson, undefined, undefined, undefined);
+    const left: string[] = [];
+    for (const cls of ENEMY_CLASSES) {
+      fresh();
+      const w = new Walker(mk([
+        block(0, [{
+          i: 0, at: 0x100, op: 0x09, name: "spawn_placed", cat: "spawn",
+          spawns: [{ at: recAt(cls), class: cls, flags: 0, pos: [0, 0, 0],
+                     yaw_deg: 0, orient: [0, 0, 0], hp: 1, desc_flags: 0 }],
+        }, {
+          i: 1, at: 0x108, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+          arg: 0, blocks_on: "enemies alive <= arg",
+        }, frames(2)], END),
+      ]), walkerHost);
+      seekTo(w, 0, 0, 2);
+      if (w.spawns.some((s) => s.at === recAt(cls))) {
+        left.push(`0x${cls.toString(16)}`);
+      }
+    }
+    SetGameTables(CHARS, undefined, undefined, undefined);
+    check("every class the game counts is gone past a gate a replay steps "
+          + "over", left.length === 0, `still listed: ${left.join(", ")}`);
+  }
+  // Replay only: in play the target leaves through its own states.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), raiseFlag0(1), frames(2)], END),
+    ]), walkerHost);
+    for (let i = 0; i < 8; i++) WalkerCameraFrame(w);
+    check("played rather than replayed, the marker stands -- the actor goes "
+          + "by itself", listed(w) && (G.g_script_flags[0] ?? 0) === 1,
+          at(w));
   }
 }
 
@@ -19104,6 +19632,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
+    [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -30976,9 +31505,180 @@ console.log("class 0x30 states 46-48, a second reading of main's port:");
         late.state === ZombieState.LeapOffCarrierForward,
         `${ZombieState[late.state] ?? late.state}`);
 
+  // ...and the one that held does not hold for good: `ZombieStateHoldOnCarrier`
+  // (`FUN_0045CFC0`) has its own exit, past the `MatrixStackPop` at
+  // `0x0045D0AF` the decompiler stops at (L35) -- `g_active_cam_path ==
+  // tail+0x0C && g_cam_path_frame == tail+0x0E` sends it to `(s8)tail[3]`.
+  const held = ActorSpawn(0xa176, SpawnClass.CarriedZombie, 1, "rider3", {
+    pos: vec3(-1, 3, 7.5),
+    class18: { from_state: 47, cue_path: 78, cue_frame: 630 },
+  }, rng) as ZombieActor;
+  held.attackState = 47;
+  held.state = ZombieState.HoldOnCarrier;
+  held.sub = 0;
+  G.g_cam_path_frame = 629;
+  CarriedZombieUpdate18(held, fr());
+  check("a holding rider is still aboard the frame before its cue",
+        held.state === ZombieState.HoldOnCarrier && held.sub === 1
+        && held.carrierAt === boat.at,
+        `${ZombieState[held.state] ?? held.state}/${held.sub}`);
+  G.g_cam_path_frame = 630;
+  CarriedZombieUpdate18(held, fr());
+  check("...and on camera path 78's frame 630 it takes its attack state, 47 "
+        + "(state 46 is not a dead end)",
+        held.state === ZombieState.LeapOffCarrierForward && held.sub === 0,
+        `${ZombieState[held.state] ?? held.state}/${held.sub}`);
+
   function CarrierPostFrame(a: ZombieActor): void {
     CarriedZombieUpdate18(a, fr());
   }
+}
+
+console.log("stage 3 block 0's boat, and the riders it carries to the wall:");
+{
+  // The report: "the zombies on the boat don't seem to die when shot, and
+  // when the boat explodes they still stay alive". Three faults, all read
+  // from the exe, and this drives each from the reset the page runs.
+  //
+  // **1. The boat is not in the shot test.** `SpawnFromDescriptorSmall`
+  // (`FUN_00408BC0`) hands the record's flags word to `ActorInitFlags`
+  // (`FUN_00408970`, `OR ECX, 1; MOV [EAX+0x34], ECX`), and every class-0x13
+  // record in the game carries `0x8000`; `RegisterForShotTest`
+  // (`FUN_00405160`) refuses it at `0x00405168`. The spawn arm dropped the
+  // word, so the boat's 40-unit sphere (`CarrierPropRoutine1` state 0) sat
+  // round its origin in the render pick and took the pulls aimed at the
+  // riders behind it.
+  const rng = new Rng(0xc00);
+  scene(0, rng);
+  const BOAT = 3184;
+  SetGameTables({
+    ...CHARS,
+    placements: [{
+      at: BOAT, class: 0x13, char_type: -1, motion: null, hp: 0,
+      init_flags: 0x8000, yaw: 57344,
+      class13: { slot: 6711, cam_path: 130, cam_frame: 170, scale: 1,
+                 behaviour: 8, selector: 1 },
+    }],
+  } as unknown as CharactersJson);
+  SpawnSlotActors([{ at: BOAT, class: SpawnClass.ScriptedProp,
+                     pos: [-1055, -26.25, -1620] as [number, number, number] }],
+                  rng);
+  const boat = ActorByAt(BOAT);
+  if (!boat) throw new Error("no boat");
+  check("stage 3's boat is built with its record's flags word: 0x8000 | 1",
+        boat.flags === 0x8001, `0x${boat.flags.toString(16)}`);
+  check("...and g_civilian_carrier names it", G.g_civilian_carrier === BOAT);
+  // A quarter turn, so a wrong frame for the rider shows (L48).
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: () => ({ x: -1070, y: -17, z: -2900, pitch: 0, yaw: 0x4000,
+                         roll: 0 }),
+  };
+  G.g_active_cam_path = 124;
+  G.g_civilians_alive = 0;             // the civilian is dead: it runs past
+
+  // The captor, stage 3's evt 0xC00: class 0x18, attack state 38 with mode 2
+  // (turn toward the point and never retire by itself), and no camera cue.
+  const victim = ActorSpawn(0xc01, SpawnClass.Zombie, 1, "its target", {},
+                            rng);
+  const cap = ActorSpawn(0xc00, SpawnClass.CarriedZombie, 1, "captor", {
+    pos: vec3(0, -6, -10), initialState: 38, attackState: 38,
+    flags: 0x60400,
+    script: { target: null, attack: { state: 38, entries: [], head: {
+      point: [-10, -6, -10] as [number, number, number], motion: 10,
+      frame: 0, loops: 1, mode: 2 } } },
+    class18: { from_state: 38, cue_path: -1, cue_frame: -1 },
+  }, rng) as ZombieActor;
+  cap.visible = boat.visible = true;
+  cap.targetAt = victim.at;
+  check("the captor rides the boat", cap.carrierAt === BOAT);
+  const slot = cap.hitSlot;
+
+  GameUpdate(1 / 60, host, rng);
+  check("one frame in, the boat has seated its 40-unit radius and is still "
+        + "out of the shot test",
+        boat.hitRadius === 40 && (boat.flags & ActorFlag.NoShotTest) !== 0,
+        `r ${boat.hitRadius} flags 0x${boat.flags.toString(16)}`);
+  const listed = G.g_shot_test_list.length;
+  RegisterForShotTest(boat, NULL_HOST);
+  check("...which `RegisterForShotTest` refuses (`TEST AH, 0x80`)",
+        G.g_shot_test_list.length === listed);
+
+  // **2. The boat's strike ends its captor.** `CarrierPropRoutine1` runs past
+  // its mooring with no civilian alive and raises `obj+0x34 |= 0x400000` at
+  // path frame `0x55A`; `ZombieStateRetireOffScreen` (`FUN_0045B7B0`) reads
+  // it off the carrier at `0x0045B9A5` and calls `ZombieRetireAndCredit`
+  // (`FUN_0045BA40`). The port had neither the arm nor a faithful retire.
+  const alive = G.g_enemies_alive;
+  const present = G.g_enemies_present;
+  let n = 0;
+  let aboard = true;
+  // The ride starts at the camera's frame and counts one a frame; with no
+  // path playing here that is 0, so this is the whole ride to `0x55A`.
+  while (!(boat.flags & CARRIER_RIDERS_DONE_BIT) && n++ < 0x600) {
+    aboard &&= cap.state === ZombieState.RetireOffScreen && !cap.dead
+      && cap.carrierAt === BOAT;
+    GameUpdate(1 / 60, host, rng);
+  }
+  check("the captor holds in state 38, aboard and alive, while the boat runs "
+        + "past", aboard);
+  check("the boat raises 0x400000 as it runs past its mooring, at path frame "
+        + "0x55A",
+        (boat.flags & CARRIER_RIDERS_DONE_BIT) !== 0
+        && (boat as unknown as { prop13: { pathFrame: number } })
+          .prop13.pathFrame === 0x55a + 1, `${n} frames`);
+  check("...and on that same frame its captor retires: dead, sub 4, "
+        + "0x4008001 on its flags",
+        cap.dead && cap.sub === 4
+        && (cap.flags & 0x4008001) === 0x4008001,
+        `dead ${cap.dead} sub ${cap.sub} 0x${cap.flags.toString(16)}`);
+  check("...credited to g_active_player in a one-player game",
+        G.g_players_in_play === 1 && cap.killedBy === G.g_active_player,
+        `in play ${G.g_players_in_play} credit ${cap.killedBy} active `
+        + `${G.g_active_player}`);
+  check("...with both counts given back on the spot",
+        G.g_enemies_alive === alive - 1 && G.g_enemies_present === present - 1,
+        `${alive} -> ${G.g_enemies_alive}, ${present} -> `
+        + `${G.g_enemies_present}`);
+  check("...its hit slot freed",
+        slot === HIT_SLOT_NONE || G.g_hit_slots[slot] === HIT_SLOT_NONE,
+        `slot ${slot}`);
+  check("...and the plain zombie update back (no longer a rider)",
+        cap.carrierAt === -1);
+  GameUpdate(1 / 60, host, rng);
+  check("the next frame it is gone", cap.despawned);
+
+  // **3. A holding rider leaps on its cue.** Stage 3's `0xADC` (attack state
+  // 48, cue path 124 frame 1080) finishes its maul early and holds in 46;
+  // `ZombieStateHoldOnCarrier`'s exit (`0x0045D0B4`) sends it to 48 on the
+  // frame the camera reaches 1080 -- well before the boat strikes.
+  const r = ActorSpawn(0xadc, SpawnClass.CarriedZombie, 5, "rider", {
+    pos: vec3(5, -6, -14), initialState: 46, attackState: 48,
+    flags: 0x60400,
+    class18: { from_state: 48, cue_path: 124, cue_frame: 1080 },
+  }, rng) as ZombieActor;
+  const frame: ClassFrame = { dt: 1 / 60, rng, host };
+  r.state = ZombieState.HoldOnCarrier;
+  r.sub = 0;
+  G.g_cam_path_frame = 1079;
+  CarriedZombieUpdate18(r, frame);
+  check("the rider holds on the boat the frame before its cue",
+        r.state === ZombieState.HoldOnCarrier && r.sub === 1,
+        `${ZombieState[r.state] ?? r.state}/${r.sub}`);
+  G.g_cam_path_frame = 1080;
+  CarriedZombieUpdate18(r, frame);
+  check("...and at camera path 124's frame 1080 it goes to its attack state, "
+        + "48",
+        r.state === ZombieState.LeapOffCarrierAtMark && r.sub === 0,
+        `${ZombieState[r.state] ?? r.state}/${r.sub}`);
+  r.state = ZombieState.HoldOnCarrier;
+  r.sub = 1;
+  G.g_cam_path_frame = 1081;
+  CarriedZombieUpdate18(r, frame);
+  check("...on that frame and no other: the test is `==`, so one past it "
+        + "holds",
+        r.state === ZombieState.HoldOnCarrier,
+        `${ZombieState[r.state] ?? r.state}`);
 }
 
 {
@@ -35013,6 +35713,132 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
         JSON.stringify(resolved));
   T.coli = null;
   SetGameTables(CHARS);
+}
+
+// -- class 0x28: stage 1's two burning cars, thrown once ---------------------
+
+console.log("\nclass 0x28 -- held on its route until cp 0x2F, thrown once, "
+            + "killed:");
+{
+  // Stage 1 blocks 5, 11 and 14 `spawn_placed` two class-0x28 objects,
+  // `obj+0x11C` 0 and 1, that `PathRidingPropUpdate` (`FUN_00432610`) seats
+  // on `op_` slots 0x145 and 0x146 at the frames `g_class28_route_table`
+  // (`0x00589AE0`) freezes them on, 671 and 667, and throws along the rest
+  // of the path the frame camera path 0x2F reaches that frame; it kills them
+  // once `g_cam_path_frame` reaches `g_cam_path_length[slot]`, 725 and 765.
+  //
+  // The port had no class 0x28: `render/rigs.ts` drew the path at
+  // `min(len, camera frame)` of whatever camera was playing, so the car slid
+  // along the extrapolated path before the throw and was thrown again by
+  // every later camera move past frame 671 -- the user's "start in the wrong
+  // place" and "repeat their arc". Driven here from the director's entry for
+  // a walker spawn, `SpawnSlotActor`, and `GameUpdate`; the path stub
+  // answers with the frame it was asked for in `x` and the slot in `y`, so
+  // the pose says which evaluation made it.
+  const rng = new Rng(28);
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(CHARS);
+  const asked: [number, number][] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => {
+      asked.push([slot, frame]);
+      return { x: frame, y: slot, z: -frame, pitch: 0, yaw: frame * 16,
+               roll: 0 };
+    },
+  };
+  const spawn = (at: number, hp: number) => ({
+    at, class: 0x28, hp, pos: [0, 0, 0] as [number, number, number],
+    orient: [0, 0, 0] as [number, number, number], flags: 0,
+  });
+  const listed = [spawn(24472, 0), spawn(24512, 1)];
+  const cars = () => G.g_object_list.filter(
+    (o) => o.cls === (0x28 as SpawnClass) && !o.despawned);
+  const car = (at: number) => cars().find((o) => o.at === at);
+  const frame = (cam: number, f: number) => {
+    G.g_active_cam_path = cam;
+    G.g_cam_path_frame = f;
+    for (const sp of listed) SpawnSlotActor(sp, rng);
+    GameUpdate(1 / 60, host, rng);
+  };
+
+  // The boss block's arrival camera, well before the throw.
+  frame(0x2f, 121);
+  check("a class-0x28 spawn record builds a class-0x28 actor, one per spawn",
+        cars().length === 2 && car(24472)?.hp === 0 && car(24512)?.hp === 1,
+        cars().map((o) => `${o.at}:${o.hp}`).join(","));
+  check("its first frame seats it on its route at the table's freeze frame, "
+        + "not the camera's",
+        car(24472)?.pos.x === 671 && car(24472)?.pos.y === 0x145
+        && car(24512)?.pos.x === 667 && car(24512)?.pos.y === 0x146,
+        JSON.stringify(cars().map((o) => o.pos)));
+  // Any camera, any frame: nothing moves it until cp 0x2F reaches the freeze.
+  asked.length = 0;
+  for (const [cam, f] of [[0x2f, 400], [0x2f, 590], [0x32, 700], [0x32, 720],
+                          [0x31, 690], [0x2f, 666]] as const) {
+    frame(cam, f);
+  }
+  check("...and holds it there on every camera until cp 0x2F reaches it -- "
+        + "another camera's frame 700 throws nothing",
+        car(24472)?.pos.x === 671 && car(24512)?.pos.x === 667
+        && asked.length === 0,
+        `${car(24472)?.pos.x} ${car(24512)?.pos.x} asked ${asked.length}`);
+  frame(0x2f, 667);
+  check("cp 0x2F frame 667 throws route 1 (freeze 667) and not route 0 (671)",
+        car(24512)?.sub === 2 && car(24512)?.pos.x === 667
+        && car(24472)?.sub === 1,
+        `${car(24512)?.sub} ${car(24472)?.sub}`);
+  frame(0x2f, 671);
+  frame(0x2f, 700);
+  check("once thrown, the pose is the path at g_cam_path_frame",
+        car(24472)?.pos.x === 700 && car(24472)?.pos.z === -700
+        && car(24472)?.yaw === 700 * 16 && car(24512)?.pos.x === 700,
+        `${car(24472)?.pos.x} ${car(24512)?.pos.x}`);
+  // Thrown, the pose follows whichever camera is playing -- no camera test.
+  frame(0x32, 710);
+  check("...whichever camera is playing (the kill and the ride have no "
+        + "camera test)", car(24472)?.pos.x === 710,
+        `${car(24472)?.pos.x}`);
+  frame(0x2f, 725);
+  check("route 0 is killed on g_cam_path_length[0x145], 725",
+        car(24472) === undefined && car(24512) !== undefined,
+        cars().map((o) => o.at).join(","));
+  frame(0x2f, 765);
+  check("...and route 1 on g_cam_path_length[0x146], 765",
+        cars().length === 0, cars().map((o) => o.at).join(","));
+  // The post-fight cutscene: cp 50 runs 0..680 and 681..950 while the
+  // script still lists both spawns. Nothing is rebuilt and nothing is thrown.
+  asked.length = 0;
+  for (let f = 660; f <= 730; f += 5) frame(0x32, f);
+  check("a later camera through frames 660..730 plays no throw: the pool "
+        + "holds no class 0x28 and nothing evaluated a path",
+        cars().length === 0 && asked.length === 0,
+        `${cars().length} cars, ${asked.length} evaluations`);
+
+  // `g_app_state` 10's arm: the literal pose, and its own handler.
+  const mod = await import("../src/game/class28").catch(() => null);
+  check("class 0x28's module exists", mod !== null);
+  if (mod) {
+    ResetGameGlobals();
+    const a = ActorSpawn(24512, 0x28 as SpawnClass, -1, "fixed",
+                         { hp: 1 }, rng);
+    G.g_app_state = 10;
+    G.g_active_cam_path = 7;
+    G.g_cam_path_frame = 0;
+    mod.PathRidingPropUpdate(a as never, { dt: 1 / 60, rng,
+                                           host });
+    check("in g_app_state 10 the pose is g_class28_fixed_poses[1], as words",
+          Math.abs(a.pos.x - -1021.8939819335938) < 1e-9
+          && Math.abs(a.pos.y - 1.1816699504852295) < 1e-9
+          && a.pitch === -2607 && a.yaw === 0x8000 && a.roll === -0x4000,
+          `${a.pos.x},${a.pos.y},${a.pos.z} ${a.pitch},${a.yaw},${a.roll}`);
+    G.g_active_cam_path = 8;
+    mod.PathRidingPropFixedPoseUpdate(a as never);
+    check("...and PathRidingPropFixedPoseUpdate kills it on cp 8",
+          a.despawned === true);
+    ResetGameGlobals();
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

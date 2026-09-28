@@ -146,10 +146,11 @@ import { G, PlayerState } from "../globals";
 import { CameraBlockEye, CameraBlockYaw } from "../camera/view";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
+  type SpawnRecord,
 } from "../registry";
 import { ActorBuildSkinnedModel, ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
-import { CharacterTypeOf, MotionAuthoredFrame, MotionOf } from "../tables";
+import { CharacterTypeOf, MotionAuthoredFrame, MotionOf, T } from "../tables";
 import type { Vec3 } from "../vec";
 import { SpawnBatSplash } from "./splash";
 import { BatState, BatSubtype, type BatTail } from "./state";
@@ -1367,9 +1368,33 @@ export function BatUpdate(obj: Actor, f: ClassFrame): void {
   else BatDiveUpdate(obj, f);
 }
 
+/**
+ * `[port-only]` -- a replay's question, `ClassHandler.countsForEnemyGate`:
+ * does the flight this record places count into the enemy counters, and so
+ * go with the enemies a room gate stepped over?
+ *
+ * Per record, because the answer is the sub-type's. `PlaceBats`
+ * (`0x0042D9C0`) raises both counters for every dive member -- `INC word ptr
+ * [0x009C7006]` / `[0x009C904A]` at `0x0042DF87`/`0x0042DF8E` -- and for every
+ * swarm member at `0x0042DB5D`/`0x0042DB64`, and the scatter flight's
+ * twenty-five raise neither. `[proved]` The sub-type is the placement's
+ * (`desc+0x25`), which the bundle carries as `class46`.
+ *
+ * Without it a reload past stage 3's `2/4/32` rebuilt the swarm `0x31B8` --
+ * six counted bats the room had already shot down -- in front of every gate
+ * after it: the walker's list of gate-counted classes is per class, and this
+ * class counts for two of its three flights.
+ */
+export function BatCountsForEnemyGate(rec: SpawnRecord): boolean {
+  if (rec.at === undefined) return false;
+  const p = T.chars?.placements?.find((q) => q.at === rec.at)?.class46;
+  return !!p && p.subtype !== BatSubtype.Scatter;
+}
+
 const handler: ClassHandler = {
   init: PlaceBats,
   update: BatUpdate,
+  countsForEnemyGate: BatCountsForEnemyGate,
   updatesWhenDead: true,
   ownsShotResult: true,
   registersForShotTest: true,

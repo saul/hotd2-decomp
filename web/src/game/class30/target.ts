@@ -56,15 +56,17 @@ import type { GameHost } from "../host";
 import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleTowardFrames }
   from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
-import { ActorIsOnScreen } from "../combat/permits";
+import { ActorBoundsOnScreen } from "../combat/permits";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
   from "../combat/counts";
+import { CARRIER_RIDERS_DONE_BIT } from "../carrier";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import { CameraBlockYaw } from "../camera/view";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
+import { SpawnClass } from "../spawn_class";
 import { vec3 } from "../vec";
 import { PropStripKind, SpawnPropStripEffect } from "../effects/prop_strip";
 import { WADE_MOTION, ZombieWadeSplash } from "./splash";
@@ -525,6 +527,24 @@ export function ZombieStateTargetScriptWithFlag(obj: ZombieActor): void {
  * point, 3 retires it when the loop count runs out. It is how a captor leaves
  * the stage once its business with the civilian is done — walking out of frame
  * rather than charging the player.
+ *
+ * **And a rider leaves with its boat.** After the mode arm, whatever the mode
+ * (`0x0045B997`..`0x0045B9B7`):
+ *
+ * ```
+ * 0045b997  CMP dword ptr [ESI], 0x45cd90      ; the task is CarriedZombieUpdate18
+ * 0045b99f  MOV ECX, [ESI+0x13b0]              ; the carrier
+ * 0045b9a5  TEST dword ptr [ECX+0x34], 0x400000
+ * 0045b9ae  ZombieRetireAndCredit(obj)
+ * 0045b9b7  MOV dword ptr [ESI], 0x4533f0      ; *obj = EnemyZombieUpdate
+ * ```
+ *
+ * The bit is {@link CARRIER_RIDERS_DONE_BIT}, which stage 3's two boats raise
+ * as they run past their mooring and strike. So a captor still aboard when its
+ * boat hits the wall -- stage 3 block 0's `0xC00`, block 7's `0x71D0`, both
+ * class 0x18 with 38 as their attack state -- retires, credited, and is gone
+ * on its next frame. The port had no such arm, and both stood on the wreck
+ * holding their rooms open.
  */
 export function ZombieStateRetireOffScreen(obj: ZombieActor, host: GameHost,
                                            rng: Rng): void {
@@ -564,13 +584,10 @@ export function ZombieStateRetireOffScreen(obj: ZombieActor, host: GameHost,
     return;
   }
 
+  // Modes 0 and 1 (`0x0045B978`): `ActorBoundsOnScreen` (`FUN_0045CA60`),
+  // then the dead bit, then the retire.
   const retire = (): void => {
-    // [diverges] The engine asks `ActorBoundsOnScreen` (`FUN_0045CA60`), which
-    // pads the actor's view-space interval at `obj+0x10C`/`0x110` by its
-    // radius. The port has not read those two fields, so this asks
-    // `ActorIsOnScreen` (`FUN_00409C10`) about the tracked point instead — the
-    // same question about a point rather than a box.
-    if (!ActorIsOnScreen(obj, host) && !(obj.flags & ActorFlag.Dead)) {
+    if (!ActorBoundsOnScreen(obj, host) && !(obj.flags & ActorFlag.Dead)) {
       ZombieRetireAndCredit(obj, rng);
     }
   };
@@ -583,25 +600,59 @@ export function ZombieStateRetireOffScreen(obj: ZombieActor, host: GameHost,
     case 3: if (obj.zom.targetLoops === 0) ZombieRetireAndCredit(obj, rng); break;
     default: break;
   }
+  // `0x0045B997`: the rider's exit. `*obj == CarriedZombieUpdate18` is, in
+  // the port, a class-0x18 actor whose `carrierAt` still names its carrier --
+  // the step off and the two leaps clear it where the engine rewrites `*obj`.
+  // (`ZombieActor` types the class as 0x30; a rider is one by its update.)
+  if ((obj as Actor).cls === SpawnClass.CarriedZombie && obj.carrierAt >= 0) {
+    const carrier = ActorByAt(obj.carrierAt);
+    if (carrier && (carrier.flags & CARRIER_RIDERS_DONE_BIT)) {
+      ZombieRetireAndCredit(obj, rng);
+      // `*obj = EnemyZombieUpdate`, with no bake: the actor is gone on its
+      // next update (sub 4). See `Actor.carrierAt` for the one frame between.
+      obj.carrierAt = -1;
+    }
+  }
   reblend(obj);
 }
 
 /**
  * `ZombieRetireAndCredit` — `FUN_0045BA40`.
  *
- * `obj+0x34 |= 0x4008001`, then `obj+0x131C` takes the player the *civilian's*
- * `sub+0x6C` names — or a random one when that is `-1`. That byte is exactly
- * what `CivilianPruneDeadChildren` reads back to decide who is paid the 400,
- * so a captor that walks off screen still counts as dealt with.
+ * ```
+ * 0045ba4e  obj+0x34 |= 0x4008001
+ * 0045ba54  if (obj+0x1394) {                        ; the target
+ * 0045ba61      if (target sub+0x6C != -1) obj+0x131C = sub+0x6C
+ * 0045ba6d      else if (g_players_in_play == 1) obj+0x131C = g_active_player
+ * 0045ba85      else obj+0x131C = rand() % 2
+ *           }
+ * 0045ba9d  ReleaseEnemyAliveCount(obj); ReleaseEnemyPresentCount(obj)
+ * 0045baae  if (obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0
+ * 0045babe  sub = 4
+ * ```
+ *
+ * `obj+0x131C` is exactly what `CivilianPruneDeadChildren` reads back to
+ * decide who is paid the 400, so a captor that walks off screen still counts
+ * as dealt with. The port's copy drew the player with `rng.next() < 0.5`,
+ * skipped the one-player arm, and gave neither count nor the slot back --
+ * the counts fell a frame late, when `ActorDespawn` swept them.
  */
 export function ZombieRetireAndCredit(obj: ZombieActor, rng: Rng): void {
   obj.flags |= 0x4008001;
   const t = targetOf(obj);
   if (t) {
     const named = t.civ?.rescuePlayer ?? -1;
-    obj.killedBy = named === -1 ? (rng.next() < 0.5 ? 0 : 1) : named;
+    if (named !== -1) obj.killedBy = named;
+    else if (G.g_players_in_play === 1) obj.killedBy = G.g_active_player;
+    else obj.killedBy = rng.int(2);
   }
   obj.dead = true;
+  ReleaseEnemyAliveCount(obj);
+  ReleaseEnemyPresentCount(obj);
+  // The index against -1 and not `obj+0x38` bit `0x40`, and the index is
+  // left where it was -- `ZombieStateDragTarget`'s own copy of these lines
+  // says the same, and `ActorDespawn`'s release clears it.
+  if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
   obj.sub = 4;
 }
 

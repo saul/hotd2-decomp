@@ -2,9 +2,13 @@
  * Class 0x13 — **a script-driven prop**, and stage 3's arriving boat.
  *
  * The class is one asset slot drawn under a matrix, with a behaviour chosen
- * out of a ten-entry table. 23 spawns across stages 2, 3 and 4; five of them
- * take behaviour 0, `NoOpStub`, and are static scenery, and the other eighteen
- * take behaviour 8, which is an installer rather than a behaviour.
+ * out of a ten-entry table. 23 spawn instructions across stages 2, 3 and 4
+ * reach 15 descriptors: five of them (eight instructions, all stage 2's) take
+ * behaviour 0, `NoOpStub`, and are static scenery, and the other ten (fifteen
+ * instructions) take behaviour 8, which is an installer rather than a
+ * behaviour. This said "the other eighteen", counting descriptors on one side
+ * and instructions on the other. `trnevtbl.bin` holds a sixteenth descriptor,
+ * on behaviour 9 (`0x00445050`, unread).
  *
  * ```
  * ScriptedPropInit13 (FUN_0043FE10)
@@ -525,6 +529,13 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
  * The despawn cue first — `g_active_cam_path` and `g_cam_path_frame` both
  * equal to the pair the descriptor named — then the behaviour. The draw that
  * follows it in the engine is `render/slotmodels.ts`'s.
+ *
+ * The behaviour runs **before** the draw (`CALL [EDI]` at `0x0043FEC9`, the
+ * matrix from `0x0043FEDE`), so the record's angles are drawn only where the
+ * behaviour writes none: behaviour 0, and carrier selector 3 (`0x00440AD0`,
+ * which never stores to the object), both for life. Every other carrier
+ * routine falls from state 0 into {@link PropSeatOnObjectPath} on its first
+ * call, and its first draw is already on the path. `[proved]`
  */
 export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);

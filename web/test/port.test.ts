@@ -29323,5 +29323,52 @@ console.log("\na spawn record's three angles reach every slot actor:");
   SetGameTables(CHARS);
 }
 
+// ...and the other half: a carrier never draws them. `ScriptedPropUpdate13`
+// (`FUN_0043FE90`) calls the behaviour at `0x0043FEC9` and only then draws off
+// `obj+0x64/0x68/0x6C`, and every routine `CarrierPropSelectRoutine`
+// (`FUN_00440190`) installs, bar one, falls from state 0 into
+// `PropSeatOnObjectPath` (`FUN_00440130`) on that first call: 0 at
+// `0x0044028F`, 1 at `0x00440440`, 2 and 9 at `0x00440969`/`0x00440997` and
+// `0x004408E6`, 4 and 7 at `0x00440CE4`/`0x00440C7C`, 5 and 8 at
+// `0x004410B7`/`0x0044105C`, 6 at `0x00441430`. The one is selector 3,
+// `0x00440AD0`, which never stores to the object and so draws the record's
+// angles for life, as behaviour 0 does -- it is unported, and when it is not,
+// this loop expects exactly that of it.
+console.log("\na carrier seats itself before the first draw reads its angles:");
+{
+  const rng = new Rng(19);
+  scene(0, rng);
+  const onPath = { pitch: 0x0400, yaw: 0x0800, roll: 0x0c00 };
+  const record = { pitch: 0x1111, yaw: 0x2222, roll: 0x3333 };
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => ({ x: frame, y: slot, z: 0, ...onPath }),
+  };
+  // A camera path none of the routines turns on (`CarrierPropRoutine2` adds
+  // 0x8000 to the yaw on 0xBB and 0xBD) and a frame inside every ride.
+  G.g_active_cam_path = 1;
+  G.g_cam_path_frame = 200;
+  const got: string[] = [];
+  let ok = CARRIER_SELECTORS_PORTED.size > 0;
+  for (const sel of CARRIER_SELECTORS_PORTED) {
+    const prop = ActorSpawn(0x7200 + sel, SpawnClass.ScriptedProp, -1,
+                            `carrier ${sel}`, {
+      class13: { slot: 6711, cam_path: 134, cam_frame: 340, scale: 1,
+                 behaviour: 8, selector: sel },
+      ...record,
+    }, rng);
+    const spawned = prop.pitch === record.pitch && prop.yaw === record.yaw
+      && prop.roll === record.roll;
+    ScriptedPropUpdate13(prop, { eye: EYE, dt: 1 / 60, rng, host });
+    const want = sel === 3 ? record : onPath;
+    ok &&= spawned && prop.pitch === want.pitch && prop.yaw === want.yaw
+      && prop.roll === want.roll;
+    got.push(`${sel}:${prop.pitch.toString(16)}/${prop.yaw.toString(16)}/`
+             + `${prop.roll.toString(16)}`);
+  }
+  check("every ported carrier holds its op_ path's angles after its first "
+        + "update, not the record's", ok, got.join(" "));
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

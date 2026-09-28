@@ -1219,6 +1219,22 @@ six stages carry is the origin. `RigLayer` used to evaluate the path at frame 0
 for the fallback instance, which put stage 3's boat in the canal, parked, for
 the whole opening while a second boat sailed past it.
 
+**A rig whose object is a task exists only while the task does.** Stage 2's
+car (`obj_452320`, drawn by `St2CarDraw`, `FUN_00452320`) is a task that
+`St2CarSpawn` (`FUN_00452120`) allocates, and its only caller is
+`RescueTargetInit` (`FUN_00451720`) -- class 0x21's one spawn, block 0 step 2.
+`RigLayer` drew it from stage load at its exported root, the origin, which is
+Goldman's desk: the car stood in the office through the whole of step 1's
+cutscene (NEW-BUGS-2). The task is ported now, in `game/class21/car.ts` --
+the camera-path switch that picks its route, the park at the end of shot
+`0x39` or `0x3A`, and the `g_script_flags[0]` kill -- as plain records in
+`G.g_st2_cars`, and `RigLayer` draws one root per task that drew this frame at
+the pose it wrote (`TASK_POSED_ROUTINES`). Its routes in the rig data now only
+name the roots. What the draw does with the task's other words -- the
+post-crash asset set, the wheel spin, the second part's yaw once parked -- is
+not drawn yet: the exporter ships variant 0 only and no part rules for this
+rig.
+
 ## Which instructions the UI strikes through
 
 The script tree and the event feed **strike through any instruction the player
@@ -1448,7 +1464,7 @@ having its handler read.
 | Class | Rule | From |
 |---|---|---|
 | `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
-| `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
+| `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail — **plus every clip of the table** (`CAT_CLIPS`) | `FUN_00431250`; the table is a five-entry playlist per set (`g_cat_motions`), all inside `nya.bin`'s 762–773, and `CatMotionListUpdate` steps through it — see below |
 | `0x19` the stage-4 boss | motion **124** (`0x7C`), `boss4.bin` | `Boss4Init` (`FUN_004917E0`) stores it as a literal: `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E` |
 | `0x21` the rescue target | motion **998** (`0x3E6`), `zom.bin`, plus the freed clip **972** (`0x3CC`) | `RescueTargetInit` (`FUN_00451720`) stores it as a literal: `MOV dword ptr [EDI + 0x20], 0x3E6` (`c74720e6030000`) at `0x00451747`. See below — the missing row cost half of stage 2 |
 
@@ -4735,6 +4751,72 @@ by frame 3 of path 14. At the report's own URL a seek places the prop on the
 first live frame (as it does every class-0x41 prop, see above), so it plays its
 sixty frames over `cp_st2[14]` 0..59 and is gone at 60 -- where before it was
 still frame 0 at the end of the path.
+
+### The cat runs: class 0x53's playlist, and the clip that was never baked
+
+`?stage=2&original=1&mode=play&block=11&step=7&op=32&frame=1012` showed the
+cat in the corner of the room **not moving**, where the game has it run off
+screen. Two faults, one in each half, and either alone would have kept it
+still.
+
+**The port had no routine for it.** Class 0x53's module ported the trigger
+(sub-type 2, block 8) and nothing else; sub-types 0 and 1 -- three of the four
+spawns, block 11's among them -- had an empty update and looped whatever clip
+the spawn gave them. Their routine is `CatMotionListUpdate` (`FUN_00431340`,
+unnamed until now): a playlist of up to five clips per animation set in
+`g_cat_motions` (`0x00589A64`), each played the number of passes
+`g_cat_motion_repeats` (`0x00589AA0`) gives it, the next one **written straight
+into `obj+0x1B4`** when the counter reaches `play_length - 1`, and an
+`ActorDespawn` once the cat has lived 1000 frames. Nothing in it moves the cat:
+the last clip of four of the six sets is `0x2FD`, 12.7 units of root motion a
+pass, and `SkeletonApplyRootMotion` does the rest from the draw. Block 11's cat
+is set 5: `0x305` twice (it stands, 114 frames), `0x2FC` once (it creeps 2.6
+units, 78 frames), then `0x2FD` until it is taken away -- about 230 units,
+out through the bottom-left of the shot and past the camera.
+
+**And the bundle had no clip to run with.** The exporter's rule for class
+0x53 baked entry 0 of each spawn's set, so character type `0x1A` carried
+`0x2FC`, `0x2FF`, `0x301` and `0x305` and no `0x2FD` in any stage. The
+exporter now offers the whole table (`CAT_CLIPS`, data-only in
+`game/class53/records.ts`, the `class22/records.ts` arrangement), and all
+nine clips reach both stage-2 bundles. With the port fixed and the old bundle
+the cat steps on to `0x2FD`, finds no frames and no play length, and stops
+after 2.7 units -- which is exactly what `tools/animals.mjs`'s new travel
+assertion measures on the old export.
+
+**The rest of the class, read in the same pass and transcribed with it:**
+
+* `CatInit` raises `obj+0x38` bit 3 for sub-type 1 -- block 11's cat is drawn
+  through the scene light array, three instructions after the block turns the
+  scene lighting on -- writes the trigger's `obj+0x124 = 4.0`, and despawns an
+  arcade trigger with `ActorDespawn` rather than marking it dead.
+* `CatBranchTriggerUpdate` was the branch write and nothing else; it now cues
+  `0x2FA` after 200 frames, blends to `0x2FD` on the shot and runs until
+  `x < -478`, where it settles on `0x305`, and despawns on
+  `g_script_flags[0x83]`, which stage 2 raises in block 8 right after it frees
+  `cat.bin`. The port used to set `dead` on the shot, which dropped the cat
+  from the scene where the game shows it bolting. It also stops clearing
+  `obj+0x34` bit 3: the engine never does.
+* **The shot test is the engine's now** (`registersForShotTest`). The trigger
+  ends in `ActorRegisterOriginInViewSpace` (`FUN_0043F950`), whose
+  `RegisterForShotTest` call Ghidra's pseudocode drops after a `MatrixStackPop`
+  it believes does not return (`L35`), so it is hit as one 4.0 sphere about its
+  feet. The list cat never registers at all, and so cannot be shot -- the
+  renderer's bone-sphere pick used to let it be.
+
+Measured in the headless player (`HOTD2_BUNDLE` at a fresh export): at the
+report's URL the cat stands on `0x305` for 114 frames, creeps on `0x2FC`, runs
+on `0x2FD` from frame 192, and is gone at life 1001; before, it stood at
+`(-890, -1015)` on `0x305` for twenty seconds and never left. Played from its
+spawn (`op=8`), it runs out of the frame-1010 shot 2.5 seconds after the camera
+settles on the room.
+
+What is still not the engine's: `obj+0x1FC`, the rotation order, has no field
+on an actor without the model block, and every shipped cat turns about y alone.
+And the shared root-motion step (`rootDelta`) gives a looping clip's wrap frame
+zero travel where `SkeletonApplyRootMotion`'s damped reset gives it one average
+step -- about 2% of `0x2FD`'s distance, and not the cat's alone, so it is left
+for its own change.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

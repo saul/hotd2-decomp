@@ -34,6 +34,7 @@ import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
 import type { RingEffect } from "./effects/ring_effect";
 import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
+import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
@@ -1023,6 +1024,14 @@ export const G = {
   g_water_surfaces: [] as WaterSurface[],
   /** `[port-only]` — see {@link WaterSurface.id}. */
   g_water_surface_seq: 0,
+  /**
+   * `[port-only]` — the stage-2 car tasks `St2CarSpawn` (`FUN_00452120`) has
+   * allocated, which `RescueTargetInit` (`FUN_00451720`) is the only caller
+   * of. `game/class21/car.ts`; `render/rigs.ts` draws the car from these.
+   */
+  g_st2_cars: [] as St2Car[],
+  /** `[port-only]` — see {@link St2Car.id}. */
+  g_st2_car_seq: 0,
   /**
    * `[port-only]` in shape — what `WaterSurfaceUpdate` (`FUN_0046E3A0`) has
    * done to each tile's model, which the engine rewrites in place: one entry
@@ -2278,6 +2287,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_water_surfaces = [];
   G.g_water_surface_seq = 0;
   G.g_water_surface_uv = [];
+  // ...and the stage-2 car, a task like them: no class 0x21, no car.
+  G.g_st2_cars = [];
+  G.g_st2_car_seq = 0;
   // ...and the owl's and the fish's tasks, which the scene's list takes
   // with it like every other task.
   G.g_owl_feathers = [];

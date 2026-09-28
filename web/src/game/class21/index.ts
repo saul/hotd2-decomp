@@ -64,6 +64,7 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { St2CarSpawn } from "./car";
 import { RescueTargetState, type RescueTargetTail } from "./state";
 
 export { RescueTargetState } from "./state";
@@ -159,6 +160,7 @@ function Tail(obj: Actor): RescueTargetTail | null {
  * obj->+0x194 = rand() % 10;              // its start frame
  * g_enemies_present += 1;  g_enemies_alive += 1;
  * if (g_GameMode != 2) obj->+0x11C = g_class21_hp_by_rank[rank];  // not Training
+ * St2CarSpawn(0);                          // the car it rides -- car.ts
  * *obj = RescueTargetRideInState;
  * ```
  *
@@ -201,6 +203,13 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   obj.hp = CLASS21_HP_BY_RANK[G.g_damage_rank] ?? 1;
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
+  // **The car.** `PUSH 0x0` at `0x004517F6`, `CALL 0x00452120` at
+  // `0x00451800`: this Init is the only thing in the game that allocates the
+  // stage-2 car, so the car exists from the frame class 0x21 does and not
+  // before -- see `game/class21/car.ts`. The Training arm passes `obj+0x11C`
+  // instead (`0x0045183B`); that arm, `RescueTargetTrainingWaitState`
+  // (`FUN_00452540`), is not ported.
+  St2CarSpawn(0);
 }
 
 /**

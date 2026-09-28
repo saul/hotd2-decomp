@@ -53,9 +53,12 @@ import { CrumbMenu } from "../src/ui/panels/Crumbs";
 import { DebugSidebar } from "../src/ui/panels/DebugSidebar";
 import { Feed } from "../src/ui/panels/Feed";
 import { PauseScreen, SoundButton } from "../src/ui/panels/Overlays";
+import { SkipBar } from "../src/ui/panels/SkipBar";
 import { Tree } from "../src/ui/panels/Tree";
 import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
+import { ShortcutsDialog } from "../src/ui/panels/Shortcuts";
+import { SHORTCUT_GROUPS, keyCap } from "../src/ui/shortcuts";
 import { shutterCover } from "../src/hud/hud";
 import { readPersisted, writePersisted } from "../src/ui/persist";
 import { readViewPrefs } from "../src/app/viewprefs";
@@ -122,6 +125,7 @@ function projection(): UiProjection {
       route: [["g_script_branch_var", "0"]],
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
+    continueOffer: null,
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
     gameOver: { phase: 3, label: "GAME OVER" },
@@ -339,6 +343,48 @@ const oneEntry = renderIn({ ...projection(), entries: [0] },
                             onClose: () => {} }));
 check("and a stage with one entry offers no choice of entry",
       !oneEntry.includes('id="entry-picker"'));
+
+// The corner button is START, and says which of its two jobs the moment
+// wants. On a phone it is the only START there is -- without the Continue
+// label a phone could only watch the CONTINUE? digit run out.
+console.log("\nThe corner button:\n");
+{
+  const skipOnly = renderIn(projection(), createElement(SkipBar));
+  check("in a skippable region it says Skip",
+        skipOnly.includes('id="skipbar"') && skipOnly.includes("Skip")
+        && !skipOnly.includes("Continue"), skipOnly);
+  const counting = renderIn({ ...projection(), skip: null,
+                              continueOffer: { canContinue: true, digit: 7,
+                                               sub: "a credit" } },
+                            createElement(SkipBar));
+  check("on the continue countdown it says Continue, with the game's digit",
+        /id="skipbar" class="continue"/.test(counting)
+        && /Continue <span class="continue-digit">7<\/span>/.test(counting)
+        && !/<button[^>]*disabled/.test(counting), counting);
+  const both = renderIn({ ...projection(),
+                          continueOffer: { canContinue: true, digit: 3,
+                                           sub: "a credit" } },
+                        createElement(SkipBar));
+  check("...and Continue is the label if both are ever live at once",
+        both.includes("Continue") && !both.includes("Skip"));
+  const broke = renderIn({ ...projection(), skip: null,
+                           continueOffer: { canContinue: false, digit: 2,
+                                            sub: "no credit" } },
+                         createElement(SkipBar));
+  check("a continue START would not take is shown, and cannot be pressed",
+        /<button[^>]*disabled/.test(broke) && broke.includes("Continue"));
+  const neither = renderIn({ ...projection(), skip: null },
+                           createElement(SkipBar));
+  check("with neither, there is no button", !neither.includes("skipbar"));
+  // Both labels are one press: the command Enter's own handler makes.
+  let src = "";
+  try {
+    src = readFileSync(join(process.cwd(), "src", "ui", "panels", "SkipBar.tsx"),
+                       "utf8");
+  } catch { /* the check below fails on an empty source */ }
+  check("both labels dispatch pressStart, and nothing else",
+        /kind: "pressStart"/.test(src) && !/requestSkip/.test(src));
+}
 
 console.log("\nThe debug sidebar:\n");
 
@@ -694,6 +740,102 @@ console.log("\nThe branch pause is a debug aid, off by default:\n");
   check("...unchecked", box !== null && !/checked/.test(box[1]), box?.[1]);
   check("...under its own heading, apart from the game and the overlays",
         html.includes("grp-aid") && html.includes("debug aids"));
+}
+
+// Three handlers answer keys -- `app/main.ts`, `render/freeroam.ts` and
+// `ui/App.tsx` -- and `ui/shortcuts.ts` is the one list of what they do, which
+// the `?` dialog draws. A list of keys drifts the moment a handler grows a
+// branch nobody added a row for, so the handlers' own source is read here and
+// held to the table in both directions.
+console.log("\nThe keys:\n");
+{
+  const src = (...p: string[]) => {
+    try { return readFileSync(join(process.cwd(), "src", ...p), "utf8"); }
+    catch { return ""; }
+  };
+  const codesIn = (text: string, re: RegExp) =>
+    new Set([...text.matchAll(re)].map((m) => m[1]));
+  const rows = SHORTCUT_GROUPS.flatMap((g) => g.rows);
+  const listed = (by: string) =>
+    new Set(rows.filter((r) => r.by === by).flatMap((r) => r.codes));
+  const same = (a: Set<string>, b: Set<string>) =>
+    a.size === b.size && [...a].every((x) => b.has(x));
+  const show = (a: Set<string>, b: Set<string>) =>
+    `bound ${[...a].sort().join(" ")} / listed ${[...b].sort().join(" ")}`;
+
+  const main = src("app", "main.ts");
+  const app = codesIn(main, /e\.code === "(\w+)"/g);
+  check("app/main.ts binds exactly the keys the table gives it",
+        main !== "" && same(app, listed("app")), show(app, listed("app")));
+
+  const fly = src("render", "freeroam.ts");
+  const moveBlock = /const MOVE_KEYS[^{]*\{([^}]*)\}/.exec(fly)?.[1] ?? "";
+  const roam = new Set([...codesIn(moveBlock, /(Key[A-Z]):/g),
+                        ...codesIn(fly, /keys\.has\("(\w+)"\)/g)]);
+  check("free roam flies on exactly the keys the table gives it",
+        roam.size > 0 && same(roam, listed("freeRoam")),
+        show(roam, listed("freeRoam")));
+
+  const page = src("ui", "App.tsx");
+  const ui = new Set([...codesIn(page, /e\.code === "(\w+)"/g),
+                      ...TOGGLES.flatMap((t) => (t.key ? [t.key] : []))]);
+  check("ui/App.tsx answers exactly the keys the table gives it",
+        page !== "" && same(ui, listed("ui")), show(ui, listed("ui")));
+
+  // One owner a key, with no exception. There was one: S was the pad's Start
+  // to the game and back to free roam. START is Enter now, which is the key
+  // the skip already had -- the exe reads the one button for both.
+  const owners = new Map<string, Set<string>>();
+  for (const r of rows) {
+    for (const c of r.codes) owners.set(c, (owners.get(c) ?? new Set()).add(r.by));
+  }
+  const shared = [...owners].filter(([, o]) => o.size > 1);
+  check("no key has two owners", shared.length === 0,
+        shared.map(([c, o]) => `${c}: ${[...o].join("+")}`).join(", "));
+  const twice = [...new Set(rows.flatMap((r) => r.codes)
+    .filter((c, i, all) => all.indexOf(c) !== i))];
+  check("...and no key is listed twice", twice.length === 0, twice.join(", "));
+  const start = rows.find((r) => r.codes.includes("Enter"));
+  check("Enter is START: it continues as well as skipping",
+        start?.by === "app" && /continue/i.test(start.what)
+        && /skip/i.test(start.what), JSON.stringify(start));
+  const sOwners = [...(owners.get("KeyS") ?? [])];
+  check("...and S is free roam's alone again",
+        sOwners.length === 1 && sOwners[0] === "freeRoam", sOwners.join("+"));
+  check("Z is bound by nothing: tools/pacing.mjs presses it for that",
+        !owners.has("KeyZ"));
+  check("only overlays have keys",
+        TOGGLES.every((t) => !t.key || t.kind === "debug"),
+        TOGGLES.filter((t) => t.key && t.kind !== "debug").map((t) => t.name).join(", "));
+  check("the actor bounding boxes have one",
+        TOGGLES.find((t) => t.name === "boxes")?.key === "KeyB");
+
+  const keyed = TOGGLES.filter((t) => t.key);
+  const dialog = renderIn(projection(), createElement(ShortcutsDialog,
+                                                      { onClose: () => {} }));
+  check("the ? dialog is a dialog, under the id the harnesses reach it by",
+        dialog.includes('id="shortcuts"') && dialog.includes('role="dialog"'));
+  check("...and lists every overlay key with its label",
+        keyed.every((t) => dialog.includes(`<kbd>${keyCap(t.key as string)}</kbd>`)
+                           && dialog.includes(t.label)));
+  check("...each one saying it is off, as they all start",
+        (dialog.match(/class="state"/g) ?? []).length === keyed.length
+        && !dialog.includes('class="state on"'));
+  const boxesOn = renderIn({ ...projection(),
+                             toggles: { ...TOGGLE_DEFAULTS, boxes: true } },
+                           createElement(ShortcutsDialog, { onClose: () => {} }));
+  check("...and one that is on saying so",
+        (boxesOn.match(/class="state on"/g) ?? []).length === 1);
+
+  const withKeys = renderIn(projection(), createElement(CrumbMenu, {
+    debugOpen: false, onToggleDebug: () => {}, onShowKeys: () => {},
+    onClose: () => {} }));
+  check("the menu offers the list, to a mouse",
+        withKeys.includes('class="keys-open only-fine"'));
+  const actorsGroup = renderIn(projection(),
+                               createElement(DebugGroup, { group: "actors" }));
+  check("an overlay's switch shows its key",
+        actorsGroup.includes('<kbd class="key-hint">B</kbd>'));
 }
 
 // The letterbox is drawn from the bars the engine's routine recorded, not

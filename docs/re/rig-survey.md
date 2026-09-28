@@ -111,7 +111,7 @@ never fire.
 | `0x00484FF0` | `obj_484ff0_props` | — | world space; **not placed**, see below |
 | `0x00470B70` | `obj_470b70` | `0x179` | actor state 412 |
 | `0x00470080` | `obj_470080` | `0x196`–`0x198` | actor state 406; slot is runtime, nothing to place |
-| `0x00416B00` | `obj_416b00` | `0x194` | [likely] per-shot gunfire effects; a 6-record ring, all runtime |
+| `0x00416B00` | `obj_416b00` | `0x194` | `PlayerShotEffectsThink`: the three per-shot rings, all runtime. **Not placed** -- see below |
 | `0x00452320` | `obj_452320` | `0x148`, `0x14D`, `0x14E`, `0x19A`–`0x1A1` | **[proved] a car** — the stage-2 opening vehicle. See below. |
 | `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path |
 | `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed**, see below |
@@ -128,11 +128,25 @@ It is bound to the opening shots: camera `0x38`/`0x39`/`0x3A` select object
 paths `0x148`/`0x14E`/`0x14D`. At the end of shot `0x39` the asset set swaps to
 variant 1 and the think pointer becomes `FUN_004522A0`, which never re-samples
 a path — so the body pose **freezes permanently**. An intact→wrecked swap is
-the obvious reading, `[likely]`. At shot `0x3A` frame 80 the wheel spin flag is
-cleared for good.
+the obvious reading, `[likely]`: the unshot branch plays that shot out in
+stage 2 block 11 step 1, its script plays `0x519A9`,
+`STAGE2_SE\BRIDGE_CRASH1_22.wav`, at frame 340 of it, and row 1's body is
+row 0's geometry on a different texture set (`char_adv04` textures 26, 30 and
+34 where row 0 has 0, 1, 2 and 33), which renders dark and streaked. At shot `0x3A` frame 80 the wheel spin flag is cleared
+for good -- and a cleared flag *skips* the `RotX`, so the spun parts draw at
+no rotation rather than holding their angle.
 
 Every part draws `dword[0x00565F2C + obj+0x13F0 * 0x10 + column]`, a 2×4 int
-table; variant 0 is exported and variant 1 is the post-crash set.
+table: row 0 `0x2D 0x2F 0x34 0x31`, row 1 `0x2E 0x30 0x35 0x32`, which the pol
+slot list resolves to `char_adv04.bin` entries 2..10. **Both rows are
+exported**, one part per slot, and the player shows the part whose slot the
+port's `St2CarDraw` names this frame (`web/src/game/class21/car.ts`). Column 1
+is a push nested in the body's and turned `RotY(obj+0x1334)` once parked --
+rendered, `[likely]` the driver's door: it is the door the rescued man climbs
+out through at the end of shot `0x3A`. Columns 2 and 3 hang off a second frame,
+the body's `MatrixGetAngles` re-applied as `RotY RotX RotZ` with the roll
+through a dead zone (`0x00452414`..`0x0045245A`), which the port computes and
+the player applies.
 
 Eight further instances run as traffic on `0x19A`–`0x1A1`, which are
 **`op_train` paths** — so they are not in any numbered stage export.
@@ -149,7 +163,23 @@ arcade routines are ported in `web/src/game/class21/car.ts`, and the player
 draws this rig from that task.
 
 None of this was reachable from the 9 direct drawers. Its posers evaluate the
-path and never draw; only following `obj[0]` gets you here.
+path and never call `AssetDrawSlot` themselves; they call this routine, which
+is how you get here.
+
+### Why `obj_416b00` is not placed
+
+`PlayerShotEffectsThink` (`FUN_00416B00`) draws every part it has from a live
+record of one of the three per-shot rings, at a position the shot wrote.
+Its one literal slot, `0x109D` (`etc_1.bin` entry 41), is the kind-5 tracer's:
+`CMP EAX, 0x5` at `0x00416CBE`, then `Translate(record) ·
+Translate(CamEvalObjectPath6(0x194, age % 24)) · MatrixClearRotation · RotZ RotY
+RotX` and `PUSH 0x109D` at `0x00416DA1` `[proved]`. The rig carried
+`Route(0x194)` with no camera gate, so the exporter emitted a root and the
+player drew it from stage load, at the path's own pose, `(0.5, 0, 0)` -- a green
+mound in front of Goldman's desk in every Original Mode stage-2 opening, with no
+shot fired. It is `placement_blocked` now; the ring is
+`game/effects/shot_effects.ts`'s, `render/effects.ts` draws the kind-5 arm, and
+an Original Mode bundle carries `0x109D` in its effect templates.
 
 ### Why `obj_4331d0` and `obj_484ff0_props` are not placed
 

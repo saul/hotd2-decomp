@@ -30,9 +30,11 @@
  * the camera. {@link EffectLayer.bones} is what answers that here.
  */
 import {
-  type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
+  type BufferGeometry, Euler, Group, Matrix4, Object3D,
+  Quaternion, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
 import { drawCreatureEffects } from "./creature_effects";
 import { drawWaterRings } from "./water_rings";
@@ -46,8 +48,9 @@ import {
 } from "../game/effects/blood";
 import {
   FLASH_SCALE, FLASH_SMOKE_SCALE, FLASH_SMOKE_SCALE_KIND4,
-  OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_SLOT_OFFSET, WEAPON_FIRST_SLOT,
-  WEAPON_SCALE,
+  OriginalWeaponKind, SHOT_EFFECT_RING, TRACER_SLOT_OFFSET,
+  TRACER_WEAPON5_LOOP, TRACER_WEAPON5_PATH, TRACER_WEAPON5_SLOT,
+  WEAPON_FIRST_SLOT, WEAPON_SCALE,
 } from "../game/effects/shot_effects";
 import { POINT_BLOOD_SCALE } from "../game/effects/blood";
 import { PlayerTask } from "../game/player_state";
@@ -102,13 +105,12 @@ export interface BoneSphereSource {
 
 /**
  * Free the materials a fading draw gave its clone -- see `setSlotAlpha` in
- * `boss3_effects.ts` -- and the geometry a deforming one copied (the water
- * mound). Anything else is the template's and is not ours.
+ * `boss3_effects.ts` and `releaseAssetDrawAlpha` -- and the geometry a
+ * deforming one copied (the water mound). Anything else is the template's and
+ * is not ours.
  */
 function disposeOwned(node: Object3D): void {
-  const owned = node.userData.ownedMaterials as Material[] | undefined;
-  if (owned) for (const m of owned) m.dispose();
-  node.userData.ownedMaterials = undefined;
+  releaseAssetDrawAlpha(node);
   const geos = node.userData.ownedGeometries as BufferGeometry[] | undefined;
   if (geos) for (const g of geos) g.dispose();
   node.userData.ownedGeometries = undefined;
@@ -149,6 +151,12 @@ export class EffectLayer implements System<RenderContext> {
   private readonly _m = new Matrix4();
   private readonly _view = new Matrix4();
   private readonly _elems: number[] = new Array<number>(16).fill(0);
+  /** The camera's world rotation, for the tracer's `MatrixClearRotation`. */
+  private readonly _cq = new Quaternion();
+  private readonly _cp = new Vector3();
+  private readonly _cs = new Vector3();
+  private readonly _rq = new Quaternion();
+  private readonly _e = new Euler();
 
   constructor() {
     this.group.name = "effects";
@@ -249,7 +257,7 @@ export class EffectLayer implements System<RenderContext> {
     this.drawBodyCreatures(seen);
     this.drawCarriedProps(seen);
     this.drawBoss4Extras(seen);
-    this.drawShotRings(seen);
+    this.drawShotRings(ctx, seen);
     this.drawDamageOverlays(seen);
     this.drawBossBanners(seen);
     // The owl's and the fish's tasks, and the ring the fish's corpse leaves:
@@ -555,7 +563,8 @@ export class EffectLayer implements System<RenderContext> {
   }
 
   /** The three per-shot rings — `PlayerShotEffectsThink` (`FUN_00416B00`). */
-  private drawShotRings(seen: Set<string>): void {
+  private drawShotRings(ctx: RenderContext, seen: Set<string>): void {
+    ctx.camera.matrixWorld.decompose(this._cp, this._cq, this._cs);
     for (let i = 0; i < SHOT_EFFECT_RING * 2; i++) {
       const f = G.g_shot_flash_ring[i];
       if (this.muzzle && f?.live && f.kind !== OriginalWeaponKind.Silent) {
@@ -585,6 +594,13 @@ export class EffectLayer implements System<RenderContext> {
         }
       }
 
+      // Both of the tracer's arms `MatrixTranslate` onto the record and then
+      // call `MatrixClearRotation` (`FUN_004A9F70`), which writes the top
+      // 3x3 to the identity -- the view's rotation with it -- so what follows
+      // is turned in the camera's axes, not the world's: a node here takes
+      // the camera's own world rotation first. This set `rotation (0, 0,
+      // spin)` in world axes, a quad facing world +Z wherever the camera
+      // looked.
       const t = G.g_shot_tracer_ring[i];
       if (t?.live && t.kind !== OriginalWeaponKind.Slow) {
         const smoke = MUZZLE_SMOKE_SLOTS[t.player] ?? MUZZLE_SMOKE_SLOTS[0];
@@ -593,9 +609,36 @@ export class EffectLayer implements System<RenderContext> {
         if (node) {
           seen.add(key);
           node.position.set(t.pos.x, t.pos.y, t.pos.z);
-          // `MatrixClearRotation` (`FUN_004A9F70`) wipes the top 3x3, which is
-          // a screen-axis billboard, and then the roll spins it in place.
-          node.rotation.set(0, 0, t.spin * BAMS_TO_RAD);
+          // ...and then the roll spins it in place.
+          this._e.set(0, 0, t.spin * BAMS_TO_RAD, "ZYX");
+          node.quaternion.copy(this._cq)
+            .multiply(this._rq.setFromEuler(this._e));
+          node.scale.setScalar(1);
+        }
+      } else if (t?.live) {
+        // Kind 5 -- Original Mode's slow round, and the only thing in the exe
+        // that draws slot 0x109D: `Translate(record) · Translate(op_ 0x194 at
+        // frame % 24) · MatrixClearRotation · RotZ · RotY · RotX` of that
+        // pose (`0x00416D2B`..`0x00416DA6`). It was the rig `obj_416b00`,
+        // drawn from stage load at the path's own pose -- in front of
+        // Goldman's desk -- and skipped here.
+        const path = ctx.paths?.objectPaths.get(TRACER_WEAPON5_PATH);
+        const key = `t${i}`;
+        const node = path ? this.node(key, TRACER_WEAPON5_SLOT, this.group)
+          : null;
+        if (path && node) {
+          seen.add(key);
+          const at = t.frame % TRACER_WEAPON5_LOOP;
+          path.position(at, this._c);
+          node.position.set(t.pos.x + this._c.x, t.pos.y + this._c.y,
+                            t.pos.z + this._c.z);
+          // `CamEvalObjectPath6` (`FUN_004042D0`) `__ftol`s the three angles
+          // (L2), and they go on as `RotZ(rz); RotY(ry); RotX(rx)`.
+          this._e.set(Math.trunc(path.channel(3, at)) * BAMS_TO_RAD,
+                      Math.trunc(path.channel(4, at)) * BAMS_TO_RAD,
+                      Math.trunc(path.channel(5, at)) * BAMS_TO_RAD, "ZYX");
+          node.quaternion.copy(this._cq)
+            .multiply(this._rq.setFromEuler(this._e));
           node.scale.setScalar(1);
         }
       }
@@ -630,6 +673,15 @@ export class EffectLayer implements System<RenderContext> {
    * Drawn for exactly as long as the record is active, from the record alone,
    * so a seek or a load shows whatever the restored state says and nothing a
    * frame from the old timeline left behind.
+   *
+   * **No alpha of its own, and none added here** `[proved]`. It is
+   * `AssetDrawSlot` (`FUN_00418560`), not `AssetDrawSlotWithAlpha`, so the
+   * node keeps the template's material untouched -- the translucent pass
+   * `applyPvr2DrawState` gave it from TSP `0x9400041B` (`SRCALPHA /
+   * INVSRCALPHA`, alpha test at 1) and the base alpha 1 -- and what blends is
+   * the texture's own alpha: 255 over the body of each mark, 0 around it. A
+   * fade or a forced opacity here would be a claim the exe does not make; see
+   * `game/effects/damage_overlay.ts` and `tools/hurt_alpha.mjs`.
    *
    * **Drawn before the shot effects, not after** `[proved]`. Every
    * translucent draw is queued by `RenderEnqueueCommand` (`FUN_004A7E50`)

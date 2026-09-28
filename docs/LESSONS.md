@@ -915,3 +915,113 @@ as the playthrough's failure to hit a frog. **When a state raises the freeze
 on cursor N, find the cursor it then waits for**; if it is N + 1, the class
 has to read the cursor its own draw left (`FrogTail.playCursor`), not the
 counter.
+
+**L63 -- A literal the engine compares against belongs to the engine's
+representation, and the port need not share it.** `g_attack_permits` holds 1
+or 0 in the exe and the holder's `at` or -1 in the port, a choice written down
+on the global. Two scripted attackers' player picks were transcribed
+instruction by instruction -- `CMP [g_attack_permits + p*4], 1` became
+`=== 1` and `TEST EAX, EAX` became `=== 0` -- so neither ever saw a permit a
+claim held, nor a free one: a scripted zombie took a player's permit from under
+the zombie that had it and never fell back to the other player. Every test
+passed, because those two routines' own writes to the table also used the
+exe's `1`, so they agreed with themselves and with nobody else. **When the port
+represents a value differently from the exe, transcribe the question the
+comparison asks ("is it taken"), not its constant** -- and before calling any
+reader of such a value faithful, grep every reader for the exe's literals.
+It is a cousin of `L3`: there one field means two things in two classes, here
+one table means one thing in two encodings.
+
+**L64 -- A word the port "keeps instead" is a divergence at every reader, and
+the question it rests on is usually one read away.** `g_camera_block_yaw_bams`
+(`0x009A60D0`) and `g_camera_yaw_bams` (`0x009C71F0`) are two camera yaws, and
+for as long as the port had only the second, each routine the exe points at
+the first was transcribed onto the second with a note: "the port keeps one
+heading, and reads it for this as `PropUpdateType43` and the bat do; whether
+the two ever differ is the `[open]` on that row of `globals.tsv`". Four notes
+cited each other and a helper was written to return it. They differ by half a
+turn: the scene state's hooks write the second as a camera heading plus or
+minus `0x8000`, which is in the five instructions of each hook. So a
+condition-8 walker's facing window sat behind it and no blade or axe walker in
+the game ever threw, severed heads and owl corpses flew at the camera, and
+deaths fell the wrong way -- one substitution, wrong at every reader. **When a
+routine reads a word the port does not have, the substitute is the
+divergence, not the missing word**: tag it `[diverges]`, and settle the
+`[open]` by reading the substitute's writers before a second reader copies the
+choice. `L20`'s "never name a thing from what it resembles" applies to globals
+that resemble each other.
+
+**L65 -- A count a check was calibrated on is a reading, and it can be the
+bug.** `verify_combat.py` check 16 asserted that exactly nine arc-script
+stage changes switch clips, and its docstring named two of them: "zslman's
+aside in stances 1 and 3". Those two were not leap-aside scripts at all. The
+exporter read `zslman`'s four at `0x30` apart -- one script's width -- where
+`ThrowerStateLeapAside` names them `0x60` apart with four `MOV ESI, imm32`,
+and the extra `0x30` between each pair is that stance's *pounce* script,
+which ends on a different clip. The check was written by counting what the
+export produced, so it passed the misread and would have failed the fix. The
+comment beside the address said "+0x60 a stance"; the code beside it said
+`0x30`; the annotation said "stride 0x30" and listed four motions that sit
+`0x60` apart. **When a check's expected number was measured rather than
+derived, say what it was measured from, and prefer asserting the thing the
+engine names** -- here the immediates in `.text` -- to asserting a total
+that includes whatever the reader got wrong. It is `L6` seen from the
+checker's side: the adjacent-array trap, calibrated into the test.
+
+**L66 -- In the frustum is not on screen, and a diff of the whole page is a
+diff of its clock.** Showing stage 2's four tilted class-0x13 props before and
+after, a harness chose "the nearest frame with all four in view" by projecting
+their origins through the camera, and chose a frame where all four were inside
+a window jamb: the before and after crops came back byte for byte the same,
+which reads as "the renderer ignores the fix". Widening the comparison to the
+whole screenshot then called every frame different, because the page's header
+prints the bundle's age in minutes. Neither result was about the props. **A
+projection cannot see occlusion, so pick the frame by the pixels: shoot before
+and after, diff them inside the viewport only, and look where they differ** --
+and when nothing differs, make the object impossible to miss (scale it up in
+the live page through `G`, debug only) before concluding it is not drawn. It is
+`L19` from the other side: the render is not the game, and the frustum is not
+the render.
+
+**L67 -- A bit's name is its hardware's meaning, and the port decides what it
+does.** TSP bit 19 is `IgnoreTexAlpha` in the PowerVR2 documentation, and the
+exporter did what the name says: an alpha-stripped copy of every texture a
+mesh with the bit drew. The PC port is a Direct3D translation of those words,
+and in it the bit is only half of the pass selector -- the texture is
+uploaded once, alpha and all, and stage 0's alpha op takes it. 101 meshes
+that blend by their texture's alpha drew as solid cards for as long as the
+export existed, and the blood recolour quietly came to depend on the stripped
+images. **Before implementing a field by its spec name, find the instruction
+that reads it in this binary**; a search for its mask and its bit number that
+comes back with only the readers you know is the evidence, and "the spec
+says" is not.
+
+**L68 -- A cache keyed on less than it stores hands one entry's value to the
+next.** The exporter deduplicated materials on the part, the texture and the
+four PVR2 words, and wrote the base colour and the culling into what it
+cached. A fifth of the game's meshes drew with an earlier mesh's colour --
+baked lighting, base alpha -- and the stage-2 car's door took the black of
+the body's inner shells, which a session then spent time taking for a
+draw-order fault. Nothing looked wrong locally: every material was a real
+material of that part. **A dedup key must cover every field the cached value
+carries**; the check that finds the gap compares each output against its own
+input, not the output against itself.
+
+**L69 -- Under `?drive=1`, `advance(0)` redraws the picture the last tick
+posed, not the state you just wrote.** Measuring how opaque the damage overlay
+is, I shot a driven frame, lowered the record's `active` through `G`, called
+`advance(0)` to redraw, and shot again: the two images were byte-identical,
+the harness reported the overlay covering **0 pixels**, and its own sanity
+check -- "the redraw reproduces the frame" -- passed, because nothing had been
+redrawn from the new state. The render layers pose their nodes in
+`world.update`, which runs inside `stepOneFrame` (and, undriven, in
+`idleTick`); under the drive flag a zero-frame pump calls neither, so
+`endFrame` renders the scene graph exactly as the last tick left it. A `G`
+edit between two driven frames reaches no picture until the next frame runs.
+**To compare one frame with and without something, run twice on one seed and
+make the change before the frame is stepped**, choosing a change nothing in
+the game reads back (here the record's kind, pointed past the slot table), and
+check that the pixels it should not touch are identical -- which is also what
+tells you the runs stayed in step. It is `L44`'s "a harness that prints its
+arguments as its result" one layer down: a redraw that repeats the frame
+agrees with any claim about it.

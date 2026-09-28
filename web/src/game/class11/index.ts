@@ -31,13 +31,17 @@
  *
  * ## What is not ported
  *
- * `[diverges]` **The wedge clamp reads the wrong camera yaw.** The engine's
+ * **The wedge clamp reads camera block 2's yaw.** The engine's
  * `FrogStateHopWithinScreenWedge` clamps its chosen heading against two
- * screen-edge rays built from **camera block 2's** yaw, the s32 at
+ * screen-edge rays built from `g_camera_block2_yaw_bams`, the s32 at
  * `0x009A6418` — `g_camera_blocks + 2 * 0x1A4 + 0x90` — while the same class's
- * state 0 waits on **camera block 0's** path frame. The port has one camera
- * yaw, `g_camera_yaw_bams`, so it uses that for both. Why the engine is
- * asymmetric is `[open]`; nothing in the class explains it.
+ * state 0 waits on **camera block 0's** path frame. Block 2 is not the view:
+ * `EvtRunQueuedActionsSyncViewBlock` copies block 0's pose into it only while
+ * a scripted view-angle turn, scene state (1, 3), is running, so on a rail it
+ * holds the last such turn's heading, or zero after `CameraBlocksReset`. The
+ * port read `g_camera_yaw_bams` here, a heading the scene state's hooks write
+ * every frame, and now reads block 2's as the engine does. Why the frog's
+ * author reached for block 2 is `[open]`; nothing in the class explains it.
  *
  * ## Bone 1, and the two matrix chains that read it
  *
@@ -634,7 +638,8 @@ function FrogHeadingWindow(state: FrogState, aim: number,
 function FrogClampToWedge(obj: Actor, eye: { x: number; z: number },
                           wedge: number, win: { base: number; width: number }):
                           void {
-  const camYaw = G.g_camera_yaw_bams;
+  // `MOV EBP, [0x009A6418]` at `0x0043AB62`: camera block 2's yaw.
+  const camYaw = G.g_camera_block2_yaw_bams;
   const dx = obj.pos.x - eye.x;
   const dz = obj.pos.z - eye.z;
   const halfFov = Math.trunc(Math.atan2(320.0, PROJECTION_DISTANCE_PX)

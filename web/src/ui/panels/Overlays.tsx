@@ -53,7 +53,9 @@ export function PauseScreen() {
         <button className="start-btn" autoFocus={false} onClick={go}>
           <span aria-hidden="true">▶</span> {started ? "Resume" : "Start"}
         </button>
-        <span className="hint only-fine">or press <kbd>Space</kbd></span>
+        <span className="hint only-fine">
+          or press <kbd>Space</kbd> · <kbd>?</kbd> for every key
+        </span>
         <span className="hint only-coarse">
           tap to shoot · flick the phone, or tap with a second finger, to reload
         </span>

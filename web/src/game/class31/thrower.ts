@@ -29,8 +29,9 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { ActorRegisterCameraPoint } from "../camera/track";
 import { RegisterEnemySlot } from "../camera/slots";
-import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
-  from "../combat/permits";
+import {
+  AttackClaimRefusal, ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot,
+} from "../combat/permits";
 import {
   ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount,
 } from "../combat/counts";
@@ -119,6 +120,8 @@ const SFX_THROW_DONE = 0x2916a9;
 
 /** Character type 0x18 — `zslman`. It has its own clip for everything. */
 const CHAR_ZSLMAN = 0x18;
+/** Character type 0x17 — `zskamere`. `CMP CX, 0x17` at `0x004497EC`. */
+const CHAR_ZSKAMERE = 0x17;
 
 /**
  * `ThrowerPickThrowingHand` — `FUN_0044F630`. Which bone throws this time.
@@ -418,7 +421,7 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, _eye: Vec3,
     // case 0x1F claims one before it writes the state — but it is the engine's
     // own answer to arriving without one, and the port's used to be a bail to
     // the hub.
-    if (obj.attackPermit < 0 && !ThrowerTryClaimAttackSlot(obj, host)) {
+    if (obj.attackPermit < 0 && !ThrowerTryClaimAttackSlot(obj, rng, host)) {
       obj.attackPermit = 0;
     }
     const bone = ThrowerPickThrowingHand(obj, rng);
@@ -559,7 +562,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.GetUp:
       return ThrowerStateGetUp(obj, eye, rng, host);
     case ThrowerState.RideObjectPath:
-      return ThrowerStateRideObjectPath(obj, dt, host);
+      return ThrowerStateRideObjectPath(obj, dt, rng, host);
     case ThrowerState.LeapStrike:
       return ThrowerStateLeapStrike(obj, dt, rng, host, events);
     case ThrowerState.CloseAndStrike:
@@ -608,7 +611,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
       return ThrowerStateLeapToPoint(obj, dt, rng, events, host);
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
-      return ThrowerStatePathFollow(obj, dt, events, host);
+      return ThrowerStatePathFollow(obj, dt, rng, events, host);
     // No turn here. `TurnActorTowardCamera` (`FUN_00409ED0`) has two callers
     // in the image and both are `ZombieStateAttackRun`'s; `ThrowerStateThrow`
     // calls no turn routine at all, so a thrower throws on the facing
@@ -719,7 +722,33 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // 0x17 through 0x19. It is the radius both push-outs test with.
   obj.bodyRadius = obj.charType === CHAR_ZSASS
     ? BODY_RADIUS_ZSASS : BODY_RADIUS_OTHER;
-  obj.alpha = 1;
+  // `obj+0x138C`, the draw alpha, for the two types whose parts
+  // `DrawCharacterPartSlot` draws at it -- and nowhere else:
+  //
+  //   004497f8  MOV [ESI + 0x138c], EDX           ; 0x17: 1.0
+  //   00449823  CMP byte ptr [EBP + 0x2], 0x22    ; 0x18 starting in state 34
+  //   00449829  OR  EAX, 0x80000                  ; ...no shadow
+  //   0044982e  MOV [ESI + 0x138c], EDI           ; ...alpha 0
+  //   0044983d  OR  AL, 0x4                       ; ...drawn at it
+  //   00449847  MOV [ESI + 0x138c], EDX           ; 0x18 otherwise: 1.0
+  //
+  // `[proved]`, `EDX` 1.0 and `EDI` 0 from the routine's head. So stage 6's
+  // eight `zslman` are born invisible and blinking, their waist and skirt
+  // with them; state 34's own sub 0 then says the same again. Types 0x16 and
+  // 0x19 are not written, which cannot show: their parts are drawn solid and
+  // their bones read the word only under bit 2, which every writer raises
+  // together with a value.
+  if (obj.charType === CHAR_ZSKAMERE) {
+    obj.alpha = 1;
+  } else if (obj.charType === CHAR_ZSLMAN) {
+    if (obj.initialState === ThrowerState.BlinkIn) {
+      obj.flags |= ActorFlag.NoShadow;
+      obj.alpha = 0;
+      obj.flags2 |= ThrowerFlag.Blinking;
+    } else {
+      obj.alpha = 1;
+    }
+  }
   obj.pendingHit = null;
   obj.thr.knockCount = 0;
   obj.thr.stance = 0;
@@ -780,17 +809,13 @@ export function ThrowerEntryState(obj: ThrowerActor): ThrowerState {
 export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
   // `ThrowerStateWaitForPermit` is a pose held until a permit frees, so an
   // actor parked in it looks exactly like one whose own logic has stalled.
-  // `ThrowerTryClaimAttackSlot` refuses on two things and neither is visible
-  // from the row without saying so.
+  // `ThrowerTryClaimAttackSlot` refuses on the latch, the one player it
+  // offers and that player's state, and none of it is visible from the row
+  // without saying so.
   const waiting = obj.state === ThrowerState.WaitForPermit
     && obj.attackPermit < 0;
-  const held = G.g_attack_permits.findIndex((p) => p !== -1);
   const why = !waiting ? null
-    : G.g_attack_committed !== 0 ? "another enemy is committed off screen"
-    : held !== -1
-      ? `all ${G.g_max_attackers} permits held — 0x`
-        + `${(G.g_attack_permits[held] ?? 0).toString(16).toUpperCase()} has it`
-      : "a permit is free — the claim is not being made";
+    : AttackClaimRefusal() ?? "a permit is free — the claim is not being made";
   const detail = [
     `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`,
     `hp ${obj.hp}/${obj.maxHp} · motion ${obj.motion}`
@@ -809,9 +834,9 @@ export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
  * What a class-0x31 thrower gives back when `GameUpdate`'s sweep reaches it.
  *
  * The permit on every reason, in **its own** bit: `ThrowerFlag.OffScreenPermit`
- * is `obj+0x136C` bit 0x40000000, because class 0x30 already uses 0x20000000
- * of the same word for its own actors — the note on
- * `ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) is where that split is proved.
+ * is `obj+0x136C` bit `0x8000` where class 0x30's claim raises `0x20000` —
+ * the note on `ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) is where that
+ * split is proved.
  *
  * The counts **only on a despawn**, and that is not an omission. Class 0x31's
  * death is four states and it runs the two retires where the exe does —

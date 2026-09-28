@@ -30,7 +30,9 @@
  * L29 -- a peak of exactly 0.000 with another headless Chrome on the machine
  * is contention, not evidence; re-run alone before believing it.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, requireBundle, waitForLoad } from "./lib/player.mjs";
+
+requireBundle("bgm_loop");
 
 const args = process.argv.slice(2);
 const HEAD = args.includes("--head");

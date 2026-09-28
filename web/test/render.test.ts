@@ -1092,6 +1092,201 @@ console.log("\nrigs: the stage-2 car is drawn from the port's task, not from loa
   ResetGameGlobals();
 }
 
+console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed them");
+{
+  // New bug (NEW-BUGS-2): the car's rig showed its first asset row for good
+  // -- the exporter shipped nothing else -- with the spun parts still and the
+  // parked part never turning. `St2CarDraw` (`FUN_00452320`) picks a row of
+  // `g_st2car_asset_variants` per frame, turns one push by `obj+0x1334` and
+  // two by `obj+0x1330`, and hangs those two off a roll-limited frame.
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { St2CarSpawn, St2CarsTick } = await import("../src/game/class21/car");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { Euler, Quaternion } = await import("three");
+  const { BAMS_TO_RAD } = await import("../src/core/bams");
+  ResetGameGlobals();
+  const RIGS = {
+    rigs: [{ name: "obj_452320", routine: "FUN_00452320", note: "",
+             spawn_ats: null, routes: [] }],
+    blocked: [], note: "",
+  };
+  const root = new Group();
+  const rigRoot = new Group();
+  rigRoot.userData = { hod2_kind: "rig", hod2_rig: "obj_452320",
+                       hod2_routine: "FUN_00452320", hod2_path_slot: 334 };
+  root.add(rigRoot);
+  // The exporter's parts: both rows, the second column nested in the first.
+  const T2 = [9.0582619, 6.368186, 8.9433079];
+  const TW = [[0, 3.1674952, 13.6489019], [0, 3.1674952, -9.4799995]];
+  const part = (slot: number, t: number[], parent: InstanceType<typeof Group>) => {
+    const g = new Group();
+    g.position.set(t[0], t[1], t[2]);
+    g.userData = { hod2_kind: "rig_part", hod2_rig: "obj_452320",
+                   hod2_slots: [`0x${slot.toString(16).toUpperCase()
+                     .padStart(4, "0")}`] };
+    parent.add(g);
+    return g;
+  };
+  const nodes = new Map<number, InstanceType<typeof Group>>();
+  for (const row of [[0x2d, 0x2f, 0x34, 0x31], [0x2e, 0x30, 0x35, 0x32]]) {
+    const body = part(row[0], [0, 0, 0], rigRoot);
+    nodes.set(row[0], body);
+    nodes.set(row[1], part(row[1], T2, body));
+    nodes.set(row[2], part(row[2], TW[0], rigRoot));
+    nodes.set(row[3], part(row[3], TW[1], rigRoot));
+  }
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never,
+             new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never));
+  const at = { walker: { cam: { slot: 57, frame: 0 }, spawns: [] } } as
+    unknown as Parameters<typeof rigs.update>[0];
+  // A pose with a roll outside the limiter's dead zone, so the second frame
+  // is not the body's.
+  let pose = { x: -885, y: -7, z: -597, pitch: 0x300, yaw: 0x7428, roll: 0x2000 };
+  const host = {
+    ...NULL_HOST,
+    objectPath: (slot: number, frame: number) =>
+      slot === 0x153 ? { x: 0, y: 0, z: 0, pitch: 0, roll: 0,
+                         yaw: 16384 + (frame - 100) * 370 }
+        : { ...pose },
+  };
+  const visible = (s: number) => {
+    let o: InstanceType<typeof Obj3D> | null = nodes.get(s)!;
+    while (o) { if (!o.visible) return false; o = o.parent; }
+    return true;
+  };
+  G.g_active_cam_path = 0x39;
+  G.g_cam_path_frame = 360;
+  const car = St2CarSpawn(0);
+  St2CarsTick(host);
+  St2CarsTick(host);
+  rigs.update(at);
+  check("riding 0x39, row 0 is drawn and row 1 is not",
+        [0x2d, 0x2f, 0x34, 0x31].every(visible)
+        && ![0x2e, 0x30, 0x35, 0x32].some(visible),
+        [...nodes.keys()].map((s) => `${s.toString(16)}:${visible(s)}`).join(" "));
+
+  // The spun part, in world space, against the exe's own product:
+  // T(pos) · RotY(y) · RotX(x) · RotZ(lim) · T(offset) · RotX(spin).
+  const d = car.draw.limited;
+  const qd = new Quaternion().setFromEuler(new Euler(
+    d.pitch * BAMS_TO_RAD, d.yaw * BAMS_TO_RAD, d.roll * BAMS_TO_RAD, "YXZ"));
+  const qs = new Quaternion().setFromEuler(new Euler(
+    car.spin * BAMS_TO_RAD, 0, 0, "YXZ"));
+  root.updateMatrixWorld(true);
+  const wheel = nodes.get(0x34)!;
+  const wq = wheel.getWorldQuaternion(new Quaternion());
+  const wp = wheel.getWorldPosition(new Vector3());
+  const want = new Vector3(...TW[0]).applyQuaternion(qd)
+    .add(new Vector3(pose.x, pose.y, pose.z));
+  check("the limited frame is not the body's for this roll",
+        d.roll !== 0 && d.roll !== pose.roll, JSON.stringify(d));
+  check("a spun part sits on the roll-limited frame",
+        wp.distanceTo(want) < 1e-3, `${wp.toArray()} vs ${want.toArray()}`);
+  check("...turned by it and then by RotX(obj+0x1330)",
+        Math.abs(Math.abs(wq.dot(qd.clone().multiply(qs))) - 1) < 1e-6,
+        `${wq.toArray()}`);
+  const spinWas = wheel.quaternion.clone();
+  St2CarsTick(host);
+  rigs.update(at);
+  check("...a frame later it has turned by another 0x1000",
+        Math.abs(wheel.quaternion.angleTo(spinWas)) > 0.1,
+        String(wheel.quaternion.angleTo(spinWas)));
+
+  // Crash: 0x39 runs out, the row changes and the parked part turns.
+  pose = { ...pose, roll: 0 };
+  G.g_cam_path_frame = 370;
+  St2CarsTick(host);
+  St2CarsTick(host);
+  St2CarsTick(host);
+  rigs.update(at);
+  check("parked after 0x39, row 1 is drawn and row 0 is not",
+        [0x2e, 0x30, 0x35, 0x32].every(visible)
+        && ![0x2d, 0x2f, 0x34, 0x31].some(visible));
+  const door = nodes.get(0x30)!;
+  const yaw = new Euler().setFromQuaternion(door.quaternion, "YXZ").y;
+  check("...and the second column is turned RotY by obj+0x1334",
+        car.partYaw !== 0
+        && Math.abs(yaw - car.partYaw * BAMS_TO_RAD) < 1e-6
+        && door.position.x === T2[0],
+        `${yaw} vs ${car.partYaw * BAMS_TO_RAD}`);
+  ResetGameGlobals();
+}
+
+console.log("\nthe weapon-5 round and the tracer face the camera");
+{
+  // The rig `obj_416b00` put `PlayerShotEffectsThink`'s one literal slot,
+  // 0x109D, in front of Goldman's desk in every Original Mode stage-2 opening:
+  // the exporter placed a root at `op_` 0x194's own pose. The exe draws that
+  // slot only from a live kind-5 `g_shot_tracer_ring` record, at the record
+  // plus the path, after `MatrixClearRotation`.
+  const { RIGS } = await import("../src/hod2lib/rigs_data");
+  const { originalWeaponRoundSlots } = await import("../src/hod2lib/bundle");
+  const { OriginalWeaponKind, TRACER_WEAPON5_SLOT }
+    = await import("../src/game/effects/shot_effects");
+  const { Euler, Quaternion } = await import("three");
+  const { BAMS_TO_RAD } = await import("../src/core/bams");
+  check("obj_416b00 is not a rig the exporter places",
+        !!RIGS.find((r) => r.name === "obj_416b00")?.placementBlocked);
+  check("...and its slot rides the effect templates, in Original Mode only",
+        originalWeaponRoundSlots(true).includes(0x109d)
+        && originalWeaponRoundSlots(false).length === 0);
+
+  const root = new Obj3D();
+  for (const slot of [TRACER_WEAPON5_SLOT, 0xb78]) {
+    const p = new Obj3D();
+    p.name = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    p.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(p);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.position.set(10, 5, 30);
+  camera.rotation.set(0.2, 0.9, 0.1, "YXZ");
+  camera.updateMatrixWorld(true);
+  const key = (v: number) => [[0, v, 0, 0], [30, v, 0, 0]];
+  const paths = new CamPaths({
+    fps: 60, paths: {},
+    object_paths: { "404": { file: "op_org", index: 0, start: 0, duration: 24,
+      channels: { pos_x: key(0.5), pos_y: key(0.25), pos_z: key(-1),
+                  rot_x: key(0x800), rot_y: key(0x1000), rot_z: key(0) } } },
+  } as never);
+  const ctx = { camera, paths } as unknown as Parameters<typeof layer.update>[0];
+  layer.update(ctx);
+  check("no record, no round", layer.group.children.length === 0);
+
+  const t = G.g_shot_tracer_ring[0]!;
+  t.live = true; t.player = 0; t.kind = OriginalWeaponKind.Slow;
+  t.pos = { x: 1, y: 2, z: 3 }; t.frame = 30;
+  layer.update(ctx);
+  const n = layer.group.children[0];
+  check("a live kind-5 record draws slot 0x109D in the world",
+        layer.group.children.length === 1 && !!n,
+        `${layer.group.children.length}`);
+  check("...at the record plus op_ 0x194 at frame % 24",
+        !!n && Math.abs(n.position.x - 1.5) < 1e-6
+        && Math.abs(n.position.y - 2.25) < 1e-6
+        && Math.abs(n.position.z - 2) < 1e-6,
+        n ? n.position.toArray().join(",") : "none");
+  const cq = camera.getWorldQuaternion(new Quaternion());
+  const pr = new Quaternion().setFromEuler(
+    new Euler(0x800 * BAMS_TO_RAD, 0x1000 * BAMS_TO_RAD, 0, "ZYX"));
+  check("...turned in the camera's axes: MatrixClearRotation, then the path",
+        !!n && Math.abs(Math.abs(n.quaternion.dot(cq.clone().multiply(pr))) - 1)
+          < 1e-6, n ? n.quaternion.toArray().join(",") : "none");
+
+  t.kind = 0; t.spin = 0x2000;
+  layer.update(ctx);
+  const s = layer.group.children[0];
+  const zr = new Quaternion().setFromEuler(new Euler(0, 0, 0x2000 * BAMS_TO_RAD));
+  check("an ordinary tracer faces the camera and rolls in its plane",
+        !!s && Math.abs(Math.abs(s.quaternion.dot(cq.clone().multiply(zr))) - 1)
+          < 1e-6, s ? s.quaternion.toArray().join(",") : "none");
+  ResetGameGlobals();
+}
+
 console.log("\nthe object-path seam carries six values");
 
 {
@@ -1680,6 +1875,131 @@ console.log("\nthe shot effects are models, one per frame:");
 }
 
 
+console.log("\nthe damage overlay: a plain AssetDrawSlot, drawn by the texture's alpha:");
+{
+  // `DamageOverlayUpdateAndDraw` (`FUN_00417300`) calls `AssetDrawSlot`, not
+  // `AssetDrawSlotWithAlpha`: no draw alpha, no fade. The eleven templates as
+  // the exporter writes them -- one mesh each, with the TSP words
+  // `common.bin` 116..126 carry -- and the pass `prepareDrawCommands` gives
+  // them at load. What reaches the screen must then be the template's own
+  // material on every one of the 59 frames: the translucent pass, blending by
+  // the texel's alpha at material alpha 1.
+  const { applyPvr2DrawState, pvr2Words, ALPHA_REF }
+    = await import("../src/render/draw_order");
+  const { PlayerTask } = await import("../src/game/player_state");
+  const { DAMAGE_OVERLAY_FRAMES, DAMAGE_OVERLAY_SCALES, DAMAGE_OVERLAY_SLOTS,
+          DAMAGE_OVERLAY_Z, DamageOverlayKind }
+    = await import("../src/game/effects/damage_overlay");
+  const { CustomBlending, OneMinusSrcAlphaFactor, SrcAlphaFactor }
+    = await import("three");
+  type Basic = InstanceType<typeof MeshBasicMaterial>;
+  const root = new Obj3D();
+  const mats = new Map<number, Basic>();
+  for (let slot = 0x931; slot <= 0x93b; slot++) {
+    const mat = new MeshBasicMaterial();
+    // 0x938 and 0x939 are the U-flipped models: bit 18 more, nothing else.
+    const flipped = slot === 0x938 || slot === 0x939;
+    mat.userData = { pvr2: { isp_tsp_instruction: "0x83000000",
+                             tsp_instruction: flipped ? "0x9404041B"
+                                                      : "0x9400041B" } };
+    applyPvr2DrawState(mat, pvr2Words(mat)!);
+    const part = new Mesh(new PlaneGeometry(1, 1), mat);
+    part.name = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(part);
+    mats.set(slot, mat);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // The record as the port's spawn and first update leave it -- the state
+  // half is `port.test.ts`'s, driven through `GameUpdate`.
+  G.g_player_task[0] = PlayerTask.InPlay;
+  const o = G.g_damage_overlays[0]!;
+  Object.assign(o, { active: 1, frames: DAMAGE_OVERLAY_FRAMES - 1, x: 0,
+                     kind: DamageOverlayKind.Slash, count: 1 });
+  layer.update(ctx);
+  const slot = DAMAGE_OVERLAY_SLOTS[DamageOverlayKind.Slash]![0];
+  check("a live record draws one node, in the camera's own space",
+        layer.viewGroup.children.length === 1
+        && layer.group.children.length === 0 && slot === 0x933,
+        `${layer.viewGroup.children.length}/${layer.group.children.length}`);
+  const node = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+  check("...at (0, 0, -1.02), unturned, scale 0.02, in draw layer 0xA",
+        node.position.x === 0 && node.position.y === 0
+        && node.position.z === DAMAGE_OVERLAY_Z
+        && Math.abs(DAMAGE_OVERLAY_Z + 1.02) < 1e-6
+        && node.quaternion.w === 1
+        && node.scale.x === DAMAGE_OVERLAY_SCALES[DamageOverlayKind.Slash]
+        && Math.abs(node.scale.x - 0.02) < 1e-6 && node.renderOrder === 899,
+        `${node.position.toArray()} ${node.scale.x} ${node.renderOrder}`);
+  const mat = node.material as Basic;
+  check("...with the template's own material: the draw gives it no alpha",
+        mat === mats.get(0x933));
+  check("...the translucent pass TSP 0x9400041B names: SRCALPHA / "
+        + "INVSRCALPHA, the alpha test at 1",
+        mat.transparent && mat.blending === CustomBlending
+        && mat.blendSrc === SrcAlphaFactor
+        && mat.blendDst === OneMinusSrcAlphaFactor
+        && mat.alphaTest === ALPHA_REF / 255 && mat.depthWrite,
+        `${mat.transparent} ${mat.blending} ${mat.blendSrc} ${mat.blendDst}`);
+  check("...at material alpha 1, so the texel's alpha is the whole of it",
+        mat.opacity === 1, `${mat.opacity}`);
+
+  // Every frame of its life draws the same thing.
+  const looks = new Set<string>();
+  for (let f = DAMAGE_OVERLAY_FRAMES - 1; f >= 1; f--) {
+    o.frames = f;
+    layer.update(ctx);
+    const n = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+    const m = n.material as Basic;
+    looks.add([m === mats.get(0x933), m.opacity, m.transparent, m.blending,
+               n.visible, n.scale.x, ...n.position.toArray()].join(" "));
+  }
+  const varied = [...looks];
+  check("no fade, flash or scale ramp over the 59 frames it is drawn",
+        looks.size === 1,
+        `${varied.length} different draws, first ${varied[0]}, last `
+        + `${varied[varied.length - 1]}`);
+  o.active = 0;
+  o.frames = 0;
+  layer.update(ctx);
+  check("...and on the sixtieth it is gone",
+        layer.viewGroup.children.length === 0);
+
+  // The mirrored slash is the same pass; two players move it and, for the
+  // gash, swap the model.
+  Object.assign(o, { active: 1, frames: 30, x: 0,
+                     kind: DamageOverlayKind.SlashMirrored, count: 1 });
+  layer.update(ctx);
+  const flip = (layer.viewGroup.children[0] as InstanceType<typeof Mesh>)
+    .material as Basic;
+  check("the U-flipped slash (0x939) blends the same way",
+        flip === mats.get(0x939) && flip.transparent
+        && flip.blendSrc === SrcAlphaFactor && flip.opacity === 1);
+  Object.assign(o, { kind: DamageOverlayKind.Gash, count: 2, x: -0.22 });
+  layer.update(ctx);
+  const gash = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+  check("with two players the gash is 0x936, 0.22 to the left",
+        gash.material === mats.get(0x936)
+        && Math.abs(gash.position.x + 0.22) < 1e-6);
+
+  // Only the two tasks that call the routine draw it.
+  G.g_player_task[0] = PlayerTask.None;
+  layer.update(ctx);
+  check("a player not in play or on the countdown draws no overlay",
+        layer.viewGroup.children.length === 0);
+  G.g_player_task[0] = PlayerTask.ContinueCountdown;
+  layer.update(ctx);
+  check("...and one on the countdown does",
+        layer.viewGroup.children.length === 1);
+  ResetGameGlobals();
+}
+
 console.log("\nthe water ring is drawn from its record alone:");
 {
   const root = new Obj3D();
@@ -1728,19 +2048,35 @@ console.log("\nthe water ring is drawn from its record alone:");
 
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {
-  // A 2x1 image and just enough canvas to transpose it. The file's own stub is
+  // A 2x1 image and just enough WebGL to read it back. The file's own stub is
   // for text labels and has no pixel calls, so this one is local and put back.
+  // The second texel is transparent, as 904 opaque-pass gore texels are: the
+  // readback has to keep the colour under it, which a 2D canvas -- stored
+  // premultiplied -- hands back as black. That canvas is what this used, and
+  // the stub asks only for `webgl`, so going back to it fails here.
   const doc = globalThis.document;
-  const px = new Uint8ClampedArray([10, 200, 30, 255, 40, 50, 60, 255]);
-  const held = new Uint8ClampedArray(px);
+  const px = new Uint8Array([10, 200, 30, 255, 40, 50, 60, 0]);
+  const asked: string[] = [];
+  const gl = {
+    TEXTURE_2D: 1, FRAMEBUFFER: 2, COLOR_ATTACHMENT0: 3,
+    FRAMEBUFFER_COMPLETE: 4, RGBA: 5, UNSIGNED_BYTE: 6, NONE: 0,
+    createTexture: () => ({}), createFramebuffer: () => ({}),
+    bindTexture: () => undefined, bindFramebuffer: () => undefined,
+    pixelStorei: () => undefined, texParameteri: () => undefined,
+    texImage2D: () => undefined, framebufferTexture2D: () => undefined,
+    checkFramebufferStatus: () => 4,
+    readPixels: (_x: number, _y: number, _w: number, _h: number,
+                 _f: number, _t: number, out: Uint8Array) => out.set(px),
+    deleteTexture: () => undefined, deleteFramebuffer: () => undefined,
+    getExtension: () => ({ loseContext: () => undefined }),
+  };
   (globalThis as unknown as { document: unknown }).document = {
     createElement: () => ({
       width: 0, height: 0,
-      getContext: () => ({
-        drawImage: () => undefined,
-        getImageData: () => ({ data: held }),
-        putImageData: () => undefined,
-      }),
+      getContext: (kind: string) => {
+        asked.push(kind);
+        return kind === "webgl" ? gl : null;
+      },
     }),
   };
 
@@ -1760,9 +2096,14 @@ console.log("\nthe blood colour switch moves the map, not the shader:");
         /1\/1 swapped/.test(layer.describe), layer.describe);
   check("red is the default, and it is the transposed map",
         mat.map !== map && layer.colour === "red", layer.describe);
+  const held = ((mat.map as { image?: { data?: Uint8Array } } | null)
+    ?.image?.data) ?? new Uint8Array();
   check("...and the transpose really exchanges R and G",
         held[0] === 200 && held[1] === 10 && held[2] === 30,
         `${held[0]},${held[1]},${held[2]}`);
+  check("...keeping the alpha, and the colour under a transparent texel",
+        held.join() === "200,10,30,255,50,40,60,0" && asked.includes("webgl"),
+        `${held.join()} via ${asked.join()}`);
 
   // **The regression this exists for.** The first cut did the swap in the
   // fragment shader through `onBeforeCompile`; the material's mode changed and
@@ -2273,6 +2614,139 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
 }
 
 /**
+ * The hook's draw, node by node: `ZombieSubmitSlotByLighting` (`FUN_00453AE0`)
+ * and `ThrowerDrawPartWithAlpha` (`FUN_0044A240`) draw a node through
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`), and the port's hooks write which
+ * into `Actor.nodeDrawAlpha`; `DrawCharacterPartSlot` (`FUN_00419B40`) draws
+ * four types' parts at `obj+0x138C`. `draw_gates.ts` used to draw every
+ * alpha above 0 solid and hide a bone at 0.
+ */
+console.log("\nthe draw gates: each node's faded draw, and the parts at 0x138C");
+{
+  const three = await import("three");
+  const { Group, Mesh, MeshBasicMaterial, BoxGeometry, MeshLambertMaterial } =
+    three;
+  const { applyDrawGates } =
+    await import("../src/render/characters/draw_gates");
+  const { setMeshDrawAlpha, setUnfadedMaterial, unfadedMaterial,
+          meshDrawAlpha } = await import("../src/render/draw_order");
+  const { MotionFlag } = await import("../src/game/actor");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+
+  // A template material in the opaque pass, with a base alpha under 1.
+  const tmpl = (): InstanceType<typeof MeshBasicMaterial> => {
+    const m = new MeshBasicMaterial({ opacity: 0.8 });
+    m.transparent = false;
+    return m;
+  };
+  const mk = (name: string) => {
+    const m = new Mesh(new BoxGeometry(1, 1, 1), tmpl());
+    m.name = name;
+    return m;
+  };
+  const pivot = new Group();
+  const pelvis = mk("chr_z_spawn000_bone01_1c6c");
+  const leg = mk("chr_z_spawn000_bone10_1111");
+  const cel = mk("cel");
+  pelvis.add(leg, cel);        // the cel is the pelvis's draw, not the leg's
+  const waist = mk("chr_z_spawn000_part0_1c63");
+  pivot.add(pelvis, waist);
+  const plain = new Map<object, unknown>([
+    [pelvis, pelvis.material], [leg, leg.material], [cel, cel.material],
+    [waist, waist.material]]);
+  const a = {
+    cls: SpawnClass.Zombie, charType: 0x12, alpha: 0.25,
+    motionFlags: MotionFlag.Drawn, partVisible: [1], suppressedBones: 0,
+    nodeDrawAlpha: [] as (number | null)[],
+  };
+  const inst = {
+    a, pivot, root: pivot, bones: new Map([[1, pelvis], [10, leg]]),
+    gore: new Map(),
+  } as never;
+  type Basic = InstanceType<typeof MeshBasicMaterial>;
+  const mat = (m: InstanceType<typeof Mesh>) => m.material as Basic;
+
+  a.nodeDrawAlpha[1] = 0.25;
+  a.nodeDrawAlpha[10] = null;
+  applyDrawGates(inst);
+  check("a node drawn at 0.25 is the forced blend at its base alpha times it",
+        mat(pelvis) !== plain.get(pelvis) && mat(pelvis).transparent
+        && mat(pelvis).blendSrc === three.SrcAlphaFactor
+        && mat(pelvis).blendDst === three.OneMinusSrcAlphaFactor
+        && Math.abs(mat(pelvis).opacity - 0.2) < 1e-6,
+        `${mat(pelvis).opacity}`);
+  check("...and so is everything else the hook draws for it -- the cel",
+        Math.abs(mat(cel).opacity - 0.2) < 1e-6 && mat(cel).transparent);
+  check("...while a child bone drawn plainly keeps the template's material",
+        leg.material === plain.get(leg));
+  check("`znele`'s part is drawn at `obj+0x138C` whatever the node alpha",
+        waist.material !== plain.get(waist)
+        && Math.abs(mat(waist).opacity - 0.2) < 1e-6);
+
+  a.nodeDrawAlpha[1] = 0;
+  a.alpha = 0;
+  applyDrawGates(inst);
+  check("at 0 the node is still drawn: on its layer, opacity 0, writing depth",
+        pelvis.layers.isEnabled(0) && mat(pelvis).opacity === 0
+        && mat(pelvis).depthWrite && mat(pelvis).alphaTest === 0);
+  check("...and so is the part", waist.visible && mat(waist).opacity === 0);
+
+  a.nodeDrawAlpha[1] = 1;
+  a.alpha = 1;
+  applyDrawGates(inst);
+  check("at 1 it is still the forced blend, not the plain draw: an "
+        + "opaque-pass mesh's texture alpha shows",
+        mat(pelvis) !== plain.get(pelvis) && mat(pelvis).transparent
+        && Math.abs(mat(pelvis).opacity - 0.8) < 1e-6
+        && mat(waist).transparent);
+
+  // A zombie that is not one of the four types draws its parts plainly.
+  a.charType = 1;
+  applyDrawGates(inst);
+  check("another character type's part is drawn plainly",
+        waist.material === plain.get(waist));
+  a.charType = 0x12;
+
+  // The gun light swaps a lit actor's materials for its twins, after the
+  // characters: the fade goes back on top of the twin it chose.
+  a.nodeDrawAlpha[1] = 0.5;
+  applyDrawGates(inst);
+  const twin = new MeshLambertMaterial({ opacity: 0.8 });
+  twin.userData = { gunLit: true };
+  setUnfadedMaterial(pelvis, twin);
+  const drawnWith = pelvis.material as unknown as { type: string };
+  check("a light layer's swap goes under the fade: the twin, at 0.5",
+        unfadedMaterial(pelvis) === (twin as unknown)
+        && drawnWith !== (twin as unknown)
+        && drawnWith.type === "MeshLambertMaterial"
+        && Math.abs(mat(pelvis).opacity - 0.4) < 1e-6
+        && meshDrawAlpha(pelvis) === 0.5);
+  // A layer that writes the material directly -- a gore swap, a cel -- is
+  // read back as the new unfaded one by the next fade.
+  const gore = tmpl();
+  pelvis.material = gore;
+  applyDrawGates(inst);
+  check("...and a direct write is taken as the new unfaded material",
+        unfadedMaterial(pelvis) === gore && pelvis.material !== gore
+        && Math.abs(mat(pelvis).opacity - 0.4) < 1e-6);
+
+  // The fade ends: every mesh goes back to what it draws unfaded.
+  a.nodeDrawAlpha[1] = null;
+  applyDrawGates(inst);
+  check("a plain draw after the fade puts back what the mesh draws unfaded",
+        pelvis.material === gore && cel.material === plain.get(cel)
+        && meshDrawAlpha(pelvis) === null);
+  // ...and a clone some layer saved and puts back later is seen through.
+  setMeshDrawAlpha(leg, 0.3);
+  const saved = leg.material;
+  setMeshDrawAlpha(leg, null);
+  leg.material = saved as never;
+  setMeshDrawAlpha(leg, null);
+  check("a stale fade clone put back after the fade is replaced by its source",
+        leg.material === plain.get(leg));
+}
+
+/**
  * The player's own character, in the scene, in the cut scene that spawns it.
  *
  * Stage 3's block 2 step 5 puts two class-0x25 humanoids at one point --
@@ -2611,6 +3085,86 @@ console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
   const z = makeActor(0x30, SpawnClass.Zombie, 1, "zombie");
   check("...and any other class is left to the ordinary arm",
         !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
+}
+
+console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
+{
+  // `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `MatrixTranslate(obj+0x40);
+  // MatrixRotateX(obj+0x64); MatrixRotateZ(obj+0x6C); MatrixRotateY(obj+0x68);
+  // MatrixScale(s, s, s)` (`0x0043FEE3`..`0x0043FF1E`), and all three angles
+  // come off the record through `SpawnFromDescriptorSmall` (`FUN_00408BC0`).
+  // Built here from the placement through `SpawnSlotActors`, drawn by the
+  // layer, and compared element by element with the port's transcriptions of
+  // those five calls -- three unequal angles and a scale that is not 1, so a
+  // dropped angle at the spawn, a wrong order or a wrong axis in the draw each
+  // move some element (`L48`).
+  const { SpawnSlotActors } = await import("../src/game/director");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Rng } = await import("../src/core/rng");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale,
+    MatrixTranslate,
+  } = await import("../src/game/matrix");
+  await import("../src/game/classes");
+
+  const SLOT = 0x1383;
+  const root = new Obj3D();
+  const part = new Obj3D();
+  part.name = `slots_actor_fixed000_slot_${SLOT.toString(16)}`;
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  // Stage 2's `etc_1.bin[63]` at its own 15x and its own pitch, 0x2800, with
+  // a yaw and a roll added that no shipped class-0x13 record has.
+  const AT = 84232;
+  SetGameTables({
+    types: {}, placements: [{
+      at: AT, class: 0x13, char_type: -1, motion: null, hp: 0,
+      pitch: 0x2800, yaw: 0x1c00, roll: 0x0a00, init_flags: 0x8000,
+      class13: { slot: SLOT, cam_path: 114, cam_frame: 0, scale: 15,
+                 behaviour: 0, selector: 65 },
+    }],
+  } as never);
+  const pos = { x: -1600, y: 1400, z: -2750 };
+  SpawnSlotActors([{ at: AT, class: SpawnClass.ScriptedProp,
+                     pos: [pos.x, pos.y, pos.z] }], new Rng(1));
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  layer.update(ctx);
+  const node = layer.nodeFor(AT);
+  node?.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, pos.x, pos.y, pos.z);
+  MatrixRotateX(want, 0x2800);
+  MatrixRotateZ(want, 0x0a00);
+  MatrixRotateY(want, 0x1c00);
+  MatrixScale(want, 15, 15, 15);
+  const got = node?.matrix.elements ?? [];
+  const worst = node
+    ? Math.max(...want.map((v, i) => Math.abs(v - got[i]) / Math.max(1, Math.abs(v))))
+    : Infinity;
+  check("a class-0x13 prop spawned from its record is drawn "
+        + "T * Rx(pitch) * Rz(roll) * Ry(yaw) * S",
+        worst < 1e-4, node ? `worst relative element ${worst}` : "no node");
+
+  // The shipped record alone, `(0x2800, 0, 0)`: the quads' face, +z in the
+  // model, tips 0x2800 about x and turns down toward the ground at
+  // `(0, -sin, cos)` -- the disc faces the viewer below it rather than the
+  // horizon. Upright, the column would be `(0, 0, 1)`.
+  const a = G.g_object_list.find((o) => o.at === AT);
+  if (a) { a.yaw = 0; a.roll = 0; }
+  layer.update(ctx);
+  node?.updateMatrix();
+  const e = node?.matrix.elements ?? [];
+  const th = 0x2800 * Math.PI * 2 / 65536;
+  const face = [8, 9, 10].map((i) => (e[i] ?? 0) / 15);
+  check("stage 2's etc_1.bin[63] faces down at 0x2800, not the horizon",
+        Math.abs(face[0]) < 1e-6 && Math.abs(face[1] + Math.sin(th)) < 1e-5
+        && Math.abs(face[2] - Math.cos(th)) < 1e-5,
+        face.map((v) => v.toFixed(4)).join(", "));
+  G.g_object_list.length = 0;
+  SetGameTables({ types: {}, placements: [] } as never);
 }
 
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
@@ -3127,6 +3681,40 @@ console.log("\nthe engine's two passes, and the translucent order");
   check("...every frame, not from the last frame's",
         Math.abs((slotNode.material as InstanceType<typeof MeshBasicMaterial>)
           .opacity - 0.15) < 1e-9);
+
+  // `AssetDrawSlotWithAlpha` (`FUN_004185A0`) does not test its argument: at
+  // 1.0 it is still `DrawModelWithForcedAlphaBlend`, which blends an
+  // opaque-pass mesh -- and so its texture's alpha, now that the exporter
+  // keeps it. The layers used to keep the plain draw at 1.
+  const wallMat = exported(0x83000000, 0x2008045B, false);
+  applyPvr2DrawState(wallMat, { isp: 0x83000000, tsp: 0x2008045B });
+  const wallNode = new Mesh(new PlaneGeometry(1, 1), wallMat);
+  setSlotAlpha(wallNode, 1);
+  const forcedWall = wallNode.material as InstanceType<typeof MeshBasicMaterial>;
+  check("a draw with alpha at 1 still blends an opaque-pass mesh",
+        forcedWall !== wallMat && forcedWall.transparent
+        && forcedWall.blendSrc === three.SrcAlphaFactor
+        && forcedWall.blendDst === three.OneMinusSrcAlphaFactor
+        && forcedWall.opacity === 1,
+        `${forcedWall === wallMat} ${forcedWall.transparent}`);
+  check("...and leaves the template's material alone",
+        wallMat.transparent === false);
+  check("...untested: the opaque pass's alpha test stays off (bits 19-20 kept)",
+        forcedWall.alphaTest === 0, `${forcedWall.alphaTest}`);
+  setSlotAlpha(wallNode, null);
+  check("a plain draw (`AssetDrawSlot`) after it goes back to the template's",
+        wallNode.material === wallMat && wallMat.transparent === false);
+  const untouched = new Mesh(new PlaneGeometry(1, 1), wallMat);
+  setSlotAlpha(untouched, null);
+  check("...and a plain draw never clones", untouched.material === wallMat);
+
+  // The blood transpose swaps red and green and nothing else: an opaque-pass
+  // gore texel at alpha 0 keeps the colour the pass shows.
+  const { transposeRedGreen } = await import("../src/render/bloodcolour");
+  const texel = new Uint8Array([10, 200, 30, 0, 1, 2, 3, 255]);
+  transposeRedGreen(texel);
+  check("the blood transpose keeps the alpha, and the colour under alpha 0",
+        texel.join() === "200,10,30,0,2,1,3,255", texel.join());
 
   // ---- the order ---------------------------------------------------------
   // Commands as the loader delivers them: a node Group of primitive Meshes,

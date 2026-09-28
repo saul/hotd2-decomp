@@ -138,7 +138,7 @@ here — see below.
 | 13–14 | filter mode | 0 point, 1 bilinear, 2/3 trilinear pass A/B |
 | 15–16 | clamp UV | 0 none, 1 clamp V, 2 clamp U, 3 both |
 | 17–18 | flip UV | 0 none, 1 flip V, 2 flip U, 3 both |
-| 19 | ignore texture alpha | |
+| 19 | ignore texture alpha | PowerVR2 only. The PC port reads it only with bit 20, as the pass selector `(tsp & 0x180000) != 0x80000`; the texture keeps its alpha ([materials.md](materials.md#texture-alpha-on-the-d3d-path--proved)) |
 | 20 | use alpha | |
 | 21 | colour clamp | |
 | 22–23 | fog control | 0 LUT, 1 per-vertex, 2 none, 3 LUT mode 2 |

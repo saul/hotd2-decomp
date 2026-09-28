@@ -76,9 +76,13 @@ function S(m: Matrix4, x: number, y: number, z: number): Matrix4 {
   return m.multiply(_b.makeScale(x, y, z));
 }
 
-/** One `AssetDrawSlot` under `m`, faded when `alpha` is below one. */
+/**
+ * One draw under `m`: `AssetDrawSlot` with no `alpha`,
+ * `AssetDrawSlotWithAlpha` with one -- at 1 as at any other value.
+ */
 function draw(h: CreatureEffectHost, seen: Set<string>, key: string,
-              slot: number, parent: Group, m: Matrix4, alpha = 1): void {
+              slot: number, parent: Group, m: Matrix4,
+              alpha: number | null = null): void {
   const node = h.node(key, slot, parent);
   if (!node) return;
   seen.add(key);
@@ -108,7 +112,11 @@ export function drawCreatureEffects(h: CreatureEffectHost,
     R(_o, AX, r.pitch);
     _m.copy(_o);
     S(_m, r.ring, 1, r.ring);
-    draw(h, seen, `or${r.id}`, OWL_RING_SLOT, h.world, _m, r.alpha);
+    // `OwlGroundImpactRingPulse` draws the ring with `AssetDrawSlot`;
+    // `OwlGroundImpactRingFadeOut` with `AssetDrawSlotWithAlpha`, the first
+    // twenty-nine frames at 1.
+    draw(h, seen, `or${r.id}`, OWL_RING_SLOT, h.world, _m,
+         r.drew === OwlGroundRingPhase.FadeOut ? r.alpha : null);
     if (r.drew === OwlGroundRingPhase.Pulse) {
       _m.copy(_o);
       S(_m, r.strip, r.strip, r.strip);
@@ -151,13 +159,16 @@ export function drawCreatureEffects(h: CreatureEffectHost,
     R(_o, AY, r.yaw);
     _m.copy(_o);
     S(_m, r.drawnRing, r.scale, r.drawnRing);
-    draw(h, seen, `re${r.id}`, RING_EFFECT_RING_SLOT, h.world, _m,
-         r.drawnAlpha);
+    // `RingEffectSpread` and `RingEffectHold` draw with `AssetDrawSlot` and
+    // record 1; `RingEffectFadeOut` takes 0.025 off before it draws with
+    // `AssetDrawSlotWithAlpha`, so its alpha is never 1.
+    const alpha = r.drawnAlpha < 1 ? r.drawnAlpha : null;
+    draw(h, seen, `re${r.id}`, RING_EFFECT_RING_SLOT, h.world, _m, alpha);
     r.drawnStrips.forEach((st, i) => {
       _m.copy(_o);
       T(_m, st.x, 0, st.z);
       S(_m, r.drawnStrip, r.drawnStrip, r.drawnStrip);
-      draw(h, seen, `re${r.id}s${i}`, st.slot, h.world, _m, r.drawnAlpha);
+      draw(h, seen, `re${r.id}s${i}`, st.slot, h.world, _m, alpha);
     });
   }
 }

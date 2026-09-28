@@ -25,9 +25,11 @@
  * execution order, and every actor is allocated after the list is built.
  */
 import { G } from "../globals";
+import { vec3 } from "../vec";
 import { EvtRunQueuedActions } from "./actions";
 import { CameraUpdateHook, EvtActionHandler } from "./driver";
 import { CameraUpdateTick } from "./hooks";
+import { CamBlockSetAnglesFromLookAt, CameraPoseBlock } from "./path";
 import { RailMayAdvance } from "./rail";
 import { UpdateSceneViewAndLight } from "./view";
 
@@ -48,18 +50,58 @@ export { CameraUpdateTick };
  * driver can raise it; `g_camera_is_tracking` is seeded to 1 and
  * `SelectCameraLookAtTarget` clears it when no slot is claimed. The major
  * hooks are `[0]` and `[3]` `NoOpStub`, `[2]` `EvtRunQueuedActions` and `[1]`
- * `EvtRunQueuedActionsSyncViewBlock`, which is `EvtRunQueuedActions` and then,
- * while the minor is 3, a copy of block 0's eye and look-at into block 2 -- a
- * block the port has no reader for. The handlers of evt-action blocks 1..3
- * are the two-player camera blocks', and every one the shipped scripts leave
- * is `NoOpStub`. `[proved]`
+ * {@link EvtRunQueuedActionsSyncViewBlock}. The handlers of evt-action blocks
+ * 1..3 are the two-player camera blocks', and every one the shipped scripts
+ * leave is `NoOpStub`. `[proved]`
  */
 export function CameraActorTick(): void {
   G.g_camera_settled = 0;
   G.g_camera_is_tracking = 1;
   const major = G.g_scene_state_major_entered;
-  if (major === 1 || major === 2) EvtRunQueuedActions();
+  if (major === 1) EvtRunQueuedActionsSyncViewBlock();
+  else if (major === 2) EvtRunQueuedActions();
   UpdateSceneViewAndLight();
+}
+
+/**
+ * `EvtRunQueuedActionsSyncViewBlock` — `FUN_004023D0`,
+ * `g_camera_actor_major_hooks[1]`.
+ *
+ * ```
+ * 004023d0  EvtRunQueuedActions()
+ * 004023f0  if (g_scene_state_minor_entered != 3) return
+ *           if ([0x009C6F1C] == 0) {
+ * 00402422    block2.eye..roll    = block0.eye..roll      ; 0x009A60C0 -> 0x009A6408, 6 dwords
+ * 00402433    block2.target..+0x14 = block0.target..+0x14 ; 0x009A60D8 -> 0x009A6420, 6 dwords
+ * 00402455    CamBlockSetAnglesFromLookAt(block2, block2.target, block0.roll)
+ *           } else if ([0x009C6F1C] == 5) {
+ * 00402417    CamBlockSetAnglesFromLookAt(block2, block2.target, block2.roll)
+ *           }
+ * ```
+ *
+ * `0x009C6F1C` is always 0: its only writers are `CameraBlocksReset`
+ * (`0x0040220E`) and `ResetSceneOnEnter` (`0x0045EE2F`), both storing an
+ * `EBX` they zeroed (operand search and the bytes `1c6f9c00` agree on the
+ * three sites). So the copy is the arm that runs and the `== 5` one is
+ * unreachable, which is why the port has no word for it.
+ *
+ * So while a scripted view-angle turn -- scene state (1, 3) -- is running,
+ * camera block 2 follows block 0 frame by frame, and when the turn ends it
+ * keeps the last heading. The frog's screen wedge reads block 2's yaw
+ * (`0x0043AB62`), which is the only reason the port keeps the block.
+ * `[proved]`
+ */
+export function EvtRunQueuedActionsSyncViewBlock(): void {
+  EvtRunQueuedActions();
+  if (G.g_scene_state_minor_entered !== 3) return;
+  const e = G.g_camera_block_eye, t = G.g_camera_block_target;
+  G.g_camera_block2_eye = vec3(e.x, e.y, e.z);
+  G.g_camera_block2_pitch_bams = G.g_camera_block_pitch_bams;
+  G.g_camera_block2_yaw_bams = G.g_camera_block_yaw_bams;
+  G.g_camera_block2_roll_bams = G.g_camera_block_roll_bams;
+  G.g_camera_block2_target = vec3(t.x, t.y, t.z);
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Block2, G.g_camera_block2_target,
+                              G.g_camera_block_roll_bams);
 }
 
 /** A replay's camera frames are cheap, and no postcondition needs more. */

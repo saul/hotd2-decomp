@@ -37,7 +37,8 @@
  * Everything streams from `/bgm/`, `/se/` and `/voice/` — the dev server
  * serves them out of the user's own install (see `vite.config.ts`), because
  * the audio is 300 MB of uncompressed PCM and copying it into the bundle
- * would triple it.
+ * would triple it. A hosted copy (`tools/site.mjs`) stages them beside the
+ * page instead, and {@link soundUrl} is why it can.
  */
 
 import type { BgmJson, SoundJson } from "../bundle";
@@ -59,6 +60,24 @@ export const NS_CONTROL = 8;
 export const SOUND_STOP = 0x80000000;
 export const SOUND_STOP_SE = 0x80000001;
 export const SOUND_STOP_VOICE = 0x80000002;
+
+/**
+ * Where a sound is fetched from: `<kind>/<path>`, **lowercased**.
+ *
+ * The exe's tables spell a name the way its build did -- `COMMON\GUN5_22.WAV`,
+ * `STAGE1_SE\RAIN3ST_44.wav` -- and the install spells the file however it
+ * was pressed (`SE/STAGE1_SE/rain3st_44.wav`), which Windows never minded.
+ * The dev server resolves each segment case-insensitively (`vite.config.ts`);
+ * a static host cannot, because an S3 key is exact. So the request is
+ * lowercased here and `tools/site.mjs` lowercases every file it stages, and
+ * the two meet without either knowing the other's spelling. That is safe
+ * only because no two of the install's 802 sound files differ in case alone,
+ * and `site.mjs` refuses to stage an install where two do.
+ */
+export function soundUrl(kind: "bgm" | "se" | "voice", file: string): string {
+  return `${kind}/${file.replace(/\\/g, "/").toLowerCase()
+    .split("/").map(encodeURIComponent).join("/")}`;
+}
 
 /**
  * The BGM ids `PlaySoundId` streams **unlooped**: the three `CMP EBX, imm32`
@@ -422,7 +441,7 @@ export class Bgm {
     if (hit) return hit.buffer;
     let bytes: Uint8Array;
     try {
-      const r = await fetch(`bgm/${encodeURIComponent(file)}`);
+      const r = await fetch(soundUrl("bgm", file));
       if (!r.ok) return null;
       bytes = new Uint8Array(await r.arrayBuffer());
     } catch {
@@ -504,8 +523,7 @@ export class Bgm {
     if (this.loops.has(id)) return;
     const el = new Audio();
     el.loop = true;
-    el.src = `se/${file.replace(/\\/g, "/")
-      .split("/").map(encodeURIComponent).join("/")}`;
+    el.src = soundUrl("se", file);
     el.volume = Math.min(1, this._volume * SFX_GAIN);
     el.muted = this._muted;
     this.loops.set(id, el);
@@ -558,8 +576,7 @@ export class Bgm {
    */
   private oneShot(kind: "se" | "voice", file: string): void {
     if (this._muted) return;
-    const url = `${kind}/${file.replace(/\\/g, "/")
-      .split("/").map(encodeURIComponent).join("/")}`;
+    const url = soundUrl(kind, file);
     let el = this.pool[this.poolNext];
     if (!el) {
       el = new Audio();

@@ -49,6 +49,7 @@
  * what the old `[open]` note here got wrong.
  */
 import { Mesh, type Object3D } from "three";
+import { setUnfadedMaterial, unfadedMaterial } from "../draw_order";
 import { CEL_HOLDER } from "./cels";
 import type { GoreSwap, Instance } from "./instance";
 
@@ -102,11 +103,13 @@ export function swapGore(parts: ReadonlyMap<number, Object3D>,
     // A single-primitive bone. Its geometry and material are replaced, which
     // leaves its child bones untouched, and the damaged part's remaining
     // primitives are parented to it -- `AssetDrawSlot` draws all of them.
+    // What the bone draws when it is not faded, never a fade's clone: the
+    // next fade reads the new material back (`render/draw_order.ts`).
     const keep = prev?.keep
-      ?? Object.assign(new Mesh(self.geometry, self.material as never),
+      ?? Object.assign(new Mesh(self.geometry, unfadedMaterial(self) as never),
                        { visible: false });
     self.geometry = prims[0].geometry;
-    self.material = prims[0].material;
+    setUnfadedMaterial(self, prims[0].material);
     const added = prims.slice(1).map((p) => {
       const copy = seated(p);
       self.add(copy);
@@ -141,6 +144,6 @@ export function restoreGore(inst: Instance, bone: number,
   const node = inst.bones.get(bone) as Mesh | undefined;
   if (g.keep && node?.isMesh) {
     node.geometry = g.keep.geometry;
-    node.material = g.keep.material;
+    setUnfadedMaterial(node, g.keep.material);
   }
 }

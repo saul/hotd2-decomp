@@ -168,3 +168,24 @@ export function unlockDevice(tilt: TiltReload): void {
     lockLandscape();
   }
 }
+
+/**
+ * `F`: the page fullscreen, or back out of it.
+ *
+ * The same request the start screen makes on a phone, made on any device and
+ * undone by a second press -- Escape undoes it too, which the browser does
+ * itself. A key press is a gesture, so it is allowed. On a touch screen the
+ * landscape lock follows, as it does from the start screen. iOS has no element
+ * fullscreen on a phone, so there the call is missing and this does nothing.
+ */
+export function toggleFullscreen(): void {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => { /* already out */ });
+    return;
+  }
+  const root = document.documentElement;
+  if (typeof root.requestFullscreen !== "function") return;
+  root.requestFullscreen({ navigationUI: "hide" })
+    .then(() => { if (touchFirst()) lockLandscape(); })
+    .catch(() => { /* refused; the page still fills the window */ });
+}

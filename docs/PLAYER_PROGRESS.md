@@ -993,6 +993,50 @@ read it -- `CameraDriverFromDeferredPose` copies it whole,
 roll zeroed, the yaw turned half round) while the drawn camera takes the pose's
 full angles through the driver. `[proved]`
 
+**Two yaws, and which one each reader takes.** The camera block's yaw,
+`g_camera_block_yaw_bams` (`0x009A60D0`), is `VecToAngles(eye - target)` --
+the camera's own +z, pointing back at the viewer -- and it is what the view is
+built from. `g_camera_yaw_bams` (`0x009C71F0`) is the gameplay eye's heading,
+which the scene state's hooks write half a turn round from a camera heading:
+the rail pose's yaw `+ 0x8000`, or the block's `- 0x8000`. Before the camera
+was two tasks the port had only the second, and every routine the exe points at
+the first read the second in its place -- **half a turn out**. With the block
+kept current each frame they read the block now, as the exe does, and a sweep
+of the image's 63 references to `0x009A60D0` (operand search and the bytes
+agree) found every ported one:
+
+* **`ZombieShouldStandAndThrow`** (`FUN_00458E10`). The facing window is the
+  block's yaw turned half round, which is the heading of an actor facing the
+  camera; reading `g_camera_yaw_bams` put it behind the actor, so no
+  condition-8 walker ever threw -- none of stage 4's ten `znassb` or stage 5's
+  one, nor the axe walkers in stages 2 and 3. Measured in the headless player
+  with `tools/blade_throw.mjs`: stage 4's first `znassb` (evt 3740) closes to a
+  facing error of 297 BAMS against the block (20544 against the old word), and
+  now stands at frame 70 and throws both blades; stage 5's (2948), stage 3's
+  axe walker (8312, two axes) and stage 2's (26500) do the same. Before,
+  stage 4's and stage 5's never entered state 33 in 1500 frames. The claim
+  and the hands come in the character type's order: `znassb` claims first,
+  the axe types look first, and any other type answers no.
+* **`ChooseDeathMotionDirectional`** (`FUN_00456220`) reads the block itself;
+  its callers used to hand in `g_camera_yaw_bams`, which swapped the falls
+  front for back. Its four arcs are tested in a row, as the exe does, so a
+  boundary heading takes the later one.
+* **`SeveredHeadUpdate`** and **`OwlUpdateAndResolveShot`** threw the head and
+  the owl's corpse *at* the camera; they go away from it now.
+* **`Class26Subtype2Update`**'s face-camera latch, the **bat**'s wobble, the
+  **fish** splash, class 0x14's six splash strips, the carrier's bow strip and
+  its drawn wake strip, and **`PropUpdateType43`**'s crack all turn by the
+  block; **`KindedPropUpdate`**'s crack now makes the write at all.
+* **`OwlPickTargetPlayerAndAimOffset`**'s two-player offset takes the block's
+  yaw and the owl's distance from the block eye, not the sway rate.
+* **The frog** reads camera block **2**'s yaw (`0x009A6418`), which is not the
+  view: `EvtRunQueuedActionsSyncViewBlock` copies block 0's pose into it only
+  during a (1, 3) view-angle turn. The port keeps block 2 for that read, with
+  the sync, the reset and the per-frame rebuild.
+
+What the class-0x31 leaps, the grab and class 0x22 read is `g_camera_yaw_bams`
+itself, and those were right. `[proved]`
+
 A replay also has to honour what a wait *leaves behind*, not only what it
 blocks on. `wait_enemies_alive` and `wait_enemies_present` open only when the
 counters fall, and the counters fall only when the actors die — so past one of
@@ -1353,10 +1397,34 @@ the camera-path switch that picks its route, the park at the end of shot
 `0x39` or `0x3A`, and the `g_script_flags[0]` kill -- as plain records in
 `G.g_st2_cars`, and `RigLayer` draws one root per task that drew this frame at
 the pose it wrote (`TASK_POSED_ROUTINES`). Its routes in the rig data now only
-name the roots. What the draw does with the task's other words -- the
-post-crash asset set, the wheel spin, the second part's yaw once parked -- is
-not drawn yet: the exporter ships variant 0 only and no part rules for this
-rig.
+name the roots.
+
+**...and it draws what `St2CarDraw` draws, not the parts it was exported
+with.** The draw takes four slots from a row of `g_st2car_asset_variants`
+(`0x00565F2C`): row 0 until shot `0x39` runs out, row 1 -- the car after the
+crash -- from then on. It turns its nested second push `RotY(obj+0x1334)` once
+parked (`[likely]` the driver's door), and its two spun pushes
+`RotX(obj+0x1330)` while `obj+0x1320` is set, on a second frame that re-applies
+the body's `MatrixGetAngles` with the roll through a dead zone. The port's
+`St2CarDraw` computes all of it into `car.draw`; the exporter ships both rows as
+parts; `RigLayer.applyTaskDraw` shows the four parts the draw named and poses
+them. So the unshot branch's car is the crashed one from shot `0x39` frame 370,
+the wheels turn a sixteenth a frame while it drives and stop at no rotation at
+`0x3A` frame `0x50`, and the door swings out over 39 frames once it is parked.
+The door's outer skin renders black -- its translucent `char_adv04` texture-33
+material carries a zero base colour in the bundle -- which is a material
+question and not this rig's.
+
+**Original Mode's green mound in front of Goldman's desk was a shot effect.**
+`obj_416b00` is `PlayerShotEffectsThink` (`FUN_00416B00`), whose one literal
+slot, `0x109D`, it draws only for a live kind-5 tracer record, at the record
+plus `op_` `0x194`. The rig carried that path as an ungated route, so the
+player drew it from stage load at the path's own pose, `(0.5, 0, 0)`. It is not
+placed now; `render/effects.ts` draws the kind-5 arm from
+`G.g_shot_tracer_ring`, and an Original Mode bundle carries the slot in its
+effect templates. Both tracer arms now also face the camera, as
+`MatrixClearRotation` makes them: the ordinary tracer was a quad turned in
+world axes.
 
 ## Which instructions the UI strikes through
 
@@ -2318,12 +2386,14 @@ frame with the file, rendered across the wrap, and heard), and
   it may attack: `{25, 38, 51}` radii, 2 / +3 / +4 steps, from `DAT_004C4CD0`
   and `FUN_00408D60`. No stage uses evt `0x0E`, so those constants are what
   every encounter runs on.
-* `TryClaimAttackSlot` grants **one permit per player**. Only the holder enters
-  its attack state; everyone else keeps walking. That one byte (`obj+0x121`)
-  also decides the camera's focus.
+* `TryClaimAttackSlot` grants **one permit per player**, and offers each
+  claimant exactly one of them — see *The claim offers one player* below.
+  Only the holder enters its attack state; everyone else keeps walking. That
+  one byte (`obj+0x121`) also decides the camera's focus.
 * `RegisterForCameraTracking` skips any actor with flag `0x10000`, which the
-  approach state sets while walking and clears when the actor wins a permit —
-  so the camera only ever considers enemies that have committed. Candidates are
+  approach state sets while walking and clears itself when the actor wins a
+  permit — the claim does not — so the camera only ever considers enemies
+  that have committed. Candidates are
   keyed `|actor − eye| × 10` and radix-sorted nearest-first; permit holders take
   slots 0 and 1, the rest from 2.
 * `SelectCameraLookAtTarget` aims at the lone attacker, the midpoint of two, or
@@ -2476,6 +2546,49 @@ pair**: `PlaySoundId` walks two parallel tables — the looping ids at
 `LASER_SWORD_22_OFF` kills it before the strike. The off cue fires on *every*
 non-blinking frame of the hold, not once; the engine has no edge test there and
 `PlaySoundId` does not de-duplicate.
+
+### The claim offers one player, and leaves the camera bit to its callers
+
+`TryClaimAttackSlot` (`FUN_00455DE0`) and `ThrowerTryClaimAttackSlot`
+(`FUN_0044CA40`) are transcribed whole now; both used to carry a declared
+divergence.
+
+* **The pick.** The port took the first free permit. The engine picks one
+  player and offers only that player's: `g_active_player`'s with one attacker,
+  a `rand() % 2` with two attackers when one player is in play or one enemy is
+  present, and otherwise the player on the actor's own half of the screen
+  (`ActorScreenHalfSign`, `FUN_00409C90`, ported alongside). Nothing falls back
+  to the other player. For player 1 alone the answers were the same; **player
+  2 alone** was being offered player 1's permit, and in a two-player game
+  every enemy went for player 1 first. The two `rand()` arms draw from the
+  frame's `Rng` at the exact point each caller claims, so all twenty claim
+  sites in the two classes carry one — `ZombieShouldStandAndThrow`,
+  `ZombieStateWaitForCameraFrame`, `ZombieStateScriptedGrabAndDespawn`,
+  `ThrowerStatePathFollow` and `ThrowerStateRideObjectPath` gained the
+  parameter. One-player play draws nothing new, so its random stream is
+  unchanged.
+* **`NoCameraTrack`.** The port's claim lowered `obj+0x34` bit `0x10000` on
+  every grant; neither exe routine writes `obj+0x34` at all. Only
+  `ZombieStateApproach` (after its grant), `ZombieStateWaitForCameraFrame`
+  (before its claim, hidden kind only) and `ZombieStateHoldForCameraCue` (at
+  its cue) lower it, and the port already had all three. So a captor held for
+  a camera cue now stays off the camera's list until the cue, as it does in
+  the game, instead of from its first claim in the hub.
+* **The callers, read with it.** `ZombieShouldStandAndThrow` claims *before*
+  its hand test for `znassb` and after it for types 0x13/0x14, so an unarmed
+  `znassb` walker takes the permit and is answered no. `ThrowerTryEnterState`'s
+  state 0x20 claims and then asks for surface `0x35` (the router called it an
+  open question; `QueryGroundSurfaceAt` answers it), keeping the permit on a
+  refusal. `ThrowerStateRideObjectPath` is shot-immune for its ride. The
+  three-hop blink-in raised `NoCameraTrack` where the exe raises `ShotImmune`
+  (`0x100`), so stage 6's `zslman` could be shot while materialising and were
+  hidden from the camera. The scripted attackers' own player picks
+  (`ZombieScriptedPickPlayer`, `ThrowerGrabTakePermit`) compared the permit
+  table against the engine's literals, `=== 1` and `=== 0`, which the port's
+  holder-id/`-1` representation never matches for a claimed entry.
+* **Still open.** Class 0x30 state 28 (`0x004586E0`, claim at `0x004587C4`)
+  is the one claimant of the twenty-one that is not ported. A `-2` pick that `IsPlayerAttackable` passes — attract mode only
+  — is refused rather than claimed; the port runs no attract mode.
 
 ### The noise a standing zombie makes, and the chainsaw
 
@@ -3258,6 +3371,24 @@ in `game/effects/damage_overlay.ts`:
 
 `render/effects.ts` draws it in camera space at `z = -1.02`, scale 0.02, from
 the record alone, so a load or a seek shows whatever the restored state says.
+
+**It is opaque, and that is the game** (checked 2026-09-28 against a report
+that the marks should be translucent). The exe draws it with the plain
+`AssetDrawSlot`, which hands the model no alpha; each of the eleven is one
+translucent-pass `SRCALPHA / INVSRCALPHA` mesh at base alpha 1.0, so the
+alpha on screen is the texture's -- 0 round each mark, 255 over most of it,
+a 4-bit feathered edge between. The port's node keeps the template's
+material untouched and draws exactly that: `tools/hurt_alpha.mjs` measures
+the on-screen alpha off two in-step driven runs (one with the overlay left
+out of the shot frames), and reads 66.5% of stage 2's slash pixels at alpha
+exactly 1.0 against 65.4% of texture 28's covered texels at 255, identical at
+57 and 30 frames left. `render.test.ts` pins the draw (template material,
+the pass, opacity 1, the same draw on all 59 frames) and
+`verify_texture_alpha.py` pins the exe side and the bundle's images. What
+does differ is the **colour**: the exe lights the model under the scene's
+default light and the port draws every effect unlit, so the port shows the
+texture's own orange where the game may tint or darken it
+(`docs/formats/combat.md`, *How opaque it is*).
 The eleven models ride the `slots_effect` rig (slots 0x931..0x93B), so
 **a bundle exported before this has none -- re-export.**
 
@@ -4561,6 +4692,27 @@ the boat**: it ends the ride state at the `MatrixStackPop` and shows no
 `frame++`; the increment is at `0x00440323` and the whole tail past it.
 `game/class13/routine0.ts`.
 
+**...and the five static ones lean the way their records say.** Those five
+(`komono_st1.bin[3]` x4 at block 17 step 1, `etc_1.bin[63]` at 15x in blocks
+16, 20, 35 and 39) are the only class-0x13 records with a pitch, and
+`SpawnSlotActor` took the yaw alone -- the placement had carried `pitch` since
+the wall-climbers, and the arm read `yaw` by name. `SpawnFromDescriptorSmall`
+(`FUN_00408BC0`) copies all three words, behaviour 0 is a bare `RET`, and
+`ScriptedPropUpdate13` draws `T·Rx·Rz·Ry·S`, which `render/slotmodels.ts`
+already did; so the four wooden models on the far wall of the block-17 room
+stood upright where the game tips them `+22.5°`, `+56°`, `-22.5°` and `-28°`
+about x, and `etc_1.bin[63]` -- the moon, `[likely]` by its texture -- stood
+on edge to the ground where the game turns its face `56°` down toward it. Every spawn site now takes the three angles
+through one helper, `PlacementOrientation` (`game/descriptor.ts`) --
+`SpawnScriptedCharacters`, every arm of `SpawnSlotActor` and
+`SpawnHordePlacers`. What a player sees: at block 17's hold (camera 81 frame
+425, the civilian and the `znkage`) two of the four are in frame and lean
+left; the other two are off the right edge, and from the street at the start
+of the step all four sit behind the window jamb (at most ten pixels change).
+`etc_1.bin[63]` is in the frustum on camera 86 frames 5..240 and behind the
+tower's roof there: at most five pixels of a scripted frame change. `web/tools/props13_look.mjs`
+reads the three angles back off the page's own `G` and shoots the hold.
+
 **The draws are ported too.** Selector 0's wake (`char_adv06.bin[0..21]`
 under the boat's own pose, `Translate(0, 0, 27.5); Scale(1, 0.15, 1)`) and its
 splash (`eff_dokan.bin[0..93]` at the fixed point by the wall) are drawn by
@@ -4929,6 +5081,52 @@ stage 2, and resets both fades to 1 in the tight case. Both are transcribed now,
 under their own names, and the `zstin` one no longer clamps its fades at
 `0x7F`, because the engine's does not.
 
+### The pounce and the leap back, as the listing has them (NEW-BUGS-2)
+
+The rooftop route ends in states 9 and 10, `ThrowerStateLeapDown`
+(`FUN_0044B670`) and `ThrowerStateLeapAside` (`FUN_0044B880`), and the agent
+that fixed the route left a list of what they got wrong. Both are
+transcriptions of the disassembly now, and so are the two routines the pounce
+runs every frame, `ActorArcBeginToWaypoint` (`FUN_0044D780`) and
+`ThrowerStrikeConnect` (`FUN_0044CE60`). What changed, in the running player:
+
+* **The pounce raises `0x10000000`, not `BackingOff`**, and takes it down on
+  the way to state 10; **the leap back raises `BackingOff`** and both
+  collision bits on its first frame, and takes `BackingOff` down when it
+  lands. So the leap back's landing puts up `ThrowerEmitGroundDust`'s column
+  and the pounce's does not -- the other way round from before.
+* **The landing clip plays.** The leap back used class 0x30's conditional
+  setter, which refused while the arc's own clip was still on, so the actor
+  stood in its flight pose and waited out the whole ninety frames. It goes
+  through `SetCurrentActorMotionBlended` now: at the report's URL the rooftop
+  `zsass` lands into clip 4, walks itself clear on that clip's root, and is
+  back at the hub 38 frames after landing where it used to take 90.
+* **Both states leave on the cursor**, two frames short of the clip's end,
+  not when the port's one-shot channel happens to empty; the pounce is five
+  frames shorter for it, and the pause counts ninety with `>=`.
+* **Down, the pounce collides with nothing** (`0xffe7ffff` on landing), and a
+  head still on its 0x2002 model cries out as it leaves.
+* **`zslman` goes back where it came from.** It keeps its surface, records the
+  point it pounced from and leaps back to it on its own surface's script,
+  where the port sent it to a point beside the camera. Stage 6's first
+  `zslman` now lands its pounce and returns to (484.4, -51.2, -9556.2), the
+  spot it left, instead of (475.3, -51.2, -9574.3). Its four scripts were
+  also exported at the wrong stride -- `0x30` where the engine names them
+  `0x60` apart -- so on a wall it would have leapt back on a pounce clip.
+* **`zskamere`'s standing attacks land.** `ThrowerStrikeConnect`'s throw-table
+  arm, which `ThrowerStateWaitForPermit` sends type 0x17 to, was a `return`.
+  Stage 4 block 2's first `zskamere`, perched in state 32, took a life at
+  frames 327 and 528 of a driven run; before, it swung six times in 1200
+  frames and never hit.
+* **The hit frame is `==`**, and the connect latch is the callers' to test --
+  the port tested it inside the connect, which was what stood in for the
+  `==`. `ActorArcBeginToWaypoint` takes the attack draw itself, for `zslman`
+  too, so a `zslman` pounce moves the `rand()` stream as the engine's does.
+
+One divergence is declared: `zskamere` in state 10 is given no arc script,
+because the engine's arm for it skips the copy and hands the arc twelve dwords
+of uninitialised stack. No shipped run has been shown to reach it.
+
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 
 `ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track
@@ -5217,15 +5415,142 @@ than the engine's submission order, which differs only for coplanar opaque
 surfaces; the player's own transparent meshes (labels, debug overlays, the
 deep screen sprites) sort after the NL1 commands of their layer rather than by
 any exe rule, and the queued sprite quads' own layer (`0x007E78B8`, 0) is not
-modelled; and the exporter strips a texture's alpha for every mesh with
-`IgnoreTexAlpha` set, where nothing in the D3D translation reads that bit --
-so a fading opaque mesh, and the 112 translucent-pass meshes that set both
-bits 19 and 20 on an ARGB texture (`boss6`, `st_adver03`), blend on their base
-alpha alone where the engine would [likely] multiply the texture's in.
+modelled. (The exporter's alpha stripping that was listed here is done: see
+the next section.)
 
 **The water at block 16 step 14** (the report's second item) was already
 drawn by the time this was read -- main's class 0x41 type 1 port, above --
 and its four tiles are opaque-pass meshes, so none of this changes them.
+
+### A texture keeps its alpha, and a mesh keeps its own material
+
+Two exporter faults in `gltf.ts`/`gltf.py`'s material writer, both read
+against the EXE (`docs/formats/materials.md`, *Texture alpha on the D3D path*
+and *One material per mesh*):
+
+* **Texture alpha is the bank's.** The exporter wrote an alpha-stripped
+  `_opaque` image for every mesh with `IgnoreTexAlpha` (TSP bit 19) -- the
+  PowerVR2 meaning. On the PC the texture is decoded once per bank slot with
+  no mesh word as input, uploaded in a format that keeps the alpha
+  (`A1R5G5B5` for ARGB1555, `DDPF_ALPHAPIXELS` tested), and stage 0's alpha op
+  takes the texel's alpha; bit 19 is read only as half of the pass selector.
+  So the opaque pass ignores texture alpha by its state and the translucent
+  pass blends by it. 101 translucent-pass meshes set the bit on a texture with
+  alpha below 255: `zslman`'s and `zndina`'s additive blade glows drew as
+  solid cards and are shaped now (stage 6 block 0, 3-4% of a close crop
+  changes, all on the glows). Opaque-pass meshes on textures with transparent
+  texels come out byte-identical (stage 2's clock-tower shot: 0 pixels of
+  588,800 differ). The glTF `alphaMode` is the pass.
+* **One material per mesh.** The material cache left the base colour and the
+  culling out of its key, so about a fifth of the game's meshes drew with an
+  earlier mesh's colour -- baked lighting and base alpha. The stage-2 car's
+  driver's door drew black in the rescue branch (the inner copies' black, same
+  texture 33 and TSP) and is red now; stage geometry shifts by up to ~60
+  levels where two segments shared a texture at different lighting.
+
+Two render paths leaned on the stripped images:
+
+* `setAssetDrawAlpha` (`render/draw_order.ts`) is the one fading draw for the
+  effect layers and the slot models, and takes `null` for `AssetDrawSlot` and
+  a number for `AssetDrawSlotWithAlpha` -- **1 included**: the engine does not
+  test the argument, so a draw at 1.0 is still
+  `DrawModelWithForcedAlphaBlend`'s, which blends an opaque-pass mesh's
+  texture alpha. The layers used to keep the plain draw at 1. Records that
+  encoded "plain" as 1 (the ring effect's spread and hold, the boss-3 path
+  effects inside their window, the owl ring's pulse, the horde's plain parts)
+  say `null` now; every slot drawn at exactly 1 today is translucent
+  `SRCALPHA`/`INVSRCALPHA` at base alpha 1, so no picture moved.
+* The blood-colour transpose read the map through a 2D canvas, which is
+  premultiplied: the colour under a texel at alpha 0 came back black, and 904
+  opaque-pass gore meshes have such texels. It reads the map back through
+  WebGL with premultiplication off.
+
+**Re-export every bundle.** `tools/verify_texture_alpha.py` checks the EXE
+bytes, the bit-19 scan, the corpus premises, and -- on a bundle this tree's
+`gltf.ts` wrote -- that no image is `_opaque`, that the `IgnoreTexAlpha`
+ARGB images carry the bank's alpha, and that every model primitive holds its
+own mesh's colour and culling.
+
+Not done, and not this change's: the character layer draws a bone or part at
+any alpha above 0 solid (`render/characters/draw_gates.ts`), where the exe's
+`AssetDrawSlotWithAlpha` draws blend -- the class-0x30 twin of type 9 at 0.25
+(`EnemyZombieInitByCharType`), `ZombieSubmitSlotByLighting`'s fade-in while
+`obj+0x1368` bit `0x20` is up, and `ThrowerDrawBonePart`'s triangular fade on
+slot `0x1FB9`. With the alpha now in the images, drawing them through
+`setAssetDrawAlpha` would be faithful as it stands. (Done since: see the next
+section.)
+
+## Character fades: every node drawn the way its hook draws it
+
+`render/characters/draw_gates.ts` drew a bone or a part at any alpha above 0
+solid and hid it at 0, and said that 0 and 1 were every alpha the game gives a
+character. They are not, and at 0 and 1 the faded draw is not the plain one
+either: `AssetDrawSlotWithAlpha` (`FUN_004185A0`) hands its alpha on untested,
+and `DrawModelWithForcedAlphaBlend` (`FUN_004A8440`) makes each mesh's
+material alpha its base alpha times it with no test of its own -- so at 1 an
+opaque-pass mesh's texture alpha shows, and at 0 the model is drawn invisible
+and still writes depth (bits 19-20 are kept, so an opaque-pass mesh is not
+alpha-tested). What the player does now:
+
+* **Each node's draw is state.** The hooks the port runs write, per bone, the
+  draw they chose into `Actor.nodeDrawAlpha` -- `null` for `AssetDrawSlot`, the
+  alpha for `AssetDrawSlotWithAlpha` -- and `draw_gates.ts` fades every mesh
+  that node's draw covers (its own model, a gore piece, a cel) through the new
+  per-mesh `setMeshDrawAlpha`. `DrawCharacterPartSlot` (`FUN_00419B40`)'s four
+  types (9, 0x12, 0x17, 0x18) have their parts drawn at `obj+0x138C` always,
+  1 and 0 included. Attachments stay plain: `ActorDrawAttachedParts` draws
+  them through `AssetDrawSlot`.
+* **Class 0x30** (`game/class30/draw.ts`, `init_char.ts`, `twin.ts`).
+  `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) is ported: the light array
+  first (`obj+0x136C` bit `0x20` under `g_scene_lighting`, never faded), then
+  `obj+0x1368` bit `0x20` for the fade. `EnemyZombieInitByCharType`
+  (`FUN_00452FD0`) sets up the two fades -- `znele` (type 0x12) at 0 stepping
+  1/30, the twin (type 9) at 0.25 stepping 1/60, both after a hundred draws --
+  and `ZombieDrawBonePart` (`FUN_004534A0`)'s `0x1C6C` and `0x1C7C` arms run
+  the clocks: `znele` fades in over thirty frames, and at the end gets its
+  pushes and its shot test back (its head aim stays off) with
+  `PlaySoundId(0x2225A9)`; the twin fades
+  out over sixteen. **The twin exists now**: the type-0x12 arm allocates it
+  unless `obj+0x34` has `0x10000000` (two of stage 6's thirteen do), and
+  `ZombieTwinFollowHost` (`FUN_00453290`) is its whole update -- it wears the
+  host's transform and clip, runs no state, is counted into neither enemy
+  count, has the minimum hit points (`ActorInitHitPoints` overwrites the 999),
+  and despawns the frame after its alpha reaches 0 or when the host dies. The
+  exporter writes it a synthetic row (`zombieTwinPlacements`,
+  `hod2lib/characters.ts`) with `znjikken1.bin` and every clip its host's type
+  has; re-export the bundles.
+* **Class 0x31.** `ThrowerDrawBonePart` (`FUN_00449F90`) records `null` or the
+  alpha through `ThrowerDrawPartAlphaIfBlinking` (`FUN_0044A280`); the
+  blinking states' 0 and 1 are faded draws, not "hidden" and "solid".
+  `EnemyThrowerInit` writes `obj+0x138C` per type as the exe does -- a
+  `zslman` starting in state 34 is born at 0, blinking and shadowless -- and
+  the blink states read `g_blink_frame_counter`'s low bit
+  (`0x0044F0C2`, `0x0045149C`), not the port's fractional `g_frame`. The
+  `0x1FB9` ramp is `zskamere`'s bone 9 and is `[likely]` never reached by a
+  shipped spawn (see `class31/draw.ts`); a debug write of bit 2 shows it.
+* **The fade composes with the lighting layers.** A fade is over whatever the
+  mesh draws: the lighting view's twin and the gun light's are swapped in
+  underneath it (`setUnfadedMaterial`), a gore swap or a cel write is read
+  back as the new unfaded material, and a clone a layer saved is seen through.
+  The clones keep `onBeforeCompile` (fog, and the lit twins' shaders), which
+  the old per-node clones lost.
+
+What that looks like, in `?stage=6&mode=play&block=0&step=2&op=19`: for the
+first hundred frames each `znele` is a quarter-alpha twin with nothing under it
+but its depth, then the twin fades and `znele` fades in. The depth is visible:
+an invisible actor in front of translucent geometry keeps that geometry off
+its silhouette, as the engine's would if its sort puts the actor first -- the
+port's sort is the engine's (`RenderCommandOrder`). The same is true of a
+blinking `zslman` on its odd frames (`?stage=6&mode=play&block=0&step=4&op=2`).
+
+Not done: the twin's parts and cels are drawn with the exporter's UVs, where
+`AssetSlotUVsFromViewNormals` (`FUN_00418660`) rewrites them from the normals
+each frame (`[diverges]`, `class30/twin.ts`). Three more characters fade in the
+exe and are not ported at all, so they are not drawn solid either -- they are
+not drawn: class 0x25's `0xE24` flash (`ScriptedHumanoidBoneDrawHook`), the
+golden frog (`GoldenFrogDrawBonePart`) and class 0x2D's node hook at
+`0x00429040`. Class 0x40's `SubModelDrawBoneHook` fade is unreachable:
+`HordeMemberInit` writes `obj+0x1338` = 0 and nothing else writes it.
 
 ### Every caller of the ring effects, where the exe calls it
 
@@ -5267,6 +5592,7 @@ frog's (class 0x11, another session's):
 Three sub-state fall-throughs went with it (states 13 and 23, and both corpse
 states), and `obj.frozen` -- class 0x24's `obj+0x1324` -- is no longer written
 by two class-0x30 entrances.
+
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

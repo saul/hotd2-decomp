@@ -34,9 +34,51 @@ alone for a long time; it now carries `pitch` and `roll` beside it whenever
 either is not zero. Across the six stages, including the class-0x10 civilians'
 children, that is two character placements: stage 2 block 21 step 2's
 class-0x31 `zstin`, placed at `(0, 0xC000, 0xC000)` on their sides against the
-clock face they climb down. Five stage-2 class-0x13 props carry a pitch as
-well; `SpawnSlotActor`'s class-0x13 arm still takes the yaw alone, and whether
-that shows before `PropSeatOnObjectPath` overwrites all three is `[open]`.
+clock face they climb down.
+
+**All three allocators do the same**, for every class: `FUN_00408BC0` (opcode
+0x0C) at `0x00408C01`..`0x00408C10`, and `FUN_004088A0` (0x09) at
+`0x00408925`..`0x00408934`, after its byte tail. `[proved]` The port's spawn
+sites all take the three from the placement through one helper,
+`PlacementOrientation` in `game/descriptor.ts`.
+
+**Class 0x13** comes through `FUN_00408BC0`, and five stage-2 records carry a
+pitch -- the only class-0x13 records in the six stages with a pitch or a roll:
+
+| evt | slot | orient `(pitch, yaw, roll)` | where |
+|---|---|---|---|
+| 48896 | `0x1237` `komono_st1.bin[3]` | `(0x1000, 0xC000, 0)` | block 17 step 1, `(-602.5, 50.5, -1526.5)` |
+| 48952 | `0x1237` | `(0x2800, 0xC000, 0)` | block 17 step 1, `(-602.5, 49.5, -1529.5)` |
+| 49008 | `0x1237` | `(0xF000, 0xC000, 0)` | block 17 step 1, `(-602.5, 50.5, -1554.5)` |
+| 49064 | `0x1237` | `(0xEC00, 0xC000, 0)` | block 17 step 1, `(-602.5, 50.5, -1553.1)` |
+| 84232 | `0x1383` `etc_1.bin[63]`, scale 15 | `(0x2800, 0, 0)` | blocks 16, 20, 35, 39, `(-1600, 1400, -2750)` |
+
+All five take behaviour 0, and `g_prop_behaviours[0]` is `NoOpStub`, a bare
+`RET` at `0x0041EBB0`; `ScriptedPropInit13` (`FUN_0043FE10`) stores nothing at
+`+0x64`/`+0x68`/`+0x6C`; `ScriptedPropUpdate13` (`FUN_0043FE90`) calls no
+motion routine and draws `MatrixTranslate; MatrixRotateX(+0x64);
+MatrixRotateZ(+0x6C); MatrixRotateY(+0x68); MatrixScale` -- each call
+pre-multiplies the stack top, so the product is `T·Rx·Rz·Ry·S`, a three.js
+`Euler` in order `"XZY"`. `[proved]` So a static prop wears the record's three
+angles for its whole life, and the pitch is drawn. `PropSeatOnObjectPath`
+overwrites all three only for a carrier (behaviour 8), and no carrier record
+has a pitch or a roll. What `komono_st1.bin[3]` is, is `[open]`: a 0.9 x 5.5 x
+4.2 wooden two-part model, four of them against the far wall of the room the
+block-17 fight holds on. `etc_1.bin[63]` is two blended quads, 82 and 134
+units square, whose textures show a lit crescent over a lunar surface and a
+halo -- the moon `[likely]`, from its texture; tipped `0x2800` about x, its
+face turns down toward the ground.
+
+**Other classes with a non-zero pitch or roll in a record**, all six stages:
+class 0x41 (113 of 316 records), 0x44 (21 of 123), 0x33 (2 of 24) and 0x31 (the
+two above). The port carries every one it spawns: class 0x41's generic props
+take `pitch`/`roll` from the breakables placement, and its kinded (type 4)
+and falling (type 34) records use the two words as a kind and a set size,
+which the placement carries under those names; class 0x44's selector 16
+likewise. Not
+spawned by the port at all, and so not checked: class 0x41 type 37 (3
+records), class 0x44 selectors 10, 14 and 15 (5, 5 and 9), and class 0x33
+selectors 8 and 9 (stage 5, pitch `0x3800` each).
 
 The handler itself comes from the 112-slot array at `0x009A2280`, built by
 `FUN_0040AC90` from the `{class_id, handler}` pairs at `0x00593358` — 56

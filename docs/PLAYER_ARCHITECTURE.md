@@ -561,8 +561,11 @@ keeping from them moved:
 
 * **Over the game** (`#overlay`): the breadcrumb menu -- `≡ HOTD2`, and in it
   the stage, the entry, Original Mode, restart, the bundle screen and the
-  sidebar -- the speaker, the start and pause screen, the skip prompt, the
-  branch bar and the game-over buttons.
+  sidebar -- the speaker, the start and pause screen, the corner button, the
+  branch bar and the game-over buttons. The corner button is player 1's
+  START (`pressStart`, the command Enter's handler makes too), labelled for
+  what START would do: **Skip** in a skippable region, **Continue** with the
+  game's digit on the CONTINUE? countdown. It is the only START a phone has.
 * **In the debug sidebar** (`#debug`): Play or free roam, pause, skip and
   kill; then three tabs — the inspection panels (the 4:3 switch, light, fog
   and filtering in Scene; the branch variable and "Pause at branches" in
@@ -614,6 +617,20 @@ audio go (`Bgm.unblock`), which is what a reloaded page needs.
 The sidebar's open state is `ui/` state (`usePersisted`), not a command. The
 harnesses open it by setting that key before the page loads
 (`tools/lib/player.mjs`), because the panels are what they read.
+
+**Keys have one list.** Three handlers answer them, each for its own reason:
+`app/main.ts` the game's (Space, Enter -- which is START, both the continue
+and the skip -- the digits, the arrow and R),
+`render/freeroam.ts` flying, and `ui/App.tsx` the page's -- the sidebar, the
+`?` dialog, `M`, `F`, and a key for each debug overlay, which is a column of
+the toggle table (`ToggleSpec.key`) rather than a map of its own. What they
+did not have was one place saying what all of them do, so `ui/shortcuts.ts`
+is that place: the `?` dialog is drawn from it, and `test:ui` reads the other
+two handlers' source and holds the table to them in both directions, so a
+branch added without a row fails a check rather than a viewer. Nothing binds
+`Z` -- `tools/pacing.mjs` presses it to prove an unbound key still wakes the
+loop. Opening the dialog holds the game, and closing it lets go only of a
+hold it took. A chord is the browser's: `Cmd-R` and `Ctrl-F` are never ours.
 
 ### How a frame reaches the screen
 

@@ -881,7 +881,7 @@ try {
     // path camera, the player drops into the continue countdown, and with
     // nobody pressing START the run asks for the game-over screen and the
     // page stops. That is an outcome of its own, not a hang, and it is
-    // reported as one. `--continue` presses START (`S`, a credit) whenever
+    // reported as one. `--continue` presses START (Enter, a credit) whenever
     // the countdown is up, which is what a player who wants to see the stage
     // does -- the credits are the game's own, five continues in Arcade.
     if (NO_DAMAGE) {
@@ -891,7 +891,7 @@ try {
       });
     }
     if (CONTINUE && /CONTINUE\?/.test(s.lives)) {
-      await page.keyboard.press("KeyS");
+      await page.keyboard.press("Enter");
       continues += 1;
       console.log(`  f${String(frames).padStart(6)}  START ${continues} `
                   + `at block ${s.block}`);

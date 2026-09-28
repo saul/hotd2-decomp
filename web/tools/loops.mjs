@@ -19,7 +19,9 @@
  * Two runs, because the difference between them *was* the bug: the same stage
  * from the top and from a deep link past the instruction that starts the loop.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, requireBundle, waitForLoad } from "./lib/player.mjs";
+
+requireBundle("loops");
 
 /** Stage 1's rain: `se_play STAGE1_SE\RAIN3ST_44.wav` at block 0 step 1 op 42. */
 const LOOP_FILE = "RAIN3ST_44.wav";
@@ -64,7 +66,9 @@ async function run(label, url, seconds) {
     for (let s = 0; s < seconds; s++) {
       await page.waitForTimeout(1000);
       const snap = await page.evaluate(() => window.__snap());
-      const el = snap.find((e) => e.loop && e.src.includes(LOOP_FILE));
+      // Lowercased: `audio/bgm.ts`'s `soundUrl` asks for every file that way.
+      const el = snap.find((e) => e.loop
+        && e.src.toLowerCase().includes(LOOP_FILE.toLowerCase()));
       cursors.push(el ? { t: el.t, paused: el.paused } : null);
     }
   } finally {

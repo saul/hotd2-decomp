@@ -80,14 +80,15 @@ export interface Instance {
   parentAt?: number;
   /**
    * The draw gates this instance's nodes are currently showing, as a key —
-   * set only while every gate is open, so a frame that changes nothing costs
-   * one comparison. See `render/characters/draw_gates.ts`.
+   * set only while every gate is open and no node is faded, so a frame that
+   * changes nothing costs one comparison. See
+   * `render/characters/draw_gates.ts`.
    *
    * Render bookkeeping: the gates themselves are `a.motionFlags`,
-   * `a.partVisible`, `a.suppressedBones` and the thrower's
-   * `boneDrawAlpha`, and this is only how far the nodes have been caught up
-   * to them. `undefined` means "unknown", which is what `restoreNodes`, a
-   * fresh instance and any frame with a gate closed all are.
+   * `a.partVisible`, `a.suppressedBones` and `a.nodeDrawAlpha`, and this is
+   * only how far the nodes have been caught up to them. `undefined` means
+   * "unknown", which is what `restoreNodes`, a fresh instance and any frame
+   * with a gate closed or a node faded all are.
    */
   gates?: string;
   /**

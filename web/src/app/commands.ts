@@ -28,6 +28,7 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import type { PlayerState } from "./urlstate";
 import type { CamCommand, FeedEntry, Walker } from "../script/walker";
 import { ActorKillAll } from "../game/combat/resolve_hit";
+import { toggleFullscreen } from "./device";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
 import type { BloodColourLayer } from "../render/bloodcolour";
@@ -120,6 +121,8 @@ export interface PlayerCommands {
   /** Sound on or off, as the viewer's own choice. */
   setMuted(muted: boolean): void;
   requestSkip(): void;
+  /** Player 1's START, both of its readers. See the `pressStart` command. */
+  pressStart(): void;
   /** The game-over screen's buttons and the menu's Restart. */
   restartRun(stage: number): void;
   /** A stage the menu chose, loaded and -- once started -- running. */
@@ -186,6 +189,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "pause":      p.pause(); return;
     case "start":      p.startGame(); return;
     case "requestSkip": p.requestSkip(); return;
+    case "pressStart": p.pressStart(); return;
     case "restartStage": p.restartRun(p.state.stage); return;
     case "restartFromStageOne": p.restartRun(1); return;
     case "branchHover":
@@ -235,6 +239,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       return;
     case "setVolume":  p.bgm.setVolume(c.volume / 100); return;
     case "toggleMute": p.setMuted(!p.bgm.muted); return;
+    case "toggleFullscreen": toggleFullscreen(); return;
     case "killAll": {
       // The debug clear: `killAll` drops every live actor to zero hit points
       // and starts its directional death, which is what opens the enemy gate.
@@ -245,7 +250,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       // debug clear is a *command*, and the composition root is what turns a
       // click into one. `render/` calling it was the port being driven from a
       // renderer, which is what step 21 closed.
-      const n = ActorKillAll(p.shooting.cameraYawBams, p.chars.rng);
+      const n = ActorKillAll(p.chars.rng);
       const parts = [`${n.enemies} enem${n.enemies === 1 ? "y" : "ies"}`];
       if (n.civilians) parts.push(`${n.civilians} civilian`
                                   + (n.civilians === 1 ? "" : "s"));

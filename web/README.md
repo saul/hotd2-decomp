@@ -66,9 +66,10 @@ had just been built while every other stage's files sat on disk unlisted.
 
 `extract/player/` is served at `/bundle/` by a dev-server middleware
 (`vite.config.ts`). It is deliberately *not* in `public/`: it is game-derived
-data and must never end up in a build artifact. For a production build, run
-`npm run build` and copy the bundle to `dist/bundle/` yourself — the app
-fetches `bundle/manifest.json` relative to the page either way.
+data and must never end up in a build artifact. To put the player somewhere
+else -- a phone, most usefully -- `npm run site` stages the page, a bundle and
+the sounds as one private static site and can upload it to S3; see
+[`docs/HOSTING.md`](../docs/HOSTING.md).
 
 ### Why there is a bundle at all
 
@@ -133,9 +134,13 @@ back to the game where it was.
 | **Play** | `1` | the game, at 60 Hz; "Pause at branches" in the Route panel holds each branch |
 | **Free roam** | `2` | orbit and fly, detached from the rail |
 
-Space plays and pauses, `Enter` skips a cutscene, `R` or the right button
-reloads, `S` is the pad's Start, `←` rewinds half a second, `` ` `` toggles
-the sidebar.
+Space plays and pauses, `Enter` is the pad's Start -- it takes a continue,
+skips a cutscene where the game allows one, and starts a new game when you
+are out -- `R` or the right button reloads, `←` rewinds half a second, `` ` `` toggles
+the sidebar, `M` mutes and `F` goes fullscreen. **`?` lists every key**,
+including one for each debug overlay -- `B` the actor boxes, `C` collision,
+`G` all regions, `V` and `L` the camera rails -- which flip it without opening
+the sidebar and say so for a moment over the game.
 
 **On a phone** (iOS Safari or Android Chrome), hold it sideways — the page
 asks you to, and on Android Start also goes fullscreen and locks landscape. A
@@ -144,8 +149,11 @@ away), or tap with a second finger while the first is down, or, with the 4:3
 frame on, tap the black bar beside it: all three are a pull *off the screen*,
 which is how the arcade gun reloads. The flick needs the motion sensors,
 which a browser only exposes over HTTPS (or `localhost`); iOS also asks
-permission when you press Start. A phone cannot build a bundle -- no mobile
-browser can open a folder -- so point it at a machine serving one.
+permission when you press Start. When the last life goes, the corner button
+turns into **Continue** with the countdown's digit on it: it is the pad's
+Start, the same press as Enter, and a phone's only one. A phone cannot build a bundle -- no mobile
+browser can open a folder -- so point it at a machine serving one, or publish
+one privately: [`docs/HOSTING.md`](../docs/HOSTING.md).
 
 A **Skip** prompt appears in the corner of the frame whenever the script is
 inside a `set_skippable_region`, and it can be pressed when the shutter's

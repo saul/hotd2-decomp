@@ -64,7 +64,17 @@ export type UiCommand =
   | { kind: "setPillarbox"; on: boolean }
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
+  /** `F`: the page fullscreen, or back. A key press is the gesture it needs. */
+  | { kind: "toggleFullscreen" }
+  /** The debug sidebar's skip: the skip alone, whatever else START would do. */
   | { kind: "requestSkip" }
+  /**
+   * The corner button: the pad's **START**, exactly as Enter is. The exe reads
+   * the one button for the continue and the skip alike, so this is both --
+   * the button's label says which one the moment wants, and a phone has no
+   * other START to press.
+   */
+  | { kind: "pressStart" }
   /**
    * `[port-only]` -- a new game at this stage's entry, or at stage 1, through
    * the same boot, title and START a page load runs: the game-over screen's

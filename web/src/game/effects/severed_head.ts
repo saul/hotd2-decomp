@@ -133,18 +133,13 @@ export function SeveredHeadUpdate(h: SeveredHead, rng: Rng,
   if (h.phase === SeveredHeadPhase.Launch) {
     h.gravity = GRAVITY;
     h.vel.y = (rng.int(UP_STEPS) + 1) * UP_STEP + UP_MIN;
-    // `MatrixRotateY(camera yaw)` applied to `(0, 0, -0.2)`: the head is
-    // thrown along the camera's own forward, which is always away from the
-    // viewer whichever way the shot came from.
-    //
-    // **The camera block's yaw**, `g_camera_block_yaw_bams`: `MOV EAX,
-    // [EDX*4 + 0x9a60d0]` at `0x0040A2A6` with `EDX = g_camera_index * 0x69`,
-    // so `0x009A60D0 + index * 0x1A4`. The block looks down its own -z, so
-    // `(0, 0, -0.2)` turned by its yaw is forward. This read
-    // `g_camera_yaw_bams` (`0x009C71F0`), the gameplay eye's heading, which
-    // the scene hooks write half a turn from the block's -- so the port threw
-    // the heads back toward the viewer (`[likely]`: true wherever the hook in
-    // force keeps that half turn).
+    // `MatrixRotateY(g_camera_block_yaw_bams[g_camera_index])` applied to
+    // `(0, 0, -0.2)` (`0x0040A2A6`..`0x0040A2D5`): the head is thrown along
+    // the camera's own forward -- its -z, which the block's yaw turns -- so
+    // always away from the viewer whichever way the shot came from. This read
+    // `g_camera_yaw_bams` (`0x009C71F0`), which the scene state's hooks write
+    // as a camera heading turned half round, and threw every head at the
+    // camera. `[proved]`
     const a = G.g_camera_block_yaw_bams * ((Math.PI * 2) / 65536);
     h.vel.x = AWAY_SPEED * Math.sin(a);
     h.vel.z = AWAY_SPEED * Math.cos(a);

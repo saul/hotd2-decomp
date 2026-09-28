@@ -193,7 +193,9 @@ export function RotYXZ(y: number, x: number, z: number): Rot3 {
 }
 
 /**
- * `RotZ(z); RotY(y); RotX(x)` -- the order `RescueTargetHeldState`
+ * `RotZ(z); RotY(y); RotX(x)` -- the order an object pose is drawn in when
+ * the routine rotates `obj+0x6C`, `+0x68`, `+0x64` in that sequence, as
+ * `St2CarDraw` (`FUN_00452320`) does, and the order `RescueTargetHeldState`
  * (`FUN_00451980`) builds from the actor's own angles before handing the
  * matrix to `MatrixGetAngles`. `[port-only]`: the engine builds it on the
  * stack.

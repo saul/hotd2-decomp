@@ -68,10 +68,18 @@ const CARRIER_GIVE_UP_FRAMES = 0x14;
  *
  * The engine has no shared function for it: both states carry the same
  * instructions. It is not `TryClaimAttackSlot` — that reads the off-screen
- * commit latch first and picks by distance, and neither of these states wants
- * either. A scripted attacker takes the player its descriptor names, falls
- * back to the other one if that player is out or already spoken for, and gives
- * up only when neither can be hit.
+ * commit latch first and never falls back to the other player, and neither of
+ * these states wants either. A scripted attacker takes the player its
+ * descriptor names, falls back to the other one if that player is out or
+ * already spoken for, and gives up only when neither can be hit.
+ *
+ * The engine's tests are `CMP [g_attack_permits + p*4], 1` for "spoken for"
+ * and `TEST EAX, EAX` for "free" (`0x00457E32`, `0x00457E5F`), against the
+ * 1 every claim stores. The port stores the holder's `at` and frees with -1,
+ * so the same two questions are `!== -1` and `=== -1` here. They were
+ * `=== 1` and `=== 0`, which saw neither a permit `TryClaimAttackSlot` held
+ * nor a free one, so a scripted attacker took a player's permit from under a
+ * zombie that held it and never fell back to the other player.
  *
  * `player` is the descriptor's own byte, `-1` meaning "either", which is when
  * the coin is tossed. Returns the chosen permit index, or -1.
@@ -80,11 +88,11 @@ export function ZombieScriptedPickPlayer(want: number, rng: Rng): number {
   // `rand() & 0x80000001`, sign-corrected — the engine's way of writing
   // `rand() % 2` for a signed int.
   let p = want === -1 ? rng.int(2) : want;
-  if (!IsPlayerAttackable(p) || G.g_attack_permits[p] === 1) {
+  if (!IsPlayerAttackable(p) || G.g_attack_permits[p] !== -1) {
     // Swap to the other player, and only if *that* one is both attackable and
     // unclaimed. The engine spells both arms out rather than looping.
     const other = p === 0 ? 1 : 0;
-    p = (IsPlayerAttackable(other) && G.g_attack_permits[other] === 0)
+    p = (IsPlayerAttackable(other) && G.g_attack_permits[other] === -1)
       ? other : -1;
   }
   return p;
@@ -132,7 +140,8 @@ function atLastFrame(obj: ZombieActor): boolean {
  * cooldown to zero. So for an ordinary zombie there is no wait between swings
  * beyond the strike clip and the retreat — and for these four there is.
  */
-export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): void {
+export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number,
+                                              rng: Rng): void {
   const t = obj.entry;
   const hide = t?.freeze === true;
 
@@ -152,7 +161,9 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
         && t?.motion !== undefined && obj.motion !== t.motion) {
       ActorSetMotion(obj, t.motion);
     }
-    if (G.g_cam_path_frame !== (t?.cue_frame ?? -1)) return;
+    // `0x004576A6`/`0x004576AE`: either camera block's frame, which is
+    // `CamCueHit` and its declared divergence.
+    if (!CamCueHit(t?.cue_frame ?? -1)) return;
     obj.sub = 2;
   }
 
@@ -164,8 +175,11 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
                    | ActorFlag.NoShadow);
     }
     // `tail+0x0D` says whether to claim at all, and a failed claim is not an
-    // error: the actor simply takes the descriptor's branch instead.
-    if (!t?.claim || !TryClaimAttackSlot(obj)) {
+    // error: the actor simply takes the descriptor's branch instead. The
+    // `NoCameraTrack` clear above is the only one this state has, and it is
+    // made before the claim and only for the hidden kind; a visible one keeps
+    // whatever its spawn flags gave it (`0x004576D5`..`0x00457705`).
+    if (!t?.claim || !TryClaimAttackSlot(obj, rng)) {
       obj.state = obj.attackState;
       obj.sub = 0;
       return;
@@ -235,7 +249,10 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
     if (t.motion === GRAB_MOTION_PAIRED) {
       ActorSetMotionBlended(obj, GRAB_MOTION_PAIRED, 0, 1);
     }
-    TryClaimAttackSlot(obj);
+    // The answer is not looked at (`0x00457C18`), and the only `obj+0x34`
+    // write after it is `AND AH, 0xbe` -- the freeze and the shot immunity,
+    // not the camera bit.
+    TryClaimAttackSlot(obj, rng);
     ActorFacePlayerTarget(obj, eye);
     obj.flags &= ~(ActorFlag.PoseFrozen | ActorFlag.ShotImmune);
     ZombieStrikeStartSplash(obj, rng, host, events);
@@ -319,7 +336,7 @@ export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
     const p = ZombieScriptedPickPlayer(t.player ?? -1, rng);
     obj.attackPermit = p;
     if (p === -1) { ZombieLeapPin(obj); return; }
-    G.g_attack_permits[p] = 1;
+    G.g_attack_permits[p] = obj.at;       // the engine's 1; see the pick
     ActorFacePlayerTarget(obj, eye);
     obj.flags &= ~ActorFlag.PoseFrozen;
     if (t.strike_motion !== undefined) {
@@ -442,7 +459,7 @@ function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
     const p = ZombieScriptedPickPlayer(t?.player ?? -1, rng);
     obj.attackPermit = p;
     if (p === -1) return;
-    G.g_attack_permits[p] = 1;
+    G.g_attack_permits[p] = obj.at;       // the engine's 1; see the pick
     ActorFacePlayerTarget(obj, eye);
     // `obj+0x34 |= 0x10000000` — mid-attack, and the idle below stops.
     obj.flags |= ActorFlag.Committed;

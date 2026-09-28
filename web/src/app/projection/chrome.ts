@@ -9,10 +9,11 @@
  */
 import type { Player } from "../main";
 import type {
-  BranchProjection, GameOverProjection, SkipProjection, SoundProjection,
-  TransportProjection,
+  BranchProjection, ContinueProjection, GameOverProjection, SkipProjection,
+  SoundProjection, TransportProjection,
 } from "../../ui/projection";
-import { AppState, G } from "../../game/globals";
+import { AppState, G, PlayerState, RunPhase } from "../../game/globals";
+import { CreditsAvailable } from "../../game/credits";
 
 /**
  * The skip bar, shown under the game's own condition.
@@ -46,6 +47,31 @@ export function skipProjection(p: Player): SkipProjection | null {
       : held
         ? `holding on ${held} — skips every wait until the region closes`
         : "skips every wait until set_skippable_region closes",
+  };
+}
+
+/**
+ * The continue offer, read off the player's shell.
+ *
+ * Shown for as long as player 1 is on `PlayerContinueCountdown` in play --
+ * its own countdown or the run's (phase 4, `g_continue_timer`), which is the
+ * digit the game draws either way. Enabled on the tests `PlayerTryStartPress`
+ * makes before it spends (`game/player_shell.ts`): the screen furniture's bit
+ * 2 and a credit. The spend itself is the game's to make when START lands.
+ */
+export function continueProjection(): ContinueProjection | null {
+  if (G.g_app_state !== AppState.InPlay
+      || G.g_player_state[0] !== PlayerState.Continue) return null;
+  const t = G.g_nRunPhase === RunPhase.ContinueCountdown
+    ? G.g_continue_timer : G.g_player_continue_timer[0];
+  const can = CreditsAvailable() !== 0
+    && (G.g_screen_furniture_flags & 2) !== 0;
+  const credits = G.g_free_play === 1 ? "free play" : `${G.g_credits[0]} credits`;
+  return {
+    canContinue: can,
+    digit: Math.max(0, t >> 12),
+    sub: can ? `START: spend a credit and play on (${credits})`
+             : "START would not be heard here: no credit, or the screen is not up",
   };
 }
 

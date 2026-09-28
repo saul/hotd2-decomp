@@ -5,7 +5,8 @@
  * permit index lives in `obj+0x121`, and `RegisterForCameraTracking` keys off
  * the same commitment. One byte doing two jobs is the whole trick.
  */
-import { ActorFlag, ThrowerFlag, ZombieFlag2, type Actor } from "../actor";
+import type { Rng } from "../../core/rng";
+import { ThrowerFlag, ZombieFlag2, type Actor } from "../actor";
 import { G } from "../globals";
 import { IsPlayerAttackable } from "./player";
 import type { GameHost } from "../host";
@@ -53,8 +54,9 @@ export type PermitHolder = Pick<Actor, "attackPermit" | "flags2">;
  * `ActorIsOnScreen` — `FUN_00409C10`.
  *
  * Projects the actor's tracked point and asks whether it lands inside the
- * frame. Both claim functions call it — but **not to refuse the claim**. See
- * {@link TryClaimAttackSlot}.
+ * frame. Both claim functions call it — but **not to refuse the claim**: only
+ * after a pick has survived, to decide whether the grant also raises the
+ * off-screen latch. See {@link TryClaimAttackSlot}.
  *
  * There is **no sign test**, because the engine has none: it divides by
  * `obj+0x78` whatever its sign and compares against symmetric bounds, so an
@@ -128,25 +130,114 @@ export function ActorBoundsOnScreen(obj: Actor, host: GameHost): boolean {
 }
 
 /**
- * `TryClaimAttackSlot` — `FUN_00455DE0`. Take a free permit, or fail.
+ * `ActorScreenHalfSign` — `FUN_00409C90`. Which half of the frame the actor's
+ * tracked view-space point projects to: `-1` for the left, `1` for the right.
  *
- * Note what it does **not** do: there is no queue-rank test here. That lives
- * in `ZombieStateApproach`, before the call.
+ * Twelve instructions, and this is the whole of it `[proved]`:
  *
- * **Being off screen does not refuse the claim.** This port used to read it
- * that way and it was wrong in a way you could watch: an enemy that ended up
- * level with the camera — which happens whenever the rail carries the camera
- * into one — was refused a permit for ever, so it never attacked, never ran
- * the state that retreats, and simply stood in your face. `zsass` shows it
- * most because its whole cycle is *close in, pounce, leap back to fifty*, and
- * without the permit it never gets past the first step.
+ * ```
+ * 00409c94  FLD    float ptr [0x009a2d70]   ; g_projection_distance_px
+ * 00409c9a  FMUL   float ptr [EAX + 0x70]   ; view-space x
+ * 00409c9d  FDIV   float ptr [EAX + 0x78]   ; view-space z -- no sign test
+ * 00409ca0  FCOMP  float ptr [0x004c436c]   ; 0.0
+ * 00409ca8  TEST   AH, 0x1                  ; C0: below, or unordered
+ * 00409cad  OR     EAX, 0xffffffff          ; not below: -1
+ * 00409cb1  MOV    EAX, 0x1                 ; below: 1
+ * ```
  *
- * What the engine actually does is grant the permit and raise a **global
- * latch**, `g_attack_committed`: one enemy may be attacking from off screen,
- * and while one is, nobody else may claim at all. That is the rule this
- * enforces now, on both halves.
+ * With `-z` in front, a point on the **right** gives `P*x/z < 0` and returns
+ * 1, a point on the left returns -1 — so in a two-player game the claim
+ * offers player 1 the enemies on the left of the screen and player 2 those on
+ * the right `[likely]`: the halves follow from the port's view convention,
+ * the rest is read.
+ *
+ * `[port-only]` A host that cannot place the point — a headless run, or no
+ * host at all — gets the arithmetic on a zero point, `0/0`, which is
+ * unordered and answers 1. The engine always has a value there: it is the
+ * same `obj+0x70/0x78` that `ActorIsOnScreen` and `ShotTestSphere` read.
  */
-export function TryClaimAttackSlot(obj: Actor, host?: GameHost,
+export function ActorScreenHalfSign(obj: Actor, host?: GameHost): number {
+  const placed = host?.viewSpaceOf(obj.at, _view) ?? false;
+  const s = placed ? (PROJECTION_DISTANCE_PX * _view.x) / _view.z : NaN;
+  return s < 0 || Number.isNaN(s) ? 1 : -1;
+}
+
+/**
+ * Is `g_attack_permits[p]` free? The engine stores 1 in a claimed entry and
+ * tests it against 0; the port stores the holder's `at` and frees with `-1`
+ * (see `globals.ts`), so "free" is `-1` here. `[port-only]` as a function.
+ */
+function PermitIsFree(p: number): boolean {
+  return G.g_attack_permits[p] === -1;
+}
+
+/**
+ * `TryClaimAttackSlot` — `FUN_00455DE0`. Pick **one** player, offer that
+ * player's permit, and take it or fail.
+ *
+ * The whole routine, from the listing `[proved]` (`0x00455DE0`..`0x00455F39`):
+ *
+ * ```c
+ * obj+0x121 = 0xFF;                                  // 00455de5
+ * if (g_attack_committed) return 0;                  // 00455dec
+ * switch (g_max_attackers) {                         // 00455df9, a word
+ * case 1:                                            // 00455ea3
+ *     if (g_active_player == 0) {
+ *         if (g_attack_permits[0]) goto test;        // no fall-back
+ *         obj+0x121 = 0;
+ *     }
+ *     if (g_active_player == 1 && !g_attack_permits[1]) obj+0x121 = 1;
+ *     break;
+ * case 2:
+ *     if (g_players_in_play == 1) {                  // 00455e0e, a word
+ *         p = rand() % 2;                            // 00455e18
+ *         if (!g_attack_permits[p]) obj+0x121 = p;
+ *     } else if (g_enemies_present == 1) {           // 00455e43, a word
+ *         p = rand() % 2;                            // 00455e4d
+ *         obj+0x121 = g_attack_permits[p] ? ~p : p;  // 00455e69 NOT
+ *     } else {
+ *         s = ActorScreenHalfSign(obj);              // 00455e74
+ *         if (s == -1 && !g_attack_permits[0]) obj+0x121 = 0;
+ *         if (s ==  1 && !g_attack_permits[1]) obj+0x121 = 1;
+ *     }
+ * }
+ * test:                                              // 00455ed5
+ * if (!IsPlayerAttackable((s8)obj+0x121)) obj+0x121 = 0xFF;
+ * if (obj+0x121 == 0xFF) return 0;                   // 00455ef0
+ * if (!ActorIsOnScreen(obj)) { obj+0x136C |= 0x20000; g_attack_committed = 1; }
+ * g_attack_permits[obj+0x121] = 1;                   // 00455f32
+ * return 1;
+ * ```
+ *
+ * So **nothing falls back to the other player.** One player alone is offered
+ * only `g_active_player`'s permit — player 2 alone included, which the port's
+ * old first-free loop gave player 1's — and with two players in play the
+ * enemy comes for the player on its own half of the screen. The two
+ * `rand() % 2` arms are one `Rng.int(2)` each, drawn from the frame's `rng`
+ * **at this point in the caller** and nowhere else, which is why every
+ * claimant carries one. The one-attacker and screen-half arms draw nothing.
+ *
+ * `IsPlayerAttackable` (`FUN_00409DC0`) runs **after** the pick and voids it,
+ * so a player who cannot be attacked refuses the claim rather than passing it
+ * to the other one. It also runs on a pick of `-1`: the engine reads 0x130
+ * bytes below `g_player_state` for it, and the port's `player >= 0` guard
+ * says no.
+ *
+ * **Being off screen does not refuse the claim**: it grants it and raises the
+ * global latch, `g_attack_committed`, which the next claim anywhere reads on
+ * its second instruction. A port that refused off-screen claims left enemies
+ * the rail had carried the camera into standing in your face for ever.
+ *
+ * It writes **nothing else**. Not `obj+0x34`: there is no store to the word
+ * anywhere in either claim routine, so whether the camera may track the actor
+ * is decided by each caller -- `ZombieStateApproach` clears `NoCameraTrack`
+ * itself on a successful claim (`0x00457A4E`), `ZombieStateWaitForCameraFrame`
+ * before it claims (`0x004576E5`), `ZombieStateHoldForCameraCue` at its cue
+ * (`0x0045C00C`) -- and class 0x31 clears it nowhere. There is no queue-rank
+ * test either; that lives in `ZombieStateApproach` and the hub, before their
+ * calls (`L11`).
+ */
+export function TryClaimAttackSlot(obj: Actor, rng: Rng, host?: GameHost,
                                    offScreenBit: number =
                                      ZombieFlag2.OffScreenPermit): boolean {
   // **The first write is `obj+0x121 = 0xFF`, before anything is tested** —
@@ -161,69 +252,103 @@ export function TryClaimAttackSlot(obj: Actor, host?: GameHost,
   obj.attackPermit = -1;
   // The latch is read first and gives up before a player is even picked.
   if (G.g_attack_committed !== 0) return false;
-  // [diverges] The engine offers **one** player's permit, not the first free
-  // one: `g_active_player`'s when `g_max_attackers` is 1, and with two a
-  // `rand() % 2` or `ActorScreenHalfSign` (`FUN_00409C90`) pick -- see the
-  // `functions.tsv` row. For player 1 alone, the case the port plays, the
-  // two agree; player 2 alone and two players do not. The
-  // faithful pick needs an `Rng` in every claimant, class 0x31's included.
-  for (let i = 0; i < G.g_max_attackers; i++) {
-    // `obj+0x121` is a **player index**, not a slot: the engine picks which
-    // player to come for and then **voids the choice** when
-    // `IsPlayerAttackable` (`FUN_00409DC0`) says no —
-    // `if (!IsPlayerAttackable(obj+0x121)) obj+0x121 = -1;`, and the claim
-    // below only happens if the pick survived. It does not try the other
-    // player afterwards, so a refusal fails the whole claim.
-    //
-    // This gate used to be left out on purpose, and the reason was good at the
-    // time: the port's `IsPlayerAttackable` tested `g_player_lives` alone, so
-    // wiring it here would have stopped every enemy attacking once a player
-    // was out of lives — a divergence rather than a fix. Two things have
-    // changed. `g_player_lives` floors at one, so that clause can no longer
-    // fail; and the function now tests the **scene state**, which is the
-    // clause that matters here — no enemy may claim while the follow camera or
-    // a scripted view-angle turn is driving.
-    if (G.g_attack_permits[i] === -1) {
-      if (!IsPlayerAttackable(i)) return false;
-      // Granted either way; off screen it also latches, so this actor is the
-      // only one that may be attacking unseen.
-      if (host && !ActorIsOnScreen(obj, host)) {
-        obj.flags2 |= offScreenBit;
-        G.g_attack_committed = 1;
-      }
-      G.g_attack_permits[i] = obj.at;
-      obj.attackPermit = i;                    // +0x121
-      // [diverges] Neither claim routine writes `obj+0x34`: 0x00455DE0's only
-      // stores are `obj+0x121`, `obj+0x136C` bit 0x20000, `g_attack_committed`
-      // and the permit table. This clear has been here since the first port
-      // and claimants that raise the bit may lean on it to lower it again. It
-      // matters to `ZombieStateHoldForCameraCue`, which keeps
-      // the bit up until the cue and whose delegate claims every frame of the
-      // wait, so the port lets the camera track a held captor early. Moving
-      // it means reading every claimant's own clear first -- class 0x31's
-      // included -- and is left to that job rather than done here.
-      obj.flags &= ~ActorFlag.NoCameraTrack;      // the camera may now see it
-      return true;
+
+  if (G.g_max_attackers === 1) {
+    // `0x00455EA3`. Player 1's arm falls into player 2's test, which cannot
+    // match on the same `g_active_player`; a taken permit jumps past both.
+    if (G.g_active_player === 0 && PermitIsFree(0)) obj.attackPermit = 0;
+    else if (G.g_active_player === 1 && PermitIsFree(1)) obj.attackPermit = 1;
+  } else if (G.g_max_attackers === 2) {
+    if (G.g_players_in_play === 1) {
+      // `rand() & 0x80000001`, sign-corrected: the compiler's `rand() % 2`.
+      const p = rng.int(2);
+      if (PermitIsFree(p)) obj.attackPermit = p;
+    } else if (G.g_enemies_present === 1) {
+      // A taken permit is **NOT**-ed (`0x00455E69`), not swapped: `~0` is -1,
+      // which fails below, and `~1` is -2 -- see the check after the gate.
+      const p = rng.int(2);
+      obj.attackPermit = PermitIsFree(p) ? p : ~p;
+    } else {
+      const s = ActorScreenHalfSign(obj, host);
+      if (s === -1 && PermitIsFree(0)) obj.attackPermit = 0;
+      else if (s === 1 && PermitIsFree(1)) obj.attackPermit = 1;
     }
   }
-  return false;
+
+  // `if (!IsPlayerAttackable((s8)obj+0x121)) obj+0x121 = 0xFF` — no enemy may
+  // claim while the follow camera or a scripted view-angle turn is driving,
+  // or while the picked player is out of play.
+  if (!IsPlayerAttackable(obj.attackPermit)) obj.attackPermit = -1;
+  if (obj.attackPermit === -1) return false;
+  // [diverges] A pick of `-2` survives only when `IsPlayerAttackable(-2)` is
+  // true, which in the engine is attract mode (`g_app_state == 5` answers
+  // true for any index) or whatever lies 0x260 bytes below `g_player_state`.
+  // The engine then claims "permit -2": it writes 1 to `0x009A2B98`, eight
+  // bytes below `g_attack_permits`, and the actor attacks holding `0xFE`. The
+  // port runs no attract mode and its `IsPlayerAttackable` refuses a negative
+  // player outside it, so this is unreachable here; it refuses rather than
+  // scribble on an array index the port does not have.
+  if (obj.attackPermit < 0) { obj.attackPermit = -1; return false; }
+
+  // Granted either way; off screen it also latches, so this actor is the only
+  // one that may be attacking unseen. No host means no camera to measure
+  // against, and the port reads that as on screen.
+  if (host && !ActorIsOnScreen(obj, host)) {
+    obj.flags2 |= offScreenBit;
+    G.g_attack_committed = 1;
+  }
+  // The engine stores 1; the port stores the holder, which every reader
+  // tests against -1 and the debug panels print.
+  G.g_attack_permits[obj.attackPermit] = obj.at;
+  return true;
 }
 
 /**
  * `ThrowerTryClaimAttackSlot` — `FUN_0044CA40`.
  *
- * Byte-for-byte `TryClaimAttackSlot`, and it exists as its own function
- * because class 0x31 reaches it from its own state machine. Kept separate for
- * the same reason: gating the thrower on the zombie's rank test is why the
- * elevated ones never threw — they are far away by design, so their distance
- * rank is always high.
+ * Class 0x31's copy of `TryClaimAttackSlot`, instruction for instruction
+ * (`0x0044CA40`..`0x0044CB97` against `0x00455DE0`..`0x00455F39`) — the same
+ * void, the same latch read, the same pick and the same two `rand()` calls —
+ * except the off-screen latch bit: `OR AH, 0x80` at `0x0044CB70`, `obj+0x136C`
+ * bit `0x8000`, where the zombie's copy has `OR EAX, 0x20000`. Kept separate
+ * for the reason the exe has two: gating the thrower on the zombie's rank test
+ * is why the elevated ones never threw — they are far away by design, so
+ * their distance rank is always high. `[proved]`
  */
-export function ThrowerTryClaimAttackSlot(obj: Actor,
+export function ThrowerTryClaimAttackSlot(obj: Actor, rng: Rng,
                                           host?: GameHost): boolean {
-  // The one thing that is not byte-for-byte: the off-screen latch is recorded
-  // in a different bit of the same word, because class 0x30 already uses
-  // `0x20000` for something else on its own actors.
-  return TryClaimAttackSlot(obj, host, ThrowerFlag.OffScreenPermit);
+  return TryClaimAttackSlot(obj, rng, host, ThrowerFlag.OffScreenPermit);
+}
+
+/**
+ * Why a claim would be refused right now, in the order the claim asks — or
+ * `null` when it may succeed. For the debug panels.
+ *
+ * `[port-only]` It **reads** what `TryClaimAttackSlot` tests rather than
+ * calling it, so asking neither takes a permit nor draws from the `Rng`; the
+ * two-player arms whose pick is a coin toss or a screen half are reported only
+ * when neither permit could be offered.
+ */
+export function AttackClaimRefusal(): string | null {
+  if (G.g_attack_committed !== 0) {
+    return "another enemy is committed off screen";
+  }
+  const holder = (p: number) => `0x${(G.g_attack_permits[p] ?? 0)
+    .toString(16).toUpperCase()} has it`;
+  if (G.g_max_attackers === 1) {
+    const p = G.g_active_player;
+    if (p !== 0 && p !== 1) return `no permit is offered to g_active_player ${p}`;
+    if (!PermitIsFree(p)) return `player ${p + 1}'s permit is held — ${holder(p)}`;
+    if (!IsPlayerAttackable(p)) return `player ${p + 1} is not attackable`;
+    return null;
+  }
+  if (G.g_max_attackers === 2) {
+    if (!PermitIsFree(0) && !PermitIsFree(1)) {
+      return `both permits held — ${holder(0)}, ${holder(1)}`;
+    }
+    return null;
+  }
+  return `g_max_attackers is ${G.g_max_attackers}: no permit is offered`;
 }
 
 /**

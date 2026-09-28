@@ -15,8 +15,8 @@ import type { Walker } from "../../script/walker";
 import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
-  BranchProjection, FeedRow, LoadingProjection, SkipProjection,
-  SoundProjection, StatusProjection, StripRow, TransportProjection,
+  BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
+  SkipProjection, SoundProjection, StatusProjection, StripRow, TransportProjection,
   TreeProjection, UiProjection,
 } from "../../ui/projection";
 import type { DebugGroupName } from "../../ui/projection";
@@ -74,6 +74,7 @@ export interface PlayerView {
   readonly groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   readonly sound: SoundProjection;
   readonly skip: SkipProjection | null;
+  readonly continueOffer: ContinueProjection | null;
   readonly branch: BranchProjection | null;
   readonly transport: TransportProjection;
 }
@@ -126,6 +127,7 @@ export function buildProjection(v: PlayerView,
     hudRows: v.hudRows,
     groups: v.groups,
     skip: v.skip,
+    continueOffer: v.continueOffer,
     branch: v.branch,
     gameOver: gameOverProjection(),
   });

@@ -70,15 +70,17 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
-  BranchProjection, FeedRow, LoadingProjection, SkipProjection,
-  SoundProjection, StatusProjection, TransportProjection, TreeProjection,
+  BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
+  SkipProjection, SoundProjection, StatusProjection, TransportProjection,
+  TreeProjection,
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
 import { buildProjection, type PlayerView } from "./projection/player";
 import { groupRows, hudInputs, hudRows } from "./projection/hud";
 import type { DebugGroupName, StripRow } from "../ui/projection";
 import {
-  branchProjection, skipProjection, soundProjection, transportProjection,
+  branchProjection, continueProjection, skipProjection, soundProjection,
+  transportProjection,
 } from "./projection/chrome";
 import { SceneFog } from "../render/fog";
 import { TextureFilter } from "../render/texfilter";
@@ -753,6 +755,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   }
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
+  get continueOffer(): ContinueProjection | null { return continueProjection(); }
   get branch(): BranchProjection | null { return branchProjection(this); }
   get transport(): TransportProjection { return transportProjection(this); }
 
@@ -1130,10 +1133,18 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       else if (e.code === "ArrowLeft") { e.preventDefault(); this.rewind(); }
       else if (e.code === "Digit1") this.setMode("play");
       else if (e.code === "Digit2") this.setMode("free");
-      else if (e.code === "Enter") { e.preventDefault(); this.requestSkip(); }
-      // The pad's START for player 1 (`g_pad_state` bit 8): a new game from
-      // "out", a continue during the countdown. See `PadStartPressed`.
-      else if (e.code === "KeyS") this.padLatch |= PadBit.Start0;
+      // **START**, and the only key that is. The pad has one START and the
+      // exe reads it in two places -- `PadStartPressed` (`g_pad_state` bit 8:
+      // a continue during the countdown, a new game from "out") and the
+      // player-update routines' skip poll (`FUN_00414940`, `FUN_00414B90`),
+      // whose request `CheckCutsceneSkipRequest` acts on (`Walker.skippable`
+      // has the chain) -- so a press is both, as one press of the button is.
+      // They were `S` and Enter, which made the continue screen's "PRESS
+      // START" a key nobody would guess, and put `S` on free roam's back key.
+      else if (e.code === "Enter" || e.code === "NumpadEnter") {
+        e.preventDefault();
+        this.pressStart();
+      }
       // Reload. `[port-only]` as a key: the exe's mouse reloads with its right
       // button, which is a pull off the screen, and `R` is mapped onto exactly
       // that pull -- not onto a pad bit, because the gun's binding set in
@@ -1321,6 +1332,19 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   offscreenPull(): void {
     if (this.gameRunning && !this.frozen) QueueOffscreenPull(0);
     this.pacer.wake();
+  }
+
+  /**
+   * One press of player 1's START: Enter, and the corner button.
+   *
+   * Both of the exe's readers get it -- bit 8 of the next tick's
+   * `g_pad_state` for `PadStartPressed` (a continue, a new game from "out"),
+   * and the skip request -- because it is one button. See the Enter branch
+   * of the key handler.
+   */
+  pressStart(): void {
+    this.padLatch |= PadBit.Start0;
+    this.requestSkip();
   }
 
   /**

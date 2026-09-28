@@ -313,6 +313,78 @@ kbd {
   }
 }
 
+/* ---- what an overlay key just did ---- */
+
+#toast {
+  position: absolute; z-index: 7;
+  top: calc(var(--fy) + max(14px, env(safe-area-inset-top)));
+  left: 50%; transform: translate(-50%, -6px);
+  padding: 6px 14px;
+  background: var(--glass); color: #eef2f6;
+  border: 1px solid var(--glass-line); border-radius: 999px;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  opacity: 0; pointer-events: none !important;
+  transition: opacity 140ms ease-out, transform 140ms ease-out;
+}
+#toast.shown { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---- the `?` list of keys ---- */
+
+/* Over everything in the overlay, and it takes the press: a click on the dim
+   around the card closes it rather than going through to the gun. */
+#shortcuts {
+  position: absolute; inset: 0; z-index: 20;
+  display: grid; place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+  animation: pop-in 140ms ease-out;
+}
+.shortcuts-card {
+  width: min(760px, 100%); max-height: 100%; overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  padding: 14px 18px 18px;
+  outline: none;
+}
+.shortcuts-card header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.shortcuts-card h2 { margin: 0; font-size: 15px; font-weight: 700; }
+.shortcuts-close {
+  width: 30px; height: 30px; padding: 0;
+  background: transparent; color: var(--dim);
+  border: 1px solid transparent; border-radius: 7px;
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.shortcuts-close:hover { color: var(--text); border-color: var(--line); }
+.shortcuts-groups {
+  display: grid; gap: 4px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+.shortcuts-groups h3 {
+  margin: 12px 0 6px; font-size: 10px; font-weight: 700; color: var(--dim);
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.shortcuts-groups dl {
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: 5px 12px; margin: 0; align-items: baseline;
+}
+.shortcuts-groups dt { display: flex; gap: 3px; justify-content: flex-end; }
+.shortcuts-groups dd { margin: 0; color: var(--text); }
+.shortcuts-groups kbd { color: var(--text); background: var(--panel-2); }
+.shortcuts-groups .press { font-size: 11px; color: var(--dim); }
+.shortcuts-groups .note { color: var(--dim); }
+.shortcuts-groups .state {
+  margin-left: 8px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim);
+}
+.shortcuts-groups .state.on { color: var(--accent); }
+
+/* The overlay switches in the sidebar say their key. */
+.grp-switches .key-hint { font-size: 10px; padding: 0 4px; margin-left: 2px; }
+
 /* ---- the skip prompt and the branch bar ----
    Both hang off the bottom of the picture rather than the window, so with the
    4:3 frame on they sit on the picture and not out in the black bars.
@@ -344,6 +416,23 @@ kbd {
   cursor: default;
 }
 .skip-key { background: var(--glass); }
+/* The same button on the continue countdown, in the game's own colour: it is
+   the one thing between the player and the game-over screen, and on a phone
+   the only START there is. Larger for a thumb, and the digit is the game's. */
+#skipbar.continue button {
+  min-height: 48px; padding: 10px 22px;
+  background: var(--blood); border-color: var(--blood);
+  font-size: 15px; letter-spacing: 0.16em;
+  box-shadow: 0 8px 28px rgba(208, 20, 44, 0.45);
+}
+#skipbar.continue button:hover:not(:disabled) { background: #e8243e; }
+#skipbar.continue button:disabled {
+  background: var(--glass); box-shadow: none;
+}
+.continue-digit {
+  min-width: 1.2em; text-align: center;
+  font-family: var(--mono); font-size: 17px; letter-spacing: 0;
+}
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { #skipbar { animation: none; } }
 

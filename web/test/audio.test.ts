@@ -13,6 +13,7 @@
  */
 import {
   BGM_ONE_SHOT_IDS, SOUND_STOP, SOUND_STOP_SE, SOUND_STOP_VOICE, routeSoundId,
+  soundUrl,
 } from "../src/audio/bgm";
 import {
   bgmRingBytes, bgmStreamLayout, bgmStreamSamples, wavStreamHeader,
@@ -238,6 +239,18 @@ const SOUND: SoundJson = {
   check("a voice id routes to its line",
         v.kind === "voice" && v.file === "st1\\a.wav", JSON.stringify(v));
 }
+
+console.log("\nWhere a sound is fetched from:\n");
+// Lowercased, because a static host's keys are exact and the tables' spelling
+// is not the install's. `tools/site.mjs` stages the lowercased tree.
+check("an SE's backslash becomes a path, all of it lowercase",
+      soundUrl("se", "COMMON\\GUN5_22.WAV") === "se/common/gun5_22.wav",
+      soundUrl("se", "COMMON\\GUN5_22.WAV"));
+check("a track is lowercased too",
+      soundUrl("bgm", "ST1_AR.WAV") === "bgm/st1_ar.wav");
+check("and a name that needs escaping is escaped per segment",
+      soundUrl("voice", "ST1\\A B#.wav") === "voice/st1/a%20b%23.wav",
+      soundUrl("voice", "ST1\\A B#.wav"));
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

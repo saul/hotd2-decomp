@@ -141,6 +141,20 @@ CHECKS: list[Check] = [
           "from its first sample to end of file, looped, sample for sample -- "
           "and that it is audible",
           NEEDS_BUNDLE),
+    Check("keys", "web", ["npm", "run", "--silent", "keys"],
+          "that the page's keys do what the `?` list says when pressed -- "
+          "test:ui holds the list to the handlers' source, this reads back "
+          "what a press did -- and that a click on a control over the game "
+          "hands Space and Enter (START) back to the game rather than "
+          "leaving them with the button",
+          NEEDS_BUNDLE),
+    Check("continue", "web",
+          ["node", "tools/continue_page.mjs", "--headless"],
+          "that the last life lost with credits left puts CONTINUE? and its "
+          "digit where the exe draws them, holds the script at its wait, and "
+          "that START -- pressed on the corner button, the one START a phone "
+          "has -- spends a credit and puts the player back in play",
+          NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "
@@ -338,6 +352,17 @@ CHECKS: list[Check] = [
           "comparator bytes that make the sort nearest-first rather than the "
           "painter's order this repo's docs had -- plus that no mesh in `pol/` "
           "turns its depth write off, which is why translucent meshes occlude",
+          NEEDS_GAME),
+    Check("verify_texture_alpha", ".",
+          ["python3", "tools/verify_texture_alpha.py", "--game-dir",
+           "{game_dir}"],
+          "that a texture's alpha reaches the bundle as the bank stores it, "
+          "because the EXE's D3D path keeps it: the upload's format table and "
+          "the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the "
+          "D3D module finding TSP bit 19 read only as half of the pass "
+          "selector -- plus the corpus premise that makes a glTF alphaMode "
+          "from the pass right, and, on a current bundle, no `_opaque` image "
+          "and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha",
           NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],

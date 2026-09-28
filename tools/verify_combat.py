@@ -95,15 +95,19 @@ byte. The readings under test are the ones docs/formats/combat.md states:
     the named ones, every attack entry's, the two entrance scripts -- keep
     every start and threshold inside it, which is what says the port's
     one-shot channel ending first is never the thing that ends an arc.
-    Nine stage changes switch clips: seven scripts end on a different clip
-    from the two stages before it -- zslman's aside in stances 1 and 3, and
-    set 3's attack 3 in all five stances -- and `ThrowerStatePathFollow`'s
-    style-2 script (`0x00565E88`) flies on 300 between two stages of 301,
-    so the bound is taken per stage, not per script, and
-    `InstallArcMotionScript`'s old note that every script is one clip was
-    wrong. The count was 38 until the path follow's three scripts were
-    exported -- they were not, and the rooftop route in stage 2 flew with no
-    clip at all.
+    Seven stage changes switch clips: five scripts end on a different clip
+    from the two stages before it -- set 3's attack 3 in all five stances --
+    and `ThrowerStatePathFollow`'s style-2 script (`0x00565E88`) flies on 300
+    between two stages of 301, so the bound is taken per stage, not per
+    script, and `InstallArcMotionScript`'s old note that every script is one
+    clip was wrong. The count was 38 until the path follow's three scripts
+    were exported -- they were not, and the rooftop route in stage 2 flew with
+    no clip at all. It was nine until zslman's leap-aside scripts were read
+    at the stride `ThrowerStateLeapAside` names them at: at `0x30` rows 1 and
+    3 were two of those pounce scripts, which is where the other two
+    switches came from. So the check also reads the four `MOV ESI, imm32`
+    the state picks them with (`0x0044BAB1`..`0x0044BAD0`) and holds the
+    exported four to exactly those addresses.
 
 Known exception, reported rather than hidden: character type 21 (`samson`, a
 boss) has a `PTR_DAT_004D032C` entry that is not the ``{slot, centre, radius}``
@@ -122,7 +126,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hod2lib.arcscript import CLASS30_ARC_SCRIPTS, arc_script
+from hod2lib.arcscript import (CLASS30_ARC_SCRIPTS, CLASS31_ARC_SCRIPTS,
+                               CLASS31_ASIDE_ZSLMAN_IMM,
+                               CLASS31_ASIDE_ZSLMAN_STRIDE, arc_script)
 from hod2lib.characters import MOTION_ROW_BACKOFF
 from hod2lib import characters as ch          # noqa: E402
 from hod2lib import stage as stagelib         # noqa: E402
@@ -626,9 +632,28 @@ def main() -> int:
                             f"play {play}")
     print(f"  arc scripts: {len(arcs)}, every start and threshold inside its "
           f"own clip's play length; {switches} stage changes switch clips")
-    if switches != 9:
-        fails.append(f"expected nine arc-script stage changes to switch "
+    if switches != 7:
+        fails.append(f"expected seven arc-script stage changes to switch "
                      f"clips, counted {switches}")
+    # zslman's four leap-aside scripts are the ones `ThrowerStateLeapAside`'s
+    # own `MOV ESI, imm32` name -- read out of `.text`, not out of the
+    # exporter's table -- and the exported four are the twelve dwords there.
+    named = []
+    for row, imm in enumerate(CLASS31_ASIDE_ZSLMAN_IMM):
+        o = tables._v2r(imm - 1)
+        op, addr = struct.unpack_from("<BI", tables.data, o)
+        named.append(addr)
+        want = CLASS31_ARC_SCRIPTS["aside_zslman"] \
+            + row * CLASS31_ASIDE_ZSLMAN_STRIDE
+        if op != 0xBE or addr != want:
+            fails.append(f"ThrowerStateLeapAside row {row}: {op:#x} "
+                         f"{addr:#010x}, the exporter reads {want:#010x}")
+        got = c31.get("scripts", {}).get(f"aside_zslman_{row}")
+        if got != arc_script(tables, addr):
+            fails.append(f"aside_zslman_{row} is not the script at "
+                         f"{addr:#010x}")
+    print(f"  zslman's leap-aside scripts are the four the state names: "
+          f"{', '.join(f'{a:#010x}' for a in named)}")
     if len(arcs) != 41:
         fails.append(f"expected the 41 arc scripts classes 0x30 and 0x31 can "
                      f"install, read {len(arcs)}")

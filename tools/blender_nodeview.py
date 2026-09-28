@@ -50,6 +50,10 @@ print(f"{len(keep)} objects, world bbox {list(round(v,1) for v in lo)} .. "
 cam_data = bpy.data.cameras.new("rigcam"); cam = bpy.data.objects.new("rigcam", cam_data)
 sc.collection.objects.link(cam); sc.camera = cam
 d = rad * 3.0
+# Blender's camera clips at 100 units by default, which a stage segment's
+# bounding box outruns: the render came back as nothing but the world colour.
+cam_data.clip_start = max(d * 0.001, 0.01)
+cam_data.clip_end = d * 4.0
 import os
 ang = float(os.environ.get("RIGANG","0"))
 cam.location = ctr + mathutils.Vector((d*math.cos(ang), d*math.sin(ang), d*0.5))

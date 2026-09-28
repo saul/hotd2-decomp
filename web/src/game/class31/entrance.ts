@@ -172,7 +172,7 @@ export function ThrowerStateDelayedPounce(obj: ThrowerActor, eye: Vec3,
     if (obj.slideTimer > 0) return;
     obj.motionFlags &= ~MotionFlag.RootMotionY;
     obj.flags &= ~ActorFlag.ShotImmune;
-    if (!ThrowerTryClaimAttackSlot(obj, host)) obj.attackPermit = -1;
+    if (!ThrowerTryClaimAttackSlot(obj, rng, host)) obj.attackPermit = -1;
     obj.flags |= ActorFlag.Committed;
     obj.flags2 |= ThrowerFlag.Pouncing;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));

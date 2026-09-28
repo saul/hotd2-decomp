@@ -140,7 +140,7 @@ if (killedAt < 0) {
   // Force one. The release path is what is under test, and whether this
   // particular scene reaches an attack is a separate question.
   const e = G.g_object_list.find((o) => ActorIsEnemy(o.cls) && !o.dead);
-  if (e && TryClaimAttackSlot(e, host)) {
+  if (e && TryClaimAttackSlot(e, rng, host)) {
     console.log(`no permit was held in ${frames} frames;`
       + ` forced one onto 0x${e.at.toString(16)} to test the release`);
   } else {
@@ -181,7 +181,7 @@ for (const o of G.g_object_list) {
 }
 console.log(permitOwners());
 
-const n = ActorKillAll(0, rng);
+const n = ActorKillAll(rng);
 console.log(`\nActorKillAll -> ${n.enemies} enemies, ${n.civilians} civilians`);
 
 // Both enemy classes die through a **chain of states** and retire the counts

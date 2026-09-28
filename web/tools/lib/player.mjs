@@ -14,12 +14,31 @@
  */
 import { chromium } from "playwright-core";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const SHOTS = join(WEB, "shots");
+
+/**
+ * Leave with `3` -- asserted nothing -- when there is no bundle to play.
+ *
+ * `lib/bundle_root.ts`'s `skipNoBundle`, for a driver run by plain `node`,
+ * which cannot import a `.ts`. It looks where `vite.config.ts` serves from, so
+ * the page and this agree. Without it a driver with no bundle waits out its
+ * load and **fails**, which `verify_all.py` reports as a broken check rather
+ * than one that could not run.
+ */
+export function requireBundle(what) {
+  const root = process.env.HOTD2_BUNDLE ?? join(WEB, "..", "extract", "player");
+  if (existsSync(join(root, "manifest.json"))) return;
+  console.log(`\nSKIP  ${what}: no bundle under ${root}`);
+  console.log("      build one with `npm run export -- --game-dir ...`,"
+    + " or point HOTD2_BUNDLE at an existing export.");
+  process.exit(3);
+}
 
 /** A port nothing is listening on, so a dev server you already have is safe. */
 export function freePort() {

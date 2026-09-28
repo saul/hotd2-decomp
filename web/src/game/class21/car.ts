@@ -5,9 +5,10 @@
  *
  * It is proved a car by its sound: the Training poser plays `0x719A9`, whose
  * SE record names `STAGE2_SE\CAR_SRIP_22.wav` (see `OBJ_452320` in
- * `tools/hod2lib/rigs.py`). Its draw routine is `St2CarDraw` (`FUN_00452320`),
- * which the exporter transcribes into the rig `obj_452320`; everything else it
- * does is here.
+ * `tools/hod2lib/rigs.py`). Its draw routine is {@link St2CarDraw}, at
+ * `0x00452320`: the exporter transcribes its transforms into the rig
+ * `obj_452320`, and everything it decides -- the asset row, the two gated
+ * rotations, the roll-limited frame -- is here.
  *
  * ## Who makes it, and when
  *
@@ -28,6 +29,7 @@
  * St2CarInit                 0x00452150  zero the draw words; Route (or Training)
  * St2CarRouteUpdate          0x004521B0  the camera path picks the op_ path; pose; draw
  * St2CarHeldUpdate           0x004522A0  parked: never re-poses; dies on g_script_flags[0]
+ * St2CarDraw                 0x00452320  both of the above end by calling it; row, rotations
  * St2CarTrainingWaitUpdate   0x004528B0  Training only -- not ported, see St2CarInit
  * ```
  *
@@ -47,6 +49,7 @@
 import type { GameHost } from "../host";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
+import { MatrixGetAngles, RotZYX } from "../carrier";
 import { vec3, type Vec3 } from "../vec";
 
 /** `ActorAlloc(St2CarInit, 0x13F4)` -- `PUSH 0x13F4` at `0x00452120`. */
@@ -109,15 +112,87 @@ export const ST2CAR_PART_YAW_BASE = 0x4000;
 export const ST2CAR_KILL_FLAG = 0;
 
 /**
+ * `g_st2car_asset_variants` — `0x00565F2C`, `int[2][4]`, read from the
+ * image: `2d000000 2f000000 34000000 31000000` then `2e000000 30000000
+ * 35000000 32000000`. {@link St2CarDraw} takes column `c` of row
+ * `obj+0x13F0` as `[EAX + 0x565f2c + 4c]` after `SHL EAX, 0x4` (`0x0045235B`,
+ * `0x004523A7`, `0x004524C5`, `0x00452515`). Through the pol slot list the
+ * eight slots are `pol/char_adv04.bin` entries 2..10.
+ */
+export const ST2CAR_ASSET_VARIANTS: readonly (readonly number[])[] = [
+  [0x2d, 0x2f, 0x34, 0x31],
+  [0x2e, 0x30, 0x35, 0x32],
+];
+
+/** The two rows of {@link ST2CAR_ASSET_VARIANTS}, as `obj+0x13F0` holds them. */
+export enum St2CarAssetRow {
+  /** {@link St2CarInit} writes 0 at `0x00452157`. */
+  Intact = 0,
+  /**
+   * `St2CarRouteUpdate` writes 1 at `0x00452239`, when shot `0x39` runs
+   * out -- and nothing else writes the word. `[likely]` the crashed car: that
+   * shot is the unshot branch's, and its script plays
+   * `STAGE2_SE\BRIDGE_CRASH1_22.wav` (0x519A9) at frame 340 of it (stage 2
+   * block 11 step 1), thirty frames before the swap.
+   */
+  Crashed = 1,
+}
+
+/**
+ * The roll limiter {@link St2CarDraw} runs on `MatrixGetAngles`' roll before
+ * the second frame re-applies it, `0x00452414`..`0x0045245A`: `r = roll &
+ * 0xFFFF`, then `r <= 0x800` is 0, `r <= 0x4000` loses 0x800, `r < 0xC000`
+ * passes, `r >= 0xE800` is 0, and the rest lose 0xE800. The immediates.
+ */
+export const ST2CAR_ROLL_DEADZONE_POS = 0x800;
+export const ST2CAR_ROLL_PASS_LO = 0x4000;
+export const ST2CAR_ROLL_PASS_HI = 0xc000;
+export const ST2CAR_ROLL_DEADZONE_NEG = 0xe800;
+
+/**
+ * One `AssetDrawSlot` of {@link St2CarDraw}'s four, and what its push did
+ * after `MatrixTranslate`-ing to the part. `[port-only]` in shape: the
+ * engine draws, and the port hands `render/rigs.ts` the words to draw from.
+ */
+export interface St2CarDrawnPart {
+  /** `g_st2car_asset_variants[obj+0x13F0][column]`. */
+  slot: number;
+  /**
+   * The push hangs off the **roll-limited** frame (columns 2 and 3) rather
+   * than the body's (columns 0 and 1).
+   */
+  limited: boolean;
+  /** `MatrixRotateY` after the translation, BAMS; 0 where the routine makes
+   * no call, which is the same matrix. */
+  rotY: number;
+  /** `MatrixRotateX` after the translation, BAMS; 0 likewise. */
+  rotX: number;
+}
+
+/** `[port-only]` -- everything one {@link St2CarDraw} drew. */
+export interface St2CarDrawList {
+  /** The four draws, in column order. Empty before the first draw. */
+  parts: St2CarDrawnPart[];
+  /**
+   * The roll-limited frame, re-applied at the car's position as
+   * `MatrixRotateY(yaw); MatrixRotateX(pitch); MatrixRotateZ(roll)`
+   * (`0x0045247B`, `0x00452485`, `0x0045248B`), BAMS.
+   */
+  limited: { pitch: number; yaw: number; roll: number };
+}
+
+/**
  * Which routine is installed at `obj+0x00`. The engine keeps a function
  * pointer; the numbers are the port's.
  */
 export enum St2CarRoutine {
-  /** `St2CarInit` (`FUN_00452150`) -- what {@link St2CarSpawn} installs. */
+  /** {@link St2CarInit}, `0x00452150` -- what {@link St2CarSpawn} installs.
+   * Linked, not cited: see L42 on citing a routine in the file that ports
+   * it. */
   Init = 0,
-  /** `St2CarRouteUpdate` (`FUN_004521B0`). */
+  /** {@link St2CarRouteUpdate}, `0x004521B0`. */
   Route = 1,
-  /** `St2CarHeldUpdate` (`FUN_004522A0`). */
+  /** {@link St2CarHeldUpdate}, `0x004522A0`. */
   Held = 2,
   /** `St2CarTrainingWaitUpdate` (`FUN_004528B0`) -- see {@link St2CarInit}. */
   TrainingWait = 3,
@@ -150,12 +225,14 @@ export interface St2Car {
   /** `obj+0x1330` -- BAMS, `+= 0x1000` every frame `St2CarRouteUpdate` runs
    * and never reset. */
   spin: number;
-  /** `obj+0x1334` -- BAMS, the RotY `St2CarDraw` gives its second part once
-   * parked. `[open]` what that part is. */
+  /** `obj+0x1334` -- BAMS, the RotY {@link St2CarDraw} gives its second part
+   * once parked. `[likely]` the driver's door: drawn, it is the door the
+   * rescued man climbs out through. */
   partYaw: number;
-  /** `obj+0x13F0` -- the row of `g_st2car_asset_variants` (`0x00565F2C`) the
-   * draw takes its four slots from; 1 once shot `0x39` has run out. */
-  variant: number;
+  /** `obj+0x13F0` -- the row of {@link ST2CAR_ASSET_VARIANTS} the draw takes
+   * its four slots from; {@link St2CarAssetRow.Crashed} once shot `0x39` has
+   * run out. */
+  variant: St2CarAssetRow;
   /** `obj+0x40`..`+0x48` and `+0x64`/`+0x68`/`+0x6C` -- the pose
    * `CamEvalObjectPath6` wrote, rotations in BAMS. */
   pos: Vec3;
@@ -169,8 +246,11 @@ export interface St2Car {
    * first `CamEvalObjectPath6`, and the port has no such bytes to draw at.
    */
   posed: boolean;
-  /** `[port-only]` -- this frame's routine called `St2CarDraw`. */
+  /** `[port-only]` -- this frame's routine called {@link St2CarDraw}. */
   drawn: boolean;
+  /** `[port-only]` -- what that draw drew; stale while {@link drawn} is
+   * false. */
+  draw: St2CarDrawList;
 }
 
 /**
@@ -199,13 +279,14 @@ export function St2CarSpawn(index: number): St2Car {
     trainingFrame: 0,
     spin: 0,
     partYaw: 0,
-    variant: 0,
+    variant: St2CarAssetRow.Intact,
     pos: vec3(),
     pitch: 0,
     yaw: 0,
     roll: 0,
     posed: false,
     drawn: false,
+    draw: { parts: [], limited: { pitch: 0, yaw: 0, roll: 0 } },
   };
   G.g_st2_cars.push(car);
   return car;
@@ -236,7 +317,7 @@ export function St2CarSpawn(index: number): St2Car {
  * until its cue.
  */
 export function St2CarInit(car: St2Car, host: GameHost): void {
-  car.variant = 0;
+  car.variant = St2CarAssetRow.Intact;
   car.spin = 0;
   car.partYaw = 0;
   car.spinOn = 1;
@@ -298,7 +379,7 @@ export function St2CarRouteUpdate(car: St2Car, host: GameHost): void {
     ? ST2CAR_SHOT_PATH[cam as St2CarShot] : null;
   if (cam === St2CarShot.Crash) {
     if (path !== null && frame >= (ST2CAR_PATH_LENGTH[path] ?? Infinity)) {
-      car.variant = 1;
+      car.variant = St2CarAssetRow.Crashed;
       car.routine = St2CarRoutine.Held;
     }
   } else if (cam === St2CarShot.Stop) {
@@ -320,7 +401,7 @@ export function St2CarRouteUpdate(car: St2Car, host: GameHost): void {
       car.posed = true;
     }
   }
-  car.drawn = true;
+  St2CarDraw(car);
 }
 
 /**
@@ -351,8 +432,83 @@ export function St2CarHeldUpdate(car: St2Car, host: GameHost): boolean {
                                 n + ST2CAR_PART_YAW_OFFSET);
     if (p) car.partYaw = (ST2CAR_PART_YAW_BASE - Math.trunc(p.yaw ?? 0)) | 0;
   }
-  car.drawn = true;
+  St2CarDraw(car);
   return true;
+}
+
+/**
+ * `St2CarDraw` — `FUN_00452320`. The whole routine, `0x00452320`..
+ * `0x0045253F` (the listing; Ghidra's body stops at the second
+ * `MatrixStackPop`, L35):
+ *
+ * ```c
+ * row = g_st2car_asset_variants[obj->+0x13F0];
+ * Push(0); Translate(obj->+0x40..); RotZ(+0x6C); RotY(+0x68); RotX(+0x64);
+ *   AssetDrawSlot(row[0]);
+ *   Push(0); Translate(9.058262, 6.368186, 8.943308);        // nested
+ *     if (obj->+0x1324) RotY(obj->+0x1334);
+ *     AssetDrawSlot(row[1]);
+ *   Pop(1);
+ * Pop(1);
+ * Push(0); LoadIdentity(); RotZ(+0x6C); RotY(+0x68); RotX(+0x64);
+ *   MatrixGetAngles(&x, &y, &z);
+ * Pop(1);
+ * r = z & 0xFFFF;  lim = <the deadzone>;
+ * Push(0); Translate(obj->+0x40..); RotY(y); RotX(x); RotZ(lim);
+ *   Push(0); Translate(0, 3.167495, 13.648902);
+ *     if (obj->+0x1320) RotX(obj->+0x1330);
+ *     AssetDrawSlot(row[2]);
+ *   Pop(1);
+ *   Push(0); Translate(0, 3.167495, -9.48);
+ *     if (obj->+0x1320) RotX(obj->+0x1330);
+ *     AssetDrawSlot(row[3]);
+ *   Pop(1);
+ * Pop(1);
+ * ```
+ *
+ * `[port-only]` in what it produces: the matrix stack and the draws are
+ * `render/`'s, so this computes everything the routine decides -- which row,
+ * which rotation each push takes and the second frame's three angles -- and
+ * leaves it on {@link St2Car.draw} for `render/rigs.ts` to place the parts
+ * with. The translations are the rig data's (`tools/hod2lib/rigs.py`
+ * `OBJ_452320`), transcribed from the same `PUSH imm32`s.
+ *
+ * A skipped rotation is **not** a held one: once `St2CarRouteUpdate` clears
+ * `+0x1320` at frame 0x50 of shot `0x3A`, the spun parts are drawn at `RotX`
+ * of nothing, wherever the spin had got to.
+ */
+export function St2CarDraw(car: St2Car): void {
+  const row = ST2CAR_ASSET_VARIANTS[car.variant];
+  // `MatrixGetAngles` (`FUN_004018E0`) of `RotZ; RotY; RotX` after a
+  // `MatrixLoadIdentity`, at `0x004523D2`..`0x00452401`.
+  const a = MatrixGetAngles(RotZYX(car.roll, car.yaw, car.pitch));
+  // `AND EAX, 0xFFFF` at `0x00452414`, so the `JL` after it never jumps.
+  const r = a.z & 0xffff;
+  let roll: number;
+  if (r > ST2CAR_ROLL_PASS_LO) {
+    if (r < ST2CAR_ROLL_PASS_HI) roll = r;
+    else if (r >= ST2CAR_ROLL_DEADZONE_NEG) roll = 0;
+    else roll = r - ST2CAR_ROLL_DEADZONE_NEG;       // `LEA EDI, [EAX - 0xE800]`
+  } else if (r > ST2CAR_ROLL_DEADZONE_POS) {
+    roll = r - ST2CAR_ROLL_DEADZONE_POS;            // `LEA EDI, [EAX - 0x800]`
+  } else {
+    roll = 0;
+  }
+  // `TEST [ESI+0x1324]` at `0x0045238B`; `TEST [ESI+0x1320]` at `0x004524A8`
+  // and again at `0x004524F9`.
+  const partYaw = car.heldFrames !== 0 ? car.partYaw : 0;
+  const spin = car.spinOn !== 0 ? car.spin : 0;
+  car.draw = {
+    // Only rows 0 and 1 are ever written to `obj+0x13F0`.
+    parts: row ? [
+      { slot: row[0], limited: false, rotY: 0, rotX: 0 },
+      { slot: row[1], limited: false, rotY: partYaw, rotX: 0 },
+      { slot: row[2], limited: true, rotY: 0, rotX: spin },
+      { slot: row[3], limited: true, rotY: 0, rotX: spin },
+    ] : [],
+    limited: { pitch: a.x, yaw: a.y, roll },
+  };
+  car.drawn = true;
 }
 
 /**

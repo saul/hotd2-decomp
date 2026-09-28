@@ -678,7 +678,7 @@ from `obj+0x32C`. The head is *thrown*:
 |---|---|
 | gravity | `-0.0204167` (`0xBCA740DA`) a frame, into `+0x50` |
 | launch up | `(rand() % 20 + 1) * 0.01 + 0.3`, so 0.31 to 0.50 |
-| launch out | `MatrixRotateY(camera yaw)` over `(0, 0, -0.2)` — always **away from the viewer** |
+| launch out | `MatrixRotateY(g_camera_block_yaw_bams)` over `(0, 0, -0.2)` (`0x0040A2A6`) — the camera's own −z, always **away from the viewer** |
 | spin | yaw `±(rand() % 0x800 + 0x800)`, pitch the same without the sign, BAMS a frame |
 | bounce | on `QueryGroundHeightAt`, `y` snaps to the ground and the vertical speed is negated and scaled by **0.25** |
 | bounce sound | `0x1116A9` for head slots `0x2015`/`0x1DC1`; else `0x4416A9` on a wet surface (`g_coli_hit_surface` `0x37` or 5) and `0x2616A9` otherwise |
@@ -710,8 +710,13 @@ if (obj[0x19C] >= play_length[obj[0x1B4]] - 1)   /* clip finished */
 ```
 
 `FUN_004560B0` picks the motion. Ignoring the special cases, it falls through to
-`FUN_00456220`, which is **directional**: `camera_yaw − actor_yaw` against four
-±45° arcs (`FUN_0040A040(angle, centre, 0x2000)`).
+`FUN_00456220`, which is **directional**: `g_camera_block_yaw_bams − actor_yaw`
+(the camera **block's** yaw, `0x009A60D0`, read at `0x00456248`) against four
+±45° arcs (`FUN_0040A040(angle, centre, 0x2000)`). The four are tested **in a
+row**, each setting the motion, so a heading exactly on a boundary passes two
+and the later one wins, drawing its `rand()` if it has one. The camera block's
+yaw is `VecToAngles(eye − target)`, pointing back at the viewer, so an actor
+facing the camera sits at `0x8000` and falls back. `[proved]`
 
 | Arc | Motion |
 |---|---|
@@ -965,10 +970,18 @@ the routine, `MOV ECX,count; CDQ; IDIV ECX; ADD EDX,base`:
 | `0x1D99` | — | itself, then `0xB66` at `T(0.343, 0.4530, 1.0333)` |
 | `0x1CA9` | `0x004537E3` | `0x1CA9 + n`, `n` a latch in `obj+0x1328` that counts to 14 and stops |
 | `0x1F09` | — | a 60-cel ping-pong off the same word, restarted by `obj+0x136C` bit `0x80000` |
-| `0x1C71`–`0x1C7B` (not `0x1C73`), `0x1C7D`–`0x1C80` | — | `FUN_00418660(slot)` `[open]`, then itself |
-| `0x1C7C` | — | itself, and a per-frame decay of `obj+0x134C` / `obj+0x138C` |
-| `0x1C6C` | — | itself, and a transition that raises `obj+0x136C` bits `0x60000000` and plays `PlaySoundId(0x2225A9)` |
+| `0x1C71`–`0x1C7B` (not `0x1C73`), `0x1C7D`–`0x1C80` | — | `AssetSlotUVsFromViewNormals(slot)` (`FUN_00418660`: the model's UVs rewritten from its normals through the matrix), then itself |
+| `0x1C7C` | `0x00453708` | the twin's fade-out: `obj+0x134C -= 1.0` each draw, and once that is below 0, `obj+0x138C -= obj+0x1388` clamped at 0; then itself |
+| `0x1C6C` | `0x00453665` | `znele`'s fade-in, only while `obj+0x1368` bit `0x20` is up: `obj+0x134C -= 1.0`, and once below 0, `obj+0x138C += obj+0x1388`; past 1.0 -- or at once under `obj+0x34` `0x10000000` -- the bit drops, the alpha is pinned at 1.0, `obj+0x136C |= 0x60000000`, `obj+0x34 &= ~0x8100`, `PlaySoundId(0x2225A9)`; then itself |
 | anything else | — | itself |
+
+The two fade arms are the whole of what moves a class-0x30 actor's alpha;
+`EnemyZombieInitByCharType` (`FUN_00452FD0`) sets them up -- type 9 at 0.25
+stepping `1/60`, type 0x12 at 0 stepping `1/30`, both with a hundred-draw wait
+and `obj+0x1368` bit `0x20` up -- and type 0x12's arm allocates the type-9
+twin, which `ZombieTwinFollowHost` (`FUN_00453290`) keeps on the host's pose.
+Ported in `game/class30/draw.ts`, `init_char.ts` and `twin.ts`; see
+`docs/PLAYER_PROGRESS.md`, "Character fades".
 
 Two arms are not draws at all and wrap this one: `ZombieDrawBoneSlotOnly`
 (`0x00453B30`) is the plain one-slot hook `ZombieAdvanceMotion` installs in
@@ -979,7 +992,8 @@ Original Mode big-head item — bone 2 at `MatrixScale(2,2,2)`, or
 Every arm draws through `ZombieSubmitSlotByLighting` (`FUN_00453AE0`), which
 picks `SubmitSlotWithSceneLightArray`, `AssetDrawSlotWithAlpha` or
 `AssetDrawSlot` on `obj+0x136C` bit `0x20` and `obj+0x1368` bit `0x20` — so a
-cel keeps whatever lighting the spawn asked for.
+cel keeps whatever lighting the spawn asked for. The light array is tested
+first: a zombie drawn through it is never faded, whatever `obj+0x1368` says.
 
 **Each trigger slot belongs to exactly one character type**, and every run
 resolves to that type's own `pol/` file, which is the check on the reading:
@@ -1243,7 +1257,7 @@ records every frame.
 | Ring | Address | Space | Frames | Slots |
 |---|---|---|---|---|
 | muzzle flash | `g_shot_flash_ring` 0x009A2960 | camera | 9 | `g_muzzle_flash_slots[player] + frame` at scale 0.1, then `g_muzzle_smoke_slots[player] + frame` at **0.05** — see below |
-| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad |
+| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad; Original Mode weapon kind 5: `0x109D` at the record plus `op_` `0x194` at `frame % 24`, no spin — see below |
 | Original Mode | `g_shot_weapon_ring` 0x009A2700 | camera | 24 | `0xA6F + frame` at scale 0.05, weapon kind 4 only |
 
 `g_muzzle_flash_slots` (0x00579F78) is `{0x175, 0x17F}` and
@@ -1268,6 +1282,18 @@ and flies `normalize(point - eye) * 20.0` a frame, spinning `0x1000` BAMS.
 (0x009C9010) as "the candidate list is not empty", and that is its only reader.
 So a round that hit is a stub of streak leaving the barrel and a round that
 missed flies for a full second.
+
+**Both tracer arms are camera-facing** `[proved]`. Each one
+`MatrixTranslate`s onto the record and then calls `MatrixClearRotation`
+(`FUN_004A9F70`), which writes the top 3x3 to the identity -- the view's
+rotation with it -- so the roll, and the kind-5 arm's `RotZ RotY RotX`, turn in
+the camera's axes. The kind-5 arm (`CMP EAX, 0x5` at `0x00416CBE`) also
+`MatrixTranslate`s by `CamEvalObjectPath6(0x194, frame % 0x18)` first -- two
+translations, summed (L5) -- and draws `0x109D` (`etc_1.bin` entry 41), the
+only draw of that slot in the program. `op_` `0x194` is `op_org` 0, so only an
+Original Mode stage has the path. The exporter once placed that arm as the rig
+`obj_416b00` at the path's own pose, which stood in front of Goldman's desk in
+stage 2's opening; it is not a placeable rig.
 
 Two smaller findings from the same routine:
 
@@ -1361,14 +1387,46 @@ Fail, and the enemy keeps walking.
 * its **first** store is `obj+0x121 = 0xFF`, before any test — a refused claim
   always leaves the actor holding no index, whatever it held;
 * `g_attack_committed` set refuses at once;
-* it offers **one** player's permit, not the first free one: `g_active_player`'s
-  with one attacker; with two, `rand() % 2`'s while one player is in play, the
-  same pick `NOT`'d if taken while one enemy is present, and otherwise the
-  player on the actor's half of the screen (`ActorScreenHalfSign`,
-  `0x00409C90`); `IsPlayerAttackable` then voids the pick;
+* it offers **one** player's permit, not the first free one, and nothing ever
+  falls back to the other player:
+
+  | `g_max_attackers` | condition | offered | draws |
+  |---|---|---|---|
+  | 1 | — | `g_active_player`'s, if free (0 or 1; `2` offers nothing) | none |
+  | 2 | `g_players_in_play == 1` (s16) | `rand() % 2`'s, if free | one `rand()` |
+  | 2 | `g_enemies_present == 1` (s16) | `rand() % 2`'s; if taken, `~pick` — -1 or -2 (`0x00455E69`) | one `rand()` |
+  | 2 | otherwise | player 0's if `ActorScreenHalfSign` (`0x00409C90`) is -1, player 1's if 1, if free | none |
+  | other | — | nothing | none |
+
+  `ActorScreenHalfSign` is `P * obj+0x70 / obj+0x78` against 0.0: below (or
+  unordered) is 1, else -1 — the right of the frame for player 2 and the left
+  for player 1 `[likely]`, the halves following from the `-Z`-in-front view;
+* `IsPlayerAttackable((s8)obj+0x121)` then voids the pick (`0x00455ED5`), and
+  only `0xFF` fails (`0x00455EF0`): a `-2` it passes — attract mode, where it
+  answers true for any index — claims "permit -2", a 1 written to
+  `0x009A2B98`;
+* the grant raises the latch bit and `g_attack_committed` when
+  `ActorIsOnScreen` says no, and writes `g_attack_permits[obj+0x121] = 1`;
 * the permit table holds **0 or 1** — whether a permit is out, not who has it
-  (the port stores the holder's id and `-1` for free, for its debug panel);
-* it does **not** write `obj+0x34`.
+  (the port stores the holder's id and `-1` for free, for its debug panel —
+  and every reader in the port, the scripted attackers' own picks included,
+  has to test against `-1`, not against the engine's literals);
+* it does **not** write `obj+0x34`. Where a claimant lowers `NoCameraTrack`
+  (`0x10000`) is its own business, and only three do: `ZombieStateApproach`
+  after a grant (`0x00457A4E`), `ZombieStateWaitForCameraFrame` before its
+  claim and only for its hidden kind (`0x004576E5`), and
+  `ZombieStateHoldForCameraCue` at its cue (`0x0045C00C`). The hub, both
+  stand-and-throw routines, the scripted grab and state 28 have no clear, and
+  class 0x31 has none anywhere — it raises the bit only on its way to a corpse.
+
+The nine class-0x30 call sites are `0x0045583B` (hub), `0x004576FB` (state
+19), `0x00457A39` (state 22), `0x00457C18` (state 23), `0x004587C4` (state 28,
+`0x004586E0`, unported), `0x00458EB0`/`0x00458EC3` (`ZombieShouldStandAndThrow`
+— type 1 claims *before* its hand test, 0x13/0x14 after) and
+`0x0045920C`/`0x004592EE` (state 33). Class 0x31's twelve are listed in
+`functions.tsv`'s `ThrowerTryClaimAttackSlot` row; five of them are
+`ThrowerTryEnterState`'s, and the one for state 0x20 claims before its surface
+test and keeps the permit on a refusal.
 
 Two things free a permit other than its holder. `ZombieStateHoldForCameraCue`
 (`0x0045BFD0`) zeroes `g_attack_permits[obj+0x121]` when its delegate reaches
@@ -2060,6 +2118,42 @@ vertical camera nod: `UpdateSceneViewAndLight` re-aims the camera at
 | 8 | 0x935 | 120 | vertical streak | BLOOD05 |
 | 9, 10 | 0x931 | 116 | ring of teeth marks | BONE01 |
 
+**How opaque it is: solid where the mark is, clear round it** `[proved]`.
+The draw is the plain `AssetDrawSlot` (`FUN_00418560`; the `CALL` is at
+`0x004173B5`), never `AssetDrawSlotWithAlpha` (`FUN_004185A0`), so it hands
+the model no alpha and nothing fades it: `RenderSubmitModelDefaultLight`
+(`FUN_004AA2B0`) queues an unfaded command and `WalkMeshChainAndDraw`
+(`FUN_004A7EF0`) draws each mesh by its own header. All eleven models are one
+mesh each with the same state:
+
+| field | value | what `TranslatePvr2StateToD3D` / `WalkMeshChainAndDraw` make of it |
+|---|---|---|
+| TSP | `0x9400041B` (`0x9404041B` on 123/124, U flip) | `SRCALPHA` / `INVSRCALPHA`; bits 20-19 clear, so the translucent pass with the alpha test on (ref 1); shading mode 0, so `ALPHAOP MODULATE` (texel x diffuse); `POINT` filtering; fog on |
+| base colour, `+0x2C..+0x38` | ARGB `(1, 1, 1, 1)` | `SetMaterial`'s diffuse -- alpha 1.0 |
+| `+0x28`, `+0x24` | 0.75, -1 | material ambient 0.75 x diffuse; no specular |
+| texture | 26..33, ARGB4444 VQ 128x128 | alpha 0 over 55-84% of each; of the texels the mark covers, 31-82% are 255 (the thin claw marks, texture 27, are mostly edge) and the rest a 4-bit soft edge |
+
+So what reaches the screen is the texel's alpha: a solid mark with feathered
+edges, not a translucent one, and the same on all 59 frames. The port draws
+exactly that -- `tools/hurt_alpha.mjs` measures it off the page's pixels
+(stage 2's kind 4: 66.5% of the covered pixels at alpha exactly 1.0 against
+texture 28's 65.4% of covered texels at 255; stage 1's kind 0: 74.2% against
+texture 33's 75.9%), and `tools/verify_texture_alpha.py` holds the call, the
+words, the base alpha, the textures and the bundle's images to it.
+
+`[likely]` **Its colour is lit.** `AssetDrawSlot` draws under
+`SetLightingDefaultSingle`'s light, and no immediate `PUSH 0x89`
+(`D3DRENDERSTATE_LIGHTING`) is in the D3D module, so the device's default --
+lighting on -- stands and the vertex colour the texel is
+multiplied by is D3D's lighting of material ambient 0.75 and diffuse 1.0 --
+with the model's normals `(0, 0, 1)` put through a modelview scaled by 0.02
+and `NORMALIZENORMALS` never set. That can tint the mark with the scene's
+light and darken it where the light is behind it. Alpha is untouched by it
+(the lit diffuse alpha is the material's, 1.0). `[open]` how far: that turns
+on how the device transforms an unnormalised normal. The port draws every
+effect model unlit (`render/lighting.ts`), so it shows the texture's own
+orange.
+
 The zombie attack tables' `+0x0A` values span 0, 1, 2, 3 (type 0x0D only), 4,
 5, 7, 8 and 9; the literals at the other call sites are 0/1 (the thrower's
 grab), 4 (the axe), 6 (arcing throws, the stage-2 boss), 7 (leaps, rolled
@@ -2385,9 +2479,17 @@ that skips their own descriptor read. The walk arm raises `obj+0x34` bit
 > clear is a no-op.
 
 A second path reaches the same state: `ZombieShouldStandAndThrow`
-(`FUN_00458E10`) lets a **condition 8** walker stop and throw when the camera
-is already within `0x400` BAMS of the way it is facing. Fourteen spawns are
-condition 8, and they never turn to line the shot up.
+(`FUN_00458E10`) lets a **condition 8** walker stop and throw when
+`(g_camera_block_yaw_bams - 0x8000) & 0xFFFF` -- the camera block's yaw turned
+half round, which is the heading of an actor facing the camera -- is within
+`0x400` BAMS of the way it is facing (`0x00458E48`). Fourteen spawns are
+condition 8, and they never turn to line the shot up. **The claim and the
+hands come in the character type's order**: `znassb` (type 1) takes the permit
+first and then looks for a blade, so one with both shot away still holds the
+permit and answers no; the axe types 0x13 and 0x14 look first; any other type
+answers no without claiming. The port read `g_camera_yaw_bams` (`0x009C71F0`)
+here, half a turn from the block, and none of the fourteen ever threw.
+`[proved]`
 
 #### Where the recompute happens, and why it is the whole of condition 8
 
@@ -2577,39 +2679,127 @@ level design, not unreachable data.
 ### The pounce — `ThrowerStateLeapDown`, `FUN_0044B670`
 
 States 9, 12 and 13 share it, and it is the attack. What it is *not* is a swing
-at a range:
+at a range. `[proved]` from the listing: four arms off the jump table at
+`0x0044B868`, each of the first three ending `INC obj+0x1312` and running on
+into the next, and `JA` returning for a sub past 3.
 
 ```
-dest  = ThrowerPickLandingPoint()       /* a place on the SCREEN */
-yaw   = g_camera_yaw_bams
-ActorArcBeginToWaypoint(dest, <null script>, 1)
-obj+0x1364 = the stance, latched before the surface bits are cleared
-...every frame: ThrowerStrikeConnect()
+sub 0  p = ThrowerPickLandingPoint()          /* a place on the SCREEN */
+       obj+0x68   = g_camera_yaw_bams
+       ActorArcBeginToWaypoint(p, &DAT_007DCC70, 1)  /* draws the attack */
+       obj+0x1364 = bit6 + 2*(bit7 + 2*bit17) + 3*bit8 of obj+0x136C
+       obj+0x34  |= 0x10000000                /* 0x0044B6F0 */
+       if (obj+0x32C == 0x2002) ActorPlayHitVoice(obj, 3)
+       type != 0x18: obj+0x136C &= 0xfffff61f /* 0x800, surface, off-ground */
+       type == 0x18: obj+0x136C &= ~0x800; obj+0x13D8.. = obj+0x40..
+sub 1  if (!(obj+0x136C & 0x800) && type != 0x18) ThrowerStrikeConnect()
+       if (ActorArcStep(obj, 1) == 1) return
+       obj+0x136C &= 0xffe7ffff               /* both collision bits down */
+sub 2  if (!(obj+0x136C & 0x800)) ThrowerStrikeConnect()
+       unless g_GameMode == 2 && g_script_flags[0xF2]: obj+0x40.. = p again
+       if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+sub 3  obj+0x136C &= ~0x800; obj+0x34 &= ~0x10000000; state 10
 ```
 
-Three things worth naming.
+Things worth naming.
 
-* **The attack is chosen by the null script.** `ActorArcBeginToWaypoint`
-  (`FUN_0044D780`) takes a pointer to an arc motion script, and passing the
-  `&DAT_007DCC70` sentinel — sixty-four zero bytes — means "roll one instead":
-  it draws an index out of `g_class31_attack_picks` and installs *that
-  attack's* script. So the swing and the flight are one clip.
-* **The stance is latched, then cleared.** `obj+0x1364` is written from the
-  surface bits and the bits are cleared immediately after, so a thrower that
-  pounces off a wall swings the wall's attack and arrives on the ground.
-* **`ThrowerStrikeConnect` (`FUN_0044CE60`) tests no range at all.** It fires
-  when the clip reaches the attack entry's `hit_frame`, and the only other
-  condition is the cancel mask. The aiming *is* the arc: the landing point is a
-  pixel offset unprojected at a fixed depth, so the actor is where the swing
-  will reach on the frame it lands. Same design as the melee strike and the
-  thrown weapon — this engine times its hits, it does not test them.
+* **The attack is chosen by the sentinel.** `ActorArcBeginToWaypoint`
+  (`FUN_0044D780`) takes a pointer to an arc motion script, and
+  `&DAT_007DCC70` (`g_arc_script_draw_attack`, zero, referenced by that one
+  `PUSH` and that one `CMP`) sends it to its own draw instead:
+  `g_class31_attack_picks[(rand() >> 4) % 10 + (obj+0x1318 & 7) * 10]`, then
+  `ThrowerLoadAttackArcScript`. So the swing and the flight are one clip.
+  Character type 0x18 takes the draw **and then** has 3 written over it.
+* **The stance is latched, then cleared** -- after the arc begins, before the
+  surface bits go -- so a thrower that pounces off a wall swings the wall's
+  attack and arrives on the ground. `zslman` does not come off its surface at
+  all: it keeps every bit but `0x800`, and records where it left from.
+* **The bit is `0x10000000`**, not `0x20000000`. `ThrowerEmitGroundDust`'s
+  landing column answers `0x20000000` with `0x10000000` down, so the pounce's
+  landing raises none and the leap back's does.
+* **Down, it collides with nothing**, and the re-snap to the landing point
+  holds it on a camera that may still be moving until the clip is two frames
+  from its end. The one gate on the re-snap is Training Mode with
+  `g_script_flags[0xF2]` up; `FUN_00497760` raises that byte (`0x004979B6`),
+  and what it stands for there is `[open]`.
 
-Then state 10, `ThrowerStateLeapAside`: a point five units to one side of the
-camera and fifty in front **in the camera's yaw-only frame**, vertical-traced
-between ±1000 to find whatever floor is there — falling back to
-`g_camera_fixed_eye_y` when the trace misses — and arced to. It stands there
-for ninety frames or until it is fifty units clear. That wait **is** the
-cooldown; there is no timer.
+### `ThrowerStrikeConnect`, `FUN_0044CE60`
+
+**It tests no range at all.** `[proved]` from the listing:
+
+```
+if (obj+0x136C & 0x400) {                       /* the throw table */
+  e = g_class31_throws[set] + (s8)obj+0x131A * 0x10
+  if (obj+0x19C != (s16)e+8) return
+  if (((obj+0x1318 & 7) & (s16)e+0xC) == (s16)e+0xC) return
+  PlayerTakeDamage((s8)obj+0x121, kind, (s16)e+0xA)       /* no 0x800 */
+} else {                                        /* the melee table */
+  e = g_class31_melee_attacks[set] + ((s8)obj+0x131A + obj+0x1364*4) * 0x10
+  if (obj+0x19C != e.hit_frame && !(e.hit_frame == -1 && obj+0x1360 == 4))
+    return
+  if ((obj+0x1318 & e.mask & 7) == e.mask) return         /* mask 0 whiffs */
+  PlayerTakeDamage((s8)obj+0x121, kind, e.overlay); obj+0x136C |= 0x800
+}
+kind = obj+0x34 & 0x2000000 ? 0 : 1, and with 0 ThrowerLeave follows
+```
+
+The hit is **`==` the frame**, not "at or past it": a clip that jumps past
+its hit frame -- a fit that skips into the middle of a clip, a connect first
+called after the frame has gone -- does not hit. And **the connect latch is
+the callers'**: `ThrowerStateLeapDown` tests `0x800` before calling,
+`ThrowerStateDelayedPounce` and `ThrowerStateStrikeOnTheSpot` do not,
+`ThrowerStateCloseAndStrike` calls only on its throw entry's own frame.
+`ThrowerStateWaitForPermit` raises `0x400` for character type 0x17 alone, so
+the throw-table arm is `zskamere`'s. The aiming is the arc: the landing point
+is a pixel offset unprojected at a fixed depth, so the actor is where the
+swing will reach on the frame it lands. Same design as the melee strike and
+the thrown weapon -- this engine times its hits, it does not test them.
+
+### The leap back — `ThrowerStateLeapAside`, `FUN_0044B880`
+
+State 10. `[proved]` from the listing; Ghidra cuts sub 0 at the
+`MatrixStackPop` at `0x0044BA37` (`L35`), and the body runs on into the
+script choice and the arc.
+
+```
+sub 0  obj+0x34 |= 0x20000000; obj+0x136C |= 0x180000
+       type 0x17: obj+0x34 |= 0x2000
+       type != 0x18:
+         x = obj+0x136C & 0x10 ? 5.0 : (1 - 2*(rand() % 2)) * 5.0
+         p = eye + RotY(g_camera_yaw_bams) * (x, 0, 50.0)
+         trace (p.x, obj+0x104 -/+ 1000, p.z): hit -> obj+0x13D8 = the hit
+                                               miss -> (p.x, g_camera_fixed_eye_y, p.z)
+       ActorArcBeginToWaypoint(obj+0x13D8, script, 1)
+sub 1  unless obj+0x136C & 0x20: TurnActorAwayFromPoint(obj+0x13D8, -0x100)
+       if (ActorArcStep(obj, 1) == 1) return
+       obj+0x34 &= ~0x20000000; obj+0x1338 = 0; ThrowerReleaseAttackPermit
+       type != 0x18: SetCurrentActorMotionBlended(set[4], 0, 1)
+       type == 0x18: ActorSetMotionBlended(0x211 / 0x20E / 0x214 / 0x20B, 0, 5)
+sub 2  if (++obj+0x1338 < 0x5A && |obj - eye|xz < 50.0) return
+       if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+       state 7
+```
+
+| script | when |
+| --- | --- |
+| `0x00564AF8` `aside_attack3` | `obj+0x131A == 3` and type != 0x18 |
+| `0x005649A8` `aside_zsass` | type 0x16 |
+| none | type 0x17: `JZ 0x0044BAE7` skips the copy, so the local is uninitialised stack |
+| `0x00564D08` + `0x60` * row `aside_zslman_<row>` | type 0x18, row = `3*bit8 + 2*bit7 + bit6`, 1..3, else 0 |
+| `0x00564AC8` `aside` | every other type |
+
+`zslman`'s four sit **`0x60` apart**, each after the pounce script set 3
+names for attack 3 in that stance; the exporter read them at `0x30` until
+this was read, which gave rows 1 and 3 a pounce and row 2 row 1's leap.
+`verify_combat.py` check 16 holds the export to the four `MOV ESI, imm32` the
+state picks them with.
+
+So the ordinary thrower lands five units to one side of the camera and fifty
+in front, **in the camera's yaw-only frame**, and stands there for ninety
+frames or until it is fifty units clear -- and until its landing clip is two
+frames from its end. That wait **is** the cooldown; there is no timer.
+`zslman` instead leaps back to where its pounce began, on its own surface's
+script, so a wall-crawler goes back up its wall.
 
 ### The delayed pounce — `ThrowerStateDelayedPounce`, `FUN_0044E830`
 

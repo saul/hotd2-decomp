@@ -38,8 +38,9 @@
  * host's `viewSpaceOf`, `viewPoint`, `aimPoint` and `cameraMatrices` -- and
  * what the draw places the three.js camera from. Built here, inside the camera
  * actor's task, they are the view of **this** frame for every task after it,
- * as the engine's are. Only block 0 is modelled: `g_camera_index` is written
- * 0 by every shipped writer.
+ * as the engine's are. Block 0 is the one drawn: `g_camera_index` is written
+ * 0 by every shipped writer. Block 2 is kept too, for its yaw alone -- see
+ * {@link CameraBlock2RebuildAngles} -- and blocks 1 and 3 are not.
  */
 import { AppState, G } from "../globals";
 import { MatrixGetAngles, type Rot3 } from "../carrier";
@@ -88,6 +89,7 @@ export function UpdateSceneViewAndLight(): void {
   CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, _q,
                               G.g_camera_block_roll_bams);
   CameraBuildView();
+  CameraBlock2RebuildAngles();
   // The stamp every unstamped scene-state entry waits for.
   G.g_scene_state_major_entered = G.g_scene_state_major;
   G.g_scene_state_minor_entered = G.g_scene_state_minor;
@@ -128,6 +130,32 @@ export function CameraBuildView(): void {
   MatrixRotateY(m, -G.g_camera_block_yaw_bams);
   MatrixTranslate(m, -e.x, -e.y, -e.z);
   MatCopy(G.g_camera_world_to_view, m);
+}
+
+/**
+ * `[port-only]` as a function -- the per-block body of
+ * `UpdateSceneViewAndLight` for camera block 2, which the routine's loop
+ * (`ESI` from `0x009A60D4` by `0x1A4` to `0x009A6764`, all four blocks) runs
+ * after block 0's: no nod, since `g_camera_index` is 0; the view built from
+ * the block's eye and angles and the angles and eye read back out of it, so
+ * each frame puts block 2's yaw through the same `MatrixGetAngles`
+ * truncation block 0's goes through. Neither of block 2's matrices is kept:
+ * the port keeps the block for the frog's read of its yaw alone, and nothing
+ * reads the matrices. `[proved]`
+ */
+function CameraBlock2RebuildAngles(): void {
+  const e = G.g_camera_block2_eye;
+  const m = _m;
+  MatrixLoadIdentity(m);
+  MatrixTranslate(m, e.x, e.y, e.z);
+  MatrixRotateY(m, G.g_camera_block2_yaw_bams);
+  MatrixRotateX(m, G.g_camera_block2_pitch_bams);
+  MatrixRotateZ(m, G.g_camera_block2_roll_bams);
+  const a = MatrixGetAngles(RotationOf(m));
+  G.g_camera_block2_pitch_bams = a.x;
+  G.g_camera_block2_yaw_bams = a.y;
+  G.g_camera_block2_roll_bams = a.z;
+  MatrixGetTranslation(m, e);
 }
 
 /**

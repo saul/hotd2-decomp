@@ -9,10 +9,16 @@
  * never echoed from this script (`L44`, `L47`). Screenshots of three digits
  * and of the continue taken go to `web/shots/`.
  *
- *   node tools/continue_page.mjs --headless
+ * START is the corner button by default -- **Continue**, with the game's digit
+ * on it, the one START a phone has -- and Enter with `--enter`. Both are
+ * `Player.pressStart`, and both are worth pressing for real.
+ *
+ *   node tools/continue_page.mjs --headless [--enter]
  */
 import { join } from "node:path";
-import { openPlayer, waitForLoad, SHOTS } from "./lib/player.mjs";
+import { openPlayer, requireBundle, waitForLoad, SHOTS } from "./lib/player.mjs";
+
+requireBundle("continue_page");
 
 const args = process.argv.slice(2);
 const flag = (n) => args.includes(`--${n}`);
@@ -63,6 +69,23 @@ const crosshairShown = () => page.evaluate(() => {
   const el = document.querySelector(".crosshair");
   return el instanceof HTMLElement ? !el.hidden : null;
 });
+/**
+ * The corner button as the page shows it, once the page has drawn the digit
+ * `d` on it -- the UI publishes on the page's own frame, not the drive's.
+ */
+const cornerShows = async (d) => {
+  try {
+    await page.waitForFunction((want) => {
+      const b = document.querySelector("#skipbar.continue button");
+      return b && b.querySelector(".continue-digit")?.textContent === want;
+    }, String(d), { timeout: 5000 });
+  } catch { /* read back what is there instead */ }
+  return page.evaluate(() => {
+    const b = document.querySelector("#skipbar button");
+    return b ? { cls: b.parentElement.className, text: b.textContent.trim(),
+                 disabled: b.disabled } : null;
+  });
+};
 const digitOf = (s) => {
   const d = s.draws.find((x) => x.id >= BIG_DIGIT0 && x.id <= BIG_DIGIT0 + 9);
   return d ? d.id - BIG_DIGIT0 : -1;
@@ -155,6 +178,10 @@ try {
   check(s.address === address,
         "the script stands at its wait while the countdown runs",
         `${address} -> ${s.address}`);
+  const at6 = await cornerShows(6);
+  check(at6?.cls === "continue" && at6.text === "Continue 6" && !at6.disabled,
+        "the corner button is Continue, with the game's digit on it",
+        JSON.stringify(at6));
   await page.screenshot({ path: join(SHOTS, "continue-6.png") });
   s = await untilDigit(3);
   check(digitOf(s) === 3, "counting down: the 3",
@@ -163,17 +190,25 @@ try {
   console.log("credit line:", JSON.stringify(line));
   await page.screenshot({ path: join(SHOTS, "continue-3.png") });
 
-  // START (the page's `S`, `g_pad_state` bit 8) with a credit.
+  // START (`g_pad_state` bit 8) with a credit: the corner button, or Enter.
   const credits = s.credits[0];
-  await page.keyboard.press("KeyS");
+  const at3 = await cornerShows(3);
+  check(at3?.text === "Continue 3", "...and counts down with it",
+        JSON.stringify(at3));
+  if (flag("enter")) await page.keyboard.press("Enter");
+  else await page.click("#skipbar.continue button");
   await advance(3);
   s = await state();
   console.log("continued:", JSON.stringify({ ...s, draws: s.draws.length }));
   check(s.app === 6 && s.phase === 2 && s.pstate[0] === 5 && s.lives[0] === 3
         && s.credits[0] === credits - 1,
-        "START continues: in play, three lives, a credit spent");
+        `START (${flag("enter") ? "Enter" : "the button"}) continues: in play, `
+        + "three lives, a credit spent");
   check(!s.draws.some((d) => d.id === CONTINUE) && s.live === 1,
         "the CONTINUE? is gone and the script's gate open again");
+  await page.waitForFunction(() => !document.querySelector("#skipbar.continue"),
+                             null, { timeout: 5000 }).catch(() => {});
+  check(!(await page.$("#skipbar.continue")), "...and so is the button");
   await advance(30);
   await page.screenshot({ path: join(SHOTS, "continue-taken.png") });
 } catch (e) {

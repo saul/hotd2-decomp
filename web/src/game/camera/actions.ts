@@ -524,8 +524,9 @@ export function CheckpointResetCamera(): void {
  * LightBlockInit x2; LightsUseSecondarySet; LightsRestoreScene;
  * ```
  *
- * Block 0 is the port's; `+0x110` is `g_cam_path_frame`. The two light
- * blocks are the walker's. `[proved]`
+ * Blocks 0 and 2 are the port's -- block 2 only for the pose
+ * `EvtRunQueuedActionsSyncViewBlock` copies into it; `+0x110` is
+ * `g_cam_path_frame`. The two light blocks are the walker's. `[proved]`
  */
 export function CameraBlocksReset(): void {
   G.g_camera_block_eye = vec3();
@@ -533,6 +534,11 @@ export function CameraBlocksReset(): void {
   G.g_camera_block_yaw_bams = 0;
   G.g_camera_block_roll_bams = 0;
   G.g_camera_block_target = vec3();
+  G.g_camera_block2_eye = vec3();
+  G.g_camera_block2_pitch_bams = 0;
+  G.g_camera_block2_yaw_bams = 0;
+  G.g_camera_block2_roll_bams = 0;
+  G.g_camera_block2_target = vec3();
   G.g_cam_path_frame = 0;
   G.g_camera_turn_curve = 1;
   G.g_camera_index = 0;

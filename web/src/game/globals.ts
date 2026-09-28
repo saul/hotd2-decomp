@@ -1780,6 +1780,21 @@ export const G = {
    */
   g_camera_fixed_eye_y: 0,
   /**
+   * The camera eye: `g_camera_eye_x` — `0x009C71E0`, and `_y` and `_z` in the
+   * two floats after it.
+   *
+   * A class's update has it as `ClassFrame.eye`, which is what every class
+   * reads. This copy is for the one kind of routine that runs with no frame:
+   * an `Init`. `EnemyZombieInit` (`FUN_00452DA0`) and `EnemyThrowerInit`
+   * (`FUN_00449620`) both seed the head's aim toward `eye + (0, 15, 0)` from
+   * these three words, and a spawn runs in the script phase, ahead of the
+   * frame. `GameSystem.update` writes it from `ctx.view` beside
+   * `g_camera_yaw_bams`, so a spawn reads the eye the previous tick was played
+   * against, and a snapshot carries it. Nothing in `game/` writes it, and the
+   * scene load does not reset it -- the engine's does not either.
+   */
+  g_camera_eye: vec3(),
+  /**
    * `g_camera_block_eye` — 0x009A60C0: the eased eye position of the camera
    * block `g_camera_index` selects, at `g_camera_blocks + 0x80`.
    *

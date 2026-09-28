@@ -56,8 +56,14 @@
  * separates nothing there, and giving the two readings one name would hide it.
  */
 import type { ListCursor } from "../actor";
+import { makeHeadAimWords, type HeadAimWords } from "../class30/state";
 
-export interface ThrowerTail {
+/**
+ * The head aim's words are class 0x30's reading of the same two offsets:
+ * `ThrowerDrawBonePart` runs `ActorAimHeadAtCamera` (`FUN_00453BE0`) on bone 2
+ * as `ZombieDrawBonePart` does. See `class30/head_aim.ts`.
+ */
+export interface ThrowerTail extends HeadAimWords {
   /**
    * `obj+0x1394` — which leg of the walked route the spawn is on. The engine
    * keeps a cursor there.
@@ -79,7 +85,7 @@ export interface ThrowerTail {
   /**
    * `obj+0x1364` — the stance row the current attack was drawn against.
    *
-   * The same word is class 0x25's `boneDecoration` (`op 12`) and the
+   * The same word is class 0x25's `aimsHead` (`op 12`) and the
    * class-0x30 attack stance row, which the port does not read yet.
    */
   stance: number;           // +0x1364, also class 0x25 / class 0x30
@@ -195,6 +201,7 @@ export interface ThrowerTail {
  */
 export function makeThrowerTail(): ThrowerTail {
   return {
+    ...makeHeadAimWords(),
     pathLeg: 0,
     pathDelay: 0,
     stance: 0,

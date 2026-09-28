@@ -205,6 +205,16 @@ export class GameSystem implements System {
     G.g_camera_yaw_bams = ctx.view.yawBams;
     // ...and the pitch beside it: the horde's dive lifts its arc by it.
     G.g_camera_block_pitch_bams = ctx.view.pitchBams;
+    // ...and the eye, `g_camera_eye_x/y/z`, for the one kind of routine that
+    // runs with no `ClassFrame`: the two combat `Init`s seed the head aim
+    // toward it. Here and not in the script phase where the spawns run,
+    // because `ctx.view` is the camera this tick is played against and is not
+    // in a snapshot -- written earlier, from the camera the last draw left, a
+    // load's first frame read the pre-load camera and replayed differently.
+    // So a spawn reads what the previous tick wrote, which `G` carries.
+    G.g_camera_eye.x = ctx.view.eye.x;
+    G.g_camera_eye.y = ctx.view.eye.y;
+    G.g_camera_eye.z = ctx.view.eye.z;
     // The gun lights are **not** built here -- see `GunLightBuildSystem`.
     // **And nothing else.** A frame that owes no tick must not do part of one,
     // and resolving a shot is the whole of a game-time job: `ResolveHit` takes

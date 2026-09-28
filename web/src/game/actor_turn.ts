@@ -3,17 +3,19 @@
  *
  * Actors turn their **whole body**: every routine here steps `obj+0x68`, the
  * yaw, and `SkeletonWalkNode` reads every bone rotation straight from the
- * motion bank. **One bone is aimed, though, and it is not ported.** The
- * class-0x30 and class-0x31 per-bone draw hooks, `ZombieDrawBonePart`
- * (`FUN_004534A0`, at `004534ea`) and `ThrowerDrawBonePart` (`FUN_00449F90`,
- * at `00449fd9`), call the routine at `0x00453BE0` for bone 2 unless
- * `obj+0x34` bit `0x40000` is up, and it steps `obj+0x1320`/`obj+0x1324`
- * toward the camera with {@link TurnAngleToward} at `0xC0` a call before
- * rotating the bone by them -- the head following you. Ghidra has no function
- * at that address, so its four calls to `FUN_00409E00` are in no xref list
- * (L35); a byte scan for `E8` finds them. Class 0x25's
- * `ScriptedHumanoidBoneDrawHook` has a twin at `0x00485BA0`. `[proved]` that
- * they call the turn; the rest of the two routines is unread.
+ * motion bank. **One bone is aimed, though.** The class-0x30 and class-0x31
+ * per-bone draw hooks, `ZombieDrawBonePart` (`FUN_004534A0`, at `004534ea`)
+ * and `ThrowerDrawBonePart` (`FUN_00449F90`, at `00449fd9`), call
+ * `ActorAimHeadAtCamera` (`FUN_00453BE0`) for bone 2 unless `obj+0x34` bit
+ * `0x40000` is up, and it steps `obj+0x1320`/`obj+0x1324` toward the camera
+ * with {@link TurnAngleToward} at `0xC0` a draw, kept inside a quarter turn by
+ * {@link AngleWithinTolerance}, before rotating the bone's own draw by them --
+ * the head following you. Ghidra had no function at that address, so its four
+ * calls to `FUN_00409E00` were in no xref list (L35). It is ported in
+ * `class30/head_aim.ts`, and the turn is drawn by
+ * `render/characters/head_aim.ts`. Class 0x25's `ScriptedHumanoidBoneDrawHook`
+ * has a twin, `ScriptedHumanoidAimHeadAtCamera` (`FUN_00485BA0`), which is
+ * not ported.
  *
  * **The exe turns once per 60 Hz frame and the port's tick may be several**
  * (`Tick.dt` is `frames * TICK`). Every wrapper below takes the tick's `dt`,

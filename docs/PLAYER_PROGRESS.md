@@ -5291,6 +5291,22 @@ What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
 absolute turn on two other words, switched by an op no exported program
 uses), and Training's hook swap, which is declared on both updates.
 
+**Into the lens, not above it** (2026-09-28, evening). Until then every aimed
+head in the game craned up -- about 35 degrees on average over stage 1 block
+1, 58 at arm's length. `ActorHeadAimAngles` (`FUN_00453D70`) aims at
+`g_camera_eye` raised 15, and `g_camera_eye` is the *gameplay* eye, which the
+path hooks put 15 below the pose; the port added the 15 to the lens, the
+camera the renderer drew, and so aimed at a point 15 above the camera. It
+reads `g_camera_eye` now, as the exe does, and a head at the camera's height
+looks level into it. The record the aim starts from is also taken in the view
+of the frame that drew it (`HeadAimWords.headRecordView`) rather than the next
+frame's, so a moving camera displaces it for one frame as the engine's does.
+Measured on `?stage=1&block=1&mode=play&drive=1&seed=1`, 104 aimed samples
+over 900 frames: mean head pitch -6323 BAMS (-34.7 degrees, up) before and
++415 (+2.3, the head sitting a unit above the lens) after; the pitch the head
+should have to look into the lens is missed by 37.0 degrees on average before
+and 0.3 after.
+
 ### Stage 2 block 11: the fire strip ends
 
 Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:

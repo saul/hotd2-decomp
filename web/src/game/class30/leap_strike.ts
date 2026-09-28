@@ -23,7 +23,7 @@
  * `ZombieStateStrike`, and `strike.ts` proved -- correctly, for that state --
  * that their condition-4 attack could never connect there, because its hit
  * frame is 40 on a 20-frame clip. The proof was about a state the crawlers do
- * not run. See `L53`.
+ * not run. See `L57`.
  *
  * The table entry is `[proved]` from `g_class30_states[0x34]` =
  * `0x0045E330`, with `[0x33]` `0x0045DED0` and `[0x35]` `0x0045E660` either

@@ -19,36 +19,36 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 80932 | 274 | engine |
-| `hod2lib/` | 18189 | 35 | engine |
-| `render/` | 12905 | 45 | render |
-| `app/` | 7867 | 29 | app |
-| `script/` | 4919 | 27 | engine |
-| `ui/` | 3161 | 27 | ui |
-| `bundle/` | 2608 | 11 | engine |
+| `game/` | 83516 | 281 | engine |
+| `hod2lib/` | 18340 | 35 | engine |
+| `render/` | 13592 | 49 | render |
+| `app/` | 7921 | 29 | app |
+| `script/` | 4773 | 27 | engine |
+| `ui/` | 3190 | 27 | ui |
+| `bundle/` | 2620 | 11 | engine |
 | `core/` | 949 | 9 | engine |
-| `hud/` | 459 | 1 | ui |
+| `hud/` | 491 | 1 | ui |
 | `audio/` | 390 | 1 | render |
-| **total** | **132379** | **459** | |
+| **total** | **135782** | **470** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/actor.ts` — 2438
-* `game/globals.ts` — 2405
-* `hod2lib/exetab.ts` — 2187
-* `app/main.ts` — 2164
-* `script/walker.ts` — 2149
+* `game/actor.ts` — 2486
+* `game/globals.ts` — 2474
+* `hod2lib/exetab.ts` — 2212
+* `app/main.ts` — 2175
+* `script/walker.ts` — 2162
 
 ## The port
 
 | | |
 |---|---|
-| Gameplay coverage | **190 of 296** annotated functions in the gameplay address ranges have a port (64%) |
-| Ported outside those ranges | 436 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 626 ported functions match `functions.tsv` under the same name |
+| Gameplay coverage | **194 of 298** annotated functions in the gameplay address ranges have a port (65%) |
+| Ported outside those ranges | 442 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 636 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **162** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers in `game/` | **175** — questions the port is honest about not having answered |
+| Declared `[diverges]` | **159** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers in `game/` | **173** — questions the port is honest about not having answered |
 
 The two declared seams between the UI and the player: **`PlayerCommands` has 53 members against `PlayerView`'s 41** — how much of the player a click can move, against how much of it the page can see. Neither can grow without a line appearing in the open.
 
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 53 
 
 | | |
 |---|---|
-| Named functions | 1260 in `ghidra/annotations/functions.tsv` |
-| Named globals | 619 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 41 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1272 in `ghidra/annotations/functions.tsv` |
+| Named globals | 623 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 42 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -133,6 +133,7 @@ nothing exits 3 and is never counted as green.
 | `verify_split_unreachable` | that nothing the shipped game runs reaches `ZombieSplitInTwo` (`FUN_0045D9F0`) -- no store of 4 to `g_hit_result`, one writer of the split bit and no way into its state, each beside a control that must be found -- which is the whole of the case for the port not transcribing the split, and the only check that can say when that case stops holding | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |
+| `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
 | `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
@@ -141,7 +142,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-18 of them need the installed game and 15 need an exported
+19 of them need the installed game and 15 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

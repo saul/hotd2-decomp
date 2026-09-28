@@ -194,6 +194,12 @@ export async function loadStageInto(p: Player): Promise<void> {
   // measures against.
   p.slotModels.adopt(p.scene3d.root);
   p.chars.slotModels = p.slotModels;
+  // ...and the canal water, which draws the stage's own tiles where it has
+  // them and clones the rest from the same rig.
+  p.waterSurfaces.scene = p.scene3d;
+  p.waterSurfaces.templates = p.slotModels;
+  p.waterSurfaces.textures = p.texFilter;
+  p.waterSurfaces.props = p.breakables;
   // ...and once more for the shot effects. `chars` owns the bones, and the
   // blood is glued to one for its whole life -- see `render/effects.ts`.
   p.effects.adopt(p.scene3d.root);
@@ -238,7 +244,10 @@ export async function loadStageInto(p: Player): Promise<void> {
   // No seed: the walker draws no random numbers. `?seed=` reseeds the world's
   // generator, `p.rng`, a few lines above -- which is the only random source
   // in the player.
-  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script));
+  // `branchPause` is the sidebar's debug aid, read at every branch; the
+  // toggles above were applied before this walker existed.
+  p.walker = new Walker(bundle.script, makeWalkerHost(p, bundle.script),
+                        { branchPause: p.toggles.branchPause });
   p.script.walker = p.walker;
 
   // The dialogue table for the stage. The walker carries the group; the words
@@ -376,6 +385,10 @@ function applyIncomingState(p: Player): void {
     // camera command, so opening there is a truthful black screen. Prime to
     // where the stage actually starts instead.
     w.primeToFirstWait();
+    // No frame has run here either, and the letterbox is drawn from what
+    // `HudDrawShutterState` recorded on one -- so without this a stage that
+    // opens paused showed no bars over what the engine draws shut.
+    PlayerTasksDrawWithoutAFrame();
     p.syncCameraToWalker(true);
   }
   if (p.state.all) {

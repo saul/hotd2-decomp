@@ -1,8 +1,8 @@
 """Three-stage arc motion scripts: the twelve dwords an actor leaps on.
 
 `InstallArcMotionScript` (`FUN_0044DA60`) copies twelve dwords into the
-actor's slot and `ActorArcStep` plays them as one clip cut into windup,
-flight and landing. Class 0x31 names them from its attack tables and class
+actor's slot and `ActorArcStep` plays them as a windup, a flight and a
+landing -- nearly always one clip cut three ways. Class 0x31 names them from its attack tables and class
 0x30 from one state, so the reader sits here rather than in either -- which is
 also what keeps `combat` and `class31` from importing each other.
 """
@@ -15,10 +15,11 @@ import struct
 #: A three-stage arc motion script, the 12 dwords `InstallArcMotionScript`
 #: (`FUN_0044DA60`) copies into the actor's slot: ``{s32 motion, s32 start
 #: frame, s32 fade, s32 threshold} x 3``. `ActorArcStep` plays stage 0 at the
-#: start of the arc, stage 1 once the clip frame passes stage 0's threshold,
-#: stage 2 once it passes stage 1's, and reports the arc over once it passes
-#: stage 2's. Every script in the program names the **same motion** in all
-#: three stages, so it is one clip cut into windup / flight / landing.
+#: start of the arc, stage 1 once the clip frame reaches stage 0's threshold,
+#: stage 2 once it reaches stage 1's, and reports the arc over once it reaches
+#: stage 2's. Seven of the 38 installable scripts end on a different clip from
+#: their first two stages, so a stage's clip is its own (`verify_combat.py`
+#: check 16).
 ARC_SCRIPT_STAGES = 3
 
 #: The arc scripts that are named by a state rather than by an attack entry.

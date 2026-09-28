@@ -22,6 +22,7 @@
 import type { ColiBlob, ColiJson } from "../bundle";
 import { ActorUpdateBoundingSphere, type Actor } from "./actor";
 import { G } from "./globals";
+import { g_class_handlers } from "./registry";
 import { T } from "./tables";
 
 /** Which of a quad's two in-plane components the dominant axis leaves. */
@@ -417,8 +418,12 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
     if (o.bodyRadius === 0) o.bodyRadius = o.radius;
     // The engine tests a list every actor registers into once a frame; the
     // port derives the sphere from the position instead, so an actor that has
-    // not ticked yet is still measured where it actually is.
-    ActorUpdateBoundingSphere(o);
+    // not ticked yet is still measured where it actually is. The derivation is
+    // class 0x30's, so a class whose own routine publishes a different point
+    // says so and keeps it -- the frog's is bone 1 as drawn, not its feet.
+    if (!g_class_handlers[o.cls]?.ownsSphereCentre) {
+      ActorUpdateBoundingSphere(o);
+    }
     const dx = cx - o.sphereCentre.x;
     const dy = cy - o.sphereCentre.y;
     const dz = cz - o.sphereCentre.z;

@@ -89,7 +89,10 @@
  * what its clip authored. `render/characters/pose.ts` applies the offset
  * unscaled -- deliberately, because nothing in this port scales a drawn
  * character at all: neither `hod2lib.characters` nor `render/characters.ts`
- * writes that field to a node, so every skinned actor is drawn at 1.0.
+ * writes that field to a node, so every skinned actor is drawn at 1.0 --
+ * except class 0x46's bat and wing, whose roots `render/characters/bat.ts`
+ * scales whole (pose offset included, as the engine's stack does), because
+ * `BatWingUpdate` seats the wing through the body's scaled node matrix.
  * Scaling the offset alone would be worse than leaving it, because the offset
  * would shrink while the model it offsets did not.
  *
@@ -153,14 +156,14 @@ export function ActorModelScale(charType: number): number {
  * statement. `[proved]`
  */
 export function rootDelta(m: BakedMotion, prev: number, next: number):
-    { x: number; z: number } {
+    { x: number; y: number; z: number } {
   const n = m.frames;
-  if (n <= 1 || prev < 0 || prev === next) return { x: 0, z: 0 };
-  const at = (f: number): [number, number] =>
-    [m.root[f * 3] ?? 0, m.root[f * 3 + 2] ?? 0];
-  const [px, pz] = at(Math.min(prev, n - 1));
-  const [nx, nz] = at(Math.min(next, n - 1));
-  if (next > prev) return { x: nx - px, z: nz - pz };
+  if (n <= 1 || prev < 0 || prev === next) return { x: 0, y: 0, z: 0 };
+  const at = (f: number): [number, number, number] =>
+    [m.root[f * 3] ?? 0, m.root[f * 3 + 1] ?? 0, m.root[f * 3 + 2] ?? 0];
+  const [px, py, pz] = at(Math.min(prev, n - 1));
+  const [nx, ny, nz] = at(Math.min(next, n - 1));
+  if (next > prev) return { x: nx - px, y: ny - py, z: nz - pz };
   // **The loop wrap is damped, not stitched.** `SkeletonApplyRootMotion` tests
   // `|frame - previous| > play_length / 4` and, when it trips, resets the
   // baseline to `root + (root - baseline) / play_length` instead of taking the
@@ -168,15 +171,22 @@ export function rootDelta(m: BakedMotion, prev: number, next: number):
   // walk does not lurch once a cycle. Summing "finish the cycle, then start
   // the next" as this used to gives the wrap frame a whole clip's worth of
   // translation in one tick.
-  const [sx, sz] = at(0);
-  return { x: (nx - sx) / n, z: (nz - sz) / n };
+  const [sx, sy, sz] = at(0);
+  return { x: (nx - sx) / n, y: (ny - sy) / n, z: (nz - sz) / n };
 }
 
 /**
  * Apply a clip-space root delta to the actor, rotated into world space by its
  * own yaw. The clips walk along their local -Z, which is the actor's forward.
+ *
+ * `dy` is the root's **height** delta, and it moves the actor only while
+ * {@link MotionFlag.RootMotionY} is up: `SkeletonApplyRootMotion`'s gated arm
+ * writes `obj+0x40` and `obj+0x48` back always and `obj+0x44` only under
+ * `TEST [model+0x64], 0x10` at `0x00410DB0`. `[proved]` Its one writer read so
+ * far is `ThrowerStateDelayedPounce` (`FUN_0044E830`), for the wait clip.
  */
-export function ApplyRootMotion(obj: Actor, dx: number, dz: number): void {
+export function ApplyRootMotion(obj: Actor, dx: number, dz: number,
+                                dy = 0): void {
   // `if ((*(byte *)(model + 100) & 2) != 0)`, which is the whole of
   // `SkeletonApplyRootMotion`'s gate. `ActorBuildSkinnedModel` leaves it set
   // on every skeletal actor, so classes 0x30 and 0x31 are unaffected by the
@@ -185,6 +195,10 @@ export function ApplyRootMotion(obj: Actor, dx: number, dz: number): void {
   // wherever her clip's root went, in the 297 of 596 shipped blocks whose wait
   // word does not ask for it just as much as in the 289 that do.
   if ((obj.motionFlags & MotionFlag.RootMotion) === 0) return;
+  // Yaw alone leaves a height unturned, so the scale is all it takes -- the
+  // pitch and roll the engine also rotates by are the yaw-only divergence
+  // declared at the top of this file.
+  if (obj.motionFlags & MotionFlag.RootMotionY) obj.pos.y += dy * obj.scale;
   if (dx === 0 && dz === 0) return;
   // `MatrixScale(model+0x116C)`, in the same matrix as the rotation.
   dx *= obj.scale;

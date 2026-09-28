@@ -18,6 +18,7 @@ import { SceneViewApplyShake } from "./camera/shake";
 import { ActorLiftCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
+import { WaterSurfacesTick } from "./class41/water";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
@@ -29,6 +30,7 @@ import { ShotTestListReset } from "./combat/shot_test";
 import { CommitAppState } from "./app_state";
 import { GameOverRunPhase } from "./game_over";
 import { PlayerTasksRun } from "./player_shell";
+import { HudDrawShutterState } from "./hud_shutter";
 import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
@@ -37,6 +39,7 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
@@ -539,21 +542,27 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table38" ? PropContainerType.Table38Props
       : pl.container === "table39" ? PropContainerType.Table39Stacks
       : pl.container === "table44" ? PropContainerType.Table44Props
+      : pl.container === "water_surface" ? PropContainerType.WaterSurface
       : PropContainerType.BreakableGroup;
     // The three table constructors read the placer's `+0x11C` as the step
     // lifetime they copy into every object, so that is what goes in `hp` for
     // them; for a group it is the group id.
     const table = pl.container === "table38" || pl.container === "table39"
       || pl.container === "table44";
+    // The water task reads both descriptor fields as themselves: `+0x1F4`
+    // the table index, `+0x11C` the lifetime.
+    const water = pl.container === "water_surface";
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
-                         pl.lifetime_evt_steps,
+                         water ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
                            : pl.container === "flicker_light"
                              ? "flicker light"
-                             : `breakable group ${pl.group}`,
-                         { hp: table ? pl.lifetime_evt_steps
-                                     : pl.group ?? 0,
+                             : water
+                               ? `water surface ${pl.field_1f4}`
+                               : `breakable group ${pl.group}`,
+                         { hp: table || water ? pl.lifetime_evt_steps
+                                              : pl.group ?? 0,
                            condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
@@ -606,6 +615,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // (`game/game_over.ts`) and the stage's actors stand still; any other
   // screen (3, after the game over) runs nothing the port has.
   if (G.g_app_state !== AppState.InPlay) {
+    // The letterbox is one of the scene list's tasks (`HudShutterTaskCreate`,
+    // `0x00460733`), so a screen that does not walk that list draws no bars.
+    G.g_hud_shutter_bars = [];
     if (G.g_app_state === AppState.GameOver) {
       GameOverRunPhase({ host, rng, events }, events);
     }
@@ -638,6 +650,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // ahead of the walk: the layered queue starts every frame empty.
   ScreenSpriteQueueReset();
   PlayerTasksRun({ host, rng, events });
+  // The letterbox, the task `HudShutterTaskCreate` makes on the line after
+  // `SpawnAttackablePlayerTask` (`0x00460733`): after both players have read
+  // the state and the firing gate the script left, before any actor reads
+  // what it turns them into. See `hud_shutter.ts`.
+  HudDrawShutterState();
   DropDueShotRequests();
   // `ProcessPlayerShots` (`FUN_00404570`) is a task of its own, created after
   // the two player tasks and before any actor, and it ends by emptying
@@ -763,6 +780,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
   BreakablePropPoolUpdate(rng, events, host);
+  // ...and the canal water tasks, which a class-0x41 placer allocates with
+  // `ActorAlloc` like the props, so after the actors that placed them: a task
+  // made this frame draws this frame. See `game/class41/water.ts`.
+  WaterSurfacesTick();
 
   // `FUN_00408DD0` drains the candidates the actor updates above registered.
   UpdateCameraEnemySlots(eye);
@@ -790,6 +811,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+  // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
+  // after the bats, so the first is drawn on the frame it is made. See
+  // `game/class46/splash.ts`.
+  BatSplashesTick();
 
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.

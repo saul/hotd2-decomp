@@ -34,6 +34,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 import {
   ActorArcBegin, ActorArcStep, ArcPhase, InstallArcMotionScript,
@@ -75,7 +76,8 @@ export function LeapToPointScriptName(obj: Actor, rng: Rng): string {
 }
 
 export function ThrowerStateLeapToPoint(obj: Actor, dt: number, rng: Rng,
-                                        events?: Events): void {
+                                        events?: Events,
+                                        host?: GameHost): void {
   const leap = obj.leap;
   if (!leap) {
     obj.state = ThrowerState.StandAndDecide;
@@ -102,7 +104,7 @@ export function ThrowerStateLeapToPoint(obj: Actor, dt: number, rng: Rng,
     obj.flags2 |= ThrowerFlag.TrackBone2;
     events?.emit("sound.play", { id: SND_LEAP_LANDED });
   }
-  if (ActorArcStep(obj, 1, dt)) return;
+  if (ActorArcStep(obj, 1, dt, host, events)) return;
   obj.state = ThrowerState.StandAndDecide;
   obj.flags &= ~ActorFlag.ShotImmune;
   obj.sub = 0;

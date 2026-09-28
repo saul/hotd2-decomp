@@ -67,7 +67,7 @@ import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
  * `ZombieStateLeapStrike` (`FUN_0045E330`) lands the same entry through
  * `ActorStrikeConnect` on touching down, with no hit frame in it at all -- so
  * an undamaged crawler's leap **connects**, its cancel mask being 1 (the
- * head). See `class30/leap_strike.ts` and `L53`. The draw here is still blind
+ * head). See `class30/leap_strike.ts` and `L57`. The draw here is still blind
  * and the entry is still exported, and both still matter: they are what that
  * state reads too.
  *

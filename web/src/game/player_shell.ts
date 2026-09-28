@@ -47,6 +47,7 @@ import type { Events } from "../core/events";
 import { CommitAppState, RequestAppState } from "./app_state";
 import { FirstDueShotRequest } from "./combat/shot";
 import { HudDrawAmmoAndReloadPrompt, HudDrawLives } from "./hud_readout";
+import { HudDrawShutterState } from "./hud_shutter";
 import {
   OriginalWeaponLoadFireParams, PlayerFireAndReloadUpdate,
   PlayerFireOriginalModeWeapon,
@@ -661,11 +662,14 @@ export function PlayerTasksRun(f: PlayerFrame): void {
  * then show the reset's empty `G.g_screen_sprite_draws`: a seek into a fight,
  * paused, had no bullets and no lives on it.
  *
- * So this runs the next frame's player turn, {@link PlayerTasksRun}, and
- * throws it away: `G` is copied first and written back after, keeping only
- * the sprites. Nothing is heard (no events), the world's generator is not
- * drawn from (a scratch one), and nothing is asked of the renderer
- * (`NULL_HOST`). There is no invented "does this player have a HUD" test:
+ * So this runs the next frame's player turn, {@link PlayerTasksRun}, and the
+ * task the scene list runs straight after it, `HudDrawShutterState` -- the
+ * letterbox is drawn from the bars that routine records, so a stage loaded
+ * or seeked into a cutscene would otherwise show no bars until it played --
+ * and throws both away: `G` is copied first and written back after, keeping
+ * only the sprites and the bars. Nothing is heard (no events), the world's
+ * generator is not drawn from (a scratch one), and nothing is asked of the
+ * renderer (`NULL_HOST`). There is no invented "does this player have a HUD" test:
  * the routines that draw the readouts decide, from a player task that is
  * often not yet `InPlay` after a seek -- the enter-play states run
  * `PlayerUpdateInPlay` on their own first frame.
@@ -679,9 +683,12 @@ export function PlayerTasksDrawWithoutAFrame(): void {
   const live = { ...G };
   RestoreGameGlobals(clonePlain(G));
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(0) });
+  HudDrawShutterState();
   const sprites = G.g_screen_sprite_draws;
+  const bars = G.g_hud_shutter_bars;
   RestoreGameGlobals(live);
   G.g_screen_sprite_draws = sprites;
+  G.g_hud_shutter_bars = bars;
 }
 
 /**

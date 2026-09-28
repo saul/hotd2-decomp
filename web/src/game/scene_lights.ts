@@ -180,13 +180,23 @@ export function EntityLightLive(i: number): boolean {
  * routine — but not in content. Every reader is `g_scene_lighting` and one
  * bit:
  *
- * * `DrawCharacterPartSlot` (`FUN_00419B40`) and `ZombieSubmitSlotByLighting`
- *   (`FUN_00453AE0`): `obj+0x38` bit 3, {@link ZombieAux.SceneLit}, which
- *   `EnemyZombieInitByCharType` raises from the descriptor, `CivilianInit`
- *   raises when the lighting is on at spawn, and `EnemyThrowerInit` raises for
- *   character type 0x17.
- * * `ThrowerDrawPart` (`FUN_0044A200`): `obj+0x136C` bit 0,
- *   {@link ThrowerFlag.SceneLit}.
+ * * `DrawCharacterPartSlot` (`FUN_00419B40`): `obj+0x38` bit 3,
+ *   {@link ZombieAux.SceneLit}, which `EnemyZombieInitByCharType` raises from
+ *   the descriptor, `CivilianInit` raises when the lighting is on at spawn,
+ *   and `EnemyThrowerInit` raises for character type 0x17.
+ * * `ZombieSubmitSlotByLighting` (`FUN_00453AE0`), every class-0x30 node:
+ *   `obj+0x136C` bit `0x20` (`0x00453AE7`), the descriptor bit the first of
+ *   those is raised from -- this used to say it read `obj+0x38` too. The two
+ *   agree from `EnemyZombieInitByCharType` on `[likely]`: an operand search
+ *   of class 0x30's code finds `obj+0x38` written only there and by the two
+ *   count releases, and no write of `obj+0x136C` bit `0x20` has been found
+ *   after `EnemyZombieInit` assigns it -- so one answer serves the actor.
+ * * `ThrowerDrawPart` (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha`
+ *   (`FUN_0044A240`): `obj+0x136C` bit 0, {@link ThrowerFlag.SceneLit}.
+ *
+ * A faded draw under the light array is `AssetDrawSlotWithAlphaSceneLights`
+ * (`FUN_00418620`): lit and faded both, which `render/gunlights.ts` and the
+ * fade in `render/draw_order.ts` compose.
  */
 export function ActorDrawsSceneLit(obj: Actor): boolean {
   if (G.g_scene_lighting === 0) return false;

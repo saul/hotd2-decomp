@@ -497,6 +497,81 @@ function batChildPlacement(sp: SpawnJson, placer: Placement, subtype: number,
   return b;
 }
 
+/** `znele.bin`: the character type whose `Init` arm allocates a twin. */
+const ZOMBIE_TWIN_HOST_CHAR_TYPE = 0x12;
+/** `znjikken1.bin`: `MOV word ptr [EBX + 0x1f4], 0x9` at `0x00453249`. */
+const ZOMBIE_TWIN_CHAR_TYPE = 9;
+/**
+ * `TEST EAX, 0x10000000` at `0x004531DA`: a `znele` whose spawn record sets
+ * this `obj+0x34` bit allocates no twin. Two of stage 6's thirteen do.
+ */
+const ZOMBIE_TWIN_SUPPRESS_FLAG = 0x10000000;
+/**
+ * `[port-only]` — the bit a twin's spawn address carries over its host's.
+ * The other half of the pair is `ZOMBIE_TWIN_AT_BIT` / `ZombieTwinAt` in
+ * `game/class30/twin.ts`; nothing can check the two agree, so each names the
+ * other, and `web/test/port.test.ts` holds them equal.
+ */
+const ZOMBIE_TWIN_AT_BIT = 0x08000000;
+
+/** The twin's spawn address for a host at `hostAt`. */
+export function zombieTwinAt(hostAt: number): number {
+  return (hostAt | ZOMBIE_TWIN_AT_BIT) >>> 0;
+}
+
+/**
+ * The synthetic placements `znele`'s twins are drawn from: one per class-0x30,
+ * character-type-0x12 row whose `init_flags` lack 0x10000000, character type 9
+ * at {@link zombieTwinAt}, parented to the host so it is wanted exactly while
+ * the host is.
+ *
+ * The twin plays whatever clip its host is on -- `ZombieTwinFollowHost`
+ * (`FUN_00453290`) copies `obj+0x1B4` and the frame counters every frame --
+ * so every clip baked for the host's type is offered for the twin's; `bake`
+ * refuses any that does not fit its skeleton. Returns none when the type will
+ * not build, which leaves each `znele` without its ghost rather than emitting
+ * a row nothing can pose.
+ */
+async function zombieTwinPlacements(stage: Stage, tables: ExeTables,
+                                    placements: readonly Placement[],
+                                    chars: Map<number, Character>):
+    Promise<Placement[]> {
+  const hosts = placements.filter((p) => p.cls === 0x30 && !p.synthetic
+    && p.char_type === ZOMBIE_TWIN_HOST_CHAR_TYPE && p.motion !== null
+    && (p.init_flags & ZOMBIE_TWIN_SUPPRESS_FLAG) === 0);
+  const hostType = chars.get(ZOMBIE_TWIN_HOST_CHAR_TYPE);
+  if (!hosts.length || !hostType) return [];
+  const ct = ZOMBIE_TWIN_CHAR_TYPE;
+  if (!chars.has(ct)) {
+    const file = tables.characterAssetFile(ct);
+    if (!file) return [];
+    const built = build(tables, ct, file);
+    if (built === null) return [];
+    chars.set(ct, built);
+  }
+  const c = chars.get(ct)!;
+  for (const mid of [...hostType.motions.keys()].sort((a, b) => a - b)) {
+    if (c.motions.has(mid)) continue;
+    const baked = await bake(stage.source, tables, mid, c.boneCount);
+    if (baked !== null) c.motions.set(mid, baked);
+  }
+  const out: Placement[] = [];
+  for (const h of hosts) {
+    if (!c.motions.has(h.motion!)) continue;
+    const t = new Placement();
+    t.at = zombieTwinAt(h.at);
+    t.cls = 0x30;
+    t.char_type = ct;
+    t.motion = h.motion;
+    t.hp = 0;
+    t.spawn = { ...h.spawn, at: t.at };
+    t.parent_at = h.at;
+    t.synthetic = true;
+    out.push(t);
+  }
+  return out;
+}
+
 /**
  * The synthetic placement a player's body is drawn from on the game-over
  * screen, and the character type it needs in the bundle.
@@ -1787,6 +1862,23 @@ export async function resolveForStage(
       c.heldSlots.add(CLASS22_NODE1_EXTRA_A);
       c.heldSlots.add(CLASS22_NODE1_EXTRA_B);
     }
+  }
+
+  // -- `znele`'s twin ---------------------------------------------------------
+  //
+  // `EnemyZombieInitByCharType` (`FUN_00452FD0`)'s type-0x12 arm allocates a
+  // second class-0x30 actor of character type 9 beside every `znele` whose
+  // `obj+0x34` lacks 0x10000000, and it wears the host's clip every frame
+  // (`ZombieTwinFollowHost`, `FUN_00453290`). Like the bat's wings it has no
+  // descriptor and so needs a synthetic row to carry its geometry; see
+  // `zombieTwinPlacements`. Emitted after every spawn has been read, so the
+  // twin is baked every clip its host's type has.
+  for (const tw of await zombieTwinPlacements(stage, tables, placements,
+                                              chars)) {
+    placements.push(tw);
+    let tlist = perType.get(ZOMBIE_TWIN_CHAR_TYPE);
+    if (!tlist) { tlist = []; perType.set(ZOMBIE_TWIN_CHAR_TYPE, tlist); }
+    tlist.push(tw.spawn);
   }
 
   // -- the players' bodies ---------------------------------------------------

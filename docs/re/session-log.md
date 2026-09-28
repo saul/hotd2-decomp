@@ -22846,3 +22846,329 @@ alone) and two `render.test.ts` ones (a prop spawned from its record is drawn
 shipped `etc_1.bin[63]` faces `(0, -sin, cos)`). Reverting the class-0x13 arm
 to the yaw fails three and two of them; drawing `"YZX"` fails the render one.
 The new lesson is `L66` (written as L64; main took L64 and L65 first).
+
+## 2026-09-28 -- texture alpha is the bank's, and a mesh's material is its own (branch `fix/newbugs2-texalpha`)
+
+**The report.** The translucency session left `[likely]`: "the exporter strips
+texture alpha from meshes with the 'ignore texture alpha' bit set, but nothing
+in the exe's Direct3D path reads that bit" -- 112 translucent-pass meshes
+(`boss6`, `st_adver03`) and any faded opaque mesh.
+
+**What the exe does, read end to end** (`docs/formats/materials.md`, *Texture
+alpha on the D3D path*):
+
+* `BindModelTextureHandles` (`0x004AC980`) decodes each bank texture once
+  into its global slot, from the bank entry and its data; no mesh word is an
+  input. `DecodeTextureToSurface` (`0x004AC270`) picks the surface format by
+  the entry's own pixel format through `g_pvr_pixfmt_texture_format`
+  (`0x00571250` = `{5, 2, 6, 8, 8, 8, 7, 0}`, named here) and copies 16-bit
+  texels verbatim. `EnumTextureFormatsCallback` (`0x004A5BC0`, named) files
+  the 1555 masks in slot 5 only under `DDPF_ALPHAPIXELS` and in slot 3
+  otherwise; the 4444 masks go to slot 6 with no alpha test -- `[likely]`
+  `A4R4G4B4`. `PromoteSurfaceToTexture` (`0x004A6010`, named) keeps the format.
+* `InitD3DDeviceAndTextureStages` sets stage 0 `ALPHAOP MODULATE`,
+  `ALPHAARG1 TEXTURE`, `ALPHAARG2 DIFFUSE` once; `TranslatePvr2StateToD3D`'s
+  jump table (`0x004A79C8`) swaps in `SELECTARG1` for mode 1 and nothing else.
+* A capstone sweep of `0x004A4DA0..0x004ACD20` finds five instructions that
+  touch bit 19, all the `0x180000` pass pair. `BindTextureStage` is
+  `SetTexture` behind a one-entry cache (`g_bound_texture`, `0x007DECD0`).
+* `AssetDrawSlotWithAlpha` hands its alpha on untested, so a draw at 1.0 is
+  `DrawModelWithForcedAlphaBlend`'s: blended, `MODULATE` (bit 7), and the
+  alpha test of the mesh's own pass.
+
+So the opaque pass ignores texture alpha by its state, the translucent pass
+blends and tests it, a faded draw blends it in either. The stripping was the
+PowerVR2 meaning of the bit.
+
+**Corpus** (de-duplicated: `pol/pol_<x>.bin` are byte copies of `<x>.bin`):
+112 translucent-pass `IgnoreTexAlpha` meshes on ARGB textures, **101** with
+alpha below 255 -- `zslman` and `zndina`'s additive blade glows, `eff_boss5`'s
+cels, 27 `boss6` cels with 3% of texels at 221, and two `st_adver03` meshes
+whose base alpha is 0 and which the alpha test drops either way. Every textured
+mesh is in the pass its list type names; five untextured list-2 meshes
+(`zndina` 4, `zslman` 1) are opaque-pass. 3,147 opaque-pass meshes sit on
+textures with transparent texels.
+
+**What changed.** One image per bank texture with the bank's alpha; the glTF
+`alphaMode` is the pass; `texture_alpha_used` says whether a plain draw shows
+it. `setAssetDrawAlpha` is the one fading draw (`null` = `AssetDrawSlot`, a
+number = `WithAlpha`, 1 included), and the records that wrote 1 for a plain
+draw say `null`. The blood transpose reads pixels back through WebGL, because
+a 2D canvas is premultiplied and blacked out the colour under 904 opaque-pass
+gore meshes' transparent texels -- harmless only while those images were
+stripped.
+
+**The car, and a second fault in the same function.** The coordinator passed
+on the crashed-car session's `[open]`: the stage-2 car's door skin draws black,
+"a translucent material with a zero base colour in the bundle". It is not the
+alpha. `char_adv04` model 4 (the door) has base colour white; model 2's inner
+copies of the body are black on the same texture 33 and TSP, and the
+exporter's material cache was keyed on the part, the texture and the four
+words -- **not the base colour or the culling** -- so the door took the
+body's black. `WalkMeshChainAndDraw` calls `SetMaterial` per mesh from its own
+header `[proved]`. Over the corpus the key merged 1,452 keys' worth of
+differing materials: 7,868 of 41,463 meshes (counting each file once by name)
+drew with an earlier mesh's material, 7,417 with another colour -- baked
+lighting and base alpha -- and 581 with other culling. The key carries both
+now. In the rescue branch at frame 150 the driver's door is red with its
+window; in the unshot drive, stage geometry shifts by up to 62 levels where
+segments shared a texture at different lighting.
+
+**Screenshots** (`web/shots/`, not committed; the before bundle is the same
+stages exported by the previous exporter into `extract/player_before` and
+served through `HOTD2_BUNDLE`): `texalpha-zslman-170-{old,after}-clip.png`
+and `texalpha-zslman-170-zoom-{old,after}-clip.png` (the thrown blade's
+afterimage card vs its shaped glow; 3.6% of the crop differs, all on the
+glows), `texalpha-zndina-60-{old,after}-clip.png` (2.6%, the blade halos),
+`texalpha-ladder-{60,200}-{old,after}.png` (opaque-pass alpha textures: 0 of
+588,800 viewport pixels differ), `car-rescue-{prekey,after}-150-zoom.png`
+(black door -> red). Blender, `extract/compare/texalpha/`: `st_adver03` model 1
+(the key fix recolours its pipes, max 41 levels; its `IgnoreTexAlpha` meshes
+are invisible both ways), `boss6` models 0-99 identical, model 133 two pixels
+off by one. Neither `boss6` (class 0x2D is unported) nor `st_adver03` is in a
+player bundle.
+
+**Not done, reported.** `render/characters/draw_gates.ts` draws a bone or part
+at any alpha above 0 solid, and says that is every alpha the game gives one;
+it is not -- the type-9 twin is drawn at 0.25 (`EnemyZombieInitByCharType`),
+`ZombieSubmitSlotByLighting` fades a zombie in through `AssetDrawSlotWithAlpha`
+while `obj+0x1368` bit `0x20` is up, and `ThrowerDrawBonePart` fades slot
+`0x1FB9` on a 120-frame triangle. So no draw the port makes today fades an
+opaque-pass mesh with transparent texels; the render test holds the state
+such a draw gets.
+
+The lessons are `L67` (a bit's name is its hardware's meaning) and `L68` (a
+cache keyed on less than it stores); main took `L66` while this was open.
+
+**Wrong turns.**
+
+* The first "before" shots were taken on the old bundle **before** merging
+  main, whose attack-slot claim moved the actors; they could not be diffed
+  against shots after the merge. The comparison bundle had to be re-exported
+  by the old `gltf.ts` from the merged tree, into its own directory.
+* The same trap twice: the first old bundle for the car predated the car
+  session's exporter rows, so its crash frames showed a different model.
+* The stage-1 view I first chose (`block=0`) is the prologue that loads stage
+  2; its 0.06% "difference" was the loading spinner. The new UI also moved the
+  viewport, so the first diff regions were half off it.
+* I took the car's black door for a draw-order fault and probed the sort keys
+  first (they were right: shells before inner copies, one command) before
+  reading the colour off the material.
+* `verify_texture_alpha.py`'s material check first matched primitives by node
+  name and chain index and reported 1,203 false mismatches: rig nodes number a
+  filtered model list, and `hod2_chain_index` skips empty meshes. It matches
+  by the header sphere each primitive carries.
+* `tools/blender_nodeview.py` rendered a stage segment as a blank frame: the
+  camera clipped at Blender's default 100 units. It sets the clip range from
+  the framing distance now.
+* Editing `gltf.ts` with a text tool: its cache keys join on NUL bytes, which
+  the editor shows as spaces, so an exact-match edit of that line failed until
+  it was done on bytes.
+
+## 2026-09-28 -- the damage overlay is opaque, and that is the game (branch `fix/newbugs2-hurt-sprites`)
+
+**The report.** "Should the hurt sprites that render on screen when the player
+is damaged be fully opaque? I think on the real game they're transparent."
+The sprites are the damage overlay: one of eleven `common.bin` models
+(116..126, slots 0x931..0x93B) that `DamageOverlayUpdateAndDraw`
+(`FUN_00417300`) draws in camera space for 59 frames after a hit.
+
+**What the exe does, read end to end** `[proved]`:
+
+* `DamageOverlayUpdateAndDraw` draws with `CALL 0x00418560` at `0x004173B5`
+  -- `AssetDrawSlot`, not `AssetDrawSlotWithAlpha` (`0x004185A0`), and the
+  routine has no other draw. No alpha, colour or scale depends on the frame
+  count.
+* `AssetDrawSlot` -> `RenderSubmitModelDefaultLight` (`0x004AA2B0`) builds an
+  unfaded command (key 0) and `RenderEnqueueCommand` queues it with layer
+  0xA; `RenderFlushCommandList` sends it to `WalkMeshChainAndDraw(cmd, 1)`,
+  not `DrawModelWithForcedAlphaBlend`. Nothing in the flush reads the layer
+  except the sort.
+* Per mesh, `WalkMeshChainAndDraw` `SetMaterial`s the header's colour --
+  all eleven are ARGB `(1, 1, 1, 1)`, ambient scale 0.75, no specular -- and
+  `TranslatePvr2StateToD3D` turns TSP `0x9400041B` (`0x9404041B` on the two
+  U-flipped models) into `SRCALPHA/INVSRCALPHA`, `ALPHATESTENABLE` on (bits
+  20-19 are `00`), `COLOROP`/`ALPHAOP` `MODULATE` (shading mode 0), `POINT`
+  filtering and fog on.
+* The textures, 26..33, are ARGB4444 VQ; `DecodeTextureToSurface`'s VQ arm
+  copies the codebook texels verbatim into the slot-6 (4:4:4) surface. Alpha
+  0 over 55-84% of each texture, and of the texels a mark covers 31-82% are
+  255 (texture 27, the three thin claws, is the low one) with the rest a
+  4-bit soft edge.
+
+So the on-screen alpha is the texel's, and the marks are **solid with
+feathered edges**. The answer to the question is no: they are not
+translucent in the exe. No `PUSH 0x89` (`D3DRENDERSTATE_LIGHTING`) is in the
+D3D module -- the two in the image are data in class 0x2C -- so the device's
+default, on, stands and the model is lit by `SetLightingDefaultSingle`'s
+light (the L32 caveat: a state number in a register would not show). That can
+tint or darken the mark's colour, never its alpha (`[likely]`; how far it
+changes the colour turns on the device's handling of the normals, which the
+0.02 scale leaves unnormalised, and is `[open]`).
+
+**The port already draws that**, and nothing in the draw changed. The node
+keeps the template's material (`applyPvr2DrawState`'s translucent pass, alpha
+test at 1/255, opacity 1). Measured off the page with a new harness,
+`web/tools/hurt_alpha.mjs`: two driven runs on one seed, in step, one of them
+with the record's kind pointed past the slot table for the shot frames so the
+overlay is left out and nothing else moves; the overlay rides the camera, so
+two moments give two backgrounds under each pixel and `a = 1 - dP/dB`. Stage
+2 block 16 (kind 4, texture 28): 80,773 pixels covered, 99.9% at both
+moments; 66.5% of the 46,790 measurable ones at alpha exactly 1.0, against
+65.4% of texture 28's covered texels at 255; every opaque pixel the same
+colour at 57 and 30 frames left. Stage 1 block 4 (kind 0, texture 33): 74.2%
+against 75.9%.
+
+**What is new.** Evidence and guards, no behaviour:
+
+* `render.test.ts`: the overlay's node draws with the template's own
+  material -- the translucent pass, opacity 1 -- the same way on all 59
+  frames, at `(0, 0, -1.02)` scale 0.02 in the camera's group, gone on the
+  sixtieth, drawn only for the two player tasks that call the routine.
+  Mutation-tested: an opacity ramp over the life fails "no fade", and forcing
+  the material opaque fails the pass check.
+* `verify_texture_alpha.py`: the `CALL` at `0x004173B5` is to
+  `AssetDrawSlot`, no call in the routine reaches `AssetDrawSlotWithAlpha`,
+  each model `g_damage_overlay_slots` names is one translucent-pass
+  `SRCALPHA/INVSRCALPHA` mesh at base alpha 1.0 on an ARGB4444 texture with a
+  clear surround and 255 its commonest other alpha, the port's
+  `DAMAGE_OVERLAY_SLOTS` is the exe's table, and the bundle's overlay images
+  carry the bank's alpha byte for byte. Each mutated in-process and seen to
+  fail.
+* Annotations: `AssetDrawSlot`, `AssetDrawSlotWithAlpha` and
+  `RenderSubmitModelDefaultLight` had no comment; `DamageOverlayUpdateAndDraw`
+  carries the opacity chain.
+
+**Found beside it, not done here.** `CurlModelSlot3F7ByYaw` (`0x004759C0`)
+reads the slot record at `0x009AE584`/`0x009AE58C`. `AssetDrawSlot` indexes
+the table as `0x009A66A0 + slot*0x10` (`SHL EAX, 4` at `0x00418576`), so that
+is slot **0x7EE** -- the boss banner's own card back, which the banner loads
+-- and not 0x3F7, which is what a stride of 0x20 gives. The port calls the
+curl a no-op because 0x3F7 is never resident, and draws the cards flat.
+Handed on as its own task.
+
+**Wrong turns.**
+
+* The harness's first cut took one driven frame, lowered the record's
+  `active` through `G`, redrew with `advance(0)` and shot again. The shots
+  were byte-identical, the overlay "covered 0 pixels", and the harness's own
+  "the redraw reproduces the frame" check passed -- because a zero-frame pump
+  renders the scene graph as the last tick posed it, and the render layers
+  pose inside the tick. That is `L69`. Two in-step runs replaced it.
+* The corpus check first opened `pol/common.bin.bin`: `asset_slots()` names
+  files with their extension, and the bank helper wants the stem.
+
+## 2026-09-28 -- character fades, and the twin `znele` makes (branch `fix/newbugs2-char-fades`)
+
+**The report.** The texture-alpha session left it: `draw_gates.ts` draws a
+character's bones and parts solid at any alpha above 0 and hides them at 0,
+and its comment said 0 and 1 were every alpha the game gives one. Three cases
+were named: the type-9 twin at 0.25, the fade-in through
+`ZombieSubmitSlotByLighting` while `obj+0x1368` bit `0x20` is up, and the
+triangle on thrower slot `0x1FB9`. The coordinator asked for every case, not
+those three.
+
+**Finding them.** Every caller of `AssetDrawSlotWithAlpha` (`0x004185A0`, 71
+sites) and of its light-array twin `AssetDrawSlotWithAlphaSceneLights`
+(`0x00418620`, 7), each mapped to its function; then every node draw hook
+installed at `model+0x1158` / `obj+0x12EC` (25 + 11 writes), to see which of
+them reaches either. What draws a *character* faded:
+
+* `DrawCharacterPartSlot` (`0x00419B40`): the parts of types 9, 0x12, 0x17,
+  0x18 at `obj+0x138C`, always. `[proved]` (already read; the render ignored
+  it at 1.)
+* `ZombieSubmitSlotByLighting` (`0x00453AE0`), every class-0x30 node: light
+  array first on `obj+0x136C` bit `0x20` -- **not** `obj+0x38` bit 3 as
+  `g_scene_lighting`'s row and `scene_lights.ts` said -- then the fade on
+  `obj+0x1368` bit `0x20`. `[proved]`
+* `ZombieDrawBonePart` (`0x004534A0`)'s `0x1C6C` arm (reached through the
+  byte map at `0x00453A04`, index `0x7F` = 1, jump table `0x004539F4` entry 1
+  = `0x00453665`) and its `0x1C7C` arm (`0x00453708`): the two clocks, on
+  `obj+0x134C` (wait) and `obj+0x1388` (step). `EnemyZombieInitByCharType`'s
+  type-9 and type-0x12 arms seed them. `[proved]`
+* `ThrowerDrawBonePart` (`0x00449F90`) through `ThrowerDrawPartWithAlpha`
+  (`0x0044A240`), under `obj+0x136C` bit 2. `[proved]`
+* `SubModelDrawBoneHook` (`0x0040F490`), class 0x40, on `obj+0x1338`:
+  unreachable -- `HordeMemberInit` writes it from `EBX`, zeroed at
+  `0x0043BF21`, and it is the only class-0x40 writer. `[proved]`
+* Not ported, so not drawn at all: `ScriptedHumanoidBoneDrawHook`'s `0xE24`
+  flash (class 0x25, three frames at 1.0/0.7/0.4), `GoldenFrogDrawBonePart`
+  (`0x00463F90`, named here: `1 - n*0.02` for `n >= 25`), class 0x2D's hook at
+  `0x00429040` (at `obj+0x1370`).
+* Everything else is a prop, an effect or a screen overlay.
+
+**What the faded draw is**, confirmed on the way: `TranslatePvr2StateToD3D`
+sets `ALPHATESTENABLE` (state 15) from the TSP pass bits and
+`DrawModelWithForcedAlphaBlend` keeps them, and the material alpha is the
+mesh's base times the command's at `0x004A85D5` with no test. So a draw at 0
+is invisible and writes depth for every opaque-pass mesh. In the player this
+shows: an invisible `znele` or a blinking `zslman` keeps translucent geometry
+behind it off its silhouette, because the port's sort, which is the engine's,
+draws the actor first. It follows from `[proved]` pieces; if the real game
+does not show it, the sort is the suspect, not the fade.
+
+**The twin.** Type 0x12's arm allocates a type-9 actor (`znjikken1`) unless
+`obj+0x34` has `0x10000000`, and `EnemyZombieInit` gives it
+`ZombieTwinFollowHost` (`0x00453290`, already named) for its update. Read
+whole: it despawns at alpha 0 or a dead host, runs `ZombieOnShot`, raises
+`0x80040000`, copies the host's transform block and motion words, draws, and
+registers for the shot test. Ported (`class30/twin.ts`), with a synthetic
+bundle row for its geometry and every clip its host's type has. Its 999 hit
+points are not what it has: its own `ActorInitHitPoints` overwrites them with
+the clamp of `obj+0x11E` (0) plus the delta.
+
+**Also fixed on the way:** the thrower blink states read the port's fractional
+`g_frame` where the exe tests `g_blink_frame_counter`'s low bit;
+`EnemyThrowerInit` wrote alpha 1 for every type where the exe writes 1.0 for
+0x17, 0 for a 0x18 starting in state 34 (with bit 2 and `0x80000`) and 1.0
+for other 0x18s; the per-node fade clones dropped `onBeforeCompile`; and the
+gun light and the lighting view swapped materials over a fade's clone.
+
+**Named:** `AssetSlotUVsFromViewNormals` (`0x00418660`) and
+`ModelUVsFromViewNormals` (`0x004AA400`) -- the "`FUN_00418660` `[open]`" of
+`combat.md`'s cel table: the model's UVs rewritten from its normals through
+the matrix, drawing nothing; `GoldenFrogDrawBonePart` (`0x00463F90`),
+`GoldenFrogUpdate` (`0x00471FA0`; Ghidra's naming gate refused it for its
+token overlap with `FrogUpdate` and it went in with the gate off).
+
+**Screenshots** (`web/shots/`, not committed; before = main at `14098154`
+with the shared bundle, after = this branch with its own export, both under
+`?drive=1`; each is before on the left, after on the right, a row a frame):
+`charfades-znele-compare.png` (stage 6 block 0 step 2 op 19, frames 60/105/
+115/125/135, before the twin was ported: solid from the first frame against
+invisible, then 0.17/0.5/0.83, then solid), `charfades-twin-compare.png` and
+`charfades-twin-f60-zoom.png` (the same with the twin: three quarter-alpha
+ghosts; the zoom's rows are before, no twin, twin), `charfades-zslman-
+compare.png` (stage 6 block 0 step 4 op 2, frames 40/41/100/101: the blink's
+odd frames and the waiting `zslman`'s depth), `charfades-pulse2-compare.png`
+(stage 4 block 1 step 2 op 5 with bit 2 forced on `zskamere` 4236 from frame
+1: frame 100 is solid before and a third after), `charfades-kamere-compare.png`
+(0 of 218,400 pixels differ: `zskamere`'s parts at the forced blend's 1
+against the plain draw -- its textures have no transparent texels there).
+
+**Wrong turns.**
+
+* The first commit's message and `class31/draw.ts` said the `0x1FB9` ramp is
+  `zskamere`'s "under any of the blinking states", and that the old comment
+  had only counted the descriptor's word. The old comment's conclusion was
+  right: no shipped `zskamere` starts in or reaches state 27 or 34, no class-
+  0x31 routine writes either into `obj+0x1310` as an immediate, and the
+  blinking death is `zslman`'s. Corrected to `[likely]` unreachable.
+* `functions.tsv` called `ZombieTwinFollowHost`'s `obj+0x1320`/`0x1324` "the
+  clip pair". On class 0x30 they are the head aim's two angles (`L3`).
+* The port test's first expectation was that every node shows the alpha the
+  fade arm makes. The fixture walks bones 4 and 5 before bone 1, and the hook
+  moves the alpha as it draws the fade node, so the nodes before it draw the
+  previous frame's -- which is the engine's order, and the test says so now.
+* The builder hash was generated, the stages exported, and then a comment
+  edit to `class30/bonecels.ts` -- which the exporter imports -- moved it
+  again (`L33`, with my own hands). Re-exported after the merge.
+* The first full `verify_all` with the new bundle failed `verify_bone_cels`:
+  "`znjikken1` draws `0x1C97`". It does not. The check read each
+  character's `HIT_EFFECT` rows `1..nb+1`, and the table is a pointer per
+  character at `nb` rows each -- every one of the 86 skeletons numbers its
+  bones below its own count -- so rows `nb` and `nb + 1` were the next
+  character's rows 0 and 1, and `znjikken1`'s row 17 is `znjoe`'s row 1.
+  `L6`, in a checker, latent until a bundle carried type 9. Bounded at `nb`
+  now; the count went from 79 to 77, the two dropped being those two reads,
+  and the shared bundle gives 77 as well.

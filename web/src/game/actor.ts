@@ -842,10 +842,14 @@ export enum ZombieFlag2 {
    */
   MayFall = 0x4000000,
   /**
-   * Bit `0x20` — the descriptor's own `+0x20` word asking for
-   * {@link ZombieAux.SceneLit}. `EnemyZombieInitByCharType`
-   * (`FUN_00452FD0`) reads it at `0x00453000` and raises `obj+0x38` bit 3 from
-   * it; nothing else in the image looks at it.
+   * Bit `0x20` — the descriptor's own `+0x20` word asking for the light
+   * array. `EnemyZombieInitByCharType` (`FUN_00452FD0`) reads it at
+   * `0x00453000` and raises {@link ZombieAux.SceneLit} (`obj+0x38` bit 3)
+   * from it, which is what `DrawCharacterPartSlot` (`FUN_00419B40`) tests for
+   * the parts; and `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) tests **this**
+   * bit for every node (`TEST byte ptr [EAX + 0x136c], CL`, `CL = 0x20`, at
+   * `0x00453AE7`). This comment used to say nothing else in the image looked
+   * at it.
    */
   DrawVariantSource = 0x20,
   /** Bit `0x20000000` — take part in the world push. Off while emerging. */
@@ -1953,7 +1957,16 @@ export interface ActorBase {
    *   see `PART_ALPHA_CHAR_TYPES` in `game/model_draw.ts`;
    * * `ThrowerDrawBonePart` (`FUN_00449F90`) draws a class-0x31 bone at it
    *   while {@link ThrowerFlag.Blinking} is up, which is what the blinking
-   *   states write it for.
+   *   states write it for -- 0 and 1 -- and writes a 120-frame ramp into it
+   *   itself on a `0x1FB9` node;
+   * * `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) draws every class-0x30
+   *   bone at it while `obj+0x1368` bit `0x20` is up
+   *   (`zom.fadeDraw`), which `EnemyZombieInitByCharType`
+   *   (`FUN_00452FD0`) raises for character types 9 and 0x12 with the alpha
+   *   at 0.25 and 0, and `ZombieDrawBonePart` (`FUN_004534A0`) steps it --
+   *   down to 0 on the twin's `0x1C7C` node, up to 1 on `znele`'s `0x1C6C`.
+   *
+   * What each node was drawn at is {@link Actor.nodeDrawAlpha}.
    *
    * It is not a draw gate for the whole actor and not a stand-in for one:
    * hiding a class-0x30 actor is {@link MotionFlag.Drawn} and
@@ -2145,6 +2158,22 @@ export interface ActorBase {
    * a predicate per node.
    */
   suppressedBones: number;
+  /**
+   * What the class's node draw hook drew each bone at, by bone number: `null`
+   * for `AssetDrawSlot` (`FUN_00418560`) or its light-array twin, a number for
+   * `AssetDrawSlotWithAlpha` (`FUN_004185A0`) or `FUN_00418620` -- the forced
+   * blend at that alpha, **1 and 0 included**, because the faded draw tests
+   * nothing (`render/draw_order.ts`, `setMeshDrawAlpha`).
+   *
+   * [port-only] as a field. The engine draws and forgets; the renderer may
+   * not call into the port, so the hooks the port runs --
+   * `ZombieDrawBonePart` (`FUN_004534A0`, through `ZombieSubmitSlotByLighting`)
+   * and `ThrowerDrawBonePart` (`FUN_00449F90`) -- write down which draw each
+   * node got, and `render/characters/draw_gates.ts` makes it. A bone the hook
+   * was not called for keeps last frame's entry, which nothing reads: the
+   * gate that skipped the hook hides the bone.
+   */
+  nodeDrawAlpha: (number | null)[];
   /**
    * The attachment list — `model+0x1170`, ids into
    * `g_actor_attachment_records` (`0x004EC4C0`).
@@ -2456,6 +2485,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     boneSlot: {},
     boneRadius: {},
     suppressedBones: 0,
+    nodeDrawAlpha: [],
     attachments: [],
   };
   // One `return` per arm. TypeScript narrows `cls` inside each branch, so the

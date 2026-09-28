@@ -49,9 +49,13 @@ const _p = vec3();
  * `g_blink_frame_counter` (0x009A5C50), gone on an odd one. `obj+0x138C` is
  * the draw alpha and `obj+0x136C` bit 2 is the flag `ThrowerDrawBonePart`
  * reads to decide whether to use it.
+ *
+ * `TEST byte ptr [0x009a5c50], 0x1` at `0x0044F0C2` and `0x0044F181` (state
+ * 27) and `0x0045149C` (state 34). The port read its own fractional
+ * `g_frame` here, which is not that counter and can hold a fraction. `[proved]`
  */
 function ThrowerBlink(obj: ThrowerActor): void {
-  if (Math.floor(G.g_frame) & 1) {
+  if (G.g_blink_frame_counter & 1) {
     obj.alpha = 0;
     obj.flags2 |= ThrowerFlag.Blinking;
   } else {

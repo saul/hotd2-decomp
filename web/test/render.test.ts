@@ -1875,6 +1875,131 @@ console.log("\nthe shot effects are models, one per frame:");
 }
 
 
+console.log("\nthe damage overlay: a plain AssetDrawSlot, drawn by the texture's alpha:");
+{
+  // `DamageOverlayUpdateAndDraw` (`FUN_00417300`) calls `AssetDrawSlot`, not
+  // `AssetDrawSlotWithAlpha`: no draw alpha, no fade. The eleven templates as
+  // the exporter writes them -- one mesh each, with the TSP words
+  // `common.bin` 116..126 carry -- and the pass `prepareDrawCommands` gives
+  // them at load. What reaches the screen must then be the template's own
+  // material on every one of the 59 frames: the translucent pass, blending by
+  // the texel's alpha at material alpha 1.
+  const { applyPvr2DrawState, pvr2Words, ALPHA_REF }
+    = await import("../src/render/draw_order");
+  const { PlayerTask } = await import("../src/game/player_state");
+  const { DAMAGE_OVERLAY_FRAMES, DAMAGE_OVERLAY_SCALES, DAMAGE_OVERLAY_SLOTS,
+          DAMAGE_OVERLAY_Z, DamageOverlayKind }
+    = await import("../src/game/effects/damage_overlay");
+  const { CustomBlending, OneMinusSrcAlphaFactor, SrcAlphaFactor }
+    = await import("three");
+  type Basic = InstanceType<typeof MeshBasicMaterial>;
+  const root = new Obj3D();
+  const mats = new Map<number, Basic>();
+  for (let slot = 0x931; slot <= 0x93b; slot++) {
+    const mat = new MeshBasicMaterial();
+    // 0x938 and 0x939 are the U-flipped models: bit 18 more, nothing else.
+    const flipped = slot === 0x938 || slot === 0x939;
+    mat.userData = { pvr2: { isp_tsp_instruction: "0x83000000",
+                             tsp_instruction: flipped ? "0x9404041B"
+                                                      : "0x9400041B" } };
+    applyPvr2DrawState(mat, pvr2Words(mat)!);
+    const part = new Mesh(new PlaneGeometry(1, 1), mat);
+    part.name = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(part);
+    mats.set(slot, mat);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // The record as the port's spawn and first update leave it -- the state
+  // half is `port.test.ts`'s, driven through `GameUpdate`.
+  G.g_player_task[0] = PlayerTask.InPlay;
+  const o = G.g_damage_overlays[0]!;
+  Object.assign(o, { active: 1, frames: DAMAGE_OVERLAY_FRAMES - 1, x: 0,
+                     kind: DamageOverlayKind.Slash, count: 1 });
+  layer.update(ctx);
+  const slot = DAMAGE_OVERLAY_SLOTS[DamageOverlayKind.Slash]![0];
+  check("a live record draws one node, in the camera's own space",
+        layer.viewGroup.children.length === 1
+        && layer.group.children.length === 0 && slot === 0x933,
+        `${layer.viewGroup.children.length}/${layer.group.children.length}`);
+  const node = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+  check("...at (0, 0, -1.02), unturned, scale 0.02, in draw layer 0xA",
+        node.position.x === 0 && node.position.y === 0
+        && node.position.z === DAMAGE_OVERLAY_Z
+        && Math.abs(DAMAGE_OVERLAY_Z + 1.02) < 1e-6
+        && node.quaternion.w === 1
+        && node.scale.x === DAMAGE_OVERLAY_SCALES[DamageOverlayKind.Slash]
+        && Math.abs(node.scale.x - 0.02) < 1e-6 && node.renderOrder === 899,
+        `${node.position.toArray()} ${node.scale.x} ${node.renderOrder}`);
+  const mat = node.material as Basic;
+  check("...with the template's own material: the draw gives it no alpha",
+        mat === mats.get(0x933));
+  check("...the translucent pass TSP 0x9400041B names: SRCALPHA / "
+        + "INVSRCALPHA, the alpha test at 1",
+        mat.transparent && mat.blending === CustomBlending
+        && mat.blendSrc === SrcAlphaFactor
+        && mat.blendDst === OneMinusSrcAlphaFactor
+        && mat.alphaTest === ALPHA_REF / 255 && mat.depthWrite,
+        `${mat.transparent} ${mat.blending} ${mat.blendSrc} ${mat.blendDst}`);
+  check("...at material alpha 1, so the texel's alpha is the whole of it",
+        mat.opacity === 1, `${mat.opacity}`);
+
+  // Every frame of its life draws the same thing.
+  const looks = new Set<string>();
+  for (let f = DAMAGE_OVERLAY_FRAMES - 1; f >= 1; f--) {
+    o.frames = f;
+    layer.update(ctx);
+    const n = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+    const m = n.material as Basic;
+    looks.add([m === mats.get(0x933), m.opacity, m.transparent, m.blending,
+               n.visible, n.scale.x, ...n.position.toArray()].join(" "));
+  }
+  const varied = [...looks];
+  check("no fade, flash or scale ramp over the 59 frames it is drawn",
+        looks.size === 1,
+        `${varied.length} different draws, first ${varied[0]}, last `
+        + `${varied[varied.length - 1]}`);
+  o.active = 0;
+  o.frames = 0;
+  layer.update(ctx);
+  check("...and on the sixtieth it is gone",
+        layer.viewGroup.children.length === 0);
+
+  // The mirrored slash is the same pass; two players move it and, for the
+  // gash, swap the model.
+  Object.assign(o, { active: 1, frames: 30, x: 0,
+                     kind: DamageOverlayKind.SlashMirrored, count: 1 });
+  layer.update(ctx);
+  const flip = (layer.viewGroup.children[0] as InstanceType<typeof Mesh>)
+    .material as Basic;
+  check("the U-flipped slash (0x939) blends the same way",
+        flip === mats.get(0x939) && flip.transparent
+        && flip.blendSrc === SrcAlphaFactor && flip.opacity === 1);
+  Object.assign(o, { kind: DamageOverlayKind.Gash, count: 2, x: -0.22 });
+  layer.update(ctx);
+  const gash = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+  check("with two players the gash is 0x936, 0.22 to the left",
+        gash.material === mats.get(0x936)
+        && Math.abs(gash.position.x + 0.22) < 1e-6);
+
+  // Only the two tasks that call the routine draw it.
+  G.g_player_task[0] = PlayerTask.None;
+  layer.update(ctx);
+  check("a player not in play or on the countdown draws no overlay",
+        layer.viewGroup.children.length === 0);
+  G.g_player_task[0] = PlayerTask.ContinueCountdown;
+  layer.update(ctx);
+  check("...and one on the countdown does",
+        layer.viewGroup.children.length === 1);
+  ResetGameGlobals();
+}
+
 console.log("\nthe water ring is drawn from its record alone:");
 {
   const root = new Obj3D();
@@ -1923,19 +2048,35 @@ console.log("\nthe water ring is drawn from its record alone:");
 
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {
-  // A 2x1 image and just enough canvas to transpose it. The file's own stub is
+  // A 2x1 image and just enough WebGL to read it back. The file's own stub is
   // for text labels and has no pixel calls, so this one is local and put back.
+  // The second texel is transparent, as 904 opaque-pass gore texels are: the
+  // readback has to keep the colour under it, which a 2D canvas -- stored
+  // premultiplied -- hands back as black. That canvas is what this used, and
+  // the stub asks only for `webgl`, so going back to it fails here.
   const doc = globalThis.document;
-  const px = new Uint8ClampedArray([10, 200, 30, 255, 40, 50, 60, 255]);
-  const held = new Uint8ClampedArray(px);
+  const px = new Uint8Array([10, 200, 30, 255, 40, 50, 60, 0]);
+  const asked: string[] = [];
+  const gl = {
+    TEXTURE_2D: 1, FRAMEBUFFER: 2, COLOR_ATTACHMENT0: 3,
+    FRAMEBUFFER_COMPLETE: 4, RGBA: 5, UNSIGNED_BYTE: 6, NONE: 0,
+    createTexture: () => ({}), createFramebuffer: () => ({}),
+    bindTexture: () => undefined, bindFramebuffer: () => undefined,
+    pixelStorei: () => undefined, texParameteri: () => undefined,
+    texImage2D: () => undefined, framebufferTexture2D: () => undefined,
+    checkFramebufferStatus: () => 4,
+    readPixels: (_x: number, _y: number, _w: number, _h: number,
+                 _f: number, _t: number, out: Uint8Array) => out.set(px),
+    deleteTexture: () => undefined, deleteFramebuffer: () => undefined,
+    getExtension: () => ({ loseContext: () => undefined }),
+  };
   (globalThis as unknown as { document: unknown }).document = {
     createElement: () => ({
       width: 0, height: 0,
-      getContext: () => ({
-        drawImage: () => undefined,
-        getImageData: () => ({ data: held }),
-        putImageData: () => undefined,
-      }),
+      getContext: (kind: string) => {
+        asked.push(kind);
+        return kind === "webgl" ? gl : null;
+      },
     }),
   };
 
@@ -1955,9 +2096,14 @@ console.log("\nthe blood colour switch moves the map, not the shader:");
         /1\/1 swapped/.test(layer.describe), layer.describe);
   check("red is the default, and it is the transposed map",
         mat.map !== map && layer.colour === "red", layer.describe);
+  const held = ((mat.map as { image?: { data?: Uint8Array } } | null)
+    ?.image?.data) ?? new Uint8Array();
   check("...and the transpose really exchanges R and G",
         held[0] === 200 && held[1] === 10 && held[2] === 30,
         `${held[0]},${held[1]},${held[2]}`);
+  check("...keeping the alpha, and the colour under a transparent texel",
+        held.join() === "200,10,30,255,50,40,60,0" && asked.includes("webgl"),
+        `${held.join()} via ${asked.join()}`);
 
   // **The regression this exists for.** The first cut did the swap in the
   // fragment shader through `onBeforeCompile`; the material's mode changed and
@@ -2465,6 +2611,139 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
         && !alphaGatesWholeActor(fake(SpawnClass.Thrower)));
 
   stage.dispose();
+}
+
+/**
+ * The hook's draw, node by node: `ZombieSubmitSlotByLighting` (`FUN_00453AE0`)
+ * and `ThrowerDrawPartWithAlpha` (`FUN_0044A240`) draw a node through
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`), and the port's hooks write which
+ * into `Actor.nodeDrawAlpha`; `DrawCharacterPartSlot` (`FUN_00419B40`) draws
+ * four types' parts at `obj+0x138C`. `draw_gates.ts` used to draw every
+ * alpha above 0 solid and hide a bone at 0.
+ */
+console.log("\nthe draw gates: each node's faded draw, and the parts at 0x138C");
+{
+  const three = await import("three");
+  const { Group, Mesh, MeshBasicMaterial, BoxGeometry, MeshLambertMaterial } =
+    three;
+  const { applyDrawGates } =
+    await import("../src/render/characters/draw_gates");
+  const { setMeshDrawAlpha, setUnfadedMaterial, unfadedMaterial,
+          meshDrawAlpha } = await import("../src/render/draw_order");
+  const { MotionFlag } = await import("../src/game/actor");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+
+  // A template material in the opaque pass, with a base alpha under 1.
+  const tmpl = (): InstanceType<typeof MeshBasicMaterial> => {
+    const m = new MeshBasicMaterial({ opacity: 0.8 });
+    m.transparent = false;
+    return m;
+  };
+  const mk = (name: string) => {
+    const m = new Mesh(new BoxGeometry(1, 1, 1), tmpl());
+    m.name = name;
+    return m;
+  };
+  const pivot = new Group();
+  const pelvis = mk("chr_z_spawn000_bone01_1c6c");
+  const leg = mk("chr_z_spawn000_bone10_1111");
+  const cel = mk("cel");
+  pelvis.add(leg, cel);        // the cel is the pelvis's draw, not the leg's
+  const waist = mk("chr_z_spawn000_part0_1c63");
+  pivot.add(pelvis, waist);
+  const plain = new Map<object, unknown>([
+    [pelvis, pelvis.material], [leg, leg.material], [cel, cel.material],
+    [waist, waist.material]]);
+  const a = {
+    cls: SpawnClass.Zombie, charType: 0x12, alpha: 0.25,
+    motionFlags: MotionFlag.Drawn, partVisible: [1], suppressedBones: 0,
+    nodeDrawAlpha: [] as (number | null)[],
+  };
+  const inst = {
+    a, pivot, root: pivot, bones: new Map([[1, pelvis], [10, leg]]),
+    gore: new Map(),
+  } as never;
+  type Basic = InstanceType<typeof MeshBasicMaterial>;
+  const mat = (m: InstanceType<typeof Mesh>) => m.material as Basic;
+
+  a.nodeDrawAlpha[1] = 0.25;
+  a.nodeDrawAlpha[10] = null;
+  applyDrawGates(inst);
+  check("a node drawn at 0.25 is the forced blend at its base alpha times it",
+        mat(pelvis) !== plain.get(pelvis) && mat(pelvis).transparent
+        && mat(pelvis).blendSrc === three.SrcAlphaFactor
+        && mat(pelvis).blendDst === three.OneMinusSrcAlphaFactor
+        && Math.abs(mat(pelvis).opacity - 0.2) < 1e-6,
+        `${mat(pelvis).opacity}`);
+  check("...and so is everything else the hook draws for it -- the cel",
+        Math.abs(mat(cel).opacity - 0.2) < 1e-6 && mat(cel).transparent);
+  check("...while a child bone drawn plainly keeps the template's material",
+        leg.material === plain.get(leg));
+  check("`znele`'s part is drawn at `obj+0x138C` whatever the node alpha",
+        waist.material !== plain.get(waist)
+        && Math.abs(mat(waist).opacity - 0.2) < 1e-6);
+
+  a.nodeDrawAlpha[1] = 0;
+  a.alpha = 0;
+  applyDrawGates(inst);
+  check("at 0 the node is still drawn: on its layer, opacity 0, writing depth",
+        pelvis.layers.isEnabled(0) && mat(pelvis).opacity === 0
+        && mat(pelvis).depthWrite && mat(pelvis).alphaTest === 0);
+  check("...and so is the part", waist.visible && mat(waist).opacity === 0);
+
+  a.nodeDrawAlpha[1] = 1;
+  a.alpha = 1;
+  applyDrawGates(inst);
+  check("at 1 it is still the forced blend, not the plain draw: an "
+        + "opaque-pass mesh's texture alpha shows",
+        mat(pelvis) !== plain.get(pelvis) && mat(pelvis).transparent
+        && Math.abs(mat(pelvis).opacity - 0.8) < 1e-6
+        && mat(waist).transparent);
+
+  // A zombie that is not one of the four types draws its parts plainly.
+  a.charType = 1;
+  applyDrawGates(inst);
+  check("another character type's part is drawn plainly",
+        waist.material === plain.get(waist));
+  a.charType = 0x12;
+
+  // The gun light swaps a lit actor's materials for its twins, after the
+  // characters: the fade goes back on top of the twin it chose.
+  a.nodeDrawAlpha[1] = 0.5;
+  applyDrawGates(inst);
+  const twin = new MeshLambertMaterial({ opacity: 0.8 });
+  twin.userData = { gunLit: true };
+  setUnfadedMaterial(pelvis, twin);
+  const drawnWith = pelvis.material as unknown as { type: string };
+  check("a light layer's swap goes under the fade: the twin, at 0.5",
+        unfadedMaterial(pelvis) === (twin as unknown)
+        && drawnWith !== (twin as unknown)
+        && drawnWith.type === "MeshLambertMaterial"
+        && Math.abs(mat(pelvis).opacity - 0.4) < 1e-6
+        && meshDrawAlpha(pelvis) === 0.5);
+  // A layer that writes the material directly -- a gore swap, a cel -- is
+  // read back as the new unfaded one by the next fade.
+  const gore = tmpl();
+  pelvis.material = gore;
+  applyDrawGates(inst);
+  check("...and a direct write is taken as the new unfaded material",
+        unfadedMaterial(pelvis) === gore && pelvis.material !== gore
+        && Math.abs(mat(pelvis).opacity - 0.4) < 1e-6);
+
+  // The fade ends: every mesh goes back to what it draws unfaded.
+  a.nodeDrawAlpha[1] = null;
+  applyDrawGates(inst);
+  check("a plain draw after the fade puts back what the mesh draws unfaded",
+        pelvis.material === gore && cel.material === plain.get(cel)
+        && meshDrawAlpha(pelvis) === null);
+  // ...and a clone some layer saved and puts back later is seen through.
+  setMeshDrawAlpha(leg, 0.3);
+  const saved = leg.material;
+  setMeshDrawAlpha(leg, null);
+  leg.material = saved as never;
+  setMeshDrawAlpha(leg, null);
+  check("a stale fade clone put back after the fade is replaced by its source",
+        leg.material === plain.get(leg));
 }
 
 /**
@@ -3402,6 +3681,40 @@ console.log("\nthe engine's two passes, and the translucent order");
   check("...every frame, not from the last frame's",
         Math.abs((slotNode.material as InstanceType<typeof MeshBasicMaterial>)
           .opacity - 0.15) < 1e-9);
+
+  // `AssetDrawSlotWithAlpha` (`FUN_004185A0`) does not test its argument: at
+  // 1.0 it is still `DrawModelWithForcedAlphaBlend`, which blends an
+  // opaque-pass mesh -- and so its texture's alpha, now that the exporter
+  // keeps it. The layers used to keep the plain draw at 1.
+  const wallMat = exported(0x83000000, 0x2008045B, false);
+  applyPvr2DrawState(wallMat, { isp: 0x83000000, tsp: 0x2008045B });
+  const wallNode = new Mesh(new PlaneGeometry(1, 1), wallMat);
+  setSlotAlpha(wallNode, 1);
+  const forcedWall = wallNode.material as InstanceType<typeof MeshBasicMaterial>;
+  check("a draw with alpha at 1 still blends an opaque-pass mesh",
+        forcedWall !== wallMat && forcedWall.transparent
+        && forcedWall.blendSrc === three.SrcAlphaFactor
+        && forcedWall.blendDst === three.OneMinusSrcAlphaFactor
+        && forcedWall.opacity === 1,
+        `${forcedWall === wallMat} ${forcedWall.transparent}`);
+  check("...and leaves the template's material alone",
+        wallMat.transparent === false);
+  check("...untested: the opaque pass's alpha test stays off (bits 19-20 kept)",
+        forcedWall.alphaTest === 0, `${forcedWall.alphaTest}`);
+  setSlotAlpha(wallNode, null);
+  check("a plain draw (`AssetDrawSlot`) after it goes back to the template's",
+        wallNode.material === wallMat && wallMat.transparent === false);
+  const untouched = new Mesh(new PlaneGeometry(1, 1), wallMat);
+  setSlotAlpha(untouched, null);
+  check("...and a plain draw never clones", untouched.material === wallMat);
+
+  // The blood transpose swaps red and green and nothing else: an opaque-pass
+  // gore texel at alpha 0 keeps the colour the pass shows.
+  const { transposeRedGreen } = await import("../src/render/bloodcolour");
+  const texel = new Uint8Array([10, 200, 30, 0, 1, 2, 3, 255]);
+  transposeRedGreen(texel);
+  check("the blood transpose keeps the alpha, and the colour under alpha 0",
+        texel.join() === "200,10,30,0,2,1,3,255", texel.join());
 
   // ---- the order ---------------------------------------------------------
   // Commands as the loader delivers them: a node Group of primitive Meshes,

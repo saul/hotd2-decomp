@@ -74,7 +74,9 @@ import { G } from "../game/globals";
 import { GUN_LIGHT_FIRST, RenderLightType } from "../game/scene_lights";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
-import { copyDrawState } from "./draw_order";
+import {
+  copyDrawState, setUnfadedMaterial, unfadedMaterial,
+} from "./draw_order";
 import type { SceneLighting } from "./lighting";
 
 /**
@@ -427,15 +429,21 @@ export class GunLights implements System<RenderContext> {
     return t;
   }
 
+  /**
+   * Under any fade the draw has put on the mesh: the light array is which
+   * material a faded draw fades (`AssetDrawSlotWithAlphaSceneLights`,
+   * `FUN_00418620`), so the twin goes underneath and the fade stays on top.
+   * See `setUnfadedMaterial` in `render/draw_order.ts`.
+   */
   private light(mesh: Mesh): void {
-    const cur = mesh.material;
+    const cur = unfadedMaterial(mesh);
     const isLit = Array.isArray(cur)
       ? cur.every((m) => m.userData?.gunLit)
       : !!cur.userData?.gunLit;
     if (isLit) return;
     this.saved.set(mesh, cur);
-    mesh.material = Array.isArray(cur)
-      ? cur.map((m) => this.twinOf(m)) : this.twinOf(cur);
+    setUnfadedMaterial(mesh, Array.isArray(cur)
+      ? cur.map((m) => this.twinOf(m)) : this.twinOf(cur));
   }
 
   private restore(mesh: Mesh, base?: (m: Material) => Material): void {
@@ -443,7 +451,7 @@ export class GunLights implements System<RenderContext> {
     if (!prev) return;
     this.saved.delete(mesh);
     const back = (m: Material): Material => (base ? base(m) : m);
-    mesh.material = Array.isArray(prev) ? prev.map(back) : back(prev);
+    setUnfadedMaterial(mesh, Array.isArray(prev) ? prev.map(back) : back(prev));
   }
 
   private restoreAll(base?: (m: Material) => Material): void {

@@ -982,3 +982,46 @@ and when nothing differs, make the object impossible to miss (scale it up in
 the live page through `G`, debug only) before concluding it is not drawn. It is
 `L19` from the other side: the render is not the game, and the frustum is not
 the render.
+
+**L67 -- A bit's name is its hardware's meaning, and the port decides what it
+does.** TSP bit 19 is `IgnoreTexAlpha` in the PowerVR2 documentation, and the
+exporter did what the name says: an alpha-stripped copy of every texture a
+mesh with the bit drew. The PC port is a Direct3D translation of those words,
+and in it the bit is only half of the pass selector -- the texture is
+uploaded once, alpha and all, and stage 0's alpha op takes it. 101 meshes
+that blend by their texture's alpha drew as solid cards for as long as the
+export existed, and the blood recolour quietly came to depend on the stripped
+images. **Before implementing a field by its spec name, find the instruction
+that reads it in this binary**; a search for its mask and its bit number that
+comes back with only the readers you know is the evidence, and "the spec
+says" is not.
+
+**L68 -- A cache keyed on less than it stores hands one entry's value to the
+next.** The exporter deduplicated materials on the part, the texture and the
+four PVR2 words, and wrote the base colour and the culling into what it
+cached. A fifth of the game's meshes drew with an earlier mesh's colour --
+baked lighting, base alpha -- and the stage-2 car's door took the black of
+the body's inner shells, which a session then spent time taking for a
+draw-order fault. Nothing looked wrong locally: every material was a real
+material of that part. **A dedup key must cover every field the cached value
+carries**; the check that finds the gap compares each output against its own
+input, not the output against itself.
+
+**L69 -- Under `?drive=1`, `advance(0)` redraws the picture the last tick
+posed, not the state you just wrote.** Measuring how opaque the damage overlay
+is, I shot a driven frame, lowered the record's `active` through `G`, called
+`advance(0)` to redraw, and shot again: the two images were byte-identical,
+the harness reported the overlay covering **0 pixels**, and its own sanity
+check -- "the redraw reproduces the frame" -- passed, because nothing had been
+redrawn from the new state. The render layers pose their nodes in
+`world.update`, which runs inside `stepOneFrame` (and, undriven, in
+`idleTick`); under the drive flag a zero-frame pump calls neither, so
+`endFrame` renders the scene graph exactly as the last tick left it. A `G`
+edit between two driven frames reaches no picture until the next frame runs.
+**To compare one frame with and without something, run twice on one seed and
+make the change before the frame is stepped**, choosing a change nothing in
+the game reads back (here the record's kind, pointed past the slot table), and
+check that the pixels it should not touch are identical -- which is also what
+tells you the runs stayed in step. It is `L44`'s "a harness that prints its
+arguments as its result" one layer down: a redraw that repeats the frame
+agrees with any claim about it.

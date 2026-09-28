@@ -41,7 +41,7 @@
  *   has to.
  */
 import {
-  type BufferGeometry, type Group, type Material, Matrix4, type Mesh,
+  type BufferGeometry, type Group, Matrix4, type Mesh,
   type Object3D, Quaternion, Vector3,
 } from "three";
 import { BAMS_TO_RAD, BAMS_TO_RAD_F64 } from "../core/bams";
@@ -59,7 +59,7 @@ import {
   BOSS3_FLASH_B_FIRST_SLOT, BOSS3_PATH_EFFECTS, BOSS3_PATH_EFFECT_FIRST_SLOT,
   BOSS3_SPARK_FIRST_SLOT, BOSS3_WAKE_CELS, BOSS3_WAKE_FIRST_SLOT,
 } from "../game/class45/tables";
-import { applyForcedAlphaBlend } from "./draw_order";
+import { setAssetDrawAlpha } from "./draw_order";
 
 /** What this needs of the effect layer and the character layer. */
 export interface Boss3EffectHost {
@@ -106,45 +106,21 @@ function place(node: Object3D, m: Matrix4): void {
 }
 
 /**
- * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s second argument. The clone
- * shares its template's materials, so it gets its own the first time it
- * fades, and keeps them; they are freed with the node (see `effects.ts`).
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s second argument, or `null` for
+ * a plain `AssetDrawSlot` (`FUN_00418560`). The clone shares its template's
+ * materials until it first fades and then gets its own, freed with the node
+ * (see `effects.ts`).
  *
  * The state is `DrawModelWithForcedAlphaBlend`'s (`FUN_004A8440`), through
- * `applyForcedAlphaBlend`: every mesh in the translucent pass, blended
- * `SRCALPHA`/`INVSRCALPHA`, at its **own** base alpha times this one -- the
- * clone records the base before the first fade overwrites it.
- *
- * An alpha of 1 on a node never faded keeps the plain draw, sharing the
- * template's materials. The engine would still defer such a command and
- * blend it; with every mesh's alpha at its unfaded value the picture differs
- * only where an opaque mesh's texture carries alpha the exporter stripped.
+ * `setAssetDrawAlpha`: every mesh in the translucent pass, blended
+ * `SRCALPHA`/`INVSRCALPHA`, at its **own** base alpha times this one, and
+ * the texture's alpha with it -- **at 1 as at any other value**, because the
+ * engine does not test the argument. It used to keep the plain draw at 1,
+ * which was the same picture only while the exporter stripped the alpha of
+ * every opaque-pass texture.
  */
-export function setSlotAlpha(node: Object3D, alpha: number): void {
-  const a = Math.max(0, Math.min(1, alpha));
-  if (node.userData.boss3Alpha === a) return;
-  if (node.userData.boss3Alpha === undefined) {
-    if (a >= 1) return;
-    const owned: Material[] = [];
-    node.traverse((o) => {
-      const mesh = o as Mesh;
-      if (!mesh.material) return;
-      const clone = (x: Material): Material => {
-        const c = x.clone();
-        c.userData.hod2BaseOpacity = x.opacity;
-        owned.push(c);
-        return c;
-      };
-      mesh.material = Array.isArray(mesh.material)
-        ? mesh.material.map(clone) : clone(mesh.material);
-    });
-    node.userData.ownedMaterials = owned;
-  }
-  node.userData.boss3Alpha = a;
-  for (const mat of node.userData.ownedMaterials as Material[]) {
-    applyForcedAlphaBlend(mat, a,
-                          (mat.userData.hod2BaseOpacity as number | undefined) ?? 1);
-  }
+export function setSlotAlpha(node: Object3D, alpha: number | null): void {
+  setAssetDrawAlpha(node, alpha);
 }
 
 /** Every class-0x45 draw of the frame, as keys into `seen`. */
@@ -295,7 +271,10 @@ function drawPathEffects(h: Boss3EffectHost, seen: Set<string>): void {
     _m.identity();
     S(R(T(_m, row.x, row.y, row.z), AY, e.shownYaw), 2, 2, 2);
     place(node, _m);
-    setSlotAlpha(node, e.shownAlpha);
+    // `Boss3PathEffectUpdate` draws `AssetDrawSlot` inside the window and
+    // `AssetDrawSlotWithAlpha` past its end, where the alpha is at most
+    // (0x14 - 1) * 0.05: the record's 1 is the plain draw and nothing else.
+    setSlotAlpha(node, e.shownAlpha < 1 ? e.shownAlpha : null);
   });
 }
 

@@ -3371,6 +3371,24 @@ in `game/effects/damage_overlay.ts`:
 
 `render/effects.ts` draws it in camera space at `z = -1.02`, scale 0.02, from
 the record alone, so a load or a seek shows whatever the restored state says.
+
+**It is opaque, and that is the game** (checked 2026-09-28 against a report
+that the marks should be translucent). The exe draws it with the plain
+`AssetDrawSlot`, which hands the model no alpha; each of the eleven is one
+translucent-pass `SRCALPHA / INVSRCALPHA` mesh at base alpha 1.0, so the
+alpha on screen is the texture's -- 0 round each mark, 255 over most of it,
+a 4-bit feathered edge between. The port's node keeps the template's
+material untouched and draws exactly that: `tools/hurt_alpha.mjs` measures
+the on-screen alpha off two in-step driven runs (one with the overlay left
+out of the shot frames), and reads 66.5% of stage 2's slash pixels at alpha
+exactly 1.0 against 65.4% of texture 28's covered texels at 255, identical at
+57 and 30 frames left. `render.test.ts` pins the draw (template material,
+the pass, opacity 1, the same draw on all 59 frames) and
+`verify_texture_alpha.py` pins the exe side and the bundle's images. What
+does differ is the **colour**: the exe lights the model under the scene's
+default light and the port draws every effect unlit, so the port shows the
+texture's own orange where the game may tint or darken it
+(`docs/formats/combat.md`, *How opaque it is*).
 The eleven models ride the `slots_effect` rig (slots 0x931..0x93B), so
 **a bundle exported before this has none -- re-export.**
 
@@ -5397,15 +5415,142 @@ than the engine's submission order, which differs only for coplanar opaque
 surfaces; the player's own transparent meshes (labels, debug overlays, the
 deep screen sprites) sort after the NL1 commands of their layer rather than by
 any exe rule, and the queued sprite quads' own layer (`0x007E78B8`, 0) is not
-modelled; and the exporter strips a texture's alpha for every mesh with
-`IgnoreTexAlpha` set, where nothing in the D3D translation reads that bit --
-so a fading opaque mesh, and the 112 translucent-pass meshes that set both
-bits 19 and 20 on an ARGB texture (`boss6`, `st_adver03`), blend on their base
-alpha alone where the engine would [likely] multiply the texture's in.
+modelled. (The exporter's alpha stripping that was listed here is done: see
+the next section.)
 
 **The water at block 16 step 14** (the report's second item) was already
 drawn by the time this was read -- main's class 0x41 type 1 port, above --
 and its four tiles are opaque-pass meshes, so none of this changes them.
+
+### A texture keeps its alpha, and a mesh keeps its own material
+
+Two exporter faults in `gltf.ts`/`gltf.py`'s material writer, both read
+against the EXE (`docs/formats/materials.md`, *Texture alpha on the D3D path*
+and *One material per mesh*):
+
+* **Texture alpha is the bank's.** The exporter wrote an alpha-stripped
+  `_opaque` image for every mesh with `IgnoreTexAlpha` (TSP bit 19) -- the
+  PowerVR2 meaning. On the PC the texture is decoded once per bank slot with
+  no mesh word as input, uploaded in a format that keeps the alpha
+  (`A1R5G5B5` for ARGB1555, `DDPF_ALPHAPIXELS` tested), and stage 0's alpha op
+  takes the texel's alpha; bit 19 is read only as half of the pass selector.
+  So the opaque pass ignores texture alpha by its state and the translucent
+  pass blends by it. 101 translucent-pass meshes set the bit on a texture with
+  alpha below 255: `zslman`'s and `zndina`'s additive blade glows drew as
+  solid cards and are shaped now (stage 6 block 0, 3-4% of a close crop
+  changes, all on the glows). Opaque-pass meshes on textures with transparent
+  texels come out byte-identical (stage 2's clock-tower shot: 0 pixels of
+  588,800 differ). The glTF `alphaMode` is the pass.
+* **One material per mesh.** The material cache left the base colour and the
+  culling out of its key, so about a fifth of the game's meshes drew with an
+  earlier mesh's colour -- baked lighting and base alpha. The stage-2 car's
+  driver's door drew black in the rescue branch (the inner copies' black, same
+  texture 33 and TSP) and is red now; stage geometry shifts by up to ~60
+  levels where two segments shared a texture at different lighting.
+
+Two render paths leaned on the stripped images:
+
+* `setAssetDrawAlpha` (`render/draw_order.ts`) is the one fading draw for the
+  effect layers and the slot models, and takes `null` for `AssetDrawSlot` and
+  a number for `AssetDrawSlotWithAlpha` -- **1 included**: the engine does not
+  test the argument, so a draw at 1.0 is still
+  `DrawModelWithForcedAlphaBlend`'s, which blends an opaque-pass mesh's
+  texture alpha. The layers used to keep the plain draw at 1. Records that
+  encoded "plain" as 1 (the ring effect's spread and hold, the boss-3 path
+  effects inside their window, the owl ring's pulse, the horde's plain parts)
+  say `null` now; every slot drawn at exactly 1 today is translucent
+  `SRCALPHA`/`INVSRCALPHA` at base alpha 1, so no picture moved.
+* The blood-colour transpose read the map through a 2D canvas, which is
+  premultiplied: the colour under a texel at alpha 0 came back black, and 904
+  opaque-pass gore meshes have such texels. It reads the map back through
+  WebGL with premultiplication off.
+
+**Re-export every bundle.** `tools/verify_texture_alpha.py` checks the EXE
+bytes, the bit-19 scan, the corpus premises, and -- on a bundle this tree's
+`gltf.ts` wrote -- that no image is `_opaque`, that the `IgnoreTexAlpha`
+ARGB images carry the bank's alpha, and that every model primitive holds its
+own mesh's colour and culling.
+
+Not done, and not this change's: the character layer draws a bone or part at
+any alpha above 0 solid (`render/characters/draw_gates.ts`), where the exe's
+`AssetDrawSlotWithAlpha` draws blend -- the class-0x30 twin of type 9 at 0.25
+(`EnemyZombieInitByCharType`), `ZombieSubmitSlotByLighting`'s fade-in while
+`obj+0x1368` bit `0x20` is up, and `ThrowerDrawBonePart`'s triangular fade on
+slot `0x1FB9`. With the alpha now in the images, drawing them through
+`setAssetDrawAlpha` would be faithful as it stands. (Done since: see the next
+section.)
+
+## Character fades: every node drawn the way its hook draws it
+
+`render/characters/draw_gates.ts` drew a bone or a part at any alpha above 0
+solid and hid it at 0, and said that 0 and 1 were every alpha the game gives a
+character. They are not, and at 0 and 1 the faded draw is not the plain one
+either: `AssetDrawSlotWithAlpha` (`FUN_004185A0`) hands its alpha on untested,
+and `DrawModelWithForcedAlphaBlend` (`FUN_004A8440`) makes each mesh's
+material alpha its base alpha times it with no test of its own -- so at 1 an
+opaque-pass mesh's texture alpha shows, and at 0 the model is drawn invisible
+and still writes depth (bits 19-20 are kept, so an opaque-pass mesh is not
+alpha-tested). What the player does now:
+
+* **Each node's draw is state.** The hooks the port runs write, per bone, the
+  draw they chose into `Actor.nodeDrawAlpha` -- `null` for `AssetDrawSlot`, the
+  alpha for `AssetDrawSlotWithAlpha` -- and `draw_gates.ts` fades every mesh
+  that node's draw covers (its own model, a gore piece, a cel) through the new
+  per-mesh `setMeshDrawAlpha`. `DrawCharacterPartSlot` (`FUN_00419B40`)'s four
+  types (9, 0x12, 0x17, 0x18) have their parts drawn at `obj+0x138C` always,
+  1 and 0 included. Attachments stay plain: `ActorDrawAttachedParts` draws
+  them through `AssetDrawSlot`.
+* **Class 0x30** (`game/class30/draw.ts`, `init_char.ts`, `twin.ts`).
+  `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) is ported: the light array
+  first (`obj+0x136C` bit `0x20` under `g_scene_lighting`, never faded), then
+  `obj+0x1368` bit `0x20` for the fade. `EnemyZombieInitByCharType`
+  (`FUN_00452FD0`) sets up the two fades -- `znele` (type 0x12) at 0 stepping
+  1/30, the twin (type 9) at 0.25 stepping 1/60, both after a hundred draws --
+  and `ZombieDrawBonePart` (`FUN_004534A0`)'s `0x1C6C` and `0x1C7C` arms run
+  the clocks: `znele` fades in over thirty frames, and at the end gets its
+  pushes and its shot test back (its head aim stays off) with
+  `PlaySoundId(0x2225A9)`; the twin fades
+  out over sixteen. **The twin exists now**: the type-0x12 arm allocates it
+  unless `obj+0x34` has `0x10000000` (two of stage 6's thirteen do), and
+  `ZombieTwinFollowHost` (`FUN_00453290`) is its whole update -- it wears the
+  host's transform and clip, runs no state, is counted into neither enemy
+  count, has the minimum hit points (`ActorInitHitPoints` overwrites the 999),
+  and despawns the frame after its alpha reaches 0 or when the host dies. The
+  exporter writes it a synthetic row (`zombieTwinPlacements`,
+  `hod2lib/characters.ts`) with `znjikken1.bin` and every clip its host's type
+  has; re-export the bundles.
+* **Class 0x31.** `ThrowerDrawBonePart` (`FUN_00449F90`) records `null` or the
+  alpha through `ThrowerDrawPartAlphaIfBlinking` (`FUN_0044A280`); the
+  blinking states' 0 and 1 are faded draws, not "hidden" and "solid".
+  `EnemyThrowerInit` writes `obj+0x138C` per type as the exe does -- a
+  `zslman` starting in state 34 is born at 0, blinking and shadowless -- and
+  the blink states read `g_blink_frame_counter`'s low bit
+  (`0x0044F0C2`, `0x0045149C`), not the port's fractional `g_frame`. The
+  `0x1FB9` ramp is `zskamere`'s bone 9 and is `[likely]` never reached by a
+  shipped spawn (see `class31/draw.ts`); a debug write of bit 2 shows it.
+* **The fade composes with the lighting layers.** A fade is over whatever the
+  mesh draws: the lighting view's twin and the gun light's are swapped in
+  underneath it (`setUnfadedMaterial`), a gore swap or a cel write is read
+  back as the new unfaded material, and a clone a layer saved is seen through.
+  The clones keep `onBeforeCompile` (fog, and the lit twins' shaders), which
+  the old per-node clones lost.
+
+What that looks like, in `?stage=6&mode=play&block=0&step=2&op=19`: for the
+first hundred frames each `znele` is a quarter-alpha twin with nothing under it
+but its depth, then the twin fades and `znele` fades in. The depth is visible:
+an invisible actor in front of translucent geometry keeps that geometry off
+its silhouette, as the engine's would if its sort puts the actor first -- the
+port's sort is the engine's (`RenderCommandOrder`). The same is true of a
+blinking `zslman` on its odd frames (`?stage=6&mode=play&block=0&step=4&op=2`).
+
+Not done: the twin's parts and cels are drawn with the exporter's UVs, where
+`AssetSlotUVsFromViewNormals` (`FUN_00418660`) rewrites them from the normals
+each frame (`[diverges]`, `class30/twin.ts`). Three more characters fade in the
+exe and are not ported at all, so they are not drawn solid either -- they are
+not drawn: class 0x25's `0xE24` flash (`ScriptedHumanoidBoneDrawHook`), the
+golden frog (`GoldenFrogDrawBonePart`) and class 0x2D's node hook at
+`0x00429040`. Class 0x40's `SubModelDrawBoneHook` fade is unreachable:
+`HordeMemberInit` writes `obj+0x1338` = 0 and nothing else writes it.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

@@ -195,6 +195,7 @@ import { ActorDrawShadow, ActorSetPartVisibility, PART_ALPHA_CHAR_TYPES,
          ActorRunNodeDrawHooks } from "../src/game/model_draw";
 import { REGROW_FULL, ThrowerDrawBonePart } from "../src/game/class31/draw";
 import { ZombieDrawBonePart } from "../src/game/class30/draw";
+import { ZombieTwinAt } from "../src/game/class30/twin";
 import {
   ActorAimHeadAtCamera, ActorHeadAimAngles, HEAD_AIM_RATE, HeadAimBeginDraw,
   HeadAimEndDraw, ThrowerHeadAims,
@@ -6631,6 +6632,21 @@ console.log("\nEnemyThrowerInit: zslman is born NoDismember");
   check("...and no other thrower character type is",
         (zstin.flags & ActorFlag.NoDismember) === 0,
         `flags ${zstin.flags.toString(16)}`);
+  // `obj+0x138C`: 1.0 for 0x17 and for 0x18, but a `zslman` that starts in
+  // state 34 is born invisible, blinking and shadowless (`0x00449823`..
+  // `0x0044983F`) -- stage 6's eight, and the parts `DrawCharacterPartSlot`
+  // draws at the word go with them.
+  check("...and a zslman that does not start in state 34 is born at alpha 1",
+        zslman.alpha === 1 && (zslman.flags2 & ThrowerFlag.Blinking) === 0,
+        `${zslman.alpha} ${zslman.flags2.toString(16)}`);
+  const blinkIn = ActorSpawn(0x9102, SpawnClass.Thrower, 0x18, "zslman",
+                             { initialState: ThrowerState.BlinkIn,
+                               condition: 0 });
+  check("...one that starts in state 34 is born at 0, blinking, no shadow",
+        blinkIn.alpha === 0 && (blinkIn.flags2 & ThrowerFlag.Blinking) !== 0
+        && (blinkIn.flags & ActorFlag.NoShadow) !== 0,
+        `${blinkIn.alpha} ${blinkIn.flags2.toString(16)} `
+        + `${blinkIn.flags.toString(16)}`);
 }
 
 // `ActorArcStep` (`FUN_0044D860`) sets each stage with `ActorSetMotionBlended`
@@ -15717,12 +15733,20 @@ console.log("class 0x31, the hand grows back in the draw:");
   blink.flags2 |= ThrowerFlag.Blinking;
   blink.alpha = 0;
   ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart, DRAW_FRAME);
-  const at0 = [4, 5, 1, 2, 8].map((b) => blink.thr.boneDrawAlpha[b]).join();
+  const at0 = [4, 5, 1, 2, 8].map((b) => blink.nodeDrawAlpha[b]).join();
   blink.flags2 &= ~ThrowerFlag.Blinking;
+  blink.alpha = 1;
   ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart, DRAW_FRAME);
-  const solid = [4, 5, 1, 2, 8].map((b) => blink.thr.boneDrawAlpha[b]).join();
-  check("a blinking zslman's bones are drawn at its alpha, and solid without",
-        at0 === "0,0,0,0,0" && solid === "1,1,1,1,1", `${at0} / ${solid}`);
+  const plain = [4, 5, 1, 2, 8].map((b) => blink.nodeDrawAlpha[b]);
+  check("a blinking zslman's bones are drawn faded at its alpha, 0 included",
+        at0 === "0,0,0,0,0", at0);
+  check("...and without bit 2 plainly -- `null`, not a faded draw at 1",
+        plain.every((x) => x === null), plain.join());
+  blink.flags2 |= ThrowerFlag.Blinking;
+  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart, DRAW_FRAME);
+  check("...while at alpha 1 under bit 2 it is still the faded draw",
+        [4, 5, 1, 2, 8].every((b) => blink.nodeDrawAlpha[b] === 1),
+        [4, 5, 1, 2, 8].map((b) => blink.nodeDrawAlpha[b]).join());
 
   // Every other type: solid while `obj+0x34` has 0x4000000, whatever bit 2.
   SetGameTables(CHARS31);
@@ -15731,12 +15755,12 @@ console.log("class 0x31, the hand grows back in the draw:");
   tin.flags2 |= ThrowerFlag.Blinking;
   tin.alpha = 0;
   ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
-  const live = tin.thr.boneDrawAlpha[1];
+  const live = tin.nodeDrawAlpha[1];
   tin.flags |= ActorFlag.Dead;
   ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
-  check("...another type blinks too, but a dead one is drawn solid",
-        live === 0 && tin.thr.boneDrawAlpha[1] === 1,
-        `${live} then ${tin.thr.boneDrawAlpha[1]}`);
+  check("...another type blinks too, but a dead one is drawn plainly",
+        live === 0 && tin.nodeDrawAlpha[1] === null,
+        `${live} then ${tin.nodeDrawAlpha[1]}`);
   // And `0x1FB9` writes the alpha, so every node after it in the walk draws
   // at the ramp: bone 4 is the first root.
   tin.flags &= ~ActorFlag.Dead;
@@ -15745,8 +15769,25 @@ console.log("class 0x31, the hand grows back in the draw:");
   ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
   check("...and the 0x1FB9 node writes a 120-frame ramp into `obj+0x138C`",
         Math.abs(tin.alpha - 0.5) < 1e-6
-        && Math.abs(tin.thr.boneDrawAlpha[2] - 0.5) < 1e-6,
-        `alpha ${tin.alpha} bone 2 ${tin.thr.boneDrawAlpha[2]}`);
+        && Math.abs((tin.nodeDrawAlpha[2] ?? -1) - 0.5) < 1e-6,
+        `alpha ${tin.alpha} bone 2 ${tin.nodeDrawAlpha[2]}`);
+  // The triangle itself: up over sixty frames and back down over sixty, and
+  // the node that writes it is drawn at it. Without bit 2 the same node is
+  // drawn plainly and writes nothing.
+  const ramp = [0, 30, 59, 60, 61, 119, 120].map((n) => {
+    G.g_blink_frame_counter = n;
+    ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
+    return Math.round((tin.nodeDrawAlpha[4] ?? -1) * 1000) / 1000;
+  });
+  check("...0, rising 1/60 a frame to 1 at 60 and falling back by 119",
+        ramp.join() === "0,0.5,0.983,1,0.983,0.017,0", ramp.join());
+  tin.flags2 &= ~ThrowerFlag.Blinking;
+  tin.alpha = 0.25;
+  G.g_blink_frame_counter = 30;
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
+  check("...and without bit 2 the 0x1FB9 node is drawn plainly, alpha left",
+        tin.nodeDrawAlpha[4] === null && tin.alpha === 0.25,
+        `${tin.nodeDrawAlpha[4]} ${tin.alpha}`);
 
   // `ThrowerStateCorpseBlink`'s way out: alpha 0 and bit 2 down.
   const corpse = zslman(0x9350);
@@ -15760,6 +15801,192 @@ console.log("class 0x31, the hand grows back in the draw:");
         corpse.despawned && corpse.alpha === 0
         && (corpse.flags2 & ThrowerFlag.Blinking) === 0,
         `alpha ${corpse.alpha} flags2 ${corpse.flags2.toString(16)}`);
+}
+
+console.log("\nclass 0x30's two fades: `znele` in, the twin out");
+// `EnemyZombieInitByCharType` (`FUN_00452FD0`) sets them up, and
+// `ZombieDrawBonePart` (`FUN_004534A0`)'s `0x1C6C` and `0x1C7C` arms run
+// their clocks, one step per draw of the node; every node is drawn through
+// `ZombieSubmitSlotByLighting` (`FUN_00453AE0`). The renderer used to draw
+// all of it solid.
+{
+  ResetGameGlobals();
+  EnterPlay();
+  const withBone1Slot = (type: number, slot: number): CharacterType => ({
+    ...TYPE, type,
+    bones: TYPE.bones.map((b) => (b.bone === 1 ? { ...b, slot } : b)),
+  });
+  SetGameTables({
+    ...CHARS,
+    types: { ...CHARS.types, "18": withBone1Slot(0x12, 0x1c6c),
+             "9": withBone1Slot(9, 0x1c7c) },
+  } as unknown as CharactersJson);
+  const events = new Events();
+  const sounds: number[] = [];
+  events.on("sound.play", (e) => sounds.push(e.id));
+  const f: ClassFrame = { ...DRAW_FRAME, events };
+  const pushes = ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
+  const draw = (z: ZombieActor, n = 1): void => {
+    for (let i = 0; i < n; i++) ActorRunNodeDrawHooks(z, ZombieDrawBonePart, f);
+  };
+  const nodes = (z: ZombieActor): (number | null)[] =>
+    [4, 5, 1, 2].map((b) => z.nodeDrawAlpha[b] ?? null);
+
+  const znele = spawnZombie(0x9400, 0x12, "znele",
+                            { initialState: ZombieState.HoldClipThenBranch });
+  check("`znele` is born at alpha 0, faded, with a hundred-draw wait",
+        znele.alpha === 0 && znele.zom.fadeDraw && znele.zom.fadeDelay === 100
+        && znele.zom.fadeStep === Math.fround(1 / 30),
+        `${znele.alpha} ${znele.zom.fadeDraw} ${znele.zom.fadeDelay}`);
+  check("...out of both pushes, and shot-immune, untestable, unaimed",
+        (znele.flags2 & pushes) === 0
+        && (znele.flags & 0x48500) === 0x48500,
+        `${znele.flags2.toString(16)} ${znele.flags.toString(16)}`);
+  draw(znele);
+  check("...and every node is drawn: the faded draw at 0, not hidden",
+        nodes(znele).every((x) => x === 0), nodes(znele).join());
+  draw(znele, 99);
+  check("a hundred draws of 0x1C6C hold it at 0", znele.alpha === 0
+        && znele.zom.fadeDelay === 0, `${znele.alpha} ${znele.zom.fadeDelay}`);
+  // The fixture walks bones 4 and 5 before bone 1, the fade node: the hook
+  // moves the alpha as it draws that node, so the nodes before it in the
+  // walk were drawn at the old one. The shipped skeletons put bone 1 first.
+  draw(znele);
+  check("...the hundred-and-first steps it 1/30: the fade node and the nodes "
+        + "after it at that, the two before it still at 0",
+        znele.alpha === Math.fround(1 / 30)
+        && nodes(znele).join() === `0,0,${znele.alpha},${znele.alpha}`,
+        nodes(znele).join());
+  draw(znele, 28);
+  const before = sounds.length;
+  check("...twenty-nine steps are still under 1, still faded",
+        znele.zom.fadeDraw && znele.alpha < 1 && before === 0,
+        `${znele.alpha}`);
+  const last = znele.alpha;
+  draw(znele);
+  check("the thirtieth passes 1.0 and ends it: pinned at 1, and the fade "
+        + "node on is drawn plainly (the two before it at the 29th step)",
+        !znele.zom.fadeDraw && znele.alpha === 1
+        && nodes(znele).join() === `${last},${last},,`, nodes(znele).join());
+  check("...pushes back, shot test and immunity lowered, head aim still off",
+        (znele.flags2 & pushes) === pushes
+        && (znele.flags & (ActorFlag.NoShotTest | ActorFlag.ShotImmune)) === 0
+        && (znele.flags & ActorFlag.NoHeadAim) !== 0,
+        `${znele.flags2.toString(16)} ${znele.flags.toString(16)}`);
+  check("...and `PlaySoundId(0x2225A9)`, once",
+        sounds.filter((s) => s === 0x2225a9).length === 1, sounds.join());
+  draw(znele, 10);
+  check("...after which the node holds nothing and draws plainly",
+        znele.alpha === 1 && nodes(znele).every((x) => x === null)
+        && sounds.filter((s) => s === 0x2225a9).length === 1);
+
+  // `obj+0x34` bit 0x10000000 ends it on the first draw: two stage-6 `znele`
+  // carry it in their descriptor, and those are the two with no twin.
+  const quick = spawnZombie(0x9408, 0x12, "znele",
+                            { initialState: ZombieState.HoldClipThenBranch,
+                              flags: ActorFlag.Committed });
+  draw(quick);
+  check("a `znele` with `obj+0x34` 0x10000000 is done on its first draw",
+        !quick.zom.fadeDraw && quick.alpha === 1
+        && nodes(quick).join() === "0,0,,", nodes(quick).join());
+
+  const twin = spawnZombie(0x9410, 9, "twin");
+  check("the twin is born at a quarter alpha, faded, stepping 1/60",
+        twin.alpha === 0.25 && twin.zom.fadeDraw
+        && twin.zom.fadeStep === Math.fround(1 / 60)
+        && (twin.flags2 & pushes) === 0, `${twin.alpha}`);
+  draw(twin, 100);
+  check("...holds it for a hundred draws of 0x1C7C, drawn at it",
+        twin.alpha === 0.25 && nodes(twin).every((x) => x === 0.25),
+        nodes(twin).join());
+  draw(twin, 15);
+  check("...fifteen steps leave it just above 0 in f32",
+        twin.alpha > 0 && twin.alpha < 1e-6, `${twin.alpha}`);
+  const tail = twin.alpha;
+  draw(twin);
+  check("...and the sixteenth clamps it to 0, still the faded draw",
+        twin.alpha === 0 && nodes(twin).join() === `${tail},${tail},0,0`,
+        nodes(twin).join());
+
+  // The light array wins: `obj+0x136C` bit 0x20 under `g_scene_lighting`
+  // takes the draw before the fade bit is looked at.
+  const lit = spawnZombie(0x9418, 9, "twin");
+  lit.flags2 |= ZombieFlag2.DrawVariantSource;
+  G.g_scene_lighting = 1;
+  draw(lit);
+  check("a lit zombie's nodes are drawn solid through the light array",
+        nodes(lit).every((x) => x === null) && lit.zom.fadeDraw,
+        nodes(lit).join());
+  G.g_scene_lighting = 0;
+  draw(lit);
+  check("...and faded again once the scene light goes off",
+        nodes(lit).every((x) => x === 0.25), nodes(lit).join());
+
+  // The twin itself. `EnemyZombieInitByCharType`'s type-0x12 arm allocates it
+  // (0x00453204) unless `obj+0x34` has 0x10000000, and `EnemyZombieInit`
+  // gives type 9 `ZombieTwinFollowHost` (`FUN_00453290`) for its update.
+  const twinOf = (hostAt: number) =>
+    G.g_object_list.find((o) => o.at === ZombieTwinAt(hostAt));
+  const made = twinOf(znele.at);
+  check("every `znele` without 0x10000000 allocates a type-9 twin beside it",
+        made !== undefined && made.cls === SpawnClass.Zombie
+        && made.charType === 9 && made.zom.twinHost === znele.at
+        && made.visible,
+        made ? `${made.at.toString(16)} ${made.charType}` : "none");
+  check("...one with the bit allocates none",
+        twinOf(quick.at) === undefined);
+  // The exporter writes the twin's synthetic row at its own copy of the
+  // address; nothing else holds the two together.
+  const { zombieTwinAt } = await import("../src/hod2lib/characters");
+  check("the port's twin address is the one the exporter's row carries",
+        [0x874, 0x2164, 0x9400, 0xfffff].every(
+          (a) => ZombieTwinAt(a) === zombieTwinAt(a)));
+  const aliveBefore = G.g_enemies_alive;
+  const host = spawnZombie(0x9420, 0x12, "znele",
+                           { initialState: ZombieState.HoldClipThenBranch });
+  const tw = twinOf(host.at);
+  if (!tw || tw.cls !== SpawnClass.Zombie) throw new Error("no twin");
+  check("...counted into neither enemy count: the host is, once",
+        G.g_enemies_alive === aliveBefore + 1, `${G.g_enemies_alive}`);
+  check("...with the minimum hit points: `ActorInitHitPoints` clamps the "
+        + "cleared `obj+0x11E`, and the 999 is written over",
+        tw.hp === ActorInitHitPoints({ hp: 0 } as never, SpawnClass.Zombie)
+        && tw.hp < 999, `${tw.hp}`);
+  // Move the host and put it on another clip; the twin's update takes both.
+  host.pos.x = 12;
+  host.yaw = 0x2000;
+  host.motion = 956;
+  host.playTicks = 37;
+  const handler = g_class_handlers[SpawnClass.Zombie]!;
+  handler.update(tw, f);
+  check("the twin's update takes the host's transform and clip each frame",
+        tw.pos.x === 12 && tw.yaw === 0x2000 && tw.motion === 956
+        && tw.playTicks === 37,
+        `${tw.pos.x} ${tw.yaw} ${tw.motion} ${tw.playTicks}`);
+  check("...never turns its head (0x40000 every frame)",
+        (tw.flags & ActorFlag.NoHeadAim) !== 0);
+  check("...and runs its own 0x1C7C node's clock in the draw",
+        tw.zom.fadeDelay === 99 && tw.alpha === 0.25);
+  // A host with 0x10000000 is not followed.
+  host.flags |= ActorFlag.Committed;
+  host.pos.x = 30;
+  handler.update(tw, f);
+  check("...but not while the host has 0x10000000",
+        tw.pos.x === 12, `${tw.pos.x}`);
+  host.flags &= ~ActorFlag.Committed;
+  // Its alpha at 0 is the end of it: `TEST AH, 0x41` takes "equal".
+  for (let i = 0; i < 200 && !tw.despawned; i++) handler.update(tw, f);
+  check("the twin despawns the update after its alpha reaches 0",
+        tw.despawned && tw.alpha === 0 && tw.zom.fadeDelay < -15,
+        `${tw.despawned} ${tw.alpha} ${tw.zom.fadeDelay}`);
+  // ...and when its host dies.
+  const host2 = spawnZombie(0x9430, 0x12, "znele",
+                            { initialState: ZombieState.HoldClipThenBranch });
+  const twin2 = twinOf(host2.at);
+  if (!twin2) throw new Error("no twin");
+  host2.flags |= ActorFlag.Dead;
+  handler.update(twin2, f);
+  check("...and when its host has died", twin2.despawned);
 }
 
 console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");

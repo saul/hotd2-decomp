@@ -30,10 +30,11 @@
  * the camera. {@link EffectLayer.bones} is what answers that here.
  */
 import {
-  type BufferGeometry, Euler, Group, type Material, Matrix4, Object3D,
+  type BufferGeometry, Euler, Group, Matrix4, Object3D,
   Quaternion, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
 import { drawCreatureEffects } from "./creature_effects";
 import { drawWaterRings } from "./water_rings";
@@ -104,13 +105,12 @@ export interface BoneSphereSource {
 
 /**
  * Free the materials a fading draw gave its clone -- see `setSlotAlpha` in
- * `boss3_effects.ts` -- and the geometry a deforming one copied (the water
- * mound). Anything else is the template's and is not ours.
+ * `boss3_effects.ts` and `releaseAssetDrawAlpha` -- and the geometry a
+ * deforming one copied (the water mound). Anything else is the template's and
+ * is not ours.
  */
 function disposeOwned(node: Object3D): void {
-  const owned = node.userData.ownedMaterials as Material[] | undefined;
-  if (owned) for (const m of owned) m.dispose();
-  node.userData.ownedMaterials = undefined;
+  releaseAssetDrawAlpha(node);
   const geos = node.userData.ownedGeometries as BufferGeometry[] | undefined;
   if (geos) for (const g of geos) g.dispose();
   node.userData.ownedGeometries = undefined;
@@ -673,6 +673,15 @@ export class EffectLayer implements System<RenderContext> {
    * Drawn for exactly as long as the record is active, from the record alone,
    * so a seek or a load shows whatever the restored state says and nothing a
    * frame from the old timeline left behind.
+   *
+   * **No alpha of its own, and none added here** `[proved]`. It is
+   * `AssetDrawSlot` (`FUN_00418560`), not `AssetDrawSlotWithAlpha`, so the
+   * node keeps the template's material untouched -- the translucent pass
+   * `applyPvr2DrawState` gave it from TSP `0x9400041B` (`SRCALPHA /
+   * INVSRCALPHA`, alpha test at 1) and the base alpha 1 -- and what blends is
+   * the texture's own alpha: 255 over the body of each mark, 0 around it. A
+   * fade or a forced opacity here would be a claim the exe does not make; see
+   * `game/effects/damage_overlay.ts` and `tools/hurt_alpha.mjs`.
    *
    * **Drawn before the shot effects, not after** `[proved]`. Every
    * translucent draw is queued by `RenderEnqueueCommand` (`FUN_004A7E50`)

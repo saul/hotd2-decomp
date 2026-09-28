@@ -224,12 +224,11 @@ private applyBlend(inst: Instance, mA: BakedMotion, fA: number,
  * provides it.
  *
  * The engine's translate sits **inside** `MatrixScale(model+0x116C)`, so a
- * character drawn at 0.9 offsets by 0.9 of what its clip authored, and the
- * offset is written unscaled here because nothing in this port scales a drawn
- * character either. That is a **declared divergence**, and like the death
- * clip's it is declared in `game/` so that it is counted -- on
- * `ActorModelScale` in `game/root_motion.ts`, which owns the field and
- * carries the measured size of it.
+ * character drawn at 0.9 offsets by 0.9 of what its clip authored. The offset
+ * is written here as the clip authored it, and the scale reaches it the way
+ * it reaches it on the engine's stack: the pose group is a child of the root,
+ * and the character layer's `placeRoot` puts `Actor.scale` on the root. See
+ * `game/root_motion.ts`.
  */
 private apply(inst: Instance, m: BakedMotion, f: number,
               full = (inst.a.motionFlags & MotionFlag.RootMotion) === 0):

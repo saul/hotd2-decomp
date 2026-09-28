@@ -1876,7 +1876,9 @@ investigation ruled out.
   its whole root regardless of the gate, at one call site, because nothing else
   would give a falling body its travel.
   `RescueTargetFreedState` never ends, so a rescued target stays in the pool,
-  harmless today. And **nothing counts the spawns a block asks for against the
+  harmless today. (Since ported: the freed clip ends, the ground ring opens and
+  `RescueTargetSinkAndDespawnState` removes the body -- see
+  `PLAYER_PROGRESS.md`, "Every caller of the ring effects".) And **nothing counts the spawns a block asks for against the
   actors it gets** — that one comparison would have found this and both bosses
   in seconds, and is the obvious next check.
 

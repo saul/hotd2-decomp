@@ -95,6 +95,16 @@ export enum SpriteEffectKind {
    * surfaces and in the rain.
    */
   Splash = 0x61,
+  /**
+   * The same strip as {@link Splash}, `0x1339..0x1356`, at base scale 1.5
+   * rather than 1.0 -- the switch's own row, exported as
+   * `combat.impact_sprite["98"]` -- and the same `BOMB2_16` ricochet.
+   * `ZombieStrikeStartSplash` (`FUN_00456C50`) takes it over {@link Splash}
+   * for state 0x17, and the wading clip `0xB8`'s two cues in
+   * `ZombieStateSurfaceOnCameraCue` and `ZombieStateTargetMotionScript` throw
+   * it. Named for its scale and nothing else. `[proved]`
+   */
+  SplashLarge = 0x62,
   /** Exempt from the distance scale law altogether. */
   BigSand = 0x63,
 }

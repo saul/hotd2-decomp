@@ -56,13 +56,6 @@
  * (`FUN_00408370`), `game/effects/ring_effect.ts`. The surface ring is only
  * ever `FishStateSink`'s; the deaths make the ring task.
  *
- * `[diverges]` **The camera gate is coarser here.** `FishRegisterForCameraTracking`
- * (`FUN_00439D70`) offers the fish to the camera only in states 0, 1 and 2;
- * the port's `RegisterForCameraTracking` is a filter over the pool with no
- * per-class predicate, so a fish in {@link FishState.FallBack} stays a
- * candidate for the sixty-four frames it takes to sink. The death states are
- * covered, because `FishCheckShot` raises `NoCameraTrack` itself.
- *
  * The draw is `render/`'s: this class is drawn by asset slot, so it goes
  * through `render/slotmodels.ts` exactly as class 0x52 does — **including its
  * size.** `FishDraw` sets `MatrixScale(0.3, 0.3, 0.3)` before it hands the
@@ -77,6 +70,8 @@
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { ActorFlag, CountFlag, type Actor } from "../actor";
+import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
+  from "../camera/slots";
 import { QueryGroundHeightAt } from "../coli";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount } from "../combat/counts";
 import { PlayerTakeDamage } from "../combat/player";
@@ -487,6 +482,7 @@ export function FishInit(obj: Actor, _rng?: Rng): void {
   G.g_enemies_present += 1;
   sub.slot = -1;
   obj.attackPermit = -1;
+  RegisterEnemySlot(obj);
   sub.vx = p.speed_x;
   sub.vz = p.speed_z;
   FishBeginRise(obj);
@@ -575,6 +571,7 @@ export function FishStateBob(obj: Actor, f: ClassFrame): void {
   ReleaseEnemyPresentCount(obj);
   ReleaseEnemyAliveCount(obj);
   obj.flags |= ActorFlag.NoCameraTrack;
+  CameraSlotVacate(obj);
   FishReleaseAttackPermit(obj);
   FishReleaseAttackSlot(sub);
   FishBeginSwimAway(obj, FISH_SWIM_AWAY_FRAMES);
@@ -663,6 +660,7 @@ export function FishEndLunge(obj: Actor): void {
   sub.state = FishState.FallBack;
   sub.timer = 0;
   obj.flags |= ActorFlag.NoCameraTrack;
+  CameraSlotVacate(obj);
   FishReleaseAttackPermit(obj);
 }
 
@@ -678,6 +676,7 @@ export function FishStateFallBack(obj: Actor): void {
   if (!sub) return;
   if (sub.timer === FISH_FALLBACK_RELEASE) {
     obj.flags |= ActorFlag.NoCameraTrack;
+    CameraSlotVacate(obj);
     FishReleaseAttackSlot(sub);
   }
   if (sub.timer > FISH_FALLBACK_RELEASE - 1
@@ -936,6 +935,7 @@ export function FishCheckShot(obj: Actor, f: ClassFrame): void {
   obj.flags &= ~ActorFlag.Hit;
   SpawnFishBloodCloud(obj, f.host);
   obj.flags |= ActorFlag.NoCameraTrack;
+  CameraSlotVacate(obj);
   ReleaseEnemyAliveCount(obj);
   FishReleaseAttackPermit(obj);
   FishReleaseAttackSlot(sub);
@@ -975,7 +975,7 @@ export function FishRunState(obj: Actor, f: ClassFrame): void {
  * FishRunState(obj);           // FUN_00438F10
  * FishDraw(obj);               // FUN_00439860 — render/
  * FishProjectToScreen(obj);    // FUN_00439B50 — render/
- * FishRegisterForCameraTracking(obj);  // FUN_00439D70 — see the file's note
+ * FishRegisterForCameraTracking(obj);  // FUN_00439D70
  * ```
  *
  * The shot is checked **before** the state runs, so the frame a fish is hit is
@@ -984,6 +984,24 @@ export function FishRunState(obj: Actor, f: ClassFrame): void {
 export function FishUpdate(obj: Actor, f: ClassFrame): void {
   FishCheckShot(obj, f);
   FishRunState(obj, f);
+  if (!obj.despawned) FishRegisterForCameraTracking(obj);
+}
+
+/**
+ * `FishRegisterForCameraTracking` — `FUN_00439D70`. Only while rising,
+ * bobbing or lunging (`sub+0x62` 0, 1 or 2): `obj+0x100 = obj+0x40` and
+ * `RegisterForCameraTracking`. A fish falling back, flung or sinking is never
+ * a candidate. `[proved]`
+ */
+export function FishRegisterForCameraTracking(obj: Actor): void {
+  const sub = Tail(obj);
+  if (!sub) return;
+  if (sub.state !== FishState.Rise && sub.state !== FishState.Bob
+      && sub.state !== FishState.Lunge) return;
+  obj.lookAt.x = obj.pos.x;
+  obj.lookAt.y = obj.pos.y;
+  obj.lookAt.z = obj.pos.z;
+  RegisterForCameraTracking(obj);
 }
 
 /**
@@ -1047,6 +1065,7 @@ export function SpawnWaterEnemyAt(x: number, y: number, z: number, lifetime: num
   G.g_enemies_alive += 1;
   G.g_enemies_present += 1;
   obj.attackPermit = -1;
+  RegisterEnemySlot(obj);
   obj.visible = true;
   FishClaimSlotAndLunge(obj, rng, host);
   return obj;

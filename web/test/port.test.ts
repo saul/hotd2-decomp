@@ -32,18 +32,23 @@ import { authoredFrameHeld, authoredFrameOfTicks,
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor,
          SpawnScriptedCharacters } from "../src/game/director";
 import { ActorKillAll, RemoveBoneSubtree } from "../src/game/combat/resolve_hit";
-import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
-import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
+import { RegisterEnemySlot, UpdateCameraEnemySlots, makeCameraSlots }
+  from "../src/game/camera/slots";
+import { CamBlockSetAnglesFromLookAt, CamPathCueReached, CameraPoseBlock }
   from "../src/game/camera/path";
 import { ActorAdvanceMotion } from "../src/game/motion";
 import { ActorHeadingErrorTo, ActorTurnTowardXZ } from "../src/game/actor_turn";
 import { CamStashPathRange, CameraPlayStashedPath, CameraStepRailTick }
   from "../src/game/camera/rail";
+import { CameraUpdateHook, EvtActionHandler }
+  from "../src/game/camera/driver";
+import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
+import { UpdateSceneViewAndLight } from "../src/game/camera/view";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor,
   type FishActor }
   from "../src/game/actor";
-import { CameraActionDriver, CameraActorTick, CameraDriverSelectMode,
-  CameraMode } from "../src/game/camera/mode";
+import { CameraDriverSelectMode, CameraMode }
+  from "../src/game/camera/mode";
 import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
   from "../src/game/class13";
 import {
@@ -59,8 +64,7 @@ import {
   SFX_CARRIER0_STRIKE, g_carrier_routine0_ride_end,
 } from "../src/game/class13/routine0";
 import { CarriedZombieUpdate18 } from "../src/game/class18";
-import { ActorRegisterCameraPoint, CameraPointRiseFor,
-         CameraDriverFromDeferredPose }
+import { ActorRegisterCameraPoint, CameraDriverFromDeferredPose }
   from "../src/game/camera/track";
 import { ActorBuildSkinnedModel } from "../src/game/spawn";
 import {
@@ -200,7 +204,6 @@ import { SCENERY_SKIP_COLLISION } from "../src/game/class33/pushable";
 import { DescriptorFromPlacement } from "../src/game/descriptor";
 import { CheckPlayerCanBeHit, IsPlayerAttackable, PlayerTakeDamage }
   from "../src/game/combat/player";
-import { ShakeNodLookAt } from "../src/game/camera/shake";
 import {
   DAMAGE_OVERLAY_SLOTS, DAMAGE_OVERLAY_SOUNDS, DAMAGE_OVERLAY_VOICES,
   DamageOverlayClear, DamageOverlayKind, PlayerCameraHook, SceneStateInstallPlayerHooks,
@@ -360,7 +363,8 @@ import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
 import { BOSS4_DEAD_FLAG, BOSS4_DEATH_DWELL }
   from "../src/game/class19/death";
 import { Boss4ResolveShot } from "../src/game/class19/shot";
-import { Boss4State } from "../src/game/class19/state";
+import { Boss4BlockNew, Boss4State } from "../src/game/class19/state";
+import { Boss4PlayCameraCue } from "../src/game/class19/camera";
 import type { Boss4TablesJson } from "../src/bundle/stage";
 import {
   BreakableState, BreakableFlag, BreakablePropTakeShot, BreakablePropUpdate,
@@ -474,7 +478,8 @@ import {
 import { GameOverCameraFlyTick } from "../src/game/game_over";
 import { SetGameOverTables } from "../src/game/tables";
 import { RouteFigureTick } from "../src/game/route_map";
-import { CamPath } from "../src/game/camera/curve";
+import { CamPath, CamPaths } from "../src/game/camera/curve";
+import { SetCameraPaths } from "../src/game/tables";
 import { Class22SubActorAt } from "../src/game/class22/records";
 import { Class22Relative } from "../src/game/class22/state";
 import { Class23State } from "../src/game/class23/state";
@@ -792,11 +797,14 @@ function scene(n: number, rng: Rng): Events {
   EnterPlay();
   openShutter();
   // The camera driver a shot installs. There is no script in this file, so
-  // this line stands in for the `finish_sequence` that would have run: with no
-  // driver installed `CameraRunQueuedAction` does nothing at all, which is the
-  // engine's bare `RET` and not a camera. Minor 4 is the commonest of the
-  // three starters.
-  G.g_camera_action_driver = CameraActionDriver.SelectMode;
+  // these two lines stand in for the `finish_sequence` that would have run:
+  // its driver in the action slot, and the ring told the slot is still busy
+  // (`g_evt_action_advance = 0`), which is what keeps `EvtRunQueuedActions`
+  // from parking it. With no driver installed the camera actor does nothing
+  // at all, which is the engine's bare `RET` and not a camera. Minor 4 is the
+  // commonest of the three starters.
+  G.g_evt_action_handler = EvtActionHandler.SelectMode;
+  G.g_evt_action_advance = 0;
   for (let i = 0; i < n; i++) {
     const a = spawnZombie(0x1000 + i, 1, `zombie ${i}`);
     a.visible = true;
@@ -807,6 +815,60 @@ function scene(n: number, rng: Rng): Events {
   }
   void rng;
   return new Events();
+}
+
+/**
+ * One frame for a walker with no object pool: the interpreter, then the
+ * camera's two tasks, as `SceneTaskWalk` runs them at the head of
+ * `GameUpdate`. `queue_event` only pushes; the actions run in the camera
+ * actor.
+ */
+function WalkerCameraFrame(w: Walker): void {
+  w.tick(1 / 60);
+  CameraActorTick();
+  CameraUpdateTick();
+}
+
+/** A `cp_` path standing still: the same eye and target at every frame. */
+function StillPath(slot: number, eye: Vec3, target: Vec3): CamPaths {
+  const k = (v: number) => [[0, v, 0, 0], [10000, v, 0, 0]];
+  return new CamPaths({ fps: 60, object_paths: {}, paths: { [slot]: {
+    file: "cp_test", index: 0, start: 0, duration: 10000,
+    channels: { eye_x: k(eye.x), eye_y: k(eye.y), eye_z: k(eye.z),
+                target_x: k(target.x), target_y: k(target.y),
+                target_z: k(target.z) } } } } as never);
+}
+
+/**
+ * Put the camera on a still shot: the path the hand-back evaluates, the
+ * camera block, and the deferred pose the tracking tick eases the eye onto
+ * and falls back to -- what a stashed rail standing on that frame leaves --
+ * then the view built from the block. There is no script in these fixtures,
+ * so this stands in for the `cam_play` and the rail.
+ */
+function SeatCamera(eye: Vec3, target: Vec3, slot = 900): void {
+  SetCameraPaths(StillPath(slot, eye, target));
+  G.g_active_cam_path = slot;
+  G.g_camera_block_eye = vec3(eye.x, eye.y, eye.z);
+  G.g_camera_block_target = vec3(target.x, target.y, target.z);
+  G.g_cam_path_eye = vec3(eye.x, eye.y, eye.z);
+  G.g_cam_path_target = vec3(target.x, target.y, target.z);
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
+                              0);
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Path, G.g_cam_path_target, 0);
+  UpdateSceneViewAndLight();
+}
+
+/** Whether camera slot table holds actor `at` (its occupied byte up). */
+const slotHolds = (at: number): boolean => G.g_enemy_slots.some(
+  (x) => x.occupied === 1 && x.prop === null && x.at === at);
+/** The occupied slots, for a failure message. */
+const slotsShown = (): string => G.g_enemy_slots
+  .map((x, i) => x.occupied ? `${i}:${x.prop ?? x.at.toString(16)}` : "")
+  .filter(Boolean).join(",");
+/** Slot `i` held by `at`, as a fill or a direct claim leaves it. */
+function ClaimSlot(i: number, at = 0): void {
+  G.g_enemy_slots[i] = { occupied: 1, at, prop: null };
 }
 
 /**
@@ -1417,8 +1479,7 @@ console.log("the camera eases back onto the rail, it does not cut:");
   // The rail: eye at the origin looking straight down +Z, which is the shot's
   // own aim once the `cam_play` action has retired.
   const rail = vec3(0, 0, 100);
-  CamAdvancePathFrame(EYE, rail);
-  CamSetPathTarget(rail);
+  SeatCamera(EYE, rail);
 
   const aimAngle = (): number => {
     const t = G.g_camera_block_target;
@@ -1434,7 +1495,6 @@ console.log("the camera eases back onto the rail, it does not cut:");
   // because the shot's action has retired -- that is the whole point.
   let pulled = 0;
   for (let i = 0; i < 240; i++) {
-    CamSetPathTarget(rail);
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     pulled = aimAngle();
   }
@@ -1442,20 +1502,27 @@ console.log("the camera eases back onto the rail, it does not cut:");
         `${pulled.toFixed(1)} deg off`);
   check("and the camera is marked as tracking", G.g_camera_is_tracking === 1);
 
-  // Now kill it. Nothing is registered from the next frame on.
-  z.dead = true;
+  // Now kill it, the way a shot does: its death state raises `NoCameraTrack`
+  // and it files no candidate from then on. Two frames later the fill has
+  // nothing to deal.
+  ActorKillAll(0, rng);
   let worst = 0;
   let settled = -1;
+  let settledOn = -1;
   for (let i = 0; i < 300; i++) {
     const before = aimAngle();
-    CamSetPathTarget(rail);
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     const after = aimAngle();
     worst = Math.max(worst, Math.abs(before - after));
     if (settled < 0 && after < 0.5) settled = i;
+    if (settledOn < 0 && G.g_camera_settled === 1) settledOn = i;
   }
-  check("with nothing registered the camera stops tracking",
-        G.g_camera_is_tracking === 0);
+  // With nothing alive and nothing in a slot the selector hands the room back:
+  // `CameraTurnOntoPathTarget`, which eases onto the path's own target at the
+  // untracked rate. It never runs `SelectCameraLookAtTarget`, so the tracking
+  // flag `CameraActorTick` seeds each frame is not what says it is idle.
+  check("with nothing registered and nobody alive the camera turns back",
+        G.g_camera_mode === CameraMode.HandBackToPath, `${G.g_camera_mode}`);
   check("the aim comes back to the rail", settled >= 0,
         `still ${aimAngle().toFixed(2)} deg off after 300 frames`);
   // 1/13 of a gap that starts near 16 degrees is about 1.3 degrees; a snap
@@ -1464,8 +1531,11 @@ console.log("the camera eases back onto the rail, it does not cut:");
         `worst frame moved ${worst.toFixed(2)} deg`);
   check("it takes tens of frames, not one", settled > 20,
         `settled after ${settled} frames`);
-  check("`g_camera_settled` is raised once it has caught up",
-        G.g_camera_settled === 1);
+  // A this-frame answer: raised on the frame the turn converges, in the same
+  // breath as `g_camera_free`, and cleared by the next camera actor.
+  check("`g_camera_settled` is raised on the frame it catches up",
+        settledOn >= 0 && G.g_camera_free === 1 && G.g_camera_settled === 0,
+        `settled on ${settledOn}, now ${G.g_camera_settled}`);
 }
 
 // -- 5. the snapshot round-trips, exactly -----------------------------------
@@ -3434,7 +3504,8 @@ console.log("\nclass 0x25, it is not an enemy:");
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("a scripted humanoid is not counted as a live enemy",
         G.g_enemies_alive === 0, String(G.g_enemies_alive));
-  check("and is not a camera target", G.g_enemy_slots.length === 0);
+  check("and is not a camera target",
+        G.g_enemy_slots.every((x) => x.occupied === 0), slotsShown());
 }
 
 console.log("\nclass 0x25, `op 4` mode 4 waits for the actor to RECEDE (B13):");
@@ -6356,6 +6427,7 @@ function thrower(state: number, extra: Record<string, unknown> = {}) {
   ResetGameGlobals();
   SetGameTables(CHARS31);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   // `g_camera_yaw_bams` is the heading *from* the camera *toward* what it
   // looks at -- `ThrowerStateLeapDown` sets the pouncing actor's own yaw from
@@ -6655,6 +6727,7 @@ console.log("class 0x31, ThrowerStatePathFollow:");
   ResetGameGlobals();
   SetGameTables(CHARS31);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   G.g_camera_yaw_bams = 0;
   const a = ActorSpawn(0x7ea4, SpawnClass.Thrower, 0x16, "zsass", {
@@ -7327,6 +7400,7 @@ console.log("class 0x31, state 23 -- the wall-climbers climb down the wall:");
   ResetGameGlobals();
   SetGameTables(chars);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   G.g_max_attackers = 1;
   const [a] = SpawnScriptedCharacters(
@@ -7555,6 +7629,7 @@ console.log("the counts an actor never joined:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     const z = spawnZombie(0x1000, ct, "zom",
                          { initialState: initial });
     check(`a zombie with ${what} is not in the counts`,
@@ -7612,6 +7687,7 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   ResetGameGlobals();
   SetGameTables(CHARS_THROW);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   G.g_camera_yaw_bams = 0;
   const z = ActorSpawn(0x9200, SpawnClass.Thrower, 0x16, "thrower", {
@@ -7759,6 +7835,7 @@ console.log("thrown weapons, the spin and the shot that takes one down:");
     SetGameTables({ ...CHARS31, types: { "1": TYPE, "22": TYPE_ZSASS } } as
                   unknown as CharactersJson);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     G.g_camera_yaw_bams = 0;
     const z = ActorSpawn(0x9300, SpawnClass.Thrower, 0x16, "zsass", {
@@ -7886,6 +7963,7 @@ console.log("thrown weapons, the spin and the shot that takes one down:");
       SetGameTables({ ...CHARS, types: { "1": TYPE_ZNASSB } } as unknown as
                     CharactersJson);
       G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+      G.g_scene_state_major = SCENE_MAJOR_PLAYING;
       EnterPlay();
       const z = spawnZombie(0x7800, 1, "znassb", {
         initialState: ZombieState.StandAndThrow, condition: 8,
@@ -8026,7 +8104,7 @@ console.log("class 0x31, the grab ends in the engine's one leave routine:");
   check("...and gives the attack permit back",
         G.g_attack_permits.every((x) => x === -1), G.g_attack_permits.join());
   check("...and drops out of the camera's enemy slots",
-        !G.g_enemy_slots.includes(z.at), G.g_enemy_slots.join());
+        !slotHolds(z.at), slotsShown());
 }
 
 /**
@@ -8057,6 +8135,7 @@ console.log("class 0x31, ThrowerStateThrow, character type 0x18:");
     EnterPlay();
     SetGameTables(CHARS31);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_yaw_bams = 0;
     const a = ActorSpawn(at, SpawnClass.Thrower, charType, "t", {
       initialState: ThrowerState.Throw, condition: 0,
@@ -8204,6 +8283,7 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   ResetGameGlobals();
   SetGameTables(CHARS_REARM);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   G.g_camera_yaw_bams = 0;
   const z = ActorSpawn(0x9300, SpawnClass.Thrower, 0x16, "zsass", {
@@ -8303,6 +8383,7 @@ console.log("\na downed thrower, shot on the ground:");
   SetGameTables(CHARS31);
   G.g_app_state = AppState.InPlay;
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   // A minute of a thrower on its feet takes every life, and a player out of
   // play has no trigger. This is a test of the thrower: the player is given
@@ -8648,6 +8729,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
       cmd(CivilianOp.End),
     ]]);
     G.g_scene_state_major_entered = 2;
+    G.g_scene_state_major = 2;
     G.g_camera_settled = 0;
     G.g_camera_free = 0;
     for (let i = 0; i < 5; i++) cFrame(a, events);
@@ -8668,6 +8750,7 @@ console.log("\nclass 0x10, the civilian and the rescue:");
     ]]);
     // Row 1 minor 3 is `CameraFromViewAngles`, the scripted view-angle turn.
     G.g_scene_state_major_entered = 1;
+    G.g_scene_state_major = 1;
     G.g_camera_settled = 1;
     G.g_camera_free = 1;
     for (let i = 0; i < 5; i++) cFrame(a, events);
@@ -9692,6 +9775,7 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     T.coli = { files: ["t"], blobs: { floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["floor"];
     G.g_camera_fixed_eye_y = -1e9;     // a miss must not pass as a hit
@@ -9954,6 +10038,7 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     T.coli = { files: ["t"], blobs: { wall: WALL_BLOB, floor: FLOOR_BLOB } };
     G.g_coli_full_set = ["wall", "floor"];
     G.g_camera_fixed_eye_y = 0;
@@ -10019,6 +10104,7 @@ console.log("\nclass 0x30 state 15, the scripted walk-in:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = spawnZombie(0x7100, 1, "walk-in", {
       initialState: ZombieState.WalkDistance, walkDistance: dist,
@@ -10097,6 +10183,7 @@ console.log("\nthe clip clock the scripts count in:");
   EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   const z = spawnZombie(0x7200, 1, "clock");
   z.motion = 10;                     // 20 frames, and a play length of 37
   const m = CHARS.types["1"].motions["10"];
@@ -10171,6 +10258,7 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
   const c = ActorSpawn(0x7300, SpawnClass.Civilian, 1, "civ", undefined,
                        new Rng(1));
@@ -10214,6 +10302,7 @@ console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
     const c = ActorSpawn(0x7400, SpawnClass.Civilian, 1, "dying", undefined,
                          new Rng(1));
@@ -10298,6 +10387,7 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     G.g_players_in_play = 1;
     const z = spawnZombie(0x7700, 1, "entrance", {
@@ -10900,10 +10990,11 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
       target_z: [key(10, -1), key(210, -1)],
     },
   } as never, false);
-  const host = { ...NULL_HOST, camPath: (slot: number) =>
-    slot === 0x1f ? path : null };
+  const paths = new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never);
+  paths.paths.set(0x1f, path);
+  SetCameraPaths(paths);
   G.g_game_over_fly_frame = 50;
-  GameOverCameraFlyTick(host);
+  GameOverCameraFlyTick();
   check("the fly-over tick evaluates path 0x1F at its own counter into the "
         + "camera block, then counts on",
         G.g_cam_path_frame === 50 && G.g_game_over_fly_frame === 51
@@ -10919,6 +11010,7 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
   ResetGameGlobals();
   EnterPlay();
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   PlayerTakeDamage(0, 1, 9);
   ScoreAddForPlayer(0, 500);
   const carry = PlayerBlockCapture();
@@ -11255,16 +11347,19 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
         !IsPlayerAttackable(0), "attackable at major 0");
 
   G.g_scene_state_major_entered = 1;
+  G.g_scene_state_major = 1;
   check("...nor while the follow camera or a scripted turn drives",
         !IsPlayerAttackable(0), "attackable at major 1");
 
   G.g_scene_state_major_entered = 2;
+  G.g_scene_state_major = 2;
   check("...but is once the path camera is driving", IsPlayerAttackable(0),
         "not attackable at major 2");
 
   // The attract override: the demo has no real player, so `g_player_state` is
   // never 5, and without this the demo would never be attacked.
   G.g_scene_state_major_entered = 2;
+  G.g_scene_state_major = 2;
   // The third clause is the state word itself, and nothing else: lives are
   // not in it. The reset leaves player 1 at 9, out of the game, as boot does.
   check("player 1 is out of a one-player game, lives or no lives",
@@ -11300,10 +11395,12 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
     z.visible = true;
     z.hp = z.maxHp = 100;
     G.g_scene_state_major_entered = 1;
+    G.g_scene_state_major = 1;
     check("no permit is granted while a scripted camera drives",
           !TryClaimAttackSlot(z) && z.attackPermit === -1,
           `permit ${z.attackPermit}`);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     check("...and one is the moment the path camera takes over",
           TryClaimAttackSlot(z) && z.attackPermit === 0,
           `permit ${z.attackPermit}`);
@@ -11320,6 +11417,7 @@ console.log("\nResetSceneOnEnter: what a scene starts clean:");
   EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   G.g_enemies_alive = 4;
   G.g_enemies_present = 7;
   G.g_civilians_alive = 3;
@@ -11381,6 +11479,7 @@ console.log("\nthe two enemy counters, stepped and not derived:");
   EnterPlay();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   check("a scene starts with both counts at zero",
         G.g_enemies_alive === 0 && G.g_enemies_present === 0,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
@@ -11438,6 +11537,7 @@ console.log("\nclass 0x30 state 26: the arc alone moves the leap:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = spawnZombie(0x7900, 1, "leaper", {
       initialState: ZombieState.DelayedLeap,
@@ -11525,6 +11625,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = spawnZombie(0x7500, 1, "axe man", {
       initialState: ZombieState.StandAndThrow, condition: cond,
@@ -11579,6 +11680,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     EnterPlay();
     SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;          // the ground plane, far below
     const pinned = spawnZombie(0x7600, 1, "on a ledge", {
       initialState: ZombieState.StandAndThrow, condition: 7,
@@ -11660,6 +11762,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
       EnterPlay();
       SetGameTables(CHARS);
       G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+      G.g_scene_state_major = SCENE_MAJOR_PLAYING;
       G.g_camera_fixed_eye_y = 0;
       const z = spawnZombie(0x7700, 1, "axe man", {
         initialState: ZombieState.StandAndThrow, condition: 7, flags,
@@ -11899,6 +12002,7 @@ console.log("\nActorBodyConditionFromHands:");
     ResetGameGlobals();
     SetGameTables(CHARS_AXE);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(at, SpawnClass.Zombie, 0x14, "znonoopa", {
@@ -11994,6 +12098,7 @@ console.log("\nActorBodyConditionFromHands:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     const znassb = ActorSpawn(0x6800, SpawnClass.Zombie, 1, "znassb", {
       initialState: ZombieState.AttackRun, condition: 8,
     });
@@ -12068,6 +12173,7 @@ console.log("\nthe crawler's undamaged swing:");
     ResetGameGlobals();
     SetGameTables(CHARS_CRAWLER);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     G.g_camera_fixed_eye_y = 0;
     const z = ActorSpawn(0x4048, SpawnClass.Zombie, 12, "znkager", {
@@ -12171,7 +12277,7 @@ console.log("\nthe crawler's undamaged swing:");
   EnterPlay();
 
   // Claimed: somebody is in the camera's slots.
-  G.g_enemy_slots = [0];
+  ClaimSlot(2);
   G.g_enemies_alive = 1;
   G.g_camera_settled = 1;
   CameraDriverFromDeferredPose();
@@ -12179,7 +12285,7 @@ console.log("\nthe crawler's undamaged swing:");
         G.g_camera_free === 0);
 
   // The slot empties and the flag rises again -- that is the whole rule.
-  G.g_enemy_slots = [];
+  G.g_enemy_slots = makeCameraSlots();
   CameraDriverFromDeferredPose();
   check("the camera is free once nothing holds a slot", G.g_camera_free === 1);
 
@@ -12210,12 +12316,7 @@ console.log("\nthe crawler's undamaged swing:");
   // A camera at the origin, the rail aimed down +z, and the aim pulled a
   // quarter turn off it by the enemy that has just died.
   const seat = (offDegrees: number) => {
-    G.g_camera_block_eye.x = 0;
-    G.g_camera_block_eye.y = 0;
-    G.g_camera_block_eye.z = 0;
-    G.g_cam_path_target.x = 0;
-    G.g_cam_path_target.y = 0;
-    G.g_cam_path_target.z = 100;
+    SeatCamera(vec3(0, 0, 0), vec3(0, 0, 100));
     const a = offDegrees * Math.PI / 180;
     G.g_camera_block_target.x = Math.sin(a) * 100;
     G.g_camera_block_target.y = 0;
@@ -12224,7 +12325,7 @@ console.log("\nthe crawler's undamaged swing:");
 
   seat(30);
   G.g_enemies_alive = 1;
-  G.g_enemy_slots = [0];
+  ClaimSlot(2);
   G.g_camera_free = 1;
   CameraActorTick();
   CameraDriverSelectMode();
@@ -12238,7 +12339,7 @@ console.log("\nthe crawler's undamaged swing:");
   // the frame above had no actor behind its slot and so aimed at the rail
   // anyway -- where the enemy left the aim is the fixture, not the assertion.
   G.g_enemies_alive = 0;
-  G.g_enemy_slots = [];
+  G.g_enemy_slots = makeCameraSlots();
   seat(30);
   CameraActorTick();
   CameraDriverSelectMode();
@@ -12266,7 +12367,7 @@ console.log("\nthe crawler's undamaged swing:");
     EnterPlay();
     seat(deg);
     G.g_enemies_alive = 0;
-    G.g_enemy_slots = [];
+    G.g_enemy_slots = makeCameraSlots();
     let n = 0;
     for (; n < 600 && G.g_camera_free === 0; n += 1) {
       CameraActorTick();
@@ -12285,7 +12386,7 @@ console.log("\nthe crawler's undamaged swing:");
   EnterPlay();
   seat(0);
   G.g_enemies_alive = 0;
-  G.g_enemy_slots = [];
+  G.g_enemy_slots = makeCameraSlots();
   CameraActorTick();
   CameraDriverSelectMode();
   const wasFree = G.g_camera_free;
@@ -12298,7 +12399,7 @@ console.log("\nthe crawler's undamaged swing:");
 
   // And a new enemy takes it away again.
   G.g_enemies_alive = 1;
-  G.g_enemy_slots = [0];
+  ClaimSlot(2);
   CameraActorTick();
   CameraDriverSelectMode();
   check("...until the next enemy claims a slot",
@@ -12522,7 +12623,11 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
   // The wait: claimed and bounced, every frame, and the table ends each frame
   // empty. `obj+0x121` keeps naming the slot, as the engine leaves it.
   let everHeld = false;
+  // The frame is published by the driver in the camera actor
+  // (`CameraDriverSelectMode`: `g_cam_path_frame = __ftol(g_rail_frame)`),
+  // so the fixture moves the word it publishes from.
   for (let f = 600; f < 610; f++) {
+    G.g_rail_frame = f;
     G.g_cam_path_frame = f;
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     if (G.g_attack_permits[0] !== -1) everHeld = true;
@@ -12536,6 +12641,7 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
 
   // The cue frame: it graduates into HoldAtRange **holding** the permit the
   // delegate claimed on this same frame.
+  G.g_rail_frame = 660;
   G.g_cam_path_frame = 660;
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("on the cue frame it graduates to HoldAtRange still owning the permit",
@@ -12546,6 +12652,7 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
 
   // Nothing in class 0x30 lets go of it: the hub's claim fails on its own
   // permit, and `TryClaimAttackSlot` voids `obj+0x121` first.
+  G.g_rail_frame = 661;
   G.g_cam_path_frame = 661;
   for (let i = 0; i < 30; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("...and its own permit refuses every claim after it",
@@ -12586,7 +12693,11 @@ console.log("\na held captor's cue frame, and the finish_sequence that frees it:
     showMessage: () => null, endDialogue: () => undefined,
   };
   const w = new Walker(script, host);
-  w.tick(1 / 60);
+  // The action runs in the camera actor, after the interpreter has queued it,
+  // on a ring the driver before it has let go of (`goto_scene_state` or the
+  // drain mode leave the advance word at 1).
+  G.g_evt_action_advance = 1;
+  WalkerCameraFrame(w);
   check("finish_sequence frees both permits and drops the latch",
         G.g_attack_permits.every((p) => p === -1) && G.g_attack_committed === 0,
         `permits ${JSON.stringify(G.g_attack_permits)} `
@@ -13526,6 +13637,9 @@ console.log("\nthe shot queue, with the clock stopped:");
 
   QueueShotRequest(0, RAY);
   const frame = G.g_frame;
+  // A heading the view cannot have, so a copy from it would show.
+  G.g_camera_yaw_bams = 0x1234;
+  const yawBefore = G.g_camera_yaw_bams;
   game.update(ctx, STOPPED);
   check("a stopped clock leaves the pull on the queue",
         G.g_shot_requests.length === 1, `${G.g_shot_requests.length}`);
@@ -13540,11 +13654,14 @@ console.log("\nthe shot queue, with the clock stopped:");
         G.g_shot_tracer_ring.every((t) => !t.live));
   check("...and does not move the frame counter", G.g_frame === frame,
         `${G.g_frame} vs ${frame}`);
-  // The camera yaw is the one thing that *is* written on a stopped tick, and
-  // deliberately: where the camera points is not a function of elapsed time,
-  // and free roam turns it every frame with the transport stopped.
-  check("...but it still takes the camera's yaw",
-        G.g_camera_yaw_bams === ctx.view.yawBams);
+  // Nor is any camera word copied in from the drawn camera. The gameplay yaw
+  // (`g_camera_yaw_bams`, beside `g_camera_eye`) is the scene state's hook's,
+  // written inside the tick; it used to be taken from `ctx.view` here, on
+  // stopped ticks too, which put the drawn camera's heading where the engine
+  // keeps the players'.
+  check("...and writes no camera word from the drawn camera",
+        G.g_camera_yaw_bams === yawBefore,
+        `${G.g_camera_yaw_bams} vs ${yawBefore} (view ${ctx.view.yawBams})`);
 
   // Step mode, and the frame after an unpause: the same request, the same
   // fixture, a tick with time in it.
@@ -13629,6 +13746,7 @@ console.log("\nthe strike anchor and the cooldown it gates:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
   };
 
@@ -14019,11 +14137,10 @@ console.log("\nthe camera-point lift is per class:");
         thrower.lookAt.y === 20, String(thrower.lookAt.y));
   check("a class the exe never registers gets no lift", prop.lookAt.y === 20,
         String(prop.lookAt.y));
-  check("`CameraPointRiseFor` is the table, not a constant",
-        CameraPointRiseFor(SpawnClass.Civilian) === 4
-        && CameraPointRiseFor(SpawnClass.Zombie) === 4
-        && CameraPointRiseFor(SpawnClass.Thrower) === 0
-        && CameraPointRiseFor(SpawnClass.ScriptedHumanoid) === 0);
+  // The lift is each class's own push, made from its own update: there is
+  // no table any more for a class to fall back on.
+  check("...and a set piece that never makes the call is not a candidate",
+        !G.g_camera_candidates.some((c) => c.at === prop.at));
 }
 
 /**
@@ -14114,12 +14231,14 @@ console.log("\na tracked civilian holds the camera, and the room with it:");
   prop.visible = true;
   G.g_enemies_alive = 0;
 
+  // Filed on this frame, dealt into a slot on the next: the fill runs before
+  // any actor.
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   check("a civilian without `obj+0x34` bit 0x10000 is a camera candidate",
-        G.g_enemy_slots.includes(civ.at),
-        `[${G.g_enemy_slots.map((a) => a.toString(16)).join(",")}]`);
+        slotHolds(civ.at), slotsShown());
   check("...and a class whose routine never calls it is not",
-        !G.g_enemy_slots.includes(prop.at));
+        !slotHolds(prop.at));
   G.g_camera_free = 1;
   CameraDriverSelectMode();
   check("...so with no enemy alive the camera still tracks, and the room is "
@@ -14130,10 +14249,11 @@ console.log("\na tracked civilian holds the camera, and the room with it:");
   // Her script's next word drops `0x40000`: op 0x2C sets the bit.
   civ.flags |= ActorFlag.NoCameraTrack;
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
   CameraDriverSelectMode();
   check("...and once her wait word drops the track bit the slot goes and the "
         + "hand-back starts",
-        !G.g_enemy_slots.includes(civ.at)
+        !slotHolds(civ.at)
         && G.g_camera_mode === CameraMode.HandBackToPath,
         `${G.g_camera_mode}`);
 }
@@ -14831,6 +14951,7 @@ console.log("class 0x30 state 9: the body is thrown, not dropped:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_camera_fixed_eye_y = 0;
     const z = spawnZombie(0x3600, 1, "knocked back",
                          { condition });
@@ -15028,6 +15149,7 @@ console.log("class 0x30 state 12, with no clip to wait on:");
   ResetGameGlobals();
   SetGameTables(CHARS_NO_FALL);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
   openShutter();
   const events = new Events();
@@ -15429,7 +15551,9 @@ console.log("\n`ActorKillAll` will not kill what a shot could not touch:");
 
   G.g_enemies_alive = 3;
   G.g_enemies_present = 3;
-  G.g_enemy_slots = [immuneZombie.at, plainZombie.at, immuneThrower.at];
+  RegisterEnemySlot(immuneZombie);
+  RegisterEnemySlot(plainZombie);
+  RegisterEnemySlot(immuneThrower);
 
   const n = ActorKillAll(0, rng);
   check("the clear takes the one actor a shot could have reached",
@@ -15450,7 +15574,7 @@ console.log("\n`ActorKillAll` will not kill what a shot could not touch:");
         G.g_enemies_alive === 2 && G.g_enemies_present === 2,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
   check("...and its slot with them",
-        !G.g_enemy_slots.includes(plainZombie.at), G.g_enemy_slots.join());
+        !slotHolds(plainZombie.at), slotsShown());
   check("...while the two refused ones are still alive and still counted",
         !immuneZombie.dead && !immuneThrower.dead
         && !immuneZombie.despawned && !immuneThrower.despawned,
@@ -15469,7 +15593,7 @@ console.log("\n`ActorKillAll` will not kill what a shot could not touch:");
   check("...and `g_enemies_alive` reaches zero, which is the gate",
         G.g_enemies_alive === 0, `${G.g_enemies_alive}`);
   check("...with nothing left holding a camera slot",
-        G.g_enemy_slots.length === 0, G.g_enemy_slots.join());
+        G.g_enemy_slots.every((x) => x.occupied === 0), slotsShown());
 }
 
 // -- D1: where `NoCameraTrack` is raised, and the guard on it ---------------
@@ -15528,7 +15652,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     a.visible = true;
     a.hp = 10;
     a.flags |= flags;
-    G.g_enemy_slots = [...G.g_enemy_slots, a.at];
+    RegisterEnemySlot(a);
     return a;
   };
 
@@ -15540,7 +15664,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
           (last.flags & ActorFlag.NoCameraTrack) === 0,
           `flags ${last.flags.toString(16)}`);
     check("...and keeps its `g_enemy_slots` slot with it",
-          G.g_enemy_slots.includes(last.at), G.g_enemy_slots.join());
+          slotHolds(last.at), slotsShown());
     check("...and still leaves `g_enemies_alive`, which is outside the arm",
           G.g_enemies_alive === 0, `${G.g_enemies_alive}`);
   }
@@ -15552,7 +15676,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
           (plain.flags & ActorFlag.NoCameraTrack) !== 0,
           `flags ${plain.flags.toString(16)}`);
     check("...and loses the slot with it",
-          !G.g_enemy_slots.includes(plain.at), G.g_enemy_slots.join());
+          !slotHolds(plain.at), slotsShown());
   }
   {
     const held = zombie(0x2502, ActorFlag.KeepCameraWhenLast);
@@ -15560,8 +15684,8 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     ZombieReleasePermitAndUntrack(held);
     check("with two alive the guard does not fire",
           (held.flags & ActorFlag.NoCameraTrack) !== 0
-          && !G.g_enemy_slots.includes(held.at),
-          `flags ${held.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
+          && !slotHolds(held.at),
+          `flags ${held.flags.toString(16)} slots ${slotsShown()}`);
   }
 }
 {
@@ -15577,7 +15701,8 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     a.visible = true;
     a.hp = 0;                                  // dying, so the routine acts
     a.flags |= flags;
-    G.g_enemy_slots = [...G.g_enemy_slots, a.at];
+    // `EnemyThrowerInit` has already claimed it a slot: `RegisterEnemySlot`
+    // is its last call.
     return a;
   };
 
@@ -15587,8 +15712,8 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     ThrowerReleaseSlotOnDeath(last);
     check("the last enemy present carrying the bit keeps both",
           (last.flags & ActorFlag.NoCameraTrack) === 0
-          && G.g_enemy_slots.includes(last.at),
-          `flags ${last.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
+          && slotHolds(last.at),
+          `flags ${last.flags.toString(16)} slots ${slotsShown()}`);
   }
   {
     const plain = thrown(0x2601);
@@ -15596,8 +15721,8 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     ThrowerReleaseSlotOnDeath(plain);
     check("...and one without the bit loses both",
           (plain.flags & ActorFlag.NoCameraTrack) !== 0
-          && !G.g_enemy_slots.includes(plain.at),
-          `flags ${plain.flags.toString(16)} slots ${G.g_enemy_slots.join()}`);
+          && !slotHolds(plain.at),
+          `flags ${plain.flags.toString(16)} slots ${slotsShown()}`);
   }
 }
 /**
@@ -15714,11 +15839,12 @@ console.log("\nthe camera path publishes every frame, ends included:");
   // No `primeToFirstWait`: it steps *over* waits to get a scene on screen, and
   // the wait between the two shots is the whole point here. The first tick
   // runs the instructions from cold, exactly as the player's does.
+  ResetGameGlobals();
 
-  // What `syncPortGlobals` copies into `g_cam_path_frame`, once a tick.
+  // What `CamAdvancePathFrame` publishes into `g_cam_path_frame`, once a tick.
   const published: number[] = [];
   for (let f = 0; f < 60; f++) {
-    w.tick(1 / 60);
+    WalkerCameraFrame(w);
     published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
   }
   const missing: number[] = [];
@@ -15735,6 +15861,178 @@ console.log("\nthe camera path publishes every frame, ends included:");
         published.filter((n) => n === 10).length === 1, head);
   check("...and the shot behind it starts on the tick after",
         published[published.indexOf(10) + 1] === 11, head);
+}
+
+/**
+ * A block change leaves the action ring alone.
+ *
+ * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) moves the block and the program
+ * pointer and nothing else; `EvtLoadBlockProgram` (`FUN_0045EBC0`), which
+ * zeroes `g_queued_events_pending`, is called only by the two task-list
+ * builders. A `cam_play` a skip cut short retires on its next call -- after
+ * the interpreter has raced into the next block -- so its count has to still
+ * be there. The port zeroed it at the block change, the retire took the next
+ * block's count, and stage 6 block 1 parked on a -1.
+ */
+console.log("\na block change carries the action ring's count:");
+{
+  const camOp = (i: number, start: number, end: number) => ({
+    i, at: i, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 7, 0],
+    start, end, slot: 7, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const waitRing = (i: number) => ({ i, at: i, op: 0x40,
+    name: "wait_queued_events_done", cat: "wait",
+    blocks_on: "queued events pending == 0" });
+  const region = (i: number, open: boolean) => ({ i, at: i, op: 0x2c,
+    name: "set_skippable_region", cat: "flow", open });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 1, routes: [], regions: [], cam_slots_used: [7], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "goto", next: [1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [] }, { index: 1, at: 0, ops: [
+        region(0, true), camOp(1, 0, 100), waitRing(2), region(3, false),
+      ] }],
+    }, {
+      index: 1, at: 100, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 100, ops: [] }, { index: 1, at: 100, ops: [
+        camOp(0, 0, 10), waitRing(1),
+        { i: 2, at: 102, op: 0x42, name: "wait_frames", cat: "wait", arg: 100,
+          blocks_on: "arg frames elapsed" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  ResetGameGlobals();
+  let lowest = 0, skipped = false, passedAt = -1;
+  for (let f = 0; f < 60; f++) {
+    if (f === 5) skipped = w.requestSkip();
+    WalkerCameraFrame(w);
+    lowest = Math.min(lowest, G.g_queued_events_pending);
+    if (passedAt < 0 && w.block === 1 && w.opIndex === 2) {
+      passedAt = G.g_cam_path_frame;
+    }
+  }
+  check("the skip is taken inside the region", skipped);
+  check("the count never goes below zero", lowest >= 0, `${lowest}`);
+  check("...and the next block's wait holds until its own shot has ended",
+        passedAt === 10, `passed with the camera on ${passedAt}`);
+}
+
+/**
+ * A camera cue that aims by look-at has to write the block's angles.
+ *
+ * The view is built from the camera block's angles (`UpdateSceneViewAndLight`,
+ * `FUN_00401F40`), so a routine that moves the eye and the target and stops
+ * there moves the camera without turning it. `Boss4PlayCameraCue` calls
+ * `CamBlockSetAnglesFromLookAt` at `0x00493277`; the port left it out while
+ * its view was built from the look-at, and under the angle-built view
+ * Strength's cues would have slid the camera along the path facing the way
+ * it faced before.
+ */
+console.log("\nStrength's camera cue turns the camera it moves:");
+{
+  ResetGameGlobals();
+  const path = {
+    pose: (t: number, _roll: boolean,
+           out: { eye: Vec3; target: Vec3; roll: number }) => {
+      out.eye.x = 100 + t; out.eye.y = 5; out.eye.z = 0;
+      out.target.x = 0; out.target.y = 0; out.target.z = 0;
+      out.roll = 0;
+      return out;
+    },
+  };
+  const host: GameHost = {
+    ...NULL_HOST,
+    camPath: () => path as unknown as CamPath,
+  };
+  const b = Boss4BlockNew();
+  b.cueStep = 1; b.cueFrame = 0; b.cueEnd = 50; b.cuePath = 7; b.cueQueued = -1;
+  G.g_camera_block_yaw_bams = 0x1234;
+  G.g_camera_block_pitch_bams = 0;
+  // Nobody is registered, so the aim turns toward the deferred pose's
+  // target, which is the origin.
+  G.g_cam_path_target = vec3(0, 0, 0);
+  G.g_camera_block_target = vec3(0, 0, -100);
+  for (let i = 0; i < 40; i++) Boss4PlayCameraCue(b, host);
+  const e = G.g_camera_block_eye, t = G.g_camera_block_target;
+  const want = VecToAngles(e.x - t.x, e.y - t.y, e.z - t.z);
+  const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
+  check("the block's yaw and pitch are the look-at's, set on every frame",
+        G.g_camera_block_yaw_bams === s16(want.yaw)
+        && G.g_camera_block_pitch_bams === s16(want.pitch)
+        && G.g_camera_block_yaw_bams !== 0x1234,
+        `${G.g_camera_block_yaw_bams},${G.g_camera_block_pitch_bams} vs `
+        + `${s16(want.yaw)},${s16(want.pitch)}`);
+}
+
+/**
+ * `goto_scene_state_when_alive` (0x32) waits for the players.
+ *
+ * `EvtOpGotoSceneStateWhenPlayersAlive32` (`FUN_0045F900`) returns with the
+ * pointer where it was while either player sits in a state whose
+ * `g_player_state_handlers` row has `+0x10 == 0` (4, 5 and 6) with no lives
+ * left, and runs again next frame. The port let it through always.
+ */
+console.log("\ngoto_scene_state_when_alive holds while a player is out of lives:");
+{
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x32, name: "goto_scene_state_when_alive",
+          cat: "flow", scene_state_minor: 3 },
+        { i: 1, at: 1, op: 0x42, name: "wait_frames", cat: "wait", arg: 100,
+          blocks_on: "arg frames elapsed" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  ResetGameGlobals();
+  G.g_scene_state_major = 2;
+  G.g_scene_state_minor = 4;
+  // Player 0 dead on the continue countdown; player 1 never started.
+  G.g_player_state[0] = PlayerState.Continue;
+  G.g_player_lives[0] = 0;
+  G.g_player_state[1] = PlayerState.Out;
+  G.g_player_lives[1] = 0;
+  w.tick(1 / 60);
+  w.tick(1 / 60);
+  check("a player at 4 with no lives holds it",
+        w.opIndex === 0 && G.g_scene_state_major === 2,
+        `op ${w.opIndex}, state ${G.g_scene_state_major}/${G.g_scene_state_minor}`);
+  G.g_player_state[0] = PlayerState.InPlay;
+  check("...in play with no lives still holds it",
+        (w.tick(1 / 60), w.opIndex === 0 && G.g_scene_state_major === 2));
+  G.g_player_lives[0] = 3;
+  w.tick(1 / 60);
+  check("...and with lives it enters (1, 3) and moves on",
+        w.opIndex === 1 && G.g_scene_state_major === 1
+        && G.g_scene_state_minor === 3,
+        `op ${w.opIndex}, state ${G.g_scene_state_major}/${G.g_scene_state_minor}`);
 }
 
 /**
@@ -15793,13 +16091,17 @@ console.log("\na camera-frame wait releases one frame past its operand:");
     scriptFlagRaised: () => null,
     showMessage: () => null, endDialogue: () => undefined,
   });
+  ResetGameGlobals();
   G.g_script_flags[9] = 0;
   let ranOn = -1;
   const seen: number[] = [];
   for (let f = 0; f < 30; f++) {
-    w.tick(1 / 60);
+    // What the interpreter reads: the frame the camera published on the tick
+    // before, since its task runs first.
+    const read = G.g_cam_path_frame;
+    WalkerCameraFrame(w);
     seen.push(w.cam ? Math.trunc(w.cam.frame) : -1);
-    if (ranOn < 0 && G.g_script_flags[9]) ranOn = seen[seen.length - 1];
+    if (ranOn < 0 && G.g_script_flags[9]) ranOn = read;
   }
   check("the instruction behind `wait_camera_path_frame 5` runs on frame 6",
         ranOn === 6, `ran on ${ranOn} of ${seen.slice(0, 12).join(",")}`);
@@ -15874,10 +16176,20 @@ console.log("\na stashed path is played by a hook that steps first:");
   };
 
   const w = new Walker(script, host);
+  // A player in play: the rail's gate holds it while nobody is.
+  ResetGameGlobals();
+  EnterPlay();
+  // The frames the (2,7) hook draws into the deferred pose, `g_rail_frame`,
+  // and the frame the minor-7 driver publishes from it a task earlier in the
+  // next frame, `g_cam_path_frame`.
   const published: number[] = [];
+  const cue: number[] = [];
   for (let f = 0; f < 40; f++) {
-    w.tick(1 / 60);
-    published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+    WalkerCameraFrame(w);
+    if (G.g_camera_update_hook === CameraUpdateHook.PlayStashedPath) {
+      published.push(G.g_rail_frame);
+      cue.push(G.g_cam_path_frame);
+    }
   }
   const head = published.slice(0, 14).join(",");
   check("the stashed shot reaches its end frame",
@@ -15896,6 +16208,14 @@ console.log("\na stashed path is played by a hook that steps first:");
         published.includes(11), head);
   check("...and not two",
         !published.includes(12), head);
+  // The frame order: `CameraDriverFromDeferredPose` stores
+  // `g_cam_path_frame = __ftol(g_rail_frame)` inside `CameraActorTick`, which
+  // runs **before** `CameraUpdateTick` steps the rail -- so every cue the
+  // game reads is one frame behind the pose the rail has just drawn.
+  const steady = cue.slice(3, 9).map((c, i) => published[i + 3] - c);
+  check("the published frame trails the rail by exactly one, every frame",
+        steady.length === 6 && steady.every((d) => d === 1),
+        `${cue.slice(0, 12).join(",")} against ${head}`);
 }
 
 /** The same stash under state **(2,6)**, whose guard stops on the end frame. */
@@ -15934,10 +16254,13 @@ console.log("\na stashed path is played by a hook that steps first:");
     showMessage: () => null, endDialogue: () => undefined,
   };
   const w = new Walker(script, host);
+  ResetGameGlobals();
+  EnterPlay();
   const published: number[] = [];
   for (let f = 0; f < 40; f++) {
-    w.tick(1 / 60);
-    published.push(w.cam ? Math.trunc(w.cam.frame) : -1);
+    WalkerCameraFrame(w);
+    const h = G.g_camera_update_hook;
+    if (h === CameraUpdateHook.StepRail) published.push(G.g_rail_frame);
   }
   const head = published.slice(0, 14).join(",");
   check("state 6 reaches the end frame", published.includes(10), head);
@@ -15972,8 +16295,9 @@ console.log("\na stashed path is played by a hook that steps first:");
         ] }],
       }],
     } as unknown as ScriptJson;
+    EnterPlay();
     const wb = new Walker(bossScript, host);
-    for (let f = 0; f < 5; f++) wb.tick(1 / 60);
+    for (let f = 0; f < 5; f++) WalkerCameraFrame(wb);
     check("finish_sequence 6 after a static pose rides the pose's path on "
           + "the rail",
           wb.cam?.slot === 185 && wb.cam.deferred === true,
@@ -15982,13 +16306,20 @@ console.log("\na stashed path is played by a hook that steps first:");
     G.g_stashed_path_frame = 20;
     G.g_stashed_path_end_frame = 30;
     const drawn: number[] = [];
+    const cue: number[] = [];
     for (let f = 0; f < 15; f++) {
-      wb.tick(1 / 60);
-      drawn.push(wb.cam ? Math.trunc(wb.cam.frame) : -1);
+      WalkerCameraFrame(wb);
+      drawn.push(G.g_rail_frame);
+      cue.push(G.g_cam_path_frame);
     }
     check("...and a range moved on under it is drawn frame by frame",
           drawn.slice(0, 10).join() === "21,22,23,24,25,26,27,28,29,30"
           && drawn[14] === 30, drawn.join(","));
+    // `CameraDriverSelectMode` publishes `__ftol(g_rail_frame)` in the camera
+    // actor, a task before the hook steps the rail.
+    check("...and published a frame behind, by the driver ahead of the hook",
+          cue.slice(1, 11).every((c, i) => c === drawn[i]),
+          `${cue.join(",")} against ${drawn.join(",")}`);
   }
 
   // And the seek's half: `seekTo` observes no waits, so an address behind
@@ -15997,11 +16328,15 @@ console.log("\na stashed path is played by a hook that steps first:");
   // reached with the camera on frame 0 of a shot the script only ever leaves
   // at 10 — and the `finish_sequence` behind it then froze it there.
   const w2 = new Walker(script, host);
+  ResetGameGlobals();
+  EnterPlay();
   seekTo(w2, 0, 0, 3);
   check("a seek over the wait lands with the shot at its end",
-        w2.cam?.frame === 10, `frame ${w2.cam?.frame}`);
-  check("...and with the action retired",
-        w2.cam?.done === true, `done ${w2.cam?.done}`);
+        G.g_rail_frame === 10 && G.g_cam_path_frames_left === 0,
+        `rail ${G.g_rail_frame} left ${G.g_cam_path_frames_left}`);
+  check("...and with the action ring drained",
+        G.g_evt_action_ring.length === 0,
+        `${G.g_evt_action_ring.length} queued`);
 
   // A target that is not a whole number has to throw, because the silent
   // failure is total rather than partial: `arrived()` compares
@@ -17632,18 +17967,21 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
           `flag ${G.g_script_flags[BOSS4_FIGHT_READY_FLAG]}`);
   }
 
-  // **The boss holds the camera**, while bit 0x10000 is clear.
+  // **The boss holds the camera**, while bit 0x10000 is clear:
+  // `Boss4Update`'s `ActorRegisterCameraPoint(state+0x70)` at `0x00491A49`
+  // ends in `RegisterForCameraTracking`, and the next fill deals him a slot.
   {
     const obj = bossFighting();
     obj.flags &= ~ActorFlag.NoCameraTrack;
-    UpdateCameraEnemySlots(EYE);
+    UpdateCameraEnemySlots();
+    ActorRegisterCameraPoint(obj, NULL_HOST, obj.boss4!.cameraRise);
+    UpdateCameraEnemySlots();
     check("the stage-4 boss is a camera candidate while bit 0x10000 is clear",
-          G.g_enemy_slots.includes(obj.at),
-          `[${G.g_enemy_slots.join(",")}]`);
+          slotHolds(obj.at), slotsShown());
     obj.flags |= ActorFlag.NoCameraTrack;
-    UpdateCameraEnemySlots(EYE);
-    check("...and not once it is raised",
-          !G.g_enemy_slots.includes(obj.at));
+    ActorRegisterCameraPoint(obj, NULL_HOST, obj.boss4!.cameraRise);
+    UpdateCameraEnemySlots();
+    check("...and not once it is raised", !slotHolds(obj.at), slotsShown());
   }
 
   // **The damage model**: the head by table, flesh by one, the rest nothing.
@@ -18685,6 +19023,7 @@ console.log("\nclass 0x33 selector 1: the carrier, and the room it opens:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
     G.g_camera_fixed_eye_y = 0;
   };
@@ -19090,6 +19429,7 @@ console.log("\nthe idle groan, the weapon loop, and kind 4:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
   };
 
@@ -19326,6 +19666,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     EnterPlay();
     SetGameTables(CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     G.g_players_in_play = 1;
   };
   const makeChair = (tail = STAGE1(),
@@ -21507,6 +21848,7 @@ console.log("\nznjoe's creature:");
     ResetGameGlobals();
     SetGameTables(joeChars);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     openShutter();
     const joe = spawnZombie(0x0a68, JOE, "znjoe", {}, rng);
@@ -22104,6 +22446,7 @@ console.log("\nclass 0x40, the horde:");
     ResetGameGlobals();
     SetGameTables(HORDE_CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     if (players === 2) JoinPlayerTwo();
     G.g_active_player = 0;
@@ -22260,6 +22603,7 @@ console.log("\nclass 0x40, the horde:");
     const rng = new Rng(421);
     room(0, 3, rng);
     G.g_scene_state_major_entered = 1;
+    G.g_scene_state_major = 1;
     place(0x2b94, 1, vec3(-70, -10, -520), rng);
     for (let i = 0; i < 1500; i += 1) step(rng);
     check("outside play nobody dives, and nobody is hurt",
@@ -22708,6 +23052,7 @@ console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
     ResetGameGlobals();
     SetGameTables(CARRY_CHARS);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     G.g_active_player = 0;
     const z = spawnZombie(0x4050, 1, "drummer", {
@@ -22872,6 +23217,7 @@ console.log("\nclass 0x30 state 37, release 3 — stage 1's barrel over the civi
   EnterPlay();
   SetGameTables({ ...CHARS, types: { "1": DROP_TYPE } } as unknown as CharactersJson);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   G.g_app_state = AppState.InPlay;
   const victim = ActorSpawn(0x3c38, SpawnClass.Zombie, 1, "victim");
   victim.visible = true;
@@ -23186,6 +23532,7 @@ console.log("\nclass 0x30 state 37, release 5 — stage 2's rolling barrels, the
     SetGameTables({ ...CHARS, types: { "1": ROLL_TYPE } } as unknown as CharactersJson);
     T.breakables = { effects: { "18": DRUM_EFFECT } } as never;
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     G.g_active_player = 0;
     G.g_camera_fixed_eye_y = -20;
@@ -23735,52 +24082,74 @@ console.log("\nthe damage overlay:");
 
 {
   // The nod: `UpdateSceneViewAndLight` re-aims the block at (0, pitch, -1000)
-  // in its own un-rolled frame. Tested off the identity (L48): a camera
-  // turned a quarter, and one looking down, where "up" is not world +Y.
-  const near = (a: { x: number; y: number; z: number }, x: number, y: number,
-                z: number) => Math.abs(a.x - x) < 1e-3
-                && Math.abs(a.y - y) < 1e-3 && Math.abs(a.z - z) < 1e-3;
+  // in its own un-rolled frame and builds the view from the angles that
+  // leaves. Tested off the identity (L48): a camera turned a quarter, and one
+  // looking down, where "up" is not world +Y.
   const eye = vec3(5, 2, 7);
-  const o = vec3();
-  ShakeNodLookAt(eye, vec3(5, 2, -100), 39, o);
+  const viewDir = (): Vec3 => {
+    const p = vec3();
+    MatrixTransformPoint(G.g_camera_view_to_world, { x: 0, y: 0, z: -1 }, p);
+    return vec3(p.x - G.g_camera_block_eye.x, p.y - G.g_camera_block_eye.y,
+                p.z - G.g_camera_block_eye.z);
+  };
+  const degBetween = (a: Vec3, b: Vec3): number => {
+    const d = (a.x * b.x + a.y * b.y + a.z * b.z)
+      / (Math.hypot(a.x, a.y, a.z) * Math.hypot(b.x, b.y, b.z));
+    return Math.acos(Math.min(1, Math.max(-1, d))) * 180 / Math.PI;
+  };
+  /** The view direction a block at `eye` aimed at `target` draws with. */
+  const nodded = (target: Vec3, pitch: number): Vec3 => {
+    ResetGameGlobals();
+    G.g_camera_block_eye = vec3(eye.x, eye.y, eye.z);
+    G.g_camera_block_target = vec3(target.x, target.y, target.z);
+    CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera,
+                                G.g_camera_block_target, 0);
+    G.g_screen_shake_pitch = pitch;
+    UpdateSceneViewAndLight();
+    return viewDir();
+  };
+  // Whole BAMS on both angles: a hundredth of a degree is the budget.
+  const TOL = 0.02;
+  let d = nodded(vec3(5, 2, -100), 39);
   check("looking down -Z, a pitch of 39 aims 39 up at 1000 ahead",
-        near(o, 5, 41, -993), JSON.stringify(o));
-  ShakeNodLookAt(eye, vec3(50, 2, 7), -39, o);
+        degBetween(d, vec3(0, 39, -1000)) < TOL, JSON.stringify(d));
+  d = nodded(vec3(50, 2, 7), -39);
   check("a quarter turn keeps the nod vertical, and the sign",
-        near(o, 1005, -37, 7), JSON.stringify(o));
+        degBetween(d, vec3(1000, -39, 0)) < TOL, JSON.stringify(d));
   // 30 degrees down: up' = (0, cos30, -sin30) for a camera facing -Z.
-  const d = { x: 5, y: 2 - Math.sin(Math.PI / 6), z: 7 - Math.cos(Math.PI / 6) };
-  ShakeNodLookAt(eye, d, 10, o);
+  const c = Math.cos(Math.PI / 6), sn = Math.sin(Math.PI / 6);
+  d = nodded(vec3(5, 2 - sn, 7 - c), 10);
   check("looking down, the nod is about the camera's own right axis",
-        near(o, 5, 2 - 500 + 10 * Math.cos(Math.PI / 6),
-             7 - 1000 * Math.cos(Math.PI / 6) - 10 * Math.sin(Math.PI / 6)),
-        JSON.stringify(o));
-  ShakeNodLookAt(eye, vec3(5, 2, -100), 0, o);
-  check("no shake, no nod", near(o, 5, 2, -993));
+        degBetween(d, vec3(0, -500 + 10 * c, -1000 * c - 10 * sn)) < TOL,
+        JSON.stringify(d));
+  d = nodded(vec3(5, 2, -100), 0);
+  check("no shake, no nod", degBetween(d, vec3(0, 0, -1)) < TOL);
+  const before = [G.g_camera_block_pitch_bams, G.g_camera_block_yaw_bams];
+  for (let i = 0; i < 60; i++) UpdateSceneViewAndLight();
+  check("...and with no driver re-deriving the angles, sixty nods of nothing "
+        + "leave them where they were",
+        G.g_camera_block_pitch_bams === before[0]
+        && G.g_camera_block_yaw_bams === before[1],
+        `${before} -> ${G.g_camera_block_pitch_bams},${G.g_camera_block_yaw_bams}`);
 
-  // Through the frame: a hit's shake reaches the block's view target at the
-  // end of `GameUpdate`, where `UpdateSceneViewAndLight` would apply it, and
-  // leaves the block's own eased target alone.
+  // Through the frame: the shake a hit starts reaches the view the next
+  // frame's camera actor builds, as a turn of atan(pitch / 1000) off the
+  // block's own (eased) aim -- which the nod leaves alone.
   const rng = new Rng(43);
   const events = scene(1, rng);
-  G.g_camera_block_eye = vec3(0, 0, 0);
-  G.g_camera_block_target = vec3(0, 0, -50);
+  SeatCamera(vec3(0, 0, 0), vec3(0, 0, -50));
   SceneStateInstallPlayerHooks(2, 4);
   PlayerTakeDamage(0, 1, DamageOverlayKind.Bite, events);
   GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-  // The eye is the origin, so the view target is 1000 along the block's
-  // (eased) aim plus `pitch` across it, whatever the camera tick did to it.
-  const v = G.g_camera_block_view_target;
   const pitch = G.g_screen_shake_pitch;
-  const t = G.g_camera_block_target;
-  const n = Math.hypot(t.x, t.y, t.z);
-  const along = (v.x * t.x + v.y * t.y + v.z * t.z) / n;
-  const across = Math.hypot(v.x - t.x / n * along, v.y - t.y / n * along,
-                            v.z - t.z / n * along);
-  check("the frame's last step aims the view by the shake's pitch",
-        pitch !== 0 && Math.abs(along - 1000) < 1e-3
-        && Math.abs(across - Math.abs(pitch)) < 1e-3,
-        `pitch ${pitch} along ${along} across ${across}`);
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  const turned = degBetween(viewDir(), vec3(G.g_camera_block_target.x,
+                                            G.g_camera_block_target.y,
+                                            G.g_camera_block_target.z));
+  const want = Math.atan(Math.abs(pitch) / 1000) * 180 / Math.PI;
+  check("the next frame's view is nodded by the shake's pitch",
+        pitch !== 0 && Math.abs(turned - want) < TOL,
+        `pitch ${pitch} turned ${turned.toFixed(4)} want ${want.toFixed(4)}`);
 }
 
 
@@ -24527,10 +24896,26 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("...and a held driver is mode 6, which does nothing and frees nothing",
         G.g_camera_mode === CameraMode.Held && G.g_camera_free === 0);
 
+  const headingAtSeat = [G.g_camera_block_yaw_bams, G.g_camera_block_pitch_bams,
+                         G.g_camera_block_roll_bams].join();
   BossBannersTick(host);
   check("the slide flies the camera block along the record's path",
         G.g_camera_block_eye.x === 2 && G.g_camera_block_target.z === 10,
         JSON.stringify(G.g_camera_block_eye));
+  // **Eye and target, no angles**: the view is built from the angles, so the
+  // flight carries the eye and keeps the heading it found. `CamEvalPath7`
+  // writes six floats and the banner never calls `CamBlockSetAnglesFromLookAt`.
+  UpdateSceneViewAndLight();
+  check("...and leaves the block's heading alone, so the view keeps it and "
+        + "sits at the banner's eye",
+        [G.g_camera_block_yaw_bams, G.g_camera_block_pitch_bams,
+         G.g_camera_block_roll_bams].join() === headingAtSeat
+        && G.g_camera_view_to_world[12] === Math.fround(2)
+        && G.g_camera_view_to_world[13] === Math.fround(1)
+        && G.g_camera_view_to_world[14] === Math.fround(2),
+        `${headingAtSeat} -> ${G.g_camera_block_yaw_bams},`
+        + `${G.g_camera_block_pitch_bams}; `
+        + `${Array.from(G.g_camera_view_to_world.slice(12, 15)).join()}`);
   let restacked = -1;
   while (j.frame < 0x50 && j.step === BannerStep.Slide) {
     BossBannersTick(host);
@@ -24641,34 +25026,77 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
 // boss's camera cues -- is what they play next.
 {
   ResetGameGlobals();
-  const drawn = (tick: () => boolean): number[] => {
+  // Past the gate, so this block is about the range: the gate has its own.
+  G.g_force_rail_advance = 1;
+  /** The frames a hook publishes, until it stops stepping. */
+  const drawn = (tick: () => void): number[] => {
     const out: number[] = [];
-    for (let i = 0; i < 100 && tick(); i++) out.push(G.g_rail_frame);
+    for (let i = 0; i < 100; i++) {
+      const was = G.g_stashed_path_frame;
+      tick();
+      if (G.g_stashed_path_frame === was) break;
+      out.push(G.g_rail_frame);
+    }
     return out;
   };
-  CamStashPathRange(351, 384);
+  CamStashPathRange(35, 351, 384);
   const six = drawn(CameraStepRailTick);
   check("state (2,6) increments before it publishes and stops at the end: "
         + "351..384 draws 352..384",
         six[0] === 352 && six[six.length - 1] === 384 && six.length === 33,
         `${six[0]}..${six[six.length - 1]} (${six.length})`);
-  CamStashPathRange(351, 384);
+  check("...and `g_cam_path_frames_left` reads 0 on the last",
+        G.g_cam_path_frames_left === 0, `${G.g_cam_path_frames_left}`);
+  CamStashPathRange(35, 351, 384);
   const seven = drawn(CameraPlayStashedPath);
   check("...and state (2,7)'s JG lets one frame past the end through: "
         + "352..385", seven[seven.length - 1] === 385 && seven.length === 34,
         `${seven[0]}..${seven[seven.length - 1]} (${seven.length})`);
-  check("a finished rail publishes nothing more", !CameraStepRailTick()
-        && G.g_rail_frame === 385);
   // What `Boss4PlayCameraCue` does: overwrite both stash words from game code.
   G.g_stashed_path_frame = 600;
   G.g_stashed_path_end_frame = 640;
+  CameraStepRailTick();
   check("...until game code moves the range on, and it plays from there",
-        CameraStepRailTick() && G.g_rail_frame === 601,
-        `${G.g_rail_frame}`);
+        G.g_rail_frame === 601, `${G.g_rail_frame}`);
   ResetGameGlobals();
   check("a reset leaves no stale range for a seek to replay",
         G.g_stashed_path_frame === 0 && G.g_stashed_path_end_frame === 0
         && G.g_rail_frame === 0);
+}
+
+/**
+ * **The rail's gate.** Both hooks step the stash only when
+ * `g_force_rail_advance == 1 || IsDemoRun() || (g_screen_shake_frames == 0 &&
+ * g_players_in_play != 0)` (`0x0040C7A6`, `0x0040C8C6`): a hit holds the rail
+ * for the shake, and so does an empty game. The frame is still published and
+ * the pose still evaluated, so the camera stands rather than blanks.
+ */
+{
+  ResetGameGlobals();
+  EnterPlay();
+  CamStashPathRange(35, 100, 200);
+  CameraStepRailTick();
+  check("with a player in play and no shake the rail steps",
+        G.g_stashed_path_frame === 101 && G.g_rail_frame === 101,
+        `${G.g_stashed_path_frame}`);
+  G.g_screen_shake_frames = 0x30;
+  CameraStepRailTick();
+  CameraPlayStashedPath();
+  check("a shake holds it where it is -- both hooks -- still publishing",
+        G.g_stashed_path_frame === 101 && G.g_rail_frame === 101
+        && G.g_cam_path_frames_left === 99,
+        `${G.g_stashed_path_frame} ${G.g_cam_path_frames_left}`);
+  G.g_screen_shake_frames = 0;
+  const inPlay = G.g_players_in_play;
+  G.g_players_in_play = 0;
+  CameraStepRailTick();
+  check("...and so does nobody being in play", G.g_stashed_path_frame === 101);
+  G.g_force_rail_advance = 1;
+  CameraStepRailTick();
+  check("...unless the script forces it (opcode 0x37)",
+        G.g_stashed_path_frame === 102);
+  G.g_force_rail_advance = 0;
+  G.g_players_in_play = inPlay;
 }
 
 // JUDGMENT -- classes 0x22 and 0x23, `game/class22/` and `game/class23/`. The
@@ -25789,6 +26217,7 @@ console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce
     ResetGameGlobals();
     SetGameTables(CHARS31_TURN);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     G.g_camera_yaw_bams = 0;
     const a = ActorSpawn(0x9a00, SpawnClass.Thrower, type, "t", {
@@ -25943,6 +26372,7 @@ console.log("\nclass 0x31, the ground: the bounce's puff, the landing's column a
     T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB, wet: WET_FLOOR } };
     G.g_coli_full_set = ["floor"];
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     EnterPlay();
     const a = ActorSpawn(nextAt++, SpawnClass.Thrower, type, name, {
       initialState: ThrowerState.StandAndDecide, condition,
@@ -26360,9 +26790,10 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
 
   // `ActorHeadAimAngles`, with two attackers: 1.5 in front of the camera, 15
   // up, and 1.2 to the side of the player whose permit the actor holds. This
-  // file's camera looks down +z, `g_camera_yaw_bams` 0, so "in front" is +z.
+  // file's camera looks down +z, which is a block yaw of half a turn (the
+  // view looks down its own -z), so "in front" is +z.
   const t = zombie();
-  G.g_camera_yaw_bams = 0;
+  G.g_camera_block_yaw_bams = 0x8000;
   const far = vec3(0, 10, 101.5);
   const one = ActorHeadAimAngles(t, far, eye).yaw;
   G.g_max_attackers = 2;

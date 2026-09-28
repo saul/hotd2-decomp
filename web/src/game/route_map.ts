@@ -40,7 +40,8 @@ import { PlayerTasksCreate, PlayerTasksRun, type PlayerFrame }
   from "./player_shell";
 import { PlayerState } from "./player_state";
 import { PlayerBodiesCreate } from "./player_body";
-import { CameraBlocksReset } from "./game_over";
+import { CameraBlocksReset } from "./camera/actions";
+import { UpdateSceneViewAndLight } from "./camera/view";
 import { DrawScreenSprite } from "./screen_sprite";
 import { PROJECTION_DISTANCE_PX } from "./scene_lights";
 import { T } from "./tables";
@@ -231,15 +232,14 @@ export function GameOverRouteMapArm(f: PlayerFrame): void {
  * player 2 is, and otherwise player 1's `0x18` to the side with the partner
  * beside it. Then `RouteMapDrawTask`.
  *
- * `[port-only]`: the block's look-at goes one unit down -Z from the eye. The
- * engine builds this view from the block's angles, which the reset zeroes --
- * a camera looking down its own -Z -- and never from the look-at; the port's
- * draw orients from the look-at, and this is the same view.
+ * The view is built from the block's angles, which the reset zeroes: a camera
+ * at `(0, 0, -7)` looking down its own -Z. `RouteCameraTaskCreate`
+ * (`FUN_004610D0`) allocates `UpdateSceneViewAndLight` as the list's first
+ * task, so {@link GameOverRouteTasksWalk} builds the view every frame.
  */
 export function GameOverBuildRouteTasks(): void {
   CameraBlocksReset();
   G.g_camera_block_eye.z = ROUTE_CAMERA_EYE_Z;
-  G.g_camera_block_target.z = ROUTE_CAMERA_EYE_Z - 1;
   PlayerBodiesCreate();
   PlayerTasksCreate();
   const p1 = G.g_player_state[0] === PlayerState.GameOver;
@@ -529,12 +529,14 @@ export function RouteMapDrawTask(): void {
 }
 
 /**
- * `[port-only]` -- the route list, walked: the player tasks, the figures, the
- * map, then the footprints (allocated after the map task, so after it in the
- * walk; each is drawn by the renderer from its record). The camera tasks'
- * `CameraUpdateTick` runs scene state (0, 0)'s no-op.
+ * `[port-only]` -- the route list, walked: the view (`UpdateSceneViewAndLight`,
+ * the list's first task), the player tasks, the figures, the map, then the
+ * footprints (allocated after the map task, so after it in the walk; each is
+ * drawn by the renderer from its record). The camera tasks' `CameraUpdateTick`
+ * runs scene state (0, 0)'s no-op.
  */
 export function GameOverRouteTasksWalk(f: PlayerFrame): void {
+  UpdateSceneViewAndLight();
   PlayerTasksRun(f);
   for (const fig of G.g_route_figures) {
     if (fig.kind === 0) RouteFigureTick(fig);

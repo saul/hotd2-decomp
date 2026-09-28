@@ -1,6 +1,6 @@
 /**
- * The camera: `cam_play`, the roll switch, the fixed eye height and the
- * path-advance override.
+ * The camera: `queue_event` (every camera action goes through its ring), the
+ * roll switch, the fixed eye height and the path-advance override.
  *
  * Registered into `Walker.OPS` by `./index.ts`; the `status` field is what
  * `verify_player_ops.py` checks against docs/PLAYER_PROGRESS.md.
@@ -22,35 +22,38 @@ export const OPS: Record<number, OpImpl> = {
         : w.applyQueueEvent(op)),
     },
     0x35: {                                     // enable_camera_path_roll
+      // `g_cam_roll_enabled` (`0x009A21B0`): `CamEvalPath7` evaluates a
+      // path's roll channel only while it is set. The checkpoint clears it.
       status: "done",
-      run: (w, op) => {
-        w.rollEnabled = !!op.roll_enabled;
-        return w.rollEnabled ? "roll channel on" : "roll channel off";
+      run: (_w, op) => {
+        G.g_cam_roll_enabled = op.roll_enabled ? 1 : 0;
+        return op.roll_enabled ? "roll channel on" : "roll channel off";
       },
     },
     0x1a: {                                     // ground plane / fixed eye Y
       status: "tracked",
       run: (w, op) => {
         w.groundY = op.ground_y ?? null;
-        w.fixedEyeY = op.camera_fixed_eye_y ?? op.ground_y ?? 0;
         // The engine's own write. Class 0x41 reads it when it places a group,
         // which happens inside the spawn opcode -- so it has to be current by
         // the time that instruction runs, not by the time the frame draws.
-        G.g_camera_fixed_eye_y = w.fixedEyeY;
+        G.g_camera_fixed_eye_y = op.camera_fixed_eye_y ?? op.ground_y ?? 0;
         return undefined;
       },
     },
     0x36: {                                     // pin_view_to_ground_plane
-      // Kept and shown, not applied: `campath.cameraEyeY` has
-      // APPLY_EYE_Y_RULE off, because measuring the rule against the data
-      // found 173 of 201 paths would end up looking *up* at their own target.
-      // Until that is resolved the honest status is `tracked`.
-      status: "tracked",
-      run: (w, op) => {
-        w.useFixedEyeY = !!op.use_fixed_eye_y;
-        return w.useFixedEyeY
-          ? `camera eye Y pinned to ${w.fixedEyeY}`
-          : "camera eye Y back to path.y - 15";
+      // `g_camera_use_fixed_y` (`0x009C70F4`). At 1 the scene-state hooks put
+      // the **gameplay** eye at `g_camera_fixed_eye_y` instead of fifteen
+      // below the pose -- `camera/rail.ts`, `camera/hooks.ts`. It never
+      // reaches the drawn camera, which is the block's eye and is not
+      // lowered at all: that is why applying the rule to the draw found 173
+      // of 201 paths looking up at their own target.
+      status: "done",
+      run: (_w, op) => {
+        G.g_camera_use_fixed_y = op.use_fixed_eye_y ? 1 : 0;
+        return op.use_fixed_eye_y
+          ? `gameplay eye Y pinned to ${G.g_camera_fixed_eye_y}`
+          : "gameplay eye Y back to pose.y - 15";
       },
     },
     0x37: {                                     // force_camera_path_advance
@@ -58,8 +61,7 @@ export const OPS: Record<number, OpImpl> = {
       // `g_force_rail_advance`, which the stashed rail's gate reads -- so the
       // rail keeps stepping through a shake or with nobody in play.
       status: "done",
-      run: (w, op) => {
-        w.forcePathAdvance = !!op.force_path_advance;
+      run: (_w, op) => {
         G.g_force_rail_advance = op.force_path_advance ? 1 : 0;
         return undefined;
       },

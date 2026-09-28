@@ -312,8 +312,6 @@ export interface HordeTail {
   /** The ground shadow was drawn, at this y. */
   shadow: boolean;
   shadowY: number;
-  /** `RegisterForCameraTracking` was called this frame. */
-  tracked: boolean;
 }
 
 /** [port-only] `ActorClearGameFields` zeroes the object; this is that zero. */
@@ -337,7 +335,7 @@ export function makeHordeTail(): HordeTail {
     rimPoint: -1, settles: 0, lifetime: 0,
     frame: 0, fade: 0, size: 0,
     drawn: false, mirrored: false, mirrorY: 0, mirrorPitch: 0,
-    shadow: false, shadowY: 0, tracked: false,
+    shadow: false, shadowY: 0,
   };
 }
 

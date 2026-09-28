@@ -11,7 +11,7 @@
  * says it is drawing.
  *
  * On the first hit it also shoots six frames in a row, for the screen
- * shake's nod (`game/camera/shake.ts`).
+ * shake's nod (`game/camera/view.ts`).
  *
  * Then the two things a renderer can get wrong and the port cannot see:
  *

@@ -128,7 +128,7 @@ export interface PlayerCommands {
   /** The game-over screen's buttons. See {@link UiCommand}. */
   restartRun(stage: number): void;
   poseFromSlot(slot: number, frame: number): void;
-  syncCameraToWalker(force?: boolean): void;
+  syncCameraToWalker(reseat?: boolean): void;
   onCamera(cmd: CamCommand): void;
   onFeed(e: FeedEntry): void;
   clearFeed(): void;
@@ -233,7 +233,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.clearFeed();
       p.walker?.reset();
       p.walker?.primeToFirstWait();
-      p.syncCameraToWalker();
+      p.syncCameraToWalker(true);
       p.markAddress();
       p.pushUrl();
       return;
@@ -245,8 +245,8 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       const w = p.walker;
       if (!w?.cam) return;
       w.setCameraFrame(c.frame);
-      p.syncCameraToWalker();
-      p.state.frame = w.cam.frame;
+      p.syncCameraToWalker(true);
+      p.state.frame = w.cam?.frame;
       p.pushUrl();
       return;
     }

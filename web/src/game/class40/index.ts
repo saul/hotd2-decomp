@@ -51,6 +51,8 @@ import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { ActorDespawn } from "../despawn";
+import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
+  from "../camera/slots";
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
 import { G, PlayerState } from "../globals";
 import type { GameHost } from "../host";
@@ -602,7 +604,8 @@ export function HordeMemberInit(obj: Actor, rng: Rng, host?: GameHost):
   t.sub.frame = rng.int(HORDE_CLOCK_PHASES);
   obj.hitRadius = t.scale * HORDE_HIT_RADIUS_K;
   if (t.formation !== HordeFormation.Stage2Block25) {
-    // `RegisterEnemySlot` (`FUN_00408E80`) is the port's per-frame slot pass.
+    // `RegisterEnemySlot` at `0x0043C3B8`, then both `INC`s.
+    RegisterEnemySlot(obj);
     G.g_enemies_present += 1;
     G.g_enemies_alive += 1;
   }
@@ -754,7 +757,7 @@ export function HordeResolveShot(obj: Actor, f: ClassFrame): boolean {
   if (G.g_horde_live_count > 1) {
     G.g_horde_live_count -= 1;
     obj.flags |= HordeFlag.NoCameraTrack;
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
   }
   t.kind = HordeKind.Corpse;
   // `[port-only]` Out of the pick: the corpse routine never calls
@@ -782,7 +785,6 @@ export function HordeMemberUpdate(obj: Actor, f: ClassFrame): void {
   t.drawn = false;
   t.mirrored = false;
   t.shadow = false;
-  t.tracked = false;
   // The whole routine -- the shot, the state, the draw, the bookkeeping --
   // is skipped while camera path 0x47 plays: stage 2 block 0x19's cut scene.
   if (G.g_active_cam_path === HORDE_FREEZE_CAM_PATH) {
@@ -842,11 +844,13 @@ export function HordeMemberUpdate(obj: Actor, f: ClassFrame): void {
   obj.alpha = draw ? 1 : 0;
 
   HordePublishShotSphere(obj);
+  // `0x0043D43F`: `obj+0x100 = pos` and `RegisterForCameraTracking` at
+  // `0x0043D45B`, unless it is formation 2 waiting for its flag.
   if (!small || (G.g_script_flags[HORDE_FLAG_SMALL_LIVE] ?? 0) !== 0) {
     obj.lookAt.x = obj.pos.x;
     obj.lookAt.y = obj.pos.y;
     obj.lookAt.z = obj.pos.z;
-    t.tracked = true;
+    RegisterForCameraTracking(obj);
   }
   // A turn that has sat on an empty slot for ninety-one frames moves on.
   if ((G.g_frame_counter - G.g_horde_last_dive_frame) >>> 0
@@ -880,6 +884,8 @@ function HordeStateHold(obj: Actor, t: HordeTail): void {
     obj.flags &= ~HordeFlag.OutOfShotTest;
   }
   if (small && live === 1) {
+    // `RegisterEnemySlot` at `0x0043C768`, then both `INC`s.
+    RegisterEnemySlot(obj);
     G.g_enemies_present += 1;
     G.g_enemies_alive += 1;
   }
@@ -1186,7 +1192,6 @@ export function HordeCorpseSinkUpdate(obj: Actor): void {
   t.drawn = false;
   t.mirrored = false;
   t.shadow = false;
-  t.tracked = false;
   const n = t.counter;
   t.counter = n + 1;
   if (n > HORDE_CORPSE_FRAMES) {
@@ -1214,11 +1219,12 @@ export function HordeCorpseSinkUpdate(obj: Actor): void {
     t.drawn = true;
   }
   obj.alpha = draw ? 1 : 0;
+  // `RegisterForCameraTracking` at `0x0043DB45`, only while it is the last.
   if (G.g_horde_live_count === 1) {
     obj.lookAt.x = obj.pos.x;
     obj.lookAt.y = obj.pos.y;
     obj.lookAt.z = obj.pos.z;
-    t.tracked = true;
+    RegisterForCameraTracking(obj);
   }
   t.sub.frame += 1;
   G.g_horde_members[t.idx] = obj.at;
@@ -1287,10 +1293,6 @@ const handler: ClassHandler = {
       ReleaseEnemyAliveCount(obj);
       ReleaseEnemyPresentCount(obj);
     }
-  },
-  tracksCamera(obj: Actor): boolean {
-    const t = HordeOf(obj);
-    return !!t && t.tracked;
   },
   debug(obj: Actor): ActorDebug {
     const t = HordeOf(obj);

@@ -73,9 +73,10 @@ import { PlayerBodiesCreate } from "./player_body";
 import { GameOverRouteMapArm, GameOverRouteMapWait } from "./route_map";
 import { ScreenSpriteDraw } from "./screen_sprite";
 import { GAME_OVER_CAM_PATH } from "./player_body_data";
-import { vec3 } from "./vec";
-import type { CamPose } from "./camera/curve";
-import type { GameHost } from "./host";
+import { CameraBlocksReset } from "./camera/actions";
+import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
+  from "./camera/path";
+import { UpdateSceneViewAndLight } from "./camera/view";
 
 /** `GameOverRunPhase`'s phases -- `g_nRunPhase` while `g_app_state` is 7. */
 export enum GameOverPhase {
@@ -299,55 +300,42 @@ export function AppStateAdvanceByTable(): void {
 /** `GameOverSpawnCameraFly` starts the path here, not at its own start. */
 const FLY_START_FRAME = 10;
 
-/**
- * `CameraBlocksReset` — `FUN_004021D0`, the half of it the port keeps: the
- * camera block's eye and look-at back to the default at `0x0059C990`, which
- * is all zeroes, and the free-look and hand-back flags down. The rest --
- * `EvtEnterSceneState(0, 0)`, whose installer (`FUN_00403970`) sets the
- * camera update hook to a no-op, the two light blocks back to
- * `LightBlockInit`'s defaults -- belongs to the walker's scene state and
- * light ramps, which the game-over screen no longer runs.
- */
-export function CameraBlocksReset(): void {
-  G.g_camera_block_eye = vec3();
-  G.g_camera_block_target = vec3();
-  G.g_camera_free = 0;
-  G.g_camera_hand_back_started = 0;
-}
-
-const _flyPose: CamPose = { eye: vec3(), target: vec3(), roll: 0 };
+export { CameraBlocksReset };
 
 /**
- * `GameOverCameraFlyTick` — `FUN_00460E60`. `g_cam_path_frame` = the task's
- * counter, `CamEvalPath7(0x1F, frame)` straight into the camera block's eye
- * and look-at, the counter up one, and the angles from the look-at with a roll
- * of 0 -- so whatever the path's roll channel says, the fly-over is level.
- * `UpdateSceneViewAndLight` is the renderer's.
+ * `GameOverCameraFlyTick` — `FUN_00460E60`:
+ *
+ * ```c
+ * g_cam_path_frame = task+0x50;
+ * CamEvalPath7(0x1F, (float)g_cam_path_frame, &block.eye, &block.target, ...);
+ * task+0x50 += 1;
+ * CamBlockSetAnglesFromLookAt(&block, &block.target, 0);
+ * UpdateSceneViewAndLight();
+ * ```
+ *
+ * Whatever the path's roll channel says, the fly-over is level. `[proved]`
+ * The path is the stage bundle's `cp_gmovr` slot, read through
+ * `CamEvalPath7` like every other.
  */
-export function GameOverCameraFlyTick(host: GameHost): void {
+export function GameOverCameraFlyTick(): void {
   G.g_cam_path_frame = G.g_game_over_fly_frame;
-  const path = host.camPath?.(GAME_OVER_CAM_PATH) ?? null;
-  if (path) {
-    path.pose(G.g_cam_path_frame, false, _flyPose);
-    G.g_camera_block_eye.x = _flyPose.eye.x;
-    G.g_camera_block_eye.y = _flyPose.eye.y;
-    G.g_camera_block_eye.z = _flyPose.eye.z;
-    G.g_camera_block_target.x = _flyPose.target.x;
-    G.g_camera_block_target.y = _flyPose.target.y;
-    G.g_camera_block_target.z = _flyPose.target.z;
-  }
+  CamEvalPath7(GAME_OVER_CAM_PATH, G.g_cam_path_frame, G.g_camera_block_eye,
+               G.g_camera_block_target);
   G.g_game_over_fly_frame += 1;
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target,
+                              0);
+  UpdateSceneViewAndLight();
 }
 
 /**
  * `GameOverSpawnCameraFly` — `FUN_00460EC0`. The fly-over's camera task:
  * `CameraBlocksReset`, the counter at 10, and its first tick at once.
  */
-export function GameOverSpawnCameraFly(host: GameHost): void {
+export function GameOverSpawnCameraFly(): void {
   CameraBlocksReset();
   G.g_game_over_fly_frame = FLY_START_FRAME;
   G.g_cam_path_frame = FLY_START_FRAME;
-  GameOverCameraFlyTick(host);
+  GameOverCameraFlyTick();
 }
 
 /**
@@ -359,8 +347,8 @@ export function GameOverSpawnCameraFly(host: GameHost): void {
  * handler; and `SpawnAttackablePlayerTask`, whose screen shake has nothing to
  * shake.
  */
-export function GameOverBuildFlyTasks(host: GameHost): void {
-  GameOverSpawnCameraFly(host);
+export function GameOverBuildFlyTasks(): void {
+  GameOverSpawnCameraFly();
   PlayerBodiesCreate();
   // `PlayerTasksCreate`: every player's task is its state's handler again --
   // so a player already at 6 is armed afresh, in app state 7, onto the fall.
@@ -370,10 +358,11 @@ export function GameOverBuildFlyTasks(host: GameHost): void {
 /**
  * `GameOverResetCamera` — `FUN_00460EF0`, the logo list's first task:
  * `CameraBlocksReset` and `UpdateSceneViewAndLight`. With the block at the
- * origin looking at the origin and no stage resident, the logo sits on black.
+ * origin, its angles zero and no stage resident, the logo sits on black.
  */
 export function GameOverResetCamera(): void {
   CameraBlocksReset();
+  UpdateSceneViewAndLight();
 }
 
 /**
@@ -404,7 +393,7 @@ export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
       // `g_camera_eye_x/y/z` and the three angles (`0x009C71E0`..`F4`), which
       // the port does not keep: they are what `GameOverPlaceBody` pushes the
       // body's table point through, and zero makes that the identity.
-      GameOverBuildFlyTasks(f.host);
+      GameOverBuildFlyTasks();
       for (let p = 0; p < 2; p++) {
         if (G.g_player_state[p] === PlayerState.Continue) {
           PlayerSetState(PlayerState.GameOver, 1, p);
@@ -419,7 +408,7 @@ export function GameOverRunPhase(f: PlayerFrame, events?: Events): void {
       // The fly-over's task list, walked: the camera task first, then the
       // players, whose hook draws the bodies.
       GameOverBodiesUndrawn();
-      GameOverCameraFlyTick(f.host);
+      GameOverCameraFlyTick();
       PlayerTasksRun(f);
       // Original Mode copies the carried items out on frame 0xC6 and saves
       // them (`FUN_004011F0`); the port keeps no save.

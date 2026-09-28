@@ -31,6 +31,7 @@ import {
 } from "../combat/counts";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import { CameraSlotVacate } from "../camera/slots";
 import { AttackListOf, CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
@@ -393,7 +394,7 @@ function ZombieStandAndThrowRetire(obj: ZombieActor,
   // rather than reached through `ZombieReleasePermitAndUntrack`. The port
   // keeps `g_enemy_slots` as the list of spawn addresses the fill rebuilds
   // each frame, so dropping this actor from it is the same statement.
-  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  CameraSlotVacate(obj);
   // `if ((obj+0x38 & 0x40) && obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0` — the
   // hit-slot system is not ported at all; see `Actor.flags38`.
   obj.zom.throwDelay = tail?.leave_delay ?? 0;

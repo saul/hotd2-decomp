@@ -174,6 +174,16 @@ const _pose: CamPose = { eye: vec3(), target: vec3(), roll: 0 };
  * camera block, straight off the banner's own path; the roll is thrown away.
  * A host with no paths leaves the block where it is, as
  * `GameOverCameraFlyTick` does.
+ *
+ * **Eye and target only, no angles.** `CamEvalPath7` writes six floats and
+ * nothing else, and the banner never calls `CamBlockSetAnglesFromLookAt`
+ * (`FUN_00403AC0`'s callers do not include it, and no instruction between
+ * `0x00437AC0` and its `RET` names `0x009A60CC..D4`). The view is built from
+ * the angles (`UpdateSceneViewAndLight`), so the card flight carries the eye
+ * along the path and keeps the heading the camera had when the banner took
+ * it; the path's target is written and nothing draws from it. `[proved]` The
+ * view of a frame is built at its head, before the banner's task runs, so it
+ * shows the eye the banner wrote the frame before.
  */
 function BannerFlyCamera(rec: BossIntroBannerRecord, frame: number,
                          host: GameHost): void {

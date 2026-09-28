@@ -40,12 +40,11 @@ import { GameSystem, ScriptSystem, syncPortGlobals }
   from "../src/app/systems.ts";
 import { ResetPropContainers } from "../src/game/class41/index.ts";
 import { CamPaths } from "../src/game/camera/curve.ts";
-import { CamSeatPathFrame } from "../src/game/camera/path.ts";
 import { SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G } from "../src/game/globals.ts";
 import { OwlState } from "../src/game/class43/state.ts";
-import { SetGameTables } from "../src/game/tables.ts";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
 import { hasBundle, skipNoBundle, stageFile } from "./lib/bundle_root.ts";
@@ -110,6 +109,7 @@ for (const [name, stage, block, step, subtype, entry] of CASES) {
   world.attach(ctx);
   SetGameTables(chars, script.breakables, script.set_pieces, script.humanoids,
                 script.coli, script.civilians);
+  SetCameraPaths(cam);
   // In play through the ported routines, not by hand (L49): the reset
   // started the game from the title, and this is the first player turn.
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
@@ -125,11 +125,10 @@ for (const [name, stage, block, step, subtype, entry] of CASES) {
 
   // What `seatCamera` does, minus the rig: the block's eye is the engine's,
   // and it is what the dive measures against.
+  // The eye the next tick's frame is handed, as the app's `CameraTakeSystem`
+  // hands it: the camera the last tick drew. The camera block itself is the
+  // port's -- the action ring and the drivers seat it inside `GameUpdate`.
   const seat = () => {
-    const c = walker.cam;
-    const p = c && cam.paths.get(c.slot);
-    if (!p) return;
-    CamSeatPathFrame(p, c.frame, walker.rollEnabled, !c.retired);
     ctx.view.eye.x = G.g_camera_block_eye.x;
     ctx.view.eye.y = G.g_camera_block_eye.y;
     ctx.view.eye.z = G.g_camera_block_eye.z;

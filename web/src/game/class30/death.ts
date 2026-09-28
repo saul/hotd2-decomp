@@ -42,6 +42,7 @@ import { ReleaseAttackSlot } from "../combat/permits";
 import { QueryGroundHeightAt } from "../coli";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import { CameraSlotVacate } from "../camera/slots";
 import type { GameHost } from "../host";
 import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
@@ -256,7 +257,7 @@ export function ZombieReleasePermitAndUntrack(obj: ZombieActor): void {
     // permit at `obj+0x121`. Modelled as a filter by `at`, for the reason
     // `ThrowerLeave` gives: the port keeps `g_enemy_slots` as a list of
     // actors.
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
   }
   ReleaseEnemyAliveCount(obj);
 }
@@ -401,7 +402,7 @@ function ZombieCorpseBegin(obj: ZombieActor): void {
  */
 function ZombieCorpseLeave(obj: ZombieActor): void {
   obj.flags |= ActorFlag.NoCameraTrack;
-  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  CameraSlotVacate(obj);
   ActorDespawn(obj);
 }
 

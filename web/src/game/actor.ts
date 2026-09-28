@@ -1371,6 +1371,14 @@ export interface ActorBase {
    * A `number` that cannot go negative is the wrong shape for it.
    */
   attackPermit: number;     // +0x121, s8, 0xFF = none
+  /**
+   * `obj+0x120` — the `g_enemy_slots` index this actor was last dealt, an s8
+   * with `0xFF` (-1) for none. `UpdateCameraEnemySlots` (`FUN_00408DD0`) and
+   * `RegisterEnemySlot` (`FUN_00408E80`) write it; the death paths clear the
+   * slot it names -- and only the slot, so it can go stale. See
+   * `camera/slots.ts`.
+   */
+  cameraSlot: number;       // +0x120, s8, 0xFF = none
   /** `ActorBodyConditionFromHands` — indexes the attack and motion tables. */
   condition: number;        // +0x130C
   state: number;            // +0x1310
@@ -2323,6 +2331,12 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     hp: 0,
     maxHp: 0,
     attackPermit: -1,
+    // `ActorClearGameFields` zeroes it, and only the Inits that call
+    // `RegisterEnemySlot` or store `0xFF` themselves change that -- class
+    // 0x30's does neither, so a zombie that dies before any fill has dealt
+    // it a slot vacates slot 0. `[likely]`: no immediate store to `+0x120`
+    // in `EnemyZombieInit` (byte search over every register encoding).
+    cameraSlot: 0,
     condition: 0,
     state: 0,
     sub: 0,

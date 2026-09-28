@@ -103,6 +103,7 @@ for (let stage = 1; stage <= 6; stage++) {
     // the major is 2 -- the `cam/` path camera row -- so a harness that leaves
     // it at 0 is testing a scripted cutscene, where nothing may attack.
     G.g_scene_state_major_entered = 2;
+    G.g_scene_state_major = 2;
 
     const a = ActorSpawn(sp.at, sp.class, p.char_type,
                          chars.types[String(p.char_type)]?.name ?? "?",

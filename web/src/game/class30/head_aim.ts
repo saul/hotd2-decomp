@@ -144,12 +144,17 @@ const _aim = vec3();
  * 1.5 in front of the camera, 15 up and 1.2 to one side for the player whose
  * permit the actor holds -- the head looks at *its* player.
  *
- * `[likely]` the heading: the engine's block yaw is `g_camera_yaw_bams` half a
- * turn round. `UpdateSceneViewAndLight` builds the view as `T(eye) Ry(yaw) Rx
- * Rz` looking down its own -z, so the block's yaw is the heading of the
- * camera's *back*, and the port fills `g_camera_yaw_bams` from the camera's
- * forward axis (`CameraFrame.place`). The `-1.5` is then in front, which is
- * the reading that makes the point one the head can see.
+ * The heading is the camera block's own yaw, `0x9A60D0 + g_camera_index *
+ * 0x1A4` read at `0x00453DD1` `[proved]`. `UpdateSceneViewAndLight` builds
+ * the view as `T(eye) Ry(yaw) Rx Rz` looking down its own -z, so the `-1.5` is
+ * in front of the camera, which is the reading that makes the point one the
+ * head can see.
+ *
+ * The eye is `g_camera_eye` (`0x009C71E0`, both branches); the callers pass
+ * `ClassFrame.eye`, which is still the camera the renderer last drew rather
+ * than the gameplay eye the scene state's hook writes. They coincide on a
+ * path (the hook's eye is the pose's, fifteen units down, and the target here
+ * is fifteen up) but not under a fixed eye height or while the eye eases.
  */
 export function ActorHeadAimAngles(obj: Actor, pt: Vec3, eye: Vec3):
     { pitch: number; yaw: number } {
@@ -157,7 +162,7 @@ export function ActorHeadAimAngles(obj: Actor, pt: Vec3, eye: Vec3):
   if (G.g_max_attackers === 2 && obj.attackPermit !== -1) {
     const m = MatIdentity();
     MatrixTranslate(m, eye.x, eye.y, eye.z);
-    MatrixRotateY(m, G.g_camera_yaw_bams + HEAD_AIM_FACING);
+    MatrixRotateY(m, G.g_camera_block_yaw_bams);
     _aim.x = Math.fround((1 - 2 * obj.attackPermit) * HEAD_AIM_SHOULDER);
     _aim.y = HEAD_AIM_TWO_RISE;
     _aim.z = HEAD_AIM_AHEAD;

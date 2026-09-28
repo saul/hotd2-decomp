@@ -1,67 +1,80 @@
 /**
- * The two waits that count down: `wait_frames` (0x42) and
+ * The two clock waits: `wait_frames` (0x42) and
  * `wait_camera_path_frame` (0x41).
  *
- * Both produce a `frames` policy, because both are answered by the same
- * clock — the difference is only where the count comes from.
+ * `wait_frames` counts its own frames; `wait_camera_path_frame` reads the
+ * camera's words in `G` every frame, as the engine's does.
  */
 import type { OpJson } from "../../bundle";
+import { G } from "../../game/globals";
 import type { WaitPolicy } from "../walker";
 import type { WaitContext, WaitRule } from "./types";
 
+/**
+ * `EvtOpWaitFrames42` (`FUN_0045FB30`):
+ *
+ * ```c
+ * if (skip) { pc += 8; return; }
+ * if (g_evt_yield == 0) { counter = operand; g_evt_yield = 1; return; }     // the first visit
+ * if ((counter < 0 || --counter < 0) && g_evt_gameplay_live) { g_evt_yield = 0; pc += 8; }
+ * ```
+ *
+ * The counter is loaded on the visit that yields and decremented *before* it
+ * is tested, so the instruction behind `wait_frames n` runs `n + 1` frames
+ * after the one the wait was reached on. `[proved]`
+ */
 export const waitFrames: WaitRule = {
   ops: [0x42],
   skippable: true,
   enter(op: OpJson): WaitPolicy {
-    return { kind: "frames", framesLeft: op.arg ?? 0 };
+    return { kind: "frames", framesLeft: (op.arg ?? 0) + 1 };
   },
   satisfied(policy: WaitPolicy): boolean {
     return policy.kind !== "frames" || policy.framesLeft <= 0;
   },
 };
 
+/**
+ * `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`):
+ *
+ * ```c
+ * if (!skip) {
+ *     if (g_evt_yield == 0) { g_evt_yield = 1; return; }       // the first visit
+ *     if (g_evt_gameplay_live) {
+ *         if (operand == 0) { if (g_cam_path_frames_left < 1) goto pass; }
+ *         else if (operand < g_cam_path_frame) goto pass;
+ *     }
+ *     return;
+ * }
+ * pass: g_evt_yield = 0; pc += 8;
+ * ```
+ *
+ * Operand 0 is "the shot's last frame is out", anything else "the path has
+ * **passed** the operand", strictly. Both read the camera's words as the
+ * camera tasks left them on the frame before -- the interpreter runs first --
+ * and neither is read on the frame the wait is reached. `[proved]`
+ *
+ * Measured before transcribing, because a strict wait that cannot be
+ * satisfied is a hang: across the shipped scripts, of the
+ * `wait_camera_path_frame <n>` sites that have a play in force, **none**
+ * names the last frame its own play publishes.
+ */
 export const waitCameraPathFrame: WaitRule = {
   ops: [0x41],
   skippable: true,
   // Stepping past this one is a claim about where the camera is. See
   // `WaitRule.skipRunsCameraOn`.
   skipRunsCameraOn: true,
-  enter(op: OpJson, ctx: WaitContext): WaitPolicy {
-    // Operand 0 means "to the end of the path"; otherwise wait until the path
-    // frame **passes** the operand, and passes is strict.
-    //
-    // `EvtOpWaitCameraPathFrame41` (`FUN_0045FAC0`), the two arms:
-    //
-    // ```
-    // 0045fadb  MOV  EAX,[0x009c7108]        ; the instruction
-    // 0045fae0  MOV  EAX,[EAX + 4]           ; ...its operand
-    // 0045fae3  CMP  EAX,ECX / JZ 0045fb03   ; operand 0 -> the other arm
-    // 0045fae7  CMP  dword ptr [0x009a6110],EAX
-    // 0045faed  JLE  0045fb29                ; frame <= operand: keep waiting
-    //
-    // 0045fb03  CMP  dword ptr [0x009c6f28],ECX
-    // 0045fb09  JG   0045fb29                ; frames left > 0: keep waiting
-    // ```
-    //
-    // So the operand form needs `g_cam_path_frame > operand` — frame
-    // `operand + 1` — and `runCameraOnPast` already says so for the seek's
-    // half of the same rule (`Math.min(arg + 1, ...)`). This read the
-    // operand itself, so the live wait released one frame before the seek's
-    // postcondition put the camera, and the instructions behind it ran a
-    // frame early. Stage 2's block 9 is what that cost: the step's
-    // `wait_camera_path_frame 384` let `finish_sequence 4` freeze the camera
-    // on 384, so frame **385** — a stashed play's last, and the cue a
-    // civilian's killed stream waits on with an equality — was never
-    // published, and `wait_script_flag 3` behind it held for ever.
-    //
-    // Measured before transcribing, because a strict wait that cannot be
-    // satisfied is a hang: across the shipped scripts, of the
-    // `wait_camera_path_frame <n>` sites that have a play in force, **none**
-    // names the last frame its own play publishes.
-    const arg = op.arg ?? 0;
-    const target = arg === 0 ? ctx.cam?.endFrame ?? 0 : arg + 1;
-    const left = ctx.cam ? Math.max(0, target - ctx.cam.frame) : 0;
-    return { kind: "frames", framesLeft: left };
+  enter(op: OpJson): WaitPolicy {
+    return { kind: "camera", arg: op.arg ?? 0 };
   },
-  satisfied: waitFrames.satisfied,
+  satisfied(policy: WaitPolicy, _op: OpJson, ctx: WaitContext): boolean {
+    if (policy.kind !== "camera") return true;
+    // Nothing is tested while the gameplay gate is shut -- the continue
+    // screen -- and the camera, which is not the script's, runs on.
+    if (!ctx.gameplayLive()) return false;
+    return policy.arg === 0
+      ? G.g_cam_path_frames_left < 1
+      : G.g_cam_path_frame > policy.arg;
+  },
 };

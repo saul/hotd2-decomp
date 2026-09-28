@@ -18,6 +18,7 @@
  */
 import type { JudgmentActor } from "../actor";
 import { ActorSetMotion } from "../class30/motion_cue";
+import { CamBlockSetAnglesFromLookAt, CameraPoseBlock } from "../camera/path";
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { GameMode } from "../game_mode";
 import { ActorByAt, G } from "../globals";
@@ -333,11 +334,13 @@ function Class22DeathFallAndLand(obj: JudgmentActor, f: ClassFrame): void {
  * pop; CamBlockSetAnglesFromLookAt(&eye, &target, 0)
  * ```
  *
- * `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) turns the eye/target pair
- * into the block's orientation words; the port's camera draws from the pair
- * itself, so writing the pair is the whole of it. Nothing downstream
- * overwrites it: the director runs the camera tasks after the actors, and
- * `g_camera_driver_held` parks `CameraDriverSelectMode` in mode 6.
+ * `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`, called at `0x0049CDBC`)
+ * turns the eye/target pair into the block's orientation words, and those are
+ * what the view is built from (`UpdateSceneViewAndLight`, `FUN_00401F40`) --
+ * the pair alone would move the eye and leave the camera facing wherever it
+ * faced before. The view is built in the camera actor's task at the head of
+ * the next frame, and nothing overwrites the block in between:
+ * `g_camera_driver_held` parks `CameraDriverSelectMode` in mode 6. `[proved]`
  */
 function Class22DeathOrbit(obj: JudgmentActor, variant: number): void {
   const t = obj.judgment;
@@ -352,4 +355,5 @@ function Class22DeathOrbit(obj: JudgmentActor, variant: number): void {
   for (const v of [G.g_camera_block_eye, G.g_camera_block_target]) {
     v.x = Math.fround(v.x); v.y = Math.fround(v.y); v.z = Math.fround(v.z);
   }
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target, 0);
 }

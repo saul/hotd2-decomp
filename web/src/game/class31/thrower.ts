@@ -25,6 +25,8 @@ import {
   type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { ActorRegisterCameraPoint } from "../camera/track";
+import { RegisterEnemySlot } from "../camera/slots";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import {
@@ -519,7 +521,14 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   HeadAimBeginDraw(obj, obj.thr, host);
   ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
   HeadAimEndDraw(obj, obj.thr);
+  // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
+  // every path: the camera point, not lifted, and the candidate filing. The
+  // death chain's `0x10000` keeps a corpse off the list.
+  ActorRegisterCameraPoint(obj, host, THROWER_CAMERA_RISE);
 }
+
+/** `PUSH 0x0` at `0x0044998F`: `ActorRegisterCameraPoint`'s 0.0. */
+export const THROWER_CAMERA_RISE = 0.0;
 
 /**
  * The state table, dispatched. `g_class31_states` (0x00592960) is 35 entries
@@ -712,6 +721,10 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // `INC word [g_enemies_present]` then `INC word [g_enemies_alive]`, with no
   // guard at all -- unlike class 0x30's, which excludes two kinds.
   CountEnemyThrowerIn();
+  // `obj+0x121 = 0xFF`, then `RegisterEnemySlot` at `0x004498A1`: the thrower
+  // takes a camera slot the moment it exists, until the next
+  // `UpdateCameraEnemySlots` deals the table afresh.
+  RegisterEnemySlot(obj);
 }
 
 /**

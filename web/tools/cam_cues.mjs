@@ -38,7 +38,8 @@ import { GameSystem, ScriptSystem, syncPortGlobals } from "../src/app/systems.ts
 import { ResetPropContainers } from "../src/game/class41/index.ts";
 import { G } from "../src/game/globals.ts";
 import { SpawnScriptedCharacters } from "../src/game/director.ts";
-import { SetGameTables } from "../src/game/tables.ts";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
+import { CamPaths } from "../src/game/camera/curve.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
@@ -138,6 +139,9 @@ for (let stage = 1; stage <= 6; stage++) {
     world.attach(ctx);
     SetGameTables(chars, script.breakables, script.set_pieces,
                   script.humanoids, script.coli, script.civilians);
+    SetCameraPaths(new CamPaths(JSON.parse(readFileSync(stageFile(stage,
+                                                                  "cam"),
+                                                        "utf8"))));
     if (!seekTo(walker, ...where.at)) {
       unreachable += 1;
       seen -= 1;

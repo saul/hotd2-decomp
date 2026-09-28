@@ -21952,3 +21952,216 @@ exporter's `IgnoreTexAlpha` stripping has no counterpart in the D3D
 translation, so 112 translucent-pass meshes on ARGB textures (`boss6`,
 `st_adver03`) and a fading opaque mesh lose texture alpha the engine would
 [likely] use. The queued sprite quads' own layer is not modelled.
+
+## 2026-09-28 -- the camera is the exe's two tasks (branch `fix/camera-faithful`)
+
+The camera used to be seated from outside the game: `Walker.tick` advanced a
+`cam_play`, retired it and released `wait_queued_events_done` inside one call,
+and an `app/` system wrote the block from the walker's shot before the actors
+ran. It is now the exe's pipeline, in the order the scene's task list at
+`0x00460710` builds it `[proved]`: interpreter (pushes only), light push,
+`CameraActorTick` (the action ring, the driver, `UpdateSceneViewAndLight`),
+backdrop, `CameraUpdateTick` (the scene state's hook, the bodies), the player
+tasks, `SelectAttackablePlayer`, shutter, scene lights, region draw, rain,
+`UpdateCameraEnemySlots`, `RankEnemiesByDistance`, the shot resolution, then
+every actor. `SceneTaskWalk` is that list.
+
+What moved or was ported: the action ring and all ten handlers
+(`game/camera/actions.ts`, `EvtRunQueuedActions` with its advance word and
+drain mode); the view built from the block's angles with the shake's nod,
+into two matrices in `G` the renderer draws from; the scene-state hooks writing
+the gameplay eye `g_camera_eye` -- the `-15` is its -- and the deferred pose
+block; the rail's pause (`RailMayAdvance`) applied, because nothing snaps the
+block onto a stashed play any more; `CameraDriverFromDeferredPose`'s copies;
+both eye eases (`CameraEaseBlockEyeToPathPose`, `CameraEaseEyeToPath`); the
+integer `TurnLookAtToward`; `CameraArmStashedPath` where the two drivers call
+it; the slot table dealt by the next frame's fill; per-class camera
+registration through `ActorRegisterCameraPoint`'s second tail call; waits that
+yield on their first visit and `wait_frames n` passing after `n + 1`; and
+`0x32`'s gate on the players (states 4, 5 and 6 with no lives hold it, read
+from `g_player_state_handlers +0x10`). A seek runs the camera's two tasks
+through every wait it steps over rather than writing the words.
+
+Measured: `handback` now lets each room fight for a second first (below) and
+gives 7-14 degrees and 50-76 frames in stage 1 block 1's fought rooms, 2
+frames in an empty one; `cam_cues` moved by one frame for the entrances whose
+shot is queued after the spawn (the ring dequeues a frame later), and stage 2's
+`0x10948` (cue 430, the end of `cam_play 336..430`) now leaves on its first
+update instead of 552 frames later -- the retire publishes the end frame and
+the spawn is made in the same interpreter pass, so its equality holds at once.
+Stage 1's opening room holds about 180 frames longer: the last zombie carries
+`KeepCameraWhenLast`, stays a camera candidate through its death clip, and the
+mode machine tracks its corpse until `ZombieStateCorpseSink` untracks it.
+
+**Wrong turns.**
+
+* The first rotation helpers duplicated `carrier.ts`'s `MatrixGetAngles`,
+  `matrix.ts`'s `VecAngleBetween` and `vec.ts`'s `LerpWeighted`; verify_port's
+  rule 1 caught all three.
+* Test fixtures that set a handler found it parked: `CameraActorInit` starts
+  the advance word at 2, which dequeues on the first call. Fixtures that set
+  only the stamped scene state were reset by the per-frame stamp and had to
+  set the live one as well.
+* Harness replays deadlocked on a `goto_scene_state` that ran ahead of a
+  queued `finish_sequence`, until the replay modelled the yields of 0x41,
+  0x42, 0x45 and 0x47 and ran camera frames through every step-over.
+* `handback`'s first kill model raised `NoCameraTrack` and left the permit
+  holders standing, which are camera targets as long as they stand; its seek
+  rebuilt block 0's boat hostage fresh, holding a slot for ever. Every spawn
+  is now made once, and a kill goes through the class's death. Then it killed
+  on the gate's first frame, which the two-frame slot latency means is before
+  the camera has turned at all: four of five stage-1 rooms measured 0 degrees
+  and the "wider swing holds longer" check silently stopped being asserted.
+  It lets each room fight for `FIGHT_FRAMES` now.
+* `horde` raised flag 94 at a fixed frame; with `wait_queued_events_done`
+  waiting on the ring the members spawn two frames later, the fourth one's
+  hold had not run out, and `HordeStateHold` counts a member in on every such
+  frame. It raises the flag once the holds are out, as step 2 does.
+* The walker zeroed the ring's count on every block change, on the reading
+  that `EvtLoadBlockProgram` (`FUN_0045EBC0`) runs there. It does not:
+  `EvtAdvanceStepOrRoute` moves the block index and the pointer and nothing
+  else, and `FUN_0045EBC0`'s two callers are task-list builders. With the ring
+  now the engine's, a `cam_play` a skip cut short at the end of stage 6's
+  block 0 retired into block 1 after the reset, took the new block's count,
+  and block 1 step 5's `wait_queued_events_done` held on -1. The reset had
+  also been hiding a replay bug: stepping over a wait that yielded on its
+  first visit ran one camera frame, so a room gate the replay could not count
+  left its `finish_sequence` queued for the `goto_scene_state` behind it, and
+  the driver was installed afterwards with no count. A yield now takes the
+  rule's postcondition like any other wait.
+* A screenshot pass and two playthroughs failed mid-run because the shared
+  bundle was re-exported at a new format under them (L29's cousin): the
+  measurements that count were rerun one Chrome at a time against a bundle in
+  this worktree's own `extract/`. One of mine failed the same way because I
+  edited the source under a running playthrough, and vite reloaded the page.
+
+**Playthroughs**, one Chrome at a time, `--headless --continue`, against main
+at `00c5fec` run the same way on the same bundle (this worktree's export):
+
+| run | main `00c5fec` | this branch |
+|---|---|---|
+| stage 1 | end block at 9330 | end block at 9585 |
+| stage 2 | GAME OVER, block 16, 9285 | GAME OVER, block 16, 9360 |
+| stage 3 | end block at 8415 | end block at 8970 |
+| stage 4 | end block at 7980, 5 continues | GAME OVER, block 6, 7890 |
+| stage 5 | hung at block 1 op 69 | hung at block 1 op 69 |
+| stage 6 | GAME OVER, block 2 op 77, 6270 | GAME OVER, block 2 op 77, 6765 |
+| stage 1 `--boss` | left block 14 at 13923 (in 4668) | 14269 (in 4684) |
+| stage 2 `--boss --no-damage` | 19541 (in 5126) | 19899 (in 5619) |
+| stage 3 `--boss --no-damage --hang 3000 --shoot-for 1500` | 18543 (in 9963) | 18483 (in 9449) |
+| stage 4 `--boss --no-damage` | 15191 (in 7091) | 14929 (in 6724) |
+| stage 5 `--boss` | 13349 (in 1665) | 13411 (in 1725) |
+
+(The `--boss` main column is the coordinator's post-Hierophant run.) Every run
+ends where main's does except stage 4 without the cheat, which spends a sixth
+continue and runs out of credits in block 6; with `--no-damage` it plays block
+25 through 262 frames sooner than main. The one difference decomposed to the
+frame is stage 1's opening: +210 by block 1, the `KeepCameraWhenLast` corpse
+hold plus the turn back, and it carries through the stage. The rest follow
+from the same few engine behaviours the port lacked -- the room held until the
+aim is back on the path, the corpse hold, the rail pausing for a hit's shake
+and for a player in the continue chain, the action ring's one-a-frame dequeue,
+waits yielding their first frame, `0x32` holding a boss room for a dead player
+-- and, through the harness, from where the camera is looking: the playthrough
+fires a fixed grid through the view, so a camera that follows the fight as the
+exe's does changes which volleys land, and with them when lives are lost.
+That last part is not a per-frame account and I do not claim one.
+
+**The boss cameras under the angle-built view** (after merging main at
+`39a7065`). The view is built from the block's angles, so every routine that
+aims by look-at has to turn the pair into angles, as the exe's do. The eleven
+callers of `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) are the list to hold
+the port against:
+
+* `Boss4PlayCameraCue` calls it at `0x00493277` and Judgment's death orbit at
+  `0x0049CDBC`. The port had left both out, with notes saying its view came
+  from the look-at; under the angle-built view both would have slid the camera
+  along the cue facing the old way. Added; a port test fails without the cue's.
+* The boss-name banner and class 0x14's cut do **not** call it.
+  `CamEvalPath7` writes eye and target and nothing else, and nothing in
+  `BossIntroBannerUpdate` names `0x009A60CC..D4`. So the card flight carries
+  the eye along the path and keeps the heading the camera had when the banner
+  took it. `[proved]` Measured in the page on stage 1 block 14: the heading
+  held at yaw 18042, pitch 1614 for all 300 frames; the drawn translation was
+  the banner's eye one frame late (the view is built at the head of the frame,
+  the banner writes after it); the path's own target ran from 60 degrees off
+  the view axis to 4 and back to 16, and nothing drew from it. The action slot
+  was `NoOpStub` for the whole flight, so the view came from
+  `UpdateSceneViewAndLight` alone -- not from mode 6, which needs
+  `CameraDriverSelectMode` in the slot.
+* The Tower writes the block's yaw and pitch itself. Its two port-only
+  stand-ins for the look-at view went: `Boss3SeatCameraAngles` replaced the
+  engine's angles with the look-at's when the body took the camera, and
+  `Boss3PublishCameraAngles` rewrote the target from the angles every frame, so
+  the hand-back turned from a target the exe never has.
+* The head aim that landed on main reads the camera block's yaw at
+  `0x00453DD1` for two attackers; the port read `g_camera_yaw_bams + 0x8000`,
+  a stand-in main filled from the drawn camera, which the merge removes. It
+  reads the block's yaw now. Its eye is still `ClassFrame.eye`.
+
+**Playthroughs again, after `39a7065` and the boss-camera fixes**, one
+Chrome at a time, both trees on this worktree's export:
+
+| run | main `39a7065` | this branch |
+|---|---|---|
+| stage 1 | end block at 9390 | end block at 9750 |
+| stage 2 | GAME OVER, block 16 op 7/35, 10440 | GAME OVER, block 16 op 3/13, 9405 |
+| stage 3 | end block at 8415 | end block at 8970 |
+| stage 4 | end block at 7980, 6 continues | end block at 8250, 5 continues |
+| stage 5 | hung at block 1 op 69 | hung at block 1 op 69 |
+| stage 6 | GAME OVER at the Tower gate, 6270 | the same gate, 6765 |
+| stage 1 `--boss` | left block 14 at 13819 (4429 in it) | 14042 (4292) |
+| stage 2 `--boss --no-damage` | 19707 (5352) | 19948 (5233) |
+| stage 3 `--boss --no-damage --hang 3000 --shoot-for 1500` | 17549 (9055) | 18183 (9149) |
+| stage 4 `--boss --no-damage` | 15174 (7029) | 15352 (7072) |
+| stage 5 `--boss` | 13275 (1650) | 13321 (1635) |
+
+Every run now ends where main's does. Three runs with screenshots taken inside
+the loop came out 15 to 90 frames off their plain twins: taking a screenshot is
+not free under the drive seam, so the table is the plain runs only.
+
+**And after `a237a5c`** (the continue screen's hold, the shutter task, the
+thrown weapons), both trees on a fresh export:
+
+| run | main `a237a5c` | this branch |
+|---|---|---|
+| stage 1 | hung at block 3 op 1/26 (the frogs' room) | end block at 9930, block 3 cleared only by the debug clear |
+| stage 2 | GAME OVER, block 16 op 6/10, 9840 | GAME OVER, block 16 op 6/10, 9915 |
+| stage 3 | end block at 8355 | end block at 8970 |
+| stage 4 | end block at 7635 | end block at 7695 |
+| stage 5 | hung at block 1 op 69 | the same |
+| stage 6 | hung at the Tower gate, block 2 op 77 | the same |
+| stage 1 `--boss` | left block 14 at 14194 (4293 in it); block 3 unclearable | 14268 (4338); the same |
+| stage 2 `--boss --no-damage` | 19605 (5400) | 19371 (5256) |
+| stage 3 `--boss --no-damage --hang 3000 --shoot-for 1500` | 16280 (7890) | 18255 (9130) |
+| stage 4 `--boss --no-damage` | 14865 (7110) | 14735 (6815) |
+| stage 5 `--boss` | 13483 (1650) | 13561 (1635) |
+
+Stage 1's frog room fails on both: two frogs stand in `Die` sub 1 with
+`g_enemies_alive` 1 and present 3, which is class 0x11's and not the camera's.
+The Tower's block 11 takes the branch 1240 frames longer than main now, where
+at `39a7065` the two were within 100 (9149 against 9055); main's time fell and
+this branch's did not, and I have not traced why. `[open]`
+
+**Still `[diverges]`, camera-related:** `CamPathCueReached` treats a cue the
+seek landed past as reached (the engine never seeks); four class routines read
+camera block 0 where the exe reads block 2 or the bare block-0 symbol
+(`class30/entrance.ts`, `class33`, `class11`'s wedge, `class46`'s dive yaw) --
+the port models one block, and blocks 1-3's handlers are `NoOpStub` in every
+shipped script.
+
+**Next actions.**
+
+* The actors are handed the **drawn** eye as `ClassFrame.eye` -- the app's
+  `ctx.view.eye`, the three.js camera the previous frame drew -- where the
+  exe's routines read the gameplay eye `g_camera_eye` (`0x009C71E0`), which
+  the scene state's hook writes this frame, fifteen units below the pose on a
+  path. `G.g_camera_eye` is now the engine's; the frame's eye should be it.
+* The boss classes still answer `tracksCamera` (0x19, 0x22, 0x23, 0x45, and
+  0x14, which also makes the call): each should call
+  `RegisterForCameraTracking` -- or `ActorRegisterCameraPoint(obj, host, rise)`
+  where the exe does -- from its own update at the exe's site, and drop the
+  predicate; the director's bridge goes with the last one.
+* The Tower's `Boss3PublishCameraAngles` and `Boss3SeatCameraAngles`
+  (`class45/body.ts`) compensate for a view built from the look-at. The view
+  is built from the angles now, so both can go.

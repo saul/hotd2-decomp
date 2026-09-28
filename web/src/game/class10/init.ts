@@ -8,6 +8,7 @@
 import { ZombieAux, type Actor } from "../actor";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { RegisterEnemySlot } from "../camera/slots";
 import { CharacterTypeOf, T } from "../tables";
 import { ActorBindPartList } from "../attachments";
 import { CivilianRunScript } from "./script";
@@ -30,9 +31,11 @@ const CIVILIAN_BODY_RADIUS = 1;
 export function CivilianInit(obj: Actor, rng?: Rng): void {
   const sub = makeCivilianState();
   obj.civ = sub;
-  // `obj+0x120` and `obj+0x121` are both 0xFF: a civilian holds neither a
-  // general slot nor an attack permit, whatever `RegisterEnemySlot` hands it.
+  // `obj+0x121 = 0xFF` at `0x0048A6E2`, then `obj+0x120 = 0xFF` and
+  // `RegisterEnemySlot` at `0x0048A6E9`/`0x0048A6F0`: no permit, and a camera
+  // slot from the frame she exists until the next fill deals the table.
   obj.attackPermit = -1;
+  RegisterEnemySlot(obj);
   // `if (obj+0x11C != 0) { civ->+0x68 = g_civilian_carrier;
   //   obj[0] = CivilianUpdateOnCarrier; }` at `0x0048A747`-`0x0048A75E`.
   // Seven of the game's 47 civilians ride something; this one does.

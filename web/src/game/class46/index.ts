@@ -131,6 +131,8 @@ import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorDespawn } from "../despawn";
+import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
+  from "../camera/slots";
 import {
   MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
   MatrixRotateZ, MatrixScale, MatrixTranslate, type Mat,
@@ -543,13 +545,14 @@ export const BAT_SHOT_SPHERE_LIFT = 1.0;
  *
  * The camera aims at the bat's **position**, not at a bone: the draw at the
  * top of the update has just written `obj+0x100` from node 1, and this
- * overwrites it. The registration is the port's predicate over the pool
- * (`camera/slots.ts`), which a corpse's `NoCameraTrack` refuses.
+ * overwrites it. `RegisterForCameraTracking` refuses a corpse, which carries
+ * `NoCameraTrack`.
  */
 function BatPublishCameraPoint(obj: Actor): void {
   obj.lookAt.x = obj.pos.x;
   obj.lookAt.y = obj.pos.y;
   obj.lookAt.z = obj.pos.z;
+  RegisterForCameraTracking(obj);
 }
 
 /** The pitch and yaw tumble all three corpses share. */
@@ -583,11 +586,8 @@ export function SpawnBatWings(obj: Actor, sub: BatTail, rng?: Rng): void {
   ActorBuildSkinnedModel(wing);
   // `obj+0x194 = 0`; `BatWingUpdate` copies the body's over it every frame.
   wing.playTicks = 0;
-  // `[port-only]` — the engine's wing never calls `RegisterForCameraTracking`
-  // (`FUN_00408EC0`), and neither does a scatter member; the port's is a
-  // predicate over the whole pool rather than a call, so the actors that would
-  // not have called it say so with the bit that predicate tests.
-  wing.flags |= ActorFlag.NoCameraTrack;
+  // The wing never calls `RegisterForCameraTracking` (`FUN_00408EC0`), and
+  // neither does a scatter member, so neither is ever a camera candidate.
   const w = Tail(wing);
   if (!w) return;
   w.isWing = true;
@@ -707,6 +707,8 @@ export function PlaceBats(obj: Actor, rng?: Rng): void {
     sub.segment = 0;
     sub.segT = 0;
     sub.wobble = 1.0;
+    // `obj+0x120 = 0xFF`, `RegisterEnemySlot` at `0x0042DF82`, both `INC`s.
+    RegisterEnemySlot(obj);
     G.g_enemies_present += 1;
     G.g_enemies_alive += 1;
     SpawnBatWings(obj, sub, rng);
@@ -755,7 +757,6 @@ function BatSpawnScatterMember(placer: Actor, i: number, rng?: Rng): void {
   BatSeatCommon(child, sub, BatSubtype.Scatter, i);
   // `BatScatterUpdate` calls neither `RegisterForCameraTracking` nor
   // `RegisterEnemySlot`; see the note in {@link SpawnBatWings}.
-  child.flags |= ActorFlag.NoCameraTrack;
   child.playTicks = i;
   const dx = rng?.int(BAT_SCATTER_X_STEPS) ?? 0;
   child.pos.x = dx + placer.pos.x + BAT_SCATTER_X_BIAS;
@@ -800,6 +801,8 @@ function BatSpawnSwarmMember(placer: Actor, i: number, rng?: Rng): void {
   sub.prevZ = placer.pos.z;
   sub.timer = BAT_SWARM_ORBIT_BASE + i * BAT_SWARM_ORBIT_STAGGER;
   sub.orbitPhase = i << BAT_SWARM_PHASE_SHIFT;
+  // `obj+0x120 = 0xFF`, `RegisterEnemySlot` at `0x0042DB58`, both `INC`s.
+  RegisterEnemySlot(child);
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
   SpawnBatWings(child, sub, rng);
@@ -868,7 +871,7 @@ export function BatResolveShot(obj: Actor, f: ClassFrame): boolean {
 
   if (sub.subtype === BatSubtype.Dive) {
     obj.flags |= ActorFlag.NoCameraTrack;
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
     // Flung backwards along its own yaw at a half unit a frame.
     const a = (obj.yaw + 0x8000) * BAMS;
     sub.vx = Math.sin(a) * BAT_DIVE_CORPSE_FLING;
@@ -878,7 +881,7 @@ export function BatResolveShot(obj: Actor, f: ClassFrame): boolean {
     sub.vz *= BAT_SCATTER_CORPSE_DAMP;
   } else {
     obj.flags |= ActorFlag.NoCameraTrack;
-    G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+    CameraSlotVacate(obj);
     sub.vx *= BAT_SWARM_CORPSE_DAMP;
     sub.vz *= BAT_SWARM_CORPSE_DAMP;
   }

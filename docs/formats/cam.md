@@ -172,23 +172,28 @@ Only **nine** selectors exist in total, not the 100+ estimated earlier.
 **[proved]** A `cp_` path is not fed to the renderer directly. It is written
 into a **camera block** — `g_camera_blocks` (`0x009A6040`, stride `0x1A4`),
 whose eye is at `+0x80` (`g_camera_block_eye`), pitch/yaw/roll at `+0x8C` and
-look-at at `+0x98` (`g_camera_block_target`) — and two things then act on it
-each frame, in this order:
+look-at at `+0x98` (`g_camera_block_target`) — and the view is built from the
+block's **angles** (`UpdateSceneViewAndLight`, `0x00401F40`: `T(eye) Ry Rx
+Rz`), not from its look-at. Everything that writes the block writes the angles
+too (`CamBlockSetAnglesFromLookAt`), or the view does not move. It is written
+inside the camera actor's task (`CameraActorTick`, third in every scene's task
+list at `0x00460710`), by whatever the queued action's slot holds:
 
-1. **The queued action.** `CamAdvancePathFrame` (`0x004035E0`) is installed by
-   `CamStartPathPlayback` and runs until the frame counter passes the command's
-   end frame. Every frame it writes the block's eye **and** look-at straight
-   from `CamEvalPath7`, with no easing. That is what keeps the script's cuts
-   sharp — and cuts are the norm: **148 of the 631 consecutive `cam_play` pairs
-   in stages 1-6 turn the view by more than 3 degrees at the seam, some by
-   173.** When the action retires the block is simply left where it is.
+1. **A playing `cam_play`.** `CamAdvancePathFrame` (`0x004035E0`) is installed
+   by `CamStartPathPlayback` and runs until the cursor passes the command's end
+   frame. Every frame it publishes the cursor as `g_cam_path_frame` and writes
+   the block's eye **and** look-at straight from `CamEvalPath7`, with no
+   easing. That is what keeps the script's cuts sharp — and cuts are the norm:
+   **148 of the 631 consecutive `cam_play` pairs in stages 1-6 turn the view by
+   more than 3 degrees at the seam, some by 173.** When the action retires the
+   block is simply left where it is.
 
-2. **The camera hook** at `g_camera_update_hook` (`0x009C7080`), run by
-   `CameraUpdateTick`. During a fight that is `CameraTrackEnemiesTick`
-   (`0x00402890`), which does:
+2. **A fight's driver.** `finish_sequence 4|6` installs
+   `CameraDriverSelectMode` (`0x00402650`), whose mode 3 is
+   `CameraTrackEnemiesTick` (`0x00402890`):
 
    ```c
-   CameraEaseBlockEyeToPathPose();          /* the eye  */
+   CameraEaseBlockEyeToPathPose();          /* the eye, toward 0x009C70C0 */
    SelectCameraLookAtTarget();              /* what it WANTS to look at */
    TurnLookAtToward(&block_eye, &g_camera_lookat_target,
                     &g_camera_block_target, &out, 1, g_camera_turn_rate);
@@ -196,10 +201,22 @@ each frame, in this order:
    /* then refresh g_camera_turn_rate for the NEXT frame */
    ```
 
+   and whose mode 2 turns the aim back onto the path before it lets the room
+   go. `finish_sequence 7` installs `CameraDriverFromDeferredPose`
+   (`0x00402E00`) instead, which copies the deferred pose block into the camera
+   block whole.
+
+The scene state's hook at `g_camera_update_hook` (`0x009C7080`) runs after
+that, in `CameraUpdateTick`'s task (fifth). It never writes the camera block:
+it writes the **gameplay eye** `g_camera_eye` (`0x009C71E0`) -- fifteen units
+below the pose's eye, which is where the `-15` in this project's history comes
+from -- and, under (2,6)/(2,7), steps the stashed rail into the deferred pose
+block for the driver to read on the next frame.
+
 `SelectCameraLookAtTarget` (`0x00403050`) with **nothing registered** does not
 hand control back — it writes `g_camera_lookat_target = g_cam_path_target`
-(`0x009C70D8`, the path's own aim) and clears `g_camera_is_tracking`. The ease
-in step 3 is unconditional. So `g_camera_is_tracking` selects only the *rate*:
+(`0x009C70D8`, the deferred pose block's aim) and clears
+`g_camera_is_tracking`. The turn that follows it is unconditional. So `g_camera_is_tracking` selects only the *rate*:
 
 | tracking | rate | source |
 |---|---|---|
@@ -210,7 +227,8 @@ in step 3 is unconditional. So `g_camera_is_tracking` selects only the *rate*:
 one by `num / (num + rate)` of the angle between them and re-emits it 100 units
 from the eye; every call site passes `num = 1`. Rate 0 would be a snap, and the
 one branch that sets it — `if (g_enemies_alive == 0 && DAT_009C6F2E == 2)` — is
-**dead code**: `DAT_009C6F2E` is read twice in the image and written nowhere.
+**dead code**: `DAT_009C6F2E` (`g_camera_hand_back_variant`) is written only by
+`CameraResetForPathShot` (`0x004031E0`), and always with 0.
 
 The rate is written at the *end* of the tick and read at the top of the next,
 so it is always one frame old. That lag is the engine's.
@@ -221,15 +239,20 @@ function returns the **square** of the cosine, never rooted — so the threshold
 is about 0.18 degrees. `EvtOpWaitTargetsClear47` gates on this flag, which is
 why evt op `0x47` cannot mean anything without the ease.
 
-### The eye has a second pose block — [open]
+### The deferred pose block, `0x009C70C0` — [proved]
 
-`CameraEaseBlockEyeToPathPose` (`0x00402EF0`) moves the block's eye a
-**sixteenth of the way per frame** toward `0x009C70C0` while `g_camera_ease_eye`
-(`0x009C6F33`) is set, and snaps to it otherwise. `0x009C70C0`/`0x009C70D8` is
-a *second* eye/look-at pair, and only the deferred-rail hooks
-(`CameraStepRailTick`, `CameraPlayStashedPath`, `CameraArmStashedPath`) ever
-write it. What keeps it current during an ordinary `cam_play` is not settled,
-and until it is the player takes the block eye straight from the curve.
+`0x009C70C0`/`0x009C70D8` is a second eye/look-at pair with its own angle words
+beside it. It is written by the rail hooks on every frame they step
+(`CameraStepRailTick`, `CameraPlayStashedPath`), by `CameraArmStashedPath`, and
+by `CameraSnapToPathEye` -- scene state (2,4)'s hook on its first call, which
+copies the camera block's eye into it. It is read by
+`CameraEaseBlockEyeToPathPose` (`0x00402EF0`), which moves the block's eye a
+**sixteenth of the way per frame** toward it while `g_camera_ease_eye`
+(`0x009C6F33`) is set and snaps to it otherwise; by
+`CameraDriverFromDeferredPose`, which copies it whole; by
+`SelectCameraLookAtTarget`'s nothing-registered fallback (the look-at half);
+and by the (2,4)-(2,7) hooks for the gameplay eye. An ordinary `cam_play`
+neither reads nor writes it.
 
 ## Timebase
 

@@ -22,6 +22,7 @@ import {
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
 import { G } from "../globals";
+import { CameraSlotVacate } from "../camera/slots";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 import { QueryGroundHeightAt } from "../coli";
@@ -492,7 +493,7 @@ export function ThrowerLeave(obj: ThrowerActor): void {
   // `obj+0x121`. Modelled as a filter by `at` for the same reason
   // `ThrowerReleaseSlotOnDeath` is: the port keeps `g_enemy_slots` as the
   // list of actors rather than a fixed array of eight-byte records.
-  G.g_enemy_slots = G.g_enemy_slots.filter((at) => at !== obj.at);
+  CameraSlotVacate(obj);
   // `obj+0x34 &= ~1`. [open] Bit 0 of the flag word has no port: nothing in
   // the ported call graph reads or writes it, so there is nothing to clear.
   // Named here rather than dropped, so the next reader knows it was seen.

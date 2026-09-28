@@ -156,14 +156,39 @@ not an assignment — and that is exactly why it is not done. The rule is about
 miss is still the violation. So the intent goes through the composition root,
 which is the layer whose job is to know about both sides.
 
-**The camera followed the same route.** The Hermite evaluation moved from
-`render/campath.ts` to `game/camera/curve.ts` over `Vec3` — it is plain maths
-over bundle keys and never needed three.js — and `CamSeatPathFrame` runs
-`CamEvalPath7` and `CamAdvancePathFrame` in the engine's order.
-`render/campath.ts` keeps `applyPose`, which is genuinely three.js, and the
-`path.y - 15` eye rule, which is a property of the draw. `CameraSeatSystem`
-lives in `app/systems.ts`; the rig keeps the pose scratch, the rails and the
-draw.
+**The camera followed the same route, and then all the way in.** The Hermite
+evaluation moved from `render/campath.ts` to `game/camera/curve.ts` over
+`Vec3` -- it is plain maths over bundle keys and never needed three.js. That
+first move stopped short: a `CameraSeatSystem` in `app/` seated the block from
+the walker's shot once a frame, and `Walker.tick` advanced the shot, retired it
+and released `wait_queued_events_done` inside one call, so every camera word
+was a task out of place and the rail could not pause. The camera is now the
+exe's own two tasks, run by `SceneTaskWalk` in the order the scene's task list
+at `0x00460710` builds them `[proved]`:
+
+* `queue_event` only **pushes** onto `G.g_evt_action_ring`
+  (`EvtQueueAction`).
+* `CameraActorTick` (task 3) runs `EvtRunQueuedActions`, which calls the
+  current handler and dequeues at most one action a frame, then
+  `UpdateSceneViewAndLight` builds the view -- `G.g_camera_view_to_world` and
+  `G.g_camera_world_to_view`, from the block's **angles**, with the shake's
+  nod.
+* `CameraUpdateTick` (task 5) runs the scene state's hook, which writes the
+  **gameplay eye** `g_camera_eye` (`0x009C71E0`) and, on a stashed rail, the
+  deferred pose block the driver copies from on the next frame.
+* The players (task 6), `UpdateCameraEnemySlots` (task 12) and every actor run
+  after both, so they read this frame's view; the actors file themselves as
+  candidates and the next frame's fill deals the slots the camera reads the
+  frame after that.
+
+`render/camera.ts` places the three.js camera from `G.g_camera_view_to_world`
+and decides nothing; `render/campath.ts` keeps `applyPose` for free roam and
+the rails. The `path.y - 15` rule turned out not to be the draw's at all: it is
+the gameplay eye's, which the hooks write and the actors aim at. The one
+`[port-only]` composition left is `reseatCamera` in `app/systems.ts`, for the
+four places the player moves the script without running the frames that would
+have written the block -- a seek, the scrubber, a reset, a deep link --
+which calls `CameraReseatFromFrame` and then the draw.
 
 **The stashed rail's range moved into `G` for the same reason (rule 1b).** A
 `cam_play` with `flags & 2` stashes its range, and scene states (2,6)/(2,7)
@@ -171,10 +196,11 @@ step it; the walker used to hold that range on its shot, where no game routine
 could reach it, and the stage-4 boss writes it. `g_stashed_path_frame`,
 `g_stashed_path_end_frame` and the published `g_rail_frame` are the engine's
 own globals now, stepped by `game/camera/rail.ts`'s `CameraStepRailTick` and
-`CameraPlayStashedPath`; the walker's shot mirrors them, and every writer of a
-shot's frame goes through `Walker.setCameraFrame`. The rail's pause while the
-screen shakes is transcribed and not applied -- see the note in `rail.ts` for
-why it depends on the seat leaving a (2,6) play's aim to the driver.
+`CameraPlayStashedPath`; the walker's `cam` is a view of them, and every
+writer of a shot's frame goes through `Walker.setCameraFrame`. The rail pauses
+while the screen shakes or no player is in play (`RailMayAdvance`), as the
+hooks do: nothing snaps the block onto the rail any more, so the pause is
+applied rather than only transcribed.
 
 **What the queue buys, and what is still missing.** `g_shot_requests` is plain
 data in the data segment, so a snapshot carries any pull the frame has not
@@ -690,7 +716,14 @@ web/src/
                   to *make* an actor -- the stage-2 boss's summons, the two
                   prop placers' children -- would close an ESM cycle
     globals.ts    `G`, the data segment      actor.ts   the struct at its offsets
-    camera/       curve.ts (the `cam/` Hermite), path.ts, track.ts, slots.ts
+    camera/       the camera's two tasks: actor.ts (`CameraActorTick`) and
+                  hooks.ts (`CameraUpdateTick`, the scene state's hook);
+                  actions.ts the action ring and its handlers; driver.ts the
+                  two function-pointer slots as enums; path.ts the path play;
+                  mode.ts the hand-back; rail.ts the stashed rail; track.ts,
+                  slots.ts, slot_table.ts, select_target.ts the enemies it
+                  follows; turn.ts; view.ts the view matrices; curve.ts the
+                  `cam/` Hermite
     player_shell.ts  the per-player state machine: start, in play, continue,
                   game over, and the stage step's park at 2
     run_phase.ts  the run phases a stage is played in (0, 2, 3, 4, 11, 12),
@@ -721,16 +754,20 @@ web/src/
     registry.ts   table assembly that refuses a duplicate key
     ops/          the opcodes, one module per group
     waits/        one module per wait policy
-    state/        channels, queued events, the shutter's accessors,
-                  camera actions
+    state/        channels, the shutter's accessors. The queued events
+                  and the camera actions are `G`'s now
+                  (`game/camera/actions.ts`)
     seek.ts       the planner
     (there is deliberately no `vm.ts`: the machine is the part that was
      never the problem -- see "`script/`: the machine, and the state the
      script drives")
   render/       three.js. Reads engine state, owns nothing.
     context.ts    RenderContext, which adds { scene, camera, paths }
-    camera.ts     the rig, the take and the draw (the *seat* is app/systems)
-    campath.ts    a pose -> a three.js camera (the curves are game/camera/)
+    camera.ts     the rig and the draw: the three.js camera placed from
+                  `G.g_camera_view_to_world`. No seat -- the port's tasks
+                  write the block
+    campath.ts    a pose -> a three.js camera, for free roam and the rails
+                  (the curves are game/camera/)
     stagescene, rigs, props, backdrop, rain, fog, lighting,
     characters, shooting, breakables, projectiles, overlays, debug
     slotmodels.ts an actor whose model is an ASSET SLOT rather than a

@@ -8,6 +8,7 @@
  */
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { CamPathCueReached } from "../camera/path";
+import { ActorRegisterCameraPoint } from "../camera/track";
 import { CarrierPublishWorld } from "../carrier";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G } from "../globals";
@@ -81,17 +82,12 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
     }
   }
 
-  // `ActorRegisterCameraPoint` (`FUN_00409B70`) goes here in the engine —
-  // `PUSH 0x40800000; CALL 0x00409B70`, bytes `6800008040` at 0x0048ADAB, so
-  // class 0x10's lift is **4.0**. It transforms `obj+0x100` into view space,
-  // appends the actor to the per-frame gunshot list and raises `obj+0x104` by
-  // that argument.
-  //
-  // The port runs it from `director.ts`, once per visible actor, with the
-  // per-class lift from `camera/track.ts`'s `CAMERA_POINT_RISE` — so class
-  // 0x10 gets its 4.0 from the same table the other two classes get theirs
-  // from. What stays here is the *radius*, `obj+0x124`, which `CivilianInit`
-  // sets, and the sphere-centre switch below.
+  // `PUSH 0x40800000; CALL 0x00409B70`, bytes `6800008040` at `0x0048ADAB`,
+  // on every path through the routine: the camera point lifted by **4.0** and
+  // the civilian filed as a camera candidate. Her script's wait word drives
+  // `obj+0x34` bit `0x10000` (`class10/script.ts`), which is what decides
+  // whether `RegisterForCameraTracking` takes her -- the whole of bug 18.
+  ActorRegisterCameraPoint(obj, f.host, CIVILIAN_CAMERA_RISE);
   CivilianWriteSphereCentre(obj);
   PoseHookGrowAndPushOutOfWorld(obj);
   CivilianCheckRemoval(obj, f.host);
@@ -99,6 +95,9 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // except the two that despawn.
   if (!obj.despawned) CivilianReleaseCaptors(obj);
 }
+
+/** `PUSH 0x40800000` at `0x0048ADAB`: `ActorRegisterCameraPoint`'s 4.0. */
+export const CIVILIAN_CAMERA_RISE = 4.0;
 
 /**
  * The collision-sphere switch at the tail of `CivilianUpdate`: `sub+0x80` (op

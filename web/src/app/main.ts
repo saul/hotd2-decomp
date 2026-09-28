@@ -45,6 +45,7 @@ import { hasThumb, rememberedInstall, runExport,
 import { hideExportScreen, showExportScreen } from "./install/ExportScreen";
 import { readState, writeState, type PlayerState } from "./urlstate";
 import { seekTo as seekWalkerTo } from "../script/seek";
+import { CameraReseatFromFrame } from "../game/camera/view";
 import { readViewPrefs, writeViewPrefs } from "./viewprefs";
 import { Bgm } from "../audio/bgm";
 import { Backdrop } from "../render/backdrop";
@@ -94,9 +95,9 @@ import { TICK } from "./loop";
 import { DRIVEN_TICK, Pacer, STOPPED_TICK, type PacerHost } from "./pacer";
 import { SnapshotRing, type HistoryView } from "./ring";
 import {
-  CameraSeatSystem, CharacterBindSystem, GameSystem, GunLightBuildSystem,
+  CharacterBindSystem, GameSystem, GunLightBuildSystem,
   ScriptSystem, drawSystem,
-  seatCamera, syncCamera, syncCharacterSpawns, syncPortGlobals,
+  drawCamera, reseatCamera, syncCharacterSpawns, syncPortGlobals,
 } from "./systems";
 import { ProjectileLayer } from "../render/projectiles";
 import { SeveredHeadLayer } from "../render/severed_heads";
@@ -539,10 +540,6 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // the port decides where it is and what it is doing, and the renderer
     // reads that. Adding a layer is one `add` and never touches the loop.
     this.world.add("script", this.script);
-    // The camera's two halves straddle the game phase: the shot writes the
-    // block, `CameraTrackEnemiesTick` eases it, and only then does the draw
-    // read it back. See `render/camera.ts`.
-    this.world.add("script", new CameraSeatSystem(this.cam));
     // At the head of the game phase, where `GameSystem` used to read the
     // camera for itself. Same place in the order, same values.
     this.world.add("game", new CameraTakeSystem());
@@ -1293,11 +1290,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // A seek replaces the world exactly as a snapshot load does, so it takes
     // the same rebuild path. Running only half of it is what let a rig keep a
     // held pose across a seek.
+    // The replay ran the camera's own tasks at every wait it stepped over,
+    // but the words it landed on may be newer than the block (a checkpoint
+    // since the last drain): put the block on them before the resync draws
+    // it. A snapshot load does not, because its `G` holds the block and the
+    // view exactly.
+    CameraReseatFromFrame();
     this.world.resync(this.ctx);
-    // No `syncCameraToWalker` and no `props.reset` here any more: the resync
-    // pass does both, and the camera's is the stronger of the two -- it seats
-    // the block on the rail even where the restored shot's action has already
-    // retired. Two rebuild paths that nearly agree is the thing being removed.
     this.syncBgmToWalker();
     this.state.block = block;
     this.state.step = step;
@@ -1309,8 +1308,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   /** `?slot=59&frame=170`: pose the camera straight off a path, no script. */
   poseFromSlot(slot: number, frame: number): void {
     this.cam.poseFromSlot(this.ctx, this.walker?.rollEnabled ?? false,
-                          this.walker?.useFixedEyeY ?? false,
-                          this.walker?.fixedEyeY ?? 0, slot, frame);
+                          slot, frame);
   }
 
   // -- walker callbacks --------------------------------------------------
@@ -1330,13 +1328,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       });
       return;
     }
-    // `CamStartPathPlayback` (`FUN_00403510`) ends by calling
-    // `CamAdvancePathFrame` itself, and `CamEvalStaticPose` writes the block
-    // outright: a new shot always seats the camera on its own pose rather
-    // than swinging onto it. That is what keeps the script's cuts sharp — and
-    // 148 of the 631 consecutive `cam_play` pairs in stages 1-6 are cuts, some
-    // of them a full 173 degrees.
-    seatCamera(this.cam, this.ctx, true);
+    // The shot is queued, not started: the action ring runs it in the next
+    // `CameraActorTick`, which seats the block itself. Nothing to seat here.
   }
 
   /** The feed is capped so a long session cannot grow without bound. */
@@ -1402,14 +1395,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   }
 
   /**
-   * Seat and draw in one go, for the paths that have no game tick between —
-   * a seek, a slider drag, a stage that has just finished loading.
-   *
-   * `force` puts the aim on the rail even though the shot's action has
-   * retired. See `seatCamera` in `app/systems.ts`.
+   * Draw the camera for a path that runs no game tick. `reseat` first puts
+   * the block where the camera words say -- a seek, a slider drag, a stage
+   * that has just finished loading, a reset -- which writes `G`; without it
+   * the view `G` already holds is drawn. See `app/systems.ts`.
    */
-  syncCameraToWalker(force = false): void {
-    syncCamera(this.cam, this.ctx, force);
+  syncCameraToWalker(reseat = false): void {
+    if (reseat) reseatCamera(this.cam, this.ctx);
+    else drawCamera(this.cam, this.ctx);
   }
 
   // -- what a frame is made of -------------------------------------------

@@ -907,7 +907,91 @@ frames a room on stage 1, scaled to how far the last enemy had pulled it. The
 other 5 run under `CameraDriverFromDeferredPose`, which frees the room as soon
 as the slot table empties. The player had that second rule on every shot, so
 every room handed over two frames after the last zombie died; `npm run
-handback` is what measures it.
+handback` is what measures it. With the camera now running as the exe's own
+tasks (below), stage 1 block 1's four fought rooms hand back in 50 to 76
+frames from a 7 to 14 degree swing, and an empty one in 2.
+
+**A room also waits for its last corpse when the spawn says so.** Six shipped
+class-0x30 spawns carry `KeepCameraWhenLast` (`0x800000` in the record's init
+flags: stage 1's three are its opening room's, stage 3's three are block 2
+step 4's). `ZombieReleasePermitAndUntrack` skips its untrack
+arm for the last enemy alive that carries it, so that actor keeps registering
+as a camera candidate through its death clip, keeps a slot, and the mode
+machine stays on `TrackEnemies` until `ZombieStateCorpseSink` raises
+`NoCameraTrack` unconditionally. Stage 1's opening room therefore holds its
+gate for the corpse and then the turn, about 180 frames longer than the port
+used to, because the port's slot table used to be rebuilt from a list that
+dropped the dead.
+
+### The camera is the exe's two tasks, in the exe's order
+
+The camera used to be seated from outside the game: `Walker.tick` advanced a
+shot, retired it and released `wait_queued_events_done` inside one call, and an
+`app/` system then wrote the camera block from the walker's shot before the
+actors ran. Everything that followed from that was a task out of place, and
+several things could not be done at all -- the rail could not pause, because
+the seat put the block back on it every frame.
+
+The scene's task list (`0x00460710`, `[proved]`) runs, in creation order: the
+interpreter, the light push, **`CameraActorTick`**, the backdrop,
+**`CameraUpdateTick`** (the scene state's hook, then the player bodies), the
+two player tasks, `SelectAttackablePlayer`, the shutter, the scene lights, the
+region draw, the rain, `UpdateCameraEnemySlots`, `RankEnemiesByDistance`, the
+shot resolution -- and then every actor. `SceneTaskWalk` (`game/director.ts`)
+is that list now, and the camera lives entirely inside it:
+
+* `queue_event` pushes onto the action ring (`EvtQueueAction`), and
+  `EvtRunQueuedActions` inside `CameraActorTick` calls the current handler and
+  dequeues at most one action a frame. A `cam_play` starts the frame after it is
+  queued, a `wait_queued_events_done` passes on the frame the ring is empty, and
+  a skip ends a play where it stands.
+* `UpdateSceneViewAndLight` builds the view from the block's **angles**, with
+  the shake's nod, into `G.g_camera_view_to_world` / `g_camera_world_to_view`,
+  and stamps the scene state as entered. The renderer draws that matrix.
+* The scene state's hook writes the **gameplay eye** `g_camera_eye` -- the
+  `-15` is its, not the drawn camera's -- and, on a stashed rail, the deferred
+  pose block. The rail pauses while the screen shakes or nobody is in play.
+* The drivers read what the hook left the frame before: the deferred-pose
+  driver copies the pose block whole; the mode machine eases the block eye a
+  sixteenth a frame onto the pose (`CameraEaseBlockEyeToPathPose`) or onto the
+  path (`CameraEaseEyeToPath`), and turns the aim in whole BAMS.
+* Every tracked class files itself as a candidate from its own update
+  (`ActorRegisterCameraPoint` / `RegisterForCameraTracking`), the next frame's
+  `UpdateCameraEnemySlots` deals the slots, and the camera reads them the frame
+  after that. The camera is two frames behind the room, as the exe's is.
+
+**What flies the camera has to write angles, or say why it does not.** The
+view is the block's angles, so a routine that moves the eye and the target and
+stops there moves the camera without turning it. The exe's routines that aim by
+look-at all call `CamBlockSetAnglesFromLookAt` (its eleven callers include
+Strength's cues and Judgment's death orbit, and the port's now do too). Two
+fly the camera without it, and the port keeps that: the boss-name banner and
+class 0x14's cut write eye and target through `CamEvalPath7`, which writes
+nothing else, so their flights carry the eye and keep the heading they found.
+The Tower writes the yaw and pitch itself. `[proved]`
+
+A block change leaves the ring alone. `EvtAdvanceStepOrRoute` moves the block
+and the program pointer; only a scene's task list runs `EvtLoadBlockProgram`,
+which empties the ring and zeroes the count. So an action still running when a
+block ends -- a `cam_play` a skip cut short -- retires in the next block and
+takes its own count with it. `[proved]`
+
+Waits yield on their first visit, as every wait opcode but `0x40` does, and
+`wait_frames n` passes after `n + 1` frames. A seek walks the script without
+running frames, so every wait it steps over runs the camera's two tasks to the
+state the wait claims (`CameraReplayUntil`, `CameraReplayFor`,
+`CameraReplaySettle` in `game/camera/actor.ts`).
+
+Three questions this table used to list as open are answered by the same
+reading. The `path.y - 15` is the gameplay eye's: the path hooks write
+`g_camera_eye` fifteen units below the pose (or at `g_camera_fixed_eye_y`), and
+the drawn camera is the block's eye unchanged. `0x009C70C0` is the deferred pose
+block: the (2,6)/(2,7) hooks evaluate the rail into it, and the two drivers
+read it -- `CameraDriverFromDeferredPose` copies it whole,
+`CameraEaseBlockEyeToPathPose` eases the block eye toward it. And
+`CameraStepRailTick` (`0x0040C790`) makes the gameplay eye yaw-only (pitch and
+roll zeroed, the yaw turned half round) while the drawn camera takes the pose's
+full angles through the driver. `[proved]`
 
 A replay also has to honour what a wait *leaves behind*, not only what it
 blocks on. `wait_enemies_alive` and `wait_enemies_present` open only when the
@@ -1204,9 +1288,6 @@ Ranked by what they would actually change on screen.
 
 | Open | Effect | Where the work is |
 |---|---|---|
-| `path.y - 15` compensation | nothing today; the player is correct without it | decomp — `0x009A60C0` is the camera block's eye at block+0x80, and `CameraFromViewAngles` reads a **4x4 matrix** at the block base (0x009A6040) instead, offsetting `(0, -15, 0)` in its own frame. Which of the two the shipped hooks agree on is the remaining question |
-| `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`) | the block eye is taken straight off the curve; the engine can ease it a sixteenth a frame toward a *second* pose block at 0x009C70C0 | decomp — what writes 0x009C70C0 outside the deferred-rail hooks |
-| `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
 | Spawn class → model | enemies stay markers | decomp, large — the class table holds handler addresses |
 | W6 harness | no regression safety net | client |
 
@@ -1438,6 +1519,11 @@ slider all seat through `Player.syncCameraToWalker`, which calls
 `CameraRig.sync` directly. The **draw** is deliberately still ungated — placing
 the three.js camera from a block that has not changed is idempotent, and a
 resize needs it.
+
+Since then the seat has gone altogether. The camera's two tasks run inside the
+game tick (`game/camera/actor.ts`), so a frame that owes no tick runs none of
+the camera, and the draw places the three.js camera from the matrix the last
+tick built.
 
 `test/camera.test.ts` is the guard: it plays stage 1 at 60 and 120 Hz through
 the real `Loop`, `Walker`, `CameraRig` and `CameraTrackEnemiesTick`, and
@@ -3313,13 +3399,13 @@ look like the enemies were at fault is that they are not: a dropper is in both
 counters from its `Init`, throughout its descent — `test/port.test.ts` asserts
 that, because ruling it out is what turned the search towards the script.
 
-Both are now transcribed. The three counter gates — `0x43`, `0x44`, `0x46` —
-model the yield by blocking from `WaitRule.enter` unconditionally and testing
-only in `WaitRule.satisfied`, and `0x44` carries the hysteresis in
-`G.g_evt_wait_alive_hysteresis`. `0x41`, `0x42` and `0x45` have the same yield
-in the engine and still do not model it `[diverges]`: `0x42`'s countdown would
-become `operand + 2` frames, and every camera cue in six stages is timed
-against that clock.
+Both are now transcribed. Every wait rule models the yield by never passing
+from `WaitRule.enter` -- a condition the client cannot hold on is a `yield`
+policy that spends the frame and passes on the next visit -- and `0x44`
+carries the hysteresis in `G.g_evt_wait_alive_hysteresis`. `0x41`, `0x42`,
+`0x45` and `0x47` were the last to take it, with the camera's action ring: a
+wait that passed on sight let the `goto_scene_state` behind it park the slot
+before the camera actor had run the `finish_sequence` in front of it.
 
 **And they are two counters.** `EvtOpWaitEnemiesPresent43` (`FUN_0045FBC0`)
 reads `g_enemies_present`; `EvtOpWaitEnemiesAlive44` reads `g_enemies_alive`.
@@ -5498,14 +5584,14 @@ missed. Meanings and confidence marks live in
 | `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
 | `2E` | `stop_voice_if_skipped` | audio | **done** | `PlaySoundId(0x80000002)`, the voice channel's stop, when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
-| `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |
-| `31` | `goto_scene_state` | flow | *tracked* | the end-of-room instruction: enters scene state (1, 3) and retires the outstanding `queue_event 0x21`. The camera hook it installs reads the player view angles, which this client does not have — it draws the `cam/` path. [diverges] |
-| `32` | `goto_scene_state_when_alive` | flow | *tracked* | as `0x31`, minus two clears, plus a park until a player is out of the death → continue → revive chain. No player death here, so the gate is always open [diverges] |
-| `33` | `set_action_drain_mode` | flow | *tracked* | `pending += delta`, the second script-side retirement — all 128 in the game carry −1. The dequeue mode itself is not modelled |
+| `30` | `queue_event` | camera | **done** | pushes onto the action ring and nothing more; the actions run in `CameraActorTick`'s `EvtRunQueuedActions`, one at a time, behind whatever handler holds the slot (`game/camera/actions.ts`) — see the selector table below |
+| `31` | `goto_scene_state` | flow | **done** | the end-of-room instruction: enters scene state (1, minor) and stamps it, drops the camera mode, the override latch and the eye ease, parks the action slot and retires the `queue_event 0x21` whose driver never retires itself. (1,3)'s hook, `CameraFromViewAngles`, puts the gameplay eye fifteen down the view's own axis |
+| `32` | `goto_scene_state_when_alive` | flow | done | as `0x31`, minus two clears, behind a gate: while either player is in state 4, 5 or 6 (`g_player_state_handlers` `+0x10` is 0) with no lives, it re-runs every frame (`Walker.holdHere`). The nineteen sites are the boss rooms |
+| `33` | `set_action_drain_mode` | flow | **done** | `g_evt_action_advance = mode; pending += delta` — all 128 in the game carry `2, −1`: the `finish_sequence` in the slot taken back, what is queued behind it dequeued now and first called next frame |
 | `34` | `unused_34` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
 | `35` | `enable_camera_path_roll` | camera | **done** | **gates the camera roll channel**, exactly as CamEvalPath7 does |
-| `36` | `pin_view_to_ground_plane` | camera | *tracked* | selects the fixed camera eye height; see the eye-height note |
-| `37` | `force_camera_path_advance` | camera | done | `EvtOpForceCameraPathAdvance37` writes `g_force_rail_advance` (`0x009CA098`): at 1 the stashed rail steps through a screen shake or with nobody in play. The rail's gate itself is a declared divergence in `game/camera/rail.ts` |
+| `36` | `pin_view_to_ground_plane` | camera | **done** | `g_camera_use_fixed_y`: the **gameplay** eye at `g_camera_fixed_eye_y` instead of fifteen below the pose; see the eye-height note |
+| `37` | `force_camera_path_advance` | camera | done | `EvtOpForceCameraPathAdvance37` writes `g_force_rail_advance` (`0x009CA098`): at 1 the stashed rail steps through a screen shake or with nobody in play, which the rail's gate (`RailMayAdvance`, `game/camera/rail.ts`) otherwise holds it for |
 | `38` | `se_play` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
 | `39` | `se_play_3d` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
 | `3A` | `se_play_unless_skip` | audio | **done** | **sound effects, voice and BGM play** — dispatched by namespace like PlaySoundId |
@@ -5514,20 +5600,20 @@ missed. Meanings and confidence marks live in
 | `3D` | `nop3` | nop | n/a | proved no-ops |
 | `3E` | `nop1` | nop | n/a | proved no-ops |
 | `3F` | `nop0` | nop | n/a | proved no-ops |
-| `40` | `wait_queued_events_done` | wait | ~approx~ | **`g_queued_events_pending == 0`, counted for real** — `queue_event` adds one, each handler takes one back, `finish_sequence` never does and `0x31`/`0x33` do it for it. Still `approx` because the ring's *ordering* is not modelled: the port runs an action when it is queued, not one at a time |
-| `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate; operand 0 waits for the end of the path. It does **not** carry `EvtOpWaitCameraPathFrame41`'s first-visit `g_evt_yield` yield [diverges] — see `0x43` |
-| `42` | `wait_frames` | wait | **done** | **exact** frame countdown — of `operand` frames. `EvtOpWaitFrames42` loads the counter on its `g_evt_yield` frame and decrements *before* testing, so the engine's is `operand + 2` [diverges]: retiming it moves every camera cue in six stages and wants its own change |
+| `40` | `wait_queued_events_done` | wait | ~approx~ | **`g_queued_events_pending == 0`, counted for real** — `queue_event` adds one, each handler takes one back, `finish_sequence` never does and `0x31`/`0x33` do it for it. The ring is the engine's now, one action at a time; `approx` only for `g_evt_gameplay_live`, as every wait |
+| `41` | `wait_camera_path_frame` | wait | **done** | **exact** camera-frame gate on `G`'s words, polled every frame: operand 0 waits for `g_cam_path_frames_left < 1`, any other for `g_cam_path_frame > operand`. It yields the frame it is reached, as `g_evt_yield` makes it |
+| `42` | `wait_frames` | wait | **done** | **exact** frame countdown: `EvtOpWaitFrames42` loads the counter on its `g_evt_yield` frame and decrements *before* testing, so the instruction behind it runs `operand + 1` frames after the one that reached it |
 | `43` | `wait_enemies_present` | wait | ~approx~ | the **corpse-clear** gate, on `g_enemies_present` — not a synonym for `0x44`, and answered with the alive count until B4/B8. **Real** — the script holds until they are dead **and the camera has swung back** (`g_camera_free`). Yields the frame it is reached, as `g_evt_yield` makes it |
 | `44` | `wait_enemies_alive` | wait | ~approx~ | the **live-enemy** gate, on `g_enemies_alive`, and 434 of the 488 enemy gates. Same side conditions as `0x43` plus `g_evt_wait_alive_hysteresis`, so it costs one frame more — both are now ported |
-| `45` | `wait_script_flag` | wait | ~approx~ | the **script-flag gate**, on `g_script_flags` (0x009C7200) — and that array is one array: every one of the forty-odd gates in the six shipped scripts names a flag that script's own `set_script_flag` never sets, so this opcode is *only* ever a wait on an actor. **Real** now; it used to read a `Set` beside `G` that held the script's own writes only, and passed on sight. **`[diverges]`**: a gate whose flag *nothing this port runs can raise* passes instead of parking, and the boundary is derived from the bundle rather than listed — the stage's own `set_script_flag` ops, the civilians' streams and the captors' state 36. Honouring every gate unconditionally parks stage 5 at block 1, stage 1 at blocks 14 and 16, stage 2 at 35-41, stage 4 at 23-29 and all six on the chapter card |
+| `45` | `wait_script_flag` | wait | ~approx~ | the **script-flag gate**, on `g_script_flags` (0x009C7200), never passed on the frame it is reached (`g_evt_yield`) — and that array is one array: every one of the forty-odd gates in the six shipped scripts names a flag that script's own `set_script_flag` never sets, so this opcode is *only* ever a wait on an actor. **Real** now; it used to read a `Set` beside `G` that held the script's own writes only, and passed on sight. **`[diverges]`**: a gate whose flag *nothing this port runs can raise* passes instead of parking, and the boundary is derived from the bundle rather than listed — the stage's own `set_script_flag` ops, the civilians' streams and the captors' state 36. Honouring every gate unconditionally parks stage 5 at block 1, stage 1 at blocks 14 and 16, stage 2 at 35-41, stage 4 at 23-29 and all six on the chapter card |
 | `46` | `wait_scripted_actors` | wait | ~approx~ | the civilian gate — `g_civilians_alive`, the same handler as `0x43` on a different counter. **Real**: it holds until the captors are dead. All 68 sites pass operand 0 |
-| `47` | `wait_targets_clear` | wait | ~approx~ | **Real**: `(g_camera_settled \|\| g_camera_free) && g_camera_candidate_count == 0`, the candidate count including carried props. It passed on sight until stage 3's bridge, where it let the script leave with a drum-thrower still standing there. `g_evt_gameplay_live` is not modelled, as for `0x45` |
+| `47` | `wait_targets_clear` | wait | ~approx~ | **Real**, after the frame it yields on: `(g_camera_settled \|\| g_camera_free) && g_camera_candidate_count == 0`, the candidate count including carried props. It passed on sight until stage 3's bridge, where it let the script leave with a drum-thrower still standing there. `g_evt_gameplay_live` is not modelled, as for `0x45` |
 | `48` | `set_script_flag` | flow | **done** | `g_script_flags[operand] = 1` and nothing else — the whole of `EvtOpSetScriptFlag48`. It writes `G.g_script_flags`, the same array the civilians' op 0x1C and the captors' state 36 write |
 | `49` | `variant_call_a` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4A` | `variant_call_b` | flow | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4B` | `variant_spawn` | spawn | shown | a global picks which operand list runs; the client does not evaluate it |
 | `4C` | `unused_4c` | unused | n/a | dispatch slots that map to the empty stub; no shipped file encodes one |
-| `4D` | `checkpoint` | flow | *tracked* | records the checkpoint block |
+| `4D` | `checkpoint` | flow | *tracked* | records the checkpoint block, and the camera half of `ResetSceneCombatState`: scene state (1,3), the published frame to 0, the override latch, the eye ease, the held driver, the roll channel and the fixed eye cleared |
 | `4E` | `halt` | flow | **done** | **parks playback** — it does not end the scene |
 | `4F` | `advance_step` | flow | **done** | **next step, or the route table** when the step list is exhausted. Retires nothing: actors cross both step and block boundaries by design |
 | `50` | `asset_load_slot` | assets | **done** | **streams a model in / out** of the drawn set |
@@ -5551,22 +5637,25 @@ missed. Meanings and confidence marks live in
 
 | Sel | Action | Status | Notes |
 |---|---|---|---|
-| `10` | `set_player_flag` | shown |  |
-| `11` | `scene_state` | shown |  |
-| `12` | `set_update_routine` | shown |  |
+| `10` | `set_player_flag` | shown | both players' flag bit 0, the on-screen body the client does not draw; retires |
+| `11` | `scene_state` | **done** | `EvtEnterSceneState(live major, operand)`, stamped; retires |
+| `12` | `set_update_routine` | shown | both players' update routine out of `0x00579E90`; retires |
 | `13` | `set_continuation` | n/a | defined, never used in shipped data |
-| `14` | `set_global` | shown |  |
-| `15` | `set_flag` | shown |  |
-| `20` | `hold_camera_preset` | shown | the preset table at 0x00576CF0 is not read |
-| `21` | `finish_sequence` | **done** | camera state: 4 snaps to the path eye, 6/7 play the stashed range |
-| `40` | `cam_play` | **done** | start..end at 60 Hz; `-1` resumes, `start == end` holds, `flags & 2` stashes |
-| `60` | `store_six` | **done** | the branch preview shots, offered on hover at a branch |
+| `14` | `set_global` | **done** | `g_camera_index` — the block the view is built from; both shipped sites pass 0 |
+| `15` | `set_flag` | **done** | `g_camera_ease_eye = 1`: the tracking tick eases the eye onto the pose a sixteenth a frame instead of snapping |
+| `20` | `hold_camera_preset` | **done** | persistent: the block's eye and angles from the preset table at `0x00576CF0` every frame, and `g_camera_free = 1`; operand 0 counts down, and 0 never does |
+| `21` | `finish_sequence` | **done** | the permits dropped, scene state (2, minor) entered unstamped, the minor's starter installed and the ring held (`advance = 0`); the starter runs next frame and installs `CameraDriverSelectMode` (4, 6) or `CameraDriverFromDeferredPose` (7) |
+| `40` | `cam_play` | **done** | `start == end` a held pose, `flags & 2` the stash, else `CamStartPathPlayback`; `-1` resumes; the handler publishes every frame start..end inclusive |
+| `60` | `store_six` | **done** | the three `(frame, path)` pairs and `g_evt_cam_override_valid`, which `CameraArmStashedPath` reads; the branch preview shots offered on hover |
 
 ### The eye-height note
 
-`0x1A` and `0x36` are marked *tracked* rather than **done** on purpose. Every
-camera hook applies `eye.y = use_fixed_y ? fixed_eye_y : path.y - 15`, but
-applying that to the `cp_` curve puts 173 of 201 paths looking upward at their
-own aim point, so the client records both values and applies neither. The
-measurement and a switch to re-enable it are in `web/src/render/campath.ts`.
+Every path hook applies `eye.y = use_fixed_y ? fixed_eye_y : pose.y - 15`, and
+the `eye` it writes is `g_camera_eye` (`0x009C71E0`) — the **gameplay** eye the
+enemies measure to — never the camera block the view is built from. That is
+why applying it to the drawn camera put 173 of 201 paths looking up at their
+own aim point: it is the height of the player's body below the lens. `0x36` is
+**done** on that reading (`g_camera_use_fixed_y`); `0x1A` stays *tracked* for
+its other reader, the ground plane a missed downward ray falls back to. See
+`web/src/render/campath.ts`.
 

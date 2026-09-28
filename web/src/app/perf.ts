@@ -29,7 +29,10 @@
  * The A/B switches are URL parameters, so a phone can try one without a
  * rebuild: `?perf=1` turns the meter on, `aa=0` drops MSAA, `shadows=0` the
  * gun lights' shadow maps, `blur=0` every `backdrop-filter` over the game,
- * `gpu=1` turns the GPU sample on. They are experiments, not settings: nothing saves
+ * `gpu=1` turns the GPU sample on, `rain=0` drops the rain, and `thin=1`
+ * hides every other opaque scenery mesh -- a wrong picture, to ask whether
+ * halving the draw calls takes the stutter with it before building the fix
+ * that would. They are experiments, not settings: nothing saves
  * them, and the meter says which are on.
  */
 import type { Phase, SystemProbe } from "../core/world";
@@ -55,6 +58,14 @@ export interface Experiments {
   shadows: boolean;
   blur: boolean;
   gpu: boolean;
+  /** `rain=0`: no rain -- fifty drops, a draw call or two each. */
+  rain: boolean;
+  /**
+   * `thin=1`: every other opaque scenery mesh hidden. The picture is wrong
+   * on purpose; it halves the scenery's draw calls, which is the question --
+   * does the stutter go with them? -- asked before paying for the answer.
+   */
+  thin: boolean;
 }
 
 export function readExperiments(search: string): Experiments {
@@ -64,12 +75,15 @@ export function readExperiments(search: string): Experiments {
     perf: q.get("perf") === "1",
     aa: !off("aa"), shadows: !off("shadows"), blur: !off("blur"),
     gpu: q.get("gpu") === "1",
+    rain: !off("rain"),
+    thin: q.get("thin") === "1",
   };
 }
 
 function describeExperiments(e: Experiments): string {
-  return [...(["aa", "shadows", "blur"] as const)
-    .filter((k) => !e[k]).map((k) => `${k}=0`), ...(e.gpu ? ["gpu=1"] : [])]
+  return [...(["aa", "shadows", "blur", "rain"] as const)
+    .filter((k) => !e[k]).map((k) => `${k}=0`),
+    ...(["gpu", "thin"] as const).filter((k) => e[k]).map((k) => `${k}=1`)]
     .join(" ");
 }
 

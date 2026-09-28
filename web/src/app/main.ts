@@ -20,6 +20,7 @@
 
 import {
   Color,
+  type Mesh,
   PCFSoftShadowMap,
   PerspectiveCamera,
   Scene,
@@ -1916,8 +1917,28 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * loading screen lifts.
    */
   warmShaders(): void {
+    this.applyStageExperiments();
     updateVisibleMatrixWorld(this.scene);
     this.renderer.compile(this.scene, this.camera);
+  }
+
+  /**
+   * The perf meter's two A/B switches that act on a loaded stage: `rain=0`
+   * and `thin=1`. Experiments, not settings -- see `app/perf.ts`.
+   */
+  private applyStageExperiments(): void {
+    const e = this.perfMeter.experiments;
+    if (!e.rain) this.rain.setEnabled(false);
+    const scenery = this.scene3d?.root.children[0];
+    if (!e.thin || !scenery) return;
+    let n = 0;
+    scenery.traverse((o) => {
+      const m = o as Mesh;
+      if (!m.isMesh) return;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      if (mats.some((x) => x.transparent)) return;
+      if (n++ % 2 === 1) m.visible = false;
+    });
   }
 
   /** Draw, then publish. Every frame, whether or not it owed a tick. */

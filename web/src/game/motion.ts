@@ -144,9 +144,7 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   }
 
   // A one-shot at full weight -- a swing, an arc stage, an entrance. It ends
-  // itself, and the state machine reads the null as "the swing is over". The
-  // `loop` arm below was class 0x30's lunge, which plays on the base track now
-  // as `ZombieStateStrike` (`FUN_00455A40`) plays it; nothing sets it today.
+  // itself, and the state machine reads the null as "the swing is over".
   const act = obj.action;
   if (act) {
     const wasAct = obj.rootActionFrame;
@@ -171,16 +169,11 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
       ApplyRootMotion(obj, d.x, d.z, d.y);
       obj.rootActionFrame = f;
       if (act.ticks >= ticksOfAuthoredFrame(am.frames, am.fps)) {
-        if (act.loop) {
-          act.ticks = 0;
-          obj.rootActionFrame = -1;
-        } else {
-          // A one-shot ending is a transition like any other: the next state
-          // will set its own clip, and it must fade out of the swing rather
-          // than out of whatever the base motion happened to be.
-          ActorStartFade(obj, act.motion, act.ticks, MotionFade.Normal);
-          obj.action = null;
-        }
+        // A one-shot ending is a transition like any other: the next state
+        // will set its own clip, and it must fade out of the swing rather
+        // than out of whatever the base motion happened to be.
+        ActorStartFade(obj, act.motion, act.ticks, MotionFade.Normal);
+        obj.action = null;
       }
     }
   }

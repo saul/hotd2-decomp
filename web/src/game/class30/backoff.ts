@@ -56,11 +56,11 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
                                    rng: Rng): void {
   if (obj.sub === 0) {
     // `obj+0x1338`, **not** the attack cooldown at `obj+0x133C`. This is the
-    // shove timer `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) counts
-    // down; 60 frames after a push it flips `obj+0x136C` bit 0x400000, which
-    // is the direction this state retreats in. An earlier revision wrote it
-    // into `cooldown` — two different fields, one of them the thing that
-    // paces attacks.
+    // shove timer the hook at `obj+0x12F0` counts down, once a call; when it
+    // runs out on a frame the actor was pushed it flips `obj+0x136C` bit
+    // 0x400000, which is the direction this state retreats in. An earlier
+    // revision wrote it into `cooldown` — two different fields, one of them
+    // the thing that paces attacks.
     obj.zom.shoveTimer = 0x3c;            // +0x1338
     obj.zom.backoffFrames = 0;            // +0x1334
     // `obj+0x34 = obj+0x34 & ~0x10000000 | 0x20000000` (`00455ca1`,
@@ -86,15 +86,12 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
   // Retreating along a shared radial away from the player instead, as this
   // did, funnels every one of them onto the same line.
   //
-  // An earlier revision of this comment asserted there is **no** separation
-  // pass anywhere in the engine. That is wrong: `ZombiePushOutOfWorldAndActors`
-  // (`FUN_00454900`), the per-frame hook `EnemyZombieInit` installs at
-  // `obj+0x12F0`, runs `ColiTestSphereAgainstActors` against `obj+0x12C` with
-  // radius `obj+0x128` and pushes the actor out by a tenth of the penetration
-  // each frame -- 1.8x that while it, or the actor that pushed it, holds
-  // `obj+0x34 & 0x18000000`: committed to a strike, or sprinting, which every
-  // zombie that has been shot is. It is ported, in `class30/ground.ts`.
-  // `[proved]`
+  // The crowd is kept apart by something else, which runs after this state
+  // in the same update: `ZombiePushOutOfWorldAndActors` (`FUN_00454900`), the
+  // hook at `obj+0x12F0` (`class30/ground.ts`). It is also what flips
+  // {@link ZombieFlag2.BackOffTurnFlip} sixty frames into being shoved, and
+  // the retreat's `Committed` clear above takes away one of the two bits that
+  // push is 1.8x as hard for.
   //
   // The negative rate turns the long way, toward the *opposite* of
   // `VecToAngles(obj - p)`: the anchor is further out than the actor now is,

@@ -10,10 +10,15 @@
  * |---|---|---|
  * | `SpawnThrownWeapon` (`FUN_004504E0`), class 0x31 | `ThrownWeaponUpdate` (`FUN_00450780`) | `g_thrown_weapon_states` — `0x00592AE0`, two |
  * | `ZombieThrowHandWeapon` (`FUN_0045A240`), class 0x30 | `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) | `g_zombie_thrown_weapon_states` — `0x00593170`, four |
+ * | `ZslmanBladeEmitAfterimage` (`FUN_00450930`), a `zslman` blade | `ZslmanBladeAfterimageFade` (`FUN_00450A30`) | none: it fades and goes |
  *
  * Both are `ActorAlloc(routine, 0x13F4)` followed by `ActorClearGameFields`
  * (`FUN_004A73D0`), which zeroes everything from `obj+0x34` to the end of the
  * block — so every field below that a launcher does not write starts at zero.
+ * The third row is not a weapon at all but what one of them trails: the same
+ * `ActorAlloc(routine, 0x13F4)` and clear, made by the weapon's own routine,
+ * holding a copy of its pose. It lives in the same list because it is the
+ * same kind of task, at the same offsets, drawn the same way.
  * (A note on `ActorAlloc` used to say the opposite, that the body is the
  * previous occupant's memory; the clear is the very next call at
  * `0x004504F8` / `0x0045A259`.)
@@ -58,6 +63,12 @@ export enum ThrownWeaponRoutine {
   Thrower = 0,
   /** `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`), by `ZombieThrowHandWeapon`. */
   Zombie = 1,
+  /**
+   * `ZslmanBladeAfterimageFade` (`FUN_00450A30`), by
+   * `ZslmanBladeEmitAfterimage` (`FUN_00450930`): `PUSH 0x450a30` at
+   * `0x0045095D`, into the `ActorAlloc` at `0x00450962`.
+   */
+  ZslmanAfterimage = 2,
 }
 
 /**
@@ -113,7 +124,10 @@ export interface ThrownWeapon {
   id: number;
   /** The task's function pointer. See {@link ThrownWeaponRoutine}. */
   routine: ThrownWeaponRoutine;
-  /** `obj+0x1390` — the thrower, by spawn address. */
+  /**
+   * `obj+0x1390` — the thrower, by spawn address. An afterimage's `+0x1390` is
+   * its weapon instead, which the port keys by id: {@link weapon}.
+   */
   from: number;
   /** `obj+0x13F0` — the model `AssetDrawSlot` draws. */
   slot: number;
@@ -174,10 +188,52 @@ export interface ThrownWeapon {
   hitRadius: number;
   /** `obj+0x1344` — frames of flight left. */
   ttl: number;
-  /** `obj+0x1330` — the stick, blink and shot-down counters. */
+  /**
+   * `obj+0x1330` — the stick, blink and shot-down counters, and an
+   * afterimage's life.
+   */
   timer: number;
   /** `obj+0x13C0..0x13C8` — where it is flying to. */
   target: Vec3;
+  /**
+   * `obj+0x1338` — frames until the next afterimage. `ZslmanBladeEmitAfterimage`
+   * (`FUN_00450930`) counts it down and reloads it from
+   * {@link afterimagePeriod}. Both launchers write it — 4 at `0x00450736` for
+   * class 0x31, 7 at `0x0045A419` for class 0x30 — and only class 0x31's
+   * routine reads it, and only for character type 0x18.
+   */
+  afterimageTimer: number;
+  /** `obj+0x133C` — what {@link afterimageTimer} reloads with. */
+  afterimagePeriod: number;
+  /**
+   * `obj+0x1368`. On a weapon, how many afterimages it has out: the emitter
+   * makes one only below ten, and each gives its count back as it goes —
+   * unless the weapon is {@link ThrownWeaponFlag.Spent} by then. On an
+   * afterimage, that count as it stood when this one was made
+   * (`MOV [EBX+0x1368], EDX` at `0x00450A0D`), which nothing reads.
+   */
+  afterimages: number;
+  /**
+   * `obj+0x1390` on an afterimage — the weapon it was made from, by id
+   * (`MOV [EBX+0x1390], EBP` at `0x0045097F`). Zero on a weapon, whose
+   * `+0x1390` is its thrower, {@link from}.
+   */
+  weapon: number;
+  /**
+   * `obj+0x1384` — an afterimage's light: 1.0, or 0.75 for a `zslman` blade's
+   * (`0x004509A7`, `0x004509DA` / `0x004509F6`), down by {@link lightStep}
+   * every frame it draws. It goes below zero before the life runs out.
+   */
+  light: number;
+  /** `obj+0x1388` — `0x3D888889`, a fifteenth, as an f32 (`0x004509B1`). */
+  lightStep: number;
+  /**
+   * `[port-only]` What this frame's draw handed `SetRenderLightColour`
+   * (`FUN_004AA0A0`) before its `AssetDrawSlot`, or `null` for a draw that
+   * left the light alone — every draw but an afterimage's. The renderer reads
+   * it; nothing reads it back.
+   */
+  lightColour: [number, number, number] | null;
   /**
    * `[port-only]` What this frame's `AssetDrawSlot` drew with: the engine's
    * modelview (`g_camera_world_to_view` · T · Rz · Ry · Rx), or `null` for a
@@ -245,7 +301,9 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
     pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 },
     acc: { x: 0, y: 0, z: 0 }, rx: 0, ry: 0, rz: 0,
     view: { x: 0, y: 0, z: 0 }, hitRadius: 0, ttl: 0, timer: 0,
-    target: { x: 0, y: 0, z: 0 }, draw: null, despawned: false,
+    target: { x: 0, y: 0, z: 0 }, afterimageTimer: 0, afterimagePeriod: 0,
+    afterimages: 0, weapon: 0, light: 0, lightStep: 0, lightColour: null,
+    draw: null, despawned: false,
   };
 }
 
@@ -254,6 +312,14 @@ export function ThrownWeaponAlloc(routine: ThrownWeaponRoutine): ThrownWeapon {
  * among other things is `RegisterForShotTest`'s refusal bit, and out of the
  * task list. `[port-only]` as a function: the engine calls the one routine for
  * every object.
+ *
+ * **Nothing after it runs.** `ActorDespawn` ends in `ActorKill`
+ * (`FUN_004A7040`), which unlinks the running task, puts it on the free list
+ * and `_longjmp`s to the `__setjmp3` in `TaskRunTree` (`FUN_004A71A0`) — so a
+ * state routine that despawns its weapon takes the rest of the weapon's own
+ * routine with it: no draw that frame, no shot-test registration, no
+ * afterimage. The port's routines return on {@link ThrownWeapon.despawned}
+ * where the jump lands. `[proved]`
  */
 export function ThrownWeaponDespawn(w: ThrownWeapon): void {
   w.flags |= THROWN_WEAPON_DESPAWN_FLAGS;
@@ -285,6 +351,19 @@ const THROWN_WEAPON_DESPAWN_FLAGS = 0x80018000 | 0;
 export function ThrownWeaponDrawAndProject(w: ThrownWeapon, xTerm: number,
                                            cam: ThrownWeaponCamera | null):
     boolean {
+  if (!ThrownWeaponDraw(w, xTerm, cam) || !cam) return false;
+  MatrixTransformPoint(cam.w2v, w.pos, w.view);
+  return true;
+}
+
+/**
+ * `[port-only]` The draw alone, without the view point: `MatrixStackPush(0)`,
+ * `T · Rz · Ry · Rx(xTerm)`, `AssetDrawSlot`, `MatrixStackPop(1)`. The
+ * afterimage's routine is exactly this (`0x00450A66`..`0x00450AEE`) and
+ * neither projects nor registers.
+ */
+export function ThrownWeaponDraw(w: ThrownWeapon, xTerm: number,
+                                 cam: ThrownWeaponCamera | null): boolean {
   if (!cam) return false;
   const m = MatCopy(MatIdentity(), cam.w2v);
   MatrixTranslate(m, w.pos.x, w.pos.y, w.pos.z);
@@ -292,7 +371,6 @@ export function ThrownWeaponDrawAndProject(w: ThrownWeapon, xTerm: number,
   MatrixRotateY(m, w.ry);
   MatrixRotateX(m, xTerm);
   w.draw = m;
-  MatrixTransformPoint(cam.w2v, w.pos, w.view);
   return true;
 }
 
@@ -379,14 +457,8 @@ export function ThrownWeaponShotDownTarget(w: ThrownWeapon,
 /** `FMUL float ptr [0x004C43A4]` — `0x41200000`, 10.0. */
 const SHOT_DOWN_SCATTER = 10.0;
 
-/**
- * `Vec3Normalize` — `FUN_004AAA00`. `out = v / |v|`, and the length comes
- * back in `ST0`, which both shot-down arms pop and discard. No zero test.
- */
-export function Vec3Normalize(v: Vec3, out: Vec3): number {
-  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-  out.x = v.x / len;
-  out.y = v.y / len;
-  out.z = v.z / len;
-  return len;
-}
+// `Vec3Normalize` (`FUN_004AAA00`) is `game/matrix.ts`'s, beside
+// `Vec3ScaleToUnitLength`; the crowd push calls it too, and `coli.ts` may not
+// import this module without entering its cycle (L56). Re-exported for the
+// two shot-down arms that take it from here.
+export { Vec3Normalize } from "./matrix";

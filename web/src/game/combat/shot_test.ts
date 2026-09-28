@@ -49,17 +49,24 @@
  *
  * ## Which classes the port runs through here
  *
- * Only those that say so, with {@link ClassHandler.registersForShotTest}: the
- * class calls {@link RegisterForShotTest} -- or `ActorRegisterCameraPoint`,
- * which calls it -- from its own update at the exe's call sites, and the pick
- * tests it through {@link G.g_shot_test_list} and nothing else. Every other
- * class is still picked by `render/characters.ts` the way it was before this
- * file existed. `docs/formats/combat.md`, "The shot test", lists what moving
- * each of them across would take.
+ * **Every class that registers is in the list**, because the list has a
+ * second reader: `ColiPublishDynamicList` (`FUN_00405360`) copies it for the
+ * crowd push, `ColiTestSphereAgainstActors` (`FUN_00405B10`), which can only
+ * find what registered. So `ActorRegisterCameraPoint` files every caller, as
+ * the engine's does.
+ *
+ * **The pick is the part that migrates, a class at a time**
+ * ({@link ShotTestPickedHere}): a class that has set
+ * {@link ClassHandler.registersForShotTest} is tested through
+ * {@link G.g_shot_test_list} and nothing else, and every other class's entry
+ * is passed over here because `render/characters.ts` still picks it the way
+ * it did before this file existed. `docs/formats/combat.md`, "The shot test",
+ * lists what moving each of them across would take.
  */
 import { ActorFlag, type Actor } from "../actor";
 import type { CharacterBone } from "../../bundle/characters";
 import { ActorByAt, G } from "../globals";
+import { g_class_handlers } from "../registry";
 import type { GameHost, ShotRay } from "../host";
 import { ColiSegmentVsMesh, type ColiHit } from "../coli";
 import {
@@ -319,6 +326,19 @@ export function RegisterForShotTest(obj: Actor, host: GameHost): void {
 }
 
 /**
+ * `[port-only]` Whether this pick, rather than `render/characters.ts`', tests
+ * the object: a class that has moved across
+ * ({@link ClassHandler.registersForShotTest}), or an actor that carries the
+ * engine's own model block. Every registered object is in
+ * {@link G.g_shot_test_list} either way -- the crowd push reads it too -- so
+ * the migration boundary is here, at the pick, and not at the registration.
+ * It goes when the last class moves across.
+ */
+export function ShotTestPickedHere(obj: Actor): boolean {
+  return !!obj.skel || !!g_class_handlers[obj.cls]?.registersForShotTest;
+}
+
+/**
  * The end of `ProcessPlayerShots`' pass: `MOV [0x005A4C80], EBP` at
  * `0x0040461E` — nothing is registered any more until an update registers it
  * again.
@@ -383,6 +403,7 @@ export function ProcessPlayerShotsTestList(ray: ShotRay, host: GameHost):
     }
     const obj = ActorByAt(entry.at);
     if (!obj) continue;
+    if (!ShotTestPickedHere(obj)) continue;
     if (obj.flags & ActorFlag.ShotTestMesh) continue;
     ShotTestSphere(obj, shot, out);
   }

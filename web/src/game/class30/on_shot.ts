@@ -11,7 +11,7 @@
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { ActorReleaseBodyCreatureOnHit } from "../combat/resolve_hit";
 import { CharacterTypeOf } from "../tables";
-import { ZombieState } from "./states";
+import { ZOMBIE_SPRINTS, ZombieState } from "./states";
 
 /** `FCOMP [0x0055d178]` — `00009041` = 18.0f. */
 const ARC_TARGET_NEAR = 18.0;
@@ -57,6 +57,32 @@ const STATE_UNREAD_0x34 = 0x34;
  *   middle of `ZombieStateDelayedLeap`'s arc finishes the arc; the death is
  *   dispatched later, by whatever ends the leap.
  *
+ * **Every shot that lands makes it run.** The head of the per-player loop,
+ * before the death latch and before the test for dead:
+ *
+ * ```
+ * 00453efd  8b966c130000   MOV EDX, [ESI+0x136c]
+ * 00453f03  8b4e34         MOV ECX, [ESI+0x34]
+ * 00453f14  80e6fb         AND DH, 0xfb          ; obj+0x136C &= ~0x400
+ * 00453f17  81c900000008   OR  ECX, 0x8000000    ; obj+0x34 |= 0x8000000
+ * 00453f24  89966c130000   MOV [ESI+0x136c], EDX
+ * 00453f2a  894e34         MOV [ESI+0x34], ECX
+ * 00453f3b  a900000080     TEST EAX, 0x80000000  ; the latch, only now
+ * ```
+ *
+ * `0x8000000` is {@link ZOMBIE_SPRINTS}, the bit `ZombieStateAttackRun`
+ * (`FUN_004554D0`) takes the second run of its pair with and turns two and a
+ * half times as fast on, so **a zombie that has been shot comes on at a
+ * run** — whether its spawn record asked for one or not, and for good: no
+ * `AND` in class 0x30 clears it (the image's only three masks that would are
+ * in `ThrowerDrawBonePart` and the sound code; a whole-word store has not been
+ * swept for). `0x400` is
+ * {@link ZombieFlag2.EntryClipPlaying}, whose two readers in
+ * `ZombieStateHoldAtRange` exempt the actor from the too-close retreat and
+ * refuse it the attack claim, so a shot ends that too. Both are written for
+ * a corpse as well, and for one already latched: only `ShotImmune` comes
+ * before them. The port wrote neither until now. `[proved]`
+ *
  * [diverges] The engine's routine is the whole shot response, not only this:
  * per player it stashes the result at `obj+0x1364`, calls `ActorShotFeedback`
  * (`FUN_00454050`) for the blood and the sound, and on a *survivable* hit
@@ -64,7 +90,7 @@ const STATE_UNREAD_0x34 = 0x34;
  * `ResolveHit` already does the damage, the gore, the score and the stagger
  * generically — `ThrowerShotFeedback` declares the same departure for its own
  * routine, for the same reason — so what is left here is the half no shared
- * routine can do, which is choosing a state.
+ * routine can do, which is choosing a state, and the two bits above.
  *
  * **State 9 is ported.** It used to be declared a divergence here, saying it
  * was not: every actor this half of the routine chose state 9 for was sent to
@@ -86,6 +112,13 @@ export function ZombieOnShot(obj: ZombieActor): void {
   // holds `MOV EDX, [ESI+0x136c]`, inside the per-player loop, and the
   // encoding is the byte form. `[proved]`
   if (obj.flags & ActorFlag.ShotImmune) return;
+  // The loop head, `0x00453F14`..`0x00453F2A`: for every landed shot, before
+  // anything asks whether the actor is alive.
+  obj.flags2 &= ~ZombieFlag2.EntryClipPlaying;
+  obj.flags |= ZOMBIE_SPRINTS;
+  // `00453F3B TEST EAX, 0x80000000` / `JNZ 0x00454035` -- the latch comes
+  // **before** the live/dead split, so a latched actor takes neither arm.
+  if (obj.flags2 & ZombieFlag2.DiedInFlight) return;
   // `00453F46 TEST dword ptr [ESI + 0x34], 0x4000000` / `JZ 0045401A` -- the
   // live arm, and the engine's **one** call site for `ActorReactToHit`
   // (`FUN_004543F0`): `0045401A PUSH EDI / CALL 0x004543F0`.
@@ -104,9 +137,7 @@ export function ZombieOnShot(obj: ZombieActor): void {
                                   ?? -1, hit.result, hit.player ?? 0);
     return;
   }
-  // `if ((obj+0x136C & 0x80000000) == 0)` at 0x00453F2A, then the raise at
-  // 0x00453F4E: this death is dispatched once.
-  if (obj.flags2 & ZombieFlag2.DiedInFlight) return;
+  // `OR EAX, 0x80000000` at 0x00453F53: this death is dispatched once.
   obj.flags2 |= ZombieFlag2.DiedInFlight;
 
   if (obj.flags2 & ZombieFlag2.Leaping) return;

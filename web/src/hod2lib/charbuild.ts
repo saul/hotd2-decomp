@@ -23,7 +23,7 @@ import { g_class30_bone_cels } from "../game/class30/bonecels";
 import { u32 } from "./bytes";
 import { MOTION_ROW_BACKOFF, actorRadius, attackPicks, attackTables,
          damageRankRow, goreParts, hitReactions, hitSphere, hitSteps,
-         motionRow, throwTables, torsoStageCount,
+         motionRow, THROWER_AFTERIMAGE_SLOTS, throwTables, torsoStageCount,
          zombieThrowTables } from "./combat";
 import type { CharacterPart, ExeTables } from "./exetab";
 import type { BakedMotion } from "./charmotion";
@@ -520,6 +520,9 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
       }
     }
   }
+  // **And what the weapon trails**: `zslman`'s afterimages draw a model of
+  // their own that no hand kit names -- see `THROWER_AFTERIMAGE_SLOTS`.
+  for (const s of THROWER_AFTERIMAGE_SLOTS[char.charType] ?? []) want.add(s);
   // **And class 0x30's own throw kit, which is a different table.**
   // `ZOMBIE_THROW_SLOTS` is what `ZombieThrowHandWeapon` (`FUN_0045A240`)
   // switches on -- character types 1, 0x13 and 0x14 -- and the loop above

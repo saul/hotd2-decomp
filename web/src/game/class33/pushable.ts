@@ -45,16 +45,19 @@
  * * **The draw.** `MatrixTranslate(obj+0x40..0x48)` / `RotZ(obj+0x6C)` /
  *   `RotY(obj+0x68)` / `RotX(obj+0x64)` / `AssetDrawSlot(obj+0x13F0)` is
  *   `render/slotmodels.ts`', the same arrangement class 0x52's mouse has.
- * * **`RegisterForShotTest` (`FUN_00405160`)**, at `0x00433CC6` in the tail
- *   the decompiler does not show (`L35`). It is the call that puts the object
- *   in the per-frame dynamic list, and the port has no list: `game/coli.ts`
- *   walks `g_object_list` instead, which is that list's own declared
- *   divergence and covers this object without a line here.
+ *
+ * `RegisterForShotTest` (`FUN_00405160`) **is** ported, at the end of
+ * {@link ScriptedPushableUpdate33}: it is in the tail the decompiler does not
+ * show (`L35`), and it is the call that puts the object in the list the crowd
+ * push walks a frame later -- so without it no actor could find the chair.
+ * The shot pick passes the entry over (`ShotTestPickedHere`); this class is
+ * not one the port's pick has taken across.
  */
 import { type Actor, type ScriptedSceneryActor } from "../actor";
 import { ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet }
   from "../coli";
 import { ActorDespawn } from "../despawn";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorByAt, G } from "../globals";
 import type { ClassFrame } from "../registry";
 
@@ -93,11 +96,9 @@ const PUSH_BOOST = 1.8;
  * `TEST ECX, 0x18000000` at `0x00433D11`, on the **pusher's** `obj+0x34`.
  * The pusher is a class-0x30 actor, and on that class `0x10000000` is
  * `ActorFlag.Committed` -- a zombie in its strike -- and `0x8000000` is
- * `ZOMBIE_SPRINTS` in `class30/states.ts`: a sprinter's spawn record sets it,
- * and `ZombieOnShot` (`FUN_00453EB0`) raises it at `0x00453F17` on every shot
- * that lands, so a zombie that has been shot shoves the chair harder too. The
- * same mask as `class30/ground.ts`'s two tests. This used to say "either of
- * the pusher's two airborne bits".
+ * `ZOMBIE_SPRINTS`, the sprint bit: the two that `PushBoostBits` in
+ * `class30/ground.ts` names. Raw here, because the object reading it is not
+ * a zombie and the bits are the pusher's.
  */
 const PUSHER_BOOST_BITS = 0x18000000;
 
@@ -209,7 +210,7 @@ export function ScriptedPushableApplyPush33(obj: ScriptedSceneryActor): void {
  * `g_script_flags[255]`, so it is arithmetic rather than a branch.
  */
 export function ScriptedPushableUpdate33(obj: ScriptedSceneryActor,
-                                         _f: ClassFrame): void {
+                                         f: ClassFrame): void {
   const t = obj.class33Push;
   if (!t) return;
 
@@ -248,4 +249,15 @@ export function ScriptedPushableUpdate33(obj: ScriptedSceneryActor,
   if (!(obj.flags & SCENERY_SKIP_COLLISION)) {
     ScriptedPushableApplyPush33(obj);
   }
+
+  // 5. The draw is the renderer's. Then, on every frame that got this far:
+  //    `obj+0x70..0x78 = g_camera_world_to_view * obj+0x40..0x48`
+  //    (`0x00433C5D`..`0x00433CBE`) and `RegisterForShotTest` at
+  //    `0x00433CC6`, which refuses the object while
+  //    {@link SCENERY_SKIP_COLLISION} is up. The port keeps `obj+0x70` in
+  //    world space and lets the registration take the depth.
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, f.host);
 }

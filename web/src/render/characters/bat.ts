@@ -20,11 +20,12 @@
  *   `0xE800`. Yaw alone drew every corpse falling level and every wing flat.
  * * **The scale.** `ActorBuildSkinnedModel` (`FUN_00410440`) sizes character
  *   type `0x1E` at 0.6 and `0x1F` at 0.7 (`ActorModelScale`, which the actor
- *   already carries as {@link Actor.scale}). The port draws every other
- *   skinned actor at 1.0 -- a declared divergence on that function -- and the
- *   bat is drawn at its own, because `BatWingUpdate` seats the wing through
- *   the body's scaled node matrix and a body drawn at 1.0 would leave the
- *   wings inside it.
+ *   carries as {@link Actor.scale}), and `BatWingUpdate` seats the wing
+ *   through the body's scaled node matrix. That is not the bat's own: the
+ *   `MatrixScale(model+0x116C)` above is on every skinned actor's draw, and
+ *   the character layer's `placeRoot` applies it to every root it places,
+ *   this one included. This file used to apply it here alone, when every
+ *   other skinned actor was drawn at 1.0.
  *
  * Everything here **reads** the actor.
  */
@@ -40,13 +41,15 @@ import type { Instance } from "./instance";
  */
 const BAT_ROTATION_ORDER = "ZYX";
 
-/** Place a bat's root, body or wing. False when the instance is not class 0x46. */
+/**
+ * Place a bat's root, body or wing: its position and its three angles. False
+ * when the instance is not class 0x46. The size is the caller's -- see above.
+ */
 export function placeBatRoot(inst: Instance): boolean {
   const a: Actor = inst.a;
   if (a.cls !== SpawnClass.Bat) return false;
   inst.root.position.set(a.pos.x, a.pos.y, a.pos.z);
   inst.root.rotation.set(a.pitch * BAMS_TO_RAD, a.yaw * BAMS_TO_RAD,
                          a.roll * BAMS_TO_RAD, BAT_ROTATION_ORDER);
-  inst.root.scale.setScalar(a.scale);
   return true;
 }

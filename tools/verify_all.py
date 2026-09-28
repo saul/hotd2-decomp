@@ -307,7 +307,10 @@ CHECKS: list[Check] = [
           "only place the set of actors the second arm can move is "
           "enumerated: every motion block in the game measured for an "
           "absolute horizontal root, paired with the class-0x10 wait word "
-          "that governs it",
+          "that governs it -- and the size both arms are drawn at: "
+          "`ActorBuildSkinnedModel`'s per-type switch decoded from its jump "
+          "table against the port's `ActorModelScale`, and the characters "
+          "that pose those clips found in the six stages' spawns",
           NEEDS_GAME),
     Check("verify_combat", ".",
           ["python3", "tools/verify_combat.py", "--game-dir", "{game_dir}"],

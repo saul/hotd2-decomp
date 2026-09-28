@@ -1873,18 +1873,14 @@ assertion behind it kept a hang alive for two sessions.
    right.** Faithful means running root motion through a death in `game/`, for
    the classes with no death machine. Tagged on the `obj.death` branch in
    `game/motion.ts`.
-2. **The pose offset is unscaled, because the model is.** The engine's translate
-   sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at 0.9
-   offsets by 0.9 of what its clip authored. This port draws every character at
-   1.0 — neither `hod2lib.characters` nor `render/characters.ts` writes that
-   field to a node — so scaling the offset alone would be worse than leaving it,
-   since the offset would shrink while the model it offsets did not. The honest
-   size of the gap: three of the four clips that reach the pose at all belong to
-   `scale 0.9` types, where the engine's offset is **2.594 units and the port's
-   is 2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
-   they agree exactly. Faithful means scaling every skinned actor's drawn size,
-   which changes how the whole game looks. Tagged on `ActorModelScale` in
-   `game/root_motion.ts`.
+2. **The pose offset was unscaled, because the model was.** The engine's
+   translate sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at
+   0.9 offsets by 0.9 of what its clip authored, and this port drew every
+   character at 1.0. Three of the four clips that reach the pose at all belong
+   to a `scale 0.9` type (stage 4's type-48 civilian at spawn `0x3578`), where
+   the engine's offset is **2.593 units and the port's was 2.882**; the fourth is
+   class 0x21 at character type 7, scale 1.0. **Closed** by drawing every
+   skinned actor at its size — see *The model's size* below.
 
 `MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
 no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
@@ -2199,8 +2195,9 @@ units off the body on the far side. The matrix is built in `game/` the way the
 draw builds it (`BatBodyNodeMatrix`), and `test:render` checks it against the
 pose the character layer makes. `render/characters/bat.ts` draws both roots in
 order 5 with their pitch and roll — a corpse tumbles, a wing is pitched
-`0xE800` — and at their model's own size, 0.6 and 0.7; every other skinned
-actor is still drawn at 1.0 (`ActorModelScale`'s declared divergence).
+`0xE800` — and at their model's own size, 0.6 and 0.7. That size was the bat's
+alone when this was written; it is now every skinned actor's (*The model's
+size*, below).
 
 **The splash** is `BatSplashUpdate`'s thirty models of `common.bin` 307..336 on
 the water plane, `game/class46/splash.ts` and `render/bat_splash.ts`.
@@ -5908,6 +5905,53 @@ nothing but shooting opens its gates.
 * Default stage 6 now hangs at block 2's gate, because the boss exists: the
   default meter cannot see its damage and 900 frames is shorter than the
   fight.
+
+## The model's size: every skinned actor is drawn at `model+0x116C`
+
+`ActorBuildSkinnedModel` (`FUN_00410440`) sizes a character from its type
+alone -- 0.6 for type 30 (the bat), 0.7 for 31 (its wing), 0.9 for every type
+from 32 to 56, and 1.0 for everything else -- and the draw tail of
+`SkeletonApplyRootMotion` (`FUN_00410C50`) pushes that size as
+`MatrixScale(model+0x116C)` between the actor's rotation and the pose
+translate (`0x00410FEA`..`0x00410FF7`). Every bone hangs from that matrix. So
+one number decides the drawn size, the pose offset, where every bone is -- the
+attachments, the held items, the gore and the camera point ride the bones --
+and where every hit centre is. `[proved]`
+
+Types 32..56 are the people, whichever class runs them (0x10, 0x24, 0x25 and
+0x45 in the shipped placements), and the port drew all of them at 1.0: the
+root motion was already scaled, the drawing was not. `render/characters.ts`
+now puts `Actor.scale` on the root of every actor it places (`placeRoot`), in
+the engine's place on the matrix, which is also the bat's special case folded
+into the rule it was an instance of. Nothing at 1.0 changes: a zombie, a
+thrower and the stage-1 boss screenshot byte for byte the same before and
+after.
+
+**The spheres.** The radius is the one part of a sphere the bone matrix does
+not reach, and `SkeletonWalkNode` (`FUN_004107E0`) scales it at build
+instead: `FLD [ECX+0x1300]; FMUL [EAX-4]; FSTP [ESI+0x78]` at `0x00410837`.
+The port's build now writes every bone's record radius (`Actor.boneRadius`)
+as the table's times the size, so a civilian is shot through spheres 0.9 as
+wide at bones 0.9 as far apart -- both shot tests, the blood spray and the
+dropped-prop test read that record. The same routine gates each row on its
+own slot matching the node's, which the port still does not do; that is a
+declared divergence on `ActorBuildSkinnedModel` in `game/spawn.ts`, and it
+wants porting together with `ResolveDamagedPartSphere` (`FUN_004099A0`).
+
+**What it looks like.** Stage 1's rescue civilian stands a head shorter; stage
+4's crawling civilian (block 4, type 48, posing clip 596's root) sits 2.593
+units out of his clip's 2.882 rather than all of it. And **stage 4 block 23's
+jumbotron was empty**: the one `SetScale` in the game's scripts (class 0x10 op
+0x27, `0x42480000` = 50.0) is how the engine puts `player_gold` -- Goldman --
+on the arena's big screen, and at 1.0 the port drew him fist-sized somewhere
+behind it while the speech played over a blank panel.
+
+Checked by `test:port` (the build writes the size for every actor and each
+radius from it), `test:render` (a civilian's root, bone, sphere centre, radius
+and a shot 1.30 in and 1.40 out of her 1.35 head), and
+`tools/verify_root_pose.py`, which decodes the size switch from its jump table
+against `ActorModelScale` and finds, in the six stages' spawns, every
+character that poses a clip's root.
 
 ## Every opcode, and what the player does with it
 

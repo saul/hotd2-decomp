@@ -28,6 +28,16 @@
  * the spin and the roll-limited frame the spun parts hang off, and
  * {@link RigLayer.applyTaskDraw} poses exactly those parts.
  *
+ * **Nor are stage 1's two burning cars.** `obj_432840` is
+ * `PathRidingPropDraw` (`FUN_00432840`), class 0x28's draw, and the object
+ * is `game/class28/`'s: seated once on its route at a table's freeze frame,
+ * thrown when camera path `0x2F` reaches it, killed at the route's length.
+ * This layer drew the rig's first route root at `path(min(len, camera
+ * frame))` of every camera from stage load, so the car came in from millions
+ * of units away along the extrapolated path and was thrown again by the
+ * post-fight cutscene's camera. Its spawn roots are now posed from the actor
+ * -- see {@link ACTOR_POSED_ROUTINES} -- and its route roots are not drawn.
+ *
  * What the client adds is the motion. The bundle exports rig roots
  * *unparented*, tagged `hod2_path_slot`, because it ships no baked camera or
  * object animation — the same decision the camera rails are built on. So the
@@ -87,7 +97,8 @@
  * the spawns that install each routine, and such a rig is drawn only once the
  * walker has run one of them. The other rigs — the ones no spawn links to —
  * still draw from stage load rather than from the frame their opcode ran --
- * all but the stage-2 car, which the port's own task poses (above).
+ * all but the stage-2 car, which the port's own task poses, and stage 1's
+ * class-0x28 cars, which its actors do (both above).
  *
  * **That paragraph described the intent and not the code**, and the gap was a
  * visible object. `update` placed the fallback instance from its path at
@@ -112,11 +123,14 @@ import type { RigsJson, RigRoute } from "../bundle";
 import type { Context, System } from "../core/system";
 import type { CamPaths } from "../game/camera/curve";
 import { OP_CHANNELS } from "../game/camera/curve";
-import { BAMS_TO_RAD } from "../core/bams";
+import { BAMS_TO_RAD, RAD_TO_BAMS } from "../core/bams";
 import { G } from "../game/globals";
 import { SpawnClass } from "../game/spawn_class";
 
 /** BAMS -> radians. */
+
+/** The axis `MatrixRotateY` turns about, for the sprites that carry only it. */
+const AXIS_Y = new Vector3(0, 1, 0);
 
 /** `hod2_path_rotation`: a part rotation the routine drives from a path. */
 interface PathRotationRule {
@@ -223,6 +237,41 @@ interface SlotPart {
 const ACTOR_POSED_CLASSES: ReadonlySet<number> = new Set([SpawnClass.Vehicle]);
 
 /**
+ * The draw routines whose object is a **port actor of one class**, by the
+ * `routine` the rig data names: every root of the rig the exporter placed at
+ * a spawn (`hod2_spawn_at`) is drawn from the live actor of that class at
+ * that address, and every other root -- one per `op_` route slot -- is the
+ * exporter's route copy, which nothing draws.
+ *
+ * `PathRidingPropDraw` (`FUN_00432840`) is class 0x28's, and
+ * `PathRidingPropUpdate` (`0x00432610`, `game/class28/`) is what poses it:
+ * seated once on its route at the table's freeze frame, launched by camera
+ * path `0x2F`, killed at the route's length. This layer used to be that
+ * routine, badly -- the two route roots grouped as one ungated object at
+ * `path(min(len, camera frame))` of whatever camera was playing, drawn from
+ * stage load in every stage whose glTF carried the rig and never killed. So
+ * before the throw it slid along the path's first segment extrapolated back
+ * from frame 671, and every later camera move past frame 671 threw it again.
+ */
+const ACTOR_POSED_ROUTINES: Readonly<Record<string, SpawnClass>> = {
+  FUN_00432840: SpawnClass.PathRidingProp,
+};
+
+/**
+ * `PathRidingPropDraw`'s two sprites, by the asset slot their `rig_part` was
+ * exported with: `+5.0` (`0x0055D2B4`) and `+8.0` (`0x004C43A0`) on the
+ * object's `y` before the yaw, and `T(0, 0, 12.0)` (`PUSH 0x41400000` at
+ * `0x0043297B`) after it for the second. Their scales are the parts' baked
+ * ones -- `(1.5, 2.0, 1.0)` and `(7, 7, 7)`, the `MatrixScale`s at
+ * `0x0043291D` and `0x00432998`.
+ */
+const PATH_PROP_SPRITES: ReadonlyArray<{ slot: number; lift: number;
+                                         ahead: number }> = [
+  { slot: 0x135f, lift: 5.0, ahead: 0 },
+  { slot: 0xb67, lift: 8.0, ahead: 12.0 },
+];
+
+/**
  * A pose the port's own task wrote, in the engine's words: `obj+0x40`..`+0x48`
  * and the BAMS triple at `+0x64`/`+0x68`/`+0x6C`, and whether this frame's
  * routine drew it at all.
@@ -324,6 +373,11 @@ const DESCRIBE_POSES = 4;
 export class RigLayer implements System {
   readonly id = "render.rigs";
   private instances: Instance[] = [];
+  /**
+   * The route roots of an {@link ACTOR_POSED_ROUTINES} rig: exported, never
+   * drawn. Held so a caller that re-shows everything cannot bring them back.
+   */
+  private undrawn: Object3D[] = [];
   private actors: Actor[] = [];
   private paths: CamPaths | null = null;
   private enabled = true;
@@ -336,6 +390,7 @@ export class RigLayer implements System {
   /** Find the rig roots the exporter emitted and bind each to its route. */
   build(root: Object3D, json: RigsJson | undefined, paths: CamPaths): void {
     this.instances = [];
+    this.undrawn = [];
     this.paths = paths;
     if (!json) return;
 
@@ -409,7 +464,16 @@ export class RigLayer implements System {
       });
       const slotParts = new Map<number, SlotPart>();
       const routine = (o.userData as { hod2_routine?: string }).hod2_routine;
-      if (routine && TASK_POSED_ROUTINES[routine]) {
+      const posedBy = routine !== undefined
+        ? ACTOR_POSED_ROUTINES[routine] : undefined;
+      // A route root of a routine a port actor draws: not this layer's to
+      // pose and nobody's to draw. Hidden, and kept hidden.
+      if (posedBy !== undefined && x.hod2_spawn_at === undefined) {
+        o.visible = false;
+        this.undrawn.push(o);
+        return;
+      }
+      if (routine && (TASK_POSED_ROUTINES[routine] || posedBy !== undefined)) {
         o.traverse((c) => {
           const px = c.userData as { hod2_kind?: string; hod2_slots?: string[] };
           if (px?.hod2_kind !== "rig_part" || !px.hod2_slots?.length) return;
@@ -439,11 +503,12 @@ export class RigLayer implements System {
         slotParts,
       });
       const cls = classOf.get(x.hod2_rig) ?? null;
-      if (cls !== null && ACTOR_POSED_CLASSES.has(cls)
-          && x.hod2_spawn_at !== undefined) {
+      if (x.hod2_spawn_at !== undefined
+          && (posedBy !== undefined
+              || (cls !== null && ACTOR_POSED_CLASSES.has(cls)))) {
         const inst = this.instances[this.instances.length - 1];
         inst.spawnAt = x.hod2_spawn_at;
-        inst.spawnClass = cls;
+        inst.spawnClass = posedBy ?? cls;
       }
     });
 
@@ -586,16 +651,69 @@ export class RigLayer implements System {
    * {@link bamsEuler} spells. Reads engine state and writes only the nodes.
    */
   private placeFromActors(): void {
+    for (const o of this.undrawn) o.visible = false;
+    // **One root per actor.** The exporter places a rig once per spawn
+    // *record*, and a descriptor the script spawns in three blocks is three
+    // records at one address -- class 0x28's two are in blocks 5, 11 and 14
+    // -- where the pool holds one object for it. Drawing every root bound to
+    // it drew the object three times over itself.
+    const drawn = new Set<number>();
     for (const inst of this.instances) {
       if (inst.spawnAt === null) continue;
       const a = G.g_object_list.find(
         (o) => o.at === inst.spawnAt && o.cls === inst.spawnClass
                && !o.despawned);
-      inst.root.visible = this.enabled && !!a;
-      if (!a) continue;
+      const mine = !!a && !drawn.has(a.at);
+      inst.root.visible = this.enabled && mine;
+      if (!a || !mine) continue;
+      drawn.add(a.at);
       inst.root.position.set(a.pos.x, a.pos.y, a.pos.z);
       inst.root.quaternion.setFromEuler(
         bamsEuler(a.pitch, a.yaw, a.roll, this._e));
+      if (a.cls === SpawnClass.PathRidingProp) {
+        this.PathRidingPropDraw(inst, a.pathProp.launched);
+      }
+    }
+  }
+
+  /**
+   * `PathRidingPropDraw` -- `FUN_00432840`, what it draws beyond the root.
+   *
+   * The body is the root: `T(obj+0x40); RotZ(+0x6C); RotY(+0x68);
+   * RotX(+0x64); AssetDrawSlot(obj+0x13F0)`, placed above. Then, only while
+   * `obj+0x1320` is 0 (`JNZ` at `0x00432897`), two sprites that do **not**
+   * carry the object's rotation: each is `T(x, y + lift, z) . RotY(yaw) .
+   * [T(0, 0, 12)] . Scale`, where `yaw` is `VecToAngles` (`FUN_004016B0`) of
+   * the camera block's eye less the object in `x` and `z` with a zero `y` --
+   * `[g_camera_index * 0x1A4 + 0x009A60C0]` and `+ 0x009A60C8` at
+   * `0x004328C0`/`0x004328CC`, so block 0's eye or, while the index is 2,
+   * block 2's -- truncated to a `short` of BAMS.
+   *
+   * The sprites are children of the root in the scene graph, so their world
+   * transform is undone through the root's rotation here. What is **not**
+   * drawn is each loop's cel: the draw names `0x135F + g_frame_counter % 15`
+   * and `0xB67 + (g_frame_counter & 7)`, and the rig carries the first cel of
+   * each, so both loops stand on their first frame.
+   */
+  private PathRidingPropDraw(inst: Instance, launched: number): void {
+    const eye = G.g_camera_index === 2 ? G.g_camera_block2_eye
+                                       : G.g_camera_block_eye;
+    const p = inst.root.position;
+    // `VecToAngles`: `yaw = atan2(x, z)`, `__ftol`'d into a `short`.
+    const yaw = (Math.trunc(Math.atan2(eye.x - p.x, eye.z - p.z)
+                            * RAD_TO_BAMS) << 16) >> 16;
+    const undo = this._rel.copy(inst.root.quaternion).invert();
+    const turn = this._own.setFromAxisAngle(AXIS_Y, yaw * BAMS_TO_RAD);
+    for (const s of PATH_PROP_SPRITES) {
+      const part = inst.slotParts.get(s.slot);
+      if (!part) continue;
+      part.node.visible = launched === 0;
+      if (launched !== 0) continue;
+      // World: lift, then the yaw, then `ahead` along the turned +z.
+      this._v.set(0, 0, s.ahead).applyQuaternion(turn);
+      this._v.y += s.lift;
+      part.node.position.copy(this._v.applyQuaternion(undo));
+      part.node.quaternion.copy(undo).multiply(turn);
     }
   }
 

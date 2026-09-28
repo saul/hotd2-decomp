@@ -1015,6 +1015,148 @@ console.log("\nrigs: the boat the port's actor poses");
   void G;
 }
 
+console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
+            + "camera frame");
+{
+  // `PathRidingPropDraw` (`FUN_00432840`) is stage 1's two burning cars, and
+  // the object is class 0x28's, `game/class28/`. This layer used to pose the
+  // rig itself: both route roots grouped as one ungated object, the first
+  // drawn at `path(min(len, camera frame))` of **whatever camera was
+  // playing** -- sliding along the path extrapolated back from frame 671
+  // before the throw, thrown again by every later camera move past 671, and
+  // drawn from stage load whether or not anything had spawned. Now the
+  // spawn roots are posed from the live actor at their address, one root per
+  // actor, and the route roots are never drawn.
+  const { ActorSpawn } = await import("../src/game/director");
+  const { Rng } = await import("../src/core/rng");
+  const { Quaternion } = await import("three");
+  ResetGameGlobals();
+  const route = (slot: number, length: number) => ({
+    slot, bias: [0, 0, 0] as [number, number, number], cam_paths: [],
+    file: "op_st1", index: slot - 253, duration: 54, length,
+    hold_frame: null, stop_frame: null, note: "",
+  });
+  const RIGS = {
+    rigs: [{ name: "obj_432840", routine: "FUN_00432840", note: "",
+             spawn_class: 0x28, spawn_ats: null,
+             routes: [route(325, 725), route(326, 765)] }],
+    blocked: [], note: "",
+  };
+  const part = (slot: number, pos: [number, number, number],
+                scale: [number, number, number]) => {
+    const g = new Group();
+    g.position.set(...pos);
+    g.scale.set(...scale);
+    g.userData = { hod2_kind: "rig_part", hod2_rig: "obj_432840",
+                   hod2_slots: [`0x${slot.toString(16).padStart(4, "0")}`] };
+    return g;
+  };
+  const rigRoot = (name: string, data: Record<string, unknown>) => {
+    const g = new Group();
+    g.name = name;
+    g.userData = { hod2_kind: "rig", hod2_rig: "obj_432840",
+                   hod2_routine: "FUN_00432840", ...data };
+    g.add(part(0x33, [0, 0, 0], [1, 1, 1]),
+          part(0x135f, [0, 5, 0], [1.5, 2, 1]),
+          part(0xb67, [0, 0, 12], [7, 7, 7]));
+    return g;
+  };
+  const root = new Group();
+  const r325 = rigRoot("obj_432840_325", { hod2_path_slot: 325 });
+  const r326 = rigRoot("obj_432840_326", { hod2_path_slot: 326 });
+  const s0 = rigRoot("obj_432840_spawn000",
+                     { hod2_spawn_at: 24472, hod2_spawn_class: 0x28 });
+  const s1 = rigRoot("obj_432840_spawn001",
+                     { hod2_spawn_at: 24512, hod2_spawn_class: 0x28 });
+  // The same descriptor spawned in a second block: a second record, one
+  // object.
+  const s2 = rigRoot("obj_432840_spawn002",
+                     { hod2_spawn_at: 24472, hod2_spawn_class: 0x28 });
+  root.add(r325, r326, s0, s1, s2);
+  // A real curve, so a root the layer placed on a path is distinguishable
+  // from one it left alone: x is the frame.
+  const ramp = [[0, 0, 1, 1], [2000, 2000, 1, 1]];
+  const flat = (v: number) => [[0, v, 0, 0], [2000, v, 0, 0]];
+  const curve = { channels: { pos_x: ramp, pos_y: flat(-8), pos_z: flat(-497) },
+                  file: "op_st1", index: 72, start: 0, duration: 2000 };
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {}, object_paths: { "325": curve, "326": curve },
+  } as never));
+  // The post-fight cutscene's camera, frame 700 -- inside route 0's throw.
+  const ctx = { walker: { cam: { slot: 50, frame: 700 }, spawns: [] } } as
+    unknown as Parameters<typeof rigs.update>[0];
+  rigs.update(ctx);
+  const shown = () => [r325, r326, s0, s1, s2].filter((r) => r.visible)
+    .map((r) => `${r.name}@${r.position.x}`);
+  check("with no class-0x28 actor nothing is drawn -- not the route roots "
+        + "at another camera's frame 700",
+        shown().length === 0, shown().join(" "));
+
+  const a = ActorSpawn(24472, SpawnClass.PathRidingProp, -1, "car",
+                       { hp: 0 }, new Rng(28));
+  a.visible = true;
+  a.pos.x = -1021.62; a.pos.y = -8.04; a.pos.z = -497.51;
+  a.yaw = 0x1ca6;
+  a.roll = 0x4000;                         // on its side: not the identity
+  G.g_camera_block_eye.x = a.pos.x + 30;
+  G.g_camera_block_eye.y = 0;
+  G.g_camera_block_eye.z = a.pos.z + 40;
+  rigs.update(ctx);
+  check("with one, exactly its first spawn root is drawn, at the actor",
+        shown().length === 1 && s0.visible
+        && s0.position.x === a.pos.x && s0.position.z === a.pos.z,
+        shown().join(" "));
+  root.updateMatrixWorld(true);
+  const [, fire, smoke] = s0.children;
+  const wp = (o: InstanceType<typeof Obj3D>) =>
+    o.getWorldPosition(new Vector3());
+  const yaw = Math.trunc(Math.atan2(30, 40) * 32768 / Math.PI)
+    * Math.PI / 32768;
+  const f = wp(fire);
+  const sm = wp(smoke);
+  const near = (u: number, v: number) => Math.abs(u - v) < 1e-3;
+  check("before the throw the fire stands 5.0 above the object, whatever "
+        + "the object's roll",
+        fire.visible && near(f.x, a.pos.x) && near(f.y, a.pos.y + 5)
+        && near(f.z, a.pos.z), `${f.x},${f.y},${f.z}`);
+  check("...and the smoke 8.0 above and 12 toward the camera block's eye",
+        smoke.visible && near(sm.x, a.pos.x + 12 * Math.sin(yaw))
+        && near(sm.y, a.pos.y + 8) && near(sm.z, a.pos.z + 12 * Math.cos(yaw)),
+        `${sm.x},${sm.y},${sm.z}`);
+  const up = new Vector3(0, 1, 0).applyQuaternion(
+    fire.getWorldQuaternion(new Quaternion()));
+  check("...both carrying the yaw alone: the fire stands upright",
+        near(up.y, 1), `${up.x},${up.y},${up.z}`);
+  // The eye is `[g_camera_index * 0x1A4 + 0x009A60C0]`: under scene state
+  // (1, 3) the index is 2, and the smoke turns to block 2's eye.
+  G.g_camera_index = 2;
+  G.g_camera_block2_eye.x = a.pos.x - 40;
+  G.g_camera_block2_eye.z = a.pos.z + 30;
+  rigs.update(ctx);
+  root.updateMatrixWorld(true);
+  const yaw2 = Math.trunc(Math.atan2(-40, 30) * 32768 / Math.PI)
+    * Math.PI / 32768;
+  const sm2 = wp(smoke);
+  check("...toward the eye of the block g_camera_index names (block 2)",
+        near(sm2.x, a.pos.x + 12 * Math.sin(yaw2))
+        && near(sm2.z, a.pos.z + 12 * Math.cos(yaw2)),
+        `${sm2.x},${sm2.z}`);
+  G.g_camera_index = 0;
+  const tail = (a as unknown as { pathProp?: { launched: number } }).pathProp;
+  check("the actor carries class 0x28's tail", tail !== undefined);
+  if (tail) tail.launched = 1;
+  rigs.update(ctx);
+  check("once obj+0x1320 is up the sprites are not drawn and the body is",
+        s0.visible && !fire.visible && !smoke.visible
+        && s0.children[0].visible);
+  a.despawned = true;
+  rigs.update(ctx);
+  check("...and once the actor is killed nothing is", shown().length === 0,
+        shown().join(" "));
+  ResetGameGlobals();
+}
+
 console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
 {
   // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2

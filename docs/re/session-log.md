@@ -24420,3 +24420,66 @@ comment (`class41/items.ts`, `type62.ts`, `type72.ts`, `original_item.ts`,
 `draw_only.ts`, `class46/index.ts`). `type72.ts` is the one that could change
 play: by its own comment the exe reads the block's frame through the index,
 and block 2's `+0x110` is never written. `[open]`, handed on as its own sweep.
+
+
+## 2026-09-28 -- stage 1's burning cars: class 0x28, seated once, thrown once
+
+Reported as "the cars that the boss at the end of stage 1 pushes out of the
+way start in the wrong place. also occasionally the cars repeat their 'move
+out of the way' arc". The cars are **class 0x28**, `PathRidingPropUpdate`
+(`FUN_00432610`, the `{0x28, 0x00432610}` row of the class table at
+`0x005933F8`), drawn by `PathRidingPropDraw` (`0x00432840`, created in the
+database: Ghidra had no function there, and its body stops at the first
+`MatrixStackPop`, L35). Two descriptors, `24472` and `24512`, placed by
+`spawn_placed` in blocks 5, 11 and 14 with `obj+0x11C` 0 and 1.
+
+`[proved]` from the listing (`0x00432610`..`0x0043280F`): a switch on
+`obj+0x1312`. 0 writes `obj+0x13F0 = 0x33`, `obj+0x1320 = 0`, poses the object
+**once** at `CamEvalObjectPath6(g_class28_route_table[obj+0x11C])` -- slot
+`0x145` at frame 671, `0x146` at 667, the paths' first keys -- and falls into
+1; 1 launches on the first frame `g_active_cam_path == 0x2F` and `freeze <=
+g_cam_path_frame` (`FCOMPP` / `TEST AH, 0x41`); 2 `ActorKill`s once
+`g_cam_path_length[slot] <= g_cam_path_frame` (725, 765) with no camera test.
+While launched the pose is the path at `g_cam_path_frame`. `g_app_state` 10
+takes a literal pose from `g_class28_fixed_poses` (`0x0055DD18`, rows 0 and 1
+are the same first keys) and installs `PathRidingPropFixedPoseUpdate`
+(`0x00432810`). The draw's tail draws two sprites under `T(pos + lift) .
+RotY(VecToAngles(eye - pos))` -- the yaw alone -- until the launch.
+
+The port had **no class 0x28**. `render/rigs.ts` drew the rig's route roots as
+one ungated object, the first one only, at `path(min(len, camera frame))` of
+whatever camera played, from stage load: before the throw that is the path
+extrapolated back from frame 671 -- 2.2 million units away at `cp_st1` 47
+frame 120, 2634 at frame 618, closing in through the sky -- and `cp_st1` 50
+after the fight runs through 671..725 and threw it again in front of the
+players. The second car was never drawn; stages 2 and 5 drew a phantom
+`obj_432840` with no class 0x28 in them. Now: `game/class28/` is the routine,
+`SpawnSlotActor` builds it from the spawn record (opcode 9 reads no tail, so
+`ScriptSpawn` carries `hp`, `orient` and `flags`), and `RigLayer` poses the
+rig's spawn roots from the actor, one root per actor (the exporter places one
+per spawn *record*, three per address here), and hides the route roots.
+Measured on seed 1 through the whole fight (368 pulls at the shot-test list's
+JUDGMENT targets, a scratch driver over `tools/lib/player.mjs`): the old
+root moved on
+1562 of 4401 frames and threw on `cp` 47 and `cp` 50; the actor moves on 53,
+all on `cp` 47, and is gone at 725. `port.test` and `render.test` blocks fail
+10 and 7 assertions on the old tree.
+
+**Not a regression.** The coordinator's brief asked for the regressing commit
+of the last day. There is none: the sweep is `8458978d` (2026-08-29, "a rig
+holds its final pose instead of vanishing"), and `docs/re/rig-survey.md` had
+recorded it as open ("the player still sweeps those four routes from frame 0")
+since the rig survey.
+
+**Wrong turns.** (1) The brief's candidate, class 0x33 selector 4, is stage 1
+block 1's two chairs and nothing else; the boss blocks place none. (2) Block
+14's class-0x33 selector-2 spawns are the van and the estate car parked in the
+street -- `ScriptedPropDrawUntilFlag`, static, and drawn by `render/props.ts`
+-- which are cars, and are not the ones that move; `rigs.rigs` in the bundle is
+where `obj_432840` was. (3) `block=14&step=0` lands on 14/3/0, as the memory
+note says; seek to step 1. (4) "Kill all" does not end the JUDGMENT fight and
+flags every visible actor dead, props included; shooting the shot-test list's
+targets one pull every four frames does end it, in 1600 frames. (5) A seek
+past the throw leaves both cars seated and burning, because the replay does
+not run the game -- a seek artefact, not the engine; in play they are gone.
+Still undrawn: each sprite's cel loop -- the rig carries only the first cel.

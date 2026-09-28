@@ -32,6 +32,8 @@ import { makeFrogTail, type FrogTail } from "./class11/state";
 import { makeOwlTail, type OwlTail } from "./class43/state";
 import { makeScriptedPropTail, type ScriptedPropTail } from "./class13/state";
 import { makeVehicleTail, type VehicleTail } from "./class26/state";
+import { makePathRidingPropTail, type PathRidingPropTail }
+  from "./class28/state";
 import { makeBatTail, type BatTail } from "./class46/state";
 import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
@@ -2323,6 +2325,8 @@ export type Actor =
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
   | (ActorBase & { cls: SpawnClass.ScriptedProp; prop13: ScriptedPropTail })
   | (ActorBase & { cls: SpawnClass.Vehicle; vehicle: VehicleTail })
+  | (ActorBase & { cls: SpawnClass.PathRidingProp;
+                   pathProp: PathRidingPropTail })
   | (ActorBase & { cls: SpawnClass.Bat; bat: BatTail })
   | (ActorBase & { cls: SpawnClass.Boss3; boss3: Boss3Tail })
   | (ActorBase & { cls: SpawnClass.HordeSpawner; horde: HordeTail })
@@ -2338,7 +2342,7 @@ export type Actor =
       | SpawnClass.Boss3
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
       | SpawnClass.ScriptedScenery | SpawnClass.Vehicle
-      | SpawnClass.HordeSpawner> });
+      | SpawnClass.PathRidingProp | SpawnClass.HordeSpawner> });
 
 /** An actor already narrowed to class 0x25, for that class's own routines. */
 export type HumanoidActor = Extract<Actor,
@@ -2612,6 +2616,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Vehicle) {
     return { ...head, cls, vehicle: makeVehicleTail() };
+  }
+  if (cls === SpawnClass.PathRidingProp) {
+    return { ...head, cls, pathProp: makePathRidingPropTail() };
   }
   if (cls === SpawnClass.Bat) {
     return { ...head, cls, bat: makeBatTail() };

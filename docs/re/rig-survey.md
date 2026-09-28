@@ -56,8 +56,12 @@ literal in the time argument finds nine, and only `St1VehicleUpdate`'s two are
 in a transcribed rig. `obj_432840` has the same *shape* of rule -- its pose is
 "sampled ONCE at the table's freeze frame and held" until `obj+0x1320` flips --
 but the freeze frame comes from the table at `0x00589AE0` rather than a
-literal, so the scan cannot see it. It is recorded in that rig's note and is
-**[open]**: the player still sweeps those four routes from frame 0.
+literal, so the scan cannot see it. It was recorded in that rig's note and
+left open, and the player swept those routes from frame 0 on every camera
+until 2026-09-28, when a report of stage 1's cars "starting in the wrong place"
+and "repeating their arc" closed it: the object is class 0x28's
+`PathRidingPropUpdate` (`FUN_00432610`), ported in `game/class28/`, and
+`render/rigs.ts` draws the rig from that actor. `[proved]`
 
 Two other stop rules a route may carry:
 
@@ -113,7 +117,7 @@ never fire.
 | `0x00470080` | `obj_470080` | `0x196`–`0x198` | actor state 406; slot is runtime, nothing to place |
 | `0x00416B00` | `obj_416b00` | `0x194` | `PlayerShotEffectsThink`: the three per-shot rings, all runtime. **Not placed** -- see below |
 | `0x00452320` | `obj_452320` | `0x148`, `0x14D`, `0x14E`, `0x19A`–`0x1A1` | **[proved] a car** — the stage-2 opening vehicle. See below. |
-| `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path |
+| `0x00432840` | `obj_432840` | `0x145`, `0x146`, `0x149`, `0x14A` | class `0x28`; route chosen by `obj+0x11C`, **not** by camera path. Posed by the port's actor (`game/class28/`) |
 | `SUB_004331D0` | `obj_4331d0` | — | class `0x33`, 9 draw sites; **not placed**, see below |
 
 ### The stage-2 car, and why the 9-vs-22 split nearly lost it

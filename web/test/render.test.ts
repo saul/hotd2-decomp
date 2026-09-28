@@ -4132,5 +4132,56 @@ console.log("\nthe stage-1 banners' wave, on the templates");
         z(opaque, 0) === 7 && z(translucent, 0) === 7);
 }
 
+// -- a skinned part's joints under a hidden node ----------------------------
+//
+// `updateVisibleMatrixWorld` does not descend into a hidden branch, and every
+// reader in `render/` asks for the matrix it reads. three.js's skinning does
+// not: `Skeleton.update` reads each bone's `matrixWorld` as it stands. A
+// character's vertex-blended part is skinned to `jointNN` nodes that hang under
+// the bones, and `swapGore`'s multi-primitive arm hides every non-bone child of
+// a bone -- the joints included. From the frame a zombie's torso took a gore
+// swap, its waist was drawn against the joint where it was when the swap hid
+// it, while the rest of the body moved on: the vertices bound to that joint
+// stretched back to it.
+console.log("\na skinned part's joints stay current under a hidden node:");
+{
+  const { Bone, BufferGeometry, Float32BufferAttribute, Group, MeshBasicMaterial,
+          Skeleton, SkinnedMesh, Uint16BufferAttribute, Vector3: V3 } =
+    await import("three");
+  const { updateVisibleMatrixWorld } = await import("../src/render/visible_world");
+  const scene = new Group();
+  const bone = new Group();                 // the drawn bone, visible
+  const shell = new Group();                // a primitive swapGore hid...
+  shell.visible = false;
+  const joint = new Bone();                 // ...and the skin joint under it
+  shell.add(joint);
+  bone.add(shell);
+  scene.add(bone);
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+  geo.setAttribute("skinIndex", new Uint16BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 4));
+  geo.setAttribute("skinWeight", new Float32BufferAttribute([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 4));
+  const part = new SkinnedMesh(geo, new MeshBasicMaterial());
+  part.bind(new Skeleton([joint]));
+  scene.add(part);
+  scene.matrixWorldAutoUpdate = false;
+  updateVisibleMatrixWorld(scene);
+  bone.position.set(10, 0, 0);
+  updateVisibleMatrixWorld(scene);
+  const at = new V3().setFromMatrixPosition(joint.matrixWorld);
+  check("a joint under a hidden node follows its bone when a visible part is "
+        + "skinned to it", at.x === 10, at.toArray().join());
+  const v = new V3();
+  part.getVertexPosition(1, v);
+  check("...so the part's vertex is drawn where the bone is, not where it was",
+        v.x === 11, v.toArray().join());
+  // A hidden part asks nothing of its joints: the walk does not reach it.
+  part.visible = false;
+  bone.position.set(20, 0, 0);
+  updateVisibleMatrixWorld(scene);
+  check("...and a hidden part costs its joints nothing",
+        new V3().setFromMatrixPosition(joint.matrixWorld).x === 10);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

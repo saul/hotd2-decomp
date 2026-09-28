@@ -419,6 +419,8 @@ Supporting routines identified along the way:
 | `0x00598AF0` | 4 | `1,2,3,2` | texture address: `WRAP, MIRROR, CLAMP, MIRROR` |
 | `0x00598B00` | 8 | `1,7,3,5,4,6,2,8` | `ZFUNC` |
 | `0x00598B20` | 4 | `1,1,3,2` | `CULLMODE`: `NONE, NONE, CCW, CW` |
+| `0x00571250` | 8 | `5,2,6,8,8,8,7,0` | `g_pvr_pixfmt_texture_format`: a tex/ entry's pixel format to a `g_texture_formats` slot -- ARGB1555 to 5 (`A1R5G5B5`), RGB565 to 2, ARGB4444 to 6; 8 is refused |
+| `0x007DEBD0` | 8 × `DDPIXELFORMAT` | device-filled | `g_texture_formats`, written by `EnumTextureFormatsCallback`; slot 5 only under `DDPF_ALPHAPIXELS` |
 | `0x0057A280` | 4 + `-1` | `0x17A0, 0x17A1, 0x18A3, 0x18A5` | `g_model_fixup_slot_list` — the only slots that get the two model patches |
 
 ### Globals

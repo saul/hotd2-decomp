@@ -365,9 +365,10 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
   };
   // texture_control: pixel format 2 (ARGB4444) at bits 27-29, bit 26 linear.
   const TC = (2 << 27) | (1 << 26);
-  const mesh = (pc: number, tsp: number) => {
+  const mesh = (pc: number, tsp: number,
+                base: [number, number, number, number] = [1, 1, 1, 1]) => {
     const m = new Mesh(0, pc, 0x83000000, tsp, TC, [0, 0, 0], 1, 0, 0,
-                       [1, 1, 1, 1], [0, 0, 0, 0]);
+                       base, [0, 0, 0, 0]);
     for (const pos of [[0, 0, 0], [1, 0, 0], [0, 1, 0]] as const) {
       m.vertices.push({ pos: [pos[0], pos[1], pos[2]], normal: [0, 0, 1],
                         uv: [pos[0], pos[1]], colour: null });
@@ -380,6 +381,9 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
   model.meshes.push(mesh(0x02000008, 0x94180000));
   // List 0, TSP 0x20080000: ONE/ZERO, IgnoreTexAlpha alone -- the opaque pass.
   model.meshes.push(mesh(0x00000008, 0x20080000));
+  // The first mesh again, black: the stage-2 car's inner copies of its shells
+  // (char_adv04). Same texture and words, its own material.
+  model.meshes.push(mesh(0x02000008, 0x94180000, [1, 0, 0, 0]));
 
   const files = new Map<string, Uint8Array | string>();
   const sink = {
@@ -439,6 +443,13 @@ console.log("\na texture's alpha is the bank's, not the mesh's:");
         doc.materials[1]?.alphaMode === "OPAQUE"
         && doc.materials[1].extras.pvr2.texture_alpha_used === false,
         `${doc.materials[1]?.alphaMode}`);
+  const factors = (doc.materials as unknown as
+    { pbrMetallicRoughness: { baseColorFactor: number[] } }[])
+    .map((m) => m.pbrMetallicRoughness.baseColorFactor.join());
+  check("a mesh with its own base colour gets its own material, not the "
+        + "first match's",
+        factors.length === 3 && factors[0] === "1,1,1,1"
+        && factors[2] === "0,0,0,1", JSON.stringify(factors));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

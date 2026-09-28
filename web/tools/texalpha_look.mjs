@@ -6,8 +6,15 @@
  * the character types on screen are printed beside each shot so a frame with
  * nothing of interest in it reads as such rather than as "no change".
  *
- *   node tools/texalpha_look.mjs --headless --tag before
- *   node tools/texalpha_look.mjs --headless --tag after --only zslman
+ *   HOTD2_BUNDLE=../extract/player_before node tools/texalpha_look.mjs \
+ *       --headless --tag old
+ *   node tools/texalpha_look.mjs --headless --tag after --only zslman \
+ *       --size 2560x1600 --frames 170 --clip 880,720,640,360
+ *   node tools/shot_diff.mjs shots/texalpha-zslman-170-old-clip.png \
+ *       shots/texalpha-zslman-170-after-clip.png --out shots/zslman-diff.png
+ *
+ * The bundle to compare against is the same stages exported by the old
+ * exporter into a directory of their own, served through `HOTD2_BUNDLE`.
  *
  * Output: `web/shots/texalpha-<view>-<frame>-<tag>.png` (gitignored).
  */
@@ -29,18 +36,13 @@ const flag = (n) => args.includes(`--${n}`);
  *   meshes with `IgnoreTexAlpha` and `UseAlpha` both set, on an ARGB4444
  *   texture 82% of whose texels are below full alpha.
  * * `zndina` (type 3): bones `0x1BEB` and `0x1BED`, the same.
- * * `boss6`: slots `0x7B0`..`0x7CA`, a 3% sliver of alpha 221.
+ * * `ladder`: the other side of it -- opaque-pass meshes on textures with
+ *   transparent texels (`komono_tokeidai` 0 is 68% alpha 0, and the player
+ *   bodies in the shot carry more), which must come out the same.
  */
 const VIEWS = {
   zslman: { url: "?stage=6&block=0&step=4&op=8", frames: [30, 90, 150, 240] },
   zndina: { url: "?stage=6&block=0&step=5&op=12", frames: [60, 150, 240, 360] },
-  boss6: { url: opt("boss6", "?stage=6&block=12&step=1&op=122"),
-           frames: [60, 240, 480, 720] },
-  // Opaque-pass meshes on textures with transparent texels, which must look
-  // the same before and after: stage 1's opening street (`st1_01`, 76 such
-  // meshes) and stage 2's clock-tower part (`komono_tokeidai` 0, 68% of its
-  // ARGB1555 texels at alpha 0).
-  st1: { url: "?stage=1&block=1&step=8&op=6", frames: [120, 400] },
   ladder: { url: "?stage=2&block=21&step=4&op=6", frames: [60, 200] },
 };
 

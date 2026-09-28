@@ -14,16 +14,19 @@ using the wrong one produces geometry that is silently opaque:
 | State | Bits | Meaning |
 |---|---|---|
 | **list type** | `parameter_control` 24–26 | which hardware pass: 0 opaque, 2 translucent, 4 punch-through |
-| **IgnoreTexAlpha** | `tsp_instruction` 19 | discard the texture's alpha channel |
+| **IgnoreTexAlpha** | `tsp_instruction` 19 | on PowerVR2, discard the texture's alpha; **on the PC port, half of the pass selector and nothing else** — see *Texture alpha on the D3D path* |
 | **UseAlpha** | `tsp_instruction` 20 | let the *vertex / base colour* alpha participate |
 
-**Blending is selected by the list type.** `UseAlpha` does **not** control
-whether blending happens — it controls whether the polygon's own colour alpha
-takes part.
+**On the PC port the pass is the TSP pair**, `(tsp & 0x180000) != 0x80000`
+(`WalkMeshChainAndDraw`, below), and `TranslatePvr2StateToD3D` never reads the
+list type. Over every mesh in `pol/` the two agree for every textured mesh;
+the only disagreements are five untextured list-2 meshes (`zndina` 4,
+`zslman` 1) drawn in the opaque pass. `UseAlpha` alone does **not** decide
+whether blending happens.
 
 > ⚠️ Requiring `UseAlpha` before emitting a blended material marks **8,554**
 > translucent meshes as opaque, which is most of the game's glass, foliage and
-> smoke. Drive `alphaMode` from the list type alone.
+> smoke. The exporter's `alphaMode` is the pass: both bits.
 
 ## What the game actually uses
 
@@ -36,32 +39,105 @@ Measured across all 9,112 models:
 | 2 | src_alpha | inv_src_alpha | 0 | 5,526 | as above, `UseAlpha` also set |
 | 2 | src_alpha | **one** | 0 | 1,740 | **additive** |
 | 2 | src_alpha | one | 0 | 702 | additive, `UseAlpha` set |
-| 2 | src_alpha | inv_src_alpha | **1** | 467 | blended, texture alpha discarded |
-| 2 | src_alpha | one | 1 | 262 | additive, texture alpha discarded |
+| 2 | src_alpha | inv_src_alpha | **1** | 467 | blended; `IgnoreTexAlpha` set and ignored — the PC blends by the texture alpha |
+| 2 | src_alpha | one | 1 | 262 | additive, the same |
 
 Notes:
 
 - **The opaque list is perfectly uniform**: `one`/`zero` with `IgnoreTexAlpha`
   set, every single time.
-- **Punch-through (list 4) never occurs.** There is no alpha testing in this
-  game; cutouts are done with ordinary blending.
+- **Punch-through (list 4) never occurs.** Cutouts are ordinary blending plus
+  the translucent pass's alpha test at ref 1 — see *What a pass switches*.
+- Every textured list-2 mesh with `IgnoreTexAlpha` also sets `UseAlpha`, so it
+  is in the translucent pass on the PC, and its texture's alpha blends. (This
+  table's counts include the `pol_` copies of files; see
+  `tools/verify_texture_alpha.py` for the de-duplicated corpus.)
 - **Additive blending is real but confined to effects.** All 2,704 additive
   meshes live in `eff_*` and boss assets — `eff_boss3`, `eff_org9`, `eff_boss5`
   and similar. Stage geometry contains none.
 
-## Textures that carry alpha the game throws away
+## Texture alpha on the D3D path — [proved]
 
-2,126 meshes use an **ARGB4444 texture on an opaque mesh** with
-`IgnoreTexAlpha` set, plus a further 1,698 ARGB1555. The stored alpha is real
-but the hardware discards it.
+The PC port **never drops a texture's alpha**; the pass it draws a mesh in
+decides whether the alpha shows. What used to be written here — "the hardware
+discards it", so the exporter wrote a fully-opaque `tex_NNN_opaque.png` for
+every mesh with `IgnoreTexAlpha` set — is the PowerVR2's meaning of the bit,
+and nothing on the D3D path reads it that way.
 
-Exporting that alpha as-is punches holes in solid geometry. The exporter
-therefore emits a **separate fully-opaque image variant** (`tex_NNN_opaque.png`)
-whenever `IgnoreTexAlpha` is set, and keys the texture cache on
-`(part, texture_id, strip_alpha)` so a texture used both ways yields both
-variants.
+* **One surface per texture.** `BindModelTextureHandles` (`0x004AC980`)
+  decodes each bank texture once, into its global slot, from the bank entry
+  and its data — no mesh word is an input — so every mesh that names a
+  texture samples the same surface whatever its TSP says.
+* **The upload keeps the alpha.** `DecodeTextureToSurface` (`0x004AC270`)
+  creates the surface with `CreateSurfaceInTextureFormat` in slot
+  `g_pvr_pixfmt_texture_format[entry +0x04 & 7]` (`0x00571250` =
+  `{5, 2, 6, 8, 8, 8, 7, 0}`) and copies the 16-bit texels verbatim.
+  `EnumTextureFormatsCallback` (`0x004A5BC0`) fills slot 5 with the
+  `7C00/03E0/001F` format **only under `DDPF_ALPHAPIXELS`** (`TEST BL, 1` at
+  `0x004A5CD0`; the alpha-less one goes to slot 3, which no PVR format uses),
+  so ARGB1555 is uploaded as `A1R5G5B5`. ARGB4444 goes to slot 6, the
+  `0F00/00F0/000F` format, which the callback files without testing the alpha
+  flag — `[likely]` `A4R4G4B4` on any DX7 device: that is the 4:4:4 format
+  drivers enumerate, and the PAL4 arm writes an alpha nibble into this slot.
+  `PromoteSurfaceToTexture` (`0x004A6010`) blits into a texture of the same
+  pixel format.
+* **The alpha op takes it.** `InitD3DDeviceAndTextureStages` sets stage 0
+  once: `ALPHAOP` `MODULATE`, `ALPHAARG1` `TEXTURE`, `ALPHAARG2` `DIFFUSE`
+  (and `COLOROP` `MODULATE` of `TEXTURE` and `DIFFUSE`).
+  `TranslatePvr2StateToD3D`'s mode switch only swaps in `SELECTARG1` for mode
+  1 — jump table `0x004A79C8` = `{0x4A792E, 0x4A790F, 0x4A792E, 0x4A792E}` —
+  so a textured mesh's alpha is the texel's, alone or times the material
+  alpha.
+* **Nothing else reads bit 19.** A disassembly of the D3D module
+  (`0x004A4DA0`–`0x004ACD20`) finds five instructions that touch the bit, all
+  the `0x180000` pass pair: `TranslatePvr2StateToD3D`'s `ALPHATESTENABLE` and
+  `WalkMeshChainAndDraw`'s selector. `DrawModelWithForcedAlphaBlend`'s mask
+  `0x03FFFF7F` keeps it.
 
-In stage 1 that is 576 of 822 exported images.
+So, by pass:
+
+| Draw | Blend | Alpha test | Texture alpha |
+|---|---|---|---|
+| opaque pass (`(tsp & 0x180000) == 0x80000`) | off | off | reaches nothing: the texel's colour is written whatever its alpha |
+| translucent pass | on, TSP factors | on, ref 1 | blends and is tested |
+| `DrawModelWithForcedAlphaBlend` (any `AssetDrawSlotWithAlpha`, 1.0 included) | on, `SRCALPHA`/`INVSRCALPHA` | the mesh's own pass's | blends — **also on an opaque-pass mesh** |
+
+Measured over the corpus: 112 translucent-pass meshes set `IgnoreTexAlpha` on
+an ARGB texture, and **101** of those textures have alpha below 255 — the
+additive blades of `zslman` and `zndina`, `eff_boss5`'s cels, a sliver of
+`boss6`, and two `st_adver03` meshes whose base alpha is 0 and which are
+invisible either way. The stripped copies drew the blades' glow as solid
+cards. 3,147 opaque-pass meshes sit on textures with transparent texels; the
+opaque pass shows them as before, and only a faded draw would change them.
+
+**The exporter** writes one image per bank texture with the bank's alpha;
+the material's `alphaMode` is the pass, so a viewer ignores the alpha of an
+opaque-pass material as the game does. **The player** reproduces pass 0's
+indifference with three.js's `OPAQUE` define (compiled for a material that is
+not `transparent` and has `NormalBlending`, which `draw_order.ts` gives every
+opaque-pass material), and a fade flips the pass. Two things leaned on the
+stripped images and changed with them: `setAssetDrawAlpha` draws an
+`AssetDrawSlotWithAlpha` at 1.0 in the forced state rather than plainly, and
+the blood-colour transpose reads pixels back through WebGL instead of a 2D
+canvas, which is premultiplied and turned the colour under 904 opaque-pass
+gore texels at alpha 0 black. `tools/verify_texture_alpha.py` holds the bytes,
+the scan, the corpus counts, and a current bundle's images against the bank.
+
+## One material per mesh — [proved]
+
+`WalkMeshChainAndDraw` calls `SetMaterial` for **every mesh** from its own
+header: diffuse `(+0x30, +0x34, +0x38, +0x2C)`, ambient that times `+0x28`
+(`ModelSetMeshAmbientScale`, `0x00419380`, writes it), and a specular colour
+`+0x40..+0x48` at power `1 << +0x24` when `+0x24 >= 1`. The exporter's
+material cache was keyed on the part, the texture and the four words, **not
+the base colour or the culling**, so a mesh with the same texture and state
+as an earlier one got the earlier one's colour: about a fifth of the game's
+meshes, nearly all of them with another mesh's baked lighting or base alpha.
+The stage-2 car's driver's door (`char_adv04` model 4, white) drew black —
+the colour of the body's inner copies in model 2, same texture 33 and TSP.
+The key carries the clamped colour and `doubleSided` now, and
+`verify_texture_alpha.py` holds every model primitive of a bundle to its own
+mesh's colour and culling, found by the header sphere it carries.
 
 ## Pixel formats and their alpha
 
@@ -610,10 +686,10 @@ state instead. That single distinction eliminates most of the search space.
 
 | PowerVR2 | glTF |
 |---|---|
-| list 0 (opaque) | `alphaMode: OPAQUE` |
-| list 2/3 (translucent) | `alphaMode: BLEND` |
-| list 4 (punch-through) | `alphaMode: MASK`, cutoff 0.5 (unused in practice) |
-| `IgnoreTexAlpha` | opaque image variant |
+| opaque pass, `(tsp & 0x180000) == 0x80000` | `alphaMode: OPAQUE` |
+| translucent pass, anything else | `alphaMode: BLEND` |
+| `IgnoreTexAlpha` | nothing of its own: half of the pass; the image keeps the bank's alpha |
+| base colour, culling | one material per distinct value (the cache key carries both) |
 | clamp / flip UV | sampler `wrapS` / `wrapT` — part of the texture's identity, see below |
 | filter mode 0 | `NEAREST`, else `LINEAR` |
 | culling | `doubleSided` |
@@ -627,9 +703,9 @@ Every material also carries the raw register words in `extras.pvr2` —
 `parameter_control`, `isp_tsp_instruction`, `tsp_instruction`,
 `texture_control` — so nothing is lost to the approximate PBR mapping.
 
-**The player does not use `alphaMode`.** It is the list type, which is not the
-pass, and a glTF `BLEND` means "no depth write" to `GLTFLoader` — the opposite
-of what this game does. `web/src/render/draw_order.ts` rebuilds the pass, the
+**The player does not use `alphaMode`.** It is the pass, but a glTF `BLEND`
+means "no depth write" to `GLTFLoader` — the opposite of what this game
+does. `web/src/render/draw_order.ts` rebuilds the pass, the
 blend factors, the depth state and the alpha test from `extras.pvr2` for
 every material; see *What a pass switches* above. Blender and other viewers
 still get the approximation.
@@ -638,8 +714,9 @@ still get the approximation.
 
 In glTF a `texture` binds one `image` to one `sampler`, and the *material*
 references the texture. The exporter used to cache textures on the decoded
-image alone — `(part, texture_id, opaque)` — and then stamp the sampler onto
-the shared texture as each material was written.
+image alone — `(part, texture_id, opaque)`, the last from the alpha-stripped
+variants it no longer writes — and then stamp the sampler onto the shared
+texture as each material was written.
 
 That is last-writer-wins. A single mesh with a clamped or mirrored axis
 retroactively gave its addressing to **every** other mesh in the segment using
@@ -649,7 +726,7 @@ row or column of texels across whole walls. The carved marble plinths on the
 canal rendered as flat grey streaks because of it.
 
 Fixed by splitting the caches: images are still deduplicated on
-`(part, texture_id, opaque)`, textures on `(image, sampler)`. Stage 2 now emits
+`(part, texture_id)`, textures on `(image, sampler)`. Stage 2 now emits
 1,754 textures over the same 1,241 images, and **2,176 / 2,176 materials carry
 the addressing modes their own `tsp_instruction` demands**.
 

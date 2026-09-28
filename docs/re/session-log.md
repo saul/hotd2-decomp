@@ -22752,3 +22752,118 @@ they pin).
   restore.
 * The sandbox refuses a shell line that runs `node` or `git` with a path held
   in a variable; the swaps had to be spelled out in full.
+
+## 2026-09-28 -- texture alpha is the bank's, and a mesh's material is its own (branch `fix/newbugs2-texalpha`)
+
+**The report.** The translucency session left `[likely]`: "the exporter strips
+texture alpha from meshes with the 'ignore texture alpha' bit set, but nothing
+in the exe's Direct3D path reads that bit" -- 112 translucent-pass meshes
+(`boss6`, `st_adver03`) and any faded opaque mesh.
+
+**What the exe does, read end to end** (`docs/formats/materials.md`, *Texture
+alpha on the D3D path*):
+
+* `BindModelTextureHandles` (`0x004AC980`) decodes each bank texture once
+  into its global slot, from the bank entry and its data; no mesh word is an
+  input. `DecodeTextureToSurface` (`0x004AC270`) picks the surface format by
+  the entry's own pixel format through `g_pvr_pixfmt_texture_format`
+  (`0x00571250` = `{5, 2, 6, 8, 8, 8, 7, 0}`, named here) and copies 16-bit
+  texels verbatim. `EnumTextureFormatsCallback` (`0x004A5BC0`, named) files
+  the 1555 masks in slot 5 only under `DDPF_ALPHAPIXELS` and in slot 3
+  otherwise; the 4444 masks go to slot 6 with no alpha test -- `[likely]`
+  `A4R4G4B4`. `PromoteSurfaceToTexture` (`0x004A6010`, named) keeps the format.
+* `InitD3DDeviceAndTextureStages` sets stage 0 `ALPHAOP MODULATE`,
+  `ALPHAARG1 TEXTURE`, `ALPHAARG2 DIFFUSE` once; `TranslatePvr2StateToD3D`'s
+  jump table (`0x004A79C8`) swaps in `SELECTARG1` for mode 1 and nothing else.
+* A capstone sweep of `0x004A4DA0..0x004ACD20` finds five instructions that
+  touch bit 19, all the `0x180000` pass pair. `BindTextureStage` is
+  `SetTexture` behind a one-entry cache (`g_bound_texture`, `0x007DECD0`).
+* `AssetDrawSlotWithAlpha` hands its alpha on untested, so a draw at 1.0 is
+  `DrawModelWithForcedAlphaBlend`'s: blended, `MODULATE` (bit 7), and the
+  alpha test of the mesh's own pass.
+
+So the opaque pass ignores texture alpha by its state, the translucent pass
+blends and tests it, a faded draw blends it in either. The stripping was the
+PowerVR2 meaning of the bit.
+
+**Corpus** (de-duplicated: `pol/pol_<x>.bin` are byte copies of `<x>.bin`):
+112 translucent-pass `IgnoreTexAlpha` meshes on ARGB textures, **101** with
+alpha below 255 -- `zslman` and `zndina`'s additive blade glows, `eff_boss5`'s
+cels, 27 `boss6` cels with 3% of texels at 221, and two `st_adver03` meshes
+whose base alpha is 0 and which the alpha test drops either way. Every textured
+mesh is in the pass its list type names; five untextured list-2 meshes
+(`zndina` 4, `zslman` 1) are opaque-pass. 3,147 opaque-pass meshes sit on
+textures with transparent texels.
+
+**What changed.** One image per bank texture with the bank's alpha; the glTF
+`alphaMode` is the pass; `texture_alpha_used` says whether a plain draw shows
+it. `setAssetDrawAlpha` is the one fading draw (`null` = `AssetDrawSlot`, a
+number = `WithAlpha`, 1 included), and the records that wrote 1 for a plain
+draw say `null`. The blood transpose reads pixels back through WebGL, because
+a 2D canvas is premultiplied and blacked out the colour under 904 opaque-pass
+gore meshes' transparent texels -- harmless only while those images were
+stripped.
+
+**The car, and a second fault in the same function.** The coordinator passed
+on the crashed-car session's `[open]`: the stage-2 car's door skin draws black,
+"a translucent material with a zero base colour in the bundle". It is not the
+alpha. `char_adv04` model 4 (the door) has base colour white; model 2's inner
+copies of the body are black on the same texture 33 and TSP, and the
+exporter's material cache was keyed on the part, the texture and the four
+words -- **not the base colour or the culling** -- so the door took the
+body's black. `WalkMeshChainAndDraw` calls `SetMaterial` per mesh from its own
+header `[proved]`. Over the corpus the key merged 1,452 keys' worth of
+differing materials: 7,868 of 41,463 meshes (counting each file once by name)
+drew with an earlier mesh's material, 7,417 with another colour -- baked
+lighting and base alpha -- and 581 with other culling. The key carries both
+now. In the rescue branch at frame 150 the driver's door is red with its
+window; in the unshot drive, stage geometry shifts by up to 62 levels where
+segments shared a texture at different lighting.
+
+**Screenshots** (`web/shots/`, not committed; the before bundle is the same
+stages exported by the previous exporter into `extract/player_before` and
+served through `HOTD2_BUNDLE`): `texalpha-zslman-170-{old,after}-clip.png`
+and `texalpha-zslman-170-zoom-{old,after}-clip.png` (the thrown blade's
+afterimage card vs its shaped glow; 3.6% of the crop differs, all on the
+glows), `texalpha-zndina-60-{old,after}-clip.png` (2.6%, the blade halos),
+`texalpha-ladder-{60,200}-{old,after}.png` (opaque-pass alpha textures: 0 of
+588,800 viewport pixels differ), `car-rescue-{prekey,after}-150-zoom.png`
+(black door -> red). Blender, `extract/compare/texalpha/`: `st_adver03` model 1
+(the key fix recolours its pipes, max 41 levels; its `IgnoreTexAlpha` meshes
+are invisible both ways), `boss6` models 0-99 identical, model 133 two pixels
+off by one. Neither `boss6` (class 0x2D is unported) nor `st_adver03` is in a
+player bundle.
+
+**Not done, reported.** `render/characters/draw_gates.ts` draws a bone or part
+at any alpha above 0 solid, and says that is every alpha the game gives one;
+it is not -- the type-9 twin is drawn at 0.25 (`EnemyZombieInitByCharType`),
+`ZombieSubmitSlotByLighting` fades a zombie in through `AssetDrawSlotWithAlpha`
+while `obj+0x1368` bit `0x20` is up, and `ThrowerDrawBonePart` fades slot
+`0x1FB9` on a 120-frame triangle. So no draw the port makes today fades an
+opaque-pass mesh with transparent texels; the render test holds the state
+such a draw gets.
+
+**Wrong turns.**
+
+* The first "before" shots were taken on the old bundle **before** merging
+  main, whose attack-slot claim moved the actors; they could not be diffed
+  against shots after the merge. The comparison bundle had to be re-exported
+  by the old `gltf.ts` from the merged tree, into its own directory.
+* The same trap twice: the first old bundle for the car predated the car
+  session's exporter rows, so its crash frames showed a different model.
+* The stage-1 view I first chose (`block=0`) is the prologue that loads stage
+  2; its 0.06% "difference" was the loading spinner. The new UI also moved the
+  viewport, so the first diff regions were half off it.
+* I took the car's black door for a draw-order fault and probed the sort keys
+  first (they were right: shells before inner copies, one command) before
+  reading the colour off the material.
+* `verify_texture_alpha.py`'s material check first matched primitives by node
+  name and chain index and reported 1,203 false mismatches: rig nodes number a
+  filtered model list, and `hod2_chain_index` skips empty meshes. It matches
+  by the header sphere each primitive carries.
+* `tools/blender_nodeview.py` rendered a stage segment as a blank frame: the
+  camera clipped at Blender's default 100 units. It sets the clip range from
+  the framing distance now.
+* Editing `gltf.ts` with a text tool: its cache keys join on NUL bytes, which
+  the editor shows as spaces, so an exact-match edit of that line failed until
+  it was done on bytes.

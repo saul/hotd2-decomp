@@ -903,17 +903,29 @@ export async function exportLevel(
 
   const getMaterial = async (part: string, bank: Bank | null,
                              mesh: Mesh): Promise<number> => {
+    const [a, r, g, b] = mesh.baseColour;
+    const clamp01 = (v: number) => Math.min(Math.max(v, 0.0), 1.0);
+    const factor = [clamp01(r), clamp01(g), clamp01(b), clamp01(a)];
+    // **Everything the material carries is in the key.** `WalkMeshChainAndDraw`
+    // (`FUN_004A7EF0`) calls `SetMaterial` for every mesh from its own header
+    // (`+0x2C..+0x38`), so two meshes with the same texture and words but a
+    // different base colour are two materials. The key used to leave the
+    // colour and the culling out, and about a fifth of the game's meshes were
+    // drawn with the first matching mesh's material -- nearly all of them
+    // with another mesh's baked lighting and base alpha, among them the
+    // stage-2 car's door shells, which took the black of the body's inner
+    // copies. `tools/verify_texture_alpha.py` holds every primitive of a
+    // bundle to its own mesh's colour and culling.
     const key = [part, mesh.textureId, mesh.tsp, mesh.textureControl,
-                 mesh.parameterControl, mesh.ispTsp, mesh.shading].join(" ");
+                 mesh.parameterControl, mesh.ispTsp, mesh.shading,
+                 ...factor, mesh.doubleSided].join(" ");
     const hit = matCache.get(key);
     if (hit !== undefined) return hit;
 
     const texIdx = mesh.textured ? await getTexture(part, bank, mesh) : null;
 
-    const [a, r, g, b] = mesh.baseColour;
-    const clamp01 = (v: number) => Math.min(Math.max(v, 0.0), 1.0);
     const pbr: Doc = {
-      baseColorFactor: [clamp01(r), clamp01(g), clamp01(b), clamp01(a)],
+      baseColorFactor: factor,
       metallicFactor: 0.0,
       roughnessFactor: 1.0,
     };

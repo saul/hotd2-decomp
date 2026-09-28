@@ -7,7 +7,9 @@
  *
  *   node tools/shot_diff.mjs a.png b.png [--region x,y,w,h] [--out diff.png]
  *
- * `--out` writes the differing pixels in red over a darkened copy of `a`.
+ * `--out` writes the differing pixels in red over a darkened copy of `a`;
+ * `--zoom k` writes the region of each input, scaled k times, beside it
+ * (`<name>-zoom.png`), for looking at the difference rather than counting it.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright-core";
@@ -21,12 +23,13 @@ const [a, b] = args.filter((x, i) => !x.startsWith("--")
   && !(i > 0 && args[i - 1].startsWith("--")));
 const region = opt("region")?.split(",").map(Number) ?? null;
 const out = opt("out");
+const zoom = Number(opt("zoom") ?? 0);
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 try {
   const page = await browser.newPage();
   const url = (p) => `data:image/png;base64,${readFileSync(p).toString("base64")}`;
-  const res = await page.evaluate(async ({ ua, ub, region, wantOut }) => {
+  const res = await page.evaluate(async ({ ua, ub, region, wantOut, zoom }) => {
     const load = (u) => new Promise((ok, fail) => {
       const im = new Image();
       im.onload = () => ok(im);
@@ -70,9 +73,26 @@ try {
       ga.putImageData(da, 0, 0);
       png = ca.toDataURL("image/png");
     }
+    const zoomed = [];
+    if (zoom > 0) {
+      for (const im of [ia, ib]) {
+        const c = document.createElement("canvas");
+        c.width = w * zoom; c.height = h * zoom;
+        const g = c.getContext("2d");
+        g.imageSmoothingEnabled = false;
+        g.drawImage(im, x, y, w, h, 0, 0, w * zoom, h * zoom);
+        zoomed.push(c.toDataURL("image/png"));
+      }
+    }
     return { total: w * h, n, max, mean: n ? sum / n : 0,
-             box: n ? [x + x0, y + y0, x1 - x0 + 1, y1 - y0 + 1] : null, png };
-  }, { ua: url(a), ub: url(b), region, wantOut: !!out });
+             box: n ? [x + x0, y + y0, x1 - x0 + 1, y1 - y0 + 1] : null, png,
+             zoomed };
+  }, { ua: url(a), ub: url(b), region, wantOut: !!out, zoom });
+  for (const [i, p] of [a, b].entries()) {
+    const z = res.zoomed?.[i];
+    if (z) writeFileSync(p.replace(/\.png$/, "-zoom.png"),
+                         Buffer.from(z.split(",")[1], "base64"));
+  }
   if (res.error) throw new Error(res.error);
   if (out && res.png) {
     writeFileSync(out, Buffer.from(res.png.split(",")[1], "base64"));

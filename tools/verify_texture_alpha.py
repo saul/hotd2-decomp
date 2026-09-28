@@ -156,12 +156,15 @@ def scan_bit19(raw: bytes, tables: ExeTables, fail: Failures) -> None:
           f"{len(hits)} touch bit 19, all of them the pass selectors")
 
 
-def corpus(game: Path, fail: Failures) -> None:
+def corpus(game: Path, fail: Failures) -> dict:
+    """The corpus premises; returns the materials the meshes of each
+    `(pol stem, header sphere)` own, for the bundle to be held to."""
     textured_disagree = 0
     untextured = Counter()
     used = 0
     argb_ita_trn = 0
     meshes = 0
+    own: dict[tuple, set] = {}
     for p in unique_pol(game):
         try:
             models = nl1.parse_container(container.load(p.read_bytes()))
@@ -169,11 +172,15 @@ def corpus(game: Path, fail: Failures) -> None:
             continue
         bank = None
         cache: dict[int, int | None] = {}
-        for m in models:
+        for mi, m in enumerate(models):
             if m is None:
                 continue
-            for me in m.meshes:
+            for ci, me in enumerate(m.meshes):
                 meshes += 1
+                a, r, g, b = me.base_colour
+                own.setdefault((p.stem, *me.centroid, me.radius), set()).add((
+                    tuple(min(max(v, 0.0), 1.0) for v in (r, g, b, a)),
+                    me.double_sided))
                 if (me.list_type == 0) != me.opaque_pass:
                     if me.textured:
                         textured_disagree += 1
@@ -208,6 +215,7 @@ def corpus(game: Path, fail: Failures) -> None:
           f"pass, the untextured exceptions {dict(untextured)}; "
           f"{argb_ita_trn} translucent-pass IgnoreTexAlpha meshes on ARGB "
           f"textures, {used} of them on one with alpha below 255")
+    return own
 
 
 def glb(path: Path) -> tuple[dict, bytes]:
@@ -237,7 +245,7 @@ def png_alpha(png: bytes) -> tuple[int, int, bytes]:
     return w, h, rows[3::4]
 
 
-def bundle(game: Path, fail: Failures) -> None:
+def bundle(game: Path, fail: Failures, own: dict) -> None:
     bd = bundle_dir()
     if bd is None:
         print("  bundle: none found -- the images were NOT checked (export "
@@ -249,8 +257,34 @@ def bundle(game: Path, fail: Failures) -> None:
         return
     banks: dict[str, object] = {}
     images = opaque_named = compared = mismatched = 0
+    prims = wrong_mat = 0
     for path in sorted(bd.glob("stage*/stage*.glb")):
         doc, binary = glb(path)
+        # Every model primitive draws with its own mesh's material: the base
+        # colour WalkMeshChainAndDraw hands SetMaterial, and the culling. A
+        # primitive is found by its part and the mesh header's sphere, which
+        # it carries as `hod2_sphere` -- node names number a filtered model
+        # list in the rigs, and a chain index skips empty meshes -- and it
+        # must hold one of the materials the meshes with that sphere own.
+        mats = doc.get("materials", [])
+        for node in doc.get("nodes", []):
+            part, sep, _ = (node.get("name") or "").rpartition("_model_")
+            if not sep or "mesh" not in node:
+                continue
+            for pr in doc["meshes"][node["mesh"]]["primitives"]:
+                sphere = (pr.get("extras") or {}).get("hod2_sphere")
+                want = own.get((part, *sphere)) if sphere else None
+                if want is None or "material" not in pr:
+                    continue
+                mat = mats[pr["material"]]
+                got = (tuple(mat["pbrMetallicRoughness"]["baseColorFactor"]),
+                       mat.get("doubleSided", False))
+                prims += 1
+                if got not in want:
+                    wrong_mat += 1
+                    if wrong_mat <= 3:
+                        print(f"    {path.name} {node['name']}: material "
+                              f"{got}, the mesh's own {sorted(want)}")
         imgs = doc.get("images", [])
         images += len(imgs)
         opaque_named += sum(1 for im in imgs
@@ -296,9 +330,14 @@ def bundle(game: Path, fail: Failures) -> None:
     fail.check(compared > 0, "no IgnoreTexAlpha ARGB image was compared")
     fail.check(mismatched == 0,
                f"{mismatched} of {compared} images differ from the bank's alpha")
+    fail.check(prims > 10000, f"only {prims} stage primitives matched a mesh")
+    fail.check(wrong_mat == 0,
+               f"{wrong_mat} of {prims} stage primitives draw with a material "
+               "whose base colour or culling is another mesh's")
     print(f"  bundle: {images} images in {bd}, {opaque_named} `_opaque`; "
           f"{compared} IgnoreTexAlpha ARGB images against the bank, "
-          f"{mismatched} with a different alpha")
+          f"{mismatched} with a different alpha; {prims} stage primitives "
+          f"against their mesh's base colour and culling, {wrong_mat} wrong")
 
 
 def main() -> int:
@@ -336,8 +375,8 @@ def main() -> int:
           f"{len(SEQUENCES)} sequences")
 
     scan_bit19(raw, tables, fail)
-    corpus(args.game_dir, fail)
-    bundle(args.game_dir, fail)
+    own = corpus(args.game_dir, fail)
+    bundle(args.game_dir, fail, own)
 
     if fail.n:
         print(f"verify_texture_alpha: {fail.n} of {fail.asserted} checks FAILED")

@@ -5376,15 +5376,69 @@ than the engine's submission order, which differs only for coplanar opaque
 surfaces; the player's own transparent meshes (labels, debug overlays, the
 deep screen sprites) sort after the NL1 commands of their layer rather than by
 any exe rule, and the queued sprite quads' own layer (`0x007E78B8`, 0) is not
-modelled; and the exporter strips a texture's alpha for every mesh with
-`IgnoreTexAlpha` set, where nothing in the D3D translation reads that bit --
-so a fading opaque mesh, and the 112 translucent-pass meshes that set both
-bits 19 and 20 on an ARGB texture (`boss6`, `st_adver03`), blend on their base
-alpha alone where the engine would [likely] multiply the texture's in.
+modelled. (The exporter's alpha stripping that was listed here is done: see
+the next section.)
 
 **The water at block 16 step 14** (the report's second item) was already
 drawn by the time this was read -- main's class 0x41 type 1 port, above --
 and its four tiles are opaque-pass meshes, so none of this changes them.
+
+### A texture keeps its alpha, and a mesh keeps its own material
+
+Two exporter faults in `gltf.ts`/`gltf.py`'s material writer, both read
+against the EXE (`docs/formats/materials.md`, *Texture alpha on the D3D path*
+and *One material per mesh*):
+
+* **Texture alpha is the bank's.** The exporter wrote an alpha-stripped
+  `_opaque` image for every mesh with `IgnoreTexAlpha` (TSP bit 19) -- the
+  PowerVR2 meaning. On the PC the texture is decoded once per bank slot with
+  no mesh word as input, uploaded in a format that keeps the alpha
+  (`A1R5G5B5` for ARGB1555, `DDPF_ALPHAPIXELS` tested), and stage 0's alpha op
+  takes the texel's alpha; bit 19 is read only as half of the pass selector.
+  So the opaque pass ignores texture alpha by its state and the translucent
+  pass blends by it. 101 translucent-pass meshes set the bit on a texture with
+  alpha below 255: `zslman`'s and `zndina`'s additive blade glows drew as
+  solid cards and are shaped now (stage 6 block 0, 3-4% of a close crop
+  changes, all on the glows). Opaque-pass meshes on textures with transparent
+  texels come out byte-identical (stage 2's clock-tower shot: 0 pixels of
+  588,800 differ). The glTF `alphaMode` is the pass.
+* **One material per mesh.** The material cache left the base colour and the
+  culling out of its key, so about a fifth of the game's meshes drew with an
+  earlier mesh's colour -- baked lighting and base alpha. The stage-2 car's
+  driver's door drew black in the rescue branch (the inner copies' black, same
+  texture 33 and TSP) and is red now; stage geometry shifts by up to ~60
+  levels where two segments shared a texture at different lighting.
+
+Two render paths leaned on the stripped images:
+
+* `setAssetDrawAlpha` (`render/draw_order.ts`) is the one fading draw for the
+  effect layers and the slot models, and takes `null` for `AssetDrawSlot` and
+  a number for `AssetDrawSlotWithAlpha` -- **1 included**: the engine does not
+  test the argument, so a draw at 1.0 is still
+  `DrawModelWithForcedAlphaBlend`'s, which blends an opaque-pass mesh's
+  texture alpha. The layers used to keep the plain draw at 1. Records that
+  encoded "plain" as 1 (the ring effect's spread and hold, the boss-3 path
+  effects inside their window, the owl ring's pulse, the horde's plain parts)
+  say `null` now; every slot drawn at exactly 1 today is translucent
+  `SRCALPHA`/`INVSRCALPHA` at base alpha 1, so no picture moved.
+* The blood-colour transpose read the map through a 2D canvas, which is
+  premultiplied: the colour under a texel at alpha 0 came back black, and 904
+  opaque-pass gore meshes have such texels. It reads the map back through
+  WebGL with premultiplication off.
+
+**Re-export every bundle.** `tools/verify_texture_alpha.py` checks the EXE
+bytes, the bit-19 scan, the corpus premises, and -- on a bundle this tree's
+`gltf.ts` wrote -- that no image is `_opaque`, that the `IgnoreTexAlpha`
+ARGB images carry the bank's alpha, and that every model primitive holds its
+own mesh's colour and culling.
+
+Not done, and not this change's: the character layer draws a bone or part at
+any alpha above 0 solid (`render/characters/draw_gates.ts`), where the exe's
+`AssetDrawSlotWithAlpha` draws blend -- the class-0x30 twin of type 9 at 0.25
+(`EnemyZombieInitByCharType`), `ZombieSubmitSlotByLighting`'s fade-in while
+`obj+0x1368` bit `0x20` is up, and `ThrowerDrawBonePart`'s triangular fade on
+slot `0x1FB9`. With the alpha now in the images, drawing them through
+`setAssetDrawAlpha` would be faithful as it stands.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

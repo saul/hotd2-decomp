@@ -763,19 +763,23 @@ def export_level(name, parts, out_dir, collision=None, rigs=None,
         return sampler_cache[key]
 
     def get_material(part: str, bank, mesh) -> int:
+        a, r, g, b = mesh.base_colour
+        factor = [min(max(r, 0.0), 1.0), min(max(g, 0.0), 1.0),
+                  min(max(b, 0.0), 1.0), min(max(a, 0.0), 1.0)]
+        # Everything the material carries is in the key: WalkMeshChainAndDraw
+        # (FUN_004A7EF0) calls SetMaterial for every mesh from its own header
+        # (+0x2C..+0x38). Leaving the colour and the culling out drew about a
+        # fifth of the game's meshes with the first matching mesh's material.
         key = (part, mesh.texture_id, mesh.tsp, mesh.texture_control,
-               mesh.parameter_control, mesh.isp_tsp, mesh.shading)
+               mesh.parameter_control, mesh.isp_tsp, mesh.shading,
+               *factor, mesh.double_sided)
         if key in mat_cache:
             return mat_cache[key]
 
         tex_idx = get_texture(part, bank, mesh) if mesh.textured else None
 
-        a, r, g, b = mesh.base_colour
         pbr: dict = {
-            "baseColorFactor": [
-                min(max(r, 0.0), 1.0), min(max(g, 0.0), 1.0),
-                min(max(b, 0.0), 1.0), min(max(a, 0.0), 1.0),
-            ],
+            "baseColorFactor": factor,
             "metallicFactor": 0.0,
             "roughnessFactor": 1.0,
         }

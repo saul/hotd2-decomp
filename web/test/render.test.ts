@@ -1100,7 +1100,9 @@ console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed
   // `g_st2car_asset_variants` per frame, turns one push by `obj+0x1334` and
   // two by `obj+0x1330`, and hangs those two off a roll-limited frame.
   const { G, ResetGameGlobals } = await import("../src/game/globals");
-  const { St2CarSpawn, St2CarsTick } = await import("../src/game/class21/car");
+  const { ST2CAR_ASSET_VARIANTS, St2CarSpawn, St2CarsTick }
+    = await import("../src/game/class21/car");
+  const { RIGS: RIG_TABLE } = await import("../src/hod2lib/rigs_data");
   const { NULL_HOST } = await import("../src/game/host");
   const { Euler, Quaternion } = await import("three");
   const { BAMS_TO_RAD } = await import("../src/core/bams");
@@ -1115,26 +1117,60 @@ console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed
   rigRoot.userData = { hod2_kind: "rig", hod2_rig: "obj_452320",
                        hod2_routine: "FUN_00452320", hod2_path_slot: 334 };
   root.add(rigRoot);
-  // The exporter's parts: both rows, the second column nested in the first.
-  const T2 = [9.0582619, 6.368186, 8.9433079];
-  const TW = [[0, 3.1674952, 13.6489019], [0, 3.1674952, -9.4799995]];
-  const part = (slot: number, t: number[], parent: InstanceType<typeof Group>) => {
+
+  // The rig this block poses is the one both exporters write the bundle
+  // from, not a hand-typed copy of it: `applyTaskDraw` is right only for a
+  // rig that carries every slot the draw can name, nests the second column
+  // in its own row's body and hangs the other three off the rig root. These
+  // hold the table to `St2CarDraw`'s own words first.
+  const carParts = RIG_TABLE.find((r) => r.name === "obj_452320")?.parts ?? [];
+  const partFor = (slot: number) =>
+    carParts.filter((p) => p.slots.length === 1 && p.slots[0] === slot);
+  check("the exporter ships both rows of g_st2car_asset_variants, a part a slot",
+        carParts.length === 8
+        && ST2CAR_ASSET_VARIANTS.flat().every((s) => partFor(s).length === 1),
+        carParts.map((p) => `${p.name}:${p.slots}`).join(" "));
+  check("...column 1 inside its own row's body, columns 0, 2 and 3 on the root",
+        ST2CAR_ASSET_VARIANTS.every((row) => {
+          const [body, door, a, b] = row.map((s) => partFor(s)[0]);
+          return door?.parent === body?.name
+            && !body?.parent && !a?.parent && !b?.parent
+            && (body?.translation ?? [0, 0, 0]).every((v) => v === 0);
+        }),
+        carParts.map((p) => `${p.name}<${p.parent ?? "root"}`).join(" "));
+  // `MatrixTranslate(x, y, z)` of three `PUSH imm32`s, z first: the nested
+  // push at `0x00452377`, the two spun ones at `0x00452497` and `0x004524E8`.
+  const f32 = (bits: number) =>
+    new Float32Array(new Uint32Array([bits]).buffer)[0];
+  const PUSHED = [
+    [f32(0x4110eecc), f32(0x40cbc84b), f32(0x410f17c2)],
+    [0, f32(0x404ab852), f32(0x415a61e5)],
+    [0, f32(0x404ab852), f32(0xc117ae14)],
+  ];
+  check("...each at the float32s its PUSH imm32s carry",
+        ST2CAR_ASSET_VARIANTS.every((row) => PUSHED.every((want, i) => {
+          const t = partFor(row[i + 1])[0]?.translation;
+          return !!t && t.every((v, k) => Math.fround(v) === want[k]);
+        })),
+        ST2CAR_ASSET_VARIANTS.flatMap((row) => row.slice(1).map((s) =>
+          `${s.toString(16)}:${partFor(s)[0]?.translation}`)).join(" "));
+
+  // Then built as the writer builds it: each part under its `parent`, or the
+  // root, at its translation, tagged with the slot it draws.
+  const nodes = new Map<number, InstanceType<typeof Group>>();
+  const byName = new Map<string, InstanceType<typeof Group>>();
+  for (const p of carParts) {
     const g = new Group();
+    const t = p.translation ?? [0, 0, 0];
     g.position.set(t[0], t[1], t[2]);
     g.userData = { hod2_kind: "rig_part", hod2_rig: "obj_452320",
-                   hod2_slots: [`0x${slot.toString(16).toUpperCase()
-                     .padStart(4, "0")}`] };
-    parent.add(g);
-    return g;
-  };
-  const nodes = new Map<number, InstanceType<typeof Group>>();
-  for (const row of [[0x2d, 0x2f, 0x34, 0x31], [0x2e, 0x30, 0x35, 0x32]]) {
-    const body = part(row[0], [0, 0, 0], rigRoot);
-    nodes.set(row[0], body);
-    nodes.set(row[1], part(row[1], T2, body));
-    nodes.set(row[2], part(row[2], TW[0], rigRoot));
-    nodes.set(row[3], part(row[3], TW[1], rigRoot));
+                   hod2_slots: p.slots.map((s) => `0x${s.toString(16)
+                     .toUpperCase().padStart(4, "0")}`) };
+    (p.parent ? byName.get(p.parent) ?? rigRoot : rigRoot).add(g);
+    byName.set(p.name, g);
+    nodes.set(p.slots[0], g);
   }
+  const TW = partFor(0x34)[0]?.translation ?? [0, 0, 0];
   const rigs = new RigLayer();
   rigs.build(root, RIGS as never,
              new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never));
@@ -1177,7 +1213,7 @@ console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed
   const wheel = nodes.get(0x34)!;
   const wq = wheel.getWorldQuaternion(new Quaternion());
   const wp = wheel.getWorldPosition(new Vector3());
-  const want = new Vector3(...TW[0]).applyQuaternion(qd)
+  const want = new Vector3(...TW).applyQuaternion(qd)
     .add(new Vector3(pose.x, pose.y, pose.z));
   check("the limited frame is not the body's for this roll",
         d.roll !== 0 && d.roll !== pose.roll, JSON.stringify(d));
@@ -1208,7 +1244,7 @@ console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed
   check("...and the second column is turned RotY by obj+0x1334",
         car.partYaw !== 0
         && Math.abs(yaw - car.partYaw * BAMS_TO_RAD) < 1e-6
-        && door.position.x === T2[0],
+        && door.position.x === partFor(0x30)[0]?.translation?.[0],
         `${yaw} vs ${car.partYaw * BAMS_TO_RAD}`);
   ResetGameGlobals();
 }
@@ -2276,6 +2312,148 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
         `${head.children.length}`);
 
   stage.dispose();
+}
+
+/**
+ * **The model's size, `model+0x116C`, on every skinned actor.**
+ *
+ * `SkeletonApplyRootMotion` (`FUN_00410C50`) draws `T(obj+0x40)`, the actor's
+ * rotation, then `MatrixScale(model+0x116C)` (`0x00410FEA`..`0x00410FF7`) and
+ * only then the pose translate and the bones -- so a civilian, whose
+ * character type the build sizes at 0.9, is 0.9 of her model everywhere: the
+ * pose offset, every bone, every hit centre. The radius is the one part of a
+ * sphere the matrix does not reach, and the build scaled it instead
+ * (`SkeletonWalkNode`, `FUN_004107E0`, `0x00410837`).
+ *
+ * The port drew every skinned actor at 1.0 but the bat. Each assertion here is
+ * about what the scene graph and the two shot queries answer, and each fails
+ * on a root drawn at 1.0: the bone lands at `(102, 21, -53)` rather than
+ * `(101.8, 18.9, -52.7)`, and the sphere is 1.5 wide and in the wrong place.
+ */
+console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { MotionFlag } = await import("../src/game/actor");
+  const { Object3D, Vector3 } = await import("three");
+
+  // `hito_gal`'s shape: bone 1 the torso at the root, bone 2 the head ten up
+  // it, each with a sphere a unit along its own y.
+  const TYPE = {
+    type: 0x26, name: "hito_gal", file: "hito_gal.bin", bone_count: 3,
+    actor_radius: 10,
+    bones: [
+      { bone: 1, part: "bone01_0eb9", slot: 0x0eb9, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 2, hit_centre: [0, 1, 0],
+        steps: [] },
+      { bone: 2, part: "bone02_0eaf", slot: 0x0eaf, offset: [0, 10, 0],
+        parent: 0, damage_rank: [], hit_radius: 1.5, hit_centre: [0, 1, 0],
+        steps: [] },
+    ],
+    head_bone: 2, reactions: {}, attacks: {},
+    // One frame whose root sits off the origin in all three axes, and no
+    // rotation anywhere: the pose offset is then the whole of what moves the
+    // bones off the actor's position.
+    motions: {
+      "660": { bank: "people", frames: 1, fps: 30, root: [2, 11, -3],
+               rot: [0, 0, 0, 0, 0, 0, 0, 0, 0], play: 0 },
+    },
+  };
+  const AT = 0x8640;
+  const PLACE = {
+    at: AT, class: 0x10, char_type: 0x26, motion: 660, hp: 0, yaw: 0,
+    body_condition: 0, initial_state: 0, attack_state: 0, ring_set: 0,
+  };
+  const CHARS = {
+    types: { "38": TYPE }, placements: [PLACE],
+    approach: { rings: [{ inner: 25, mid: 38, outer: 51 }],
+                steps: { base: 2, mid_add: 3, outer_add: 4 },
+                ring_set_for_char0: 1 },
+    difficulty: { hp_delta: [0, 0, 0, 0, 0], hp_min: 1, hp_max: 300,
+                  initial_rank: [0, 0, 2, 0, 0], default: 2 },
+  };
+
+  const root = new Object3D();
+  const rig = new Object3D();
+  rig.name = "chr_hito_gal_spawn000";
+  rig.userData = { hod2_kind: "rig", hod2_rig: "chr_hito_gal",
+                   hod2_spawn_at: AT };
+  const torso = new Object3D();
+  torso.name = "chr_hito_gal_spawn000_bone01_0eb9";
+  const head = new Object3D();
+  head.name = "chr_hito_gal_spawn000_bone02_0eaf";
+  // Where the exporter puts a bone: at its offset in its parent's frame.
+  head.position.set(0, 10, 0);
+  torso.add(head);
+  rig.add(torso);
+  root.add(rig);
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_difficulty = 2;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+  const made = SpawnScriptedCharacters(chars.readySpawns([{ at: AT }]));
+  const a = made[0];
+  check("the civilian is made, at her type's 0.9",
+        made.length === 1 && a.scale === Math.fround(0.9), `${a?.scale}`);
+  const s = a.scale;
+  a.visible = true;
+  a.pos.x = 100; a.pos.y = 0; a.pos.z = -50;
+  a.yaw = 0;
+  a.motion = 660;
+  // The gate clear, so the pose takes the clip's whole root -- the arm the
+  // `people.bin` clips 596, 598 and 600 are posed with.
+  a.motionFlags &= ~MotionFlag.RootMotion;
+  chars.syncSpawns([{ at: AT }], made);
+  chars.update({} as never);
+
+  check("her root is drawn at her size", rig.scale.x === s
+        && rig.scale.y === s && rig.scale.z === s, rig.scale.toArray().join());
+  const near = (v: { x: number; y: number; z: number },
+                x: number, y: number, z: number) =>
+    Math.hypot(v.x - x, v.y - y, v.z - z) < 1e-4;
+  const at = (x: number, y: number, z: number) =>
+    [100 + s * x, s * y, -50 + s * z] as const;
+  const w = { x: 0, y: 0, z: 0 };
+  check("the head is where the scaled pose puts it: the offset and the bone "
+        + "both 0.9 of the clip's",
+        chars.boneWorld(AT, 2, w) && near(w, ...at(2, 21, -3)),
+        `${w.x.toFixed(3)} ${w.y.toFixed(3)} ${w.z.toFixed(3)}`);
+  const c = new Vector3();
+  const r = chars.boneSphere(AT, 2, c);
+  check("the head's sphere: its centre through the scaled bone",
+        near(c, ...at(2, 22, -3)), c.toArray().map((v) => v.toFixed(3)).join());
+  check("...and its radius the build's, 0.9 of the table's 1.5",
+        r === Math.fround(s * 1.5), `${r}`);
+
+  // The shot, through the same sphere: along -z past the centre, 1.30 and
+  // 1.40 to one side -- inside 1.35 and outside it, both inside the table's
+  // own 1.5.
+  const shot = (dx: number) => chars.pickShot({
+    origin: { x: c.x + dx, y: c.y, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
+  const hit = shot(1.3);
+  check("a shot 1.30 off the centre hits the head",
+        hit?.kind === "actor" && hit.at === AT && hit.bone === 2,
+        JSON.stringify(hit));
+  check("...and one 1.40 off misses it, inside the table's radius and "
+        + "outside hers", shot(1.4) === null, JSON.stringify(shot(1.4)));
+
+  // Op 0x27, the one later writer of the size: the whole drawing follows it,
+  // and the radii stay the build's.
+  a.scale = 50;
+  chars.update({} as never);
+  check("a size written after the build is the size she is drawn at",
+        rig.scale.x === 50, `${rig.scale.x}`);
+  check("...and leaves her radii where the build put them",
+        chars.boneSphere(AT, 2, c) === Math.fround(s * 1.5),
+        `${chars.boneSphere(AT, 2, c)}`);
+
+  stage.dispose();
+  G.g_object_list.length = 0;
 }
 
 /**

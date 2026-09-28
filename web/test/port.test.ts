@@ -17662,12 +17662,22 @@ console.log("\na stashed path is played by a hook that steps first:");
 // delta by it -- so a smaller character takes smaller steps. This port applied
 // 1.0 to everything and called the field "drawing only".
 {
+  // The three arms store float immediates -- `0x3f19999a`, `0x3f333333`,
+  // `0x3f666666` -- so the port's values are those floats, not the doubles
+  // they round from.
   check("the scale table is the engine's jump table, not a guess",
-        ActorModelScale(30) === 0.6 && ActorModelScale(31) === 0.7
-        && ActorModelScale(32) === 0.9 && ActorModelScale(56) === 0.9
+        ActorModelScale(30) === Math.fround(0.6)
+        && ActorModelScale(31) === Math.fround(0.7)
+        && ActorModelScale(32) === Math.fround(0.9)
+        && ActorModelScale(56) === Math.fround(0.9)
         && ActorModelScale(29) === 1 && ActorModelScale(57) === 1
         && ActorModelScale(8) === 1,
         `${[29, 30, 31, 32, 56, 57].map(ActorModelScale).join(", ")}`);
+  check("...and they are the engine's float bits",
+        [30, 31, 32].map((t) => {
+          const f = new Float32Array([ActorModelScale(t)]);
+          return new Uint32Array(f.buffer)[0].toString(16);
+        }).join(",") === "3f19999a,3f333333,3f666666");
 
   // Stage 1's rescue, in one line: the civilian is type 38 and her captor
   // type 8, so she flees at 0.9 of her clip and he walks at all of his.
@@ -17680,6 +17690,49 @@ console.log("\na stashed path is played by a hook that steps first:");
   const ratio = (captorWalk - civRun) / (0.800 - 0.6885);
   check("...so the captor closes on the civilian 1.6x faster than unscaled",
         Math.abs(ratio - 1.61) < 0.02, `${ratio.toFixed(2)}x`);
+}
+
+// **The build writes the size for every skinned actor, and the hit radii from
+// it.** `ActorBuildSkinnedModel` (`FUN_00410440`) stores `model+0x116C` first,
+// whatever the actor, and `SkeletonWalkNode` (`FUN_004107E0`) then writes each
+// bone record's radius as the table's times that size:
+//
+//     00410837  FLD  float ptr [ECX + 0x1300]   ; g_cur_actor's model+0x116C
+//     0041083D  FMUL float ptr [EAX + -0x4]     ; the row's radius
+//     00410840  FSTP float ptr [ESI + 0x78]     ; the record's
+//
+// The port wrote the size only for an actor that carries the model block, and
+// no radius at all -- every reader took the table's, so a civilian drawn at
+// 0.9 would have been shot through spheres drawn for 1.0.
+{
+  ResetGameGlobals();
+  const PEOPLE: CharacterType = { ...TYPE, type: 38, name: "test civilian" };
+  SetGameTables({ ...CHARS, types: { ...CHARS.types, "38": PEOPLE } } as
+                unknown as CharactersJson);
+  const civ = makeActor(0x3000, SpawnClass.Civilian, 38, "civ");
+  // What op 0x27 might have left on a pooled object: the build overwrites it.
+  civ.scale = 50;
+  ActorBuildSkinnedModel(civ);
+  const s = Math.fround(0.9);
+  check("the build writes the size for an actor with no model block",
+        civ.scale === s && !civ.skel, `${civ.scale}`);
+  check("...and every bone's hit radius, as the table's times the size",
+        civ.boneRadius["1"] === Math.fround(s * 3)
+        && civ.boneRadius["2"] === Math.fround(s * 2)
+        && civ.boneRadius["4"] === Math.fround(s * 2)
+        && civ.boneRadius["5"] === Math.fround(s * 2),
+        JSON.stringify(civ.boneRadius));
+  const z = makeActor(0x3001, SpawnClass.Zombie, 1, "z");
+  ActorBuildSkinnedModel(z);
+  check("...and a type at 1.0 keeps the table's own",
+        z.scale === 1 && z.boneRadius["1"] === 3 && z.boneRadius["2"] === 2,
+        JSON.stringify(z.boneRadius));
+  // The one later writer of the size is op 0x27, and it writes the size only:
+  // the radii are the build's for the rest of the actor's life. That is held
+  // where it could go wrong -- a reader deriving the radius from the live
+  // size -- in `test/render.test.ts`.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
 }
 
 // `ActorPointIsAhead` (`FUN_0045BC10`): the world delta rotated into the
@@ -29454,6 +29507,53 @@ console.log("\na spawn record's three angles reach every slot actor:");
         && rolled?.roll === 0x1234,
         props.map(angles).join(" "));
   SetGameTables(CHARS);
+}
+
+// ...and the other half: a carrier never draws them. `ScriptedPropUpdate13`
+// (`FUN_0043FE90`) calls the behaviour at `0x0043FEC9` and only then draws off
+// `obj+0x64/0x68/0x6C`, and every routine `CarrierPropSelectRoutine`
+// (`FUN_00440190`) installs, bar one, falls from state 0 into
+// `PropSeatOnObjectPath` (`FUN_00440130`) on that first call: 0 at
+// `0x0044028F`, 1 at `0x00440440`, 2 and 9 at `0x00440969`/`0x00440997` and
+// `0x004408E6`, 4 and 7 at `0x00440CE4`/`0x00440C7C`, 5 and 8 at
+// `0x004410B7`/`0x0044105C`, 6 at `0x00441430`. The one is selector 3,
+// `0x00440AD0`, which never stores to the object and so draws the record's
+// angles for life, as behaviour 0 does -- it is unported, and when it is not,
+// this loop expects exactly that of it.
+console.log("\na carrier seats itself before the first draw reads its angles:");
+{
+  const rng = new Rng(19);
+  scene(0, rng);
+  const onPath = { pitch: 0x0400, yaw: 0x0800, roll: 0x0c00 };
+  const record = { pitch: 0x1111, yaw: 0x2222, roll: 0x3333 };
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => ({ x: frame, y: slot, z: 0, ...onPath }),
+  };
+  // A camera path none of the routines turns on (`CarrierPropRoutine2` adds
+  // 0x8000 to the yaw on 0xBB and 0xBD) and a frame inside every ride.
+  G.g_active_cam_path = 1;
+  G.g_cam_path_frame = 200;
+  const got: string[] = [];
+  let ok = CARRIER_SELECTORS_PORTED.size > 0;
+  for (const sel of CARRIER_SELECTORS_PORTED) {
+    const prop = ActorSpawn(0x7200 + sel, SpawnClass.ScriptedProp, -1,
+                            `carrier ${sel}`, {
+      class13: { slot: 6711, cam_path: 134, cam_frame: 340, scale: 1,
+                 behaviour: 8, selector: sel },
+      ...record,
+    }, rng);
+    const spawned = prop.pitch === record.pitch && prop.yaw === record.yaw
+      && prop.roll === record.roll;
+    ScriptedPropUpdate13(prop, { eye: EYE, dt: 1 / 60, rng, host });
+    const want = sel === 3 ? record : onPath;
+    ok &&= spawned && prop.pitch === want.pitch && prop.yaw === want.yaw
+      && prop.roll === want.roll;
+    got.push(`${sel}:${prop.pitch.toString(16)}/${prop.yaw.toString(16)}/`
+             + `${prop.roll.toString(16)}`);
+  }
+  check("every ported carrier holds its op_ path's angles after its first "
+        + "update, not the record's", ok, got.join(" "));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -1928,11 +1928,21 @@ Three readings from these that are worth keeping:
   records are these, which is why they sit at the world origin with no
   orientation.
 * **A sub-type-0 owl cannot be shot until the camera's path frame passes 682**,
-  and no other sub-type has that guard.
+  and no other sub-type has that guard -- but nothing in the class clears the
+  hit bit, so a bullet that lands early is kept and kills it the frame the
+  guard lifts.
+* **The owl's corpse lands on literals, not on the stage.**
+  `OwlCorpseFallAndSettle` (`FUN_00448210`) has one ground per sub-type: a
+  stairwell for 0 -- two rails at `g_class43_corpse_rails` that turn it back, a
+  wall at `x = -739`, thirteen steps and a landing at `35.91906`; a line
+  between a flat at `49.16` and a sloped plane for 1; an eight-step stair in a
+  box and a floor at `-36` for 2; water at `-25` for 3. The spin the death
+  gives it keeps 0.95 of itself a frame, so the body stops turning over.
+  The owl registers for the shot test the engine's way now, at its own tail,
+  and the corpse never does, so a falling body no longer takes the shots meant
+  for the owl behind it.
 
-**What is not ported**, and each is declared where it lives: the owl's body
-chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has.
+The owl's body chain (sixteen slots in one matrix chain) is `render/owl.ts`.
 
 **Their effects are.** The owl sheds forty feathers when it dies and eight
 on every strike, and leaves blood at its camera-space point; the fish leaves a
@@ -1944,8 +1954,9 @@ twenty-five, thirty and sixty frames -- in bytes past the `MatrixStackPop` the
 decompiler stops at (`L35`). And the deaths that meet the water never made the
 surface ring the port had them make: all three call `SpawnRingEffectAtPose`
 (`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
-ground impact ring and water splash are ported and wait on the landings, which
-are their only callers.
+ground impact ring and water splash come from the corpse's landings, which are
+their only callers: a ring where sub-types 0, 1 and 2 come to rest, and the
+splash where sub-type 3 goes into the water.
 
 The frog's two gaps, which this list used to name, are closed. Its **turn fix-up** — not a
 head look: after each 45° pass the engine turns bone 1, the node the whole of

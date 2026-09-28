@@ -105,8 +105,9 @@ import {
   PROJECTION_DISTANCE_PX,
 } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
-import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
-  OwlUpdateAndResolveShot } from "../src/game/class43";
+import { OwlPickTargetPlayerAndAimOffset, OwlStateDiveAtCamera,
+  OwlStateRideApproachSpline, OwlUpdateAndResolveShot }
+  from "../src/game/class43";
 import {
   OWL_RING_PULSE_FRAMES, OwlEffectsTick, OwlGroundRingPhase,
   OwlSpawnGroundImpactRing, OwlSpawnWaterSplashFlipbook,
@@ -20966,9 +20967,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...each turned by half a turn at most, not a whole one",
           G.g_owl_feathers.every((f) => f.yaw >= 0 && f.yaw < 0x8000),
           `${Math.max(...G.g_owl_feathers.map((f) => f.yaw))}`);
+    // Two points go through the camera on the death frame: the blood's, and
+    // then -- the frame falls through to the tail -- the shot test's depth.
     check("...and leaves blood at its camera-space point",
           G.g_point_blood_sprays.length === blood + 1
-          && seen.length === 1 && seen[0].z === 40
+          && seen.length === 2 && seen[0].z === 40
           && G.g_point_blood_sprays[blood].pos.z === -60,
           `${G.g_point_blood_sprays.length - blood} ${JSON.stringify(seen)}`);
     // Standing still, the heading of its own motion is 0, and the death frame
@@ -21062,6 +21065,348 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and draws its thirty cels once each, the last one included",
           cels.length === 30 && cels[0] === 0 && cels[29] === 29,
           `${cels.length} ${cels[0]}..${cels[cels.length - 1]}`);
+  }
+
+  // -- the owl's corpse: four landings, and the effects only they make -------
+  //
+  // `OwlCorpseFallAndSettle` (`FUN_00448210`) lands each sub-type on its own
+  // literals, and the ground ring and the water splash have no other caller.
+  // Every number below is the exe's own, written out rather than imported, so
+  // that a wrong constant in the port fails here.
+  {
+    const rng = new Rng(71);
+    const events = scene(0, rng);
+    G.g_players_in_play = 2;
+    G.g_scene_index = 0;
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const THUD = 0x1e16a9;       // COMMON\DAMAGE5_22.WAV
+    const SIBUKI = 0x4616a9;     // COMMON\SIBUKI8_16.WAV
+    const BOBBLE = 0x118a9;      // the ring's own, in scene 0
+    const GRAV = Math.fround(0.020415);
+    let at = 0xa400;
+    // An owl of `subtype` shot where it stands, then put at (x, y, z) with
+    // the given velocity: the corpse's first frame is the next update.
+    const corpse = (subtype: number, x: number, y: number, z: number,
+                    vx = 0, vy = 0, vz = 0) => {
+      G.g_cam_path_frame = 700;
+      G.g_owl_ground_rings = [];
+      G.g_owl_water_splashes = [];
+      const o = ActorSpawn(at++, SpawnClass.FlyingEnemy, -1, "owl", {
+        pos: vec3(x, y, z), class43: { subtype, member: 0 },
+      }, rng);
+      const t = (o as { owl: OwlTail }).owl;
+      o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      OwlUpdateAndResolveShot(o, frame(rng, events));
+      o.pos.x = x; o.pos.y = y; o.pos.z = z;
+      t.vx = vx; t.vy = vy; t.vz = vz;
+      sounds.length = 0;
+      const step = () => OwlUpdateAndResolveShot(o, frame(rng, events));
+      return { o, t, step };
+    };
+
+    {
+      const { o, t, step } = corpse(1, 0, 100, 0);
+      check("a shot owl is marked with the owl's corpse bit, 0x1000000, and "
+            + "not ActorFlag.Dead",
+            t.state === OwlState.Dead && (o.flags & 0x1000000) !== 0
+            && (o.flags & ActorFlag.Dead) === 0,
+            `flags 0x${o.flags.toString(16)}`);
+      const p0 = o.pitch;
+      step();
+      check("the corpse tumbles by its spin, and the spin keeps 0.95 of "
+            + "itself, truncated",
+            o.pitch === p0 - 768 && t.spin === -729,
+            `${o.pitch - p0} ${t.spin}`);
+      step();
+      check("...-768, then -729, then -692",
+            o.pitch === p0 - 768 - 729 && t.spin === -692,
+            `${o.pitch - p0} ${t.spin}`);
+      check("...and in the air nothing is made and nothing heard",
+            G.g_owl_ground_rings.length === 0
+            && G.g_owl_water_splashes.length === 0 && sounds.length === 0,
+            `${sounds}`);
+    }
+
+    // Sub-type 0: the stairwell.
+    {
+      const { t, step } = corpse(0, -690, 60, -1103, 0, 0, 0.1);
+      step();
+      check("sub-type 0, between its two rails: both flip z and cancel",
+            t.vz === 0.1, `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -690, 60, -1095, 0, 0, 0.1);
+      step();
+      check("...beyond rail 0 one flips, and the corpse turns back",
+            t.vz === -0.1, `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -690, 60, -1120, 0, 0, -0.1);
+      step();
+      check("...beyond rail 1 likewise, the other way", t.vz === 0.1,
+            `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -725, 60, -1095, 0, 0, 0.1);
+      step();
+      check("...and west of the rails' last point neither is tested",
+            t.vz === 0.1, `${t.vz}`);
+    }
+    {
+      const { o, t, step } = corpse(0, -738.9, 60, -1100, -0.5, 0, 0.2);
+      step();
+      check("sub-type 0, past x = -739: stopped dead, and 0x600 on the spin",
+            o.pos.x === -739 && t.vx === 0 && t.vz === 0
+            && t.spin === -729 + 0x600,
+            `${o.pos.x} ${t.vx} ${t.vz} ${t.spin}`);
+    }
+    {
+      // x -689.5 is step n = -4 of `n * 6 - 671`: a floor at 41.
+      const { o, t, step } = corpse(0, -690, 41.01, -1103, 0.5, 0, 0);
+      step();
+      check("sub-type 0, on a step: onto it, x0.8 across, x-0.4 up, 0x400 "
+            + "off the spin, and the thud",
+            o.pos.y === 41 && t.vy === -GRAV * Math.fround(-0.4)
+            && t.vx === 0.5 * Math.fround(0.8) && t.spin === -729 - 0x400
+            && t.settled === 0 && sounds.join() === `${THUD}`
+            && G.g_owl_ground_rings.length === 0,
+            `${o.pos.y} ${t.vy} ${t.vx} ${t.spin} ${sounds}`);
+    }
+    {
+      const { o, t, step } = corpse(0, -730, 35.93, -1100);
+      o.yaw = 0x1234;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 0 lands for good under 35.91906, with a ring at "
+            + "35.93906 turned to its yaw",
+            o.pos.y === Math.fround(35.91906) && t.settled === 1
+            && G.g_owl_ground_rings.length === 1
+            && r.y === Math.fround(35.93906) && r.x === o.pos.x
+            && r.z === o.pos.z && r.scale === 0.75 && r.pitch === 0
+            && r.yaw === 0x1234,
+            `${o.pos.y} ${JSON.stringify(r)}`);
+      check("...to the ring's bobble and then the thud",
+            sounds.join() === `${BOBBLE},${THUD}`, `${sounds}`);
+      const pitch = o.pitch;
+      step();
+      check("a landed corpse sinks 0.03 a frame and does nothing else",
+            o.pos.y === Math.fround(35.91906) - Math.fround(0.03)
+            && o.pitch === pitch && G.g_owl_ground_rings.length === 1,
+            `${o.pos.y} ${o.pitch - pitch}`);
+    }
+
+    // Sub-type 1: a line between a flat and a slope.
+    {
+      const { o, t, step } = corpse(1, -600, 49.17, -950);
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 1, on the flat side of its line: under 49.16, a ring "
+            + "at 49.3 turned 0xDC00 -- and no thud",
+            t.settled === 1 && r?.y === Math.fround(49.3) && r.pitch === 0
+            && r.yaw === 0xdc00 && r.scale === 0.75
+            && sounds.join() === `${BOBBLE}`,
+            `${t.settled} ${JSON.stringify(r)} ${sounds}`);
+      check("...and the corpse is left where it fell, not put on the flat",
+            o.pos.y === 49.17 - GRAV, `${o.pos.y}`);
+    }
+    {
+      const b = Math.fround(0.979029);
+      const c = Math.fround(0.203721);
+      const d = Math.fround(140.1687);
+      const z = -900;
+      const under = -(c * z + d) / b;
+      const { o, t, step } = corpse(1, -660, under + 0.5, z);
+      step();
+      check("sub-type 1, on the slope side: nothing while it is above the "
+            + "plane", t.settled === 0 && G.g_owl_ground_rings.length === 0,
+            `${o.pos.y} ${under}`);
+      o.pos.y = under + 0.01;
+      t.vy = 0;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("...and under it, a ring a unit below the corpse, pitched "
+            + "0x1000, and the thud",
+            t.settled === 1 && r?.y === o.pos.y - 1 && r.pitch === 0x1000
+            && r.yaw === 0xdc00 && sounds.join() === `${BOBBLE},${THUD}`,
+            `${t.settled} ${JSON.stringify(r)} ${sounds}`);
+    }
+
+    // Sub-type 2: an eight-step stair in a box, and a floor at -36.
+    {
+      // z -1107.9 is step n = 2 of `-1098.7 - 3.7666 (n + 1)`: -26.
+      const { o, t, step } = corpse(2, -1120, -25.99, -1108, 0.2, 0, 0.1);
+      step();
+      check("sub-type 2, on a step in its box: onto it, x-0.5 on all three, "
+            + "0x600 on the spin, and the thud",
+            o.pos.y === -26 && t.vy === -GRAV * -0.5 && t.vx === 0.2 * -0.5
+            && t.vz === 0.1 * -0.5 && t.bounced === 1
+            && t.spin === -729 + 0x600 && t.settled === 0
+            && sounds.join() === `${THUD}`,
+            `${o.pos.y} ${t.vy} ${t.vx} ${t.vz} ${t.spin} ${sounds}`);
+      o.pos.y = -25.99;
+      t.vy = 0; t.vx = 0.2; t.vz = 0.1;
+      sounds.length = 0;
+      step();
+      check("...and the second time only its fall is turned: nothing "
+            + "across, no thud",
+            o.pos.y === -26 && t.vy === -GRAV * -0.5 && t.vx === 0.2
+            && t.vz === 0.1 && sounds.length === 0,
+            `${o.pos.y} ${t.vx} ${t.vz} ${sounds}`);
+    }
+    {
+      const { o, t, step } = corpse(2, -1100, -35.99, -1100);
+      o.yaw = 0x2345;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 2 lands at -36 outside its box, with a ring at -35.98",
+            o.pos.y === -36 && t.settled === 1
+            && r?.y === Math.fround(-35.98) && r.yaw === 0x2345
+            && r.pitch === 0 && sounds.join() === `${BOBBLE},${THUD}`,
+            `${o.pos.y} ${JSON.stringify(r)} ${sounds}`);
+    }
+
+    // Sub-type 3: water.
+    {
+      const { o, t, step } = corpse(3, 10, -24.99, 20, 0.1, 0, 0);
+      step();
+      const s = G.g_owl_water_splashes[0];
+      check("sub-type 3 meets the water at -25: the splash at its x and z, "
+            + "SIBUKI8, and no ring",
+            t.settled === 1 && s?.x === o.pos.x && s.z === o.pos.z
+            && s.y === -25 && G.g_owl_ground_rings.length === 0
+            && sounds.join() === `${SIBUKI}`,
+            `${t.settled} ${JSON.stringify(s)} ${sounds}`);
+      check("...and is not stopped at the surface",
+            o.pos.y === -24.99 - GRAV, `${o.pos.y}`);
+      const y1 = o.pos.y;
+      step();
+      check("...it sinks on through it", o.pos.y === y1 - Math.fround(0.03),
+            `${o.pos.y}`);
+      OwlEffectsTick(rng);
+      check("...and the splash it made runs",
+            G.g_owl_water_splashes.length === 1
+            && G.g_owl_water_splashes[0].shown === 0,
+            `${G.g_owl_water_splashes.length}`);
+    }
+  }
+
+  {
+    // The rest of the death path.
+    const rng = new Rng(73);
+    const events = scene(0, rng);
+    G.g_players_in_play = 2;
+
+    // A bullet on a sub-type-0 owl before frame 682 is kept: nothing in the
+    // class clears `obj+0x34` bit 3, so the owl dies the frame the guard lifts.
+    const o = ActorSpawn(0xa500, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 0, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    G.g_cam_path_frame = 100;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(o, frame(rng, events));
+    check("an early bullet on a sub-type-0 owl is kept",
+          t().state !== OwlState.Dead && (o.flags & ActorFlag.Hit) !== 0,
+          `${OwlState[t().state]} 0x${o.flags.toString(16)}`);
+    G.g_cam_path_frame = 700;
+    OwlUpdateAndResolveShot(o, frame(rng, events));
+    check("...and kills it the frame 682 is passed, with no second shot",
+          t().state === OwlState.Dead, OwlState[t().state]);
+
+    // The shot test: every frame alive, the death frame too, never a corpse.
+    const p = ActorSpawn(0xa501, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(3, 4, 40), class43: { subtype: 1, member: 1 },
+    }, rng);
+    G.g_shot_test_list = [];
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("a live owl files itself for the shot test, at its own point",
+          G.g_shot_test_list.some((e) => e.at === p.at)
+          && p.shotCentre.x === p.pos.x && p.shotCentre.y === p.pos.y
+          && p.shotCentre.z === p.pos.z,
+          `${G.g_shot_test_list.length}`);
+    G.g_shot_test_list = [];
+    p.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer1;
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("...on the frame it dies as well",
+          (p as { owl: OwlTail }).owl.state === OwlState.Dead
+          && G.g_shot_test_list.some((e) => e.at === p.at),
+          `${G.g_shot_test_list.length}`);
+    G.g_shot_test_list = [];
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("...and never as a corpse",
+          !G.g_shot_test_list.some((e) => e.at === p.at),
+          `${G.g_shot_test_list.length}`);
+
+    // A despawned corpse gives nothing back: the death block already did,
+    // and the token it would match on is another group's.
+    G.g_class43_attack_token = 1;
+    const alive = G.g_enemies_alive;
+    const present = G.g_enemies_present;
+    ActorDespawn(p);
+    ActorDeadSweep(p, DeadSweep.Despawned);
+    check("a despawned owl corpse frees no token and retires nothing twice",
+          G.g_class43_attack_token === 1 && G.g_enemies_alive === alive
+          && G.g_enemies_present === present,
+          `${G.g_class43_attack_token} ${G.g_enemies_alive}/`
+          + `${G.g_enemies_present}`);
+
+    // The yaw's error runs -0x7FFF..+0x8000: a heading straight behind turns
+    // the positive way. The death frame steers on the owl's own motion,
+    // which standing still is heading 0.
+    const q = ActorSpawn(0xa502, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 1, member: 2 },
+    }, rng);
+    const qt = (q as { owl: OwlTail }).owl;
+    qt.prevX = q.pos.x;
+    qt.prevZ = q.pos.z;
+    q.yaw = 0x8000;
+    q.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(q, frame(rng, events));
+    check("an owl turning to a heading exactly behind turns the positive way",
+          qt.state === OwlState.Dead && q.yaw === 0x8000 + 3276, `${q.yaw}`);
+
+    // The throw: `g_camera_block_yaw_bams + 0x8000`. The block's yaw faces
+    // back at the viewer -- `g_camera_yaw_bams` is it turned half round -- so
+    // a camera looking down -z throws the corpse on down -z, away from it.
+    G.g_camera_block_yaw_bams = 0;
+    G.g_camera_yaw_bams = 0x8000;
+    const r = ActorSpawn(0xa503, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, -40), class43: { subtype: 1, member: 3 },
+    }, rng);
+    const rt = (r as { owl: OwlTail }).owl;
+    rt.vx = 0; rt.vy = 0; rt.vz = 0;
+    r.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(r, frame(rng, events));
+    check("a shot owl is thrown away from the camera, along the block's yaw "
+          + "turned half round",
+          rt.state === OwlState.Dead && Math.abs(rt.vx) < 1e-9
+          && Math.abs(rt.vz + 1) < 1e-9,
+          `${rt.vx} ${rt.vz}`);
+
+    // The two-player aim offset: the owl's horizontal distance from the
+    // block's eye, truncated, over sixty, a quarter turn off the block's yaw
+    // -- 0xC000 for player 0, 0x4000 for player 1.
+    G.g_players_in_play = 2;
+    G.g_camera_block_eye.x = 0;
+    G.g_camera_block_eye.y = 0;
+    G.g_camera_block_eye.z = 0;
+    const s = ActorSpawn(0xa504, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(30.5, 7, 40.2), class43: { subtype: 3, member: 3 },
+    }, rng);
+    const st = (s as { owl: OwlTail }).owl;
+    const sides = new Set<number>();
+    for (let i = 0; i < 8; i += 1) {
+      OwlPickTargetPlayerAndAimOffset(s, st, rng);
+      const want = 50 * Math.fround(1 / 60) * (s.attackPermit === 0 ? -1 : 1);
+      sides.add(s.attackPermit);
+      check(`the two-player aim offset for player ${s.attackPermit} is the `
+            + "distance over sixty, a quarter turn off the block's yaw",
+            Math.abs(st.aimX - want) < 1e-9 && Math.abs(st.aimZ) < 1e-9,
+            `${st.aimX} ${st.aimZ} want ${want}`);
+    }
+    check("...and both players are drawn", sides.size === 2,
+          `${[...sides]}`);
   }
 
   {

@@ -1,7 +1,8 @@
 /**
  * How a zombie closes the distance: the clips carry it.
  *
- * This was `[open]` for a long time and the answer was in the data all along.
+ * This was an open question for a long time and the answer was in the data
+ * all along.
  * None of the five ported class-0x30 states writes `obj+0x4C`, and
  * `ZombieStateWalkDistance` *measures* how far the actor has travelled from a
  * remembered point — which only makes sense if something other than the state
@@ -20,7 +21,7 @@
  * too slow.
  *
  * **The mechanism is `SkeletonApplyRootMotion` (`FUN_00410C50`)**, and it was
- * `[open]` here for a long time. It does not go through `obj+0x4C` at all: the
+ * an open question here for a long time. It does not go through `obj+0x4C` at all: the
  * draw walk reaches it as `ActorAdvanceMotion` -> `DrawSkinnedModelAndShadow`
  * -> `SkeletonDrawWalk` -> `SkeletonPoseRootFrame`, and it writes the rotated
  * delta straight onto `g_cur_actor`'s position. Its gate is motion-block
@@ -83,26 +84,37 @@
  * small numbers is not small** — 1.6x — so the grab landed 244 ticks after the
  * spawn instead of 158, long after its camera shot had cut away.
  *
- * **It scales the pose offset too, and the port scales neither that nor the
- * model.** `SkeletonApplyRootMotion`'s pose translate is pushed *after*
- * `MatrixScale(model+0x116C)`, so a character drawn at 0.9 offsets by 0.9 of
- * what its clip authored. `render/characters/pose.ts` applies the offset
- * unscaled -- deliberately, because nothing in this port scales a drawn
- * character at all: neither `hod2lib.characters` nor `render/characters.ts`
- * writes that field to a node, so every skinned actor is drawn at 1.0 --
- * except class 0x46's bat and wing, whose roots `render/characters/bat.ts`
- * scales whole (pose offset included, as the engine's stack does), because
- * `BatWingUpdate` seats the wing through the body's scaled node matrix.
- * Scaling the offset alone would be worse than leaving it, because the offset
- * would shrink while the model it offsets did not.
+ * **And the same factor sizes the whole drawn model.** The draw half of
+ * `SkeletonApplyRootMotion` pushes `MatrixScale(model+0x116C)` between the
+ * actor's rotation and the pose translate (`MOV EAX,[EDX+0x116C]; PUSH EAX`
+ * x3; `CALL MatrixScale` at `0x00410FEA`..`0x00410FF7`), and every bone the
+ * walk then emits hangs from that matrix. So one number, at one place on the
+ * stack, decides the size of the character, the pose offset (a character at
+ * 0.9 offsets by 0.9 of what its clip authored), where every bone is -- the
+ * attachments, the held items, the gore and the camera point ride the bones
+ * -- and where every hit centre is, because `SkeletonEmitNode` puts the
+ * centre through the same node matrix. The radius is the one part of a
+ * sphere the matrix does not reach, and `SkeletonWalkNode` (`FUN_004107E0`)
+ * scales it at build instead -- see `ActorBuildSkinnedModel` in
+ * `game/spawn.ts`.
  *
- * The honest size of it, from `tools/verify_root_pose.py`: of the four actors
- * whose clip root reaches the pose at all, the three `people.bin` clips 596,
- * 598 and 600 belong to `scale 0.9` types, so the engine's offset is **2.594
- * units and the port's is 2.882**. The fourth is class 0x21 at character type
- * 7, scale 1.0, where the two agree exactly. Making it faithful means scaling
- * every skinned actor's drawn size, which is a change to how the whole game
- * looks and not to this arithmetic. [diverges]
+ * `render/characters.ts` draws every skinned actor under `Actor.scale` in
+ * that same place -- the root node carries `T R S` and the pose group below
+ * it the pose translate -- so the three agree by construction: the size, the
+ * offset and the bones. The people are what it shows on: character types 32
+ * to 56 are all 0.9, and they are the people, whichever class runs them --
+ * 0x10, 0x24, 0x25 or 0x45 in the shipped placements. The three `people.bin`
+ * clips 596, 598 and 600, which pose their root rather than walk it, sit
+ * 2.593 units off it and not 2.882 (`tools/verify_root_pose.py`). The port
+ * drew every one of them at 1.0 -- every skinned actor but the bat, which
+ * was drawn at its own size as a special case of what is the general rule.
+ *
+ * Nothing else reads the field as a size. Its other readers
+ * (`SkeletonDrawNodeSlot`, `ActorDrawAttachedParts`, `DrawCharacterPartSlot`,
+ * `CivilianDrawHeldItems`'s model) pass it to `NoOpStub` (`FUN_0041EBB0`) and
+ * nothing more: the size reaches their draws through the bone matrix alone.
+ * `CivilianApplyMotionPose`, which multiplies it into a placement of its own,
+ * is unported.
  *
  * **The delta is turned by all three angles**, in the one order the gated
  * arm hard-codes, whatever the model's own draw order is:
@@ -134,29 +146,51 @@ import {
 } from "./matrix";
 import type { Vec3 } from "./vec";
 
+/** `0x3f19999a`, stored at `0x00410478` for character type 30. */
+const MODEL_SCALE_BAT = Math.fround(0.6);
+/** `0x3f333333`, stored at `0x00410484` for character type 31. */
+const MODEL_SCALE_BAT_WING = Math.fround(0.7);
+/** `0x3f666666`, stored at `0x0041046C` for character types 32..56. */
+const MODEL_SCALE_PEOPLE = Math.fround(0.9);
+
 /**
  * The character's size, as `ActorBuildSkinnedModel` (`FUN_00410440`) sets it.
  *
  * `[port-only]` — one arm of that routine rather than the whole of it: the
- * engine writes `model+0x116C` inline while building the model, and this port
- * has no model-build function to write it from.
+ * engine writes `model+0x116C` inline while building the model, and
+ * `ActorBuildSkinnedModel` in `game/spawn.ts` does the same with this; it is a
+ * function of its own because `makeActor` and the player's body
+ * (`game/player_body.ts`) need the same number without a build.
  *
  * Written to `model+0x116C` from the character type and nothing else, by a
  * jump table over types 30..56 with everything outside it at 1.0.
  * `[proved]` from the raw bytes at `0x00410451`: `MOVSX EAX,[ESI+0x60]`,
- * `ADD EAX,-0x1e`, `CMP EAX,0x1a`, `JA` to the 1.0 arm, then an index byte
- * table at `0x00410568` of `00 01 02 02 02 ...` selecting between
- * `0x3f19999a`, `0x3f333333` and `0x3f666666`.
+ * `ADD EAX,-0x1e`, `CMP EAX,0x1a`, `JA` to the 1.0 arm (`0x00410490`), then
+ * the index byte table at `0x00410568` -- `00 01` and twenty-five `02`s --
+ * into the jump table at `0x0041055C`, whose three arms store `0x3f19999a`
+ * (`0x00410478`), `0x3f333333` (`0x00410484`) and `0x3f666666`
+ * (`0x0041046C`). Those are floats, and so is this: `fround`, so that the 0.9
+ * the renderer draws with and the root motion steps by is the engine's
+ * 0.89999998, not a double the engine never had. `tools/verify_root_pose.py`
+ * holds the bytes.
+ *
+ * | types | scale | who |
+ * |---|---|---|
+ * | 30 | 0.6 | `zabat`, the bat (class 0x46) |
+ * | 31 | 0.7 | `zabat_wing`, its wing |
+ * | 32..56 | 0.9 | the people: every one of them, whichever class runs it |
+ * | anything else | 1.0 | the zombies, the throwers, the bosses, the animals |
  *
  * It scales the drawn model *and* the root motion, which is the same statement
  * twice: a smaller character takes smaller steps.
  */
 export function ActorModelScale(charType: number): number {
-  if (charType === 30) return 0.6;
-  if (charType === 31) return 0.7;
-  if (charType >= 32 && charType <= 56) return 0.9;
+  if (charType === 30) return MODEL_SCALE_BAT;
+  if (charType === 31) return MODEL_SCALE_BAT_WING;
+  if (charType >= 32 && charType <= 56) return MODEL_SCALE_PEOPLE;
   return 1.0;
 }
+
 
 /**
  * The root translation between two frames of a clip, wrapping across the loop.

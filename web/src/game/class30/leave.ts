@@ -22,6 +22,13 @@
  * assignment, and clearing it here would put the actor back under
  * `ZombieStateHoldAtRange`'s too-close retreat, which is a behaviour the exe
  * only ever gives an actor that has never swung.
+ *
+ * It leaves `ActorFlag.Committed` up, as `ZombieStateStrike`'s sub 0
+ * raised it before the draw that sent the actor here. That matches what a
+ * shot would find in the engine, whose actor on a zeroed entry goes on
+ * lunging toward a distance of 0.0 in state 3 -- still holding the bit, so
+ * still no stumble. The next strike raises it again and its retreat takes it
+ * down.
  */
 import type { ZombieActor } from "../actor";
 import { ReleaseAttackSlot } from "../combat/permits";

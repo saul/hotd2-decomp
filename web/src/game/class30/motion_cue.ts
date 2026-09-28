@@ -82,17 +82,25 @@ export function ActorSetMotion(obj: Actor, motion: number): void {
  * actor's *ordinary* motion:
  *
  * ```
- * 00455b54  6a00 6a00 ff77 04 57   SetCurrentActorMotionBlended(obj+0x194,
- * 00455b5b  e8..                     entry->lunge, 0, 10)
- * 00455b8a  6a05 6a00 ff37 57      FUN_004119A0(obj+0x194, entry->strike, 0, 5)
- * 00455bd6  0fbf0c4dd0074e00       MOVSX ECX, [g_motion_play_length + 0x1B4*2]
+ * 00455b3d  6a0a 6a00              PUSH 0xa ; PUSH 0x0         ; fade, start
+ * 00455b49  e8e276ffff             SetCurrentActorMotionBlended(obj+0x194,
+ *                                    entry->lunge, 0, 10)
+ * 00455b57  6a05 6a00              PUSH 0x5 ; PUSH 0x0
+ * 00455b63  e838befbff             FUN_004119A0(obj+0x194, entry->strike, 0, 5)
+ * 00455c02  0fbf144dd0074e00       MOVSX EDX, [g_motion_play_length + 0x1B4*2]
  * ```
  *
  * — `obj+0x1B4` and the play cursor at `obj+0x19C`, the same pair every other
  * state reads. The port gives the swing a channel of its own (`obj.action`,
  * `[port-only]`) because the poser needs it at full weight while the walk
  * keeps its clock; the engine needs no such thing, because writing the motion
- * **is** ending the swing.
+ * **is** ending the swing. The lunge is not on that channel: it is an
+ * ordinary motion to the engine, and the port plays it as one, through
+ * {@link SetCurrentActorMotionBlended}.
+ *
+ * (This listing used to put the lunge's call at `0x00455B54`, which is the
+ * strike branch's first instruction, and the strike's at `0x00455B8A`, which
+ * is the `ActorPlayHitVoice` call after it.)
  *
  * So both primitives that write that track end the one-shot, which is the
  * whole of **B5**: `ZombieOnShot` (`FUN_00453EB0`) sets state 6 on the frame
@@ -187,7 +195,10 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
  * track's, `fade + 1` frames on the start frame counting the frame of the
  * call; see {@link ActorRestartFade}. That is the engine's count of **draws**
  * on the start frame. Its states see it once more, `fade + 2` times, because
- * `EnemyThrowerUpdate` runs the state before `ThrowerAdvanceMotion` draws, so
+ * `EnemyThrowerUpdate` runs the state before `ThrowerAdvanceMotion` draws --
+ * and `EnemyZombieUpdate` (`FUN_004533F0`) its state at `0x00453434` before
+ * `ZombieAdvanceMotion` at `0x00453457`, for the swing `ZombieStateStrike`
+ * sets through this, whose hit waits `fade + 1` frames on it -- so
  * a state reads the cursor the previous frame's draw computed -- where the
  * port advances its clocks before its states. That puts every cursor a port
  * state reads one tick ahead of the engine's on every frame but the one that

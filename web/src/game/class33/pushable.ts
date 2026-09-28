@@ -87,10 +87,16 @@ const SCENERY_SEEDED_BIT = 0x1;
 
 /** The tenth of the penetration a frame, as class 0x30's push applies. */
 const PUSH_FRACTION = 0.1;
-/** ...and the multiplier while the **pusher** is airborne. */
-const PUSH_AIRBORNE = 1.8;
-/** `TEST 0x18000000` — either of the pusher's two airborne bits. */
-const PUSHER_AIRBORNE_EITHER = 0x18000000;
+/** ...and the multiplier while the **pusher** holds either boost bit. */
+const PUSH_BOOST = 1.8;
+/**
+ * `TEST ECX, 0x18000000` at `0x00433D11`, on the **pusher's** `obj+0x34`.
+ * The pusher is a class-0x30 actor, and on that class `0x10000000` is
+ * `ActorFlag.Committed` -- a zombie in its strike -- and `0x8000000` is the
+ * same unanswered bit `class30/ground.ts` notes. This used to say "either of the pusher's two airborne bits"; see
+ * `PUSH_BOOST_BITS` in `class30/ground.ts`.
+ */
+const PUSHER_BOOST_BITS = 0x18000000;
 
 /** `tail+0x04`'s "no shot mesh", which is what makes the object pushable. */
 const SHOT_MESH_NONE = -1;
@@ -126,8 +132,8 @@ export function ScriptedPushableSyncSphere33(obj: Actor): void {
  * Three moves, in this order, each followed by a re-sync:
  *
  * 1. the push another actor recorded — a tenth of `obj+0x13C` along
- *    `obj+0x140..0x148`, times 1.8 when the **pusher** carries either airborne
- *    bit, on all three axes. `obj+0x138` is then cleared, so one recorded push
+ *    `obj+0x140..0x148`, times 1.8 when the **pusher** carries either of
+ *    `0x18000000`, on all three axes. `obj+0x138` is then cleared, so one recorded push
  *    moves the object once;
  * 2. a re-resolve against the actors, at a tenth of the depth and in **x and z
  *    only** — the object is never pushed up out of another. It is *nested*
@@ -135,7 +141,7 @@ export function ScriptedPushableSyncSphere33(obj: Actor): void {
  * 3. a resolve against the full collision set, at the **full** depth and on
  *    all three axes, and this one runs whether or not anything pushed.
  *
- * The fraction and the airborne multiplier are `ZombiePushOutOfWorldAndActors`'
+ * The fraction and the multiplier are `ZombiePushOutOfWorldAndActors`'
  * own, so an enemy walking into a chair displaces it at exactly the speed it
  * would displace another enemy.
  *
@@ -150,7 +156,7 @@ export function ScriptedPushableApplyPush33(obj: ScriptedSceneryActor): void {
   if (obj.pushedBy >= 0) {
     const by = ActorByAt(obj.pushedBy);
     let f = obj.pushDepth * PUSH_FRACTION;
-    if (by && (by.flags & PUSHER_AIRBORNE_EITHER)) f *= PUSH_AIRBORNE;
+    if (by && (by.flags & PUSHER_BOOST_BITS)) f *= PUSH_BOOST;
     obj.pos.x += obj.pushNormal.x * f;
     obj.pos.y += obj.pushNormal.y * f;
     obj.pos.z += obj.pushNormal.z * f;

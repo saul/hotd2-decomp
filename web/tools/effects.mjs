@@ -154,7 +154,7 @@ try {
     await page.waitForTimeout(120);
   }
   console.log(`  miss  ${miss || "(every shot in the volley hit flesh)"}`);
-  check("the muzzle flash is off by default", /flash 0/.test(miss), miss);
+  check("the muzzle flash is on by default", /flash [1-9]/.test(miss), miss);
   check("...and throws a round", /tracer [1-9]/.test(miss), miss);
   // Only meaningful where the script has selected some collision.
   // `set_collision_set_full` is an opcode like any other, and between two of
@@ -171,12 +171,12 @@ try {
   }
   await page.screenshot({ path: resolve(SHOTS, "effects_miss.png") });
 
-  // ...and on, which is what the toggle is for.
+  // ...and off, which is what the toggle is for.
   await toggle("Muzzle flash");
   await pull(page, box.x + box.width / 2, box.y + box.height * 0.7);
   await page.waitForTimeout(50);
-  const lit = await row("effects");
-  check("...and on when the toggle is", /flash [1-9]/.test(lit), lit);
+  const dark = await row("effects");
+  check("...and off when the toggle is", /flash 0/.test(dark), dark);
   await page.screenshot({ path: resolve(SHOTS, "effects_muzzle.png") });
   await toggle("Muzzle flash");
 

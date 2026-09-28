@@ -979,9 +979,14 @@ is that list now, and the camera lives entirely inside it:
   dequeues at most one action a frame. A `cam_play` starts the frame after it is
   queued, a `wait_queued_events_done` passes on the frame the ring is empty, and
   a skip ends a play where it stands.
-* `UpdateSceneViewAndLight` builds the view from the block's **angles**, with
-  the shake's nod, into `G.g_camera_view_to_world` / `g_camera_world_to_view`,
-  and stamps the scene state as entered. The renderer draws that matrix.
+* `UpdateSceneViewAndLight` builds each block's view from its **angles**, with
+  the shake's nod on the block `g_camera_index` names, and stamps the scene
+  state as entered. The renderer draws that block's matrix, and the host's
+  view seams read it: **block 2 under scene state (1, 3)**, whose installer
+  `CameraInstallViewAngles` writes the index 2, block 0 once a starter's
+  `CameraResetForPathShot` puts 0 back. Block 2 is block 0's eye aimed at
+  block 0's look-at, refilled every frame (`EvtRunQueuedActionsSyncViewBlock`),
+  so a cutscene is drawn looking where the look-at says. `[proved]`
 * The scene state's hook writes the **gameplay eye** `g_camera_eye` -- the
   `-15` is its, not the drawn camera's -- and, on a stashed rail, the deferred
   pose block. The rail pauses while the screen shakes or nobody is in play.
@@ -995,14 +1000,22 @@ is that list now, and the camera lives entirely inside it:
   after that. The camera is two frames behind the room, as the exe's is.
 
 **What flies the camera has to write angles, or say why it does not.** The
-view is the block's angles, so a routine that moves the eye and the target and
-stops there moves the camera without turning it. The exe's routines that aim by
+view is a block's angles, so a routine that moves block 0's eye and target and
+stops there moves block 0 without turning it. The exe's routines that aim by
 look-at all call `CamBlockSetAnglesFromLookAt` (its eleven callers include
 Strength's cues and Judgment's death orbit, and the port's now do too). Two
 fly the camera without it, and the port keeps that: the boss-name banner and
 class 0x14's cut write eye and target through `CamEvalPath7`, which writes
-nothing else, so their flights carry the eye and keep the heading they found.
-The Tower writes the yaw and pitch itself. `[proved]`
+nothing else. **What that looks like depends on the drawn block.** Drawn from
+block 0 the flight carries the eye and keeps the heading; under scene state
+(1, 3) it is drawn from block 2, which is aimed at block 0's look-at every
+frame, so the camera turns with the flight. Stage 1's banner -- JUDGMENT's,
+on block 14's `wait_frames 300` after its last `cam_play` -- runs under
+(1, 3), and at `?stage=1&block=14&step=1&op=52&frame=830` the drawn camera
+now swings about 77 degrees of yaw across the 300 frames, onto the boss,
+where it had held one heading since the camera became two tasks
+(`3a28137a`, merged as `6706e323`). The Tower writes the yaw and pitch
+itself. `[proved]`
 
 A block change leaves the ring alone. `EvtAdvanceStepOrRoute` moves the block
 and the program pointer; only a scene's task list runs `EvtLoadBlockProgram`,
@@ -1063,10 +1076,21 @@ agree) found every ported one:
   block; **`KindedPropUpdate`**'s crack now makes the write at all.
 * **`OwlPickTargetPlayerAndAimOffset`**'s two-player offset takes the block's
   yaw and the owl's distance from the block eye, not the sway rate.
-* **The frog** reads camera block **2**'s yaw (`0x009A6418`), which is not the
-  view: `EvtRunQueuedActionsSyncViewBlock` copies block 0's pose into it only
-  during a (1, 3) view-angle turn. The port keeps block 2 for that read, with
-  the sync, the reset and the per-frame rebuild.
+* **The frog** reads camera block **2**'s yaw (`0x009A6418`) by address:
+  `EvtRunQueuedActionsSyncViewBlock` copies block 0's pose into it only
+  during a (1, 3) view-angle turn, and outside one it holds the last turn's
+  heading. Block 2 is also the drawn block during that turn (above), so the
+  port keeps it whole -- the sync, the reset, the nod and both matrices.
+
+The readers above take block 0's words, and the exe indexes most of them by
+`g_camera_index` (`[ECX*4 + 0x9a60d0]` with `ECX` the index times `0x69`).
+Under (1, 3) block 2's eye is block 0's, and its yaw is block 0's whenever
+block 0's angles came from its own look-at -- every `cam_play` -- so they
+agree there too, and differ only under the banner's flight or
+`hold_camera_preset`. Moving each onto the block the index names, as the
+view seams now read it (`CameraBlockViewToWorld` in `game/camera/view.ts`), is
+a sweep of its own, with each reader's addressing read first. `[open]` which
+of them run while the two differ.
 
 What the class-0x31 leaps, the grab and class 0x22 read is `g_camera_yaw_bams`
 itself, and those were right. `[proved]`
@@ -5323,6 +5347,22 @@ What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
 absolute turn on two other words, switched by an op no exported program
 uses), and Training's hook swap, which is declared on both updates.
 
+**Into the lens, not above it** (2026-09-28, evening). Until then every aimed
+head in the game craned up -- about 35 degrees on average over stage 1 block
+1, 58 at arm's length. `ActorHeadAimAngles` (`FUN_00453D70`) aims at
+`g_camera_eye` raised 15, and `g_camera_eye` is the *gameplay* eye, which the
+path hooks put 15 below the pose; the port added the 15 to the lens, the
+camera the renderer drew, and so aimed at a point 15 above the camera. It
+reads `g_camera_eye` now, as the exe does, and a head at the camera's height
+looks level into it. The record the aim starts from is also taken in the view
+of the frame that drew it (`HeadAimWords.headRecordView`) rather than the next
+frame's, so a moving camera displaces it for one frame as the engine's does.
+Measured on `?stage=1&block=1&mode=play&drive=1&seed=1`, 104 aimed samples
+over 900 frames: mean head pitch -6323 BAMS (-34.7 degrees, up) before and
++415 (+2.3, the head sitting a unit above the lens) after; the pitch the head
+should have to look into the lens is missed by 37.0 degrees on average before
+and 0.3 after.
+
 ### Stage 2 block 11: the fire strip ends
 
 Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:
@@ -6364,7 +6404,7 @@ missed. Meanings and confidence marks live in
 | `11` | `scene_state` | **done** | `EvtEnterSceneState(live major, operand)`, stamped; retires |
 | `12` | `set_update_routine` | shown | both players' update routine out of `0x00579E90`; retires |
 | `13` | `set_continuation` | n/a | defined, never used in shipped data |
-| `14` | `set_global` | **done** | `g_camera_index` — the block the view is built from; both shipped sites pass 0 |
+| `14` | `set_global` | **done** | `g_camera_index` — the block the view is built from; both shipped sites pass 0 (scene state (1, 3)'s installer writes the other value, 2) |
 | `15` | `set_flag` | **done** | `g_camera_ease_eye = 1`: the tracking tick eases the eye onto the pose a sixteenth a frame instead of snapping |
 | `20` | `hold_camera_preset` | **done** | persistent: the block's eye and angles from the preset table at `0x00576CF0` every frame, and `g_camera_free = 1`; operand 0 counts down, and 0 never does |
 | `21` | `finish_sequence` | **done** | the permits dropped, scene state (2, minor) entered unstamped, the minor's starter installed and the ring held (`advance = 0`); the starter runs next frame and installs `CameraDriverSelectMode` (4, 6) or `CameraDriverFromDeferredPose` (7) |

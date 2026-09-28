@@ -33,6 +33,7 @@ import { MatCopy, MatIdentity, MatrixGetTranslation, MatrixLoadIdentity,
          RADIANS_TO_BAMS } from "../matrix";
 import { vec3 } from "../vec";
 import { CameraUpdateHook } from "./driver";
+import { CAMERA_INDEX_VIEW_ANGLES } from "./view";
 import { CAMERA_EYE_DROP, CameraPlayStashedPath,
          CameraStepDeferredRailWithFrameExport, CameraStepRailTick }
   from "./rail";
@@ -85,16 +86,45 @@ export function EvtEnterSceneState(major: number, minor: number): void {
  * last two stamp the pair themselves. `[proved]`
  *
  * The cell is an installer: both players' camera hook
- * (`SceneStateInstallPlayerHooks`) and `g_camera_update_hook`. Every other
- * cell is `SceneStateInvalidHang` (`FUN_00402710`) and the shipped scripts
- * reach none of them, so they install nothing here.
+ * (`SceneStateInstallPlayerHooks`) and `g_camera_update_hook` -- and, for
+ * (1, 3) alone, `g_camera_index` ({@link CameraInstallViewAngles}). Every
+ * other cell is `SceneStateInvalidHang` (`FUN_00402710`) and the shipped
+ * scripts reach none of them, so they install nothing here.
  */
 export function EvtEnterSceneStateUnstamped(major: number, minor: number): void {
   G.g_scene_state_minor = minor;
   G.g_scene_state_major = major;
   SceneStateInstallPlayerHooks(major, minor);
-  const hook = SCENE_STATE_CAMERA_HOOKS[major * 9 + minor];
+  const cell = major * 9 + minor;
+  const hook = SCENE_STATE_CAMERA_HOOKS[cell];
   if (hook !== undefined) G.g_camera_update_hook = hook;
+  if (cell === SCENE_STATE_VIEW_ANGLES) CameraInstallViewAngles();
+}
+
+/** Scene state (1, 3)'s cell, `g_scene_state_table[12]` (`0x00576C44`). */
+const SCENE_STATE_VIEW_ANGLES = 1 * 9 + 3;
+
+/**
+ * The half of `CameraInstallViewAngles` — `FUN_004039D0`, scene state (1, 3)'s
+ * installer -- that no other installer has:
+ *
+ * ```
+ * 004039d0  MOV EAX, 0x415970
+ * 004039d5  MOV dword ptr [0x009c6f00], 0x2       ; g_camera_index = 2
+ * 004039df  MOV dword ptr [0x009c7080], 0x40c380  ; g_camera_update_hook = CameraFromViewAngles
+ * 004039e9  MOV [0x009a5e10], EAX                 ; both players' second hook
+ * 004039ee  MOV [0x009a5ce0], EAX
+ * ```
+ *
+ * The hook is {@link SCENE_STATE_CAMERA_HOOKS}'s and the players' words are
+ * `SceneStateInstallPlayerHooks`'; this is the index. **So every cutscene is
+ * drawn from camera block 2** -- block 0's eye aimed at block 0's look-at,
+ * `EvtRunQueuedActionsSyncViewBlock`'s copy -- until a starter's
+ * `CameraResetForPathShot` writes 0 back. The other seven installers write
+ * no index (`0x00403970`..`0x00403AB8`, read whole). `[proved]`
+ */
+export function CameraInstallViewAngles(): void {
+  G.g_camera_index = CAMERA_INDEX_VIEW_ANGLES;
 }
 
 /** The live cells of `g_scene_state_table`, by `major * 9 + minor`. */
@@ -155,7 +185,11 @@ const _q = vec3();
  * ```
  *
  * `g_camera_blocks` is the matrix `UpdateSceneViewAndLight` built earlier in
- * the frame. `[proved]` for the eye. The three angles are what `FUN_00401C50`
+ * the frame -- **block 0's, by address** (`PUSH 0x9a6040` at `0x0040C3E2`),
+ * and the angles are block 0's too (`[0x009a60d0]`, `[0x009a60cc]`,
+ * `[0x009a60d4]`), although under (1, 3) the frame is drawn from block 2. So
+ * the gameplay eye follows block 0's heading while the view turns to its
+ * look-at. `[proved]` for the eye. The three angles are what `FUN_00401C50`
  * recovers from the matrix the routine built out of the block's --
  * `(block.yaw - 0x8000) & 0xFFFF`, `-block.pitch` and `block.roll` --
  * `[likely]`: a decomposition of the rotation it was just given, and nothing

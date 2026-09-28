@@ -19,23 +19,23 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 102534 | 338 | engine |
+| `game/` | 102742 | 338 | engine |
 | `hod2lib/` | 19029 | 35 | engine |
-| `render/` | 14989 | 54 | render |
-| `app/` | 8533 | 29 | app |
+| `render/` | 14994 | 54 | render |
+| `app/` | 8554 | 29 | app |
 | `script/` | 4410 | 25 | engine |
 | `ui/` | 3181 | 24 | ui |
 | `bundle/` | 2727 | 11 | engine |
 | `core/` | 978 | 9 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **157845** | **528** | |
+| **total** | **158079** | **528** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2793
+* `game/globals.ts` — 2819
 * `game/actor.ts` — 2636
-* `app/main.ts` — 2575
+* `app/main.ts` — 2581
 * `hod2lib/bundle.ts` — 2322
 * `hod2lib/exetab.ts` — 2269
 
@@ -43,9 +43,9 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **229 of 297** annotated functions in the gameplay address ranges have a port (77%) |
+| Gameplay coverage | **230 of 297** annotated functions in the gameplay address ranges have a port (77%) |
 | Ported outside those ranges | 527 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 756 ported functions match `functions.tsv` under the same name |
+| Citations checked | 757 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **30 of 42** read classes have a module, covering 1541 of 1619 placements |
 | Declared `[diverges]` | **133** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **124** — questions the port and the exporter are honest about not having answered |
@@ -66,7 +66,7 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 52 
 | | |
 |---|---|
 | Named functions | 1373 in `ghidra/annotations/functions.tsv` |
-| Named globals | 673 in `ghidra/annotations/globals.tsv` |
+| Named globals | 675 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

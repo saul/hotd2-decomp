@@ -21,21 +21,21 @@ is in `tools/verify_all.py`, beside the command that runs it.
 |---|---:|---:|---|
 | `game/` | 88078 | 290 | engine |
 | `hod2lib/` | 18393 | 35 | engine |
-| `render/` | 14159 | 51 | render |
-| `app/` | 7663 | 28 | app |
+| `render/` | 14180 | 51 | render |
+| `app/` | 7901 | 28 | app |
 | `script/` | 4388 | 25 | engine |
-| `ui/` | 2693 | 21 | ui |
+| `ui/` | 2708 | 21 | ui |
 | `bundle/` | 2632 | 11 | engine |
 | `core/` | 949 | 9 | engine |
-| `audio/` | 878 | 2 | render |
+| `audio/` | 890 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **140324** | **473** | |
+| **total** | **140610** | **473** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2641
 * `game/actor.ts` — 2510
-* `app/main.ts` — 2219
+* `app/main.ts` — 2316
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
 

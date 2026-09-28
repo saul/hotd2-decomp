@@ -43,10 +43,10 @@
  * WebGL drawing into a detached element, which is a dead page that looks like
  * a graphics bug.
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import type { UiStore } from "./store";
 import { StoreContext } from "./store_context";
-import { useHasProjection } from "./useSlice";
+import { useHasProjection, useSlice } from "./useSlice";
 import { usePersisted } from "./persist";
 import { Crumbs } from "./panels/Crumbs";
 import { DebugSidebar } from "./panels/DebugSidebar";
@@ -118,6 +118,21 @@ function typingIn(target: EventTarget | null): boolean {
   return el.tagName === "INPUT"
     && !["button", "checkbox", "radio", "range"]
       .includes((el as HTMLInputElement).type);
+}
+
+/**
+ * `#overlay`, which knows one thing about the frame: whether it is boxed.
+ *
+ * The skip prompt, the branch bar and the game-over buttons hang off the
+ * bottom of the *picture*, which is the whole stage area when the frame fills
+ * it and a centred 4:3 box when it does not. A component rather than the root
+ * reading the field, so the switch re-renders this element and not the page.
+ */
+function Overlay({ children }: { children: ReactNode }) {
+  const boxed = useSlice((p) => p?.pillarbox) === true;
+  return (
+    <div id="overlay" className={boxed ? "boxed" : undefined}>{children}</div>
+  );
 }
 
 function Page(
@@ -200,7 +215,7 @@ function Page(
             </ErrorBoundary>
           </Viewport>
 
-          <div id="overlay">
+          <Overlay>
             <ErrorBoundary label="The game overlay" onError={onError}>
               <Crumbs debugOpen={debugOpen} onToggleDebug={toggleDebug} />
               {ready && <>
@@ -216,7 +231,7 @@ function Page(
               </>}
               <RotateHint />
             </ErrorBoundary>
-          </div>
+          </Overlay>
         </main>
 
         {debugOpen && (

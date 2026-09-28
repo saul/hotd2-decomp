@@ -47,7 +47,12 @@ export interface PlayerState {
   drive?: boolean;
 }
 
-const DEFAULTS: PlayerState = { stage: 2, original: false, mode: "play" };
+/**
+ * A page with nothing in its query string opens where the game does: stage 1,
+ * Arcade, playing. (It was stage 2 in Step mode, which was where debugging
+ * happened to be when the default was written.)
+ */
+const DEFAULTS: PlayerState = { stage: 1, original: false, mode: "play" };
 
 function num(v: string | null): number | undefined {
   if (v === null || v === "") return undefined;

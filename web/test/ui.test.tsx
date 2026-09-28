@@ -58,6 +58,7 @@ import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
 import { shutterCover } from "../src/hud/hud";
 import { readPersisted, writePersisted } from "../src/ui/persist";
+import { readViewPrefs } from "../src/app/viewprefs";
 import type { UiProjection } from "../src/ui/projection";
 
 let failures = 0;
@@ -293,6 +294,19 @@ check("every control is in #overlay and none is in #viewport",
 check("the sound button says what it is, for the harnesses and for a reader",
       /id="sound"[^>]*aria-pressed="true"/.test(warm)
       || /aria-pressed="true"[^>]*id="sound"/.test(warm));
+// The trail is the brand and nothing else: the stage is the game's own title
+// card's to say, and the menu marks which one is open.
+const trail = warm.slice(warm.indexOf('class="crumb-trail"'),
+                         warm.indexOf("</button>", warm.indexOf('class="crumb-trail"')));
+check("the breadcrumb says HOTD2 and not the stage",
+      trail.includes("HOTD2") && !trail.includes("Stage") && !trail.includes("Block"),
+      trail);
+// Filling the window is the default. The bars over the picture follow the
+// frame, so `#overlay` carries whether it is boxed.
+check("the frame fills the window by default, and #overlay knows",
+      /<div id="overlay">/.test(warm)
+      && /<div id="overlay" class="boxed">/.test(render({ ...projection(),
+                                                          pillarbox: true })));
 
 const paused = renderIn({ ...projection(), started: true },
                         createElement(PauseScreen));
@@ -355,6 +369,13 @@ check("the player strip is a panel, open by default",
       && /<div id="hud" class="kv"/.test(side));
 check("the Track switch is gone: the gameplay camera is always on",
       !side.includes(">Track<") && !(("trackEnemies" as string) in TOGGLE_DEFAULTS));
+// The page is the game: nothing drawn over it that it did not ask for. The
+// rails and the spawn labels were on by default once.
+check("every debug overlay starts off",
+      TOGGLES.filter((t) => t.kind === "debug").every((t) => !t.on),
+      TOGGLES.filter((t) => t.kind === "debug" && t.on).map((t) => t.name).join(", "));
+check("...and so does every debug aid",
+      TOGGLES.filter((t) => t.kind === "aid").every((t) => !t.on));
 
 // The script and the feed are tabs, and a tab that is not showing renders
 // nothing -- so they are rendered here the way the tab would.
@@ -608,6 +629,31 @@ console.log("\nOne key per preference:\n");
         opened.includes('id="debug"') && opened.includes('class="debug-open"')
         && !inOrder(opened, ["stagearea", "debug"]),
         "the harnesses read the panels, and open the sidebar through this key");
+
+  // The 4:3 switch is in the Scene panel with the light, fog and filter --
+  // rendered once the panel's fold is open, which is the same key scheme.
+  store.set("hod2.ui.panel-scene", "true");
+  const scene = renderIn({ ...projection(), pillarbox: true },
+                         createElement(DebugSidebar, { onClose: () => {} }));
+  check("the Scene panel has the 4:3 switch, and it follows the projection",
+        /<input type="checkbox" checked=""\/>\s*4:3 frame/.test(scene),
+        scene.slice(scene.indexOf("view-settings"), scene.indexOf("view-settings") + 400));
+
+  // An old save held every overlay's default as if chosen: every setting was
+  // written whenever one moved. Read back as a choice, `rails: true` would put
+  // the camera line straight back over the game. So a save from before
+  // version 2 keeps its game switches and forgets its overlay ones.
+  (globalThis as unknown as { window: unknown }).window = globalThis;
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ toggles: { rails: true, spawns: true, sky: false } }));
+  const old = readViewPrefs().toggles;
+  check("an old save's overlays are forgotten and its game switches kept",
+        !("rails" in old) && !("spawns" in old) && old.sky === false,
+        JSON.stringify(old));
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 2, toggles: { rails: true } }));
+  check("...and a new save's overlays are a choice, and kept",
+        readViewPrefs().toggles.rails === true);
 
   // A browser set to block site data throws on the accessor. A layout
   // preference is not worth a blank page.

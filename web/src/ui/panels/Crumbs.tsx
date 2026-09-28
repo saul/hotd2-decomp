@@ -1,16 +1,16 @@
 /**
  * The breadcrumb menu: the one piece of chrome that sits over the game.
  *
- * `≡ HOTD2 › Stage 2 › Block 7` in the top-left corner, and a click on it
- * opens everything the page offers that is not debugging: which stage, where
- * it opens, Original Mode, a restart, the bundle screen, and the debug
- * sidebar. It replaced a top bar and a bottom bar of controls that had grown
- * one debugging need at a time, until the game was the smallest thing on the
- * page.
+ * `≡ HOTD2` in the top-left corner, and a click on it opens everything the
+ * page offers that is not debugging: which stage, where it opens, Original
+ * Mode, a restart, the bundle screen, and the debug sidebar. It replaced a top
+ * bar and a bottom bar of controls that had grown one debugging need at a
+ * time, until the game was the smallest thing on the page.
  *
- * The trail is the menu's button, not a row of links: a stage is not a place
- * you navigate *into*, it is the one thing on screen, so the crumbs say where
- * you are and the menu is how you go somewhere else.
+ * The trail used to go on -- `› Stage 2 › Block 7` -- and that is the one
+ * thing the game already says itself, on its own title card, so it went: over
+ * the game the pill is as small as it can be. The menu marks which stage is
+ * open.
  *
  * Every item is a command except two. Whether the menu is open is this
  * component's own state, and whether the debug sidebar is open belongs to
@@ -34,9 +34,6 @@ export interface DebugToggle {
 export function Crumbs({ debugOpen, onToggleDebug }: DebugToggle) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLElement>(null);
-  const stage = useSlice((p) => p?.stage);
-  const entries = useSlice((p) => p?.entries);
-  const entry = useSlice((p) => p?.entry);
   const stale = useSlice((p) => p?.bundleStale) === true;
 
   // Dismissed by a press anywhere else, and by Escape. `pointerdown` rather
@@ -73,14 +70,6 @@ export function Crumbs({ debugOpen, onToggleDebug }: DebugToggle) {
               onClick={() => setOpen(!open)}>
         <Burger />
         <span className="crumb brand">HOTD2</span>
-        {stage !== undefined && <>
-          <span className="sep" aria-hidden="true">›</span>
-          <span className="crumb">Stage {stage}</span>
-        </>}
-        {entries && entries.length > 1 && entry !== undefined && <>
-          <span className="sep" aria-hidden="true">›</span>
-          <span className="crumb dim">Block {entry}</span>
-        </>}
         {stale && <span className="crumb-warn" aria-label="bundle out of date">!</span>}
       </button>
       {open && <CrumbMenu debugOpen={debugOpen}

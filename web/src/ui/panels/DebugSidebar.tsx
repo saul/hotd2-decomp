@@ -258,12 +258,20 @@ function ViewSettings() {
   const fogMode = useSlice((p) => p?.fogMode);
   const filterMode = useSlice((p) => p?.filterMode);
   const anisoLimit = useSlice((p) => p?.anisotropyLimit) ?? 1;
+  const boxed = useSlice((p) => p?.pillarbox);
   // Controlled selects with nothing to be controlled by yet would be
   // uncontrolled for one commit and controlled for the next.
   if (lightMode === undefined || fogMode === undefined
       || filterMode === undefined) return null;
   return (
     <div className="view-settings" id="view-settings">
+      <label className="view-box"
+             title="Box the frame to the game's own 4:3. The projection is a compile-time 41.1 degrees vertical at 4:3, so filling a wider window keeps the vertical and shows more at the sides than the cabinet ever did. Off by default: the page is the game, and a phone held sideways is twice as wide as it is tall.">
+        <input type="checkbox" checked={!!boxed}
+               onChange={(e) => dispatch({ kind: "setPillarbox",
+                                           on: e.target.checked })} />
+        {" "}4:3 frame, as the cabinet
+      </label>
       <label title="The game bakes most illumination into textures and the per-mesh base colour, so unlit is the faithful baseline. 'Scene' adds the one directional light SetLightingDefaultSingle installs, with the direction, colour and ambient the script sets.">
         <span>Light</span>
         <select value={lightMode}

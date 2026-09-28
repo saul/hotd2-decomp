@@ -140,6 +140,17 @@ const PREF_COMMANDS: ReadonlySet<string> = new Set([
  */
 const THUMB_FRAMES = 420;
 
+/** Where a tab keeps what a reload should bring back. See `Player.resumeMark`. */
+const SESSION_KEY = "hod2.session";
+
+function readSessionMark(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export class Player implements PlayerView, PlayerCommands, PacerHost {
   private readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
@@ -762,23 +773,38 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // `app/pacer.ts` says they have to go in. It ends by asking for the first
     // frame, so the loop is turning for the whole of the fetch below.
     this.pacer.start(this.state);
+    await this.enter();
+  }
+
+  /**
+   * Open the stage the URL names -- or, on a first visit, the welcome.
+   *
+   * **A first visit** is a page with nothing to play and nothing to build
+   * from: no bundle served beside it and no install this browser remembers.
+   * The bundle screen is the answer, in its welcome form -- a paragraph, one
+   * folder to choose, and every stage in both modes built from it -- and when
+   * that is done this runs again, now with a bundle, and the page is in the
+   * stage the URL names: stage 1, for a page opened with nothing in its
+   * address. It used to reload the page instead, on the argument that the
+   * boot had given up before building a scene; but nothing the boot does is
+   * owed again except this, and a reload would drop the press that built it.
+   */
+  private async enter(): Promise<void> {
     // Both bundles are read, and which one a *stage* comes from is decided
     // per stage. See `app/bundles.ts`.
     await this.refreshStages();
     if (this.bundles.manifest === null && !this.canBuild) {
-      // Nothing to play and nothing to build from. The bundle screen is the
-      // answer to that, so it is offered rather than described -- the reason
-      // the server was refused is what it opens with.
       const why = this.bundles.refusals.get("server")
         ?? this.bundles.refusals.get("cache") ?? "no bundle";
+      // Under the welcome, for whoever dismisses it with devtools: the page
+      // says why there is nothing to play rather than spinning for ever.
       this.fail(`${why}\n\nBuild one from your own copy of the game.`);
       showExportScreen({
+        welcome: true,
         reason: why,
         onDismiss: null,
         onBuilt: () => {},
-        // The one place a reload is still right: `start` gave up before it
-        // built a scene, so there is nothing to swap a stage into.
-        onReady: () => { window.location.reload(); },
+        onReady: () => { void this.enter(); },
       });
       return;
     }
@@ -790,6 +816,62 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
     await this.loadStage();
     this.setMode(this.state.mode);
+    this.resumeAfterReload();
+  }
+
+  /**
+   * What this tab was doing before it reloaded: `"playing"`, `"started"`
+   * (paused, but past the start screen), or null. Read once, in the
+   * constructor, before the first frame can overwrite it.
+   *
+   * **A reload is not a new visit.** Vite reloads the whole page for every
+   * edit under `src/`, and a player that came back under the start screen,
+   * paused, every time a file was saved could not be worked on with the game
+   * running beside the code. The URL already brings back the stage, the
+   * address and the mode; this brings back the transport. Per tab --
+   * `sessionStorage` -- so a new tab, or tomorrow, starts at the start screen
+   * as a first visit should.
+   */
+  private readonly resumeMark: string | null = readSessionMark();
+  /** The mark as last written. See {@link noteSession}. */
+  private sessionMark: string | null = null;
+  /**
+   * Whether {@link resumeAfterReload} has had its turn. Until it has, the old
+   * mark is left where it is: frames run for the whole of the stage load, and
+   * one that wrote "not started" over it would lose it to a second reload
+   * made before the first had finished loading.
+   */
+  private resumed = false;
+
+  /**
+   * Put the transport back the way the tab left it. Never under a harness:
+   * `?drive=1` and `?freeze=1` own the clock, and a driver that pressed Space
+   * expects the page it opened, not the one it left.
+   */
+  private resumeAfterReload(): void {
+    if (this.resumed) return;
+    this.resumed = true;
+    const mark = this.resumeMark;
+    if (!mark || this.state.drive || this.state.freeze) return;
+    // Past the start screen: this tab pressed Start already. Its sound comes
+    // back on, held until the first press -- the browser's rule, and any press
+    // lifts it (`Bgm.unblock`). Fullscreen and the motion sensors cannot come
+    // back without a press, and a phone gets them from the next Start.
+    this.started = true;
+    this.soundOn();
+    if (mark === "playing" && this.state.mode === "play") this.playing = true;
+  }
+
+  /** Write what a reload should bring back, when it changes. Once a frame. */
+  private noteSession(): void {
+    if (!this.resumed) return;
+    const mark = !this.started ? null : this.playing ? "playing" : "started";
+    if (mark === this.sessionMark) return;
+    this.sessionMark = mark;
+    try {
+      if (mark) sessionStorage.setItem(SESSION_KEY, mark);
+      else sessionStorage.removeItem(SESSION_KEY);
+    } catch { /* storage blocked: a reload is a fresh visit, as before */ }
   }
 
   /**
@@ -1065,6 +1147,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       void this.loadStage();
     });
 
+    // Any press lets held audio go. The browser counts a shot, a key or a
+    // menu item alike as the gesture it wants, and a page that came back from
+    // a reload mid-game (`resumeAfterReload`) should have its sound back on
+    // the first thing the player does, not on a press of the speaker. Capture
+    // phase, so a control that stops its own event still counts.
+    for (const kind of ["pointerdown", "keydown"] as const) {
+      window.addEventListener(kind, () => this.bgm.unblock(), true);
+    }
+
     // The saved preferences go back through `runCommand`, which is the same
     // path a click takes -- there is deliberately no second way for a setting
     // to take effect, because two would drift.
@@ -1201,8 +1292,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private unlock(): void {
     if (this.started) return;
     this.started = true;
-    if (this.mutePref === undefined && this.bgm.muted) this.bgm.setMuted(false);
+    this.soundOn();
     unlockDevice(this.tilt);
+  }
+
+  /** Sound on, for somebody who has never said otherwise. */
+  private soundOn(): void {
+    if (this.mutePref === undefined && this.bgm.muted) this.bgm.setMuted(false);
   }
 
   /**
@@ -2062,6 +2158,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // holds when nothing moved, so `publish` decides with an identity test.
     // There is no key, no counter and no list of fields to keep in step.
     this.ui.publish(buildProjection(this, this.ui.getSnapshot()));
+    this.noteSession();
   }
 
   /** Put one back. Returns the reason it was refused, or null. */

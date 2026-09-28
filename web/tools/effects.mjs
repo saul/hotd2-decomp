@@ -52,11 +52,24 @@ const openAll = async () => {
   }
   await page.evaluate(() => document.activeElement?.blur?.());
 };
+/**
+ * The value beside `label` in the sidebar, waiting up to two seconds for it.
+ *
+ * A panel opened by `openAll` renders its rows on the `<details>` element's
+ * `toggle` event, and the browser dispatches that as a task after the click
+ * -- so a read made straight after the clicks raced the render, and lost it
+ * often enough to fail three checks with "(no row)".
+ */
 const row = async (label) => {
-  const rows = (await page.locator("#debug").innerText().catch(() => ""))
-    .split("\n").map((r) => r.trim());
-  const i = rows.indexOf(label);
-  return i < 0 ? "(no row)" : rows[i + 1] ?? "";
+  const t0 = Date.now();
+  for (;;) {
+    const rows = (await page.locator("#debug").innerText().catch(() => ""))
+      .split("\n").map((r) => r.trim());
+    const i = rows.indexOf(label);
+    if (i >= 0) return rows[i + 1] ?? "";
+    if (Date.now() - t0 > 2000) return "(no row)";
+    await page.waitForTimeout(100);
+  }
 };
 
 let bad = 0;

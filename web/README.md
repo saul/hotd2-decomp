@@ -26,20 +26,21 @@ npm run export -- --game-dir "/path/to/THE HOUSE OF THE DEAD 2" --all
 npm run dev          # http://localhost:5173
 ```
 
-**Or build one from inside the page.** Choose **Rebuild bundle…** in the menu --
-or open the client with no bundle at all, which goes straight there. Choose the
-install folder, pick a stage and a mode, and the export runs in a worker into
-the Origin Private File System. It survives a reload and downloads as a zip
-that unpacks into `extract/player/`. `src/hod2lib/` is the library both paths
-run, and `docs/TS_PORT.md` says what "the same bundle" means down to the byte.
+**Or build one from inside the page.** Open the client with no bundle at all
+and it greets you with one button: choose the folder that holds `Hod2.exe`,
+and it builds all six stages in both Arcade and Original Mode (about 35
+seconds here) and drops you into stage 1. The export runs in a worker into the
+Origin Private File System; it survives a reload and downloads as a zip that
+unpacks into `extract/player/`. **Rebuild bundle…** in the menu opens the full
+screen -- one stage, one mode, the zip, the cache. `src/hod2lib/` is the
+library both paths run, and `docs/TS_PORT.md` says what "the same bundle"
+means down to the byte. A stage neither bundle holds is also built on demand
+when the menu picks it.
 
-**One stage at a time, and the rest on demand.** Every stage in both modes is
-431 MB and the better part of an hour, which is a strange thing to ask for
-before you have seen anything. So the screen builds the one stage you chose,
-and picking a stage from the menu that neither bundle holds decodes it then,
-keeps it, and plays it -- about a minute, once. The stage picker therefore
-offers all six as soon as the page knows an install, whether or not they exist
-yet.
+One gap: sounds are fetched from the server, which finds them through the game
+directory a *served* bundle's manifest names. A bundle built only in the
+browser has no such server, so it plays silently until the page learns to
+read sounds from the chosen folder (`tools/first_visit.mjs` counts the 404s).
 
 A browser holds two bundles at once: the one the page was served out of
 `extract/player/`, and the one it built for itself. Which one a *stage* comes
@@ -110,34 +111,41 @@ lands at 379 KB as JSON, which gzips hard.
 
 ## Playing it
 
-The page is the game: the 4:3 frame fills the window, and a stage opens under
-a **Start** button — the press a browser wants before it will play sound, go
-fullscreen or hand over a phone's motion sensors. Everything else is in two
-places:
+The page is the game: the frame fills the window, stage 1 is where it opens,
+and a stage opens under a **Start** button — the press a browser wants before
+it will play sound, go fullscreen or hand over a phone's motion sensors. No
+debug overlay is on until you turn it on. Everything else is in two places:
 
-* **The menu** — `≡ HOTD2 › Stage N` in the top-left corner: pick a stage, the
-  block it opens at (stages 3 and 4 have two), Original Mode, restart, rebuild
-  the bundle, and the debug sidebar.
+* **The menu** — `≡ HOTD2` in the top-left corner: pick a stage, the block it
+  opens at (stages 3 and 4 have two), Original Mode, restart, rebuild the
+  bundle, and the debug sidebar.
 * **The debug sidebar** — `` ` `` or the menu: Play or free roam, pause, skip
-  and kill; then the inspection panels (light, fog and texture filtering are
-  in Scene), the script (click an instruction to seek to it, which pauses
-  there) and the event feed.
+  and kill; then the inspection panels (the 4:3 frame switch, light, fog and
+  texture filtering are in Scene), the script (click an instruction to seek to
+  it, which pauses there) and the event feed.
+
+The sidebar, its tab and its folds, the stage and address, and whether the
+game was running all survive a reload -- so a Vite reload after an edit comes
+back to the game where it was.
 
 | Mode | Key | What it is |
 |---|---|---|
-| **Play** | `1` | the game, at 60 Hz, pausing at every branch point |
+| **Play** | `1` | the game, at 60 Hz; "Pause at branches" in the Route panel holds each branch |
 | **Free roam** | `2` | orbit and fly, detached from the rail |
 
 Space plays and pauses, `Enter` skips a cutscene, `R` or the right button
 reloads, `S` is the pad's Start, `←` rewinds half a second, `` ` `` toggles
 the sidebar.
 
-**On a phone**, hold it sideways (the page asks you to). A tap is a shot; a
-tap in the black bars beside the 4:3 frame is a shot *off the screen*, which
-is how the arcade gun reloads; and so is a sharp flick of the phone — top edge
-towards you or away. The flick needs the motion sensors, which a browser only
-exposes over HTTPS (or `localhost`), and iOS asks permission for them when you
-press Start.
+**On a phone** (iOS Safari or Android Chrome), hold it sideways — the page
+asks you to, and on Android Start also goes fullscreen and locks landscape. A
+tap is a shot. To reload, flick the phone sharply (top edge towards you or
+away), or tap with a second finger while the first is down, or, with the 4:3
+frame on, tap the black bar beside it: all three are a pull *off the screen*,
+which is how the arcade gun reloads. The flick needs the motion sensors,
+which a browser only exposes over HTTPS (or `localhost`); iOS also asks
+permission when you press Start. A phone cannot build a bundle -- no mobile
+browser can open a folder -- so point it at a machine serving one.
 
 A **Skip** prompt appears in the corner of the frame whenever the script is
 inside a `set_skippable_region`, and it can be pressed when the shutter's
@@ -189,8 +197,10 @@ so is the event feed.
 
 - **The projection.** 41.100° vertical (`0x1D3B` BAMS), 4:3, near 0.8, far
   8000, from `SetupSceneProjection`. It is a compile-time constant for the
-  whole game — there is no zoom and no per-camera FOV — so the frame is always
-  pillarboxed to 4:3. Filling a wider window would widen every shot.
+  whole game — there is no zoom and no per-camera FOV. The page fills the
+  window by default, keeping the vertical FOV, so a wide window shows more at
+  the sides than the cabinet did; the Scene panel's **4:3 frame** switch boxes
+  it to exactly what the game framed.
 - **Hermite evaluation.** A transcription of `FUN_004040F0`, including its end
   behaviour: the game's binary search cannot leave the key array, so a time
   outside a curve extrapolates along the end segment rather than clamping.

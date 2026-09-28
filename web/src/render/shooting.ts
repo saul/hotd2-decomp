@@ -229,6 +229,20 @@ export class Shooting implements System {
       }
       // A finger, a pen and the left button all arrive here as button 0.
       if (e.button !== 0) return;
+      // **A second finger is a reload.** With the frame filling a phone there
+      // are no black bars to tap, and the flick (`app/device.ts`) needs motion
+      // sensors a browser may not grant -- plain `http://` on a LAN, or a
+      // refused permission prompt. The first finger is the trigger; one put
+      // down while it is still on the glass is a pull off the screen.
+      if (e.pointerType === "touch") {
+        const second = this.touches.size > 0;
+        this.touches.add(e.pointerId);
+        if (second) {
+          e.preventDefault();
+          this.onOffscreenPull();
+          return;
+        }
+      }
       // `preventDefault` stops the drag-select a click on the scene would
       // otherwise start. It also stops the **focus change** the browser would
       // have made, and that half has to be done by hand: without it a click on
@@ -241,11 +255,11 @@ export class Shooting implements System {
       if (active && active !== document.body) active.blur?.();
       const f = this.pointerAt(e);
       this.follow(f);
-      // **Off the frame is off the screen.** The frame is 4:3 and the window
-      // rarely is, so there are black bars either side of it -- and a gun
-      // pointed there is pointed off the screen, which is how the arcade gun
-      // reloads (`MouseGunResolvePull`, `FUN_0041EB30`). On a phone that is
-      // the reload a thumb can reach.
+      // **Off the frame is off the screen.** With the 4:3 frame on there are
+      // black bars beside it -- and a gun pointed there is pointed off the
+      // screen, which is how the arcade gun reloads (`MouseGunResolvePull`,
+      // `FUN_0041EB30`). Filling the window, there is nowhere off the frame
+      // to press and this never fires.
       if (!f.inside) {
         this.onOffscreenPull();
         return;
@@ -255,7 +269,14 @@ export class Shooting implements System {
     viewport.addEventListener("pointermove", (e) => {
       this.follow(this.pointerAt(e));
     });
+    // A finger lifting, or taken by the browser, is no longer down.
+    const lift = (e: PointerEvent) => { this.touches.delete(e.pointerId); };
+    viewport.addEventListener("pointerup", lift);
+    viewport.addEventListener("pointercancel", lift);
   }
+
+  /** The fingers on the glass right now, by pointer id. */
+  private readonly touches = new Set<number>();
 
   /** The crosshair onto the pointer, and the aim with it. */
   private follow(f: FramePoint): void {

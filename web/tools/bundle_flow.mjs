@@ -163,6 +163,13 @@ try {
   await openBundles();
   await page.waitForSelector(".export-card");
   check("one tile per stage", await page.locator(".export-tile").count() === 6);
+  // The labels are the screen's scan of both bundles, which lands a moment
+  // after it opens; until then the tiles say "checking…". Reading them at
+  // once read whichever the race gave -- it passed for months and then read
+  // six "not built" over a bundle serving two.
+  await page.waitForFunction(() => ![...document.querySelectorAll(
+    ".export-tile-note")].some((n) => n.textContent?.includes("checking")),
+    null, { timeout: 30_000 });
   const notes = await page.locator(".export-tile-note").allInnerTexts();
   check("each tile says whether that stage exists, and where",
         notes.filter((t) => t.trim() === "served").length === 2

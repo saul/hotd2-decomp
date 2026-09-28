@@ -553,24 +553,46 @@ how much of the player a click can reach; both counts are in
 
 ### The page is the game
 
-The rendered frame fills the window, pillarboxed to the game's own 4:3, and
-every piece of chrome is either **over** it or in a **debug sidebar** closed
-until it is asked for. The top and bottom bars that framed the view grew one
-debugging need at a time until the game was the smallest thing on the page;
-they went, and what was worth keeping from them moved:
+The rendered frame fills the window, and every piece of chrome is either
+**over** it or in a **debug sidebar** closed until it is asked for. The top
+and bottom bars that framed the view grew one debugging need at a time until
+the game was the smallest thing on the page; they went, and what was worth
+keeping from them moved:
 
-* **Over the game** (`#overlay`): the breadcrumb menu (stage, entry, Original
-  Mode, restart, the bundle screen, the sidebar), the speaker, the start and
-  pause screen, the skip prompt, the branch bar and the game-over buttons.
+* **Over the game** (`#overlay`): the breadcrumb menu -- `≡ HOTD2`, and in it
+  the stage, the entry, Original Mode, restart, the bundle screen and the
+  sidebar -- the speaker, the start and pause screen, the skip prompt, the
+  branch bar and the game-over buttons.
 * **In the debug sidebar** (`#debug`): Play or free roam, pause, skip and
-  kill; then three tabs — the inspection panels (light, fog and filtering in
-  Scene), the script, and the event feed. A tab that is not showing renders
+  kill; then three tabs — the inspection panels (the 4:3 switch, light, fog
+  and filtering in Scene; the branch variable and "Pause at branches" in
+  Route), the script, and the event feed. A tab that is not showing renders
   nothing, so a stage being played costs none of the script's rows.
 * **Gone:** the speed control, Step mode and the instruction steppers, the
-  frame scrubber, the 4:3 switch (the frame is always 4:3), Save and Load, and
-  the route graph, scopes, globals, inspector and rigs panels, with the
-  projection slices only they read. The gameplay camera's Track switch went
-  too: it is the game, not a view of it.
+  frame scrubber, Save and Load, and the route graph, scopes, globals,
+  inspector and rigs panels, with the projection slices only they read. The
+  gameplay camera's Track switch went too: it is the game, not a view of it.
+
+**Off by default, everything that is not the game.** The frame fills the
+window -- the vertical FOV is the game's, so a wide window shows more at the
+sides than the cabinet did, and the 4:3 switch is there for when what the
+game framed is the question. Every overlay (`ToggleSpec.kind === "debug"`)
+and every debug aid starts off; a saved preference from before that
+(`viewprefs.ts`, version 2) keeps its game switches and forgets its overlay
+ones, because every setting used to be written whenever one moved.
+
+**A first visit** -- nothing served, nothing remembered -- opens the bundle
+screen as a welcome: one paragraph and one button, which takes the game folder
+and builds all six stages in both modes (about 35 seconds on this machine),
+then puts the page in stage 1 without a reload. `tools/first_visit.mjs` drives
+it end to end against an empty server.
+
+**A reload is not a new visit.** Vite reloads the page for every edit, so the
+tab keeps what a reload should bring back: the sidebar, its tab and its folds
+in `localStorage` (`ui/persist.ts`), the stage and address in the URL, and
+whether the game was started and running in `sessionStorage`
+(`Player.resumeMark`) -- so a saved file comes back to the game running
+where it was, not to the start screen.
 
 **`#overlay` is a sibling of `#viewport`, not a child, and that is the input
 rule.** `render/shooting.ts` hears a press on `#viewport` natively, before any
@@ -579,13 +601,15 @@ also being a shot. Everything that can be pressed is in `#overlay`, which is
 `pointer-events: none` wherever it is empty, so a press anywhere else reaches
 the gun. `test:ui` asserts there is no `<button>` inside `#viewport`.
 
-**A shot is aimed through the canvas, not the viewport.** The canvas is the
-4:3 frame centred in the viewport, and the ray is built from the pointer's
-place in the canvas's rectangle. A press in the bars beside it is a pull *off
-the screen* — the gun's reload — so a phone reloads with a thumb in the black
-bar, or (`app/device.ts`) with a flick of the wrist. Fullscreen, a landscape
-lock and the motion sensors are all granted only inside a press, which is what
-the start screen is for; `app/device.ts` does all three from it.
+**A shot is aimed through the canvas, not the viewport.** With the 4:3 switch
+on, the canvas is a centred box inside the viewport, and the ray is built from
+the pointer's place in the canvas's rectangle; a press in the bars beside it
+is a pull *off the screen* — the gun's reload. On a phone the reloads are a
+flick of the wrist (`app/device.ts`), a second finger on the glass, and, when
+boxed, a thumb in the bar. Fullscreen, a landscape lock and the motion
+sensors are all granted only inside a press, which is what the start screen
+is for; `app/device.ts` does all three from it. Any press also lets held
+audio go (`Bgm.unblock`), which is what a reloaded page needs.
 
 The sidebar's open state is `ui/` state (`usePersisted`), not a command. The
 harnesses open it by setting that key before the page loads
@@ -1248,9 +1272,10 @@ imports, and about thirty methods of 15 to 35 lines. Twenty systems
 constructed and registered, the context built, the scope tree opened.
 
 Two ratios say more than the line count, and both are what to watch:
-`main.ts` holds **two** `addEventListener` calls, neither of them a control —
-the keyboard and the browser's back button — and every one of the player's
-commands is a case in one exhaustive switch.
+`main.ts` holds **three** `addEventListener` sites, none of them a control —
+the keyboard, the browser's back button, and the any-press that lets held
+audio go — and every one of the player's commands is a case in one
+exhaustive switch.
 
 The extractions that were worth making are the ones that named a seam rather
 than moved lines: `stage_load.ts`, `commands.ts`, `walker_host.ts`, `pacer.ts`,

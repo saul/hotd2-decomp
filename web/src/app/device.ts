@@ -22,9 +22,17 @@
  *   from the start screen's button and from nowhere a frame could reach.
  *
  * `devicemotion` needs a secure context: over plain `http://` on a LAN
- * address the event never fires and a tap in the side bars is the only
- * reload. `localhost` counts as secure; a phone pointed at a dev machine does
- * not, without HTTPS.
+ * address the event never fires, and a second finger (`render/shooting.ts`)
+ * is the reload that is left. `localhost` counts as secure; a phone pointed at
+ * a dev machine does not, without HTTPS.
+ *
+ * **The two phones differ in one call each.** iOS Safari asks permission for
+ * the motion sensors (`DeviceMotionEvent.requestPermission`) and has no
+ * element fullscreen or orientation lock, so the page's turn-your-phone notice
+ * is what holds it sideways. Android Chrome asks nothing for the sensors and
+ * honours `screen.orientation.lock` once the page is fullscreen, which is the
+ * order {@link unlockDevice} asks in. Both report `rotationRate` in degrees a
+ * second, and both deliver touches as pointer events.
  */
 
 /**

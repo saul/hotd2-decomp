@@ -32,13 +32,32 @@
  * `runCommand`, which is the same path a click takes.
  */
 import type { ToggleName } from "../ui/commands";
+import { TOGGLES } from "../ui/panels/Toggles";
 
 const KEY = "hod2.viewPrefs";
+
+/**
+ * What this file writes, so a reader can tell what an old save meant.
+ *
+ * **2**: the debug overlays start off. Every setting used to be saved whenever
+ * any one changed, so a browser that had ever moved the volume holds
+ * `rails: true` and `spawns: true` -- the old defaults, never chosen. Read as a
+ * choice they would put the camera line and the spawn labels straight back
+ * over the game, so a save from before 2 keeps its game switches and forgets
+ * its overlay ones.
+ */
+const VERSION = 2;
+
+/** The overlay switches, which a pre-2 save cannot be trusted about. */
+const OVERLAYS: ReadonlySet<string> =
+  new Set(TOGGLES.filter((t) => t.kind === "debug").map((t) => t.name));
 
 /** URL state, so never saved here. See the note above. */
 const NOT_SAVED: ReadonlySet<ToggleName> = new Set<ToggleName>(["allRegions"]);
 
 export interface ViewPrefs {
+  /** See {@link VERSION}. Absent in a save from before it existed. */
+  v?: number;
   toggles: Partial<Record<ToggleName, boolean>>;
   lightMode?: string;
   fogMode?: string;
@@ -73,7 +92,13 @@ export function readViewPrefs(): ViewPrefs {
     const v: unknown = raw ? JSON.parse(raw) : null;
     if (!v || typeof v !== "object") return { toggles: {} };
     const p = v as ViewPrefs;
-    return { ...p, toggles: p.toggles ?? {} };
+    const toggles = { ...(p.toggles ?? {}) };
+    if ((p.v ?? 1) < VERSION) {
+      for (const k of Object.keys(toggles)) {
+        if (OVERLAYS.has(k)) delete toggles[k as ToggleName];
+      }
+    }
+    return { ...p, toggles };
   } catch {
     return { toggles: {} };
   }
@@ -85,7 +110,8 @@ export function writeViewPrefs(p: ViewPrefs): void {
     if (!NOT_SAVED.has(k as ToggleName)) toggles[k as ToggleName] = on;
   }
   try {
-    window.localStorage.setItem(KEY, JSON.stringify({ ...p, toggles }));
+    window.localStorage.setItem(KEY,
+                                JSON.stringify({ ...p, v: VERSION, toggles }));
   } catch {
     /* quota, private mode, or site data blocked -- nothing to do */
   }

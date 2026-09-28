@@ -35,7 +35,10 @@ export interface ToggleSpec {
    *
    * `game` — the game itself draws it, and off is an inspection convenience.
    * `debug` — drawing this player invented, over the top. None of it changes
-   * what the game does, so none of it is in a snapshot.
+   * what the game does, so none of it is in a snapshot. **Every one starts
+   * off**: the page is the game, and an overlay is something you turn on to
+   * look at a question. The rails and the spawn markers used to start on,
+   * which put a camera line and a label over every stage anybody opened.
    * `aid` — a debug aid that makes the player **behave** unlike the game so
    * that something can be looked at. It is not drawing, so it is not `debug`,
    * and the game has no such switch, so it is not `game`: off is the engine,
@@ -63,7 +66,7 @@ export interface ToggleSpec {
 export const TOGGLES: readonly ToggleSpec[] = [
   { name: "allRegions", kind: "debug", label: "All regions", on: false, group: "scene",
     title: "Draw every region at once. Consecutive regions overlap heavily, so this is how the interpenetration becomes legible as a deliberate mechanism rather than an export bug." },
-  { name: "rails", kind: "debug", label: "Rails", on: true, group: "camera",
+  { name: "rails", kind: "debug", label: "Rails", on: false, group: "camera",
     title: "Camera eye rails, one polyline per cam/ path." },
   { name: "aimRails", kind: "debug", label: "Look-at", on: false, group: "camera",
     title: "The look-at track: where each camera path is aimed, as opposed to where it sits." },
@@ -73,7 +76,7 @@ export const TOGGLES: readonly ToggleSpec[] = [
     title: "The screen-space layer: the letterbox shutter (evt 0x1F) and the dialogue subtitles (evt 0x2D)." },
   { name: "rigs", kind: "game", label: "Rigs", on: true, group: "props",
     title: "Objects that ride op_ object paths \u2014 vehicles and props, assembled from transcribed draw routines. They appear only while the camera is on a path that selects them." },
-  { name: "spawns", kind: "debug", label: "Spawns", on: true, group: "actors",
+  { name: "spawns", kind: "debug", label: "Spawns", on: false, group: "actors",
     title: "A marker and a label at every spawn the script has placed, so a spawn whose class the port cannot pose yet is still visible as something the game put there. The characters themselves are Characters; this is what stands in for the ones that have no pose." },
   { name: "chars", kind: "game", label: "Characters", on: true, group: "actors",
     title: "Spawned characters assembled from the EXE skeleton and posed from mot/. A spawn whose class has no motion rule yet keeps its marker instead \u2014 an unposed character is a heap of parts, not a character." },

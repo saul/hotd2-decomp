@@ -14,17 +14,18 @@
  * It mounts into its own root over the page, so it never becomes a second
  * writer of anything `ui/App.tsx` renders.
  *
- * It opens two ways: by itself when there is nothing to play, and from the top
- * bar's `Bundle...` button at any time. It used to open only the first way,
- * which meant that on any machine with `extract/player/` populated -- every
- * developer's -- none of it could be reached at all.
+ * It opens two ways: by itself on a first visit, when there is nothing to
+ * play, and from the menu's `Rebuild bundle…` at any time. It used to open
+ * only the first way, which meant that on any machine with `extract/player/`
+ * populated -- every developer's -- none of it could be reached at all.
  *
- * **One stage at a time.** Every stage in both modes is 431 MB and the better
- * part of an hour of somebody's laptop, which is a strange thing to ask for
- * before they have seen anything at all. A stage is a minute. The rest are
- * built when they are asked for, from the menu, into the same cache -- see
- * `Player.buildStage` -- so choosing here is choosing where to start and not
- * what you are limited to.
+ * **A first visit builds everything.** This screen used to open on one stage
+ * at a time, when every stage in both modes was the better part of an hour; the
+ * exporter does all twelve in about half a minute now, so the first visit gets a welcome with one button
+ * that builds all six stages in both modes and then plays stage 1 (see
+ * `Props.welcome`). The workbench -- one stage, one mode, the zip, the cache --
+ * is a link away, and is what the menu opens. A stage nothing holds is still
+ * built on demand when the menu picks it (`Player.buildStage`).
  */
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -33,8 +34,8 @@ import type { Root } from "react-dom/client";
 import { ALL_STAGES, BundleIndex, slotKey } from "../bundles";
 import type { Origin } from "../bundles";
 import { canPickDirectory, clearCache, downloadCache, forgetInstall,
-         onThumbWritten, pickInstall, regrantInstall, rememberedInstall,
-         requestPersist, readThumb, runExport,
+         looksLikeInstall, onThumbWritten, pickInstall, regrantInstall,
+         rememberedInstall, requestPersist, readThumb, runExport,
          storageEstimate } from "./index";
 import type { ExportHandle } from "./index";
 import type { InstallRef, WorkerOut } from "./protocol";
@@ -71,7 +72,21 @@ interface Props {
   openOn?: { stage: number; original: boolean };
   /** Why the screen opened, when it opened because nothing would load. */
   reason: string | null;
+  /**
+   * A first visit: nothing served, nothing remembered, nothing to play.
+   *
+   * The screen opens as a welcome instead of a workbench -- a paragraph, one
+   * button, and **every stage in both modes** built from the folder it picks,
+   * because that is about half a minute and it means the menu never has to stop and
+   * build anything later. When it is done, {@link Props.onReady} puts the page
+   * in stage 1. The whole screen is one link away for somebody who wants one
+   * stage, one mode, or the zip.
+   */
+  welcome?: boolean;
 }
+
+/** Every stage in both modes: what a first visit builds. */
+const EVERY_MODE = [false, true];
 
 /** Where a stage already exists, in the words the screen uses for it. */
 const ORIGIN_TEXT: Record<Origin, string> = {
@@ -80,8 +95,13 @@ const ORIGIN_TEXT: Record<Origin, string> = {
 };
 
 function ExportScreen({ onReady, onBuilt, onDismiss, reason,
-                        openOn }: Props) {
+                        openOn, welcome = false }: Props) {
   const [install, setInstall] = useState<InstallRef | null>(null);
+  // The welcome until somebody asks for the rest. See `Props.welcome`.
+  const [simple, setSimple] = useState(welcome);
+  // How many stage bundles the run in flight has finished, of how many.
+  const [built, setBuilt] = useState(0);
+  const [planned, setPlanned] = useState(0);
   const [stage, setStage] = useState(openOn?.stage ?? 1);
   const [original, setOriginal] = useState(openOn?.original ?? false);
   const [lines, setLines] = useState<string[]>([]);
@@ -94,6 +114,10 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
   // labels under the stage buttons are what is on disk and not what this
   // screen remembers doing.
   const [have, setHave] = useState<Map<string, Origin>>(new Map());
+  // False until the first scan lands: before it, "not built" would be a guess
+  // about stages the page may well be holding -- and a harness reading the
+  // tiles the moment the screen opened read exactly that guess.
+  const [scanned, setScanned] = useState(false);
   // Which of those were written by an older exporter than this page, and what
   // moved. The item in the menu can only say *that* something is out of
   // date; this is the screen with room to say which and why.
@@ -180,6 +204,7 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
     // four is worse than a tile with no picture in it. Reading six images
     // takes long enough to be visible.
     setHave(m);
+    setScanned(true);
     setStale(old);
     setDrift(index.drift);
     setQuota(e && e.quota
@@ -248,19 +273,28 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
    * nothing else, and two copies of the message handling is two places for the
    * per-stage `onBuilt` to be forgotten.
    */
-  const start = useCallback(async (stages: number[]) => {
-    if (!install) return;
+  /**
+   * Run an export. One stage or every stage; the selected mode, or -- the
+   * welcome's -- both. `then` runs when it finishes cleanly.
+   */
+  const start = useCallback(async (stages: number[], modes?: boolean[],
+                                   from?: InstallRef, then?: () => void) => {
+    const ref = from ?? install;
+    if (!ref) return;
+    const runModes = modes ?? [original];
     setLines([]);
     setWarnings([]);
     setError(null);
     setFinished(null);
     setRunning(true);
+    setBuilt(0);
+    setPlanned(stages.length * runModes.length);
     // A stage is ~35 MB and the cache is meant to survive a reload, so ask for
     // persistence before filling it rather than after being evicted.
     await requestPersist();
 
     handle.current = runExport(
-      { kind: "export", install, stages, modes: [original], fresh: false },
+      { kind: "export", install: ref, stages, modes: runModes, fresh: false },
       (msg: WorkerOut) => {
         if (msg.kind === "progress") setLines((l) => [...l, msg.line]);
         else if (msg.kind === "warning") setWarnings((w) => [...w, msg.line]);
@@ -268,6 +302,7 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
           setLines((l) => [...l,
             `  -> ${msg.counts.models} models, ${msg.counts.triangles} tris, `
             + `${msg.counts.textures} textures, ${msg.counts.spawns} spawns`]);
+          setBuilt((n) => n + 1);
           // Per stage rather than once at the end: a run may build six, and
           // each of them wants its picture taken and its stage reloaded if it
           // is the one on screen.
@@ -287,9 +322,30 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
                ? ` -- ${msg.degraded} thing(s) could not be read; see below`
                : ""));
           void rescan();
+          then?.();
         }
       });
   }, [install, original, rescan, onBuilt]);
+
+  /**
+   * The welcome's one button: pick the folder, check it is the game, and
+   * build every stage in both modes from it, then play.
+   *
+   * One press for all of it, because the picker has to be opened inside a
+   * press and everything after it follows from what was picked.
+   */
+  const buildEverything = useCallback(async () => {
+    setError(null);
+    const ref = await pickInstall();
+    if (!ref) return;                                  // cancelled
+    if (!await looksLikeInstall(ref)) {
+      setError(`There is no Hod2.exe in ${ref.label}. Choose the folder the `
+               + "game is installed in -- the one that holds Hod2.exe.");
+      return;
+    }
+    setInstall(ref);
+    await start([...ALL_STAGES], EVERY_MODE, ref, () => onReady(1, false));
+  }, [start, onReady]);
 
   const stop = useCallback(() => {
     handle.current?.cancel();
@@ -300,6 +356,52 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
 
   const where = have.get(slotKey(stage, original));
   const anything = have.size > 0;
+
+  if (simple) {
+    const pct = planned ? Math.round((100 * built) / planned) : 0;
+    const last = lines.filter((l) => !l.startsWith("  ->")).at(-1) ?? "";
+    return (
+      <div className="export-screen">
+        <div className="export-card welcome">
+          <h1>The House of the Dead 2</h1>
+          <p className="export-lede">
+            This page plays the game from your own copy of it. Choose the
+            folder that holds <code>Hod2.exe</code> and it builds everything it
+            needs -- all six stages, Arcade and Original -- right here in this
+            tab. It takes about half a minute, and nothing is uploaded anywhere.
+          </p>
+          {running || (finished && !error)
+            ? <div className="export-progress" role="progressbar"
+                   aria-valuemin={0} aria-valuemax={planned}
+                   aria-valuenow={built}>
+                <div className="export-bar"><span style={{ width: `${pct}%` }} /></div>
+                <p className="export-note">
+                  {finished
+                    ? "Built. Opening stage 1…"
+                    : `${built} of ${planned} built${last ? ` -- ${last}` : ""}`}
+                </p>
+              </div>
+            : <p>
+                <button className="export-primary export-go"
+                        onClick={() => void buildEverything()}>
+                  Choose your game folder…
+                </button>
+              </p>}
+          {error ? <p className="export-error">{error}</p> : null}
+          <p className="export-note">
+            <button className="export-link" disabled={running}
+                    onClick={() => setSimple(false)}>
+              More options
+            </button>
+            {" "}-- one stage or one mode at a time, or the bundle as a .zip.
+            {reason
+              ? <> The page could not find a bundle to play: <code>{reason}</code></>
+              : null}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="export-screen">
@@ -357,7 +459,7 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
                   </span>
                   <span className="export-tile-name">Stage {n}</span>
                   <span className="export-tile-note">
-                    {src ? ORIGIN_TEXT[src] : "not built"}
+                    {!scanned ? "checking…" : src ? ORIGIN_TEXT[src] : "not built"}
                     {old ? " \u00b7 needs rebuilding" : ""}
                   </span>
                 </button>
@@ -398,9 +500,10 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
             </label>
           </div>
           <p className="export-note">
-            About 35 MB and a minute each. The other stages are also built when
-            you pick them from the menu, so <b>Build all</b> is for when you
-            would rather wait once.{quota ? ` ${quota}.` : ""}
+            <b>Build it</b> builds the stage above in this mode; <b>Build
+            all</b> builds all six in both modes, which is what a first visit
+            does. A stage nothing holds is also built when you pick it from the
+            menu.{quota ? ` ${quota}.` : ""}
           </p>
         </section>
 
@@ -415,11 +518,10 @@ function ExportScreen({ onReady, onBuilt, onDismiss, reason,
                           disabled={!install}>
                     {where === "cache" ? "Build it again" : "Build it"}
                   </button>
-                  <button onClick={() => void start([...ALL_STAGES])}
+                  <button onClick={() => void start([...ALL_STAGES],
+                                                    EVERY_MODE)}
                           disabled={!install}
-                          title={`Build all six stages in `
-                            + `${original ? "Original" : "Arcade"} Mode. `
-                            + `About 200 MB and six minutes.`}>
+                          title="Build all six stages in both Arcade and Original Mode, so the menu never has to stop and build one.">
                     Build all
                   </button>
                   {where

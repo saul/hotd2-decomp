@@ -55,7 +55,7 @@ export function PauseScreen() {
         </button>
         <span className="hint only-fine">or press <kbd>Space</kbd></span>
         <span className="hint only-coarse">
-          tap to shoot · shoot off the screen, or flick the phone up, to reload
+          tap to shoot · flick the phone, or tap with a second finger, to reload
         </span>
       </div>
     </div>

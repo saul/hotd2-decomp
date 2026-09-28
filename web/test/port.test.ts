@@ -568,7 +568,7 @@ import {
   RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
   RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
-import { SpawnPropContainers, SpawnSlotActors }
+import { SpawnPropContainers, SpawnSlotActor, SpawnSlotActors }
   from "../src/game/director";
 import {
   SetPieceState, SetPiecePropUpdate,
@@ -18924,6 +18924,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
+    [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -34724,6 +34725,132 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
         JSON.stringify(resolved));
   T.coli = null;
   SetGameTables(CHARS);
+}
+
+// -- class 0x28: stage 1's two burning cars, thrown once ---------------------
+
+console.log("\nclass 0x28 -- held on its route until cp 0x2F, thrown once, "
+            + "killed:");
+{
+  // Stage 1 blocks 5, 11 and 14 `spawn_placed` two class-0x28 objects,
+  // `obj+0x11C` 0 and 1, that `PathRidingPropUpdate` (`FUN_00432610`) seats
+  // on `op_` slots 0x145 and 0x146 at the frames `g_class28_route_table`
+  // (`0x00589AE0`) freezes them on, 671 and 667, and throws along the rest
+  // of the path the frame camera path 0x2F reaches that frame; it kills them
+  // once `g_cam_path_frame` reaches `g_cam_path_length[slot]`, 725 and 765.
+  //
+  // The port had no class 0x28: `render/rigs.ts` drew the path at
+  // `min(len, camera frame)` of whatever camera was playing, so the car slid
+  // along the extrapolated path before the throw and was thrown again by
+  // every later camera move past frame 671 -- the user's "start in the wrong
+  // place" and "repeat their arc". Driven here from the director's entry for
+  // a walker spawn, `SpawnSlotActor`, and `GameUpdate`; the path stub
+  // answers with the frame it was asked for in `x` and the slot in `y`, so
+  // the pose says which evaluation made it.
+  const rng = new Rng(28);
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(CHARS);
+  const asked: [number, number][] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => {
+      asked.push([slot, frame]);
+      return { x: frame, y: slot, z: -frame, pitch: 0, yaw: frame * 16,
+               roll: 0 };
+    },
+  };
+  const spawn = (at: number, hp: number) => ({
+    at, class: 0x28, hp, pos: [0, 0, 0] as [number, number, number],
+    orient: [0, 0, 0] as [number, number, number], flags: 0,
+  });
+  const listed = [spawn(24472, 0), spawn(24512, 1)];
+  const cars = () => G.g_object_list.filter(
+    (o) => o.cls === (0x28 as SpawnClass) && !o.despawned);
+  const car = (at: number) => cars().find((o) => o.at === at);
+  const frame = (cam: number, f: number) => {
+    G.g_active_cam_path = cam;
+    G.g_cam_path_frame = f;
+    for (const sp of listed) SpawnSlotActor(sp, rng);
+    GameUpdate(EYE, 1 / 60, host, rng);
+  };
+
+  // The boss block's arrival camera, well before the throw.
+  frame(0x2f, 121);
+  check("a class-0x28 spawn record builds a class-0x28 actor, one per spawn",
+        cars().length === 2 && car(24472)?.hp === 0 && car(24512)?.hp === 1,
+        cars().map((o) => `${o.at}:${o.hp}`).join(","));
+  check("its first frame seats it on its route at the table's freeze frame, "
+        + "not the camera's",
+        car(24472)?.pos.x === 671 && car(24472)?.pos.y === 0x145
+        && car(24512)?.pos.x === 667 && car(24512)?.pos.y === 0x146,
+        JSON.stringify(cars().map((o) => o.pos)));
+  // Any camera, any frame: nothing moves it until cp 0x2F reaches the freeze.
+  asked.length = 0;
+  for (const [cam, f] of [[0x2f, 400], [0x2f, 590], [0x32, 700], [0x32, 720],
+                          [0x31, 690], [0x2f, 666]] as const) {
+    frame(cam, f);
+  }
+  check("...and holds it there on every camera until cp 0x2F reaches it -- "
+        + "another camera's frame 700 throws nothing",
+        car(24472)?.pos.x === 671 && car(24512)?.pos.x === 667
+        && asked.length === 0,
+        `${car(24472)?.pos.x} ${car(24512)?.pos.x} asked ${asked.length}`);
+  frame(0x2f, 667);
+  check("cp 0x2F frame 667 throws route 1 (freeze 667) and not route 0 (671)",
+        car(24512)?.sub === 2 && car(24512)?.pos.x === 667
+        && car(24472)?.sub === 1,
+        `${car(24512)?.sub} ${car(24472)?.sub}`);
+  frame(0x2f, 671);
+  frame(0x2f, 700);
+  check("once thrown, the pose is the path at g_cam_path_frame",
+        car(24472)?.pos.x === 700 && car(24472)?.pos.z === -700
+        && car(24472)?.yaw === 700 * 16 && car(24512)?.pos.x === 700,
+        `${car(24472)?.pos.x} ${car(24512)?.pos.x}`);
+  // Thrown, the pose follows whichever camera is playing -- no camera test.
+  frame(0x32, 710);
+  check("...whichever camera is playing (the kill and the ride have no "
+        + "camera test)", car(24472)?.pos.x === 710,
+        `${car(24472)?.pos.x}`);
+  frame(0x2f, 725);
+  check("route 0 is killed on g_cam_path_length[0x145], 725",
+        car(24472) === undefined && car(24512) !== undefined,
+        cars().map((o) => o.at).join(","));
+  frame(0x2f, 765);
+  check("...and route 1 on g_cam_path_length[0x146], 765",
+        cars().length === 0, cars().map((o) => o.at).join(","));
+  // The post-fight cutscene: cp 50 runs 0..680 and 681..950 while the
+  // script still lists both spawns. Nothing is rebuilt and nothing is thrown.
+  asked.length = 0;
+  for (let f = 660; f <= 730; f += 5) frame(0x32, f);
+  check("a later camera through frames 660..730 plays no throw: the pool "
+        + "holds no class 0x28 and nothing evaluated a path",
+        cars().length === 0 && asked.length === 0,
+        `${cars().length} cars, ${asked.length} evaluations`);
+
+  // `g_app_state` 10's arm: the literal pose, and its own handler.
+  const mod = await import("../src/game/class28").catch(() => null);
+  check("class 0x28's module exists", mod !== null);
+  if (mod) {
+    ResetGameGlobals();
+    const a = ActorSpawn(24512, 0x28 as SpawnClass, -1, "fixed",
+                         { hp: 1 }, rng);
+    G.g_app_state = 10;
+    G.g_active_cam_path = 7;
+    G.g_cam_path_frame = 0;
+    mod.PathRidingPropUpdate(a as never, { eye: EYE, dt: 1 / 60, rng,
+                                           host });
+    check("in g_app_state 10 the pose is g_class28_fixed_poses[1], as words",
+          Math.abs(a.pos.x - -1021.8939819335938) < 1e-9
+          && Math.abs(a.pos.y - 1.1816699504852295) < 1e-9
+          && a.pitch === -2607 && a.yaw === 0x8000 && a.roll === -0x4000,
+          `${a.pos.x},${a.pos.y},${a.pos.z} ${a.pitch},${a.yaw},${a.roll}`);
+    G.g_active_cam_path = 8;
+    mod.PathRidingPropFixedPoseUpdate(a as never);
+    check("...and PathRidingPropFixedPoseUpdate kills it on cp 8",
+          a.despawned === true);
+    ResetGameGlobals();
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

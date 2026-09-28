@@ -1460,6 +1460,38 @@ effect templates. Both tracer arms now also face the camera, as
 `MatrixClearRotation` makes them: the ordinary tracer was a quad turned in
 world axes.
 
+**Stage 1's two burning cars are class 0x28's, and are thrown once.** The
+cars the JUDGMENT walker knocks aside when it lands are `obj_432840`, drawn by
+`PathRidingPropDraw` (`FUN_00432840`); the object is `PathRidingPropUpdate`
+(`FUN_00432610`), class 0x28's handler, and six `spawn_placed` records place
+two of them (`obj+0x11C` 0 and 1) in blocks 5, 11 and 14. The routine seats
+each **once** on its route, `g_class28_route_table` (`0x00589AE0`): `op_st1`
+72 at frame 671 and 73 at 667, which are the paths' first keys -- a car at
+`(-1021.6, -8.0, -497.5)` and one on its side at `(-1021.9, 1.2, -460.2)`,
+blocking the street, each under a fire and a smoke sprite. It throws them the
+frame **camera path `0x2F`** -- the boss block's -- reaches that frame, lets
+the pose follow `g_cam_path_frame` from then on, and **kills** them when the
+frame reaches `g_cam_path_length[slot]`, 725 and 765, with no camera test. The
+port had no class 0x28: `RigLayer` drew the first route root from stage load
+at `path(min(len, camera frame))` of every camera, so before the throw the car
+was hundreds of thousands of units away on the extrapolated path (2.2 million
+at `cp_st1` 47 frame 120) and came in through the sky, and the post-fight
+cutscene's `cp_st1` 50, which runs through frames 671..725, threw it again in
+front of the players. The second car was never drawn at all. Now
+`game/class28/` is the routine, `SpawnSlotActor` builds it from the spawn
+record (opcode 9 reads no tail), and `RigLayer` draws the rig's spawn roots
+from the live actor, one root per actor, the route roots never
+(`ACTOR_POSED_ROUTINES`) -- including the two phantom `obj_432840` roots stages
+2 and 5 carried and drew with no class 0x28 in them. The sprites stand on the
+object's position with the camera-facing yaw alone, as the draw's tail has
+them, and stop at the throw. Measured on seed 1 through the whole fight: the
+old root moved on 1562 of 4401 frames and threw on two cameras (`cp` 47 and
+50); the class-0x28 car moves on 53 frames, all on `cp` 47, and is gone at
+frame 725. Still not drawn: each sprite's cel loop (`0x135F + g_frame_counter %
+15`, `0xB67 + (g_frame_counter & 7)`) -- the rig carries the first cel of each.
+A seek past the throw leaves the cars seated, because the replay does not run
+the game; in play they are gone by then.
+
 ## Which instructions the UI strikes through
 
 The script tree and the event feed **strike through any instruction the player

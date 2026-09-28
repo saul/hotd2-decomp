@@ -401,6 +401,13 @@ const CIVILIAN_GATE_CLASSES: ReadonlySet<number> =
 const SCENE_MAJOR_PATH_CAMERA = 2;
 
 /**
+ * `queue_event`'s `finish_sequence` selector: the one value
+ * `EvtOpQueueEvent30` tests its selector dword against itself
+ * (`CMP EDX, 0x21` at `0x0045F82E`) rather than leaving to the action table.
+ */
+const QUEUE_SEL_FINISH_SEQUENCE = 0x21;
+
+/**
  * One opcode's implementation and how far this client honours it.
  *
  * `run` and `status` travel together on purpose -- see {@link Walker.OPS}.
@@ -865,6 +872,22 @@ export class Walker {
    * `g_training_lesson` here instead: no stage script is entered in that mode.
    */
   nextEntryBlock: number | null = null;
+  /**
+   * The BGM id the script has left on channel `0xF`, or null once it has
+   * stopped it -- the engine's `g_current_bgm_id` (`0x009C8FB8`), which
+   * `PlaySoundId` writes on every track it opens and clears on
+   * `0x80000000`.
+   *
+   * Written by **both** instructions that reach `PlaySoundId`: `se_play`
+   * (`0x38`-`0x3B`), which is how five of the six stage scripts start their
+   * own track, and `bgm_entry_play` (`0x5F`). It used to be written by `0x5F`
+   * alone, so a seek past the `se_play` at block 0 step 2 had no music to put
+   * back, and the player started each stage's track at load "by convention"
+   * to cover for it.
+   *
+   * Script state for the reason {@link Walker.loopingSe} is: a seek replays
+   * the instructions silently, and this is what `Bgm.syncTrack` puts back.
+   */
   bgmTrack: number | null = null;
   /** The most recent `se_play` operand, for the HUD. */
   lastSound: number | null = null;
@@ -1731,7 +1754,35 @@ export class Walker {
   static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
     w.lastSound = op.sound ?? null;
     Walker.trackLoopingSe(w, op.sound ?? 0);
+    Walker.trackBgm(w, op.sound ?? 0);
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
+  }
+
+  /**
+   * Keep {@link Walker.bgmTrack} in step with what one `PlaySoundId` does to
+   * channel `0xF` -- **whether or not the sound is played**, as
+   * {@link trackLoopingSe} does for the loops.
+   *
+   * `PlaySoundId` (`FUN_0041CFD0`): a namespace-1 id whose table entry is a
+   * name opens that track and becomes `g_current_bgm_id`; one whose entry is
+   * null breaks out and changes nothing. A namespace-8 id reaches
+   * `PlaySoundControl` (`FUN_0041D3E0`), where `0x80000001` is the SE and
+   * `0x80000002` the voice and **every other value stops the music**. Only
+   * `0x80000000` also zeroes `g_current_bgm_id`; this clears on all of them,
+   * because what a seek needs is what is sounding, and the two differ only
+   * for control words no shipped script uses.
+   */
+  static trackBgm(w: Walker, id: number): void {
+    const ns = id >>> 28;
+    if (ns === 8) {
+      if (id !== 0x80000001 && id !== 0x80000002) w.bgmTrack = null;
+      return;
+    }
+    if (ns !== 1) return;
+    const idx = id & 0xfff;
+    const names = w.script.bgm?.names;
+    if (names && !(names.ar[idx] ?? null) && !(names.plain[idx] ?? null)) return;
+    w.bgmTrack = id >>> 0;
   }
 
   /**
@@ -1748,6 +1799,13 @@ export class Walker {
    */
   static trackLoopingSe(w: Walker, id: number): void {
     if (!id) return;
+    // `PlaySoundId(0x80000001)` releases every SE channel, the loops with
+    // them: `PlaySoundControl` (`FUN_0041D3E0`) → `SoundCommand(n, 0x1100A0)`
+    // (`FUN_004ABF80`).
+    if (id === 0x80000001) {
+      w.loopingSe = [];
+      return;
+    }
     for (const pair of w.script.sound?.looping ?? []) {
       if (pair.play === id) {
         if (!w.loopingSe.includes(id)) w.loopingSe.push(id);
@@ -1885,6 +1943,19 @@ export class Walker {
    * it queues; each handler says for itself whether it takes that one back.
    */
   applyQueueEvent(op: OpJson): string | undefined {
+    // **Queueing a `finish_sequence` drops the off-screen attack latch**, at
+    // queue time and before the action has run:
+    //
+    //     if (*(int *)(g_evt_ip + 4) == 0x21) g_attack_committed = 0;
+    //
+    // `MOV dword ptr [0x009a34f0], 0x0` at `0x0045F833` in
+    // `EvtOpQueueEvent30` (`FUN_0045F7F0`), after the skip test -- which the
+    // `0x30` op has already made -- and ahead of the ring bump. The action
+    // itself then frees both permits (`finish_sequence` in
+    // `state/camera_action.ts`). So a scene
+    // change hands the attack back to whoever claims next, whatever state the
+    // last holder was left in. `[proved]`
+    if (op.sel === QUEUE_SEL_FINISH_SEQUENCE) G.g_attack_committed = 0;
     this.ring.queued();
     const action = (op.action ? ACTIONS[op.action] : undefined) ?? UNMODELLED;
     return action(this, op);

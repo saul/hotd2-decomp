@@ -58,7 +58,7 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 | `bundle/` | engine | one module per exporter block |
 | `core/` | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
 | `hud/` | ui | the shutter and the caption, drawn |
-| `audio/` | ui | `bgm.ts` |
+| `audio/` | ui | `bgm.ts` the mixer; `stream.ts` the music stream, pure |
 
 **Line counts, file counts, the largest files and the divergence count are in
 [`STATUS.md`](STATUS.md), which is generated.** They used to be written here,
@@ -760,6 +760,9 @@ web/src/
     characters/bat.ts, bat_splash.ts  class 0x46: each root in rotation
                   order 5 at its model's own scale, and the splash task
                   `game/class46/splash.ts` steps
+    characters/thrower.ts  class 0x31: the root in rotation order 1
+                  (`RotX; RotZ; RotY`), which is what puts stage 2's
+                  wall-climbers on their wall
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand
@@ -776,7 +779,10 @@ web/src/
                 and the screen sprites, drawn. Holds no state
                 and imports nothing; React renders its nodes and hands them
                 over through `UiHost`
-  audio/        bgm.ts — audio, not UI
+  audio/        bgm.ts — audio, not UI: `PlaySoundId`'s dispatch, and the
+                mixer (Web Audio for channel 0xF, elements for SE and voice)
+                stream.ts — what channel 0xF plays, byte for byte; no DOM, so
+                `test:audio` runs it headless
 ```
 
 ### The three rules that hold the rest together

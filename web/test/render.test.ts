@@ -1015,6 +1015,83 @@ console.log("\nrigs: the boat the port's actor poses");
   void G;
 }
 
+console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
+{
+  // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2
+  // block 0 step 1. `obj_452320` is `St2CarDraw` (`FUN_00452320`); its object
+  // is the task `St2CarSpawn` (`FUN_00452120`) allocates, and the one caller
+  // is `RescueTargetInit` (`FUN_00451720`) -- class 0x21's spawn, a step
+  // later. The rig's three roots are exported at the origin, which is where
+  // Goldman's desk is, and this layer drew the first of them from load.
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { St2CarSpawn, St2CarsTick } = await import("../src/game/class21/car");
+  const { NULL_HOST } = await import("../src/game/host");
+  ResetGameGlobals();
+  const route = (slot: number, cam: number) => ({
+    slot, bias: [0, 0, 0] as [number, number, number], cam_paths: [cam],
+    file: null, index: null, duration: null, length: 200, hold_frame: null,
+    stop_frame: null, note: "",
+  });
+  const RIGS = {
+    rigs: [{ name: "obj_452320", routine: "FUN_00452320", note: "",
+             spawn_ats: null,
+             routes: [route(328, 56), route(334, 57), route(333, 58)] }],
+    blocked: [], note: "",
+  };
+  const root = new Group();
+  const roots = [328, 333, 334].map((slot) => {
+    const g = new Group();
+    g.userData = { hod2_kind: "rig", hod2_rig: "obj_452320",
+                   hod2_routine: "FUN_00452320", hod2_path_slot: slot };
+    root.add(g);
+    return g;
+  });
+  const rigs = new RigLayer();
+  const key = (v: number) => [[0, v, 0, 0], [400, v, 0, 0]];
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {},
+    object_paths: { "328": { channels: { pos_x: key(-1669), pos_y: key(-8),
+                                         pos_z: key(-158) },
+                             file: "op_st2", index: 0, start: 0,
+                             duration: 400 } },
+  } as never));
+  const at = (slot: number, frame: number) => ({
+    walker: { cam: { slot, frame }, spawns: [] },
+  }) as unknown as Parameters<typeof rigs.update>[0];
+  const shown = () => roots.filter((r) => r.visible).length;
+
+  rigs.update(at(55, 35));
+  check("on the Goldman shot, with no car task, no root is drawn",
+        shown() === 0, `${shown()} shown`);
+  rigs.update(at(56, 30));
+  check("...nor on the car's own shot: the route does not make the car",
+        shown() === 0, `${shown()} shown`);
+
+  const car = St2CarSpawn(0);
+  rigs.update(at(56, 30));
+  check("a task that has not yet run is not drawn either", shown() === 0);
+  G.g_active_cam_path = 0x38;
+  G.g_cam_path_frame = 30;
+  St2CarsTick({ ...NULL_HOST,
+                objectPath: () => ({ x: -1457, y: -6, z: -339,
+                                     pitch: 0, yaw: 0x4000, roll: 0 }) });
+  rigs.update(at(56, 30));
+  check("once it has drawn, exactly one root is",
+        shown() === 1 && car.drawn, `${shown()} shown`);
+  const r = roots.find((g) => g.visible)!;
+  check("...at the pose the task wrote",
+        r.position.x === -1457 && r.position.y === -6 && r.position.z === -339,
+        `${r.position.x},${r.position.y},${r.position.z}`);
+  const fwd = new Vector3(0, 0, 1).applyQuaternion(r.quaternion);
+  check("...turned by its yaw (a quarter turn takes +z to +x)",
+        Math.abs(fwd.x - 1) < 1e-6 && Math.abs(fwd.z) < 1e-6,
+        `${fwd.x},${fwd.z}`);
+  G.g_st2_cars = [];
+  rigs.update(at(57, 100));
+  check("...and none once the task has killed itself", shown() === 0);
+  ResetGameGlobals();
+}
+
 console.log("\nthe object-path seam carries six values");
 
 {
@@ -2490,6 +2567,52 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
  *   through `readySpawns`, or the wing is a hierarchy that never learns what
  *   it draws and a bat has no wings.
  */
+console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
+{
+  // `EnemyThrowerInit` writes `obj+0x1FC = 1` (`c686fc01000001` at
+  // `0x004496A2`), and `SkeletonApplyRootMotion`'s draw tail takes arm 1 of
+  // the jump table at `0x00411038`: `T; RotX; RotZ; RotY`. Built here with
+  // the port's own transcriptions of those four calls, and compared element
+  // by element against the node -- three unequal angles, so a wrong order, a
+  // wrong axis or a dropped angle each move some element.
+  const { placeThrowerRoot } = await import("../src/render/characters/thrower");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  } = await import("../src/game/matrix");
+  const { Object3D } = await import("three");
+  type Inst = Parameters<typeof placeThrowerRoot>[0];
+
+  const a = makeActor(59548, SpawnClass.Thrower, 0x19, "zstin");
+  a.pos = { x: -830.3, y: 163.9, z: -1289.8 };
+  a.pitch = 0x1234; a.yaw = 0xc000; a.roll = 0xb000;
+  const inst = { a, root: new Object3D() } as unknown as Inst;
+  const placed = placeThrowerRoot(inst);
+  inst.root.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, a.pos.x, a.pos.y, a.pos.z);
+  MatrixRotateX(want, a.pitch);
+  MatrixRotateZ(want, a.roll);
+  MatrixRotateY(want, a.yaw);
+  const got = inst.root.matrix.elements;
+  const worst = Math.max(...want.map((v, i) => Math.abs(v - got[i])));
+  check("a thrower's root is T * Rx(pitch) * Rz(roll) * Ry(yaw)",
+        placed && worst < 1e-4, `placed ${placed}, worst element ${worst}`);
+
+  // The wall-climber on its wall: its own up (+Y) points out of the wall,
+  // toward +X, and its forward (-Z) points down it.
+  a.pitch = 0; a.yaw = 0xc000; a.roll = 0xc000;
+  placeThrowerRoot(inst);
+  inst.root.updateMatrix();
+  const e = inst.root.matrix.elements;
+  check("stage 2's zstin lies on its wall: up is +X, forward is down",
+        Math.abs(e[4] - 1) < 1e-6 && Math.abs(e[9] - 1) < 1e-6,
+        `up (${e[4]}, ${e[5]}, ${e[6]}) back (${e[8]}, ${e[9]}, ${e[10]})`);
+
+  const z = makeActor(0x30, SpawnClass.Zombie, 1, "zombie");
+  check("...and any other class is left to the ordinary arm",
+        !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
+}
+
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 {
   const { CharacterLayer } = await import("../src/render/characters");

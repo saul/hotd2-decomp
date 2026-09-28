@@ -1136,7 +1136,9 @@ Things established while building it, now folded back into the format docs.
   where it stands and draining the asset queue. Every consumer is honoured
   here: `30` drops its action, `40`/`41`/`42` fall through, `0D`/`3A`/`3B`
   suppress, `2D` says nothing and cuts a subtitle already on screen, `2E`
-  restarts the BGM. Two earlier notes called this dead code; the task is only
+  stops the voice line (it was read as "restarts the BGM", and the mixer
+  stopped the music instead -- see [the music](#the-music-loops-where-the-engines-does)).
+  Two earlier notes called this dead code; the task is only
   ever reached through a function pointer, so it appeared in no xref list.
   See [`re/session-log.md`](re/session-log.md).
 - **Fog is per-mesh, and its values were in the data all along.** TSP bit 23
@@ -1149,7 +1151,8 @@ Things established while building it, now folded back into the format docs.
   all four name tables read out. Three of the four store no count and are
   bounded only by the table that follows them. `se_play` is **not** restricted
   to SE: across the six stage scripts its operand names 9 BGM tracks, 6 voice
-  lines and a stop as well. [`formats/sound.md`](formats/sound.md).
+  lines and a stop as well -- and it is how each stage starts its own track.
+  [`formats/sound.md`](formats/sound.md).
 - **Light and fog values are readable.** The `0x20`–`0x27` operands are
   pointers to float constants in the evt file; dereferencing them turns 1,888
   bytes of "unattributed residue" into real values — stage 2 block 3 opens with
@@ -1161,7 +1164,6 @@ Ranked by what they would actually change on screen.
 
 | Open | Effect | Where the work is |
 |---|---|---|
-| What starts a stage's own BGM | the player names the stage track by convention and says so | decomp — the scene-entry path, not an xref sweep over 496 callers |
 | `path.y - 15` compensation | nothing today; the player is correct without it | decomp — `0x009A60C0` is the camera block's eye at block+0x80, and `CameraFromViewAngles` reads a **4x4 matrix** at the block base (0x009A6040) instead, offsetting `(0, -15, 0)` in its own frame. Which of the two the shipped hooks agree on is the remaining question |
 | `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`) | the block eye is taken straight off the curve; the engine can ease it a sixteenth a frame toward a *second* pose block at 0x009C70C0 | decomp — what writes 0x009C70C0 outside the deferred-rail hooks |
 | `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
@@ -1218,6 +1220,22 @@ the object stays wherever the spawn descriptor put it, which for every rig the
 six stages carry is the origin. `RigLayer` used to evaluate the path at frame 0
 for the fallback instance, which put stage 3's boat in the canal, parked, for
 the whole opening while a second boat sailed past it.
+
+**A rig whose object is a task exists only while the task does.** Stage 2's
+car (`obj_452320`, drawn by `St2CarDraw`, `FUN_00452320`) is a task that
+`St2CarSpawn` (`FUN_00452120`) allocates, and its only caller is
+`RescueTargetInit` (`FUN_00451720`) -- class 0x21's one spawn, block 0 step 2.
+`RigLayer` drew it from stage load at its exported root, the origin, which is
+Goldman's desk: the car stood in the office through the whole of step 1's
+cutscene (NEW-BUGS-2). The task is ported now, in `game/class21/car.ts` --
+the camera-path switch that picks its route, the park at the end of shot
+`0x39` or `0x3A`, and the `g_script_flags[0]` kill -- as plain records in
+`G.g_st2_cars`, and `RigLayer` draws one root per task that drew this frame at
+the pose it wrote (`TASK_POSED_ROUTINES`). Its routes in the rig data now only
+name the roots. What the draw does with the task's other words -- the
+post-crash asset set, the wheel spin, the second part's yaw once parked -- is
+not drawn yet: the exporter ships variant 0 only and no part rules for this
+rig.
 
 ## Which instructions the UI strikes through
 
@@ -1448,7 +1466,7 @@ having its handler read.
 | Class | Rule | From |
 |---|---|---|
 | `0x30` the zombie | motion **956** (`zom.bin`) | `FUN_00452DA0` stores `0x3BC`, or `0x41E` on a branch not taken here |
-| `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail | `FUN_00431250`; the table is a five-entry playlist, all inside `nya.bin`'s 762–773 |
+| `0x53` the cat | `u16[0x00589A64 + variant*10]`, variant from the parameter tail — **plus every clip of the table** (`CAT_CLIPS`) | `FUN_00431250`; the table is a five-entry playlist per set (`g_cat_motions`), all inside `nya.bin`'s 762–773, and `CatMotionListUpdate` steps through it — see below |
 | `0x19` the stage-4 boss | motion **124** (`0x7C`), `boss4.bin` | `Boss4Init` (`FUN_004917E0`) stores it as a literal: `MOV dword ptr [ECX + 0x20], 0x7C` at `0x0049183E` |
 | `0x21` the rescue target | motion **998** (`0x3E6`), `zom.bin`, plus the freed clip **972** (`0x3CC`) | `RescueTargetInit` (`FUN_00451720`) stores it as a literal: `MOV dword ptr [EDI + 0x20], 0x3E6` (`c74720e6030000`) at `0x00451747`. See below — the missing row cost half of stage 2 |
 
@@ -1677,8 +1695,13 @@ assertion behind it kept a hang alive for two sessions.
 `MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
 no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
 clip (`0x0044E863`), and `ApplyRootMotion` now honours it — the height store at
-`0x00410E48`. The shipped wait clip's root height is flat, so no stage moves
-differently for it. And the engine's
+`0x00410E48`. What it stores is the height of the delta *after* the actor's
+rotation, and `ApplyRootMotion` now turns the delta by all three angles,
+`T · Rz(roll) · Ry(yaw) · Rx(pitch) · S`, as the gated arm does
+(`0x00410D56`..`0x00410D9B`); it used to turn by yaw alone. The one place that
+shows is stage 2 block 21, whose pair are spawned rolled onto a wall: their
+wait clip's flat root height is beside the point, because the roll turns the
+clip's -Z into world -Y. See class 0x31's state 23 below. And the engine's
 wrap damper makes the applied delta `(baseline_old - root)/play_length` where
 `rootDelta` computes `(root - root[0])/frames`; both are small, neither was
 touched, they are not the same number and nothing asserts either.
@@ -2075,6 +2098,59 @@ already correct.
 the mixer rather than the intent: it taps `window.Audio` before the app boots
 and watches the cursor wrap.
 
+## The music loops where the engine's does
+
+The report was that the port's music "seems to start from scratch on loop",
+and the question whether the game does that. **It does** `[proved]`: there are
+no loop points in the files or the exe. Channel `0xF` is streamed, and
+`SoundStreamThread` (`FUN_004A4640`) seeks back to the first sample when a
+refill reads past **end of file** -- so a track is its file from sample 0 to
+EOF, end to end, for ever. What the game does not do is stop between passes:
+the wrap is made inside one ring refill. The port's `<audio loop>` element put
+**8.4 ms of digital silence** at the seam of `ST1.WAV` `[measured]`, which is
+the join made audible. Every detail is in
+[`formats/sound.md`](formats/sound.md#the-music-stream-no-loop-points),
+including the per-track table.
+
+Six things were wrong, and all six were in the same two files:
+
+* **The seam.** `audio/stream.ts` transcribes the stream -- `SoundChannelOpenWav`'s
+  header walk and the thread's wrap -- and `audio/bgm.ts` plays one period of it
+  as a Web Audio buffer looped whole. That period includes what the engine
+  plays and an element never would: the file's `LIST` chunk, a few frames of
+  `"LIST"…"INFO"` read as PCM between the last sample and the first, and, for a
+  track whose pass is `2 mod 4` bytes, the next pass half a frame late -- the
+  channels exchanged every other time round.
+* **Three tracks do not loop.** `PlaySoundId` passes `loop = 0` for exactly
+  `0x10000009` (`OVR_AR`, the game-over track), `0x10000025` (`CLR2`) and
+  `0x10000014` (`HOD1_ADV`). The port looped everything, so the game-over sting
+  went round again.
+* **Playing a track restarts it.** `SoundPlayOnFreeChannel` reopens the file
+  on every call; the port ignored a request for the track already playing. A
+  seek, which has no engine counterpart, still leaves a correct track alone
+  (`Bgm.syncTrack`, port-only).
+* **`bgm_entry_play` is a stop and then a play.** The port played only, so
+  `bgm_entry_play 0` -- which stages 2, 3, 4 and 6 open step 1 with -- did
+  nothing.
+* **Each stage's track is started by its script**, with a `se_play` at step 2
+  of each entry block (stage 5: `bgm_entry_play`). The record said no script
+  did, having looked only at `bgm_entry_play`, and the player started the
+  track at load "by convention" -- a step early -- and then ignored the
+  script's own `se_play` of it. The walker's `bgmTrack` now follows both
+  instructions, as `g_current_bgm_id` does, and a stage load is `SoundStopAll`.
+* **`0x80000002` stops the voice.** The mixer took every namespace-8 id as a
+  music stop; `PlaySoundControl` (`FUN_0041D3E0`) has three arms. evt `0x2E`,
+  which plays it after a cutscene skip, was named `resume_bgm_if_skipped`, and
+  it is `stop_voice_if_skipped` -- so every skip used to silence the music. The
+  host no longer cuts the voice itself at the moment of the skip; the script's
+  `0x2E` does, as in the game.
+
+Checks: `npm run test:audio` (the dispatch and the stream, with no browser),
+`test:seek` (each stage's first track, across a seek), `npm run bgm-loop` (the
+page: the buffer the script's track reaches Web Audio as is compared frame by
+frame with the file, rendered across the wrap, and heard), and
+`tools/verify_bgm_stream.py` (the exe's own bytes, and every track).
+
 ## The gameplay loop
 
 **Done.** Enemies advance by the game's own **advance rings**, compete for an
@@ -2188,6 +2264,34 @@ height — `ThrowerPickLandingPoint` switches on the *state*, and nothing in the
 port had read that — and past the pounce row's hit frame the actor stops
 reacting to shots. `ThrowerLoadAttackArcScript` no longer latches the stance
 the connect reads: the exe's does not, so the swing connects on row 0's frame.
+
+**...and the wait is a climb down the clock face** (NEW-BUGS-2: "they should
+climb down the wall, then jump onto the player"). The pair's spawn records
+carry orient `(0, 0xC000, 0xC000)` -- on their sides against the wall -- and
+the port kept only the yaw: the placement had no `pitch` or `roll`, so the
+actors stood upright a hundred units up in mid-air, drawn upright, and
+`ApplyRootMotion` turned motion 310's forward walk by the yaw alone, which
+walked them 8.7 units out from the wall along +X. Three things changed, all
+from the exe: the exporter emits the record's other two orientation words
+(`SpawnFromDescriptor`, `FUN_00408A20`, copies all three) and
+`SpawnScriptedCharacters` puts them on the actor; `ApplyRootMotion` turns the
+delta by roll, yaw and pitch (`SkeletonApplyRootMotion`, `FUN_00410C50`); and
+`render/characters/thrower.ts` draws class 0x31 in `EnemyThrowerInit`'s order
+1, `RotX; RotZ; RotY`. Measured in the page at
+`?stage=2&mode=play&entry=0&block=21&step=2&op=7&frame=64`, before and after:
+
+| | before (main at `2e6de214`) | after |
+|---|---|---|
+| height over the 45-frame wait | 163.9 -> 163.9 | 163.9 -> 155.2 (8.7 down) |
+| height over the 60-frame wait | 153.2 -> 153.2 | 153.2 -> 140.6 (12.6 down) |
+| x over the 45-frame wait (the wall is at -830.3) | -830.3 -> -821.6 | -830.3 throughout |
+| roll | 0 throughout, drawn upright | `0xC000` on the wall, level six frames into the leap |
+| leap starts at | 163.9 | 155.2 |
+
+The leap itself was fixed with the rest of the state above: it lands six
+units in front of the eye at `g_camera_eye_y` (51) instead of at the actor's
+own height, and the stab connects on row 0's frame 62, thirteen frames before
+the landing, with the body about thirty units above the eye and closing.
 
 **And it now dies its own death.** Class 0x31 does not use the shared stagger
 or the shared *directional* death clip — it has a four-state chain of its own,
@@ -2733,6 +2837,31 @@ instructions and observes no waits, so it stepped over that step's
 `WaitRule.skipRunsCameraOn` runs the shot on to where the wait would have left
 it, the same way `WaitRule.retires` already settled the enemy gates.
 
+**And then it reached the cue holding the only permit** (NEW-BUGS-2: "if the
+first zombie mauls the civilian, the zombie then never attacks the player").
+With the cue reachable, `0xA030` graduated on frame 660 and stood in
+`ZombieStateHoldAtRange` for the rest of the stage with `g_attack_permits[0]`
+naming itself. That is the engine's shape, not a port slip:
+`ZombieStateHoldForCameraCue` (`FUN_0045BFD0`) runs its delegate first and tests
+the cue before its `Strike` bounce, so a captor already at the ring claims on
+the cue frame too and graduates into the hub still owning the permit, and its
+own permit refuses every claim after it. Nothing in class 0x30 lets it go; the
+**script** does. `EvtActionFinishSequence21` (`FUN_00403710`) opens by zeroing
+both permits, and queueing a `finish_sequence` clears `g_attack_committed`
+(`EvtOpQueueEvent30`, `FUN_0045F7F0`) — and block 16 step 6 queues one right
+after the cue, as block 9 step 3 does for the other two held spawns. The port
+had neither, and now has both (`script/state/camera_action.ts`,
+`Walker.applyQueueEvent`). Three smaller transcriptions came with it, all on
+the same path: the bounce frees the table entry only and not the whole
+`ReleaseAttackSlot`; `TryClaimAttackSlot` voids `obj+0x121` before it tests
+anything; and the hub calls the claim itself behind its own four tests instead
+of predicting its refusal — which kept a stale index, and refused a two-player
+claim whenever either permit was out — and drops an off-screen latch while the
+actor is still off screen (`0x00455748`). Driven under `?drive=1`
+(`web/tools/maul_then_attack.mjs`): the civilian dies on frame 200, the captor
+graduates on 321 and strikes on 322, and shot dead it releases the two
+`znebi2`, who both strike in turn.
+
 ### `IsPlayerAttackable`: two of three clauses
 
 The engine's gate is three tests and the port had none of them, standing in
@@ -3221,6 +3350,26 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+### A zombie cannot be staggered out of its own attack
+
+The other half of that mask is raised by the **strike itself**, and the port
+had never raised it. `ZombieStateStrike`'s sub 0 opens with one
+read-modify-write of `obj+0x34`, before it draws an attack —
+`00455a93 AND CH, 0xfe` / `00455a96 OR ECX, 0x10000000` — and nothing on the
+melee path lowers the bit again until `ZombieStateBackOff`'s first frame
+(`00455ca1 AND ECX, 0xefffffff`, in the same write that raises `BackingOff`).
+So from the pick, through the lunge and the whole swing, **a shot takes its hit
+points but plays no stumble**; the ways to stop an attack are to kill the
+zombie or to shoot off every limb its entry's cancel mask names, which whiffs
+it in `ActorStrikeConnect`. In the port, every strike could be cut short by a
+stagger. The same bit is half of `ZombiePushOutOfWorldAndActors`' `0x18000000`
+test, which the port had transcribed as "the airborne bits" — a zombie in its
+strike is shoved out of a crowd, and shoves a chair, 1.8× as hard.
+
+`ActorPlayHitReaction` also carries a `state 3 && sub 2 → BackOff` arm behind
+the gate — a shot ending the swing — which the gate makes unreachable for
+class 0x30: every entry to state 3 writes sub 0, and sub 0 raises the bit.
+
 ### What a death throws up, what a corpse leaves, and what a landing sounds like
 
 Five `[diverges]` notes said class 0x30 drew none of this; it draws all of it
@@ -3264,6 +3413,37 @@ exit clear the landing latch, `0xfffeffff`, where the port cleared the carried
 bit one hex digit over; and `ZombieStateDelayedLeap` landed in silence.
 `web/tools/death_fx.mjs` kills what is on screen and photographs each effect;
 `--staged` puts one of each in front of the camera.
+
+### What the ground does under a thrower
+
+Class 0x31 had none of its ground effects; `ThrowerEmitGroundDust`
+(`FUN_0044D260`, `game/class31/ground_dust.ts`) is ported and called from all
+three of the exe's call sites, which took `ActorArcStep`'s last `[diverges]`
+with it:
+
+* **The bounce** (`ThrowerStateFallAndLand`, code 0x46). Once per landing --
+  `obj+0x136C` bit 0x4000, which the port cleared as the body settled but
+  nothing set -- a kind-0x46 dust sprite at the body, or the 0x61 splash in the
+  rain or on surfaces 5 and 0x37. It works out the floor's tilt with
+  `VecAimYAxisZThenX` (`FUN_00401870`, newly named) and then has the sprite
+  face the camera, which throws the tilt away. The bounce also thumps now:
+  `COMMON\ENE_WALK4_16.WAV` (`0x2716A9`) on **every** bounce, which the port
+  never played.
+* **The arc's landing** (`ActorArcStep`, code 0x50). A thrower of type
+  0x16..0x19 landing with `obj+0x34` bit 0x20000000 up and 0x10000000 down
+  raises a narrow column of dust, kind 0x4B stretched `(0.4, 2.0, 0.2)`, or a
+  splash in the rain. Then it **falls into** the trail.
+* **`zsass`'s trail** (`ThrowerStateStandAndDecide`, code 0x5A, and every
+  0x50). For character type 0x16 while the track holds behaviour set 1's walk
+  (read by address, `PTR_DAT_005929F4` = `g_class31_motion_sets[1]`): on the
+  walk's footfalls, cursor 0x19 and 0x32, or on any frame out of state 7, it
+  lays two scuffs across the step since `obj+0x13E4` -- a quarter-turn each
+  side of the line walked, as wide as the step is long times 0.0598 -- and
+  moves `obj+0x13E4` up to the actor. They are splashes on water.
+
+The stand's port returned early from two of its three exits, the re-arm and
+the fall; the exe runs all three -- those two and the router -- on to
+`0x0044B3B2`, which is where the trail call is, so the port does too.
 
 ## A cross-fade dissolves from a still, and holds the new clip
 
@@ -4007,8 +4187,8 @@ geometry and doing the wrong thing. Their arms are ported now, in
   that `CALL` and the pseudocode shows a bare draw with nothing stepping the
   cursor — `L37`, and `0x0046A334` is where the tail really is. Type 33 has the
   identical tail with `ActorKill` where 31 has the wrap, so it plays its 60
-  frames of `eff_shop.bin` once and dies; that one is still `[open]` in the
-  port, which draws frame 0 and holds it.
+  frames of `eff_shop.bin` once and dies. The port drew frame 0 and held it
+  until 2026-09-28 — see *Stage 2 block 11: the fire strip ends* below.
 * **Type 53 is a car.** `char_adv04.bin[0]`, charred black, with wheels and a
   shadow quad. Its head is an inline variant of `PropExpireByStepLifetime`
   with the scene-1 sweep left out and `ActorKill` in place of `ActorDespawn`.
@@ -4516,6 +4696,31 @@ ever; the old port only finished because it bailed out when the arc landed.
 The fixture carries the exe's own wall script now, and `verify_combat.py`
 check 16 asserts that none of the 38 shipped scripts does that.
 
+### A zombie's swing holds its first frame, and its run becomes its lunge
+
+`ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track
+with a fade: the lunge through `SetCurrentActorMotionBlended(obj+0x194, lunge,
+0, 10)` at `0x00455B49`, and the swing through `ActorSetMotionBlended(obj+0x194,
+strike, 0, 5)` at `0x00455B63`. Each call holds the cursor on frame 0 for the
+fade. The port started both on its one-shot channel with no fade, so the arm
+snapped up. Worse, the swing's cursor left 0 on the next frame, so every hit
+landed six frames before the engine's. The swing now goes through
+`ActorSetOneShotBlended`. Its cursor holds 0 for six frames and the hit lands
+five frames later than it did, one frame short of the engine's. That last frame
+is the port's clocks-before-states phase, which the arc work above found and
+which covers every cursor test in the port.
+
+The lunge moved to the ordinary track, where the engine has it. That is what
+makes the engine's own test work: `00455b31 CMP [ESI+0x1b4], EAX` skips the
+call while **the track** is playing the lunge. In 155 of the 311 shipped
+attack entries the lunge is the same clip as the actor's run (`row[2]` or
+`row[3]`), and `ZombieStateHoldAtRange` claims before it sets its idle. So an
+actor that runs straight into its attack just keeps running into it, and the
+run *is* its lunge. The port tested only its one-shot channel, so it cut back to
+the lunge's frame 0 every time. On the base track the lunge also gets its
+11-frame hold, stands still for it, and wraps as the engine's clip does; the
+lunge was the one looping one-shot, and nothing sets `loop` any more.
+
 ### The canal is drawn by a task: class 0x41 type 1
 
 Stage 2's block 16 stood on a dock over **no water at all** --
@@ -4620,6 +4825,111 @@ the opposite as a settled result.
 What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
 absolute turn on two other words, switched by an op no exported program
 uses), and Training's hook swap, which is declared on both updates.
+
+### Stage 2 block 11: the fire strip ends
+
+Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:
+"the fire sprites that appear after the car crashes into the wall don't
+disappear". They were one object, the game's **only** class-0x41 type-33
+spawn (evt `0x6A14`, block 11 step 1 op 20, in both stage-2 scripts): slot
+`0x174A` = `eff_shop.bin[0]` with a roll word of `0x3B`. The port placed it as
+`Generic`, which has no update for type 33, so `obj+0x2A0` never moved and the
+renderer drew `eff_shop.bin[0]` -- three fireballs -- for the rest of the
+stage. Its only other exit was the shared lifetime prologue counting 5962 step
+changes against a slot number.
+
+`PropDrawOnlyType33` (`FUN_00472950`) is a draw, a step and a kill, and
+**nothing else** -- no `PropExpireByStepLifetime`, no shot test. The tail is
+past the `MatrixStackPop` Ghidra ends the body at (`L37`): `obj+0x2A0++`, and
+`JMP ActorKill` once the *post-increment* value passes `obj+0x2A4`. So a roll
+word of `0x3B` draws cursors `0..0x3B` -- sixty frames, `0x174A..0x1785` --
+and dies on the frame that drew the last. It is now its own
+`PropFamily.DrawOnlyType33` in `game/class41/draw_only.ts`.
+
+**Where in the frame it steps is part of the port.** The engine draws, then
+steps. `ActorAlloc` puts the object after its placer and `TaskRunTree` reaches
+it that same frame (the placer's `ActorKill` leaves its own next pointer
+intact), so the engine draws cursor 0 on the frame it is made. The port's draw
+is the renderer's, after the whole frame, so the step runs where the sprite
+effects' and water rings' do -- at the head of the next frame, from
+`ShotEffectsTick` -- and the pool's walk skips it. Stepped in the pool walk
+instead it would show cursors 1..59 and never 0; `web/test/port.test.ts` drives
+a placer through `GameUpdate` and asserts the sixty slots in order, and fails
+both that mutation and the old `Generic` family.
+
+Measured in the headless player, driven frame by frame (`?drive=1`) from op 18:
+before, the prop sat at cursor 0 through the end of `cp_st2[2]` and into
+`cp_st2[14]`; after, it reaches cursor 58 at `cp_st2[2]` frame 399 and is gone
+by frame 3 of path 14. At the report's own URL a seek places the prop on the
+first live frame (as it does every class-0x41 prop, see above), so it plays its
+sixty frames over `cp_st2[14]` 0..59 and is gone at 60 -- where before it was
+still frame 0 at the end of the path.
+
+### The cat runs: class 0x53's playlist, and the clip that was never baked
+
+`?stage=2&original=1&mode=play&block=11&step=7&op=32&frame=1012` showed the
+cat in the corner of the room **not moving**, where the game has it run off
+screen. Two faults, one in each half, and either alone would have kept it
+still.
+
+**The port had no routine for it.** Class 0x53's module ported the trigger
+(sub-type 2, block 8) and nothing else; sub-types 0 and 1 -- three of the four
+spawns, block 11's among them -- had an empty update and looped whatever clip
+the spawn gave them. Their routine is `CatMotionListUpdate` (`FUN_00431340`,
+unnamed until now): a playlist of up to five clips per animation set in
+`g_cat_motions` (`0x00589A64`), each played the number of passes
+`g_cat_motion_repeats` (`0x00589AA0`) gives it, the next one **written straight
+into `obj+0x1B4`** when the counter reaches `play_length - 1`, and an
+`ActorDespawn` once the cat has lived 1000 frames. Nothing in it moves the cat:
+the last clip of four of the six sets is `0x2FD`, 12.7 units of root motion a
+pass, and `SkeletonApplyRootMotion` does the rest from the draw. Block 11's cat
+is set 5: `0x305` twice (it stands, 114 frames), `0x2FC` once (it creeps 2.6
+units, 78 frames), then `0x2FD` until it is taken away -- about 230 units,
+out through the bottom-left of the shot and past the camera.
+
+**And the bundle had no clip to run with.** The exporter's rule for class
+0x53 baked entry 0 of each spawn's set, so character type `0x1A` carried
+`0x2FC`, `0x2FF`, `0x301` and `0x305` and no `0x2FD` in any stage. The
+exporter now offers the whole table (`CAT_CLIPS`, data-only in
+`game/class53/records.ts`, the `class22/records.ts` arrangement), and all
+nine clips reach both stage-2 bundles. With the port fixed and the old bundle
+the cat steps on to `0x2FD`, finds no frames and no play length, and stops
+after 2.7 units -- which is exactly what `tools/animals.mjs`'s new travel
+assertion measures on the old export.
+
+**The rest of the class, read in the same pass and transcribed with it:**
+
+* `CatInit` raises `obj+0x38` bit 3 for sub-type 1 -- block 11's cat is drawn
+  through the scene light array, three instructions after the block turns the
+  scene lighting on -- writes the trigger's `obj+0x124 = 4.0`, and despawns an
+  arcade trigger with `ActorDespawn` rather than marking it dead.
+* `CatBranchTriggerUpdate` was the branch write and nothing else; it now cues
+  `0x2FA` after 200 frames, blends to `0x2FD` on the shot and runs until
+  `x < -478`, where it settles on `0x305`, and despawns on
+  `g_script_flags[0x83]`, which stage 2 raises in block 8 right after it frees
+  `cat.bin`. The port used to set `dead` on the shot, which dropped the cat
+  from the scene where the game shows it bolting. It also stops clearing
+  `obj+0x34` bit 3: the engine never does.
+* **The shot test is the engine's now** (`registersForShotTest`). The trigger
+  ends in `ActorRegisterOriginInViewSpace` (`FUN_0043F950`), whose
+  `RegisterForShotTest` call Ghidra's pseudocode drops after a `MatrixStackPop`
+  it believes does not return (`L35`), so it is hit as one 4.0 sphere about its
+  feet. The list cat never registers at all, and so cannot be shot -- the
+  renderer's bone-sphere pick used to let it be.
+
+Measured in the headless player (`HOTD2_BUNDLE` at a fresh export): at the
+report's URL the cat stands on `0x305` for 114 frames, creeps on `0x2FC`, runs
+on `0x2FD` from frame 192, and is gone at life 1001; before, it stood at
+`(-890, -1015)` on `0x305` for twenty seconds and never left. Played from its
+spawn (`op=8`), it runs out of the frame-1010 shot 2.5 seconds after the camera
+settles on the room.
+
+What is still not the engine's: `obj+0x1FC`, the rotation order, has no field
+on an actor without the model block, and every shipped cat turns about y alone.
+And the shared root-motion step (`rootDelta`) gives a looping clip's wrap frame
+zero travel where `SkeletonApplyRootMotion`'s damped reset gives it one average
+step -- about 2% of `0x2FD`'s distance, and not the cat's alone, so it is left
+for its own change.
 
 ### Translucent meshes are drawn the engine's way: two passes, depth written, nearest first
 
@@ -5069,7 +5379,7 @@ missed. Meanings and confidence marks live in
 | `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawns, unless a skip is in progress — `FUN_00408B70` walks the list either way |
 | `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
-| `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
+| `2E` | `stop_voice_if_skipped` | audio | **done** | `PlaySoundId(0x80000002)`, the voice channel's stop, when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |
 | `31` | `goto_scene_state` | flow | *tracked* | the end-of-room instruction: enters scene state (1, 3) and retires the outstanding `queue_event 0x21`. The camera hook it installs reads the player view angles, which this client does not have — it draws the `cam/` path. [diverges] |
@@ -5118,7 +5428,7 @@ missed. Meanings and confidence marks live in
 | `5C` | `nop0_c` | nop | n/a | proved no-ops |
 | `5D` | `snd_load_pack_stub` | audio | n/a | OutputDebugStringA stubs — the PC port streams .wav instead |
 | `5E` | `snd_free_pack_stub` | audio | n/a | OutputDebugStringA stubs — the PC port streams .wav instead |
-| `5F` | `bgm_entry_play` | audio | **done** | **plays a BGM track** |
+| `5F` | `bgm_entry_play` | audio | **done** | **stops the music, then plays a BGM track** -- `BgmStopThenPlay`; with a track of 0 it is a stop |
 
 ### `queue_event` (`0x30`) selectors
 

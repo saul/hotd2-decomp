@@ -156,7 +156,7 @@ export function soundProjection(p: Player): SoundProjection {
       ? "no bgm"
       : bs.blocked && on
         ? "click 🔇 to allow audio"
-        : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`,
+        : `${bs.file}${bs.loop === false ? " (once)" : ""}`,
   };
 }
 

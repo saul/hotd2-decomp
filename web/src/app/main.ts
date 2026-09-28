@@ -1394,8 +1394,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * `Walker.loopingSe`.
    */
   syncBgmToWalker(): void {
-    const t = this.walker?.bgmTrack;
-    if (t !== null && t !== undefined && t !== 0) this.bgm.play(t);
+    // `syncTrack`, not `play`: `PlaySoundId` restarts a track it is handed
+    // even when that track is already sounding, which is right for the
+    // script and wrong for a seek that merely confirms what is playing.
+    this.bgm.syncTrack(this.walker?.bgmTrack ?? null);
     this.bgm.syncLoopingSe(this.walker?.loopingSe ?? []);
   }
 

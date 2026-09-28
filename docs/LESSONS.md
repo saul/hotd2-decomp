@@ -810,7 +810,44 @@ throw two lines above it. **In `game/`, derive anything that touches another
 module's export inside the function that uses it**, and when a page check fails
 after a merge, read its `threw:` line before its timeout.
 
-**L57 -- A loader's default is a claim about the game, and so is the sign of
+**L57 -- A divergence parked "until something needs it" is blind if the
+input that would need it is dropped upstream.** `ApplyRootMotion` turned the
+root delta by yaw alone, and the note on it said that was wrong only for a
+class-0x31 actor on a wall, and could wait until something needed it, "because
+the clips those stances play carry no root translation". The premise was true
+of the stance clips and missed the case that needed it. Stage 2 block 21's two
+`zstin` are not put on the wall by a stance at all: their **spawn record**
+places them there, orient `(0, 0xC000, 0xC000)`, and the exporter kept only the
+yaw. With pitch and roll dropped before the port ever saw them, no run of the
+port could have shown the divergence mattering. The actors stood upright a
+hundred units up and walked out into the air, and it went in as "they jump
+from way above the player". **When you park a divergence, name the inputs that
+would make it matter, and check that every one of them reaches the port** --
+here, `grep` the placements for a nonzero pitch or roll. It is `L27` and
+`L34`'s "scan the shipped data" applied one step further upstream: the scan has
+to cover the fields the exporter throws away, not only the ones it keeps.
+
+**L58 -- A dispatcher has more than one caller, and "nothing plays X" was
+asked of one of them.** `sound.md` carried "no stage script starts its own
+track" as an open question, `bundle.ts` wrote it into every bundle's
+`stage_track.note`, and the player started each stage's music at load "by
+convention" to make up for it -- all from a table of every `bgm_entry_play` in
+the six scripts. Every one of those names a boss or transition track. But
+`se_play` hands its operand to the same `PlaySoundId`, and **the same document
+said so**: its operand names nine BGM tracks. Five of them are the stage
+tracks, each at step 2 of its entry block. The convention start opened the
+music a step early, and because the port ignored a request for the track
+already playing, the script's own start -- which in the engine reopens the file
+from its first sample -- was swallowed. The same afternoon found evt `0x2E`
+named `resume_bgm_if_skipped` from the word it plays, `0x80000002`, when
+`PlaySoundControl` sends that word to the **voice**; the mixer had taken every
+namespace-8 id as a music stop, so a cutscene skip silenced the stage. **Before
+recording that nothing reaches a routine, enumerate every instruction and
+every call site that can reach it, and read the routine a word is handed to
+before naming the word.** It is `L17` pointed at a dispatcher: the negative was
+true of the caller that was looked at.
+
+**L59 -- A loader's default is a claim about the game, and so is the sign of
 an axis.** `GLTFLoader` turns `alphaMode: BLEND` into `depthWrite: false` and a
 normal blend, and three.js sorts transparent primitives farthest first. The
 player took both for as long as it existed, and they were three wrong claims

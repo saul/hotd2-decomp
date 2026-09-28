@@ -539,7 +539,7 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor, dt: number,
       break;
   }
 
-  if (ActorArcStep(obj, t?.step ?? 1, dt)) return;
+  if (ActorArcStep(obj, t?.step ?? 1, dt, host, events)) return;
 
   obj.flags2 &= ~ZombieFlag2.OneShotFired;
   obj.flags &= ~ActorFlag.NoHitReaction;

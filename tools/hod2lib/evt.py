@@ -194,9 +194,11 @@ OPCODES: dict[int, Op] = {
     # but DAT_009C911E is only ever written 2, so it never runs -- the game
     # always draws text. Suppressed entirely while the skip flag is up.
     0x2D: ("play_dialogue", "fix", 2),
-    # `if (skip) PlaySoundId(0x80000002)` -- restart the BGM a skipped cutscene
-    # interrupted.
-    0x2E: ("resume_bgm_if_skipped", "fix", 1),
+    # `if (skip) PlaySoundId(0x80000002)` -- and 0x80000002 is the VOICE
+    # channel's stop (PlaySoundControl, FUN_0041D3E0 -> SoundStopGroup(1)), so
+    # this cuts the line a skipped cutscene was in the middle of. It used to be
+    # named `resume_bgm_if_skipped`, which the code never did.
+    0x2E: ("stop_voice_if_skipped", "fix", 1),
     0x2F: ("suppress_accuracy_stats", "fix", 2),  # gates the counters 0x2B grades
     0x30: ("queue_event", "queue", 0),      # FUN_0045F7F0
     0x31: ("goto_scene_state", "fix", 2),          # major fixed at 1

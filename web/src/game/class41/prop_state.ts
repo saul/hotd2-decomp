@@ -160,6 +160,18 @@ export enum PropFamily {
    * `RegisterForShotTest`. See `class44/container_fragment.ts`.
    */
   ContainerFragment = 19,
+  /**
+   * `PropDrawOnlyType33` (`FUN_00472950`) — class 0x41 type 33, one spawn in
+   * the game: stage 2 block 11's strip of `eff_shop.bin`, played once.
+   *
+   * Its own family and not {@link Generic} for the reason
+   * {@link DrawOnlyType53} is, and one more: its routine has **no**
+   * `PropExpireByStepLifetime` and no `RegisterForShotTest` — it is a draw, a
+   * step and an `ActorKill` — and it draws *before* it steps, so it is
+   * stepped at the head of the frame rather than in the pool's walk. See
+   * `class41/draw_only.ts`.
+   */
+  DrawOnlyType33 = 20,
 }
 
 /**

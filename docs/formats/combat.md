@@ -300,9 +300,13 @@ list instead:
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
   `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
-  `0x51` `FishProjectToScreen` `0x00439BE3`; `0x52` and the class-0x53 trigger
-  through `FUN_0043F950` (`0x0043F9C2`, `0x0043FB76`), which both branch
-  triggers call.
+  `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
+  `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
+  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),
+  so this line used to be wrong to say both branch triggers call it; the
+  other site it listed, `0x0043FB76`, lies outside it, in the unfunctioned
+  code from `0x0043F9D0`. Whose routine that is, and where `0x52`
+  registers, is `[open]`.
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
@@ -1351,6 +1355,33 @@ claiming one stores its index in `obj+0x121` and returns 1, which is what lets
 the approach state hand over to the attack state named by the descriptor tail.
 Fail, and the enemy keeps walking.
 
+**[proved]** How it claims, from `0x00455DE0` (and `ThrowerTryClaimAttackSlot`,
+`0x0044CA40`, instruction for instruction):
+
+* its **first** store is `obj+0x121 = 0xFF`, before any test — a refused claim
+  always leaves the actor holding no index, whatever it held;
+* `g_attack_committed` set refuses at once;
+* it offers **one** player's permit, not the first free one: `g_active_player`'s
+  with one attacker; with two, `rand() % 2`'s while one player is in play, the
+  same pick `NOT`'d if taken while one enemy is present, and otherwise the
+  player on the actor's half of the screen (`ActorScreenHalfSign`,
+  `0x00409C90`); `IsPlayerAttackable` then voids the pick;
+* the permit table holds **0 or 1** — whether a permit is out, not who has it
+  (the port stores the holder's id and `-1` for free, for its debug panel);
+* it does **not** write `obj+0x34`.
+
+Two things free a permit other than its holder. `ZombieStateHoldForCameraCue`
+(`0x0045BFD0`) zeroes `g_attack_permits[obj+0x121]` when its delegate reaches
+`Strike` — the table entry only, leaving `obj+0x121` and the off-screen latch —
+and **every `finish_sequence`** (`EvtActionFinishSequence21`, `0x00403710`)
+zeroes both. That second one is load-bearing: the hold tests its camera cue
+*before* its `Strike` bounce, so a captor already at the ring claims on the cue
+frame and graduates into `ZombieStateHoldAtRange` still owning the permit, and
+its own permit refuses its every claim after that until the script's next
+`finish_sequence` — queued right after the cue for all three held spawns in the
+game — lets it go. The hub itself (`0x00455748`) gives `g_attack_committed` back
+when the actor holding it is back at the ring and still off screen.
+
 That single byte does double duty: it gates the attack *and* it is what
 `SelectCameraLookAtTarget` tests. **The camera focuses on the enemy that holds
 the attack permit** — the one about to attack — and otherwise frames the pair.
@@ -1746,11 +1777,39 @@ moves it to **state 3**, which is the swing:
 ```c
 sub 0:  idx = picks[(rand % 10) + (destroyed_zones & 7) * 10];
         atk = attacks[body_condition][idx];
-sub 1:  if (distance > atk.distance)  { play atk.lunge, keep closing; }
-        else { play atk.strike; ActorPlayHitVoice(obj, 3); sub = 2; }
+sub 1:  if (distance > atk.distance && !cooldown_latch) {
+            if (obj+0x1B4 != atk.lunge)            // the track's own motion
+                SetCurrentActorMotionBlended(obj+0x194, atk.lunge, 0, 10);
+            return;                                // keep closing
+        }
+        ActorSetMotionBlended(obj+0x194, atk.strike, 0, 5);
+        ActorPlayHitVoice(obj, 3); sub = 2;
 sub 2:  if (play_position == atk.hit_frame) ActorStrikeConnect(obj);
         if (play_position >= length - 1) -> state 4, re-approach
 ```
+
+**Both motion calls fade, and the fade holds the cursor.** `ActorSetMotionBlended`
+(`FUN_004119A0`) writes `obj+0x19C` = the start frame and raises
+`track+0x37` bit 0, and `SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not
+recompute the cursor from the clock while that bit is up. It lets go once
+`clock - track+0x28` reaches `fade + 2`. `EnemyZombieUpdate` runs the
+state at `0x00453434` and `ZombieAdvanceMotion` at `0x00453457`. That routine
+draws first (`SkeletonDrawWalk` calls the sampler at `0x004110F3`) and steps the
+clock only after. So the swing's frame 0 is drawn `fade + 1` = 6 times, sub 2
+reads it on `fade + 2` = 7 consecutive frames, and the hit lands
+`6 + hit_frame` frames after the swing starts, not `hit_frame`. The
+lunge's clip is held 11 draws the same way. `[proved]`
+
+**The lunge's test is against the track, not against a lunge the state set.**
+`00455b31 CMP [ESI+0x1b4], EAX` / `00455b37 JZ` skips the call whenever the
+track is already playing that clip. In 155 of the 311 shipped entries the lunge
+*is* the actor's run clip (`row[2]` or `row[3]`). `ZombieStateHoldAtRange`
+tries its claim before it sets its idle: `TryClaimAttackSlot` at `0x0045583B`
+hands to state 3 and returns at `0x0045587B`, and the idle's
+`ActorSetMotionBlended` at `0x004558CC` is only on the path where the claim
+failed. So an actor whose claim succeeds on its first frame at the ring is
+still on its run, and keeps playing it as the lunge, with no restart and no
+fade. `[proved]`
 
 The entry is 0x10 bytes:
 
@@ -2516,12 +2575,28 @@ sub 2  roll -> 0 at 0xCCC a frame; ThrowerStrikeConnect if a permit is held
   has never leapt down it is row 0. The `0x2000` test reads the live stance
   again. Stage 2's pair therefore swing row 4's clip 289, connect on row 0's
   frame 62 or 64, and stop flinching past row 4's 66.
-* **The wait is shot-proof and walks.** `ShotImmune` is up for all of it --
-  sub 1 drops it and `ActorArcStep`'s phase 0 raises it again on the same
-  frame (`0x0044D8BB`), so it stays up until the takeoff -- and the clip is
-  the ordinary motion, so it loops and its root carries the actor.
-  Bit `0x10` of `obj+0x1F8` is `SkeletonApplyRootMotion`'s height store
-  (`0x00410E48`); 310's root height is flat, so here it moves nothing.
+* **The wait is shot-proof, and it is a climb down a wall.** `ShotImmune` is
+  up for all of it -- sub 1 drops it and `ActorArcStep`'s phase 0 raises it
+  again on the same frame (`0x0044D8BB`), so it stays up until the takeoff --
+  and the clip is the ordinary motion, so it loops and its root carries the
+  actor. Both spawns are placed **on their sides against the clock face**:
+  their records carry orient `(0, 0xC000, 0xC000)`, which
+  `SpawnFromDescriptor` (`FUN_00408A20`) copies whole to `obj+0x64..0x6C`, and
+  `SkeletonApplyRootMotion` (`FUN_00410C50`) turns every root delta by
+  `T · Rz(roll) · Ry(yaw) · Rx(pitch) · S` before it stores it
+  (`0x00410D56`..`0x00410DDE`). Motion 310 walks 7.19 units a cycle along its
+  own -Z; that rotation takes -Z to world -Y, and bit `0x10` of `obj+0x1F8` is
+  the store that lets the height through (`0x00410E48`). So the wait walks the
+  pair straight down the wall -- 8.7 units in 45 frames and 12.6 in 60,
+  measured in the page, the fade holding the first six still -- and sub 2
+  rolls each one level (`0xCCC` a frame, six frames from `0xC000`) as it
+  leaps. `EnemyThrowerInit` sets the draw's rotation order to 1
+  (`obj+0x1FC`, `0x004496A2`): `RotX; RotZ; RotY`.
+* **Where the stab lands.** The arc is 45 (or 60) frames and the connect
+  waits for row 0's frame 62 or 64 on clip 289's flight stage (cut 34..66), so
+  the stab lands thirteen frames before the landing (measured in the page),
+  with the body some thirty units above the eye and closing -- the swing, not
+  the arrival, is what hurts.
 
 ### The arc, and the three-stage script
 

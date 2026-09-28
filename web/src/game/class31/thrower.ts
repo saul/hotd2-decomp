@@ -538,7 +538,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.HitReaction:
       return ThrowerStateHitReaction(obj, eye, rng, host);
     case ThrowerState.FallAndLand:
-      return ThrowerStateFallAndLand(obj, host, dt, rng);
+      return ThrowerStateFallAndLand(obj, host, dt, rng, events);
     case ThrowerState.Death:
       return ThrowerStateDeathClip(obj);
     case ThrowerState.Corpse:
@@ -574,7 +574,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.BlinkIn:
       return ThrowerStateBlinkInThreeHops(obj, dt, stance);
     case ThrowerState.StandAndDecide:
-      return ThrowerStateStandAndDecide(obj, eye, dt, rng, host);
+      return ThrowerStateStandAndDecide(obj, eye, dt, rng, host, events);
     case ThrowerState.WaitForPermit:
       return ThrowerStateWaitForPermit(obj, eye, rng, host);
     // Three ids, one handler: the router names 12 and 13, the wait names 9.
@@ -583,11 +583,11 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.PounceFar:
       return ThrowerStateLeapDown(obj, dt, rng, host, events);
     case ThrowerState.LeapAside:
-      return ThrowerStateLeapAside(obj, eye, dt, rng);
+      return ThrowerStateLeapAside(obj, eye, dt, rng, host, events);
     case ThrowerState.LeapToWallA:
     case ThrowerState.LeapToWallB:
     case ThrowerState.LeapToCeiling:
-      return ThrowerStateLeapToSurface(obj, dt);
+      return ThrowerStateLeapToSurface(obj, dt, host, events);
     case ThrowerState.WalkDistance:
       return ThrowerStateWalkDistance(obj, rng);
     case ThrowerState.EntranceClip:
@@ -600,7 +600,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
       // No `ActorIntegrate`: the arc **interpolates** the position, the way
       // `ActorArcStep` does for every other leap in this class. Integrating a
       // velocity on top would move the actor twice.
-      return ThrowerStateLeapToPoint(obj, dt, rng, events);
+      return ThrowerStateLeapToPoint(obj, dt, rng, events, host);
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
       return ThrowerStatePathFollow(obj, dt);

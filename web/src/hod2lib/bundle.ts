@@ -249,9 +249,13 @@ export const GENERIC_NO_MODEL = [18, 25, 28];
 /**
  * Stage number -> the index in the BGM tables of that stage's own track.
  *
- * The event script never plays these: every `bgm_entry_play` in the six stage
- * scripts names a *boss* or *transition* track, so the opening track is
- * started outside the event system by a path that has not been traced.
+ * **The event script plays these**, at step 2 of each entry block: a
+ * `se_play` of the track in stages 1-4 and 6, a `bgm_entry_play` in stage 5.
+ * This said the opposite for as long as only `bgm_entry_play` had been
+ * looked at -- every one of those names a boss or transition track -- and the
+ * player started the track at load on the strength of it. The player no
+ * longer reads this field; it is a label, and a check (`test:seek`) that the
+ * script's own first track is the one named here.
  */
 export const STAGE_BGM_INDEX: Record<number, number> =
   { 1: 1, 2: 0, 3: 17, 4: 16, 5: 18, 6: 19 };
@@ -279,8 +283,8 @@ export function bgmJson(tables: ExeTables, stageNumber: number | null,
       id: (0x10000000 | idx) >>> 0,
       ar: names.ar[idx],
       plain: idx < names.plain.length ? names.plain[idx] : null,
-      note: "the stage's own track, named by convention rather than by the "
-        + "script -- no bgm_entry_play in any stage script starts it",
+      note: "the stage's own track, which its script starts at step 2 of "
+        + "each entry block (se_play; bgm_entry_play in stage 5)",
     },
     game_mode: gameMode,
   };

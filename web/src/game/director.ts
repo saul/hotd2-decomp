@@ -19,6 +19,7 @@ import { ActorLiftCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { WaterSurfacesTick } from "./class41/water";
+import { St2CarsTick } from "./class21/car";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
@@ -211,7 +212,11 @@ export function SpawnScriptedCharacters(
                          { ...DescriptorFromPlacement(p),
                            motion: req.motion,
                            hp, maxHp: hp,
-                           yaw: p?.yaw ?? 0, pos: { ...req.pos },
+                           // All three words of the record's orientation,
+                           // `obj+0x64`/`+0x68`/`+0x6C`, as
+                           // `SpawnFromDescriptor` copies them.
+                           pitch: p?.pitch ?? 0, yaw: p?.yaw ?? 0,
+                           roll: p?.roll ?? 0, pos: { ...req.pos },
                            visible: true },
                          rng, events));
   }
@@ -795,6 +800,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // `CamAdvancePathFrame` before any of this.
   CameraActorTick();
   CameraRunQueuedAction();
+  // The stage-2 car, which `RescueTargetInit` (`FUN_00451720`) allocates:
+  // appended after the camera tasks the scene made first, so it poses from
+  // the camera path this frame's queued action has just installed -- see
+  // `game/class21/car.ts`.
+  St2CarsTick(host);
   // The tasks a boss allocates: the name banner and the health bar. After
   // the camera tasks, which the scene created before any boss existed, and
   // after the boss -- `ActorAlloc` appends. The banner flies the camera block

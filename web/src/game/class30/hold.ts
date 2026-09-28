@@ -28,7 +28,7 @@ import type { Rng } from "../../core/rng";
 import { ZombieFlag2, type ZombieActor } from "../actor";
 import { G } from "../globals";
 import { TurnActorTowardCameraEye } from "../actor_turn";
-import { TryClaimAttackSlot } from "../combat/permits";
+import { ActorIsOnScreen, TryClaimAttackSlot } from "../combat/permits";
 import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
@@ -96,6 +96,31 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
   // the axe.
   ActorBodyConditionFromHands(obj);
 
+  // **The off-screen latch comes off here too**, and the port had no copy of
+  // it. `g_attack_committed` is the "one enemy may be attacking unseen" gate
+  // `TryClaimAttackSlot` raises; an actor that is back in the hub still owning
+  // it, and still off screen, gives it up:
+  //
+  // ```
+  // 0045573f  8b866c130000   MOV  EAX, dword ptr [ESI + 0x136c]
+  // 00455748  a900000200     TEST EAX, 0x20000             ; its own latch bit
+  // 0045574d  7424           JZ   0x00455773
+  // 00455750  e8bb44fbff     CALL ActorIsOnScreen          ; FUN_00409C10
+  // 00455758  85c0           TEST EAX, EAX
+  // 0045575a  7517           JNZ  0x00455773               ; on screen: keep it
+  // 00455762  25fffffdff     AND  EAX, 0xfffdffff
+  // 0045576d  891df0349a00   MOV  [g_attack_committed], EBX ; EBX = 0
+  // ```
+  //
+  // It matters to `ZombieStateHoldForCameraCue` (`FUN_0045BFD0`), which gives
+  // back the permit a held captor claims and **not** the latch: the next frame
+  // of the hold lands here, and this is where an off-screen claim's latch is
+  // let go. `[proved]`
+  if ((obj.flags2 & ZombieFlag2.OffScreenPermit) && !ActorIsOnScreen(obj, host)) {
+    obj.flags2 &= ~ZombieFlag2.OffScreenPermit;
+    G.g_attack_committed = 0;
+  }
+
   const charType = CharacterTypeOf(obj)?.type ?? -1;
   // **The retreat has an escape, and it is two bits of `obj+0x136C`:**
   //
@@ -155,7 +180,15 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
     if (obj.cooldown < 1) obj.zom.hasCooldown = false;
   }
 
-  if (ZombieAttackRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
+  // The hub's own four tests, and then **the claim itself** -- not a reading
+  // of the claim's refusals. `TryClaimAttackSlot` voids `obj+0x121` before it
+  // tests anything, so a hub that skipped the call because the permit looked
+  // taken kept a stale index the engine does not: the captor
+  // `ZombieStateHoldForCameraCue` hands back holding its own permit sat on
+  // `obj+0x121 = 0` where the exe has `0xFF`. It also refused a two-player
+  // claim whenever *either* permit was held, which the engine's per-player
+  // pick does not. `0x0045580F`..`0x0045583B`. `[proved]`
+  if (ZombieHoldGateRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
     // Body condition 4 goes to state 0x34 instead; that state is unread, and
     // no stage-2 spawn carries condition 4 into this state.
     obj.state = ZombieState.Strike;
@@ -202,19 +235,15 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
 }
 
 /**
- * Why this actor may not swing, in the order the hub asks — or `null`.
+ * `ZombieStateHoldAtRange`'s own gate in front of the claim, in the order it
+ * asks — or `null` when the hub may call `TryClaimAttackSlot`.
  *
- * **The condition and the explanation are one function on purpose.** A crowd
- * standing at the ring looks identical whichever of the five reasons it is,
- * and the sidebar could only say "wants a permit", which is the symptom. A
- * second copy of the test written for the panel would be a copy that drifts,
- * so the state machine asks this and the panel prints the same answer.
- *
- * The first four are `ZombieStateHoldAtRange`'s own gate, in the order it asks
- * them. The last two are what `TryClaimAttackSlot` (`FUN_00455DE0`) refuses
- * on, read rather than called so that asking does not take the permit.
+ * [port-only] as a function: the engine tests these inline at
+ * `0x0045580F`..`0x00455838`. It is split out so that the state machine and
+ * {@link ZombieAttackRefusal} ask the same four questions, and so that the
+ * hub's call to the claim is the engine's call rather than a prediction of it.
  */
-export function ZombieAttackRefusal(obj: ZombieActor): string | null {
+function ZombieHoldGateRefusal(obj: ZombieActor): string | null {
   // `00455815 f6c404` / `00455818 7535` — the first thing the exe asks, and it
   // jumps past the whole claim. A spawn still playing its authored entry clip
   // does not queue for a permit at all.
@@ -228,6 +257,24 @@ export function ZombieAttackRefusal(obj: ZombieActor): string | null {
     return `queued ${obj.queueRank}, past the cap of ${QUEUE_CAP}`;
   }
   if (obj.cooldown >= 1) return `cooling down, ${obj.cooldown} left`;
+  return null;
+}
+
+/**
+ * Why this actor may not swing, in the order the hub asks — or `null`. For
+ * the debug sidebar.
+ *
+ * A crowd standing at the ring looks identical whichever of the reasons it
+ * is, and the sidebar could only say "wants a permit", which is the symptom.
+ * The first four are the hub's own gate, {@link ZombieHoldGateRefusal}, which
+ * the state machine asks too. The last two are what `TryClaimAttackSlot`
+ * (`FUN_00455DE0`) refuses on, read rather than called so that asking does not
+ * take the permit — and **only** read: the state machine does not ask them,
+ * it calls the claim, which is what the engine does.
+ */
+export function ZombieAttackRefusal(obj: ZombieActor): string | null {
+  const hub = ZombieHoldGateRefusal(obj);
+  if (hub !== null) return hub;
   // The global latch. One enemy may attack unseen, and while one is, nobody
   // may claim at all — including the ones you can see, which is what makes
   // this so hard to read off the screen.

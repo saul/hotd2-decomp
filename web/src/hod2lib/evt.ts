@@ -154,7 +154,9 @@ export const OPCODES: Record<number, Op> = {
   0x2b: ["award_accuracy_bonus", "fix", 1],
   0x2c: ["set_skippable_region", "fix", 2],
   0x2d: ["play_dialogue", "fix", 2],
-  0x2e: ["resume_bgm_if_skipped", "fix", 1],
+  // `if (skip) PlaySoundId(0x80000002)`: the voice channel's stop, not a
+  // resume of the music. See tools/hod2lib/evt.py.
+  0x2e: ["stop_voice_if_skipped", "fix", 1],
   0x2f: ["suppress_accuracy_stats", "fix", 2],
   0x30: ["queue_event", "queue", 0],      // FUN_0045F7F0
   0x31: ["goto_scene_state", "fix", 2],

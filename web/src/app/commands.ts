@@ -121,6 +121,8 @@ export interface PlayerCommands {
   /** Sound on or off, as the viewer's own choice. */
   setMuted(muted: boolean): void;
   requestSkip(): void;
+  /** Player 1's START, both of its readers. See the `pressStart` command. */
+  pressStart(): void;
   /** The game-over screen's buttons and the menu's Restart. */
   restartRun(stage: number): void;
   /** A stage the menu chose, loaded and -- once started -- running. */
@@ -187,6 +189,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "pause":      p.pause(); return;
     case "start":      p.startGame(); return;
     case "requestSkip": p.requestSkip(); return;
+    case "pressStart": p.pressStart(); return;
     case "restartStage": p.restartRun(p.state.stage); return;
     case "restartFromStageOne": p.restartRun(1); return;
     case "branchHover":

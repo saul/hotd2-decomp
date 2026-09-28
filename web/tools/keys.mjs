@@ -17,8 +17,9 @@
  * Enter (which is START: the continue, the skip) never reached the game. With
  * `ui/App.tsx`'s release taken out, the three checks that say so fail.
  */
-import { openPlayer, waitForLoad } from "./lib/player.mjs";
+import { openPlayer, requireBundle, waitForLoad } from "./lib/player.mjs";
 
+requireBundle("keys");
 const HEAD = process.argv.includes("--head");
 let failures = 0;
 const check = (name, ok, detail = "") => {

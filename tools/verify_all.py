@@ -148,6 +148,13 @@ CHECKS: list[Check] = [
           "hands Space and Enter (START) back to the game rather than "
           "leaving them with the button",
           NEEDS_BUNDLE),
+    Check("continue", "web",
+          ["node", "tools/continue_page.mjs", "--headless"],
+          "that the last life lost with credits left puts CONTINUE? and its "
+          "digit where the exe draws them, holds the script at its wait, and "
+          "that START -- pressed on the corner button, the one START a phone "
+          "has -- spends a credit and puts the player back in play",
+          NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "

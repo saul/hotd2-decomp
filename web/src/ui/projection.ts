@@ -85,6 +85,20 @@ export interface SkipProjection {
 }
 
 /**
+ * The continue offer: player 1 is on the CONTINUE? countdown and START would
+ * be heard. The corner button becomes **Continue** for it, because it is the
+ * one START a phone has -- the skip's button and the continue's are the same
+ * press, as they are on the pad. Null whenever player 1 is not counting down.
+ */
+export interface ContinueProjection {
+  /** START would take: the screen furniture is up and a credit is there. */
+  canContinue: boolean;
+  /** The digit the game draws, 9 down to 0. */
+  digit: number;
+  sub: string;
+}
+
+/**
  * The game-over screen, from `game/game_over.ts`'s state. Null while a stage
  * is being played.
  */
@@ -365,6 +379,7 @@ export interface UiProjection {
    */
   groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   skip: SkipProjection | null;
+  continueOffer: ContinueProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
 }

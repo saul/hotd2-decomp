@@ -416,6 +416,23 @@ kbd {
   cursor: default;
 }
 .skip-key { background: var(--glass); }
+/* The same button on the continue countdown, in the game's own colour: it is
+   the one thing between the player and the game-over screen, and on a phone
+   the only START there is. Larger for a thumb, and the digit is the game's. */
+#skipbar.continue button {
+  min-height: 48px; padding: 10px 22px;
+  background: var(--blood); border-color: var(--blood);
+  font-size: 15px; letter-spacing: 0.16em;
+  box-shadow: 0 8px 28px rgba(208, 20, 44, 0.45);
+}
+#skipbar.continue button:hover:not(:disabled) { background: #e8243e; }
+#skipbar.continue button:disabled {
+  background: var(--glass); box-shadow: none;
+}
+.continue-digit {
+  min-width: 1.2em; text-align: center;
+  font-family: var(--mono); font-size: 17px; letter-spacing: 0;
+}
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { #skipbar { animation: none; } }
 

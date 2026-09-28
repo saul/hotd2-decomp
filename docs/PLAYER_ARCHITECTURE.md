@@ -561,8 +561,11 @@ keeping from them moved:
 
 * **Over the game** (`#overlay`): the breadcrumb menu -- `≡ HOTD2`, and in it
   the stage, the entry, Original Mode, restart, the bundle screen and the
-  sidebar -- the speaker, the start and pause screen, the skip prompt, the
-  branch bar and the game-over buttons.
+  sidebar -- the speaker, the start and pause screen, the corner button, the
+  branch bar and the game-over buttons. The corner button is player 1's
+  START (`pressStart`, the command Enter's handler makes too), labelled for
+  what START would do: **Skip** in a skippable region, **Continue** with the
+  game's digit on the CONTINUE? countdown. It is the only START a phone has.
 * **In the debug sidebar** (`#debug`): Play or free roam, pause, skip and
   kill; then three tabs — the inspection panels (the 4:3 switch, light, fog
   and filtering in Scene; the branch variable and "Pause at branches" in

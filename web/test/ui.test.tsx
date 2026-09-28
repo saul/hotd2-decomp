@@ -53,6 +53,7 @@ import { CrumbMenu } from "../src/ui/panels/Crumbs";
 import { DebugSidebar } from "../src/ui/panels/DebugSidebar";
 import { Feed } from "../src/ui/panels/Feed";
 import { PauseScreen, SoundButton } from "../src/ui/panels/Overlays";
+import { SkipBar } from "../src/ui/panels/SkipBar";
 import { Tree } from "../src/ui/panels/Tree";
 import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
@@ -124,6 +125,7 @@ function projection(): UiProjection {
       route: [["g_script_branch_var", "0"]],
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
+    continueOffer: null,
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
     gameOver: { phase: 3, label: "GAME OVER" },
@@ -341,6 +343,48 @@ const oneEntry = renderIn({ ...projection(), entries: [0] },
                             onClose: () => {} }));
 check("and a stage with one entry offers no choice of entry",
       !oneEntry.includes('id="entry-picker"'));
+
+// The corner button is START, and says which of its two jobs the moment
+// wants. On a phone it is the only START there is -- without the Continue
+// label a phone could only watch the CONTINUE? digit run out.
+console.log("\nThe corner button:\n");
+{
+  const skipOnly = renderIn(projection(), createElement(SkipBar));
+  check("in a skippable region it says Skip",
+        skipOnly.includes('id="skipbar"') && skipOnly.includes("Skip")
+        && !skipOnly.includes("Continue"), skipOnly);
+  const counting = renderIn({ ...projection(), skip: null,
+                              continueOffer: { canContinue: true, digit: 7,
+                                               sub: "a credit" } },
+                            createElement(SkipBar));
+  check("on the continue countdown it says Continue, with the game's digit",
+        /id="skipbar" class="continue"/.test(counting)
+        && /Continue <span class="continue-digit">7<\/span>/.test(counting)
+        && !/<button[^>]*disabled/.test(counting), counting);
+  const both = renderIn({ ...projection(),
+                          continueOffer: { canContinue: true, digit: 3,
+                                           sub: "a credit" } },
+                        createElement(SkipBar));
+  check("...and Continue is the label if both are ever live at once",
+        both.includes("Continue") && !both.includes("Skip"));
+  const broke = renderIn({ ...projection(), skip: null,
+                           continueOffer: { canContinue: false, digit: 2,
+                                            sub: "no credit" } },
+                         createElement(SkipBar));
+  check("a continue START would not take is shown, and cannot be pressed",
+        /<button[^>]*disabled/.test(broke) && broke.includes("Continue"));
+  const neither = renderIn({ ...projection(), skip: null },
+                           createElement(SkipBar));
+  check("with neither, there is no button", !neither.includes("skipbar"));
+  // Both labels are one press: the command Enter's own handler makes.
+  let src = "";
+  try {
+    src = readFileSync(join(process.cwd(), "src", "ui", "panels", "SkipBar.tsx"),
+                       "utf8");
+  } catch { /* the check below fails on an empty source */ }
+  check("both labels dispatch pressStart, and nothing else",
+        /kind: "pressStart"/.test(src) && !/requestSkip/.test(src));
+}
 
 console.log("\nThe debug sidebar:\n");
 

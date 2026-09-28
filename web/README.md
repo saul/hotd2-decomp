@@ -149,7 +149,9 @@ away), or tap with a second finger while the first is down, or, with the 4:3
 frame on, tap the black bar beside it: all three are a pull *off the screen*,
 which is how the arcade gun reloads. The flick needs the motion sensors,
 which a browser only exposes over HTTPS (or `localhost`); iOS also asks
-permission when you press Start. A phone cannot build a bundle -- no mobile
+permission when you press Start. When the last life goes, the corner button
+turns into **Continue** with the countdown's digit on it: it is the pad's
+Start, the same press as Enter, and a phone's only one. A phone cannot build a bundle -- no mobile
 browser can open a folder -- so point it at a machine serving one, or publish
 one privately: [`docs/HOSTING.md`](../docs/HOSTING.md).
 

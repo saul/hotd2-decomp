@@ -126,6 +126,7 @@ function projection(): UiProjection {
       collision: [["coli", "0 quads selected"]],
       shooting: [["shooting", "off"]],
       route: [["g_script_branch_var", "0"]],
+      net: [["session", "none"]],
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
     continueOffer: null,
@@ -133,6 +134,8 @@ function projection(): UiProjection {
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
     gameOver: { phase: 3, label: "GAME OVER" },
+    net: null,
+    netPeer: null,
   };
 }
 

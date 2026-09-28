@@ -53,6 +53,7 @@ import { DebugSidebar } from "./panels/DebugSidebar";
 import { PauseScreen, RotateHint, SoundButton } from "./panels/Overlays";
 import { SkipBar } from "./panels/SkipBar";
 import { PerfHud } from "./panels/PerfHud";
+import { NetBadge, NetLobbyCard, NetOverlay } from "./panels/Net";
 import { GameOver } from "./panels/GameOver";
 import { BranchBar } from "./panels/BranchBar";
 import { LoadingOverlay, Viewport } from "./panels/Viewport";
@@ -292,6 +293,11 @@ function Page(
                 <GameOver />
               </>}
               {ready && <PerfHud />}
+              {/* Netplay: the badge whenever a session is up, the card while
+                  one is being made, the overlay when asked for. */}
+              <NetBadge />
+              <NetLobbyCard />
+              <NetOverlay />
               <RotateHint />
               <div id="toast" role="status" aria-live="polite"
                    className={toast ? "shown" : undefined}>{toast}</div>

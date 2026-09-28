@@ -35,16 +35,25 @@ import { screenMessage } from "./projection/message";
 import type { Player } from "./main";
 
 export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
+  // On a netplay replica the walker never ticks, and the only calls it makes
+  // are `loadState`'s announcements as the host's deltas land. Streaming there
+  // follows the walker's state (`Player.replicaStreaming`), so these are not
+  // passed on.
+  const replica = () => p.net.role === "replica";
   return {
-    enterRegion: (r) => p.scene3d?.enterRegion(r),
-    loadSlot: (s) => p.scene3d?.loadSlot(s),
-    unloadSlot: (s) => p.scene3d?.unloadSlot(s),
+    enterRegion: (r) => { if (!replica()) p.scene3d?.enterRegion(r); },
+    loadSlot: (s) => { if (!replica()) p.scene3d?.loadSlot(s); },
+    unloadSlot: (s) => { if (!replica()) p.scene3d?.unloadSlot(s); },
     startCamera: (c) => p.onCamera(c),
     onFeed: (e) => p.onFeed(e),
     // Nothing to do: the branch bar is a projection now, so the next frame
     // draws it. The callback stays because the walker's contract has one.
     onBranch: () => {},
-    playSound: (id) => p.bgm.play(id),
+    // **An output is an event.** The script's sounds go out on the bus like
+    // the port's, so the one subscriber that plays them plays them -- and a
+    // netplay replica, which hears the host's events and nothing else, hears
+    // these too. The note is what that subscriber's `Bgm.play` said.
+    playSound: (id) => p.playSound(id),
     // `g_enemies_alive` — the engine's own counter, stepped by
     // `CountEnemyZombieIn` / `CountEnemyThrowerIn` and the four retires in
     // `game/combat/counts.ts`, exactly as `g_civilians_alive` below is.
@@ -95,7 +104,7 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
       const raw = script.sound?.messages?.[String(g)]?.[0] ?? null;
       const v = screenMessage(raw);
       if (!raw || !v) return null;
-      if (raw.voice) p.bgm.play(raw.voice);
+      if (raw.voice) p.playSound(raw.voice);
       const said = v.lines.map((l) => l.text).join(" / ");
       return {
         frames: v.frames,

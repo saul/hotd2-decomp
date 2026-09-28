@@ -30,8 +30,8 @@ import type { Transport } from "./transport";
 
 /** What the host needs of the player. */
 export interface HostSim {
-  /** The stage the player has loaded, and in which mode. */
-  stage(): { stage: number; original: boolean };
+  /** The stage the player has loaded, in which mode, and whose exporter built it. */
+  stage(): { stage: number; original: boolean; builder?: string };
   /** The live state, laid out as `world.save()` lays it out, uncloned. */
   liveRoot(): Record<string, unknown>;
   /** Why the host's clock is not running, or null. */
@@ -147,8 +147,9 @@ export class NetHost extends NetPeer {
     this.views.clear();
     this.sections.clear();
     this.loadSentAt = this.now;
-    const { stage, original } = this.sim.stage();
-    const load: LoadMsg = { epoch: this.epoch, stage, original };
+    const { stage, original, builder } = this.sim.stage();
+    const load: LoadMsg = { epoch: this.epoch, stage, original,
+                            ...(builder ? { builder } : {}) };
     this.sendCtrl(Msg.Load, load);
     this.stats.epoch = this.epoch;
   }

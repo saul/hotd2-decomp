@@ -59,11 +59,11 @@ export function skipProjection(p: Player): SkipProjection | null {
  * makes before it spends (`game/player_shell.ts`): the screen furniture's bit
  * 2 and a credit. The spend itself is the game's to make when START lands.
  */
-export function continueProjection(): ContinueProjection | null {
+export function continueProjection(player = 0): ContinueProjection | null {
   if (G.g_app_state !== AppState.InPlay
-      || G.g_player_state[0] !== PlayerState.Continue) return null;
+      || G.g_player_state[player] !== PlayerState.Continue) return null;
   const t = G.g_nRunPhase === RunPhase.ContinueCountdown
-    ? G.g_continue_timer : G.g_player_continue_timer[0];
+    ? G.g_continue_timer : G.g_player_continue_timer[player];
   const can = CreditsAvailable() !== 0
     && (G.g_screen_furniture_flags & 2) !== 0;
   const credits = G.g_free_play === 1 ? "free play" : `${G.g_credits[0]} credits`;
@@ -164,12 +164,13 @@ const GAME_OVER_LABELS = [
 ];
 
 /**
- * Whether the game drew player 1's crosshair this frame --
+ * Whether the game drew this page's player's crosshair this frame --
  * `HudDrawCrosshair`'s decision, recorded in `G.g_crosshair_drawn`. The
  * reticle itself is the page's, because it follows the pointer between ticks.
+ * Player 1's alone or hosting; player 2's on a netplay replica.
  */
-export function crosshairProjection(): boolean {
-  return G.g_crosshair_drawn[0] !== 0;
+export function crosshairProjection(player = 0): boolean {
+  return G.g_crosshair_drawn[player] !== 0;
 }
 
 /**

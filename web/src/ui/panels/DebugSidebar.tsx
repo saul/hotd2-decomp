@@ -204,6 +204,13 @@ function Inspect() {
         <DebugGroup group="route" />
       </Panel>
 
+      <Panel id="panel-net" title="Two players"
+             subTitle={"Netplay: one browser runs the game, the other shows "
+               + "it and sends player 2's gun. The menu hosts and joins; "
+               + "this says how the link is doing."}>
+        <DebugGroup group="net" />
+      </Panel>
+
       <Panel id="panel-shooting" title="Shooting"
              subTitle={"Click or tap to shoot: the ray, the per-bone hit "
                + "spheres, the damage escalation and the score, all the "

@@ -1,0 +1,47 @@
+# The netplay rendezvous as a Cloudflare Worker: worker.ts beside this file,
+# one Durable Object per room. README.md is the operator's guide.
+#
+#     cd web/tools/signal
+#     npx wrangler secret put HOTD2_TURN_SECRET    # once, if there is a TURN server
+#     npx wrangler deploy
+#
+# The page then points at https://hotd2-signal.<your-subdomain>.workers.dev/net/signal
+
+name = "hotd2-signal"
+main = "worker.ts"
+compatibility_date = "2025-09-01"
+
+# To serve it from a domain of your own instead of workers.dev (the zone has
+# to be on Cloudflare):
+# routes = [{ pattern = "signal.example.com", custom_domain = true }]
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "SignalRoom"
+
+# SQLite-backed, which the Workers Free plan requires of a new class. The
+# rooms keep nothing in storage, so the backend makes no other difference.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SignalRoom"]
+
+# The settings rooms.ts's configFromEnv reads, under the same names as for the
+# Node servers. Quote them: they are strings there.
+#
+# HOTD2_TURN_SECRET is a secret, not a var, and never goes in this file:
+#
+#     npx wrangler secret put HOTD2_TURN_SECRET
+#
+# It is coturn's static-auth-secret. Until it is set, TURN is off whatever
+# HOTD2_TURN_URLS says, and the rooms hand out STUN only.
+[vars]
+HOTD2_TURN_URLS = "turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:443?transport=tcp"
+# Seconds a TURN credential lives. It has to outlast a session: coturn checks
+# it again on every refresh of a relay.
+HOTD2_TURN_TTL = "21600"
+# Comma-separated; leave it out for rooms.ts's defaults (Cloudflare's, Google's).
+# HOTD2_STUN = "stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302"
+# How long a room with nobody listening lives, if its object stays in memory
+# that long -- usually it does not; see worker.ts.
+# HOTD2_ROOM_IDLE_MS = "1800000"
+# HOTD2_MAX_ROOMS is not enforced by the Worker: each room is its own object.

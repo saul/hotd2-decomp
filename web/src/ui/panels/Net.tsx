@@ -1,0 +1,216 @@
+/**
+ * Two players over the network, on the page: the badge that says how the link
+ * is, the overlay that says everything, the card that shows the room code
+ * while player 2 is on the way, and the menu's section that starts it all.
+ *
+ * Every figure and every judgement of it -- `ok`, `warn`, `bad` -- is
+ * `app/projection/net.ts`'s; these lay it out. What they add is only what
+ * never leaves the page: copying a code or a report to the clipboard.
+ */
+import { useState } from "react";
+import { useDispatch } from "../store_context";
+import { useSlice } from "../useSlice";
+import type { NetProjection } from "../projection";
+
+function copy(text: string): void {
+  void navigator.clipboard?.writeText(text).catch(() => { /* not allowed here */ });
+}
+
+/**
+ * The one line over the game whenever a session is up: who this page is, the
+ * round trip, the loss -- and in red, whatever means the game on this screen
+ * may not be the host's. A press opens the overlay.
+ */
+export function NetBadge() {
+  const net = useSlice((p) => p?.net ?? null);
+  const dispatch = useDispatch();
+  const open = useSlice((p) => p?.toggles.netStats) === true;
+  if (!net?.badge) return null;
+  return (
+    <button id="net-badge" className={`net-${net.badge.level}`}
+            title="Netplay: press for the whole of it (I)"
+            aria-pressed={open}
+            onClick={() => dispatch({ kind: "toggle", name: "netStats", on: !open })}>
+      <span className="net-dot" aria-hidden="true" />
+      {net.badge.text}
+    </button>
+  );
+}
+
+/** Everything the session measures, grouped, with the desync log under it. */
+export function NetOverlay() {
+  const net = useSlice((p) => p?.net ?? null);
+  const dispatch = useDispatch();
+  const [copied, setCopied] = useState(false);
+  const stats = net?.stats;
+  if (!net || !stats) return null;
+  return (
+    <div id="net-overlay" role="dialog" aria-label="Netplay">
+      <div className="net-head">
+        <b>{net.role === "host" ? "Player 1 · host" : "Player 2 · replica"}</b>
+        {net.held && <span className="net-held"> · host {net.held}</span>}
+        <span className="net-actions">
+          {net.role === "replica" && (
+            <button onClick={() => dispatch({ kind: "netResync" })}
+                    title="Ask the host for a keyframe: the whole state, again">
+              Resync
+            </button>
+          )}
+          <button onClick={() => { copy(stats.report); setCopied(true); }}
+                  title="Every figure and the log, as JSON, for a bug report">
+            {copied ? "Copied" : "Copy report"}
+          </button>
+          <button onClick={() => dispatch({ kind: "toggle", name: "netStats", on: false })}
+                  aria-label="Close">×</button>
+        </span>
+      </div>
+      {stats.sections.map((s) => (
+        <section key={s.title}>
+          <h6>{s.title}</h6>
+          <table>
+            <tbody>
+              {s.rows.map((r) => (
+                <tr key={r.label} title={r.title}>
+                  <th>{r.label}</th>
+                  <td className={r.level ? `net-${r.level}` : undefined}>{r.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ))}
+      <section>
+        <h6>Log</h6>
+        {stats.log.length === 0
+          ? <p className="net-dim">Nothing has gone wrong.</p>
+          : (
+            <ol className="net-log">
+              {stats.log.map((e, i) => (
+                <li key={i} className={`net-log-${e.kind}`}>
+                  <span className="net-dim">{e.age} ago · tick {e.tick} · {e.kind}</span>
+                  <br />{e.text}
+                </li>
+              ))}
+            </ol>
+          )}
+      </section>
+    </div>
+  );
+}
+
+function lobbyText(net: NetProjection): { title: string; body: string } | null {
+  const l = net.lobby;
+  switch (l.phase) {
+    case "creating": return { title: "Making a room…", body: "" };
+    case "waiting":
+      return net.role === "host"
+        ? { title: "Waiting for player 2", body: l.code === "local"
+            ? "Open this page in another tab with ?net=local-join."
+            : "Send them the link, or have them choose Join and type the code." }
+        : null;
+    case "joining": return { title: `Joining ${l.code ?? ""}…`, body: "" };
+    case "connecting":
+      return { title: "Connecting…", body: "Finding a way through both networks." };
+    case "error":
+    case "closed":
+      return { title: l.phase === "error" ? "Could not connect" : "The session ended",
+               body: l.error ?? "" };
+    default: return null;
+  }
+}
+
+/**
+ * The card over the game while a session is being made: the room code big
+ * enough to read across a room, the link to send, and a way out.
+ */
+export function NetLobbyCard() {
+  const net = useSlice((p) => p?.net ?? null);
+  const dispatch = useDispatch();
+  const [copied, setCopied] = useState(false);
+  if (!net) return null;
+  const t = lobbyText(net);
+  if (!t) return null;
+  const l = net.lobby;
+  const bad = l.phase === "error" || l.phase === "closed";
+  return (
+    <div id="net-lobby" className={bad ? "net-bad" : undefined} role="status">
+      <h5>{t.title}</h5>
+      {net.role === "host" && l.phase === "waiting" && l.code && l.code !== "local" && (
+        <>
+          <div className="net-code">{l.code}</div>
+          {l.link && (
+            <button className="net-link"
+                    onClick={() => { copy(l.link!); setCopied(true); }}>
+              {copied ? "Link copied" : "Copy the join link"}
+            </button>
+          )}
+        </>
+      )}
+      {t.body && <p>{t.body}</p>}
+      <button className="net-leave" onClick={() => dispatch({ kind: "netLeave" })}>
+        {bad ? "Close" : "Cancel"}
+      </button>
+    </div>
+  );
+}
+
+/** The menu's section: host, join, or -- in a session -- leave. */
+export function NetMenuSection({ onClose }: { onClose: () => void }) {
+  const net = useSlice((p) => p?.net ?? null);
+  const dispatch = useDispatch();
+  const [code, setCode] = useState("");
+  const active = net && net.role !== "solo";
+  return (
+    <section className="menu-net">
+      <h6>Two players</h6>
+      {active ? (
+        <div className="net-menu-row">
+          <span className="net-dim">
+            {net.role === "host" ? "Hosting" : "Player 2"}
+            {net.lobby.code && net.lobby.code !== "local" ? ` · ${net.lobby.code}` : ""}
+          </span>
+          <button onClick={() => { dispatch({ kind: "netLeave" }); onClose(); }}>
+            Leave
+          </button>
+        </div>
+      ) : (
+        <>
+          <button className="net-host"
+                  title="Make a room and play this stage with a friend: you run the game, they join from their own browser"
+                  onClick={() => { dispatch({ kind: "netHost" }); onClose(); }}>
+            <span className="mi">⇄</span> Host a two-player game
+          </button>
+          <form className="net-join"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (code.trim().length >= 4) {
+                    dispatch({ kind: "netJoin", code: code.trim() });
+                    onClose();
+                  }
+                }}>
+            <input value={code} maxLength={12} placeholder="Room code"
+                   aria-label="Room code" autoCapitalize="characters"
+                   spellCheck={false}
+                   onChange={(e) => setCode(e.target.value.toUpperCase())} />
+            <button type="submit" disabled={code.trim().length < 4}>Join</button>
+          </form>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The other player's crosshair, where the game says they are aiming: blue
+ * for player 2, red for player 1, as the cabinet's two guns were.
+ */
+export function PeerCrosshair() {
+  const peer = useSlice((p) => p?.netPeer ?? null);
+  if (!peer) return null;
+  return (
+    <div className={`crosshair peer p${peer.player}`}
+         style={{ left: `${peer.x}px`, top: `${peer.y}px` }}>
+      <span>P{peer.player}</span>
+    </div>
+  );
+}

@@ -1,4 +1,7 @@
 import { defineConfig } from "vite";
+import { execSync } from "node:child_process";
+import { configFromEnv } from "./tools/signal/rooms";
+import { handle as handleSignal, nodeRooms } from "./tools/signal/node";
 import {
   appendFileSync,
   createReadStream,
@@ -188,8 +191,48 @@ function serveBundle() {
   };
 }
 
+/**
+ * The netplay rendezvous, on the dev server: two tabs, or a laptop and a
+ * phone on the LAN, find each other at `/net/signal` with no cloud involved.
+ * The same rooms as `npm run signal` and the Cloudflare Worker -- see
+ * `tools/signal/rooms.ts`. TURN comes from the environment, as there.
+ */
+function serveSignal() {
+  return {
+    name: "hod2-signal",
+    configureServer(server: import("vite").ViteDevServer) {
+      const rooms = nodeRooms(configFromEnv(process.env));
+      const sweep = setInterval(() => rooms.sweep(), 15_000);
+      sweep.unref();
+      server.httpServer?.on("close", () => clearInterval(sweep));
+      server.middlewares.use((req, res, next) => {
+        if (!handleSignal(rooms, "/net/signal", req, res)) next();
+      });
+    },
+  };
+}
+
+/**
+ * Which code the page is, for the netplay handshake: two peers from different
+ * builds are refused rather than left to misread each other's state. The
+ * commit, and whether the tree it was built from had changes -- which in
+ * development is every time, and is the same for every tab one server serves.
+ */
+function buildId(): string {
+  try {
+    const sha = execSync("git rev-parse --short=12 HEAD", { cwd: __dirname })
+      .toString().trim();
+    const dirty = execSync("git status --porcelain -- src", { cwd: __dirname })
+      .toString().trim().length > 0;
+    return dirty ? `${sha}+${Date.now().toString(36)}` : sha;
+  } catch {
+    return `unversioned+${Date.now().toString(36)}`;
+  }
+}
+
 export default defineConfig({
-  plugins: [serveBundle()],
+  plugins: [serveBundle(), serveSignal()],
+  define: { __HOTD2_BUILD__: JSON.stringify(buildId()) },
   // Relative, so a build works wherever it is put -- a bucket's root, a
   // prefix in one, a CloudFront path. Every URL the page makes for itself
   // (`bundle/…`, `bgm/…`) is already relative to the page. See

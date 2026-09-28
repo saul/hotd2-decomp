@@ -64,15 +64,34 @@ export class World<C extends Context = Context> {
   /** See {@link SystemProbe}. Null unless something is measuring. */
   probe: SystemProbe | null = null;
 
+  /**
+   * Systems that do not run: neither `update` nor `resync` reaches them.
+   *
+   * A netplay replica's world holds the port's simulation this way -- the
+   * game update, the rain, anything that writes the state -- because its
+   * state is the host's, applied a tick at a time, and a system of its own
+   * writing into it would be a second author the host never hears from. They
+   * stay registered, so `save`/`load` still see their slices and a keyframe
+   * still loads through them. Empty in every other role.
+   */
+  private dormant: ReadonlySet<System<C>> = new Set();
+
+  setDormant(systems: Iterable<System<C>>): void {
+    this.dormant = new Set(systems);
+  }
+
   update(ctx: C, t: Tick): void {
     const probe = this.probe;
+    const dormant = this.dormant;
     if (!probe) {
-      for (const s of this.systems()) s.update?.(ctx, t);
+      for (const s of this.systems()) {
+        if (s.update && !dormant.has(s)) s.update(ctx, t);
+      }
       return;
     }
     for (const p of ORDER) {
       for (const s of this.byPhase.get(p)!) {
-        if (!s.update) continue;
+        if (!s.update || dormant.has(s)) continue;
         const t0 = probe.now();
         s.update(ctx, t);
         probe.took(s.id, p, probe.now() - t0);
@@ -111,8 +130,13 @@ export class World<C extends Context = Context> {
    * Restore one. Returns null on success, or the reason it was refused —
    * refusing outright, because a half-applied snapshot is indistinguishable
    * from a gameplay bug.
+   *
+   * `adopt` hands each system its slice as it is, uncloned. Only for a
+   * snapshot nobody else holds -- a netplay keyframe, just decoded -- whose
+   * objects are meant to *become* the live state, so that the deltas after it
+   * can be applied to them in place. Everything else takes the clone.
    */
-  load(snap: Snapshot, ctx: C): string | null {
+  load(snap: Snapshot, ctx: C, opts: { adopt?: boolean } = {}): string | null {
     const refusal = snapshotRefusal(snap, ctx.stage);
     if (refusal) return refusal;
     // **Refuse before restoring anything.** A system that saves a slice and
@@ -138,7 +162,7 @@ export class World<C extends Context = Context> {
       if (!s.load) continue;
       const slice = snap.parts[s.id];
       if (slice === undefined) continue;
-      s.load(clonePlain(slice), ctx);
+      s.load(opts.adopt ? slice : clonePlain(slice), ctx);
     }
     // Second pass: the renderers rebuild from the state the first pass put
     // back. Split in two because a renderer's resync may read another
@@ -156,6 +180,8 @@ export class World<C extends Context = Context> {
    * snapshot to apply, so it calls this on its own.
    */
   resync(ctx: C): void {
-    for (const s of this.systems()) s.resync?.(ctx);
+    for (const s of this.systems()) {
+      if (s.resync && !this.dormant.has(s)) s.resync(ctx);
+    }
   }
 }

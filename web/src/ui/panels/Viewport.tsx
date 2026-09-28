@@ -66,6 +66,7 @@
 import type { ReactNode, RefObject } from "react";
 import { useSlice } from "../useSlice";
 import type { LoadingProjection } from "../projection";
+import { PeerCrosshair } from "./Net";
 
 /**
  * The nodes `app/` is handed, as the refs that fill them in.
@@ -127,9 +128,12 @@ export function Viewport(
   // the viewport there, covering the frame's black margin and a sliver of the
   // picture instead of a tenth of it.
   const boxed = useSlice((p) => p?.pillarbox) === true;
+  // Player 2's crosshair is blue, as the cabinet's second gun was.
+  const player = useSlice((p) => p?.net?.player);
   return (
     <div id="viewport" ref={refs.host}
-         className={[paused && "paused", aiming && "shooting"]
+         className={[paused && "paused", aiming && "shooting",
+                     player === 2 && "p2"]
                     .filter(Boolean).join(" ")}>
       {children}
       {/* Before the first projection there are no toggles and both are
@@ -163,6 +167,9 @@ export function Viewport(
                 height={480} />
       </div>
       <div className="crosshair" ref={refs.crosshair} hidden={!aiming} />
+      {/* The other player's, in a two-player session: React places it from
+          the projection, because it follows `G` and not this page's pointer. */}
+      <PeerCrosshair />
     </div>
   );
 }

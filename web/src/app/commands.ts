@@ -28,6 +28,7 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import type { PlayerState } from "./urlstate";
 import type { CamCommand, FeedEntry, Walker } from "../script/walker";
 import { ActorKillAll } from "../game/combat/resolve_hit";
+import type { NetSession } from "./net/session";
 import { toggleFullscreen } from "./device";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
@@ -77,6 +78,8 @@ export interface PlayerCommands {
 
   // -- reached through --------------------------------------------------
 
+  /** Netplay: the lobby's commands, and the role that decides what else is allowed. */
+  readonly net: NetSession;
   /** Written field by field; never replaced. See the note above. */
   readonly state: PlayerState;
   readonly walker: Walker | null;
@@ -146,8 +149,45 @@ export interface PlayerCommands {
   resize(): void;
 }
 
+/**
+ * What a netplay replica may ask for: how it sees and hears the game, its own
+ * gun's START, and the session. Everything else moves the game or its
+ * timeline, which on a replica is the host's -- a stage, a seek, a kill, a
+ * branch, the transport -- and is refused with a line in the feed rather
+ * than quietly ignored.
+ */
+const REPLICA_MAY: ReadonlySet<UiCommand["kind"]> = new Set<UiCommand["kind"]>([
+  "toggle", "boxClass", "foldClass", "boxWait", "setLightMode", "setFogMode",
+  "setFilterMode", "setPillarbox", "setPixelRatio", "setVolume", "toggleMute",
+  "toggleFullscreen", "start", "pressStart",
+  "netHost", "netJoin", "netHostLocal", "netJoinLocal", "netLeave", "netResync",
+]);
+
+/** What a host may not do while player 2 is connected: it would load stages behind their back. */
+const HOST_MAY_NOT: ReadonlySet<UiCommand["kind"]> = new Set<UiCommand["kind"]>([
+  "openBundles",
+]);
+
 export function runCommand(p: PlayerCommands, c: UiCommand): void {
+  const role = p.net.role;
+  if ((role === "replica" && !REPLICA_MAY.has(c.kind))
+      || (role === "host" && HOST_MAY_NOT.has(c.kind))) {
+    p.onFeed({
+      seq: -1, block: p.walker?.block ?? -1, step: -1, opIndex: -1,
+      op: { i: -1, at: 0, op: -1, name: "netplay", cat: "flow" },
+      note: `${c.kind}: not while ${role === "replica"
+        ? "playing as player 2 -- the host decides that"
+        : "player 2 is connected"}`,
+    });
+    return;
+  }
   switch (c.kind) {
+    case "netHost": void p.net.hostOnline(); return;
+    case "netJoin": void p.net.joinOnline(c.code); return;
+    case "netHostLocal": p.net.hostLocal(); return;
+    case "netJoinLocal": p.net.joinLocal(); return;
+    case "netLeave": p.net.leave(); return;
+    case "netResync": p.net.replica?.resync(); return;
     case "boxClass":
       if (c.on) p.boxedClasses.add(c.cls);
       else p.boxedClasses.delete(c.cls);
@@ -325,5 +365,8 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
       p.walker.options.branchPause = on;
       if (!on && p.walker.branch) p.walker.takeBranch();
       return;
+    // The network overlay is the projection's to draw; the switch only asks
+    // for it, and `wantsFrame` keeps its figures live while it is open.
+    case "netStats":     return;
   }
 }

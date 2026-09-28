@@ -1,0 +1,238 @@
+/**
+ * Two-player netplay in the real page: a host and a replica, two tabs of one
+ * headless Chrome, joined over the same-browser transport (`?net=local-host`,
+ * `?net=local-join`), playing a stage.
+ *
+ * `test:net` proves the session code on a real stage with no browser; this
+ * proves the page around it -- the replica's install into `G`, the render
+ * layers that must follow a state they did not make, the gun's route to the
+ * host, the overlay's figures -- none of which a headless run touches. It
+ * asserts what the overlay says, because the overlay is what a player sees:
+ *
+ * - the replica streams, every tick it applies is verified by hash, and
+ *   **none** differs from the host's; no delta fails to apply;
+ * - START pressed on the replica puts player 2 in play on the host;
+ * - shots aimed at enemies through the replica's own camera reach the host
+ *   as player 2's, and the host's aim check says they agree with its camera;
+ * - a rewind on the host moves both to a new epoch without a desync;
+ * - and all of it again with the replica's outgoing link made bad.
+ *
+ *     HOTD2_BUNDLE=<dir> node tools/net_pair.mjs [--stage 1] [--seconds 20]
+ *
+ * Headless, and the only Chrome running: two at once on this machine starve
+ * each other (L29).
+ */
+import { chromium } from "playwright-core";
+import { freePort, requireBundle, serve } from "./lib/player.mjs";
+
+requireBundle("net_pair");
+const args = process.argv.slice(2);
+const flag = (n, d) => {
+  const i = args.indexOf(`--${n}`);
+  return i >= 0 ? args[i + 1] : d;
+};
+const STAGE = Number(flag("stage", "1"));
+const SECONDS = Number(flag("seconds", "20"));
+
+let failures = 0;
+const check = (name, ok, detail = "") => {
+  console.log(`  ${ok ? "ok  " : "FAIL"}  ${name}${!ok && detail ? ` -- ${detail}` : ""}`);
+  if (!ok) failures++;
+};
+
+const port = await freePort();
+const vite = await serve(port);
+// Host candidates as plain addresses: two pages of one browser on one machine
+// find each other that way whether or not mDNS resolves, or STUN is reachable.
+const browser = await chromium.launch({
+  channel: "chrome", headless: true,
+  args: ["--disable-features=WebRtcHideLocalIpsWithMdns"],
+});
+const faults = [];
+// One context for both tabs: `browser.newPage` would give each its own, and a
+// `BroadcastChannel` does not cross contexts any more than it crosses profiles.
+let context = null;
+
+async function open(label, query) {
+  const page = await context.newPage();
+  page.on("pageerror", (e) => faults.push(`${label} threw: ${e.message}`));
+  page.on("console", (m) => {
+    if (m.type() === "error" && !m.location().url.endsWith("/favicon.ico")) {
+      faults.push(`${label}: ${m.text()}`);
+    }
+  });
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("hod2.viewPrefs", JSON.stringify({ toggles: {}, muted: true }));
+    } catch { /* */ }
+  });
+  await page.goto(`http://127.0.0.1:${port}/?stage=${STAGE}&${query}`,
+                  { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#loading", { state: "detached", timeout: 120_000 });
+  return page;
+}
+
+/** The overlay's figures, as a label -> value map. Opens it if it is shut. */
+async function figures(page) {
+  if (!(await page.$("#net-overlay"))) {
+    await page.keyboard.press("KeyI");
+    try {
+      await page.waitForSelector("#net-overlay", { timeout: 5000 });
+    } catch {
+      // No session to show figures for: say what the page does show.
+      return {
+        overlay: "none",
+        lobby: await page.$eval("#net-lobby", (e) => e.textContent).catch(() => "none"),
+        badge: await page.$eval("#net-badge", (e) => e.textContent).catch(() => "none"),
+      };
+    }
+  }
+  return page.$$eval("#net-overlay tr", (trs) => Object.fromEntries(
+    trs.map((tr) => [tr.querySelector("th")?.textContent ?? "",
+                     tr.querySelector("td")?.textContent ?? ""])));
+}
+
+const num = (s) => Number(String(s ?? "").replace(/[^0-9.\-]/g, "")) || 0;
+
+/** `G`, from the page's own module graph (the Vite module the app uses). */
+const readG = (page, fn) => page.evaluate(async (src) => {
+  const { G } = await import("/src/game/globals.ts");
+  return new Function("G", `return (${src})(G);`)(G);
+}, fn.toString());
+
+/**
+ * Where the nearest live enemy is on the replica's screen, through the
+ * replica's own camera -- the pixel a player aiming at it would click.
+ */
+const enemyOnScreen = (page) => page.evaluate(async () => {
+  const { G } = await import("/src/game/globals.ts");
+  const { ActorIsEnemy } = await import("/src/game/registry.ts");
+  const canvas = document.querySelector("#viewport canvas");
+  const r = canvas.getBoundingClientRect();
+  const w = G.g_camera_world_to_view;
+  const eye = G.g_camera_block_eye;
+  let best = null, bd = Infinity;
+  for (const o of G.g_object_list) {
+    if (o.despawned || o.dead || !o.visible || !ActorIsEnemy(o.cls)) continue;
+    const p = { x: o.pos.x, y: o.pos.y + 5, z: o.pos.z };
+    const vx = w[0] * p.x + w[4] * p.y + w[8] * p.z + w[12];
+    const vy = w[1] * p.x + w[5] * p.y + w[9] * p.z + w[13];
+    const vz = w[2] * p.x + w[6] * p.y + w[10] * p.z + w[14];
+    if (vz >= -1) continue;
+    const half = Math.tan((41.1 * Math.PI) / 360);
+    const nx = vx / (-vz * half * (r.width / r.height));
+    const ny = vy / (-vz * half);
+    if (Math.abs(nx) > 0.95 || Math.abs(ny) > 0.95) continue;
+    const d = (o.pos.x - eye.x) ** 2 + (o.pos.z - eye.z) ** 2;
+    if (d < bd) {
+      bd = d;
+      best = { x: r.left + ((nx + 1) / 2) * r.width, y: r.top + ((1 - ny) / 2) * r.height };
+    }
+  }
+  return best;
+});
+
+async function session(label, replicaQuery, seconds, webrtc = false) {
+  console.log(`\n${label}`);
+  context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const host = await open("host", webrtc ? "net=host" : "net=local-host");
+  await host.keyboard.press("Space"); // past the start screen, and play
+  let replica;
+  if (webrtc) {
+    // The room the host made at the dev server's rendezvous, off its card.
+    const code = await host.waitForSelector("#net-lobby .net-code", { timeout: 20_000 })
+      .then((el) => el.textContent());
+    console.log(`        room ${code}`);
+    replica = await open("replica", `${replicaQuery}#join=${code}`);
+  } else {
+    replica = await open("replica", `net=local-join&${replicaQuery}`);
+  }
+  await replica.mouse.click(5, 5); // a press, for the audio; the start screen is the host's
+  // Streaming: the replica verifies ticks.
+  let f = {};
+  for (let i = 0; i < 60; i++) {
+    f = await figures(replica);
+    if (num(f["ticks verified"]) > 120) break;
+    await replica.waitForTimeout(500);
+  }
+  check("the replica streams and verifies ticks", num(f["ticks verified"]) > 120,
+        JSON.stringify(f));
+
+  // Player 2 presses START. The shell goes through pending-start (10) and
+  // into play (5) when the game lets a player in, which can take a while if
+  // a cut is running: pressed again every couple of seconds, as a player would.
+  let p2 = null;
+  for (let i = 0; i < 80 && p2 !== 5; i++) {
+    if (i % 8 === 0) await replica.keyboard.press("Enter");
+    await replica.waitForTimeout(250);
+    p2 = await readG(host, (G) => G.g_player_state[1]);
+  }
+  check("START on the replica puts player 2 in play on the host", p2 === 5,
+        `g_player_state[1] = ${p2}`);
+
+  // Player 2 shoots what it can see, through its own camera.
+  const end = Date.now() + seconds * 1000;
+  let shots = 0, reloads = 0;
+  let rewound = false;
+  while (Date.now() < end) {
+    const t = await enemyOnScreen(replica);
+    if (t) {
+      await replica.mouse.click(t.x, t.y);
+      shots++;
+      if (shots % 6 === 0) { await replica.keyboard.press("KeyR"); reloads++; }
+    }
+    if (!rewound && Date.now() > end - seconds * 500) {
+      rewound = true;
+      await host.keyboard.press("ArrowLeft"); // a rewind: a new epoch
+    }
+    await replica.waitForTimeout(120);
+  }
+  await replica.waitForTimeout(1500);
+  const rf = await figures(replica);
+  const hf = await figures(host);
+  const score = await readG(host, (G) => G.g_player_score[1]);
+  const epochs = [num(hf["epoch · tick"].split("·")[0]), num(rf["epoch · tick"].split("·")[0])];
+  console.log(`        replica: ${JSON.stringify(rf)}`);
+  console.log(`        host: ${JSON.stringify(hf)}`);
+  check(`no tick the replica applied differed from the host's (${rf["ticks verified"]} verified)`,
+        rf["hash mismatches"] === "0" && num(rf["ticks verified"]) > 300,
+        `mismatches ${rf["hash mismatches"]}`);
+  check("no delta failed to apply", rf["apply errors"] === "0", rf["apply errors"]);
+  check("the replica's state matches the host's now",
+        /matches/.test(rf.state ?? "") && num(rf["ticks verified"]) > 0, rf.state);
+  check(`player 2's shots reached the host (${shots} fired, ${hf["presses taken"]} presses taken)`,
+        shots > 5 && num(hf["presses taken"]) >= shots, "");
+  check(`player 2's aim agrees with the host's camera (${hf["player 2's aim"]})`,
+        /\d/.test(hf["player 2's aim"] ?? "") && num(hf["player 2's aim"]) < 0.05,
+        hf["player 2's aim"]);
+  check(`player 2 scored (${score})`, score > 0, `score ${score}`);
+  check(`the rewind moved both ends to the same new epoch (${epochs.join(" / ")})`,
+        epochs[0] >= 2 && epochs[0] === epochs[1], JSON.stringify(epochs));
+  if (webrtc) {
+    check(`WebRTC connected (${rf.transport}, route ${rf.route}, ICE ${rf.ICE})`,
+          rf.transport.startsWith("webrtc") && /connected|completed/.test(rf.ICE), rf.ICE);
+  }
+  await context.close();
+}
+
+const ONLY = flag("only", "");
+try {
+  if (!ONLY || ONLY === "local") {
+    await session(`stage ${STAGE}, two tabs, clean`, "", SECONDS);
+  }
+  if (!ONLY || ONLY === "sim") {
+    await session(`stage ${STAGE}, two tabs, replica's link 60±30 ms, 10% loss`,
+                  "netsim=lat:60,jit:30,loss:10", SECONDS);
+  }
+  if (!ONLY || ONLY === "webrtc") {
+    await session(`stage ${STAGE}, WebRTC through the dev server's rendezvous`,
+                  "", SECONDS, true);
+  }
+} finally {
+  await browser.close();
+  vite.kill("SIGTERM");
+}
+check(`nothing threw and nothing logged an error (${faults.length})`, faults.length === 0,
+      faults.slice(0, 5).join(" | "));
+console.log(failures ? `\n${failures} failed` : "\nall passed");
+process.exit(failures ? 1 : 0);

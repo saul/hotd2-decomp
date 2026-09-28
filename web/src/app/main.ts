@@ -72,11 +72,12 @@ import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
   BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
-  PerfProjection,
+  NetProjection, PerfProjection,
   SkipProjection, SoundProjection, StatusProjection, TransportProjection,
   TreeProjection,
 } from "../ui/projection";
 import { highlightSet } from "./projection/sidebar";
+import { netProjection, netRows } from "./projection/net";
 import { buildProjection, type PlayerView } from "./projection/player";
 import { groupRows, hudInputs, hudRows } from "./projection/hud";
 import type { DebugGroupName, StripRow } from "../ui/projection";
@@ -127,11 +128,15 @@ import {
 } from "../game/player_shell";
 import { SetBoss4Tables, SetGameOverTables, SetGameTables }
   from "../game/tables";
+import { PressKind, type Press } from "../core/net/protocol";
+import { NetSession, type NetRole } from "./net/session";
+import { makeNetHooks } from "./net/player_hooks";
+import type { ShotRay } from "../game/host";
 
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
 const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
   camera: [], scene: [], actors: [], props: [], collision: [], shooting: [],
-  route: [],
+  route: [], net: [],
 };
 
 /** The commands that change something worth remembering across a reload. */
@@ -360,7 +365,37 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   status: StatusProjection = { text: "", note: "", noteTitle: "" };
   /** The view toggles. Defaults come from the table the panel renders. */
   toggles: Readonly<Record<ToggleName, boolean>> = TOGGLE_DEFAULTS;
-  private readonly events = new Events();
+  /** The typed bus. Public for netplay's replica, which replays the host's onto it. */
+  readonly events = new Events();
+  /**
+   * Two players over the network: this page's role in it, and the lobby. See
+   * `app/net/session.ts`. Solo unless somebody hosts or joins.
+   */
+  readonly net: NetSession;
+  /**
+   * The replica's live state tree: `{ frame, rng, parts }` with `G` itself
+   * at `parts.game`. What the host's deltas are applied into. Null unless
+   * this page is a replica with a keyframe installed.
+   */
+  netRoot: Record<string, unknown> | null = null;
+  /** The replica's last music, so it re-syncs only when the host's moves. */
+  netBgmKey = "";
+  /** The stage streaming the replica last told the scene about. */
+  private netRegion = -1;
+  private readonly netSlots = new Set<number>();
+  /** `GunLightBuildSystem`, kept to be held dormant on a replica. */
+  private readonly gunLightBuild: GunLightBuildSystem;
+  /** What `Bgm.play` said about the last sound: the walker's feed note. */
+  private lastSoundNote: string | undefined = undefined;
+  /** The aim this page's own gun last had, in the exe's pixels. */
+  private localAim = { x: 0, y: 0 };
+  /**
+   * Which player this page's gun is: player 1 (index 0) alone or hosting,
+   * player 2 (index 1) as a replica.
+   */
+  get localPlayer(): number {
+    return this.net.role === "replica" ? 1 : 0;
+  }
   /** The one random source in the player, and part of every snapshot. */
   readonly rng = new Rng(1);
   /**
@@ -498,12 +533,17 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // The `wake` is unconditional. It is a redraw, not a tick — `Shooting.fire`
     // has already counted the click in the HUD's own shots tally — and the
     // pacer's list of wakers says "a shot" without qualification.
+    //
+    // **As player 2, the pull goes to the host.** The segment is the one this
+    // page's own renderer built through the camera it drew -- the replicated
+    // one -- so it is where player 2 was looking, and the host checks it
+    // against its own record of that camera (`NetHost.checkAim`).
     this.shooting.onFire = (ray) => {
-      // On the game-over screen a pull is the pad bit its cuts test
-      // (`GAME_OVER_SKIP_BITS`, player 0's `2`), not a shot: no scene runs.
-      if (G.g_app_state === AppState.GameOver) {
-        this.padLatch |= 2;
-      } else if (this.gameRunning && !this.frozen) QueueShotRequest(0, ray);
+      if (this.net.replica) {
+        this.net.replica.press(PressKind.Pull, ray);
+      } else {
+        this.gunInput(0, PressKind.Pull, ray);
+      }
       this.pacer.wake();
     };
     // The right button is a pull **off the screen**, because that is what the
@@ -523,10 +563,21 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // so `nx = ±1` is the frame's edge. A move only wakes the loop while a
     // gun light is live -- it is then the one thing on screen that follows
     // the pointer through a pause.
+    //
+    // As player 2 the aim is the host's to write: it goes out with the next
+    // input packet, and comes back in `G` like everything else.
     this.shooting.onAim = (nx, ny) => {
       const half = Math.tan((this.camera.fov * Math.PI) / 360)
         * PROJECTION_DISTANCE_PX;
-      SetPlayerAimFromPointer(0, nx * half * this.camera.aspect, ny * half);
+      const x = nx * half * this.camera.aspect;
+      const y = ny * half;
+      this.localAim.x = x;
+      this.localAim.y = y;
+      if (this.net.replica) {
+        this.net.replica.setAim(x, y, true);
+        return;
+      }
+      SetPlayerAimFromPointer(0, x, y);
       if (EntityLightLive(GUN_LIGHT_FIRST)) this.pacer.wake();
     };
     this.hudLayer = new HudLayer(host.hud);
@@ -640,7 +691,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.freeRoam);
     // The gun lights, off the camera just placed -- not the one the port's
     // frame read a phase earlier. See `GunLightBuildSystem`.
-    this.world.add("render", new GunLightBuildSystem(this.game));
+    this.gunLightBuild = this.world.add("render", new GunLightBuildSystem(this.game));
     // Everything below poses against the camera the draw just placed.
     this.world.add("render", this.spawns);
     this.world.add("render", this.sceneFog);
@@ -730,7 +781,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // engine calls `PlaySoundId` from gameplay -- class 0x31's laser sword and
     // its footsteps, class 0x10's queued cries -- and every one of them was
     // going nowhere.
-    this.events.on("sound.play", (d) => { this.bgm.play(d.id); });
+    //
+    // The script's own sounds come this way too now (`walker_host.ts`), so
+    // that a netplay replica, which hears the host's events and nothing else,
+    // hears them. The note is what the walker's feed row says.
+    this.events.on("sound.play", (d) => { this.lastSoundNote = this.bgm.play(d.id); });
 
     // -- class 0x10, the civilians ---------------------------------------
     // Op 0x1D is `EvtOpPlayDialogue2D`, the same call evt op 0x2D makes, so a
@@ -743,6 +798,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // Onto the walker, not into the layer: a caption is script state, and
       // the one raised by a civilian is no less so than the one raised by
       // evt 0x2D. It goes in the snapshot with the rest.
+      //
+      // **Not on a replica.** There the caption arrives as state, with the
+      // tick that raised it, and this handler runs on the host's event as a
+      // replay -- a write here would be a second author of script state the
+      // host never hears from, and the next tick's hash would say so. The
+      // voice above is an output and plays on both.
+      if (this.net.role === "replica") return;
       this.walker.captionGroup = d.group;
       this.walker.captionFrames = v.frames;
     };
@@ -764,6 +826,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
         note: `player ${d.player < 0 ? "?" : d.player} · −1 life · −100 twice`,
       });
     });
+
+    // Netplay. The host records every event the port raises, per tick, for
+    // the replica; with no session the tap does nothing.
+    this.net = new NetSession(makeNetHooks(this), location.search);
+    this.events.tap((k, payload) => this.net.host?.tap(k, payload));
 
     this.wireUi();
     // The one place a `UiCommand` means anything. Everything in `ui/` reaches
@@ -808,11 +875,40 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get groups(): Readonly<Record<DebugGroupName, readonly StripRow[]>> {
     const w = this.walker;
     const x = hudInputs(this);
-    return w && x ? groupRows(w, x) : EMPTY_GROUPS;
+    const rows = w && x ? groupRows(w, x) : { ...EMPTY_GROUPS };
+    return { ...rows, net: netRows(this.net) };
   }
+  get netView(): NetProjection | null {
+    return netProjection(this.net, this.toggles.netStats, performance.now());
+  }
+  /**
+   * The other player's crosshair, off `G`: where the game says they are
+   * aiming, in its pixels from the frame's centre, put through this page's
+   * own camera into the viewport's pixels. Drawn only when the game drew it
+   * (`g_crosshair_drawn`) and the aim is on the screen.
+   */
+  get netPeer(): { x: number; y: number; player: 1 | 2 } | null {
+    if (!this.net.active || !this.walker) return null;
+    const other = 1 - this.localPlayer;
+    if (!G.g_crosshair_drawn[other] || !G.g_aim_on_screen[other]) return null;
+    const half = Math.tan((this.camera.fov * Math.PI) / 360) * PROJECTION_DISTANCE_PX;
+    const nx = G.g_crosshair_x[other] / (half * this.camera.aspect);
+    const ny = G.g_crosshair_y[other] / half;
+    if (Math.abs(nx) > 1 || Math.abs(ny) > 1) return null;
+    const b = this.canvasBox;
+    return {
+      x: Math.round(b.left + ((nx + 1) / 2) * b.width),
+      y: Math.round(b.top + ((1 - ny) / 2) * b.height),
+      player: other === 0 ? 1 : 2,
+    };
+  }
+  /** Where the canvas sits in the viewport, in CSS pixels. Set by `resize`. */
+  private canvasBox = { left: 0, top: 0, width: 1, height: 1 };
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
-  get continueOffer(): ContinueProjection | null { return continueProjection(); }
+  get continueOffer(): ContinueProjection | null {
+    return continueProjection(this.localPlayer);
+  }
   get perf(): PerfProjection | null {
     return this.perfMeter.enabled ? this.perfMeter.snapshot : null;
   }
@@ -880,7 +976,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     await this.loadStage();
     this.setMode(this.state.mode);
     this.resumeAfterReload();
+    // `#join=CODE`, `?net=local-host`, `?net=local-join`: a session the URL
+    // asked for, now that there is a bundle to say who this page is -- read
+    // from the address as the page opened, because the load above rewrites
+    // it (`pushUrl`) and the rewrite has no hash.
+    this.net.autostart(this.openedHash);
   }
+
+  /** The address's hash as the page opened. See {@link enter}. */
+  private readonly openedHash = location.hash;
 
   /**
    * What this tab was doing before it reloaded: `"playing"`, `"started"`
@@ -1147,6 +1251,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // refuse every slot of it anyway -- a snapshot names the stage it was
     // taken against -- so keeping it is guaranteed waste.
     this.ring.clear();
+    // A new timeline for player 2, told now rather than after the load so
+    // the two loads run side by side; the host holds its clock until player
+    // 2 says it is ready (`NetHost.holding`).
+    this.net.host?.discontinuity();
     await loadStageInto(this);
   }
 
@@ -1182,6 +1290,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       // Before the branches, not after: every one of them changes something
       // worth drawing, and a paused player has no loop running to draw it.
       this.wake();
+      // Player 2's keys are its gun's: START and the reload. The transport,
+      // the rewind and the modes are the host's.
+      if (this.net.replica && ["Space", "ArrowLeft", "Digit1", "Digit2"]
+            .includes(e.code)) {
+        return;
+      }
       if (e.code === "Space") { e.preventDefault(); this.togglePlay(); }
       // Half a second of game time back, through the snapshot ring. It has no
       // button: it is a debugging reach for "watch that again", and it went
@@ -1213,6 +1327,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     });
 
     window.addEventListener("popstate", () => {
+      // Player 2's address is the host's to move, not the back button's.
+      if (this.net.replica) return;
       this.state = readState();
       this.wake();
       void this.loadStage();
@@ -1436,21 +1552,84 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * reload. Queued only while the clock can consume it, as a click is.
    */
   offscreenPull(): void {
-    if (this.gameRunning && !this.frozen) QueueOffscreenPull(0);
+    if (this.net.replica) this.net.replica.press(PressKind.Offscreen);
+    else this.gunInput(0, PressKind.Offscreen);
     this.pacer.wake();
   }
 
   /**
-   * One press of player 1's START: Enter, and the corner button.
+   * One press of this page's START: Enter, and the corner button.
    *
    * Both of the exe's readers get it -- bit 8 of the next tick's
    * `g_pad_state` for `PadStartPressed` (a continue, a new game from "out"),
    * and the skip request -- because it is one button. See the Enter branch
-   * of the key handler.
+   * of the key handler. As player 2 it is player 2's START, and the host's.
    */
   pressStart(): void {
-    this.padLatch |= PadBit.Start0;
-    this.requestSkip();
+    if (this.net.replica) {
+      this.net.replica.press(PressKind.Start);
+      this.pacer.wake();
+      return;
+    }
+    this.gunInput(0, PressKind.Start);
+  }
+
+  /**
+   * One player's gun: the one place a press -- this page's own, or player
+   * 2's off the network -- becomes intent in `G`.
+   *
+   * The exe keeps each player's pad in its own half of the pad word, player
+   * 2's sixteen bits above player 1's: `PadStartPressed` (`FUN_00413230`)
+   * tests `0x8` or `0x80000`, and the game-over screen's cut
+   * (`GAME_OVER_SKIP_BITS`) `0x2` or `0x20000`. The shot queue, the
+   * off-screen pull and the aim all take the player's index. So player 2 is
+   * not a special case anywhere below this line: the network is simply what
+   * is plugged into the second port.
+   */
+  gunInput(player: number, kind: PressKind, ray?: ShotRay): void {
+    const shift = player === 0 ? 1 : 0x10000;
+    switch (kind) {
+      case PressKind.Pull:
+        // On the game-over screen a pull is the pad bit its cuts test, not a
+        // shot: no scene runs.
+        if (G.g_app_state === AppState.GameOver) {
+          this.padLatch |= 0x2 * shift;
+        } else if (ray && this.gameRunning && !this.frozen) {
+          QueueShotRequest(player, ray);
+        }
+        return;
+      case PressKind.Offscreen:
+        if (this.gameRunning && !this.frozen) QueueOffscreenPull(player);
+        return;
+      case PressKind.Start:
+        this.padLatch |= player === 0 ? PadBit.Start0 : PadBit.Start1;
+        this.requestSkip();
+        return;
+    }
+  }
+
+  /**
+   * Player 2's gun, from the network, at the head of the host's tick: the aim
+   * `PollPlayerAimInput` would have recorded for the second port, and every
+   * press that has arrived since the last tick.
+   */
+  private applyRemoteInput(): void {
+    const h = this.net.host;
+    if (!h) return;
+    const input = h.takeInput();
+    if (input.aim) {
+      if (input.aim.on) SetPlayerAimFromPointer(1, input.aim.x, input.aim.y);
+      else G.g_aim_on_screen[1] = 0;
+    }
+    for (const q of input.presses) this.remotePress(q);
+  }
+
+  private remotePress(q: Press): void {
+    if (q.kind === PressKind.Pull) {
+      // The aim as it was at the press, not as it is now.
+      SetPlayerAimFromPointer(1, q.x, q.y);
+    }
+    this.gunInput(1, q.kind, q.ray);
   }
 
   /**
@@ -1561,6 +1740,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     CameraReseatFromFrame();
     this.world.resync(this.ctx);
     this.syncBgmToWalker();
+    this.net.host?.discontinuity();
     this.state.block = block;
     this.state.step = step;
     this.state.op = op;
@@ -1593,6 +1773,17 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     }
     // The shot is queued, not started: the action ring runs it in the next
     // `CameraActorTick`, which seats the block itself. Nothing to seat here.
+  }
+
+  /**
+   * A sound the script asked for, as an event: the bus's one `sound.play`
+   * subscriber plays it, and a netplay host's tap carries it to player 2.
+   * Returns that subscriber's note, for the feed.
+   */
+  playSound(id: number): string | undefined {
+    this.lastSoundNote = undefined;
+    this.events.emit("sound.play", { id });
+    return this.lastSoundNote;
   }
 
   /** The feed is capped so a long session cannot grow without bound. */
@@ -1694,6 +1885,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   beginFrame(_wall: number): void {
     this.lifeFrame += 1;
     if (this.perfMeter.enabled) this.perfMeter.beginFrame();
+    // Netplay's clock: pings, the link's figures, and player 2's aim and
+    // acknowledgements, once a frame -- and on the session's own timer while
+    // the loop sleeps.
+    if (this.net.active) {
+      const now = performance.now();
+      this.net.poll(now);
+      this.net.replica?.flushInput(now);
+    }
   }
 
   /**
@@ -1706,9 +1905,82 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   idleTick(t: Tick): void {
     if (!this.walker) return;
-    this.pushPortGlobals();
+    // A replica's script phase is the host's: nothing of it runs here.
+    if (!this.net.replica) this.pushPortGlobals();
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, t);
+  }
+
+  /**
+   * A replica's tick: the jitter buffer picks the host's tick that is due, it
+   * is applied into `G` and checked by hash (`app/net/replica.ts`), and the
+   * world runs the render and HUD phases over it -- the port's own systems
+   * are dormant here (`netRoleChanged`). No tick due is a frame that redraws
+   * what it has; the loop never runs ahead of what the host has sent.
+   */
+  private replicaStep(): boolean {
+    const r = this.net.replica!;
+    if (this.perfMeter.enabled) this.perfMeter.tick();
+    const applied = r.step(performance.now());
+    this.cam.scripted = true;
+    this.world.update(this.ctx, applied ? DRIVEN_TICK : STOPPED_TICK);
+    return true;
+  }
+
+  /**
+   * The session's role changed. A replica's world holds dormant every system
+   * that writes the state -- the port's update, the rain, the gun lights'
+   * build -- because its state is the host's; the others run as ever. Back to
+   * playing alone, the stage is loaded afresh: what a replica holds is the
+   * host's run, not one this page can carry on.
+   */
+  netRoleChanged(role: NetRole): void {
+    if (role === "replica") {
+      this.world.setDormant([this.game, this.rainSim, this.gunLightBuild]);
+      this.playing = false;
+      this.ring.clear();
+      if (this.state.mode === "free") this.setMode("play");
+    } else {
+      this.world.setDormant([]);
+    }
+    if (role === "solo" && this.netRoot) {
+      this.netRoot = null;
+      this.loadAndPlay();
+    }
+    this.wake();
+  }
+
+  /**
+   * A replica's streaming, told to the scene: the region and the loaded slots
+   * are the walker's state, which the host's deltas move, so the scene is told
+   * whenever they differ from what it was last told. `reset` starts again from
+   * nothing, as a keyframe does.
+   */
+  replicaStreaming(reset: boolean): void {
+    const w = this.walker;
+    const scene = this.scene3d;
+    if (!w || !scene) return;
+    if (reset) {
+      scene.resetStreaming();
+      this.netRegion = -1;
+      this.netSlots.clear();
+    }
+    if (w.region !== this.netRegion) {
+      this.netRegion = w.region;
+      scene.enterRegion(w.region);
+    }
+    for (const s of this.netSlots) {
+      if (!w.loadedSlots.has(s)) {
+        this.netSlots.delete(s);
+        scene.unloadSlot(s);
+      }
+    }
+    for (const s of w.loadedSlots) {
+      if (!this.netSlots.has(s)) {
+        this.netSlots.add(s);
+        scene.loadSlot(s);
+      }
+    }
   }
 
   /** The stage a picture is owed of, or 0. See {@link Player.requestThumb}. */
@@ -2079,6 +2351,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * "a debt worth dropping is never allowed to form".
    */
   get gameRunning(): boolean {
+    // A replica's clock is the host's: it runs while the host's does.
+    if (this.net.replica) return this.net.replica.running && !!this.walker;
+    // A host holds its own while player 2 loads the stage, so neither of
+    // them starts it without the other.
+    if (this.net.host?.holding) return false;
     return !this.gameStopped && !!this.walker;
   }
 
@@ -2104,6 +2381,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   wantsFrame(): boolean {
     if (this.loading) return true;
+    // The network overlay is live figures: while it is open, the page keeps
+    // drawing them whether or not the game moves.
+    if (this.net.active && this.toggles.netStats) return true;
+    if (this.net.replica) {
+      return this.net.replica.running || this.shooting.busy;
+    }
     if (this.state.mode === "free") return true;
     if (this.state.freeze) return false;
     if (!this.gameStopped) return true;
@@ -2173,7 +2456,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   stepOneFrame(): boolean {
     const w = this.walker;
     if (!w || this.state.freeze) return false;
+    if (this.net.replica) return this.replicaStep();
     if (this.perfMeter.enabled) this.perfMeter.tick();
+    // Player 2's gun, before anything of this tick runs -- the same moment a
+    // local press made between frames is in `G`.
+    if (this.net.host) this.applyRemoteInput();
     if (this.playing && this.state.mode !== "free") {
       if (w.branch) {
         // On the script's clock rather than the wall's. The countdown is what
@@ -2223,6 +2510,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     if (!this.gameStopped) {
       this.ring.offer(this.ctx.frame, () => this.saveSnapshot());
     }
+    // The tick, to player 2: what changed, and the events it raised. After
+    // everything that writes the state this tick, the render phase's gun
+    // lights included, so the replica's copy is exactly this tick's.
+    this.net.host?.endTick(performance.now());
     // A finished stage is the one thing that stops the accumulator mid-drain:
     // the ticks it would have run are not owed, because there is nothing left
     // to run them.
@@ -2329,6 +2620,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * through with `PAUSED` would be worse than saying nothing.
    */
   get paused(): boolean {
+    // Player 2 sees the host's pause as a pause; a host that is only waiting
+    // for player 2 to load is not one.
+    if (this.net.replica) return this.net.hostHold === "paused" && !!this.walker;
     return this.state.mode === "play" && !this.playing && !!this.walker;
   }
 
@@ -2423,13 +2717,19 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.noteSession();
   }
 
-  /** Put one back. Returns the reason it was refused, or null. */
-  loadSnapshot(snap: Snapshot): string | null {
+  /**
+   * Put one back. Returns the reason it was refused, or null. `adopt` is a
+   * netplay keyframe's: see `World.load`.
+   */
+  loadSnapshot(snap: Snapshot, opts: { adopt?: boolean } = {}): string | null {
     // Before `load`, because `load` ends by resyncing every system and a
     // system's `resync` claims the *new* session.
     this.newSession();
-    const err = this.world.load(snap, this.ctx);
+    const err = this.world.load(snap, this.ctx, opts);
     if (err) return err;
+    // The host's timeline just jumped -- a rewind, a load -- and player 2's
+    // follows it through a new epoch.
+    this.net.host?.discontinuity();
     // Every layer has resynced, the camera included -- it is the first system
     // in the render phase, so the rest posed against the shot it restored.
     this.markAddress();
@@ -2478,10 +2778,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       this.renderer.setSize(cw, ch, true);
       this.canvas.style.margin = `${(h - ch) / 2}px ${(w - cw) / 2}px`;
       this.camera.aspect = aspect;
+      this.canvasBox = { left: (w - cw) / 2, top: (h - ch) / 2, width: cw, height: ch };
     } else {
       this.renderer.setSize(w, h, true);
       this.canvas.style.margin = "0";
       this.camera.aspect = w / h;
+      this.canvasBox = { left: 0, top: 0, width: w, height: h };
     }
     this.camera.updateProjectionMatrix();
   }
@@ -2506,6 +2808,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   }
 
   pushUrl(): void {
+    // A replica's address carries the room it joined (`#join=`); the stage
+    // and block are the host's, and writing them would only mislead a reload.
+    if (this.net.replica) return;
     writeState(this.state);
   }
 

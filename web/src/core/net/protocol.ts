@@ -70,9 +70,13 @@ export interface HelloMsg {
   snapshot: number;
   /** Identifies the page's code. A different build has a different state shape. */
   build: string;
-  /** `BUILDER_HASH` of the bundle: a different exporter can mean different tables. */
+  /**
+   * The exporter this page builds bundles with (`BUILDER_HASH`). Informative
+   * in the hello; the check that matters is per stage, in {@link LoadMsg},
+   * because a page holds stages from two bundles at once.
+   */
   bundle: string;
-  /** The schema digest the bundle was written against. */
+  /** `SCHEMA_HASH`: the bundle format this page reads. */
   schema: string;
 }
 
@@ -80,6 +84,13 @@ export interface LoadMsg {
   epoch: number;
   stage: number;
   original: boolean;
+  /**
+   * The exporter that built the host's copy of this stage, when its bundle
+   * says. A replica whose copy was built by another refuses: a different
+   * exporter can mean different tables, and different tables are different
+   * state.
+   */
+  builder?: string;
 }
 
 export interface ReadyMsg {

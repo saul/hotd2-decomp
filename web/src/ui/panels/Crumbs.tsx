@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDispatch, useStore } from "../store_context";
 import { useSlice } from "../useSlice";
+import { NetMenuSection } from "./Net";
 
 export interface DebugToggle {
   debugOpen: boolean;
@@ -180,6 +181,7 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
           </label>
         </section>
       )}
+      {stage !== undefined && <NetMenuSection onClose={() => onClose()} />}
       <section className="menu-actions">
         {stage !== undefined && (
           <button

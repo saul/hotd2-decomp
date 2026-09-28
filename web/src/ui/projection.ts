@@ -28,9 +28,45 @@ export type StripRow = readonly [string, string, boolean?];
  * they used to sit on opposite sides of the page with only a shared word
  * connecting them.
  */
+/** How a netplay figure reads: fine, worth a look, or wrong. */
+export type NetLevel = "ok" | "warn" | "bad" | "";
+
+/** One labelled figure in the netplay overlay. */
+export interface NetRow {
+  label: string;
+  value: string;
+  level: NetLevel;
+  /** What the figure means, for the tooltip. */
+  title?: string;
+}
+
+/** Two-player netplay, as the badge, the overlay and the lobby show it. */
+export interface NetProjection {
+  role: "solo" | "host" | "replica";
+  /** Which player this page's gun is. */
+  player: 1 | 2;
+  lobby: {
+    phase: string;
+    code: string | null;
+    link: string | null;
+    error: string | null;
+  };
+  /** The one line over the game, while a session is up. */
+  badge: { text: string; level: NetLevel } | null;
+  /** Why the host's clock is stopped, as player 2 sees it; null while it runs. */
+  held: string | null;
+  /** The whole of it, only while the overlay is open. */
+  stats: {
+    sections: { title: string; rows: NetRow[] }[];
+    log: { age: string; tick: number; kind: string; text: string }[];
+    /** Everything above as JSON, for "Copy report". */
+    report: string;
+  } | null;
+}
+
 export type DebugGroupName =
   "camera" | "scene" | "actors" | "props" | "collision" | "shooting"
-  | "route";
+  | "route" | "net";
 
 /** One route out of a branch point, as a button. */
 export interface BranchOption {
@@ -431,4 +467,13 @@ export interface UiProjection {
   perf: PerfProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
+  /** Netplay, whenever a session is up or being made; null alone. */
+  net: NetProjection | null;
+  /**
+   * The other player's crosshair, where the game drew it this frame, in the
+   * viewport's pixels -- the game's decision (`g_crosshair_drawn`) and aim
+   * (`g_crosshair_x`) for the player this page is not. Null when there is no
+   * other player, or the game drew none.
+   */
+  netPeer: { x: number; y: number; player: 1 | 2 } | null;
 }

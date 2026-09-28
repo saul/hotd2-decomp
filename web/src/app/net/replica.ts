@@ -33,8 +33,12 @@ import type { Transport } from "./transport";
 
 /** What the replica needs of the player. */
 export interface ReplicaSim {
-  /** Load this stage, if it is not the one loaded. Resolves to an error or null. */
-  load(stage: number, original: boolean): Promise<string | null>;
+  /**
+   * Load this stage, if it is not the one loaded. Resolves to an error or
+   * null. `builder` is the exporter that built the host's copy: a copy built
+   * by another is refused.
+   */
+  load(stage: number, original: boolean, builder?: string): Promise<string | null>;
   /**
    * Make `root` the game's state -- a keyframe, decoded. The player adopts its
    * objects as `G`'s. Returns an error, or null.
@@ -179,7 +183,7 @@ export class NetReplica extends NetPeer {
     if (!same) {
       this.loaded = null;
       try {
-        error = await this.sim.load(l.stage, l.original);
+        error = await this.sim.load(l.stage, l.original, l.builder);
       } catch (e) {
         error = (e as Error).message;
       }

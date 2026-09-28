@@ -144,9 +144,24 @@ export class Events {
   }
 
   emit<K extends keyof EventMap>(key: K, payload: EventMap[K]): void {
+    this.tapFn?.(key, payload);
     const set = this.subs.get(key as string);
     if (!set) return;
     for (const fn of set) (fn as Handler<K>)(payload);
+  }
+
+  private tapFn: (<K extends keyof EventMap>(key: K, payload: EventMap[K]) => void) | null
+    = null;
+
+  /**
+   * One listener for every event, before the subscribers. A netplay host
+   * records each tick's events through it for the replica, which puts them on
+   * its own bus with {@link emit} -- so the replica's subscribers are the same
+   * ones, playing the same sounds, and none of them needs to know which end
+   * it is on. Null to stop.
+   */
+  tap(fn: (<K extends keyof EventMap>(key: K, payload: EventMap[K]) => void) | null): void {
+    this.tapFn = fn;
   }
 
   /** Drop every subscriber — a stage change rebuilds them all. */

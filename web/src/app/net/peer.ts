@@ -49,10 +49,9 @@ export function helloRefusal(mine: HelloMsg, theirs: HelloMsg): string | null {
     return `bundle schema ${theirs.schema.slice(0, 8)} against `
       + `${mine.schema.slice(0, 8)}: rebuild one bundle`;
   }
-  if (theirs.bundle !== mine.bundle) {
-    return `bundle exporter ${theirs.bundle.slice(0, 8)} against `
-      + `${mine.bundle.slice(0, 8)}: both players need the same bundle`;
-  }
+  // The bundle is checked stage by stage when one loads (`LoadMsg.builder`):
+  // a page holds stages from two bundles at once, and only the one being
+  // played has to agree.
   return null;
 }
 

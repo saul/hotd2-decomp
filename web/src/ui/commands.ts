@@ -16,7 +16,7 @@ export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
   | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
   | "breakables" | "propBoxes"
-  | "muzzle" | "redBlood" | "branchPause" | "perf";
+  | "muzzle" | "redBlood" | "branchPause" | "perf" | "netStats";
 
 export type UiCommand =
   | { kind: "toggle"; name: ToggleName; on: boolean }
@@ -99,7 +99,19 @@ export type UiCommand =
    * `ui/` may not import it and does not need to: this says what was clicked
    * and the composition root decides that it means "show that screen".
    */
-  | { kind: "openBundles" };
+  | { kind: "openBundles" }
+  // -- two players over the network: see `app/net/session.ts` --------------
+  /** Make a room at the rendezvous and wait for player 2. */
+  | { kind: "netHost" }
+  /** Join a room by its code, as player 2. */
+  | { kind: "netJoin"; code: string }
+  /** Host or join another tab of this browser, with no network. */
+  | { kind: "netHostLocal" }
+  | { kind: "netJoinLocal" }
+  /** Leave the session, whichever end this is. */
+  | { kind: "netLeave" }
+  /** Ask the host for a keyframe: the overlay's repair button. */
+  | { kind: "netResync" };
 
 /** What a panel is handed to talk back with. */
 export type Dispatch = (c: UiCommand) => void;

@@ -290,7 +290,12 @@ export async function loadStageInto(p: Player): Promise<void> {
     });
   }
 
-  applyIncomingState(p);
+  // A netplay replica opens nothing itself: its state is the host's, and the
+  // host's keyframe is what puts the walker, `G` and the camera somewhere.
+  // Priming the script here would write state the keyframe then overwrites --
+  // harmless, but a second author for a moment, and a replay of the stage's
+  // opening sounds nobody asked for.
+  if (p.net.role !== "replica") applyIncomingState(p);
   // Nothing starts the music here. Every stage script starts its own track
   // at step 2 of each entry block: stages 1-4 and 6 with a `se_play` of it,
   // stage 5 with a `bgm_entry_play`. This used to play the bundle's
@@ -308,7 +313,7 @@ export async function loadStageInto(p: Player): Promise<void> {
   // and taken when the stage is built. `Player.keepThumb` does the rest in the
   // frame loop, because a WebGL back buffer does not survive the turn it was
   // drawn in.
-  p.requestThumb(p.state.stage);
+  if (p.net.role === "solo") p.requestThumb(p.state.stage);
   const status: StatusProjection = {
     text:
       `${entry.name} · ${entry.counts.models} models · ` +

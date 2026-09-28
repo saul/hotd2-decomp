@@ -286,6 +286,9 @@ export function groupRows(w: Walker, x: HudInputs):
         : w.options.branchPause ? "— · the aid will hold the next one"
         : "—"],
     ],
+    // Netplay's rows are the session's, not the walker's: `Player.groups`
+    // fills them in from `app/net/`.
+    net: [],
   };
 }
 

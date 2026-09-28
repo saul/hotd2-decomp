@@ -16,7 +16,7 @@ import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
   BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
-  PerfProjection,
+  NetProjection, PerfProjection,
   SkipProjection, SoundProjection, StatusProjection, StripRow, TransportProjection,
   TreeProjection, UiProjection,
 } from "../../ui/projection";
@@ -82,6 +82,12 @@ export interface PlayerView {
   readonly perf: PerfProjection | null;
   readonly branch: BranchProjection | null;
   readonly transport: TransportProjection;
+  /** Which player this page's gun is: 0 alone or hosting, 1 as player 2. */
+  readonly localPlayer: number;
+  /** See {@link UiProjection.net}. */
+  readonly netView: NetProjection | null;
+  /** See {@link UiProjection.netPeer}. */
+  readonly netPeer: { x: number; y: number; player: 1 | 2 } | null;
 }
 
 /**
@@ -111,7 +117,7 @@ export function buildProjection(v: PlayerView,
     started: v.started,
     // `HudDrawCrosshair`'s decision, off `G`. Off before the first player
     // turn, which is also what the engine's BSS says.
-    crosshair: crosshairProjection(),
+    crosshair: crosshairProjection(v.localPlayer),
     toggles: v.toggles,
     transport: v.transport,
     sound: v.sound,
@@ -138,5 +144,7 @@ export function buildProjection(v: PlayerView,
     perf: v.perf,
     branch: v.branch,
     gameOver: gameOverProjection(),
+    net: v.netView,
+    netPeer: v.netPeer,
   });
 }

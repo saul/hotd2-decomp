@@ -1006,3 +1006,22 @@ draw-order fault. Nothing looked wrong locally: every material was a real
 material of that part. **A dedup key must cover every field the cached value
 carries**; the check that finds the gap compares each output against its own
 input, not the output against itself.
+
+**L69 -- Under `?drive=1`, `advance(0)` redraws the picture the last tick
+posed, not the state you just wrote.** Measuring how opaque the damage overlay
+is, I shot a driven frame, lowered the record's `active` through `G`, called
+`advance(0)` to redraw, and shot again: the two images were byte-identical,
+the harness reported the overlay covering **0 pixels**, and its own sanity
+check -- "the redraw reproduces the frame" -- passed, because nothing had been
+redrawn from the new state. The render layers pose their nodes in
+`world.update`, which runs inside `stepOneFrame` (and, undriven, in
+`idleTick`); under the drive flag a zero-frame pump calls neither, so
+`endFrame` renders the scene graph exactly as the last tick left it. A `G`
+edit between two driven frames reaches no picture until the next frame runs.
+**To compare one frame with and without something, run twice on one seed and
+make the change before the frame is stepped**, choosing a change nothing in
+the game reads back (here the record's kind, pointed past the slot table), and
+check that the pixels it should not touch are identical -- which is also what
+tells you the runs stayed in step. It is `L44`'s "a harness that prints its
+arguments as its result" one layer down: a redraw that repeats the frame
+agrees with any claim about it.

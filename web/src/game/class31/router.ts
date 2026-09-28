@@ -22,6 +22,7 @@
  */
 import type { Rng } from "../../core/rng";
 import { ThrowerFlag, type ThrowerActor } from "../actor";
+import { QueryGroundSurfaceAt } from "../coli";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { dist2d, type Vec3 } from "../vec";
@@ -35,6 +36,9 @@ import { ThrowerPickState } from "./tables";
 const CHAR_ZSLMAN = 0x18;
 /** ...and 0x16 and 0x18 are the only two that carry a weapon. */
 const CHAR_ZSASS = 0x16;
+/** State 0x20's surface, and the probe's rise: `FADD [0x00565DE8]`, 4.5. */
+const PERCH_SURFACE = 0x35;
+const SURFACE_PROBE_RISE = 4.5;
 
 /**
  * The destroyed-zone bits an arm going bare sets — the same two the cancel
@@ -82,13 +86,13 @@ export function ThrowerTryEnterState(obj: ThrowerActor, state: number, rng: Rng,
       // Not reachable from the pick tables in the shipped data -- the router
       // reaches state 8 through its own close-range short-circuit -- but the
       // gate is here as the engine writes it.
-      return ThrowerTryClaimAttackSlot(obj, host) ? false : enter();
+      return ThrowerTryClaimAttackSlot(obj, rng, host) ? false : enter();
     case ThrowerState.Pounce:
-      return ThrowerTryClaimAttackSlot(obj, host) ? enter() : false;
+      return ThrowerTryClaimAttackSlot(obj, rng, host) ? enter() : false;
     case ThrowerState.PounceNear:
     case ThrowerState.PounceFar:
       if (obj.charType === CHAR_ZSLMAN) return false;
-      return ThrowerTryClaimAttackSlot(obj, host) ? enter() : false;
+      return ThrowerTryClaimAttackSlot(obj, rng, host) ? enter() : false;
     case ThrowerState.LeapToWallB:
       if (obj.flags2 & ThrowerFlag.OffGround) return false;
       return ThrowerFindWallBeside(obj, -1, rng) ? enter() : false;
@@ -104,10 +108,18 @@ export function ThrowerTryEnterState(obj: ThrowerActor, state: number, rng: Rng,
       return ThrowerHasBareHand(obj) ? enter() : false;
     case ThrowerState.Throw:
       if (!ThrowerBothHandsArmed(obj)) return false;
-      return ThrowerTryClaimAttackSlot(obj, host) ? enter() : false;
-    // `[open]` state 0x20 additionally requires the ground surface under the
-    // actor to be 0x35, a collision material the bundle does not carry. Only
-    // character type 0x17 can reach it and nothing ported is that type.
+      return ThrowerTryClaimAttackSlot(obj, rng, host) ? enter() : false;
+    // Arm 9 of the jump table (`0x0044B0E4`): **the claim first**, then the
+    // surface under `(x, y + 4.5, z)` must be `0x35` (`QueryGroundSurfaceAt`,
+    // `0x0044B106`; the 4.5 is `0x40900000` at `0x00565DE8`). A refusal on the
+    // surface keeps the permit the claim just took -- the engine has no
+    // release on that path. `[proved]` Only character type 0x17's pick table
+    // names state 0x20.
+    case ThrowerState.StrikeOnTheSpot:
+      if (!ThrowerTryClaimAttackSlot(obj, rng, host)) return false;
+      return QueryGroundSurfaceAt(obj.pos.x, obj.pos.y + SURFACE_PROBE_RISE,
+                                  obj.pos.z) === PERCH_SURFACE
+        ? enter() : false;
     default:
       return false;
   }

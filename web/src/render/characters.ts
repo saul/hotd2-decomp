@@ -771,7 +771,10 @@ export class CharacterLayer implements System {
         continue;
       }
       for (const b of inst.type.bones) {
-        if (!b.hit_radius) continue;
+        // The record's radius, which a class may have written over the
+        // table's -- `Actor.boneRadius`; `ShotTestBoneSphere` skips a zero.
+        const r = inst.a.boneRadius[String(b.bone)] ?? b.hit_radius;
+        if (!r) continue;
         // A removed bone has a zero draw slot, and `ShotTestBoneTree` never
         // descends into one -- so a blown-off arm cannot be shot again.
         if (inst.a.removed.includes(b.bone)) continue;
@@ -782,8 +785,7 @@ export class CharacterLayer implements System {
         this._ray.closestPointToPoint(this._c, this._p);
         const t = this._p.sub(this._ray.origin).dot(this._ray.direction);
         if (t <= 0) continue;                         // behind the muzzle
-        if (this._ray.distanceSqToPoint(this._c)
-            > b.hit_radius * b.hit_radius) continue;
+        if (this._ray.distanceSqToPoint(this._c) > r * r) continue;
         if (t < bestT) {
           bestT = t;
           best = { kind: "actor", at: inst.at, bone: b.bone,
@@ -868,7 +870,9 @@ export class CharacterLayer implements System {
       if (!b || !node || !b.hit_centre) return null;
       out.set(b.hit_centre[0], b.hit_centre[1], b.hit_centre[2]);
       node.localToWorld(out);
-      return b.hit_radius ?? null;
+      // `+0x284` is the record's, and a class may have written it --
+      // `Actor.boneRadius`.
+      return inst.a.boneRadius[String(bone)] ?? b.hit_radius ?? null;
     }
     return null;
   }

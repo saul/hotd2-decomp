@@ -55,8 +55,7 @@
 import { Matrix4 } from "three";
 import { BAMS_TO_RAD } from "../core/bams";
 import type { Actor } from "../game/actor";
-import { ActorFlag } from "../game/actor";
-import { OwlState } from "../game/class43/state";
+import { OwlFlag, OwlState } from "../game/class43/state";
 import { G } from "../game/globals";
 
 /** `owl.bin` 2 and 3 — the body alive and dead. */
@@ -126,7 +125,9 @@ export function OwlBodyChain(a: Actor, out: OwlPart[]): OwlPart[] {
   out.length = 0;
   if (a.cls !== 0x43) return out;
   const o = a.owl;
-  const dead = (a.flags & ActorFlag.Dead) !== 0;
+  // `TEST dword ptr [ESI+0x34], 0x1000000` at `0x00447C94` and `0x00447D4B`:
+  // the owl's own corpse bit, not `ActorFlag.Dead`.
+  const dead = (a.flags & OwlFlag.Corpse) !== 0;
 
   const push = (slot: number, m: Matrix4) => {
     out.push({ slot, m: m.clone() });

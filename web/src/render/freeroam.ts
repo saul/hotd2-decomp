@@ -312,7 +312,7 @@ const INPUT_CONTROLS = new Set([
 /** What the browser activates a focused control with. */
 const ACTIVATION_KEYS = new Set(["Space", "Enter", "NumpadEnter"]);
 
-/** What a focused `<input type=range>` — the scrubber, the volume — acts on. */
+/** What a focused `<input type=range>` — the volume slider — acts on. */
 const RANGE_KEYS = new Set([
   "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
   "Home", "End", "PageUp", "PageDown",
@@ -359,7 +359,7 @@ export function isTyping(target: EventTarget | null): boolean {
  *
  * So the question is asked about the **key**, not only about the element. A
  * button, a link and a `<summary>` take Space and Enter; a range input takes
- * those and the arrows and Home/End, which is what makes the scrubber
+ * those and the arrows and Home/End, which is what makes a slider
  * keyboard-usable next to a player that binds the arrows itself; a text box
  * takes everything.
  *

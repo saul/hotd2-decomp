@@ -129,16 +129,29 @@ export function ZombiePickThrowingHand(obj: ZombieActor, rng: Rng): number {
  * `TryClaimAttackSlot` is called here as a *test*, and it takes the permit on
  * success; the state it routes into does not claim again for a condition-8
  * actor, which is why the claim arm skips it.
+ *
+ * **The claim and the hand test swap places by character type**
+ * (`0x00458E6D`..`0x00458EED`) `[proved]`: 0x13 and 0x14 test their hands
+ * first (slots `0x1ECE`/`0x1ECA` and `0x1EF9`/`0x1EF5`) and claim only if one
+ * is armed; type 1 claims **first** (`0x00458EC3`) and only then tests
+ * `0x1BA9`/`0x1BA5`, so an unarmed `znassb` still takes the permit and is
+ * answered no. Any other type is no without a claim. The order is the
+ * engine's, and it decides when the claim's `rand()` is drawn.
  */
-export function ZombieShouldStandAndThrow(obj: ZombieActor): boolean {
+export function ZombieShouldStandAndThrow(obj: ZombieActor, rng: Rng): boolean {
   if (obj.condition !== ATTACK_RUN_THROW_CONDITION) return false;
   // `FUN_0040A040(g_camera_yaw_bams - 0x8000, obj+0x68, 0x400)` — the camera's
   // *backward* yaw against the actor's facing, because an actor faces away
   // from what it is walking at. See `TurnActorTowardCamera`.
   const want = (G.g_camera_yaw_bams - 0x8000) & 0xffff;
   if (Math.abs(bamsDelta(want, obj.yaw & 0xffff)) > FACING_WINDOW) return false;
+  if (obj.charType === CHAR_ZNASSB) {
+    if (!TryClaimAttackSlot(obj, rng)) return false;
+    return ZombieArmedHands(obj) !== 0;
+  }
+  if (obj.charType !== 0x13 && obj.charType !== 0x14) return false;
   if (ZombieArmedHands(obj) === 0) return false;
-  return TryClaimAttackSlot(obj);
+  return TryClaimAttackSlot(obj, rng);
 }
 
 /** The condition an ordinary walker must be in to stop and throw. */
@@ -214,11 +227,19 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, _eye: Vec3,
     // **The pause between throws.** `TryClaimAttackSlot` is the same permit
     // every other enemy queues for, so a thrower standing behind a crowd waits
     // its turn rather than throwing over their heads.
-    if (standing && !TryClaimAttackSlot(obj)) {
+    if (standing && !TryClaimAttackSlot(obj, rng)) {
       ZombieSetMotionIfIdle(obj, idle, rng, "clip", MotionFade.Quick);
       return;
     }
     obj.flags |= ActorFlag.Committed;
+    // `MOV dword ptr [EDX*0x4 + 0x9a2ba0], 0x1` at `0x00459260`, on every
+    // path into the throw: a second write after a claim that has just
+    // succeeded, and the only one for a condition-8 walker whose permit a
+    // `finish_sequence` freed between `ZombieShouldStandAndThrow` and here.
+    // The engine has no `-1` test; `[likely]` no reachable path arrives
+    // without an index, and the port's guard is for an array that has nothing
+    // at `-1` to write.
+    if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = obj.at;
     obj.zom.throwHand = ZombiePickThrowingHand(obj, rng);
     const a = AttackListOf(obj)[String(obj.attack)];
     if (a) ActorSetMotionBlended(obj, a.strike, 0, 4);
@@ -248,7 +269,7 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, _eye: Vec3,
     // 0. A thrower with only one hand left throws it and then a second weapon
     // with no model at all, which is what the routine does with hand 0.
     if (obj.charType === CHAR_ZNASSB) {
-      TryClaimAttackSlot(obj);
+      TryClaimAttackSlot(obj, rng);
       obj.zom.throwHand = ZombiePickThrowingHand(obj, rng);
       ZombieThrowHandWeapon(obj, obj.zom.throwHand, host, events);
     }

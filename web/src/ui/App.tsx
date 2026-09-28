@@ -1,66 +1,60 @@
 /**
  * The UI layer's root, and the page.
  *
+ * **The page is the game.** The rendered frame fills the window, pillarboxed to
+ * the game's own 4:3, and everything else is either over it — the breadcrumb
+ * menu, the sound button, the start and pause screen, the skip prompt, the
+ * branch bar, the game-over buttons — or in a debug sidebar that is closed
+ * until you ask for it. The top and bottom bars that used to frame the view
+ * grew one debugging need at a time; what was worth keeping from them is in
+ * the menu and the sidebar now.
+ *
  * `App` is two things and nothing else: the one place the store enters the
  * tree, and the frame every region hangs off. It subscribes to a single fact —
  * whether there is a projection yet — and every panel below it subscribes to
- * the fields it actually reads, with `useSlice`. Before step 24 the root read
- * the whole projection, so one moved field re-rendered `App`, the sidebar and
- * all seven panels before a leaf `memo` could bail: the cost of a publish was
- * the size of the page. It is now the size of the change.
+ * the fields it actually reads, with `useSlice`. A publish costs the size of
+ * the change, not the size of the page.
  *
  * Nothing here reaches into the engine, holds a layer, or keeps a copy of game
  * state; a control that wants something to happen dispatches a `UiCommand` and
- * `app/` decides what that means.
+ * `app/` decides what that means. **Whether the debug sidebar is open is the
+ * exception that proves it**: it changes nothing outside `ui/`, so it is
+ * component state here, remembered in `localStorage`, and never a command.
  *
- * `index.html` is a mount point. The chrome used to live there and the panels
- * were portalled into sixteen ids inside it, which let them move across one at
- * a time — and left a page with two owners. A renamed id gave `createPortal` a
- * null host and the panel silently vanished; `#viewport` carried a `paused`
- * class from `app/` and a `shooting` class from `render/` while React rendered
- * neither; the mode buttons were written by React *and* by a
- * `classList.toggle` loop, and the loop won for about a frame. All three are
- * the same bug, and having one writer is the fix.
+ * `index.html` is a mount point. React renders every element on the page, the
+ * canvas included, and the one thing that flows the other way is the elements
+ * the layers below need: the canvas the renderer draws into, the viewport it
+ * measures, the nodes `hud/` writes the shutter and the caption onto, and the
+ * crosshair `render/` moves with the pointer. `onHost` hands them over once,
+ * after mount, and `app/` builds the `Player` around them. That is why the
+ * chrome renders before there is a projection at all.
  *
- * The one thing that flows the other way is the elements the layers below
- * need: the canvas the renderer draws into, the viewport it measures, the four
- * nodes `hud/` writes the shutter and the caption onto, and the crosshair
- * `render/` moves with the pointer. React owns them, so React hands them over
- * — `onHost` fires once, after mount, and `app/` builds the `Player` around
- * them. That is why the chrome renders before there is a projection at all.
- *
- * The hud layer and the crosshair are on that list from step 26. Until then
- * they were the last two elements on the page React did not render: `hud/`
- * built four divs with `document.createElement` and appended them into
- * `#viewport`, and `render/` did the same with one, so the element React
- * renders had children React had never heard of. It worked, and it worked by
- * accident — React appends its conditional overlays wherever its own last
- * child happens to be, so whether the crosshair painted over the branch bar or
- * under it depended on the order the two had first mounted in. Rule 6 is one
- * writer per pixel, and a node whose *position* has two authors is the same
- * bug as an attribute that has two.
+ * **Two siblings, not a parent and child.** `#viewport` holds the canvas and
+ * what is drawn over it; `#overlay` holds everything that can be pressed.
+ * `render/shooting.ts` hears a press on `#viewport` natively, which is before
+ * any React handler runs, so a button inside it could not keep its press from
+ * also being a shot. `#overlay` is `pointer-events: none` where it is empty,
+ * so the game still gets every press that is not on a control.
  *
  * Every region is inside an `ErrorBoundary`, and one region is deliberately
  * not: `#viewport` and `#view` are the two elements handed across by `onHost`,
- * and the renderer holds them for the session. So the boundaries sit *inside*
- * the viewport, around the overlays, and never around the viewport itself — a
- * boundary that could unmount the canvas would leave WebGL drawing into a
- * detached element, which is a dead page that looks like a graphics bug.
+ * and the renderer holds them for the session. So no boundary sits between
+ * the root and the canvas — a boundary that could unmount it would leave
+ * WebGL drawing into a detached element, which is a dead page that looks like
+ * a graphics bug.
  */
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import type { UiStore } from "./store";
 import { StoreContext } from "./store_context";
-import { useHasProjection } from "./useSlice";
-import { Sidebar } from "./panels/Sidebar";
-import { Tree } from "./panels/Tree";
-import { Resizer } from "./panels/Resizer";
-import { BundleButton, Modes, StagePicker, Status, ViewSettings }
-  from "./panels/Topbar";
-import { Transport } from "./panels/Transport";
+import { useHasProjection, useSlice } from "./useSlice";
+import { usePersisted } from "./persist";
+import { Crumbs } from "./panels/Crumbs";
+import { DebugSidebar } from "./panels/DebugSidebar";
+import { PauseScreen, RotateHint, SoundButton } from "./panels/Overlays";
 import { SkipBar } from "./panels/SkipBar";
 import { GameOver } from "./panels/GameOver";
 import { BranchBar } from "./panels/BranchBar";
-import { LoadingOverlay, PausedOverlay, Viewport } from "./panels/Viewport";
+import { LoadingOverlay, Viewport } from "./panels/Viewport";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 /**
@@ -109,6 +103,38 @@ export function App(
   );
 }
 
+/**
+ * Is the viewer typing into something?
+ *
+ * The backquote that opens the sidebar must not be stolen from the script
+ * filter. `render/freeroam.ts` has the full version of this question; `ui/`
+ * may not import it, and the narrow one is all a single printable key needs.
+ */
+function typingIn(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  if (el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+  return el.tagName === "INPUT"
+    && !["button", "checkbox", "radio", "range"]
+      .includes((el as HTMLInputElement).type);
+}
+
+/**
+ * `#overlay`, which knows one thing about the frame: whether it is boxed.
+ *
+ * The skip prompt, the branch bar and the game-over buttons hang off the
+ * bottom of the *picture*, which is the whole stage area when the frame fills
+ * it and a centred 4:3 box when it does not. A component rather than the root
+ * reading the field, so the switch re-renders this element and not the page.
+ */
+function Overlay({ children }: { children: ReactNode }) {
+  const boxed = useSlice((p) => p?.pillarbox) === true;
+  return (
+    <div id="overlay" className={boxed ? "boxed" : undefined}>{children}</div>
+  );
+}
+
 function Page(
   { onHost, onError }: {
     onHost: (h: UiHost) => void;
@@ -116,14 +142,13 @@ function Page(
   },
 ) {
   // The only subscription above a panel. It flips once, when `app/` publishes
-  // its first projection, and never back — so this render happens twice in a
-  // session and the panels below carry every frame after that.
+  // its first projection, and never back.
   const ready = useHasProjection();
+  const [debugOpen, setDebugOpen] = usePersisted("debug", false);
+  const toggleDebug = useCallback(() => setDebugOpen(!debugOpen),
+                                  [debugOpen, setDebugOpen]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
-  // The nodes `hud/` and `render/` write geometry onto. They are declared here
-  // rather than inside `Viewport` because `onHost` is the handover and it
-  // fires from here; `Viewport` renders them and takes the refs as a prop.
   const hud = useRef<HTMLDivElement>(null);
   const shutterTop = useRef<HTMLDivElement>(null);
   const shutterBottom = useRef<HTMLDivElement>(null);
@@ -136,11 +161,10 @@ function Page(
   //
   // The guard is not defensive padding. `onHost` builds the `WebGLRenderer`,
   // the `Hud` and the `Shooting` layer in one go, and a `UiHost` with one null
-  // field would hand a layer a node it then writes to on every frame — an
-  // error thrown sixty times a second from inside the tick, a long way from
-  // the ref that was never attached. Every element below is rendered
-  // unconditionally, so after the first commit they are all present; if that
-  // ever stops being true this fires never rather than half.
+  // field would hand a layer a node it then writes to on every frame. Every
+  // element below is rendered unconditionally, so after the first commit they
+  // are all present; if that ever stops being true this fires never rather
+  // than half.
   useEffect(() => {
     const [c, v, h, t, b, m, s, x] = [
       canvas.current, viewport.current, hud.current, shutterTop.current,
@@ -155,81 +179,69 @@ function Page(
     }
   }, [onHost]);
 
+  // The backquote opens and closes the sidebar. A key the player binds
+  // nothing else to: `app/`'s handler owns Space, Enter, the digits, the
+  // arrows, S and R, and free roam owns WASDQE and Shift.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.code !== "Backquote" || e.repeat || typingIn(e.target)) return;
+      e.preventDefault();
+      toggleDebug();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [toggleDebug]);
+
   return (
     <ErrorBoundary label="The player" onError={onError}>
-      <header id="topbar">
-        <ErrorBoundary label="The top bar" onError={onError}>
-          <span className="brand">HOTD2 <span className="dim">stage player</span></span>
-          {ready && <>
-            <span id="stage-picker" className="toggles">
-              <StagePicker />
-            </span>
-            <span className="sep" />
-            <div className="modes" role="tablist" id="modes">
-              <Modes />
-            </div>
-            <span className="sep" />
-            <span id="view-settings" className="toggles">
-              <ViewSettings />
-            </span>
-          </>}
-          <span className="grow" />
-          <Status />
-          <BundleButton />
-        </ErrorBoundary>
-      </header>
+      <div id="shell" className={debugOpen ? "debug-open" : undefined}>
+        <main id="stagearea">
+          {/* `#viewport` is a component because the two classes it carries
+              are projection fields, and the root reading them would re-render
+              the whole page to move one class. The canvas is built here and
+              passed through as `children`, so it is the same element whatever
+              the classes do -- which is the property that keeps it mounted
+              for the session. */}
+          <Viewport refs={{ host: viewport, hud, shutterTop, shutterBottom,
+                            message, screen, crosshair }}>
+            <canvas id="view" ref={canvas} />
+            {/* The boundary goes round the overlay and never round
+                `#viewport` or `#view`: `app/` was handed those two for the
+                session. The loading screen is in here rather than in
+                `#overlay` because it is not a control, and it should cover
+                the frame and nothing else. */}
+            <ErrorBoundary label="The loading screen" onError={onError}>
+              <LoadingOverlay />
+            </ErrorBoundary>
+          </Viewport>
 
-      <main id="stagearea">
-        <ErrorBoundary label="The script tree" onError={onError}>
-          <Tree />
-        </ErrorBoundary>
-        <Resizer />
+          <Overlay>
+            <ErrorBoundary label="The game overlay" onError={onError}>
+              <Crumbs debugOpen={debugOpen} onToggleDebug={toggleDebug} />
+              {ready && <>
+                <SoundButton />
+                <PauseScreen />
+                {/* Anchored to the bottom of the frame, not a modal over it:
+                    a branch point is a fact about where playback has got to,
+                    so free roam and the sidebar stay usable. The skip prompt
+                    sits above it on the rare frame both are live. */}
+                <SkipBar />
+                <BranchBar />
+                <GameOver />
+              </>}
+              <RotateHint />
+            </ErrorBoundary>
+          </Overlay>
+        </main>
 
-        {/* `#viewport` is a component because the two classes it carries are
-            projection fields, and the root reading them would re-render the
-            whole chrome to move one class. The canvas and the overlays are
-            built here and passed through as `children`, so they are the same
-            elements whatever the classes do — which is the property that keeps
-            the canvas mounted for the session. The hud layer and the crosshair
-            are rendered by `Viewport` itself, after these children, because
-            their `hidden` is the same toggle field it already subscribes to
-            for the `shooting` class. */}
-        <Viewport refs={{ host: viewport, hud, shutterTop, shutterBottom,
-                          message, screen, crosshair }}>
-          <canvas id="view" ref={canvas} />
-          {/* The boundary goes round the overlays and never round `#viewport`
-              or `#view`: `app/` was handed those two elements through `onHost`
-              and the `WebGLRenderer` and the `ResizeObserver` are built on
-              them for the session. Unmounting either leaves WebGL drawing into
-              a detached canvas, which looks like a graphics bug and is not
-              one. */}
-          <ErrorBoundary label="The viewport overlays" onError={onError}>
-            <PausedOverlay />
-            <LoadingOverlay />
-            {/* Anchored to the bottom of the rendered view, not a modal over
-                it: a branch point is a fact about where playback has got to,
-                so the script, the scrubber and free roam all stay usable. The
-                skip bar sits above it on the rare frame both are live. */}
-            <SkipBar />
-            <BranchBar />
-            <GameOver />
-          </ErrorBoundary>
-        </Viewport>
-
-        {/* Fourth in source order, because `#stagearea` is a grid and grid
-            auto-placement follows the DOM. */}
-        <aside id="right">
-          <ErrorBoundary label="The sidebar" onError={onError}>
-            {ready && <Sidebar />}
-          </ErrorBoundary>
-        </aside>
-      </main>
-
-      <footer id="transport">
-        <ErrorBoundary label="The transport" onError={onError}>
-          {ready && <Transport />}
-        </ErrorBoundary>
-      </footer>
+        {debugOpen && (
+          <aside id="debug">
+            <ErrorBoundary label="The debug sidebar" onError={onError}>
+              {ready && <DebugSidebar onClose={toggleDebug} />}
+            </ErrorBoundary>
+          </aside>
+        )}
+      </div>
     </ErrorBoundary>
   );
 }

@@ -28,7 +28,8 @@ import type { Rng } from "../../core/rng";
 import { ZombieFlag2, type ZombieActor } from "../actor";
 import { G } from "../globals";
 import { TurnActorTowardCameraEye } from "../actor_turn";
-import { ActorIsOnScreen, TryClaimAttackSlot } from "../combat/permits";
+import { ActorIsOnScreen, AttackClaimRefusal, TryClaimAttackSlot }
+  from "../combat/permits";
 import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
@@ -187,8 +188,11 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
   // `ZombieStateHoldForCameraCue` hands back holding its own permit sat on
   // `obj+0x121 = 0` where the exe has `0xFF`. It also refused a two-player
   // claim whenever *either* permit was held, which the engine's per-player
-  // pick does not. `0x0045580F`..`0x0045583B`. `[proved]`
-  if (ZombieHoldGateRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
+  // pick does not. `0x0045580F`..`0x0045583B`. `[proved]` And nothing here
+  // touches `NoCameraTrack` on a grant (`0x00455845`..`0x0045587B`): a held
+  // captor whose delegate this is stays out of the camera's list until
+  // `ZombieStateHoldForCameraCue`'s own cue lowers it.
+  if (ZombieHoldGateRefusal(obj) === null && TryClaimAttackSlot(obj, rng, host)) {
     // Body condition 4 goes to state 0x34 instead; that state is unread, and
     // no stage-2 spawn carries condition 4 into this state.
     obj.state = ZombieState.Strike;
@@ -267,24 +271,14 @@ function ZombieHoldGateRefusal(obj: ZombieActor): string | null {
  * A crowd standing at the ring looks identical whichever of the reasons it
  * is, and the sidebar could only say "wants a permit", which is the symptom.
  * The first four are the hub's own gate, {@link ZombieHoldGateRefusal}, which
- * the state machine asks too. The last two are what `TryClaimAttackSlot`
- * (`FUN_00455DE0`) refuses on, read rather than called so that asking does not
- * take the permit — and **only** read: the state machine does not ask them,
- * it calls the claim, which is what the engine does.
+ * the state machine asks too. The rest are what `TryClaimAttackSlot`
+ * (`FUN_00455DE0`) refuses on, read by {@link AttackClaimRefusal} rather than
+ * called so that asking neither takes the permit nor draws — and **only**
+ * read: the state machine does not ask them, it calls the claim, which is
+ * what the engine does.
  */
 export function ZombieAttackRefusal(obj: ZombieActor): string | null {
   const hub = ZombieHoldGateRefusal(obj);
   if (hub !== null) return hub;
-  // The global latch. One enemy may attack unseen, and while one is, nobody
-  // may claim at all — including the ones you can see, which is what makes
-  // this so hard to read off the screen.
-  if (G.g_attack_committed !== 0) {
-    return "another enemy is committed off screen";
-  }
-  const held = G.g_attack_permits.findIndex((p) => p !== -1);
-  if (held !== -1) {
-    return `all ${G.g_max_attackers} permits held — 0x`
-      + `${(G.g_attack_permits[held] ?? 0).toString(16).toUpperCase()} has it`;
-  }
-  return null;
+  return AttackClaimRefusal();
 }

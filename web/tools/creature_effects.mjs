@@ -28,11 +28,16 @@ const flag = (n) => args.includes(`--${n}`);
 /** Where each creature is placed, and its class. */
 const WHERE = {
   owl: { url: "?stage=2&block=5&step=1&op=3", cls: 0x43 },
+  // The owl's other two flocks: sub-type 2's box and stair, sub-type 3's
+  // water. `--at` overrides the address for any of them.
+  owl2: { url: "?stage=2&block=14", cls: 0x43 },
+  owl3: { url: "?stage=3&block=7", cls: 0x43 },
   fish: { url: "?stage=2&block=16&step=8&op=3", cls: 0x51 },
 };
 const which = opt("which", "owl");
-const at = WHERE[which];
-if (!at) throw new Error(`--which owl|fish, not ${which}`);
+const at = WHERE[which]
+  && { ...WHERE[which], url: opt("at", WHERE[which].url) };
+if (!at) throw new Error(`--which owl|owl2|owl3|fish, not ${which}`);
 const BUDGET = Number(opt("budget", "3000"));
 
 const { page, close } = await openPlayer({
@@ -48,7 +53,7 @@ try {
   await page.keyboard.press("Space");
   const advance = (n) =>
     page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
-  const box = await page.locator("#viewport").boundingBox();
+  const box = await page.locator("#view").boundingBox();
   const pools = () => page.evaluate(async () => {
     const { G } = await import("/src/game/globals.ts");
     return {
@@ -58,13 +63,21 @@ try {
       splashes: G.g_fish_water_splashes.length,
       surfaceRings: G.g_fish_surface_rings.length,
       rings: G.g_ring_effects.length,
+      // The owl corpse's landings, and what only they make.
+      corpses: G.g_object_list.filter((o) => o.cls === 0x43 && !o.despawned
+        && o.owl?.state === 6).map((o) =>
+        [o.owl.subtype, +o.pos.y.toFixed(3), o.owl.settled]),
+      owlRings: G.g_owl_ground_rings.map((r) =>
+        [+r.x.toFixed(2), +r.y.toFixed(3), +r.z.toFixed(2)]),
+      owlSplashes: G.g_owl_water_splashes.length,
       dead: G.g_object_list.filter((o) => o.dead).map((o) => o.cls),
     };
   });
 
   // The shot. A class on the shot-test list gets a real pull at the point it
-  // published; one the port still tests by its own sphere (the owl) is marked
-  // hit the way that test marks it -- `obj+0x34` bits 3 and 1, player 0 --
+  // published (the owl registers the engine's way); one the port still tests
+  // by its own sphere (the fish) is marked hit the way that test marks it --
+  // `obj+0x34` bits 3 and 1, player 0 --
   // once it is inside `NEAR` units of the eye, which is on the screen for
   // every approach these blocks make.
   const NEAR = Number(opt("near", "30"));
@@ -114,10 +127,15 @@ try {
       console.log(`+${String(n).padStart(2)}  ${JSON.stringify(p)}`);
       await page.screenshot({ path: join(SHOTS, `${which}-fx-${tag}.png`) });
     }
-    if (which === "owl") {
+    if (which.startsWith("owl")) {
       failed = !(seen[0].feathers >= 40 && seen[0].pointBlood >= 1);
       console.log(failed ? "FAIL  the owl's death left no feathers"
         : "ok    the shot owl shed its feathers and bled");
+      // Whether the corpse reaches its ground inside its 121 frames depends
+      // on how high it was shot, so this reports rather than fails.
+      const landed = seen.some((p) => p.owlRings.length || p.owlSplashes);
+      console.log(landed ? "ok    the corpse landed and left its ring or splash"
+        : "note  the corpse did not reach its ground in its 121 frames");
     } else {
       failed = !(seen[0].clouds >= 1 && seen[0].splashes + seen[0].rings >= 1);
       console.log(failed ? "FAIL  the fish's death left nothing"

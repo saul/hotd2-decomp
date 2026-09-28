@@ -70,11 +70,17 @@ function ThrowerBlink(obj: ThrowerActor): void {
  * **No shipped spawn starts in it and no state can reach it.** Ported because
  * the state table names it and a bare number in a switch is how the cat ended
  * up running the zombie's machine.
+ *
+ * The ride cannot be shot: sub 0 raises `obj+0x34` bit `0x100` (`OR AH, 0x1`
+ * at `0x0044E603`) and the last frame lowers it (`AND DH, 0xfe` at
+ * `0x0044E67D`) **before** the claim at `0x0044E683`. Both writes are the
+ * shot bit; nothing here touches `NoCameraTrack`. `[proved]`
  */
 export function ThrowerStateRideObjectPath(obj: ThrowerActor, dt: number,
-                                           host: GameHost): void {
+                                           rng: Rng, host: GameHost): void {
   if (obj.sub === 0) {
     obj.slideTimer = 0;
+    obj.flags |= ActorFlag.ShotImmune;
     obj.sub = 1;
   }
   if (obj.sub === 1) {
@@ -92,8 +98,9 @@ export function ThrowerStateRideObjectPath(obj: ThrowerActor, dt: number,
     }
     obj.sub = 2;
   }
+  obj.flags &= ~ActorFlag.ShotImmune;
   // The claim's answer is discarded: it pounces either way.
-  ThrowerTryClaimAttackSlot(obj, host);
+  ThrowerTryClaimAttackSlot(obj, rng, host);
   obj.state = ThrowerState.Pounce;
   obj.sub = 0;
 }
@@ -116,7 +123,7 @@ export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
                                        host: GameHost,
                                        events?: Events): void {
   if (obj.sub === 0) {
-    if (!ThrowerTryClaimAttackSlot(obj, host)) {
+    if (!ThrowerTryClaimAttackSlot(obj, rng, host)) {
       // `g_active_player`: -1 nobody, 0 or 1 that player only, 2 both.
       obj.attackPermit = G.g_active_player === 1 ? 1
         : G.g_active_player === 2 ? rng.int(2) : 0;
@@ -302,11 +309,17 @@ function ThrowerGrabRide(obj: ThrowerActor, eye: Vec3): void {
  * The permit negotiation at the end of the hold: take the named player's slot
  * outright, and if that player cannot be attacked or is already someone else's
  * target, try the other one before giving up.
+ *
+ * "Someone else's" is `CMP [g_attack_permits + p*4], 1` at `0x0044F249` and
+ * "free" is `TEST EAX, EAX` at `0x0044F276`/`0x0044F297`, against the 1 every
+ * claim stores. The port stores the holder's `at` and frees with -1, so the
+ * first test is `!== -1`; it was `=== 1`, which a permit
+ * `ThrowerTryClaimAttackSlot` held never equals. `[proved]`
  */
 function ThrowerGrabTakePermit(obj: ThrowerActor, named: number,
                                rng: Rng): void {
   let p = named === -1 ? rng.int(2) : named;
-  if (!IsPlayerAttackable(p) || G.g_attack_permits[p] === 1) {
+  if (!IsPlayerAttackable(p) || G.g_attack_permits[p] !== -1) {
     if (p === 0) {
       p = IsPlayerAttackable(1) && G.g_attack_permits[1] === -1 ? 1 : -1;
     } else if (p === 1) {
@@ -393,6 +406,14 @@ const BLINK_IDLE_BY_STANCE = [0x208, 0x1fd, 0x1f3, 0x205];
  * blink, and jump in to sixty and then thirty, thirty frames apart, before
  * going solid and handing to the state their descriptor names.
  *
+ * **It cannot be shot while it does it**, and it is not hidden from the
+ * camera: the bit sub 0 raises is `obj+0x34` `0x100` (`OR AH, 0x1` at
+ * `0x004514F3`) and the arrival lowers it (`AND AH, 0xfe` at `0x004516B7`,
+ * `EAX` = `obj+0x34`) -- `ShotImmune`. The port raised `NoCameraTrack`
+ * there, `0x10000`, a bit this class sets only on its way to a corpse, and so
+ * a blinking `zslman` could be shot and was kept off the camera's list.
+ * `[proved]`
+ *
  * The earlier reading called this a retreat and named it after one. It is a
  * materialisation: `obj+0x1348` counts **down** 3, 2, 1, and each hop is
  * measured from the origin captured on entry rather than from where the actor
@@ -404,7 +425,7 @@ export function ThrowerStateBlinkInThreeHops(obj: ThrowerActor, dt: number,
 
   if (obj.sub === 0) {
     obj.thr.hopsLeft = BLINK_HOPS;
-    obj.flags |= ActorFlag.NoCameraTrack;
+    obj.flags |= ActorFlag.ShotImmune;
     const m = BLINK_IDLE_BY_STANCE[stance & 3] ?? BLINK_IDLE_BY_STANCE[0];
     if (MotionOf(obj, m)) {
       obj.action = { motion: m, ticks: 0 };
@@ -440,7 +461,7 @@ export function ThrowerStateBlinkInThreeHops(obj: ThrowerActor, dt: number,
   if (obj.thr.hopsLeft > 0) { obj.sub = 2; return; }
   obj.flags2 &= ~ThrowerFlag.Blinking;
   obj.alpha = 1;
-  obj.flags &= ~ActorFlag.NoCameraTrack;
+  obj.flags &= ~ActorFlag.ShotImmune;
   obj.state = obj.attackState;
   obj.sub = 0;
 }

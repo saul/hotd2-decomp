@@ -139,6 +139,28 @@ export interface FrogTail {
    * hold game state. `null` until the first draw the host could pose.
    */
   bone1View: { x: number; y: number; z: number } | null;
+  /**
+   * `part+0x08` — `obj+0x19C`, the **play cursor as the states read it**:
+   * what the last draw's `SkeletonAdvancePlayCursor` (`FUN_004111A0`) left
+   * there, or the start cursor an `ActorSetMotionBlended` (`FUN_004119A0`)
+   * wrote since (`param_1[2] = param_3`).
+   *
+   * Every cursor test in the class reads this word, and in the engine it lags
+   * the frame counter by the one increment `FrogDrawAndCycleBone2Slot` makes
+   * after the draw. The port's director advances the counter **before** the
+   * update, so `MotionPlayFrame` is already this frame's draw cursor when a
+   * state runs -- one tick ahead of what the engine's state reads. For most
+   * tests that is a frame early; for the death state it is a hang: the clip
+   * is frozen on the frame the state sees `len - 1` and the corpse waits for
+   * `len`, which the engine's next draw computes and the port's frozen
+   * counter never reaches.
+   *
+   * `[port-only]` in where it is kept, for {@link bone1View}'s reason: the
+   * engine's word is in the model block every skinned actor carries, and this
+   * class is the only one whose states the lag decides. Written at the draw
+   * and at each blend the class starts; read by every state.
+   */
+  playCursor: number;
 }
 
 /** [port-only] The zero `ActorAllocSub` hands the Init, written out. */
@@ -147,6 +169,6 @@ export function makeFrogTail(): FrogTail {
     flags: 0, state: FrogState.WaitForCamera, sub: 0,
     boneSlot: 0, boneCycle: 0, cursor: 0, wedge: 0, camDist: 0,
     a: 0, b: 0, motion: 0, targetX: 0, targetY: 0, targetZ: 0,
-    bone1View: null,
+    bone1View: null, playCursor: 0,
   };
 }

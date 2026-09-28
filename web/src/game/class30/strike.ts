@@ -35,6 +35,8 @@ import {
 } from "./motion_cue";
 import { MotionFade, StrikeSub, ZombieState } from "./states";
 import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
+import type { GameHost } from "../host";
+import { ZombieStrikeFrameSplash, ZombieStrikeStartSplash } from "./splash";
 
 /**
  * `ZombieStateStrike` sub 0: `picks[(rand % 10) + (zones & 7) * 10]`.
@@ -132,7 +134,7 @@ function endStrike(obj: ZombieActor): void {
 }
 
 export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
-                                  events?: Events): void {
+                                  events?: Events, host?: GameHost): void {
   // Every frame of the strike, before anything else: face the player and
   // record where they are.
   ActorFacePlayerTarget(obj, eye);
@@ -232,17 +234,16 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     // phase, not this call's -- its clocks advance before its states -- which
     // `ActorSetOneShotBlended` explains.
     ActorSetOneShotBlended(obj, atk.strike, 0, MotionFade.Quick);
+    // `CALL dword ptr [0x00592bcc]` at `0x00455B69`, straight after the clip:
+    // `g_class30_states[0x39]`, `ZombieStrikeStartSplash` (`FUN_00456C50`) --
+    // a wading actor's splash and two water rings as the swing starts.
+    ZombieStrikeStartSplash(obj, rng, host, events);
     // `00455b77 81e2fffffeff` / `00455b7e 81ca00000800` on `obj+0x136C`: the
-    // new clip's one-shot latch comes down with the swing.
+    // new clip's one-shot latch comes down with the swing, which is what lets
+    // `ZombieStrikeFrameSplash` below fire once more.
     //
-    // [diverges] Three things between the clip and the cry are not here, and
-    // all three are effects. `CALL [0x00592bcc]` at `0x00455B69` is
-    // `ZombieStrikeStartSplash` (`FUN_00456C50`) and `CALL [0x00592bd0]` at
-    // `0x00455BED`, every frame of sub 2, is `ZombieStrikeFrameSplash`
-    // (`FUN_00456D10`) -- a wading actor's splash at the swing's start and
-    // 0x14 frames before its end, the second latched by the bit cleared
-    // above. The same write raises {@link ZombieFlag2.StrikeStarted}, which is
-    // left down: its one reader and its only clear are `ZombieDrawBonePart`'s
+    // The same write raises {@link ZombieFlag2.StrikeStarted}, which is left
+    // down: its one reader and its only clear are `ZombieDrawBonePart`'s
     // `0x1F09` cel arm, which `bonecels.ts` lists as not ported, so raising
     // it here would leave it up for good.
     obj.flags2 &= ~ZombieFlag2.OneShotFired;
@@ -287,6 +288,11 @@ export function ZombieStateStrike(obj: ZombieActor, eye: Vec3, rng: Rng,
     obj.struck = true;
     ActorStrikeConnect(obj, atk, events);
   }
+  // `CALL dword ptr [0x00592bd0]` at `0x00455BED`, every frame of the swing,
+  // between the hit test and the end test: `g_class30_states[0x3A]`,
+  // `ZombieStrikeFrameSplash` (`FUN_00456D10`) -- the wading splash 0x14 play
+  // frames before the clip ends, latched by the bit sub 1 took down.
+  ZombieStrikeFrameSplash(obj, rng, host, events);
   if (obj.action.ticks >= ticksOfAuthoredFrame(m.frames - 1, m.fps)) {
     endStrike(obj);
   }

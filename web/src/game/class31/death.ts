@@ -21,8 +21,9 @@ import {
 } from "../combat/counts";
 import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
-import { G } from "../globals";
+import { G, HIT_SLOT_NONE } from "../globals";
 import { CameraSlotVacate } from "../camera/slots";
+import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import type { GameHost } from "../host";
 import { vec3 } from "../vec";
 import { QueryGroundHeightAt } from "../coli";
@@ -383,34 +384,143 @@ export function ThrowerEnterCorpseState(obj: ThrowerActor): void {
 }
 
 /**
- * The pose the corpse freezes on, from `class31.corpse_frames`.
+ * The pose pin both corpse states run on every frame but their last: a fresh
+ * `rand()` and a write of `obj+0x194`, the play cursor, from the table the
+ * track's clip `obj+0x1B4` chooses -- `g_class31_corpse_frames_m1bc`,
+ * `_m11d`, `_m11e` or `_m3a6` (`0x00592AC0`) by `rand() % 17 >> 4`, so the
+ * second entry comes up once in seventeen and **a corpse can twitch** between
+ * its two frames from one frame to the next.
+ *
+ * `[port-only]` as a function: the engine has it inline, the same forty bytes
+ * at `0x0044AA9E` and `0x0044AC8C`. And the draw is **every** frame: the port
+ * used to take it once, in sub 0, which pinned one frame for the whole two
+ * seconds and left the other 119 draws out of the shared stream.
  *
  * [diverges] The engine has a general table for motions `0x3D9..0x3E0` behind
  * these four special cases, and class 0x31 never plays one of those — every
  * use of it reads outside the array, into mesh floats or a string. The port
- * keeps the current frame instead of reproducing an out-of-bounds read.
+ * keeps the current frame instead of reproducing an out-of-bounds read; the
+ * draw is still taken, as the engine takes it on every arm.
  */
-function ThrowerCorpsePoseFrame(obj: ThrowerActor, rng: Rng): number {
-  const row = T.chars?.class31?.corpse_frames?.[String(obj.action?.motion
-                                                      ?? obj.motion)];
-  if (!row) return -1;
-  // `rand() % 17 >> 4` — the second entry comes up once in seventeen.
-  return row[rng.int(17) >> 4] ?? row[0];
+function ThrowerCorpsePoseFrame(obj: ThrowerActor, rng: Rng): void {
+  const r = rng.int(17) >> 4;
+  const row = T.chars?.class31?.corpse_frames?.[String(ThrowerTrackMotion(obj))];
+  obj.thr.corpseFrame = row ? (row[r] ?? row[0]) : -1;
+  // `MOV [ESI+0x194], EDX`: the play cursor itself, and the corpse's advance
+  // is frozen (`ThrowerEnterCorpseState` raised `PoseFrozen`), so the frame
+  // written is the frame drawn.
+  if (obj.thr.corpseFrame >= 0 && obj.action) {
+    obj.action.ticks = obj.thr.corpseFrame;
+  }
 }
 
 /**
- * One handler for `ThrowerStateCorpseSink` (`FUN_0044A9D0`, class 0x31
- * state 4) and `ThrowerStateCorpseBlink` (`FUN_0044AB70`, state 5), which is
- * the same two seconds without the sinking.
+ * `obj+0x1B4` -- the motion on the engine's one track. The port plays class
+ * 0x31's death clips on the one-shot channel (`playOnce`), so while one is up
+ * it is the clip on screen.
+ */
+function ThrowerTrackMotion(obj: ThrowerActor): number {
+  return obj.action?.motion ?? obj.motion;
+}
+
+/**
+ * `0x3A6`, and `[0x00565DEC]` = `0000b040` = 5.5f: both corpse states lift
+ * `obj+0x44` by 5.5 around their `SpawnGroundRingEffect` (`FUN_00407DA0`)
+ * call when the clip is `0x3A6`, and drop it again straight after --
  *
- * [diverges] Two functions in the engine, one here: they share their opening,
- * their pose pin, their countdown and their despawn, and differ only in
- * whether the last line sinks the body or flickers it. The `blink` argument is
- * the character-type test `ThrowerEnterCorpseState` already made.
+ * ```
+ * 0044a9e6  CMP  dword ptr [ESI+0x1b4], 0x3a6
+ * 0044a9f2  FLD  [ESI+0x44] ; FADD [0x00565dec] ; FSTP [ESI+0x44]
+ * 0044a9ff  CALL 0x00407da0
+ * 0044aa04  FLD  [ESI+0x44] ; FSUB [0x00565dec] ; FSTP [ESI+0x44]
+ * ```
  *
- * Both pin the motion cursor to one pose frame and hold it, which is why a
- * corpse does not finish its death animation: it is frozen on a chosen frame
- * of it.
+ * (and the same at `0x0044AB89`..`0x0044ABB3`). The ring's height is a floor
+ * trace from `y + 20` (`MotionFlag.TraceGround`), so this starts that trace
+ * 25.5 above the origin for the one clip. `0x3A6` is the airborne clip of
+ * behaviour sets 0 and 3; why a body frozen on it wants the higher start is
+ * `[open]`.
+ */
+const CORPSE_RING_LIFT_MOTION = 0x3a6;
+const CORPSE_RING_LIFT = 5.5;
+
+/**
+ * The opening both corpse states share, instruction for instruction: the
+ * ring, the count, and `obj+0x34 |= 0x20000`.
+ *
+ * `[port-only]` as a function -- `0x0044A9E6`..`0x0044AA38` and
+ * `0x0044AB89`..`0x0044ABDB` are the same code twice.
+ */
+function ThrowerCorpseBegin(obj: ThrowerActor): void {
+  if (ThrowerTrackMotion(obj) === CORPSE_RING_LIFT_MOTION) {
+    obj.pos.y += CORPSE_RING_LIFT;
+    SpawnGroundRingEffect(obj);
+    obj.pos.y -= CORPSE_RING_LIFT;
+  } else {
+    SpawnGroundRingEffect(obj);
+  }
+  obj.slideTimer = CORPSE_FRAMES;
+  // `OR ECX, 0x20000` -- the bit the class-0x30 corpse raises for its sink.
+  obj.flags |= ActorFlag.Airborne;
+  // `INC word ptr [ESI+0x1312]` and no `RET`: sub 1 runs on this frame too.
+  obj.sub = 1;
+}
+
+/**
+ * The corpse's way out, the same in both states:
+ *
+ * ```c
+ * if ((obj+0x34 & 0x800000) && g_enemies_present == 0) {
+ *     obj+0x34 |= 0x10000;
+ *     if (obj+0x120 != -1) g_enemy_slots[obj+0x120 * 8] = 0;
+ * }
+ * if (obj+0x3C != -1) g_hit_slots[obj+0x3C] = 0;
+ * ActorDespawn(obj);
+ * ```
+ *
+ * at `0x0044AA4F`..`0x0044AA94` and `0x0044AC34`..`0x0044AC81` `[proved]`.
+ * **Not `ThrowerLeave`**, which the port called here: the counts left at
+ * the death and at `ThrowerEnterCorpseState`, and the permit goes back in the
+ * dead sweep, so the only things left to give up are the camera -- and that
+ * only for {@link ActorFlag.KeepCameraWhenLast}, the bit that kept it through
+ * `ThrowerReleaseSlotOnDeath` -- and the hit slot.
+ */
+function ThrowerCorpseLeave(obj: ThrowerActor): void {
+  if ((obj.flags & ActorFlag.KeepCameraWhenLast)
+      && G.g_enemies_present === 0) {
+    obj.flags |= ActorFlag.NoCameraTrack;
+    CameraSlotVacate(obj);
+  }
+  if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+  ActorDespawn(obj);
+}
+
+/**
+ * `ThrowerStateCorpseSink` — `FUN_0044A9D0`, class 0x31 state 4. Every
+ * character type but 0x18.
+ *
+ * Sub 0 opens the ring and falls into sub 1 on the same frame. Sub 1 sinks
+ * `obj+0x44` by 0.04 (`[0x004C4D04]` = `0ad7233d`), counts `obj+0x1330`
+ * down from 0x78, and on reaching zero leaves; on every other frame it pins
+ * the pose. So the body sinks 120 times and is drawn on a pinned frame 119.
+ */
+export function ThrowerStateCorpseSink(obj: ThrowerActor, dt: number,
+                                       rng: Rng): void {
+  if (obj.sub === 0) ThrowerCorpseBegin(obj);
+  else if (obj.sub !== 1) return;
+
+  const frames = dt * GAME_HZ;
+  obj.pos.y -= CORPSE_SINK * frames;
+  obj.slideTimer -= frames;
+  if (obj.slideTimer < 1) { ThrowerCorpseLeave(obj); return; }
+  ThrowerCorpsePoseFrame(obj, rng);
+}
+
+/**
+ * `ThrowerStateCorpseBlink` — `FUN_0044AB70`, class 0x31 state 5. Character
+ * type 0x18 only, which is the test `ThrowerEnterCorpseState` makes.
+ *
+ * The same opening and the same two seconds without the sink.
  *
  * **The flicker is an alpha, not a draw flag.** Where class 0x30's
  * `ZombieStateCorpseBlink` (`FUN_00454FD0`) closes `obj+0x1F8` bit 0 and the
@@ -419,47 +529,30 @@ function ThrowerCorpsePoseFrame(obj: ThrowerActor, rng: Rng): number {
  * nor `obj+0x1F8` appears in the routine. `ThrowerDrawBonePart` draws each
  * bone at that alpha while the bit is up, and `DrawCharacterPartSlot` draws
  * `zslman`'s waist at it whatever the bit, so the whole body goes. `[proved]`
+ *
+ * Parity is read before the decrement, so the first frame is visible; the
+ * way out writes `obj+0x138C = 0` and takes bit 2 down.
  */
-export function ThrowerStateCorpse(obj: ThrowerActor, dt: number, rng: Rng,
-                                   blink: boolean): void {
-  if (obj.sub === 0) {
-    obj.slideTimer = CORPSE_FRAMES;
-    obj.thr.corpseFrame = ThrowerCorpsePoseFrame(obj, rng);
-    obj.flags |= 0x20000;
-    obj.sub = 1;
-  }
+export function ThrowerStateCorpseBlink(obj: ThrowerActor, dt: number,
+                                        rng: Rng): void {
+  if (obj.sub === 0) ThrowerCorpseBegin(obj);
+  else if (obj.sub !== 1) return;
 
-  // The pose pin: the engine rewrites the play cursor every frame and freezes
-  // the advance, so the corpse holds one chosen frame of its death clip rather
-  // than finishing it.
-  if (obj.thr.corpseFrame >= 0 && obj.action) {
-    // `obj.thr.corpseFrame` is already a frame number; it used to be divided by
-    // GAME_HZ only to be multiplied back on read.
-    obj.action.ticks = obj.thr.corpseFrame;
-  }
-
-  if (blink) {
-    // Parity is tested *before* the decrement, so the first frame is visible.
-    if (Math.floor(obj.slideTimer) & 1) {
-      obj.alpha = 0;
-      obj.flags2 |= ThrowerFlag.Blinking;
-    } else {
-      obj.alpha = 1;
-      obj.flags2 &= ~ThrowerFlag.Blinking;
-    }
-  } else {
-    obj.pos.y -= CORPSE_SINK * dt * GAME_HZ;
-  }
-
-  obj.slideTimer -= dt * GAME_HZ;
-  if (obj.slideTimer > 0) return;
-  if (blink) {
-    // `ThrowerStateCorpseBlink`'s way out: `obj+0x138C = 0` and bit 2 down.
-    // The sink writes neither.
+  if (Math.floor(obj.slideTimer) & 1) {
+    obj.flags2 |= ThrowerFlag.Blinking;
     obj.alpha = 0;
+  } else {
     obj.flags2 &= ~ThrowerFlag.Blinking;
+    obj.alpha = 1;
   }
-  ThrowerLeave(obj);
+  obj.slideTimer -= dt * GAME_HZ;
+  if (obj.slideTimer < 1) {
+    obj.flags2 &= ~ThrowerFlag.Blinking;
+    obj.alpha = 0;
+    ThrowerCorpseLeave(obj);
+    return;
+  }
+  ThrowerCorpsePoseFrame(obj, rng);
 }
 
 /**

@@ -970,10 +970,18 @@ the routine, `MOV ECX,count; CDQ; IDIV ECX; ADD EDX,base`:
 | `0x1D99` | — | itself, then `0xB66` at `T(0.343, 0.4530, 1.0333)` |
 | `0x1CA9` | `0x004537E3` | `0x1CA9 + n`, `n` a latch in `obj+0x1328` that counts to 14 and stops |
 | `0x1F09` | — | a 60-cel ping-pong off the same word, restarted by `obj+0x136C` bit `0x80000` |
-| `0x1C71`–`0x1C7B` (not `0x1C73`), `0x1C7D`–`0x1C80` | — | `FUN_00418660(slot)` `[open]`, then itself |
-| `0x1C7C` | — | itself, and a per-frame decay of `obj+0x134C` / `obj+0x138C` |
-| `0x1C6C` | — | itself, and a transition that raises `obj+0x136C` bits `0x60000000` and plays `PlaySoundId(0x2225A9)` |
+| `0x1C71`–`0x1C7B` (not `0x1C73`), `0x1C7D`–`0x1C80` | — | `AssetSlotUVsFromViewNormals(slot)` (`FUN_00418660`: the model's UVs rewritten from its normals through the matrix), then itself |
+| `0x1C7C` | `0x00453708` | the twin's fade-out: `obj+0x134C -= 1.0` each draw, and once that is below 0, `obj+0x138C -= obj+0x1388` clamped at 0; then itself |
+| `0x1C6C` | `0x00453665` | `znele`'s fade-in, only while `obj+0x1368` bit `0x20` is up: `obj+0x134C -= 1.0`, and once below 0, `obj+0x138C += obj+0x1388`; past 1.0 -- or at once under `obj+0x34` `0x10000000` -- the bit drops, the alpha is pinned at 1.0, `obj+0x136C |= 0x60000000`, `obj+0x34 &= ~0x8100`, `PlaySoundId(0x2225A9)`; then itself |
 | anything else | — | itself |
+
+The two fade arms are the whole of what moves a class-0x30 actor's alpha;
+`EnemyZombieInitByCharType` (`FUN_00452FD0`) sets them up -- type 9 at 0.25
+stepping `1/60`, type 0x12 at 0 stepping `1/30`, both with a hundred-draw wait
+and `obj+0x1368` bit `0x20` up -- and type 0x12's arm allocates the type-9
+twin, which `ZombieTwinFollowHost` (`FUN_00453290`) keeps on the host's pose.
+Ported in `game/class30/draw.ts`, `init_char.ts` and `twin.ts`; see
+`docs/PLAYER_PROGRESS.md`, "Character fades".
 
 Two arms are not draws at all and wrap this one: `ZombieDrawBoneSlotOnly`
 (`0x00453B30`) is the plain one-slot hook `ZombieAdvanceMotion` installs in
@@ -984,7 +992,8 @@ Original Mode big-head item — bone 2 at `MatrixScale(2,2,2)`, or
 Every arm draws through `ZombieSubmitSlotByLighting` (`FUN_00453AE0`), which
 picks `SubmitSlotWithSceneLightArray`, `AssetDrawSlotWithAlpha` or
 `AssetDrawSlot` on `obj+0x136C` bit `0x20` and `obj+0x1368` bit `0x20` — so a
-cel keeps whatever lighting the spawn asked for.
+cel keeps whatever lighting the spawn asked for. The light array is tested
+first: a zombie drawn through it is never faded, whatever `obj+0x1368` says.
 
 **Each trigger slot belongs to exactly one character type**, and every run
 resolves to that type's own `pol/` file, which is the check on the reading:

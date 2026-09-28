@@ -22,6 +22,7 @@ import type { Events } from "../../core/events";
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
 import { SPAWN_RIDE_CARRIER, ZombieAttachToCarrier } from "./carrier";
 import { EnemyZombieTakeWeaponLoopSe } from "./weapon_loop";
+import { ZombieAllocTwin } from "./twin";
 
 /**
  * The two bits this routine consumes out of the spawn record's flags word.
@@ -106,7 +107,9 @@ export function EnemyZombieInitByCharType(obj: ZombieActor,
   EnemyZombieTakeWeaponLoopSe(obj, events);
   // The two arms that set up a faded draw.
   if (obj.charType === ZombieFadeType.Twin) ZombieInitTwinFade(obj);
-  else if (obj.charType === ZombieFadeType.Znele) ZombieInitZneleFade(obj);
+  else if (obj.charType === ZombieFadeType.Znele) {
+    ZombieInitZneleFade(obj, events);
+  }
 }
 
 /**
@@ -185,12 +188,19 @@ function ZombieInitTwinFade(obj: ZombieActor): void {
  * `[proved]`. So a `znele` is drawn, invisible, from its first frame; after a
  * hundred draws of its `0x1C6C` node `ZombieDrawBonePart` fades it in over
  * thirty and gives it back its pushes and its shot test.
+ *
+ * Then, unless `obj+0x34` has `0x10000000` (`TEST EAX, 0x10000000` at
+ * `0x004531DA`, `JNZ` past the allocation at `0x00453202`), the twin --
+ * `ZombieAllocTwin` in `class30/twin.ts`.
  */
-function ZombieInitZneleFade(obj: ZombieActor): void {
+function ZombieInitZneleFade(obj: ZombieActor, events?: Events): void {
   obj.flags |= ZNELE_FADING_FLAGS;
   obj.flags2 &= ~FADE_NO_PUSH;
   obj.zom.fadeDraw = true;
   obj.alpha = 0;
   obj.zom.fadeStep = ZNELE_FADE_STEP;
   obj.zom.fadeDelay = FADE_DELAY;
+  if ((obj.flags & ActorFlag.Committed) === 0) {
+    ZombieAllocTwin(obj, undefined, events);
+  }
 }

@@ -64,6 +64,7 @@
  *   for all four classes, together with a split of that function. That is a
  *   job of its own; it is recorded here rather than half-done. `[open]`
  */
+import type { ActorRef } from "../actor";
 import { vec3, type Vec3 } from "../vec";
 
 /**
@@ -337,6 +338,14 @@ export interface ZombieTail extends HeadAimWords {
    */
   fadeDelay: number;          // +0x134C
   /**
+   * `obj+0x13A4` — on the twin, the `znele` that allocated it:
+   * `EnemyZombieInitByCharType`'s type-0x12 arm writes the host there
+   * (`MOV dword ptr [EBX + 0x13a4], EBP` at `0x0045323D`) and
+   * `ZombieTwinFollowHost` (`FUN_00453290`) reads it on its first line. `-1`
+   * on every other actor. See `class30/twin.ts`.
+   */
+  twinHost: ActorRef;         // +0x13A4
+  /**
    * `obj+0x1370` — how close `ZombieStateWalkToTarget` has to get, and what
    * `ZombieStateWalkDistance` latches the descriptor's `desc+0x04` into.
    */
@@ -445,6 +454,7 @@ export function makeZombieTail(): ZombieTail {
     fadeDraw: false,
     fadeStep: 0,
     fadeDelay: 0,
+    twinHost: -1,
     targetArrive: 0,
     walkTravelled: 0,
     scriptPc: 0,

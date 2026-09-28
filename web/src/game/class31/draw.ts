@@ -108,10 +108,15 @@ const CYCLE_SLOTS: readonly number[] = [0x2016, 0x204a];
  * {@link Actor.nodeDrawAlpha}, `null` or the alpha. A faded draw at 1 or at 0
  * is still a faded draw: the blinking states write exactly those two, and
  * the renderer draws both through the forced blend, the 0 invisible and still
- * writing depth (`render/draw_order.ts`). Only `zskamere` has a `0x1FB9`
- * node -- its bone 9 -- so the ramp is its, under any of the blinking states;
- * this comment used to say bit 2 was never up for it, which counted the
- * descriptor's word and not the states that raise the bit.
+ * writing depth (`render/draw_order.ts`).
+ *
+ * Only `zskamere` has a `0x1FB9` node -- its bone 9 -- and whether a shipped
+ * one ever has bit 2 up is `[likely]` no: the fifteen descriptors' `+0x20`
+ * words are 0 or 1, they start in states 18 and 20 and leave them for 0, not
+ * for 27 or 34, no class-0x31 routine writes 27 or 34 into `obj+0x1310` as an
+ * immediate, and the blinking death is `zslman`'s alone. So the ramp is
+ * transcribed and drawn, and as far as the shipped data goes it is never
+ * reached; a debug write of the bit shows it.
  *
  * What is not here, and why: the draws themselves, the scale, `0x1FF4` and
  * the cycles are `render/`'s, and `render/` draws none of the last three.

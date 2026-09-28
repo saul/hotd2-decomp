@@ -195,6 +195,7 @@ import { ActorDrawShadow, ActorSetPartVisibility, PART_ALPHA_CHAR_TYPES,
          ActorRunNodeDrawHooks } from "../src/game/model_draw";
 import { REGROW_FULL, ThrowerDrawBonePart } from "../src/game/class31/draw";
 import { ZombieDrawBonePart } from "../src/game/class30/draw";
+import { ZombieTwinAt } from "../src/game/class30/twin";
 import {
   ActorAimHeadAtCamera, ActorHeadAimAngles, HEAD_AIM_RATE, HeadAimBeginDraw,
   HeadAimEndDraw, ThrowerHeadAims,
@@ -15882,8 +15883,8 @@ console.log("\nclass 0x30's two fades: `znele` in, the twin out");
   // `obj+0x34` bit 0x10000000 ends it on the first draw: two stage-6 `znele`
   // carry it in their descriptor, and those are the two with no twin.
   const quick = spawnZombie(0x9408, 0x12, "znele",
-                            { initialState: ZombieState.HoldClipThenBranch });
-  quick.flags |= ActorFlag.Committed;
+                            { initialState: ZombieState.HoldClipThenBranch,
+                              flags: ActorFlag.Committed });
   draw(quick);
   check("a `znele` with `obj+0x34` 0x10000000 is done on its first draw",
         !quick.zom.fadeDraw && quick.alpha === 1
@@ -15920,6 +15921,72 @@ console.log("\nclass 0x30's two fades: `znele` in, the twin out");
   draw(lit);
   check("...and faded again once the scene light goes off",
         nodes(lit).every((x) => x === 0.25), nodes(lit).join());
+
+  // The twin itself. `EnemyZombieInitByCharType`'s type-0x12 arm allocates it
+  // (0x00453204) unless `obj+0x34` has 0x10000000, and `EnemyZombieInit`
+  // gives type 9 `ZombieTwinFollowHost` (`FUN_00453290`) for its update.
+  const twinOf = (hostAt: number) =>
+    G.g_object_list.find((o) => o.at === ZombieTwinAt(hostAt));
+  const made = twinOf(znele.at);
+  check("every `znele` without 0x10000000 allocates a type-9 twin beside it",
+        made !== undefined && made.cls === SpawnClass.Zombie
+        && made.charType === 9 && made.zom.twinHost === znele.at
+        && made.visible,
+        made ? `${made.at.toString(16)} ${made.charType}` : "none");
+  check("...one with the bit allocates none",
+        twinOf(quick.at) === undefined);
+  // The exporter writes the twin's synthetic row at its own copy of the
+  // address; nothing else holds the two together.
+  const { zombieTwinAt } = await import("../src/hod2lib/characters");
+  check("the port's twin address is the one the exporter's row carries",
+        [0x874, 0x2164, 0x9400, 0xfffff].every(
+          (a) => ZombieTwinAt(a) === zombieTwinAt(a)));
+  const aliveBefore = G.g_enemies_alive;
+  const host = spawnZombie(0x9420, 0x12, "znele",
+                           { initialState: ZombieState.HoldClipThenBranch });
+  const tw = twinOf(host.at);
+  if (!tw || tw.cls !== SpawnClass.Zombie) throw new Error("no twin");
+  check("...counted into neither enemy count: the host is, once",
+        G.g_enemies_alive === aliveBefore + 1, `${G.g_enemies_alive}`);
+  check("...with the minimum hit points: `ActorInitHitPoints` clamps the "
+        + "cleared `obj+0x11E`, and the 999 is written over",
+        tw.hp === ActorInitHitPoints({ hp: 0 } as never, SpawnClass.Zombie)
+        && tw.hp < 999, `${tw.hp}`);
+  // Move the host and put it on another clip; the twin's update takes both.
+  host.pos.x = 12;
+  host.yaw = 0x2000;
+  host.motion = 956;
+  host.playTicks = 37;
+  const handler = g_class_handlers[SpawnClass.Zombie]!;
+  handler.update(tw, f);
+  check("the twin's update takes the host's transform and clip each frame",
+        tw.pos.x === 12 && tw.yaw === 0x2000 && tw.motion === 956
+        && tw.playTicks === 37,
+        `${tw.pos.x} ${tw.yaw} ${tw.motion} ${tw.playTicks}`);
+  check("...never turns its head (0x40000 every frame)",
+        (tw.flags & ActorFlag.NoHeadAim) !== 0);
+  check("...and runs its own 0x1C7C node's clock in the draw",
+        tw.zom.fadeDelay === 99 && tw.alpha === 0.25);
+  // A host with 0x10000000 is not followed.
+  host.flags |= ActorFlag.Committed;
+  host.pos.x = 30;
+  handler.update(tw, f);
+  check("...but not while the host has 0x10000000",
+        tw.pos.x === 12, `${tw.pos.x}`);
+  host.flags &= ~ActorFlag.Committed;
+  // Its alpha at 0 is the end of it: `TEST AH, 0x41` takes "equal".
+  for (let i = 0; i < 200 && !tw.despawned; i++) handler.update(tw, f);
+  check("the twin despawns the update after its alpha reaches 0",
+        tw.despawned && tw.alpha === 0 && tw.zom.fadeDelay < -15,
+        `${tw.despawned} ${tw.alpha} ${tw.zom.fadeDelay}`);
+  // ...and when its host dies.
+  const host2 = spawnZombie(0x9430, 0x12, "znele",
+                            { initialState: ZombieState.HoldClipThenBranch });
+  const twin2 = twinOf(host2.at);
+  if (!twin2) throw new Error("no twin");
+  host2.flags |= ActorFlag.Dead;
+  handler.update(twin2, f);
+  check("...and when its host has died", twin2.despawned);
 }
 
 console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");

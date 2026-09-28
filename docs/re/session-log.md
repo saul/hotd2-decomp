@@ -20508,3 +20508,66 @@ they are `FROG_BONE1` and `FrogBone1World` now.
 * The death state plays `ActorSetMotionBlended(0x13F, 0, 2)` after writing
   `obj.motion` itself, so the port's blend sees no change and cuts; and its
   `SpawnGroundRingEffect` is not called. Neither was read for this.
+
+## 2026-09-28 -- the canal water is a task: class 0x41 type 1
+
+**The report.** `?stage=2&mode=play&entry=0&block=16&step=14&op=1`: the dock
+in block 16 stands over nothing -- black under the boards and between the
+pilings.
+
+**What was found.**
+
+* Region 29, where the walker stands, names four `st2_07` models and none of
+  the canal's flat green planes. The script loads two of those planes itself
+  (`asset_load_slot` `st2_07[3]` at step 0 and `st2_07[1]` at step 10), and a
+  slot that is only loaded is drawn by nothing: `RegionDrawResidentSet`
+  (`0x00401260`) walks the current region's list and no other `[proved]`.
+  Its loop tail (`0x00401443..0x0040145F`) sits outside Ghidra's function
+  body, so its decompile shows a single entry; the disassembly settles it.
+* The only references to those slots in `.text` are immediates in
+  unfunctioned code at `0x0046E3A0` -- now `WaterSurfaceUpdate` -- whose one
+  data xref is `g_class41_constructors[1]`, `FUN_00462F70`, now
+  `PlaceWaterSurface`. Class 0x41 type 1: a 0x44-byte task that draws
+  `g_water_surface_slots[obj+0x1F4]` (`0x00593DA4`, ten flat tiles) every
+  frame, ripples its UVs, flips its TSP filter bit to bilinear, pairs and
+  swaps tiles on script flags, and kills itself on five conditions.
+  Fifteen spawns: 5 stage 2, 7 stage 3, 3 training. Full reading in
+  `docs/formats/water.md` §2.
+
+**What the port does.** `game/class41/water.ts` transcribes both routines;
+the ripple is cumulative in the engine, so `G.g_water_surface_uv` keeps it as
+two sums per tile (`sin(a + b)` factors) and `render/water_surfaces.ts`
+applies them per geometry. The exporter emits a `water_surface` placement
+with the slot resolved through the table (schema change) and carries the
+`komono_boss2`/`komono_venis` tiles in `slots_actor`. `StageScene` no longer
+shows the task's tiles by its "loaded and unregioned" stand-in.
+`tools/verify_water.py` checks the chain, the table and every constant
+against the immediates; two mutations (a constant, the table address) fail it.
+
+**Wrong turns.**
+
+* `docs/formats/water.md` opened "There is no water renderer", and I spent
+  the first hour treating that as the frame: checking the region lists and
+  the materials of the region planes for a hiding reason. It was a negative
+  result (L17) that nobody had tested against a place the water was missing.
+* `water.bin`, which the block loads at step 1, looked like the answer by its
+  name. It is 63 effect models -- droplets, splash sheets and a fifty-frame
+  splash drawn from `0x004086F5` -- and no surface. Naming by resemblance
+  again; the slot search is what found the task.
+* The first cut of the exporter placement had no arm in `SpawnPropContainers`'
+  bridge, whose default is `PlaceBreakableGroup`: every water spawn would
+  have been placed as breakable group 0. Caught in the page, before commit,
+  by the placers' `condition` reading 0.
+* The first render layer called two `game/` functions and failed
+  `render-drives-the-port`; the closure became a table and the per-vertex half
+  of the phase moved into the renderer.
+
+**Next actions.**
+
+* Asset residency (`0x009A66A0`'s `+0xD` bit 0x80) is not modelled, so the
+  ripple's residency gate is `[diverges]` and the ripple is not reset when a
+  tile is reloaded. Both are bounded to a phase offset; a residency model
+  would clear them and is its own piece of work.
+* A seek runs every replayed placer's constructor on the first live frame, so
+  step lifetimes restart where the seek lands -- for every class-0x41 object,
+  not only this one.

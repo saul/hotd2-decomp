@@ -33,6 +33,7 @@ import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
   from "./effects/owl";
 import type { RingEffect } from "./effects/ring_effect";
 import type { WaterRing } from "./effects/water_ring";
+import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
@@ -1004,6 +1005,19 @@ export const G = {
   g_water_rings: [] as WaterRing[],
   /** `[port-only]` — see {@link WaterRing.id}. */
   g_water_ring_seq: 0,
+  /**
+   * `[port-only]` — the canal water tasks `PlaceWaterSurface`
+   * (`FUN_00462F70`, class 0x41 type 1) has allocated. `game/class41/water.ts`.
+   */
+  g_water_surfaces: [] as WaterSurface[],
+  /** `[port-only]` — see {@link WaterSurface.id}. */
+  g_water_surface_seq: 0,
+  /**
+   * `[port-only]` in shape — what `WaterSurfaceUpdate` (`FUN_0046E3A0`) has
+   * done to each tile's model, which the engine rewrites in place: one entry
+   * per slot the walk has run on. See {@link WaterSurfaceUv}.
+   */
+  g_water_surface_uv: [] as WaterSurfaceUv[],
   /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
@@ -2235,6 +2249,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_prop_strip_effect_seq = 0;
   G.g_water_rings = [];
   G.g_water_ring_seq = 0;
+  // The water tasks go with the scene's list, and the tiles they rewrote go
+  // with the scene's assets.
+  G.g_water_surfaces = [];
+  G.g_water_surface_seq = 0;
+  G.g_water_surface_uv = [];
   // ...and the owl's and the fish's tasks, which the scene's list takes
   // with it like every other task.
   G.g_owl_feathers = [];

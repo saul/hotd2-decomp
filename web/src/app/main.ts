@@ -5,7 +5,8 @@
  *
  *   Step       block -> step -> instruction, every one of them seekable, with
  *              a frame slider inside a camera move
- *   Play       60 Hz with a speed control, pausing at every branch point
+ *   Play       60 Hz with a speed control; a branch goes as the game's does,
+ *              unless the sidebar's "Pause at branches" debug aid holds it
  *   Free roam  orbit and fly, detached from the rail
  *
  * The camera is the game's own: 41.100 degrees vertical, 4:3, near 0.8, far
@@ -119,6 +120,7 @@ import { SetBoss4Tables, SetGameOverTables, SetGameTables }
 /** Before a stage is up there is nothing to report, and the shape is fixed. */
 const EMPTY_GROUPS: Readonly<Record<DebugGroupName, readonly StripRow[]>> = {
   camera: [], scene: [], actors: [], props: [], collision: [], shooting: [],
+  route: [],
 };
 
 /** The commands that change something worth remembering across a reload. */
@@ -582,13 +584,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.scene.add(this.deepSprites.group);
     this.world.add("render", this.deepSprites);
     // The screen-space layer, and the last thing the tick does: it draws the
-    // shutter and the caption straight off the walker, and holds no state of
-    // its own for a snapshot to miss. The projection is *not* built here --
+    // caption straight off the walker and the shutter bars and screen sprites
+    // the engine recorded in `G`, and holds no state of its own for a
+    // snapshot to miss. The projection is *not* built here --
     // it is built at the end of `frame`, outside the tick, because a world
     // with no walker in it does not tick at all. See `frame`.
     this.world.add("hud", drawSystem("hud.layer",
                                     (ctx) => this.hudLayer.draw(ctx.walker,
-                                                            G.g_screen_sprite_draws)));
+                                                            G.g_screen_sprite_draws,
+                                                            G.g_hud_shutter_bars)));
     this.game.backend = this.chars;
     this.debug.source = this.chars;
     // One generator for the whole player, so a snapshot replays the gore

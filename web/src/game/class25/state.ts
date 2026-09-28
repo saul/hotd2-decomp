@@ -181,16 +181,20 @@ export interface HumanoidTail {
    * `[proved]`: `MOV dword ptr [EDI + 0x1364], 0x1` (`c7876413000001000000`)
    * at `0x004848BE` and `MOV dword ptr [EDI + 0x1364], EBX` (`899f64130000`,
    * `EBX = 0`) at `0x004848DE`. Read every frame by
-   * `ScriptedHumanoidBoneDrawHook` at `0x00485287` — so it decorates **bone
-   * 2** for as long as it is set. `FUN_00485BA0` and `FUN_00485D70` are
-   * `[open]`.
+   * `ScriptedHumanoidBoneDrawHook` at `0x00485287`: while it is set, bone 2 is
+   * turned toward the camera by `ScriptedHumanoidAimHeadAtCamera`
+   * (`FUN_00485BA0`), from angles op 12 mode 1 seeds through
+   * `ScriptedHumanoidSeedHeadAim` (`FUN_00485D70`). It was called a bone
+   * "decoration" before either routine was read. `ScriptedHumanoidInit` is the
+   * third writer, at `0x00484229`.
    *
-   * `op 12` is used **zero** times in shipped data, so this is modelled and
-   * inert. It is kept because the VM writes it and a snapshot must carry it.
+   * `op 12` is used **zero** times in the 274 exported class-0x25 programs, so
+   * this is modelled and inert, and the aim it switches is not ported. It is
+   * kept because the VM writes it and a snapshot must carry it.
    *
    * The same word is the class-0x30 / class-0x31 attack stance row.
    */
-  boneDecoration: number;     // +0x1364, also class 0x30 / class 0x31
+  aimsHead: number;           // +0x1364, also class 0x30 / class 0x31
   /**
    * `obj+0x13C0`/`+0x13C4`/`+0x13C8` — where the actor was last frame.
    *
@@ -228,7 +232,7 @@ export function makeHumanoidTail(): HumanoidTail {
     drawVariant: HumanoidDrawVariant.None,
     bonePropMode: 0,
     bonePropFrame: 0,
-    boneDecoration: 0,
+    aimsHead: 0,
     prevPos: { x: 0, y: 0, z: 0 },
   };
 }

@@ -23251,3 +23251,68 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+## 2026-09-28 -- two harnesses outside `verify_all`: `civilians` was stale, `zombies` had lost the walker
+
+Both measured failing on `main` at `98627e93`. Neither was a port regression.
+
+**`tools/civilians.mjs`: moved 37 -> 17, rescued 21 -> 0, mauled 10 -> 14.**
+Bisected with the harness over a current bundle from its last pin
+(`b9bb4960`, which gives 37 / 18 / 10 on today's data). First bad:
+`a41baa08`, which made `CivilianPruneDeadChildren` (`FUN_0048CA60`) the
+engine's test and nothing else. Read again in Ghidra: `0x0048CA75` is
+`TEST dword ptr [EAX + 0x34], 0x4000000` and the only test in the loop.
+`[proved]`. The harness "killed" the captors with `o.dead = true`, which
+raises no bit, so no captor ever left its civilian's list (L49: a state set by
+hand proves only what is behind it). It shoots them through `ResolveHit` now.
+
+That left rescued 18 and mauled 12 against the pinned 21 and 10, and both
+movements are the port doing more of the game:
+
+* **mauled +2** bisects to `902de88a`, which ported class 0x18. Stage 3's
+  civilians `0xBC0` and `0x7190` are held by one class-0x18 captor each
+  (`0xC00`, `0x71D0`), and `CarriedZombieUpdate18` (`FUN_0045CD90`) is
+  `EnemyZombieUpdate` inside the carrier's matrix, so those captors run the
+  class-0x30 captor states and maul. `[proved]`. Their tails carry cue path
+  -1, and the hold into state 0x2E needs `tail+0x0C != -1` (`0x0045CDFD`), so
+  the camera the harness does not play would not have held them either.
+* **rescued 21 was three too many.** Pin-era code on a current bundle with
+  the class-0x18 placements filtered out gives exactly 21, and the three
+  extra are exactly `0xA134`, `0xBC0` and `0x7190`, the class-0x18 hostages.
+  Before `902de88a` those captors had no character-type rule and so no
+  placement; the harness skipped a child with no placement, and before
+  `a41baa08` the prune dropped a child missing from the pool. So nobody shot
+  anybody and three rescues were paid. That is L65: a count calibrated on the
+  port's output was carrying the port's bug. With the harness's kill taking
+  every captor it spawned, whatever the class, `0xA134` is rescued by a real
+  kill of `0xA174`: 19.
+
+The pin is now 53 / 37 / 19 / 4 / 60 captors / 58 in a captor state / 12
+mauled. A child with no placement is a failure rather than a skip. Both
+mutants fail: filtering the class-0x18 placements names the three orphaned
+captors; putting back `dead = true` gives 17 / 0 / 14. The harness is a
+`verify_all` row now (`civilians`, bundle-gated, exit 3 without one).
+
+**`tools/zombies.mjs`: `walker.flags is not iterable`.** The walker's flag set
+went when the script flags became `G.g_script_flags` alone. The five lines
+around it also copied the scene-state major, the camera path and its frame
+out of the walker, and those are engine globals the camera and the goto
+opcodes write now. They are replaced by `syncPortGlobals`, the camera paths are
+loaded as `handback.mjs` loads them, the walker's `cameraFree` reads
+`G.g_camera_free` instead of answering true, and the result prints the
+walker's own address (L44). Two more faults turned up once it ran:
+
+* Its default address, stage 1 `9/2/8`, is the enemy gate behind
+  `wait_script_flag` at `9/2/7`. Since `a41baa08` a seek that steps over a flag
+  gate retires the civilian whose stream raises the flag
+  (`Walker.retireFlagRaisers`), so the hostage `0x4AE4` and her three captors
+  were gone and the gate opened on frame 1. The default is `9/2/7`.
+* `syncSpawns` rebuilt any listed actor missing from the pool, so a shot
+  captor came back as a new actor when its corpse was swept. It hid the
+  real thing to see here: `0x4B74` and `0x4BD0` wait in
+  `ZombieStateAwaitCivilianOrder` and are ordered to die at frame 108, which
+  the trace showed as the pair standing in state 39 for the whole run. It
+  keeps `render/characters.ts`'s `spent` rule now, and a despawn is written
+  into the trail.
+
+`zombies` asserts nothing and exits 0 whatever it prints, so it is a tool and
+not a `verify_all` row.

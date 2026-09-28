@@ -277,12 +277,10 @@ function ViewSettings() {
         {" "}4:3 frame, as the cabinet
       </label>
       <label className="view-ratio"
-             title={"Canvas pixels per CSS pixel. The game drew 640x480, and a"
-               + " phone's screen is 3x denser than its CSS pixels -- so its own"
-               + " ratio is nine times the pixels of 1x for detail the textures"
-               + " do not have, and on a phone GPU that is dropped frames. 1x by"
-               + " default on a touch screen; the screen's own, up to 2x, on a"
-               + " desktop."}>
+             title={"Canvas pixels per CSS pixel. The screen's own by default:"
+               + " the game drew 640x480, but a frame here is bound by its draw"
+               + " calls, not its pixels -- an iPhone held 60 fps at 3x as at"
+               + " 1x. Lower it if a device says otherwise."}>
         <span>Resolution</span>
         <select value={String(ratio)}
                 onChange={(e) => dispatch({ kind: "setPixelRatio",
@@ -324,7 +322,7 @@ function ViewSettings() {
         + " The rest force one filter on everything. Trilinear and anisotropic"
         + " add a mip chain the original never had: they are not more faithful,"
         + " they stop the long floors and walls shimmering at grazing angles."
-        + ` Anisotropic uses this machine's maximum, ${anisoLimit}x.`}>
+        + ` Anisotropic, the default, uses this machine's maximum, ${anisoLimit}x.`}>
         <span>Filter</span>
         <select value={filterMode}
                 onChange={(e) => dispatch({ kind: "setFilterMode",

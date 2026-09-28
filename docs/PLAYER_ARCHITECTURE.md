@@ -617,11 +617,13 @@ keeping from them moved:
 **Off by default, everything that is not the game.** On a desktop the frame
 fills the window -- the vertical FOV is the game's, so a wide window shows
 more at the sides than the cabinet did, and the 4:3 switch is there for when
-what the game framed is the question. **On a touch screen it is boxed to 4:3
-and drawn at 1x** (`Player.pillarbox`, `Player.pixelRatio`): a phone held
-sideways would show nearly 80 degrees across for the game's 53, and its own
-pixel ratio is nine times the pixels of a 640x480 game. Both are the device's
-defaults and saved only as choices, like the mute. Every overlay (`ToggleSpec.kind === "debug"`)
+what the game framed is the question. **On a touch screen it is boxed to
+4:3** (`Player.pillarbox`): a phone held sideways would show nearly 80 degrees
+across for the game's 53. It renders at the screen's own pixel ratio
+everywhere (`Player.pixelRatio`) -- 1x on phones was tried, and an iPhone held
+60 fps at 3x just the same, the frame being bound by draw calls. The 4:3
+box, the light, the filter and the ratio are defaults and saved only as
+choices, like the mute. Every overlay (`ToggleSpec.kind === "debug"`)
 and every debug aid starts off; a saved preference from before that
 (`viewprefs.ts`, version 2) keeps its game switches and forgets its overlay
 ones, because every setting used to be written whenever one moved.

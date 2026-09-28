@@ -9,11 +9,14 @@
  * off the disc already says, per mesh, how it wants to be sampled — and
  * `GLTFLoader` applies it.
  *
- * That is why `"asset"` is the default and every other mode is a **forced**
+ * So `"asset"` is the faithful mode and every other one is a **forced**
  * one. The original hardware did bilinear with no mipmaps, so trilinear and
  * anisotropic are not more faithful, they are nicer: the game is full of long
  * floors and walls seen at grazing angles, which is exactly what anisotropy is
- * for, and exactly where an unmipmapped texture shimmers.
+ * for, and exactly where an unmipmapped texture shimmers. **Anisotropic, at
+ * the hardware's ceiling (16x on anything current), is the default** -- the
+ * nicer picture, chosen, with "as the game" one switch away in the Scene
+ * panel.
  *
  * **Restoring `"asset"` needs the original remembered.** Once a mode has
  * overwritten `minFilter`, what the sampler said is gone, so the first sight of
@@ -49,7 +52,7 @@ interface Original {
 
 export class TextureFilter implements System {
   readonly id = "render.texfilter";
-  private mode: TextureFilterMode = "asset";
+  private mode: TextureFilterMode = "aniso";
   /**
    * Every texture this layer has touched, and what it looked like first.
    *

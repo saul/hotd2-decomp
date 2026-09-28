@@ -396,7 +396,7 @@ export interface UiProjection {
   pillarbox: boolean;
   /**
    * Canvas pixels per CSS pixel, and the steps the Resolution select offers.
-   * 1 by default on a touch screen. See `Player.pixelRatio`.
+   * The screen's own by default. See `Player.pixelRatio`.
    */
   pixelRatio: number;
   pixelRatioOptions: readonly number[];

@@ -39,8 +39,7 @@ import type { CharacterLayer } from "../render/characters";
 import type { ColiDebugLayer } from "../render/coli_debug";
 import type { DebugBoxLayer } from "../render/debug";
 import type { FogMode, SceneFog } from "../render/fog";
-import type { TextureFilter, TextureFilterMode }
-  from "../render/texfilter";
+import type { TextureFilter } from "../render/texfilter";
 import type { SceneLighting } from "../render/lighting";
 import type { SpawnLayer } from "../render/overlays";
 import type { PropLayer } from "../render/props";
@@ -124,6 +123,8 @@ export interface PlayerCommands {
   setPixelRatio(ratio: number): void;
   /** The Light select, as the viewer's choice. */
   setLighting(mode: string): void;
+  /** The Filter select, as the viewer's choice. */
+  setFiltering(mode: string): void;
   /** The Perf meter switch. See `app/perf.ts`. */
   setPerf(on: boolean): void;
   requestSkip(): void;
@@ -238,9 +239,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     case "setFogMode":
       p.sceneFog.setMode(c.mode as FogMode);
       return;
-    case "setFilterMode":
-      p.texFilter.setMode(c.mode as TextureFilterMode);
-      return;
+    case "setFilterMode": p.setFiltering(c.mode); return;
     case "setVolume":  p.bgm.setVolume(c.volume / 100); return;
     case "toggleMute": p.setMuted(!p.bgm.muted); return;
     case "toggleFullscreen": toggleFullscreen(); return;

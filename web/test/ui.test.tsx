@@ -783,6 +783,15 @@ console.log("\nOne key per preference:\n");
             JSON.stringify({ v: 3, toggles: {}, lightMode: "scene" }));
   check("...and its scene light is kept, being a choice",
         readViewPrefs().lightMode === "scene");
+  // Anisotropic is the default since version 5; a pre-5 "asset" is the old one.
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 4, toggles: {}, filterMode: "asset" }));
+  check("a pre-5 save's filter as the game is dropped, so anisotropic is the default",
+        readViewPrefs().filterMode === undefined);
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 4, toggles: {}, filterMode: "nearest" }));
+  check("...and any other filter is kept, being a choice",
+        readViewPrefs().filterMode === "nearest");
   check("...and a version-3 choice either way is kept, the resolution too",
         v3.fourByThree === false && v3.pixelRatio === 1.5, JSON.stringify(v3));
 

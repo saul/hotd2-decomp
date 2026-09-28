@@ -30,7 +30,7 @@ CLASS31_ARC_SCRIPTS = {
     "aside": 0x00564AC8,             # every character but 0x16 and 0x18
     "aside_attack3": 0x00564AF8,     # ...unless obj+0x131A is 3
     "aside_zsass": 0x005649A8,       # character type 0x16
-    "aside_zslman": 0x00564D08,      # character type 0x18, then +0x60 a stance
+    "aside_zslman": 0x00564D08,      # character type 0x18: see the stride below
     "wall_left": 0x00564A68,         # state 14
     "wall_right": 0x00564A38,        # state 15
     "ceiling": 0x00564A98,           # state 16
@@ -65,8 +65,22 @@ CLASS30_ARC_SCRIPTS = {
     "entrance_other": 0x00567958,
 }
 
-#: `ThrowerStateLeapAside`'s character-0x18 block is one script per stance.
+#: One arc motion script's twelve dwords.
 CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4
+
+#: `ThrowerStateLeapAside`'s character-0x18 scripts, one per surface row, sit
+#: **0x60 apart, not 0x30**: the listing names 0x00564D08 for row 0 and the
+#: default (`MOV ESI` at 0x0044BAB1), 0x00564D68 for row 1 (0x0044BAD0),
+#: 0x00564DC8 for row 2 (0x0044BAC4) and 0x00564E28 for row 3 (0x0044BAB8).
+#: Between each pair lies one of zslman's pounce scripts -- the ones
+#: `g_class31_melee_attacks` set 3 names for attack 3 -- and reading at a
+#: script's own width gave rows 1 to 3 a pounce and its neighbour's leap.
+#: `verify_combat.py` check 16 reads the four immediates.
+CLASS31_ASIDE_ZSLMAN_STRIDE = 0x60
+
+#: Where `ThrowerStateLeapAside` names each of those four, row by row: the
+#: address of the imm32 in each `MOV ESI, imm32` (`BE xx xx xx xx`).
+CLASS31_ASIDE_ZSLMAN_IMM = (0x0044BAB2, 0x0044BAD1, 0x0044BAC5, 0x0044BAB9)
 
 
 def arc_script(tables, addr: int) -> list[dict] | None:

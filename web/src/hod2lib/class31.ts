@@ -9,7 +9,8 @@
  */
 
 import { f32, i16, i32, i32s, u32 } from "./bytes";
-import { CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES, arcScript } from "./arcscript";
+import { CLASS31_ARC_SCRIPTS, CLASS31_ASIDE_ZSLMAN_STRIDE, arcScript }
+  from "./arcscript";
 import type { ArcStage } from "./arcscript";
 import { ATTACK_ENTRY, ATTACK_PICK_PER_ZONE, ATTACK_ZONE_COMBOS,
          REACT_GROUPS, THROW_TABLE } from "./combat";
@@ -280,7 +281,8 @@ export function class31Tables(tables: ExeTables | null): Record<string, unknown>
   // flat rather than nested -- the client indexes it by name.
   for (let st = 0; st < 4; st++) {
     scripts[`aside_zslman_${st}`] = arcScript(
-      tables, CLASS31_ARC_SCRIPTS.aside_zslman + st * CLASS31_ARC_SCRIPT_BYTES);
+      tables,
+      CLASS31_ARC_SCRIPTS.aside_zslman + st * CLASS31_ASIDE_ZSLMAN_STRIDE);
   }
   const kept: Record<string, ArcStage[]> = {};
   for (const [k, v] of Object.entries(scripts)) if (v) kept[k] = v;

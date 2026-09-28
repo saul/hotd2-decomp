@@ -417,7 +417,9 @@ export function ZombieThrownWeaponStateShotDown(w: ThrownWeapon,
  *
  * The hit test, the state, then — while `obj+0x1F8` bit 0 is up — the draw,
  * `obj+0x70` and `RegisterForShotTest` (`0x0045A562`..`0x0045A612`), which is
- * the same tail as class 0x31's with no `obj+0x1364` in the X term.
+ * the same tail as class 0x31's with no `obj+0x1364` in the X term. A state
+ * that despawned the weapon never comes back to it (see `ThrownWeaponDespawn`
+ * in `game/thrown_weapon.ts`), so a weapon is not drawn on the frame it goes.
  *
  * `[diverges]` Two calls are not made, for the reasons
  * `ThrownWeaponUpdate` (`FUN_00450780`) gives for its own: the 5-by-5 ground
@@ -427,6 +429,7 @@ export function ZombieThrownWeaponStateShotDown(w: ThrownWeapon,
 export function ZombieThrownWeaponUpdate(w: ThrownWeapon,
                                          f: ThrownWeaponFrame): void {
   ThrownWeaponTakeMark(w, ZombieThrownWeaponState.ShotDown);
+  w.draw = null;
   switch (w.state as ZombieThrownWeaponState) {
     case ZombieThrownWeaponState.Straight:
       ZombieThrownWeaponStateStraight(w, f); break;
@@ -437,7 +440,8 @@ export function ZombieThrownWeaponUpdate(w: ThrownWeapon,
     case ZombieThrownWeaponState.None:
       break;
   }
-  w.draw = null;
+  // `ActorKill`'s `_longjmp` (`ThrownWeaponDespawn`): nothing after a despawn.
+  if (w.despawned) return;
   if (w.drawFlags & THROWN_WEAPON_DRAWN) {
     if (ThrownWeaponDrawAndProject(w, w.rx, f.cam)) {
       RegisterThrownWeaponForShotTest(w);

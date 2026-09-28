@@ -164,6 +164,17 @@ THROWER_SLOTS = {
     },
 }
 
+#: The models a thrown weapon's afterimages draw, per character type -- none
+#: of which the skeleton or a hand kit names, so nothing else puts them in the
+#: rig a client clones from. `ZslmanBladeEmitAfterimage` (`FUN_00450930`)
+#: copies the weapon's model and swaps it: 0x1FE1 -> 0x1FE4 (`0x004509C8`,
+#: `0x004509E0`), 0x1FE2 -> 0x1FE5 (`0x004509EA`, `0x004509FC`). Only
+#: character type 0x18 reaches it (`0x004508C2`); the two are `zslman.bin`
+#: parts 13 and 14.
+THROWER_AFTERIMAGE_SLOTS = {
+    0x18: (0x1FE4, 0x1FE5),
+}
+
 #: The **class 0x30** hand kits, which are a different family from
 #: :data:`THROWER_SLOTS` above: `ZombiePickThrowingHand` (`FUN_00458F00`) tests
 #: *held* to see whether a hand is still armed, and `ZombieThrowHandWeapon`
@@ -765,12 +776,13 @@ def combat_tables(tables) -> dict:
     named = lambda ids: [{"id": i, "file": name(i)} for i in ids]
     return {
         # `ActorPlayHitVoice`. `impact` plays on kinds 0 and 1; `head_impact`
-        # replaces it on kind 2 -- which is the **hit result being 2**, not a
-        # headshot: `ZombieOnShot` (`FUN_00453EB0`) picks between kinds 1 and 2
-        # at `0x00453F6E CMP EAX,0x2` on `g_hit_result` and tests no bone at
-        # all, and `ThrowerOnShot` (`FUN_004499A0`) agrees at `0x00449A76`.
-        # The two kinds share one voice pair, so the impact is the only
-        # audible difference; `tools/verify_combat.py` check 15 asserts both.
+        # replaces it on kind 2 -- a dead actor shot in **bone 2, the head**:
+        # `ZombieOnShot` (`FUN_00453EB0`) picks between kinds 1 and 2 at
+        # `0x00453F6E CMP EAX,0x2` on `g_shot_bone` (through `EBP`, loaded at
+        # `0x00453EEE`), and `ThrowerOnShot` (`FUN_004499A0`) agrees at
+        # `0x00449A76`. The two kinds share one voice pair, so the impact is
+        # the only audible difference; `tools/verify_combat.py` check 15
+        # asserts both and reads the two operands out of the image.
         "impact": named(v[0:5]),
         "head_impact": named([0x0116A9, 0x0516A9]),
         "voice": {

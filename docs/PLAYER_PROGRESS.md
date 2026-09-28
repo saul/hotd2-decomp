@@ -328,9 +328,10 @@ each record runs the routine its launcher installed, and a shot-test entry can
 name a weapon as well as an actor; `ProcessPlayerShotsTestList` tests both in
 one pass and one sort. What the engine's weapon also does and the record does
 not: it claims a `g_hit_slots` entry (read only for a class-0x30 bone's cel
-phase), registers for camera tracking, draws a 5-by-5 ground shadow, and —
-for `zslman`'s blades — trails fading afterimages (`ZslmanBladeEmitAfterimage`,
-`FUN_00450930`). Each is declared where the call is not made.
+phase), registers for camera tracking, and draws a 5-by-5 ground shadow. Each
+is declared where the call is not made. `zslman`'s blades' fading afterimages
+(`ZslmanBladeEmitAfterimage`, `FUN_00450930`) used to be the fourth; they are
+ported, in the same list — see *zslman's blades trail afterimages* below.
 
 **The spin was the port's own, and slow.** Every thrown weapon tumbled at
 `0x200` BAMS a frame, declared as the port's invention on a reading that
@@ -2065,8 +2066,8 @@ doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
 view-space draw record, so the product is bone 1 in the world. The push is
 scaled by bone 1's travel between two readings of that record through one
 camera block — relative to the camera — and the pushed point is the sphere
-the frog publishes; `ClassHandler.ownsSphereCentre` keeps
-`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+the frog publishes, which `ColiTestSphereAgainstActors` now reads out of the
+published registration list (see "The crowd push tests what registered").
 Reading the two states whole also found four wrong ports inside them: the
 wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
 was inverted; both launch frames run on into the flight and halve the turn
@@ -2672,7 +2673,7 @@ had been igniting for 0.4 seconds and never sustaining, and its `_OFF` cue was
 a 404 for a file the game does not ship. The loop branch is transcribed now,
 and the bundle carries `sound.looping`, the 44 pairs out of the EXE.
 
-### The hit voice exists once, and the kind is the hit-result code
+### The hit voice exists once, and a kill's kind is the head bone
 
 `ActorPlayHitVoice` (`FUN_0040A6F0`) was implemented **twice**: kinds 0, 1 and
 2 in `render/shooting.ts`, because the shot path needed them before there was
@@ -2695,49 +2696,51 @@ state. It is the world's seeded `rand()` now, like every other draw in the
 port, and therefore in the snapshot — which is what a save has to be able to
 reproduce (`L10`).
 
-`[proved]` **And the kind is the hit-result code and nothing else.** Two
-routines agree, which is what makes it a rule and not one function's habit:
+`[proved]` **And on a kill the kind is the shot bone, on a hurt the result.**
+Two routines agree, which is what makes it a rule and not one function's
+habit. `ZombieOnShot` holds two pointers across its per-player loop, `EBP` =
+`&g_shot_bone[p]` (`LEA` at `0x00453EEE`) and `EBX` = `&g_hit_result[p]` (at
+`0x00453F0D`):
 
 ```
+00453f3b  TEST EAX, 0x80000000        ; latched -> neither arm, no voice
 00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
-00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
-00453f77  PUSH 0x1           ;                  dead otherwise -> kind 1
-00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+00453f68  MOV  EAX, [EBP] / CMP EAX, 0x2   ; the head -> kind 2, else kind 1
+00454020  MOV  EAX, [EBX] / CMP EAX, 0x5   ; alive and not 5 -> kind 0
 ```
 
-and `ThrowerOnShot` is the same two instructions with the same two constants at
-`0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the bone and
-neither tests whether the actor died of *this* shot**, which is exactly what
-the render-side copy keyed on — `killed ? (head ? "head" : "kill") : "hurt"`.
-`docs/formats/combat.md` had said `bone == 2 ? 2 : 1` since the routine was
-first read, and the port was written from that line.
+and `ThrowerOnShot` reads the same `[EBP]` at `0x00449A70` for its `CMP` at
+`0x00449A76`. **This section said the opposite when it was written** — that
+the `CMP` at `0x00453F6E` was on `g_hit_result`, so a head kill whose result
+was 1 played kind 1 and a body kill whose result was 2 played kind 2 — and the
+port's voice and five of its checks were rewritten from that. The register is
+the bone pointer; the render-side `head` rule, and `docs/formats/combat.md`'s
+original `bone == 2 ? 2 : 1`, were right. Corrected with the register trace,
+and `verify_combat.py` check 15 now reads both routines' operands out of the
+image.
 
-**What a player actually hears change is the impact, and almost nothing else.**
-Kind 2's two voice ids in `g_hit_voice_table` are the *same pair* as kind 1's —
+**What a player hears is the impact, and almost nothing else.** Kind 2's two
+voice ids in `g_hit_voice_table` are the *same pair* as kind 1's —
 `ZOMBIE_019` for set A, `ZOMBIE_018` for set B — so the difference between
 those two kinds is two head impacts (`BLOOD01`, `BLOOD05`) against the five
-body ones (`BLOOD02/03/04/06`, `BONE01`). So:
+body ones (`BLOOD02/03/04/06`, `BONE01`):
 
-* a **killing head shot** now plays a body impact, because its result is
-  usually 1 (the head model swapped) and not 2;
-* a **killing body shot whose result is 2** — plain damage, no swap — now plays
-  the head impact pair;
-* the **voice line is identical** in both of those, which is why this is a
-  correction worth making and not one worth being nervous about;
-* a shot that finds an actor **already dead** says the kill line rather than
-  the hurt line, because the test is the `Dead` flag and not this shot's kill.
-  `[likely]` audible: nothing in the port's candidate pick excludes a corpse,
-  but whether the engine's death states raise `ShotImmune` — which would
-  silence it there — is `[open]`.
+* a **killing head shot** plays a head impact;
+* a **killing body shot** plays a body one, whatever its result;
+* a shot that finds an actor **already dead** says the kill line — but only
+  until the actor's own on-shot routine has latched the death. The latch test
+  comes before both arms (`0x00453F3B` for class 0x30, `0x00449A12` for class
+  0x31), so every later shot into the corpse is silent; the port replayed the
+  death line on each of them until the latch was read.
 
 That equality is a claim small enough to be tempting to leave in a doc comment,
 which is how `L26` happens, so it is a check: `verify_combat.py`'s check 15
 reads `g_hit_voice_table` out of the EXE and asserts that kinds 1 and 2 share
 one pair, that the two impact tables are five and two ids with nothing in
 common, and that kind 3's entry is a *pair per set* where the others are one id
-per set. Four mutations of the parser fail it. The five kinds and the whole
-result-code mapping are asserted in `web/test/port.test.ts`; restoring the old
-`killed`/`head` rule fails three of them.
+per set. Four mutations of the parser fail it. The five kinds, the bone and
+result tests and the latch are asserted in `web/test/port.test.ts`; putting
+back the result test fails three of them and dropping the latch two.
 
 **And the bursting head shouts.** `ActorShotFeedback` holds one of the routine's
 twenty-three call sites and it is **kind 3**, not a shot kind: `0x00454133 PUSH
@@ -4196,7 +4199,8 @@ that goes never publishes a draw slot.
 
 The move is class 0x30's own arithmetic on furniture — a tenth of the
 penetration along the reversed normal, times 1.8 when the **pusher** carries
-either airborne bit — followed by a re-resolve against the actors in x and z
+either bit of `0x18000000` — its strike's commit or the sprint bit, not an
+airborne bit — followed by a re-resolve against the actors in x and z
 and one against the full collision set at the full depth, with the sphere
 re-seated after every move. The sphere convention is this class's own:
 `obj+0x130 = obj+0x44 + obj+0x128`, the position plus exactly the body radius,
@@ -5624,6 +5628,58 @@ states), and `obj.frozen` -- class 0x24's `obj+0x1324` -- is no longer written
 by two class-0x30 entrances.
 
 
+### zslman's blades trail afterimages, and a zombie that has been shot runs
+
+Two exe behaviours that were known and declared away.
+
+**The afterimages.** `ThrownWeaponUpdate` (`FUN_00450780`) ends, drawn or
+not, by calling `ZslmanBladeEmitAfterimage` (`FUN_00450930`) for a character
+type 0x18 weapon that is launching or flying (state 0, sub < 2) or has been
+shot out of the air (state 1). Every fifth frame — `DEC` then `JNS` on the
+launcher's 4 — while fewer than ten are out, it allocates a task running
+`ZslmanBladeAfterimageFade` (`FUN_00450A30`) with a copy of the blade's pose,
+its tilt and its spin, and swaps the model: `0x1FE1` → `0x1FE4`, `0x1FE2` →
+`0x1FE5`, `zslman.bin` parts 13 and 14, single additive meshes, at a light of
+0.75. The fade stands where it was made and draws for fifteen frames under
+`SetRenderLightColour(l, l, l)` with `l` a fifteenth less each frame, so it is
+below zero — black, and additive black adds nothing — for its last four. It
+goes at once when its blade lands, and gives its place in the blade's count
+back unless the blade is spent, which a blade that has been shot down is — so
+a deflected blade trails until its count reaches ten and then stops.
+
+In the port the afterimage is a third routine in `G.g_thrown_weapons`
+(`ThrownWeaponRoutine.ZslmanAfterimage`), appended to the list the pool is
+walking so it runs on the frame it is made, as `ActorAlloc`'s tail link has
+it. The record carries the light colour its draw set, and
+`render/projectiles.ts` multiplies the node's own material colour by it, out
+of gamma space. The exporter puts `0x1FE4` and `0x1FE5` in zslman's hidden
+rig (`THROWER_AFTERIMAGE_SLOTS`), which no hand kit names.
+
+Found on the way: **nothing after `ActorDespawn` runs.** `ActorKill`
+(`FUN_004A7040`) `_longjmp`s back into `TaskRunTree`, so a weapon whose state
+routine despawned it is not drawn that frame and trails nothing. Both weapon
+routines drew it anyway; both return on the despawn now.
+
+**The sprint.** `ZombieOnShot` (`FUN_00453EB0`)'s per-player loop opens, for
+every landed shot that `ShotImmune` has not refused, with `obj+0x136C &=
+~0x400` (`AND DH, 0xFB` at `0x00453F14`) and `obj+0x34 |= 0x8000000` (`OR ECX,
+0x8000000` at `0x00453F17`), stored at `0x00453F24`/`0x00453F2A` — before the
+death latch and before the test for dead. `0x8000000` is the bit
+`ZombieStateAttackRun` takes the second of its run pair with and turns 2.5
+times as fast on (`0x410` BAMS a frame against `0x1A0`), so **a zombie you
+have shot and not killed comes on at a run**, whatever its spawn record said.
+`0x400` is `EntryClipPlaying`, the entrance-clip exemption from
+`ZombieStateHoldAtRange`'s too-close retreat and attack refusal, which a shot
+ends. The latch test moved ahead of the live/dead split with it, where the
+exe has it.
+
+And reading that loop whole turned up **the voice misreading** above: the dead
+arm's `CMP EAX, 2` is on the shot bone.
+
+Observed in the running player (`web/tools/afterimages.mjs`, headless, stage
+6): see the session log for the numbers.
+
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),
@@ -5938,6 +5994,35 @@ nothing but shooting opens its gates.
 * Default stage 6 now hangs at block 2's gate, because the boss exists: the
   default meter cannot see its damage and 900 frames is shorter than the
   fight.
+
+## The crowd push tests what registered, a frame late
+
+`ZombiePushOutOfWorldAndActors` (`FUN_00454900`) has been ported since the
+crowd separation landed; what it tested against had not been.
+`ColiTestSphereAgainstActors` (`FUN_00405B10`) walked the object pool and
+re-derived each actor's sphere where it stood. The engine walks
+`g_coli_dynamic_list`, the copy `ColiPublishDynamicList` (`FUN_00405360`)
+makes of `g_shot_test_list` before any actor runs -- so the candidates are
+what registered **last frame**, each at the sphere its own class published,
+and a body behind the camera, which never registers, pushes nobody. Both are
+ported, with the rest of the routine: the two surface points, the stable
+radix pick of the nearest, the depth re-derived from them (which differs from
+`r + R - d` when the radii do), the `nx + ny + nz == 0` miss, and
+`g_coli_hit_object` and `g_coli_hit_dist_sq` among its outputs.
+
+For the list to hold anything, `ActorRegisterCameraPoint` now files every
+caller, as `0x00409BED` does; the shot test's class-at-a-time migration is a
+filter at the pick (`ShotTestPickedHere`) instead of a gate on the
+registration, which had kept every zombie, thrower, civilian and frog out of
+the list. Class 0x33's chair registers from its own tail (`0x00433CC6`), and
+the `ownsSphereCentre` flag the frog and the civilian carried is gone -- the
+list carries each one's point. The
+thrower's special case on `g_coli_hit_object` is in: an off-ground thrower
+shouldered by an object with `obj+0x34` `0x200000` falls instead of sliding.
+The hook's shove timer counts calls, and its 1.8x is the strike's commit and
+the sprint bit, which `docs/formats/combat.md` section 10 now sets out.
+
+Measured over the eight entry routes with `--no-damage`: see the session log.
 
 ## The model's size: every skinned actor is drawn at `model+0x116C`
 

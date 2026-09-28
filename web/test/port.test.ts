@@ -342,7 +342,8 @@ import { BOSS4_DROP_FLAG, BOSS4_FIGHT_READY_FLAG }
 import { BOSS4_DEAD_FLAG, BOSS4_DEATH_DWELL }
   from "../src/game/class19/death";
 import { Boss4ResolveShot } from "../src/game/class19/shot";
-import { Boss4State } from "../src/game/class19/state";
+import { Boss4BlockNew, Boss4State } from "../src/game/class19/state";
+import { Boss4PlayCameraCue } from "../src/game/class19/camera";
 import type { Boss4TablesJson } from "../src/bundle/stage";
 import {
   BreakableState, BreakableFlag, BreakablePropTakeShot, BreakablePropUpdate,
@@ -14144,6 +14145,53 @@ console.log("\na block change carries the action ring's count:");
 }
 
 /**
+ * A camera cue that aims by look-at has to write the block's angles.
+ *
+ * The view is built from the camera block's angles (`UpdateSceneViewAndLight`,
+ * `FUN_00401F40`), so a routine that moves the eye and the target and stops
+ * there moves the camera without turning it. `Boss4PlayCameraCue` calls
+ * `CamBlockSetAnglesFromLookAt` at `0x00493277`; the port left it out while
+ * its view was built from the look-at, and under the angle-built view
+ * Strength's cues would have slid the camera along the path facing the way
+ * it faced before.
+ */
+console.log("\nStrength's camera cue turns the camera it moves:");
+{
+  ResetGameGlobals();
+  const path = {
+    pose: (t: number, _roll: boolean,
+           out: { eye: Vec3; target: Vec3; roll: number }) => {
+      out.eye.x = 100 + t; out.eye.y = 5; out.eye.z = 0;
+      out.target.x = 0; out.target.y = 0; out.target.z = 0;
+      out.roll = 0;
+      return out;
+    },
+  };
+  const host: GameHost = {
+    ...NULL_HOST,
+    camPath: () => path as unknown as CamPath,
+  };
+  const b = Boss4BlockNew();
+  b.cueStep = 1; b.cueFrame = 0; b.cueEnd = 50; b.cuePath = 7; b.cueQueued = -1;
+  G.g_camera_block_yaw_bams = 0x1234;
+  G.g_camera_block_pitch_bams = 0;
+  // Nobody is registered, so the aim turns toward the deferred pose's
+  // target, which is the origin.
+  G.g_cam_path_target = vec3(0, 0, 0);
+  G.g_camera_block_target = vec3(0, 0, -100);
+  for (let i = 0; i < 40; i++) Boss4PlayCameraCue(b, host);
+  const e = G.g_camera_block_eye, t = G.g_camera_block_target;
+  const want = VecToAngles(e.x - t.x, e.y - t.y, e.z - t.z);
+  const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
+  check("the block's yaw and pitch are the look-at's, set on every frame",
+        G.g_camera_block_yaw_bams === s16(want.yaw)
+        && G.g_camera_block_pitch_bams === s16(want.pitch)
+        && G.g_camera_block_yaw_bams !== 0x1234,
+        `${G.g_camera_block_yaw_bams},${G.g_camera_block_pitch_bams} vs `
+        + `${s16(want.yaw)},${s16(want.pitch)}`);
+}
+
+/**
  * `goto_scene_state_when_alive` (0x32) waits for the players.
  *
  * `EvtOpGotoSceneStateWhenPlayersAlive32` (`FUN_0045F900`) returns with the
@@ -22776,10 +22824,26 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("...and a held driver is mode 6, which does nothing and frees nothing",
         G.g_camera_mode === CameraMode.Held && G.g_camera_free === 0);
 
+  const headingAtSeat = [G.g_camera_block_yaw_bams, G.g_camera_block_pitch_bams,
+                         G.g_camera_block_roll_bams].join();
   BossBannersTick(host);
   check("the slide flies the camera block along the record's path",
         G.g_camera_block_eye.x === 2 && G.g_camera_block_target.z === 10,
         JSON.stringify(G.g_camera_block_eye));
+  // **Eye and target, no angles**: the view is built from the angles, so the
+  // flight carries the eye and keeps the heading it found. `CamEvalPath7`
+  // writes six floats and the banner never calls `CamBlockSetAnglesFromLookAt`.
+  UpdateSceneViewAndLight();
+  check("...and leaves the block's heading alone, so the view keeps it and "
+        + "sits at the banner's eye",
+        [G.g_camera_block_yaw_bams, G.g_camera_block_pitch_bams,
+         G.g_camera_block_roll_bams].join() === headingAtSeat
+        && G.g_camera_view_to_world[12] === Math.fround(2)
+        && G.g_camera_view_to_world[13] === Math.fround(1)
+        && G.g_camera_view_to_world[14] === Math.fround(2),
+        `${headingAtSeat} -> ${G.g_camera_block_yaw_bams},`
+        + `${G.g_camera_block_pitch_bams}; `
+        + `${Array.from(G.g_camera_view_to_world.slice(12, 15)).join()}`);
   let restacked = -1;
   while (j.frame < 0x50 && j.step === BannerStep.Slide) {
     BossBannersTick(host);

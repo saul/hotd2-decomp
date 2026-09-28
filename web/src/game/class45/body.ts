@@ -464,9 +464,10 @@ export function Boss3BodyUpdate(obj: Boss3Actor, f: ClassFrame): void {
     case Boss3BodyState.TakeCamera:
       obj.state = Boss3BodyState.Swim;
       G.g_camera_driver_held = 1;
-      // `[port-only]`: the block's angles, which the port's camera does not
-      // keep while no one aims by angle, taken from the view as it stands.
-      Boss3SeatCameraAngles();
+      // The body eases from the block's yaw and pitch as they stand: the
+      // camera block carries its angles every frame (`UpdateSceneViewAndLight`
+      // reads them back out of the view it builds), so there is nothing to
+      // seat.
       break;
     case Boss3BodyState.Swim:
       Boss3BodyStateSwim(obj, f);
@@ -551,41 +552,10 @@ function Boss3AimCamera(obj: Boss3Actor): void {
   } else {
     G.g_camera_block_pitch_bams = 0;
   }
-  Boss3PublishCameraAngles(obj);
-}
-
-/**
- * `[port-only]` -- the look-at the block's yaw and pitch give. The engine
- * builds its view from the camera block's angles (`UpdateSceneViewAndLight`,
- * `FUN_00401F40`: `T(eye) Ry(yaw) Rx(pitch)`, looking down -Z); the port
- * builds its view from the block's eye and look-at, so the angles the body
- * sets are published as the point one step down that -Z, at the weak bone's
- * distance. When the port's view is built from the angles this goes.
- */
-function Boss3PublishCameraAngles(obj: Boss3Actor): void {
-  const eye = G.g_camera_block_eye;
-  const y = G.g_camera_block_yaw_bams * (Math.PI * 2 / 65536);
-  const p = G.g_camera_block_pitch_bams * (Math.PI * 2 / 65536);
-  const d = Math.max(1, Math.hypot(obj.lookAt.x - eye.x,
-                                   obj.lookAt.y - eye.y,
-                                   obj.lookAt.z - eye.z));
-  const tgt = G.g_camera_block_target;
-  tgt.x = eye.x - Math.cos(p) * Math.sin(y) * d;
-  tgt.y = eye.y + Math.sin(p) * d;
-  tgt.z = eye.z - Math.cos(p) * Math.cos(y) * d;
-}
-
-/**
- * `[port-only]` -- seat the block's yaw and pitch from the look-at the camera
- * has when the body takes it: the engine's block carries both at every
- * frame, the port's derives them, and the body's ease starts from them.
- */
-function Boss3SeatCameraAngles(): void {
-  const eye = G.g_camera_block_eye;
-  const tgt = G.g_camera_block_target;
-  const a = VecToAngles(eye.x - tgt.x, eye.y - tgt.y, eye.z - tgt.z);
-  G.g_camera_block_yaw_bams = FtolS16(a.yaw);
-  G.g_camera_block_pitch_bams = FtolS16(a.pitch);
+  // No look-at is written. The view is built from these two words
+  // (`UpdateSceneViewAndLight`, `FUN_00401F40`: `T(eye) Ry(yaw) Rx(pitch)`),
+  // and the block's target keeps what it had when the body took the camera,
+  // as the engine's does -- the hand-back turns from it.
 }
 
 /** The death, from the shot (`0x00423355`). */

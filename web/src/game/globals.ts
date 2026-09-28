@@ -830,7 +830,7 @@ export const G = {
   g_screen_shake_frames: 0,
   /**
    * `g_screen_shake_pitch` — 0x009CA0E4. How far the camera nods, in units
-   * up at a look distance of 1000 -- see `camera/shake.ts`.
+   * up at a look distance of 1000 -- see `camera/view.ts`.
    */
   g_screen_shake_pitch: 0,
   /** `g_player_hit_count` — 0x009A5C86 + player*0x98. Hits that scored. */

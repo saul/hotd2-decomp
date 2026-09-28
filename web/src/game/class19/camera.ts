@@ -26,6 +26,7 @@
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import type { CamPose } from "../camera/curve";
+import { CamBlockSetAnglesFromLookAt, CameraPoseBlock } from "../camera/path";
 import { SelectCameraLookAtTarget } from "../camera/select_target";
 import { TurnLookAtToward } from "../camera/turn";
 import { vec3 } from "../vec";
@@ -90,9 +91,10 @@ const _aim = vec3();
  * ```
  *
  * `CamEvalPath7`'s own target is evaluated into a local and never read: the
- * aim comes from the turn. `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`)
- * has no line here because the port's camera block is its eye and target and
- * the draw derives the angles from them every frame (see `camera/shake.ts`).
+ * aim comes from the turn. `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`, at
+ * `0x00493277`) turns the pair into the block's orientation words, which are
+ * what the view is built from (`UpdateSceneViewAndLight`); without it the eye
+ * would follow the cue and the camera keep facing the way it faced before.
  * A host with no paths leaves the eye where it is, as `BannerFlyCamera`
  * does; the frame words are written either way.
  */
@@ -137,4 +139,5 @@ export function Boss4PlayCameraCue(b: Blk, host: GameHost): void {
   G.g_camera_block_target.x = _aim.x;
   G.g_camera_block_target.y = _aim.y;
   G.g_camera_block_target.z = _aim.z;
+  CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, G.g_camera_block_target, 0);
 }

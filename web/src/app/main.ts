@@ -1130,10 +1130,19 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       else if (e.code === "ArrowLeft") { e.preventDefault(); this.rewind(); }
       else if (e.code === "Digit1") this.setMode("play");
       else if (e.code === "Digit2") this.setMode("free");
-      else if (e.code === "Enter") { e.preventDefault(); this.requestSkip(); }
-      // The pad's START for player 1 (`g_pad_state` bit 8): a new game from
-      // "out", a continue during the countdown. See `PadStartPressed`.
-      else if (e.code === "KeyS") this.padLatch |= PadBit.Start0;
+      // **START**, and the only key that is. The pad has one START and the
+      // exe reads it in two places -- `PadStartPressed` (`g_pad_state` bit 8:
+      // a continue during the countdown, a new game from "out") and the
+      // player-update routines' skip poll (`FUN_00414940`, `FUN_00414B90`),
+      // whose request `CheckCutsceneSkipRequest` acts on (`Walker.skippable`
+      // has the chain) -- so a press is both, as one press of the button is.
+      // They were `S` and Enter, which made the continue screen's "PRESS
+      // START" a key nobody would guess, and put `S` on free roam's back key.
+      else if (e.code === "Enter" || e.code === "NumpadEnter") {
+        e.preventDefault();
+        this.padLatch |= PadBit.Start0;
+        this.requestSkip();
+      }
       // Reload. `[port-only]` as a key: the exe's mouse reloads with its right
       // button, which is a pull off the screen, and `R` is mapped onto exactly
       // that pull -- not onto a pad bit, because the gun's binding set in

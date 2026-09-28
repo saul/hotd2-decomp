@@ -141,6 +141,13 @@ CHECKS: list[Check] = [
           "from its first sample to end of file, looped, sample for sample -- "
           "and that it is audible",
           NEEDS_BUNDLE),
+    Check("keys", "web", ["npm", "run", "--silent", "keys"],
+          "that the page's keys do what the `?` list says when pressed -- "
+          "test:ui holds the list to the handlers' source, this reads back "
+          "what a press did -- and that a click on a control over the game "
+          "hands Space and Enter (START) back to the game rather than "
+          "leaving them with the button",
+          NEEDS_BUNDLE),
     Check("animals", "web", ["npm", "run", "--silent", "animals"],
           "that the frog, the owl and the fish are placed from a real bundle "
           "and leave their opening state -- none of the three is a skinned "

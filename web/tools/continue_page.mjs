@@ -163,9 +163,9 @@ try {
   console.log("credit line:", JSON.stringify(line));
   await page.screenshot({ path: join(SHOTS, "continue-3.png") });
 
-  // START (the page's `S`, `g_pad_state` bit 8) with a credit.
+  // START (the page's Enter, `g_pad_state` bit 8) with a credit.
   const credits = s.credits[0];
-  await page.keyboard.press("KeyS");
+  await page.keyboard.press("Enter");
   await advance(3);
   s = await state();
   console.log("continued:", JSON.stringify({ ...s, draws: s.draws.length }));

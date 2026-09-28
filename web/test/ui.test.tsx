@@ -738,18 +738,26 @@ console.log("\nThe keys:\n");
   check("ui/App.tsx answers exactly the keys the table gives it",
         page !== "" && same(ui, listed("ui")), show(ui, listed("ui")));
 
-  // One owner a key. The one overlap is old and stated: S is the pad's Start
-  // to the game and back to free roam, and free roam has no Start to press.
+  // One owner a key, with no exception. There was one: S was the pad's Start
+  // to the game and back to free roam. START is Enter now, which is the key
+  // the skip already had -- the exe reads the one button for both.
   const owners = new Map<string, Set<string>>();
   for (const r of rows) {
     for (const c of r.codes) owners.set(c, (owners.get(c) ?? new Set()).add(r.by));
   }
-  const shared = [...owners].filter(([c, o]) => o.size > 1 && c !== "KeyS");
-  check("no key has two owners, but S", shared.length === 0,
+  const shared = [...owners].filter(([, o]) => o.size > 1);
+  check("no key has two owners", shared.length === 0,
         shared.map(([c, o]) => `${c}: ${[...o].join("+")}`).join(", "));
   const twice = [...new Set(rows.flatMap((r) => r.codes)
-    .filter((c, i, all) => all.indexOf(c) !== i && c !== "KeyS"))];
+    .filter((c, i, all) => all.indexOf(c) !== i))];
   check("...and no key is listed twice", twice.length === 0, twice.join(", "));
+  const start = rows.find((r) => r.codes.includes("Enter"));
+  check("Enter is START: it continues as well as skipping",
+        start?.by === "app" && /continue/i.test(start.what)
+        && /skip/i.test(start.what), JSON.stringify(start));
+  const sOwners = [...(owners.get("KeyS") ?? [])];
+  check("...and S is free roam's alone again",
+        sOwners.length === 1 && sOwners[0] === "freeRoam", sOwners.join("+"));
   check("Z is bound by nothing: tools/pacing.mjs presses it for that",
         !owners.has("KeyZ"));
   check("only overlays have keys",

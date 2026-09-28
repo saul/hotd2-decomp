@@ -136,8 +136,18 @@ function typingIn(target: EventTarget | null): boolean {
  */
 function Overlay({ children }: { children: ReactNode }) {
   const boxed = useSlice((p) => p?.pillarbox) === true;
+  // **A press over the game hands the keys back to the game.** Chrome leaves
+  // the focus on a button the mouse clicked, and a focused button takes Space
+  // and Enter for itself -- `app/`'s handler rightly defers to it -- so a
+  // click on the speaker made the next Enter a mute instead of START, and one
+  // on the menu's trail made it reopen the menu. `detail` is 0 for a click a
+  // key made, so a button reached with Tab keeps its focus as it should.
+  const release = (e: { detail: number }) => {
+    if (e.detail > 0) (document.activeElement as HTMLElement | null)?.blur?.();
+  };
   return (
-    <div id="overlay" className={boxed ? "boxed" : undefined}>{children}</div>
+    <div id="overlay" className={boxed ? "boxed" : undefined}
+         onClick={release}>{children}</div>
   );
 }
 
@@ -214,7 +224,7 @@ function Page(
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // The page's keys. The rest are `app/`'s (Space, Enter, the digits, the
-  // arrows, S and R) and free roam's (WASDQE, Shift and Alt), and
+  // arrow and R) and free roam's (WASDQE, Shift and Alt), and
   // `ui/shortcuts.ts` is the list of all of them that `test:ui` holds every
   // handler to. A chord is the browser's, never ours: Cmd-R is a reload and
   // Ctrl-F is find.

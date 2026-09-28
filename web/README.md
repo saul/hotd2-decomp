@@ -134,8 +134,9 @@ back to the game where it was.
 | **Play** | `1` | the game, at 60 Hz; "Pause at branches" in the Route panel holds each branch |
 | **Free roam** | `2` | orbit and fly, detached from the rail |
 
-Space plays and pauses, `Enter` skips a cutscene, `R` or the right button
-reloads, `S` is the pad's Start, `←` rewinds half a second, `` ` `` toggles
+Space plays and pauses, `Enter` is the pad's Start -- it takes a continue,
+skips a cutscene where the game allows one, and starts a new game when you
+are out -- `R` or the right button reloads, `←` rewinds half a second, `` ` `` toggles
 the sidebar, `M` mutes and `F` goes fullscreen. **`?` lists every key**,
 including one for each debug overlay -- `B` the actor boxes, `C` collision,
 `G` all regions, `V` and `L` the camera rails -- which flip it without opening

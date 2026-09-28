@@ -301,9 +301,9 @@ function playerShellNote(): string {
   if (s === PlayerState.Continue) {
     const t = G.g_nRunPhase === RunPhase.ContinueCountdown
       ? G.g_continue_timer : G.g_player_continue_timer[0];
-    return ` · CONTINUE? ${Math.max(0, t >> 12)} (S to continue, ${credits})`;
+    return ` · CONTINUE? ${Math.max(0, t >> 12)} (Enter to continue, ${credits})`;
   }
   if (s === PlayerState.GameOver) return " · game over";
-  if (s === PlayerState.Out) return " · out (S to start)";
+  if (s === PlayerState.Out) return " · out (Enter to start)";
   return "";
 }

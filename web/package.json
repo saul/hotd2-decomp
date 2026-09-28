@@ -28,6 +28,7 @@
     "verify:ui": "node tools/verify_ui.mjs",
     "bundle-flow": "node tools/bundle_flow.mjs",
     "first-visit": "node tools/first_visit.mjs",
+    "keys": "node tools/keys.mjs",
     "transitions": "node tools/transitions.mjs",
     "sound-prefs": "node tools/sound_prefs.mjs",
     "shot": "node tools/shot.mjs",

@@ -616,7 +616,8 @@ harnesses open it by setting that key before the page loads
 (`tools/lib/player.mjs`), because the panels are what they read.
 
 **Keys have one list.** Three handlers answer them, each for its own reason:
-`app/main.ts` the game's (Space, Enter, the digits, the arrow, S and R),
+`app/main.ts` the game's (Space, Enter -- which is START, both the continue
+and the skip -- the digits, the arrow and R),
 `render/freeroam.ts` flying, and `ui/App.tsx` the page's -- the sidebar, the
 `?` dialog, `M`, `F`, and a key for each debug overlay, which is a column of
 the toggle table (`ToggleSpec.key`) rather than a map of its own. What they

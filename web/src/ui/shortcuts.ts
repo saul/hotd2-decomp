@@ -2,7 +2,7 @@
  * Every key the page answers to, in one table.
  *
  * Three layers listen for keys, and for good reasons: `app/main.ts` owns the
- * game's (Space, Enter, R, S, the arrows, the digits), `render/freeroam.ts`
+ * game's (Space, Enter, R, the arrow, the digits), `render/freeroam.ts`
  * owns flying (WASDQE and Shift, in free roam only), and `ui/App.tsx` owns the
  * page's (the sidebar, this list, the overlays, mute, fullscreen). What none
  * of them had was one place that said what all of them do -- so the `?`
@@ -52,10 +52,9 @@ const GAME: ShortcutGroup = {
       what: "Reload — a pull off the screen, as the arcade gun does it" },
     { codes: ["KeyR"], cap: "R", by: "app", what: "Reload" },
     { codes: ["Space"], cap: "Space", by: "app", what: "Play / pause" },
-    { codes: ["Enter"], cap: "Enter", by: "app",
-      what: "Skip the cutscene, where the game would allow it" },
-    { codes: ["KeyS"], cap: "S", by: "app",
-      what: "The pad's Start: a new game when you are out, a continue" },
+    { codes: ["Enter", "NumpadEnter"], cap: "Enter", by: "app",
+      what: "Start — continue, skip a cutscene where the game allows it, "
+        + "or a new game when you are out" },
     { codes: ["KeyM"], cap: "M", by: "ui", what: "Sound on / off" },
     { codes: ["KeyF"], cap: "F", by: "ui", what: "Fullscreen" },
   ],

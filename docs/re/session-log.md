@@ -23327,6 +23327,66 @@ was not pinned down.
   destroyed" at frame 8055; alone, it ran to the same GAME OVER at 9750 as the
   old code. That was another page reload, not the change (`L29`).
 
+## 2026-09-28 -- which class-0x13 routines draw before they seat on a path (branch `claude/relaxed-benz-c908db`)
+
+**The brief.** Once the wall-climbers branch put `pitch`/`roll` on placements,
+five stage-2 class-0x13 records carry a pitch; `SpawnSlotActor` was said to
+build class 0x13 with `yaw: pl.yaw` only, and `PropSeatOnObjectPath` overwrites
+all three angles. Find out which class-0x13 states draw before seating, and
+pass the angles through if any shipped prop draws its spawn orientation.
+
+**Already done.** The brief described the tree before `1723413f` (this
+morning's class-0x13 pitch session, above): the arm has taken all three
+through `PlacementOrientation` since then, with four `port.test.ts`
+assertions. Nothing to pass through. What that session did not read is the
+carriers, and that is what this one adds.
+
+What the exe does, all `[proved]` from the listing:
+
+* `ScriptedPropUpdate13` (`FUN_0043FE90`) calls the behaviour at `0x0043FEC9`
+  and draws from `0x0043FEDE` on; the model at `obj+0x1F4` is drawn nowhere
+  else. So the record's angles are drawn only where the behaviour writes none.
+* `CarrierPropSelectRoutine`'s table at `0x004401E4`: 0 `0x00440210`, 1
+  `0x004403D0`, 2 and 9 `0x004408A0`, 3 `0x00440AD0`, 4 and 7 `0x00440C20`,
+  5 and 8 `0x00441000`, 6 `0x004413C0`.
+* Every routine but selector 3's falls from state 0 into
+  `PropSeatOnObjectPath` on its first call: 0 `0x00440282`->`0x0044028F`, 1
+  `0x00440433`->`0x00440440`, 2 `0x00440940`->`0x00440969`/`0x00440997` and
+  9 at `0x004408E6`, 4 `0x00440CC0`->`0x00440CE4` and 7 at `0x00440C7C`, 5 into
+  `0x004410B7` and 8 at `0x0044105C`, 6 `0x00441423`->`0x00441430`.
+* Selector 3's routine, `0x00440AD0`..`0x00440BFD` (not a Ghidra function;
+  read as bytes), stores nothing to the object: it reads `obj+0x1310` and
+  writes its own tail and an 8-byte block. It draws the record's angles for
+  life, as behaviour 0 does.
+
+The data, off the disc rather than the bundle (`L18`): sixteen class-0x13
+descriptors in the eleven `evt/*.bin`, 15 in stages 2..4 (the bundle's 15)
+and one in `trnevtbl.bin` on behaviour 9. The five behaviour-0 records are the
+only ones with a non-zero angle; selector 3's (stage 4, 35916) is `(0, 0, 0)`.
+So the one shipped carrier that draws its spawn orientation draws zero, and
+the port already keeps its model out of the bundle.
+
+**Checks.** One `port.test.ts` assertion: every selector in
+`CARRIER_SELECTORS_PORTED`, spawned from a record carrying all three angles,
+holds its `op_` path's after one `ScriptedPropUpdate13`, and the loop expects
+selector 3 to keep the record's when it is ported. Replacing routine 1's
+fall-through call with nothing fails it (`1:1111/2222/3333`).
+
+**Corrected.** `functions.tsv` said `PropSeatOnObjectPath` is called by "every
+carrier routine"; selector 3's never does, and the row now lists every caller.
+The class-0x13 header and `spawns.md` said "five take behaviour 0 ... the
+other eighteen take 8": five is descriptors and eighteen is instructions less
+five. It is 15 descriptors (5 and 10) and 23 instructions (8 and 15).
+
+**Wrong turn.** A first draft of the `ScriptedPropUpdate13` row said "nothing
+else draws the object". Routines 0, 1 and 2 draw their wakes and doors under
+the object's angles; they do it after their own seat, but only those three
+were read that far, so the row now says the *model* is drawn nowhere else.
+
+`[open]`: what routines 3, 4/7 and 5/8 are (stage 4's), and behaviours 6, 7
+and 9 (`0x0043FFC0`, `0x004400D0`, `0x00445050`) -- no stage record uses them,
+though `0x004400D0` also calls `PropSeatOnObjectPath` (`0x00440101`).
+
 ## 2026-09-28 -- the stage-2 car's draw, checked a second time; its push translations were the wrong float32s (branch `claude/adoring-lehmann-1b16dc`)
 
 The brief was to port what `St2CarDraw` (`FUN_00452320`) does and the player

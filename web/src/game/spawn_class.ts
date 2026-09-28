@@ -159,8 +159,10 @@ export enum SpawnClass {
    */
   Mouse = 0x52,
   /**
-   * `CatInit` (`FUN_00431250`) — the cat, character type `0x1A`. Subtype 2
-   * and up is a shootable route-branch trigger, in Original Mode only.
+   * `CatInit` (`FUN_00431250`) — the cat, character type `0x1A`. Subtypes 0
+   * and 1 play a playlist and leave (`CatMotionListUpdate`, `FUN_00431340`);
+   * subtype 2 and up is a shootable route-branch trigger, in Original Mode
+   * only.
    */
   SkinnedNpc = 0x53,
 

@@ -32,8 +32,9 @@ export interface RescueTargetTail {
    * `obj+0x1350` — the row of `g_st2car_path_table` this actor takes its pose
    * from, and **the whole of how it comes to be on the car**.
    *
-   * `RescueTargetInit` (`FUN_00451720`) leaves it at the zero `ActorAlloc`
-   * wrote, which is `op_st2` path `0x148`; every way out of
+   * `RescueTargetInit` (`FUN_00451720`) writes it 0 itself in its
+   * non-Training arm -- `MOV dword ptr [ESI + 0x1350], 0x0` at `0x004517D7`
+   * -- which is `op_st2` path `0x148`; every way out of
    * `RescueTargetRideInState` (`FUN_00451860`) writes 1, which is `0x14E`.
    * Those are the same two routes `FUN_004521B0` gives the stage-2 car on
    * camera paths `0x38` and `0x39`.

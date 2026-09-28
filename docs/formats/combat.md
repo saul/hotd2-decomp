@@ -300,9 +300,13 @@ list instead:
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
   `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
-  `0x51` `FishProjectToScreen` `0x00439BE3`; `0x52` and the class-0x53 trigger
-  through `FUN_0043F950` (`0x0043F9C2`, `0x0043FB76`), which both branch
-  triggers call.
+  `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
+  `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
+  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),
+  so this line used to be wrong to say both branch triggers call it; the
+  other site it listed, `0x0043FB76`, lies outside it, in the unfunctioned
+  code from `0x0043F9D0`. Whose routine that is, and where `0x52`
+  registers, is `[open]`.
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner
@@ -1350,6 +1354,33 @@ falls back to the authored path target only when there are none registered.
 claiming one stores its index in `obj+0x121` and returns 1, which is what lets
 the approach state hand over to the attack state named by the descriptor tail.
 Fail, and the enemy keeps walking.
+
+**[proved]** How it claims, from `0x00455DE0` (and `ThrowerTryClaimAttackSlot`,
+`0x0044CA40`, instruction for instruction):
+
+* its **first** store is `obj+0x121 = 0xFF`, before any test — a refused claim
+  always leaves the actor holding no index, whatever it held;
+* `g_attack_committed` set refuses at once;
+* it offers **one** player's permit, not the first free one: `g_active_player`'s
+  with one attacker; with two, `rand() % 2`'s while one player is in play, the
+  same pick `NOT`'d if taken while one enemy is present, and otherwise the
+  player on the actor's half of the screen (`ActorScreenHalfSign`,
+  `0x00409C90`); `IsPlayerAttackable` then voids the pick;
+* the permit table holds **0 or 1** — whether a permit is out, not who has it
+  (the port stores the holder's id and `-1` for free, for its debug panel);
+* it does **not** write `obj+0x34`.
+
+Two things free a permit other than its holder. `ZombieStateHoldForCameraCue`
+(`0x0045BFD0`) zeroes `g_attack_permits[obj+0x121]` when its delegate reaches
+`Strike` — the table entry only, leaving `obj+0x121` and the off-screen latch —
+and **every `finish_sequence`** (`EvtActionFinishSequence21`, `0x00403710`)
+zeroes both. That second one is load-bearing: the hold tests its camera cue
+*before* its `Strike` bounce, so a captor already at the ring claims on the cue
+frame and graduates into `ZombieStateHoldAtRange` still owning the permit, and
+its own permit refuses its every claim after that until the script's next
+`finish_sequence` — queued right after the cue for all three held spawns in the
+game — lets it go. The hub itself (`0x00455748`) gives `g_attack_committed` back
+when the actor holding it is back at the ring and still off screen.
 
 That single byte does double duty: it gates the attack *and* it is what
 `SelectCameraLookAtTarget` tests. **The camera focuses on the enemy that holds

@@ -147,6 +147,22 @@ const SCENE: Record<string, ActionImpl> = {
     // `EvtActionFinishSequence21` is the one handler that does NOT retire
     // itself -- it installs a camera driver and pins the ring's dequeue mode
     // at "still running". `goto_scene_state` is what takes it back.
+    //
+    // **Its first two stores free both attack permits**, whoever holds them:
+    //
+    //     00403714  c705a02b9a0000000000  MOV [g_attack_permits], 0x0
+    //     0040371e  c705a42b9a0000000000  MOV [g_attack_permits + 4], 0x0
+    //
+    // and nothing else in `EvtActionFinishSequence21` touches an actor, so
+    // the holders keep their `obj+0x121` and find out on their next claim,
+    // which voids it first. This is what lets a captor out of the permit
+    // `ZombieStateHoldForCameraCue` leaves it holding on its cue frame -- all
+    // three held spawns in the game have a `finish_sequence` right after
+    // their cue -- and the port had no copy of it: stage 2's block-16 zombie
+    // stood in `HoldAtRange` with the only permit for the rest of the stage.
+    // `-1` is the port's "free"; the engine's is 0. `[proved]`
+    G.g_attack_permits[0] = -1;
+    G.g_attack_permits[1] = -1;
     w.enterSceneState(2, op.args?.[0] ?? 0);
     // Selector 0x21 is EvtEnterSceneState(2, minor) -- it picks a *camera
     // routine*, it does not hand control back from a path. Row 2's live

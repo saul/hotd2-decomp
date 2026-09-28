@@ -218,10 +218,10 @@ export function TurnActorAwayFromPointTestArrival(obj: Actor, p: Vec3,
  * 0040a085  CMP EDX, ECX; SBB EAX, EAX; INC EAX   ; hi >= a
  * ```
  *
- * Both ends inclusive. It has other readers --
- * `ZombieShouldStandAndThrow`'s facing window and the cardinal snap in class
- * 0x31's surface code among them -- which still carry their own spelling of
- * it.
+ * Both ends inclusive. `ZombieShouldStandAndThrow`'s facing window and
+ * `ChooseDeathMotionDirectional`'s four arcs call it; other readers -- the
+ * cardinal snap in class 0x31's surface code among them -- still carry their
+ * own spelling of it.
  */
 export function AngleWithinTolerance(angle: number, centre: number,
                                      tolerance: number): boolean {

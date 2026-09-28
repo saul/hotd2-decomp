@@ -1316,6 +1316,26 @@ export const EFFECT_SLOT_RANGES: ReadonlyArray<readonly [number, number]> = [
 ];
 
 /**
+ * The round Original Mode's weapon kind 5 fires: `PlayerShotEffectsThink`
+ * (`FUN_00416B00`) draws `AssetDrawSlot(0x109D)` for a live
+ * `g_shot_tracer_ring` record of kind 5 and for nothing else (`PUSH 0x109D`
+ * at `0x00416DA1`, behind `CMP EAX, 0x5` at `0x00416CBE`), and
+ * `AssetQueueLoadSlot` (`FUN_0041D5D0`) is what makes it resident, from
+ * `LoadSceneAndReset`. `etc_1.bin` entry 41. Carried in an Original Mode
+ * bundle's effect templates, which is where `render/effects.ts` draws the
+ * ring from; it used to reach the page only as the rig `obj_416b00`, which
+ * the player drew from stage load at `op_` 0x194's own pose -- in front of
+ * Goldman's desk. The kind-4 record's run from 0xA6F is not here: nothing the
+ * port can equip arms it, and this is only the slot whose rig was wrong.
+ */
+export const ORIGINAL_WEAPON5_ROUND_SLOT = 0x109d;
+
+/** {@link ORIGINAL_WEAPON5_ROUND_SLOT}, for a stage that is Original Mode. */
+export function originalWeaponRoundSlots(original: boolean): number[] {
+  return original ? [ORIGINAL_WEAPON5_ROUND_SLOT] : [];
+}
+
+/**
  * A hidden rig holding the models the shot effects flip through.
  *
  * Same shape and same reason as {@link actorSlotEntry}: one part per asset
@@ -1770,6 +1790,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
     ...Boss4EffectSlots(spawnRecords.map((r) => r.cls)),
     // ...and the sprite effects a class draws off the shot path.
     ...classEffectSlots(spawnRecords.map((r) => r.cls)),
+    // ...and Original Mode's weapon-5 round, on the tracer ring.
+    ...originalWeaponRoundSlots(stage.original),
   ]);
   // Which materials draw blood, so the client can offer the colour the game's
   // own option offers. See `bloodTexturePredicate`.

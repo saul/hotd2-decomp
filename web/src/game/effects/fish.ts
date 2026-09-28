@@ -149,15 +149,15 @@ export function FishSpawnWaterSplash(obj: Actor, scale: number, kind: number,
  * and the slot, then the step; past `0x1356` the task is killed, after that
  * cel has been drawn.
  *
- * The yaw is `g_camera_block_yaw_bams[g_camera_index * 0x69]`, the camera
- * block's heading. The port builds its view from the block's eye and target
- * and keeps that heading in `g_camera_yaw_bams` instead, which is what
- * `OwlUpdateAndResolveShot`'s port reads for the same word.
+ * The yaw is `g_camera_block_yaw_bams[g_camera_index * 0x69]` (`0x009A60D0`,
+ * read at `0x00439F5A`), the camera block's heading. This read
+ * `g_camera_yaw_bams` (`0x009C71F0`), which the scene state's hooks write as
+ * a camera heading turned half round. `[proved]`
  */
 export function WaterSplashUpdate(s: FishWaterSplash): boolean {
   if (s.done) return false;
   s.shown = s.slot;
-  s.shownYaw = G.g_camera_yaw_bams;
+  s.shownYaw = G.g_camera_block_yaw_bams;
   s.slot += 1;
   if (s.slot > FISH_SPLASH_LAST_SLOT) s.done = true;
   return true;

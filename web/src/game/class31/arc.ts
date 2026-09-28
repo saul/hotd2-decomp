@@ -14,7 +14,9 @@
  */
 import type { ArcStage } from "../../bundle/characters";
 import type { Events } from "../../core/events";
-import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
+import type { Rng } from "../../core/rng";
+import { ActorFlag, ThrowerFlag, type Actor, type ThrowerActor }
+  from "../actor";
 import { ActorSetOneShotBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import type { GameHost } from "../host";
@@ -24,6 +26,7 @@ import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
 import {
   ARC_MIN_FRAMES, ARC_MIN_FRAMES_FAST, ARC_SPEED_UNITS, ThrowerState,
 } from "./states";
+import { ThrowerLoadAttackArcScript, ThrowerPickAttack } from "./tables";
 
 /**
  * Half the gravity `ThrowerStateFallAndLand` puts in `obj+0x5C`, and the
@@ -217,27 +220,74 @@ const FADE_MAX = 0x7f;
 const CHAR_ZSTIN = 0x19;
 
 /**
+ * `&DAT_007DCC70` -- the address `ThrowerStateLeapDown` passes
+ * `ActorArcBeginToWaypoint` for its script (`PUSH 0x7dcc70` at `0x0044B6A6`),
+ * and the one the routine compares against (`CMP EAX, 0x7dcc70` at
+ * `0x0044D7E0`). Those are its only two references. It is not read as a
+ * script: the compare sends the routine to its own attack draw instead.
+ *
+ * A symbol and not `null`, because `null` already means something else in the
+ * port -- a named script the bundle does not carry -- and the two must not
+ * meet: a missing path script taking this arm would roll an attack.
+ */
+export const ARC_SCRIPT_DRAW_ATTACK: unique symbol =
+  Symbol("&DAT_007DCC70");
+
+/**
  * `ActorArcBeginToWaypoint` — `FUN_0044D780`.
  *
- * Begins the arc and installs the script in one call. Character type 0x19
+ * Begins the arc and installs a script in one call. Character type 0x19
  * takes `ActorArcBeginToAtSpeed` and ignores `step` entirely; everything else
- * takes `ActorArcBeginTo`.
+ * takes `ActorArcBeginTo`. `[proved]`, the whole routine:
  *
- * A **null** script is the engine's `&DAT_007DCC70` sentinel — sixty-four zero
- * bytes meaning "no script". In that case the caller wants a fresh attack
- * instead, which `pickAttack` supplies; that is how `ThrowerStateLeapDown`
- * chooses which swing the pounce is.
+ * ```
+ * 0044d785  type == 0x19 ? ActorArcBeginToAtSpeed(obj+0x40.., dest..)
+ *                        : ActorArcBeginTo(obj+0x40.., dest.., step)
+ * 0044d7e0  if (script != &DAT_007DCC70) {
+ *             InstallArcMotionScript(script); obj+0x1360 = 0; return }
+ * 0044d7fc  obj+0x131A = g_class31_attack_picks[obj+0x130C]
+ *                          [(rand() >> 4) % 10 + (obj+0x1318 & 7) * 10]
+ * 0044d839  if (type == 0x18) obj+0x131A = 3
+ * 0044d843  ThrowerLoadAttackArcScript(obj); obj+0x1360 = 0
+ * ```
+ *
+ * **The draw is this routine's, and it is taken for `zslman` too**, which
+ * then overwrites it with 3: the `rand()` still moves the stream. The port
+ * used to hand the draw back to the caller as a callback, and
+ * `ThrowerStateLeapDown`'s skipped it for type 0x18.
+ *
+ * `rng` is `rand()`, and only the draw arm reads it; the overloads make the
+ * one caller that takes that arm pass it.
  */
-export function ActorArcBeginToWaypoint(obj: Actor, dest: Vec3,
-                                        script: ArcStage[] | null,
-                                        step: number,
-                                        pickAttack?: () => void): void {
-  if (obj.charType === 0x19) ActorArcBeginToAtSpeed(obj, dest);
+export function ActorArcBeginToWaypoint(
+  obj: ThrowerActor, dest: Vec3, script: typeof ARC_SCRIPT_DRAW_ATTACK,
+  step: number, rng: Rng): void;
+export function ActorArcBeginToWaypoint(
+  obj: ThrowerActor, dest: Vec3, script: ArcStage[] | null,
+  step: number): void;
+export function ActorArcBeginToWaypoint(
+  obj: ThrowerActor, dest: Vec3,
+  script: ArcStage[] | null | typeof ARC_SCRIPT_DRAW_ATTACK,
+  step: number, rng?: Rng): void {
+  if (obj.charType === CHAR_ZSTIN) ActorArcBeginToAtSpeed(obj, dest);
   else ActorArcBeginTo(obj, dest, step);
-  if (script) InstallArcMotionScript(obj, script);
-  else pickAttack?.();
+  if (script !== ARC_SCRIPT_DRAW_ATTACK) {
+    InstallArcMotionScript(obj, script);
+    obj.arcPhase = ArcPhase.Windup;
+    return;
+  }
+  // `CALL rand; SAR EAX, 4; CDQ; IDIV 10` -- `Rng.int` is the port's `% n`,
+  // and the shift before it changes which value comes up, not how many draws.
+  obj.attack = ThrowerPickAttack(obj, (rng as Rng).int(10));
+  if (obj.charType === CHAR_ZSLMAN) obj.attack = ZSLMAN_ATTACK;
+  ThrowerLoadAttackArcScript(obj);
   obj.arcPhase = ArcPhase.Windup;
 }
+
+/** `CMP word ptr [ESI + 0x1f4], 0x18` at `0x0044D815`. */
+const CHAR_ZSLMAN = 0x18;
+/** `MOV byte ptr [ESI + 0x131a], 0x3` at `0x0044D83B`. */
+const ZSLMAN_ATTACK = 3;
 
 /**
  * `ActorArcInterpolate` — `FUN_0044DD00`. The position at frame *n*, exactly.
@@ -338,6 +388,18 @@ export function ActorClipLength(obj: Actor, motion: number): number {
  */
 export function ActorPlayCursor(obj: Actor): number {
   return obj.action ? obj.action.ticks : MotionPlayFrame(obj);
+}
+
+/**
+ * `obj+0x1B4` -- the motion on the track, for the same reason and on the same
+ * terms as {@link ActorPlayCursor}: the one-shot's while one runs, the base
+ * clip's otherwise. `g_motion_play_length[obj+0x1B4]` is how long the clip
+ * whose cursor that is runs.
+ *
+ * `[port-only]`, a lookup: the engine reads the word.
+ */
+export function ActorPlayMotion(obj: Actor): number {
+  return obj.action ? obj.action.motion : obj.motion;
 }
 
 /**

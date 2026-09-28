@@ -63,7 +63,7 @@ const BOAT_FLAGS = 0x51;
  */
 const BOAT_RIDE_HEIGHT = 2.0;
 
-/** `+ 0x8000` on the camera's yaw at `0x0048EDCD` — turned to face it. */
+/** `+ 0x8000` on the camera block's yaw at `0x0048EDCD`. */
 const FACE_CAMERA_TURN = 0x8000;
 
 /**
@@ -198,12 +198,13 @@ export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
       obj.pos.y = p.y + BOAT_RIDE_HEIGHT;
       obj.pos.z = p.z;
       obj.pitch = p.pitch ?? obj.pitch;
-      // `g_camera_block_yaw_bams` (`0x009A60D0`) in the engine. The port
-      // keeps one heading, `g_camera_yaw_bams`, and reads it for this as
-      // `PropUpdateType43` and the bat do; whether the two ever differ is the
-      // `[open]` on that row of `globals.tsv`.
+      // `obj+0x68 = g_camera_block_yaw_bams[g_camera_index] + 0x8000`
+      // (`0x0048EDC6`..`0x0048EDD3`), no mask. This read `g_camera_yaw_bams`
+      // (`0x009C71F0`), which the scene state's hooks write as a camera
+      // heading already turned half round, so the latched boat stood half a
+      // turn from where the engine puts it. `[proved]`
       obj.yaw = v.faceCamera
-        ? (G.g_camera_yaw_bams + FACE_CAMERA_TURN) & 0xffff
+        ? G.g_camera_block_yaw_bams + FACE_CAMERA_TURN
         : (p.yaw ?? obj.yaw);
       obj.roll = p.roll ?? obj.roll;
     }

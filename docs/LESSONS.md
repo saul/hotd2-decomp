@@ -931,3 +931,39 @@ comparison asks ("is it taken"), not its constant** -- and before calling any
 reader of such a value faithful, grep every reader for the exe's literals.
 It is a cousin of `L3`: there one field means two things in two classes, here
 one table means one thing in two encodings.
+
+**L64 -- A word the port "keeps instead" is a divergence at every reader, and
+the question it rests on is usually one read away.** `g_camera_block_yaw_bams`
+(`0x009A60D0`) and `g_camera_yaw_bams` (`0x009C71F0`) are two camera yaws, and
+for as long as the port had only the second, each routine the exe points at
+the first was transcribed onto the second with a note: "the port keeps one
+heading, and reads it for this as `PropUpdateType43` and the bat do; whether
+the two ever differ is the `[open]` on that row of `globals.tsv`". Four notes
+cited each other and a helper was written to return it. They differ by half a
+turn: the scene state's hooks write the second as a camera heading plus or
+minus `0x8000`, which is in the five instructions of each hook. So a
+condition-8 walker's facing window sat behind it and no blade or axe walker in
+the game ever threw, severed heads and owl corpses flew at the camera, and
+deaths fell the wrong way -- one substitution, wrong at every reader. **When a
+routine reads a word the port does not have, the substitute is the
+divergence, not the missing word**: tag it `[diverges]`, and settle the
+`[open]` by reading the substitute's writers before a second reader copies the
+choice. `L20`'s "never name a thing from what it resembles" applies to globals
+that resemble each other.
+
+**L65 -- A count a check was calibrated on is a reading, and it can be the
+bug.** `verify_combat.py` check 16 asserted that exactly nine arc-script
+stage changes switch clips, and its docstring named two of them: "zslman's
+aside in stances 1 and 3". Those two were not leap-aside scripts at all. The
+exporter read `zslman`'s four at `0x30` apart -- one script's width -- where
+`ThrowerStateLeapAside` names them `0x60` apart with four `MOV ESI, imm32`,
+and the extra `0x30` between each pair is that stance's *pounce* script,
+which ends on a different clip. The check was written by counting what the
+export produced, so it passed the misread and would have failed the fix. The
+comment beside the address said "+0x60 a stance"; the code beside it said
+`0x30`; the annotation said "stride 0x30" and listed four motions that sit
+`0x60` apart. **When a check's expected number was measured rather than
+derived, say what it was measured from, and prefer asserting the thing the
+engine names** -- here the immediates in `.text` -- to asserting a total
+that includes whatever the reader got wrong. It is `L6` seen from the
+checker's side: the adjacent-array trap, calibrated into the test.

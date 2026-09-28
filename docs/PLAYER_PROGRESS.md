@@ -5549,6 +5549,48 @@ golden frog (`GoldenFrogDrawBonePart`) and class 0x2D's node hook at
 `0x00429040`. Class 0x40's `SubModelDrawBoneHook` fade is unreachable:
 `HordeMemberInit` writes `obj+0x1338` = 0 and nothing else writes it.
 
+### Every caller of the ring effects, where the exe calls it
+
+`SpawnGroundRingEffect` (`FUN_00407DA0`), `SpawnRingEffectAtPose`
+(`FUN_00408370`) and `SpawnWaterRing` (`FUN_004567C0`) have twenty-six call
+sites -- every `E8` rel32 in `.text` aimed at one of the three, which is the
+same list Ghidra's cross-references give. All of them are wired now but the
+frog's (class 0x11, another session's):
+
+* **Class 0x31's corpses** open the ground ring on their first frame, as class
+  0x30's do. `EnemyThrowerInit` raises `obj+0x1F8` bit 4 as `EnemyZombieInit`
+  does, so the ring sits on the traced floor; a body frozen on clip 0x3A6 is
+  lifted 5.5 for the call. `ThrowerStateCorpseSink` and
+  `ThrowerStateCorpseBlink` are two functions again, the pose pin draws its
+  `rand()` every frame (a corpse can twitch between its two frames), and the
+  way out is the exe's -- no `ThrowerLeave`, the camera slot only for
+  `KeepCameraWhenLast`.
+* **The rescue target's freed body** leaves the car:
+  `RescueTargetFreedDrift` (`FUN_00451F40`) carries the car's last frame of
+  travel and bleeds it out over frames 11..20, eases the body to the ground
+  plane and levels its roll. The freed clip is blended in at cursor 15; when
+  `RescueTargetDraw` reports it over, the ring opens and
+  `RescueTargetSinkAndDespawnState` (`FUN_00451DF0`, a function Ghidra did not
+  have) sinks the body for 120 frames on the clip's last frame and despawns
+  it. The class steps its own clock now (`advancesOwnMotion`), which is what
+  lets the freed state stop it. The abandoned state rides the route on.
+* **A severed head** leaves a 0.25 ring every time a soft head bounces and a
+  0.5 one as any head settles; it is thrown along the camera **block's** yaw,
+  which is forward, not `g_camera_yaw_bams`, which the scene hooks keep half a
+  turn round.
+* **The wading splashes** (`class30/splash.ts`): `ZombieStrikeStartSplash`
+  and `ZombieStrikeFrameSplash`, `g_class30_states[0x39]` and `[0x3A]`, as the
+  swing starts and 0x14 play frames before it ends, for body condition 6 on
+  water; state 23's grab takes the first as sprite 0x62 and ends in another.
+  The wading clip 0xB8 throws its splash at play frames 0x15 and 0x1B, and its
+  two water rings at 0x1B, in `ZombieStateSurfaceOnCameraCue` and the captor
+  script; the captor script's clip 0xB2 throws its prop strip at 0x16.
+
+Three sub-state fall-throughs went with it (states 13 and 23, and both corpse
+states), and `obj.frozen` -- class 0x24's `obj+0x1324` -- is no longer written
+by two class-0x30 entrances.
+
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),

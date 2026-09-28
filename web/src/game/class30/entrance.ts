@@ -395,9 +395,9 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
  * the global with no null test at all (`ZombieStateDelayedStrikeInPlace` does
  * the same at `0x0045EAFE`) — so it can only ever be reached in the port,
  * where a stage may reach one of these spawns without the class-0x33 object
- * that belongs to it. `Class26Subtype2Update` (`FUN_0048EAD0`) is the game's
- * **other** writer of `g_carrier_object`, stage 3's boat, and that class is
- * still unported.
+ * that belongs to it. `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's
+ * boat, is the **other** ported writer of `g_carrier_object`
+ * (`game/class26/`); the global's own note in `globals.ts` lists them all.
  */
 export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
                                        rng: Rng, dt: number): void {
@@ -451,11 +451,12 @@ export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
  * in the descriptor: clip `0x10C` held `0x21` frames for type 0 and `0x39F`
  * held `0x2C` for every other.
  *
- * [open] The engine's sub 1 has a second arm, taken when the descriptor's own
- * byte `+0x02` is `0x16`, that waits on a camera frame instead of counting the
- * delay down. `+0x02` is the initial-state byte, so for a spawn that starts
+ * [diverges] The engine's sub 1 has a second arm, taken when the descriptor's
+ * own byte `+0x02` is `0x16`, that waits on a camera frame instead of counting
+ * the delay down. `+0x02` is the initial-state byte, so for a spawn that starts
  * here it reads 30 and for one routed from state 29 it reads 29 — never 0x16.
- * No shipped record takes it; the countdown arm is the only live one.
+ * No shipped record takes it; the countdown arm is the only live one, and the
+ * only one ported.
  *
  * **The landing** is the one frame the arc step has reported
  * {@link ArcPhase.Settled} and {@link ZombieFlag2.OneShotFired} is still down

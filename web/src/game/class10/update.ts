@@ -11,7 +11,7 @@ import { CamPathCueReached } from "../camera/path";
 import { ActorRegisterCameraPoint } from "../camera/track";
 import { CarrierPublishWorld } from "../carrier";
 import { ActorDespawn } from "../despawn";
-import { ActorByAt, G } from "../globals";
+import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
 import type { ClassFrame } from "../registry";
 import { T, SecondsToTicks } from "../tables";
 import { CivilianPruneDeadChildren } from "./children";
@@ -122,7 +122,7 @@ function CivilianWriteSphereCentre(obj: Actor): void {
 /**
  * `obj+0x136C` bit `0x1` — **draw this actor with the scene light array**.
  *
- * `[proved]`, and it closes an `[open]` the survey left. The only readers in
+ * `[proved]`, and it answers a question the survey left. The only readers in
  * the binary are class 0x31's two part-draw wrappers, `ThrowerDrawPart`
  * (`FUN_0044A200`) and `ThrowerDrawPartWithAlpha` (`FUN_0044A240`): each does
  * `MOV EAX, [g_cur_actor]; TEST byte ptr [EAX + 0x136C], 0x1` — bytes
@@ -232,8 +232,11 @@ export function CivilianReleaseCaptors(obj: Actor): void {
  * only, so a rescued civilian stood where her script left her for the rest of
  * the stage.
  *
- * [open] The skip arm: `g_cutscene_skipping` (`0x009A2230`) has no field in
- * `G` -- see `class41/type13.ts` for the same gap.
+ * [diverges] The skip arm is not ported: `g_cutscene_skipping`
+ * (`0x009A2230`) has no field in `G` -- the port's skip is the walker's own --
+ * so a skipped cut scene does not remove the civilian early.
+ * `class41/type13.ts` and `class21/index.ts` leave their own skip arms out for
+ * the same reason.
  */
 function CivilianCheckRemoval(obj: Actor, host: GameHost): void {
   const sub = obj.civ;
@@ -275,12 +278,23 @@ const SCENE_MAJOR_PATH_CAMERA = 2;
  * is the "already left the count" stamp op 0x2C's `LeaveCountNow` sets, so a
  * civilian that took itself out early is not taken out twice.
  *
- * [open] The engine also frees the actor's hit slot —
- * `g_hit_slots[obj+0x3C] = 0` — and the draw record at `model+0x45C`. Neither
- * is modelled by this port at all, so neither is here.
+ * Ahead of both, the engine frees the actor's hit slot and its draw record:
+ *
+ * ```
+ * 0048B07D  MOV EAX, [ESI + 0x3C] / CMP EAX, -1 / JZ
+ * 0048B085  MOV [EAX*4 + 0x9C88C0], EBX       ; g_hit_slots[obj+0x3C] = 0
+ * 0048B098  CALL 0x004124B0                   ; the model's draw record
+ * ```
+ *
+ * `[proved]` The slot write tests the index and not `obj+0x38` bit `0x40`,
+ * and leaves the index standing, so `ActorDespawn`'s own release a line
+ * later frees the same entry again -- the shape `ZombieStateDragTarget`'s
+ * sub 4 has too. The draw record is the renderer's. This said the hit-slot
+ * table was not modelled, which stopped being true with `hit_slots.ts`.
  */
 export function CivilianLeaveField(obj: Actor): void {
   const sub = obj.civ;
+  if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
   if (sub && !(sub.subFlags & 1)) G.g_civilians_alive -= 1;
   ActorDespawn(obj);
 }

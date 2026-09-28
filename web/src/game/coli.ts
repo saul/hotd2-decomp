@@ -316,7 +316,7 @@ export function ColiTraceSegmentVsObjectBlob(
  * the pass, which was true, and it was the bug: a zombie that leapt onto the
  * boat found the canal under it.
  *
- * [open] The engine keys its nearest-of-all pass on `trunc(distance * 10)`
+ * [diverges] The engine keys its nearest-of-all pass on `trunc(distance * 10)`
  * and radix-sorts **only the low sixteen bits**, so a hit beyond 6553.5 units
  * wraps and can win spuriously. This compares the distances directly; nothing
  * in the shipped data traces that far.
@@ -500,7 +500,7 @@ export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
  * normal; this takes the face case alone, which is exact for a sphere resting
  * on a face and an approximation near an edge. It is also the one case that
  * still gets no push at all: a centre behind a wall whose projection has left
- * the quad. `[open]`
+ * the quad.
  */
 export function ColiTestSphereAgainstFullSet(cx: number, cy: number,
                                              cz: number, r: number): boolean {
@@ -550,8 +550,8 @@ const _sph: SphereHit = { hit: false, distSq: Infinity, depth: 0,
 
 /**
  * `ColiSphereVsMesh` (`FUN_004AAFF0`) — one blob, the nearest face hit, kept
- * in `acc` when it beats what is there. The face case only; see the
- * `[diverges]` on {@link ColiTestSphereAgainstFullSet}.
+ * in `acc` when it beats what is there. The face case only -- the divergence
+ * declared on {@link ColiTestSphereAgainstFullSet}.
  */
 function ColiSphereVsBlob(b: ColiBlob, cx: number, cy: number, cz: number,
                           r: number, acc: SphereHit): void {

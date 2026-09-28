@@ -135,15 +135,16 @@ function playOnce(obj: ThrowerActor, motion: number): void {
  * — the body is thrown away from the viewer.
  *
  * This used to read the store as "pulled `t` units nearer" and approximate it
- * with a lerp from the actor toward the eye, under a `[diverges]` saying the
- * camera's matrix was out of reach. It is not: `GameHost.viewSpaceOf` is the
- * view-space point and `GameHost.viewPoint` is the inverse transform, and both
- * have been on the seam since `ThrowerPickLandingPoint` was ported. The lerp
- * was wrong twice over — the direction, and the shape. Moving along the
- * camera's z keeps the body's screen x and y, so it recedes; moving toward the
- * eye converges on a point, and `k = min(1, t / d)` pinned it *at* the eye for
- * anything inside about fifteen units. A thrower shot mid-pounce lands 15.5
- * units in front of the camera, so that was every close kill.
+ * with a lerp from the actor toward the eye, declared a divergence on the
+ * grounds that the camera's matrix was out of reach. It is not:
+ * `GameHost.viewSpaceOf` is the view-space point and `GameHost.viewPoint` is
+ * the inverse transform, and both have been on the seam since
+ * `ThrowerPickLandingPoint` was ported. The lerp was wrong twice over — the
+ * direction, and the shape. Moving along the camera's z keeps the body's screen
+ * x and y, so it recedes; moving toward the eye converges on a point, and
+ * `k = min(1, t / d)` pinned it *at* the eye for anything inside about fifteen
+ * units. A thrower shot mid-pounce lands 15.5 units in front of the camera, so
+ * that was every close kill.
  *
  * `GameHost.viewSpaceOf` hands the field over in the engine's own sign and
  * with no opinion about it, so this is `z - t` verbatim. It used to negate the

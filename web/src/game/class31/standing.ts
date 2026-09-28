@@ -219,13 +219,25 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
   if (obj.slideTimer < 1) obj.sub = 2;
 }
 
-/** Put one hand's weapon back and clear the arm it counted as destroyed. */
+/**
+ * Put one hand's weapon back and clear the arm it counted as destroyed.
+ *
+ * Both re-arm states also rewrite the bone record's hit sphere from the
+ * character's table, `g_character_part_tables` (`0x004D032C`) entry
+ * `bone - 1`: the radius at `+0x10` into `+0x78` and the centre at `+0x04`
+ * into `+0x7C` -- `ThrowerStateRearm` at `0x0044F831`/`0x0044F891` through
+ * type 0x16's own pointer, `ThrowerStateRestoreBothHands` at `0x0044F9F6` and
+ * `0x0044FA61` through `obj+0x1F4`'s. `[proved]` That is the radius
+ * `SpawnThrownWeapon` zeroed, **unscaled**, which is exactly the table value
+ * the port falls back to, so dropping the override is the write.
+ */
 function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
                             h: { bone: number; bare: number; armed: number;
                                  zone: DamageZone }): boolean {
   if (obj.boneSlot[String(h.bone)] !== h.bare) return false;
   host.setBoneSlot(obj.at, h.bone, h.armed);
   obj.boneSlot[String(h.bone)] = h.armed;
+  delete obj.boneRadius[String(h.bone)];
   obj.zones &= ~h.zone;
   return true;
 }

@@ -8,7 +8,8 @@ are enforced, and they are cheaply checkable because both sides are text:
      ghidra/annotations/functions.tsv, under the same name, and every `0x00…`
      address exists in globals.tsv under the name beside it;
   2. the coverage -- how much of the gameplay code has a port -- is a number;
-  3. every `[diverges]` tag is gathered into one list;
+  3. every `[diverges]` tag in a comment anywhere under `web/src/` is gathered
+     into one list, and each must carry its reason;
   4. the class modules line up with `SpawnClass` and with the class table in
      docs/formats/spawns.md;
   5. the three ways state can escape a save snapshot are grepped for:
@@ -26,6 +27,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "web" / "src"
 GAME = ROOT / "web" / "src" / "game"
 FUNCS = ROOT / "ghidra" / "annotations" / "functions.tsv"
 GLOBALS = ROOT / "ghidra" / "annotations" / "globals.tsv"
@@ -54,6 +56,11 @@ ANY_FUN = re.compile(r"`(FUN_[0-9A-Fa-f]{8})`")
 GLOBAL_DOC = re.compile(
     r"`(g_[A-Za-z0-9_]+)`\s*[-—]+\s*`?0x([0-9A-Fa-f]{6,8})`?")
 DIVERGES = re.compile(r"\[diverges\]")
+#: The two markers `docs/STATUS.md` counts. See :func:`marker_lines` for what
+#: counts as an occurrence, and `docs/PLAYER_ARCHITECTURE.md` for the rule
+#: that keeps each one a single declaration.
+DIVERGES_TAG = "[diverges]"
+OPEN_TAG = "[open]"
 
 failures: list[str] = []
 notes: list[str] = []
@@ -87,23 +94,190 @@ def cited_files() -> list[Path]:
     return game_files() + sorted(p for p in SCRIPT.rglob("*.ts"))
 
 
-def divergence_files() -> list[Path]:
-    """Everywhere a `[diverges]` counts, which is wider than `cited_files()`.
+def marker_files() -> list[Path]:
+    """Every source file under `web/src/`, in every layer -- where a
+    `[diverges]` or an `[open]` counts.
 
-    `render/` is added because that is where transcribed exe behaviour drifts
-    to when it will not fit the engine layer, and this project has already paid
-    for that once: the stage-1 vehicle's spin lived as long as it did precisely
-    because ported behaviour had moved into `render/` where no check reached
-    it. Fifteen tags across eight files under `render/` were declared and
-    counted by nothing, which is the same failure `check_divergences` was
-    widened to fix in the first place.
+    This was three directories wide for `[diverges]` (`game/`, `script/`,
+    `render/`, each added after tags in it had gone uncounted) and one for
+    `[open]` (`game/` alone), while both markers were already written in
+    `app/`, `ui/` and `hod2lib/` as well. A departure declared in the
+    composition root is a departure, and a question the exporter has not
+    answered is a question: the rule has to be the directory tree, not a list
+    of the directories somebody has noticed. `.tsx` is included for `ui/`.
 
-    Citations are deliberately **not** checked there. `render/` is a different
-    layer with different rules, and putting it under the one-function-one-name
-    rule would be a separate decision about what that rule is for. This says
-    only that a declared departure is a departure wherever it is written.
+    Citations are deliberately **not** checked this wide. `render/` and the
+    layers above it have different rules, and putting them under the
+    one-function-one-name rule would be a separate decision about what that
+    rule is for. This says only that a declared marker counts wherever it is
+    written.
     """
-    return cited_files() + sorted(p for p in RENDER.rglob("*.ts"))
+    return sorted(p for p in SRC.rglob("*")
+                  if p.suffix in (".ts", ".tsx") and p.is_file())
+
+
+def divergence_files() -> list[Path]:
+    """Everywhere a `[diverges]` counts: :func:`marker_files`."""
+    return marker_files()
+
+
+#: A `/` opens a regular expression, not a division, after one of these or
+#: after one of the keywords below -- the usual heuristic, and enough for a
+#: tree whose regex literals are all of that shape. :func:`check_marker_lexer`
+#: pins the cases that matter here.
+_REGEX_AFTER = set("(,=:[!&|?{};+-*%<>~^")
+_REGEX_AFTER_WORDS = {"return", "typeof", "case", "do", "else", "in", "of",
+                      "new", "delete", "void", "throw", "yield", "await",
+                      "instanceof"}
+
+
+def comment_spans(text: str) -> tuple[list[tuple[int, int]], bool]:
+    """The `(start, end)` of every comment in a TypeScript source, and whether
+    the scan ended back in code.
+
+    A small lexer rather than a line test, because the markers are words that
+    also occur in code: `ui/panels/Crumbs.tsx` has `}, [open]);` -- a React
+    dependency array on a variable called `open` -- and `hod2lib/rigs_data.ts`
+    has one inside a string the exporter writes into the bundle. Strings,
+    template literals (with `${}` nesting) and regex literals are stepped over
+    so that a `//` inside one is not taken for a comment. Quote strings and
+    regex literals end at the line's end whatever happens, so a stray
+    apostrophe in JSX text costs one line and not the rest of the file; a
+    template or block comment that never closes is what the second value
+    reports, and :func:`check_divergences` fails a file that leaves the lexer
+    lost.
+    """
+    spans: list[tuple[int, int]] = []
+    i, n = 0, len(text)
+    templates: list[int] = []   # brace depth at each open `${`
+    depth = 0
+    prev, word = "", ""         # last significant code character, identifier
+    while i < n:
+        c = text[i]
+        nx = text[i + 1] if i + 1 < n else ""
+        if c == "/" and nx == "/":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            spans.append((i, j))
+            i = j
+            continue
+        if c == "/" and nx == "*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            spans.append((i, j))
+            i = j
+            continue
+        if c in "'\"":
+            j = i + 1
+            while j < n and text[j] != c and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            i, prev, word = j + 1, c, ""
+            continue
+        if c == "`" or (c == "}" and templates and depth == templates[-1]):
+            if c == "}":
+                templates.pop()
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == "`":
+                    j += 1
+                    break
+                if text[j] == "$" and j + 1 < n and text[j + 1] == "{":
+                    templates.append(depth)
+                    j += 2
+                    break
+                j += 1
+            else:
+                j = n
+            i, prev, word = j, "`", ""
+            continue
+        if c == "/" and (prev == "" or prev in _REGEX_AFTER
+                         or word in _REGEX_AFTER_WORDS):
+            j, in_class = i + 1, False
+            while j < n and text[j] != "\n":
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == "[":
+                    in_class = True
+                elif text[j] == "]":
+                    in_class = False
+                elif text[j] == "/" and not in_class:
+                    break
+                j += 1
+            i, prev, word = j + 1, "/", ""
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        if c.isalnum() or c in "_$":
+            joined = i > 0 and (text[i - 1].isalnum() or text[i - 1] in "_$")
+            word = word + c if joined else c
+            prev = "a"
+        elif not c.isspace():
+            prev, word = c, ""
+        i += 1
+    return spans, not templates
+
+
+def marker_lines(text: str, token: str) -> tuple[list[int], bool]:
+    """The 1-based line of every `token` that sits **in a comment**, one entry
+    per occurrence; and whether the lexer ended back in code.
+
+    A marker is a claim written in prose next to the code it is about, so the
+    comment is what counts. Code is not a marker, and neither is a string --
+    `rigs_data.ts`'s note is bundle data, and its question is already asked
+    in `game/globals.ts`'s `g_app_state`.
+    """
+    spans, closed = comment_spans(text)
+    out: list[int] = []
+    for a, b in spans:
+        k = text.find(token, a, b)
+        while k >= 0:
+            out.append(text.count("\n", 0, k) + 1)
+            k = text.find(token, k + 1, b)
+    return out, closed
+
+
+def marker_counts(token: str) -> dict[str, int]:
+    """Occurrences of `token` in comments, by top-level directory of
+    `web/src/` -- the unit `verify_layers.LAYER_OF` assigns a layer to."""
+    out: dict[str, int] = {}
+    for path in marker_files():
+        top = path.relative_to(SRC).parts[0]
+        lines, _ = marker_lines(path.read_text(), token)
+        out[top] = out.get(top, 0) + len(lines)
+    return out
+
+
+#: The lexer's own fixture: every shape above that has a marker in it, with
+#: the lines that must count and the lines that must not.
+_LEXER_FIXTURE = """\
+const s = "a // not a comment [open]";  // [open] counts
+const r = /[open]\\//g; // [diverges] counts, with a reason of its own here
+const t = `${x /* [open] counts */} [open] template text does not`;
+}, [open]);
+/** [diverges] a
+ * [open] b */
+<p>don't [open]</p>
+const u = a / b; // [open] after a division counts
+"""
+
+
+def check_marker_lexer() -> None:
+    """Pin :func:`marker_lines` against :data:`_LEXER_FIXTURE`, so a change
+    to the lexer that starts counting code -- or stops counting a comment --
+    fails here rather than moving `STATUS.md`'s numbers in silence (`L41`)."""
+    want = {OPEN_TAG: [1, 3, 6, 8], DIVERGES_TAG: [2, 5]}
+    for token, lines in want.items():
+        got, closed = marker_lines(_LEXER_FIXTURE, token)
+        if got != lines or not closed:
+            failures.append(
+                f"marker lexer: {token} found on lines {got} of the fixture, "
+                f"expected {lines} (closed: {closed})")
 
 
 def check_names(named: dict[str, str]) -> dict[str, tuple[str, str]]:
@@ -342,14 +516,26 @@ def check_divergences() -> None:
     reason one layer over: fifteen tags across eight files under ``render/``
     were declared and counted by nothing. ``render/`` is exactly where ported
     behaviour goes when it will not fit the engine layer, so it is the *last*
-    place a departure should be invisible.
+    place a departure should be invisible. And again to the whole of
+    ``web/src/`` (:func:`marker_files`), when ``app/main.ts`` turned out to
+    hold one more.
+
+    An occurrence is one in a **comment** (:func:`marker_lines`), one per
+    occurrence rather than one per line, which is also what ``STATUS.md``
+    counts -- the two numbers used to be a line count here and a token count
+    there, equal only while no line held two.
     """
     found: list[str] = []
     for path in divergence_files():
-        lines = path.read_text().splitlines()
-        for n, line in enumerate(lines, 1):
-            if not DIVERGES.search(line):
-                continue
+        text = path.read_text()
+        lines = text.splitlines()
+        tagged, closed = marker_lines(text, DIVERGES_TAG)
+        if not closed:
+            failures.append(
+                f"{path.relative_to(ROOT)}: the marker lexer ended inside a "
+                f"template literal or comment -- fix `comment_spans` before "
+                f"believing any count from this file")
+        for n in tagged:
             where = f"{path.relative_to(ROOT)}:{n}"
             found.append(where)
             # A tag with no prose around it is a confession with no content:
@@ -852,6 +1038,7 @@ def main() -> int:
     check_globals(annotations(GLOBALS))
     check_coverage(named, ported)
     check_uncited_exports()
+    check_marker_lexer()
     check_divergences()
     check_classes()
     check_snapshot_rules()

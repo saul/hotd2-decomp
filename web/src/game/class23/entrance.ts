@@ -53,7 +53,8 @@ const SND_AXE: Readonly<Record<number, number>> = {
 /** Stage 5's hold: the groan on counter 700, the idle on the back-off's cursor `0x75`. */
 const STAGE5_GROAN_FRAME = 700;
 const STAGE5_BACK_OFF_END = 0x75;
-/** `pos.x - 50.0` (`0x0055D2AC`) — `+0x13C0` when the fight starts. `[open]` who reads it. */
+/** `pos.x - 50.0` (`0x0055D2AC`) — `+0x13C0` when the fight starts. Who
+ *  reads it is the open question on `JudgmentCompanionTail.point`. */
 const POINT_X_OFFSET = 50.0;
 /** The flier's relative state the walker waits for: phase 1. */
 const FLIER_PHASE1 = 1;

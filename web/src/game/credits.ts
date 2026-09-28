@@ -6,11 +6,11 @@
  * one for Training and Boss -- and every start and every continue takes one.
  * The first start is one of them, so an Arcade game has five continues.
  *
- * `SetBothPlayerCounters`'s annotation had what it counts as `[open]`; the
- * spends settle it. `CreditTrySpend` is the only caller of the two spend
- * routines, `PlayerTryStartPress` is the only caller of that, and it passes
- * "is this player in the continue state" as the kind -- so the count is of
- * starts and continues. `[proved]`
+ * `SetBothPlayerCounters`'s annotation had what it counts as an open question;
+ * the spends settle it. `CreditTrySpend` is the only caller of the two spend
+ * routines, `PlayerTryStartPress` is the only caller of that, and it passes "is
+ * this player in the continue state" as the kind -- so the count is of starts
+ * and continues. `[proved]`
  */
 import { AppState, G } from "./globals";
 import { GameMode } from "./game_mode";

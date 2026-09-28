@@ -196,8 +196,9 @@ export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
     return done();
   }
   // The four destroyed-part arms would go here -- `obj+0x1368` bits 0x8,
-  // 0x10, 0x40 and 0x80 giving clips 0x1AC, 0x1A5, 0x279 and 0x229. See the
-  // `[diverges]` above: no ported routine raises any of them.
+  // 0x10, 0x40 and 0x80 giving clips 0x1AC, 0x1A5, 0x279 and 0x229. This
+  // routine's declared divergence, above, says why: no ported routine raises
+  // any of them.
 
   if (obj.charType === CHAR_KEEPS_CLIP) {
     if (obj.flags2 & ZombieFlag2.DeathMotionVariant) return done();

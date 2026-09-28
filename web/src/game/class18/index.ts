@@ -77,10 +77,10 @@ const CARRIED_ZOMBIE_STEP_OFF_SUB = 2;
 /**
  * `CarriedZombieInit18` — `FUN_0045CD60`.
  *
- * `[diverges]` The engine stores the carrier *pointer* in `obj+0x13B0`; the
- * port stores its spawn address, because a pointer cannot go in a snapshot and
- * an address is what every other cross-actor reference in the port already
- * uses.
+ * The engine stores the carrier *pointer* in `obj+0x13B0`; the port stores
+ * its spawn address, because a pointer cannot go in a snapshot and an address
+ * is what every other cross-actor reference in the port already uses. That is
+ * a departure in representation, declared once on {@link Actor.carrierAt}.
  */
 export function CarriedZombieInit18(obj: Actor, rng?: Rng,
                                     events?: Events): void {

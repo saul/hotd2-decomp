@@ -22,14 +22,14 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `game/` | 100855 | 330 | engine |
 | `hod2lib/` | 18831 | 35 | engine |
 | `render/` | 14822 | 54 | render |
-| `app/` | 8463 | 29 | app |
+| `app/` | 8467 | 29 | app |
 | `script/` | 4410 | 25 | engine |
 | `ui/` | 3161 | 24 | ui |
 | `bundle/` | 2680 | 11 | engine |
 | `core/` | 978 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **155598** | **520** | |
+| **total** | **155602** | **520** | |
 
 The largest files, which is where the pressure to split next is:
 

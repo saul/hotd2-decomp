@@ -17,8 +17,11 @@
  *   costliest systems named), the matrix walk, `renderer.render` -- which is
  *   WebGL submission, CPU side -- and the UI publish.
  * * `gpu≈` is a wait for the GPU to finish a frame, sampled now and then by
- *   reading one pixel back after the render. It stalls the frame it samples,
- *   which is why it is sampled and why that frame's busy time leaves it out.
+ *   reading one pixel back after the render -- **only with `?gpu=1`**. It
+ *   stalls the frame it samples, and on an iPhone the first readings showed
+ *   a frame four times a second arriving 80 ms late on a page drawing
+ *   nothing, at about the rate the sample ran: a probe that may be making the
+ *   stutter it measures does not run by default.
  * * **Low fps with both small** is neither: the browser's compositor, CSS
  *   effects over the canvas, or the display's own cap (Low Power Mode holds
  *   iOS at 30).
@@ -26,7 +29,7 @@
  * The A/B switches are URL parameters, so a phone can try one without a
  * rebuild: `?perf=1` turns the meter on, `aa=0` drops MSAA, `shadows=0` the
  * gun lights' shadow maps, `blur=0` every `backdrop-filter` over the game,
- * `gpu=0` the GPU sample. They are experiments, not settings: nothing saves
+ * `gpu=1` turns the GPU sample on. They are experiments, not settings: nothing saves
  * them, and the meter says which are on.
  */
 import type { Phase, SystemProbe } from "../core/world";
@@ -60,13 +63,14 @@ export function readExperiments(search: string): Experiments {
   return {
     perf: q.get("perf") === "1",
     aa: !off("aa"), shadows: !off("shadows"), blur: !off("blur"),
-    gpu: !off("gpu"),
+    gpu: q.get("gpu") === "1",
   };
 }
 
 function describeExperiments(e: Experiments): string {
-  return (["aa", "shadows", "blur", "gpu"] as const)
-    .filter((k) => !e[k]).map((k) => `${k}=0`).join(" ");
+  return [...(["aa", "shadows", "blur"] as const)
+    .filter((k) => !e[k]).map((k) => `${k}=0`), ...(e.gpu ? ["gpu=1"] : [])]
+    .join(" ");
 }
 
 const round = (ms: number) => Math.round(ms * 10) / 10;

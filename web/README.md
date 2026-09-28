@@ -128,7 +128,7 @@ debug overlay is on until you turn it on. Everything else is in two places:
 **The Perf meter** (Scene panel, `O`, or `?perf=1` in the address) shows the
 frame rate and where each frame's time goes -- script, game systems, render
 systems, the matrix walk, WebGL submission, the UI publish, the costliest
-systems by name -- and a sampled wait for the GPU. On a phone it sits in the
+systems by name -- and, with `gpu=1`, a sampled wait for the GPU. On a phone it sits in the
 bar beside the 4:3 frame. Under the dev server the page also posts each
 reading, every two seconds, to `extract/perf.jsonl` (`HOTD2_PERF_LOG`
 overrides), so a phone on the LAN can be diagnosed from the desk. `aa=0`,

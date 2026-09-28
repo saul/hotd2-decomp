@@ -125,6 +125,17 @@ debug overlay is on until you turn it on. Everything else is in two places:
   texture filtering are in Scene), the script (click an instruction to seek to
   it, which pauses there) and the event feed.
 
+**The Perf meter** (Scene panel, `O`, or `?perf=1` in the address) shows the
+frame rate and where each frame's time goes -- script, game systems, render
+systems, the matrix walk, WebGL submission, the UI publish, the costliest
+systems by name -- and a sampled wait for the GPU. On a phone it sits in the
+bar beside the 4:3 frame. Under the dev server the page also posts each
+reading, every two seconds, to `extract/perf.jsonl` (`HOTD2_PERF_LOG`
+overrides), so a phone on the LAN can be diagnosed from the desk. `aa=0`,
+`shadows=0` and `blur=0` in the address are A/B switches for antialiasing,
+the gun lights' shadow maps and the backdrop blur over the game; see
+`src/app/perf.ts`.
+
 The sidebar, its tab and its folds, the stage and address, and whether the
 game was running all survive a reload -- so a Vite reload after an edit comes
 back to the game where it was.

@@ -54,6 +54,7 @@ import { DebugSidebar } from "../src/ui/panels/DebugSidebar";
 import { Feed } from "../src/ui/panels/Feed";
 import { PauseScreen, SoundButton } from "../src/ui/panels/Overlays";
 import { SkipBar } from "../src/ui/panels/SkipBar";
+import { PerfHud } from "../src/ui/panels/PerfHud";
 import { Tree } from "../src/ui/panels/Tree";
 import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
@@ -128,6 +129,7 @@ function projection(): UiProjection {
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
     continueOffer: null,
+    perf: null,
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
     gameOver: { phase: 3, label: "GAME OVER" },
@@ -386,6 +388,35 @@ console.log("\nThe corner button:\n");
   } catch { /* the check below fails on an empty source */ }
   check("both labels dispatch pressStart, and nothing else",
         /kind: "pressStart"/.test(src) && !/requestSkip/.test(src));
+}
+
+// The perf meter is read off a phone, over the game, and is the evidence a
+// slow frame is diagnosed from -- so it has to render what it is given, and
+// nothing when it is off.
+console.log("\nThe perf meter:\n");
+{
+  const off = renderIn(projection(), createElement(PerfHud));
+  check("off, there is no readout", off === "", off);
+  const on = renderIn({ ...projection(), perf: {
+    fps: 42, frame: [16.7, 33.4, 81], long: 3, busy: [4.2, 9.9], ticks: 1.4,
+    sections: [["script", 0.2, 1], ["game", 1.9, 4], ["render", 0.9, 2],
+               ["hud", 0, 0], ["matrices", 0.3, 1], ["draw", 0.8, 2],
+               ["publish", 0.1, 1], ["other", 0.05, 0.2]],
+    systems: [["render.characters", 0.8], ["game.world", 0.4]],
+    gpu: 6.3, gl: [164, 2718, 29, 290, 999], view: "520×390 @1× · dpr 3",
+    experiments: "blur=0" } }, createElement(PerfHud));
+  check("on, it says the frame rate and the frame times",
+        on.includes('id="perf-hud"') && /<b>42<\/b> fps · 16.7\/33.4\/81 ms/.test(on)
+        && on.includes("3 long"), on);
+  check("...where the time went, leaving out what cost nothing",
+        on.includes("game</span> 1.9") && !/>hud<\/span>/.test(on)
+        && on.includes("characters 0.8"), on);
+  check("...the GPU sample, the GL counts, the canvas and the A/B switches",
+        on.includes("gpu≈ 6.3") && on.includes("164 calls")
+        && on.includes("520×390 @1× · dpr 3 · blur=0"), on);
+  check("the meter is an overlay with a key, in the Scene panel",
+        TOGGLES.some((t) => t.name === "perf" && t.kind === "debug"
+                            && t.group === "scene" && !t.on && !!t.key));
 }
 
 console.log("\nThe debug sidebar:\n");

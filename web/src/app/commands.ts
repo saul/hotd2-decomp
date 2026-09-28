@@ -122,6 +122,8 @@ export interface PlayerCommands {
   setPillarbox(on: boolean): void;
   /** The Resolution select, as the viewer's choice. */
   setPixelRatio(ratio: number): void;
+  /** The Perf meter switch. See `app/perf.ts`. */
+  setPerf(on: boolean): void;
   requestSkip(): void;
   /** Player 1's START, both of its readers. See the `pressStart` command. */
   pressStart(): void;
@@ -311,6 +313,7 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     // Both of these are about what is *drawn*, not about what the game does:
     // the port spawns the same records and marks the same materials either
     // way, so neither changes a snapshot.
+    case "perf":         p.setPerf(on); return;
     case "muzzle":       p.effects.setMuzzle(on); return;
     case "redBlood":     p.bloodColour.setColour(on ? "red" : "green"); return;
     // A debug aid, not a view: it changes when the script moves on. The walker

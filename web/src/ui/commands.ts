@@ -16,7 +16,7 @@ export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
   | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
   | "breakables" | "propBoxes"
-  | "muzzle" | "redBlood" | "branchPause";
+  | "muzzle" | "redBlood" | "branchPause" | "perf";
 
 export type UiCommand =
   | { kind: "toggle"; name: ToggleName; on: boolean }

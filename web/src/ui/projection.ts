@@ -85,6 +85,38 @@ export interface SkipProjection {
 }
 
 /**
+ * The perf meter's readout: what a frame costs, measured where it runs.
+ *
+ * Null unless the Perf meter overlay is on. Rebuilt twice a second rather
+ * than every frame, so showing it does not cost a render a frame of its own.
+ * `app/perf.ts` measures; this is only the numbers.
+ */
+export interface PerfProjection {
+  /** Frames drawn per second, while the loop is awake. */
+  fps: number;
+  /** Frame-to-frame interval in ms: median, 95th percentile, worst. */
+  frame: readonly [number, number, number];
+  /** Frames in the window that came more than 25 ms after the last. */
+  long: number;
+  /** The page's own work per frame, ms: mean and worst. */
+  busy: readonly [number, number];
+  /** Game ticks per drawn frame, mean. */
+  ticks: number;
+  /** Where the work goes: [section, mean ms, worst ms], in loop order. */
+  sections: readonly (readonly [string, number, number])[];
+  /** The costliest systems: [id, mean ms per frame], worst first. */
+  systems: readonly (readonly [string, number])[];
+  /** Sampled wait for the GPU to finish a frame, ms; null before a sample. */
+  gpu: number | null;
+  /** Draw calls, triangles, shader programs, textures, geometries. */
+  gl: readonly [number, number, number, number, number];
+  /** The canvas: "520×390 @1× · dpr 3". */
+  view: string;
+  /** The URL's A/B switches that are on, "" if none. See `app/perf.ts`. */
+  experiments: string;
+}
+
+/**
  * The continue offer: player 1 is on the CONTINUE? countdown and START would
  * be heard. The corner button becomes **Continue** for it, because it is the
  * one START a phone has -- the skip's button and the continue's are the same
@@ -387,6 +419,8 @@ export interface UiProjection {
   groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   skip: SkipProjection | null;
   continueOffer: ContinueProjection | null;
+  /** See {@link PerfProjection}. */
+  perf: PerfProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
 }

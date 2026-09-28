@@ -1,11 +1,13 @@
 import { defineConfig } from "vite";
 import {
+  appendFileSync,
   createReadStream,
+  mkdirSync,
   readFileSync,
   readdirSync,
   statSync,
 } from "node:fs";
-import { extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 
 /**
  * The bundle is game-derived data and must never be committed or copied into
@@ -20,6 +22,10 @@ import { extname, join, normalize, resolve } from "node:path";
  * same variable `tools/lib/bundle_root.ts` reads, on purpose: the dev server
  * and the headless tests disagreeing about where the bundle is was F10.
  */
+/** Where the perf meter's readouts go. See `/__perf` below. */
+const PERF_LOG = process.env.HOTD2_PERF_LOG
+  ?? resolve(__dirname, "..", "extract", "perf.jsonl");
+
 const BUNDLE_DIR = process.env.HOTD2_BUNDLE
   ?? resolve(__dirname, "..", "extract", "player");
 
@@ -85,6 +91,31 @@ function serveBundle() {
     configureServer(server: import("vite").ViteDevServer) {
       server.middlewares.use((req, res, next) => {
         const url = (req.url ?? "").split("?")[0];
+
+        // The perf meter's readouts, from whichever device is playing --
+        // a phone on the LAN is the case it exists for (`app/perf.ts`). One
+        // JSON line each, to a file under `extract/`, which is gitignored.
+        if (url === "/__perf" && req.method === "POST") {
+          let body = "";
+          req.setEncoding("utf8");
+          req.on("data", (c: string) => {
+            if (body.length < 65536) body += c;
+          });
+          req.on("end", () => {
+            try {
+              const line = JSON.stringify({
+                ...JSON.parse(body), from: req.socket.remoteAddress,
+              });
+              mkdirSync(dirname(PERF_LOG), { recursive: true });
+              appendFileSync(PERF_LOG, line + "\n");
+              res.statusCode = 204;
+            } catch {
+              res.statusCode = 400;
+            }
+            res.end();
+          });
+          return;
+        }
 
         const sound = url.startsWith("/bgm/") ? (["bgm", "bgm"] as const)
           : url.startsWith("/se/") ? (["se", "SE"] as const)

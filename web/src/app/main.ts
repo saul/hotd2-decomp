@@ -71,6 +71,7 @@ import { TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 import { feedRow } from "./projection/script";
 import type {
   BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
+  PerfProjection,
   SkipProjection, SoundProjection, StatusProjection, TransportProjection,
   TreeProjection,
 } from "../ui/projection";
@@ -110,6 +111,7 @@ import { DebugBoxLayer } from "../render/debug";
 import { Hud as HudLayer } from "../hud/hud";
 import { Rain } from "../render/rain";
 import { updateVisibleMatrixWorld } from "../render/visible_world";
+import { PerfMeter, readExperiments } from "./perf";
 import { RainSystem } from "../game/effects/rain";
 import { BreakableLayer } from "../render/breakables";
 import { PropShatterLayer } from "../render/prop_shatter";
@@ -430,6 +432,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   pixelRatio = touchFirst() ? 1 : Math.min(devicePixelRatio, 2);
   /**
+   * What a frame costs, measured where it runs -- the Perf meter overlay, and
+   * the URL's A/B switches, which the renderer reads as it is built. See
+   * `app/perf.ts`.
+   */
+  readonly perfMeter = new PerfMeter(readExperiments(location.search));
+  /**
    * What the Resolution select offers: the steps up to the screen's own
    * ratio, and 1 always. Built once, so the projection hands the UI the same
    * array every frame.
@@ -520,7 +528,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.hudLayer = new HudLayer(host.hud);
     this.renderer = new WebGLRenderer({
       canvas: this.canvas,
-      antialias: true,
+      // `?aa=0` is one of the perf meter's A/B switches: `app/perf.ts`.
+      antialias: this.perfMeter.experiments.aa,
       powerPreference: "high-performance",
     });
     this.renderer.setPixelRatio(this.pixelRatio);
@@ -528,8 +537,14 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // the page and free until one is live: three.js renders a shadow pass
     // only for a visible light with `castShadow`, and those two lights are
     // the only ones that have it.
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = this.perfMeter.experiments.shadows;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
+    // `?blur=0`: every `backdrop-filter` over the game, off. The one A/B
+    // switch that is a stylesheet's -- see `.no-blur` in `style.css`.
+    if (!this.perfMeter.experiments.blur) {
+      document.documentElement.classList.add("no-blur");
+    }
+    this.perfMeter.onSnapshot = (r) => this.reportPerf(r);
     this.scene.background = new Color(0x05070a);
     // World matrices are brought up to date for the visible branches only,
     // just before each render. See `render/visible_world.ts`.
@@ -794,6 +809,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get sound(): SoundProjection { return soundProjection(this); }
   get skip(): SkipProjection | null { return skipProjection(this); }
   get continueOffer(): ContinueProjection | null { return continueProjection(); }
+  get perf(): PerfProjection | null {
+    return this.perfMeter.enabled ? this.perfMeter.snapshot : null;
+  }
   get branch(): BranchProjection | null { return branchProjection(this); }
   get transport(): TransportProjection { return transportProjection(this); }
 
@@ -1257,6 +1275,11 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // silence would be read as one who never chose, and Start would give
     // them sound.
     this.mutePref = prefs.muted;
+    // `?perf=1` turns the meter on through the same command the switch
+    // sends, so the switch shows it and the choice is kept like any other.
+    if (this.perfMeter.experiments.perf && !this.toggles.perf) {
+      this.runCommand({ kind: "toggle", name: "perf", on: true });
+    }
   }
 
   /**
@@ -1652,6 +1675,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   // back here.
   beginFrame(_wall: number): void {
     this.lifeFrame += 1;
+    if (this.perfMeter.enabled) this.perfMeter.beginFrame();
   }
 
   /**
@@ -1898,6 +1922,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
   /** Draw, then publish. Every frame, whether or not it owed a tick. */
   endFrame(): void {
+    if (this.perfMeter.enabled) return this.endFrameMeasured();
     this.drawOrder.beginFrame();
     updateVisibleMatrixWorld(this.scene);
     this.renderer.render(this.scene, this.camera);
@@ -1907,6 +1932,80 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // panel are live while the clock is stopped, and the loading overlay is
     // live before there is a stage to tick.
     this.publishUi();
+  }
+
+  /**
+   * {@link endFrame}, timed section by section for the perf meter, and now
+   * and then waiting for the GPU to finish the frame. Kept apart so the
+   * ordinary frame carries no clock reads at all.
+   */
+  private endFrameMeasured(): void {
+    const m = this.perfMeter;
+    let t = performance.now();
+    this.drawOrder.beginFrame();
+    updateVisibleMatrixWorld(this.scene);
+    let n = performance.now();
+    m.add("matrices", n - t);
+    t = n;
+    this.renderer.render(this.scene, this.camera);
+    n = performance.now();
+    m.add("draw", n - t);
+    t = n;
+    if (m.wantsGpuSample()) {
+      // One pixel back: the call cannot return before the GPU has finished
+      // everything this frame asked of it.
+      const gl = this.renderer.getContext();
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.gpuProbePixel);
+      n = performance.now();
+      m.gpu(n - t);
+      t = n;
+    }
+    this.keepThumb();
+    this.publishUi();
+    m.add("publish", performance.now() - t);
+    m.endFrame(() => {
+      const i = this.renderer.info;
+      return [i.render.calls, i.render.triangles, i.programs?.length ?? 0,
+              i.memory.textures, i.memory.geometries];
+    }, () => {
+      const c = this.canvas;
+      return `${c.width}×${c.height} @${this.pixelRatio}× · dpr `
+        + `${Math.round(devicePixelRatio * 100) / 100}`;
+    });
+  }
+
+  private readonly gpuProbePixel = new Uint8Array(4);
+
+  /**
+   * The perf meter on or off: the switch's one path. It installs itself as
+   * the world's system probe, so the per-system times exist only while it
+   * is on.
+   */
+  setPerf(on: boolean): void {
+    this.perfMeter.setEnabled(on);
+    this.world.probe = on ? this.perfMeter : null;
+    this.wake();
+  }
+
+  /** How many readouts since the last one was sent. See {@link reportPerf}. */
+  private perfSent = 0;
+
+  /**
+   * Send the meter's readout to the dev server, every fourth one -- two
+   * seconds -- so a phone's numbers can be read where the code is:
+   * `vite.config.ts` appends them to `extract/perf.jsonl`. Dev builds only; a
+   * hosted copy has nowhere to send them and does not try.
+   */
+  private reportPerf(r: PerfProjection): void {
+    if (!import.meta.env.DEV || ++this.perfSent % 4 !== 0) return;
+    const body = JSON.stringify({
+      ...r, at: new Date().toISOString(), ua: navigator.userAgent,
+      stage: this.state.stage, original: !!this.state.original,
+      boxed: this.pillarbox, ratio: this.pixelRatio,
+      playing: this.playing, mode: this.state.mode,
+    });
+    fetch("/__perf", { method: "POST", body, keepalive: true })
+      .catch(() => { /* no dev server behind this page: nothing to tell */ });
   }
 
   /**
@@ -2027,6 +2126,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   stepOneFrame(): boolean {
     const w = this.walker;
     if (!w || this.state.freeze) return false;
+    if (this.perfMeter.enabled) this.perfMeter.tick();
     if (this.playing && this.state.mode !== "free") {
       if (w.branch) {
         // On the script's clock rather than the wall's. The countdown is what
@@ -2037,7 +2137,13 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       } else if (!w.finished && G.g_app_state === AppState.InPlay) {
         // `AppStateDispatch` runs the scene -- and the script -- only in app
         // state 6; the game-over screen stops it where it stood.
-        w.tick(TICK);
+        if (this.perfMeter.enabled) {
+          const t0 = performance.now();
+          w.tick(TICK);
+          this.perfMeter.add("script", performance.now() - t0);
+        } else {
+          w.tick(TICK);
+        }
         this.syncUrlToWalker();
       }
     }

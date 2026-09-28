@@ -16,6 +16,7 @@ import type { ToggleName } from "../../ui/commands";
 import type { UiSlice } from "../../ui/store";
 import type {
   BranchProjection, ContinueProjection, FeedRow, LoadingProjection,
+  PerfProjection,
   SkipProjection, SoundProjection, StatusProjection, StripRow, TransportProjection,
   TreeProjection, UiProjection,
 } from "../../ui/projection";
@@ -78,6 +79,7 @@ export interface PlayerView {
   readonly sound: SoundProjection;
   readonly skip: SkipProjection | null;
   readonly continueOffer: ContinueProjection | null;
+  readonly perf: PerfProjection | null;
   readonly branch: BranchProjection | null;
   readonly transport: TransportProjection;
 }
@@ -133,6 +135,7 @@ export function buildProjection(v: PlayerView,
     groups: v.groups,
     skip: v.skip,
     continueOffer: v.continueOffer,
+    perf: v.perf,
     branch: v.branch,
     gameOver: gameOverProjection(),
   });

@@ -52,6 +52,7 @@ import { Crumbs } from "./panels/Crumbs";
 import { DebugSidebar } from "./panels/DebugSidebar";
 import { PauseScreen, RotateHint, SoundButton } from "./panels/Overlays";
 import { SkipBar } from "./panels/SkipBar";
+import { PerfHud } from "./panels/PerfHud";
 import { GameOver } from "./panels/GameOver";
 import { BranchBar } from "./panels/BranchBar";
 import { LoadingOverlay, Viewport } from "./panels/Viewport";
@@ -290,6 +291,7 @@ function Page(
                 <BranchBar />
                 <GameOver />
               </>}
+              {ready && <PerfHud />}
               <RotateHint />
               <div id="toast" role="status" aria-live="polite"
                    className={toast ? "shown" : undefined}>{toast}</div>

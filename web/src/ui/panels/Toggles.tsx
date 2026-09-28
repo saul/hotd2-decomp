@@ -78,6 +78,8 @@ export interface ToggleSpec {
 export const TOGGLES: readonly ToggleSpec[] = [
   { name: "allRegions", kind: "debug", label: "All regions", on: false, group: "scene", key: "KeyG",
     title: "Draw every region at once. Consecutive regions overlap heavily, so this is how the interpenetration becomes legible as a deliberate mechanism rather than an export bug." },
+  { name: "perf", kind: "debug", label: "Perf meter", on: false, group: "scene", key: "KeyO",
+    title: "Frame rate and where each frame's time goes, over the game: the script, the game systems, the render systems and the HUD (the costliest systems named), the matrix walk, the WebGL submission, the UI publish -- and a sampled wait for the GPU. Low fps with little of either is the browser's compositor, not the page. `?perf=1` in the address turns it on; `aa=0`, `shadows=0`, `blur=0` are A/B switches. A dev server writes what it measures to extract/perf.jsonl." },
   { name: "rails", kind: "debug", label: "Rails", on: false, group: "camera", key: "KeyV",
     title: "Camera eye rails, one polyline per cam/ path." },
   { name: "aimRails", kind: "debug", label: "Look-at", on: false, group: "camera", key: "KeyL",

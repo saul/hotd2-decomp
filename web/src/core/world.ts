@@ -20,6 +20,20 @@ export type Phase = "script" | "game" | "render" | "hud";
 const ORDER: Phase[] = ["script", "game", "render", "hud"];
 
 /**
+ * Timing each system's update, from outside.
+ *
+ * The engine reads no clock (`tools/verify_layers.py`: a clock cannot be
+ * replayed from a snapshot), so the clock is the caller's: `app/perf.ts`
+ * installs one of these while the perf meter is on, and the world only hands
+ * it each system as it runs. Nothing the systems do depends on it, and with
+ * none installed the loop is the plain one.
+ */
+export interface SystemProbe {
+  now(): number;
+  took(id: string, phase: Phase, ms: number): void;
+}
+
+/**
  * `C` is the context this world's systems are handed. `app/` builds one
  * concrete object and names its widest type here; an engine system that only
  * declares `Context` is still accepted, because a function that takes the
@@ -47,8 +61,23 @@ export class World<C extends Context = Context> {
     for (const s of this.systems()) s.detach?.(ctx);
   }
 
+  /** See {@link SystemProbe}. Null unless something is measuring. */
+  probe: SystemProbe | null = null;
+
   update(ctx: C, t: Tick): void {
-    for (const s of this.systems()) s.update?.(ctx, t);
+    const probe = this.probe;
+    if (!probe) {
+      for (const s of this.systems()) s.update?.(ctx, t);
+      return;
+    }
+    for (const p of ORDER) {
+      for (const s of this.byPhase.get(p)!) {
+        if (!s.update) continue;
+        const t0 = probe.now();
+        s.update(ctx, t);
+        probe.took(s.id, p, probe.now() - t0);
+      }
+    }
   }
 
   /**

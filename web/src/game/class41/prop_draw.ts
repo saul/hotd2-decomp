@@ -88,6 +88,20 @@ export function PropDrawSlot(p: BreakableProp, m: Mat, slot: number,
 }
 
 /**
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the same draw through the
+ * forced alpha blend at `alpha`, which it hands on untested — so a draw at
+ * 1.0 is still the blended one.
+ *
+ * `[port-only]` as a function: it records the call rather than making it.
+ */
+export function PropDrawSlotWithAlpha(p: BreakableProp, m: Mat, slot: number,
+                                      alpha: number): void {
+  PropDrawSlot(p, m, slot);
+  const last = p.draws?.[p.draws.length - 1];
+  if (last && last.slot === ((slot << 16) >> 16)) last.alpha = alpha;
+}
+
+/**
  * The layer every task draws in unless it says otherwise: the routines that
  * change it put it back with `SetDrawLayerNibble(8)` straight after their
  * draw.

@@ -167,11 +167,30 @@ export enum PropFamily {
    * Its own family and not {@link Generic} for the reason
    * {@link DrawOnlyType53} is, and one more: its routine has **no**
    * `PropExpireByStepLifetime` and no `RegisterForShotTest` — it is a draw, a
-   * step and an `ActorKill` — and it draws *before* it steps, so it is
-   * stepped at the head of the frame rather than in the pool's walk. See
-   * `class41/draw_only.ts`.
+   * step and an `ActorKill`. See `class41/draw_only.ts`.
    */
   DrawOnlyType33 = 20,
+  /**
+   * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
+   * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
+   * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
+   *
+   * These three are numbered 100 past the type whose arm or routine makes
+   * them, so that no family numbered for a type can land on one.
+   */
+  OriginalItemDrop = 107,
+  /**
+   * `Type8MountedPartUpdate` (`FUN_00467290`) — one of the three 0x1C0
+   * objects `PlaceGenericProp` case 8 allocates, drawn on its parent's stored
+   * matrix. See `class41/type08.ts`.
+   */
+  Type8Piece = 108,
+  /**
+   * `Type67MountedPartUpdate` (`FUN_004702E0`) — one of the three objects
+   * `PlaceGenericProp` case 0x43 allocates beside a type-67 prop, drawn the
+   * same way. See `class41/type67.ts`.
+   */
+  Type67Piece = 167,
 }
 
 /**
@@ -221,6 +240,23 @@ export interface PropDrawCall {
    * whatever its depth. Absent means 8.
    */
   layer?: number;
+  /**
+   * The alpha of an `AssetDrawSlotWithAlpha` (`FUN_004185A0`) call — the
+   * forced-blend draw, at any value, 1 included — or absent for a plain
+   * `AssetDrawSlot`. `render/draw_order.ts`'s `setAssetDrawAlpha` is what
+   * the renderer hands it to.
+   */
+  alpha?: number;
+}
+
+/**
+ * `[port-only]` The draws of a prop that died on the frame it made them. See
+ * `g_prop_final_draws` in `game/globals.ts`.
+ */
+export interface PropFinalDraw {
+  /** The prop's id, which the renderer keys its nodes on. */
+  id: number;
+  draws: PropDrawCall[];
 }
 
 /**
@@ -541,11 +577,13 @@ export interface BreakableProp {
    * `obj+0x40`/`+0x44`/`+0x48` — the object's world position as the shared
    * actor fields hold it.
    *
-   * `ActorAlloc` zeroes the object from `+0x34` up and **nothing in class
-   * 0x41 ever writes these**: a prop keeps its position at `+0x19C` instead.
-   * The one routine that reads them is the fall's land-on-another-prop test,
-   * which therefore compares zero against zero for every pair. Kept so that
-   * test can be transcribed as it is written rather than quietly dropped.
+   * `ActorAlloc` zeroes the object from `+0x34` up and most of class 0x41
+   * never writes these: a prop keeps its position at `+0x19C` instead. For
+   * those the fall's land-on-another-prop test compares zero against zero for
+   * every pair, and the field is kept so that test can be transcribed as it
+   * is written. **Some generic arms do write them** — types 19 and 56 copy the
+   * placer's position here and draw from it, and the mounted parts of types 8
+   * and 67 keep their world point here — so check the type.
    */
   hitPos: { x: number; y: number; z: number };   // +0x40
   /**
@@ -640,15 +678,13 @@ export interface BreakableProp {
    * The **branch latch** — the field that stops a trigger opening its route
    * twice.
    *
-   * One port field for four engine offsets, and they really are four:
-   * `obj+0x34` bit `0x40000000` for types 14, 19, 25 and 76, `obj+0x192` for
-   * types 56 and 73 and the story switch, `obj+0x1B9` for type 40, and
-   * `obj+0x1B0` of a chain's **segment 0** for the chain. They are one field
-   * here because the port transcribes only the branch arm of those routines,
-   * so nothing else reads any of them — and a `+0x192` shared with
-   * {@link BreakableState} would have the latch and the fall state disagree
-   * about what 1 means. Where a routine's other arms are ported later, this
-   * splits.
+   * One port field for the engine offsets of the routines ported only as far
+   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76,
+   * `obj+0x192` for the story switch, `obj+0x1B0` of a chain's **segment 0**
+   * for the chain — and `obj+0x1B9` for type 40. Types 14, 19, 25, 56, 69
+   * and 73 used to be here too; they are transcribed whole now and keep
+   * their latch in the word their routine does. Where the rest are ported,
+   * this splits the same way.
    */
   branchLatched: boolean;
   /**

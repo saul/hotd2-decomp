@@ -21,19 +21,19 @@ import { RisingDoorUpdate } from "../class44/rising_door";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, OriginalItemPropUpdate, StoryModeSwitchUpdate,
-  PropUpdateType14,
-  PropUpdateType19, PropUpdateType25, PropUpdateType56,
-  PropUpdateType69, PropUpdateType73, PropUpdateType76,
+  PropUpdateType76,
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
 import { PropUpdateType75 } from "./flag_prop";
 import {
-  PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
+  PropDrawOnlyType33, PropDrawOnlyType53, PropDrawOnlyType54,
 } from "./draw_only";
 import { GENERIC_ORIGINAL_MODE_ONLY } from "./generic";
 import { GENERIC_ROUTINES } from "./generic_routines";
 import { PropUpdateType13 } from "./type13";
-import { PropUpdateType35 } from "./type35";
+import { OriginalItemDropUpdate } from "./type07";
+import { Type8MountedPartUpdate } from "./type08";
+import { Type67MountedPartUpdate } from "./type67";
 import { PropUpdateType43 } from "./type43";
 import { PropUpdateType48FlickerLight } from "./type48";
 import { KindedPropUpdate } from "./kinded";
@@ -68,6 +68,8 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
   // what makes a prop which returned early this frame unshootable for exactly
   // as long as the engine makes it. See `class41/shot_test.ts`.
   ClearPropShotTestList();
+  // Last frame's final draws have been shown; this frame makes its own.
+  G.g_prop_final_draws = [];
   // The view the group props' draw blocks compose onto this frame -- what
   // `MatrixStore(obj+0x2E4)` keeps under the model, and what the shatter's
   // `MatrixInvert(0)` takes back off. Null with no camera.
@@ -109,11 +111,17 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // Neither masks `obj+0x34` and neither registers a shot sphere either.
       case PropFamily.DrawOnlyType53: PropDrawOnlyType53(p); break;
       case PropFamily.DrawOnlyType54: PropDrawOnlyType54(p); break;
-      // Nothing here, and deliberately: `PropDrawOnlyType33` draws before it
-      // steps, so its step ran at the head of this frame in
-      // `PropDrawOnlyType33Tick` -- see `class41/draw_only.ts`. Letting it
-      // reach the default arm below would run a group prop's routine on it.
-      case PropFamily.DrawOnlyType33: break;
+      // It draws, steps and kills; the draw is recorded where it is made,
+      // so it runs in the walk like the rest. See `class41/draw_only.ts`.
+      case PropFamily.DrawOnlyType33: PropDrawOnlyType33(p); break;
+      // The Original Mode item `SpawnOriginalItemDrop` releases.
+      case PropFamily.OriginalItemDrop:
+        OriginalItemDropUpdate(p, rng, events); break;
+      // The two mounted-part objects: their own lifetimes, hit arms and
+      // spheres, drawn on the parent's stored matrix.
+      case PropFamily.Type8Piece: Type8MountedPartUpdate(p, rng, events); break;
+      case PropFamily.Type67Piece:
+        Type67MountedPartUpdate(p, rng, events, cam); break;
       // Its own lifetime, its own hit arms, its own shot-test tail. Nothing
       // the generic arm supplies belongs to it.
       case PropFamily.Type43: PropUpdateType43(p, rng, events); break;
@@ -134,6 +142,14 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
     }
   }
   if (G.g_breakable_props.some((p) => p.dead)) {
+    // A routine that drew and then died this frame had its draw submitted
+    // before the object went: keep it for the renderer. See
+    // `g_prop_final_draws`.
+    for (const p of G.g_breakable_props) {
+      if (p.dead && p.draws?.length) {
+        G.g_prop_final_draws.push({ id: p.id, draws: p.draws });
+      }
+    }
     G.g_breakable_props = G.g_breakable_props.filter((p) => !p.dead);
   }
   // The shatter objects the walk above allocated, and the ones still flying
@@ -147,30 +163,19 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
  *
  * This table **is** the engine's indirect call: `ActorAlloc` was handed
  * `g_class41_updates[obj->+0x130C]` and the object calls through it every
- * frame, so switching on the type here is that call written out. Eight of the
- * eleven entries are branch triggers — see `class41/branch.ts` — because a route
- * the stage takes is worth more than a swing.
+ * frame, so switching on the type here is that call written out. The entries
+ * here are routines ported only as far as their branch arm — see
+ * `class41/branch.ts` — and run inside the prologue and tail below; a routine
+ * transcribed whole is in `class41/generic_routines.ts` instead and runs on its
+ * own.
  *
- * A type absent here is placed, drawn and otherwise inert, which is the
+ * A type in neither is placed, drawn and otherwise inert, which is the
  * standing divergence `class41/generic.ts` declares.
  */
 const GENERIC_UPDATE: Partial<Record<number,
   (p: BreakableProp, events?: Events) => void>> = {
-  14: PropUpdateType14,
-  // 31 *does* open with `PropExpireByStepLifetime`, so unlike 53 and 54 it
-  // rides the generic arm and only owes its camera cue and its strip cursor.
-  31: PropDrawOnlyType31,
-  // Opens with `PropExpireByStepLifetime` too, and ignores what it did: a
-  // retired door runs its rattle once more before the pool drops it, which
-  // the arm below does not reproduce because nothing can see it.
-  35: PropUpdateType35,
-  19: PropUpdateType19,
-  25: PropUpdateType25,
-  56: PropUpdateType56,
-  69: PropUpdateType69,
   70: OriginalItemPropUpdate,
   71: OriginalItemPropUpdate,
-  73: PropUpdateType73,
   76: PropUpdateType76,
 };
 

@@ -1025,3 +1025,21 @@ check that the pixels it should not touch are identical -- which is also what
 tells you the runs stayed in step. It is `L44`'s "a harness that prints its
 arguments as its result" one layer down: a redraw that repeats the frame
 agrees with any claim about it.
+
+**L70 -- `PlaySoundId` is marked no-return too, and `ActorDespawn` really
+does not return.** Two facts about the same kind of call, pointing opposite
+ways, and the class-0x41 generic props were full of both. The database marks
+`PlaySoundId` (`FUN_0041CFD0`) no-return, so **every hit arm the decompiler
+shows ends at its sound**: `PropUpdateType41`'s decompile stops before the
+`+0x2A0 = 0x200` that starts its swing, `PropUpdateType28`'s before the clamp
+that stops it, `PropUpdateType7`'s before the kick, the hit effect and the
+Original Mode item drop that are the rest of its hit arm.
+L35 and L37 name `MatrixStackPop`; this is the same trap on the commonest
+call in a hit arm. Meanwhile `ActorDespawn` (`FUN_00409CC0`) ends in a call to
+`ActorKill`, which longjmps out of the task walk, so a routine that calls
+`PropExpireByStepLifetime` and ignores its result **does** stop when it
+despawns -- and `class41/type35.ts` had built "a retired door runs its rattle
+once more before the pool drops it" on a return that never happens. **Read
+the listing past every `PlaySoundId`, and read the callee before believing a
+caller carries on**: the pseudocode is wrong in the first direction and a
+reading of the pseudocode is wrong in the second.

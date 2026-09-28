@@ -46,11 +46,8 @@ import {
 import { T } from "../game/tables";
 import { KIND_SHADOW } from "../game/class41/kinded";
 import {
-  GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, GENERIC_SLOT_STRIP, PoseOrder,
+  GENERIC_DRAW_SLOT, GENERIC_POSE_ORDER, PoseOrder,
 } from "../game/class41/generic";
-import { TYPE43_EFFECT7_RISE, TYPE43_EFFECT7_SLOT }
-  from "../game/class41/type43";
-import { TYPE13_DROP_SLOT } from "../game/class41/type13";
 import {
   FLICKER_BROKEN, FLICKER_BROKEN_SCALE, FLICKER_DEBRIS_SCALE,
   FLICKER_FADE_FRAMES, FLICKER_SLOT_BROKEN, FLICKER_SLOT_DEBRIS,
@@ -60,6 +57,8 @@ import { SpawnClass } from "../game/spawn_class";
 import { BAMS_TO_RAD } from "../core/bams";
 import { Rng } from "../core/rng";
 import { COMPOSITE_FAMILIES, PropParts, type PropPart } from "./prop_parts";
+import { BannerWave } from "./banner_wave";
+import { releaseAssetDrawAlpha, setAssetDrawAlpha } from "./draw_order";
 
 /** `AssetDrawSlot(0x10D0)` — the ground shadow a standing prop gets. */
 const SHADOW_SLOT = 0x10d0;
@@ -88,29 +87,6 @@ const DOOR_SHAKE_Z: readonly [number, number] = [0x65, 50];
 const SHAKE_SEED = 0x52415454;
 
 /**
- * `PropUpdateType35` (`FUN_0046B320`)'s draw — two leaves at literal world
- * coordinates, each its own `Push; Translate; RotateY; AssetDrawSlot; Pop`:
- *
- * ```
- * 0046b402  PUSH 0xc4797ed9 ; PUSH 0x4284966d ; PUSH 0xc41b2354  ; Translate
- *           RotateY( obj+0x1D0) ; AssetDrawSlot(0x1812)
- * 0046b439  PUSH 0xc475345a ; PUSH 0x4284966d ; PUSH 0xc41b2354  ; Translate
- *           RotateY(-obj+0x1D0) ; AssetDrawSlot(0x1813)
- * ```
- *
- * The prop's own position is never read, and its one spawn is placed at the
- * origin — so drawing the model at `p.x/p.y/p.z` put it a kilometre from the
- * doorway it hangs in. The second leaf is past the `MatrixStackPop` Ghidra
- * ends the function on (`L37`).
- */
-const TYPE35_LEAF_A: readonly [number, number, number] =
-  [-620.5520, 66.2938, -997.9820];
-const TYPE35_LEAF_B: readonly [number, number, number] =
-  [-620.5520, 66.2938, -980.8180];
-const TYPE35_LEAF_B_SLOT = 0x1813;
-const TYPE35 = 35;
-
-/**
  * A `SetDrawLayerNibble` layer as a `renderOrder`, for the layers a prop
  * routine draws in. The port spells the world's own layer 8 as 0 and layer 7
  * as `DRAW_LAYER_7_ORDER` (`render/draw_order.ts`); layer 9 is the one after
@@ -126,54 +102,6 @@ const DRAW_LAYER_ORDER: Partial<Record<number, number>> = {
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
 
 /**
- * `LiftUpdate` (`FUN_0046A360`)'s draw, transcribed. The state half is
- * `game/class41/lift.ts`; this is the five `AssetDrawSlot` calls.
- *
- * ```c
- * MatrixStackPush(0);
- *   MatrixTranslate(obj+0x19C, obj+0x1A0, obj+0x1A4);
- *   AssetDrawSlot(0x197A);                          // the body
- *   MatrixStackPush(0);
- *     MatrixTranslate(9.619, 0.0451, -8.4127);
- *     MatrixRotateY(obj+0x1D0);      AssetDrawSlot(0x197B);
- *     MatrixTranslate(-6.5, 0, 0);
- *     MatrixRotateY((-0x4000 - obj+0x1D0) * 2);
- *                                    AssetDrawSlot(0x197B);
- *   MatrixStackPop(1);
- *   MatrixStackPush(0);
- *     MatrixTranslate(-3.988, 0.0451, -9.6331);
- *     MatrixRotateY(obj+0x1E8);      AssetDrawSlot(0x197B);
- *     MatrixTranslate(-6.5, 0, 0);
- *     MatrixRotateY(obj+0x1E8 * -2); AssetDrawSlot(0x197B);
- *   MatrixStackPop(1);
- *   MatrixTranslate(-3.2134, 13.0, -2.0);
- *   MatrixRotateX(obj+0x1CC);
- *   MatrixTranslate(0, 1.0, 0);
- *   AssetDrawSlot(0x1981);                          // the panel
- * MatrixStackPop(1);
- * ```
- *
- * Every constant is read back out of the disassembly rather than off the
- * decompiler, because the decompiler drops FPU arguments to these calls. The
- * root takes **no** rotation: `obj+0x1CC` and `+0x1D0` are hinge angles for
- * this type, not the prop's orientation.
- */
-const LIFT_CAR_SLOT = 0x197a;
-const LIFT_LEAF_SLOT = 0x197b;
-const LIFT_PANEL_SLOT = 0x1981;
-const LIFT_HINGE_NEAR: readonly [number, number, number] =
-  [9.619, 0.0451, -8.4127];
-const LIFT_HINGE_FAR: readonly [number, number, number] =
-  [-3.988, 0.0451, -9.6331];
-/** `MatrixTranslate(-6.5, 0, 0)` — leaf two hangs off the end of leaf one. */
-const LIFT_LEAF_SPAN = -6.5;
-const LIFT_PANEL_AT: readonly [number, number, number] = [-3.2134, 13.0, -2.0];
-/** `MatrixTranslate(0, 1.0, 0)` after the panel's hinge. */
-const LIFT_PANEL_RISE = 1.0;
-/** The near pair's second leaf folds back from `-0x4000`, the far pair's from 0. */
-const LIFT_NEAR_FOLD_BIAS = -0x4000;
-
-/**
  * `Ry.Rz.Rx`, which is what this renderer composed for every prop in every
  * family until `GENERIC_POSE_ORDER` was read out of the EXE.
  *
@@ -187,11 +115,10 @@ const LIFT_NEAR_FOLD_BIAS = -0x4000;
 const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
 
 /**
- * The order each non-generic family composes, where its routine has been read.
+ * The order each non-generic family composes, where its routine has been read
+ * and does not record its own draws (a family that does is drawn from
+ * {@link BreakableProp.draws} and never reaches this).
  *
- * * {@link PropFamily.Falling} — `FallingContainerUpdate` draws `Rz.Ry.Rx`,
- *   the same order `BreakablePropGroundContact`'s hull test uses, so box and
- *   model agree.
  * * {@link PropFamily.ScriptFlagEffect} — `EffectPoseNode` (`FUN_0040D9D0`)
  *   is `RotZ; RotY; RotX` after its translate, and the port has already
  *   resolved its three angles into `pitch`/`yaw`/`roll`, so the effect tree's
@@ -202,23 +129,10 @@ const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;
  *   `PropBuildRisingDoor` (`FUN_00473410`) writes only `obj+0x1D0`, so this
  *   row changes no pixel today and is the routine written out rather than
  *   three rotations it does not make.
- * * The two draw-only types are `Rz.Ry.Rx`, from their own rows in
- *   {@link GENERIC_POSE_ORDER}.
  */
 const FAMILY_POSE_ORDER: Partial<Record<PropFamily, PoseOrder>> = {
-  [PropFamily.Falling]: PoseOrder.RollYawPitch,
   [PropFamily.ScriptFlagEffect]: PoseOrder.RollYawPitch,
   [PropFamily.RisingDoor]: PoseOrder.YawOnly,
-  [PropFamily.DrawOnlyType53]: PoseOrder.RollYawPitch,
-  [PropFamily.DrawOnlyType54]: PoseOrder.RollYawPitch,
-  // `PropDrawOnlyType33` (`FUN_00472950`): `RotZ(+0x1D4); RotY(+0x1D0);
-  // RotX(+0x1CC)` at `0x0047297D`..`0x00472995`, its own row in
-  // `GENERIC_POSE_ORDER` too.
-  [PropFamily.DrawOnlyType33]: PoseOrder.RollYawPitch,
-  // `PropUpdateType43`'s two draw blocks both compose `Rz.Ry.Rx`, and its
-  // tumble drives all three angles, so this is the one family where the order
-  // is visible on every frame rather than only at placement.
-  [PropFamily.Type43]: PoseOrder.RollYawPitch,
   // `FallingContainerFragmentUpdate` (`FUN_0046AD20`): `RotZ; RotY; RotX`
   // in both draw blocks, the container's own order.
   [PropFamily.ContainerFragment]: PoseOrder.RollYawPitch,
@@ -240,10 +154,6 @@ function PoseOrderFor(p: BreakableProp): string {
     if (order !== undefined && order !== PoseOrder.Unread) return order;
     return GENERIC_FAMILY_DEFAULT;
   }
-  // The two draw-only families have rows in `GENERIC_POSE_ORDER` as well --
-  // they are class-0x41 types 53 and 54 -- but they are their own families
-  // here, so they are read from the table by number rather than by `p.kind`,
-  // which for them is the type and would work, but only by coincidence.
   const own = FAMILY_POSE_ORDER[p.family];
   return own ?? GENERIC_FAMILY_DEFAULT;
 }
@@ -258,37 +168,15 @@ function PoseOrderFor(p: BreakableProp): string {
  * `GENERIC_DRAW_SLOT`. `null` means the routine draws no static model at all.
  */
 function DrawSlotFor(p: BreakableProp): number | null {
-  if (p.family === PropFamily.Lift) return LIFT_CAR_SLOT;
   // `PropUpdateType48FlickerLight`: the whole lamp, or once shot the broken
   // one -- which it draws for the rest of its life, pieces or no pieces.
   if (p.family === PropFamily.Type48) {
     return (p.flags & FLICKER_BROKEN) ? FLICKER_SLOT_BROKEN : FLICKER_SLOT_WHOLE;
   }
-  // The two draw-only families each draw `obj+0x28C` and nothing else.
-  if (p.family === PropFamily.DrawOnlyType53
-      || p.family === PropFamily.DrawOnlyType54) return p.slot;
-  // `AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)` at `0x0047299A`: type
-  // 33's strip, and `storyItem` is the cursor `PropDrawOnlyType33` steps --
-  // at the head of the frame, so what is here is what the engine's draw of
-  // this frame is handed.
-  if (p.family === PropFamily.DrawOnlyType33) return p.slot + p.storyItem;
-  // `PropUpdateType43` has two draw blocks and picks between them on its
-  // effect id: with none it draws `obj+0x28C`, and with one -- kind 2, whose
-  // `obj+0x28C` is `0xFFFF` -- it draws `0x17A9` lifted 0.8 while the prop is
-  // whole, and the effect tree once it is destroyed.
-  if (p.family === PropFamily.Type43) {
-    if (p.effect === 0) return p.slot === SLOT_NONE ? null : p.slot;
-    return p.effectFrames === 0 ? TYPE43_EFFECT7_SLOT : null;
-  }
   // `-1` as a `u16`: the engine's "draw nothing", which `KindedPropUpdate`
   // writes over a prop it has hidden.
   if (p.slot === SLOT_NONE && p.family !== PropFamily.Generic) return null;
   if (p.family !== PropFamily.Generic) return p.slot;
-  // `AssetDrawSlot((s16)obj+0x28C + (s32)obj+0x2A0)` — type 31 plays a strip,
-  // and `storyItem` is the cursor its routine steps (type 33 is the other
-  // strip, and its own family above). Everything else in the family passes
-  // `obj+0x2A0` to nothing.
-  if (GENERIC_SLOT_STRIP.has(p.kind)) return p.slot + p.storyItem;
   const drawn = GENERIC_DRAW_SLOT[p.kind];
   return drawn === undefined ? p.slot : drawn;
 }
@@ -298,14 +186,12 @@ function DrawSlotFor(p: BreakableProp): number | null {
  *
  * A group prop always casts the large one. A kinded prop casts one only for
  * the kinds the engine's `switch` on `obj+0x290` lists, and kinds 4 and 5 get
- * the smaller `0x10D1`; every other kind casts none. The falling container
- * casts none — it spends most of its life off the ground.
+ * the smaller `0x10D1`; every other kind casts none.
  */
 function ShadowSlotFor(p: BreakableProp): number | null {
   // A generic prop is whatever its slot says it is -- scenery, an effect, in a
   // few cases an enemy. Nothing in `PlaceGenericProp` draws a shadow, so
   // neither does this.
-  if (p.family === PropFamily.Falling) return null;
   if (p.family === PropFamily.Generic) return null;
   // `RisingDoorUpdate` (`FUN_004753F0`) is one `AssetDrawSlot` and no second
   // draw of any kind, so a shutter casts nothing. Without this arm the default
@@ -315,27 +201,13 @@ function ShadowSlotFor(p: BreakableProp): number | null {
   // `ScriptFlagEffectUpdate` (`FUN_00473B90`) draws the effect tree and
   // nothing else -- no second `AssetDrawSlot`, so no shadow.
   if (p.family === PropFamily.ScriptFlagEffect) return null;
-  // `PropUpdateType13` (`FUN_00467F50`) is two `AssetDrawSlot` calls and
-  // neither is a shadow.
-  if (p.family === PropFamily.Type13) return null;
   // `FallingContainerFragmentUpdate` draws its piece and nothing else.
   if (p.family === PropFamily.ContainerFragment) return null;
   // Nor does `PropUpdateType48FlickerLight`: a lamp, and three draws, none a
   // shadow.
   if (p.family === PropFamily.Type48) return null;
-  // `PropDrawOnlyType33` is one `AssetDrawSlot`, the strip's, and no other.
-  if (p.family === PropFamily.DrawOnlyType33) return null;
   if (p.family !== PropFamily.Kinded) return SHADOW_SLOT;
   return KIND_SHADOW[p.kind] ?? null;
-}
-
-/** The five hinged sub-nodes the lift's draw composes. */
-interface LiftParts {
-  near: Object3D;
-  nearFold: Object3D;
-  far: Object3D;
-  farFold: Object3D;
-  panel: Object3D;
 }
 
 interface Live {
@@ -344,8 +216,6 @@ interface Live {
   shadow: Object3D | null;
   /** Which slot `node` was cloned from, so a swap is noticed. */
   slot: number;
-  /** Only the lift has one; the pivots its update drives. */
-  lift?: LiftParts;
   /**
    * For the families `render/prop_parts.ts` draws: the slots of the parts
    * `node` holds, in order, so a change in what the routine draws rebuilds
@@ -360,24 +230,8 @@ interface Live {
    * several.
    */
   partSlots?: number[];
-  /**
-   * The second model of a routine that draws two under separate matrices:
-   * `PropUpdateType13`'s falling part and `PropUpdateType35`'s second leaf.
-   * A sibling in the layer's group, not a child — neither routine composes
-   * the second draw on the first's matrix.
-   */
-  second?: Object3D | null;
   /** `PropUpdateType48FlickerLight`'s thirty pieces, built on the break. */
   debris?: Object3D[];
-}
-
-/** The slot of a routine's second, independently placed draw, if it has one. */
-function SecondSlotFor(p: BreakableProp): number | null {
-  if (p.family === PropFamily.Type13) return TYPE13_DROP_SLOT;
-  if (p.family === PropFamily.Generic && p.kind === TYPE35) {
-    return TYPE35_LEAF_B_SLOT;
-  }
-  return null;
 }
 
 export class BreakableLayer implements System<RenderContext> {
@@ -392,6 +246,8 @@ export class BreakableLayer implements System<RenderContext> {
   /** Draw-time noise only — see `shake`. Reseeded by `adopt`. */
   private readonly rng = new Rng(SHAKE_SEED);
   private readonly _m = new Matrix4();
+  /** `PropUpdateType45`'s bend of the banner templates (`banner_wave.ts`). */
+  private readonly banners = new BannerWave();
 
   constructor() {
     this.group.name = "breakables";
@@ -435,7 +291,10 @@ export class BreakableLayer implements System<RenderContext> {
    */
   attach(ctx: RenderContext): void {
     ctx.scope.child("breakables.templates")
-      .defer(() => this.templates.clear());
+      .defer(() => {
+        this.templates.clear();
+        this.banners.clear();
+      });
     this.claimSession(ctx);
   }
 
@@ -444,7 +303,6 @@ export class BreakableLayer implements System<RenderContext> {
       for (const l of this.nodes.values()) {
         l.node.removeFromParent();
         l.shadow?.removeFromParent();
-        l.second?.removeFromParent();
         for (const d of l.debris ?? []) d.removeFromParent();
       }
       this.nodes.clear();
@@ -515,7 +373,6 @@ export class BreakableLayer implements System<RenderContext> {
       // every frame and a changed one re-clones rather than re-poses.
       if (l && l.slot !== slot) {
         l.node.removeFromParent();
-        l.second?.removeFromParent();
         for (const d of l.debris ?? []) d.removeFromParent();
         l.shadow?.removeFromParent();
         this.nodes.delete(p.id);
@@ -529,12 +386,6 @@ export class BreakableLayer implements System<RenderContext> {
         const shadow = shadowSlot === null ? null : this.clone(shadowSlot);
         if (shadow) this.group.add(shadow);
         this.nodes.set(p.id, (l = { node, shadow, slot }));
-        if (p.family === PropFamily.Lift) this.buildLift(l);
-        const second = SecondSlotFor(p);
-        if (second !== null) {
-          l.second = this.clone(second);
-          if (l.second) this.group.add(l.second);
-        }
       }
 
       // A destroyed prop is a puff the port is counting down; nothing of the
@@ -549,11 +400,7 @@ export class BreakableLayer implements System<RenderContext> {
       l.node.visible = !gone && !p.drawSkipped;
 
       const [sx, sz] = this.shake(p);
-      // `MatrixTranslate(0, 0.8, 0)` after the pose, for the one piece a
-      // kind-2 `PropUpdateType43` draws instead of a body.
-      const rise = p.family === PropFamily.Type43 && p.effect !== 0
-        ? TYPE43_EFFECT7_RISE : 0;
-      l.node.position.set(p.x + sx, p.y + rise, p.z + sz);
+      l.node.position.set(p.x + sx, p.y, p.z + sz);
       l.node.rotation.set(0, 0, 0);
       if (p.family === PropFamily.Group && p.drawMatrix.length === 16) {
         // `BreakablePropUpdate`'s draw blocks, which the port composes and
@@ -565,23 +412,6 @@ export class BreakableLayer implements System<RenderContext> {
         this._m.decompose(l.node.position, l.node.quaternion, l.node.scale);
       } else if (p.family === PropFamily.Type48) {
         this.poseFlicker(l, p);
-      } else if (p.family === PropFamily.Type13) {
-        // `AssetDrawSlot(obj+0x28C)` under no matrix of its own: the panel is
-        // modelled in world space. Then `Translate(x, y, z + obj+0x1C8)` for
-        // the part that falls -- `vz` is the landing judder for this type.
-        l.node.position.set(0, 0, 0);
-        l.second?.position.set(p.x, p.y, p.z + p.vz);
-        if (l.second) l.second.visible = !gone;
-      } else if (p.family === PropFamily.Generic && p.kind === TYPE35) {
-        l.node.position.set(...TYPE35_LEAF_A);
-        l.node.rotation.set(0, p.yaw * BAMS_TO_RAD, 0);
-        if (l.second) {
-          l.second.position.set(...TYPE35_LEAF_B);
-          l.second.rotation.set(0, -p.yaw * BAMS_TO_RAD, 0);
-          l.second.visible = !gone;
-        }
-      } else if (l.lift) {
-        this.poseLift(l.lift, p);
       } else {
         // Each routine's own order, read out of the EXE. `PoseOrder`'s value
         // *is* the sequence of `MatrixRotate*` calls, left to right as the
@@ -624,18 +454,24 @@ export class BreakableLayer implements System<RenderContext> {
           && p.state === BreakableState.Standing
           && (T.breakables?.groups?.[p.group]?.[p.member]?.level ?? 0) !== 0;
         l.shadow.visible = !gone && !stacked;
-        const floor = p.family === PropFamily.Falling
-          ? p.floorY : G.g_camera_fixed_eye_y;
-        l.shadow.position.set(p.x, floor + SHADOW_RISE, p.z);
+        l.shadow.position.set(p.x, G.g_camera_fixed_eye_y + SHADOW_RISE, p.z);
         l.shadow.scale.set(SHADOW_SCALE, 1, SHADOW_SCALE);
       }
+    }
+
+    this.banners.apply(this.templates);
+
+    // A prop that drew and then died this frame: its draw was submitted before
+    // the object went (`g_prop_final_draws`).
+    for (const f of G.g_prop_final_draws) {
+      seen.add(f.id);
+      this.drawCalls(f.id, f.draws);
     }
 
     for (const [id, l] of this.nodes) {
       if (seen.has(id)) continue;
       l.node.removeFromParent();
       l.shadow?.removeFromParent();
-      l.second?.removeFromParent();
       for (const d of l.debris ?? []) d.removeFromParent();
       this.nodes.delete(id);
     }
@@ -740,8 +576,8 @@ export class BreakableLayer implements System<RenderContext> {
     if (l && l.parts !== key) {
       l.node.removeFromParent();
       l.shadow?.removeFromParent();
-      l.second?.removeFromParent();
       for (const d of l.debris ?? []) d.removeFromParent();
+      releaseAssetDrawAlpha(l.node);
       this.nodes.delete(id);
       l = undefined;
     }
@@ -765,68 +601,14 @@ export class BreakableLayer implements System<RenderContext> {
       if (!n) return;
       n.matrix.fromArray(c.m);
       n.matrixWorldNeedsUpdate = true;
+      // `AssetDrawSlotWithAlpha`'s forced blend, or the plain draw.
+      setAssetDrawAlpha(n, c.alpha ?? null);
       // The layer goes on the primitives, as `draw_order.ts` puts layer 7:
       // a group's order would become its children's `groupOrder`, which
       // three.js compares before anything else.
       const order = c.layer === undefined ? 0 : DRAW_LAYER_ORDER[c.layer] ?? 0;
       n.traverse((o) => { o.renderOrder = order; });
     });
-  }
-
-  /**
-   * Hang the lift's four cage leaves and its overhead panel off the car.
-   *
-   * `MatrixStackPush(0)` duplicates the top of the stack, so the two hinges
-   * are **siblings** under the body's translate rather than a chain — the
-   * `MatrixStackPop(1)` between them is what says so. The panel comes after
-   * both pops, so it composes on the body too.
-   */
-  private buildLift(l: Live): void {
-    const pivot = (at: readonly [number, number, number]) => {
-      const g = new Group();
-      g.position.set(at[0], at[1], at[2]);
-      return g;
-    };
-    const leaf = () => this.clone(LIFT_LEAF_SLOT);
-
-    const near = pivot(LIFT_HINGE_NEAR);
-    const nearFold = pivot([LIFT_LEAF_SPAN, 0, 0]);
-    const far = pivot(LIFT_HINGE_FAR);
-    const farFold = pivot([LIFT_LEAF_SPAN, 0, 0]);
-    const panel = pivot(LIFT_PANEL_AT);
-
-    for (const [pv, fold] of [[near, nearFold], [far, farFold]] as const) {
-      const a = leaf();
-      if (a) pv.add(a);
-      const b = leaf();
-      if (b) fold.add(b);
-      pv.add(fold);
-      l.node.add(pv);
-    }
-    const deck = this.clone(LIFT_PANEL_SLOT);
-    if (deck) {
-      // `MatrixTranslate(0, 1.0, 0)` sits between the hinge and the model.
-      deck.position.set(0, LIFT_PANEL_RISE, 0);
-      panel.add(deck);
-    }
-    l.node.add(panel);
-    l.lift = { near, nearFold, far, farFold, panel };
-  }
-
-  /**
-   * The three angles `LiftUpdate` drives, applied to the pivots.
-   *
-   * The second leaf of each pair counter-rotates at twice the rate, which is
-   * what folds it back against the first instead of swinging it wide: the
-   * near pair from `-0x4000`, the far pair from zero.
-   */
-  private poseLift(g: LiftParts, p: BreakableProp): void {
-    g.near.rotation.y = p.yaw * BAMS_TO_RAD;
-    g.nearFold.rotation.y =
-      (LIFT_NEAR_FOLD_BIAS - p.yaw) * 2 * BAMS_TO_RAD;
-    g.far.rotation.y = p.hingeB * BAMS_TO_RAD;
-    g.farFold.rotation.y = p.hingeB * -2 * BAMS_TO_RAD;
-    g.panel.rotation.x = p.pitch * BAMS_TO_RAD;
   }
 
   /**

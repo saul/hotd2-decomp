@@ -2048,7 +2048,11 @@ pruned exactly as the exe prunes them (`CivilianPruneDeadChildren` reads
   `0x39` at or past `0x181`; route slot 1 out of its own block. The one window
   answered early rather than exactly is the freed body's last seconds on the
   rescued road -- a replay cannot tell how far into them it landed.
-* `ENEMY_GATE_CLASSES` gains 0x18 and 0x21.
+* `ENEMY_GATE_CLASSES` gains 0x18 and 0x21, and class 0x46 answers
+  `countsForEnemyGate` per record: its dive and swarm flights count member by
+  member (`INC`s at `0x0042DF87`/`8E` and `0x0042DB5D`/`64`), its scatter
+  flight does not. A seek past stage 3's `2/4/32` had rebuilt the swarm `0x31B8`
+  (`e7 p7` with the rider; `e0 p0` after).
 * On the way: the held state's abandon arm frees the camera slot and the hit
   slot (`0x00451C5B`..`0x00451C77`), which the port's did not.
 
@@ -2058,10 +2062,22 @@ a seek short of the flag), both classes through a gate, and **every class in
 `ENEMY_CLASSES` through a gate** -- watched failing with the fix backed out
 (seven assertions, then the bat case below). Measured after, same URL and
 seed: captors dead f34, she leaves the count f243, the walker leaves 11/2 at
-f263. Stage 3 `2/3`: stuck before; after, she leaves the count at f490 and the
-walker leaves the step at f491.
+f263. Stage 3 `2/3`: stuck before; after (merged with `eb232a6e`), she leaves
+the count at f467 and the walker leaves the step at f468.
 
-SWEEP_RESULTS
+**Every captor civilian, from her own address.** A headless page harness
+(`?drive=1`, one seed) seeked to each of the 40 civilians-with-captors' spawn
+steps -- with `entry=7` for stage 3's blocks 7 and 9 and `entry=4` for stage
+4's 4, 7 and 9, which the default entry cannot reach -- shot every counted
+actor the shot-test list offered, and timed her leaving the count and the
+walker leaving her step. Before: stage 2's `0x6830` (11/2), `0x8598` (14/9,
+`e1` with no enemy on the panel) and stage 3's `0x3208` (2/3) never left, and
+stage 3's `0x2208` (1/2) was never even placed, her room held at `1/2/18` by
+the rebuilt rider. After, on the merged tree: **all 37 one-player civilians
+leave the count and let the script past her step**; the other three
+(`0xEA8C`, `0x22D8`, `0x70EC`) are `spawn_obj_c_if_2p` and are not placed in a
+one-player run. Both measured hangs re-checked on `origin/main` `eb232a6e`
+alone, whose boat-rider changes do not touch this: still hung, same holders.
 
 ## 32. What a reload still rebuilds that the exe would not have — `[open]`
 

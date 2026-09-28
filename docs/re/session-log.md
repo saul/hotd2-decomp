@@ -24652,4 +24652,11 @@ on these: the checkout they play in is merged into every few minutes. `L75`.
 walker and `reaches` treat as fall-through, so the seek to block 2 went down
 arm 0 and the assertion failed for the fixture's reason, not the code's.
 
-SWEEP_LOG
+**Measured.** Same URL and seed, before and after: `0x6830` never left the
+count in 1,500 frames before; after, the captors die at f34, she leaves the
+count at f243 and the walker leaves 11/2 at f263. Stage 3's `0x3208`: stuck at
+`2/3/35 wait_script_flag 30` before; after the merge with `eb232a6e`, f467 and
+f468. All 37 one-player captor civilians pass from their own spawn step on the
+merged tree (the three two-player spawns are not placed). A seek past stage
+3's `2/4/32` read `e7 p7` with 62 bat objects and the rider before, `e0 p0`
+with the 50 uncounted scatter bats after.

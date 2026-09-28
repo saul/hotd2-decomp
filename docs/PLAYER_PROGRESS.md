@@ -611,8 +611,9 @@ although the game's own list had. Rebuilt, either held `g_enemies_alive` with
 nothing on screen to shoot, and every civilian whose rescue waits on that count
 or on a camera cue behind a room gate sat sobbing in front of her dead
 captors: stage 2's `0x6830` after the burnt-out car (block 11 step 2),
-`0x8510` and `0x8598` at block 14, stage 3's boat hostage `0x3208`. The rider
-and the target are in the gate list now, and class 0x21 answers
+`0x8598` at block 14, stage 3's boat hostage `0x3208`. The rider and the
+target are in the gate list now, class 0x46's bats answer per record (their
+dive and swarm flights count, the scatter does not), and class 0x21 answers
 `ClassHandler.outlivedByReplay` -- flag 0, camera path `0x39` at frame
 `0x181`, route slot 1 out of its own block -- so the landing is the world the
 exe is in at that address. The held target's abandon arm also frees its camera

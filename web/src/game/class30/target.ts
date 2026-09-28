@@ -744,11 +744,30 @@ export function ZombieStateAwaitCivilianOrder(
  * Walks until the header's point is **behind** it —
  * `ActorPointIsAhead` (`FUN_0045BC10`) is the test — and then hands over to
  * the maul, or ends the script if the list is spent.
+ *
+ * **Subs 0 and 1 write the cursor**, and the hand-over is only right because
+ * they do: `ADD EDI, 0x10; MOV dword ptr [ESI + 0x1398], EDI` at `0x0045BD89`
+ * (sub 0) and `0x0045BD24` (sub 1), with `EDI` the blob
+ * `ZombieScriptForState` just returned -- the attack blob, this being the
+ * attack state -- so `obj+0x1398` is its first entry, past the 0x10-byte
+ * header. State 35 sub 1 then loads the entry **the cursor** names. The port
+ * set the index and left the blob where the previous state had put it, which
+ * for stage 1's bin captor (`0x3D34`, ordered into state 36 by its civilian)
+ * was the *target* blob: state 35 replayed the burst out of the wood, ended
+ * that one-entry list, came back here, and did it again for as long as the
+ * stage lasted. `[proved]`
+ *
+ * The arrival test reads the cursor too, as a **dword**:
+ * `MOV ECX, [ESI + 0x1398]; CMP dword ptr [ECX], 0x0; JLE` at `0x0045BDBC`.
+ * `entryAt` tests the motion short alone. They agree on every list this state
+ * reads in the six stages -- all nine state-40 blobs and both state-41 ones
+ * end on `{-1, -1}`, a dword of -1 -- which the bundle cannot show, because
+ * the exporter stops at the terminator; a scan of the evt blobs found it.
  */
 export function ZombieStateWalkPastPoint(obj: ZombieActor): void {
-  const s = ZombieScriptForState(obj);
   if (obj.sub === 0 || obj.sub === 1) {
     obj.flags |= 0x2400;
+    const s = ZombieScriptForState(obj);
     const h = s?.head ?? {};
     obj.target = vec3(h.point?.[0] ?? 0, h.point?.[1] ?? 0, h.point?.[2] ?? 0);
     const m = h.motion ?? 0;
@@ -756,11 +775,11 @@ export function ZombieStateWalkPastPoint(obj: ZombieActor): void {
       ActorSetMotionBlended(obj, m, h.frame ?? 0, obj.sub === 0 ? 0 : 10);
     }
     obj.zom.scriptMotion = m;
-    obj.zom.scriptPc = 0;
+    aimCursor(obj, blobForState(obj), 0);        // `0x1398 = puVar4 + 4`
     obj.sub = 2;
   }
   if (ActorPointIsAhead(obj, obj.target)) {
-    if (!entryAt(s, obj.zom.scriptPc)) ZombieScriptEnded(obj);
+    if (!entryAt(cursorScript(obj), obj.zom.scriptPc)) ZombieScriptEnded(obj);
     else if (!ZombieTargetIsDead(obj)) {
       obj.state = ZombieState.TargetMotionScript;
       obj.sub = 1;
@@ -772,10 +791,14 @@ export function ZombieStateWalkPastPoint(obj: ZombieActor): void {
 /**
  * `ZombieStateWalkToPoint` — `FUN_0045BE30`. Class 0x30 state 41. The same
  * header, but it walks *to* the point — within 5.0 — turning as it goes.
+ *
+ * Subs 0 and 1 share one tail that writes the cursor, `puVar6 + 4` into
+ * `obj+0x1398` beside `obj+0x1312 = 2`, and sub 2 reads it back:
+ * `**(short **)(obj+0x1398) < 1`. Same fault, same fix, as state 40 above.
  */
 export function ZombieStateWalkToPoint(obj: ZombieActor): void {
-  const s = ZombieScriptForState(obj);
   if (obj.sub === 0 || obj.sub === 1) {
+    const s = ZombieScriptForState(obj);
     const h = s?.head ?? {};
     obj.target = vec3(h.point?.[0] ?? 0, h.point?.[1] ?? 0, h.point?.[2] ?? 0);
     const m = h.motion ?? 0;
@@ -783,12 +806,12 @@ export function ZombieStateWalkToPoint(obj: ZombieActor): void {
       ActorSetMotionBlended(obj, m, h.frame ?? 0, obj.sub === 0 ? 0 : 10);
     }
     obj.zom.scriptMotion = m;
-    obj.zom.scriptPc = 0;
+    aimCursor(obj, blobForState(obj), 0);        // `0x1398 = puVar6 + 4`
     obj.sub = 2;
   } else if (obj.sub === 2) {
     const d = Math.hypot(obj.pos.x - obj.target.x, obj.pos.z - obj.target.z);
     if (d <= POINT_ARRIVE) {
-      if (!entryAt(s, obj.zom.scriptPc)) ZombieScriptEnded(obj);
+      if (!entryAt(cursorScript(obj), obj.zom.scriptPc)) ZombieScriptEnded(obj);
       else { obj.state = ZombieState.TargetMotionScript; obj.sub = 1; }
     } else {
       TurnActorAwayFromPoint(obj, obj.target, TARGET_TURN_RATE, 1 / 60);

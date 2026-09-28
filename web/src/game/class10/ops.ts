@@ -25,8 +25,17 @@ export enum CivilianOp {
   SetMotionFrom = 0x01,
   /** Stop the clip at this frame rather than at its length. */
   SetFrameLimit = 0x02,
-  /** The per-frame cap on the turn toward the target, in BAMS. */
-  SetTurnRate = 0x03,
+  /**
+   * **The cross-fade length of the next clip change**, into `sub+0xE`.
+   * `MOV word ptr [EAX + 0xe], CX` at `0x0048BD5E`. Its one reader is
+   * `CivilianApplyMotionPose` (`FUN_0048C310`), which hands it to
+   * `ActorSetMotionBlended` as the fade (`MOVSX EDX, word ptr [ECX + 0xe]`
+   * at `0x0048C824`); `CivilianInit` writes 10 (`0x0048A4F1`). A sweep of
+   * every `[r + 0xe]` operand in the image finds no third. It was
+   * `SetTurnRate`, a name nothing read supported -- the turn passes the
+   * literal `0x100`. `[proved]`
+   */
+  SetMotionBlend = 0x03,
   /** The clip frame wait bit {@link CivilianWait.MotionFrame} looks for. */
   SetMotionFrame = 0x04,
   /** A target point: `(pointer or mode, radius)`. See {@link CivilianTarget}. */
@@ -75,7 +84,12 @@ export enum CivilianOp {
    * `obj+0x100`, and nothing this op sets reaches it.
    */
   SetSphereCentreMode = 0x17,
-  /** Teleport: six floats, position then rotation. */
+  /**
+   * Teleport: six **dwords** copied as they are -- three floats into
+   * `obj+0x40..0x48` and three BAMS integers into `obj+0x64..0x6C`
+   * (`0x0048BE71`..`0x0048BEA9`, `MOV`s all). The bundle read all six as
+   * floats until the rotation was needed; see `hod2lib/exetab.ts`.
+   */
   SetPose = 0x18,
   /**
    * **Set the route branch.** `g_script_branch_var` (`0x009C88A4`) = the s16
@@ -275,6 +289,30 @@ export enum CivilianWait {
    * introduced it, exactly as {@link CivilianOp.Wait}'s note describes.
    */
   RootMotion = 0x00100000,
+  /**
+   * The four bits `CivilianApplyMotionPose` (`FUN_0048C310`) reads off the
+   * **new** block's word at a clip change -- see `class10/pose.ts`. Either of
+   * the first two turns the actor by the heading the drawn pose has and the
+   * new clip's first frame lacks (`TEST [sub], 0x18000` at `0x0048C348`);
+   * `TurnKeepBones` then counter-rotates records 1 and 9 so the body does not
+   * swing through the turn, and `TurnTakeRoot` without it takes record 0 from
+   * the new frame. `[proved]`
+   */
+  TurnKeepBones = 0x00008000,
+  TurnTakeRoot = 0x00010000,
+  /**
+   * Move the actor so bone 1 of the new clip's first frame lands where the
+   * last draw put it -- `TEST [sub], 0x20000` at `0x0048C489`. It is how a
+   * clip that climbs down off something hands the height it reached to the
+   * next one. `[proved]`
+   */
+  HoldBone1 = 0x00020000,
+  /**
+   * No blend, and none of the record rewrites: `TEST EAX, 0x200000` at
+   * `0x0048C673` jumps straight to `ActorSetMotionBlended(model, clip,
+   * start, 0)`. `[proved]`
+   */
+  Cut = 0x00200000,
   /** Not counted in `g_civilians_alive`, and worth no score. */
   Uncounted = 0x08000000,
   /** Leave `g_civilians_alive` now rather than on removal. */

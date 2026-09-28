@@ -15,11 +15,12 @@ import type { Rng } from "../../core/rng";
 import { ScoreAddForPlayer } from "../combat/score";
 import { G } from "../globals";
 import type { ClassFrame } from "../registry";
-import { FrameToTicks, MotionOf } from "../tables";
+import { NULL_HOST, type GameHost } from "../host";
 import { CivilianAddHeldItem, CivilianAddPickedItem, CivilianPickHeldItem }
   from "./items";
 import { FALL_ACCEL } from "./hooks";
 import { AsFloat, CivilianHook, CivilianOp, CivilianWait, CmdAt } from "./ops";
+import { CivilianApplyMotionPose } from "./pose";
 
 /** What a rescue pays — `ScoreAddForPlayer`'s operand. */
 const RESCUE_AWARD = 400;
@@ -45,6 +46,12 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
   const sub = obj.civ;
   if (!sub) return;
   const uncounted = sub.wait & CivilianWait.Uncounted;
+  // `MOV EBX, dword ptr [EAX]` at `0x0048B9EA`, before the loop: the word the
+  // block now ending ran under. Ops 0x00 and 0x01 hand it to
+  // `CivilianApplyMotionPose`, which reads the old block's root-motion bit off
+  // it and everything else off the new word op 0x2C is about to load.
+  const entryWord = sub.wait;
+  const host = f?.host ?? NULL_HOST;
   sub.script = script;
   sub.skipCount = 0;
 
@@ -58,10 +65,11 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         sub.loops = a[1];
         sub.frameLimit = 0;
         CivilianSetMotion(obj, a[0],
-                          c.op === CivilianOp.SetMotionFrom ? a[2] : 0);
+                          c.op === CivilianOp.SetMotionFrom ? a[2] : 0,
+                          entryWord, host);
         break;
       case CivilianOp.SetFrameLimit: sub.frameLimit = a[0]; break;
-      case CivilianOp.SetTurnRate: sub.turnRate = a[0]; break;
+      case CivilianOp.SetMotionBlend: sub.motionBlend = a[0]; break;
       case CivilianOp.SetMotionFrame: sub.motionCompare = a[0]; break;
       case CivilianOp.SetTarget:
         sub.targetMode = a[0];
@@ -124,9 +132,13 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         sub.sphereCentreMode = (a[0] << 24) >> 24;
         break;
       case CivilianOp.SetPose:
+        // Six dwords, copied: the position's floats into `obj+0x40..0x48`,
+        // the rotation's BAMS into `obj+0x64..0x6C` -- pitch, yaw, roll.
         if (c.pose && c.pose.length === 6) {
           obj.pos = { x: c.pose[0], y: c.pose[1], z: c.pose[2] };
+          obj.pitch = c.pose[3];
           obj.yaw = c.pose[4];
+          obj.roll = c.pose[5];
         }
         break;
       case CivilianOp.SetChildCue:
@@ -309,33 +321,32 @@ function CivilianApplyWaitWord(obj: Actor, word: number,
 }
 
 /**
- * Ops 0x00 and 0x01: change the clip, reset its clock, **and set the clip's
- * root-motion gate from the block's wait word.**
+ * Ops 0x00 and 0x01: change the clip -- **and set the clip's root-motion
+ * gate from the block's wait word**, then hand the change to
+ * `CivilianApplyMotionPose` (`FUN_0048C310`).
  *
- * All three are inside the engine's `if (model+0x20 != new clip)`, so a block
- * that re-states the clip it is already playing changes none of them — the
- * gate included. That is why the test comes first here and not inside the
- * assignments.
+ * All of it is inside the engine's `if (model+0x20 != new clip)`, so a block
+ * that re-states the clip it is already playing changes none of it -- the
+ * gate included. That is why the test comes first here.
  *
  * The gate is `model+0x64` bit 1, {@link Actor.motionFlags}, and its source is
- * bit `0x00100000` of `sub.wait` — see {@link CivilianWait.RootMotion} for the
- * decompiled arm. `obj.rootFrame = -1` is the engine's baseline reset that
- * goes with it: `SkeletonApplyRootMotion` leaves `model+0x1160` alone while
- * the gate is clear, so the delta taken on the frame it re-opens would span
- * however long it was shut. Because the gate can only *change* here, and here
- * always clears the baseline, that span is never taken.
+ * bit `0x00100000` of `sub.wait` -- see {@link CivilianWait.RootMotion} for the
+ * decompiled arm. The engine writes it **before** the pose call, so the pose
+ * call sees the new gate; the root-motion baseline goes with the blend, which
+ * resets it (`Actor.rootFrame = -1`), so the delta taken on the frame a gate
+ * re-opens never spans the frames it was shut.
+ *
+ * `[port-only]` as a function: the two ops' shared arm, inline in the engine.
  */
-function CivilianSetMotion(obj: Actor, motion: number, frame: number): void {
+function CivilianSetMotion(obj: Actor, motion: number, start: number,
+                           entryWord: number, host: GameHost): void {
   if (obj.motion === motion) return;
-  obj.motion = motion;
-  const m = MotionOf(obj, motion);
-  obj.playTicks = FrameToTicks(frame, m);
-  obj.rootFrame = -1;
   if (obj.civ && (obj.civ.wait & CivilianWait.RootMotion) !== 0) {
     obj.motionFlags |= MotionFlag.RootMotion;
   } else {
     obj.motionFlags &= ~MotionFlag.RootMotion;
   }
+  CivilianApplyMotionPose(obj, entryWord, start, motion, host);
 }
 
 /**
@@ -361,12 +372,13 @@ export function CivilianReapplyWaitCommand(obj: Actor, script: number,
         sub.loops = a[1];
         obj.playTicks = 0;
         break;
-      case CivilianOp.SetMotionFrom: {
+      // `*(int *)(model + 8) = param_2[3]`: the start **cursor**, as it is.
+      // This converted it as an authored frame and started the clip twice
+      // as far in.
+      case CivilianOp.SetMotionFrom:
         sub.loops = a[1];
-        const m = MotionOf(obj, obj.motion);
-        obj.playTicks = FrameToTicks(a[2] ?? 0, m);
+        obj.playTicks = a[2] ?? 0;
         break;
-      }
       case CivilianOp.SetMotionFrame: sub.motionCompare = a[0]; break;
       case CivilianOp.SetTarget:
         sub.targetMode = a[0];

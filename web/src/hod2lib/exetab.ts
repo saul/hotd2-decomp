@@ -694,8 +694,15 @@ export class ExeTables {
           }
           if (op === 5) d.radius = asFloatBits(args[1]);
           if (op === 0x16) d.radius = asFloatBits(args[0]);
+          // Op 0x18 copies six **dwords** -- `MOV EDX,[EAX]; MOV [ECX],EDX`
+          // three times into `obj+0x40..0x48`, then three more into
+          // `obj+0x64..0x6C` (`0x0048BE71`..`0x0048BEA9`) -- so the first
+          // three are the position's floats and the last three are the
+          // rotation's BAMS **integers**. Read as floats, stage 1's bin
+          // civilian's `0xC000` yaw came out 6.9e-41.
           if (op === 0x18 && args[0]) {
-            d.pose = [0, 1, 2, 3, 4, 5].map((i) => this.rf32(args[0]! + i * 4));
+            d.pose = [0, 1, 2].map((i) => this.rf32(args[0]! + i * 4))
+              .concat([3, 4, 5].map((i) => this.ri32(args[0]! + i * 4)));
           }
           if ((op === 0x13 || op === 0x14) && (args[0] ?? 0) > 0) {
             d.item = this.civItem(args[0]!, items);

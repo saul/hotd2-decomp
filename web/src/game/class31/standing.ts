@@ -189,7 +189,7 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
     obj.pos.y = obj.strikeStart.y;
     obj.pos.z = obj.strikeStart.z;
     // The claim's answer is ignored: it swings whether or not it got one.
-    if (obj.attackPermit < 0) ThrowerTryClaimAttackSlot(obj, host);
+    if (obj.attackPermit < 0) ThrowerTryClaimAttackSlot(obj, rng, host);
     obj.flags |= ActorFlag.BackingOff;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
     const e = ThrowerStrikeEntry(obj, obj.attack);

@@ -898,3 +898,19 @@ the matrix stack's, and `RenderInitStates` flips z into D3D's view with
 the axis before you say which end comes first**, and treat any default a
 library supplies for state the exe sets explicitly as a divergence until it is
 shown to agree.
+
+**L62 -- A literal the engine compares against belongs to the engine's
+representation, and the port need not share it.** `g_attack_permits` holds 1
+or 0 in the exe and the holder's `at` or -1 in the port, a choice written down
+on the global. Two scripted attackers' player picks were transcribed
+instruction by instruction -- `CMP [g_attack_permits + p*4], 1` became
+`=== 1` and `TEST EAX, EAX` became `=== 0` -- so neither ever saw a permit a
+claim held, nor a free one: a scripted zombie took a player's permit from under
+the zombie that had it and never fell back to the other player. Every test
+passed, because those two routines' own writes to the table also used the
+exe's `1`, so they agreed with themselves and with nobody else. **When the port
+represents a value differently from the exe, transcribe the question the
+comparison asks ("is it taken"), not its constant** -- and before calling any
+reader of such a value faithful, grep every reader for the exe's literals.
+It is a cousin of `L3`: there one field means two things in two classes, here
+one table means one thing in two encodings.

@@ -185,7 +185,7 @@ export function ThrowerStateWaitForPermit(obj: ThrowerActor, eye: Vec3,
                                           rng: Rng,
                                           host: GameHost): void {
   if (obj.sub === 0) {
-    if (!ThrowerTryClaimAttackSlot(obj, host)) {
+    if (!ThrowerTryClaimAttackSlot(obj, rng, host)) {
       // `if ((obj+0x34 & 0x40000000) != 0) return;` — an actor already in a
       // reaction holds whatever clip that reaction is playing rather than
       // dropping into the wait's idle.

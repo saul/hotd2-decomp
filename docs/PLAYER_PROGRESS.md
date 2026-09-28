@@ -2288,12 +2288,14 @@ frame with the file, rendered across the wrap, and heard), and
   it may attack: `{25, 38, 51}` radii, 2 / +3 / +4 steps, from `DAT_004C4CD0`
   and `FUN_00408D60`. No stage uses evt `0x0E`, so those constants are what
   every encounter runs on.
-* `TryClaimAttackSlot` grants **one permit per player**. Only the holder enters
-  its attack state; everyone else keeps walking. That one byte (`obj+0x121`)
-  also decides the camera's focus.
+* `TryClaimAttackSlot` grants **one permit per player**, and offers each
+  claimant exactly one of them — see *The claim offers one player* below.
+  Only the holder enters its attack state; everyone else keeps walking. That
+  one byte (`obj+0x121`) also decides the camera's focus.
 * `RegisterForCameraTracking` skips any actor with flag `0x10000`, which the
-  approach state sets while walking and clears when the actor wins a permit —
-  so the camera only ever considers enemies that have committed. Candidates are
+  approach state sets while walking and clears itself when the actor wins a
+  permit — the claim does not — so the camera only ever considers enemies
+  that have committed. Candidates are
   keyed `|actor − eye| × 10` and radix-sorted nearest-first; permit holders take
   slots 0 and 1, the rest from 2.
 * `SelectCameraLookAtTarget` aims at the lone attacker, the midpoint of two, or
@@ -2446,6 +2448,49 @@ pair**: `PlaySoundId` walks two parallel tables — the looping ids at
 `LASER_SWORD_22_OFF` kills it before the strike. The off cue fires on *every*
 non-blinking frame of the hold, not once; the engine has no edge test there and
 `PlaySoundId` does not de-duplicate.
+
+### The claim offers one player, and leaves the camera bit to its callers
+
+`TryClaimAttackSlot` (`FUN_00455DE0`) and `ThrowerTryClaimAttackSlot`
+(`FUN_0044CA40`) are transcribed whole now; both used to carry a declared
+divergence.
+
+* **The pick.** The port took the first free permit. The engine picks one
+  player and offers only that player's: `g_active_player`'s with one attacker,
+  a `rand() % 2` with two attackers when one player is in play or one enemy is
+  present, and otherwise the player on the actor's own half of the screen
+  (`ActorScreenHalfSign`, `FUN_00409C90`, ported alongside). Nothing falls back
+  to the other player. For player 1 alone the answers were the same; **player
+  2 alone** was being offered player 1's permit, and in a two-player game
+  every enemy went for player 1 first. The two `rand()` arms draw from the
+  frame's `Rng` at the exact point each caller claims, so all twenty claim
+  sites in the two classes carry one — `ZombieShouldStandAndThrow`,
+  `ZombieStateWaitForCameraFrame`, `ZombieStateScriptedGrabAndDespawn`,
+  `ThrowerStatePathFollow` and `ThrowerStateRideObjectPath` gained the
+  parameter. One-player play draws nothing new, so its random stream is
+  unchanged.
+* **`NoCameraTrack`.** The port's claim lowered `obj+0x34` bit `0x10000` on
+  every grant; neither exe routine writes `obj+0x34` at all. Only
+  `ZombieStateApproach` (after its grant), `ZombieStateWaitForCameraFrame`
+  (before its claim, hidden kind only) and `ZombieStateHoldForCameraCue` (at
+  its cue) lower it, and the port already had all three. So a captor held for
+  a camera cue now stays off the camera's list until the cue, as it does in
+  the game, instead of from its first claim in the hub.
+* **The callers, read with it.** `ZombieShouldStandAndThrow` claims *before*
+  its hand test for `znassb` and after it for types 0x13/0x14, so an unarmed
+  `znassb` walker takes the permit and is answered no. `ThrowerTryEnterState`'s
+  state 0x20 claims and then asks for surface `0x35` (the router called it an
+  open question; `QueryGroundSurfaceAt` answers it), keeping the permit on a
+  refusal. `ThrowerStateRideObjectPath` is shot-immune for its ride. The
+  three-hop blink-in raised `NoCameraTrack` where the exe raises `ShotImmune`
+  (`0x100`), so stage 6's `zslman` could be shot while materialising and were
+  hidden from the camera. The scripted attackers' own player picks
+  (`ZombieScriptedPickPlayer`, `ThrowerGrabTakePermit`) compared the permit
+  table against the engine's literals, `=== 1` and `=== 0`, which the port's
+  holder-id/`-1` representation never matches for a claimed entry.
+* **Still open.** Class 0x30 state 28 (`0x004586E0`, claim at `0x004587C4`)
+  is the one claimant of the twenty-one that is not ported. A `-2` pick that `IsPlayerAttackable` passes — attract mode only
+  — is refused rather than claimed; the port runs no attract mode.
 
 ### The noise a standing zombie makes, and the chainsaw
 

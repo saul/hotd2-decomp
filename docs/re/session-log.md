@@ -20321,6 +20321,45 @@ reduced to its latch, `SpawnGroundRingEffect` returning early, the entrance's
 and the leap's sounds and shake removed, the rain opcode not writing `G`, and
 the sub-3 latch put back on the carried bit each fail `npm run test:port`.
 
+## 2026-09-27 -- the screen cards' furniture bits, 0x20 and 0x10
+
+`game/class60/` and `game/class61/` both said `[port-only] the bit is not
+modelled` for `g_screen_furniture_flags` (`0x009A5900`) because nothing in
+the port read the word. Two readers had landed since -- `HudDrawLives` (bit
+`0x10`, "HOLD YOUR FIRE!") and `Class22CutsceneHoldUntilChapterCard` (bit
+`0x20`) -- and a third, `HudDrawShutterState`'s state 4 (`& 0x30` at
+`0x00413BB5`), is on a branch not yet merged. Both cards now write it, and
+`ScreenFurniture` in `game/globals.ts` names the two bits for writers and
+readers alike. `[proved]` off the disassembly:
+
+* `ChapterCardInstall` ORs `0x20` in **three** places, not one: sub 0
+  (`0x0043436B`), and each installer arm before it hands over -- Boss Mode at
+  `0x004342F6`, app state `0x0B` at `0x00434324`. It clears it at `0x004348C7`
+  after the flag at `0x004348C1`. The two variants clear it for their own
+  arms (`BossModeChapterCardUpdate` at `0x00434CE7`, `FUN_00434DA0` at
+  `0x00434ED4`), and neither is ported, so an actor on either arm holds the
+  bit up as long as it holds the gate shut. Both arms are unreachable from a
+  bundle.
+* `ResultCardInstall` ORs `0x10` at `0x00434FD0` beside the firing-gate drop
+  and clears it at `0x00435683` after the flag at `0x0043567C`. The tail's
+  `CMP word ptr [EBP+0x11c], BX` compares with zero: `EBX` is cleared at
+  `0x00435188` and nothing in the draw after it writes it -- which the port
+  had assumed and nobody had checked.
+
+**The skip.** By the user's decision (NEW-BUGS 13) every chapter card is cut
+on its first update. That path still sets and clears `0x20` in the same
+call, exactly as the exe does for a player who skips on the first frame, so
+**no reader ever sees the chapter card's bit** -- class 0x22's cameo and the
+shutter's state-4 bars draw straight through where an unskipped card would
+hide them for three seconds. A before-and-after test cannot tell that from a
+card that never wrote the word, so `test:port` records the writes themselves
+through an accessor on `G`, each with flag 248 as it stood.
+
+**Found in passing.** `obj_484ff0_props`' rig note, in both
+`tools/hod2lib/rigs.py` and `web/src/hod2lib/rigs_data.ts`, says "nothing
+sets 0x20" and calls the bit dead; the chapter card sets it on every stage.
+Left for its own change -- it is bundle-writer text with a Python twin.
+
 ## 2026-09-27 -- `obj_484ff0_props`: the `0x20` gate is the chapter card's, not dead
 
 The rig's note (`tools/hod2lib/rigs.py`, and `rigs_data.ts` generated from it)
@@ -20355,9 +20394,9 @@ on `DrawAndStep`) and not for these two.
 
 **The port has nothing to gate.** What sits under the test in both routines is
 the draw, which is the renderer's; the tick, which is the port's
-(`ActorAdvanceMotion`), is outside it. The bit itself is modelled on the peer
-branch `claude/loving-matsumoto-7d3a6c` (`c1e6e721`, `ScreenFurniture` in
-`game/globals.ts`), and under the user's skip-every-card decision (NEW-BUGS 13)
+(`ActorAdvanceMotion`), is outside it. The bit itself is modelled by the
+screen-card session (`c1e6e721`, merged to main as `ccb956b7`;
+`ScreenFurniture.ChapterCard` in `game/globals.ts`), and under the user's skip-every-card decision (NEW-BUGS 13)
 sub 0 raises it and the countdown drops it inside one `ChapterCardInstall`
 update, so no draw could observe it. A render-side gate is worth writing only
 if the card is ever held for its dwell. Comments at class 0x24's tail and

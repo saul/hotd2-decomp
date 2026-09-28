@@ -287,11 +287,16 @@ export function entryTail(rec: Spawn, state: number,
  * and the list is terminated by a step of -1.
  *
  * *step* is the arc's parameter-advance rate: `ActorArcBeginTo` sets the
- * duration to `dist2d * step` rounded down to a multiple of *step*. It is
- * **not** the arc kind.
+ * duration to `dist2d * step` rounded down to a multiple of *step*, and
+ * `ActorArcInterpolate` advances the counter by *step* a frame -- so the leg
+ * still takes about `dist2d` frames, and a bigger step only makes it higher.
+ * It is **not** the arc kind.
  *
  * *script* selects the leg's three-stage arc motion script for every character
- * type but 0x17.
+ * type but 0x17 -- 1 -> `0x00565E58`, 2 -> `0x00565E88`, anything else
+ * `0x00565EB8`; type 0x17 always takes `0x00565E28`. The bundle carries them
+ * as `class31.scripts.path_style1`, `path_style2`, `path_style0` and
+ * `drop_zskamere` (see `arcscript.ts`).
  */
 export const WAYPOINT_BYTES = 0x10;
 

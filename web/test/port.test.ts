@@ -285,8 +285,10 @@ import { ThrowerBeginKnockbackArc, ThrowerStateCorpse }
 import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
 import {
-  ActorArcBegin, ActorArcStep, ActorClipFrame, InstallArcMotionScript,
+  ActorArcBegin, ActorArcBeginTo, ActorArcStep, ActorClipFrame,
+  FitArcScriptByFadeLength, FitArcScriptByStartFrame, InstallArcMotionScript,
 } from "../src/game/class31/arc";
+import { SND_PATH_LEG_LANDED } from "../src/game/class31/path";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
@@ -1044,74 +1046,10 @@ console.log("RankEnemiesByDistance:");
 }
 
 // -- 3c. the route ----------------------------------------------------------
-
-console.log("ThrowerStatePathFollow:");
-{
-  const rng = new Rng(6);
-  const events = scene(0, rng);
-  // Stage 2 block 3's zsass, 3/3/4, descriptor 0x1EF0, verbatim: wait 30
-  // frames, then climb three legs before it fights.
-  const z = ActorSpawn(0x1ef0, SpawnClass.Thrower, 1, "zsass", {
-    initialState: ThrowerState.PathFollow,
-    path: {
-      delay: 30,
-      points: [
-        { step: 1, motion_set: 1, dest: [-741.9, 100.0, -890.7] },
-        { step: 1, motion_set: 1, dest: [-741.9, 110.0, -845.7] },
-        { step: 1, motion_set: 2, dest: [-737.5, 115.0, -810.0] },
-      ],
-    },
-  });
-  z.visible = true;
-  z.hp = 10;
-  z.pos = vec3(-741.9, 90.0, -930.0);
-  z.motion = 10;
-  const start = { ...z.pos };
-
-  check("it starts on the route, not standing and throwing",
-        z.state === ThrowerState.PathFollow, `state ${z.state}`);
-  for (let i = 0; i < 20; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-  check("it holds still for the descriptor's delay",
-        Math.abs(z.pos.z - start.z) < 0.01, `moved ${(z.pos.z - start.z).toFixed(2)}`);
-
-  // The leap at the end lands in front of the camera, so the camera has to be
-  // somewhere plausible: in the real scene it is on the street below the roof,
-  // not a thousand units away at the origin.
-  const roofEye = vec3(-737.5, 100.0, -780.0);
-  const roofHost = {
-    ...NULL_HOST,
-    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
-      out.x = roofEye.x + x;
-      out.y = roofEye.y + y;
-      out.z = roofEye.z + zz;
-    },
-  };
-  let reachedLast = false;
-  for (let i = 0; i < 900; i++) {
-    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
-    if (!reachedLast && Math.abs(z.pos.x + 737.5) < 0.2
-        && Math.abs(z.pos.z + 810.0) < 0.2
-        && Math.abs(z.pos.y - 115.0) < 0.2) reachedLast = true;
-  }
-  check("it walks the route to the last waypoint", reachedLast,
-        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
-  // `ThrowerStateLeapDown`: off the roof and into shot, at a place picked on
-  // the *screen* rather than on the map -- 15.5 in front, 9.4 below.
-  // The depth is exact -- 15.5 is a literal in `ThrowerPickLandingPoint`. The
-  // drop is not asserted to the unit because it divides by
-  // `g_projection_distance_px`, which is derived from the projection rather
-  // than read out of the binary; what matters is that it comes *down* and
-  // lands in front.
-  check("then it comes down off the roof, in front of the camera",
-        Math.abs(z.pos.z - (roofEye.z - 15.5)) < 0.5
-        && z.pos.y < 115 - 5 && z.pos.y < roofEye.y,
-        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
-  // ...and the pounce hands to the leap aside, not to the hub: state 9 always
-  // ends in state 10. Standing again is two states further on.
-  check("and only then goes for the player",
-        z.state === ThrowerState.LeapAside
-        || z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
-}
+//
+// `ThrowerStatePathFollow` is tested with the other class-0x31 states, under
+// "class 0x31, ThrowerStatePathFollow": it needs `CHARS31`'s arc scripts,
+// which are declared further down this file than this section runs.
 
 // -- 3c2. the entrance that arrives on a clip -----------------------------
 
@@ -5744,6 +5682,22 @@ const WALL_SCRIPT = (motionId: number) => [
   { motion: motionId, start: 34, fade: 5, until: 43 },
 ];
 
+/**
+ * `g_class31_arc_path_style0` (`0x00565EB8`) -- motion 301 cut at 0..8, 9..17
+ * and 18..23, no fades -- and `g_class31_arc_path_style1` (`0x00565E58`):
+ * 301 held on frame 12 three times over, fade 1 each.
+ */
+const PATH_STYLE0 = [
+  { motion: 301, start: 0, fade: 0, until: 8 },
+  { motion: 301, start: 9, fade: 0, until: 17 },
+  { motion: 301, start: 18, fade: 0, until: 23 },
+];
+const PATH_STYLE1 = [
+  { motion: 301, start: 12, fade: 1, until: 12 },
+  { motion: 301, start: 12, fade: 1, until: 12 },
+  { motion: 301, start: 12, fade: 1, until: 12 },
+];
+
 const TYPE31: CharacterType = {
   ...TYPE,
   type: 0x19, name: "zstin", file: "zstin.bin",
@@ -5759,6 +5713,8 @@ const TYPE31: CharacterType = {
     "929": motion(20), "930": motion(20), "931": motion(20), "934": motion(50),
     "935": motion(20), "938": motion(20), "939": motion(20),
     "283b": motion(1), "285": motion(50), "287": motion(29),
+    // The path follow's hop, 13 authored frames as `szom.bin` has it.
+    "301": motion(13),
   },
 };
 
@@ -5808,6 +5764,15 @@ const CLASS31 = {
       { motion: 439, start: 0, fade: 0, until: 19 },
       { motion: 439, start: 20, fade: 0, until: 31 },
       { motion: 439, start: 32, fade: 0, until: 42 },
+    ],
+    // `ThrowerStatePathFollow`'s three, verbatim from `0x00565EB8`,
+    // `0x00565E58` and `0x00565E88`.
+    path_style0: PATH_STYLE0,
+    path_style1: PATH_STYLE1,
+    path_style2: [
+      { motion: 301, start: 7, fade: 0, until: 11 },
+      { motion: 300, start: 48, fade: 1, until: 65 },
+      { motion: 301, start: 17, fade: 1, until: 22 },
     ],
   },
 };
@@ -6157,6 +6122,181 @@ console.log("class 0x31, ThrowerStateLeapToPoint:");
   check("...and the first frame of the hub overwrites it with the set's walk",
         z.motion === 313 && z.action === null,
         `motion ${z.motion} action ${z.action?.motion ?? "null"}`);
+}
+
+// `FitArcScriptByFadeLength` (`FUN_0044D5F0`) and `FitArcScriptByStartFrame`
+// (`FUN_0044E140`) are two routines with two slacks, and the port had one
+// function standing in for both. Every expected value here is worked by hand
+// from the listing, not from the port.
+console.log("class 0x31, the two arc-script fits:");
+{
+  const fit = (script: typeof PATH_STYLE0, T: number, byStart = false) => {
+    const a = thrower(ThrowerState.Idle);
+    InstallArcMotionScript(a, script);
+    a.arcTotal = T;
+    if (byStart) FitArcScriptByStartFrame(a);
+    else FitArcScriptByFadeLength(a);
+    return a.arcScript!;
+  };
+  // slack = s1.start - s1.until + T = 9 - 17 + 19 = 11: both fades climb to
+  // 6 and 6, twelve is past eleven, so stage 1 gives one back.
+  let s = fit(PATH_STYLE0, 19);
+  check("the fade fit grows both fades and gives the odd frame to stage 2",
+        s[1].fade === 5 && s[2].fade === 6,
+        `fades ${s[1].fade}, ${s[2].fade}`);
+  s = fit(PATH_STYLE1, 24);
+  check("...a slack of 24 splits evenly", s[1].fade === 12 && s[2].fade === 12,
+        `fades ${s[1].fade}, ${s[2].fade}`);
+  s = fit(PATH_STYLE0, 8);
+  check("...a slack of 0 leaves the script alone",
+        s[1].fade === 0 && s[2].fade === 0 && s[1].start === 9
+        && s[1].until === 17, JSON.stringify(s[1]));
+  // A slack the authored fades already cover: 10 - 12 + 5 = 3 against fades
+  // of 4 and 6. The engine runs no increment and takes stage 1's fade down to
+  // 3 -- `CMP EDI, ESI / JGE` then `DEC EDX` at 0x0044D68F. The old single
+  // function measured this slack net of the fades, found it negative, and
+  // walked stage 1's window instead.
+  s = fit([{ motion: 301, start: 0, fade: 0, until: 5 },
+           { motion: 301, start: 10, fade: 4, until: 12 },
+           { motion: 301, start: 13, fade: 6, until: 20 }], 5);
+  check("...and a slack inside the fades only trims stage 1's",
+        s[1].fade === 3 && s[2].fade === 6 && s[1].start === 10
+        && s[1].until === 12, JSON.stringify(s.slice(1)));
+  // 9 - 17 + 4 = -4: both fades to 1, then stage 1's window closes from both
+  // ends -- 10..16, 11..15, 12..14, 13..13 -- until it fits and is at most a
+  // frame wide, and a window of nothing gives its start back.
+  s = fit(PATH_STYLE0, 4);
+  check("the tight branch resets both fades to 1 and closes stage 1",
+        s[1].fade === 1 && s[2].fade === 1 && s[1].start === 12
+        && s[1].until === 13, JSON.stringify(s.slice(1)));
+  // zstin's: slack = 400 - 0 - 5 - 46 + 23 = 372, k = 186, and nothing clamps.
+  s = fit(ARC(303), 400, true);
+  check("the start-frame fit halves its slack onto both fades, unclamped",
+        s[1].fade === 191 && s[2].fade === 186,
+        `fades ${s[1].fade}, ${s[2].fade}`);
+}
+
+console.log("class 0x31, ThrowerStatePathFollow:");
+{
+  // Stage 2 block 14's zsass, descriptor 0x7EA4, verbatim out of the bundle:
+  // wait 45 frames, then five legs over the rooftops -- the first at step 1
+  // on style 3 (which is style 0), the other four at step 3 on style 1.
+  const route = {
+    delay: 45,
+    points: [
+      { step: 1, motion_set: 3, dest: [-984.199951171875, 23.599998474121094, -1087.5] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-984.0999755859375, 37.29999923706055, -1095.699951171875] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-979.2999877929688, 45.19999694824219, -1111] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-964.5, 47.69999694824219, -1114.89990234375] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-952.5, 27.599998474121094, -1114.5999755859375] as [number, number, number] },
+    ],
+  };
+  // `ActorArcBeginTo`: n = (int)(dist2d * step), T = n - n % step.
+  const t = thrower(ThrowerState.Idle);
+  t.pos = vec3(...route.points[0].dest);
+  ActorArcBeginTo(t, vec3(...route.points[1].dest), 3);
+  check("a step-3 leg of 8.2 units is 24 parameter frames",
+        t.arcTotal === 24, `T ${t.arcTotal}`);
+
+  const rng = new Rng(14);
+  const events = new Events();
+  // `thrower()`'s scene without its zstin.
+  ResetGameGlobals();
+  SetGameTables(CHARS31);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  G.g_camera_yaw_bams = 0;
+  const a = ActorSpawn(0x7ea4, SpawnClass.Thrower, 0x16, "zsass", {
+    initialState: ThrowerState.PathFollow, condition: 0, path: route,
+  });
+  if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  a.visible = true;
+  a.hp = 130;
+  a.motion = 936;
+  a.pos = vec3(-1003.7, 17.1, -1086.2);
+  const start = { ...a.pos };
+  let frame = 0;
+  const ends: number[] = [];
+  events.on("sound.play", (d) => {
+    if (d.id === SND_PATH_LEG_LANDED) ends.push(frame);
+  });
+  // The pounce at the end lands in front of the camera, so put one where the
+  // route comes down: on the street below its last roof.
+  const roofEye = vec3(-952.5, 10.0, -1090.0);
+  const roofHost = {
+    ...NULL_HOST,
+    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+      out.x = roofEye.x + x; out.y = roofEye.y + y; out.z = roofEye.z + zz;
+    },
+  };
+  const pos: Vec3[] = [];
+  const sub: number[] = [];
+  const clip: number[] = [];
+  const cursor: number[] = [];
+  let immune = 0;
+  for (; frame < 400 && a.state === ThrowerState.PathFollow; frame++) {
+    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
+    pos.push({ ...a.pos });
+    sub.push(a.sub);
+    clip.push(a.action?.motion ?? -1);
+    cursor.push(ActorClipFrame(a));
+    if (a.flags & ActorFlag.ShotImmune) immune += 1;
+  }
+  const same = (p: Vec3, q: Vec3, e = 1e-6) =>
+    Math.abs(p.x - q.x) < e && Math.abs(p.y - q.y) < e && Math.abs(p.z - q.z) < e;
+  // `DEC` then `JG`: the 45th update is the one that begins the first leg.
+  check("it waits out the descriptor's 45 frames where it stands",
+        sub[43] === 1 && sub[44] === 3 && pos.slice(0, 44).every((p) => same(p, start)),
+        `sub ${sub[43]} -> ${sub[44]}`);
+  check("...and winds up on the spot for style 0's first stage",
+        pos.slice(44, 52).every((p) => same(p, start)) && clip[44] === 301,
+        `clip ${clip[44]}`);
+  check("five legs, and a footfall at the end of each",
+        ends.length === 5, `${ends.length}: ${ends.join(", ")}`);
+  // **The pace.** `ActorArcStep` flies the arc `step` parameter frames a
+  // frame, so a step-3 leg of T lasts T/3 frames of flight, plus the frame it
+  // begins on and the frame `ActorArcInterpolate` reports it over: 24/3 + 2,
+  // 48/3 + 2, 45/3 + 2 and 36/3 + 2. The port flew one parameter frame a frame,
+  // which made these 25, 49, 46 and 37 -- the "moves quite slowly" report.
+  const legs = ends.slice(1).map((e, i) => e - ends[i]);
+  check("each step-3 leg lasts T / 3 + 2 frames",
+        legs.join() === "10,18,17,14", legs.join(", "));
+  // 3 * 8.2006 / 24 on the ground each frame of the second leg's flight.
+  let fastest = 0;
+  for (let i = ends[0] + 2; i <= ends[1]; i++) {
+    fastest = Math.max(fastest, dist2d(pos[i], pos[i - 1]));
+  }
+  check("...covering about a unit of ground a frame",
+        Math.abs(fastest - 3 * 8.200609 / 24) < 1e-3, fastest.toFixed(4));
+  check("every leg lands on its waypoint",
+        ends.every((e, k) => same(pos[e], vec3(...route.points[k].dest), 1e-3)),
+        ends.map((e) => `(${pos[e].x.toFixed(2)}, ${pos[e].y.toFixed(2)}, `
+                        + `${pos[e].z.toFixed(2)})`).join(" "));
+  // Style 1 is motion 301 held on frame 12 by three fade-1 stages, and the fit
+  // grows the fades to cover the leg, so the clip never leaves the frame.
+  const hop = clip.slice(ends[0] + 1, ends[4]);
+  const hopAt = cursor.slice(ends[0] + 1, ends[4]);
+  check("the four hops are clip 301 held on frame 12",
+        hop.every((m) => m === 301) && hopAt.every((c) => c === 12),
+        `${[...new Set(hop)].join()} at ${[...new Set(hopAt)].join()}`);
+  // `OR AH, 0x1` at 0x0044EE3E and `AND CH, 0xFE` at 0x0044EF22; the arc's own
+  // windup finds the bit already up and leaves it alone.
+  check("it cannot be shot on the route, and can when it leaves it",
+        immune === pos.length - 1 && (a.flags & ActorFlag.ShotImmune) === 0,
+        `${immune} of ${pos.length}`);
+  check("then it claims a permit and pounces",
+        a.state === ThrowerState.Pounce && a.attackPermit !== -1,
+        `state ${a.state} permit ${a.attackPermit}`);
+  // `ThrowerStateLeapDown`: off the roof and into shot, at a place picked on
+  // the *screen* -- 15.5 in front, 9.4 below.
+  for (let i = 0; i < 300 && a.state === ThrowerState.Pounce; i++) {
+    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
+  }
+  check("then it comes down off the roof, in front of the camera",
+        Math.abs(a.pos.z - (roofEye.z - 15.5)) < 0.5 && a.pos.y < roofEye.y,
+        `(${a.pos.x.toFixed(1)}, ${a.pos.y.toFixed(1)}, ${a.pos.z.toFixed(1)})`);
+  check("...and the pounce hands to the leap aside",
+        a.state === ThrowerState.LeapAside, `state ${a.state}`);
 }
 
 console.log("class 0x31, ThrowerStateWalkDistance:");

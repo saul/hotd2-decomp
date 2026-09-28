@@ -599,7 +599,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
       return ThrowerStateLeapToPoint(obj, dt, rng, events);
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
-      return ThrowerStatePathFollow(obj, dt);
+      return ThrowerStatePathFollow(obj, dt, events);
     // No turn here. `TurnActorTowardCamera` (`FUN_00409ED0`) has two callers
     // in the image and both are `ZombieStateAttackRun`'s; `ThrowerStateThrow`
     // calls no turn routine at all, so a thrower throws on the facing

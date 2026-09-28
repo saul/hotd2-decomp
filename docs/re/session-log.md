@@ -20626,3 +20626,105 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+
+## 2026-09-28 -- the rooftop route is flown at the waypoint's step, and the two arc fits are two routines
+
+NEW-BUGS-2: "the zombie that jumps across the rooftops at
+`?stage=2&original=1&mode=play&block=14&step=2&op=9&frame=372` moves quite
+slowly compared to the real game." Probed the page headlessly (`G` imported
+into `page.evaluate`, one row a rAF): spawn `0x7EA4`, class 0x31, character
+type 0x16 `zsass`, initial state 26 `ThrowerStatePathFollow`, delay 45 and five
+waypoints -- one at step 1 on style 3, four at step 3 on style 1. The port flew
+the step-3 legs in 25, 49, 46 and 37 frames at 0.33-0.35 units of ground a
+frame, in the base clip 936, and reached the pounce at frame 220.
+
+Read `ThrowerStatePathFollow` (`FUN_0044EE00`) from the listing, not the
+pseudocode: jump table `0x0044EF7C` (cases `0x44EE29`, `0x44EE52`, `0x44EE70`,
+`0x44EEE8` -- case 2 lands after the `INC` at `0x44EE69`, so the sub goes 2 -> 3
+once, not twice), `OR AH, 1` on `obj+0x34` in sub 0 and `AND CH, 0xFE` at the
+terminator, the style switch at `0x44EE80..0x44EEA4`, `PUSH 0x565e28` for type
+0x17, and **`ActorArcStep(obj, wp.step)`** at `0x44EEEE`. `ActorArcStep`
+(`FUN_0044D860`) passes `EDI` -- its second argument -- to `ActorArcInterpolate`
+at `0x44D989` and `0x44D9EC`, and `ActorArcInterpolate` (`FUN_0044DD00`) adds it
+to `obj+0x1330` (`ADD EDX, ESI` at `0x44DD85`). `ActorArcBeginTo`
+(`FUN_0044DC70`) is `n = __ftol(sqrt(dx*dx + dz*dz) * step)` (`FIMUL [ESP+0x20]`
+at `0x44DCDD`), `T = n - n % step`. So a leg is `T / step` frames, about one
+unit of ground a frame whatever the step, and the step buys height.
+
+The port's `path.ts` had the duration right and flew it one parameter frame a
+game frame through `ActorArcVelocity`, with no arc motion script and none of
+the state's flags or sound. Transcribed it whole. Its three scripts --
+`g_class31_arc_path_style0/1/2`, already named in `globals.tsv` -- were not in
+the bundle and neither was clip 301 they play; added to `CLASS31_ARC_SCRIPTS`
+in both halves of the library (the `c17` script is `drop_zskamere`'s address).
+`verify_combat.py` check 16 now reads 41 scripts and nine clip switches.
+After, in the running player at the report's URL: legs of 10, 18, 17 and 14
+frames, 0.92-0.96 units a frame, the pounce at frame 135, clip 301 held on
+frame 12 through the hops.
+
+**`FitArcScriptByFadeLength` (`FUN_0044D5F0`) was wrong, and so was its
+annotation.** Both said `slack = T - s2.fade - s1.fade - s1.until + s1.start`,
+which is `FitArcScriptByStartFrame`'s (`FUN_0044E140`). The listing's is
+`s1.start - s1.until + T` (`0x44D606..0x44D614`); the positive arm grows both
+fades together until they cover it and takes one back off stage 1, the tight
+arm resets both fades to 1 first, and only this routine clamps at `0x7F` --
+`FitArcScriptByStartFrame` does not, which the port's shared function did.
+Split into the two routines; the port's two declared divergences for "one
+function where the engine has two" and "the fixed point of the loop, not the
+loop" are gone with it. The existing `zstin` assertion (fades 9 and 14 over a
+30-frame drop) is unchanged, which is the start-frame arm agreeing.
+
+`g_projection_distance_px` (`0x009A2D70`): its one writer,
+`SetupSceneProjection` at `0x00418528..0x0041853B`, is `240.0 /
+tan(double [0x004ED1D0] = 0.35866388296751145)` = 640.2079. The port had it as
+640.2, `[likely]`, in four places; `combat/permits.ts` has the exact value now
+and `ThrowerPickLandingPoint` imports it. The other two copies
+(`scene_lights.ts`, `class11/index.ts`) are left for whoever opens those files.
+
+**Wrong turns.**
+* `ActorArcBeginTo`'s annotation said step "is frames per unit: 1 gives a unit
+  a frame, 2 gives half" and that it "selects which axis carries the arc".
+  Both wrong -- it is flown at `step` a frame, and the axis is `obj+0x1354`.
+  `tools/hod2lib/placement.py`'s waypoint comment had it right all along (with
+  a routine name, `ActorArcStepInterp`, that does not exist; fixed).
+* A first draft of the fit's doc comment gave the old port's answer for the
+  rooftop's first leg as a 3-frame hold; worked by hand it was 6 and 5 against
+  the engine's 5 and 6. Numbers in prose get computed or left out.
+* `page.waitForFunction` with an `async` predicate resolved at once -- the
+  returned promise is truthy -- so the first screenshot sequence was labelled
+  with frames it was not taken at. Polled `G.g_frame` from Node instead, and
+  paused with Space for each shot.
+
+**Found, not fixed** -- a peer is on `ThrowerStateLeapDown` /
+`ThrowerStateLeapStrike`, so these are for that workstream. From the
+decompilation of `FUN_0044B670` and `FUN_0044B880`, not yet re-read in the
+listing:
+* LeapDown raises `obj+0x34` bit `0x10000000` (`ActorFlag.Committed`) and
+  clears it on the way to state 10; the port raises and clears `BackingOff`,
+  `0x20000000`.
+* LeapDown clears `obj+0x136C & ~0x180000` when the arc returns 0, so the
+  post-landing re-snap runs without collision; the port leaves it up.
+* LeapDown's exit is `obj+0x19C >= g_motion_play_length[obj+0x1B4] - 2`; the
+  port waits for its one-shot channel to end.
+* LeapDown's clear for types other than 0x18 is `0x9E0`; the port's includes
+  `0x200`. For 0x18 it saves the position to `obj+0x13D8` and clears `0x800`
+  only; the port does neither. The `rand()` is drawn for 0x18 too and then
+  overridden to 3; the port skips the draw. `ActorPlayHitVoice(obj, 3)` when
+  `obj+0x32C == 0x2002` is not ported.
+* LeapAside's sub 0 raises `obj+0x34 |= 0x20000000`, `obj+0x136C |= 0x180000`
+  (and `0x2000` for type 0x17); the port does not. Its landing clip goes
+  through `SetCurrentActorMotionBlended(set[4], 0, 1)` (`ActorSetMotionBlended`
+  with a stance clip at fade 5 for 0x18); the port calls class 0x30's
+  `ZombieSetMotionIfIdle`, which refuses while a one-shot is on -- the L11
+  shape `ThrowerStateLeapToPoint` already had fixed. Its exit also waits on
+  the cursor, `>= play_length - 2`, not on the channel. Ghidra shows a
+  `return` after `MatrixStackPop` in sub 0 that would stop the state ever
+  leaving sub 0; it is the no-return artefact of L35 -- the listing runs on
+  from `CALL 0x004a9840` at `0x0044BA37` into the script choice at
+  `0x0044BA3F` and the arc at `0x0044BAEB`.
+
+**And one for the camera workstream:** with the route at the engine's pace the
+tracking camera (`g_camera_is_tracking` 1, the look-at on the actor's tracked
+point) lags it, and in legs 3 and 4 the actor's torso sits 18-21 degrees above
+the look axis against a 20.55-degree half-field -- at the top edge. Whether
+the engine's camera keeps up better is the camera's question, not this one's.

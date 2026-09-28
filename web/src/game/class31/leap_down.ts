@@ -11,24 +11,22 @@
  * already put the actor where the swing will reach.
  */
 import type { Actor } from "../actor";
+import { PROJECTION_DISTANCE_PX } from "../combat/permits";
 import type { GameHost } from "../host";
 import { CharacterTypeOf } from "../tables";
 import type { Vec3 } from "../vec";
 
 /** `local_10` — the depth the landing point is unprojected at. */
 const LANDING_DEPTH = -15.5;
-/** `fVar2` — the vertical pixel offset, by character type. */
+/**
+ * `fVar2` — the vertical pixel offset, by character type: `float ptr
+ * [0x00565E0C]` = 390.0 for 0x16 and `[0x004C49CC]` = 320.0 otherwise, at
+ * `0x0044CBCA` and `0x0044CBD2`. Over `g_projection_distance_px` -- see
+ * {@link PROJECTION_DISTANCE_PX}, which this used to carry its own rounded
+ * copy of -- 390 puts the landing point 9.44 units below the eye.
+ */
 const LANDING_PX_ZSASS = 390;
 const LANDING_PX_OTHER = 320;
-/**
- * `g_projection_distance_px` — 0x009A2D70.
- *
- * [likely] Not read out of the binary; derived from `SetupSceneProjection`,
- * which builds the projection from 41.100 degrees vertical over 4:3. For a
- * 480-line frame that is `240 / tan(41.1/2)` = 640.2. Only the ratio
- * `px / this` matters, and it puts the landing point 9.4 units below the eye.
- */
-const PROJECTION_DISTANCE_PX = 640.2;
 
 export function ThrowerPickLandingPoint(obj: Actor, host: GameHost,
                                         out: Vec3): void {

@@ -299,28 +299,68 @@ the single builder now, and folding the harnesses into it turned up the same
 drift the other way: `replay.mjs` had been passing four class-0x31 descriptor
 fields the player never did.
 
-[open] You are meant to be able to shoot the axe out of the air — the weapon
-registers for the shot test every frame, and in the tutorial that is the whole
-lesson. The port's projectile pool is plain records and its shot test walks
-actors, so `ZombieThrownWeaponStateShotDown` is named rather than half-done.
+**You can shoot a thrown weapon out of the air** — the axe, and every knife
+and blade in the game. Both weapon routines end their frame with the draw, the
+view point at `obj+0x70` and `RegisterForShotTest` (`FUN_00405160`), so a
+weapon is an ordinary object to the shot test: a whole two-unit sphere
+(`obj+0x124 = 2.0`, `obj+0x34 = 0x80000001`, no per-bone bit), marked by
+`MarkActorShot` like anything else. Its own routine reads the mark on its next
+frame, counts a hit in `g_player_hit_count`, gives its thrower's permit back
+on the spot and goes to its shot-down state — `ThrownWeaponDeflected`
+(`FUN_00450050`) for class 0x31, `ZombieThrownWeaponStateShotDown`
+(`FUN_00459D20`) for class 0x30: a spark, `KNIFE*_OFF` and `BULLET_MET3`, five
+frames hanging where it was hit, and off to a random point up to a hundred
+units away in view space, cartwheeling about X at 1.3 times its old spin. It
+scores nothing. `game/thrown_weapon.ts` has the whole path.
 
-The shape of what that costs is now read rather than guessed. In the engine a
-thrown weapon is **not a record in a pool at all** — it is a whole object.
-`SpawnThrownWeapon` (`FUN_004504E0`) allocates `0x13F4` bytes with its own
-update `ThrownWeaponUpdate` (`FUN_00450780`), links it into the same object
-list every actor lives on, and calls `ActorClaimHitSlot` (`FUN_00409270`),
-which is what puts it in `g_hit_slots` — `0x009C88C0`, fourteen slots — and
-raises `obj+0x38` bit `0x40`. It dispatches on its own two-entry state table
-`g_thrown_weapon_states` — `0x00592AE0`: state 0 `ThrownWeaponFlyToTarget`
-(`FUN_0044FD40`) and state 1 `ThrownWeaponDeflected` (`FUN_00450050`), which
-`ThrownWeaponUpdate` routes into the moment `obj+0x34` bit `0x8` — the
-pending-shot bit — is set on it. It also
-**inherits the thrower's attack permit** (`obj+0x121` is copied across and the
-thrower's is cleared), and only gives it back when it lands or is deflected. So
-"shoot the axe down" is not a special case bolted onto a projectile: it is the
-ordinary shot path finding an ordinary object. Making the port able to do it
-means the pool becoming actors, which is a change to the shot path and to the
-snapshot, not to the projectile.
+It did not need the pool to become actors, which is what this paragraph used
+to say it would cost. The pool keeps the engine's fields at their offsets,
+each record runs the routine its launcher installed, and a shot-test entry can
+name a weapon as well as an actor; `ProcessPlayerShotsTestList` tests both in
+one pass and one sort. What the engine's weapon also does and the record does
+not: it claims a `g_hit_slots` entry (read only for a class-0x30 bone's cel
+phase), registers for camera tracking, draws a 5-by-5 ground shadow, and —
+for `zslman`'s blades — trails fading afterimages (`ZslmanBladeEmitAfterimage`,
+`FUN_00450930`). Each is declared where the call is not made.
+
+**The spin was the port's own, and slow.** Every thrown weapon tumbled at
+`0x200` BAMS a frame, declared as the port's invention on a reading that
+nothing writes `obj+0x135C` and the allocator leaves it uninitialised. Both
+launchers write it, past a `MatrixStackPop` the decompiler stops at (`L35`),
+and `ActorClearGameFields` clears the block on the line after `ActorAlloc`
+anyway:
+
+| weapon | rate | axis | from |
+|---|---|---|---|
+| `zsass`'s knives, `zslman`'s blades (class 0x31) | `0x2400`, signed by the hand | Y, with a fixed `0x600` lean on X for `zsass` | `SpawnThrownWeapon`, `0x0045072C` |
+| the axe (class 0x30, straight) | `0xB00` | X | `ZombieThrowHandWeapon`, `0x0045A427` |
+| `znassb`'s blades (class 0x30, arc) | `0x1600` | Y | `ZombieThrowHandWeapon`, `0x0045A43C` |
+
+Class 0x30's weapon also leaves the hand pointed at its target and rolled
+`0x800`, and both families land in the engine's own pose — class 0x31's faces
+the eye with two random kicks and keeps its lean, class 0x30's faces back the
+way it came — rather than a look-at the renderer used to do for them. The
+renderer now draws each weapon under the modelview its own routine built, so
+there is no second copy of the rotation order to drift.
+
+**And the permit rides the weapon.** Both launchers copy `obj+0x121` onto the
+projectile and leave the thrower holding **0**; the weapon gives it back when
+it has blinked out, or at once when it is shot down. The port freed it at the
+throw — class 0x31 — or at the end of the throw clip — class 0x30's
+`ZombieStateStandAndThrow`, whose clip end in fact drops only the off-screen
+latch. So a knife in the air now holds the room's permit for its flight, its
+thirty frames on the screen and its sixty blinking, and **shooting it down is
+what lets the next enemy in**: in stage 2 block 5 the second `zsass` used to
+throw twenty-seven frames after the first, with both knives in the air at
+once.
+
+**`znassb` throws both blades at once.** `ZombieStateStandAndThrow`'s release
+arm throws a second weapon for character type 1 — `TryClaimAttackSlot`, whose
+answer it ignores, `ZombiePickThrowingHand` and a second
+`ZombieThrowHandWeapon` (`0x004592E4`..`0x00459301`) — so in a two-permit game
+each player gets a blade. Then `ZombieRetireThrowConditionIfUnarmed`
+(`FUN_004595F0`) takes a condition-8 walker with nothing left in its hands to
+condition 0 and raises its sprint bit.
 
 **A new overlay, `Wedged`**, answers the question the collision one leaves open.
 `#show-coli` says what the engine can feel; this marks in red every zombie the
@@ -2128,8 +2168,9 @@ status bar.
 `zsass.bin` and `zslman.bin`, spawned out of walking reach — compete for the same attack permit
 as the zombies, play the throw clip and release on the frame the table names.
 The weapon flies in a straight line at 1.2 units/frame to a point 4 units in
-front of the camera, tumbling, and costs a life on arrival: the hit is timed,
-not tested. Throwing leaves the hand bare and sets the arm's destroyed-zone
+front of the camera, spinning `0x2400` BAMS a frame, and costs a life on
+arrival: the hit is timed, not tested — unless it is shot out of the air
+first. Throwing leaves the hand bare and sets the arm's destroyed-zone
 bit, so the cancel mask treats a thrown arm and a shot-off one alike.
 
 **And it re-arms, which turns out to hold the whole state machine up.**
@@ -2394,17 +2435,12 @@ Three more things came out of reading the state properly, all `[proved]`:
   `zsass` throw is 22 cursor ticks of wind-up against its entry's release frame
   of 48, not 48.
 * **The state releases no permit.** `SpawnThrownWeapon` hands `obj+0x121` to
-  the projectile actor and leaves the thrower holding **0** — not −1 — and the
+  the projectile and leaves the thrower holding **0** — not −1 — and the
   weapon frees the slot at the end of its stick-and-blink life, in
-  `ThrownWeaponFlyToTarget`. The port's weapon is a plain pool record shared
-  with class 0x30's, which has its own state table and its own release site, so
-  a record cannot carry a permit and releasing from the shared flight routine
-  would free a class-0x30 slot through class 0x31's routine — the exact
-  wrong-bit mistake `ThrowerReleaseAttackPermit`'s note warns about. The slot
-  therefore goes back in `SpawnThrownWeapon`, where the engine hands it over,
-  about 90 frames early, and that is now the `[diverges]` the re-arm one used to
-  be. Making `G.g_thrown_weapons` carry a permit is the fix, and it is a change
-  to both classes' projectiles.
+  `ThrownWeaponFlyToTarget`, or when it is shot down. The port used to free it
+  in `SpawnThrownWeapon` instead, about ninety frames early, because its weapon
+  record could not hold one; the record carries the permit now, and each
+  family's weapon gives it back through its own family's release.
 
 ### Four things that stopped the throwers working
 

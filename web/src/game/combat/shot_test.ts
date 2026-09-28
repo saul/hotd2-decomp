@@ -88,6 +88,13 @@ export interface ShotTestEntry {
   x: number;
   y: number;
   z: number;
+  /**
+   * `[port-only]` A thrown weapon registered this entry, by its id in
+   * `G.g_thrown_weapons`, and `at` is its thrower. The engine's entry holds
+   * the object pointer whatever the object is; the port's weapons are a pool
+   * of their own (`game/thrown_weapon.ts`), so the entry says which pool.
+   */
+  thrown?: number;
 }
 
 /**
@@ -141,6 +148,8 @@ export interface ShotCandidate {
   whole: boolean;
   /** Where, in world space — the port's effects need the point. */
   point: Vec3;
+  /** `[port-only]` The candidate is a thrown weapon, by id. See {@link ShotTestEntry.thrown}. */
+  thrown?: number;
   /**
    * A bone hit on its collision mesh (`ShotTestBoneMesh`): the surface code
    * and the face's normal the segment test found, which the candidate record
@@ -368,6 +377,10 @@ export function ProcessPlayerShotsTestList(ray: ShotRay, host: GameHost):
   };
   const out: ShotCandidate[] = [];
   for (const entry of G.g_shot_test_list) {
+    if (entry.thrown !== undefined) {
+      ShotTestSphereThrownWeapon(entry.thrown, shot, out);
+      continue;
+    }
     const obj = ActorByAt(entry.at);
     if (!obj) continue;
     if (obj.flags & ActorFlag.ShotTestMesh) continue;
@@ -431,6 +444,32 @@ function ShotTestSphere(obj: Actor, shot: ShotTest, out: ShotCandidate[]):
   const p = obj.shotCentre;
   out.push({ key: ShotCandidateKey(_c.z), at: obj.at, bone: 0, whole: true,
              point: { x: p.x, y: p.y, z: p.z }, t: alongShot(shot.ray, p) });
+}
+
+/**
+ * `ShotTestSphere`'s whole-object arm (`0x0040468C`), for a thrown weapon.
+ *
+ * The weapon's `obj+0x34` is `0x80000001` and never gains bit `0x80`, so the
+ * fork never goes to the skeleton: `RayTestSphere(player, obj+0x70, obj+0x74,
+ * obj+0x78, obj+0x124)` and, on a hit, the whole weapon is one candidate keyed
+ * on its depth. `obj+0x70..0x78` is the view point the weapon's own draw left,
+ * which is the engine's arrangement exactly -- the draw that registered it is
+ * the draw that wrote it. `[port-only]` as a separate function, because the
+ * weapons are a pool of their own; see `game/thrown_weapon.ts`.
+ */
+function ShotTestSphereThrownWeapon(id: number, shot: ShotTest,
+                                    out: ShotCandidate[]): void {
+  const w = G.g_thrown_weapons.find((x) => x.id === id);
+  if (!w) return;
+  const c = w.view;
+  if (RayTestSphere(shot.angles, c.x - shot.eye.x, c.y - shot.eye.y,
+                    c.z - shot.eye.z, w.hitRadius) <= 0) {
+    return;
+  }
+  const p = w.pos;
+  out.push({ key: ShotCandidateKey(c.z), at: w.from, bone: 0, whole: true,
+             point: { x: p.x, y: p.y, z: p.z }, t: alongShot(shot.ray, p),
+             thrown: w.id });
 }
 
 /**

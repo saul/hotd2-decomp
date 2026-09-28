@@ -16,7 +16,8 @@ import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraActorTick, CameraRunQueuedAction } from "./camera/mode";
 import { SceneViewApplyShake } from "./camera/shake";
 import { ActorLiftCameraPoint, CameraPointRiseFor } from "./camera/track";
-import { ThrownWeaponUpdate } from "./class31/projectile";
+import { ThrownWeaponPoolUpdate } from "./class31/projectile";
+import { ThrownWeaponCameraOf } from "./thrown_weapon";
 import { BreakablePropPoolUpdate } from "./class41/pool";
 import { WaterSurfacesTick } from "./class41/water";
 import { PropContainerType } from "./class41";
@@ -628,7 +629,7 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // (`FUN_0040E860`) ends the engine's tick the same way.
   let result: FrameResult = { lookAt: G.g_camera_block_target };
   RunPhaseDispatch(() => {
-    result = SceneTaskWalk(eye, dt, frames, host, rng, events);
+    result = SceneTaskWalk(eye, dt, host, rng, events);
   });
   CommitAppState();
   return result;
@@ -640,7 +641,7 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
  * else in a scene), which is where the trigger is polled; then the actors and
  * the non-actor pools; then the camera tasks.
  */
-function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
+function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
   // `ScreenSpriteQueueReset` (`FUN_0041CF00`), from `SetupSceneProjection`
   // ahead of the walk: the layered queue starts every frame empty.
@@ -760,7 +761,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
     G.g_cur_actor = -1;
   }
 
-  ThrownWeaponUpdate(frames, events);
+  // The thrown weapons, each running the routine its launcher installed --
+  // `ThrownWeaponUpdate` (`FUN_00450780`) or `ZombieThrownWeaponUpdate`
+  // (`FUN_0045A4F0`). One engine frame a call, like the other task pools.
+  ThrownWeaponPoolUpdate({ eye, cam: ThrownWeaponCameraOf(host), host, rng,
+                           events });
   // ...and so are the creatures `znjoe` releases: `SpawnBodyCreature`
   // (`FUN_0043E720`) allocates a task with no class id, so it is stepped here
   // beside the other non-actor pools rather than inside the actor walk.

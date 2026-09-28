@@ -94,7 +94,11 @@ import { CameraTargetsClear, waitTargetsClear }
   from "../src/script/waits/targets";
 import { FishUpdate } from "../src/game/class51";
 import { FishFlag, FishState, type FishTail } from "../src/game/class51/state";
-import { FrogReadNextScriptCommand, FrogUpdate } from "../src/game/class11";
+import {
+  FROG_LEAP_RECOVER_CURSOR, FrogMotion, FrogReadNextScriptCommand,
+  FrogStateHopWithinScreenWedge, FrogStateLeapAtPlayer, FrogUpdate,
+  PROJECTION_DISTANCE_PX,
+} from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
 import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
   OwlUpdateAndResolveShot } from "../src/game/class43";
@@ -280,13 +284,16 @@ import { ThrowerBeginKnockbackArc, ThrowerStateCorpse }
   from "../src/game/class31/death";
 import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
+import {
+  ActorArcBegin, ActorArcStep, ActorClipFrame, InstallArcMotionScript,
+} from "../src/game/class31/arc";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
 import { ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
-import { ActorClipFrame, ActorPlayCursor } from "../src/game/class31/arc";
+import { ActorPlayCursor } from "../src/game/class31/arc";
 import { ThrowerPickLandingPoint } from "../src/game/class31/leap_down";
 import { SND_LEAP_LANDED } from "../src/game/class31/leap";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
@@ -341,6 +348,10 @@ import {
   PropExpireByStepLifetime, GENERIC_DRAW_SLOT, GENERIC_DESCRIPTOR_SLOT,
   GENERIC_LIFETIME_FROM_1F4,
   GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
+  WaterSurfaceFlag, WaterSurfacesTick, WATER_ARENA_ALT_PAIR_SLOT,
+  WATER_ARENA_ALT_SLOT, WATER_ARENA_PAIR_SLOT, WATER_ARENA_SLOT,
+  WATER_CANAL_SLOT, WATER_DEATH_ALT_SLOT, WATER_DEATH_CAM_PATH,
+  WATER_DEATH_SLOT, WATER_PHASE_PER_TICK, WATER_SURFACE_ALSO_DRAWS,
   PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
@@ -1770,6 +1781,148 @@ console.log("\nclass 0x41, the placer:");
         String(G.g_item_set_countdown[ItemSet.Score2]));
   check("a prop takes two shots and carries the group's lifetime",
         G.g_breakable_props.every((p) => p.hp === 2 && p.lifetime === 4));
+}
+
+console.log("\nclass 0x41 type 1, the canal water task:");
+{
+  // Stage 2's three tiles and one of stage 3's, as the exporter resolves
+  // them: `slot` is `g_water_surface_slots[field_1f4]`.
+  const water = (at: number, index: number, slot: number, life: number) =>
+    ({ at, container: "water_surface" as const, field_1f4: index, slot,
+       lifetime_evt_steps: life });
+  const rng = new Rng(7);
+  propScene(rng, GameMode.Arcade);
+  SetGameTables(CHARS, { ...BREAKABLES, placements: [
+    ...(BREAKABLES.placements ?? []),
+    water(0x8ae4, 2, WATER_CANAL_SLOT, 15),
+    water(0x14940, 0, WATER_ARENA_SLOT, 20),
+    water(0x15684, 1, WATER_DEATH_SLOT, 1),
+    water(0x237c, 4, 0x13ad, 11),
+  ] });
+  const f = { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST };
+  const place = (at: number, index: number, life: number) => {
+    const placer = ActorSpawn(at, SpawnClass.PropContainerPlacer, index,
+                              "placer");
+    placer.visible = true;
+    placer.hp = life;           // +0x11C: the lifetime in step changes
+    placer.condition = 1;       // +0x130C: PlaceWaterSurface
+    PropContainerPlacerUpdate(placer, f);
+    return { placer, task: G.g_water_surfaces.find(
+      (w) => w.slot === T.breakables!.placements!.find(
+        (q) => q.at === at)!.slot) };
+  };
+  const uvOf = (slot: number) =>
+    G.g_water_surface_uv.find((u) => u.slot === slot);
+  G.g_scene_index = 1;
+  G.g_evt_block_index = 16;
+  G.g_evt_step_index = 0;
+  G.g_scene_tick_counter = 100;
+
+  const canal = place(0x8ae4, 2, 15);
+  check("constructor 1 builds a water task and the placer dies",
+        canal.placer.dead && G.g_water_surfaces.length === 1
+        && canal.task?.slot === WATER_CANAL_SLOT && canal.task.index === 2
+        && canal.task.lifetime === 15 && canal.task.killFlag === 0,
+        JSON.stringify(G.g_water_surfaces));
+  WaterSurfacesTick();
+  const a = (100 * WATER_PHASE_PER_TICK & 0xffff) * (Math.PI * 2 / 65536);
+  const u = uvOf(WATER_CANAL_SLOT);
+  check("...which draws its tile and ripples it by the tick's phase",
+        canal.task!.drawn.join() === String(WATER_CANAL_SLOT)
+        && u?.frames === 1 && u.sin === Math.sin(a) && u.cos === Math.cos(a)
+        && !u.zLimited, JSON.stringify(u));
+  for (let step = 1; step < 0xf; step++) {
+    G.g_evt_step_index = step;
+    WaterSurfacesTick();
+  }
+  check("...lives through fourteen step changes",
+        G.g_water_surfaces.length === 1 && canal.task!.stepChanges === 14);
+  G.g_evt_step_index = 0xf;
+  WaterSurfacesTick();
+  check("...and 0x13B5 is killed at step 0xF, a change inside its lifetime",
+        G.g_water_surfaces.length === 0);
+  check("the tile keeps what the walk did to it after the task goes",
+        uvOf(WATER_CANAL_SLOT)?.frames === 15);
+
+  G.g_evt_step_index = 10;
+  const arena = place(0x14940, 0, 20).task!;
+  WaterSurfacesTick();
+  check("index 0 draws the arena water and 0x13A5 beside it",
+        arena.drawn.join() === [WATER_ARENA_SLOT, WATER_ARENA_PAIR_SLOT].join());
+  check("...and does not ripple it until flag 8", !uvOf(WATER_ARENA_SLOT));
+  G.g_script_flags[WaterSurfaceFlag.ArenaRipple] = 1;
+  WaterSurfacesTick();
+  check("...then ripples only the vertices at z <= -1870",
+        uvOf(WATER_ARENA_SLOT)?.frames === 1
+        && uvOf(WATER_ARENA_SLOT)?.zLimited === true);
+  G.g_script_flags[WaterSurfaceFlag.RippleOff] = 1;
+  WaterSurfacesTick();
+  check("flag 0x6A stops every ripple and not the draw",
+        uvOf(WATER_ARENA_SLOT)?.frames === 1 && arena.drawn.length === 2);
+  G.g_script_flags[WaterSurfaceFlag.RippleOff] = 0;
+  G.g_script_flags[WaterSurfaceFlag.SwapTiles] = 1;
+  WaterSurfacesTick();
+  check("flag 9 swaps the arena water after this frame's draw",
+        arena.slot === WATER_ARENA_ALT_SLOT
+        && arena.drawn[0] === WATER_ARENA_SLOT);
+  WaterSurfacesTick();
+  check("...and the alternate is drawn with its own pair",
+        arena.drawn.join()
+          === [WATER_ARENA_ALT_SLOT, WATER_ARENA_ALT_PAIR_SLOT].join());
+  check("...which the exporter's list of what it can draw covers",
+        [WATER_ARENA_PAIR_SLOT, WATER_ARENA_ALT_SLOT, WATER_ARENA_ALT_PAIR_SLOT]
+          .every((s) => WATER_SURFACE_ALSO_DRAWS[WATER_ARENA_SLOT]!.includes(s)));
+
+  const death = place(0x15684, 1, 1).task!;
+  G.g_active_cam_path = 0x40;
+  WaterSurfacesTick();
+  check("the death water swaps on flag 9 off camera path 0x6E",
+        death.slot === WATER_DEATH_ALT_SLOT && !uvOf(WATER_DEATH_SLOT));
+  G.g_active_cam_path = WATER_DEATH_CAM_PATH;
+  WaterSurfacesTick();
+  check("...and on 0x6E turns back after the draw, in the same frame",
+        death.drawn[0] === WATER_DEATH_ALT_SLOT
+        && death.slot === WATER_DEATH_SLOT);
+  WaterSurfacesTick();
+  check("...where flag 9 swaps it and the last line swaps it back again",
+        death.slot === WATER_DEATH_SLOT && uvOf(WATER_DEATH_SLOT)?.frames === 1);
+  check("a snapshot carries the tasks and the tiles as they are",
+        JSON.stringify(clonePlain(G.g_water_surfaces))
+          === JSON.stringify(G.g_water_surfaces)
+        && JSON.stringify(clonePlain(G.g_water_surface_uv))
+          === JSON.stringify(G.g_water_surface_uv));
+  G.g_evt_block_index = 0x23;
+  G.g_evt_step_index = 2;
+  G.g_GameMode = GameMode.Boss;
+  WaterSurfacesTick();
+  check("in Boss mode none of the kill tests runs",
+        G.g_water_surfaces.length === 2);
+  G.g_GameMode = GameMode.Arcade;
+  WaterSurfacesTick();
+  check("on stage 2, block 0x23 step 2 kills every task",
+        G.g_water_surfaces.length === 0);
+
+  G.g_scene_index = 2;
+  G.g_evt_block_index = 1;
+  const st3 = place(0x237c, 4, 11).task!;
+  check("on stage 3 the kill flag is the index plus 0x0B", st3.killFlag === 15);
+  G.g_script_flags[15] = 1;
+  WaterSurfacesTick();
+  check("...and raising it kills the task", G.g_water_surfaces.length === 0);
+  G.g_script_flags[15] = 0;
+  place(0x237c, 4, 11);
+  G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 1;
+  WaterSurfacesTick();
+  check("...as flag 4 kills every one", G.g_water_surfaces.length === 0);
+  G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 0;
+  G.g_script_flags[WaterSurfaceFlag.ArenaRipple] = 0;
+  G.g_script_flags[WaterSurfaceFlag.SwapTiles] = 0;
+  G.g_scene_index = 0;
+  G.g_active_cam_path = -1;
+  SetGameTables(CHARS, BREAKABLES);
+  ResetGameGlobals();
+  check("the scene takes its tasks and its tiles with it",
+        G.g_water_surfaces.length === 0 && G.g_water_surface_uv.length === 0);
 }
 
 console.log("\nclass 0x41, breaking a prop:");
@@ -5580,6 +5733,19 @@ const DROP_SCRIPT = (motionId: number) => [
   { motion: motionId, start: 64, fade: 5, until: 98 },
 ];
 
+/**
+ * `CLASS31_ARC_SCRIPTS.wall_left` and `wall_right`, verbatim from `0x00564A68`
+ * and `0x00564A38`: 0..15, 16..33 and 34..43, inside the 44 of play length a
+ * 23-frame clip has. {@link ARC}'s 46 and 47 are past it, and `ActorArcStep`
+ * waits on the cursor reaching them whether or not the arc has landed -- the
+ * engine's cursor wraps back to 0 after 44, so the actor would wait for ever.
+ */
+const WALL_SCRIPT = (motionId: number) => [
+  { motion: motionId, start: 0, fade: 5, until: 15 },
+  { motion: motionId, start: 16, fade: 5, until: 33 },
+  { motion: motionId, start: 34, fade: 5, until: 43 },
+];
+
 const TYPE31: CharacterType = {
   ...TYPE,
   type: 0x19, name: "zstin", file: "zstin.bin",
@@ -5630,7 +5796,8 @@ const CLASS31 = {
   // The pose a corpse freezes on, by the clip it died in.
   corpse_frames: { "286": [74, 70], "285": [48, 40], "934": [44, 35] },
   scripts: {
-    wall_left: ARC(290), wall_right: ARC(291), ceiling: ARC(309),
+    wall_left: WALL_SCRIPT(290), wall_right: WALL_SCRIPT(291),
+    ceiling: ARC(309),
     aside: ARC(282), aside_attack3: ARC(282), aside_zsass: ARC(282),
     // `ThrowerStateLeapToPoint`'s three. `drop` and `drop_alt` are byte for
     // byte the same in the exe and are the same here, which is what lets the
@@ -5818,6 +5985,97 @@ console.log("\nEnemyThrowerInit: zslman is born NoDismember");
   check("...and no other thrower character type is",
         (zstin.flags & ActorFlag.NoDismember) === 0,
         `flags ${zstin.flags.toString(16)}`);
+}
+
+// `ActorArcStep` (`FUN_0044D860`) sets each stage with `ActorSetMotionBlended`
+// (`CALL 0x004119a0` at 0x0044D901, 0x0044D94D, 0x0044D9C9), and that writes
+// `obj+0x19C = start` and raises the fade bit `SkeletonAdvancePlayCursor`
+// (`FUN_004111A0`) holds the cursor on for the fade. The port's one-shot
+// channel started the stage running at once, so a state that tests the cursor
+// *before* it steps the arc -- `ThrowerStateDelayedPounce`'s `cursor > 66` --
+// never saw a stage's start frame at all.
+console.log("class 0x31, ActorArcStep holds each stage on its start frame:");
+{
+  const z = thrower(ThrowerState.LeapToPoint);
+  z.pos = vec3(0, 60, 80);
+  ActorArcBegin(z, vec3(0, 10, 80), 30);
+  InstallArcMotionScript(z, DROP_SCRIPT(300));
+  z.arcPhase = ArcPhase.Windup;
+  const before: number[] = [];
+  const after: number[] = [];
+  let immuneAtWindup = false;
+  let immuneInFlight = true;
+  let steps = 0;
+  let going = true;
+  while (going && steps++ < 200) {
+    // The director's order: the clocks, then the state.
+    ActorAdvanceMotion(z, 1 / 60);
+    before.push(ActorClipFrame(z));
+    going = ActorArcStep(z, 1, 1 / 60);
+    after.push(ActorClipFrame(z));
+    if (z.arcPhase === ArcPhase.Crouched) {
+      immuneAtWindup ||= (z.flags & ActorFlag.ShotImmune) !== 0;
+    }
+    if (z.arcPhase === ArcPhase.Flight) {
+      immuneInFlight &&= (z.flags & ActorFlag.ShotImmune) !== 0;
+    }
+  }
+  const s = z.arcScript!;
+  // The fit ran on the first step and grew the two fades onto the thirty
+  // frames: 30 - 5 - 0 - 63 + 56 = 18 of slack, nine onto each.
+  check("the fit grew stage 1's fade and stage 2's onto the arc",
+        s[1].fade === 9 && s[2].fade === 14,
+        `fades ${s.map((st) => st.fade).join(", ")}`);
+  const seen = (xs: number[], v: number) => xs.filter((x) => x === v).length;
+  // `fade + 1` frames on the start frame, counting the frame of the call --
+  // the base track's hold, and the engine's draws: it draws the start frame
+  // at weights 1/(fade+1) through 1.
+  check("stage 1 holds its start frame for its fade + 1",
+        seen(after, s[1].start) === s[1].fade + 1,
+        `${seen(after, s[1].start)} frames on ${s[1].start}`);
+  check("...and stage 2 its own",
+        seen(after, s[2].start) === s[2].fade + 1,
+        `${seen(after, s[2].start)} frames on ${s[2].start}`);
+  // A state that reads the cursor before it steps the arc sees stage 2's start
+  // on the frame after the handover, not the frame after that.
+  const firstPast = before.find((c) => c > s[1].until);
+  check("a test before the step sees stage 2's start, not the frame after it",
+        firstPast === s[2].start, `first past ${s[1].until}: ${firstPast}`);
+  check("...and every frame of stage 1 on the way",
+        Array.from({ length: s[1].until - s[1].start + 1 },
+                   (_, i) => s[1].start + i)
+          .every((c) => before.includes(c)),
+        before.join(","));
+  check("the arc ends once the cursor reaches stage 2's threshold",
+        !going && after[after.length - 1] >= s[2].until
+        && after[after.length - 2] < s[2].until,
+        `${after.slice(-2).join(" -> ")}`);
+  check("...standing on the point it named",
+        Math.abs(z.pos.y - 10) < 1e-6, `y ${z.pos.y}`);
+  // `0x0044D886`..`0x0044D8BE` and `0x0044D952`..`0x0044D97D`: types
+  // 0x16..0x19 cannot be shot in the windup, and can from the takeoff.
+  check("zstin cannot be shot in the windup, and can in flight",
+        immuneAtWindup && !immuneInFlight,
+        `windup ${immuneAtWindup} flight ${immuneInFlight}`);
+  // `OR dword ptr [ESI + 0x136c], 0x180000` at 0x0044DA39.
+  check("...and lands colliding with the world and with actors",
+        (z.flags2 & ThrowerFlag.Collide) === ThrowerFlag.Collide,
+        `flags2 0x${z.flags2.toString(16)}`);
+
+  // `CMP word ptr [ESI + 0x1310], 0xa / JZ` at 0x0044D89A: the leap aside's
+  // windup is the one that can be shot.
+  const w = thrower(ThrowerState.LeapAside);
+  w.state = ThrowerState.LeapAside;     // the spawn applies it on first update
+  w.flags &= ~ActorFlag.ShotImmune;
+  ActorArcBegin(w, vec3(0, 0, 60), 30);
+  InstallArcMotionScript(w, DROP_SCRIPT(300));
+  w.arcPhase = ArcPhase.Windup;
+  ActorAdvanceMotion(w, 1 / 60);
+  ActorArcStep(w, 1, 1 / 60);
+  check("the leap aside's windup is not shot-immune",
+        w.arcPhase === ArcPhase.Crouched
+        && (w.flags & ActorFlag.ShotImmune) === 0,
+        `phase ${w.arcPhase} flags 0x${(w.flags >>> 0).toString(16)}`);
 }
 
 console.log("class 0x31, ThrowerStateLeapToPoint:");
@@ -6232,11 +6490,17 @@ console.log("class 0x31, state 23 -- the wait, then the pounce at eye height:");
   GameUpdate(eye, 1 / 60, host, rng, events);
   check("frame 45: the counter runs out and it falls through to sub 2",
         z.sub === 2 && z.state === ThrowerState.DelayedPounce, `sub ${z.sub}`);
-  check("...with the wait's two bits taken down",
+  // Sub 1 drops both bits (`0x0044E8BA`), and the same frame's fall into
+  // `ActorArcStep` puts `0x100` straight back up for the windup: phase 0 at
+  // `0x0044D8A4`..`0x0044D8BE`, types 0x16..0x19 outside state 10. It latches
+  // `obj+0x136C` bit `0x200` only if `0x100` was already up, and it was not.
+  check("...with the wait's height bit down and the windup shot-proof",
         (z.motionFlags & MotionFlag.RootMotionY) === 0
-        && (z.flags & ActorFlag.ShotImmune) === 0,
+        && (z.flags & ActorFlag.ShotImmune) !== 0
+        && (z.flags2 & ThrowerFlag.ArcSuppressedShotImmune) === 0
+        && z.arcPhase === ArcPhase.Crouched,
         `motion 0x${z.motionFlags.toString(16)} `
-        + `flags 0x${(z.flags >>> 0).toString(16)}`);
+        + `flags 0x${(z.flags >>> 0).toString(16)} phase ${z.arcPhase}`);
   check("obj+0x34 |= 0x10000000, not BackingOff's 0x20000000",
         (z.flags & ActorFlag.Committed) !== 0
         && (z.flags & ActorFlag.BackingOff) === 0,
@@ -6258,6 +6522,8 @@ console.log("class 0x31, state 23 -- the wait, then the pounce at eye height:");
         `to (${z.arcTo.x}, ${z.arcTo.y}, ${z.arcTo.z}) over ${z.arcTotal}`);
 
   let vetoCursor = -1;
+  let flightFrames = 0;
+  let immuneInFlight = false;
   let frames = 0;
   while (z.state === ThrowerState.DelayedPounce && frames++ < 400) {
     const had = (z.flags & ActorFlag.NoHitReaction) !== 0;
@@ -6265,17 +6531,24 @@ console.log("class 0x31, state 23 -- the wait, then the pounce at eye height:");
     if (!had && (z.flags & ActorFlag.NoHitReaction) !== 0) {
       vetoCursor = ActorPlayCursor(z);
     }
+    if (z.arcPhase === ArcPhase.Flight) {
+      flightFrames++;
+      if (z.flags & ActorFlag.ShotImmune) immuneInFlight = true;
+    }
   }
+  // ...and the takeoff drops it, with `0x200` clear (`0x0044D966`..`D977`).
+  check("the takeoff takes the windup's immunity down",
+        flightFrames > 0 && !immuneInFlight,
+        `${flightFrames} flight frames, immune ${immuneInFlight}`);
   // The connect reads `obj+0x1364` -- row 0 -- and the veto the live stance
   // -- row 4. Both halves of the same state, on different rows.
   const row0 = set0.attacks["0"][String(z.attack) as "0" | "1"].hit_frame;
   check("the stab lands on row 0's hit frame, through obj+0x1364",
         cursorAtHit === row0, `hit at cursor ${cursorAtHit}, row 0 ${row0}`);
-  // Past 66 and not before: a row-0 reading would raise it at 63 or 65. The
-  // exact frame is the arc's -- `ActorArcStep` hands to stage 2 at 67 on the
-  // frame the cursor reaches 66 -- and not this state's.
+  // Stage 2 starts on 67 and holds there through its fade, so 67 is the
+  // first cursor past row 4's 66. A row-0 reading would raise it at 63 or 65.
   check("...before the flinch veto, which waits for row 4's 66",
-        !vetoAtHit && vetoCursor > 66, `veto at cursor ${vetoCursor}`);
+        !vetoAtHit && vetoCursor === 67, `veto at cursor ${vetoCursor}`);
   check("the arc ends in ThrowerStateWithdraw",
         z.state === ThrowerState.Withdraw && z.sub === 0, `state ${z.state}`);
   check("...with 0x10000000 and 0x20000 taken down on the way out",
@@ -17754,6 +18027,321 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and a second one idles rather than leaping without one",
           bt().state === FrogState.IdleAndCroak && b.attackPermit === -1,
           `${FrogState[bt().state]} permit ${b.attackPermit}`);
+  }
+
+  // -- class 0x11: the two turning states, and the push-out -----------------
+  //
+  // `frog.bin`, cut down to the clips the states below play. The turn clip
+  // carries its turn in the **root record** as the real one does (`0x142`
+  // ends at ry -24577), and both records get an rx and an rz as well, so a
+  // rebase about the wrong axis, in the wrong order or with the wrong sign
+  // cannot come out right by symmetry (L48).
+  {
+    const BONES = 15;
+    type Rot = [number, number, number];
+    const clip = (frames: number, play: number, r0: Rot = [0, 0x7fff, 0],
+                  r1: Rot = [0, 0, 0]) => ({
+      bank: "frog", frames, fps: 30, play,
+      root: Array.from({ length: frames * 3 }, (_, i) => (i % 3 === 1 ? 2.6 : 0)),
+      rot: Array.from({ length: frames * BONES * 3 }, (_, i) => {
+        const k = i % (BONES * 3);
+        return k < 3 ? r0[k] : k < 6 ? r1[k - 3] : 0;
+      }),
+    });
+    const TURN_R0: Rot = [0x300, -24577, 0x100];
+    const TURN_R1: Rot = [0x200, 0x400, -0x180];
+    const FROG_TYPE = {
+      ...TYPE, type: 0x1b, name: "frog", file: "frog.bin", bone_count: BONES,
+      motions: {
+        [FrogMotion.Leap]: clip(61, 119),
+        [FrogMotion.Death]: clip(6, 10),
+        [FrogMotion.Hop]: clip(31, 60),
+        [FrogMotion.Idle]: clip(31, 59),
+        [FrogMotion.TurnLeft]: clip(16, 30, TURN_R0, TURN_R1),
+        [FrogMotion.TurnRight]: clip(16, 30),
+        [FrogMotion.HopInPlace]: clip(31, 59),
+      },
+    };
+    const frogScene = (rng: Rng): void => {
+      scene(0, rng);
+      SetGameTables({
+        ...CHARS, types: { "1": TYPE, "27": FROG_TYPE },
+      } as unknown as CharactersJson);
+    };
+    // Camera path 999 never comes, so a frog left in state 0 does nothing.
+    const spawnFrog = (at: number, pos: Vec3, rng: Rng) =>
+      ActorSpawn(at, SpawnClass.Frog, 0x1b, "frog", {
+        pos,
+        class11: {
+          char_type: 0x1b, motion: 0x141, cam_path: 999, cam_frame: 0,
+          wedge: 0, commands: [],
+        },
+      }, rng);
+    const tailOf = (a: Actor) => (a as { frog: FrogTail }).frog;
+    const s16 = (v: number) => (v << 16) >> 16;
+    const TO_BAMS = 65536 / (Math.PI * 2);
+
+    // The turn's fix-up. When a pass of the turn clip ends the yaw takes the
+    // 45 degrees, and bone 1 is turned back by them in the root's frame, so
+    // the blend out of the turn clip starts from the pose on screen.
+    {
+      const rng = new Rng(31);
+      frogScene(rng);
+      const a = spawnFrog(0x9310, vec3(0, 0, -40), rng);
+      const t = tailOf(a);
+      a.yaw = 0x1234;
+      t.state = FrogState.HopToHeading;
+      t.sub = 0;
+      t.a = 0x2800;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("a frog owed more than 30 degrees starts the left turn clip",
+            a.motion === FrogMotion.TurnLeft && t.sub === 1,
+            `motion 0x${a.motion.toString(16)} sub ${t.sub}`);
+      a.playTicks = 30;          // the clip's play length: this pass is done
+      a.fade = 0;                // ...and the fade into it long over
+      const yaw0 = a.yaw;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("...the pass goes into the yaw, and what is left into the hop",
+            a.yaw === s16(yaw0 + 0x2000) && t.a === 0x800
+            && a.motion === FrogMotion.Hop && t.sub === 2,
+            `yaw ${a.yaw} owed ${t.a} motion 0x${a.motion.toString(16)}`);
+      const rec = a.fadeFrom?.records?.find((r) => r.record === 1);
+      check("...which dissolves from the turn clip with bone 1 rewritten",
+            a.fadeFrom?.motion === FrogMotion.TurnLeft && rec !== undefined,
+            JSON.stringify(a.fadeFrom));
+      // The invariant the rewrite exists for: the actor's yaw, the root
+      // record and bone 1, composed as the draw composes them, put bone 1
+      // where it was drawn before the yaw moved.
+      const orient = (yaw: number, r0: Rot, r1: Rot) => {
+        const m = MatIdentity();
+        MatrixRotateY(m, yaw);
+        MatrixRotateZ(m, r0[2]); MatrixRotateY(m, r0[1]); MatrixRotateX(m, r0[0]);
+        MatrixRotateZ(m, r1[2]); MatrixRotateY(m, r1[1]); MatrixRotateX(m, r1[0]);
+        return m;
+      };
+      const before = orient(yaw0, TURN_R0, TURN_R1);
+      const after = orient(a.yaw, TURN_R0, rec?.rot ?? TURN_R1);
+      let err = 0;
+      for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) {
+        err = Math.max(err, Math.abs(before[i] - after[i]));
+      }
+      check("...so bone 1 keeps the world orientation it was drawn with",
+            err < 2e-3, `max element error ${err}`);
+
+      // With a pass still to go there is no blend, and nothing to carry the
+      // rewrite: the draw overwrites it, so the snapshot is not touched.
+      t.sub = 1;
+      t.a = 0x5000;
+      a.motion = FrogMotion.TurnLeft;
+      a.playTicks = 30;
+      a.fadeFrom = null;
+      a.fade = 0;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("...and a pass with another to follow blends nothing",
+            t.sub === 1 && t.a === 0x3000 && a.fadeFrom === null,
+            `sub ${t.sub} owed 0x${t.a.toString(16)}`);
+    }
+
+    // The launch frame runs on into the flight: both states' substate 2
+    // bumps the substate and falls into substate 3's code, which halves the
+    // turn still owed.
+    {
+      const rng = new Rng(37);
+      frogScene(rng);
+      const a = spawnFrog(0x9311, vec3(0, 0, -40), rng);
+      const t = tailOf(a);
+      t.state = FrogState.HopToHeading;
+      t.sub = 2;
+      t.a = 0x800;
+      a.motion = FrogMotion.Hop;
+      a.playTicks = 0x12;
+      const yaw0 = a.yaw;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      check("the hop's launch frame also halves the turn it still owes",
+            t.sub === 3 && t.a === 0x400 && a.yaw === s16(yaw0 + 0x400)
+            && Math.hypot(a.vel.x, a.vel.z) > 0.99,
+            `sub ${t.sub} owed 0x${t.a.toString(16)} yaw ${a.yaw - yaw0}`);
+
+      t.state = FrogState.LeapAtPlayer;
+      t.sub = 2;
+      t.a = 0x400;
+      a.motion = FrogMotion.Leap;
+      a.playTicks = 0x1e;
+      FrogStateLeapAtPlayer(a, frame(rng));
+      check("...and so does the leap's",
+            t.sub === 3 && t.a === 0x200
+            && (t.flags & FrogFlag.CycleRunning) !== 0,
+            `sub ${t.sub} owed 0x${t.a.toString(16)}`);
+
+      // The recovery: `ActorSetMotionBlended(0x13E, 0x3D, 2)` -- the leap
+      // clip resumed one past the frame it connected on, over a fade of 2.
+      t.sub = 4;
+      t.flags = FrogFlag.CycleRunning | FrogFlag.CycleWrapped
+        | FrogFlag.NoGravity;
+      a.motion = FrogMotion.Idle;
+      a.playTicks = 7;
+      a.fadeFrom = null;
+      a.fade = 0;
+      FrogStateLeapAtPlayer(a, frame(rng));
+      check("after the bone-2 cycle wraps the leap resumes where it "
+            + "connected, over a fade of 2 and not 61",
+            a.motion === FrogMotion.Leap
+            && MotionPlayFrame(a) === FROG_LEAP_RECOVER_CURSOR
+            && a.fadeLen === 3 && t.sub === 5
+            && (t.flags & (FrogFlag.CycleRunning | FrogFlag.CycleWrapped
+                           | FrogFlag.NoGravity)) === 0,
+            `motion 0x${a.motion.toString(16)} cursor ${MotionPlayFrame(a)} `
+            + `fadeLen ${a.fadeLen} sub ${t.sub}`);
+    }
+
+    // State 1's heading window has three bands across the screen, and the
+    // middle one is the full 0x3000. A frog 100 units out, clear of both
+    // wedge rays, so the clamp leaves the window alone; its yaw makes the
+    // aim at the camera exactly 0.
+    {
+      const pos = vec3(1, 0, -100);
+      const yaw = Math.trunc(Math.atan2(pos.x, pos.z) * TO_BAMS);
+      const picks = (viewX: number): number[] => {
+        const out: number[] = [];
+        for (let seed = 1; seed <= 24; seed++) {
+          const rng = new Rng(seed);
+          frogScene(rng);
+          G.g_camera_yaw_bams = 0;
+          const a = spawnFrog(0x9312, vec3(pos.x, 0, pos.z), rng);
+          a.yaw = yaw;
+          const t = tailOf(a);
+          t.state = FrogState.HopAcross;
+          t.sub = 0;
+          const host: GameHost = {
+            ...HOST,
+            viewSpaceOf: (_at, o) => { o.x = viewX; o.y = 0; o.z = -100; return true; },
+          };
+          FrogStateHopWithinScreenWedge(a, { eye: EYE, dt: 1 / 60, rng, host });
+          out.push(t.a);
+        }
+        return out;
+      };
+      const mid = picks(0);
+      check("a frog in the middle of the screen may turn either way",
+            mid.some((v) => v < 0) && mid.some((v) => v > 0)
+            && mid.every((v) => v >= -0x1800 && v <= 0x1800),
+            mid.join(","));
+      const left = picks(-40);
+      check("...and one left of the z/4 line only one way",
+            left.every((v) => v >= 0 && v <= 0x1800), left.join(","));
+    }
+
+    // The wedge clamp is `acos`, not `asin`: `FUN_004AD0B0` is the C
+    // runtime's arc cosine. A frog standing exactly on the first screen-edge
+    // ray is 0 from it, and acos(0) moves the window a quarter turn where
+    // asin(0) would not move it at all. HopToward with no camera point takes
+    // [aim, aim + 0x1800]; a base past 0x2000 is taken as it is, so the
+    // heading is the clamp's own number.
+    {
+      const rng = new Rng(41);
+      frogScene(rng);
+      G.g_camera_yaw_bams = 0;
+      const a = spawnFrog(0x9313, vec3(0, 0, 0), rng);
+      const t = tailOf(a);
+      const ray = s16(t.wedge - 0x8000) * (Math.PI * 2) / 65536;
+      a.pos.x = Math.sin(ray) * 50;
+      a.pos.z = Math.cos(ray) * 50;
+      a.yaw = 20000;
+      t.state = FrogState.HopToward;
+      t.sub = 0;
+      FrogStateHopWithinScreenWedge(a, frame(rng));
+      const halfFov = Math.trunc(Math.atan2(320, PROJECTION_DISTANCE_PX)
+                                 * TO_BAMS);
+      const withAcos = s16(halfFov + 0x4000 - 20000 + 0x4000);
+      const withAsin = s16(halfFov - 20000 + 0x4000);
+      check("a frog on a wedge ray has its window moved by acos(0), "
+            + "a quarter turn",
+            Math.abs(t.a - withAcos) <= 2 && Math.abs(t.a - withAsin) > 2,
+            `heading ${t.a}, acos ${withAcos}, asin ${withAsin}`);
+    }
+
+    // `FrogPushOutOfActorCollision`. The camera is a quarter turn about Y and
+    // an offset, so a point taken in the wrong space lands nowhere near the
+    // other frog (L48). The push is in the world, scaled by bone 1's travel
+    // since the last draw, and the pushed point is what the frog publishes.
+    {
+      const rng = new Rng(43);
+      frogScene(rng);
+      const cam = vec3(10, 5, 20);
+      const toView = (p: Vec3, o: Vec3): void => {
+        const dx = p.x - cam.x, dy = p.y - cam.y, dz = p.z - cam.z;
+        o.x = -dz; o.y = dy; o.z = dx;
+      };
+      const a = spawnFrog(0x9314, vec3(0, 0, -50), rng);
+      const b = spawnFrog(0x9315, vec3(40, 0, -50), rng);
+      const g = a.pos.y;
+      const drawn = vec3(0, g + 2.6, -50);
+      const host: GameHost = {
+        ...NULL_HOST,
+        boneWorld: (at, bone, o) => {
+          if (at !== a.at || bone !== 1) return false;
+          o.x = drawn.x; o.y = drawn.y; o.z = drawn.z;
+          return true;
+        },
+        viewPoint: (x, y, z, o) => {
+          o.x = cam.x + z; o.y = cam.y + y; o.z = cam.z - x;
+        },
+        viewSpaceOfPoint: (p, o) => { toView(p, o); return true; },
+      };
+      const pf = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+      // The other frog has published a sphere two units to A's +x.
+      b.visible = true;
+      b.sphereCentre.x = 2;
+      b.sphereCentre.y = g + 2.6;
+      b.sphereCentre.z = -50;
+      // The last draw left bone 1 0.4 behind where this frame draws it.
+      const last = vec3();
+      toView(vec3(0, g + 2.6, -50.4), last);
+      tailOf(a).bone1View = { x: last.x, y: last.y, z: last.z };
+      FrogUpdate(a, pf());
+      const near = (u: number, v: number) => Math.abs(u - v) < 1e-5;
+      // depth 3 + 3 - 2 = 4, normal -x, travel 0.4: 4 * 0.4 * 0.3.
+      check("a frog in another's sphere is pushed out along the world normal, "
+            + "at the depth times its travel times 0.3",
+            near(a.pos.x, -0.48) && near(a.pos.z, -50),
+            `pos ${a.pos.x}, ${a.pos.z}`);
+      check("...and publishes bone 1, pushed, as its sphere",
+            near(a.sphereCentre.x, -0.48) && near(a.sphereCentre.y, g + 2.6)
+            && near(a.sphereCentre.z, -50),
+            JSON.stringify(a.sphereCentre));
+      check("...having measured the other frog where it published itself",
+            b.sphereCentre.x === 2 && b.pushedBy === a.at,
+            `${JSON.stringify(b.sphereCentre)} pushedBy ${b.pushedBy}`);
+      check("...and the travel from bone 1 as last drawn, through the camera",
+            near(G.g_frog_bone1_on_entry.z, -50.4)
+            && near(G.g_frog_bone1_on_entry.x, 0),
+            JSON.stringify(G.g_frog_bone1_on_entry));
+
+      // Drawn in the same place again: no travel, a twentieth of the depth.
+      FrogUpdate(a, pf());
+      check("a frog that has not moved is nudged at a twentieth of the depth",
+            near(a.pos.x, -0.48 - 0.2), `pos ${a.pos.x}`);
+
+      // The camera moves 0.4 and the frog does not. The travel is measured
+      // between two readings of one record through one camera block, so it
+      // is travel relative to the camera -- the engine's arrangement.
+      cam.x += 0.4;
+      FrogUpdate(a, pf());
+      check("...but under a camera that moved 0.4, at the rate for 0.4",
+            near(a.pos.x, -0.48 - 0.2 - 0.48), `pos ${a.pos.x}`);
+
+      // The leap skips the test, and still publishes where bone 1 is.
+      const t = tailOf(a);
+      t.state = FrogState.LeapAtPlayer;
+      t.sub = 4;
+      t.flags = 0;
+      const x0 = a.pos.x;
+      FrogUpdate(a, pf());
+      check("the leap is never pushed, but its point is still published",
+            a.pos.x === x0 && near(a.sphereCentre.x, 0)
+            && near(a.sphereCentre.z, -50),
+            `pos ${a.pos.x} sphere ${JSON.stringify(a.sphereCentre)}`);
+    }
   }
 
   // -- class 0x43, the owl --------------------------------------------------

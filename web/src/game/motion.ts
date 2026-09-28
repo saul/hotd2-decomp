@@ -105,20 +105,24 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   // engine.
   const ticks = SecondsToTicks(dt);
   let fading = false;
+  // How far the clip being faded **into** moves this frame: every tick with no
+  // fade up, none while one holds it, and what is left over on the frame the
+  // fade ends.
+  let run = ticks;
   if (obj.fadeFrom) {
     obj.fade -= ticks;
     if (obj.fade < 0) {
       // `*model = model[2] + 1`: the fade is over and the clip starts moving,
       // from the frame after the one it was held on.
-      obj.playTicks += -obj.fade;
+      run = -obj.fade;
       obj.fadeFrom = null;
       obj.fade = 0;
     } else {
+      run = 0;
       fading = true;
     }
-  } else {
-    obj.playTicks += ticks;
   }
+  obj.playTicks += run;
   // Root motion: the clip's own translation is what walks the actor. Applied
   // only while no one-shot is running, because the one-shot owns the body.
   if (base && !obj.action) {
@@ -144,7 +148,11 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
   const act = obj.action;
   if (act) {
     const wasAct = obj.rootActionFrame;
-    act.ticks += SecondsToTicks(dt);
+    // A one-shot set through `ActorSetOneShotBlended` is the clip the fade is
+    // into, so the fade holds **it** on its start frame -- the arc's stages,
+    // whose thresholds are compared against exactly that cursor. See
+    // `ActorClip.held`.
+    act.ticks += act.held ? run : ticks;
     const am = MotionOf(obj, act.motion);
     if (!am) {
       obj.action = null;

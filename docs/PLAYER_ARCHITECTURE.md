@@ -738,6 +738,12 @@ web/src/
                   `ring_effect.ts`' records, the same way
     water_rings.ts  the flat ring a class-0x30 death leaves on water, from
                   `game/effects/water_ring.ts`' records
+    water_surfaces.ts  the canal water class 0x41 type 1 draws
+                  (`game/class41/water.ts`): the stage's own tile node where
+                  the glTF has one -- `StageScene` shows it while resident --
+                  or a `slots_actor` clone; the ripple's UVs rewritten per
+                  geometry from `G.g_water_surface_uv`, and the bilinear bit
+                  as a per-mesh material clone
     characters/bat.ts, bat_splash.ts  class 0x46: each root in rotation
                   order 5 at its model's own scale, and the splash task
                   `game/class46/splash.ts` steps

@@ -121,7 +121,9 @@ const POUNCE_ROLL_RATE = 0xccc;
  * ```
  *
  * **The wait cannot be shot and it walks.** `ShotImmune` makes every hit a
- * ricochet until the counter runs out, and the clip is the ordinary motion,
+ * ricochet until the counter runs out -- and on that same frame
+ * `ActorArcStep`'s windup raises it again, so the actor is only shootable
+ * from the takeoff on. The clip is the ordinary motion,
  * so it loops for the whole wait and its root carries the actor -- 310 covers
  * seven units a cycle. Bit `0x10` would carry its height as well; 310's root
  * height never changes, so it moves nothing, but the bit is the engine's.

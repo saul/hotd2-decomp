@@ -93,6 +93,7 @@ from .bams import (  # noqa: F401
                    bams_from_matrix, compose_bams, rot_matrix)
 from .arcscript import (  # noqa: F401
                         ARC_SCRIPT_STAGES, CLASS30_ARC_SCRIPTS,
+                        CLASS30_ENTRANCE_ARC_SCRIPTS,
                         CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
                         arc_script)
 from .charmotion import (  # noqa: F401
@@ -191,6 +192,7 @@ __all__ = [
     "CLASS21_FREED_MOTION",
     "CLASS30_ARC_SCRIPTS",
     "CLASS30_DEATH_CLIPS",
+    "CLASS30_ENTRANCE_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPTS",
     "CLASS31_ARC_SCRIPT_BYTES",
     "CLASS31_ATTACKS_PER_STANCE",
@@ -1273,9 +1275,18 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             if tail[1] == 30:
                 # The crouch and the three arc-script stages, both by type.
                 entry_clips += [0x10C, 0x39F]
-                for a30 in CLASS30_ARC_SCRIPTS.values():
-                    entry_clips += [st["motion"]
-                                    for st in (arc_script(tables, a30) or [])]
+                for k in CLASS30_ENTRANCE_ARC_SCRIPTS:
+                    entry_clips += [st["motion"] for st in
+                                    (arc_script(tables, CLASS30_ARC_SCRIPTS[k])
+                                     or [])]
+        if sp["class"] == 0x30 and tail[0] == 4:
+            # Body condition 4 attacks through `ZombieStateLeapStrike`
+            # (`FUN_0045E330`), not `ZombieStateStrike`: its arc script's
+            # windup, flight and landing clips. Every `znkager` is condition 4.
+            entry_clips += [st["motion"] for st in
+                            (arc_script(tables,
+                                        CLASS30_ARC_SCRIPTS["leap_strike"])
+                             or [])]
         # The two clips the `znjoe` release state names -- keyed by
         # character type, because that state is. See
         # ``BODY_CREATURE_HOST_CLIPS``.

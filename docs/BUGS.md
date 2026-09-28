@@ -94,7 +94,9 @@ disproved rather than fixed.
   which is a flipbook and not a set of variants; and each trigger slot belongs
   to one character type whose own file holds the run.
 * `[fixed]` **the crawlers hit where the engine whiffs** — closed on your
-  decision. It was divergence 2 and the divergence is gone.
+  decision. It was divergence 2 and the divergence is gone. **And then
+  reversed, 2026-09-28**: the crawlers never run the state that whiffs. See
+  "And one about the crawlers, which leap" below.
 
 ### One `[open]` that no report raised
 
@@ -2602,6 +2604,44 @@ investigation ruled out.
   mode 7. Sixteen routines write the first and none of them has been read.
   `[open]`
 
+## And one about the crawlers, which leap
+
+* `[fixed]` **Stage 2's crawlers attack by leaping at you, and the leap
+  lands.** The 2026-09-11 fix above made them swing and miss, from a proof
+  that was right about the wrong state: `ZombieStateStrike` cannot land their
+  condition-4 attack (hit frame 40 on a 20-frame clip), but **no crawler ever
+  runs it**. `ZombieStateHoldAtRange` sends body condition 4 to state 0x34
+  instead -- `0x0045585E CMP [ESI+0x130C], 4` / `JZ` / `0x0045587C MOV word
+  [ESI+0x1310], 0x34` -- and all twenty `znkager` are condition 4.
+  `ZombieStateLeapStrike` (`FUN_0045E330`) closes on the entry's lunge, rides
+  an arc to a point 3 under and 12.5 in front of the camera, and calls
+  `ActorStrikeConnect` on touching down, with no hit frame at all; then it
+  bounces back off the floor and retreats. The port sent every crawler to the
+  strike. `[proved]`
+
+  Two more halves of the same reading came with it. `EnemyZombieInitByCharType`
+  raises `obj+0x136C` bit 0x80 on every `znkager`, which is the bit
+  `ResolveHit`'s type-0xC sever gate opens on for bones 9 and up -- nothing in
+  the port set it, so no `znkager` leg could be severed. And at body condition
+  4 it calls `ZombieInitHalved` (`FUN_0045DA10`), which hides the bone-9 root
+  (bones 9 to 15), puts the stump `0x1DA3` on bone 9 and shrinks the body
+  sphere: the crawlers are born half a body.
+
+  Measured headlessly against the fixture that pins the real play lengths: a
+  minute of one crawler is three leaps and three hits, the player out of
+  lives, and **no frame in `ZombieStateStrike`**; with the head shot off it
+  draws entry 3 and still connects. In the player at stage 2 block 8 step 1,
+  driven: three legless crawlers come on, `0x4098` claims first, leaps, and
+  takes a life at nine units from the camera, then retreats and rejoins the
+  queue.
+
+  What was **not** ported, and why: `ZombieSplitInTwo` (`FUN_0045D9F0`, which
+  was `ActorAbortAttackAndLeave`) and the three states around it, 0x32, 0x33
+  and 0x35. It cuts an actor in two, and nothing the shipped game runs can
+  reach it -- no store of 4 to `g_hit_result`, and the bit its other two
+  callers need is raised only by a state nothing enters.
+  `tools/verify_split_unreachable.py` holds all of that.
+
 ## Divergences awaiting a call
 
 Four, and each is a refactor rather than a line edit — which is why they are
@@ -2611,7 +2651,8 @@ here rather than done.
    first visit and `EvtOpWaitFrames42` decrements before testing. Every camera
    cue in six stages is timed against that clock, so making it faithful is a
    retiming job of its own.
-2. **The crawlers hit where the engine whiffs.** The undamaged crawler's attack
+2. ~~**The crawlers hit where the engine whiffs.**~~ Closed, then reversed on
+   2026-09-28 -- see "And one about the crawlers, which leap". The undamaged crawler's attack
    is clip 997 at hit frame 40 and clip 997 is 20 frames long, so in the real
    game it misses; the port falls back to an attack that connects and is
    therefore **more dangerous than the original**. Faithful means baking clip

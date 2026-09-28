@@ -21,12 +21,6 @@ const ARC_TARGET_STATE_HI = 0x1c;
 /** `obj+0x130C` — the two body conditions that die through state 9. */
 const COND_FIVE = 5;
 const COND_SIX = 6;
-/**
- * `CMP DX, 0x34` — the state that also dies through state 9.
- * `g_class30_states[0x34]` is `FUN_0045E330`, which the port has not read;
- * `ZombieStateHoldAtRange` is the one thing that enters it (0x0045587C).
- */
-const STATE_UNREAD_0x34 = 0x34;
 
 /**
  * `ZombieOnShot` — `FUN_00453EB0`. Its **death** half.
@@ -111,7 +105,9 @@ export function ZombieOnShot(obj: ZombieActor): void {
   if (obj.flags2 & ZombieFlag2.Leaping) return;
   obj.sub = 0;
 
-  const arcDeath = obj.state === STATE_UNREAD_0x34
+  // `CMP DX, 0x34` -- `ZombieStateLeapStrike`, the crawler's leap, dies
+  // thrown as well.
+  const arcDeath = obj.state === ZombieState.LeapStrike
                 || (obj.flags2 & ZombieFlag2.Carried) !== 0
                 || obj.condition === COND_FIVE
                 || obj.condition === COND_SIX;

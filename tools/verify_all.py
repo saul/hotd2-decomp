@@ -274,6 +274,16 @@ CHECKS: list[Check] = [
           "crawlers' condition-4 swing being filtered out again as an "
           "impossible row",
           NEEDS_GAME),
+    Check("verify_split_unreachable", ".",
+          ["python3", "tools/verify_split_unreachable.py",
+           "--game-dir", "{game_dir}"],
+          "that nothing the shipped game runs reaches `ZombieSplitInTwo` "
+          "(`FUN_0045D9F0`) -- no store of 4 to `g_hit_result`, one writer "
+          "of the split bit and no way into its state, each beside a control "
+          "that must be found -- which is the whole of the case for the port "
+          "not transcribing the split, and the only check that can say when "
+          "that case stops holding",
+          NEEDS_GAME),
     Check("verify_effects", ".",
           ["python3", "tools/verify_effects.py", "--game-dir", "{game_dir}"],
           "that each of the 29 effect trees walks to exactly the node count "

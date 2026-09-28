@@ -327,6 +327,13 @@ def rig_entry(stage, tables, char: Character, spawns: list[dict],
             "blocked": "", "parts": [(p, m) for p, m in parts if m]}
 
 
+#: ``ZombieInitHalved`` (``FUN_0045DA10``): ``MOV dword ptr [EAX + 0x71c],
+#: 0x1da3`` at 0x0045DA4A for character type 0xC -- bone 9's stump, drawn by
+#: every ``znkager`` from birth.
+HALVED_STUMP_CHAR = 0xC
+HALVED_STUMP_SLOT = 0x1DA3
+
+
 def gore_entry(stage, tables, char: Character) -> dict | None:
     """A hidden rig holding one part per damaged variant, for the client to clone."""
     from . import rigs as rigslib, stage as stagelib
@@ -369,6 +376,13 @@ def gore_entry(stage, tables, char: Character) -> dict | None:
     # in the fist. The throw itself happened all along.
     for h in (char.zombie_throw or {}).get("hands", []):
         want.update(v for v in (h["held"], h["bare"], h["projectile"]) if v)
+    # **And the stump a crawler is born with.** ``ZombieInitHalved``
+    # (``FUN_0045DA10``) writes slot 0x1DA3 into bone 9's draw record for
+    # character type 0xC, after hiding everything from bone 9 down; it is in
+    # no effect table and on no skeleton node. The TypeScript half reads the
+    # pair from ``game/class30/halved.ts``.
+    if char.char_type == HALVED_STUMP_CHAR:
+        want.add(HALVED_STUMP_SLOT)
     for slot in sorted(want):
         # A slot this character's own file loads comes from that file, as the
         # bones do -- see ``Character.own_slots``.

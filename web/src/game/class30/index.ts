@@ -3,8 +3,10 @@
  *
  * The engine's own order, which matters: the state runs, *then* the position
  * integrates, then the motion advances. Anything not ported goes through
- * `ActorAbortAttackAndLeave` rather than a fallthrough, so no unmodelled state
- * can sit on a permit.
+ * `ZombieGiveUpAttack` rather than a fallthrough, so no unmodelled state can
+ * sit on a permit. That used to name `ActorAbortAttackAndLeave` as what the
+ * fallback stood for; the routine at `0x0045D9F0` is `ZombieSplitInTwo` and
+ * has nothing to do with it.
  */
 import { ZombieStateCarryProp } from "./carry_prop";
 import { SecondsToTicks } from "../tables";
@@ -28,6 +30,7 @@ import { ZombieStateBackOff } from "./backoff";
 import { ZombieAttackRefusal, ZombieStateHoldAtRange } from "./hold";
 import { ZombieGiveUpAttack } from "./leave";
 import { ZombieStateStrike } from "./strike";
+import { ZombieStateLeapStrike } from "./leap_strike";
 import { ZombieStateWaitTurn } from "./wait_turn";
 import { ZombieReleaseAndDespawn, ZombieStateWalkDistance }
   from "./walk_distance";
@@ -111,6 +114,12 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.HoldAtRange:
       return ZombieStateHoldAtRange(obj, eye, rng, host, events);
     case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
+    // Body condition 4's strike -- every `znkager` crawler's. States 0x32,
+    // 0x33 and 0x35 beside it have no `case`: nothing the shipped game runs
+    // enters them (see `class30/split.ts`), so the default below is right for
+    // them in the only sense that can be tested.
+    case ZombieState.LeapStrike:
+      return ZombieStateLeapStrike(obj, eye, dt, rng, host, events);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
     // **State 10 is terminal, and the table says so.** `g_class30_states`
@@ -122,7 +131,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     // thing that can settle it.
     //
     // It used to fall through to the `default` arm and `ZombieGiveUpAttack`,
-    // on a citation of `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) that is
+    // on a citation of the routine at `0x0045D9F0`, then named
+    // `ActorAbortAttackAndLeave` and now `ZombieSplitInTwo`, that is
     // not this address at all -- see `class30/leave.ts` and
     // `ZombieState.Leave`. Everything the port sends to state 10 therefore
     // went to `WaitTurn` and stayed alive: stage 5 block 2's four `znnick`,

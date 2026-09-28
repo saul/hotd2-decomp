@@ -474,7 +474,9 @@ function ZombieDelayedStrikeIdle(obj: ZombieActor, rng: Rng): void {
  *
  * While that bit is clear the counter at `obj+0x1334` is held at zero; once it
  * is set the counter runs, and at `0x14` the actor abandons the fight for
- * state 10 — `ActorAbortAttackAndLeave`, which releases the permit. It is how
+ * state 10 — `ZombieReleaseAndDespawn` (`FUN_00455490`), which releases the
+ * permit and leaves the pool. This used to name `ActorAbortAttackAndLeave`
+ * for state 10, the same wrong citation `ZombieState.Leave` carried. It is how
  * a scripted attacker gets out of the way when the ride it belongs to ends.
  *
  * **`obj+0x34`, not `obj+0x136C`.** The read is

@@ -250,6 +250,18 @@ the nineteen-unit melee at your face. The engine's own operand bug at
 armed, so it always lands on condition 1 with the left-arm zone bit set, which
 pins its pick to the right-arm swing.
 
+**Superseded, 2026-09-28: the crawler does not swing at all -- it leaps, and
+the leap lands.** Everything in the next two paragraphs is true of
+`ZombieStateStrike`, and no crawler runs it: `ZombieStateHoldAtRange` sends
+body condition 4 to state 0x34, `ZombieStateLeapStrike` (`FUN_0045E330`),
+which lands the same entry through `ActorStrikeConnect` on touching down with
+no hit frame to miss. The crawlers are also born half a body --
+`ZombieInitHalved` (`FUN_0045DA10`) hides bones 9 to 15 and puts the stump
+`0x1DA3` on bone 9 -- and every `znkager` carries the `obj+0x136C` bit 0x80
+that lets its legs be severed. See `class30/leap_strike.ts`,
+`class30/split.ts`, and the section of that name in `BUGS.md`. What follows is
+kept as it was written.
+
 **And the crawler's swing misses now, because the engine's does.** Character
 types `0x07`, `0x0B` and `0x0C` share a body-condition-4 attack entry at
 `0x00566E70` — `{997, 1051, 26.0f, 40, 9, 1}` — whose hit frame is 40 against

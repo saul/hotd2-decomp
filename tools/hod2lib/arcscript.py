@@ -43,14 +43,22 @@ CLASS31_ARC_SCRIPTS = {
     "drop_zskamere": 0x00565E28,
 }
 
-#: `ZombieStateArcScriptedEntrance`'s two arc motion scripts, in the same
-#: twelve-dword shape as class 0x31's. The state picks by character type, not
-#: by anything in the descriptor: type 0 takes the first and every other type
-#: the second.
+#: Class 0x30's arc motion scripts, in the same twelve-dword shape as class
+#: 0x31's. `ZombieStateArcScriptedEntrance` picks between the first two by
+#: character type, not by anything in the descriptor: type 0 takes the first
+#: and every other type the second. The third is `ZombieStateLeapStrike`'s
+#: (`FUN_0045E330`), `g_class30_leap_strike_arc_script`, which the state
+#: passes as a literal (``PUSH 0x593180`` at 0x0045E487) -- body condition
+#: 4's attack, so every `znkager` crawler's.
 CLASS30_ARC_SCRIPTS = {
     "entrance_type0": 0x00567898,
     "entrance_other": 0x00567958,
+    "leap_strike": 0x00593180,
 }
+
+#: The two of :data:`CLASS30_ARC_SCRIPTS` state 30 installs, whose clips a
+#: state-30 spawn bakes.
+CLASS30_ENTRANCE_ARC_SCRIPTS = ("entrance_type0", "entrance_other")
 
 #: `ThrowerStateLeapAside`'s character-0x18 block is one script per stance.
 CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4

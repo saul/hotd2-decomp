@@ -66,9 +66,13 @@ export enum ZombieState {
    * ({@link ZombieState.FallToGround}) and 12 `0x00456DF0`
    * ({@link ZombieState.DeathFallAndBounce}) — so the indexing is not adrift.
    *
-   * This used to cite `ActorAbortAttackAndLeave` (`FUN_0045D9F0`), which is a
-   * different address and takes no actor at all: it is three no-argument calls
-   * (`0x0045DB70`, `0x0045DA60`, `0x0045DD30(9)`) and assigns no state. The
+   * This used to cite the routine at `0x0045D9F0`, then named
+   * `ActorAbortAttackAndLeave`, which is a different address and not in the
+   * table at all. It is `ZombieSplitInTwo` (`FUN_0045D9F0`): three no-argument
+   * calls that cut `g_cur_actor` in two, the second of which --
+   * `ZombieSplitUpdateSelf` (`FUN_0045DA60`) -- **does** assign a state, 0x32
+   * ({@link ZombieState.SplitLaunch}). An earlier revision of this note said
+   * it assigned none; it had read the three calls and not their bodies. The
    * wrong citation is why state 10 had no `case` in the dispatch and every
    * actor that reached it went to {@link ZombieState.WaitTurn} and lived —
    * which is what held stage 5 block 2's room shut even once class 0x33 was
@@ -236,6 +240,40 @@ export enum ZombieState {
    * state to enter — class 0x10's op 0x1A writes it to `sub+0x2C`.
    */
   OrderDie = 0x31,
+
+  // -- the half-body family: states 0x32 to 0x35 ---------------------------
+  //
+  // `g_class30_states[0x32..0x35]` is `0x0045E010`, `0x0045DED0`,
+  // `0x0045E330`, `0x0045E660`, read out of the table with `[0x31]` the no-op
+  // `0x0041EBB0` below and `[0x36]` `0x00456920` above (`L38`). Only 0x34 is
+  // reached by anything the shipped game runs; see `class30/split.ts`.
+  /**
+   * `ZombieStateSplitLaunch` (`FUN_0045E010`). The actor `ZombieSplitInTwo`
+   * leaves holding root 0, thrown at the camera, bounced, and sent back into
+   * the run. **No `case` in the dispatch, on purpose**: its only writer is
+   * `ZombieSplitUpdateSelf` at `0x0045DA76`, and nothing reaches that.
+   */
+  SplitLaunch = 0x32,
+  /**
+   * `ZombieStateSplitHalfCollapse` (`FUN_0045DED0`). The second actor a split
+   * makes, holding root 1: two clips, a pause, a death. No `case`, for the
+   * same reason as {@link SplitLaunch}.
+   */
+  SplitHalfCollapse = 0x33,
+  /**
+   * `ZombieStateLeapStrike` (`FUN_0045E330`) — **what a crawler attacks
+   * with.** `ZombieStateHoldAtRange` sends body condition 4 here instead of to
+   * {@link Strike} (`0x0045585E CMP [ESI+0x130C], 4` / `JZ` /
+   * `0x0045587C MOV word [ESI+0x1310], 0x34`), and every `znkager` is
+   * condition 4. See `class30/leap_strike.ts`.
+   */
+  LeapStrike = 0x34,
+  /**
+   * `ZombieStateCollapseToCondition4` (`FUN_0045E660`). Falls, gets up as a
+   * condition-4 actor with {@link ZombieFlag2.SplitArmed} raised. No `case`:
+   * no instruction writes 0x35 as a state and no shipped data names it.
+   */
+  CollapseToCondition4 = 0x35,
 }
 
 /**

@@ -21,6 +21,7 @@
 import type { Events } from "../../core/events";
 import { ActorFlag, ZombieAux, ZombieFlag2, type ZombieActor } from "../actor";
 import { SPAWN_RIDE_CARRIER, ZombieAttachToCarrier } from "./carrier";
+import { CHAR_ZNKAGER, HALVED_CONDITION, ZombieInitHalved } from "./split";
 import { EnemyZombieTakeWeaponLoopSe } from "./weapon_loop";
 
 /**
@@ -38,10 +39,10 @@ const SPAWN_TURN_TOWARD_CAMERA = 0x4;
 /**
  * `EnemyZombieInitByCharType` — `FUN_00452FD0`.
  *
- * **The head, and two arms.** After the flag moves the engine branches on
+ * **The head, and three arms.** After the flag moves the engine branches on
  * the character type: 9 becomes a corpse, 0xC branches on the body condition,
  * 0xE loads a prop, and 0x12 allocates a *second* class-0x30 actor beside
- * itself. None of that is ported.
+ * itself. Type 0xC's arm is ported, below; the other three are not.
  *
  * The fourth arm — `obj+0x34` bit 3 — **is** ported, and it is not a flag
  * move at all: it re-reads the descriptor's position and yaw as an offset on
@@ -102,4 +103,17 @@ export function EnemyZombieInitByCharType(obj: ZombieActor,
   }
   // `00453133`, the switch's types-2-and-3 arm, sound only.
   EnemyZombieTakeWeaponLoopSe(obj, events);
+  // The switch's type-0xC arm, `znkager`: `obj+0x136C |= 0x80` on every one,
+  // which is the bit `ResolveHit`'s sever arm lets type 0xC through on for
+  // bones 9 and up, and then -- `if (obj+0x130C == 4)`, and all twenty shipped
+  // `znkager` spawns are condition 4 -- the actor is born as half a body.
+  // The body condition is the descriptor's by now: `EnemyZombieInit` stores
+  // `obj+0x130C = tail[1]` before it calls this. [proved]
+  //
+  // Without it the crawlers kept the legs their skeleton names, and a shot
+  // below bone 9 could never sever anything on them.
+  if (obj.charType === CHAR_ZNKAGER) {
+    obj.flags2 |= ZombieFlag2.SeverAnyBone;
+    if (obj.condition === HALVED_CONDITION) ZombieInitHalved(obj);
+  }
 }

@@ -20,6 +20,7 @@
 
 import { composeBams, rotMatrix } from "./bams";
 import { g_class30_bone_cels } from "../game/class30/bonecels";
+import { CHAR_ZNKAGER, HALVED_STUMP_SLOT } from "../game/class30/halved";
 import { u32 } from "./bytes";
 import { MOTION_ROW_BACKOFF, actorRadius, attackPicks, attackTables,
          damageRankRow, goreParts, hitReactions, hitSphere, hitSteps,
@@ -554,6 +555,12 @@ export async function goreEntry(stage: Stage, tables: ExeTables,
       for (let i = 0; i < r.count; i++) want.add(r.base + i);
     }
   }
+  // **And the stump a crawler is born with.** `ZombieInitHalved`
+  // (`FUN_0045DA10`) writes slot `0x1DA3` into bone 9's draw record for
+  // character type 0xC, after hiding everything from bone 9 down; it is in no
+  // effect table and on no skeleton node, so nothing above could find it, and
+  // the swap would have cloned nothing.
+  if (char.charType === CHAR_ZNKAGER) want.add(HALVED_STUMP_SLOT);
   for (const slot of [...want].sort((a, b) => a - b)) {
     // A slot this character's own file loads comes from that file, as the
     // bones do -- see `Character.ownSlots`.

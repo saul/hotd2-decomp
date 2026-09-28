@@ -20359,3 +20359,61 @@ through an accessor on `G`, each with flag 248 as it stood.
 `tools/hod2lib/rigs.py` and `web/src/hod2lib/rigs_data.ts`, says "nothing
 sets 0x20" and calls the bit dead; the chapter card sets it on every stage.
 Left for its own change -- it is bundle-writer text with a Python twin.
+
+## 2026-09-28 -- the split nothing reaches, and the crawler's leap everything does
+
+Asked to port `ActorReactToHit`'s `g_hit_result == 4` arm and state 0x32 if
+shipped data reaches them. **It does not**, and the reading that says so is now
+a check, `tools/verify_split_unreachable.py`. What the reading turned up on the
+way is reachable, was not ported, and is now.
+
+**The split.** `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) is renamed
+`ZombieSplitInTwo`: it allocates a second `EnemyZombieUpdate` actor
+(`ZombieSplitSpawnOtherHalf`, `FUN_0045DB70`), copies the first into it
+(`ZombieSplitCopyToHalf`, `FUN_0045DBC0`) and gives each one of the skeleton's
+two roots -- `g_character_skeletons[type] + 0x18` and `+ 0x1C`, which for
+`znkager` are bone 1 (torso, head, arms) and bone 9 (the two leg chains). The
+original goes to state 0x32 (`ZombieStateSplitLaunch`, thrown at the camera and
+back into the run), the new actor to 0x33 (`ZombieStateSplitHalfCollapse`, two
+clips and a death). Twelve routines and three globals named; the table read at
+0x31..0x36 with the neighbours agreeing (`L38`). `[proved]`
+
+Why nothing reaches it: no instruction stores 4 to `g_hit_result` (the address
+bytes occur 25 times -- `ResolveHit`'s 0/1/2/3/5, `ThrowerShotFeedback`'s 5,
+eight loads, four compares, one `LEA` whose register is only read; player 1's
+slot by name occurs nowhere). The other two callers need `obj+0x136C` bit
+0x1000000, and an aligned `capstone` sweep of class 0x30's code finds one `OR`
+of it, in state 0x35 (`ZombieStateCollapseToCondition4`), which nothing enters:
+no literal store of 0x35, and no descriptor, entry tail, captor script or
+civilian order names 50 to 53. Not ported, by the task's own condition, and
+each of the three call sites says so.
+
+**The crawler.** `ZombieStateHoldAtRange` sends a condition-4 claim to state
+0x34 rather than to the strike (`0x0045585E`), and every `znkager` -- all
+twenty -- is condition 4. The port sent them to `ZombieStateStrike`, behind a
+comment saying no stage-2 spawn carried condition 4; and the 2026-09-11 fix had
+concluded from that state that the crawler's swing always misses. State 0x34 is
+`ZombieStateLeapStrike`: close on the lunge, arc to a point 3 under and 12.5
+ahead of the camera (`ZombieLeapStrikeTarget`, `FUN_0045A690`), strike on
+touchdown with no hit frame, bounce, retreat. Ported, with its arc script
+exported (`g_class30_leap_strike_arc_script`, both halves of `hod2lib`) and its
+two clips baked for condition-4 spawns. Driven in the player at stage 2 block 8:
+three crawlers, the first claim leaps and takes a life at nine units, retreats,
+and the next one goes. `L53` is this.
+
+**The birth.** `EnemyZombieInitByCharType`'s type-0xC arm raises `obj+0x136C`
+bit 0x80 on every `znkager` -- which is what opens `ResolveHit`'s type-0xC sever
+gate below bone 9, a test the port had and nothing fed -- and on condition 4
+calls `ZombieInitHalved` (`FUN_0045DA10`): 0x6000080, the body sphere at 0.8,
+bones 9 to 15 hidden (`ZombieHideSkeletonRoot`/`ZombieHideBoneSubtree`), and the
+stump `0x1DA3` on bone 9, which no effect table names and `goreEntry` now bakes.
+
+**Wrong turns, recorded.** The first census of state numbers read the evt spawn
+records alone and got 690 class-0x30 descriptors against the character
+resolver's 804: `CivilianInit`'s captors are descriptors no evt instruction
+points at, and three `znkager` are among them. The check walks them now and
+matches 804. The state-0x32 store was cited as `0x0045DA79`, which is where the
+byte pattern starts, three bytes into the instruction at `0x0045DA76`. And the
+note on `ActorFlag.StrikeAndLeave` credited `obj+0x34` bit 0x2000000 to
+`FUN_0045E010` and `FUN_0045E660`; both `OR` it into `obj+0x136C`, a different
+word, and it is corrected.

@@ -1090,9 +1090,12 @@ counting.
 which releases both counters, releases the permit and despawns. The port had no
 `case` for state 10 and sent it through the dispatch's `default` to
 `ZombieGiveUpAttack`, which routes to `WaitTurn` and keeps the actor alive.
-`class30/states.ts` cited `ActorAbortAttackAndLeave` (`FUN_0045D9F0`) for that
-index, and that address is not in the table at all — it takes no argument and
-assigns no state. The dword at `0x00592AE8 + 0x28` is `90 54 45 00`, and its
+`class30/states.ts` cited the routine at `0x0045D9F0`, then named
+`ActorAbortAttackAndLeave`, for that index, and that address is not in the
+table at all — it takes no argument and
+assigns no state. (Since read in full and renamed `ZombieSplitInTwo`: it cuts
+the actor in two, and one of its calls *does* assign a state, 0x32. It is still
+not in the table, which is the point here.) The dword at `0x00592AE8 + 0x28` is `90 54 45 00`, and its
 neighbours agree with the enum either side, so the indexing is not adrift.
 
 Without the second half the first would have released nothing: all four

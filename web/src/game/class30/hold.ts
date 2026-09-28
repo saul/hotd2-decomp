@@ -34,6 +34,7 @@ import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
 import type { GameHost } from "../host";
 import { dist2d, type Vec3 } from "../vec";
 import { ActorBodyConditionFromHands } from "./condition";
+import { HALVED_CONDITION } from "./split";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius, TestApproachRing } from "./ring";
 import { MotionFade, MotionRow, QUEUE_CAP, ZombieState } from "./states";
@@ -156,9 +157,16 @@ export function ZombieStateHoldAtRange(obj: ZombieActor, eye: Vec3, rng: Rng,
   }
 
   if (ZombieAttackRefusal(obj) === null && TryClaimAttackSlot(obj, host)) {
-    // Body condition 4 goes to state 0x34 instead; that state is unread, and
-    // no stage-2 spawn carries condition 4 into this state.
-    obj.state = ZombieState.Strike;
+    // `0045585e CMP dword ptr [ESI + 0x130c], 0x4` / `JZ 0045587c`: body
+    // condition 4 leaps (`MOV word [ESI + 0x1310], 0x34`) and everything else
+    // strikes (`MOV word [ESI + 0x1310], 0x3`). This used to say that no
+    // stage-2 spawn carried condition 4 here and send every claim to the
+    // strike; all twenty `znkager` crawlers carry it, from their descriptors,
+    // and reach this claim from the attack run and the walk-in -- so every
+    // one of them ran a state the engine never gives them. See
+    // `class30/leap_strike.ts`.
+    obj.state = obj.condition === HALVED_CONDITION
+      ? ZombieState.LeapStrike : ZombieState.Strike;
     obj.sub = 0;
     return;
   }

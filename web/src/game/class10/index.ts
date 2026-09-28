@@ -159,6 +159,11 @@ export const CivilianHandler: ClassHandler = {
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj: Actor) => (obj.civ?.onShotScript ?? -1) < 0,
   leave: CivilianLeaveField,
+  // `CivilianUpdate`'s own switch writes `obj+0x12C` -- bone 1 as drawn, for
+  // a civilian no script has told otherwise -- and `RegisterForShotTest`
+  // publishes that, so the actor push must not rebuild class 0x30's
+  // feet-plus-radius over it. See `CivilianWriteSphereCentre`.
+  ownsSphereCentre: true,
 };
 
 /**

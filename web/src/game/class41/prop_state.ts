@@ -707,6 +707,25 @@ export interface BreakableProp {
    */
   draws: PropDrawCall[] | null;
   /**
+   * The words of the 0x378-byte object that a transcribed generic routine
+   * keeps and no field above carries, **keyed by their offset** — `"o200"` is
+   * `obj+0x200`.
+   *
+   * Keyed by offset and not by meaning because in this family the offset is
+   * all the words share: `PlaceGenericProp` builds one object for fifty
+   * routines, and `obj+0x200` is one routine's hinge angle and another's
+   * nothing at all (`L3`). Each routine's file declares the words it keeps as
+   * an interface of its own, named for what *that* routine uses them for,
+   * and reads them through it. `ActorClearGameFields` (`FUN_004A73D0`) has
+   * zeroed every one of them, so an absent key reads as 0.
+   *
+   * A word that a field above already carries — `+0x2A0`, `+0x1E8`, `+0x192`
+   * and the rest, each documented with its offset — is read through that
+   * field, and never through this. Plain numbers only, so the pool still
+   * survives `clonePlain`.
+   */
+  words: Record<string, number>;
+  /**
    * [port-only] Where the last shot on this prop was aimed, at the prop's own
    * camera depth — `g_crosshair_x/y` unprojected by `obj+0x78`, which is what
    * `SpawnPropHitEffectScaled` (`FUN_004666B0`) computes when a routine calls
@@ -811,6 +830,7 @@ export function makeBreakableProp(id: number, group: number,
     effectPoses: [],
     drawSkipped: false,
     draws: null,
+    words: {},
     hitAim: null,
     dead: false,
     flicker: null,

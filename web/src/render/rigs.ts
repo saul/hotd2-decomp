@@ -711,6 +711,18 @@ export class RigLayer implements System {
    * cel, `0x135F + g_frame_counter % 15` and `0xB67 + (g_frame_counter & 7)`
    * ({@link PATH_PROP_SPRITES}): that cel's part is shown and posed, and the
    * loop's other cels are hidden.
+   *
+   * **Nothing here touches a material, and that is the exe.** The routine
+   * sets no render state around the sprites -- its only calls are the matrix
+   * ones, `VecToAngles`, `NoOpStub` and the plain `AssetDrawSlot` -- so each
+   * cel composites by its own mesh's words, which `prepareDrawCommands`
+   * (`draw_order.ts`) put on its material when the stage loaded: ISP
+   * `0x83000000` and TSP `0x94002453` / `0x9400241B`, the translucent pass,
+   * SRCALPHA / INVSRCALPHA, alpha-tested at 1, **writing depth**. Nearest
+   * first, the 0xB67 cel (12.0 nearer) draws before the 0x135F column and
+   * cuts it away wherever its own texel alpha is at least 1, which is the
+   * pale fringe round each flame. It is the PC exe's picture; do not
+   * hand-tune it here (`render.test`, "class 0x28's sprite cels").
    */
   private PathRidingPropDraw(inst: Instance, launched: number): void {
     const eye = G.g_camera_index === 2 ? G.g_camera_block2_eye

@@ -1128,6 +1128,21 @@ console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
     fire.getWorldQuaternion(new Quaternion()));
   check("...both carrying the yaw alone: the fire stands upright",
         near(up.y, 1), `${up.x},${up.y},${up.z}`);
+  // The eye is `[g_camera_index * 0x1A4 + 0x009A60C0]`: under scene state
+  // (1, 3) the index is 2, and the smoke turns to block 2's eye.
+  G.g_camera_index = 2;
+  G.g_camera_block2_eye.x = a.pos.x - 40;
+  G.g_camera_block2_eye.z = a.pos.z + 30;
+  rigs.update(ctx);
+  root.updateMatrixWorld(true);
+  const yaw2 = Math.trunc(Math.atan2(-40, 30) * 32768 / Math.PI)
+    * Math.PI / 32768;
+  const sm2 = wp(smoke);
+  check("...toward the eye of the block g_camera_index names (block 2)",
+        near(sm2.x, a.pos.x + 12 * Math.sin(yaw2))
+        && near(sm2.z, a.pos.z + 12 * Math.cos(yaw2)),
+        `${sm2.x},${sm2.z}`);
+  G.g_camera_index = 0;
   const tail = (a as unknown as { pathProp?: { launched: number } }).pathProp;
   check("the actor carries class 0x28's tail", tail !== undefined);
   if (tail) tail.launched = 1;

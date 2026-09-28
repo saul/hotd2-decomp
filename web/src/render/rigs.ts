@@ -685,8 +685,9 @@ export class RigLayer implements System {
    * carry the object's rotation: each is `T(x, y + lift, z) . RotY(yaw) .
    * [T(0, 0, 12)] . Scale`, where `yaw` is `VecToAngles` (`FUN_004016B0`) of
    * the camera block's eye less the object in `x` and `z` with a zero `y` --
-   * `g_camera_blocks[g_camera_index]`, `0x009A60C0` and `0x009A60C8`, which
-   * is `G.g_camera_block_eye` -- truncated to a `short` of BAMS.
+   * `[g_camera_index * 0x1A4 + 0x009A60C0]` and `+ 0x009A60C8` at
+   * `0x004328C0`/`0x004328CC`, so block 0's eye or, while the index is 2,
+   * block 2's -- truncated to a `short` of BAMS.
    *
    * The sprites are children of the root in the scene graph, so their world
    * transform is undone through the root's rotation here. What is **not**
@@ -695,7 +696,8 @@ export class RigLayer implements System {
    * each, so both loops stand on their first frame.
    */
   private PathRidingPropDraw(inst: Instance, launched: number): void {
-    const eye = G.g_camera_block_eye;
+    const eye = G.g_camera_index === 2 ? G.g_camera_block2_eye
+                                       : G.g_camera_block_eye;
     const p = inst.root.position;
     // `VecToAngles`: `yaw = atan2(x, z)`, `__ftol`'d into a `short`.
     const yaw = (Math.trunc(Math.atan2(eye.x - p.x, eye.z - p.z)

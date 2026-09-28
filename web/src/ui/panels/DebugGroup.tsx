@@ -24,6 +24,7 @@ import type { DebugGroupName } from "../projection";
 import { useDispatch } from "../store_context";
 import { useSlice } from "../useSlice";
 import { TOGGLES, type ToggleKind } from "./Toggles";
+import { keyCap } from "../shortcuts";
 
 /** The switches this group draws, resolved once: the table never moves. */
 const byGroup = (g: DebugGroupName, kind: ToggleKind) =>
@@ -65,6 +66,7 @@ function Switches({ group, kind }:
                  onChange={(e) => dispatch({ kind: "toggle", name: t.name,
                                              on: e.target.checked })} />
           {" "}{t.label}
+          {t.key && <kbd className="key-hint">{keyCap(t.key)}</kbd>}
         </label>
       ))}
     </div>

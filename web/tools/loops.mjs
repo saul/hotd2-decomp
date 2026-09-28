@@ -64,7 +64,9 @@ async function run(label, url, seconds) {
     for (let s = 0; s < seconds; s++) {
       await page.waitForTimeout(1000);
       const snap = await page.evaluate(() => window.__snap());
-      const el = snap.find((e) => e.loop && e.src.includes(LOOP_FILE));
+      // Lowercased: `audio/bgm.ts`'s `soundUrl` asks for every file that way.
+      const el = snap.find((e) => e.loop
+        && e.src.toLowerCase().includes(LOOP_FILE.toLowerCase()));
       cursors.push(el ? { t: el.t, paused: el.paused } : null);
     }
   } finally {

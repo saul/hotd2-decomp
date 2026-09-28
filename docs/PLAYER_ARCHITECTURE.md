@@ -615,6 +615,19 @@ The sidebar's open state is `ui/` state (`usePersisted`), not a command. The
 harnesses open it by setting that key before the page loads
 (`tools/lib/player.mjs`), because the panels are what they read.
 
+**Keys have one list.** Three handlers answer them, each for its own reason:
+`app/main.ts` the game's (Space, Enter, the digits, the arrow, S and R),
+`render/freeroam.ts` flying, and `ui/App.tsx` the page's -- the sidebar, the
+`?` dialog, `M`, `F`, and a key for each debug overlay, which is a column of
+the toggle table (`ToggleSpec.key`) rather than a map of its own. What they
+did not have was one place saying what all of them do, so `ui/shortcuts.ts`
+is that place: the `?` dialog is drawn from it, and `test:ui` reads the other
+two handlers' source and holds the table to them in both directions, so a
+branch added without a row fails a check rather than a viewer. Nothing binds
+`Z` -- `tools/pacing.mjs` presses it to prove an unbound key still wakes the
+loop. Opening the dialog holds the game, and closing it lets go only of a
+hold it took. A chord is the browser's: `Cmd-R` and `Ctrl-F` are never ours.
+
 ### How a frame reaches the screen
 
 ```

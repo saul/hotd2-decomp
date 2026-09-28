@@ -33,7 +33,7 @@ export const EXIT_SKIPPED = 3;
  * both a `.git` and a `web/`. Falls back to the working directory, which makes
  * the error message name a wrong-but-visible path rather than throwing.
  */
-function repoRoot(): string {
+export function repoRoot(): string {
   let dir = process.cwd();
   for (;;) {
     if (existsSync(join(dir, ".git")) && existsSync(join(dir, "web"))) return dir;

@@ -29,9 +29,11 @@ import { useSlice } from "../useSlice";
 export interface DebugToggle {
   debugOpen: boolean;
   onToggleDebug: () => void;
+  /** Open the `?` dialog. Also `App`'s, for the reason the sidebar is. */
+  onShowKeys?: () => void;
 }
 
-export function Crumbs({ debugOpen, onToggleDebug }: DebugToggle) {
+export function Crumbs({ debugOpen, onToggleDebug, onShowKeys }: DebugToggle) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLElement>(null);
   const stale = useSlice((p) => p?.bundleStale) === true;
@@ -74,6 +76,7 @@ export function Crumbs({ debugOpen, onToggleDebug }: DebugToggle) {
       </button>
       {open && <CrumbMenu debugOpen={debugOpen}
                           onToggleDebug={onToggleDebug}
+                          onShowKeys={onShowKeys}
                           onClose={() => setOpen(false)} />}
     </nav>
   );
@@ -93,7 +96,7 @@ function Burger() {
  * The menu's body. Exported for `test:ui`, which cannot click a trail open and
  * renders this directly instead.
  */
-export function CrumbMenu({ debugOpen, onToggleDebug, onClose }:
+export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
                           DebugToggle & { onClose: () => void }) {
   const dispatch = useDispatch();
   const stage = useSlice((p) => p?.stage);
@@ -180,6 +183,14 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onClose }:
           <span className="mi">{debugOpen ? "✓" : "⌥"}</span> Debug sidebar
           <kbd>`</kbd>
         </button>
+        {/* A phone has no keys to list, so the stylesheet hides it there. */}
+        {onShowKeys && (
+          <button className="keys-open only-fine"
+                  onClick={act(onShowKeys)}>
+            <span className="mi">⌨</span> Keyboard shortcuts
+            <kbd>?</kbd>
+          </button>
+        )}
       </section>
     </div>
   );

@@ -12,8 +12,9 @@ import { extname, join, normalize, resolve } from "node:path";
  * a build artifact, so it is not in `public/`. It is served straight out of
  * `extract/player/` under `/bundle/` instead.
  *
- * For a production build, put the bundle in `dist/bundle/` yourself -- the app
- * fetches `bundle/manifest.json` relative to the page either way.
+ * For a hosted copy, `tools/site.ts` (`npm run site`) stages the build, the
+ * bundle and the sounds side by side -- the app fetches `bundle/manifest.json`
+ * relative to the page either way. See `docs/HOSTING.md`.
  *
  * `HOTD2_BUNDLE` points all of this at an export somewhere else. It is the
  * same variable `tools/lib/bundle_root.ts` reads, on purpose: the dev server
@@ -158,6 +159,11 @@ function serveBundle() {
 
 export default defineConfig({
   plugins: [serveBundle()],
+  // Relative, so a build works wherever it is put -- a bucket's root, a
+  // prefix in one, a CloudFront path. Every URL the page makes for itself
+  // (`bundle/…`, `bgm/…`) is already relative to the page. See
+  // `tools/site.mjs`.
+  base: "./",
   server: { port: 5173, open: false },
   build: { target: "es2022", chunkSizeWarningLimit: 2000 },
 });

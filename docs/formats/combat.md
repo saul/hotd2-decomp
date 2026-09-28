@@ -300,9 +300,13 @@ list instead:
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
   `0x0043E330`; `0x43` `0x00446488`; `0x44` eight sites `0x00473CDF`..
   `0x004758C7`; `0x46` `0x0042E9B7`, `0x0042ED16`, `0x0042F401`, `0x0042F5B3`;
-  `0x51` `FishProjectToScreen` `0x00439BE3`; `0x52` and the class-0x53 trigger
-  through `FUN_0043F950` (`0x0043F9C2`, `0x0043FB76`), which both branch
-  triggers call.
+  `0x51` `FishProjectToScreen` `0x00439BE3`; the class-0x53 trigger through
+  `ActorRegisterOriginInViewSpace` (`FUN_0043F950`, the call at `0x0043F9C2`).
+  That routine has **one** caller, `CatBranchTriggerUpdate` (`get_xrefs_to`),
+  so this line used to be wrong to say both branch triggers call it; the
+  other site it listed, `0x0043FB76`, lies outside it, in the unfunctioned
+  code from `0x0043F9D0`. Whose routine that is, and where `0x52`
+  registers, is `[open]`.
 * Class `0x25`: `[likely]` none. No site lies in its routines, and every shared
   routine that registers is accounted for above. The exception is
   `FUN_004825B0` (`0x00482991`), a task `FUN_00482070` allocates, whose owner

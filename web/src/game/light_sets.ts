@@ -29,7 +29,7 @@
  * | `OwlCorpseFallAndSettle` (`FUN_00448210`) -- **the corpse only** | 0x43 |
  * | `BatDiveUpdate`, `BatScatterUpdate`, `BatSwarmUpdate` | 0x46 |
  * | `FishDraw` (`FUN_00439860`), `FishSwimAwayTick` (`FUN_00439C20`) | 0x51 |
- * | `CatBranchTriggerUpdate` (`FUN_00431430`) and `FUN_00431340`, the other cat | 0x53 |
+ * | `CatBranchTriggerUpdate` (`FUN_00431430`) and `CatMotionListUpdate` (`FUN_00431340`) | 0x53 |
  *
  * Also callers, and not actors this module can answer for:
  * `BodyCreatureUpdate` (`FUN_0043E880`, `znjoe`'s released creatures, a pool of

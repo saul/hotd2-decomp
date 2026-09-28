@@ -21038,3 +21038,72 @@ at 60.
 **Found, not fixed:** `render/breakables.ts`'s `ShadowSlotFor` gives families
 53 and 54 the generic `0x10D0` shadow by default; whether `PropDrawOnlyType53`
 and `PropDrawOnlyType54` draw one was not read here.
+
+## 2026-09-28 -- the camera through stage 2 block 5's drop (branch `fix/newbugs2-camera-pitch`)
+
+Reported in `NEW-BUGS-2.md`: when the two knife zombies drop at
+`?stage=2&original=1&mode=play&block=5&step=6&op=10&frame=90`, the camera
+hardly pitches up. No port change here: the fix is `fix/camera-faithful`'s,
+and this entry is the evidence for that.
+
+What drives the camera at this step, all `[proved]` from the listing. Op 6
+spawns two class-0x31 `zsass` (character type 0x16) in state 20,
+`ThrowerStateLeapToPoint` (`FUN_0044E4C0`), at y = 87. Op 7 is `cam_play
+44..90` with flags 2, which `EvtActionCamPlay40` (`FUN_00403360`) sends to
+`CamStashPathRange` (`FUN_00403490`): stashed, not played. Op 8,
+`finish_sequence 6`, enters scene state (2,6) -- `g_scene_state_table[2][6]`
+= `CameraInstallDeferredRail` (`FUN_00403A60`) -- and installs
+`g_camera_action_starters[6]` = `CameraActionStartWithEyeMatrix`
+(`FUN_00402580`), which installs `CameraDriverSelectMode` (`FUN_00402650`);
+with enemies alive that is mode 3, `g_camera_mode_hooks[3]` =
+`CameraTrackEnemiesTick` (`FUN_00402890`). The rail hook,
+`CameraStepRailTick` (`FUN_0040C790`), evaluates the path into
+`g_cam_path_eye` / `g_cam_path_target` and nothing else. So for the whole
+rail the block's aim moves only by `TurnLookAtToward` (`FUN_00403C00`)
+toward the pair's midpoint, and accumulates. Also checked: the leap sets
+`obj+0x34` bit 0x100 and not 0x10000, so the pair register the whole way
+down; type 0x16 is past `SkeletonEmitNode`'s `< 0x15` guard, so the camera
+point is bone 1 with no -3.5; the thrower's rise is 0; the task list at
+`0x00460710` runs the camera actor before the rail hook, the slot fill and
+the actors; `g_camera_turn_curve` is only ever 1 (a byte search for
+`386f9c00` finds two writers, both storing 1, and one reader).
+
+Measured, driven clock, `seed=1`, from `op=0`:
+
+| tree | peak block pitch | wanted | aim follows the exe's turn on every rail frame |
+|---|---|---|---|
+| `main` 98627e9 | 2.66 | 44.76 | no, off by up to 2.5 degrees a frame |
+| `fix/camera-faithful` 13341b0 | 27.96 | 44.75 | yes, worst 0.005 degrees |
+| the same merged with `main` 39a7065 (throwaway) | 28.38 | 44.76 | yes |
+
+`main`'s fault is the one `game/camera/rail.ts` already declares: `seatCamera`
+in `app/systems.ts` writes the block's eye **and** aim from a stashed play for
+as long as it is live, so every frame starts the ease from the rail again.
+The rail's own note had put that change to the user; `fix/camera-faithful`
+makes it. The "follows the exe's turn" column is an independent
+re-simulation of `TurnLookAtToward` and `ComputeLookAtAngleError` from their
+listings, fed each frame's logged eye, wanted point and rate -- not the
+port's own routine. `web/tools/drop_pitch.mjs` is that check: it fails on
+`main` and passes on the camera branch.
+
+**Wrong turns.**
+
+* The first measurements were at the reported address, and there the two
+  branches agree -- 19.87 degrees on `main`, 18.88 on the camera branch. The
+  address is past the rail: the seek makes the pair on its first live frame,
+  so they leap under a camera that has already parked. It shows the seek, not
+  the bug; the engine's pair has landed by that frame. Measure from `op=0`.
+* I suspected the camera bone before reading `SkeletonEmitNode`'s guard: the
+  thrower's leap does raise `obj+0x136C` bit 0x10000000, which picks bone 2,
+  but only for character types below 0x15, and only once the arc settles.
+
+**Open.**
+
+* A seek to any address inside a room restarts that room's spawns on the
+  first live frame, so a deep link past an entrance replays the entrance
+  under whatever the camera is doing then. Known for class 0x41; this is the
+  same thing for class 0x31, and it is the seek's, not the camera's.
+* `CameraTurnCurveReset` (`FUN_00403BA0`) is named in the TSV and the live
+  database; the `export-annotations` round trip has to be run from the main
+  checkout.
+

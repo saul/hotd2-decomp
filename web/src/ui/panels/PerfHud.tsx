@@ -35,6 +35,14 @@ export function PerfHud() {
             .join(" · ")}
         </div>
       )}
+      {p.worst && (
+        <div className="perf-line">worst {p.worst}</div>
+      )}
+      {(p.uploads[0] > 0 || p.uploads[1] > 0) && (
+        <div className="perf-line perf-bad">
+          new: +{p.uploads[0]} tex · +{p.uploads[1]} prog
+        </div>
+      )}
       <div className="perf-line perf-dim">
         {calls} calls · {(tris / 1000).toFixed(1)}k tri · {programs} prog
         {" "}· {textures} tex

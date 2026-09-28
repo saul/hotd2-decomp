@@ -1963,11 +1963,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.keepThumb();
     this.publishUi();
     m.add("publish", performance.now() - t);
-    m.endFrame(() => {
-      const i = this.renderer.info;
-      return [i.render.calls, i.render.triangles, i.programs?.length ?? 0,
-              i.memory.textures, i.memory.geometries];
-    }, () => {
+    const i = this.renderer.info;
+    m.endFrame([i.render.calls, i.render.triangles, i.programs?.length ?? 0,
+                i.memory.textures, i.memory.geometries], () => {
       const c = this.canvas;
       return `${c.width}×${c.height} @${this.pixelRatio}× · dpr `
         + `${Math.round(devicePixelRatio * 100) / 100}`;

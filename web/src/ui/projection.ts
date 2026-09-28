@@ -108,6 +108,14 @@ export interface PerfProjection {
   systems: readonly (readonly [string, number])[];
   /** Sampled wait for the GPU to finish a frame, ms; null before a sample. */
   gpu: number | null;
+  /**
+   * Textures and shader programs created on the GPU in the window -- each a
+   * synchronous upload or compile inside `draw`, and on WebKit a trip to its
+   * GPU process.
+   */
+  uploads: readonly [number, number];
+  /** The window's costliest frame, in one line: "38 ms, draw 31 · +12 tex". */
+  worst: string;
   /** Draw calls, triangles, shader programs, textures, geometries. */
   gl: readonly [number, number, number, number, number];
   /** The canvas: "520×390 @1× · dpr 3". */

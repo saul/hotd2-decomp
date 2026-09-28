@@ -99,6 +99,14 @@ export class PerfMeter implements SystemProbe {
   private readonly sysSum = new Map<string, number>();
   private gpuMs: number | null = null;
   private sinceGpu = 0;
+  /** Texture and program counts at the last frame, for the uploads. */
+  private lastTextures = -1;
+  private lastPrograms = -1;
+  private texNew = 0;
+  private progNew = 0;
+  /** The frame with the most work in the window, said in one line. */
+  private worstBusy = 0;
+  private worst = "";
 
   /** The latest readout, replaced once a window. */
   snapshot: PerfProjection | null = null;
@@ -163,8 +171,17 @@ export class PerfMeter implements SystemProbe {
     this.gpuMs = this.gpuMs === null ? ms : this.gpuMs * 0.6 + ms * 0.4;
   }
 
-  endFrame(gl: () => PerfProjection["gl"], view: () => string): void {
+  endFrame(gl: PerfProjection["gl"], view: () => string): void {
     const t = performance.now();
+    // What this frame uploaded: a texture is created on the GPU the first
+    // time something drawn uses it, and a program the first time a material
+    // is drawn -- both synchronous, both in `draw`.
+    const tex = this.lastTextures < 0 ? 0 : Math.max(0, gl[3] - this.lastTextures);
+    const prog = this.lastPrograms < 0 ? 0 : Math.max(0, gl[2] - this.lastPrograms);
+    this.lastTextures = gl[3];
+    this.lastPrograms = gl[2];
+    this.texNew += tex;
+    this.progNew += prog;
     const busy = t - this.frameAt - this.gpuNow;
     let known = 0;
     for (const v of this.secNow.values()) known += v;
@@ -172,6 +189,14 @@ export class PerfMeter implements SystemProbe {
     this.frames += 1;
     this.ticks += this.ticksNow;
     this.busy.push(busy);
+    if (busy > this.worstBusy) {
+      this.worstBusy = busy;
+      let top: [string, number] = ["other", 0];
+      for (const [k, v] of this.secNow) if (v > top[1]) top = [k, v];
+      this.worst = `${round(busy)} ms, ${top[0]} ${round(top[1])}`
+        + (tex ? ` · +${tex} tex` : "") + (prog ? ` · +${prog} prog` : "")
+        + (this.ticksNow > 1 ? ` · ×${this.ticksNow} ticks` : "");
+    }
     for (const [k, v] of this.secNow) {
       this.secSum.set(k, (this.secSum.get(k) ?? 0) + v);
       this.secMax.set(k, Math.max(this.secMax.get(k) ?? 0, v));
@@ -180,7 +205,7 @@ export class PerfMeter implements SystemProbe {
       this.sysSum.set(k, (this.sysSum.get(k) ?? 0) + v);
     }
     if (t - this.windowAt >= WINDOW_MS) {
-      this.snapshot = this.readout(t, gl(), view());
+      this.snapshot = this.readout(t, gl, view());
       this.onSnapshot?.(this.snapshot);
       this.resetWindow(t);
     }
@@ -207,6 +232,8 @@ export class PerfMeter implements SystemProbe {
         .map(([id, ms]) => [id, round(ms / n)] as const)
         .sort((a, b) => b[1] - a[1]).slice(0, 5),
       gpu: this.gpuMs === null ? null : round(this.gpuMs),
+      uploads: [this.texNew, this.progNew],
+      worst: this.worst,
       gl, view,
       experiments: describeExperiments(this.experiments),
     };
@@ -221,5 +248,9 @@ export class PerfMeter implements SystemProbe {
     this.secSum.clear();
     this.secMax.clear();
     this.sysSum.clear();
+    this.texNew = 0;
+    this.progNew = 0;
+    this.worstBusy = 0;
+    this.worst = "";
   }
 }

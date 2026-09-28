@@ -403,7 +403,8 @@ console.log("\nThe perf meter:\n");
                ["hud", 0, 0], ["matrices", 0.3, 1], ["draw", 0.8, 2],
                ["publish", 0.1, 1], ["other", 0.05, 0.2]],
     systems: [["render.characters", 0.8], ["game.world", 0.4]],
-    gpu: 6.3, gl: [164, 2718, 29, 290, 999], view: "520×390 @1× · dpr 3",
+    gpu: 6.3, uploads: [12, 1], worst: "38 ms, draw 31 · +12 tex",
+    gl: [164, 2718, 29, 290, 999], view: "520×390 @1× · dpr 3",
     experiments: "blur=0" } }, createElement(PerfHud));
   check("on, it says the frame rate and the frame times",
         on.includes('id="perf-hud"') && /<b>42<\/b> fps · 16.7\/33.4\/81 ms/.test(on)
@@ -414,6 +415,9 @@ console.log("\nThe perf meter:\n");
   check("...the GPU sample, the GL counts, the canvas and the A/B switches",
         on.includes("gpu≈ 6.3") && on.includes("164 calls")
         && on.includes("520×390 @1× · dpr 3 · blur=0"), on);
+  check("...the worst frame and what the window uploaded",
+        on.includes("worst 38 ms, draw 31 · +12 tex")
+        && on.includes("new: +12 tex · +1 prog"), on);
   check("the meter is an overlay with a key, in the Scene panel",
         TOGGLES.some((t) => t.name === "perf" && t.kind === "debug"
                             && t.group === "scene" && !t.on && !!t.key));

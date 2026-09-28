@@ -391,6 +391,8 @@
 007dd0a4	g_cur_actor_xform	Scratch pointer to the transform block of the object being updated -- obj+0x40. Floats 0..2 position, 3..5 the per-frame step op 0x26 interpolates by, 9..11 pitch/yaw/roll.
 007ddaa8	g_screen_sprites	The 2D screen-sprite array ScreenSpriteRegister (0x0049E950) appends to: 64 slots of 0x28 bytes, {void* tex; float x, y, w, h; u32 a, b, c, d; u32 visible}. +0x24 is the visibility flag ScreenSpriteSetVisible writes. The slot index is registration order, which is how the title menu addresses its rows arithmetically.
 007de4a8	g_screen_sprite_count	How many g_screen_sprites slots are in use. ScreenSpriteRegister refuses at 0x40 and otherwise uses the pre-increment value as the new slot index.
+007de5a8	g_sound_channels	Heap array of 0x44-byte channel records, g_sound_channel_count of them. +0x00 IDirectSoundBuffer, +0x0C stream file handle, +0x34 ring bytes, +0x38 next half to fill, +0x3C file offset of the first sample (SoundChannelOpenWav), +0x40 flags: 0x80000000 open, 0x40000000 streaming, 0x08000000 loop, 0x10000/0x20000 stopped/paused. Channel 0xF is BGM, 0x10 voice. [proved]
+007de5bc	g_sound_channel_count	Number of records at g_sound_channels; every channel routine bounds its index by it. [proved]
 007de5c8	g_d3du_unused_projection
 007e7948	g_projection_matrix_cache
 007e7990	g_MatrixStackTop
@@ -602,6 +604,8 @@
 009c9034	g_pad_raw	The pad word PadReadMapleDevices assembles from both maple devices, before PadLatchFrame. [proved]
 009c904a	g_enemies_alive
 009c90a4	g_nRunPhase	Index into g_pfnRunPhaseHandlers; RunPhaseDispatch (0x0045FEE0) calls handlers[this]() and is the only reader. 0 ResetGameOnStart, 1 AdvanceToNextScene, 2-4 the continue screen, 5 RunPhaseArmSceneAdvance, 6 RunPhaseStepToNextScene, 7 the ending. Formerly DAT_009C90A4.
+009c90a8	g_bgm_stop_group	0, written only by SoundStopGroupsInit. The group SoundStopGroup stops for the music. [proved]
+009c90ac	g_voice_stop_group	1, written only by SoundStopGroupsInit. The group SoundStopGroup stops for the voice. [proved]
 009c90c0	g_original_items_taken	One byte per Original Mode item id, incremented on pickup and capped at 99.
 009c9100	g_civilians_seen_by_scene	u16 per scene, indexed g_scene_index*2. CivilianInit increments it on the same straight line as g_civilians_seen_total (0x009A21BA) and g_civilians_alive, so it is every class-0x10 actor the scene created. Paired with g_civilians_rescued_by_scene for the end-of-stage rescue tally. ResetGameOnStart zeroes the first three dwords -- six scenes -- and ResetSceneOnEnter zeroes this scene only.
 009c9118	g_training_lesson	Which training lesson is being played, a byte. PROVED it is read in exactly two places and both are behind g_GameMode == 2, which is Training: PreloadScreenAssetList indexes g_preload_lists_training_by_lesson with it at event block 3, and PlaceBreakableGroup uses it to pick which members of a breakable group become one-shot targets (+0x11C = 1, asset 0x1A0F) -- set 0 takes members 2, 3, 4 and 6; set 1 takes 0, 1 and 5; set 2 takes 0 and 6; set 3 takes the same four as set 0. Those four sets are the four lessons, which closes the [open] this row carried while it was called g_prop_target_set from the belief that mode 2 was arcade. scr_training_sele.bin is the lesson-select screen; which lesson is which is still [open]. The browser port calls this global g_prop_target_set.

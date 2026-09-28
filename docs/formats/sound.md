@@ -1,9 +1,10 @@
 # Sound: ids, tables and BGM
 
-**Status:** the id space, the BGM tables and the **looping-SE pairs** are
-solved. SE and voice use the same dispatcher and their name tables are read by
-`ExeTables.se_names()` / `.voice_names()`. What starts a stage's own music is
-**open**.
+**Status:** the id space, the BGM tables, the **looping-SE pairs**, the
+**music stream and its loop**, and the three control words are solved. SE and
+voice use the same dispatcher and their name tables are read by
+`ExeTables.se_names()` / `.voice_names()`. Each stage's own music is started by
+its script -- see [what starts a stage's own music](#what-starts-a-stages-own-music).
 
 Audio ships as plain `.wav` under `sound/` — `bgm/` (38 files, 270 MB),
 `SE/` and `voice/`. There is no container and no compression; the NAOMI sound
@@ -23,14 +24,38 @@ sound in the game. It switches on `id >> 28`:
 | Nibble | Kind | Lookup |
 |---|---|---|
 | `0` | SE | linked list at `0x005845F8`, stride `0x34` = `{u32 id; char name[0x30]}`, walked comparing `id`, terminated by `id == 0xFFFF`. Prefix `Sound\SE\` |
-| `1` | **BGM** | `id & 0xFFF` indexes a table of `char *` filenames. Prefix from `0x00588B58` |
-| `2` | voice | `(id & 0xFFF) * 0x24` into the records at `0x0058044A`; a `s16` of `-1` marks an empty slot, name at `+2`. Prefix `Sound\Voice\` |
-| `8` | control | `0x80000000` stops playback and clears `g_current_bgm_id` |
+| `1` | **BGM** | `id & 0xFFF` indexes a table of `char *` filenames. Prefix from `0x00588B58`. Streamed on channel `0xF` -- see [the music stream](#the-music-stream-no-loop-points) |
+| `2` | voice | `(id & 0xFFF) * 0x24` into the records at `0x0058044A`; a `s16` of `-1` marks an empty slot, name at `+2`. Prefix `Sound\Voice\`. Channel `0x10`, unlooped |
+| `8` | control | `PlaySoundControl` (`0x0041D3E0`): stops one group -- see [control words](#control-words) |
 
 `id == 0` early-outs. That is how a script says *no sound* — it is not track 0.
 
 Three ids are special-cased in the SE path: `0x000100A0` is
-`SS_SND_ALL_SOUND_OFF`, and `0x21A9` / `0x121A9` take a different argument set.
+`SS_SND_ALL_SOUND_OFF`, which goes to `SoundCommand(0, 0x100A0)`
+(`0x004ABF80`) -- and **that does nothing**: the command switch has no arm for
+it and falls to `return 0` (`0x004ABFAC`-`0x004ABFC1`, by disassembly).
+`0x21A9` / `0x121A9` go to channel `0x11`, unlooped, skipping the loop walk.
+
+## Control words
+
+**[proved]** `PlaySoundControl` (`FUN_0041D3E0`) tells three apart, and
+`PlaySoundId` then zeroes `g_current_bgm_id` for exactly `0x80000000`:
+
+| Id | Stops | How |
+|---|---|---|
+| `0x80000001` | every SE channel, 0-14, loops included | `SoundCommand(1..3, 0x1100A0)` → `SoundChannelsRelease(0, 14, 1)` |
+| `0x80000002` | **the voice**, channel `0x10` | `SoundStopGroup(g_voice_stop_group)` |
+| anything else, `0x80000000` included | the music, channel `0xF` | `SoundStopGroup(g_bgm_stop_group)` |
+
+`g_bgm_stop_group` (`0x009C90A8`) and `g_voice_stop_group` (`0x009C90AC`) are
+0 and 1, written by `SoundStopGroupsInit` (`FUN_0040AD70`) and nothing else.
+`SoundStopAll` (`FUN_0041D350`) is all three plus `g_current_bgm_id = 0`, and is
+what `MarkSceneOver` and `ResetGameOnStart` call.
+
+**`0x80000002` is not a music word.** It is what evt `0x2E` plays after a
+cutscene skip, and that instruction was named `resume_bgm_if_skipped`: it is
+`stop_voice_if_skipped`. The player's mixer took every namespace-8 id as a
+music stop, so a skip silenced the stage's track for the rest of the scene.
 
 ## Looping SE — two tables, and no handle anywhere
 
@@ -97,6 +122,15 @@ Exposed as `ExeTables.looping_se()` in both halves of the library and carried
 into the bundle as `sound.looping`; `web/src/audio/bgm.ts` is the transcription
 of the branch above.
 
+**A looping SE is not streamed**, unlike the music: `SoundPlayOnFreeChannel`
+opens every channel but `0xF` with `SoundChannelOpenWav(ch, name, 0, 0)`, a
+static buffer filled once from the `data` chunk's own size, and plays it with
+`DSBPLAY_LOOPING` (`SoundChannelStartBuffer`). So an SE loop is the data chunk
+exactly -- no tail bytes, no shift -- and gapless. `[likely]` for the buffer
+being exactly the data size: `FUN_004A4500`, which creates it, is passed that
+size and has not been read. The player still loops SE on an `<audio loop>`
+element, which is the same points with the element's seam at the join.
+
 ## BGM — two tables, chosen at runtime
 
 **[proved]**
@@ -158,6 +192,153 @@ them. Indices ≥ 20 exist only in the AR table.
 all 38 of them. Match case-insensitively: the tables spell `.WAV`, the files
 are `.wav`, and `ITEM_SELECT.wav` is lowercase in the table too.
 
+
+## The music stream: no loop points
+
+**[proved]** There are no loop points in this game's music -- not in the
+files, not in a table. A track is its file from the first sample to **end of
+file**, played end to end for as long as it loops.
+
+`PlaySoundId` hands every BGM id to `SoundPlayOnFreeChannel(name, loop, 0xF,
+-1)` (`FUN_004AC020`). That releases channel `0xF`, and channel `0xF` alone is
+opened **streamed**: `SoundChannelOpenWav(0xF, name, 1, 3000)` (`FUN_004A3EF0`;
+the `PUSH 0xBB8; PUSH 1` at `0x004AC131`). The loop flag is `PUSH 1` at
+`0x0041D21D` for every id except three -- see below.
+
+`SoundChannelOpenWav` walks the RIFF chunks **counting bytes into the channel's
+`+0x3C`**: `RIFF`'s tag and size, `WAVE` as a bare tag, `fmt `'s tag, size and
+body (reading at most `0x12`), any other chunk skipped by its size **with no
+word-alignment pad**, and at `data` the tag and size -- where it stops. So
+`+0x3C` is the file offset of the first sample, **44 for every shipped track**.
+It reads the data chunk's size and, streaming, never uses it. The ring is
+`nAvgBytesPerSec * 3000 / 1000` rounded up to 64 bytes -- 264,640 for 22,050 Hz
+16-bit stereo -- filled whole by `SoundStreamFill` (`FUN_004A3C70`), with
+notifications at the half and at the end.
+
+`SoundStreamThread` (`FUN_004A4640`) refills the half the play cursor has just
+left with a raw `ReadFile`. A short read is **end of file**, and the thread
+tests the loop bit that `SoundChannelStartBuffer` (`FUN_004A34B0`) set from
+`PlaySoundId`'s flag:
+
+```c
+if (read != want) {
+    if (ch->flags & 0x08000000) {                  /* 0x004A4991, 0x004A4AAF */
+        SetFilePointer(ch->file, ch->dataStart /* +0x3C */, 0, FILE_BEGIN);
+        ReadFile(ch->file, buf + read, want - read, &read, 0);
+    } else {
+        fill(buf + read, silence, want - read);    /* then stop, a half later */
+    }
+}
+```
+
+The wrap is made inside one refill, so it is **gapless**, and three things
+follow from where it is made:
+
+1. **The loop goes back to the very first sample.** Nothing plays once and
+   then loops a later section. Most tracks are written to wrap -- `ST1_AR`
+   ends at the same level it starts -- and a few (`ST2`, the endings) fade out
+   and so audibly start over.
+2. **The chunk after `data` is played as PCM.** Every shipped track ends in a
+   `LIST` chunk of 12, 38, 40 or 62 bytes, and `ReadFile` does not know it is
+   not audio: 3 to 15½ stereo frames of `"LIST"`, a size and `"INFO"...` reach the
+   speaker between the last sample and the first -- a click, once a pass.
+3. **A pass that is not a whole number of frames shifts the next.** The byte
+   after end of file is the first sample's, written wherever the read stopped.
+   A 38- or 62-byte tail leaves a pass `2 mod 4` bytes long, so every second
+   pass starts one 16-bit sample late: **left and right exchanged**, until the
+   pass after puts them back.
+
+The initial fill is made before the loop bit is set, so a *looping* file
+shorter than the ring would play once, then silence to the end of the ring,
+and only then wrap. No shipped looping track is that short -- the shortest is
+`ST6_BOS1_AR`, 8.3 rings -- and `tools/verify_bgm_stream.py` asserts it.
+
+**[measured]** Before this was read, the player looped each track on an
+`<audio loop>` element: the same points, since the element also returns to
+the first sample, but it stopped at the end of the `data` chunk and it put
+**8.4 ms of digital silence** at the seam of `ST1.WAV` (Chrome, headless). The
+player now builds one period of the stream -- one pass, or two where a pass is
+half a frame over -- and loops it in Web Audio; `tools/bgm_loop.mjs` renders
+the wrap and finds every sample the stream's own.
+
+### The three one-shots
+
+**[proved]** `CMP EBX, imm32` at `0x0041D1FB`, `0x0041D205` and `0x0041D20D`
+send exactly three ids to the `PUSH 0` at `0x0041D241`:
+
+| Id | Name | Notes |
+|---|---|---|
+| `0x10000009` | `OVR_AR` (both tables) | `GameOverRunPhase` plays it |
+| `0x10000025` | `CLR2` (`_AR` only) | 4.35 s |
+| `0x10000014` | `HOD1_ADV` (`_AR` only) | |
+
+A one-shot plays `[first sample, EOF)` once; the thread fills silence and
+stops the buffer a half-ring later. Every other name in either table loops.
+
+### Per track
+
+`python3 tools/verify_bgm_stream.py --game-dir ...` prints this from the files
+and the exe's own walk. Start is the file offset of the first sample; the loop
+is always `[start, EOF)`.
+
+| Track | Mode | Start | Data | Tail | Pass | Passes per period |
+|---|---|---|---|---|---|---|
+| `ADV_AR` | loop | 44 | 5,573,776 | 62 | 5,573,838 | 2 |
+| `BOS_AR` | loop | 44 | 5,591,880 | 12 | 5,591,892 | 1 |
+| `BOSS` | loop | 44 | 5,585,000 | 12 | 5,585,012 | 1 |
+| `BOSS_MOD` | loop | 44 | 1,448,824 | 12 | 1,448,836 | 1 |
+| `CLR` | loop | 44 | 1,659,832 | 38 | 1,659,870 | 2 |
+| `CLR2` | **once** | 44 | 383,232 | 12 | 383,244 | -- |
+| `CLR_AR` | loop | 44 | 1,751,408 | 38 | 1,751,446 | 2 |
+| `ENDL` | loop | 44 | 9,468,804 | 12 | 9,468,816 | 1 |
+| `ENDL_AR` | loop | 44 | 9,429,864 | 38 | 9,429,902 | 2 |
+| `ENDS` | loop | 44 | 8,139,520 | 12 | 8,139,532 | 1 |
+| `ENDS_AR` | loop | 44 | 8,232,800 | 38 | 8,232,838 | 2 |
+| `HOD1_ADV` | **once** | 44 | 5,467,136 | 12 | 5,467,148 | -- |
+| `ITEM_SELECT` | loop | 44 | 3,529,944 | 12 | 3,529,956 | 1 |
+| `NAM_AR` | loop | 44 | 8,458,376 | 12 | 8,458,388 | 1 |
+| `NAME` | loop | 44 | 7,528,844 | 12 | 7,528,856 | 1 |
+| `OVR_AR` | **once** | 44 | 654,420 | 62 | 654,482 | -- |
+| `RANK_MOD` | loop | 44 | 8,228,188 | 38 | 8,228,226 | 2 |
+| `ST1` | loop | 44 | 13,350,028 | 38 | 13,350,066 | 2 |
+| `ST1_AR` | loop | 44 | 12,941,772 | 38 | 12,941,810 | 2 |
+| `ST2` | loop | 44 | 13,930,028 | 38 | 13,930,066 | 2 |
+| `ST2_AR` | loop | 44 | 14,068,992 | 40 | 14,069,032 | 1 |
+| `ST3` | loop | 44 | 8,024,252 | 12 | 8,024,264 | 1 |
+| `ST3_AR` | loop | 44 | 6,774,632 | 12 | 6,774,644 | 1 |
+| `ST4` | loop | 44 | 6,882,460 | 12 | 6,882,472 | 1 |
+| `ST4_AR` | loop | 44 | 6,898,796 | 12 | 6,898,808 | 1 |
+| `ST5` | loop | 44 | 11,582,072 | 12 | 11,582,084 | 1 |
+| `ST5_AR` | loop | 44 | 11,628,700 | 12 | 11,628,712 | 1 |
+| `ST5_BOS1_AR` | loop | 44 | 11,187,744 | 38 | 11,187,782 | 2 |
+| `ST5_BOS2_AR` | loop | 44 | 7,372,740 | 38 | 7,372,778 | 2 |
+| `ST5BOS1` | loop | 44 | 15,136,840 | 38 | 15,136,878 | 2 |
+| `ST5BOS2` | loop | 44 | 9,322,932 | 62 | 9,322,994 | 2 |
+| `ST6` | loop | 44 | 6,498,168 | 12 | 6,498,180 | 1 |
+| `ST6_AR` | loop | 44 | 6,513,048 | 12 | 6,513,060 | 1 |
+| `ST6_BOS1_AR` | loop | 44 | 2,205,284 | 38 | 2,205,322 | 2 |
+| `ST6_BOS2_AR` | loop | 44 | 11,171,036 | 62 | 11,171,098 | 2 |
+| `ST6BOS1` | loop | 44 | 2,554,020 | 38 | 2,554,058 | 2 |
+| `ST6BOS2` | loop | 44 | 10,660,656 | 38 | 10,660,694 | 2 |
+| `TRA_MOD` | loop | 44 | 2,894,156 | 12 | 2,894,168 | 1 |
+
+All 22,050 Hz, 16-bit, stereo: a frame is 4 bytes, so a pass is `pass / 4`
+frames, fractional where there are two passes per period.
+
+### Every request reopens the file
+
+**[proved]** `SoundPlayOnFreeChannel` with channel `0xF` stops and releases
+whatever is on the channel and opens the file again from its first byte --
+there is no "already playing" test. So playing the track that is already
+playing **restarts** it. Stage 4 plays `ST4_AR` again with `bgm_entry_play`
+at blocks 2, 6 and 14 -- a stop and then the same track, from the top each
+time. `FUN_0040E500` behaves the same way: it toggles `DAT_009A1A00`, stops the
+music and voice groups when it sets it and plays `g_current_bgm_id` when it
+clears it -- so the track comes back from its first sample. `[likely]` that is
+the in-game pause: it draws one of two screen sprites while set and releases
+the SE channels every frame, but the sprite and the toggle's condition
+(`FUN_0040E9C0`) have not been read.
+
 ## `bgm_entry_play` (`0x5F`)
 
 **[proved]** `EvtOpBgmEntryPlay5F` → `BgmStopThenPlay` (`0x0041D450`) is:
@@ -169,6 +350,7 @@ PlaySoundId(operand[2]);      /* play */
 ```
 
 The instruction is 5 dwords — four operands — and **only the third is used**.
+`bgm_entry_play 0` is therefore a stop: the play is `PlaySoundId`'s own nothing.
 
 **[measured]** Every `bgm_entry_play` across the six stage scripts:
 
@@ -180,23 +362,32 @@ The instruction is 5 dwords — four operands — and **only the third is used**
 | `0x10000010` | 16 | `ST4_AR` | 4 |
 | `0x10000012` | 18 | `ST5_AR` | 5 |
 | `0x10000013` | 19 | `ST6_AR` | 6 |
-| `0x00000000` | — | *(none)* | 2, 3, 4, 5, 6 — the `id == 0` early-out |
+| `0x00000000` | — | *(none)* | 2, 3, 4, 5, 6 — a stop |
 
-## Open: what starts a stage's own music
+## What starts a stage's own music
 
-**[open]** Note what is missing from that table: **no stage script starts its
-own stage track.** Stage 2's script only ever plays `BOS_AR`; stage 1's only
-`BOS_AR`. The tracks named `ST1_AR`…`ST6_AR` are started somewhere else.
+**[measured]** **The script does, with `se_play`.** `se_play` (`0x38`-`0x3B`)
+hands its operand to `PlaySoundId` like `bgm_entry_play` does, and every stage
+script plays its own track at step 2 of each entry block:
 
-`PlaySoundId` has 496 callers, overwhelmingly SE, so finding it by xref is not
-practical — it wants the scene-entry path instead. Candidates not yet checked:
-the scene state table at `0x00576C14` (row 1 installs camera hooks, and may
-install more), and `FUN_0040A6F0` / `FUN_00407950`, which each make long runs
-of consecutive `PlaySoundId` calls in the event-system address range.
+| Stage | Where | Instruction | Track |
+|---|---|---|---|
+| 1 | block 0 step 2 op 34 | `se_play 0x10000001` | `ST1` / `ST1_AR` |
+| 2 | block 0 step 2 op 0 | `se_play 0x10000000` | `ST2` / `ST2_AR` |
+| 3 | block 0 step 2 op 39; block 7 step 2 op 41 | `se_play 0x10000011` | `ST3` / `ST3_AR` |
+| 4 | block 0 step 2 op 0; block 4 step 2 op 0 | `se_play 0x10000010` | `ST4` / `ST4_AR` |
+| 5 | block 0 step 2 op 0 | `bgm_entry_play 0x10000012` | `ST5` / `ST5_AR` |
+| 6 | block 0 step 2 op 0 | `se_play 0x10000013` | `ST6` / `ST6_AR` |
 
-Until that is traced the browser player names the stage track by convention —
-index `{1: 1, 2: 0, 3: 17, 4: 16, 5: 18, 6: 19}` — and labels it as *not*
-script-driven so the inference is visible rather than assumed.
+Stages 2, 3, 4 and 6 open step 1 with `bgm_entry_play 0` -- a stop -- so the
+previous music is silenced a step before the new track begins.
+
+This section used to be an open question headed "no stage script starts its
+own stage track", written from the `bgm_entry_play` table above alone -- while
+this same document said `se_play` names nine BGM tracks. The browser player
+started the track at load "by convention" on the strength of it, a step early,
+and then ignored the script's own `se_play` of the same track because it was
+already playing. `test:seek` now checks the table above against every bundle.
 
 ## Addresses
 
@@ -204,11 +395,23 @@ script-driven so the inference is visible rather than assumed.
 |---|---|---|
 | `0x0041CFD0` | `PlaySoundId` | the dispatcher |
 | `0x0041D450` | `BgmStopThenPlay` | evt `0x5F`'s target |
-| `0x0041D3E0` | — | stop, reached through nibble 8 |
+| `0x0041D3E0` | `PlaySoundControl` | the namespace-8 arm: SE, voice or music |
+| `0x0041D350` | `SoundStopAll` | all three groups and `g_current_bgm_id = 0` |
+| `0x00401000` | `SoundStopGroup` | 0 music (channel `0xF`), 1 voice (`0x10`) |
+| `0x004ABF80` | `SoundCommand` | `0x2A0` pause music, `0x3A0` resume it looped, `0x1100A0` release SE; `0x100A0` nothing |
+| `0x004AC020` | `SoundPlayOnFreeChannel` | channel `0xF` streamed with a 3000 ms ring |
+| `0x004A3EF0` | `SoundChannelOpenWav` | the header walk; `+0x3C` = first sample |
+| `0x004A34B0` | `SoundChannelStartBuffer` | sets the stream's loop bit `0x08000000` |
+| `0x004A4640` | `SoundStreamThread` | the refill, and the wrap at end of file |
+| `0x004A3C70` | `SoundStreamFill` | the first fill (loop bit still clear) |
+| `0x004A3B90` | `SoundStreamRewind` | seek to `+0x3C`, refill, position 0 |
+| `0x007DE5A8` | `g_sound_channels` | `0x44`-byte channel records |
 | `0x00580354` | `g_bgm_names_ar` | `char *[41]` |
 | `0x005803F8` | `g_bgm_names_plain` | `char *[20]` |
 | `0x005845F8` | `g_se_name_list` | `{u32 id; char[0x30]}`, `0xFFFF`-terminated |
 | `0x0058044A` | `g_voice_records` | `0x24`-byte records |
 | `0x00588B58` | `s_sound_bgm_prefix` | the `Sound\BGM\` path prefix |
-| `0x009C8FB8` | `g_current_bgm_id` | id currently playing; cleared by the stop |
+| `0x009C8FB8` | `g_current_bgm_id` | id last opened on channel `0xF`; zeroed by `0x80000000` and `SoundStopAll`; the game's unpause replays it |
+| `0x009C90A8` | `g_bgm_stop_group` | 0 |
+| `0x009C90AC` | `g_voice_stop_group` | 1 |
 | `0x009C8E98` | `g_app_state` | the top-level screen; **6 is in play**, so the plain table is the one a stage being played uses. See `docs/re/addresses.md` |

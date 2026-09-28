@@ -58,7 +58,7 @@ Each layer earns its boundary by what it makes possible, not by tidiness:
 | `bundle/` | engine | one module per exporter block |
 | `core/` | engine | `System`, `World`, `Scope`, `CameraFrame`, `Snapshot` |
 | `hud/` | ui | the shutter and the caption, drawn |
-| `audio/` | ui | `bgm.ts` |
+| `audio/` | ui | `bgm.ts` the mixer; `stream.ts` the music stream, pure |
 
 **Line counts, file counts, the largest files and the divergence count are in
 [`STATUS.md`](STATUS.md), which is generated.** They used to be written here,
@@ -762,7 +762,10 @@ web/src/
   hud/          hud.ts — the shutter and the caption, drawn. Holds no state
                 and imports nothing; React renders its nodes and hands them
                 over through `UiHost`
-  audio/        bgm.ts — audio, not UI
+  audio/        bgm.ts — audio, not UI: `PlaySoundId`'s dispatch, and the
+                mixer (Web Audio for channel 0xF, elements for SE and voice)
+                stream.ts — what channel 0xF plays, byte for byte; no DOM, so
+                `test:audio` runs it headless
 ```
 
 ### The three rules that hold the rest together

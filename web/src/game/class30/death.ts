@@ -30,7 +30,10 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, CountFlag, ZombieFlag2, type ZombieActor } from "../actor";
+import {
+  ActorFlag, CountFlag, MotionFlag, ZombieFlag2, type ZombieActor,
+} from "../actor";
+import { ActorSetPartVisibility } from "../model_draw";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
 } from "../combat/counts";
@@ -39,7 +42,13 @@ import { ReleaseAttackSlot } from "../combat/permits";
 import { QueryGroundHeightAt } from "../coli";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import type { GameHost } from "../host";
+import { SpawnGroundRingEffect } from "../effects/ring_effect";
 import { MotionOf, MotionPlayFrame, MotionPlayLength } from "../tables";
+import {
+  ZombieDeathEffectCueTick, ZombieDeathLandingEffect,
+  ZombieInstallDeathEffectCues,
+} from "./death_effects";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieReleaseWeaponLoopSe } from "./weapon_loop";
 import { GAME_HZ, MotionFade, ZombieState } from "./states";
@@ -61,17 +70,6 @@ const CORPSE_BLINK_TYPES: readonly number[] = [0x12, 3];
  * reader should see that it was seen.
  */
 const CORPSE_UNREAD_BIT = 0x8000;
-
-/**
- * `obj+0x34 |= 0x80000` — raised with {@link ActorFlag.Airborne} by both
- * corpse states (`OR EAX, 0xa0000`).
- *
- * `[likely]` it suppresses the ground decal: `FUN_0040A590` is
- * `if (!(obj+0x34 & 0x80000) && (obj+0x1F8 & 1)) FUN_0040A620(obj, w, h)` with
- * two sizes per character type, and it is the only reader found. The port does
- * not draw one, so this write has no consequence here.
- */
-const CORPSE_NO_DECAL_BIT = 0x80000;
 
 /** `ZombieStateDeathFallAndBounce`'s `obj+0x5C` — `0xbd16872b` = -0.03675f. */
 const BOUNCE_GRAVITY = -0.03675;
@@ -134,8 +132,9 @@ const CHAR_CARRIED_DEATH_HI = 0x11;
  * 00456194  7574         JNZ  0045620a           ; -> the *tail*, no clip at all
  * ```
  *
- * `0045620a` is the shared tail — install the effect cues, clear
- * {@link ActorFlag.PoseFrozen} — and it is reached **past** the
+ * `0045620a` is the shared tail — `ZombieInstallDeathEffectCues`
+ * (`FUN_004563F0`), then clear {@link ActorFlag.PoseFrozen} — and it is
+ * reached **past** the
  * `ActorSetMotionBlended` at `00456202`. So character type 10 with
  * `obj+0x136C` bit 0x8000 ({@link ZombieFlag2.DeathMotionVariant}) keeps
  * whatever it was already playing; it does not take clip 0x3DB, which is what
@@ -146,15 +145,14 @@ const CHAR_CARRIED_DEATH_HI = 0x11;
  * `AND EAX, 0x16`, `ADD EAX, 0x404` — so it is 0x404 on an even draw and
  * 0x41A on an odd one, not a range.
  *
- * [diverges] Three things the engine does here have no port. The four
+ * [diverges] Two things the engine does here have no port. The four
  * destroyed-part arms read `obj+0x1368` bits 0x8/0x10/0x40/0x80, which
  * `ZombieStateTargetMotionScript` and `ZombieStateDragTarget` set from a
  * kill-move clip id the port does not model — so those bits are never up and
- * the arms are unreachable rather than omitted. `ZombieInstallDeathEffectCues`
- * (`FUN_004563F0`) points `obj+0x13A0` at a dust/splash cue list, which is an
- * effect. And the exe's directional pick sets the base motion itself and then
- * remaps it through `obj+0x136C` bits 1, 2 and 4; the port's
- * `ChooseDeathMotionDirectional` returns the id and has never had the remap.
+ * the arms are unreachable rather than omitted. And the exe's directional pick
+ * sets the base motion itself and then remaps it through `obj+0x136C` bits 1,
+ * 2 and 4; the port's `ChooseDeathMotionDirectional` returns the id and has
+ * never had the remap.
  */
 export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
   const play = (motion: number, frame = 0): void => {
@@ -164,8 +162,12 @@ export function ChooseDeathMotion(obj: ZombieActor, rng: Rng): void {
     const m = ChooseDeathMotionDirectional(obj, G.g_camera_yaw_bams, rng);
     if (m !== undefined && MotionOf(obj, m)) play(m);
   };
-  // The shared tail: `FUN_004563F0` then `AND AH, 0xbf` on `obj+0x34`.
-  const done = (): void => { obj.flags &= ~ActorFlag.PoseFrozen; };
+  // The shared tail at `0x0045620A`: the cue list for whichever clip is now
+  // playing, then `AND AH, 0xbf` on `obj+0x34`.
+  const done = (): void => {
+    ZombieInstallDeathEffectCues(obj);
+    obj.flags &= ~ActorFlag.PoseFrozen;
+  };
 
   if (obj.condition === COND_FOUR) {
     if ((obj.flags2 & ZombieFlag2.LowSphere)
@@ -272,15 +274,13 @@ export function ZombieReleasePermitAndUntrack(obj: ZombieActor): void {
  * frame**. That is the independent confirmation that the looping death clip
  * fixed at `b917532` was a bug and not the engine's behaviour.
  *
- * [diverges] The per-frame call through `PTR_FUN_00592BC4` — which is
- * `g_class30_states[0x37]`, `ZombieDeathEffectCueTick` (`FUN_004569B0`) — walks
- * the cue list `ChooseDeathMotion` installed and spawns a dust puff or a
- * splash when the play cursor reaches each cue. It is an effect and the port
- * has no cue list to walk; the one piece of state it touches,
- * {@link ZombieFlag2.OneShotFired}, is cleared below exactly as the engine
- * clears it.
+ * Every frame of sub 2, the first included, calls through `PTR_FUN_00592BC4`
+ * (`00454d90`) before the test -- `g_class30_states[0x37]`,
+ * `ZombieDeathEffectCueTick` (`FUN_004569B0`), which walks the cue list
+ * `ChooseDeathMotion` installed and puts up the dust or the splash as the play
+ * cursor reaches each cue.
  */
-export function ZombieStateDeath6(obj: ZombieActor, rng: Rng,
+export function ZombieStateDeath6(obj: ZombieActor, rng: Rng, host?: GameHost,
                                   events?: Events): void {
   if (obj.sub === 0) {
     ChooseDeathMotion(obj, rng);
@@ -312,6 +312,7 @@ export function ZombieStateDeath6(obj: ZombieActor, rng: Rng,
   }
   if (obj.sub !== 2) return;
 
+  ZombieDeathEffectCueTick(obj, rng, host, events);
   const holding = (obj.flags & ActorFlag.HoldingWeapon) !== 0;
   const spent = MotionPlayFrame(obj) >= MotionPlayLength(obj) - 1;
   if (!spent && !holding) return;
@@ -371,16 +372,18 @@ export function ZombieEnterCorpseState(obj: ZombieActor): void {
  * the same eight lines up to the countdown, and differ only in whether the
  * body sinks or flickers.
  *
- * [diverges] `SpawnGroundRingEffect` is the first call of each, and it is an
- * effect the port does not draw.
+ * `SpawnGroundRingEffect` (`FUN_00407DA0`) is the first call of each, before
+ * the flag words move: the ring opens under the body as it starts to go.
  */
 function ZombieCorpseBegin(obj: ZombieActor): void {
+  SpawnGroundRingEffect(obj);
   // `AND EDX, 0xdffffdff` — **0x20000000 and 0x200 only.** The comment on
   // `ZombieFlag2.HitReactionAlt` used to name this instruction as the thing
   // that clears bit 0x100; `0xdffffdff` has bit 8 set, so it does not.
   obj.flags2 &= ~(ZombieFlag2.CollideWorld | ZombieFlag2.HitReactionPending);
-  // `OR EAX, 0xa0000` — off the floor for the sink, and no ground decal.
-  obj.flags |= ActorFlag.Airborne | CORPSE_NO_DECAL_BIT;
+  // `OR EAX, 0xa0000` — off the floor for the sink, and no ground shadow:
+  // `ActorDrawShadow` (`FUN_0040A590`) tests `0x80000` first.
+  obj.flags |= ActorFlag.Airborne | ActorFlag.NoShadow;
   obj.zom.corpseTimer = CORPSE_FRAMES;
   // `obj+0x1350 = obj+0x68` — the spawn yaw stashed in the field the port
   // calls `landSurface`. `[open]`: nothing in the ported call graph reads it
@@ -444,26 +447,47 @@ export function ZombieStateCorpseSink(obj: ZombieActor, dt: number): void {
  * `ZombieStateCorpseBlink` — `FUN_00454FD0`, class 0x30 state 8. Character
  * types 0x12 and 3 only.
  *
- * The same two seconds without the sink: the countdown's **parity** drives the
- * whole skinned model's per-part draw flag through `FUN_00409D10`, which walks
- * `model+0x3C` parts and writes the byte at `model+0x40 + i*8 - 7`. `obj+0x1F8`
- * bit 0 takes the same value and is what `FUN_0040A590` reads before it draws
- * the ground decal.
+ * The same two seconds without the sink: the countdown's **parity** is the
+ * whole body's visibility, and it is written to the two places the draw reads
+ * it from — `obj+0x1F8` bit 0, which is {@link MotionFlag.Drawn} and
+ * gates every node of the skeleton, and every part's byte through
+ * `ActorSetPartVisibility` (`FUN_00409D10`), which gates the waist:
  *
- * [diverges] The port has one draw alpha per actor rather than a byte per
- * part, which is `ThrowerStateCorpse`'s answer to the same routine.
+ * ```
+ * 0045502f  AND  ECX, 0x80000001 / JNS ...   ; obj+0x1330 % 2, signed
+ * 00455042  JZ   0x00455057                  ; even:
+ * 00455057  OR   EDI, 0x1 / PUSH 0x1         ;   obj+0x1F8 |= 1, and 1
+ * 00455044  AND  EDI, 0xfffffffe / PUSH 0x0  ; odd: obj+0x1F8 &= ~1, and 0
+ * 00455069  CALL 0x00409d10                  ; ActorSetPartVisibility(model, _)
+ * 0045508c  AND  EDX, 0xfffffffe             ; at the end: both closed ...
+ * 00455096  CALL 0x00409d10                  ; ... (model, 0), then despawn
+ * ```
+ *
+ * `[proved]`. Parity is read before the decrement and the count starts at
+ * `0x78`, so the first frame is drawn. The last frame is **hidden**, not
+ * shown: at the end the routine clears both gates before it despawns.
+ *
+ * Neither is an alpha, and nothing of the actor's `obj+0x138C` is involved.
+ * Class 0x31's corpse blinks another way — `ThrowerStateCorpseBlink` writes
+ * that alpha and `obj+0x136C` bit 2 for its hook to draw at — so the two are
+ * not the same answer to one routine.
  */
 export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
   if (obj.sub === 0) ZombieCorpseBegin(obj);
   else if (obj.sub !== 1) return;
 
-  // Parity is read **before** the decrement, so the first frame is visible.
-  obj.alpha = (Math.floor(obj.zom.corpseTimer) & 1) ? 0 : 1;
+  // `& 0x80000001` with the sign fix-up is `timer % 2`, and the timer is a
+  // positive count here, so even is the low bit clear.
+  const even = (Math.floor(obj.zom.corpseTimer) & 1) === 0 ? 1 : 0;
+  if (even) obj.motionFlags |= MotionFlag.Drawn;
+  else obj.motionFlags &= ~MotionFlag.Drawn;
+  ActorSetPartVisibility(obj, even);
 
   const frames = dt * GAME_HZ;
   obj.zom.corpseTimer -= frames;
   if (obj.zom.corpseTimer >= 1) return;
-  obj.alpha = 1;
+  obj.motionFlags &= ~MotionFlag.Drawn;
+  ActorSetPartVisibility(obj, 0);
   ZombieCorpseLeave(obj);
 }
 
@@ -480,15 +504,15 @@ export function ZombieStateCorpseBlink(obj: ZombieActor, dt: number): void {
  * landing clip 0x3F8 at a random frame, and enters the corpse when the bounce
  * has died down.
  *
- * [diverges] The landing effect at `PTR_FUN_00592BC8` —
- * `ZombieDeathLandingEffect` (`FUN_00456B70`), which is
- * `g_class30_states[0x38]` — is a splash on surfaces 5 and 0x37 and a dust
- * puff otherwise. Not ported; the one piece of state it owns is
- * {@link ZombieFlag2.OneShotFired}, which is the gate below and is set here
- * where the hook would set it.
+ * The first landing calls through `PTR_FUN_00592BC8` (`00456ed9`) —
+ * `g_class30_states[0x38]`, `ZombieDeathLandingEffect` (`FUN_00456B70`) —
+ * behind the same {@link ZombieFlag2.OneShotFired} test the hook makes
+ * itself, and the hook is what raises the bit. It draws `rand()` for the water
+ * rings **before** the landing clip's own `rand() % 10`.
  */
 export function ZombieStateDeathFallAndBounce(obj: ZombieActor, dt: number,
-                                              rng: Rng): void {
+                                              rng: Rng, host?: GameHost,
+                                              events?: Events): void {
   const frames = dt * GAME_HZ;
 
   if (obj.sub === 0) {
@@ -518,7 +542,7 @@ export function ZombieStateDeathFallAndBounce(obj: ZombieActor, dt: number,
   obj.pos.y = ground;
   obj.vel.y *= BOUNCE_NORMAL;
   if (!(obj.flags2 & ZombieFlag2.OneShotFired)) {
-    obj.flags2 |= ZombieFlag2.OneShotFired;
+    ZombieDeathLandingEffect(obj, rng, host, events);
     ActorSetMotionBlended(obj, BOUNCE_LANDING_CLIP,
                           rng.int(BOUNCE_LANDING_SPREAD), MotionFade.Normal);
     obj.flags &= ~ActorFlag.PoseFrozen;

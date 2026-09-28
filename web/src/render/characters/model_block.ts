@@ -28,7 +28,7 @@
  *
  * The part the skeleton walk draws (`boss2.bin`'s vertex-blended waist,
  * part 0) follows bones 1 and 9 through its skin; its draw byte is
- * `SkeletonModel.part0`.
+ * `Actor.partVisible[0]`.
  */
 import { Matrix4, Vector3, type Object3D } from "three";
 import type { Actor } from "../../game/actor";
@@ -145,7 +145,7 @@ export function PoseFromModelBlock(inst: Instance,
     if (node && m) PlaceWorld(node, m);
   }
   const part0 = inst.part0 ?? FindPart0(inst);
-  if (part0) part0.visible = skel.part0 !== 0;
+  if (part0) part0.visible = (a.partVisible[0] ?? 1) !== 0;
   return true;
 }
 

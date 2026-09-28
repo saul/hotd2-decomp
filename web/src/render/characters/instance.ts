@@ -78,14 +78,22 @@ export interface Instance {
    */
   parentAt?: number;
   /**
-   * The bone-veto mask this instance's nodes are currently showing.
+   * The draw gates this instance's nodes are currently showing, as a key —
+   * set only while every gate is open, so a frame that changes nothing costs
+   * one comparison. See `render/characters/draw_gates.ts`.
    *
-   * Render bookkeeping: the mask itself is `a.suppressedBones`, and this is
-   * only how far the nodes have been caught up to it, so a frame that changes
-   * nothing costs one comparison. `undefined` means "unknown", which is what
-   * `restoreNodes` and a fresh instance both are.
+   * Render bookkeeping: the gates themselves are `a.motionFlags`,
+   * `a.partVisible`, `a.suppressedBones` and the thrower's
+   * `boneDrawAlpha`, and this is only how far the nodes have been caught up
+   * to them. `undefined` means "unknown", which is what `restoreNodes`, a
+   * fresh instance and any frame with a gate closed all are.
    */
-  veto?: number;
+  gates?: string;
+  /**
+   * The exporter's `part<i>_<slot>` nodes — the vertex-blended parts, which
+   * are not bones — by part index. Found once by name; render bookkeeping.
+   */
+  partNodes?: Map<number, Object3D>;
   /**
    * The cel nodes `ZombieDrawBonePart` (`FUN_004534A0`) draws on a bone, keyed
    * `"<bone>:<run index>"`.

@@ -37,6 +37,8 @@ import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
 import { ThrowerStrikeConnect } from "./strike";
 import { Class31SetOf, ThrowerMotionOf, ThrowerPickAttack } from "./tables";
+import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
+import { MotionFade } from "../class30/states";
 
 const _dest = vec3();
 
@@ -65,16 +67,6 @@ const HANDS: Record<number, { bone: number; bare: number; armed: number;
 
 /** The stance idle `ThrowerStateRestoreBothHands` holds while it regrows. */
 const RESTORE_IDLE_BY_STANCE = [0x208, 0x1fd, 0x1f3, 0x205];
-/**
- * The weapon grows back at this a **drawn** frame, so forty frames in all.
- *
- * `[0x004C4CB0]` = `cdcccc3c` = 0.025f, the `FADD` in `ThrowerDrawBonePart`
- * (`FUN_00449F90`) at 0x0044A150; the clamp it is compared against,
- * `[0x004C4380]` = `0000803f`, is 1.0f.
- */
-const REGROW_PER_FRAME = 0.025;
-/** ...and the value {@link ThrowerTail.handRegrow} is done at. */
-const REGROW_FULL = 1.0;
 
 function playOnce(obj: ThrowerActor, motion: number, from = 0): void {
   const m = MotionOf(obj, motion);
@@ -274,38 +266,44 @@ export function ThrowerStateRearm(obj: ThrowerActor, host: GameHost): void {
  * `ThrowerStateRestoreBothHands` — `FUN_0044F900`, class 0x31 state 30.
  *
  * Character type 0x18's version, and it is slower on purpose: the weapon
- * **grows back**. The state itself only zeroes the accumulator and raises the
- * latch, then waits on it:
+ * **grows back**, and this state does not grow it. Sub 0 raises
+ * `ActorFlag.NoHitReaction` for the length of the state, blends to the
+ * stance's idle over five frames if it is not already playing, zeroes the
+ * accumulator and raises the latch — then runs on into sub 1, which waits on
+ * the latch:
  *
  * ```
+ * 0044f924  OR   AH, 0x20                             ; obj+0x34 |= 0x2000
+ * 0044f98e  CALL 0x0044d230                          ; (model, idle, 0, 5)
  * 0044f99c  MOV  dword ptr [ESI + 0x1384], 0x0      c7868413000000000000
  * 0044f9a6  OR   ECX, 0x8000000                     81c900000008
  * 0044f9b9  TEST dword ptr [ESI + 0x136c], 0x8000000  f7866c13000000000008
  * ```
  *
- * `ThrowerDrawBonePart` (`FUN_00449F90`) is what advances `obj+0x1384` by
- * 0.025 a *drawn* frame and clears the latch at 1.0, so the wait is forty
- * frames of being on screen — a thrower that is not being drawn does not
- * re-arm.
+ * `ThrowerDrawBonePart` (`FUN_00449F90`) is what advances `obj+0x1384` and
+ * drops the latch, from the draw — see `class31/draw.ts` — so the wait is
+ * measured in **regrowing nodes drawn**: 41 of them, one a frame for one bare
+ * hand and two for two, and none on a frame the skeleton is not drawn. With
+ * the latch down, sub 1 puts back each hand that is still bare — two
+ * independent tests, `obj+0x4DC == 0x1FF1` at `0x0044F9C9` and
+ * `obj+0x68C == 0x1FED` at `0x0044FA31` — and runs on into sub 2, which
+ * leaves for state 7 on the clip's last frame and lowers `0x2000` on the way
+ * out. `[proved]`
  *
- * [diverges] The port has no per-bone draw hook to hang the growth on, so the
- * forty frames are counted here and `Actor.alpha` is not involved. The
- * accumulator and the latch are the engine's own —
- * {@link ThrowerTail.handRegrow} (`obj+0x1384`) and
- * {@link ThrowerFlag.Regrowing}. This used to run on
+ * This counted forty frames itself for as long as the port had no hook to
+ * hang the growth on, and cut to the idle rather than blending into it; the
+ * hook is ported now, and the growth is the draw's again. It had also run on
  * `ThrowerTail.hopFrames`, which is `obj+0x1344`,
- * `ThrowerStateBlinkInThreeHops`' hop dwell: states 30 and 34 cannot run at
- * once so it never bit, but it was the wrong field.
+ * `ThrowerStateBlinkInThreeHops`' hop dwell, before it ran on
+ * {@link ThrowerTail.handRegrow}.
  */
-export function ThrowerStateRestoreBothHands(obj: ThrowerActor, dt: number,
-                                             stance: number,
+export function ThrowerStateRestoreBothHands(obj: ThrowerActor, stance: number,
                                              host: GameHost): void {
   if (obj.sub === 0) {
+    obj.flags |= ActorFlag.NoHitReaction;
     const m = RESTORE_IDLE_BY_STANCE[stance & 3] ?? RESTORE_IDLE_BY_STANCE[0];
-    if (obj.motion !== m && MotionOf(obj, m)) {
-      obj.motion = m;
-      obj.playTicks = 0;
-      obj.rootFrame = -1;
+    if (obj.motion !== m) {
+      SetCurrentActorMotionBlended(obj, m, 0, MotionFade.Quick);
     }
     obj.thr.handRegrow = 0;
     obj.flags2 |= ThrowerFlag.Regrowing;
@@ -313,11 +311,7 @@ export function ThrowerStateRestoreBothHands(obj: ThrowerActor, dt: number,
   }
 
   if (obj.sub === 1) {
-    obj.thr.handRegrow += REGROW_PER_FRAME * SecondsToTicks(dt);
-    if (obj.thr.handRegrow < REGROW_FULL) return;
-    // `ThrowerDrawBonePart` pins it at exactly 1.0 and drops the latch.
-    obj.thr.handRegrow = REGROW_FULL;
-    obj.flags2 &= ~ThrowerFlag.Regrowing;
+    if (obj.flags2 & ThrowerFlag.Regrowing) return;
     for (const h of HANDS[CHAR_ZSLMAN] ?? []) ThrowerRestoreHand(obj, host, h);
     obj.sub = 2;
   }
@@ -329,6 +323,7 @@ export function ThrowerStateRestoreBothHands(obj: ThrowerActor, dt: number,
   if (obj.playTicks < len - 1) return;
   obj.state = ThrowerState.StandAndDecide;
   obj.sub = 0;
+  obj.flags &= ~ActorFlag.NoHitReaction;
 }
 
 /** Whether this character has hands the two restore states know about. */

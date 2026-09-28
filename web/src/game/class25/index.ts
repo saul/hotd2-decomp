@@ -745,7 +745,10 @@ export function ScriptedHumanoidIdle(obj: HumanoidActor): void {
     obj.dead = true;
     obj.visible = false;
   }
-  // `CALL 0x00484FF0` — the draw, which is the renderer's.
+  // `CALL 0x00484FF0` — the draw, which is the renderer's. Its chapter-card
+  // early-out (`ScreenFurniture.ChapterCard`, `0x00484FF8`) skips the body
+  // and the decoration but lands on the tick at `0x0048523A`, not the `RET`,
+  // so the motion frame advances behind a card either way.
 }
 
 export const ScriptedHumanoidHandler: ClassHandler = {

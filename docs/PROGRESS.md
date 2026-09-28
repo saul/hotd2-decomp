@@ -361,6 +361,11 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       not a renderer: a global plane plus up to eight travelling or circular
       sinusoid sources, sampled by floating props and the water enemy and by
       nothing that draws. See [`formats/water.md`](formats/water.md).
+      **And a third, found 2026-09-28:** class 0x41 type 1
+      (`PlaceWaterSurface` / `WaterSurfaceUpdate`) draws ten script-loaded
+      tiles no region lists -- stage 2's block 16 canal and boss arena, stage
+      3's -- and ripples their UVs. "Solved" above had missed it; the canal
+      was absent in the player for as long as it did.
 - [x] **The sound record table at `0x005845F8`** — 324 `{id, filename}` records,
       the only place this binary names anything. `ExeTables.sound_records()`.
       This is now the primary identification tool for the decomp.

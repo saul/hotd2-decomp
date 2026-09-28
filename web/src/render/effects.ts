@@ -33,6 +33,9 @@ import {
   type BufferGeometry, Group, type Material, Matrix4, Object3D, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { drawBatSplashes } from "./bat_splash";
+import { drawCreatureEffects } from "./creature_effects";
+import { drawWaterRings } from "./water_rings";
 import { BAMS_TO_RAD } from "../core/bams";
 import { G } from "../game/globals";
 import { BannerStep } from "../game/boss_banner";
@@ -237,6 +240,10 @@ export class EffectLayer implements System<RenderContext> {
     const seen = new Set<string>();
 
     this.drawSpriteEffects(seen);
+    drawWaterRings({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.group,
+    }, seen);
     this.drawBlood(ctx, seen);
     this.drawPointBlood(seen);
     this.drawBodyCreatures(seen);
@@ -245,6 +252,14 @@ export class EffectLayer implements System<RenderContext> {
     this.drawShotRings(seen);
     this.drawDamageOverlays(seen);
     this.drawBossBanners(seen);
+    // The owl's and the fish's tasks, and the ring the fish's corpse leaves:
+    // `render/creature_effects.ts`.
+    drawCreatureEffects({
+      node: (key, slot, parent) => this.node(key, slot, parent),
+      world: this.group, view: this.viewGroup,
+    }, seen);
+    drawBatSplashes({ node: (key, slot, parent) => this.node(key, slot, parent),
+                      world: this.group }, seen);
     if (this.bones) {
       const bones = this.bones;
       this._view.copy(ctx.camera.matrixWorldInverse);

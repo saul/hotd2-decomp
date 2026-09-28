@@ -95,10 +95,13 @@ import { PoseFromModelBlock } from "./characters/model_block";
 import { placeHordeRoot, poseHordeJaw, syncHordeMirror }
   from "./characters/horde";
 import { clearBoneCels, syncBoneCels } from "./characters/cels";
+import { alphaGatesWholeActor, applyDrawGates }
+  from "./characters/draw_gates";
 import {
   placeJudgmentRoot, seatJudgmentSubActors, syncJudgmentWings,
 } from "./characters/judgment";
 import { restoreGore, swapGore } from "./characters/gore";
+import { placeBatRoot } from "./characters/bat";
 export type { Instance };
 
 
@@ -492,19 +495,18 @@ export class CharacterLayer implements System {
       // set-piece past its removal trigger and a class-0x25 humanoid the script
       // had killed both stayed on screen, because the renderer un-hid them once
       // a frame.
-      // **`alpha` is a draw gate as well as a fade**, and until now nothing
-      // read it. It is the port's stand-in for the engine's per-part draw byte
-      // — `SkeletonDrawWalk` (`FUN_004110D0`) emits a part only when
-      // `parts[i*8 + 1]` is non-zero — and two states write it:
-      // `ZombieStateCorpseBlink` flickers a body with it and
-      // `ZombieStateAwaitCivilianOrder` holds a captor off screen with it
-      // until its civilian calls it up. Both write 0 or 1 and nothing else, so
-      // a threshold is the whole of what this needs; a genuine fade would have
-      // to reach every material under the root and is not what either state
-      // asks for.
+      // **Hiding an actor is not an alpha.** What of a character is drawn is
+      // three gates the port keeps as state -- the skeleton's
+      // (`MotionFlag.Drawn`), each vertex-blended part's
+      // (`Actor.partVisible`) and the hook's own per-bone choice -- and
+      // `applyDrawGates` below applies them node by node, because a hidden
+      // skeleton still draws its attachments and, for a captor, its skirt.
+      // `Actor.alpha` gates the whole actor only for the classes that write it
+      // as "the draw ran": see `alphaGatesWholeActor`.
       // Class 0x45's routines say for themselves whether they drew the
       // skeleton this frame -- see `render/characters/boss3.ts`.
-      const show = this.enabled && inst.a.visible && inst.a.alpha > 0
+      const show = this.enabled && inst.a.visible
+        && (!alphaGatesWholeActor(inst) || inst.a.alpha > 0)
         && boss3Drawn(inst);
       inst.root.visible = show;
       if (!show) {
@@ -540,6 +542,9 @@ export class CharacterLayer implements System {
         } else if (placeJudgmentRoot(inst)) {
           // Classes 0x22 and 0x23: all three angles, in each model's own
           // order (`model+0x68`). See `render/characters/judgment.ts`.
+        } else if (placeBatRoot(inst)) {
+          // Class 0x46: all three angles in order 5, at the model's own
+          // size. See `render/characters/bat.ts`.
         } else if (inst.a.carrierAt >= 0) {
           inst.root.position.set(inst.a.carrierWorld.x,
                                  inst.a.carrierWorld.y,
@@ -570,7 +575,6 @@ export class CharacterLayer implements System {
         }
         inst.hidden = inst.a.removed.length;
       }
-      this.applyBoneVeto(inst);
       // `ZombieDrawBonePart` (`FUN_004534A0`) -- the cel a class-0x30 bone
       // draws instead of, or as well as, its own model. This is what fills
       // `char_adv02`'s midriff once its torso is shot; see
@@ -578,39 +582,14 @@ export class CharacterLayer implements System {
       syncBoneCels(this.goreParts, inst);
       this.syncAttachments(inst);
       if (inst.a.civ) this.syncHeldItems(inst);
+      // Last, so that a cel or a gore piece hung on a bone this frame arrives
+      // under the gate and an attachment made this frame is known to be one.
+      applyDrawGates(inst);
     }
     // `Class22DrawAndPoseSubActor` seats the sub-actor on the flier's node 1
     // *after* drawing the flier, so it reads this frame's pose: every
     // instance is posed by now.
     seatJudgmentSubActors(this.instances);
-  }
-
-  /**
-   * `SkeletonNodeDrawSuppressed` (`FUN_004122E0`), applied.
-   *
-   * The port decides — `ActorUpdateSuppressedBones` writes `a.suppressedBones`
-   * once a frame — and this is only the drawing of it. A vetoed bone's own
-   * model is not drawn; **its child bones still are**, which is the whole
-   * difficulty. `visible = false` would take the subtree with it, and for the
-   * ten characters this fires on that subtree is both legs.
-   *
-   * `layers` is what separates the two. `WebGLRenderer.projectObject` returns
-   * early on `visible === false` but only *skips the draw* on a failed
-   * `layers.test`, and recurses into the children either way — so clearing
-   * layer 0 hides exactly this node's geometry and nothing below it. It is
-   * also reversible, which matters because a gore swap can change the slot
-   * bone 9 is showing and take the veto away again.
-   */
-  private applyBoneVeto(inst: Instance): void {
-    const mask = inst.a.suppressedBones;
-    if (mask === inst.veto) return;
-    for (const [bone, node] of inst.bones) {
-      const want = (mask & (1 << bone)) === 0;
-      if (node.layers.isEnabled(0) === want) continue;
-      if (want) node.layers.enable(0);
-      else node.layers.disable(0);
-    }
-    inst.veto = mask;
   }
 
   /**
@@ -1144,11 +1123,13 @@ export class CharacterLayer implements System {
       for (const [bone, slot] of Object.entries(inst.a.boneSlot)) {
         swapGore(this.goreParts, inst, Number(bone), slot);
       }
-      // The veto is derived from the restored actor like everything else
-      // here; clearing the cache is what makes the next apply do the work.
-      inst.veto = undefined;
-      this.applyBoneVeto(inst);
-      inst.root.visible = this.enabled && inst.a.visible && inst.a.alpha > 0
+      // The draw gates -- the veto among them -- are derived from the restored
+      // actor like everything else here; clearing the cache is what makes the
+      // apply do the whole walk.
+      inst.gates = undefined;
+      applyDrawGates(inst);
+      inst.root.visible = this.enabled && inst.a.visible
+        && (!alphaGatesWholeActor(inst) || inst.a.alpha > 0)
         && boss3Drawn(inst);
       if (poseBoss3(inst)) {
         // See `update`.
@@ -1156,6 +1137,8 @@ export class CharacterLayer implements System {
         if (placeHordeRoot(inst)) {
           // See `update`.
         } else if (placeJudgmentRoot(inst)) {
+          // See `update`.
+        } else if (placeBatRoot(inst)) {
           // See `update`.
         } else if (inst.a.carrierAt >= 0) {
           inst.root.position.set(inst.a.carrierWorld.x,

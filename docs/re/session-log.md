@@ -20020,6 +20020,729 @@ own before the grid. The port test that pins the first fails on the old read.
 `--no-damage` -- the harness spends five credits by block 14 -- and with it
 end block 35 goes 300 → -10 and the script leaves the block for stage 3.
 
+## 2026-09-27 -- the owl's and the fish's effect tasks
+
+**Outcome:** the owl (class 0x43) and the fish (class 0x51) draw their
+effects. Six tasks of their own and one shared one, each stepped after the
+actors and drawn from its record: `game/effects/owl.ts` (feathers, ground
+impact ring, water splash), `game/effects/fish.ts` (blood cloud, splash,
+surface ring), `game/effects/ring_effect.ts` (the ring task), all drawn by
+`render/creature_effects.ts`. The bundle carries their slots for classes 0x43
+and 0x51 in `slots_effect`.
+
+**What the exe does.**
+
+* **All three fish tasks end** `[proved]`. The class's note said "none of the
+  three updates has a termination, so porting them would mean inventing a
+  lifetime", and the TSV comments said "No termination" three times. Every
+  kill is past the `MatrixStackPop` Ghidra marks no-return (`L35`, `L37`):
+  `BloodCloudTickInScreenSpace` kills past slot `0x52` (`0x00439E87`),
+  `WaterSplashUpdate` past `0x1356` (`0x00439F83`), and
+  `SurfaceRingDrawAndFade` widens by 0.02, fades by a sixtieth and kills on
+  its sixtieth frame (`0x0043A04D`..`0x0043A071`). The same trap hid the fade
+  and the kill in the owl's ring and the owl splash's step, which the TSV had
+  right.
+* **The deaths that meet the water never made the surface ring.**
+  `FishSpawnSurfaceRing`'s only callers are `FishStateSink`'s two
+  (`search_instructions` over every `CALL`); the port also called it from
+  `FishCheckShot` and three times from `FishStateFlung`, where the exe calls
+  `FUN_00408370` -- now `SpawnRingEffectAtPose` -- which allocates the task
+  `SpawnGroundRingEffect` (`0x00407DA0`) allocates too: three routines through
+  `obj[0]`, `RingEffectSpread` / `RingEffectHold` / `RingEffectFadeOut`
+  (`0x00407E30`, `0x00408100`, `0x00408220`), a ring opening over 120 frames
+  with four strips closing in, 30 held, 39 fading.
+* **`SpawnRingEffectAtPose` reads the pose's `p[4]` as the ring's yaw**, and
+  the fish's three calls build only `x, y, z` on the stack: the yaw is an
+  unwritten local `[open]`. The port passes 0 and declares it.
+* **The corpse's yaw is half a turn.** `rand() & 0xFFFF` of an MSVC `rand()`
+  that ends `AND EAX, 0x7FFF` (`0x004ADED2`); the port drew `rng.int(0x10000)`.
+  Both fish death paths fixed. The owl's feathers draw their yaw the same way.
+* **The owl's death leaves blood** -- `SpawnBloodSprayAtPoint(obj + 0x40)` at
+  `0x00446123`, reading the owl's `obj+0x70` -- which the port did not spawn
+  (`blood.ts` even said so). And **the death block falls through** into the
+  state dispatch (state 6 is a bare `RET`) and the yaw steering; the port
+  returned early and skipped a tenth of a turn on the death frame.
+* **A task runs on the frame it is made** `[proved]`: `ActorAlloc` links it at
+  the tail of the running task's sibling list and `TaskRunTree` reads each
+  `+0x1C` only after the task before it has run. So these pools are stepped
+  after the actors, like `Boss3TasksTick`'s, and each record says what its
+  routine drew. `director.ts`'s comment on `ShotEffectsTick` ("the walk that
+  would step a new task has already gone past the end") says the opposite; it
+  is not this session's to change, and the head tick there happens to give the
+  right drawn sequence for draw-then-step flipbooks.
+
+**Not wired:** the owl's ground impact ring and water splash are called only
+from `OwlCorpseFallAndSettle`'s four landing arms (`0x00448319`,
+`0x00448376`, `0x00448710`, `0x00448758`), and the landings are another
+workstream's. The tasks are ported and tested; the calls go in with the
+landings.
+
+**Wrong turns.**
+
+* My first names for the ring task's routines were `SpawnImpactRing` and
+  `ImpactRingFadeOut`; the MCP gate refused both as token subsets of the owl's
+  `OwlSpawnGroundImpactRing` / `OwlGroundImpactRingFadeOut`, and a peer had
+  already named `0x00407DA0` `SpawnGroundRingEffect`. The family is now named
+  after that one.
+* Two test expectations were wrong on the first draft: the sinking fish makes
+  its surface rings on its **second** frame in state 5 (the timer is tested for
+  1 before it is stepped), and a feather's first half turn is 32..64 frames but
+  every later one 26..128.
+
+**Mutation-checked:** removing either fish kill, the corpse's half-turn, the
+fall-through, the feather's kill-without-draw, the ring task's fortieth-frame
+kill, the owl's blood, or putting the surface ring back on the underwater death
+each fails `npm run test:port`.
+
+## 2026-09-27 -- per-part draw gates: hiding a character is not an alpha
+
+The port hid class-0x30 actors (the corpse blink, the captor's hold, the
+emerge) by writing one alpha for the whole actor, and the renderer hid the root
+on it; three sites declared as divergences said the engine keeps "a draw flag per
+model part". Read again, instruction by instruction:
+
+* **Two gates, not one.** `SkeletonEmitNode` skips a node's hook on
+  `model+0x64` bit 0 (`TEST byte ptr [ECX+0x64],0x1` at `0x00411505`), so that
+  bit is the whole skeleton's gate -- main had just named it
+  `MotionFlag.Drawn`. The `model+0x40` records `ActorSetPartVisibility`
+  writes are the **vertex-blended parts** (`g_pCharacterExtraParts`: the waist,
+  the skirt), not bones: part *i* is the exporter's `part<i>_<slot>` node.
+  `ActorBuildSkinnedModel` sizes them from that table and sets every byte to 1.
+  The attachment list runs with no gate at all.
+* **`DrawSkinnedModelAndShadow` draws the shadow** (`ActorDrawShadow` on
+  `g_cur_actor`, past the no-return pop, L35). Main's Hierophant branch found
+  the same thing the same day; the rows were merged.
+* **State 19 was misread.** `ZombieStateWaitForCameraFrame`'s `tail+0x0C == 0`
+  arm was ported as a freeze ("FUN_00409D10 stops the clip", "obj+0x1F8 bit 0
+  is root motion") and froze `obj+0x1324`. It is a hide; the clip plays. The
+  exporter's `freeze` field has the right polarity and the wrong name.
+* **`ZombieStateAwaitCivilianOrder`'s sub 0 falls into sub 1**, and its die
+  arm releases both counts on the spot and credits `g_active_player` with one
+  player in play; the port returned, deferred the counts to the sweep and drew
+  a random killer. It writes part 0 alone, so a skirt would stay drawn.
+* **Class 0x31's blink is an alpha after all** -- `obj+0x138C` with
+  `obj+0x136C` bit 2, which `ThrowerDrawBonePart` draws each bone at, and which
+  `DrawCharacterPartSlot` draws types 9, 0x12, 0x17 and 0x18's parts at with no
+  test of the bit. So the note that it was "the same answer" to class 0x30's
+  routine was wrong: different routine, different mechanism.
+* **The regrow is per node and takes 41.** `ThrowerDrawBonePart` adds 0.025f
+  for each regrowing node it is handed, so two bare hands grow twice as fast,
+  a hidden skeleton not at all, and forty f32 additions stop at 0.99999958.
+  `ThrowerStateRestoreBothHands` also raises `0x2000` for its length and
+  blends to its idle, both missing.
+* **Ghidra's xrefs to `ActorSetPartVisibility` list eight calls; a rel32 scan
+  finds ten.** The other two are class 0x30 state 28 (`0x004586E0`), which has
+  no Ghidra function.
+
+**Wrong turn.** This branch first ported `SkeletonDrawWalk` and
+`SkeletonEmitNode` (the hook half) under their own names, and called bit 0
+`DrawSkeleton`; main had landed `game/skeleton.ts` with both routines whole
+for an actor carrying the model block, and `SkeletonModel.part0` for class
+0x14's part byte. On the merge the walk became the port-only
+`ActorRunNodeDrawHooks`, the bit took main's name, and `part0` became
+`Actor.partVisible[0]`, so there is one array of part records.
+
+**Measured**: the port tests drive the corpse blink through both gates to a
+hidden last frame, the captor's hide with part 1 still drawn, state 19's hide
+without a frozen clock, and the regrow at 40, 41 and 42 frames; the render
+test draws a skirt with no body.
+
+## 2026-09-27 -- the turn routines as the exe has them, and the run pair that was already right
+
+**Outcome:** `TurnAngleToward` (`FUN_00409E00`) is transcribed instruction for
+instruction and every turn in `game/` goes through it at the rate the exe
+passes; `ZombieStateAttackRun` is the exe's routine rather than an
+approximation of it; two stale divergence notes about the Run/RunAlt pair are
+gone because the thing they described had been fixed weeks ago.
+
+**What the binary says.** `[proved]` throughout, from the listings:
+
+* `TurnAngleToward` masks both angles, forms the direct distance and the two
+  distances through the seam, lands on the target when the rate is `>=` any of
+  them, and otherwise steps `a ± rate` the short way -- **unwrapped**, and with
+  a signed compare that makes a **negative rate** never land and step the long
+  way, so the angle runs to the opposite heading and dithers about it. The port
+  had the destination right and the arithmetic wrong: an ease for the attack
+  run, `|rate| * frames` with a wrapped result elsewhere, and a 0x8000 flip of
+  the target standing in for the negative rate.
+* `TurnActorTowardCamera` (`FUN_00409ED0`) turns toward
+  `eye + RotY(__ftol(g_camera_eye_y)) * (0, 0, 1.5)`. The rotation is by the
+  eye's **height** -- `FLD [0x009C71E4]` -- not by any angle; the doc and
+  `ACTOR_FACE_OFFSET` both said "1.5 in front of the camera". The whole turn
+  is past `MatrixStackPop` and the pseudocode shows none of it.
+* Its only callers are `ZombieStateAttackRun`'s two, with
+  `ftol((bit27 * 1.5 + 1.0) * 416.0)`: **0x1A0 jogging, 0x410 sprinting**.
+* `ZombieStateAttackRun`: the 1-in-64 roll into `ActorAbortAttackAndLeave` is
+  drawn every frame; bands 2..4 turn, then drop to `WaitTurn` with
+  `g_wait_turn_variant[(rand() >> 4) % 10] << 21` OR-ed into `obj+0x136C`
+  **without ending the frame**, and only bands 3 and 4 ask
+  `ZombieShouldStandAndThrow`. The port returned on the drop-out, never wrote
+  the variant bit, and asked from band 2 too -- which takes a permit.
+* `ZombieStateBackOff` clears `obj+0x136C` bit 0x400000 and `obj+0x34` bit
+  0x10000000 on its first frame, and turns at `+0x40` while that bit is up,
+  `-0x40` otherwise. The port always used `-0x40`, though the shove timer that
+  flips the bit was already ported.
+* `ZombieStateWaitTurn` plays `row[(obj+0x136C >> 21) & 1]` through
+  `ActorSetMotionBlended`; the port took the first baked of the pair.
+* `AngleWithinTolerance` (`FUN_0040A040`, named this session in Ghidra and the
+  TSV) is an inclusive window the short way round, and it is what
+  `TurnActorAwayFromPointTestArrival` returns through `EAX`.
+* Class 0x31: `ThrowerStateThrow` calls **no** turn routine -- the port turned
+  the thrower with the zombie's ease before every throw; `ThrowerStateWithdraw`
+  has a type-0x17 arm (turn at -0x100, 30 units, no clip wait, no flinch) the
+  port did not; `ThrowerStateDelayedPounce` levels `obj+0x6C` at 0xCCC a frame
+  where the port's line wrapped the yaw.
+
+**The Run/RunAlt item was already done.** `ActorInitFlags` carries the spawn
+record's flags word whole onto `obj.flags`, the bundle exports it as
+`init_flags`, and `ZombieRunMotion` has read bit 27 since the entry "Every
+zombie in the game jogged, and half of them should sprint". The notes in `walk_distance.ts` and `tables.ts` saying otherwise were
+stale, and so was the one's count: **192** of the 402 class-0x30 spawns set
+the bit, not 141. The `tables.ts` claim that `znchain`'s sprint (968) is
+another skeleton's clip is also false: `znchain` has 16 bones and 968 bakes for
+it, and every class-0x30 spawn's `row[2 + bit27]`, `row[0]`, `row[1]` and
+`row[4]` is baked for every condition row its type has, across all twelve
+bundles. The engine would not refuse such a clip in any case --
+`MotionFrameAddress` reads any motion at the character's own stride -- so
+`FirstBakedOf` went, and every state indexes the row the way the exe does.
+
+**Found and not done** (chips raised): the head is aimed. `ZombieDrawBonePart`
+and `ThrowerDrawBonePart` call an undefined routine at `0x00453BE0` for bone 2
+that steps `obj+0x1320`/`+0x1324` toward the camera with `TurnAngleToward` at
+0xC0 and rotates the bone -- `combat.md` had recorded "zombies do not aim their
+head" as a settled negative from a search of the (empty) pose hook, which is
+L39 again. Class 0x25 has a twin at `0x00485BA0`. Also: `ZombieStateStrike`
+sets `obj+0x34` bit 0x10000000 and clears 0x100 and the port does neither; and
+`ThrowerStateDelayedPounce` differs from the exe beyond its roll.
+
+**What it changes in play.** Zombies no longer whip round: a jogger half a turn
+off takes 79 frames to face you, a sprinter 32, where the ease had them nine
+tenths of the way in about half a second. Stage 3 block 1's hand-back harness
+now measures one gate where it measured three: the harness clears a room by
+dropping the counter and the camera slot while leaving the actors alive, and
+with the zombies arriving on different frames two of them re-claim a permit and
+hold the camera off its rail for the rest of the run. The harness makes that
+state, not the port -- the camera branch's rewrite of `handback.mjs` already
+kills the room through the death states for exactly this reason.
+
+**Wrong turns.**
+
+* My first `verify_all` "baseline" ran while I was already editing, so its
+  handback failure was a half-edited tree. A second worktree of `HEAD` in the
+  scratch directory is what gave a real baseline (L30's advice, taken late).
+* The first draft of the class-0x31 arrival test asserted "not there" with a
+  window of 0x1FF around a yaw 0x100 off, which is there.
+* I first wrote the stand's two `0x200` constants the wrong way round against
+  the push order: the tolerance is pushed first, the rate second.
+* The scratch directory is shared with sibling agents: two of my scratch files
+  were overwritten by another agent's between writing and rereading. Scripts
+  now live in a subdirectory of their own.
+
+## 2026-09-27 -- the shatter and the container's pieces are objects
+
+`BreakablePropSpawnShatter` (`FUN_00465170`) and the falling container's
+destroy arm were both ported as an event and a despawn, under a divergence
+note that called their pieces render-only. Read from the disassembly, not the
+pseudocode: Ghidra ends `BreakablePropSpawnShatter`,
+`BreakablePropShatterUpdate` (`FUN_004653B0`, named here) and
+`BreakablePropUpdate` at a `MatrixStackPop` it takes for no-return (L37), so
+two of the three loops and every draw block's tail were invisible.
+
+What the engine does: one `0x2B4` object carries fifteen pieces placed off
+`obj+0x2E4` -- the matrix the prop's last draw `MatrixStore`d, view included --
+75 `rand()`s at the spawn; and the container throws **two** 0x378 pieces
+(`FallingContainerFragmentUpdate`, `FUN_0046AD20`, named here), ten `rand()`s.
+`FUN_0046B040` is one routine taking `(obj, hull, count)` for both, named
+`FallingContainerGroundContact` to match the port.
+
+**What the old reading got wrong**, besides dropping the objects: "three
+fragments" in the TSV, the port and `spawns.md` -- the loop is `1, -1` and
+stops at `-3`. The `[open]` hit gate over "three script globals that have not
+been read out" was `g_scene_index`, `g_evt_block_index` and
+`g_script_flags[0x28]`, all already named. The ground-level destroy wrote
+`+0x324` where the engine writes `+0x294`. The rattle's `rand()`s were drawn by
+the renderer. The renderer left out `Translate(0, -3.770148, 0)` on falling and
+settled props. And three things were missing outright: group 4's script break
+on `g_script_flags[0x65]` (a second caller of the shatter), the scene-1 `0x77`
+sweep in both routines, and the container's camera cue and wall.
+
+**Wrong turn.** The first port test for piece 2's angles asserted the Euler
+triple `(0, -26260, 0)`; `MatrixToEulerZYX` returns the half-turn-flipped
+spelling `(-0x7FFF, -6508, -0x8000)` of the same rotation. The check compares
+rotation matrices now. And the first lifetime checks looped on the constants
+under test, so a mutation of either lifetime passed; they are literals.
+
+`[open]`: `FUN_004702E0`, a second caller of the shatter that forces group 99
+(no floor), is not in `g_class41_updates`; what allocates it is unread.
+
+## 2026-09-27 -- class 0x30's death effects, the corpse's ring, the landings' thud
+
+Five declared divergences in `class30/death.ts`, `knockback.ts`, `entrance.ts`
+and `class20/index.ts` said the dust, the splash, the ring under a corpse and
+the entrance landing's sound and shake were not drawn. All five are ported;
+`PLAYER_PROGRESS.md` has what the exe does. What is worth keeping here:
+
+* **`g_class30_states[0x37]` and `[0x38]` are not states.** The xrefs to
+  `PTR_FUN_00592BC4` / `PTR_FUN_00592BC8` are state 6, and states 9, 12, 26
+  and 30 -- the delayed leap's call was in no note at all, and the port's leap
+  landed without its sound, shake, dust or attack cry.
+* **The decompiler folds the cue tick's parameter block.** Which of the dust,
+  the wader's flat splash and the wet splash sit on the traced floor and which
+  on `obj+0x44` is only readable from the stores (`0x00456A4B`, `0x00456B1B`).
+* **`SpawnGroundRingEffect` reads `obj+0x1F8` bit 4**, which nothing in the
+  port had: `EnemyZombieInit` and `EnemyThrowerInit` raise it after
+  `ActorBuildSkinnedModel`, and `ActorDrawGroundShadow` is its other reader.
+  `MotionFlag.TraceGround`.
+* **The ring task's three routines step, then draw**, the opposite of the
+  sprite effects -- each installs its successor into `obj[0]` and still draws
+  its own picture that frame.
+* **Two wrong ports in `ZombieStateArcScriptedEntrance`**, both from the
+  bytes: `CALL 0x004119A0` with fade 5 for the crouch (the port cut), and
+  `AND ECX, 0xfffeffff` -- the landing latch -- at sub 3 and on the way out,
+  where the port cleared `0x100000`, the carried bit.
+
+**Wrong turns.**
+
+* **I ported the ring task a second time.** A peer (the owl and fish effects)
+  had it in `ring_effect.ts` in their tree, uncommitted, and had named the
+  three routines in Ghidra an hour before; I created the functions, named them
+  `GroundRingEffect*`, and my `rename_function` calls **overwrote their names**
+  -- the tool's result said "from 'RingEffectSpread'", which is the only place
+  it showed. The names were put back, and once their branch reached `main` my
+  copy was folded onto theirs: `SpawnGroundRingEffect` now lives in
+  `ring_effect.ts` and feeds its pool. See `L52`.
+* The first staged screenshot showed nothing: the effects were thirty units
+  ahead of a camera fifteen above the water, under the bottom of the frame.
+  Sixty units ahead, all six draw -- the red pools, the strip cels, the two
+  white water rings, the splash and the grey dust.
+
+**Mutation-checked:** the cue tick reduced to a no-op, the landing effect
+reduced to its latch, `SpawnGroundRingEffect` returning early, the entrance's
+and the leap's sounds and shake removed, the rain opcode not writing `G`, and
+the sub-3 latch put back on the carried bit each fail `npm run test:port`.
+
+## 2026-09-27 -- the screen cards' furniture bits, 0x20 and 0x10
+
+`game/class60/` and `game/class61/` both said `[port-only] the bit is not
+modelled` for `g_screen_furniture_flags` (`0x009A5900`) because nothing in
+the port read the word. Two readers had landed since -- `HudDrawLives` (bit
+`0x10`, "HOLD YOUR FIRE!") and `Class22CutsceneHoldUntilChapterCard` (bit
+`0x20`) -- and a third, `HudDrawShutterState`'s state 4 (`& 0x30` at
+`0x00413BB5`), is on a branch not yet merged. Both cards now write it, and
+`ScreenFurniture` in `game/globals.ts` names the two bits for writers and
+readers alike. `[proved]` off the disassembly:
+
+* `ChapterCardInstall` ORs `0x20` in **three** places, not one: sub 0
+  (`0x0043436B`), and each installer arm before it hands over -- Boss Mode at
+  `0x004342F6`, app state `0x0B` at `0x00434324`. It clears it at `0x004348C7`
+  after the flag at `0x004348C1`. The two variants clear it for their own
+  arms (`BossModeChapterCardUpdate` at `0x00434CE7`, `FUN_00434DA0` at
+  `0x00434ED4`), and neither is ported, so an actor on either arm holds the
+  bit up as long as it holds the gate shut. Both arms are unreachable from a
+  bundle.
+* `ResultCardInstall` ORs `0x10` at `0x00434FD0` beside the firing-gate drop
+  and clears it at `0x00435683` after the flag at `0x0043567C`. The tail's
+  `CMP word ptr [EBP+0x11c], BX` compares with zero: `EBX` is cleared at
+  `0x00435188` and nothing in the draw after it writes it -- which the port
+  had assumed and nobody had checked.
+
+**The skip.** By the user's decision (NEW-BUGS 13) every chapter card is cut
+on its first update. That path still sets and clears `0x20` in the same
+call, exactly as the exe does for a player who skips on the first frame, so
+**no reader ever sees the chapter card's bit** -- class 0x22's cameo and the
+shutter's state-4 bars draw straight through where an unskipped card would
+hide them for three seconds. A before-and-after test cannot tell that from a
+card that never wrote the word, so `test:port` records the writes themselves
+through an accessor on `G`, each with flag 248 as it stood.
+
+**Found in passing.** `obj_484ff0_props`' rig note, in both
+`tools/hod2lib/rigs.py` and `web/src/hod2lib/rigs_data.ts`, says "nothing
+sets 0x20" and calls the bit dead; the chapter card sets it on every stage.
+Left for its own change -- it is bundle-writer text with a Python twin.
+
+## 2026-09-27 -- the bats: every sub-type drawn, the wing on its body, the splash
+
+Class 0x46 had two declared divergences: the scatter's and the swarm's members
+undrawn, and `SpawnBatSplash` a sound with no picture. Both are gone; reading
+the routines around them again found six more things the first transcription
+had wrong.
+
+* **What draws a bat** `[proved]`: every arm of `PlaceBats` writes
+  `obj+0x1F4 = 0x1E`, clip `0x407`, `obj+0x1FC = 5`, builds the model and
+  installs `BatDrawBoneSlot` (`FUN_0042E020`), which draws the node's own slot
+  and nothing else. The model is the character type's; a member's descriptor,
+  or its lack of one, never enters the draw. The port's character layer binds
+  geometry by spawn address, so the exporter now emits a synthetic body row
+  and wing row per runtime child at the port's own address for it, parented to
+  the placer -- the horde's arrangement.
+* **`BatChildAt` collided.** It gave the member four bits; the scatter has 25,
+  so members 16..24 took 0..8's addresses and `tools/bats.mjs` had been
+  counting 16 scatter bats, not 25, for as long as it had run.
+* **The wing seat** `[proved]`: `g_camera_blocks[cur] * body+0x2C4 *
+  (0, 1, 2)`, and `body+0x2C4` is node 1's draw record `+0x28` --
+  `SkeletonEmitNode` (`FUN_004114C0`) stores it straight after
+  `FUN_00411700` has translated and turned the node, and the matrix under it is
+  `SkeletonApplyRootMotion`'s `T Rz Ry Rx S(model+0x116C)` and closing
+  translate, then `SkeletonPoseRootFrame`'s three turns. The port had
+  `(0, 1, 2)` in the body's yaw alone; the clip's root record is a half turn
+  tipped by 3679, so the wing sat four units off, on the far side. Ported as
+  `BatBodyNodeMatrix` in `game/`, cross-checked in `test:render` against the
+  pose the character layer actually makes. The bat's and the wing's roots are
+  now drawn in order 5 with pitch and roll and at 0.6 / 0.7.
+* **The shot.** The bat now registers the engine's way. The wing never
+  registers (the routine ends on its draw at `0x0042F7D8`), but the render
+  pick had walked every drawn bone and the wing's bone 3 has a 0.3 sphere, so a
+  wing could take a bullet meant for its bat. The dive registers in every
+  state and clears bit 3 only when its gate takes the hit: a bat shot during
+  its launch delay dies at launch. The port had cleared the bit every frame.
+  A sweep for `AND ..., 0xF7`/`0xFFFFFFF7` finds no clear in the task walk or
+  the shot processor `[likely]`.
+* **The scatter takes its hit inside its flying arm** (its `AND AL, 0xF7` is at `0x0042EB04`), and
+  the arm runs on: the kill frame is a flying frame (`* 1.05`, `* 1.08`), and
+  only that arm registers.
+* **The swarm's dive bobs by 5.0.** `FMUL [0x0055D2B4]` at `0x0042F035`; the
+  port used the orbit's 8.0 (`FMUL double [0x0055D2D0]`, `0x0042F2FE`).
+* **`PlaceBats`' dive member keeps the placer's pitch and yaw** (it had
+  zeroed the yaw), and every member and wing builds its model, which claims a
+  `g_hit_slots` entry -- a scatter fills the table.
+* **The splash** `[proved]`: `BatSplashUpdate` at `0x0042F930` was a bare label
+  (`SpawnBatSplash` passes `&LAB_0042f930` to `ActorAlloc`); created and named.
+  Translate to `(x, -25, z)`, `AssetDrawSlot(0x1339 + n)`, `n` 0..0x1D, one a
+  frame from the frame it is made. Stepped after the actors like the owl's and
+  the fish's tasks; `common.bin` 307..336 is the same run theirs use.
+
+**Wrong turns.** I first planned to key the draw on the character type with a
+runtime clone path in the character layer, as the task suggested; the layer's
+whole lifetime model (pending, adopted, spent, released on unlisting) is keyed
+on rows, and the horde, JUDGMENT's sub-actor and the players' bodies already
+use synthetic rows, so a second mechanism for one class would have been the
+wrong refactor. And the scratchpad this session was given is shared with other
+agents: my first bundle log was overwritten by a sibling's, and the size
+comparison was made against their export until a baseline was rebuilt from
+`git archive HEAD` in a private directory.
+
+**Mutation-checked:** the four-bit address, a per-frame hit clear, the yaw-only
+seat, a seat without the model scale, the orbit's bob, the scatter's hit ahead
+of the switch, a registering wing, a scatter registering while it waits, a
+zeroed dive yaw, no hit slot, a splash at the caller's y, the splash stepped
+at the head of the frame, and a splash drawn one frame late each fail
+`npm run test:port`.
+
+## 2026-09-27 -- the frog's turn fix-up and push-out, and four wrong ports beside them
+
+Class 0x11 declared two things unported: a "head-look fix-up" after each 45°
+turn, and `FrogPushOutOfActorCollision`, whose point was called undecided
+between view and world space because "the matrix chain says one and the use
+says the other". Both notes were wrong about the code, and reading the two
+turning states whole found four more wrong ports inside them.
+
+**The push-out's point is world space.** The chain is `MatrixStackPush(0);
+MatrixStackSetTopFromArray(g_camera_blocks[g_camera_index]);
+MatrixMultiply(part+0x130); MatrixGetTranslation` (`0x0043A504`..`0x0043A563`).
+`g_camera_blocks` is the camera block's `+0x40` matrix, which `globals.tsv`
+already had as view-to-world, and `part+0x130` is bone 1's draw record --
+records are `0x90` apart from `part+0x78`, the matrix at `+0x28` -- which
+`SkeletonEmitNode` stores under the camera, so in view space. View-to-world
+times view is world; `ActorShiftToHoldBone1Position` reads the identical chain
+the same way. The note had taken `g_camera_blocks` for world-to-view. The rest,
+from the listing with its FPU operands: skipped in state 6 but the point still
+written; `ColiTestSphereAgainstActors(point, obj+0x128)`; on a hit the push is
+`g_coli_hit_depth` times 0.05 below 0.1 of travel, times the travel times 0.3
+up to 0.6, times 0.3 above, added along the normal's x and z to both the
+position and the point; the point goes to `obj+0x12C` either way. The travel
+is measured from `0x007DCBB8`, now `g_frog_bone1_on_entry`, which `FrogUpdate`
+fills before any state runs from the same record through the same camera
+block -- one writer and one reader, by xref and by byte search. So the travel
+is between two readings of one record through one camera, the last draw's and
+this one's: bone 1's motion relative to the camera, not in the world.
+
+**The fix-up is not a head look.** `frog.bin`'s bone 1 is the node every other
+bone hangs from, and its turn clips carry their 45° in the root record (bone
+0's ry, 32767 to -24577 for `0x142`). After a pass the state adds the turn to
+the yaw and rewrites bone 1's angles as `MatrixToEulerZYX(R0⁻¹ RotY(-turn) R0
+R1)` -- there is no `MatrixDecomposeEuler`. Every draw rewrites those angles
+(`FUN_00411700`, now `SkeletonPoseNode`, stores all three of its arms at
+`record+0x04` -- the decompiler shows the fade arm returning early, the listing
+falls through to the store), so the rewrite survives only when the blend to the
+next clip snapshots it, which is exactly when the turn is done. The port
+already had that snapshot: `Actor.fadeFrom.records`, written for class 0x19's
+turn. Class 0x30 has no counterpart; neither Euler decomposition is called
+from a class-0x30 routine, so the note's "the same gap stops class 0x30's" was
+not so.
+
+**Four wrong ports in the same two routines**, each now pinned by a check that
+fails without its fix:
+
+* `0x004AD0B0` is `acos`, now `CrtAcos`: `atan2(sqrt((1+x)(1-x)), x)`, with
+  `FLDZ` at +1 and `FLDPI` at -1. The port had `asin`, marked likely because
+  asin "vanishes at the boundary" -- a reason about the result, not the code.
+* State 1's middle heading band was inverted: `[0x004C4D0C]` is -0.25, and the
+  frog between the two quarter lines gets the full `0x3000` window.
+* Both launch substates bump the substate and run on into substate 3's code
+  (`0x0043B03E`, `0x0043B6F2`), so the launch frame halves the owed turn too.
+  The port returned. That is now `L53`.
+* The leap's recovery is `ActorSetMotionBlended(0x13E, 0x3D, 2)`: the third
+  argument is the start cursor and the fourth the fade. The port had read a
+  61-frame fade from cursor 0, so the frog replayed its take-off.
+
+**What the port does, and how.** The draw half of `FrogDrawAndCycleBone2Slot`
+stores bone 1's record in view space on the frog's tail (`bone1View`) from the
+host's posed bone through this frame's camera; `FrogUpdate` and the push-out
+read it back through `viewPoint`, the camera block's view-to-world. The pose
+is the renderer's, so the record is the bone as last drawn -- the reading
+`ActorRegisterCameraPoint` takes. `ColiTestSphereAgainstActors` re-derives
+every other actor's sphere with class 0x30's formula; a new
+`ClassHandler.ownsSphereCentre` keeps the frog's published point. Classes
+0x31, 0x33 and 0x10 also write their own sphere and are still overwritten
+there; that is the shared routine's, not this change's.
+
+**Wrong turns.** A first draft named the constant and helpers "body" because
+bone 1 is what the corpse model replaces; that is naming by resemblance, and
+they are `FROG_BONE1` and `FrogBone1World` now.
+
+**Next actions.**
+
+* `ColiTestSphereAgainstActors`'s re-derivation should honour every class
+  that publishes its own `obj+0x12C` (0x31, 0x33, 0x10), or walk the
+  registered list as the engine does.
+* The death state plays `ActorSetMotionBlended(0x13F, 0, 2)` after writing
+  `obj.motion` itself, so the port's blend sees no change and cuts; and its
+  `SpawnGroundRingEffect` is not called. Neither was read for this.
+
+## 2026-09-28 -- the canal water is a task: class 0x41 type 1
+
+**The report.** `?stage=2&mode=play&entry=0&block=16&step=14&op=1`: the dock
+in block 16 stands over nothing -- black under the boards and between the
+pilings.
+
+**What was found.**
+
+* Region 29, where the walker stands, names four `st2_07` models and none of
+  the canal's flat green planes. The script loads two of those planes itself
+  (`asset_load_slot` `st2_07[3]` at step 0 and `st2_07[1]` at step 10), and a
+  slot that is only loaded is drawn by nothing: `RegionDrawResidentSet`
+  (`0x00401260`) walks the current region's list and no other `[proved]`.
+  Its loop tail (`0x00401443..0x0040145F`) sits outside Ghidra's function
+  body, so its decompile shows a single entry; the disassembly settles it.
+* The only references to those slots in `.text` are immediates in
+  unfunctioned code at `0x0046E3A0` -- now `WaterSurfaceUpdate` -- whose one
+  data xref is `g_class41_constructors[1]`, `FUN_00462F70`, now
+  `PlaceWaterSurface`. Class 0x41 type 1: a 0x44-byte task that draws
+  `g_water_surface_slots[obj+0x1F4]` (`0x00593DA4`, ten flat tiles) every
+  frame, ripples its UVs, flips its TSP filter bit to bilinear, pairs and
+  swaps tiles on script flags, and kills itself on five conditions.
+  Fifteen spawns: 5 stage 2, 7 stage 3, 3 training. Full reading in
+  `docs/formats/water.md` §2.
+
+**What the port does.** `game/class41/water.ts` transcribes both routines;
+the ripple is cumulative in the engine, so `G.g_water_surface_uv` keeps it as
+two sums per tile (`sin(a + b)` factors) and `render/water_surfaces.ts`
+applies them per geometry. The exporter emits a `water_surface` placement
+with the slot resolved through the table (schema change) and carries the
+`komono_boss2`/`komono_venis` tiles in `slots_actor`. `StageScene` no longer
+shows the task's tiles by its "loaded and unregioned" stand-in.
+`tools/verify_water.py` checks the chain, the table and every constant
+against the immediates; two mutations (a constant, the table address) fail it.
+
+**Wrong turns.**
+
+* `docs/formats/water.md` opened "There is no water renderer", and I spent
+  the first hour treating that as the frame: checking the region lists and
+  the materials of the region planes for a hiding reason. It was a negative
+  result (L17) that nobody had tested against a place the water was missing.
+* `water.bin`, which the block loads at step 1, looked like the answer by its
+  name. It is 63 effect models -- droplets, splash sheets and a fifty-frame
+  splash drawn from `0x004086F5` -- and no surface. Naming by resemblance
+  again; the slot search is what found the task.
+* The first cut of the exporter placement had no arm in `SpawnPropContainers`'
+  bridge, whose default is `PlaceBreakableGroup`: every water spawn would
+  have been placed as breakable group 0. Caught in the page, before commit,
+  by the placers' `condition` reading 0.
+* The first render layer called two `game/` functions and failed
+  `render-drives-the-port`; the closure became a table and the per-vertex half
+  of the phase moved into the renderer.
+
+**Next actions.**
+
+* Asset residency (`0x009A66A0`'s `+0xD` bit 0x80) is not modelled, so the
+  ripple's residency gate is `[diverges]` and the ripple is not reset when a
+  tile is reloaded. Both are bounded to a phase offset; a residency model
+  would clear them and is its own piece of work.
+* A seek runs every replayed placer's constructor on the first live frame, so
+  step lifetimes restart where the seek lands -- for every class-0x41 object,
+  not only this one.
+
+## 2026-09-28 -- `ActorArcStep`'s stages, and the hold `ActorSetMotionBlended` puts on the cursor
+
+Reported from the state-23 port: its `obj+0x19C > 66` test first fired at 68
+in the port. Read `ActorArcStep` (`FUN_0044D860`) from the listing. All three
+stages are `CALL 0x004119a0` -- `ActorSetMotionBlended` itself, not the
+`SetCurrentActorMotionBlended` thunk -- with `{motion, start, fade}` straight
+out of `g_arc_scripts`. `ActorSetMotionBlended` writes `start` into the cursor
+and raises `track+0x37` bit 0; `SkeletonAdvancePlayCursor` (`FUN_004111A0`)
+then leaves the cursor alone until `counter - track+0x28` reaches
+`(s8)track+0x30 + 1`, i.e. `fade + 2` (`MOVSX ECX, byte [ESI+0x30]; INC ECX` at
+`0x004111BB`), and rewrites the counter to `start + 1`. The port's one-shot
+channel started the stage running, so a stage's start frame was never seen by
+a state that reads the cursor before stepping the arc.
+
+The port now has `ActorSetOneShotBlended`, the channel's `ActorSetMotionBlended`,
+and a `held` one-shot is held by `ActorAdvanceMotion` through the fade. The
+alternative, moving the stages onto the base track as `ThrowerStateThrow`
+did, was rejected: every script plays the same clip in its first two stages
+and the port's base-track `ActorSetMotionBlended` skips the fade when the
+motion is unchanged (the exe does not), which is class 0x30's shared setter
+to change; and the leap states' waits on `obj.action` would all have moved.
+
+`ActorArcStep` was also wrong in ways that had nothing to do with the hold,
+and those are fixed with it: the phases fall into each other; phase 2 ignores
+`ActorArcInterpolate`'s result (the port jumped to phase 4 and dropped the
+landing clip); `obj+0x1330 -= step` before phase 3 flies the frame again; the
+`0x100` windup immunity and its `0x136C & 0x200` memory, and `0x180000` on
+landing, for types 0x16..0x19. The annotation said it "returns 0 once the frame
+counter passes the duration" -- it returns 0 when the **landing clip** reaches
+stage 2's threshold.
+
+**And one annotation was wrong outright.** `InstallArcMotionScript` said every
+script names the same motion in all three stages. Seven of the 38 do not:
+`zslman`'s aside in stances 1 and 3 and set 3's attack 3 in all five end on a
+different clip (504/504/506, 490/490/493). `verify_combat.py` check 16 now
+reads all 38 and asserts every start and threshold lies inside its own stage's
+`g_motion_play_length`.
+
+**Wrong turn.** The first run failed the port test's climb: the fixture put the
+generic script (thresholds 46 and 47) over a 23-frame clip, play length 44.
+That is data the engine would hang on -- the cursor wraps at 45 -- and the old
+port only got off the wall because it gave up waiting when the arc landed. The
+fixture has the exe's wall script now; the port did not get a guard for it.
+
+**Found, not fixed: the port's states read the cursor one tick ahead of the
+engine's.** `EnemyThrowerUpdate` (and class 0x30's update) run the state, then
+the draw computes `obj+0x19C` from the counter, then the counter steps -- so a
+state reads the cursor the *previous* frame's draw computed. The director
+advances the port's clocks before the update, so every cursor a port state
+reads is the one the engine will draw this frame: one tick ahead, on every
+frame but the one that set the clip. The draws agree. The held start frame is
+therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
+Not this change's to fix -- it is every cursor test in the port.
+
+## 2026-09-27 -- class 0x31 state 23, the delayed pounce, read against the listing
+
+`ThrowerStateDelayedPounce` (`FUN_0044E830`) re-ported from the disassembly;
+the roll turn is the turn-routines branch's and was left alone here. What the
+port had wrong, all `[proved]`:
+
+* The wait clip was a one-shot. The exe calls `ActorSetMotionBlended`
+  (`0x004119A0`) directly, so it is the ordinary motion and loops for the
+  whole wait -- its root walks the actor. It also raises `obj+0x1F8` bit
+  `0x10`, which is `MotionFlag.RootMotionY` and had no known writer; that is
+  the height store at `0x00410E48`, now honoured by `ApplyRootMotion`.
+* `obj+0x34 |= 0x100` (`ShotImmune`) for the wait was missing, so the pair
+  could be knocked down before they moved.
+* `ActorFlag.BackingOff` (`0x20000000`) for the exe's `0x10000000`
+  (`Committed`). `ThrowerStateLeapDown` and `ThrowerStateLeapStrike` make the
+  same substitution; they were left to their owners and reported.
+* The flight aimed at `obj.lookAt.y`, the actor's own tracked point, for
+  `g_camera_eye_y`.
+* The `obj+0x34 |= 0x2000` raise past the live row's hit frame was not there.
+* **`ThrowerPickLandingPoint` switches on the state** (`obj+0x1310`, at
+  `0x0044CBB1`): states 22 and 23 take -350 px, and 23 unprojects at -6.0. The
+  annotation already said so; the port ignored it and had no sideways offset
+  either. State 23 was landing 9.5 units short.
+* `ThrowerLoadAttackArcScript` wrote `obj+0x1364`. The exe's does not; the only
+  store to that word on a thrower is `ThrowerStateLeapDown`'s at `0x0044B6FB`.
+
+**Wrong turns.** I first wrote that seven `+0x1364` instructions in class
+0x31's range held one store. There are five stores: `SpawnThrownWeapon`'s
+three go through `ESI`, the projectile, and `FUN_00450930`'s through an object
+it has just allocated. The claim is now "one store on a thrower". And the first
+port test pinned the flinch veto to cursor 67. The port shows 68, because
+`ActorArcStep`'s `playStage` starts stage 2 on its start frame with no fade
+hold, and the state never sees 67. That is the arc's approximation, not state
+23's, so the test now asserts "past 66" and the hold is reported.
+
+Checks: 29 new assertions in `port.test.ts`, 2223 passing. Mutating the veto
+to read `obj.thr.stance` fails it at cursor 63.
+
+**After merging the arc hold (98627e93).** The veto check is back to exactly
+67, because stage 2 now holds on its start frame. The merge also caught a third
+wrong turn, found by the hold's session. I had asserted that `ShotImmune` is
+down at the end of the frame the wait ends. Sub 1 does drop it (`0x0044E8BA`),
+but the same frame falls into `ActorArcStep`, whose phase 0 raises it again
+for types 0x16..0x19 outside state 10 (`0x0044D8A4`..`0x0044D8BE`, jump-table
+entry 0 at `0x0044DA4C`). It latches `obj+0x136C` bit `0x200` only if `0x100`
+was already up. The takeoff (`0x0044D966`..`0x0044D97D`) drops it. So the
+windup cannot be shot either. I asserted what the state does in isolation
+rather than the end of the engine's frame, and the check now asserts the
+latter.
+
+## 2026-09-27 -- `obj_484ff0_props`: the `0x20` gate is the chapter card's, not dead
+
+The rig's note (`tools/hod2lib/rigs.py`, and `rigs_data.ts` generated from it)
+ended: "gated on DAT_009A5900 & 0x20, and [likely] that bit is dead: of 54
+references ... nothing sets 0x20, so the early-out never fires". **Wrong.**
+`[proved]` from the disassembly of all 67 references `get_xrefs_to 0x009A5900`
+returns now:
+
+* **Set only by `ChapterCardInstall`** (`FUN_004342E0`): `OR AL, 0x20` at
+  `0x0043436B` in sub 0, and `OR EDX, 0x20` at `0x004342F6` / `0x00434324` in
+  the Boss Mode and app-state-`0x0B` installer arms. Every other writer ORs
+  1, 2, 8, `0x10` or `0x18`, or ANDs one of those out (`PlayerTryStartPress`'s
+  `OR EAX, EBP` is `EBP = 1`, loaded at `0x00415018`).
+* **Cleared** at `0x004348C7` after flag 248, by `BossModeChapterCardUpdate`
+  at `0x00434CE4` and by `FUN_00434DA0` at `0x00434ED4`; and wholesale by
+  `CommitAppState`'s `AND 0xFFFFFFC7` (`0x0040E8C5`) and `FUN_0040A920`'s
+  `MOV [0x009A5900], 3` (`0x0040AA85`).
+
+So the early-out fires for every chapter card's 180 frames. Why the earlier
+sweep missed three plain `OR`s is `[open]`; the reference count it quoted (54)
+is not the count there is now (67), so it was read off a different list.
+
+**The early-out is a draw gate, not a routine gate** -- the note's "the whole
+routine is gated" was also wrong. `ScriptedHumanoidDraw`'s `JNZ` at
+`0x0048500D` lands on the tick at `0x0048523A` (`if obj+0x1324 == 0,
+obj+0x194++`), not the `RET`; `SetPiecePropDrawAndTick`'s at `0x00483503`
+lands on the type-`0x55` test at `0x00483520`, past the skeleton draw only. So
+classes 0x24 and 0x25 **keep animating** behind the card and are only undrawn;
+this log's chapter-card entry above lists them among routines that "hold
+still", which is right for `Class22CutsceneHoldUntilChapterCard` (its gate is
+on `DrawAndStep`) and not for these two.
+
+**The port has nothing to gate.** What sits under the test in both routines is
+the draw, which is the renderer's; the tick, which is the port's
+(`ActorAdvanceMotion`), is outside it. The bit itself is modelled by the
+screen-card session (`c1e6e721`, merged to main as `ccb956b7`;
+`ScreenFurniture.ChapterCard` in `game/globals.ts`), and under the user's skip-every-card decision (NEW-BUGS 13)
+sub 0 raises it and the countdown drops it inside one `ChapterCardInstall`
+update, so no draw could observe it. A render-side gate is worth writing only
+if the card is ever held for its dwell. Comments at class 0x24's tail and
+class 0x25's `ScriptedHumanoidIdle` say so where the next reader will look.
+
+**Wrong turn.** The pseudocode of both routines `return`s after the
+`MatrixStackPop` that ends each decoration arm, and after
+`SetPiecePropDrawAndTick`'s type-`0x53` draw of slot `0x1382` -- which read as
+"those arms never tick". The disassembly falls through into the tick every
+time (`0x00485237`, `JMP 0x0048523A` at `0x004851F3`, `0x004835BA`): **L35**,
+the no-return `MatrixStackPop`. Nothing is lost here in practice: no class-0x24
+placement in the six stages has character type `0x53` or `0x55` -- the 28
+reached use `0x22`/`0x26`/`0x2E`/`0x30`/`0x31`/`0x33`/`0x34`/`0x35`/`0x37`/`0x47`.
+
+**Bundle.** The note is data, and it travels twice: `rigsJson` writes it into
+`rigs[].note` of the script JSON, and the glTF carries it as the rig node's
+`extras.hod2_note` -- stages 2 and 3, both modes, eight files. All twelve
+bundles were exported before and after the change and diffed chunk by chunk:
+those eight notes, and `rigs_data.ts`'s entry and the builder stamp in
+`manifest.json`, are the whole difference. Every `.glb` BIN chunk and every
+other file is byte-identical.
+
+**Two more slips, both caught.** (1) The first "after" export was started
+before `tools/gen_builder_hash.py` had run -- **L33** exactly; `rigs_data.ts`
+is in the builder digest, and `verify_exporters.py` said so. Stopped, hash
+regenerated, re-exported. (2) `grep -rl` over the bundle listed only the four
+script JSONs, which read as "the glTF does not carry the note". macOS `grep`
+exits 1 on these `.glb` files and prints nothing, even with `-c` -- **L13**.
+Counting the bytes in Python found it in all four.
+
 ## 2026-09-27 -- `ZombieStateStrike` commits at the pick (`obj+0x34` bit `0x10000000`)
 
 `ZombieStateStrike` (`FUN_00455A40`) sub 0 opens, before the draw, with

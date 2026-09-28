@@ -53,11 +53,23 @@ import { makeZombieTail, type ZombieTail } from "./class30/state";
  */
 export enum MotionFlag {
   /**
-   * Bit 0 — **the skeleton is drawn.** `SkeletonEmitNode` (`FUN_004114C0`)
-   * runs a node's draw hook, updates its hit-centre and writes the camera
-   * point only while it is set; the pose itself is walked either way.
+   * Bit 0 — **the skeleton is drawn**, and the ground shadow with it.
+   *
+   * `SkeletonEmitNode` (`FUN_004114C0`) runs a node's draw hook, updates its
+   * hit-centre and writes the camera point only while it is set —
+   * `TEST byte ptr [ECX + 0x64], 0x1` / `JZ` at `0x00411505`, `ECX` being
+   * `g_skeleton_model` — so with it clear **no node of the skeleton is
+   * drawn**, hook and all; the pose itself is walked either way.
+   * `ActorDrawShadow` (`FUN_0040A590`) and `ActorDrawGroundShadow`
+   * (`FUN_0040A620`) both test it again before the shadow disc.
    * `ActorBuildSkinnedModel` sets it; class 0x14's entrances clear it to hide
    * the boss under the water and set it again. `[proved]`
+   *
+   * It is **not** the gate on the vertex-blended parts: those have a byte
+   * each, {@link Actor.partVisible}, and `ActorSetPartVisibility`
+   * (`FUN_00409D10`) is what writes them. Every state that hides an actor
+   * writes both, and `ZombieStateAwaitCivilianOrder` and class 0x14's
+   * entrances write this and only part 0's byte.
    */
   Drawn = 0x01,
   /**
@@ -72,12 +84,28 @@ export enum MotionFlag {
    */
   RootMotion = 0x02,
   /**
+   * Bit `0x04` — **the ground-anchored draws trace the floor.**
+   *
+   * Two readers, and they make the same choice `[proved]`:
+   * `SpawnGroundRingEffect` (`FUN_00407DA0`, `TEST byte ptr [EDI+0x1F8], 4`
+   * at `0x00407DCD`) puts its ring on `QueryGroundHeightAt(x, y + 20, z)`
+   * with the bit up and on `obj+0x44` without it, and `ActorDrawGroundShadow`
+   * (`FUN_0040A620`, `TEST AL, 4` at `0x0040A649`) does the same for the
+   * shadow. `EnemyZombieInit` (`OR EDX, 4` at `0x00452E21`) and
+   * `EnemyThrowerInit` (`0x00449694`) raise it straight after
+   * `ActorBuildSkinnedModel`; `OneHitTargetInit` (`FUN_00448ED0`) raises only
+   * bit 1, so a class-0x20 ring sits at the body's own height.
+   */
+  TraceGround = 0x04,
+  /**
    * Bit `0x10` — take the root's **y** as well.
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
    * clear it writes back `obj+0x40` and `obj+0x48` only, with it set it writes
-   * `obj+0x44` too. Nothing in the port sets it, and no routine read so far
-   * writes it. `[open]`
+   * `obj+0x44` too (`0x00410E48`). `[proved]` Its one writer found is
+   * `ThrowerStateDelayedPounce` (`FUN_0044E830`), which raises it for its wait
+   * clip (`OR ECX, 0x10` at `0x0044E863`) and drops it when the wait ends;
+   * `ApplyRootMotion` in `game/root_motion.ts` honours it.
    */
   RootMotionY = 0x10,
   /**
@@ -93,10 +121,10 @@ export enum MotionFlag {
  * {@link Actor.motionFlags}: `MOV dword ptr [ESI + 0x64], 0x3` at 0x004104C5,
  * bytes `c7466403000000`. `[proved]`
  *
- * It is unconditional, so **every skeletal actor in the game starts with root
- * motion on** — class 0x30 and class 0x31 never change it, and class 0x10's
- * script does, on every clip change. Bit `1` is not read by anything the port
- * has looked at; it is kept so the field round-trips the engine's value.
+ * It is unconditional, so **every skeletal actor in the game starts drawn and
+ * with root motion on** — {@link MotionFlag.Drawn} and
+ * {@link MotionFlag.RootMotion}. Class 0x10's script rewrites the second on
+ * every clip change; class 0x30's hiding states clear and restore the first.
  */
 export const MOTION_FLAGS_INIT = 3;
 
@@ -121,7 +149,9 @@ export enum ActorFlag {
   /**
    * `obj+0x34` bit 8. While it is set `ThrowerShotFeedback` forces the hit
    * result to 5, so a downed thrower only ricochets — a real invulnerability
-   * window, counted down by `obj+0x133C`.
+   * window, counted down by `obj+0x133C`. `ThrowerStateDelayedPounce`
+   * (`FUN_0044E830`) holds it up for the whole of its wait instead
+   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`).
    */
   ShotImmune = 0x100,
   /**
@@ -183,6 +213,22 @@ export enum ActorFlag {
   FireLoop = 0x200000,
   /** `ResolveHit` sets it when the hit points reach zero. */
   Dead = 0x4000000,
+  /**
+   * `obj+0x34` bit `0x80000` — **no ground shadow.** `ActorDrawShadow`
+   * (`FUN_0040A590`) draws the disc only while this is clear and
+   * {@link MotionFlag.Drawn} is set, and `ActorDrawGroundShadow`
+   * (`FUN_0040A620`) tests the pair again: `TEST dword ptr [ESI + 0x34],
+   * 0x80000` (`f7463400000800`) at `0x0040A625`. `[proved]` for that reader.
+   *
+   * Class 0x30 raises it with the other bits of a hide or a corpse:
+   * `0x90000` with {@link NoCameraTrack} in `ZombieStateEmerge` and state 28,
+   * `0x90100` with {@link ShotImmune} as well in
+   * `ZombieStateWaitForCameraFrame`, `0xA0000` with {@link Airborne} in both
+   * corpse states. Other classes use the same bit of this word for their own
+   * ends (class 0x46's `PlaceBats` writes it, class 0x14 toggles it), and
+   * `L3` applies: this names the reader, not every writer's intent.
+   */
+  NoShadow = 0x80000,
   /**
    * Excluded from `RegisterForCameraTracking`. `ZombieStateApproach` sets it
    * while walking and clears it the moment the actor wins a permit, which is
@@ -250,6 +296,10 @@ export enum ActorFlag {
    *
    * It said "will not be re-ranked out of it". `RankEnemiesByDistance`
    * reads bit 1 and {@link BackingOff} and not this. `[proved]`
+   *
+   * Class 0x31's pounces raise it for the flight -- `ThrowerStateLeapDown` at
+   * `0x0044B6F0`, `ThrowerStateLeapStrike` and `ThrowerStateDelayedPounce` at
+   * `0x0044E8E6` -- and not {@link BackingOff}, which is the next bit up.
    */
   Committed = 0x10000000,
   /**
@@ -525,7 +575,18 @@ export enum ThrowerFlag {
   Ceiling = 0x100,
   /** The three surface bits together. */
   Surface = 0x1C0,
-  /** The blinking states hide the actor with this and `Actor.alpha`. */
+  /**
+   * Bit 2 — **draw the bones at {@link Actor.alpha}.** `ThrowerDrawBonePart`
+   * (`FUN_00449F90`) tests it per node (`f6876c13000004` at `0x0044A016`) and
+   * `ThrowerDrawPartAlphaIfBlinking` (`FUN_0044A280`) for type 0x18
+   * (`f6806c13000004` at `0x0044A285`): with it up a bone is drawn through
+   * `ThrowerDrawPartWithAlpha` at `obj+0x138C`, with it down solid whatever
+   * that word holds. The blinking states raise it with the alpha at 0 and
+   * drop it with the alpha at 1 — but for `ThrowerStateCorpseBlink`'s last
+   * frame, which drops it with 0. It does not reach the vertex-blended parts,
+   * which `DrawCharacterPartSlot` draws at the alpha for types 0x17 and 0x18
+   * with no test of this bit at all. `[proved]`
+   */
   Blinking = 0x4,
   /** A reaction is already running; a second shot latches a re-entry. */
   ReactReentry = 0x400000,
@@ -766,10 +827,25 @@ export enum ZombieFlag2 {
   CollideActors = 0x40000000,
   /** Bit `0x800000` — set for the frame a push actually moved this actor. */
   Shoved = 0x800000,
-  /** Bit `0x400000` — which way `ZombieStateBackOff` turns; the shove flips it. */
+  /**
+   * Bit `0x400000` — which way `ZombieStateBackOff` turns: clear, it passes
+   * `-0x40` and turns away from where its strike began; set, `+0x40`, toward
+   * it. The retreat's own first frame clears it (`00455cc0 81e1ffffbfff`)
+   * and the shove timer flips it every sixty frames while the actor is being
+   * pushed, so a wedged one tries the other way.
+   */
   BackOffTurnFlip = 0x400000,
   /** Bit `0x2000000` — the bounding sphere sits a half unit up, not one. */
   LowSphere = 0x2000000,
+  /**
+   * Bit `0x1000000` — with {@link LowSphere}, what arms
+   * `ZombieStateAttackRun`'s one-in-64 roll into `ActorAbortAttackAndLeave`
+   * (`FUN_0045D9F0`); the roll clears it when it fires (`00455540 25fffffffe`).
+   * Its one writer found so far is `g_class30_states[53]` at `0045e6a2`
+   * (`OR EAX, 0x1000000`), a state the port does not have. What the bit means
+   * beyond that is `[open]`.
+   */
+  AbortRollArmed = 0x1000000,
   /**
    * Bit `0x100000` — the actor is being **carried**: riding
    * `g_carrier_object` in `ZombieStateRideCarrier`, or in flight in
@@ -969,16 +1045,6 @@ export enum ThrowerStance {
   Pounce = 4,
 }
 
-/** A motion the actor is playing at full weight. `t` is seconds. */
-/**
- * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
- *
- * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
- * engine counts frames and the port compares against frame numbers. Holding it
- * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
- * a frame test written `===` could be stepped over -- which is what the
- * `struck` latch on this interface's owner used to exist to work around.
- */
 /**
  * One skeleton record's rotation in a fade's snapshot, overriding the clip's:
  * `(rx, ry, rz)` BAMS, applied `RotZ RotY RotX` like every record. See
@@ -989,7 +1055,29 @@ export interface FadeRecord {
   rot: [number, number, number];
 }
 
-export interface ActorClip { motion: number; ticks: number; loop: boolean }
+/**
+ * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
+ *
+ * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
+ * engine counts frames and the port compares against frame numbers. Holding it
+ * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
+ * a frame test written `===` could be stepped over -- which is what the
+ * `struck` latch on this interface's owner used to exist to work around.
+ */
+export interface ActorClip {
+  motion: number;
+  ticks: number;
+  loop: boolean;
+  /**
+   * `[port-only]` The clip was set through `ActorSetOneShotBlended`, the
+   * channel's `ActorSetMotionBlended` (`FUN_004119A0`), so the actor's fade is
+   * a fade **into it** and holds `ticks` on the start frame while it runs, as
+   * `SkeletonAdvancePlayCursor` (`FUN_004111A0`) holds `obj+0x19C` while
+   * `track+0x37` bit 0 is up. A one-shot set any other way keeps running under
+   * a fade, which is what it did before this existed.
+   */
+  held?: boolean;
+}
 
 /**
  * **Another actor**, by spawn address — the port's stand-in for a raw actor
@@ -1093,6 +1181,29 @@ export interface ActorBase {
    * skeletal actor is built with.
    */
   motionFlags: number;      // +0x1F8
+  /**
+   * `model+0x40` — the **vertex-blended parts' draw bytes**, one per
+   * `model+0x3C`: byte `+1` of each eight-byte record. `obj+0x1D4` is the
+   * pointer and `obj+0x1D0` the count.
+   *
+   * The parts are `g_pCharacterExtraParts[type]` (`0x0052ED08`) — the waist
+   * and the skirt, the geometry no skeleton node names — so index *i* here is
+   * the exporter's `part<i>_<slot>` node and {@link CharacterType.parts}'
+   * entry *i*, **not a bone**. `ActorBuildSkinnedModel` (`FUN_00410440`) sizes
+   * the array from that table's count, null descriptors included, and writes
+   * 1 into every byte (`0` into the `+0` "has a model" cache beside it, which
+   * is the renderer's and not carried). `SkeletonDrawWalk` (`FUN_004110D0`)
+   * skips part *i* while its byte is 0, and so does `DrawCharacterPartSlot`
+   * (`FUN_00419B40`). `ActorSetPartVisibility` (`FUN_00409D10`) writes all of
+   * them; `ZombieStateAwaitCivilianOrder` and class 0x14's entrances write
+   * part 0's alone. `[proved]`
+   *
+   * On the actor rather than in {@link SkeletonModel}, because every skinned
+   * actor has these records and only class 0x14 carries the rest of the
+   * block. Empty for an actor whose class `Init` the port does not run the
+   * build for; see `spawn.ts`.
+   */
+  partVisible: number[];    // model+0x40, byte +1 of each record
   /**
    * The engine's own model block (`obj+0x194`), for an actor whose class
    * poses it the way the exe does -- see `game/skeleton.ts`. Null for every
@@ -1776,7 +1887,23 @@ export interface ActorBase {
    */
   script: { target: TargetScriptJson | null;
             attack: TargetScriptJson | null } | null;
-  /** `obj+0x138C` — the draw alpha the blinking states write. */
+  /**
+   * `obj+0x138C` — a **draw alpha**, and the engine's readers of it are
+   * per-part, never per-actor:
+   *
+   * * `DrawCharacterPartSlot` (`FUN_00419B40`) draws the vertex-blended parts
+   *   of character types 9, 0x12, 0x17 and 0x18 at it, unconditionally —
+   *   see `PART_ALPHA_CHAR_TYPES` in `game/model_draw.ts`;
+   * * `ThrowerDrawBonePart` (`FUN_00449F90`) draws a class-0x31 bone at it
+   *   while {@link ThrowerFlag.Blinking} is up, which is what the blinking
+   *   states write it for.
+   *
+   * It is not a draw gate for the whole actor and not a stand-in for one:
+   * hiding a class-0x30 actor is {@link MotionFlag.Drawn} and
+   * {@link Actor.partVisible}. Classes 0x22, 0x23 and 0x40 still write it as
+   * a port-only "drawn this frame", which `render/characters.ts` honours for
+   * them alone.
+   */
   alpha: number;            // +0x138C
 
   /**
@@ -1893,7 +2020,9 @@ export interface ActorBase {
    * clip's: a state that writes the drawn pose's records before it blends
    * (`Boss4StateTurnClipThenApproach`, `FUN_00494730`, rewrites records 1 and
    * 9 at `char+0x10C` and `+0x58C`) hands the renderer the BAMS it wrote, and
-   * the fade dissolves from those.
+   * the fade dissolves from those. The frog's two turning states do the same
+   * to record 1 after every pass of a turn clip (`FrogStateHopWithinScreenWedge`
+   * (`FUN_0043AA10`), `FrogStateLeapAtPlayer` (`FUN_0043B270`)).
    */
   fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
   /**
@@ -2127,6 +2256,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     // the scale from the character type alone, the flags unconditionally.
     scale: ActorModelScale(charType),
     motionFlags: MOTION_FLAGS_INIT,
+    // Sized and filled by the build itself, which knows the character's
+    // part count -- see `ActorBuildSkinnedModel` in `spawn.ts`.
+    partVisible: [],
     flags: 0,
     pos: vec3(),
     yaw: 0,

@@ -145,6 +145,15 @@ fixes it, and `PoseHookGrowAndPushOutOfWorld` (`FUN_0048D070`) is now ported
 with it: the per-frame hook that ramps that radius toward whatever op 0x16 set
 and pushes the civilian out of the world when its wait word asks.
 
+*And the sphere is where she is drawn.* The centre of that body sphere,
+`obj+0x12C`, is `CivilianUpdate`'s to write, from a switch on op 0x17's mode:
+the position, bone 2, bone 1 -- every civilian's until a script says
+otherwise -- or halfway between bones 12 and 15, the fallen body's. Each bone
+is its draw record taken back to the world. Only the position had been
+ported, so the push measured every civilian at class 0x30's feet-plus-radius
+point and the pose hook traced that same point; both read the switch's
+centre now (`class10/update.ts`, `docs/formats/civilians.md`).
+
 *The maul was an animation with no consequence.* `obj+0x19C` — the frame every
 script cue is counted in — is the **play** clock: it ticks once per 60 Hz frame
 over 30 Hz data, so it runs to `g_motion_play_length[motion]`, about twice the

@@ -118,7 +118,11 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         sub.scaleTarget = c.radius ?? 1;
         sub.scaleStep = a[1] ? (sub.scaleTarget - 1) / AsFloat(a[1]) : 0;
         break;
-      case CivilianOp.SetCameraPointMode: sub.cameraPointMode = a[0]; break;
+      case CivilianOp.SetSphereCentreMode:
+        // `MOV DL, byte ptr [ESI+0x4]`: a byte, and the switch reads it back
+        // with `MOVSX`, so the signed byte is what the field holds.
+        sub.sphereCentreMode = (a[0] << 24) >> 24;
+        break;
       case CivilianOp.SetPose:
         if (c.pose && c.pose.length === 6) {
           obj.pos = { x: c.pose[0], y: c.pose[1], z: c.pose[2] };

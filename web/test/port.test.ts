@@ -301,8 +301,11 @@ import {
 } from "../src/game/carrier";
 import { bamsDelta } from "../src/core/bams";
 import { CivilianAttachSet, CivilianCountMotionLoops, CivilianOp,
-         CivilianTarget,
-         CivilianUpdate, CivilianWait, PoseHookGrowAndPushOutOfWorld }
+         CivilianRunScript, CivilianSphereMode, CivilianTarget,
+         CivilianUpdate, CivilianWait, CivilianWriteSphereCentre,
+         CIVILIAN_SPHERE_BONE_MODE1, CIVILIAN_SPHERE_BONE_MODE2,
+         CIVILIAN_SPHERE_BONE_MODE3_A, CIVILIAN_SPHERE_BONE_MODE3_B,
+         PoseHookGrowAndPushOutOfWorld }
   from "../src/game/class10";
 import type { CivilianCmdJson, CivilianItemJson } from "../src/bundle/scene";
 import { GameMode } from "../src/game/game_mode";
@@ -11052,10 +11055,12 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   for (let i = 0; i < 10; i++) PoseHookGrowAndPushOutOfWorld(c);
   check("...from either side", c.bodyRadius === 2, String(c.bodyRadius));
 
-  // And the push it does only when the wait word asks for it.
+  // And the push it does only when the wait word asks for it. The sphere it
+  // traces is `obj+0x12C` as the switch left it -- set here by hand.
   T.coli = { files: ["t"], blobs: { wall: WALL_BLOB } };
   G.g_coli_full_set = ["wall"];
   c.pos = vec3(29, 0, 45);
+  c.sphereCentre = vec3(29, 2, 45);
   c.civ!.scaleTarget = c.bodyRadius;
   c.civ!.scaleStep = 0;
   PoseHookGrowAndPushOutOfWorld(c);
@@ -11064,6 +11069,195 @@ console.log("\nclass 0x10's body radius, and the hook that ramps it:");
   c.civ!.wait |= CivilianWait.PushOutOfWorld;
   PoseHookGrowAndPushOutOfWorld(c);
   check("with it, it is pushed out", c.pos.x < 29, c.pos.x.toFixed(2));
+
+  // `LEA EDX, [ESI+0x12C]` at `0x0048D0F8`: the published sphere, never one
+  // rebuilt from the feet. Feet in the wall, sphere clear of it: no push. The
+  // port used to rebuild class 0x30's feet-plus-radius-plus-one first, which
+  // put the sphere back in the wall.
+  c.pos = vec3(29, 0, 45);
+  c.sphereCentre = vec3(0, 2, 45);
+  PoseHookGrowAndPushOutOfWorld(c);
+  check("the hook traces obj+0x12C as it stands, not a sphere at the feet",
+        c.pos.x === 29 && c.sphereCentre.x === 0,
+        `pos ${c.pos.x} sphere ${JSON.stringify(c.sphereCentre)}`);
+}
+
+console.log("\nclass 0x10's collision-sphere switch: a drawn bone, not the feet:");
+{
+  // `CivilianUpdate`'s tail switches on `sub+0x80` (op 0x17) to fill
+  // `obj+0x12C`: 0 the position, 1 bone 2, 2 bone 1 -- `CivilianInit`'s
+  // default -- and 3 halfway between bones 15 and 12. Each bone is its draw
+  // record, stored in view space, taken back to the world through
+  // `g_camera_blocks`. Only mode 0 was ported, on a misreading of Ghidra's
+  // `int *` indices as byte offsets.
+  //
+  // The stub keeps each bone as the engine does -- a view-space record under
+  // a camera turned a quarter and set off the origin (L48), so a world point
+  // and its view-space twin differ on every axis -- and answers `boneWorld`
+  // the way the switch computes it, view to world.
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(CHARS);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+  T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
+  const c = ActorSpawn(0x7310, SpawnClass.Civilian, 1, "civ", undefined,
+                       new Rng(1));
+  c.visible = true;
+  c.pos = vec3(40, 3, -60);
+  c.yaw = 0x4000;
+
+  const EYE_AT = vec3(-12, 5, 30);
+  // Camera right is world +z, up is +y, back is world -x.
+  const toView = (w: Vec3): Vec3 =>
+    vec3(w.z - EYE_AT.z, w.y - EYE_AT.y, -(w.x - EYE_AT.x));
+  const toWorld = (v: Vec3): Vec3 =>
+    vec3(EYE_AT.x - v.z, EYE_AT.y + v.y, EYE_AT.z + v.x);
+  // The actor's own frame turned a quarter too: local (x, y, z) goes to
+  // world (z, y, -x) about its position.
+  const local: Record<number, Vec3> = {
+    1: vec3(0, 8.5, 0.25), 2: vec3(0.1, 13.4, -0.6),
+    12: vec3(1.6, 3.2, 0.5), 15: vec3(-1.4, 2.8, -0.3),
+  };
+  const records = new Map<number, Vec3>();
+  const pose = () => {
+    records.clear();
+    for (const [b, l] of Object.entries(local)) {
+      records.set(Number(b), toView(vec3(c.pos.x + l.z, c.pos.y + l.y,
+                                         c.pos.z - l.x)));
+    }
+  };
+  const put = (w: Vec3, out: Vec3) => {
+    out.x = w.x; out.y = w.y; out.z = w.z;
+  };
+  const host: GameHost = {
+    ...NULL_HOST,
+    boneWorld: (at, bone, out) => {
+      const r = at === c.at ? records.get(bone) : undefined;
+      if (!r) return false;
+      put(toWorld(r), out);
+      return true;
+    },
+    viewPoint: (x, y, z, out) => put(toWorld(vec3(x, y, z)), out),
+    viewSpaceOfPoint: (p, out) => { put(toView(p), out); return true; },
+  };
+  const at = (p: Vec3, x: number, y: number, z: number) =>
+    Math.abs(p.x - x) < 1e-9 && Math.abs(p.y - y) < 1e-9
+    && Math.abs(p.z - z) < 1e-9;
+  const show = (p: Vec3) => `(${p.x}, ${p.y}, ${p.z})`;
+  pose();
+
+  check("the four arms read bones 2, 1, 15 and 12 -- 0x1C0, 0x130, 0x910 "
+        + "and 0x760 off the model block",
+        CIVILIAN_SPHERE_BONE_MODE1 === 2 && CIVILIAN_SPHERE_BONE_MODE2 === 1
+        && CIVILIAN_SPHERE_BONE_MODE3_A === 15
+        && CIVILIAN_SPHERE_BONE_MODE3_B === 12);
+  check("CivilianInit leaves every civilian on mode 2, bone 1",
+        c.civ!.sphereCentreMode === CivilianSphereMode.Bone1,
+        String(c.civ!.sphereCentreMode));
+  const view1 = records.get(1)!;
+  check("...and the camera makes bone 1's record differ from its world "
+        + "point on every axis",
+        view1.x !== 40.25 && view1.y !== 11.5 && view1.z !== -60,
+        show(view1));
+
+  CivilianWriteSphereCentre(c, host);
+  check("mode 2: bone 1 in the world", at(c.sphereCentre, 40.25, 11.5, -60),
+        show(c.sphereCentre));
+  c.civ!.sphereCentreMode = CivilianSphereMode.Bone2;
+  CivilianWriteSphereCentre(c, host);
+  check("mode 1: bone 2 in the world",
+        at(c.sphereCentre, 39.4, 16.4, -60.1), show(c.sphereCentre));
+  c.civ!.sphereCentreMode = CivilianSphereMode.Bones12And15;
+  CivilianWriteSphereCentre(c, host);
+  check("mode 3: halfway between bones 12 and 15",
+        at(c.sphereCentre, 40.1, 6, -60.1), show(c.sphereCentre));
+  c.civ!.sphereCentreMode = CivilianSphereMode.Position;
+  CivilianWriteSphereCentre(c, host);
+  check("mode 0: the position", at(c.sphereCentre, 40, 3, -60),
+        show(c.sphereCentre));
+
+  // `MOVSX; CMP EAX, 3; JA`: anything else, negative included, writes
+  // nothing. And the op keeps only the low byte of its operand.
+  c.sphereCentre = vec3(1, 2, 3);
+  for (const m of [4, -1, 0x7f]) {
+    c.civ!.sphereCentreMode = m;
+    CivilianWriteSphereCentre(c, host);
+  }
+  check("a mode past 3, or negative, writes nothing",
+        at(c.sphereCentre, 1, 2, 3), show(c.sphereCentre));
+  T.civilians = {
+    entries: [], items: [], spawns: {},
+    scripts: [[{ op: CivilianOp.SetSphereCentreMode, args: [0x101] }],
+              [{ op: CivilianOp.SetSphereCentreMode, args: [0xff] }]],
+  };
+  CivilianRunScript(c, 0, 0, DRAW_FRAME);
+  const lowByte = c.civ!.sphereCentreMode;
+  CivilianRunScript(c, 1, 0, DRAW_FRAME);
+  check("op 0x17 stores the operand's low byte, read signed",
+        lowByte === CivilianSphereMode.Bone2
+        && c.civ!.sphereCentreMode === -1,
+        `${lowByte}, ${c.civ!.sphereCentreMode}`);
+
+  // [port-only] at the seam: a host with no pose answers nothing, and a bone
+  // arm then writes nothing -- the sphere keeps what it had, as the camera
+  // point does; mode 3 needs both of its bones.
+  for (const m of [CivilianSphereMode.Bone2, CivilianSphereMode.Bone1,
+                   CivilianSphereMode.Bones12And15]) {
+    c.civ!.sphereCentreMode = m;
+    CivilianWriteSphereCentre(c, NULL_HOST);
+    check(`with no posed skeleton, mode ${m} keeps the sphere`,
+          at(c.sphereCentre, 1, 2, 3), show(c.sphereCentre));
+  }
+  records.delete(12);
+  CivilianWriteSphereCentre(c, host);
+  check("...and mode 3 with one of its two bones is no midpoint at all",
+        at(c.sphereCentre, 1, 2, 3), show(c.sphereCentre));
+  c.civ!.sphereCentreMode = CivilianSphereMode.Position;
+  CivilianWriteSphereCentre(c, NULL_HOST);
+  check("mode 0 needs no pose", at(c.sphereCentre, 40, 3, -60),
+        show(c.sphereCentre));
+
+  // **The readers.** `RegisterForShotTest` publishes the switch's point and
+  // `ColiTestSphereAgainstActors` measures every other actor's push against
+  // it. A captor probing at bone 1 finds her; one probing where class 0x30's
+  // formula would put her sphere -- feet plus radius plus one -- does not.
+  pose();
+  c.civ!.sphereCentreMode = CivilianSphereMode.Bone1;
+  CivilianWriteSphereCentre(c, host);
+  const z = spawnZombie(0x7390, 1, "captor");
+  z.visible = true;
+  z.pos = vec3(40, 3, -52);
+  const hitBone = ColiTestSphereAgainstActors(z, 40.25, 13, -60, 1);
+  const hitAt = vec3(G.g_coli_hit_x, G.g_coli_hit_y, G.g_coli_hit_z);
+  const hitFeet = ColiTestSphereAgainstActors(z, 40, 3 + c.bodyRadius + 1,
+                                              -60, 1);
+  check("the actor push measures a civilian at bone 1, where she publishes",
+        hitBone && at(hitAt, 40.25, 11.5, -60), show(hitAt));
+  check("...and not at class 0x30's feet-plus-radius point",
+        !hitFeet && at(c.sphereCentre, 40.25, 11.5, -60),
+        show(c.sphereCentre));
+
+  // **The order inside the update.** The pose hook runs from the draw, near
+  // the top of `CivilianUpdate`, so it traces the sphere the switch wrote on
+  // the *previous* frame; the switch then writes this frame's. Last frame's
+  // sphere is in the wall and this frame's bone 1 is clear of it: the engine
+  // pushes. Tracing after the switch, or rebuilding from the feet, does not.
+  T.civilians = { entries: [], scripts: [], items: [], spawns: {} };
+  T.coli = { files: ["t"], blobs: { wall: WALL_BLOB } };
+  G.g_coli_full_set = ["wall"];
+  c.civ!.wait |= CivilianWait.PushOutOfWorld;
+  c.civ!.scaleTarget = c.bodyRadius;
+  c.civ!.scaleStep = 0;
+  c.pos = vec3(0, 0, 45);
+  c.sphereCentre = vec3(29.5, 8, 45);
+  pose();
+  CivilianUpdate(c, { eye: EYE, dt: 1 / 60, rng: new Rng(3), host,
+                      events: new Events() });
+  check("the pose hook traces last frame's sphere, before the switch",
+        c.pos.x < 0, `pos.x ${c.pos.x}`);
+  check("...and the switch then publishes this frame's bone 1",
+        at(c.sphereCentre, 0.25, 8.5, 45), show(c.sphereCentre));
 }
 
 console.log("\nclass 0x10's play cursor: a corpse rests, it does not replay:");

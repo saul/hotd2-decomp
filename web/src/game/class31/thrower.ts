@@ -18,8 +18,10 @@ import type { Events } from "../../core/events";
 import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
-import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, type ThrowerActor }
-  from "../actor";
+import {
+  ActorFlag, DamageZone, MotionFlag, ThrowerFlag, ThrowerStance,
+  type ThrowerActor,
+} from "../actor";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
   type ClassHandler,
@@ -58,8 +60,8 @@ import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
   from "../class30/head_aim";
 import { ThrowerOnShot } from "./on_shot";
 import {
-  ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
-  ThrowerStateFallToSurface, ThrowerLeave,
+  ThrowerStateCorpseBlink, ThrowerStateCorpseSink, ThrowerStateDeathClip,
+  ThrowerStateFallAndLand, ThrowerStateFallToSurface, ThrowerLeave,
 } from "./death";
 import {
   ThrowerStateGetUp, ThrowerStateHitReaction, ThrowerStateKnockedTumbling,
@@ -545,9 +547,9 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Death:
       return ThrowerStateDeathClip(obj);
     case ThrowerState.Corpse:
-      return ThrowerStateCorpse(obj, dt, rng, false);
+      return ThrowerStateCorpseSink(obj, dt, rng);
     case ThrowerState.CorpseBlink:
-      return ThrowerStateCorpse(obj, dt, rng, true);
+      return ThrowerStateCorpseBlink(obj, dt, rng);
     // Slot 6 holds `ThrowerLeave`, which nothing ever enters as a state. It is
     // here so that an actor forced into it by a descriptor still leaves.
     case ThrowerState.Leave:
@@ -641,6 +643,13 @@ const BODY_RADIUS_OTHER = 4.0;
  * above the street stood in mid-air instead of dropping into it.
  */
 export function EnemyThrowerInit(obj: ThrowerActor): void {
+  // `ActorBuildSkinnedModel` at `0x00449686`, then `MOV EDX, [ESI+0x1F8]` /
+  // `OR EDX, 0x4` (`83ca04`) at `0x00449694` / `MOV [ESI+0x1F8], EDX`: the
+  // same bit `EnemyZombieInit` raises at `0x00452E21`, so a thrower's corpse
+  // ring sits on the traced floor and not at the body's own y --
+  // `SpawnGroundRingEffect` (`FUN_00407DA0`) tests it at `0x00407DCD`.
+  // `[proved]`
+  obj.motionFlags |= MotionFlag.TraceGround;
   obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
@@ -807,7 +816,8 @@ export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
  * The counts **only on a despawn**, and that is not an omission. Class 0x31's
  * death is four states and it runs the two retires where the exe does —
  * `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) drops the alive count as the
- * fall opens, `ThrowerStateCorpse` the present count when the body is done —
+ * fall opens, `ThrowerEnterCorpseState` (`FUN_0044D0A0`) the present count
+ * as the body becomes a corpse —
  * so a thrower that has merely died is *present but not alive*, exactly as the
  * engine leaves it, and a sweep that retired both here would collapse the one
  * window class 0x30 has already lost.

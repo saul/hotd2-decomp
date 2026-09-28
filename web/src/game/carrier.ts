@@ -193,6 +193,16 @@ export function RotYXZ(y: number, x: number, z: number): Rot3 {
 }
 
 /**
+ * `RotZ(z); RotY(y); RotX(x)` -- the order `RescueTargetHeldState`
+ * (`FUN_00451980`) builds from the actor's own angles before handing the
+ * matrix to `MatrixGetAngles`. `[port-only]`: the engine builds it on the
+ * stack.
+ */
+export function RotZYX(z: number, y: number, x: number): Rot3 {
+  return mul3(mul3(rotZ(z), rotY(y)), rotX(x));
+}
+
+/**
  * `CarrierBakeWorldPose` — `FUN_0045D920`. The step off: the carrier's matrix
  * times the rider's own, read back into the rider's position and angles.
  *

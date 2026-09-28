@@ -135,6 +135,12 @@ export const CLASS31_LITERAL_MOTIONS = new Set([
   0x005,
   // `ThrowerStateFallAndLand` (state 2)'s get-up, for every type but 0x17.
   0x11b,
+  // `ThrowerStateCorpseSink` and `ThrowerStateCorpseBlink` (states 4 and 5):
+  // `CMP dword ptr [ESI+0x1b4], 0x3a6` at `0x0044A9E6` and `0x0044AB89`, the
+  // clip that lifts the corpse's ring trace by 5.5. Compared against rather
+  // than played, and already reached through the motion sets of behaviour
+  // sets 0 and 3 -- but named as a literal all the same.
+  0x3a6,
 ]);
 
 /**

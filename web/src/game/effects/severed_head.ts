@@ -26,6 +26,7 @@ import type { Events } from "../../core/events";
 import { G } from "../globals";
 import { QueryGroundHeightAt } from "../coli";
 import { vec3, type Vec3 } from "../vec";
+import { SpawnRingEffectAtPose } from "./ring_effect";
 
 /** `+0x5C`, `0xBCA740DA`. */
 const GRAVITY = -0.020416665822267532;
@@ -47,6 +48,14 @@ const LINGER_FRAMES = 0x78;
 const SINK_PER_FRAME = 0.04;
 /** Both spins lose a tenth a frame once it is down. */
 const SPIN_DECAY = 10;
+/**
+ * The ring task's scales at the head's two `SpawnRingEffectAtPose`
+ * (`FUN_00408370`) calls: `PUSH 0x3E800000` (`680000803e`, 0.25) at
+ * `0x0040A3BD` for each bounce, `PUSH 0x3F000000` (`680000003f`, 0.5) at
+ * `0x0040A445` for the settle.
+ */
+export const SEVERED_HEAD_RING_BOUNCE = 0.25;
+export const SEVERED_HEAD_RING_SETTLE = 0.5;
 
 /** The two head models whose bounce is a clink rather than a splat. */
 const HARD_HEAD_SLOTS = new Set([0x2015, 0x1dc1]);
@@ -127,7 +136,16 @@ export function SeveredHeadUpdate(h: SeveredHead, rng: Rng,
     // `MatrixRotateY(camera yaw)` applied to `(0, 0, -0.2)`: the head is
     // thrown along the camera's own forward, which is always away from the
     // viewer whichever way the shot came from.
-    const a = G.g_camera_yaw_bams * ((Math.PI * 2) / 65536);
+    //
+    // **The camera block's yaw**, `g_camera_block_yaw_bams`: `MOV EAX,
+    // [EDX*4 + 0x9a60d0]` at `0x0040A2A6` with `EDX = g_camera_index * 0x69`,
+    // so `0x009A60D0 + index * 0x1A4`. The block looks down its own -z, so
+    // `(0, 0, -0.2)` turned by its yaw is forward. This read
+    // `g_camera_yaw_bams` (`0x009C71F0`), the gameplay eye's heading, which
+    // the scene hooks write half a turn from the block's -- so the port threw
+    // the heads back toward the viewer (`[likely]`: true wherever the hook in
+    // force keeps that half turn).
+    const a = G.g_camera_block_yaw_bams * ((Math.PI * 2) / 65536);
     h.vel.x = AWAY_SPEED * Math.sin(a);
     h.vel.z = AWAY_SPEED * Math.cos(a);
     // `rand() & 0x80000001` is a signed `% 2`; `(x * -2 + 1)` turns 0/1 into
@@ -148,11 +166,27 @@ export function SeveredHeadUpdate(h: SeveredHead, rng: Rng,
     if (ground >= h.pos.y + h.vel.y) {
       h.pos.y = ground;
       h.vel.y *= BOUNCE;
+      // **Every bounce of a soft head leaves a ring**, before its noise:
+      // `CALL 0x00408370` at `0x0040A3CB`, reached only past the two
+      // hard-slot tests at `0x0040A392`/`0x0040A39F` -- a clinking head
+      // leaves none. The pose is built on the stack from `obj+0x40`, the
+      // floor just traced and `obj+0x48`, with the head's own spin yaw
+      // `obj+0x68` in `p[4]`; `p[3]` is whatever the stack held and
+      // `SpawnRingEffectAtPose` does not read it.
+      if (!HARD_HEAD_SLOTS.has(h.slot)) {
+        SpawnRingEffectAtPose({ x: h.pos.x, y: ground, z: h.pos.z, yaw: h.yaw },
+                              SEVERED_HEAD_RING_BOUNCE);
+      }
       events?.emit("sound.play", { id: bounceSound(h) });
       if (Math.abs(h.vel.y) <= REST_SPEED) {
         h.pos.y = ground;
         h.gravity = 0;
         h.vel.x = 0; h.vel.y = 0; h.vel.z = 0;
+        // ...and the settle leaves a second, twice the size, whatever the
+        // slot: `CALL 0x00408370` at `0x0040A45F` has no slot test in front
+        // of it.
+        SpawnRingEffectAtPose({ x: h.pos.x, y: ground, z: h.pos.z, yaw: h.yaw },
+                              SEVERED_HEAD_RING_SETTLE);
         h.phase = SeveredHeadPhase.Settled;
         h.timer = LINGER_FRAMES;
       }

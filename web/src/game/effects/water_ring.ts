@@ -3,13 +3,17 @@
  * `SpawnWaterRing` at `0x004567C0` and its task, `WaterRingUpdate` at
  * `0x00456880`.
  *
- * Six routines call it, always twice, at sizes 1.0 and 0.5. Four of them were
- * read for this and reach it only when `g_coli_hit_surface` is 5 or 0x37, the
- * two surfaces `PlayImpactSoundForMaterial` gives the water ricochet to:
+ * Six routines call it, always twice, at sizes 1.0 and 0.5, and always on the
+ * floor traced twenty units under the actor. Four reach it only when
+ * `g_coli_hit_surface` is 5 or 0x37, the two surfaces
+ * `PlayImpactSoundForMaterial` gives the water ricochet to:
  * `ZombieDeathEffectCueTick`, `ZombieDeathLandingEffect`,
- * `ZombieStrikeStartSplash` and `ZombieStrikeFrameSplash` `[proved]`. The
- * surfacing entrance and the captor script were not read here `[open]`. That
- * it is a ripple is `[likely]`, from where it is drawn and how: flat
+ * `ZombieStrikeStartSplash` and `ZombieStrikeFrameSplash`. The other two,
+ * `ZombieStateSurfaceOnCameraCue` and `ZombieStateTargetMotionScript`, reach
+ * it on the wading clip `0xB8`'s play frame 0x1B with no surface test at all
+ * -- see `ZombieWadeSplash` in `class30/splash.ts`. `[proved]`, all twelve
+ * call sites, which are every `E8` rel32 in `.text` aimed at `0x004567C0`.
+ * That it is a ripple is `[likely]`, from where it is drawn and how: flat
  * (`MatrixScale(s, 0.2, s)`), widening 0.02 a frame and fading out over one
  * second. The model is `common.bin` 181, slot `0xE23`.
  *

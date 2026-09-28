@@ -64,6 +64,29 @@ export function LerpWeighted(a: number, b: number, num: number,
 }
 
 /**
+ * `LerpAngleShortWay` — `FUN_00401EC0`. {@link LerpWeighted} for a BAMS
+ * angle, the short way round:
+ *
+ * ```c
+ * u = (b - a) & 0xFFFF;
+ * if (u < 0x8000) return (int)(u * num) / (den + num) + a;
+ * return a - (int)((0x10000 - u) * num) / (den + num);
+ * ```
+ *
+ * All integer, `IDIV` truncating toward zero, and the result is **not**
+ * masked -- it is `a` plus or minus the step, in whatever range `a` was.
+ * `[proved]` from the decompilation, whose four parameters are all `int`.
+ * Callers: `CameraFollowPlayerMidpoint` (`FUN_0040C9C0`, three) and
+ * `RescueTargetFreedDrift` (`FUN_00451F40`, one).
+ */
+export function LerpAngleShortWay(a: number, b: number, num: number,
+                                  den: number): number {
+  const u = (b - a) & 0xffff;
+  if (u < 0x8000) return Math.trunc((u * num) / (den + num)) + a;
+  return a - Math.trunc(((0x10000 - u) * num) / (den + num));
+}
+
+/**
  * The angle helpers live in `core/bams.ts` and are re-exported here.
  *
  * There is one definition of a BAMS turn in the player, and `core/` is where

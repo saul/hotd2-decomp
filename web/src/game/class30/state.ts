@@ -65,6 +65,7 @@
  *   job of its own; it is recorded here rather than half-done.
  */
 import type { ActorRef } from "../actor";
+import { MatIdentity, type Mat } from "../matrix";
 import { vec3, type Vec3 } from "../vec";
 
 /**
@@ -105,9 +106,20 @@ export interface HeadAimWords {
    * at `0x0045675E`), so a corpse's head goes on aiming from where it was
    * when it died, re-projected through wherever the camera has since moved.
    * Zero until the first draw: the allocation clears it, and the view-space
-   * origin is the eye.
+   * origin is the lens.
    */
   headRecord: Vec3;           // +0x394, bone 2's record +0x68
+  /**
+   * `[port-only]` — the world-to-view of the frame whose draw owes
+   * {@link headRecord}: `g_camera_world_to_view` as that frame's camera actor
+   * built it, which is the matrix the engine's draw had on the stack when it
+   * wrote the record. The port can only take the record a tick later, from
+   * the pose the renderer drew, and by then the camera actor has built the
+   * next frame's view; taken through that one, the record would come back as
+   * exactly the posed point, where the engine's comes back displaced by the
+   * frame's camera move.
+   */
+  headRecordView: Mat;
   /**
    * `[port-only]` — the last frame's draw wrote {@link headRecord}.
    *
@@ -134,6 +146,7 @@ export function makeHeadAimWords(): HeadAimWords {
     headPitch: 0,
     headYaw: 0,
     headRecord: vec3(),
+    headRecordView: MatIdentity(),
     headRecordDue: false,
     headAimed: false,
   };

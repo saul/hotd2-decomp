@@ -5,9 +5,9 @@
  * camera block, the driver eases it, and `UpdateSceneViewAndLight` builds the
  * view matrices out of the block's eye and **angles** -- all inside
  * `CameraActorTick`, at the head of `GameUpdate` (`game/camera/`). What is
- * left here is the draw: the three.js camera placed from
- * `G.g_camera_view_to_world`, the matrix every task after the camera actor
- * read the frame through, and the rails overlay.
+ * left here is the draw: the three.js camera placed from the view-to-world
+ * matrix of the block `G.g_camera_index` names, the matrix every task after
+ * the camera actor read the frame through, and the rails overlay.
  *
  * ```
  * game:    CameraTake   -- the camera as the last draw left it, for render/
@@ -58,15 +58,20 @@ export class CameraRig {
 
   /**
    * The draw: the three.js camera placed from the view the port built this
-   * frame -- `g_camera_blocks`, `T(eye) Ry(yaw) Rx(pitch) Rz(roll)` of the
-   * block after the shake's nod. The matrix stack's row-vector layout is
-   * three.js's column-major `elements`, so the sixteen floats cross as they
-   * are. A frame that runs no tick draws what the last tick built.
+   * frame -- `g_camera_blocks[g_camera_index]`, `T(eye) Ry(yaw) Rx(pitch)
+   * Rz(roll)` of the block after the shake's nod, which is block 2 under
+   * scene state (1, 3) and block 0 otherwise (`game/camera/view.ts`). The
+   * matrix stack's row-vector layout is three.js's column-major `elements`,
+   * so the sixteen floats cross as they are. A frame that runs no tick draws
+   * what the last tick built.
    */
   draw(ctx: RenderContext): void {
     if (!ctx.walker || !this.scripted) return;
     const cam = ctx.camera;
-    _view.fromArray(G.g_camera_view_to_world);
+    // `CameraBlockViewToWorld(g_camera_index)`, read rather than called: the
+    // index is only ever 0 or 2, the two blocks the port keeps.
+    _view.fromArray(G.g_camera_index === 2 ? G.g_camera_block2_view_to_world
+      : G.g_camera_view_to_world);
     _view.decompose(cam.position, cam.quaternion, _scale);
     cam.updateMatrixWorld(true);
     this.pose.eye.copy(cam.position);

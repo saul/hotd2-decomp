@@ -127,7 +127,7 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // which goes with the item.
   HeadAimBeginDraw(obj, obj.zom, host);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
-  HeadAimEndDraw(obj, obj.zom);
+  HeadAimEndDraw(obj, obj.zom, host);
   // `PUSH 0x40800000; CALL 0x00409b70` at `0x00453475`, on every path through
   // the routine and after the draw (`ZombieAdvanceMotion`, `0x00453457`): the
   // camera point lifted by 4 and the actor filed as a candidate. A death

@@ -44,9 +44,11 @@ import { CamStashPathRange, CameraPlayStashedPath, CameraStepRailTick }
 import { CameraUpdateHook, EvtActionHandler }
   from "../src/game/camera/driver";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
-import { UpdateSceneViewAndLight } from "../src/game/camera/view";
-import { CameraFromViewAngles } from "../src/game/camera/hooks";
-import { CameraBlocksReset } from "../src/game/camera/actions";
+import { CameraBlockViewToWorld, UpdateSceneViewAndLight }
+  from "../src/game/camera/view";
+import { CameraFromViewAngles, CameraHoldEyeTick } from "../src/game/camera/hooks";
+import { CameraBlocksReset, CheckpointResetCamera }
+  from "../src/game/camera/actions";
 import { ChooseDeathMotionDirectional } from "../src/game/combat/resolve_hit";
 import { FishSpawnWaterSplash, WaterSplashUpdate }
   from "../src/game/effects/fish";
@@ -54,7 +56,7 @@ import { OwlResolveShot } from "../src/game/class43";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor,
   type FishActor }
   from "../src/game/actor";
-import { CameraDriverSelectMode, CameraMode }
+import { CameraDriverSelectMode, CameraMode, CameraResetForPathShot }
   from "../src/game/camera/mode";
 import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
   from "../src/game/class13";
@@ -568,7 +570,7 @@ import {
   RISING_DOOR_CEILING, RISING_DOOR_CEILING_OTHER, RISING_DOOR_RATTLE_SLOT,
   RISING_DOOR_STEP_OTHER,
 } from "../src/game/class44";
-import { SpawnPropContainers, SpawnSlotActors }
+import { SpawnPropContainers, SpawnSlotActor, SpawnSlotActors }
   from "../src/game/director";
 import {
   SetPieceState, SetPiecePropUpdate,
@@ -19196,6 +19198,7 @@ console.log("\n`g_class_handlers`, filled by the classes themselves:");
     [SpawnClass.ScriptedProp, "0x13 script-driven prop / the boat"],
     [SpawnClass.CarriedZombie, "0x18 the zombie that rides it"],
     [SpawnClass.Vehicle, "0x26 subtype 2, the boat the player rides"],
+    [SpawnClass.PathRidingProp, "0x28 stage 1's two burning cars"],
     [SpawnClass.SetPieceProp, "0x24 set piece"],
     [SpawnClass.ScriptedHumanoid, "0x25 scripted humanoid"],
     [SpawnClass.Zombie, "0x30 zombie"],
@@ -22911,6 +22914,53 @@ console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
     check("`CameraBlocksReset` zeroes it with the other three",
           G.g_camera_block2_yaw_bams === 0
           && G.g_camera_block2_eye.x === 0 && G.g_camera_block2_target.x === 0);
+  }
+
+  // Scene state (1, 3) **draws** camera block 2. Its installer,
+  // `CameraInstallViewAngles` (`FUN_004039D0`), writes `g_camera_index` 2
+  // (`MOV dword ptr [0x009c6f00], 0x2` at `0x004039D5`) -- and the checkpoint
+  // every block opens with enters (1, 3) -- until a starter's
+  // `CameraResetForPathShot` (`MOV [0x009c6f00], EAX` at `0x00403209`, EAX 0)
+  // puts it back. `UpdateSceneViewAndLight` nods only the block the index
+  // names (`CMP EBP, [0x009c6f00]` at `0x00401F4E`) and the frame is drawn
+  // from that block's matrices, so a cutscene is block 0's eye looking at
+  // block 0's look-at whatever block 0's angles say.
+  {
+    ResetGameGlobals();
+    check("a scene opens on camera block 0", G.g_camera_index === 0);
+    CheckpointResetCamera();
+    check("the checkpoint's (1, 3) makes camera block 2 the drawn block",
+          G.g_camera_index === 2, String(G.g_camera_index));
+    // Block 0 looking down -z; its look-at then moved to +x with no angle
+    // written, as the boss-name banner moves it.
+    SeatCamera(vec3(0, 0, 0), vec3(0, 0, -10));
+    const yaw0 = G.g_camera_block_yaw_bams;
+    const pitch0 = G.g_camera_block_pitch_bams;
+    G.g_camera_block_target = vec3(10, 0, 0);
+    CameraActorTick();                     // stamps (1, 3): the copy runs next
+    G.g_screen_shake_pitch = 47;
+    CameraActorTick();
+    check("under (1, 3) the shake's nod lands on block 2, never on block 0",
+          Math.abs(G.g_camera_block_pitch_bams - pitch0) <= 1
+          && Math.abs(G.g_camera_block_yaw_bams - yaw0) <= 1
+          && G.g_camera_block2_pitch_bams !== G.g_camera_block_pitch_bams,
+          `block0 ${G.g_camera_block_pitch_bams} (was ${pitch0}) block2 `
+          + `${G.g_camera_block2_pitch_bams}`);
+    G.g_screen_shake_pitch = 0;
+    CameraActorTick();
+    const v2w = CameraBlockViewToWorld(G.g_camera_index);
+    // The camera looks down its own -z: row 2 of the view-to-world, negated.
+    check("...and the frame is drawn looking at block 0's look-at, though "
+          + "block 0's own heading is a quarter turn away",
+          -v2w[8] > 0.9999 && Math.abs(v2w[9]) < 1e-4
+          && Math.abs(v2w[10]) < 1e-2
+          && Math.abs(G.g_camera_block_yaw_bams - yaw0) <= 1,
+          Array.from(v2w.slice(8, 11)).join());
+    CameraResetForPathShot();
+    check("a starter's `CameraResetForPathShot` hands the frame back to block 0",
+          G.g_camera_index === 0
+          && CameraBlockViewToWorld(G.g_camera_index)
+             === G.g_camera_view_to_world);
   }
 }
 
@@ -31982,12 +32032,14 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("the slide flies the camera block along the record's path",
         G.g_camera_block_eye.x === 2 && G.g_camera_block_target.z === 10,
         JSON.stringify(G.g_camera_block_eye));
-  // **Eye and target, no angles**: the view is built from the angles, so the
-  // flight carries the eye and keeps the heading it found. `CamEvalPath7`
-  // writes six floats and the banner never calls `CamBlockSetAnglesFromLookAt`.
+  // **Eye and target, no angles**: `CamEvalPath7` writes six floats and the
+  // banner never calls `CamBlockSetAnglesFromLookAt`, so block 0's view keeps
+  // the heading it found. (Under scene state (1, 3), where stage 1's banner
+  // runs, the frame is drawn from block 2 instead, which turns onto the
+  // flight's look-at -- `render.test.ts`, "the boss-name banner's flight".)
   UpdateSceneViewAndLight();
-  check("...and leaves the block's heading alone, so the view keeps it and "
-        + "sits at the banner's eye",
+  check("...and leaves block 0's heading alone, so block 0's view keeps it "
+        + "and sits at the banner's eye",
         [G.g_camera_block_yaw_bams, G.g_camera_block_pitch_bams,
          G.g_camera_block_roll_bams].join() === headingAtSeat
         && G.g_camera_view_to_world[12] === Math.fround(2)
@@ -33826,8 +33878,10 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
     ResetGameGlobals();
     SetGameTables(CHARS);
     EnterPlay();
-    // What `GameSystem.update` writes from the camera each tick, and the
-    // spawn opcodes read on the next.
+    // A gameplay eye **at** the lens, which only a fixed eye height set to
+    // the lens's own would give: it keeps the arithmetic below readable. On a
+    // path the two are fifteen apart, and that case -- the page's -- is
+    // driven through the hook that writes it, further down.
     G.g_camera_eye.x = eye.x; G.g_camera_eye.y = eye.y; G.g_camera_eye.z = eye.z;
     head.x = 0; head.y = 12; head.z = 50;
     const z = spawnZombie(0x9400, 1, "aim", { pos: vec3(0, 0, 50), flags });
@@ -33839,7 +33893,7 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
   const draw = (z: ZombieActor): void => {
     HeadAimBeginDraw(z, z.zom, host);
     ActorRunNodeDrawHooks(z, ZombieDrawBonePart, fr);
-    HeadAimEndDraw(z, z.zom);
+    HeadAimEndDraw(z, z.zom, host);
   };
   const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
 
@@ -33950,17 +34004,69 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
   const t = zombie();
   G.g_camera_block_yaw_bams = 0x8000;
   const far = vec3(0, 10, 101.5);
-  const one = ActorHeadAimAngles(t, far, eye).yaw;
+  const one = ActorHeadAimAngles(t, far).yaw;
   G.g_max_attackers = 2;
   t.attackPermit = 0;
-  const p0 = ActorHeadAimAngles(t, far, eye).yaw;
+  const p0 = ActorHeadAimAngles(t, far).yaw;
   t.attackPermit = 1;
-  const p1 = ActorHeadAimAngles(t, far, eye).yaw;
+  const p1 = ActorHeadAimAngles(t, far).yaw;
   const off = Math.trunc(Math.atan2(1.2, 100) * 65536 / (Math.PI * 2));
   check("two attackers aim 1.5 ahead and 1.2 aside, one side per permit",
         one === -0x8000 && Math.abs(p0 - (0x8000 - off)) <= 1
         && Math.abs(p1 - (-0x8000 + off)) <= 1,
         `${one} ${p0} ${p1} (off ${off})`);
+
+  // The page's case. On a path the gameplay eye is fifteen **below** the
+  // lens -- `CameraHoldEyeTick` writes `g_camera_eye.y = pose.y - 15.0`
+  // (`0x004C4398`) -- while the view, and the `ClassFrame`'s eye, are the
+  // pose's own. `ActorHeadAimAngles` reads `g_camera_eye` in both branches
+  // (`0x00453DA3`, `0x00453E66..0x00453E8E`) and adds the fifteen back, so a
+  // head level with the lens looks level into it. Reading the frame's eye --
+  // the lens -- put the target fifteen above the camera, and every head in
+  // the game looked up.
+  {
+    const lens = vec3(0, 25, 0);
+    const cam = vec3(lens.x, lens.y, lens.z);
+    const lensHost: GameHost = {
+      ...host,
+      cameraMatrices: (w2v, v2w) => {
+        for (let i = 0; i < 16; i++) w2v[i] = v2w[i] = i % 5 === 0 ? 1 : 0;
+        w2v[12] = -cam.x; w2v[13] = -cam.y; w2v[14] = -cam.z;
+        v2w[12] = cam.x; v2w[13] = cam.y; v2w[14] = cam.z;
+        return true;
+      },
+    };
+    const lensFrame: ClassFrame = { eye: cam, dt: 1 / 60, rng: new Rng(1),
+                                    host: lensHost };
+    const drawAt = (z: ZombieActor): void => {
+      HeadAimBeginDraw(z, z.zom, lensHost);
+      ActorRunNodeDrawHooks(z, ZombieDrawBonePart, lensFrame);
+      HeadAimEndDraw(z, z.zom, lensHost);
+    };
+    const z = zombie();
+    G.g_cam_path_eye.x = lens.x; G.g_cam_path_eye.y = lens.y;
+    G.g_cam_path_eye.z = lens.z;
+    CameraHoldEyeTick();
+    check("the path hook puts the gameplay eye fifteen below the lens",
+          G.g_camera_eye.y === lens.y - 15, `${G.g_camera_eye.y}`);
+    head.x = 0; head.y = lens.y; head.z = 50;
+    for (let i = 0; i < 80; i++) drawAt(z);
+    check("a head level with the lens settles level: it looks into the "
+          + "camera, not fifteen above it",
+          (z.zom.headPitch & 0xffff) === 0 && (z.zom.headYaw & 0xffff) === 0x8000,
+          `pitch ${s16(z.zom.headPitch)} yaw ${z.zom.headYaw.toString(16)}`);
+
+    // The record is in the view of the frame that drew it. Between two
+    // frames the camera backs off ten: the engine's record, taken in the old
+    // view and read back through the new, is the head moved ten with it.
+    drawAt(z);
+    cam.z = lens.z - 10;
+    drawAt(z);
+    check("the record is taken in the view its draw used, not the next "
+          + "frame's",
+          z.zom.headRecord.x === 0 && z.zom.headRecord.y === 0
+          && z.zom.headRecord.z === 50, JSON.stringify(z.zom.headRecord));
+  }
 
   // Class 0x31: the same routine, behind the hook's own surface test. A
   // thrower on a wall does not look at you; on the ceiling it does.
@@ -33972,7 +34078,7 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
       | bits;
     HeadAimBeginDraw(th, th.thr, host);
     ActorRunNodeDrawHooks(th, ThrowerDrawBonePart, fr);
-    HeadAimEndDraw(th, th.thr);
+    HeadAimEndDraw(th, th.thr, host);
     return th.thr.headAimed;
   };
   const ground = aims(0), onWall = aims(wall), onCeiling = aims(ceiling);
@@ -34996,6 +35102,132 @@ console.log("\nEnemyZombieInitByCharType's mesh hands:");
         JSON.stringify(resolved));
   T.coli = null;
   SetGameTables(CHARS);
+}
+
+// -- class 0x28: stage 1's two burning cars, thrown once ---------------------
+
+console.log("\nclass 0x28 -- held on its route until cp 0x2F, thrown once, "
+            + "killed:");
+{
+  // Stage 1 blocks 5, 11 and 14 `spawn_placed` two class-0x28 objects,
+  // `obj+0x11C` 0 and 1, that `PathRidingPropUpdate` (`FUN_00432610`) seats
+  // on `op_` slots 0x145 and 0x146 at the frames `g_class28_route_table`
+  // (`0x00589AE0`) freezes them on, 671 and 667, and throws along the rest
+  // of the path the frame camera path 0x2F reaches that frame; it kills them
+  // once `g_cam_path_frame` reaches `g_cam_path_length[slot]`, 725 and 765.
+  //
+  // The port had no class 0x28: `render/rigs.ts` drew the path at
+  // `min(len, camera frame)` of whatever camera was playing, so the car slid
+  // along the extrapolated path before the throw and was thrown again by
+  // every later camera move past frame 671 -- the user's "start in the wrong
+  // place" and "repeat their arc". Driven here from the director's entry for
+  // a walker spawn, `SpawnSlotActor`, and `GameUpdate`; the path stub
+  // answers with the frame it was asked for in `x` and the slot in `y`, so
+  // the pose says which evaluation made it.
+  const rng = new Rng(28);
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(CHARS);
+  const asked: [number, number][] = [];
+  const host: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => {
+      asked.push([slot, frame]);
+      return { x: frame, y: slot, z: -frame, pitch: 0, yaw: frame * 16,
+               roll: 0 };
+    },
+  };
+  const spawn = (at: number, hp: number) => ({
+    at, class: 0x28, hp, pos: [0, 0, 0] as [number, number, number],
+    orient: [0, 0, 0] as [number, number, number], flags: 0,
+  });
+  const listed = [spawn(24472, 0), spawn(24512, 1)];
+  const cars = () => G.g_object_list.filter(
+    (o) => o.cls === (0x28 as SpawnClass) && !o.despawned);
+  const car = (at: number) => cars().find((o) => o.at === at);
+  const frame = (cam: number, f: number) => {
+    G.g_active_cam_path = cam;
+    G.g_cam_path_frame = f;
+    for (const sp of listed) SpawnSlotActor(sp, rng);
+    GameUpdate(EYE, 1 / 60, host, rng);
+  };
+
+  // The boss block's arrival camera, well before the throw.
+  frame(0x2f, 121);
+  check("a class-0x28 spawn record builds a class-0x28 actor, one per spawn",
+        cars().length === 2 && car(24472)?.hp === 0 && car(24512)?.hp === 1,
+        cars().map((o) => `${o.at}:${o.hp}`).join(","));
+  check("its first frame seats it on its route at the table's freeze frame, "
+        + "not the camera's",
+        car(24472)?.pos.x === 671 && car(24472)?.pos.y === 0x145
+        && car(24512)?.pos.x === 667 && car(24512)?.pos.y === 0x146,
+        JSON.stringify(cars().map((o) => o.pos)));
+  // Any camera, any frame: nothing moves it until cp 0x2F reaches the freeze.
+  asked.length = 0;
+  for (const [cam, f] of [[0x2f, 400], [0x2f, 590], [0x32, 700], [0x32, 720],
+                          [0x31, 690], [0x2f, 666]] as const) {
+    frame(cam, f);
+  }
+  check("...and holds it there on every camera until cp 0x2F reaches it -- "
+        + "another camera's frame 700 throws nothing",
+        car(24472)?.pos.x === 671 && car(24512)?.pos.x === 667
+        && asked.length === 0,
+        `${car(24472)?.pos.x} ${car(24512)?.pos.x} asked ${asked.length}`);
+  frame(0x2f, 667);
+  check("cp 0x2F frame 667 throws route 1 (freeze 667) and not route 0 (671)",
+        car(24512)?.sub === 2 && car(24512)?.pos.x === 667
+        && car(24472)?.sub === 1,
+        `${car(24512)?.sub} ${car(24472)?.sub}`);
+  frame(0x2f, 671);
+  frame(0x2f, 700);
+  check("once thrown, the pose is the path at g_cam_path_frame",
+        car(24472)?.pos.x === 700 && car(24472)?.pos.z === -700
+        && car(24472)?.yaw === 700 * 16 && car(24512)?.pos.x === 700,
+        `${car(24472)?.pos.x} ${car(24512)?.pos.x}`);
+  // Thrown, the pose follows whichever camera is playing -- no camera test.
+  frame(0x32, 710);
+  check("...whichever camera is playing (the kill and the ride have no "
+        + "camera test)", car(24472)?.pos.x === 710,
+        `${car(24472)?.pos.x}`);
+  frame(0x2f, 725);
+  check("route 0 is killed on g_cam_path_length[0x145], 725",
+        car(24472) === undefined && car(24512) !== undefined,
+        cars().map((o) => o.at).join(","));
+  frame(0x2f, 765);
+  check("...and route 1 on g_cam_path_length[0x146], 765",
+        cars().length === 0, cars().map((o) => o.at).join(","));
+  // The post-fight cutscene: cp 50 runs 0..680 and 681..950 while the
+  // script still lists both spawns. Nothing is rebuilt and nothing is thrown.
+  asked.length = 0;
+  for (let f = 660; f <= 730; f += 5) frame(0x32, f);
+  check("a later camera through frames 660..730 plays no throw: the pool "
+        + "holds no class 0x28 and nothing evaluated a path",
+        cars().length === 0 && asked.length === 0,
+        `${cars().length} cars, ${asked.length} evaluations`);
+
+  // `g_app_state` 10's arm: the literal pose, and its own handler.
+  const mod = await import("../src/game/class28").catch(() => null);
+  check("class 0x28's module exists", mod !== null);
+  if (mod) {
+    ResetGameGlobals();
+    const a = ActorSpawn(24512, 0x28 as SpawnClass, -1, "fixed",
+                         { hp: 1 }, rng);
+    G.g_app_state = 10;
+    G.g_active_cam_path = 7;
+    G.g_cam_path_frame = 0;
+    mod.PathRidingPropUpdate(a as never, { eye: EYE, dt: 1 / 60, rng,
+                                           host });
+    check("in g_app_state 10 the pose is g_class28_fixed_poses[1], as words",
+          Math.abs(a.pos.x - -1021.8939819335938) < 1e-9
+          && Math.abs(a.pos.y - 1.1816699504852295) < 1e-9
+          && a.pitch === -2607 && a.yaw === 0x8000 && a.roll === -0x4000,
+          `${a.pos.x},${a.pos.y},${a.pos.z} ${a.pitch},${a.yaw},${a.roll}`);
+    G.g_active_cam_path = 8;
+    mod.PathRidingPropFixedPoseUpdate(a as never);
+    check("...and PathRidingPropFixedPoseUpdate kills it on cp 8",
+          a.despawned === true);
+    ResetGameGlobals();
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

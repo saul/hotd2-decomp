@@ -8,7 +8,8 @@
 import type { Context, System, Tick } from "../core/system";
 import type { RenderContext } from "../render/context";
 import type { CameraRig } from "../render/camera";
-import { CameraReseatFromFrame } from "../game/camera/view";
+import { CameraBlockViewToWorld, CameraBlockWorldToView, CameraReseatFromFrame }
+  from "../game/camera/view";
 import type { CamPaths } from "../game/camera/curve";
 import { MatCopy, MatrixTransformPoint } from "../game/matrix";
 import { GameUpdate } from "../game/director";
@@ -97,12 +98,14 @@ export class GameSystem implements System {
       this.backend?.boneMatrix?.(at, bone, out) ?? false,
     boneSphere: (at, bone, out) =>
       this.backend?.boneSphereWorld?.(at, bone, out) ?? null,
-    // The two matrices of the engine's camera block, as
-    // `UpdateSceneViewAndLight` built them in this tick's `CameraActorTick`.
+    // The two matrices of the camera block `g_camera_index` names, as
+    // `UpdateSceneViewAndLight` built them in this tick's `CameraActorTick`
+    // -- `g_camera_world_to_view[g_camera_index]` and
+    // `g_camera_blocks[g_camera_index]`, the pair the engine's readers index.
     // The carried props cross between the spaces with them.
     cameraMatrices: (w2v, v2w) => {
-      MatCopy(w2v, G.g_camera_world_to_view);
-      MatCopy(v2w, G.g_camera_view_to_world);
+      MatCopy(w2v, CameraBlockWorldToView(G.g_camera_index));
+      MatCopy(v2w, CameraBlockViewToWorld(G.g_camera_index));
       return true;
     },
     // `CamEvalObjectPath6`. The curves are in the camera bundle and their
@@ -115,14 +118,14 @@ export class GameSystem implements System {
     // The camera looks down its own local -Z, which is where the player is.
     aimPoint: (ahead, out) => {
       _p.x = 0; _p.y = 0; _p.z = -ahead;
-      MatrixTransformPoint(G.g_camera_view_to_world, _p, out);
+      MatrixTransformPoint(CameraBlockViewToWorld(G.g_camera_index), _p, out);
     },
     // A point in the camera's own space, in world coordinates. The engine
     // unprojects a screen offset at a depth to get one -- see
     // `ThrowerPickLandingPoint`.
     viewPoint: (x, y, z, out) => {
       _p.x = x; _p.y = y; _p.z = z;
-      MatrixTransformPoint(G.g_camera_view_to_world, _p, out);
+      MatrixTransformPoint(CameraBlockViewToWorld(G.g_camera_index), _p, out);
     },
     // `obj+0x70/74/78`: the actor's tracked point in the camera's own space,
     // handed over exactly as the engine holds it. Camera-local -Z is forward
@@ -138,13 +141,14 @@ export class GameSystem implements System {
     viewSpaceOf: (at, out) => {
       const a = ActorByAt(at);
       if (!a) return false;
-      MatrixTransformPoint(G.g_camera_world_to_view, a.lookAt, out);
+      MatrixTransformPoint(CameraBlockWorldToView(G.g_camera_index), a.lookAt,
+                           out);
       return true;
     },
     // The same transform as `viewSpaceOf`, for a point nothing owns: an
     // impact sprite's size and the muzzle effects' aim both come from it.
     viewSpaceOfPoint: (p, out) => {
-      MatrixTransformPoint(G.g_camera_world_to_view, p, out);
+      MatrixTransformPoint(CameraBlockWorldToView(G.g_camera_index), p, out);
       return true;
     },
     setBoneSlot: (at, bone, slot) => this.backend?.setBoneSlot(at, bone, slot),

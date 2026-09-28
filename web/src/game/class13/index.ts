@@ -168,6 +168,12 @@ function Tail(obj: Actor): ScriptedPropTail | null {
  * Fills the 0x1C-byte block from the descriptor tail and then **calls the
  * behaviour once**, which is how entry 8 gets to install a routine before the
  * first update runs.
+ *
+ * It stores nothing at `obj+0x64`/`+0x68`/`+0x6C` (`0x0043FE23`..
+ * `0x0043FE7E`), so the three angles `SpawnFromDescriptorSmall`
+ * (`FUN_00408BC0`) copied off the record are what the first draw uses -- and,
+ * behind `NoOpStub`, the only ones a static prop ever has. Stage 2's five
+ * static props all carry a pitch; see `PlacementOrientation`.
  */
 export function ScriptedPropInit13(obj: Actor): void {
   const sub = Tail(obj);

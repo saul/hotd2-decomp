@@ -50,6 +50,7 @@ import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
   from "../combat/counts";
 import { PlayerTakeDamage } from "../combat/player";
 import { ScoreAddForPlayer } from "../combat/score";
+import { PlacementOrientation } from "../descriptor";
 import { ActorDespawn } from "../despawn";
 import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
   from "../camera/slots";
@@ -434,7 +435,8 @@ export function PlaceHorde(obj: Actor, rng?: Rng): void {
 export function SpawnHordePlacers(
     spawns: readonly { at: number; class: number;
                        pos?: [number, number, number] }[],
-    placements: readonly { at: number; yaw?: number;
+    placements: readonly { at: number; pitch?: number; yaw?: number;
+                           roll?: number;
                            class40?: { selector: number } | null }[],
     rng: Rng): void {
   const listed = new Map<number, number>();
@@ -455,7 +457,7 @@ export function SpawnHordePlacers(
     for (let k = done; k < n; k += 1) {
       // `ActorSpawn` runs `PlaceHorde` as the Init, and it despawns itself.
       ActorSpawn(at, SpawnClass.HordeSpawner, -1, "horde placer",
-                 { class40: { ...pl.class40 }, yaw: pl.yaw ?? 0,
+                 { class40: { ...pl.class40 }, ...PlacementOrientation(pl),
                    pos: vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0,
                              s.pos?.[2] ?? 0),
                    visible: true },

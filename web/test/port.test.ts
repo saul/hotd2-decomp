@@ -27699,5 +27699,92 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
         `${live.zom.headAimed} ${start.toString(16)} -> ${live.zom.headYaw.toString(16)}`);
 }
 
+// -- a spawn record's three angles reach every slot actor ---------------------
+//
+// `SpawnFromDescriptorSmall` (`FUN_00408BC0`, opcode 0x0C) copies the record's
+// sixth, seventh and eighth dwords to `obj+0x64/0x68/0x6C` (`0x00408C01`..
+// `0x00408C10`), and so do the other two allocators, for every class.
+// `ScriptedPropInit13` (`FUN_0043FE10`) writes none of the three, behaviour 0
+// is `NoOpStub` -- a bare `RET` -- and `ScriptedPropUpdate13` (`FUN_0043FE90`)
+// draws `T; RotX(+0x64); RotZ(+0x6C); RotY(+0x68)`. `SpawnSlotActor` took the
+// yaw alone, and stage 2's five static props stood upright.
+console.log("\na spawn record's three angles reach every slot actor:");
+{
+  const rng = new Rng(13);
+  const events = scene(0, rng);
+  // Stage 2 block 17 step 1's four `komono_st1.bin[3]`, as `st2evtbl.bin`
+  // places them: yaw 0xC000, a pitch each, behaviour 0, gone on camera path 81
+  // frame 549. And the fifth, `etc_1.bin[63]` at 15x, 1400 units up.
+  const shipped: Array<[number, number, number, number]> = [
+    [48896, 0x1000, 0xc000, 0x1237], [48952, 0x2800, 0xc000, 0x1237],
+    [49008, 0xf000, 0xc000, 0x1237], [49064, 0xec00, 0xc000, 0x1237],
+    [84232, 0x2800, 0, 0x1383],
+  ];
+  const tail = (slot: number) => ({
+    slot, cam_path: slot === 0x1383 ? 114 : 81,
+    cam_frame: slot === 0x1383 ? 0 : 549,
+    scale: slot === 0x1383 ? 15 : 1, behaviour: 0, selector: 19,
+  });
+  SetGameTables({
+    ...CHARS,
+    placements: [
+      ...shipped.map(([at, pitch, yaw, slot]) => ({
+        at, class: 0x13, char_type: -1, motion: null, hp: 0, yaw, pitch,
+        init_flags: 0x8000, class13: tail(slot),
+      })),
+      // No shipped class-0x13 record rolls; this one does, so a spawn arm
+      // that took the pitch alone fails too.
+      { at: 0x7130, class: 0x13, char_type: -1, motion: null, hp: 0,
+        yaw: 0x4000, pitch: 0x0800, roll: 0x1234, init_flags: 0x8000,
+        class13: tail(0x1237) },
+      // Two other arms of the same routine, through the same helper.
+      { at: 0x7152, class: 0x52, char_type: -1, motion: null, hp: 0,
+        yaw: 0x2000, pitch: 0x0300, roll: 0x0500, class52: { subtype: 0 } },
+      { at: 0x7116, class: 0x16, char_type: -1, motion: null, hp: 0,
+        yaw: 0x2000, pitch: 0x0300, roll: 0x0500, class16: {} },
+    ],
+  } as unknown as CharactersJson);
+  const at = (a: number, cls: SpawnClass) =>
+    ({ at: a, class: cls, pos: [-602.5, 50.5, -1526.5] as [number, number, number] });
+  SpawnSlotActors([
+    ...shipped.map(([a]) => at(a, SpawnClass.ScriptedProp)),
+    at(0x7130, SpawnClass.ScriptedProp),
+    at(0x7152, SpawnClass.Mouse),
+    at(0x7116, SpawnClass.WaterWaveField),
+  ], rng);
+  const props = shipped.map(([a]) => G.g_object_list.find((o) => o.at === a));
+  const angles = (o: Actor | undefined) =>
+    o ? `${o.pitch.toString(16)}/${o.yaw.toString(16)}/${o.roll.toString(16)}`
+      : "none";
+  check("stage 2's five static class-0x13 props spawn at the record's pitch, "
+        + "not upright",
+        props.every((o, i) => !!o && o.pitch === shipped[i][1]
+                    && o.yaw === shipped[i][2] && o.roll === 0),
+        props.map(angles).join(" "));
+  const rolled = G.g_object_list.find((o) => o.at === 0x7130);
+  check("...and a class-0x13 record's roll reaches `obj+0x6C` too",
+        rolled?.pitch === 0x0800 && rolled.yaw === 0x4000
+        && rolled.roll === 0x1234, angles(rolled));
+  // `MouseInit` and `WaterFieldCreate` (`FUN_00442290`) write none of the
+  // three either, so what they hold straight after the spawn is what the arm
+  // handed them. Read before any update: the field kills itself in its `Init`
+  // and the pool drops it at the end of the next frame.
+  const mouse = G.g_object_list.find((o) => o.at === 0x7152);
+  const field = G.g_object_list.find((o) => o.at === 0x7116);
+  check("the mouse's and the wave field's arms take all three angles as well",
+        mouse?.pitch === 0x0300 && mouse.roll === 0x0500
+        && field?.pitch === 0x0300 && field.roll === 0x0500,
+        `${angles(mouse)} ${angles(field)}`);
+  // Behaviour 0 is `NoOpStub`: nothing between the spawn and the draw writes
+  // an angle, so thirty frames later they are what the record said.
+  for (let i = 0; i < 30; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("a static class-0x13 prop keeps all three through thirty updates",
+        props.every((o, i) => !!o && !o.despawned && o.pitch === shipped[i][1]
+                    && o.yaw === shipped[i][2] && o.roll === 0)
+        && rolled?.roll === 0x1234,
+        props.map(angles).join(" "));
+  SetGameTables(CHARS);
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

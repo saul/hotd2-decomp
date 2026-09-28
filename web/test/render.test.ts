@@ -2613,6 +2613,86 @@ console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
         !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
 }
 
+console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
+{
+  // `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `MatrixTranslate(obj+0x40);
+  // MatrixRotateX(obj+0x64); MatrixRotateZ(obj+0x6C); MatrixRotateY(obj+0x68);
+  // MatrixScale(s, s, s)` (`0x0043FEE3`..`0x0043FF1E`), and all three angles
+  // come off the record through `SpawnFromDescriptorSmall` (`FUN_00408BC0`).
+  // Built here from the placement through `SpawnSlotActors`, drawn by the
+  // layer, and compared element by element with the port's transcriptions of
+  // those five calls -- three unequal angles and a scale that is not 1, so a
+  // dropped angle at the spawn, a wrong order or a wrong axis in the draw each
+  // move some element (`L48`).
+  const { SpawnSlotActors } = await import("../src/game/director");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Rng } = await import("../src/core/rng");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixScale,
+    MatrixTranslate,
+  } = await import("../src/game/matrix");
+  await import("../src/game/classes");
+
+  const SLOT = 0x1383;
+  const root = new Obj3D();
+  const part = new Obj3D();
+  part.name = `slots_actor_fixed000_slot_${SLOT.toString(16)}`;
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_actor" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new SlotModelLayer();
+  layer.adopt(root);
+  // Stage 2's `etc_1.bin[63]` at its own 15x and its own pitch, 0x2800, with
+  // a yaw and a roll added that no shipped class-0x13 record has.
+  const AT = 84232;
+  SetGameTables({
+    types: {}, placements: [{
+      at: AT, class: 0x13, char_type: -1, motion: null, hp: 0,
+      pitch: 0x2800, yaw: 0x1c00, roll: 0x0a00, init_flags: 0x8000,
+      class13: { slot: SLOT, cam_path: 114, cam_frame: 0, scale: 15,
+                 behaviour: 0, selector: 65 },
+    }],
+  } as never);
+  const pos = { x: -1600, y: 1400, z: -2750 };
+  SpawnSlotActors([{ at: AT, class: SpawnClass.ScriptedProp,
+                     pos: [pos.x, pos.y, pos.z] }], new Rng(1));
+  const ctx = { paths: null } as unknown as Parameters<typeof layer.update>[0];
+  layer.update(ctx);
+  const node = layer.nodeFor(AT);
+  node?.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, pos.x, pos.y, pos.z);
+  MatrixRotateX(want, 0x2800);
+  MatrixRotateZ(want, 0x0a00);
+  MatrixRotateY(want, 0x1c00);
+  MatrixScale(want, 15, 15, 15);
+  const got = node?.matrix.elements ?? [];
+  const worst = node
+    ? Math.max(...want.map((v, i) => Math.abs(v - got[i]) / Math.max(1, Math.abs(v))))
+    : Infinity;
+  check("a class-0x13 prop spawned from its record is drawn "
+        + "T * Rx(pitch) * Rz(roll) * Ry(yaw) * S",
+        worst < 1e-4, node ? `worst relative element ${worst}` : "no node");
+
+  // The shipped record alone, `(0x2800, 0, 0)`: the quads' face, +z in the
+  // model, tips 0x2800 about x and turns down toward the ground at
+  // `(0, -sin, cos)` -- the disc faces the viewer below it rather than the
+  // horizon. Upright, the column would be `(0, 0, 1)`.
+  const a = G.g_object_list.find((o) => o.at === AT);
+  if (a) { a.yaw = 0; a.roll = 0; }
+  layer.update(ctx);
+  node?.updateMatrix();
+  const e = node?.matrix.elements ?? [];
+  const th = 0x2800 * Math.PI * 2 / 65536;
+  const face = [8, 9, 10].map((i) => (e[i] ?? 0) / 15);
+  check("stage 2's etc_1.bin[63] faces down at 0x2800, not the horizon",
+        Math.abs(face[0]) < 1e-6 && Math.abs(face[1] + Math.sin(th)) < 1e-5
+        && Math.abs(face[2] - Math.cos(th)) < 1e-5,
+        face.map((v) => v.toFixed(4)).join(", "));
+  G.g_object_list.length = 0;
+  SetGameTables({ types: {}, placements: [] } as never);
+}
+
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 {
   const { CharacterLayer } = await import("../src/render/characters");

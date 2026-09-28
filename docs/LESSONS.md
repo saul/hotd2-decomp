@@ -931,3 +931,18 @@ comparison asks ("is it taken"), not its constant** -- and before calling any
 reader of such a value faithful, grep every reader for the exe's literals.
 It is a cousin of `L3`: there one field means two things in two classes, here
 one table means one thing in two encodings.
+
+**L64 -- In the frustum is not on screen, and a diff of the whole page is a
+diff of its clock.** Showing stage 2's four tilted class-0x13 props before and
+after, a harness chose "the nearest frame with all four in view" by projecting
+their origins through the camera, and chose a frame where all four were inside
+a window jamb: the before and after crops came back byte for byte the same,
+which reads as "the renderer ignores the fix". Widening the comparison to the
+whole screenshot then called every frame different, because the page's header
+prints the bundle's age in minutes. Neither result was about the props. **A
+projection cannot see occlusion, so pick the frame by the pixels: shoot before
+and after, diff them inside the viewport only, and look where they differ** --
+and when nothing differs, make the object impossible to miss (scale it up in
+the live page through `G`, debug only) before concluding it is not drawn. It is
+`L19` from the other side: the render is not the game, and the frustum is not
+the render.

@@ -24543,3 +24543,58 @@ Test: `test:port`'s five new class-0x25 blocks (the jetty program driven by
 `a=66`; `op 2` and the Init's counter; `op 17` modes 1-4 and 7; the removal's
 hit slot) -- 22 assertions that fail on `a3f5d167`. Counts: divergences 133
 held (the `op 9`/`op 16` stub keeps its tag), uncited exports 82 held.
+
+## 2026-09-28 -- stage 3's boat riders: the boat took the shots, and nothing ended them
+
+Reported: at the start of stage 3 the zombies on the boat with the first
+civilian "don't seem to die when shot", and "when the boat explodes they
+still stay alive". Three faults, all read from the exe, none a regression.
+
+* **The boat was in the shot test.** `SpawnFromDescriptorSmall`
+  (`FUN_00408BC0`) runs `ActorInitFlags` (`FUN_00408970`: `OR ECX, 1; MOV
+  [EAX+0x34], ECX`) on the record's flags word, all fifteen class-0x13
+  records carry `0x8000`, and `RegisterForShotTest` refuses that at
+  `0x00405168`. `SpawnSlotActor`'s class-0x13 arm passed no `flags`, so the
+  boat had `obj+0x34 == 1`, and the 40.0 that `CarrierPropRoutine1` state 0
+  writes at `obj+0x124` was a live sphere in `render/slotmodels.ts`' pick,
+  merged with the engine pick by distance along the ray: every pull at a
+  rider standing behind the boat's origin was the boat's. Since `902de88a`.
+* **`ZombieStateRetireOffScreen` has a carrier arm** after its mode switch
+  (`0x0045B997`): `*obj == CarriedZombieUpdate18` (the only reader of that
+  pointer -- a byte search for `0x0045CD90` finds it and the Init's store)
+  and the carrier's `obj+0x34 & 0x400000` -> `ZombieRetireAndCredit`, `*obj =
+  EnemyZombieUpdate`, no bake. Routines 1 (`0x00440610`) and 6
+  (`0x0044151A`) raise the bit running past the mooring; nothing else in the
+  image touches it at `[reg+0x34]`. The port's `ZombieRetireAndCredit` was
+  short too: `rng.next() < 0.5` for `rand() % 2`, no one-player arm, no
+  count releases, no hit slot. The same state's mode-0/1 `[diverges]`
+  (`ActorIsOnScreen` for `ActorBoundsOnScreen`) is gone, since the latter
+  has been ported for class 0x10 for a while.
+* **`ZombieStateHoldOnCarrier` has an exit** (`0x0045D0B4`..`0x0045D0DD`),
+  after the `MatrixStackPop` at `0x0045D0AF` the pseudocode ends on (`L35`):
+  on `g_active_cam_path == tail+0x0C && g_cam_path_frame == tail+0x0E` the
+  rider takes `(s8)tail[3]`. The port, the annotation and PLAYER_PROGRESS
+  all said "no exit, aboard until shot".
+
+`port.test.ts` "stage 3 block 0's boat" drives the boat's whole ride through
+`GameUpdate` from the reset; eleven assertions there and in the stage-2 rider
+block fail on the old code. In the page, one seed, the same pulls replayed:
+before, the first ten took nothing (the boat's flags read back `0x8`, marked);
+after, the captor dies on the ninth. Free-run, the captor now vanishes on the
+frame the boat raises `0x400000` (`g_enemies_alive` 2 -> 1) and `0xADC` leaps
+to the player's boat on camera frame 1080.
+
+**Wrong turns.** The brief suspected the class-0x30 pick moving into the
+engine (`629832ca`) and a class-0x18 handler that did not register. The
+handler spreads class 0x30's row, `registersForShotTest` included, and the
+engine pick does test the riders (`shotTargets` lists them, and the pulls
+that were not blocked took hit points). A bundle exported at `51b0f657`, the
+merge before that change, answers the same replayed pulls identically, which
+closed it. The probe's first run read "hits start landing after ten pulls"
+as flaky aim; clearing the boat's hit bit before each pull and reading it
+back after was what named the boat.
+
+`[open]`: the retire frame. The port's `carrierAt` is the task pointer as
+well as the carrier (declared on the field), so `render/` places that one
+last frame at the rider's carrier-relative point, where the engine draws it
+in the carrier's matrix; the actor is gone at the next update in both.

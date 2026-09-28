@@ -4994,7 +4994,9 @@ exe:
   in the carrier's frame, so it walked off across the canal in boat-relative
   coordinates. Ported in `game/class30/carrier_rider.ts`:
   `ZombieStateHoldOnCarrier` (46, aboard, turning to face the camera through
-  the inverse carrier matrix, no exit), `ZombieStateLeapOffCarrierForward`
+  the inverse carrier matrix -- and, since 2026-09-28, leaving for the attack
+  state on the cue frame itself; "no exit" was the pseudocode stopping at a
+  `MatrixStackPop`), `ZombieStateLeapOffCarrierForward`
   (47) and `ZombieStateLeapOffCarrierAtMark` (48), which bake the carrier into
   the rider with `CarrierBakeWorldPose` (`FUN_0045D920`, position *and*
   angles, through a transcription of `MatrixToEulerBams`), fly, splash through
@@ -5016,6 +5018,35 @@ default road, the 1-2-3-4-5-6-7-8-10 road and the 5→21→16 road with no
 debug clear. The corpse step-off (`state 7 sub 1`, `obj+0x1330 == 2`) now
 bakes the angles too. `[open]`: `RegisterForDistanceRank` still admits class
 0x30 only; whether a rider registers, and with which position, is unread.
+
+### Stage 3's boat riders can be shot, and go with the boat
+
+Reported: at the start of stage 3 the zombies on the boat with the first
+civilian did not die when shot, and were still standing when the boat blew up.
+Three faults, none of them a regression -- the first dates from the class-0x13
+port (`902de88a`), and a build from before the class-0x30 pick moved into the
+engine (`51b0f657`) answers the same pulls identically.
+
+* **The boat took the shots.** `SpawnFromDescriptorSmall` hands the record's
+  flags word to `ActorInitFlags`, and every class-0x13 record carries `0x8000`
+  -- out of `RegisterForShotTest` for life. The port's spawn arm dropped the
+  word, so the 40-unit radius `CarrierPropRoutine1` seats round the boat's
+  origin was a live sphere in `render/`'s pick, nearer along the ray than any
+  rider standing behind the origin. Measured on one seed, the same pulls
+  replayed one every two frames at the riders' own shot points: before, the
+  first ten took nothing from either (220 and 130 hit points); after, the
+  captor was dead on the ninth (220 to -60) and the rider on the eighteenth.
+* **A captor aboard retires with its boat.** `ZombieStateRetireOffScreen`
+  (state 38) ends with an arm the port had not got: a class-0x18 rider whose
+  carrier has `obj+0x34 & 0x400000` -- raised by routines 1 and 6 as the boat
+  runs past its mooring into the wall -- is retired and credited
+  (`ZombieRetireAndCredit`, now transcribed whole: the one-player credit, both
+  counts on the spot, the hit slot). Stage 3's `0xC00` and `0x71D0`. The
+  mode-0/1 test is `ActorBoundsOnScreen` now, as the engine's is.
+* **A holding rider leaps on its cue.** `ZombieStateHoldOnCarrier` sends the
+  rider to its attack state when the camera reaches `tail+0x0E`; the three
+  `znnick` riders (attack state 48, camera path 124 frame 1080/1075) leap to
+  the player's boat instead of standing on theirs through the crash.
 
 ### Hiding a character is two gates and a hook, not an alpha
 

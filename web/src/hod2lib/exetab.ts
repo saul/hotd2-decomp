@@ -907,6 +907,13 @@ export class ExeTables {
   static readonly BREAKABLE_HULL_POINTS = 96;
   static readonly PROP_KIND_PARAMS = 0x00593db8;
   static readonly PROP_KIND_COUNT = 11;
+  /**
+   * `g_water_surface_slots`, s16[10]. `PlaceWaterSurface` indexes it with no
+   * bound; the ten end where `PROP_KIND_PARAMS` begins, which four routines
+   * address directly -- the table beside it, not a guess at its length (L6).
+   */
+  static readonly WATER_SURFACE_SLOTS = 0x00593da4;
+  static readonly WATER_SURFACE_SLOT_COUNT = 10;
   static readonly FALLING_HULL = 0x00594788;
   static readonly FALLING_HULL_POINTS = 48;
   /**
@@ -1586,6 +1593,24 @@ export class ExeTables {
       const upds = u32s(this.data, ub, n);
       return Array.from({ length: n },
                         (_, i) => ({ type: i, ctor: ctors[i], update: upds[i] }));
+    });
+  }
+
+  /**
+   * `g_water_surface_slots` -- `0x00593DA4`, the ten canal water tiles class
+   * 0x41's type-1 constructor `PlaceWaterSurface` (`FUN_00462F70`) indexes by
+   * the placer's `obj+0x1F4` (`MOVSX ECX, word ptr [EAX*2 + 0x593DA4]`).
+   * Ten, because `g_prop_kind_params` begins at `0x00593DB8`.
+   */
+  waterSurfaceSlots(): number[] {
+    return this.cached("waterSurfaceSlots", () => {
+      const base = this.v2r(ExeTables.WATER_SURFACE_SLOTS);
+      if (base === null) return [];
+      const out: number[] = [];
+      for (let i = 0; i < ExeTables.WATER_SURFACE_SLOT_COUNT; i++) {
+        out.push(i16(this.data, base + i * 2));
+      }
+      return out;
     });
   }
 

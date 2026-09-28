@@ -383,6 +383,19 @@ export function class43Tail(rec: Spawn): Record<string, unknown> {
 /** Class 0x46, and the sub-type whose members are one per descriptor. */
 const CLASS46 = 0x46;
 const CLASS46_SUBTYPE_DIVE = 0;
+/**
+ * The two sub-types whose members are **runtime children** of the placer, and
+ * the most members each makes: `PlaceBats` (`FUN_0042D9C0`) loops `0x19` times
+ * for sub-type 1 and `((1 < g_players_in_play) - 1 & ~1) + 8` times for
+ * sub-type 2 -- six with one player, eight with two. The rows are for the most
+ * a game can make; a one-player swarm leaves two of them unadopted.
+ */
+const CLASS46_CHILD_MEMBERS: Readonly<Record<number, number>> = {
+  1: 0x19,
+  2: 8,
+};
+/** `zabat.bin` -- `obj+0x1F4 = 0x1E` and clip `0x407`, in every arm. */
+const CLASS46_BODY_CHAR_TYPE = 0x1e;
 /** `zabat_wing.bin` — six nodes, and the clip `BatWingUpdate` settles on. */
 const CLASS46_WING_CHAR_TYPE = 0x1f;
 const CLASS46_WING_CLIP = 0x406;
@@ -391,22 +404,43 @@ const CLASS46_WING_CLIP = 0x406;
  *
  * The engine keys nothing on an address; the port's pool does, so a placer's
  * child needs one, and it takes its body's with bit 30 set. One definition,
- * here and in `game/class46/`, and `verify_port.py` has no way to check that
- * they agree — so the two carry each other's names in a comment.
+ * here and in `game/class46/` (`BatWingAt`), and `verify_port.py` has no way
+ * to check that they agree — so the two carry each other's names in a
+ * comment, and `render.test.ts` adopts one through the other.
  */
 const CLASS46_WING_AT_BIT = 0x40000000;
+
+/**
+ * `[port-only]` — the spawn address the port's `PlaceBats` gives member
+ * `member` of a sub-type-1 or sub-type-2 placer: bit 29, the sub-type in bits
+ * 25..26, the member in bits 20..24 (the scatter has twenty-five) and the
+ * placer's own address below. The other half of the pair is `BatChildAt` in
+ * `game/class46/`; the same arrangement as {@link hordeMemberAt}.
+ */
+export function batChildAt(placerAt: number, subtype: number,
+                           member: number): number {
+  return 0x20000000 | ((subtype & 0x3) << 25) | ((member & 0x1f) << 20)
+    | (placerAt & 0xfffff);
+}
 
 /**
  * The synthetic placement a bat's wings are drawn from, and the character
  * type it needs in the bundle.
  *
+ * `bodyAt` is the address of the body it rides and `parentAt` the placement
+ * that makes the row wanted: the body's own descriptor for a sub-type-0 bat,
+ * the placer's for a member of the other two -- a member's row is itself
+ * synthetic, and parenting one synthetic row to another would make whether it
+ * is wanted depend on the order the layer walks them in.
+ *
  * Returns null when the wing's own asset or clip will not build, which leaves
  * the bat wingless rather than emitting a row nothing can pose.
  */
 async function batWingPlacement(stage: Stage, tables: ExeTables,
-                                sp: SpawnJson, body: Placement,
-                                chars: Map<number, Character>,
-                                cache: AssetCache): Promise<Placement | null> {
+                                bodyAt: number, parentAt: number,
+                                body: Placement,
+                                chars: Map<number, Character>):
+    Promise<Placement | null> {
   const ct = CLASS46_WING_CHAR_TYPE;
   if (!chars.has(ct)) {
     const file = tables.characterAssetFile(ct);
@@ -422,9 +456,8 @@ async function batWingPlacement(stage: Stage, tables: ExeTables,
     if (baked === null) return null;
     c.motions.set(CLASS46_WING_CLIP, baked);
   }
-  void cache;
   const w = new Placement();
-  w.at = (sp.at as number) | CLASS46_WING_AT_BIT;
+  w.at = bodyAt | CLASS46_WING_AT_BIT;
   w.cls = CLASS46;
   w.char_type = ct;
   w.motion = CLASS46_WING_CLIP;
@@ -433,9 +466,33 @@ async function batWingPlacement(stage: Stage, tables: ExeTables,
   // and `toJson` finds an orientation. `BatWingUpdate` moves it from there on
   // its first frame.
   w.spawn = { ...body.spawn, at: w.at };
-  w.parent_at = sp.at as number;
+  w.parent_at = parentAt;
   w.synthetic = true;
   return w;
+}
+
+/**
+ * The synthetic placement one member of a sub-type-1 or sub-type-2 placer is
+ * drawn from: character type `0x1E` on clip `0x407`, at {@link batChildAt},
+ * parented to the placer. The same arrangement as the horde's members
+ * ({@link hordeMemberPlacements}): `PlaceBats` makes the object and the
+ * character layer adopts it, and nothing spawns from the row.
+ *
+ * `placer` is the placer's own row, which has already resolved and baked the
+ * body's type and clip.
+ */
+function batChildPlacement(sp: SpawnJson, placer: Placement, subtype: number,
+                           member: number): Placement {
+  const b = new Placement();
+  b.at = batChildAt(sp.at as number, subtype, member);
+  b.cls = CLASS46;
+  b.char_type = CLASS46_BODY_CHAR_TYPE;
+  b.motion = placer.motion;
+  b.hp = 0;
+  b.spawn = { ...sp, at: b.at };
+  b.parent_at = sp.at as number;
+  b.synthetic = true;
+  return b;
 }
 
 /**
@@ -1668,18 +1725,30 @@ export async function resolveForStage(
     // the placer still makes the object, as the engine does. It exists to
     // carry geometry and to be adopted.
     //
-    // Only sub-type 0 gets one, because only sub-type 0 is one member per
-    // descriptor. The scatter's twenty-five and the swarm's six are runtime
-    // children of a placer and there is no descriptor to hang a row on.
-    if (cls === CLASS46 && class46
-        && (class46.subtype as number) === CLASS46_SUBTYPE_DIVE) {
-      const wing = await batWingPlacement(stage, tables, sp, p, chars, cache);
-      if (wing) {
-        placements.push(wing);
-        let wlist = perType.get(CLASS46_WING_CHAR_TYPE);
-        if (!wlist) { wlist = []; perType.set(CLASS46_WING_CHAR_TYPE, wlist); }
-        wlist.push({ ...sp, at: wing.at, class: CLASS46,
-                     hp: 0 } as SpawnJson);
+    // A sub-type-0 descriptor is its own member, so its body is this row and
+    // only the wing needs one. Sub-types 1 and 2 are placers whose members
+    // are runtime children, and the same trick keys on the address the port
+    // gives each child: a body row and a wing row per member, all parented to
+    // the placer. See `game/class46/`, "How every bat is drawn".
+    if (cls === CLASS46 && class46) {
+      const subtype = class46.subtype as number;
+      const pushRow = (row: Placement, ct: number): void => {
+        placements.push(row);
+        let l = perType.get(ct);
+        if (!l) { l = []; perType.set(ct, l); }
+        l.push({ ...sp, at: row.at, class: CLASS46, hp: 0 } as SpawnJson);
+      };
+      if (subtype === CLASS46_SUBTYPE_DIVE) {
+        const wing = await batWingPlacement(stage, tables, sp.at as number,
+                                            sp.at as number, p, chars);
+        if (wing) pushRow(wing, CLASS46_WING_CHAR_TYPE);
+      }
+      for (let i = 0; i < (CLASS46_CHILD_MEMBERS[subtype] ?? 0); i += 1) {
+        const body = batChildPlacement(sp, p, subtype, i);
+        pushRow(body, CLASS46_BODY_CHAR_TYPE);
+        const wing = await batWingPlacement(stage, tables, body.at,
+                                            sp.at as number, body, chars);
+        if (wing) pushRow(wing, CLASS46_WING_CHAR_TYPE);
       }
     }
   }

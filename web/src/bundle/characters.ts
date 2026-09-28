@@ -913,16 +913,20 @@ export interface DifficultyJson {
  * (`FUN_0044DA60`) copies twelve dwords into the actor's slot and
  * `ActorArcStep` (`FUN_0044D860`) walks them.
  *
- * Every script in the program names the **same motion** in all three stages,
- * so a script is one clip cut into windup, flight and landing.
+ * A script is nearly always one clip cut into windup, flight and landing;
+ * seven of the 38 end on a different clip, so each stage names its own.
  */
 export interface ArcStage {
   motion: number;
   /** Frame of that clip the stage starts at. */
   start: number;
-  /** Cross-fade in, in frames. */
+  /**
+   * Cross-fade in, in frames -- and so the frames the cursor is **held** on
+   * `start`: `ActorSetMotionBlended` writes it to `obj+0x19C` and
+   * `SkeletonAdvancePlayCursor` does not move it until the fade is over.
+   */
   fade: number;
-  /** The clip frame past which the next stage begins. */
+  /** The clip frame the cursor must reach for the next stage to begin. */
   until: number;
 }
 

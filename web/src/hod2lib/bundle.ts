@@ -39,6 +39,9 @@ import { CARRIER_SELECTORS_PORTED, CarrierDrawSlots }
   from "../game/class13/state";
 // ...and `class19/slots.ts` for the stage-4 boss's prop and hit mark.
 import { Boss4EffectSlots } from "../game/class19/slots";
+// ...and `class41/water_slots.ts` for the tiles the canal water task pairs
+// and swaps -- immediates in its routine, which the geometry has to contain.
+import { WATER_SURFACE_ALSO_DRAWS } from "../game/class41/water_slots";
 // Same argument again: `hud_sprites.ts` is the id list `hud_readout.ts` draws
 // from, as data, and the exporter must put exactly those textures in.
 import { BOSS_HP_BAR_SPRITES, HUD_READOUT_SPRITES } from "../game/hud_sprites";
@@ -517,6 +520,25 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
                           : {}),
           pos: [...rec.pos], yaw: rec.orient[1],
         });
+      } else if (ctor === 1) {
+        // `PlaceWaterSurface` -- the canal water task. Its slot is
+        // `g_water_surface_slots[(s16)obj+0x1F4]`, looked up here because the
+        // table is image data; the index travels too, since with index 0 the
+        // ripple is limited to `z <= -1870`. `+0x11C` is the lifetime.
+        const index = s8(rec.offset + 0x24);
+        const slot = tables.waterSurfaceSlots()[index];
+        if (slot === undefined) {
+          degraded.note("hod2lib.bundle.container_placements",
+                        `water surface at 0x${rec.offset.toString(16)}`,
+                        "the task is not placed and nothing draws its tile",
+                        `index ${index} is outside g_water_surface_slots`);
+          continue;
+        }
+        out.push({
+          at: rec.offset, container: "water_surface",
+          field_1f4: index, slot,
+          lifetime_evt_steps: rec.hp,
+        });
       } else if (ctor === 4) {
         out.push({
           at: rec.offset, container: "kinded",
@@ -941,9 +963,9 @@ const CREATURE_SPLASH_SLOTS: readonly number[] =
  * `render/effects.ts` clones from `slots_effect` rather than
  * `render/slotmodels.ts` from `slots_actor`.
  *
- * Five classes today. JUDGMENT's walker's sparks, which only its flier's
- * presence brings. `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind
- * 0x5B through `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
+ * JUDGMENT's walker's sparks, which only its flier's presence brings.
+ * `SpawnSpriteEffectsTowardEye` (`FUN_00407BC0`) runs kind 0x5B through
+ * `0xAA4..0xAB6`, 0x5C through `0xA87..0xAA3` and 0x5D through
  * `0xAB7..0xAD3` -- `boss1q.bin`, which the fight's blocks load. The
  * Tower's, class 0x45, every one of which its routines draw themselves. The
  * owl's and the fish's effect tasks, classes 0x43 and 0x51.
@@ -954,7 +976,8 @@ const CREATURE_SPLASH_SLOTS: readonly number[] =
  * 0x46, `0x94..0xA2`, and 0x61, `0x1339..0x1356`), its water ring
  * (`SpawnWaterRing`, `0xE23`), and the ring task `SpawnGroundRingEffect`
  * opens under its corpse -- and under class 0x20's -- `0x1A38` and the
- * thirty-cel strip `0x15E4..0x1601`.
+ * thirty-cel strip `0x15E4..0x1601`. And the bat's splash, class
+ * 0x46's, which is the kind-0x61 run again.
  */
 export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   0x22: Array.from({ length: 0xad3 - 0xa87 + 1 }, (_, i) => 0xa87 + i),
@@ -979,6 +1002,14 @@ export const EFFECT_SLOTS_BY_CLASS: Record<number, number[]> = {
   // task its corpse leaves (`RingEffectSpread`, `FUN_00407E30`: 371 and
   // 338..367). The blood cloud's cels are the shot path's, already carried.
   0x51: [...CREATURE_SPLASH_SLOTS, 0xb71, ...CREATURE_RING_SLOTS],
+  // Class 0x46, the bat: the splash a shot one falls into.
+  // `BatSplashUpdate` (`FUN_0042F930`) draws `AssetDrawSlot(0x1339 + n)` for
+  // n in 0..0x1D -- `common.bin` 307..336, the run class 0x30, the owl and
+  // the fish draw too -- under a bare translation. Listed for the class all
+  // the same: `effectSlotEntry` carries a slot once however many ask, and a
+  // stage with bats and none of those would otherwise have no splash. See
+  // `game/class46/splash.ts`.
+  0x46: [...CREATURE_SPLASH_SLOTS],
 };
 
 /** {@link EFFECT_SLOTS_BY_CLASS} for the classes a stage spawns. */
@@ -1096,6 +1127,30 @@ export function sceneryDrawSlots(
 }
 
 /**
+ * The asset slots a stage's canal water tasks can draw.
+ *
+ * `WaterSurfaceUpdate` (`FUN_0046E3A0`) draws its placement's tile, the
+ * tile's pair, and whatever a swap turns it into -- `WATER_SURFACE_ALSO_DRAWS`
+ * lists them. Most of them are also stage geometry, which
+ * `render/water_surfaces.ts` prefers; the ones in `komono_boss2.bin` and
+ * `komono_venis.bin` are loaded by `asset_load_polfile` and are nobody's
+ * region, so without this the boss arena and the stage-2 canal's west end
+ * had no water to draw at all.
+ */
+export function waterSurfaceDrawSlots(
+    placements: readonly Record<string, unknown>[]): number[] {
+  const out: number[] = [];
+  for (const pl of placements) {
+    if (pl.container !== "water_surface") continue;
+    const first = pl.slot as number;
+    for (const slot of [first, ...WATER_SURFACE_ALSO_DRAWS[first] ?? []]) {
+      if (!out.includes(slot)) out.push(slot);
+    }
+  }
+  return out;
+}
+
+/**
  * The asset slots a stage's class-0x13 **descriptors** draw.
  *
  * `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `obj+0x1F4`, which
@@ -1188,7 +1243,8 @@ export async function actorSlotEntry(
   const rig: Rig = {
     name: "slots_actor",
     routine: "asset-slot actor draws (classes 0x13, 0x14, 0x40, 0x43, "
-      + "0x51, 0x52; class 0x25 variant 3; class 0x33 selector 4)",
+      + "0x51, 0x52; class 0x25 variant 3; class 0x33 selector 4; "
+      + "class 0x41 type 1's water tiles)",
     worldSpace: false,
     parts: parts.map(([p]) => p),
     note: "actor models drawn by asset slot; hidden, cloned per live actor",
@@ -1686,7 +1742,8 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const act = await actorSlotEntry(
     stage, spawnRecords.map((r) => r.cls),
     [...humanoidDrawSlots(humanoids), ...sceneryDrawSlots(charPlaces),
-     ...scriptedPropDrawSlots(charPlaces)],
+     ...scriptedPropDrawSlots(charPlaces),
+     ...waterSurfaceDrawSlots(placements)],
     cache);
   const eff = await effectSlotEntry(stage, cache, [
     ...bodyCreatureDrawSlots(charDefs.keys()),

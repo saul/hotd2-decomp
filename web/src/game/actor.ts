@@ -1019,16 +1019,6 @@ export enum ThrowerStance {
   Pounce = 4,
 }
 
-/** A motion the actor is playing at full weight. `t` is seconds. */
-/**
- * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
- *
- * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
- * engine counts frames and the port compares against frame numbers. Holding it
- * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
- * a frame test written `===` could be stepped over -- which is what the
- * `struck` latch on this interface's owner used to exist to work around.
- */
 /**
  * One skeleton record's rotation in a fade's snapshot, overriding the clip's:
  * `(rx, ry, rz)` BAMS, applied `RotZ RotY RotX` like every record. See
@@ -1039,7 +1029,29 @@ export interface FadeRecord {
   rot: [number, number, number];
 }
 
-export interface ActorClip { motion: number; ticks: number; loop: boolean }
+/**
+ * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
+ *
+ * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
+ * engine counts frames and the port compares against frame numbers. Holding it
+ * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
+ * a frame test written `===` could be stepped over -- which is what the
+ * `struck` latch on this interface's owner used to exist to work around.
+ */
+export interface ActorClip {
+  motion: number;
+  ticks: number;
+  loop: boolean;
+  /**
+   * `[port-only]` The clip was set through `ActorSetOneShotBlended`, the
+   * channel's `ActorSetMotionBlended` (`FUN_004119A0`), so the actor's fade is
+   * a fade **into it** and holds `ticks` on the start frame while it runs, as
+   * `SkeletonAdvancePlayCursor` (`FUN_004111A0`) holds `obj+0x19C` while
+   * `track+0x37` bit 0 is up. A one-shot set any other way keeps running under
+   * a fade, which is what it did before this existed.
+   */
+  held?: boolean;
+}
 
 /**
  * **Another actor**, by spawn address — the port's stand-in for a raw actor
@@ -1982,7 +1994,9 @@ export interface ActorBase {
    * clip's: a state that writes the drawn pose's records before it blends
    * (`Boss4StateTurnClipThenApproach`, `FUN_00494730`, rewrites records 1 and
    * 9 at `char+0x10C` and `+0x58C`) hands the renderer the BAMS it wrote, and
-   * the fade dissolves from those.
+   * the fade dissolves from those. The frog's two turning states do the same
+   * to record 1 after every pass of a turn clip (`FrogStateHopWithinScreenWedge`
+   * (`FUN_0043AA10`), `FrogStateLeapAtPlayer` (`FUN_0043B270`)).
    */
   fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
   /**

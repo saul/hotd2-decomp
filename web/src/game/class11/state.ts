@@ -6,6 +6,7 @@
  * `FrogInit` (`FUN_0043A080`) allocates it with `ActorAllocSub(0x38)` and
  * hangs it at `obj+0x1310`. Eight of those fifty-six bytes — `sub+0x24` and
  * `sub+0x34` — are never written or read by any routine in the class.
+ * {@link FrogTail.bone1View} is not one of the fifty-six; it says why.
  */
 
 /** `sub+0x04` — the index into `g_class11_states` (`0x00592660`). */
@@ -121,6 +122,23 @@ export interface FrogTail {
   targetX: number;          // +0x28
   targetY: number;          // +0x2C
   targetZ: number;          // +0x30
+  /**
+   * `obj+0x2F4..0x2FC` — the translation row of **bone 1's draw record**,
+   * `part+0x130` (`obj+0x194 + 0x78 + 1*0x90 + 0x28`), in **view space**.
+   *
+   * `SkeletonEmitNode` (`FUN_004114C0`) stores every node's matrix there as
+   * the draw walks the skeleton under the camera, and the frog reads it back
+   * twice a frame through `g_camera_blocks` — once at the top of `FrogUpdate`,
+   * before this frame's draw, and once in `FrogPushOutOfActorCollision`,
+   * after it. Only the translation is ever read (`MatrixGetTranslation`).
+   *
+   * `[port-only]` in where it is kept: the engine's record is part of the
+   * skinned model every actor carries, not of this sub-block. It is here
+   * because this class is the only one whose reading of it has to survive
+   * into the next frame, and the renderer — which makes the pose — cannot
+   * hold game state. `null` until the first draw the host could pose.
+   */
+  bone1View: { x: number; y: number; z: number } | null;
 }
 
 /** [port-only] The zero `ActorAllocSub` hands the Init, written out. */
@@ -129,5 +147,6 @@ export function makeFrogTail(): FrogTail {
     flags: 0, state: FrogState.WaitForCamera, sub: 0,
     boneSlot: 0, boneCycle: 0, cursor: 0, wedge: 0, camDist: 0,
     a: 0, b: 0, motion: 0, targetX: 0, targetY: 0, targetZ: 0,
+    bone1View: null,
   };
 }

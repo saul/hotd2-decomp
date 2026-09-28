@@ -144,6 +144,8 @@ function Boss4DeathRetire(b: Blk): void {
  * in the flinch with its clip finished and the tail running again next frame.
  */
 export function Boss4StateFlinch(obj: Actor, b: Blk, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   if (b.sub === 0) {
     if (b.savedState === Boss4State.FaceCamera) {
       // `MOV [EAX + 0x74], char+0x20` -- the clip to put back afterwards.
@@ -162,7 +164,7 @@ export function Boss4StateFlinch(obj: Actor, b: Blk, f: ClassFrame): void {
 
   if (b.savedState !== Boss4State.ChargePastCamera) {
     if (obj.motion === Boss4Clip.FlinchIdle) {
-      ActorTurnTowardXZ(obj, obj.pos.x - f.eye.x, obj.pos.z - f.eye.z, 0x200);
+      ActorTurnTowardXZ(obj, obj.pos.x - eye.x, obj.pos.z - eye.z, 0x200);
     } else {
       const p0 = b.arena[0];
       ActorTurnTowardXZ(obj, p0.x - obj.pos.x, p0.z - obj.pos.z, 0x200);
@@ -235,13 +237,15 @@ const BAMS_TO_RADIANS = Math.PI / 0x8000;
  * and the shift after it, which reads the same clip and frame.
  */
 export function Boss4StateKnockDown(obj: Actor, b: Blk, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   if (b.sub === 0) {
     b.cameraRise = BOSS4_CAMERA_RISE;
     ActorSetMotionBlended(obj, Boss4Clip.KnockDown, 0, 10);
     ActorShiftToHoldBone1Position(obj, f.host);
-    const dx = Math.fround(obj.pos.x - f.eye.x);
-    const dy = Math.fround(obj.pos.y - f.eye.y);
-    const dz = Math.fround(obj.pos.z - f.eye.z);
+    const dx = Math.fround(obj.pos.x - eye.x);
+    const dy = Math.fround(obj.pos.y - eye.y);
+    const dz = Math.fround(obj.pos.z - eye.z);
     const pitch = FtolS16(Math.atan2(dy, Math.sqrt(dz * dz + dx * dx))
                           * RADIANS_TO_BAMS);
     const yaw = FtolS16(Math.atan2(dx, dz) * RADIANS_TO_BAMS);

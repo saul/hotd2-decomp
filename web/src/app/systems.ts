@@ -225,11 +225,9 @@ export class GameSystem implements System {
     // in the instant between a playing frame and a pause, which is input the
     // clock genuinely owed, and it resolves on the frame the clock restarts.
     if (t.frozen || t.dt <= 0) return;
-    // A copy, not the live one: the frame object `GameUpdate` builds holds
-    // the reference for the whole pass, and `ctx.view.eye` is written again
-    // next tick.
-    const { x, y, z } = ctx.view.eye;
-    GameUpdate({ x, y, z }, t.dt, this.host, ctx.rng, ctx.events);
+    // No eye: the drawn camera is the render half's, and the game reads its
+    // own -- `g_camera_eye` or a camera block -- from `G`. See `ClassFrame`.
+    GameUpdate(t.dt, this.host, ctx.rng, ctx.events);
     ctx.frame = Math.round(G.g_frame);
   }
 

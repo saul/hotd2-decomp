@@ -42,6 +42,7 @@ import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import { BAMS_TO_RAD_F64 } from "../../core/bams";
 import { G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import { GameMode } from "../game_mode";
 import { T } from "../tables";
 import {
@@ -457,12 +458,13 @@ export function OriginalItemDrawMaybeFaded(p: BreakableProp, m: Mat,
  * `atan2(x - eye.x, z - eye.z)` in BAMS, `__ftol`ed, sign-extended from 16
  * bits (`MOVSX EDX, AX`) and turned half round.
  *
- * `g_camera_block_eye` of block `g_camera_index`, which is 0 in every
- * shipped write and the port's one block.
+ * `g_camera_block_eye` of the block `g_camera_index` names (`0x004677D7`,
+ * `0x004677E3`) -- block 2's under scene state (1, 3), block 0's otherwise.
  */
 function OriginalItemFacingYaw(p: BreakableProp): number {
-  const dx = p.x - G.g_camera_block_eye.x;
-  const dz = p.z - G.g_camera_block_eye.z;
+  const eye = CameraBlockEye(G.g_camera_index);
+  const dx = p.x - eye.x;
+  const dz = p.z - eye.z;
   const b = Math.trunc(Math.atan2(dx, dz) * RADIANS_TO_BAMS);
   return ((b << 16) >> 16) + 0x8000;
 }

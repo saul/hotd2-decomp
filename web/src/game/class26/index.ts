@@ -38,6 +38,7 @@
 import { ActorDespawn } from "../despawn";
 import type { Actor } from "../actor";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { ActorClaimHitSlot } from "../hit_slots";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -204,7 +205,7 @@ export function Class26Subtype2Update(obj: Actor, f: ClassFrame): void {
       // heading already turned half round, so the latched boat stood half a
       // turn from where the engine puts it. `[proved]`
       obj.yaw = v.faceCamera
-        ? G.g_camera_block_yaw_bams + FACE_CAMERA_TURN
+        ? CameraBlockYaw(G.g_camera_index) + FACE_CAMERA_TURN
         : (p.yaw ?? obj.yaw);
       obj.roll = p.roll ?? obj.roll;
     }

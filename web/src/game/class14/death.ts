@@ -28,6 +28,7 @@ import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { WaterFieldSampleHeight } from "../class16";
 import { PropStripKind, SpawnPropStripEffect } from "../effects/prop_strip";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { MatrixGetTranslation } from "../matrix";
 import type { ClassFrame } from "../registry";
 import { ActorShiftToHoldBone1Position } from "../actor_pose";
@@ -249,7 +250,7 @@ export function Class14StateDeathA(obj: Boss2Actor, f: ClassFrame): void {
         t.flags |= Class14Flag.FeetOff;
         for (const c of G.g_class14_foot_contacts) c.strength = 0;
         SpawnPropStripEffect({ pos: B1, pitch: 0,
-                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYaw(G.g_camera_index), roll: 0 },
                              PropStripKind.Kind0, SPLASH_SMALL, f.events);
         SpawnPropStripEffect({ pos: vec3(B1.x, B1.y, B1.z), pitch: 0, yaw: 0,
                                roll: 0 },
@@ -326,7 +327,7 @@ export function Class14StateDeathB(obj: Boss2Actor, f: ClassFrame): void {
       const B2 = BoneWorld(obj, 2);
       if (B2.y <= Math.fround(h)) {
         SpawnPropStripEffect({ pos: B2, pitch: 0,
-                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYaw(G.g_camera_index), roll: 0 },
                              PropStripKind.Kind0, SPLASH_LARGE, f.events);
         SpawnPropStripEffect({ pos: vec3(B2.x, B2.y, B2.z), pitch: 0, yaw: 0,
                                roll: 0 },
@@ -431,7 +432,7 @@ export function Class14StateDeathC(obj: Boss2Actor, f: ClassFrame): void {
       if (t.counter0 === 0) {
         const B2 = BoneWorld(obj, 2);
         SpawnPropStripEffect({ pos: B2, pitch: 0,
-                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYaw(G.g_camera_index), roll: 0 },
                              PropStripKind.Kind0, SPLASH_LARGE, f.events);
         t.counter0 = GONE_FRAMES_C;
         t.sub += 1;

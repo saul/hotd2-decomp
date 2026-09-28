@@ -28,6 +28,7 @@ import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
@@ -129,7 +130,8 @@ for (let stage = 1; stage <= 6; stage++) {
       // ...and the script raises its flags. Two states wait on one; nothing
       // else in this harness would ever set them.
       if (f === 120) for (let i = 0; i < 256; i++) G.g_script_flags[i] = 1;
-      GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+      SeatHarnessEye(eye);
+      GameUpdate(1 / 60, NULL_HOST, rng, events);
       maxSub = Math.max(maxSub, a.sub);
       const left = DESPAWNS.has(p.initial_state)
         ? (a.despawned || a.dead) : a.state !== p.initial_state;

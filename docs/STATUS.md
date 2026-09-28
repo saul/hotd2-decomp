@@ -19,21 +19,21 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 102368 | 336 | engine |
+| `game/` | 102725 | 336 | engine |
 | `hod2lib/` | 19029 | 35 | engine |
-| `render/` | 14878 | 54 | render |
-| `app/` | 8554 | 29 | app |
+| `render/` | 14882 | 54 | render |
+| `app/` | 8552 | 29 | app |
 | `script/` | 4410 | 25 | engine |
 | `ui/` | 3181 | 24 | ui |
 | `bundle/` | 2727 | 11 | engine |
 | `core/` | 978 | 9 | engine |
 | `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **157589** | **526** | |
+| **total** | **157948** | **526** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2819
+* `game/globals.ts` — 2834
 * `game/actor.ts` — 2629
 * `app/main.ts` — 2581
 * `hod2lib/bundle.ts` — 2322
@@ -82,7 +82,7 @@ in a checker**, and there is deliberately no suppression comment.
 
 | Ratchet | Where | Now | Baseline |
 |---|---|---:|---:|
-| `uncited-exports` | `tools/verify_port.py` | 82 | 82 |
+| `uncited-exports` | `tools/verify_port.py` | 81 | 81 |
 
 All 14 rules in `verify_layers.py` are `error` at zero;
 a new violation of any of them fails the build rather than moving

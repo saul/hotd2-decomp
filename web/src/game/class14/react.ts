@@ -211,15 +211,17 @@ function Class14KnockRoll(obj: Boss2Actor, t: Boss2Tail): void {
  * 0x10 is on screen for one frame. That is the engine's.
  */
 export function Class14StateKnockedDown(obj: Boss2Actor, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe (`0x0047B550..562`).
+  const eye = G.g_camera_eye;
   const t = obj.boss2;
   switch (t.sub) {
     case 0: {
       t.counter1 = KNOCK_SPAN;
       t.counter0 = KNOCK_SPAN;
       Class14KnockStep(obj, t, 0x14);
-      const dx = obj.pos.x - f.eye.x;
-      const dz = Math.fround(obj.pos.z - f.eye.z);
-      const dy = obj.pos.y - f.eye.y;
+      const dx = obj.pos.x - eye.x;
+      const dz = Math.fround(obj.pos.z - eye.z);
+      const dy = obj.pos.y - eye.y;
       const pitch = FtolS16(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))
                             * RADIANS_TO_BAMS);
       const yaw = FtolS16(Math.atan2(dx, dz) * RADIANS_TO_BAMS);

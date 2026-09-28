@@ -799,17 +799,19 @@ function FrogPickHeading(base: number, width: number, rng: Rng): number {
  * the frog never picks a heading. See `docs/LESSONS.md`.
  */
 export function FrogStateHopWithinScreenWedge(obj: Actor, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   const sub = Tail(obj);
   if (!sub) return;
   switch (sub.sub) {
     case 0: {
       if (sub.state !== FrogState.HopToHeading) {
-        const aim = FrogHeadingTo(obj, f.eye.x, f.eye.z);
+        const aim = FrogHeadingTo(obj, eye.x, eye.z);
         const view = { x: 0, z: 0 };
         const p = { x: 0, y: 0, z: 0 };
         if (f.host.viewSpaceOf(obj.at, p)) { view.x = p.x; view.z = p.z; }
         const win = FrogHeadingWindow(sub.state, aim, view);
-        FrogClampToWedge(obj, f.eye, sub.wedge, win);
+        FrogClampToWedge(obj, G.g_camera_eye, sub.wedge, win);
         sub.a = FrogPickHeading(win.base, win.width, f.rng);
       }
       if (sub.a > FROG_TURN_THRESHOLD) {
@@ -834,8 +836,8 @@ export function FrogStateHopWithinScreenWedge(obj: Actor, f: ClassFrame): void {
       const c = Math.cos(th);
       let speed: number;
       if (sub.state === FrogState.HopToward) {
-        const ddx = obj.pos.x - s * FROG_STOP_SHORT - f.eye.x;
-        const ddz = obj.pos.z - c * FROG_STOP_SHORT - f.eye.z;
+        const ddx = obj.pos.x - s * FROG_STOP_SHORT - eye.x;
+        const ddz = obj.pos.z - c * FROG_STOP_SHORT - eye.z;
         speed = Math.hypot(ddx, ddz) >= FROG_SLOW_RANGE
           ? -1.0 : (sub.camDist - FROG_SLOW_RANGE) / -FROG_STOP_SHORT;
       } else if (sub.state === FrogState.HopToHeading) {
@@ -890,12 +892,14 @@ function FrogHopInFlight(obj: Actor, sub: FrogTail): void {
  * ⚠ 37 bytes dropped at `0x0043B212`..`0x0043B236`, and they are the ones that
  * make state 5 aim.
  */
-export function FrogStateHopInPlace(obj: Actor, f: ClassFrame): void {
+export function FrogStateHopInPlace(obj: Actor, _f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.sub === 0) {
     sub.a = sub.state === FrogState.HopInPlaceFacing
-      ? FrogHeadingTo(obj, f.eye.x, f.eye.z) : 0;
+      ? FrogHeadingTo(obj, eye.x, eye.z) : 0;
     FrogPlay(obj, FrogMotion.HopInPlace);
     sub.sub += 1;
     return;
@@ -1453,7 +1457,11 @@ const g_class11_states: Record<number, (obj: Actor, f: ClassFrame) => void> = {
 export function FrogUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
-  sub.camDist = Math.hypot(obj.pos.z - f.eye.z, obj.pos.x - f.eye.x);
+  // `g_camera_eye_z` and `_x` by address, `0x0043A212` and `0x0043A21A`, as
+  // every eye in this class is (`0x0043AA97..AB2`, `0x0043AB8C`, `0x0043AFCF`,
+  // `0x0043B1DC..1F6`): the gameplay eye.
+  const eye = G.g_camera_eye;
+  sub.camDist = Math.hypot(obj.pos.z - eye.z, obj.pos.x - eye.x);
   if (!FrogBone1World(sub, f.host, G.g_frog_bone1_on_entry)) {
     // `[port-only]`: no draw the host could pose has left a record yet. What
     // the engine's record holds before its first draw is `[open]` -- zero is

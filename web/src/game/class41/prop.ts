@@ -23,6 +23,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { GameMode } from "../game_mode";
 import { BREAKABLE_STANDING_RISE, PropRegisterForShotTest }
   from "./shot_test";
@@ -467,7 +468,7 @@ function BreakCrack(p: BreakableProp, level: number, rng: Rng,
   // (`0x0046473E`, the `* 0x69` dword stride): a prop cracked while still
   // standing turns to face the camera. `g_camera_block_yaw_bams` —
   // `0x009A60D0` — is the one block the port keeps.
-  if (p.state === BreakableState.Standing) p.yaw = G.g_camera_block_yaw_bams;
+  if (p.state === BreakableState.Standing) p.yaw = CameraBlockYaw(G.g_camera_index);
   p.hp -= 1;
   p.shake = BREAKABLE_SHAKE;
   events?.emit("prop.cracked", { id: p.id, sound: SFX_PROP_CRACK });

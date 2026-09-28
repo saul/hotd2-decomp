@@ -61,6 +61,7 @@ import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
   from "../combat/counts";
 import { ActorDespawn } from "../despawn";
 import { ActorByAt, G, HIT_SLOT_NONE } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
@@ -464,7 +465,7 @@ export function ZombieStateTargetMotionScript(obj: ZombieActor, rng: Rng,
         if (frameOf(obj) === SCRIPT_SPLASH_FRAME) {
           SpawnPropStripEffect({
             pos: vec3(obj.pos.x, obj.pos.y, obj.pos.z),
-            pitch: 0, yaw: G.g_camera_block_yaw_bams, roll: 0,
+            pitch: 0, yaw: CameraBlockYaw(G.g_camera_index), roll: 0,
           }, PropStripKind.Kind0, 1.0, events);
         }
       } else if (obj.motion === WADE_MOTION) {

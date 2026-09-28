@@ -58,6 +58,7 @@
 import type { Actor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -374,7 +375,7 @@ export function CarrierPropRoutine1(obj: Actor, f: ClassFrame): void {
         const bow = vec3();
         CarrierTransformPoint(obj, 0, 0, CARRIER_GROUND_WAKE_DRAW[1].bowZ, bow);
         SpawnPropStripEffect({ pos: bow, pitch: 0,
-                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYaw(G.g_camera_index), roll: 0 },
                              PropStripKind.CarrierBow, 1.0, f.events);
         f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       } else if (sub.pathFrame === FRAME_BOW_FLAG) {
@@ -498,7 +499,7 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
         const bow = vec3();
         CarrierTransformPoint(obj, 0, 0, CARRIER_GROUND_WAKE_DRAW[6].bowZ, bow);
         SpawnPropStripEffect({ pos: bow, pitch: 0,
-                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
+                               yaw: CameraBlockYaw(G.g_camera_index), roll: 0 },
                              PropStripKind.CarrierBow, 1.0, f.events);
         f.events?.emit("sound.play", { id: SFX_CARRIER_BOW });
       }

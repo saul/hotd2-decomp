@@ -26,6 +26,7 @@ import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { ActorKillAll } from "../src/game/combat/resolve_hit.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ActorIsEnemy } from "../src/game/registry.ts";
@@ -132,7 +133,8 @@ let killedAt = -1;
 for (let i = 0; i < frames; i++) {
   walker.tick(1 / 60);
   syncSpawns();
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, host, rng, events);
   if (killedAt < 0 && G.g_attack_permits.some((x) => x !== -1)) killedAt = i;
   if (killedAt >= 0 && i >= killedAt) break;
 }
@@ -219,7 +221,8 @@ function trace(frame) {
 trace(0);
 for (let i = 0; i < after; i++) {
   walker.tick(1 / 60);
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, host, rng, events);
   trace(i + 1);
   if (i === 0 || i === 59 || i === 299 || i === after - 1) {
     console.log(`  +${i + 1}f: ${row()}`

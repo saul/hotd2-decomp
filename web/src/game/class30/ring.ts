@@ -23,7 +23,7 @@
  */
 import type { Actor } from "../actor";
 import { G } from "../globals";
-import { dist2d, type Vec3 } from "../vec";
+import { dist2d } from "../vec";
 
 // -- `.text` immediates ----------------------------------------------------
 //
@@ -55,15 +55,16 @@ export function ApproachInnerRadius(obj: Actor): number {
  * how `ZombieStateHoldAtRange` refreshes the allowance by calling it and
  * ignoring the result.
  */
-export function TestApproachRing(obj: Actor, eye: Vec3): RingBand {
+export function TestApproachRing(obj: Actor): RingBand {
   const inner = ApproachInnerRadius(obj);
   const mid = G.g_enemy_approach_ring_mid[obj.ringSet]
            ?? G.g_enemy_approach_ring_mid[0] ?? inner;
   const outer = G.g_enemy_approach_ring_outer[obj.ringSet]
              ?? G.g_enemy_approach_ring_outer[0] ?? mid;
   const base = G.g_enemy_approach_steps;
-  // The game measures on the ground plane only -- x and z.
-  const d = dist2d(obj.pos, eye);
+  // The game measures on the ground plane only -- `g_camera_eye_z` and `_x`
+  // by address, `0x0045665B` and `0x00456664`: the gameplay eye.
+  const d = dist2d(obj.pos, G.g_camera_eye);
   if (d <= inner) { obj.allowance = base; return 1; }
   if (d <= mid) { obj.allowance = base; return 2; }
   if (d <= outer) {

@@ -54,6 +54,7 @@
 import { ActorFlag, MotionFlag, ThrowerFlag, type Actor } from "../actor";
 import { AngleWithinTolerance, TurnAngleToward } from "../actor_turn";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import type { GameHost } from "../host";
 import {
   FtolS16, MatIdentity, MatrixRotateY, MatrixTransformPoint, MatrixTranslate,
@@ -183,7 +184,7 @@ export function ActorHeadAimAngles(obj: Actor, pt: Vec3):
   if (G.g_max_attackers === 2 && obj.attackPermit !== -1) {
     const m = MatIdentity();
     MatrixTranslate(m, eye.x, eye.y, eye.z);
-    MatrixRotateY(m, G.g_camera_block_yaw_bams);
+    MatrixRotateY(m, CameraBlockYaw(G.g_camera_index));
     _aim.x = Math.fround((1 - 2 * obj.attackPermit) * HEAD_AIM_SHOULDER);
     _aim.y = HEAD_AIM_TWO_RISE;
     _aim.z = HEAD_AIM_AHEAD;

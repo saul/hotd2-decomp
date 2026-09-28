@@ -39,7 +39,7 @@ import { SpawnSpriteEffect } from "../effects/sprite";
 import { ActorByAt, G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionPlayFrame, MotionPlayLength, MotionRowOf } from "../tables";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import { ActorSetMotionBlended } from "./motion_cue";
 import { ZombieFlag2 } from "../actor";
 import { ZombieState } from "./states";
@@ -99,7 +99,7 @@ function turnTowardInCarrier(obj: ZombieActor, x: number, y: number,
  * frame; later subs only re-blend to the remembered clip. **No exit**: the
  * actor stays on the carrier until it is shot.
  */
-export function ZombieStateHoldOnCarrier(obj: ZombieActor, eye: Vec3,
+export function ZombieStateHoldOnCarrier(obj: ZombieActor,
                                          dt: number): void {
   if (obj.sub === 0) {
     const m = MotionRowOf(obj)[0] ?? 0;
@@ -113,6 +113,8 @@ export function ZombieStateHoldOnCarrier(obj: ZombieActor, eye: Vec3,
     }
     return;
   }
+  // `g_camera_eye` by address, all three words (`0x0045D06D`..`0x0045D078`).
+  const eye = G.g_camera_eye;
   turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt);
 }
 
@@ -123,7 +125,7 @@ export function ZombieStateHoldOnCarrier(obj: ZombieActor, eye: Vec3,
  * halving both instead.
  */
 function LeapOffCarrierFlight(obj: ZombieActor, flagFrame: number,
-                              knockOnWood: boolean, eye: Vec3, dt: number,
+                              knockOnWood: boolean, dt: number,
                               host: GameHost | undefined,
                               events: Events | undefined): void {
   obj.vel.y += obj.accY;
@@ -172,7 +174,7 @@ function LeapOffCarrierFlight(obj: ZombieActor, flagFrame: number,
         obj.flags2 |= ZombieFlag2.CollideWorld;
       }
     }
-    TurnActorAwayFromPoint(obj, eye, LANDED_TURN_RATE, dt);
+    TurnActorAwayFromPoint(obj, G.g_camera_eye, LANDED_TURN_RATE, dt);
     return;
   }
   // `MatrixGetAngles` of the pose, then half the pitch and roll back through
@@ -186,13 +188,13 @@ function LeapOffCarrierFlight(obj: ZombieActor, flagFrame: number,
 }
 
 /** Sub 3 of both leaps: face the camera until the landing clip ends. */
-function LeapOffCarrierLanded(obj: ZombieActor, eye: Vec3, dt: number): void {
+function LeapOffCarrierLanded(obj: ZombieActor, dt: number): void {
   const len = MotionPlayLength(obj);
   if (MotionPlayFrame(obj) === len - 1) {
     obj.state = ZombieState.AttackRun;
     obj.sub = 0;
   }
-  TurnActorAwayFromPoint(obj, eye, LANDED_TURN_RATE, dt);
+  TurnActorAwayFromPoint(obj, G.g_camera_eye, LANDED_TURN_RATE, dt);
 }
 
 /**
@@ -221,7 +223,7 @@ function LeapOffCarrierRelease(obj: ZombieActor, frame: number): boolean {
  * `-0.109`; sub 2 flies and lands; sub 3 faces the camera out and goes to
  * `AttackRun`.
  */
-export function ZombieStateLeapOffCarrierForward(obj: ZombieActor, eye: Vec3,
+export function ZombieStateLeapOffCarrierForward(obj: ZombieActor,
                                           dt: number, host?: GameHost,
                                           events?: Events): void {
   const h = ZombieScriptForState(obj)?.head;
@@ -245,15 +247,16 @@ export function ZombieStateLeapOffCarrierForward(obj: ZombieActor, eye: Vec3,
         obj.vel.y = h.vy ?? 0;
         obj.sub += 1;
       }
+      const eye = G.g_camera_eye;           // `0x0045D232`..`0x0045D23E`
       turnTowardInCarrier(obj, eye.x, eye.y, eye.z, RIDER_TURN_RATE, dt, c);
       return;
     }
     case 2:
-      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, false, eye, dt, host,
+      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, false, dt, host,
                            events);
       return;
     case 3:
-      LeapOffCarrierLanded(obj, eye, dt);
+      LeapOffCarrierLanded(obj, dt);
       return;
   }
 }
@@ -268,7 +271,7 @@ export function ZombieStateLeapOffCarrierForward(obj: ZombieActor, eye: Vec3,
  * Aboard it turns toward that point rather than the camera, and a landing on
  * surface `0x35` knocks.
  */
-export function ZombieStateLeapOffCarrierAtMark(obj: ZombieActor, eye: Vec3,
+export function ZombieStateLeapOffCarrierAtMark(obj: ZombieActor,
                                                  dt: number, host?: GameHost,
                                                  events?: Events): void {
   const h = ZombieScriptForState(obj)?.head;
@@ -292,15 +295,17 @@ export function ZombieStateLeapOffCarrierAtMark(obj: ZombieActor, eye: Vec3,
         obj.accY = g;
         obj.sub += 1;
       }
-      turnTowardInCarrier(obj, pt[0], eye.y, pt[2], RIDER_TURN_RATE, dt, c);
+      // The mark on the bank, at the height of `g_camera_eye_y` (`0x0045D627`).
+      turnTowardInCarrier(obj, pt[0], G.g_camera_eye.y, pt[2], RIDER_TURN_RATE,
+                          dt, c);
       return;
     }
     case 2:
-      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, true, eye, dt, host,
+      LeapOffCarrierFlight(obj, h.flag_frame ?? -1, true, dt, host,
                            events);
       return;
     case 3:
-      LeapOffCarrierLanded(obj, eye, dt);
+      LeapOffCarrierLanded(obj, dt);
       return;
   }
 }

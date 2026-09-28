@@ -14,16 +14,16 @@ import { ActorFlag, type ZombieActor } from "../actor";
 import { TryClaimAttackSlot } from "../combat/permits";
 import { MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
-import type { Vec3 } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { MotionFade, QUEUE_CAP, ZombieWaitMotion } from "./states";
 
-export function ZombieStateApproach(obj: ZombieActor, eye: Vec3, rng: Rng,
+export function ZombieStateApproach(obj: ZombieActor, rng: Rng,
                                     host: GameHost): void {
   if (obj.sub === 0) {
-    // The same band test `TestApproachRing` does, inlined here in the exe.
-    TestApproachRing(obj, eye);
+    // The same band test `TestApproachRing` does, inlined here in the exe --
+    // on `g_camera_eye` by address too, `0x00457A71` and `0x00457A7A`.
+    TestApproachRing(obj);
     obj.flags |= ActorFlag.NoCameraTrack;
     obj.sub = 1;
     return;

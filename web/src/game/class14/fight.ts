@@ -23,6 +23,7 @@ import { QueryGroundHeightAt } from "../coli";
 import { PlayerTakeDamage } from "../combat/player";
 import { SpawnPropStripEffect, PropStripKind } from "../effects/prop_strip";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import type { GameHost } from "../host";
 import {
   MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
@@ -134,6 +135,8 @@ function StripAt(p: Vec3, yaw: number, kind: PropStripKind, scale: number,
  * ```
  */
 export function Class14StateHunt(obj: Boss2Actor, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   const t = obj.boss2;
   if (t.sub === 0) {
     let slot: number;
@@ -153,8 +156,10 @@ export function Class14StateHunt(obj: Boss2Actor, f: ClassFrame): void {
     t.sub += 1;
   }
   if (t.sub === 1) {
-    const dx = Math.fround(obj.pos.x - f.eye.x);
-    const dz = Math.fround(obj.pos.z - f.eye.z);
+    // `g_camera_eye` by address, as every eye in this class is
+    // (`0x00478993`..`0x00478B26`, `0x0047B550..562`): the gameplay eye.
+    const dx = Math.fround(obj.pos.x - eye.x);
+    const dz = Math.fround(obj.pos.z - eye.z);
     ActorTurnTowardXZ(obj, dx, dz, CLASS14_TURN_STEP);
     const d = Math.sqrt(dz * dz + dx * dx);
     let next: Class14State | null = null;
@@ -358,9 +363,11 @@ const _aim = vec3();
 /**
  * The launch the three leaps share, at `0x00479169..0x00479220`: speed
  * `hypot(x - eye.x, z - eye.z) * k` along the boss's own yaw, 4.0 up,
- * ENE_WALK7. `[port-only]` as a function; the engine has it three times.
+ * ENE_WALK7, from `g_camera_eye` by address (`0x0047914E`, `0x0047A3F6`,
+ * `0x0047AB31`). `[port-only]` as a function; the engine has it three times.
  */
-function Class14Launch(obj: Boss2Actor, eye: Vec3, k: number): void {
+function Class14Launch(obj: Boss2Actor, k: number): void {
+  const eye = G.g_camera_eye;
   const dz = obj.pos.z - eye.z;
   const dx = obj.pos.x - eye.x;
   const s = Math.sqrt(dz * dz + dx * dx) * k;
@@ -492,7 +499,7 @@ export function Class14StateLungeAtCamera(obj: Boss2Actor, f: ClassFrame): void 
   if (t.sub === 1) {
     Class14LeapAim(obj, f, LUNGE_AIM, LUNGE_AIM);
     if (Class14Cursor(obj) === CUE_LAUNCH) {
-      Class14Launch(obj, f.eye, t.phase === Class14Phase.Stage5Final
+      Class14Launch(obj, t.phase === Class14Phase.Stage5Final
         ? LUNGE_SPEED_FINAL : LEAP_SPEED);
       Sound(f.events, Class14Sound.Launch);
       t.sub += 1;
@@ -510,7 +517,9 @@ export function Class14StateLungeAtCamera(obj: Boss2Actor, f: ClassFrame): void 
  */
 function Class14LeapAim(obj: Boss2Actor, f: ClassFrame, near: number,
                         far: number): void {
-  let tx = f.eye.x, tz = f.eye.z;
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
+  let tx = eye.x, tz = eye.z;
   if (G.g_max_attackers === 2) {
     AimPoint(obj, near, far, f.host, _aim);
     tx = _aim.x;
@@ -540,7 +549,7 @@ export function Class14StateLeapAttack(obj: Boss2Actor, f: ClassFrame): void {
   if (t.sub === 1) {
     Class14LeapAim(obj, f, LEAP_AIM, LEAP_AIM);
     if (Class14Cursor(obj) === CUE_LAUNCH) {
-      Class14Launch(obj, f.eye, LEAP_SPEED);
+      Class14Launch(obj, LEAP_SPEED);
       Sound(f.events, Class14Sound.Launch);
       t.sub += 1;
     }
@@ -595,7 +604,7 @@ export function Class14StateReposition(obj: Boss2Actor, f: ClassFrame): void {
   }
   if (c === 10) {
     obj.flags &= ~ActorFlag.NoCameraTrack;
-    StripAt(obj.pos, G.g_camera_block_yaw_bams, PropStripKind.Kind0,
+    StripAt(obj.pos, CameraBlockYaw(G.g_camera_index), PropStripKind.Kind0,
             STRIP_SMALL, f);
   }
 }
@@ -624,6 +633,8 @@ export function Class14StateReposition(obj: Boss2Actor, f: ClassFrame): void {
  * ```
  */
 export function Class14StateLeapFromSide(obj: Boss2Actor, f: ClassFrame): void {
+  // The gameplay eye, `g_camera_eye`, by address in the exe.
+  const eye = G.g_camera_eye;
   const t = obj.boss2;
   switch (t.sub) {
     case 0: {
@@ -633,7 +644,7 @@ export function Class14StateLeapFromSide(obj: Boss2Actor, f: ClassFrame): void {
       ActorSetMotionBlended(obj, 0x33, CUE_LAUNCH, 0);
       obj.pos.z = t.target.z;
       obj.pos.y = Math.fround(Ground(obj));
-      let tx = f.eye.x, tz = f.eye.z;
+      let tx = eye.x, tz = eye.z;
       if (G.g_max_attackers === 2) {
         const near = t.counter0 === 0 ? SIDE_AIM_NEAR : SIDE_AIM_FAR;
         const far = t.counter0 === 0 ? SIDE_AIM_FAR : SIDE_AIM_NEAR;
@@ -643,7 +654,7 @@ export function Class14StateLeapFromSide(obj: Boss2Actor, f: ClassFrame): void {
       }
       obj.yaw = FtolS16(Math.atan2(obj.pos.x - tx, obj.pos.z - tz)
                         * RADIANS_TO_BAMS);
-      Class14Launch(obj, f.eye, LEAP_SPEED);
+      Class14Launch(obj, LEAP_SPEED);
       obj.flags = (obj.flags & ~(OBJ_BIT_80000 | ActorFlag.PoseFrozen))
         | ActorFlag.Committed;
       t.sub += 1;
@@ -654,7 +665,7 @@ export function Class14StateLeapFromSide(obj: Boss2Actor, f: ClassFrame): void {
       if (c === CUE_FREEZE_RISE) {
         obj.flags |= ActorFlag.PoseFrozen;
       } else if (c === 0x28) {
-        StripAt(obj.pos, G.g_camera_block_yaw_bams, PropStripKind.Kind0,
+        StripAt(obj.pos, CameraBlockYaw(G.g_camera_index), PropStripKind.Kind0,
                 STRIP_SMALL, f);
       } else if (c === 0x2d) {
         // `EvtOpPlayDialogue2D` (`FUN_00435B80`) -- the same message groups
@@ -765,7 +776,7 @@ export function Class14StateScriptedBreak(obj: Boss2Actor, f: ClassFrame): void 
       obj.pos.y = Math.fround(WaterFieldSampleHeight(obj.pos));
       obj.pos.x = Math.fround(obj.pos.x - t.dir.x * BREAK_BACK);
       obj.pos.z = Math.fround(obj.pos.z - t.dir.z * BREAK_BACK);
-      const yaw = G.g_camera_block_yaw_bams;
+      const yaw = CameraBlockYaw(G.g_camera_index);
       obj.yaw = ((-0x8000 - ((yaw << 16) >> 16)) << 16) >> 16;
       StripAt(obj.pos, yaw, PropStripKind.Kind0, STRIP_LARGE, f);
       t.counter2 = 0x14;

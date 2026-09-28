@@ -27,6 +27,7 @@ import { authoredFrameOfTicks } from "../src/core/play_cursor.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables, T } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -135,7 +136,8 @@ for (let i = 0; i <= frames; i++) {
     walker.tick(1 / 60);
     syncSpawns();
     syncCam();
-    GameUpdate(eye, 1 / 60, host, rng, events);
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, host, rng, events);
   } else {
     syncSpawns();
     syncCam();

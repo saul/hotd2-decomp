@@ -5331,6 +5331,50 @@ over 900 frames: mean head pitch -6323 BAMS (-34.7 degrees, up) before and
 should have to look into the lens is missed by 37.0 degrees on average before
 and 0.3 after.
 
+**And every other reader of the eye** (2026-09-28, night). The head aim was
+one reader of a wrong eye; there were about fifty. `GameUpdate` was handed
+`ctx.view.eye` -- the drawn camera, as the last draw left it -- and every class
+update read it as `ClassFrame.eye`, where the engine names one of three points
+by address: `g_camera_eye` (`0x009C71E0`), the gameplay eye, fifteen under the
+rail's pose; camera block 0's eye (`0x009A60C0`); or the block
+`g_camera_index` names, which is block 2 under scene state (1, 3). The frame
+carries no eye now, so a reader has to spell the one its instruction names;
+the per-routine table, with the address of every read, is
+`docs/formats/cam.md` § *Which eye*. Ground distances and turns could not
+show the error. Heights, 3D distances and aims did, and each moved to the
+exe's, measured in the page (`?drive=1&seed=1`), before -> after:
+
+| | before | after |
+|---|---|---|
+| stage 2 block 21, the delayed pounce's target height | 51.0 (the lens) | 36.0 (`g_camera_eye_y`) |
+| stage 5 block 2, `zslman` hanging off the camera, over `g_camera_eye` | 45.0 | 30.0, dropping onto the gameplay eye |
+| stage 6 block 0, the first `zslman` pounce: from `g_camera_eye`, ground / up | 12.98 / 3.52 (the screen point) | 10.00 / 4.50 |
+| stage 1 block 1, the first strike's remembered point, y | 8.28 (the lens) | -6.72 (`g_camera_eye_y`) |
+
+(The stage 2 block 21 note above reads "at `g_camera_eye_y` (51)": the 51 was
+the lens.) Three changes are more than the eye. The **distance rank** is the
+engine's list now: `RegisterForDistanceRank` files the **ground** distance to
+`g_camera_eye` from `EnemyZombieUpdate`'s own frame, and the next frame's rank
+task sorts it -- it had sorted the pool on the 3D distance to the lens.
+`ThrowerStateCloseAndStrike` called `ActorFacePlayerTarget`, which stored the
+eye over the landing point it had just picked, so the strike's range test
+measured to the camera; it turns its yaw alone now, as the exe does.
+`ThrowerPickLandingPoint` had no `zslman` arm at all -- it lay past a
+`MatrixStackPop` Ghidra marks no-return -- and `zslman` lands ten units in
+front of `g_camera_eye` at a stance's height. Class 0x10's op `0x26` with no
+point walks to `g_camera_eye`, not the world origin. The drawn block's yaw is
+read through the index by the twenty-odd routines that index it
+(`CameraBlockYaw`), and the owl, the fish, the bats, the horde and five
+class-0x41 props read the drawn block's eye (`CameraBlockEye`).
+
+Playthroughs (`playthrough.mjs --headless --continue`, stages 1-6) against the
+tree before: stages 1, 2, 3, 5 and 6 end where they did (1 reaches its end
+240 frames sooner; 5 and 6 still hang at block 1 1/69 and block 2 1/77);
+**stage 4 now spends its sixth credit at block 6 where it used to reach the
+end on five.** It is chaos rather than one bug: putting back either the old
+rank or the old eye in `TurnActorTowardCamera` alone -- whose point turns by
+`ftol(eye.y)` BAMS, 49 against 34 -- restores the old run.
+
 ### Stage 2 block 11: the fire strip ends
 
 Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:

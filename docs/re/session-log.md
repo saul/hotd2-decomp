@@ -24420,3 +24420,107 @@ comment (`class41/items.ts`, `type62.ts`, `type72.ts`, `original_item.ts`,
 `draw_only.ts`, `class46/index.ts`). `type72.ts` is the one that could change
 play: by its own comment the exe reads the block's frame through the index,
 and block 2's `+0x110` is never written. `[open]`, handed on as its own sweep.
+
+
+## 2026-09-28 -- which eye: the frame stops carrying the lens
+
+Asked to audit every place the port reads the drawn camera where the exe reads
+the gameplay eye `g_camera_eye` (`0x009C71E0`), after the head-aim fix
+(`74db148b`) found one such reader, and -- once `5ec8cd4c` made scene state
+(1, 3) draw from camera block 2 -- to fold in the readers the exe points at
+`[g_camera_index * 0x1A4 + ...]`.
+
+**The exe side.** A byte search of the image's code for each address
+(`e0719c00`/`e4`/`e8`: 328 hits; the block eye `c0609a00`/`c4`/`c8`: 259; the
+block angles `cc`/`d0`/`d4`: 92), every hit decoded to its instruction and
+mapped to a routine, and cross-checked against `get_xrefs_to` (the xref lists
+agreed on `0x009C71E0..E8`; they cannot say which addressing mode a read uses,
+and that was half the question). An indexed read is `[reg + 0x9a60c0]` or
+`[reg*4 + ...]` after `MOV reg, [0x009c6f00]`; I spot-checked the load in the
+owl (`0x00446C9D`), the bats (`0x0042EFFF`), the carried prop (`0x004450B3`)
+and `PropUpdateType72` (`0x00470945`). The table is `docs/formats/cam.md`
+§ *Which eye*.
+
+**The port side.** `GameUpdate(eye, ...)` took `ctx.view.eye` -- the
+three.js camera the last draw placed, which is the previous tick's drawn
+block -- and handed it to every class as `ClassFrame.eye`, to
+`RankEnemiesByDistance` and to the thrown weapons. About sixty readers used
+it; all but two (`head_aim.ts`, `camera/slots.ts`) should have read
+`g_camera_eye` or a camera block. Rather than fix them one by one and leave
+the field for the next reader to reach for, the field is gone: `GameUpdate`
+takes no eye, `ClassFrame` has none, and the leaf routines that read the
+global in the exe read it themselves (`TurnActorTowardCamera`,
+`TurnActorTowardCameraEye`, `ActorFacePlayerTarget`, `TestApproachRing`, and
+so the class-0x30 and 0x31 states lost their `eye` parameters). A reader has
+to spell `G.g_camera_eye`, `G.g_camera_block_eye` or
+`CameraBlockEye(G.g_camera_index)` (new in `camera/view.ts`, with
+`CameraBlockYaw` and `CameraBlockPitch`). Nothing in `game/` can see the lens
+any more except through `GameHost`, which is where the render half's camera
+belongs.
+
+Found on the way, each a transcription:
+
+* `RegisterForDistanceRank` (`FUN_00409010`) keys on the **ground** distance
+  to `g_camera_eye` (`0x0040903B`, `0x00409032`) and is called from
+  `EnemyZombieUpdate` after its draw (`0x0045346D`, behind `obj+0x136C` bit
+  `0x8000000`); `RankEnemiesByDistance` sorts that list on the next frame. The
+  port built the list at rank time from the pool and sorted on the 3D
+  distance to the lens. The list is `G.g_distance_rank_list` now.
+* `ThrowerStateCloseAndStrike` called `ActorFacePlayerTarget`, which writes
+  the eye into `obj+0x13E4` -- over the landing point the state had just put
+  there -- so its range test measured to the camera. The exe turns the yaw
+  alone (`0x0044EAA3`).
+* `ThrowerPickLandingPoint` (`FUN_0044CBA0`) has a `zslman` tail past the
+  `MatrixStackPop` Ghidra marks no-return (`L35`): the screen point is
+  replaced by `T(g_camera_eye) Ry(g_camera_yaw_bams + 0x8000) (x, y, -10)`,
+  `y` from the stance table at `0x0044CE44`. Its `x`/`y` live in the argument
+  slots, so the stance > 3 arm reads the `out` pointer's bits as `y` -- a
+  float below `1e-28`, which the port writes as 0.
+* Class 0x10's op `0x26` with no point walks to `g_camera_eye`
+  (`0x0048C0FE`); the port walked it to the world origin.
+* `GameOverRunPhase` zeroes the gameplay eye and its angles in phase 0
+  (`0x00460A6E..AA0`), and `GameOverPlaceBody` is transcribed through them.
+* `ThrowerIsClear` had no caller and no citation, and is deleted (uncited
+  exports 82 -> 81, baseline lowered).
+
+**Wrong turns.** My first byte scan decoded each hit from the first backward
+offset that parsed, and `FSUB [EAX + 0x9a60c0]` (`d8 a0 c0 60 9a 00`) parses
+one byte in as `MOV AL, [0x9a60c0]` -- an absolute read. About forty indexed
+readers came out as block 0 by address; a majority vote over sliding
+disassembly starts put them right, and `disassemble_bytes` at `0x004170FB`
+confirmed one. Mapping hits to routines by the nearest named entry in
+`functions.tsv` misattributed four runs of unfunctioned code
+(`0x0044CDCD` is `ThrowerPickLandingPoint`'s tail, `0x0045E6C2` is
+`ZombieStateCollapseToCondition4` -- named in the database, not in the TSV --
+`0x0048D2D7` is class 0x10's bone hook `0x0048D1F0`, `0x004889DE` an
+unfunctioned writer of the drawn block); `get_function_by_address` on every
+offset over a few hundred bytes caught them. The first rank test drove two
+zombies through `GameUpdate`, where the floor snaps both to one height and
+the lens and ground orders then agree; the test calls the two routines on a
+hook-written eye instead. The `animals` harness then failed its owl: it had
+no camera paths, so the camera tasks wrote zeros over the eye it invented and
+the owl dived at the origin -- the frame's eye had been hiding that its camera
+was fiction. It loads the stage's paths now, as `dives.mjs` does. The
+worktree guard refused a `git worktree add` for the before tree, so the
+baseline ran from `git archive HEAD web`; one measurement hit vite's shared
+dependency cache mid-rebuild (504, "Outdated Optimize Dep") and was retried.
+
+**Proof.** Eleven new checks in `port.test.ts` ("which eye"), each driven through
+`EvtEnterSceneState` and the hooks rather than a hand-set eye, and the
+delayed-pounce checks re-pointed at the hook-written eye; putting each read
+back on the lens (or block 0) one at a time fails them (seven mutants, nine
+checks). Measured in the page before -> after: the delayed pounce's target
+height 51 -> 36, `zslman`'s hang over the gameplay eye 45 -> 30, stage 6's
+first `zslman` landing 12.98/3.52 -> 10.00/4.50 from `g_camera_eye`, the first
+strike's remembered y 8.28 -> -6.72. Playthroughs: stage 4 now ends in a game
+over at block 6 on its sixth credit where it reached the end on five;
+restoring either the old rank or `TurnActorTowardCamera`'s old eye alone
+restores the old run, so it is the butterfly, not a new fault. The other five
+stages end where they did.
+
+**Left open.** `PropUpdateType72` reads the drawn block's path frame
+(`0x0047095A`), and block 2's frame word has no writer found; the three
+effect spawners that read the drawn block's eye through `GameHost.viewPoint`
+are `[likely]` equal and unchanged; `ThrowerStateCloseAndStrike` also raises
+and clears `BackingOff` (`0x20000000`) where the exe raises and clears
+`0x10000000` (`0x0044EA50` sub 0, and the exit) -- not an eye, not touched.

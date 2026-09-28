@@ -3063,7 +3063,7 @@ console.log("\nthe player's character survives its own op 10:");
   const rng = new Rng(1);
   const events = new Events();
   for (let i = 0; i < 4; i++) {
-    ScriptedHumanoidUpdate(a, { eye: { x: 0, y: 6, z: 0 }, dt: 1 / 60, rng,
+    ScriptedHumanoidUpdate(a, { dt: 1 / 60, rng,
                                 host: NULL_HOST, events });
   }
   chars.update({} as never);

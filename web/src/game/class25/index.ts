@@ -630,7 +630,9 @@ function HumanoidFrameTail(obj: HumanoidActor, f: ClassFrame): void {
       obj.hum.turnMode = HumanoidTurn.None;
     }
   } else if (obj.hum.turnMode === HumanoidTurn.FaceCamera) {
-    obj.yaw = VecToAngles(obj.pos.x - f.eye.x, 0, obj.pos.z - f.eye.z).yaw
+    // `g_camera_eye_z` and `_x` by address, `0x00484AB3` and `0x00484ACA`.
+    const eye = G.g_camera_eye;
+    obj.yaw = VecToAngles(obj.pos.x - eye.x, 0, obj.pos.z - eye.z).yaw
       & 0xffff;
   }
 

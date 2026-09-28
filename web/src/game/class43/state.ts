@@ -46,6 +46,23 @@ export enum OwlState {
   Dead = 6,
 }
 
+/**
+ * `obj+0x34` bits as class 0x43 uses them (`L3`: the word is shared, the
+ * meanings are the class's).
+ */
+export enum OwlFlag {
+  /**
+   * `0x1000000` — **the owl is a corpse.** Raised by the death block in
+   * `OwlUpdateAndResolveShot` (`FUN_004460C0`) at `0x004461D6`
+   * (`OR ECX, 0x1000000`), and read by `OwlDrawBodyChain` (`FUN_00447C20`)
+   * twice: `0x00447C94` draws the dead body `0xBC0` instead of `0xBBF`, and
+   * `0x00447D4B` skips the inner limb chain. `[proved]` for both. The same
+   * bit is `ActorFlag.HoldingWeapon` on a class-0x30 actor, which is a
+   * different fact; the owl never raises `ActorFlag.Dead` (`0x4000000`).
+   */
+  Corpse = 0x1000000,
+}
+
 /** `obj+0x244` — which of the two dive trajectories is running. */
 export enum OwlDiveKind {
   /** Idle, between the pull-out and the next launch. */
@@ -83,7 +100,10 @@ export interface OwlTail {
   launchYaw: number;
   /** `obj+0x1F4` — the circling or orbiting phase, BAMS. */
   orbitPhase: number;
-  /** `obj+0x1F8` — the corpse's pitch spin. */
+  /**
+   * `obj+0x1F8` — the corpse's pitch spin, BAMS a frame: -768 at the death,
+   * 0.95 of itself every frame after, and kicked by each bounce.
+   */
   spin: number;
   /** `obj+0x1FC` and `obj+0x204` — the dive's lateral sway, and its rate. */
   swayPhase: number;
@@ -118,8 +138,16 @@ export interface OwlTail {
   dwell: number;
   /** `obj+0x24C` — the per-state frame counter. */
   timer: number;
-  /** `obj+0x250` and `obj+0x26C` — the corpse's bounce latch and settle flag. */
+  /**
+   * `obj+0x250` — sub-type 2's corpse has bounced off a step, so the next
+   * step only stops it. The death block zeroes it.
+   */
   bounced: number;
+  /**
+   * `obj+0x26C` — the corpse has landed and only sinks from here. Written 1
+   * by the four landing arms and **by nothing else**: the death block zeroes
+   * `+0x250` and `+0x254` but not this, so it is the allocation's zero.
+   */
   settled: number;
   /** `obj+0x270` and `obj+0x274` — the lerp's parameter and its rate. */
   t: number;

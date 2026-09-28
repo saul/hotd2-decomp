@@ -238,7 +238,7 @@
 00592ad8	g_class31_corpse_frames_m11e	Corpse pose frames {74, 70} for motion 0x11E, character type 0x16's death clip.
 00592ae0	g_thrown_weapon_states	The projectile's two states: flight (ThrownWeaponFlyToTarget) and deflected (ThrownWeaponDeflected). Sits immediately before g_class30_states.
 00592ae8	g_class30_states	59 entries, indices 0x00-0x3A, ending at 0x00592C74 where a table of DATA pointers (0x00565FDC...) begins; the zombie's state machine. Indices 0x00 and 0x31 are both the stub at 0x0041EBB0. (This row previously said 54; the raw bytes say 59, and 0x36-0x3A are ActorCheckWaterEntry, FUN_004569B0, FUN_00456B70, ZombieStrikeStartSplash and ZombieStrikeFrameSplash.)
-00592bc0	g_class30_draw	the zombie's draw pointer, immediately after its state table
+00592bc0	g_class30_draw	Holds 0x00456920, ActorCheckWaterEntry, and EnemyZombieUpdate calls through it at 0x00453480 after ActorRegisterCameraPoint. Not a draw -- the draw is ZombieAdvanceMotion -- and not the obj+0x12F0 push hook; the name came from where it sits, straight after g_class30_states, and is wrong. [proved]
 00592cbc	g_class30_motion_rows	Per class-0x30 character type -> per body condition (obj+0x130C) -> a row of motion ids: the character's GENERAL motion row. Sixteen readers (get_xrefs_to): fourteen states pick a clip from it by fixed index -- ZombieStateApproach 0/1 (walk, by obj+0x136C bit 21), ZombieStateAttackRun 2/3 (run, by obj+0x34 bit 27), ZombieStateBackOff 4, and row[0] as the idle in ZombieStateHoldAtRange, ZombieStateTargetLostPause, ZombieStateHoldOnCarrier and others -- and ActorPlayHitReaction / ZombieTickAltHitReaction read entries from +0x10 indexed by the last-hit zone (obj+0x1319) when obj+0x136C & 0x100, which is [open]. Was g_pHitReactionMotionsAlt, named for those two readers alone.
 00592dc0	g_class30_attack_picks	Per character type -> per body condition -> s32[80]: which attack to use, indexed (rand%10 + (destroyed_zones & 7) * 10). Ten choices per destroyed-zone combination, so a zombie that has lost its head or an arm reaches for a different attack.
 00592f18	g_class30_attacks	Per character type -> per body condition -> 0x10-byte attack entries: {s16 strike motion; s16 lunge motion; f32 distance; s16 hit frame; s16 player damage motion; u16 cancel mask}. The cancel mask names zones (1 head, 2 right arm, 4 left arm) whose destruction makes the strike whiff; 8 is outside the 3-bit mask and so never cancels, and 0 whiffs unconditionally (ActorStrikeConnect tests masked != mask). A hit frame is NOT bounded by its own clip: types 0x07, 0x0B and 0x0C share a condition-4 entry 2 at 0x00566E70 of {997, 1051, 26.0f, 40, 9, 1} where g_motion_play_length[997] is 20, and ZombieStateStrike's strike test is an exact equality against the play cursor while its exit is play_length - 1, so that entry can never land. It is the crawlers' undamaged attack and it is meant to miss.
@@ -321,11 +321,11 @@
 0059d8d8	g_coli_query_ref_x
 0059d8dc	g_coli_query_ref_y
 0059d8e0	g_coli_query_ref_z
-0059d8e4	g_coli_dynamic_count
+0059d8e4	g_coli_dynamic_count	Entries in g_coli_dynamic_list. ProcessPlayerShots stores g_shot_test_count here at 0x00404626, straight after ColiPublishDynamicList and the count's reset, so it is the PREVIOUS frame's registration count for the whole of the next actor walk. Read by ColiTraceSegmentAllSets, ColiTestSphereAgainstFullSet and ColiTestSphereAgainstActors. [proved]
 0059d8e8	g_shot_test_list	stride 5 dwords
 0059ecd8	g_coli_candidate_sort_keys
 0059f4d0	g_coli_candidates	hit candidates, stride 0x3C, sorted by the distance keys at 0x0059ECD8
-005a3098	g_coli_dynamic_list
+005a3098	g_coli_dynamic_list	Stride 5 dwords {obj, obj+0x34, obj+0x12C, +0x130, +0x134}: ColiPublishDynamicList's copy of g_shot_test_list, made once a frame at the end of ProcessPlayerShots, before any actor runs. The three moving-object passes walk it: ColiTraceSegmentAllSets, ColiTestSphereAgainstFullSet and ColiTestSphereAgainstActors, the crowd push, which reads its sphere centres from here. [proved]
 005a4488	g_coli_candidate_sort_scratch
 005a4c80	g_shot_test_count
 005a4c84	g_coli_candidate_count	entries in g_coli_candidates this frame

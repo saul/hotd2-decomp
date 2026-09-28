@@ -38,7 +38,6 @@ import { ComputeLookAtAngleError, LookAtCosineSquared, TurnLookAtToward }
   from "./turn";
 import { LerpWeighted, vec3 } from "../vec";
 import { RegisterForShotTest } from "../combat/shot_test";
-import { g_class_handlers } from "../registry";
 
 /**
  * The bone the camera follows.
@@ -135,12 +134,18 @@ export function SkeletonRecordCameraPoint(obj: Actor, host: GameHost): boolean {
  * it. A host with no pose refreshes nothing and lifts nothing -- with no draw
  * the port's `+= rise` would climb -- but the actor still registers.
  *
- * The shot-test call is made for a class that has set
- * `ClassHandler.registersForShotTest`, and only for one: the classes that have
- * not are still picked by `render/characters.ts`, and filing them here as
- * well would put them in two picks at once. That boundary is the shot test's
- * migration, one class at a time (`docs/formats/combat.md`, "The shot
- * test"), not this routine's; it goes when the last class moves across.
+ * **The shot-test call is made for every class, as the engine's is.** The
+ * list it appends to has two readers: the shot pick, and -- published a frame
+ * later by `ColiPublishDynamicList` (`FUN_00405360`) -- the crowd push,
+ * `ColiTestSphereAgainstActors` (`FUN_00405B10`), which finds a zombie, a
+ * thrower, a civilian or a frog only because it registered here. The shot
+ * test's migration, one class at a time (`docs/formats/combat.md`, "The shot
+ * test"), is the pick's business and is kept there:
+ * `ProcessPlayerShotsTestList` passes over the entry of a class that has not
+ * set `ClassHandler.registersForShotTest`, which `render/characters.ts` still
+ * picks, so no actor is in two picks at once. This call used to be gated on
+ * that flag, which left every class-0x30 and 0x31 actor out of the list the
+ * crowd push walks.
  */
 export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
                                          rise: number): void {
@@ -151,12 +156,10 @@ export function ActorRegisterCameraPoint(obj: Actor, host: GameHost,
   // whose walk drew nothing, which is the engine's own behaviour for a
   // hidden model (`SkeletonEmitNode` writes the point only while it draws).
   const posed = obj.skel ? true : SkeletonRecordCameraPoint(obj, host);
-  if (obj.skel || g_class_handlers[obj.cls]?.registersForShotTest) {
-    obj.shotCentre.x = obj.lookAt.x;
-    obj.shotCentre.y = obj.lookAt.y;
-    obj.shotCentre.z = obj.lookAt.z;
-    RegisterForShotTest(obj, host);
-  }
+  obj.shotCentre.x = obj.lookAt.x;
+  obj.shotCentre.y = obj.lookAt.y;
+  obj.shotCentre.z = obj.lookAt.z;
+  RegisterForShotTest(obj, host);
   if (obj.skel) {
     obj.lookAt.y = Math.fround(rise + obj.lookAt.y);
     RegisterForCameraTracking(obj);

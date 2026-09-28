@@ -5867,6 +5867,34 @@ nothing but shooting opens its gates.
   default meter cannot see its damage and 900 frames is shorter than the
   fight.
 
+## The crowd push tests what registered, a frame late
+
+`ZombiePushOutOfWorldAndActors` (`FUN_00454900`) has been ported since the
+crowd separation landed; what it tested against had not been.
+`ColiTestSphereAgainstActors` (`FUN_00405B10`) walked the object pool and
+re-derived each actor's sphere where it stood. The engine walks
+`g_coli_dynamic_list`, the copy `ColiPublishDynamicList` (`FUN_00405360`)
+makes of `g_shot_test_list` before any actor runs -- so the candidates are
+what registered **last frame**, each at the sphere its own class published,
+and a body behind the camera, which never registers, pushes nobody. Both are
+ported, with the rest of the routine: the two surface points, the stable
+radix pick of the nearest, the depth re-derived from them (which differs from
+`r + R - d` when the radii do), the `nx + ny + nz == 0` miss, and
+`g_coli_hit_object` and `g_coli_hit_dist_sq` among its outputs.
+
+For the list to hold anything, `ActorRegisterCameraPoint` now files every
+caller, as `0x00409BED` does; the shot test's class-at-a-time migration is a
+filter at the pick (`ShotTestPickedHere`) instead of a gate on the
+registration, which had kept every zombie, thrower, civilian and frog out of
+the list. Class 0x33's chair registers from its own tail (`0x00433CC6`), and
+the frog's `ownsSphereCentre` is gone -- the list carries its point. The
+thrower's special case on `g_coli_hit_object` is in: an off-ground thrower
+shouldered by an object with `obj+0x34` `0x200000` falls instead of sliding.
+The hook's shove timer counts calls, and its 1.8x is the strike's commit and
+the sprint bit, which `docs/formats/combat.md` section 10 now sets out.
+
+Measured over the eight entry routes with `--no-damage`: see the session log.
+
 ## Every opcode, and what the player does with it
 
 > The status column is a copy. The original lives on `Walker.OPS` in

@@ -76,7 +76,7 @@ import { ActorBuildSkinnedModel } from "../src/game/spawn";
 import {
   ColiSortHitCandidatesByDistance, ProcessPlayerShotsTestList, RayTestSphere,
   RegisterForShotTest, ShotCandidateKey, ShotRayAnglesFromView,
-  ShotTestListReset,
+  ShotTestListReset, ShotTestPickedHere,
 } from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
@@ -160,8 +160,8 @@ import { FireShotRequest, MarkActorShot, MergeShotPicks, QueueOffscreenPull,
 import { AttackListOf, MotionOf, MotionPlayFrame, MotionPlayLength,
          SetBoss4Tables, SetGameTables, T } from "../src/game/tables";
 import {
-  ColiTestSphereAgainstActors, ColiTestSphereAgainstFullSet,
-  ColiTraceSegmentAllSets,
+  ColiPublishDynamicList, ColiTestSphereAgainstActors,
+  ColiTestSphereAgainstFullSet, ColiTraceSegmentAllSets,
   QueryGroundHeightAt, QueryGroundSurfaceAt,
 } from "../src/game/coli";
 import { MotionFade, MotionRow, StrikeSub, ZombieState }
@@ -200,8 +200,8 @@ import {
   ActorAimHeadAtCamera, ActorHeadAimAngles, HEAD_AIM_RATE, HeadAimBeginDraw,
   HeadAimEndDraw, ThrowerHeadAims,
 } from "../src/game/class30/head_aim";
-import { ActorFlag, CountFlag, DamageZone, ThrowerFlag, ThrowerStance,
-         ZombieFlag2,
+import { ActorFlag, ActorUpdateBoundingSphere, CountFlag, DamageZone,
+         ThrowerFlag, ThrowerStance, ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
          type ScriptedSceneryActor,
          type SetPiecePropActor, type ThrowerActor, type ZombieActor }
@@ -228,7 +228,10 @@ import { ZombieScriptedPickPlayer } from "../src/game/class30/scripted";
 import { ThrowerTryEnterState } from "../src/game/class31/router";
 import { ThrowerStateBlinkInThreeHops, ThrowerStateRideObjectPath }
   from "../src/game/class31/scripted";
-import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
+import { EnemyZombieUpdate, ZOMBIE_CAMERA_RISE, ZombieEntryState }
+  from "../src/game/class30";
+import { ThrowerPlaceCollisionSphere, ThrowerPushOutOfWorld }
+  from "../src/game/class31/collide";
 import { ZombieEnterCorpseState, ZombieReleasePermitAndUntrack }
   from "../src/game/class30/death";
 import { ZombieOnShot } from "../src/game/class30/on_shot";
@@ -798,6 +801,25 @@ function spawnZombieWithEvents(at: number, charType: number, name: string,
                        new Rng(1), events);
   if (a.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
   return a;
+}
+
+/**
+ * What the crowd push can see, set up the way two frames of the engine leave
+ * it: each actor files its sphere with `RegisterForShotTest` (`FUN_00405160`),
+ * as its update's `ActorRegisterCameraPoint` does, and `ColiPublishDynamicList`
+ * (`FUN_00405360`) copies the list at the head of the next frame.
+ * `ColiTestSphereAgainstActors` reads nothing else -- an actor not passed here
+ * is not there. A class-0x30 sphere is rebuilt first, as that class's own push
+ * leaves it; any other class's is taken as it stands.
+ */
+function PublishCrowd(...actors: Actor[]): void {
+  ShotTestListReset();
+  for (const a of actors) {
+    if (a.cls === SpawnClass.Zombie) ActorUpdateBoundingSphere(a);
+    RegisterForShotTest(a, NULL_HOST);
+  }
+  ColiPublishDynamicList();
+  ShotTestListReset();
 }
 
 /**
@@ -10608,7 +10630,7 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
     z.hp = z.maxHp = 100;
     z.pos = vec3(29, 0, 45);
     const before = z.pos.x;
-    ZombiePushOutOfWorldAndActors(z, 1);
+    ZombiePushOutOfWorldAndActors(z);
     check("an actor inside a wall is pushed back out of it", z.pos.x < before,
           `x ${z.pos.x.toFixed(2)} from ${before}`);
   }
@@ -10624,18 +10646,249 @@ console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
     a.pos = vec3(0, 0, 0);
     b.pos = vec3(2, 0, 0);             // well inside 3.5 + 3.5
     const gap0 = Math.abs(a.pos.x - b.pos.x);
-    ZombiePushOutOfWorldAndActors(a, 1);
+    PublishCrowd(a, b);
+    ZombiePushOutOfWorldAndActors(a);
     check("an actor inside another is pushed away from it", a.pos.x < 0,
           `ax ${a.pos.x.toFixed(3)}`);
     check("...and the other is told which way, not moved",
           b.pos.x === 2 && b.pushedBy === a.at && b.pushNormal.x > 0,
           `bx ${b.pos.x} by ${b.pushedBy}`);
-    ZombiePushOutOfWorldAndActors(b, 1);
+    ZombiePushOutOfWorldAndActors(b);
     check("which it does on its own next frame",
           b.pos.x > 2 && b.pushedBy === -1, `bx ${b.pos.x.toFixed(3)}`);
     check("so the two separate", Math.abs(a.pos.x - b.pos.x) > gap0,
           `gap ${Math.abs(a.pos.x - b.pos.x).toFixed(3)} from ${gap0}`);
   }
+}
+
+// -- the crowd push, as `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) and
+// `ColiTestSphereAgainstActors` (`FUN_00405B10`) do it ----------------------
+//
+// Every number below is the exe's: a tenth of the depth a frame
+// (`0x004C4CC8`), 1.8x (`0x0055DD48`) for `obj+0x34 & 0x18000000`, the
+// candidate list published a frame late by `ColiPublishDynamicList`
+// (`FUN_00405360`), and the depth re-derived from the two surface points at
+// `0x00405E8A`. Two 3.5 bodies two units apart overlap by five.
+console.log("\nthe crowd push, as the exe runs it:");
+{
+  const crowd = (): [ZombieActor, ZombieActor] => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    G.g_camera_fixed_eye_y = 0;          // no collision: the ground plane
+    const a = spawnZombie(0x7a00, 1, "a");
+    const b = spawnZombie(0x7a01, 1, "b");
+    for (const z of [a, b]) {
+      z.visible = true;
+      z.hp = z.maxHp = 100;
+      z.flags2 |= ZombieFlag2.CollideActors;
+    }
+    a.pos = vec3(0, 0, 0);
+    b.pos = vec3(2, 0, 0);
+    return [a, b];
+  };
+  const near = (u: number, v: number, e = 1e-3) => Math.abs(u - v) < e;
+
+  // -- one frame, both halves ----------------------------------------------
+  {
+    const [a, b] = crowd();
+    PublishCrowd(a, b);
+    ZombiePushOutOfWorldAndActors(a);
+    check("an actor two units inside another moves a tenth of the five-unit "
+          + "overlap, straight away from it",
+          near(a.pos.x, -0.5) && near(a.pos.z, 0) && a.pos.y === 0,
+          `${a.pos.x}/${a.pos.y}/${a.pos.z}`);
+    check("...and records the opposite push on the other -- the depth, and "
+          + "the reversed normal -- without moving it",
+          b.pos.x === 2 && b.pushedBy === a.at && near(b.pushDepth, 5)
+          && near(b.pushNormal.x, 1) && near(b.pushNormal.z, 0),
+          `${b.pos.x} ${b.pushedBy} ${b.pushDepth} `
+          + JSON.stringify(b.pushNormal));
+    ZombiePushOutOfWorldAndActors(b);
+    // b takes a's 0.5, and then measures a where a **registered** -- still
+    // at 0, not at the -0.5 it has moved to this frame: 2.5 apart, 4.5 deep.
+    check("the other applies the recorded half-unit on its own update, then "
+          + "measures the first where it registered, not where it now is",
+          near(b.pos.x, 2 + 0.5 + 0.45) && b.pushedBy === -1
+          && a.pushedBy === b.at && near(a.pushDepth, 4.5),
+          `${b.pos.x} ${a.pushedBy} ${a.pushDepth}`);
+  }
+
+  // The test on its own, because the hook's later traces overwrite the
+  // globals it leaves: the point on this sphere, surface 1, the other object.
+  {
+    const [a, b] = crowd();
+    PublishCrowd(a, b);
+    ActorUpdateBoundingSphere(a);
+    const hit = ColiTestSphereAgainstActors(a, a.sphereCentre.x,
+                                            a.sphereCentre.y, a.sphereCentre.z,
+                                            a.bodyRadius);
+    check("`ColiTestSphereAgainstActors` leaves the hit in the globals: this "
+          + "sphere's surface point toward the other, surface 1, the object",
+          hit && G.g_coli_hit_surface === 1 && G.g_coli_hit_object === b.at
+          && near(G.g_coli_hit_x, 3.5) && near(G.g_coli_hit_depth, 5),
+          `${hit} ${G.g_coli_hit_surface} ${G.g_coli_hit_object} `
+          + `${G.g_coli_hit_x} ${G.g_coli_hit_depth}`);
+  }
+
+  // -- the 1.8x is Committed and the sprint bit, not the airborne bit ------
+  {
+    const shove = (bits: number): number => {
+      const [a, b] = crowd();
+      a.flags |= bits;
+      PublishCrowd(a, b);
+      ZombiePushOutOfWorldAndActors(a);
+      return a.pos.x;
+    };
+    check("a sprinter (`obj+0x34` 0x8000000) is pushed out 1.8x as far",
+          near(shove(ZOMBIE_SPRINTS), -0.9), String(shove(ZOMBIE_SPRINTS)));
+    check("...and so is one committed to its strike (0x10000000)",
+          near(shove(ActorFlag.Committed), -0.9),
+          String(shove(ActorFlag.Committed)));
+    check("...and an airborne one (0x20000) is not: that bit only skips the "
+          + "ground snap", near(shove(ActorFlag.Airborne), -0.5),
+          String(shove(ActorFlag.Airborne)));
+    const [a, b] = crowd();
+    a.flags |= ActorFlag.Committed;
+    PublishCrowd(a, b);
+    ZombiePushOutOfWorldAndActors(a);
+    b.pos.x = 50;                          // out of reach of anything
+    ZombiePushOutOfWorldAndActors(b);
+    check("the recorded push is 1.8x when the **pusher** carries the bit",
+          near(b.pos.x, 50.9), String(b.pos.x));
+  }
+
+  // -- who is a candidate ---------------------------------------------------
+  {
+    let [a, b] = crowd();
+    a.flags2 &= ~ZombieFlag2.CollideActors;
+    PublishCrowd(a, b);
+    ZombiePushOutOfWorldAndActors(a);
+    check("without `obj+0x136C` 0x40000000 an actor neither moves nor "
+          + "records anything", a.pos.x === 0 && b.pushedBy === -1,
+          `${a.pos.x} ${b.pushedBy}`);
+
+    [a, b] = crowd();
+    PublishCrowd(a);
+    ZombiePushOutOfWorldAndActors(a);
+    check("an actor that did not register last frame is not there to be "
+          + "found -- the list is the published registrations, not the pool",
+          a.pos.x === 0 && b.pushedBy === -1, `${a.pos.x} ${b.pushedBy}`);
+
+    [a, b] = crowd();
+    PublishCrowd(a, b);
+    b.flags |= ActorFlag.NoShotTest;
+    ZombiePushOutOfWorldAndActors(a);
+    check("...and one that registered is refused on its **live** flags: "
+          + "0x8000 raised since", a.pos.x === 0, String(a.pos.x));
+
+    [a, b] = crowd();
+    PublishCrowd(a, b);
+    b.flags |= ActorFlag.ShotTestMesh;
+    ZombiePushOutOfWorldAndActors(a);
+    check("...or 0x10", a.pos.x === 0, String(a.pos.x));
+
+    [a, b] = crowd();
+    PublishCrowd(a, b);
+    b.pos.x = 100;
+    ZombiePushOutOfWorldAndActors(a);
+    check("a candidate is measured where it registered, however far it has "
+          + "gone since", near(a.pos.x, -0.5), String(a.pos.x));
+
+    [a, b] = crowd();
+    b.pos = vec3(0, 0, 0);
+    PublishCrowd(a, b);
+    ZombiePushOutOfWorldAndActors(a);
+    check("two bodies on one centre are a miss -- the normal's components "
+          + "sum to exactly zero (`0x00405ECB`) -- and nothing is recorded",
+          a.pos.x === 0 && a.pos.z === 0 && b.pushedBy === -1,
+          `${a.pos.x}/${a.pos.z} ${b.pushedBy}`);
+  }
+
+  // -- the depth the engine re-derives, with two radii that differ ----------
+  //
+  // r = 1 against R = 6, two units apart: the two surface points are 5 apart
+  // (not above R), so the depth is `r - |centre - other's point|` = 1 - 4.
+  // A body inside a bigger one is pulled *in*. `r + R - d` would say 5.
+  {
+    const [a, b] = crowd();
+    b.pos = vec3(0, 0, 0);
+    b.bodyRadius = 6;
+    PublishCrowd(b);
+    const y = b.sphereCentre.y;
+    const hit = ColiTestSphereAgainstActors(a, 2, y, 0, 1);
+    check("unequal radii take the engine's depth, 1 - |6 - 2|, not 1 + 6 - 2",
+          hit && near(G.g_coli_hit_depth, -3) && near(G.g_coli_hit_dist_sq, 4)
+          && near(G.g_coli_hit_normal[0], 1),
+          `${hit} ${G.g_coli_hit_depth} ${G.g_coli_hit_dist_sq} `
+          + JSON.stringify(G.g_coli_hit_normal));
+  }
+
+  // -- registration: every class-0x30 actor files itself -------------------
+  {
+    const [a] = crowd();
+    ShotTestListReset();
+    ActorRegisterCameraPoint(a, NULL_HOST, ZOMBIE_CAMERA_RISE);
+    check("`ActorRegisterCameraPoint` files a zombie for the shot test, as "
+          + "`0x00409BED` does for every caller -- the crowd push's list",
+          G.g_shot_test_list.some((e) => e.at === a.at),
+          String(G.g_shot_test_list.length));
+    check("...while the port's own pick still passes it over, because the "
+          + "renderer picks class 0x30", !ShotTestPickedHere(a));
+  }
+
+  // -- the frame's order: published at the head of the frame ---------------
+  {
+    const [a, b] = crowd();
+    GameUpdate(EYE, 1 / 60, NULL_HOST, new Rng(3), new Events());
+    const first = G.g_coli_dynamic_list.map((e) => e.at);
+    const filed = G.g_shot_test_list.map((e) => e.at);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, new Rng(3), new Events());
+    const second = G.g_coli_dynamic_list.map((e) => e.at);
+    check("the first frame's actors test an empty list -- nothing had "
+          + "registered before it -- and file themselves during it",
+          first.length === 0 && filed.includes(a.at) && filed.includes(b.at),
+          `${first} / ${filed}`);
+    check("...and the second frame's test what the first filed",
+          second.includes(a.at) && second.includes(b.at), String(second));
+  }
+}
+
+// -- `ThrowerPushOutOfWorld`'s own case, off the same test ------------------
+console.log("\nThrowerPushOutOfWorld: what a burning object does to a thrower:");
+{
+  const scene = (charType: number, offGround: boolean) => {
+    const t = thrower(ThrowerState.StandAndDecide);
+    t.charType = charType;
+    if (offGround) t.flags2 |= ThrowerFlag.OffGround;
+    const o = ActorSpawn(0x9001, SpawnClass.Thrower, 0x19, "on fire", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    o.visible = true;
+    o.pos = vec3(t.pos.x + 2, t.pos.y, t.pos.z);
+    ThrowerPlaceCollisionSphere(t);
+    ThrowerPlaceCollisionSphere(o);
+    o.flags |= ActorFlag.FireLoop;
+    PublishCrowd(o);
+    const x0 = t.pos.x;
+    ThrowerPushOutOfWorld(t);
+    return { t, x0 };
+  };
+  let { t, x0 } = scene(0x19, true);
+  check("an off-ground thrower shouldered by an object with `obj+0x34` "
+        + "0x200000 falls instead of being pushed (`0x00449D8F`)",
+        t.state === ThrowerState.FallAndLand && t.sub === 0 && t.pos.x === x0,
+        `${t.state}.${t.sub} ${t.pos.x}`);
+  ({ t, x0 } = scene(0x19, false));
+  check("...one on the ground neither falls nor is pushed",
+        t.state === ThrowerState.StandAndDecide && t.pos.x === x0,
+        `${t.state} ${t.pos.x}`);
+  ({ t, x0 } = scene(0x18, true));
+  check("...and `zslman` is always pushed",
+        t.state === ThrowerState.StandAndDecide && t.pos.x < x0,
+        `${t.state} ${t.pos.x}`);
 }
 
 console.log("\nclass 0x30 state 15, the scripted walk-in:");
@@ -12237,7 +12490,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           (pinned.flags & GROUND_SNAP_EXEMPT) !== 0,
           `0x${(pinned.flags >>> 0).toString(16)}`);
     check("...and `ActorInitFlags` ORs in bit 0", (pinned.flags & 1) !== 0);
-    ZombiePushOutOfWorldAndActors(pinned, 1);
+    ZombiePushOutOfWorldAndActors(pinned);
     check("a pinned spawn keeps the height the script placed it at",
           pinned.pos.y === 47, String(pinned.pos.y));
 
@@ -12249,7 +12502,7 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     loose.visible = true;
     loose.hp = loose.maxHp = 100;
     loose.pos = vec3(0, 47, 60);
-    ZombiePushOutOfWorldAndActors(loose, 1);
+    ZombiePushOutOfWorldAndActors(loose);
     check("...and one without it still snaps to the ground",
           loose.pos.y === 0, String(loose.pos.y));
   }
@@ -14987,7 +15240,8 @@ console.log("\nthe strike anchor and the cooldown it gates:");
       b.pos = vec3(2, 0, 40);             // well inside 3.5 + 3.5
       if (strike) ZombieStateStrike(a, EYE, new Rng(4));
       a.pos = vec3(0, 0, 40);
-      ZombiePushOutOfWorldAndActors(a, 1);
+      PublishCrowd(a, b);
+      ZombiePushOutOfWorldAndActors(a);
       return a.pos.x;
     };
     const plain = shove(false);
@@ -15083,10 +15337,11 @@ console.log("\nthe engine's body-radius fallback:");
   self.visible = true;
   self.pos = vec3(2, 0, 0);
 
-  // `ActorUpdateBoundingSphere` puts the other actor's centre at
-  // `y = bodyRadius + 1`, so the probe is level with it and two units aside:
-  // inside `1 + 6` only if the fallback filled the radius in.
-  const hit = ColiTestSphereAgainstActors(self, 2, 7, 0, 1);
+  // The other actor published its sphere with a body radius of zero, so its
+  // centre is `y = 0 + 0 + 1`; the probe is level with it and two units
+  // aside: inside `1 + 6` only if the fallback filled the radius in.
+  PublishCrowd(other, self);
+  const hit = ColiTestSphereAgainstActors(self, 2, 1, 0, 1);
   check("a zero body radius still collides -- it falls back to `obj+0x124`",
         hit, String(hit));
   check("...and the fallback is stored back onto the actor",
@@ -21125,10 +21380,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
 
   // -- C5. a zombie walking into it is the whole set piece ------------------
   //
-  // The two halves meeting: `ZombiePushOutOfWorldAndActors` runs
-  // `ColiTestSphereAgainstActors`, which records the opposite push on whatever
-  // it finds, and this class applies it next frame. Nothing here calls the
-  // push directly -- if the chair moves, the wiring is real.
+  // The two halves meeting: the chair registers from its own update,
+  // `ZombiePushOutOfWorldAndActors` runs `ColiTestSphereAgainstActors` over
+  // the published list, which records the opposite push on whatever it finds,
+  // and this class applies it next frame. Nothing here calls the push
+  // directly -- if the chair moves, the wiring is real.
   {
     reset();
     G.g_script_flags[PUSH_FLAG] = 1;
@@ -21139,7 +21395,12 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     z.bodyRadius = 3.5;
     z.flags2 |= ZombieFlag2.CollideActors;
     const x0 = c.pos.x;
-    ZombiePushOutOfWorldAndActors(z, 1);
+    // The chair filed itself on its own frame (`RegisterForShotTest` at
+    // `0x00433CC6`); the next frame's `ColiPublishDynamicList` is what puts it
+    // where a zombie can find it. Without that frame boundary it is not there.
+    ColiPublishDynamicList();
+    ShotTestListReset();
+    ZombiePushOutOfWorldAndActors(z);
     check("the zombie's own collision pass records the push on the chair "
           + "rather than moving it",
           c.pushedBy === z.at && c.pushDepth > 0,
@@ -21759,11 +22020,14 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
         viewSpaceOfPoint: (p, o) => { toView(p, o); return true; },
       };
       const pf = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
-      // The other frog has published a sphere two units to A's +x.
+      // The other frog has published a sphere two units to A's +x: its own
+      // push wrote it, its registration filed it, and the frame boundary
+      // published it.
       b.visible = true;
       b.sphereCentre.x = 2;
       b.sphereCentre.y = g + 2.6;
       b.sphereCentre.z = -50;
+      PublishCrowd(b);
       // The last draw left bone 1 0.4 behind where this frame draws it.
       const last = vec3();
       toView(vec3(0, g + 2.6, -50.4), last);

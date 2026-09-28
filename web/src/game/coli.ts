@@ -20,10 +20,15 @@
  * none is warranted.
  */
 import type { ColiBlob, ColiJson } from "../bundle";
-import { ActorUpdateBoundingSphere, type Actor } from "./actor";
-import { G } from "./globals";
-import { g_class_handlers } from "./registry";
+import type { Actor, ActorRef } from "./actor";
+import { ColiSortHitCandidatesByDistance } from "./combat/shot_test";
+import { ActorByAt, G } from "./globals";
+import {
+  FtolS16, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
+  MatrixTransformPoint, MatrixTranslate, Vec3Normalize,
+} from "./matrix";
 import { T } from "./tables";
+import { VecToAngles, type Vec3 } from "./vec";
 
 /** Which of a quad's two in-plane components the dominant axis leaves. */
 const PLANE_AXES: readonly (readonly [number, number])[] =
@@ -372,87 +377,254 @@ export function QueryGroundSurfaceAt(x: number, y: number, z: number): number {
 }
 
 /**
- * `ColiTestSphereAgainstActors` — `FUN_00405B10`. The actor-versus-actor test.
+ * `ColiPublishDynamicList` — `FUN_00405360`. The frame's registrations become
+ * the list the crowd push walks.
  *
- * The engine walks a per-frame list of registered body spheres; the port walks
- * `g_object_list`, which is the same set — an actor is in that list exactly
- * while it is alive and placed. Everything else is transcribed:
+ * `ProcessPlayerShots` (`FUN_00404570`) ends
  *
- * * the caller itself is skipped, as are actors carrying `obj+0x34` bits
- *   `0x80008000` or `0x10`;
- * * a body radius of zero is lazily filled in from the shot radius at
- *   `obj+0x124`, which is the engine's own fallback for an actor whose class
- *   never set one;
- * * the overlap test is centre-to-centre against the **sum** of the radii, and
- *   the nearest of the candidates wins;
- * * and the hit is reported as a normal along the line between the centres,
- *   with the depth as the overlap.
+ * ```
+ * 00404612  CALL 0x00405360                 ; this: g_shot_test_list -> g_coli_dynamic_list
+ * 00404617  MOV  EDX, [0x005a4c80]           ; g_shot_test_count
+ * 0040461E  MOV  [0x005a4c80], EBP           ; ...= 0
+ * 00404626  MOV  [0x0059d8e4], EDX           ; g_coli_dynamic_count = the old count
+ * ```
  *
- * It also writes the **opposite** push onto the actor it found — `obj+0x138`
- * and the vector at `+0x140` — rather than moving it. That actor applies it on
- * its own next frame, so one test per actor separates a whole crowd.
+ * and it is a task that runs before every actor, so for the whole of a frame's
+ * actor walk `ColiTestSphereAgainstActors` tests what the actors registered
+ * during the **previous** one: each object's `obj+0x12C..0x134` as its own
+ * class had left it when it called `RegisterForShotTest` (`FUN_00405160`), not
+ * where the object is now. `[proved]`
+ *
+ * The copy is five dwords an entry. The port's list carries its count as its
+ * length, so the store at `0x00404626` is the copy's length, and a frame with
+ * nothing registered publishes an empty list -- as the engine's loop, which
+ * copies nothing, does with a count of zero.
+ */
+export function ColiPublishDynamicList(): void {
+  G.g_coli_dynamic_list = G.g_shot_test_list.map((e) => ({ ...e }));
+}
+
+/**
+ * One record of `g_coli_candidates` (`0x0059F4D0`, stride `0x3C`) and its
+ * sort key, as far as {@link ColiSelectNearestHitCandidate} copies it out.
+ * Which quantity sits in `distSq` and `depth` is each caller's own business --
+ * see `ColiTestSphereAgainstActors`.
+ */
+export interface ColiCandidate {
+  /** `g_coli_candidate_sort_keys` (`0x0059ECD8`): the radix sort's key. */
+  key: number;
+  /** `+0x00..0x08` → `g_coli_hit_x/y/z`. */
+  x: number; y: number; z: number;
+  /** `+0x18..0x20` → `g_coli_hit_normal_x/y/z`. */
+  nx: number; ny: number; nz: number;
+  /** `+0x24` → `g_coli_hit_object`, by spawn address; `-1` for none. */
+  obj: ActorRef;
+  /** `+0x30` → `g_coli_hit_surface`. */
+  surface: number;
+  /** `+0x34` → `g_coli_hit_dist_sq`. */
+  distSq: number;
+  /** `+0x38` → `g_coli_hit_depth`. */
+  depth: number;
+}
+
+/**
+ * `ColiSelectNearestHitCandidate` — `FUN_00405760`. Sort the candidates and
+ * copy the first one out into the `g_coli_hit_*` globals.
+ *
+ * `ColiSortHitCandidatesByDistance` (`FUN_00405080`) is a stable radix sort
+ * on the low sixteen bits of each key, so equal keys keep the order they were
+ * pushed in, and the record at the head of its index list is copied, fifteen
+ * dwords, into the ten globals below. `[proved]`
+ */
+export function ColiSelectNearestHitCandidate(
+    candidates: readonly ColiCandidate[]): ColiCandidate {
+  const c = ColiSortHitCandidatesByDistance(candidates)[0];
+  G.g_coli_hit_x = c.x;
+  G.g_coli_hit_y = c.y;
+  G.g_coli_hit_z = c.z;
+  G.g_coli_hit_normal = [c.nx, c.ny, c.nz];
+  G.g_coli_hit_surface = c.surface;
+  G.g_coli_hit_dist_sq = c.distSq;
+  G.g_coli_hit_depth = c.depth;
+  G.g_coli_hit_object = c.obj;
+  return c;
+}
+
+/**
+ * The `obj+0x34` bits that keep an object out of the crowd push:
+ * `TEST EAX, 0x80008000` at `0x00405B77` and `TEST AL, 0x10` at `0x00405B82`
+ * -- the second is {@link ActorFlag.ShotTestMesh} -- both on the object's
+ * **live** flags, not the word the entry recorded. A literal, not the enum
+ * member: this module is inside `actor.ts`'s import cycle, and a top-level
+ * read of another module's export there is a page that does not start (L56).
+ */
+const ACTOR_PUSH_REFUSE = 0x80008000 | 0x10;
+/**
+ * `[0x004C43A4]`, `10.0`: a candidate's key is `__ftol(distance * 10.0)`,
+ * centre to centre in tenths of a unit (`0x00405D59`..`0x00405D7B`).
+ */
+const ACTOR_PUSH_KEY_SCALE = 10.0;
+/**
+ * `MOV dword ptr [ESI + 0x59f500], 0x1` at `0x00405E01`: record `+0x30`,
+ * which `ColiSelectNearestHitCandidate` hands to `g_coli_hit_surface`. An
+ * actor has no material, and every hit this routine makes reads as one.
+ */
+const ACTOR_PUSH_SURFACE = 1;
+
+const _m: number[] = new Array(16).fill(0);
+const _v = { x: 0, y: 0, z: 0 };
+const _pSelf = { x: 0, y: 0, z: 0 };
+const _pOther = { x: 0, y: 0, z: 0 };
+const _n = { x: 0, y: 0, z: 0 };
+
+/** `x*x + y*y + z*z`, in the engine's order. `[port-only]` as a function. */
+function sq3(x: number, y: number, z: number): number {
+  return x * x + y * y + z * z;
+}
+
+/**
+ * The point `radius` out from `(ox, oy, oz)` toward `(dx, dy, dz)`, the way
+ * `ColiTestSphereAgainstActors` finds it twice over: `VecToAngles`
+ * (`FUN_004016B0`) of the direction, truncated to BAMS as `__ftol` and the
+ * `MOVSX` leave it, then `MatrixLoadIdentity`, `MatrixTranslate(o)`,
+ * `MatrixRotateY(yaw)`, `MatrixRotateX(pitch)` and `MatrixTransformPoint` of
+ * `(0, 0, radius)`. `[port-only]` as a function; the routine writes the
+ * sequence out at `0x00405C1C` and again at `0x00405CBF`.
+ */
+function SphereSurfacePointToward(ox: number, oy: number, oz: number,
+                                  dx: number, dy: number, dz: number,
+                                  radius: number, out: Vec3): void {
+  const a = VecToAngles(dx, dy, dz);
+  MatrixLoadIdentity(_m);
+  MatrixTranslate(_m, ox, oy, oz);
+  MatrixRotateY(_m, FtolS16(a.yaw));
+  MatrixRotateX(_m, FtolS16(a.pitch));
+  _v.x = 0; _v.y = 0; _v.z = radius;
+  MatrixTransformPoint(_m, _v, out);
+}
+
+/**
+ * `ColiTestSphereAgainstActors` — `FUN_00405B10`. The actor-versus-actor test,
+ * which every crowd in the game is separated by.
+ *
+ * **What it walks is last frame's registrations**, `g_coli_dynamic_list`
+ * (`0x005A3098`), which {@link ColiPublishDynamicList} copies out of
+ * `g_shot_test_list` before any actor runs. So an object is a candidate only
+ * if its class called `RegisterForShotTest` (`FUN_00405160`) on the previous
+ * frame -- in front of the eye, or a mesh, and without `obj+0x34` bit
+ * `0x8000` -- and it is measured at the sphere centre that call recorded, not
+ * at its position now. This walked the pool and re-derived every sphere from
+ * where the actor stood, which tested actors behind the camera that never
+ * register, tested every other object in the pool at a sphere made from its
+ * position -- cut-scene figures that never register, and props whose classes
+ * never write `obj+0x12C` and so register, `[likely]`, at the world origin
+ * (a search for stores to `[reg + 0x12c]` finds classes 0x10, 0x30, 0x31 and
+ * 0x33, the player block and one task, and misses the frog's, so it is a
+ * floor rather than a census) -- and measured each pusher a frame ahead of
+ * where the
+ * engine measures it. `[proved]`: the list base at `0x00405B4F`, the count at
+ * `0x00405B31`, and `ColiPublishDynamicList`'s only caller at `0x00404612`.
+ *
+ * Per entry, in order (`0x00405B5D`..`0x00405E6F`):
+ *
+ * * skipped if it is the caller (`g_cur_actor` at `0x00405B68` -- the port
+ *   passes the caller), or if its **live** `obj+0x34` carries `0x80008000` or
+ *   `0x10`;
+ * * `obj+0x128`, if zero, is filled from `obj+0x124` and **stored back**
+ *   (`0x00405BB7`), before the distance is known;
+ * * a candidate if `|centre - entry| <= r + obj+0x128` -- `TEST AH, 0x41`,
+ *   so a NaN distance is one too;
+ * * then **two surface points**: this sphere's point toward the other and the
+ *   other's toward this one ({@link SphereSurfacePointToward}), both past a
+ *   `MatrixStackPop` Ghidra calls no-return, `0x00405CBF`..`0x00405E56`
+ *   (`L35`). The record keeps this sphere's point as the hit, `other's point
+ *   - this point` as the normal, `|centre - other's point|` in the slot
+ *   `ColiSelectNearestHitCandidate` hands to `g_coli_hit_dist_sq`, and
+ *   `|this point - other's point|` in the one it hands to `g_coli_hit_depth`;
+ *   the key is `__ftol(distance * 10.0)`.
+ *
+ * Then the nearest -- by that key, stably, so a tie goes to the object that
+ * registered first -- and the depth is re-derived from the two slots:
+ *
+ * ```
+ * 00405E8A  FLD [g_coli_hit_depth]; FCOMP [obj+0x128]; TEST AH,0x41; JNZ
+ * 00405E9D  depth = g_coli_hit_dist_sq + r        ; the gap is wider than R
+ * 00405EA9  depth = r - g_coli_hit_dist_sq        ; otherwise
+ * ```
+ *
+ * which is `r + R - d` whenever the two radii are equal and something else
+ * when they are not -- transcribed as it stands. Then **a sum, not a length**:
+ * `nz + ny + nx` of the unnormalised normal compared with `0.0`
+ * (`0x00405EB9`..`0x00405ED6`), and exactly zero is a miss with nothing
+ * written onto anybody. Otherwise `Vec3Normalize` (`FUN_004AAA00`), and the
+ * **opposite** push goes onto the object found -- `obj+0x138` the caller,
+ * `obj+0x13C` the depth, `obj+0x140..0x148` the reversed normal -- which it
+ * applies on its own next update, so one test per actor separates a crowd.
+ * `[proved]`
+ *
+ * A thrown weapon registers too, and never qualifies: both launchers write
+ * `obj+0x34 = 0x80000001` (`THROWN_WEAPON_SPAWN_FLAGS`) and nothing clears bit
+ * 31, which is `0x80008000`'s half. The port's weapons are not `Actor`s, so
+ * their entries are passed over by that fact rather than by reading the flag.
  */
 export function ColiTestSphereAgainstActors(self: Actor, cx: number, cy: number,
                                             cz: number, r: number): boolean {
   G.g_coli_hit_surface = 0;
-  let best: Actor | null = null;
-  let bestDist = Infinity;
-  for (const o of G.g_object_list) {
-    if (o === self || o.despawned || !o.visible) continue;
-    if (o.flags & (0x80008000 | 0x10)) continue;
-    // `if (obj+0x128 == 0) obj+0x128 = obj+0x124` -- the engine's own lazy
-    // default, kept because it is what gives a class that never set a body
-    // radius one at all.
-    //
+  const candidates: ColiCandidate[] = [];
+  for (const e of G.g_coli_dynamic_list) {
+    if (e.thrown !== undefined) continue;
+    const o = ActorByAt(e.at);
+    if (!o || o === self) continue;
+    if (o.flags & ACTOR_PUSH_REFUSE) continue;
     // `[proved]`, and it is a **store**, not a local substitution:
     //
     //     00405b8a  FLD   float ptr [EBX + 0x128]
     //     00405bb1  MOV   EAX, dword ptr [EBX + 0x124]
     //     00405bb7  MOV   dword ptr [EBX + 0x128], EAX
     //
-    // so the actor keeps the filled-in radius afterwards and every later
-    // reader -- the class's own push, the debug marker -- sees it too. Writing
-    // it back is the behaviour, not a shortcut; `port.test.ts`'s
-    // "engine fallback" assertion is on the field after the call, for that
-    // reason.
+    // so the object keeps the filled-in radius and every later reader -- the
+    // class's own push, the debug marker -- sees it too. `port.test.ts`'s
+    // "engine fallback" assertion is on the field after the call.
     if (o.bodyRadius === 0) o.bodyRadius = o.radius;
-    // The engine tests a list every actor registers into once a frame; the
-    // port derives the sphere from the position instead, so an actor that has
-    // not ticked yet is still measured where it actually is. The derivation is
-    // class 0x30's, so a class whose own routine publishes a different point
-    // says so and keeps it -- the frog's is bone 1 as drawn, not its feet.
-    if (!g_class_handlers[o.cls]?.ownsSphereCentre) {
-      ActorUpdateBoundingSphere(o);
-    }
-    const dx = cx - o.sphereCentre.x;
-    const dy = cy - o.sphereCentre.y;
-    const dz = cz - o.sphereCentre.z;
-    const d = Math.hypot(dx, dy, dz);
-    if (d > r + o.bodyRadius) continue;
-    if (d >= bestDist) continue;
-    bestDist = d;
-    best = o;
+    const dx = cx - e.x, dy = cy - e.y, dz = cz - e.z;
+    const dist = Math.sqrt(sq3(dx, dy, dz));
+    if (dist > r + o.bodyRadius) continue;
+    // `entry - centre` subtracted afresh (`0x00405C1C`..`0x00405C42`), not
+    // `-(centre - entry)`: on two coincident centres that is +0 where the
+    // negation is -0, and `VecToAngles` turns -0 into half a turn.
+    SphereSurfacePointToward(cx, cy, cz, e.x - cx, e.y - cy, e.z - cz, r,
+                             _pSelf);
+    SphereSurfacePointToward(e.x, e.y, e.z, dx, dy, dz, o.bodyRadius, _pOther);
+    candidates.push({
+      key: Math.trunc(dist * ACTOR_PUSH_KEY_SCALE) | 0,
+      x: _pSelf.x, y: _pSelf.y, z: _pSelf.z,
+      nx: _pOther.x - _pSelf.x, ny: _pOther.y - _pSelf.y,
+      nz: _pOther.z - _pSelf.z,
+      obj: o.at,
+      surface: ACTOR_PUSH_SURFACE,
+      // `0x00405DE1`..`0x00405E1B` and `0x00405E21`..`0x00405E51`: each the
+      // square root of a sum of three squares, stored as a float.
+      distSq: Math.sqrt(sq3(cx - _pOther.x, cy - _pOther.y, cz - _pOther.z)),
+      depth: Math.sqrt(sq3(_pSelf.x - _pOther.x, _pSelf.y - _pOther.y,
+                           _pSelf.z - _pOther.z)),
+    });
   }
-  if (!best) return false;
-
-  const dx = cx - best.sphereCentre.x;
-  const dy = cy - best.sphereCentre.y;
-  const dz = cz - best.sphereCentre.z;
-  const len = Math.hypot(dx, dy, dz);
-  if (len === 0) return false;                    // exactly co-located: no way out
-  const nx = dx / len, ny = dy / len, nz = dz / len;
-  G.g_coli_hit_normal = [nx, ny, nz];
-  G.g_coli_hit_depth = r + best.bodyRadius - len;
-  G.g_coli_hit_x = best.sphereCentre.x;
-  G.g_coli_hit_y = best.sphereCentre.y;
-  G.g_coli_hit_z = best.sphereCentre.z;
-  // The deferred half: the other actor is told which way it was pushed and by
-  // how much, and moves itself next frame.
-  best.pushedBy = self.at;
-  best.pushDepth = G.g_coli_hit_depth;
-  best.pushNormal.x = -nx;
-  best.pushNormal.y = -ny;
-  best.pushNormal.z = -nz;
+  if (!candidates.length) return false;
+  ColiSelectNearestHitCandidate(candidates);
+  const hit = ActorByAt(G.g_coli_hit_object)!;
+  G.g_coli_hit_depth = G.g_coli_hit_depth <= hit.bodyRadius
+    ? r - G.g_coli_hit_dist_sq
+    : G.g_coli_hit_dist_sq + r;
+  const [nx, ny, nz] = G.g_coli_hit_normal;
+  if (nz + ny + nx === 0) return false;
+  _n.x = nx; _n.y = ny; _n.z = nz;
+  Vec3Normalize(_n, _n);
+  G.g_coli_hit_normal = [_n.x, _n.y, _n.z];
+  hit.pushedBy = self.at;
+  hit.pushDepth = G.g_coli_hit_depth;
+  hit.pushNormal.x = -_n.x;
+  hit.pushNormal.y = -_n.y;
+  hit.pushNormal.z = -_n.z;
   return true;
 }
 

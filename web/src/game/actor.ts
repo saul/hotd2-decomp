@@ -207,11 +207,15 @@ export enum ActorFlag {
    * arm plays `0x823A9`, `CAR_FIRE_22_OFF.wav`, which is what says the bit
    * stands for a *loop that has to be stopped* rather than a one-shot.
    *
-   * `[proved]` its only two readers on `obj+0x34` are `0x004332DA` and
-   * `0x00433830`, both inside that routine — a sweep for `TEST` against a
-   * `0x200000` mask returns 39 sites and no other names `+0x34`. Whether any
-   * of the six that test a bare register hold `obj+0x34` there is `[open]`;
-   * this name describes the one class that provably writes it. The same bit
+   * `[proved]` two of its readers on `obj+0x34` are `0x004332DA` and
+   * `0x00433830`, both inside that routine. A third is not: the sweep that
+   * found those two -- `TEST` against a `0x200000` mask, 39 sites -- missed
+   * `TEST dword ptr [ECX + 0x34], 0x200000` at `0x00449D8F` in
+   * `ThrowerPushOutOfWorld` (`FUN_00449D40`), on whatever object the crowd
+   * push found, which knocks an off-ground thrower down instead of pushing
+   * it. Whether any of the six that test a bare register hold `obj+0x34`
+   * there is `[open]`; this name describes the one class that provably writes
+   * it. The same bit
    * number in `obj+0x136C` is {@link ThrowerFlag.DeathLatched}, which is a
    * different word and a different fact.
    */
@@ -2332,11 +2336,14 @@ const LOW_SPHERE = 0x2000000;
  * x and z, with y lifted by the **body** radius `obj+0x128` and then by one
  * unit — or a half when `obj+0x136C` bit `0x2000000` is set.
  *
- * It lives here rather than beside its caller because both the class-0x30 push
- * and `ColiTestSphereAgainstActors` need it, and the second must be able to
- * ask it about an actor that has not ticked yet. The engine solves that with a
- * per-frame registration list; deriving the sphere from the position is the
- * same answer without the ordering hazard.
+ * It lives here rather than beside the class-0x30 push,
+ * `ZombiePushOutOfWorldAndActors` (`FUN_00454900`), because class 0x10's pose
+ * hook calls it too. What another actor's push measures against is **not**
+ * this function's answer but the centre the actor registered with
+ * `RegisterForShotTest` last frame, which `ColiTestSphereAgainstActors`
+ * (`FUN_00405B10`) reads out of `g_coli_dynamic_list`; it used to re-derive
+ * every sphere through here instead, a frame early and in class 0x30's shape
+ * whatever the class.
  */
 export function ActorUpdateBoundingSphere(obj: Actor): void {
   obj.sphereCentre.x = obj.pos.x;

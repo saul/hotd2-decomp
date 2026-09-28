@@ -7,7 +7,6 @@
  * can sit on a permit.
  */
 import { ZombieStateCarryProp } from "./carry_prop";
-import { SecondsToTicks } from "../tables";
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { ZombieActor } from "../actor";
@@ -101,12 +100,15 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   ZombieRunState(obj, eye, dt, rng, host, events);
   // The engine's own order, and the two halves the port did not have.
   // `EnemyZombieUpdate` integrates the velocity straight after the state —
-  // which is what carries a leap through its arc — and then runs the hook at
-  // `obj+0x12F0`, which is what puts the actor on the floor.
+  // which is what carries a leap through its arc — and then draws, and the
+  // draw runs the hook at `obj+0x12F0` (`SkeletonApplyRootMotion`'s
+  // `CALL [model+0x115C]` at `0x00410E93`), which is what puts the actor on
+  // the floor and out of the crowd. Once per update: the hook counts its
+  // shove timer in calls, not in time.
   obj.pos.x += obj.vel.x;
   obj.pos.y += obj.vel.y;
   obj.pos.z += obj.vel.z;
-  ZombiePushOutOfWorldAndActors(obj, SecondsToTicks(dt));
+  ZombiePushOutOfWorldAndActors(obj);
   // `ZombieAdvanceMotion` (`FUN_00454860`) at `0x0045343F`: the draw, and
   // with it the node hook -- which is where the head is aimed. The push above
   // is the pose hook at `obj+0x12F0`, which `SkeletonApplyRootMotion` runs

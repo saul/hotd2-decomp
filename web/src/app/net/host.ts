@@ -17,7 +17,9 @@
  * stale by the time the packet lands still correct.
  */
 import { ByteReader, ByteWriter } from "../../core/net/bytes";
-import { StateTracker, TreeHasher, labelOf } from "../../core/net/codec";
+import {
+  StateTracker, TreeHasher, labelOf, type SectionSink,
+} from "../../core/net/codec";
 import {
   KEYFRAME_CHUNK, Msg, PressKind, decodeJson, readInput, writeKeyframeChunk,
   writeTickHead,
@@ -90,7 +92,23 @@ export class NetHost extends NetPeer {
   private readonly events = new Map<number, [string, unknown][]>();
   private pending: [string, unknown][] = [];
   private readonly views = new Map<number, number[]>();
-  private readonly sections = new Map<number, Map<string, number>>();
+  /** Each tick's sections, as ids into {@link sectionNames} and their hashes. */
+  private readonly sections = new Map<number, { ids: Int32Array; hashes: Uint32Array }>();
+  private readonly sectionIds = new Map<string, number>();
+  private readonly sectionNames: string[] = [];
+  private readonly sectionScratch = { ids: [] as number[], hashes: [] as number[] };
+  private readonly sectionSink: SectionSink = {
+    add: (name, hash) => {
+      let id = this.sectionIds.get(name);
+      if (id === undefined) {
+        id = this.sectionNames.length;
+        this.sectionIds.set(name, id);
+        this.sectionNames.push(name);
+      }
+      this.sectionScratch.ids.push(id);
+      this.sectionScratch.hashes.push(hash);
+    },
+  };
   /** Section hashes each tick: what answers "which part differed". */
   trackSections = true;
   private aim: RemoteInput["aim"] = null;
@@ -188,10 +206,14 @@ export class NetHost extends NetPeer {
     if (!this.tracker) this.tracker = new StateTracker();
     const tracker = this.tracker;
     tracker.update(this.sim.liveRoot(), t);
-    const sections = this.trackSections ? new Map<string, number>() : undefined;
-    const hash = this.hasher.hash(tracker.state, sections);
-    if (sections) {
-      this.sections.set(t, sections);
+    const scratch = this.sectionScratch;
+    scratch.ids.length = 0;
+    scratch.hashes.length = 0;
+    const hash = this.hasher.hash(tracker.state,
+                                  this.trackSections ? this.sectionSink : undefined);
+    if (this.trackSections) {
+      this.sections.set(t, { ids: Int32Array.from(scratch.ids),
+                             hashes: Uint32Array.from(scratch.hashes) });
       this.sections.delete(t - SECTION_HISTORY);
     }
     if (this.pending.length) this.events.set(t, this.pending);
@@ -325,12 +347,16 @@ export class NetHost extends NetPeer {
 
   /** Which sections of the replica's state differed from the host's at that tick. */
   private answerDesync(d: DesyncMsg): void {
-    const mine = this.sections.get(d.tick);
+    const held = this.sections.get(d.tick);
     let differ: string[] = [];
     let note: string;
-    if (!mine) {
+    if (!held) {
       note = `tick ${d.tick} is no longer held (${SECTION_HISTORY} are)`;
     } else {
+      const mine = new Map<string, number>();
+      for (let i = 0; i < held.ids.length; i++) {
+        mine.set(this.sectionNames[held.ids[i]], held.hashes[i]);
+      }
       const theirs = new Map(d.sections);
       for (const [k, h] of mine) if (theirs.get(k) !== h) differ.push(labelOf(k));
       for (const k of theirs.keys()) if (!mine.has(k)) differ.push(`${labelOf(k)} (replica only)`);

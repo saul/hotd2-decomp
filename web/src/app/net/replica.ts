@@ -19,7 +19,7 @@
  */
 import { ByteReader, ByteWriter } from "../../core/net/bytes";
 import {
-  ApplyError, StateMirror, TreeHasher, diffTrees,
+  ApplyError, StateMirror, TreeHasher, diffTrees, sectionMap,
 } from "../../core/net/codec";
 import {
   Msg, decodeJson, readKeyframeChunk, readTickHead, writeInput,
@@ -402,7 +402,7 @@ export class NetReplica extends NetPeer {
     this.desynced = true;
     this.log("hash", head.tick, `state hash ${hex(mine)}, the host's ${hex(head.hash)}`);
     const sections = new Map<string, number>();
-    this.hasher.hash(this.sim.root(), sections);
+    this.hasher.hash(this.sim.root(), sectionMap(sections));
     this.sendCtrl(Msg.Desync, { epoch: this.epoch, tick: head.tick,
                                 sections: [...sections] });
     this.requestResync("state hash differs", head.tick);

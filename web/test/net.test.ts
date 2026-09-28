@@ -93,7 +93,8 @@ function aimAt(g: typeof G, target: Vec): { x: number; y: number; ray: { origin:
 
 interface Profile { name: string; loss: number; latency: number; jitter: number }
 
-async function run(stage: number, p: Profile, seconds: number): Promise<void> {
+async function run(stage: number, p: Profile, seconds: number,
+                   sabotage = false): Promise<void> {
   const h = buildHost(stage);
   let seed = 0x9e3779b9 ^ stage;
   const random = () => {
@@ -136,7 +137,7 @@ async function run(stage: number, p: Profile, seconds: number): Promise<void> {
   };
   const replica = new NetReplica(link.b, ID, replicaSim);
 
-  const truth = new Map<number, Obj>();
+  const truth = new Map<string, Obj>();
   const hasher = new TreeHasher();
   let now = 0;
   const hostCost: number[] = [];
@@ -152,6 +153,7 @@ async function run(stage: number, p: Profile, seconds: number): Promise<void> {
   let aimWorst = 0;
   let aimChecked = 0;
   let seeked = false, seekEpochDone = false;
+  let sab1 = 0, sab2 = 0, sabEpoch = 0, mismatchesBefore2 = 0;
   const frames = seconds * 60;
   let hostTick = 0;
 
@@ -196,8 +198,13 @@ async function run(stage: number, p: Profile, seconds: number): Promise<void> {
       if (host.streaming) {
         hostCost.push(performance.now() - t0);
         hostTick++;
-        if (hostTick % 30 === 0) truth.set(hostTick, structuredClone(h.root()));
-        truth.delete(hostTick - 600);
+        // Keyed as the host numbers its ticks -- per epoch -- so the state
+        // after the seek is compared as well as the state before it.
+        const t = host.stats.tick;
+        if (t % 30 === 0) {
+          truth.set(`${host.stats.epoch}:${t}`, structuredClone(h.root()));
+          truth.delete(`${host.stats.epoch}:${t - 600}`);
+        }
       }
     }
 
@@ -206,13 +213,39 @@ async function run(stage: number, p: Profile, seconds: number): Promise<void> {
     const before = replica.tick;
     replica.step(now);
     if (replica.tick !== before) replicaCost.push(performance.now() - r0);
-    const want = truth.get(replica.tick);
-    if (want && replicaRoot && replica.tick !== before) {
+    const want = truth.get(`${replica.stats.epoch}:${replica.tick}`);
+    // Under sabotage the replica differs on purpose until it is repaired;
+    // the comparison counts only once the second repair has had time to land
+    // -- or a new epoch has started it afresh.
+    const comparable = !sabotage || (sab2 > 0 && !replica.stats.desynced
+      && (replica.stats.epoch > sabEpoch || replica.tick > sab2 + 180));
+    if (want && replicaRoot && replica.tick !== before && comparable) {
       compared++;
       const d = diffTrees(want, replicaRoot, 4);
       if (d.length && !deepFail) deepFail = `tick ${replica.tick}: ${d.join("; ")}`;
       if (!d.length && hasher.hash(want) !== hasher.hash(replicaRoot) && !deepFail) {
         deepFail = `tick ${replica.tick}: equal trees, different hashes`;
+      }
+    }
+
+    // -- sabotage: the replica's state made wrong behind the codec's back --
+    if (sabotage && replicaRoot && replica.running) {
+      const g = (replicaRoot.parts as Obj).game as Record<string, unknown>;
+      if (!sab1 && replica.tick >= 400) {
+        // A value that changes rarely, so nothing the host sends repairs it
+        // by accident: only the hash can see it.
+        sab1 = replica.tick;
+        (g.g_credits as number[])[0] += 77;
+      }
+      if (sab1 && !sab2 && replica.tick >= 1200 && !replica.stats.desynced) {
+        const pool = g.g_object_list as Obj[];
+        if (pool.length > 2) {
+          // An actor gone from the replica's pool: the next op for it cannot land.
+          sab2 = replica.tick;
+          sabEpoch = replica.stats.epoch;
+          mismatchesBefore2 = replica.stats.mismatches + replica.stats.applyErrors;
+          pool.splice(1, 1);
+        }
       }
     }
 
@@ -273,8 +306,29 @@ async function run(stage: number, p: Profile, seconds: number): Promise<void> {
   const dropped = [...fired].filter(([id, ep]) => ep !== finalEpoch && !taken.has(id)).length;
   check(`${tag}: the replica streamed (${rs.verified} ticks verified by hash)`,
         rs.verified > frames / 4, `${rs.verified} of ${frames} frames; phase ${rs.phase}`);
+  const logs = (s: typeof rs) => s.log.map((e) => `${e.kind}@${e.tick}: ${e.text}`).join(" | ");
+  if (sabotage) {
+    // What the overlay exists to show: a replica that is not the host's is
+    // caught on the tick it happens, the host says which part of the state
+    // it is, and a keyframe puts it right.
+    check(`${tag}: a value changed behind the codec's back is caught by the hash `
+          + `(${rs.mismatches} mismatched ticks)`, sab1 > 0 && rs.mismatches > 0, logs(rs));
+    check(`${tag}: ...and the host names the section it is in`,
+          hs.log.some((e) => e.kind === "report" && /parts\.game\.g_credits/.test(e.text)),
+          logs(hs));
+    check(`${tag}: ...and the replica hears the host's answer`,
+          rs.log.some((e) => e.kind === "report" && /g_credits/.test(e.text)), logs(rs));
+    check(`${tag}: an actor taken from the replica's pool is caught too`,
+          sab2 > 0 && rs.mismatches + rs.applyErrors > mismatchesBefore2, logs(rs));
+    check(`${tag}: ...both repaired by keyframes (${rs.keyframes}), the replica `
+          + `matching again at the end`, rs.keyframes >= 3 && !rs.desynced, logs(rs));
+    check(`${tag}: ${compared} ticks after the repair compared whole against the host's`,
+          compared > 5 && !deepFail, deepFail || `${compared} comparisons`);
+    console.log(`        replica log: ${logs(rs)}`);
+    return;
+  }
   check(`${tag}: no tick's hash differed from the host's`, rs.mismatches === 0,
-        `${rs.mismatches}: ${rs.log.map((e) => `${e.kind}@${e.tick}: ${e.text}`).join(" | ")}`);
+        `${rs.mismatches}: ${logs(rs)}`);
   check(`${tag}: no delta failed to apply`, rs.applyErrors === 0,
         rs.log.map((e) => e.text).join(" | "));
   check(`${tag}: ${compared} ticks compared whole against the host's state`,
@@ -317,5 +371,10 @@ const PROFILES: Profile[] = [
 ];
 for (const stage of STAGES) {
   for (const p of PROFILES) await run(stage, p, 50);
+}
+// And once with the replica sabotaged, on a lossy link: the checks that
+// have to *fail* to be worth having.
+if (STAGES.includes(1)) {
+  await run(1, { name: "sabotaged", loss: 0.05, latency: 40, jitter: 20 }, 50, true);
 }
 finishOrSkip("net", failures, ran);

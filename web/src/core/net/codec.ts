@@ -1101,6 +1101,16 @@ export class StateMirror {
 /** The depth at which a path becomes its own section: `parts.<id>.<key>`. */
 const SECTION_DEPTH = 3;
 
+/** Where a hash's sections go: each section's name and its own hash, once. */
+export interface SectionSink {
+  add(name: string, hash: number): void;
+}
+
+/** A plain `Map` as a sink, for the rare caller that wants one. */
+export function sectionMap(map: Map<string, number>): SectionSink {
+  return { add: (n, h) => { map.set(n, h); } };
+}
+
 /**
  * The state's hash, and optionally its sections'.
  *
@@ -1115,11 +1125,17 @@ const SECTION_DEPTH = 3;
 export class TreeHasher {
   private acc = 0;
   private readonly segs: Seg[] = [];
-  private sections: Map<string, number> | null = null;
+  private sections: SectionSink | null = null;
   /** The sum of the sections nested directly inside each open section. */
   private readonly nested: number[] = [];
+  /**
+   * Section names, built once: `parent -> key -> name`. The host hashes its
+   * sections every tick, and building eight hundred path strings a tick to
+   * name the same eight hundred sections was most of the garbage it made.
+   */
+  private readonly names = new Map<string, Map<string | number, string>>();
 
-  hash(root: unknown, sections?: Map<string, number>): number {
+  hash(root: unknown, sections?: SectionSink): number {
     this.acc = 0;
     this.segs.length = 0;
     this.nested.length = 0;
@@ -1133,19 +1149,39 @@ export class TreeHasher {
     this.acc = (this.acc + fmix(h)) | 0;
   }
 
+  /** `parent` + SEP + `key`, from the cache. */
+  private child(parent: string, key: Seg): string {
+    let m = this.names.get(parent);
+    if (!m) this.names.set(parent, (m = new Map()));
+    let s = m.get(key);
+    if (s === undefined) {
+      const part = typeof key === "string" ? key : key >= 0 ? `#${key}` : `@${segAt(key)}`;
+      s = parent === "" ? part : parent + SEP + part;
+      m.set(key, s);
+    }
+    return s;
+  }
+
+  /** The name of the section `segs[0..d)`. */
+  private sectionName(d: number): string {
+    let s = "";
+    for (let i = 0; i < d; i++) s = this.child(s, this.segs[i]);
+    return s;
+  }
+
   private node(v: unknown, d: number, ph: number, inPool: boolean): void {
     if (!this.sections || !(d === 1 || d === SECTION_DEPTH
                             || (d === SECTION_DEPTH + 1 && inPool))) {
       this.value(v, d, ph);
       return;
     }
-    const name = pathString(this.segs, d);
+    const name = this.sectionName(d);
     const start = this.acc;
     this.nested.push(0);
     this.value(v, d, ph);
     const inner = this.nested.pop()!;
     const total = (this.acc - start) | 0;
-    this.sections.set(name, ((total - inner) | 0) >>> 0);
+    this.sections.add(name, ((total - inner) | 0) >>> 0);
     if (this.nested.length) {
       this.nested[this.nested.length - 1] =
         (this.nested[this.nested.length - 1] + total) | 0;

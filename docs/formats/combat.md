@@ -2423,6 +2423,47 @@ between ±1000 to find whatever floor is there — falling back to
 for ninety frames or until it is fifty units clear. That wait **is** the
 cooldown; there is no timer.
 
+### The delayed pounce — `ThrowerStateDelayedPounce`, `FUN_0044E830`
+
+State 23, stage 2 block 21's pair of `zstin` (motion 310 over 45 and 60
+frames). A wait, then the same pounce with three differences. `[proved]` from
+the listing; the three subs fall into each other.
+
+```
+sub 0  obj+0x1F8 |= 0x10                    /* root motion carries y too */
+       ActorSetMotionBlended(desc+4, 0, 5)  /* the ordinary track: it loops */
+       obj+0x34  |= 0x100                   /* shots ricochet */
+       obj+0x1330 = desc+8
+sub 1  if (--obj+0x1330 > 0) return
+       clear both bits; claim (0xFF on failure)
+       obj+0x34 |= 0x10000000; obj+0x136C |= 0x20000
+       draw the attack; ThrowerLoadAttackArcScript
+       ActorArcBegin(pos -> (landing.x, g_camera_eye_y, landing.z), desc+8)
+sub 2  roll -> 0 at 0xCCC a frame; ThrowerStrikeConnect if a permit is held
+       obj+0x34 |= 0x2000 once obj+0x19C > the LIVE row's hit frame
+       arc over: clear 0x10000000 and 0x20000, state 25
+```
+
+* **The landing point depends on the state.** `ThrowerPickLandingPoint`
+  (`FUN_0044CBA0`) switches on `obj+0x1310`: states 22 and 23 take a
+  vertical offset of **-350 px**, and 23 unprojects at **-6.0** instead of
+  -15.5 — six units in front of the eye rather than fifteen and a half. Every
+  other state takes 390 px (type 0x16) or 320 px at -15.5. The sideways offset
+  is ±160 px by the permit held, and zero with one attacker.
+* **Three stances in one state.** The script comes from the live stance, which
+  the pounce bit has just moved to rows 4..7. `ThrowerStrikeConnect` reads its
+  row through `obj+0x1364`, which `ThrowerLoadAttackArcScript` does **not**
+  write — only `ThrowerStateLeapDown` does (`0x0044B6FB`) — so for a spawn that
+  has never leapt down it is row 0. The `0x2000` test reads the live stance
+  again. Stage 2's pair therefore swing row 4's clip 289, connect on row 0's
+  frame 62 or 64, and stop flinching past row 4's 66.
+* **The wait is shot-proof and walks.** `ShotImmune` is up for all of it --
+  sub 1 drops it and `ActorArcStep`'s phase 0 raises it again on the same
+  frame (`0x0044D8BB`), so it stays up until the takeoff -- and the clip is
+  the ordinary motion, so it loops and its root carries the actor.
+  Bit `0x10` of `obj+0x1F8` is `SkeletonApplyRootMotion`'s height store
+  (`0x00410E48`); 310's root height is flat, so here it moves nothing.
+
 ### The arc, and the three-stage script
 
 Nothing in this class walks except state 18 and the hub. Every other move is a

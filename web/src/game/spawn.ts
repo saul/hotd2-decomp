@@ -75,42 +75,54 @@ export function ActorSpawn(at: number, cls: SpawnClass, charType: number,
  *   Every skinned actor gets it, not only the ones that carry the block --
  *   `Actor.scale` is what the renderer draws the whole model under and what
  *   the root motion steps by (`game/root_motion.ts`).
- * * **Each bone's hit radius**, `+0x78` of its record (`obj + 0x284 +
- *   bone*0x90`): `SkeletonBuildAndPose` (`FUN_00410590`) walks the tree
- *   through `SkeletonWalkNode` (`FUN_004107E0`), which stores the type's
- *   sphere radius **times the size just written** --
+ * * **Each bone's hit sphere**, `+0x78` and `+0x7C..+0x84` of its record
+ *   (`obj + 0x20C + bone*0x90`): `SkeletonBuildAndPose` (`FUN_00410590`)
+ *   walks the tree through `SkeletonWalkNode` (`FUN_004107E0`), which reads
+ *   row `bone - 1` of `g_character_part_tables` (`0x004D032C`) and takes it
+ *   **only when the row's own slot is the node's**:
  *
  *   ```
- *   00410837  FLD  float ptr [ECX + 0x1300]    ; g_cur_actor+0x1300 = model+0x116C
- *   0041083D  FMUL float ptr [EAX + -0x4]      ; g_character_bone_spheres row's radius
- *   00410840  FSTP float ptr [ESI + 0x78]      ; the record's
+ *   00410830  MOV  EDX, dword ptr [EAX + -0x14]   ; the row's slot
+ *   00410833  CMP  EDX, dword ptr [EDI]           ; the node's
+ *   00410835  JNZ  0x00410876                     ; not ours: zero it
+ *   00410837  FLD  float ptr [ECX + 0x1300]       ; g_cur_actor+0x1300 = model+0x116C
+ *   0041083D  FMUL float ptr [EAX + -0x4]         ; the row's radius
+ *   00410840  FSTP float ptr [ESI + 0x78]         ; the record's
+ *   ...       +0x7C..+0x84 = the row's centre     ; 0x0041085D..0x00410871
+ *   00410876  MOV  [ESI+0x78], 0; [ESI+0x84], 0; [ESI+0x80], 0; [ESI+0x7C], 0
  *   ```
  *
- *   -- and the centre, `+0x7C`, as the row has it, because the centre goes
- *   through the node matrix, which carries the size already. So a civilian
- *   drawn at 0.9 is shot through spheres 0.9 as wide, at bones 0.9 as far
- *   apart. The record is `Actor.boneRadius`, written here in full so that
- *   every reader -- both shot tests, the blood spray, the dropped-prop test
- *   -- reads the engine's number and a class that writes over one (the
- *   frog's bone 2) still wins, because its `Init` runs after this.
+ *   -- the radius **times the size just written**, and the centre as the
+ *   row has it, because the centre goes through the node matrix, which
+ *   carries the size already. So a civilian drawn at 0.9 is shot through
+ *   spheres 0.9 as wide, at bones 0.9 as far apart. The record is
+ *   `Actor.boneRadius` and `Actor.boneCentre`, written here for every bone so
+ *   that every reader -- both shot tests, the blood spray, the dropped-prop
+ *   test -- reads the engine's numbers, and a class that writes over one
+ *   (the frog's bone 2, the weapon hands) still wins, because its `Init`
+ *   runs after this.
+ *
+ *   The slot test is what several types' rows need. Some types' pointers
+ *   are a stub that ends in `-1` after a row or two, and their later "rows"
+ *   are the next type's table read out of step; on others a real row names
+ *   another model than the node does -- `zsass`'s bones 5 and 8 name the
+ *   armed hands `EnemyThrowerInit` gives it (`0x1FA2`, `0x1F9E`) where the
+ *   skeleton names the bare ones. Every row with a radius that the test
+ *   refuses is `GATED` in `tools/verify_combat.py`, which derives the list
+ *   from the exe and fails when it moves. So a `zsass` is born with
+ *   both weapon hands unshootable, `EnemyThrowerInit` arms them without
+ *   touching the radius, and only `ThrowerStateRearm` gives them a sphere,
+ *   after a throw.
+ *
+ *   The bundle carries a row only where its radius is positive, so a bone
+ *   whose row has none gets a zero centre here where the engine would copy
+ *   the row's. Every reader of the centre also reads the radius, and none of
+ *   them draws or tests a zero one, except the blood at a bone a *mesh* was
+ *   hit on -- and the three types with mesh bones have positive rows there.
  *
  *   It is written once, here, and only here: op 0x27's later
  *   `SetScale` (`CivilianRunScript`, `FUN_0048B9E0`) changes the drawn size
  *   and leaves every radius as the build made it, as the engine's does.
- *
- *   [diverges] `SkeletonWalkNode` takes a row only when the row's own slot is
- *   the node's -- `MOV EDX,[EAX-0x14]; CMP EDX,[EDI]; JNZ 0x00410876` at
- *   `0x00410830`, and the other arm zeroes the radius and the centre -- and
- *   the bundle's `hit_radius` is the row whatever slot it names. Among the
- *   shipped types the two disagree on bones 5 and 8 of 0x03 and 0x16, 3 and
- *   11 of 0x1A, 9..14 of 0x1B, 3 of 0x1F and 0x46, 2 of 0x21, 2 and 5 of 0x39
- *   and 0x3A, 5 of 0x3B and 0x3C, and 9 of 0x3E, which therefore have spheres
- *   here the engine's build leaves at zero. It wants porting
- *   with the other writer of the same two fields,
- *   `ResolveDamagedPartSphere` (`FUN_004099A0`), which `ActorSwapDamagedPart`
- *   runs on every part swap and which looks the new slot up past the
- *   per-bone rows -- the thrower's hands are where a sphere the build zeroes
- *   is restored later, and porting the gate alone would leave them zero.
  * * The draw state: `model+0x64 = 3` — {@link MOTION_FLAGS_INIT}, `c7466403`
  *   at `0x004104C5` — and the vertex-blended parts' records. `model+0x3C` is
  *   `g_pCharacterExtraParts[type]->count` (`0x0052ED08`), `model+0x40` is
@@ -146,12 +158,19 @@ export function ActorBuildSkinnedModel(obj: Actor): void {
   const type = CharacterTypeOf(obj);
   // `M[0x116C] = scale by character type`, the build's first write.
   obj.scale = ActorModelScale(obj.charType);
-  // `SkeletonWalkNode`'s `R+0x78 = obj+0x1300 * row.radius`, for every bone
-  // the type has a sphere for. `fround`, because the engine's is an `FSTP`
-  // to a float.
+  // `SkeletonWalkNode`'s sphere, for every bone: `R+0x78 = obj+0x1300 *
+  // row.radius` and `R+0x7C = row.centre` when the row's slot is the node's,
+  // and all four zeroed when it is not. `fround`, because the engine's
+  // radius is an `FSTP` to a float.
   for (const b of type?.bones ?? []) {
-    if (b.hit_radius) {
-      obj.boneRadius[String(b.bone)] = Math.fround(obj.scale * b.hit_radius);
+    const k = String(b.bone);
+    if (b.hit_slot !== undefined && b.hit_slot === b.slot) {
+      const c = b.hit_centre ?? [0, 0, 0];
+      obj.boneRadius[k] = Math.fround(obj.scale * (b.hit_radius ?? 0));
+      obj.boneCentre[k] = [c[0], c[1], c[2]];
+    } else {
+      obj.boneRadius[k] = 0;
+      obj.boneCentre[k] = [0, 0, 0];
     }
   }
   // `M[0x64] = 3` -- drawn, root motion -- and the part records, each

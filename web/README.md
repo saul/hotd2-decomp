@@ -125,6 +125,17 @@ debug overlay is on until you turn it on. Everything else is in two places:
   texture filtering are in Scene), the script (click an instruction to seek to
   it, which pauses there) and the event feed.
 
+**The Perf meter** (Scene panel, `O`, or `?perf=1` in the address) shows the
+frame rate and where each frame's time goes -- script, game systems, render
+systems, the matrix walk, WebGL submission, the UI publish, the costliest
+systems by name -- and a sampled wait for the GPU. On a phone it sits in the
+bar beside the 4:3 frame. Under the dev server the page also posts each
+reading, every two seconds, to `extract/perf.jsonl` (`HOTD2_PERF_LOG`
+overrides), so a phone on the LAN can be diagnosed from the desk. `aa=0`,
+`shadows=0` and `blur=0` in the address are A/B switches for antialiasing,
+the gun lights' shadow maps and the backdrop blur over the game; see
+`src/app/perf.ts`.
+
 The sidebar, its tab and its folds, the stage and address, and whether the
 game was running all survive a reload -- so a Vite reload after an edit comes
 back to the game where it was.
@@ -143,10 +154,12 @@ including one for each debug overlay -- `B` the actor boxes, `C` collision,
 the sidebar and say so for a moment over the game.
 
 **On a phone** (iOS Safari or Android Chrome), hold it sideways — the page
-asks you to, and on Android Start also goes fullscreen and locks landscape. A
+asks you to, and on Android Start also goes fullscreen and locks landscape.
+The frame is boxed to the game's 4:3 and drawn at 1x by default; both are in
+the sidebar's Scene panel (4:3 frame, Resolution). A
 tap is a shot. To reload, flick the phone sharply (top edge towards you or
-away), or tap with a second finger while the first is down, or, with the 4:3
-frame on, tap the black bar beside it: all three are a pull *off the screen*,
+away), or tap with a second finger while the first is down, or tap the black
+bar beside the frame: all three are a pull *off the screen*,
 which is how the arcade gun reloads. The flick needs the motion sensors,
 which a browser only exposes over HTTPS (or `localhost`); iOS also asks
 permission when you press Start. When the last life goes, the corner button
@@ -205,10 +218,11 @@ so is the event feed.
 
 - **The projection.** 41.100° vertical (`0x1D3B` BAMS), 4:3, near 0.8, far
   8000, from `SetupSceneProjection`. It is a compile-time constant for the
-  whole game — there is no zoom and no per-camera FOV. The page fills the
-  window by default, keeping the vertical FOV, so a wide window shows more at
-  the sides than the cabinet did; the Scene panel's **4:3 frame** switch boxes
-  it to exactly what the game framed.
+  whole game — there is no zoom and no per-camera FOV. On a desktop the page
+  fills the window by default, keeping the vertical FOV, so a wide window
+  shows more at the sides than the cabinet did; the Scene panel's **4:3
+  frame** switch boxes it to exactly what the game framed, and a phone gets
+  the box by default.
 - **Hermite evaluation.** A transcription of `FUN_004040F0`, including its end
   behaviour: the game's binary search cannot leave the key array, so a time
   outside a curve extrapolates along the end segment rather than clamping.

@@ -72,7 +72,7 @@ import { ColiSegmentVsMesh, type ColiHit } from "../coli";
 import {
   MatCopy, MatrixInvert, MatrixTransformPoint, MatrixTransformVector,
 } from "../matrix";
-import { CharacterTypeOf, T } from "../tables";
+import { BoneHitRadius, CharacterTypeOf, T } from "../tables";
 import { VecToAngles, type Vec3 } from "../vec";
 
 /**
@@ -662,15 +662,16 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
 function ShotTestBoneSphere(obj: Actor, node: CharacterBone, shot: ShotTest,
                             out: ShotCandidate[]): void {
   // An actor that carries the engine's model block has the record itself:
-  // `rec+0x68` is what its own `SkeletonEmitNode` wrote this frame, and
-  // `rec+0x78` is `Actor.boneRadius`: the type's radius times the model's
-  // size as the build wrote it, or what a class has written over it since.
-  // See `game/skeleton.ts` and `ActorBuildSkinnedModel` in `game/spawn.ts`.
+  // `rec+0x68` is what its own `SkeletonEmitNode` wrote this frame from
+  // `Actor.boneCentre`, and `rec+0x78` is `Actor.boneRadius`: the build's
+  // (the row's radius times the model's size, where the row's slot is the
+  // node's), or what a routine has written over it since. See
+  // `game/skeleton.ts` and `ActorBuildSkinnedModel` in `game/spawn.ts`.
   const rec = obj.skel?.bones[node.bone];
   if (rec) {
     _w.x = rec.hit[0]; _w.y = rec.hit[1]; _w.z = rec.hit[2];
   }
-  const r = rec ? (obj.boneRadius[String(node.bone)] ?? node.hit_radius ?? 0)
+  const r = rec ? BoneHitRadius(obj, node)
     : shot.host.boneSphere?.(obj.at, node.bone, _w) ?? null;
   if (r === null || r === SHOT_TEST_ZERO) return;
   if (!shot.host.viewSpaceOfPoint?.(_w, _c)) return;

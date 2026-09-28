@@ -31,7 +31,8 @@ import { authoredFrameHeld, authoredFrameOfTicks,
          ticksOfAuthoredFrame } from "../src/core/play_cursor";
 import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor,
          SpawnScriptedCharacters } from "../src/game/director";
-import { ActorKillAll, RemoveBoneSubtree } from "../src/game/combat/resolve_hit";
+import { ActorKillAll, ActorSwapDamagedPart, RemoveBoneSubtree,
+         ResolveDamagedPartSphere } from "../src/game/combat/resolve_hit";
 import { RegisterEnemySlot, UpdateCameraEnemySlots, makeCameraSlots }
   from "../src/game/camera/slots";
 import { CamBlockSetAnglesFromLookAt, CamPathCueReached, CameraPoseBlock }
@@ -337,7 +338,8 @@ import { FALL_GRAVITY, SND_BOUNCE, ThrowerBeginKnockbackArc,
 import { GroundDustCode, ThrowerEmitGroundDust }
   from "../src/game/class31/ground_dust";
 import { ThrowerStateStandAndDecide } from "../src/game/class31/stand";
-import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
+import { ThrowerStateRearm, ThrowerStateRestoreBothHands }
+  from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
 import {
   ActorArcBegin, ActorArcBeginTo, ActorArcStep, ActorClipFrame,
@@ -347,7 +349,7 @@ import { SND_PATH_LEG_LANDED } from "../src/game/class31/path";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
-import { ThrowerStateThrow } from "../src/game/class31/thrower";
+import { SpawnThrownWeapon, ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
 import { ActorPlayCursor } from "../src/game/class31/arc";
@@ -631,13 +633,13 @@ const TYPE: CharacterType = {
   // animating below a destroyed one.
   bones: [
     { bone: 4, part: "r_upperarm", slot: 4, offset: [0, 0, 0], parent: null,
-      damage_rank: [], hit_radius: 2,
+      damage_rank: [], hit_radius: 2, hit_slot: 4,
       steps: [[0x11, EffectCode.Escalate, 3], [0x12, EffectCode.Escalate + 1, 3],
               [0x13, EffectCode.Escalate + 2, 3], [0x14, EffectCode.Sever, 3]] },
     { bone: 5, part: "r_forearm", slot: 5, offset: [0, 0, 0], parent: 0,
-      damage_rank: [], hit_radius: 2, steps: [] },
+      damage_rank: [], hit_radius: 2, hit_slot: 5, steps: [] },
     { bone: 1, part: "torso", slot: 1, offset: [0, 0, 0], parent: null,
-      damage_rank: [], hit_radius: 3,
+      damage_rank: [], hit_radius: 3, hit_slot: 1,
       steps: [[0x21, EffectCode.Last, 3]] },
     // `head_bone: 2` below named a bone this table did not have, so anything
     // that reads the head's *own* record -- the model the severed head flies
@@ -648,7 +650,8 @@ const TYPE: CharacterType = {
     // has an entry once something has been swapped. The damage comes from
     // `damage_rank`, which `DamageRankModifier` indexes with `g_damage_rank`.
     { bone: 2, part: "head", slot: 0x30, offset: [0, 0, 0], parent: null,
-      damage_rank: new Array(16).fill(5), hit_radius: 2, steps: [] },
+      damage_rank: new Array(16).fill(5), hit_radius: 2, hit_slot: 0x30,
+      steps: [] },
   ],
   // Two vertex-blended parts -- a waist and a skirt, as the humanoids with a
   // skirt carry -- so that `model+0x3C` is 2 and "part 0 alone" and "every
@@ -15030,8 +15033,8 @@ console.log("\nthe crowd push, as the exe runs it:");
           + "`0x00409BED` does for every caller -- the crowd push's list",
           G.g_shot_test_list.some((e) => e.at === a.at),
           String(G.g_shot_test_list.length));
-    check("...while the port's own pick still passes it over, because the "
-          + "renderer picks class 0x30", !ShotTestPickedHere(a));
+    check("...and the port's own pick tests it: class 0x30 is picked the "
+          + "engine's way, through the list", ShotTestPickedHere(a));
   }
 
   // -- the frame's order: published at the head of the frame ---------------
@@ -24593,6 +24596,10 @@ console.log("\nclass 0x14, the stage-2 boss:");
     "hit_radius":4.550000190734863},{"bone":15,"part":"bone15_02c9",
     "slot":713,"offset":[0,-9.513999938964844,0],"parent":13,"hit_centre":[0,
     -0.30000001192092896,1.600000023841858],"hit_radius":2.3499999046325684}] as CharacterType["bones"];
+  // Type 0x47's rows each name their node's own slot, which is what the
+  // exporter's `hit_slot` says and what `SkeletonWalkNode` tests before it
+  // takes one -- so every row with a radius is taken.
+  for (const b of C14_BONES) if (b.hit_radius) b.hit_slot = b.slot;
   const C14_LENGTHS: Record<string, [number, number]> = {"21":[50,98],"22":[55,108],"23":[55,108],"24":[50,98],"25":[25,48],
     "26":[33,64],"27":[31,59],"28":[30,58],"29":[18,34],"30":[61,119],
     "31":[35,68],"32":[65,128],"33":[60,118],"34":[56,109],"35":[30,58],
@@ -25963,13 +25970,14 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
   }
 
-  // -- C3. the pusher's airborne bits, not the chair's ----------------------
+  // -- C3. the pusher's boost bits, not the chair's -------------------------
   //
   // `if ((*(uint *)(obj+0x138) + 0x34) & 0x18000000) f *= 1.8` -- the test is
   // on the actor that did the pushing. Reading the chair's own flags there
   // would be `L11` with the object the other way round, and it would be
-  // silent: 1.8 times nothing is still nothing until an airborne zombie
-  // arrives.
+  // silent: 1.8 times nothing is still nothing until a zombie that is
+  // striking (`ActorFlag.Committed`) or sprinting (`ZOMBIE_SPRINTS`, which a
+  // shot raises) arrives. These were called the airborne bits; neither is.
   {
     reset();
     G.g_script_flags[PUSH_FLAG] = 1;
@@ -25982,8 +25990,8 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     c.pushNormal = vec3(1, 0, 0);
     const x0 = c.pos.x;
     tick(c, 1);
-    check("an airborne pusher shoves 1.8x as far, and the bit read is the "
-          + "**pusher's**",
+    check("a striking or sprinting pusher shoves 1.8x as far, and the bit "
+          + "read is the **pusher's**",
           Math.abs(c.pos.x - (x0 + 0.36)) < 1e-6, String(c.pos.x));
 
     // ...and the chair's own copy of the same bits changes nothing.
@@ -32967,6 +32975,79 @@ console.log("\nZombieStateAttackRun: the turn rate, the bands, and the wait clip
           far.state === ZombieState.StandAndThrow && far.attackPermit >= 0,
           `${ZombieState[far.state]} permit ${far.attackPermit}`);
   }
+  {
+    // A shot is what makes a jogger sprint, and everything that reads the bit
+    // follows. `ZombieOnShot` (`FUN_00453EB0`) ORs `0x8000000` into `obj+0x34`
+    // at the head of its per-player loop for every shot that finds a bone,
+    // alive or dead:
+    //
+    //   00453ef7  JLE 0x00454035               ; g_shot_bone[p] <= 0: skip
+    //   00453f17  OR  ECX, 0x8000000           ; 81c900000008
+    //   00453f2a  MOV dword ptr [ESI+0x34], ECX
+    //
+    // Nothing between the shot and the next frame of the run puts the jogger
+    // anywhere else: the spawn record here asked for the jog, and the only
+    // input is the hit record `ResolveHit` leaves.
+    const shot = runner(0, 45);
+    shot.yaw = 0x4000;
+    const before = ZombieRunTurnRate(shot);
+    shot.pendingHit = { bone: 4, result: HitResultCode.Plain, player: 0 };
+    ZombieOnShot(shot);
+    ZombieStateAttackRun(shot, EYE, 1 / 60, new Rng(1));
+    check("a jogger shot and still up runs its next frame on row 3, the sprint",
+          before === 0x1a0 && shot.state === ZombieState.AttackRun
+          && shot.motion === 13 && !shot.dead,
+          `${ZombieState[shot.state]} motion ${shot.motion}`);
+    check("...and turns at the sprint's 0x410, not the jog's 0x1A0",
+          shot.yaw === 0x4000 - 0x410, shot.yaw.toString(16));
+
+    // `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) moves an actor out of
+    // a crowd by a tenth of the penetration, and by 1.8 times that
+    // (`0x0055dd48`, `6666e63f`) while `obj+0x34 & 0x18000000` -- tested on
+    // the actor itself at `004549b6`, and on the actor that recorded the push
+    // at `00454944`. "The crowd push, as the exe runs it" pins both with the
+    // bit written by hand; this is the same two with the bit put there by a
+    // shot. Neither actor is committed to a strike, so the only bit of the
+    // mask either can hold is the one `ZombieOnShot` raised.
+    const crowd = (shoot: boolean) => {
+      const a = runner(0, 40);
+      const b = spawnZombie(0x7b01, 1, "in the way");
+      b.visible = true;
+      b.hp = b.maxHp = 100;
+      for (const z of [a, b]) z.flags2 |= ZombieFlag2.CollideActors;
+      b.pos = vec3(2, 0, 40);             // two 3.5 bodies, five deep
+      if (shoot) {
+        a.pendingHit = { bone: 4, result: HitResultCode.Plain, player: 0 };
+        ZombieOnShot(a);
+      }
+      const mask = (a.flags | b.flags) & 0x18000000;
+      PublishCrowd(a, b);
+      ZombiePushOutOfWorldAndActors(a);     // a moves, and records b's push
+      const self = a.pos.x;                 // from x = 0
+      const recorded = b.pushedBy === a.at;
+      // An empty list for `b`'s own frame, so what moves it is the push it
+      // was handed and nothing it finds itself. `00454935` reads the
+      // pusher's flags through the recorded pointer, not the list.
+      PublishCrowd();
+      const bx = b.pos.x;
+      ZombiePushOutOfWorldAndActors(b);
+      return { self, pushed: b.pos.x - bx, mask, recorded };
+    };
+    const calm = crowd(false);
+    const hurt = crowd(true);
+    check("...with the sprint the only bit of the mask either actor holds",
+          calm.mask === 0 && hurt.mask === ZOMBIE_SPRINTS,
+          `0x${calm.mask.toString(16)} 0x${hurt.mask.toString(16)}`);
+    check("...and it is pushed out of a crowd 1.8x as far (004549b6)",
+          calm.self < 0 && Math.abs(hurt.self / calm.self - 1.8) < 1e-6,
+          `${hurt.self.toFixed(4)} against ${calm.self.toFixed(4)}`);
+    check("...and the actor it pushed is shoved 1.8x as far on that actor's "
+          + "own next frame (00454944)",
+          calm.recorded && hurt.recorded && calm.pushed > 0
+          && Math.abs(hurt.pushed / calm.pushed - 1.8) < 1e-6,
+          `${hurt.pushed.toFixed(4)} against ${calm.pushed.toFixed(4)}, `
+          + `recorded ${calm.recorded}/${hurt.recorded}`);
+  }
 }
 
 console.log("\nZombieStateBackOff: which way the retreat turns:");
@@ -34264,6 +34345,385 @@ console.log("\na carrier seats itself before the first draw reads its angles:");
   }
   check("every ported carrier holds its op_ path's angles after its first "
         + "update, not the record's", ok, got.join(" "));
+}
+// -- the bone records' hit spheres ------------------------------------------
+//
+// `obj + 0x20C + bone*0x90` is a bone's draw record, and `+0x78` / `+0x7C..`
+// its hit sphere's radius and centre. The port kept the radius on the actor
+// (`Actor.boneRadius`) from the build alone and took every centre from the
+// bundle, so the sphere a gore swap, a thrown weapon or a re-armed hand
+// leaves on the record was never the one a shot met. These are the writers,
+// one by one, in the engine's words.
+console.log("\nthe bone records' hit spheres, every writer:");
+{
+  // Type 38 -- drawn at 0.9, so "scaled" and "unscaled" are different
+  // numbers -- with four rows: bones 4, 5, 1 and 2 name their own nodes, and
+  // bone 6's row names another model than its node does.
+  const S38: CharacterType = {
+    ...TYPE, type: 38, name: "test civilian",
+    bones: [
+      ...TYPE.bones.map((b) => ({ ...b,
+        hit_centre: [0, b.bone, 0.5] as [number, number, number] })),
+      { bone: 6, part: "l_upperarm", slot: 6, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 1.5, hit_centre: [9, 9, 9],
+        hit_slot: 0x66, steps: [] },
+    ],
+  };
+  // The damaged-part rows: type 38's own, and types 7 and 0xB.
+  const PARTS = {
+    "38": [{ slot: 0x11, centre: [1, 2, 3], radius: 0.5 },
+           { slot: 0x13, centre: [3, 3, 3], radius: 0.3 },
+           { slot: 0x50, centre: [5, 0, 0], radius: 5 }],
+    "7": [{ slot: 0x12, centre: [4, 5, 6], radius: 0.75 },
+          { slot: 0x13, centre: [7, 8, 9], radius: 0.25 },
+          { slot: 0x50, centre: [7, 0, 0], radius: 7 }],
+    "11": [{ slot: 0x50, centre: [11, 0, 0], radius: 11 }],
+  };
+  const tables = {
+    ...CHARS, types: { ...CHARS.types, "38": S38 }, part_spheres: PARTS,
+  } as unknown as CharactersJson;
+  const fresh = (at: number, ct = 38): Actor => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables);
+    const a = makeActor(at, SpawnClass.Zombie, ct, "rec");
+    ActorBuildSkinnedModel(a);
+    a.hp = 100;
+    return a;
+  };
+  const s = Math.fround(0.9);
+
+  // `SkeletonWalkNode` (`FUN_004107E0`): `CMP EDX,[EDI]; JNZ` at 0x00410830.
+  const b = fresh(0x3100);
+  check("the build takes a row whose slot is its node's: radius times the "
+        + "size, centre as the row has it",
+        b.boneRadius["4"] === Math.fround(s * 2)
+        && JSON.stringify(b.boneCentre["4"]) === "[0,4,0.5]",
+        `${b.boneRadius["4"]} ${JSON.stringify(b.boneCentre["4"])}`);
+  check("...and zeroes radius and centre where the row names another slot",
+        b.boneRadius["6"] === 0
+        && JSON.stringify(b.boneCentre["6"]) === "[0,0,0]",
+        `${b.boneRadius["6"]} ${JSON.stringify(b.boneCentre["6"])}`);
+
+  // `ActorSwapDamagedPart` (`FUN_004098E0`) through `ResolveHit`: bone 4's
+  // steps swap to 0x11, 0x12, 0x13, then sever with 0x14.
+  const g = fresh(0x3101);
+  const rng = new Rng(9);
+  ResolveHit(g, 4, NULL_HOST, rng);
+  check("a gore swap takes the part's own row out of the type's table, "
+        + "unscaled -- `ResolveDamagedPartSphere`",
+        g.boneSlot["4"] === 0x11 && g.boneRadius["4"] === 0.5
+        && JSON.stringify(g.boneCentre["4"]) === "[1,2,3]",
+        `${g.boneSlot["4"]} ${g.boneRadius["4"]} `
+        + JSON.stringify(g.boneCentre["4"]));
+  ResolveHit(g, 4, NULL_HOST, rng);
+  check("...a part the type's table has no row for takes type 7's",
+        g.boneRadius["4"] === 0.75
+        && JSON.stringify(g.boneCentre["4"]) === "[4,5,6]",
+        `${g.boneRadius["4"]} ${JSON.stringify(g.boneCentre["4"])}`);
+  ResolveHit(g, 4, NULL_HOST, rng);
+  check("...and **both** searches run, so where both tables have the part "
+        + "type 7's row is the one left",
+        g.boneRadius["4"] === 0.25
+        && JSON.stringify(g.boneCentre["4"]) === "[7,8,9]",
+        `${g.boneRadius["4"]} ${JSON.stringify(g.boneCentre["4"])}`);
+  ResolveHit(g, 4, NULL_HOST, rng);
+  check("a part neither table has leaves the record as it was",
+        g.boneSlot["4"] === 0x14 && g.boneRadius["4"] === 0.25
+        && JSON.stringify(g.boneCentre["4"]) === "[7,8,9]",
+        `${g.boneSlot["4"]} ${g.boneRadius["4"]}`);
+  // The same step severed bone 5, through `RemoveBoneSubtree`
+  // (`FUN_00409AF0`): `rec+0x00 = 0; rec+0x78 = 0` at 0x00409B3A/0x00409B41.
+  check("...and the sever zeroes the removed bone's radius with its slot",
+        g.removed.includes(5) && g.boneRadius["5"] === 0,
+        `${JSON.stringify(g.removed)} ${g.boneRadius["5"]}`);
+
+  // Type 0xD searches 0xB second, not 7 (`0x0040994D`).
+  const d = fresh(0x3102, 0xd);
+  ActorSwapDamagedPart(d, 4, 0x50, NULL_HOST);
+  check("character type 0xD's second search is type 0xB's table",
+        d.boneRadius["4"] === 11, String(d.boneRadius["4"]));
+  const e = fresh(0x3103);
+  ActorSwapDamagedPart(e, 4, 0x50, NULL_HOST);
+  check("...and every other type's, type 7's, over its own",
+        e.boneRadius["4"] === 7, String(e.boneRadius["4"]));
+  check("`ResolveDamagedPartSphere` returns 0 whatever it found",
+        ResolveDamagedPartSphere(e, 4, 0x50, 38) === 0
+        && ResolveDamagedPartSphere(e, 4, 0x50, 99) === 0);
+
+  // Slot 0 or 1: `MOV [EDI+0x78], 0` at 0x00409973, and no search.
+  const one = fresh(0x3104);
+  ActorSwapDamagedPart(one, 4, 1, NULL_HOST);
+  check("a swap to slot 1 zeroes the radius and searches nothing",
+        one.boneSlot["4"] === 1 && one.boneRadius["4"] === 0
+        && JSON.stringify(one.boneCentre["4"]) === "[0,4,0.5]",
+        `${one.boneRadius["4"]} ${JSON.stringify(one.boneCentre["4"])}`);
+  // The headshot's `ActorSwapDamagedPart(rec, 0, 2)` at 0x004097AA: the head
+  // and nothing under it, and the zone bit only if the head's current step
+  // is its last.
+  const h = fresh(0x3105);
+  const zones0 = h.zones;
+  h.hits["2"] = 0;
+  S38.bones.find((x) => x.bone === 2)!.steps =
+    [[0x31, EffectCode.Escalate, 1]];
+  ActorSwapDamagedPart(h, 2, 0, NULL_HOST);
+  check("a swap to slot 0 takes the head alone, and its radius",
+        JSON.stringify(h.removed) === "[2]" && h.boneRadius["2"] === 0,
+        `${JSON.stringify(h.removed)} ${h.boneRadius["2"]}`);
+  check("...with no zone bit while the head's step is not its last",
+        h.zones === zones0, `${h.zones}`);
+  S38.bones.find((x) => x.bone === 2)!.steps = [];
+  const h2 = fresh(0x3106);
+  ActorSwapDamagedPart(h2, 2, 0, NULL_HOST);
+  check("...and with it when it is", (h2.zones & 1) !== 0, `${h2.zones}`);
+  // `NoPartSwap`: `TEST CH,0x2` at 0x00409916, and the epilogue.
+  const np = fresh(0x3107);
+  np.flags |= ActorFlag.NoPartSwap;
+  ActorSwapDamagedPart(np, 4, 0x11, NULL_HOST);
+  check("`NoPartSwap` leaves the sphere as the build made it",
+        np.boneRadius["4"] === Math.fround(s * 2), String(np.boneRadius["4"]));
+}
+
+console.log("\nthe weapon hands' spheres:");
+{
+  // `zsass`: the skeleton names the bare hands and the rows the armed ones
+  // -- 0x16's rows 4 and 7 as `Hod2.exe` has them, bit for bit.
+  const R4: [number, number, number] =
+    [Math.fround(-0.1), Math.fround(-1.1), Math.fround(2.4)];
+  const R7: [number, number, number] =
+    [0, Math.fround(-1.3), Math.fround(2.25)];
+  const HAND5 = { bone: 5, motion: 9, release_frame: 48, range: 20,
+                  overlay_kind: 6, cancel_mask: 2, held: 0x1fa2, bare: 0x1f9f,
+                  projectile: 0x1f91 };
+  const ZSASS: CharacterType = {
+    ...TYPE31_ZSASS,
+    bones: [
+      ...TYPE31_ZSASS.bones.filter((b) => b.bone === 1 || b.bone === 2),
+      { bone: 5, part: "r_hand", slot: 0x1f9f, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: 1.75, hit_centre: R4,
+        hit_slot: 0x1fa2, steps: [] },
+      { bone: 8, part: "l_hand", slot: 0x1f9b, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: Math.fround(1.65),
+        hit_centre: R7, hit_slot: 0x1f9e, steps: [] },
+    ],
+    motions: { ...TYPE31_ZSASS.motions, "5": motion(20) },
+  };
+  const ZSLMAN: CharacterType = {
+    ...TYPE31_ZSLMAN,
+    bones: [
+      { bone: 5, part: "r_hand", slot: 0x1ff3, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: Math.fround(1.05),
+        hit_centre: [0, Math.fround(-2.05), 0], hit_slot: 0x1ff3,
+        steps: [] },
+      { bone: 8, part: "l_hand", slot: 0x1fef, offset: [0, 0, 0],
+        parent: null, damage_rank: [], hit_radius: Math.fround(1.05),
+        hit_centre: [0, Math.fround(-2.05), 0], hit_slot: 0x1fef,
+        steps: [] },
+    ],
+    motions: { ...TYPE31_ZSLMAN.motions, "520": motion(40) },
+  };
+  const tables = {
+    ...CHARS31, types: { ...CHARS31.types, "22": ZSASS, "24": ZSLMAN },
+  } as unknown as CharactersJson;
+  const spawn = (at: number, ct: number): ThrowerActor => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables);
+    const a = ActorSpawn(at, SpawnClass.Thrower, ct, "hands");
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    return a;
+  };
+
+  // `EnemyThrowerInit` (`FUN_00449620`), 0x00449877 / 0x00449881.
+  const z = spawn(0x9400, 0x16);
+  check("`zsass` is born holding its weapons: `EnemyThrowerInit` writes the "
+        + "armed slots",
+        z.boneSlot["5"] === 0x1fa2 && z.boneSlot["8"] === 0x1f9e,
+        JSON.stringify(z.boneSlot));
+  check("...and neither hand has a sphere, because the build refused both "
+        + "rows",
+        z.boneRadius["5"] === 0 && z.boneRadius["8"] === 0,
+        `${z.boneRadius["5"]} ${z.boneRadius["8"]}`);
+  // `SpawnThrownWeapon` (`FUN_004504E0`): the hand goes bare, radius 0.
+  z.boneRadius["5"] = 3;
+  SpawnThrownWeapon(z, HAND5 as never, NULL_HOST);
+  check("the throw empties the hand and zeroes its sphere",
+        z.boneSlot["5"] === 0x1f9f && z.boneRadius["5"] === 0,
+        `${z.boneSlot["5"]} ${z.boneRadius["5"]}`);
+  // `ThrowerStateRearm` (`FUN_0044F7A0`), at the clip's midpoint.
+  z.boneSlot["8"] = 0x1f9b;
+  z.state = ThrowerState.Rearm;
+  z.sub = 0;
+  ThrowerStateRearm(z, NULL_HOST);
+  z.action!.ticks = Math.trunc(ActorClipLength(z, 5) / 2);
+  ThrowerStateRearm(z, NULL_HOST);
+  check("`ThrowerStateRearm` gives both hands type 0x16's rows 4 and 7, "
+        + "unscaled and unasked",
+        z.boneSlot["5"] === 0x1fa2 && z.boneRadius["5"] === 1.75
+        && JSON.stringify(z.boneCentre["5"]) === JSON.stringify(R4)
+        && z.boneSlot["8"] === 0x1f9e
+        && z.boneRadius["8"] === Math.fround(1.65)
+        && JSON.stringify(z.boneCentre["8"]) === JSON.stringify(R7),
+        `${z.boneRadius["5"]} ${JSON.stringify(z.boneCentre["5"])} `
+        + `${z.boneRadius["8"]}`);
+
+  // `ThrowerStateRestoreBothHands` (`FUN_0044F900`), sub 1 with the latch
+  // down: the actor's own type's rows.
+  const m = spawn(0x9401, 0x18);
+  check("`zslman`'s rows name its own nodes, so the build gives it both",
+        m.boneRadius["5"] === Math.fround(1.05), String(m.boneRadius["5"]));
+  m.boneSlot["5"] = 0x1ff1;
+  m.boneRadius["5"] = 0;
+  m.boneCentre["5"] = [0, 0, 0];
+  m.state = ThrowerState.RestoreBothHands;
+  m.sub = 1;
+  m.flags2 &= ~ThrowerFlag.Regrowing;
+  ThrowerStateRestoreBothHands(m, 0, NULL_HOST);
+  check("`ThrowerStateRestoreBothHands` puts the row back with the weapon",
+        m.boneSlot["5"] === 0x1ff3 && m.boneRadius["5"] === Math.fround(1.05)
+        && m.boneCentre["5"][1] === Math.fround(-2.05),
+        `${m.boneSlot["5"]} ${m.boneRadius["5"]} `
+        + JSON.stringify(m.boneCentre["5"]));
+
+  // `ZombieThrowHandWeapon` (`FUN_0045A240`): `MOV [EDI+0x554], EBX`.
+  ResetGameGlobals();
+  EnterPlay();
+  SetGameTables(CHARS);
+  const k = spawnZombie(0x9402, 1, "knife");
+  k.pos = vec3(0, 0, 60);
+  const r4 = k.boneRadius["4"];
+  ZombieThrowHandWeapon(k, 5, NULL_HOST);
+  check("class 0x30's throw zeroes the emptied hand's sphere and no other",
+        k.boneRadius["5"] === 0 && k.boneRadius["4"] === r4 && r4 > 0,
+        `${k.boneRadius["5"]} ${k.boneRadius["4"]}`);
+}
+
+console.log("\nEnemyZombieInitByCharType's mesh hands:");
+{
+  const MESH = "coli0.bin:4576";
+  // `TYPE` with a left hand, so the arms that name bone 8 have one to name.
+  const mk = (t: number): CharacterType => ({
+    ...TYPE, type: t,
+    bones: [...TYPE.bones,
+            { bone: 8, part: "l_hand", slot: 8, offset: [0, 0, 0],
+              parent: null, damage_rank: [], hit_radius: 2, hit_slot: 8,
+              steps: [] }],
+  });
+  const tables = {
+    ...CHARS,
+    types: { "1": mk(1), "2": mk(2), "3": mk(3), "14": mk(14) },
+  } as unknown as CharactersJson;
+  const spawn = (at: number, ct: number): ZombieActor => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(tables);
+    return spawnZombie(at, ct, "mesh", { boneMeshColi: MESH });
+  };
+  const c2 = spawn(0x9500, 2);
+  check("types 2 and 3 test both hands against the tail's mesh, with no "
+        + "sphere",
+        c2.boneColi["5"] === MESH && c2.boneColi["8"] === MESH
+        && c2.boneRadius["5"] === 0 && c2.boneRadius["8"] === 0,
+        `${JSON.stringify(c2.boneColi)} ${c2.boneRadius["5"]}`);
+  check("...and neither comes apart: `obj+0x34 |= 0x400`",
+        (c2.flags & ActorFlag.NoDismember) !== 0);
+  check("...and type 2 alone raises `obj+0x136C` bit 0x400 before it falls "
+        + "into type 3's arm",
+        (c2.flags2 & ZombieFlag2.EntryClipPlaying) !== 0);
+  const c3 = spawn(0x9501, 3);
+  check("...which type 3 does not",
+        (c3.flags2 & ZombieFlag2.EntryClipPlaying) === 0
+        && (c3.flags & ActorFlag.NoDismember) !== 0
+        && c3.boneColi["8"] === MESH);
+  const ce = spawn(0x9502, 14);
+  check("type 0xE's arm is bone 5 alone",
+        ce.boneColi["5"] === MESH && ce.boneColi["8"] === undefined
+        && ce.boneRadius["5"] === 0 && ce.boneRadius["8"] > 0
+        && (ce.flags & ActorFlag.NoDismember) === 0,
+        `${JSON.stringify(ce.boneColi)} ${ce.boneRadius["8"]}`);
+  const c1 = spawn(0x9503, 1);
+  check("...and no other type reads the tail's `+0x10`",
+        Object.keys(c1.boneColi).length === 0 && c1.boneRadius["5"] > 0);
+  // `ZombieOnShot` (`FUN_00453EB0`) drops the latch for a landed shot:
+  // `AND DH, 0xfb` at 0x00453F14.
+  c2.pendingHit = { bone: 4, result: 2, player: 0 };
+  ZombieOnShot(c2);
+  check("...and a shot drops it",
+        (c2.flags2 & ZombieFlag2.EntryClipPlaying) === 0);
+
+  // **The shot meets the mesh.** `ShotTestBoneTree` (`FUN_00404750`) takes
+  // `ShotTestBoneMesh` (`FUN_004048A0`) for these bones, and class 0x30 is
+  // picked through the list: registered by its own update, broad phase at
+  // `obj+0x124` round the tracked point, then the tree.
+  const rng = new Rng(4);
+  const events = scene(0, rng);
+  SetGameTables(tables);
+  const z = spawnZombie(0x9504, 2, "saw", { boneMeshColi: MESH });
+  z.visible = true;
+  z.hp = 50;
+  z.pos = vec3(0, 0, 60);
+  // A unit quad in bone 5's own space, a unit in front of it toward the eye,
+  // facing it: `quadVsSegment` takes the segment from the plane's negative
+  // side to its positive one, and the winding runs with the normal.
+  T.coli = { files: ["t"], blobs: { [MESH]: {
+    min: [-0.5, -0.5, -1], max: [0.5, 0.5, -1], n: 1, plane: [0, 0, -1, -1],
+    verts: [-0.5, -0.5, -1, -0.5, 0.5, -1, 0.5, 0.5, -1, 0.5, -0.5, -1],
+    axis: [2], surface: [0x33],
+  } } } as never;
+  // Every bone at (0, 10, 60), unrotated -- the tracked point the broad phase
+  // is centred on included -- and no bone has a sphere; the camera at the
+  // origin looking +z.
+  const host: GameHost = {
+    ...NULL_HOST,
+    pickShot: () => null,
+    boneWorld: (_at, _bone, out) => {
+      out.x = 0; out.y = 10; out.z = 60;
+      return true;
+    },
+    boneSphere: () => null,
+    boneMatrix: (_at, _bone, out) => {
+      for (let i = 0; i < 16; i++) out[i] = i % 5 === 0 ? 1 : 0;
+      out[12] = 0; out[13] = 10; out[14] = 60;
+      return true;
+    },
+    viewSpaceOfPoint: (p, out) => {
+      out.x = p.x; out.y = p.y; out.z = -p.z;
+      return true;
+    },
+  };
+  const RAY = { origin: vec3(0, 10, 0), dir: vec3(0, 0, 1) };
+  // One frame for the update to file the actor; the shot tests what the last
+  // walk filed.
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  const cand = ProcessPlayerShotsTestList(RAY, host);
+  check("a shot along the hand meets its mesh, not a sphere: bone 5, the "
+        + "quad's surface, a unit short of the bone",
+        cand?.bone === 5 && cand.mesh?.surface === 0x33
+        && Math.abs(cand.point.z - 59) < 1e-6,
+        JSON.stringify(cand));
+  check("...and misses it a unit to the side",
+        ProcessPlayerShotsTestList({ origin: vec3(1, 10, 0),
+                                     dir: vec3(0, 0, 1) }, host) === null);
+  z.removed.push(5, 8);
+  check("...and not at all once the hands' draw slots are zero",
+        ProcessPlayerShotsTestList(RAY, host) === null);
+  z.removed.length = 0;
+  const resolved: { kind: string; at?: number; bone?: number }[] = [];
+  events.on("shot.resolved", (r) => resolved.push(r));
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  const rec = G.g_shot_hit_records[0];
+  check("the queued shot takes it: the impact of that surface, where "
+        + "`MarkActorShot` spawns it",
+        rec?.surface === 0x33 && Math.abs(rec.z - 59) < 1e-6,
+        JSON.stringify(rec));
+  check("...and the hit on the hand goes to the damage tables like any other",
+        resolved.length === 1 && resolved[0].kind === "actor"
+        && resolved[0].at === z.at && resolved[0].bone === 5,
+        JSON.stringify(resolved));
+  T.coli = null;
+  SetGameTables(CHARS);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

@@ -6120,9 +6120,8 @@ The port's build now writes every bone's record radius (`Actor.boneRadius`)
 as the table's times the size, so a civilian is shot through spheres 0.9 as
 wide at bones 0.9 as far apart -- both shot tests, the blood spray and the
 dropped-prop test read that record. The same routine gates each row on its
-own slot matching the node's, which the port still does not do; that is a
-declared divergence on `ActorBuildSkinnedModel` in `game/spawn.ts`, and it
-wants porting together with `ResolveDamagedPartSphere` (`FUN_004099A0`).
+own slot matching the node's; that is ported now, with every other writer of
+the record's sphere -- see the next section.
 
 **What it looks like.** Stage 1's rescue civilian stands a head shorter; stage
 4's crawling civilian (block 4, type 48, posing clip 596's root) sits 2.593
@@ -6138,6 +6137,70 @@ and a shot 1.30 in and 1.40 out of her 1.35 head), and
 `tools/verify_root_pose.py`, which decodes the size switch from its jump table
 against `ActorModelScale` and finds, in the six stages' spawns, every
 character that poses a clip's root.
+
+## A bone's hit sphere is the record's, from every routine that writes it
+
+A bone is shot through the sphere its **draw record** holds -- `+0x78` the
+radius, `+0x7C..+0x84` the centre, of `obj + 0x20C + bone*0x90` -- and the
+port held only the radius, from the build alone, and took every centre from the
+bundle. So a gore-swapped part kept the pristine part's sphere, an emptied hand
+could still be shot, and the table's rows reached actors the engine's build
+refuses them to. Every writer a sweep of `.text` finds is on
+`Actor.boneRadius` / `Actor.boneCentre` now (`docs/formats/combat.md` §8a has
+the table):
+
+* **The build's slot test.** `SkeletonWalkNode` (`FUN_004107E0`) takes row
+  `bone - 1` only when the row's own slot is the node's (`0x00410830`), and
+  zeroes radius and centre otherwise. The bundle carries each row's slot as
+  `hit_slot`. The one case a player meets is `zsass`: its rows name the armed
+  hands `EnemyThrowerInit` (`FUN_00449620`) puts in and its skeleton the bare
+  ones, so **a `zsass` holding its weapons cannot be shot in either hand** until
+  it has thrown and re-armed. `EnemyThrowerInit`'s arming itself was missing
+  too (`0x00449877`/`0x00449881`), so a `zsass` walked in bare-handed.
+* **The gore swap.** `ActorSwapDamagedPart` (`FUN_004098E0`) zeroes the radius
+  for slot 0 or 1 and otherwise runs `ResolveDamagedPartSphere`
+  (`FUN_004099A0`) twice, on the actor's type and then on type 7 (0xB for
+  0xD), **both always** -- the first returns 0 whatever it finds. A found row
+  is copied unscaled; a missing one leaves the record alone. The rows travel
+  as `characters.part_spheres`. The swap also reads its own zone-bit code off
+  the record's step counter now, and the headshot's `(rec, 0, 2)` is that swap
+  rather than `RemoveBoneSubtree`, which the port had called: the head goes
+  alone, and its zone bit only on its last step. `RemoveBoneSubtree` zeroes
+  the radius with the slot.
+* **The weapon hands.** `SpawnThrownWeapon` and `ZombieThrowHandWeapon` zero
+  the emptied hand's radius -- two declared divergences lose that half.
+  `ThrowerStateRearm` copies type 0x16's rows 4 and 7 back and
+  `ThrowerStateRestoreBothHands` the actor's own, unscaled and untested.
+* **The mesh hands.** `EnemyZombieInitByCharType` (`FUN_00452FD0`) gives
+  `znchain`'s and `zndina`'s bones 5 and 8, and `znken`'s bone 5, the collision
+  mesh at the descriptor tail's `+0x10` and a zero radius -- the "held prop"
+  the port's notes had it loading -- and the same arm makes 2 and 3
+  undismemberable and raises 2's entry latch, whose readers and whose
+  clearer in `ZombieOnShot` were already ported. All 34 shipped spawns
+  name a blob (`bone_mesh_coli`). Only `ShotTestBoneTree`'s walk tests a
+  mesh, so **class 0x30 (and 0x18) is picked through the shot-test list
+  now**, the engine's way: it registered every frame already, and the pick
+  was the renderer's. A mesh hit sparks with the quad's surface and reaches
+  `ResolveHit` on the bone; every other zombie shot takes `ShotTestSphere`'s
+  broad phase at `obj+0x124` round the tracked point before the bones.
+
+Not ported, and said where it lives: Original Mode's big-head item doubles
+bone 2's radius in both enemy `Init`s, which goes with the item; and
+`ZombieHideBoneSubtree` (`0x0045DD70`) is the halved crawler's, another
+workstream's.
+
+Checked by `test:port` (the build's test; each search, both running, type
+0xB for 0xD, a slot-0 and a slot-1 swap, the headshot's zone bit, the sever;
+every hand writer; the three mesh arms; a zombie's hand met through the
+list and a queued shot through it), `test:render` (a written centre is where
+the pick meets the sphere and not the row's) -- each
+failing on a mutant of the change it covers -- and `tools/verify_combat.py`
+check 17: the gate's bytes
+and every row it refuses (`GATED`), the two restore states' loads, **type
+0x16's rows 4 and 7 against `EnemyThrowerInit`'s immediates** -- a table and an
+instruction stream agreeing -- every reachable tail ending in `-1`, both
+searches agreeing wherever both find a slot, `part_sphere_rows` against a raw
+first match, and every mesh-hand spawn naming a blob.
 
 ## Every opcode, and what the player does with it
 

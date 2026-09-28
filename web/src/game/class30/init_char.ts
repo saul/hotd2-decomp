@@ -42,9 +42,11 @@ const SPAWN_TURN_TOWARD_CAMERA = 0x4;
  * **The head, and the arms.** After the flag moves the engine branches on
  * the character type: 9 (the twin) and 0x12 (`znele`) set up a faded draw --
  * {@link ZombieFadeType} -- and 0x12 also allocates the twin beside itself,
- * 0xC branches on the body condition and 0xE loads a prop. The two fade arms
- * are ported; 0xC's and 0xE's are not. (This comment used to say type 9
- * "becomes a corpse". It is drawn at a quarter alpha and fades out.)
+ * 0xC branches on the body condition, and 2, 3 and 0xE give a hand a
+ * collision mesh -- {@link ZombieBoneMeshType}. The fade arms and the mesh
+ * arms are ported; 0xC's is not. (This comment used to say type 9 "becomes a
+ * corpse". It is drawn at a quarter alpha and fades out; and that 0xE "loads
+ * a prop", which is the mesh.)
  *
  * The fourth arm — `obj+0x34` bit 3 — **is** ported, and it is not a flag
  * move at all: it re-reads the descriptor's position and yaw as an offset on
@@ -55,11 +57,11 @@ const SPAWN_TURN_TOWARD_CAMERA = 0x4;
  * flag, nothing read it, and stage 5 block 2's four passengers stood at the
  * world origin for it.
  *
- * The other arm that **is** here is types 2 and 3, which this file used to
- * describe as *"load a held prop and play a spawn cry"*. It is not a cry: it
- * takes a share in the scene's one looping held-weapon SE, and the sound runs
- * until an actor dies. See {@link EnemyZombieTakeWeaponLoopSe} — the prop load
- * beside it is still unported and says so there.
+ * Types 2 and 3 this file used to describe as *"load a held prop and play a
+ * spawn cry"*. Neither: the "prop" is the collision mesh, and the sound is a
+ * share in the scene's one looping held-weapon SE, which runs until an actor
+ * dies -- see {@link ZombieInitBoneMeshes} and
+ * {@link EnemyZombieTakeWeaponLoopSe}.
  */
 export function EnemyZombieInitByCharType(obj: ZombieActor,
                                           events?: Events): void {
@@ -103,13 +105,91 @@ export function EnemyZombieInitByCharType(obj: ZombieActor,
     // `OR EAX, 0x100000` on the word re-read at `00453058` — after the call.
     obj.flags2 |= ZombieFlag2.Carried;
   }
-  // `00453133`, the switch's types-2-and-3 arm, sound only.
+  // The switch's types-2-and-3 and 0xE arms: the flags and the meshes,
+  // then `00453133`, the sound.
+  ZombieInitBoneMeshes(obj);
   EnemyZombieTakeWeaponLoopSe(obj, events);
   // The two arms that set up a faded draw.
   if (obj.charType === ZombieFadeType.Twin) ZombieInitTwinFade(obj);
   else if (obj.charType === ZombieFadeType.Znele) {
     ZombieInitZneleFade(obj, events);
   }
+}
+
+/**
+ * The three character types `EnemyZombieInitByCharType`'s switch gives a
+ * collision mesh on a hand, named for their `pol/` files through
+ * `g_character_skeletons`.
+ */
+export enum ZombieBoneMeshType {
+  /** `znchain.bin` -- case 2, which raises one more bit and falls into 3. */
+  Znchain = 2,
+  /** `zndina.bin`. */
+  Zndina = 3,
+  /** `znken.bin` -- its own arm, bone 5 alone. */
+  Znken = 0xe,
+}
+
+/** The two bones the arms name, by record: `obj+0x550..` and `obj+0x700..`. */
+const MESH_BONE_RIGHT = 5;
+const MESH_BONE_LEFT = 8;
+
+/**
+ * The mesh arms of `EnemyZombieInitByCharType` (`FUN_00452FD0`):
+ *
+ * ```
+ * case 2:    obj+0x136C |= 0x400                               ; falls into 3
+ * case 3:    obj+0x34 |= 0x400
+ *            rec(5)+0x74 |= 0x51; rec(5)+0x88 = tail+0x10; rec(5)+0x78 = 0
+ *            rec(8)+0x74 |= 0x51; rec(8)+0x88 = tail+0x10; rec(8)+0x78 = 0
+ *            ...the weapon loop's take, EnemyZombieTakeWeaponLoopSe
+ * case 0xE:  rec(5)+0x74 |= 0x51; rec(5)+0x88 = tail+0x10; rec(5)+0x78 = 0
+ * ```
+ *
+ * `[proved]`, `0x004530BE..0x00453164` (the records are `obj+0x550`/`0x564`/
+ * `0x554` and `obj+0x700`/`0x714`/`0x704`: bone 5's and bone 8's `+0x74`,
+ * `+0x88` and `+0x78`). `+0x74 |= 0x51` and `+0x88` are what make
+ * `ShotTestBoneTree` (`FUN_00404750`) test the bone against the mesh
+ * instead of its sphere -- {@link Actor.boneColi} -- and the radius goes to
+ * zero with it. The blob is the tail's `+0x10`, a relocated pointer into the
+ * collision buffers, and every shipped spawn of the three names one.
+ *
+ * `0x400` on `obj+0x34` is {@link ActorFlag.NoDismember}: neither weapon
+ * carrier comes apart. `0x400` on `obj+0x136C` is
+ * {@link ZombieFlag2.EntryClipPlaying}, which `ZombieStateHoldAtRange`
+ * already reads and clears and nothing in the port raised.
+ *
+ * `[port-only]` as a function, like {@link EnemyZombieTakeWeaponLoopSe}: the
+ * engine's is two `switch` arms.
+ */
+export function ZombieInitBoneMeshes(obj: ZombieActor): void {
+  const t = obj.charType;
+  if (t === ZombieBoneMeshType.Znken) {
+    ZombieGiveBoneMesh(obj, MESH_BONE_RIGHT);
+    return;
+  }
+  if (t !== ZombieBoneMeshType.Znchain && t !== ZombieBoneMeshType.Zndina) {
+    return;
+  }
+  // Case 2's one write, before it falls into case 3.
+  if (t === ZombieBoneMeshType.Znchain) {
+    obj.flags2 |= ZombieFlag2.EntryClipPlaying;
+  }
+  obj.flags |= ActorFlag.NoDismember;
+  ZombieGiveBoneMesh(obj, MESH_BONE_RIGHT);
+  ZombieGiveBoneMesh(obj, MESH_BONE_LEFT);
+}
+
+/**
+ * One record's three writes. A tail whose `+0x10` did not resolve to a blob
+ * leaves the record flagged with nothing to test -- `CMP [rec+0x88],-1` in
+ * `ShotTestBoneTree` -- which the port has as no mesh and no radius, and the
+ * same nothing.
+ */
+function ZombieGiveBoneMesh(obj: ZombieActor, bone: number): void {
+  const k = String(bone);
+  if (obj.boneMeshColi) obj.boneColi[k] = obj.boneMeshColi;
+  obj.boneRadius[k] = 0;
 }
 
 /**

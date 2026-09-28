@@ -54,6 +54,7 @@ import { DebugSidebar } from "../src/ui/panels/DebugSidebar";
 import { Feed } from "../src/ui/panels/Feed";
 import { PauseScreen, SoundButton } from "../src/ui/panels/Overlays";
 import { SkipBar } from "../src/ui/panels/SkipBar";
+import { PerfHud } from "../src/ui/panels/PerfHud";
 import { Tree } from "../src/ui/panels/Tree";
 import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
@@ -99,6 +100,8 @@ function projection(): UiProjection {
     filterMode: "asset",
     anisotropyLimit: 16,
     pillarbox: false,
+    pixelRatio: 1,
+    pixelRatioOptions: [1, 1.5, 2],
     wait: { sub: "0x3B wait_enemies_alive", lines: [{ text: "3 alive" }] },
     waitBoxed: true,
     actorPanel: { sub: "12 actors", groups: [] },
@@ -126,6 +129,7 @@ function projection(): UiProjection {
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
     continueOffer: null,
+    perf: null,
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
     gameOver: { phase: 3, label: "GAME OVER" },
@@ -384,6 +388,39 @@ console.log("\nThe corner button:\n");
   } catch { /* the check below fails on an empty source */ }
   check("both labels dispatch pressStart, and nothing else",
         /kind: "pressStart"/.test(src) && !/requestSkip/.test(src));
+}
+
+// The perf meter is read off a phone, over the game, and is the evidence a
+// slow frame is diagnosed from -- so it has to render what it is given, and
+// nothing when it is off.
+console.log("\nThe perf meter:\n");
+{
+  const off = renderIn(projection(), createElement(PerfHud));
+  check("off, there is no readout", off === "", off);
+  const on = renderIn({ ...projection(), perf: {
+    fps: 42, frame: [16.7, 33.4, 81], long: 3, busy: [4.2, 9.9], ticks: 1.4,
+    sections: [["script", 0.2, 1], ["game", 1.9, 4], ["render", 0.9, 2],
+               ["hud", 0, 0], ["matrices", 0.3, 1], ["draw", 0.8, 2],
+               ["publish", 0.1, 1], ["other", 0.05, 0.2]],
+    systems: [["render.characters", 0.8], ["game.world", 0.4]],
+    gpu: 6.3, uploads: [12, 1], worst: "38 ms, draw 31 · +12 tex",
+    gl: [164, 2718, 29, 290, 999], view: "520×390 @1× · dpr 3",
+    experiments: "blur=0" } }, createElement(PerfHud));
+  check("on, it says the frame rate and the frame times",
+        on.includes('id="perf-hud"') && /<b>42<\/b> fps · 16.7\/33.4\/81 ms/.test(on)
+        && on.includes("3 long"), on);
+  check("...where the time went, leaving out what cost nothing",
+        on.includes("game</span> 1.9") && !/>hud<\/span>/.test(on)
+        && on.includes("characters 0.8"), on);
+  check("...the GPU sample, the GL counts, the canvas and the A/B switches",
+        on.includes("gpu≈ 6.3") && on.includes("164 calls")
+        && on.includes("520×390 @1× · dpr 3 · blur=0"), on);
+  check("...the worst frame and what the window uploaded",
+        on.includes("worst 38 ms, draw 31 · +12 tex")
+        && on.includes("new: +12 tex · +1 prog"), on);
+  check("the meter is an overlay with a key, in the Scene panel",
+        TOGGLES.some((t) => t.name === "perf" && t.kind === "debug"
+                            && t.group === "scene" && !t.on && !!t.key));
 }
 
 console.log("\nThe debug sidebar:\n");
@@ -684,6 +721,10 @@ console.log("\nOne key per preference:\n");
   check("the Scene panel has the 4:3 switch, and it follows the projection",
         /<input type="checkbox" checked=""\/>\s*4:3 frame/.test(scene),
         scene.slice(scene.indexOf("view-settings"), scene.indexOf("view-settings") + 400));
+  const ratioSel = /<label class="view-ratio"[^]*?<\/label>/.exec(scene)?.[0] ?? "";
+  check("...and the Resolution select, offering the projection's steps",
+        (ratioSel.match(/<option /g) ?? []).length === 3
+        && /<option value="1" selected="">1×/.test(ratioSel), ratioSel);
 
   // An old save held every overlay's default as if chosen: every setting was
   // written whenever one moved. Read back as a choice, `rails: true` would put
@@ -700,6 +741,23 @@ console.log("\nOne key per preference:\n");
             JSON.stringify({ v: 2, toggles: { rails: true } }));
   check("...and a new save's overlays are a choice, and kept",
         readViewPrefs().toggles.rails === true);
+  // The 4:3 switch's default is the device's since version 3, so a pre-3
+  // `false` -- written whenever anything moved -- is not a choice and must not
+  // keep a phone filling the screen. A pre-3 `true` could only be chosen.
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 2, toggles: {}, fourByThree: false }));
+  check("a pre-3 save's 4:3 false is dropped, so the device decides",
+        readViewPrefs().fourByThree === undefined);
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 2, toggles: {}, fourByThree: true }));
+  check("...and its true is kept, being a choice",
+        readViewPrefs().fourByThree === true);
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 3, toggles: {}, fourByThree: false,
+                             pixelRatio: 1.5 }));
+  const v3 = readViewPrefs();
+  check("...and a version-3 choice either way is kept, the resolution too",
+        v3.fourByThree === false && v3.pixelRatio === 1.5, JSON.stringify(v3));
 
   // A browser set to block site data throws on the accessor. A layout
   // preference is not worth a blank page.

@@ -127,7 +127,9 @@ from .combat import (  # noqa: F401
                      bone_zones, combat_tables,
                      damage_rank_row, death_motions, difficulty_tables,
                      gore_parts, hit_reactions, hit_sphere, hit_steps,
-                     motion_row, player_damage, reaction_groups, throw_tables,
+                     motion_row, PART_SPHERE_FALLBACK_TYPES,
+                     part_sphere_rows, player_damage, reaction_groups,
+                     throw_tables,
                      torso_stage_count, zombie_throw_tables)
 from .approach import (  # noqa: F401
                        APPROACH_RING_DEFAULTS, APPROACH_RING_SETS,
@@ -222,6 +224,9 @@ __all__ = [
     "class14_tail",
     "class17_tail",
     "class19_tail",
+    "part_spheres",
+    "ZOMBIE_BONE_MESH_TYPES",
+    "zombie_bone_mesh_coli",
     "class45_tail",
     "CLASS14_MOTIONS",
     "class22_tail",
@@ -605,6 +610,27 @@ def class19_tail(rec, sets=None) -> dict:
         "despawn_path": rec.param(0x40, "i16") or 0,
         "despawn_frame": rec.param(0x42, "i16") or 0,
     }
+#: The character types whose arm of `EnemyZombieInitByCharType`
+#: (`FUN_00452FD0`) reads the tail's ``+0x10`` -- 2 and 3 share one arm, 0xE
+#: has its own.
+ZOMBIE_BONE_MESH_TYPES = frozenset({2, 3, 0xE})
+
+
+def zombie_bone_mesh_coli(rec, char_type, sets=None) -> str | None:
+    """Class 0x30's (and 0x18's) tail ``+0x10`` for the three character types
+    whose arm of `EnemyZombieInitByCharType` puts it in bones 5 and 8's
+    records as their collision mesh, resolved to a ``coli.blobs`` key. The
+    TypeScript half's ``zombieBoneMeshColi`` has the routine."""
+    from . import coli as colilib
+    if char_type not in ZOMBIE_BONE_MESH_TYPES:
+        return None
+    word = rec.param(0x10, "u32")
+    if word is None or word == 0xFFFFFFFF or not sets:
+        return None
+    hit = colilib.pointer_to_offset(word, sets[0], sets[1])
+    return f"{hit[0]}:{hit[1]}" if hit else None
+
+
 def class45_tail(rec) -> dict:
     """Class 0x45's descriptor: ``desc+0x25``, the sub-type
     `Boss3ClassHandler` (`FUN_0041FC00`) dispatches on -- 0 the opening head,
@@ -1072,6 +1098,9 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         class14 = class14_tail(rec) if sp["class"] == 0x14 else None
         class19 = (class19_tail(rec, stage.colisets() or None)
                    if sp["class"] == 0x19 else None)
+        bone_mesh_coli = (zombie_bone_mesh_coli(rec, res.char_type,
+                                                stage.colisets() or None)
+                          if sp["class"] in (0x30, 0x18) else None)
         class22 = class22_tail(rec) if sp["class"] == 0x22 else None
         class23 = class23_tail(rec) if sp["class"] == 0x23 else None
         class45 = class45_tail(rec) if sp["class"] == 0x45 else None
@@ -1163,6 +1192,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             class53=class53,
             class14=class14,
             class19=class19,
+            bone_mesh_coli=bone_mesh_coli,
             class22=class22,
             class23=class23,
             class45=class45,
@@ -1348,6 +1378,17 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
     return chars, placements, [e for e in entries if e]
 
 
+def part_spheres(tables, chars: dict[int, Character]) -> dict:
+    """`g_character_part_tables`' damaged-part rows by character type, for
+    every type built here and the two fallbacks; rows kept when their slot is
+    some bone's effect-table step slot above 1. The TypeScript half's
+    ``partSpheres`` says why."""
+    slots = {st[0] for c in chars.values() for b in c.bones
+             for st in b.get("steps", []) if st[0] > 1}
+    types = sorted(set(chars) | set(PART_SPHERE_FALLBACK_TYPES))
+    return {str(ct): part_sphere_rows(tables, ct, slots) for ct in types}
+
+
 def characters_json(chars: dict[int, Character],
                     placements: list[Placement], tables=None) -> dict:
     """The `characters` block of ``<stage>.script.json``."""
@@ -1361,6 +1402,8 @@ def characters_json(chars: dict[int, Character],
         "tracking": camera_tracking(tables) if tables is not None else {},
         "player": player_damage(),
         "bone_zones": bone_zones(tables) if tables is not None else [],
+        "part_spheres": (part_spheres(tables, chars)
+                         if tables is not None else {}),
         "class31": class31_tables(tables) if tables is not None else {},
         "types": {str(ct): c.to_json() for ct, c in sorted(chars.items())},
         "placements": [p.to_json() for p in placements],

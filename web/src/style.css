@@ -313,6 +313,43 @@ kbd {
   }
 }
 
+/* ---- the perf meter ----
+   Under the menu, in the corner; on a phone that is the black bar beside the
+   4:3 frame. Solid rather than glass: a `backdrop-filter` over the canvas is
+   one of the things it exists to measure. */
+
+#perf-hud {
+  position: absolute; z-index: 5;
+  top: calc(max(10px, env(safe-area-inset-top)) + 44px);
+  left: max(10px, env(safe-area-inset-left));
+  max-width: min(46ch, 45vw);
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.72); color: #cfe9d6;
+  border-radius: 6px;
+  font: 10px/1.35 var(--mono);
+  pointer-events: none !important;
+  overflow: hidden;
+}
+/* Boxed, it keeps to the bar beside the frame -- about 160 px on a phone
+   held sideways -- and wraps rather than covering the game. */
+#overlay.boxed #perf-hud {
+  max-width: max(140px, calc(var(--fx) - 20px));
+  font-size: 9px;
+}
+#overlay.boxed #perf-hud .perf-head { font-size: 11px; }
+#perf-hud .perf-head { font-size: 12px; color: #fff; }
+#perf-hud .perf-sec span:first-child {
+  display: inline-block; min-width: 7ch; color: #8fb3a0;
+}
+#perf-hud .perf-dim { color: #7c8b99; white-space: normal; }
+#perf-hud .perf-bad { color: var(--warn); }
+
+/* `?blur=0`, the perf meter's A/B switch: every backdrop blur over the game
+   off, to see what the compositor was paying for them. */
+.no-blur *, .no-blur *::before, .no-blur *::after {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+
 /* ---- what an overlay key just did ---- */
 
 #toast {

@@ -45,8 +45,14 @@ const KEY = "hod2.viewPrefs";
  * choice they would put the camera line and the spawn labels straight back
  * over the game, so a save from before 2 keeps its game switches and forgets
  * its overlay ones.
+ *
+ * **3**: the 4:3 switch is a choice. A phone boxes by default and a desktop
+ * fills, and a pre-3 save wrote `fourByThree` whenever anything moved -- so
+ * its `false` is the old default, never chosen, and would keep a phone that
+ * had once moved the volume filling the screen. A pre-3 `true` could only
+ * have been chosen, and is kept.
  */
-const VERSION = 2;
+const VERSION = 3;
 
 /** The overlay switches, which a pre-2 save cannot be trusted about. */
 const OVERLAYS: ReadonlySet<string> =
@@ -62,8 +68,13 @@ export interface ViewPrefs {
   lightMode?: string;
   fogMode?: string;
   filterMode?: string;
-  /** The frame boxed to 4:3 rather than filling the window. See the note above. */
+  /**
+   * The frame boxed to 4:3 rather than filling the window -- as a choice, and
+   * absent until one is made: the default is the device's (`Player.pillarbox`).
+   */
   fourByThree?: boolean;
+  /** The Resolution select, as a choice. See `Player.pixelRatio`. */
+  pixelRatio?: number;
   /**
    * Whether sound is off, and how loud it is when it is not.
    *
@@ -93,12 +104,15 @@ export function readViewPrefs(): ViewPrefs {
     if (!v || typeof v !== "object") return { toggles: {} };
     const p = v as ViewPrefs;
     const toggles = { ...(p.toggles ?? {}) };
-    if ((p.v ?? 1) < VERSION) {
+    const saved = p.v ?? 1;
+    if (saved < 2) {
       for (const k of Object.keys(toggles)) {
         if (OVERLAYS.has(k)) delete toggles[k as ToggleName];
       }
     }
-    return { ...p, toggles };
+    const out: ViewPrefs = { ...p, toggles };
+    if (saved < 3 && out.fourByThree !== true) delete out.fourByThree;
+    return out;
   } catch {
     return { toggles: {} };
   }

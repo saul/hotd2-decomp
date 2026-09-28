@@ -85,6 +85,46 @@ export interface SkipProjection {
 }
 
 /**
+ * The perf meter's readout: what a frame costs, measured where it runs.
+ *
+ * Null unless the Perf meter overlay is on. Rebuilt twice a second rather
+ * than every frame, so showing it does not cost a render a frame of its own.
+ * `app/perf.ts` measures; this is only the numbers.
+ */
+export interface PerfProjection {
+  /** Frames drawn per second, while the loop is awake. */
+  fps: number;
+  /** Frame-to-frame interval in ms: median, 95th percentile, worst. */
+  frame: readonly [number, number, number];
+  /** Frames in the window that came more than 25 ms after the last. */
+  long: number;
+  /** The page's own work per frame, ms: mean and worst. */
+  busy: readonly [number, number];
+  /** Game ticks per drawn frame, mean. */
+  ticks: number;
+  /** Where the work goes: [section, mean ms, worst ms], in loop order. */
+  sections: readonly (readonly [string, number, number])[];
+  /** The costliest systems: [id, mean ms per frame], worst first. */
+  systems: readonly (readonly [string, number])[];
+  /** Sampled wait for the GPU to finish a frame, ms; null before a sample. */
+  gpu: number | null;
+  /**
+   * Textures and shader programs created on the GPU in the window -- each a
+   * synchronous upload or compile inside `draw`, and on WebKit a trip to its
+   * GPU process.
+   */
+  uploads: readonly [number, number];
+  /** The window's costliest frame, in one line: "38 ms, draw 31 · +12 tex". */
+  worst: string;
+  /** Draw calls, triangles, shader programs, textures, geometries. */
+  gl: readonly [number, number, number, number, number];
+  /** The canvas: "520×390 @1× · dpr 3". */
+  view: string;
+  /** The URL's A/B switches that are on, "" if none. See `app/perf.ts`. */
+  experiments: string;
+}
+
+/**
  * The continue offer: player 1 is on the CONTINUE? countdown and START would
  * be heard. The corner button becomes **Continue** for it, because it is the
  * one START a phone has -- the skip's button and the continue's are the same
@@ -346,13 +386,20 @@ export interface UiProjection {
   /**
    * Whether the frame is boxed to the game's 4:3, or fills the window.
    *
-   * Off by default: the page is the game, and a phone held sideways is twice
-   * as wide as it is tall. On is the cabinet's own shape -- the projection is
-   * a compile-time 4:3, so filling a wider window shows more of every shot
-   * than the game ever did -- and the HUD's letterbox measures itself against
-   * whichever frame is drawn.
+   * On is the cabinet's own shape -- the projection is a compile-time 4:3, so
+   * filling a wider window shows more of every shot than the game ever did --
+   * and the HUD's letterbox measures itself against whichever frame is
+   * drawn. On by default on a touch screen, where a phone held sideways shows
+   * nearly 80 degrees across for the game's 53; off on a desktop. See
+   * `Player.pillarbox`.
    */
   pillarbox: boolean;
+  /**
+   * Canvas pixels per CSS pixel, and the steps the Resolution select offers.
+   * 1 by default on a touch screen. See `Player.pixelRatio`.
+   */
+  pixelRatio: number;
+  pixelRatioOptions: readonly number[];
   wait: WaitProjection | null;
   /** The wait panel's `box` checkbox. See the `boxWait` command. */
   waitBoxed: boolean;
@@ -380,6 +427,8 @@ export interface UiProjection {
   groups: Readonly<Record<DebugGroupName, readonly StripRow[]>>;
   skip: SkipProjection | null;
   continueOffer: ContinueProjection | null;
+  /** See {@link PerfProjection}. */
+  perf: PerfProjection | null;
   branch: BranchProjection | null;
   gameOver: GameOverProjection | null;
 }

@@ -75,16 +75,17 @@ const AFTERIMAGE_PERIOD = 7;
  *
  * **The second write is not another bone.** `*(bone * 0x90 + 0x284 + obj) = 0`
  * — `899f54050000` for bone 5 at 0x0045A2B2 and `899f04070000` for bone 8 at
- * 0x0045A2DB — is the bone record's own `+0x78`, which `SkeletonWalkNode`
- * (`FUN_004107E0`) fills as the bone's **hit-sphere radius**; zeroing it makes
- * the hand it just emptied unshootable. `SpawnThrownWeapon` (`FUN_004504E0`)
- * does the identical write for class 0x31 at 0x00450540.
- *
- * The hit sphere **is** cleared: {@link Actor.boneRadius} is the record's
- * `+0x78`, and both shot tests and the blood read it over the table's. It was
- * left out, declared a divergence, for as long as the actor had no per-bone
- * radius to zero. Nothing in class 0x30 gives it back: the only other writer
- * that names `+0x554` or `+0x704` is `EnemyZombieInitByCharType`, at spawn.
+ * 0x0045A2DB, and the same pair again in the other two arms (`0x0045A2F7`,
+ * `0x0045A31D`, `0x0045A339`) — is the bone record's own `+0x78`, which
+ * `SkeletonWalkNode` (`FUN_004107E0`) fills as the bone's **hit-sphere
+ * radius**; zeroing it makes the hand it just emptied unshootable.
+ * `SpawnThrownWeapon` (`FUN_004504E0`) does the identical write for class
+ * 0x31. Every arm that swaps a hand zeroes that hand, and the bundle's hand
+ * kit is exactly the arms, so the port makes the write wherever it makes the
+ * swap, onto {@link Actor.boneRadius}. Nothing in class 0x30 gives it back:
+ * the only other writer that names `+0x554` or `+0x704` is
+ * `EnemyZombieInitByCharType`, at spawn. It was left out, declared a
+ * divergence, for as long as the actor had no per-bone radius to zero.
  *
  * `[diverges]` Two things the weapon does in the engine are not done, both
  * because it is not an `Actor` here but a record in `G.g_thrown_weapons`. It

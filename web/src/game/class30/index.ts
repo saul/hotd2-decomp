@@ -121,7 +121,10 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // the next frame on `obj+0x34` bit `0x4000` and bytes `0x009C72F1`/
   // `0x009C72F3`; no stage bundle is exported in Training, and the port keeps
   // no hook pointer. Original Mode's big-head hook, `ZombieDrawWithEnlargedHead`
-  // (`FUN_00453B50`), calls this one inside a scale, so it aims the same.
+  // (`FUN_00453B50`), calls this one inside a scale, so it aims the same; the
+  // same arm of `EnemyZombieInit` doubles bone 2's hit radius (`obj+0x3A4`,
+  // `FADD ST0,ST0` -- `FMUL [0x0055DD48]` for type 0xE -- at `0x00452F71`),
+  // which goes with the item.
   HeadAimBeginDraw(obj, obj.zom, host);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
   HeadAimEndDraw(obj, obj.zom);
@@ -305,6 +308,9 @@ export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
   // sphere, and `obj+0x128 = 3.5`, the body one. The port had neither, so
   // every zombie collided as a point and walked through walls.
   obj.radius = CharacterTypeOf(obj)?.actor_radius ?? 0;
+  // The same word as the shot test reads it: `ShotTestSphere`'s broad phase,
+  // now that the class is picked through the list.
+  obj.hitRadius = obj.radius;
   obj.bodyRadius = ZOMBIE_BODY_RADIUS;
   // `obj+0x131D = 0xFF`, and every test reads it as `(s8)` -- so this is -1,
   // and an actor that has not been ranked yet passes rather than failing. As
@@ -504,6 +510,16 @@ export const EnemyZombieHandler: ClassHandler = {
   // `ActorKillAll`, which is right: `ChooseDeathMotion` (`FUN_004560B0`) is
   // the engine's own picker and `ZombieStateDeath6` calls it.
   updatesWhenDead: true,
+  // **Picked the engine's way.** Class 0x30 registers every frame --
+  // `ActorRegisterCameraPoint(obj, 4.0)` at `0x0045347A` on every path
+  // through `ZombieAdvanceMotion`, and the twin's `RegisterForShotTest` at
+  // `0x004533CB` -- so the shot is `ShotTestSphere`'s broad phase at
+  // `obj+0x124` round the tracked point, then `ShotTestBoneTree` over the
+  // bones, sphere or mesh by the record. The mesh arm is why it moved across:
+  // `EnemyZombieInitByCharType`'s weapon hands are collision meshes, and only
+  // the tree walk tests one. Class 0x18 spreads this row, and its update is
+  // `EnemyZombieUpdate` too.
+  registersForShotTest: true,
   debug: EnemyZombieDebug,
 };
 

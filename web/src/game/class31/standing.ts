@@ -30,7 +30,8 @@ import { ActorFacePlayerTarget } from "../actor_turn";
 import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
   from "../combat/permits";
 import type { GameHost } from "../host";
-import { CharacterTypeOf, MotionOf, SecondsToTicks } from "../tables";
+import { CharacterTypeOf, MotionOf, SecondsToTicks, T } from "../tables";
+import type { CharacterType } from "../../bundle";
 import { vec3, type Vec3 } from "../vec";
 import { ActorClipFrame, ActorClipLength } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
@@ -220,26 +221,40 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
 }
 
 /**
- * Put one hand's weapon back and clear the arm it counted as destroyed.
+ * Put one hand's weapon back, give it back its hit sphere, and clear the arm
+ * it counted as destroyed -- the four writes each restore state makes per
+ * hand, in the engine's order:
  *
- * Both re-arm states also rewrite the bone record's hit sphere from the
- * character's table, `g_character_part_tables` (`0x004D032C`) entry
- * `bone - 1`: the radius at `+0x10` into `+0x78` and the centre at `+0x04`
- * into `+0x7C` -- `ThrowerStateRearm` at `0x0044F831`/`0x0044F891` through
- * type 0x16's own pointer, `ThrowerStateRestoreBothHands` at `0x0044F9F6` and
- * `0x0044FA61` through `obj+0x1F4`'s. `[proved]` That is the radius
- * `SpawnThrownWeapon` zeroed, written back **unscaled** -- a plain `MOV` of
- * the row's float, where `SkeletonWalkNode`'s build multiplies it by the
- * model's size -- so it is the bundle's `hit_radius` as it stands.
+ * ```
+ * if (rec+0x00 == bare) {
+ *   rec+0x00 = armed
+ *   rec+0x78 = row(bone - 1).radius          ; table[type] + 0x60 / + 0x9C
+ *   rec+0x7C..+0x84 = row(bone - 1).centre   ; table[type] + 0x54 / + 0x90
+ *   obj+0x1318 &= ~(1 << g_bone_damage_zone[bone])
+ * }
+ * ```
+ *
+ * The stores are `ThrowerStateRearm`'s at `0x0044F831`/`0x0044F891`, through
+ * type 0x16's own pointer, and `ThrowerStateRestoreBothHands`' at
+ * `0x0044F9F6`/`0x0044FA61`, through `obj+0x1F4`'s. `[proved]` The rows are
+ * `g_character_part_tables[rows]`'s own, **unscaled and without the build's
+ * slot test** -- which is how a `zsass`, whose build refused both rows, gets a
+ * sphere on either hand at all. Bone 5 reads row 4 and bone 8 row 7, which is
+ * the row the bundle hangs on the bone. `[port-only]` as a function: both
+ * states inline it.
  */
 function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
                             h: { bone: number; bare: number; armed: number;
-                                 zone: DamageZone }): boolean {
-  if (obj.boneSlot[String(h.bone)] !== h.bare) return false;
+                                 zone: DamageZone },
+                            rows: CharacterType | null): boolean {
+  const k = String(h.bone);
+  if (obj.boneSlot[k] !== h.bare) return false;
   host.setBoneSlot(obj.at, h.bone, h.armed);
-  obj.boneSlot[String(h.bone)] = h.armed;
-  obj.boneRadius[String(h.bone)] = CharacterTypeOf(obj)?.bones
-    .find((b) => b.bone === h.bone)?.hit_radius ?? 0;
+  obj.boneSlot[k] = h.armed;
+  const row = rows?.bones.find((b) => b.bone === h.bone);
+  obj.boneRadius[k] = row?.hit_radius ?? 0;
+  const c = row?.hit_centre;
+  obj.boneCentre[k] = c ? [c[0], c[1], c[2]] : [0, 0, 0];
   obj.zones &= ~h.zone;
   return true;
 }
@@ -254,6 +269,23 @@ function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
  *
  * The earlier note on this routine said it "puts the weapon back in whichever
  * hand is bare", which read as a choice. It is not one.
+ *
+ * **The sphere comes from type 0x16's table by name**, not the actor's:
+ *
+ * ```
+ * 0044f822  MOV ECX, dword ptr [0x004d0384]     ; g_character_part_tables[0x16]
+ * 0044f828  MOV EDX, dword ptr [ECX + 0x60]     ; row 4's radius
+ * 0044f831  MOV dword ptr [ESI + 0x554], EDX    ; bone 5's record
+ * 0044f880  MOV EAX, [0x004d0384]
+ * 0044f885  MOV ECX, dword ptr [EAX + 0x9c]     ; row 7's radius
+ * 0044f891  MOV dword ptr [ESI + 0x704], ECX    ; bone 8's
+ * ```
+ *
+ * -- the same table, since only a type 0x16 gets this far. Ghidra's
+ * pseudocode shows the four words of each as float **literals**, `0x3fe00000`
+ * and the rest: `0x004D0384` is initialised data, and the decompiler folded
+ * the load through it into the values it points at. They are the table's
+ * rows 4 and 7 bit for bit, and `verify_combat.py` holds that.
  */
 export function ThrowerStateRearm(obj: ThrowerActor, host: GameHost): void {
   if (obj.charType !== CHAR_ZSASS) {
@@ -269,7 +301,8 @@ export function ThrowerStateRearm(obj: ThrowerActor, host: GameHost): void {
   const len = ActorClipLength(obj, obj.action?.motion ?? REARM_CLIP);
   if (!obj.struck && ActorClipFrame(obj) >= Math.trunc(len / 2)) {
     obj.struck = true;
-    for (const h of HANDS[CHAR_ZSASS]) ThrowerRestoreHand(obj, host, h);
+    const rows = T.types[String(CHAR_ZSASS)] ?? null;
+    for (const h of HANDS[CHAR_ZSASS]) ThrowerRestoreHand(obj, host, h, rows);
   }
   if (obj.action && ActorClipFrame(obj) < len - 1) return;
   obj.state = ThrowerState.StandAndDecide;
@@ -326,7 +359,13 @@ export function ThrowerStateRestoreBothHands(obj: ThrowerActor, stance: number,
 
   if (obj.sub === 1) {
     if (obj.flags2 & ThrowerFlag.Regrowing) return;
-    for (const h of HANDS[CHAR_ZSLMAN] ?? []) ThrowerRestoreHand(obj, host, h);
+    // `g_character_part_tables[obj+0x1F4]` -- the actor's own type's table
+    // this time, `MOV ECX,[EAX*0x4 + 0x4d032c]` at `0x0044F9E6` and
+    // `0x0044FA4E`, rows 4 and 7.
+    const rows = CharacterTypeOf(obj);
+    for (const h of HANDS[CHAR_ZSLMAN] ?? []) {
+      ThrowerRestoreHand(obj, host, h, rows);
+    }
     obj.sub = 2;
   }
 

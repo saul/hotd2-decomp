@@ -392,6 +392,12 @@ export class Placement {
    * meshes and despawn cue; see `class19Tail`.
    */
   class19: Record<string, unknown> | null = null;
+  /**
+   * Class 0x30's (and 0x18's) tail `+0x10` for character types 2, 3 and
+   * 0xE -- the collision blob `EnemyZombieInitByCharType` puts in bones 5
+   * and 8's records; see `zombieBoneMeshColi`.
+   */
+  bone_mesh_coli: string | null = null;
   class11: Record<string, unknown> | null = null;
   /** Class 0x43's two bytes -- the owl's member index and sub-type. */
   class43: Record<string, unknown> | null = null;
@@ -536,6 +542,7 @@ export class Placement {
     if (this.class18) d.class18 = this.class18;
     if (this.class26) d.class26 = this.class26;
     if (this.class19) d.class19 = this.class19;
+    if (this.bone_mesh_coli) d.bone_mesh_coli = this.bone_mesh_coli;
     if (this.class11) d.class11 = this.class11;
     if (this.class43) d.class43 = this.class43;
     if (this.class46) d.class46 = this.class46;

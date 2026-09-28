@@ -78,11 +78,11 @@ const LASER_SWORD_STOP = 0x2025a9;
  * (`FUN_00456600`) with two callers, and a take that lived inline while its
  * release sat in another file is how the two halves of a refcount drift apart.
  *
- * The arm also loads the held prop into the actor's two draw slots
- * (`obj+0x550`/`0x564`/`0x554` and `obj+0x700`/`0x704`/`0x714`, all from the
- * descriptor tail's `+0x10`) and, for type 2 alone, raises `obj+0x136C` bit
- * 0x400. None of that is ported — the port has no per-bone prop slots for
- * class 0x30 — and it is called out here rather than silently dropped.
+ * The rest of the arm is `ZombieInitBoneMeshes` in `init_char.ts`. This note
+ * used to call it loading "the held prop into the actor's two draw slots":
+ * `obj+0x550`/`0x564`/`0x554` and `obj+0x700`/`0x714`/`0x704` are bone 5's
+ * and bone 8's records at `+0x74`, `+0x88` and `+0x78` -- the mesh bits, the
+ * collision mesh and the sphere's radius -- and not draw slots at all.
  *
  * `[proved]` The gate is `g_weapon_loop_holders == 0` and nothing else:
  *

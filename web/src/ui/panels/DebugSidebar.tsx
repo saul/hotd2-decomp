@@ -259,18 +259,38 @@ function ViewSettings() {
   const filterMode = useSlice((p) => p?.filterMode);
   const anisoLimit = useSlice((p) => p?.anisotropyLimit) ?? 1;
   const boxed = useSlice((p) => p?.pillarbox);
+  const ratio = useSlice((p) => p?.pixelRatio);
+  const ratios = useSlice((p) => p?.pixelRatioOptions);
   // Controlled selects with nothing to be controlled by yet would be
   // uncontrolled for one commit and controlled for the next.
   if (lightMode === undefined || fogMode === undefined
-      || filterMode === undefined) return null;
+      || filterMode === undefined || ratio === undefined || !ratios) {
+    return null;
+  }
   return (
     <div className="view-settings" id="view-settings">
       <label className="view-box"
-             title="Box the frame to the game's own 4:3. The projection is a compile-time 41.1 degrees vertical at 4:3, so filling a wider window keeps the vertical and shows more at the sides than the cabinet ever did. Off by default: the page is the game, and a phone held sideways is twice as wide as it is tall.">
+             title="Box the frame to the game's own 4:3. The projection is a compile-time 41.1 degrees vertical at 4:3, so filling a wider window keeps the vertical and shows more at the sides than the cabinet ever did: 53 degrees across at 4:3, nearly 80 on a phone held sideways. On by default on a touch screen, off on a desktop.">
         <input type="checkbox" checked={!!boxed}
                onChange={(e) => dispatch({ kind: "setPillarbox",
                                            on: e.target.checked })} />
         {" "}4:3 frame, as the cabinet
+      </label>
+      <label className="view-ratio"
+             title={"Canvas pixels per CSS pixel. The game drew 640x480, and a"
+               + " phone's screen is 3x denser than its CSS pixels -- so its own"
+               + " ratio is nine times the pixels of 1x for detail the textures"
+               + " do not have, and on a phone GPU that is dropped frames. 1x by"
+               + " default on a touch screen; the screen's own, up to 2x, on a"
+               + " desktop."}>
+        <span>Resolution</span>
+        <select value={String(ratio)}
+                onChange={(e) => dispatch({ kind: "setPixelRatio",
+                                            ratio: Number(e.target.value) })}>
+          {ratios.map((r) => (
+            <option key={r} value={String(r)}>{r}×</option>
+          ))}
+        </select>
       </label>
       <label title="The game bakes most illumination into textures and the per-mesh base colour, so unlit is the faithful baseline. 'Scene' adds the one directional light SetLightingDefaultSingle installs, with the direction, colour and ambient the script sets.">
         <span>Light</span>

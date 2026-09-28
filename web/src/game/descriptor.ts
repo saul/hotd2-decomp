@@ -113,6 +113,10 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // too), the fifteen dwords are the bones' collision meshes, and
     // `+0x40`/`+0x42` the despawn pair.
     class19: p?.class19 ?? null,
+    // Class 0x30's `tail+0x10`, which `EnemyZombieInitByCharType` reads for
+    // three character types as a collision mesh; the exporter emits it for
+    // those three alone.
+    boneMeshColi: p?.bone_mesh_coli ?? null,
     // Classes 0x22's and 0x23's, on the same terms: `Class22Init`
     // (`FUN_0049B0D0`) reads `tail+0x01` as a variant and `Class23Init`
     // (`FUN_0048FD90`) as a subtype, where class 0x30 reads a state.

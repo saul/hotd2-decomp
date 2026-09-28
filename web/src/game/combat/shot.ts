@@ -424,6 +424,15 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     return;
   }
 
+  // A bone hit on its collision mesh -- class 0x30's weapon hands -- first
+  // gets what `MarkActorShot` (`FUN_00404DB0`) gives one at the moment of the
+  // shot, before the class drains it: `SpawnWorldImpact` (`FUN_00405260`) on
+  // the winning quad, the spark of that surface's kind. The owning classes
+  // above get it inside their `MarkActorShot`.
+  if (pick.mesh) {
+    SpawnWorldImpact(player, pick.point, pick.mesh.normal, pick.mesh.surface,
+                     host, events);
+  }
   // Through `DispatchHit` (`FUN_004092F0`) and never straight into
   // `ResolveHit`: the engine has exactly one call to the damage tables and it
   // is behind the shot-immune gate. `null` is that refusal, and it is a
@@ -539,8 +548,9 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
  * `0x10`) goes on to `SpawnWorldImpact` (`FUN_00405260`) with the winning
  * quad -- the `CALL` at the end of the bone arm -- which spawns the impact
  * sprite of that surface's kind and leaves the point, surface and normal in
- * `g_shot_hit_records[player]`. The stage-4 boss is the only actor with such
- * bones, and its `Boss4ResolveShot` reads the record back.
+ * `g_shot_hit_records[player]`. The stage-4 boss has such bones, and its
+ * `Boss4ResolveShot` reads the record back; so do class 0x30's weapon hands,
+ * which do not come through here (`ResolveShot` spawns their impact).
  *
  * [diverges] The engine's version also runs the blood effect and, in Original
  * Mode, the item-drop test. Neither is state, and both are the renderer's.

@@ -592,9 +592,11 @@ function SkeletonEmitNode(obj: Actor, skel: SkeletonModel, tree: SkeletonTree,
     if (bone === SKELETON_TRACKED_BONE && obj.charType >= 0x15) {
       MatrixGetTranslation(top, obj.lookAt);
     }
-    // `if (!(obj+0x34 & 0x8000)) R+0x68 = MatrixTransformPoint(R+0x7C)`.
+    // `if (!(obj+0x34 & 0x8000)) R+0x68 = MatrixTransformPoint(R+0x7C)` --
+    // the record's centre, `Actor.boneCentre`, which the build wrote and a
+    // gore swap may have rewritten; the table's only for a bone it never did.
     if (!(obj.flags & ActorFlag.NoShotTest)) {
-      const c = tree.hitCentre[bone];
+      const c = obj.boneCentre[String(bone)] ?? tree.hitCentre[bone];
       MatrixTransformPoint(top, { x: c[0], y: c[1], z: c[2] }, _hit);
       R.hit[0] = _hit.x; R.hit[1] = _hit.y; R.hit[2] = _hit.z;
     }

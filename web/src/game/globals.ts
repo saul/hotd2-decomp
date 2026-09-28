@@ -1096,10 +1096,27 @@ export const G = {
   g_camera_view_to_world: MatIdentity(),
   g_camera_world_to_view: MatIdentity(),
   /**
-   * `g_camera_index` — `0x009C6F00`. Which of the four camera blocks the view
-   * is built from and the shake nods. `set_global` (`EvtActionSetGlobal14`),
-   * `CameraBlocksReset` and `CameraResetForPathShot` write it, and every
-   * shipped write is 0 -- the only block the port has.
+   * Camera block 2's two matrices, `0x009A6388` (its `+0x40`, view to world)
+   * and `0x009A6348` (`+0x00`, world to view): what `UpdateSceneViewAndLight`
+   * builds for it every frame, as for block 0, and what the frame is drawn
+   * from while {@link g_camera_index} is 2. See `camera/view.ts`.
+   */
+  g_camera_block2_view_to_world: MatIdentity(),
+  g_camera_block2_world_to_view: MatIdentity(),
+  /**
+   * `g_camera_index` — `0x009C6F00`. Which of the four camera blocks the shake
+   * nods, the frame is drawn from (`MatrixStackSetTopFromArray` at
+   * `0x00402136`), and every reader that indexes the blocks by it reads.
+   *
+   * **0 or 2.** `CameraBlocksReset`, `CameraResetForPathShot` (every starter's
+   * first call) and `CameraTaskCreateAtOrigin` write 0, `set_global`
+   * (`EvtActionSetGlobal14`) its operand -- 0 at both shipped sites -- and
+   * `CameraInstallViewAngles` (`FUN_004039D0`), scene state (1, 3)'s
+   * installer, writes **2** (`MOV dword ptr [0x009c6f00], 0x2` at
+   * `0x004039D5`). Nothing else: every `MOV` form with the address as its
+   * destination was searched for. `[proved]` Every block's checkpoint enters
+   * (1, 3), so every cutscene is drawn from block 2 until a
+   * `finish_sequence`'s starter puts it back to 0.
    */
   g_camera_index: 0,
   /**
@@ -1987,8 +2004,12 @@ export const G = {
    * `FUN_00403B00` reads it as the eye when it measures the angle to the
    * look-at target, which is what proves the three words are a position.
    *
-   * Only one camera block is ever active in this port, so the array collapses
-   * to one entry.
+   * This is block 0's. The port keeps block 0 and block 2
+   * ({@link g_camera_block2_eye}) -- the two {@link g_camera_index} is ever
+   * written. Most readers in the engine index it by `g_camera_index`; the
+   * port's read block 0's, which is block 2's eye under (1, 3) too, since
+   * `EvtRunQueuedActionsSyncViewBlock` copies it across at the head of every
+   * frame -- until something later in that frame moves block 0's.
    */
   g_camera_block_eye: vec3(),
   /**
@@ -2035,14 +2056,17 @@ export const G = {
    * `0x009A6420`: camera block **2**'s eye, angles and look-at, at
    * `g_camera_blocks + 2 * 0x1A4` plus the same offsets as block 0's.
    *
-   * Nothing draws from it -- `g_camera_index` is 0 in every shipped write --
-   * but one routine reads its yaw by address: the frog's screen wedge
-   * (`0x0043AB62`). `CameraBlocksReset` zeroes it with the other three,
+   * **It is the block drawn under scene state (1, 3)**, whose installer
+   * writes {@link g_camera_index} 2, and one routine reads its yaw by address
+   * whatever the index: the frog's screen wedge (`0x0043AB62`).
+   * `CameraBlocksReset` zeroes it with the other three,
    * `EvtRunQueuedActionsSyncViewBlock` copies block 0's eye and look-at into
-   * it while the scene state is (1, 3) and derives its angles, and
-   * `UpdateSceneViewAndLight` rebuilds its angles through `MatrixGetAngles`
-   * every frame. So outside a view-angle turn it holds the last one's
-   * heading, or zero. `[proved]`
+   * it while the scene state is (1, 3) and aims it at the look-at, and
+   * `UpdateSceneViewAndLight` nods it while it is the index's and rebuilds its
+   * matrices and angles every frame. So under (1, 3) it is block 0's eye
+   * looking where block 0's look-at says -- whether or not block 0's own
+   * angles were derived from it -- and outside a view-angle turn it holds the
+   * last one's heading, or zero. `[proved]`
    */
   g_camera_block2_eye: vec3(),
   g_camera_block2_pitch_bams: 0,
@@ -2616,6 +2640,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_block_target = vec3();
   G.g_camera_view_to_world = MatIdentity();
   G.g_camera_world_to_view = MatIdentity();
+  G.g_camera_block2_view_to_world = MatIdentity();
+  G.g_camera_block2_world_to_view = MatIdentity();
   G.g_cam_path_target = vec3();
   G.g_cam_path_eye = vec3();
   G.g_cam_path_pitch_bams = 0;

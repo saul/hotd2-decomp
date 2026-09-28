@@ -44,9 +44,11 @@ import { CamStashPathRange, CameraPlayStashedPath, CameraStepRailTick }
 import { CameraUpdateHook, EvtActionHandler }
   from "../src/game/camera/driver";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
-import { UpdateSceneViewAndLight } from "../src/game/camera/view";
+import { CameraBlockViewToWorld, UpdateSceneViewAndLight }
+  from "../src/game/camera/view";
 import { CameraFromViewAngles, CameraHoldEyeTick } from "../src/game/camera/hooks";
-import { CameraBlocksReset } from "../src/game/camera/actions";
+import { CameraBlocksReset, CheckpointResetCamera }
+  from "../src/game/camera/actions";
 import { ChooseDeathMotionDirectional } from "../src/game/combat/resolve_hit";
 import { FishSpawnWaterSplash, WaterSplashUpdate }
   from "../src/game/effects/fish";
@@ -54,7 +56,7 @@ import { OwlResolveShot } from "../src/game/class43";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor,
   type FishActor }
   from "../src/game/actor";
-import { CameraDriverSelectMode, CameraMode }
+import { CameraDriverSelectMode, CameraMode, CameraResetForPathShot }
   from "../src/game/camera/mode";
 import { ScriptedPropUpdate13, g_carrier_prop_routines, SFX_CARRIER_BOW }
   from "../src/game/class13";
@@ -22640,6 +22642,53 @@ console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
           G.g_camera_block2_yaw_bams === 0
           && G.g_camera_block2_eye.x === 0 && G.g_camera_block2_target.x === 0);
   }
+
+  // Scene state (1, 3) **draws** camera block 2. Its installer,
+  // `CameraInstallViewAngles` (`FUN_004039D0`), writes `g_camera_index` 2
+  // (`MOV dword ptr [0x009c6f00], 0x2` at `0x004039D5`) -- and the checkpoint
+  // every block opens with enters (1, 3) -- until a starter's
+  // `CameraResetForPathShot` (`MOV [0x009c6f00], EAX` at `0x00403209`, EAX 0)
+  // puts it back. `UpdateSceneViewAndLight` nods only the block the index
+  // names (`CMP EBP, [0x009c6f00]` at `0x00401F4E`) and the frame is drawn
+  // from that block's matrices, so a cutscene is block 0's eye looking at
+  // block 0's look-at whatever block 0's angles say.
+  {
+    ResetGameGlobals();
+    check("a scene opens on camera block 0", G.g_camera_index === 0);
+    CheckpointResetCamera();
+    check("the checkpoint's (1, 3) makes camera block 2 the drawn block",
+          G.g_camera_index === 2, String(G.g_camera_index));
+    // Block 0 looking down -z; its look-at then moved to +x with no angle
+    // written, as the boss-name banner moves it.
+    SeatCamera(vec3(0, 0, 0), vec3(0, 0, -10));
+    const yaw0 = G.g_camera_block_yaw_bams;
+    const pitch0 = G.g_camera_block_pitch_bams;
+    G.g_camera_block_target = vec3(10, 0, 0);
+    CameraActorTick();                     // stamps (1, 3): the copy runs next
+    G.g_screen_shake_pitch = 47;
+    CameraActorTick();
+    check("under (1, 3) the shake's nod lands on block 2, never on block 0",
+          Math.abs(G.g_camera_block_pitch_bams - pitch0) <= 1
+          && Math.abs(G.g_camera_block_yaw_bams - yaw0) <= 1
+          && G.g_camera_block2_pitch_bams !== G.g_camera_block_pitch_bams,
+          `block0 ${G.g_camera_block_pitch_bams} (was ${pitch0}) block2 `
+          + `${G.g_camera_block2_pitch_bams}`);
+    G.g_screen_shake_pitch = 0;
+    CameraActorTick();
+    const v2w = CameraBlockViewToWorld(G.g_camera_index);
+    // The camera looks down its own -z: row 2 of the view-to-world, negated.
+    check("...and the frame is drawn looking at block 0's look-at, though "
+          + "block 0's own heading is a quarter turn away",
+          -v2w[8] > 0.9999 && Math.abs(v2w[9]) < 1e-4
+          && Math.abs(v2w[10]) < 1e-2
+          && Math.abs(G.g_camera_block_yaw_bams - yaw0) <= 1,
+          Array.from(v2w.slice(8, 11)).join());
+    CameraResetForPathShot();
+    check("a starter's `CameraResetForPathShot` hands the frame back to block 0",
+          G.g_camera_index === 0
+          && CameraBlockViewToWorld(G.g_camera_index)
+             === G.g_camera_view_to_world);
+  }
 }
 
 // Which of the run pair a zombie takes, and who decides.
@@ -31710,12 +31759,14 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   check("the slide flies the camera block along the record's path",
         G.g_camera_block_eye.x === 2 && G.g_camera_block_target.z === 10,
         JSON.stringify(G.g_camera_block_eye));
-  // **Eye and target, no angles**: the view is built from the angles, so the
-  // flight carries the eye and keeps the heading it found. `CamEvalPath7`
-  // writes six floats and the banner never calls `CamBlockSetAnglesFromLookAt`.
+  // **Eye and target, no angles**: `CamEvalPath7` writes six floats and the
+  // banner never calls `CamBlockSetAnglesFromLookAt`, so block 0's view keeps
+  // the heading it found. (Under scene state (1, 3), where stage 1's banner
+  // runs, the frame is drawn from block 2 instead, which turns onto the
+  // flight's look-at -- `render.test.ts`, "the boss-name banner's flight".)
   UpdateSceneViewAndLight();
-  check("...and leaves the block's heading alone, so the view keeps it and "
-        + "sits at the banner's eye",
+  check("...and leaves block 0's heading alone, so block 0's view keeps it "
+        + "and sits at the banner's eye",
         [G.g_camera_block_yaw_bams, G.g_camera_block_pitch_bams,
          G.g_camera_block_roll_bams].join() === headingAtSeat
         && G.g_camera_view_to_world[12] === Math.fround(2)

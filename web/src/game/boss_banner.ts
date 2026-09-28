@@ -17,8 +17,9 @@
  *    unit behind each other: card 0 is `0x7ED`, card 6 is the boss's own card
  *    (`+0x06`), the rest `0x7EE`;
  * 3. for eighty frames **flies the camera along its own `cp_` path** --
- *    `CamEvalPath7` straight into the camera block -- while cards 0..5 flip
- *    over in turn, each one re-stacked the frame it is edge-on;
+ *    `CamEvalPath7` straight into the camera block's eye and look-at, which
+ *    under scene state (1, 3) the drawn block turns to follow -- while cards
+ *    0..5 flip over in turn, each one re-stacked the frame it is edge-on;
  * 4. from frame 0x50 to the record's end frame (300), keeps flying, shrinks
  *    every card but the boss's to nothing, grows the boss's card from 0.03 to
  *    0.06 while sliding it across, and fades in the boss's **two name
@@ -178,12 +179,21 @@ const _pose: CamPose = { eye: vec3(), target: vec3(), roll: 0 };
  * **Eye and target only, no angles.** `CamEvalPath7` writes six floats and
  * nothing else, and the banner never calls `CamBlockSetAnglesFromLookAt`
  * (`FUN_00403AC0`'s callers do not include it, and no instruction between
- * `0x00437AC0` and its `RET` names `0x009A60CC..D4`). The view is built from
- * the angles (`UpdateSceneViewAndLight`), so the card flight carries the eye
- * along the path and keeps the heading the camera had when the banner took
- * it; the path's target is written and nothing draws from it. `[proved]` The
+ * `0x00437AC0` and its `RET` names `0x009A60CC..D4`), so camera block 0 keeps
+ * the heading it had when the banner took it. `[proved]`
+ *
+ * **The camera turns anyway, because block 0 is not the block drawn.**
+ * Stage 1's banner runs under scene state (1, 3) -- the script is on the
+ * `wait_frames 300` after its last `cam_play`, and no `finish_sequence` has
+ * run -- whose installer writes `g_camera_index` 2. At the head of every
+ * frame `EvtRunQueuedActionsSyncViewBlock` copies block 0's eye into block 2
+ * and aims block 2 at block 0's **target**, the path's, and
+ * `UpdateSceneViewAndLight` draws block 2. So the flight carries the eye along
+ * the path and turns the view onto the path's target, one frame late: the
  * view of a frame is built at its head, before the banner's task runs, so it
- * shows the eye the banner wrote the frame before.
+ * shows the pose the banner wrote the frame before. `[proved]` (A banner run
+ * under any other scene state would be drawn from block 0 and keep its
+ * heading.)
  */
 function BannerFlyCamera(rec: BossIntroBannerRecord, frame: number,
                          host: GameHost): void {

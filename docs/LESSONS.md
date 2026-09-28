@@ -1107,3 +1107,24 @@ past. The check that holds it now reads the instruction bytes and the table
 together (`tools/verify_combat.py`, check 17). It is `L1`'s family: the
 decompiler presents the instruction stream as something it is not, and nothing
 marks the substitution.
+
+**L74 -- A proved fact about what a routine writes is not a proved fact about
+what the frame shows; the draw is a reader, and it reads through an index.**
+The boss-name banner writes camera block 0's eye and look-at and no angle, and
+the view is built from angles: both `[proved]`, and the port concluded the
+banner's flight "keeps the heading it found". The camera had turned in the
+port before the view became angle-built, and a player reported it had
+stopped. What the argument skipped was the reader -- *which* block
+`UpdateSceneViewAndLight` leaves on the matrix stack -- and that is
+`g_camera_index`, which the port had pinned at 0 with "every shipped write is
+0 -- the only block the port has" and then collapsed the four blocks into
+one on the strength of it. Scene state (1, 3)'s installer writes it **2**,
+with `MOV dword ptr [0x009c6f00], 0x2`: a store of an immediate, which the
+register-form writes the author found do not include (L32's shape), and
+which `functions.tsv`'s row for `CameraInstallViewAngles` had recorded as
+`[proved]` the whole time. Block 2 is block 0's eye aimed at block 0's
+look-at, so every cutscene is drawn by look-at after all. **Before collapsing
+an indexed structure because its index "is always N", enumerate the index's
+writers by byte pattern in every `MOV` form and grep the annotations for the
+index's address** -- and when a proof about a writer ends in a claim about the
+picture, follow the value to the instruction that draws it.

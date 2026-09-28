@@ -183,9 +183,11 @@ export interface GameHost {
    */
   boneMatrix?(at: number, bone: number, out: number[]): boolean;
   /**
-   * The camera block's two matrices: `g_camera_world_to_view` (`0x009A6000`,
-   * the block's `+0x00`) and its inverse `g_camera_blocks` (`0x009A6040`,
-   * `+0x40`), in the engine's layout. False with no camera.
+   * The two matrices of the camera block `g_camera_index` names:
+   * `g_camera_world_to_view` (`0x009A6000`, the block's `+0x00`) and its
+   * inverse `g_camera_blocks` (`0x009A6040`, `+0x40`), each `+ index *
+   * 0x1A4` -- block 2's under scene state (1, 3), block 0's otherwise -- in
+   * the engine's layout. False with no camera.
    */
   cameraMatrices?(worldToView: number[], viewToWorld: number[]): boolean;
   /**

@@ -178,7 +178,16 @@ const eye = vec3(0, 0, 0);
 // every placer in the pool and `g_breakable_props` still empty — which is the
 // other half of why `breakables: none placed` was read as a dropped
 // placement. One frame is the whole of the difference.
+//
+// **This step's** placers: the pool also holds whatever an earlier step placed
+// and no frame has run yet -- stage 3's step-2 water task (class 0x41 type 1,
+// `game/class41/water.ts`) is one -- and a count of every placer in it was a
+// count of how much of the replay had been placed, not of this step.
+const ours = new Set(stepOps
+  .filter((x) => x.name === "spawn_placed")
+  .flatMap((x) => (x.spawns ?? []).map((sp) => sp.at)));
 const waiting = G.g_object_list.filter((o) => !o.despawned && !o.dead
+  && ours.has(o.at)
   && (o.cls === SpawnClass.PropContainerPlacer
       || o.cls === SpawnClass.PropPlacer)).length;
 check("the seek leaves the step's placers in the pool, not its props",

@@ -87,6 +87,20 @@ byte. The readings under test are the ones docs/formats/combat.md states:
    `g_hit_result == 2` is nearly inaudible, and a claim that small deserves a
    check rather than a sentence in a doc comment (`L26`).
 
+16. **Every arc script fits its own clips.** `ActorArcStep` (`FUN_0044D860`)
+    waits on `obj+0x19C` reaching each stage's threshold, and that cursor
+    wraps at ``g_motion_play_length + 1``: a threshold or a start frame past
+    the play length of the motion the stage plays is an actor parked in its
+    leap for ever. All 38 scripts class 0x31 and class 0x30 can install --
+    the named ones, every attack entry's, the two entrance scripts -- keep
+    every start and threshold inside it, which is what says the port's
+    one-shot channel ending first is never the thing that ends an arc.
+    Seven scripts end on a different clip from the two stages before it --
+    zslman's aside in stances 1 and 3, and set 3's attack 3 in all five
+    stances -- so the bound is taken per stage, not per script, and
+    `InstallArcMotionScript`'s old note that every script is one clip was
+    wrong.
+
 Known exception, reported rather than hidden: character type 21 (`samson`, a
 boss) has a `PTR_DAT_004D032C` entry that is not the ``{slot, centre, radius}``
 layout the others use -- its first word is a float. Its damaged-part spheres
@@ -104,6 +118,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from hod2lib.arcscript import CLASS30_ARC_SCRIPTS, arc_script
 from hod2lib.characters import MOTION_ROW_BACKOFF
 from hod2lib import characters as ch          # noqa: E402
 from hod2lib import stage as stagelib         # noqa: E402
@@ -574,6 +589,48 @@ def main() -> int:
           f"({[hex(i) for i in kill_ids]}); their impacts are "
           f"{len(body)} body and {len(headi)} head, disjoint; kind 3 is "
           f"{len(atk or [])} pairs of {len((atk or [[]])[0])}")
+
+    # 16 -----------------------------------------------------------------
+    # Every arc script's starts and thresholds inside its own clips' play
+    # lengths. `ActorArcStep` compares them to a cursor that wraps at
+    # `g_motion_play_length + 1`, so one past it never comes.
+    arcs: list[tuple[str, list[dict]]] = [
+        (f"named {k}", v) for k, v in c31.get("scripts", {}).items() if v]
+    for row in c31.get("sets", []):
+        for stance, entries in row["attacks"].items():
+            for idx, e in entries.items():
+                arcs.append((f"set {row['set']} {stance}/{idx}", e["script"]))
+    for k, a in CLASS30_ARC_SCRIPTS.items():
+        sc = arc_script(tables, a)
+        if sc is None:
+            fails.append(f"class-0x30 arc script {k} does not resolve")
+        else:
+            arcs.append((f"class 0x30 {k}", sc))
+    past, switches = [], 0
+    for name, sc in arcs:
+        if len(sc) != 3:
+            past.append(f"{name}: {len(sc)} stages")
+            continue
+        switches += sum(1 for a, b in zip(sc, sc[1:])
+                        if a["motion"] != b["motion"])
+        for i, st in enumerate(sc):
+            play = tables.motion_play_length(st["motion"])
+            if play is None or not (0 <= st["start"] <= play
+                                    and st["until"] <= play):
+                past.append(f"{name} stage {i}: motion {st['motion']} "
+                            f"start {st['start']} until {st['until']} "
+                            f"play {play}")
+    print(f"  arc scripts: {len(arcs)}, every start and threshold inside its "
+          f"own clip's play length; {switches} stage changes switch clips")
+    if switches != 7:
+        fails.append(f"expected seven arc scripts to switch clips for their "
+                     f"last stage, counted {switches}")
+    if len(arcs) != 38:
+        fails.append(f"expected the 38 arc scripts classes 0x30 and 0x31 can "
+                     f"install, read {len(arcs)}")
+    if past:
+        fails.append(f"arc-script stages past their clip's play length: "
+                     f"{past[:6]}")
 
     if fails:
         print("\nFAIL")

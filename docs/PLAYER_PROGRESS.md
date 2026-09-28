@@ -1781,9 +1781,7 @@ Three readings from these that are worth keeping:
 
 **What is not ported**, and each is declared where it lives: the owl's body
 chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has; and the frog's
-head-look fix-up and its actor-versus-actor push, whose transformed point is
-`[open]` between view and world space.
+per actor) and the four per-sub-type landings its corpse has.
 
 **Their effects are.** The owl sheds forty feathers when it dies and eight
 on every strike, and leaves blood at its camera-space point; the fish leaves a
@@ -1797,6 +1795,24 @@ surface ring the port had them make: all three call `SpawnRingEffectAtPose`
 (`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
 ground impact ring and water splash are ported and wait on the landings, which
 are their only callers.
+
+The frog's two gaps, which this list used to name, are closed. Its **turn fix-up** — not a
+head look: after each 45° pass the engine turns bone 1, the node the whole of
+`frog.bin` hangs from, back by the turn it just put into the yaw, so the
+blend out of the turn clip starts from the pose on screen — rides the fade's
+snapshot as `Actor.fadeFrom.records`, the mechanism class 0x19's turn already
+uses. Its **actor-versus-actor push** is ported, and its point was never in
+doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
+view-space draw record, so the product is bone 1 in the world. The push is
+scaled by bone 1's travel between two readings of that record through one
+camera block — relative to the camera — and the pushed point is the sphere
+the frog publishes; `ClassHandler.ownsSphereCentre` keeps
+`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+Reading the two states whole also found four wrong ports inside them: the
+wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
+was inverted; both launch frames run on into the flight and halve the turn
+that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
+over a fade of 2, where the port had played it from the start over 61.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
@@ -1831,7 +1847,7 @@ Three sub-types, and they disagree about more than their trajectory:
 | descriptors | 24 | 1 | 2 |
 | members each | 1 | 25 | 6, or 8 with two players |
 | enemy counters | both | **neither** | both |
-| killable while waiting | no | no | **yes** |
+| killable while waiting | no, but a hit then is kept and kills it at launch | cannot be hit | **yes** |
 | how it ends | reaches the eye, takes a life | passes `z = -3500` | reaches the eye, takes a life |
 | corpse gravity | `0.02722`, 80 frames | `0.04083`, to `y = -25` | `0.02722`, to `y = -25` |
 
@@ -1873,9 +1889,11 @@ Four readings from this that are worth keeping:
   arithmetic now.
 * **Two objects collapsed into one, and the order of reads survived it.** The
   engine's placer seeds the new object's previous position from `sin`/`cos` of
-  *its own* yaw, which is still zero, and only then copies the placer's yaw
-  over it. The port's sub-type-0 member *is* the placement's actor, whose yaw
-  is already the descriptor's `0x8000`, so the zero is written out explicitly.
+  *its own* yaw, which is still zero, and only then copies the placer's pitch
+  and yaw over it. The port's sub-type-0 member *is* the placement's actor, so
+  the seed is taken at an explicit zero and the member keeps the descriptor's
+  `0x8000`. (The first cut zeroed the yaw itself as well, and every waiting bat
+  faced the wrong way until its spline turned it.)
 
 ### The wings, and the bundle's first synthetic placement
 
@@ -1910,11 +1928,43 @@ instance whose bones carry no sphere, and the actor publishes `obj+0x70` as
 `(x, y + 1, z)` the way its update does. See `L47` for how the false
 verification happened.
 
-**The splash divergence stands; the wing one is gone.** What is still not
-ported: the **scatter's twenty-five and the swarm's six** are runtime children
-of a placer with no descriptor to key a row on, so they run — hits, score,
-counters, the strike — and are not drawn; and the **splash** is a sound and a
-despawn rather than thirty frames of `common.bin`.
+### Every bat drawn, the wing where the exe seats it, and the splash
+
+**The scatter's twenty-five and the swarm's six are drawn**, bodies and wings.
+All three sub-types draw the same way in the exe — character type `0x1E` or
+`0x1F` through the skinned draw, keyed on the type alone — and the port's
+character layer binds geometry by spawn address, so the exporter now emits a
+synthetic row at the address the port's `PlaceBats` gives each runtime child,
+parented to the placer: 25 bodies and 25 wings behind the scatter's
+descriptor, 8 and 8 behind each swarm's. `BatChildAt` had given the member four
+bits and the scatter has twenty-five, so members 16..24 shared 0..8's
+addresses and wings rode the wrong bodies; it has five now.
+`tools/bats_look.mjs` drives stage 3 block 2 in the page, screenshots both
+flights and a splash, and checks every live body has a live wing on every
+frame.
+
+**The wing sits on the body.** `BatWingUpdate` seats it at node 1's matrix
+times `(0, 1, 2)`; the port had `(0, 1, 2)` in the body's yaw alone, which,
+against a clip whose root record is a half turn tipped 21°, put the wings four
+units off the body on the far side. The matrix is built in `game/` the way the
+draw builds it (`BatBodyNodeMatrix`), and `test:render` checks it against the
+pose the character layer makes. `render/characters/bat.ts` draws both roots in
+order 5 with their pitch and roll — a corpse tumbles, a wing is pitched
+`0xE800` — and at their model's own size, 0.6 and 0.7; every other skinned
+actor is still drawn at 1.0 (`ActorModelScale`'s declared divergence).
+
+**The splash** is `BatSplashUpdate`'s thirty models of `common.bin` 307..336 on
+the water plane, `game/class46/splash.ts` and `render/bat_splash.ts`.
+
+**And the shot is the engine's.** The bat registers for the shot test from its
+own routines (`registersForShotTest`): the dive and the swarm in every state,
+the scatter only at the end of its flying arm, and **the wing never** — the
+character layer's pick had walked every drawn bone, and the wing's bone 3
+carries a 0.3 sphere, so a wing could take a bullet meant for the bat behind
+it. The hit bit is cleared only by the arm that takes it, so a diving bat hit
+during its launch delay dies when it launches; the scatter's kill frame is a
+flying frame; the swarm's dive bobs by 5.0, not the orbit's 8.0; and every
+member and wing claims its hit slot.
 
 ## A fifth: the horde, class 0x40 — worms that come up out of the street
 
@@ -4368,6 +4418,119 @@ despawns on camera path `0x2F` frame `0x96`, its knock throws the
 one-and-a-half-size impact instead of a spark, and its story item comes out
 half a unit above the floor. The bundle carries both slot tables, the offsets
 and angles, and the 55-point piece hull.
+
+### A leap's stages hold their start frame through the fade
+
+`ActorArcStep` (`FUN_0044D860`) plays each of an arc script's three stages with
+a direct `ActorSetMotionBlended` call, and that call writes the stage's start
+frame into the cursor at `obj+0x19C` and holds it there until the fade is over.
+The port's one-shot channel started each stage running at once, so every
+threshold the arc and the attack entries compare against that cursor came up
+early, by the whole of every fade before it -- and
+`ThrowerStateDelayedPounce`'s `cursor > 66` first fired at 68, because stage 2
+started at 67 on the frame the cursor reached 66 and nothing ever saw 67. It
+matters more than a fade usually does: the fit that stretches a script onto a
+long arc does it **by growing the fades**, so on a long leap the hold is most
+of the flight, and a pounce's hit frame and its landing are timed against it.
+
+`ActorSetOneShotBlended` (`class30/motion_cue.ts`) is the channel's
+`ActorSetMotionBlended` now: it fades out of whatever is on screen and marks
+the clip `held`, and `ActorAdvanceMotion` holds a held clip -- not the base
+clip underneath it -- for the fade, `fade + 1` frames, as it already did for
+the base track. The renderer was already fading into a one-shot; it now fades
+into each stage as well, where it used to cut.
+
+`ActorArcStep` itself is transcribed whole with it. Its phases fall into each
+other; its flight phase ignores whether the arc has landed and waits for the
+clip, where the port used to skip straight to the end and drop the landing
+clip; `obj+0x1330` gives back the frame the flight flew twice; the four
+thrower types cannot be shot in a leap's windup (outside the leap aside) and
+land colliding; and the arc no longer zeroes a velocity the engine leaves
+alone. The landing dust (`ThrowerEmitGroundDust`) is the one thing left out,
+declared.
+
+Two test fixtures had to change with it, and the reason is the engine's: the
+wall leaps played a generic script whose last two thresholds, 46 and 47, lie
+past the 44-frame play length of the 23-frame clips under them. The engine's
+cursor wraps there, so an actor on that data would wait out its landing for
+ever; the old port only finished because it bailed out when the arc landed.
+The fixture carries the exe's own wall script now, and `verify_combat.py`
+check 16 asserts that none of the 38 shipped scripts does that.
+
+### The canal is drawn by a task: class 0x41 type 1
+
+Stage 2's block 16 stood on a dock over **no water at all** --
+`?stage=2&mode=play&entry=0&block=16&step=14&op=1` showed a black void under
+the boards and between the pilings. `docs/formats/water.md` said the surface
+is region geometry and there is no water renderer, and for most of the canal
+that is true. It is not true here.
+
+Fifteen class-0x41 spawns in the game -- five in stage 2, seven in stage 3,
+three in training -- carry constructor byte **1**, `PlaceWaterSurface`
+(`FUN_00462F70`), which the port had never read: its entry in
+`g_class41_constructors` fell to the generic fallback, found no placement and
+did nothing. What it builds is a 0x44-byte task, `WaterSurfaceUpdate`
+(`FUN_0046E3A0`, not even a Ghidra function until now), that **draws a water
+tile every frame** -- `g_water_surface_slots[obj+0x1F4]` (`0x00593DA4`), ten
+flat tiles in `st2_07`, `st1_1`, `komono_boss2` and `komono_venis` -- and
+ripples its texture as it does. The script loads those tiles with opcode 0x50
+or `asset_load_polfile`, and a slot that is only *loaded* is drawn by nothing:
+`RegionDrawResidentSet` walks the current region's list and no other. Region
+29, where the report stands, names four models and no water.
+
+**What the task does**, all of it now in `game/class41/water.ts`:
+
+* a lifetime in changes of `g_evt_step_index`, and five kill arms -- the
+  canal tile at step 0xF, block 0x23 step 2 on stage 2, `flags[index + 0x0B]`
+  and `flags[4]` on stage 3, `flags[0x77]` on stage 2 -- none of them in
+  Boss mode;
+* **the ripple**: while the tile is resident and a gate is open (flag 8 for
+  the arena tile, camera path 0x6E for the death water, not flag 0x6A, not
+  path 0x7E at frame 0x163, and in Training flags 0xF1/0xF2), every vertex's
+  `u` gains `sin(phase(x)) * 0.00075` and `v` gains `cos(phase(z)) * 0.00075`,
+  the phase being `tick * 0x180 + ftol(coordinate) * 600` in BAMS; with index
+  0 only vertices at `z <= -1870` move. It is cumulative -- the model's UVs
+  are rewritten in place -- so it is state, and it lives in `G` as two sums
+  per tile (`G.g_water_surface_uv`): `sin(a + b)` factors, so the per-vertex
+  term comes out of the sum and `render/water_surfaces.ts` applies it;
+* every mesh header's TSP word gains `0x2000`, filter mode 1: a rippled tile
+  samples **bilinearly**, where the exporter had turned its filter mode 0
+  into `NEAREST`. Only the rippled tile -- `0x13A5`, drawn beside the arena
+  water but never walked, keeps its point sampling;
+* the draws: the tile, `0x13A5` beside `0x13A7`, `0x13AC` beside `0x13A9`;
+  then flag 9 swaps `0x13A7 -> 0x13A9` and `0x13A0 -> 0x13A2`, and
+  `0x13A2` turns back to `0x13A0` on path 0x6E -- in the same frame as the
+  swap, since that line reads the slot the swap just wrote.
+
+**How it is drawn.** A tile the stage glTF already holds is drawn as that
+node, because in the engine the task and `RegionDrawResidentSet` draw one
+model and the ripple shows in both; `StageScene.setWaterSlots` makes it
+visible while the player has it resident (0x50-loaded, or in the current
+region). The `komono_*` tiles are nobody's region, so they now travel in the
+`slots_actor` rig and are cloned from it. The tiles the task owns are taken
+**out** of `StageScene`'s "loaded and unregioned, so drawn" rule: that rule
+was standing in for this task, and left in it drew stage 2's two death-water
+tiles over each other and stage 3's before their task existed. A class-0x41
+type-12 prop draws `0x13B5` in the boss's blocks too, and it gets the same
+rippled model -- the layer rewrites every node drawing a tile, keyed by
+geometry.
+
+The bundle carries a `water_surface` placement per spawn with the slot
+already resolved through the table, so this is a schema change and every
+bundle needs re-exporting. `tools/verify_water.py` asserts the constructor
+chain, that the table is ten flat water tiles, the fifteen spawns, and every
+constant in the port against the immediate at its instruction.
+
+What it does not do: the engine's ripple state lives as long as the model
+and resets when a tile is unloaded and loaded again; the port keeps it for
+the scene (`[diverges]`, and the one shipped reload is at most 0.02 of a
+texture repeat out of phase). The walk's residency test is not modelled
+either -- the port has no asset residency (opcodes 0x52..0x58 are "shown") --
+so block 16 step 10's arena tile ripples three steps before `komono_boss2.bin`
+arrives, while it is not drawn. And a seek replays every placer and runs
+their constructors on the first live frame, so after a seek a task starts its
+lifetime where the seek lands -- the same thing every class-0x41 prop does,
+which is why the canal tile is still there after a seek into block 35.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

@@ -33,6 +33,7 @@ import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
   from "./effects/owl";
 import type { RingEffect } from "./effects/ring_effect";
 import type { WaterRing } from "./effects/water_ring";
+import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
@@ -48,6 +49,7 @@ import type {
 } from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { Boss4HitMark } from "./class19/hit_mark";
+import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
@@ -1004,6 +1006,19 @@ export const G = {
   /** `[port-only]` — see {@link WaterRing.id}. */
   g_water_ring_seq: 0,
   /**
+   * `[port-only]` — the canal water tasks `PlaceWaterSurface`
+   * (`FUN_00462F70`, class 0x41 type 1) has allocated. `game/class41/water.ts`.
+   */
+  g_water_surfaces: [] as WaterSurface[],
+  /** `[port-only]` — see {@link WaterSurface.id}. */
+  g_water_surface_seq: 0,
+  /**
+   * `[port-only]` in shape — what `WaterSurfaceUpdate` (`FUN_0046E3A0`) has
+   * done to each tile's model, which the engine rewrites in place: one entry
+   * per slot the walk has run on. See {@link WaterSurfaceUv}.
+   */
+  g_water_surface_uv: [] as WaterSurfaceUv[],
+  /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
    * `game/effects/fish.ts` and `game/effects/ring_effect.ts`. Each is an
@@ -1263,6 +1278,15 @@ export const G = {
    */
   g_water_level: -24.9,
   /**
+   * `g_frog_bone1_on_entry` — 0x007DCBB8, three floats beside the water
+   * level. Class 0x11's: `FrogUpdate` (`FUN_0043A1E0`) writes it before any
+   * state runs, as bone 1 where the **last** draw left it, carried into the
+   * world through this frame's camera block; `FrogPushOutOfActorCollision`
+   * (`FUN_0043A500`) reads its x and z as where the frame's travel started.
+   * Nothing else touches it, and y is written and never read.
+   */
+  g_frog_bone1_on_entry: vec3(),
+  /**
    * `g_water_wave_field` — 0x007DCC4C. The block `WaterFieldCreate`
    * (`FUN_00442290`, class 0x16) allocates: a plane, a slot mask, a count of
    * sources that have ticked and eight wave sources, which class 0x17's
@@ -1348,6 +1372,15 @@ export const G = {
    * because no two of them are ever in play at once.
    */
   g_bat_members: [] as number[],
+  /**
+   * `[port-only]` as a pool: the `0x50`-byte objects `SpawnBatSplash`
+   * (`FUN_0042F980`) allocates, each running `BatSplashUpdate`
+   * (`FUN_0042F930`). Plain records for the same reason as
+   * `g_severed_heads`. `game/class46/splash.ts`.
+   */
+  g_bat_splashes: [] as BatSplash[],
+  /** `[port-only]` — see {@link BatSplash.id}. */
+  g_bat_splash_seq: 0,
 
   // -- the horde, class 0x40 ---------------------------------------------
   /**
@@ -2216,6 +2249,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_prop_strip_effect_seq = 0;
   G.g_water_rings = [];
   G.g_water_ring_seq = 0;
+  // The water tasks go with the scene's list, and the tiles they rewrote go
+  // with the scene's assets.
+  G.g_water_surfaces = [];
+  G.g_water_surface_seq = 0;
+  G.g_water_surface_uv = [];
   // ...and the owl's and the fish's tasks, which the scene's list takes
   // with it like every other task.
   G.g_owl_feathers = [];
@@ -2306,6 +2344,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_enemy_slots = [];
   G.g_camera_candidate_count = 0;
   G.g_water_level = -24.9;
+  G.g_frog_bone1_on_entry = vec3();
   G.g_water_attack_slots = [0, 0, 0, 0];
   // The engine leaves the pointer dangling into the freed pool; nothing
   // samples it until the next class-0x16 spawn replaces it.
@@ -2314,6 +2353,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
+  // The splash is a task, and the scene's task list goes with the scene.
+  G.g_bat_splashes = [];
+  G.g_bat_splash_seq = 0;
   G.g_horde_members = [];
   G.g_horde_live_count = 0;
   G.g_horde_diver = 0;

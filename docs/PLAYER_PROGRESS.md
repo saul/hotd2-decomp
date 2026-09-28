@@ -3948,8 +3948,8 @@ geometry and doing the wrong thing. Their arms are ported now, in
   that `CALL` and the pseudocode shows a bare draw with nothing stepping the
   cursor — `L37`, and `0x0046A334` is where the tail really is. Type 33 has the
   identical tail with `ActorKill` where 31 has the wrap, so it plays its 60
-  frames of `eff_shop.bin` once and dies; that one is still `[open]` in the
-  port, which draws frame 0 and holds it.
+  frames of `eff_shop.bin` once and dies. The port drew frame 0 and held it
+  until 2026-09-28 — see *Stage 2 block 11: the fire strip ends* below.
 * **Type 53 is a car.** `char_adv04.bin[0]`, charred black, with wheels and a
   shadow quad. Its head is an inline variant of `PropExpireByStepLifetime`
   with the scene-1 sweep left out and `ActorKill` in place of `ActorDespawn`.
@@ -4531,6 +4531,45 @@ arrives, while it is not drawn. And a seek replays every placer and runs
 their constructors on the first live frame, so after a seek a task starts its
 lifetime where the seek lands -- the same thing every class-0x41 prop does,
 which is why the canal tile is still there after a seek into block 35.
+
+### Stage 2 block 11: the fire strip ends
+
+Reported at `?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0`:
+"the fire sprites that appear after the car crashes into the wall don't
+disappear". They were one object, the game's **only** class-0x41 type-33
+spawn (evt `0x6A14`, block 11 step 1 op 20, in both stage-2 scripts): slot
+`0x174A` = `eff_shop.bin[0]` with a roll word of `0x3B`. The port placed it as
+`Generic`, which has no update for type 33, so `obj+0x2A0` never moved and the
+renderer drew `eff_shop.bin[0]` -- three fireballs -- for the rest of the
+stage. Its only other exit was the shared lifetime prologue counting 5962 step
+changes against a slot number.
+
+`PropDrawOnlyType33` (`FUN_00472950`) is a draw, a step and a kill, and
+**nothing else** -- no `PropExpireByStepLifetime`, no shot test. The tail is
+past the `MatrixStackPop` Ghidra ends the body at (`L37`): `obj+0x2A0++`, and
+`JMP ActorKill` once the *post-increment* value passes `obj+0x2A4`. So a roll
+word of `0x3B` draws cursors `0..0x3B` -- sixty frames, `0x174A..0x1785` --
+and dies on the frame that drew the last. It is now its own
+`PropFamily.DrawOnlyType33` in `game/class41/draw_only.ts`.
+
+**Where in the frame it steps is part of the port.** The engine draws, then
+steps. `ActorAlloc` puts the object after its placer and `TaskRunTree` reaches
+it that same frame (the placer's `ActorKill` leaves its own next pointer
+intact), so the engine draws cursor 0 on the frame it is made. The port's draw
+is the renderer's, after the whole frame, so the step runs where the sprite
+effects' and water rings' do -- at the head of the next frame, from
+`ShotEffectsTick` -- and the pool's walk skips it. Stepped in the pool walk
+instead it would show cursors 1..59 and never 0; `web/test/port.test.ts` drives
+a placer through `GameUpdate` and asserts the sixty slots in order, and fails
+both that mutation and the old `Generic` family.
+
+Measured in the headless player, driven frame by frame (`?drive=1`) from op 18:
+before, the prop sat at cursor 0 through the end of `cp_st2[2]` and into
+`cp_st2[14]`; after, it reaches cursor 58 at `cp_st2[2]` frame 399 and is gone
+by frame 3 of path 14. At the report's own URL a seek places the prop on the
+first live frame (as it does every class-0x41 prop, see above), so it plays its
+sixty frames over `cp_st2[14]` 0..59 and is gone at 60 -- where before it was
+still frame 0 at the end of the path.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

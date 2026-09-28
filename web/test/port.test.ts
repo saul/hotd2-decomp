@@ -376,6 +376,7 @@ import {
   Type43ItemSet, TYPE43_PICKUP_SLOT,
 } from "../src/game/class41/type43";
 import {
+  PropDrawOnlyType33, PropDrawOnlyType33Tick,
   SCRIPT_FLAG_TYPE54_DRIFT, TYPE31_DESPAWN_CAM_FRAME,
   TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
 } from "../src/game/class41/draw_only";
@@ -2663,6 +2664,83 @@ console.log("\nclass 0x41's three draw-only types:");
   BreakablePropPoolUpdate(rng);
   check("...and on the frame itself it goes",
         G.g_breakable_props.length === 0, `${G.g_breakable_props.length}`);
+}
+
+{
+  // ---- type 33: a strip played once, then ActorKill ---------------------
+  // Stage 2 block 11 step 1's one spawn, as the exporter carries it: slot
+  // 0x174A (eff_shop.bin[0]), a roll word of 0x3B, and a `+0x11C` that is
+  // the slot and would be a 5962-step "lifetime" to a prologue the routine
+  // does not have. Driven through the real frame -- placer in the actor
+  // walk, step at the head of the next -- because the order is the fix.
+  const rng = new Rng(33);
+  const events = propScene(rng, GameMode.Arcade);
+  const at = 0x6a14;
+  SetGameTables(CHARS, { ...BREAKABLES, placements: [
+    ...(BREAKABLES.placements ?? []),
+    { at, container: "generic", type: 33, slot: 0x174a,
+      lifetime_evt_steps: 0x174a, field_1f4: 0,
+      pos: [-908, 7, -564], pitch: 0, yaw: 0xe000, roll: 0x3b },
+  ] });
+  // Scene 1 (stage 2) with the sweep flag up: the shared prologue would take
+  // a Generic prop on its first frame, and this routine has no prologue.
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  const placer = ActorSpawn(at, SpawnClass.PropContainerPlacer, 0, "placer");
+  placer.visible = true;
+  placer.hp = 0x174a;       // +0x11C: the slot, for this type
+  placer.condition = 33;    // +0x130C: PlaceGenericProp, g_class41_updates[33]
+  const drawn: number[] = [];
+  let p: BreakableProp | undefined;
+  for (let frame = 0; frame < 70; frame += 1) {
+    // A step change every frame: nothing may count them against `+0x11C`.
+    G.g_evt_step_index = frame & 0xff;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    p = G.g_breakable_props.find((q) => q.at === at);
+    // What `render/breakables.ts` hands the draw this frame, or nothing.
+    if (p && !p.dead) drawn.push(p.slot + p.storyItem);
+  }
+  check("a type-33 prop is its own family, with the roll word as its length",
+        drawn.length > 0 && placer.dead, `${drawn.length} drawn`);
+  check("...the sweep and 70 step changes do not retire it: no prologue",
+        drawn.length === 60, `${drawn.length}`);
+  check("...it draws cursor 0 on the frame it is placed, as the engine's "
+        + "walk reaches it then (TaskRunTree)",
+        drawn[0] === 0x174a, drawn[0]?.toString(16));
+  check("...then one slot a frame, every one of 0x174A..0x1785 once",
+        drawn.every((s, i) => s === 0x174a + i)
+        && drawn[drawn.length - 1] === 0x1785,
+        drawn.map((s) => s.toString(16)).join());
+  check("...and it is gone from the pool after its sixtieth frame",
+        !G.g_breakable_props.some((q) => q.at === at),
+        `${G.g_breakable_props.length}`);
+
+  // The routine on its own: post-increment compare, `ActorKill`.
+  const q = PlaceGenericProp({
+    at: 0xb133, container: "generic", type: 33, slot: 0x174a,
+    lifetime_evt_steps: 0x174a, pos: [0, 0, 0], roll: 2,
+  }, rng);
+  check("PlaceGenericProp gives type 33 its own family",
+        q.family === PropFamily.DrawOnlyType33 && q.removeFlag === 2
+        && q.storyItem === 0, `${PropFamily[q.family]} ${q.removeFlag}`);
+  PropDrawOnlyType33(q);
+  PropDrawOnlyType33(q);
+  check("...a roll word of 2 survives the steps to cursors 1 and 2",
+        !q.dead && q.storyItem === 2, `${q.storyItem}`);
+  PropDrawOnlyType33(q);
+  check("...and the call that drew cursor 2 kills it: 3 > 2",
+        q.dead && q.storyItem === 3, `${q.storyItem}`);
+  // And the pool's own walk does not step it a second time.
+  const r = PlaceGenericProp({
+    at: 0xb134, container: "generic", type: 33, slot: 0x174a,
+    lifetime_evt_steps: 0x174a, pos: [0, 0, 0], roll: 5,
+  }, rng);
+  G.g_breakable_props.push(r);
+  BreakablePropPoolUpdate(rng);
+  PropDrawOnlyType33Tick();
+  check("the pool walk leaves its cursor to the head-of-frame tick",
+        r.storyItem === 1 && G.g_breakable_props.includes(r),
+        `${r.storyItem}`);
 }
 
 {

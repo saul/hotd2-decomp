@@ -20626,3 +20626,73 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+
+## 2026-09-28 -- stage 2 block 11's fire strip ends: class 0x41 type 33
+
+Report (`docs/NEW-BUGS-2.md`): at
+`?stage=2&original=1&mode=play&block=11&step=1&op=28&frame=0` "the fire
+sprites that appear after the car crashes into the wall don't disappear".
+
+**Finding the emitter.** Driving the page with `?drive=1` and dumping every
+effect pool per frame: `g_sprite_effects`, `g_prop_strip_effects` and
+`g_ring_effects` were all empty through the whole crash. The fire was a
+**breakable prop**: evt `0x6A14`, block 11 step 1 op 20, a class-0x41 placer
+the bundle resolves to generic type 33, slot `0x174A` (`eff_shop.bin[0]`), roll
+`0x3B`, placed when `cp_st2[2]` passes frame 340 and followed by `se_play`
+`STAGE2_SE\BRIDGE_CRASH1_22.wav`. It sat at `storyItem` 0 for the rest of the
+stage -- `generic.ts` had already declared that `[open]`.
+
+**Read, `[proved]`:**
+
+* `g_class41_updates[33]` (`0x00593740`) = `0x00472950`
+  `PropDrawOnlyType33`, its only xref; the neighbours are 31 ->
+  `0x0046A1C0` and 32 -> `0x0046A360` (`LiftUpdate`), which is what the port
+  believed (`L38`). `g_class41_constructors[31..33]` are all
+  `PlaceGenericProp`.
+* The routine, `0x00472950..0x004729D6` by `disassemble_bytes` (Ghidra's
+  `body_end` is `0x004729B3`, `L37`): Push; Translate; RotZ(+0x1D4);
+  RotY(+0x1D0); RotX(+0x1CC); `AssetDrawSlot((s16)+0x28C + +0x2A0)`; Pop;
+  `+0x2A0++`; `JMP ActorKill` if the post-increment value `> +0x2A4`.
+  **No** `PropExpireByStepLifetime`, no `AND` on `+0x34`, no shot test.
+* `PlaceGenericProp`'s switch: `type - 6` indexes the byte table at
+  `0x00462978`, whose entry for 33 is `0x11`, and jump-table entry `0x11` at
+  `0x004628D4` is `0x004620BE`: `+0x28C = placer+0x11C`,
+  `+0x2A4 = placer+0x6C`, nothing else. `ActorClearGameFields` has zeroed
+  `+0x2A0`.
+* `TaskRunTree` (`FUN_004A71A0`) walks the `+0x28` child list, then the
+  handler, then the `+0x24` list, reading each child's `+0x1C` after its call
+  returns; `ActorKill` (`FUN_004A7040`) relinks the neighbours and the
+  parent's head/tail but leaves the killed task's own `+0x1C` alone. So the
+  object a placer allocates and then dies is reached the **same frame**, and
+  the engine draws cursor 0 on its first frame.
+
+**Wrong in the annotations, corrected:** `TaskRunTree`'s row said "+0x24 list,
+handler, +0x28 list" -- the other way round from `0x004A71AD`/`0x004A7210`.
+This log already said `+0x28` twice; only the TSV was off.
+`PropDrawOnlyType33`'s row said the port "draws frame 0 and holds it".
+
+**Ported:** `PropFamily.DrawOnlyType33`; `PropDrawOnlyType33` is the half after
+the draw, stepped at the head of the frame by `PropDrawOnlyType33Tick` from
+`ShotEffectsTick` -- the place the sprite effects and water rings, the port's
+other draw-then-step objects, are stepped -- and skipped by the pool walk. The
+renderer draws `slot + storyItem` for the family, poses it `Rz.Ry.Rx` and gives
+it no shadow (one `AssetDrawSlot`, no `0x10D0`).
+
+**Wrong turn I nearly took.** The obvious edit was a row in `GENERIC_UPDATE`
+beside type 31. That would have run the shared prologue the routine does not
+have -- including the scene-1 sweep, and stage 2 *is* scene 1 -- and stepped
+the cursor in the pool walk after the placer, so the renderer would have shown
+cursors 1..59 and never the strip's first frame: the one-frame lead type 31
+declares. The port test drives a placer through `GameUpdate` and fails that
+mutation (first slot `0x174B`, 59 drawn) as well as the old `Generic` family
+(0 drawn: the sweep takes it on its first frame).
+
+**Measured**, headless, driven: from op 18 the cursor runs 8, 18 .. 58 through
+`cp_st2[2]` frames 349..399 and the prop is gone by `cp_st2[14]` frame 3;
+before, it was at cursor 0 through all of it. At the report's URL the seek
+places it on the first live frame, it plays over `cp_st2[14]` 0..59 and is gone
+at 60.
+
+**Found, not fixed:** `render/breakables.ts`'s `ShadowSlotFor` gives families
+53 and 54 the generic `0x10D0` shadow by default; whether `PropDrawOnlyType53`
+and `PropDrawOnlyType54` draw one was not read here.

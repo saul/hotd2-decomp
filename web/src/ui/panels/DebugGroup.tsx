@@ -23,10 +23,10 @@
 import type { DebugGroupName } from "../projection";
 import { useDispatch } from "../store_context";
 import { useSlice } from "../useSlice";
-import { TOGGLES } from "./Toggles";
+import { TOGGLES, type ToggleKind } from "./Toggles";
 
 /** The switches this group draws, resolved once: the table never moves. */
-const byGroup = (g: DebugGroupName, kind: "game" | "debug") =>
+const byGroup = (g: DebugGroupName, kind: ToggleKind) =>
   TOGGLES.filter((t) => t.group === g && t.kind === kind);
 
 /**
@@ -37,17 +37,20 @@ const byGroup = (g: DebugGroupName, kind: "game" | "debug") =>
  * whether you are looking at a bug. So the two are drawn apart and each is
  * named. The classification is `ToggleSpec.kind`; this is only the wording.
  */
-const KIND_TITLE: Record<"game" | "debug", [string, string]> = {
+const KIND_TITLE: Record<ToggleKind, [string, string]> = {
   game: ["the game", "What the game itself draws. Turning one of these off "
     + "hides part of the real scene, so what is left is not what the game "
     + "looks like."],
   debug: ["overlays", "Drawing this player invented, over the top of the "
     + "game: markers, boxes, rails and labels the game never had. None of it "
     + "changes what the game does, and none of it is in a snapshot."],
+  aid: ["debug aids", "Switches that make this player behave unlike the "
+    + "game so that something can be looked at. The game has none of them: "
+    + "off is the engine, and each one starts off."],
 };
 
 function Switches({ group, kind }:
-                  { group: DebugGroupName; kind: "game" | "debug" }) {
+                  { group: DebugGroupName; kind: ToggleKind }) {
   const dispatch = useDispatch();
   const state = useSlice((s) => s?.toggles ?? null);
   const specs = byGroup(group, kind);
@@ -88,6 +91,7 @@ export function DebugGroup({ group }: { group: DebugGroupName }) {
     <div className="grp">
       <Switches group={group} kind="game" />
       <Switches group={group} kind="debug" />
+      <Switches group={group} kind="aid" />
       <Rows group={group} />
     </div>
   );

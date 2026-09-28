@@ -1353,10 +1353,34 @@ the camera-path switch that picks its route, the park at the end of shot
 `0x39` or `0x3A`, and the `g_script_flags[0]` kill -- as plain records in
 `G.g_st2_cars`, and `RigLayer` draws one root per task that drew this frame at
 the pose it wrote (`TASK_POSED_ROUTINES`). Its routes in the rig data now only
-name the roots. What the draw does with the task's other words -- the
-post-crash asset set, the wheel spin, the second part's yaw once parked -- is
-not drawn yet: the exporter ships variant 0 only and no part rules for this
-rig.
+name the roots.
+
+**...and it draws what `St2CarDraw` draws, not the parts it was exported
+with.** The draw takes four slots from a row of `g_st2car_asset_variants`
+(`0x00565F2C`): row 0 until shot `0x39` runs out, row 1 -- the car after the
+crash -- from then on. It turns its nested second push `RotY(obj+0x1334)` once
+parked (`[likely]` the driver's door), and its two spun pushes
+`RotX(obj+0x1330)` while `obj+0x1320` is set, on a second frame that re-applies
+the body's `MatrixGetAngles` with the roll through a dead zone. The port's
+`St2CarDraw` computes all of it into `car.draw`; the exporter ships both rows as
+parts; `RigLayer.applyTaskDraw` shows the four parts the draw named and poses
+them. So the unshot branch's car is the crashed one from shot `0x39` frame 370,
+the wheels turn a sixteenth a frame while it drives and stop at no rotation at
+`0x3A` frame `0x50`, and the door swings out over 39 frames once it is parked.
+The door's outer skin renders black -- its translucent `char_adv04` texture-33
+material carries a zero base colour in the bundle -- which is a material
+question and not this rig's.
+
+**Original Mode's green mound in front of Goldman's desk was a shot effect.**
+`obj_416b00` is `PlayerShotEffectsThink` (`FUN_00416B00`), whose one literal
+slot, `0x109D`, it draws only for a live kind-5 tracer record, at the record
+plus `op_` `0x194`. The rig carried that path as an ungated route, so the
+player drew it from stage load at the path's own pose, `(0.5, 0, 0)`. It is not
+placed now; `render/effects.ts` draws the kind-5 arm from
+`G.g_shot_tracer_ring`, and an Original Mode bundle carries the slot in its
+effect templates. Both tracer arms now also face the camera, as
+`MatrixClearRotation` makes them: the ordinary tracer was a quad turned in
+world axes.
 
 ## Which instructions the UI strikes through
 

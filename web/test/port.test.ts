@@ -418,8 +418,9 @@ import {
   RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
 import {
-  ST2CAR_PART_YAW_BASE, ST2CAR_PART_YAW_FRAMES, ST2CAR_SPIN_STEP,
-  St2CarRoutine, St2CarsTick,
+  ST2CAR_ASSET_VARIANTS, ST2CAR_PART_YAW_BASE, ST2CAR_PART_YAW_FRAMES,
+  ST2CAR_SPIN_STEP, St2CarAssetRow, St2CarDraw, St2CarRoutine, St2CarSpawn,
+  St2CarsTick,
 } from "../src/game/class21/car";
 import {
   MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT, MOUSE_PAUSE_FRAMES,
@@ -4396,6 +4397,129 @@ console.log("\nthe stage-2 car: class 0x21 makes it, and nothing does before:");
   check("...and the pool survives JSON",
         JSON.stringify(JSON.parse(JSON.stringify(G.g_st2_cars)))
           === JSON.stringify(G.g_st2_cars));
+}
+
+console.log("\nSt2CarDraw: the row, the two gated rotations, the roll-limited frame:");
+{
+  // New bug (NEW-BUGS-2, left open by the car's port): the crashed set, the
+  // spin and the parked part's turn were never drawn -- the task only said
+  // "drew". `St2CarDraw` (`FUN_00452320`) decides all three, and the port
+  // leaves what it decided on `car.draw`.
+  const carHost: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => ({
+      x: slot, y: -8, z: frame, pitch: 0, roll: 0,
+      yaw: slot === 0x153 ? frame * 16 : 0x100,
+    }),
+  };
+  const scene = (cam: number, frame: number) => {
+    ResetGameGlobals();
+    EnterPlay();
+    G.g_active_cam_path = cam;
+    G.g_cam_path_frame = frame;
+  };
+  const slots = (c: { draw: { parts: { slot: number }[] } }) =>
+    c.draw.parts.map((p) => p.slot);
+  check("g_st2car_asset_variants is the image's two rows",
+        JSON.stringify(ST2CAR_ASSET_VARIANTS)
+          === JSON.stringify([[0x2d, 0x2f, 0x34, 0x31], [0x2e, 0x30, 0x35, 0x32]]));
+
+  // The unshot branch: shot 0x39 runs out and the row changes.
+  scene(0x39, 368);
+  const car = St2CarSpawn(0);
+  St2CarsTick(carHost);
+  check("riding shot 0x39, the draw names row 0",
+        car.drawn && JSON.stringify(slots(car))
+          === JSON.stringify([0x2d, 0x2f, 0x34, 0x31]),
+        JSON.stringify(slots(car)));
+  check("...the spun columns turn RotX by obj+0x1330 while +0x1320 is set",
+        car.spinOn === 1 && car.draw.parts[2].rotX === car.spin
+        && car.draw.parts[3].rotX === car.spin && car.spin !== 0
+        && car.draw.parts[0].rotX === 0 && car.draw.parts[1].rotX === 0,
+        JSON.stringify(car.draw.parts.map((p) => p.rotX)));
+  check("...on the roll-limited frame, and only they",
+        JSON.stringify(car.draw.parts.map((p) => p.limited))
+          === JSON.stringify([false, false, true, true]));
+  const spinAtCrash = car.spin;
+  G.g_cam_path_frame = 370;
+  St2CarsTick(carHost);
+  check("at frame 370 it parks, and the same frame's draw is row 1",
+        car.routine === St2CarRoutine.Held
+        && car.variant === St2CarAssetRow.Crashed
+        && JSON.stringify(slots(car))
+          === JSON.stringify([0x2e, 0x30, 0x35, 0x32]),
+        JSON.stringify(slots(car)));
+  check("...with no turn yet on the parked part: obj+0x1324 is still 0",
+        car.draw.parts[1].rotY === 0);
+  St2CarsTick(carHost);
+  St2CarsTick(carHost);
+  check("parked, the second column turns RotY by obj+0x1334",
+        car.heldFrames === 2 && car.partYaw !== 0
+        && car.draw.parts[1].rotY === car.partYaw
+        && car.partYaw === ST2CAR_PART_YAW_BASE - 102 * 16,
+        `${car.heldFrames} ${car.partYaw} ${car.draw.parts[1].rotY}`);
+  check("...and the spin holds where it was: +0x1320 is still set on 0x39",
+        car.spin === spinAtCrash + ST2CAR_SPIN_STEP
+        && car.draw.parts[2].rotX === car.spin,
+        `${car.spin} ${car.draw.parts[2].rotX}`);
+
+  // The rescue branch: shot 0x3A clears the spin flag at 0x50, and a skipped
+  // `RotX` is not a held one -- the columns draw at no rotation at all.
+  scene(0x3a, 0x4f);
+  const stop = St2CarSpawn(0);
+  St2CarsTick(carHost);
+  St2CarsTick(carHost);
+  check("on 0x3A before frame 0x50 the columns still spin",
+        stop.draw.parts[2].rotX === stop.spin && stop.spin === 2 * 0x1000);
+  G.g_cam_path_frame = 0x50;
+  St2CarsTick(carHost);
+  check("...and from 0x50 they draw at RotX 0, whatever +0x1330 holds",
+        stop.spinOn === 0 && stop.spin === 3 * 0x1000
+        && stop.draw.parts[2].rotX === 0 && stop.draw.parts[3].rotX === 0,
+        `${stop.spin} ${stop.draw.parts[2].rotX}`);
+  G.g_cam_path_frame = 130;
+  St2CarsTick(carHost);
+  St2CarsTick(carHost);
+  check("...and parked on 0x3A it keeps row 0 and turns the part",
+        stop.routine === St2CarRoutine.Held
+        && JSON.stringify(slots(stop))
+          === JSON.stringify([0x2d, 0x2f, 0x34, 0x31])
+        && stop.draw.parts[1].rotY === stop.partYaw && stop.partYaw !== 0);
+
+  // The roll limiter, on a pose with only a roll: `MatrixGetAngles` hands the
+  // roll back, and `0x00452414`..`0x0045245A` remaps it.
+  const lim = (roll: number) => {
+    const c = St2CarSpawn(0);
+    c.pitch = 0; c.yaw = 0; c.roll = roll;
+    St2CarDraw(c);
+    return c.draw.limited.roll;
+  };
+  // Within one BAMS: `MatrixGetAngles` truncates an `atan2` of a matrix built
+  // from `sin`/`cos`, which can land a hair under the angle it was given.
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+  check("a roll inside +0x800 is dropped", lim(0x400) === 0, String(lim(0x400)));
+  check("...up to 0x4000 it loses the 0x800",
+        near(lim(0x1000), 0x800) && near(lim(0x4000), 0x3800),
+        `${lim(0x1000)} ${lim(0x4000)}`);
+  check("...from there to 0xC000 it passes",
+        near(lim(0x6000), 0x6000), String(lim(0x6000)));
+  check("...a small negative roll, down to -0x1800, is dropped",
+        lim(-0x1000) === 0 && lim(-0x1800) === 0,
+        `${lim(-0x1000)} ${lim(-0x1800)}`);
+  check("...and a larger one loses 0xE800 off its sixteen bits",
+        near(lim(-0x2000), 0xe000 - 0xe800), String(lim(-0x2000)));
+  const turned = St2CarSpawn(0);
+  turned.pitch = 0x400; turned.yaw = 0x3000; turned.roll = 0;
+  St2CarDraw(turned);
+  check("with no roll the frame is the body's pitch and yaw",
+        Math.abs(turned.draw.limited.pitch - 0x400) <= 1
+        && Math.abs(turned.draw.limited.yaw - 0x3000) <= 1
+        && turned.draw.limited.roll === 0,
+        JSON.stringify(turned.draw.limited));
+  check("...and the draw is plain data a snapshot carries",
+        JSON.stringify(JSON.parse(JSON.stringify(turned.draw)))
+          === JSON.stringify(turned.draw));
+  ResetGameGlobals();
 }
 
 console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");

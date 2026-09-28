@@ -22,7 +22,11 @@
  * roots are exported at the origin: so the car stood in Goldman's office
  * through the whole of step 1's cutscene. Its roots are now placed from
  * `G.g_st2_cars` -- see {@link TASK_POSED_ROUTINES} -- and drawn exactly while
- * a car task is drawing; the routes in its rig data only name the roots.
+ * a car task is drawing; the routes in its rig data only name the roots. What
+ * each root shows is the task's too: the draw names four asset slots out of
+ * two rows (the car after the crash is the second), the parked part's turn,
+ * the spin and the roll-limited frame the spun parts hang off, and
+ * {@link RigLayer.applyTaskDraw} poses exactly those parts.
  *
  * What the client adds is the motion. The bundle exports rig roots
  * *unparented*, tagged `hod2_path_slot`, because it ships no baked camera or
@@ -191,6 +195,20 @@ interface Instance {
   spawnAt: number | null;
   /** ...and the class that actor must be. */
   spawnClass: number | null;
+  /**
+   * Every `rig_part` under a root whose routine is one of
+   * {@link TASK_POSED_ROUTINES}, by the asset slot it draws. The task's draw
+   * list names slots, and the part that draws a slot is the part it means --
+   * which is how the engine picks one too. Empty for any other rig.
+   */
+  slotParts: Map<number, SlotPart>;
+}
+
+/** A `rig_part` a task's draw list can name, with the pose it was baked at. */
+interface SlotPart {
+  node: Object3D;
+  bakedPos: Vector3;
+  baked: Quaternion;
 }
 
 /**
@@ -221,6 +239,29 @@ interface TaskPose {
   posed: boolean;
   /** This frame's routine called the draw. */
   drawn: boolean;
+  /**
+   * What that draw drew, when the port computes it: one entry per
+   * `AssetDrawSlot`, and the second frame some of them hang off. Absent means
+   * every part of the root is drawn as baked.
+   */
+  draw?: TaskDrawList;
+}
+
+/**
+ * The words a task's draw hands this layer -- `St2CarDrawList` in
+ * `game/class21/car.ts`, which says where each field is decided.
+ */
+interface TaskDrawList {
+  parts: readonly {
+    slot: number;
+    /** Hangs off {@link TaskDrawList.limited} rather than the root. */
+    limited: boolean;
+    /** The push's own rotations after its translation, BAMS. */
+    rotY: number;
+    rotX: number;
+  }[];
+  /** A second frame at the root's position, as `RotY; RotX; RotZ`. */
+  limited: { pitch: number; yaw: number; roll: number };
 }
 
 /**
@@ -230,9 +271,10 @@ interface TaskPose {
  * `St2CarDraw` (`FUN_00452320`) is called by `St2CarRouteUpdate`
  * (`FUN_004521B0`) and `St2CarHeldUpdate` (`FUN_004522A0`), the stage-2 car's
  * two arcade routines. The camera-path switch, the parking and the
- * `g_script_flags[0]` kill are theirs, in `game/class21/car.ts`; this layer
- * draws one root per car task at the pose the task wrote, and none while
- * there is no task.
+ * `g_script_flags[0]` kill are theirs, in `game/class21/car.ts`, and so is
+ * what the draw decides -- its port leaves the result on each record's
+ * `draw`; this layer draws one root per car task at the pose the task wrote,
+ * the parts that draw names, and none while there is no task.
  */
 const TASK_POSED_ROUTINES: Readonly<Record<string, () => readonly TaskPose[]>> = {
   FUN_00452320: () => G.g_st2_cars,
@@ -313,6 +355,8 @@ export class RigLayer implements System {
   private readonly _e = new Euler();
   private readonly _v = new Vector3();
   private readonly _q = new Quaternion();
+  private readonly _rel = new Quaternion();
+  private readonly _own = new Quaternion();
 
   /** Find the rig roots the exporter emitted and bind each to its route. */
   build(root: Object3D, json: RigsJson | undefined, paths: CamPaths): void {
@@ -388,6 +432,18 @@ export class RigLayer implements System {
           pathRotation: px.hod2_path_rotation ?? null,
         });
       });
+      const slotParts = new Map<number, SlotPart>();
+      const routine = (o.userData as { hod2_routine?: string }).hod2_routine;
+      if (routine && TASK_POSED_ROUTINES[routine]) {
+        o.traverse((c) => {
+          const px = c.userData as { hod2_kind?: string; hod2_slots?: string[] };
+          if (px?.hod2_kind !== "rig_part" || !px.hod2_slots?.length) return;
+          slotParts.set(Number.parseInt(px.hod2_slots[0], 16), {
+            node: c, bakedPos: c.position.clone(),
+            baked: c.quaternion.clone(),
+          });
+        });
+      }
       this.instances.push({
         root: o,
         bakedPos: o.position.clone(),
@@ -405,6 +461,7 @@ export class RigLayer implements System {
         posed: false,
         spawnAt: null,
         spawnClass: null,
+        slotParts,
       });
       const cls = classOf.get(x.hod2_rig) ?? null;
       if (cls !== null && ACTOR_POSED_CLASSES.has(cls)
@@ -588,8 +645,42 @@ export class RigLayer implements System {
       inst.root.position.set(t.pos.x, t.pos.y, t.pos.z);
       inst.root.quaternion.setFromEuler(
         bamsEuler(t.pitch, t.yaw, t.roll, this._e));
+      if (t.draw) this.applyTaskDraw(inst, t.draw);
     });
     actor.showing = live.length ? actor.instances[0] : null;
+  }
+
+  /**
+   * The parts a task's draw named, and only those, each posed as its push
+   * was: `T(baked) · R(baked) · RotY · RotX` under the root -- or, for a part
+   * on the second frame, under `root⁻¹ · RotY(yaw) · RotX(pitch) ·
+   * RotZ(roll)` at the same position, which is `St2CarDraw`
+   * (`FUN_00452320`)'s roll-limited push expressed as a child of the root it
+   * is not. Every other part of the root is hidden: the car draws one of its
+   * two asset rows, never both. Reads the task's record and writes only the
+   * nodes.
+   */
+  private applyTaskDraw(inst: Instance, draw: TaskDrawList): void {
+    for (const p of inst.slotParts.values()) p.node.visible = false;
+    // `RotY; RotX; RotZ` is Euler order "YXZ" in three's naming.
+    this._e.set(draw.limited.pitch * BAMS_TO_RAD, draw.limited.yaw * BAMS_TO_RAD,
+                draw.limited.roll * BAMS_TO_RAD, "YXZ");
+    const rel = this._rel.copy(inst.root.quaternion).invert()
+      .multiply(this._q.setFromEuler(this._e));
+    for (const d of draw.parts) {
+      const p = inst.slotParts.get(d.slot);
+      if (!p) continue;
+      p.node.visible = true;
+      this._e.set(d.rotX * BAMS_TO_RAD, d.rotY * BAMS_TO_RAD, 0, "YXZ");
+      const own = this._q.copy(p.baked).multiply(this._own.setFromEuler(this._e));
+      if (d.limited) {
+        p.node.position.copy(p.bakedPos).applyQuaternion(rel);
+        p.node.quaternion.copy(rel).multiply(own);
+      } else {
+        p.node.position.copy(p.bakedPos);
+        p.node.quaternion.copy(own);
+      }
+    }
   }
 
   /**

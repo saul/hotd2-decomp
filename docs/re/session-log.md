@@ -22165,3 +22165,104 @@ shipped script.
 * The Tower's `Boss3PublishCameraAngles` and `Boss3SeatCameraAngles`
   (`class45/body.ts`) compensate for a view built from the look-at. The view
   is built from the angles now, so both can go.
+
+## 2026-09-28 -- the stage-2 car draws what `St2CarDraw` draws; the green mound was a shot effect
+
+Branch `fix/newbugs2-crashed-car`. Two items the car's port
+(`fix/newbugs2-goldman-car`) left open: "not drawn yet: the crashed model set,
+the wheel spin and the parked part's turn", and Original Mode's small green
+object in front of Goldman's desk.
+
+**`St2CarDraw` (`FUN_00452320`), read whole from the listing, `0x00452320`..
+`0x0045253F` `[proved]`.** Ghidra's body ends at the second `MatrixStackPop`
+(L35). Two pushes held open make a real chain: body then, nested, the second
+column at `(9.058, 6.368, 8.943)` turned `RotY(obj+0x1334)` only while
+`obj+0x1324 != 0`. Then a scratch push: `MatrixLoadIdentity`, the body's
+`RotZ RotY RotX`, `MatrixGetAngles` (`FUN_004018E0`, `(pitch, yaw, roll)` --
+its first two outputs are `VecToAngles`' `-elevation` and heading, checked at
+`0x004016B0`), pop. The roll goes through `AND EAX, 0xFFFF` -- so the `JL` after
+it never jumps -- and a dead zone: `<= 0x800` is 0, `<= 0x4000` loses 0x800,
+`< 0xC000` passes, `>= 0xE800` is 0, the rest lose 0xE800. A third push
+re-applies the frame as `Translate(obj+0x40); RotY; RotX; RotZ(limited)`, and
+two pushes inside it at `(0, 3.167, 13.649)` and `(0, 3.167, -9.48)` each turn
+`RotX(obj+0x1330)` only while `obj+0x1320 != 0`. Every column's slot is
+`g_st2car_asset_variants[obj+0x13F0][c]`, read from the image: row 0
+`0x2D 0x2F 0x34 0x31`, row 1 `0x2E 0x30 0x35 0x32` -- `char_adv04.bin`
+entries 2..10 through the pol slot list, so the old "no static name table"
+note on the rig was wrong: the slot list is that table.
+
+What the routines around it do, re-read against the port (`[proved]`, all
+already right): `St2CarRouteUpdate` adds `0x1000` a frame to `+0x1330`, writes
+row 1 at `0x00452239` as `0x39` runs out, and clears `+0x1320` from `0x3A`
+frame `0x50`; `St2CarHeldUpdate` reads `ry` at struct `+0x10` (`[ESP+0x20]`
+after the call) for `n = 1..39`, `n + 100.0`.
+
+**Evidence for what the parts are.** Row 1 is `[likely]` the crashed car: the
+unshot branch plays shot `0x39` out in block 11 step 1 (`cam_play 290..405`),
+its script plays `0x519A9` -- `STAGE2_SE\BRIDGE_CRASH1_22.wav` -- at frame 340,
+the row changes at 370, and row 1's body is row 0's geometry on another texture
+set (26/30/34 for 0/1/2/33). The rescue branch plays `0x419A9`,
+`STAGE2_SE\BRAKE.wav`, as `0x3A` starts. Column 1 is `[likely]` the driver's
+door: drawn, it is the door the rescued man climbs out through as `0x3A` ends,
+swinging out through `op_` 0x153's `ry` `0x4000..0x7A43`, about 82 degrees.
+
+**What changed.** `game/class21/car.ts` has `St2CarDraw` now, called where the
+two routines call it, which computes the row, the two gated rotations and the
+limited frame into `car.draw` (plain data); `RotZYX` joined `carrier.ts`'s
+matrix helpers. `tools/hod2lib/rigs.py` exports both rows as parts;
+`render/rigs.ts` keys a task-posed root's parts by the slot they draw and
+`applyTaskDraw` shows and poses exactly the four the draw named -- the spun
+parts under `root⁻¹ · RotY RotX RotZ(limited)`, which is the second frame as a
+child of the root it is not.
+
+**The green mound.** It is the rig `obj_416b00`, `PlayerShotEffectsThink`
+(`FUN_00416B00`): with the car gone it was the only rig near the origin, and it
+is Original-only because its route, `op_` 0x194, is `op_org` 0. The exe draws
+its one literal slot, `0x109D` (`etc_1.bin` 41), only from a live kind-5
+`g_shot_tracer_ring` record: `CMP EAX, 0x5` at `0x00416CBE`, then
+`Translate(record) · Translate(path(0x194, frame % 24)) · MatrixClearRotation ·
+RotZ RotY RotX`, `PUSH 0x109D` at `0x00416DA1`. A byte search for `9d100000`
+finds that push, two `PUSH 0x109D; CALL 0x0041D5D0` in `LoadSceneAndReset` and
+at `0x0048A1D0`, and three data hits (a pol slot list and two descriptor
+tables). `0x0041D5D0` is `AssetQueueLoadSlot` -- job kinds 0 and 1 on the
+64-deep ring `AssetQueueUnloadSlot` uses, both of which the job table at
+`0x00588C20` sends to the loader at `0x00418B80` -- and its script caller is
+`EvtOpAssetLoadSlot50` (`0x0045F3A0`, table entry `0x00593318`); both named.
+The rig had carried `Route(0x194)` with no camera gate, and its note said
+"Nothing here is placeable" -- prose the exporter does not read (L26's shape):
+an ungated route is always selected, so the player drew the root from stage
+load at the path's frame-0 pose, `(0.5, 0, 0)`. It is `placement_blocked` now;
+`render/effects.ts` draws the kind-5 arm (it had skipped kind 5 outright), and
+an Original Mode bundle carries `0x109D` in `slots_effect`. The port cannot yet
+arm weapon kind 5 -- `g_original_weapon_kind` is only ever reset -- so the
+round is testable and not reachable in play.
+
+Found on the way, same function, fixed: the ordinary tracer was drawn with
+`rotation (0, 0, spin)` in world axes; `MatrixClearRotation` (`FUN_004A9F70`,
+it writes the 3x3 to the identity) makes it a camera-facing quad, so both arms
+now take the camera's world rotation first.
+
+**Wrong turns.**
+
+* The first harness shots of the desk at frame 35 found nothing: the room is
+  still fading in there, and the mound only reads once `cp_st2` 55 pulls back,
+  around frame 250.
+* In the rescue branch the car's door looked **open while driving** -- a black
+  panel off the side at `0x3A` frame 60, with `obj+0x1324` still 0. Hiding
+  slot `0x2F` alone showed it is the door, closed: its bounds are flush with
+  the body, and the black is its material. The outer skin is a translucent
+  `char_adv04` texture-33 primitive whose base colour is `[0, 0, 0]` in the
+  bundle, so it modulates to black; the inner panel is untextured black. It
+  was the same before this change and is a material question, not the rig's --
+  left `[open]` for whoever owns texture alpha.
+* `car.ts` cited `St2CarInit`, `St2CarRouteUpdate` and `St2CarHeldUpdate` as
+  references in the file that ports them (L42), so `verify_port.py` counted
+  none of the three as ported; linked instead. Citations checked 692 -> 696
+  with `St2CarDraw`.
+
+Measured in the page (`?stage=2&mode=play&entry=0&block=0&step=2&op=0&drive=1`,
+harness driven a frame at a time): unshot, the draw names row 0 through `0x39`
+frame 369 and row 1 from 370, the door turns from 371 to 409 (-27 .. -14887
+BAMS), the spin holds at 2260992; rescue (the class-0x21 target marked shot
+each frame), `+0x1320` drops at `0x3A` frame 80 and the spun parts draw at
+`RotX` 0, the car parks at 130 on row 0 and the door swings through 169.

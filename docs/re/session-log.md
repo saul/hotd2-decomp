@@ -21010,7 +21010,7 @@ every bundle's `stage_track.note`, and `stage_load.ts` started the track at load
 tracks. Every stage's script starts its own track with a `se_play` at step 2 of
 each entry block (stage 5 with `bgm_entry_play`); `test:seek` now asserts it
 across the bundles. The convention start is gone and the walker's `bgmTrack`
-follows `se_play` too, which is what makes a deep link keep its music. L48.
+follows `se_play` too, which is what makes a deep link keep its music. L57.
 
 **Wrong turn, the second: `resume_bgm_if_skipped`.** evt `0x2E` plays
 `0x80000002` after a skip, and was named for resuming the music. Reading

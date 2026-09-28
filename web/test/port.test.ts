@@ -240,7 +240,7 @@ import { ActorSnapToGroundHeight, ZombiePushOutOfWorldAndActors }
 import { ActorArcBeginFalling } from "../src/game/class30/emerge";
 import { ActorPointIsAhead, ZombieScriptEnded, ZombieStateHoldForCameraCue }
   from "../src/game/class30/target";
-import { ActorModelScale } from "../src/game/root_motion";
+import { ActorModelScale, ApplyRootMotion } from "../src/game/root_motion";
 import { ZOMBIE_SPRINTS, ZombieRunMotion, ZombieWaitMotion }
   from "../src/game/class30/states";
 import {
@@ -298,6 +298,8 @@ import { ThrowerState, ThrowSub } from "../src/game/class31/states";
 import { ThrowerStateThrow } from "../src/game/class31/thrower";
 import { ThrowerStrikeConnect } from "../src/game/class31/strike";
 import { ThrowerStanceOf } from "../src/game/class31/tables";
+import { ActorPlayCursor } from "../src/game/class31/arc";
+import { ThrowerPickLandingPoint } from "../src/game/class31/leap_down";
 import { SND_LEAP_LANDED } from "../src/game/class31/leap";
 import { dist2d, vec3, type Vec3 } from "../src/game/vec";
 import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
@@ -6392,6 +6394,248 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   ThrowerStrikeConnect(z, events);
   check("but an attack whose zone has been shot off whiffs", hits === before,
         `${hits} vs ${before}`);
+}
+
+
+// `ThrowerStateDelayedPounce` (`FUN_0044E830`), state 23, against the exe's
+// three subs. Stage 2 block 21's pair: motion 310 over 45 frames, set 0.
+console.log("class 0x31, state 23 -- the wait, then the pounce at eye height:");
+{
+  // `g_class31_melee_attacks` set 0's pounce rows (stance 4), verbatim: clip
+  // 289 cut 25..34, 34..66, 67..90, both hands hitting on 66. Row 0 hits on
+  // 62 and 64, which is the point -- the connect reads a different row.
+  const POUNCE_ARC = [
+    { motion: 289, start: 25, fade: 5, until: 34 },
+    { motion: 289, start: 34, fade: 5, until: 66 },
+    { motion: 289, start: 67, fade: 5, until: 90 },
+  ];
+  const set0 = CLASS31.sets[0];
+  const chars = {
+    ...CHARS31,
+    types: {
+      ...CHARS31.types,
+      "25": {
+        ...TYPE31,
+        motions: {
+          ...TYPE31.motions,
+          // The wait: a walk, and -- unlike the shipped 310, whose root height
+          // is flat -- one whose root rises, so the bit-0x10 arm can be seen.
+          "310": { ...motion(16, 0.45),
+                   root: Array.from({ length: 48 }, (_, i) =>
+                     i % 3 === 1 ? 0.25 * Math.floor(i / 3)
+                       : i % 3 === 2 ? -0.45 * Math.floor(i / 3) : 0) },
+          "289": motion(58),
+        },
+      },
+    },
+    class31: {
+      ...CLASS31,
+      sets: [{
+        ...set0,
+        attacks: {
+          ...set0.attacks,
+          "4": {
+            "0": { script: POUNCE_ARC, hit_frame: 66, overlay_kind: 2,
+                   cancel_mask: 2 },
+            "1": { script: POUNCE_ARC, hit_frame: 66, overlay_kind: 3,
+                   cancel_mask: 4 },
+          },
+        },
+      }],
+    },
+  } as unknown as CharactersJson;
+
+  // An eye twelve units up, so `g_camera_eye_y` and the actor's own tracked
+  // point (`obj.lookAt`, at the origin) cannot be mistaken for each other.
+  const eye = vec3(0, 12, 0);
+  const host = {
+    ...CAM_HOST,
+    viewPoint: (x: number, y: number, z: number, out: Vec3) => {
+      out.x = eye.x + x; out.y = eye.y + y; out.z = eye.z - z;
+    },
+  };
+  const rng = new Rng(23);
+  const events = new Events();
+  let cursorAtHit = -1;
+  let vetoAtHit = true;
+  events.on("player.damaged", () => {
+    cursorAtHit = ActorClipFrame(z);
+    vetoAtHit = (z.flags & ActorFlag.NoHitReaction) !== 0;
+  });
+  const z = thrower(ThrowerState.DelayedPounce,
+                    { pounce: { motion: 310, frames: 45 } });
+  SetGameTables(chars);
+  G.g_max_attackers = 1;
+
+  GameUpdate(eye, 1 / 60, host, rng, events);
+  check("sub 0 falls into sub 1 on its own frame, and counts it",
+        z.sub === 1 && z.slideTimer === 44, `sub ${z.sub} timer ${z.slideTimer}`);
+  check("obj+0x1F8 |= 0x10 -- the wait clip carries the root's height",
+        (z.motionFlags & MotionFlag.RootMotionY) !== 0,
+        `0x${z.motionFlags.toString(16)}`);
+  check("obj+0x34 |= 0x100 -- the wait cannot be shot",
+        (z.flags & ActorFlag.ShotImmune) !== 0,
+        `0x${(z.flags >>> 0).toString(16)}`);
+  check("the wait clip is the ordinary motion, not a one-shot",
+        z.motion === 310 && z.action === null,
+        `motion ${z.motion} action ${JSON.stringify(z.action)}`);
+
+  // A shot during the wait ricochets: the state does not move.
+  ResolveHit(z, 4, 0, host, rng);
+  GameUpdate(eye, 1 / 60, host, rng, events);
+  check("a shot in the wait neither reacts nor interrupts it",
+        z.state === ThrowerState.DelayedPounce && z.sub === 1
+        && z.slideTimer === 43, `state ${z.state} sub ${z.sub}`);
+
+  const y0 = z.pos.y;
+  const z0 = z.pos.z;
+  for (let i = 0; i < 42; i++) GameUpdate(eye, 1 / 60, host, rng, events);
+  check("frame 44: still waiting", z.sub === 1 && z.slideTimer === 1,
+        `sub ${z.sub} timer ${z.slideTimer}`);
+  // Sixteen authored frames are 30 cursor ticks; forty frames in it is on its
+  // second cycle and has not dropped back to anything else.
+  check("the clip loops for the whole wait", z.motion === 310
+        && z.action === null && ActorPlayCursor(z) < 30,
+        `motion ${z.motion} cursor ${ActorPlayCursor(z)}`);
+  check("and its root walks the actor and lifts it",
+        z.pos.z < z0 - 5 && z.pos.y > y0 + 2,
+        `z ${z0.toFixed(2)} -> ${z.pos.z.toFixed(2)}, `
+        + `y ${y0.toFixed(2)} -> ${z.pos.y.toFixed(2)}`);
+
+  GameUpdate(eye, 1 / 60, host, rng, events);
+  check("frame 45: the counter runs out and it falls through to sub 2",
+        z.sub === 2 && z.state === ThrowerState.DelayedPounce, `sub ${z.sub}`);
+  // Sub 1 drops both bits (`0x0044E8BA`), and the same frame's fall into
+  // `ActorArcStep` puts `0x100` straight back up for the windup: phase 0 at
+  // `0x0044D8A4`..`0x0044D8BE`, types 0x16..0x19 outside state 10. It latches
+  // `obj+0x136C` bit `0x200` only if `0x100` was already up, and it was not.
+  check("...with the wait's height bit down and the windup shot-proof",
+        (z.motionFlags & MotionFlag.RootMotionY) === 0
+        && (z.flags & ActorFlag.ShotImmune) !== 0
+        && (z.flags2 & ThrowerFlag.ArcSuppressedShotImmune) === 0
+        && z.arcPhase === ArcPhase.Crouched,
+        `motion 0x${z.motionFlags.toString(16)} `
+        + `flags 0x${(z.flags >>> 0).toString(16)} phase ${z.arcPhase}`);
+  check("obj+0x34 |= 0x10000000, not BackingOff's 0x20000000",
+        (z.flags & ActorFlag.Committed) !== 0
+        && (z.flags & ActorFlag.BackingOff) === 0,
+        `0x${(z.flags >>> 0).toString(16)}`);
+  check("obj+0x136C |= 0x20000, and it holds the permit it claimed",
+        (z.flags2 & ThrowerFlag.Pouncing) !== 0 && z.attackPermit === 0
+        && G.g_attack_permits[0] === z.at,
+        `flags2 0x${(z.flags2 >>> 0).toString(16)} permit ${z.attackPermit}`);
+  check("the script is the pounce row's -- clip 289, stage 0 at 25",
+        z.arcScript?.[0].motion === 289 && z.arcScript?.[0].start === 25,
+        JSON.stringify(z.arcScript?.[0]));
+  check("ThrowerLoadAttackArcScript latches no stance into obj+0x1364",
+        z.thr.stance === 0, `stance ${z.thr.stance}`);
+  // `ThrowerPickLandingPoint`'s state-23 arm: six units out, not 15.5, and
+  // then `g_camera_eye_y` in place of the height it computed.
+  check("it aims six units in front of the eye, at the eye's own height",
+        Math.abs(z.arcTo.x) < 1e-9 && Math.abs(z.arcTo.z - 6) < 1e-9
+        && z.arcTo.y === eye.y && z.arcTotal === 45,
+        `to (${z.arcTo.x}, ${z.arcTo.y}, ${z.arcTo.z}) over ${z.arcTotal}`);
+
+  let vetoCursor = -1;
+  let flightFrames = 0;
+  let immuneInFlight = false;
+  let frames = 0;
+  while (z.state === ThrowerState.DelayedPounce && frames++ < 400) {
+    const had = (z.flags & ActorFlag.NoHitReaction) !== 0;
+    GameUpdate(eye, 1 / 60, host, rng, events);
+    if (!had && (z.flags & ActorFlag.NoHitReaction) !== 0) {
+      vetoCursor = ActorPlayCursor(z);
+    }
+    if (z.arcPhase === ArcPhase.Flight) {
+      flightFrames++;
+      if (z.flags & ActorFlag.ShotImmune) immuneInFlight = true;
+    }
+  }
+  // ...and the takeoff drops it, with `0x200` clear (`0x0044D966`..`D977`).
+  check("the takeoff takes the windup's immunity down",
+        flightFrames > 0 && !immuneInFlight,
+        `${flightFrames} flight frames, immune ${immuneInFlight}`);
+  // The connect reads `obj+0x1364` -- row 0 -- and the veto the live stance
+  // -- row 4. Both halves of the same state, on different rows.
+  const row0 = set0.attacks["0"][String(z.attack) as "0" | "1"].hit_frame;
+  check("the stab lands on row 0's hit frame, through obj+0x1364",
+        cursorAtHit === row0, `hit at cursor ${cursorAtHit}, row 0 ${row0}`);
+  // Stage 2 starts on 67 and holds there through its fade, so 67 is the
+  // first cursor past row 4's 66. A row-0 reading would raise it at 63 or 65.
+  check("...before the flinch veto, which waits for row 4's 66",
+        !vetoAtHit && vetoCursor === 67, `veto at cursor ${vetoCursor}`);
+  check("the arc ends in ThrowerStateWithdraw",
+        z.state === ThrowerState.Withdraw && z.sub === 0, `state ${z.state}`);
+  check("...with 0x10000000 and 0x20000 taken down on the way out",
+        (z.flags & ActorFlag.Committed) === 0
+        && (z.flags2 & ThrowerFlag.Pouncing) === 0,
+        `flags 0x${(z.flags >>> 0).toString(16)} `
+        + `flags2 0x${(z.flags2 >>> 0).toString(16)}`);
+}
+
+// `ThrowerPickLandingPoint` (`FUN_0044CBA0`) switches on the **state**, not
+// only on the character type -- every arm, through a host that is the
+// identity with -z in front.
+console.log("class 0x31, ThrowerPickLandingPoint's arms:");
+{
+  const z = thrower(ThrowerState.StandAndDecide);
+  const host = {
+    ...NULL_HOST,
+    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+      out.x = x; out.y = y; out.z = -zz;
+    },
+  };
+  const out = vec3();
+  const at = (state: number, charType: number, permit: number,
+              attackers: number) => {
+    z.state = state; z.charType = charType; z.attackPermit = permit;
+    G.g_max_attackers = attackers;
+    ThrowerPickLandingPoint(z, host, out);
+    return { x: out.x, y: out.y, z: out.z };
+  };
+  const PX = 640.2;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  let p = at(ThrowerState.PounceNear, 0x19, 0, 1);
+  check("an ordinary leap: 320px down at -15.5, one attacker, no side",
+        near(p.x, 0) && near(p.y, 320 * -15.5 / PX) && near(p.z, 15.5),
+        JSON.stringify(p));
+  p = at(ThrowerState.PounceNear, 0x16, 0, 1);
+  check("zsass drops further, 390px", near(p.y, 390 * -15.5 / PX),
+        JSON.stringify(p));
+  p = at(ThrowerState.LeapStrike, 0x16, 0, 1);
+  check("state 22: -350px whatever the type, at -15.5",
+        near(p.y, -350 * -15.5 / PX) && near(p.z, 15.5), JSON.stringify(p));
+  p = at(ThrowerState.DelayedPounce, 0x19, 0, 1);
+  check("state 23: -350px at -6.0",
+        near(p.y, -350 * -6 / PX) && near(p.z, 6), JSON.stringify(p));
+  p = at(ThrowerState.PounceNear, 0x19, 0, 2);
+  check("two attackers: player 0's holder lands 160px to one side",
+        near(p.x, 160 * -15.5 / PX), JSON.stringify(p));
+  p = at(ThrowerState.PounceNear, 0x19, 1, 2);
+  check("...player 1's to the other", near(p.x, -160 * -15.5 / PX),
+        JSON.stringify(p));
+  p = at(ThrowerState.PounceNear, 0x19, -1, 2);
+  check("...and no permit in the middle", near(p.x, 0), JSON.stringify(p));
+}
+
+// `SkeletonApplyRootMotion`'s bit-0x10 arm (`TEST [model+0x64], 0x10` at
+// `0x00410DB0`): the height moves the actor only with the bit up.
+console.log("root motion: model+0x64 bit 0x10 carries the height:");
+{
+  const z = thrower(ThrowerState.StandAndDecide);
+  z.pos = vec3(0, 3, 50);
+  z.motionFlags = MOTION_FLAGS_INIT;
+  ApplyRootMotion(z, 0, 1, 2);
+  check("without the bit the height is left alone",
+        z.pos.y === 3 && z.pos.z !== 50, `y ${z.pos.y} z ${z.pos.z}`);
+  z.motionFlags |= MotionFlag.RootMotionY;
+  ApplyRootMotion(z, 0, 0, 2);
+  check("with it, the actor rises by the delta times its scale",
+        z.pos.y === 3 + 2 * z.scale, `y ${z.pos.y} scale ${z.scale}`);
+  z.motionFlags &= ~MotionFlag.RootMotion;
+  ApplyRootMotion(z, 0, 0, 2);
+  check("and bit 1 still gates the whole arm", z.pos.y === 3 + 2 * z.scale,
+        `y ${z.pos.y}`);
 }
 
 
@@ -23549,7 +23793,7 @@ console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce
     p.sub = 2;
     p.attackPermit = -1;
     p.roll = 0x2000;
-    ThrowerStateDelayedPounce(p, 2 / 60, new Rng(1), NULL_HOST);
+    ThrowerStateDelayedPounce(p, EYE, 2 / 60, new Rng(1), NULL_HOST);
     check("the pounce levels its roll at 0xCCC a frame",
           p.roll === 0x2000 - 2 * 0xccc, p.roll.toString(16));
   }

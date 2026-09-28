@@ -1,5 +1,8 @@
 /**
- * The script panel: a filter box, and the script as a tree.
+ * The script tab: a filter box, and the script as a tree.
+ *
+ * Clicking an instruction seeks to it, which pauses: the replay lands on the
+ * instruction and waits there for Play.
  *
  * Thousands of rows, none of which change once a stage has loaded — so each
  * block is memoised on the object `stabilise` holds still for it, and a stage
@@ -91,7 +94,15 @@ export function Tree() {
       + `[data-o="${current.op}"]`);
     if (row) {
       row.classList.add("current");
-      row.scrollIntoView({ block: "nearest" });
+      // The tree's own scroller and nothing else. `scrollIntoView` scrolls
+      // every ancestor that can scroll -- and `overflow: hidden` ones can,
+      // programmatically -- so inside the debug drawer it could shift the
+      // drawer, or the page under it, to follow the script.
+      const box = el.getBoundingClientRect();
+      const at = row.getBoundingClientRect();
+      if (at.top < box.top || at.bottom > box.bottom) {
+        el.scrollTop += at.top - box.top - el.clientHeight / 3;
+      }
     }
   }, [current, p]);
 
@@ -113,16 +124,18 @@ export function Tree() {
     }
   }, [q, p]);
 
+  // The debug sidebar's Script tab. It was the left-hand column of the page,
+  // always on screen; it is a tab now, so a stage that is being *played*
+  // renders none of its thousands of rows.
   return (
-    <aside id="left">
-      <div className="panel-head">
-        <strong>Script</strong>
-        <input type="search" id="tree-filter" placeholder="filter…"
+    <div className="tab-body tree-tab">
+      <div className="tab-tools">
+        <input type="search" id="tree-filter" placeholder="filter the script…"
                value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <div id="tree" className="scroll" ref={host}>
         {p?.blocks.map((b) => <Block key={b.index} b={b} dispatch={dispatch} />)}
       </div>
-    </aside>
+    </div>
   );
 }

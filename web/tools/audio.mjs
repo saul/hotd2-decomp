@@ -116,9 +116,9 @@ const check = (name, ok, detail = "") => {
 };
 
 const openAll = async () => {
-  const n = await page.locator("#right summary").count().catch(() => 0);
+  const n = await page.locator("#debug summary").count().catch(() => 0);
   for (let i = 0; i < n; i++) {
-    const el = page.locator("#right summary").nth(i);
+    const el = page.locator("#debug summary").nth(i);
     const open = await el.evaluate((e) => e.parentElement?.open ?? true)
       .catch(() => true);
     if (!open) await el.click().catch(() => {});
@@ -143,7 +143,7 @@ try {
   await page.keyboard.press("Space");
   await page.waitForTimeout(2500);
 
-  const box = await page.locator("#viewport").boundingBox();
+  const box = await page.locator("#view").boundingBox();
   // A sweep, so some shots meet flesh, some meet the level and some meet
   // nothing. The gunshot itself does not care which.
   for (let round = 0; round < 6; round++) {

@@ -224,7 +224,7 @@ export function ActorSetOneShotBlended(obj: Actor, motion: number,
   } else {
     ActorStartFade(obj, obj.motion, obj.playTicks, fade);
   }
-  obj.action = { motion, ticks: start, loop: false, held: true };
+  obj.action = { motion, ticks: start, held: true };
   obj.rootActionFrame = -1;
 }
 

@@ -71,7 +71,7 @@ const RESTORE_IDLE_BY_STANCE = [0x208, 0x1fd, 0x1f3, 0x205];
 function playOnce(obj: ThrowerActor, motion: number, from = 0): void {
   const m = MotionOf(obj, motion);
   if (!m) return;
-  obj.action = { motion, ticks: from, loop: false };
+  obj.action = { motion, ticks: from };
   obj.rootActionFrame = -1;
 }
 

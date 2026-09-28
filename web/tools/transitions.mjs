@@ -37,16 +37,29 @@ function check(name, ok, detail = "") {
   }
 }
 
-/** The entry select's options and current value, or null when there is none. */
+/**
+ * The entry picker's choices and the current one, or null when there is none.
+ *
+ * It is in the breadcrumb menu, which renders only while open, so the menu is
+ * opened to read it and shut again after. `click()` from the page, which
+ * moves no focus, and a beat for React to commit what the click changed.
+ */
 async function readEntryPicker(page) {
-  return page.evaluate(() => {
-    const sel = document.querySelector("#entry-select");
-    if (!sel) return null;
-    return {
-      value: sel.value,
-      options: [...sel.options].map((o) => o.value),
-      text: [...sel.options].map((o) => o.textContent),
-    };
+  return page.evaluate(async () => {
+    const beat = () => new Promise((r) => setTimeout(r, 50));
+    const trail = document.querySelector(".crumb-trail");
+    const wasOpen = !!document.querySelector("#menu");
+    if (!wasOpen) { trail?.click(); await beat(); }
+    const box = document.querySelector("#entry-picker");
+    const buttons = box ? [...box.querySelectorAll("[data-entry]")] : [];
+    const out = box ? {
+      value: buttons.find((b) => b.getAttribute("aria-pressed") === "true")
+        ?.dataset.entry,
+      options: buttons.map((b) => b.dataset.entry),
+      text: buttons.map((b) => b.textContent),
+    } : null;
+    if (!wasOpen) { trail?.click(); await beat(); }
+    return out;
   });
 }
 
@@ -140,13 +153,9 @@ try {
   check("stage 1 opens on its terminal block", before.includes("stage=1"),
         before);
 
-  // The transport's own button, not the mode button beside it: "Play" is a
-  // *mode* and this needs the clock started, which is `\u25b6`.
-  await page.evaluate(() => {
-    document.querySelectorAll("button").forEach((b) => {
-      if (b.textContent.trim() === "\u25b6") b.click();
-    });
-  });
+  // The transport's own button in the debug sidebar, not the mode button
+  // above it: "Play" is a *mode* and this needs the clock started.
+  await page.evaluate(() => document.querySelector("#play-pause")?.click());
   // One frame, so the projection carries the click before it is read.
   await page.evaluate(() => globalThis.__hotd2Drive.advance(1));
   check("the transport is running",

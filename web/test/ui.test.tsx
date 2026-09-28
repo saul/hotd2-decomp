@@ -4,9 +4,9 @@
  * A green `tsc` and a green `vite build` say nothing about whether the chrome
  * renders — that lesson is already written into `verify_player_dom.py`, and
  * it applied again the moment `index.html` became a mount point: moving the
- * sidebar out of a portal dropped its `<aside id="right">`, and `#stagearea`
- * is a four-column grid whose columns land by **source order**. Types cannot
- * see that. A build cannot see it. It is a blank right-hand column.
+ * sidebar out of a portal once dropped the element the stylesheet placed it
+ * by, and the page lost a column with nothing anywhere failing. Types cannot
+ * see that. A build cannot see it.
  *
  * So this renders `App` to a string, twice — once with no projection, which
  * is the state the page is in before `Player` exists, and once with one — and
@@ -14,43 +14,51 @@
  * not about content: a test that pinned the markup would fail on every honest
  * edit and be deleted within the month.
  *
- * Since step 24 it also lists the ids each render must carry. That is not a
- * duplicate of `verify_player_dom.py`: that tool reads `id="..."` out of the
- * source, so it goes on passing when a component that carries one stops being
- * *rendered* — and step 24 moved eight ids into components that did not exist
- * before, which is exactly the edit that loses one silently. Here they have to
- * come out of a render.
+ * **The page is the game**, so most of what used to be checked here is no
+ * longer on it by default: the breadcrumb menu is shut until it is pressed and
+ * the debug sidebar is closed until it is opened. `renderToStaticMarkup` cannot
+ * press anything, so both are rendered directly, inside the same store, and
+ * held to the ids the stylesheet and the harnesses reach them by.
  *
- * Since step 26 it also covers the five elements inside `#viewport` that used
- * to be appended there by `hud/` and `render/`. None of them carries an id, so
- * `verify_player_dom.py` is structurally unable to see them: this is the only
- * check that they are rendered, that they are rendered *inside* the viewport,
- * and that `hidden` on the two React now owns follows the toggle rather than
- * the layer.
+ * It also lists the ids each render must carry. That is not a duplicate of
+ * `verify_player_dom.py`: that tool reads `id="..."` out of the source, so it
+ * goes on passing when a component that carries one stops being *rendered*.
+ * Here they have to come out of a render.
  *
- * Since step 22 it also covers the error boundaries, and covers them with a
- * hole in the middle that is stated where it bites: `renderToStaticMarkup`
- * does not run a boundary at all, so the one assertion worth having — the page
- * survives while a panel is throwing — cannot be made from here. What is here
- * instead is the fallback driven through the two methods React itself calls,
- * and the nesting the boundaries must have, read from the source because a
- * healthy boundary renders no markup to read.
+ * It covers the elements inside `#viewport` that `hud/` and `render/` are
+ * handed. None of them carries an id, so `verify_player_dom.py` is
+ * structurally unable to see them: this is the only check that they are
+ * rendered, that they are rendered *inside* the viewport, and that `hidden`
+ * on the two React owns follows the projection rather than the layer.
+ *
+ * And it covers the error boundaries, with a hole in the middle that is stated
+ * where it bites: `renderToStaticMarkup` does not run a boundary at all, so
+ * the one assertion worth having — the page survives while a panel is
+ * throwing — cannot be made from here. What is here instead is the fallback
+ * driven through the two methods React itself calls, and the nesting the
+ * boundaries must have, read from the source because a healthy boundary
+ * renders no markup to read.
  *
  * Run with `npm run test:ui`.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
+import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { App } from "../src/ui/App";
 import { ErrorBoundary } from "../src/ui/ErrorBoundary";
 import { UiStore } from "../src/ui/store";
-import { Transport } from "../src/ui/panels/Transport";
+import { StoreContext } from "../src/ui/store_context";
+import { CrumbMenu } from "../src/ui/panels/Crumbs";
+import { DebugSidebar } from "../src/ui/panels/DebugSidebar";
+import { Feed } from "../src/ui/panels/Feed";
+import { PauseScreen, SoundButton } from "../src/ui/panels/Overlays";
+import { Tree } from "../src/ui/panels/Tree";
 import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
-import { StoreContext } from "../src/ui/store_context";
 import { shutterCover } from "../src/hud/hud";
 import { readPersisted, writePersisted } from "../src/ui/persist";
+import { readViewPrefs } from "../src/app/viewprefs";
 import type { UiProjection } from "../src/ui/projection";
 
 let failures = 0;
@@ -74,16 +82,15 @@ function projection(): UiProjection {
               noteTitle: "built" },
     bundleStale: false,
     paused: true,
+    started: false,
     // The game drew the crosshair: the fixture renders the chrome as it is in
     // play, and `Viewport` hangs the reticle off this.
     crosshair: true,
     toggles: TOGGLE_DEFAULTS,
-    transport: { playing: false, mode: "play", speed: 1, frozen: false,
-                 hasPath: true, camFrame: 10, camFrameLo: 0, camFrameHi: 100,
-                 camLabel: "cp_st2 · 10", canRewind: true,
-                 rewindLabel: "back ~0.5 s  ·  30 s of history in 60 slots" },
+    transport: { playing: false, mode: "play",
+                 camLabel: "cp_st2[0] slot 57  frame 10 / 100" },
     sound: { muted: false, volume: 70, label: "bgm", blocked: false,
-             text: "stage" },
+             text: "Sound on" },
     lightMode: "auto",
     fogMode: "auto",
     filterMode: "asset",
@@ -92,17 +99,8 @@ function projection(): UiProjection {
     wait: { sub: "0x3B wait_enemies_alive", lines: [{ text: "3 alive" }] },
     waitBoxed: true,
     actorPanel: { sub: "12 actors", groups: [] },
-    globals: { rows: [{ name: "g_frame", value: "10", address: "009C7108" }],
-               actors: [], liveActors: 0, thrown: [] },
-    rigs: { sub: "1/2 showing", rows: [
-      { name: "obj_432840", slot: 12, visible: true, frozen: false,
-        note: "", routes: 2, boxed: true },
-      { name: "obj_484ff0_props", slot: null, visible: false, frozen: true,
-        note: "held", routes: 1, boxed: false },
-    ] },
     tree: { blocks: [{ index: 0, kind: "next", targets: [1], stepCount: 2,
                        title: "block 0", steps: [] }] },
-    minimap: { entry: 0, nodes: [{ index: 0, kind: "next", next: [1] }] },
     current: { block: 0, step: 1, op: 0 },
     // Two rows, with `seq` deliberately not 0 and 1: `Player.onFeed` mints
     // from a counter that never resets, so by the time the window is full the
@@ -113,7 +111,6 @@ function projection(): UiProjection {
            { seq: 413, block: 0, step: 1, opIndex: 1, at: "0.1.1",
              name: "wait_frames", summary: "", note: "", cat: "wait",
              status: "ported", title: "" }],
-    inspector: "cam_play",
     hudRows: [["mode", "play"]],
     groups: {
       camera: [["slot", "57"], ["yaw", "180.0°  0x8000"]],
@@ -128,32 +125,45 @@ function projection(): UiProjection {
     branch: { sub: "two routes", options: [], countdown: "5s",
               paused: false },
     gameOver: { phase: 3, label: "GAME OVER" },
-    scopes: null,
-    scopeContext: { frame: 10, stageLoadedAt: 0 },
-    hasSaved: false,
   };
 }
 
-function render(p: UiProjection | null): string {
+function storeWith(p: UiProjection | null): UiStore {
   const store = new UiStore();
   if (p) store.publish(p);
-  return renderToStaticMarkup(createElement(App, { store, onHost: () => {} }));
+  return store;
+}
+
+function render(p: UiProjection | null): string {
+  return renderToStaticMarkup(createElement(App, { store: storeWith(p),
+                                                   onHost: () => {} }));
+}
+
+/** One component, inside a store, the way `App` would have placed it. */
+function renderIn(p: UiProjection | null, el: ReactElement): string {
+  return renderToStaticMarkup(
+    createElement(StoreContext, { value: storeWith(p) }, el));
 }
 
 /**
- * Everything between `#viewport` and the sidebar column, which is its subtree.
+ * Everything in `#viewport`, which is its subtree.
  *
- * `#stagearea` renders the tree, the resizer, the viewport and `<aside
- * id="right">` in that order, so the span between the last two is exactly what
- * `#viewport` contains. That is how the elements React took over from `hud/`
- * and `render/` in step 26 can be checked for *containment* and not merely for
+ * `#stagearea` renders the viewport and then `#overlay`, so the span between
+ * the two is exactly what `#viewport` contains. That is how the elements the
+ * layers are handed can be checked for *containment* and not merely for
  * presence: appending them to the wrong parent is the failure, and a
  * whole-document `includes` would pass either way.
  */
 function viewportOf(html: string): string {
   const a = html.indexOf('id="viewport"');
-  const b = html.indexOf('id="right"');
+  const b = html.indexOf('id="overlay"');
   return a >= 0 && b > a ? html.slice(a, b) : "";
+}
+
+/** Everything in `#overlay`: from its tag to the end of the stage area. */
+function overlayOf(html: string): string {
+  const a = html.indexOf('id="overlay"');
+  return a >= 0 ? html.slice(a) : "";
 }
 
 /** The same source-order test as `inOrder`, over substrings rather than ids. */
@@ -173,7 +183,7 @@ function tagOf(html: string, cls: string): string {
   return html.match(new RegExp(`<div class="${cls}"[^>]*>`))?.[0] ?? "";
 }
 
-/** `#stagearea`'s four columns land by source order, so the order is the test. */
+/** The nesting the stylesheet and the input layering need, as source order. */
 function inOrder(html: string, ids: string[]): string {
   let at = -1;
   for (const id of ids) {
@@ -185,112 +195,206 @@ function inOrder(html: string, ids: string[]): string {
   return "";
 }
 
-const GRID = ["topbar", "stagearea", "left", "left-resize", "viewport", "view",
-              "right", "transport"];
+/**
+ * The page's skeleton. `#viewport` before `#overlay`, because the overlay is
+ * painted over it and is where every control lives: a press on a control
+ * must never reach the viewport, which is the gun.
+ */
+const PAGE = ["shell", "stagearea", "viewport", "view", "overlay"];
 
-/** What the page carries before `Player` exists, ids the sheet styles included. */
-const COLD_IDS = ["topbar", "status", "stagearea", "left", "tree-filter",
-                  "tree", "left-resize", "viewport", "view", "loading",
-                  "loading-text", "right", "transport"];
+/** What the page carries before `Player` exists. */
+const COLD_IDS = ["shell", "stagearea", "viewport", "view", "loading",
+                  "loading-text", "overlay", "crumbs", "rotate-hint"];
+
+/** And with a projection, sidebar closed: the game, and what sits over it. */
+const WARM_IDS = ["shell", "stagearea", "viewport", "view", "overlay",
+                  "crumbs", "sound", "paused-overlay", "skipbar", "branchbar",
+                  "gameover", "gameover-restart", "gameover-first",
+                  "rotate-hint"];
 
 /**
- * And with a projection, at the default folds.
+ * The debug sidebar at its default tab and folds.
  *
- * `#feed` is in the list because its panel opens by default; `#minimap`,
- * `#inspector`, `#scopes` and `#globals` are not, because theirs do not, and a
- * panel that is folded renders no body at all -- which is the same fact
- * `store.demand` is counting.
+ * `#panel-scene`'s body -- `#view-settings` -- is not in the list, because its
+ * panel is shut by default, and a panel that is folded renders no body at
+ * all: the same fact `store.demand` is counting.
  */
-const WARM_IDS = ["topbar", "stage-picker", "modes", "view-settings",
-                  "status", "stagearea", "left", "tree-filter", "tree",
-                  "left-resize", "viewport", "view", "paused-overlay",
-                  "skipbar", "branchbar", "gameover", "gameover-restart",
-                  "gameover-first", "right", "hud", "panel-wait",
-                  "panel-actors", "panel-sound", "panel-route",
-                  "panel-feed", "feed",
-                  "inspector-panel", "scope-panel", "globals-panel",
-                  "transport", "volume", "bgm-label", "frame-label"];
+const SIDEBAR_IDS = ["status", "controls", "modes", "play-pause", "skip-go",
+                     "cam-label", "inspect", "panel-hud", "hud", "panel-wait",
+                     "panel-camera", "panel-scene", "panel-actors",
+                     "panel-props", "panel-collision", "panel-shooting",
+                     "panel-sound", "volume", "bgm-label"];
+
+/**
+ * What the old chrome had and the game-first page does not. A panel that came
+ * back by accident would be a slice built every frame for nothing.
+ */
+const GONE_IDS = ["topbar", "transport", "left", "right", "left-resize",
+                  "panel-route", "minimap", "inspector-panel", "inspector",
+                  "scope-panel", "scopes", "globals-panel", "globals",
+                  "panel-rigs", "frame-label"];
 
 const missing = (html: string, ids: string[]): string[] =>
   ids.filter((id) => !html.includes(`id="${id}"`));
 
-console.log("\nThe chrome renders before there is a projection:\n");
+console.log("\nThe page renders before there is a projection:\n");
 
 const cold = render(null);
-check("every element the grid places is there, in source order",
-      !inOrder(cold, GRID), inOrder(cold, GRID));
+check("the skeleton is there, in source order",
+      !inOrder(cold, PAGE), inOrder(cold, PAGE));
 check("and the loading overlay is up",
       cold.includes('id="loading"') && cold.includes("loading bundle"));
-check("and the panels that need a projection are not",
-      !cold.includes('id="panel-wait"') && !cold.includes('id="hud"'));
+check("and nothing that needs a projection is",
+      !cold.includes('id="paused-overlay"') && !cold.includes('id="sound"'));
 check("and every id the stylesheet hangs off this state is emitted",
       missing(cold, COLD_IDS).length === 0,
       `missing: ${missing(cold, COLD_IDS).join(", ")}`);
-// The whole of `app/install/` hangs off this one button, and it is the only
-// control in the bar drawn outside the `ready` guard. It has to be in both
-// renders: the export screen shipped reachable only from the failure path,
-// so on every machine that had a bundle none of it existed.
-check("and the way to the bundle screen, which does not wait for a bundle",
-      cold.includes('class="bundle-open"'),
+// The whole of `app/install/` hangs off the menu, and it is the one piece of
+// chrome drawn whether or not a bundle loaded. The export screen shipped
+// reachable only from the failure path once, so on every machine that had a
+// bundle none of it existed.
+check("and the menu's trail, which does not wait for a bundle",
+      cold.includes('class="crumb-trail"'),
+      "nothing renders `.crumb-trail`");
+const coldMenu = renderIn(null, createElement(CrumbMenu, {
+  debugOpen: false, onToggleDebug: () => {}, onClose: () => {} }));
+check("and the menu, opened with no projection, still offers the bundle screen",
+      coldMenu.includes('class="bundle-open"'),
       "nothing renders `.bundle-open`");
 
 console.log("\nAnd again with one:\n");
 
 const warm = render(projection());
-check("every element the grid places is there, in source order",
-      !inOrder(warm, GRID), inOrder(warm, GRID));
-check("the sidebar is inside #right", (() => {
-  const right = warm.indexOf('id="right"');
-  const hud = warm.indexOf('id="hud"');
-  const globals = warm.indexOf('id="globals-panel"');
-  return right >= 0 && hud > right && globals > hud;
-})(), "a panel rendered outside the column the stylesheet gives it");
+check("the skeleton is there, in source order",
+      !inOrder(warm, PAGE), inOrder(warm, PAGE));
 check("the loading overlay is gone", !warm.includes('id="loading"'));
-check("the paused overlay is up", warm.includes('id="paused-overlay"'));
+check("the start screen is up, and says Start before the first play",
+      warm.includes('id="paused-overlay"') && warm.includes("is-start")
+      && warm.includes("Start"));
 check("the viewport carries the classes both layers used to fight over",
       /id="viewport" class="[^"]*paused/.test(warm)
       || /class="[^"]*paused[^"]*"[^>]*id="viewport"/.test(warm),
       "the `paused` class is not on #viewport");
+check("every id the stylesheet hangs off is emitted",
+      missing(warm, WARM_IDS).length === 0,
+      `missing: ${missing(warm, WARM_IDS).join(", ")}`);
+check("the debug sidebar is closed by default: the page is the game",
+      !warm.includes('id="debug"') && !warm.includes('class="debug-open"'));
+check("nothing from the old chrome came back",
+      GONE_IDS.every((id) => !warm.includes(`id="${id}"`)),
+      GONE_IDS.filter((id) => warm.includes(`id="${id}"`)).join(", "));
+// Every control sits in `#overlay`, which is painted over the viewport and is
+// not inside it: `render/shooting.ts` hears presses on `#viewport` natively,
+// before React does, so a button inside it would fire a shot as well.
+check("every control is in #overlay and none is in #viewport",
+      !/<button/.test(viewportOf(warm))
+      && ["crumbs", "sound", "paused-overlay", "skipbar", "branchbar",
+          "gameover"].every((id) => overlayOf(warm).includes(`id="${id}"`)),
+      "a control inside the viewport is also a trigger pull");
+check("the sound button says what it is, for the harnesses and for a reader",
+      /id="sound"[^>]*aria-pressed="true"/.test(warm)
+      || /aria-pressed="true"[^>]*id="sound"/.test(warm));
+// The trail is the brand and nothing else: the stage is the game's own title
+// card's to say, and the menu marks which one is open.
+const trail = warm.slice(warm.indexOf('class="crumb-trail"'),
+                         warm.indexOf("</button>", warm.indexOf('class="crumb-trail"')));
+check("the breadcrumb says HOTD2 and not the stage",
+      trail.includes("HOTD2") && !trail.includes("Stage") && !trail.includes("Block"),
+      trail);
+// Filling the window is the default. The bars over the picture follow the
+// frame, so `#overlay` carries whether it is boxed.
+check("the frame fills the window by default, and #overlay knows",
+      /<div id="overlay">/.test(warm)
+      && /<div id="overlay" class="boxed">/.test(render({ ...projection(),
+                                                          pillarbox: true })));
+
+const paused = renderIn({ ...projection(), started: true },
+                        createElement(PauseScreen));
+check("once started, the same screen says PAUSED and Resume",
+      paused.includes("is-paused") && paused.includes("PAUSED")
+      && paused.includes("Resume"));
+const muted = renderIn({ ...projection(),
+                         sound: { ...projection().sound, muted: true } },
+                       createElement(SoundButton));
+check("and a muted game's speaker says so",
+      muted.includes('aria-pressed="false"'));
+
+console.log("\nThe menu:\n");
+
+const menu = renderIn(projection(), createElement(CrumbMenu, {
+  debugOpen: true, onToggleDebug: () => {}, onClose: () => {} }));
+check("every stage is a button, and the current one is marked",
+      (menu.match(/data-stage="/g) ?? []).length === 2
+      && /class="current"[^>]*>2</.test(menu),
+      "`[data-stage]` is the harnesses' hold on the stage picker");
+check("the entry picker is there when the stage has two entries",
+      menu.includes('id="entry-picker"')
+      && (menu.match(/data-entry="/g) ?? []).length === 2);
+check("rebuild, restart and the debug toggle are all there",
+      menu.includes('class="bundle-open"') && menu.includes("Restart stage")
+      && menu.includes('class="debug-toggle"'));
+const oneEntry = renderIn({ ...projection(), entries: [0] },
+                          createElement(CrumbMenu, {
+                            debugOpen: false, onToggleDebug: () => {},
+                            onClose: () => {} }));
+check("and a stage with one entry offers no choice of entry",
+      !oneEntry.includes('id="entry-picker"'));
+
+console.log("\nThe debug sidebar:\n");
+
+const side = renderIn(projection(), createElement(DebugSidebar,
+                                                  { onClose: () => {} }));
+check("every id the stylesheet and the harnesses hang off is emitted",
+      missing(side, SIDEBAR_IDS).length === 0,
+      `missing: ${missing(side, SIDEBAR_IDS).join(", ")}`);
 // The bug this replaces: React wrote `mode on`, the stylesheet only knew
 // `.mode.active`, and a `classList.toggle` loop in `app/` put `active` back
 // for about a frame.
 check("the active mode button carries the class the stylesheet knows",
-      warm.includes("mode active"),
+      side.includes("mode active"),
       "`.mode.active` is what style.css styles");
-check("the script filter is the panel's own control",
-      warm.includes('id="tree-filter"'));
-check("every id the stylesheet hangs off is emitted",
-      missing(warm, WARM_IDS).length === 0,
-      `missing: ${missing(warm, WARM_IDS).join(", ")}`);
-check("and the bundle button is still there once one has loaded",
-      warm.includes('class="bundle-open"'),
-      "nothing renders `.bundle-open`");
+check("there are two modes, and neither is Step",
+      (side.match(/class="mode/g) ?? []).length === 2 && !side.includes(">Step<"));
+check("the controls come before the tabs, so they stay on screen",
+      !inOrder(side, ["controls", "inspect"]), inOrder(side, ["controls", "inspect"]));
 // The fold is what decides whether a body exists, and the body existing is
 // what `store.demand` counts. A panel that rendered its children while shut
-// would claim its slice for ever, and `app/` would build the expensive one for
-// a panel nobody has open.
+// would claim its slice for ever, and `app/` would build it for a panel
+// nobody has open.
 check("a folded panel renders no body, which is what makes demand honest",
-      !warm.includes('id="globals"') && !warm.includes('id="scopes"')
-      && !warm.includes('id="minimap"'),
+      !side.includes('id="view-settings"'),
       "a shut panel rendered its children");
-check("and an open one does", warm.includes('id="feed"'));
+check("the player strip is a panel, open by default",
+      /<details id="panel-hud"[^>]*open/.test(side)
+      && /<div id="hud" class="kv"/.test(side));
+check("the Track switch is gone: the gameplay camera is always on",
+      !side.includes(">Track<") && !(("trackEnemies" as string) in TOGGLE_DEFAULTS));
+// The page is the game: nothing drawn over it that it did not ask for. The
+// rails and the spawn labels were on by default once.
+check("every debug overlay starts off",
+      TOGGLES.filter((t) => t.kind === "debug").every((t) => !t.on),
+      TOGGLES.filter((t) => t.kind === "debug" && t.on).map((t) => t.name).join(", "));
+check("...and so does every debug aid",
+      TOGGLES.filter((t) => t.kind === "aid").every((t) => !t.on));
+
+// The script and the feed are tabs, and a tab that is not showing renders
+// nothing -- so they are rendered here the way the tab would.
+const tree = renderIn(projection(), createElement(Tree));
+check("the script tab has its filter and its tree",
+      tree.includes('id="tree-filter"') && tree.includes('id="tree"'));
 
 // Step 28. The feed keyed on the array index over a `slice(-400)` window, so
 // past the cap every push shifted every index by one and React rewrote all
 // four hundred rows' text to add one at the bottom.
 //
-// **React does not render keys**, so the markup cannot show which one is used
-// and this cannot be asserted the way the ids above are. What the markup does
-// show is that both rows in the fixture reach the page -- the failure a wrong
-// key would eventually produce is rows with the wrong text in them, not rows
-// missing -- and the key itself is read from the source, the way the boundary
-// nesting below is, for the same reason: it is a fact about the source that
-// the output does not carry.
-const feedBody = warm.slice(warm.indexOf('id="feed"'),
-                            warm.indexOf('id="inspector-panel"'));
+// **React does not render keys**, so the markup cannot show which one is used.
+// What the markup does show is that both rows reach the page, and the key
+// itself is read from the source, for the same reason the boundary nesting
+// below is: it is a fact about the source that the output does not carry.
+const feed = renderIn(projection(), createElement(Feed));
 check("every feed row reaches the page",
-      (feedBody.match(/class="fe /g) ?? []).length === 2
-      && feedBody.includes("cam_play") && feedBody.includes("wait_frames"),
+      (feed.match(/class="fe /g) ?? []).length === 2
+      && feed.includes("cam_play") && feed.includes("wait_frames"),
       "a row in the projection did not render");
 const FEED = join(process.cwd(), "src", "ui", "panels", "Feed.tsx");
 let feedSrc = "";
@@ -300,37 +404,22 @@ check("and is keyed on its own seq, not on where it happens to sit",
       feedSrc.includes("key={e.seq}") && !/key=\{i\}/.test(feedSrc),
       "an index key over a capped window renames every row on every push");
 
-// The boundaries render no element of their own while the region under them
-// is healthy, which is the property that keeps them out of `#stagearea`'s
-// grid: the four columns land by source order, so a `<div>` wrapped round
-// `#left` or `#right` would move the column it was added to protect. The GRID
-// check above is what proves it, and these two say it about the two places a
-// wrapper would be easiest to add by accident.
+// A boundary renders no element of its own while the region under it is
+// healthy, and nothing may come between `#viewport` and the canvas: a wrapper
+// there would also be a boundary able to unmount it.
 check("nothing stands between #viewport and its canvas",
       /id="viewport"[^>]*>\s*<canvas id="view"/.test(warm),
       "a boundary that wraps the canvas in an element of its own would also "
       + "be a boundary that can unmount it");
-check("nothing stands between #right and the first panel in it",
-      /id="right"[^>]*>\s*<details id="panel-hud"/.test(warm));
-// The strip folds like every other panel. It is the tallest thing in the
-// column, and `panel-feed` below it has `flex: 1` -- so while the strip was a
-// bare div with no scroller and no fold, a long row could squeeze the feed to
-// zero height, summary included, and the panel simply was not on the page.
-check("the player strip is a panel, and it scrolls",
-      /<details id="panel-hud"[^>]*open/.test(warm)
-      && /<div id="hud" class="scroll"/.test(warm),
-      "an unscrollable strip pushes the panels below it off the column");
 
 console.log("\nEverything inside #viewport is React's:\n");
 
-// Step 26. `hud/` built `.hud-layer` and its three divs with
-// `document.createElement` and appended them here, and `render/` did the same
-// with `.crosshair`, so the element React renders held five children React had
-// never heard of -- and where they landed in the paint order was decided by
-// which of React's conditional overlays had mounted first. They are rendered
-// here now and handed to the layers through `UiHost`. None of them carries an
-// id, so `verify_player_dom.py` cannot see them and this is the only check
-// there is that they exist at all.
+// `hud/` built `.hud-layer` and its three divs with `document.createElement`
+// and appended them here once, and `render/` did the same with `.crosshair`,
+// so the element React renders held five children React had never heard of.
+// They are rendered here now and handed to the layers through `UiHost`. None
+// of them carries an id, so `verify_player_dom.py` cannot see them and this
+// is the only check there is that they exist at all.
 const HUD_NODES = ['class="hud-layer"', 'class="shutter shutter-top"',
                    'class="shutter shutter-bottom"',
                    'class="screen-message"'];
@@ -342,9 +431,7 @@ for (const [when, html] of [["before a projection", cold],
         HUD_NODES.every((n) => vp.includes(n)) && vp.includes('class="crosshair"'),
         "a node the layers are handed is outside the element they draw over");
   // The canvas stays first because `#view` is absolutely positioned and the
-  // rest of the viewport paints over it; the crosshair is last because it
-  // stands in for the pointer `#viewport.shooting { cursor: none }` removed,
-  // and a pointer under the branch bar reads as the mode having broken.
+  // rest of the viewport paints over it; the crosshair is last.
   check(`the canvas is first and the crosshair last, ${when}`,
         !inSourceOrder(vp, ['<canvas id="view"', 'class="hud-layer"',
                             'class="crosshair"']),
@@ -360,10 +447,7 @@ for (const [when, html] of [["before a projection", cold],
 
 // `hidden` on these two was `Hud.setEnabled` and `Shooting.setEnabled`, and on
 // both it was purely a function of a toggle already in the projection. So it
-// is rendered, and the layers stopped writing it: one writer, and it is the
-// one that renders the element. The caption is the exception and is
-// deliberately not asserted here -- whether there is a caption is a countdown
-// on the walker, so `hud/` still owns that one.
+// is rendered, and the layers stopped writing it.
 check("with no projection there are no toggles, so both are hidden",
       tagOf(cold, "hud-layer").includes("hidden")
       && tagOf(cold, "crosshair").includes("hidden"));
@@ -372,23 +456,20 @@ check("and with one, the hud layer follows its toggle and the crosshair is up",
       && !tagOf(warm, "hud-layer").includes("hidden")
       && !tagOf(warm, "crosshair").includes("hidden"),
       `hud-layer=${tagOf(warm, "hud-layer")} crosshair=${tagOf(warm, "crosshair")}`);
-// There is no Shoot toggle to follow any more, and the crosshair being up
-// whenever there is a projection is the whole of its rule now. It was off by
-// default, and off it took the live-enemy gates with it -- see the note at the
-// top of `render/shooting.ts`.
+// There is no Shoot toggle: shooting is what the game is. It was off by
+// default once, and off it took the live-enemy gates with it -- see the note
+// at the top of `render/shooting.ts`.
 check("...and no toggle named shoot survives anywhere in the table",
       !(("shoot" as string) in TOGGLE_DEFAULTS));
 
 console.log("\nThe store reaches the panels by context:\n");
 
-// Step 24 took the `store` prop off `Panel` and the `dispatch` prop off most
-// of the panels; both come from `StoreContext` now. The failure mode that
-// replaces a missing prop is a component that subscribes to a store nothing
-// publishes to and sits there permanently empty, with nothing anywhere saying
-// why -- so the context has no working default and this is what it does
-// instead.
+// The failure mode that replaces a missing prop is a component that
+// subscribes to a store nothing publishes to and sits there permanently
+// empty, with nothing anywhere saying why -- so the context has no working
+// default and this is what it does instead.
 let outside: unknown = null;
-try { renderToStaticMarkup(createElement(Transport)); }
+try { renderToStaticMarkup(createElement(SoundButton)); }
 catch (e) { outside = e; }
 check("a panel rendered outside <App> says so rather than rendering empty",
       outside instanceof Error && outside.message.includes("StoreContext"),
@@ -403,7 +484,9 @@ console.log("\nA region that throws:\n");
 const badHud = { ...projection(),
                  hudRows: [null as unknown as [string, string]] };
 let thrown: unknown = null;
-try { render(badHud); } catch (e) { thrown = e; }
+try {
+  renderIn(badHud, createElement(DebugSidebar, { onClose: () => {} }));
+} catch (e) { thrown = e; }
 check("a slice a panel cannot read does throw out of that panel",
       thrown !== null,
       "the rest of this section is only meaningful if this still throws");
@@ -412,16 +495,8 @@ check("a slice a panel cannot read does throw out of that panel",
 // `renderToStaticMarkup` does not invoke error boundaries: React only runs
 // `getDerivedStateFromError` in a client render, and a throw during server
 // rendering propagates to the caller — which is what the check above just
-// measured. So the assertion that would have caught a blank page — "#viewport,
-// #view, #topbar and #transport are all still in the output while one panel is
-// throwing" — cannot be written here at all. Writing it against a hand-built
-// fallback would assert this test's own imitation of React and nothing else.
-//
-// What it needs is a client render, which needs a DOM: jsdom or happy-dom plus
-// `act`, and a new devDependency this repo has consistently refused for less —
-// or the headless-Chromium harness `docs/PLAYER_ARCHITECTURE.md` has deferred,
-// which would see it in the real browser and is the better answer. Until one of
-// those exists, what is testable is below: the pieces React drives, driven
+// measured. What it needs is a client render, which needs a DOM; until one
+// exists, what is testable is below: the pieces React drives, driven
 // directly, and the shape of the tree they sit in.
 
 console.log("\nThe fallback, through the two methods React calls:\n");
@@ -433,9 +508,9 @@ function fallback(label: string, error: unknown): string {
   return renderToStaticMarkup(b.render());
 }
 
-const fb = fallback("The sidebar", new Error("rows is not iterable"));
+const fb = fallback("The debug sidebar", new Error("rows is not iterable"));
 check("it names the region, so you know which part died",
-      fb.includes("The sidebar"));
+      fb.includes("The debug sidebar"));
 check("and carries the message, so you know what the bad value was",
       fb.includes("rows is not iterable"));
 check("and offers Retry, which is the only way out of it",
@@ -448,17 +523,17 @@ check("and wears the class the stylesheet styles", fb.includes('class="errbox"')
 // compared it against null would read it back as healthy, render the children,
 // and catch it again -- for ever. The value is boxed for exactly this.
 check("a thrown null is still a failure, not a healthy region",
-      fallback("The sidebar", null).includes("errbox"),
+      fallback("The debug sidebar", null).includes("errbox"),
       "throw null read back as healthy");
 
 let reported: unknown[] = [];
 const boundary = new ErrorBoundary({
-  label: "The transport", children: null,
+  label: "The game overlay", children: null,
   onError: (...args) => { reported = args; },
 });
 boundary.componentDidCatch(new Error("nope"), { componentStack: "" });
 check("and componentDidCatch reports the label with the error",
-      reported[0] === "The transport"
+      reported[0] === "The game overlay"
       && (reported[1] as Error).message === "nope",
       "app/main.ts routes this to console.error and to the event feed, so "
       + "the region that died is named beside what the script was doing");
@@ -473,9 +548,6 @@ console.log("\nAnd the two elements no boundary may unmount:\n");
 // nesting is read from the source. The root backstop is the one boundary that
 // is allowed to contain them, because a page whose root has thrown is already
 // gone.
-// `npm run test:ui` runs with `web/` as the working directory, and the bundle
-// this file becomes lives in a temp dir, so `import.meta.url` cannot find the
-// source.
 const APP = join(process.cwd(), "src", "ui", "App.tsx");
 let src: string[] = [];
 try { src = readFileSync(APP, "utf8").split("\n"); }
@@ -489,21 +561,21 @@ for (const line of src.slice(0, canvasAt)) {
 check("only the root backstop encloses the canvas", canvasAt > 0 && depth === 1,
       `#view sits inside ${depth} boundaries; only the root may hold it`);
 check("every region of the page is inside one",
-      src.filter((l) => /^\s*<ErrorBoundary\b/.test(l)).length === 6,
-      "the root, the top bar, the script tree, the viewport overlays, the "
-      + "sidebar and the transport");
+      src.filter((l) => /^\s*<ErrorBoundary\b/.test(l)).length === 4,
+      "the root, the loading screen, the game overlay and the debug sidebar");
 
 // Every debug group must be rendered by exactly one panel.
 //
-// The names live in `ui/projection.ts` and the panels in `ui/panels/Sidebar.tsx`,
-// and nothing but this ties the two together: routing a toggle to a group that
-// no panel draws compiles, renders, and silently removes the control from the
-// page. That happened to `actors` -- four toggles and two readouts, `boxes`
-// among them, unreachable -- and no check in this repository could see it,
-// because every one of them was about markup that *was* rendered.
+// The names live in `ui/projection.ts` and the panels in
+// `ui/panels/DebugSidebar.tsx`, and nothing but this ties the two together:
+// routing a toggle to a group that no panel draws compiles, renders, and
+// silently removes the control from the page. That happened to `actors` --
+// four toggles and two readouts, `boxes` among them, unreachable -- and no
+// check in this repository could see it.
 console.log("\nEvery debug group has a panel:\n");
 {
-  const src = readFileSync(join(process.cwd(), "src", "ui", "panels", "Sidebar.tsx"), "utf8");
+  const src = readFileSync(join(process.cwd(), "src", "ui", "panels",
+                                "DebugSidebar.tsx"), "utf8");
   const declared = readFileSync(join(process.cwd(), "src", "ui", "projection.ts"), "utf8")
     .match(/export type DebugGroupName =([^;]*);/)?.[1] ?? "";
   const names = [...declared.matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
@@ -547,6 +619,41 @@ console.log("\nOne key per preference:\n");
   store.set("hod2.ui", JSON.stringify({ "panel-d": true }));
   check("the old single blob is still read as a fallback",
         readPersisted("panel-d") === true);
+
+  // The debug sidebar's open state is one of these keys, and it is how a
+  // harness opens the sidebar before the page has loaded -- see
+  // `tools/lib/player.mjs`. With it set, the page renders the sidebar.
+  store.set("hod2.ui.debug", "true");
+  const opened = render(projection());
+  check("with `hod2.ui.debug` set the page opens with the debug sidebar",
+        opened.includes('id="debug"') && opened.includes('class="debug-open"')
+        && !inOrder(opened, ["stagearea", "debug"]),
+        "the harnesses read the panels, and open the sidebar through this key");
+
+  // The 4:3 switch is in the Scene panel with the light, fog and filter --
+  // rendered once the panel's fold is open, which is the same key scheme.
+  store.set("hod2.ui.panel-scene", "true");
+  const scene = renderIn({ ...projection(), pillarbox: true },
+                         createElement(DebugSidebar, { onClose: () => {} }));
+  check("the Scene panel has the 4:3 switch, and it follows the projection",
+        /<input type="checkbox" checked=""\/>\s*4:3 frame/.test(scene),
+        scene.slice(scene.indexOf("view-settings"), scene.indexOf("view-settings") + 400));
+
+  // An old save held every overlay's default as if chosen: every setting was
+  // written whenever one moved. Read back as a choice, `rails: true` would put
+  // the camera line straight back over the game. So a save from before
+  // version 2 keeps its game switches and forgets its overlay ones.
+  (globalThis as unknown as { window: unknown }).window = globalThis;
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ toggles: { rails: true, spawns: true, sky: false } }));
+  const old = readViewPrefs().toggles;
+  check("an old save's overlays are forgotten and its game switches kept",
+        !("rails" in old) && !("spawns" in old) && old.sky === false,
+        JSON.stringify(old));
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 2, toggles: { rails: true } }));
+  check("...and a new save's overlays are a choice, and kept",
+        readViewPrefs().toggles.rails === true);
 
   // A browser set to block site data throws on the accessor. A layout
   // preference is not worth a blank page.

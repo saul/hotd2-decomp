@@ -67,8 +67,8 @@ try {
   // starting playback. Blur first.
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.keyboard.press("Space");
-  const box = await page.locator("#viewport").boundingBox();
-  if (!box) throw new Error("#viewport has no box");
+  const box = await page.locator("#view").boundingBox();
+  if (!box) throw new Error("#view has no box");
 
   const advance = (n) =>
     page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);

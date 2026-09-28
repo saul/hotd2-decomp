@@ -29,13 +29,13 @@ import type { Dispatch, UiCommand } from "./commands";
 /**
  * The slices that are expensive enough to be worth not building.
  *
- * A closed set, because each one is a real cost with a name: `globals` walks
- * every global and every actor and formats them all, `actors` groups the pool
- * by class, `wait` resolves what the script is blocked on, `rigs` walks every
- * instance in the stage — 335 of them in stage 2. Everything else in
- * the projection is a handful of fields and is always built.
+ * A closed set, because each one is a real cost with a name: `actors` groups
+ * the pool by class and `wait` resolves what the script is blocked on.
+ * Everything else in the projection is a handful of fields and is always
+ * built. Three more — the globals, the rigs and the scope tree — went with
+ * the panels that showed them.
  */
-export type UiSlice = "wait" | "actors" | "globals" | "rigs" | "scopes";
+export type UiSlice = "wait" | "actors";
 
 export class UiStore {
   private current: UiProjection | null = null;

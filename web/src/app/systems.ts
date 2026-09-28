@@ -206,10 +206,10 @@ export class GameSystem implements System {
     //
     // This branch used to drain `g_shot_requests` anyway, on the argument that
     // a trigger pull is input rather than elapsed time. The argument does not
-    // survive the case it was made for: **step mode never reaches this
-    // branch.** Stepping stops the *script* and runs the port at full rate, so
-    // its ticks carry time and take the path below — the debug capability is
-    // the live path, not this one. What this branch actually served was
+    // survive the case it was made for: **step mode never reached this
+    // branch.** Stepping stopped the *script* and ran the port at full rate, so
+    // its ticks carried time and took the path below. (The mode has since
+    // gone; the argument stands without it.) What this branch actually served was
     // paused, free roam and `?freeze=1`, where the shot landed a hit, killed
     // the actor, scored it, and hung its muzzle flash and its blood on screen
     // for as long as the transport stayed stopped, because nothing was
@@ -418,8 +418,8 @@ export function drawCamera(rig: CameraRig, ctx: RenderContext): void {
 
 /**
  * `[port-only]` -- put the camera block where the camera words say, then draw:
- * for a seek, the frame scrubber, a reset and a stage opening at an address,
- * the four places the player moves the script without running the frames that
+ * for a seek and a stage opening at an address, the two places the player
+ * moves the script without running the frames that
  * would have written the block. `CameraReseatFromFrame` is the game's; this
  * is the composition. Never after a snapshot load, whose `G` already holds
  * the block and its view.

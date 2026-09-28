@@ -1359,7 +1359,7 @@ export class Walker {
 
   /**
    * `[port-only]` -- put the camera at `frame` of the shot it is on, for a
-   * seek, the scrubber or a restored URL: the playing shot's cursor, or the
+   * seek or a restored URL: the playing shot's cursor, or the
    * stashed rail's, and the published frame. The block is reseated from the
    * words by `CameraReseatFromFrame`, which the caller runs.
    */

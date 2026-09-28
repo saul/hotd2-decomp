@@ -54,7 +54,7 @@ export function useSlice<T>(select: (p: UiProjection | null) => T): T {
  * The page renders before `Player` exists, because `Player` is built from the
  * canvas React hands over in `onHost`. So "is there a projection" is a real
  * state of the page and not a null check to be tidied away: it is what decides
- * whether the sidebar, the transport and the top bar's controls are on the page
+ * whether the overlay's controls and the debug sidebar's panels are on the page
  * at all. It flips once per session and never back, so the root re-renders
  * once.
  *

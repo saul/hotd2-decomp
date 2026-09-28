@@ -457,9 +457,21 @@ export class Bgm {
   }
 
   /**
+   * A press has happened: if audio is on and held, let it go.
+   *
+   * Called from `app/` on any press on the page -- a shot, a key, a menu
+   * item -- because the browser counts all of them, and a page reloaded mid-
+   * game should come back to sound on the first thing the player does rather
+   * than on a press of the speaker they have no reason to make.
+   */
+  unblock(): void {
+    if (!this._muted) this.resume();
+  }
+
+  /**
    * Browsers refuse audio until the page has been interacted with. That is a
-   * normal outcome, not an error: the state records it and the transport's
-   * sound button doubles as the gesture that lifts it.
+   * normal outcome, not an error: the state records it and the sound button
+   * doubles as the gesture that lifts it.
    */
   private resume(): void {
     const ctx = this.ctx;

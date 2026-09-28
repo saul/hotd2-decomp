@@ -69,6 +69,7 @@ import { G, HIT_SLOT_NONE } from "../globals";
 import { ActorAdvanceMotion } from "../motion";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
+  type ReplaySpawnRecord,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { MotionPlayFrame, MotionPlayLength } from "../tables";
@@ -162,6 +163,16 @@ export const CLASS21_DROP_IN_FRAMES = 50;
 /** The camera path and frame that abandon it, and the one that despawns it. */
 export const CLASS21_ABANDON_PATH = 0x39;
 export const CLASS21_ABANDON_FRAME = 0x121;
+/**
+ * `CMP dword ptr [0x009A6110], 0x181` at `0x00451D49`: the frame of path
+ * `0x39` `RescueTargetAbandonedState` despawns on. An equality there.
+ */
+export const CLASS21_ABANDONED_DESPAWN_FRAME = 0x181;
+/**
+ * The `g_script_branch_var` the rescue writes (`0x00451AE9`), and so the slot
+ * of block 0's route `{11, 1}` that only a rescue can send the stage down.
+ */
+export const CLASS21_RESCUE_ARM = 1;
 
 /** What a part hit and the rescue pay. Part 2 is the head. */
 export const CLASS21_HEAD_PART = 2;
@@ -463,8 +474,77 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
   if (G.g_active_cam_path === CLASS21_ABANDON_PATH
       && G.g_cam_path_frame > CLASS21_ABANDON_FRAME) {
     RescueTargetRetire(obj);
+    // **And both slots**, which this arm used to keep. `0x00451C5B`..
+    // `0x00451C7F`, `[proved]`:
+    //
+    // ```
+    // 00451c5b  MOV AL, byte ptr [ESI + 0x120] / OR EBX, -1 / CMP AL, BL
+    // 00451c66  JZ  / PUSH ESI / CALL 0x004092b0   ; ReleaseCameraEnemySlot
+    // 00451c71  CMP dword ptr [ESI + 0x3c], EBX
+    // 00451c74  JZ  / PUSH ESI / CALL 0x004092d0   ; ActorFreeHitSlot
+    // 00451c7f  MOV dword ptr [ESI], 0x451d20      ; RescueTargetAbandonedState
+    // ```
+    //
+    // `ActorFreeHitSlot` (`FUN_004092D0`) is `g_hit_slots[obj+0x3C] = 0;
+    // obj+0x3C = -1` and no flag test -- the same two stores the rescue
+    // makes inline at `0x00451BCB`, written the same way here.
+    if (obj.cameraSlot >= 0) ReleaseCameraEnemySlot(obj);
+    if (obj.hitSlot !== HIT_SLOT_NONE) {
+      G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+      obj.hitSlot = HIT_SLOT_NONE;
+    }
     t.state = RescueTargetState.Abandoned;
   }
+}
+
+/**
+ * `[port-only]` -- a replay's question, `ClassHandler.outlivedByReplay`:
+ * has the replay gone past one of this target's ways out, so that at the
+ * landing address the engine's object is gone and must not be rebuilt?
+ *
+ * A seek rebuilds every spawn still listed at its `Init`, and this one's
+ * `Init` counts it into both enemy counters and starts the ride-in. Its ways
+ * out all come **before** any room gate on either road, so no gate a replay
+ * steps over could say it was gone, and a reload anywhere past them rebuilt
+ * it counted: stage 2 block 11 step 2's civilian `0x6830` then sat sobbing in
+ * front of two dead captors, because her rescue waits on a camera cue that
+ * only plays after `wait_enemies_alive 0`, and the rebuilt target held that
+ * gate in `RescueTargetRideInState` -- which hands over only at frame
+ * `>= 0xBE`, and that step's shot never gets past 30.
+ *
+ * The three the replay can see, each read in the exe `[proved]`:
+ *
+ * * **`g_script_flags[0]`.** `RescueTargetHeldState` (`0x00451980`),
+ *   `RescueTargetFreedState` (`0x00451D80`), the sink (`0x00451DF0`) and
+ *   `RescueTargetAbandonedState` (`0x00451D20`) each open
+ *   `MOV AL, [0x009C7200]; CMP AL, 1` and despawn -- the held one giving its
+ *   counters back first. The ride-in does not test it, and does not need to:
+ *   stage 2 raises flag 0 only at 3/3/10 and 11/2/27, a road past the
+ *   ride-in's hand-over at block 0's `cam_play 10..190` either way.
+ * * **Camera path `0x39` at frame `0x181`.** The held state is abandoned at
+ *   `>= 0x122` on that path, counters back, and the abandoned state despawns
+ *   at `== 0x181`. A replay jumps frames where play steps them, so "at or
+ *   past" is the frame play would have gone through -- the rule the civilian
+ *   removal cue takes in `Walker.civilianCuesSeen`. The only shots on `0x39`
+ *   in the shipped data are block 0's `0..90` and `91..289` and block 11's
+ *   `290..405`, so the frame is reached on the one shot that also passes
+ *   `0x122` on the way. A landing between the two is left to the target:
+ *   rebuilt there it hands over and is abandoned on its own first frames.
+ * * **Route slot 1 out of its own block.** `g_script_branch_var = 1` at
+ *   `0x00451AE9` is the rescue, and block 0 of stage 2 has no other writer of
+ *   a 1 (`L45`): a replay that took that slot is a replay past the rescue,
+ *   after which the freed body plays its clip out, sinks for `0x78` frames and
+ *   despawns. What the replay cannot tell is how far into those frames it
+ *   has landed, so a landing inside them loses the sinking body early -- the
+ *   one window this answers early rather than exactly.
+ */
+export function RescueTargetOutlivedByReplay(rec: ReplaySpawnRecord): boolean {
+  if ((G.g_script_flags[CLASS21_CLEAR_FLAG] ?? 0) === 1) return true;
+  if (G.g_active_cam_path === CLASS21_ABANDON_PATH
+      && G.g_cam_path_frame >= CLASS21_ABANDONED_DESPAWN_FRAME) {
+    return true;
+  }
+  return rec.armOut === CLASS21_RESCUE_ARM;
 }
 
 /**
@@ -722,7 +802,7 @@ function RescueTargetAbandonedState(obj: Actor, f: ClassFrame): void {
     return;
   }
   if (G.g_active_cam_path === CLASS21_ABANDON_PATH
-      && G.g_cam_path_frame === 0x181) {
+      && G.g_cam_path_frame === CLASS21_ABANDONED_DESPAWN_FRAME) {
     ActorDespawn(obj);
     return;
   }
@@ -777,6 +857,7 @@ export const RescueTargetHandler: ClassHandler = {
   // The class reads `obj+0x34` bit 3 itself and charges one hit point a part;
   // `ResolveHit` would look up a damage row it has no entry in.
   ownsShotResult: true,
+  outlivedByReplay: RescueTargetOutlivedByReplay,
   debug: RescueTargetDebug,
 };
 

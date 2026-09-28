@@ -176,13 +176,13 @@ function build(stage: number, script: ScriptJson): Rig {
 /**
  * One frame, in the order `Player.frame` runs it.
  *
- * A branch is taken the moment it appears, always down the first route. The
- * player lets an arcade countdown pick; the point here is only that the choice
- * is a function of the script and not of the wall clock — and that the drive
- * never *stops* on one, because `Walker.loadState` deliberately drops the
- * branch prompt and a snapshot taken while parked at one therefore cannot
- * round-trip. That divergence is declared where it is made; this harness
- * stays out of its way rather than asserting against it.
+ * A branch goes on the frame its steps run out, as the engine's does -- the
+ * walker only holds at one with the sidebar's debug aid on, and this rig
+ * builds its walker without it. The line below is for a walker that has it:
+ * a held branch is taken the moment it appears, down the first route, so
+ * the drive never *stops* on one, because `Walker.loadState` deliberately
+ * drops the branch prompt and a snapshot taken while parked at one therefore
+ * cannot round-trip.
  */
 function step(r: Rig): void {
   r.walker.tick(TICK);

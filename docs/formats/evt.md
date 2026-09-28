@@ -559,6 +559,31 @@ States 0 and 5 both draw a closed shutter and set the gate to 1 and 0
 respectively, which is the whole reason the gate is a separate global: a
 letterboxed moment can still be playable.
 
+**The opcode is one store.** `EvtOpSetHudShutterState1F` (`FUN_0045F380`)
+writes its operand into `g_bHudShutterState` and returns **[proved]**. The
+table above is `HudDrawShutterState` (`FUN_00413970`), a task of its own that
+`HudShutterTaskCreate` (`FUN_00413950`) allocates from the scene's task-list
+builder at `0x00460733` -- after both player tasks and before every actor, so
+in one frame the script writes the byte, the players read it and the gate,
+and only then does the routine seed, slide and write the gate **[proved]**
+(`ActorAlloc` appends, `TaskRunTree` walks in order). Frame by frame, read off
+the disassembly and the jump table at `0x00413C80`:
+
+* A state that differs from `g_bHudShutterPrev` seeds the task's `+0x50`
+  counter: `0x28` into 3, 0 into 1. Nothing else is seeded.
+* 1 steps the counter **before** drawing, so an open draws 1..40 and hands over
+  to 2 on the 41st frame, drawing nothing on it; 3 draws 39..0 and on the 41st
+  draws shut, drops the gate and leaves 4.
+* 7 puts `g_bHudShutterPrev` back and draws nothing on its own frame.
+* The tail writes `g_bHudShutterPrev = state` on every path but 8's.
+
+`ResetSceneOnEnter` sets **both** bytes to 5 (`0x0045EE58`..`0x0045EE64`), and
+the script task's first handler, `EvtTaskInstallInterpreter`
+(`FUN_0045ECB0`), only installs the interpreter -- so a scene's first frame
+runs no script and draws the bars shut. Every stage's block 0 step 1 then
+writes a 5 of its own before its first wait, and opens the bars later (stage
+6's block 0 step 2 with a 6, the others with a 1).
+
 `hod2lib.script` attaches these readings to the instruction as `means` and
 `firing_gate`, so the player shows "5 — close, and disable firing" rather than
 "5".

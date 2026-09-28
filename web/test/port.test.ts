@@ -306,7 +306,7 @@ import { ActorPlayHitReaction, EffectCode, HitResultCode, ResolveHit }
   from "../src/game/combat/resolve_hit";
 import { ActorSetMotionBlended } from "../src/game/class30/motion_cue";
 import type { BreakablesJson, ScriptJson } from "../src/bundle";
-import { Walker } from "../src/script/walker";
+import { Walker, type BranchChoice } from "../src/script/walker";
 import {
   ActorDrawsSceneLit, BuildEntitySpotlightArray, EntityLightLive, GUN_LIGHT_CONE,
   GUN_LIGHT_FIRST, RenderLightType, SceneLightArrayUpdate, SetPlayerAimFromPointer,
@@ -318,7 +318,11 @@ import {
   PlaceFlickerLightProp48, PropUpdateType48FlickerLight, SFX_FLICKER_BREAK,
 } from "../src/game/class41/type48";
 import { ZombieAux } from "../src/game/actor";
-import { SHUTTER_FRAMES, Shutter } from "../src/script/state/shutter";
+import { Shutter } from "../src/script/state/shutter";
+import {
+  HudDrawShutterState, SHUTTER_BLACKOUT_SCALE, SHUTTER_CLOSED_Y,
+  SHUTTER_FRAMES, SHUTTER_SLIDE_STEP, ShutterState,
+} from "../src/game/hud_shutter";
 import { seekTo } from "../src/script/seek";
 import { Boss2Handler, Class14Phase, Class14State } from "../src/game/class14";
 import { Class14AdvanceMotionAndPublishPoints }
@@ -733,18 +737,31 @@ function spawnZombieWithEvents(at: number, charType: number, name: string,
   return a;
 }
 
+/**
+ * A scene whose script has opened the shutter: the firing gate up and the
+ * letterbox settled open.
+ *
+ * `g_nFiringGate` — `0x009C8E00`. `ResetSceneOnEnter` leaves it **down**, with
+ * the shutter shut in state 5, and the stage script opens it with
+ * `hud_shutter_state` 1 or 6; there is no script in this file, so this stands
+ * in for one. Without it every shot here would be dropped by
+ * `ProcessShotRequests`, which is the behaviour the firing-gate section below
+ * exists to prove. **Both words**, because `HudDrawShutterState` runs in every
+ * `GameUpdate`: a gate raised by hand over a state-5 shutter is put back down
+ * on the first frame, as the engine's would be.
+ */
+function openShutter(): void {
+  G.g_nFiringGate = 1;
+  G.g_bHudShutterState = G.g_bHudShutterPrev = ShutterState.Open;
+}
+
 function scene(n: number, rng: Rng): Events {
   ResetGameGlobals();
   SetGameTables(CHARS);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   G.g_scene_state_major = SCENE_MAJOR_PLAYING;
   EnterPlay();
-  // `g_nFiringGate` — `0x009C8E00`. `ResetSceneOnEnter` leaves it **down** and
-  // the stage script raises it with `hud_shutter_state` 1 or 6; there is no
-  // script in this file, so this line stands in for one. Without it every shot
-  // here would be dropped by `ProcessShotRequests`, which is the behaviour the
-  // firing-gate section below exists to prove.
-  G.g_nFiringGate = 1;
+  openShutter();
   // The camera driver a shot installs. There is no script in this file, so
   // this line stands in for the `finish_sequence` that would have run: with no
   // driver installed `CameraRunQueuedAction` does nothing at all, which is the
@@ -7265,7 +7282,7 @@ console.log("\na downed thrower, shot on the ground:");
   // play has no trigger. This is a test of the thrower: the player is given
   // the engine's own "cannot be hurt" byte, `g_player_no_damage`.
   G.g_player_no_damage[0] = 1;
-  G.g_nFiringGate = 1;
+  openShutter();
   G.g_camera_yaw_bams = 0;
 
   const AT = 0x8094;
@@ -13257,7 +13274,7 @@ console.log("class 0x30 state 12, with no clip to wait on:");
   SetGameTables(CHARS_NO_FALL);
   G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
   EnterPlay();
-  G.g_nFiringGate = 1;
+  openShutter();
   const events = new Events();
   const z = spawnZombie(0x3520, 1, "axe man, no fall clip");
   z.visible = true;
@@ -14900,6 +14917,11 @@ console.log("\nthe firing gate:");
   ResetSceneOnEnter();
   check("a scene starts with the gate down, as `ResetSceneOnEnter` leaves it",
         G.g_nFiringGate === 0, `${G.g_nFiringGate}`);
+  check("...and the shutter shut, 5 in both bytes (`0x0045EE5F`, "
+        + "`0x0045EE64`)",
+        G.g_bHudShutterState === ShutterState.CloseHoldFire
+        && G.g_bHudShutterPrev === ShutterState.CloseHoldFire,
+        `${G.g_bHudShutterState} ${G.g_bHudShutterPrev}`);
 
   // -- a trigger pull under a closed shutter --------------------------------
   const scoreBefore = G.g_player_score[0];
@@ -14923,9 +14945,25 @@ console.log("\nthe firing gate:");
         !G.g_shot_flash_ring.some((f) => f.live)
         && !G.g_shot_tracer_ring.some((t) => t.live));
 
-  // -- and it does not fire late once the gate comes up ---------------------
+  // -- the frame the script opens it -----------------------------------------
+  // `EvtOpSetHudShutterState1F` stores the byte and nothing else. The gate is
+  // `HudDrawShutterState`'s, and that task runs **after** both player tasks
+  // (`0x00460733`, after `PlayerTasksCreate`) -- so a pull on the frame the
+  // script says 6 still meets a dead trigger, and the gate is up from the
+  // next one. The port's opcode used to raise it itself, a frame early.
   shutter.set(6);        // `hud_shutter_state 6` -- open at once, gate on
-  check("state 6 raises the gate", G.g_nFiringGate === 1);
+  check("evt 0x1F stores the state and leaves the gate alone",
+        G.g_bHudShutterState === ShutterState.OpenFiring
+        && G.g_nFiringGate === 0,
+        `state ${G.g_bHudShutterState} gate ${G.g_nFiringGate}`);
+  QueueShotRequest(0, RAY);
+  GameUpdate(EYE, 1 / 60, host, rng, events);
+  check("a pull on the frame of the 6 is dead: the players run before the "
+        + "shutter task", resolved.length === 0 && G.g_nPlayerFired[0] === 0,
+        `${resolved.join(",")} fired ${G.g_nPlayerFired[0]}`);
+  check("...and that frame's shutter task raised the gate and left 2",
+        G.g_nFiringGate === 1 && G.g_bHudShutterState === ShutterState.Open,
+        `gate ${G.g_nFiringGate} state ${G.g_bHudShutterState}`);
   GameUpdate(EYE, 1 / 60, host, rng, events);
   check("the blocked pull does not fire late", resolved.length === 0,
         resolved.join(","));
@@ -14944,32 +14982,46 @@ console.log("\nthe firing gate:");
 
   // -- the polarity, state by state, from `HudDrawShutterState` -------------
   // The five states that write the word, and only those five. 2, 4, 7 and 8
-  // leave it alone, which is why they are not in `SHUTTER_GATE`.
-  shutter.set(5);
-  check("state 5 drops the gate at once -- a closed shutter, firing off",
+  // leave it alone, which is why they are not in `SHUTTER_GATE`. Each is the
+  // opcode's store and then one frame of the task, which is where the write
+  // is.
+  const frame = (state: number) => { shutter.set(state); HudDrawShutterState(); };
+  frame(5);
+  check("state 5 drops the gate on its frame -- a closed shutter, firing off",
         G.g_nFiringGate === 0);
-  shutter.set(0);
+  frame(0);
   check("state 0 draws the same closed bars and RAISES it",
         G.g_nFiringGate === 1);
-  shutter.set(2);
+  frame(2);
   check("state 2 leaves it alone", G.g_nFiringGate === 1);
-  shutter.set(5);
-  shutter.set(1);
+  frame(5);
+  frame(1);
   check("state 1 raises it on the way open", G.g_nFiringGate === 1);
 
   // -- state 3 drops it only when the close finishes ------------------------
-  shutter.set(3);
+  // Seeded to 0x28 on the frame the state changes, stepped before it is
+  // drawn: frames 1..40 draw the counter 39..0, and the 41st -- the one that
+  // finds it already at 0 -- draws them shut, drops the gate and leaves 4.
+  for (let i = 0; i < 41; i++) HudDrawShutterState();   // the 1 opens fully
+  frame(3);
   check("a state-3 close keeps the gate up while it is still sliding",
-        G.g_nFiringGate === 1);
+        G.g_nFiringGate === 1 && G.g_hud_shutter_counter === SHUTTER_FRAMES - 1,
+        `gate ${G.g_nFiringGate} counter ${G.g_hud_shutter_counter}`);
   const before = G.g_nPlayerFired[0];
   QueueShotRequest(0, RAY);
   GameUpdate(EYE, 1 / 60, host, rng, events);
   check("...so a shot in the middle of a close still fires",
         G.g_nPlayerFired[0] === before + 1,
         `${before} -> ${G.g_nPlayerFired[0]}`);
-  shutter.step(SHUTTER_FRAMES);
-  check("...and the gate drops the frame the bars meet",
-        G.g_nFiringGate === 0 && shutter.state === 4,
+  for (let i = 2; i < SHUTTER_FRAMES; i++) HudDrawShutterState();
+  check("...the bars meet on the 40th frame with the gate still up",
+        G.g_nFiringGate === 1 && shutter.state === ShutterState.Closing
+        && G.g_hud_shutter_counter === 0,
+        `gate ${G.g_nFiringGate}, state ${shutter.state}, `
+        + `counter ${G.g_hud_shutter_counter}`);
+  HudDrawShutterState();
+  check("...and the 41st drops it and leaves 4",
+        G.g_nFiringGate === 0 && shutter.state === ShutterState.Closed,
         `gate ${G.g_nFiringGate}, state ${shutter.state}`);
   const after = G.g_nPlayerFired[0];
   QueueShotRequest(0, RAY);
@@ -16124,19 +16176,16 @@ console.log("\nclass 0x19: the stage-4 boss, Strength, and both of its flags:");
   {
     ResetGameGlobals();
     EnterPlay();
-    const sh = new Shutter();
-    sh.reset();
-    sh.set(5);
-    G.g_nFiringGate = 0;
+    HudDrawShutterState();             // the scene's first frame: 5, then 4
     G.g_bHudShutterState = 1;          // as `BossIntroBannerUpdate` writes it
-    sh.step(1);
+    HudDrawShutterState();
     check("a shutter state written from game/ seeds the slide and raises the "
           + "firing gate",
-          sh.counter === 1 && G.g_nFiringGate === 1,
-          `counter ${sh.counter} gate ${G.g_nFiringGate}`);
-    sh.step(SHUTTER_FRAMES);
+          G.g_hud_shutter_counter === 1 && G.g_nFiringGate === 1,
+          `counter ${G.g_hud_shutter_counter} gate ${G.g_nFiringGate}`);
+    for (let i = 0; i < SHUTTER_FRAMES; i++) HudDrawShutterState();
     check("...and the slide still finishes into state 2",
-          sh.state === 2, `state ${sh.state}`);
+          G.g_bHudShutterState === 2, `state ${G.g_bHudShutterState}`);
   }
   SetBoss4Tables(undefined, undefined);
 }
@@ -19704,7 +19753,7 @@ console.log("\nznjoe's creature:");
     SetGameTables(joeChars);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     EnterPlay();
-    G.g_nFiringGate = 1;
+    openShutter();
     const joe = spawnZombie(0x0a68, JOE, "znjoe", {}, rng);
     joe.visible = true;
     joe.attackState = 1;
@@ -21988,21 +22037,270 @@ console.log("\nthe shutter's one-frame states (HudDrawShutterState's tails):");
   const sh = new Shutter();
   sh.reset();
   sh.set(6);
-  sh.step(1);
+  HudDrawShutterState();
   check("a 6 is a 2 with the gate up one frame later",
         sh.state === 2 && G.g_nFiringGate === 1, `${sh.state}`);
   sh.set(0);
-  sh.step(1);
+  HudDrawShutterState();
   check("a 0 is a 4 with the gate up", sh.state === 4
         && G.g_nFiringGate === 1, `${sh.state} ${G.g_nFiringGate}`);
   sh.set(5);
-  sh.step(1);
+  HudDrawShutterState();
   check("a 5 is a 4 with the gate down", sh.state === 4
         && G.g_nFiringGate === 0, `${sh.state} ${G.g_nFiringGate}`);
   sh.set(7);
-  check("...and a 7 after them restores the 4 they left, not the 5",
+  check("...a 7 is only a store until the task runs", sh.state === 7,
+        `${sh.state}`);
+  HudDrawShutterState();
+  check("...and then restores the 4 they left, not the 5",
         sh.state === 4, `${sh.state}`);
   sh.reset();
+}
+
+/**
+ * `HudDrawShutterState` (`FUN_00413970`) frame by frame, from the reset the
+ * page runs.
+ *
+ * `ResetSceneOnEnter` stores 5 in the state *and* in `g_bHudShutterPrev`
+ * (`0x0045EE58`..`0x0045EE64`), and `HudShutterTaskCreate` zeroes the counter.
+ * The port used to reset the state to 2 -- nothing drawn -- which is the
+ * declared divergence this section removed; every assertion about the first
+ * frame fails on it. The rest pins the slide to the engine's own frame: the
+ * counter is stepped **before** it is drawn, so an open draws 1..40 and a
+ * close 39..0, and each hands over on the 41st frame. The port's machine used
+ * to finish both on the 40th and draw the first frame a counter behind.
+ */
+console.log("\nthe shutter frame by frame (HudDrawShutterState, from the reset):");
+{
+  const bars = () => G.g_hud_shutter_bars.map((b) => `${b.y.toFixed(4)}x${b.sy}`)
+    .join(" ");
+  const pair = (y: number) => `${y.toFixed(4)}x1 ${(-y).toFixed(4)}x1`;
+  const SHUT = pair(SHUTTER_CLOSED_Y);
+
+  ResetGameGlobals();
+  check("a scene load leaves the shutter at 5 in both bytes, the counter 0 "
+        + "and nothing drawn",
+        G.g_bHudShutterState === ShutterState.CloseHoldFire
+        && G.g_bHudShutterPrev === ShutterState.CloseHoldFire
+        && G.g_hud_shutter_counter === 0 && G.g_hud_shutter_bars.length === 0
+        && G.g_nFiringGate === 0,
+        `state ${G.g_bHudShutterState} prev ${G.g_bHudShutterPrev} `
+        + `counter ${G.g_hud_shutter_counter}`);
+  HudDrawShutterState();
+  check("its first frame draws both bars shut, at y = +-0.35",
+        bars() === SHUT, bars());
+  check("...and leaves 4 with the gate down: nothing was seeded, 5 == prev",
+        G.g_bHudShutterState === ShutterState.Closed
+        && G.g_bHudShutterPrev === ShutterState.Closed
+        && G.g_nFiringGate === 0 && G.g_hud_shutter_counter === 0,
+        `state ${G.g_bHudShutterState} prev ${G.g_bHudShutterPrev} `
+        + `gate ${G.g_nFiringGate} counter ${G.g_hud_shutter_counter}`);
+  HudDrawShutterState();
+  check("...and 4 holds them shut on every frame after", bars() === SHUT
+        && G.g_bHudShutterState === ShutterState.Closed, bars());
+
+  // The same frame through the page's own walk: the players first, then the
+  // shutter. `HudDrawLives` draws the lamps in state 2 only, so on the frame
+  // the script's 6 lands the players still see a 6 and draw none, and the
+  // frame after -- the task having made it 2 -- they do.
+  {
+    const rng = new Rng(52);
+    scene(0, rng);
+    ResetSceneOnEnter();
+    const lamps = () => G.g_screen_sprite_draws.filter(
+      (d) => d.id >= HudSprite.Lamp1P && d.id < HudSprite.Lamp1P + 7).length;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng);
+    check("GameUpdate draws a freshly reset scene shut", bars() === SHUT,
+          bars());
+    G.g_bHudShutterState = ShutterState.OpenFiring;   // the opcode's store
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng);
+    check("on the frame of a 6 the players still read 6: no lamps, and "
+          + "nothing drawn by the shutter", lamps() === 0 && bars() === ""
+          && G.g_bHudShutterState === ShutterState.Open,
+          `lamps ${lamps()} bars "${bars()}"`);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng);
+    check("...and on the next they read 2 and draw the lives", lamps() > 0,
+          `lamps ${lamps()}`);
+  }
+
+  // Open: seeded to 0 on the change, stepped, then drawn.
+  ResetGameGlobals();
+  HudDrawShutterState();                              // 5 -> 4
+  G.g_bHudShutterState = ShutterState.Opening;
+  const drawn: string[] = [];
+  let gateHeld = true;
+  for (let f = 1; f <= SHUTTER_FRAMES; f++) {
+    HudDrawShutterState();
+    drawn.push(bars());
+    gateHeld &&= G.g_nFiringGate === 1;
+  }
+  const slide = (k: number) => pair(SHUTTER_CLOSED_Y + k * SHUTTER_SLIDE_STEP);
+  check("an open draws the counter 1 on its first frame, not 0",
+        drawn[0] === slide(1), drawn[0]);
+  check("...and 40 on its fortieth, still in state 1",
+        drawn[SHUTTER_FRAMES - 1] === slide(SHUTTER_FRAMES)
+        && G.g_bHudShutterState === ShutterState.Opening,
+        `${drawn[SHUTTER_FRAMES - 1]} state ${G.g_bHudShutterState}`);
+  check("...every frame of it one step of 0.0025",
+        drawn.every((d, i) => d === slide(i + 1)));
+  check("...with the gate raised on every one", gateHeld);
+  HudDrawShutterState();
+  check("the 41st draws nothing and leaves 2",
+        bars() === "" && G.g_bHudShutterState === ShutterState.Open
+        && G.g_bHudShutterPrev === ShutterState.Open,
+        `"${bars()}" state ${G.g_bHudShutterState}`);
+  // A shut state straight after a finished open is shut whatever the counter
+  // says. `hud/` used to draw 0, 4 and 5 from the counter, which an open
+  // leaves past 40, so they drew no bars at all.
+  const leftAt = G.g_hud_shutter_counter;
+  G.g_bHudShutterState = ShutterState.CloseFiring;
+  HudDrawShutterState();
+  check("a 0 straight after an open draws the bars shut at 0.35, with the "
+        + "counter left at 41", bars() === SHUT && leftAt === SHUTTER_FRAMES + 1,
+        `${bars()} counter ${leftAt}`);
+  G.g_bHudShutterState = ShutterState.Open;
+  HudDrawShutterState();
+
+  // Close: seeded to 0x28 on the change, stepped, then drawn.
+  G.g_bHudShutterState = ShutterState.Closing;
+  const closing: string[] = [];
+  for (let f = 1; f <= SHUTTER_FRAMES; f++) {
+    HudDrawShutterState();
+    closing.push(bars());
+  }
+  check("a close draws 39 .. 0 over its forty frames, the gate still up",
+        closing.every((d, i) => d === slide(SHUTTER_FRAMES - 1 - i))
+        && G.g_nFiringGate === 1
+        && G.g_bHudShutterState === ShutterState.Closing,
+        `${closing[0]} .. ${closing[SHUTTER_FRAMES - 1]}`);
+  HudDrawShutterState();
+  check("...and the 41st draws them shut, drops the gate and leaves 4",
+        bars() === SHUT && G.g_nFiringGate === 0
+        && G.g_bHudShutterState === ShutterState.Closed, bars());
+
+  // 4 is hidden while either screen card has the screen: `TEST byte ptr
+  // [0x009a5900], 0x30` at `0x00413BB5`.
+  G.g_screen_furniture_flags = 0x20;
+  HudDrawShutterState();
+  const underChapter = bars();
+  G.g_screen_furniture_flags = 0x10;
+  HudDrawShutterState();
+  const underResult = bars();
+  G.g_screen_furniture_flags = 0;
+  HudDrawShutterState();
+  check("state 4 draws nothing under the chapter card (0x20) or the result "
+        + "card (0x10), and the bars come back after",
+        underChapter === "" && underResult === "" && bars() === SHUT,
+        `"${underChapter}" "${underResult}" "${bars()}"`);
+
+  // 8, and a 7 after it: the blackout is the one state the tail does not
+  // remember, and a 7 draws nothing on its own frame.
+  G.g_bHudShutterState = ShutterState.Blackout;
+  HudDrawShutterState();
+  check("a blackout is one bar at the centre scaled 8, and prev stays 4",
+        bars() === `0.0000x${SHUTTER_BLACKOUT_SCALE}`
+        && G.g_bHudShutterPrev === ShutterState.Closed,
+        `${bars()} prev ${G.g_bHudShutterPrev}`);
+  G.g_bHudShutterState = ShutterState.Restore;
+  HudDrawShutterState();
+  check("a 7 after it puts the 4 back and draws nothing that frame",
+        bars() === "" && G.g_bHudShutterState === ShutterState.Closed,
+        `"${bars()}" state ${G.g_bHudShutterState}`);
+  HudDrawShutterState();
+  check("...and the bars are back the frame after", bars() === SHUT, bars());
+
+  // A seek or a paused load runs no frame. The page draws the next frame's
+  // bars on a copy and keeps only those.
+  ResetGameGlobals();
+  EnterPlay();
+  PlayerTasksDrawWithoutAFrame();
+  check("a world no frame has run on still shows the bars the next frame "
+        + "would draw", bars() === SHUT, bars());
+  check("...without running that frame on the live world",
+        G.g_bHudShutterState === ShutterState.CloseHoldFire
+        && G.g_bHudShutterPrev === ShutterState.CloseHoldFire,
+        `state ${G.g_bHudShutterState} prev ${G.g_bHudShutterPrev}`);
+}
+
+/**
+ * A route branch goes on the frame the step list runs out.
+ *
+ * `EvtAdvanceStepOrRoute` (`FUN_0045F000`) reads `g_script_branch_var` and
+ * assigns `next[choice]` in the same call; there is no window. The port held
+ * every branch for 1.5 s so a viewer could take the other road, which is a
+ * debug aid now and off by default -- this section fails on the old default.
+ * With the aid on, the value is still latched when the steps run out, so
+ * gameplay writing the global during the pause cannot change a decision the
+ * engine had already made.
+ */
+console.log("\na route branch, with and without the debug pause:");
+{
+  const op = (i: number, code: number, name: string) =>
+    ({ i, at: i * 4, op: code, name, cat: "flow" });
+  const END = { kind: "end", next: [-1, -1, -1] };
+  const BRANCH = { kind: "branch", next: [1, 2, -1] };
+  const parked = (index: number) => ({
+    index, at: index * 64, route: END,
+    steps: [{ index: 0, at: index * 64, ops: [op(0, 0x4e, "halt")] },
+            { index: 1, at: index * 64 + 8, ops: [op(1, 0x4e, "halt")] }],
+  });
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [BRANCH, END, END],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [
+      { index: 0, at: 0, route: BRANCH,
+        steps: [{ index: 0, at: 0, ops: [op(0, 0x4f, "advance_step")] }] },
+      parked(1), parked(2),
+    ],
+  } as unknown as ScriptJson;
+  const prompts: (BranchChoice | null)[] = [];
+  const host = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined,
+    onBranch: (b: BranchChoice | null) => { prompts.push(b); },
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+
+  ResetGameGlobals();
+  const w = new Walker(script, host);
+  w.reset();
+  check("the pause is off unless asked for", w.options.branchPause === false);
+  w.branchChoice = 1;                        // a rescue wrote route 1
+  w.tick(1 / 60);
+  check("off, the branch goes on the frame the steps run out: next[1] = 2",
+        w.block === 2 && w.branch === null
+        && !prompts.some((b) => b !== null),
+        `block ${w.block} branch ${JSON.stringify(w.branch)}`);
+  check("...and clears g_script_branch_var behind it, as the engine's store "
+        + "does", G.g_script_branch_var === 0, `${G.g_script_branch_var}`);
+
+  const held = new Walker(script, host, { branchPause: true });
+  held.reset();
+  held.branchChoice = 1;
+  held.tick(1 / 60);
+  check("on, it holds at the branch with the game's choice latched",
+        held.block === 0 && held.branch !== null && held.branch.choice === 1
+        && held.branch.targets.join(",") === "1,2",
+        JSON.stringify(held.branch));
+  G.g_script_branch_var = 0;                 // gameplay writes during the hold
+  held.tickBranchCountdown(1.5);
+  check("...and an expired hold takes the latched 1, not what the global "
+        + "says now", held.block === 2 && held.branch === null,
+        `block ${held.block}`);
+
+  const over = new Walker(script, host, { branchPause: true });
+  over.reset();
+  over.branchChoice = 1;
+  over.tick(1 / 60);
+  over.takeBranch(1);
+  check("...and a viewer's override is still taken while it holds",
+        over.block === 1, `block ${over.block}`);
 }
 
 console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");

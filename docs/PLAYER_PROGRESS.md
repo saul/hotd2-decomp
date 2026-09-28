@@ -1511,10 +1511,21 @@ object's position with the camera-facing yaw alone, as the draw's tail has
 them, and stop at the throw. Measured on seed 1 through the whole fight: the
 old root moved on 1562 of 4401 frames and threw on two cameras (`cp` 47 and
 50); the class-0x28 car moves on 53 frames, all on `cp` 47, and is gone at
-frame 725. Still not drawn: each sprite's cel loop (`0x135F + g_frame_counter %
-15`, `0xB67 + (g_frame_counter & 7)`) -- the rig carries the first cel of each.
-A seek past the throw leaves the cars seated, because the replay does not run
-the game; in play they are gone by then.
+frame 725. A seek past the throw leaves the cars seated, because the replay
+does not run the game; in play they are gone by then.
+
+**Their fire and smoke play.** Each sprite is a cel loop on `g_frame_counter`
+(`0x009A32A0`) -- `0x135F + g_frame_counter % 15` (an unsigned `DIV` at
+`0x00432938`) and `0xB67 + (g_frame_counter & 7)` (`0x004329AD`) -- not on
+`g_scene_tick_counter`, which class 0x41 type 53 reads for the same two
+loops. The rig carried only each loop's first cel, so both stood on it. Now
+`obj_432840` exports every cel as a part of its own, 15 fire and 8 smoke, the
+way the stage-2 car's rig carries both of its rows, and `PathRidingPropDraw`
+in `render/rigs.ts` shows the one the counter names and hides the rest.
+Measured from the scene graph over 30 driven frames of `cp_st1` 47 on seed 1:
+the drawn cels matched the exe's on 0 of 30 frames before (always
+`0x135F`/`0xB67`) and on 30 of 30 after, with all 15 and all 8 seen. Stage
+1's glb grows by 0.3 MB.
 
 ## Which instructions the UI strikes through
 

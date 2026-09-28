@@ -737,6 +737,8 @@ OBJ_432840 = Rig(
     ),
     note="Max matrix depth 1, 3 balanced push/pop pairs, all parts siblings. "
          "No SetDrawLayerNibble, so everything is on the default layer. "
+         "Each sprite loop is exported one part per cel, 15 fire and 8 smoke, "
+         "of which the draw names one a frame from g_frame_counter. "
          "Until obj+0x1320 flips the pose is the route sampled ONCE at the "
          "table's freeze frame and held; it flips on the first frame where "
          "g_active_cam_path == 0x2F and g_frame >= that freeze frame, and the "
@@ -756,7 +758,7 @@ OBJ_432840 = Rig(
         RigPart("part_135f", (0x135F,),
                 translation=(0.0, 5.0, 0.0),
                 scale=(1.5, 2.0, 1.0),
-                animated="slot = 0x135F + (frame counter 0x009A32A0 % 15), a "
+                animated="slot = 0x135F + (g_frame_counter 0x009A32A0 % 15), a "
                          "15-slot loop 0x135F..0x136D. RotY is a pure "
                          "camera-facing yaw from VecToAngles(camX - obj.x, 0.0, "
                          "camZ - obj.z) -- a billboard with no pitch. The "
@@ -764,10 +766,25 @@ OBJ_432840 = Rig(
                          "The +5.0 is a bias on the path position, applied "
                          "before the yaw.",
                 condition="only while obj+0x1320 == 0, i.e. before launch"),
+    ) + tuple(
+        # The loop's other fourteen cels, one part each -- the draw names one
+        # slot a frame (0x0043292C: MOV EAX,[g_frame_counter]; XOR EDX,EDX;
+        # MOV ECX,0xF; DIV ECX; ADD EDX,0x135F), and a part with several
+        # slots draws them all at once. The player shows the one the counter
+        # names; see PathRidingPropDraw in web/src/render/rigs.ts.
+        RigPart("part_%04x" % slot, (slot,),
+                translation=(0.0, 5.0, 0.0),
+                scale=(1.5, 2.0, 1.0),
+                animated="cel %d of part_135f's loop: drawn instead of it on "
+                         "the frames g_frame_counter %% 15 == %d, at its pose"
+                         % (slot - 0x135F, slot - 0x135F),
+                condition="only while obj+0x1320 == 0, i.e. before launch")
+        for slot in range(0x1360, 0x136E)
+    ) + (
         RigPart("part_0b67", (0xB67,),
                 translation=(0.0, 0.0, 12.0),
                 scale=(7.0, 7.0, 7.0),
-                animated="slot = 0xB67 + (frame counter 0x009A32A0 & 7), an "
+                animated="slot = 0xB67 + (g_frame_counter 0x009A32A0 & 7), an "
                          "8-slot loop 0xB67..0xB6E, advancing in step with "
                          "part_135f. Reuses the same yaw, not recomputed. Its "
                          "path-position bias is +8.0 in Y, NOT the 5.0 that "
@@ -775,6 +792,17 @@ OBJ_432840 = Rig(
                          "post-rotation offset, since the yaw sits between the "
                          "two translates and so they do not compose.",
                 condition="only while obj+0x1320 == 0, i.e. before launch"),
+    ) + tuple(
+        # ...and the smoke loop's other seven (0x004329A7: MOV EDX,
+        # [g_frame_counter]; AND EDX,7; ADD EDX,0xB67).
+        RigPart("part_%04x" % slot, (slot,),
+                translation=(0.0, 0.0, 12.0),
+                scale=(7.0, 7.0, 7.0),
+                animated="cel %d of part_0b67's loop: drawn instead of it on "
+                         "the frames g_frame_counter & 7 == %d, at its pose"
+                         % (slot - 0xB67, slot - 0xB67),
+                condition="only while obj+0x1320 == 0, i.e. before launch")
+        for slot in range(0xB68, 0xB6F)
     ),
 )
 

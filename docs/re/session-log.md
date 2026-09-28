@@ -24483,3 +24483,41 @@ targets one pull every four frames does end it, in 1600 frames. (5) A seek
 past the throw leaves both cars seated and burning, because the replay does
 not run the game -- a seek artefact, not the engine; in play they are gone.
 Still undrawn: each sprite's cel loop -- the rig carries only the first cel.
+
+## 2026-09-28 -- stage 1's burning cars: the fire and smoke play their cels
+
+`PathRidingPropDraw` (`FUN_00432840`), re-read past the no-return
+`MatrixStackPop` at `0x00432887` (L35): the fire's cel is `MOV EAX,
+[0x009A32A0]; XOR EDX,EDX; MOV ECX,0xF; DIV ECX; ADD EDX,0x135F` at
+`0x0043292C`, and the smoke's `MOV EDX,[0x009A32A0]; AND EDX,7; ADD
+EDX,0xB67` at `0x004329A7`. `0x009A32A0` is `g_frame_counter`, not
+`g_scene_tick_counter` (`0x009A2BAC`), which `PropDrawOnlyType53` reads for
+the same two loops; the `DIV` is unsigned. `[proved]`
+
+The rig `obj_432840` carried only `0x135F` and `0xB67`, so both loops stood on
+their first cel. A `RigPart` with several slots draws them all at once, so the
+fix is the stage-2 car's shape: one part per cel, 15 fire (`0x135F..0x136D`)
+and 8 smoke (`0xB67..0xB6E`), each at the first cel's translation and scale,
+in `tools/hod2lib/rigs.py` and regenerated into `rigs_data.ts`.
+`PathRidingPropDraw` in `render/rigs.ts` (`PATH_PROP_SPRITES`) now shows the
+cel the counter names and hides the loop's others; render reads
+`G.g_frame_counter` and calls nothing in `game/`. Class 0x41's way -- every
+slot in `slots_breakable` and a clone per draw -- was the other candidate; it
+belongs to a layer that clones by slot, and this one already poses rig parts
+by slot, so the cels went where the draw is.
+
+`render.test`'s class-0x28 block fails 3 assertions on the old code (the
+cels at `g_frame_counter` 0, 22, 100, 101, with `g_scene_tick_counter` set to
+something else, and every sprite part hidden after the launch). Measured in
+headless Chrome over 30 driven frames of `cp_st1` 47 on seed 1, reading the
+scene graph through three's devtools hook: the old tree drew `0x135F`/`0xB67`
+on every frame (0 of 30 matching the exe), the new one the exe's cel on 30
+of 30, all 15 and all 8 seen. On that seek `g_frame_counter` and
+`g_scene_tick_counter` hold the same value, so the page cannot tell the two
+apart; the unit test is what does. Stage 1's glb grows by 0.3 MB.
+
+**Wrong turns.** (1) A first harness run died composing the frame strip with
+`page.context().newPage()` -- the default context of `browser.newPage` takes
+one page; a second `browser.newPage()` does it. (2) The worktree guard refuses
+`git -C <shared checkout>`, so the L28 check that `annotate.py` wrote only
+here was a `grep -c` of both copies instead.

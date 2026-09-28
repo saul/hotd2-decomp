@@ -7628,6 +7628,263 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
   }
+
+  // ...and **both slots**, which the port's arm left held. `0x00451C5B`..
+  // `0x00451C7F`: `if ((s8)obj+0x120 != -1) ReleaseCameraEnemySlot(obj)` and
+  // `if (obj+0x3C != -1) ActorFreeHitSlot(obj)` (`FUN_004092D0`), before the
+  // state is set to `RescueTargetAbandonedState`. The hit slot is the one the
+  // build claimed; the camera slot is written here by hand, because nothing
+  // this fixture runs deals one -- what is asserted is the release.
+  {
+    const { a, events, rng } = rescueScene();
+    a.rescue.state = RescueTargetState.Held;
+    const hit = a.hitSlot;
+    a.cameraSlot = 2;
+    G.g_enemy_slots[2].occupied = 1;
+    G.g_enemy_slots[2].at = a.at;
+    G.g_cam_path_frame = 0x122;
+    rFrame(a, events, rng);
+    check("abandoned at 0x122, it frees the hit slot the build claimed",
+          hit !== HIT_SLOT_NONE && a.hitSlot === HIT_SLOT_NONE
+          && G.g_hit_slots[hit] === HIT_SLOT_NONE,
+          `slot ${hit} -> ${a.hitSlot}, table ${G.g_hit_slots[hit]}`);
+    check("...and the camera slot it held",
+          a.cameraSlot === -1 && G.g_enemy_slots[2].occupied === 0,
+          `slot ${a.cameraSlot}, occupied ${G.g_enemy_slots[2].occupied}`);
+    check("...and is abandoned, not freed",
+          (a.rescue.state as RescueTargetState) === RescueTargetState.Abandoned,
+          String(a.rescue.state));
+  }
+}
+
+/**
+ * A replay does not rebuild a rescue target it has played past.
+ *
+ * The user's report: stage 2's first civilian after the burnt-out car,
+ * `0x6830` at block 11 step 2, "sits there sobbing still even after both
+ * enemies are killed". Played from the stage's entry she does not; from the
+ * address the page writes into its URL -- which is where every reload lands
+ * -- she does, every time. The seek replayed block 0, where class 0x21's
+ * rescue target `0x7D0` is spawned, and left its marker listed, so the
+ * landing **rebuilt** it: `RescueTargetInit` counted it into both enemy
+ * counters, and it sat in `RescueTargetRideInState` for good, because that
+ * state hands over only at camera frame `>= 0xBE` and block 11 step 2's shot
+ * never gets past 30 until the room is clear. Her rescue block waits on
+ * camera cue `(70, 100)`, which the script plays only after
+ * `wait_enemies_alive 0` -- so she sobbed in front of two dead captors with
+ * `g_enemies_alive` at 1 and no enemy on screen.
+ *
+ * The engine is never in that state: by block 11 step 2 the target has been
+ * abandoned at path `0x39` frame `0x122` and despawned at `0x181`, or
+ * rescued, or despawned on `g_script_flags[0]`. Each of those is a way out a
+ * replay can see, and `RescueTargetOutlivedByReplay` names them.
+ */
+console.log("\na replay does not rebuild a rescue target it has played past:");
+{
+  const RESCUE_AT = 0x7d0;
+  const rescueSpawn = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x09, name: "spawn_placed", cat: "spawn",
+    spawns: [{ at: RESCUE_AT, class: SpawnClass.RankScaledEnemy, flags: 0,
+               pos: [0, 0, 0], yaw_deg: 0, orient: [0, 0, 0], hp: 0,
+               desc_flags: 0 }],
+  });
+  const crashShot = (i: number, start: number, end: number) => ({
+    i, at: 0x100 + i * 8, op: 0x30, name: "queue_event", cat: "camera",
+    sel: 0x40, action: "cam_play", args: [start, end, 0x39, 0],
+    start, end, slot: 0x39, flags: 0, static: false, resume: false,
+    cam: { file: "cp_test", path: 0, duration: end + 1 },
+  });
+  const shotDone = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x40, name: "wait_queued_events_done",
+    cat: "wait", blocks_on: "queued events pending == 0",
+  });
+  const raiseFlag0 = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x48, name: "set_script_flag", cat: "flow",
+    arg: 0, flag: 0,
+  });
+  const frames = (i: number) => ({
+    i, at: 0x100 + i * 8, op: 0x42, name: "wait_frames", cat: "wait", arg: 1,
+    blocks_on: "arg frames elapsed",
+  });
+  const block = (index: number, ops: unknown[], route: unknown) => ({
+    index, at: index * 0x1000, route, steps: [{ index: 0, at: 0, ops }],
+  });
+  const END = { kind: "end", next: [-1, -1, -1] };
+  const STOP = { kind: "goto", next: [-1, -1, -1] };
+  const mk = (blocks: unknown[]) => ({
+    scene: 1, stage: 2, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: blocks.map((b) => (b as { route: unknown }).route),
+    regions: [], cam_slots_used: [0x39], warnings: [], blocks,
+  }) as unknown as ScriptJson;
+  const walkerHost = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => null,
+    presentEnemies: () => null, aliveCivilians: () => null,
+    cameraFree: () => null, scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  const fresh = () => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetCameraPaths(StillPath(0x39, vec3(0, 10, 0), vec3(0, 10, -100)));
+  };
+  const listed = (w: Walker) => w.spawns.some((s) => s.at === RESCUE_AT);
+  const at = (w: Walker) => `at ${w.block}/${w.step}/${w.opIndex}, `
+    + `spawns ${w.spawns.map((s) => s.at.toString(16)).join(",")}`;
+
+  // The shipped road, in miniature: block 0 spawns it and plays the crash
+  // shot's last stretch on path 0x39 -- stage 2 plays `290..405` in block 11
+  // step 1 -- and the route out is block 0's own `{11, 1}`.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), crashShot(1, 290, 405), shotDone(2),
+                frames(3)], END),
+    ]), walkerHost);
+    seekTo(w, 0, 0, 2);
+    check("a seek that lands before the crash shot has run keeps it listed",
+          listed(w), at(w));
+    seekTo(w, 0, 0, 3);
+    check("**one past the shot's end retires it**: abandoned at 0x122, "
+          + "despawned at 0x181",
+          !listed(w) && G.g_active_cam_path === 0x39
+          && G.g_cam_path_frame >= 0x181,
+          `${at(w)}, path ${G.g_active_cam_path} frame ${G.g_cam_path_frame}`);
+  }
+  // A shot that stops short of 0x181 is not the despawn: an abandoned
+  // target rides on, and one rebuilt there finds 0x122 for itself.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), crashShot(1, 290, 0x180), shotDone(2),
+                frames(3)], END),
+    ]), walkerHost);
+    seekTo(w, 0, 0, 3);
+    check("...and a crash shot that ends at 0x180 does not",
+          listed(w), `${at(w)}, frame ${G.g_cam_path_frame}`);
+  }
+  // `g_script_flags[0]`: stage 2 raises it at 3/3/10 and 11/2/27, and every
+  // state past the ride-in despawns on it.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), raiseFlag0(1), frames(2)], END),
+    ]), walkerHost);
+    seekTo(w, 0, 0, 1);
+    check("a seek that stops before flag 0 keeps it", listed(w), at(w));
+    seekTo(w, 0, 0, 2);
+    check("...and one past `set_script_flag 0` retires it",
+          !listed(w) && (G.g_script_flags[0] ?? 0) === 1, at(w));
+  }
+  // The route: arm 1 out of its own block is its own rescue, the only writer
+  // of `g_script_branch_var = 1` there (L45). Arm 0 is the road on which it
+  // is still held, and still counted, until the crash shot.
+  {
+    fresh();
+    const blocks = [
+      block(0, [rescueSpawn(0), frames(1)],
+            { kind: "branch", next: [1, 2, -1] }),
+      // A `goto` to nothing rather than `END`: a route of any other kind
+      // falls through to the next block, and block 1 would reach block 2.
+      block(1, [frames(0), frames(1)], STOP),
+      block(2, [frames(0), frames(1)], STOP),
+    ];
+    // A route transition enters a block at step 1 (`goToBlock`), so each
+    // block here carries two steps and the seek lands on the second.
+    for (const b of blocks.slice(1)) {
+      (b as { steps: unknown[] }).steps.push({ index: 1, at: 0,
+                                               ops: [frames(0), frames(1)] });
+    }
+    const w = new Walker(mk(blocks), walkerHost);
+    seekTo(w, 1, 1, 1);
+    check("a seek down arm 0 (not rescued) keeps it listed",
+          w.block === 1 && listed(w), at(w));
+    seekTo(w, 2, 1, 1);
+    check("...and a seek down arm 1, its own rescue, retires it",
+          w.block === 2 && !listed(w), at(w));
+  }
+  // The gate half, for both classes: every class whose `Init` counts is gone
+  // on the far side of a room gate the replay steps over. Class 0x18's rider
+  // is class 0x30 on a carrier (`CarriedZombieInit18`, `FUN_0045CD60`), and
+  // the replay's list lacked it: stage 3's `0xADC`, placed at 0/6/6, came
+  // back past `1/1/40` and held every gate after, the boat hostage's rescue
+  // among them.
+  {
+    const RIDER_AT = 0xadc;
+    const riderSpawn = (i: number) => ({
+      i, at: 0x100 + i * 8, op: 0x09, name: "spawn_placed", cat: "spawn",
+      spawns: [{ at: RIDER_AT, class: SpawnClass.CarriedZombie, flags: 0,
+                 pos: [5, -6, -14], yaw_deg: 90, orient: [0, 0x4000, 0],
+                 hp: 130, desc_flags: 0 }],
+    });
+    const roomGate = (i: number) => ({
+      i, at: 0x100 + i * 8, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+      arg: 0, blocks_on: "enemies alive <= arg",
+    });
+    for (const [what, spawn, spawnAt] of [
+      ["class 0x18's rider", riderSpawn, RIDER_AT],
+      ["class 0x21's target", rescueSpawn, RESCUE_AT],
+    ] as const) {
+      fresh();
+      const w = new Walker(mk([
+        block(0, [spawn(0), roomGate(1), frames(2)], END),
+      ]), walkerHost);
+      seekTo(w, 0, 0, 1);
+      const before = w.spawns.some((s) => s.at === spawnAt);
+      seekTo(w, 0, 0, 2);
+      check(`a room gate a replay steps over retires ${what}`,
+            before && !w.spawns.some((s) => s.at === spawnAt), at(w));
+    }
+  }
+  // ...and not two classes but **every class the game counts**
+  // (`ENEMY_CLASSES`): the replay's list is the script's, written from
+  // `spawns.md`, and it had fallen behind the game's twice. Class 0x46
+  // answers per record -- its scatter flight counts nothing -- so its record
+  // here is a swarm, sub-type 2, which `PlaceBats` counts member by member
+  // (`INC` `0x0042DB5D`/`0x0042DB64`; the dive's pair is `0x0042DF87`/`8E`).
+  {
+    const recAt = (cls: number) => 0x5000 + cls * 0x10;
+    SetGameTables({ ...CHARS, placements: [{
+      at: recAt(SpawnClass.Bat), class: SpawnClass.Bat, char_type: 0x1e,
+      motion: 0, hp: 0, body_condition: 0, initial_state: 0,
+      attack_state: 0, ring_set: 0, yaw: 0,
+      class46: { subtype: 2, group: 0, member: 0 },
+    }] } as unknown as CharactersJson, undefined, undefined, undefined);
+    const left: string[] = [];
+    for (const cls of ENEMY_CLASSES) {
+      fresh();
+      const w = new Walker(mk([
+        block(0, [{
+          i: 0, at: 0x100, op: 0x09, name: "spawn_placed", cat: "spawn",
+          spawns: [{ at: recAt(cls), class: cls, flags: 0, pos: [0, 0, 0],
+                     yaw_deg: 0, orient: [0, 0, 0], hp: 1, desc_flags: 0 }],
+        }, {
+          i: 1, at: 0x108, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+          arg: 0, blocks_on: "enemies alive <= arg",
+        }, frames(2)], END),
+      ]), walkerHost);
+      seekTo(w, 0, 0, 2);
+      if (w.spawns.some((s) => s.at === recAt(cls))) {
+        left.push(`0x${cls.toString(16)}`);
+      }
+    }
+    SetGameTables(CHARS, undefined, undefined, undefined);
+    check("every class the game counts is gone past a gate a replay steps "
+          + "over", left.length === 0, `still listed: ${left.join(", ")}`);
+  }
+  // Replay only: in play the target leaves through its own states.
+  {
+    fresh();
+    const w = new Walker(mk([
+      block(0, [rescueSpawn(0), raiseFlag0(1), frames(2)], END),
+    ]), walkerHost);
+    for (let i = 0; i < 8; i++) WalkerCameraFrame(w);
+    check("played rather than replayed, the marker stands -- the actor goes "
+          + "by itself", listed(w) && (G.g_script_flags[0] ?? 0) === 1,
+          at(w));
+  }
 }
 
 console.log("\nthe stage-2 car: class 0x21 makes it, and nothing does before:");

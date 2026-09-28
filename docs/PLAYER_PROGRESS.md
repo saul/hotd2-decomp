@@ -601,6 +601,24 @@ it, and a block whose own wait is already satisfied is **skipped** — with
 block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
 frames and the two score paths.
 
+**A reload no longer brings back an enemy the room already got rid of.** A
+seek rebuilds every spawn still listed at its `Init`, and two classes whose
+`Init` counts into both enemy counters were never taken off the list: stage 2's
+class-0x21 rescue target, whose ways out -- rescue, the crash shot, flag 0 --
+all come before any room gate, and class 0x18's boat riders, which the replay's
+list of gate-counted classes (`ENEMY_GATE_CLASSES`) had never been told about
+although the game's own list had. Rebuilt, either held `g_enemies_alive` with
+nothing on screen to shoot, and every civilian whose rescue waits on that count
+or on a camera cue behind a room gate sat sobbing in front of her dead
+captors: stage 2's `0x6830` after the burnt-out car (block 11 step 2),
+`0x8598` at block 14, stage 3's boat hostage `0x3208`. The rider and the
+target are in the gate list now, class 0x46's bats answer per record (their
+dive and swarm flights count, the scatter does not), and class 0x21 answers
+`ClassHandler.outlivedByReplay` -- flag 0, camera path `0x39` at frame
+`0x181`, route slot 1 out of its own block -- so the landing is the world the
+exe is in at that address. The held target's abandon arm also frees its camera
+and hit slots, which the port's had kept.
+
 **A captor counts as gone only when it dies.** `CivilianPruneDeadChildren`
 tests the child's `obj+0x34` bit `0x4000000` and nothing else; the port also
 dropped a child that was merely missing from the pool, so a captor that left

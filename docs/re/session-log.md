@@ -24636,3 +24636,65 @@ apart; the unit test is what does. Stage 1's glb grows by 0.3 MB.
 one page; a second `browser.newPage()` does it. (2) The worktree guard refuses
 `git -C <shared checkout>`, so the L28 check that `annotate.py` wrote only
 here was a `grep -c` of both copies instead.
+
+## 2026-09-28 -- civilians sobbing behind dead captors: a reload rebuilt the enemies the room had got rid of
+
+Reported as "hangs with some civilians, e.g. the first one in stage 2 (after
+the burnt out car) sits there sobbing still even after both enemies are
+killed". That civilian is `0x6830`, block 11 step 2, on the unrescued road.
+
+**Where it hangs, and where it does not.** Every driven run from the entry
+block, or from block 11 step 1 through the crash, released her: captors shot
+while still walking at her, shot mid-maul, and left to kill her first, and a
+`playthrough.mjs --stage 2` passed block 11 twice over with two continues.
+Seeked to her own step -- `?stage=2&block=11&step=2&op=0`, the address the page
+writes while she is on screen -- it hung on every run, at
+`11/2/34 wait_enemies_alive` with `e1 p1` and the panel naming nobody. The one
+counted actor was class 0x21's rescue target `0x7D0`, rebuilt by the landing
+at its `Init` in `RescueTargetRideInState` with flag 0 already up. Read in the
+listing: the ride-in does not test flag 0 and hands over only at frame
+`>= 0xBE` (`0x004518A3`); step 2's shot stays at 30 until the room clears, and
+her rescue waits for frame 100 of it. The held/freed/sinking/abandoned states
+all despawn on flag 0; the held state abandons at path `0x39` frame `>= 0x122`
+(counters back, then -- which the port had dropped -- the camera and hit slots
+freed at `0x00451C5B`..`0x00451C77`), and the abandoned state despawns at
+`== 0x181`. Every one of those ways out precedes any room gate, so nothing in
+the replay could retire it. `ClassHandler.outlivedByReplay` is the question a
+replay now asks each listed record after every instruction, wait and block
+change, and class 0x21 answers it from flag 0, path `0x39` at or past `0x181`,
+and route slot 1 out of its own block.
+
+**A sweep made it a class of bug.** A headless page harness seeked to each of
+the 40 captor civilians' spawn steps and shot at them. Stage 2's blocks 11
+and 14 hung on the same phantom target; stage 3 past `1/1/40` hung on a
+different one, the class-0x18 boat rider `0xADC`, which `registry.ts`'s
+`ENEMY_CLASSES` counts and the walker's `ENEMY_GATE_CLASSES` -- the classes a
+replay retires at a room gate -- had never listed (the riders were ported in
+902de88a, after the list was written). The boat hostage `0x3208` waits on
+`g_enemies_present`. 0x18 and 0x21 are in the list now, and a port test drives
+every class in `ENEMY_CLASSES` through a gate, which is what then found class
+0x46: its swarm and dive flights count member by member (`INC`s at
+`0x0042DB5D`/`64` and `0x0042DF87`/`8E`) and its scatter flight does not, so
+it answers `countsForEnemyGate` per record.
+
+**Wrong turns.** (1) I started from the brief's suspects -- today's headshot
+change, the shot-test move, the permit claim -- and drove kills every way I
+could think of before trying the URL; `CivilianPruneDeadChildren` was right
+all along. (2) The first sweep shot only the captors, so every civilian whose
+rescue waits for *all* enemies (`0x2`) read as stuck; the second shot every
+counted actor the shot-test list offers. (3) That sweep then died with
+"Execution context was destroyed": saving a file under `web/src/` made Vite
+reload the page onto its URL -- a seek. Which is exactly how the user lands
+on these: the checkout they play in is merged into every few minutes. `L75`.
+(4) The first route fixture used `kind: "end"` for the leaf blocks, which the
+walker and `reaches` treat as fall-through, so the seek to block 2 went down
+arm 0 and the assertion failed for the fixture's reason, not the code's.
+
+**Measured.** Same URL and seed, before and after: `0x6830` never left the
+count in 1,500 frames before; after, the captors die at f34, she leaves the
+count at f243 and the walker leaves 11/2 at f263. Stage 3's `0x3208`: stuck at
+`2/3/35 wait_script_flag 30` before; after the merge with `eb232a6e`, f467 and
+f468. All 37 one-player captor civilians pass from their own spawn step on the
+merged tree (the three two-player spawns are not placed). A seek past stage
+3's `2/4/32` read `e7 p7` with 62 bat objects and the rider before, `e0 p0`
+with the 50 uncounted scatter bats after.

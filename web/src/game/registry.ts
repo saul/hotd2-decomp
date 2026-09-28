@@ -49,6 +49,22 @@ export interface SpawnRecord {
   at?: number;
 }
 
+/**
+ * `[port-only]` A spawn record as a **replay** has seen it: the record, the
+ * block its instruction ran in, and the route the replay then left that block
+ * by. What {@link ClassHandler.outlivedByReplay} is handed.
+ */
+export interface ReplaySpawnRecord extends SpawnRecord {
+  /** The block whose instruction pushed the record. */
+  block: number;
+  /**
+   * The slot of that block's route the replay left it by -- the value of
+   * `g_script_branch_var` the route read -- once it has left through a
+   * `branch` route; undefined while it has not.
+   */
+  armOut?: number;
+}
+
 export interface ClassFrame {
   eye: Vec3;
   dt: number;
@@ -265,6 +281,21 @@ export interface ClassHandler {
    * {@link ClassHandler.raisesScriptFlag}'s is.
    */
   countsForEnemyGate?(rec: SpawnRecord): boolean;
+  /**
+   * `[port-only]` Whether a **replay** has gone past this spawn record's own
+   * way out, so that the object is gone at the address the replay lands on
+   * and must not be rebuilt there.
+   *
+   * A seek replays the evt with no actor running and rebuilds every record
+   * still listed at its `Init`. For most classes the gates a replay steps over
+   * say when their objects are gone (`Walker.retireGated`, the civilian
+   * arms in `script/civilian_life.ts`); a class whose exit is its **own**
+   * test of something the replay also moves -- a script flag, the camera, the
+   * route it wrote -- answers here, from those and the record. The walker asks
+   * after every instruction, every wait it steps over and every block change,
+   * and only while replaying.
+   */
+  outlivedByReplay?(rec: ReplaySpawnRecord): boolean;
   /**
    * Describe one of this class's actors for the debug sidebar.
    *

@@ -1977,6 +1977,120 @@ scene state 7 as stopping on its range's end and **eighteen**
 That count is also the strongest evidence for the reading — the shipped scripts
 require the `JG`.
 
+## 31. A reload rebuilt enemies the room had already got rid of, and the civilians sobbed behind them — **fixed**
+
+Reported as "the first one in stage 2 (after the burnt out car) sits there
+sobbing still even after both enemies are killed". That is `0x6830`,
+block 11 step 2, the unrescued road's first civilian.
+
+**From the entry block it does not happen; from the page's own URL it always
+does.** Driven from `?stage=2`, and from `block=11&step=1` through the crash,
+her captors died early, mid-maul and after she had died, and every run
+released her (`e0`, she leaves the count, 11/3). From
+`?stage=2&block=11&step=2&op=0` -- the address the page writes while she is on
+screen, and so the address every reload lands on -- **every run hangs**, four
+of four (driven, so the same run each time, from three different tools):
+
+```
+f34   both captors dead, her children list empty
+f1500 11/2/34 wait_enemies_alive   e1 p1 v1   (panel: "Nothing this panel can
+      name is alive -- the camera gate (g_camera_free 0) is holding it")
+      0x6830 cursor 7, wait 0x100080 (camera cue 70,100), motion 403
+      0x7D0 class 0x21 · RideIn sub 0 · hp 1 · flag 0 up · path 70 frame 30
+```
+
+`shots/…/before-stage2-11-2.png`: she kneels sobbing, "HOLD YOUR FIRE!", the
+shot parked at `slot 70 frame 30 / 30`. The scene renders; this is the count.
+
+### The mechanism, `[proved]`
+
+Her rescue block waits on camera cue `(70, 100)` (stream 21's command 4), and
+the script plays path 70 past frame 30 only after `wait_enemies_alive 0` at
+op 34. The `1` is the **class-0x21 rescue target** `0x7D0`, spawned in block 0
+step 2: the seek replayed block 0, left its marker listed, and the landing
+rebuilt it at `RescueTargetInit` -- both counters up -- in
+`RescueTargetRideInState`, which hands over only at frame `>= 0xBE`
+(`CMP EAX,0xBE; JL` at `0x004518A3`). Step 2's shot never gets past 30 until
+the room is clear. Deadlock, and nothing on screen to shoot.
+
+The exe is never in that state. Its target's ways out, each read in the
+listing: `g_script_flags[0]` despawns it in the held, freed, sinking and
+abandoned states (`0x00451980`, `0x00451D80`, `0x00451DF0`, `0x00451D20`);
+the held state is abandoned at path `0x39` frame `>= 0x122` with both counters
+given back (`0x00451C37`) and the abandoned state despawns at `== 0x181`
+(`0x00451D49`); and the rescue itself writes `g_script_branch_var = 1`. All of
+them come before any room gate on either road, so no gate the replay stepped
+over could retire it.
+
+**The same shape, a second class.** Stage 3's boat riders are class 0x18,
+`CarriedZombieInit18` (`FUN_0045CD60`) = `EnemyZombieInit` on a carrier, both
+counters. `registry.ts`'s `ENEMY_CLASSES` has counted them since the riders
+were ported (902de88a); the walker's `ENEMY_GATE_CLASSES` -- the classes a
+replay retires when it steps over a room gate -- never had them. So a reload
+past `1/1/40` rebuilt the rider `0xADC` and held every later gate: stage 3's
+boat hostage `0x3208` (block 2 step 3), whose rescue waits on
+`g_enemies_present`, stopped at `2/3/35 wait_script_flag 30` with `e1 p1`.
+
+Never worked, rather than a regression: the seek has rebuilt the rescue target
+counted since it was first built (e9e6da8a, the class's motion rule, over the
+branch writers of 5d4fe218), and the rider since 902de88a. Today's hit-sphere,
+permit and crowd-push changes are not involved -- the captors die and are
+pruned exactly as the exe prunes them (`CivilianPruneDeadChildren` reads
+`obj+0x34` bit `0x4000000`, and every kill path raises it).
+
+### The fix
+
+* `ClassHandler.outlivedByReplay` (`game/registry.ts`): a replay asks a
+  listed record's class after every instruction, every wait it steps over and
+  every block change whether its own way out is behind it. The walker records
+  which route slot it left each block by (`Walker.leaveBlock`).
+* `RescueTargetOutlivedByReplay` (`game/class21/index.ts`): flag 0 up; path
+  `0x39` at or past `0x181`; route slot 1 out of its own block. The one window
+  answered early rather than exactly is the freed body's last seconds on the
+  rescued road -- a replay cannot tell how far into them it landed.
+* `ENEMY_GATE_CLASSES` gains 0x18 and 0x21, and class 0x46 answers
+  `countsForEnemyGate` per record: its dive and swarm flights count member by
+  member (`INC`s at `0x0042DF87`/`8E` and `0x0042DB5D`/`64`), its scatter
+  flight does not. A seek past stage 3's `2/4/32` had rebuilt the swarm `0x31B8`
+  (`e7 p7` with the rider; `e0 p0` after).
+* On the way: the held state's abandon arm frees the camera slot and the hit
+  slot (`0x00451C5B`..`0x00451C77`), which the port's did not.
+
+`test/port.test.ts`, "a replay does not rebuild a rescue target it has played
+past": each way out, the negative cases (a crash shot ending at `0x180`, arm 0,
+a seek short of the flag), both classes through a gate, and **every class in
+`ENEMY_CLASSES` through a gate** -- watched failing with the fix backed out
+(seven assertions, then the bat case below). Measured after, same URL and
+seed: captors dead f34, she leaves the count f243, the walker leaves 11/2 at
+f263. Stage 3 `2/3`: stuck before; after (merged with `eb232a6e`), she leaves
+the count at f467 and the walker leaves the step at f468.
+
+**Every captor civilian, from her own address.** A headless page harness
+(`?drive=1`, one seed) seeked to each of the 40 civilians-with-captors' spawn
+steps -- with `entry=7` for stage 3's blocks 7 and 9 and `entry=4` for stage
+4's 4, 7 and 9, which the default entry cannot reach -- shot every counted
+actor the shot-test list offered, and timed her leaving the count and the
+walker leaving her step. Before: stage 2's `0x6830` (11/2), `0x8598` (14/9,
+`e1` with no enemy on the panel) and stage 3's `0x3208` (2/3) never left, and
+stage 3's `0x2208` (1/2) was never even placed, her room held at `1/2/18` by
+the rebuilt rider. After, on the merged tree: **all 37 one-player civilians
+leave the count and let the script past her step**; the other three
+(`0xEA8C`, `0x22D8`, `0x70EC`) are `spawn_obj_c_if_2p` and are not placed in a
+one-player run. Both measured hangs re-checked on `origin/main` `eb232a6e`
+alone, whose boat-rider changes do not touch this: still hung, same holders.
+
+## 32. What a reload still rebuilds that the exe would not have — `[open]`
+
+Found on the way to item 31, not fixed there:
+
+* **Class 0x22 counts after its entrance, not in its `Init`** (`0x0049B6B4`,
+  `0x0049D104`), so a gate stepped over between its spawn and its entrance
+  says nothing about it and it is deliberately not in `ENEMY_GATE_CLASSES`.
+  Whether any shipped gate falls in that window is unread.
+* **The wait panel cannot name a class-0x21 holder**: item 31's hang read
+  "Nothing this panel can name is alive" with the target standing at `e1`.
+  `ActorIsEnemy` is the panel's filter and class 0x21 is not in it.
+
 ## Rules for whoever picks this up
 
 These are not style preferences; each one was paid for.

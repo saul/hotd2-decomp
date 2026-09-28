@@ -580,6 +580,15 @@ room is played), and the off-camera arm at the first `goto_scene_state` after
 her room's gate when her rescue path ends on `0x2000000` -- `[likely]`, since
 a replay has no pose to test the screen against.
 
+**...and so does every counted actor she waits behind.** Many of her kind
+wait on `g_enemies_alive` or `g_enemies_present` (wait bits `0x2`/`0x1`) or on
+a camera cue the script plays only past a room gate, so a replay that
+rebuilds any actor holding either counter leaves her sobbing in front of dead
+captors. Two did: stage 2's class-0x21 rescue target, whose ways out all come
+before any gate (`RescueTargetOutlivedByReplay` in `game/class21/index.ts`),
+and stage 3's class-0x18 boat riders, which the walker's gate list had left
+out. See `docs/PLAYER_HANGS.md` item 31.
+
 ## The rescue, and what the class is
 
 `CivilianInit` reads a **child count** at tail `+0x0C` and an array of

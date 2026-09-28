@@ -1128,3 +1128,25 @@ an indexed structure because its index "is always N", enumerate the index's
 writers by byte pattern in every `MOV` form and grep the annotations for the
 index's address** -- and when a proof about a writer ends in a claim about the
 picture, follow the value to the instruction that draws it.
+
+**L75 -- A bug that only shows from a deep link is a bug the user plays into,
+because every source change reloads the page onto its own URL.** Stage 2's
+civilian after the burnt-out car was reported sobbing in front of her dead
+captors, and played from the stage's entry she never did: driven runs killed
+her captors early, mid-maul and after she had died, and every one released
+her. From the address the page writes into its URL she hung every time --
+the replay had rebuilt the class-0x21 rescue target, whose ways out all come
+before any room gate, and it held `g_enemies_alive` with nothing on screen. The
+same session's sweep harness then died with *"Execution context was
+destroyed"* the moment a file under `web/src/` was saved: Vite reloads the
+page on a change to a module nothing hot-accepts, and the page reloads to the
+URL it last wrote, which is a seek. With a coordinator merging into the
+checkout the user plays in every few minutes, **a seek is the ordinary way into
+a stage mid-session**, not a debug path. So a report that does not reproduce
+from the entry block is not a report that does not reproduce: take the URL
+the page would have written at that point and run it. And the rebuild has two
+lists to keep true -- `registry.ts`'s `ENEMY_CLASSES`, the classes the game
+counts, and the walker's `ENEMY_GATE_CLASSES`, the ones a replay retires at a
+room gate -- which had drifted apart by two classes (`L24`'s shape: "I fixed
+it" was true of one copy); `test/port.test.ts` now drives every member of the
+first through a gate and fails on any the second forgets.

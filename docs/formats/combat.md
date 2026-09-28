@@ -2429,7 +2429,7 @@ weapon goes: the draw slot at `+0x00`, and `+0x78` to zero — `899f54050000` at
 `0x0045A2B2` for bone 5 and `899f04070000` at `0x0045A2DB` for bone 8, with
 `EBX` zeroed. `0x554` is `0x20C + 5*0x90 + 0x78`, **inside bone 5's own
 record**, not the base of another one, and `+0x78` is what `SkeletonWalkNode`
-(`FUN_004107E0`) fills each frame with `obj+0x1300 * hit_sphere.radius` — so
+(`FUN_004107E0`) fills at build with `obj+0x1300 * hit_sphere.radius` — so
 the hand that has just been emptied stops being shootable.
 `SpawnThrownWeapon` (`0x00450540`) does the identical write for class 0x31,
 where Ghidra renders the same address as `bone * 0x90 + 0x284`. **[proved]**

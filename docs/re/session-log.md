@@ -23251,6 +23251,198 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+## 2026-09-28 -- every skinned actor drawn at its model's size (branch `worktree-agent-a271ad1688e59a06c`)
+
+**The report.** `game/root_motion.ts` carried a declared divergence: the
+engine draws the pose offset -- and the whole model -- under
+`MatrixScale(model+0x116C)`, and the port drew every skinned actor at 1.0 but
+the bat. "Making it faithful means scaling every skinned actor's drawn size."
+
+**What the exe does with the field.** Read from the instruction stream, not
+the pseudocode (`L1`: every consumer passes it as a pushed float):
+
+* `ActorBuildSkinnedModel` (`0x00410440`) writes it first, from the type at
+  `model+0x60`: `ADD EAX,-0x1E; CMP EAX,0x1A; JA` to `0x3F800000`, else the
+  index bytes at `0x00410568` (`00 01` and twenty-five `02`) into the jump
+  table at `0x0041055C` -- 0.6 for 30, 0.7 for 31, 0.9 for 32..56. `[proved]`
+* The draw tail of `SkeletonApplyRootMotion` pushes it three times into
+  `MatrixScale` at `0x00410FEA`..`0x00410FF7`, between the rotation (any of the
+  six orders) and the pose translate; `SkeletonBuildAndPose` at `0x0041061B`
+  likewise. Every bone hangs from that matrix. `[proved]`
+* `SkeletonWalkNode` (`0x004107E0`) stores each bone record's hit radius as
+  `obj+0x1300 * row.radius` (`0x00410837`..`0x00410840`) -- once, at build --
+  and the centre unscaled, because the node matrix scales it. `[proved]`
+* Every other reader -- `SkeletonDrawNodeSlot`, `ActorDrawAttachedParts(Lit)`,
+  `DrawCharacterPartSlot`, `CivilianDrawHeldItems`, the unfunctioned
+  `0x0041A213` -- hands it to `NoOpStub` and nothing else. A byte search for
+  `6c110000` (`L32`) found that last one, which the operand search had missed
+  because no function covers it. `[proved]`
+* The one later writer is class 0x10's op 0x27, and the one command that runs
+  it -- 50.0, stage 4's `player_gold` in blocks 23 and 25 -- is how Goldman
+  gets onto the arena's jumbotron. `[likely]`: the port showed an empty screen
+  through his whole speech before this and shows him filling it after.
+
+**The port.** `ActorBuildSkinnedModel` writes `Actor.scale` for every actor it
+builds (it wrote it only for the one class that carries the model block) and
+each bone's radius into `Actor.boneRadius`; `ActorModelScale` returns the
+engine's floats. `render/characters.ts` has one `placeRoot` for the update and
+the resync, which puts `Actor.scale` on every root it places -- the bat's
+special case is now the general rule. Class 0x45 and the model block already
+carried their own. `tools/verify_root_pose.py` decodes the switch against
+`ActorModelScale` and finds, in the six stages' evts, every character that
+poses a clip's root: one, stage 4's type-48 civilian at `0x3578`.
+
+**Screenshots** (`extract/compare/model-scale/` in the worktree, before/after
+pairs under `?drive=1&seed=1`, game canvas only): `s1b1_f0020` (stage 1 block
+1 step 8: the suited civilian a head shorter, the zombie beside him
+unchanged), `s4b4_f0090` (stage 4 entry 4 block 4 step 7: the crawling
+civilian smaller and further into his hole), `s4b23_f0220`/`f0320` (the
+jumbotron, empty before and Goldman after), and `s1b14_f0400` (JUDGMENT) and
+`s2b3b_f0340`/`f0400` (a `zsass` thrower), which are byte-identical PNGs --
+every type at 1.0 draws exactly as it did. Playthroughs: stage 2 ends at the
+same frame (9750, GAME OVER at block 16) before and after; stage 1 reaches its
+end block both times, at 9120 frames against 9285 -- where the two runs part
+was not pinned down.
+
+**Wrong turns.**
+
+* The old note's "2.594 units" was `0.9 * 2.882` with the 2.882 already
+  rounded; the root is `(-0.104, 0.805, -2.880)`, 2.8816 across, and the
+  engine draws 2.5935. The check caught it the first time it computed the
+  number instead of quoting it.
+* I meant to export a per-type scale into the bundle, as the brief suggested
+  if it was missing. It is not missing: the port transcribes the switch and
+  every actor carries the result, and `Actor.scale` has to be the per-actor
+  field anyway because op 0x27 writes it. A bundle copy would have been a
+  second source the renderer must not read. The switch is pinned by the
+  verifier instead.
+* `SkeletonWalkNode` also gates each row on its slot matching the node's, and
+  the exporter does not: the rows of twelve shipped types disagree with
+  their nodes on at least one bone, zndina's, zsass's and the frog's among
+  them (the list is on `ActorBuildSkinnedModel`). Porting that gate alone would zero the thrower's hands for
+  good, because what restores them -- `ResolveDamagedPartSphere` on a part
+  swap and `ThrowerStateRestoreBothHands` -- is unported. Declared on
+  `ActorBuildSkinnedModel` rather than half-done.
+* The first stage-2 playthrough after the change died on "Execution context was
+  destroyed" at frame 8055; alone, it ran to the same GAME OVER at 9750 as the
+  old code. That was another page reload, not the change (`L29`).
+
+## 2026-09-28 -- which class-0x13 routines draw before they seat on a path (branch `claude/relaxed-benz-c908db`)
+
+**The brief.** Once the wall-climbers branch put `pitch`/`roll` on placements,
+five stage-2 class-0x13 records carry a pitch; `SpawnSlotActor` was said to
+build class 0x13 with `yaw: pl.yaw` only, and `PropSeatOnObjectPath` overwrites
+all three angles. Find out which class-0x13 states draw before seating, and
+pass the angles through if any shipped prop draws its spawn orientation.
+
+**Already done.** The brief described the tree before `1723413f` (this
+morning's class-0x13 pitch session, above): the arm has taken all three
+through `PlacementOrientation` since then, with four `port.test.ts`
+assertions. Nothing to pass through. What that session did not read is the
+carriers, and that is what this one adds.
+
+What the exe does, all `[proved]` from the listing:
+
+* `ScriptedPropUpdate13` (`FUN_0043FE90`) calls the behaviour at `0x0043FEC9`
+  and draws from `0x0043FEDE` on; the model at `obj+0x1F4` is drawn nowhere
+  else. So the record's angles are drawn only where the behaviour writes none.
+* `CarrierPropSelectRoutine`'s table at `0x004401E4`: 0 `0x00440210`, 1
+  `0x004403D0`, 2 and 9 `0x004408A0`, 3 `0x00440AD0`, 4 and 7 `0x00440C20`,
+  5 and 8 `0x00441000`, 6 `0x004413C0`.
+* Every routine but selector 3's falls from state 0 into
+  `PropSeatOnObjectPath` on its first call: 0 `0x00440282`->`0x0044028F`, 1
+  `0x00440433`->`0x00440440`, 2 `0x00440940`->`0x00440969`/`0x00440997` and
+  9 at `0x004408E6`, 4 `0x00440CC0`->`0x00440CE4` and 7 at `0x00440C7C`, 5 into
+  `0x004410B7` and 8 at `0x0044105C`, 6 `0x00441423`->`0x00441430`.
+* Selector 3's routine, `0x00440AD0`..`0x00440BFD` (not a Ghidra function;
+  read as bytes), stores nothing to the object: it reads `obj+0x1310` and
+  writes its own tail and an 8-byte block. It draws the record's angles for
+  life, as behaviour 0 does.
+
+The data, off the disc rather than the bundle (`L18`): sixteen class-0x13
+descriptors in the eleven `evt/*.bin`, 15 in stages 2..4 (the bundle's 15)
+and one in `trnevtbl.bin` on behaviour 9. The five behaviour-0 records are the
+only ones with a non-zero angle; selector 3's (stage 4, 35916) is `(0, 0, 0)`.
+So the one shipped carrier that draws its spawn orientation draws zero, and
+the port already keeps its model out of the bundle.
+
+**Checks.** One `port.test.ts` assertion: every selector in
+`CARRIER_SELECTORS_PORTED`, spawned from a record carrying all three angles,
+holds its `op_` path's after one `ScriptedPropUpdate13`, and the loop expects
+selector 3 to keep the record's when it is ported. Replacing routine 1's
+fall-through call with nothing fails it (`1:1111/2222/3333`).
+
+**Corrected.** `functions.tsv` said `PropSeatOnObjectPath` is called by "every
+carrier routine"; selector 3's never does, and the row now lists every caller.
+The class-0x13 header and `spawns.md` said "five take behaviour 0 ... the
+other eighteen take 8": five is descriptors and eighteen is instructions less
+five. It is 15 descriptors (5 and 10) and 23 instructions (8 and 15).
+
+**Wrong turn.** A first draft of the `ScriptedPropUpdate13` row said "nothing
+else draws the object". Routines 0, 1 and 2 draw their wakes and doors under
+the object's angles; they do it after their own seat, but only those three
+were read that far, so the row now says the *model* is drawn nowhere else.
+
+`[open]`: what routines 3, 4/7 and 5/8 are (stage 4's), and behaviours 6, 7
+and 9 (`0x0043FFC0`, `0x004400D0`, `0x00445050`) -- no stage record uses them,
+though `0x004400D0` also calls `PropSeatOnObjectPath` (`0x00440101`).
+
+## 2026-09-28 -- the stage-2 car's draw, checked a second time; its push translations were the wrong float32s (branch `claude/adoring-lehmann-1b16dc`)
+
+The brief was to port what `St2CarDraw` (`FUN_00452320`) does and the player
+did not draw -- the post-crash asset row, the door's `RotY(obj+0x1334)`, the
+two spun parts on the roll-limited frame -- and to export row 1's slots. **All
+of it was already on `main`**, in `00061004` from this morning's
+`fix/newbugs2-crashed-car`; the brief had been written before that landed. So
+this session re-read the routine and checked the landed work instead of
+redoing it (L17: one agent's reading is not a fact, a positive one included).
+
+**Re-read, `[proved]`.** `disassemble_bytes 0x00452320..0x0045253F`
+matches `car.ts`'s pseudocode instruction for instruction: the four rows at
+`0x565F2C`/`30`/`34`/`38` after `SHL EAX, 0x4`; the door push nested inside
+the body's (two `Pop(1)` at `0x004523BD`/`0x004523C4`); `MatrixGetAngles`'
+three outputs at `[ESP0-0xC]`, `[ESP0-8]`, `[ESP0-4]` re-applied as
+`RotY(out2)`, `RotX(out1)`, `RotZ(limited out3)` at `0x0045247B`..
+`0x0045248B`; the dead zone's five arms. `MatrixGetAngles` (`FUN_004018E0`)
+decompiled: out1 and out2 are `VecToAngles`' pitch and yaw, out3 is
+`fpatan(y, x)` of `M·(1,0,0)` after `RotX(-p)·RotY(-y)` -- which is the
+`{x, y, z}` `carrier.ts` returns and `applyTaskDraw` composes as `"YXZ"`. The
+real stage-2 glb has three roots of eight parts each, the door under its own
+row's body and the four spun parts on the root, all at identity rotation --
+the hierarchy `applyTaskDraw`'s `root⁻¹ · limited` arithmetic assumes.
+
+In the page (`?stage=2&mode=play&entry=0&block=0&step=2&op=0&drive=1`, headless,
+private bundle), unshot: the draw names `2d 2f 34 31` through `0x39` frame 369
+and `2e 30 35 32` from 370; the door runs `-27` at 371 to `-14009` at 404; the
+spin holds at `2260992`. The screenshots show the intact car on `0x38` frame
+100, the crash fireball at `0x39` 369, and the scorched row-1 body parked nose
+first in the storefront at 404 with its door swung out about the front hinge
+and both wheels seated.
+
+**What was wrong: the translations.** The three pushes are `PUSH imm32`s --
+`0x4110EECC 0x40CBC84B 0x410F17C2` (x y z) at `0x00452377`, `0 0x404AB852
+0x415A61E5` at `0x00452497`, `0 0x404AB852 0xC117AE14` at `0x004524E8` -- and
+those are 9.0583, 6.3682, 8.9433, 3.1675, 13.6489 and -9.48. `rigs.py` has
+carried 9.0582619, 6.368186, 8.9433079, 3.1674952, 13.6489019 and -9.4799995
+since `8684c7bf`: five of six components 2 to 40 ulps off, while the note
+beside them quoted the right hex. Invisible (under 4e-5 of a unit) and still a
+wrong number, so fixed in `rigs.py` and regenerated into `rigs_data.ts` and
+`builder_hash.ts`; `car.ts`'s pseudocode had copied them too. A scan of every
+rig part whose note quotes raw hex: 21 components, all agree now, and the car's
+were the only ones that ever did not.
+
+**What pins it.** `render.test.ts`'s car block used to build its graph from
+hand-typed numbers, so nothing tied it to what the exporter ships: it now
+builds from `RIGS` itself and asserts first that both rows of
+`ST2CAR_ASSET_VARIANTS` are one part a slot, that column 1 sits in its own
+row's body and the rest on the root, and that each translation is the float32
+of its push. Mutations: `HEAD`'s decimals fail the third; re-parenting row 1's
+door to row 0's body fails the second and then "row 1 is drawn".
+
+**Wrong turns.** None in the code. The time went on establishing that the task
+was done before starting it -- `git log` on the four files the brief names is
+the first thing to run, not the last.
+
 
 ## 2026-09-28 -- zslman's afterimages, the sprint a shot gives, and the shot voice read off the wrong register
 

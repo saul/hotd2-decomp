@@ -936,8 +936,11 @@ OBJ_452320 = Rig(
                      "RotX from obj+0x40/44/48 and 0x6C/68/64. "
                      "Row 1 draws 0x2E instead (part_002e)."),
         # A genuine nested push: this one is inside part_002d's, not a sibling.
+        # Every translation here is the float32 its PUSH imm32 carries, as the
+        # shortest decimal that round-trips (0x00452377, 0x00452497, 0x004524E8).
+        # They were 2..40 ulps off in five of six components until 2026-09-28.
         RigPart("part_002f", (0x2F,),
-                translation=(9.0582619, 6.368186, 8.9433079),
+                translation=(9.0583, 6.3682, 8.9433),
                 parent="part_002d",
                 condition="obj+0x13F0 == 0: column 1 of row 0",
                 animated="RotY by obj+0x1334, applied only while obj+0x1324 is "
@@ -959,7 +962,7 @@ OBJ_452320 = Rig(
         # the player moves them onto the limited frame the port computes each
         # frame (web/src/game/class21/car.ts, St2CarDraw).
         RigPart("part_0034", (0x34,),
-                translation=(0.0, 3.1674952, 13.6489019),
+                translation=(0.0, 3.1675, 13.6489),
                 condition="obj+0x13F0 == 0: column 2 of row 0",
                 animated="RotX by obj+0x1330, applied only while obj+0x1320 is "
                          "set -- and NOT applied, so drawn at RotX 0, once it "
@@ -978,7 +981,7 @@ OBJ_452320 = Rig(
                      "asymmetric deadzone over -33.75..+11.25 deg, identity "
                      "at rest."),
         RigPart("part_0031", (0x31,),
-                translation=(0.0, 3.1674952, -9.4799995),
+                translation=(0.0, 3.1675, -9.48),
                 condition="obj+0x13F0 == 0: column 3 of row 0",
                 animated="RotX by obj+0x1330, same rule and same gate as "
                          "part_0034",
@@ -1003,18 +1006,18 @@ OBJ_452320 = Rig(
                      "and it is row 0's geometry on another texture set "
                      "(char_adv04 textures 26/30/34 for 0/1/2/33)"),
         RigPart("part_0030", (0x30,),
-                translation=(9.0582619, 6.368186, 8.9433079),
+                translation=(9.0583, 6.3682, 8.9433),
                 parent="part_002e",
                 condition="obj+0x13F0 == 1: column 1 of row 1",
                 animated="RotY by obj+0x1334 while obj+0x1324 != 0, as "
                          "part_002f"),
         RigPart("part_0035", (0x35,),
-                translation=(0.0, 3.1674952, 13.6489019),
+                translation=(0.0, 3.1675, 13.6489),
                 condition="obj+0x13F0 == 1: column 2 of row 1",
                 animated="RotX by obj+0x1330 while obj+0x1320 != 0, on the "
                          "roll-limited frame, as part_0034"),
         RigPart("part_0032", (0x32,),
-                translation=(0.0, 3.1674952, -9.4799995),
+                translation=(0.0, 3.1675, -9.48),
                 condition="obj+0x13F0 == 1: column 3 of row 1",
                 animated="RotX by obj+0x1330 while obj+0x1320 != 0, on the "
                          "roll-limited frame, as part_0031"),

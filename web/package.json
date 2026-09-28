@@ -25,6 +25,8 @@
     "test:ui": "node tools/run_test.mjs test/ui.test.tsx",
     "test:projection": "node tools/run_test.mjs test/projection.test.ts",
     "test:camera": "node tools/run_test.mjs test/camera.test.ts",
+    "test:net-codec": "node tools/run_test.mjs test/net_codec.test.ts",
+    "test:net": "node tools/run_test.mjs test/net.test.ts",
     "verify:ui": "node tools/verify_ui.mjs",
     "bundle-flow": "node tools/bundle_flow.mjs",
     "first-visit": "node tools/first_visit.mjs",

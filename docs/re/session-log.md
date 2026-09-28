@@ -22965,6 +22965,99 @@ cache keyed on less than it stores); main took `L66` while this was open.
   the editor shows as spaces, so an exact-match edit of that line failed until
   it was done on bytes.
 
+## 2026-09-28 -- the damage overlay is opaque, and that is the game (branch `fix/newbugs2-hurt-sprites`)
+
+**The report.** "Should the hurt sprites that render on screen when the player
+is damaged be fully opaque? I think on the real game they're transparent."
+The sprites are the damage overlay: one of eleven `common.bin` models
+(116..126, slots 0x931..0x93B) that `DamageOverlayUpdateAndDraw`
+(`FUN_00417300`) draws in camera space for 59 frames after a hit.
+
+**What the exe does, read end to end** `[proved]`:
+
+* `DamageOverlayUpdateAndDraw` draws with `CALL 0x00418560` at `0x004173B5`
+  -- `AssetDrawSlot`, not `AssetDrawSlotWithAlpha` (`0x004185A0`), and the
+  routine has no other draw. No alpha, colour or scale depends on the frame
+  count.
+* `AssetDrawSlot` -> `RenderSubmitModelDefaultLight` (`0x004AA2B0`) builds an
+  unfaded command (key 0) and `RenderEnqueueCommand` queues it with layer
+  0xA; `RenderFlushCommandList` sends it to `WalkMeshChainAndDraw(cmd, 1)`,
+  not `DrawModelWithForcedAlphaBlend`. Nothing in the flush reads the layer
+  except the sort.
+* Per mesh, `WalkMeshChainAndDraw` `SetMaterial`s the header's colour --
+  all eleven are ARGB `(1, 1, 1, 1)`, ambient scale 0.75, no specular -- and
+  `TranslatePvr2StateToD3D` turns TSP `0x9400041B` (`0x9404041B` on the two
+  U-flipped models) into `SRCALPHA/INVSRCALPHA`, `ALPHATESTENABLE` on (bits
+  20-19 are `00`), `COLOROP`/`ALPHAOP` `MODULATE` (shading mode 0), `POINT`
+  filtering and fog on.
+* The textures, 26..33, are ARGB4444 VQ; `DecodeTextureToSurface`'s VQ arm
+  copies the codebook texels verbatim into the slot-6 (4:4:4) surface. Alpha
+  0 over 55-84% of each texture, and of the texels a mark covers 31-82% are
+  255 (texture 27, the three thin claws, is the low one) with the rest a
+  4-bit soft edge.
+
+So the on-screen alpha is the texel's, and the marks are **solid with
+feathered edges**. The answer to the question is no: they are not
+translucent in the exe. No `PUSH 0x89` (`D3DRENDERSTATE_LIGHTING`) is in the
+D3D module -- the two in the image are data in class 0x2C -- so the device's
+default, on, stands and the model is lit by `SetLightingDefaultSingle`'s
+light (the L32 caveat: a state number in a register would not show). That can
+tint or darken the mark's colour, never its alpha (`[likely]`; how far it
+changes the colour turns on the device's handling of the normals, which the
+0.02 scale leaves unnormalised, and is `[open]`).
+
+**The port already draws that**, and nothing in the draw changed. The node
+keeps the template's material (`applyPvr2DrawState`'s translucent pass, alpha
+test at 1/255, opacity 1). Measured off the page with a new harness,
+`web/tools/hurt_alpha.mjs`: two driven runs on one seed, in step, one of them
+with the record's kind pointed past the slot table for the shot frames so the
+overlay is left out and nothing else moves; the overlay rides the camera, so
+two moments give two backgrounds under each pixel and `a = 1 - dP/dB`. Stage
+2 block 16 (kind 4, texture 28): 80,773 pixels covered, 99.9% at both
+moments; 66.5% of the 46,790 measurable ones at alpha exactly 1.0, against
+65.4% of texture 28's covered texels at 255; every opaque pixel the same
+colour at 57 and 30 frames left. Stage 1 block 4 (kind 0, texture 33): 74.2%
+against 75.9%.
+
+**What is new.** Evidence and guards, no behaviour:
+
+* `render.test.ts`: the overlay's node draws with the template's own
+  material -- the translucent pass, opacity 1 -- the same way on all 59
+  frames, at `(0, 0, -1.02)` scale 0.02 in the camera's group, gone on the
+  sixtieth, drawn only for the two player tasks that call the routine.
+  Mutation-tested: an opacity ramp over the life fails "no fade", and forcing
+  the material opaque fails the pass check.
+* `verify_texture_alpha.py`: the `CALL` at `0x004173B5` is to
+  `AssetDrawSlot`, no call in the routine reaches `AssetDrawSlotWithAlpha`,
+  each model `g_damage_overlay_slots` names is one translucent-pass
+  `SRCALPHA/INVSRCALPHA` mesh at base alpha 1.0 on an ARGB4444 texture with a
+  clear surround and 255 its commonest other alpha, the port's
+  `DAMAGE_OVERLAY_SLOTS` is the exe's table, and the bundle's overlay images
+  carry the bank's alpha byte for byte. Each mutated in-process and seen to
+  fail.
+* Annotations: `AssetDrawSlot`, `AssetDrawSlotWithAlpha` and
+  `RenderSubmitModelDefaultLight` had no comment; `DamageOverlayUpdateAndDraw`
+  carries the opacity chain.
+
+**Found beside it, not done here.** `CurlModelSlot3F7ByYaw` (`0x004759C0`)
+reads the slot record at `0x009AE584`/`0x009AE58C`. `AssetDrawSlot` indexes
+the table as `0x009A66A0 + slot*0x10` (`SHL EAX, 4` at `0x00418576`), so that
+is slot **0x7EE** -- the boss banner's own card back, which the banner loads
+-- and not 0x3F7, which is what a stride of 0x20 gives. The port calls the
+curl a no-op because 0x3F7 is never resident, and draws the cards flat.
+Handed on as its own task.
+
+**Wrong turns.**
+
+* The harness's first cut took one driven frame, lowered the record's
+  `active` through `G`, redrew with `advance(0)` and shot again. The shots
+  were byte-identical, the overlay "covered 0 pixels", and the harness's own
+  "the redraw reproduces the frame" check passed -- because a zero-frame pump
+  renders the scene graph as the last tick posed it, and the render layers
+  pose inside the tick. That is `L69`. Two in-step runs replaced it.
+* The corpus check first opened `pol/common.bin.bin`: `asset_slots()` names
+  files with their extension, and the bank helper wants the stem.
+
 ## 2026-09-28 -- character fades, and the twin `znele` makes (branch `fix/newbugs2-char-fades`)
 
 **The report.** The texture-alpha session left it: `draw_gates.ts` draws a

@@ -2118,6 +2118,42 @@ vertical camera nod: `UpdateSceneViewAndLight` re-aims the camera at
 | 8 | 0x935 | 120 | vertical streak | BLOOD05 |
 | 9, 10 | 0x931 | 116 | ring of teeth marks | BONE01 |
 
+**How opaque it is: solid where the mark is, clear round it** `[proved]`.
+The draw is the plain `AssetDrawSlot` (`FUN_00418560`; the `CALL` is at
+`0x004173B5`), never `AssetDrawSlotWithAlpha` (`FUN_004185A0`), so it hands
+the model no alpha and nothing fades it: `RenderSubmitModelDefaultLight`
+(`FUN_004AA2B0`) queues an unfaded command and `WalkMeshChainAndDraw`
+(`FUN_004A7EF0`) draws each mesh by its own header. All eleven models are one
+mesh each with the same state:
+
+| field | value | what `TranslatePvr2StateToD3D` / `WalkMeshChainAndDraw` make of it |
+|---|---|---|
+| TSP | `0x9400041B` (`0x9404041B` on 123/124, U flip) | `SRCALPHA` / `INVSRCALPHA`; bits 20-19 clear, so the translucent pass with the alpha test on (ref 1); shading mode 0, so `ALPHAOP MODULATE` (texel x diffuse); `POINT` filtering; fog on |
+| base colour, `+0x2C..+0x38` | ARGB `(1, 1, 1, 1)` | `SetMaterial`'s diffuse -- alpha 1.0 |
+| `+0x28`, `+0x24` | 0.75, -1 | material ambient 0.75 x diffuse; no specular |
+| texture | 26..33, ARGB4444 VQ 128x128 | alpha 0 over 55-84% of each; of the texels the mark covers, 31-82% are 255 (the thin claw marks, texture 27, are mostly edge) and the rest a 4-bit soft edge |
+
+So what reaches the screen is the texel's alpha: a solid mark with feathered
+edges, not a translucent one, and the same on all 59 frames. The port draws
+exactly that -- `tools/hurt_alpha.mjs` measures it off the page's pixels
+(stage 2's kind 4: 66.5% of the covered pixels at alpha exactly 1.0 against
+texture 28's 65.4% of covered texels at 255; stage 1's kind 0: 74.2% against
+texture 33's 75.9%), and `tools/verify_texture_alpha.py` holds the call, the
+words, the base alpha, the textures and the bundle's images to it.
+
+`[likely]` **Its colour is lit.** `AssetDrawSlot` draws under
+`SetLightingDefaultSingle`'s light, and no immediate `PUSH 0x89`
+(`D3DRENDERSTATE_LIGHTING`) is in the D3D module, so the device's default --
+lighting on -- stands and the vertex colour the texel is
+multiplied by is D3D's lighting of material ambient 0.75 and diffuse 1.0 --
+with the model's normals `(0, 0, 1)` put through a modelview scaled by 0.02
+and `NORMALIZENORMALS` never set. That can tint the mark with the scene's
+light and darken it where the light is behind it. Alpha is untouched by it
+(the lit diffuse alpha is the material's, 1.0). `[open]` how far: that turns
+on how the device transforms an unnormalised normal. The port draws every
+effect model unlit (`render/lighting.ts`), so it shows the texture's own
+orange.
+
 The zombie attack tables' `+0x0A` values span 0, 1, 2, 3 (type 0x0D only), 4,
 5, 7, 8 and 9; the literals at the other call sites are 0/1 (the thrower's
 grab), 4 (the axe), 6 (arcing throws, the stage-2 boss), 7 (leaps, rolled

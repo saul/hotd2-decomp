@@ -29,10 +29,18 @@ it and blend by their texture's alpha, among them the additive blades of
     `gltf.ts` names. And the count of translucent-pass `IgnoreTexAlpha`
     meshes whose texture has alpha below 255 -- the meshes the stripping
     changed on screen -- is the number the code and the docs give.
+  * **The damage overlay is drawn by its texture's alpha.**
+    `DamageOverlayUpdateAndDraw` calls the plain `AssetDrawSlot` at
+    `0x004173B5` and never `AssetDrawSlotWithAlpha`; every model
+    `g_damage_overlay_slots` names is one translucent-pass `SRCALPHA /
+    INVSRCALPHA` mesh at base alpha 1.0 whose ARGB4444 texture is alpha 0
+    round the mark with 255 its commonest other value; and the port's copy of
+    the slot table is the exe's. That is the whole of why a hit's marks are
+    opaque rather than translucent.
   * **The bundle**, when one written by this tree's `gltf.ts` is present: no
     image named `_opaque`, and the images of `IgnoreTexAlpha` materials on
     ARGB textures carry the bank's alpha byte for byte (every translucent-pass
-    one, and the first opaque-pass ones by name).
+    one, and the first opaque-pass ones by name), as do the damage overlay's.
 
 `pol/pol_<name>.bin` files that are byte-identical copies of `<name>.bin` are
 counted once.
@@ -42,6 +50,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import struct
 import sys
 import zlib
@@ -108,6 +117,17 @@ UNTEXTURED_LIST2_OPAQUE = {"zndina": 4, "zslman": 1}
 STRIPPED_AND_USED = 101
 #: How many opaque-pass `IgnoreTexAlpha` ARGB images to compare, per stage.
 OPAQUE_SAMPLE = 12
+#: `g_damage_overlay_slots` -- `s32[11][2]`, `[kind][players - 1]`.
+G_DAMAGE_OVERLAY_SLOTS = 0x00579F80
+DAMAGE_OVERLAY_KINDS = 11
+#: `DamageOverlayUpdateAndDraw`'s body, and its one draw: `CALL AssetDrawSlot`.
+DAMAGE_OVERLAY_DRAW = (0x00417300, 0x0041743F)
+DAMAGE_OVERLAY_CALL = 0x004173B5
+ASSET_DRAW_SLOT = 0x00418560
+ASSET_DRAW_SLOT_WITH_ALPHA = 0x004185A0
+#: The port's copy of the slot table.
+PORT_DAMAGE_OVERLAY = (Path(__file__).resolve().parent.parent / "web" / "src"
+                       / "game" / "effects" / "damage_overlay.ts")
 
 
 def unique_pol(game: Path) -> list[Path]:
@@ -218,6 +238,96 @@ def corpus(game: Path, fail: Failures) -> dict:
     return own
 
 
+def damage_overlay(game: Path, raw: bytes, tables: ExeTables,
+                   fail: Failures) -> set[str]:
+    """What a hit puts on the screen is opaque where the mark is.
+
+    `DamageOverlayUpdateAndDraw` draws its model with the plain
+    `AssetDrawSlot`, which hands it no alpha, so the opacity on screen is the
+    model's own: its pass, its alpha op, its base alpha and its texture's
+    alpha. Each of those is asserted here for every model the overlay's slot
+    table names, and the port's copy of that table is held to the exe's.
+    Returns the bundle image names whose alpha must be the bank's.
+    """
+    def at(va: int) -> int:
+        r = tables._v2r(va)
+        assert r is not None, hex(va)
+        return r
+
+    call = raw[at(DAMAGE_OVERLAY_CALL):at(DAMAGE_OVERLAY_CALL) + 5]
+    target = (DAMAGE_OVERLAY_CALL + 5
+              + struct.unpack_from("<i", call, 1)[0]) & 0xFFFFFFFF
+    fail.check(call[0] == 0xE8 and target == ASSET_DRAW_SLOT,
+               f"{DAMAGE_OVERLAY_CALL:#010x} is not CALL AssetDrawSlot "
+               f"({call.hex()})")
+    lo, hi = DAMAGE_OVERLAY_DRAW
+    body = raw[at(lo):at(hi)]
+    faded = [lo + i for i in range(len(body) - 4) if body[i] == 0xE8
+             and (lo + i + 5 + struct.unpack_from("<i", body, i + 1)[0])
+             & 0xFFFFFFFF == ASSET_DRAW_SLOT_WITH_ALPHA]
+    fail.check(not faded, "DamageOverlayUpdateAndDraw calls "
+               f"AssetDrawSlotWithAlpha at {[hex(a) for a in faded]}")
+
+    table = struct.unpack_from(f"<{DAMAGE_OVERLAY_KINDS * 2}i", raw,
+                               at(G_DAMAGE_OVERLAY_SLOTS))
+    src = PORT_DAMAGE_OVERLAY.read_text()
+    m = re.search(r"export const DAMAGE_OVERLAY_SLOTS\b[^=]*=\s*\[(.*?)\];",
+                  src, re.S)
+    port = [int(x, 16) for x in re.findall(r"0x([0-9a-fA-F]+)",
+                                           m.group(1))] if m else []
+    fail.check(port == list(table),
+               f"the port's DAMAGE_OVERLAY_SLOTS {port} is not "
+               f"g_damage_overlay_slots {list(table)}")
+
+    where = tables.asset_slots()
+    models: dict[str, list] = {}
+    banks: dict[str, object] = {}
+    images: set[str] = set()
+    seen = 0
+    for slot in sorted(set(table)):
+        file, k = where.get(slot, ("", -1))
+        name = file.removesuffix(".bin")
+        if name not in models:
+            models[name] = nl1.parse_container(container.load(
+                (game / "pol" / file).read_bytes())) if name else []
+            banks[name] = stage._bank_for(game, name) if name else None
+        m = models[name][k] if 0 <= k < len(models[name]) else None
+        if m is None or len(m.meshes) != 1:
+            fail.check(False, f"slot {slot:#x} is not one mesh ({name}[{k}])")
+            continue
+        me = m.meshes[0]
+        seen += 1
+        what = f"slot {slot:#x} ({name}[{k}])"
+        fail.check(not me.opaque_pass and (me.tsp >> 29) == 4
+                   and ((me.tsp >> 26) & 7) == 5,
+                   f"{what}: TSP {me.tsp:#010x} is not the translucent pass "
+                   "with SRCALPHA / INVSRCALPHA")
+        # Mode 1 would be SELECTARG1 -- still the texel's alpha, but the
+        # reading below is of MODULATE, so say so if it ever is not.
+        fail.check(((me.tsp >> 6) & 3) != 1 and me.base_colour[0] == 1.0,
+                   f"{what}: shading mode {(me.tsp >> 6) & 3}, base alpha "
+                   f"{me.base_colour[0]} -- not texel alpha x 1.0")
+        bank = banks[name]
+        got = bank.decode(me.texture_id) if bank else None
+        if got is None or me.pixel_format != 2:
+            fail.check(False, f"{what}: texture {me.texture_id} is not an "
+                       "ARGB4444 texture of the bank")
+            continue
+        hist = Counter(got[2][3::4])
+        nonzero = {a: n for a, n in hist.items() if a}
+        fail.check(hist[0] > 0 and nonzero
+                   and max(nonzero, key=nonzero.get) == 255,
+                   f"{what}: texture {me.texture_id}'s alpha is not a clear "
+                   f"surround round a mostly opaque mark ({sorted(hist.items())})")
+        images.add(f"{name}/tex_{me.texture_id:03d}")
+    fail.check(seen == len(set(table)), f"only {seen} overlay models read")
+    print(f"  damage overlay: CALL AssetDrawSlot at {DAMAGE_OVERLAY_CALL:#x}, "
+          f"no faded draw; {seen} models, each one translucent-pass mesh at "
+          f"base alpha 1 on an ARGB4444 texture that is alpha 0 round the mark "
+          f"and 255 across most of it; the port's slot table is the exe's")
+    return images
+
+
 def glb(path: Path) -> tuple[dict, bytes]:
     b = path.read_bytes()
     ln = struct.unpack_from("<I", b, 12)[0]
@@ -245,7 +355,7 @@ def png_alpha(png: bytes) -> tuple[int, int, bytes]:
     return w, h, rows[3::4]
 
 
-def bundle(game: Path, fail: Failures, own: dict) -> None:
+def bundle(game: Path, fail: Failures, own: dict, must: set[str]) -> None:
     bd = bundle_dir()
     if bd is None:
         print("  bundle: none found -- the images were NOT checked (export "
@@ -258,6 +368,7 @@ def bundle(game: Path, fail: Failures, own: dict) -> None:
     banks: dict[str, object] = {}
     images = opaque_named = compared = mismatched = 0
     prims = wrong_mat = 0
+    named_seen: set[str] = set()
     for path in sorted(bd.glob("stage*/stage*.glb")):
         doc, binary = glb(path)
         # Every model primitive draws with its own mesh's material: the base
@@ -301,7 +412,11 @@ def bundle(game: Path, fail: Failures, own: dict) -> None:
             want[img] = want.get(img, False) or mat.get("alphaMode") == "BLEND"
         opaque = sorted((i for i, t in want.items() if not t),
                         key=lambda i: imgs[i].get("name", ""))[:OPAQUE_SAMPLE]
-        for i in sorted({i for i, t in want.items() if t} | set(opaque)):
+        # ...and the images a caller names outright: the damage overlay's.
+        named = {i for i, im in enumerate(imgs) if im.get("name") in must}
+        named_seen |= {imgs[i]["name"] for i in named}
+        for i in sorted({i for i, t in want.items() if t} | set(opaque)
+                        | named):
             name = imgs[i].get("name", "")
             part, _, tex_name = name.rpartition("/")
             if not tex_name.startswith("tex_"):
@@ -328,6 +443,9 @@ def bundle(game: Path, fail: Failures, own: dict) -> None:
                f"{opaque_named} images in {bd} are alpha-stripped `_opaque` "
                "copies")
     fail.check(compared > 0, "no IgnoreTexAlpha ARGB image was compared")
+    fail.check(named_seen == must,
+               f"the damage overlay's images {sorted(must - named_seen)} are "
+               "in no stage bundle")
     fail.check(mismatched == 0,
                f"{mismatched} of {compared} images differ from the bank's alpha")
     fail.check(prims > 10000, f"only {prims} stage primitives matched a mesh")
@@ -335,7 +453,8 @@ def bundle(game: Path, fail: Failures, own: dict) -> None:
                f"{wrong_mat} of {prims} stage primitives draw with a material "
                "whose base colour or culling is another mesh's")
     print(f"  bundle: {images} images in {bd}, {opaque_named} `_opaque`; "
-          f"{compared} IgnoreTexAlpha ARGB images against the bank, "
+          f"{compared} IgnoreTexAlpha ARGB and damage-overlay images against "
+          "the bank, "
           f"{mismatched} with a different alpha; {prims} stage primitives "
           f"against their mesh's base colour and culling, {wrong_mat} wrong")
 
@@ -376,7 +495,8 @@ def main() -> int:
 
     scan_bit19(raw, tables, fail)
     own = corpus(args.game_dir, fail)
-    bundle(args.game_dir, fail, own)
+    overlay = damage_overlay(args.game_dir, raw, tables, fail)
+    bundle(args.game_dir, fail, own, overlay)
 
     if fail.n:
         print(f"verify_texture_alpha: {fail.n} of {fail.asserted} checks FAILED")

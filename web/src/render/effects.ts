@@ -674,6 +674,15 @@ export class EffectLayer implements System<RenderContext> {
    * so a seek or a load shows whatever the restored state says and nothing a
    * frame from the old timeline left behind.
    *
+   * **No alpha of its own, and none added here** `[proved]`. It is
+   * `AssetDrawSlot` (`FUN_00418560`), not `AssetDrawSlotWithAlpha`, so the
+   * node keeps the template's material untouched -- the translucent pass
+   * `applyPvr2DrawState` gave it from TSP `0x9400041B` (`SRCALPHA /
+   * INVSRCALPHA`, alpha test at 1) and the base alpha 1 -- and what blends is
+   * the texture's own alpha: 255 over the body of each mark, 0 around it. A
+   * fade or a forced opacity here would be a claim the exe does not make; see
+   * `game/effects/damage_overlay.ts` and `tools/hurt_alpha.mjs`.
+   *
    * **Drawn before the shot effects, not after** `[proved]`. Every
    * translucent draw is queued by `RenderEnqueueCommand` (`FUN_004A7E50`)
    * with the current `SetDrawLayerNibble` value OR'd into the low nibble of

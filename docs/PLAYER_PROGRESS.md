@@ -3371,6 +3371,24 @@ in `game/effects/damage_overlay.ts`:
 
 `render/effects.ts` draws it in camera space at `z = -1.02`, scale 0.02, from
 the record alone, so a load or a seek shows whatever the restored state says.
+
+**It is opaque, and that is the game** (checked 2026-09-28 against a report
+that the marks should be translucent). The exe draws it with the plain
+`AssetDrawSlot`, which hands the model no alpha; each of the eleven is one
+translucent-pass `SRCALPHA / INVSRCALPHA` mesh at base alpha 1.0, so the
+alpha on screen is the texture's -- 0 round each mark, 255 over most of it,
+a 4-bit feathered edge between. The port's node keeps the template's
+material untouched and draws exactly that: `tools/hurt_alpha.mjs` measures
+the on-screen alpha off two in-step driven runs (one with the overlay left
+out of the shot frames), and reads 66.5% of stage 2's slash pixels at alpha
+exactly 1.0 against 65.4% of texture 28's covered texels at 255, identical at
+57 and 30 frames left. `render.test.ts` pins the draw (template material,
+the pass, opacity 1, the same draw on all 59 frames) and
+`verify_texture_alpha.py` pins the exe side and the bundle's images. What
+does differ is the **colour**: the exe lights the model under the scene's
+default light and the port draws every effect unlit, so the port shows the
+texture's own orange where the game may tint or darken it
+(`docs/formats/combat.md`, *How opaque it is*).
 The eleven models ride the `slots_effect` rig (slots 0x931..0x93B), so
 **a bundle exported before this has none -- re-export.**
 

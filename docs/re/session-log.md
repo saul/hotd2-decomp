@@ -22165,3 +22165,86 @@ shipped script.
 * The Tower's `Boss3PublishCameraAngles` and `Boss3SeatCameraAngles`
   (`class45/body.ts`) compensate for a view built from the look-at. The view
   is built from the angles now, so both can go.
+
+## 2026-09-28 -- the frog's death, read whole, and why its corpse never went
+
+Class 0x11's death state had never been read. The last frog session left two
+notes -- the death cuts where it should blend, and `SpawnGroundRingEffect` is
+not called -- and the playthrough table above had stage 1 hung in the frogs'
+room with two frogs in `Die/1`. Both halves of the path were read from the
+listing: `FrogAwardKillAndEnterDeath` (`0x0043A2E0`..`0x0043A3C7`) and
+`FrogStateDieTumbleAndSink` (`0x0043B990`..`0x0043BD23`, with
+`0x0043BB68`..`0x0043BB8E` past the `MatrixStackPop` call Ghidra ends case 0
+on). `[proved]` throughout; the TSV rows now carry the whole reading.
+
+**Why the corpse never went.** Case 1 raises `obj+0x34` bit `0x4000` (the
+clip's freeze) when `part+0x08 == len - 1` and waits for `part+0x08 == len`.
+In the engine `part+0x08` is what the last draw computed, and
+`FrogDrawAndCycleBone2Slot` steps the counter *after* its draw, so the draw
+following the freeze computes `len` and the state reads it next frame. The
+port's director steps the counter before the update, so a port state reads the
+cursor the engine's reads a frame later; frozen on `len - 1`, the counter never
+got to `len`. That is `L62`. The class now keeps `part+0x08` on its sub-block
+(`FrogTail.playCursor`, written at the draw and at each blend it starts) and
+every state reads that -- which also moves the hop's launch and stop, the
+leap's launch and connect and every turn pass one frame later, onto the
+engine's frame.
+
+**What else was wrong**, each pinned by a check that fails on the old module
+(`web/test/port.test.ts`, 20 failures against `HEAD`'s `class11/index.ts`):
+
+* case 0 runs on into case 1 (`INC byte ptr [EAX+5]` at `0x0043BB8C`, then
+  `0x0043BB8F`, L53), so the kick is bounced on the frame of the kill;
+* the death clip is blended: `ActorSetMotionBlended` snapshots the drawn pose
+  unconditionally, and the port's primitive keys its snapshot on
+  `obj.motion`, which the port had written first;
+* `SpawnGroundRingEffect(obj)` at `0x0043BCD4`, on the settling frame;
+* the kick is the camera block's rotation of `(0, 0, -0.5)` with the
+  translation zeroed; the port subtracted `ClassFrame.eye` from a camera
+  point, which is wrong wherever the two cameras differ;
+* the kill's bit is `0x8000` (out of the shot test), not `0x100`: corpses were
+  stopping bullets. Whether that is what kept the playthrough off the third
+  frog, or only the corpses never leaving, is `[open]` -- the run below
+  changes both at once;
+* `part+0x210` is bone 2's record `+0x78`, its hit radius -- not bone 3's slot.
+  Bone 3's model is back on the corpse, and the radius is a new
+  `Actor.boneRadius` the pick, the shot test and the blood's depth read;
+* `ChooseHitPlayerOrder` (`0x004093C0`) is called, a draw with two players in;
+  `g_hit_player_order` is in `G`;
+* the kill zeroes the word at `+0x11C` and not `+0x11E`;
+* `FrogInit` raises `part+0x64` bit 4 (`0x0043A170`), which the ring's height
+  and the shadow read, and seeds `obj+0x12C` from the position;
+* two port-only exits: `leave` dropped `g_enemies_alive` again for a corpse,
+  and the sweep freed a permit the corpse no longer held.
+
+**Checks.** `tools/animals.mjs` gains a `frog death` row on the real bundle:
+every frog alive at frame 720 is marked shot, and each must despawn and leave
+one ring (it fails on the old module, one corpse standing). The harness also
+learned the character layer's `spent` set -- it rebuilt despawned actors.
+Stage 1 under `playthrough.mjs --continue`: on `HEAD` the frog room needs the
+debug clear (37 volleys, no damage; `0x2AB0` and `0x2B5C` in `Die/1`), on
+this branch it is shot clear and the stage ends at 9240. Screens of the death
+in the page, before and after, are
+`scratchpad/frog-death/shots/frog-{old,new}-*.png` of this session: the
+corpse keeps its head, and at +14 the ring's strips open round it.
+
+**Wrong turns.** The first stage-1 playthrough ended at block 1 with a
+GAME OVER and I took it for this branch's; the same run on a detached `HEAD`
+did the same thing (33 volleys at a `char_adv00` in `HoldAtRange` with no
+damage landing), so it predates this. The `+0x11E` assertion first passed on
+the old module too, because the fixture's `maxHp` was already 0.
+
+**Next actions.**
+
+* `ActorKillAll` marks an `ownsShotResult` class dead without raising bit 3,
+  so a frog the debug clear reaches never enters its death.
+* The engine stops writing a bone's sphere centre once its slot is 0 or
+  `obj+0x34` has `0x8000` (`SkeletonEmitNode`), so the frog's blood stays
+  where bone 2 was drawn; `render/effects.ts` reads the live bone.
+* `class30/throw.ts` and `SpawnThrownWeapon` zero a hand's hit radius and
+  declare that the actor has nowhere to keep it; `Actor.boneRadius` is that
+  place now.
+* Stage 1 block 1 on `6706e32`: no damage lands on the `HoldAtRange`
+  `char_adv00`, and a run without `--continue` ends there.
+* L62's pairing -- a freeze on one cursor and a wait for the next -- may be
+  in other classes; they read the counter.

@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 88070 | 290 | engine |
+| `game/` | 88340 | 291 | engine |
 | `hod2lib/` | 18393 | 35 | engine |
-| `render/` | 14180 | 51 | render |
+| `render/` | 14184 | 51 | render |
 | `app/` | 7901 | 28 | app |
 | `script/` | 4388 | 25 | engine |
 | `ui/` | 2708 | 21 | ui |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 890 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **140602** | **473** | |
+| **total** | **140876** | **474** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2641
-* `game/actor.ts` — 2511
+* `game/globals.ts` — 2649
+* `game/actor.ts` — 2526
 * `app/main.ts` — 2316
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
@@ -43,9 +43,9 @@ The largest files, which is where the pressure to split next is:
 
 | | |
 |---|---|
-| Gameplay coverage | **219 of 297** annotated functions in the gameplay address ranges have a port (73%) |
+| Gameplay coverage | **220 of 297** annotated functions in the gameplay address ranges have a port (74%) |
 | Ported outside those ranges | 473 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 692 ported functions match `functions.tsv` under the same name |
+| Citations checked | 693 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
 | Declared `[diverges]` | **142** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers in `game/` | **166** — questions the port is honest about not having answered |

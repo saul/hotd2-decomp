@@ -26,6 +26,7 @@
  */
 import { G } from "../globals";
 import { EvtRunQueuedActions } from "./actions";
+import { CameraSyncViewBlock } from "./blocks";
 import { CameraUpdateHook, EvtActionHandler } from "./driver";
 import { CameraUpdateTick } from "./hooks";
 import { RailMayAdvance } from "./rail";
@@ -49,16 +50,21 @@ export { CameraUpdateTick };
  * `SelectCameraLookAtTarget` clears it when no slot is claimed. The major
  * hooks are `[0]` and `[3]` `NoOpStub`, `[2]` `EvtRunQueuedActions` and `[1]`
  * `EvtRunQueuedActionsSyncViewBlock`, which is `EvtRunQueuedActions` and then,
- * while the minor is 3, a copy of block 0's eye and look-at into block 2 -- a
- * block the port has no reader for. The handlers of evt-action blocks 1..3
- * are the two-player camera blocks', and every one the shipped scripts leave
- * is `NoOpStub`. `[proved]`
+ * while the minor is 3, block 0's eye, angles and look-at copied into block 2
+ * (`camera/blocks.ts`). The handlers of evt-action blocks 1..3 are
+ * `NoOpStub` from `CameraActorInit` on and nothing installs another.
+ * `[proved]`
  */
 export function CameraActorTick(): void {
   G.g_camera_settled = 0;
   G.g_camera_is_tracking = 1;
   const major = G.g_scene_state_major_entered;
-  if (major === 1 || major === 2) EvtRunQueuedActions();
+  if (major === 1) {
+    EvtRunQueuedActions();
+    CameraSyncViewBlock();
+  } else if (major === 2) {
+    EvtRunQueuedActions();
+  }
   UpdateSceneViewAndLight();
 }
 

@@ -56,7 +56,8 @@ import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
 import { vec3 } from "./vec";
-import { makeCameraSlots, type CameraCandidate } from "./camera/slot_table";
+import { makeCameraBlockRecords, makeCameraSlots, type CameraBlockRecord,
+         type CameraCandidate } from "./camera/slot_table";
 import { CameraActorInit } from "./camera/actions";
 import { MatIdentity } from "./matrix";
 import { makeEntityLights } from "./entity_light";
@@ -1075,6 +1076,21 @@ export const G = {
    * shipped write is 0 -- the only block the port has.
    */
   g_camera_index: 0,
+  /**
+   * Camera blocks 1, 2 and 3 of `g_camera_blocks`: `[0]` is block 1, `[1]`
+   * block 2, `[2]` block 3. See {@link CameraBlockRecord}. Block 2 is the one
+   * with readers: its path frame at `0x009A6458` (seven cue tests beside block
+   * 0's) and its yaw at `0x009A6418` (the frog's screen wedge).
+   */
+  g_camera_blocks_extra: makeCameraBlockRecords() as CameraBlockRecord[],
+  /**
+   * `0x009C6F1C` -- which of its two arms `EvtRunQueuedActionsSyncViewBlock`
+   * takes on block 2: 0 copies block 0 across, 5 re-aims block 2 at its own
+   * target. Written only by `CameraBlocksReset` and `ResetSceneOnEnter`, both
+   * with 0 (every reference, byte search `1c6f9c00`), so only the copy runs.
+   * `[proved]`
+   */
+  g_camera_view_block_mode: 0,
   /**
    * `g_cam_path_target` — 0x009C70D8. The deferred pose block's target, and
    * the fallback `SelectCameraLookAtTarget` uses when nothing is registered.
@@ -2277,6 +2293,9 @@ export function ResetSceneOnEnter(): void {
   G.g_civilians_alive = 0;
   // `MOV [0x009a2bac], EBX` at `0x0045EE23`, `EBX` zeroed at the top.
   G.g_scene_tick_counter = 0;
+  // `MOV [0x009c6f1c], EBX` at `0x0045EE2F`: block 2's sync arm, back to the
+  // copy.
+  G.g_camera_view_block_mode = 0;
   // `for (i = 0xE; i != 0; i--) *p++ = 0` over `&DAT_009C88C0` at
   // `0x0045EE70` -- and the **0xE is a second, independent proof that
   // `g_hit_slots` is fourteen deep**, the first being the pointer bound in

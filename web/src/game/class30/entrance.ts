@@ -51,6 +51,7 @@ import {
 } from "./death_effects";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
+import { CamCueHit } from "../camera/blocks";
 
 /**
  * `PUSH 0x1A0` at `0x004589F7` and `0x0045EAF0` — the BAMS-per-frame rate the
@@ -96,33 +97,12 @@ const ARC_CROUCH_TYPE0 = { motion: 0x10c, hold: 0x21 };
 const ARC_CROUCH_OTHER = { motion: 0x39f, hold: 0x2c };
 
 /**
- * `[port-only]` — the camera cue the scripted entrances wait on.
- *
- * The engine accepts **either** `g_cam_path_frame` (camera block 0) or
- * `g_cam_path_frame_2` (block 2) — the same `+0xD0` field of two different
- * blocks. `ZombieStateScriptedGrabAndDespawn` (`FUN_00457B50`) does it at
- * `0x00457BE2` and `0x00457BEA`.
- *
- * **The test is an equality on a frame that passes once**, which is the thing
- * to know about it: an actor that exists while its cue frame goes by fires,
- * and one that misses it waits for the rest of the scene. The engine cannot
- * miss, because `SpawnFromDescriptor` builds the object in the opcode that
- * lists it; the port builds it from the same list on the same frame, which is
- * what keeps that true here.
- *
- * [diverges] The port models one camera block, so this tests the one it has.
- * A spawn whose cue is authored against block 2 waits on block 0's frame
- * instead; none of the 47 spawns across states 18, 19 and 23 was observed to
- * need the second, because a stage that is running block 2 is running a
- * cutscene camera the port does not drive either.
- *
- * One function rather than the test written out, because it **was** written
- * out twice — here and in `class30/scripted.ts` — and only one copy carried
- * the divergence.
+ * The camera cue the scripted entrances wait on: block 0's or block 2's path
+ * frame, as `camera/blocks.ts` says. One function rather than the test
+ * written out, because it **was** written out twice -- here and in
+ * `class30/scripted.ts` -- and only one copy carried the second block.
  */
-export function CamCueHit(frame: number): boolean {
-  return G.g_cam_path_frame === frame;
-}
+export { CamCueHit };
 
 /**
  * The branch every waiting entrance ends with: `obj+0x1310 = (s8)tail+0x03`.
@@ -486,8 +466,17 @@ export function ZombieStateArcScriptedEntrance(obj: ZombieActor, dt: number,
   }
 
   if (obj.sub === 1) {
-    obj.zom.holdFrames -= SecondsToTicks(dt);
-    if (obj.zom.holdFrames >= 1) return;
+    // Two ways to wait, on the descriptor's own initial-state byte
+    // (`tail+0x02`, `CMP byte ptr [EDI+0x2], 0x16` at `0x00458AA7`): a spawn
+    // whose tail names state 22 waits for its camera cue -- block 0's frame or
+    // block 2's (`0x00458AB9`/`0x00458ABD`) -- and every other counts the
+    // delay down. The three shipped arc entrances carry 30, so they count.
+    if (obj.initialState === ZombieState.Approach) {
+      if (!CamCueHit(obj.zom.holdFrames)) return;
+    } else {
+      obj.zom.holdFrames -= SecondsToTicks(dt);
+      if (obj.zom.holdFrames >= 1) return;
+    }
     const crouch = obj.charType === 0 ? ARC_CROUCH_TYPE0 : ARC_CROUCH_OTHER;
     ActorSetMotionBlended(obj, crouch.motion, 0, MotionFade.Quick);
     obj.zom.holdFrames = crouch.hold;

@@ -44,6 +44,8 @@ import { CameraUpdateHook, EvtActionHandler }
   from "../src/game/camera/driver";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
 import { UpdateSceneViewAndLight } from "../src/game/camera/view";
+import { CamCueHit } from "../src/game/camera/blocks";
+import { CameraBlocksReset } from "../src/game/camera/actions";
 import { MOTION_FLAGS_INIT, MotionFlag, makeActor, type Boss2Actor,
   type FishActor }
   from "../src/game/actor";
@@ -15928,6 +15930,50 @@ console.log("\na block change carries the action ring's count:");
   check("the count never goes below zero", lowest >= 0, `${lowest}`);
   check("...and the next block's wait holds until its own shot has ended",
         passedAt === 10, `passed with the camera on ${passedAt}`);
+}
+
+/**
+ * Camera block 2: block 0 as the scene last sat in state (1,3).
+ *
+ * `EvtRunQueuedActionsSyncViewBlock` (`FUN_004023D0`, the camera actor's
+ * major hook for major 1) copies block 0's eye, angles and target into block
+ * 2 while the minor is 3, and nothing else writes it. Seven cue tests accept
+ * block 2's path frame beside block 0's, and the frog's wedge reads block 2's
+ * yaw.
+ */
+console.log("\ncamera block 2 follows block 0 between rooms and holds through a fight:");
+{
+  ResetGameGlobals();
+  G.g_camera_block_eye = vec3(10, 5, 20);
+  G.g_camera_block_target = vec3(10, 5, -80);
+  G.g_scene_state_major = 1; G.g_scene_state_minor = 3;
+  G.g_scene_state_major_entered = 1; G.g_scene_state_minor_entered = 3;
+  G.g_evt_action_advance = 0;
+  CameraActorTick();
+  const b2 = G.g_camera_blocks_extra[1];
+  check("between rooms block 2 takes block 0's eye and its aim",
+        b2.eye.x === 10 && b2.eye.z === 20 && b2.target.z === -80
+        && Math.abs(((b2.yaw - G.g_camera_block_yaw_bams) << 16) >> 16) <= 1,
+        `${JSON.stringify(b2.eye)} yaw ${b2.yaw} vs ${G.g_camera_block_yaw_bams}`);
+  const held = b2.yaw;
+  // A fight: major 2. Block 0 turns; block 2 does not follow.
+  G.g_scene_state_major = 2; G.g_scene_state_minor = 4;
+  G.g_scene_state_major_entered = 2; G.g_scene_state_minor_entered = 4;
+  G.g_camera_block_target = vec3(90, 5, 20);
+  G.g_camera_block_yaw_bams = 0x4000;
+  CameraActorTick();
+  check("...and in a fight it holds what it had",
+        b2.yaw === held && G.g_camera_blocks_extra[1].eye.x === 10,
+        `yaw ${b2.yaw} vs ${held}`);
+  G.g_cam_path_frame = 7;
+  check("its path frame is never written, so a cue is met on block 0's frame "
+        + "or on block 2's 0",
+        CamCueHit(7) && CamCueHit(0) && !CamCueHit(5),
+        `frame ${G.g_cam_path_frame}, block 2 ${b2.pathFrame}`);
+  CameraBlocksReset();
+  check("the reset zeroes it with block 0",
+        G.g_camera_blocks_extra.every((b) => b.yaw === 0 && b.eye.x === 0
+                                             && b.pathFrame === 0));
 }
 
 /**

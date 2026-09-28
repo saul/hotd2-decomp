@@ -150,7 +150,8 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number): voi
         && t?.motion !== undefined && obj.motion !== t.motion) {
       ActorSetMotion(obj, t.motion);
     }
-    if (G.g_cam_path_frame !== (t?.cue_frame ?? -1)) return;
+    // Block 0's frame or block 2's (`0x004576A6`/`0x004576AE`).
+    if (!CamCueHit(t?.cue_frame ?? -1)) return;
     obj.sub = 2;
   }
 
@@ -216,7 +217,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
 
   if (obj.sub === 1) {
     // `-1` fires at once; otherwise the camera path frame must equal it —
-    // **either camera block's**, which is `CamCueHit` and its divergence.
+    // **either camera block's**, which is `CamCueHit`.
     if (obj.zom.holdFrames !== -1 && !CamCueHit(obj.zom.holdFrames)) return;
     if (t.motion === GRAB_MOTION_PAIRED) {
       ActorSetMotionBlended(obj, GRAB_MOTION_PAIRED, 0, 1);

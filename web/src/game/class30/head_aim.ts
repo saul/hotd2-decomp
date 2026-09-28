@@ -51,6 +51,7 @@
  * readings two names, as `ZombieTail` does for its other intra-class aliases,
  * and the flag is the measured reason that is safe -- see its doc.
  */
+import { CameraBlockYawAt } from "../camera/blocks";
 import { ActorFlag, MotionFlag, ThrowerFlag, type Actor } from "../actor";
 import { AngleWithinTolerance, TurnAngleToward } from "../actor_turn";
 import { G } from "../globals";
@@ -162,7 +163,7 @@ export function ActorHeadAimAngles(obj: Actor, pt: Vec3, eye: Vec3):
   if (G.g_max_attackers === 2 && obj.attackPermit !== -1) {
     const m = MatIdentity();
     MatrixTranslate(m, eye.x, eye.y, eye.z);
-    MatrixRotateY(m, G.g_camera_block_yaw_bams);
+    MatrixRotateY(m, CameraBlockYawAt(G.g_camera_index));
     _aim.x = Math.fround((1 - 2 * obj.attackPermit) * HEAD_AIM_SHOULDER);
     _aim.y = HEAD_AIM_TWO_RISE;
     _aim.z = HEAD_AIM_AHEAD;

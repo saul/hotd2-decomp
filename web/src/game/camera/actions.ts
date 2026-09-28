@@ -41,6 +41,7 @@ import { MatIdentity, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
          MatrixTransformPoint, MatrixTranslate } from "../matrix";
 import { vec3 } from "../vec";
 import { EVT_ACTION_TABLE, EvtActionHandler } from "./driver";
+import { makeCameraBlockRecords } from "./slot_table";
 import { CAMERA_EYE_DROP, CamStashPathRange } from "./rail";
 import { CamAdvancePathFrame, CamEvalStaticPose, CamStartPathPlayback,
          EvtActionRetire } from "./path";
@@ -524,8 +525,9 @@ export function CheckpointResetCamera(): void {
  * LightBlockInit x2; LightsUseSecondarySet; LightsRestoreScene;
  * ```
  *
- * Block 0 is the port's; `+0x110` is `g_cam_path_frame`. The two light
- * blocks are the walker's. `[proved]`
+ * Block 0 is the port's `g_camera_block_*`, blocks 1..3
+ * `g_camera_blocks_extra`; `+0x110` is each block's `g_cam_path_frame`. The
+ * two light blocks are the walker's. `[proved]`
  */
 export function CameraBlocksReset(): void {
   G.g_camera_block_eye = vec3();
@@ -534,7 +536,9 @@ export function CameraBlocksReset(): void {
   G.g_camera_block_roll_bams = 0;
   G.g_camera_block_target = vec3();
   G.g_cam_path_frame = 0;
+  G.g_camera_blocks_extra = makeCameraBlockRecords();
   G.g_camera_turn_curve = 1;
+  G.g_camera_view_block_mode = 0;
   G.g_camera_index = 0;
   EvtEnterSceneState(0, 0);
   G.g_camera_free = 0;

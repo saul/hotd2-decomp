@@ -38,8 +38,10 @@
  * host's `viewSpaceOf`, `viewPoint`, `aimPoint` and `cameraMatrices` -- and
  * what the draw places the three.js camera from. Built here, inside the camera
  * actor's task, they are the view of **this** frame for every task after it,
- * as the engine's are. Only block 0 is modelled: `g_camera_index` is written
- * 0 by every shipped writer.
+ * as the engine's are. The nod and the drawn view are block 0's:
+ * `g_camera_index` is written 0 by every shipped writer. Blocks 1..3 are
+ * built and read back too (`camera/blocks.ts`), because block 2's angles have
+ * a reader.
  */
 import { AppState, G } from "../globals";
 import { MatrixGetAngles, type Rot3 } from "../carrier";
@@ -47,6 +49,7 @@ import { MatIdentity, MatCopy, MatrixGetTranslation, MatrixLoadIdentity,
          MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTransformPoint,
          MatrixTranslate } from "../matrix";
 import { vec3 } from "../vec";
+import { CameraBuildBlockView } from "./blocks";
 import { CameraUpdateHook } from "./driver";
 import { CamBlockSetAnglesFromLookAt, CamEvalPath7, CameraPoseBlock }
   from "./path";
@@ -88,6 +91,8 @@ export function UpdateSceneViewAndLight(): void {
   CamBlockSetAnglesFromLookAt(CameraPoseBlock.Camera, _q,
                               G.g_camera_block_roll_bams);
   CameraBuildView();
+  // Blocks 1..3, which no one nods: `g_camera_index` is always 0.
+  for (const b of G.g_camera_blocks_extra) CameraBuildBlockView(b);
   // The stamp every unstamped scene-state entry waits for.
   G.g_scene_state_major_entered = G.g_scene_state_major;
   G.g_scene_state_minor_entered = G.g_scene_state_minor;

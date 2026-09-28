@@ -75,6 +75,7 @@
  *   it. **The decompiler shows none of it** — its pseudocode ends at
  *   `0x0043345E` with a `return` the code does not have, which is `L37`.
  */
+import { CamCueHit } from "../camera/blocks";
 import type { Rng } from "../../core/rng";
 import { type Actor, ActorFlag, type ScriptedSceneryActor } from "../actor";
 import { ActorDespawn } from "../despawn";
@@ -253,12 +254,11 @@ export function ScriptedCarrierStepPath33(obj: ScriptedSceneryActor,
  * early return is what stops the ride, and the despawn arm is reached only by
  * falling past both.
  *
- * [diverges] The despawn cue is `g_cam_path_frame == tail+0x1C ||
- * g_cam_path_frame_2 == tail+0x1C`, camera blocks 0 and 2. The port models one
- * camera block, so it tests the one it has — the same divergence, for the same
- * reason, as `class30/entrance.ts`'s `CamCueHit`. Of the three shipped
- * carriers only stage 5's names a frame at all (650); stage 2's two both carry
- * `-1` there and leave on their script flag instead.
+ * The despawn cue is `g_cam_path_frame == tail+0x1C || g_cam_path_frame_2 ==
+ * tail+0x1C`, camera blocks 0 and 2 (`0x004333D7`/`0x004333DF`), which is
+ * `CamCueHit`. Of the three shipped carriers only stage 5's names a frame at
+ * all (650); stage 2's two both carry `-1` there and leave on their script
+ * flag instead.
  */
 export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
                                         f: ClassFrame): void {
@@ -313,7 +313,7 @@ export function ScriptedCarrierUpdate33(obj: ScriptedSceneryActor,
   }
 
   if (G.g_script_flags[t.despawn_flag] !== 1
-      && G.g_cam_path_frame !== t.despawn_frame) {
+      && !CamCueHit(t.despawn_frame)) {
     ScriptedCarrierStepPath33(obj, f.host, f.events);
     return;
   }

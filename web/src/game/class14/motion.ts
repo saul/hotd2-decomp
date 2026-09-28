@@ -3,6 +3,7 @@
  * inline, spelled once. None of them is an exe function: each is a line or
  * two the engine writes out at every site, and each helper says which.
  */
+import { CameraBlockYawAt } from "../camera/blocks";
 import type { Events } from "../../core/events";
 import type { Actor } from "../actor";
 import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
@@ -67,17 +68,20 @@ export function Class14Sound(events: Events | undefined, id: number): void {
 }
 
 /**
- * `[port-only]` `g_camera_block_yaw_bams[g_camera_index]` — `0x009A60D0`, the
- * camera block's own heading, which four class-0x14 states put on a splash strip
- * and `Class14StateScriptedBreak` turns the boss by.
+ * `g_camera_block_yaw_bams[g_camera_index]` — `0x009A60D0 + index * 0x1A4`,
+ * the camera block's own heading, which the class puts on its splash strips
+ * and `Class14StateScriptedBreak` turns the boss by: `MOV EAX, dword ptr
+ * [ECX*4 + 0x9a60d0]` at `0x0047A888` (`Class14StateReposition`),
+ * `0x0047AC24` and `0x0047B0A1`, each with `ECX` the block's offset from
+ * `g_camera_index`. `[proved]`
  *
- * The port keeps one camera heading, `g_camera_yaw_bams`, which the host
- * writes from the view it draws -- the camera block's orientation, which is
- * this word's meaning. Whether the engine's two yaw words (this and
- * `0x009C71F0`) ever differ is the camera's `[open]`, recorded on
- * `globals.tsv`; here it is read the way `PropUpdateType43` and the bat read
- * it.
+ * **Not `g_camera_yaw_bams`** (`0x009C71F0`), which it read until the camera
+ * became the engine's: that is the gameplay yaw the scene state's hook
+ * writes, and on a stashed rail it is the pose's yaw turned half round
+ * (`CameraStepRailTick`), so a strip laid on it faced the other way.
+ *
+ * `[port-only]` as a function: the engine has the read inline.
  */
 export function Class14CameraBlockYaw(): number {
-  return G.g_camera_yaw_bams;
+  return CameraBlockYawAt(G.g_camera_index);
 }

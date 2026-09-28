@@ -31,6 +31,7 @@ import { SecondsToTicks, T } from "./tables";
 import { RankEnemiesByDistance } from "./combat/rank";
 import { DropDueShotRequests } from "./combat/shot";
 import { ShotTestListReset } from "./combat/shot_test";
+import { ColiPublishDynamicList } from "./coli";
 import { CommitAppState } from "./app_state";
 import { GameOverRunPhase } from "./game_over";
 import { PlayerTasksRun } from "./player_shell";
@@ -711,6 +712,9 @@ function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
   // list makes, and it ends by emptying `g_shot_test_list`: the trigger pulls
   // above were tested against what the actors registered last frame, and what
   // they register below is for the next one. See `combat/shot_test.ts`.
+  // Its last three stores publish the list first (`0x00404612`), so the
+  // crowd push this frame's actors run tests what they registered last frame.
+  ColiPublishDynamicList();
   ShotTestListReset();
   // The heads the burst threw, stepped where the engine steps its tasks.
   SeveredHeadsTick(rng, events);

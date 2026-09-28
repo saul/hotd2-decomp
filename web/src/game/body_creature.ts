@@ -54,7 +54,8 @@
  * reaches `BodyCreatureUpdate` only through the allocation — so there is no
  * `SpawnClass` for it to key a handler on.
  *
- * `[open]` One consequence, and it is not a spelling difference:
+ * One consequence, and it is not a spelling difference -- the divergence
+ * declared at the last line of `BodyCreatureUpdate`, below:
  * `BodyCreatureUpdate` ends by calling `RegisterForCameraTracking`
  * (`FUN_00408EC0`), so a live creature is a **camera candidate** in the
  * engine. The port's candidate list (`camera/slots.ts`) is over `Actor`s, so
@@ -430,7 +431,8 @@ function BodyCreatureFly(c: BodyCreature, rng: Rng,
     c.flags &= ~ActorFlag.Hit;
     // The engine also drops its enemy slot here — `g_enemy_slots[obj+0x120]
     // = 0` — and returns without drawing. The port has no slot for a
-    // non-actor to hold; see the `[open]` at the top of this file.
+    // non-actor to hold: the camera-candidate divergence the file's header
+    // describes, one line from the other end of the same routine.
     return true;
   }
   const f = c.flight;
@@ -520,9 +522,13 @@ export function BodyCreatureUpdate(c: BodyCreature, rng: Rng, host: GameHost,
       break;
   }
   // The last line of the routine, past the draw, on every state and every
-  // path that does not despawn — the part the decompiler drops. See the
-  // `[open]` about `RegisterForCameraTracking`, which is the other half of
-  // that tail and is not ported.
+  // path that does not despawn — the part the decompiler drops.
+  //
+  // [diverges] Its other half, `RegisterForCameraTracking` (`FUN_00408EC0`),
+  // is not called: the port's camera candidates are `Actor`s and this record
+  // is not one, so a live creature is never a camera candidate here as it is
+  // in the engine. The file's header has the whole of it, and the open
+  // question of what space the registered point is in.
   if (live) {
     // The draw's own argument, resolved here — see {@link BodyCreature.slot}.
     c.slot = BodyCreatureDrawSlot(c);

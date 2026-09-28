@@ -49,6 +49,7 @@
  * wall exactly as it is for a player.
  */
 import { G } from "../game/globals";
+import { ShotTestPickedHere } from "../game/combat/shot_test";
 import type { Walker } from "../script/walker";
 import type { Rng } from "../core/rng";
 import type { PlayerState } from "./urlstate";
@@ -283,8 +284,10 @@ export class Harness {
    * `FUN_00405160`): an object on it is one a pull *can* hit this frame, at
    * the point its class published at `obj+0x70`. A driver that cannot see the
    * actors sprays a grid and walks past a boss's handful of spheres; this is
-   * the same information the game itself uses, read, not a new decision. Only
-   * the classes that register the engine's way are on the list.
+   * the same information the game itself uses, read, not a new decision.
+   * Every registered object is on the list -- the crowd push reads it too --
+   * but only the ones the port's own pick tests (`ShotTestPickedHere`) are
+   * offered here, so a driver aims at the same set it always has.
    */
   shotTargets(): ShotTarget[] {
     const out: ShotTarget[] = [];
@@ -300,7 +303,7 @@ export class Harness {
         continue;
       }
       const obj = G.g_object_list.find((o) => o.at === e.at);
-      if (!obj) continue;
+      if (!obj || !ShotTestPickedHere(obj)) continue;
       const p = project(obj.shotCentre);
       if (!p) continue;
       out.push({ at: obj.at, cls: obj.cls, x: p.x, y: p.y, z: p.z });

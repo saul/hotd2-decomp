@@ -107,6 +107,7 @@ import {
 import { restoreGore, swapGore } from "./characters/gore";
 import { placeBatRoot } from "./characters/bat";
 import { placeThrowerRoot } from "./characters/thrower";
+import { placeHumanoidRoot } from "./characters/humanoid";
 export type { Instance };
 
 
@@ -614,6 +615,9 @@ export class CharacterLayer implements System {
     } else if (placeThrowerRoot(inst)) {
       // Class 0x31: all three angles in order 1. See
       // `render/characters/thrower.ts`.
+    } else if (placeHumanoidRoot(inst)) {
+      // Class 0x25: the same order, which `ScriptedHumanoidInit` writes. See
+      // `render/characters/humanoid.ts`.
     } else if (a.carrierAt >= 0) {
       // **A rider is drawn where its carrier's matrix puts it.**
       // `CarriedZombieUpdate18` (`FUN_0045CD90`) and `CivilianUpdateOnCarrier`

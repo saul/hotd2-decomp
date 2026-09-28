@@ -207,11 +207,18 @@ export enum ActorFlag {
    * arm plays `0x823A9`, `CAR_FIRE_22_OFF.wav`, which is what says the bit
    * stands for a *loop that has to be stopped* rather than a one-shot.
    *
-   * `[proved]` its only two readers on `obj+0x34` are `0x004332DA` and
-   * `0x00433830`, both inside that routine — a sweep for `TEST` against a
-   * `0x200000` mask returns 39 sites and no other names `+0x34`. Whether any
-   * of the six that test a bare register hold `obj+0x34` there is `[open]`;
-   * this name describes the one class that provably writes it. The same bit
+   * `[proved]` two of its readers on `obj+0x34` are `0x004332DA` and
+   * `0x00433830`, both inside that routine. The sweep that found those two --
+   * `TEST` against a `0x200000` mask, 39 sites -- missed two more. One is
+   * `TEST dword ptr [ECX + 0x34], 0x200000` at `0x00449D8F` in
+   * `ThrowerPushOutOfWorld` (`FUN_00449D40`), on whatever object the crowd
+   * push found, which knocks an off-ground thrower down instead of pushing
+   * it. The other is `ZombieStateEmerge`, which loads `obj+0x34` into `EAX`,
+   * tests it at `0x00458509` (`a900002000`) and clears the bit at
+   * `0x00458510` -- a class-0x30 actor, whose bit can only have come in on its
+   * spawn record (`class30/emerge.ts`, `L3`). Whether any other bare-register
+   * test holds `obj+0x34` is `[open]`; this name describes the one class that
+   * provably writes it. The same bit
    * number in `obj+0x136C` is {@link ThrowerFlag.DeathLatched}, which is a
    * different word and a different fact.
    */
@@ -336,11 +343,13 @@ export enum ActorFlag {
    * or a memory word, would be invisible to this sweep too (`L32`).
    *
    * The docstring this replaced said the state was "the only reader and
-   * writer". See `PLAYER_HANGS.md` 22 for what that cost and for the `[open]`
-   * item it leaves: `class30/stand_throw.ts` still **raises** this bit where
-   * the engine's own sub 0 writes `obj+0x136C` bits `1` and `0x100000`
-   * instead, which is what put two character-type-19 axe men — whose records
-   * do not carry it — into state 12.
+   * writer". See `PLAYER_HANGS.md` items 22 and 24 for what that cost:
+   * `class30/stand_throw.ts` **raised** this bit in sub 0, where the engine's
+   * own arm only tests it and writes `obj+0x136C` bits `1` and `0x100000`
+   * (`0x004590E6`..`0x00459109`), and that is what put two character-type-19
+   * axe men — whose records do not carry it — into state 12. It makes the
+   * engine's writes now; an operand sweep for `0x1000000` in the database
+   * finds no class-0x30 raise of this word either.
    */
   HoldingWeapon = 0x1000000,
   /**
@@ -545,7 +554,7 @@ export enum ThrowerFlag {
    * 0x17 `EnemyThrowerInit` (`FUN_00449620`) also raises `obj+0x38` bit 3 for
    * it (`OR dword ptr [ESI + 0x38], 0x8` — `834e3808` at 0x00449802).
    *
-   * **What the branch does is not `[open]`.** `FUN_0044A200` is
+   * **What the branch does is known.** `FUN_0044A200` is
    * `if ((obj+0x136C & 1) && g_scene_light_array) SubmitSlotWithSceneLightArray
    * (FUN_004185E0) else AssetDrawSlot (FUN_00418560)` — the bit picks the
    * lit submission path. `[proved]`, from two readings that met here: one
@@ -781,8 +790,8 @@ export enum ZombieAux {
    * submits through `SubmitSlotWithSceneLightArray` (or its alpha twin
    * `FUN_00418620`) instead of `AssetDrawSlot` — so the actor is lit by the
    * gun lights and the evt `0x16` ambient. `[proved]`, read for the flashlight;
-   * this used to be `DrawVariant` and `[open]`. Fifty-five shipped class-0x30
-   * spawns set the source bit — 20 in stage 2 and 35 in stage 4.
+   * this used to be `DrawVariant`, an open question. Fifty-five shipped
+   * class-0x30 spawns set the source bit — 20 in stage 2 and 35 in stage 4.
    *
    * Class-agnostic: `EnemyThrowerInit` (`0x00449802`, character type 0x17
    * with `obj+0x136C` bit 0) and `CivilianInit` (`0x0048A642`, when
@@ -883,6 +892,12 @@ export enum ZombieFlag2 {
    * `ZombieStateArcScriptedEntrance` and `ZombieStateScriptedGrabAndDespawn`.
    * The states raise it for exactly as long as something other than the actor
    * itself owns its position.
+   *
+   * That is the carrier states' reading and not the bit's only writer (`L3`):
+   * `ZombieStateEmerge` raises it for the climb out of the water
+   * (`0x00458528`) and `ZombieStateStandAndThrow`'s sub 0 for an airborne
+   * body-condition-7 thrower (`0x00459104`). `ZombieOnShot` and
+   * `ChooseDeathMotion` read the bit whoever wrote it.
    */
   Carried = 0x100000,
   /**
@@ -896,10 +911,10 @@ export enum ZombieFlag2 {
    * Bit `0x4000` — raised for the length of `ZombieStateDelayedLeap`'s arc and
    * cleared on both its exits.
    *
-   * **`ZombieOnShot` reads it back**, which closes an `[open]` this comment
-   * used to carry: `00453f88 f6c540` (`TEST CH, 0x40`) and the `JNZ` two bytes
-   * later jump past the death-state change, so a zombie shot mid-leap keeps
-   * flying. `[proved]`
+   * **`ZombieOnShot` reads it back**, which answers an open question this
+   * comment used to carry: `00453f88 f6c540` (`TEST CH, 0x40`) and the `JNZ`
+   * two bytes later jump past the death-state change, so a zombie shot
+   * mid-leap keeps flying. `[proved]`
    *
    * It is a different word from `obj+0x34` bit 0x4000
    * ({@link ActorFlag.PoseFrozen}) which the same state also toggles — two
@@ -909,7 +924,7 @@ export enum ZombieFlag2 {
   /**
    * Bit `0x80000000` — this actor's death has already been dispatched.
    *
-   * Also no longer `[open]`: `ZombieOnShot` sets it at `00453f53`
+   * Also no longer an open question: `ZombieOnShot` sets it at `00453f53`
    * (`0d00000080`) and refuses a second death on the test five instructions
    * earlier, `00453f3b a900000080`. `[proved]`
    */
@@ -943,7 +958,8 @@ export enum ZombieFlag2 {
    * While it is up the same state exempts the actor from the too-close retreat
    * (`0045577c f7866c13000000040400`, the `0x40400` pair with
    * {@link ZombieFlag2.StrikeAnchor}) and refuses the attack claim outright
-   * (`00455815 f6c404`). `ZombieOnShot` also clears it (`00453efd`).
+   * (`00455815 f6c404`). `ZombieOnShot` also clears it, for every shot that
+ * lands (`00453f14 80e6fb AND DH, 0xFB`, stored at `00453f24`).
    * `[proved]` — the ops. That the clip in question is the *authored entrance*
    * one is `[likely]`: it is what character type 2's spawns carry.
    */
@@ -1026,8 +1042,11 @@ export enum ZombieFlag2 {
    * Bit `0x1` — raised with {@link ActorFlag.HoldingWeapon} cleared, when the
    * actor lets go of what it was holding: `ZombieStateCarryProp` does both at
    * its release and when its prop is destroyed, the same `& 0xFEFFFFFF` on
-   * `obj+0x34` and `| 1` here both times. `ChooseDeathMotion`'s directional arm reads
-   * `obj+0x136C` bits 1, 2 and 4; `[open]` what this one selects there.
+   * `obj+0x34` and `| 1` here both times. `ZombieStateStandAndThrow`'s sub 0
+   * raises it too (`OR AL, 1` at `0x004590F4`), for a body-condition-7
+   * thrower whose spawn record does **not** set `HoldingWeapon`.
+   * `ChooseDeathMotion`'s directional arm reads `obj+0x136C` bits 1, 2 and 4;
+   * `[open]` what this one selects there.
    */
   LetGo = 0x1,
   /**
@@ -1261,18 +1280,17 @@ export interface ActorBase {
    * in. See {@link CountFlag}; class 0x31 latches the same two facts in
    * `obj+0x136C` instead, which is the usual polymorphism.
    *
-   * [open] Bits `0x1`/`0x2`/`0x4` are class 0x30's counting latches, but bit
-   * **`0x40` is class-agnostic and this port does not model it**, and neither
-   * is `obj+0x3C`, the s32 beside it. `ActorInitFlags` (`FUN_00408970`) zeroes
-   * both; `ActorClaimHitSlot` (`FUN_00409270`) does
-   * `obj+0x3C = -1; if (g_hit_slots[i] == 0) { obj+0x38 |= 0x40;
-   * g_hit_slots[i] = obj; obj+0x3C = i; }`; and `ActorDespawn`
-   * (`FUN_00409CC0`) reads the byte back —
+   * Bits `0x1`/`0x2`/`0x4` are class 0x30's counting latches, and bit
+   * **`0x40` is class-agnostic**: the hit-slot claim, `HIT_SLOT_CLAIMED` in
+   * `game/hit_slots.ts`, beside {@link Actor.hitSlot} (`obj+0x3C`).
+   * `ActorInitFlags` (`FUN_00408970`) zeroes both; `ActorClaimHitSlot`
+   * (`FUN_00409270`) does `obj+0x3C = -1; if (g_hit_slots[i] == 0) {
+   * obj+0x38 |= 0x40; g_hit_slots[i] = obj; obj+0x3C = i; }`; and
+   * `ActorDespawn` (`FUN_00409CC0`) reads the byte back —
    * `if ((obj+0x38 & 0x40) && obj+0x3C != -1) { g_hit_slots[obj+0x3C] = 0;
    * obj+0x3C = -1; }` — before `ActorKill`. `[proved]` Class draws also use
-   * `obj+0x3C` as a per-actor seed. `game/globals.ts` already records
-   * `g_hit_slots` as not ported; porting the hit-slot system is a job of its
-   * own and until it happens this word carries only class 0x30's three bits.
+   * `obj+0x3C` as a per-actor seed. This note said the bit and the slot were
+   * not modelled, for as long as the hit-slot table was not ported.
    */
   flags38: number;          // +0x38
   /**
@@ -1899,9 +1917,13 @@ export interface ActorBase {
    * class-agnostic routines read. Renamed for that reason; the writers are
    * `ActorUpdateBoundingSphere` (`FUN_00454AC0`) for class 0x30,
    * `ThrowerPlaceCollisionSphere` (`FUN_00449E80`) for class 0x31, and that
-   * switch for class 0x10. Of the switch, only mode 0 — the actor's own
-   * position — is ported; modes 1-3 read matrices out of the model block and
-   * are `[open]`.
+   * switch for class 0x10 — the actor's position, bone 2, bone 1 (the
+   * default), or halfway between bones 12 and 15, each bone read out of its
+   * draw record as a world point (`class10/update.ts`,
+   * `CivilianWriteSphereCentre`). Whatever a class writes here is what the
+   * others' crowd push measures: `RegisterForShotTest` records it and
+   * `ColiTestSphereAgainstActors` reads it back out of `g_coli_dynamic_list`
+   * a frame later, whichever class wrote it.
    *
    * It is **not** what the camera aims at: that is `obj+0x100`
    * ({@link Actor.lookAt}), which the skeleton walk writes and
@@ -2379,11 +2401,13 @@ const LOW_SPHERE = 0x2000000;
  * x and z, with y lifted by the **body** radius `obj+0x128` and then by one
  * unit — or a half when `obj+0x136C` bit `0x2000000` is set.
  *
- * It lives here rather than beside its caller because both the class-0x30 push
- * and `ColiTestSphereAgainstActors` need it, and the second must be able to
- * ask it about an actor that has not ticked yet. The engine solves that with a
- * per-frame registration list; deriving the sphere from the position is the
- * same answer without the ordering hazard.
+ * Its caller is the class-0x30 push, `ZombiePushOutOfWorldAndActors`
+ * (`FUN_00454900`). What another actor's push measures against is **not**
+ * this function's answer but the centre the actor registered with
+ * `RegisterForShotTest` last frame, which `ColiTestSphereAgainstActors`
+ * (`FUN_00405B10`) reads out of `g_coli_dynamic_list`; it used to re-derive
+ * every sphere through here instead, a frame early and in class 0x30's shape
+ * whatever the class.
  */
 export function ActorUpdateBoundingSphere(obj: Actor): void {
   obj.sphereCentre.x = obj.pos.x;

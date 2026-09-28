@@ -52,7 +52,8 @@
  * ## What is not ported, by name
  *
  * * `OneHitTargetHoldDrawn` and the `g_GameMode` 2 (Training) / block 0x0D
- *   arms that reach it. The two gate bytes are `[open]`.
+ *   arms that reach it, whose two gate bytes are the open question
+ *   `OneHitTargetState` records.
  * * `OneHitTargetBoneDrawHook` (`FUN_00449530`) — a per-bone draw callback
  *   that writes nothing to the actor. The renderer's.
  * * `SpawnGroundRingEffect` (`FUN_00407DA0`) and `SpawnBoneHitSprite`
@@ -60,8 +61,8 @@
  *   `game/effects/ring_effect.ts` and `game/effects/blood.ts`.
  * * The damaged-part swap `g_pBoneEffectSlots[type][bone][0]`. The port has
  *   `ActorSwapDamagedPart` for the combat classes; wiring class 0x20's
- *   single-index read of the same table to it is a renderer question and is
- *   left `[open]` rather than half-done.
+ *   single-index read of the same table to it is a renderer question, and
+ *   it is not done: `[diverges]`, the hit bone keeps the model it had.
  */
 import { ActorFlag, type Actor, type OneHitTargetActor } from "../actor";
 import { ActorDespawn } from "../despawn";
@@ -313,7 +314,8 @@ export function OneHitTargetStepIdle(obj: OneHitTargetActor): void {
  *
  * [diverges] The `g_GameMode == 2 && g_evt_block_index == 0x0D` arm at the top
  * — the one that leads to `OneHitTargetHoldDrawn` (`FUN_004494D0`) — is not
- * ported: its two gate bytes are `[open]`, and reading them wrong would freeze
+ * ported: its two gate bytes are unread (`OneHitTargetState`'s open
+ * question), and reading them wrong would freeze
  * an actor that should be alive. The port always takes the ordinary path.
  * Mode 2 is **Training**, whose stage is scene 6 (`trnevtbl.bin`), so nothing
  * a stage bundle can carry reaches this arm at all.

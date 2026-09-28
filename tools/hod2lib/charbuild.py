@@ -17,7 +17,8 @@ from .bams import compose_bams, rot_matrix
 from .combat import (MOTION_ROW_BACKOFF, actor_radius, attack_picks,
                      attack_tables, damage_rank_row, gore_parts,
                      hit_reactions, hit_sphere, hit_steps, motion_row,
-                     throw_tables, torso_stage_count, zombie_throw_tables)
+                     THROWER_AFTERIMAGE_SLOTS, throw_tables,
+                     torso_stage_count, zombie_throw_tables)
 
 
 #: The spawn's authored yaw is used **as written**. There is no half turn.
@@ -359,6 +360,9 @@ def gore_entry(stage, tables, char: Character) -> dict | None:
         for h in hands:
             want.update(v for v in (h["held"], h["bare"], h["projectile"])
                         if v)
+    # **And what the weapon trails**: ``zslman``'s afterimages draw a model of
+    # their own that no hand kit names -- see ``THROWER_AFTERIMAGE_SLOTS``.
+    want.update(THROWER_AFTERIMAGE_SLOTS.get(char.char_type, ()))
     # **And class 0x30's own throw kit, which is a different table.**
     # ``ZOMBIE_THROW_SLOTS`` is what ``ZombieThrowHandWeapon``
     # (``FUN_0045A240``) switches on -- character types 1, 0x13 and 0x14 --

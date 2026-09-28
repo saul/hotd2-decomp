@@ -1026,7 +1026,51 @@ tells you the runs stayed in step. It is `L44`'s "a harness that prints its
 arguments as its result" one layer down: a redraw that repeats the frame
 agrees with any claim about it.
 
-**L70 -- A load through initialised data comes out of the decompiler as a
+**L70 -- A list with two readers cannot be gated for one of them.**
+`RegisterForShotTest` appends to one list, and the engine reads it twice: the
+shot pick, and -- copied a frame later by `ColiPublishDynamicList` -- the crowd
+push, `ColiTestSphereAgainstActors`. The port migrates the pick a class at a
+time, and put the migration's gate on the *writer*: `ActorRegisterCameraPoint`
+filed an actor only if its class had moved across. That starved the second
+reader of every zombie, thrower, civilian and frog, and nothing showed it,
+because the crowd push had been given a substitute -- it walked the pool,
+re-deriving every sphere, under a comment that the pool "is the same set". It
+is not the same set (the list holds only what registered, in front of the eye,
+without `0x8000`) and not the same time (the list is last frame's spheres, as
+each class left them). Two notes elsewhere then built on the gap: the frog got
+`ownsSphereCentre` to stop the substitute overwriting its published point, and
+`backoff.ts`'s note that the whole hook was unported -- written half an hour
+before it was ported -- outlived the port by four weeks. **When a port stands something in for a structure the exe shares
+between two routines, find every reader of the structure before gating any
+writer of it**, and put a migration's boundary at the reader it is migrating.
+The same session tripped `L56` with its own hands: a new `import` from
+`coli.ts` into `thrown_weapon.ts` put a top-level `ActorFlag.Hit` inside
+`actor.ts`'s cycle, `tsc` and `test:port` passed, and the page threw at
+startup -- found only because the next driven playthrough measured nothing.
+
+**L71 -- A register read is named by the instruction that loaded the register,
+not by the constant it is compared with.** `ZombieOnShot`'s dead arm is `MOV
+EAX, [EBP]` / `CMP EAX, 0x2` at `0x00453F6E`, and a session annotated it "on
+`g_hit_result`, read back": 2 is `HitResultCode.Plain`, and the loop reads
+`g_hit_result` a few lines earlier. `EBP` had been loaded at `0x00453EEE` with
+`LEA EBP, [EDI*4 + 0x9A2D88]` -- `g_shot_bone` -- and the loop keeps the result
+pointer in `EBX`. So "is it the head?" was recorded as "was the result 2?",
+tagged `[proved]`, written into three docs and an annotation row, and pinned by
+five checks that passed because they encoded the reading rather than tested it.
+`ThrowerOnShot` "agreed" because it was read the same way, at the same kind of
+`[EBP]`.
+
+Two things made it stick. It was a **correction**: `combat.md` had said `bone
+== 2` since the routine was first read, and the reversal was believed because
+it came later and was more emphatic. And the port could not hear the
+difference: kinds 1 and 2 share a voice pair, so the only change was an
+impact sample. **When a disassembly note names what a register holds, cite the
+instruction that put it there** -- the `LEA` or the `MOV` -- and when a note
+overturns an earlier reading, it owes the earlier one the same trace, not a
+louder adjective. `verify_combat.py` check 15 now reads the `LEA`'s operand out
+of the image in both routines.
+
+**L72 -- A load through initialised data comes out of the decompiler as a
 literal.** `ThrowerStateRearm` (`FUN_0044F7A0`) decompiles to eight float
 constants written into two hands' bone records -- `obj+0x554 = 0x3fe00000`,
 `obj+0x558 = 0xbdcccccd`, and so on -- and I had them typed up as the

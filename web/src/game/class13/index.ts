@@ -2,9 +2,13 @@
  * Class 0x13 — **a script-driven prop**, and stage 3's arriving boat.
  *
  * The class is one asset slot drawn under a matrix, with a behaviour chosen
- * out of a ten-entry table. 23 spawns across stages 2, 3 and 4; five of them
- * take behaviour 0, `NoOpStub`, and are static scenery, and the other eighteen
- * take behaviour 8, which is an installer rather than a behaviour.
+ * out of a ten-entry table. 23 spawn instructions across stages 2, 3 and 4
+ * reach 15 descriptors: five of them (eight instructions, all stage 2's) take
+ * behaviour 0, `NoOpStub`, and are static scenery, and the other ten (fifteen
+ * instructions) take behaviour 8, which is an installer rather than a
+ * behaviour. This said "the other eighteen", counting descriptors on one side
+ * and instructions on the other. `trnevtbl.bin` holds a sixteenth descriptor,
+ * on behaviour 9 (`0x00445050`, unread).
  *
  * ```
  * ScriptedPropInit13 (FUN_0043FE10)
@@ -42,12 +46,14 @@
  * frame 0x550 with `PlaySoundId(0x000B16A9)`, and states 5 and 6's strip.
  * The state and the cursors are here; the draws are `render/slotmodels.ts`',
  * reading the `*Drawn` fields this file sets on the frames the engine draws.
- * They used to be a `[diverges]` for want of their slots in the bundle.
+ * They used to be declared a divergence, for want of their slots in the
+ * bundle.
  *
  * `FUN_004459C0`, the on-screen test state 6 uses to decide when to despawn,
- * reads view-space `obj+0x70`/`+0x78` against the shot radius. The port has
- * those through `GameHost.viewSpaceOf`, and where it cannot answer the boat
- * holds state 6 rather than vanishing. [diverges]
+ * projects the shot radius through `g_projection_distance_px / obj+0x78` and
+ * compares it against the viewport. It is **not** ported, in either routine
+ * that reaches it, so the boat holds state 6 and the descriptor's own cue is
+ * what removes it; each of the two declares that at its own `case`.
  */
 import type { Actor } from "../actor";
 import { ActorDespawn } from "../despawn";
@@ -525,6 +531,13 @@ export function CarrierPropRoutine6(obj: Actor, f: ClassFrame): void {
  * The despawn cue first — `g_active_cam_path` and `g_cam_path_frame` both
  * equal to the pair the descriptor named — then the behaviour. The draw that
  * follows it in the engine is `render/slotmodels.ts`'s.
+ *
+ * The behaviour runs **before** the draw (`CALL [EDI]` at `0x0043FEC9`, the
+ * matrix from `0x0043FEDE`), so the record's angles are drawn only where the
+ * behaviour writes none: behaviour 0, and carrier selector 3 (`0x00440AD0`,
+ * which never stores to the object), both for life. Every other carrier
+ * routine falls from state 0 into {@link PropSeatOnObjectPath} on its first
+ * call, and its first draw is already on the path. `[proved]`
  */
 export function ScriptedPropUpdate13(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);

@@ -124,10 +124,12 @@ should take it:
 
 * **The renderer answers questions; it never decides.** `GameHost.pickShot`
   (`ShotTestSphere`, `FUN_00404630`) returns the nearest actor-and-bone or prop
-  along a segment, for the classes that do not register for the shot test.
-  For those that do (`ClassHandler.registersForShotTest`), **who is a
-  candidate is the game's**. Their updates call `RegisterForShotTest` into
-  `G.g_shot_test_list`, and `game/combat/shot_test.ts` runs the broad phase,
+  along a segment, for the classes the port's own pick has not taken over.
+  For those it has (`ClassHandler.registersForShotTest`), **who is a
+  candidate is the game's**. Every class's update calls `RegisterForShotTest`
+  into `G.g_shot_test_list` where the exe's does -- the list is also the
+  crowd push's, a frame later -- and `game/combat/shot_test.ts` picks from
+  the entries of the classes that have moved across, running the broad phase,
   the fork and the sort itself. It asks the host only for what a pose knows:
   `boneSphere` and `viewSpaceOfPoint`. `MergeShotPicks` puts the two answers
   together until every class has moved across -- three, while a class the
@@ -317,6 +319,42 @@ constant we never found — it is tagged and explained on the spot:
 
 `[diverges]` is greppable, and the count of them is the honest measure of how
 finished this is.
+
+**One departure, one tag.** The count is only honest if every tag is one
+departure and every departure is one tag, so:
+
+* **The tag goes where the port's code departs** — on the routine, or the
+  branch in it, that does something other than the exe; or, for a departure
+  in *representation* (a field the port keeps differently, or keeps and the
+  exe has not got), on the declaration of that field. Its reason is on the
+  spot, and `verify_port.py` fails a tag with none.
+* **Two routines that depart for one reason are two departures**, and each
+  carries a tag: each is a transcription someone will compare against Ghidra,
+  and fixing one does not fix the other. The readers of a word the port does
+  not have are the usual case (`L64`) — `class30/entrance.ts`,
+  `class31/scripted.ts` and `class33/index.ts` each test block 0's path frame
+  where the exe also accepts block 2's, and they are three tags. The routines
+  that *maintain* a representation departure are not: `worldPushDepth` is one
+  port-only field, tagged on `Actor`, and the two push-outs that clear it point
+  there.
+* **Everything else names it in words.** A file header summarising a
+  departure its body makes, a "see the one above", a note in another class
+  that "makes the same trade", and a record of a departure since fixed all
+  describe it without writing the token (`L41`): "this routine's declared
+  divergence", "it used to be declared a divergence". A fixed departure keeps
+  its history if the history is useful — `class25/index.ts` keeps `L26`'s — and
+  loses its tag.
+
+`[open]` follows the same rule. It marks a question about the binary that has
+not been answered, once, where it is asked. A question since answered, a
+"that closes an earlier open question", a back-reference to one asked
+elsewhere, and a thing the port knowingly does not do (which is a
+`[diverges]`, not a question) do not carry it.
+
+Both are counted by `tools/status.py` in every `.ts`/`.tsx` file under
+`web/src/`, in comments only — `ui/panels/Crumbs.tsx`'s `[open]` is a React
+dependency array and is not a marker. [`STATUS.md`](STATUS.md) has the
+numbers, by layer.
 
 **5. Tables from `.rdata` go in the bundle; immediates from `.text` go in
 `game/`.** A number the exporter *reads out of the EXE* — a per-character
@@ -1503,9 +1541,9 @@ cheaply checkable because both sides are text.
   the same address ranges** — they were not, and the figure read fifteen points
   high in the flattering direction. Its current value is in
   [`STATUS.md`](STATUS.md); do not quote it here.
-* **List the divergences.** Every `[diverges]` tag, gathered into the report,
-  so the places the port is knowingly wrong are one command away instead of
-  spread through the tree.
+* **List the divergences.** Every `[diverges]` tag in `web/src/`, gathered
+  into the report, so the places the port is knowingly wrong are one command
+  away instead of spread through the tree.
 * **Classes:** enumerate `game/class*/`, cross-check against the class table in
   `docs/formats/spawns.md`, and report which have behaviour, which are
   deliberately inert, and which are simply unread — the drift that let 279

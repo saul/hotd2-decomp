@@ -294,20 +294,6 @@ export interface ClassHandler {
    * `combat/shot_test.ts`.
    */
   registersForShotTest?: boolean;
-  /**
-   * **This class writes its own `obj+0x12C..0x134`**, and
-   * `ColiTestSphereAgainstActors` (`FUN_00405B10`) must measure it there.
-   *
-   * The engine's actor-versus-actor test walks the spheres the classes
-   * published, whatever each class put in them. The port's walks the pool and
-   * re-derives each actor's sphere with `ActorUpdateBoundingSphere`
-   * (`FUN_00454AC0`) — class 0x30's formula, feet plus the body radius plus
-   * one — which is right for class 0x30 and overwrites anything another class
-   * wrote. Set, the sphere is left as the class left it. Class 0x11 sets it:
-   * `FrogPushOutOfActorCollision` (`FUN_0043A500`) publishes bone 1's drawn
-   * point, not its feet.
-   */
-  ownsSphereCentre?: boolean;
 }
 
 /**

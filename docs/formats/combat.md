@@ -234,8 +234,13 @@ the classes that set `ClassHandler.registersForShotTest`. Such a class calls
 `RegisterForShotTest`, or `ActorRegisterCameraPoint` (`camera/track.ts`, which
 now carries the tail call), from its own update at the exe's site. The
 director stops calling the camera point for it, and `render/`'s pick passes it
-by. `ShotTestListReset` runs where `ProcessPlayerShots` does, straight after
-the player tasks. `ActorSpawn` runs `ActorBuildSkinnedModel`, which raises
+by. **Every class that calls `ActorRegisterCameraPoint` is filed**, flag or
+no flag, as `0x00409BED` files it, because the list's second reader is the
+crowd push (see section 10); the pick is what migrates, and
+`ShotTestPickedHere` is where it passes over the entries of a class
+`render/` still picks. `ColiPublishDynamicList` and then `ShotTestListReset`
+run where `ProcessPlayerShots` ends, straight after the player tasks.
+`ActorSpawn` runs `ActorBuildSkinnedModel`, which raises
 `0x80` on a type with bones, and `CatInit` clears it. The port holds
 `obj+0x70..0x78` in world space (`Actor.shotCentre`) and takes the depth
 through the camera its frame reads.
@@ -1204,33 +1209,50 @@ pointer into `+0x0A` need not show as a reference to that address.
 ### Hitting — `ActorShotFeedback` and `ActorPlayHitVoice`
 
 `ZombieOnShot` (`FUN_00453EB0`) runs the reaction once `ResolveHit` has set
-`g_hit_result`:
+`g_hit_result`, per player in `g_hit_player_order`:
 
 ```c
+if (obj+0x34 & 0x100) return;                   /* ShotImmune: the whole loop */
+obj+0x1364 = result; obj+0x136C &= ~0x400; obj+0x34 |= 0x8000000;   /* sprint */
 ActorShotFeedback(player);                      /* FUN_00454050 -- blood or ricochet */
+if (obj+0x136C & 0x80000000) continue;          /* the death latch: silent */
 if (still alive)  { hit reaction motion; if (result != 5) voice(obj, 0); }
-else              { voice(obj, result == 2 ? 2 : 1); state = 6; }
+else              { latch; voice(obj, bone == 2 ? 2 : 1); state = 6 or 9; }
 ```
 
-**The kind is the hit-result code and nothing else.** `[proved]`, from the
-instruction stream and from a second routine that agrees:
+**The dead arm's kind is the shot bone; the live arm's is the result.**
+`[proved]`, from the instruction stream and from a second routine that agrees.
+The loop loads two pointers at its head and holds them to its end:
 
 ```
+00453eee  8d2cbd882d9a00   LEA  EBP, [EDI*4 + 0x9a2d88]   ; &g_shot_bone[p]
+00453f0d  8d1cbdf8589a00   LEA  EBX, [EDI*4 + 0x9a58f8]   ; &g_hit_result[p]
+00453f3b  a900000080       TEST EAX, 0x80000000  ; latched -> neither arm
 00453f46  f7463400000004   TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
-00453f4d  0f84c7000000     JZ   0x0045401a                         ; ...alive
-00453f6e  83f802           CMP  EAX, 0x2       ; g_hit_result, read back
-00453f73  6a02             PUSH 0x2            ; dead, result 2 -> kind 2
-00453f77  6a01             PUSH 0x1            ; dead, otherwise -> kind 1
+00453f68  8b4500           MOV  EAX, [EBP]     ; the bone
+00453f6e  83f802           CMP  EAX, 0x2       ; the head?
+00453f73  6a02             PUSH 0x2            ; dead, head      -> kind 2
+00453f77  6a01             PUSH 0x1            ; dead, elsewhere -> kind 1
+00454020  8b03             MOV  EAX, [EBX]     ; the result
 00454025  83f805           CMP  EAX, 0x5
 0045402a  6a00             PUSH 0x0            ; alive, result != 5 -> kind 0
 ```
 
-`ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the same two
-constants at `0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the
-bone and neither tests whether the actor died of *this* shot.** This page said
-`bone == 2 ? 2 : 1` for a long time, the browser player's shot path was written
-from it, and the correction is small only because of the table below: kind 2's
-voice pair *is* kind 1's, so what changes is the impact and not the line.
+`EBP` is callee-saved across the two calls between the `LEA` and the read, and
+`DispatchHit` fills `g_shot_bone[p]` from `obj+0x190 + p`, the byte
+`MarkActorShot` writes the hit bone into. `ThrowerOnShot` (`FUN_004499A0`) is
+the same: `LEA EBP` of the same address at `0x004499D4`, `MOV EAX, [EBP]` at
+`0x00449A70`, `CMP EAX, 0x2` at `0x00449A76`. Neither tests whether the actor
+died of *this* shot — only that it is dead and its death not yet latched.
+`tools/verify_combat.py` check 15 reads those operands out of the image.
+
+This page said `bone == 2 ? 2 : 1` when the routine was first read, which was
+right. A later session read `[EBP]` at `0x00453F6E` as `g_hit_result` — the
+other of the two pointers, the one in `EBX` — rewrote this section, the
+player's shot path and its tests to "the result is 2", and said so here as a
+correction. It is corrected back, with the register this time. What made either
+reading easy to hold is the table below: kind 2's voice pair *is* kind 1's, so
+what changes between them is the impact and not the line.
 
 `ActorPlayHitVoice` (`FUN_0040A6F0`) plays **two** sounds — a flesh impact and
 a voice:
@@ -1238,8 +1260,8 @@ a voice:
 | Event | Impact, one at random | Voice |
 |---|---|---|
 | hurt (kind 0) | `BLOOD02`, `BLOOD03`, `BLOOD04`, `BLOOD06`, `BONE01` | `ZOMBIE_010` / `ZOMBIE_012` |
-| dead, result != 2 (kind 1) | the same five | `ZOMBIE_019` / `ZOMBIE_018` |
-| dead, result == 2 (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
+| dead, not the head (kind 1) | the same five | `ZOMBIE_019` / `ZOMBIE_018` |
+| dead, the head (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
 | attack cry (kind 3) | *none* | a coin flip **within** the set's own pair |
 
 Kinds 1 and 2 carry the **same voice pair**, which is checked against every
@@ -1658,6 +1680,77 @@ they approach, are refused a permit, and simply stand at the ring.
 
 with `SelectCameraLookAtTarget` reading the slot table every frame, so the
 camera swings onto whoever just took a permit and follows them in.
+
+### The crowd keeps itself apart — `ZombiePushOutOfWorldAndActors`, `FUN_00454900`
+
+`EnemyZombieInit` puts it at `obj+0x12F0` (`0x00452E4A`, for every character
+type), and nothing in `EnemyZombieUpdate` calls it by name: it is `model+0x115C`
+of the skinned model at `obj+0x194`, which `SkeletonApplyRootMotion` calls at
+`0x00410E93` inside `ZombieAdvanceMotion`'s draw — after the state, the
+velocity and the frame's root motion, before any node, and before
+`ActorRegisterCameraPoint` files the sphere it leaves. Once per update, every
+state; the states that stop a zombie being pushed drop its bits instead.
+`[proved]`
+
+```
+obj+0x136C &= ~0x800000;  sphere()
+if (obj+0x136C & 0x40000000) {                      ; collide with actors
+    if (obj+0x138) {                                ; a push someone recorded
+        f = obj+0x13C * 0.1;  if (pusher+0x34 & 0x18000000) f *= 1.8
+        obj+0x40..0x48 += f * obj+0x140..0x148;  sphere();  obj+0x138 = 0
+    }
+    if (ColiTestSphereAgainstActors(obj+0x12C, obj+0x128)) {
+        f = g_coli_hit_depth * 0.1;  if (obj+0x34 & 0x18000000) f *= 1.8
+        obj+0x40 += nx * f;  obj+0x48 += nz * f     ; x and z only
+        obj+0x136C |= 0x800000;  sphere()
+    }
+}
+if (obj+0x136C & 0x20000000 && ColiTestSphereAgainstFullSet(...)) {
+    obj+0x40..0x48 += n * depth;  obj+0x136C |= 0x800000;  sphere()
+}
+if (!(obj+0x34 & 0x20000)) ActorSnapToGroundHeight(obj)
+sphere()
+if (--obj+0x1338 < 0 && obj+0x136C & 0x800000) { obj+0x1338 = 0x3C; obj+0x136C ^= 0x400000 }
+```
+
+`0.1` is `[0x004C4CC8]` and `1.8` is `[0x0055DD48]`. **The 1.8x bits are
+`0x10000000`, the strike's commit, and `0x8000000`, the spawn's sprint bit** —
+not the airborne bit `0x20000`, which is only the ground snap's gate. So a
+sprinter shoves and is shoved harder all its life, and a walker only while it
+swings. The normal is not renormalised for the x/z push: a neighbour above or
+below pushes less.
+
+**`ColiTestSphereAgainstActors` (`FUN_00405B10`) tests last frame's
+registrations.** It walks `g_coli_dynamic_list` (`0x005A3098`), which
+`ColiPublishDynamicList` (`FUN_00405360`) copies out of `g_shot_test_list` at
+the end of `ProcessPlayerShots` — a task that runs before every actor — and
+`g_coli_dynamic_count` is the copied count (`0x00404626`). So the candidates are
+the objects that called `RegisterForShotTest` on the previous frame (in front
+of the eye or a mesh, `0x8000` clear), each measured at the `obj+0x12C` its
+class had left when it registered, and refused on its **live** `obj+0x34` for
+`0x80008000` or `0x10`. A body behind the camera pushes nobody.
+
+For each candidate inside `r + obj+0x128` (a zero `obj+0x128` is filled from
+`obj+0x124` and stored back), the routine takes two surface points —
+`VecToAngles` and a translate/rotate of `(0, 0, radius)`, once from each centre
+toward the other — and files a candidate with the near point as the hit,
+`far point - near point` as the normal, `|centre - far point|` and
+`|near point - far point|`, keyed on `__ftol(distance * 10)`. The stable radix
+sort picks the nearest, and then:
+
+```
+depth = (|near - far| <= R) ? r - |centre - far| : |centre - far| + r
+if (nx + ny + nz == 0.0) return 0                   ; a sum, not a length
+normalise;  other+0x138 = me;  other+0x13C = depth;  other+0x140.. = -n
+```
+
+which is `r + R - d` when the radii are equal and something else when they are
+not: a thrower's two-thirds sphere against a zombie's gets less than the
+overlap whenever the centres are between the two radii apart, and a small
+sphere well inside a big one is pulled further in.
+`ThrowerPushOutOfWorld` reads `g_coli_hit_object` after the same test: unless
+it is `zslman`, a found object carrying `obj+0x34` `0x200000` knocks an
+off-ground thrower into state 2 rather than pushing it. `[proved]`
 
 ### Enemies that never walk to you
 
@@ -2441,7 +2534,7 @@ its own bits on top. Everything the shipped records set:
 | `0x10000` | 4 | `NoCameraTrack` |
 | **`0x20000`** | **95** | **`ZombiePushOutOfWorldAndActors` skips the ground snap** |
 | `0x40000` | 22 | `EnemyZombieInit` skips the aim-angle setup |
-| `0x8000000` | 155 | picks between `row[2]` and `row[3]` |
+| `0x8000000` | 155 | picks between `row[2]` and `row[3]`, and makes the crowd push 1.8x |
 
 `0x20000` is the one that shows. Stage 1's axe man stands on a ledge whose
 collision is **two vertical quads** — `coli1.bin:4968`, both `axis 2` with a

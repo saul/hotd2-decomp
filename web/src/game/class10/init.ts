@@ -21,9 +21,12 @@ const DEFAULT_TURN_RATE = 10;
  * `CivilianInit` — `FUN_0048A3E0`.
  *
  * Allocates the sub-block, seeds it, points the script at the tail's entry and
- * builds the children. The engine also installs the two pose hooks
- * (`UNK_0048D1F0` and `PoseHookGrowAndPushOutOfWorld`) and binds the part list;
- * both are the renderer's, and are `[diverges]` here.
+ * builds the children. The engine also installs two hooks in the model
+ * block (`0x0048A60B`..`0x0048A61B`): `0x0048D1F0` at `model+0x1158`, the
+ * per-node draw `SkeletonEmitNode` calls, which is the renderer's and
+ * `[diverges]` here with the rest of the drawing; and
+ * `PoseHookGrowAndPushOutOfWorld` at `model+0x115C`, which is the game's and
+ * which `CivilianUpdate` calls where its draw is.
  */
 /** `CivilianInit`'s literal for `obj+0x128` — `0x3F800000`. */
 const CIVILIAN_BODY_RADIUS = 1;

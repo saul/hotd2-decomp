@@ -166,8 +166,9 @@ function tail(obj: ZombieActor, eye: Vec3, host: GameHost,
     if (obj.zom.targetLoops !== 0) return;
     if (cue < 0) {
       if (obj.zom.carryRelease !== RELEASE_AT_CAMERA) {
-        // `[open]` The engine first tests `g_GameMode == 2 && DAT_009A2234 ==
-        // 1` and, if both hold, replays the wait clip instead. That is
+        // `[diverges]` The engine first tests `g_GameMode == 2 &&
+        // DAT_009A2234 == 1` (`0x0045B624`) and, if both hold, replays the
+        // wait clip instead. That is
         // Training, the word is one Training's own routines write, and no
         // bundle is exported in Training -- so the arm is not ported and the
         // step to the next entry is what every shipped stage takes.

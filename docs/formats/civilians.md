@@ -218,7 +218,7 @@ Two consequences worth knowing, both the engine's:
 | `0x14` | `AddPickedItem` | value |
 | `0x15` | `PickHeldItem` | weighted table |
 | `0x16` | `SetRadiusRamp` | target radius, frames |
-| `0x17` | `SetCameraPointMode` | which point the shot test registers |
+| `0x17` | `SetSphereCentreMode` | **[proved]** the low byte of `cmd[1]` to `sub+0x80` (`0x0048BE5B`), which picks the collision-sphere centre `CivilianUpdate` writes to `obj+0x12C` -- see *The collision sphere* below. It was `SetCameraPointMode`; the camera's point is `obj+0x100` and this never reaches it |
 | `0x18` | `SetPose` | pointer to six floats |
 | `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |
@@ -511,6 +511,45 @@ units** for every civilian type — and descends into `ShotTestSkeleton` only
 when `obj+0x34` bit `0x80` is set. No class-0x10 script ever sets it. What
 lands is `MarkActorShot` (`FUN_00404DB0`): `obj+0x34 |= (1 << (player + 1)) |
 8`, and `CivilianUpdate` reads those bits back on its next frame.
+
+## The collision sphere
+
+`CivilianUpdate` ends by writing `obj+0x12C..0x134`, the centre
+`RegisterForShotTest` publishes and `ColiTestSphereAgainstActors` measures
+every other actor's push against, from a four-arm switch on `sub+0x80`
+(`0x0048ADB5`..`0x0048AF83`, jump table `0x0048B12C`). **[proved]**
+
+| `sub+0x80` | Arm | Point |
+|---|---|---|
+| 0 | `0x0048ADDB` | `obj+0x40`, the actor's position (carrier-relative on a carrier) |
+| 1 | `0x0048ADFC` | bone 2: `model+0x1C0` |
+| 2 | `0x0048AE60` | bone 1: `model+0x130` -- **`CivilianInit` writes this mode** |
+| 3 | `0x0048AEC4` | halfway between bone 15 (`model+0x910`) and bone 12 (`model+0x760`) |
+| other | | nothing is written (`CMP EAX,3; JA`, on a `MOVSX` byte) |
+
+`model` is `g_cur_actor_model`, `obj+0x194`, and `model+0xA0 + bone*0x90` is
+the matrix `SkeletonEmitNode` stores in a bone's draw record
+(`obj+0x20C + bone*0x90 + 0x28`) as it walks the skeleton under the camera.
+Each bone arm is `MatrixStackSetTopFromArray(g_camera_blocks[cam])` (view to
+world), `MatrixMultiply(record)`, `MatrixGetTranslation`: the bone's origin in
+the world, drawn a few lines earlier in the same update. Bone 1 is the root node
+of every civilian skeleton; bone 2 its child five-odd units up; 12 and 15 the
+children of 11 and 14, 4.76 below them (`[likely]` the two legs' lower joints --
+from the tree, not from a name).
+
+Mode 1 is set by streams 5, 6, 18, 24, 31, 43, 45 and 89; mode 2 by 5, 28, 31
+and 89; mode 3 by 28 and 30; mode 0 by 38 alone. Through `entries`, the spawns
+whose streams reach them are: mode 1, stage 1's `0x4AE4`, stage 2's `0x51AC`,
+`0x8510`, `0x8620`, `0xBBA8`, `0xEA54` and `0xEA8C`, and stage 4's `0x59C8`;
+mode 3, stage 2's `0x8598`; mode 0, stage 2's `0xA134`. Every civilian no
+stream has told otherwise is on mode 2.
+
+The two readers are the actor push (through the registration list, so a sphere
+published this frame is the one written on the previous) and
+`PoseHookGrowAndPushOutOfWorld`, which the draw calls through `model+0x115C` --
+before the switch, so it too reads the previous frame's centre. The gunshot
+does not read it: `ShotTestSphere` measures `obj+0x70`, the camera point in view
+space.
 
 ## How a civilian leaves
 

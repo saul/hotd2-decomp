@@ -234,11 +234,14 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
  * }
  * ```
  *
- * The rows are `g_character_part_tables[rows]`'s own, **unscaled and without
- * the build's slot test** -- which is how a `zsass`, whose build refused both
- * rows, gets a sphere on either hand at all. Bone 5 reads row 4 and bone 8
- * row 7, which is the row the bundle hangs on the bone. `[port-only]` as a
- * function: both states inline it.
+ * The stores are `ThrowerStateRearm`'s at `0x0044F831`/`0x0044F891`, through
+ * type 0x16's own pointer, and `ThrowerStateRestoreBothHands`' at
+ * `0x0044F9F6`/`0x0044FA61`, through `obj+0x1F4`'s. `[proved]` The rows are
+ * `g_character_part_tables[rows]`'s own, **unscaled and without the build's
+ * slot test** -- which is how a `zsass`, whose build refused both rows, gets a
+ * sphere on either hand at all. Bone 5 reads row 4 and bone 8 row 7, which is
+ * the row the bundle hangs on the bone. `[port-only]` as a function: both
+ * states inline it.
  */
 function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
                             h: { bone: number; bare: number; armed: number;

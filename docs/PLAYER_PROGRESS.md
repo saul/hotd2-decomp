@@ -6439,9 +6439,50 @@ still at y -23 on clip 972 at frame 457, the cursor running 0..58 and wrapping
 with a splash at y -25; 43740 at 263 and 285. Checked by `test:port`'s five
 class-0x25 `op 17` blocks, 17 assertions failing on the base.
 
-Not done: `op 9` and `op 16` (the hand and bone model swaps, and `op 16`'s blood
-spray from the bone -- the zombies' shot wounds in this same scene) stay a
-declared divergence.
+`op 9` and `op 16`, the zombies' shot wounds in this same scene, followed --
+see the next section.
+
+## Class 0x25's `op 9` and `op 16`: the wounds and the hands
+
+The jetty zombies were shot on cue and nothing showed it: no blood and no
+wound, because the port stepped over both slot-writing commands with a
+declared divergence ("routines this port has not read"). There was nothing
+else to read -- both are arms of `ScriptedHumanoidUpdate` -- and both are now
+transcribed `[proved]`:
+
+* **`op 16`** (`0x00484972`): `SpawnBloodSpray(obj, a, 0.75)` -- the port's
+  own `effects/blood.ts` -- and then the character's effect-table entry
+  `6*a + b` into bone `a`'s draw record, when it is above 2. Only the slot:
+  it is **not** `ActorSwapDamagedPart`, and the hit sphere, the step counter
+  and the zone mask are left alone. Stage 2's four jetty zombies are the only
+  users: 43584 and 55372 lose the top of the head (`0x1BFA`, then `0x1BFB`),
+  43740 and 55536 take a wound on bone 3 (`0x1C00`) and then the head.
+* **`op 9`** (`0x00484739`): bone 5's slot from `g_player_hand_slots[3*row +
+  mode]` (`0x004EC9E0`), unconditionally, with `row` the command's `a` -- or in
+  Original Mode, for `a` 0 or 1, `g_original_character[a]`, now in `G` and
+  seeded as `ResetOriginalModeLoadout` leaves it. 117 commands in 114 programs
+  across all six stages; stage 3 block 11's James takes row 0's variant 2 for
+  the closing scene.
+
+The bundle carries the hand table as `characters.player_hand_slots`, and every
+slot either command can write rides the character's hidden template, where
+before only the jetty zombies' wounds happened to (they have hit-sphere rows).
+Both exporters read the table (`playerHandSlots` / `player_hand_slots`);
+`tools/verify_attachments.py` check 6 holds the bundle's copy to the exe's
+words and every written slot to a model in the glTF, reading the table address
+and both strides out of the instructions.
+
+Measured in the page on one seed, with and without the two arms
+(`?stage=2&block=16&step=15&op=0&drive=1&seed=1`): identical to driven frame
+150; at 166, 277 pixels differ, all on 43584's head -- the blood and the open
+skull; at 214, 43584's head and 43740's bone-3 wound. Stage 3 block 11 step 1:
+James's right hand differs at frame 170. `test:port`'s four `op 9`/`op 16`
+blocks, 15 assertions, 12 failing with the step-over put back.
+
+Still declared, in the same file: the Init's Original Mode remap of types 0x39
+and 0x3A, which the engine makes before the model is built and the port builds
+in `ActorSpawn`. It was described as Boss Mode; it is `g_GameMode == 1`, and
+with `g_original_character` as its one writer leaves it, the identity.
 
 ## Every opcode, and what the player does with it
 

@@ -1099,6 +1099,14 @@ export interface CharactersJson {
    * than the port of that routine.
    */
   part_spheres?: Record<string, PartSphereRow[]>;
+  /**
+   * `g_player_hand_slots` — `0x004EC9E0`, `s16[c*3 + variant]`: the model a
+   * body's bone 5 draws, per character `c`. Ten rows, one per value
+   * `g_original_character` can decode, as the table is laid out. Read by
+   * `PlayerBodySetHandSlot` (`FUN_00416810`) and by class 0x25's `op 9`,
+   * which is the port's reader. Absent in a bundle older than that port.
+   */
+  player_hand_slots?: number[];
   /** `DAT_004C84A8` — bone → reaction group: head, torso, each limb. */
   reaction_groups: number[];
   approach: ApproachJson;

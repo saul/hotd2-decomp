@@ -503,6 +503,29 @@ export function humanoidMotionIds(evt: EvtFile | null,
   return out;
 }
 
+/**
+ * Every `op 9` and `op 16` a class-0x25 program can run, as
+ * `[op, mode, a, b]` -- the two commands that write a bone's draw slot.
+ *
+ * `op 9` (`ScriptedHumanoidUpdate` at `0x00484739`) writes bone 5's from
+ * `g_player_hand_slots[3*a + mode]`, and `op 16` (`0x00484972`) writes bone
+ * `a`'s from the character's effect table at `6*a + b`. `characters` resolves
+ * them against the tables, because the models they name have to ride the
+ * character's hidden template for a swap to have anything to clone.
+ */
+export function humanoidModelCommands(evt: EvtFile | null,
+                                      spawnRec: Spawn): number[][] {
+  const out: number[][] = [];
+  if (humanoidBlockOffset(evt, spawnRec) === null) return out;
+  const raw = evt!.raw;
+  for (const off of humanoidCommandOffsets(evt, spawnRec)) {
+    const op = i16(raw, off);
+    if (op !== 9 && op !== 16) continue;
+    out.push([op, i16(raw, off + 2), i16(raw, off + 4), i16(raw, off + 6)]);
+  }
+  return out;
+}
+
 /** The motion id a class handler starts this spawn in, or null. */
 export function motionFor(tables: ExeTables, spawnRec: Spawn,
                           cls: number): number | null {

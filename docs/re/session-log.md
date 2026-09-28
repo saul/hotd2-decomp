@@ -24802,3 +24802,68 @@ effect spawners that read the drawn block's eye through `GameHost.viewPoint`
 are `[likely]` equal and unchanged; `ThrowerStateCloseAndStrike` also raises
 and clears `BackingOff` (`0x20000000`) where the exe raises and clears
 `0x10000000` (`0x0044EA50` sub 0, and the exit) -- not an eye, not touched.
+
+## 2026-09-28 -- class 0x25's `op 9` and `op 16`: the hands and the wounds
+
+The last declared divergence in `ScriptedHumanoidUpdate`'s switch said the two
+slot-writing commands "need routines this port has not read". There were no
+routines: the jump table at `0x00484CA8` (indexed `op + 1`, `LEA EDX,[EAX+1];
+CMP EDX,0x13` at `0x00484365`) sends `op 9` to `0x00484739` and `op 16` to
+`0x00484972`, and both are fourteen-odd instructions inline, read whole from
+the listing `[proved]`:
+
+* `op 9`: `EAX = g_GameMode; DEC EAX`; `a`; `JNZ` to the plain arm. In Original
+  Mode an `a` of 0 or 1 becomes the character byte at `0x009A2242` /
+  `0x009A2256` (`MOVSX EAX, byte ptr`), any other `a` stands; then
+  `MOVSX EAX, word ptr [(3*row + mode)*2 + 0x4ec9e0]` into `[EDI+0x4dc]` --
+  bone 5's `+0x00` (`0x20C + 5*0x90`). No filter.
+* `op 16`: `PUSH 0x3f400000; PUSH a; PUSH obj; CALL 0x00407310` --
+  `SpawnBloodSpray`, already ported in `effects/blood.ts` -- then `EBP =
+  [charType*4 + 0x4c7160]`, `XOR EAX,EAX; MOV AX,[EBP + (6a+b)*2]`, and bone
+  `a`'s record (`LEA ECX,[a*0x90 + EDI + 0x20c]`) takes it past `CMP EAX,EBX;
+  JL` / `CMP EAX,2; JLE`. The `JL` arm is dead on a zero-extended `u16`.
+
+Both end `MOV [EDI+0x1320], EBX; ADD ESI, 8; JMP 0x0048435D`: the next command
+runs in the same frame.
+
+**Wrong turns.** The brief expected `op 16` to be `ActorSwapDamagedPart` or to
+share its sphere search; it calls neither, and writes no sphere, no step
+counter and no zone bit, so `combat.md` §8a's writer table gains a note, not a
+row. The Init's declared divergence and both class-0x25 rows in
+`functions.tsv` said the character remap was **Boss Mode**; the test is `DEC
+EAX; JZ` on `g_GameMode` at `0x00484106`, which is 1, **Original** Mode. And I
+nearly collapsed `op 9`'s Original-Mode arm the way `PlayerBodiesCreate`'s note
+does ("the byte is only ever `p`"); it is transcribed instead, against a new
+`G.g_original_character` seeded as `ResetOriginalModeLoadout` leaves it, and
+`test:port` moves the byte to show the arm reads it. The one-writer claim is
+`[proved]` for every literal reference (byte searches `42229a00`: 8 hits,
+`56229a00`: 5, all loads); a masked search over the record's other bases came
+back inconsistent with the unmasked one, so "no other base reaches `+0x02`" is
+`[likely]`, and says so in `globals.tsv`.
+
+Named: `PlayerBodySetHandSlot` (`FUN_00416810`, the other reader of the hand
+table, same row arithmetic), `g_original_character` (`0x009A2242`); the rows
+for `g_player_hand_slots`, `ScriptedHumanoidInit` and `ScriptedHumanoidUpdate`
+rewritten. The hand table is **ten rows**: bounded by the index -- the readers
+of the character byte decode 0..9 -- and the word after row 9 is 0 (`L6`).
+
+Exporter, both halves: `playerHandSlots` / `player_hand_slots` and
+`boneEffectSlot` / `bone_effect_slot` in `combat`, `humanoidModelCommands` /
+`humanoid_model_commands` in `charmotion`, `humanoidModelSlots` /
+`humanoid_model_slots` in `characters`, which puts every slot either command
+can write on the character's hidden template, and
+`characters.player_hand_slots` in the bundle. Before, only the jetty wounds
+were in the bundle, and only because they have damaged-part sphere rows; none
+of the 117 `op 9` hands was. `verify_attachments.py` check 6 reads the table
+address and both strides out of the instructions, holds the bundle's copy to
+the exe's words and every written slot to a glTF model: 246 problems on the
+bundle from `eb232a6e`, 0 on this one, and 6 on a stage-2 export with the
+table address moved by one word.
+
+Survey (the six arcade stages; the Original Mode bundles repeat them): `op 9`
+117 commands in 114 programs, every stage -- rows 0 to 4, modes 0 to 2;
+`op 16` 8 commands in stage 2's four jetty zombies. Verified in the page on
+one seed with the step-over put back as the control: stage 2 block 16 step 15
+(the head and the bone-3 wound, frames 166 and 214) and stage 3 block 11
+step 1 (James's hand, frame 170); identical elsewhere, frame 150 byte for
+byte. Counts: divergences 132 -> 131, uncited exports 82 held.

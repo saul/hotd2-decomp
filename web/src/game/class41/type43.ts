@@ -322,15 +322,12 @@ function Type43FirstHit(p: BreakableProp, rng: Rng, events?: Events): void {
     // camera, and spark.
     BreakablePropAwardHit(p.flags, false, rng);
     p.slot = BreakableSlot.Broken;
-    // `obj+0x1D0 = *(g_camera_blocks + g_camera_index * 0x1A4 + 0x90)`.
-    //
-    // `[open]` That word is `0x009A60D0` and the port does not carry it.
-    // `g_camera_yaw_bams` (`0x009C71F0`) is the camera's heading as this port
-    // knows it -- `app/systems.ts` writes it from the live view every frame,
-    // and class 0x31's states already turn to face the camera with it -- but
-    // the engine keeps two camera yaws at two addresses and whether they hold
-    // the same number has not been read.
-    p.yaw = G.g_camera_yaw_bams;
+    // `obj+0x1D0 = *(g_camera_blocks + g_camera_index * 0x1A4 + 0x90)` at
+    // `0x0046CF9C`: the camera block's yaw, `g_camera_block_yaw_bams`
+    // (`0x009A60D0`), which the port's camera keeps. This read
+    // `g_camera_yaw_bams` (`0x009C71F0`), which the scene state's hooks write
+    // as a camera heading turned half round. `[proved]`
+    p.yaw = G.g_camera_block_yaw_bams;
     return;
   }
   // The destroy: award 1, ten points, and the puff starts.

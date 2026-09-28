@@ -1972,9 +1972,35 @@ export const G = {
    * and yaw from the eye and target and stores its third argument as the
    * roll; the stage-3 boss's body, `Boss3BodyUpdate` (`FUN_004231C0`),
    * writes the yaw itself and aims the camera by angle.
+   *
+   * The yaw is the camera's own +z, pointing back at the viewer, and it is
+   * the heading nearly every actor that turns to or throws along the camera
+   * reads -- not {@link g_camera_yaw_bams}, which the scene state's hooks
+   * write half a turn round from it. `globals.tsv` lists the readers.
    */
   g_camera_block_yaw_bams: 0,
   g_camera_block_roll_bams: 0,
+  /**
+   * `g_camera_block2_eye` — `0x009A6408`, `g_camera_block2_pitch_bams` —
+   * `0x009A6414`, `g_camera_block2_yaw_bams` — `0x009A6418`,
+   * `g_camera_block2_roll_bams` — `0x009A641C` and `g_camera_block2_target` —
+   * `0x009A6420`: camera block **2**'s eye, angles and look-at, at
+   * `g_camera_blocks + 2 * 0x1A4` plus the same offsets as block 0's.
+   *
+   * Nothing draws from it -- `g_camera_index` is 0 in every shipped write --
+   * but one routine reads its yaw by address: the frog's screen wedge
+   * (`0x0043AB62`). `CameraBlocksReset` zeroes it with the other three,
+   * `EvtRunQueuedActionsSyncViewBlock` copies block 0's eye and look-at into
+   * it while the scene state is (1, 3) and derives its angles, and
+   * `UpdateSceneViewAndLight` rebuilds its angles through `MatrixGetAngles`
+   * every frame. So outside a view-angle turn it holds the last one's
+   * heading, or zero. `[proved]`
+   */
+  g_camera_block2_eye: vec3(),
+  g_camera_block2_pitch_bams: 0,
+  g_camera_block2_yaw_bams: 0,
+  g_camera_block2_roll_bams: 0,
+  g_camera_block2_target: vec3(),
   /**
    * `g_coli_hit_surface` — 0x009CAC40. The material id of whatever the last
    * collision trace hit, and a **side output**: every caller reads it straight
@@ -2503,6 +2529,11 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_camera_block_pitch_bams = 0;
   G.g_camera_block_yaw_bams = 0;
   G.g_camera_block_roll_bams = 0;
+  G.g_camera_block2_eye = vec3();
+  G.g_camera_block2_pitch_bams = 0;
+  G.g_camera_block2_yaw_bams = 0;
+  G.g_camera_block2_roll_bams = 0;
+  G.g_camera_block2_target = vec3();
   G.g_camera_starter_reseats = 1;
   G.g_camera_update_hook = 0;
   G.g_cam_path_cursor = 0;

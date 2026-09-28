@@ -50,8 +50,9 @@
  *
  * A kill runs `FUN_004560B0`'s directional pick — `camera_yaw − actor_yaw`
  * against four ±45° arcs — and the body plays that clip once and stays. The
- * game's camera yaw is the direction from target to eye, which is the camera's
- * own local **+Z**, so that is what is measured here.
+ * camera yaw is the camera block's own, `g_camera_block_yaw_bams`, which the
+ * port's camera keeps and `ChooseDeathMotionDirectional` reads for itself;
+ * nothing here measures it.
  *
  * ## Feedback — `ActorShotFeedback` and `FUN_00407950`
  *
@@ -114,8 +115,6 @@ import type { Scope } from "../core/scope";
 
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
 const SHOT_RANGE = 1000;
-
-const BAMS = 65536 / (Math.PI * 2);
 
 /**
  * A pointer, twice over: `x`/`y` in the viewport's pixels, for the crosshair,
@@ -344,18 +343,6 @@ export class Shooting implements System {
     this._camera = camera;
   }
 
-  /**
-   * The camera yaw the directional death compares against, in BAMS.
-   *
-   * `FUN_00403AC0` builds the game's camera yaw from `eye - target`, so it is
-   * the camera's own local **+Z** — its backward axis, not its forward one.
-   */
-  get cameraYawBams(): number {
-    if (!this._camera) return 0;
-    this._back.set(0, 0, 1).applyQuaternion(this._camera.quaternion);
-    return Math.atan2(this._back.x, this._back.z) * BAMS;
-  }
-
   /** The proved sound and sprite tables, from the stage bundle. */
   setTables(combat: CombatJson | undefined): void {
     this.combat = combat ?? null;
@@ -377,7 +364,6 @@ export class Shooting implements System {
       || G.g_shot_flash_ring.some((f) => f.live);
   }
 
-  private readonly _back = new Vector3();
   private _camera: Camera | null = null;
 
   reset(): void {

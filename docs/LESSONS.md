@@ -931,3 +931,22 @@ comparison asks ("is it taken"), not its constant** -- and before calling any
 reader of such a value faithful, grep every reader for the exe's literals.
 It is a cousin of `L3`: there one field means two things in two classes, here
 one table means one thing in two encodings.
+
+**L64 -- A word the port "keeps instead" is a divergence at every reader, and
+the question it rests on is usually one read away.** `g_camera_block_yaw_bams`
+(`0x009A60D0`) and `g_camera_yaw_bams` (`0x009C71F0`) are two camera yaws, and
+for as long as the port had only the second, each routine the exe points at
+the first was transcribed onto the second with a note: "the port keeps one
+heading, and reads it for this as `PropUpdateType43` and the bat do; whether
+the two ever differ is the `[open]` on that row of `globals.tsv`". Four notes
+cited each other and a helper was written to return it. They differ by half a
+turn: the scene state's hooks write the second as a camera heading plus or
+minus `0x8000`, which is in the five instructions of each hook. So a
+condition-8 walker's facing window sat behind it and no blade or axe walker in
+the game ever threw, severed heads and owl corpses flew at the camera, and
+deaths fell the wrong way -- one substitution, wrong at every reader. **When a
+routine reads a word the port does not have, the substitute is the
+divergence, not the missing word**: tag it `[diverges]`, and settle the
+`[open]` by reading the substitute's writers before a second reader copies the
+choice. `L20`'s "never name a thing from what it resembles" applies to globals
+that resemble each other.

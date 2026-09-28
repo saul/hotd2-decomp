@@ -12,6 +12,7 @@
 import { SpawnBoneHitSprite } from "../effects/blood";
 import { SpawnSeveredHead } from "../effects/severed_head";
 import { vec3 } from "../vec";
+import { AngleWithinTolerance } from "../actor_turn";
 import type { Rng } from "../../core/rng";
 import type { CharacterBone, CharacterType } from "../../bundle";
 import { ActorFlag, DamageZone, type Actor } from "../actor";
@@ -436,27 +437,48 @@ const RELEASE_CREATURE_BONE = 1;
 const RELEASE_CREATURE_SCORE = 0x50;
 
 /**
- * `ChooseDeathMotionDirectional` — `FUN_00456220`: `camera_yaw - actor_yaw`
- * against four ±45° arcs.
+ * `ChooseDeathMotionDirectional` — `FUN_00456220`: the camera block's yaw
+ * less the actor's, against four ±45° arcs.
+ *
+ * ```
+ * 00456248  rel = (g_camera_block_yaw_bams[g_camera_index] - obj+0x68) & 0xFFFF
+ * 00456258  if (AngleWithinTolerance(rel, 0x4000, 0x2000)) motion = 0x3E0
+ * 00456287  if (AngleWithinTolerance(rel, 0xC000, 0x2000)) motion = 0x3DF
+ * 004562b3  if (AngleWithinTolerance(rel, 0x0000, 0x2000)) motion = [0x0059309C][rand() % 4]
+ * 004562f6  if (AngleWithinTolerance(rel, 0x8000, 0x2000)) motion = [0x00593084][rand() % 6]
+ * ```
+ *
+ * Four tests in a row, not an `else` chain: the arcs are inclusive at both
+ * ends, so a heading exactly on a boundary passes two and the later one wins,
+ * drawing its `rand()` if it has one.
+ *
+ * **The heading is the camera block's**, `g_camera_block_yaw_bams`
+ * (`0x009A60D0`). Its callers used to hand in a yaw of their own --
+ * `g_camera_yaw_bams` (`0x009C71F0`) from `ChooseDeathMotion`, which the
+ * scene state's hooks write as a camera heading turned half round and so put
+ * every body in the opposite arc, and that plus `0x8000` from the shot path,
+ * which on a rail is the path pose's yaw rather than the eased one the camera
+ * is drawn at. `[proved]`
  *
  * Named by angle rather than front/back — see the note in
  * `hod2lib/characters.py`, which explains why those labels depend on two
  * conventions at once and why the *data* is the reliable half.
  */
-export function ChooseDeathMotionDirectional(obj: Actor, cameraYawBams: number,
+export function ChooseDeathMotionDirectional(obj: Actor,
                                              rng: Rng): number | undefined {
   const d = T.chars?.deaths;
   if (!d || !d.front?.length) return undefined;
-  const rel = Math.round(cameraYawBams - obj.yaw) & 0xffff;
-  const inArc = (centre: number): boolean => {
-    let x = (rel - centre) & 0xffff;
-    if (x > 0x8000) x -= 0x10000;
-    return Math.abs(x) <= DEATH_ARC;
-  };
-  if (inArc(0x4000)) return DEATH_RIGHT;
-  if (inArc(0xc000)) return DEATH_LEFT;
-  const pool = inArc(0x8000) ? d.back : d.front;
-  return pool[rng.int(pool.length)];
+  const rel = (G.g_camera_block_yaw_bams - obj.yaw) & 0xffff;
+  let motion: number | undefined;
+  if (AngleWithinTolerance(rel, 0x4000, DEATH_ARC)) motion = DEATH_RIGHT;
+  if (AngleWithinTolerance(rel, 0xc000, DEATH_ARC)) motion = DEATH_LEFT;
+  if (AngleWithinTolerance(rel, 0x0000, DEATH_ARC)) {
+    motion = d.front[rng.int(d.front.length)];
+  }
+  if (AngleWithinTolerance(rel, 0x8000, DEATH_ARC)) {
+    motion = d.back[rng.int(d.back.length)];
+  }
+  return motion;
 }
 
 /**
@@ -565,11 +587,11 @@ const HEADLESS_EXEMPT = new Set([3, 0x12, 0x18]);
  * in as an argument and the marks are the request. This is the gate and the
  * call, which is the part that decides anything.
  */
-export function DispatchHit(obj: Actor, bone: number, cameraYawBams: number,
+export function DispatchHit(obj: Actor, bone: number,
                             host: GameHost, rng: Rng,
                             player = 0): HitResult | null {
   if (obj.flags & ActorFlag.ShotImmune) return null;
-  return ResolveHit(obj, bone, cameraYawBams, host, rng, player);
+  return ResolveHit(obj, bone, host, rng, player);
 }
 
 /**
@@ -580,7 +602,7 @@ export function DispatchHit(obj: Actor, bone: number, cameraYawBams: number,
  * the player is still needed, because `ActorReactToHit`'s `znjoe` arm pays a
  * score to whoever fired.
  */
-export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
+export function ResolveHit(obj: Actor, bone: number,
                            host: GameHost, rng: Rng,
                            player = 0): HitResult {
   // `00409495`: out of play, this hit does nothing visible. Raised on the
@@ -800,7 +822,7 @@ export function ResolveHit(obj: Actor, bone: number, cameraYawBams: number,
     // `ThrowerOnShot` reads to tell a killing blow from a survivable one.
     obj.flags |= ActorFlag.Dead;
     if (!ownDeath) {
-      death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
+      death = ChooseDeathMotionDirectional(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, ticks: 0 };
       }
@@ -857,7 +879,7 @@ export interface KillAllResult {
  * the ordinary way — so refusing here is not "this actor can never be
  * cleared", it is "not this frame", which is what a shot would have been told.
  */
-export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
+export function ActorKillAll(rng: Rng): KillAllResult {
   const out: KillAllResult = { enemies: 0, civilians: 0 };
   for (const obj of G.g_object_list) {
     if (!obj.visible || obj.dead) continue;
@@ -893,7 +915,7 @@ export function ActorKillAll(cameraYawBams: number, rng: Rng): KillAllResult {
     // Same rule as `ResolveHit` above: a class that runs its own death gets
     // its own clip, and the shared one would stop the clock it counts on.
     if (!g_class_handlers[obj.cls]?.updatesWhenDead) {
-      const death = ChooseDeathMotionDirectional(obj, cameraYawBams, rng);
+      const death = ChooseDeathMotionDirectional(obj, rng);
       if (death !== undefined && MotionOf(obj, death)) {
         obj.death = { motion: death, ticks: 0 };
       }

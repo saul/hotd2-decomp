@@ -290,6 +290,15 @@ CHECKS: list[Check] = [
           "descriptors split five hordes to two props on the byte PlaceHorde "
           "switches on",
           NEEDS_GAME),
+    Check("verify_water", ".",
+          ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],
+          "that class 0x41 type 1, the canal water task, starts from the table "
+          "the EXE indexes -- ten flat water tiles -- and that every slot, "
+          "flag, camera cue and multiplier the port's copy of it tests is the "
+          "immediate at the instruction that holds it; its fifteen spawns sit "
+          "at the origin, so a wrong reading draws nothing and looks like "
+          "nothing",
+          NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],
           "that the class-0x46 bat's flight paths still line up with the "

@@ -426,6 +426,20 @@ export class BreakableLayer implements System<RenderContext> {
     this.group.visible = v;
   }
 
+  /**
+   * The live nodes drawing one slot. `render/water_surfaces.ts` asks, because
+   * a prop can draw a canal tile -- `PropDrawOnlyType12` puts `0x13B5` in the
+   * stage-2 boss's blocks -- and in the engine that is the same model the
+   * water task ripples, not a copy of it.
+   */
+  nodesForSlot(slot: number): Object3D[] {
+    const out: Object3D[] = [];
+    for (const l of this.nodes.values()) {
+      if (l.slot === slot && l.node.parent) out.push(l.node);
+    }
+    return out;
+  }
+
   private clone(slot: number): Object3D | null {
     const t = this.templates.get(slot);
     if (!t) return null;

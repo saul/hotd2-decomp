@@ -236,6 +236,12 @@ import { WATER_RING_FRAMES, WATER_RING_SLOT }
   from "../src/game/effects/water_ring";
 import { ZombieStateArcScriptedEntrance } from "../src/game/class30/entrance";
 import { ZombieStateDelayedLeap } from "../src/game/class30/emerge";
+import {
+  DelayedPounceSub, POUNCE_CROUCH_MOTION, POUNCE_HIT_CURSOR,
+  POUNCE_LEAP_MOTION, ZombieStateDelayedPounce,
+} from "../src/game/class30/pounce";
+import { LeapTargetMode, ZombieLeapStrikeTarget }
+  from "../src/game/class30/leap_target";
 import { ArcPhase } from "../src/game/class31/arc";
 import { OPS as SCENE_OPS } from "../src/script/ops/scene";
 import type { SpriteEffect } from "../src/game/effects/sprite";
@@ -10031,6 +10037,270 @@ console.log("\nclass 0x30's placement: the ground snap and the two entrances:");
 
 }
 
+console.log("\nclass 0x30 state 28, ZombieStateDelayedPounce (0x004586E0):");
+{
+  // `g_class30_pounce_arc_script`, verbatim from `0x00593140`, and the two
+  // clips the state names with their real `g_motion_play_length`: 58 for
+  // 0x10F (`debu.bin`) and 59 for 0x162 (`ebi.bin`).
+  const POUNCE_SCRIPT = [
+    { motion: 0x162, start: 0, fade: 5, until: 15 },
+    { motion: 0x162, start: 16, fade: 5, until: 26 },
+    { motion: 0x162, start: 27, fade: 5, until: 40 },
+  ];
+  const TYPE28 = {
+    ...TYPE,
+    motions: { ...TYPE.motions, "271": motion(30, 0, 58),
+               "354": motion(31, 0, 59) },
+  };
+  const CHARS28 = {
+    ...CHARS, types: { "1": TYPE28 },
+    combat: { arc_scripts: { pounce: POUNCE_SCRIPT } },
+  } as unknown as CharactersJson;
+  // A camera at (0, 10, 0) looking down +z; `-z` in front, as the engine has
+  // it, so `viewPoint(0, -12, -12)` is two units under the floor, twelve on.
+  const CAM28: GameHost = {
+    ...NULL_HOST,
+    viewPoint: (x: number, y: number, z: number, out: Vec3) => {
+      out.x = x; out.y = 10 + y; out.z = -z;
+    },
+  };
+  const pounceScene = (desc: Partial<Actor>, at = 0x6100) => {
+    const rng = new Rng(28);
+    const events = scene(0, rng);
+    SetGameTables(CHARS28);
+    T.coli = { files: ["t"], blobs: { floor: FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    const z = spawnZombie(at, 1, "pouncer", {
+      initialState: ZombieState.DelayedPounce, attackState: 1, ...desc,
+    }, rng);
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.pos = vec3(0, 0, 60);
+    return { z, rng, events };
+  };
+  const step = (z: ZombieActor, rng: Rng, events: Events, host = CAM28) => {
+    ActorAdvanceMotion(z, 1 / 60);
+    EnemyZombieUpdate(z, { eye: EYE, dt: 1 / 60, rng, host, events });
+  };
+
+  // -- the entry, and sub 0 falling into sub 1 --------------------------------
+  {
+    const { z, rng, events } = pounceScene({ delayedPounce: { delay: 20 } });
+    check("state 28 is an entrance a descriptor can start in",
+          z.state === ZombieState.DelayedPounce, ZombieState[z.state]);
+    step(z, rng, events);
+    check("the first frame cuts to 0x10F and counts one frame of the delay",
+          z.motion === POUNCE_CROUCH_MOTION && z.sub === DelayedPounceSub.Wait
+            && z.zom.holdFrames === 19,
+          `motion ${z.motion} sub ${z.sub} hold ${z.zom.holdFrames}`);
+    const up = ActorFlag.Airborne | ActorFlag.NoHitReaction
+      | ActorFlag.ShotImmune;
+    check("...off the ground snap, unstaggerable and unshootable (0x22100)",
+          (z.flags & up) === up, `flags 0x${z.flags.toString(16)}`);
+    check("...off the world push and carried (obj+0x136C)",
+          (z.flags2 & ZombieFlag2.CollideWorld) === 0
+            && (z.flags2 & ZombieFlag2.Carried) !== 0,
+          `flags2 0x${z.flags2.toString(16)}`);
+    check("`tail+0x03 == 1` hides it: no skeleton, no parts, no shadow",
+          (z.motionFlags & MotionFlag.Drawn) === 0
+            && z.partVisible.every((v) => v === 0)
+            && (z.flags & (ActorFlag.NoShadow | ActorFlag.NoCameraTrack))
+              === (ActorFlag.NoShadow | ActorFlag.NoCameraTrack),
+          `drawn ${z.motionFlags & 1} parts ${z.partVisible}`);
+    for (let i = 0; i < 18; i++) step(z, rng, events);
+    check("it waits the descriptor's delay out, crouched",
+          z.sub === DelayedPounceSub.Wait && z.motion === POUNCE_CROUCH_MOTION,
+          `sub ${z.sub} hold ${z.zom.holdFrames}`);
+    step(z, rng, events);
+    check("...and launches on frame 20, drawn again",
+          z.sub === DelayedPounceSub.Flight
+            && (z.motionFlags & MotionFlag.Drawn) !== 0
+            && z.partVisible.every((v) => v === 1),
+          `sub ${z.sub} parts ${z.partVisible}`);
+    check("...shootable, tracked and shadowed, mid-attack, still unstaggerable",
+          (z.flags & (ActorFlag.ShotImmune | ActorFlag.NoShadow
+                      | ActorFlag.NoCameraTrack)) === 0
+            && (z.flags & ActorFlag.Committed) !== 0
+            && (z.flags & ActorFlag.NoHitReaction) !== 0,
+          `flags 0x${z.flags.toString(16)}`);
+    check("...holding player 0's permit",
+          z.attackPermit === 0 && G.g_attack_permits[0] === z.at,
+          `${z.attackPermit} ${G.g_attack_permits[0]}`);
+    check("...arcing to the camera-space point, 12 down and 12 ahead",
+          z.arcTo.x === 0 && z.arcTo.y === -2 && z.arcTo.z === 12,
+          JSON.stringify(z.arcTo));
+    check("...on `g_class30_pounce_arc_script`, the leap clip on the track",
+          z.arcScript?.[0]?.motion === POUNCE_LEAP_MOTION
+            && z.action?.motion === POUNCE_LEAP_MOTION,
+          `${JSON.stringify(z.arcScript?.[0])} ${z.action?.motion}`);
+
+    // The flight: two splashes, then the clip. This leap is 48 frames, and
+    // its strike on the landing is the state's one declared divergence --
+    // see the hit test in `class30/pounce.ts`, and the short leap below.
+    const seq0 = G.g_sprite_effect_seq;
+    let frames = 0;
+    for (; frames < 400 && z.state === ZombieState.DelayedPounce; frames++) {
+      step(z, rng, events);
+    }
+    const splashes = G.g_sprite_effects.filter(
+      (e) => e.id >= seq0 && e.kind === 0x62);
+    check("it splashes twice on the ground under it, clip frames 1 and 15",
+          splashes.length === 2 && splashes.every((e) => e.pos.y === 0),
+          splashes.map((e) => `${e.kind}@${e.pos.y}`).join(" "));
+    check("it hands over to the attack run once the clip is played out",
+          z.state === ZombieState.AttackRun && z.sub === 0,
+          `${ZombieState[z.state]}/${z.sub} after ${frames}`);
+    const down = ActorFlag.Committed | ActorFlag.Airborne
+      | ActorFlag.NoHitReaction;
+    check("...with 0x10022000 down and the world push back",
+          (z.flags & down) === 0
+            && (z.flags2 & ZombieFlag2.CollideWorld) !== 0
+            && (z.flags2 & (ZombieFlag2.Carried | ZombieFlag2.OneShotFired))
+              === 0,
+          `flags 0x${z.flags.toString(16)} flags2 0x${z.flags2.toString(16)}`);
+    check("...and the permit given back",
+          z.attackPermit === -1 && G.g_attack_permits[0] === -1,
+          `${z.attackPermit} ${G.g_attack_permits[0]}`);
+  }
+
+  // -- the strike on the landing: arc phase 4 on clip frame 0x1B --------------
+  // Fourteen units to the landing point is a 14-frame flight, which the fit
+  // covers with fades of 4 and 5 and lands inside frame 27's hold in the
+  // engine and in the port alike.
+  {
+    const { z, rng, events } = pounceScene({ delayedPounce: { delay: 1 } });
+    z.pos = vec3(0, 0, 26);
+    let hits = 0;
+    let overlay = -1;
+    let hitAt = -1;
+    let phaseAt = -1;
+    events.on("player.damaged", () => {
+      hits++;
+      overlay = G.g_player_damage_overlay_kind[0];
+      hitAt = z.action ? z.action.ticks : -1;
+      phaseAt = z.arcPhase;
+    });
+    const lives = G.g_player_lives[0];
+    for (let i = 0; i < 400 && z.state === ZombieState.DelayedPounce; i++) {
+      step(z, rng, events);
+      // Out of the hit's invulnerability at once, so that what keeps it to
+      // one hit is the state's own latch and nothing else.
+      G.g_player_invuln_frames[0] = 0;
+    }
+    check("the landing strikes the player once, on frame 0x1B, overlay 9",
+          hits === 1 && overlay === 9 && hitAt === POUNCE_HIT_CURSOR
+            && phaseAt === ArcPhase.Settled
+            && G.g_player_lives[0] === lives - 1,
+          `${hits} hits, overlay ${overlay}, at ${hitAt} phase ${phaseAt}, `
+          + `lives ${lives} -> ${G.g_player_lives[0]}`);
+    check("...and the latch keeps it to one, down again on the way out",
+          z.state === ZombieState.AttackRun
+            && (z.flags2 & ZombieFlag2.OneShotFired) === 0,
+          `${ZombieState[z.state]} flags2 0x${z.flags2.toString(16)}`);
+  }
+
+  // -- sub 3 waits for g_motion_play_length[0x162] - 1 -------------------------
+  {
+    const { z, rng, events } = pounceScene({ delayedPounce: { delay: 1 } });
+    step(z, rng, events);
+    check("a delay of 1 launches on the spawn frame: sub 0 into 1 into 2",
+          z.sub === DelayedPounceSub.Flight
+            && z.action?.motion === POUNCE_LEAP_MOTION,
+          `sub ${z.sub} action ${z.action?.motion}`);
+    let exitCursor = -1;
+    for (let i = 0; i < 400 && z.state === ZombieState.DelayedPounce; i++) {
+      step(z, rng, events);
+      if (z.state !== ZombieState.DelayedPounce) {
+        exitCursor = z.action ? z.action.ticks : -1;
+      }
+    }
+    check("...and hands over on the leap clip's frame 58, not before",
+          exitCursor === 58, `left at cursor ${exitCursor}`);
+  }
+
+  // -- a refused claim leaps at player 0 all the same ---------------------------
+  {
+    const { z, rng, events } = pounceScene({ delayedPounce: { delay: 1 } });
+    const holder = 0x7777;
+    G.g_attack_permits[0] = holder;
+    step(z, rng, events);
+    check("a refused claim is overruled: obj+0x121 = 0 with no permit of its own",
+          z.attackPermit === 0 && G.g_attack_permits[0] === holder,
+          `${z.attackPermit} ${G.g_attack_permits[0]}`);
+    for (let i = 0; i < 400 && z.state === ZombieState.DelayedPounce; i++) {
+      step(z, rng, events);
+    }
+    check("...and its release frees entry 0, whoever held it",
+          z.state === ZombieState.AttackRun && G.g_attack_permits[0] === -1,
+          `${ZombieState[z.state]} ${G.g_attack_permits[0]}`);
+  }
+
+  // -- tail+0x03 other than 1 is drawn throughout -------------------------------
+  {
+    const { z, rng, events } = pounceScene(
+      { attackState: 0, delayedPounce: { delay: 20 } });
+    step(z, rng, events);
+    check("with `tail+0x03 != 1` the crouch is drawn",
+          (z.motionFlags & MotionFlag.Drawn) !== 0
+            && z.partVisible.every((v) => v === 1)
+            && (z.flags & ActorFlag.NoShadow) === 0,
+          `drawn ${z.motionFlags & 1} parts ${z.partVisible}`);
+  }
+
+  // -- the descriptor's point: mode 1, turned by the camera's heading -----------
+  {
+    const { z, events } = pounceScene({
+      delayedPounce: { delay: 1, point: [10, 0, 40] },
+    });
+    G.g_max_attackers = 2;
+    G.g_camera_yaw_bams = 0x4000;
+    ZombieStateDelayedPounce(z, 1 / 60, CAM28, events);
+    // x = 2 * (1 - 2 * 0) = 2; T(10, 0, 40) Ry(0x4000) (2, 0, 12).
+    check("a descriptor point lands 12 ahead of it along the camera's heading",
+          Math.abs(z.target.x - 22) < 1e-9 && z.target.y === 0
+            && Math.abs(z.target.z - 38) < 1e-9,
+          JSON.stringify(z.target));
+    check("...which is where the arc goes",
+          Math.abs(z.arcTo.x - 22) < 1e-9 && Math.abs(z.arcTo.z - 38) < 1e-9,
+          JSON.stringify(z.arcTo));
+  }
+
+  // -- ZombieLeapStrikeTarget's arms --------------------------------------------
+  {
+    const { z } = pounceScene({ delayedPounce: { delay: 1 } });
+    G.g_max_attackers = 2;
+    G.g_camera_yaw_bams = 0;
+    z.attackPermit = 1;
+    const p = vec3(0, 0, 0);
+    ZombieLeapStrikeTarget(z, p, LeapTargetMode.CameraSpace, CAM28);
+    // x = 2 * (1 - 2) = -2.
+    check("camera space: (x, -12, -12) with x = 2(1 - 2 * permit)",
+          p.x === -2 && p.y === -2 && p.z === 12, JSON.stringify(p));
+    z.condition = 4;
+    ZombieLeapStrikeTarget(z, p, LeapTargetMode.CameraSpace, CAM28);
+    check("...and body condition 4's own: (-x, -3, -12.5)",
+          p.x === 2 && p.y === 7 && p.z === 12.5, JSON.stringify(p));
+    const q = vec3(5, 1, 5);
+    ZombieLeapStrikeTarget(z, q, LeapTargetMode.FromPoint, CAM28);
+    check("from the point, condition 4: (-x, 0, 12.5) at yaw 0",
+          Math.abs(q.x - 7) < 1e-9 && q.y === 1 && Math.abs(q.z - 17.5) < 1e-9,
+          JSON.stringify(q));
+    z.condition = 0;
+    z.attackPermit = -1;
+    const r = vec3(0, 0, 0);
+    ZombieLeapStrikeTarget(z, r, LeapTargetMode.FromPoint, CAM28);
+    // The permit as a signed byte: 0xFF is -1, so x = 2 * 3 = 6.
+    check("...and an actor with no permit lands six to the side, not two",
+          Math.abs(r.x - 6) < 1e-9 && Math.abs(r.z - 12) < 1e-9,
+          JSON.stringify(r));
+    G.g_max_attackers = 1;
+    const u = vec3(0, 0, 0);
+    ZombieLeapStrikeTarget(z, u, LeapTargetMode.FromPoint, CAM28);
+    check("...with one attacker there is no side at all",
+          Math.abs(u.x) < 1e-9 && Math.abs(u.z - 12) < 1e-9, JSON.stringify(u));
+  }
+}
+
 console.log("\nclass 0x30's two spheres: the wall push and the crowd push:");
 {
   const scenePush = () => {
@@ -10484,6 +10754,32 @@ console.log("\nclass 0x30's twelve entrance states — do the waits end?");
     // `AttackRun` itself, so the assertion is that the entrance is done.
     check("...then hands over when the surfacing clip is out",
           z.state !== ZombieState.SurfaceOnCameraCue, String(z.state));
+  }
+
+  // -- state 13's exit: 15 is the only branch -------------------------------
+  // `00457102 CMP byte [EDI+3], 0xf`: 15 latches the walk and enters state 15
+  // at sub 1, and every other `+0x03` is the attack run at `0x0045713C` --
+  // not the state the byte names, which is what states 17, 18 and 20 do.
+  {
+    const leave = (exit: number, entry: unknown) => {
+      const z = spawn(ZombieState.SurfaceOnCameraCue, entry, exit);
+      G.g_cam_path_frame = 100;
+      for (let i = 0; i < 300 && z.state === ZombieState.SurfaceOnCameraCue;
+           i++) {
+        run(z, 1);
+      }
+      return z;
+    };
+    const other = leave(ZombieState.DelayedPounce, { cue_frame: 40 });
+    check("state 13 leaves for the attack run whatever else +0x03 names",
+          other.state === ZombieState.AttackRun && other.sub === 0,
+          `${ZombieState[other.state]}/${other.sub}`);
+    const walk = leave(ZombieState.WalkDistance,
+                       { cue_frame: 40, walk_distance: 9 });
+    check("...and for 15 latches the walk and enters it at sub 1",
+          walk.state === ZombieState.WalkDistance && walk.sub === 1
+            && walk.zom.targetArrive === 9,
+          `${ZombieState[walk.state]}/${walk.sub} ${walk.zom.targetArrive}`);
   }
 
   // -- state 20: the script flag ------------------------------------------

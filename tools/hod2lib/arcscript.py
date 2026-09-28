@@ -59,10 +59,14 @@ CLASS31_ARC_SCRIPTS = {
 #: `ZombieStateArcScriptedEntrance`'s two arc motion scripts, in the same
 #: twelve-dword shape as class 0x31's. The state picks by character type, not
 #: by anything in the descriptor: type 0 takes the first and every other type
-#: the second.
+#: the second. The third is state 28's own.
 CLASS30_ARC_SCRIPTS = {
     "entrance_type0": 0x00567898,
     "entrance_other": 0x00567958,
+    # `g_class30_pounce_arc_script`: `ZombieStateDelayedPounce`
+    # (`FUN_004586E0`, state 28) passes it as a literal, ``PUSH 0x593140`` at
+    # 0x00458815 -- motion 0x162 cut at 0..15, 16..26 and 27..40.
+    "pounce": 0x00593140,
 }
 
 #: `ThrowerStateLeapAside`'s character-0x18 block is one script per stance.

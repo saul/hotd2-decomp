@@ -1349,6 +1349,12 @@ export interface ActorBase {
     delay: number; dest: [number, number, number]; gravity: number;
   } | null;
   /**
+   * `ZombieStateDelayedPounce`'s: the delay at `+0x04` and the landing point
+   * at `+0x08..+0x10`, `point` absent for the `0xBF800000` sentinel. See
+   * `class30/pounce.ts`.
+   */
+  delayedPounce: { delay: number; point?: [number, number, number] } | null;
+  /**
    * The descriptor tail of whichever of the twelve entrance states this spawn
    * starts in — see `class30/entrance.ts`. One field rather than twelve
    * because a spawn has one initial state and every other state's reading of
@@ -2327,6 +2333,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     accZ: 0,
     emerge: null,
     delayedLeap: null,
+    delayedPounce: null,
     entry: null,
     hp: 0,
     maxHp: 0,

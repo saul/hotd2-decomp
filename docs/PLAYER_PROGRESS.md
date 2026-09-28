@@ -3485,6 +3485,44 @@ has already made the carrier; each is pinned by an assertion in
 `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's boat, is the one remaining
 unported writer.
 
+### State 28, the pounce nothing enters
+
+`g_class30_states[28]` is `0x004586E0`, a routine Ghidra had no function for
+(its two `ActorSetPartVisibility` calls turned up in a byte scan). It is now
+`ZombieStateDelayedPounce`, in `class30/pounce.ts`: hold clip 0x10F -- hidden
+if the descriptor's `+0x03` is 1 -- for the delay at `+0x04`, then show the
+actor, claim a permit **and take player 0's if the claim is refused**, and
+ride `g_class30_pounce_arc_script` to a point 12 below and 12 in front of the
+camera (or 12 ahead of the descriptor's own point along the camera's heading,
+through `ZombieLeapStrikeTarget`, `class30/leap_target.ts`); splash `0x62` on
+the ground under it at clip frames 1 and 15, strike the player once on the
+landing (`PlayerTakeDamage(permit, 1, 9)`), play the clip out, give the permit
+back and join the attack run. Every sub-state but the last falls into the
+next.
+
+**No shipped stage reaches it.** Nothing stores 28 into `obj+0x1310` as an
+immediate; every register store copies the descriptor's `+0x02` or `+0x03`, a
+civilian's op-0x1A order or a state the actor was already in, and no
+descriptor in any of the twelve scenes' `evt/` files names 28 in either byte,
+nor does any civilian order. So the port runs it only for a record that asks,
+and the bundle now carries what such a record would need: `delayed_pounce`
+(`{delay, point?}`) on any class-0x30 placement whose `+0x02` or `+0x03` names
+28, the arc script as `combat.arc_scripts.pounce`, and clips 0x10F and 0x162
+for those spawns. The two clips are from different banks (`debu.bin`,
+`ebi.bin`); which character the state was written for is `[open]`.
+
+The one declared divergence is the strike: on a flight of more than 17 frames
+the port's advance-before-state clock reads the landing two frames after the
+engine does, past the cursor it is tested against, and the hit does not land.
+The fix is the port's clock phase for every class-0x30 and class-0x31 cursor
+test, not this state.
+
+Reading the states that can hand over to 28 found one more:
+`ZombieStateSurfaceOnCameraCue` (13) branches to `+0x03` only when it is 15,
+and goes to the attack run for anything else (`0x0045713C`). The port sent
+every value through the shared branch; the 32 shipped state-13 spawns name 1
+or 15, so none of them moves.
+
 ### The entrance a shot may not interrupt
 
 **A stagger is refused by a flag, not by a state.** `ActorPlayHitReaction`

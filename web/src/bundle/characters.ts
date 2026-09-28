@@ -271,6 +271,16 @@ export interface CharacterPlacement {
     delay: number; dest: [number, number, number]; gravity: number;
   } | null;
   /**
+   * `ZombieStateDelayedPounce`'s (state 28) reading of the tail: the s32 delay
+   * at `+0x04` and the landing point at `+0x08..+0x10`, absent when the dword
+   * at `+0x08` is `0xBF800000` -- the state then lands in the camera's own
+   * space. Present for a spawn whose `+0x02` or `+0x03` names state 28, and
+   * no shipped spawn's does.
+   */
+  delayed_pounce?: {
+    delay: number; point?: [number, number, number];
+  } | null;
+  /**
    * The two captor scripts, decoded — see `target_script` in
    * hod2lib/characters.py. `target_script` is the descriptor tail's `+0x04`
    * blob read for the initial state, `attack_script` the `+0x08` blob read for
@@ -765,7 +775,8 @@ export interface CombatJson {
   /**
    * `ZombieStateArcScriptedEntrance`'s two arc motion scripts, in class 0x31's
    * twelve-dword shape. The state picks by character type: `entrance_type0`
-   * for type 0 and `entrance_other` for every other.
+   * for type 0 and `entrance_other` for every other. `pounce` is
+   * `ZombieStateDelayedPounce`'s (state 28).
    */
   arc_scripts?: Record<string, ArcStage[]>;
   /** `ActorShotFeedback`: blood spray scale by hit result. */

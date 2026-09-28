@@ -60,14 +60,17 @@ import { CharacterTypeOf } from "./tables";
  * 00409d2f  MOV  byte ptr [ESI + EAX*0x8 + -0x7], DL
  * ```
  *
- * `[proved]`. Ten calls in the image, eight of them in the list Ghidra gives
- * and two more in class 0x30 state 28 (`0x004586E0`), which Ghidra has no
- * function for: `ZombieStateCorpseBlink` twice, `ZombieStateEmerge` twice,
- * `ZombieStateWaitForCameraFrame` twice, state 28 twice, and the unnamed
- * routines at `0x0045DBC0` and `0x00480810` (the latter installed by class
- * 0x32's `0x004807B0`) once each. Every caller that hides an actor
- * also clears {@link MotionFlag.Drawn}, because this reaches the parts
- * and not the skeleton.
+ * `[proved]`. Ten calls in the image, eight of them in the list Ghidra gave
+ * and two more in class 0x30 state 28, `ZombieStateDelayedPounce`
+ * (`FUN_004586E0`), which had no Ghidra function until its port created one:
+ * `ZombieStateCorpseBlink` twice, `ZombieStateEmerge` twice,
+ * `ZombieStateWaitForCameraFrame` twice, state 28 twice, and once each the
+ * split's copy at `0x0045DBC0` -- which hides the new half's parts -- and
+ * `Class32ExitEffectTick` (`FUN_00480810`), the task class 0x32's
+ * `Class32SpawnExitEffect` (`FUN_004807B0`) installs, which hides the actor
+ * that spawned it. Every caller that hides an actor also clears
+ * {@link MotionFlag.Drawn}, because this reaches the parts and not the
+ * skeleton.
  */
 export function ActorSetPartVisibility(obj: Actor, visible: number): void {
   if (visible !== 1 && visible !== 0) return;

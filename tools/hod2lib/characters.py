@@ -149,11 +149,12 @@ from .actorscript import (  # noqa: F401
                           civilian_motion_ids, civilian_ordered_states,
                           target_script, target_script_motions)
 from .placement import (  # noqa: F401
-                        BACK_AWAY_STATES, CUE_STATES, ENTRANCE_CLIP_STATES,
-                        ENTRY_TAIL_STATES, GRAB_STATES, LEAP_STATES,
+                        BACK_AWAY_STATES, CUE_STATES, DELAYED_POUNCE_STATE,
+                        ENTRANCE_CLIP_STATES, ENTRY_TAIL_STATES, GRAB_STATES,
+                        LEAP_STATES,
                         LEAP_STRIKE_STATES, PATH_STATES, POUNCE_STATES,
                         Placement, WALK_DISTANCE_STATES, WAYPOINT_BYTES,
-                        entry_tail)
+                        delayed_pounce_tail, entry_tail)
 from .charbuild import (  # noqa: F401
                         Character, EXTRA_PARTS, build, extra_parts,
                         gore_entry, rig_entry)
@@ -230,6 +231,7 @@ __all__ = [
     "CLASS23_MOTIONS",
     "DEATH_BACK",
     "DEATH_FRONT",
+    "DELAYED_POUNCE_STATE",
     "DEATH_LEFT",
     "DEATH_RIGHT",
     "DIFFICULTY_HP_DELTA",
@@ -314,6 +316,7 @@ __all__ = [
     "compose_bams",
     "damage_rank_row",
     "death_motions",
+    "delayed_pounce_tail",
     "difficulty_tables",
     "entry_tail",
     "extra_parts",
@@ -1066,6 +1069,11 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
                     and g is not None and 0 < g < 10):
                 delayed_leap = {"delay": rec.param(4, "i32") or 0,
                                 "dest": dest, "gravity": g}
+        # `ZombieStateDelayedPounce`'s delay and landing point, for a spawn
+        # that starts there or branches there through ``+0x03``.
+        delayed_pounce = None
+        if sp["class"] == 0x30 and DELAYED_POUNCE_STATE in tail[1:3]:
+            delayed_pounce = delayed_pounce_tail(rec)
         class20 = class20_tail(rec) if sp["class"] == 0x20 else None
         class52 = class52_tail(rec) if sp["class"] == 0x52 else None
         class53 = class53_tail(rec) if sp["class"] == 0x53 else None
@@ -1147,6 +1155,7 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             at, sp["class"], -1 if res.char_type is None else res.char_type,
             motion, sp, intro,
             emerge=emerge, delayed_leap=delayed_leap,
+            delayed_pounce=delayed_pounce,
             target_script=tscript, attack_script=ascript,
             camera_cue=camera_cue,
             entry=entry,
@@ -1273,9 +1282,16 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
             if tail[1] == 30:
                 # The crouch and the three arc-script stages, both by type.
                 entry_clips += [0x10C, 0x39F]
-                for a30 in CLASS30_ARC_SCRIPTS.values():
-                    entry_clips += [st["motion"]
-                                    for st in (arc_script(tables, a30) or [])]
+                for k in ("entrance_type0", "entrance_other"):
+                    entry_clips += [st["motion"] for st in
+                                    (arc_script(tables,
+                                                CLASS30_ARC_SCRIPTS[k]) or [])]
+        # `ZombieStateDelayedPounce`'s cut to 0x10F (``0x00458765``) and the
+        # clip its arc script plays.
+        if delayed_pounce:
+            entry_clips += [0x10F] + [
+                st["motion"] for st in (arc_script(
+                    tables, CLASS30_ARC_SCRIPTS["pounce"]) or [])]
         # The two clips the `znjoe` release state names -- keyed by
         # character type, because that state is. See
         # ``BODY_CREATURE_HOST_CLIPS``.

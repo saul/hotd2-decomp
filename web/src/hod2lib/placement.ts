@@ -282,6 +282,41 @@ export function entryTail(rec: Spawn, state: number,
   return null;
 }
 
+/** `ZombieStateDelayedPounce` (`FUN_004586E0`), class 0x30 state 28. */
+export const DELAYED_POUNCE_STATE = 28;
+
+/**
+ * `*(int *)(tail + 8) != 0xBF800000` at `0x004587E3` -- a raw dword test, so
+ * the float -1.0 in the landing point's x is "no point".
+ */
+export const POUNCE_NO_POINT = 0xbf800000;
+
+/**
+ * `ZombieStateDelayedPounce`'s two reads of the tail, as the engine makes them.
+ *
+ * `tail+0x04` is the s32 delay copied into `obj+0x1330` (`0x00458777`) and
+ * `tail+0x08..0x10` the landing point copied into `obj+0x13E4` -- unless the
+ * dword at `+0x08` is `0xBF800000`, when the point is left out and the state
+ * lands in the camera's own space instead. `tail+0x03` is read too, as the
+ * hide test, and `Placement.attack_state` already carries it.
+ *
+ * **Gated on either byte that can route an actor here** -- the initial state
+ * at `+0x02` and the branch at `+0x03` -- because the state reads these
+ * offsets whichever way it was entered. No bounds test: the engine applies
+ * none, and the gate is what says the bytes are this state's reading. A point
+ * that is not three finite floats cannot go into JSON and drops the block. No
+ * shipped spawn names state 28 at all.
+ */
+export function delayedPounceTail(rec: Spawn): Record<string, unknown> | null {
+  const delay = rec.param(0x04, "i32");
+  const raw = rec.param(0x08, "u32");
+  if (delay === null || raw === null) return null;
+  if (raw === POUNCE_NO_POINT) return { delay };
+  const point = [0, 1, 2].map((k) => rec.param(0x08 + 4 * k, "f32"));
+  if (!point.every((v) => v !== null && Number.isFinite(v))) return null;
+  return { delay, point };
+}
+
 /**
  * A waypoint: `{s16 step, s16 script, f32 x, f32 y, f32 z}`, sixteen bytes,
  * and the list is terminated by a step of -1.
@@ -365,6 +400,8 @@ export class Placement {
   emerge: Record<string, unknown> | null = null;
   /** `ZombieStateDelayedLeap`'s (state 26) `{delay, dest, gravity}`. */
   delayed_leap: Record<string, unknown> | null = null;
+  /** `ZombieStateDelayedPounce`'s (state 28) `{delay, point?}`. */
+  delayed_pounce: Record<string, unknown> | null = null;
   /**
    * The two captor scripts, decoded. `target` is the tail's `+0x04` blob read
    * for the initial state, `attack` the `+0x08` blob read for the attack state.
@@ -506,6 +543,7 @@ export class Placement {
     }
     if (this.emerge) d.emerge = this.emerge;
     if (this.delayed_leap) d.delayed_leap = this.delayed_leap;
+    if (this.delayed_pounce) d.delayed_pounce = this.delayed_pounce;
     if (this.entry) d.entry = this.entry;
     if (this.target_script) d.target_script = this.target_script;
     if (this.attack_script) d.attack_script = this.attack_script;

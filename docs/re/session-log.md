@@ -22165,3 +22165,63 @@ shipped script.
 * The Tower's `Boss3PublishCameraAngles` and `Boss3SeatCameraAngles`
   (`class45/body.ts`) compensate for a view built from the look-at. The view
   is built from the angles now, so both can go.
+
+## 2026-09-28 -- class 0x30 state 28, the pounce nothing enters
+
+`g_class30_states[28]` is `0x004586E0` (`[27]` `0x004584E0` and `[29]`
+`0x00458960` either side, so the indexing holds -- `L38`), not shared, and
+Ghidra had no function there. Created and named `ZombieStateDelayedPounce`;
+the jump table is at `0x00458950` and subs 0, 1 and 2 each fall into the next
+(`L53`). Its callee `FUN_0045A690` was already named in the live database,
+`ZombieLeapStrikeTarget`, by the crawler branch
+(`claude/musing-goldstine-ad68da`, not merged): its TSV row is copied here
+verbatim so that the two merge cleanly, and the routine is ported in its own
+module (`class30/leap_target.ts`) with that branch's signature, so whichever
+lands second drops a copy rather than untangling one. The arc script it
+passes, `0x00593140`, is `g_class30_pounce_arc_script`, exported as
+`combat.arc_scripts.pounce`.
+
+**Nothing reaches it.** A sweep of every `MOV word [reg + 0x1310]` finds no
+class-0x30 immediate 28, and every register store copies the descriptor's
+`+0x02` or `+0x03`, a civilian's op-0x1A order, or a state the actor was
+already in (`obj+0x132C`, `obj+0x1354`). All twelve scenes' `evt/` files --
+the six stages, training, the ending and the two `adv` scenes -- carry no
+class-0x30 descriptor naming 28 in either byte, and the shipped civilian
+orders are 1, 34, 35, 36 and 49. Its clips come from two banks, 0x10F from
+`debu.bin` and 0x162 from `ebi.bin`.
+
+**Wrong turn: the hit.** The first test drove a 48-frame flight and the
+landing never struck. It is not the transcription. The engine's states read a
+clip's start frame `fade + 2` times (`SkeletonAdvancePlayCursor` lets go when
+the counter is `fade + 2` past the call and `ZombieAdvanceMotion` steps it
+after the state), and `FitArcScriptByFadeLength` sets `f1 + f2 = T - 10`,
+which puts the arc's Settled phase on the last read of cursor 27: a hit on
+every flight from 11 frames up. The port's states read it `fade + 1` times,
+because its clocks run before its states, and the effect lands twice -- stage
+1 lets go early, so the arc comes down a frame later against stage 2, whose
+hold is a frame shorter -- so the read comes two frames late and only flights
+of 17 frames or fewer hit. Moving class 0x30's clock after its state, as the
+exe has it, broke ten other assertions and still missed, because the one-shot
+hold is derived for the current phase; it was reverted. Declared at the test,
+and the test for the hit uses a 14-frame flight that both hit.
+
+**Also found: state 13's exit.** `ZombieStateSurfaceOnCameraCue` branches to
+`+0x03` only for 15 (`CMP byte [EDI+3], 0xf` at `0x00457102`) and otherwise
+writes state 1 (`0x0045713C`); the port sent every value through the shared
+branch, which would have entered 28 where the exe runs at the player. No
+shipped record can tell -- all 32 name 1 or 15 -- and states 17, 18, 19, 20,
+21, 22 and 29 were checked and do take `+0x03`.
+
+**Also identified**, for the two other `ActorSetPartVisibility` calls the byte
+scan found: `0x0045DBC0` is the crawler branch's `ZombieSplitCopyToHalf`,
+reached only through `ZombieSplitInTwo`, which that branch shows unreachable;
+`0x00480810` is `Class32ExitEffectTick`, the task class 0x32's
+`Class32StateRaiseFlagAndLeave` spawns through `Class32SpawnExitEffect`
+(`0x004807B0`) -- it shrinks slot 0x7F4 away, hides the actor that spawned it
+and plays `STAGE5_SE\MAG_BAKU1_22K.wav`, then flips slots 0x7EF..0x815 and
+kills itself. Class 0x32 has one shipped spawn (stage 5, evt `0x3D84`, hp 450)
+and no module.
+
+**Near miss, `L42`.** `leap_target.ts`'s header cited the routine it defines in
+the parenthesised form, which took it out of the ported set: coverage read
+220 of 299 where two new ports made it 221. Rewritten to the bare address.

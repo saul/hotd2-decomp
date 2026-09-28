@@ -126,6 +126,7 @@ export function CamCueHit(frame: number): boolean {
 
 /**
  * The branch every waiting entrance ends with: `obj+0x1310 = (s8)tail+0x03`.
+ * State 13 takes it only for 15, and goes to the attack run otherwise.
  *
  * The `tail+0x03 == 15` arm is the one worth reading twice. It does not just
  * set state 15 — it latches `obj+0x1370` from the tail *and enters at sub 1*,
@@ -216,7 +217,21 @@ export function ZombieStateSurfaceOnCameraCue(obj: ZombieActor,
       }
     }
   }
-  if (atLastFrame(obj)) ZombieEntranceBranch(obj, t?.walk_distance);
+  if (!atLastFrame(obj)) return;
+  // **Only 15 is a branch here.** `00457102 CMP byte ptr [EDI+3], 0xf / JNZ
+  // 0x0045713C`: with 15 the walk distance is latched from `tail+0x08` and
+  // state 15 entered at sub 1 (`0x0045712D`); with anything else it is
+  // `MOV word [ESI+0x1310], 0x1` and sub 0 at `0x0045713C` -- the attack run,
+  // whatever `+0x03` names. States 17, 18 and 20 take `+0x03` on that arm and
+  // this one does not. It went through `ZombieEntranceBranch` for both, which
+  // no shipped record can tell apart -- the 32 state-13 spawns name 1 or 15 --
+  // and which would have sent a record naming state 28 into it.
+  if (obj.attackState === ZombieState.WalkDistance) {
+    ZombieEntranceBranch(obj, t?.walk_distance);
+    return;
+  }
+  obj.state = ZombieState.AttackRun;
+  obj.sub = 0;
 }
 
 /**

@@ -57,6 +57,7 @@ import type { Spawn } from "./evt";
 import { ExeTables as ExeTablesClass } from "./exetab";
 import type { ExeTables } from "./exetab";
 import { attachmentList, BACK_AWAY_STATES, CUE_STATES,
+         DELAYED_POUNCE_STATE, delayedPounceTail,
          ENTRANCE_CLIP_STATES, entryTail, GRAB_STATES, LEAP_STATES,
          LEAP_STRIKE_STATES, PATH_STATES, Placement, POUNCE_STATES,
          WALK_DISTANCE_STATES, WAYPOINT_BYTES } from "./placement";
@@ -1394,6 +1395,11 @@ export async function resolveForStage(
         delayedLeap = { delay: rec.param(4, "i32") || 0, dest, gravity: g };
       }
     }
+    // `ZombieStateDelayedPounce`'s delay and landing point, for a spawn that
+    // starts there or branches there through `+0x03`.
+    const delayedPounce = cls === 0x30
+      && (tail[1] === DELAYED_POUNCE_STATE || tail[2] === DELAYED_POUNCE_STATE)
+      ? delayedPounceTail(rec) : null;
     const class13 = cls === 0x13 ? class13Tail(rec) : null;
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
@@ -1488,6 +1494,7 @@ export async function resolveForStage(
     p.intro = intro;
     p.emerge = emerge;
     p.delayed_leap = delayedLeap;
+    p.delayed_pounce = delayedPounce;
     p.target_script = tscript;
     p.attack_script = ascript;
     p.camera_cue = cameraCue;
@@ -1654,11 +1661,19 @@ export async function resolveForStage(
       if (tail[1] === 30) {
         // The crouch and the three arc-script stages, both by type.
         entryClips.push(0x10c, 0x39f);
-        for (const a30 of Object.values(CLASS30_ARC_SCRIPTS)) {
-          for (const st of arcScript(tables, a30) ?? []) {
+        for (const k of ["entrance_type0", "entrance_other"]) {
+          for (const st of arcScript(tables, CLASS30_ARC_SCRIPTS[k]) ?? []) {
             entryClips.push(st.motion);
           }
         }
+      }
+    }
+    // `ZombieStateDelayedPounce`'s cut to 0x10F (`0x00458765`) and the clip
+    // its arc script plays.
+    if (delayedPounce) {
+      entryClips.push(0x10f);
+      for (const st of arcScript(tables, CLASS30_ARC_SCRIPTS.pounce) ?? []) {
+        entryClips.push(st.motion);
       }
     }
     // The two clips the `znjoe` release state names -- keyed by character

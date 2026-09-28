@@ -46,6 +46,9 @@ export function DescriptorFromPlacement(p: CharacterPlacement | undefined):
     // the one descriptor field the headless harnesses never saw.
     intro: p?.intro ?? null,
     delayedLeap: p?.delayed_leap ?? null,
+    // `ZombieStateDelayedPounce`'s delay and landing point -- see
+    // `class30/pounce.ts`.
+    delayedPounce: p?.delayed_pounce ?? null,
     // The twelve entrance states' tails, one union narrowed by the state --
     // see `class30/entrance.ts`.
     entry: p?.entry ?? null,

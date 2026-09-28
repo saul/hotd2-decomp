@@ -271,6 +271,44 @@ def entry_tail(rec, state: int, exit_state: int) -> dict | None:
     return None
 
 
+#: `ZombieStateDelayedPounce` (`FUN_004586E0`), class 0x30 state 28.
+DELAYED_POUNCE_STATE = 28
+
+#: ``*(int *)(tail + 8) != 0xBF800000`` at ``0x004587E3`` -- a raw dword test,
+#: so the float -1.0 in the landing point's x is "no point".
+POUNCE_NO_POINT = 0xBF800000
+
+
+def delayed_pounce_tail(rec) -> dict | None:
+    """`ZombieStateDelayedPounce`'s two reads of the tail, as the engine makes them.
+
+    ``tail+0x04`` is the s32 delay copied into ``obj+0x1330`` (``0x00458777``)
+    and ``tail+0x08..0x10`` the landing point copied into ``obj+0x13E4`` --
+    unless the dword at ``+0x08`` is ``0xBF800000``, when the point is left
+    out and the state lands in the camera's own space instead. ``tail+0x03``
+    is read too, as the hide test, and `Placement.attack_state` already
+    carries it.
+
+    **Gated on either byte that can route an actor here** -- the initial state
+    at ``+0x02`` and the branch at ``+0x03`` -- because the state reads these
+    offsets whichever way it was entered, and for a spawn that arrives from
+    another entrance they are that entrance's bytes as well. No bounds test:
+    the engine applies none, and the gate is what says the bytes are this
+    state's reading. A point that is not three finite floats cannot go into
+    JSON and drops the block. No shipped spawn names state 28 at all.
+    """
+    delay = rec.param(0x04, "i32")
+    raw = rec.param(0x08, "u32")
+    if delay is None or raw is None:
+        return None
+    if raw == POUNCE_NO_POINT:
+        return {"delay": delay}
+    point = [rec.param(0x08 + 4 * k, "f32") for k in range(3)]
+    if not all(v is not None and math.isfinite(v) for v in point):
+        return None
+    return {"delay": delay, "point": point}
+
+
 #: A waypoint: ``{s16 step, s16 script, f32 x, f32 y, f32 z}``, sixteen bytes,
 #: and the list is terminated by a step of -1.
 #:
@@ -358,6 +396,9 @@ class Placement:
     #: downward **acceleration**, not a duration -- `FUN_0040A090` counts the
     #: frames out by simulating the drop.
     delayed_leap: dict | None = None
+    #: `ZombieStateDelayedPounce`'s (state 28) ``{delay, point?}`` -- see
+    #: :func:`delayed_pounce_tail`.
+    delayed_pounce: dict | None = None
     #: The two captor scripts, decoded -- see :func:`target_script`. ``target``
     #: is the tail's ``+0x04`` blob read for the initial state, ``attack`` the
     #: ``+0x08`` blob read for the attack state. Only class-0x30 spawns whose
@@ -458,6 +499,8 @@ class Placement:
             d["emerge"] = self.emerge
         if self.delayed_leap:
             d["delayed_leap"] = self.delayed_leap
+        if self.delayed_pounce:
+            d["delayed_pounce"] = self.delayed_pounce
         if self.entry:
             d["entry"] = self.entry
         if self.target_script:

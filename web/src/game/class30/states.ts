@@ -159,6 +159,13 @@ export enum ZombieState {
    */
   Emerge = 27,
   /**
+   * `ZombieStateDelayedPounce` (`FUN_004586E0`). Hold a crouch -- hidden if
+   * the descriptor's `+0x03` is 1 -- for a delay, then leap at the player and
+   * strike on the landing. **No shipped spawn reaches it**: see
+   * `class30/pounce.ts`.
+   */
+  DelayedPounce = 28,
+  /**
    * `ZombieStateRideCarrier` (`FUN_00458960`). A passenger: its position is
    * its own spawn offset plus `g_carrier_object`'s, every frame. Six spawns,
    * and it reads nothing from the tail — the tail belongs to the state it

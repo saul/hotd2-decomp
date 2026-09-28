@@ -60,6 +60,7 @@ import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed } from "./head_aim";
 import { ZombieAttachToCarrier } from "./carrier";
 import { ActorRegisterCameraPoint } from "../camera/track";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
+import { ZombieStateDelayedPounce } from "./pounce";
 import { ZombieStateFallToGround } from "./fall";
 import { ZombieStateMotionCue21 } from "./play_cue";
 import {
@@ -222,6 +223,11 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
       return ZombieStateEmerge(obj, dt, events);
     case ZombieState.DelayedLeap:
       return ZombieStateDelayedLeap(obj, dt, rng, host, events);
+    // State 28, which nothing in the shipped game enters -- see
+    // `class30/pounce.ts`. A descriptor that names it gets the engine's
+    // state rather than the fallback below.
+    case ZombieState.DelayedPounce:
+      return ZombieStateDelayedPounce(obj, dt, host, events);
     case ZombieState.FallToGround:
       return ZombieStateFallToGround(obj, dt, rng);
 
@@ -384,6 +390,7 @@ const ZOMBIE_ENTRY_STATES: ReadonlySet<number> = new Set<number>([
   // ...and the ones that were already read.
   ZombieState.WalkDistance, ZombieState.MotionCue, ZombieState.DelayedLeap,
   ZombieState.Emerge, ZombieState.StandAndThrow, ZombieState.FallToGround,
+  ZombieState.DelayedPounce,
   ...TARGET_STATES,
 ]);
 

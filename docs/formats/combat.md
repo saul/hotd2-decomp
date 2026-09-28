@@ -2730,6 +2730,18 @@ stage 2's — **not** when the arc lands: its flight phase ignores
 clip. `zstin`'s attack 0 is `{303,0,5,22}{303,23,5,46}{303,47,0,47}` and
 connects on frame **62** of the same clip.
 
+Class 0x30 installs three scripts of its own, exported as
+`combat.arc_scripts`: `ZombieStateArcScriptedEntrance`'s two, picked by
+character type (`0x00567898` for type 0, `0x00567958` for the rest), and
+`ZombieStateDelayedPounce`'s `g_class30_pounce_arc_script` (`0x00593140`,
+state 28) -- `{0x162,0,5,15}{0x162,16,5,26}{0x162,27,5,40}`, one `ebi.bin`
+clip of play length 59, flown at step 1. That state strikes the player when
+the arc's phase is 4 on cursor 27, the landing stage's start frame, and it is
+the fit that makes the two meet: with `f1 + f2 = T - 10` the Settled phase is
+read on the **last** state frame of that hold, for every flight from 11 frames
+until the fades clamp. `[proved]` from the three routines' arithmetic; no
+shipped spawn reaches state 28.
+
 **The fade is a hold.** Each stage is played by a direct `CALL 0x004119a0` —
 `ActorSetMotionBlended(obj+0x194, motion, start, fade)`, at `0x0044D901`,
 `0x0044D94D` and `0x0044D9C9` — which writes `start` into the cursor at

@@ -30,6 +30,7 @@ import { ShotTestListReset } from "./combat/shot_test";
 import { CommitAppState } from "./app_state";
 import { GameOverRunPhase } from "./game_over";
 import { PlayerTasksRun } from "./player_shell";
+import { HudDrawShutterState } from "./hud_shutter";
 import { AutoReloadEmptyGuns } from "./player_gun";
 import { RunPhaseDispatch } from "./run_phase";
 import { ShotEffectsTick } from "./effects/tick";
@@ -618,6 +619,9 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // (`game/game_over.ts`) and the stage's actors stand still; any other
   // screen (3, after the game over) runs nothing the port has.
   if (G.g_app_state !== AppState.InPlay) {
+    // The letterbox is one of the scene list's tasks (`HudShutterTaskCreate`,
+    // `0x00460733`), so a screen that does not walk that list draws no bars.
+    G.g_hud_shutter_bars = [];
     if (G.g_app_state === AppState.GameOver) {
       GameOverRunPhase({ host, rng, events }, events);
     }
@@ -650,6 +654,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   // ahead of the walk: the layered queue starts every frame empty.
   ScreenSpriteQueueReset();
   PlayerTasksRun({ host, rng, events });
+  // The letterbox, the task `HudShutterTaskCreate` makes on the line after
+  // `SpawnAttackablePlayerTask` (`0x00460733`): after both players have read
+  // the state and the firing gate the script left, before any actor reads
+  // what it turns them into. See `hud_shutter.ts`.
+  HudDrawShutterState();
   DropDueShotRequests();
   // `ProcessPlayerShots` (`FUN_00404570`) is a task of its own, created after
   // the two player tasks and before any actor, and it ends by emptying

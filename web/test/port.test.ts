@@ -14743,6 +14743,158 @@ console.log("\nclass 0x10, the civilian and the rescue:");
   }
 }
 
+// **A civilian's clip change** -- `CivilianApplyMotionPose` (`FUN_0048C310`),
+// which ops 0x00 and 0x01 call and the port did not. Stage 1's bin civilian
+// (`0x3C38`, block 6) is the scene: she falls onto the bin on clip 619 and
+// climbs down on 611, whose root ends 15.4 units lower, and the block that
+// follows (`0x160100`) carries `0x20000` -- hold bone 1 -- which is what puts
+// her feet on the ground. Without it she walked the rest of the scene at the
+// height of the bin lid. Each arm is driven through the VM, with a host whose
+// bone 1 stands where a draw would have left it.
+console.log("\nclass 0x10's clip change, CivilianApplyMotionPose:");
+{
+  const rng = new Rng(21);
+  const N = TYPE.bone_count;
+  /** A clip whose every frame has this root and these two records. */
+  const clip = (frames: number, root: [number, number, number],
+                rec0: [number, number, number] = [0, 0, 0],
+                rec1: [number, number, number] = [0, 0, 0]) => ({
+    bank: "t", frames, fps: 30,
+    root: Array.from({ length: frames * 3 }, (_, i) => root[i % 3]),
+    rot: Array.from({ length: frames * N * 3 }, (_, i) => {
+      const r = Math.floor(i / 3) % N;
+      return r === 0 ? rec0[i % 3] : r === 1 ? rec1[i % 3] : 0;
+    }),
+  });
+  const POSE_CHARS = {
+    ...CHARS,
+    types: { "1": { ...TYPE, motions: {
+      ...TYPE.motions,
+      // 610 the climb down, whose root ends low; 565 the stand after it.
+      "610": clip(20, [0, -5.18, 0]),
+      "565": clip(20, [0, 11.91, 0]),
+      // 669 a pose whose bone 1 is turned 0x2000; 373 one that is not.
+      "669": clip(20, [0, 11.8, 0], [0, 0, 0], [0, 0x2000, 0]),
+      "373": clip(20, [0, 11.0, 0]),
+    } } },
+  } as unknown as CharactersJson;
+  /** Where the host says bone 1 was drawn. */
+  const DRAWN = vec3(3, -4.78, 5);
+  const HOST = { ...NULL_HOST,
+    boneWorld: (_at: number, bone: number, out: Vec3) => {
+      if (bone !== 1) return false;
+      out.x = DRAWN.x; out.y = DRAWN.y; out.z = DRAWN.z;
+      return true;
+    } };
+  const cmd = (op: CivilianOp, ...args: number[]): CivilianCmdJson =>
+    ({ op, args });
+  /**
+   * The Init plays `first` in a block of its own and waits one timer frame;
+   * the next block, led by `word`, changes to `second`. Returned just after
+   * that change, driven by `CivilianUpdate` with `HOST`.
+   */
+  const change = (first: number, word: number, ...block: CivilianCmdJson[]) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(POSE_CHARS, undefined, undefined, undefined, undefined, {
+      entries: [0], items: [],
+      scripts: [[
+        cmd(CivilianOp.Wait, CivilianWait.RootMotion),
+        cmd(CivilianOp.SetMotion, first, -1),
+        cmd(CivilianOp.SetTimer, 1),
+        cmd(CivilianOp.Wait, word),
+        ...block,
+        cmd(CivilianOp.Wait, 0),
+        cmd(CivilianOp.End),
+      ]],
+      spawns: { "16384": { charType: 1, script: 0, removePath: -1,
+                           removeFrame: 0, removeDelay: 0, children: [] } },
+    });
+    const a = ActorSpawn(0x4000, SpawnClass.Civilian, 1, "civilian",
+                         undefined, rng);
+    a.visible = true;
+    a.pos = vec3(0, 0, 0);
+    a.yaw = 0;
+    const events = new Events();
+    // The Init parks on command 3; the frame the next block runs moves it.
+    for (let i = 0; i < 6 && a.civ?.cursor === 3; i++) {
+      CivilianUpdate(a, { dt: 1 / 60, rng, host: HOST, events });
+    }
+    return a;
+  };
+
+  // `0x20000`: pos += bone 1 drawn - bone 1 under the new clip's first frame.
+  // Type 1 is scale 1.0 and its first root node's offset is zero, so P2 is
+  // the position plus 565's root, `(0, 11.91, 0)`.
+  {
+    const a = change(610, CivilianWait.HoldBone1 | CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("0x20000 moves her so bone 1 stays where the climb-down drew it",
+          a.motion === 565 && Math.abs(a.pos.x - 3) < 1e-4
+          && Math.abs(a.pos.y - (-4.78 - 11.91)) < 1e-4
+          && Math.abs(a.pos.z - 5) < 1e-4,
+          `motion ${a.motion} pos ${a.pos.x},${a.pos.y},${a.pos.z}`);
+    check("...and the fade dissolves from the new clip's root, not the old",
+          a.fadeFrom !== null && a.fadeFrom.root?.y === 11.91
+          && a.fadeFrom.root?.x === 0 && a.fadeFrom.root?.z === 0,
+          JSON.stringify(a.fadeFrom));
+  }
+  // The blend is op 0x03's operand -- `sub+0xE`, `CivilianInit`'s 10 by
+  // default -- and `0x200000` cuts instead.
+  {
+    const a = change(610, CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotionBlend, 6),
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("a clip change fades over op 0x03's length",
+          a.motion === 565 && a.fadeFrom !== null && a.fadeLen === 7,
+          `motion ${a.motion} fadeLen ${a.fadeLen}`);
+    const b = change(610, CivilianWait.Cut | CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("...and 0x200000 cuts, with no fade at all",
+          b.motion === 565 && b.fadeFrom === null, `fade ${b.fadeLen}`);
+  }
+  // The old block walked on its clip (`0x100000` in the word the VM entered
+  // with), so the snapshot's x and z are the new frame's -- `model+0x6C` and
+  // `+0x74` at `0x0048C809`/`0x0048C816` -- and its y is still the drawn one.
+  {
+    const a = change(610, CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 565, -1));
+    check("the outgoing block's root motion hands the fade x and z, not y",
+          a.fadeFrom?.root?.x === 0 && a.fadeFrom?.root?.z === 0
+          && a.fadeFrom?.root?.y === undefined, JSON.stringify(a.fadeFrom));
+  }
+  // `0x8000`: she turns by the heading the drawn pose has and the new clip's
+  // first frame lacks, and records 1 and 9 are rebased by the same so the
+  // body does not swing. 669's bone 1 faces 0x2000; 373's faces nothing.
+  {
+    const a = change(669, CivilianWait.TurnKeepBones | CivilianWait.RootMotion,
+                     cmd(CivilianOp.SetMotion, 373, -1));
+    const r1 = a.fadeFrom?.records?.find((r) => r.record === 1)?.rot;
+    check("0x8000 turns her by the drawn heading the new clip lacks",
+          a.motion === 373 && Math.abs(a.yaw - 0x2000) <= 1, `yaw ${a.yaw}`);
+    check("...and rebases bone 1 so the body keeps facing where it was",
+          r1 !== undefined && r1.every((v) => Math.abs(v) <= 2)
+          && a.fadeFrom?.records?.some((r) => r.record === 9) === true,
+          JSON.stringify(a.fadeFrom?.records));
+  }
+  // Op 0x01's third operand is the start **cursor**: `ActorSetMotionBlended`
+  // writes it into `model+0x08` as it is. The port doubled it.
+  {
+    const a = change(610, CivilianWait.Cut,
+                     { op: CivilianOp.SetMotionFrom, args: [565, 1, 7] });
+    check("op 0x01 starts the clip on the cursor it names",
+          a.motion === 565 && a.playTicks === 7, `ticks ${a.playTicks}`);
+  }
+  // Op 0x18: six dwords copied, the last three into pitch, yaw and roll.
+  {
+    const a = change(610, 0, { op: CivilianOp.SetPose, args: [0],
+                               pose: [-698, -0.116, -541, 0x100, 0xc000, 0x200] });
+    check("op 0x18 writes all three angles as BAMS",
+          a.pitch === 0x100 && a.yaw === 0xc000 && a.roll === 0x200
+          && a.pos.x === -698, `pitch ${a.pitch} yaw ${a.yaw} roll ${a.roll}`);
+  }
+}
+
 console.log("\nclass 0x30's captor family — the zombies work on the civilian:");
 {
   const rng = new Rng(11);
@@ -18644,7 +18796,7 @@ console.log("\nthe bin captor's walk hands state 35 its attack list, once:");
   z.sub = 0;
   const seen: string[] = [];
   for (let i = 0; i < 900 && z.state !== ZombieState.AttackRun; i++) {
-    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
     const s = `${z.state}:${z.zom.scriptMotion}`;
     if (seen[seen.length - 1] !== s) seen.push(s);
   }

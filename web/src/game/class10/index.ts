@@ -73,11 +73,13 @@
  * `CivilianDrawHeldItems` (`FUN_0048CD10`) is `syncHeldItems` in
  * `render/characters.ts`, and `ActorRegisterCameraPoint`'s shot sphere is that
  * layer's `pick` — this side owns the radius at `obj+0x124` and the item list,
- * and nothing else. `CivilianApplyMotionPose` (`FUN_0048C310`) is not ported:
- * it blends the clip, takes the root translation off the pol file and turns
- * the body by the difference between two bone directions, and the generic
- * `ActorAdvanceMotion` root walk already carries a civilian where its clips
- * say.
+ * and nothing else.
+ *
+ * **`CivilianApplyMotionPose` (`FUN_0048C310`) is ported** (`pose.ts`). It
+ * used to be passed over on the grounds that the generic root walk already
+ * carries a civilian where her clips say -- which is true inside a clip and
+ * says nothing about the seam between two, where that routine turns her,
+ * moves her to hold bone 1 and starts the next clip over a cross-fade.
  *
  * **`CivilianUpdateOnCarrier` (`FUN_0048B140`) is ported.** `CivilianInit`
  * tests `obj+0x11C != 0` at `0x0048A747` and, when it is, writes
@@ -110,6 +112,7 @@
  * | `ops.ts`      | the opcode, wait-bit, target and hook sets both VMs switch on |
  * | `init.ts`     | `CivilianInit` `FUN_0048A3E0`                              |
  * | `script.ts`   | `CivilianRunScript` `FUN_0048B9E0`, `CivilianReapplyWaitCommand` `FUN_0048B760` |
+ * | `pose.ts`     | `CivilianApplyMotionPose` `FUN_0048C310`                   |
  * | `items.ts`    | `CivilianAddHeldItem` `FUN_0048CAE0`, `CivilianAddPickedItem` `FUN_0048CB60`, `CivilianPickHeldItem` `FUN_0048CBF0` |
  * | `step.ts`     | `CivilianStepScript` `FUN_0048B1E0`                        |
  * | `turn.ts`     | `CivilianStepTurnToTarget` `FUN_0048C850`, `ActorTurnTowardPoint` `FUN_0048C990` |
@@ -140,6 +143,7 @@ export * from "./hooks";
 export * from "./loops";
 export * from "./shot";
 export * from "./script";
+export * from "./pose";
 export * from "./step";
 export * from "./init";
 export * from "./update";

@@ -113,8 +113,8 @@
  * (`SkeletonDrawNodeSlot`, `ActorDrawAttachedParts`, `DrawCharacterPartSlot`,
  * `CivilianDrawHeldItems`'s model) pass it to `NoOpStub` (`FUN_0041EBB0`) and
  * nothing more: the size reaches their draws through the bone matrix alone.
- * `CivilianApplyMotionPose`, which multiplies it into a placement of its own,
- * is unported.
+ * `CivilianApplyMotionPose` multiplies it into a placement of its own, the
+ * bone-1 hold at a clip change (`class10/pose.ts`).
  *
  * **The delta is turned by all three angles**, in the one order the gated
  * arm hard-codes, whatever the model's own draw order is:

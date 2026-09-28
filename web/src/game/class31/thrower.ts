@@ -589,7 +589,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.EntranceClip:
       return ThrowerStateEntranceClip(obj);
     case ThrowerState.DelayedPounce:
-      return ThrowerStateDelayedPounce(obj, dt, rng, host, events);
+      return ThrowerStateDelayedPounce(obj, eye, dt, rng, host, events);
     case ThrowerState.Withdraw:
       return ThrowerStateWithdraw(obj, eye, dt, rng);
     case ThrowerState.LeapToPoint:

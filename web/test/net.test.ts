@@ -31,7 +31,7 @@
  */
 import type { EventMap } from "../src/core/events";
 import { TreeHasher, diffTrees } from "../src/core/net/codec";
-import { PressKind } from "../src/core/net/protocol";
+import { Msg, PressKind } from "../src/core/net/protocol";
 import { NetHost, type HostSim } from "../src/app/net/host";
 import { NetReplica, type ReplicaSim } from "../src/app/net/replica";
 import { MemoryLink } from "../src/app/net/transport";
@@ -109,6 +109,7 @@ async function run(stage: number, p: Profile, seconds: number,
   link.jitter = p.jitter;
   const hostSim: HostSim = {
     stage: () => ({ stage, original: false }),
+    loaded: () => stage,
     liveRoot: () => h.root(),
     hold: () => null,
     branch: () => null,
@@ -136,6 +137,20 @@ async function run(stage: number, p: Profile, seconds: number,
     wake: () => undefined,
   };
   const replica = new NetReplica(link.b, ID, replicaSim);
+  // Both ends time what lands on the one simulated clock.
+  host.clock = replica.clock = () => now;
+  // Under sabotage, one desync report is lost on its way to the host, so the
+  // replica's own retry is what has to get the keyframe.
+  let loseDesync = false, lostDesync = false;
+  const hostHears = link.a.onMessage;
+  link.a.onMessage = (ch, data) => {
+    if (loseDesync && data[0] === Msg.Desync) {
+      loseDesync = false;
+      lostDesync = true;
+      return;
+    }
+    hostHears(ch, data);
+  };
 
   const truth = new Map<string, Obj>();
   const hasher = new TreeHasher();
@@ -156,6 +171,12 @@ async function run(stage: number, p: Profile, seconds: number,
   let sab1 = 0, sab2 = 0, sabEpoch = 0, mismatchesBefore2 = 0;
   const frames = seconds * 60;
   let hostTick = 0;
+  // Player 2's tab hidden for five seconds: no frames, so no steps and no
+  // flushes, and the session's timer throttled to once a second. Only what
+  // lands still runs.
+  const hideFrom = sabotage ? Infinity : Math.floor(frames * 0.3);
+  const hideTo = hideFrom + 300;
+  let hiddenLag = 0, hiddenKeyframes = -1, hiddenBehind = NaN;
 
   const setNow = (t: number) => {
     now = t;
@@ -171,7 +192,9 @@ async function run(stage: number, p: Profile, seconds: number,
     setNow(f * FRAME_MS);
     link.deliver(now);
     host.poll(now);
-    replica.poll(now);
+    const hidden = f >= hideFrom && f < hideTo;
+    if (f === hideFrom) hiddenKeyframes = host.stats.keyframes;
+    if (!hidden || f % 60 === 0) replica.poll(now);
 
     // -- the host's frame: player 2's gun first, as `stepOneFrame` takes it --
     if (!host.holding) {
@@ -195,6 +218,11 @@ async function run(stage: number, p: Profile, seconds: number,
       h.step();
       const t0 = performance.now();
       host.endTick(now);
+      if (hidden) hiddenLag = Math.max(hiddenLag, host.stats.lag);
+      if (f === hideTo - 1) {
+        hiddenKeyframes = host.stats.keyframes - hiddenKeyframes;
+        hiddenBehind = host.stats.tick - replica.tick;
+      }
       if (host.streaming) {
         hostCost.push(performance.now() - t0);
         hostTick++;
@@ -208,6 +236,7 @@ async function run(stage: number, p: Profile, seconds: number,
       }
     }
 
+    if (hidden) continue;
     // -- the replica's frame --
     const r0 = performance.now();
     const before = replica.tick;
@@ -244,6 +273,7 @@ async function run(stage: number, p: Profile, seconds: number,
           sab2 = replica.tick;
           sabEpoch = replica.stats.epoch;
           mismatchesBefore2 = replica.stats.mismatches + replica.stats.applyErrors;
+          loseDesync = true;
           pool.splice(1, 1);
         }
       }
@@ -276,7 +306,10 @@ async function run(stage: number, p: Profile, seconds: number,
           const id = replica.press(PressKind.Pull, shot.ray);
           if (id >= 0) fired.set(id, replica.stats.epoch);
           // Once, a shot whose pixels say one thing and whose ray another.
-          if (liar < 0 && id >= 0 && fired.size > 20) {
+          // On screen: far off the axis 200 pixels is a small angle, and the
+          // nearest enemy can be anywhere in front of the camera.
+          if (liar < 0 && id >= 0 && fired.size > 20
+              && Math.abs(shot.x) < 320 && Math.abs(shot.y) < 240) {
             replica.setAim(shot.x + 200, shot.y, true);
             liar = replica.press(PressKind.Pull, shot.ray);
             if (liar >= 0) fired.set(liar, replica.stats.epoch);
@@ -320,6 +353,10 @@ async function run(stage: number, p: Profile, seconds: number,
           rs.log.some((e) => e.kind === "report" && /g_credits/.test(e.text)), logs(rs));
     check(`${tag}: an actor taken from the replica's pool is caught too`,
           sab2 > 0 && rs.mismatches + rs.applyErrors > mismatchesBefore2, logs(rs));
+    check(`${tag}: ...whose report the host never got, so the replica asked again `
+          + "by itself", lostDesync
+          && hs.log.some((e) => /asked for a keyframe: the state is still wrong/.test(e.text)),
+          logs(hs));
     check(`${tag}: ...both repaired by keyframes (${rs.keyframes}), the replica `
           + `matching again at the end`, rs.keyframes >= 3 && !rs.desynced, logs(rs));
     check(`${tag}: ${compared} ticks after the repair compared whole against the host's`,
@@ -333,6 +370,12 @@ async function run(stage: number, p: Profile, seconds: number,
         rs.log.map((e) => e.text).join(" | "));
   check(`${tag}: ${compared} ticks compared whole against the host's state`,
         compared > 10 && !deepFail, deepFail || `${compared} comparisons`);
+  // A hidden tab applies what lands and says so: the host's base keeps moving,
+  // no delta grows past a keyframe's worth, and the tab comes back current.
+  check(`${tag}: a hidden player 2 kept the host's deltas narrow (widest `
+        + `${hiddenLag} ticks, ${hiddenKeyframes} keyframes) and was ${hiddenBehind} `
+        + "ticks behind when it came back",
+        hiddenLag < 45 && hiddenKeyframes === 0 && hiddenBehind < 20, "");
   check(`${tag}: the seek's new epoch was taken up`, seekEpochDone,
         `host epoch ${hs.epoch}, replica ${rs.epoch}, phase ${rs.phase}`);
   check(`${tag}: player 2 is in play off a START sent from the replica`,

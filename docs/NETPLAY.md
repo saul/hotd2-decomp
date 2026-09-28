@@ -111,14 +111,22 @@ figure):
   target, the arrival jitter, underruns and skips, keyframes, and the per-tick
   cost of applying and hashing.
 * **Is it the same game?:** whether the replica's state matches the host's
-  now, ticks verified, **hash mismatches**, **apply errors**; on the host,
-  desync reports.
+  now, ticks verified, **hash mismatches**, **apply errors**, and **systems
+  disagree**; on the host, desync reports. The per-tick hash is of the tree
+  the deltas land in. Every slice of it but `G` is then handed to its
+  system's `load`, and twice a second the replica also hashes what the
+  systems hold (`save()`, as the host reads it) against the host's hash. A
+  `load` that drops or changes what it is handed shows there and nowhere
+  else, with the local diff in the log. It found one on its first run: the
+  RNG word written back unsigned where the host's was signed.
 * **Log:** every desync, apply error, keyframe problem and aim disagreement,
-  newest first, with its tick. On a mismatch the replica sends its section
-  hashes, the host compares them with its own for that tick, and the log
-  names **which global or which actor** differed, for example
-  `parts.game.g_entity_lights` or `parts.game.g_object_list[@6720]`, before
-  a keyframe repairs it.
+  newest first, with its tick. On a mismatch or an apply error the replica
+  sends its section hashes, the host compares them with its own for that
+  tick, and the log names **which global or which actor** differed, for
+  example `parts.game.g_entity_lights` or `parts.game.g_object_list[@6720]`,
+  before a keyframe repairs it. One line an episode: the ticks after the first
+  fail the same way and are counted, not logged. If the keyframe does not
+  come, or installs wrong, the replica asks again after 1 s, then 2, 4 and 8.
 * **Resync** (replica) asks for a keyframe. **Copy report** puts every figure
   and the log on the clipboard as JSON, for a bug report.
 
@@ -182,8 +190,22 @@ value. The fuzz test's purpose is to try to break exactly this.
   ordered set of `(at, serial)`: survivors keep their object on the replica,
   and a respawn at an old `at` is a new element sent whole. Some pools are
   rebuilt from fresh objects every tick (`g_shot_test_list`, the walker's
-  `spawns`); the tick itself tells those apart, because in a rebuilt pool no
-  surviving `at` kept its object.
+  `spawns`); the tick itself tells those apart. A pool in which any surviving
+  `at` kept its object persists; one in which two or more survived and none
+  did was rebuilt. **One survivor proves nothing** (the only actor
+  respawning looks exactly like a one-element list rebuilt), so that tick goes
+  by what the pool last proved. What stays unprovable is two or more
+  survivors of a persistent pool all respawning in one tick; it is patched in
+  place, with the values and the hash still right, and the character layer
+  looks for a life starting again in the values as well (`removed` or
+  `boneSlot` shrinking).
+* **An element is sent whole for as long as it is younger than the base**,
+  so an actor spawned within the ack lag rides whole in every delta. A
+  replica already past its spawn keeps its own object and takes the value
+  into it. Without that, a new actor was a new object on the replica every
+  tick of its first few. The fuzz asserts identity both ways over every
+  window in which the list stayed a pool; until the review it computed the
+  identity map and asserted nothing (L14).
 * **An indexed array's length** travels as the shortest the window saw and the
   final length. The replica cuts, then grows, so an element cut off and grown
   back as a hole stays a hole. The fuzz found the version without this.
@@ -220,15 +242,32 @@ carries whatever the other end has not acknowledged yet.
   base, the press ack, the host's state hash and send time, then the delta,
   then the events of the window (the last 30 ticks at most). A delta over
   12 KiB goes on `ctrl` instead. A keyframe (about 35–50 KiB in practice)
-  goes on `ctrl` in 16 KiB chunks.
-* **While the host's clock is held** (paused, hidden, free roam, a branch),
-  a keyframe that is due goes at once, and a tick goes every 250 ms anyway.
-  A held replica applies what lands at once, so it stands on the host's exact
-  frame through a pause and sees what changes during it.
+  goes on `ctrl` in 16 KiB chunks, and says which stage the host has
+  *loaded*: a failed load leaves the last one, and a replica on another stage
+  refuses it rather than installing it where it would hash the same and draw
+  nonsense.
+* **No delta spans more than 90 ticks.** Past that a keyframe is cheaper: a
+  replica that has not acknowledged in a second and a half is not applying,
+  and every delta from its base would carry the whole window again, sixty a
+  second.
+* **While the host's clock is held** (paused, hidden, free roam), a keyframe
+  that is due goes at once, and a tick goes every 250 ms anyway. A held
+  replica applies what lands at once, so it stands on the host's exact frame
+  through a pause and sees what changes during it. A branch is not a hold:
+  its countdown runs on the script's clock and the port runs through it, so
+  it travels as a label.
+* **A hidden replica** gets no frames, so no steps and no flushes, and its
+  timers are throttled. It applies each tick as it lands and acknowledges
+  it, as a held one does, so the host's deltas stay narrow (the headless
+  test hides player 2 for five seconds on a 100 ms, 20 %-loss link: 33 ticks
+  at the widest, no keyframe) and the tab comes back current. Arrivals are
+  timed with the page's clock read on receipt, not the last frame's.
 * **Input.** An input packet, sent every frame and at once on a press, has the
   replica's newest applied tick (the host's next base), the tick on screen,
   the aim in the exe's pixels, and every press not yet acknowledged. The host
-  takes each press once by id.
+  takes each press once by id. A pull that lands while the host's game is
+  stopped goes nowhere, as player 1's does; START is latched for either. A
+  new epoch drops whatever was waiting.
 
 ## Player 2's gun
 
@@ -315,17 +354,23 @@ TURN is not optional for this player. It is built for phones, and a phone on
 cellular sits behind carrier-grade NAT, where hole-punching often fails;
 TURN over TLS on 443 also covers networks that block UDP. When ICE drops
 (`disconnected` for 2.5 s, or `failed`), the host restarts it through the
-rendezvous (the replica asks it to) up to four times. The overlay's route
-row says whether a session is direct or relayed.
+rendezvous (the replica asks it to), up to four times in a row; a restart
+that reconnects gives the budget back. Both ends usually see a drop together,
+so a replica's request that lands while the host's own restart is in flight,
+or within 2.5 s of it, is ignored: a second offer over the first would leave
+each end holding the other's wrong credentials. Signalling goes out in order
+and is handled in order, and a candidate for an ICE generation whose offer or
+answer has not been applied yet (its username fragment says which) is held
+for it. The overlay's route row says whether a session is direct or relayed.
 
 ## Verification
 
 | check | what only it sees |
 |---|---|
-| `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; pool identity kept, a respawn a new object, a rebuilt list free; a `Map` refused by name. No bundle, about 20 s |
-| `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick hash-verified, a whole-tree comparison every 30th, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Needs a bundle |
+| `test:net-codec` | fuzzed trees, lossy, reordered and duplicated delivery, acks up to 60 ticks late: every applied tick deep-equal and hash-equal to the host's; pool identity kept and a respawn a new object, asserted over every window, the only survivor's respawn included; a rebuilt list free; a `Map` refused by name. No bundle, about 20 s |
+| `test:net` | a real stage, host and replica sessions on a `MemoryLink` at clean, lossy and bad settings: every tick hash-verified, a whole-tree comparison every 30th, player 2's tab hidden for five seconds with the host's deltas staying narrow, a seek's epoch followed, every press of the final epoch taken once and none twice, player 2 scoring, the aim check exact for a true shot and catching a false one. Sabotaged once: a changed value and a removed actor caught and named, a lost desync report recovered by the replica's own retry. Needs a bundle |
 | `test:signal` | the rendezvous over real HTTP in its Node binding and its Worker: codes, TURN credentials, 404/409/403, queues, reconnects, rejoins, the sweep. It found three bugs, now fixed |
-| `net_pair` | the page: two tabs (clean, then 60±30 ms at 10% loss) and real WebRTC through the dev server's rendezvous, each playing stage 1 with player 2 joining and shooting through its own camera. Then a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). No console error anywhere |
+| `net_pair` | the page: two tabs (clean, then 60±30 ms at 10% loss) and real WebRTC through the dev server's rendezvous, each playing stage 1 with player 2 joining and shooting through its own camera, and the replica's systems re-hashed against the host's. Then a pause (player 2 on the host's exact frame), a reload of player 2 (rejoined, matching) and a stage change (player 2 follows, matching). No console error anywhere |
 
 All four are rows in `tools/verify_all.py`.
 

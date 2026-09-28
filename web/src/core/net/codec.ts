@@ -255,6 +255,12 @@ interface PoolInfo {
   objs: object[];
   /** The tick each element (by serial) appeared at. */
   intro: number[];
+  /**
+   * What the last tick that could tell said: that this pool is rebuilt from
+   * fresh objects (two or more `at`s survived and none kept its object), or
+   * that its objects persist (one did). See {@link StateTracker.diffPool}.
+   */
+  rebuilt: boolean;
 }
 
 /** How many ticks of change lists the host keeps. */
@@ -376,6 +382,7 @@ export class StateTracker {
           serials: ats.map(() => ++this.serial),
           objs: (v as object[]).slice(),
           intro: ats.map(() => this.tick),
+          rebuilt: false,
         });
       }
       return out;
@@ -451,7 +458,8 @@ export class StateTracker {
         return;
       } else if (sa.length === 0) {
         // An empty array becoming a pool: every element is new.
-        const fresh: PoolInfo = { ats: [], serials: [], objs: [], intro: [] };
+        const fresh: PoolInfo = { ats: [], serials: [], objs: [], intro: [],
+                                  rebuilt: false };
         this.pools.set(sa, fresh);
         this.diffPool(la, sa, fresh, ats, cd);
         return;
@@ -502,8 +510,17 @@ export class StateTracker {
    * whole, never a patch. But some pools are rebuilt every tick from fresh
    * objects -- `g_shot_test_list`, the walker's `spawns`, which `saveState`
    * copies -- and there a new object means nothing. The two are told apart by
-   * the tick itself: a pool in which no persisting `at` kept its object was
-   * rebuilt, and one in which any did was not.
+   * the tick itself: a pool in which any surviving `at` kept its object
+   * persists, and one in which two or more survived and none did was rebuilt.
+   *
+   * **One survivor proves nothing,** because the pool's only survivor
+   * respawning looks exactly like a one-element pool being rebuilt. That tick
+   * goes by what the pool last proved to be: the actor pool proves itself
+   * persistent nearly every tick, and a rebuilt list as soon as it holds two.
+   * What is left unprovable is two or more survivors of a persistent pool all
+   * respawning in the one tick, which is patched in place: the values and the
+   * hash stay right, and the character layer, which holds the objects, looks
+   * for a life starting again in the values too (`render/characters.ts`).
    */
   private diffPool(live: unknown[], shadow: unknown[], info: PoolInfo,
                    ats: number[], d: number): void {
@@ -512,7 +529,7 @@ export class StateTracker {
     const intro = new Array<number>(n);
     const from = new Array<number>(n);
     let byAt: Map<number, number> | null = null;
-    let kept = 0;
+    let kept = 0, survivors = 0;
     for (let i = 0; i < n; i++) {
       const at = ats[i];
       let j = -1;
@@ -526,11 +543,16 @@ export class StateTracker {
         j = byAt.get(at) ?? -1;
       }
       from[i] = j;
-      if (j >= 0 && info.objs[j] === live[i]) kept++;
+      if (j >= 0) {
+        survivors++;
+        if (info.objs[j] === live[i]) kept++;
+      }
     }
+    if (kept > 0) info.rebuilt = false;
+    else if (survivors >= 2) info.rebuilt = true;
     // Objects persist here: an `at` that kept its place but not its object is
     // a new element.
-    const persistent = kept > 0;
+    const persistent = !info.rebuilt;
     let changed = n !== info.ats.length;
     for (let i = 0; i < n; i++) {
       let j = from[i];
@@ -1018,11 +1040,24 @@ export class StateMirror {
             const serial = r.uvar();
             const full = r.u8();
             if (full) {
-              const v = this.readValue(r);
-              if (kindOf(v) !== 1 || (v as { at: unknown }).at !== at) {
+              const v = this.readValue(r) as Record<string, unknown>;
+              if (kindOf(v) !== 1 || v.at !== at) {
                 throw this.fail(`pool element @${at} is not itself`, segs);
               }
-              next[i] = v;
+              // Whole because the base predates it, but this replica is past
+              // the base and already has this life of it: the object it has
+              // takes the value, so whatever holds the actor still does. An
+              // actor is sent whole in every delta for as long as its spawn is
+              // younger than the host's newest ack.
+              const e = byAt.get(at);
+              if (e !== undefined && had.get(at) === serial && kindOf(e) === 1) {
+                const o = e as Record<string, unknown>;
+                for (const k of Object.keys(o)) if (!Object.hasOwn(v, k)) delete o[k];
+                Object.assign(o, v);
+                next[i] = o;
+              } else {
+                next[i] = v;
+              }
             } else {
               const e = byAt.get(at);
               if (e === undefined || had.get(at) !== serial) {

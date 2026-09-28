@@ -181,6 +181,12 @@ export interface NetStats {
   verified: number;
   mismatches: number;
   applyErrors: number;
+  /**
+   * Replica: checks, a few a second, that found the page's systems holding
+   * a different state from the one applied -- a `load` that does not take
+   * what it is handed. The host cannot see these; see `DEEP_EVERY`.
+   */
+  liveMismatches: number;
   /** Replica: whether its state is known to differ from the host's right now. */
   desynced: boolean;
   /** Host: the per-tick cost of tracking, in ms. Replica: of applying and hashing. */
@@ -199,7 +205,7 @@ export function emptyStats(role: "host" | "replica"): NetStats {
     kbIn: 0, kbOut: 0, pktIn: 0, pktOut: 0, silence: 0, expectTicks: false,
     epoch: 0, tick: 0, lag: 0, depth: 0, target: 0, jitter: 0, underruns: 0,
     skips: 0, deltaBytes: 0, keyframeBytes: 0, keyframes: 0, verified: 0,
-    mismatches: 0, applyErrors: 0, desynced: false, costMs: 0, aimError: NaN,
+    mismatches: 0, applyErrors: 0, liveMismatches: 0, desynced: false, costMs: 0, aimError: NaN,
     presses: 0, log: [],
   };
 }

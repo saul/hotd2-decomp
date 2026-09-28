@@ -44,7 +44,8 @@ function hold(p: Player): HoldReason {
   if (typeof document !== "undefined" && document.hidden) return "hidden";
   if (p.state.mode === "free") return "free-roam";
   if (!p.playing) return "paused";
-  if (p.walker?.branch) return "branch";
+  // Not a branch: its countdown runs on the script's clock and the port runs
+  // through it, so the host goes on sending ticks. It travels as a label.
   return null;
 }
 
@@ -55,6 +56,9 @@ export function makeNetHooks(p: Player): NetPlayerHooks {
       original: !!p.state.original,
       builder: p.bundles.find(p.state.stage, !!p.state.original)?.entry.builder,
     }),
+    // Set when a load commits (`stage_load.ts`), so a failed one leaves the
+    // stage that is still running.
+    loaded: () => p.ctx.stage,
     liveRoot: () => liveRoot(p),
     hold: () => hold(p),
     branch: () => {
@@ -86,6 +90,7 @@ export function makeNetHooks(p: Player): NetPlayerHooks {
     },
     install: (root) => installKeyframe(p, root),
     root: () => p.netRoot!,
+    liveRoot: () => liveRoot(p),
     afterApply: (touched) => afterApply(p, touched),
     dispatch: (name, payload) => {
       p.events.emit(name as keyof EventMap, payload as never);
@@ -130,6 +135,8 @@ function installKeyframe(p: Player, root: Obj): string | null {
   };
   const err = p.loadSnapshot(snap, { adopt: true });
   if (err) return err;
+  // `World.load` normalises the word; the host's may be signed. See `afterApply`.
+  p.rng.state = root.rng;
   // `G` now holds the decoded objects; the tree the deltas go into is the
   // same tree with `G` itself at `parts.game`, so a delta that replaces a
   // global replaces it on `G`.
@@ -151,7 +158,11 @@ function afterApply(p: Player, touched: Set<string>): void {
   const root = p.netRoot;
   if (!root) return;
   p.ctx.frame = root.frame as number;
-  p.rng.state = (root.rng as number) >>> 0;
+  // As the host holds it, not normalised: `Rng.next` leaves the word signed
+  // and a load leaves it unsigned. The same bits draw the same numbers
+  // either way, but the replica's systems are checked against the host's
+  // hash (`DEEP_EVERY` in `replica.ts`), and that check found `>>> 0` here.
+  p.rng.state = root.rng as number;
   const parts = root.parts as Obj;
   // Every slice but the game's is a copy the system is handed; the game's is
   // `G`, written in place.

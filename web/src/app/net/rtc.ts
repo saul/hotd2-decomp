@@ -30,7 +30,11 @@ type RtcSignal =
 
 /** How long `disconnected` may last before ICE is restarted. */
 const RESTART_AFTER_MS = 2500;
-/** Restarts attempted before the link is given up. */
+/**
+ * Restarts attempted in a row before the link is given up. A restart that
+ * reconnects gives the budget back: a phone that changes network twice an
+ * hour is not failing.
+ */
 const MAX_RESTARTS = 4;
 /** More than this queued on `tick` and a send is dropped: it would arrive stale. */
 const TICK_BACKLOG = 256 * 1024;
@@ -54,9 +58,23 @@ export class RtcTransport implements Transport {
   private readonly tick: RTCDataChannel;
   private open = 0;
   private closed = false;
-  private remoteSet = false;
+  /**
+   * Candidates for a description not applied yet: before the first, or of
+   * the next ICE generation while a restart's offer or answer is in flight.
+   */
   private readonly early: RTCIceCandidateInit[] = [];
+  /** The ICE username fragment of the remote description applied, or null. */
+  private remoteUfrag: string | null = null;
+  /**
+   * Both directions of the rendezvous, in order. A POST is not awaited by the
+   * next, so without the chain a small candidate overtakes the offer it
+   * belongs to; and a step handled while the one before it is still awaiting
+   * `setRemoteDescription` adds its candidate against the old description.
+   */
+  private outbox: Promise<void> = Promise.resolve();
+  private inbox: Promise<void> = Promise.resolve();
   private restarts = 0;
+  private restartedAt = -Infinity;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   /** Which of player 2's joins this connection is for; null before the first. */
   private peerN: number | null = null;
@@ -93,7 +111,10 @@ export class RtcTransport implements Transport {
       }
     };
     signal.onEvent = (e) => {
-      if (e.t === "signal") void this.heard(e.data as RtcSignal);
+      if (e.t === "signal") {
+        const s = e.data as RtcSignal;
+        this.inbox = this.inbox.then(() => this.heard(s));
+      }
       else if (e.t === "peer") this.peerChanged(e.joined, e.n);
       else if (e.t === "closed") this.close(e.reason);
     };
@@ -125,13 +146,16 @@ export class RtcTransport implements Transport {
     }
   }
 
-  private async say(s: RtcSignal): Promise<void> {
-    try {
-      await this.signal.send(s);
-    } catch (e) {
-      // A candidate that could not be sent is one path fewer, not a failure.
-      console.warn("netplay: rendezvous send failed", e);
-    }
+  private say(s: RtcSignal): Promise<void> {
+    this.outbox = this.outbox.then(async () => {
+      try {
+        await this.signal.send(s);
+      } catch (e) {
+        // A candidate that could not be sent is one path fewer, not a failure.
+        console.warn("netplay: rendezvous send failed", e);
+      }
+    });
+    return this.outbox;
   }
 
   /** The host's offer: at first, and again with fresh ICE on a restart. */
@@ -148,8 +172,7 @@ export class RtcTransport implements Transport {
       switch (s.kind) {
         case "offer": {
           await this.pc.setRemoteDescription({ type: "offer", sdp: s.sdp });
-          this.remoteSet = true;
-          await this.flushCandidates();
+          await this.flushCandidates(s.sdp);
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
           await this.say({ kind: "answer", sdp: answer.sdp ?? "" });
@@ -157,16 +180,30 @@ export class RtcTransport implements Transport {
         }
         case "answer":
           await this.pc.setRemoteDescription({ type: "answer", sdp: s.sdp });
-          this.remoteSet = true;
-          await this.flushCandidates();
+          await this.flushCandidates(s.sdp);
           return;
-        case "candidate":
-          if (!s.candidate) return;
-          if (!this.remoteSet) this.early.push(s.candidate);
-          else await this.pc.addIceCandidate(s.candidate);
+        case "candidate": {
+          const c = s.candidate;
+          if (!c) return;
+          const theirs = c.usernameFragment ?? null;
+          if (this.remoteUfrag === null
+              || (theirs !== null && this.remoteUfrag && theirs !== this.remoteUfrag)) {
+            this.early.push(c);
+            if (this.early.length > 64) this.early.shift();
+          } else {
+            await this.pc.addIceCandidate(c);
+          }
           return;
+        }
         case "restart":
-          if (this.signal.role === "host") this.restart();
+          // Both ends usually see the drop together, so the host has often
+          // restarted already by the time player 2's request lands. A second
+          // offer over the first would leave each end with the other's wrong
+          // credentials.
+          if (this.signal.role !== "host") return;
+          if (this.pc.signalingState !== "stable") return;
+          if (performance.now() - this.restartedAt < RESTART_AFTER_MS) return;
+          this.restart();
           return;
       }
     } catch (e) {
@@ -174,8 +211,19 @@ export class RtcTransport implements Transport {
     }
   }
 
-  private async flushCandidates(): Promise<void> {
-    for (const c of this.early.splice(0)) {
+  /**
+   * A remote description is applied: the candidates held for it go in. Those
+   * of another generation stay held -- a later one's, if they overtook it.
+   */
+  private async flushCandidates(sdp: string): Promise<void> {
+    this.remoteUfrag = /^a=ice-ufrag:(\S+)/m.exec(sdp)?.[1] ?? "";
+    const held = this.early.splice(0);
+    for (const c of held) {
+      const theirs = c.usernameFragment ?? null;
+      if (theirs !== null && this.remoteUfrag && theirs !== this.remoteUfrag) {
+        this.early.push(c);
+        continue;
+      }
       try { await this.pc.addIceCandidate(c); } catch { /* stale */ }
     }
   }
@@ -186,6 +234,7 @@ export class RtcTransport implements Transport {
     if (state === "connected" || state === "completed") {
       if (this.restartTimer) clearTimeout(this.restartTimer);
       this.restartTimer = null;
+      this.restarts = 0;
       return;
     }
     if (state === "failed") {
@@ -204,6 +253,7 @@ export class RtcTransport implements Transport {
   private restart(): void {
     if (this.closed || this.restarts >= MAX_RESTARTS) return;
     this.restarts++;
+    this.restartedAt = performance.now();
     if (this.signal.role === "host") {
       this.pc.restartIce();
       void this.offer(true);

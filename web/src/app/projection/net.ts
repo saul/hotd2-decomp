@@ -117,6 +117,10 @@ function sections(net: NetSession, s: NetStats): { title: string; rows: NetRow[]
       title: "Every tick applied is hashed and compared with the hash the host sent with it." },
     { label: "hash mismatches", value: String(s.mismatches), level: s.mismatches ? "bad" : "ok" },
     { label: "apply errors", value: String(s.applyErrors), level: s.applyErrors ? "bad" : "ok" },
+    { label: "systems disagree", value: String(s.liveMismatches),
+      level: s.liveMismatches ? "bad" : "ok",
+      title: "The page's systems re-read and hashed a few times a second: a system "
+        + "that does not load what the host sent it shows here and nowhere else." },
   ];
   return [
     { title: "Link", rows: link },

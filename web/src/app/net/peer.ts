@@ -70,7 +70,15 @@ export abstract class NetPeer {
   protected readonly pktOut = new Rate();
   /** When the last `tick`-channel packet from the peer arrived. */
   protected lastArrival = -1;
+  /** The clock as of the last reading: a poll, a step, or a packet landing. */
   protected now = 0;
+  /**
+   * What a packet's arrival is timed with. The page's own clock, read on
+   * receipt: `now` is only as fresh as the last frame or poll, and a page
+   * whose loop sleeps would stamp a round trip of nearly zero and a jitter a
+   * frame too wide. The headless test sets its simulated clock here.
+   */
+  clock: () => number = () => performance.now();
   protected helloSent = false;
   protected peerHello: HelloMsg | null = null;
   protected closed = false;
@@ -111,6 +119,7 @@ export abstract class NetPeer {
 
   private receive(ch: Channel, data: Uint8Array): void {
     if (this.closed || data.length === 0) return;
+    this.now = Math.max(this.now, this.clock());
     const m = data[0] as Msg;
     if (channelOf(m) !== ch && m !== Msg.Tick) {
       this.problem(`message ${m} arrived on ${ch}`);

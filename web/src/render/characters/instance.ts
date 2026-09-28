@@ -74,6 +74,13 @@ export interface Instance {
    */
   hidden?: number;
   /**
+   * The model each swapped bone's node shows, by bone, as `a.boneSlot` says
+   * it. Render bookkeeping like {@link hidden}: how far this instance has
+   * caught up with the actor, so a swap made where no `setBoneSlot` reached
+   * this layer -- a netplay replica, which runs no port -- still lands.
+   */
+  slots?: Record<string, number>;
+  /**
    * The class-0x10 civilian that built this actor, for the fifty captors whose
    * descriptors the walker never sees. They come and go with their parent.
    */

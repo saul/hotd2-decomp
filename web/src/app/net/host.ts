@@ -32,8 +32,13 @@ import type { Transport } from "./transport";
 
 /** What the host needs of the player. */
 export interface HostSim {
-  /** The stage the player has loaded, in which mode, and whose exporter built it. */
+  /**
+   * The stage the player is loading or has loaded, in which mode, and whose
+   * exporter built it: what a new epoch announces, before the load finishes.
+   */
   stage(): { stage: number; original: boolean; builder?: string };
+  /** The stage the live state is of: what a keyframe says it is. */
+  loaded(): number;
   /** The live state, laid out as `world.save()` lays it out, uncloned. */
   liveRoot(): Record<string, unknown>;
   /** Why the host's clock is not running, or null. */
@@ -74,6 +79,13 @@ const MAX_UNRELIABLE = 12 * 1024;
 const LOAD_WAIT_MS = 45_000;
 /** While the host's clock is held, a tick this often all the same. See `poll`. */
 const HELD_TICK_MS = 250;
+/**
+ * The widest delta sent, in ticks. Past it a keyframe is cheaper: a replica
+ * that has not acknowledged in a second and a half is not applying what it
+ * is sent, and every delta from its base would carry the whole window again
+ * -- sixty a second -- where one keyframe resets the base for all of them.
+ */
+const MAX_DELTA_SPAN = 90;
 
 export class NetHost extends NetPeer {
   private epoch = 0;
@@ -166,6 +178,8 @@ export class NetHost extends NetPeer {
     this.lossIn.reset();
     this.events.clear();
     this.pending = [];
+    // A press aimed into the old timeline would fire in the new one.
+    this.presses = [];
     this.views.clear();
     this.sections.clear();
     this.loadSentAt = this.now;
@@ -228,7 +242,8 @@ export class NetHost extends NetPeer {
     const base = Math.max(this.ack, this.keyframeAt);
     const canDelta = base >= 0 && tracker.covers(base);
     const cooled = now - this.keyframeSentAt >= KEYFRAME_COOLDOWN_MS;
-    if ((this.needKeyframe || !canDelta) && (cooled || this.keyframeAt < 0)) {
+    const tooWide = t - base > MAX_DELTA_SPAN;
+    if ((this.needKeyframe || !canDelta || tooWide) && (cooled || this.keyframeAt < 0)) {
       this.sendKeyframe(hash);
     } else if (canDelta) {
       this.sendDelta(base, hash);
@@ -285,7 +300,8 @@ export class NetHost extends NetPeer {
     for (let i = 0; i < count; i++) {
       const w = new ByteWriter(KEYFRAME_CHUNK + 64);
       writeKeyframeChunk(w, {
-        epoch: this.epoch, tick: this.tick, index: i, count, hash,
+        epoch: this.epoch, tick: this.tick, stage: this.sim.loaded(),
+        index: i, count, hash,
         bytes: bytes.subarray(i * KEYFRAME_CHUNK, (i + 1) * KEYFRAME_CHUNK),
       });
       this.send("ctrl", w.finish());
@@ -305,9 +321,15 @@ export class NetHost extends NetPeer {
         this.lossIn.record(p.seq);
         if (p.ack > this.ack && p.ack <= this.tick) this.ack = p.ack;
         this.aim = p.aim;
+        // A pull made while the host's game is stopped goes nowhere, as
+        // player 1's does (`gunInput` drops it); START is latched for the
+        // next tick for either player. Taken all the same -- acknowledged --
+        // so the replica stops sending it.
+        const stopped = this.sim.hold() !== null;
         for (const q of p.presses) {
           if (q.id <= this.pressHigh) continue;
           this.pressHigh = q.id;
+          if (stopped && q.kind !== PressKind.Start) continue;
           const aimError = q.kind === PressKind.Pull ? this.checkAim(q) : NaN;
           this.presses.push({ ...q, aimError });
           this.stats.presses++;

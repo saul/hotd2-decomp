@@ -2260,6 +2260,8 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
   gore.userData = { hod2_kind: "rig", hod2_rig: "gore_hito_gal" };
   gore.add(template(0x0c7d));
   gore.add(template(0x11dd));
+  // A damaged torso, for the swaps below that no `setBoneSlot` announces.
+  gore.add(template(0x0d00));
   root.add(gore);
 
   ResetGameGlobals();
@@ -2312,6 +2314,36 @@ console.log("\ncivilian attachments: the face swaps, the hair is added");
         head.children.filter((c) => (c as { isMesh?: boolean }).isMesh)
           .length === added.length,
         `${head.children.length}`);
+
+  // **A swap no `setBoneSlot` announced.** A netplay replica runs no port, so
+  // a hit's swap reaches it only as `a.boneSlot` changing under the layer --
+  // and a respawn as a new object at the same spawn, or, when the codec
+  // cannot tell, as the same object starting its lists again.
+  const torn = () => torso.children.filter((c) => c.name.includes("0d00")).length;
+  a.boneSlot["1"] = 0x0d00;
+  chars.update({} as never);
+  check("a swap written only on the actor is drawn on the next frame", torn() === 1,
+        `${torn()} damaged torsos`);
+  chars.update({} as never);
+  check("...once", torn() === 1, `${torn()}`);
+  a.removed.push(2);
+  chars.update({} as never);
+  check("a severed head written only on the actor is hidden", !head.visible);
+  delete a.boneSlot["1"];
+  a.removed.length = 0;
+  chars.update({} as never);
+  check("the same object starting a new life gets its nodes back",
+        head.visible && torn() === 0 && head.geometry !== headGeom,
+        `head ${head.visible}, ${torn()} damaged torsos`);
+  a.boneSlot["1"] = 0x0d00;
+  a.removed.push(2);
+  chars.update({} as never);
+  const reborn = { ...a, boneSlot: { "2": 0x0c7d }, removed: [] as number[] };
+  chars.bindToPool([reborn]);
+  chars.update({} as never);
+  check("a new object at the same spawn is a new life: the old one's damage comes off",
+        head.visible && torn() === 0 && head.geometry !== headGeom,
+        `head ${head.visible}, ${torn()} damaged torsos`);
 
   stage.dispose();
 }

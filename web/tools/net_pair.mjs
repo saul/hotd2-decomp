@@ -198,6 +198,11 @@ async function session(label, replicaQuery, seconds, webrtc = false) {
         rf["hash mismatches"] === "0" && num(rf["ticks verified"]) > 300,
         `mismatches ${rf["hash mismatches"]}`);
   check("no delta failed to apply", rf["apply errors"] === "0", rf["apply errors"]);
+  // The mirror the deltas land in is what the per-tick hash sees; this is the
+  // state the page's systems made of it, re-read a few times a second.
+  check("the replica's systems hold the state they were handed "
+        + `(${rf["systems disagree"]} disagreements)`,
+        rf["systems disagree"] === "0", rf["systems disagree"]);
   check("the replica's state matches the host's now",
         /matches/.test(rf.state ?? "") && num(rf["ticks verified"]) > 0, rf.state);
   check(`player 2's shots reached the host (${shots} fired, ${hf["presses taken"]} presses taken)`,

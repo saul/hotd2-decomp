@@ -18,7 +18,7 @@
  */
 import { ByteReader, ByteWriter } from "./bytes";
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 
 export type Channel = "ctrl" | "tick";
 
@@ -101,7 +101,7 @@ export interface ReadyMsg {
 
 /** Why the host's clock is not running, or null while it is. */
 export type HoldReason =
-  | "paused" | "loading" | "hidden" | "free-roam" | "branch" | "game-over"
+  | "paused" | "loading" | "hidden" | "free-roam" | "game-over"
   | null;
 
 export interface SessionMsg {
@@ -301,6 +301,11 @@ export function readPing(r: ByteReader): PingPacket {
 export interface KeyframeChunk {
   epoch: number;
   tick: number;
+  /**
+   * The stage the host's state is of -- the one it has loaded, which is not
+   * always the one it announced: a load that fails leaves the last one.
+   */
+  stage: number;
   index: number;
   count: number;
   /** The host's state hash at `tick`, so the install can be checked. */
@@ -312,6 +317,7 @@ export function writeKeyframeChunk(w: ByteWriter, c: KeyframeChunk): void {
   w.u8(Msg.Keyframe);
   w.uvar(c.epoch);
   w.uvar(c.tick);
+  w.uvar(c.stage);
   w.uvar(c.index);
   w.uvar(c.count);
   w.u32(c.hash);
@@ -323,9 +329,10 @@ export function readKeyframeChunk(r: ByteReader): KeyframeChunk {
   r.u8();
   const epoch = r.uvar();
   const tick = r.uvar();
+  const stage = r.uvar();
   const index = r.uvar();
   const count = r.uvar();
   const hash = r.u32();
   const n = r.uvar();
-  return { epoch, tick, index, count, hash, bytes: r.bytes(n).slice() };
+  return { epoch, tick, stage, index, count, hash, bytes: r.bytes(n).slice() };
 }

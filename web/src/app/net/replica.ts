@@ -46,6 +46,11 @@ export interface ReplicaSim {
   install(root: Record<string, unknown>): string | null;
   /** The live tree deltas apply into: `{ frame, rng, parts: { game: G, ... } }`. */
   root(): Record<string, unknown>;
+  /**
+   * The state as the page's systems hold it -- `world.save()`'s layout, read
+   * back from them -- or absent where there is no page. See `DEEP_EVERY`.
+   */
+  liveRoot?(): Record<string, unknown>;
   /** A delta was applied; `touched` names the parts it wrote. */
   afterApply(touched: Set<string>): void;
   /** One of the host's events, for the replica's own subscribers. */
@@ -60,6 +65,28 @@ const STALE_EVENT_TICKS = 12;
 const JUMP_SLACK = 4;
 /** A resync request is repeated no more often than this. */
 const RESYNC_MS = 500;
+/**
+ * While the state is known wrong, the keyframe is asked for again after this
+ * long, and twice as long each time after, up to {@link RESYNC_RETRY_MAX_MS}.
+ * A request can be lost to the throttle or a keyframe can fail to verify;
+ * either way nothing else would ask again.
+ */
+const RESYNC_RETRY_MS = 1000;
+const RESYNC_RETRY_MAX_MS = 8000;
+/**
+ * No step for this long and the player's loop is not running -- a hidden
+ * tab, a long stall. Ticks are then applied as they land, so the state stays
+ * current and the host's base keeps moving.
+ */
+const IDLE_MS = 250;
+/**
+ * Every this many applied ticks, the state is hashed again as the page's
+ * systems hold it rather than as the deltas left it. The deltas land in a
+ * mirrored tree, and every slice but `G` is then handed to its system's
+ * `load`. A `load` that drops or changes what it is handed diverges the game
+ * while the mirror -- and so the per-tick hash -- stays right.
+ */
+const DEEP_EVERY = 30;
 /** Input goes at most this often, apart from presses, which go at once. */
 const INPUT_MS = 15;
 
@@ -75,7 +102,7 @@ export class NetReplica extends NetPeer {
   private at = -1;
   private readonly buffer = new Map<number, Buffered>();
   private newest = -1;
-  private keyframe: { epoch: number; tick: number; hash: number;
+  private keyframe: { epoch: number; tick: number; stage: number; hash: number;
                       chunks: Uint8Array[]; got: number } | null = null;
   private readonly mirror = new StateMirror();
   private readonly hasher = new TreeHasher();
@@ -90,6 +117,13 @@ export class NetReplica extends NetPeer {
   private resyncAt = -Infinity;
   /** Set on the first mismatch of an episode, cleared by a keyframe that verifies. */
   private desynced = false;
+  /** While desynced: when to ask for the keyframe again, and the wait after that. */
+  private retryAt = Infinity;
+  private retryMs = RESYNC_RETRY_MS;
+  /** When the player last stepped: its loop is idle long after. */
+  private lastStepAt = -Infinity;
+  private deepCount = 0;
+  private deepLoggedAt = -Infinity;
   // -- the gun --
   private aim = { x: 0, y: 0, on: false };
   private readonly unacked: Press[] = [];
@@ -137,9 +171,15 @@ export class NetReplica extends NetPeer {
         if (head.tick <= this.at || this.buffer.has(head.tick)) return;
         this.buffer.set(head.tick, { head, bytes: data, arrived: this.now });
         if (head.tick > this.newest) this.newest = head.tick;
-        // The host's clock is held, so the player's is, and no step will come
-        // for this: what the host sends while paused is shown as it lands.
-        if (this.hold !== null && this.phase === "streaming") this.applyNewest();
+        // No step is coming for this -- the host's clock is held, so the
+        // player's is; or the player's loop is not running at all, a hidden
+        // tab -- so it is applied as it lands, and acknowledged, so the host's
+        // deltas stay narrow and a tab brought back shows the game as it is.
+        if (this.phase === "streaming"
+            && (this.hold !== null || this.now - this.lastStepAt > IDLE_MS)) {
+          this.applyNewest();
+          this.sendInput(false);
+        }
         this.sim.wake();
         return;
       }
@@ -176,6 +216,11 @@ export class NetReplica extends NetPeer {
     this.lastEventTick = -1;
     this.lossIn.reset();
     this.jitter.reset();
+    // The host counts this epoch's input from zero, as this counts its ticks.
+    this.inputSeq = 0;
+    this.desynced = false;
+    this.retryAt = Infinity;
+    this.retryMs = RESYNC_RETRY_MS;
     this.hold = "loading";
     // A press made in the old timeline means nothing in the new one.
     this.unacked.length = 0;
@@ -208,7 +253,7 @@ export class NetReplica extends NetPeer {
     if (c.epoch !== this.epoch || this.phase === "loading") return;
     if (!this.keyframe || this.keyframe.tick !== c.tick) {
       if (c.tick <= this.at && !this.desynced && this.phase === "streaming") return;
-      this.keyframe = { epoch: c.epoch, tick: c.tick, hash: c.hash,
+      this.keyframe = { epoch: c.epoch, tick: c.tick, stage: c.stage, hash: c.hash,
                         chunks: new Array(c.count), got: 0 };
     }
     const k = this.keyframe;
@@ -222,17 +267,29 @@ export class NetReplica extends NetPeer {
     const all = new Uint8Array(total);
     let o = 0;
     for (const b of k.chunks) { all.set(b, o); o += b.length; }
-    this.installKeyframe(k.tick, k.hash, all);
+    this.installKeyframe(k.tick, k.stage, k.hash, all);
   }
 
-  private installKeyframe(tick: number, hash: number, bytes: Uint8Array): void {
+  private installKeyframe(tick: number, stage: number, hash: number,
+                          bytes: Uint8Array): void {
     const t0 = performance.now();
+    // The host's state is of the stage it has loaded, which is not always the
+    // one it announced; installed into another stage it would hash the same
+    // and draw nonsense.
+    if (this.loaded && stage !== this.loaded.stage) {
+      const why = `the host's state is of stage ${stage}, and this page loaded `
+        + `stage ${this.loaded.stage}`;
+      this.log("keyframe", tick, `keyframe refused: ${why}`);
+      this.problem(why);
+      this.stale(`keyframe refused: ${why}`, tick);
+      return;
+    }
     let root: Record<string, unknown>;
     try {
       root = this.mirror.readKeyframe(new ByteReader(bytes));
     } catch (e) {
       this.log("keyframe", tick, `keyframe did not decode: ${(e as Error).message}`);
-      this.requestResync("keyframe did not decode", tick);
+      this.stale("keyframe did not decode", tick);
       return;
     }
     // Compared before it is installed, so a difference is the codec's...
@@ -245,8 +302,14 @@ export class NetReplica extends NetPeer {
     if (err) {
       this.log("keyframe", tick, `keyframe refused: ${err}`);
       this.problem(`keyframe refused: ${err}`);
+      this.stale(`keyframe refused: ${err}`, tick);
       return;
     }
+    this.at = tick;
+    // A new episode: whatever was wrong before, this is the state now, and
+    // the next request for a keyframe, if one is needed, goes at once.
+    this.desynced = false;
+    this.resyncAt = -Infinity;
     // ...and after, so a difference is the install's: something that runs on
     // a load wrote state it should only have read.
     const installed = this.hasher.hash(this.sim.root());
@@ -254,12 +317,17 @@ export class NetReplica extends NetPeer {
       this.log("keyframe", tick, `installed state hashes ${hex(installed)}, `
         + `the host's was ${hex(hash)}: ${diffTrees(root, this.sim.root(), 4).join("; ")
           || "a difference outside the decoded tree"}`);
-      this.desynced = true;
       this.stats.mismatches++;
+      // Backing off: a keyframe that installs wrong once will install wrong
+      // again, and each is forty kilobytes.
+      const wait = this.retryMs;
+      this.desync(tick, "the installed keyframe differs");
+      this.retryAt = this.now + wait;
+      this.retryMs = Math.min(RESYNC_RETRY_MAX_MS, wait * 2);
     } else {
-      this.desynced = false;
+      this.retryAt = Infinity;
+      this.retryMs = RESYNC_RETRY_MS;
     }
-    this.at = tick;
     this.lastEventTick = tick;
     this.phase = "streaming";
     this.stats.phase = "streaming";
@@ -277,6 +345,7 @@ export class NetReplica extends NetPeer {
    */
   step(now: number): boolean {
     this.now = now;
+    this.lastStepAt = now;
     if (this.phase !== "streaming" || this.closed) return false;
     for (const t of this.buffer.keys()) if (t <= this.at) this.buffer.delete(t);
     const target = this.targetDepth();
@@ -364,14 +433,15 @@ export class NetReplica extends NetPeer {
       }
     } catch (e) {
       // The state may be half-written. It is shown as it is until the
-      // keyframe lands, and the overlay says so.
+      // keyframe lands, and the overlay says so. Logged once an episode:
+      // every tick until the repair fails the same way, and a dozen copies
+      // of it would push out of the log the report that says why.
       this.stats.applyErrors++;
-      this.desynced = true;
       const kind = e instanceof ApplyError ? "apply" : "decode";
-      this.log(kind, head.tick, (e as Error).message);
+      if (!this.desynced) this.log(kind, head.tick, (e as Error).message);
       this.at = head.tick;
       this.sim.afterApply(touched);
-      this.requestResync(`${kind}: ${(e as Error).message}`, head.tick);
+      this.desync(head.tick, `${kind}: ${(e as Error).message}`);
       return;
     }
     const from = this.at;
@@ -381,6 +451,7 @@ export class NetReplica extends NetPeer {
       const mine = this.hasher.hash(this.sim.root());
       this.stats.verified++;
       if (mine !== head.hash) this.mismatch(head, mine);
+      else if (++this.deepCount >= DEEP_EVERY) this.deepVerify(head);
     }
     // The host's events for every tick this apply moved over, oldest first,
     // and none too old to be worth hearing.
@@ -399,13 +470,52 @@ export class NetReplica extends NetPeer {
   private mismatch(head: TickHead, mine: number): void {
     this.stats.mismatches++;
     if (this.desynced) return; // already reported; a keyframe is on its way
-    this.desynced = true;
     this.log("hash", head.tick, `state hash ${hex(mine)}, the host's ${hex(head.hash)}`);
+    this.desync(head.tick, "state hash differs");
+  }
+
+  /**
+   * The state is known wrong. Said once an episode: the host is sent this
+   * replica's section hashes, so it can name *which* global or actor
+   * differs, and answers with a keyframe. If that keyframe does not come, or
+   * does not fix it, `poll` asks again.
+   */
+  private desync(tick: number, reason: string): void {
+    if (this.desynced) return;
+    this.desynced = true;
+    this.stats.desynced = true;
+    this.retryAt = this.now + this.retryMs;
     const sections = new Map<string, number>();
     this.hasher.hash(this.sim.root(), sectionMap(sections));
-    this.sendCtrl(Msg.Desync, { epoch: this.epoch, tick: head.tick,
-                                sections: [...sections] });
-    this.requestResync("state hash differs", head.tick);
+    this.sendCtrl(Msg.Desync, { epoch: this.epoch, tick, sections: [...sections] });
+    this.resyncAt = this.now;
+    this.log("report", tick, `asked the host for a keyframe: ${reason}`);
+  }
+
+  /** The state is behind rather than wrong: a keyframe was lost or refused. */
+  private stale(reason: string, tick: number): void {
+    this.desynced = true;
+    if (this.retryAt === Infinity) this.retryAt = this.now + this.retryMs;
+    this.requestResync(reason, tick);
+  }
+
+  /**
+   * The state as the systems hold it, against the host's hash. Local, so a
+   * difference is named exactly: the mirror is what the host sent, and the
+   * live tree is what the page made of it.
+   */
+  private deepVerify(head: TickHead): void {
+    this.deepCount = 0;
+    const live = this.sim.liveRoot?.();
+    if (!live) return;
+    const h = this.hasher.hash(live);
+    if (h === head.hash) return;
+    this.stats.liveMismatches++;
+    if (this.now - this.deepLoggedAt < 5000) return;
+    this.deepLoggedAt = this.now;
+    const d = diffTrees(this.sim.root(), live, 4);
+    this.log("hash", head.tick, "the page's systems hold a different state from "
+      + `the one applied: ${d.join("; ") || "a difference the diff cannot see"}`);
   }
 
   private requestResync(reason: string, tick: number): void {
@@ -474,6 +584,19 @@ export class NetReplica extends NetPeer {
 
   override poll(now: number): void {
     super.poll(now);
+    if (this.closed) return;
+    if (this.desynced && (this.phase === "streaming" || this.phase === "waiting")
+        && now >= this.retryAt) {
+      this.retryAt = now + this.retryMs;
+      this.retryMs = Math.min(RESYNC_RETRY_MAX_MS, this.retryMs * 2);
+      this.resyncAt = -Infinity;
+      this.requestResync("the state is still wrong", this.at);
+    }
+    // A loop that does not step does not flush either: what was applied as it
+    // landed is acknowledged from here too.
+    if (this.phase === "streaming" && now - this.lastStepAt > IDLE_MS) {
+      this.sendInput(false);
+    }
     const s = this.stats;
     s.expectTicks = this.phase === "streaming" && this.hold === null;
     s.jitter = this.jitter.spread();

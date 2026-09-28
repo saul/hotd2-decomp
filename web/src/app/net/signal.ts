@@ -58,10 +58,12 @@ export class SignalClient {
     let json: unknown = null;
     try { json = JSON.parse(text); } catch { /* not JSON: an HTML 404 page */ }
     if (!r.ok) {
-      const why = (json as { error?: string } | null)?.error
-        ?? `${r.status} ${r.statusText}`;
-      throw new Error(r.status === 404 && !json
-        ? `no rendezvous at ${url} (${r.status})` : why);
+      const why = (json as { error?: string } | null)?.error;
+      // A 404 with no JSON is no rendezvous at all, not a missing room: it
+      // carries no status, so nobody takes it for "the room is gone".
+      if (r.status === 404 && !json) throw new Error(`no rendezvous at ${url} (404)`);
+      throw Object.assign(new Error(why ?? `${r.status} ${r.statusText}`),
+                          { status: r.status });
     }
     return json;
   }
@@ -147,9 +149,12 @@ export class SignalClient {
       try { sessionStorage.removeItem(`hod2.net.token.${this.code}`); } catch { /* */ }
     }
     const url = this.url("leave");
-    // `sendBeacon` survives the page unloading; `fetch` is the fallback.
-    if (!navigator.sendBeacon?.(url, new Blob(["{}"], { type: "application/json" }))) {
-      void fetch(url, { method: "POST", body: "{}", keepalive: true }).catch(() => {});
-    }
+    // `sendBeacon` survives the page unloading; `fetch` is the fallback. The
+    // body is a string, so `text/plain`: a beacon whose type is not one a
+    // form could send needs a preflight it cannot make, and Chrome has thrown
+    // on one rather than send it. The token is in the URL; the body is unread.
+    let sent = false;
+    try { sent = !!navigator.sendBeacon?.(url, "{}"); } catch { /* refused */ }
+    if (!sent) void fetch(url, { method: "POST", body: "{}", keepalive: true }).catch(() => {});
   }
 }

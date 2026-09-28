@@ -1128,3 +1128,14 @@ first two-tab netplay run (`tools/net_pair.mjs`) paired with nobody and
 reported every figure at zero, which read as a transport that did not work.
 Pages that must see each other take one `browser.newContext()` and call
 `context.newPage()` twice.
+
+**L76 -- A hash of what was handed over says nothing about what was made of
+it.** Netplay's replica hashes the tree the deltas land in every tick, and it
+agreed with the host's on every tick of every run. But every slice of that
+tree except `G` is then handed to its system's `load`, and the page plays what
+the systems hold, not the tree. Hashing the systems' own `save()` as well
+(`DEEP_EVERY` in `app/net/replica.ts`) disagreed on half its checks the first
+time it ran: the replica wrote the RNG word back as `state >>> 0`, and the
+host's is signed whenever `Rng.next` last ran. The same bits draw the same
+numbers, so nothing played wrong -- this time. **Check state where it is used,
+not where it was delivered.**

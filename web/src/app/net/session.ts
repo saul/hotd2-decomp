@@ -84,6 +84,8 @@ export class NetSession {
   private rejoinTimer: ReturnType<typeof setTimeout> | null = null;
   /** The last peer's log, carried into the next so a drop does not erase the story. */
   private carriedLog: NetStats["log"] = [];
+  /** The peer whose close has been dealt with. */
+  private settled: NetPeer | null = null;
 
   constructor(private readonly hooks: NetPlayerHooks, search: string) {
     this.params = new URLSearchParams(search);
@@ -195,8 +197,16 @@ export class NetSession {
       this.lobby = { ...this.lobby, phase: "connecting", code: c };
       this.attach("replica", this.rtc(signal));
     } catch (e) {
-      if (this.lobby.phase === "reconnecting") this.rejoinLater((e as Error).message);
-      else this.fail(`could not join ${c}: ${(e as Error).message}`);
+      const why = (e as Error).message;
+      if (this.lobby.phase !== "reconnecting") {
+        this.fail(`could not join ${c}: ${why}`);
+      } else if ((e as { status?: number }).status === 404) {
+        // The room is gone: the host left, however word of it was lost.
+        this.lobby = { ...this.lobby, phase: "closed", error: `the host closed the room (${why})` };
+        this.hooks.wake();
+      } else {
+        this.rejoinLater(why);
+      }
     }
   }
 
@@ -304,7 +314,11 @@ export class NetSession {
     if (!peer) return;
     peer.poll(now);
     if (peer.isClosed) {
-      this.dropped(peer);
+      // Once: a replica whose host left stays, closed, for its log.
+      if (peer !== this.settled) {
+        this.settled = peer;
+        this.dropped(peer);
+      }
     } else if (this.transport?.info.state === "open") {
       if (this.lobby.phase !== "connected") {
         this.lobby = { ...this.lobby, phase: "connected", error: null };

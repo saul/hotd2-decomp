@@ -25,7 +25,7 @@
  */
 import { ByteReader, ByteWriter } from "../src/core/net/bytes";
 import {
-  NetStateError, StateMirror, StateTracker, TreeHasher, diffTrees,
+  NetStateError, StateMirror, StateTracker, TreeHasher, diffTrees, poolAts,
 } from "../src/core/net/codec";
 
 let failures = 0;
@@ -262,14 +262,31 @@ function run(seed: number, ticks: number, opts: {
   const inflight: Packet[] = [];
   let keyframes = 0, applied = 0, bytes = 0;
   let needKeyframe = true;
-  // Identity: an element that keeps its serial keeps its object.
+  // Identity: the host's pool objects each tick -- or null on a tick the
+  // list was not a pool (a duplicate `at`, a hole) -- and the replica's at
+  // the tick it last applied, by `at`.
+  const hostPools = new Map<number, Map<number, object> | null>();
   let lastPool = new Map<number, object>();
+  let lastAt = -1;
+  const poolOf = (root: Obj): Map<number, object> => {
+    const m = new Map<number, object>();
+    const pool = ((root.parts as Obj).game as Obj).g_object_list;
+    if (Array.isArray(pool)) {
+      for (const a of pool) if (a && typeof a === "object") m.set((a as Obj).at as number, a);
+    }
+    return m;
+  };
 
   for (let t = 1; t <= ticks; t++) {
     f.mutate(live);
     tracker.update(live, t);
     history.set(t, structuredClone(live));
     history.delete(t - 300);
+    // The churn may have made the list anything, or deleted it.
+    const list = ((live.parts as Obj).game as Obj).g_object_list;
+    hostPools.set(t, Array.isArray(list) && (list.length === 0 || poolAts(list))
+      ? poolOf(live) : null);
+    hostPools.delete(t - 300);
     // Acks arrive late.
     for (let i = acks.length - 1; i >= 0; i--) {
       if (acks[i].arrive <= t) {
@@ -318,16 +335,37 @@ function run(seed: number, ticks: number, opts: {
       const d = diffTrees(want, replica, 5);
       check(`seed ${seed} tick ${at} (base ${p.base})`, d.length === 0, d.join("; "));
       check(`seed ${seed} tick ${at}: hash`, hasher.hash(replica) === hasher.hash(want));
-      // Identity across ticks for the pool.
-      const pool = (((replica.parts as Obj).game as Obj).g_object_list) as Obj[];
-      const now = new Map<number, object>();
-      if (Array.isArray(pool)) for (const a of pool) if (a && typeof a === "object") now.set(a.at as number, a);
+      // Identity across the ticks this apply moved over, while the list
+      // stayed a pool: an actor the host kept is the replica's same object,
+      // and one the host replaced is replaced there too, never patched.
+      // "Stayed a pool" over the delta's whole window, from its base: a list
+      // that stopped being one was set whole, and every delta whose window
+      // holds that tick sets it whole again, with new objects.
+      const now = poolOf(replica);
+      let pooled = !p.keyframe && lastAt >= 0;
+      for (let q = Math.min(lastAt, p.base); pooled && q <= at; q++) {
+        pooled = !!hostPools.get(q);
+      }
+      if (pooled) {
+        const was = hostPools.get(lastAt)!, is = hostPools.get(at)!;
+        for (const [k, obj] of now) {
+          const prev = lastPool.get(k);
+          if (!prev || !was.has(k) || !is.has(k)) continue;
+          if (was.get(k) !== is.get(k)) {
+            check(`seed ${seed} tick ${at}: @${k} was respawned on the host `
+              + `after tick ${lastAt}`, obj !== prev, "the replica patched the old object");
+          } else {
+            check(`seed ${seed} tick ${at}: @${k} kept its object on the host `
+              + `since tick ${lastAt}`, obj === prev, "the replica replaced it");
+          }
+        }
+      }
       lastPool = now;
+      lastAt = at;
       acks.push({ tick: at, arrive: t + opts.ackDelay + f.int(3) });
       if (d.length) needKeyframe = true;
     }
   }
-  void lastPool;
   return { applied, keyframes, bytes };
 }
 
@@ -370,9 +408,21 @@ function run(seed: number, ticks: number, opts: {
   step(3);
   report("a respawn at an old `at` is a new object, not a patch",
          rp()[0] !== r9 && rp()[0].hp === 50 && r9.hp === 3 && rp()[1] === r11);
+  // The only survivor respawning: one element, and none kept its object,
+  // which is what a one-element list rebuilt whole looks like too. The pool
+  // has proved itself persistent, so it is a respawn.
+  g.pool = [c];
+  step(4);
+  const r11b = rp()[0];
+  const c2 = { at: 11, hp: 99 };
+  g.pool = [c2];
+  step(5);
+  report("the only survivor respawning is a new object, not a patch",
+         rp()[0] !== r11b && rp()[0].hp === 99 && r11b.hp === 4,
+         `${JSON.stringify(rp())}`);
   // A list rebuilt whole from fresh objects, unchanged in value: nothing to send.
   g.list = [{ at: 1 }, { at: 2 }];
-  const quiet = step(4);
+  const quiet = step(6);
   report("a list rebuilt from fresh objects with the same values sends no ops",
          quiet <= 3, `${quiet} bytes`);
 }

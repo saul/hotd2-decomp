@@ -542,6 +542,15 @@ export class CharacterLayer implements System {
         syncJudgmentWings(this.goreParts, inst, this.poser);
       }
       syncHordeMirror(inst, true);
+      // `a.removed` and `a.boneSlot` only grow within a life. Either one
+      // shorter than what this instance shows is a life starting again in
+      // the same object -- which only a netplay replica meets, when a respawn
+      // reached it as a patch (`core/net/codec.ts`, `diffPool`) -- and the
+      // nodes go back to bind before the new life's damage is laid on.
+      if (inst.a.removed.length < (inst.hidden ?? 0) || this.slotsShrank(inst)) {
+        this.restoreNodes(inst);
+        inst.gates = undefined;
+      }
       // A bone `RemoveBoneSubtree` took off is hidden here rather than where
       // the shot resolved: `ResolveHit` runs in the port now, and what a
       // severed subtree *looks like* is this layer's half of it. `a.removed`
@@ -554,6 +563,10 @@ export class CharacterLayer implements System {
         }
         inst.hidden = inst.a.removed.length;
       }
+      // The swaps, the same way: the port asks for each through
+      // `setBoneSlot`, which is what lands on the host; the actor says them
+      // all, which is what lands everywhere.
+      this.syncSlots(inst);
       // `ZombieDrawBonePart` (`FUN_004534A0`) -- the cel a class-0x30 bone
       // draws instead of, or as well as, its own model. This is what fills
       // `char_adv02`'s midriff once its torso is shot; see
@@ -1020,6 +1033,7 @@ export class CharacterLayer implements System {
     inst.gore.clear();
     clearBoneCels(inst);
     inst.hidden = 0;
+    inst.slots = undefined;
     for (const g of inst.held?.values() ?? []) g.removeFromParent();
     inst.held?.clear();
     for (const node of inst.bones.values()) {
@@ -1044,7 +1058,18 @@ export class CharacterLayer implements System {
     for (let i = this.instances.length - 1; i >= 0; i--) {
       const inst = this.instances[i];
       const a = byAt.get(inst.at);
-      if (a) { inst.a = a; continue; }
+      if (a) {
+        // A different object at the same spawn is a different life -- a
+        // snapshot's restored copy, or a respawn a netplay replica reached
+        // in one step -- and the last one's damage comes off. What this one
+        // has is laid on by `update`, or by `resync` after a load.
+        if (a !== inst.a) {
+          inst.a = a;
+          this.restoreNodes(inst);
+          inst.gates = undefined;
+        }
+        continue;
+      }
       this.release(inst);
       this.instances.splice(i, 1);
     }
@@ -1073,10 +1098,27 @@ export class CharacterLayer implements System {
       // saying which model each bone draws, and this replays it exactly as
       // `resync` does. Without it a civilian kept the default head its
       // skeleton names instead of the `hito_kao_*` its spawn asked for.
-      for (const [bone, slot] of Object.entries(a.boneSlot)) {
-        swapGore(this.goreParts, inst, Number(bone), slot);
-      }
+      this.syncSlots(inst);
     }
+  }
+
+  /** Lay on every swap the actor names that this instance does not show yet. */
+  private syncSlots(inst: Instance): void {
+    const want = inst.a.boneSlot;
+    for (const k in want) {
+      const slot = want[k];
+      if (inst.slots?.[k] === slot) continue;
+      swapGore(this.goreParts, inst, Number(k), slot);
+      (inst.slots ??= {})[k] = slot;
+    }
+  }
+
+  /** Whether the instance shows a swap its actor no longer names. */
+  private slotsShrank(inst: Instance): boolean {
+    const shown = inst.slots;
+    if (!shown) return false;
+    for (const k in shown) if (!(k in inst.a.boneSlot)) return true;
+    return false;
   }
 
 
@@ -1147,7 +1189,9 @@ export class CharacterLayer implements System {
   /** Swap one bone's drawn model — the thrower's hand going bare and back. */
   setBoneSlot(at: number, bone: number, slot: number): void {
     const inst = this.instances.find((i) => i.at === at);
-    if (inst) swapGore(this.goreParts, inst, bone, slot);
+    if (!inst) return;
+    swapGore(this.goreParts, inst, bone, slot);
+    (inst.slots ??= {})[String(bone)] = slot;
   }
 
   /** The game objects this layer draws. */
@@ -1178,9 +1222,8 @@ export class CharacterLayer implements System {
         const node = inst.bones.get(bone);
         if (node) node.visible = false;
       }
-      for (const [bone, slot] of Object.entries(inst.a.boneSlot)) {
-        swapGore(this.goreParts, inst, Number(bone), slot);
-      }
+      inst.hidden = inst.a.removed.length;
+      this.syncSlots(inst);
       // The draw gates -- the veto among them -- are derived from the restored
       // actor like everything else here; clearing the cache is what makes the
       // apply do the whole walk.

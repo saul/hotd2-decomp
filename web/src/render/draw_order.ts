@@ -264,74 +264,181 @@ export function applyForcedAlphaBlend(mat: Material, alpha: number,
   mat.opacity = baseOpacity * Math.max(0, Math.min(1, alpha));
 }
 
-/** What {@link setAssetDrawAlpha} keeps on a node it has faded. */
-interface FadedNode {
-  /** The alpha last applied; absent while the node draws plainly. */
-  hod2DrawAlpha?: number;
-  /** The clones the fade drew with, freed with the node (`effects.ts`). */
-  ownedMaterials?: Material[];
-  /** Each mesh's material before the fade, to go back to. */
-  hod2PlainMaterials?: [Mesh, Material | Material[]][];
+/**
+ * One mesh's faded draw: what it draws when it is not faded, and the clones
+ * the fade drew with.
+ *
+ * **Per mesh, not per node**, because a character's fade is per node of its
+ * skeleton and a node's own mesh has its child bones under it:
+ * `setAssetDrawAlpha` on a bone would reach every bone below it. And **over
+ * whatever the mesh draws now**, not over the template: three layers choose a
+ * mesh's material -- the lighting view's Lambert twin (`render/lighting.ts`),
+ * the gun light's (`render/gunlights.ts`) and this one -- and a faded draw is
+ * the engine's draw of whichever of those the scene light and the light array
+ * made it (`AssetDrawSlotWithAlphaSceneLights`, `FUN_00418620`, is the lit
+ * one). So the other two set the {@link unfadedMaterial} through
+ * {@link setUnfadedMaterial} and the fade is put back on top of what they
+ * chose; a layer that writes `mesh.material` directly (a gore swap, a cel
+ * stepping) is noticed by the next fade and taken as the new unfaded material.
+ */
+interface MeshFade {
+  /** The alpha applied. */
+  alpha: number;
+  /** What the mesh draws when it is not faded. */
+  under: Material | Material[];
+  /** Each unfaded material's faded clone, made the first time it is faded. */
+  clones: Map<Material, Material>;
+}
+
+const meshFades = new WeakMap<Mesh, MeshFade>();
+/**
+ * Every faded clone to the material it was cloned from, for as long as either
+ * lives, so that a clone some layer saved during a fade and put back after it
+ * is still seen through.
+ */
+const fadedFrom = new WeakMap<Material, Material>();
+
+function isMeshNode(o: Object3D): o is Mesh {
+  return (o as Mesh).isMesh === true && !!(o as Mesh).material;
+}
+
+/** The material under a faded one, or the material itself. */
+function unfadedOf(m: Material): Material {
+  return fadedFrom.get(m) ?? m;
+}
+
+/** One unfaded material's clone, made once, at the fade's alpha. */
+function fadedClone(f: MeshFade, under: Material): Material {
+  let c = f.clones.get(under);
+  if (!c) {
+    c = under.clone();
+    // `Material.copy` carries neither, and the fog hook and the lighting
+    // twins' shaders both live in them (`render/fog.ts`).
+    c.onBeforeCompile = under.onBeforeCompile;
+    c.customProgramCacheKey = under.customProgramCacheKey;
+    c.userData.hod2BaseOpacity = under.opacity;
+    fadedFrom.set(c, under);
+    f.clones.set(under, c);
+  }
+  applyForcedAlphaBlend(c, f.alpha,
+                        (c.userData.hod2BaseOpacity as number | undefined) ?? 1);
+  return c;
+}
+
+function resolveFade(mesh: Mesh, f: MeshFade): void {
+  const u = f.under;
+  mesh.material = Array.isArray(u)
+    ? u.map((m) => fadedClone(f, m)) : fadedClone(f, u);
 }
 
 /**
- * One cloned slot node's draw: `AssetDrawSlot` (`FUN_00418560`) when `alpha`
- * is `null`, `AssetDrawSlotWithAlpha` (`FUN_004185A0`) otherwise.
- *
- * **A number is the forced state at any value, 1 included.**
- * `AssetDrawSlotWithAlpha` hands its argument to
- * `RenderSubmitModelFadedDefaultLight` (`FUN_004AA350`) without testing it,
- * so a draw at 1.0 is still `DrawModelWithForcedAlphaBlend`'s: deferred,
- * blended `SRCALPHA`/`INVSRCALPHA`, and alpha-modulating -- which puts an
- * opaque-pass mesh's texture alpha on screen, where the plain draw ignores
- * it. The layers used to skip the clone at 1, which was the same picture
- * only while the exporter stripped that alpha, and the fading draws do sit at
- * exactly 1: the horde ripple for thirty frames, the owl ring for
- * twenty-nine, and the fish and water rings open on it. (Every slot those
- * draw today is translucent-pass `SRCALPHA`/`INVSRCALPHA` at base alpha 1,
- * so the picture did not move; the draw is the engine's all the same.) The
- * plain draw shares the template's materials;
- * the first fade clones them, recording each one's own opacity as the base
- * the fade multiplies, and a plain draw after a fade goes back to the
- * template's.
+ * What a mesh draws when it is not faded: the material under its fade, or
+ * its own when it has none.
  */
-export function setAssetDrawAlpha(node: Object3D, alpha: number | null): void {
-  const ud = node.userData as FadedNode;
+export function unfadedMaterial(mesh: Mesh): Material | Material[] {
+  const f = meshFades.get(mesh);
+  if (f) return f.under;
+  const cur = mesh.material;
+  return Array.isArray(cur) ? cur.map(unfadedOf) : unfadedOf(cur);
+}
+
+/**
+ * Change what a mesh draws when it is not faded, and keep its fade on top --
+ * the lighting layers' way of swapping a material. See {@link MeshFade}.
+ */
+export function setUnfadedMaterial(mesh: Mesh,
+                                   m: Material | Material[]): void {
+  const f = meshFades.get(mesh);
+  if (!f) {
+    mesh.material = m;
+    return;
+  }
+  f.under = m;
+  resolveFade(mesh, f);
+}
+
+/**
+ * One mesh's draw: `AssetDrawSlot` (`FUN_00418560`) when `alpha` is `null`,
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`) otherwise.
+ *
+ * **A number is the forced state at any value, 1 and 0 included.**
+ * `AssetDrawSlotWithAlpha` hands its argument to
+ * `RenderSubmitModelFadedDefaultLight` (`FUN_004AA350`) untested, and
+ * `DrawModelWithForcedAlphaBlend` (`FUN_004A8440`) makes each mesh's material
+ * alpha its base alpha times it (`0x004A85D5`), untested too. So a draw at 1
+ * is deferred, blended and alpha-modulating -- which puts an opaque-pass
+ * mesh's texture alpha on screen, where the plain draw ignores it -- and a
+ * draw at 0 still happens: invisible, and still writing depth for every mesh
+ * the alpha test does not drop, which is every opaque-pass one (bits 19-20 are
+ * kept, and they say "untested").
+ */
+export function setMeshDrawAlpha(mesh: Mesh, alpha: number | null): void {
+  let f = meshFades.get(mesh);
   if (alpha === null) {
-    if (ud.hod2DrawAlpha === undefined) return;
-    for (const [mesh, m] of ud.hod2PlainMaterials ?? []) mesh.material = m;
-    for (const m of ud.ownedMaterials ?? []) m.dispose();
-    ud.hod2DrawAlpha = undefined;
-    ud.ownedMaterials = undefined;
-    ud.hod2PlainMaterials = undefined;
+    if (f) {
+      // What the mesh draws now, seen through the fade: a layer may have
+      // written it since the last fade (a cel stepping), and that is what it
+      // draws unfaded.
+      const cur = mesh.material;
+      mesh.material = Array.isArray(cur) ? cur.map(unfadedOf) : unfadedOf(cur);
+      for (const c of f.clones.values()) c.dispose();
+      meshFades.delete(mesh);
+      return;
+    }
+    // A clone a layer saved during a fade and has put back since.
+    const cur = mesh.material;
+    if (Array.isArray(cur)) {
+      if (cur.some((m) => fadedFrom.has(m))) mesh.material = cur.map(unfadedOf);
+    } else if (fadedFrom.has(cur)) {
+      mesh.material = unfadedOf(cur);
+    }
     return;
   }
   const a = Math.max(0, Math.min(1, alpha));
-  if (ud.hod2DrawAlpha === a) return;
-  if (ud.hod2DrawAlpha === undefined) {
-    const owned: Material[] = [];
-    const plain: [Mesh, Material | Material[]][] = [];
-    node.traverse((o) => {
-      const mesh = o as Mesh;
-      if (!mesh.material) return;
-      plain.push([mesh, mesh.material]);
-      const clone = (x: Material): Material => {
-        const c = x.clone();
-        c.userData.hod2BaseOpacity = x.opacity;
-        owned.push(c);
-        return c;
-      };
-      mesh.material = Array.isArray(mesh.material)
-        ? mesh.material.map(clone) : clone(mesh.material);
-    });
-    ud.ownedMaterials = owned;
-    ud.hod2PlainMaterials = plain;
+  if (!f) {
+    f = { alpha: a, under: unfadedMaterial(mesh), clones: new Map() };
+    meshFades.set(mesh, f);
+  } else {
+    // Read back what the mesh draws: something may have written the material
+    // directly since the last fade -- a gore swap, a cel stepping -- and then
+    // that is its unfaded material now. Seen through a clone, it is the
+    // material the clone was made from, whichever that was.
+    const cur = mesh.material;
+    f.under = Array.isArray(cur) ? cur.map(unfadedOf) : unfadedOf(cur);
+    f.alpha = a;
   }
-  ud.hod2DrawAlpha = a;
-  for (const mat of ud.ownedMaterials ?? []) {
-    applyForcedAlphaBlend(
-      mat, a, (mat.userData.hod2BaseOpacity as number | undefined) ?? 1);
-  }
+  resolveFade(mesh, f);
+}
+
+/** The alpha a mesh's draw is faded at, or `null` for a plain draw. */
+export function meshDrawAlpha(mesh: Mesh): number | null {
+  return meshFades.get(mesh)?.alpha ?? null;
+}
+
+/**
+ * One cloned slot node's draw, every mesh of it: `AssetDrawSlot` when `alpha`
+ * is `null`, `AssetDrawSlotWithAlpha` otherwise -- see
+ * {@link setMeshDrawAlpha}. The plain draw shares the template's materials;
+ * the first fade clones them, recording each one's own opacity as the base
+ * the fade multiplies, and a plain draw after a fade goes back to them. The
+ * layers used to skip the clone at 1, which was the same picture only while
+ * the exporter stripped the texture alpha of every opaque-pass mesh; the
+ * fading draws do sit at exactly 1 -- the horde ripple for thirty frames, the
+ * owl ring for twenty-nine, the fish and water rings open on it.
+ */
+export function setAssetDrawAlpha(node: Object3D, alpha: number | null): void {
+  node.traverse((o) => {
+    if (isMeshNode(o)) setMeshDrawAlpha(o, alpha);
+  });
+}
+
+/**
+ * Put every faded mesh under `node` back to its unfaded material and free the
+ * clones its fades drew with -- for a node leaving the scene for good
+ * (`effects.ts`).
+ */
+export function releaseAssetDrawAlpha(node: Object3D): void {
+  setAssetDrawAlpha(node, null);
 }
 
 /**

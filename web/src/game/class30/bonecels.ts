@@ -93,9 +93,11 @@
  * `2`, "nothing at all", so the runtime twin takes no damage and has no gore.
  *
  * {@link g_class30_bone_cels} carries the arms that are **nothing but a
- * phase**, which is nine of the sixteen. The other seven need something this
- * table cannot say and are listed in {@link ZOMBIE_BONE_CEL_UNPORTED} with
- * what each of them wants.
+ * phase**, which is nine of the sixteen. Two more, `0x1C7C` and `0x1C6C`,
+ * draw only their own slot and move the actor's alpha as they do, which is
+ * state: `ZombieDrawBonePart` in `class30/draw.ts` runs both. The other five
+ * need something this table cannot say and are listed in
+ * {@link ZOMBIE_BONE_CEL_UNPORTED} with what each of them wants.
  */
 
 /** One arm of `ZombieDrawBonePart`'s switch, as a pair of cel runs. */
@@ -151,7 +153,8 @@ export const g_class30_bone_cels: Readonly<Record<number, BoneCelArm>> = {
 };
 
 /**
- * The seven arms that are not a phase, and what each of them needs.
+ * The five arms that are not a phase and have no port, and what each of them
+ * needs.
  *
  * Listed rather than silently dropped: a table that covers nine of sixteen
  * arms and says nothing about the rest is the shape of reading that produced
@@ -170,15 +173,17 @@ export const g_class30_bone_cels: Readonly<Record<number, BoneCelArm>> = {
  *   once and holds. Wants a field on the actor.
  * * `0x1F09` (`char_adv00`) — a 60-cel ping-pong off the same word, with
  *   `obj+0x136C` bit `0x80000` restarting it and `-1` meaning "draw the slot".
- * * `0x1C7C` (`znjikken1`) — the slot, and a per-frame decay of `obj+0x134C`
- *   and `obj+0x138C`, which is state and not a draw.
- * * `0x1C6C` (`znele`) — the slot, and a transition that raises `obj+0x136C`
- *   bits `0x60000000` and plays `PlaySoundId(0x2225A9)`.
- * * `0x1C71`–`0x1C7B` (not `0x1C73`) and `0x1C7D`–`0x1C80` (`znjikken1`) —
- *   `FUN_00418660(slot)` and then the slot. What that call does is `[open]`.
+ *
+ * Not in the list, because what they draw is the slot and nothing else:
+ * `0x1C71`–`0x1C7B` (not `0x1C73`) and `0x1C7D`–`0x1C80` (`znjikken1`) run
+ * `AssetSlotUVsFromViewNormals` (`FUN_00418660`) on the slot first, which
+ * rewrites the model's UVs from its normals through the matrix -- a texture
+ * the renderer does not reproduce (see `class30/twin.ts`) -- and the two fade
+ * arms, `0x1C7C` (`znjikken1`) and `0x1C6C` (`znele`), which are ported in
+ * `class30/draw.ts`.
  */
 export const ZOMBIE_BONE_CEL_UNPORTED: readonly number[] = [
-  0x1beb, 0x1bed, 0x1d99, 0x1ca9, 0x1f09, 0x1c7c, 0x1c6c,
+  0x1beb, 0x1bed, 0x1d99, 0x1ca9, 0x1f09,
 ];
 
 /**

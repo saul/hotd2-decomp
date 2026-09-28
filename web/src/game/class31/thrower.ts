@@ -118,6 +118,8 @@ const SFX_THROW_DONE = 0x2916a9;
 
 /** Character type 0x18 — `zslman`. It has its own clip for everything. */
 const CHAR_ZSLMAN = 0x18;
+/** Character type 0x17 — `zskamere`. `CMP CX, 0x17` at `0x004497EC`. */
+const CHAR_ZSKAMERE = 0x17;
 
 /**
  * `ThrowerPickThrowingHand` — `FUN_0044F630`. Which bone throws this time.
@@ -711,7 +713,33 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
   // 0x17 through 0x19. It is the radius both push-outs test with.
   obj.bodyRadius = obj.charType === CHAR_ZSASS
     ? BODY_RADIUS_ZSASS : BODY_RADIUS_OTHER;
-  obj.alpha = 1;
+  // `obj+0x138C`, the draw alpha, for the two types whose parts
+  // `DrawCharacterPartSlot` draws at it -- and nowhere else:
+  //
+  //   004497f8  MOV [ESI + 0x138c], EDX           ; 0x17: 1.0
+  //   00449823  CMP byte ptr [EBP + 0x2], 0x22    ; 0x18 starting in state 34
+  //   00449829  OR  EAX, 0x80000                  ; ...no shadow
+  //   0044982e  MOV [ESI + 0x138c], EDI           ; ...alpha 0
+  //   0044983d  OR  AL, 0x4                       ; ...drawn at it
+  //   00449847  MOV [ESI + 0x138c], EDX           ; 0x18 otherwise: 1.0
+  //
+  // `[proved]`, `EDX` 1.0 and `EDI` 0 from the routine's head. So stage 6's
+  // eight `zslman` are born invisible and blinking, their waist and skirt
+  // with them; state 34's own sub 0 then says the same again. Types 0x16 and
+  // 0x19 are not written, which cannot show: their parts are drawn solid and
+  // their bones read the word only under bit 2, which every writer raises
+  // together with a value.
+  if (obj.charType === CHAR_ZSKAMERE) {
+    obj.alpha = 1;
+  } else if (obj.charType === CHAR_ZSLMAN) {
+    if (obj.initialState === ThrowerState.BlinkIn) {
+      obj.flags |= ActorFlag.NoShadow;
+      obj.alpha = 0;
+      obj.flags2 |= ThrowerFlag.Blinking;
+    } else {
+      obj.alpha = 1;
+    }
+  }
   obj.pendingHit = null;
   obj.thr.knockCount = 0;
   obj.thr.stance = 0;

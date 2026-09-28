@@ -5477,7 +5477,80 @@ any alpha above 0 solid (`render/characters/draw_gates.ts`), where the exe's
 (`EnemyZombieInitByCharType`), `ZombieSubmitSlotByLighting`'s fade-in while
 `obj+0x1368` bit `0x20` is up, and `ThrowerDrawBonePart`'s triangular fade on
 slot `0x1FB9`. With the alpha now in the images, drawing them through
-`setAssetDrawAlpha` would be faithful as it stands.
+`setAssetDrawAlpha` would be faithful as it stands. (Done since: see the next
+section.)
+
+## Character fades: every node drawn the way its hook draws it
+
+`render/characters/draw_gates.ts` drew a bone or a part at any alpha above 0
+solid and hid it at 0, and said that 0 and 1 were every alpha the game gives a
+character. They are not, and at 0 and 1 the faded draw is not the plain one
+either: `AssetDrawSlotWithAlpha` (`FUN_004185A0`) hands its alpha on untested,
+and `DrawModelWithForcedAlphaBlend` (`FUN_004A8440`) makes each mesh's
+material alpha its base alpha times it with no test of its own -- so at 1 an
+opaque-pass mesh's texture alpha shows, and at 0 the model is drawn invisible
+and still writes depth (bits 19-20 are kept, so an opaque-pass mesh is not
+alpha-tested). What the player does now:
+
+* **Each node's draw is state.** The hooks the port runs write, per bone, the
+  draw they chose into `Actor.nodeDrawAlpha` -- `null` for `AssetDrawSlot`, the
+  alpha for `AssetDrawSlotWithAlpha` -- and `draw_gates.ts` fades every mesh
+  that node's draw covers (its own model, a gore piece, a cel) through the new
+  per-mesh `setMeshDrawAlpha`. `DrawCharacterPartSlot` (`FUN_00419B40`)'s four
+  types (9, 0x12, 0x17, 0x18) have their parts drawn at `obj+0x138C` always,
+  1 and 0 included. Attachments stay plain: `ActorDrawAttachedParts` draws
+  them through `AssetDrawSlot`.
+* **Class 0x30** (`game/class30/draw.ts`, `init_char.ts`, `twin.ts`).
+  `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) is ported: the light array
+  first (`obj+0x136C` bit `0x20` under `g_scene_lighting`, never faded), then
+  `obj+0x1368` bit `0x20` for the fade. `EnemyZombieInitByCharType`
+  (`FUN_00452FD0`) sets up the two fades -- `znele` (type 0x12) at 0 stepping
+  1/30, the twin (type 9) at 0.25 stepping 1/60, both after a hundred draws --
+  and `ZombieDrawBonePart` (`FUN_004534A0`)'s `0x1C6C` and `0x1C7C` arms run
+  the clocks: `znele` fades in over thirty frames, and at the end gets its
+  pushes and its shot test back (its head aim stays off) with
+  `PlaySoundId(0x2225A9)`; the twin fades
+  out over sixteen. **The twin exists now**: the type-0x12 arm allocates it
+  unless `obj+0x34` has `0x10000000` (two of stage 6's thirteen do), and
+  `ZombieTwinFollowHost` (`FUN_00453290`) is its whole update -- it wears the
+  host's transform and clip, runs no state, is counted into neither enemy
+  count, has the minimum hit points (`ActorInitHitPoints` overwrites the 999),
+  and despawns the frame after its alpha reaches 0 or when the host dies. The
+  exporter writes it a synthetic row (`zombieTwinPlacements`,
+  `hod2lib/characters.ts`) with `znjikken1.bin` and every clip its host's type
+  has; re-export the bundles.
+* **Class 0x31.** `ThrowerDrawBonePart` (`FUN_00449F90`) records `null` or the
+  alpha through `ThrowerDrawPartAlphaIfBlinking` (`FUN_0044A280`); the
+  blinking states' 0 and 1 are faded draws, not "hidden" and "solid".
+  `EnemyThrowerInit` writes `obj+0x138C` per type as the exe does -- a
+  `zslman` starting in state 34 is born at 0, blinking and shadowless -- and
+  the blink states read `g_blink_frame_counter`'s low bit
+  (`0x0044F0C2`, `0x0045149C`), not the port's fractional `g_frame`. The
+  `0x1FB9` ramp is `zskamere`'s bone 9 and is `[likely]` never reached by a
+  shipped spawn (see `class31/draw.ts`); a debug write of bit 2 shows it.
+* **The fade composes with the lighting layers.** A fade is over whatever the
+  mesh draws: the lighting view's twin and the gun light's are swapped in
+  underneath it (`setUnfadedMaterial`), a gore swap or a cel write is read
+  back as the new unfaded material, and a clone a layer saved is seen through.
+  The clones keep `onBeforeCompile` (fog, and the lit twins' shaders), which
+  the old per-node clones lost.
+
+What that looks like, in `?stage=6&mode=play&block=0&step=2&op=19`: for the
+first hundred frames each `znele` is a quarter-alpha twin with nothing under it
+but its depth, then the twin fades and `znele` fades in. The depth is visible:
+an invisible actor in front of translucent geometry keeps that geometry off
+its silhouette, as the engine's would if its sort puts the actor first -- the
+port's sort is the engine's (`RenderCommandOrder`). The same is true of a
+blinking `zslman` on its odd frames (`?stage=6&mode=play&block=0&step=4&op=2`).
+
+Not done: the twin's parts and cels are drawn with the exporter's UVs, where
+`AssetSlotUVsFromViewNormals` (`FUN_00418660`) rewrites them from the normals
+each frame (`[diverges]`, `class30/twin.ts`). Three more characters fade in the
+exe and are not ported at all, so they are not drawn solid either -- they are
+not drawn: class 0x25's `0xE24` flash (`ScriptedHumanoidBoneDrawHook`), the
+golden frog (`GoldenFrogDrawBonePart`) and class 0x2D's node hook at
+`0x00429040`. Class 0x40's `SubModelDrawBoneHook` fade is unreachable:
+`HordeMemberInit` writes `obj+0x1338` = 0 and nothing else writes it.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

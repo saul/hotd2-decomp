@@ -30,10 +30,11 @@
  * the camera. {@link EffectLayer.bones} is what answers that here.
  */
 import {
-  type BufferGeometry, Euler, Group, type Material, Matrix4, Object3D,
+  type BufferGeometry, Euler, Group, Matrix4, Object3D,
   Quaternion, Ray, Vector3,
 } from "three";
 import { drawBoss3Effects } from "./boss3_effects";
+import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
 import { drawCreatureEffects } from "./creature_effects";
 import { drawWaterRings } from "./water_rings";
@@ -104,13 +105,12 @@ export interface BoneSphereSource {
 
 /**
  * Free the materials a fading draw gave its clone -- see `setSlotAlpha` in
- * `boss3_effects.ts` -- and the geometry a deforming one copied (the water
- * mound). Anything else is the template's and is not ours.
+ * `boss3_effects.ts` and `releaseAssetDrawAlpha` -- and the geometry a
+ * deforming one copied (the water mound). Anything else is the template's and
+ * is not ours.
  */
 function disposeOwned(node: Object3D): void {
-  const owned = node.userData.ownedMaterials as Material[] | undefined;
-  if (owned) for (const m of owned) m.dispose();
-  node.userData.ownedMaterials = undefined;
+  releaseAssetDrawAlpha(node);
   const geos = node.userData.ownedGeometries as BufferGeometry[] | undefined;
   if (geos) for (const g of geos) g.dispose();
   node.userData.ownedGeometries = undefined;

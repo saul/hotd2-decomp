@@ -23057,3 +23057,118 @@ Handed on as its own task.
   pose inside the tick. That is `L69`. Two in-step runs replaced it.
 * The corpus check first opened `pol/common.bin.bin`: `asset_slots()` names
   files with their extension, and the bank helper wants the stem.
+
+## 2026-09-28 -- character fades, and the twin `znele` makes (branch `fix/newbugs2-char-fades`)
+
+**The report.** The texture-alpha session left it: `draw_gates.ts` draws a
+character's bones and parts solid at any alpha above 0 and hides them at 0,
+and its comment said 0 and 1 were every alpha the game gives one. Three cases
+were named: the type-9 twin at 0.25, the fade-in through
+`ZombieSubmitSlotByLighting` while `obj+0x1368` bit `0x20` is up, and the
+triangle on thrower slot `0x1FB9`. The coordinator asked for every case, not
+those three.
+
+**Finding them.** Every caller of `AssetDrawSlotWithAlpha` (`0x004185A0`, 71
+sites) and of its light-array twin `AssetDrawSlotWithAlphaSceneLights`
+(`0x00418620`, 7), each mapped to its function; then every node draw hook
+installed at `model+0x1158` / `obj+0x12EC` (25 + 11 writes), to see which of
+them reaches either. What draws a *character* faded:
+
+* `DrawCharacterPartSlot` (`0x00419B40`): the parts of types 9, 0x12, 0x17,
+  0x18 at `obj+0x138C`, always. `[proved]` (already read; the render ignored
+  it at 1.)
+* `ZombieSubmitSlotByLighting` (`0x00453AE0`), every class-0x30 node: light
+  array first on `obj+0x136C` bit `0x20` -- **not** `obj+0x38` bit 3 as
+  `g_scene_lighting`'s row and `scene_lights.ts` said -- then the fade on
+  `obj+0x1368` bit `0x20`. `[proved]`
+* `ZombieDrawBonePart` (`0x004534A0`)'s `0x1C6C` arm (reached through the
+  byte map at `0x00453A04`, index `0x7F` = 1, jump table `0x004539F4` entry 1
+  = `0x00453665`) and its `0x1C7C` arm (`0x00453708`): the two clocks, on
+  `obj+0x134C` (wait) and `obj+0x1388` (step). `EnemyZombieInitByCharType`'s
+  type-9 and type-0x12 arms seed them. `[proved]`
+* `ThrowerDrawBonePart` (`0x00449F90`) through `ThrowerDrawPartWithAlpha`
+  (`0x0044A240`), under `obj+0x136C` bit 2. `[proved]`
+* `SubModelDrawBoneHook` (`0x0040F490`), class 0x40, on `obj+0x1338`:
+  unreachable -- `HordeMemberInit` writes it from `EBX`, zeroed at
+  `0x0043BF21`, and it is the only class-0x40 writer. `[proved]`
+* Not ported, so not drawn at all: `ScriptedHumanoidBoneDrawHook`'s `0xE24`
+  flash (class 0x25, three frames at 1.0/0.7/0.4), `GoldenFrogDrawBonePart`
+  (`0x00463F90`, named here: `1 - n*0.02` for `n >= 25`), class 0x2D's hook at
+  `0x00429040` (at `obj+0x1370`).
+* Everything else is a prop, an effect or a screen overlay.
+
+**What the faded draw is**, confirmed on the way: `TranslatePvr2StateToD3D`
+sets `ALPHATESTENABLE` (state 15) from the TSP pass bits and
+`DrawModelWithForcedAlphaBlend` keeps them, and the material alpha is the
+mesh's base times the command's at `0x004A85D5` with no test. So a draw at 0
+is invisible and writes depth for every opaque-pass mesh. In the player this
+shows: an invisible `znele` or a blinking `zslman` keeps translucent geometry
+behind it off its silhouette, because the port's sort, which is the engine's,
+draws the actor first. It follows from `[proved]` pieces; if the real game
+does not show it, the sort is the suspect, not the fade.
+
+**The twin.** Type 0x12's arm allocates a type-9 actor (`znjikken1`) unless
+`obj+0x34` has `0x10000000`, and `EnemyZombieInit` gives it
+`ZombieTwinFollowHost` (`0x00453290`, already named) for its update. Read
+whole: it despawns at alpha 0 or a dead host, runs `ZombieOnShot`, raises
+`0x80040000`, copies the host's transform block and motion words, draws, and
+registers for the shot test. Ported (`class30/twin.ts`), with a synthetic
+bundle row for its geometry and every clip its host's type has. Its 999 hit
+points are not what it has: its own `ActorInitHitPoints` overwrites them with
+the clamp of `obj+0x11E` (0) plus the delta.
+
+**Also fixed on the way:** the thrower blink states read the port's fractional
+`g_frame` where the exe tests `g_blink_frame_counter`'s low bit;
+`EnemyThrowerInit` wrote alpha 1 for every type where the exe writes 1.0 for
+0x17, 0 for a 0x18 starting in state 34 (with bit 2 and `0x80000`) and 1.0
+for other 0x18s; the per-node fade clones dropped `onBeforeCompile`; and the
+gun light and the lighting view swapped materials over a fade's clone.
+
+**Named:** `AssetSlotUVsFromViewNormals` (`0x00418660`) and
+`ModelUVsFromViewNormals` (`0x004AA400`) -- the "`FUN_00418660` `[open]`" of
+`combat.md`'s cel table: the model's UVs rewritten from its normals through
+the matrix, drawing nothing; `GoldenFrogDrawBonePart` (`0x00463F90`),
+`GoldenFrogUpdate` (`0x00471FA0`; Ghidra's naming gate refused it for its
+token overlap with `FrogUpdate` and it went in with the gate off).
+
+**Screenshots** (`web/shots/`, not committed; before = main at `14098154`
+with the shared bundle, after = this branch with its own export, both under
+`?drive=1`; each is before on the left, after on the right, a row a frame):
+`charfades-znele-compare.png` (stage 6 block 0 step 2 op 19, frames 60/105/
+115/125/135, before the twin was ported: solid from the first frame against
+invisible, then 0.17/0.5/0.83, then solid), `charfades-twin-compare.png` and
+`charfades-twin-f60-zoom.png` (the same with the twin: three quarter-alpha
+ghosts; the zoom's rows are before, no twin, twin), `charfades-zslman-
+compare.png` (stage 6 block 0 step 4 op 2, frames 40/41/100/101: the blink's
+odd frames and the waiting `zslman`'s depth), `charfades-pulse2-compare.png`
+(stage 4 block 1 step 2 op 5 with bit 2 forced on `zskamere` 4236 from frame
+1: frame 100 is solid before and a third after), `charfades-kamere-compare.png`
+(0 of 218,400 pixels differ: `zskamere`'s parts at the forced blend's 1
+against the plain draw -- its textures have no transparent texels there).
+
+**Wrong turns.**
+
+* The first commit's message and `class31/draw.ts` said the `0x1FB9` ramp is
+  `zskamere`'s "under any of the blinking states", and that the old comment
+  had only counted the descriptor's word. The old comment's conclusion was
+  right: no shipped `zskamere` starts in or reaches state 27 or 34, no class-
+  0x31 routine writes either into `obj+0x1310` as an immediate, and the
+  blinking death is `zslman`'s. Corrected to `[likely]` unreachable.
+* `functions.tsv` called `ZombieTwinFollowHost`'s `obj+0x1320`/`0x1324` "the
+  clip pair". On class 0x30 they are the head aim's two angles (`L3`).
+* The port test's first expectation was that every node shows the alpha the
+  fade arm makes. The fixture walks bones 4 and 5 before bone 1, and the hook
+  moves the alpha as it draws the fade node, so the nodes before it draw the
+  previous frame's -- which is the engine's order, and the test says so now.
+* The builder hash was generated, the stages exported, and then a comment
+  edit to `class30/bonecels.ts` -- which the exporter imports -- moved it
+  again (`L33`, with my own hands). Re-exported after the merge.
+* The first full `verify_all` with the new bundle failed `verify_bone_cels`:
+  "`znjikken1` draws `0x1C97`". It does not. The check read each
+  character's `HIT_EFFECT` rows `1..nb+1`, and the table is a pointer per
+  character at `nb` rows each -- every one of the 86 skeletons numbers its
+  bones below its own count -- so rows `nb` and `nb + 1` were the next
+  character's rows 0 and 1, and `znjikken1`'s row 17 is `znjoe`'s row 1.
+  `L6`, in a checker, latent until a bundle carried type 9. Bounded at `nb`
+  now; the count went from 79 to 77, the two dropped being those two reads,
+  and the shared bundle gives 77 as well.

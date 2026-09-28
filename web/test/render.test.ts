@@ -2614,6 +2614,139 @@ console.log("\nthe draw gates: the skeleton, and each part by index");
 }
 
 /**
+ * The hook's draw, node by node: `ZombieSubmitSlotByLighting` (`FUN_00453AE0`)
+ * and `ThrowerDrawPartWithAlpha` (`FUN_0044A240`) draw a node through
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`), and the port's hooks write which
+ * into `Actor.nodeDrawAlpha`; `DrawCharacterPartSlot` (`FUN_00419B40`) draws
+ * four types' parts at `obj+0x138C`. `draw_gates.ts` used to draw every
+ * alpha above 0 solid and hide a bone at 0.
+ */
+console.log("\nthe draw gates: each node's faded draw, and the parts at 0x138C");
+{
+  const three = await import("three");
+  const { Group, Mesh, MeshBasicMaterial, BoxGeometry, MeshLambertMaterial } =
+    three;
+  const { applyDrawGates } =
+    await import("../src/render/characters/draw_gates");
+  const { setMeshDrawAlpha, setUnfadedMaterial, unfadedMaterial,
+          meshDrawAlpha } = await import("../src/render/draw_order");
+  const { MotionFlag } = await import("../src/game/actor");
+  const { SpawnClass } = await import("../src/game/spawn_class");
+
+  // A template material in the opaque pass, with a base alpha under 1.
+  const tmpl = (): InstanceType<typeof MeshBasicMaterial> => {
+    const m = new MeshBasicMaterial({ opacity: 0.8 });
+    m.transparent = false;
+    return m;
+  };
+  const mk = (name: string) => {
+    const m = new Mesh(new BoxGeometry(1, 1, 1), tmpl());
+    m.name = name;
+    return m;
+  };
+  const pivot = new Group();
+  const pelvis = mk("chr_z_spawn000_bone01_1c6c");
+  const leg = mk("chr_z_spawn000_bone10_1111");
+  const cel = mk("cel");
+  pelvis.add(leg, cel);        // the cel is the pelvis's draw, not the leg's
+  const waist = mk("chr_z_spawn000_part0_1c63");
+  pivot.add(pelvis, waist);
+  const plain = new Map<object, unknown>([
+    [pelvis, pelvis.material], [leg, leg.material], [cel, cel.material],
+    [waist, waist.material]]);
+  const a = {
+    cls: SpawnClass.Zombie, charType: 0x12, alpha: 0.25,
+    motionFlags: MotionFlag.Drawn, partVisible: [1], suppressedBones: 0,
+    nodeDrawAlpha: [] as (number | null)[],
+  };
+  const inst = {
+    a, pivot, root: pivot, bones: new Map([[1, pelvis], [10, leg]]),
+    gore: new Map(),
+  } as never;
+  type Basic = InstanceType<typeof MeshBasicMaterial>;
+  const mat = (m: InstanceType<typeof Mesh>) => m.material as Basic;
+
+  a.nodeDrawAlpha[1] = 0.25;
+  a.nodeDrawAlpha[10] = null;
+  applyDrawGates(inst);
+  check("a node drawn at 0.25 is the forced blend at its base alpha times it",
+        mat(pelvis) !== plain.get(pelvis) && mat(pelvis).transparent
+        && mat(pelvis).blendSrc === three.SrcAlphaFactor
+        && mat(pelvis).blendDst === three.OneMinusSrcAlphaFactor
+        && Math.abs(mat(pelvis).opacity - 0.2) < 1e-6,
+        `${mat(pelvis).opacity}`);
+  check("...and so is everything else the hook draws for it -- the cel",
+        Math.abs(mat(cel).opacity - 0.2) < 1e-6 && mat(cel).transparent);
+  check("...while a child bone drawn plainly keeps the template's material",
+        leg.material === plain.get(leg));
+  check("`znele`'s part is drawn at `obj+0x138C` whatever the node alpha",
+        waist.material !== plain.get(waist)
+        && Math.abs(mat(waist).opacity - 0.2) < 1e-6);
+
+  a.nodeDrawAlpha[1] = 0;
+  a.alpha = 0;
+  applyDrawGates(inst);
+  check("at 0 the node is still drawn: on its layer, opacity 0, writing depth",
+        pelvis.layers.isEnabled(0) && mat(pelvis).opacity === 0
+        && mat(pelvis).depthWrite && mat(pelvis).alphaTest === 0);
+  check("...and so is the part", waist.visible && mat(waist).opacity === 0);
+
+  a.nodeDrawAlpha[1] = 1;
+  a.alpha = 1;
+  applyDrawGates(inst);
+  check("at 1 it is still the forced blend, not the plain draw: an "
+        + "opaque-pass mesh's texture alpha shows",
+        mat(pelvis) !== plain.get(pelvis) && mat(pelvis).transparent
+        && Math.abs(mat(pelvis).opacity - 0.8) < 1e-6
+        && mat(waist).transparent);
+
+  // A zombie that is not one of the four types draws its parts plainly.
+  a.charType = 1;
+  applyDrawGates(inst);
+  check("another character type's part is drawn plainly",
+        waist.material === plain.get(waist));
+  a.charType = 0x12;
+
+  // The gun light swaps a lit actor's materials for its twins, after the
+  // characters: the fade goes back on top of the twin it chose.
+  a.nodeDrawAlpha[1] = 0.5;
+  applyDrawGates(inst);
+  const twin = new MeshLambertMaterial({ opacity: 0.8 });
+  twin.userData = { gunLit: true };
+  setUnfadedMaterial(pelvis, twin);
+  const drawnWith = pelvis.material as unknown as { type: string };
+  check("a light layer's swap goes under the fade: the twin, at 0.5",
+        unfadedMaterial(pelvis) === (twin as unknown)
+        && drawnWith !== (twin as unknown)
+        && drawnWith.type === "MeshLambertMaterial"
+        && Math.abs(mat(pelvis).opacity - 0.4) < 1e-6
+        && meshDrawAlpha(pelvis) === 0.5);
+  // A layer that writes the material directly -- a gore swap, a cel -- is
+  // read back as the new unfaded one by the next fade.
+  const gore = tmpl();
+  pelvis.material = gore;
+  applyDrawGates(inst);
+  check("...and a direct write is taken as the new unfaded material",
+        unfadedMaterial(pelvis) === gore && pelvis.material !== gore
+        && Math.abs(mat(pelvis).opacity - 0.4) < 1e-6);
+
+  // The fade ends: every mesh goes back to what it draws unfaded.
+  a.nodeDrawAlpha[1] = null;
+  applyDrawGates(inst);
+  check("a plain draw after the fade puts back what the mesh draws unfaded",
+        pelvis.material === gore && cel.material === plain.get(cel)
+        && meshDrawAlpha(pelvis) === null);
+  // ...and a clone some layer saved and puts back later is seen through.
+  setMeshDrawAlpha(leg, 0.3);
+  const saved = leg.material;
+  setMeshDrawAlpha(leg, null);
+  leg.material = saved as never;
+  setMeshDrawAlpha(leg, null);
+  check("a stale fade clone put back after the fade is replaced by its source",
+        leg.material === plain.get(leg));
+}
+
+/**
  * The player's own character, in the scene, in the cut scene that spawns it.
  *
  * Stage 3's block 2 step 5 puts two class-0x25 humanoids at one point --

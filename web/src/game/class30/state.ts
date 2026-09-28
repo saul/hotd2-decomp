@@ -64,6 +64,7 @@
  *   for all four classes, together with a split of that function. That is a
  *   job of its own; it is recorded here rather than half-done. `[open]`
  */
+import type { ActorRef } from "../actor";
 import { vec3, type Vec3 } from "../vec";
 
 /**
@@ -298,14 +299,52 @@ export interface ZombieTail extends HeadAimWords {
    *   `ZombieStateDragTarget`'s sub 0, so a captor killed mid-drag is meant to
    *   take motion `0x1A5`. This note used to name one state; `functions.tsv`'s
    *   `ChooseDeathMotion` row names both.
-   * * `0x20` — set by `EnemyZombieInitByCharType` for character types 9 and
-   *   0x12 (0x00453180), tested by `FUN_004534A0` (0x00453665 `TEST CL, 0x20`)
-   *   and `FUN_00453AE0` (0x00453B07). `[open]` what it selects.
+   *
+   * Bit `0x20` has a port now, as a second boolean: {@link fadeDraw}.
    *
    * Making this a word is a job of its own; the gap is recorded rather than
    * half-fixed. The arm is what splits it from `reactBone`.
    */
   hasCooldown: boolean;       // +0x1368 bit 0, also class 0x31 `reactBone`
+  /**
+   * `obj+0x1368` bit `0x20` — **every bone is drawn at `obj+0x138C`**.
+   *
+   * `[proved]`. `ZombieSubmitSlotByLighting` (`FUN_00453AE0`) tests it at
+   * `0x00453B07` (`TEST byte ptr [EAX + 0x1368], CL` with `CL = 0x20`) and
+   * draws the slot through `AssetDrawSlotWithAlpha` (`FUN_004185A0`) at
+   * `obj+0x138C` while it is up -- unless the light-array arm before it took
+   * the draw. `EnemyZombieInitByCharType` (`FUN_00452FD0`) raises it for
+   * character types 9 (`0x00453180`) and 0x12 (`0x004531C4`); the only
+   * writer that drops it is `ZombieDrawBonePart`'s `0x1C6C` arm when `znele`'s
+   * fade-in is done (`AND ECX, 0xffffffdf` at `0x004536CE`). The same bit is
+   * the arm's own test (`TEST CL, 0x20` at `0x0045366D`). A separate boolean
+   * for the reason {@link hasCooldown} is.
+   */
+  fadeDraw: boolean;          // +0x1368 bit 0x20
+  /**
+   * `obj+0x1388` — how far `ZombieDrawBonePart`'s fade arms move the alpha
+   * per node drawn: `0x3C888889` (1/60) for the twin, `0x3D088889` (1/30)
+   * for `znele`, written by `EnemyZombieInitByCharType` at `0x00453199` and
+   * `0x004531DF` and read at `0x00453695` and `0x0045372D`. Nothing else in
+   * class 0x30 touches the word. `[proved]`
+   */
+  fadeStep: number;           // +0x1388
+  /**
+   * `obj+0x134C` — how many node draws the fade arms wait before they move
+   * the alpha: `100.0` (`0x42C80000`) from `EnemyZombieInitByCharType`
+   * (`0x004531A3`, `0x004531E9`), less 1.0 for every draw of the arm's node,
+   * and the step runs only once it is below zero. The two fade arms are the
+   * word's only other readers in class 0x30. `[proved]`
+   */
+  fadeDelay: number;          // +0x134C
+  /**
+   * `obj+0x13A4` — on the twin, the `znele` that allocated it:
+   * `EnemyZombieInitByCharType`'s type-0x12 arm writes the host there
+   * (`MOV dword ptr [EBX + 0x13a4], EBP` at `0x0045323D`) and
+   * `ZombieTwinFollowHost` (`FUN_00453290`) reads it on its first line. `-1`
+   * on every other actor. See `class30/twin.ts`.
+   */
+  twinHost: ActorRef;         // +0x13A4
   /**
    * `obj+0x1370` — how close `ZombieStateWalkToTarget` has to get, and what
    * `ZombieStateWalkDistance` latches the descriptor's `desc+0x04` into.
@@ -412,6 +451,10 @@ export function makeZombieTail(): ZombieTail {
     targetCue: 0,
     resumeSub: 0,
     hasCooldown: false,
+    fadeDraw: false,
+    fadeStep: 0,
+    fadeDelay: 0,
+    twinHost: -1,
     targetArrive: 0,
     walkTravelled: 0,
     scriptPc: 0,

@@ -56,6 +56,9 @@ import { MotionFlag, ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ActorRunNodeDrawHooks } from "../model_draw";
 import { ZombieDrawBonePart } from "./draw";
+import {
+  ZOMBIE_TWIN_CHAR_TYPE, ZombieTwinFollowHost,
+} from "./twin";
 import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed } from "./head_aim";
 import { ZombieAttachToCarrier } from "./carrier";
 import { ActorRegisterCameraPoint } from "../camera/track";
@@ -472,10 +475,24 @@ function EnemyZombieDeadSweep(obj: ZombieActor, why: DeadSweep): void {
   ReleaseEnemyPresentCount(obj);
 }
 
+/**
+ * The task `EnemyZombieInit` (`FUN_00452DA0`) leaves at `obj+0`, run: its last
+ * lines are `if (type != 9) { ...; *obj = EnemyZombieUpdate; return; }` and
+ * `*obj = ZombieTwinFollowHost`, so a class-0x30 actor of character type 9 --
+ * the twin, which only `znele` makes -- never runs the state machine at all.
+ * `[proved]`. [port-only] as a function: the engine keeps the pointer, and the
+ * port's handler row has one `update`, so the choice is made here on the same
+ * test.
+ */
+export function ZombieTaskUpdate(obj: ZombieActor, f: ClassFrame): void {
+  if (obj.charType === ZOMBIE_TWIN_CHAR_TYPE) ZombieTwinFollowHost(obj, f);
+  else EnemyZombieUpdate(obj, f);
+}
+
 /** Class 0x30's row of `g_class_handlers`, filled by the class itself. */
 export const EnemyZombieHandler: ClassHandler = {
   init: EnemyZombieInit,
-  update: EnemyZombieUpdate,
+  update: ZombieTaskUpdate,
   leave: ZombieReleaseAndDespawn,
   onDeadSweep: EnemyZombieDeadSweep,
   // **Class 0x30's death is four states**, the same as class 0x31's, and the

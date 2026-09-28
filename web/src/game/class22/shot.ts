@@ -230,7 +230,8 @@ export function Class22Phase1TakeShots(obj: JudgmentActor, f: ClassFrame,
   if (snd !== undefined) Class22PlaySound(f, snd);
   obj.state += 1;
   obj.sub = 0;
-  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, f.eye.x, f.eye.z);
+  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, G.g_camera_eye.x,
+                              G.g_camera_eye.z);
   obj.hp = d.phase1_floor;
   // `FSTP [0x009C8E10]` at `0x0049D478`.
   G.g_boss_hp_fraction = BossHpFractionOf(obj.hp, obj.maxHp);

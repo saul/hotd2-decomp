@@ -17,6 +17,7 @@ import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
@@ -137,7 +138,8 @@ for (let f = 0; f <= total; f++) {
         + `permit=${a.attackPermit} motion=${a.motion}`);
     }
   }
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, host, rng, events);
   for (const { a } of actors) a.visible = !a.dead;   // what the renderer does
 }
 console.log(`\n${hits} hits on the player over ${seconds}s`);

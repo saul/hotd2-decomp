@@ -63,6 +63,7 @@ import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { Walker } from "../src/script/walker.ts";
 import { seekTo } from "../src/script/seek.ts";
@@ -202,7 +203,8 @@ check("the seek leaves the step's placers in the pool, not its props",
       waiting === 3 && G.g_breakable_props.length === 0,
       `${waiting} placers waiting, ${G.g_breakable_props.length} props built`);
 
-GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+SeatHarnessEye(eye);
+GameUpdate(1 / 60, NULL_HOST, rng, events);
 const placed = G.g_breakable_props.length;
 check("...and one frame of `GameUpdate` builds all three",
       placed === 3, `${placed} of 3`);
@@ -212,7 +214,8 @@ const record = () => { for (const p of type43()) seen.set(p.at, p); };
 record();
 for (let i = 0; i < Number(seconds) * 60; i += 1) {
   w.tick(1 / 60);
-  GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
   record();
 }
 
@@ -229,7 +232,8 @@ if (live.length) {
   for (let i = 0; i < 8 && !p.dead && p.effectFrames === 0; i += 1) {
     p.flags |= BreakableFlag.Hit | BreakableFlag.HitByPlayer0;
     w.tick(1 / 60);
-    GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, NULL_HOST, rng, events);
     shots += 1;
   }
   console.log(`  kind ${Type43Kind(p)}: ${shots} shot(s), slot `

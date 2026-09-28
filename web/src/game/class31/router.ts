@@ -25,7 +25,8 @@ import { ThrowerFlag, type ThrowerActor } from "../actor";
 import { QueryGroundSurfaceAt } from "../coli";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
-import { dist2d, type Vec3 } from "../vec";
+import { G } from "../globals";
+import { dist2d } from "../vec";
 import { ThrowerFindCeilingAbove, ThrowerFindWallBeside } from "./surface";
 import {
   BAND_NEAR_MAX, BAND_NEAR_MIN, CLOSE_RANGE, ThrowerBand, ThrowerState,
@@ -136,9 +137,10 @@ export function ThrowerTryEnterState(obj: ThrowerActor, state: number, rng: Rng,
  * candidate is accepted the band is remembered, and the actor only asks again
  * when the band changes.
  */
-export function ThrowerPickNextState(obj: ThrowerActor, eye: Vec3, rng: Rng,
+export function ThrowerPickNextState(obj: ThrowerActor, rng: Rng,
                                      host: GameHost): void {
-  const d = dist2d(obj.pos, eye);
+  // `g_camera_eye_z` and `_x` by address, `0x0044ADD0` and `0x0044ADDA`.
+  const d = dist2d(obj.pos, G.g_camera_eye);
   const band = d > BAND_NEAR_MIN && d <= BAND_NEAR_MAX
     ? ThrowerBand.Near : ThrowerBand.Far;
 

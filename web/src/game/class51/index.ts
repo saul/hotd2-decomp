@@ -82,6 +82,7 @@ import {
 } from "../effects/fish";
 import { SpawnRingEffectAtPose } from "../effects/ring_effect";
 import { G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import type { GameHost } from "../host";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
@@ -395,7 +396,9 @@ export function FishClaimSlotAndLunge(obj: Actor, rng: Rng,
 export function FishBeginRise(obj: Actor): void {
   const sub = Tail(obj);
   if (!sub) return;
-  const eye = G.g_camera_block_eye;
+  // The block `g_camera_index` names, `[index * 0x1A4 + 0x9A60C0]`, at
+  // `0x0043879B` and `0x004387A4`.
+  const eye = CameraBlockEye(G.g_camera_index);
   obj.pos.x = sub.homeX;
   obj.pos.y = sub.homeY;
   obj.pos.z = sub.homeZ;
@@ -633,8 +636,10 @@ export function FishStateLunge(obj: Actor, f: ClassFrame): void {
  * permit gates, not the ending.
  */
 export function FishLungeTestBite(obj: Actor, f: ClassFrame): void {
-  const d = Math.hypot(obj.pos.x - f.eye.x, obj.pos.y - f.eye.y,
-                       obj.pos.z - f.eye.z);
+  // The block `g_camera_index` names, at `0x004397E1..F3`, all three words.
+  const eye = CameraBlockEye(G.g_camera_index);
+  const d = Math.hypot(obj.pos.x - eye.x, obj.pos.y - eye.y,
+                       obj.pos.z - eye.z);
   if (d >= FISH_BITE_RANGE) {
     if (d <= FISH_ABANDON_RANGE) return;
   } else if (obj.attackPermit !== -1) {
@@ -893,8 +898,10 @@ export function FishCheckShot(obj: Actor, f: ClassFrame): void {
     sub.state = FishState.Flung;
     sub.frame = FishCorpseSlot(FISH_FLUNG_SLOT);
     sub.vy = FISH_FLUNG_LIFT;
-    const dx = obj.pos.x - f.eye.x;
-    const dz = obj.pos.z - f.eye.z;
+    // The block `g_camera_index` names, at `0x00438DE3` and `0x00438DEC`.
+    const eye = CameraBlockEye(G.g_camera_index);
+    const dx = obj.pos.x - eye.x;
+    const dz = obj.pos.z - eye.z;
     const len = Math.hypot(dx, dz) * 2;
     if (len === 0) { sub.vx = 0; sub.vz = 0; }
     else { sub.vx = dx / len; sub.vz = dz / len; }

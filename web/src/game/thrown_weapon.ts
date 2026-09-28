@@ -250,8 +250,6 @@ export interface ThrownWeapon {
 
 /** `[port-only]` What one frame of a weapon's routine needs. */
 export interface ThrownWeaponFrame {
-  /** `g_camera_eye_x/y/z` — `0x009C71E0`. */
-  eye: Vec3;
   cam: ThrownWeaponCamera | null;
   host: GameHost;
   rng: Rng;

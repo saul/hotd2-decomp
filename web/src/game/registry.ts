@@ -32,7 +32,6 @@ import type { Rng } from "../core/rng";
 import type { Actor } from "./actor";
 import type { GameHost } from "./host";
 import { SpawnClass } from "./spawn_class";
-import type { Vec3 } from "./vec";
 
 /**
  * The half of a spawn record {@link ClassHandler.raisesScriptFlag} is given.
@@ -65,8 +64,21 @@ export interface ReplaySpawnRecord extends SpawnRecord {
   armOut?: number;
 }
 
+/**
+ * What every class update is handed.
+ *
+ * **No eye.** It carried `eye`, the drawn camera the app read out of the last
+ * draw, and about thirty routines measured to it -- where the engine reads one
+ * of three different points, each by its own address: `g_camera_eye`
+ * (`0x009C71E0`), the gameplay eye the scene state's hook writes fifteen under
+ * the rail's pose, which every enemy state measures to; camera block 0's eye
+ * by address (`0x009A60C0`); or the block `g_camera_index` names
+ * (`[g_camera_index * 0x1A4 + 0x009A60C0]`). A routine reads the one its
+ * instruction names, from `G`: `G.g_camera_eye`, `G.g_camera_block_eye`, or
+ * `CameraBlockEye(G.g_camera_index)` in `camera/view.ts`. The per-site table
+ * is `docs/formats/cam.md` § *Which eye*.
+ */
 export interface ClassFrame {
-  eye: Vec3;
   dt: number;
   rng: Rng;
   host: GameHost;

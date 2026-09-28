@@ -26,7 +26,7 @@ import { G } from "../globals";
 import { DrawRecordSlot } from "../model_draw";
 import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import type { GameHost } from "../host";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import { ActorSetMotionBlended, SetCurrentActorMotionBlended }
   from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
@@ -322,7 +322,7 @@ const LEAP_ASIDE_LAND_FADE_ZSLMAN = 5;
  * engine counts with `>=`; run sub 2 for any sub; and wait for the one-shot
  * channel to empty rather than for the cursor.
  */
-export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
+export function ThrowerStateLeapAside(obj: ThrowerActor, dt: number,
                                       rng: Rng, host?: GameHost,
                                       events?: Events): void {
   if (obj.sub === 0) {
@@ -337,7 +337,9 @@ export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
       // The camera's **yaw only**, not its whole matrix: the point stays level
       // however the camera is pitched, which is why the engine builds it with
       // a bare `MatrixRotateY(g_camera_yaw_bams)`.
-      ActorLocalPoint(eye, G.g_camera_yaw_bams, side * ASIDE_SIDEWAYS, 0,
+      // About `g_camera_eye`, the three words by address (`0x0044B8F3`..`8FE`).
+      ActorLocalPoint(G.g_camera_eye, G.g_camera_yaw_bams,
+                      side * ASIDE_SIDEWAYS, 0,
                       ASIDE_AHEAD, _dest);
       if (ColiTraceSegmentAllSets(_dest.x, obj.lookAt.y - ASIDE_PROBE, _dest.z,
                                   _dest.x, obj.lookAt.y + ASIDE_PROBE,
@@ -381,7 +383,7 @@ export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
   if (obj.sub !== 2) return;
   obj.thr.sinceLanding += SecondsToTicks(dt);
   if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
-      && dist2(obj, eye) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) {
+      && dist2(obj) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) {
     return;
   }
   if (ActorPlayCursor(obj)
@@ -392,7 +394,13 @@ export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
   obj.sub = 0;
 }
 
-function dist2(obj: ThrowerActor, eye: Vec3): number {
+/**
+ * `[port-only]` as a function: the squared ground distance to `g_camera_eye`,
+ * as both states read it by address (`0x0044BC04`, `0x0044ED39`,
+ * `0x0044ED82`).
+ */
+function dist2(obj: ThrowerActor): number {
+  const eye = G.g_camera_eye;
   const dx = obj.pos.x - eye.x;
   const dz = obj.pos.z - eye.z;
   return dx * dx + dz * dz;
@@ -426,7 +434,7 @@ function dist2(obj: ThrowerActor, eye: Vec3): number {
  * every type, with no turn at all, a pooled "if idle" motion call at fade 10,
  * and an exit that waited on the swing channel instead of the clip.
  */
-export function ThrowerStateWithdraw(obj: ThrowerActor, eye: Vec3, dt: number,
+export function ThrowerStateWithdraw(obj: ThrowerActor, dt: number,
                                      _rng: Rng): void {
   const backsOff = obj.charType === CHAR_ZSKAMERE;
   if (obj.sub === 0) {
@@ -445,13 +453,13 @@ export function ThrowerStateWithdraw(obj: ThrowerActor, eye: Vec3, dt: number,
     TurnActorAwayFromPoint(obj, obj.strikeStart, WITHDRAW_TURN_RATE, dt);
     obj.thr.sinceLanding += dt * GAME_HZ;
     if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
-        && dist2(obj, eye) < WITHDRAW_CLEAR_BACKING * WITHDRAW_CLEAR_BACKING) {
+        && dist2(obj) < WITHDRAW_CLEAR_BACKING * WITHDRAW_CLEAR_BACKING) {
       return;
     }
   } else {
     obj.thr.sinceLanding += dt * GAME_HZ;
     if (obj.thr.sinceLanding < LEAP_ASIDE_FRAMES
-        && dist2(obj, eye) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) return;
+        && dist2(obj) < LEAP_ASIDE_CLEAR * LEAP_ASIDE_CLEAR) return;
     if (MotionPlayFrame(obj) < MotionPlayLength(obj) - 2) return;
   }
 

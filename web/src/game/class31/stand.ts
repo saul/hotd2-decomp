@@ -17,7 +17,8 @@ import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { QueryGroundSurfaceAt } from "../coli";
 import { MotionOf } from "../tables";
-import { dist2d, type Vec3 } from "../vec";
+import { G } from "../globals";
+import type { Vec3 } from "../vec";
 import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
 import { MotionFade } from "../class30/states";
 import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
@@ -82,7 +83,7 @@ const WAIT_DEFAULT = 0x127;
  * wall or the ceiling skips the turn entirely — `obj+0x136C` bit 0x20 — which
  * is why a clinging thrower does not swing round to track you.
  */
-export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
+export function ThrowerStateStandAndDecide(obj: ThrowerActor,
                                            dt: number,
                                            rng: Rng, host: GameHost,
                                            events?: Events): void {
@@ -131,9 +132,9 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
 
   // The aim latch. Only an actor standing on the ground turns.
   if (obj.sub === 1 && !(obj.flags2 & ThrowerFlag.OffGround)) {
-    if (TurnTowardCameraAndTest(obj, eye, dt)) obj.sub = 2;
+    if (TurnTowardCameraAndTest(obj, dt)) obj.sub = 2;
   } else if (obj.sub === 2 && !(obj.flags2 & ThrowerFlag.OffGround)) {
-    if (!TurnTowardCameraAndTest(obj, eye, dt)) obj.sub = 0;
+    if (!TurnTowardCameraAndTest(obj, dt)) obj.sub = 0;
   }
 
   // The re-arm comes first, and only from here: an actor that has thrown puts
@@ -142,7 +143,7 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
     ? ThrowerState.RestoreBothHands : ThrowerState.Rearm;
   if (!ThrowerTryEnterState(obj, rearm, rng, host)
       && obj.state !== ThrowerState.FallToSurface) {
-    ThrowerPickNextState(obj, eye, rng, host);
+    ThrowerPickNextState(obj, rng, host);
   }
   // `0x0044B3B2`, which all three of those paths reach: the re-arm's `JZ`,
   // the fall's `JZ` and the router's fall-through. It runs after the router,
@@ -161,10 +162,10 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
  * a `bamsDelta` window standing in for `AngleWithinTolerance`; the routine is
  * ported in `actor_turn.ts` now and this calls it.
  */
-function TurnTowardCameraAndTest(obj: ThrowerActor, eye: Vec3,
+function TurnTowardCameraAndTest(obj: ThrowerActor,
                                  dt: number): boolean {
-  _eyeAtFloor.x = eye.x;
-  _eyeAtFloor.z = eye.z;
+  _eyeAtFloor.x = G.g_camera_eye.x;
+  _eyeAtFloor.z = G.g_camera_eye.z;
   return TurnActorAwayFromPointTestArrival(obj, _eyeAtFloor, STAND_TURN_RATE,
                                            STAND_AIM_TOLERANCE, dt);
 }
@@ -181,7 +182,7 @@ const _eyeAtFloor: Vec3 = { x: 0, y: 0, z: 0 };
  * This is the throttle: there is one permit in single player, so however many
  * throwers are on you, only one is ever coming.
  */
-export function ThrowerStateWaitForPermit(obj: ThrowerActor, eye: Vec3,
+export function ThrowerStateWaitForPermit(obj: ThrowerActor,
                                           rng: Rng,
                                           host: GameHost): void {
   if (obj.sub === 0) {
@@ -223,11 +224,14 @@ export function ThrowerStateWaitForPermit(obj: ThrowerActor, eye: Vec3,
   // Neither state sets that bit itself, so this is the only place it is set.
   if (obj.charType === CHAR_ZSKAMERE) {
     obj.flags2 |= ThrowerFlag.UseThrowTable;
-    // On surface 0x35, more than fifteen units above the eye, it perches and
+    // On surface 0x35, more than fifteen units above `g_camera_eye_y` (read
+    // by address at `0x0044B56F`: the gameplay eye, so level with the rail's
+    // own height, not fifteen above the drawn camera), it perches and
     // swings on the spot; otherwise it closes and strikes.
     const surface = QueryGroundSurfaceAt(obj.pos.x, obj.pos.y + 4.5,
                                          obj.pos.z);
-    obj.state = surface === PERCH_SURFACE && eye.y + PERCH_HEIGHT < obj.pos.y
+    obj.state = surface === PERCH_SURFACE
+        && G.g_camera_eye.y + PERCH_HEIGHT < obj.pos.y
       ? ThrowerState.StrikeOnTheSpot : ThrowerState.CloseAndStrike;
     return;
   }
@@ -240,9 +244,3 @@ const CHAR_ZSKAMERE = 0x17;
 /** The surface it perches on, and how far above the eye it must be. */
 const PERCH_SURFACE = 0x35;
 const PERCH_HEIGHT = 15;
-
-/** Is this actor far enough from the camera to be out of its face? */
-export function ThrowerIsClear(obj: ThrowerActor, eye: Vec3,
-                               clear: number): boolean {
-  return dist2d(obj.pos, eye) >= clear;
-}

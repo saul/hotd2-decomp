@@ -27,6 +27,7 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import {
   FtolS16, MatrixRotateY, MatrixScale, MatrixTranslate, RADIANS_TO_BAMS,
 } from "../matrix";
@@ -339,12 +340,11 @@ export function PlaceGenericPropType33(p: BreakableProp,
  * not fire for them — which is the reason to write the routine out rather
  * than reuse the prologue, not a reason to reuse it (`L27`).
  *
- * `g_camera_block_eye` is block 0's eye, and the routine reads block
- * `g_camera_index`'s: `[likely]` the same block, because every shipped write
- * of `g_camera_index` is 0 (see `game/globals.ts`), which is why the port
- * keeps one block. The camera's tasks run before every actor and pool in the
- * frame (`game/director.ts`), so this is the eye of the frame being drawn in
- * both. Block 4 is where the second placement is made, so the strips are live
+ * The eye is the block `g_camera_index` names (`0x0046EC9F`, `0x0046ECAB`):
+ * block 2's under scene state (1, 3), whose installer writes the index,
+ * block 0's otherwise -- `CameraBlockEye`. The camera's tasks run before
+ * every actor and pool in the frame (`game/director.ts`), so this is the eye
+ * of the frame being drawn. Block 4 is where the second placement is made, so the strips are live
  * in the shipped game; their slots are `0x135F..0x136D` and `0xB67..0xB6E`.
  */
 export function PropDrawOnlyType53(p: BreakableProp): void {
@@ -362,7 +362,7 @@ export function PropDrawOnlyType53(p: BreakableProp): void {
   PropDrawSlot(p, body, p.slot);
   if (!TYPE53_STRIP_BLOCKS.includes(G.g_evt_block_index)) return;
 
-  const eye = G.g_camera_block_eye;
+  const eye = CameraBlockEye(G.g_camera_index);
   const yaw = FtolS16(Math.atan2(eye.x - p.x, eye.z - p.z) * RADIANS_TO_BAMS);
   const tick = G.g_scene_tick_counter;
 

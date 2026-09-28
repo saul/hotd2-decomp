@@ -25,7 +25,6 @@
 import type { ZombieActor } from "../actor";
 import { ActorFlag } from "../actor";
 import { MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
-import type { Vec3 } from "../vec";
 import { ActorSetMotion } from "./motion_cue";
 import { TestApproachRing } from "./ring";
 import { ZombieState } from "./states";
@@ -43,7 +42,7 @@ const VAN_JUMP_MOTION = 0x39b;
  */
 const VAN_JUMP_VULNERABLE_FRAME = 0x26;
 
-export function ZombieStateMotionCue21(obj: ZombieActor, eye: Vec3,
+export function ZombieStateMotionCue21(obj: ZombieActor,
                                        dt: number): void {
   const p = obj.intro;
   // [diverges] The engine has no such test: `obj+0x1390` is the descriptor and
@@ -52,7 +51,7 @@ export function ZombieStateMotionCue21(obj: ZombieActor, eye: Vec3,
   // ever — the exact failure this state exists to end — so it hands over
   // instead, with the three bits cleared as the last frame would have.
   if (!p || !MotionPlayLength(obj, p.motion)) {
-    ZombieCueHandOver(obj, eye);
+    ZombieCueHandOver(obj);
     return;
   }
 
@@ -90,12 +89,12 @@ export function ZombieStateMotionCue21(obj: ZombieActor, eye: Vec3,
   // authored frame count — see `MotionPlayLength`.
   if (MotionPlayFrame(obj) >= MotionPlayLength(obj) - 1) {
     obj.sub = 0;
-    ZombieCueHandOver(obj, eye);
+    ZombieCueHandOver(obj);
   }
 }
 
 /** The tail of state 21: clear the last bit and take the descriptor's exit. */
-function ZombieCueHandOver(obj: ZombieActor, eye: Vec3): void {
+function ZombieCueHandOver(obj: ZombieActor): void {
   obj.flags &= ~ActorFlag.NoHitReaction;
   // Descriptor byte 3. A record that names state 21 again would never leave,
   // so the engine substitutes the attack run — all six shipped records name
@@ -109,5 +108,5 @@ function ZombieCueHandOver(obj: ZombieActor, eye: Vec3): void {
   // `TestApproachRing`'s three comparisons; this calls it, which is the same
   // writes to `obj+0x1358` and one fewer copy of the ring table.
   // No shipped record takes this arm — every one of the six exits to state 1.
-  if (next === ZombieState.BackOff) TestApproachRing(obj, eye);
+  if (next === ZombieState.BackOff) TestApproachRing(obj);
 }

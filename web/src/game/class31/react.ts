@@ -22,7 +22,7 @@ import { ThrowerPickNextState } from "./router";
 import { ThrowerState } from "./states";
 import { Class31SetOf, ThrowerStanceOf } from "./tables";
 import { ThrowerEnterCorpseState, FALL_GRAVITY, SURFACE_KILL } from "./death";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import { ThrowerBeginKnockbackArc } from "./death";
 import { TraceActorSurfaceContactPoint } from "./surface";
 
@@ -59,7 +59,7 @@ function playOnce(obj: ThrowerActor, motion: number): void {
  * **hard-cut** rather than blend, so a leg shot reads as a buckle where an arm
  * shot reads as a flinch.
  */
-export function ThrowerStateHitReaction(obj: ThrowerActor, eye: Vec3, rng: Rng,
+export function ThrowerStateHitReaction(obj: ThrowerActor, rng: Rng,
                                         host: GameHost): void {
   const bone = Math.min(REACT_BONE_MAX, Math.max(0, obj.thr.reactBone));
   const group = T.chars?.reaction_groups?.[bone] ?? 0;
@@ -88,7 +88,7 @@ export function ThrowerStateHitReaction(obj: ThrowerActor, eye: Vec3, rng: Rng,
     obj.sub = 0;
     return;
   }
-  ThrowerPickNextState(obj, eye, rng, host);
+  ThrowerPickNextState(obj, rng, host);
 }
 
 /**
@@ -104,7 +104,7 @@ export function ThrowerStateHitReaction(obj: ThrowerActor, eye: Vec3, rng: Rng,
  * rig does not have. The port's motion lookup returns nothing and the state
  * ends immediately, which is the least-wrong reading of an engine bug.
  */
-export function ThrowerStateGetUp(obj: ThrowerActor, eye: Vec3, rng: Rng,
+export function ThrowerStateGetUp(obj: ThrowerActor, rng: Rng,
                                   host: GameHost): void {
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.ShotImmune;
@@ -115,7 +115,7 @@ export function ThrowerStateGetUp(obj: ThrowerActor, eye: Vec3, rng: Rng,
   if (obj.action && ActorClipFrame(obj) < len - 1) return;
   obj.flags &= ~ActorFlag.ShotImmune;
   obj.flags2 &= ~ThrowerFlag.KnockedDown;
-  ThrowerPickNextState(obj, eye, rng, host);
+  ThrowerPickNextState(obj, rng, host);
 }
 
 /**

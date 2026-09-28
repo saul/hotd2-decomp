@@ -169,9 +169,7 @@ function play(hz: number, rafs: number, spawnAt: number,
   const draw = new CameraDrawSystem(rig);
   const world = (t: Tick): void => {
     if (!t.frozen && t.dt > 0) {
-      const e = camera.position;
-      GameUpdate({ x: e.x, y: e.y, z: e.z }, t.dt, NULL_HOST, ctx.rng,
-                 ctx.events);
+      GameUpdate(t.dt, NULL_HOST, ctx.rng, ctx.events);
     }
     draw.update(ctx);
   };

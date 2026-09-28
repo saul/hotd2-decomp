@@ -37,7 +37,7 @@ import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotion, ActorSetMotionBlended, ZombieSetMotionIfIdle }
   from "./motion_cue";
 import { MotionFade, ZombieState, ZombieWaitMotion } from "./states";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import type { GameHost } from "../host";
 import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
 import { ZombieStrikeStartSplash } from "./splash";
@@ -219,7 +219,7 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number,
  * `obj+0x1324` (L3), no store in this routine touches it, and
  * {@link ActorFlag.PoseFrozen} is what holds the clock.
  */
-export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
+export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor,
                                                   rng: Rng, host?: GameHost,
                                                   events?: Events): void {
   const t = obj.entry;
@@ -253,7 +253,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
     // write after it is `AND AH, 0xbe` -- the freeze and the shot immunity,
     // not the camera bit.
     TryClaimAttackSlot(obj, rng);
-    ActorFacePlayerTarget(obj, eye);
+    ActorFacePlayerTarget(obj);
     obj.flags &= ~(ActorFlag.PoseFrozen | ActorFlag.ShotImmune);
     ZombieStrikeStartSplash(obj, rng, host, events);
     // `obj+0x13C4 = obj+0x44` — the y the actor is pinned at for the grab.
@@ -291,7 +291,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
  * **pins** the position back to where the flight ended, so the actor cannot be
  * shoved off its perch by the crowd push.
  */
-export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
+export function ZombieStateLeapToPoint(obj: ZombieActor, dt: number,
                                        rng: Rng, events?: Events): void {
   const t = obj.entry;
   if (!t?.dest) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
@@ -337,7 +337,7 @@ export function ZombieStateLeapToPoint(obj: ZombieActor, eye: Vec3, dt: number,
     obj.attackPermit = p;
     if (p === -1) { ZombieLeapPin(obj); return; }
     G.g_attack_permits[p] = obj.at;       // the engine's 1; see the pick
-    ActorFacePlayerTarget(obj, eye);
+    ActorFacePlayerTarget(obj);
     obj.flags &= ~ActorFlag.PoseFrozen;
     if (t.strike_motion !== undefined) {
       ActorSetMotionBlended(obj, t.strike_motion, 0, MotionFade.Quick);
@@ -410,10 +410,10 @@ function ZombieLeapPin(obj: ZombieActor): void {
  * actor left `0x14` frames late by however many it had spent waiting. Hence
  * the split: the switch may return, the frame may not.
  */
-export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
+export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor,
                                                 dt: number, rng: Rng,
                                                 events?: Events): void {
-  ZombieDelayedStrikeStep(obj, eye, dt, rng, events);
+  ZombieDelayedStrikeStep(obj, dt, rng, events);
   // `switchD_0045e899_default`, in order: the idle re-blend, the camera turn,
   // then the watch.
   ZombieDelayedStrikeIdle(obj, rng);
@@ -423,13 +423,13 @@ export function ZombieStateDelayedStrikeInPlace(obj: ZombieActor, eye: Vec3,
   // the descriptor bit behind it, so it is dead in the shipped data and
   // transcribed anyway; see {@link ZombieAux.TurnTowardCameraEye}.
   if (obj.flags38 & ZombieAux.TurnTowardCameraEye) {
-    TurnActorTowardCameraEye(obj, eye, CARRIER_TURN_RATE, dt);
+    TurnActorTowardCameraEye(obj, CARRIER_TURN_RATE, dt);
   }
   ZombieDelayedStrikeGiveUp(obj, dt);
 }
 
 /** The switch itself — `0045e899`'s nine arms. May return; see the caller. */
-function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
+function ZombieDelayedStrikeStep(obj: ZombieActor, dt: number,
                                  rng: Rng, events?: Events): void {
   const t = obj.entry;
   const frames = SecondsToTicks(dt);
@@ -460,7 +460,7 @@ function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
     obj.attackPermit = p;
     if (p === -1) return;
     G.g_attack_permits[p] = obj.at;       // the engine's 1; see the pick
-    ActorFacePlayerTarget(obj, eye);
+    ActorFacePlayerTarget(obj);
     // `obj+0x34 |= 0x10000000` — mid-attack, and the idle below stops.
     obj.flags |= ActorFlag.Committed;
     // The same draw `ZombieStateStrike` sub 0 makes: `rand() % 10` plus ten
@@ -472,7 +472,7 @@ function ZombieDelayedStrikeStep(obj: ZombieActor, eye: Vec3, dt: number,
   }
 
   if (obj.sub === 5) {
-    ActorFacePlayerTarget(obj, eye);
+    ActorFacePlayerTarget(obj);
     const entry = AttackListOf(obj)[String(obj.attack)];
     if (entry && MotionPlayFrame(obj) === entry.hit_frame) {
       ActorStrikeConnect(obj, entry, events);

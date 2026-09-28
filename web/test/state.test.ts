@@ -274,10 +274,9 @@ console.log("\nA driven frame is a whole frame:\n");
     aimPoint: () => undefined, viewPoint: () => undefined,
     viewSpaceOf: () => false, setBoneSlot: () => undefined,
   };
-  const eye = { x: 0, y: 0, z: 0 };
   let integral = true;
   for (let i = 1; i <= 600; i++) {
-    GameUpdate(eye, TICK, host, rng);
+    GameUpdate(TICK, host, rng);
     if (!Number.isInteger(G.g_frame) || G.g_frame !== i) integral = false;
   }
   // `g_cam_path_frame` is `__ftol`'d in the exe and steps by exactly one, so
@@ -294,7 +293,7 @@ console.log("\nA driven frame is a whole frame:\n");
   const jitter = [0.0161, 0.0174, 0.0159, 0.0182, 0.0166];
   let skipped = 0, last = 0;
   for (let i = 0; i < 600; i++) {
-    GameUpdate(eye, jitter[i % jitter.length], host, rng);
+    GameUpdate(jitter[i % jitter.length], host, rng);
     // An integer the cursor stepped straight over is a cue nothing can equal.
     if (Math.floor(G.g_frame) - last > 1) skipped++;
     last = Math.floor(G.g_frame);

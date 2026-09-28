@@ -36,7 +36,7 @@ import {
 } from "../matrix";
 import { EffectSampleNode, type EffectNodePose }
   from "../class44/script_flag_effect";
-import type { BreakableProp } from "./prop_state";
+import type { BreakableProp, PropDrawCall } from "./prop_state";
 
 /**
  * `[port-only]` The head of a routine that records its draws: nothing drawn
@@ -71,12 +71,28 @@ export function PropMatrixPush(m?: Mat): Mat {
  * `(s16)` on the way in, which is how every caller loads it (`MOVSX`). Slot 0
  * is not recorded: `AssetDrawSlot(0)` calls `NoOpStub(1.0f)` and returns
  * having drawn nothing.
+ *
+ * `layer` is the `SetDrawLayerNibble` (`0x004A79F0`) value in force at the
+ * call, for the few routines that bracket a draw with one; the world's own is
+ * {@link DRAW_LAYER_WORLD}.
+ *
+ * `[port-only]` as a function: it records the call rather than making it.
  */
-export function PropDrawSlot(p: BreakableProp, m: Mat, slot: number): void {
+export function PropDrawSlot(p: BreakableProp, m: Mat, slot: number,
+                             layer = DRAW_LAYER_WORLD): void {
   const s = (slot << 16) >> 16;
   if (s === 0) return;
-  (p.draws ??= []).push({ slot: s, m: m.slice(0, 16) });
+  const call: PropDrawCall = { slot: s, m: m.slice(0, 16) };
+  if (layer !== DRAW_LAYER_WORLD) call.layer = layer;
+  (p.draws ??= []).push(call);
 }
+
+/**
+ * The layer every task draws in unless it says otherwise: the routines that
+ * change it put it back with `SetDrawLayerNibble(8)` straight after their
+ * draw.
+ */
+export const DRAW_LAYER_WORLD = 8;
 
 /**
  * `MatrixTranslate; MatrixRotateZ; MatrixRotateY; MatrixRotateX` — the four
@@ -132,6 +148,9 @@ export function PropMatrixTRzRyRx(m: Mat, x: number, y: number, z: number,
  * `breakables.effects`, keyed by effect id, and the clip must be the one the
  * state block names: a routine that drew one effect id with two motions would
  * need two records, and none of the routines that use this does.
+ *
+ * `[port-only]` as a function: the three routines' walk, recorded rather than
+ * drawn, with the state-block writes they make kept exactly where they are.
  */
 export function PropDrawEffect(p: BreakableProp, m: Mat, rng: Rng): void {
   const def = T.breakables?.effects?.[String(p.effect)];

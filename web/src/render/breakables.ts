@@ -110,6 +110,18 @@ const TYPE35_LEAF_B: readonly [number, number, number] =
 const TYPE35_LEAF_B_SLOT = 0x1813;
 const TYPE35 = 35;
 
+/**
+ * A `SetDrawLayerNibble` layer as a `renderOrder`, for the layers a prop
+ * routine draws in. The port spells the world's own layer 8 as 0 and layer 7
+ * as `DRAW_LAYER_7_ORDER` (`render/draw_order.ts`); layer 9 is the one after
+ * the world's, which `PropDrawOnlyType21` (`FUN_004694A0`) brackets its strip
+ * with, and anything the effects put at 899 and up still goes over it.
+ */
+const DRAW_LAYER_ORDER: Partial<Record<number, number>> = {
+  8: 0,
+  9: 1,
+};
+
 /** Templates come from the hidden `slots_breakable` rig the exporter emits. */
 const SLOT_PART = /_slot_([0-9a-f]{4})$/;
 
@@ -753,6 +765,11 @@ export class BreakableLayer implements System<RenderContext> {
       if (!n) return;
       n.matrix.fromArray(c.m);
       n.matrixWorldNeedsUpdate = true;
+      // The layer goes on the primitives, as `draw_order.ts` puts layer 7:
+      // a group's order would become its children's `groupOrder`, which
+      // three.js compares before anything else.
+      const order = c.layer === undefined ? 0 : DRAW_LAYER_ORDER[c.layer] ?? 0;
+      n.traverse((o) => { o.renderOrder = order; });
     });
   }
 

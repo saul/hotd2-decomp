@@ -279,6 +279,7 @@
 00595058	g_item_pickup_slot	Per item kind, stride 0xC: the u16 asset slot the pickup is drawn with. g_item_score_table is the s16 two bytes further into the same record.
 0059505a	g_item_score_table	per-kind pickup score, stride 0xC
 00595060	g_item_pickup_y_offset	Per item kind, stride 0xC: the float height the pickup is released at above the prop that hid it.
+005950c8	g_prop_type63_items	Twelve {s8 kind; u8 pad[3]; float x; float z} records, ending at 0x00595158. PropUpdateType63 (0x0046FB50) walks them, sets its own +0x19C = x, +0x1A4 = z - 3.0 (+0x1A0 = 2498.7 once) and releases each through the item-set switch on kind (1 extra life, 2/5..8 score pickup, 3 golden frog, 4 nothing), then ActorKills itself. Stage 6's one type-63 spawn.
 005957d8	g_original_item_records	One 0xC record per Original Mode item id: u16 model slot, u16 second model slot, f32 draw scale, u16 pickup id passed to FUN_00475E40.
 00595aa0	g_original_item_tables	Pointer per scene index to that scene's Original Mode item table, read by PickOriginalModeItem: stride 8, entries at +0..+3 (item ids) and cumulative rand() weights at +4..+7.
 00595ab8	g_class44_subtypes	18 entries, indexed by obj+0x11C

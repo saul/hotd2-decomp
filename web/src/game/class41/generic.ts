@@ -168,11 +168,6 @@ export const GENERIC_SLOT: Partial<Record<number, number>> = {
   6: 0x1032, 10: 0x10c4, 0x0d: 0x1a4a, 0x13: 0x10d3, 0x38: 0x10d3,
 };
 
-/** The types whose switch arm sets a shot count. */
-export const GENERIC_HP: Partial<Record<number, number>> = {
-  6: 1, 10: 2,
-};
-
 /**
  * The types whose update routine draws `obj+0x28C`, so that the spawn
  * descriptor's `+0x11C` really is the model.
@@ -606,7 +601,6 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // the engine writes; whether it means anything is `GENERIC_DRAW_SLOT`'s
   // business, not this function's.
   p.slot = GENERIC_SLOT[type] ?? pl.slot ?? 0;
-  p.hp = GENERIC_HP[type] ?? 0;
   // `obj+0x124` — the switch's own per-type hit radius, and the whole of what
   // makes a generic prop shootable. A type missing from the table is a type
   // the engine never registers a sphere for.

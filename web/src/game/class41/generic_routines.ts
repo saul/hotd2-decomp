@@ -21,6 +21,15 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import type { BreakablePlacement } from "../../bundle";
 import type { BreakableProp } from "./prop_state";
+import { PropDrawOnlyType5 } from "./type05";
+import {
+  PlaceGenericPropType10, PlaceGenericPropType6, PropUpdateType6,
+} from "./type06";
+import { PlaceGenericPropType12, PropDrawOnlyType12 } from "./type12";
+import { PropDrawOnlyType21 } from "./type21";
+import { PropDrawOnlyType51 } from "./type51";
+import { PropUpdateType63 } from "./type63";
+import { PropUpdateType78 } from "./type78";
 
 /** One `g_class41_updates` entry, transcribed whole. */
 export type GenericRoutine = (p: BreakableProp, rng: Rng,
@@ -38,8 +47,21 @@ export type GenericPlaceArm = (p: BreakableProp, pl: BreakablePlacement,
 
 /** `g_class41_updates[type]`, for the types transcribed whole. */
 export const GENERIC_ROUTINES: Partial<Record<number, GenericRoutine>> = {
+  5: PropDrawOnlyType5,
+  // One routine, two types: `g_class41_updates[6]` and `[10]` are both
+  // `0x004668A0`, and only their arms differ.
+  6: PropUpdateType6,
+  10: PropUpdateType6,
+  12: PropDrawOnlyType12,
+  21: PropDrawOnlyType21,
+  51: PropDrawOnlyType51,
+  63: PropUpdateType63,
+  78: PropUpdateType78,
 };
 
 /** `PlaceGenericProp`'s arm for each of those types that has one. */
 export const GENERIC_PLACE_ARMS: Partial<Record<number, GenericPlaceArm>> = {
+  6: PlaceGenericPropType6,
+  10: PlaceGenericPropType10,
+  12: PlaceGenericPropType12,
 };

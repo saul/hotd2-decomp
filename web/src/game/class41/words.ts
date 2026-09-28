@@ -22,10 +22,15 @@
  */
 import type { BreakableProp } from "./prop_state";
 
-export function PropWords<T extends { [offset: string]: number }>(
+/**
+ * `[port-only]` The words *zero* names, filled from it where the object has
+ * never written them, as one routine's view. See the file comment.
+ */
+export function PropWords<T extends Record<keyof T, number>>(
     p: BreakableProp, zero: T): T {
-  for (const k of Object.keys(zero)) {
-    if (p.words[k] === undefined) p.words[k] = zero[k];
+  const z = zero as unknown as Record<string, number>;
+  for (const k of Object.keys(z)) {
+    if (p.words[k] === undefined) p.words[k] = z[k];
   }
-  return p.words as T;
+  return p.words as unknown as T;
 }

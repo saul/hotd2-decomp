@@ -18,8 +18,8 @@
  * Run with `npm run test:port`.
  */
 import type {
-  ApproachJson, CharacterPlacement, CharactersJson, CharacterType,
-  PlayerDamageJson, TrackingJson,
+  ApproachJson, BreakablePlacement, CharacterPlacement, CharactersJson,
+  CharacterType, PlayerDamageJson, TrackingJson,
 } from "../src/bundle";
 import { Rng } from "../src/core/rng";
 import { Scope } from "../src/core/scope";
@@ -428,6 +428,16 @@ import {
   TYPE31_DESPAWN_CAM_PATH, TYPE54_DRIFT_FRAMES,
 } from "../src/game/class41/draw_only";
 import { ClearPropShotTestList } from "../src/game/class41/shot_test";
+import { SCRIPT_FLAG_TYPE5_REMOVE } from "../src/game/class41/type05";
+import { TYPE10_FIRST_SLOT, TYPE6_FIRST_SLOT } from "../src/game/class41/type06";
+import {
+  TYPE12_DESPAWN_CAM_FRAME, TYPE12_DESPAWN_CAM_PATH,
+} from "../src/game/class41/type12";
+import { TYPE21_DRAW_LAYER, TYPE21_FIRST_SLOT } from "../src/game/class41/type21";
+import { TYPE63_ITEM_Y } from "../src/game/class41/type63";
+import {
+  PropType78LoadSlot, TYPE78_ARCADE_SLOT,
+} from "../src/game/class41/type78";
 import {
   CLASS21_HP_BY_RANK, CLASS21_MOTION_FREED, g_st2car_path_table,
   RescueTargetState, RescueTargetUpdate,
@@ -2684,8 +2694,12 @@ console.log("\nclass 0x41, the generic props:");
     at: 0xa901, container: "generic", type: 6, slot: 0x1234,
     lifetime_evt_steps: 0, pos: [0, 0, 0],
   }, rng);
+  // Case 6's other literal is `obj+0x11C = 1`, and `PropUpdateType6` reads
+  // that word only through `PropExpireByStepLifetime`: a step lifetime, not
+  // the shot count this used to assert.
   check("a type whose arm overrides the slot uses the arm's",
-        door.slot === 0x1032 && door.hp === 1, door.slot.toString(16));
+        door.slot === 0x1032 && door.lifetime === 1 && door.hp === 0,
+        `${door.slot.toString(16)} ${door.lifetime} ${door.hp}`);
 }
 
 console.log("\nclass 0x41's three draw-only types:");
@@ -2887,9 +2901,11 @@ console.log("\nclass 0x41's three draw-only types:");
     at: 0xb300, container: "generic", type: 53, slot: 0x002b,
     lifetime_evt_steps: 0x002b, field_1f4: 6, pos: [0, 0, 0],
   }, rng);
+  // Type 51, which opens with the shared prologue. (This was type 5, which
+  // has no prologue at all -- `PropDrawOnlyType5` is a flag test and a draw.)
   const q = PlaceGenericProp({
-    at: 0xb301, container: "generic", type: 5, slot: 0x0fd2,
-    lifetime_evt_steps: 6, pos: [0, 0, 0],
+    at: 0xb301, container: "generic", type: 51, slot: 0x1793,
+    lifetime_evt_steps: 0x1793, field_1f4: 6, pos: [0, 0, 0],
   }, rng);
   G.g_breakable_props.push(p, q);
   G.g_script_flags[0x77] = 1;
@@ -2898,6 +2914,163 @@ console.log("\nclass 0x41's three draw-only types:");
         G.g_breakable_props.length === 1
         && G.g_breakable_props[0].family === PropFamily.DrawOnlyType53,
         `${G.g_breakable_props.map((r) => PropFamily[r.family]).join()}`);
+}
+
+console.log("\nclass 0x41 types 5, 6, 10, 12, 21, 51, 63, 78, transcribed whole:");
+{
+  const rng = new Rng(5);
+  const events = propScene(rng);
+  const tick = (k = 1) => {
+    for (let i = 0; i < k; i++) BreakablePropPoolUpdate(rng, events);
+  };
+  const place = (type: number, extra: Partial<BreakablePlacement> = {}) => {
+    const p = PlaceGenericProp({
+      at: 0xc500 + type, container: "generic", type, slot: 0,
+      lifetime_evt_steps: 0, pos: [0, 0, 0], pitch: 0, yaw: 0, roll: 0,
+      ...extra,
+    }, rng);
+    G.g_breakable_props.push(p);
+    return p;
+  };
+  const at = (m: number[]) => [m[12], m[13], m[14]].map((v) => +v.toFixed(3));
+
+  // ---- type 5: a flag test and a draw, and nothing else ----------------
+  // Stage 2 block 14 step 10's first one, exactly -- and stage 2 is scene 1,
+  // where the shared prologue's sweep would have cleared it.
+  G.g_scene_index = 1;
+  G.g_script_flags[0x77] = 1;
+  const five = place(5, { slot: 0xfd2, lifetime_evt_steps: 0xfd2,
+                          pos: [-965, -8.1, -1270], pitch: 0xf000,
+                          yaw: 0x8000 });
+  G.g_evt_step_index = 3;
+  tick();
+  check("type 5 has no prologue: the scene-1 sweep and a step change leave "
+        + "it standing", !five.dead && five.stepsElapsed === 0);
+  check("...and it draws its descriptor's slot at its own position",
+        five.draws?.length === 1 && five.draws[0].slot === 0xfd2
+        && at(five.draws[0].m).join() === "-965,-8.1,-1270",
+        JSON.stringify(five.draws?.map((c) => [c.slot, at(c.m)])));
+  // `Rz . Ry . Rx` with a half turn of yaw and a sixteenth of pitch: +X goes
+  // to -X, and the pitch leaves it there.
+  check("...under Rz.Ry.Rx of its own angles",
+        Math.abs((five.draws?.[0].m[0] ?? 0) + 1) < 1e-6,
+        String(five.draws?.[0].m.slice(0, 3)));
+  check("...and registers no shot sphere", !five.shotRegistered);
+  G.g_script_flags[0x77] = 0;
+  G.g_scene_index = 0;
+  G.g_script_flags[SCRIPT_FLAG_TYPE5_REMOVE] = 1;
+  const flagsBefore = five.flags;
+  tick();
+  check("flag 0x13 takes it with ActorKill, not ActorDespawn",
+        five.dead && five.flags === flagsBefore
+        && !G.g_breakable_props.includes(five));
+  G.g_script_flags[SCRIPT_FLAG_TYPE5_REMOVE] = 0;
+
+  // ---- types 6 and 10: the model is the cursor -------------------------
+  G.g_evt_step_index = 1;
+  const six = place(6, { slot: 1, lifetime_evt_steps: 1 });
+  const ten = place(10, { slot: 1, lifetime_evt_steps: 1,
+                          pos: [-1044.27, 2.4173, -1299.73] });
+  const drawn6: number[] = [];
+  const drawn10: number[] = [];
+  for (let i = 0; i < 52; i++) {
+    tick();
+    drawn6.push(six.draws?.[0]?.slot ?? -1);
+    drawn10.push(ten.draws?.[0]?.slot ?? -1);
+  }
+  check("type 6 plays 0x1032..0x1062, forty-nine frames, and wraps",
+        drawn6[0] === TYPE6_FIRST_SLOT && drawn6[48] === 0x1062
+        && drawn6[49] === TYPE6_FIRST_SLOT && drawn6[51] === 0x1034,
+        drawn6.slice(46, 52).map((x) => x.toString(16)).join());
+  check("type 10 plays 0x10C4..0x10CC, nine frames, and wraps",
+        drawn10.slice(0, 11).map((x) => x - TYPE10_FIRST_SLOT).join()
+        === "0,1,2,3,4,5,6,7,8,0,1",
+        drawn10.slice(0, 11).map((x) => x.toString(16)).join());
+  check("...the draw is the slot from before the step, and the step is kept",
+        six.slot === 0x1035 && ten.slot === TYPE10_FIRST_SLOT + 7,
+        `${six.slot.toString(16)} ${ten.slot.toString(16)}`);
+  // The arms' `obj+0x11C` literals are step lifetimes: 1 and 2.
+  G.g_evt_step_index = 2; tick();
+  check("one step change: both still up", !six.dead && !ten.dead);
+  G.g_evt_step_index = 3; tick();
+  check("the second retires type 6 (life 1) and not type 10 (life 2)",
+        six.dead && !ten.dead);
+  G.g_evt_step_index = 4; tick();
+  check("...and the third retires type 10", ten.dead);
+
+  // ---- type 12: a descriptor model at unit scale, and a camera cue -----
+  G.g_evt_step_index = 1;
+  const twelve = place(12, { slot: 0x17a5, lifetime_evt_steps: 0x17a5,
+                             field_1f4: 1, pos: [-585.1, -13.7, -1237],
+                             yaw: 0x4000, roll: 2 });
+  tick();
+  check("type 12 takes its lifetime from +0x1F4 and draws +0x11C's model",
+        twelve.lifetime === 1 && twelve.draws?.[0].slot === 0x17a5
+        && at(twelve.draws[0].m).join() === "-585.1,-13.7,-1237",
+        `${twelve.lifetime} ${JSON.stringify(twelve.draws)}`);
+  check("...scaled by the arm's 1.0 on all three axes",
+        twelve.restX === 1 && twelve.restY === 1 && twelve.restZ === 1);
+  G.g_active_cam_path = TYPE12_DESPAWN_CAM_PATH;
+  G.g_cam_path_frame = TYPE12_DESPAWN_CAM_FRAME - 1;
+  tick();
+  check("camera path 0x2F one frame short of 0x96 leaves it", !twelve.dead);
+  G.g_cam_path_frame = TYPE12_DESPAWN_CAM_FRAME;
+  tick();
+  check("...and frame 0x96 takes it, as ActorDespawn",
+        twelve.dead && ((twelve.flags & 0x80018000) >>> 0) === 0x80018000);
+  G.g_active_cam_path = -1;
+  G.g_cam_path_frame = 0;
+
+  // ---- type 21: g_frame_counter's strip, in draw layer 9 ---------------
+  const t21 = place(21, { slot: 2, lifetime_evt_steps: 2,
+                          pos: [-403, 0, -1347.8], yaw: 0xc000 });
+  G.g_frame_counter = 1237;
+  tick();
+  check("type 21 draws 0x132F + g_frame_counter % 10, in layer 9",
+        t21.draws?.[0].slot === TYPE21_FIRST_SLOT + 7
+        && t21.draws[0].layer === TYPE21_DRAW_LAYER,
+        JSON.stringify(t21.draws?.map((c) => [c.slot, c.layer])));
+
+  // ---- type 51: Ry . Rz . Rx, the one that is not Rz . Ry . Rx ---------
+  const van = place(51, { slot: 0x1793, lifetime_evt_steps: 0x1793,
+                          field_1f4: 4, yaw: 0x4000, roll: 0x2000 });
+  tick();
+  const yzx = MatIdentity();
+  MatrixRotateY(yzx, 0x4000); MatrixRotateZ(yzx, 0x2000);
+  MatrixRotateX(yzx, 0);
+  const zyx = MatIdentity();
+  MatrixRotateZ(zyx, 0x2000); MatrixRotateY(zyx, 0x4000);
+  const m51 = van.draws?.[0].m ?? [];
+  const same = (a: number[], b: number[]) =>
+    a.slice(0, 12).every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  check("type 51 composes yaw before roll, and the other order differs",
+        van.draws?.[0].slot === 0x1793 && same(m51, yzx) && !same(m51, zyx));
+
+  // ---- type 63: twelve items off a table, then gone --------------------
+  const released: Array<[number, number, number, number]> = [];
+  events.on("item.released", (e) => released.push([e.set, e.x, e.y, e.z]));
+  const box = place(63, { pos: [1, 2, 3] });
+  tick();
+  check("type 63 releases the table's twelve items in order and dies",
+        released.length === 12 && box.dead
+        && released.map((r) => r[0]).join() === "6,5,7,2,3,1,1,1,2,3,6,5",
+        released.map((r) => r[0]).join());
+  check("...each at the record's x, z - 3.0, and y 2498.7",
+        released[0][1] === 419 && released[0][3] === -9385
+        && Math.abs(released[5][2] - (TYPE63_ITEM_Y + 1.0)) < 1e-9
+        && released[11][1] === 456 && released[11][3] === -9375,
+        JSON.stringify([released[0], released[5], released[11]]));
+
+  // ---- type 78: a load request and an ActorKill ------------------------
+  const loader = place(78, { slot: 1, lifetime_evt_steps: 1 });
+  tick();
+  check("type 78 kills itself on its first frame and draws nothing",
+        loader.dead && (loader.draws?.length ?? 0) === 0);
+  G.g_GameMode = GameMode.Arcade;
+  const arcade = PropType78LoadSlot();
+  G.g_GameMode = GameMode.Original;
+  check("...having asked for 0x1A60 in Arcade and 0xA6C otherwise",
+        arcade === TYPE78_ARCADE_SLOT && PropType78LoadSlot() === 0xa6c);
 }
 
 console.log("\nclass 0x41 type 43, stage 3's seven shootable props:");

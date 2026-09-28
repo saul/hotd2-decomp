@@ -213,6 +213,14 @@ export interface PropDrawCall {
    * the camera taken back off.
    */
   m: number[];
+  /**
+   * The `SetDrawLayerNibble` (`0x004A79F0`) layer the call was made in, when
+   * the routine set one other than the world's own 8. `RenderEnqueueCommand`
+   * ORs it into the translucent pass's sort key and the flush sorts it
+   * **first**, so a higher layer blends over everything in a lower one
+   * whatever its depth. Absent means 8.
+   */
+  layer?: number;
 }
 
 /**

@@ -20654,6 +20654,38 @@ mode machine tracks its corpse until `ZombieStateCorpseSink` untracks it.
   this worktree's own `extract/`. One of mine failed the same way because I
   edited the source under a running playthrough, and vite reloaded the page.
 
+**Playthroughs**, one Chrome at a time, `--headless --continue`, against main
+at `00c5fec` run the same way on the same bundle (this worktree's export):
+
+| run | main `00c5fec` | this branch |
+|---|---|---|
+| stage 1 | end block at 9330 | end block at 9585 |
+| stage 2 | GAME OVER, block 16, 9285 | GAME OVER, block 16, 9360 |
+| stage 3 | end block at 8415 | end block at 8970 |
+| stage 4 | end block at 7980, 5 continues | GAME OVER, block 6, 7890 |
+| stage 5 | hung at block 1 op 69 | hung at block 1 op 69 |
+| stage 6 | GAME OVER, block 2 op 77, 6270 | GAME OVER, block 2 op 77, 6765 |
+| stage 1 `--boss` | left block 14 at 13923 (in 4668) | 14269 (in 4684) |
+| stage 2 `--boss --no-damage` | 19541 (in 5126) | 19899 (in 5619) |
+| stage 3 `--boss --no-damage --hang 3000 --shoot-for 1500` | 18543 (in 9963) | 18483 (in 9449) |
+| stage 4 `--boss --no-damage` | 15191 (in 7091) | 14929 (in 6724) |
+| stage 5 `--boss` | 13349 (in 1665) | 13411 (in 1725) |
+
+(The `--boss` main column is the coordinator's post-Hierophant run.) Every run
+ends where main's does except stage 4 without the cheat, which spends a sixth
+continue and runs out of credits in block 6; with `--no-damage` it plays block
+25 through 262 frames sooner than main. The one difference decomposed to the
+frame is stage 1's opening: +210 by block 1, the `KeepCameraWhenLast` corpse
+hold plus the turn back, and it carries through the stage. The rest follow
+from the same few engine behaviours the port lacked -- the room held until the
+aim is back on the path, the corpse hold, the rail pausing for a hit's shake
+and for a player in the continue chain, the action ring's one-a-frame dequeue,
+waits yielding their first frame, `0x32` holding a boss room for a dead player
+-- and, through the harness, from where the camera is looking: the playthrough
+fires a fixed grid through the view, so a camera that follows the fight as the
+exe's does changes which volleys land, and with them when lives are lost.
+That last part is not a per-frame account and I do not claim one.
+
 **Still `[diverges]`, camera-related:** `CamPathCueReached` treats a cue the
 seek landed past as reached (the engine never seeks); four class routines read
 camera block 0 where the exe reads block 2 or the bare block-0 symbol
@@ -20663,6 +20695,11 @@ shipped script.
 
 **Next actions.**
 
+* The actors are handed the **drawn** eye as `ClassFrame.eye` -- the app's
+  `ctx.view.eye`, the three.js camera the previous frame drew -- where the
+  exe's routines read the gameplay eye `g_camera_eye` (`0x009C71E0`), which
+  the scene state's hook writes this frame, fifteen units below the pose on a
+  path. `G.g_camera_eye` is now the engine's; the frame's eye should be it.
 * The boss classes still answer `tracksCamera` (0x19, 0x22, 0x23, 0x45, and
   0x14, which also makes the call): each should call
   `RegisterForCameraTracking` -- or `ActorRegisterCameraPoint(obj, host, rise)`

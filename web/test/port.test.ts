@@ -385,6 +385,10 @@ import {
   RescueTargetState, RescueTargetUpdate,
 } from "../src/game/class21";
 import {
+  ST2CAR_PART_YAW_BASE, ST2CAR_PART_YAW_FRAMES, ST2CAR_SPIN_STEP,
+  St2CarRoutine, St2CarsTick,
+} from "../src/game/class21/car";
+import {
   MOUSE_FIRST_SLOT, MOUSE_HIT_RADIUS, MOUSE_LAST_SLOT, MOUSE_PAUSE_FRAMES,
   MOUSE_SPEED, MOUSE_TURN_SPREAD,
   MouseBranchTriggerUpdate, MouseState, MouseWanderUpdate,
@@ -4095,6 +4099,158 @@ console.log("\nclass 0x21, the rescue target and stage 2's first fork:");
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
   }
+}
+
+console.log("\nthe stage-2 car: class 0x21 makes it, and nothing does before:");
+{
+  /**
+   * A host that answers every `op_` path with a pose that names **which**
+   * path (in x) and **when** (in z), and a yaw on path 0x153 that is the time
+   * times sixteen. That is all the car's routines are being asked: which
+   * curve, at which frame.
+   */
+  const carHost: GameHost = {
+    ...NULL_HOST,
+    objectPath: (slot, frame) => ({
+      x: slot, y: -8, z: frame, pitch: 0, roll: 0,
+      yaw: slot === 0x153 ? frame * 16 : 0x100,
+    }),
+  };
+  const carScene = (cam: number, frame: number) => {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS, undefined, undefined, undefined);
+    G.g_active_cam_path = cam;
+    G.g_cam_path_frame = frame;
+  };
+  const spawnRescue = () =>
+    ActorSpawn(0x7d0, SpawnClass.RankScaledEnemy, 7, "rescue", undefined,
+               new Rng(21));
+  const tick = () => St2CarsTick(carHost);
+
+  // **The bug.** The rig was drawn from stage load, at its exported root --
+  // the origin, which is Goldman's desk -- through the whole of block 0
+  // step 1. The car is `St2CarSpawn`'s, and `RescueTargetInit` is its only
+  // caller (`0x00451800`).
+  carScene(0x37, 35);
+  tick();
+  check("no class 0x21, no car -- not even on the Goldman shot",
+        G.g_st2_cars.length === 0, String(G.g_st2_cars.length));
+  spawnRescue();
+  check("RescueTargetInit allocates exactly one, instance 0",
+        G.g_st2_cars.length === 1 && G.g_st2_cars[0].index === 0
+        && G.g_st2_cars[0].routine === St2CarRoutine.Init,
+        JSON.stringify(G.g_st2_cars.map((c) => [c.index, c.routine])));
+  const car = G.g_st2_cars[0];
+  check("...which is neither posed nor drawn before its first update",
+        !car.posed && !car.drawn);
+
+  G.g_active_cam_path = 0x38;
+  G.g_cam_path_frame = 10;
+  tick();
+  check("the Init runs the route update at once and installs it",
+        car.routine === St2CarRoutine.Route && car.posed && car.drawn
+        && car.spinOn === 1 && car.variant === 0,
+        `routine ${car.routine} posed ${car.posed} drawn ${car.drawn}`);
+  check("...shot 0x38 poses it on op_st2 0x148 at the camera's frame",
+        car.pos.x === 0x148 && car.pos.z === 10,
+        `${car.pos.x} @ ${car.pos.z}`);
+  check("...and the spin gains 0x1000 BAMS a frame",
+        car.spin === ST2CAR_SPIN_STEP, String(car.spin));
+  G.g_cam_path_frame = 250;
+  tick();
+  check("0x38 has no hand-over: past its 200 frames the car still rides",
+        car.routine === St2CarRoutine.Route && car.pos.z === 250,
+        `routine ${car.routine} @ ${car.pos.z}`);
+
+  G.g_active_cam_path = 0x39;
+  G.g_cam_path_frame = 369;
+  tick();
+  check("shot 0x39 rides op_st2 0x14E, up to frame 369",
+        car.routine === St2CarRoutine.Route && car.pos.x === 0x14e
+        && car.variant === 0, `routine ${car.routine} x ${car.pos.x}`);
+  G.g_cam_path_frame = 372;
+  tick();
+  check("...and at g_cam_path_length[0x14E] it parks, on the post-crash set",
+        car.routine === St2CarRoutine.Held && car.variant === 1,
+        `routine ${car.routine} variant ${car.variant}`);
+  check("...posed on the hand-over frame itself, with no clamp to 370",
+        car.pos.z === 372, String(car.pos.z));
+  G.g_cam_path_frame = 380;
+  tick();
+  check("parked, it never re-poses", car.pos.z === 372, String(car.pos.z));
+  check("...and its part yaw is 0x4000 - op_ 0x153's ry at n + 100",
+        car.heldFrames === 1
+        && car.partYaw === ST2CAR_PART_YAW_BASE - 101 * 16,
+        `n ${car.heldFrames} yaw ${car.partYaw}`);
+  for (let i = 1; i < ST2CAR_PART_YAW_FRAMES + 4; i++) tick();
+  check("...for 39 frames, then it holds",
+        car.partYaw === ST2CAR_PART_YAW_BASE - (100 + 39) * 16 && car.drawn,
+        String(car.partYaw));
+  G.g_script_flags[0] = 1;
+  tick();
+  check("g_script_flags[0] kills it: the task leaves the pool",
+        G.g_st2_cars.length === 0, String(G.g_st2_cars.length));
+
+  // The other arm: block 1's shot 0x3A.
+  carScene(0x3a, 0x4f);
+  spawnRescue();
+  const stop = G.g_st2_cars[0];
+  tick();
+  check("shot 0x3A rides op_st2 0x14D, still spinning at frame 0x4F",
+        stop.pos.x === 0x14d && stop.spinOn === 1
+        && stop.routine === St2CarRoutine.Route,
+        `x ${stop.pos.x} spin ${stop.spinOn}`);
+  G.g_cam_path_frame = 0x50;
+  tick();
+  check("...the spin flag drops at 0x50", stop.spinOn === 0);
+  G.g_cam_path_frame = 0x20;
+  tick();
+  check("...for good", stop.spinOn === 0);
+  G.g_cam_path_frame = 130;
+  tick();
+  check("...and at 130 it parks on the ordinary set",
+        stop.routine === St2CarRoutine.Held && stop.variant === 0,
+        `routine ${stop.routine} variant ${stop.variant}`);
+  G.g_script_flags[0] = 0;
+  tick();
+  check("...until g_script_flags[0], which a 0 does not satisfy",
+        G.g_st2_cars.length === 1);
+
+  // `St2CarInit` writes its pointer **after** calling the route update, so a
+  // car whose first frame is already past the path's end runs the route once
+  // more before it parks.
+  carScene(0x39, 400);
+  spawnRescue();
+  const late = G.g_st2_cars[0];
+  tick();
+  check("the Init overrules a park on the first frame",
+        late.routine === St2CarRoutine.Route && late.variant === 1,
+        `routine ${late.routine} variant ${late.variant}`);
+  tick();
+  check("...and the next frame's route update parks it",
+        late.routine === St2CarRoutine.Held);
+
+  // A camera path the routine does not name: the engine reads its own
+  // pointer as a path index; the port writes nothing and draws nothing.
+  carScene(0x3b, 4);
+  spawnRescue();
+  const lost = G.g_st2_cars[0];
+  tick();
+  check("on an unnamed camera path it writes no pose",
+        lost.routine === St2CarRoutine.Route && !lost.posed,
+        `routine ${lost.routine} posed ${lost.posed}`);
+
+  // The director runs it, and it is plain data a save state can carry.
+  carScene(0x38, 20);
+  spawnRescue();
+  GameUpdate(EYE, 1 / 60, carHost, new Rng(1), new Events());
+  check("GameUpdate steps the car pool",
+        G.g_st2_cars[0]?.drawn === true && G.g_st2_cars[0]?.pos.x === 0x148,
+        JSON.stringify(G.g_st2_cars[0]?.pos));
+  check("...and the pool survives JSON",
+        JSON.stringify(JSON.parse(JSON.stringify(G.g_st2_cars)))
+          === JSON.stringify(G.g_st2_cars));
 }
 
 console.log("\nclasses 0x52 and 0x53, the two shootable triggers:");

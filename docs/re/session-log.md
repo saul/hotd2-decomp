@@ -20626,3 +20626,80 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+
+## 2026-09-28 -- the stage-2 car is class 0x21's task, not a model from stage load
+
+NEW-BUGS-2: "there is a car prop visible at the goldman cutscene part of stage
+2 intro (`?stage=2&mode=play&entry=0&block=0&step=1&op=45&frame=35`). it
+shouldn't be visible yet." Filmed from that seek, the red car stood in front of
+Goldman's desk for the whole of `cp_st2` 0x37 -- in Arcade and in Original.
+It was not an actor (the pool held only the cutscene watcher and
+`player_gold`) and not region geometry: it was `obj_452320`, the rig
+`render/rigs.ts` drew from stage load. Its three roots are exported at the
+origin, and the origin is Goldman's office.
+
+**What the exe does `[proved]`.** The rig is `St2CarDraw` (`FUN_00452320`),
+and it is drawn only by the car's own routines. The car is a task,
+`ActorAlloc(St2CarInit, 0x13F4)` in `St2CarSpawn` (`FUN_00452120`), and
+`get_xrefs_to 0x00452120` gives two calls, both in `RescueTargetInit`
+(`FUN_00451720`): `PUSH 0x0` / `CALL` at `0x004517F6`/`0x00451800`, and the
+Training arm's `obj+0x11C` at `0x0045183B`. Class 0x21's one spawn is stage 2
+block 0 step 2, so there is no car before step 2. `St2CarInit` zeroes the draw
+words, calls `St2CarRouteUpdate` (`FUN_004521B0`) and only then installs it
+(`0x0045218C`). The route update picks `op_st2` 0x148/0x14E/0x14D by
+**immediate** for `g_active_cam_path` 0x38/0x39/0x3A, parks the car
+(`St2CarHeldUpdate`, `FUN_004522A0`) when the frame reaches
+`g_cam_path_length` on 0x39 (with the post-crash asset set) or 0x3A (the spin
+flag dropped at 0x50), poses unclamped *after* the hand-over, and calls the
+draw. Parked, it never re-poses, turns one part for 39 frames off `op_` 0x153 at
+`n + 100.0` (`[0x004C43B0]` = `0000c842`), and `ActorKill`s on
+`g_script_flags[0] == 1` -- stage 2 raises that at block 3 step 3 and in block
+11, one per branch.
+
+**What changed.** The arcade half is ported as a task pool,
+`game/class21/car.ts` (`G.g_st2_cars`, stepped after the camera tasks, since the
+scene made those first); `RescueTargetInit` calls `St2CarSpawn(0)`; and
+`RigLayer` draws `obj_452320` from those records (`TASK_POSED_ROUTINES`) --
+one root per task that drew this frame, at its pose, none without one. Named:
+`St2CarSpawn`, `St2CarInit`, `St2CarRouteUpdate`, `St2CarHeldUpdate`,
+`St2CarDraw`, and the Training trio `RescueTargetTrainingWaitState`
+(`0x00452540`), `St2CarTrainingWaitUpdate` (`0x004528B0`) and
+`St2CarTrainingDriveUpdate` (`0x00452930`), which are read and not ported.
+
+Measured in the page: no car task and no car through `cp_st2` 0x37; the task
+appears on `cp_st2` 0x38 frame 10, its first update already on that path; the
+unshot branch parks it at 0x39 frame 370 on variant 1 and it dies on
+`g_script_flags[0]` in block 11; the rescued branch parks it at 0x3A frame 130
+and it is still parked, drawn, through 0x3B.
+
+**Wrong turns and wrong notes.**
+
+* `docs/re/rig-survey.md` and the rig's own note said the poser "evaluates the
+  path and never draws" and sent the reader to its `obj[0]`. `FUN_004521B0` is
+  the car's `obj[0]`, and it ends `CALL 0x00452320` at `0x0045228C`; so does
+  the held routine at `0x00452308`. "Never draws" was true only of
+  `AssetDrawSlot`. The survey is corrected; the Python and TypeScript rig notes
+  are exporter text and were left, so as not to restamp every bundle for a
+  comment.
+* `class21/state.ts` said `RescueTargetInit` "leaves" `obj+0x1350` at the zero
+  `ActorAlloc` wrote. `ActorAlloc` (`FUN_004A6FA0`) zeroes only its 0x34-byte
+  header (`MOV ECX, 0xD; REP STOSD` at `0x004A6FAE`); the Init writes the 0
+  itself at `0x004517D7`. It matters for the car, which no
+  `ActorClearGameFields` follows: its pose words are heap until the first
+  `CamEvalObjectPath6`, so the port carries a `posed` flag and draws nothing
+  before it.
+* A seek to block 1 or later replays class 0x21's spawn with no frames, so the
+  port makes a fresh car on a camera path the route update does not name. The
+  engine would read its own pointer as a path index there; the port writes no
+  pose and draws nothing -- declared. Before this change such a seek showed the
+  car at the origin, which is no better and was not the game either.
+* The ghidra MCP naming gate refused `St2CarTrainingRouteUpdate` as a token
+  superset of `St2CarRouteUpdate`; it is `St2CarTrainingDriveUpdate`.
+* Not fixed, and both are drawing: the exporter ships variant 0 of the car
+  only, so the post-crash set never shows, and none of the car's part rules
+  (wheel spin while `+0x1320`, the parked part's yaw) are applied. And in
+  Original Mode a second rig, `obj_416b00` (`PlayerShotEffectsThink`'s effect
+  set, which `game/effects/shot_effects.ts` already ports and
+  `render/effects.ts` draws), is drawn by `RigLayer` from stage load at
+  (0.5, 0, 0) -- a green object in front of Goldman's desk in the same shot,
+  `[likely]` that rig by position.

@@ -1219,6 +1219,22 @@ six stages carry is the origin. `RigLayer` used to evaluate the path at frame 0
 for the fallback instance, which put stage 3's boat in the canal, parked, for
 the whole opening while a second boat sailed past it.
 
+**A rig whose object is a task exists only while the task does.** Stage 2's
+car (`obj_452320`, drawn by `St2CarDraw`, `FUN_00452320`) is a task that
+`St2CarSpawn` (`FUN_00452120`) allocates, and its only caller is
+`RescueTargetInit` (`FUN_00451720`) -- class 0x21's one spawn, block 0 step 2.
+`RigLayer` drew it from stage load at its exported root, the origin, which is
+Goldman's desk: the car stood in the office through the whole of step 1's
+cutscene (NEW-BUGS-2). The task is ported now, in `game/class21/car.ts` --
+the camera-path switch that picks its route, the park at the end of shot
+`0x39` or `0x3A`, and the `g_script_flags[0]` kill -- as plain records in
+`G.g_st2_cars`, and `RigLayer` draws one root per task that drew this frame at
+the pose it wrote (`TASK_POSED_ROUTINES`). Its routes in the rig data now only
+name the roots. What the draw does with the task's other words -- the
+post-crash asset set, the wheel spin, the second part's yaw once parked -- is
+not drawn yet: the exporter ships variant 0 only and no part rules for this
+rig.
+
 ## Which instructions the UI strikes through
 
 The script tree and the event feed **strike through any instruction the player

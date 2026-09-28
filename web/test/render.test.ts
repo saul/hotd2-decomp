@@ -1015,6 +1015,83 @@ console.log("\nrigs: the boat the port's actor poses");
   void G;
 }
 
+console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
+{
+  // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2
+  // block 0 step 1. `obj_452320` is `St2CarDraw` (`FUN_00452320`); its object
+  // is the task `St2CarSpawn` (`FUN_00452120`) allocates, and the one caller
+  // is `RescueTargetInit` (`FUN_00451720`) -- class 0x21's spawn, a step
+  // later. The rig's three roots are exported at the origin, which is where
+  // Goldman's desk is, and this layer drew the first of them from load.
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { St2CarSpawn, St2CarsTick } = await import("../src/game/class21/car");
+  const { NULL_HOST } = await import("../src/game/host");
+  ResetGameGlobals();
+  const route = (slot: number, cam: number) => ({
+    slot, bias: [0, 0, 0] as [number, number, number], cam_paths: [cam],
+    file: null, index: null, duration: null, length: 200, hold_frame: null,
+    stop_frame: null, note: "",
+  });
+  const RIGS = {
+    rigs: [{ name: "obj_452320", routine: "FUN_00452320", note: "",
+             spawn_ats: null,
+             routes: [route(328, 56), route(334, 57), route(333, 58)] }],
+    blocked: [], note: "",
+  };
+  const root = new Group();
+  const roots = [328, 333, 334].map((slot) => {
+    const g = new Group();
+    g.userData = { hod2_kind: "rig", hod2_rig: "obj_452320",
+                   hod2_routine: "FUN_00452320", hod2_path_slot: slot };
+    root.add(g);
+    return g;
+  });
+  const rigs = new RigLayer();
+  const key = (v: number) => [[0, v, 0, 0], [400, v, 0, 0]];
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {},
+    object_paths: { "328": { channels: { pos_x: key(-1669), pos_y: key(-8),
+                                         pos_z: key(-158) },
+                             file: "op_st2", index: 0, start: 0,
+                             duration: 400 } },
+  } as never));
+  const at = (slot: number, frame: number) => ({
+    walker: { cam: { slot, frame }, spawns: [] },
+  }) as unknown as Parameters<typeof rigs.update>[0];
+  const shown = () => roots.filter((r) => r.visible).length;
+
+  rigs.update(at(55, 35));
+  check("on the Goldman shot, with no car task, no root is drawn",
+        shown() === 0, `${shown()} shown`);
+  rigs.update(at(56, 30));
+  check("...nor on the car's own shot: the route does not make the car",
+        shown() === 0, `${shown()} shown`);
+
+  const car = St2CarSpawn(0);
+  rigs.update(at(56, 30));
+  check("a task that has not yet run is not drawn either", shown() === 0);
+  G.g_active_cam_path = 0x38;
+  G.g_cam_path_frame = 30;
+  St2CarsTick({ ...NULL_HOST,
+                objectPath: () => ({ x: -1457, y: -6, z: -339,
+                                     pitch: 0, yaw: 0x4000, roll: 0 }) });
+  rigs.update(at(56, 30));
+  check("once it has drawn, exactly one root is",
+        shown() === 1 && car.drawn, `${shown()} shown`);
+  const r = roots.find((g) => g.visible)!;
+  check("...at the pose the task wrote",
+        r.position.x === -1457 && r.position.y === -6 && r.position.z === -339,
+        `${r.position.x},${r.position.y},${r.position.z}`);
+  const fwd = new Vector3(0, 0, 1).applyQuaternion(r.quaternion);
+  check("...turned by its yaw (a quarter turn takes +z to +x)",
+        Math.abs(fwd.x - 1) < 1e-6 && Math.abs(fwd.z) < 1e-6,
+        `${fwd.x},${fwd.z}`);
+  G.g_st2_cars = [];
+  rigs.update(at(57, 100));
+  check("...and none once the task has killed itself", shown() === 0);
+  ResetGameGlobals();
+}
+
 console.log("\nthe object-path seam carries six values");
 
 {

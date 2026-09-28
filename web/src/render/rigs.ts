@@ -14,6 +14,16 @@
  * route table this layer used to run for it was a second transcription of
  * `Class26Subtype2Update`'s camera-path switch and is gone from the rig data.
  *
+ * **Nor is stage 2's car.** `obj_452320` is drawn by `St2CarDraw`
+ * (`FUN_00452320`) from a task the port runs in `game/class21/car.ts`, and
+ * that task exists only once `RescueTargetInit` (`FUN_00451720`) has
+ * allocated it -- class 0x21's one spawn, stage 2 block 0 step 2. This layer
+ * drew it from stage load instead, off its own reading of the routes, and its
+ * roots are exported at the origin: so the car stood in Goldman's office
+ * through the whole of step 1's cutscene. Its roots are now placed from
+ * `G.g_st2_cars` -- see {@link TASK_POSED_ROUTINES} -- and drawn exactly while
+ * a car task is drawing; the routes in its rig data only name the roots.
+ *
  * What the client adds is the motion. The bundle exports rig roots
  * *unparented*, tagged `hod2_path_slot`, because it ships no baked camera or
  * object animation — the same decision the camera rails are built on. So the
@@ -72,7 +82,8 @@
  * diverges for class 0x26's five subtypes**: the bundle's `spawn_ats` names
  * the spawns that install each routine, and such a rig is drawn only once the
  * walker has run one of them. The other rigs — the ones no spawn links to —
- * still draw from stage load rather than from the frame their opcode ran.
+ * still draw from stage load rather than from the frame their opcode ran --
+ * all but the stage-2 car, which the port's own task poses (above).
  *
  * **That paragraph described the intent and not the code**, and the gap was a
  * visible object. `update` placed the fallback instance from its path at
@@ -88,6 +99,8 @@
  * `FUN_004522A0`'s despawn is `g_script_flags[0] == 1`, i.e. evt
  * `set_script_flag 0`. That is this routine's rule and not a general one, so
  * it is not applied here; a rig that freezes stays until the stage is reset.
+ * (That routine is the stage-2 car's, and the car's task in `game/` now
+ * applies it -- the rule is where the routine is.)
  */
 
 import {
@@ -194,6 +207,37 @@ interface Instance {
  */
 const ACTOR_POSED_CLASSES: ReadonlySet<number> = new Set([SpawnClass.Vehicle]);
 
+/**
+ * A pose the port's own task wrote, in the engine's words: `obj+0x40`..`+0x48`
+ * and the BAMS triple at `+0x64`/`+0x68`/`+0x6C`, and whether this frame's
+ * routine drew it at all.
+ */
+interface TaskPose {
+  pos: { x: number; y: number; z: number };
+  pitch: number;
+  yaw: number;
+  roll: number;
+  /** A pose has been written -- the port has nothing to draw at before. */
+  posed: boolean;
+  /** This frame's routine called the draw. */
+  drawn: boolean;
+}
+
+/**
+ * The draw routines whose object is **a task the port runs**, by the
+ * `routine` the rig data names, and where its records are.
+ *
+ * `St2CarDraw` (`FUN_00452320`) is called by `St2CarRouteUpdate`
+ * (`FUN_004521B0`) and `St2CarHeldUpdate` (`FUN_004522A0`), the stage-2 car's
+ * two arcade routines. The camera-path switch, the parking and the
+ * `g_script_flags[0]` kill are theirs, in `game/class21/car.ts`; this layer
+ * draws one root per car task at the pose the task wrote, and none while
+ * there is no task.
+ */
+const TASK_POSED_ROUTINES: Readonly<Record<string, () => readonly TaskPose[]>> = {
+  FUN_00452320: () => G.g_st2_cars,
+};
+
 /** All the roots belonging to one object, across its routes. */
 interface Actor {
   rig: string;
@@ -211,6 +255,9 @@ interface Actor {
    * {@link RigLayer.update}.
    */
   spawnAts: ReadonlySet<number> | null;
+  /** The port's task records this rig is drawn from, if it is one of
+   * {@link TASK_POSED_ROUTINES}; its routes are then not this layer's. */
+  tasks: (() => readonly TaskPose[]) | null;
 }
 
 /**
@@ -375,10 +422,12 @@ export class RigLayer implements System {
       if (inst.spawnAt !== null) continue;
       let a = byRig.get(inst.rig);
       if (!a) {
-        const ats = json.rigs.find((r) => r.name === inst.rig)?.spawn_ats;
+        const rig = json.rigs.find((r) => r.name === inst.rig);
+        const ats = rig?.spawn_ats;
         byRig.set(inst.rig, (a = {
           rig: inst.rig, instances: [], showing: null,
           spawnAts: ats ? new Set(ats) : null,
+          tasks: (rig && TASK_POSED_ROUTINES[rig.routine]) ?? null,
         }));
       }
       a.instances.push(inst);
@@ -413,6 +462,10 @@ export class RigLayer implements System {
     const camSlot = cam ? cam.slot : null;
     const camFrame = cam ? cam.frame : 0;
     for (const actor of this.actors) {
+      if (actor.tasks) {
+        this.placeFromTasks(actor, actor.tasks());
+        continue;
+      }
       // **No spawn, no object.** A rig whose routine is installed by a spawn
       // exists from the frame the walker runs that spawn's opcode, and not
       // from stage load: stage 4's `obj_48f050` (`FUN_0048F050`, class 0x26
@@ -513,6 +566,30 @@ export class RigLayer implements System {
       inst.root.quaternion.setFromEuler(
         bamsEuler(a.pitch, a.yaw, a.roll, this._e));
     }
+  }
+
+  /**
+   * The roots of a rig the port's tasks pose: one per task that drew this
+   * frame, at the pose it wrote, under `T · Rz · Ry · Rx` -- the product
+   * `St2CarDraw` (`FUN_00452320`) builds with `MatrixTranslate(obj+0x40)`,
+   * `MatrixRotateZ(obj+0x6C)`, `MatrixRotateY(obj+0x68)` and
+   * `MatrixRotateX(obj+0x64)` at `0x0045233B`..`0x00452356`. Every other
+   * root of the rig is hidden, and all of them are while there is no task:
+   * **no task, no car**. Reads engine state and writes only the nodes.
+   */
+  private placeFromTasks(actor: Actor, tasks: readonly TaskPose[]): void {
+    const live = this.enabled ? tasks.filter((t) => t.drawn && t.posed) : [];
+    actor.instances.forEach((inst, i) => {
+      const t = live[i];
+      inst.root.visible = !!t;
+      inst.frozen = false;
+      inst.posed = !!t;
+      if (!t) return;
+      inst.root.position.set(t.pos.x, t.pos.y, t.pos.z);
+      inst.root.quaternion.setFromEuler(
+        bamsEuler(t.pitch, t.yaw, t.roll, this._e));
+    });
+    actor.showing = live.length ? actor.instances[0] : null;
   }
 
   /**

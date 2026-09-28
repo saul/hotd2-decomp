@@ -795,3 +795,17 @@ decompilation stops at a call that does return, **ask the instruction before
 the function**: L35 says read past the end, and this says the end may be
 movable. The override lives in the database and not in `ghidra/annotations/`,
 so a rebuild can bring it back; say so in the row.
+
+**L56 -- A value computed at module load through an import cycle is a page
+that does not start, behind a green `test:port`.** `game/globals.ts` imports
+`game/hud_shutter.ts` for `HudShutterTaskCreate`, and `hud_shutter.ts` imports
+`G` and the `ScreenFurniture` enum back. Calls across that cycle are fine; a
+top-level `const MASK = ScreenFurniture.ChapterCard | ...` is not. Which module
+of a cycle evaluates first depends on which one the program enters by, and the
+page enters through `app/`, so there `hud_shutter.ts` ran first, found
+`ScreenFurniture` undefined and threw "reading 'ChapterCard'". `tsc` passed,
+and so did `test:port`, which enters the graph elsewhere; only `loops`, a check
+that loads the real page, failed -- as a timeout waiting for a button, with the
+throw two lines above it. **In `game/`, derive anything that touches another
+module's export inside the function that uses it**, and when a page check fails
+after a merge, read its `threw:` line before its timeout.

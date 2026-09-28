@@ -35,11 +35,12 @@
  * are plain data here -- position, yaw and scale per card, and the slot each
  * draws -- and `render/effects.ts` draws them from it in the camera's space,
  * which is where `MatrixLoadIdentity` puts them. The per-card
- * `CurlModelSlot3F7ByYaw` (`FUN_004759C0`) call bends a model by the card's
- * yaw -- but the model is asset slot `0x3F7`, `boss4_kls_hod1.bin[30]`, and it
- * only does so while that slot is resident. No shipped stage script loads that
- * file, so in every stage the port plays the call changes nothing and the
- * cards are drawn flat, which is what the port draws.
+ * `CurlModelSlot7EEByYaw` (`FUN_004759C0`) call in step 2 bends the card
+ * back's loaded model, slot `0x7EE`, by the card's yaw, so each back turns
+ * over like a page; it is a rewrite of vertices and nothing the game reads, so
+ * `render/card_curl.ts` does it from the yaw here. (It was read for a while as
+ * slot `0x3F7` -- a model no stage loads -- off a record stride of 0x20, and
+ * the cards were drawn flat.)
  *
  * ## Why this is a pool in `G`
  *
@@ -297,10 +298,10 @@ function BannerSlide(b: BossBanner, rec: BossIntroBannerRecord,
       c.z = Math.fround(rec.z - (BANNER_CARDS - i) * CARD_STACK);
     }
   }
-  // Then all eight are drawn -- `CurlModelSlot3F7ByYaw(yaw)` (a no-op in
-  // every shipped stage; see the file comment), identity, translate,
-  // yaw, scale, `AssetDrawSlot(slot)` -- which `render/effects.ts` does from
-  // this state, in its camera-space group.
+  // Then all eight are drawn -- `CurlModelSlot7EEByYaw(yaw)` (the card back's
+  // page turn; see the file comment), identity, translate, yaw, scale,
+  // `AssetDrawSlot(slot)` -- which `render/effects.ts` does from this state,
+  // in its camera-space group. Step 3's loop draws without the curl.
 }
 
 /**

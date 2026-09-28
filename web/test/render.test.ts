@@ -3825,5 +3825,133 @@ console.log("\nthe engine's two passes, and the translucent order");
         && layered.renderOrder === 0);
 }
 
+// -- the boss cards' page curl -----------------------------------------------
+//
+// `CurlModelSlot7EEByYaw` (`FUN_004759C0`) rewrites slot 0x7EE's model -- the
+// card back -- with every vertex's z from its x and a card's yaw, and both
+// intros call it per card just before drawing that card, in the step that
+// turns them and in no other. It was read as slot 0x3F7 (a stride of 0x20
+// where `AssetDrawSlot` has 0x10), which is never resident, so the port drew
+// every card flat; the first two checks below fail on that tree.
+console.log("\nthe boss cards' backs turn like pages");
+{
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { BossBannersTick, BossIntroBannerSpawn, BannerStep } =
+    await import("../src/game/boss_banner");
+  const { Boss3IntroCardUpdate, Boss3SpawnIntroCard } =
+    await import("../src/game/class45/tasks");
+  const { CURL_REST_Z, CURL_SLOT, curlZ } = await import("../src/render/card_curl");
+  const { NULL_HOST } = await import("../src/game/host");
+  const three = await import("three");
+
+  // `etc_2.bin[3]` as it is: one strip out from a hinge at x = 0 to 7.96,
+  // y +-5.69, every z the curl's own base. Its first and last x are the
+  // model's; the others are between.
+  const REST = Math.fround(CURL_REST_Z);
+  const XS = [0.013443979434669018, 2.5, 4, 6.25, 7.960561275482178];
+  const part = (slot: number) => {
+    const p = new Obj3D();
+    p.name = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    p.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    const pos: number[] = [];
+    for (const x of XS) pos.push(x, 5.69, REST, x, -5.69, REST);
+    const geo = new three.BufferGeometry();
+    geo.setAttribute("position", new three.Float32BufferAttribute(pos, 3));
+    p.add(new three.Mesh(geo, new three.MeshBasicMaterial()));
+    return p;
+  };
+  const root = new Obj3D();
+  for (const s of [0x7ed, CURL_SLOT, 0x181d, 0x1851]) root.add(part(s));
+  const template = root.children[1]!.children[0] as InstanceType<typeof three.Mesh>;
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  layer.bones = { boneSphere: () => null };
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+  const geoOf = (n: InstanceType<typeof Obj3D> | undefined) =>
+    (n?.children[0] as InstanceType<typeof three.Mesh> | undefined)?.geometry
+      .attributes.position;
+  const bentTo = (n: InstanceType<typeof Obj3D> | undefined, yaw: number) => {
+    const pos = geoOf(n);
+    if (!pos) return false;
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getZ(i) !== curlZ(pos.getX(i), yaw)) return false;
+    }
+    return true;
+  };
+  const lift = (n: InstanceType<typeof Obj3D> | undefined) => {
+    const pos = geoOf(n);
+    let m = 0;
+    for (let i = 0; pos && i < pos.count; i++) {
+      m = Math.max(m, Math.abs(pos.getZ(i) - REST));
+    }
+    return m;
+  };
+
+  // The banner, driven by its own update from the flag to frame 0x4F.
+  const b = BossIntroBannerSpawn(0x00570ec8);
+  G.g_script_flags[2] = 1;
+  for (let k = 0; k < 200 && !(b.step === BannerStep.Slide
+                                && b.frame === 0x50); k++) {
+    BossBannersTick(NULL_HOST);
+  }
+  layer.update(ctx);
+  const cards = layer.viewGroup.children;
+  const yaws = b.cards.map((c) => c.yaw);
+  check("in the flip, each card back is bent by its own yaw",
+        cards.length === 8 && [1, 2, 3, 4, 5, 7].every(
+          (i) => b.slots[i] === CURL_SLOT && bentTo(cards[i], yaws[i]!)),
+        `yaws ${yaws.map((y) => y.toString(16)).join(" ")}`);
+  check("...so one still turning stands off by most of the curl's 4 units",
+        yaws[5]! > -0x8000 && yaws[5]! < -0x4000 && lift(cards[5]) > 3,
+        `card 5 at ${yaws[5]!.toString(16)} lifts ${lift(cards[5])}`);
+  check("...each on geometry of its own, the template untouched",
+        geoOf(cards[4]) !== geoOf(cards[5])
+        && lift(cards[4]) !== lift(cards[5])
+        && (template.geometry.attributes.position as { getZ(i: number): number })
+          .getZ(9) === REST);
+  check("...card 7 never turns, and yaw 0 is the model as loaded",
+        yaws[7] === 0 && lift(cards[7]) === 0);
+  check("...and the first card and the boss's are other models, never bent",
+        lift(cards[0]) === 0 && lift(cards[6]) === 0);
+
+  // Frame 0x50: step 3, which draws without the curl. The model keeps the
+  // last call -- card 7's, yaw 0 -- so cards 1..5, frozen part-way over, are
+  // drawn flat.
+  BossBannersTick(NULL_HOST);
+  layer.update(ctx);
+  check("in the hold, the backs are drawn as the last call left the model",
+        b.step === BannerStep.Hold && b.cards[5]!.yaw === yaws[5]
+        && [1, 2, 3, 4, 5].every((i) => lift(cards[i]) === 0),
+        `step ${b.step}, card 5 lifts ${lift(cards[5])}`);
+  let freed = 0;
+  geoOf(cards[3]) && (cards[3]!.children[0] as InstanceType<typeof three.Mesh>)
+    .geometry.addEventListener("dispose", () => { freed++; });
+  G.g_boss_banners = [];
+  layer.update(ctx);
+  check("...and a card's own geometry goes with its node",
+        layer.viewGroup.children.length === 0 && freed === 1, `${freed}`);
+
+  // The Tower's own card: the same call from `Boss3IntroCardUpdate`'s step 1.
+  ResetGameGlobals();
+  Boss3SpawnIntroCard();
+  const c = G.g_boss3_intro_cards[0]!;
+  for (let k = 0; k < 200 && c.frame < 0x40; k++) Boss3IntroCardUpdate(c);
+  layer.update(ctx);
+  const pieces = layer.viewGroup.children;
+  const py = G.g_boss3_card_pieces.map((p) => p.yaw);
+  check("the Tower's card backs bend by their own yaws while they turn",
+        c.step === 1 && pieces.length === 8
+        && [1, 2, 3, 4, 5].every((i) => bentTo(pieces[i], py[i]!))
+        && lift(pieces[2]) > 1, `lift ${lift(pieces[2])}`);
+  for (let k = 0; k < 200 && c.step === 1; k++) Boss3IntroCardUpdate(c);
+  layer.update(ctx);
+  check("...and flat once step 2 stops calling it",
+        [1, 2, 3, 4, 5].every((i) => lift(pieces[i]) === 0));
+  ResetGameGlobals();
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

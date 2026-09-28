@@ -82,15 +82,17 @@ export function Boss3SpawnIntroCard(): void {
  * Returns `false` on the frame it calls `ActorKill`, which skips the frame
  * counter's increment as the engine's `ActorKill` does.
  *
- * The pieces are drawn by `render/effects.ts` from `g_boss3_card_pieces`;
- * the page curl `CurlModelSlot3F7ByYaw` (`FUN_004759C0`) applies to them
- * during the flip is that layer's too.
+ * The pieces are drawn by `render/boss3_effects.ts` from
+ * `g_boss3_card_pieces`; the page curl `CurlModelSlot7EEByYaw`
+ * (`FUN_004759C0`) that step 1 puts on each card back (slot `0x7EE`) before
+ * drawing it is that layer's too (`render/card_curl.ts`).
  */
 export function Boss3IntroCardUpdate(c: Boss3IntroCard): boolean {
   const p = G.g_boss3_card_pieces;
   // Step 1 before frame `0x50` and step 2 before frame 300 draw every piece
   // (`MatrixLoadIdentity; T; RotY; Scale; AssetDrawSlot(g_boss3_card_piece_slots[i])`
-  // under `CurlModelSlot3F7ByYaw`, which is inert); step 0 and the kill do not.
+  // under `CurlModelSlot7EEByYaw` in step 1, the card backs' page turn); step 0
+  // and the kill do not.
   c.drawn = false;
   if (c.step === 0) {
     c.frame = 0;

@@ -364,6 +364,16 @@ CHECKS: list[Check] = [
           "from the pass right, and, on a current bundle, no `_opaque` image "
           "and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha",
           NEEDS_GAME),
+    Check("verify_card_curl", ".",
+          ["python3", "tools/verify_card_curl.py", "--game-dir", "{game_dir}"],
+          "that the boss cards' page curl bends the slot the cards draw -- "
+          "0x7EE, read off the instruction bytes at `AssetDrawSlot`'s stride "
+          "of 0x10, where a stride of 0x20 once made it a model no stage "
+          "loads and the port drew every page flat -- with the EXE's four "
+          "constants, from its two card loops only, and on a model whose "
+          "every vertex the curl's own walk reaches, in the opaque pass that "
+          "draws each page before the next page's call rewrites it",
+          NEEDS_GAME),
     Check("verify_bats", ".",
           ["python3", "tools/verify_bats.py", "--game-dir", "{game_dir}"],
           "that the class-0x46 bat's flight paths still line up with the "

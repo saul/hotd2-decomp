@@ -1193,12 +1193,12 @@ step 1: if (frame == 0x50) step = 2 (and fall into step 2);
                 piece[i].yaw += (i == 0) ? -0x300 : -0x200;  clamp at -0x8000;
                 if (piece[i].yaw == -0x4200) piece[i].z = -1.0 - (8 - i)*0.01;
             }
-            FUN_004759C0(piece[i].yaw);                          // [open], see below
+            CurlModelSlot7EEByYaw(piece[i].yaw);                 // bends slot 0x7EE, see below
             identity; T(piece.xyz); RotY(yaw); Scale(scale); AssetDrawSlot(g_boss3_card_piece_slots[i]);
 step 2: if (frame == 300) ActorKill();
         for i < 8: if (i != 6) { scale -= 0.005; if (scale <= 0) scale = 0; }
                    else if (scale < 0.06) { scale += 0.001; x -= 0.004; y += 0.002; }
-                   draw as above (no FUN_004759C0);
+                   draw as above (no CurlModelSlot7EEByYaw);
 2 <= step <= 3 && frame >= 0x50:
         a = min((frame - 0x50) / 60, 1.0);
         SpriteDrawCheckedBank({0xBC, 344.0, 96.0, 1.0, 1,1, …, alpha a, -1, 0});
@@ -1418,8 +1418,14 @@ The **Boss Mode stage-select** routines after the class
 Answered since phase 1:
 
 * `0x009CA0EA` is `g_boss_engaged` (named on main). `[proved]`
-* `FUN_004759C0` is `CurlModelSlot3F7ByYaw`, and main proved it inert for the
-  shared banner (`405c17c`); the card's calls are the same routine. `[proved]`
+* `FUN_004759C0` is `CurlModelSlot7EEByYaw`: it bends the loaded model of
+  asset slot `0x7EE` -- `etc_2.bin[3]`, the card back this card draws as
+  pieces 1..5 and 7 -- by the yaw it is handed, every full vertex's z from its
+  x, so each back turns over like a page. Step 1 calls it per piece just
+  before the piece's draw; step 2 does not, so there the pieces keep piece 7's
+  bend (yaw 0, the model as loaded). It was named `CurlModelSlot3F7ByYaw` and
+  called inert (`405c17c`) off a slot-record stride of 0x20; `AssetDrawSlot`'s
+  is 0x10. `render/card_curl.ts` ports it. `[proved]`
 * The byte at `0x009C88AC` is an **Original Mode item effect**:
   `FUN_00416240` (called only from `FUN_004163D0`) walks the player's two item
   slots and, through the byte table at `0x00416314`, sets it for item `0x0C`

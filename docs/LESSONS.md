@@ -1025,3 +1025,20 @@ check that the pixels it should not touch are identical -- which is also what
 tells you the runs stayed in step. It is `L44`'s "a harness that prints its
 arguments as its result" one layer down: a redraw that repeats the frame
 agrees with any claim about it.
+
+**L70 -- An absolute address inside a table is an index only through the
+stride an instruction that indexes the table uses.** `FUN_004759C0` reads
+`[0x009AE584]` and `[0x009AE58C]` by literal address, and the reading that
+named it divided the offset into the asset slot table by a stride of 0x20:
+slot `0x3F7`, a model no stage loads. So it went into `functions.tsv` as
+`CurlModelSlot3F7ByYaw`, `[proved]`, "changes nothing", and the port drew the
+boss banner's pages rigid behind a note saying flat was the engine's picture.
+`AssetDrawSlot` indexes the same table with `SHL EAX, 4` -- 0x10 -- which
+makes it slot `0x7EE`, the card back the calling loop draws on the very next
+instruction. The tell was there: a routine called inert whose only callers
+call it immediately before drawing something it could plausibly bend. **Quote
+the indexer's `SHL`/`IMUL`/`LEA` beside any slot, id or record number you
+derive from a literal address**, and when the answer is a thing nothing uses,
+check the stride before concluding the routine is dead. It is `L6` from the
+other side: there the index source names the wrong table, here the right
+table is read at the wrong width.

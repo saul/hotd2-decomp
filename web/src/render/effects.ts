@@ -36,6 +36,7 @@ import {
 import { drawBoss3Effects } from "./boss3_effects";
 import { releaseAssetDrawAlpha } from "./draw_order";
 import { drawBatSplashes } from "./bat_splash";
+import { CURL_SLOT, CurlModelSlot7EEByYaw, curlHeldYaw } from "./card_curl";
 import { drawCreatureEffects } from "./creature_effects";
 import { drawWaterRings } from "./water_rings";
 import { BAMS_TO_RAD } from "../core/bams";
@@ -321,7 +322,8 @@ export class EffectLayer implements System<RenderContext> {
    * (`FUN_00437AC0`)'s draw loop:
    *
    * ```
-   * CurlModelSlot3F7ByYaw(yaw); MatrixStackPush(0); MatrixLoadIdentity()
+   * CurlModelSlot7EEByYaw(yaw)            -- step 2 only
+   * MatrixStackPush(0); MatrixLoadIdentity()
    * MatrixTranslate(x, y, z); MatrixRotateY(yaw); MatrixScale(s, s, s)
    * AssetDrawSlot(slot); MatrixStackPop(1)
    * ```
@@ -329,10 +331,16 @@ export class EffectLayer implements System<RenderContext> {
    * Identity, so camera space, like the damage overlay. Only in the two steps
    * that draw -- the slide and the hold -- and straight from the banner's own
    * state, so a snapshot mid-flight draws what it says.
+   *
+   * The curl bends slot `0x7EE`'s model whichever card it is called for, so
+   * a card back is drawn under its own yaw in the slide and under the last
+   * card's in the hold, which calls no curl -- see `card_curl.ts`. The slide
+   * ends with cards 1..5 still part-way over, and the hold draws them flat.
    */
   private drawBossBanners(seen: Set<string>): void {
     G.g_boss_banners.forEach((b, n) => {
       if (b.step !== BannerStep.Slide && b.step !== BannerStep.Hold) return;
+      const held = curlHeldYaw(b.cards.map((c) => c.yaw));
       b.cards.forEach((c, i) => {
         const key = `bb${n}_${i}`;
         const node = this.node(key, b.slots[i], this.viewGroup);
@@ -341,6 +349,10 @@ export class EffectLayer implements System<RenderContext> {
         node.position.set(c.x, c.y, c.z);
         node.rotation.set(0, c.yaw * BAMS_TO_RAD, 0);
         node.scale.setScalar(c.scale);
+        if (b.slots[i] === CURL_SLOT) {
+          CurlModelSlot7EEByYaw(node,
+                                b.step === BannerStep.Slide ? c.yaw : held);
+        }
       });
     });
   }

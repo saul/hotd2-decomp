@@ -13,7 +13,8 @@
  * The matrices, as the routines build them (call order = product order):
  *
  * * **card piece** (`Boss3IntroCardUpdate`, `FUN_00424900`):
- *   `MatrixLoadIdentity; T(x, y, z); RotY(yaw); Scale(s)` -- camera space.
+ *   `MatrixLoadIdentity; T(x, y, z); RotY(yaw); Scale(s)` -- camera space --
+ *   after, in step 1, the page curl on the card back (`card_curl.ts`).
  * * **bite flash** (`Boss3DrawBoneParts`, `FUN_004219E0`), on the bone's own
  *   matrix: a head `T(7, -0.5, 0) RotY(0x4000)`; the big head
  *   `T(7, -4.5, 0) RotY(0x4000) RotX(0x2000) Scale(1.5)`; the body
@@ -59,6 +60,7 @@ import {
   BOSS3_FLASH_B_FIRST_SLOT, BOSS3_PATH_EFFECTS, BOSS3_PATH_EFFECT_FIRST_SLOT,
   BOSS3_SPARK_FIRST_SLOT, BOSS3_WAKE_CELS, BOSS3_WAKE_FIRST_SLOT,
 } from "../game/class45/tables";
+import { CURL_SLOT, CurlModelSlot7EEByYaw, curlHeldYaw } from "./card_curl";
 import { setAssetDrawAlpha } from "./draw_order";
 
 /** What this needs of the effect layer and the character layer. */
@@ -137,10 +139,18 @@ export function drawBoss3Effects(h: Boss3EffectHost, seen: Set<string>): void {
   drawMound(h, seen);
 }
 
+/**
+ * The card pieces. Step 1 calls `CurlModelSlot7EEByYaw` (`FUN_004759C0`) for
+ * each piece just before drawing it (`0x0042499F`) and step 2 does not, so a
+ * `0x7EE` piece is bent by its own yaw while they turn and by the last
+ * piece's after -- the banner's shape exactly; see `card_curl.ts`.
+ */
 function drawCard(h: Boss3EffectHost, seen: Set<string>): void {
+  const pieces = G.g_boss3_card_pieces;
+  const held = curlHeldYaw(pieces.map((p) => p.yaw));
   G.g_boss3_intro_cards.forEach((c, n) => {
     if (!c.drawn) return;
-    G.g_boss3_card_pieces.forEach((p, i) => {
+    pieces.forEach((p, i) => {
       const key = `b3card${n}_${i}`;
       const node = h.node(key, BOSS3_CARD_PIECE_SLOTS[i], h.view);
       if (!node) return;
@@ -148,6 +158,9 @@ function drawCard(h: Boss3EffectHost, seen: Set<string>): void {
       _m.identity();
       S(R(T(_m, p.x, p.y, p.z), AY, p.yaw), p.scale, p.scale, p.scale);
       place(node, _m);
+      if (BOSS3_CARD_PIECE_SLOTS[i] === CURL_SLOT) {
+        CurlModelSlot7EEByYaw(node, c.step === 1 ? p.yaw : held);
+      }
     });
   });
 }

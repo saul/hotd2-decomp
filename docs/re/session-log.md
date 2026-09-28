@@ -23251,3 +23251,82 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+
+## 2026-09-28 -- the boss cards' page curl: slot 0x7EE, and the pages bend
+
+`CurlModelSlot3F7ByYaw` (`0x004759C0`) is **`CurlModelSlot7EEByYaw`**. The
+2026-09-27 entry above read its slot record at a stride of 0x20; the
+2026-09-28 damage-overlay entry flagged that `AssetDrawSlot` indexes the table
+by 0x10, and this settles it. Renamed everywhere -- the live database (with
+its prototype, `void (int yaw)`, read back over MCP), `functions.tsv`, the two
+port comments that called it inert, `boss-tower.md` -- and ported.
+
+**What it does** `[proved]`, from the listing at `0x004759C0..0x00475A4F`:
+
+* `TEST AH, 0x80` on `[0x009AE58C]`, the model at `[0x009AE584]`.
+  `AssetDrawSlot` is `SHL EAX, 4; ADD EAX, 0x9A66A0` (`0x00418576`), so both
+  are slot `0x7EE`'s record (+0xC, +4): `etc_2.bin[3]`, the card back the
+  banner loads (`PUSH 0x7ee`, `0x00437BC9`) and `g_boss3_card_piece_slots`
+  names five times.
+* It walks the model its own way -- a negative dword skips a 0x50 header, a
+  strip's count is a record count with no x3 for a triangle list, a record is
+  32 bytes when its first byte's bit 0 is set and 8 when not -- and gives
+  every full vertex `z = (float)(4.8e-05 - sin(ftol(x * 2058.112) BAMS) *
+  (sin(yaw BAMS) * 4.0))`. The constants are `[0x0055DD14]` `0x4500A1CB`,
+  `[0x004C4370]` 2pi/65536, `[0x004C4CA8]` 4.0, `[0x00569190]`
+  `4.8000001697801054e-05`. The yaw is a stack int (`FILD [ESP+0x10]`), so
+  L1's dropped FPU argument does not arise; the body ends at a `RET`, so
+  L35's tail does not either, and a rel32 scan of `.text` finds the same two
+  callers `get_xrefs_to` does.
+* The model: one mesh, one strip (flags 0x51), 24 full vertices from a hinge
+  at x = 0.013 to 7.96, every z 4.8e-05. So x * 2058.112 reaches a quarter
+  turn at the free edge; yaw 0 gives back the model as loaded, and edge-on the
+  free edge stands 4 units off -- a page turning. The pages are G's file, with
+  Greek text on them; the boss's card is the last page.
+* **Per card.** Both loops call it for card i with card i's yaw immediately
+  before card i's `AssetDrawSlot`. The model is shared, but its mesh's TSP
+  (`0x20080465`) puts it in the opaque pass, and `RenderEnqueueCommand`
+  (`0x004A7E50`, re-read) draws that pass on the spot -- `CALL
+  WalkMeshChainAndDraw` at `0x004A7E8F`, the queue copying only the command.
+  So each card is drawn with its own bend, and a copy of the geometry per card
+  is the same picture in three.js.
+* **Only while turning.** The banner's step 3 loop (`0x00437D32..0x00437E47`)
+  and the Tower card's step 2 draw without it, so there the model keeps the
+  last call: card 7, which is seated at yaw 0 (`MOV [EAX+0xC], 0` at
+  `0x00437B77`) and never turns. Cards 1..5 are still part-way over when the
+  turn ends at frame 0x50 (card 5 starts at 40 and needs 64 frames) -- the
+  engine draws them flat from then on, while they shrink away.
+
+**The port.** `render/card_curl.ts`: the vertices are render state and
+`render-drives-the-port` is an error, so the routine lives beside the stage-3
+water mound's vertex walk, in PascalCase under its exe name as `OwlBodyChain`
+does. `render/effects.ts` and `render/boss3_effects.ts` bend each `0x7EE`
+node by its own yaw in the turning step and by the last card's after. Each
+node owns its copy (`ownedGeometries`), the template is never touched.
+
+**Checks.** `test:render` drives `BossIntroBannerUpdate` and
+`Boss3IntroCardUpdate` and reads the drawn vertices: nine assertions; five
+fail on the tree before this (every page flat), and a mutant that bends by
+each card's own yaw in the hold fails the two hold checks.
+`tools/verify_card_curl.py` (new, in `verify_all`) holds the slot to the
+instruction bytes, the four constants and the port's copies, the two callers,
+and the model's three premises out of `pol/`; a stride of 0x20 fails it.
+Screenshots, stage 1's banner, banner frames 30..82 on one seed:
+`web/shots/banner-{before,after}-f<N>.png` and
+`web/shots/banner-curl-before-after.png` (`web/tools/banner_look.mjs`). The
+turning frames differ in 7-25% of the viewport; frame 82, the hold, is
+byte-identical before and after, which is both the hold rule and proof the
+two runs stayed in step.
+
+**Wrong turns.**
+
+* The harness first deep-linked `block=14&step=0&op=0` and drove 2,400 frames
+  without a banner. The seek had landed on `14/3/0`, past the boss's spawn at
+  step 1, and the walker ran off the end of the stage into stage 2. So did
+  `block=13&step=0`. `block=14&step=1&op=0` lands where asked. Why step 0
+  lands on step 3 is `[open]`; the harness prints the walker's address when
+  it fails, which is what showed it.
+* `export-annotations` was not run: the Ghidra GUI holds the project lock and
+  the analyzer refuses a `.claude` path. The rename was read back over MCP
+  (`get_function_by_address` answers `void CurlModelSlot7EEByYaw(int yaw)`);
+  the round trip is owed from the main checkout.

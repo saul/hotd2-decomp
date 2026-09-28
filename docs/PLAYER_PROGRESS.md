@@ -5628,6 +5628,22 @@ and sets the shutter to 1, the gate every entrance waits on. Seven records,
 one per call site (`boss_banner_records.ts`); the Tower has its own intro card
 instead.
 
+**The pages bend as they turn** -- `render/card_curl.ts`. While the pages
+turn, both intros call `CurlModelSlot7EEByYaw` (`FUN_004759C0`) with each
+page's yaw just before drawing it, and it rewrites the loaded page model
+(slot `0x7EE`, `etc_2.bin[3]`) so that every vertex's z is
+`4.8e-05 - 4 * sin(x * 2058.112 BAMS) * sin(yaw)`: flat at rest and edge-on,
+its free edge four units off the hinge's plane halfway over. The port drew
+the pages rigid for as long as the routine was read as bending slot `0x3F7`,
+which no stage loads. Each page gets its own copy of the geometry, which is
+the engine's picture because the mesh is in the opaque pass and is drawn
+before the next page's call. The step after the turn calls no curl, and the
+model keeps the last call's bend -- page 7's, which never turns -- so pages
+1..5, all still part-way over when it starts (page 1 at -169 degrees, page 5
+at -113), are drawn flat as they shrink away, as the engine draws them. `test:render` drives both intros and reads the vertices, and
+`tools/verify_card_curl.py` holds the slot, the constants and the model's
+premises against the EXE and `pol/`.
+
 **The shot test**:
 
 * `RegisterForShotTest` (`FUN_00405160`) never lists an actor whose `obj+0x34`

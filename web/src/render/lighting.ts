@@ -108,7 +108,9 @@ import {
 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
-import { copyDrawState } from "./draw_order";
+import {
+  copyDrawState, setUnfadedMaterial, unfadedMaterial,
+} from "./draw_order";
 
 /** 2*pi / 65536 — the constant both matrix rotators multiply by. */
 
@@ -380,9 +382,10 @@ export class SceneLighting implements System<RenderContext> {
           if (this.mode !== "scene") return base;
           return second ? this.secondaryTwinOf(base) : this.twinOf(base);
         };
-        mesh.material = Array.isArray(mesh.material)
-          ? mesh.material.map(swap)
-          : swap(mesh.material);
+        // Under any fade the draw has put on it, which stays on top: see
+        // `setUnfadedMaterial` in `render/draw_order.ts`.
+        const cur = unfadedMaterial(mesh);
+        setUnfadedMaterial(mesh, Array.isArray(cur) ? cur.map(swap) : swap(cur));
       }
       for (const c of o.children) visit(c, here);
     };

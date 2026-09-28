@@ -103,15 +103,18 @@ const CYCLE_SLOTS: readonly number[] = [0x2016, 0x204a];
  * has just pushed: the head is stepped toward the camera and drawn turned.
  * That routine is class 0x30's code and is shared; see `class30/head_aim.ts`.
  *
- * What is not here, and why:
+ * Which of the two draws each node got -- `ThrowerDrawPart` (`FUN_0044A200`),
+ * plain, or `ThrowerDrawPartWithAlpha` (`FUN_0044A240`), faded -- goes into
+ * {@link Actor.nodeDrawAlpha}, `null` or the alpha. A faded draw at 1 or at 0
+ * is still a faded draw: the blinking states write exactly those two, and
+ * the renderer draws both through the forced blend, the 0 invisible and still
+ * writing depth (`render/draw_order.ts`). Only `zskamere` has a `0x1FB9`
+ * node -- its bone 9 -- so the ramp is its, under any of the blinking states;
+ * this comment used to say bit 2 was never up for it, which counted the
+ * descriptor's word and not the states that raise the bit.
  *
- * * The draws themselves, the scale and the cels are `render/`'s, and it does
- *   not draw `0x1FF4`, the cycles or a fractional alpha. It is handed the
- *   alpha in {@link ThrowerTail.boneDrawAlpha} and draws a bone whose alpha
- *   is 0 as not drawn, which is every alpha the shipped game gives a bone:
- *   the three blinking states write 0 and 1, and the ramp is reachable only
- *   under the blink bit on a `0x1FB9` node, which no shipped `zskamere` has
- *   — all fifteen carry a `+0x20` word of 1, so bit 2 is never up.
+ * What is not here, and why: the draws themselves, the scale, `0x1FF4` and
+ * the cycles are `render/`'s, and `render/` draws none of the last three.
  */
 export function ThrowerDrawBonePart(obj: Actor, bone: number,
                                     slot: number, f: ClassFrame): void {
@@ -121,7 +124,7 @@ export function ThrowerDrawBonePart(obj: Actor, bone: number,
       && (obj.flags & ActorFlag.NoHeadAim) === 0) {
     ActorAimHeadAtCamera(obj, t, f);
   }
-  let alpha = 1;
+  let alpha: number | null = null;
   const blinking = (obj.flags2 & ThrowerFlag.Blinking) !== 0;
   if (obj.charType === CHAR_ZSLMAN) {
     if (REGROW_SLOTS.includes(slot)
@@ -131,8 +134,8 @@ export function ThrowerDrawBonePart(obj: Actor, bone: number,
         t.handRegrow = REGROW_FULL;
         obj.flags2 &= ~ThrowerFlag.Regrowing;
       }
-    } else if (blinking) {
-      alpha = obj.alpha;
+    } else {
+      alpha = ThrowerDrawPartAlphaIfBlinking(obj, obj.alpha);
     }
   } else if ((obj.flags & ActorFlag.Dead) === 0) {
     if (slot === PULSE_SLOT) {
@@ -147,5 +150,25 @@ export function ThrowerDrawBonePart(obj: Actor, bone: number,
       alpha = obj.alpha;
     }
   }
-  t.boneDrawAlpha[bone] = alpha;
+  obj.nodeDrawAlpha[bone] = alpha;
+}
+
+/**
+ * `ThrowerDrawPartAlphaIfBlinking` — `FUN_0044A280`. `ThrowerDrawPartWithAlpha`
+ * (`FUN_0044A240`) at `alpha` while `obj+0x136C` bit 2 is up, `ThrowerDrawPart`
+ * (`FUN_0044A200`) without it:
+ *
+ * ```
+ * 0044a285  TEST byte ptr [EAX + 0x136c], 0x4 / JZ 0044a2a1
+ * 0044a298  CALL ThrowerDrawPartWithAlpha(slot, alpha)
+ * 0044a2a6  CALL ThrowerDrawPart(slot)
+ * ```
+ *
+ * `[proved]`. Returns the draw as {@link Actor.nodeDrawAlpha} holds it. Its
+ * two callers are `ThrowerDrawBonePart`'s `zslman` arm and
+ * `ThrowerDrawNodePart` (`FUN_0044A2B0`), both with `obj+0x138C`.
+ */
+export function ThrowerDrawPartAlphaIfBlinking(obj: Actor,
+                                               alpha: number): number | null {
+  return (obj.flags2 & ThrowerFlag.Blinking) !== 0 ? alpha : null;
 }

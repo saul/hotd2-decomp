@@ -170,20 +170,6 @@ export interface ThrowerTail extends HeadAimWords {
    * once so it never bit, but it was the wrong address.
    */
   handRegrow: number;       // +0x1384
-  /**
-   * The alpha `ThrowerDrawBonePart` (`FUN_00449F90`) drew each bone's own
-   * part at on the last walk, by bone number; 1 for a solid draw.
-   *
-   * [port-only] The engine keeps no such thing: the hook picks
-   * `ThrowerDrawPart` or `ThrowerDrawPartWithAlpha` inside the draw and the
-   * answer is gone with the frame. The port's draw is in `render/`, which may
-   * read state and may not call the hook, so the hook's choice is kept here
-   * for it — the shape `Actor.suppressedBones` has for
-   * `SkeletonNodeDrawSuppressed`. Rewritten, not appended to, by every walk;
-   * an entry for a bone the walk did not reach this frame is stale and is
-   * not drawn anyway.
-   */
-  boneDrawAlpha: number[];
 }
 
 /**
@@ -216,6 +202,5 @@ export function makeThrowerTail(): ThrowerTail {
     hopsLeft: 0,
     hopFrames: 0,
     handRegrow: 0,
-    boneDrawAlpha: [],
   };
 }

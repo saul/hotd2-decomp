@@ -24122,3 +24122,128 @@ shipped rows both searches find agree, which `verify_combat` now holds.
   my assertion for a bone-0 hit dropped with mine. The lesson was written as
   L70 in the branch's commit and renumbered L73 over two merges, as main
   took 70, 71 and 72.
+
+## 2026-09-28 -- class 0x41 types 70, 71, 72, 74, 75, 76 and 77, and the story item (branch `worktree-agent-ab40562e548c4231e`)
+
+Ported whole: `OriginalItemPropUpdate` (70, 71),
+`PropUpdateType72`, `PropUpdateType74`, `PropUpdateType75` (its draw, sounds
+and blocked byte), `PropUpdateType76` and `PropUpdateType77`, with their
+constructor arms, `PickOriginalModeItem`, `SpawnOriginalItemBanner` /
+`OriginalItemBannerUpdate`, `SpawnScaledPropSpark` and `SpawnStoryModeItem`.
+Named over MCP: `PropUpdateType77` (`0x004717A0`), `PropUpdateType74`
+(`0x00470E20`), `SpawnScaledPropSpark` (`0x00471AB0`; the gate refused
+`SpawnPropHitSparkScaled` as a token superset of `SpawnPropHitSpark`),
+`PropHitSparkUpdate` (`0x00465950`), `SpawnOriginalItemBanner`
+(`0x00475E40`), `OriginalItemBannerUpdate` (`0x00475D00`). The global
+`g_original_item_banner_count` (`0x007DCD04`) is in `globals.tsv` only: the
+live-database gate wants a Hungarian prefix the rest of the file does not use.
+
+**Every one of these routines' pseudocode is short.** `PlaySoundId` is marked
+no-return, so each stops at its first sound: 77's lost its whole draw, its
+registration and its 2000-point payout; 74's its fall and its drop; 76's its
+swing, both draws and its sphere; 70's the three draw blocks run in sequence
+(the pseudocode returns out of each) and its registration, which is
+unconditional. All read from the listing (`L35`).
+
+**What the old notes had wrong.**
+
+* `generic.ts` carried type 72 as open -- "its draw takes `obj+0x28C`, and its
+  one spawn carries a 1: is anything resident at slot 1?" Nothing is asked of
+  slot 1. Case 0x48 calls `PickOriginalModeItem`, which **overwrites
+  `obj+0x28C`** with the drawn item's model before the routine runs. The same
+  call is what makes 70's and 71's model, and `verify_prop_pose.py`'s clause
+  2 looked for a literal store and not a call; it counts the call now, and its
+  open list is empty.
+* `generic.ts` said 70 and 71 hand `AssetDrawSlot` their lifetime. They hand
+  it the item record's model.
+* `GENERIC_ORIGINAL_MODE_ONLY` listed 70, 71, 72 and 77 as a bare mode head.
+  77's head also wants item 0x1F held and plays a sound; 76 has the bare head
+  and was missing; 74 raises `g_script_flags[0x13]` on its Arcade exit, as 75
+  raises `[0x14]`. The set is gone -- each routine has its own head.
+* `branch.ts`'s type-76 note said the port had no `obj+0x194` and gated the
+  block-5 arm on the block alone. Case 0x4C writes the placer's `+0x1F4` byte
+  there, and it also picks the draw: 0 is one door at the prop, 1 a pair of
+  leaves at two literal world points (which is why that spawn is placed at the
+  origin).
+* `globals.ts` said `FUN_00475E40` is "the pickup path" that would fill
+  `g_original_item_slots`. It is a banner; a collectible counts into
+  `g_original_items_taken`, which is persistent (the options block's, loaded
+  by `FUN_0040AB50`), and nothing here fills the inventory.
+* `SpawnStoryModeItem` was an event. It allocates the collectible.
+
+**Found in passing, not mine to fix:** `PlaceGenericPropType43` seeds its bob
+with the routine's re-seed (`0x90 - (rand() % 2 << 8) - rand() % 0x21`, a
+random amplitude); `PlaceGenericProp` case 0x2B's arm (`0x00462250`) seeds
+`0x60 - (rand() % 2) * 0xA0 - rand() % 0x21` and an amplitude of 1.5, as case
+0x47 does. And `effects/sprite.ts` refers to three of its own routines in the
+parenthesised form (`L42`).
+
+**Checks.** `port.test.ts`: the weighted walk, each arm, the pickup and its
+strip, the banner, every routine's head, clock and sphere, 72's throw and fall,
+74's three shots and its story item, 75's path pose, 76's route and swing, 77's
+ride, payout and blink; the mutations tried (the pick call, the seed, the mask,
+the banner tick, the fade, the payout, 74's flag, 76's yaw sign, 72's velocity
+test, 75's blocked byte, 72's second-block gate, 77's parity) each fail it.
+`verify_prop_slots.py` now asks for every model a placed collectible or story
+item can wear and failed the bundle exported before the rows were carried.
+Pictures (`web/shots/`, `collectibles_look.mjs`): `coll-s6b10-f60.png` (stage
+6's two items in the lift, the coin with its camera-facing sign),
+`coll-s6b10s-f75.png` (both taken: the banner and the strips) and `-f90-p11`
+(faded), `coll-s2b16-f120-p74.png` (the UFO, item 31 held),
+`coll-s2b72-f470-p75.png` (72's bullet, flag 0x12 raised by hand),
+`coll-s4b14n-f120.png` against `coll-s4b14h-f120.png` (76's door, and the
+empty doorway without it: 31,581 pixels).
+
+**Wrong turns.** The first visual check of type 75 diffed a frame with and
+without the prop and found no difference, and I nearly read that as "not
+drawn": the panel said every prop had a node, and the model -- 58 by 45 units,
+hanging from its pivot -- is behind the wall the camera faces. The pivot's
+projection being in the frustum is not the model being on screen (`L66`). A
+banner-fade assertion at frame 0x87 could not fail: `15 * (1/15)` is 1.0 in
+float, so the fade's first frame reads as unfaded; moved to 0x90.
+
+**The merge with the other half of the family** (main at `cc219d8a`, types
+5-69, 73 and 78). That branch had moved every routine onto
+`GENERIC_ROUTINES` and draws recorded in the routine (`prop_draw.ts`), so
+the seven moved too: each is its `g_class41_updates` row now, not a family
+(75's `PropFamily.Type75` went with them), and `render/prop_parts_items.ts`
+was deleted -- each routine records its own `AssetDrawSlot`,
+`AssetDrawSlotWithAlpha` and `MatrixClearRotation` (now one function,
+`PropMatrixClearRotation`, where 7's drop and 43 had a copy each). The draws
+were re-read from the listing rather than carried over from the parts, and
+two things the parts had were not the routine's: 72's first block has **no**
+test on `+0x28C` (70's has), and 77's and 76's leaves are composed from
+`MatrixLoadIdentity`, stored and multiplied back onto a fresh view, which in
+the port's world-space record is the matrix itself. The pool's older generic
+arm, `GENERIC_UPDATE`, `GENERIC_ORIGINAL_MODE_ONLY` and `shot_test.ts`'s
+per-type offset table (with its declared divergence) had nothing left to
+serve and are gone; the family-wide divergence in `generic.ts` went with
+them.
+
+`type07.ts` carried a second `PickOriginalModeItem` over TS copies of both
+tables, keyed differently (`PropWords` `o290`/`o28e`/`o2c4`, where this
+branch had fields). One function now, in `original_item.ts`, reading the
+bundle, on the words (the fields were dropped); the exporter carries row 0
+for type 7's drop and type 43's break (`ORIGINAL_ITEM_ROW_ZERO_TYPES`) and
+derives the item models it used to list by hand. With the two globals in
+`G`, 7's drop and 43's wreck count and raise the banner, and 58 and 69 clear
+the blocked byte: five declared divergences gone.
+
+**Found by a byte search, not the xref list.** `get_xrefs_to(0x007DCD14)`
+listed twelve references; a search for the operand bytes found seventeen.
+The missing writers are the story arms of the item release in
+`BreakablePropUpdate`, `KindedPropUpdate` and `FallingContainerUpdate`,
+which the port spells once (`ReleaseHiddenItem`) and which differ: the
+kinded copy writes 0 (and 1 in scene 2 block 4) *before* its spawn and lifts
+a kind-2 prop's item 1.0 whatever its set -- the port had lifted it by the
+set's rise -- and the falling copy hands `+0x11C` its `+0x199` first, which
+is the lifetime the story item inherits; the port handed it the shot count,
+1. `ReleaseHiddenItem` takes the copy now. And the xref the list did have
+from `ChainSegmentUpdate` (`0x00469897`) is not this byte at all: it is
+`g_chain_segments[i - 1]`, whose table starts four bytes later; the TSV row
+said it was a writer. `StoryModeSwitchUpdate`'s two item spawns clear it
+too, and are still not transcribed.
+
+Counts on the merged tree: divergences 134 (main 142), uncited exports held
+at 82.
+

@@ -141,11 +141,10 @@ export function PropUpdateType58(p: BreakableProp, rng: Rng,
       const y = p.y;
       p.storyItem = TYPE58_STORY_ITEM;
       p.y = TYPE58_STORY_ITEM_Y;
-      SpawnStoryModeItem(p, events);
-      // [diverges] `g_original_item_pickup_blocked = 0` (`0x0046F60B`) is
-      // not written: `G` has no such byte, and its one reader,
-      // `OriginalItemPropUpdate`'s pickup arm, is not ported either, so
-      // nothing in the port could see it.
+      SpawnStoryModeItem(p, rng, events);
+      // `MOV byte ptr [0x007DCD14], 0` at `0x0046F60B`: the collectible
+      // pickup `OriginalItemPropUpdate` gates on is open again.
+      G.g_original_item_pickup_blocked = 0;
       p.y = y;
     }
     p.routinePhase = Type58Phase.Fly;

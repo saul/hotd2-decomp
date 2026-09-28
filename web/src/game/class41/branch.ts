@@ -5,9 +5,9 @@
  * are props**: a shootable thing standing in a branch block whose one job is
  * to answer `EvtAdvanceStepOrRoute`'s `next[]` index. They are here rather
  * than one file apiece because they are one mechanism written nine ways, and
- * reading them side by side is the only way the shape is visible. Type 40 is
- * ported whole and lives in `class41/type40.ts`; the table keeps its row so
- * the nine are still read together:
+ * reading them side by side is the only way the shape is visible. Types 40,
+ * 70 and 76 are ported whole and live in their own files; the table keeps
+ * their rows so the nine are still read together:
  *
  * ```
  * type 14  first hit          -> 1 - obj+0x11C     both modes     (type14.ts)
@@ -16,9 +16,9 @@
  * type 40  both sub-kind 9 broken, flag 0x11 -> 2  original only  (type40.ts)
  * type 56  script flag 5, block 9 -> 2             original only  (type56.ts)
  * type 69  flag 0x23, already 1, shot -> 2         original only  (type69.ts)
- * type 70  scene 2, block 4, flag 0x13 -> scene    original only
+ * type 70  scene 2, block 4, flag 0x13 -> scene    original only  (original_item.ts)
  * type 73  first hit, block 7, flag 0x12, key -> 2 original only  (type73.ts)
- * type 76  first hit, block 5 or 0x0E + key -> 2   original only
+ * type 76  first hit, block 5 or 0x0E + key -> 2   original only  (type76.ts)
  * chain    any link, group 1, block 0x16 -> 2      original only
  * switch   scene/block table, its own flag -> 2    original only
  * ```
@@ -36,16 +36,17 @@
  *
  * ## What is transcribed here, and what is not
  *
- * Six of the nine are no longer here: types 14, 19, 25, 56, 69 and 73 are
- * transcribed whole, each in its own file beside type 40's, and their branch
- * write sits in its routine exactly where the exe has it — with the fall, the
- * swing, the sounds, the draws and, for 14, 19 and 25, the enemy count their
- * arms raise and their routines give back.
+ * Eight of the nine are no longer here: types 14, 19, 25, 56, 69, 70 (and 71,
+ * the same routine), 73 and 76 are transcribed whole, each in its own file
+ * beside type 40's, and their branch write sits in its routine exactly where
+ * the exe has it — with the fall, the swing, the sounds, the draws and, for
+ * 14, 19 and 25, the enemy count their arms raise and their routines give
+ * back.
  *
  * **What is left here is the gate and the write, and the latch that stops it
- * firing twice**, for the routines whose other arms are not yet read: type 70
- * (and 71, the same routine), type 76, the chain segments and the story-mode
- * switch. What each doc comment lists as unported is what a later pass still
+ * firing twice**, for the routines whose other arms are not yet read: the
+ * chain segments and the story-mode switch. What each doc comment lists as
+ * unported is what a later pass still
  * owes it. The line was drawn there first because a route the stage takes is
  * a fact about where the whole rest of the level goes, and a prop that swings
  * correctly while sending the player down the wrong road is worth less than
@@ -74,7 +75,10 @@ export enum BranchScriptFlag {
   FragmentPair = 0x11,
   /** `PropUpdateType73`. */
   Type73Trigger = 0x12,
-  /** `OriginalItemPropUpdate`, in scene 2 block 4. */
+  /**
+   * `OriginalItemPropUpdate` (`FUN_004675A0`), in scene 2 block 4 -- see
+   * `class41/original_item.ts`.
+   */
   OriginalItemRoute = 0x13,
   /** `PropUpdateType69`, which promotes an existing 1 to a 2. */
   Type69Promote = 0x23,
@@ -82,7 +86,7 @@ export enum BranchScriptFlag {
 
 /** The event blocks a trigger is live in, where it names one. */
 export enum BranchBlock {
-  /** `PropUpdateType76`'s first arm. */
+  /** `PropUpdateType76` (`FUN_00471330`)'s first arm -- `class41/type76.ts`. */
   Type76First = 5,
   /** `PropUpdateType73`. */
   Type73 = 7,
@@ -94,87 +98,6 @@ export enum BranchBlock {
   Chain = 0x16,
   /** `PropUpdateType25`. */
   Type25 = 0x17,
-}
-
-/** The original items `PropUpdateType76`'s block-0x0E arm will open for. */
-const TYPE76_KEYS = [0, 2, 0x0b];
-
-/** `g_script_flags[n]`, defaulted — an unraised flag is *absent* from the
- *  array, and an undefined slips straight through a bare `=== 1`. */
-function ScriptFlag(n: number): number {
-  return G.g_script_flags[n] ?? 0;
-}
-
-/**
- * `OriginalItemPropUpdate` — `FUN_004675A0`. `g_class41_updates[70]` **and**
- * `[71]`, 23 spawns — Original Mode's collectible.
- *
- * ```c
- * if (g_scene_index == 2 && g_evt_block_index == 4 && g_script_flags[0x13] != 0)
- *     g_script_branch_var = g_scene_index;
- * ```
- *
- * `g_scene_index` on both sides, so the value written **is 2** — the routine
- * spells the route number as the scene it is standing in. Scene 2 is stage 3,
- * whose block 4 record is `{5, -1, 10}`: slot 2, exactly.
- *
- * The write does not depend on the item having been taken; it fires while the
- * flag is up, every frame, which is harmless because the value never changes.
- *
- * Not transcribed: the pickup itself — the `g_original_items_taken` tally, the
- * `FUN_00475E40` award and the 0x32-frame animation — the bob-and-spin idle,
- * and the two draws. The mode gate is already in `pool.ts` through
- * `GENERIC_ORIGINAL_MODE_ONLY`, which lists both types.
- */
-export function OriginalItemPropUpdate(p: BreakableProp): void {
-  void p;
-  if (G.g_scene_index !== 2) return;
-  if (G.g_evt_block_index !== 4) return;
-  if (ScriptFlag(BranchScriptFlag.OriginalItemRoute) === 0) return;
-  G.g_script_branch_var = G.g_scene_index;
-}
-
-/**
- * `PropUpdateType76` — `FUN_00471330`. `g_class41_updates[76]`.
- *
- * Two arms, and only one of them wants a key:
- *
- * ```c
- * if ((obj->+0x34 & 8) && obj->+0x192 == 0) {
- *     ...pay, spark, PlaySoundId(0xF16A9)...
- *     if ((obj->+0x194 == 1 && g_evt_block_index == 5)
- *      || (g_evt_block_index == 0x0E
- *          && (HasItem(0) || HasItem(2) || HasItem(0x0B)))) {
- *         obj->+0x192 = 1;
- *         g_script_branch_var = 2;
- *         obj->+0x34 |= 0x40000000;
- *     }
- * }
- * ```
- *
- * `obj+0x194` is a byte the placer copies, and it separates the two shipped
- * spawns: stage 4 block 5 opens on the shot alone, stage 4 block 14 — 0x0E —
- * wants item 0, 2 or 0x0B first. Their records are `{7, -1, 21}` and
- * `{15, -1, 20}`.
- *
- * [diverges] The port has no `+0x194` for a generic prop, so the block-5 arm is
- * gated on the block alone. That is the same condition for the shipped data —
- * only the block-5 spawn is in block 5 — and it would differ only for a
- * spawn that does not exist.
- *
- * Not transcribed: the spark, the 60 frames of `g_pHingeCurvesXYZ` that swing
- * the door open, and the three draws.
- */
-export function PropUpdateType76(p: BreakableProp): void {
-  if (G.g_GameMode !== GameMode.Original) return;
-  if ((p.flags & BreakableFlag.Hit) === 0 || p.branchLatched) return;
-  const first = G.g_evt_block_index === BranchBlock.Type76First;
-  const keyed = G.g_evt_block_index === BranchBlock.Type76Keyed
-    && TYPE76_KEYS.some(PlayerHoldsOriginalItem);
-  if (!first && !keyed) return;
-  p.branchLatched = true;
-  G.g_script_branch_var = 2;
-  p.flags |= PROP_BRANCH_ANSWERED;
 }
 
 /**
@@ -321,8 +244,11 @@ export const STORY_SWITCH_FLAG_AT: readonly [number, number] = [2, 2];
  * The item spawn carries the **second** write of `g_script_flags[0x15]`, at
  * `0x004751B1`: in Original Mode, once `obj+0x192` has latched and the item
  * has been handed out, the routine waits for `g_script_flags[0x18]` and then
- * counts `obj+0x2B0` past `0x4C` before raising the flag. It is out only
- * because `SpawnStoryModeItem` (`FUN_00467B90`) is, and it is reachable only
+ * counts `obj+0x2B0` past `0x4C` before raising the flag. It was left out
+ * while `SpawnStoryModeItem` (`FUN_00467B90`) was unported; that is ported now
+ * (`class41/items.ts`), and each of these two arms also clears
+ * `g_original_item_pickup_blocked` after its item (`0x00475168`,
+ * `0x0047522F`), so this arm is what is left to read. It is reachable only
  * once the switch is thrown — which for stage 3's switch needs
  * `PlayerHoldsOriginalItem` of item 0 or 6, since its `obj+0x1FC` is 0 and not
  * -1. A player who has one of those in Original Mode still hangs on that gate.

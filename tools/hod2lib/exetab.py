@@ -72,8 +72,12 @@ BANK_PALETTE_INDEX = {0x147: 0x0057A524}
 #: sprites the port draws: ``scr_bosmater`` (0x177) and the six
 #: ``scr_bosmater_st1``..``st6`` (0x186..0x18B), which the byte table at
 #: 0x0041CB90 all sends to jump-table entry 10, ``MOV EAX, 0xA`` at 0x0041CA1A.
+#: And palette 0x14 for 0x156 and the 34 one-picture banks 0x193..0x1B4 --
+#: jump-table entry 2, ``MOV EAX, 0x14`` at 0x0041CA88 -- which hold the
+#: Original Mode item pictures ``OriginalItemBannerUpdate`` draws.
 BANK_PALETTE_CONST = {0x177: 10, 0x186: 10, 0x187: 10, 0x188: 10,
-                      0x189: 10, 0x18A: 10, 0x18B: 10}
+                      0x189: 10, 0x18A: 10, 0x18B: 10, 0x156: 0x14,
+                      **{b: 0x14 for b in range(0x193, 0x1B5)}}
 
 
 @dataclass(frozen=True)
@@ -828,6 +832,12 @@ class ExeTables:
     #: type-4 object kind in `obj+0x6C`.
     PROP_KIND_PARAMS = 0x00593DB8
     PROP_KIND_COUNT = 11
+    #: `g_original_item_tables` -- one pointer per `g_scene_index` to that
+    #: scene's 8-byte rows, which `PickOriginalModeItem` (`FUN_004629C0`)
+    #: indexes by the placer's `desc+0x24` byte. No row count (L6).
+    ORIGINAL_ITEM_TABLES = 0x00595AA0
+    #: `g_original_item_records` -- 0xC a record, by item id.
+    ORIGINAL_ITEM_RECORDS = 0x005957D8
     #: The 48-point hull `FallingContainerUpdate` settles against, passed to
     #: `FUN_0046B040` as `(&DAT_00594788, 0x30)`.
     FALLING_HULL = 0x00594788
@@ -1459,6 +1469,41 @@ class ExeTables:
             out.append({"kind": i, "effect": effect, "effect_variant": variant,
                         "sound": sound, "radius": radius, "y_offset": y_off})
         return out
+
+    def original_item_row(self, scene: int, row: int) -> dict | None:
+        """One row of `g_original_item_tables[scene]`.
+
+        Four s8 item ids at +0..+3 (-1 is none) and four s8 cumulative
+        `rand()` weights at +4..+7, the last of which `PickOriginalModeItem`
+        (`FUN_004629C0`) takes the draw modulo. `None` off the image.
+        """
+        ptr = self._u32(self.ORIGINAL_ITEM_TABLES + scene * 4)
+        base = None if ptr is None else self._v2r(ptr)
+        if base is None:
+            return None
+        o = base + row * 8
+        if o + 8 > len(self.data):
+            return None
+        vals = struct.unpack_from("<8b", self.data, o)
+        return {"ids": list(vals[:4]), "weights": list(vals[4:])}
+
+    def original_item_record(self, item: int) -> dict | None:
+        """`g_original_item_records[item]` -- ``{u16 slot, u16 slot2,
+        f32 scale, s16 sprite}``, the model `PickOriginalModeItem` copies to
+        `obj+0x28C`, the camera-facing one it copies to `obj+0x28E`, the
+        scale for `obj+0x2C4`, and the banner sprite
+        `SpawnOriginalItemBanner` (`FUN_00475E40`) is handed."""
+        base = self._v2r(self.ORIGINAL_ITEM_RECORDS)
+        if base is None or item < 0:
+            return None
+        o = base + item * 0xC
+        if o + 0xC > len(self.data):
+            return None
+        slot, slot2 = struct.unpack_from("<2H", self.data, o)
+        scale, = struct.unpack_from("<f", self.data, o + 4)
+        sprite, = struct.unpack_from("<h", self.data, o + 8)
+        return {"slot": slot, "slot2": slot2, "scale": scale,
+                "sprite": sprite}
 
     def falling_hull_points(self) -> list[tuple[float, float, float]]:
         """The 48-point hull `FallingContainerUpdate` comes to rest on.

@@ -1425,7 +1425,8 @@ Answered since phase 1:
   slots and, through the byte table at `0x00416314`, sets it for item `0x0C`
   (arm `0x00416284`, which also resets the weapon block) or `0x14` (arm
   `0x0041629A`); `ResetOriginalModeLoadout` clears it. The port fills no item
-  slot (`FUN_00475E40` is unported), so the byte is never set there and the
+  slot (`SpawnOriginalItemBanner`, `FUN_00475E40`, only raises a banner), so
+  the byte is never set there and the
   bystanders' scaling never applies -- as in the engine without the item.
   `[proved]`
 * Handler → init → update is three frames: the handler stores the init in

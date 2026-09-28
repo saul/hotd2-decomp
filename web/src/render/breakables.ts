@@ -107,9 +107,10 @@ const SLOT_PART = /_slot_([0-9a-f]{4})$/;
  *
  * `[open]` It stays the default for the families whose own routine has **not**
  * been read for its rotation order — the group props, the kinded props, the
- * break puff, the story-mode switch and `PropUpdateType75`. Keeping the
- * behaviour those four had is deliberate: changing it would be a guess in the
- * other direction. `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
+ * break puff and the story-mode switch. Keeping the behaviour those four had
+ * is deliberate: changing it would be a guess in the other direction.
+ * (`PropUpdateType75` was a fifth; its routine records its draws now.)
+ * `RisingDoorUpdate` (`FUN_004753F0`) is the one that is
  * read, and it is one `MatrixRotateY` and nothing else, so it gets a row.
  */
 const GENERIC_FAMILY_DEFAULT = PoseOrder.YawRollPitch;

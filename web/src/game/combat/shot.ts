@@ -89,7 +89,8 @@ import { g_class_handlers } from "../registry";
 import type { SpawnClass } from "../spawn_class";
 import { DispatchHit, HitResultCode } from "./resolve_hit";
 import { ScoreAddForPlayer } from "./score";
-import { ProcessPlayerShotsTestList, type ShotCandidate } from "./shot_test";
+import { ProcessPlayerShotsTestList, ShotTestPickedBoneMeshes,
+         type ShotCandidate } from "./shot_test";
 
 /**
  * One queued trigger pull.
@@ -333,8 +334,12 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
   events?.emit("sound.play", { id: gunshot });
   // Two answers to one question: the classes that register the engine's way,
   // through `g_shot_test_list`, and everything else through `render/`.
-  const pick = MergeShotPicks(host.pickShot?.(req.ray) ?? null,
-                              ProcessPlayerShotsTestList(req.ray, host));
+  // A third, until the last class registers: the bone meshes of the classes
+  // `render/` picks, which it passes by (`ShotTestPickedBoneMeshes`).
+  const pick = MergeShotPicks(
+    MergeShotPicks(host.pickShot?.(req.ray) ?? null,
+                   ProcessPlayerShotsTestList(req.ray, host)),
+    ShotTestPickedBoneMeshes(req.ray, host));
   // `g_shot_hit_something` — 0x009C9010, written by `ProcessPlayerShots`
   // (`FUN_00404570`) as `count > 0`. Its one reader kills the tracer on its
   // second frame, which is what makes a hit a stub of streak and a miss a
@@ -424,6 +429,15 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     return;
   }
 
+  // A bone hit on its collision mesh -- class 0x30's weapon hands -- first
+  // gets what `MarkActorShot` (`FUN_00404DB0`) gives one at the moment of the
+  // shot, before the class drains it: `SpawnWorldImpact` (`FUN_00405260`) on
+  // the winning quad, the spark of that surface's kind. The owning classes
+  // above get it inside their `MarkActorShot`.
+  if (pick.mesh) {
+    SpawnWorldImpact(player, pick.point, pick.mesh.normal, pick.mesh.surface,
+                     host, events);
+  }
   // Through `DispatchHit` (`FUN_004092F0`) and never straight into
   // `ResolveHit`: the engine has exactly one call to the damage tables and it
   // is behind the shot-immune gate. `null` is that refusal, and it is a
@@ -536,8 +550,9 @@ function ResolveShotOnProp(req: ShotRequest, pick: { propId: number;
  * `0x10`) goes on to `SpawnWorldImpact` (`FUN_00405260`) with the winning
  * quad -- the `CALL` at the end of the bone arm -- which spawns the impact
  * sprite of that surface's kind and leaves the point, surface and normal in
- * `g_shot_hit_records[player]`. The stage-4 boss is the only actor with such
- * bones, and its `Boss4ResolveShot` reads the record back.
+ * `g_shot_hit_records[player]`. The stage-4 boss has such bones, and its
+ * `Boss4ResolveShot` reads the record back; so do class 0x30's weapon hands,
+ * which do not come through here (`ResolveShot` spawns their impact).
  *
  * [diverges] The engine's version also runs the blood effect and, in Original
  * Mode, the item-drop test. Neither is state, and both are the renderer's.

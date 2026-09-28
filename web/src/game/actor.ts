@@ -1679,12 +1679,21 @@ export interface ActorBase {
    * a **collision mesh** rather than a sphere -- the `coli.blobs` key, by
    * bone index. `ShotTestBoneTree` (`FUN_00404750`) takes `ShotTestBoneMesh`
    * (`FUN_004048A0`) for a record whose `+0x74` has bit `0x10` and whose
-   * `+0x88` is not -1, and the sphere test otherwise; the only writer in the
-   * image is `Boss4Init` (`FUN_004917E0`), which also raises `+0x74 |= 0x51`
-   * and zeroes the sphere's radius at `+0x78` for each. An entry here is all
-   * three.
+   * `+0x88` is not -1, and the sphere test otherwise. Two routines write it,
+   * each also raising `+0x74 |= 0x51` and zeroing the sphere's radius at
+   * `+0x78`: `Boss4Init` (`FUN_004917E0`) for the stage-4 boss's tail, and
+   * `EnemyZombieInitByCharType` (`FUN_00452FD0`) for the weapon hands of
+   * class-0x30 character types 2, 3 and 0xE ({@link Actor.boneMeshColi}).
+   * An entry here is all three.
    */
   boneColi: Record<string, string>;
+  /**
+   * The class-0x30 descriptor tail's `+0x10`, as `EnemyZombieInitByCharType`
+   * (`FUN_00452FD0`) reads it for character types 2, 3 and 0xE: the
+   * `coli.blobs` key of the mesh it gives bones 5 and 8. `null` for every
+   * other type, whose `+0x10` is something else.
+   */
+  boneMeshColi: string | null;
   /**
    * Class 0x22's descriptor tail — JUDGMENT's flier: variant, first clip,
    * despawn cue, the three hit-point words and the nested companion. Its own
@@ -2144,19 +2153,50 @@ export interface ActorBase {
    * Per-bone **hit-sphere radius** — the same record's `+0x78`,
    * `obj + 0x284 + bone*0x90`, which `SkeletonWalkNode` (`FUN_004107E0`)
    * fills as the skeleton is built: the character type's table radius
-   * **times the model's size**, `model+0x116C` (`0x00410837`). The port's
-   * build, `ActorBuildSkinnedModel` in `game/spawn.ts`, writes one for every
-   * bone the type has a sphere for, so a civilian's are 0.9 of her table's.
+   * **times the model's size**, `model+0x116C` (`0x00410837`), when the
+   * table row's own slot is the node's, and zero when it is not
+   * (`0x00410830`). The port's build, `ActorBuildSkinnedModel` in
+   * `game/spawn.ts`, writes one for every bone, so a civilian's are 0.9 of
+   * her table's.
    *
    * A routine that writes the record afterwards wins, as the engine's record
    * does: `ShotTestBoneSphere` (`FUN_004047D0`) skips a bone whose radius is
    * zero, and `BoneHitSpriteDrawAndTick` (`FUN_00407120`) and
-   * `DrawBloodSpray` (`FUN_00407230`) add it to the view-space depth.
-   * `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) zeroes the frog's bone 2
-   * (`part+0x210`, `0x0043A35D`). A bone with no entry -- an actor that was
-   * never built -- reads the table's radius unscaled.
+   * `DrawBloodSpray` (`FUN_00407230`) add it to the view-space depth. The
+   * writers after the build, every one unscaled:
+   *
+   * * `ActorSwapDamagedPart` (`FUN_004098E0`) zeroes it for slot 0 or 1, and
+   *   otherwise `ResolveDamagedPartSphere` (`FUN_004099A0`) copies the
+   *   damaged part's row over it when a table has one;
+   * * `RemoveBoneSubtree` (`FUN_00409AF0`) zeroes it with the slot;
+   * * the weapon hands: `SpawnThrownWeapon` (`FUN_004504E0`) and
+   *   `ZombieThrowHandWeapon` (`FUN_0045A240`) zero the hand that let go,
+   *   `ThrowerStateRearm` (`FUN_0044F7A0`) writes literals back and
+   *   `ThrowerStateRestoreBothHands` (`FUN_0044F900`) table rows 4 and 7;
+   * * `EnemyZombieInitByCharType` (`FUN_00452FD0`) zeroes the bones it gives
+   *   a collision mesh ({@link Actor.boneColi});
+   * * `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) zeroes the frog's bone 2
+   *   (`part+0x210`, `0x0043A35D`).
+   *
+   * A bone with no entry -- an actor that was never built -- reads the
+   * table's radius unscaled.
    */
   boneRadius: Record<string, number>;
+  /**
+   * Per-bone **hit-sphere centre** — the record's `+0x7C..+0x84`, in the
+   * bone's own space, which goes through the node's matrix into `+0x68` as
+   * the bone is drawn (`SkeletonEmitNode`, `FUN_004114C0`). Written by the
+   * same routines as {@link Actor.boneRadius} except the ones that only zero
+   * a radius: the build (the row's centre, or zero where the row's slot is
+   * not the node's), `ResolveDamagedPartSphere`, `ThrowerStateRearm` and
+   * `ThrowerStateRestoreBothHands`. Never scaled: the node matrix carries
+   * the model's size already.
+   *
+   * It was the bundle's `hit_centre` alone for as long as nothing could move
+   * it, which made a gore-swapped bone keep the pristine part's centre. A
+   * bone with no entry reads the table's.
+   */
+  boneCentre: Record<string, [number, number, number]>;
   /**
    * Bones whose own rigid draw is vetoed, one bit per bone.
    *
@@ -2438,6 +2478,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     skel: null,
     class19: null,
     boneColi: {},
+    boneMeshColi: null,
     class22: null,
     class23: null,
     class33: null,
@@ -2491,6 +2532,7 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
     removed: [],
     boneSlot: {},
     boneRadius: {},
+    boneCentre: {},
     suppressedBones: 0,
     nodeDrawAlpha: [],
     attachments: [],

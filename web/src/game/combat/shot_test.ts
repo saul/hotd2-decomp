@@ -65,7 +65,8 @@ import { ColiSegmentVsMesh, type ColiHit } from "../coli";
 import {
   MatCopy, MatrixInvert, MatrixTransformPoint, MatrixTransformVector,
 } from "../matrix";
-import { CharacterTypeOf, T } from "../tables";
+import { BoneHitRadius, CharacterTypeOf, T } from "../tables";
+import { g_class_handlers } from "../registry";
 import { VecToAngles, type Vec3 } from "../vec";
 
 /**
@@ -596,7 +597,8 @@ const _hit: ColiHit = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, surface: 0,
  * `ShotPushColiHitCandidate` (`FUN_00404CB0`) takes it.
  */
 function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
-                          shot: ShotTest, out: ShotCandidate[]): void {
+                          shot: Pick<ShotTest, "ray" | "host">,
+                          out: ShotCandidate[]): void {
   const blob = T.coli?.blobs?.[mesh];
   if (!blob || !shot.host.boneMatrix?.(obj.at, node.bone, _bm)) return;
   MatCopy(_inv, _bm);
@@ -623,6 +625,42 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
 }
 
 /**
+ * The mesh arm of `ShotTestBoneTree` (`FUN_00404750`) for the classes
+ * `render/` still picks, nearest along the shot.
+ *
+ * `[port-only]` A class that registers for the shot test gets its bone meshes
+ * tested in {@link ProcessPlayerShotsTestList}, through the same tree walk as
+ * the engine's. One that does not is picked by `render/characters.ts`, which
+ * tests bone spheres and passes a bone with a mesh by -- the mesh is the
+ * game's data, and the renderer answers geometric questions rather than
+ * running the engine's tests. So this runs `ShotTestBoneMesh` over every such
+ * bone of every such actor, and `ResolveShot` merges the answer with the other
+ * two the way it merges those. Class 0x30's weapon hands
+ * (`EnemyZombieInitByCharType`, `FUN_00452FD0`) are the only bones it finds
+ * in the shipped game. It goes when class 0x30 registers; see
+ * `docs/formats/combat.md`, "What converting the rest takes".
+ */
+export function ShotTestPickedBoneMeshes(ray: ShotRay,
+                                         host: GameHost): ShotCandidate | null {
+  const out: ShotCandidate[] = [];
+  const shot = { ray, host };
+  for (const obj of G.g_object_list) {
+    if (!obj.visible || obj.dead || obj.despawned) continue;
+    if (g_class_handlers[obj.cls]?.registersForShotTest) continue;
+    if (obj.flags & ActorFlag.NoShotTest) continue;
+    const bones = CharacterTypeOf(obj)?.bones ?? [];
+    for (const b of bones) {
+      const mesh = obj.boneColi[String(b.bone)];
+      if (mesh === undefined || BoneDrawSlot(obj, b) === 0) continue;
+      ShotTestBoneMesh(obj, b, mesh, shot, out);
+    }
+  }
+  let best: ShotCandidate | null = null;
+  for (const c of out) if (c.t > 0 && (!best || c.t < best.t)) best = c;
+  return best;
+}
+
+/**
  * `ShotTestBoneSphere` — `FUN_004047D0`. One bone's hit sphere.
  *
  * ```
@@ -641,15 +679,16 @@ function ShotTestBoneMesh(obj: Actor, node: CharacterBone, mesh: string,
 function ShotTestBoneSphere(obj: Actor, node: CharacterBone, shot: ShotTest,
                             out: ShotCandidate[]): void {
   // An actor that carries the engine's model block has the record itself:
-  // `rec+0x68` is what its own `SkeletonEmitNode` wrote this frame, and
-  // `rec+0x78` is `Actor.boneRadius`: the type's radius times the model's
-  // size as the build wrote it, or what a class has written over it since.
-  // See `game/skeleton.ts` and `ActorBuildSkinnedModel` in `game/spawn.ts`.
+  // `rec+0x68` is what its own `SkeletonEmitNode` wrote this frame from
+  // `Actor.boneCentre`, and `rec+0x78` is `Actor.boneRadius`: the build's
+  // (the row's radius times the model's size, where the row's slot is the
+  // node's), or what a routine has written over it since. See
+  // `game/skeleton.ts` and `ActorBuildSkinnedModel` in `game/spawn.ts`.
   const rec = obj.skel?.bones[node.bone];
   if (rec) {
     _w.x = rec.hit[0]; _w.y = rec.hit[1]; _w.z = rec.hit[2];
   }
-  const r = rec ? (obj.boneRadius[String(node.bone)] ?? node.hit_radius ?? 0)
+  const r = rec ? BoneHitRadius(obj, node)
     : shot.host.boneSphere?.(obj.at, node.bone, _w) ?? null;
   if (r === null || r === SHOT_TEST_ZERO) return;
   if (!shot.host.viewSpaceOfPoint?.(_w, _c)) return;

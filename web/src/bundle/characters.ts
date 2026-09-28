@@ -26,9 +26,24 @@ export interface BakedMotion {
 
 export interface CharacterBone {
   bone: number;
-  /** Hit-sphere centre in the bone's own space, from `PTR_DAT_004D032C`. */
+  /**
+   * The bone's row of `g_character_part_tables` (`0x004D032C`), row
+   * `bone - 1`, **as the table has it**: the hit-sphere centre in the bone's
+   * own space, the radius unscaled, and the row's own asset slot. Absent when
+   * the row's radius is not positive.
+   *
+   * These are not what the actor is shot through. `SkeletonWalkNode`
+   * (`FUN_004107E0`) copies the row into the bone's draw record only when
+   * `hit_slot` is the node's own {@link CharacterBone.slot}, scaling the
+   * radius by the model's size; otherwise it zeroes both. That record is
+   * `Actor.boneRadius` and `Actor.boneCentre`, which `ActorBuildSkinnedModel`
+   * writes and every later writer overwrites. The row is kept whole because
+   * `ThrowerStateRestoreBothHands` (`FUN_0044F900`) copies rows 4 and 7
+   * back in later without the comparison.
+   */
   hit_centre?: [number, number, number];
   hit_radius?: number;
+  hit_slot?: number;
   /**
    * `[slot, code, damage]` per successive hit, exactly as `ResolveHit` reads
    * them. *code* is the **next** effect-table entry, which the game branches
@@ -487,6 +502,14 @@ export interface CharacterPlacement {
     despawn_path: number;
     despawn_frame: number;
   } | null;
+  /**
+   * Class 0x30's (and 0x18's) tail `+0x10`, for character types 2, 3 and 0xE
+   * only: the `coli.blobs` key `EnemyZombieInitByCharType` (`FUN_00452FD0`)
+   * writes into bone 5's record `+0x88` (and bone 8's, for 2 and 3), with the
+   * mesh bits `+0x74 |= 0x51` and the sphere's radius zeroed. See
+   * `game/class30/init_char.ts`.
+   */
+  bone_mesh_coli?: string;
   class43?: { subtype: number; member: number } | null;
   /**
    * Class 0x46's three descriptor bytes — the bat, and the whole descriptor.
@@ -1052,12 +1075,30 @@ export interface AttachmentRecord {
   slot: number;
 }
 
+/** One row of {@link CharactersJson.part_spheres}. */
+export interface PartSphereRow {
+  slot: number;
+  centre: [number, number, number];
+  radius: number;
+}
+
 export interface CharactersJson {
   deaths: DeathSet;
   difficulty: DifficultyJson;
   combat: CombatJson;
   /** `g_bone_damage_zone` — bone → destroyed-zone bit, 0xFF for none. */
   bone_zones: number[];
+  /**
+   * `g_character_part_tables`' **damaged-part rows**, by character type: the
+   * rows `ResolveDamagedPartSphere` (`FUN_004099A0`) walks, from row
+   * `bone_count - 1` to the `-1` that ends them, in table order. For every
+   * type the stage builds and for types 7 and 0xB, which
+   * `ActorSwapDamagedPart` (`FUN_004098E0`) searches after the actor's own;
+   * only rows whose slot some bone's effect table names are kept, which
+   * leaves every search's first match where it was. Absent in a bundle older
+   * than the port of that routine.
+   */
+  part_spheres?: Record<string, PartSphereRow[]>;
   /** `DAT_004C84A8` — bone → reaction group: head, torso, each limb. */
   reaction_groups: number[];
   approach: ApproachJson;

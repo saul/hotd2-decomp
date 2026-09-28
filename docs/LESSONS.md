@@ -1025,3 +1025,23 @@ check that the pixels it should not touch are identical -- which is also what
 tells you the runs stayed in step. It is `L44`'s "a harness that prints its
 arguments as its result" one layer down: a redraw that repeats the frame
 agrees with any claim about it.
+
+**L70 -- A load through initialised data comes out of the decompiler as a
+literal.** `ThrowerStateRearm` (`FUN_0044F7A0`) decompiles to eight float
+constants written into two hands' bone records -- `obj+0x554 = 0x3fe00000`,
+`obj+0x558 = 0xbdcccccd`, and so on -- and I had them typed up as the
+routine's own literals before disassembling. The instructions are
+`MOV ECX,[0x004D0384]; MOV EDX,[ECX+0x60]`: a pointer in `.data`, which is
+`g_character_part_tables[0x16]`, and an offset into the table it points at.
+Ghidra treats an initialised word as a constant, follows it, and prints what
+the table holds on disk. The numbers were right; the reading was not -- the
+routine reads rows 4 and 7 of a table, the same table
+`ThrowerStateRestoreBothHands` reads by the actor's type, and a port that
+wrote literals would have been a second copy of that table with nothing tying
+the two together. **When the pseudocode stores a float literal into a field a
+table also feeds, disassemble the store** -- and if a literal matches a
+table's value exactly, that is the tell, not a coincidence to note and move
+past. The check that holds it now reads the instruction bytes and the table
+together (`tools/verify_combat.py`, check 17). It is `L1`'s family: the
+decompiler presents the instruction stream as something it is not, and nothing
+marks the substitution.

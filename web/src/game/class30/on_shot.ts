@@ -86,6 +86,22 @@ export function ZombieOnShot(obj: ZombieActor): void {
   // holds `MOV EDX, [ESI+0x136c]`, inside the per-player loop, and the
   // encoding is the byte form. `[proved]`
   if (obj.flags & ActorFlag.ShotImmune) return;
+  // The per-player loop's second write, for each player whose shot found a
+  // bone (`g_shot_bone[p] > 0`, `0x00453EE7`..`0x00453EF7`):
+  //
+  // ```
+  // 00453efd  MOV EDX, dword ptr [ESI + 0x136c]
+  // 00453f14  AND DH, 0xfb                         ; ~0x400
+  // 00453f24  MOV dword ptr [ESI + 0x136c], EDX
+  // ```
+  //
+  // -- {@link ZombieFlag2.EntryClipPlaying} drops on any such hit, which is
+  // what lets a shot `znchain` attack before its first idle is out. The same
+  // loop also stores the result at `obj+0x1364` (the port's
+  // `pendingHit.result`) and raises `obj+0x34` bit `0x8000000`, which the
+  // port does not carry; see the note above on what of this routine lives
+  // elsewhere.
+  if (hit.bone > 0) obj.flags2 &= ~ZombieFlag2.EntryClipPlaying;
   // `00453F46 TEST dword ptr [ESI + 0x34], 0x4000000` / `JZ 0045401A` -- the
   // live arm, and the engine's **one** call site for `ActorReactToHit`
   // (`FUN_004543F0`): `0045401A PUSH EDI / CALL 0x004543F0`.

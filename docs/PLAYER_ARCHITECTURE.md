@@ -130,7 +130,10 @@ should take it:
   `G.g_shot_test_list`, and `game/combat/shot_test.ts` runs the broad phase,
   the fork and the sort itself. It asks the host only for what a pose knows:
   `boneSphere` and `viewSpaceOfPoint`. `MergeShotPicks` puts the two answers
-  together until every class has moved across. `GameHost.boneWorld` returns where a bone is.
+  together until every class has moved across -- three, while a class the
+  renderer picks has a bone with a collision mesh: the mesh is game data, so
+  `ShotTestPickedBoneMeshes` tests it over `boneMatrix` and the pick passes
+  the bone by. `GameHost.boneWorld` returns where a bone is.
   `CharacterLayer.readySpawns` returns which adopted hierarchies the script is
   currently asking for and where the exporter put them. Each is a fact only
   three.js can produce, and each crosses the seam as plain numbers.

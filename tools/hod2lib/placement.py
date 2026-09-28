@@ -403,6 +403,10 @@ class Placement:
     #: Class 0x19's tail -- the stage-4 boss's entrance, per-bone collision
     #: meshes and despawn cue; see :func:`characters.class19_tail`.
     class19: dict | None = None
+    #: Class 0x30's (and 0x18's) tail ``+0x10`` for character types 2, 3 and
+    #: 0xE -- the collision blob `EnemyZombieInitByCharType` puts in bones 5
+    #: and 8's records; see :func:`characters.zombie_bone_mesh_coli`.
+    bone_mesh_coli: str | None = None
     #: Class 0x22's tail -- JUDGMENT's flier; see
     #: :func:`characters.class22_tail`.
     class22: dict | None = None
@@ -516,6 +520,8 @@ class Placement:
             d["class17"] = self.class17
         if self.class19:
             d["class19"] = self.class19
+        if self.bone_mesh_coli:
+            d["bone_mesh_coli"] = self.bone_mesh_coli
         if self.class22:
             d["class22"] = self.class22
         if self.class23:

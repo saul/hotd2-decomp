@@ -119,7 +119,10 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   // the next frame on `obj+0x34` bit `0x4000` and bytes `0x009C72F1`/
   // `0x009C72F3`; no stage bundle is exported in Training, and the port keeps
   // no hook pointer. Original Mode's big-head hook, `ZombieDrawWithEnlargedHead`
-  // (`FUN_00453B50`), calls this one inside a scale, so it aims the same.
+  // (`FUN_00453B50`), calls this one inside a scale, so it aims the same; the
+  // same arm of `EnemyZombieInit` doubles bone 2's hit radius (`obj+0x3A4`,
+  // `FADD ST0,ST0` -- `FMUL [0x0055DD48]` for type 0xE -- at `0x00452F71`),
+  // which goes with the item.
   HeadAimBeginDraw(obj, obj.zom, host);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
   HeadAimEndDraw(obj, obj.zom);

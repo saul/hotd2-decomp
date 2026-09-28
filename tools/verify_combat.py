@@ -109,6 +109,22 @@ byte. The readings under test are the ones docs/formats/combat.md states:
     the state picks them with (`0x0044BAB1`..`0x0044BAD0`) and holds the
     exported four to exactly those addresses.
 
+17. **A bone record's hit sphere comes from the row whose slot is the
+    node's, and the rows the later writers read are the rows they say.**
+    `SkeletonWalkNode`'s gate (`CMP EDX,[EDI]; JNZ` at ``0x00410830``) is
+    read out of ``.text``, and the bones it refuses are held to ``GATED``. `ThrowerStateRearm` and
+    `ThrowerStateRestoreBothHands` load rows 4 and 7 -- type 0x16's by name,
+    the actor's own by index -- and those rows' **slots are the armed hands
+    `EnemyThrowerInit` writes as immediates** at ``0x00449877`` and
+    ``0x00449881``: a table and an instruction stream agreeing, which only a
+    right row stride and a right ``bone - 1`` can produce. Every type whose
+    effect table names a slot has a damaged-part tail that ends in ``-1``
+    inside the image; where a type's own tail and type 7's (or 0xB's) both
+    have a slot, the two rows are the same row, which is why running both
+    searches cannot be told from a fallback; the exporter's rows are a raw
+    first-match read; and every class-0x30/0x18 spawn of types 2, 3 and 0xE
+    names a collision blob at its tail's ``+0x10``.
+
 Known exception, reported rather than hidden: character type 21 (`samson`, a
 boss) has a `PTR_DAT_004D032C` entry that is not the ``{slot, centre, radius}``
 layout the others use -- its first word is a float. Its damaged-part spheres
@@ -395,6 +411,8 @@ def main() -> int:
     import collections
     posed = collections.Counter()
     seen_cls = collections.Counter()
+    mesh_hands = 0
+    mesh_unresolved: list[str] = []
     for n in sorted(stagelib.STAGE_TO_SCENE):
         try:
             st = stagelib.Stage(args.game_dir, stage=n)
@@ -405,6 +423,11 @@ def main() -> int:
             seen_cls[p.cls] += 1
             if p.motion is not None:
                 posed[p.cls] += 1
+            if (p.cls in (0x30, 0x18)
+                    and p.char_type in ch.ZOMBIE_BONE_MESH_TYPES):
+                mesh_hands += 1
+                if not p.bone_mesh_coli:
+                    mesh_unresolved.append(f"stage {n} {p.at:#x}")
     for cls in sorted(ch.MOTION_RULES):
         if seen_cls[cls] and not posed[cls]:
             fails.append(f"class {cls:#04x} has a motion rule and "
@@ -661,6 +684,14 @@ def main() -> int:
         fails.append(f"arc-script stages past their clip's play length: "
                      f"{past[:6]}")
 
+    # 17 -----------------------------------------------------------------
+    _check_bone_spheres(tables, types, fails)
+    print(f"  {mesh_hands} class-0x30/0x18 spawns of types 2, 3 and 0xE, "
+          f"{mesh_hands - len(mesh_unresolved)} naming a collision blob")
+    if not mesh_hands or mesh_unresolved:
+        fails.append(f"mesh-hand spawns with no blob at tail+0x10: "
+                     f"{mesh_unresolved[:6]} (of {mesh_hands})")
+
     if fails:
         print("\nFAIL")
         for f in fails:
@@ -668,6 +699,160 @@ def main() -> int:
         return 1
     print("\nclean")
     return 0
+
+
+#: Every (type, bone) row `SkeletonWalkNode` refuses although it carries a
+#: radius, over every character type with a skeleton -- by type, the bones.
+#: Held here, whole, so that `ActorBuildSkinnedModel`'s note in
+#: `web/src/game/spawn.ts` can point at a list a check derives from the exe
+#: rather than quote one. Most are types whose table pointer is a stub that
+#: ends in -1 after a row or two, read on past it; `zsass`'s two hands (0x16)
+#: are the real rows that name the armed model where the node names the bare.
+GATED = {
+    0x03: [5, 8], 0x15: [6, 9, 13, 16], 0x16: [5, 8], 0x1A: [3, 11],
+    0x1B: [9, 10, 11, 12, 13, 14], 0x1C: list(range(5, 15)), 0x1F: [3],
+    0x21: [2], 0x39: [2, 5], 0x3A: [2, 5], 0x3B: [5], 0x3C: [5], 0x3E: [9],
+    0x3F: list(range(7, 16)), 0x40: list(range(5, 16)), 0x41: [6, 9],
+    0x42: [3, 4], 0x43: [3, 13], 0x46: [3], 0x4E: [3],
+    0x53: list(range(4, 19)), 0x54: list(range(3, 20)),
+    0x55: list(range(2, 16)),
+}
+GATED_ROWS = {(ct, b) for ct, bones in GATED.items() for b in bones}
+
+
+def _code(tables, va: int, n: int) -> bytes:
+    o = tables._v2r(va)
+    return bytes(tables.data[o:o + n])
+
+
+def _raw_rows(tables, ct: int):
+    """`g_character_part_tables[ct]` read raw, as ``(slot, r, cx, cy, cz)``
+    per row from row 0, and the index of the first ``-1`` past the bones or
+    None when the image ends first."""
+    b = tables._v2r(ch.HIT_SPHERES)
+    p = tables._v2r(struct.unpack_from("<I", tables.data, b + ct * 4)[0])
+    n = tables.character_bone_count(ct)
+    rows, i, end = [], 0, None
+    while p + (i + 1) * 0x14 <= len(tables.data):
+        slot, cx, cy, cz, r = struct.unpack_from("<i4f", tables.data,
+                                                 p + i * 0x14)
+        rows.append((slot, r, cx, cy, cz))
+        if i >= n - 1 and slot == -1:
+            end = i
+            break
+        i += 1
+    return rows, end
+
+
+def _check_bone_spheres(tables, types: list[int], fails: list[str]) -> None:
+    # The gate, and the build's multiply, as the instruction stream has them:
+    # MOV EDX,[EAX-0x14]; CMP EDX,[EDI]; JNZ +0x3F; FLD [ECX+0x1300];
+    # FMUL [EAX-4]; FSTP [ESI+0x78].
+    want = bytes.fromhex("8b50ec3b17753f" "d98100130000" "d848fc" "d95e78")
+    if _code(tables, 0x00410830, len(want)) != want:
+        fails.append("SkeletonWalkNode's slot gate is not at 0x00410830")
+    gated = set()
+    for ct in types:
+        rows, _ = _raw_rows(tables, ct)
+        for node in tables.character_skeleton(ct):
+            b = node["bone"]
+            if 1 <= b <= len(rows):
+                slot, r = rows[b - 1][0], rows[b - 1][1]
+                if r > 0 and (slot & 0xFFFFFFFF) != node["slot"]:
+                    gated.add((ct, b))
+    print(f"  {len(gated)} rows with a radius the build refuses, in "
+          f"{len({ct for ct, _ in gated})} of {len(types)} character types")
+    if gated != GATED_ROWS:
+        fails.append(f"the gated rows are not the documented ones: extra "
+                     f"{sorted(gated - GATED_ROWS)}, missing "
+                     f"{sorted(GATED_ROWS - gated)}")
+
+    # The two restore states: which table, which rows, and whose slots.
+    tbl16 = ch.HIT_SPHERES + 0x16 * 4
+    reads = {
+        # ThrowerStateRearm: MOV ECX,[tbl16]; MOV EDX,[ECX+0x60] and
+        # MOV EAX,[tbl16] ... MOV ECX,[EAX+0x9c].
+        0x0044F822: b"\x8b\x0d" + struct.pack("<I", tbl16) + b"\x8b\x51\x60",
+        0x0044F880: b"\xa1" + struct.pack("<I", tbl16)
+                    + b"\x8b\x88\x9c\x00\x00\x00",
+        # ThrowerStateRestoreBothHands: MOV ECX,[EAX*4 + table]; +0x60 / +0x9c.
+        0x0044F9E6: b"\x8b\x0c\x85" + struct.pack("<I", ch.HIT_SPHERES)
+                    + b"\x8b\x51\x60",
+        0x0044FA4E: b"\x8b\x0c\x85" + struct.pack("<I", ch.HIT_SPHERES)
+                    + b"\x8b\x91\x9c\x00\x00\x00",
+    }
+    for va, w in reads.items():
+        if _code(tables, va, len(w)) != w:
+            fails.append(f"the restore read at {va:#010x} is not "
+                         f"{w.hex()}")
+    if (4 * 0x14 + 0x10, 7 * 0x14 + 0x10) != (0x60, 0x9C):
+        fails.append("rows 4 and 7's radii are not at +0x60 and +0x9C")
+    # EnemyThrowerInit's armed hands, as immediates: MOV [ESI+0x4DC], imm32
+    # and MOV [ESI+0x68C], imm32.
+    arm5 = _code(tables, 0x00449877, 10)
+    arm8 = _code(tables, 0x00449881, 10)
+    rows16, _ = _raw_rows(tables, 0x16)
+    if (arm5[:6] != bytes.fromhex("c786dc040000")
+            or arm8[:6] != bytes.fromhex("c7868c060000")):
+        fails.append("EnemyThrowerInit's two hand writes are not at "
+                     "0x00449877 / 0x00449881")
+    else:
+        imm5 = struct.unpack_from("<I", arm5, 6)[0]
+        imm8 = struct.unpack_from("<I", arm8, 6)[0]
+        print(f"  zsass: EnemyThrowerInit arms {imm5:#x}/{imm8:#x}; rows 4 "
+              f"and 7 name {rows16[4][0]:#x}/{rows16[7][0]:#x}, radii "
+              f"{rows16[4][1]:g}/{rows16[7][1]:g}")
+        if (rows16[4][0], rows16[7][0]) != (imm5, imm8):
+            fails.append("type 0x16's rows 4 and 7 are not the hands "
+                         "EnemyThrowerInit arms")
+
+    # The damaged-part tails: terminated, agreeing, and exported as a raw
+    # first match reads them.
+    fallback = {ct: (0xB if ct == 0xD else 7) for ct in types}
+    unterminated, disagree, misread, both = [], [], [], 0
+    for ct in types:
+        named = {st[0] for node in tables.character_skeleton(ct)
+                 for st in ch.hit_steps(tables, ct, node["bone"])
+                 if st[0] > 1}
+        if not named:
+            continue
+        n = tables.character_bone_count(ct)
+        rows, end = _raw_rows(tables, ct)
+        if end is None:
+            unterminated.append(f"{ct:#x}")
+            continue
+        own = {}
+        for row in rows[n - 1:end]:
+            own.setdefault(row[0], row)
+        frows, fend = _raw_rows(tables, fallback[ct])
+        fb = {}
+        for row in frows[tables.character_bone_count(fallback[ct]) - 1:fend]:
+            fb.setdefault(row[0], row)
+        for s in named:
+            if s in own and s in fb:
+                both += 1
+                if own[s][1:] != fb[s][1:]:
+                    disagree.append(f"{ct:#x} slot {s:#x}")
+        exported = ch.part_sphere_rows(tables, ct, named)
+        first = {}
+        for e in exported:
+            first.setdefault(e["slot"], e)
+        for s in named:
+            got = first.get(s)
+            raw = own.get(s)
+            if (got is None) != (raw is None) or (
+                    got is not None and (got["radius"], *got["centre"])
+                    != raw[1:]):
+                misread.append(f"{ct:#x} slot {s:#x}")
+    print(f"  damaged-part tails end in -1 for every type that searches "
+          f"one; {both} slots found by both searches, all agreeing")
+    if unterminated:
+        fails.append(f"damaged-part tails with no -1: {unterminated}")
+    if disagree:
+        fails.append(f"own and fallback rows disagree: {disagree[:6]}")
+    if misread:
+        fails.append(f"part_sphere_rows is not a raw first match: "
+                     f"{misread[:6]}")
 
 
 def _net_z(m: dict) -> float:

@@ -802,18 +802,31 @@ export class CharacterLayer implements System {
         continue;
       }
       for (const b of inst.type.bones) {
-        // The record's radius -- `Actor.boneRadius`, which the build wrote as
-        // the table's times the model's size and a class may have written
-        // over since; `ShotTestBoneSphere` skips a zero. The centre needs no
-        // such care: it goes through the bone's node, which carries the size.
-        const r = inst.a.boneRadius[String(b.bone)] ?? b.hit_radius;
-        if (!r) continue;
         // A removed bone has a zero draw slot, and `ShotTestBoneTree` never
         // descends into one -- so a blown-off arm cannot be shot again.
         if (inst.a.removed.includes(b.bone)) continue;
         const node = inst.bones.get(b.bone);
         if (!node) continue;
-        this._c.set(b.hit_centre![0], b.hit_centre![1], b.hit_centre![2]);
+        // **A bone with a collision mesh is not a sphere** -- `ShotTestBoneTree`
+        // (`FUN_00404750`) forks on the record's `+0x74` bit `0x10` before it
+        // looks at a radius, and the routines that give a bone a mesh zero the
+        // radius anyway. The mesh is the game's to test
+        // (`ShotTestPickedBoneMeshes` in `game/combat/shot_test.ts`, over
+        // `GameHost.boneMatrix`); class 0x30's weapon hands are the ones this
+        // pick would otherwise meet.
+        if (inst.a.boneColi[String(b.bone)] !== undefined) continue;
+        // The record's radius and centre -- `Actor.boneRadius` and
+        // `Actor.boneCentre`, which the build wrote from the table (the
+        // radius times the model's size, both zero where the row's slot is
+        // not the node's) and a routine may have written over since;
+        // `ShotTestBoneSphere` skips a zero. The centre is not scaled: it goes
+        // through the bone's node, which carries the size.
+        const k = String(b.bone);
+        const r = inst.a.boneRadius[k] ?? b.hit_radius;
+        if (!r) continue;
+        const c = inst.a.boneCentre[k] ?? b.hit_centre;
+        if (!c) continue;
+        this._c.set(c[0], c[1], c[2]);
         node.localToWorld(this._c);
         this._ray.closestPointToPoint(this._c, this._p);
         const t = this._p.sub(this._ray.origin).dot(this._ray.direction);
@@ -900,12 +913,16 @@ export class CharacterLayer implements System {
       if (inst.at !== at) continue;
       const b = inst.type.bones.find((x) => x.bone === bone);
       const node = b && inst.bones.get(bone);
-      if (!b || !node || !b.hit_centre) return null;
-      out.set(b.hit_centre[0], b.hit_centre[1], b.hit_centre[2]);
+      if (!b || !node) return null;
+      // `+0x288` (the centre `+0x274` is posed from) and `+0x284` are the
+      // record's: the build's, or what a routine wrote over them since --
+      // `Actor.boneCentre` and `Actor.boneRadius`.
+      const k = String(bone);
+      const c = inst.a.boneCentre[k] ?? b.hit_centre;
+      if (!c) return null;
+      out.set(c[0], c[1], c[2]);
       node.localToWorld(out);
-      // `+0x284` is the record's: the build's scaled radius, or what a class
-      // wrote over it -- `Actor.boneRadius`.
-      return inst.a.boneRadius[String(bone)] ?? b.hit_radius ?? null;
+      return inst.a.boneRadius[k] ?? b.hit_radius ?? null;
     }
     return null;
   }

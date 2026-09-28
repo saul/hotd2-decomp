@@ -39,7 +39,8 @@ import {
 } from "../matrix";
 import { ApplyRootMotion } from "../root_motion";
 import { MatrixInterpolateSwingTwist, type Mat3 } from "../class44/swing_twist";
-import { CharacterTypeOf, MotionOf, MotionPlayLength } from "../tables";
+import { BoneHitCentre, CharacterTypeOf, MotionOf, MotionPlayLength }
+  from "../tables";
 import type { BakedMotion, CharacterBone } from "../../bundle";
 import { BOSS3_MAX_BONES, Boss3PoseHook, type Boss3Tail } from "./state";
 
@@ -410,7 +411,7 @@ export function Boss3PoseMatrices(obj: Boss3Actor, composed: boolean): void {
     for (let i = 0; i < 16; i++) m[i] = parent[i];
     MatrixTranslate(m, b.offset[0], b.offset[1], b.offset[2]);
     BoneRotate(m, t, b.bone, composed, body, weak);
-    WriteBone(t, b.bone, m, b.hit_centre ?? null);
+    WriteBone(t, b.bone, m, BoneHitCentre(obj, b));
   }
 }
 
@@ -436,7 +437,7 @@ function BoneRotate(m: Mat, t: Boss3Tail, bone: number, composed: boolean,
 }
 
 function WriteBone(t: Boss3Tail, bone: number, m: Mat,
-                   centre: [number, number, number] | null): void {
+                   centre: readonly number[] | null): void {
   const o = bone * 3;
   t.boneOrigin[o] = m[12];
   t.boneOrigin[o + 1] = m[13];

@@ -312,15 +312,20 @@ function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
  * nothing. The port used to free the permit here, some ninety frames early,
  * because its weapon could not hold one. `[proved]`
  *
+ * **The hand that let go is unshootable**: `*(hand * 0x90 + 0x284 + obj) =
+ * 0` (`0x0045054E`, `0x00450580`, `0x004505BF`, `0x004505E8`, one per arm) is
+ * the bone record's `+0x78`, its hit-sphere radius, and the centre is left
+ * alone. `ThrowerStateRearm` or `ThrowerStateRestoreBothHands` gives the
+ * sphere back with the weapon.
+ *
  * `[diverges]` The engine reads the hand's own recorded position —
  * `obj + 0x274 + bone * 0x90`, through the camera block's `+0x40` matrix —
  * and so it **cannot fail**. The port has no skeleton in `game/`, so it asks
  * the host, and a host that cannot answer gets the actor's own position lifted
  * by a chest height rather than no weapon at all: a routine with no path that
- * declines to make the weapon must not grow one. Three writes are not made,
- * for the reasons `ZombieThrowHandWeapon` (`FUN_0045A240`) gives for its own
- * identical three: the hand's hit-sphere radius, the hit slot, and the camera
- * candidate.
+ * declines to make the weapon must not grow one. Two writes are not made, for
+ * the reasons `ZombieThrowHandWeapon` (`FUN_0045A240`) gives for its own
+ * identical two: the hit slot, and the camera candidate.
  */
 export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
                                   host: GameHost,
@@ -334,6 +339,7 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   // made the snapshot depend on whether a hierarchy was in the scene.
   obj.boneSlot[String(hand.bone)] = hand.bare;
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
+  obj.boneRadius[String(hand.bone)] = 0;
   w.slot = hand.projectile;
   // `obj+0x1364`, the constant the draw adds to the **X** term. `cfg.spin`
   // is that constant: the exporter reads it out of this routine and the name
@@ -523,6 +529,8 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // which grows nothing, for the next frame whenever it holds the clock
   // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
   // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
+  // The big-head arm also doubles bone 2's hit radius (`obj+0x3A4`,
+  // `FADD ST0,ST0` at `0x004498E1`), which goes with the item.
   HeadAimBeginDraw(obj, obj.thr, host);
   ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
   HeadAimEndDraw(obj, obj.thr);
@@ -634,6 +642,9 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
 
 /** `param_1[0x4a]` in `EnemyThrowerInit`: `obj+0x128`, the body sphere. */
 const CHAR_ZSASS = 0x16;
+/** `EnemyThrowerInit`'s armed hands for `zsass` (`0x00449877`, `0x00449881`). */
+const ZSASS_ARMED_RIGHT = 0x1fa2;
+const ZSASS_ARMED_LEFT = 0x1f9e;
 const BODY_RADIUS_ZSASS = 5.0;
 const BODY_RADIUS_OTHER = 4.0;
 
@@ -748,6 +759,23 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
     } else {
       obj.alpha = 1;
     }
+  }
+  // **`zsass` is armed here**, and only its draw records are:
+  //
+  //   00449871  CMP  CX, 0x16
+  //   00449877  MOV  dword ptr [ESI + 0x4dc], 0x1fa2   ; bone 5's slot
+  //   00449881  MOV  dword ptr [ESI + 0x68c], 0x1f9e   ; bone 8's
+  //
+  // `[proved]`. The skeleton names the bare hands (`0x1F9F`, `0x1F9B`), and
+  // until this was ported nothing else put the weapons in them before the
+  // first `ThrowerStateRearm`. The radius is not written: the
+  // build refused both hands' rows, whose slots are these two and not the
+  // skeleton's, so a `zsass` holding its weapons cannot be shot in either
+  // hand until it has thrown and re-armed. The renderer replays the slots
+  // when it adopts the actor, as it does `ActorBindPartList`'s.
+  if (obj.charType === CHAR_ZSASS) {
+    obj.boneSlot[String(RIGHT_HAND_BONE)] = ZSASS_ARMED_RIGHT;
+    obj.boneSlot[String(LEFT_HAND_BONE)] = ZSASS_ARMED_LEFT;
   }
   obj.pendingHit = null;
   obj.thr.knockCount = 0;

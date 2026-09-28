@@ -2304,17 +2304,18 @@ console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
   const { Object3D, Vector3 } = await import("three");
 
   // `hito_gal`'s shape: bone 1 the torso at the root, bone 2 the head ten up
-  // it, each with a sphere a unit along its own y.
+  // it, each with a sphere a unit along its own y, whose row names the node's
+  // own slot -- which is what `SkeletonWalkNode` tests before it takes one.
   const TYPE = {
     type: 0x26, name: "hito_gal", file: "hito_gal.bin", bone_count: 3,
     actor_radius: 10,
     bones: [
       { bone: 1, part: "bone01_0eb9", slot: 0x0eb9, offset: [0, 0, 0],
         parent: null, damage_rank: [], hit_radius: 2, hit_centre: [0, 1, 0],
-        steps: [] },
+        hit_slot: 0x0eb9, steps: [] },
       { bone: 2, part: "bone02_0eaf", slot: 0x0eaf, offset: [0, 10, 0],
         parent: 0, damage_rank: [], hit_radius: 1.5, hit_centre: [0, 1, 0],
-        steps: [] },
+        hit_slot: 0x0eaf, steps: [] },
     ],
     head_bone: 2, reactions: {}, attacks: {},
     // One frame whose root sits off the origin in all three axes, and no
@@ -2415,6 +2416,47 @@ console.log("\nthe model's size: a civilian at 0.9, her bones and her spheres");
   check("...and leaves her radii where the build put them",
         chars.boneSphere(AT, 2, c) === Math.fround(s * 1.5),
         `${chars.boneSphere(AT, 2, c)}`);
+  a.scale = s;
+  chars.update({} as never);
+
+  // **The centre is the record's too.** `ResolveDamagedPartSphere`
+  // (`FUN_004099A0`) writes a swapped part's own row into `+0x78` and
+  // `+0x7C..+0x84` -- unscaled radius, centre in the bone's space -- and both
+  // the pick and the blood read them there. The pick used to take the centre
+  // from the bundle's row whatever the actor's record said.
+  a.boneCentre["2"] = [0, 4, 0];
+  a.boneRadius["2"] = 1;
+  const c2 = new Vector3();
+  const r2 = chars.boneSphere(AT, 2, c2);
+  check("a centre written over the build's is where the sphere is",
+        near(c2, ...at(2, 25, -3)) && r2 === 1,
+        `${c2.toArray().map((v) => v.toFixed(3)).join()} r ${r2}`);
+  const shotAt = (y: number) => chars.pickShot({
+    origin: { x: c2.x, y, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
+  const met = shotAt(c2.y);
+  check("...and the shot meets it there",
+        met?.kind === "actor" && met.bone === 2, JSON.stringify(met));
+  check("...and not at the row's centre any more",
+        shotAt(c.y) === null, JSON.stringify(shotAt(c.y)));
+
+  // **A bone with a collision mesh is not a sphere**: `ShotTestBoneTree`
+  // (`FUN_00404750`) forks on the record's `+0x74` bit `0x10` before it reads
+  // a radius. Class 0x30's weapon hands have one (`EnemyZombieInitByCharType`,
+  // `FUN_00452FD0`); the mesh is the game's to test
+  // (`ShotTestPickedBoneMeshes`), so this pick passes the bone by -- even
+  // with a radius left on it, which no routine that gives a mesh leaves.
+  const torsoAt = new Vector3();
+  const tr = chars.boneSphere(AT, 1, torsoAt);
+  const pick = () => chars.pickShot({
+    origin: { x: torsoAt.x, y: torsoAt.y, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
+  const onSphere = pick();
+  check("the torso's sphere is shot while it has no mesh",
+        onSphere?.kind === "actor" && onSphere.bone === 1 && (tr ?? 0) > 0,
+        JSON.stringify(onSphere));
+  a.boneColi["1"] = "hand";
+  check("...and passed by once it has one: the mesh is the game's to test",
+        pick() === null, JSON.stringify(pick()));
+  delete a.boneColi["1"];
 
   stage.dispose();
   G.g_object_list.length = 0;

@@ -70,19 +70,19 @@ const SPEED = 1.0;
  *
  * **The second write is not another bone.** `*(bone * 0x90 + 0x284 + obj) = 0`
  * — `899f54050000` for bone 5 at 0x0045A2B2 and `899f04070000` for bone 8 at
- * 0x0045A2DB — is the bone record's own `+0x78`, which `SkeletonWalkNode`
- * (`FUN_004107E0`) fills as the bone's **hit-sphere radius**; zeroing it makes
- * the hand it just emptied unshootable. `SpawnThrownWeapon` (`FUN_004504E0`)
- * does the identical write for class 0x31 at 0x00450540.
+ * 0x0045A2DB, and the same pair again in the other two arms (`0x0045A2F7`,
+ * `0x0045A31D`, `0x0045A339`) — is the bone record's own `+0x78`, which
+ * `SkeletonWalkNode` (`FUN_004107E0`) fills as the bone's **hit-sphere
+ * radius**; zeroing it makes the hand it just emptied unshootable, and
+ * nothing in class 0x30 gives it back. `SpawnThrownWeapon` (`FUN_004504E0`)
+ * does the identical write for class 0x31. Every arm that swaps a hand zeroes
+ * that hand, and the bundle's hand kit is exactly the arms, so the port makes
+ * the write wherever it makes the swap.
  *
- * `[diverges]` Three writes are not made. The hit sphere is not cleared,
- * because `render/characters.ts` tests `type.bones[].hit_radius` from the
- * static table and the actor has no per-bone radius to zero — the same gap
- * that lets a gore-swapped bone keep a sphere the engine drops. The hit slot
- * is not claimed, because `g_hit_slots` holds actors and the only thing that
- * reads it is a class-0x30 bone's cel phase. And the camera is not told,
- * because the candidate list takes actors only (`body_creature.ts` has the
- * same gap).
+ * `[diverges]` Two writes are not made. The hit slot is not claimed, because
+ * `g_hit_slots` holds actors and the only thing that reads it is a class-0x30
+ * bone's cel phase. And the camera is not told, because the candidate list
+ * takes actors only (`body_creature.ts` has the same gap).
  */
 export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
                                       host: GameHost,
@@ -93,6 +93,7 @@ export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
   if (h) {
     obj.boneSlot[String(h.bone)] = h.bare;
     host.setBoneSlot(obj.at, h.bone, h.bare);
+    obj.boneRadius[String(h.bone)] = 0;
     w.slot = h.projectile;
   }
 

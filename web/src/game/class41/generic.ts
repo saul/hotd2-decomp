@@ -48,34 +48,38 @@
  *
  * ## What is ported here, and what is not
  *
- * The constructor is transcribed, and so is the lifetime prologue every one
- * of these objects opens with (`PropExpireByStepLifetime`, `class41/
- * lifetime.ts`) — without it a prop the script placed for one block stands
- * there for the rest of the stage.
+ * The constructor is transcribed, prologue and switch: the prologue here, and
+ * each type's arm in the file of the routine it seeds, looked up through
+ * `GENERIC_PLACE_ARMS` (`class41/generic_routines.ts`).
  *
- * Two types have their behaviour ported: **34**, a `FallingContainerUpdate`
- * and therefore an item container, and **32**, the lift
- * (`class41/lift.ts`).
+ * **Forty-three of the fifty routines are transcribed whole** — every type
+ * from 5 to 69, 73 and 78 — each in its own file under its Ghidra name, with
+ * its own head (the shared `PropExpireByStepLifetime`, an inline variant with
+ * a literal limit or an `ActorKill`, or no lifetime at all), its hit arms, its
+ * sounds, its shot sphere where and if it registers one, and its draws
+ * recorded where it makes them (`class41/prop_draw.ts`). Most run as
+ * `GENERIC_ROUTINES` rows in the pool's generic arm; 13, 33, 53 and 54 run as
+ * families of their own, and so do 32 (`LiftUpdate`), 34
+ * (`FallingContainerUpdate`, class 0x44 selector 16's routine too) and 43.
+ * Three of them allocate objects of their own, which run as families: the
+ * item type 7's first hit drops in Original Mode, and the parts types 8 and
+ * 67 carry on their stored matrix.
  *
- * [diverges] The rest are placed, drawn with the right model, and **do
- * nothing**. Their routines have been read for what they draw — that is
- * {@link GENERIC_DRAW_SLOT} — but not transcribed, so a type that flips its
- * model on a script flag, swings, falls, or animates through a strip of slots
- * shows its first frame and holds it. The largest are `FUN_00467E50`
- * (type 12, 36 spawns), `FUN_004717A0` (77, 24), `FUN_004675A0` (70/71, 20),
- * `PropDrawOnlyType51` (51, 11) and `PropUpdateType43` (43, 7).
- *
- * Type 51 is the one of those five that needs nothing else: the routine's
- * whole body is the lifetime prologue and one `AssetDrawSlot`, both of which
- * this file already has. It drew nothing for as long as it did because it was
- * missing from {@link GENERIC_DESCRIPTOR_SLOT} — a table about the exporter,
- * two layers away from the placement — and that is the shape to watch for in
- * the other four.
+ * [diverges] **The other seven are the Original Mode half of the family** —
+ * 70, 71, 72, 74, 75, 76 and 77, ported on their own branch — and here they
+ * are placed and drawn from {@link GENERIC_DRAW_SLOT} and run only what
+ * `class41/pool.ts`'s older generic arm gives them: the shared prologue, the
+ * Arcade-Mode despawn of {@link GENERIC_ORIGINAL_MODE_ONLY}, and for 70, 71
+ * and 76 their branch arm (`class41/branch.ts`); 75 has its own family
+ * (`class41/flag_prop.ts`). A type of theirs that animates, falls or hands out
+ * an item holds its first frame instead.
  *
  * **The renderer used to pose every one of these `Ry·Rz·Rx`**, which is
- * `PropDrawOnlyType51`'s order and not the family's. It now reads
+ * `PropDrawOnlyType51`'s order and not the family's. It then read
  * {@link GENERIC_POSE_ORDER}, which `tools/verify_prop_pose.py` derives from
- * the EXE per type and is the authority on the count.
+ * the EXE per type; a routine that records its draws composes its own
+ * matrices and never reaches that table, so it is read today only for the
+ * seven above.
  *
  * The count that went with the old open question was fifteen, and was the wrong
  * measure twice over. **The order only matters when yaw and roll are both
@@ -90,13 +94,12 @@
  * fifths of a degree, because for types 31 and 33 the "roll" is a strip
  * length.
  *
- * Some of them are not props at all: cases 0x13 and 0x19 increment
- * `g_enemies_present` and case 0x0E `g_enemies_alive`, so a few of these are
- * enemies standing still.
+ * Some of them are not props at all: the arms of types 14, 19 and 25 raise
+ * `g_enemies_alive` or `g_enemies_present`, and their routines give the count
+ * back, so a few of these are enemies standing still.
  */
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
-import { GENERIC_BRANCH_SEED } from "./branch";
 import { PROP75_TYPE } from "./flag_prop";
 import type { BreakablePlacement } from "../../bundle";
 import {
@@ -107,6 +110,7 @@ import {
   LIFT_FAR_CLOSED, LIFT_NEAR_CLOSED, LIFT_PANEL_CLOSED,
 } from "./lift";
 import { PlaceGenericPropType43 } from "./type43";
+import { GENERIC_PLACE_ARMS } from "./generic_routines";
 
 /**
  * The composition a class-0x41 generic type's routine applies the spawn
@@ -143,11 +147,15 @@ export enum PoseOrder {
    */
   NoRotation = "",
   /**
-   * `[open]` — the routine rotates from something the scanner cannot attribute
-   * to a descriptor word. Two types: **75** poses from the object path it
-   * rides (`PropUpdateType75`, `FUN_004710C0`), and **41**
-   * (`FUN_0046CC50`) takes its Z from a register the read did not follow.
-   * The renderer leaves these on the family default rather than guess.
+   * The routine rotates from something `tools/verify_prop_pose.py`'s scan
+   * cannot attribute to a descriptor word, so the table claims no order.
+   * **75** poses from the object path it rides (`PropUpdateType75`,
+   * `FUN_004710C0`). **41** is `RotY(yaw); RotZ((s16)obj+0x200);
+   * RotX(pitch)` for each of its two panels, the Z being the panel's own
+   * hinge angle — read as `LEA EBP,[ESI+0x200]` at `0x0046CDBD` and `MOVSX
+   * EAX,word [EBP]` at `0x0046CDF1`, a form the scan does not follow — and
+   * its routine records its own draws (`class41/type41.ts`). The renderer
+   * leaves an unread row on the family default rather than guess.
    */
   Unread = "?",
 }
@@ -160,16 +168,6 @@ export const GENERIC_RADIUS: Partial<Record<number, number>> = {
   7: 12, 0x49: 12, 0x0b: 2, 0x3c: 2, 0x0e: 2, 0x14: 7, 0x19: 12,
   0x13: 1.5, 0x38: 1.5, 0x29: 7, 0x31: 5, 0x39: 5, 0x3a: 3, 0x4b: 3,
   0x45: 4, 0x46: 3, 0x47: 3, 0x48: 3, 0x4a: 9, 0x4c: 3, 0x4d: 6,
-};
-
-/** The types whose switch arm overrides the slot the prologue took. */
-export const GENERIC_SLOT: Partial<Record<number, number>> = {
-  6: 0x1032, 10: 0x10c4, 0x0d: 0x1a4a, 0x13: 0x10d3, 0x38: 0x10d3,
-};
-
-/** The types whose switch arm sets a shot count. */
-export const GENERIC_HP: Partial<Record<number, number>> = {
-  6: 1, 10: 2,
 };
 
 /**
@@ -300,7 +298,7 @@ export const GENERIC_SLOT_STRIP: ReadonlySet<number> = new Set([31, 33]);
  * `PropDrawOnlyType51`'s order and **only** its order: twenty-two of the
  * family compose `Rz·Ry·Rx`, five `Ry·Rz·Rx`, twelve rotate about Y alone, one
  * about Z alone, one `Rz·Rx` with no yaw at all, six apply none of the three
- * words, and three are unknown. Twenty shipped spawns came out in the wrong
+ * words, and three the scan cannot read. Twenty shipped spawns came out in the wrong
  * place, four of them by more than a degree and the worst by 19.65° — all four
  * `PropDrawOnlyType12`, in stage 4's blocks 4, 7, 12 and 13.
  *
@@ -316,6 +314,16 @@ export const GENERIC_SLOT_STRIP: ReadonlySet<number> = new Set([31, 33]);
  *   not rotate.** So the Y-only and no-rotation rows cost nothing today, and
  *   they are still here because that is a fact about the shipped data and not
  *   about the engine.
+ *
+ * **Only the Original Mode half reads it now.** Every routine transcribed
+ * whole records its own matrices, so for those types a row here is the scan's
+ * reading and nothing else, and several are known to be the scan's limits
+ * rather than the routine: the scan stops at the first `AssetDrawSlot` and
+ * does not count an effect tree's draw, so 18, 28, 59, 62 and 63 — which draw
+ * an effect or nothing — are read out of the routine after them; and it takes
+ * `obj+0x64`/`+0x68` for the descriptor's pitch and yaw, which `PlaceGenericProp`
+ * never writes there, so 20 and 27 name a yaw that is really the object's own
+ * turning word. The routines' files say what each one really composes.
  */
 export const GENERIC_POSE_ORDER: Partial<Record<number, PoseOrder>> = {
   5: PoseOrder.RollYawPitch,  // 0x466820
@@ -379,10 +387,11 @@ export const GENERIC_POSE_ORDER: Partial<Record<number, PoseOrder>> = {
  * `obj+0x28C`, which is right for {@link GENERIC_DESCRIPTOR_SLOT} and a guess
  * for anything else.
  *
- * Only the *first* slot is here. Several of these routines draw two or three
- * parts, or step through a strip — `FUN_004694A0` draws `0x132F + frame % 10`
- * and `FUN_00467C80` alternates `0x1CF`/`0x1D0` — and none of that motion is
- * ported, so the model shown is the one the routine's first frame draws.
+ * Only the *first* slot is here, and only the Original Mode half reads it: a
+ * routine transcribed whole records every `AssetDrawSlot` it makes
+ * (`class41/prop_draw.ts`) and the renderer draws exactly those, strips and
+ * second parts included. For those types a row here is what the first frame
+ * draws, kept as a reading.
  */
 export const GENERIC_DRAW_SLOT: Partial<Record<number, number | null>> = {
   6: 0x1032,        // ctor arm; `FUN_004668A0` steps it upward from there
@@ -433,11 +442,22 @@ export const GENERIC_DRAW_SLOT: Partial<Record<number, number | null>> = {
  * two are 6. A reading with these the other way round would have to explain a
  * prop with a 6057-step life in a 42-block stage.
  *
- * `[open]` Types **6**, **10** and **34** also overwrite `obj+0x11C`, with the
- * literals 1, 2 and 2. {@link GENERIC_HP} reads those as a shot count and this
- * port keeps that reading; which of the two `FUN_004668A0` and
- * `FallingContainerUpdate` mean by the field has not been read here, and the
- * two meanings would give 6 and 10 a one- and two-step life.
+ * Types **6**, **10** and **34** also overwrite `obj+0x11C`, with the
+ * literals 1, 2 and 2, and they mean two different things by it `[proved]`:
+ *
+ * * **6 and 10: a step lifetime.** `PropUpdateType6` (`FUN_004668A0`)
+ *   charges its step changes against the word through
+ *   `PropExpireByStepLifetime` and reads it nowhere else; neither arm gives
+ *   the object a radius and the routine never looks at a hit. So a type-6
+ *   prop lives until the second step change after it is placed and a type-10
+ *   until the third, whatever its descriptor carries. The port used to read
+ *   the two literals as shot counts and keep the descriptor's word as the
+ *   lifetime, which is the reading the arm had just overwritten.
+ * * **34: two shots, and nothing else.** `FallingContainerUpdate`
+ *   (`FUN_0046A580`) never calls `PropExpireByStepLifetime`; its lifetime is
+ *   an inline count against the s8 at `obj+0x199`, which the arm fills from
+ *   the placer's `+0x11C`, and all four of its reads of `obj+0x11C` are the
+ *   shot count (`0x0046A633`, `0x0046A63F`, `0x0046A712`, `0x0046AC9D`).
  */
 export const GENERIC_LIFETIME_FROM_1F4: ReadonlySet<number> =
   new Set([12, 31, 51, 53]);
@@ -452,37 +472,12 @@ const PropContainerType32 = 32;
 const TYPE43 = 43;
 /** Class 0x41 type 13, which has its own lifetime and so its own family. */
 const TYPE13 = 13;
+/** Class 0x41 type 34, the falling container. */
+const TYPE34 = 34;
 /** Class 0x41 type 33, the slot strip played once. See `class41/draw_only.ts`. */
 const TYPE33 = 33;
 const TYPE53 = 53;
 const TYPE54 = 54;
-
-/**
- * `PlaceGenericProp` case 0x36's five literals — the whole of type 54's drift,
- * and the reason it could not be added to {@link GENERIC_DESCRIPTOR_SLOT}
- * without being ported.
- *
- * Read out of the disassembly rather than the pseudocode, because these are
- * `MOV dword ptr [ESI + disp], imm32` of float bit patterns and the decompiler
- * shows them as integers (`L1`'s neighbour):
- *
- * ```
- * 00462436  MOV dword ptr [ESI + 0x1c0], 0x40a00000   ;  5.0
- * 00462447  MOV dword ptr [ESI + 0x1c4], 0x3fc00000   ;  1.5
- * 00462451  MOV dword ptr [ESI + 0x1c8], 0xc0800000   ; -4.0
- * 0046245b  MOV dword ptr [ESI + 0x1d8], 0x300
- * 00462465  MOV dword ptr [ESI + 0x1dc], 0xfffffc00   ; -0x400
- * ```
- *
- * Identical for every spawn, which is what makes the drift *authored*: both
- * shipped type-54 props travel the same five units right, one and a half up
- * and four back a frame, tumbling `0x300` in pitch and `-0x400` in yaw.
- */
-const TYPE54_DRIFT_VX = 5.0;
-const TYPE54_DRIFT_VY = 1.5;
-const TYPE54_DRIFT_VZ = -4.0;
-const TYPE54_DRIFT_PITCH = 0x300;
-const TYPE54_DRIFT_YAW = -0x400;
 
 /**
  * The generic types whose object runs a routine of its own rather than the
@@ -509,8 +504,10 @@ export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
   // Inlines its own lifetime and registers no sphere: the part that drops
   // out of stage 2's clock tower. See `class41/type13.ts`.
   [TYPE13]: PropFamily.Type13,
-  // No prologue, no shot-test tail, and it draws before it steps, so it is
-  // stepped at the head of the frame rather than in the pool's walk. See
+  // `g_class41_updates[34]` is `FallingContainerUpdate`, the routine class
+  // 0x44 selector 16's object runs too. See `class44/container.ts`.
+  [TYPE34]: PropFamily.Falling,
+  // No prologue and no shot-test tail: a draw, a step and a kill. See
   // `class41/draw_only.ts`.
   [TYPE33]: PropFamily.DrawOnlyType33,
 };
@@ -540,12 +537,12 @@ export const GENERIC_ORIGINAL_MODE_ONLY: ReadonlySet<number> =
 /**
  * `PlaceGenericProp` — `FUN_00461CF0`.
  *
- * The prologue, which every type gets, plus the arms of the switch that set
- * something the port or the renderer reads. The arms that seed a routine's own
- * working state — the eight-fragment loop of case 8, the three velocities of
- * case 0x24, the sub-object lists of cases 0x43 and 0x2B — are left out on
- * purpose: nothing runs the routines that would read them back, and inventing
- * their state would be inventing behaviour.
+ * The prologue, which every type gets, then the arm of the switch for the
+ * type — the tables above for the ones that only set a radius, and
+ * `GENERIC_PLACE_ARMS` for every type whose routine is transcribed, which is
+ * where the arms that seed a routine's own working state live: case 8's three
+ * parts, case 0x24's three sub-parts, case 0x43's boat and its load, the
+ * branch seeds and enemy counts of cases 0x0E, 0x13 and 0x19.
  */
 export function PlaceGenericProp(pl: BreakablePlacement,
                                  rng: Rng): BreakableProp {
@@ -566,31 +563,12 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   p.lifetime = GENERIC_LIFETIME_FROM_1F4.has(type)
     ? (pl.field_1f4 ?? 0)
     : (pl.lifetime_evt_steps ?? 0);
-  // `ActorAlloc` zeroes the object, and no arm the port covers writes
-  // `+0x2A0` — which for the lift is its panel's frame counter and so
-  // has to start at zero rather than at the group props' -1.
+  // `ActorClearGameFields` (`FUN_004A73D0`) zeroes the object from `+0x34`
+  // up, so `+0x2A0` and `+0x2A4` start at zero for every one of these; the
+  // struct's own defaults are the group props' and the story switch's -1.
+  // An arm that wants anything else writes it below.
   p.storyItem = 0;
-  // Same argument for `+0x2A4`: `PropUpdateType75` counts step changes up
-  // from zero in it, and the struct's default is the story switch's -1.
-  if (p.family === PropFamily.Type75) p.removeFlag = 0;
-  // ...and `PropUpdateType13` toggles its blink frame in the same word.
-  if (p.family === PropFamily.Type13) p.removeFlag = 0;
-  // `MOV EDX,[EBP+0x6c]; MOV [ESI+0x2a4],EDX` — the arms at 0x0046205E and
-  // 0x004620BE give types 31 and 33 the placer's third orientation word as
-  // the length of the slot strip their routine plays. The same word is also
-  // the roll below, and both readings are the engine's.
-  if (GENERIC_SLOT_STRIP.has(type)) p.removeFlag = pl.roll ?? 0;
-  // Case 0x36's five literals. Without them a type-54 prop stands still with
-  // its script flag raised, which is the one thing the engine never does with
-  // it -- and then never retires, because the 300-frame drift is its only
-  // exit. See `class41/draw_only.ts`.
-  if (type === TYPE54) {
-    p.vx = TYPE54_DRIFT_VX;
-    p.vy = TYPE54_DRIFT_VY;
-    p.vz = TYPE54_DRIFT_VZ;
-    p.spin = TYPE54_DRIFT_PITCH;
-    p.yawSpin = TYPE54_DRIFT_YAW;
-  }
+  p.removeFlag = 0;
 
   p.x = pl.pos?.[0] ?? 0;
   p.y = pl.pos?.[1] ?? 0;
@@ -604,29 +582,11 @@ export function PlaceGenericProp(pl: BreakablePlacement,
   // `obj+0x28C = placer+0x11C` — carried for every type, because that is what
   // the engine writes; whether it means anything is `GENERIC_DRAW_SLOT`'s
   // business, not this function's.
-  p.slot = GENERIC_SLOT[type] ?? pl.slot ?? 0;
-  p.hp = GENERIC_HP[type] ?? 0;
+  p.slot = pl.slot ?? 0;
   // `obj+0x124` — the switch's own per-type hit radius, and the whole of what
   // makes a generic prop shootable. A type missing from the table is a type
   // the engine never registers a sphere for.
   p.hitRadius = GENERIC_RADIUS[type] ?? 0;
-
-  // **Three of the switch arms write `g_script_branch_var` at spawn time.**
-  // Cases 0x0E and 0x13 write the descriptor's own `+0x11C` and case 0x19
-  // writes 0, and their update routines write `1 - +0x11C` on the first hit —
-  // so the descriptor names the DEFAULT route and shooting the prop takes the
-  // other one. See `class41/branch.ts`.
-  //
-  // The same three arms also increment `g_enemies_alive` (0x0E) or
-  // `g_enemies_present` (0x13 and 0x19), and those are **deliberately not
-  // here**: the give-back lives in the update routines, which are ported only
-  // as far as their branch arm. Counting an enemy in with no way to count it
-  // out is how a `wait_enemies_alive` gate deadlocks a stage, and this port
-  // has a file of those.
-  const seed = GENERIC_BRANCH_SEED[type];
-  if (seed !== undefined) {
-    G.g_script_branch_var = seed === null ? p.lifetime : seed;
-  }
 
   // Case 0x20 is the lift. These are not the prop's orientation: they
   // are its three hinge angles at rest, and `LiftUpdate` swings each one
@@ -643,5 +603,8 @@ export function PlaceGenericProp(pl: BreakablePlacement,
     p.hingeB = LIFT_FAR_CLOSED;
     p.pitch = LIFT_PANEL_CLOSED;
   }
+  // The arms of the types whose routine is transcribed whole, each in its
+  // routine's own file. See `class41/generic_routines.ts`.
+  GENERIC_PLACE_ARMS[type]?.(p, pl, rng);
   return p;
 }

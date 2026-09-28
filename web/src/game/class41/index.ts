@@ -30,7 +30,6 @@ import { T } from "../tables";
 import { PlaceBreakableGroup } from "./group";
 import { PlaceKindedProp } from "./kinded";
 import { PlaceGenericProp } from "./generic";
-import { PlaceFallingContainer } from "../class44/container";
 import { PlaceChainSegments } from "./triggers";
 import { PlaceFragmentProps } from "./type40";
 import { PlaceTable38Props } from "./type38";
@@ -61,10 +60,16 @@ export enum PropContainerType {
   /** `PlaceKindedProp` (`FUN_00462E10`) — one prop, kind from `obj+0x6C`. */
   KindedProp = 4,
   /**
-   * `PlaceGenericProp` case 0x22 — a falling container, the same object class
-   * 0x44 selector 16 places. Twelve spawns across stages 1, 3, 4 and 5, and
-   * they seed item countdowns, so leaving them out left those stages' item
-   * sets paying out on the wrong break.
+   * `PlaceGenericProp` case 0x22 — a falling container, the object class 0x44
+   * selector 16 places, running the same `FallingContainerUpdate`. Twelve
+   * spawns across stages 1, 3, 4 and 5, and they seed item countdowns.
+   *
+   * **Not a constructor of its own**: `g_class41_constructors[34]` is
+   * `PlaceGenericProp` (`FUN_00461CF0`), so the object is built by that
+   * routine's prologue and its arm (`PlaceGenericPropType34` in
+   * `class44/container.ts`), and keeps the placer's pitch and roll, which
+   * class 0x44's constructor does not write. The port used to route it
+   * through class 0x44's constructor and dropped both.
    */
   FallingContainer = 34,
   /**
@@ -104,15 +109,6 @@ export const g_class41_constructors:
     // lifetime in evt blocks, not a character type. Both fields are
     // polymorphic and both have already misled this project once.
     PlaceBreakableGroup(obj.hp, obj.charType, f.rng);
-  },
-  [PropContainerType.FallingContainer]: (obj, f) => {
-    const pl = T.breakables?.placements?.find(
-      (q) => q.at === obj.at && q.container === "falling");
-    if (!pl) return;
-    G.g_breakable_props.push(PlaceFallingContainer(
-      obj.at, 0, pl.item_set ?? 0, -1, pl.set_size ?? 0,
-      pl.lifetime_evt_steps, obj.pos.x, obj.pos.y, obj.pos.z, obj.yaw,
-      f.rng));
   },
   [PropContainerType.ChainSegments]: (obj, f) => {
     void f;
@@ -190,7 +186,13 @@ function PlaceGenericPropFor(obj: Actor, f: ClassFrame): void {
   const pl = T.breakables?.placements?.find(
     (q) => q.at === obj.at && q.container === "generic");
   if (!pl) return;
-  G.g_breakable_props.push(PlaceGenericProp(pl, f.rng));
+  // `ActorAlloc` appends the prop to the task list **before** its arm
+  // allocates anything, so the objects cases 8 and 0x43 hang off it come
+  // after it in the walk and draw on the matrix it stored that frame. The
+  // arm pushes them as it makes them; the prop goes in ahead of them.
+  const at = G.g_breakable_props.length;
+  const p = PlaceGenericProp(pl, f.rng);
+  G.g_breakable_props.splice(at, 0, p);
 }
 
 /**
@@ -238,10 +240,35 @@ export function PropContainerRaisesScriptFlag(
   return pl?.type === PROP75_TYPE ? PROP75_SCRIPT_FLAG : undefined;
 }
 
+/**
+ * The generic types whose arm of `PlaceGenericProp` raises an enemy counter:
+ * case 0x0E `g_enemies_alive`, cases 0x13 and 0x19 `g_enemies_present`. Their
+ * routines give it back -- see `class41/type14.ts`, `type19.ts`, `type25.ts`.
+ */
+export const GENERIC_ENEMY_COUNTING_TYPES: ReadonlySet<number> =
+  new Set([14, 19, 25]);
+
+/**
+ * Whether the class-0x41 object this record places is one of
+ * {@link GENERIC_ENEMY_COUNTING_TYPES}: the answer
+ * `ClassHandler.countsForEnemyGate` wants, read off the placement the way
+ * {@link PropContainerRaisesScriptFlag} reads it.
+ *
+ * [port-only] There is no such routine in the engine: it answers a replay's
+ * question, which is what an enemy gate stepped over has taken away.
+ */
+export function PropContainerCountsForEnemyGate(rec: SpawnRecord): boolean {
+  if (rec.at === undefined) return false;
+  const pl = T.breakables?.placements?.find(
+    (q) => q.at === rec.at && q.container === "generic");
+  return pl?.type !== undefined && GENERIC_ENEMY_COUNTING_TYPES.has(pl.type);
+}
+
 export const PropContainerPlacerHandler: ClassHandler = {
   init: PropContainerPlacerInit,
   update: PropContainerPlacerUpdate,
   raisesScriptFlag: PropContainerRaisesScriptFlag,
+  countsForEnemyGate: PropContainerCountsForEnemyGate,
 };
 
 /**
@@ -258,6 +285,8 @@ export function ResetPropContainers(): void {
   G.g_breakable_members = [];
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
+  G.g_prop_final_draws = [];
+  G.g_prop67_by_index = [0, 0, 0];
   G.g_object_list = G.g_object_list.filter(
     (o) => o.cls !== SpawnClass.PropContainerPlacer);
 }

@@ -410,6 +410,13 @@ export interface BreakablesJson {
   effects: Record<string, EffectDefJson>;
   /** 7.540296 — one stack level, in world units. */
   level_height: number;
+  /**
+   * `g_pHingeCurvesXYZ` (`0x005960B4`) by curve index — 0, 2 and 3, the
+   * selectors that read the XYZ table — each `[rx, ry, rz]` BAMS per frame.
+   * The class-0x41 generic routines that swing a part name a curve by a
+   * literal, and read it from here.
+   */
+  hinge_curves_xyz?: Record<string, number[][]>;
 }
 
 /** One class-0x24 set-piece's parameter tail — see `game/class24`. */

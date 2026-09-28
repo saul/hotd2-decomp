@@ -23915,3 +23915,66 @@ records, from the disassembly of `RegisterForShotTest` (`0x00405176`,
 matrix rebuild and on into the append, which the decompile's early `return`
 hides (`L35`). Class 0x26's boat does not yet register at `0x0048EE9C`,
 which is what moving those passes onto the list needs first.
+
+## 2026-09-28 -- class 0x41's generic props, transcribed whole (types 5-69, 73, 78)
+
+**What was done.** The inventory first: `g_class41_constructors`
+(`0x00593580`) and `g_class41_updates` (`0x005936BC`) give fifty types built
+by `PlaceGenericProp`, not the forty-four the old note said. Twenty-three of
+their routines had no name (two had no function: `0x0046CC50`, `0x0046DAB0`);
+they are `PropUpdateTypeNN` now, plus `Type8MountedPartUpdate`,
+`Type67MountedPartUpdate`, `SpawnOriginalItemDrop`, `OriginalItemDropUpdate`,
+`SpawnPropHitEffectAtDepth`, `SpawnPropSplash` and `PropSplashUpdate`, and the
+globals `g_prop_type63_items` and `g_prop67_by_index`. Every routine except the
+Original Mode half (70-77) is transcribed whole and records its own draws;
+the renderer's per-type arms for 13, 35, the lift, 43 and the falling
+container went with it. The reading was fanned out over eight agents with a
+common brief; each routine was read from `disassemble_bytes` over its whole
+extent, and each agent's tests were mutation-checked.
+
+**What the old port and its notes had wrong.** Type 5 ran the shared lifetime
+prologue it does not have (and its scene-1 sweep). Types 6 and 10's `+0x11C`
+literals were read as shot counts; they are step lifetimes. Type 7's, 8's, 9's
+and 19's routines charge a literal lifetime, not `+0x11C`. Type 8 has three
+parts, not eight. Types 14, 19 and 25 never raised the enemy counts their arms
+raise, so their steps' waits passed early and the route was decided before the
+shot could land. Type 14's y is the arm's 36.0, not the descriptor's. Type 19
+had its sphere at the placement, nine units from where the routine puts it.
+Type 25's registration gate tested a bit nothing set. Type 31's cursor led the
+engine's by a frame, and 53's two strips were "unportable billboards" that are
+one computed yaw each. Type 35's "a retired door rattles once more" rested on
+`ActorDespawn` returning; it longjmps (`L72`, written as L70 in the
+branch's first commit and renumbered at the merge, where two other sessions'
+lessons had taken 70 and 71). Type 41's Z is its panel's
+hinge angle, not an unread register. Type 43's arm drew a fifth `rand()`, its
+pickup section was missing and a cracked crate is an effect tree. Type 69
+despawns in blocks 3 and 8 rather than idling. Class 0x41 type 34 was built
+by class 0x44's constructor, dropping the placer's pitch. Type 59 had no
+radius at all.
+
+**Wrong turns.**
+
+* Reading the arm table I took the byte past `g_place_generic_prop_arm_index`'s
+  end for type 78's arm, and told the agents 78 shares 31's. The prologue's
+  `CMP EAX,0x47; JA` at `0x00461DAA` sends everything past 77 to the default:
+  `L6` in a jump table, corrected before anything used it.
+* The first draw record had no alpha and no draw layer, and three agents
+  declared divergences against that; both are fields now. The same agents
+  declared the "last frame is lost" divergence of a routine that draws and then
+  dies; the pool keeps that frame in `g_prop_final_draws` now.
+* `PropWords` first required an index signature, which an `interface` does
+  not satisfy; typed against `Record<keyof T, number>` instead.
+* Type 45's vertex wave first went in with the renderer calling the port's
+  wave and clock functions off the live prop, which `verify_layers`'
+  `render-drives-the-port` refuses -- and rightly: the bend is the model's and
+  outlasts the object, so a renderer reading the prop lost it at the prop's
+  death and at every resync. The port keeps the clock each model was bent at
+  (`g_prop45_wave_clock`, and the one its draws went out against), and
+  `render/banner_wave.ts` walks the vertices from it, the split
+  `render/water_surfaces.ts` already has with `WaterSurfaceUpdate`.
+
+**Left open.** `tools/verify_prop_pose.py` reads past the end of a routine
+with no model draw (18, 28, 59, 62, 63) and takes `obj+0x64/+0x68` for the
+descriptor's words (20, 27); its rows no longer drive any transcribed type.
+Type 14's per-draw light direction has no render path. `g_civilians_seen_total`, `g_original_items_taken` and
+`g_original_item_pickup_blocked` are not in this branch's `G`.

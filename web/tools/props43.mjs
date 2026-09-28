@@ -70,6 +70,14 @@ import { NULL_HOST } from "../src/game/host.ts";
 import { SpawnClass } from "../src/game/spawn_class.ts";
 import { vec3 } from "../src/game/vec.ts";
 import { BreakableFlag, PropFamily } from "../src/game/class41/prop_state.ts";
+import { PropWords } from "../src/game/class41/words.ts";
+import { TYPE43_WORDS_ZERO } from "../src/game/class41/type43.ts";
+
+/**
+ * A type-43 prop's object kind: `obj+0x290`, which `PropUpdateType43` keeps
+ * in its words -- `p.kind` is the class-0x41 type, 43, for every one.
+ */
+const Type43Kind = (p) => PropWords(p, TYPE43_WORDS_ZERO).o290;
 
 const args = process.argv.slice(2)
   .filter((a) => !a.endsWith(".mjs") && !a.endsWith(".ts"));
@@ -133,7 +141,7 @@ function seek(b, s, o) {
 const type43 = () => G.g_breakable_props
   .filter((p) => p.family === PropFamily.Type43);
 const describe = (ps) => ps
-  .map((p) => `${p.at.toString(16)} kind ${p.kind}`).join(", ") || "none";
+  .map((p) => `${p.at.toString(16)} kind ${Type43Kind(p)}`).join(", ") || "none";
 
 const B = Number(block), S = Number(step), O = Number(op);
 
@@ -224,7 +232,7 @@ if (live.length) {
     GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
     shots += 1;
   }
-  console.log(`  kind ${p.kind}: ${shots} shot(s), slot `
+  console.log(`  kind ${Type43Kind(p)}: ${shots} shot(s), slot `
     + `${slot0.toString(16)} -> ${p.slot.toString(16)}, `
     + `+${G.g_player_score[0] - score0} points`);
   check("a type-43 prop in the real bundle breaks when it is shot",
@@ -232,8 +240,8 @@ if (live.length) {
   check("...and paid for the shot that destroyed it",
         G.g_player_score[0] > score0, `+${G.g_player_score[0] - score0}`);
   check("...one shot for a kind 2 and two for a kind 3",
-        p.kind === 3 ? shots === 2 : shots === 1,
-        `${shots} for kind ${p.kind}`);
+        Type43Kind(p) === 3 ? shots === 2 : shots === 1,
+        `${shots} for kind ${Type43Kind(p)}`);
 } else {
   check("a type-43 prop is alive to shoot", false);
 }

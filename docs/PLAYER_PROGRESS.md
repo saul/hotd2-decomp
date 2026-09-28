@@ -782,6 +782,30 @@ a prop the script placed for one block no longer stands there all stage, and
 Original Mode's collectibles (types 70–72, 77) leave on their first Arcade
 frame the way the engine sends them.
 
+**Forty-three of the family's fifty routines are transcribed whole**, every
+type from 5 to 69, 73 and 78 (`game/class41/typeNN.ts`, registered in
+`generic_routines.ts`). Each has its own head -- the shared step lifetime, an
+inline variant with a literal limit or an `ActorKill`, or none -- its hit arms
+and sounds, its shot sphere where it registers one, and its constructor arm.
+**The draw is transcribed with the routine**: each `AssetDrawSlot` a routine
+makes lands in `BreakableProp.draws` with the matrix it was made under
+(`game/class41/prop_draw.ts`, built with `game/matrix.ts`), and
+`render/breakables.ts` sets those matrices and decides nothing -- which is
+what shows a routine that draws and then steps its model (types 6, 10, 31,
+33) on the right frame, a draw layer (21), a fade (the Original Mode items of
+types 7 and 43), an effect tree (9, 18, 25, 27, 28, 43, 62) and a
+camera-facing billboard (53) without a per-type arm in the renderer. The
+renderer's own lift, door-leaf and clock-tower arms are gone with it. What
+moves now: type 8's rocking boat and its three shootable parts, 11's orbit
+and fall, 14's and 19's swings and give-backs of the enemy count their arms
+raise, 20's spin, 30's fall, 36's three rising strips, 41's two panels, 45's
+table of banners and the wave it bends into them, 49's tumble on its hull, 56's hinge curve and fall, 57's
+shudder, 58's and 60's flights, 62's eight camera-facing water effects, 63's
+twelve items, 64's swaying part, 67's boats (Training only), 69's fall and
+Original Mode item, 73's ride along its object path. Class 0x41 type 34 is
+built by `PlaceGenericProp` as the engine builds it, and keeps its pitch.
+The other seven, 70 to 77, are the Original Mode half, ported separately.
+
 **Class 0x41 type 75 is ported** (`game/class41/flag_prop.ts`), and it is the
 one class-0x41 object whose routine opens a `wait_script_flag` gate.
 `PropUpdateType75` (`FUN_004710C0`) raises `g_script_flags[20]` from **three**

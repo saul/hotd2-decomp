@@ -23173,6 +23173,84 @@ against the plain draw -- its textures have no transparent texels there).
   now; the count went from 79 to 77, the two dropped being those two reads,
   and the shared bundle gives 77 as well.
 
+## 2026-09-28 -- every caller of the ring effects, wired where the exe calls it
+
+**The list.** `SpawnGroundRingEffect` (`FUN_00407DA0`), `SpawnRingEffectAtPose`
+(`FUN_00408370`) and `SpawnWaterRing` (`FUN_004567C0`): a scan of `.text` for
+every `E8`/`E9` rel32 aimed at the three found 26 call sites and no absolute
+reference anywhere in the image, and that is exactly the list
+`get_xrefs_to` gives -- 9, 5 and 12. `[proved]` complete for direct calls.
+The owl (class 0x43) makes **none** of the 26: whatever its corpse landing
+spawns is not one of these three routines.
+
+| site | routine | now |
+|---|---|---|
+| `0x00449415` | `OneHitTargetPlayDeathClip` | wired before |
+| `0x0043BCD4` | `FrogStateDieTumbleAndSink` | excluded (another session) |
+| `0x0044A9FF`, `0x0044AA16` | `ThrowerStateCorpseSink` | wired |
+| `0x0044ABA2`, `0x0044ABB9` | `ThrowerStateCorpseBlink` | wired |
+| `0x00451DC3` | `RescueTargetFreedState` | wired |
+| `0x00454F37`, `0x00454FE9` | class 0x30's two corpse states | wired before |
+| `0x0040A3CB`, `0x0040A45F` | `SeveredHeadUpdate` (bounce 0.25, settle 0.5) | wired |
+| `0x00438D95`, `0x0043956D`, `0x004396CD` | the fish | wired before |
+| `0x00456B1F`/`B2E`, `0x00456C0C`/`C1B` | the two death hooks | wired before |
+| `0x00456CC1`/`CD0` | `ZombieStrikeStartSplash` | ported and wired |
+| `0x00456D9C`/`DAB` | `ZombieStrikeFrameSplash` | ported and wired |
+| `0x00457050`/`5F` | `ZombieStateSurfaceOnCameraCue` | wired |
+| `0x0045AC79`/`88` | `ZombieStateTargetMotionScript` | wired |
+
+The two strike splashes are `g_class30_states[0x39]`/`[0x3A]`, reached through
+`CALL dword ptr [0x00592BCC]`/`[0x00592BD0]`; a byte search for the two slot
+addresses found a third caller of the first, `ZombieStateScriptedGrabAndDespawn`
+at `0x00457C2D`, which is wired too.
+
+**Wrong ports in the lines around the calls**, each read and fixed:
+
+* Class 0x31's two corpse states were one function with a `blink` flag, drew
+  the pose pin's `rand()` once instead of every frame, left through
+  `ThrowerLeave` (counts, permit, unconditional camera release) where the exe
+  does only the `KeepCameraWhenLast` release and the hit slot, and had no
+  0x3A6 lift. `EnemyThrowerInit` did not raise `MotionFlag.TraceGround`.
+* Class 0x21's freed state was a stub, and three things around it were wrong:
+  `FUN_00451F40` was filed as drawing and is the body's motion off the car
+  (now `RescueTargetFreedDrift`); the rescue tail cut to the freed clip at
+  frame 0 where the exe blends it in at cursor 15 over 5, re-derives the
+  angles, frees the hit and camera slots and runs the drift and the draw; and
+  the abandoned state stood still where the exe keeps riding the route.
+  `RescueTargetInit` threw its `rand() % 10` start away. The class steps its
+  own clock now, because the freed state stops it on the frame the clip ends.
+  `0x00451DF0` had no Ghidra function; it does now.
+* `SeveredHeadUpdate` threw the head along `g_camera_yaw_bams`; the exe reads
+  the camera **block's** yaw, `0x009A60D0 + index * 0x1A4`, which the scene
+  hooks keep half a turn from the other.
+* States 13 and 23 returned after sub 0 where the exe runs on into sub 1
+  (L53; for 23 the jump table at `0x00457CCC` says so), both wrote class
+  0x24's `obj.frozen` (L3), state 13 cleared and restored
+  `ZombieFlag2.CollideWorld` the routine never touches, and its exit is a
+  literal state 1, not the tail's byte. State 23's end was a feed note where
+  the exe spawns sprite 0x62; the captor script's clip 0xB2 prop strip at
+  cursor 0x16 was missing beside the wading arm.
+
+**Wrong turns.** The Ghidra naming gate refused `LerpAngleWeighted` for
+`0x00401EC0` as a token-subset of `LerpWeighted`; it is `LerpAngleShortWay`.
+`verify_port`'s class-0x31 literal-clip check failed on
+`CORPSE_RING_LIFT_MOTION = 0x3a6`, a clip the corpse **compares** and never
+plays; it is already baked through the motion sets of behaviour sets 0 and 3,
+but the states do name it as a literal, so it went into
+`CLASS31_LITERAL_MOTIONS` in both halves -- the re-export changed no bundle's
+clips. The rescue fixture carried no clips for character type 7, so the port's
+setter declined the freed clip and the old assertion "plays the freed clip"
+failed; the fixture now bakes 0x3E6 and 0x3CC. And the first mutation run
+showed the class-0x21 tests blind to `advancesOwnMotion` -- they drove the
+update directly, which never meets the director -- so one now runs through
+`GameUpdate`, and without the flag the ring never comes (the doubled clock
+steps the cursor two at a time past the odd play length).
+
+`[open]`: `RescueTargetHeldState`'s part loop (a voice, `NoOpStub` and a bone
+sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
+its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
+2, has no field because nothing in `game/` composes a rotation from it.
+
 ## 2026-09-28 -- the civilian's collision sphere: modes 1, 2 and 3 are draw records (branch `worktree-agent-a2f32c8a45a21688b`)
 
 **The report.** `class10/update.ts` and `actor.ts` carried an open question:

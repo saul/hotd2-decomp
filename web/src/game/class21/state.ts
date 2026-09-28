@@ -21,6 +21,11 @@ export enum RescueTargetState {
   Freed = 2,
   /** `RescueTargetAbandonedState` (`0x00451D20`). */
   Abandoned = 3,
+  /**
+   * `RescueTargetSinkAndDespawnState` (`0x00451DF0`) -- the routine
+   * `RescueTargetFreedState` installs once its clip has played out.
+   */
+  Sinking = 4,
 }
 
 /** `obj+0x1312` and the entry point, as one block. */
@@ -45,15 +50,40 @@ export interface RescueTargetTail {
   route: number;
   /**
    * `obj+0x13CC`/`+0x13D0`/`+0x13D4` — the pose's change since last frame,
-   * written by `RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) and by
-   * nothing else in this class.
+   * written by `RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`).
    *
-   * **Nothing in the engine reads it back** within the four class-0x21
-   * routines, and nothing in the port does either; it is here because the
-   * routine writes it and because the same three words are the head's `arcTo`
-   * for classes 0x30 and 0x31 (L3 again), so it may not be written there.
+   * **It is the car's velocity, and the freed actor keeps it.**
+   * `RescueTargetFreedDrift` (`FUN_00451F40`) adds x and z to the position
+   * every frame after the rescue and bleeds both away over frames 11..20, so
+   * the body leaves the car at the car's own speed. This said nothing read
+   * it back, from a reading of the four state routines that took the drift
+   * for part of the draw. The same three words are the head's `arcTo` for
+   * classes 0x30 and 0x31 (L3), so they live on this arm.
    */
   delta: { x: number; y: number; z: number };
+  /**
+   * `obj+0x1334` -- frames since the rescue. `RescueTargetHeldState`
+   * (`FUN_00451980`) zeroes it as it frees the actor (`MOV [ESI+0x1334], EBX`
+   * at `0x00451BBA`) and `RescueTargetFreedDrift` (`FUN_00451F40`) is its only
+   * reader and its only other writer, one `+1` a call; frames 11..20 are the
+   * ones that bleed {@link delta} away.
+   */
+  freedFrames: number;
+  /**
+   * `model+0x5D` (`obj+0x1F1`) -- the byte `SkeletonAdvancePlayCursor`
+   * (`FUN_004111A0`) clears and then raises when the play cursor has reached
+   * the play length, inside `RescueTargetDraw` (`FUN_00451FF0`)'s draw and
+   * only when that draw is made. `RescueTargetFreedState` (`FUN_00451D80`)
+   * reads it straight after the draw. `[port-only]` as a field of the tail:
+   * the engine's lives in the model block, which the port does not carry for
+   * this class -- the same arrangement class 0x22's `done` has.
+   */
+  clipEnded: number;
+  /**
+   * `obj+0x1338` -- the sink's countdown, 0x78 from the frame the freed clip
+   * ends (`MOV dword ptr [ESI+0x1338], 0x78` at `0x00451DB9`).
+   */
+  sinkFrames: number;
 }
 
 /**
@@ -62,5 +92,6 @@ export interface RescueTargetTail {
  */
 export function makeRescueTargetTail(): RescueTargetTail {
   return { state: RescueTargetState.RideIn, sub: 0, route: 0,
-           delta: { x: 0, y: 0, z: 0 } };
+           delta: { x: 0, y: 0, z: 0 }, freedFrames: 0, clipEnded: 0,
+           sinkFrames: 0 };
 }

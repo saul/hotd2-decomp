@@ -13,14 +13,17 @@
  * all of it under `T(pos) RotY(yaw)` in draw layer `0xC`, the strip's cel
  * from `g_blink_frame_counter`.
  *
- * Two routines allocate it. `SpawnGroundRingEffect` puts one under a body on
- * its way out of the world, at scale 1 -- the first frame of class 0x30's two
- * corpse states, class 0x20's hand-over into its sink and the frog's corpse
- * as it settles (`game/class11/`) call it here; class 0x31's corpses and the
- * freed rescue target call it in the exe and not yet in the port.
- * `SpawnRingEffectAtPose` takes a six-word pose and a
+ * Two routines allocate it, from fourteen call sites between them -- every
+ * `E8` rel32 in `.text` aimed at either address, which is the same list
+ * Ghidra's cross-references give. `SpawnGroundRingEffect` puts one under a
+ * body on its way out of the world, at scale 1: the first frame of class
+ * 0x30's and class 0x31's two corpse states each, class 0x20's hand-over into
+ * its sink, the frog's corpse as it settles (`game/class11/`), and the rescue
+ * target's freed state on the frame its clip ends. `SpawnRingEffectAtPose`
+ * takes a six-word pose and a
  * scale, and it is what a class-0x51 fish's corpse makes when it meets the
- * water, and a severed head when it meets the floor.
+ * water, and a severed head each time it meets the floor -- 0.25 a bounce,
+ * 0.5 as it settles.
  *
  * Like every task this runs on the frame it is made, after its maker
  * (`game/effects/owl.ts` says why), so the pool is stepped after the actors

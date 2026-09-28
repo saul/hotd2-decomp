@@ -117,9 +117,9 @@ and a stage opens under a **Start** button — the press a browser wants before
 it will play sound, go fullscreen or hand over a phone's motion sensors. No
 debug overlay is on until you turn it on. Everything else is in two places:
 
-* **The menu** — `≡ HOTD2` in the top-left corner: pick a stage, the block it
-  opens at (stages 3 and 4 have two), Original Mode, restart, rebuild the
-  bundle, and the debug sidebar.
+* **The menu** — `≡` in the top-left corner, which holds the game while it
+  is open: pick a stage, the block it opens at (stages 3 and 4 have two),
+  Original Mode, restart, rebuild the bundle, and the debug sidebar.
 * **The debug sidebar** — `` ` `` or the menu: Play or free roam, pause, skip
   and kill; then the inspection panels (the 4:3 frame switch, light, fog and
   texture filtering are in Scene), the script (click an instruction to seek to
@@ -326,11 +326,13 @@ so is the event feed.
   The bar is not a modal: a branch is a fact about where playback has got to,
   not a question that blocks everything else, so the script, the scrubber and
   free roam stay usable.
-- **Materials are unlit.** The game bakes its illumination into textures and
-  the per-mesh base colour, and level geometry ships with no light sources at
-  all, so unlit is the faithful default rather than a shortcut. The scene light
-  values the script *does* set — light direction, light RGB, ambient, fog near
-  and far — are decoded and shown in the inspector, but not yet applied.
+- **The scene light is drawn by default.** The game bakes most of its
+  illumination into textures and the per-mesh base colour, and level geometry
+  ships with no light sources -- but the renderer applies one directional
+  light on top, which the script drives (direction, colour, ambient), and
+  "+ scene light" in the Scene panel draws it; "unlit" is the bake alone. It
+  swaps each visible mesh to a Lambert twin once a frame, which is why it
+  costs under a millisecond (`render/lighting.ts`).
 - **The `path.y - 15` eye rule is recorded, not applied.** Every camera hook
   that plays a path contains `eye.y = use_fixed_y ? fixed_eye_y : path.y - 15`
   — unambiguously, in three separate functions. Applying it to the `cp_`

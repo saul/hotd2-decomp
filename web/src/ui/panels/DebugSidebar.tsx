@@ -292,7 +292,7 @@ function ViewSettings() {
           ))}
         </select>
       </label>
-      <label title="The game bakes most illumination into textures and the per-mesh base colour, so unlit is the faithful baseline. 'Scene' adds the one directional light SetLightingDefaultSingle installs, with the direction, colour and ambient the script sets.">
+      <label title="The game bakes most illumination into textures and the per-mesh base colour, and its renderer adds one directional light on top: SetLightingDefaultSingle's, with the direction, colour and ambient the script sets. '+ scene light', the default, draws it; 'unlit' is the bake alone.">
         <span>Light</span>
         <select value={lightMode}
                 onChange={(e) => dispatch({ kind: "setLightMode",

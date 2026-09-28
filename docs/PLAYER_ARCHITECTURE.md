@@ -597,9 +597,9 @@ and bottom bars that framed the view grew one debugging need at a time until
 the game was the smallest thing on the page; they went, and what was worth
 keeping from them moved:
 
-* **Over the game** (`#overlay`): the breadcrumb menu -- `≡ HOTD2`, and in it
-  the stage, the entry, Original Mode, restart, the bundle screen and the
-  sidebar -- the speaker, the start and pause screen, the corner button, the
+* **Over the game** (`#overlay`): the breadcrumb menu -- `≡`, which holds
+  the game while it is open, and in it the stage, the entry, Original Mode,
+  restart, the bundle screen and the sidebar -- the speaker, the start and pause screen, the corner button, the
   branch bar and the game-over buttons. The corner button is player 1's
   START (`pressStart`, the command Enter's handler makes too), labelled for
   what START would do: **Skip** in a skippable region, **Continue** with the

@@ -302,13 +302,30 @@ check("every control is in #overlay and none is in #viewport",
 check("the sound button says what it is, for the harnesses and for a reader",
       /id="sound"[^>]*aria-pressed="true"/.test(warm)
       || /aria-pressed="true"[^>]*id="sound"/.test(warm));
-// The trail is the brand and nothing else: the stage is the game's own title
-// card's to say, and the menu marks which one is open.
+// The trail is a burger and nothing else: the stage is the game's own title
+// card's to say, the menu marks which one is open, and the name went too.
 const trail = warm.slice(warm.indexOf('class="crumb-trail"'),
                          warm.indexOf("</button>", warm.indexOf('class="crumb-trail"')));
-check("the breadcrumb says HOTD2 and not the stage",
-      trail.includes("HOTD2") && !trail.includes("Stage") && !trail.includes("Block"),
-      trail);
+check("the menu button is the burger alone: no name, no stage",
+      trail.includes('class="burger"') && !trail.includes("HOTD2")
+      && !trail.includes("Stage") && !trail.includes("Block"), trail);
+{
+  // The hold is the menu's own: read from its source, because a static
+  // render cannot open it. Opening pauses only a running game; closing lets
+  // go only of a hold it took; the two items that open something over the
+  // game close it without letting go.
+  let src = "";
+  try {
+    src = readFileSync(join(process.cwd(), "src", "ui", "panels", "Crumbs.tsx"),
+                       "utf8");
+  } catch { /* fails below */ }
+  check("the menu holds the game while it is open, and lets go of its own hold",
+        /transport\.playing === true[^]*kind: "pause"/.test(src)
+        && /held\.current = false;\s*if \(resume\) store\.dispatch\(\{ kind: "play" \}\)/.test(src));
+  check("...but not when it opens the bundle screen or the list of keys",
+        /kind: "openBundles" \}\), false\)/.test(src)
+        && /act\(onShowKeys, false\)/.test(src));
+}
 // Filling the window is the default. The bars over the picture follow the
 // frame, so `#overlay` carries whether it is boxed.
 check("the frame fills the window by default, and #overlay knows",
@@ -756,6 +773,16 @@ console.log("\nOne key per preference:\n");
             JSON.stringify({ v: 3, toggles: {}, fourByThree: false,
                              pixelRatio: 1.5 }));
   const v3 = readViewPrefs();
+  // The lighting's default is "+ scene light" since version 4; a pre-4 "unlit"
+  // is the old default, written whenever anything moved.
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 3, toggles: {}, lightMode: "unlit" }));
+  check("a pre-4 save's unlit is dropped, so scene light is the default",
+        readViewPrefs().lightMode === undefined);
+  store.set("hod2.viewPrefs",
+            JSON.stringify({ v: 3, toggles: {}, lightMode: "scene" }));
+  check("...and its scene light is kept, being a choice",
+        readViewPrefs().lightMode === "scene");
   check("...and a version-3 choice either way is kept, the resolution too",
         v3.fourByThree === false && v3.pixelRatio === 1.5, JSON.stringify(v3));
 

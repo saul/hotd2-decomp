@@ -41,7 +41,7 @@ import type { DebugBoxLayer } from "../render/debug";
 import type { FogMode, SceneFog } from "../render/fog";
 import type { TextureFilter, TextureFilterMode }
   from "../render/texfilter";
-import type { LightingMode, SceneLighting } from "../render/lighting";
+import type { SceneLighting } from "../render/lighting";
 import type { SpawnLayer } from "../render/overlays";
 import type { PropLayer } from "../render/props";
 import type { Rain } from "../render/rain";
@@ -122,6 +122,8 @@ export interface PlayerCommands {
   setPillarbox(on: boolean): void;
   /** The Resolution select, as the viewer's choice. */
   setPixelRatio(ratio: number): void;
+  /** The Light select, as the viewer's choice. */
+  setLighting(mode: string): void;
   /** The Perf meter switch. See `app/perf.ts`. */
   setPerf(on: boolean): void;
   requestSkip(): void;
@@ -232,9 +234,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
     // from the one tick, so a setting that changes what a layer reports shows
     // up on the next one. Twenty controls each poking the UI was the second
     // update path, and it is gone.
-    case "setLightMode":
-      p.lighting.setMode(c.mode as LightingMode);
-      return;
+    case "setLightMode": p.setLighting(c.mode); return;
     case "setFogMode":
       p.sceneFog.setMode(c.mode as FogMode);
       return;

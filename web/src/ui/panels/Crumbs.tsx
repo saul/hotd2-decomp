@@ -1,16 +1,16 @@
 /**
  * The breadcrumb menu: the one piece of chrome that sits over the game.
  *
- * `≡ HOTD2` in the top-left corner, and a click on it opens everything the
- * page offers that is not debugging: which stage, where it opens, Original
- * Mode, a restart, the bundle screen, and the debug sidebar. It replaced a top
- * bar and a bottom bar of controls that had grown one debugging need at a
- * time, until the game was the smallest thing on the page.
+ * `≡` in the top-left corner, and a press on it holds the game and opens
+ * everything the page offers that is not debugging: which stage, where it
+ * opens, Original Mode, a restart, the bundle screen, and the debug sidebar.
+ * It replaced a top bar and a bottom bar of controls that had grown one
+ * debugging need at a time, until the game was the smallest thing on the page.
  *
  * The trail used to go on -- `› Stage 2 › Block 7` -- and that is the one
- * thing the game already says itself, on its own title card, so it went: over
- * the game the pill is as small as it can be. The menu marks which stage is
- * open.
+ * thing the game already says itself, on its own title card, so it went; and
+ * then the name went too. Over the game it is one round button, matching the
+ * speaker in the other corner. The menu marks which stage is open.
  *
  * Every item is a command except two. Whether the menu is open is this
  * component's own state, and whether the debug sidebar is open belongs to
@@ -22,8 +22,8 @@
  * answer to a page with nothing to play -- is inside it, and the menu renders
  * without a projection for exactly that reason.
  */
-import { useEffect, useRef, useState } from "react";
-import { useDispatch } from "../store_context";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDispatch, useStore } from "../store_context";
 import { useSlice } from "../useSlice";
 
 export interface DebugToggle {
@@ -34,9 +34,29 @@ export interface DebugToggle {
 }
 
 export function Crumbs({ debugOpen, onToggleDebug, onShowKeys }: DebugToggle) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
   const root = useRef<HTMLElement>(null);
   const stale = useSlice((p) => p?.bundleStale) === true;
+  const store = useStore();
+
+  // **The menu holds the game while it is open**, as the `?` list does:
+  // nobody chooses a stage with a zombie on them. Closing it lets go only of
+  // a hold it took -- a game somebody had paused stays paused -- and an item
+  // that opens something else over the game (the bundle screen, the list of
+  // keys) closes it without letting go, so the game does not run on under
+  // that.
+  const held = useRef(false);
+  const setOpen = useCallback((next: boolean, resume = true) => {
+    if (next && !held.current
+        && store.getSnapshot()?.transport.playing === true) {
+      held.current = true;
+      store.dispatch({ kind: "pause" });
+    } else if (!next && held.current) {
+      held.current = false;
+      if (resume) store.dispatch({ kind: "play" });
+    }
+    setOpenState(next);
+  }, [store]);
 
   // Dismissed by a press anywhere else, and by Escape. `pointerdown` rather
   // than `click` so that the press that closes the menu over the game is not
@@ -60,7 +80,7 @@ export function Crumbs({ debugOpen, onToggleDebug, onShowKeys }: DebugToggle) {
       window.removeEventListener("pointerdown", down, true);
       window.removeEventListener("keydown", key);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   return (
     <nav id="crumbs" ref={root} className={open ? "open" : undefined}
@@ -71,13 +91,12 @@ export function Crumbs({ debugOpen, onToggleDebug, onShowKeys }: DebugToggle) {
                 : "Menu: stage, bundle, debug sidebar"}
               onClick={() => setOpen(!open)}>
         <Burger />
-        <span className="crumb brand">HOTD2</span>
         {stale && <span className="crumb-warn" aria-label="bundle out of date">!</span>}
       </button>
       {open && <CrumbMenu debugOpen={debugOpen}
                           onToggleDebug={onToggleDebug}
                           onShowKeys={onShowKeys}
-                          onClose={() => setOpen(false)} />}
+                          onClose={(resume) => setOpen(false, resume)} />}
     </nav>
   );
 }
@@ -97,7 +116,10 @@ function Burger() {
  * renders this directly instead.
  */
 export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
-                          DebugToggle & { onClose: () => void }) {
+                          DebugToggle & {
+                            /** `resume` false keeps the game held; see `Crumbs`. */
+                            onClose: (resume?: boolean) => void;
+                          }) {
   const dispatch = useDispatch();
   const stage = useSlice((p) => p?.stage);
   const stages = useSlice((p) => p?.stages);
@@ -105,7 +127,7 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
   const entry = useSlice((p) => p?.entry);
   const original = useSlice((p) => p?.original);
   const stale = useSlice((p) => p?.bundleStale) === true;
-  const act = (f: () => void) => () => { f(); onClose(); };
+  const act = (f: () => void, resume = true) => () => { f(); onClose(resume); };
 
   return (
     <div id="menu">
@@ -174,7 +196,7 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
                 title={stale
                   ? "Bundle needs rebuilding — it was built by an older exporter"
                   : "The bundle: which one is loaded, and build another from your copy of the game"}
-                onClick={act(() => dispatch({ kind: "openBundles" }))}>
+                onClick={act(() => dispatch({ kind: "openBundles" }), false)}>
           <span className="mi">{stale ? "!" : "⬡"}</span> Rebuild bundle…
         </button>
         <button aria-pressed={debugOpen}
@@ -186,7 +208,7 @@ export function CrumbMenu({ debugOpen, onToggleDebug, onShowKeys, onClose }:
         {/* A phone has no keys to list, so the stylesheet hides it there. */}
         {onShowKeys && (
           <button className="keys-open only-fine"
-                  onClick={act(onShowKeys)}>
+                  onClick={act(onShowKeys, false)}>
             <span className="mi">⌨</span> Keyboard shortcuts
             <kbd>?</kbd>
           </button>

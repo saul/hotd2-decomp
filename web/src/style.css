@@ -137,11 +137,14 @@ kbd {
   top: max(10px, env(safe-area-inset-top));
   left: max(10px, env(safe-area-inset-left));
 }
+/* One round button, the speaker's size, in the other corner: the name went,
+   the menu is behind the burger. The out-of-date mark is a badge on it. */
 .crumb-trail {
-  display: inline-flex; align-items: center; gap: 7px;
-  min-height: 34px; padding: 5px 12px 5px 10px;
+  position: relative;
+  display: inline-grid; place-items: center;
+  width: 36px; height: 36px; padding: 0;
   background: var(--glass); color: #eef2f6;
-  border: 1px solid var(--glass-line); border-radius: 999px;
+  border: 1px solid var(--glass-line); border-radius: 50%;
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
   letter-spacing: 0.04em;
@@ -154,11 +157,11 @@ kbd {
 .crumb-trail:hover, .crumb-trail:focus-visible, #crumbs.open .crumb-trail {
   opacity: 1; border-color: rgba(255, 255, 255, 0.28); outline: none;
 }
-@media (pointer: coarse) { .crumb-trail { opacity: 0.85; min-height: 40px; } }
-.crumb-trail .burger { flex: none; }
-.crumb-trail .brand { letter-spacing: 0.12em; }
-.crumb-trail .sep { color: rgba(255, 255, 255, 0.35); }
+@media (pointer: coarse) {
+  .crumb-trail { opacity: 0.85; width: 42px; height: 42px; }
+}
 .crumb-warn {
+  position: absolute; top: -4px; right: -4px;
   display: inline-grid; place-items: center;
   width: 16px; height: 16px; border-radius: 50%;
   background: var(--warn); color: #241300; font-size: 11px; font-weight: 800;

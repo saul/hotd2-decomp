@@ -86,7 +86,7 @@ import {
 } from "./projection/chrome";
 import { SceneFog } from "../render/fog";
 import { TextureFilter } from "../render/texfilter";
-import { SceneLighting } from "../render/lighting";
+import { type LightingMode, SceneLighting } from "../render/lighting";
 import { GunLights } from "../render/gunlights";
 import { ActorDrawsUnderSecondaryLights } from "../game/light_sets";
 import { applyToggle, runCommand, type PlayerCommands } from "./commands";
@@ -452,6 +452,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * a phone to a desktop's default.
    */
   private boxPref: boolean | undefined = undefined;
+  private lightPref: string | undefined = undefined;
   private ratioPref: number | undefined = undefined;
   /** The camera's own state: the pose scratch and the rails. */
   readonly cam = new CameraRig();
@@ -1300,6 +1301,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.resize();
   }
 
+  /** The Light select, as a choice. See {@link boxPref}. */
+  setLighting(mode: string): void {
+    this.lightPref = mode;
+    this.lighting.setMode(mode as LightingMode);
+  }
+
   /** The Resolution select, as a choice. See {@link pixelRatio}. */
   setPixelRatio(ratio: number): void {
     if (!this.pixelRatioOptions.includes(ratio)) return;
@@ -1313,7 +1320,9 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   private saveViewPrefs(): void {
     writeViewPrefs({
       toggles: this.toggles,
-      lightMode: this.lighting.lightingMode,
+      // A choice, like the 4:3 switch: undefined until the viewer picks one,
+      // so the default can move without old saves pinning the old one.
+      lightMode: this.lightPref,
       fogMode: this.sceneFog.fogMode,
       // Not `anisotropyLimit`: that is what the hardware allows, not something
       // the viewer chose, and persisting it would carry one machine's ceiling
@@ -1945,6 +1954,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   endFrame(): void {
     if (this.perfMeter.enabled) return this.endFrameMeasured();
     this.drawOrder.beginFrame();
+    this.lighting.beforeRender();
     updateVisibleMatrixWorld(this.scene);
     this.renderer.render(this.scene, this.camera);
     this.keepThumb();
@@ -1964,8 +1974,12 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     const m = this.perfMeter;
     let t = performance.now();
     this.drawOrder.beginFrame();
-    updateVisibleMatrixWorld(this.scene);
+    this.lighting.beforeRender();
     let n = performance.now();
+    m.add("render", n - t);
+    t = n;
+    updateVisibleMatrixWorld(this.scene);
+    n = performance.now();
     m.add("matrices", n - t);
     t = n;
     this.renderer.render(this.scene, this.camera);

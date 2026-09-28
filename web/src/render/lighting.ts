@@ -2,9 +2,10 @@
  * The scene light the script drives, and the D3D fixed-function setup it feeds.
  *
  * Level geometry ships with **no light sources of its own** and bakes most of
- * its illumination into textures and the per-mesh base colour — which is why
- * unlit is the default and the faithful baseline. But the renderer does apply
- * one directional light on top of that, and the script sets it: opcodes
+ * its illumination into textures and the per-mesh base colour. But the
+ * renderer does apply one directional light on top of that -- which is why
+ * "+ scene light" is the default and unlit, the bake alone, is the
+ * comparison -- and the script sets it: opcodes
  * `0x18`/`0x19` set the direction, `0x17` slerps it, and the `0x20`–`0x27`
  * tween channels 6/7/8 set its colour and 10 the ambient.
  *
@@ -133,9 +134,8 @@ export type LightingMode = "unlit" | "scene";
  * lit by block 1. `[proved]` The port keeps both blocks in the walker and asks
  * `app/` which actors are under block 1 (`ActorDrawsUnderSecondaryLights`).
  *
- * Only this module's "+ scene light" view draws with either; the default view
- * is unlit for everything, as the module comment explains, and so shows no
- * difference.
+ * Only this module's "+ scene light" view -- the default -- draws with
+ * either; the unlit view shows no difference.
  */
 export interface SecondaryLightSource {
   /** Block 1, as the walker holds it. Null before a stage. */
@@ -216,7 +216,12 @@ export class SceneLighting implements System<RenderContext> {
   readonly group = new Group();
   private readonly dir = new DirectionalLight(0xffffff, DIFFUSE_SCALE);
   private readonly amb = new AmbientLight(0xffffff, 1);
-  private mode: LightingMode = "unlit";
+  /**
+   * "+ scene light" by default: the script's light block drawn, which is
+   * what the stages look like with their light. `unlit` is the baked
+   * textures alone, one switch away in the Scene panel.
+   */
+  private mode: LightingMode = "scene";
   private intensity = 1;
   private state: SceneLightState = { ...DEFAULT_LIGHT };
   /** Lambert twins of the unlit materials, built once and reused. */
@@ -232,7 +237,7 @@ export class SceneLighting implements System<RenderContext> {
   constructor(scene: Scene) {
     this.group.name = "scene_lights";
     this.group.add(this.dir, this.dir.target, this.amb);
-    this.group.visible = false;
+    this.group.visible = this.mode === "scene";
     scene.add(this.group);
   }
 
@@ -287,7 +292,22 @@ export class SceneLighting implements System<RenderContext> {
     this.set(w.light);
     if (this.mode !== "scene") return;
     this.refreshSecondary(ctx);
-    this.applyMaterials();
+  }
+
+  /**
+   * The material swap for the frame about to be drawn: every **visible**
+   * mesh gets the twin this view and its actor's light block want.
+   *
+   * Once a frame, just before the render, and down the visible branches
+   * only. It ran from `update` -- every tick -- over the whole stage graph,
+   * twelve thousand nodes in stage 1 of which under two thousand are drawn,
+   * and "+ scene light" cost 4.8 ms a frame on a desktop for it. A hidden
+   * mesh's material is not read by anything until it is shown, and it is
+   * swapped on the frame it is: this runs after every system has decided
+   * what is visible. Called by `app/`'s `endFrame`.
+   */
+  beforeRender(): void {
+    if (this.mode === "scene") this.applyMaterials(true);
   }
 
   /** A layer that clones its own meshes outside the stage root. */
@@ -364,9 +384,10 @@ export class SceneLighting implements System<RenderContext> {
    * twins keep every other property the PowerVR2 translation decided:
    * texture, base colour, blend mode, alpha test, culling, fog.
    */
-  private applyMaterials(): void {
+  private applyMaterials(visibleOnly = false): void {
     if (!this.root) return;
     const visit = (o: Object3D, at: number | null): void => {
+      if (visibleOnly && !o.visible) return;
       const x = o.userData as { hod2_spawn_at?: number; hod2_actor_at?: number };
       const own = x?.hod2_actor_at ?? x?.hod2_spawn_at;
       const here = own !== undefined ? own : at;

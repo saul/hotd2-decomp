@@ -51,8 +51,12 @@ const KEY = "hod2.viewPrefs";
  * its `false` is the old default, never chosen, and would keep a phone that
  * had once moved the volume filling the screen. A pre-3 `true` could only
  * have been chosen, and is kept.
+ *
+ * **4**: the lighting is "+ scene light" by default and a choice, for the
+ * same reason: a pre-4 save's `lightMode: "unlit"` is the old default,
+ * written whenever anything moved. A pre-4 `"scene"` was chosen, and stays.
  */
-const VERSION = 3;
+const VERSION = 4;
 
 /** The overlay switches, which a pre-2 save cannot be trusted about. */
 const OVERLAYS: ReadonlySet<string> =
@@ -112,6 +116,7 @@ export function readViewPrefs(): ViewPrefs {
     }
     const out: ViewPrefs = { ...p, toggles };
     if (saved < 3 && out.fourByThree !== true) delete out.fourByThree;
+    if (saved < 4 && out.lightMode !== "scene") delete out.lightMode;
     return out;
   } catch {
     return { toggles: {} };

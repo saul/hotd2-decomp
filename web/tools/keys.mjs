@@ -78,6 +78,18 @@ try {
   check("a press on the dim round it closes it", !s.dialog);
   check("...and is not a shot at the game on the way", s.paused === null);
 
+  // -- the menu holds the game, as the list does -------------------------------
+  await page.click(".crumb-trail");
+  await page.waitForTimeout(300);
+  s = await read();
+  check("opening the menu holds the game",
+        s.menu && s.paused?.includes("is-paused") === true, JSON.stringify(s));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  s = await read();
+  check("...and shutting it lets go", !s.menu && s.paused === null,
+        JSON.stringify(s));
+
   // -- the page's other keys ---------------------------------------------------
   const before = (await read()).sound;
   await page.keyboard.press("KeyM");

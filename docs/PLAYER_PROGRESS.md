@@ -1912,7 +1912,7 @@ Each pays 80.
 | drawn as | a skeleton, `frog.bin` | a hand-built slot chain | one slot of `fish.bin` |
 | how it attacks | a 30-frame ballistic leap; the hit is **timed**, on motion frame 60 | a dive; the hit is a **distance**, five units from the eye | a lunge to one of four points in camera space |
 | what limits it | `g_attack_permits`, the same array class 0x30 uses | `g_class43_attack_token`, one per flock | `g_water_attack_slots`, four |
-| when it leaves | despawns after a landed leap, **without dying** | never: dive and orbit for ever | falls back and despawns |
+| when it leaves | despawns after a landed leap, **without dying**; shot, it tumbles, leaves the ground ring as it settles and sinks | never: dive and orbit for ever | falls back and despawns |
 
 Three readings from these that are worth keeping:
 
@@ -1928,11 +1928,21 @@ Three readings from these that are worth keeping:
   records are these, which is why they sit at the world origin with no
   orientation.
 * **A sub-type-0 owl cannot be shot until the camera's path frame passes 682**,
-  and no other sub-type has that guard.
+  and no other sub-type has that guard -- but nothing in the class clears the
+  hit bit, so a bullet that lands early is kept and kills it the frame the
+  guard lifts.
+* **The owl's corpse lands on literals, not on the stage.**
+  `OwlCorpseFallAndSettle` (`FUN_00448210`) has one ground per sub-type: a
+  stairwell for 0 -- two rails at `g_class43_corpse_rails` that turn it back, a
+  wall at `x = -739`, thirteen steps and a landing at `35.91906`; a line
+  between a flat at `49.16` and a sloped plane for 1; an eight-step stair in a
+  box and a floor at `-36` for 2; water at `-25` for 3. The spin the death
+  gives it keeps 0.95 of itself a frame, so the body stops turning over.
+  The owl registers for the shot test the engine's way now, at its own tail,
+  and the corpse never does, so a falling body no longer takes the shots meant
+  for the owl behind it.
 
-**What is not ported**, and each is declared where it lives: the owl's body
-chain (sixteen slots in one matrix chain against `render/slotmodels.ts`'s one
-per actor) and the four per-sub-type landings its corpse has.
+The owl's body chain (sixteen slots in one matrix chain) is `render/owl.ts`.
 
 **Their effects are.** The owl sheds forty feathers when it dies and eight
 on every strike, and leaves blood at its camera-space point; the fish leaves a
@@ -1944,8 +1954,9 @@ twenty-five, thirty and sixty frames -- in bytes past the `MatrixStackPop` the
 decompiler stops at (`L35`). And the deaths that meet the water never made the
 surface ring the port had them make: all three call `SpawnRingEffectAtPose`
 (`FUN_00408370`), the ring task `SpawnGroundRingEffect` makes too. The owl's
-ground impact ring and water splash are ported and wait on the landings, which
-are their only callers.
+ground impact ring and water splash come from the corpse's landings, which are
+their only callers: a ring where sub-types 0, 1 and 2 come to rest, and the
+splash where sub-type 3 goes into the water.
 
 The frog's two gaps, which this list used to name, are closed. Its **turn fix-up** — not a
 head look: after each 45° pass the engine turns bone 1, the node the whole of
@@ -1964,6 +1975,25 @@ wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
 was inverted; both launch frames run on into the flight and halve the turn
 that frame too; and the leap's recovery resumes the clip at cursor `0x3D`
 over a fade of 2, where the port had played it from the start over 61.
+
+**The frog's death is ported, and a shot one no longer stands for ever.**
+`FrogStateDieTumbleAndSink` freezes the death clip on the frame it reads
+`len - 1` and waits to read `len`; the engine's states read the cursor the
+last draw computed, one tick behind the counter the port's director has
+already stepped, so in the port the freeze stopped the clip one short and
+the corpse held `g_enemies_present` for ever. With the corpses stopping
+bullets too -- the kill raised `0x100` where the engine raises `0x8000`, out
+of the shot test -- stage 1's frog room could not be cleared by shooting.
+The class now reads `part+0x08` as the engine's states do
+(`FrogTail.playCursor`), which also puts every hop, leap and turn on the
+engine's frame rather than one early. The death blends into its clip rather
+than cutting, runs its first substate on into the bounce (`L53`), opens
+`SpawnGroundRingEffect` under bone 1 as the corpse settles, and sinks for 181
+frames before it goes. The kill keeps bone 3's model on the corpse -- its
+third write zeroes bone 2's **hit radius** (`Actor.boneRadius`) -- and calls
+`ChooseHitPlayerOrder`, which is a draw with two players in. `FrogInit`
+raises the trace-the-floor bit the ring and shadow read. The real-bundle
+check is `tools/animals.mjs`'s `frog death` row.
 
 ## A fourth: the bat, class 0x46, and a flight path that is not in the script
 
@@ -5436,7 +5466,8 @@ sub-actor never registers.
   `Init` makes is now updated after its maker.
 * A bone whose draw record is slot 0 draws nothing (`AssetDrawSlot(0)`
   returns at once). That is the walker's node 2 -- and the frog corpse's
-  bones 2 and 3, which were drawn before.
+  bone 2, which was drawn before. (This said bones 2 and 3: the kill's third
+  write, `part+0x210`, is bone 2's hit radius, not bone 3's slot.)
 * Every scene's cam files come from the exe's per-scene list
   (`0x004C4990`): stage 5 gains `op_st1` (JUDGMENT's paths `0xFD..0x147`),
   and every Original Mode bundle gains `op_org`.

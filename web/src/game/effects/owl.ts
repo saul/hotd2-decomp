@@ -25,12 +25,12 @@
  *   `OwlUpdateAndResolveShot` (`FUN_004460C0`), 8 from every strike in
  *   `OwlStateDiveAtCamera` (`FUN_00446F30`).
  * * {@link OwlSpawnGroundImpactRing} and {@link OwlSpawnWaterSplashFlipbook}
- *   -- only from the four landing arms of `OwlCorpseFallAndSettle`
- *   (`FUN_00448210`): the ring at `0x00448319` (sub-type 0), `0x00448376`
- *   (sub-type 1) and `0x00448710` (sub-type 2), the splash at `0x00448758`
- *   (sub-type 3, reaching `y = -25`). Those arms are the corpse's landing
- *   geometry, which `class43/index.ts` declares is not ported yet, so nothing
- *   calls these two until it is.
+ *   -- only from the landing arms of `OwlCorpseFallAndSettle`
+ *   (`FUN_00448210`), through the jump table at `0x004487B8`: the ring at
+ *   `0x00448319` and `0x00448376` (sub-type 1's flat and its slope) and at
+ *   `0x00448710` (the tail sub-types 0 and 2 share, sub-type 0 reaching it by
+ *   `JMP 0x0044870C`), the splash at `0x00448758` (sub-type 3, at or under
+ *   `y = -25`).
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";

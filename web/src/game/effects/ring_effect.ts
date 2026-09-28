@@ -18,8 +18,9 @@
  * Ghidra's cross-references give. `SpawnGroundRingEffect` puts one under a
  * body on its way out of the world, at scale 1: the first frame of class
  * 0x30's and class 0x31's two corpse states each, class 0x20's hand-over into
- * its sink, the frog's death, and the rescue target's freed state on the
- * frame its clip ends. `SpawnRingEffectAtPose` takes a six-word pose and a
+ * its sink, the frog's corpse as it settles (`game/class11/`), and the rescue
+ * target's freed state on the frame its clip ends. `SpawnRingEffectAtPose`
+ * takes a six-word pose and a
  * scale, and it is what a class-0x51 fish's corpse makes when it meets the
  * water, and a severed head each time it meets the floor -- 0.25 a bounce,
  * 0.5 as it settles.
@@ -157,8 +158,9 @@ export const RING_EFFECT_GROUND_SCALE = 1.0;
  * under the torso of a body lying on its back. The height does come from the
  * origin: `QueryGroundHeightAt(x, y + 20, z)` for an actor whose
  * {@link MotionFlag.TraceGround} is up (`TEST byte ptr [EDI+0x1F8], 4` at
- * `0x00407DCD` -- class 0x30 and 0x31 raise it in their `Init`), `obj+0x44`
- * otherwise (class 0x20), plus 0.05. The yaw is the actor's `obj+0x68`.
+ * `0x00407DCD` -- classes 0x30, 0x31 and 0x11 raise it in their `Init`),
+ * `obj+0x44` otherwise (class 0x20), plus 0.05. The yaw is the actor's
+ * `obj+0x68`.
  */
 export function SpawnGroundRingEffect(obj: Actor): void {
   if (G.g_app_state !== AppState.InPlay) return;

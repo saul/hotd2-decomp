@@ -22166,6 +22166,187 @@ shipped script.
   (`class45/body.ts`) compensate for a view built from the look-at. The view
   is built from the angles now, so both can go.
 
+## 2026-09-28 -- the frog's death, read whole, and why its corpse never went
+
+Class 0x11's death state had never been read. The last frog session left two
+notes -- the death cuts where it should blend, and `SpawnGroundRingEffect` is
+not called -- and the playthrough table above had stage 1 hung in the frogs'
+room with two frogs in `Die/1`. Both halves of the path were read from the
+listing: `FrogAwardKillAndEnterDeath` (`0x0043A2E0`..`0x0043A3C7`) and
+`FrogStateDieTumbleAndSink` (`0x0043B990`..`0x0043BD23`, with
+`0x0043BB68`..`0x0043BB8E` past the `MatrixStackPop` call Ghidra ends case 0
+on). `[proved]` throughout; the TSV rows now carry the whole reading.
+
+**Why the corpse never went.** Case 1 raises `obj+0x34` bit `0x4000` (the
+clip's freeze) when `part+0x08 == len - 1` and waits for `part+0x08 == len`.
+In the engine `part+0x08` is what the last draw computed, and
+`FrogDrawAndCycleBone2Slot` steps the counter *after* its draw, so the draw
+following the freeze computes `len` and the state reads it next frame. The
+port's director steps the counter before the update, so a port state reads the
+cursor the engine's reads a frame later; frozen on `len - 1`, the counter never
+got to `len`. That is `L62`. The class now keeps `part+0x08` on its sub-block
+(`FrogTail.playCursor`, written at the draw and at each blend it starts) and
+every state reads that -- which also moves the hop's launch and stop, the
+leap's launch and connect and every turn pass one frame later, onto the
+engine's frame.
+
+**What else was wrong**, each pinned by a check that fails on the old module
+(`web/test/port.test.ts`, 20 failures against `HEAD`'s `class11/index.ts`):
+
+* case 0 runs on into case 1 (`INC byte ptr [EAX+5]` at `0x0043BB8C`, then
+  `0x0043BB8F`, L53), so the kick is bounced on the frame of the kill;
+* the death clip is blended: `ActorSetMotionBlended` snapshots the drawn pose
+  unconditionally, and the port's primitive keys its snapshot on
+  `obj.motion`, which the port had written first;
+* `SpawnGroundRingEffect(obj)` at `0x0043BCD4`, on the settling frame;
+* the kick is the camera block's rotation of `(0, 0, -0.5)` with the
+  translation zeroed; the port subtracted `ClassFrame.eye` from a camera
+  point, which is wrong wherever the two cameras differ;
+* the kill's bit is `0x8000` (out of the shot test), not `0x100`: corpses were
+  stopping bullets. Whether that is what kept the playthrough off the third
+  frog, or only the corpses never leaving, is `[open]` -- the run below
+  changes both at once;
+* `part+0x210` is bone 2's record `+0x78`, its hit radius -- not bone 3's slot.
+  Bone 3's model is back on the corpse, and the radius is a new
+  `Actor.boneRadius` the pick, the shot test and the blood's depth read;
+* `ChooseHitPlayerOrder` (`0x004093C0`) is called, a draw with two players in;
+  `g_hit_player_order` is in `G`;
+* the kill zeroes the word at `+0x11C` and not `+0x11E`;
+* `FrogInit` raises `part+0x64` bit 4 (`0x0043A170`), which the ring's height
+  and the shadow read, and seeds `obj+0x12C` from the position;
+* two port-only exits: `leave` dropped `g_enemies_alive` again for a corpse,
+  and the sweep freed a permit the corpse no longer held.
+
+**Checks.** `tools/animals.mjs` gains a `frog death` row on the real bundle:
+every frog alive at frame 720 is marked shot, and each must despawn and leave
+one ring (it fails on the old module, one corpse standing). The harness also
+learned the character layer's `spent` set -- it rebuilt despawned actors.
+Stage 1 under `playthrough.mjs --continue`: on `HEAD` the frog room needs the
+debug clear (37 volleys, no damage; `0x2AB0` and `0x2B5C` in `Die/1`), on
+this branch it is shot clear and the stage ends at 9240. Screens of the death
+in the page, before and after, are
+`scratchpad/frog-death/shots/frog-{old,new}-*.png` of this session: the
+corpse keeps its head, and at +14 the ring's strips open round it.
+
+**Wrong turns.** The first stage-1 playthrough ended at block 1 with a
+GAME OVER and I took it for this branch's; the same run on a detached `HEAD`
+did the same thing (33 volleys at a `char_adv00` in `HoldAtRange` with no
+damage landing), so it predates this. The `+0x11E` assertion first passed on
+the old module too, because the fixture's `maxHp` was already 0.
+
+**Next actions.**
+
+* `ActorKillAll` marks an `ownsShotResult` class dead without raising bit 3,
+  so a frog the debug clear reaches never enters its death.
+* The engine stops writing a bone's sphere centre once its slot is 0 or
+  `obj+0x34` has `0x8000` (`SkeletonEmitNode`), so the frog's blood stays
+  where bone 2 was drawn; `render/effects.ts` reads the live bone.
+* `class30/throw.ts` and `SpawnThrownWeapon` zero a hand's hit radius and
+  declare that the actor has nowhere to keep it; `Actor.boneRadius` is that
+  place now.
+* Stage 1 block 1 on `6706e32`: no damage lands on the `HoldAtRange`
+  `char_adv00`, and a run without `--continue` ends there.
+* L62's pairing -- a freeze on one cursor and a wait for the next -- may be
+  in other classes; they read the counter.
+
+## 2026-09-28 -- the owl's corpse lands, and the owl's death path read again
+
+`OwlCorpseFallAndSettle` (`FUN_00448210`) was ported as a fall, a tumble and a
+121-frame life, with the four landings behind a declared divergence, and the
+owl's ground ring and water splash -- already ported -- had no caller. Both
+are in now, and re-reading the corpse and the death block beside it found six
+more things the first port had wrong.
+
+**The corpse** `[proved]`, from the listing (`0x00448210`..`0x004487B7`) and
+the jump table at `0x004487B8` (`0x00448397`, `0x004482BA`, `0x004485BA`,
+`0x0044872E` for sub-types 0..3):
+
+* The spin **decays**: `obj+0x64 += spin; spin = ftol(spin * 0.95)`
+  (`[0x0055CB40]`). The port added `-768` a frame for 121 frames.
+* Sub-type 0 is a stairwell. East of `x = -720.60425` -- both rails' last x,
+  bit for bit, which is what keeps the segment walk inside the rail -- each of
+  `g_class43_corpse_rails` picks the segment whose x span holds the corpse and
+  flips `vz` on the sign of a cross product: rail 0 on `> 0`, rail 1 on `< 0`
+  (`TEST DL, AH` with `DL = 1`). Worked through, that is an XOR: between the
+  rails both fire and cancel, beyond either one fires and turns it back. West
+  of `-739` it is stopped dead (`+0x600` spin). Under `35.91906` it lands
+  (ring at `35.93906`); above, a thirteen-step floor `n + 45` bounces it.
+* Sub-type 1 is a line through `(-630.6, -923.8)` along `(-34.9, -15.5)` --
+  the doubles, and the third is `-34.89999999999998`, `[likely]` the compiler
+  folding `-665.5 - -630.6`. One side is a flat: under `49.16` a ring at
+  `49.3`, **no thud and no clamp** (`0x00448319`). The other is
+  `OwlTestPositionBelowPlane(0, 0.979029, 0.203721, 140.1687)`: a ring a unit
+  under the corpse, pitched `0x1000`, and the thud (`0x00448376`).
+* Sub-type 2: an eight-step stair `n * 3.5 - 33` inside a box turns the fall
+  every time and bounces it across once (`obj+0x250`); at `-36` anywhere it
+  lands with a ring at `-35.98` (`0x00448710`, the tail sub-type 0 reaches by
+  `JMP 0x0044870C`).
+* Sub-type 3: at `-25` the splash (`0x00448758`) and `SIBUKI8`, and the corpse
+  sinks on through the surface.
+* `0x1E16A9` is `COMMON\DAMAGE5_22.WAV`, read off the SE record at
+  `0x00584BDC`.
+
+**The death path**, `OwlUpdateAndResolveShot` (`FUN_004460C0`) `[proved]`:
+
+* **The dead bit is `0x1000000`, not `0x4000000`.** `0x004461D6` raises it and
+  `OwlDrawBodyChain` reads it twice (`0x00447C94`, the dead body; `0x00447D4B`,
+  the inner chain). The port raised `ActorFlag.Dead` and `render/owl.ts` read
+  that, so the pair agreed with each other and not with the exe. It is
+  `OwlFlag.Corpse` in `class43/state.ts` now.
+* **The throw goes away from the camera.** The death reads
+  `g_camera_block_yaw_bams` (`0x009A60D0`) + `0x8000`; the port read
+  `g_camera_yaw_bams`, which is that block yaw already turned half round, so
+  every corpse flew back over the player's head. In the page a block-14 owl
+  shot at `z = -1144` came down at `z = -1061`, behind a camera at `-1070`;
+  it now comes down at `-1155`.
+* **Nothing clears the hit bit.** No instruction in the class ANDs `obj+0x34`
+  with a mask that drops bit 3 (swept every `AND` immediate in
+  `0x00445DB0..0x00448F00`; the generic ones are all class routines), and the
+  port cleared it every frame -- so a sub-type-0 owl shot before camera frame
+  682 forgot the bullet, where the exe's dies on the frame the guard lifts.
+* **The corpse is never a shot candidate.** The update ends
+  `view(obj+0x40) -> obj+0x70; RegisterForShotTest` (`0x0044644E`..
+  `0x00446488`) on every live frame, the death frame included, and the corpse
+  routine makes no such call. The owl was picked by its sphere from `render/`,
+  where a falling corpse kept taking the shots meant for the owl behind it; it
+  registers the engine's way now (`registersForShotTest`).
+* The yaw error runs `-0x7FFF..+0x8000` (`CMP ECX, 0x8000; JLE`), not `s16`.
+* The death zeroes `+0x24C`, `+0x250` and `+0x254`, not the settle flag at
+  `+0x26C`. `+0x254` has no other reference in the image.
+* `onDeadSweep` freed `g_class43_attack_token` whenever the despawned owl's
+  member index matched it -- in stage 2 block 5 that is an owl of the other
+  flock, mid-dive. It does nothing now: the death block already gave
+  everything back.
+
+**And one outside the death path**, found reading the yaw global:
+`OwlPickTargetPlayerAndAimOffset` (`0x00447FB0`) measures its two-player aim
+offset as `ftol(horizontal distance to g_camera_block_eye) / 60` along
+`g_camera_block_yaw_bams + 0xC000 / 0x4000`. The port used the sway rate for
+the length and `g_camera_yaw_bams` for the heading, so the two players' owls
+came in on each other's side. The TSV row had the length as `obj+0x204 / 60`,
+which the routine never reads.
+
+**Wrong turns.** The brief (and `effects/owl.ts`) had the ring calls as one per
+sub-type -- `0x00448319` for 0, `0x00448376` for 1, `0x00448710` for 2 -- and
+I started from that. The jump table says both `0x00448319` and `0x00448376`
+are sub-type 1's, and `0x00448710` is shared. `globals.tsv` described the
+rails as reflecting "on the outside of the first or the inside of the
+second", which is a reading of the two branch senses rather than of the
+arithmetic; working a point between them shows both fire. The first run of
+the new tests failed the blood test, which counted one call to
+`viewSpaceOfPoint` on the death frame -- the shot test's depth is the second.
+
+**Checked.** `test:port`: against the old port 27 assertions fail (26 new,
+and the amended blood count), and the throw and aim-offset ones added after
+fail under a mutation that puts the old lines back. In the page (`web/tools/creature_effects.mjs --which owl|owl2`,
+now reporting corpses, rings and splashes): stage 2 block 5 lands a sub-type-1
+corpse on the sloped street with its ring pitched to it, and block 14 a
+sub-type-2 corpse on the floor at the foot of the stair,
+`web/shots/owl-corpse-subtype1-slope.png` and
+`web/shots/owl-corpse-subtype2-floor.png` (gitignored). A sub-type-0 corpse
+was driven into the `-739` wall and landed at `35.92`; stage 3's water was not
+reached, because the deep link lands behind a room the harness does not clear.
+
 ## 2026-09-28 -- every caller of the ring effects, wired where the exe calls it
 
 **The list.** `SpawnGroundRingEffect` (`FUN_00407DA0`), `SpawnRingEffectAtPose`

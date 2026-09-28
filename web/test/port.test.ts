@@ -105,8 +105,9 @@ import {
   PROJECTION_DISTANCE_PX,
 } from "../src/game/class11";
 import { FrogFlag, FrogState, type FrogTail } from "../src/game/class11/state";
-import { OwlStateDiveAtCamera, OwlStateRideApproachSpline,
-  OwlUpdateAndResolveShot } from "../src/game/class43";
+import { OwlPickTargetPlayerAndAimOffset, OwlStateDiveAtCamera,
+  OwlStateRideApproachSpline, OwlUpdateAndResolveShot }
+  from "../src/game/class43";
 import {
   OWL_RING_PULSE_FRAMES, OwlEffectsTick, OwlGroundRingPhase,
   OwlSpawnGroundImpactRing, OwlSpawnWaterSplashFlipbook,
@@ -20164,10 +20165,13 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and the alive count comes down while the present count does not",
           G.g_enemies_alive === 0 && G.g_enemies_present === 1,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
-    check("...with the corpse model on bone 1 and bones 2 and 3 blanked",
+    // `part+0x210` is bone 2's record at `+0x78` -- its hit radius -- and
+    // not bone 3's slot: bone 3's model stays on the corpse.
+    check("...with the corpse model on bone 1, bone 2 blanked and unshootable, "
+          + "and bone 3 left alone",
           a.boneSlot["1"] === 0xb91 && a.boneSlot["2"] === 0
-          && a.boneSlot["3"] === 0,
-          JSON.stringify(a.boneSlot));
+          && a.boneSlot["3"] === undefined && a.boneRadius["2"] === 0,
+          `${JSON.stringify(a.boneSlot)} ${JSON.stringify(a.boneRadius)}`);
   }
 
   {
@@ -20275,7 +20279,10 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       check("a frog owed more than 30 degrees starts the left turn clip",
             a.motion === FrogMotion.TurnLeft && t.sub === 1,
             `motion 0x${a.motion.toString(16)} sub ${t.sub}`);
-      a.playTicks = 30;          // the clip's play length: this pass is done
+      // `part+0x08` -- the cursor the last draw left, which is what the states
+      // read -- at the clip's play length: this pass is done.
+      t.playCursor = 30;
+      a.playTicks = 30;
       a.fade = 0;                // ...and the fade into it long over
       const yaw0 = a.yaw;
       FrogStateHopWithinScreenWedge(a, frame(rng));
@@ -20311,6 +20318,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 1;
       t.a = 0x5000;
       a.motion = FrogMotion.TurnLeft;
+      t.playCursor = 30;
       a.playTicks = 30;
       a.fadeFrom = null;
       a.fade = 0;
@@ -20332,7 +20340,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 2;
       t.a = 0x800;
       a.motion = FrogMotion.Hop;
-      a.playTicks = 0x12;
+      t.playCursor = 0x12;
       const yaw0 = a.yaw;
       FrogStateHopWithinScreenWedge(a, frame(rng));
       check("the hop's launch frame also halves the turn it still owes",
@@ -20344,7 +20352,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
       t.sub = 2;
       t.a = 0x400;
       a.motion = FrogMotion.Leap;
-      a.playTicks = 0x1e;
+      t.playCursor = 0x1e;
       FrogStateLeapAtPlayer(a, frame(rng));
       check("...and so does the leap's",
             t.sub === 3 && t.a === 0x200
@@ -20365,6 +20373,7 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
             + "connected, over a fade of 2 and not 61",
             a.motion === FrogMotion.Leap
             && MotionPlayFrame(a) === FROG_LEAP_RECOVER_CURSOR
+            && t.playCursor === FROG_LEAP_RECOVER_CURSOR
             && a.fadeLen === 3 && t.sub === 5
             && (t.flags & (FrogFlag.CycleRunning | FrogFlag.CycleWrapped
                            | FrogFlag.NoGravity)) === 0,
@@ -20519,6 +20528,233 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
             a.pos.x === x0 && near(a.sphereCentre.x, 0)
             && near(a.sphereCentre.z, -50),
             `pos ${a.pos.x} sphere ${JSON.stringify(a.sphereCentre)}`);
+    }
+
+    // -- the death: `FrogAwardKillAndEnterDeath` and `FrogStateDieTumbleAndSink`
+    //
+    // Driven the way the director drives a frog -- `ActorAdvanceMotion`, then
+    // the update, a frame at a time -- because the hang this pins lived in
+    // the phase between the two. The camera is pitched down by asin(0.1),
+    // turned a quarter about Y and set somewhere `ClassFrame.eye` is not, so
+    // the kick has to be the camera's rotation of (0, 0, -0.5) and nothing
+    // else (L48).
+    {
+      const cam = vec3(7, 9, -3);
+      const SN = 0.1;
+      const CS = Math.sqrt(1 - SN * SN);
+      const host: GameHost = {
+        ...NULL_HOST,
+        viewPoint: (x, y, z, o) => {
+          o.x = cam.x + z * CS; o.y = cam.y + y + z * SN; o.z = cam.z - x;
+        },
+      };
+      const near = (u: number, v: number, e = 1e-9) => Math.abs(u - v) < e;
+      const deathScene = (seed: number) => {
+        const rng = new Rng(seed);
+        frogScene(rng);
+        const a = spawnFrog(0x9320, vec3(0, 0, -40), rng);
+        const pf = (): ClassFrame => ({ eye: EYE, dt: 1 / 60, rng, host });
+        // One frame as `SceneTaskWalk` runs it: the clock, then the update.
+        const step = (): void => {
+          ActorAdvanceMotion(a, 1 / 60);
+          FrogUpdate(a, pf());
+        };
+        return { rng, a, t: tailOf(a), step };
+      };
+
+      {
+        const { a, t, step } = deathScene(47);
+        const ground = a.pos.y;
+        check("a frog's Init raises the bit its ring and shadow trace the "
+              + "floor by, and publishes its sphere at its feet",
+              (a.motionFlags & MotionFlag.TraceGround) !== 0
+              && a.sphereCentre.x === 0 && a.sphereCentre.z === -40
+              && a.sphereCentre.y === ground,
+              `flags 0x${a.motionFlags.toString(16)} `
+              + JSON.stringify(a.sphereCentre));
+        for (let i = 0; i < 5; i++) step();
+        const slot = a.hitSlot;
+        // The descriptor's `+0x22`, which the spawn allocator puts in both
+        // words: 1 in all four shipped spawns.
+        a.hp = a.maxHp = 1;
+        const maxHp = a.maxHp;
+        const score = G.g_player_score[0];
+        const hits = G.g_player_hit_count[0];
+        a.attackPermit = 0;
+        G.g_attack_permits[0] = a.at;
+        a.lookAt.x = 1.5;
+        a.lookAt.z = -41.25;
+        G.g_ring_effects = [];
+        G.g_blood_sprays = [];
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        check("the kill frame runs on into the tumble: the kick is already "
+              + "bounced, 0.6 of the camera's own -Z half a unit long",
+              t.state === FrogState.Die && t.sub === 1 && a.vel.y === 0
+              && near(a.vel.x, -0.5 * CS * 0.6) && a.vel.z === 0,
+              `${FrogState[t.state]}/${t.sub} vel ${a.vel.x}, ${a.vel.y}, `
+              + `${a.vel.z}`);
+        check("...and the death clip is blended in from the pose on screen, "
+              + "over a fade of 2",
+              a.motion === FrogMotion.Death
+              && a.fadeFrom?.motion === FrogMotion.Idle && a.fadeLen === 3,
+              `motion 0x${a.motion.toString(16)} from `
+              + `${JSON.stringify(a.fadeFrom)} fadeLen ${a.fadeLen}`);
+        check("...it leaves the shot test (0x8000) rather than going "
+              + "shot-immune (0x100)",
+              (a.flags & ActorFlag.NoShotTest) !== 0
+              && (a.flags & ActorFlag.ShotImmune) === 0
+              && (a.flags & ActorFlag.NoCameraTrack) !== 0,
+              `flags 0x${a.flags.toString(16)}`);
+        check("...the kill zeroes the u16 at +0x11C and nothing beside it",
+              a.hp === 0 && a.maxHp === maxHp, `${a.hp}/${a.maxHp}`);
+        check("...the alive count comes down, the permit is freed and the "
+              + "frog still names it, as the engine leaves obj+0x121",
+              G.g_enemies_alive === 0 && G.g_enemies_present === 1
+              && G.g_attack_permits[0] === -1 && a.attackPermit === 0,
+              `${G.g_enemies_alive}/${G.g_enemies_present} permits `
+              + `${G.g_attack_permits} own ${a.attackPermit}`);
+        check("...80 points, a hit counted, the order chosen, and the blood "
+              + "on bone 2",
+              G.g_player_score[0] - score === 80
+              && G.g_player_hit_count[0] - hits === 1
+              && G.g_hit_player_order[0] === 0
+              && G.g_hit_player_order[1] === -1
+              && G.g_blood_sprays.length === 1
+              && G.g_blood_sprays[0].at === a.at
+              && G.g_blood_sprays[0].bone === 2,
+              `score +${G.g_player_score[0] - score} order `
+              + `${G.g_hit_player_order} blood `
+              + JSON.stringify(G.g_blood_sprays));
+
+        // The frames that follow. The clip is held three frames on its start
+        // (a fade of 2), then steps a cursor a frame; the state freezes it
+        // when it reads `len - 1` = 9, which the draw at +11 computes, and
+        // reads 10 on the frame after. The slide is dead by then, so the
+        // ring goes down on +13.
+        let frozenAt = -1;
+        let ringAt = -1;
+        let goneAt = -1;
+        const cursors: number[] = [];
+        let ringVel = "";
+        for (let k = 1; k <= 400 && goneAt < 0; k++) {
+          const velBefore = `${a.vel.x},${a.vel.y},${a.vel.z}`;
+          step();
+          if (k <= 14) cursors.push(t.playCursor);
+          if (frozenAt < 0 && (a.flags & ActorFlag.PoseFrozen)) frozenAt = k;
+          if (ringAt < 0 && G.g_ring_effects.length) {
+            ringAt = k;
+            ringVel = velBefore;
+            check("...on the settling frame the corpse sinks at 0.035 and "
+                  + "counts 180",
+                  a.vel.x === 0 && a.vel.z === 0 && a.vel.y === -0.035
+                  && t.sub === 2 && t.a === 0xb4,
+                  `vel ${a.vel.x}, ${a.vel.y}, ${a.vel.z} sub ${t.sub} `
+                  + `a ${t.a}`);
+          }
+          if (a.despawned) goneAt = k;
+        }
+        check("the drawn cursor is held three frames on the death clip's "
+              + "start and then steps to its length",
+              cursors.join(",") === "0,0,1,2,3,4,5,6,7,8,9,10,10,10",
+              cursors.join(","));
+        check("the clip freezes on the frame the state reads len - 1",
+              frozenAt === 12, `${frozenAt}`);
+        const ring = G.g_ring_effects[0];
+        check("SpawnGroundRingEffect goes down on the frame the corpse, "
+              + "settled, reads the clip's length",
+              ringAt === 13 && ringVel === "0,0,0", `${ringAt} (${ringVel})`);
+        check("...under the tracked bone, on the traced ground plus 0.05, "
+              + "at the frog's yaw and scale 1",
+              ring !== undefined && ring.x === 1.5 && ring.z === -41.25
+              && ring.y === Math.fround(QueryGroundHeightAt(0, 0, 0) + 0.05)
+              && ring.yaw === a.yaw && ring.scale === 1
+              && ring.phase === RingEffectPhase.Spread,
+              JSON.stringify(ring));
+        check("the corpse despawns 181 frames after it settles, taking the "
+              + "present count and its hit slot",
+              goneAt === ringAt + 181 && G.g_enemies_present === 0
+              && G.g_enemies_alive === 0 && G.g_hit_slots[slot] === HIT_SLOT_NONE
+              && slot !== HIT_SLOT_NONE,
+              `gone ${goneAt} (ring ${ringAt}) `
+              + `${G.g_enemies_alive}/${G.g_enemies_present} slot ${slot}`);
+        check("...having sunk 0.035 a frame from the settling frame on",
+              near(a.pos.y, ground - 0.035 * 182, 1e-6),
+              `${a.pos.y} vs ${ground - 0.035 * 182}`);
+      }
+
+      // Every cursor test in the class reads the cursor the last draw left,
+      // not the counter the director has already stepped: the hop launches
+      // one frame after the counter reaches 0x12, as the engine's does.
+      {
+        const { a, t, step } = deathScene(53);
+        t.state = FrogState.HopToHeading;
+        t.sub = 2;
+        t.a = 0;
+        a.motion = FrogMotion.Hop;
+        a.fadeFrom = null;
+        a.fade = 0;
+        a.playTicks = 0x11;
+        t.playCursor = 0x11;
+        step();
+        const early = t.sub;
+        step();
+        check("a hop launches on the frame after the counter reaches its "
+              + "launch cursor, when the state reads the draw's",
+              early === 2 && t.sub === 3 && Math.hypot(a.vel.x, a.vel.z) > 0.99,
+              `sub ${early} then ${t.sub}`);
+      }
+
+      // Retired while it sinks, a corpse gives back the present count and
+      // not the alive count its death state already returned.
+      {
+        const { a, step } = deathScene(59);
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        step();
+        g_class_handlers[SpawnClass.Frog]?.leave?.(a);
+        check("a sinking frog retired by the script leaves the room's alive "
+              + "count alone",
+              G.g_enemies_alive === 0 && G.g_enemies_present === 0
+              && a.despawned,
+              `${G.g_enemies_alive}/${G.g_enemies_present}`);
+      }
+
+      // The death frees the permit and leaves `obj+0x121`; a permit someone
+      // else has taken since is theirs when the corpse goes.
+      {
+        const { a, step } = deathScene(61);
+        a.attackPermit = 0;
+        G.g_attack_permits[0] = a.at;
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        step();
+        G.g_attack_permits[0] = 0x7777;
+        g_class_handlers[SpawnClass.Frog]?.onDeadSweep?.(a,
+                                                         DeadSweep.Despawned);
+        check("a dead frog's sweep does not free a permit another actor holds",
+              G.g_attack_permits[0] === 0x7777 && a.attackPermit === -1,
+              `${G.g_attack_permits} own ${a.attackPermit}`);
+      }
+
+      // Two players in: `ChooseHitPlayerOrder` draws its coin before the
+      // shooter's, so the kill frame takes one draw even for a shot only
+      // player 0 fired.
+      {
+        const { rng, a, step } = deathScene(67);
+        G.g_active_player = 2;
+        a.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+        const ref = new Rng(1);
+        ref.state = rng.state;
+        const first = ref.int(2);
+        step();
+        check("with both players in, the kill draws the hit order and "
+              + "nothing else for a one-player shot",
+              rng.state === ref.state
+              && G.g_hit_player_order.join(",")
+                 === (first !== 0 ? "0,1" : "1,0"),
+              `order ${G.g_hit_player_order} state ${rng.state} vs `
+              + `${ref.state}`);
+      }
     }
   }
 
@@ -20749,9 +20985,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...each turned by half a turn at most, not a whole one",
           G.g_owl_feathers.every((f) => f.yaw >= 0 && f.yaw < 0x8000),
           `${Math.max(...G.g_owl_feathers.map((f) => f.yaw))}`);
+    // Two points go through the camera on the death frame: the blood's, and
+    // then -- the frame falls through to the tail -- the shot test's depth.
     check("...and leaves blood at its camera-space point",
           G.g_point_blood_sprays.length === blood + 1
-          && seen.length === 1 && seen[0].z === 40
+          && seen.length === 2 && seen[0].z === 40
           && G.g_point_blood_sprays[blood].pos.z === -60,
           `${G.g_point_blood_sprays.length - blood} ${JSON.stringify(seen)}`);
     // Standing still, the heading of its own motion is 0, and the death frame
@@ -20845,6 +21083,348 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and draws its thirty cels once each, the last one included",
           cels.length === 30 && cels[0] === 0 && cels[29] === 29,
           `${cels.length} ${cels[0]}..${cels[cels.length - 1]}`);
+  }
+
+  // -- the owl's corpse: four landings, and the effects only they make -------
+  //
+  // `OwlCorpseFallAndSettle` (`FUN_00448210`) lands each sub-type on its own
+  // literals, and the ground ring and the water splash have no other caller.
+  // Every number below is the exe's own, written out rather than imported, so
+  // that a wrong constant in the port fails here.
+  {
+    const rng = new Rng(71);
+    const events = scene(0, rng);
+    G.g_players_in_play = 2;
+    G.g_scene_index = 0;
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    const THUD = 0x1e16a9;       // COMMON\DAMAGE5_22.WAV
+    const SIBUKI = 0x4616a9;     // COMMON\SIBUKI8_16.WAV
+    const BOBBLE = 0x118a9;      // the ring's own, in scene 0
+    const GRAV = Math.fround(0.020415);
+    let at = 0xa400;
+    // An owl of `subtype` shot where it stands, then put at (x, y, z) with
+    // the given velocity: the corpse's first frame is the next update.
+    const corpse = (subtype: number, x: number, y: number, z: number,
+                    vx = 0, vy = 0, vz = 0) => {
+      G.g_cam_path_frame = 700;
+      G.g_owl_ground_rings = [];
+      G.g_owl_water_splashes = [];
+      const o = ActorSpawn(at++, SpawnClass.FlyingEnemy, -1, "owl", {
+        pos: vec3(x, y, z), class43: { subtype, member: 0 },
+      }, rng);
+      const t = (o as { owl: OwlTail }).owl;
+      o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+      OwlUpdateAndResolveShot(o, frame(rng, events));
+      o.pos.x = x; o.pos.y = y; o.pos.z = z;
+      t.vx = vx; t.vy = vy; t.vz = vz;
+      sounds.length = 0;
+      const step = () => OwlUpdateAndResolveShot(o, frame(rng, events));
+      return { o, t, step };
+    };
+
+    {
+      const { o, t, step } = corpse(1, 0, 100, 0);
+      check("a shot owl is marked with the owl's corpse bit, 0x1000000, and "
+            + "not ActorFlag.Dead",
+            t.state === OwlState.Dead && (o.flags & 0x1000000) !== 0
+            && (o.flags & ActorFlag.Dead) === 0,
+            `flags 0x${o.flags.toString(16)}`);
+      const p0 = o.pitch;
+      step();
+      check("the corpse tumbles by its spin, and the spin keeps 0.95 of "
+            + "itself, truncated",
+            o.pitch === p0 - 768 && t.spin === -729,
+            `${o.pitch - p0} ${t.spin}`);
+      step();
+      check("...-768, then -729, then -692",
+            o.pitch === p0 - 768 - 729 && t.spin === -692,
+            `${o.pitch - p0} ${t.spin}`);
+      check("...and in the air nothing is made and nothing heard",
+            G.g_owl_ground_rings.length === 0
+            && G.g_owl_water_splashes.length === 0 && sounds.length === 0,
+            `${sounds}`);
+    }
+
+    // Sub-type 0: the stairwell.
+    {
+      const { t, step } = corpse(0, -690, 60, -1103, 0, 0, 0.1);
+      step();
+      check("sub-type 0, between its two rails: both flip z and cancel",
+            t.vz === 0.1, `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -690, 60, -1095, 0, 0, 0.1);
+      step();
+      check("...beyond rail 0 one flips, and the corpse turns back",
+            t.vz === -0.1, `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -690, 60, -1120, 0, 0, -0.1);
+      step();
+      check("...beyond rail 1 likewise, the other way", t.vz === 0.1,
+            `${t.vz}`);
+    }
+    {
+      const { t, step } = corpse(0, -725, 60, -1095, 0, 0, 0.1);
+      step();
+      check("...and west of the rails' last point neither is tested",
+            t.vz === 0.1, `${t.vz}`);
+    }
+    {
+      const { o, t, step } = corpse(0, -738.9, 60, -1100, -0.5, 0, 0.2);
+      step();
+      check("sub-type 0, past x = -739: stopped dead, and 0x600 on the spin",
+            o.pos.x === -739 && t.vx === 0 && t.vz === 0
+            && t.spin === -729 + 0x600,
+            `${o.pos.x} ${t.vx} ${t.vz} ${t.spin}`);
+    }
+    {
+      // x -689.5 is step n = -4 of `n * 6 - 671`: a floor at 41.
+      const { o, t, step } = corpse(0, -690, 41.01, -1103, 0.5, 0, 0);
+      step();
+      check("sub-type 0, on a step: onto it, x0.8 across, x-0.4 up, 0x400 "
+            + "off the spin, and the thud",
+            o.pos.y === 41 && t.vy === -GRAV * Math.fround(-0.4)
+            && t.vx === 0.5 * Math.fround(0.8) && t.spin === -729 - 0x400
+            && t.settled === 0 && sounds.join() === `${THUD}`
+            && G.g_owl_ground_rings.length === 0,
+            `${o.pos.y} ${t.vy} ${t.vx} ${t.spin} ${sounds}`);
+    }
+    {
+      const { o, t, step } = corpse(0, -730, 35.93, -1100);
+      o.yaw = 0x1234;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 0 lands for good under 35.91906, with a ring at "
+            + "35.93906 turned to its yaw",
+            o.pos.y === Math.fround(35.91906) && t.settled === 1
+            && G.g_owl_ground_rings.length === 1
+            && r.y === Math.fround(35.93906) && r.x === o.pos.x
+            && r.z === o.pos.z && r.scale === 0.75 && r.pitch === 0
+            && r.yaw === 0x1234,
+            `${o.pos.y} ${JSON.stringify(r)}`);
+      check("...to the ring's bobble and then the thud",
+            sounds.join() === `${BOBBLE},${THUD}`, `${sounds}`);
+      const pitch = o.pitch;
+      step();
+      check("a landed corpse sinks 0.03 a frame and does nothing else",
+            o.pos.y === Math.fround(35.91906) - Math.fround(0.03)
+            && o.pitch === pitch && G.g_owl_ground_rings.length === 1,
+            `${o.pos.y} ${o.pitch - pitch}`);
+    }
+
+    // Sub-type 1: a line between a flat and a slope.
+    {
+      const { o, t, step } = corpse(1, -600, 49.17, -950);
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 1, on the flat side of its line: under 49.16, a ring "
+            + "at 49.3 turned 0xDC00 -- and no thud",
+            t.settled === 1 && r?.y === Math.fround(49.3) && r.pitch === 0
+            && r.yaw === 0xdc00 && r.scale === 0.75
+            && sounds.join() === `${BOBBLE}`,
+            `${t.settled} ${JSON.stringify(r)} ${sounds}`);
+      check("...and the corpse is left where it fell, not put on the flat",
+            o.pos.y === 49.17 - GRAV, `${o.pos.y}`);
+    }
+    {
+      const b = Math.fround(0.979029);
+      const c = Math.fround(0.203721);
+      const d = Math.fround(140.1687);
+      const z = -900;
+      const under = -(c * z + d) / b;
+      const { o, t, step } = corpse(1, -660, under + 0.5, z);
+      step();
+      check("sub-type 1, on the slope side: nothing while it is above the "
+            + "plane", t.settled === 0 && G.g_owl_ground_rings.length === 0,
+            `${o.pos.y} ${under}`);
+      o.pos.y = under + 0.01;
+      t.vy = 0;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("...and under it, a ring a unit below the corpse, pitched "
+            + "0x1000, and the thud",
+            t.settled === 1 && r?.y === o.pos.y - 1 && r.pitch === 0x1000
+            && r.yaw === 0xdc00 && sounds.join() === `${BOBBLE},${THUD}`,
+            `${t.settled} ${JSON.stringify(r)} ${sounds}`);
+    }
+
+    // Sub-type 2: an eight-step stair in a box, and a floor at -36.
+    {
+      // z -1107.9 is step n = 2 of `-1098.7 - 3.7666 (n + 1)`: -26.
+      const { o, t, step } = corpse(2, -1120, -25.99, -1108, 0.2, 0, 0.1);
+      step();
+      check("sub-type 2, on a step in its box: onto it, x-0.5 on all three, "
+            + "0x600 on the spin, and the thud",
+            o.pos.y === -26 && t.vy === -GRAV * -0.5 && t.vx === 0.2 * -0.5
+            && t.vz === 0.1 * -0.5 && t.bounced === 1
+            && t.spin === -729 + 0x600 && t.settled === 0
+            && sounds.join() === `${THUD}`,
+            `${o.pos.y} ${t.vy} ${t.vx} ${t.vz} ${t.spin} ${sounds}`);
+      o.pos.y = -25.99;
+      t.vy = 0; t.vx = 0.2; t.vz = 0.1;
+      sounds.length = 0;
+      step();
+      check("...and the second time only its fall is turned: nothing "
+            + "across, no thud",
+            o.pos.y === -26 && t.vy === -GRAV * -0.5 && t.vx === 0.2
+            && t.vz === 0.1 && sounds.length === 0,
+            `${o.pos.y} ${t.vx} ${t.vz} ${sounds}`);
+    }
+    {
+      const { o, t, step } = corpse(2, -1100, -35.99, -1100);
+      o.yaw = 0x2345;
+      step();
+      const r = G.g_owl_ground_rings[0];
+      check("sub-type 2 lands at -36 outside its box, with a ring at -35.98",
+            o.pos.y === -36 && t.settled === 1
+            && r?.y === Math.fround(-35.98) && r.yaw === 0x2345
+            && r.pitch === 0 && sounds.join() === `${BOBBLE},${THUD}`,
+            `${o.pos.y} ${JSON.stringify(r)} ${sounds}`);
+    }
+
+    // Sub-type 3: water.
+    {
+      const { o, t, step } = corpse(3, 10, -24.99, 20, 0.1, 0, 0);
+      step();
+      const s = G.g_owl_water_splashes[0];
+      check("sub-type 3 meets the water at -25: the splash at its x and z, "
+            + "SIBUKI8, and no ring",
+            t.settled === 1 && s?.x === o.pos.x && s.z === o.pos.z
+            && s.y === -25 && G.g_owl_ground_rings.length === 0
+            && sounds.join() === `${SIBUKI}`,
+            `${t.settled} ${JSON.stringify(s)} ${sounds}`);
+      check("...and is not stopped at the surface",
+            o.pos.y === -24.99 - GRAV, `${o.pos.y}`);
+      const y1 = o.pos.y;
+      step();
+      check("...it sinks on through it", o.pos.y === y1 - Math.fround(0.03),
+            `${o.pos.y}`);
+      OwlEffectsTick(rng);
+      check("...and the splash it made runs",
+            G.g_owl_water_splashes.length === 1
+            && G.g_owl_water_splashes[0].shown === 0,
+            `${G.g_owl_water_splashes.length}`);
+    }
+  }
+
+  {
+    // The rest of the death path.
+    const rng = new Rng(73);
+    const events = scene(0, rng);
+    G.g_players_in_play = 2;
+
+    // A bullet on a sub-type-0 owl before frame 682 is kept: nothing in the
+    // class clears `obj+0x34` bit 3, so the owl dies the frame the guard lifts.
+    const o = ActorSpawn(0xa500, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 0, member: 0 },
+    }, rng);
+    const t = () => (o as { owl: OwlTail }).owl;
+    G.g_cam_path_frame = 100;
+    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(o, frame(rng, events));
+    check("an early bullet on a sub-type-0 owl is kept",
+          t().state !== OwlState.Dead && (o.flags & ActorFlag.Hit) !== 0,
+          `${OwlState[t().state]} 0x${o.flags.toString(16)}`);
+    G.g_cam_path_frame = 700;
+    OwlUpdateAndResolveShot(o, frame(rng, events));
+    check("...and kills it the frame 682 is passed, with no second shot",
+          t().state === OwlState.Dead, OwlState[t().state]);
+
+    // The shot test: every frame alive, the death frame too, never a corpse.
+    const p = ActorSpawn(0xa501, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(3, 4, 40), class43: { subtype: 1, member: 1 },
+    }, rng);
+    G.g_shot_test_list = [];
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("a live owl files itself for the shot test, at its own point",
+          G.g_shot_test_list.some((e) => e.at === p.at)
+          && p.shotCentre.x === p.pos.x && p.shotCentre.y === p.pos.y
+          && p.shotCentre.z === p.pos.z,
+          `${G.g_shot_test_list.length}`);
+    G.g_shot_test_list = [];
+    p.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer1;
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("...on the frame it dies as well",
+          (p as { owl: OwlTail }).owl.state === OwlState.Dead
+          && G.g_shot_test_list.some((e) => e.at === p.at),
+          `${G.g_shot_test_list.length}`);
+    G.g_shot_test_list = [];
+    OwlUpdateAndResolveShot(p, frame(rng, events));
+    check("...and never as a corpse",
+          !G.g_shot_test_list.some((e) => e.at === p.at),
+          `${G.g_shot_test_list.length}`);
+
+    // A despawned corpse gives nothing back: the death block already did,
+    // and the token it would match on is another group's.
+    G.g_class43_attack_token = 1;
+    const alive = G.g_enemies_alive;
+    const present = G.g_enemies_present;
+    ActorDespawn(p);
+    ActorDeadSweep(p, DeadSweep.Despawned);
+    check("a despawned owl corpse frees no token and retires nothing twice",
+          G.g_class43_attack_token === 1 && G.g_enemies_alive === alive
+          && G.g_enemies_present === present,
+          `${G.g_class43_attack_token} ${G.g_enemies_alive}/`
+          + `${G.g_enemies_present}`);
+
+    // The yaw's error runs -0x7FFF..+0x8000: a heading straight behind turns
+    // the positive way. The death frame steers on the owl's own motion,
+    // which standing still is heading 0.
+    const q = ActorSpawn(0xa502, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, 40), class43: { subtype: 1, member: 2 },
+    }, rng);
+    const qt = (q as { owl: OwlTail }).owl;
+    qt.prevX = q.pos.x;
+    qt.prevZ = q.pos.z;
+    q.yaw = 0x8000;
+    q.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(q, frame(rng, events));
+    check("an owl turning to a heading exactly behind turns the positive way",
+          qt.state === OwlState.Dead && q.yaw === 0x8000 + 3276, `${q.yaw}`);
+
+    // The throw: `g_camera_block_yaw_bams + 0x8000`. The block's yaw faces
+    // back at the viewer -- `g_camera_yaw_bams` is it turned half round -- so
+    // a camera looking down -z throws the corpse on down -z, away from it.
+    G.g_camera_block_yaw_bams = 0;
+    G.g_camera_yaw_bams = 0x8000;
+    const r = ActorSpawn(0xa503, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(0, 0, -40), class43: { subtype: 1, member: 3 },
+    }, rng);
+    const rt = (r as { owl: OwlTail }).owl;
+    rt.vx = 0; rt.vy = 0; rt.vz = 0;
+    r.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    OwlUpdateAndResolveShot(r, frame(rng, events));
+    check("a shot owl is thrown away from the camera, along the block's yaw "
+          + "turned half round",
+          rt.state === OwlState.Dead && Math.abs(rt.vx) < 1e-9
+          && Math.abs(rt.vz + 1) < 1e-9,
+          `${rt.vx} ${rt.vz}`);
+
+    // The two-player aim offset: the owl's horizontal distance from the
+    // block's eye, truncated, over sixty, a quarter turn off the block's yaw
+    // -- 0xC000 for player 0, 0x4000 for player 1.
+    G.g_players_in_play = 2;
+    G.g_camera_block_eye.x = 0;
+    G.g_camera_block_eye.y = 0;
+    G.g_camera_block_eye.z = 0;
+    const s = ActorSpawn(0xa504, SpawnClass.FlyingEnemy, -1, "owl", {
+      pos: vec3(30.5, 7, 40.2), class43: { subtype: 3, member: 3 },
+    }, rng);
+    const st = (s as { owl: OwlTail }).owl;
+    const sides = new Set<number>();
+    for (let i = 0; i < 8; i += 1) {
+      OwlPickTargetPlayerAndAimOffset(s, st, rng);
+      const want = 50 * Math.fround(1 / 60) * (s.attackPermit === 0 ? -1 : 1);
+      sides.add(s.attackPermit);
+      check(`the two-player aim offset for player ${s.attackPermit} is the `
+            + "distance over sixty, a quarter turn off the block's yaw",
+            Math.abs(st.aimX - want) < 1e-9 && Math.abs(st.aimZ) < 1e-9,
+            `${st.aimX} ${st.aimZ} want ${want}`);
+    }
+    check("...and both players are drawn", sides.size === 2,
+          `${[...sides]}`);
   }
 
   {

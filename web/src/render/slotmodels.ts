@@ -46,7 +46,7 @@
  * what that costs them.
  */
 import {
-  Group, Matrix4, Object3D, Ray, Vector3, type Material, type Mesh,
+  Group, Matrix4, Object3D, Ray, Vector3, type Mesh,
 } from "three";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
@@ -68,7 +68,7 @@ import {
   CARRIER_WAKE_PAIR, type ScriptedPropTail,
 }
   from "../game/class13/state";
-import { applyForcedAlphaBlend } from "./draw_order";
+import { setAssetDrawAlpha } from "./draw_order";
 
 /**
  * The literals of the carrier routines' own draws, read off the disassembly
@@ -116,38 +116,14 @@ function mScale(m: Matrix4, x: number, y: number, z: number): void {
 }
 
 /**
- * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s alpha, on a clone. The clone
- * shares its template's materials, so it gets its own before its opacity is
- * touched -- and only once something has faded it, so an opaque draw keeps
- * sharing. The state is `DrawModelWithForcedAlphaBlend`'s (`FUN_004A8440`),
- * at each mesh's own base alpha times this one; see `setSlotAlpha` in
- * `boss3_effects.ts`, which is the same draw for the effect layers.
+ * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s alpha on a clone, or `null` for
+ * a plain `AssetDrawSlot` (`FUN_00418560`). The state is
+ * `DrawModelWithForcedAlphaBlend`'s (`FUN_004A8440`), at each mesh's own base
+ * alpha times this one and at 1 as at any other value; see
+ * `setAssetDrawAlpha`, which the effect layers' `setSlotAlpha` also is.
  */
-function setDrawAlpha(c: Object3D, alpha: number): void {
-  if (alpha >= 1 && c.userData.drawAlpha === undefined) return;
-  if (c.userData.drawAlpha === undefined) {
-    const own = (x: Material) => {
-      const m = x.clone();
-      m.userData.hod2BaseOpacity = x.opacity;
-      return m;
-    };
-    c.traverse((o) => {
-      const mesh = o as Mesh;
-      if (!mesh.material) return;
-      mesh.material = Array.isArray(mesh.material)
-        ? mesh.material.map(own) : own(mesh.material);
-    });
-  }
-  c.userData.drawAlpha = alpha;
-  c.traverse((o) => {
-    const mesh = o as Mesh;
-    const mats = !mesh.material ? []
-      : Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const mat of mats) {
-      applyForcedAlphaBlend(
-        mat, alpha, (mat.userData.hod2BaseOpacity as number | undefined) ?? 1);
-    }
-  });
+function setDrawAlpha(c: Object3D, alpha: number | null): void {
+  setAssetDrawAlpha(c, alpha);
 }
 
 /**
@@ -521,10 +497,11 @@ export class SlotModelLayer implements System<RenderContext> {
 
   /**
    * A node for one of a routine's extra draws, re-cloned when its slot moves
-   * on, and placed by the matrix the routine composed.
+   * on, and placed by the matrix the routine composed. `alpha` is
+   * `AssetDrawSlotWithAlpha`'s, and absent for `AssetDrawSlot`.
    */
   private extra(key: string, slot: number, m: Matrix4,
-                seen: Set<number | string>, alpha = 1): void {
+                seen: Set<number | string>, alpha: number | null = null): void {
     let live = this.extras.get(key);
     if (!live || live.slot !== slot) {
       live?.node.removeFromParent();
@@ -728,8 +705,8 @@ export class SlotModelLayer implements System<RenderContext> {
       c.visible = true;
       if ((parts[i] as Partial<HordePart>).deform) deformHordeSheet(c, a);
       // `AssetDrawSlotWithAlpha` (`FUN_004185A0`): the one fading draw in a
-      // chain, class 0x40's ripple.
-      setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? 1);
+      // chain, class 0x40's ripple. Every other part is `AssetDrawSlot`.
+      setDrawAlpha(c, (parts[i] as Partial<HordePart>).alpha ?? null);
     }
     while (live.node.children.length > parts.length) {
       live.node.children.pop();

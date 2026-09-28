@@ -20,8 +20,8 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
 | `game/` | 89614 | 291 | engine |
-| `hod2lib/` | 18462 | 35 | engine |
-| `render/` | 14307 | 51 | render |
+| `hod2lib/` | 18483 | 35 | engine |
+| `render/` | 14443 | 51 | render |
 | `app/` | 7901 | 28 | app |
 | `script/` | 4388 | 25 | engine |
 | `ui/` | 2708 | 21 | ui |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 890 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **142342** | **474** | |
+| **total** | **142499** | **474** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -56,9 +56,9 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 47 
 
 | | |
 |---|---|
-| Named functions | 1321 in `ghidra/annotations/functions.tsv` |
-| Named globals | 666 in `ghidra/annotations/globals.tsv` |
-| Verifier scripts | 44 under `tools/`, run together by `verify_all.py` |
+| Named functions | 1326 in `ghidra/annotations/functions.tsv` |
+| Named globals | 669 in `ghidra/annotations/globals.tsv` |
+| Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,
 and lives in [`PROGRESS.md`](PROGRESS.md).
@@ -138,6 +138,7 @@ nothing exits 3 and is never counted as green.
 | `verify_continue` | that the continue screen the port draws -- the run's CONTINUE? and digit, the two-player small ones, the small GAME OVER and the credit line -- is at the EXE's positions, scales and sprite ids, read as instruction bytes and `.rdata` rows; that only one credit-line drawer can run, because the credit costs are stored once, as 1; and that all eight wait opcodes read the gameplay gate that holds the script while nobody is in play. Nothing else looks at a picture that, when wrong, is simply not there | game-dir |
 | `verify_water` | that class 0x41 type 1, the canal water task, starts from the table the EXE indexes -- ten flat water tiles -- and that every slot, flag, camera cue and multiplier the port's copy of it tests is the immediate at the instruction that holds it; its fifteen spawns sit at the origin, so a wrong reading draws nothing and looks like nothing | game-dir |
 | `verify_draw_order` | that the player's two passes and translucent order are the EXE's: the blend and depth tables `render/draw_order.ts` copies, the alpha-test and blend-enable pushes, and the VIEW matrix and comparator bytes that make the sort nearest-first rather than the painter's order this repo's docs had -- plus that no mesh in `pol/` turns its depth write off, which is why translucent meshes occlude | game-dir |
+| `verify_texture_alpha` | that a texture's alpha reaches the bundle as the bank stores it, because the EXE's D3D path keeps it: the upload's format table and the A1R5G5B5 test, stage 0's alpha args, and a disassembly of the D3D module finding TSP bit 19 read only as half of the pass selector -- plus the corpus premise that makes a glTF alphaMode from the pass right, and, on a current bundle, no `_opaque` image and the IgnoreTexAlpha ARGB images byte-equal to the bank's alpha | game-dir |
 | `verify_bats` | that the class-0x46 bat's flight paths still line up with the descriptors that select them -- the only check on a class whose spawns are all at the world origin and take their whole position from an EXE table, so nothing about a wrong reading of them looks wrong in the data | game-dir |
 | `verify_attachments` | that every face and accessory a spawn's attachment list names has a model in the stage's glTF -- the check that would have caught the civilians having no hair, because a civilian's own head model is a shell open at the back and every count was right without it | game-dir |
 | `verify_bone_cels` | that every cel run `ZombieDrawBonePart` (`FUN_004534A0`) draws is still the arithmetic in the EXE and is still in the bundle -- no table in the image names those models, so this is the only thing standing between a hand-written run and `char_adv02` losing its midriff again | game-dir |
@@ -146,7 +147,7 @@ nothing exits 3 and is never counted as green.
 | `verify_geometry` | that every scenery part in a stage bundle holds every triangle its `pol/` models declare -- the only check that compares an export against the files it was made from rather than against another export | game-dir |
 | `baseline` | that the installed assets still hash to `manifest.csv` | game-dir |
 
-21 of them need the installed game and 16 need an exported
+22 of them need the installed game and 16 need an exported
 bundle. **That is a known hole, not a design:** a machine with
 neither cannot run the checks that compare two histories, and a
 bundle-free fixture is the open work that closes it.

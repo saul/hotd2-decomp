@@ -138,6 +138,7 @@
 00570f08	g_class22_node2_cycle_a	u8[10] 4 5 6 7 6 5 4 3 2 3: node-2 slot offsets from 0x2A5 while obj+0x1338 == 1 (Class22DrawBonePart).
 00570f14	g_class22_node2_cycle_b	u8[6] 9 10 11 12 13 14: node-2 slot offsets from 0x2A5 while obj+0x1338 == 2.
 00571210	g_identity_matrix
+00571250	g_pvr_pixfmt_texture_format	u32[8], a tex/ entry's pixel format (+0x04 & 7) to a g_texture_formats slot: {5, 2, 6, 8, 8, 8, 7, 0} -- ARGB1555 -> 5 (the 1555 format WITH DDPF_ALPHAPIXELS), RGB565 -> 2, ARGB4444 -> 6; 8 is 'none' and DecodeTextureToSurface refuses it. Read only by DecodeTextureToSurface. [proved]
 00576a8c	g_SceneRegionTableMode1
 00576abc	g_SceneRegionIdTableMode1
 00576b10	g_camera_actor_major_hooks	Four dwords CameraActorTick dispatches at 0x004022C9, indexed by g_scene_state_major_entered: [0] NoOpStub, [1] EvtRunQueuedActionsSyncViewBlock, [2] 0x004023E0 (a JMP to EvtRunQueuedActions), [3] NoOpStub. [proved] (read_memory)
@@ -413,6 +414,8 @@
 007de5a8	g_sound_channels	Heap array of 0x44-byte channel records, g_sound_channel_count of them. +0x00 IDirectSoundBuffer, +0x0C stream file handle, +0x34 ring bytes, +0x38 next half to fill, +0x3C file offset of the first sample (SoundChannelOpenWav), +0x40 flags: 0x80000000 open, 0x40000000 streaming, 0x08000000 loop, 0x10000/0x20000 stopped/paused. Channel 0xF is BGM, 0x10 voice. [proved]
 007de5bc	g_sound_channel_count	Number of records at g_sound_channels; every channel routine bounds its index by it. [proved]
 007de5c8	g_d3du_unused_projection
+007debd0	g_texture_formats	DDPIXELFORMAT[8] (0x20 each, to 0x007DECD0), filled by EnumTextureFormatsCallback: 0 PAL4, 1 PAL8, 2 R5G6B5, 3 X1R5G5B5, 4 24-bit RGB, 5 A1R5G5B5, 6 the 16-bit 0F00/00F0/000F format, 7 X8R8G8B8/A8R8G8B8. CreateSurfaceInTextureFormat copies one whole into a surface desc. [proved]
+007decd0	g_bound_texture	The texture BindTextureStage last handed to SetTexture; the call is skipped when asked for it again. [proved]
 007e78bc	g_draw_layer_nibble	The draw layer RenderEnqueueCommand ORs into a queued command's key (& 0xF), which RenderCommandCompare sorts on first. SetDrawLayerNibble writes it; RenderInitStates sets 8, the world's layer; RegionDrawResidentSet uses 7 for a draw-mode-2 region entry, the effects 0xA/0xC/0xE, each restoring 8. [proved]
 007e7938	g_render_sort_depth	The command being walked's sort depth: WalkMeshChainAndDraw seeds it from cmd+4 (the modelview _43) and lowers it to each skipped mesh's eye z; RenderEnqueueCommand copies it back to the queued command's +4. Eye z, negative in front. [proved]
 007e7940	g_render_single_pass	Non-zero collapses WalkMeshChainAndDraw's two passes into one (every mesh drawn at submission). Written only by FUN_004A79E0, which only TitleMenuUpdateAndSelect calls; in play it is 0. [proved]

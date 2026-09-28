@@ -114,7 +114,7 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 - [x] Document culling (settled empirically, see `formats/nl1.md`)
 - [x] Document blend factors — two modes in use, standard and additive
 - [x] Document list assignment — no punch-through anywhere in the game
-- [x] Alpha handling incl. `IgnoreTexAlpha` opaque variants
+- [x] Alpha handling: the texture keeps its alpha and the pass decides it (`IgnoreTexAlpha` is half of the pass selector only) — see `formats/materials.md`
 - [x] Two lighting setups identified: `SetLightingDefaultSingle` (one
       directional) vs `SetLightingSceneArray` (up to 16 `D3DLIGHT7`), selected
       by draw-command bit `0x04000000` — see `formats/pipeline.md`

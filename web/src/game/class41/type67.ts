@@ -272,8 +272,9 @@ export function PlaceGenericPropType67(p: BreakableProp,
     c.lastStepIndex = G.g_evt_step_index;
     const cw = PropWords(c, TYPE67_CARGO_WORDS_ZERO);
     cw.o290 = w.o290;
-    // `[open]` past index 2 the engine reads the bytes after the table;
-    // nothing ships one, and this reads zeros.
+    // [diverges] Past index 2 the engine reads the table's zero pad and
+    // then whatever `.rdata` holds after it; the port reads zeros. No
+    // shipped spawn has an index past 2 (see `TYPE67_OBJECT_PATHS`).
     const off = TYPE67_CARGO_OFFSETS[3 * n + i] ?? [0, 0, 0];
     c.x = off[0] * TYPE67_CARGO_OFFSET_SCALE;
     c.y = off[1] * TYPE67_CARGO_OFFSET_SCALE;
@@ -348,6 +349,9 @@ export function PropUpdateType67(p: BreakableProp, rng: Rng,
   }
 
   // `PUSH [ESI+0x2C0]`: the frame as it was, and the step after the call.
+  // [diverges] Past index 3 the engine reads the cargo offsets as a path
+  // number (index 3 is the zero word, which the port's 0 matches); the port
+  // reads 0. No shipped spawn has an index past 2.
   const at = PropEvalObjectPath6(TYPE67_OBJECT_PATHS[w.o290] ?? 0, p.shake);
   if (at) {
     p.y = Math.fround(at.y);

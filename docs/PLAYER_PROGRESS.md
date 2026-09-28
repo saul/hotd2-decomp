@@ -145,6 +145,15 @@ fixes it, and `PoseHookGrowAndPushOutOfWorld` (`FUN_0048D070`) is now ported
 with it: the per-frame hook that ramps that radius toward whatever op 0x16 set
 and pushes the civilian out of the world when its wait word asks.
 
+*And the sphere is where she is drawn.* The centre of that body sphere,
+`obj+0x12C`, is `CivilianUpdate`'s to write, from a switch on op 0x17's mode:
+the position, bone 2, bone 1 -- every civilian's until a script says
+otherwise -- or halfway between bones 12 and 15, the fallen body's. Each bone
+is its draw record taken back to the world. Only the position had been
+ported, so the push measured every civilian at class 0x30's feet-plus-radius
+point and the pose hook traced that same point; both read the switch's
+centre now (`class10/update.ts`, `docs/formats/civilians.md`).
+
 *The maul was an animation with no consequence.* `obj+0x19C` — the frame every
 script cue is counted in — is the **play** clock: it ticks once per 60 Hz frame
 over 30 Hz data, so it runs to `g_motion_play_length[motion]`, about twice the
@@ -1897,18 +1906,14 @@ assertion behind it kept a hang alive for two sessions.
    right.** Faithful means running root motion through a death in `game/`, for
    the classes with no death machine. Tagged on the `obj.death` branch in
    `game/motion.ts`.
-2. **The pose offset is unscaled, because the model is.** The engine's translate
-   sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at 0.9
-   offsets by 0.9 of what its clip authored. This port draws every character at
-   1.0 — neither `hod2lib.characters` nor `render/characters.ts` writes that
-   field to a node — so scaling the offset alone would be worse than leaving it,
-   since the offset would shrink while the model it offsets did not. The honest
-   size of the gap: three of the four clips that reach the pose at all belong to
-   `scale 0.9` types, where the engine's offset is **2.594 units and the port's
-   is 2.882**; the fourth is class 0x21 at character type 7, scale 1.0, where
-   they agree exactly. Faithful means scaling every skinned actor's drawn size,
-   which changes how the whole game looks. Tagged on `ActorModelScale` in
-   `game/root_motion.ts`.
+2. **The pose offset was unscaled, because the model was.** The engine's
+   translate sits *inside* `MatrixScale(model+0x116C)`, so a character drawn at
+   0.9 offsets by 0.9 of what its clip authored, and this port drew every
+   character at 1.0. Three of the four clips that reach the pose at all belong
+   to a `scale 0.9` type (stage 4's type-48 civilian at spawn `0x3578`), where
+   the engine's offset is **2.593 units and the port's was 2.882**; the fourth is
+   class 0x21 at character type 7, scale 1.0. **Closed** by drawing every
+   skinned actor at its size — see *The model's size* below.
 
 `MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
 no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
@@ -2223,8 +2228,9 @@ units off the body on the far side. The matrix is built in `game/` the way the
 draw builds it (`BatBodyNodeMatrix`), and `test:render` checks it against the
 pose the character layer makes. `render/characters/bat.ts` draws both roots in
 order 5 with their pitch and roll — a corpse tumbles, a wing is pitched
-`0xE800` — and at their model's own size, 0.6 and 0.7; every other skinned
-actor is still drawn at 1.0 (`ActorModelScale`'s declared divergence).
+`0xE800` — and at their model's own size, 0.6 and 0.7. That size was the bat's
+alone when this was written; it is now every skinned actor's (*The model's
+size*, below).
 
 **The splash** is `BatSplashUpdate`'s thirty models of `common.bin` 307..336 on
 the water plane, `game/class46/splash.ts` and `render/bat_splash.ts`.
@@ -5576,6 +5582,48 @@ golden frog (`GoldenFrogDrawBonePart`) and class 0x2D's node hook at
 `0x00429040`. Class 0x40's `SubModelDrawBoneHook` fade is unreachable:
 `HordeMemberInit` writes `obj+0x1338` = 0 and nothing else writes it.
 
+### Every caller of the ring effects, where the exe calls it
+
+`SpawnGroundRingEffect` (`FUN_00407DA0`), `SpawnRingEffectAtPose`
+(`FUN_00408370`) and `SpawnWaterRing` (`FUN_004567C0`) have twenty-six call
+sites -- every `E8` rel32 in `.text` aimed at one of the three, which is the
+same list Ghidra's cross-references give. All of them are wired now but the
+frog's (class 0x11, another session's):
+
+* **Class 0x31's corpses** open the ground ring on their first frame, as class
+  0x30's do. `EnemyThrowerInit` raises `obj+0x1F8` bit 4 as `EnemyZombieInit`
+  does, so the ring sits on the traced floor; a body frozen on clip 0x3A6 is
+  lifted 5.5 for the call. `ThrowerStateCorpseSink` and
+  `ThrowerStateCorpseBlink` are two functions again, the pose pin draws its
+  `rand()` every frame (a corpse can twitch between its two frames), and the
+  way out is the exe's -- no `ThrowerLeave`, the camera slot only for
+  `KeepCameraWhenLast`.
+* **The rescue target's freed body** leaves the car:
+  `RescueTargetFreedDrift` (`FUN_00451F40`) carries the car's last frame of
+  travel and bleeds it out over frames 11..20, eases the body to the ground
+  plane and levels its roll. The freed clip is blended in at cursor 15; when
+  `RescueTargetDraw` reports it over, the ring opens and
+  `RescueTargetSinkAndDespawnState` (`FUN_00451DF0`, a function Ghidra did not
+  have) sinks the body for 120 frames on the clip's last frame and despawns
+  it. The class steps its own clock now (`advancesOwnMotion`), which is what
+  lets the freed state stop it. The abandoned state rides the route on.
+* **A severed head** leaves a 0.25 ring every time a soft head bounces and a
+  0.5 one as any head settles; it is thrown along the camera **block's** yaw,
+  which is forward, not `g_camera_yaw_bams`, which the scene hooks keep half a
+  turn round.
+* **The wading splashes** (`class30/splash.ts`): `ZombieStrikeStartSplash`
+  and `ZombieStrikeFrameSplash`, `g_class30_states[0x39]` and `[0x3A]`, as the
+  swing starts and 0x14 play frames before it ends, for body condition 6 on
+  water; state 23's grab takes the first as sprite 0x62 and ends in another.
+  The wading clip 0xB8 throws its splash at play frames 0x15 and 0x1B, and its
+  two water rings at 0x1B, in `ZombieStateSurfaceOnCameraCue` and the captor
+  script; the captor script's clip 0xB2 throws its prop strip at 0x16.
+
+Three sub-state fall-throughs went with it (states 13 and 23, and both corpse
+states), and `obj.frozen` -- class 0x24's `obj+0x1324` -- is no longer written
+by two class-0x30 entrances.
+
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),
@@ -5890,6 +5938,53 @@ nothing but shooting opens its gates.
 * Default stage 6 now hangs at block 2's gate, because the boss exists: the
   default meter cannot see its damage and 900 frames is shorter than the
   fight.
+
+## The model's size: every skinned actor is drawn at `model+0x116C`
+
+`ActorBuildSkinnedModel` (`FUN_00410440`) sizes a character from its type
+alone -- 0.6 for type 30 (the bat), 0.7 for 31 (its wing), 0.9 for every type
+from 32 to 56, and 1.0 for everything else -- and the draw tail of
+`SkeletonApplyRootMotion` (`FUN_00410C50`) pushes that size as
+`MatrixScale(model+0x116C)` between the actor's rotation and the pose
+translate (`0x00410FEA`..`0x00410FF7`). Every bone hangs from that matrix. So
+one number decides the drawn size, the pose offset, where every bone is -- the
+attachments, the held items, the gore and the camera point ride the bones --
+and where every hit centre is. `[proved]`
+
+Types 32..56 are the people, whichever class runs them (0x10, 0x24, 0x25 and
+0x45 in the shipped placements), and the port drew all of them at 1.0: the
+root motion was already scaled, the drawing was not. `render/characters.ts`
+now puts `Actor.scale` on the root of every actor it places (`placeRoot`), in
+the engine's place on the matrix, which is also the bat's special case folded
+into the rule it was an instance of. Nothing at 1.0 changes: a zombie, a
+thrower and the stage-1 boss screenshot byte for byte the same before and
+after.
+
+**The spheres.** The radius is the one part of a sphere the bone matrix does
+not reach, and `SkeletonWalkNode` (`FUN_004107E0`) scales it at build
+instead: `FLD [ECX+0x1300]; FMUL [EAX-4]; FSTP [ESI+0x78]` at `0x00410837`.
+The port's build now writes every bone's record radius (`Actor.boneRadius`)
+as the table's times the size, so a civilian is shot through spheres 0.9 as
+wide at bones 0.9 as far apart -- both shot tests, the blood spray and the
+dropped-prop test read that record. The same routine gates each row on its
+own slot matching the node's, which the port still does not do; that is a
+declared divergence on `ActorBuildSkinnedModel` in `game/spawn.ts`, and it
+wants porting together with `ResolveDamagedPartSphere` (`FUN_004099A0`).
+
+**What it looks like.** Stage 1's rescue civilian stands a head shorter; stage
+4's crawling civilian (block 4, type 48, posing clip 596's root) sits 2.593
+units out of his clip's 2.882 rather than all of it. And **stage 4 block 23's
+jumbotron was empty**: the one `SetScale` in the game's scripts (class 0x10 op
+0x27, `0x42480000` = 50.0) is how the engine puts `player_gold` -- Goldman --
+on the arena's big screen, and at 1.0 the port drew him fist-sized somewhere
+behind it while the speech played over a blank panel.
+
+Checked by `test:port` (the build writes the size for every actor and each
+radius from it), `test:render` (a civilian's root, bone, sphere centre, radius
+and a shot 1.30 in and 1.40 out of her 1.35 head), and
+`tools/verify_root_pose.py`, which decodes the size switch from its jump table
+against `ActorModelScale` and finds, in the six stages' spawns, every
+character that poses a clip's root.
 
 ## Every opcode, and what the player does with it
 

@@ -65,9 +65,16 @@ export enum CivilianOp {
   PickHeldItem = 0x15,
   /** Ramp `obj+0x128` to a new radius over N frames. */
   SetRadiusRamp = 0x16,
-  /** Which point `CivilianUpdate`'s switch writes into `obj+0x12C`, the
-   *  collision-sphere centre the shot test and the actor push both read. */
-  SetCameraPointMode = 0x17,
+  /**
+   * Which point `CivilianUpdate`'s switch writes into `obj+0x12C`, the
+   * collision-sphere centre — a {@link CivilianSphereMode}. The low byte of
+   * the operand goes to `sub+0x80`: `MOV DL, byte ptr [ESI+0x4]` /
+   * `MOV byte ptr [EAX+0x80], DL` at `0x0048BE5B`..`0x0048BE61`. `[proved]`
+   *
+   * It was called `SetCameraPointMode`, which it is not: the camera's point is
+   * `obj+0x100`, and nothing this op sets reaches it.
+   */
+  SetSphereCentreMode = 0x17,
   /** Teleport: six floats, position then rotation. */
   SetPose = 0x18,
   /**
@@ -87,8 +94,8 @@ export enum CivilianOp {
    * after the `SetOnShot 0` that makes the civilian unshootable — that is,
    * after she is safe. A rescued civilian takes the alternate route.
    *
-   * It was `SetGlobalA`, and `[open]` on the grounds that the reader had not
-   * been read. The reader was two functions away.
+   * It was `SetGlobalA`, an open question on the grounds that the reader had
+   * not been read. The reader was two functions away.
    */
   SetRouteBranch = 0x19,
   /** `(a, b)` applied only when this civilian still has children. */
@@ -114,8 +121,8 @@ export enum CivilianOp {
    * has just killed runs a killed script whose fourth command is this one.
    *
    * 60 commands in the shared 136-block table run it, 30 with 1 and 30 with 3.
-   * It was `SetGlobalB` and `[open]` on the grounds that the target global had
-   * not been read; it had been named for two sessions.
+   * It was `SetGlobalB`, an open question on the grounds that the target
+   * global had not been read; it had been named for two sessions.
    */
   SetHudShutterState = 0x1B,
   /** Raise one `g_script_flags` byte. */
@@ -159,7 +166,7 @@ export enum CivilianOp {
    * A six-word command taken only while `g_app_state` is 6 — which is
    * **in play**, so this is the ordinary path and not a debug one. It used to
    * be called `DebugOnly` on the strength of that gate alone, back when
-   * `g_app_state`'s meaning was `[open]`.
+   * `g_app_state`'s meaning was an open question.
    *
    * ```
    * 0048C202  833d988e9c0006  CMP dword ptr [0x009c8e98], 0x6
@@ -306,6 +313,47 @@ export enum CivilianTarget {
   Camera = -1,
   /** The actor's own position mirrored through the camera: turn away. */
   AwayFromCamera = -2,
+}
+
+/**
+ * `sub+0x80`, which op {@link CivilianOp.SetSphereCentreMode} writes and
+ * `CivilianUpdate` (`FUN_0048A920`) switches on to fill `obj+0x12C`, the
+ * collision-sphere centre. `MOVSX EAX, byte ptr [EDX+0x80]; CMP EAX, 3;
+ * JA 0x0048AF7D; JMP [EAX*4 + 0x0048B12C]` at `0x0048ADC4`: the table's four
+ * cells are `0x0048ADDB`, `0x0048ADFC`, `0x0048AE60` and `0x0048AEC4`, and any
+ * other value — negative ones included, the compare being unsigned — writes
+ * nothing at all. `[proved]`
+ *
+ * Every arm but the first reads a bone's **draw record**: the matrix
+ * `SkeletonEmitNode` (`FUN_004114C0`) stores at
+ * `g_skeleton_node_out + bone*0x90 + 0x28` — `obj+0x20C + bone*0x90 + 0x28`,
+ * or `model+0xA0 + bone*0x90` off `g_cur_actor_model` (`obj+0x194`) — which
+ * is the stack top just after `SkeletonPoseNode` (`FUN_00411700`) translated
+ * and rotated the node, under the camera: the bone's frame in view space. Each
+ * arm loads `g_camera_blocks[g_camera_index]` (`0x009A6040`, view to world),
+ * `MatrixMultiply`s the record onto it and takes the translation: **the bone's
+ * origin in the world**. The byte offsets the arms add to
+ * `g_cur_actor_model` are the evidence for the bone numbers.
+ *
+ * Members are named for the point, not for what the bone may be.
+ */
+export enum CivilianSphereMode {
+  /** `0x0048ADDB`: `obj+0x40..0x48`, the actor's own position. */
+  Position = 0,
+  /** `0x0048ADFC`: `ADD ECX, 0x1C0` — bone 2's record. */
+  Bone2 = 1,
+  /**
+   * `0x0048AE60`: `ADD EDX, 0x130` — bone 1's record, and `CivilianInit`
+   * (`FUN_0048A3E0`) writes this mode, so it is every civilian's until a
+   * script says otherwise.
+   */
+  Bone1 = 2,
+  /**
+   * `0x0048AEC4`: `ADD EAX, 0x910` then `ADD ECX, 0x760` — bones 15 and 12 —
+   * and the point halfway between them, each axis `(a + b) * 0.5` with the
+   * `0x3F000000` at `0x004C43AC`.
+   */
+  Bones12And15 = 3,
 }
 
 /**

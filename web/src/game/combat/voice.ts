@@ -46,7 +46,7 @@
  * ## Kind 4 is dead, and that is now settled
  *
  * `[proved]` **Nothing in the image calls this routine with 4, and kind 4's
- * ids are zero.** Both halves were `[open]` and both have been read:
+ * ids are zero.** Both halves were open questions and both have been read:
  *
  * * the census. All twenty-three call sites push a literal: kind 0 at
  *   `0x0045402D`, `0x00449D11`, `0x00452608` and `0x00451A03`; kind 1 at

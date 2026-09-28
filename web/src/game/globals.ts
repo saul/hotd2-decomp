@@ -720,8 +720,15 @@ export const G = {
   g_trigger_down: [0, 0],
   /**
    * `g_training_out` — 0x009A2234. `PlayerUpdateInPlay` sets it instead of
-   * the continue when a Training player runs out of lives. What reads it is
-   * `[open]`.
+   * the continue when a Training player runs out of lives.
+   *
+   * That is one writer's reading, and the word has many: `get_xrefs_to`
+   * lists 26 references -- writes from `CivilianUpdate` (a Training civilian
+   * dying) and routines at `0x004525C0`, `0x00445050`, `0x004991B0` and
+   * `0x00499530`, reads from `ZombieStateCarryProp` (`0x0045B624`) and
+   * `0x00497760` five times over, and more in code Ghidra has no function
+   * for. So it is a Training-mode state word of more than one use, and what
+   * it holds is `[open]`; the port runs no Training stage.
    */
   g_training_out: 0,
   /** `g_player_was_hit` — 0x009A5CD0 + player*0x98. */
@@ -2288,12 +2295,12 @@ export type Globals = typeof G;
  * a fresh load. A snapshot *load* deliberately does not reset — it restores
  * the whole data segment, counters and all, which a reset would undo.
  *
- * `[open]` The port has no equivalent of `ResetGameOnStart`, because it has no
- * *run*: every stage load is a fresh start. Nothing is silently wrong — the
- * run totals that reset owns (`g_civilians_seen_total`,
- * `g_civilians_rescued_total`) are not in `G` either — but the run/scene split
- * only half exists here, and a port that grows a continue sequence will need
- * the other half.
+ * `ResetGameOnStart` is ported for its rank half (`game/run_phase.ts`), and
+ * that routine declares the rest -- the scene and block index, the loadout,
+ * the civilian and route tallies -- as the app's stage load. The run totals
+ * it owns (`g_civilians_seen_total`, `g_civilians_rescued_total`) are not in
+ * `G`, so the run/scene split only half exists here. This said the port had
+ * no equivalent at all, as an open question, before `run_phase.ts`.
  *
  * **The engine's body, line for line, and what the port does with each.** This
  * is a partial transcription and the list is how you can tell which part:

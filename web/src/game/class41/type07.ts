@@ -482,12 +482,10 @@ export function SpawnOriginalItemDrop(y: number, set: number,
  * {@link BreakableProp.removeFlag} (the pickup strip's base) and `+0x192`
  * {@link BreakableProp.routinePhase}.
  *
- * [diverges] Three things the engine does here have nothing to land on in the
- * port. `g_original_items_taken` (`0x009C90C0`) is not in `G`, so the tally is
- * not kept. `SpawnOriginalItemBanner` (`0x00475E40`) is unported — it is the
- * award, and the inventory with it — so the port emits `prop.pickup` in its
- * place, as `PropUpdateType43` does. From frame 25 the two item models go
- * through `AssetDrawSlotWithAlpha` (`FUN_004185A0`) at `1.0 - frame * 0.02`.
+ * From frame 25 the two item models go through `AssetDrawSlotWithAlpha`
+ * (`FUN_004185A0`) at `1.0 - frame * 0.02`. Two things the pickup arm does
+ * have nothing to land on in the port, the tally and the award, and each is
+ * declared where the arm makes it.
  */
 export function OriginalItemDropUpdate(p: BreakableProp, rng: Rng,
                                        events?: Events): void {
@@ -511,6 +509,12 @@ export function OriginalItemDropUpdate(p: BreakableProp, rng: Rng,
       && (p.flags & BreakableFlag.Hit) !== 0) {
     BreakablePropAwardHit(p.flags, false, rng);
     p.flags |= ORIGINAL_ITEM_TAKEN;
+    // [diverges] `g_original_items_taken[id]++`, capped at 0x63: the tally
+    // (`0x009C90C0`) is not in `G`, so it is not kept.
+    // [diverges] `SpawnOriginalItemBanner(g_original_item_records[id]
+    // .banner)` (`0x00475E40`) is unported -- it is the award, and the
+    // inventory with it -- so the port emits `prop.pickup` below in its
+    // place, as `PropUpdateType43` does.
     events?.emit("sound.play", { id: SFX_ORIGINAL_ITEM_PICKUP });
     p.storyItem = 1;
     const p0 = (p.flags & BreakableFlag.HitByPlayer0) !== 0;

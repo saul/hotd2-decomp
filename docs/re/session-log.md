@@ -23173,6 +23173,468 @@ against the plain draw -- its textures have no transparent texels there).
   now; the count went from 79 to 77, the two dropped being those two reads,
   and the shared bundle gives 77 as well.
 
+## 2026-09-28 -- every caller of the ring effects, wired where the exe calls it
+
+**The list.** `SpawnGroundRingEffect` (`FUN_00407DA0`), `SpawnRingEffectAtPose`
+(`FUN_00408370`) and `SpawnWaterRing` (`FUN_004567C0`): a scan of `.text` for
+every `E8`/`E9` rel32 aimed at the three found 26 call sites and no absolute
+reference anywhere in the image, and that is exactly the list
+`get_xrefs_to` gives -- 9, 5 and 12. `[proved]` complete for direct calls.
+The owl (class 0x43) makes **none** of the 26: whatever its corpse landing
+spawns is not one of these three routines.
+
+| site | routine | now |
+|---|---|---|
+| `0x00449415` | `OneHitTargetPlayDeathClip` | wired before |
+| `0x0043BCD4` | `FrogStateDieTumbleAndSink` | excluded (another session) |
+| `0x0044A9FF`, `0x0044AA16` | `ThrowerStateCorpseSink` | wired |
+| `0x0044ABA2`, `0x0044ABB9` | `ThrowerStateCorpseBlink` | wired |
+| `0x00451DC3` | `RescueTargetFreedState` | wired |
+| `0x00454F37`, `0x00454FE9` | class 0x30's two corpse states | wired before |
+| `0x0040A3CB`, `0x0040A45F` | `SeveredHeadUpdate` (bounce 0.25, settle 0.5) | wired |
+| `0x00438D95`, `0x0043956D`, `0x004396CD` | the fish | wired before |
+| `0x00456B1F`/`B2E`, `0x00456C0C`/`C1B` | the two death hooks | wired before |
+| `0x00456CC1`/`CD0` | `ZombieStrikeStartSplash` | ported and wired |
+| `0x00456D9C`/`DAB` | `ZombieStrikeFrameSplash` | ported and wired |
+| `0x00457050`/`5F` | `ZombieStateSurfaceOnCameraCue` | wired |
+| `0x0045AC79`/`88` | `ZombieStateTargetMotionScript` | wired |
+
+The two strike splashes are `g_class30_states[0x39]`/`[0x3A]`, reached through
+`CALL dword ptr [0x00592BCC]`/`[0x00592BD0]`; a byte search for the two slot
+addresses found a third caller of the first, `ZombieStateScriptedGrabAndDespawn`
+at `0x00457C2D`, which is wired too.
+
+**Wrong ports in the lines around the calls**, each read and fixed:
+
+* Class 0x31's two corpse states were one function with a `blink` flag, drew
+  the pose pin's `rand()` once instead of every frame, left through
+  `ThrowerLeave` (counts, permit, unconditional camera release) where the exe
+  does only the `KeepCameraWhenLast` release and the hit slot, and had no
+  0x3A6 lift. `EnemyThrowerInit` did not raise `MotionFlag.TraceGround`.
+* Class 0x21's freed state was a stub, and three things around it were wrong:
+  `FUN_00451F40` was filed as drawing and is the body's motion off the car
+  (now `RescueTargetFreedDrift`); the rescue tail cut to the freed clip at
+  frame 0 where the exe blends it in at cursor 15 over 5, re-derives the
+  angles, frees the hit and camera slots and runs the drift and the draw; and
+  the abandoned state stood still where the exe keeps riding the route.
+  `RescueTargetInit` threw its `rand() % 10` start away. The class steps its
+  own clock now, because the freed state stops it on the frame the clip ends.
+  `0x00451DF0` had no Ghidra function; it does now.
+* `SeveredHeadUpdate` threw the head along `g_camera_yaw_bams`; the exe reads
+  the camera **block's** yaw, `0x009A60D0 + index * 0x1A4`, which the scene
+  hooks keep half a turn from the other.
+* States 13 and 23 returned after sub 0 where the exe runs on into sub 1
+  (L53; for 23 the jump table at `0x00457CCC` says so), both wrote class
+  0x24's `obj.frozen` (L3), state 13 cleared and restored
+  `ZombieFlag2.CollideWorld` the routine never touches, and its exit is a
+  literal state 1, not the tail's byte. State 23's end was a feed note where
+  the exe spawns sprite 0x62; the captor script's clip 0xB2 prop strip at
+  cursor 0x16 was missing beside the wading arm.
+
+**Wrong turns.** The Ghidra naming gate refused `LerpAngleWeighted` for
+`0x00401EC0` as a token-subset of `LerpWeighted`; it is `LerpAngleShortWay`.
+`verify_port`'s class-0x31 literal-clip check failed on
+`CORPSE_RING_LIFT_MOTION = 0x3a6`, a clip the corpse **compares** and never
+plays; it is already baked through the motion sets of behaviour sets 0 and 3,
+but the states do name it as a literal, so it went into
+`CLASS31_LITERAL_MOTIONS` in both halves -- the re-export changed no bundle's
+clips. The rescue fixture carried no clips for character type 7, so the port's
+setter declined the freed clip and the old assertion "plays the freed clip"
+failed; the fixture now bakes 0x3E6 and 0x3CC. And the first mutation run
+showed the class-0x21 tests blind to `advancesOwnMotion` -- they drove the
+update directly, which never meets the director -- so one now runs through
+`GameUpdate`, and without the flag the ring never comes (the doubled clock
+steps the cursor two at a time past the odd play length).
+
+`[open]`: `RescueTargetHeldState`'s part loop (a voice, `NoOpStub` and a bone
+sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
+its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
+2, has no field because nothing in `game/` composes a rotation from it.
+
+## 2026-09-28 -- every skinned actor drawn at its model's size (branch `worktree-agent-a271ad1688e59a06c`)
+
+**The report.** `game/root_motion.ts` carried a declared divergence: the
+engine draws the pose offset -- and the whole model -- under
+`MatrixScale(model+0x116C)`, and the port drew every skinned actor at 1.0 but
+the bat. "Making it faithful means scaling every skinned actor's drawn size."
+
+**What the exe does with the field.** Read from the instruction stream, not
+the pseudocode (`L1`: every consumer passes it as a pushed float):
+
+* `ActorBuildSkinnedModel` (`0x00410440`) writes it first, from the type at
+  `model+0x60`: `ADD EAX,-0x1E; CMP EAX,0x1A; JA` to `0x3F800000`, else the
+  index bytes at `0x00410568` (`00 01` and twenty-five `02`) into the jump
+  table at `0x0041055C` -- 0.6 for 30, 0.7 for 31, 0.9 for 32..56. `[proved]`
+* The draw tail of `SkeletonApplyRootMotion` pushes it three times into
+  `MatrixScale` at `0x00410FEA`..`0x00410FF7`, between the rotation (any of the
+  six orders) and the pose translate; `SkeletonBuildAndPose` at `0x0041061B`
+  likewise. Every bone hangs from that matrix. `[proved]`
+* `SkeletonWalkNode` (`0x004107E0`) stores each bone record's hit radius as
+  `obj+0x1300 * row.radius` (`0x00410837`..`0x00410840`) -- once, at build --
+  and the centre unscaled, because the node matrix scales it. `[proved]`
+* Every other reader -- `SkeletonDrawNodeSlot`, `ActorDrawAttachedParts(Lit)`,
+  `DrawCharacterPartSlot`, `CivilianDrawHeldItems`, the unfunctioned
+  `0x0041A213` -- hands it to `NoOpStub` and nothing else. A byte search for
+  `6c110000` (`L32`) found that last one, which the operand search had missed
+  because no function covers it. `[proved]`
+* The one later writer is class 0x10's op 0x27, and the one command that runs
+  it -- 50.0, stage 4's `player_gold` in blocks 23 and 25 -- is how Goldman
+  gets onto the arena's jumbotron. `[likely]`: the port showed an empty screen
+  through his whole speech before this and shows him filling it after.
+
+**The port.** `ActorBuildSkinnedModel` writes `Actor.scale` for every actor it
+builds (it wrote it only for the one class that carries the model block) and
+each bone's radius into `Actor.boneRadius`; `ActorModelScale` returns the
+engine's floats. `render/characters.ts` has one `placeRoot` for the update and
+the resync, which puts `Actor.scale` on every root it places -- the bat's
+special case is now the general rule. Class 0x45 and the model block already
+carried their own. `tools/verify_root_pose.py` decodes the switch against
+`ActorModelScale` and finds, in the six stages' evts, every character that
+poses a clip's root: one, stage 4's type-48 civilian at `0x3578`.
+
+**Screenshots** (`extract/compare/model-scale/` in the worktree, before/after
+pairs under `?drive=1&seed=1`, game canvas only): `s1b1_f0020` (stage 1 block
+1 step 8: the suited civilian a head shorter, the zombie beside him
+unchanged), `s4b4_f0090` (stage 4 entry 4 block 4 step 7: the crawling
+civilian smaller and further into his hole), `s4b23_f0220`/`f0320` (the
+jumbotron, empty before and Goldman after), and `s1b14_f0400` (JUDGMENT) and
+`s2b3b_f0340`/`f0400` (a `zsass` thrower), which are byte-identical PNGs --
+every type at 1.0 draws exactly as it did. Playthroughs: stage 2 ends at the
+same frame (9750, GAME OVER at block 16) before and after; stage 1 reaches its
+end block both times, at 9120 frames against 9285 -- where the two runs part
+was not pinned down.
+
+**Wrong turns.**
+
+* The old note's "2.594 units" was `0.9 * 2.882` with the 2.882 already
+  rounded; the root is `(-0.104, 0.805, -2.880)`, 2.8816 across, and the
+  engine draws 2.5935. The check caught it the first time it computed the
+  number instead of quoting it.
+* I meant to export a per-type scale into the bundle, as the brief suggested
+  if it was missing. It is not missing: the port transcribes the switch and
+  every actor carries the result, and `Actor.scale` has to be the per-actor
+  field anyway because op 0x27 writes it. A bundle copy would have been a
+  second source the renderer must not read. The switch is pinned by the
+  verifier instead.
+* `SkeletonWalkNode` also gates each row on its slot matching the node's, and
+  the exporter does not: the rows of twelve shipped types disagree with
+  their nodes on at least one bone, zndina's, zsass's and the frog's among
+  them (the list is on `ActorBuildSkinnedModel`). Porting that gate alone would zero the thrower's hands for
+  good, because what restores them -- `ResolveDamagedPartSphere` on a part
+  swap and `ThrowerStateRestoreBothHands` -- is unported. Declared on
+  `ActorBuildSkinnedModel` rather than half-done.
+* The first stage-2 playthrough after the change died on "Execution context was
+  destroyed" at frame 8055; alone, it ran to the same GAME OVER at 9750 as the
+  old code. That was another page reload, not the change (`L29`).
+
+## 2026-09-28 -- which class-0x13 routines draw before they seat on a path (branch `claude/relaxed-benz-c908db`)
+
+**The brief.** Once the wall-climbers branch put `pitch`/`roll` on placements,
+five stage-2 class-0x13 records carry a pitch; `SpawnSlotActor` was said to
+build class 0x13 with `yaw: pl.yaw` only, and `PropSeatOnObjectPath` overwrites
+all three angles. Find out which class-0x13 states draw before seating, and
+pass the angles through if any shipped prop draws its spawn orientation.
+
+**Already done.** The brief described the tree before `1723413f` (this
+morning's class-0x13 pitch session, above): the arm has taken all three
+through `PlacementOrientation` since then, with four `port.test.ts`
+assertions. Nothing to pass through. What that session did not read is the
+carriers, and that is what this one adds.
+
+What the exe does, all `[proved]` from the listing:
+
+* `ScriptedPropUpdate13` (`FUN_0043FE90`) calls the behaviour at `0x0043FEC9`
+  and draws from `0x0043FEDE` on; the model at `obj+0x1F4` is drawn nowhere
+  else. So the record's angles are drawn only where the behaviour writes none.
+* `CarrierPropSelectRoutine`'s table at `0x004401E4`: 0 `0x00440210`, 1
+  `0x004403D0`, 2 and 9 `0x004408A0`, 3 `0x00440AD0`, 4 and 7 `0x00440C20`,
+  5 and 8 `0x00441000`, 6 `0x004413C0`.
+* Every routine but selector 3's falls from state 0 into
+  `PropSeatOnObjectPath` on its first call: 0 `0x00440282`->`0x0044028F`, 1
+  `0x00440433`->`0x00440440`, 2 `0x00440940`->`0x00440969`/`0x00440997` and
+  9 at `0x004408E6`, 4 `0x00440CC0`->`0x00440CE4` and 7 at `0x00440C7C`, 5 into
+  `0x004410B7` and 8 at `0x0044105C`, 6 `0x00441423`->`0x00441430`.
+* Selector 3's routine, `0x00440AD0`..`0x00440BFD` (not a Ghidra function;
+  read as bytes), stores nothing to the object: it reads `obj+0x1310` and
+  writes its own tail and an 8-byte block. It draws the record's angles for
+  life, as behaviour 0 does.
+
+The data, off the disc rather than the bundle (`L18`): sixteen class-0x13
+descriptors in the eleven `evt/*.bin`, 15 in stages 2..4 (the bundle's 15)
+and one in `trnevtbl.bin` on behaviour 9. The five behaviour-0 records are the
+only ones with a non-zero angle; selector 3's (stage 4, 35916) is `(0, 0, 0)`.
+So the one shipped carrier that draws its spawn orientation draws zero, and
+the port already keeps its model out of the bundle.
+
+**Checks.** One `port.test.ts` assertion: every selector in
+`CARRIER_SELECTORS_PORTED`, spawned from a record carrying all three angles,
+holds its `op_` path's after one `ScriptedPropUpdate13`, and the loop expects
+selector 3 to keep the record's when it is ported. Replacing routine 1's
+fall-through call with nothing fails it (`1:1111/2222/3333`).
+
+**Corrected.** `functions.tsv` said `PropSeatOnObjectPath` is called by "every
+carrier routine"; selector 3's never does, and the row now lists every caller.
+The class-0x13 header and `spawns.md` said "five take behaviour 0 ... the
+other eighteen take 8": five is descriptors and eighteen is instructions less
+five. It is 15 descriptors (5 and 10) and 23 instructions (8 and 15).
+
+**Wrong turn.** A first draft of the `ScriptedPropUpdate13` row said "nothing
+else draws the object". Routines 0, 1 and 2 draw their wakes and doors under
+the object's angles; they do it after their own seat, but only those three
+were read that far, so the row now says the *model* is drawn nowhere else.
+
+`[open]`: what routines 3, 4/7 and 5/8 are (stage 4's), and behaviours 6, 7
+and 9 (`0x0043FFC0`, `0x004400D0`, `0x00445050`) -- no stage record uses them,
+though `0x004400D0` also calls `PropSeatOnObjectPath` (`0x00440101`).
+
+## 2026-09-28 -- the stage-2 car's draw, checked a second time; its push translations were the wrong float32s (branch `claude/adoring-lehmann-1b16dc`)
+
+The brief was to port what `St2CarDraw` (`FUN_00452320`) does and the player
+did not draw -- the post-crash asset row, the door's `RotY(obj+0x1334)`, the
+two spun parts on the roll-limited frame -- and to export row 1's slots. **All
+of it was already on `main`**, in `00061004` from this morning's
+`fix/newbugs2-crashed-car`; the brief had been written before that landed. So
+this session re-read the routine and checked the landed work instead of
+redoing it (L17: one agent's reading is not a fact, a positive one included).
+
+**Re-read, `[proved]`.** `disassemble_bytes 0x00452320..0x0045253F`
+matches `car.ts`'s pseudocode instruction for instruction: the four rows at
+`0x565F2C`/`30`/`34`/`38` after `SHL EAX, 0x4`; the door push nested inside
+the body's (two `Pop(1)` at `0x004523BD`/`0x004523C4`); `MatrixGetAngles`'
+three outputs at `[ESP0-0xC]`, `[ESP0-8]`, `[ESP0-4]` re-applied as
+`RotY(out2)`, `RotX(out1)`, `RotZ(limited out3)` at `0x0045247B`..
+`0x0045248B`; the dead zone's five arms. `MatrixGetAngles` (`FUN_004018E0`)
+decompiled: out1 and out2 are `VecToAngles`' pitch and yaw, out3 is
+`fpatan(y, x)` of `M·(1,0,0)` after `RotX(-p)·RotY(-y)` -- which is the
+`{x, y, z}` `carrier.ts` returns and `applyTaskDraw` composes as `"YXZ"`. The
+real stage-2 glb has three roots of eight parts each, the door under its own
+row's body and the four spun parts on the root, all at identity rotation --
+the hierarchy `applyTaskDraw`'s `root⁻¹ · limited` arithmetic assumes.
+
+In the page (`?stage=2&mode=play&entry=0&block=0&step=2&op=0&drive=1`, headless,
+private bundle), unshot: the draw names `2d 2f 34 31` through `0x39` frame 369
+and `2e 30 35 32` from 370; the door runs `-27` at 371 to `-14009` at 404; the
+spin holds at `2260992`. The screenshots show the intact car on `0x38` frame
+100, the crash fireball at `0x39` 369, and the scorched row-1 body parked nose
+first in the storefront at 404 with its door swung out about the front hinge
+and both wheels seated.
+
+**What was wrong: the translations.** The three pushes are `PUSH imm32`s --
+`0x4110EECC 0x40CBC84B 0x410F17C2` (x y z) at `0x00452377`, `0 0x404AB852
+0x415A61E5` at `0x00452497`, `0 0x404AB852 0xC117AE14` at `0x004524E8` -- and
+those are 9.0583, 6.3682, 8.9433, 3.1675, 13.6489 and -9.48. `rigs.py` has
+carried 9.0582619, 6.368186, 8.9433079, 3.1674952, 13.6489019 and -9.4799995
+since `8684c7bf`: five of six components 2 to 40 ulps off, while the note
+beside them quoted the right hex. Invisible (under 4e-5 of a unit) and still a
+wrong number, so fixed in `rigs.py` and regenerated into `rigs_data.ts` and
+`builder_hash.ts`; `car.ts`'s pseudocode had copied them too. A scan of every
+rig part whose note quotes raw hex: 21 components, all agree now, and the car's
+were the only ones that ever did not.
+
+**What pins it.** `render.test.ts`'s car block used to build its graph from
+hand-typed numbers, so nothing tied it to what the exporter ships: it now
+builds from `RIGS` itself and asserts first that both rows of
+`ST2CAR_ASSET_VARIANTS` are one part a slot, that column 1 sits in its own
+row's body and the rest on the root, and that each translation is the float32
+of its push. Mutations: `HEAD`'s decimals fail the third; re-parenting row 1's
+door to row 0's body fails the second and then "row 1 is drawn".
+
+**Wrong turns.** None in the code. The time went on establishing that the task
+was done before starting it -- `git log` on the four files the brief names is
+the first thing to run, not the last.
+
+## 2026-09-28 -- the civilian's collision sphere: modes 1, 2 and 3 are draw records (branch `worktree-agent-a2f32c8a45a21688b`)
+
+**The report.** `class10/update.ts` and `actor.ts` carried an open question:
+of `CivilianUpdate`'s switch on `sub+0x80` (op 0x17), only mode 0 -- the
+position -- was ported, because modes 1-3 "multiply the camera matrix by a
+matrix inside the model block (`model+0x70`, `model+0x4C`, and the midpoint of
+`model+0x244` and `model+0x1D8`)", which "are not bone records". The brief
+called it the camera-point switch and asked for the camera look-at, the shot
+sphere, the HUD marker and the rescue logic to be checked as readers.
+
+**What the switch is.** `0x0048ADB5`..`0x0048AF83`, after
+`ActorRegisterCameraPoint`: `MOVSX EAX, byte [sub+0x80]; CMP EAX, 3; JA past;
+JMP [EAX*4 + 0x0048B12C]`, cells `0x0048ADDB`, `0x0048ADFC`, `0x0048AE60`,
+`0x0048AEC4`. It writes `obj+0x12C..0x134`, the collision-sphere centre, and
+nothing else. `[proved]`
+
+* 0: `obj+0x40` -- the position (carrier-relative on a carrier: the arm reads
+  `g_cur_actor_xform`).
+* 1, 2: `MatrixStackSetTopFromArray(0x009A6040 + cam*0x1A4)`,
+  `MatrixMultiply(model + 0x1C0 / 0x130)`, `MatrixGetTranslation`.
+* 3: the same for `model+0x910` and `model+0x760`, halved (`0x004C43AC` =
+  `0x3F000000`).
+
+The offsets are **bytes** -- `ADD ECX, 0x1C0`, `ADD EDX, 0x130`, `ADD EAX,
+0x910`, `ADD ECX, 0x760` -- and `model` is `g_cur_actor_model`, `obj+0x194`.
+Ghidra's pseudocode types it `int *`, so it prints `0x70`, `0x4C`, `0x244`,
+`0x1D8`; the old note read those as byte offsets. As bytes they are
+`model+0xA0 + bone*0x90`: the matrix `SkeletonEmitNode` stores with
+`MatrixStore(record+0x28)` just after `SkeletonPoseNode`, record =
+`g_skeleton_node_out + bone*0x90` = `obj+0x20C + bone*0x90` (the base
+`DrawSkinnedModelAndShadow` is handed as `model+0x78`). **Bones 2, 1, 15 and
+12.** The shot branch's own read of the op-0x28 bone, `LEA ECX,[EAX+EAX*8];
+SHL ECX,4; LEA EAX,[ECX+EDX+0xA0]` at `0x0048ABD2`, is the same formula, which
+is the check on it. `[proved]`
+
+`MatrixMultiply` post-multiplies (`top = top x arg` in `Matrix4`'s element
+layout, from the sixteen sums), so each arm is view-to-world times the
+bone's view-space frame: the bone's origin in the world, from the draw a few
+lines up in the same routine. `SkeletonEmitNode` takes the same product for
+`obj+0x100` through `FUN_004A9570`, which pre-multiplies (`top = arg x top`)
+and is named `MatrixPremultiplyTop` now. `GameHost.boneWorld` answers exactly
+that point, so no new host query was needed. `CivilianInit` writes mode **2**
+(`MOV byte [sub+0x80], 2`), so the arm the port left out was the one nearly
+every civilian runs. In the skeletons of the civilian types, bone 1 is the
+root node (offset zero), bone 2 its child 3.2-5.5 up, and 12 and 15 the
+children of 11 and 14, 4.76 below them -- `[likely]` the lower leg joints,
+from the tree only.
+
+**Who uses which.** Streams 5, 6, 18, 24, 31, 43, 45, 89 set mode 1; 5, 28,
+31, 89 mode 2; 28 and 30 mode 3; 38 mode 0. Through `entries`: mode 1,
+stage 1's `0x4AE4`, stage 2's `0x51AC`, `0x8510`, `0x8620`, `0xBBA8`,
+`0xEA54`, `0xEA8C`, stage 4's `0x59C8`; mode 3, stage 2's `0x8598` (stream 28
+is her on-shot script: the fall, radius 4, the sphere between the knees);
+mode 0, stage 2's `0xA134`.
+
+**The readers.** A sweep for `0x12c` in operands (both `[r + 0x12c]` and
+`ADD r, 0x12c`) and for `+ 0x130]` finds, for a civilian, two:
+`RegisterForShotTest` (through `ActorRegisterCameraPoint`, *before* the switch,
+so it publishes last frame's centre; `ColiPublishDynamicList` copies it for
+`ColiTestSphereAgainstActors`), and `PoseHookGrowAndPushOutOfWorld`
+(`LEA EDX, [ESI+0x12C]` at `0x0048D0F8`), which the draw calls through
+`model+0x115C` from `SkeletonApplyRootMotion` at `0x00410E93` -- both of that
+routine's arms reach the call; the root-motion arm does so past a
+`MatrixStackPop` Ghidra marks no-return (L35). The gunshot does not read it:
+`ShotTestSphere` measures `obj+0x70`. Nor does the camera:
+`SelectCameraLookAtTarget` aims at `obj+0x100`, which `SkeletonEmitNode`
+writes, and the sweep finds only stores with a `+0x130` displacement, no
+load. So **the brief's camera, HUD and rescue readers do not read this
+field** (`[proved]` for the displacement forms the sweep covers, L32); the
+camera point is untouched by any mode.
+
+**What was wrong in the port, and is fixed.**
+
+* Modes 1-3 were missing; `CivilianWriteSphereCentre` has all four arms, and
+  anything else writes nothing (signed byte, unsigned compare).
+* Op 0x17 stored the whole dword; it stores the signed low byte now. Renamed
+  `SetCameraPointMode` -> `SetSphereCentreMode`, `cameraPointMode` ->
+  `sphereCentreMode`, with a `CivilianSphereMode` enum.
+* Class 0x10 did not set `ClassHandler.ownsSphereCentre`, so the actor push
+  rebuilt class 0x30's feet-plus-radius-plus-one over every civilian.
+* `PoseHookGrowAndPushOutOfWorld` rebuilt that same point with
+  `ActorUpdateBoundingSphere` before tracing it; the engine traces `obj+0x12C`
+  as it stands. And it ran after the switch; it runs where the draw is now,
+  so it reads the previous frame's centre, as the engine's does.
+* `CivilianInit`'s note said both pose hooks and the part list were the
+  renderer's; the part list is bound in the port and the grow-and-push hook
+  is the game's.
+
+**What is still not the engine's.** The switch reads the pose the renderer
+last drew, a tick behind the engine's same-routine draw for a moving
+civilian -- the same reading the camera point and the frog take, and the
+seam `game/host.ts` declares at its head, so it adds no marker of its own.
+What closes it already exists for class 0x14: the engine's model block in
+`game/skeleton.ts` (`Actor.skel`), posed by the class's own
+`DrawSkinnedModelAndShadow` call. Moving civilians onto it moves their clip
+clock, root motion and draw off the director and the renderer's posing, and a
+carrier's matrix has to go under the walk -- a class-wide change, not this
+switch's; it is the question for the user in this session's report.
+`[port-only]` at the seam: with no pose (a headless host, or the tick before
+the renderer adopts a spawn) a bone arm writes nothing, as the camera point
+does.
+
+**In the page** (`?drive=1`, stage bundles exported in this worktree): on
+mode 2 the sphere equals bone 1 to the digit -- bone 1 is also the tracked
+camera bone for every civilian type, so it is `lookAt - (0, 4, 0)` --
+through stage 1 block 9, stage 2 blocks 9, 14, 16 and 17, stage 3 block 2,
+stage 4 (entry 4) block 9. Mode 1 on `0xBBA8` sits 3.11-3.15 above bone 1,
+which is `hitoc.bin`'s bone-2 offset of 3.22 with the pose's bend; on
+`0xEA54` about 5 above, `hito_oyaji`'s 5.45. Mode 3 on `0x8598` after a
+(cheated, printed) shot follows the legs down through the fall and hands
+back to bone 1 when stream 28 reaches its mode-2 command. The camera stays in
+front of each, converging to within a few degrees of her; screenshots
+`web/shots/civ-sphere-8598-f150.png` and `civ-sphere-8510-f150.png`.
+
+**Wrong turns.**
+
+* My first map from spawns to streams used the spawn's `script` as a stream
+  index. It is an index into `entries`, and the list that came out -- mode 0
+  "stage 4's `0x59C8`", mode 3 "stage 3's `0x32A4`" -- was a list of other
+  women. The first two page runs watched the wrong civilians and reported
+  mode 2 throughout, which read like a port that never changes mode.
+* I went back and forth on the no-pose case. A fallback to the position keeps
+  a headless civilian's sphere off the world origin, where the pool's cleared
+  field would otherwise sit; it is also a default no exe instruction makes,
+  which is the port-only gameplay logic the rules exclude. It writes nothing
+  now, as the camera point does, and the headless consequence -- a sphere at
+  the origin until something poses her -- is the seam's.
+* A first draft declared the renderer's pose lag as a new divergence on the
+  switch. It is the seam `game/host.ts` already declares; the count stays
+  where it was.
+* One mutant for the mutation run was a syntax error (a second `default:`);
+  the run printed "exit 1, 0 failing", which is a build failure and not a
+  check failing. Rewritten, it failed six checks.
+* `web/tools/civilians.mjs` fails (`moved 17/37`, `rescued 0/21`, `mauled
+  14/10`) -- identically on the base commit, so it is not this change; it is
+  not in `verify_all.py`.
+
+## 2026-09-28 -- the `[diverges]` and `[open]` counts made true (branch `worktree-agent-aacb922d35020b0ee`)
+
+**The report.** STATUS's two honest measures were inflated and partial: tags
+describing departures since fixed, back-references that repeated the token so
+one departure counted twice or three times, `[open]`s that recorded answered
+questions, and counters that saw three directories for one marker and one for
+the other.
+
+**The rule** (`PLAYER_ARCHITECTURE.md`, "One departure, one tag"): a tag goes
+where the port's code departs -- the routine or branch, or for a departure in
+representation the field's declaration; two routines departing for one reason
+are two tags (the three readers of block 0's path frame); everything else --
+headers, "see above", "the same trade", history -- names it in words (`L41`).
+`[open]` follows the same rule, and a thing the port knowingly does not do is
+a `[diverges]`, not a question.
+
+**The counters.** `verify_port.marker_files()` is every `.ts`/`.tsx` under
+`web/src/`; `marker_lines` counts occurrences in comments only, through a small
+lexer (strings, templates, regex literals), so `ui/panels/Crumbs.tsx`'s
+`}, [open]);` and `rigs_data.ts`'s bundle note are not markers. It pins itself
+against a fixture and fails a file that leaves it inside a comment or
+template. STATUS prints both totals and a per-layer table.
+
+**Code the stale notes were covering for**, each read in the database first:
+
+* `ZombieStateStandAndThrow` sub 0 (`0x004590E3`..`0x00459109`) tests
+  `obj+0x34` bit `0x1000000` and writes `obj+0x136C` 1 and, if airborne,
+  0x100000; the port raised the held-weapon bit (PLAYER_HANGS 24). Its retire
+  arm's hit-slot free (`0x00459535`) was said to be unported; it is ported.
+* `ZombieThrowHandWeapon` and `SpawnThrownWeapon` zero the hand's bone-record
+  radius (`+0x78`); the two re-arm states write the table's back
+  (`0x0044F831`/`0x0044F891`, `0x0044F9F6`/`0x0044FA61`). `Actor.boneRadius`
+  carries both.
+* `ScriptedHumanoidUpdate`'s path ride writes all three angles
+  (`0x00484B6E`..`0x00484B74`); `ScriptedHumanoidInit` writes `model+0x68 = 1`
+  (`0x004841A9`), so the new `render/characters/humanoid.ts` draws them in
+  order 1.
+* `ZombieStateEmerge` writes `obj+0x136C` too: `0x100002`, or `0x10` when
+  `obj+0x34` has `0x200000` (`OR AL, 0x10` at `0x0045851E`), and drops
+  `0x100000` on the hand-over. That `OR AL` is the arc-target veto's writer,
+  which `class30/knockback.ts` had recorded as unfound after two sweeps -- the
+  one form they did not cover (`L32`).
+* `ActorShotFeedback`'s result-5 arm skips the sprite for a mesh-tested bone;
+  the note said the port had no per-bone blobs. It has, since the stage-4 boss.
+* `CivilianUpdate`'s leave frees the hit slot by index (`0x0048B085`).
+* class 0x46's dive "yaw reads block 0" is not a departure: the port's one
+  block **is** block `g_camera_index`, which every shipped write keeps at 0.
+
+**Wrong turns.** My mutation script restored each file by reversing the
+replacement, and a mutation whose replacement was empty reversed as an
+insertion at offset 0: `class30/throw.ts` came back with the line at the top
+and not in place. Caught by the script's own equality assert, repaired by
+hand, and the script changed to write the pre-mutation text back. Every fix
+above fails its new assertion with the fix removed.
+
 ## 2026-09-28 -- class 0x41's generic props, transcribed whole (types 5-69, 73, 78)
 
 **What was done.** The inventory first: `g_class41_constructors`
@@ -23233,4 +23695,3 @@ with no model draw (18, 28, 59, 62, 63) and takes `obj+0x64/+0x68` for the
 descriptor's words (20, 27); its rows no longer drive any transcribed type.
 Type 14's per-draw light direction has no render path. `g_civilians_seen_total`, `g_original_items_taken` and
 `g_original_item_pickup_blocked` are not in this branch's `G`.
-

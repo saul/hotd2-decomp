@@ -81,12 +81,12 @@
  * matrices and never reaches that table, so it is read today only for the
  * seven above.
  *
- * The count that went with the old note on the order was fifteen, and it was
- * the wrong measure twice over. **The order only matters when yaw and roll
- * are both non-zero** — `Rx` is last in every one of these compositions, so
- * all an order can disagree about is whether `Ry` or `Rz` comes first, and
- * with either angle at zero the two matrices are equal. That is why type 5's
- * four stage-2 spawns, which carry a pitch and a yaw and no roll, were never
+ * The count that went with the old open question was fifteen, and was the wrong
+ * measure twice over. **The order only matters when yaw and roll are both
+ * non-zero** — `Rx` is last in every one of these compositions, so all an
+ * order can disagree about is whether `Ry` or `Rz` comes first, and with
+ * either angle at zero the two matrices are equal. That is why type 5's four
+ * stage-2 spawns, which carry a pitch and a yaw and no roll, were never
  * misplaced at all. And the fifteen was counted over six stages rather than
  * the twelve bundles. What the check measures is 20 spawns posed differently,
  * **four of them by more than a degree and all four `PropDrawOnlyType12`** —

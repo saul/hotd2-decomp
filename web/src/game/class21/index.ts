@@ -26,6 +26,7 @@
  * RescueTargetHeldState        0x00451980  live: sixteen parts, and the branch
  * RescueTargetFreedState       0x00451D80  after the rescue
  * RescueTargetAbandonedState   0x00451D20  the camera left it behind
+ * RescueTargetSinkAndDespawnState 0x00451DF0  the freed clip is over
  * ```
  *
  * {@link RescueTargetState} is that pointer as a value.
@@ -36,19 +37,19 @@
  *   charges one hit point per part carrying bit 3, so a frame can take more
  *   than one; the port's shot model is one `pendingHit` an actor, which is the
  *   same divergence class 0x20 declares and for the same reason.
- * * `RescueTargetDraw` (`FUN_00451FF0`) and `FUN_00451F40`. The renderer's:
- *   the first loads the view matrix, transforms `obj+0x40` into camera space
- *   and draws only if the result is nearer than `float[0x004C436C]`.
+ * * The pose and the triangles of `RescueTargetDraw` (`FUN_00451FF0`), which
+ *   are the renderer's. What the draw decides is here -- see
+ *   {@link RescueTargetDraw}.
  *
- * Two of that group **are** here, because they are not drawing at all:
- * {@link RescueTargetPoseFromRoute} (`FUN_00451E50`) and
- * {@link RescueTargetPoseFromRouteWithVelocity} (`FUN_00451EB0`) write
- * `obj+0x40`..`obj+0x6C` from an object path, and that is where the actor is
- * in the world. They were read as draw helpers and left out, which is how the
- * one actor that answers stage 2's first branch came to be standing at the
- * world origin.
- * * `RescueTargetFreedState`'s hand-off at `0x00451DF0` and the ground-ring
- *   effect. Both are drawing.
+ * Three routines that were once listed here as drawing **are** here, because
+ * they are not drawing at all: {@link RescueTargetPoseFromRoute}
+ * (`FUN_00451E50`) and {@link RescueTargetPoseFromRouteWithVelocity}
+ * (`FUN_00451EB0`) write `obj+0x40`..`obj+0x6C` from an object path, and
+ * {@link RescueTargetFreedDrift} (`FUN_00451F40`) moves the freed body off the
+ * car. They were read as draw helpers and left out, which is how the one actor
+ * that answers stage 2's first branch came to be standing at the world origin,
+ * and how its death came to leave no ground ring: the ring is
+ * `RescueTargetFreedState`'s, on the frame the draw reports its clip over.
  * * The rescue tallies. `g_civilians_rescued_total` and
  *   `g_civilians_rescued_by_scene` are not in `G` — see `ResetSceneOnEnter`'s
  *   table — so the port raises `civilian.rescued`, which is what class 0x10's
@@ -57,13 +58,21 @@
 import type { Rng } from "../../core/rng";
 import type { Actor } from "../actor";
 import { ActorFlag, MotionFlag } from "../actor";
+import { ReleaseCameraEnemySlot } from "../camera/slots";
+import { MatrixGetAngles, RotZYX } from "../carrier";
+import { ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScoreAddForPlayer } from "../combat/score";
+import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 import { ActorDespawn } from "../despawn";
-import { G } from "../globals";
+import { SpawnGroundRingEffect } from "../effects/ring_effect";
+import { G, HIT_SLOT_NONE } from "../globals";
+import { ActorAdvanceMotion } from "../motion";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
+import { MotionPlayFrame, MotionPlayLength } from "../tables";
+import { LerpAngleShortWay, LerpWeighted, vec3 } from "../vec";
 import { St2CarSpawn } from "./car";
 import { RescueTargetState, type RescueTargetTail } from "./state";
 
@@ -111,6 +120,30 @@ export const g_st2car_path_table = [
 /** The clip `RescueTargetInit` installs, and the one the rescue swaps to. */
 export const CLASS21_MOTION_IDLE = 0x3e6;
 export const CLASS21_MOTION_FREED = 0x3cc;
+/**
+ * `ActorSetMotionBlended(model, 0x3CC, 0xF, 5)` at `0x00451BC0` --
+ * `PUSH 0x5; PUSH 0xf; PUSH 0x3cc` (`6a05 6a0f 68cc030000`). The start is a
+ * **play cursor**, 15, which the port's setter takes as an authored frame:
+ * `15 / 2`, which it turns back into 15 ticks.
+ */
+export const CLASS21_FREED_START_CURSOR = 0xf;
+export const CLASS21_FREED_FADE = 5;
+/** `MOV dword ptr [ESI+0x1338], 0x78` -- the sink's two seconds. */
+export const CLASS21_SINK_FRAMES = 0x78;
+/** `FSUB [0x004C4D04]` (`0ad7233d`, 0.04f) -- the sink's step a frame. */
+export const CLASS21_SINK_STEP = Math.fround(0.04);
+/**
+ * `RescueTargetFreedDrift`'s window: `10 < n && n < 0x15`, and in it the
+ * car's velocity is weighed `LerpWeighted(v, 0, 1, 20 - n)` -- nine tenths at
+ * frame 11, a half at 19, nothing at 20.
+ */
+export const CLASS21_DRIFT_BLEED_FIRST = 11;
+export const CLASS21_DRIFT_BLEED_END = 0x15;
+export const CLASS21_DRIFT_BLEED_BASE = 0x14;
+/** `LerpWeighted(y, g_camera_fixed_eye_y, 1, 3)` -- a quarter of the way a frame. */
+export const CLASS21_DRIFT_FALL_DEN = 3;
+/** `FUN_00401EC0(roll, 0, 1, 1)` -- half the roll off a frame. */
+export const CLASS21_DRIFT_LEVEL_DEN = 1;
 
 /** `RescueTargetRideInState`'s two camera-frame cues. */
 export const CLASS21_RIDE_HANDOVER = 0x31;
@@ -195,11 +228,14 @@ export function RescueTargetInit(obj: Actor, rng?: Rng): void {
   t.sub = 0;
   obj.motionFlags &= ~MotionFlag.RootMotion;
   obj.motion = CLASS21_MOTION_IDLE;
-  obj.playTicks = 0;
-  // `IDIV 10` on the `rand()` return — a start frame, so a row of these would
-  // not animate in lockstep. One ships, and it still draws.
+  // `obj+0x194 = rand() % 10` (`IDIV ECX` with `ECX = 10` at `0x00451778`,
+  // `MOV [EDI], EDX` into the model at `0x0045177A`) -- the model's
+  // **counter**, `model[0]`, which is the port's `playTicks`: the clip starts
+  // up to nine frames in, so a row of these would not animate in lockstep.
+  // The port drew the number and threw it away; the class steps its own
+  // counter now (`advancesOwnMotion`), so the start is the engine's.
   obj.rootFrame = -1;
-  void rng?.int(10);
+  obj.playTicks = rng ? rng.int(10) : 0;
   obj.hp = CLASS21_HP_BY_RANK[G.g_damage_rank] ?? 1;
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
@@ -333,10 +369,15 @@ export function RescueTargetRideInState(obj: Actor, f: ClassFrame): void {
       t.state = RescueTargetState.Held;
     }
   }
-  // [open] `g_cutscene_skipping` (0x009A2230) hands over at once wherever the
-  // ride has got to. It is not in `G` — the port's skip is the walker's
-  // `skipRequested`, which is a different global — so a skipped cutscene here
-  // simply finishes the ride. The one shipped spawn's block is not skippable.
+  // `RescueTargetDraw(obj); obj+0x194 += 1;` -- every frame of the ride, the
+  // hand-over's included.
+  RescueTargetDraw(obj, f);
+  ActorAdvanceMotion(obj, f.dt);
+  // [diverges] `g_cutscene_skipping` (0x009A2230) hands over at once wherever
+  // the ride has got to, and that arm is not ported. It is not in `G` — the
+  // port's skip is the walker's `skipRequested`, which is a different global —
+  // so a skipped cutscene here simply finishes the ride. The one shipped
+  // spawn's block is not skippable.
 }
 
 /**
@@ -411,11 +452,13 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
   }
 
   // `FUN_00451EB0(obj); FUN_00451FF0(obj); obj+0x194 += 1;` at
-  // `0x00451B2A`-`0x00451B39`, between the hit-point test above and the
+  // `0x00451C1B`-`0x00451C31`, between the hit-point test above and the
   // abandon test below. The order is the engine's: an actor rescued this frame
   // never reaches the pose, which is why the freed clip plays where the shot
   // landed rather than one frame further down the route.
   RescueTargetPoseFromRouteWithVelocity(obj, f);
+  RescueTargetDraw(obj, f);
+  ActorAdvanceMotion(obj, f.dt);
 
   if (G.g_active_cam_path === CLASS21_ABANDON_PATH
       && G.g_cam_path_frame > CLASS21_ABANDON_FRAME) {
@@ -428,13 +471,41 @@ export function RescueTargetHeldState(obj: Actor, f: ClassFrame): void {
  * The rescue itself — the tail of `RescueTargetHeldState`, split out because
  * it is the half worth asserting on.
  *
- * [port-only] as a *function*: the engine has this inline from `0x00451AE0`.
+ * [port-only] as a *function*: the engine has this inline from `0x00451AE2`
+ * to the `RET` at `0x00451C1A`, and most of it is past a `MatrixStackPop` the
+ * decompiler stops at (L35) -- the clip, the slots, the counters and the
+ * three calls that make the first freed frame.
+ *
+ * ```
+ * 00451ae9  g_script_branch_var = 1; ActorPlayHitVoice(obj, 1)
+ * 00451aff  the rescue tallies; who = obj+0x34 bits, or rand() & 1
+ * 00451b56  ScoreAddForPlayer(who, 0x50); ScoreAddForPlayer(who, 400)
+ * 00451b66  Push; Identity; RotZ(+0x6C); RotY(+0x68); RotX(+0x64)
+ * 00451b98  MatrixGetAngles(&+0x64, &+0x68, &+0x6C); obj+0x1FC = 2; Pop
+ * 00451bba  obj+0x1334 = 0; ActorSetMotionBlended(model, 0x3CC, 0xF, 5)
+ * 00451bcb  g_hit_slots[obj+0x3C] = 0; obj+0x3C = -1
+ * 00451bd8  g_enemies_alive--; g_enemies_present--
+ * 00451be6  if (obj+0x120 != -1) ReleaseCameraEnemySlot(obj)
+ * 00451bfa  RescueTargetFreedDrift(obj); RescueTargetDraw(obj); obj+0x194++
+ * 00451c0d  *obj = RescueTargetFreedState
+ * ```
+ *
+ * The angles are **re-derived**: the pose the route wrote was composed
+ * `RotZ RotY RotX`, and `MatrixGetAngles` reads the same rotation back as the
+ * `RotY RotX RotZ` triple, with `obj+0x1FC` -- the model's rotation order --
+ * set to 2 to match. The order byte has no field here: nothing in `game/`
+ * composes a rotation from it, and the renderer poses this class by its yaw.
+ * The yaw it poses by, and the one the ground ring later takes, is the
+ * re-derived one. The port used to cut straight to the clip at frame 0 and
+ * stop there, so the body never left the car and never left a ring.
  */
 function RescueTargetRescued(obj: Actor, f: ClassFrame): void {
   const t = Tail(obj);
   if (!t) return;
   // **The route.** Everything below it is the payment.
   G.g_script_branch_var = 1;
+  ActorPlayHitVoice(obj, ActorVoice.Killed, f.rng,
+                    (id) => f.events?.emit("sound.play", { id }));
 
   const bits = obj.flags & (ActorFlag.HitByPlayer0 | ActorFlag.HitByPlayer1);
   const who = bits === ActorFlag.HitByPlayer0 ? 0
@@ -442,10 +513,24 @@ function RescueTargetRescued(obj: Actor, f: ClassFrame): void {
   ScoreAddForPlayer(who, CLASS21_SCORE_FREED);
   ScoreAddForPlayer(who, CLASS21_SCORE_RESCUE);
 
+  const r = MatrixGetAngles(RotZYX(obj.roll, obj.yaw, obj.pitch));
+  obj.pitch = r.x;
+  obj.yaw = r.y;
+  obj.roll = r.z;
+  t.freedFrames = 0;
+  ActorSetMotionBlended(obj, CLASS21_MOTION_FREED,
+                        CLASS21_FREED_START_CURSOR / 2, CLASS21_FREED_FADE);
+  // `MOV [EAX*4 + 0x9c88c0], EBX` with no test of `obj+0x3C` first: an actor
+  // that found the table full writes the word before it. `[port-only]` guard,
+  // since the port's table has no word before it; class 0x21 claims in its
+  // `Init`, so the index is the claim's.
+  if (obj.hitSlot !== HIT_SLOT_NONE) G.g_hit_slots[obj.hitSlot] = HIT_SLOT_NONE;
+  obj.hitSlot = HIT_SLOT_NONE;
   RescueTargetRetire(obj);
-  obj.motion = CLASS21_MOTION_FREED;
-  obj.playTicks = 0;
-  obj.rootFrame = -1;
+  if (obj.cameraSlot >= 0) ReleaseCameraEnemySlot(obj);
+  RescueTargetFreedDrift(obj);
+  RescueTargetDraw(obj, f);
+  ActorAdvanceMotion(obj, f.dt);
   obj.dead = true;
   obj.killedBy = who;
   t.state = RescueTargetState.Freed;
@@ -471,15 +556,151 @@ function RescueTargetRetire(obj: Actor): void {
 }
 
 /**
+ * `RescueTargetFreedDrift` — `FUN_00451F40`. The freed body's own motion, one
+ * frame of it:
+ *
+ * ```c
+ * n = obj+0x1334;
+ * if (10 < n && n < 0x15) {                  // frames 11..20
+ *     obj+0x13CC = LerpWeighted(obj+0x13CC, 0, 1, 20 - n);
+ *     obj+0x13D4 = LerpWeighted(obj+0x13D4, 0, 1, 20 - n);
+ * }
+ * obj+0x40 += obj+0x13CC;
+ * obj+0x44  = LerpWeighted(obj+0x44, g_camera_fixed_eye_y, 1, 3);
+ * obj+0x48 += obj+0x13D4;
+ * obj+0x6C  = LerpAngleShortWay(obj+0x6C, 0, 1, 1);
+ * obj+0x1334 += 1;
+ * ```
+ *
+ * `[proved]`. The x and z step is the car's last frame of travel, which
+ * `RescueTargetPoseFromRouteWithVelocity` (`FUN_00451EB0`) left in
+ * `obj+0x13CC`/`+0x13D4`: the body goes on at the car's speed for ten frames
+ * and bleeds it away over the next ten. The height falls a quarter of the way
+ * to `g_camera_fixed_eye_y` -- the ground plane -- each frame, and the roll
+ * halves toward level. The port read this as part of the draw and left it
+ * out, which kept the freed body riding the car's last pose and would have put
+ * its ground ring at the car's height. Every word it writes is stored as a
+ * float, so each is rounded as it is stored.
+ */
+export function RescueTargetFreedDrift(obj: Actor): void {
+  const t = Tail(obj);
+  if (!t) return;
+  const n = t.freedFrames;
+  if (n >= CLASS21_DRIFT_BLEED_FIRST && n < CLASS21_DRIFT_BLEED_END) {
+    const den = CLASS21_DRIFT_BLEED_BASE - n;
+    t.delta.x = Math.fround(LerpWeighted(t.delta.x, 0, 1, den));
+    t.delta.z = Math.fround(LerpWeighted(t.delta.z, 0, 1, den));
+  }
+  obj.pos.x = Math.fround(t.delta.x + obj.pos.x);
+  obj.pos.y = Math.fround(LerpWeighted(obj.pos.y, G.g_camera_fixed_eye_y, 1,
+                                       CLASS21_DRIFT_FALL_DEN));
+  obj.pos.z = Math.fround(t.delta.z + obj.pos.z);
+  obj.roll = LerpAngleShortWay(obj.roll, 0, 1, CLASS21_DRIFT_LEVEL_DEN);
+  t.freedFrames = n + 1;
+}
+
+const _view = vec3();
+
+/**
+ * `RescueTargetDraw` — `FUN_00451FF0`. What the class's draw decides.
+ *
+ * ```
+ * 00452004  Push; SetTop(g_camera_world_to_view[g_camera_index])
+ * 00452049  v = MatrixTransformPoint(obj+0x40); Pop
+ * 00452055  FLD v.z; FCOMP [0x004C436C]      ; 0.0
+ * 00452067  JZ past the draw unless v.z < 0  ; -z is in front
+ * 00452074  DrawSkinnedModelAndShadow(obj+0x194, obj+0x40, obj+0x20C)
+ * ```
+ *
+ * The pose and the triangles are the renderer's. What is the game's is the
+ * byte the draw leaves in the model: `SkeletonAdvancePlayCursor`
+ * (`FUN_004111A0`), inside the draw, clears `model+0x5D` and raises it when
+ * the play cursor has reached the play length, and `RescueTargetFreedState`
+ * reads it on the next line. So this records {@link RescueTargetTail.clipEnded}
+ * from the cursor at the point the draw is made -- the counter as the last
+ * `obj+0x194++` left it, which is the port's `playTicks` here because the
+ * class steps it itself -- and records nothing when the actor is behind the
+ * camera, where the engine does not draw and the byte keeps what the last
+ * draw left.
+ *
+ * `[port-only]`: a host with no camera answers `viewSpaceOfPoint` false or
+ * not at all, and then the actor is taken as drawn. The engine always has a
+ * camera; a headless run never does, and the other choice would leave every
+ * headless freed body standing for ever.
+ */
+export function RescueTargetDraw(obj: Actor, f: ClassFrame): void {
+  const t = Tail(obj);
+  if (!t) return;
+  if (f.host.viewSpaceOfPoint?.(obj.pos, _view) && !(_view.z < 0)) return;
+  t.clipEnded = MotionPlayFrame(obj) >= MotionPlayLength(obj) ? 1 : 0;
+}
+
+/**
  * `RescueTargetFreedState` — `FUN_00451D80`.
  *
- * Opens with the `g_script_flags[0]` despawn every state in this class opens
- * with, then plays the freed clip out. What is not here: the hand-off at
- * `0x00451DF0` once `obj+0x1F1` rises, its 0x78-frame countdown, and the
- * ground-ring effect — all drawing, and the effect allocates its own task.
+ * ```
+ * 00451d80  if (g_script_flags[0] == 1) { ActorDespawn(obj); return; }
+ * 00451da0  RescueTargetFreedDrift(obj); RescueTargetDraw(obj)
+ * 00451dab  if (obj+0x1F1) {
+ * 00451db9      obj+0x1338 = 0x78; SpawnGroundRingEffect(obj);
+ * 00451dcb      *obj = 0x00451DF0; return;       // no obj+0x194++
+ *           }
+ * 00451dd3  obj+0x194 += 1
+ * ```
+ *
+ * The body drifts off the car and plays the freed clip out; on the frame the
+ * draw reports the clip at its end it opens the ground ring under itself --
+ * `SpawnGroundRingEffect` (`FUN_00407DA0`), at the tracked bone's x and z
+ * and, because `RescueTargetInit` leaves `MotionFlag.TraceGround` down, at
+ * its own height -- and hands over to the sink **without** stepping the
+ * counter, so the clip holds its last frame from then on.
  */
-function RescueTargetFreedState(obj: Actor): void {
-  if ((G.g_script_flags[CLASS21_CLEAR_FLAG] ?? 0) === 1) ActorDespawn(obj);
+function RescueTargetFreedState(obj: Actor, f: ClassFrame): void {
+  const t = Tail(obj);
+  if (!t) return;
+  if ((G.g_script_flags[CLASS21_CLEAR_FLAG] ?? 0) === 1) {
+    ActorDespawn(obj);
+    return;
+  }
+  RescueTargetFreedDrift(obj);
+  RescueTargetDraw(obj, f);
+  if (t.clipEnded) {
+    t.sinkFrames = CLASS21_SINK_FRAMES;
+    SpawnGroundRingEffect(obj);
+    t.state = RescueTargetState.Sinking;
+    return;
+  }
+  ActorAdvanceMotion(obj, f.dt);
+}
+
+/**
+ * `RescueTargetSinkAndDespawnState` — `FUN_00451DF0`. `RescueTargetFreedState`'s
+ * hand-off, reached only through the `MOV dword ptr [ESI], 0x451df0` at
+ * `0x00451DCB` -- which is why Ghidra had no function there until this read
+ * made one.
+ *
+ * ```
+ * 00451df0  if (g_script_flags[0] == 1) { ActorDespawn(obj); return; }
+ * 00451e14  obj+0x44 -= 0.04
+ * 00451e20  RescueTargetDraw(obj)
+ * 00451e2e  if (--obj+0x1338 == 0) ActorDespawn(obj)
+ * ```
+ *
+ * `[proved]`. Two seconds of sinking on the freed clip's last frame -- there
+ * is no `obj+0x194++` in it -- while the ring the freed state opened spreads
+ * and fades around it.
+ */
+function RescueTargetSinkAndDespawnState(obj: Actor, f: ClassFrame): void {
+  const t = Tail(obj);
+  if (!t) return;
+  if ((G.g_script_flags[CLASS21_CLEAR_FLAG] ?? 0) === 1) {
+    ActorDespawn(obj);
+    return;
+  }
+  obj.pos.y = Math.fround(obj.pos.y - CLASS21_SINK_STEP);
+  RescueTargetDraw(obj, f);
+  t.sinkFrames -= 1;
+  if (t.sinkFrames === 0) ActorDespawn(obj);
 }
 
 /**
@@ -489,8 +710,13 @@ function RescueTargetFreedState(obj: Actor): void {
  * `0x39` frame `0x181`. That is the shot leaving the scene, and it is an
  * **equality** in the engine rather than a `>=`, so a frame skipped over it
  * leaves the actor standing. Transcribed as written.
+ *
+ * Until then it **rides on**: `RescueTargetPoseFromRouteWithVelocity`,
+ * `RescueTargetDraw` and `obj+0x194++` at `0x00451D60`..`0x00451D76`, the
+ * held state's own three lines. The port stopped the actor where the camera
+ * left it.
  */
-function RescueTargetAbandonedState(obj: Actor): void {
+function RescueTargetAbandonedState(obj: Actor, f: ClassFrame): void {
   if ((G.g_script_flags[CLASS21_CLEAR_FLAG] ?? 0) === 1) {
     ActorDespawn(obj);
     return;
@@ -498,7 +724,11 @@ function RescueTargetAbandonedState(obj: Actor): void {
   if (G.g_active_cam_path === CLASS21_ABANDON_PATH
       && G.g_cam_path_frame === 0x181) {
     ActorDespawn(obj);
+    return;
   }
+  RescueTargetPoseFromRouteWithVelocity(obj, f);
+  RescueTargetDraw(obj, f);
+  ActorAdvanceMotion(obj, f.dt);
 }
 
 /**
@@ -512,8 +742,11 @@ export function RescueTargetUpdate(obj: Actor, f: ClassFrame): void {
   switch (t.state) {
     case RescueTargetState.RideIn: RescueTargetRideInState(obj, f); break;
     case RescueTargetState.Held: RescueTargetHeldState(obj, f); break;
-    case RescueTargetState.Freed: RescueTargetFreedState(obj); break;
-    case RescueTargetState.Abandoned: RescueTargetAbandonedState(obj); break;
+    case RescueTargetState.Freed: RescueTargetFreedState(obj, f); break;
+    case RescueTargetState.Abandoned: RescueTargetAbandonedState(obj, f); break;
+    case RescueTargetState.Sinking:
+      RescueTargetSinkAndDespawnState(obj, f);
+      break;
   }
 }
 
@@ -537,6 +770,10 @@ export const RescueTargetHandler: ClassHandler = {
   // The freed and abandoned states play out after `dead` is set, the same
   // reason class 0x20 and class 0x31 have this.
   updatesWhenDead: true,
+  // Every routine steps `obj+0x194` itself, after its draw -- and two do not
+  // step it at all: `RescueTargetFreedState` on the frame its clip ends and
+  // the sink after it, which is what holds the body on the clip's last frame.
+  advancesOwnMotion: true,
   // The class reads `obj+0x34` bit 3 itself and charges one hit point a part;
   // `ResolveHit` would look up a damage row it has no entry in.
   ownsShotResult: true,

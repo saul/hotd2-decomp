@@ -88,10 +88,12 @@
  * two share `game/carrier.ts`. The carrier is written by class 0x13's
  * `CarrierPropSelectRoutine`, which is ported now: stage 3's boat.
  *
- * [open] The routine's other arm, at `0x0048B160`, hands the civilian back to
- * the plain `CivilianUpdate` once the carrier raises `obj+0x34` bit
+ * [diverges] The routine's other arm, at `0x0048B160`, hands the civilian
+ * back to the plain `CivilianUpdate` once the carrier raises `obj+0x34` bit
  * `0x4000000` — the bit `CarrierPropRoutine1` sets from the on-screen test
- * this port does not have. Stage 3's block-0 boat moors and never reaches it.
+ * this port does not have (class 0x13 declares that one). It is not ported:
+ * with nothing to raise the bit it could not be taken, and stage 3's block-0
+ * boat moors and never reaches it.
  *
  * [open] `SpawnCivilianBloodPool` (`FUN_0048E080`) builds a ground decal at the
  * shot point, scaled by how far below the camera plane it is. It is a whole
@@ -157,6 +159,11 @@ export const CivilianHandler: ClassHandler = {
   // `CivilianCheckShot`'s first branch: no on-shot script, no way to be hurt.
   invulnerable: (obj: Actor) => (obj.civ?.onShotScript ?? -1) < 0,
   leave: CivilianLeaveField,
+  // `CivilianUpdate`'s own switch writes `obj+0x12C` -- bone 1 as drawn, for
+  // a civilian no script has told otherwise -- and `RegisterForShotTest`
+  // publishes that, so the actor push must not rebuild class 0x30's
+  // feet-plus-radius over it. See `CivilianWriteSphereCentre`.
+  ownsSphereCentre: true,
 };
 
 /**

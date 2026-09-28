@@ -51,6 +51,7 @@ import {
 } from "./death_effects";
 import { TurnActorTowardCameraEye } from "../actor_turn";
 import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
+import { ZombieWadeSplash } from "./splash";
 
 /**
  * `PUSH 0x1A0` at `0x004589F7` and `0x0045EAF0` — the BAMS-per-frame rate the
@@ -80,13 +81,6 @@ const SURFACE_MOTION_WADER = 0xb8;
 const SURFACE_MOTION_OTHER = 0x3d8;
 /** The character types that take the first — `0xF <= type <= 0x11`. */
 const SURFACE_WADER_TYPES = new Set([0xf, 0x10, 0x11]);
-/**
- * The two play-clock cursors clip `0xB8` throws splash effect `0x62` on. The
- * second is preceded by two ripples at 1.0 and 0.5 (`FUN_004567C0`), which the
- * port has no water surface to put anywhere.
- */
-const SURFACE_SPLASH_FRAMES = [0x15, 0x1b];
-const SPLASH_EFFECT = 0x62;
 
 /**
  * `ZombieStateArcScriptedEntrance`'s crouch, by character type: clip `0x10C`
@@ -179,8 +173,31 @@ function atLastFrame(obj: ZombieActor): boolean {
  *
  * The wait is `g_cam_path_frame >= cue`, a **`>=`** where states 18 and 19 use
  * an equality — so this one cannot be missed by a path that skips the frame.
+ * (Unsigned, `JC` at `0x00456FCD`; neither side is ever negative.)
+ *
+ * **The three subs fall into one another**: sub 0 sets the clip and runs on
+ * into sub 1's test in the same frame (`INC word ptr [ESI+0x1312]` at
+ * `0x00456FBB` and no `RET`), and sub 1 into sub 2's. The port returned after
+ * sub 0, a frame late on every one of the sixteen.
+ *
+ * Clip `0xB8` is the wading one, and its play frames 0x15 and 0x1B throw a
+ * splash 1.5 units ahead, the second with the two water rings -- see
+ * `ZombieWadeSplash`. This used to be a feed note.
+ *
+ * Three writes the port made and the routine does not are gone: `obj.frozen`
+ * is class 0x24's `obj+0x1324` (L3) and never an entrance's, and the clock is
+ * already held by {@link ActorFlag.PoseFrozen}; and nothing in the routine
+ * touches `obj+0x136C`, so {@link ZombieFlag2.CollideWorld} stays as the
+ * spawn left it. `[proved]` from the listing: the only stores to the actor
+ * are `obj+0x34` (`OR DH, 0x41` / `AND CH, 0xBE`), the sub, the clip, and the
+ * exit's state, sub and `obj+0x1370`.
+ *
+ * The exit is `tail+0x03 == 15 ? WalkDistance : AttackRun` -- a literal 1 at
+ * `0x0045713C`, not the tail's byte. Every shipped state-13 spawn names 1 or
+ * 15, so the two readings agree on the data.
  */
-export function ZombieStateSurfaceOnCameraCue(obj: ZombieActor,
+export function ZombieStateSurfaceOnCameraCue(obj: ZombieActor, rng: Rng,
+                                              host?: GameHost,
                                               events?: Events): void {
   const t = obj.entry;
 
@@ -188,35 +205,29 @@ export function ZombieStateSurfaceOnCameraCue(obj: ZombieActor,
     // `obj+0x34 |= 0x4100` — freeze the pose and take the actor out of the
     // shot test while it is still under the water.
     obj.flags |= ActorFlag.PoseFrozen | ActorFlag.ShotImmune;
-    obj.frozen = 1;
-    obj.flags2 &= ~ZombieFlag2.CollideWorld;
     const motion = SURFACE_WADER_TYPES.has(obj.charType)
       ? SURFACE_MOTION_WADER : SURFACE_MOTION_OTHER;
     ActorSetMotion(obj, motion);
     obj.sub = 1;
-    return;
   }
 
   if (obj.sub === 1) {
     if (G.g_cam_path_frame < (t?.cue_frame ?? 0)) return;
-    obj.sub = 2;
     obj.flags &= ~(ActorFlag.PoseFrozen | ActorFlag.ShotImmune);
-    obj.frozen = 0;
-    obj.flags2 |= ZombieFlag2.CollideWorld;
+    obj.sub = 2;
   }
 
+  if (obj.sub !== 2) return;
   if (obj.motion === SURFACE_MOTION_WADER) {
-    const f = MotionPlayFrame(obj);
-    for (const at of SURFACE_SPLASH_FRAMES) {
-      if (f === at) {
-        events?.emit("feed.note", {
-          name: "zombie", cat: "combat",
-          note: `surfaces — splash ${SPLASH_EFFECT} at frame ${at}`,
-        });
-      }
-    }
+    ZombieWadeSplash(obj, MotionPlayFrame(obj), rng, host, events);
   }
-  if (atLastFrame(obj)) ZombieEntranceBranch(obj, t?.walk_distance);
+  if (!atLastFrame(obj)) return;
+  if (obj.attackState === ZombieState.WalkDistance) {
+    ZombieEntranceBranch(obj, t?.walk_distance);
+    return;
+  }
+  obj.state = ZombieState.AttackRun;
+  obj.sub = 0;
 }
 
 /**
@@ -395,9 +406,9 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
  * the global with no null test at all (`ZombieStateDelayedStrikeInPlace` does
  * the same at `0x0045EAFE`) — so it can only ever be reached in the port,
  * where a stage may reach one of these spawns without the class-0x33 object
- * that belongs to it. `Class26Subtype2Update` (`FUN_0048EAD0`) is the game's
- * **other** writer of `g_carrier_object`, stage 3's boat, and that class is
- * still unported.
+ * that belongs to it. `Class26Subtype2Update` (`FUN_0048EAD0`), stage 3's
+ * boat, is the **other** ported writer of `g_carrier_object`
+ * (`game/class26/`); the global's own note in `globals.ts` lists them all.
  */
 export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
                                        rng: Rng, dt: number): void {
@@ -451,11 +462,12 @@ export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
  * in the descriptor: clip `0x10C` held `0x21` frames for type 0 and `0x39F`
  * held `0x2C` for every other.
  *
- * [open] The engine's sub 1 has a second arm, taken when the descriptor's own
- * byte `+0x02` is `0x16`, that waits on a camera frame instead of counting the
- * delay down. `+0x02` is the initial-state byte, so for a spawn that starts
+ * [diverges] The engine's sub 1 has a second arm, taken when the descriptor's
+ * own byte `+0x02` is `0x16`, that waits on a camera frame instead of counting
+ * the delay down. `+0x02` is the initial-state byte, so for a spawn that starts
  * here it reads 30 and for one routed from state 29 it reads 29 — never 0x16.
- * No shipped record takes it; the countdown arm is the only live one.
+ * No shipped record takes it; the countdown arm is the only live one, and the
+ * only one ported.
  *
  * **The landing** is the one frame the arc step has reported
  * {@link ArcPhase.Settled} and {@link ZombieFlag2.OneShotFired} is still down

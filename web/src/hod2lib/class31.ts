@@ -23,7 +23,8 @@ import type { ExeTables } from "./exetab";
  *     0    zstin       leaps at walls and the ceiling, then pounces
  *     1    zsass       throws
  *     2    zskamere    [open]
- *     3    zslman      [open]
+ *     3    zslman      throws both blades and grows them back
+ *                        (ThrowerStateRestoreBothHands, character 0x18)
  */
 export const CLASS31_SETS = 4;
 
@@ -34,7 +35,8 @@ export const CLASS31_SETS = 4;
  *           and index 1 is also the pause ThrowerStateStrikeOnTheSpot plays
  *     2, 3  the walk/idle, picked by obj+0x34 bit 27
  *     4     the landing clip ThrowerStateLeapAside plays
- *     5     [open] -- no reader found
+ *     5     the airborne clip ThrowerStateFallAndLand plays
+ *           (game/class31/states.ts, ThrowerMotion.Airborne)
  */
 export const CLASS31_MOTION_SETS = 0x005929f0;
 
@@ -136,6 +138,12 @@ export const CLASS31_LITERAL_MOTIONS = new Set([
   0x005,
   // `ThrowerStateFallAndLand` (state 2)'s get-up, for every type but 0x17.
   0x11b,
+  // `ThrowerStateCorpseSink` and `ThrowerStateCorpseBlink` (states 4 and 5):
+  // `CMP dword ptr [ESI+0x1b4], 0x3a6` at `0x0044A9E6` and `0x0044AB89`, the
+  // clip that lifts the corpse's ring trace by 5.5. Compared against rather
+  // than played, and already reached through the motion sets of behaviour
+  // sets 0 and 3 -- but named as a literal all the same.
+  0x3a6,
 ]);
 
 /**

@@ -352,7 +352,8 @@ export function PlaceGenericPropType43(p: BreakableProp,
   // `if (g_GameMode == 1 && byte [0x009C88AA] != 0) obj+0x194 = 1` at
   // `0x00462371`. [diverges] `G` has no such byte and nothing in the port
   // writes one, so the override never fires -- as it would not in a game
-  // with the byte clear. What sets it is `[open]`.
+  // with the byte clear. What sets it is the question `ReleaseHiddenItem`
+  // (`class41/items.ts`) asks.
 }
 
 /**

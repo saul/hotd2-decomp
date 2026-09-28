@@ -99,8 +99,9 @@
  *
  * The break (`0x0046A7A4`): `BreakablePropAwardHit(f, 1)`; `PlaySoundId(rand()
  * & 1 ? 0x1616A9 : 0x1716A9)`; the two pieces (ten `rand()`s); then either the
- * `g_GameMode == 1 && byte [0x009C88AA]` extra life (`[open]` — see
- * `ReleaseHiddenItem`) or the item-set countdown and its release, with a story
+ * `g_GameMode == 1 && byte [0x009C88AA]` extra life (what sets the byte is
+ * the question `ReleaseHiddenItem` asks) or the item-set countdown and its
+ * release, with a story
  * item seated half a unit above the floor and a set's item on it; then
  * `ActorDespawn`. Every `PlaySoundId` and `MatrixStackPop` in it is marked
  * no-return, so the pseudocode stops at the first of each (`L35`).

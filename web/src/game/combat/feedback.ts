@@ -192,11 +192,16 @@ export function ActorShotFeedback(obj: Actor, bone: number, point: Vec3,
       severity = T.chars?.combat?.blood_scale["3"] ?? 1.0;
       break;
     case HitResultCode.NoEffect: {
-      // The engine's arm here first refuses a bone whose `+0x280` carries bit
-      // 0x10 -- one tested as a mesh by `ShotTestBoneMesh` (`FUN_004048A0`)
-      // rather than as a sphere. No bone in this port is ever mesh-tested,
-      // because the port has no per-bone collision blobs, so the guard can
-      // never fire and there is nothing to read it from. [open]
+      // The engine's arm here first refuses a bone whose record carries bit
+      // 0x10 at `+0x74` -- `obj + 0x280 + bone*0x90`, tested in both of the
+      // arm's branches -- which is a bone tested as a mesh by
+      // `ShotTestBoneMesh` (`FUN_004048A0`) rather than as a sphere; the
+      // refusal skips the sprite and not the ricochet sound below. `[proved]`
+      // The port keeps that bit as the one fact it varies on,
+      // `Actor.boneColi` (see `BoneRecordFlags` in `combat/shot_test.ts`).
+      // This said the port had no per-bone collision blobs and left the guard
+      // out; it has had them since the stage-4 boss's shot test was ported.
+      if (obj.boneColi[String(bone)] !== undefined) break;
       const kind = obj.charType === CHAR_TYPE_SPRITE_ALT
         ? SpriteEffectKind.NoEffectType3 : SpriteEffectKind.Other;
       SpawnSpriteEffect(point, 0, 0, kind, 1, 0, host, events);

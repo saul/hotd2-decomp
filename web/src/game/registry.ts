@@ -319,7 +319,8 @@ export interface ClassHandler {
    * one — which is right for class 0x30 and overwrites anything another class
    * wrote. Set, the sphere is left as the class left it. Class 0x11 sets it:
    * `FrogPushOutOfActorCollision` (`FUN_0043A500`) publishes bone 1's drawn
-   * point, not its feet.
+   * point, not its feet. Class 0x10 sets it: `CivilianUpdate`
+   * (`FUN_0048A920`)'s switch publishes the position or a drawn bone.
    */
   ownsSphereCentre?: boolean;
 }

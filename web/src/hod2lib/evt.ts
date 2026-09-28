@@ -562,7 +562,7 @@ export const SPAWN_STRIDE_09 = 0x28;
  * For class 0x31 the bits are the **starting surface**: 0x40 wall A, 0x80
  * wall B, 0x100 ceiling, and bit 0 the alternate part-draw entry point.
  * Class 0x30 seeds its own flag word from it the same way; the names of its
- * bits are [open] here and belong with that class.
+ * bits belong with that class, and are not given here.
  */
 export const SPAWN_DESC_FLAGS = 0x20;
 

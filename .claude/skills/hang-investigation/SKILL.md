@@ -50,9 +50,9 @@ cannot tell a fix from a coin landing your way.
    If you cannot say which line of which routine is wrong, you are not ready to
    change anything. `[open]` is a finished piece of work; a plausible patch is
    not.
-4. **A divergence is the user's decision.** If the faithful fix is a refactor
-   and the quick fix is a `[diverges]`, state what the engine does, state what
-   the faithful fix costs, and **ask**. The tell that you are about to get this
+4. **The faithful fix, never the quick one.** If the faithful fix is a
+   refactor, do the refactor — that needs no permission; a new `[diverges]`
+   does (`/gameplay-port`, rule 2). The tell that you are about to get this
    wrong is having just written *this matches the engine in practice*. It does
    not; it matches what you have thought of.
 5. **Revert the fix and watch the check fail.** A test you have not seen fail

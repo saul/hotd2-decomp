@@ -47,10 +47,8 @@
  * `AssetDrawSlot` calls under one matrix stack, a body, a thirty-frame wing
  * beat, a head on a sixteen-frame ping-pong and four limb chains. The five
  * limb angles the states write are carried here so the pose is in the
- * snapshot, and the renderer composes them. `[open]` what the limbs
- * anatomically are: the mirrored pair is `[likely]` the wings and the chain
- * under the body `[likely]` the talons, and the slot table names files, not
- * parts.
+ * snapshot, and the renderer composes them. What the limbs anatomically are
+ * is the open question `render/owl.ts` asks, beside the chains it draws.
  *
  * ## The corpse lands where each group flies
  *

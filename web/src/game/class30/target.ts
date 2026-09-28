@@ -65,6 +65,15 @@ import { ActorSetMotionBlended } from "./motion_cue";
 import { MotionOf, MotionPlayFrame, MotionPlayLength, SecondsToTicks } from "../tables";
 import { ZombieState } from "./states";
 import { vec3 } from "../vec";
+import { PropStripKind, SpawnPropStripEffect } from "../effects/prop_strip";
+import { WADE_MOTION, ZombieWadeSplash } from "./splash";
+
+/**
+ * `ZombieStateTargetMotionScript`'s other splash: clip `0xB2` at play frame
+ * 0x16 (`SUB EAX, 0xB2` at `0x0045AC08`, `CMP ECX, 0x16` at `0x0045AD16`).
+ */
+const SCRIPT_SPLASH_MOTION = 0xb2;
+const SCRIPT_SPLASH_FRAME = 0x16;
 
 /** `ZombieStateWalkToTarget`'s turn rate, and every other walk's — `0x1A0`. */
 const TARGET_TURN_RATE = 0x1a0;
@@ -412,7 +421,8 @@ export function ZombieStateWalkToTarget(obj: ZombieActor): void {
  * players a hundred points for the rescue they did not make.
  */
 export function ZombieStateTargetMotionScript(obj: ZombieActor, rng: Rng,
-                                              events?: Events): void {
+                                              events?: Events,
+                                              host?: GameHost): void {
   const t = targetOf(obj);
   if (obj.sub === 0) {
     // `psVar6 = ZombieScriptForState(...)` — the only sub that picks a blob.
@@ -445,10 +455,28 @@ export function ZombieStateTargetMotionScript(obj: ZombieActor, rng: Rng,
         } else if (s?.entries[obj.zom.scriptPc]?.motion === -1) {
           loseTarget(obj);
         }
+      } else if (obj.motion === SCRIPT_SPLASH_MOTION) {
+        // The not-at-the-end arm is a switch on the clip, `0x0045AC08`:
+        // clip `0xB2` at play frame 0x16 throws `SpawnPropStripEffect`
+        // (`FUN_0043FCA0`) kind 0 at the actor, faced by the camera block's
+        // yaw -- `{x, y, z, 0, g_camera_block_yaw_bams, 0}` and scale 1.0 at
+        // `0x0045AD1F`..`0x0045AD67`.
+        if (frameOf(obj) === SCRIPT_SPLASH_FRAME) {
+          SpawnPropStripEffect({
+            pos: vec3(obj.pos.x, obj.pos.y, obj.pos.z),
+            pitch: 0, yaw: G.g_camera_block_yaw_bams, roll: 0,
+          }, PropStripKind.Kind0, 1.0, events);
+        }
+      } else if (obj.motion === WADE_MOTION) {
+        // ...and clip `0xB8`, the wading one, throws its splash and water
+        // rings at play frames 0x15 and 0x1B -- `0x0045AC1C`..`0x0045AD0E`,
+        // the same block `ZombieStateSurfaceOnCameraCue` has, with its two
+        // `SpawnWaterRing` (`FUN_004567C0`) calls at `0x0045AC79` and
+        // `0x0045AC88`. See `ZombieWadeSplash`.
+        ZombieWadeSplash(obj, frameOf(obj), rng, host, events);
       }
     }
   }
-  void rng;
   reblend(obj);
 }
 
@@ -786,7 +814,7 @@ function DragTargetCopyPose(obj: ZombieActor, t: Actor | null): void {
  *   blends, which differences bone 1's drawn world position against the pose
  *   the new clip would put it in. `game/` has no skeleton — that is the
  *   `GameHost` seam — so the actor lands a bone-offset away from where the
- *   engine puts it. `[open]`
+ *   engine puts it. `[diverges]`
  * * sub 0's `obj+0x1368 |= 0x10` (`0x0045C0ED`) is a kill-move death-clip
  *   selector, and the port models only bit 0 of that word. See
  *   `ZombieSubState.hasCooldown`.

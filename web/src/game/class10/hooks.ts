@@ -9,7 +9,7 @@
  * **pose hook**, installed once by `CivilianInit` (`FUN_0048A3E0`) and one of
  * only two in the whole program.
  */
-import { type Actor, ActorUpdateBoundingSphere } from "../actor";
+import type { Actor } from "../actor";
 import { ColiTestSphereAgainstFullSet, QueryGroundHeightAt } from "../coli";
 import { G } from "../globals";
 import { CivilianHook, CivilianWait } from "./ops";
@@ -84,6 +84,23 @@ export function CivilianRunFrameHook(obj: Actor, frames: number): void {
  * against the full collision set and moves the actor out along the hit normal
  * by the **whole** penetration.
  *
+ * **The sphere it traces is `obj+0x12C` as it stands**: `LEA EDX, [ESI+0x12C];
+ * PUSH ECX (obj+0x128); PUSH EDX; CALL ColiTestSphereAgainstFullSet` at
+ * `0x0048D0F2`..`0x0048D100`. `[proved]` Nothing here derives a centre. The
+ * port used to rebuild one first with `ActorUpdateBoundingSphere`
+ * (`FUN_00454AC0`) — class 0x30's feet-plus-radius-plus-one, which no
+ * civilian has — so the push measured a point the civilian never publishes.
+ *
+ * And as it stands **at the draw**, which is before this frame's switch
+ * writes it: the engine calls the hook through `model+0x115C` from
+ * `SkeletonApplyRootMotion` (`FUN_00410C50`, `CALL [ECX+0x115C]` at
+ * `0x00410E93`, which both of its arms reach — the root-motion arm past the
+ * `MatrixStackPop` Ghidra marks no-return, L35), inside
+ * `DrawSkinnedModelAndShadow` (`FUN_00411090`) at the top of
+ * `CivilianUpdate`. So the sphere is the one the switch wrote on the
+ * previous frame, and a radius op 0x16 set this frame is ramped on the next.
+ * `CivilianUpdate` calls this where the draw is for that reason.
+ *
  * The engine runs it from the pose walk; the port runs it from the update,
  * for the same reason `ActorAdvanceMotion` lives in `game/` — a hook that only
  * fires while something is drawing is a hook that a headless run and a
@@ -103,7 +120,6 @@ export function PoseHookGrowAndPushOutOfWorld(obj: Actor): void {
     }
   }
   if (!(sub.wait & CivilianWait.PushOutOfWorld)) return;
-  ActorUpdateBoundingSphere(obj);
   if (!ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,
                                     obj.sphereCentre.z, obj.bodyRadius)) {
     return;

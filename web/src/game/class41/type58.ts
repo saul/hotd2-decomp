@@ -119,10 +119,6 @@ export function PlaceGenericPropType58(p: BreakableProp,
  * `+0x192` is {@link BreakableProp.routinePhase}, `+0x2A0`
  * {@link BreakableProp.storyItem} (the story item's kind, then the flight's
  * frame count), `+0x1C4` {@link BreakableProp.vy}.
- *
- * [diverges] `g_original_item_pickup_blocked = 0` (`0x0046F60B`) is not
- * written: `G` has no such byte, and its one reader, `OriginalItemPropUpdate`'s
- * pickup arm, is not ported either, so nothing in the port could see it.
  */
 export function PropUpdateType58(p: BreakableProp, rng: Rng,
                                  events?: Events): void {
@@ -146,6 +142,10 @@ export function PropUpdateType58(p: BreakableProp, rng: Rng,
       p.storyItem = TYPE58_STORY_ITEM;
       p.y = TYPE58_STORY_ITEM_Y;
       SpawnStoryModeItem(p, events);
+      // [diverges] `g_original_item_pickup_blocked = 0` (`0x0046F60B`) is
+      // not written: `G` has no such byte, and its one reader,
+      // `OriginalItemPropUpdate`'s pickup arm, is not ported either, so
+      // nothing in the port could see it.
       p.y = y;
     }
     p.routinePhase = Type58Phase.Fly;

@@ -112,10 +112,11 @@ export function ZombiePushOutOfWorldAndActors(obj: ZombieActor, frames: number):
     }
   }
 
-  // [diverges] `worldPushDepth` is the port's own, and this is the only place
-  // that writes it: it must be cleared whether or not the actor takes part in
-  // the world push, or an actor that stops colliding stays flagged as wedged
-  // for ever. See `Actor.worldPushDepth`.
+  // `worldPushDepth` is the port's own, a port-only field whose divergence is
+  // declared on `Actor.worldPushDepth`; this and class 0x31's
+  // `ThrowerPushOutOfWorld` are its only writers. It must be cleared whether
+  // or not the actor takes part in the world push, or an actor that stops
+  // colliding stays flagged as wedged for ever.
   obj.worldPushDepth = 0;
   if (obj.flags2 & ZombieFlag2.CollideWorld) {
     if (ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,

@@ -18,8 +18,10 @@ import type { Events } from "../../core/events";
 import { CountEnemyThrowerIn } from "../combat/counts";
 import type { Rng } from "../../core/rng";
 import type { ThrowHandJson } from "../../bundle";
-import { ActorFlag, DamageZone, ThrowerFlag, ThrowerStance, type ThrowerActor }
-  from "../actor";
+import {
+  ActorFlag, DamageZone, MotionFlag, ThrowerFlag, ThrowerStance,
+  type ThrowerActor,
+} from "../actor";
 import {
   DeadSweep, registerClass, type ActorDebug, type ClassFrame,
   type ClassHandler,
@@ -59,8 +61,8 @@ import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed }
   from "../class30/head_aim";
 import { ThrowerOnShot } from "./on_shot";
 import {
-  ThrowerStateCorpse, ThrowerStateDeathClip, ThrowerStateFallAndLand,
-  ThrowerStateFallToSurface, ThrowerLeave,
+  ThrowerStateCorpseBlink, ThrowerStateCorpseSink, ThrowerStateDeathClip,
+  ThrowerStateFallAndLand, ThrowerStateFallToSurface, ThrowerLeave,
 } from "./death";
 import {
   ThrowerStateGetUp, ThrowerStateHitReaction, ThrowerStateKnockedTumbling,
@@ -315,10 +317,17 @@ function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
  * and so it **cannot fail**. The port has no skeleton in `game/`, so it asks
  * the host, and a host that cannot answer gets the actor's own position lifted
  * by a chest height rather than no weapon at all: a routine with no path that
- * declines to make the weapon must not grow one. Three writes are not made,
- * for the reasons `ZombieThrowHandWeapon` (`FUN_0045A240`) gives for its own
- * identical three: the hand's hit-sphere radius, the hit slot, and the camera
- * candidate.
+ * declines to make the weapon must not grow one. And two things the weapon
+ * does in the engine are not done, for the reasons `ZombieThrowHandWeapon`
+ * (`FUN_0045A240`) gives for its own identical two: the hit slot and the
+ * camera candidate.
+ *
+ * The hand's hit-sphere radius **is** zeroed -- `MOV [reg + EDI + 0x284],
+ * EBX` with the index `obj+0x1358 * 0x90`, in all four arms (`0x0045054E`,
+ * `0x00450580`, `0x004505BF`, `0x004505E8`) -- onto {@link Actor.boneRadius},
+ * and `ThrowerRestoreHand` gives it back from the table as the two re-arm
+ * states do. It was left out, declared a divergence, for as long as the actor
+ * had no per-bone radius to zero.
  */
 export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
                                   host: GameHost,
@@ -332,6 +341,9 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   // made the snapshot depend on whether a hierarchy was in the scene.
   obj.boneSlot[String(hand.bone)] = hand.bare;
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
+  // The bone record's `+0x78`, the hit-sphere radius: the hand it has just
+  // emptied cannot be shot.
+  obj.boneRadius[String(hand.bone)] = 0;
   w.slot = hand.projectile;
   // `obj+0x1364`, the constant the draw adds to the **X** term. `cfg.spin`
   // is that constant: the exporter reads it out of this routine and the name
@@ -548,9 +560,9 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.Death:
       return ThrowerStateDeathClip(obj);
     case ThrowerState.Corpse:
-      return ThrowerStateCorpse(obj, dt, rng, false);
+      return ThrowerStateCorpseSink(obj, dt, rng);
     case ThrowerState.CorpseBlink:
-      return ThrowerStateCorpse(obj, dt, rng, true);
+      return ThrowerStateCorpseBlink(obj, dt, rng);
     // Slot 6 holds `ThrowerLeave`, which nothing ever enters as a state. It is
     // here so that an actor forced into it by a descriptor still leaves.
     case ThrowerState.Leave:
@@ -644,6 +656,13 @@ const BODY_RADIUS_OTHER = 4.0;
  * above the street stood in mid-air instead of dropping into it.
  */
 export function EnemyThrowerInit(obj: ThrowerActor): void {
+  // `ActorBuildSkinnedModel` at `0x00449686`, then `MOV EDX, [ESI+0x1F8]` /
+  // `OR EDX, 0x4` (`83ca04`) at `0x00449694` / `MOV [ESI+0x1F8], EDX`: the
+  // same bit `EnemyZombieInit` raises at `0x00452E21`, so a thrower's corpse
+  // ring sits on the traced floor and not at the body's own y --
+  // `SpawnGroundRingEffect` (`FUN_00407DA0`) tests it at `0x00407DCD`.
+  // `[proved]`
+  obj.motionFlags |= MotionFlag.TraceGround;
   obj.sub = ThrowSub.Draw;
   obj.attack = 0;
   obj.attackPermit = -1;
@@ -832,7 +851,8 @@ export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
  * The counts **only on a despawn**, and that is not an omission. Class 0x31's
  * death is four states and it runs the two retires where the exe does —
  * `ThrowerReleaseSlotOnDeath` (`FUN_0044D050`) drops the alive count as the
- * fall opens, `ThrowerStateCorpse` the present count when the body is done —
+ * fall opens, `ThrowerEnterCorpseState` (`FUN_0044D0A0`) the present count
+ * as the body becomes a corpse —
  * so a thrower that has merely died is *present but not alive*, exactly as the
  * engine leaves it, and a sweep that retired both here would collapse the one
  * window class 0x30 has already lost.

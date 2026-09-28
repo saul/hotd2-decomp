@@ -1248,7 +1248,7 @@ records every frame.
 | Ring | Address | Space | Frames | Slots |
 |---|---|---|---|---|
 | muzzle flash | `g_shot_flash_ring` 0x009A2960 | camera | 9 | `g_muzzle_flash_slots[player] + frame` at scale 0.1, then `g_muzzle_smoke_slots[player] + frame` at **0.05** — see below |
-| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad |
+| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad; Original Mode weapon kind 5: `0x109D` at the record plus `op_` `0x194` at `frame % 24`, no spin — see below |
 | Original Mode | `g_shot_weapon_ring` 0x009A2700 | camera | 24 | `0xA6F + frame` at scale 0.05, weapon kind 4 only |
 
 `g_muzzle_flash_slots` (0x00579F78) is `{0x175, 0x17F}` and
@@ -1273,6 +1273,18 @@ and flies `normalize(point - eye) * 20.0` a frame, spinning `0x1000` BAMS.
 (0x009C9010) as "the candidate list is not empty", and that is its only reader.
 So a round that hit is a stub of streak leaving the barrel and a round that
 missed flies for a full second.
+
+**Both tracer arms are camera-facing** `[proved]`. Each one
+`MatrixTranslate`s onto the record and then calls `MatrixClearRotation`
+(`FUN_004A9F70`), which writes the top 3x3 to the identity -- the view's
+rotation with it -- so the roll, and the kind-5 arm's `RotZ RotY RotX`, turn in
+the camera's axes. The kind-5 arm (`CMP EAX, 0x5` at `0x00416CBE`) also
+`MatrixTranslate`s by `CamEvalObjectPath6(0x194, frame % 0x18)` first -- two
+translations, summed (L5) -- and draws `0x109D` (`etc_1.bin` entry 41), the
+only draw of that slot in the program. `op_` `0x194` is `op_org` 0, so only an
+Original Mode stage has the path. The exporter once placed that arm as the rig
+`obj_416b00` at the path's own pose, which stood in front of Goldman's desk in
+stage 2's opening; it is not a placeable rig.
 
 Two smaller findings from the same routine:
 
@@ -2622,39 +2634,127 @@ level design, not unreachable data.
 ### The pounce — `ThrowerStateLeapDown`, `FUN_0044B670`
 
 States 9, 12 and 13 share it, and it is the attack. What it is *not* is a swing
-at a range:
+at a range. `[proved]` from the listing: four arms off the jump table at
+`0x0044B868`, each of the first three ending `INC obj+0x1312` and running on
+into the next, and `JA` returning for a sub past 3.
 
 ```
-dest  = ThrowerPickLandingPoint()       /* a place on the SCREEN */
-yaw   = g_camera_yaw_bams
-ActorArcBeginToWaypoint(dest, <null script>, 1)
-obj+0x1364 = the stance, latched before the surface bits are cleared
-...every frame: ThrowerStrikeConnect()
+sub 0  p = ThrowerPickLandingPoint()          /* a place on the SCREEN */
+       obj+0x68   = g_camera_yaw_bams
+       ActorArcBeginToWaypoint(p, &DAT_007DCC70, 1)  /* draws the attack */
+       obj+0x1364 = bit6 + 2*(bit7 + 2*bit17) + 3*bit8 of obj+0x136C
+       obj+0x34  |= 0x10000000                /* 0x0044B6F0 */
+       if (obj+0x32C == 0x2002) ActorPlayHitVoice(obj, 3)
+       type != 0x18: obj+0x136C &= 0xfffff61f /* 0x800, surface, off-ground */
+       type == 0x18: obj+0x136C &= ~0x800; obj+0x13D8.. = obj+0x40..
+sub 1  if (!(obj+0x136C & 0x800) && type != 0x18) ThrowerStrikeConnect()
+       if (ActorArcStep(obj, 1) == 1) return
+       obj+0x136C &= 0xffe7ffff               /* both collision bits down */
+sub 2  if (!(obj+0x136C & 0x800)) ThrowerStrikeConnect()
+       unless g_GameMode == 2 && g_script_flags[0xF2]: obj+0x40.. = p again
+       if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+sub 3  obj+0x136C &= ~0x800; obj+0x34 &= ~0x10000000; state 10
 ```
 
-Three things worth naming.
+Things worth naming.
 
-* **The attack is chosen by the null script.** `ActorArcBeginToWaypoint`
-  (`FUN_0044D780`) takes a pointer to an arc motion script, and passing the
-  `&DAT_007DCC70` sentinel — sixty-four zero bytes — means "roll one instead":
-  it draws an index out of `g_class31_attack_picks` and installs *that
-  attack's* script. So the swing and the flight are one clip.
-* **The stance is latched, then cleared.** `obj+0x1364` is written from the
-  surface bits and the bits are cleared immediately after, so a thrower that
-  pounces off a wall swings the wall's attack and arrives on the ground.
-* **`ThrowerStrikeConnect` (`FUN_0044CE60`) tests no range at all.** It fires
-  when the clip reaches the attack entry's `hit_frame`, and the only other
-  condition is the cancel mask. The aiming *is* the arc: the landing point is a
-  pixel offset unprojected at a fixed depth, so the actor is where the swing
-  will reach on the frame it lands. Same design as the melee strike and the
-  thrown weapon — this engine times its hits, it does not test them.
+* **The attack is chosen by the sentinel.** `ActorArcBeginToWaypoint`
+  (`FUN_0044D780`) takes a pointer to an arc motion script, and
+  `&DAT_007DCC70` (`g_arc_script_draw_attack`, zero, referenced by that one
+  `PUSH` and that one `CMP`) sends it to its own draw instead:
+  `g_class31_attack_picks[(rand() >> 4) % 10 + (obj+0x1318 & 7) * 10]`, then
+  `ThrowerLoadAttackArcScript`. So the swing and the flight are one clip.
+  Character type 0x18 takes the draw **and then** has 3 written over it.
+* **The stance is latched, then cleared** -- after the arc begins, before the
+  surface bits go -- so a thrower that pounces off a wall swings the wall's
+  attack and arrives on the ground. `zslman` does not come off its surface at
+  all: it keeps every bit but `0x800`, and records where it left from.
+* **The bit is `0x10000000`**, not `0x20000000`. `ThrowerEmitGroundDust`'s
+  landing column answers `0x20000000` with `0x10000000` down, so the pounce's
+  landing raises none and the leap back's does.
+* **Down, it collides with nothing**, and the re-snap to the landing point
+  holds it on a camera that may still be moving until the clip is two frames
+  from its end. The one gate on the re-snap is Training Mode with
+  `g_script_flags[0xF2]` up; `FUN_00497760` raises that byte (`0x004979B6`),
+  and what it stands for there is `[open]`.
 
-Then state 10, `ThrowerStateLeapAside`: a point five units to one side of the
-camera and fifty in front **in the camera's yaw-only frame**, vertical-traced
-between ±1000 to find whatever floor is there — falling back to
-`g_camera_fixed_eye_y` when the trace misses — and arced to. It stands there
-for ninety frames or until it is fifty units clear. That wait **is** the
-cooldown; there is no timer.
+### `ThrowerStrikeConnect`, `FUN_0044CE60`
+
+**It tests no range at all.** `[proved]` from the listing:
+
+```
+if (obj+0x136C & 0x400) {                       /* the throw table */
+  e = g_class31_throws[set] + (s8)obj+0x131A * 0x10
+  if (obj+0x19C != (s16)e+8) return
+  if (((obj+0x1318 & 7) & (s16)e+0xC) == (s16)e+0xC) return
+  PlayerTakeDamage((s8)obj+0x121, kind, (s16)e+0xA)       /* no 0x800 */
+} else {                                        /* the melee table */
+  e = g_class31_melee_attacks[set] + ((s8)obj+0x131A + obj+0x1364*4) * 0x10
+  if (obj+0x19C != e.hit_frame && !(e.hit_frame == -1 && obj+0x1360 == 4))
+    return
+  if ((obj+0x1318 & e.mask & 7) == e.mask) return         /* mask 0 whiffs */
+  PlayerTakeDamage((s8)obj+0x121, kind, e.overlay); obj+0x136C |= 0x800
+}
+kind = obj+0x34 & 0x2000000 ? 0 : 1, and with 0 ThrowerLeave follows
+```
+
+The hit is **`==` the frame**, not "at or past it": a clip that jumps past
+its hit frame -- a fit that skips into the middle of a clip, a connect first
+called after the frame has gone -- does not hit. And **the connect latch is
+the callers'**: `ThrowerStateLeapDown` tests `0x800` before calling,
+`ThrowerStateDelayedPounce` and `ThrowerStateStrikeOnTheSpot` do not,
+`ThrowerStateCloseAndStrike` calls only on its throw entry's own frame.
+`ThrowerStateWaitForPermit` raises `0x400` for character type 0x17 alone, so
+the throw-table arm is `zskamere`'s. The aiming is the arc: the landing point
+is a pixel offset unprojected at a fixed depth, so the actor is where the
+swing will reach on the frame it lands. Same design as the melee strike and
+the thrown weapon -- this engine times its hits, it does not test them.
+
+### The leap back — `ThrowerStateLeapAside`, `FUN_0044B880`
+
+State 10. `[proved]` from the listing; Ghidra cuts sub 0 at the
+`MatrixStackPop` at `0x0044BA37` (`L35`), and the body runs on into the
+script choice and the arc.
+
+```
+sub 0  obj+0x34 |= 0x20000000; obj+0x136C |= 0x180000
+       type 0x17: obj+0x34 |= 0x2000
+       type != 0x18:
+         x = obj+0x136C & 0x10 ? 5.0 : (1 - 2*(rand() % 2)) * 5.0
+         p = eye + RotY(g_camera_yaw_bams) * (x, 0, 50.0)
+         trace (p.x, obj+0x104 -/+ 1000, p.z): hit -> obj+0x13D8 = the hit
+                                               miss -> (p.x, g_camera_fixed_eye_y, p.z)
+       ActorArcBeginToWaypoint(obj+0x13D8, script, 1)
+sub 1  unless obj+0x136C & 0x20: TurnActorAwayFromPoint(obj+0x13D8, -0x100)
+       if (ActorArcStep(obj, 1) == 1) return
+       obj+0x34 &= ~0x20000000; obj+0x1338 = 0; ThrowerReleaseAttackPermit
+       type != 0x18: SetCurrentActorMotionBlended(set[4], 0, 1)
+       type == 0x18: ActorSetMotionBlended(0x211 / 0x20E / 0x214 / 0x20B, 0, 5)
+sub 2  if (++obj+0x1338 < 0x5A && |obj - eye|xz < 50.0) return
+       if (obj+0x19C < g_motion_play_length[obj+0x1B4] - 2) return
+       state 7
+```
+
+| script | when |
+| --- | --- |
+| `0x00564AF8` `aside_attack3` | `obj+0x131A == 3` and type != 0x18 |
+| `0x005649A8` `aside_zsass` | type 0x16 |
+| none | type 0x17: `JZ 0x0044BAE7` skips the copy, so the local is uninitialised stack |
+| `0x00564D08` + `0x60` * row `aside_zslman_<row>` | type 0x18, row = `3*bit8 + 2*bit7 + bit6`, 1..3, else 0 |
+| `0x00564AC8` `aside` | every other type |
+
+`zslman`'s four sit **`0x60` apart**, each after the pounce script set 3
+names for attack 3 in that stance; the exporter read them at `0x30` until
+this was read, which gave rows 1 and 3 a pounce and row 2 row 1's leap.
+`verify_combat.py` check 16 holds the export to the four `MOV ESI, imm32` the
+state picks them with.
+
+So the ordinary thrower lands five units to one side of the camera and fifty
+in front, **in the camera's yaw-only frame**, and stands there for ninety
+frames or until it is fifty units clear -- and until its landing clip is two
+frames from its end. That wait **is** the cooldown; there is no timer.
+`zslman` instead leaps back to where its pounce began, on its own surface's
+script, so a wall-crawler goes back up its wall.
 
 ### The delayed pounce — `ThrowerStateDelayedPounce`, `FUN_0044E830`
 

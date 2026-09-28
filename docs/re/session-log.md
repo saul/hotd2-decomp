@@ -22550,3 +22550,299 @@ block-yaw window and `AngleWithinTolerance`, and its own test of the unarmed
 `znassb` now sets the block's yaw rather than `g_camera_yaw_bams`. The owl
 corpse merge had already moved `OwlPickTargetPlayerAndAimOffset` and the
 corpse's throw onto the block, the same way; main's text was kept for both.
+
+## 2026-09-28 -- the stage-2 car draws what `St2CarDraw` draws; the green mound was a shot effect
+
+Branch `fix/newbugs2-crashed-car`. Two items the car's port
+(`fix/newbugs2-goldman-car`) left open: "not drawn yet: the crashed model set,
+the wheel spin and the parked part's turn", and Original Mode's small green
+object in front of Goldman's desk.
+
+**`St2CarDraw` (`FUN_00452320`), read whole from the listing, `0x00452320`..
+`0x0045253F` `[proved]`.** Ghidra's body ends at the second `MatrixStackPop`
+(L35). Two pushes held open make a real chain: body then, nested, the second
+column at `(9.058, 6.368, 8.943)` turned `RotY(obj+0x1334)` only while
+`obj+0x1324 != 0`. Then a scratch push: `MatrixLoadIdentity`, the body's
+`RotZ RotY RotX`, `MatrixGetAngles` (`FUN_004018E0`, `(pitch, yaw, roll)` --
+its first two outputs are `VecToAngles`' `-elevation` and heading, checked at
+`0x004016B0`), pop. The roll goes through `AND EAX, 0xFFFF` -- so the `JL` after
+it never jumps -- and a dead zone: `<= 0x800` is 0, `<= 0x4000` loses 0x800,
+`< 0xC000` passes, `>= 0xE800` is 0, the rest lose 0xE800. A third push
+re-applies the frame as `Translate(obj+0x40); RotY; RotX; RotZ(limited)`, and
+two pushes inside it at `(0, 3.167, 13.649)` and `(0, 3.167, -9.48)` each turn
+`RotX(obj+0x1330)` only while `obj+0x1320 != 0`. Every column's slot is
+`g_st2car_asset_variants[obj+0x13F0][c]`, read from the image: row 0
+`0x2D 0x2F 0x34 0x31`, row 1 `0x2E 0x30 0x35 0x32` -- `char_adv04.bin`
+entries 2..10 through the pol slot list, so the old "no static name table"
+note on the rig was wrong: the slot list is that table.
+
+What the routines around it do, re-read against the port (`[proved]`, all
+already right): `St2CarRouteUpdate` adds `0x1000` a frame to `+0x1330`, writes
+row 1 at `0x00452239` as `0x39` runs out, and clears `+0x1320` from `0x3A`
+frame `0x50`; `St2CarHeldUpdate` reads `ry` at struct `+0x10` (`[ESP+0x20]`
+after the call) for `n = 1..39`, `n + 100.0`.
+
+**Evidence for what the parts are.** Row 1 is `[likely]` the crashed car: the
+unshot branch plays shot `0x39` out in block 11 step 1 (`cam_play 290..405`),
+its script plays `0x519A9` -- `STAGE2_SE\BRIDGE_CRASH1_22.wav` -- at frame 340,
+the row changes at 370, and row 1's body is row 0's geometry on another texture
+set (26/30/34 for 0/1/2/33). The rescue branch plays `0x419A9`,
+`STAGE2_SE\BRAKE.wav`, as `0x3A` starts. Column 1 is `[likely]` the driver's
+door: drawn, it is the door the rescued man climbs out through as `0x3A` ends,
+swinging out through `op_` 0x153's `ry` `0x4000..0x7A43`, about 82 degrees.
+
+**What changed.** `game/class21/car.ts` has `St2CarDraw` now, called where the
+two routines call it, which computes the row, the two gated rotations and the
+limited frame into `car.draw` (plain data); `RotZYX` joined `carrier.ts`'s
+matrix helpers. `tools/hod2lib/rigs.py` exports both rows as parts;
+`render/rigs.ts` keys a task-posed root's parts by the slot they draw and
+`applyTaskDraw` shows and poses exactly the four the draw named -- the spun
+parts under `root⁻¹ · RotY RotX RotZ(limited)`, which is the second frame as a
+child of the root it is not.
+
+**The green mound.** It is the rig `obj_416b00`, `PlayerShotEffectsThink`
+(`FUN_00416B00`): with the car gone it was the only rig near the origin, and it
+is Original-only because its route, `op_` 0x194, is `op_org` 0. The exe draws
+its one literal slot, `0x109D` (`etc_1.bin` 41), only from a live kind-5
+`g_shot_tracer_ring` record: `CMP EAX, 0x5` at `0x00416CBE`, then
+`Translate(record) · Translate(path(0x194, frame % 24)) · MatrixClearRotation ·
+RotZ RotY RotX`, `PUSH 0x109D` at `0x00416DA1`. A byte search for `9d100000`
+finds that push, two `PUSH 0x109D; CALL 0x0041D5D0` in `LoadSceneAndReset` and
+at `0x0048A1D0`, and three data hits (a pol slot list and two descriptor
+tables). `0x0041D5D0` is `AssetQueueLoadSlot` -- job kinds 0 and 1 on the
+64-deep ring `AssetQueueUnloadSlot` uses, both of which the job table at
+`0x00588C20` sends to the loader at `0x00418B80` -- and its script caller is
+`EvtOpAssetLoadSlot50` (`0x0045F3A0`, table entry `0x00593318`); both named.
+The rig had carried `Route(0x194)` with no camera gate, and its note said
+"Nothing here is placeable" -- prose the exporter does not read (L26's shape):
+an ungated route is always selected, so the player drew the root from stage
+load at the path's frame-0 pose, `(0.5, 0, 0)`. It is `placement_blocked` now;
+`render/effects.ts` draws the kind-5 arm (it had skipped kind 5 outright), and
+an Original Mode bundle carries `0x109D` in `slots_effect`. The port cannot yet
+arm weapon kind 5 -- `g_original_weapon_kind` is only ever reset -- so the
+round is testable and not reachable in play.
+
+Found on the way, same function, fixed: the ordinary tracer was drawn with
+`rotation (0, 0, spin)` in world axes; `MatrixClearRotation` (`FUN_004A9F70`,
+it writes the 3x3 to the identity) makes it a camera-facing quad, so both arms
+now take the camera's world rotation first.
+
+**Wrong turns.**
+
+* The first harness shots of the desk at frame 35 found nothing: the room is
+  still fading in there, and the mound only reads once `cp_st2` 55 pulls back,
+  around frame 250.
+* In the rescue branch the car's door looked **open while driving** -- a black
+  panel off the side at `0x3A` frame 60, with `obj+0x1324` still 0. Hiding
+  slot `0x2F` alone showed it is the door, closed: its bounds are flush with
+  the body, and the black is its material. The outer skin is a translucent
+  `char_adv04` texture-33 primitive whose base colour is `[0, 0, 0]` in the
+  bundle, so it modulates to black; the inner panel is untextured black. It
+  was the same before this change and is a material question, not the rig's --
+  left `[open]` for whoever owns texture alpha.
+* `car.ts` cited `St2CarInit`, `St2CarRouteUpdate` and `St2CarHeldUpdate` as
+  references in the file that ports them (L42), so `verify_port.py` counted
+  none of the three as ported; linked instead. Citations checked 692 -> 696
+  with `St2CarDraw`.
+
+Measured in the page (`?stage=2&mode=play&entry=0&block=0&step=2&op=0&drive=1`,
+harness driven a frame at a time): unshot, the draw names row 0 through `0x39`
+frame 369 and row 1 from 370, the door turns from 371 to 409 (-27 .. -14887
+BAMS), the spin holds at 2260992; rescue (the class-0x21 target marked shot
+each frame), `+0x1320` drops at `0x3A` frame 80 and the spun parts draw at
+`RotX` 0, the car parks at 130 on row 0 and the door swings through 169.
+
+## 2026-09-28 -- class 0x31 states 9 and 10, the pounce and the leap back (branch `fix/newbugs2-pounce-leapback`)
+
+The rooftop-route session left a list of what `ThrowerStateLeapDown`
+(`FUN_0044B670`) and `ThrowerStateLeapAside` (`FUN_0044B880`) got wrong, read
+from the decompilation and not yet from the listing. Both are read from the
+listing now, arm by arm, with every routine they call:
+`ThrowerPickLandingPoint`, `ActorArcBeginToWaypoint`, `ThrowerLoadAttackArcScript`,
+`InstallArcMotionScript`, `ActorPlayHitVoice` (kind 3: one `rand() & 1`),
+`ThrowerStrikeConnect`, `TurnActorAwayFromPoint`, `ThrowerReleaseAttackPermit`
+(which zeroes the permit, where the port's representation writes -1 -- `L63`'s
+kind of difference, and harmless here).
+
+**The list was right as far as it went**, and short. What it did not have:
+
+* `ActorArcBeginToWaypoint` (`FUN_0044D780`) draws the attack itself on the
+  `&DAT_007DCC70` sentinel -- `(rand() >> 4) % 10` into
+  `g_class31_attack_picks`, then 3 over it for type 0x18 at `0x0044D83B`. The
+  port handed the draw to its caller as a callback, and the caller skipped it
+  for `zslman`. The sentinel is named now, `g_arc_script_draw_attack`
+  (`0x007DCC70`, zero, two references: the `PUSH` and the `CMP`).
+* `ThrowerStrikeConnect` (`FUN_0044CE60`) compares the hit frame with `==`
+  (`CMP EDX, ECX; JZ` at `0x0044CE9F`), and **does not test `0x800`** -- the
+  port had `>=` and an internal `Struck` return, which together stood in for
+  the `==` and hid that LeapDown's own two `0x800` tests were missing. Its
+  throw-table arm (`0x0044CF2C`, `g_class31_throws`, no `0x800`) was a
+  `return`, and `ThrowerStateWaitForPermit` raises that bit for type 0x17 --
+  so no `zskamere` standing attack had ever landed. Its despawning arm ran
+  only with a permit held; the engine calls `PlayerTakeDamage(-1)`, which
+  refuses, and `ThrowerLeave`s anyway. All six callers checked for their own
+  guards (`0x0044B76F`, `0x0044B7B0`, `0x0044E7CF`, `0x0044E99E`,
+  `0x0044EC1E`, `0x00450C41`).
+* LeapAside's `zslman` arm (`CMP CX, 0x18; JZ 0x0044BA3F`) skips the whole
+  camera-relative point: it leaps back to `obj+0x13D8`, which only
+  LeapDown's type-0x18 arm writes -- the spot it pounced from. And its four
+  scripts are `0x60` apart (`MOV ESI, imm32` at `0x0044BAB1`, `BAD0`, `BAC4`,
+  `BAB8`), not the `0x30` both exporters read them at.
+* LeapAside's type-0x17 arm jumps past the `MOVSD.REP` (`JZ 0x0044BAE7`), so
+  `zskamere` arcs on uninitialised stack. Declared in the port, which installs
+  no script; reachable only through `ThrowerStateFallToSurface` with
+  `0x20000000` up, `[open]` whether any shipped run gets there.
+* The leap aside's pause counts with `JGE` at `0x0044BBFF`; the port counted
+  with `>`. Its landing clip goes through `SetCurrentActorMotionBlended` at
+  fade 1 (`zslman`: `ActorSetMotionBlended` at fade 5, its own four clips);
+  the port's class-0x30 `ZombieSetMotionIfIdle` refused over the arc's clip
+  and, when it did not, drew a `rand()` the engine does not.
+* LeapDown's Training-Mode test is on `g_script_flags[0xF2]`
+  (`0x009C72F2`), which is in `G` already; the read is the engine's, whatever
+  writes the byte. Nothing to declare.
+* Both states return for a sub past their last arm; the port ran their exits.
+
+**The exporter.** `CLASS31_ARC_SCRIPT_BYTES` (`0x30`, one script) was the
+stride for `zslman`'s four -- and the comment beside the address said "+0x60
+a stance" while the code said `0x30`, and `globals.tsv`'s row said "stride
+0x30" while listing four motions that sit `0x60` apart. Rows 1 and 3 came out
+as two of set 3's pounce scripts and row 2 as row 1's leap.
+`CLASS31_ASIDE_ZSLMAN_STRIDE = 0x60` in both halves; the builder hash moves.
+`verify_combat.py` check 16 had **enshrined** the misread: it expected nine
+clip-switching stage changes and named "zslman's aside in stances 1 and 3" as
+two of them -- which are the two pounce scripts. It expects seven now, and
+reads the four `MOV ESI` immediates out of `.text` and holds the export to
+the scripts at exactly those addresses. `L65`.
+
+**Measured** with a driven probe (`drive=1`, one row a frame, `G` imported
+into the page), before on main's three files and the shared bundle, after on
+this branch and its own export:
+
+* rooftop `zsass` (`?stage=2&original=1&mode=play&block=14&step=2&op=9`):
+  the pounce ran frames 135-200 and runs 135-195, leaving on the clip's
+  cursor with it still on; `obj+0x34` in the pounce was `0x20000181` and is
+  `0x30000181` (the spawn record's own flags word carries `0x20000000`, so
+  both are up in flight -- no dust column on landing, where there was one);
+  collision `0x180800` in sub 2 and `0` now. The leap back used to hold the
+  flight clip `1@34` for 90 frames after landing; it lands into clip 4 now,
+  walks clear on its root and is back at the hub 38 frames later, with the
+  column. It hits once in both.
+* stage 6's first `zslman` (`block=0&step=4&op=2`): leapt back to
+  (475.3, -51.2, -9574.3), beside the camera; now to (484.4, -51.2,
+  -9556.2), the spot it pounced from, landing into `0x20B`.
+* stage 4 block 2's first `zskamere`, perched in state 32: six swings and no
+  hit in 1200 frames before; a life at frames 327 and 528 after (the one at
+  222 is the same in both runs and is not its).
+
+31 `port.test.ts` assertions; 25 fail against main's `arc.ts`, `pounce.ts`
+and `strike.ts` (the other six hold on the old code too and are kept for what
+they pin).
+
+**Wrong turns.**
+* I read the arc-script dump at `0x005649A8` by eye and was a whole script
+  out: I had `0x00564D08` holding clip 490. Counting the twelve-dword blocks
+  from the start said 491, which is what the bundle held -- the bug was only
+  in rows 1 to 3. L6 in a memory dump.
+* One of the new assertions ("the connect lands through `0x800`") passed on
+  the old code: its `hits === 1` counted the hit the *previous* assertion's
+  `>=` had let through. Each check takes its own baseline now.
+* Before/after swaps were file copies of the three sources (L43): each was
+  `cmp`'d against the saved copy after restoring, and the merge of
+  `origin/main` came after the first commit, not between a copy and its
+  restore.
+* The sandbox refuses a shell line that runs `node` or `git` with a path held
+  in a variable; the swaps had to be spelled out in full.
+
+## 2026-09-28 -- class 0x13's static props: the record's pitch, and every spawn site's three angles (branch `fix/newbugs2-class13-pitch`)
+
+The wall-climbers left this `[open]`: "five stage-2 scripted props (class
+0x13) also have a non-zero pitch in their spawn records, and their spawn code
+still takes only the yaw. Whether that is visible is `[open]`."
+
+What the exe does, all `[proved]` from the listing:
+
+* Class 0x13 is spawned by opcode 0x0C through `SpawnFromDescriptorSmall`
+  (`FUN_00408BC0`), not `SpawnFromDescriptor` -- the handler's `Init` reads
+  its tail at `obj+0x130C`. It copies the record's three orientation dwords
+  whole to `obj+0x64/0x68/0x6C` (`0x00408C01`..`0x00408C10`). So does
+  `EvtOpSpawnPlaced09` (`FUN_004088A0`, `0x00408925`..`0x00408934`), which
+  makes three allocators out of three.
+* `ScriptedPropInit13` (`FUN_0043FE10`) stores to `+0x1310`, `+0x1F4`,
+  `+0x14C`, `+0x3C` (-1) and `+0x00`, and nothing else on the object; the five
+  props take behaviour 0, and `g_prop_behaviours[0]` is `0x0041EBB0`, a bare
+  `RET`.
+* `ScriptedPropUpdate13` (`FUN_0043FE90`) calls no motion routine and draws
+  `T; RotX(+0x64); RotZ(+0x6C); RotY(+0x68); Scale` (`0x0043FEDE`..
+  `0x0043FF1E`). `MatrixRotateX/Y` were read again for their signs: both are
+  three.js's own rotations in the stack's row layout, so the product is a
+  three.js `Euler` in `"XZY"` -- which `render/slotmodels.ts` already used.
+  **`functions.tsv` said `"YZX"`**; a render test built on the port's matrix
+  transcription fails with `"YZX"` and passes with `"XZY"`, and the row is
+  corrected.
+
+So a static class-0x13 prop wears the record's pitch for its whole life and
+the game draws it; the port's spawn arm read `yaw` by name. The five
+(`komono_st1.bin[3]` at evt 48896/48952/49008/49064, pitches `0x1000`,
+`0x2800`, `0xF000`, `0xEC00`, yaw `0xC000`; `etc_1.bin[63]` at 84232, 15x,
+pitch `0x2800`) are the only class-0x13 records with a pitch or a roll.
+
+The fix is one helper, `PlacementOrientation` in `game/descriptor.ts`, which
+every spawn site now takes the three angles through: `SpawnScriptedCharacters`,
+every arm of `SpawnSlotActor` (0x52, 0x13, 0x26, 0x43, 0x16, 0x51, 0x33) and
+`SpawnHordePlacers`. Class 0x17 keeps its tail's signed pair. No shipped record
+of those other classes has a pitch or a roll, so only class 0x13 changes what
+is drawn. The exporter already emitted `pitch`/`roll` for these placements
+(the wall-climbers' change is in `Placement`, which every class goes through),
+so the bundle is unchanged.
+
+The survey of the other classes: a scan of every spawn descriptor in the six
+`st*evtbl.bin` finds non-zero pitch or roll only in classes 0x13, 0x31, 0x33,
+0x41 and 0x44. 0x31 was the climbers; 0x41's generic props already read both
+from the breakables placement, and its kinded (type 4) and falling (type 34)
+records and 0x44's selector 16 use the two words as a kind and a set size,
+which the placement carries by name. The port spawns none of: 0x41 type 37,
+0x44 selectors 10/14/15, 0x33 selectors 8/9 -- left for whoever ports them.
+
+What shows. At block 17's hold (camera 81 frame 425, `?stage=2&mode=play&
+block=17&step=1&op=34`, driven frame 420) two of the four wooden models on the
+far wall are in frame and now lean left (`web/shots/props13-before-f420*.png`
+against `-after-`); in free roam turned onto the wall all four do
+(`props13-free-before.png` / `-after.png`). From the street at the start of the
+step all four sit behind the window jamb, and at most ten pixels of the frame
+change. `etc_1.bin[63]` -- two blended quads whose texture is a lit crescent
+over a lunar surface, the moon `[likely]` -- is in the camera's frustum on
+path 86 frames 5..240 (block 20) and behind the tower's roof there: at most
+five pixels of any scripted frame change, sampled every 120 driven frames over
+blocks 16 and 20 and at 6 and 12 of block 16. Flown up past the roof in
+free roam it is a disc on edge before and a disc facing down after
+(`props13-moon-free-before.png` / `-after.png`). Blocks 35 and 39 place it and
+end the stage within the frame.
+
+**Wrong turns.**
+
+* The first harness picked "the nearest frame with all four in view" by
+  projecting their origins, and chose driven frame 6 -- where they are inside
+  the window's wall from the street. The before and after crops were
+  byte-identical, which read for a moment as "the renderer ignores the pitch".
+  Blowing the props up to 6x in the live page (debug only, through `G`) showed
+  nothing there either, and at 4x on the room's hold showed a leaning board.
+  The harness now shoots the frames it is told to.
+* Comparing whole-page screenshots before and after called every sampled
+  frame different: the header prints the bundle's age in minutes. Compared
+  inside the viewport, with a stdlib PNG decoder, blocks 16 and 20 differ by
+  five pixels at most.
+* The block-35 and block-39 runs compared two different frames of *stage 3*:
+  both blocks end stage 2 at once, and the two runs reached the next stage's
+  opening two path frames apart. Nothing about the prop.
+* I called the fifth prop "the moon" in a comment before I had seen it. It is
+  named by slot in the code; the docs say `[likely]`, with the texture as the
+  evidence.
+
+**Checks.** Four `port.test.ts` assertions (the five shipped records spawn
+with their pitch; a rolled record reaches `obj+0x6C`; the mouse's and the wave
+field's arms carry both; thirty `GameUpdate`s leave a static prop's angles
+alone) and two `render.test.ts` ones (a prop spawned from its record is drawn
+`T·Rx·Rz·Ry·S` element for element with three unequal angles and 15x; the
+shipped `etc_1.bin[63]` faces `(0, -sin, cos)`). Reverting the class-0x13 arm
+to the yaw fails three and two of them; drawing `"YZX"` fails the render one.
+The new lesson is `L66` (written as L64; main took L64 and L65 first).

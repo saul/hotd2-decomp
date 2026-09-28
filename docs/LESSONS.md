@@ -950,3 +950,35 @@ divergence, not the missing word**: tag it `[diverges]`, and settle the
 `[open]` by reading the substitute's writers before a second reader copies the
 choice. `L20`'s "never name a thing from what it resembles" applies to globals
 that resemble each other.
+
+**L65 -- A count a check was calibrated on is a reading, and it can be the
+bug.** `verify_combat.py` check 16 asserted that exactly nine arc-script
+stage changes switch clips, and its docstring named two of them: "zslman's
+aside in stances 1 and 3". Those two were not leap-aside scripts at all. The
+exporter read `zslman`'s four at `0x30` apart -- one script's width -- where
+`ThrowerStateLeapAside` names them `0x60` apart with four `MOV ESI, imm32`,
+and the extra `0x30` between each pair is that stance's *pounce* script,
+which ends on a different clip. The check was written by counting what the
+export produced, so it passed the misread and would have failed the fix. The
+comment beside the address said "+0x60 a stance"; the code beside it said
+`0x30`; the annotation said "stride 0x30" and listed four motions that sit
+`0x60` apart. **When a check's expected number was measured rather than
+derived, say what it was measured from, and prefer asserting the thing the
+engine names** -- here the immediates in `.text` -- to asserting a total
+that includes whatever the reader got wrong. It is `L6` seen from the
+checker's side: the adjacent-array trap, calibrated into the test.
+
+**L66 -- In the frustum is not on screen, and a diff of the whole page is a
+diff of its clock.** Showing stage 2's four tilted class-0x13 props before and
+after, a harness chose "the nearest frame with all four in view" by projecting
+their origins through the camera, and chose a frame where all four were inside
+a window jamb: the before and after crops came back byte for byte the same,
+which reads as "the renderer ignores the fix". Widening the comparison to the
+whole screenshot then called every frame different, because the page's header
+prints the bundle's age in minutes. Neither result was about the props. **A
+projection cannot see occlusion, so pick the frame by the pixels: shoot before
+and after, diff them inside the viewport only, and look where they differ** --
+and when nothing differs, make the object impossible to miss (scale it up in
+the live page through `G`, debug only) before concluding it is not drawn. It is
+`L19` from the other side: the render is not the game, and the frustum is not
+the render.

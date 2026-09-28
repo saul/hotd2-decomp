@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import struct
 
-from .arcscript import (CLASS31_ARC_SCRIPTS, CLASS31_ARC_SCRIPT_BYTES,
+from .arcscript import (CLASS31_ARC_SCRIPTS, CLASS31_ASIDE_ZSLMAN_STRIDE,
                         arc_script)
 from .combat import (ATTACK_ENTRY, ATTACK_PICK_PER_ZONE, ATTACK_ZONE_COMBOS,
                      REACT_GROUPS, THROW_TABLE)
@@ -301,7 +301,7 @@ def class31_tables(tables) -> dict:
     for st in range(4):
         scripts[f"aside_zslman_{st}"] = arc_script(
             tables, CLASS31_ARC_SCRIPTS["aside_zslman"]
-            + st * CLASS31_ARC_SCRIPT_BYTES)
+            + st * CLASS31_ASIDE_ZSLMAN_STRIDE)
     return {"sets": sets, "corpse_frames": corpse,
             "scripts": {k: v for k, v in scripts.items() if v},
             "note": (

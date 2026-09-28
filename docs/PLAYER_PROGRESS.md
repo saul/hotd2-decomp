@@ -1397,10 +1397,34 @@ the camera-path switch that picks its route, the park at the end of shot
 `0x39` or `0x3A`, and the `g_script_flags[0]` kill -- as plain records in
 `G.g_st2_cars`, and `RigLayer` draws one root per task that drew this frame at
 the pose it wrote (`TASK_POSED_ROUTINES`). Its routes in the rig data now only
-name the roots. What the draw does with the task's other words -- the
-post-crash asset set, the wheel spin, the second part's yaw once parked -- is
-not drawn yet: the exporter ships variant 0 only and no part rules for this
-rig.
+name the roots.
+
+**...and it draws what `St2CarDraw` draws, not the parts it was exported
+with.** The draw takes four slots from a row of `g_st2car_asset_variants`
+(`0x00565F2C`): row 0 until shot `0x39` runs out, row 1 -- the car after the
+crash -- from then on. It turns its nested second push `RotY(obj+0x1334)` once
+parked (`[likely]` the driver's door), and its two spun pushes
+`RotX(obj+0x1330)` while `obj+0x1320` is set, on a second frame that re-applies
+the body's `MatrixGetAngles` with the roll through a dead zone. The port's
+`St2CarDraw` computes all of it into `car.draw`; the exporter ships both rows as
+parts; `RigLayer.applyTaskDraw` shows the four parts the draw named and poses
+them. So the unshot branch's car is the crashed one from shot `0x39` frame 370,
+the wheels turn a sixteenth a frame while it drives and stop at no rotation at
+`0x3A` frame `0x50`, and the door swings out over 39 frames once it is parked.
+The door's outer skin renders black -- its translucent `char_adv04` texture-33
+material carries a zero base colour in the bundle -- which is a material
+question and not this rig's.
+
+**Original Mode's green mound in front of Goldman's desk was a shot effect.**
+`obj_416b00` is `PlayerShotEffectsThink` (`FUN_00416B00`), whose one literal
+slot, `0x109D`, it draws only for a live kind-5 tracer record, at the record
+plus `op_` `0x194`. The rig carried that path as an ungated route, so the
+player drew it from stage load at the path's own pose, `(0.5, 0, 0)`. It is not
+placed now; `render/effects.ts` draws the kind-5 arm from
+`G.g_shot_tracer_ring`, and an Original Mode bundle carries the slot in its
+effect templates. Both tracer arms now also face the camera, as
+`MatrixClearRotation` makes them: the ordinary tracer was a quad turned in
+world axes.
 
 ## Which instructions the UI strikes through
 
@@ -4650,6 +4674,27 @@ the boat**: it ends the ride state at the `MatrixStackPop` and shows no
 `frame++`; the increment is at `0x00440323` and the whole tail past it.
 `game/class13/routine0.ts`.
 
+**...and the five static ones lean the way their records say.** Those five
+(`komono_st1.bin[3]` x4 at block 17 step 1, `etc_1.bin[63]` at 15x in blocks
+16, 20, 35 and 39) are the only class-0x13 records with a pitch, and
+`SpawnSlotActor` took the yaw alone -- the placement had carried `pitch` since
+the wall-climbers, and the arm read `yaw` by name. `SpawnFromDescriptorSmall`
+(`FUN_00408BC0`) copies all three words, behaviour 0 is a bare `RET`, and
+`ScriptedPropUpdate13` draws `T·Rx·Rz·Ry·S`, which `render/slotmodels.ts`
+already did; so the four wooden models on the far wall of the block-17 room
+stood upright where the game tips them `+22.5°`, `+56°`, `-22.5°` and `-28°`
+about x, and `etc_1.bin[63]` -- the moon, `[likely]` by its texture -- stood
+on edge to the ground where the game turns its face `56°` down toward it. Every spawn site now takes the three angles
+through one helper, `PlacementOrientation` (`game/descriptor.ts`) --
+`SpawnScriptedCharacters`, every arm of `SpawnSlotActor` and
+`SpawnHordePlacers`. What a player sees: at block 17's hold (camera 81 frame
+425, the civilian and the `znkage`) two of the four are in frame and lean
+left; the other two are off the right edge, and from the street at the start
+of the step all four sit behind the window jamb (at most ten pixels change).
+`etc_1.bin[63]` is in the frustum on camera 86 frames 5..240 and behind the
+tower's roof there: at most five pixels of a scripted frame change. `web/tools/props13_look.mjs`
+reads the three angles back off the page's own `G` and shoots the hold.
+
 **The draws are ported too.** Selector 0's wake (`char_adv06.bin[0..21]`
 under the boat's own pose, `Translate(0, 0, 27.5); Scale(1, 0.15, 1)`) and its
 splash (`eff_dokan.bin[0..93]` at the fixed point by the wall) are drawn by
@@ -5017,6 +5062,52 @@ no fades in it, grows both fades a frame at a time, gives the odd frame to
 stage 2, and resets both fades to 1 in the tight case. Both are transcribed now,
 under their own names, and the `zstin` one no longer clamps its fades at
 `0x7F`, because the engine's does not.
+
+### The pounce and the leap back, as the listing has them (NEW-BUGS-2)
+
+The rooftop route ends in states 9 and 10, `ThrowerStateLeapDown`
+(`FUN_0044B670`) and `ThrowerStateLeapAside` (`FUN_0044B880`), and the agent
+that fixed the route left a list of what they got wrong. Both are
+transcriptions of the disassembly now, and so are the two routines the pounce
+runs every frame, `ActorArcBeginToWaypoint` (`FUN_0044D780`) and
+`ThrowerStrikeConnect` (`FUN_0044CE60`). What changed, in the running player:
+
+* **The pounce raises `0x10000000`, not `BackingOff`**, and takes it down on
+  the way to state 10; **the leap back raises `BackingOff`** and both
+  collision bits on its first frame, and takes `BackingOff` down when it
+  lands. So the leap back's landing puts up `ThrowerEmitGroundDust`'s column
+  and the pounce's does not -- the other way round from before.
+* **The landing clip plays.** The leap back used class 0x30's conditional
+  setter, which refused while the arc's own clip was still on, so the actor
+  stood in its flight pose and waited out the whole ninety frames. It goes
+  through `SetCurrentActorMotionBlended` now: at the report's URL the rooftop
+  `zsass` lands into clip 4, walks itself clear on that clip's root, and is
+  back at the hub 38 frames after landing where it used to take 90.
+* **Both states leave on the cursor**, two frames short of the clip's end,
+  not when the port's one-shot channel happens to empty; the pounce is five
+  frames shorter for it, and the pause counts ninety with `>=`.
+* **Down, the pounce collides with nothing** (`0xffe7ffff` on landing), and a
+  head still on its 0x2002 model cries out as it leaves.
+* **`zslman` goes back where it came from.** It keeps its surface, records the
+  point it pounced from and leaps back to it on its own surface's script,
+  where the port sent it to a point beside the camera. Stage 6's first
+  `zslman` now lands its pounce and returns to (484.4, -51.2, -9556.2), the
+  spot it left, instead of (475.3, -51.2, -9574.3). Its four scripts were
+  also exported at the wrong stride -- `0x30` where the engine names them
+  `0x60` apart -- so on a wall it would have leapt back on a pounce clip.
+* **`zskamere`'s standing attacks land.** `ThrowerStrikeConnect`'s throw-table
+  arm, which `ThrowerStateWaitForPermit` sends type 0x17 to, was a `return`.
+  Stage 4 block 2's first `zskamere`, perched in state 32, took a life at
+  frames 327 and 528 of a driven run; before, it swung six times in 1200
+  frames and never hit.
+* **The hit frame is `==`**, and the connect latch is the callers' to test --
+  the port tested it inside the connect, which was what stood in for the
+  `==`. `ActorArcBeginToWaypoint` takes the attack draw itself, for `zslman`
+  too, so a `zslman` pounce moves the `rand()` stream as the engine's does.
+
+One divergence is declared: `zskamere` in state 10 is given no arc script,
+because the engine's arm for it skips the copy and hands the arc twelve dwords
+of uninitialised stack. No shipped run has been shown to reach it.
 
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 

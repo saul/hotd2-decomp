@@ -1693,8 +1693,13 @@ assertion behind it kept a hang alive for two sessions.
 `MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
 no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
 clip (`0x0044E863`), and `ApplyRootMotion` now honours it — the height store at
-`0x00410E48`. The shipped wait clip's root height is flat, so no stage moves
-differently for it. And the engine's
+`0x00410E48`. What it stores is the height of the delta *after* the actor's
+rotation, and `ApplyRootMotion` now turns the delta by all three angles,
+`T · Rz(roll) · Ry(yaw) · Rx(pitch) · S`, as the gated arm does
+(`0x00410D56`..`0x00410D9B`); it used to turn by yaw alone. The one place that
+shows is stage 2 block 21, whose pair are spawned rolled onto a wall: their
+wait clip's flat root height is beside the point, because the roll turns the
+clip's -Z into world -Y. See class 0x31's state 23 below. And the engine's
 wrap damper makes the applied delta `(baseline_old - root)/play_length` where
 `rootDelta` computes `(root - root[0])/frames`; both are small, neither was
 touched, they are not the same number and nothing asserts either.
@@ -2204,6 +2209,34 @@ height — `ThrowerPickLandingPoint` switches on the *state*, and nothing in the
 port had read that — and past the pounce row's hit frame the actor stops
 reacting to shots. `ThrowerLoadAttackArcScript` no longer latches the stance
 the connect reads: the exe's does not, so the swing connects on row 0's frame.
+
+**...and the wait is a climb down the clock face** (NEW-BUGS-2: "they should
+climb down the wall, then jump onto the player"). The pair's spawn records
+carry orient `(0, 0xC000, 0xC000)` -- on their sides against the wall -- and
+the port kept only the yaw: the placement had no `pitch` or `roll`, so the
+actors stood upright a hundred units up in mid-air, drawn upright, and
+`ApplyRootMotion` turned motion 310's forward walk by the yaw alone, which
+walked them 8.7 units out from the wall along +X. Three things changed, all
+from the exe: the exporter emits the record's other two orientation words
+(`SpawnFromDescriptor`, `FUN_00408A20`, copies all three) and
+`SpawnScriptedCharacters` puts them on the actor; `ApplyRootMotion` turns the
+delta by roll, yaw and pitch (`SkeletonApplyRootMotion`, `FUN_00410C50`); and
+`render/characters/thrower.ts` draws class 0x31 in `EnemyThrowerInit`'s order
+1, `RotX; RotZ; RotY`. Measured in the page at
+`?stage=2&mode=play&entry=0&block=21&step=2&op=7&frame=64`, before and after:
+
+| | before (main at `2e6de214`) | after |
+|---|---|---|
+| height over the 45-frame wait | 163.9 -> 163.9 | 163.9 -> 155.2 (8.7 down) |
+| height over the 60-frame wait | 153.2 -> 153.2 | 153.2 -> 140.6 (12.6 down) |
+| x over the 45-frame wait (the wall is at -830.3) | -830.3 -> -821.6 | -830.3 throughout |
+| roll | 0 throughout, drawn upright | `0xC000` on the wall, level six frames into the leap |
+| leap starts at | 163.9 | 155.2 |
+
+The leap itself was fixed with the rest of the state above: it lands six
+units in front of the eye at `g_camera_eye_y` (51) instead of at the actor's
+own height, and the stab connects on row 0's frame 62, thirteen frames before
+the landing, with the body about thirty units above the eye and closing.
 
 **And it now dies its own death.** Class 0x31 does not use the shared stagger
 or the shared *directional* death clip — it has a four-state chain of its own,

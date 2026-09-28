@@ -21323,3 +21323,71 @@ permit rather than the engine's one-player pick, and still clears
 `[diverges]` on the spot: the first wants an `Rng` in every claimant, class
 0x31's included, and the second wants every claimant's own clear read first.
 For player 1 alone the pick agrees.
+
+## 2026-09-28 -- stage 2's wall-climbers: the spawn's roll, and root motion turned by all three angles
+
+NEW-BUGS-2: "the zombies at `?stage=2&mode=play&entry=0&block=21&step=2&op=7&frame=64`
+... should climb down the wall, then jump onto the player. they currently jump
+(and attack) when they're way above the player." The pair are class 0x31
+character type 0x19 (`zstin`), spawned in `ThrowerStateDelayedPounce`
+(`FUN_0044E830`, state 23) from descriptors 59548 and 59600 of `st2evtbl.bin`.
+Their raw bytes: pos `(-830.3, 163.9 / 153.2, ...)`, orient `(0, 0xC000,
+0xC000)`, tail `19 00 17 00 | 310 | 45 / 60 | 90`.
+
+What the exe does, all `[proved]`:
+
+* `SpawnFromDescriptor` (`FUN_00408A20`) copies the record's three orientation
+  dwords to `obj+0x64/0x68/0x6C` (`0x00408A61`..`0x00408A70`). The pair start
+  **on their sides against the clock face**.
+* State 23's wait plays motion 310 (a walk, 7.19 units a cycle along its own
+  -Z) on the ordinary track with `obj+0x1F8` bit `0x10` up.
+* `SkeletonApplyRootMotion` (`FUN_00410C50`)'s gated arm builds `T(pos) ·
+  RotZ(+0x6C) · RotY(+0x68) · RotX(+0x64) · MatrixScale(model+0x116C)`
+  (`0x00410D56`..`0x00410D9B`), transforms the delta, and stores x and z, plus y
+  under bit `0x10`. With roll and yaw at `0xC000` the clip's -Z is world -Y, so
+  the wait is a climb straight down the wall.
+* `EnemyThrowerInit` writes `obj+0x1FC = 1` (`0x004496A2`), so the draw is
+  `T; RotX; RotZ; RotY`. Nothing else writes that byte on a thrower.
+
+Main already had state 23's own flags, landing point and eye height from the
+state-23 session (`5da65ae1`), so the leap landed in front of the eye. What was
+still missing: the placement carried the yaw alone, `ApplyRootMotion` turned
+by yaw alone, and the renderer drew class 0x31 by yaw alone. So the pair stood
+upright a hundred units up and walked 8.7 units out from the wall into the air
+before leaping. All three are fixed: the exporter emits `pitch`/`roll` when
+nonzero (both halves), `SpawnScriptedCharacters` sets them,
+`ApplyRootMotion` is the gated arm's matrix, and
+`render/characters/thrower.ts` places the root in order 1.
+
+Measured in the page at the bug's URL (`web/shots/beforemain-f30.png`,
+`web/shots/after64-f30.png` .. `-f95.png`): the 45-frame wait now climbs
+163.9 -> 155.2 and the 60-frame wait 153.2 -> 140.6, x fixed at -830.3. The
+roll is level six frames into the leap, the stab connects on row 0's frame 62
+thirteen frames before the landing, and the landing is at `g_camera_eye_y` 51.
+The camera director pitches up to the clock face, so the climb is on screen.
+
+Only two character placements in the six stages, civilian children included,
+carry a nonzero pitch or roll, and these are they. Five stage-2 class-0x13
+props carry a pitch too. `SpawnSlotActor` does not read it, and whether that
+is visible is left open, as a separate task.
+
+**Wrong turns.**
+* I planned around the state-23 branch as unmerged and messaged the
+  coordinator about overlap. It had reached main minutes after my worktree was
+  cut. `git merge-base main <branch>` would have said so before I planned.
+* I wrote climb distances into a doc comment before measuring them: 10.6 and
+  14.4. The page says 8.7 and 12.6, because the fade holds the first six
+  frames. Corrected before commit. The commit message's "7.2 units out along
+  +X" is the one-shot's figure from before the state-23 merge; on main the
+  looping wait walked 8.7.
+* The new port test first ran the leap with no stance-4 arc rows in its
+  fixture. The arc ended on its first frame and the roll check failed for a
+  reason that had nothing to do with the roll.
+* I expected the exe's 9-13 unit climb to leave the pair off screen, which
+  would make "climb down the wall" something the player never sees. The
+  screenshots show the camera tracks up to them.
+
+Checks: six quarter-turn assertions on `ApplyRootMotion` (`L48`), five on the
+shipped placement through spawn, climb and leap, three on the render root.
+Mutating the roll out of the matrix, out of the spawn, or the draw order to
+`ZYX` fails them. The new lesson is `L57`.

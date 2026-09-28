@@ -755,6 +755,9 @@ web/src/
     characters/bat.ts, bat_splash.ts  class 0x46: each root in rotation
                   order 5 at its model's own scale, and the splash task
                   `game/class46/splash.ts` steps
+    characters/thrower.ts  class 0x31: the root in rotation order 1
+                  (`RotX; RotZ; RotY`), which is what puts stage 2's
+                  wall-climbers on their wall
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand

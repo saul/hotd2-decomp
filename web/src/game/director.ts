@@ -212,7 +212,11 @@ export function SpawnScriptedCharacters(
                          { ...DescriptorFromPlacement(p),
                            motion: req.motion,
                            hp, maxHp: hp,
-                           yaw: p?.yaw ?? 0, pos: { ...req.pos },
+                           // All three words of the record's orientation,
+                           // `obj+0x64`/`+0x68`/`+0x6C`, as
+                           // `SpawnFromDescriptor` copies them.
+                           pitch: p?.pitch ?? 0, yaw: p?.yaw ?? 0,
+                           roll: p?.roll ?? 0, pos: { ...req.pos },
                            visible: true },
                          rng, events));
   }

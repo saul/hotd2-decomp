@@ -441,6 +441,15 @@ class Placement:
              # The actor's own yaw, which the directional death compares the
              # camera's against.
              "yaw": self.spawn["orient"][1] & 0xFFFF}
+        # The other two words of the record's orientation. `SpawnFromDescriptor`
+        # (`FUN_00408A20`) copies all three -- `obj+0x64`, `+0x68`, `+0x6C`
+        # from the record's sixth, seventh and eighth dwords -- and the yaw
+        # alone reached the actor. Emitted only when not zero: two placements
+        # in the game carry one, stage 2 block 21's `zstin` on their wall.
+        if self.spawn["orient"][0] & 0xFFFF:
+            d["pitch"] = self.spawn["orient"][0] & 0xFFFF
+        if self.spawn["orient"][2] & 0xFFFF:
+            d["roll"] = self.spawn["orient"][2] & 0xFFFF
         # A class-0x10 child: present exactly when the civilian that built it
         # is, because nothing in the script ever places it.
         if self.spawn.get("civilian_child") is not None:

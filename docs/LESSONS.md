@@ -809,3 +809,20 @@ that loads the real page, failed -- as a timeout waiting for a button, with the
 throw two lines above it. **In `game/`, derive anything that touches another
 module's export inside the function that uses it**, and when a page check fails
 after a merge, read its `threw:` line before its timeout.
+
+**L57 -- A divergence parked "until something needs it" is blind if the
+input that would need it is dropped upstream.** `ApplyRootMotion` turned the
+root delta by yaw alone, and the note on it said that was wrong only for a
+class-0x31 actor on a wall, and could wait until something needed it, "because
+the clips those stances play carry no root translation". The premise was true
+of the stance clips and missed the case that needed it. Stage 2 block 21's two
+`zstin` are not put on the wall by a stance at all: their **spawn record**
+places them there, orient `(0, 0xC000, 0xC000)`, and the exporter kept only the
+yaw. With pitch and roll dropped before the port ever saw them, no run of the
+port could have shown the divergence mattering. The actors stood upright a
+hundred units up and walked out into the air, and it went in as "they jump
+from way above the player". **When you park a divergence, name the inputs that
+would make it matter, and check that every one of them reaches the port** --
+here, `grep` the placements for a nonzero pitch or roll. It is `L27` and
+`L34`'s "scan the shipped data" applied one step further upstream: the scan has
+to cover the fields the exporter throws away, not only the ones it keeps.

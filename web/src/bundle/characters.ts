@@ -246,6 +246,13 @@ export interface CharacterPlacement {
   hp: number;
   /** The actor's BAMS yaw — the directional death compares the camera's to it. */
   yaw: number;
+  /**
+   * The record's other two orientation words, `obj+0x64` and `obj+0x6C`, as
+   * `SpawnFromDescriptor` (`FUN_00408A20`) copies them. Absent means zero,
+   * which is every placement but stage 2 block 21's two wall-climbers.
+   */
+  pitch?: number;
+  roll?: number;
   /** Class-0x30 descriptor tail: see `Placement` in hod2lib/characters.py. */
   body_condition: number;
   initial_state: number;

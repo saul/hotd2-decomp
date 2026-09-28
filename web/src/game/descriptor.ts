@@ -16,9 +16,9 @@
  * the port and not the player.
  *
  * `SpawnScriptedCharacters` supplies the rest — the motion, the hit points
- * (`ActorInitHitPoints`), the yaw, and the position, which comes from the glTF
- * node rather than from the placement and so crosses from `render/` as a
- * `CharacterSpawnRequest`.
+ * (`ActorInitHitPoints`), the three angles, and the position, which comes
+ * from the glTF node rather than from the placement and so crosses from
+ * `render/` as a `CharacterSpawnRequest`.
  */
 import type { CharacterPlacement } from "../bundle/characters";
 import type { Actor } from "./actor";

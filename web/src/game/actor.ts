@@ -99,11 +99,14 @@ export enum MotionFlag {
    */
   TraceGround = 0x04,
   /**
-   * Bit `0x10` — take the root's **y** as well.
+   * Bit `0x10` — root motion moves the actor's **height** as well.
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
    * clear it writes back `obj+0x40` and `obj+0x48` only, with it set it writes
-   * `obj+0x44` too (`0x00410E48`). `[proved]` Its one writer found is
+   * `obj+0x44` too (`0x00410E48`). `[proved]` What it writes is the height of
+   * the delta *after* the actor's rotation, not the clip root's own y: on an
+   * actor rolled onto a wall that height comes from the root's z, which is
+   * how a walk clip becomes a climb. Its one writer found is
    * `ThrowerStateDelayedPounce` (`FUN_0044E830`), which raises it for its wait
    * clip (`OR ECX, 0x10` at `0x0044E863`) and drops it when the wait ends;
    * `ApplyRootMotion` in `game/root_motion.ts` honours it.
@@ -1261,21 +1264,31 @@ export interface ActorBase {
   /**
    * `obj+0x64` — the **x** word of the same triple.
    *
-   * One writer is ported: body condition 4's knockback spins the falling body
-   * by `±(rand() % 5) * 0x100` BAMS at 0x004551D5. `render/` poses an actor
-   * from `yaw` alone, so nothing draws this yet; it is state the engine keeps
-   * on the actor, so the port keeps it where the engine does and the renderer
-   * is the half that has to catch up.
+   * `SpawnFromDescriptor` (`FUN_00408A20`) fills it from the record's sixth
+   * dword, the first word of its orientation, for every class; for a
+   * character `SpawnScriptedCharacters` takes it from the placement's `pitch`.
+   * One writer after the spawn is ported: body condition 4's knockback spins
+   * the falling body by `±(rand() % 5) * 0x100` BAMS at 0x004551D5.
+   * `ApplyRootMotion` turns every root delta by it. `render/` draws it for the
+   * classes that place their own root -- class 0x31 among them -- and poses
+   * every other actor from `yaw` alone, so the knockback's spin is not drawn
+   * yet; it is state the engine keeps on the actor, so the port keeps it where
+   * the engine does and the renderer is the half that has to catch up.
    */
   pitch: number;            // +0x64
   /**
    * `obj+0x6C` — the third orientation word, which every spawn allocator fills
-   * from the descriptor and `MatrixRotateZ` consumes.
+   * from the descriptor and `MatrixRotateZ` consumes. For a character it comes
+   * from the placement's `roll`: stage 2 block 21's two `zstin` are spawned
+   * at `0xC000`, on their sides against a wall, and are the only character
+   * placements in the game that are not upright.
    *
-   * Only class 0x43 writes it after the spawn: the owl banks into its dive and
-   * rolls through its orbit. Class 0x41 type 4 reads the same word as an
-   * object **kind**, which is the polymorphism `docs/formats/spawns.md` warns
-   * about — check the class before believing it is an angle.
+   * Two classes write it after the spawn: the owl, class 0x43, banks into its
+   * dive and rolls through its orbit, and `ThrowerStateDelayedPounce`
+   * (`FUN_0044E830`) turns it back to level at `0xCCC` a frame as its
+   * wall-climber leaps. Class 0x41 type 4 reads the same word as an object
+   * **kind**, which is the polymorphism `docs/formats/spawns.md` warns about —
+   * check the class before believing it is an angle.
    */
   roll: number;             // +0x6C
   /**

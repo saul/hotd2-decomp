@@ -458,7 +458,8 @@ export function Class22DescendAndJoinFight(obj: JudgmentActor,
     default:
       break;
   }
-  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, f.eye.x, f.eye.z);
+  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, G.g_camera_eye.x,
+                              G.g_camera_eye.z);
   DrawAndStep(obj, f);
 }
 

@@ -33,6 +33,7 @@ import { Rng } from "../src/core/rng.ts";
 import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
@@ -87,7 +88,8 @@ function run(n) {
     // The engine's own "cannot be hurt" byte, `g_player_no_damage`, rather
     // than a life count the first player turn would overwrite.
     G.g_player_no_damage = [1, 1];
-    GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    SeatHarnessEye(EYE);
+    GameUpdate(1 / 60, HOST, rng, events);
     let atOnce = 0;
     for (let k = 0; k < n; k++) {
       const striking = zs[k].state === ZombieState.Strike;

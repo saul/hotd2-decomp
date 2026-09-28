@@ -30,6 +30,7 @@ import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { ActorDespawn } from "../src/game/despawn.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ZombieState } from "../src/game/class30/states.ts";
@@ -170,7 +171,8 @@ for (let f = 0; f < total; f++) {
   syncSpawns(walker.spawns);
   eye.y = walker.groundY ?? 0;
   G.g_camera_fixed_eye_y = eye.y;
-  GameUpdate(eye, 1 / 60, NULL_HOST, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, NULL_HOST, rng, events);
   // **The counters are the gates.** They are stepped now, not derived, so a
   // missing release parks the script on a `wait_enemies_alive` for ever and a
   // double release takes the count negative and opens one early. Both show up

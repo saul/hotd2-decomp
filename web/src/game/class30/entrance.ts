@@ -33,7 +33,6 @@ import type { Rng } from "../../core/rng";
 import {
   ActorFlag, ZombieAux, ZombieFlag2, type Actor, type ZombieActor,
 } from "../actor";
-import type { Vec3 } from "../vec";
 import { CountEnemyZombieJoin } from "../combat/counts";
 import { ActorByAt, G } from "../globals";
 import {
@@ -410,7 +409,7 @@ export function ZombieStateWaitScriptFlagThenEnter(obj: ZombieActor, dt: number,
  * boat, is the **other** ported writer of `g_carrier_object`
  * (`game/class26/`); the global's own note in `globals.ts` lists them all.
  */
-export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
+export function ZombieStateRideCarrier(obj: ZombieActor,
                                        rng: Rng, dt: number): void {
   if (obj.sub === 0) {
     // `obj+0x13E4/E8/EC = obj+0x40/44/48` — the engine writes x, then z, then
@@ -438,7 +437,7 @@ export function ZombieStateRideCarrier(obj: ZombieActor, eye: Vec3,
   // {@link ZombieAux.TurnTowardCameraEye}, which is what the bit means; the
   // add above is unconditional and is not what this gates.
   if (obj.flags38 & ZombieAux.TurnTowardCameraEye) {
-    TurnActorTowardCameraEye(obj, eye, CARRIER_TURN_RATE, dt);
+    TurnActorTowardCameraEye(obj, CARRIER_TURN_RATE, dt);
   }
   // `(carrier+0x34 & 0x10000000) != 0` — the carrier says it is done. With no
   // carrier ported there is nothing to say it, so the ride is over at once.

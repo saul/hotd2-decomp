@@ -31,7 +31,7 @@ import { ticksOfAuthoredFrame } from "../../core/play_cursor";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import { MotionOf } from "../tables";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import { GAME_HZ } from "../class30/states";
 import {
   ActorArcBegin, ActorArcStep, ActorClipFrame, ActorClipLength, ActorLocalPoint,
@@ -206,9 +206,12 @@ const GRAB_BLINK_FRAMES = 15;
  * not is the second camera block's path frame (`g_cam_path_frame_2`), which
  * the cue also accepts and the port has no second block for.
  */
-export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
+export function ThrowerStateGrabPlayer(obj: ThrowerActor, dt: number,
                                        rng: Rng, events?: Events): void {
   const g = obj.grab;
+  // Every read here is `g_camera_eye` by address -- nineteen of them,
+  // `0x0044F015`..`0x0044F4E2` -- the gameplay eye, fifteen under the drawn one.
+  const eye = G.g_camera_eye;
   if (!g) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
 
   if (obj.sub === GrabSub.Anchor) {
@@ -225,7 +228,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
     obj.pos.x = eye.x + obj.arcFrom.x;
     obj.pos.y = eye.y + obj.arcFrom.y;
     obj.pos.z = eye.z + obj.arcFrom.z;
-    if (G.g_cam_path_frame !== g.cue_frame) return ThrowerGrabRide(obj, eye);
+    if (G.g_cam_path_frame !== g.cue_frame) return ThrowerGrabRide(obj);
     // Only the Y of the destination offset is ever read; the engine stores the
     // other two and never looks at them again.
     obj.vel.y = (obj.arcTo.y - obj.arcFrom.y) / g.drop_frames;
@@ -237,7 +240,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
   if (obj.sub === GrabSub.Descend) {
     ThrowerBlink(obj);
     obj.slideTimer -= dt * GAME_HZ;
-    if (obj.slideTimer > 0) return ThrowerGrabRide(obj, eye);
+    if (obj.slideTimer > 0) return ThrowerGrabRide(obj);
     obj.vel.x = obj.vel.y = obj.vel.z = 0;
     obj.pos.y = eye.y + obj.arcTo.y;
     events?.emit("sound.play", { id: GRAB_LAND });
@@ -263,7 +266,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
       obj.alpha = 1;
     }
     obj.slideTimer -= dt * GAME_HZ;
-    if (obj.slideTimer > 0) return ThrowerGrabRide(obj, eye);
+    if (obj.slideTimer > 0) return ThrowerGrabRide(obj);
     ThrowerGrabTakePermit(obj, g.player, rng);
     obj.sub = GrabSub.Grab;
   }
@@ -277,7 +280,7 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
                        obj, "strike", -1);
     }
     if (obj.action && ActorClipFrame(obj) < ActorClipLength(obj, m) - 1) {
-      return ThrowerGrabRide(obj, eye);
+      return ThrowerGrabRide(obj);
     }
     obj.strikeStart = { x: eye.x, y: eye.y, z: eye.z };
     obj.action = { motion: GRAB_FINISH, ticks: 0 };
@@ -301,9 +304,9 @@ export function ThrowerStateGrabPlayer(obj: ThrowerActor, eye: Vec3, dt: number,
 }
 
 /** Subs 2 to 4 hang off the camera's yaw, half a turn round. X and Z only. */
-function ThrowerGrabRide(obj: ThrowerActor, eye: Vec3): void {
+function ThrowerGrabRide(obj: ThrowerActor): void {
   if (obj.sub < GrabSub.Descend || obj.sub > GrabSub.Grab) return;
-  ActorLocalPoint(eye, G.g_camera_yaw_bams + 0x8000, obj.arcFrom.x,
+  ActorLocalPoint(G.g_camera_eye, G.g_camera_yaw_bams + 0x8000, obj.arcFrom.x,
                   obj.arcFrom.y, obj.arcFrom.z, _p);
   obj.pos.x = _p.x;
   obj.pos.z = _p.z;

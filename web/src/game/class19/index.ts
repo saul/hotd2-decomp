@@ -239,7 +239,7 @@ export function Boss4Update(obj: Actor, f: ClassFrame): void {
   Boss4ArmPhaseWhenInsideArena(obj, b);
   Boss4TrackWhenInsideArena(obj, b);
   BOSS4_STATES[b.state]?.(obj, b, f);
-  Boss4FootfallShake(obj, b, f.eye, host, events);
+  Boss4FootfallShake(obj, b, host, events);
   Boss4AdvanceMotionAndDrawHeldProps(obj, b, host);
   Boss4AdvancePhaseAtFloor(obj, b);
   // `ActorRegisterCameraPoint(state+0x70)` -- `FUN_00409B70` at

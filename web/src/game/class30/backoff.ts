@@ -14,8 +14,9 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, ZombieFlag2, type ZombieActor } from "../actor";
 import { TurnActorAwayFromPoint } from "../actor_turn";
 import { ReleaseAttackSlot } from "../combat/permits";
+import { G } from "../globals";
 import { MotionPlayFrame, MotionRowOf } from "../tables";
-import { dist2d, type Vec3 } from "../vec";
+import { dist2d } from "../vec";
 import { ZombieSetMotionIfIdle } from "./motion_cue";
 import { ApproachInnerRadius } from "./ring";
 import { BACKOFF_MAX_FRAMES, MotionFade, MotionRow, ZombieState }
@@ -52,7 +53,7 @@ const BACKOFF_HELD_MIN_FRAME = 0x43;
 const BACKOFF_SHORT_CONDITION = 4;
 const BACKOFF_SHORT_FRACTION = 0.7;
 
-export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
+export function ZombieStateBackOff(obj: ZombieActor, dt: number,
                                    rng: Rng): void {
   if (obj.sub === 0) {
     // `obj+0x1338`, **not** the attack cooldown at `obj+0x133C`. This is the
@@ -117,11 +118,13 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
   // that heap block left there for an actor that has not yet faced the player.
   // The port cannot reproduce reading uninitialised memory and will not
   // pretend to, so an actor that has never captured a strike anchor — which is
-  // exactly the one that has never run `ActorFacePlayerTarget` — measures
-  // against the eye instead. Since {@link ZombieFlag2.StrikeAnchor} is never
+  // exactly the one that has never run `ActorFacePlayerTarget` — measures to
+  // `g_camera_eye`, the point that routine would have stored there, instead.
+  // Since {@link ZombieFlag2.StrikeAnchor} is never
   // cleared once set, this only ever affects the too-close entry from the hub.
   const d = dist2d(obj.pos,
-                   (obj.flags2 & ZombieFlag2.StrikeAnchor) ? obj.target : eye);
+                   (obj.flags2 & ZombieFlag2.StrikeAnchor) ? obj.target
+                     : G.g_camera_eye);
   // **The retreat has a floor, and it is the clip's.** The engine's exit is
   // `(far enough || 240 frames) && (motion != 0x100 || frame > 0x43)` — so a
   // character whose back-away is motion 256 may not return to the hub until

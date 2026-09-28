@@ -42,6 +42,7 @@ import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
 import type { ShotTestEntry } from "./combat/shot_test";
+import type { DistanceRankEntry } from "./combat/rank";
 import type { QueuedScreenSprite, ScreenSprite } from "./screen_sprite";
 import type { BossHpBar } from "./boss_hp_bar";
 import type { BossBanner } from "./boss_banner";
@@ -1169,12 +1170,16 @@ export const G = {
    * units down its own axis), and `UpdateSceneViewAndLight` draws from the
    * block. See `camera/hooks.ts`.
    *
-   * Read by routines with no `ClassFrame` as well: `EnemyZombieInit`
-   * (`FUN_00452DA0`) and `EnemyThrowerInit` (`FUN_00449620`) seed the head's
-   * aim toward `eye + (0, 15, 0)` from these three words. A spawn runs in the
+   * Every routine that measures to it reads it here, by name: the frame
+   * carries no eye (`ClassFrame`), because the one it carried was the drawn
+   * camera, fifteen above this. `EnemyZombieInit` (`FUN_00452DA0`) and
+   * `EnemyThrowerInit` (`FUN_00449620`) seed the head's aim toward
+   * `eye + (0, 15, 0)` from these three words. A spawn runs in the
    * interpreter's task, ahead of this frame's hook, so it reads what the
    * previous frame's hook wrote, as the engine's does. `CameraClearHookAndPose`
-   * (`FUN_0040C340`) zeroes all six words on a scene load. `[proved]`
+   * (`FUN_0040C340`) zeroes all six words on a scene load, and
+   * `GameOverRunPhase` (`FUN_00460960`) in its first phase. The readers, by
+   * address, are in `docs/formats/cam.md` § *Which eye*. `[proved]`
    */
   g_camera_eye: vec3(),
   g_camera_pitch_bams: 0,
@@ -1400,6 +1405,15 @@ export const G = {
    * it is the count the previous frame's objects registered.
    */
   g_camera_candidate_count: 0,
+  /**
+   * `g_distance_rank_list` — `0x005A4D58`, with `g_distance_rank_count`
+   * (`0x005A4D50`) as its length: the `{key, obj}` pairs
+   * `RegisterForDistanceRank` (`FUN_00409010`) filed from `EnemyZombieUpdate`
+   * since the last `RankEnemiesByDistance` (`FUN_004090B0`), at most
+   * fourteen, in the order they filed. The rank task sorts and empties it;
+   * `DistanceRankTaskCreate` (`FUN_00409080`) empties it at scene setup.
+   */
+  g_distance_rank_list: [] as DistanceRankEntry[],
 
   // -- the water, class 0x16/0x17's plane and class 0x51's four slots -----
   /**
@@ -2709,6 +2723,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_enemy_slots = makeCameraSlots();
   G.g_camera_candidates = [];
   G.g_camera_candidate_count = 0;
+  G.g_distance_rank_list = [];
   G.g_water_level = -24.9;
   G.g_frog_bone1_on_entry = vec3();
   G.g_water_attack_slots = [0, 0, 0, 0];

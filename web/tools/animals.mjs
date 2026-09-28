@@ -17,9 +17,9 @@
  * the pool is pruned at the end of every frame. Between them the scene's
  * enemy count reached -2387.
  *
- * The frog is the one case that needs a nudge: it waits on a camera path and
- * this harness has no camera, so the loop forces `g_active_cam_path` to the
- * path its descriptors name.
+ * The frog is the one case that needs a nudge: it waits on a camera path the
+ * harness does not play, so the loop forces `g_active_cam_path` to the path
+ * its descriptors name.
  *
  * A row may name a **kill frame**: on it every live actor of the class is
  * marked shot as `MarkActorShot` marks one (`obj+0x34` bits 3 and 1), and
@@ -32,17 +32,19 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BUNDLE_ROOT, hasBundle, skipNoBundle }
+import { BUNDLE_ROOT, hasBundle, skipNoBundle, stageFile }
   from "./lib/bundle_root.ts";
+import { CamPaths } from "../src/game/camera/curve.ts";
 import { Rng } from "../src/core/rng.ts";
 import { PlayerTasksRun } from "../src/game/player_shell.ts";
 import { Events } from "../src/core/events.ts";
 import { GameUpdate, SpawnScriptedCharacters, SpawnSlotActors }
   from "../src/game/director.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { ActorFlag } from "../src/game/actor.ts";
 import { NULL_HOST } from "../src/game/host.ts";
-import { SetGameTables } from "../src/game/tables.ts";
+import { SetCameraPaths, SetGameTables } from "../src/game/tables.ts";
 import { g_class_handlers } from "../src/game/registry.ts";
 import { vec3 } from "../src/game/vec.ts";
 import { Walker } from "../src/script/walker.ts";
@@ -106,6 +108,13 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel,
   ResetGameGlobals();
   SetGameTables(chars, undefined, undefined, undefined, script.coli,
                 script.civilians);
+  // The stage's camera paths. The classes read the camera the engine's own
+  // tasks write -- `g_camera_eye` from the scene state's hook, a camera block
+  // from the driver -- and with no paths those tasks write zeros over the
+  // eye this harness seats, so an owl dived at the world origin. With them
+  // the camera is the stage's, as `tools/dives.mjs` has it.
+  SetCameraPaths(new CamPaths(JSON.parse(readFileSync(stageFile(stage, "cam"),
+                                                      "utf8"))));
   // In play through the ported routines, not by hand (L49): the reset
   // started the game from the title, and this is the first player turn.
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(1) });
@@ -188,7 +197,8 @@ for (const [name, stage, block, step, cls, wanted, entry, minTravel,
         killed.add(o.at);
       }
     }
-    GameUpdate(eye, 1 / 60, host, rng, events);
+    SeatHarnessEye(eye);
+    GameUpdate(1 / 60, host, rng, events);
     for (const r of G.g_ring_effects) if (r.id >= ringSeq) rings.add(r.id);
     for (const o of G.g_object_list) {
       if (o.cls === cls && o.despawned) { gone.add(o.at); spent.add(o.at); }

@@ -49,7 +49,7 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
 
   CivilianPruneDeadChildren(obj);
   CivilianRunFrameHook(obj, frames);
-  if (sub.targetMode !== CivilianTarget.None) CivilianStepTurnToTarget(obj, f);
+  if (sub.targetMode !== CivilianTarget.None) CivilianStepTurnToTarget(obj);
 
   // Op 0x26's move, which the engine steps by a per-frame delta and then snaps.
   if (sub.moveFrames !== 0) {
@@ -72,7 +72,7 @@ export function CivilianUpdate(obj: Actor, f: ClassFrame): void {
   // the part class 0x10 owns — how many more times it may come round.
   CivilianCountMotionLoops(obj);
 
-  if (CivilianStepScript(obj, f)) {
+  if (CivilianStepScript(obj)) {
     CivilianRunScript(obj, sub.script, sub.cursor, f);
   }
 

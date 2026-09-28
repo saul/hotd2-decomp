@@ -21,7 +21,7 @@ import { CarriedPropAlloc, CarriedPropById } from "../carried_prop";
 import { CivilianWait } from "../class10/ops";
 import { ActorByAt, G } from "../globals";
 import type { GameHost } from "../host";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import { ActorSetMotionBlended } from "./motion_cue";
 import {
   aimCursor, atLastFrame, blobForState, cursorScript, entryAt, frameOf,
@@ -70,7 +70,7 @@ enum CarrySub {
  * was the throw: on to state 35 if the list continues, otherwise
  * `ZombieScriptEnded`.
  */
-export function ZombieStateCarryProp(obj: ZombieActor, eye: Vec3,
+export function ZombieStateCarryProp(obj: ZombieActor,
                                      host: GameHost): void {
   let holder: { player: number } = { player: -1 };
   switch (obj.sub as CarrySub) {
@@ -121,12 +121,12 @@ export function ZombieStateCarryProp(obj: ZombieActor, eye: Vec3,
         letGo(obj);
       }
       if (p) holder = p;
-      tail(obj, eye, host, holder);
+      tail(obj, host, holder);
       break;
     }
     case CarrySub.Dropped:
       // `iVar7 = obj`: the byte is the zombie's own `obj+0x121`.
-      tail(obj, eye, host, {
+      tail(obj, host, {
         get player() { return obj.attackPermit; },
         set player(v: number) { obj.attackPermit = v; },
       });
@@ -155,10 +155,12 @@ function letGo(obj: ZombieActor): void {
  * reads and writes is the prop's `player` in one and the zombie's own
  * `attackPermit` in the other.
  */
-function tail(obj: ZombieActor, eye: Vec3, host: GameHost,
+function tail(obj: ZombieActor, host: GameHost,
               holder: { player: number }): void {
   const cue = obj.zom.targetCue;
-  TurnActorAwayFromPoint(obj, eye, cue < 0 ? CARRY_TURN_RATE : THROW_TURN_RATE,
+  // `g_camera_eye_z` and `_x` by address (`0x0045B564`..`0x0045B57E`).
+  TurnActorAwayFromPoint(obj, G.g_camera_eye,
+                         cue < 0 ? CARRY_TURN_RATE : THROW_TURN_RATE,
                          1 / 60);
   if (obj.sub !== CarrySub.Dropped || cue >= 0) {
     if (!atLastFrame(obj)) return;

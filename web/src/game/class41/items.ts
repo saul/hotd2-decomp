@@ -10,6 +10,7 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
+import { CameraBlockEye } from "../camera/view";
 import { COLLECTIBLE_WORDS_ZERO, PickOriginalModeItem } from "./original_item";
 import { PropWords } from "./words";
 import {
@@ -146,9 +147,9 @@ export function SpawnStoryModeItem(p: BreakableProp, rng: Rng,
   q.y = p.y;
   q.z = p.z;
   // `FPATAN; FMUL g_rad_to_bams; __ftol; MOVSX; ADD 0x8000`, off the camera
-  // block's eye -- `g_camera_index` is 0 in every shipped write.
-  const b = Math.trunc(Math.atan2(p.x - G.g_camera_block_eye.x,
-                                  p.z - G.g_camera_block_eye.z)
+  // eye of the block `g_camera_index` names (`0x00467C03`, `0x00467C0F`).
+  const eye = CameraBlockEye(G.g_camera_index);
+  const b = Math.trunc(Math.atan2(p.x - eye.x, p.z - eye.z)
                        * STORY_ITEM_RAD_TO_BAMS);
   q.yaw = ((b << 16) >> 16) + 0x8000;
   q.stepsElapsed = p.stepsElapsed;

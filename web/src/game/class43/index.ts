@@ -82,6 +82,7 @@ import { ActorDespawn } from "../despawn";
 import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
   from "../camera/slots";
 import { G } from "../globals";
+import { CameraBlockEye, CameraBlockYaw } from "../camera/view";
 import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
@@ -445,10 +446,11 @@ export function OwlPickTargetPlayerAndAimOffset(obj: Actor, sub: OwlTail,
   if (G.g_players_in_play === 2) {
     const p = rng.int(2);
     obj.attackPermit = p;
-    const e = G.g_camera_block_eye;
+    const e = CameraBlockEye(G.g_camera_index);            // `0x00448028`
     const d = Math.trunc(Math.hypot(obj.pos.x - e.x, obj.pos.z - e.z))
       * OWL_AIM_PER_UNIT;
-    const a = (G.g_camera_block_yaw_bams + (p !== 0 ? 0x4000 : 0xc000))
+    const a = (CameraBlockYaw(G.g_camera_index)
+               + (p !== 0 ? 0x4000 : 0xc000))
       * BAMS;
     sub.aimX = Math.sin(a) * d;
     sub.aimZ = Math.cos(a) * d;
@@ -463,6 +465,10 @@ export const OWL_AIM_PER_UNIT = Math.fround(1 / 60);
 
 /** The launch every dive shares, from state 3's coast and from state 5. */
 function OwlBeginSwayDive(obj: Actor, sub: OwlTail, f: ClassFrame): void {
+  // The eye of the block `g_camera_index` names, `[index * 0x1A4 + 0x9A60C0]`:
+  // the sway's length is taken from it at `0x00446CC4` (state 3) and
+  // `0x00447B74` (state 5).
+  const eye = CameraBlockEye(G.g_camera_index);
   play(f.events, SND_OWL_LAUNCH);
   sub.state = OwlState.Dive;
   sub.dive = OwlDiveKind.Sway;
@@ -477,7 +483,7 @@ function OwlBeginSwayDive(obj: Actor, sub: OwlTail, f: ClassFrame): void {
   sub.aimZ = 0;
   sub.swayPhase = sub.escapeDir > 0 ? 0x8000 : 0;
   G.g_class43_attack_token = sub.member;
-  sub.sway = Math.hypot(obj.pos.x - f.eye.x, obj.pos.z - f.eye.z)
+  sub.sway = Math.hypot(obj.pos.x - eye.x, obj.pos.z - eye.z)
     * OWL_SWAY_FROM_DISTANCE;
   sub.swayRate = Math.trunc(sub.rate * OWL_SWAY_RATE_SCALE);
   OwlPickTargetPlayerAndAimOffset(obj, sub, f.rng);
@@ -524,8 +530,10 @@ export function PlaceOwlFlockMember(obj: Actor, rng?: Rng): void {
   sub.state = OwlState.WaitLaunch;
   obj.attackPermit = -1;
   sub.beat = OWL_BEAT_START;
-  sub.launchYaw = s16(BamsOf(G.g_camera_block_eye.x - obj.pos.x,
-                             G.g_camera_block_eye.z - obj.pos.z));
+  // The block `g_camera_index` names, at `0x00445ECB` and `0x00445ED4`.
+  const eye = CameraBlockEye(G.g_camera_index);
+  sub.launchYaw = s16(BamsOf(eye.x - obj.pos.x,
+                             eye.z - obj.pos.z));
   // `obj+0x120 = 0xFF` at `0x00445E8A`, `RegisterEnemySlot` at `0x00445EFA`.
   RegisterEnemySlot(obj);
   G.g_enemies_present += 1;
@@ -625,12 +633,13 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
     obj.flags |= ActorFlag.Reacting;
   }
   // The corpse is thrown at unit speed, on top of four tenths of whatever it
-  // was doing, along `g_camera_block_yaw_bams + 0x8000` -- the block's yaw
+  // was doing, along `g_camera_block_yaw_bams[g_camera_index] + 0x8000` -- the
+  // drawn block's yaw
   // (`0x009A60D0`, read at `0x0044627B` and `0x004462B6`) faces back at the
   // viewer, so this is **away from the camera**, the way the shot pushed it.
   // It read `g_camera_yaw_bams`, which already faces forward, and so threw
   // every corpse back over the player's head.
-  const a = (G.g_camera_block_yaw_bams + 0x8000) * BAMS;
+  const a = (CameraBlockYaw(G.g_camera_index) + 0x8000) * BAMS;
   sub.vx = sub.vx * OWL_DEATH_DAMP + Math.sin(a);
   sub.vz = sub.vz * OWL_DEATH_DAMP + Math.cos(a);
   sub.spin = OWL_CORPSE_SPIN;
@@ -873,6 +882,10 @@ export function OwlStateRideApproachSpline(obj: Actor, f: ClassFrame): void {
  * sheds eight feathers and lets the token go.
  */
 export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
+  // The eye of the block `g_camera_index` names, `[index * 0x1A4 + 0x9A60C0]`,
+  // at every read: the two dives `0x00446F76..0x004471C1`, the strike
+  // `0x0044736A..7C`.
+  const eye = CameraBlockEye(G.g_camera_index);
   const sub = Tail(obj);
   if (!sub) return;
   // **The wing beat advances here too**, at `0x00446F42`, before either
@@ -885,9 +898,9 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   // `obj+0x270` in this branch it keeps going in a straight line for ever.
   sub.beat = (sub.beat + 1) % OWL_BEAT_FRAMES;
   if (sub.dive === OwlDiveKind.Home) {
-    sub.tx = sub.fromX + ((f.eye.x + sub.aimX) - sub.fromX) * sub.t;
-    sub.ty = sub.fromY + (f.eye.y - sub.fromY) * sub.t;
-    sub.tz = sub.fromZ + ((f.eye.z + sub.aimZ) - sub.fromZ) * sub.t;
+    sub.tx = sub.fromX + ((eye.x + sub.aimX) - sub.fromX) * sub.t;
+    sub.ty = sub.fromY + (eye.y - sub.fromY) * sub.t;
+    sub.tz = sub.fromZ + ((eye.z + sub.aimZ) - sub.fromZ) * sub.t;
     OwlSteerVelocityTowardTarget(obj, sub, sub.t * OWL_GAIN_DIVE);
     sub.t += sub.rate;
     sub.rate += OWL_DIVE_ACCEL;
@@ -904,10 +917,10 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
     const outX = Math.cos(a) * off;
     const outZ = -Math.sin(a) * off;
     sub.swayPhase += sub.swayRate;
-    obj.pos.x = sub.fromX + ((f.eye.x + sub.aimX) - sub.fromX) * sub.t;
-    obj.pos.z = sub.fromZ + ((f.eye.z + sub.aimZ) - sub.fromZ) * sub.t;
+    obj.pos.x = sub.fromX + ((eye.x + sub.aimX) - sub.fromX) * sub.t;
+    obj.pos.z = sub.fromZ + ((eye.z + sub.aimZ) - sub.fromZ) * sub.t;
     const k = sub.subtype === 2 || sub.subtype === 0 ? 0.04 : 0.025;
-    obj.pos.y += (f.eye.y - obj.pos.y) * k;
+    obj.pos.y += (eye.y - obj.pos.y) * k;
     obj.pos.x += outX * sub.sway;
     obj.pos.z += outZ * sub.sway;
     sub.t += sub.rate;
@@ -922,8 +935,8 @@ export function OwlStateDiveAtCamera(obj: Actor, f: ClassFrame): void {
   sub.limbE = Ease(sub.limbE, 0x3000, -0.2);
   sub.diveFrame += 1;
 
-  const d = Math.hypot(obj.pos.x - f.eye.x, obj.pos.y - f.eye.y,
-                       obj.pos.z - f.eye.z);
+  const d = Math.hypot(obj.pos.x - eye.x, obj.pos.y - eye.y,
+                       obj.pos.z - eye.z);
   // `obj+0x24C` is never incremented in this state, so the distance is the
   // only way out of it.
   if (d >= OWL_STRIKE_RANGE && sub.timer < 1) return;
@@ -1277,6 +1290,9 @@ const g_class43_states: Record<number, (obj: Actor, f: ClassFrame) => void> = {
  * the owl behind it.
  */
 export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
+  // The eye of the block `g_camera_index` names, `[index * 0x1A4 + 0x9A60C0]`,
+  // at `0x0044638B` and `0x00446394`.
+  const eye = CameraBlockEye(G.g_camera_index);
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.state === OwlState.Dead) {
@@ -1297,7 +1313,7 @@ export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
       || (sub.state === OwlState.Approach && sub.subtype !== 2)
       || (sub.state === OwlState.OrbitAway && sub.timer > 0)
       || (sub.state === OwlState.Approach && sub.timer > 0);
-    if (faceCamera) h = BamsOf(f.eye.x - obj.pos.x, f.eye.z - obj.pos.z);
+    if (faceCamera) h = BamsOf(eye.x - obj.pos.x, eye.z - obj.pos.z);
     // `SUB AX, [ESI+0x68]; AND EAX, 0xFFFF; CMP ECX, 0x8000; JLE` then
     // `SUB ECX, 0x10000`: the error runs `-0x7FFF..+0x8000`, so a target
     // exactly behind turns the positive way.

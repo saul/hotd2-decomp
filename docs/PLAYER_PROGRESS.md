@@ -601,6 +601,24 @@ it, and a block whose own wait is already satisfied is **skipped** — with
 block would have set. `port.test.ts` pins both, along with the timer's `n + 1`
 frames and the two score paths.
 
+**A reload no longer brings back an enemy the room already got rid of.** A
+seek rebuilds every spawn still listed at its `Init`, and two classes whose
+`Init` counts into both enemy counters were never taken off the list: stage 2's
+class-0x21 rescue target, whose ways out -- rescue, the crash shot, flag 0 --
+all come before any room gate, and class 0x18's boat riders, which the replay's
+list of gate-counted classes (`ENEMY_GATE_CLASSES`) had never been told about
+although the game's own list had. Rebuilt, either held `g_enemies_alive` with
+nothing on screen to shoot, and every civilian whose rescue waits on that count
+or on a camera cue behind a room gate sat sobbing in front of her dead
+captors: stage 2's `0x6830` after the burnt-out car (block 11 step 2),
+`0x8598` at block 14, stage 3's boat hostage `0x3208`. The rider and the
+target are in the gate list now, class 0x46's bats answer per record (their
+dive and swarm flights count, the scatter does not), and class 0x21 answers
+`ClassHandler.outlivedByReplay` -- flag 0, camera path `0x39` at frame
+`0x181`, route slot 1 out of its own block -- so the landing is the world the
+exe is in at that address. The held target's abandon arm also frees its camera
+and hit slots, which the port's had kept.
+
 **A captor counts as gone only when it dies.** `CivilianPruneDeadChildren`
 tests the child's `obj+0x34` bit `0x4000000` and nothing else; the port also
 dropped a child that was merely missing from the pool, so a captor that left
@@ -1512,10 +1530,21 @@ object's position with the camera-facing yaw alone, as the draw's tail has
 them, and stop at the throw. Measured on seed 1 through the whole fight: the
 old root moved on 1562 of 4401 frames and threw on two cameras (`cp` 47 and
 50); the class-0x28 car moves on 53 frames, all on `cp` 47, and is gone at
-frame 725. Still not drawn: each sprite's cel loop (`0x135F + g_frame_counter %
-15`, `0xB67 + (g_frame_counter & 7)`) -- the rig carries the first cel of each.
-A seek past the throw leaves the cars seated, because the replay does not run
-the game; in play they are gone by then.
+frame 725. A seek past the throw leaves the cars seated, because the replay
+does not run the game; in play they are gone by then.
+
+**Their fire and smoke play.** Each sprite is a cel loop on `g_frame_counter`
+(`0x009A32A0`) -- `0x135F + g_frame_counter % 15` (an unsigned `DIV` at
+`0x00432938`) and `0xB67 + (g_frame_counter & 7)` (`0x004329AD`) -- not on
+`g_scene_tick_counter`, which class 0x41 type 53 reads for the same two
+loops. The rig carried only each loop's first cel, so both stood on it. Now
+`obj_432840` exports every cel as a part of its own, 15 fire and 8 smoke, the
+way the stage-2 car's rig carries both of its rows, and `PathRidingPropDraw`
+in `render/rigs.ts` shows the one the counter names and hides the rest.
+Measured from the scene graph over 30 driven frames of `cp_st1` 47 on seed 1:
+the drawn cels matched the exe's on 0 of 30 frames before (always
+`0x135F`/`0xB67`) and on 30 of 30 after, with all 15 and all 8 seen. Stage
+1's glb grows by 0.3 MB.
 
 ## Which instructions the UI strikes through
 
@@ -5394,6 +5423,50 @@ over 900 frames: mean head pitch -6323 BAMS (-34.7 degrees, up) before and
 +415 (+2.3, the head sitting a unit above the lens) after; the pitch the head
 should have to look into the lens is missed by 37.0 degrees on average before
 and 0.3 after.
+
+**And every other reader of the eye** (2026-09-28, night). The head aim was
+one reader of a wrong eye; there were about fifty. `GameUpdate` was handed
+`ctx.view.eye` -- the drawn camera, as the last draw left it -- and every class
+update read it as `ClassFrame.eye`, where the engine names one of three points
+by address: `g_camera_eye` (`0x009C71E0`), the gameplay eye, fifteen under the
+rail's pose; camera block 0's eye (`0x009A60C0`); or the block
+`g_camera_index` names, which is block 2 under scene state (1, 3). The frame
+carries no eye now, so a reader has to spell the one its instruction names;
+the per-routine table, with the address of every read, is
+`docs/formats/cam.md` § *Which eye*. Ground distances and turns could not
+show the error. Heights, 3D distances and aims did, and each moved to the
+exe's, measured in the page (`?drive=1&seed=1`), before -> after:
+
+| | before | after |
+|---|---|---|
+| stage 2 block 21, the delayed pounce's target height | 51.0 (the lens) | 36.0 (`g_camera_eye_y`) |
+| stage 5 block 2, `zslman` hanging off the camera, over `g_camera_eye` | 45.0 | 30.0, dropping onto the gameplay eye |
+| stage 6 block 0, the first `zslman` pounce: from `g_camera_eye`, ground / up | 12.98 / 3.52 (the screen point) | 10.00 / 4.50 |
+| stage 1 block 1, the first strike's remembered point, y | 8.28 (the lens) | -6.72 (`g_camera_eye_y`) |
+
+(The stage 2 block 21 note above reads "at `g_camera_eye_y` (51)": the 51 was
+the lens.) Three changes are more than the eye. The **distance rank** is the
+engine's list now: `RegisterForDistanceRank` files the **ground** distance to
+`g_camera_eye` from `EnemyZombieUpdate`'s own frame, and the next frame's rank
+task sorts it -- it had sorted the pool on the 3D distance to the lens.
+`ThrowerStateCloseAndStrike` called `ActorFacePlayerTarget`, which stored the
+eye over the landing point it had just picked, so the strike's range test
+measured to the camera; it turns its yaw alone now, as the exe does.
+`ThrowerPickLandingPoint` had no `zslman` arm at all -- it lay past a
+`MatrixStackPop` Ghidra marks no-return -- and `zslman` lands ten units in
+front of `g_camera_eye` at a stance's height. Class 0x10's op `0x26` with no
+point walks to `g_camera_eye`, not the world origin. The drawn block's yaw is
+read through the index by the twenty-odd routines that index it
+(`CameraBlockYaw`), and the owl, the fish, the bats, the horde and five
+class-0x41 props read the drawn block's eye (`CameraBlockEye`).
+
+Playthroughs (`playthrough.mjs --headless --continue`, stages 1-6) against the
+tree before: stages 1, 2, 3, 5 and 6 end where they did (1 reaches its end
+240 frames sooner; 5 and 6 still hang at block 1 1/69 and block 2 1/77);
+**stage 4 now spends its sixth credit at block 6 where it used to reach the
+end on five.** It is chaos rather than one bug: putting back either the old
+rank or the old eye in `TurnActorTowardCamera` alone -- whose point turns by
+`ftol(eye.y)` BAMS, 49 against 34 -- restores the old run.
 
 ### Stage 2 block 11: the fire strip ends
 

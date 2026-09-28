@@ -377,7 +377,8 @@ export function Class22FightPhase1(obj: JudgmentActor, f: ClassFrame,
 
   // The tail, `0x0049C003` -- past the `MatrixStackPop` at `0x0049C093`.
   // The facing is taken from the OLD position, before the carry below.
-  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, f.eye.x, f.eye.z);
+  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, G.g_camera_eye.x,
+                              G.g_camera_eye.z);
   if (comp) {
     for (let i = 0; i < 16; i++) _m[i] = i % 5 === 0 ? 1 : 0;
     MatrixTranslate(_m, comp.pos.x, comp.pos.y, comp.pos.z);
@@ -457,7 +458,7 @@ function Snap(obj: JudgmentActor): void {
 /** `Class22EvalCameraRelativePath(obj, slot, frame)`. */
 function Cam(obj: JudgmentActor, f: ClassFrame, slot: number,
              frame: number): void {
-  Class22EvalCameraRelativePath(obj.judgment, f.host, f.eye, slot, frame);
+  Class22EvalCameraRelativePath(obj.judgment, f.host, slot, frame);
 }
 
 /**
@@ -624,7 +625,8 @@ export function Class22FightPhase2(obj: JudgmentActor, f: ClassFrame): void {
   }
 
   // The tail, `0x0049C869`.
-  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, f.eye.x, f.eye.z);
+  obj.yaw = Class22FaceCamera(obj.pos.x, obj.pos.z, G.g_camera_eye.x,
+                              G.g_camera_eye.z);
   // `FSTP [0x009C8E10]` at `0x0049C8A6`.
   G.g_boss_hp_fraction = BossHpFractionOf(obj.hp, obj.maxHp);
   Class22DrawAndPoseSubActor(obj, f);

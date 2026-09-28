@@ -12,7 +12,7 @@ import {
   MatCopy, MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
   MatrixTranslate, type Mat,
 } from "../matrix";
-import { vec3, type Vec3 } from "../vec";
+import { vec3 } from "../vec";
 import {
   BOSS4_BLADE_BONE, BOSS4_FOOT_A, BOSS4_FOOT_B, Boss4Flag, Boss4Sound,
   Boss4Tables,
@@ -59,7 +59,7 @@ const _foot = vec3();
  * `GameHost.boneWorld` answers; a headless host answers nothing and the feet
  * are left as they were.
  */
-export function Boss4FootfallShake(obj: Actor, b: Blk, eye: Vec3,
+export function Boss4FootfallShake(obj: Actor, b: Blk,
                                    host: GameHost, events?: Events): void {
   if (!(b.flags & Boss4Flag.Footfalls)) return;
   let shake = 0;
@@ -84,7 +84,9 @@ export function Boss4FootfallShake(obj: Actor, b: Blk, eye: Vec3,
     }
   }
   if (shake === 0) return;
-  // `g_camera_eye_x`/`_z` (`0x009C71E0`/`0x009C71E8`) -- the frame's eye.
+  // `g_camera_eye_z`/`_x` by address (`0x00492597`, `0x0049259F`) -- the
+  // gameplay eye.
+  const eye = G.g_camera_eye;
   const dz = obj.pos.z - eye.z;
   const dx = obj.pos.x - eye.x;
   const d = Math.fround(Math.sqrt(dx * dx + dz * dz));

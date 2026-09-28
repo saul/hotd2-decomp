@@ -24,6 +24,7 @@
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import { G } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { QueryGroundHeightAt } from "../coli";
 import { vec3, type Vec3 } from "../vec";
 import { SpawnRingEffectAtPose } from "./ring_effect";
@@ -140,7 +141,7 @@ export function SeveredHeadUpdate(h: SeveredHead, rng: Rng,
     // `g_camera_yaw_bams` (`0x009C71F0`), which the scene state's hooks write
     // as a camera heading turned half round, and threw every head at the
     // camera. `[proved]`
-    const a = G.g_camera_block_yaw_bams * ((Math.PI * 2) / 65536);
+    const a = CameraBlockYaw(G.g_camera_index) * ((Math.PI * 2) / 65536);
     h.vel.x = AWAY_SPEED * Math.sin(a);
     h.vel.z = AWAY_SPEED * Math.cos(a);
     // `rand() & 0x80000001` is a signed `% 2`; `(x * -2 + 1)` turns 0/1 into

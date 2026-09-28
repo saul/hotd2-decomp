@@ -31,12 +31,12 @@ import {
 } from "../combat/counts";
 import { ActorDespawn } from "../despawn";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { CameraBlockYaw } from "../camera/view";
 import { HIT_SLOT_CLAIMED } from "../hit_slots";
 import { CameraSlotVacate } from "../camera/slots";
 import { AttackListOf, CharacterTypeOf, MotionPlayFrame, MotionPlayLength,
          MotionRowOf } from "../tables";
 import type { GameHost } from "../host";
-import type { Vec3 } from "../vec";
 import { AngleWithinTolerance } from "../actor_turn";
 import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotionBlended, ZombieSetMotionIfIdle } from "./motion_cue";
@@ -167,7 +167,7 @@ export function ZombiePickThrowingHand(obj: ZombieActor, rng: Rng): number {
  */
 export function ZombieShouldStandAndThrow(obj: ZombieActor, rng: Rng): boolean {
   if (obj.condition !== ATTACK_RUN_THROW_CONDITION) return false;
-  if (!AngleWithinTolerance((G.g_camera_block_yaw_bams - 0x8000) & 0xffff,
+  if (!AngleWithinTolerance((CameraBlockYaw(G.g_camera_index) - 0x8000) & 0xffff,
                             obj.yaw & 0xffff, FACING_WINDOW)) {
     return false;
   }
@@ -222,7 +222,7 @@ export function ZombieRetireThrowConditionIfUnarmed(obj: ZombieActor): void {
 /** `FUN_0040A040`'s window here: 0x400 BAMS, a little over five degrees. */
 const FACING_WINDOW = 0x400;
 
-export function ZombieStateStandAndThrow(obj: ZombieActor, _eye: Vec3,
+export function ZombieStateStandAndThrow(obj: ZombieActor,
                                          rng: Rng,
                                          host: GameHost,
                                          events?: Events): void {

@@ -30,6 +30,7 @@ import { Events } from "../src/core/events.ts";
 import { ActorSpawn, GameUpdate } from "../src/game/director.ts";
 import { DescriptorFromPlacement } from "../src/game/descriptor.ts";
 import { G, ResetGameGlobals } from "../src/game/globals.ts";
+import { SeatHarnessEye } from "./lib/harness_eye.ts";
 import { NULL_HOST } from "../src/game/host.ts";
 import { SetGameTables } from "../src/game/tables.ts";
 import { ActorIsEnemy } from "../src/game/registry.ts";
@@ -134,5 +135,6 @@ for (let i = 0; i <= frames; i++) {
   prev = line;
   walker.tick(1 / 60);
   syncSpawns();
-  GameUpdate(eye, 1 / 60, host, rng, events);
+  SeatHarnessEye(eye);
+  GameUpdate(1 / 60, host, rng, events);
 }

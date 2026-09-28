@@ -26894,7 +26894,7 @@ console.log("\nevery caller of the ring effects, where the exe calls it:");
     a.lookAt = vec3(2, y + 9, 83);
     a.yaw = 0x1230;
     a.motion = motion;
-    a.action = { motion, ticks: 0, loop: false };
+    a.action = { motion, ticks: 0 };
     a.flags |= ActorFlag.PoseFrozen | ActorFlag.Dead;
     a.dead = true;
     a.state = ThrowerState.Corpse;

@@ -70,7 +70,8 @@ import {
 } from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
-  PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
+  EvtGameplayLiveUpdate, PadBit, PlayerBlockCapture,
+  PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
 } from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
@@ -275,7 +276,7 @@ import {
 import {
   HudDrawLives, RELOAD_VOICE, SHOOT_VOICE,
 } from "../src/game/hud_readout";
-import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
+import { BossHpBarSprite, ContinueSprite, HUD_READOUT_SPRITES, HudSprite }
   from "../src/game/hud_sprites";
 import { BOSS_HP_BAR_KILL, BossHpBarSpawn, BossHpBarsTick, BossHpFractionOf }
   from "../src/game/boss_hp_bar";
@@ -10550,6 +10551,240 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         CheckPlayerCanBeHit(2) === -1 && CheckPlayerCanBeHit(-1) === -1);
   check("...and a player at 9 while a stage runs",
         CheckPlayerCanBeHit(1) === -3 && CheckPlayerCanBeHit(0) === 0);
+}
+
+console.log("\nthe continue screen, as the exe draws it:");
+{
+  // Into the continue the way a game gets there: the reset's start press, a
+  // strike on the path camera that takes the last life, and `GameUpdate`.
+  // What is asserted is what the frame drew -- `g_screen_sprite_draws`, which
+  // the HUD layer puts on the screen -- read against the pushes in
+  // `RunPhaseContinueCountdown` (`FUN_00460530`), `CreditPromptDraw`
+  // (`FUN_00406CE0`) and `PlayerContinueCountdown` (`FUN_00414280`).
+  const rng = new Rng(5);
+  const ev = new Events();
+  G.g_GameMode = GameMode.Arcade;
+  scene(0, rng);
+  const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
+  const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
+    [d.id.toString(16), d.x, d.y]));
+  run(1, rng, ev);
+  check("in play: the crosshair is drawn, the gameplay gate is open, and "
+        + "player 2's corner has the credit line -- 'PRESS START BUTTON' at "
+        + "(384, 412) x1.4 over 'CREDIT(S)' at (424, 427)",
+        G.g_crosshair_drawn[0] === 1 && EvtGameplayLiveUpdate() === 1
+        && at(ContinueSprite.PressStart).some((d) => d.x === 384
+          && d.y === 412 && Math.abs(d.sx - 1.4) < 1e-6 && d.flags === 5)
+        && at(ContinueSprite.Credits).some((d) => d.x === 424 && d.y === 427),
+        listed());
+
+  // Frame 1 takes the player out (state 4), frame 2 puts the run in phase 3
+  // and arms the countdown, frame 3 is phase 3 and moves the run to 4.
+  G.g_player_lives[0] = 1;
+  PlayerTakeDamage(0, 1, 9);
+  run(3, rng, ev);
+  check("the last life gone: player 1 at 4 and the run in phase 4",
+        G.g_player_state[0] === PlayerState.Continue
+        && G.g_nRunPhase === RunPhase.ContinueCountdown,
+        `state ${G.g_player_state[0]} phase ${G.g_nRunPhase}`);
+  run(1, rng, ev);
+  const big = at(ContinueSprite.Continue);
+  const digits = G.g_screen_sprite_draws.filter(
+    (d) => d.id >= ContinueSprite.BigDigit0
+      && d.id <= ContinueSprite.BigDigit0 + 9);
+  check("the run draws 'CONTINUE?' 0x22C at (128, 200) and the 64x128 digit "
+        + "0x4F + 9 at (482, 188), scale 1, top-left anchored -- and nothing "
+        + "else draws a CONTINUE?",
+        big.length === 1 && big[0].x === 128 && big[0].y === 200
+        && big[0].sx === 1 && big[0].flags === 0
+        && digits.length === 1 && digits[0].id === ContinueSprite.BigDigit0 + 9
+        && digits[0].x === 482 && digits[0].y === 188,
+        JSON.stringify([...big, ...digits]));
+  check("...under it player 1's credit line, 'PRESS START BUTTON' at "
+        + "(42, 412) and 'CREDIT(S) 5' from (82, 427), the 5 at 176",
+        at(ContinueSprite.PressStart).some((d) => d.x === 42 && d.y === 412)
+        && at(ContinueSprite.Credits).some((d) => d.x === 82 && d.y === 427)
+        && G.g_screen_sprite_draws.some((d) => d.id === HudSprite.Digit0 + 5
+          && d.x === 176 && d.y === 427),
+        listed());
+  check("...no crosshair, no lives, and the script's gate shut",
+        G.g_crosshair_drawn[0] === 0
+        && at(HudSprite.Lamp1P).length === 0 && EvtGameplayLiveUpdate() === 0);
+
+  // The digit, frame by frame: 0x9FFF less 0x2D a frame, `>> 12`. The frame
+  // above was the first of phase 4; these are the second onwards.
+  const shown: number[] = [];
+  const lineOn: boolean[] = [];
+  const lineWanted: boolean[] = [];
+  const clocks: number[] = [];
+  for (let f = 0; f < 200; f++) {
+    // The walk reads the clock `CreditBlinkTick` left last frame.
+    const c = G.g_credit_blink_clock;
+    clocks.push(c);
+    run(1, rng, ev);
+    const d = G.g_screen_sprite_draws.find(
+      (s) => s.id >= ContinueSprite.BigDigit0
+        && s.id <= ContinueSprite.BigDigit0 + 9);
+    shown.push(d ? d.id - ContinueSprite.BigDigit0 : -1);
+    lineOn.push(at(ContinueSprite.PressStart).some((s) => s.x === 42));
+    lineWanted.push(((c >> 5) % 3) !== 2);
+  }
+  const nines = shown.filter((d) => d === 9).length;
+  check("the digit shows 9 for 92 frames in all -- 0x1000 / 0x2D -- then 8, "
+        + "and 7 by the 184th",
+        nines === 91 && shown[91] === 8 && shown[182] === 7
+        && shown.every((d) => d >= 7),
+        `${nines} nines after the first, then ${shown.slice(88, 96)}`);
+  check("...the credit line's clock steps one a frame, and the line is off "
+        + "exactly where (clock >> 5) % 3 == 2: 64 frames on, 32 off",
+        clocks.every((c, i) => i === 0 || c === clocks[i - 1] + 1)
+        && lineOn.every((b, i) => b === lineWanted[i])
+        && lineOn.includes(true) && lineOn.includes(false),
+        `${lineOn.filter((b) => !b).length} frames off of 200`);
+
+  // START with a credit: back in play, and the screen goes. The frame of the
+  // press still draws CONTINUE? -- the run draws before it tests -- and the
+  // next is in play.
+  G.g_pad_state = PadBit.Start0;
+  run(1, rng, ev);
+  G.g_pad_state = 0;
+  run(1, rng, ev);
+  check("START continues: in play, 'CONTINUE?' gone, the crosshair back, "
+        + "the gate open, and a credit spent",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_nRunPhase === RunPhase.InPlay
+        && at(ContinueSprite.Continue).length === 0
+        && G.g_crosshair_drawn[0] === 1 && EvtGameplayLiveUpdate() === 1
+        && G.g_credits[0] === 4,
+        `state ${G.g_player_state[0]} credits ${G.g_credits[0]} ${listed()}`);
+}
+
+{
+  // Two players: player 1 continues in their half while player 2 plays on,
+  // so the run stays in phase 2 and the per-player countdown draws its own.
+  const rng = new Rng(6);
+  const ev = new Events();
+  const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
+  const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
+    [d.id.toString(16), d.x, d.y]));
+  G.g_GameMode = GameMode.Arcade;
+  scene(0, rng);
+  JoinPlayerTwo();
+  G.g_player_lives[0] = 1;
+  PlayerTakeDamage(0, 1, 9);
+  run(3, rng, ev);
+  const layered = G.g_screen_sprite_draws.filter((d) => (d.flags & 0x700));
+  const small = layered.find((d) => d.id === ContinueSprite.Continue);
+  const digit = layered.find((d) => d.id === ContinueSprite.BigDigit0 + 9);
+  check("two players: the run stays in play and player 1's countdown draws "
+        + "the small CONTINUE? at (48, 170) x0.6/0.8 and its digit at "
+        + "(260, 160), through the layered queue",
+        G.g_nRunPhase === RunPhase.InPlay
+        && G.g_player_state[0] === PlayerState.Continue
+        && !!small && small.x === 48 && small.y === 170
+        && Math.abs(small.sx - 0.6) < 1e-6 && Math.abs(small.sy - 0.8) < 1e-6
+        && !!digit && digit.x === 260 && digit.y === 160
+        && G.g_screen_sprite_draws.every((d) =>
+          d.id !== ContinueSprite.Continue || d === small),
+        JSON.stringify(layered));
+  check("...and player 2 in play keeps the script's gate open",
+        EvtGameplayLiveUpdate() === 1);
+  // The trigger: no use on the first two digits (`CMP EAX, 0x8000; JGE`),
+  // and from 7 down it knocks the count to the bottom of its digit.
+  const pull = () => QueueShotRequest(0, { origin: vec3(), dir: vec3(0, 0, 1) });
+  let before = G.g_player_continue_timer[0];
+  pull();
+  run(1, rng, ev);
+  check("a pull on the 9 does nothing but the frame's 0x2D",
+        G.g_player_continue_timer[0] === before - 0x2d,
+        `${before.toString(16)} -> `
+        + `${G.g_player_continue_timer[0].toString(16)}`);
+  while (G.g_player_continue_timer[0] >= 0x8000) run(1, rng, ev);
+  before = G.g_player_continue_timer[0];
+  pull();
+  run(1, rng, ev);
+  check("...one on the 7 knocks it to the bottom of its digit",
+        G.g_player_continue_timer[0] === (before & ~0xfff) + 1 - 0x2d,
+        `${before.toString(16)} -> `
+        + `${G.g_player_continue_timer[0].toString(16)}`);
+  // Let it run out: the small GAME OVER, then out.
+  let frames = 0;
+  while (G.g_player_state[0] === PlayerState.Continue && frames < 1200) {
+    run(1, rng, ev);
+    frames += 1;
+  }
+  run(1, rng, ev);
+  const overs = G.g_screen_sprite_draws.filter(
+    (d) => d.id === ContinueSprite.GameOver);
+  check("run out, player 1 is game over in play: the arming frame draws the "
+        + "small GAME OVER 0x43E at (45, 170) x0.6/0.7 twice -- "
+        + "PlayerStateArmGameOver, then the wait it calls",
+        G.g_player_state[0] === PlayerState.GameOver && overs.length === 2
+        && overs[0].x === 45 && overs[0].y === 170
+        && Math.abs(overs[0].sy - 0.7) < 1e-6,
+        `state ${G.g_player_state[0]} ${JSON.stringify(overs)}`);
+  let shownFor = 1;
+  while (G.g_player_state[0] === PlayerState.GameOver && shownFor < 400) {
+    run(1, rng, ev);
+    if (G.g_screen_sprite_draws.some((d) => d.id === ContinueSprite.GameOver)) {
+      shownFor += 1;
+    }
+  }
+  check("...on 119 frames in all: the wait counts 0x78 and draws on every "
+        + "one but the last, which puts player 1 out",
+        shownFor === 119 && G.g_player_state[0] === PlayerState.Out,
+        `${shownFor} frames, state ${G.g_player_state[0]}`);
+  const c = G.g_credit_blink_clock;
+  run(1, rng, ev);
+  check("...and out, player 1's corner has the credit line again",
+        at(ContinueSprite.Credits).some((d) => d.x === 82)
+          === (((c >> 5) % 3) !== 2),
+        listed());
+}
+
+{
+  // `g_evt_gameplay_live` in the walker: with the gate shut every wait holds,
+  // `wait_frames` included, and it goes on the first frame the gate opens.
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x42, name: "wait_frames", cat: "wait", arg: 3,
+          blocks_on: "frames" },
+        { i: 1, at: 1, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+          arg: 0, blocks_on: "enemies alive <= arg" },
+        { i: 2, at: 2, op: 0x42, name: "wait_frames", cat: "wait", arg: 100,
+          blocks_on: "frames" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  let live = false;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => 0,
+    presentEnemies: () => 0, aliveCivilians: () => 0, cameraFree: () => true,
+    scriptFlagRaised: () => null, gameplayLive: () => live,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  for (let f = 0; f < 10; f++) w.tick(1 / 60);
+  check("the script holds at wait_frames 3 for ten frames while no player "
+        + "is in play", w.opIndex === 0, `op ${w.opIndex}`);
+  live = true;
+  w.tick(1 / 60);
+  check("...and goes on the frame the gate opens: the count ran down while "
+        + "it was shut", w.opIndex === 1, `op ${w.opIndex}`);
+  live = false;
+  for (let f = 0; f < 10; f++) w.tick(1 / 60);
+  check("wait_enemies_alive 0 with nobody alive holds while the gate is shut",
+        w.opIndex === 1, `op ${w.opIndex}`);
+  live = true;
+  w.tick(1 / 60);
+  check("...and passes once it opens", w.opIndex === 2, `op ${w.opIndex}`);
 }
 
 console.log("\nIsPlayerAttackable: the scene has to be running:");
@@ -21770,7 +22005,8 @@ console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
         G.g_camera_settled = 1;
         gateHeld ||= !waitTargetsClear.satisfied!(
           { kind: "targets" }, { op: 0x47 } as never,
-          { host: { cameraTargetsClear: CameraTargetsClear } } as never);
+          { host: { cameraTargetsClear: CameraTargetsClear },
+            gameplayLive: () => true } as never);
       }
       if (p?.routine === CarriedPropRoutine.StuckToScreen) hitFrame = f;
     }
@@ -23316,8 +23552,12 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   reload();
   check("Original Mode reloads to the magazine size",
         G.g_player_ammo[0] === 9, `${G.g_player_ammo[0]}`);
+  // The readout's own row, y 372: player 2's credit line, which
+  // `PlayerPollStart` draws for a player at 9, counts its credits in the
+  // same digits at y 427.
   const digits = G.g_screen_sprite_draws.filter(
-    (s) => s.id >= HudSprite.Digit0 && s.id <= HudSprite.Digit0 + 9);
+    (s) => s.id >= HudSprite.Digit0 && s.id <= HudSprite.Digit0 + 9
+      && s.y === 372);
   check("...and draws seven or more as one bullet, 'x' and two digits",
         bullets().length === 1 && sprites(HudSprite.Times).length === 1
         && digits.map((d) => d.id - HudSprite.Digit0).join("") === "09",

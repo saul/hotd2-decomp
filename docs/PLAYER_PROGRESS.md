@@ -2909,10 +2909,46 @@ counted by the routine that counts them; `g_player_lives` has no default. The
 
 **Lives now drain, and a game can end.** `PlayerTakeDamage` is exact: on the
 path camera the last life goes, the player drops out of play, and the
-continue countdown runs (the HUD strip shows `CONTINUE? n`). **Press S** --
-START -- to continue on a credit; otherwise the run's own continue screen
-counts down and asks for the game-over screen (below). Player 2 can join by
-the same route, but the page has no second START key yet.
+continue screen comes up (below). **Press S** -- START -- to continue on a
+credit; otherwise the run's own continue screen counts down and asks for the
+game-over screen (below). Player 2 can join by the same route, but the page
+has no second START key yet.
+
+**The continue screen is drawn, and the script waits under it** (2026-09-28,
+`NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran
+and the reticle stayed up over a scene that played on, script and all. Now,
+all of it read from the exe and recorded as screen sprites for the HUD layer:
+
+* **The run's CONTINUE?** -- `RunPhaseContinueCountdown` (`FUN_00460530`)
+  draws `0x22C` at (128, 200) and the 64x128 digit `0x4F + (timer >> 12)` at
+  (482, 188) every frame of run phase 4, from `0x9FFF` down `0x2D` a frame:
+  each digit 91 or 92 frames, the whole count about fifteen seconds. The
+  continue buttons (pad `0x4`) knock it to the bottom of its digit from the 7
+  down; the port's mouse is input mode 5, which `[likely]` never raises that
+  bit, so a click does not hurry it -- START does not either, it takes it.
+* **The credit line** -- `CreditPromptDraw` (`FUN_00406CE0`) and its drawer:
+  "PRESS START BUTTON" over "CREDIT(S) n", blinking 64 frames on and 32 off,
+  in the continuing player's corner; and the same line in the corner of a
+  player who is out, which is player 2's for the whole of a one-player game.
+  "INSERT COIN(S)" when the count is 0, "FREE PLAY" in free play.
+* **The two-player share** -- a player continuing while the other plays
+  draws a small CONTINUE? and digit in their own half through the layered
+  queue (`HudDrawContinuePrompt`, `HudDrawContinueDigit`), and a small GAME
+  OVER for 119 frames when it runs out (`HudDrawPlayerGameOver`).
+* **No crosshair.** `HudDrawCrosshair` (`FUN_004169C0`) is called only from
+  the in-play task; its decision is recorded in `G` and the page's reticle
+  follows it, where it used to follow the firing gate alone.
+* **The script stands still.** `g_evt_gameplay_live` (`0x007DCCA4`) is
+  recomputed at the top of `EvtInterpreterLoop` and every wait opcode,
+  `0x40..0x47`, tests it, so the walker holds at the wait it had reached while
+  the enemies and the camera run on. It used to walk on through the stage
+  with nobody playing it.
+
+The sprites are new in the bundle: **re-export** for the continue screen to
+show (`screen_sprites` in `script.json`). `tools/continue_page.mjs` drives it
+in the real page and shoots `continue-9.png`, `continue-6.png`,
+`continue-3.png` and `continue-taken.png`; `tools/verify_continue.py` holds
+every position, id and table against the EXE.
 
 **Ammo, the reload and the HUD readouts.** A gun holds six, and **R**
 reloads. The whole of it is below, under *The magazine, the reload and the

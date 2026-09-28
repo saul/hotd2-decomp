@@ -45,6 +45,7 @@ import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
 import { ScreenSpriteQueueFlush, ScreenSpriteQueueReset } from "./screen_sprite";
+import { CreditBlinkTick, InputReadFrameCounters } from "./credit_prompt";
 import { SeveredHeadsTick } from "./effects/severed_head";
 import { BodyCreaturePoolUpdate } from "./body_creature";
 import { CarriedPropPoolUpdate } from "./carried_prop";
@@ -606,6 +607,12 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   G.g_scene_tick_counter += SecondsToTicks(dt);
   // ...and the tick's next lines, the Hod2.ini auto-reload.
   AutoReloadEmptyGuns(events);
+  // `SetupSceneProjection`'s `ScreenSpriteQueueReset` (`FUN_0041CF00`): the
+  // layered queue starts every frame empty, whatever screen is up.
+  ScreenSpriteQueueReset();
+  // The input read, `FUN_0040E4D0` -> `InputReadFrame`: the frame counter the
+  // credit line's blink runs on, and the credit tiers.
+  InputReadFrameCounters(SecondsToTicks(dt));
   // Input first. `BuildShotRay` (`FUN_00406110`) writes the per-player shot
   // record and the frame reads it, so the trigger pulls the viewer made since
   // the last frame are resolved before anything moves -- an enemy is shot
@@ -618,13 +625,17 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   // `AppStateDispatch` (`FUN_004608A0`): only app state 6 runs the scene.
   // The game-over screen, 7, runs its own phases and task lists
   // (`game/game_over.ts`) and the stage's actors stand still; any other
-  // screen (3, after the game over) runs nothing the port has.
+  // screen (3, after the game over) runs nothing the port has -- not even the
+  // dispatch's last call, `CreditBlinkTick`, since the port has no screen 3
+  // to draw its PRESS START on.
   if (G.g_app_state !== AppState.InPlay) {
     // The letterbox is one of the scene list's tasks (`HudShutterTaskCreate`,
     // `0x00460733`), so a screen that does not walk that list draws no bars.
     G.g_hud_shutter_bars = [];
     if (G.g_app_state === AppState.GameOver) {
       GameOverRunPhase({ host, rng, events }, events);
+      CreditBlinkTick();
+      ScreenSpriteQueueFlush();
     }
     CommitAppState();
     return { lookAt: G.g_camera_block_target };
@@ -639,6 +650,14 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
   RunPhaseDispatch(() => {
     result = SceneTaskWalk(eye, dt, frames, host, rng, events);
   });
+  // `AppStateDispatch`'s last call, whatever the screen.
+  CreditBlinkTick();
+  // `ScreenSpriteQueueFlush` (`FUN_0041CF30`), from `FUN_00418550`, which
+  // `GameFrameTick` (`FUN_0040E730`) calls after `AppStateDispatch` -- so
+  // after the run phase's own draws as well as the task walk's: the layered
+  // queue lands after the continue screen's CONTINUE? and digit. It was at
+  // the end of the walk, which put it before them.
+  ScreenSpriteQueueFlush();
   CommitAppState();
   return result;
 }
@@ -651,9 +670,7 @@ export function GameUpdate(eye: Vec3, dt: number, host: GameHost, rng: Rng,
  */
 function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
                        rng: Rng, events?: Events): FrameResult {
-  // `ScreenSpriteQueueReset` (`FUN_0041CF00`), from `SetupSceneProjection`
-  // ahead of the walk: the layered queue starts every frame empty.
-  ScreenSpriteQueueReset();
+  // The layered queue was emptied at the head of the frame, in `GameUpdate`.
   PlayerTasksRun({ host, rng, events });
   // The letterbox, the task `HudShutterTaskCreate` makes on the line after
   // `SpawnAttackablePlayerTask` (`0x00460733`): after both players have read
@@ -831,9 +848,6 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   Boss3TasksTick(events);
   // `UpdateSceneViewAndLight`'s shake, after the camera has settled.
   SceneViewApplyShake();
-  // `ScreenSpriteQueueFlush` (`FUN_0041CF30`): `FUN_00418550` draws the
-  // layered queue after the task walk, so its sprites land after every one
-  // the frame drew directly.
-  ScreenSpriteQueueFlush();
+  // The layered queue is flushed by `GameUpdate`, after the run phase.
   return { lookAt: G.g_camera_block_target };
 }

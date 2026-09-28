@@ -16,6 +16,11 @@
  * ended on, and every class-0x30 entrance whose cue is that exact frame waited
  * for the rest of the stage. `Walker.tick` settles the action after the
  * interpreter, which is where the engine settles it.
+ *
+ * And it needs `g_evt_gameplay_live`: with nothing pending it still returns
+ * without advancing while the gate is shut --
+ * `if (pending) { yield = 1; return; } if (!live) return;` -- which is the
+ * continue screen holding the script here. `[proved]` (`FUN_0045FA80`)
  */
 import type { WaitPolicy } from "../walker";
 import type { WaitContext, WaitRule } from "./types";
@@ -24,11 +29,11 @@ export const waitQueuedEvents: WaitRule = {
   ops: [0x40],
   skippable: true,
   enter(_op, ctx: WaitContext): WaitPolicy {
-    return ctx.queuedEventsPending === 0
+    return ctx.queuedEventsPending === 0 && ctx.gameplayLive()
       ? { kind: "passed", why: "the action ring is empty" }
       : { kind: "queued" };
   },
   satisfied(_policy, _op, ctx: WaitContext): boolean {
-    return ctx.queuedEventsPending === 0;
+    return ctx.queuedEventsPending === 0 && ctx.gameplayLive();
   },
 };

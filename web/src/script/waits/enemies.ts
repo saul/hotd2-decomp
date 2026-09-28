@@ -67,6 +67,7 @@ export const waitEnemiesPresent: WaitRule = {
   },
   satisfied(_policy, op: OpJson, ctx: WaitContext): boolean {
     return (ctx.host.presentEnemies() ?? 0) <= (op.arg ?? 0)
+      && ctx.gameplayLive()
       && ctx.cameraHasHandedBack();
   },
 };
@@ -100,6 +101,7 @@ export const waitEnemiesAlive: WaitRule = {
   },
   satisfied(_policy, op: OpJson, ctx: WaitContext): boolean {
     const pass = (ctx.host.aliveEnemies() ?? 0) <= (op.arg ?? 0)
+      && ctx.gameplayLive()
       && ctx.cameraHasHandedBack()
       && G.g_evt_wait_alive_hysteresis > 0;
     if (pass) G.g_evt_wait_alive_hysteresis = 0;
@@ -131,6 +133,7 @@ export const waitScriptedActors: WaitRule = {
   },
   satisfied(_policy, op: OpJson, ctx: WaitContext): boolean {
     return (ctx.host.aliveCivilians() ?? 0) <= (op.arg ?? 0)
+      && ctx.gameplayLive()
       && ctx.cameraHasHandedBack();
   },
 };

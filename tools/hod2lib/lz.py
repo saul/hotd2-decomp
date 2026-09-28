@@ -15,6 +15,8 @@ u32 header and verifies the result length against it.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+
 __all__ = ["decompress", "decompress_file", "LZError"]
 
 
@@ -125,11 +127,55 @@ def decompress(src: bytes, pos: int = 0, expected: int | None = None) -> bytes:
     return bytes(out)
 
 
+#: Decompressed files by their compressed bytes, most recently used last --
+#: and the failures too, as their message. See `decompress_file`.
+_CACHE: OrderedDict[bytes, bytes | str] = OrderedDict()
+_CACHE_BYTES = 0
+#: Enough for every file one check touches -- `verify_combat` reads 23 MB
+#: from 123 files -- and a ceiling for a tool that reads the whole game once.
+_CACHE_LIMIT = 256 * 1024 * 1024
+
+
 def decompress_file(data: bytes) -> bytes:
     """Decompress a whole on-disk file, honouring the u32 size header.
 
     Raises LZError if the produced length does not match the header exactly.
+
+    **Memoised on the input bytes.** It is a pure function of them, and the
+    tools ask it the same question over and over: `verify_combat` made 3,060
+    calls on 123 distinct files -- every stage it resolves loads the same
+    character models, and `container.classify` trial-decompresses a file
+    that `container.load` then decompresses again -- and spent 85% of its
+    three minutes here. The key is the bytes themselves, not a path, so a
+    cache hit is the same input by construction. A failed trial is kept as
+    its message and raised again.
     """
+    global _CACHE_BYTES
+    if not isinstance(data, bytes):
+        return _decompress_file(data)
+    hit = _CACHE.get(data)
+    if hit is not None:
+        _CACHE.move_to_end(data)
+        if isinstance(hit, str):
+            raise LZError(hit)
+        return hit
+    try:
+        out: bytes | str = _decompress_file(data)
+    except LZError as e:
+        # not-a-loss: kept as the entry and raised again just below, and on
+        # every later call with the same bytes.
+        out = str(e)
+    _CACHE[data] = out
+    _CACHE_BYTES += len(data) + len(out)
+    while _CACHE_BYTES > _CACHE_LIMIT and len(_CACHE) > 1:
+        k, v = _CACHE.popitem(last=False)
+        _CACHE_BYTES -= len(k) + len(v)
+    if isinstance(out, str):
+        raise LZError(out)
+    return out
+
+
+def _decompress_file(data: bytes) -> bytes:
     if len(data) < 4:
         raise LZError("file too short to hold a size header")
 

@@ -1,5 +1,5 @@
 /**
- * The three class-0x41 generic types whose whole routine is a draw, a pose and
+ * The four class-0x41 generic types whose whole routine is a draw, a pose and
  * one rule about when to stop.
  *
  * They are here because {@link GENERIC_DESCRIPTOR_SLOT} could not have them
@@ -14,13 +14,13 @@
  * `MatrixStackPop` is marked no-return, so Ghidra ends the function body at
  * the `CALL` and the pseudocode stops there (`L37`, and `L35` one level
  * further out). `disassemble_bytes` from the address the body claims to end at
- * is what found: type 31's slot-strip wrap, and type 53's two camera-facing
- * billboards. Read literally, the pseudocode said type 31 draws one fixed
- * model and type 53 draws nothing but its body.
+ * is what found: type 31's slot-strip wrap, type 33's step and its death, and
+ * type 53's two camera-facing billboards. Read literally, the pseudocode said
+ * types 31 and 33 draw one fixed model and type 53 draws nothing but its body.
  */
 import { G } from "../globals";
 import { ActorDespawnProp, ActorKillProp } from "./prop";
-import type { BreakableProp } from "./prop_state";
+import { PropFamily, type BreakableProp } from "./prop_state";
 
 /**
  * `g_script_flags[12]` — what `PropDrawOnlyType54` drifts on.
@@ -102,6 +102,91 @@ export function PropDrawOnlyType31(p: BreakableProp): void {
   // The draw is the renderer's; the cursor it reads is this.
   p.storyItem += 1;
   if (p.storyItem > p.removeFlag) p.storyItem = 0;
+}
+
+/**
+ * `PropDrawOnlyType33` — `FUN_00472950`: the half after its draw.
+ *
+ * One shipped spawn in the whole game — stage 2 block 11 step 1 op 20, placed
+ * once camera path `cp_st2[2]` passes frame 340 and immediately followed by
+ * `se_play` of `STAGE2_SE\BRIDGE_CRASH1_22.wav`: slot `0x174A`,
+ * `eff_shop.bin[0]`, with a roll word of `0x3B`. A strip of `eff_shop.bin`
+ * (the fire the crash leaves, `[likely]` from what the slots render as and
+ * nothing else), and it is **played once and killed**. The whole routine,
+ * `0x00472950`..`0x004729D6`:
+ *
+ * ```
+ * 00472951  PUSH 0 ; CALL MatrixStackPush
+ * 00472971  CALL MatrixTranslate(+0x19C, +0x1A0, +0x1A4)
+ * 0047297D  CALL MatrixRotateZ(+0x1D4)
+ * 00472989  CALL MatrixRotateY(+0x1D0)
+ * 00472995  CALL MatrixRotateX(+0x1CC)
+ * 0047299A  MOVSX EAX,word [ESI+0x28c] ; ADD EAX,[ESI+0x2a0]
+ * 004729A8  CALL AssetDrawSlot
+ * 004729AF  CALL MatrixStackPop(1)            ; Ghidra's body ends here
+ * 004729B4  MOV EDX,[ESI+0x2a0] ; MOV ECX,[ESI+0x2a4]
+ * 004729C3  INC EDX ; MOV EAX,EDX ; MOV [ESI+0x2a0],EDX
+ * 004729CC  CMP EAX,ECX ; JLE ret
+ * 004729D1  JMP ActorKill                      ; 0x004A7040
+ * ```
+ *
+ * No `PropExpireByStepLifetime` in front of it, no `AND` on `obj+0x34` and no
+ * `RegisterForShotTest`: a draw, a step and a kill. So it cannot ride the
+ * generic arm, which supplies the lifetime prologue (and its scene-1 sweep,
+ * and stage 2 is scene 1) and the shot-test tail — and without this routine
+ * the port drew `0x174A` and held it for ever, because the only exit it had
+ * was that prologue counting 5962 step changes against the slot word.
+ *
+ * Its arm of `PlaceGenericProp`'s switch is `0x004620BE`: entry `0x11` of
+ * `g_place_generic_prop_arms` (`0x004628D4`), which is what
+ * `g_place_generic_prop_arm_index` (`0x00462978`) holds for `33 - 6`. It
+ * writes `obj+0x28C` from the placer's `+0x11C` and `obj+0x2A4` from the
+ * placer's `+0x6C`, and nothing else; `ActorClearGameFields` has zeroed
+ * `obj+0x2A0`. The compare is on the **post-increment** cursor, so a roll
+ * word of `n` draws cursors `0 .. n` — `n + 1` frames, sixty for the shipped
+ * `0x3B`, slots `0x174A..0x1785` — and the call that drew cursor `n` is the
+ * one that kills.
+ *
+ * **Why it steps at the head of the frame.** The engine draws, then steps.
+ * The port's draw is the renderer's and runs after the whole frame, so the
+ * step half is run where the port runs every draw-then-step object's — the
+ * sprite effects, the water rings — at the head of the next frame, by
+ * {@link PropDrawOnlyType33Tick}. `ActorAlloc` puts the object after its
+ * placer in the same task list, and `TaskRunTree` (`FUN_004A71A0`) reaches it
+ * on the frame it is made — the placer's `ActorKill` leaves the placer's own
+ * next pointer intact — so the engine draws cursor 0 on that frame. The port
+ * places it during its actor walk and the renderer draws cursor 0 on that
+ * frame too, and the two sequences agree frame for frame through cursor `n`.
+ * The routine reads nothing but its own fields, so where in the frame the
+ * step lands is unobservable to everything else. The one thing that moves is
+ * when the pool lets go of it: at the head of the frame after its last draw
+ * rather than at the end of that draw's frame, with no draw and no reader of
+ * the object in between.
+ */
+export function PropDrawOnlyType33(p: BreakableProp): void {
+  // The draw is the renderer's -- `(s16)obj+0x28C + obj+0x2A0` -- and this
+  // is everything after it.
+  p.storyItem += 1;
+  if (p.storyItem > p.removeFlag) ActorKillProp(p);
+}
+
+/**
+ * `[port-only]` — the walk that steps {@link PropDrawOnlyType33} at the head
+ * of the frame, as `SpriteEffectsTick` steps the sprite effects. The engine's
+ * task list steps it; the port's pool update runs after the actors, which is
+ * the wrong side of the draw for a routine that draws first.
+ *
+ * `ActorKill` unlinks the object at once, so a killed one leaves the pool
+ * here rather than waiting for `BreakablePropPoolUpdate`'s sweep.
+ */
+export function PropDrawOnlyType33Tick(): void {
+  let killed = false;
+  for (const p of G.g_breakable_props) {
+    if (p.dead || p.family !== PropFamily.DrawOnlyType33) continue;
+    PropDrawOnlyType33(p);
+    killed ||= p.dead;
+  }
+  if (killed) G.g_breakable_props = G.g_breakable_props.filter((p) => !p.dead);
 }
 
 /**

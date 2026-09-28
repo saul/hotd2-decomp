@@ -729,6 +729,8 @@ web/src/
     prop_parts.ts the class-0x41 routines that draw several models at
                   several poses (types 38, 39, 40, 44) as lists of parts;
                   breakables.ts clones and poses them
+    prop_shatter.ts  a stacked prop's fifteen shatter pieces
+                  (`G.g_prop_shatters`), off breakables.ts's templates
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
     characters/boss3.ts, boss3_effects.ts  class 0x45 composes its own bone
                   matrices in `game/class45/`; these place them, and draw
@@ -737,6 +739,17 @@ web/src/
     creature_effects.ts  the owl's and the fish's effect tasks and the ring
                   task, from `game/effects/owl.ts`, `fish.ts` and
                   `ring_effect.ts`' records, the same way
+    water_rings.ts  the flat ring a class-0x30 death leaves on water, from
+                  `game/effects/water_ring.ts`' records
+    water_surfaces.ts  the canal water class 0x41 type 1 draws
+                  (`game/class41/water.ts`): the stage's own tile node where
+                  the glTF has one -- `StageScene` shows it while resident --
+                  or a `slots_actor` clone; the ripple's UVs rewritten per
+                  geometry from `G.g_water_surface_uv`, and the bilinear bit
+                  as a per-mesh material clone
+    characters/bat.ts, bat_splash.ts  class 0x46: each root in rotation
+                  order 5 at its model's own scale, and the splash task
+                  `game/class46/splash.ts` steps
   ui/           React. One projection in, one command union out.
     App.tsx       the page, canvas included; App provides, Page renders
     store.ts      UiStore: publish, subscribe, dispatch, demand

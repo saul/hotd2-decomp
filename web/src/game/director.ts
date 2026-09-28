@@ -18,6 +18,7 @@ import { SceneViewApplyShake } from "./camera/shake";
 import { ActorLiftCameraPoint, CameraPointRiseFor } from "./camera/track";
 import { ThrownWeaponUpdate } from "./class31/projectile";
 import { BreakablePropPoolUpdate } from "./class41/pool";
+import { WaterSurfacesTick } from "./class41/water";
 import { PropContainerType } from "./class41";
 import { FLICKER_LIGHT_TYPE } from "./class41/type48";
 import { Class44Selector } from "./class44";
@@ -37,6 +38,7 @@ import { BossBannersTick } from "./boss_banner";
 import { WaterWaveSourcesTick } from "./class17";
 import { Boss4HitMarksTick } from "./class19/hit_mark";
 import { Boss3TasksTick } from "./class45/tasks";
+import { BatSplashesTick } from "./class46/splash";
 import { FishEffectsTick } from "./effects/fish";
 import { OwlEffectsTick } from "./effects/owl";
 import { RingEffectsTick } from "./effects/ring_effect";
@@ -539,21 +541,27 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
       : pl.container === "table38" ? PropContainerType.Table38Props
       : pl.container === "table39" ? PropContainerType.Table39Stacks
       : pl.container === "table44" ? PropContainerType.Table44Props
+      : pl.container === "water_surface" ? PropContainerType.WaterSurface
       : PropContainerType.BreakableGroup;
     // The three table constructors read the placer's `+0x11C` as the step
     // lifetime they copy into every object, so that is what goes in `hp` for
     // them; for a group it is the group id.
     const table = pl.container === "table38" || pl.container === "table39"
       || pl.container === "table44";
+    // The water task reads both descriptor fields as themselves: `+0x1F4`
+    // the table index, `+0x11C` the lifetime.
+    const water = pl.container === "water_surface";
     const a = ActorSpawn(s.at, SpawnClassValue.PropContainerPlacer,
-                         pl.lifetime_evt_steps,
+                         water ? pl.field_1f4 ?? 0 : pl.lifetime_evt_steps,
                          pl.container === "kinded"
                            ? `prop kind ${pl.kind}`
                            : pl.container === "flicker_light"
                              ? "flicker light"
-                             : `breakable group ${pl.group}`,
-                         { hp: table ? pl.lifetime_evt_steps
-                                     : pl.group ?? 0,
+                             : water
+                               ? `water surface ${pl.field_1f4}`
+                               : `breakable group ${pl.group}`,
+                         { hp: table || water ? pl.lifetime_evt_steps
+                                              : pl.group ?? 0,
                            condition: type });
     a.pos = vec3(s.pos?.[0] ?? 0, s.pos?.[1] ?? 0, s.pos?.[2] ?? 0);
     a.yaw = pl.yaw ?? 0;
@@ -762,7 +770,11 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   CarriedPropPoolUpdate(rng, host, events);
   // The breakable props are their own 0x378 objects in the engine's pool, not
   // actors, so they get their own sweep — the same shape as the weapons.
-  BreakablePropPoolUpdate(rng, events);
+  BreakablePropPoolUpdate(rng, events, host);
+  // ...and the canal water tasks, which a class-0x41 placer allocates with
+  // `ActorAlloc` like the props, so after the actors that placed them: a task
+  // made this frame draws this frame. See `game/class41/water.ts`.
+  WaterSurfacesTick();
 
   // `FUN_00408DD0` drains the candidates the actor updates above registered.
   UpdateCameraEnemySlots(eye);
@@ -790,6 +802,10 @@ function SceneTaskWalk(eye: Vec3, dt: number, frames: number, host: GameHost,
   OwlEffectsTick(rng);
   FishEffectsTick();
   RingEffectsTick();
+  // The splashes a falling bat allocates (`SpawnBatSplash`, `FUN_0042F980`):
+  // after the bats, so the first is drawn on the frame it is made. See
+  // `game/class46/splash.ts`.
+  BatSplashesTick();
 
   // Class 0x45's own tasks -- its intro card, the sparks and splashes, the
   // bulge and the wake -- allocated by its actors above, so after them.

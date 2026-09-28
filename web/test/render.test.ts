@@ -1603,6 +1603,52 @@ console.log("\nthe shot effects are models, one per frame:");
 }
 
 
+console.log("\nthe water ring is drawn from its record alone:");
+{
+  const root = new Obj3D();
+  const part = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial());
+  part.name = "slots_effect_fixed000_slot_0e23";
+  part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+  root.add(part);
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // `WaterRingUpdate` (`FUN_00456880`): `T(pos) Scale(s, 0.2, s)` and the
+  // record's alpha, in the world's own layer.
+  G.g_water_rings.push({
+    id: 2, pos: { x: 1, y: 0, z: 2 }, size: 1.5, growth: 0.02, alpha: 0.25,
+    frames: 45, slot: 0xe23,
+  });
+  layer.update(ctx);
+  const water = layer.group.children[0] as InstanceType<typeof Mesh>
+    | undefined;
+  const e = water?.matrix.elements ?? [];
+  const ws = [Math.hypot(e[0]!, e[1]!, e[2]!), Math.hypot(e[4]!, e[5]!, e[6]!),
+              Math.hypot(e[8]!, e[9]!, e[10]!)];
+  check("a water ring is its size across and 0.2 high, at its point",
+        water !== undefined && Math.abs(ws[0]! - 1.5) < 1e-6
+        && Math.abs(ws[1]! - Math.fround(0.2)) < 1e-6
+        && Math.abs(ws[2]! - 1.5) < 1e-6 && e[12] === 1 && e[14] === 2,
+        JSON.stringify(ws));
+  const mat = water?.material as InstanceType<typeof MeshBasicMaterial>;
+  check("...at the record's alpha",
+        mat?.transparent === true && Math.abs(mat.opacity - 0.25) < 1e-6,
+        `${mat?.opacity}`);
+  check("...drawn in the world's order, not over it",
+        water?.renderOrder === 0, `${water?.renderOrder}`);
+  G.g_water_rings.length = 0;
+  layer.update(ctx);
+  check("and a ring that has gone takes its node with it",
+        layer.group.children.length === 0,
+        `${layer.group.children.length}`);
+  ResetGameGlobals();
+}
+
+
 console.log("\nthe blood colour switch moves the map, not the shader:");
 {
   // A 2x1 image and just enough canvas to transpose it. The file's own stub is
@@ -2300,6 +2346,12 @@ console.log("\nthe player's character survives its own op 10:");
  * spheres, so a bat had no hit test at all and could not be shot. Reported
  * from play, and it is a bug this file could have caught: `pickShot` had no
  * test of its own.
+ *
+ * The bat has since moved to the engine's own registration
+ * (`ClassHandler.registersForShotTest`, `game/class46/`), so this pick passes
+ * it by; it is still the vehicle here because its type is the one with no
+ * sphere, and the flag is lifted for the length of the test to exercise the
+ * arm every class that does not register still takes.
  */
 console.log("\nthe shot: a character with no bone sphere is one sphere");
 {
@@ -2313,6 +2365,12 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   // The real `PlaceBats`, so the radius under test is the one the class
   // actually writes and not one this file made up.
   await import("../src/game/classes");
+  const { g_class_handlers } = await import("../src/game/registry");
+  const h = g_class_handlers[SpawnClass.Bat]!;
+  const registers = h.registersForShotTest;
+  check("the bat registers for the shot test the engine's way",
+        registers === true);
+  delete h.registersForShotTest;
 
   // Character type 0x1E as the exporter emits it: one bone, one slot, and no
   // `hit_radius` at all, because the EXE's row for it is zero.
@@ -2405,8 +2463,6 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   // A class that registers the engine's way is `game/combat/shot_test.ts`'s:
   // this pick passes it by, registered or not, so the one answer it gets is
   // the one its own registration earns.
-  const { g_class_handlers } = await import("../src/game/registry");
-  const h = g_class_handlers[SpawnClass.Bat]!;
   h.registersForShotTest = true;
   check("a class that registers the engine's way is not picked here",
         chars.pickShot(ray(0, 1)) === null,
@@ -2414,6 +2470,7 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
   delete h.registersForShotTest;
   check("...and is again once it stops", chars.pickShot(ray(0, 1))?.kind
         === "actor");
+  h.registersForShotTest = registers;
 
   stage.dispose();
   G.g_object_list.length = 0;
@@ -2511,6 +2568,188 @@ console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 
   stage.dispose();
   G.g_object_list.length = 0;
+}
+
+/**
+ * The scatter's and the swarm's members, and their wings: **runtime children**
+ * of a placer, drawn from synthetic rows at the address the port's placer
+ * gives each one (`BatChildAt`, `BatWingAt`), parented to the placer's own
+ * row. `PlaceBats` makes every object and the layer adopts them -- which is
+ * the whole of the change that makes sub-types 1 and 2 visible.
+ *
+ * And the wing's seat, against the renderer rather than against itself:
+ * `BatWingUpdate` builds the body's node matrix in `game/` the way the draw
+ * builds it, and the check is that the point it seats the wing at is where the
+ * pose this layer made puts `(0, 1, 2)` -- rotation order, signs, the root
+ * record's half-turn and the 0.6 model scale all at once.
+ */
+console.log("\nthe bat's runtime children: rows at the placer's addresses");
+{
+  const { CharacterLayer } = await import("../src/render/characters");
+  const { SpawnScriptedCharacters } = await import("../src/game/director");
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { SetGameTables } = await import("../src/game/tables");
+  const { Scope } = await import("../src/core/scope");
+  const { Object3D, Vector3, Matrix4 } = await import("three");
+  const { BatChildAt, BatUpdate, BatWingAt } =
+    await import("../src/game/class46");
+  const { BatState, BatSubtype } = await import("../src/game/class46/state");
+  await import("../src/game/classes");
+
+  // One frame of `bat.bin` 1031's real shape: the root record is a half-turn
+  // about y, tipped by 3679 about x, and the root sits 0.4 low.
+  const BODY_CLIP = { bank: "z", frames: 1, fps: 30, root: [0, -0.4, 0],
+                      rot: [3679, 32767, 0, 0, 0, 0] };
+  const WING_CLIP = { bank: "z", frames: 1, fps: 30, root: [0, 0, 0],
+                      rot: [0, 0, 0, 0, 0, 0] };
+  const BODY = {
+    type: 0x1e, name: "zabat", file: "zabat.bin", bone_count: 2,
+    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01, offset: [0, 0, 0],
+              parent: null }],
+    motions: { "1031": BODY_CLIP },
+  };
+  const WING = {
+    type: 0x1f, name: "zabat_wing", file: "zabat_wing.bin", bone_count: 2,
+    actor_radius: 10, head_bone: 2, reactions: {}, attacks: {},
+    bones: [{ bone: 1, part: "bone01_1b03", slot: 0x1b03,
+              offset: [0, 1.674, -0.7731], parent: null }],
+    motions: { "1030": WING_CLIP },
+  };
+  const PLACER = 0x3190;
+  const rows: Record<string, unknown>[] = [
+    { at: PLACER, class: 0x46, char_type: 0x1e, motion: 1031, hp: 1, yaw: 0,
+      class46: { subtype: 1, group: 0, member: 0 } },
+  ];
+  for (let i = 0; i < 25; i += 1) {
+    const body = BatChildAt(PLACER, BatSubtype.Scatter, i);
+    rows.push({ at: body, class: 0x46, char_type: 0x1e, motion: 1031, hp: 0,
+                yaw: 0, parent_at: PLACER, synthetic: true });
+    rows.push({ at: BatWingAt(body), class: 0x46, char_type: 0x1f,
+                motion: 1030, hp: 0, yaw: 0, parent_at: PLACER,
+                synthetic: true });
+  }
+  const CHARS = { types: { "30": BODY, "31": WING }, placements: rows };
+
+  const root = new Object3D();
+  let n = 0;
+  for (const r of rows) {
+    const wing = r.char_type === 0x1f;
+    const name = `chr_${wing ? "zabat_wing" : "zabat"}_spawn`
+      + String(n++).padStart(3, "0");
+    const rig = new Object3D();
+    rig.name = name;
+    rig.userData = { hod2_kind: "rig", hod2_rig: name.replace(/_spawn\d+$/, ""),
+                     hod2_spawn_at: r.at };
+    const bone = new Object3D();
+    bone.name = `${name}_bone01_${wing ? "1b03" : "1b01"}`;
+    if (wing) bone.position.set(0, 1.674, -0.7731);
+    rig.add(bone);
+    root.add(rig);
+  }
+
+  ResetGameGlobals();
+  SetGameTables(CHARS as never);
+  G.g_players_in_play = 1;
+  const chars = new CharacterLayer();
+  const stage = new Scope("stage");
+  chars.build(root, stage, CHARS as never);
+
+  const listed = [{ at: PLACER }];
+  const ready = chars.readySpawns(listed);
+  check("every member's row and every wing's is wanted with the placer's",
+        ready.length === 51, `${ready.length}`);
+  const made = SpawnScriptedCharacters(ready);
+  check("...but only the placer is spawned from its row",
+        made.length === 1 && made[0].at === PLACER,
+        made.map((m) => m.at.toString(16)).join(","));
+  chars.syncSpawns(listed, made);
+  const adopted = new Set(chars.actors.map((a) => a.at));
+  const want = rows.slice(1).map((r) => r.at as number);
+  check("...and the layer adopted all twenty-five bats and their wings",
+        want.every((at) => adopted.has(at)),
+        `${want.filter((at) => adopted.has(at)).length} of ${want.length}`);
+  check("...and none of them twice",
+        chars.actors.length === new Set(chars.actors.map((a) => a.at)).size,
+        `${chars.actors.length}`);
+
+  // Put member 0 somewhere a sign or an axis would show (L48), tumbling as a
+  // corpse does, and seat its wing.
+  const bat = (a: unknown) => (a as { bat: { state: number } }).bat;
+  const body = G.g_object_list.find((o) => o.at === want[0])!;
+  const wing = G.g_object_list.find((o) => o.at === want[1])!;
+  body.pos.x = 12; body.pos.y = -8; body.pos.z = -3600;
+  body.yaw = 0x4000; body.pitch = 0x3000; body.roll = 0;
+  BatUpdate(wing, { host: {} } as never);
+  chars.update({} as never);
+  const m = new Matrix4();
+  const e: number[] = new Array(16).fill(0);
+  check("the body is posed", chars.boneMatrix(body.at, 1, e),
+        BatState[bat(body).state] ?? "");
+  m.fromArray(e);
+  const seat = new Vector3(0, 1, 2).applyMatrix4(m);
+  check("the wing sits where the drawn body puts (0, 1, 2)",
+        seat.distanceTo(new Vector3(wing.pos.x, wing.pos.y, wing.pos.z))
+          < 1e-3,
+        `${seat.toArray().map((v) => v.toFixed(3))} vs `
+        + `${[wing.pos.x, wing.pos.y, wing.pos.z].map((v) => v.toFixed(3))}`);
+  const scaleOf = (el: number[]) =>
+    Math.hypot(el[0], el[1], el[2]);
+  check("...and the body is drawn at its model's 0.6",
+        Math.abs(scaleOf(e) - 0.6) < 1e-4, scaleOf(e).toFixed(4));
+  chars.boneMatrix(wing.at, 1, e);
+  check("...and the wing at its 0.7",
+        Math.abs(scaleOf(e) - 0.7) < 1e-4, scaleOf(e).toFixed(4));
+
+  stage.dispose();
+  G.g_object_list.length = 0;
+}
+
+/**
+ * `BatSplashUpdate` (`FUN_0042F930`)'s draw: `common.bin` 307..336, one a
+ * frame, under a bare translation at the water plane.
+ */
+console.log("\nthe bat's splash: thirty models, one a frame, on the water");
+{
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { BatSplashesTick, SpawnBatSplash } =
+    await import("../src/game/class46/splash");
+  const root = new Obj3D();
+  for (let slot = 0x1339; slot <= 0x1356; slot += 1) {
+    const part = new Obj3D();
+    part.name =
+      `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(part);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  SpawnBatSplash(-400, -31.5, -3620);
+  BatSplashesTick();
+  layer.update(ctx);
+  const node = layer.group.children[0];
+  check("a splash is one node in the world, on its first model",
+        layer.group.children.length === 1
+        && !!node?.name.endsWith("slot_1339"),
+        `${layer.group.children.length} ${node?.name}`);
+  check("...at the corpse's x and z and the plane's y, unturned, full size",
+        node?.position.x === -400 && node.position.y === -25
+        && node.position.z === -3620 && node.quaternion.w === 1
+        && node.scale.x === 1, `${node?.position.toArray()}`);
+  for (let i = 0; i < 29; i += 1) BatSplashesTick();
+  layer.update(ctx);
+  check("...and on its thirtieth, the last",
+        !!layer.group.children[0]?.name.endsWith("slot_1356"),
+        layer.group.children[0]?.name ?? "none");
+  BatSplashesTick();
+  layer.update(ctx);
+  check("...and then nothing", layer.group.children.length === 0
+        && G.g_bat_splashes.length === 0, `${layer.group.children.length}`);
 }
 
 // -- class 0x40's sheet ------------------------------------------------------

@@ -84,6 +84,20 @@ export enum MotionFlag {
    */
   RootMotion = 0x02,
   /**
+   * Bit `0x04` — **the ground-anchored draws trace the floor.**
+   *
+   * Two readers, and they make the same choice `[proved]`:
+   * `SpawnGroundRingEffect` (`FUN_00407DA0`, `TEST byte ptr [EDI+0x1F8], 4`
+   * at `0x00407DCD`) puts its ring on `QueryGroundHeightAt(x, y + 20, z)`
+   * with the bit up and on `obj+0x44` without it, and `ActorDrawGroundShadow`
+   * (`FUN_0040A620`, `TEST AL, 4` at `0x0040A649`) does the same for the
+   * shadow. `EnemyZombieInit` (`OR EDX, 4` at `0x00452E21`) and
+   * `EnemyThrowerInit` (`0x00449694`) raise it straight after
+   * `ActorBuildSkinnedModel`; `OneHitTargetInit` (`FUN_00448ED0`) raises only
+   * bit 1, so a class-0x20 ring sits at the body's own height.
+   */
+  TraceGround = 0x04,
+  /**
    * Bit `0x10` — take the root's **y** as well.
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
@@ -1027,16 +1041,6 @@ export enum ThrowerStance {
   Pounce = 4,
 }
 
-/** A motion the actor is playing at full weight. `t` is seconds. */
-/**
- * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
- *
- * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
- * engine counts frames and the port compares against frame numbers. Holding it
- * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
- * a frame test written `===` could be stepped over -- which is what the
- * `struck` latch on this interface's owner used to exist to work around.
- */
 /**
  * One skeleton record's rotation in a fade's snapshot, overriding the clip's:
  * `(rx, ry, rz)` BAMS, applied `RotZ RotY RotX` like every record. See
@@ -1047,7 +1051,29 @@ export interface FadeRecord {
   rot: [number, number, number];
 }
 
-export interface ActorClip { motion: number; ticks: number; loop: boolean }
+/**
+ * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
+ *
+ * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
+ * engine counts frames and the port compares against frame numbers. Holding it
+ * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
+ * a frame test written `===` could be stepped over -- which is what the
+ * `struck` latch on this interface's owner used to exist to work around.
+ */
+export interface ActorClip {
+  motion: number;
+  ticks: number;
+  loop: boolean;
+  /**
+   * `[port-only]` The clip was set through `ActorSetOneShotBlended`, the
+   * channel's `ActorSetMotionBlended` (`FUN_004119A0`), so the actor's fade is
+   * a fade **into it** and holds `ticks` on the start frame while it runs, as
+   * `SkeletonAdvancePlayCursor` (`FUN_004111A0`) holds `obj+0x19C` while
+   * `track+0x37` bit 0 is up. A one-shot set any other way keeps running under
+   * a fade, which is what it did before this existed.
+   */
+  held?: boolean;
+}
 
 /**
  * **Another actor**, by spawn address — the port's stand-in for a raw actor
@@ -1990,7 +2016,9 @@ export interface ActorBase {
    * clip's: a state that writes the drawn pose's records before it blends
    * (`Boss4StateTurnClipThenApproach`, `FUN_00494730`, rewrites records 1 and
    * 9 at `char+0x10C` and `+0x58C`) hands the renderer the BAMS it wrote, and
-   * the fade dissolves from those.
+   * the fade dissolves from those. The frog's two turning states do the same
+   * to record 1 after every pass of a turn clip (`FrogStateHopWithinScreenWedge`
+   * (`FUN_0043AA10`), `FrogStateLeapAtPlayer` (`FUN_0043B270`)).
    */
   fadeFrom: { motion: number; ticks: number; records?: FadeRecord[] } | null;
   /**

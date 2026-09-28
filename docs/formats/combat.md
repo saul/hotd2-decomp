@@ -2505,12 +2505,30 @@ Over it runs a **three-stage arc motion script**, twelve dwords that
 { s32 motion, s32 start frame, s32 fade, s32 threshold } x 3
 ```
 
-Every script in the program names the **same motion** in all three stages, so a
-script is one clip cut into windup, flight and landing. `ActorArcStep`
-(`FUN_0044D860`) plays stage 0 on the spot, stage 1 once the clip frame passes
-stage 0's threshold, stage 2 once it passes stage 1's, and reports the arc over
-past stage 2's. `zstin`'s attack 0 is `{303,0,5,22}{303,23,5,46}{303,47,0,47}`
-and connects on frame **62** of the same clip.
+A script is nearly always one clip cut into windup, flight and landing. Seven
+of the 38 that classes 0x30 and 0x31 can install end on a different clip —
+`zslman`'s leap aside in stances 1 and 3 (504 then 506, 494 then 496) and set
+3's attack 3 in all five stances — and every start and threshold of all 38 lies
+inside the play length of its own stage's clip, which `tools/verify_combat.py`
+check 16 asserts. `ActorArcStep` (`FUN_0044D860`) plays stage 0 on the spot,
+stage 1 once the clip frame reaches stage 0's threshold, stage 2 once it
+reaches stage 1's, and reports the arc over once the landing clip reaches
+stage 2's — **not** when the arc lands: its flight phase ignores
+`ActorArcInterpolate`'s result, so an arc that comes down early waits for the
+clip. `zstin`'s attack 0 is `{303,0,5,22}{303,23,5,46}{303,47,0,47}` and
+connects on frame **62** of the same clip.
+
+**The fade is a hold.** Each stage is played by a direct `CALL 0x004119a0` —
+`ActorSetMotionBlended(obj+0x194, motion, start, fade)`, at `0x0044D901`,
+`0x0044D94D` and `0x0044D9C9` — which writes `start` into the cursor at
+`obj+0x19C` outright and raises `track+0x37` bit 0. While that bit is up
+`SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not recompute the cursor, so
+it sits on `start` until the counter has run `fade + 2` past the call, then
+plays on from `start + 1`. Every threshold the script and the attack entry
+name is compared against that held cursor, and it is what the fit is fitting:
+`FitArcScriptByFadeLength` (`FUN_0044D5F0`) grows stages 1 and 2's fades to
+take up the slack of a long arc, so a long leap holds the flight clip's first
+frame through the air rather than playing it slowly. `[proved]`
 
 > ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
 > authored at 30 Hz, so the baked clip's own index is half of it: clip 303

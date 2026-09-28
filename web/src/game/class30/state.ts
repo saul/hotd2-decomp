@@ -375,6 +375,15 @@ export interface ZombieTail extends HeadAimWords {
    * `G.g_carried_props` id; `-1` for none. The engine holds the pointer.
    */
   carriedProp: number;        // +0x139C
+  /**
+   * `obj+0x13A0` — the next death-effect cue, as an index into
+   * `g_zombie_death_effect_cues` (`0x005930AC`) where the engine keeps a
+   * pointer into it. `ZombieInstallDeathEffectCues` (`FUN_004563F0`) points it
+   * at the dying clip's list and `ZombieDeathEffectCueTick` (`FUN_004569B0`)
+   * steps it past each cue it fires; those two routines are the only ones in
+   * the image that touch the word `[proved]` (every `[reg + 0x13A0]` operand).
+   */
+  deathCue: number;           // +0x13A0
 }
 
 /**
@@ -410,5 +419,6 @@ export function makeZombieTail(): ZombieTail {
     throwHand: 0,
     carryRelease: 0,
     carriedProp: -1,
+    deathCue: 0,
   };
 }

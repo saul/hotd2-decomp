@@ -13,6 +13,10 @@ import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
 import { FallingContainerUpdate } from "../class44/container";
+import { FallingContainerFragmentUpdate }
+  from "../class44/container_fragment";
+import type { GameHost } from "../host";
+import { PropShattersTick, type ShatterCamera } from "./shatter";
 import { RisingDoorUpdate } from "../class44/rising_door";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
@@ -56,17 +60,33 @@ import { PropUpdateType44 } from "./type44";
  * `PropExpireByStepLifetime`, and a prop that never expires is a prop that
  * stands in the level for the rest of the stage.
  */
-export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
+export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
+                                        host?: GameHost): void {
   // `DAT_005A4C80 = 0` — `ProcessPlayerShots` empties the registration list at
   // the end of its pass, so every object has to publish itself again. That is
   // what makes a prop which returned early this frame unshootable for exactly
   // as long as the engine makes it. See `class41/shot_test.ts`.
   ClearPropShotTestList();
+  // The view the group props' draw blocks compose onto this frame -- what
+  // `MatrixStore(obj+0x2E4)` keeps under the model, and what the shatter's
+  // `MatrixInvert(0)` takes back off. Null with no camera.
+  const w2v: number[] = new Array(16).fill(0);
+  const v2w: number[] = new Array(16).fill(0);
+  const cam: ShatterCamera | null =
+    host?.cameraMatrices?.(w2v, v2w) ? { w2v, v2w } : null;
+  // `for...of` over the live array on purpose: `ActorAlloc` appends to the
+  // task list the walk is on, so the two pieces a falling container throws
+  // take their first step on the frame they are thrown, after everything
+  // that was already there.
   for (const p of G.g_breakable_props) {
     if (p.dead) continue;
     switch (p.family) {
       case PropFamily.Kinded: KindedPropUpdate(p, rng, events); break;
       case PropFamily.Falling: FallingContainerUpdate(p, rng, events); break;
+      // No prologue, no hit arm, no shot test: the routine is a lifetime, a
+      // tumble and a landing. See `class44/container_fragment.ts`.
+      case PropFamily.ContainerFragment:
+        FallingContainerFragmentUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
       case PropFamily.Generic: GenericPropUpdate(p, events); break;
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
@@ -104,12 +124,16 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events): void {
       // Its own constructor, its own lifetime, its own light. See
       // `class41/type48.ts`.
       case PropFamily.Type48: PropUpdateType48FlickerLight(p, rng, events); break;
-      default: BreakablePropUpdate(p, rng, events); break;
+      default: BreakablePropUpdate(p, rng, events, cam); break;
     }
   }
   if (G.g_breakable_props.some((p) => p.dead)) {
     G.g_breakable_props = G.g_breakable_props.filter((p) => !p.dead);
   }
+  // The shatter objects the walk above allocated, and the ones still flying
+  // from earlier frames. Each is its own task in the engine, appended behind
+  // the prop that made it, so a new one steps on the frame it is made.
+  PropShattersTick();
 }
 
 /**

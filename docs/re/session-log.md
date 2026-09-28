@@ -23415,17 +23415,19 @@ camera point is untouched by any mode.
   renderer's; the part list is bound in the port and the grow-and-push hook
   is the game's.
 
-**Declared.** A divergence: the switch reads the pose the renderer last drew,
-a tick behind the engine's same-routine draw for a moving civilian -- the
-same reading the camera point and the frog take. What closes it already
-exists for class 0x14: the engine's model block in `game/skeleton.ts`
-(`Actor.skel`), posed by the class's own `DrawSkinnedModelAndShadow` call.
-Moving civilians onto it moves their clip clock, root motion and draw off
-the director and the renderer's posing, and a carrier's matrix has to go
-under the walk -- a class-wide change, not this switch's, so it is declared
-here and left for its own session. `[port-only]`: with no pose (a headless
-host, or the tick before the renderer adopts a spawn) a bone arm takes the
-position.
+**What is still not the engine's.** The switch reads the pose the renderer
+last drew, a tick behind the engine's same-routine draw for a moving
+civilian -- the same reading the camera point and the frog take, and the
+seam `game/host.ts` declares at its head, so it adds no marker of its own.
+What closes it already exists for class 0x14: the engine's model block in
+`game/skeleton.ts` (`Actor.skel`), posed by the class's own
+`DrawSkinnedModelAndShadow` call. Moving civilians onto it moves their clip
+clock, root motion and draw off the director and the renderer's posing, and a
+carrier's matrix has to go under the walk -- a class-wide change, not this
+switch's; it is the question for the user in this session's report.
+`[port-only]` at the seam: with no pose (a headless host, or the tick before
+the renderer adopts a spawn) a bone arm writes nothing, as the camera point
+does.
 
 **In the page** (`?drive=1`, stage bundles exported in this worktree): on
 mode 2 the sphere equals bone 1 to the digit -- bone 1 is also the tracked
@@ -23446,10 +23448,15 @@ front of each, converging to within a few degrees of her; screenshots
   "stage 4's `0x59C8`", mode 3 "stage 3's `0x32A4`" -- was a list of other
   women. The first two page runs watched the wrong civilians and reported
   mode 2 throughout, which read like a port that never changes mode.
-* The first fallback kept the field when the host had no pose, as the camera
-  point does. The pool clears the field, so a headless run would have kept a
-  sphere at the world origin for every civilian and the push would have
-  measured it there.
+* I went back and forth on the no-pose case. A fallback to the position keeps
+  a headless civilian's sphere off the world origin, where the pool's cleared
+  field would otherwise sit; it is also a default no exe instruction makes,
+  which is the port-only gameplay logic the rules exclude. It writes nothing
+  now, as the camera point does, and the headless consequence -- a sphere at
+  the origin until something poses her -- is the seam's.
+* A first draft declared the renderer's pose lag as a new divergence on the
+  switch. It is the seam `game/host.ts` already declares; the count stays
+  where it was.
 * One mutant for the mutation run was a syntax error (a second `default:`);
   the run printed "exit 1, 0 failing", which is a build failure and not a
   check failing. Rewritten, it failed six checks.

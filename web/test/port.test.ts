@@ -10986,22 +10986,24 @@ console.log("\nclass 0x10's collision-sphere switch: a drawn bone, not the feet:
         && c.civ!.sphereCentreMode === -1,
         `${lowByte}, ${c.civ!.sphereCentreMode}`);
 
-  // [port-only] A host with no pose answers nothing, and a bone arm then takes
-  // mode 0's point rather than leave the pool's cleared sphere at the world
-  // origin; mode 3 needs both of its bones.
+  // [port-only] at the seam: a host with no pose answers nothing, and a bone
+  // arm then writes nothing -- the sphere keeps what it had, as the camera
+  // point does; mode 3 needs both of its bones.
   for (const m of [CivilianSphereMode.Bone2, CivilianSphereMode.Bone1,
                    CivilianSphereMode.Bones12And15]) {
-    c.sphereCentre = vec3(1, 2, 3);
     c.civ!.sphereCentreMode = m;
     CivilianWriteSphereCentre(c, NULL_HOST);
-    check(`with no posed skeleton, mode ${m} falls back to the position`,
-          at(c.sphereCentre, 40, 3, -60), show(c.sphereCentre));
+    check(`with no posed skeleton, mode ${m} keeps the sphere`,
+          at(c.sphereCentre, 1, 2, 3), show(c.sphereCentre));
   }
-  c.sphereCentre = vec3(1, 2, 3);
   records.delete(12);
   CivilianWriteSphereCentre(c, host);
   check("...and mode 3 with one of its two bones is no midpoint at all",
-        at(c.sphereCentre, 40, 3, -60), show(c.sphereCentre));
+        at(c.sphereCentre, 1, 2, 3), show(c.sphereCentre));
+  c.civ!.sphereCentreMode = CivilianSphereMode.Position;
+  CivilianWriteSphereCentre(c, NULL_HOST);
+  check("mode 0 needs no pose", at(c.sphereCentre, 40, 3, -60),
+        show(c.sphereCentre));
 
   // **The readers.** `RegisterForShotTest` publishes the switch's point and
   // `ColiTestSphereAgainstActors` measures every other actor's push against

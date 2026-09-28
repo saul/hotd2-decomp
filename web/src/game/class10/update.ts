@@ -184,25 +184,24 @@ const _b = { x: 0, y: 0, z: 0 };
  * sphere, and both readers re-derived class 0x30's feet-plus-radius-plus-one
  * over whatever was there.
  *
- * [diverges] The engine reads the pose it drew **this** frame, a few lines
- * up in the same routine, after the move step and the pose hook's push; the
- * port's pose is the renderer's and so the one it last drew, a tick behind
- * for a civilian that is moving. That is the reading `ActorRegisterCameraPoint`
- * and the frog's bone 1 take too. Closing it is giving the civilian the
- * engine's model block (`Actor.skel`, `game/skeleton.ts`) and calling
- * `DrawSkinnedModelAndShadow` where `CivilianUpdate` does, as class 0x14
- * already does -- which moves the class's clip clock, its root motion and
- * its draw off the director and the renderer's own posing, and on a carrier
- * needs the carrier's matrix under the walk.
+ * **The records are the renderer's**, which is the seam `game/host.ts`
+ * declares at its head: the engine reads a bone out of its own draw
+ * records, the port asks three.js. So the pose read is the one the renderer
+ * last drew -- the engine's is the draw a few lines up in this routine,
+ * after the move step and the pose hook's push, so for a moving civilian
+ * the port's is a tick behind. `ActorRegisterCameraPoint` and the frog's
+ * bone 1 read the same way. What would close it for this class is the
+ * engine's model block (`Actor.skel`, `game/skeleton.ts`, which class 0x14
+ * carries), posed by a `DrawSkinnedModelAndShadow` call where
+ * `CivilianUpdate` makes it; that moves the class's clip clock, its root
+ * motion and its draw off the director and the renderer, and a carrier's
+ * matrix has to go under the walk.
  *
- * `[port-only]` With no posed skeleton — a headless host, or the tick before
- * the renderer adopts a new spawn — a bone arm has no record to read, which
- * the engine never lacks: its draw is on the lines above. The arm then takes
- * mode 0's point, the position, and mode 3 does so unless both of its bones
- * answer. Keeping what the field held instead would leave a sphere at the
- * world origin for every civilian a headless run makes — the pool clears it —
- * and `ColiTestSphereAgainstActors` measures it there, which is a collision
- * the game cannot have.
+ * `[port-only]` as a function: the engine writes it inline, so it has no
+ * address of its own. And at the seam: with no posed skeleton -- a headless
+ * host, or the tick before the renderer adopts a new spawn -- a bone arm has
+ * no answer and writes nothing, so the sphere keeps what it had, as the
+ * camera point does (`camera/track.ts`); mode 3 needs both of its bones.
  */
 export function CivilianWriteSphereCentre(obj: Actor, host: GameHost): void {
   const sub = obj.civ;
@@ -210,18 +209,21 @@ export function CivilianWriteSphereCentre(obj: Actor, host: GameHost): void {
   const c = obj.sphereCentre;
   switch (sub.sphereCentreMode as CivilianSphereMode) {
     case CivilianSphereMode.Position:
-      break;
+      c.x = obj.pos.x;
+      c.y = obj.pos.y;
+      c.z = obj.pos.z;
+      return;
     case CivilianSphereMode.Bone2:
-      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE1, _a)) break;
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE1, _a)) return;
       c.x = _a.x; c.y = _a.y; c.z = _a.z;
       return;
     case CivilianSphereMode.Bone1:
-      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE2, _a)) break;
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE2, _a)) return;
       c.x = _a.x; c.y = _a.y; c.z = _a.z;
       return;
     case CivilianSphereMode.Bones12And15:
-      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE3_A, _a)) break;
-      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE3_B, _b)) break;
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE3_A, _a)) return;
+      if (!host.boneWorld(obj.at, CIVILIAN_SPHERE_BONE_MODE3_B, _b)) return;
       c.x = (_b.x + _a.x) * HALF;
       c.y = (_b.y + _a.y) * HALF;
       c.z = (_b.z + _a.z) * HALF;
@@ -230,10 +232,6 @@ export function CivilianWriteSphereCentre(obj: Actor, host: GameHost): void {
       // `JA 0x0048AF7D`: any other byte writes nothing.
       return;
   }
-  // Mode 0, `0x0048ADDB`: `obj+0x40..0x48` -- and the fallback above.
-  c.x = obj.pos.x;
-  c.y = obj.pos.y;
-  c.z = obj.pos.z;
 }
 
 /**

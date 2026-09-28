@@ -106,8 +106,8 @@ async function once(label) {
     }
     await page.keyboard.press("Space");
     await page.evaluate(() => globalThis.__hotd2Drive.trace(true));
-    const box = await page.locator("#viewport").boundingBox();
-    if (!box) throw new Error("#viewport has no box");
+    const box = await page.locator("#view").boundingBox();
+    if (!box) throw new Error("#view has no box");
 
     const ev = schedule(FRAMES);
     const rows = [];

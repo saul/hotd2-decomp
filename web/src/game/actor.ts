@@ -1082,18 +1082,23 @@ export interface FadeRecord {
 }
 
 /**
- * A one-shot clip on its own track: a strike, a lunge, an entrance, a corpse.
+ * A one-shot clip on its own track: a strike, an arc stage, an entrance, a
+ * corpse. It plays once and `ActorAdvanceMotion` clears it at its end.
  *
  * `ticks`, not seconds, for the same reason {@link Actor.playTicks} is: the
  * engine counts frames and the port compares against frame numbers. Holding it
  * in seconds meant `ActorClipFrame` was `t * 60` over a float accumulation, so
  * a frame test written `===` could be stepped over -- which is what the
  * `struck` latch on this interface's owner used to exist to work around.
+ *
+ * There is no `loop`. The one clip that ever looped here was class 0x30's
+ * lunge, and the engine plays that on the ordinary track, where the cursor
+ * wraps by itself (`ZombieStateStrike`, `FUN_00455A40`). A clip that has to
+ * cycle belongs on {@link Actor.motion}.
  */
 export interface ActorClip {
   motion: number;
   ticks: number;
-  loop: boolean;
   /**
    * `[port-only]` The clip was set through `ActorSetOneShotBlended`, the
    * channel's `ActorSetMotionBlended` (`FUN_004119A0`), so the actor's fade is
@@ -2095,11 +2100,7 @@ export interface ActorBase {
    */
   rootFrame: number;
   rootActionFrame: number;
-  /**
-   * A one-shot at full weight: a swing, an arc stage, an entrance. The
-   * class-0x30 lunge used to be one and to loop here. It is on the ordinary
-   * track now, as `ZombieStateStrike` (`FUN_00455A40`) plays it.
-   */
+  /** A one-shot at full weight: a swing, an arc stage, an entrance. */
   action: ActorClip | null;
   /** The death clip, once. */
   death: { motion: number; ticks: number } | null;

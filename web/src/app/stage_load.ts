@@ -30,7 +30,7 @@ import { Walker } from "../script/walker";
 import { G } from "../game/globals";
 import { seekTo as seekWalkerTo } from "../script/seek";
 import { PlayerTasksDrawWithoutAFrame } from "../game/player_shell";
-import { minimapGraph, treeProjection } from "./projection/script";
+import { treeProjection } from "./projection/script";
 import { screenMessage } from "./projection/message";
 import { makeWalkerHost } from "./walker_host";
 import type { Player } from "./main";
@@ -93,16 +93,9 @@ export async function loadStageInto(p: Player): Promise<void> {
   // one is made, so a leak shows as a scope that outlived this call rather
   // than as a slow climb nobody attributes to a stage switch.
   //
-  // The mark goes **here**, at the teardown, and not at the end of the load.
-  // What the scope panel asks is "did this survive a teardown", so the frame
-  // it compares against is the frame the teardown happened on. Stamping it
-  // after the awaits instead meant every scope opened *during* the load --
-  // `stage:` and `session` on the two lines below, and every layer's own --
-  // had an `openedAt` older than the mark and was flagged as stale. That was
-  // already wrong on every stage switch; it was invisible on the first load
-  // only because `lifeFrame` could not advance while the frame loop had not
-  // started yet, which step 25 changed.
-  p.stageLoadedAt = p.lifeFrame;
+  // (A frame mark for the scope panel's "did this survive a teardown" used to
+  // be stamped here. The panel went with the move to the debug sidebar; every
+  // scope still carries its own `openedAt`, and `test:scope` is what asks.)
   p.stageScope?.dispose();
   p.stageScope = p.appScope.child(`stage:${p.state.stage}`);
   p.ctx.scope = p.stageScope;
@@ -273,7 +266,6 @@ export async function loadStageInto(p: Player): Promise<void> {
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);
-  p.minimapGraphData = minimapGraph(bundle.script);
   p.clearFeed();
 
   // Decoder warnings are surfaced, not swallowed: a step that failed to

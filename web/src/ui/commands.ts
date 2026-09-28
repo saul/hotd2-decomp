@@ -15,7 +15,7 @@
 export type ToggleName =
   | "allRegions" | "rails" | "aimRails" | "unported" | "stuck" | "coli"
   | "boxes" | "rigs" | "sky" | "hud" | "spawns" | "chars" | "props"
-  | "breakables" | "propBoxes" | "trackEnemies"
+  | "breakables" | "propBoxes"
   | "muzzle" | "redBlood" | "branchPause";
 
 export type UiCommand =
@@ -28,27 +28,20 @@ export type UiCommand =
    */
   | { kind: "setEntry"; entry: number }
   | { kind: "setOriginal"; on: boolean }
-  | { kind: "setMode"; mode: "play" | "step" | "free" }
-  | { kind: "setSpeed"; speed: number }
+  | { kind: "setMode"; mode: "play" | "free" }
   | { kind: "play" }
   | { kind: "pause" }
-  | { kind: "stepForward" }
-  | { kind: "stepBack" }
   /**
-   * Back half a second of game time, through the snapshot ring.
+   * The start screen's button: play, and everything a first gesture unlocks.
    *
-   * A different axis from `stepBack`, which is a *script* step: it seeks to
-   * the previous instruction, which replays from the entry block and throws
-   * the fight away. This puts the world back where it was, mid-fight, and is
-   * the one the "it only happens after the second zombie dies" bug wants.
-   * See `app/ring.ts`.
+   * Not `play` with a flag, because what it adds is only possible *inside* a
+   * gesture: a browser lets a page start audio, go fullscreen, lock the
+   * orientation and ask for the motion sensors only while it is handling a
+   * click or a tap, and the dispatch runs synchronously inside the one the
+   * viewer made. `app/` decides which of those this device wants.
    */
-  | { kind: "rewind" }
-  | { kind: "reset" }
+  | { kind: "start" }
   | { kind: "seek"; block: number; step: number; op: number }
-  | { kind: "scrubFrame"; frame: number; done: boolean }
-  | { kind: "saveState" }
-  | { kind: "loadState" }
   | { kind: "killAll" }
   /** The sidebar's per-class "box this" checkbox. */
   | { kind: "boxClass"; cls: number; on: boolean }
@@ -64,25 +57,19 @@ export type UiCommand =
    * user had clicked, rather than being told.
    */
   | { kind: "boxWait"; on: boolean }
-  /**
-   * The rigs panel's per-rig outline.
-   *
-   * Keyed by name rather than by index, because the list is rebuilt every
-   * frame and an index would follow whatever happened to be in that position.
-   */
-  | { kind: "boxRig"; name: string; on: boolean }
   | { kind: "setLightMode"; mode: string }
   | { kind: "setFogMode"; mode: string }
   | { kind: "setFilterMode"; mode: string }
+  /** The debug sidebar's 4:3 switch. See {@link UiProjection.pillarbox}. */
   | { kind: "setPillarbox"; on: boolean }
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
   | { kind: "requestSkip" }
   /**
-   * `[port-only]` -- the game-over screen's buttons: a new game at this
-   * stage's entry, or at stage 1, through the same boot, title and START a
-   * page load runs. Not gameplay: the engine's screen hands on to the next
-   * screen instead, which the port does not have.
+   * `[port-only]` -- a new game at this stage's entry, or at stage 1, through
+   * the same boot, title and START a page load runs: the game-over screen's
+   * two buttons, and the menu's Restart. Not gameplay: the engine's screen
+   * hands on to the next screen instead, which the port does not have.
    */
   | { kind: "restartStage" }
   | { kind: "restartFromStageOne" }

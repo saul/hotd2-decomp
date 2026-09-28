@@ -65,10 +65,17 @@ export async function serve(port) {
  * `faults` counts what the page complained about — a console error or a throw
  * — because this is the only check in the tree that runs the module graph, so
  * a throw at startup surfaces here and nowhere else.
+ *
+ * **The debug sidebar opens with the page**, unless `debug: false`. The page
+ * is the game first and the sidebar is closed by default -- but the panels in
+ * it (`#panel-hud`, `#panel-wait`, `#panel-actors`, `#cam-label`, `#volume`)
+ * are what every driver here reads, and a closed sidebar renders none of them.
+ * The sidebar's open state is one `localStorage` key (`ui/persist.ts`), set
+ * before the app's first line so the first render already has it.
  */
 export async function openPlayer({ url = "", size = "1600x1000",
                                    headless = false, quiet = false,
-                                   init = null } = {}) {
+                                   init = null, debug = true } = {}) {
   const [width, height] = size.split("x").map(Number);
   const port = await freePort();
   if (!quiet) console.log(`vite on :${port}`);
@@ -140,6 +147,31 @@ export async function openPlayer({ url = "", size = "1600x1000",
   // should know it can be watched, and wrapping a browser API from outside is
   // the one form of watching that cannot change what is watched.
   if (init) await page.addInitScript(init);
+  // The page's own preference, written the way the page writes it, so the
+  // sidebar is open from the first render rather than opened by a keypress
+  // the driver would have to time. Wrapped: a page with site data blocked
+  // throws on the accessor, and then the sidebar simply stays shut.
+  if (debug) {
+    await page.addInitScript(() => {
+      try { localStorage.setItem("hod2.ui.debug", "true"); } catch { /* */ }
+    });
+  }
+  // **Muted, as a choice, on a fresh profile.** The page's Start turns sound
+  // on for a viewer who has never said otherwise -- and Space is a Start --
+  // so without this every driver that presses Space would now be running
+  // with sound, where it used to run muted: a different page, and one whose
+  // console carries the `_OFF.wav` 404s the engine's stop ids produce by
+  // design (`audio/bgm.ts`). Only when nothing is saved, so a driver that
+  // unmutes -- `loops`, `audio`, `sound_prefs` -- keeps what it chose across
+  // a reload.
+  await page.addInitScript(() => {
+    try {
+      if (localStorage.getItem("hod2.viewPrefs") === null) {
+        localStorage.setItem("hod2.viewPrefs",
+                             JSON.stringify({ toggles: {}, muted: true }));
+      }
+    } catch { /* site data blocked: the page starts muted anyway */ }
+  });
 
   await page.goto(`http://127.0.0.1:${port}/${url}`,
                   { waitUntil: "domcontentloaded" });

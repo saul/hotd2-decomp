@@ -168,15 +168,16 @@ try {
 
   console.log("free roam");
 
-  // 1. The control case: free roam from the keyboard, nothing focused.
-  await page.keyboard.press("Digit3");
+  // 1. The control case: free roam from the keyboard, nothing focused. `2`
+  //    since Step mode went: `1` is Play and `2` is free roam.
+  await page.keyboard.press("Digit2");
   await sleep(250);
   const byKey = await flyW();
-  check("W flies after entering free roam with the 3 key",
+  check("W flies after entering free roam with the 2 key",
         byKey > 1, `moved ${byKey.toFixed(1)} units`);
 
   // 2. The bug as reported: free roam from the button, which keeps focus.
-  await page.keyboard.press("Digit2");
+  await page.keyboard.press("Digit1");
   await sleep(200);
   await page.click("button.mode >> text=Free roam");
   await sleep(250);
@@ -186,11 +187,25 @@ try {
         byClick > 1, `focus ${focus2}, moved ${byClick.toFixed(1)} units`);
 
   // 3. A text box still owns every key. The script tree's filter is the one
-  //    text input on the page, and it is behind the tree's own panel.
+  //    text input on the page, and it is in the debug sidebar's Script tab --
+  //    which is not the tab the Camera panel is on, and a tab that is not
+  //    showing renders nothing. So the tabs are switched by `click()` from
+  //    the page, which moves no focus, and the reading is taken either side.
+  const tab = (t) => page.evaluate((name) =>
+    document.querySelector(`.tabs [data-tab="${name}"]`)?.click(), t);
+  const before3 = await camera();
+  await tab("script");
+  await sleep(150);
   await page.click("#tree-filter");
   await sleep(150);
   const focus3 = await focused();
-  const whileTyping = await flyW(400);
+  await page.keyboard.down("KeyW");
+  await sleep(400);
+  await page.keyboard.up("KeyW");
+  await sleep(150);
+  await tab("inspect");
+  await sleep(200);
+  const whileTyping = moved(before3, await camera());
   check("W does not fly while the filter box has focus",
         focus3.startsWith("INPUT") && whileTyping >= 0 && whileTyping < 0.5,
         `focus ${focus3}, moved ${whileTyping.toFixed(1)} units`);
@@ -243,7 +258,7 @@ try {
   }
 
   // 6c. ...and leaving free roam gives it back, whether or not it was granted.
-  await page.keyboard.press("Digit2");
+  await page.keyboard.press("Digit1");
   await sleep(250);
   const afterLeave = await page.evaluate(() => !!document.pointerLockElement);
   check("leaving free roam releases the pointer", !afterLeave,

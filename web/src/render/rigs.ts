@@ -103,10 +103,7 @@
  * applies it -- the rule is where the routine is.)
  */
 
-import {
-  Box3, BoxGeometry, EdgesGeometry, Euler, Group, LineBasicMaterial,
-  LineSegments, Object3D, Quaternion, Vector3,
-} from "three";
+import { Euler, Object3D, Quaternion, Vector3 } from "three";
 import type { RigsJson, RigRoute } from "../bundle";
 import type { Context, System } from "../core/system";
 import type { CamPaths } from "../game/camera/curve";
@@ -272,44 +269,22 @@ function bamsEuler(rx: number, ry: number, rz: number, out: Euler): Euler {
   return out.set(rx * BAMS_TO_RAD, ry * BAMS_TO_RAD, rz * BAMS_TO_RAD, "ZYX");
 }
 
-const NO_RIGS: ReadonlySet<string> = new Set();
-
 /** How many showing instances {@link RigLayer.describe} names a pose for. */
 const DESCRIBE_POSES = 4;
 
+/**
+ * The rig roots are nodes of the stage's own glTF and are already in the
+ * scene — this layer poses them, it does not own them. It used to own one
+ * thing, a group of outline boxes round the rigs the sidebar's rigs panel had
+ * ticked; the panel went with the move to the debug sidebar, and the boxes
+ * with it.
+ */
 export class RigLayer implements System {
   readonly id = "render.rigs";
-  /**
-   * The outlines, and nothing else.
-   *
-   * The rig roots themselves are nodes of the stage's own glTF and are already
-   * in the scene — this layer poses them, it does not own them. What it does
-   * own is the boxes drawn round the ones the sidebar has ticked, so those go
-   * in a group of this layer's own that `app/` adds to the scene.
-   */
-  readonly group = new Group();
   private instances: Instance[] = [];
   private actors: Actor[] = [];
   private paths: CamPaths | null = null;
   private enabled = true;
-  /**
-   * Which rigs to outline, by name, written by `app/`.
-   *
-   * The same shape and the same reasoning as `DebugBoxLayer.highlight`: the
-   * composition root is the only layer that sees both the sidebar's selection
-   * and this one, so it hands the answer over rather than this reaching for
-   * it. Independent of the Rigs toggle — ticking a row boxes it whether or not
-   * the rigs themselves are being drawn, because "where is this thing" is a
-   * question worth asking about a rig that is not showing.
-   */
-  highlight: ReadonlySet<string> = NO_RIGS;
-  private readonly boxes: LineSegments[] = [];
-  private readonly unit = new EdgesGeometry(new BoxGeometry(1, 1, 1));
-  private readonly boxMat =
-    new LineBasicMaterial({ color: 0x6ad0ff, depthTest: false });
-  private readonly _box = new Box3();
-  private readonly _size = new Vector3();
-  private readonly _mid = new Vector3();
   private readonly _e = new Euler();
   private readonly _v = new Vector3();
   private readonly _q = new Quaternion();
@@ -545,7 +520,6 @@ export class RigLayer implements System {
       if (show.posed) this.place(show, show.frame);
       this.applyPartRules(show, camSlot, camFrame);
     }
-    this.outline();
   }
 
   /**
@@ -590,43 +564,6 @@ export class RigLayer implements System {
         bamsEuler(t.pitch, t.yaw, t.roll, this._e));
     });
     actor.showing = live.length ? actor.instances[0] : null;
-  }
-
-  /**
-   * A box round each highlighted instance, from its world bounds.
-   *
-   * `setFromObject` walks the subtree, which is the only way to get this
-   * right: a rig is a hierarchy of parts assembled from a transcribed draw
-   * routine, and its root node carries no geometry of its own to measure.
-   * Pooled, because the set changes when somebody clicks and not otherwise.
-   */
-  private outline(): void {
-    let used = 0;
-    if (this.highlight.size) {
-      for (const inst of this.instances) {
-        if (!inst.root.visible || !this.highlight.has(inst.rig)) continue;
-        this._box.setFromObject(inst.root);
-        if (this._box.isEmpty()) continue;
-        this._box.getSize(this._size);
-        this._box.getCenter(this._mid);
-        let box = this.boxes[used];
-        if (!box) {
-          box = new LineSegments(this.unit, this.boxMat);
-          // Drawn over the scene rather than into it: an outline that is
-          // occluded by the thing it is outlining answers no question.
-          box.renderOrder = 999;
-          this.boxes.push(box);
-          this.group.add(box);
-        }
-        box.position.copy(this._mid);
-        box.scale.set(Math.max(this._size.x, 0.01),
-                      Math.max(this._size.y, 0.01),
-                      Math.max(this._size.z, 0.01));
-        box.visible = true;
-        used++;
-      }
-    }
-    for (let i = used; i < this.boxes.length; i++) this.boxes[i].visible = false;
   }
 
   /**
@@ -749,11 +686,12 @@ export class RigLayer implements System {
   }
 
   /**
-   * Every instance, for the rigs panel.
+   * Every instance, for a check to read.
    *
    * All of them and not only the visible ones: which rigs this stage *has* is
-   * the question the panel exists to answer, and a rig that is absent when you
-   * expected it is the thing you are usually looking for.
+   * the question, and a rig that is absent when you expected it is the thing
+   * you are usually looking for. `test:render` reads it; the sidebar's rigs
+   * panel did, until it went.
    */
   get list(): { name: string; slot: number | null; visible: boolean;
                 frozen: boolean; note: string }[] {

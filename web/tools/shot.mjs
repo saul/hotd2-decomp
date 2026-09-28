@@ -21,7 +21,7 @@
  *
  *   node tools/shot.mjs --out cold
  *   node tools/shot.mjs --url '?stage=2&block=12&op=0&freeze=1' --out wait
- *   node tools/shot.mjs --el '#right' --out sidebar
+ *   node tools/shot.mjs --el '#debug' --out sidebar
  *
  * Output goes to `web/shots/`, which is gitignored: a screenshot of a stage is
  * derived game art, and this repository does not commit game assets.

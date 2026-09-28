@@ -87,9 +87,10 @@ try {
     // strike is the window re-opening **with a life gone** (L47).
     return [G.g_player_invuln_frames[0], G.g_player_lives[0]];
   });
-  // A snapshot from before any hit, for the load check below.
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await page.evaluate(() => document.activeElement?.blur?.());
+  // The load check below rewinds to a snapshot from before the hit. There
+  // were Save and Load buttons; they went with the top bar, and the rewind
+  // ring is the same `World.load` -> `resync` path, taken from snapshots the
+  // page keeps for itself.
   let [prev, prevLives] = await invuln();
   let hits = 0, drawn = 0, stale = null;
   for (let done = 0; done < BUDGET && hits < WANT; done += 2) {
@@ -136,16 +137,19 @@ try {
         + (still ? "(held)" : "(MOVED)"));
       if (!still) failed = true;
       await page.keyboard.press("Space");
-      // Load: the snapshot has no overlay, and the drawn node is derived
-      // from `G`, so the picture must lose it without a frame being run.
-      await page.getByRole("button", { name: "Load", exact: true }).click();
+      // Load: a snapshot from before the hit has no overlay, and the drawn
+      // node is derived from `G`, so the picture must lose it without a frame
+      // being run. Three rewinds: the ring keeps a slot every half second or
+      // so, and the hit is a dozen frames back, so three is past it whichever
+      // way the cadence fell.
       await page.evaluate(() => document.activeElement?.blur?.());
+      for (let r = 0; r < 3; r++) await page.keyboard.press("ArrowLeft");
       await page.waitForTimeout(400);
       const after = (await overlay()).rec[0];
       const shot = join(SHOTS, `damage-${tag}-loaded.png`);
       await page.screenshot({ path: shot });
       stale = after.active;
-      console.log(`  loaded the pre-hit snapshot: overlay active ${after.active}`
+      console.log(`  rewound past the hit: overlay active ${after.active}`
         + ` -> ${shot}`);
       if (after.active) failed = true;
     }

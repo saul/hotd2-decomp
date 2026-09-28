@@ -53,7 +53,7 @@ try {
   await page.keyboard.press("Space");
   const advance = (n) =>
     page.evaluate((k) => globalThis.__hotd2Drive.advance(k), n);
-  const box = await page.locator("#viewport").boundingBox();
+  const box = await page.locator("#view").boundingBox();
   const pools = () => page.evaluate(async () => {
     const { G } = await import("/src/game/globals.ts");
     return {

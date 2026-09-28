@@ -252,6 +252,20 @@ export interface ClassHandler {
                    | ((rec: SpawnRecord) => number | readonly number[]
                                           | undefined);
   /**
+   * `[port-only]` Whether this spawn record's object moves `g_enemies_alive`
+   * or `g_enemies_present`, for a class that does so for **some** of its
+   * records and not others -- so that a replay stepping over an enemy gate
+   * (`Walker.stepOverWait`) takes it away with the enemies the gate waited
+   * for, rather than leaving an object that counts and will never count back.
+   *
+   * The script-side list of enemy classes is per class; class 0x41 is not an
+   * enemy class, but three of its types' arms raise a counter that their
+   * routines give back (`class41/type14.ts`, `type19.ts`, `type25.ts`), and
+   * the answer is per record for the reason
+   * {@link ClassHandler.raisesScriptFlag}'s is.
+   */
+  countsForEnemyGate?(rec: SpawnRecord): boolean;
+  /**
    * Describe one of this class's actors for the debug sidebar.
    *
    * Optional, and read-only by contract: it runs every frame the panel is
@@ -294,20 +308,6 @@ export interface ClassHandler {
    * `combat/shot_test.ts`.
    */
   registersForShotTest?: boolean;
-  /**
-   * **This class writes its own `obj+0x12C..0x134`**, and
-   * `ColiTestSphereAgainstActors` (`FUN_00405B10`) must measure it there.
-   *
-   * The engine's actor-versus-actor test walks the spheres the classes
-   * published, whatever each class put in them. The port's walks the pool and
-   * re-derives each actor's sphere with `ActorUpdateBoundingSphere`
-   * (`FUN_00454AC0`) — class 0x30's formula, feet plus the body radius plus
-   * one — which is right for class 0x30 and overwrites anything another class
-   * wrote. Set, the sphere is left as the class left it. Class 0x11 sets it:
-   * `FrogPushOutOfActorCollision` (`FUN_0043A500`) publishes bone 1's drawn
-   * point, not its feet.
-   */
-  ownsSphereCentre?: boolean;
 }
 
 /**

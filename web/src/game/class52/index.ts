@@ -5,8 +5,8 @@
  * its ten draw slots `0x1385`..`0x138E` resolve through
  * `ExeTables.asset_slots()` to `mouse.bin` entries **0 to 9**, and an asset
  * filename is one of the binary's two name tables. `docs/formats/spawns.md`
- * had the species `[open]` on the grounds that the class plays no sound; it
- * does not need to, because it is drawn from a named file.
+ * had the species as an open question, on the grounds that the class plays
+ * no sound; it does not need to, because it is drawn from a named file.
  *
  * Ten spawns, and the subtype in the descriptor tail decides which of two
  * things it is:

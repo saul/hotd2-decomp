@@ -46,12 +46,14 @@
  * frame 0x550 with `PlaySoundId(0x000B16A9)`, and states 5 and 6's strip.
  * The state and the cursors are here; the draws are `render/slotmodels.ts`',
  * reading the `*Drawn` fields this file sets on the frames the engine draws.
- * They used to be a `[diverges]` for want of their slots in the bundle.
+ * They used to be declared a divergence, for want of their slots in the
+ * bundle.
  *
  * `FUN_004459C0`, the on-screen test state 6 uses to decide when to despawn,
- * reads view-space `obj+0x70`/`+0x78` against the shot radius. The port has
- * those through `GameHost.viewSpaceOf`, and where it cannot answer the boat
- * holds state 6 rather than vanishing. [diverges]
+ * projects the shot radius through `g_projection_distance_px / obj+0x78` and
+ * compares it against the viewport. It is **not** ported, in either routine
+ * that reaches it, so the boat holds state 6 and the descriptor's own cue is
+ * what removes it; each of the two declares that at its own `case`.
  */
 import type { Actor } from "../actor";
 import { ActorDespawn } from "../despawn";

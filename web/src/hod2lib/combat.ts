@@ -167,6 +167,23 @@ export const THROWER_SLOTS: Record<number, {
 };
 
 /**
+ * The models a thrown weapon's afterimages draw, per character type -- none
+ * of which the skeleton or a hand kit names, so nothing else puts them in the
+ * rig a client clones from.
+ *
+ * `ZslmanBladeEmitAfterimage` (`FUN_00450930`) copies the weapon's model into
+ * the afterimage and then swaps it: `CMP EAX, 0x1FE1` at `0x004509C8` and
+ * `MOV [EBX+0x13F0], 0x1FE4` at `0x004509E0`, `CMP [EBX+0x13F0], 0x1FE2` at
+ * `0x004509EA` and `0x1FE5` at `0x004509FC`. Only character type 0x18 reaches
+ * it (`CMP word ptr [ESI+0x1F4], 0x18` at `0x004508C2`), and 0x1FE4 and
+ * 0x1FE5 are `zslman.bin` parts 13 and 14 -- a single additive mesh each,
+ * where the blades they trail are two.
+ */
+export const THROWER_AFTERIMAGE_SLOTS: Record<number, readonly number[]> = {
+  0x18: [0x1fe4, 0x1fe5],
+};
+
+/**
  * The **class 0x30** hand kits, a different family from {@link THROWER_SLOTS}:
  * `ZombiePickThrowingHand` tests *held* to see whether a hand is still armed,
  * and `ZombieThrowHandWeapon` swaps it to *bare*, clears the weapon bone
@@ -736,12 +753,13 @@ export function combatTables(tables: ExeTables): Record<string, unknown> {
 
   return {
     // `ActorPlayHitVoice`. `impact` plays on kinds 0 and 1; `head_impact`
-    // replaces it on kind 2 -- which is the **hit result being 2**, not a
-    // headshot: `ZombieOnShot` (`FUN_00453EB0`) picks between kinds 1 and 2 at
-    // `0x00453F6E CMP EAX,0x2` on `g_hit_result` and tests no bone at all, and
-    // `ThrowerOnShot` (`FUN_004499A0`) agrees at `0x00449A76`. The two kinds
-    // share one voice pair, so the impact is the only audible difference;
-    // `tools/verify_combat.py` check 15 asserts both.
+    // replaces it on kind 2 -- a dead actor shot in **bone 2, the head**:
+    // `ZombieOnShot` (`FUN_00453EB0`) picks between kinds 1 and 2 at
+    // `0x00453F6E CMP EAX,0x2` on `g_shot_bone` (through `EBP`, loaded at
+    // `0x00453EEE`), and `ThrowerOnShot` (`FUN_004499A0`) agrees at
+    // `0x00449A76`. The two kinds share one voice pair, so the impact is the
+    // only audible difference; `tools/verify_combat.py` check 15 asserts both
+    // and reads the two operands out of the image.
     impact: named(v.slice(0, 5)),
     head_impact: named([0x0116a9, 0x0516a9]),
     voice: {

@@ -118,7 +118,11 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         sub.scaleTarget = c.radius ?? 1;
         sub.scaleStep = a[1] ? (sub.scaleTarget - 1) / AsFloat(a[1]) : 0;
         break;
-      case CivilianOp.SetCameraPointMode: sub.cameraPointMode = a[0]; break;
+      case CivilianOp.SetSphereCentreMode:
+        // `MOV DL, byte ptr [ESI+0x4]`: a byte, and the switch reads it back
+        // with `MOVSX`, so the signed byte is what the field holds.
+        sub.sphereCentreMode = (a[0] << 24) >> 24;
+        break;
       case CivilianOp.SetPose:
         if (c.pose && c.pose.length === 6) {
           obj.pos = { x: c.pose[0], y: c.pose[1], z: c.pose[2] };
@@ -129,8 +133,8 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         // **The order.** `sub+0x2C` is a class-0x30 state id and `sub+0x2E` a
         // countdown, and the captors sitting in
         // `ZombieStateAwaitCivilianOrder` are what read them. An earlier
-        // revision kept only the second operand and called it `childCue2`
-        // `[open]`, which threw the order itself away.
+        // revision kept only the second operand and called it `childCue2`,
+        // an open question, which threw the order itself away.
         if (sub.childCount !== 0) {
           sub.childOrder = a[0];
           sub.childOrderFrames = a[1];

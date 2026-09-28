@@ -36,6 +36,11 @@ const HAND_HEIGHT = 4;
  */
 const SPEED_STANDING = 1.5;
 const SPEED = 1.0;
+/**
+ * `obj+0x1338 = obj+0x133C = 7` at `0x0045A419`: the afterimage timers class
+ * 0x31's launcher arms at 4. Nothing in this family reads them.
+ */
+const AFTERIMAGE_PERIOD = 7;
 
 /**
  * `ZombieThrowHandWeapon` — `FUN_0045A240`. The weapon leaves the hand.
@@ -75,12 +80,18 @@ const SPEED = 1.0;
  * the hand it just emptied unshootable. `SpawnThrownWeapon` (`FUN_004504E0`)
  * does the identical write for class 0x31 at 0x00450540.
  *
- * `[diverges]` Three writes are not made. The hit sphere is not cleared,
- * because `render/characters.ts` tests `type.bones[].hit_radius` from the
- * static table and the actor has no per-bone radius to zero — the same gap
- * that lets a gore-swapped bone keep a sphere the engine drops. The hit slot
- * is not claimed, because `g_hit_slots` holds actors and the only thing that
- * reads it is a class-0x30 bone's cel phase. And the camera is not told,
+ * The hit sphere **is** cleared: {@link Actor.boneRadius} is the record's
+ * `+0x78`, and both shot tests and the blood read it over the table's. It was
+ * left out, declared a divergence, for as long as the actor had no per-bone
+ * radius to zero. Nothing in class 0x30 gives it back: the only other writer
+ * that names `+0x554` or `+0x704` is `EnemyZombieInitByCharType`, at spawn.
+ *
+ * `[diverges]` Two things the weapon does in the engine are not done, both
+ * because it is not an `Actor` here but a record in `G.g_thrown_weapons`. It
+ * claims no hit slot (`ActorClaimHitSlot`, `0x0045A25F`): `g_hit_slots` holds
+ * actors' `at`s, and the one thing that reads the table is a class-0x30
+ * bone's cel phase, which a weapon's slot would only shift for actors that
+ * claim after it. And the camera is not told (`RegisterForCameraTracking`),
  * because the candidate list takes actors only (`body_creature.ts` has the
  * same gap).
  */
@@ -93,6 +104,9 @@ export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
   if (h) {
     obj.boneSlot[String(h.bone)] = h.bare;
     host.setBoneSlot(obj.at, h.bone, h.bare);
+    // `MOV [EDI + 0x554], EBX` (bone 5) / `MOV [EDI + 0x704], EBX` (bone 8),
+    // `EBX = 0`: the bone record's `+0x78`, in every arm that swaps a hand.
+    obj.boneRadius[String(h.bone)] = 0;
     w.slot = h.projectile;
   }
 
@@ -106,9 +120,8 @@ export function ZombieThrowHandWeapon(obj: ZombieActor, hand: number,
   w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
   w.from = obj.at;
   w.hand = hand;
-  // `obj+0x1338 = obj+0x133C = 7` at `0x0045A419`: the afterimage timers
-  // class 0x31's `zslman` blades count down. Nothing in this family reads
-  // them, so the record does not carry them.
+  w.afterimageTimer = AFTERIMAGE_PERIOD;
+  w.afterimagePeriod = AFTERIMAGE_PERIOD;
   if (w.slot === ZOMBIE_AXE_SLOT) {
     w.spinRate = ZOMBIE_AXE_SPIN;
     w.state = ZombieThrownWeaponState.Straight;

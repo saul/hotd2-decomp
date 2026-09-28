@@ -243,6 +243,19 @@ export function Vec3ScaleToUnitLength(v: Vec3): void {
 }
 
 /**
+ * `Vec3Normalize` — `FUN_004AAA00`. `out = v / |v|`, and the length comes
+ * back in `ST0`, which both shot-down arms pop and discard. No zero test.
+ * `ColiTestSphereAgainstActors` normalises its candidate's normal with it.
+ */
+export function Vec3Normalize(v: Vec3, out: Vec3): number {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  out.x = v.x / len;
+  out.y = v.y / len;
+  out.z = v.z / len;
+  return len;
+}
+
+/**
  * `MatrixRotateAxis` — `FUN_004A98D0`. A turn of `bams` about `axis` (a
  * normalised copy), built in the scratch at `0x00598C18` and multiplied on
  * with `MatrixMultiply`, so it applies before whatever the top already holds.

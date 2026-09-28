@@ -61,16 +61,15 @@
  *
  * ```
  * alive, result != 5   one of BLOOD02/03/04/06, BONE01   + the hurt voice
- * dead, result != 2    the same five                     + the kill voice
- * dead, result == 2    BLOOD01 or BLOOD05                + the kill voice again
+ * dead, not the head   the same five                     + the kill voice
+ * dead, the head       BLOOD01 or BLOOD05                + the kill voice again
  * result 5             BULLET_MET3 — it bounced off
  * miss                 the surface's BULLET_SND/MET/OTH/WAT/WOD
  * ```
  *
- * That table used to be written here as *alive / killed / headshot kill*, and
- * it was wrong about the engine on both of the last two rows: the kind is the
- * hit-result code, nothing tests the bone, and kind 2's voice pair is kind 1's
- * pair. `game/combat/feedback.ts` carries the disassembly and the checks. The
+ * "Dead" is dead and not yet latched: a corpse says so once. Kind 2's voice
+ * pair is kind 1's, so a head kill differs only in its impact.
+ * `game/combat/feedback.ts` carries the disassembly and the checks. The
  * split into two voice sets is `ActorPlayHitVoice`'s own switch over the
  * character type, and `combat.voice_set_a_types` is the exporter's copy of it.
  *
@@ -101,7 +100,7 @@
  * A **miss** has a material now. `game/coli.ts` traces the shot segment
  * against the game's own collision sets, so the impact point, the normal and
  * the surface id are the engine's numbers rather than a raycast against
- * whatever happened to be drawn. That `[open]` is closed.
+ * whatever happened to be drawn. That open question is answered.
  */
 
 import { Raycaster, Vector2, Vector3, type Camera } from "three";
@@ -403,8 +402,8 @@ export class Shooting implements System {
    * **Every sprite this used to draw is the port's now, and so is every
    * sound.** What is left is the half that is genuinely nobody's but the
    * player's: the event feed. `ActorPlayHitVoice` (`FUN_0040A6F0`) is raised
-   * from `game/combat/feedback.ts`, on the engine's own hit-result rule, which
-   * is not the `killed`/`head` rule this method used to apply.
+   * from `game/combat/feedback.ts`, on the engine's own rule: dead and not
+   * latched, then the head bone or not.
    */
   private onResolved(r: EventMap["shot.resolved"]): void {
     if (r.kind === "miss") return this.noteMiss(r);
@@ -420,7 +419,7 @@ export class Shooting implements System {
       // The class scores it and the class draws it: `OneHitTargetUpdate`
       // spawns its own `SpawnBoneHitSprite`. A civilian's own effect is
       // `SpawnCivilianBloodPool` (`FUN_0048E080`), a decal object that is
-      // still unported -- [open].
+      // still unported; `game/class10/index.ts` asks what its update does.
       this.onShot({ hit: true, bone: r.bone, points: 0 },
                   `${r.who} · marked, its own class scores it`);
       return;

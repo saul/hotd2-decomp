@@ -3265,6 +3265,42 @@ console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
         !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
 }
 
+console.log("\nclass 0x25's root: all three angles, in model+0x68's order 1");
+{
+  // `ScriptedHumanoidInit` writes `model+0x68 = 1` straight after the build
+  // (`c6476801` at `0x004841A9`, `EDI = obj+0x194`), so the body draws through
+  // the same arm 1 as class 0x31: `T; RotX; RotZ; RotY`. Its object-path ride
+  // writes all three angles, and a renderer that drew yaw alone stood the
+  // boat's riders upright on a pitching deck.
+  const { placeHumanoidRoot } =
+    await import("../src/render/characters/humanoid");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  } = await import("../src/game/matrix");
+  const { Object3D } = await import("three");
+  type Inst = Parameters<typeof placeHumanoidRoot>[0];
+
+  const a = makeActor(4128, SpawnClass.ScriptedHumanoid, 0x21, "rider");
+  a.pos = { x: 12.5, y: -20, z: -300 };
+  a.pitch = 0x3d8e; a.yaw = 0x4000; a.roll = 0x0800;
+  const inst = { a, root: new Object3D() } as unknown as Inst;
+  const placed = placeHumanoidRoot(inst);
+  inst.root.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, a.pos.x, a.pos.y, a.pos.z);
+  MatrixRotateX(want, a.pitch);
+  MatrixRotateZ(want, a.roll);
+  MatrixRotateY(want, a.yaw);
+  const got = inst.root.matrix.elements;
+  const worst = Math.max(...want.map((v, i) => Math.abs(v - got[i])));
+  check("a scripted humanoid's root is T * Rx(pitch) * Rz(roll) * Ry(yaw)",
+        placed && worst < 1e-4, `placed ${placed}, worst element ${worst}`);
+
+  const z = makeActor(0x30, SpawnClass.Zombie, 1, "zombie");
+  check("...and any other class is left to the ordinary arm",
+        !placeHumanoidRoot({ a: z, root: new Object3D() } as unknown as Inst));
+}
+
 console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
 {
   // `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `MatrixTranslate(obj+0x40);
@@ -4001,6 +4037,75 @@ console.log("\nthe engine's two passes, and the translucent order");
   check("a draw-mode-2 region model is layer 7, on its primitives",
         layered.children[0]!.renderOrder === DRAW_LAYER_7_ORDER
         && layered.renderOrder === 0);
+}
+
+console.log("\nthe stage-1 banners' wave, on the templates");
+
+{
+  // `PropUpdateType45` bends four models in place; the port keeps the clock
+  // each was bent at, and `render/banner_wave.ts` rewrites the template's
+  // vertices from their authored positions at it. An opaque-pass mesh shows
+  // the bend its draws were submitted against, a translucent one this frame's.
+  const { bannerWaveZ, BannerWave } = await import("../src/render/banner_wave");
+  const { BufferGeometry, Float32BufferAttribute } = await import("three");
+  const BAMS = Math.PI * 2 / 65536;
+
+  check("the wave leaves a vertex with ftol(y) == 0 alone",
+        bannerWaveZ(0, 0.9, 0) === null && bannerWaveZ(2, -0.9, 0x4000) === null);
+  const bams = (((5 - -10) << 9) + 0x100) & 0xffff;
+  check("...and bends the rest: y * -0.1 * sin(((5k - ftol y) << 9) + clock)",
+        bannerWaveZ(1, -10, 0x100) === Math.fround(
+          Math.sin(bams * BAMS) * (-10 * Math.fround(-0.1))));
+
+  // One template, two meshes offset 2 up inside it: its y is the model's
+  // y - 2, which is what the wave must read.
+  const part = (tsp: string) => {
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new Float32BufferAttribute(
+      [1, -12, 7, 4, -1.5, 9], 3));
+    const mat = new MeshBasicMaterial();
+    mat.userData.pvr2 = { isp_tsp_instruction: "0", tsp_instruction: tsp };
+    const m = new Mesh(geo, mat);
+    m.position.set(0, 2, 0);
+    return m;
+  };
+  const opaque = part("80000");
+  const translucent = part("100000");
+  const t = new Group();
+  t.add(opaque, translucent);
+  const templates = { get: (slot: number) => (slot === 0x1731 ? t : undefined) };
+  const z = (m: InstanceType<typeof Mesh>, i: number) =>
+    (m.geometry.attributes.position as { getZ(i: number): number }).getZ(i);
+  const wave = new BannerWave();
+
+  ResetGameGlobals();
+  wave.apply(templates);
+  check("an unbent model is as authored",
+        z(opaque, 0) === 7 && z(translucent, 0) === 7 && z(opaque, 1) === 9);
+
+  G.g_prop45_wave_clock = [0x100, 0x300, 0x500, 0x700];
+  G.g_prop45_wave_clock_drawn = [-1, -1, -1, -1];
+  wave.apply(templates);
+  const at = (clock: number) => bannerWaveZ(0, -10, clock)!;
+  check("the first frame: the translucent mesh bent, the opaque one as its "
+        + "draws went out",
+        Math.abs(z(translucent, 0) - at(0x100)) < 1e-6 && z(opaque, 0) === 7,
+        `${z(translucent, 0)} ${at(0x100)} ${z(opaque, 0)}`);
+  check("...a vertex at model y -0.5 stays where it was authored",
+        z(translucent, 1) === 9);
+
+  G.g_prop45_wave_clock_drawn = [0x100, 0x300, 0x500, 0x700];
+  G.g_prop45_wave_clock = [0x900, 0xb00, 0xd00, 0xf00];
+  wave.apply(templates);
+  check("the next: the opaque mesh one frame behind, from the authored z",
+        Math.abs(z(opaque, 0) - at(0x100)) < 1e-6
+        && Math.abs(z(translucent, 0) - at(0x900)) < 1e-6,
+        `${z(opaque, 0)} ${z(translucent, 0)}`);
+
+  ResetGameGlobals();
+  wave.apply(templates);
+  check("a reset stage's models are the authored ones again",
+        z(opaque, 0) === 7 && z(translucent, 0) === 7);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

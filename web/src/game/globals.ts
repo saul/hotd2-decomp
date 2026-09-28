@@ -37,7 +37,7 @@ import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
-import type { BreakableProp } from "./class41/prop_state";
+import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
 import type { ShotTestEntry } from "./combat/shot_test";
@@ -720,8 +720,15 @@ export const G = {
   g_trigger_down: [0, 0],
   /**
    * `g_training_out` — 0x009A2234. `PlayerUpdateInPlay` sets it instead of
-   * the continue when a Training player runs out of lives. What reads it is
-   * `[open]`.
+   * the continue when a Training player runs out of lives.
+   *
+   * That is one writer's reading, and the word has many: `get_xrefs_to`
+   * lists 26 references -- writes from `CivilianUpdate` (a Training civilian
+   * dying) and routines at `0x004525C0`, `0x00445050`, `0x004991B0` and
+   * `0x00499530`, reads from `ZombieStateCarryProp` (`0x0045B624`) and
+   * `0x00497760` five times over, and more in code Ghidra has no function
+   * for. So it is a Training-mode state word of more than one use, and what
+   * it holds is `[open]`; the port runs no Training stage.
    */
   g_training_out: 0,
   /** `g_player_was_hit` — 0x009A5CD0 + player*0x98. */
@@ -874,6 +881,16 @@ export const G = {
    * registrations like any other part of the data segment.
    */
   g_shot_test_list: [] as ShotTestEntry[],
+  /**
+   * `g_coli_dynamic_list` — `0x005A3098`, with `g_coli_dynamic_count`
+   * (`0x0059D8E4`) as the array's length. `ColiPublishDynamicList`
+   * (`FUN_00405360`)'s copy of {@link g_shot_test_list}, made at the end of
+   * `ProcessPlayerShots` before any actor runs, so it holds the **previous**
+   * frame's registrations for the whole of this frame's actor walk.
+   * `ColiTestSphereAgainstActors` (`FUN_00405B10`), the crowd push, walks it
+   * and reads each object's sphere centre out of it.
+   */
+  g_coli_dynamic_list: [] as ShotTestEntry[],
   /**
    * `[port-only]` — the heads the 1-in-4 headshot burst has thrown.
    *
@@ -1569,6 +1586,36 @@ export const G = {
    * `BreakablePropShatterUpdate`. `game/class41/shatter.ts`.
    */
   g_prop_shatters: [] as PropShatter[],
+  /**
+   * `[port-only]` — the draws of every prop that died this frame **after**
+   * drawing: a routine that draws and then `ActorKill`s itself (the last
+   * frame of `PropDrawOnlyType33`'s strip, of `PropUpdateType18`'s effect, a
+   * type-8 part going under the water) has submitted that draw in the engine,
+   * and the object is freed with it already queued. The port's pool drops a
+   * dead prop before the renderer runs, so the draw is kept here for
+   * `render/breakables.ts`, and cleared at the head of the pool's next frame.
+   */
+  g_prop_final_draws: [] as PropFinalDraw[],
+  /**
+   * `g_prop67_by_index` — `0x007DCD08`. The class-0x41 type-67 prop the arm
+   * last placed with each index 0..2, as a prop id (0 for none): what
+   * `Type67MountedPartUpdate` finds its parent through.
+   */
+  g_prop67_by_index: [0, 0, 0] as number[],
+  /**
+   * `[port-only]` in shape — what `PropUpdateType45` (`FUN_0046DAB0`) has
+   * done to the four banner models it bends in place (`TYPE45_WAVE_SLOTS`):
+   * the wave clock each was last bent at, `-1` for one still as authored.
+   * The engine's state is the vertex data; this is the one number it was
+   * written from, which `render/banner_wave.ts` rewrites it with.
+   */
+  g_prop45_wave_clock: [-1, -1, -1, -1] as number[],
+  /**
+   * `[port-only]` — each banner model's {@link g_prop45_wave_clock} as it
+   * stood when the routine's draws of this frame were submitted, which is
+   * before its bend: what an opaque-pass mesh, drawn at submission, shows.
+   */
+  g_prop45_wave_clock_drawn: [-1, -1, -1, -1] as number[],
   /** `[port-only]` — see {@link PropShatter.id}. */
   g_prop_shatter_seq: 1,
 
@@ -2022,6 +2069,21 @@ export const G = {
   /** How far inside the surface a sphere test found the centre. */
   g_coli_hit_depth: 0,
   /**
+   * `g_coli_hit_dist_sq` — `0x009CAC48`. Record `+0x34` of the candidate
+   * `ColiSelectNearestHitCandidate` (`FUN_00405760`) chose, whatever its
+   * caller put there: for `ColiTestSphereAgainstActors` it is the distance
+   * from the tested centre to the other sphere's near surface, and not a
+   * square at all.
+   */
+  g_coli_hit_dist_sq: 0,
+  /**
+   * `g_coli_hit_object` — `0x009C71C8`, record `+0x24` of the chosen
+   * candidate: the object a sphere or segment test found, by spawn address,
+   * or `-1`. `ThrowerPushOutOfWorld` reads its `obj+0x34` after the crowd
+   * test.
+   */
+  g_coli_hit_object: -1,
+  /**
    * The two script-selected collision sets, as `"<file>:<offset>"` blob keys.
    *
    * evt `0x10` fills the **full** set, which both the segment and the sphere
@@ -2258,12 +2320,12 @@ export type Globals = typeof G;
  * a fresh load. A snapshot *load* deliberately does not reset — it restores
  * the whole data segment, counters and all, which a reset would undo.
  *
- * `[open]` The port has no equivalent of `ResetGameOnStart`, because it has no
- * *run*: every stage load is a fresh start. Nothing is silently wrong — the
- * run totals that reset owns (`g_civilians_seen_total`,
- * `g_civilians_rescued_total`) are not in `G` either — but the run/scene split
- * only half exists here, and a port that grows a continue sequence will need
- * the other half.
+ * `ResetGameOnStart` is ported for its rank half (`game/run_phase.ts`), and
+ * that routine declares the rest -- the scene and block index, the loadout,
+ * the civilian and route tallies -- as the app's stage load. The run totals
+ * it owns (`g_civilians_seen_total`, `g_civilians_rescued_total`) are not in
+ * `G`, so the run/scene split only half exists here. This said the port had
+ * no equivalent at all, as an open question, before `run_phase.ts`.
  *
  * **The engine's body, line for line, and what the port does with each.** This
  * is a partial transcription and the list is how you can tell which part:
@@ -2423,6 +2485,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // [port-only] The engine's list holds object pointers into a pool the scene
   // load has just emptied; nothing registered survives into the new scene.
   G.g_shot_test_list = [];
+  // ...and its published copy, which the crowd push walks.
+  // `ProcessPlayerShotsTaskCreate` (`FUN_00404480`) zeroes both counts when
+  // the scene makes the task (`0x00404539`, `0x0040454F`).
+  G.g_coli_dynamic_list = [];
   G.g_severed_heads = [];
   G.g_severed_head_seq = 0;
   G.g_sprite_effects = [];
@@ -2597,6 +2663,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
   G.g_prop_shatters = [];
+  G.g_prop_final_draws = [];
+  G.g_prop67_by_index = [0, 0, 0];
+  G.g_prop45_wave_clock = [-1, -1, -1, -1];
+  G.g_prop45_wave_clock_drawn = [-1, -1, -1, -1];
   G.g_prop_shatter_seq = 1;
   G.g_evt_step_index = 0;
   G.g_evt_block_index = 0;
@@ -2624,6 +2694,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
+  G.g_coli_hit_object = -1;
   G.g_carrier_object = -1;
   G.g_civilian_carrier = -1;
   // `LoadSceneAndReset` zeroes the counter at `0x00460030`, and

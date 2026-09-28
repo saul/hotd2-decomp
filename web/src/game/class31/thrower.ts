@@ -79,6 +79,7 @@ import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
 import {
   AimThrownWeapon, FlySub, ThrownWeaponState, THROWN_WEAPON_SPIN,
+  THROWN_WEAPON_AFTERIMAGE_PERIOD,
 } from "./projectile";
 import {
   ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponRoutine,
@@ -317,10 +318,17 @@ function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
  * and so it **cannot fail**. The port has no skeleton in `game/`, so it asks
  * the host, and a host that cannot answer gets the actor's own position lifted
  * by a chest height rather than no weapon at all: a routine with no path that
- * declines to make the weapon must not grow one. Three writes are not made,
- * for the reasons `ZombieThrowHandWeapon` (`FUN_0045A240`) gives for its own
- * identical three: the hand's hit-sphere radius, the hit slot, and the camera
- * candidate.
+ * declines to make the weapon must not grow one. And two things the weapon
+ * does in the engine are not done, for the reasons `ZombieThrowHandWeapon`
+ * (`FUN_0045A240`) gives for its own identical two: the hit slot and the
+ * camera candidate.
+ *
+ * The hand's hit-sphere radius **is** zeroed -- `MOV [reg + EDI + 0x284],
+ * EBX` with the index `obj+0x1358 * 0x90`, in all four arms (`0x0045054E`,
+ * `0x00450580`, `0x004505BF`, `0x004505E8`) -- onto {@link Actor.boneRadius},
+ * and `ThrowerRestoreHand` gives it back from the table as the two re-arm
+ * states do. It was left out, declared a divergence, for as long as the actor
+ * had no per-bone radius to zero.
  */
 export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
                                   host: GameHost,
@@ -334,6 +342,9 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   // made the snapshot depend on whether a hierarchy was in the scene.
   obj.boneSlot[String(hand.bone)] = hand.bare;
   host.setBoneSlot(obj.at, hand.bone, hand.bare);
+  // The bone record's `+0x78`, the hit-sphere radius: the hand it has just
+  // emptied cannot be shot.
+  obj.boneRadius[String(hand.bone)] = 0;
   w.slot = hand.projectile;
   // `obj+0x1364`, the constant the draw adds to the **X** term. `cfg.spin`
   // is that constant: the exporter reads it out of this routine and the name
@@ -359,9 +370,11 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   w.from = obj.at;
   w.hand = hand.bone;
   w.spinRate = THROWN_WEAPON_SPIN;
-  // `obj+0x133C = obj+0x1338 = 4` at `0x00450736`: the `zslman` afterimage
-  // timers, read by `FUN_00450930`, which the port does not run -- see
-  // `ThrownWeaponUpdate` (`FUN_00450780`).
+  // `obj+0x133C = obj+0x1338 = 4` at `0x00450736`: the afterimage timers,
+  // which `ZslmanBladeEmitAfterimage` (`FUN_00450930`) counts down for a
+  // `zslman` blade and nothing reads for any other.
+  w.afterimageTimer = THROWN_WEAPON_AFTERIMAGE_PERIOD;
+  w.afterimagePeriod = THROWN_WEAPON_AFTERIMAGE_PERIOD;
   w.state = ThrownWeaponState.Fly;
   w.sub = FlySub.Launch;
   AimThrownWeapon(w, ThrownWeaponCameraOf(host));

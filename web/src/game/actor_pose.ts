@@ -71,8 +71,8 @@ const _p2 = vec3();
  * Both points are **world** space -- P1 is the camera block's view-to-world
  * times the bone's view-space record, P2 is built from `MatrixLoadIdentity`
  * with the actor's own world pose -- so the difference is a world offset,
- * which settles the `[open]` its annotation carried. `obj+0x200` is the root
- * motion's baseline; the port's is reset by the blended clip change every
+ * which settles the open question its annotation carried. `obj+0x200` is the
+ * root motion's baseline; the port's is reset by the blended clip change every
  * caller makes next, which re-seeds it from the same frame.
  *
  * `GameHost.boneWorld` is P1; without a posed skeleton -- headless -- there is

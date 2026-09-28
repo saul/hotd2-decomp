@@ -122,32 +122,64 @@ def strip_types() -> set[int]:
     return _int_list("GENERIC_SLOT_STRIP")
 
 
+#: One generated run, `Array.from({ length: N }, (_, i) => 0xBASE + i)`.
+_RUN = re.compile(r"Array\.from\(\{\s*length:\s*(\d+)\s*\}[^)]*\)\s*=>\s*"
+                  r"(0x[0-9a-fA-F]+|\d+)\s*\+\s*i\s*\)")
+
+
+def _run(text: str) -> list[int] | None:
+    m = _RUN.fullmatch(text.strip())
+    if not m:
+        return None
+    base = int(m.group(2), 0)
+    return [base + i for i in range(int(m.group(1)))]
+
+
 def static_slots() -> dict[int, list[int]]:
     """`GENERIC_STATIC_SLOTS`, read out of the exporter.
 
-    The generated row -- type 21's ``Array.from`` -- is expanded here rather
-    than skipped: a routine that steps through ten slots needs all ten.
+    A row is a list of literals, a generated run (``Array.from``), or a list
+    that spreads runs among its literals; every run is expanded rather than
+    skipped, because a routine that steps through ten slots needs all ten.
+    An element this cannot read fails the check rather than being dropped: a
+    row read short is a slot nobody checks.
     """
     text = BUNDLE_TS.read_text(encoding="utf-8")
     m = re.search(r"GENERIC_STATIC_SLOTS[^{]*\{(.*?)\n\};", text, re.S)
     if not m:
         raise SystemExit(f"{BUNDLE_TS}: GENERIC_STATIC_SLOTS not found")
+    body = "\n".join(line.split("//")[0] for line in m.group(1).splitlines())
     out: dict[int, list[int]] = {}
-    for line in m.group(1).splitlines():
-        line = line.split("//")[0].strip()
-        e = re.match(r"(\d+):\s*(.*?),?$", line)
-        if not e:
+    for e in re.finditer(r"(\d+):\s*(\[[^\]]*\]|Array\.from\([^\n]*?=>[^,\n]*\+\s*i\s*\))",
+                         body):
+        key, row = int(e.group(1)), e.group(2).strip()
+        run = _run(row)
+        if run is not None:
+            out[key] = run
             continue
-        key, body = int(e.group(1)), e.group(2)
-        gen = re.match(r"Array\.from\(\{\s*length:\s*(\d+)\s*\}[^)]*\)\s*=>\s*"
-                       r"(0x[0-9a-fA-F]+)\s*\+\s*i\s*\)", body)
-        if gen:
-            base = int(gen.group(2), 16)
-            out[key] = [base + i for i in range(int(gen.group(1)))]
-            continue
-        b = re.match(r"\[(.*)\]$", body)
-        if b:
-            out[key] = [int(x, 0) for x in b.group(1).split(",") if x.strip()]
+        slots: list[int] = []
+        depth, cur, parts = 0, "", []
+        for ch in row[1:-1]:
+            depth += ch in "({"
+            depth -= ch in ")}"
+            if ch == "," and depth == 0:
+                parts.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        parts.append(cur)
+        for part in (x.strip() for x in parts):
+            if not part:
+                continue
+            if part.startswith("..."):
+                spread = _run(part[3:])
+                if spread is None:
+                    raise SystemExit(f"{BUNDLE_TS}: GENERIC_STATIC_SLOTS[{key}]"
+                                     f" spreads something unreadable: {part}")
+                slots += spread
+            else:
+                slots.append(int(part, 0))
+        out[key] = slots
     return out
 
 

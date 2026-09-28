@@ -76,8 +76,10 @@ export function PropExpireByStepLifetime(p: BreakableProp): boolean {
 
 /**
  * The **inline** copy of the step-lifetime test that `PropUpdateType38`
- * (`FUN_0046BCC0`), `PropUpdateType39` (`FUN_0046C240`) and
- * `PropUpdateType44` (`FUN_0046D850`) open with instead of calling
+ * (`FUN_0046BCC0`), `PropUpdateType39` (`FUN_0046C240`), `PropUpdateType41`
+ * (`FUN_0046CC50`), `PropUpdateType43` (`FUN_0046CEA0`), `PropUpdateType44`
+ * (`FUN_0046D850`), `PropUpdateType56` (`FUN_0046F090`) and
+ * `PropUpdateType59` (`FUN_0046F750`) open with instead of calling
  * {@link PropExpireByStepLifetime}:
  *
  * ```c
@@ -88,12 +90,15 @@ export function PropExpireByStepLifetime(p: BreakableProp): boolean {
  * ```
  *
  * The same two lines **without the scene-1 sweep** (`g_script_flags[0x77]`),
- * so these three are not cleared by it — which is the reason it is its own
- * function here rather than a call to the shared one. All three live only in
- * stage 1, scene 0, where the sweep could not fire anyway; that is the
- * argument `L27` warns against making, so the difference is kept.
+ * so these are not cleared by it — which is the reason it is its own function
+ * here rather than a call to the shared one. Several live only in scenes
+ * where the sweep could not fire anyway; that is the argument `L27` warns
+ * against making, so the difference is kept.
  *
- * `[port-only]` as a function: the engine writes it out three times.
+ * `[port-only]` as a function: the engine writes it out in each of them.
+ * Routines whose inline copy differs — a literal limit, `ActorKill` instead of
+ * `ActorDespawn`, the count before the sweep — write theirs out in their own
+ * file.
  */
 export function PropStepLifetimeInline(p: BreakableProp): boolean {
   if (G.g_evt_step_index !== p.lastStepIndex) {

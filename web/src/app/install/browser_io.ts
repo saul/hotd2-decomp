@@ -273,8 +273,8 @@ export async function writeThumb(stage: number, png: Blob): Promise<void> {
  * check because the wait it gave up on was a wait for an event that had
  * already happened.
  *
- * A write is the real signal, so it is the one that travels. `[open]` is not
- * a state a picker needs to be in.
+ * A write is the real signal, so it is the one that travels. Being open is
+ * not a state a picker needs to be in.
  */
 const thumbWatchers = new Set<(stage: number) => void>();
 

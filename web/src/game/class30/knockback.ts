@@ -93,16 +93,19 @@ const PITCH_STEP = 0x100;
 /**
  * `obj+0x136C` bit 0x10, which vetoes the arc-target override at 0x004552BA.
  *
- * `[open]` — **no writer was found**, over two sweeps of the whole image.
- * There is no memory-form `OR`/`AND` on that offset with an immediate carrying
- * bit 4: a byte search for `6C 13 00 00 10` returns nothing, and the seven
- * `OR`s and four `AND`s written straight to `obj+0x136C` are all other bits.
- * Nor is one built in a register: of the twelve `OR reg32, 0x10` in the image
- * (`83 C8..CF 10`), the two on an actor write `obj+0x1368` (0x0045C0ED, in
- * `ZombieStateDragTarget`) and `obj+0x1F8` (0x0044E863), and the rest are
- * globals. `OR r8, 0x10` and a computed mask are not ruled out. Written as a
- * literal rather than named, on the same terms as `class30/death.ts`'s
- * condition-4 bit: a bit the port reads and nothing in the port sets.
+ * **Its writer is `ZombieStateEmerge`'s sub 0**, `OR AL, 0x10` at
+ * `0x0045851E`, on the arm taken when `obj+0x34` carries `0x200000`
+ * (`class30/emerge.ts`). `[proved]` It was not found for two sweeps of the
+ * whole image because it is the one form they left out: there is no
+ * memory-form `OR`/`AND` on that offset with an immediate carrying bit 4 (a
+ * byte search for `6C 13 00 00 10` returns nothing), and of the twelve
+ * `OR reg32, 0x10` (`83 C8..CF 10`) the two on an actor write `obj+0x1368`
+ * (0x0045C0ED, in `ZombieStateDragTarget`) and `obj+0x1F8` (0x0044E863) --
+ * but the write is `OR r8`, into `AL` after a load of the word. The image's
+ * nine `OR AL, 0x10` put the rest on `obj+0x38` (`EnemyZombieInitByCharType`,
+ * 0x00453004), `obj+0x1368` (`ZombieStateTargetMotionScript`, 0x0045AE6F and
+ * 0x0045AFAA) and other classes; `L32`. A literal rather than a name, because
+ * what the emerge means by it is not written down anywhere.
  */
 const ARC_TARGET_VETO = 0x10;
 

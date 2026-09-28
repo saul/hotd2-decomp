@@ -23,17 +23,17 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "approach.ts": "f2458fca4f4f943e775d2f73237eef7bf925b37dc38ba653bc89f80d3e800443",
   "arcscript.ts": "7caad5bd4d03804b253c16c8beabccf0f3f1787485e6bbe553d8f32e0395719f",
   "bams.ts": "f03b1290866a63ab2ae764d49bd15c57bd53c6b1a03794f7a0357e8dd842eb8f",
-  "bundle.ts": "964936552ff4108eefc9c857a13322c3ab6f7b68bc3cd94ddcd8fe52736723a3",
+  "bundle.ts": "11125c0cf39c1386cf226521110f9e4c1d159a47d553c71427bf036764ffafac",
   "bytes.ts": "59b2f363e98da56e88ada59458239032e40cad3a27342659e213d849c0967168",
   "cam.ts": "fe50200cb57c6578681a121766e7a5f4ed2425d91996169f83a82e8375dd63c3",
   "campaths.ts": "fbe28df3265d37b60a006e937a926eca8546609aa29cc5d80e7f1fc9afd639be",
   "characters.ts": "4be20260a519312d0c4c1fcf0c26663d6aa46c519ff5deab892e3c98176f8927",
-  "charbuild.ts": "4bee40165d6a93e13cc579235e41be150c59f0685f4fa5c002cd4bab347533cc",
+  "charbuild.ts": "c4a2a02fc832288caa8d83953943036f4dd187efe5eeccd4f9299f7174cd9363",
   "charmotion.ts": "e6440210e79e688210b0f8502214ca572485056c9f1b4338f0cf731288df8433",
   "class14.ts": "e143aab15d3067812e27d18bdd8b35b4b6fc45d6091948c7b8920bf4350a512a",
   "class31.ts": "75b98d9764cd40de62b8f0eef507f48b834b920c8982e6772ad0d12cc2701adf",
   "coli.ts": "02fc9b735e70604a7c4af33ee0598d27ed21f84e1cb1ad7a98ad8433d6eac82a",
-  "combat.ts": "72843fec3f18e97316c70a3c14217d3c027756d91cef23e4b6ea16feeea27c47",
+  "combat.ts": "118b4e896db354607fe79cb4c4d08a7e7638605692060045918560caf72c773b",
   "container.ts": "11b185957d66a5123097e51aadb5ae66760d11f8c9f69a1c128c58c4045e3e40",
   "degraded.ts": "f53ceffd81c8182f0c5edde7e6f0c1bc7f62da1851ca23e351eda62a87fb9f2e",
   "evt.ts": "3115a01280203f2d46314f679856c06f57193e4084eb6e71410faf6611c6ea58",
@@ -69,4 +69,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "4dac3e3b785e65e6fde47b6b82bcfc310dd7e4cac6e04271f26245f22fb4a09e";
+export const BUILDER_HASH = "57d323f81a11481fc6f5811afcc4d344a9c8e482455a7f29abfaf9edabd2c353";

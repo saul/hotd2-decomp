@@ -1,7 +1,7 @@
 /**
  * How a zombie closes the distance: the clips carry it.
  *
- * This was an open question for a long time and the answer was in the data
+ * This was an open question for a long time, and the answer was in the data
  * all along.
  * None of the five ported class-0x30 states writes `obj+0x4C`, and
  * `ZombieStateWalkDistance` *measures* how far the actor has travelled from a
@@ -21,15 +21,15 @@
  * too slow.
  *
  * **The mechanism is `SkeletonApplyRootMotion` (`FUN_00410C50`)**, and it was
- * an open question here for a long time. It does not go through `obj+0x4C` at all: the
- * draw walk reaches it as `ActorAdvanceMotion` -> `DrawSkinnedModelAndShadow`
- * -> `SkeletonDrawWalk` -> `SkeletonPoseRootFrame`, and it writes the rotated
- * delta straight onto `g_cur_actor`'s position. Its gate is motion-block
- * `+0x64` bit 1 — which is `obj+0x1F8`, and `ActorBuildSkinnedModel` sets it
- * to 3 unconditionally for **every skeletal actor in the game**. So root
- * motion is on from frame one for class 0x30 and class 0x31 alike; there is
- * no per-state or per-class switch, and nothing carries an actor but its
- * clips.
+ * an open question here for a long time. It does not go through `obj+0x4C` at
+ * all: the draw walk reaches it as `ActorAdvanceMotion` ->
+ * `DrawSkinnedModelAndShadow` -> `SkeletonDrawWalk` -> `SkeletonPoseRootFrame`,
+ * and it writes the rotated delta straight onto `g_cur_actor`'s position. Its
+ * gate is motion-block `+0x64` bit 1 — which is `obj+0x1F8`, and
+ * `ActorBuildSkinnedModel` sets it to 3 unconditionally for **every skeletal
+ * actor in the game**. So root motion is on from frame one for class 0x30 and
+ * class 0x31 alike; there is no per-state or per-class switch, and nothing
+ * carries an actor but its clips.
  *
  * **One class does operate that switch, and this note used to say none did.**
  * `CivilianRunScript` (`FUN_0048B9E0`) writes `model+0x64` bit 1 on every clip

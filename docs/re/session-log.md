@@ -20626,3 +20626,69 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+
+## 2026-09-28 -- `ThrowerEmitGroundDust`: the bounce's puff, the landing's column, `zsass`'s trail
+
+Read `FUN_0044D260` from the listing, whole, and ported it
+(`game/class31/ground_dust.ts`) with all three of its callers:
+`ThrowerStateFallAndLand` (0x46, `0x0044A658`), `ActorArcStep` (0x50,
+`0x0044D9FC`) and `ThrowerStateStandAndDecide` (0x5A, `0x0044B3B2`). The last
+`[diverges]` on `ActorArcStep` goes with it; the arc rewrite that carried it
+landed on main from a peer session an hour earlier, and the swap was agreed
+with that session before either touched `arc.ts`.
+
+**Named.** `FUN_00401870` is `VecAimYAxisZThenX`: `rz = atan2(-x, y)`,
+`rx = atan2(z, y/cos(rz) or -x/sin(rz))`, both `(s16)trunc`. The order is
+**checked**, not assumed: with the port's own `MatrixRotateZ(rz);
+MatrixRotateX(rx)` it carries +Y back onto the input to 1e-3 over four tilted
+normals, and the other order misses by more than 0.1 -- `port.test.ts` asserts
+both. `PTR_DAT_005929F4` is not a symbol of its own: it is the second word of
+`g_class31_motion_sets` (`0x005929F0`), loaded directly (`MOV ECX,
+[0x005929F4]` at `0x0044D351`), so the trail tests set 1's walk pair --
+`{10, 10}` in the shipped table -- whatever set the actor is in. Recorded on the
+`g_class31_motion_sets` row rather than as a label inside the array, the way
+`g_class30_states[0x37]` was.
+
+**What the listing says that the decompile does not make obvious.**
+
+* The 0x50 arm's four tests all branch to `0x0044D340`, the trail, not to the
+  exit; only a code other than 0x50/0x5A returns. So a `zsass` landing on its
+  walk gets the column **and** two scuffs.
+* The trail's second sprite is at `yaw + 0xC000`, not `+0x8000`: the `+0x8000`
+  at `0x0044D511` is added to the already-stored `+0x4000`. The annotation said
+  "+0x4000 and +0x8000 BAMS"; corrected.
+* The bounce's angles off `g_coli_hit_normal` go into `params[3]` and
+  `params[5]`, and both of the bounce's sprites have a non-zero face-camera
+  word, which overwrites `params[3..4]` from the eye; `params[5]` is read by
+  nothing. The tilt is computed and never seen. The 0x50 arm's `params[3..5]`
+  are uninitialised stack for the same reason and are harmless for the same
+  reason.
+* The stand ends **every** path at `0x0044B3B2` -- after a successful
+  `ThrowerTryEnterState`, after the `0xB` test and after the router. The port
+  returned early from the first two; it runs all three on now. On a frame that
+  leaves state 7 the trail's `state != 7` arm fires, not the footfall test.
+* `ThrowerStateFallAndLand` plays `PlaySoundId(0x2716A9)` --
+  `COMMON\ENE_WALK4_16.WAV` -- straight after the dust call on every bounce.
+  The port never played it; it does now. `ThrowerStateKnockedTumbling` plays
+  the same id on its bounces and the port still does not -- left for its own
+  change.
+
+**Wrong turns.**
+
+* The brief (and the annotation) said the bounce sprite is "oriented to
+  `g_coli_hit_normal`". It computes that orientation and then discards it --
+  see above. The port passes it as the engine does, and the test reads it with
+  no host, where the port's own face-camera arm has nothing to aim at.
+* Ghidra's pseudocode of `SpawnSpriteEffectFromParams` ends the distance-law
+  arm with `MatrixStackPop(1); return;`, which would mean **no** sprite spawned
+  through `SpawnSpriteEffect` ever plays its sound. The listing continues past
+  the pop at `0x00407866` into `PlayImpactSoundForMaterial`. **L35** again:
+  `MatrixStackPop` is marked no-return and the decompile stops there. The port
+  was already right.
+* The first plan for the arc call was to write it against the `arc.ts` on
+  this branch, which had no dust `[diverges]` at all: the one the brief named
+  was in a peer's uncommitted rewrite of the same function. Asking before
+  editing is what kept that from being a merge conflict in `ActorArcStep`.
+
+`port.test.ts`: 34 new assertions; 22 of them fail with the emitter reduced to
+a bare `return`, and the rest are the matrix checks and the negative arms.

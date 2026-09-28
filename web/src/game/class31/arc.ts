@@ -13,11 +13,14 @@
  * computes the absolute position for frame *n* from the endpoints every time.
  */
 import type { ArcStage } from "../../bundle/characters";
+import type { Events } from "../../core/events";
 import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { ActorSetOneShotBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
+import type { GameHost } from "../host";
 import { MotionOf, SecondsToTicks } from "../tables";
 import { dist2d, vec3, type Vec3 } from "../vec";
+import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
 import {
   ARC_MIN_FRAMES, ARC_MIN_FRAMES_FAST, ARC_SPEED_UNITS, ThrowerState,
 } from "./states";
@@ -321,12 +324,13 @@ function ArcTypeTakesFlags(obj: Actor): boolean {
  * `SecondsToTicks(dt) * step` stands in for the engine's calls one frame at a
  * time.
  *
- * [diverges] `ThrowerEmitGroundDust` (`FUN_0044D260`) is not ported -- it is
- * a sprite emitter keyed by a code, and its `0x50` arm and the `0x5A` arm it
- * falls into are not read far enough to transcribe -- so the landing raises
- * no dust.
+ * **The landing is where the dust goes up**: `ThrowerEmitGroundDust(0x50)`
+ * (`FUN_0044D260`) for every class, which answers only a leaping thrower and
+ * then runs `zsass`'s trail. `host` and `events` are what its sprites need to
+ * face the camera and to make their sound; the arc itself reads neither.
  */
-export function ActorArcStep(obj: Actor, step: number, dt: number): boolean {
+export function ActorArcStep(obj: Actor, step: number, dt: number,
+                             host?: GameHost, events?: Events): boolean {
   const script = obj.arcScript;
   // `[port-only]` The engine's slot always holds twelve dwords, zeros for the
   // `&DAT_007DCC70` sentinel; the port's is null when the bundle has none.
@@ -372,6 +376,10 @@ export function ActorArcStep(obj: Actor, step: number, dt: number): boolean {
     obj.pos.x = obj.arcTo.x;
     obj.pos.y = obj.arcTo.y;
     obj.pos.z = obj.arcTo.z;
+    // `0x0044D9FC`. After the snap rather than before it, so that the puff
+    // and the trail point are where a one-frame step would have left the
+    // actor -- the engine's own position here -- whatever `dt` was.
+    ThrowerEmitGroundDust(obj, GroundDustCode.ArcLanding, host, events);
     obj.arcPhase = ArcPhase.Settled;
   }
   if (obj.arcPhase === ArcPhase.Settled) {

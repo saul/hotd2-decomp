@@ -133,7 +133,7 @@ export function ThrowerStateDelayedPounce(obj: ThrowerActor, dt: number,
   obj.roll = TurnAngleTowardFrames(obj.roll, 0, POUNCE_ROLL_RATE,
                                    SecondsToTicks(dt));
   if (obj.attackPermit >= 0) ThrowerStrikeConnect(obj, events);
-  if (ActorArcStep(obj, 1, dt)) return;
+  if (ActorArcStep(obj, 1, dt, host, events)) return;
 
   obj.flags &= ~ActorFlag.BackingOff;
   obj.flags2 &= ~ThrowerFlag.Pouncing;

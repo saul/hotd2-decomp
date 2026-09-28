@@ -30,8 +30,9 @@ import { G } from "../globals";
 import type { GameHost } from "../host";
 import { FtolS16, VecAimYAxisZThenX } from "../matrix";
 import { SpawnClass } from "../spawn_class";
-import { MotionPlayFrame, T } from "../tables";
+import { T } from "../tables";
 import { vec3, VecToAngles } from "../vec";
+import { ActorPlayCursor } from "./arc";
 import { ThrowerMotion, ThrowerState } from "./states";
 
 /** The three codes the routine answers; any other returns at once. */
@@ -160,11 +161,11 @@ export function ThrowerEmitGroundDust(obj: Actor, code: GroundDustCode,
   // -- the trail, `0x0044D340`: reached by 0x5A and by every 0x50 ------------
   if (obj.charType !== CHAR_ZSASS) return;
   // `[port-only]` The engine has one motion track at `obj+0x194`, whose clip
-  // is `+0x1B4` and whose wrapped cursor is `+0x19C`; the port keeps a
-  // one-shot on `obj.action` over the base loop, so the track is whichever
-  // is on top.
+  // is `+0x1B4` and whose cursor is `+0x19C`; the port keeps a one-shot on
+  // `obj.action` over the base loop, so the track is whichever is on top --
+  // for the clip as for the cursor `ActorPlayCursor` reads.
   const trackMotion = obj.action ? obj.action.motion : obj.motion;
-  const cursor = obj.action ? obj.action.ticks : MotionPlayFrame(obj);
+  const cursor = ActorPlayCursor(obj);
   // `SHR EDX, 0x1B; AND EDX, 1; CMP EAX, [ECX + EDX*4 + 8]` -- the walk pair,
   // picked by `obj+0x34` bit 27 as the stand itself picks it.
   const walk = T.chars?.class31?.sets?.[TRAIL_MOTION_SET]?.motions?.[

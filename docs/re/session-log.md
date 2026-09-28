@@ -20626,6 +20626,214 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+## 2026-09-27 -- class 0x31 state 23, the delayed pounce, read against the listing
+
+`ThrowerStateDelayedPounce` (`FUN_0044E830`) re-ported from the disassembly;
+the roll turn is the turn-routines branch's and was left alone here. What the
+port had wrong, all `[proved]`:
+
+* The wait clip was a one-shot. The exe calls `ActorSetMotionBlended`
+  (`0x004119A0`) directly, so it is the ordinary motion and loops for the
+  whole wait -- its root walks the actor. It also raises `obj+0x1F8` bit
+  `0x10`, which is `MotionFlag.RootMotionY` and had no known writer; that is
+  the height store at `0x00410E48`, now honoured by `ApplyRootMotion`.
+* `obj+0x34 |= 0x100` (`ShotImmune`) for the wait was missing, so the pair
+  could be knocked down before they moved.
+* `ActorFlag.BackingOff` (`0x20000000`) for the exe's `0x10000000`
+  (`Committed`). `ThrowerStateLeapDown` and `ThrowerStateLeapStrike` make the
+  same substitution; they were left to their owners and reported.
+* The flight aimed at `obj.lookAt.y`, the actor's own tracked point, for
+  `g_camera_eye_y`.
+* The `obj+0x34 |= 0x2000` raise past the live row's hit frame was not there.
+* **`ThrowerPickLandingPoint` switches on the state** (`obj+0x1310`, at
+  `0x0044CBB1`): states 22 and 23 take -350 px, and 23 unprojects at -6.0. The
+  annotation already said so; the port ignored it and had no sideways offset
+  either. State 23 was landing 9.5 units short.
+* `ThrowerLoadAttackArcScript` wrote `obj+0x1364`. The exe's does not; the only
+  store to that word on a thrower is `ThrowerStateLeapDown`'s at `0x0044B6FB`.
+
+**Wrong turns.** I first wrote that seven `+0x1364` instructions in class
+0x31's range held one store. There are five stores: `SpawnThrownWeapon`'s
+three go through `ESI`, the projectile, and `FUN_00450930`'s through an object
+it has just allocated. The claim is now "one store on a thrower". And the first
+port test pinned the flinch veto to cursor 67. The port shows 68, because
+`ActorArcStep`'s `playStage` starts stage 2 on its start frame with no fade
+hold, and the state never sees 67. That is the arc's approximation, not state
+23's, so the test now asserts "past 66" and the hold is reported.
+
+Checks: 29 new assertions in `port.test.ts`, 2223 passing. Mutating the veto
+to read `obj.thr.stance` fails it at cursor 63.
+
+**After merging the arc hold (98627e93).** The veto check is back to exactly
+67, because stage 2 now holds on its start frame. The merge also caught a third
+wrong turn, found by the hold's session. I had asserted that `ShotImmune` is
+down at the end of the frame the wait ends. Sub 1 does drop it (`0x0044E8BA`),
+but the same frame falls into `ActorArcStep`, whose phase 0 raises it again
+for types 0x16..0x19 outside state 10 (`0x0044D8A4`..`0x0044D8BE`, jump-table
+entry 0 at `0x0044DA4C`). It latches `obj+0x136C` bit `0x200` only if `0x100`
+was already up. The takeoff (`0x0044D966`..`0x0044D97D`) drops it. So the
+windup cannot be shot either. I asserted what the state does in isolation
+rather than the end of the engine's frame, and the check now asserts the
+latter.
+
+## 2026-09-27 -- `obj_484ff0_props`: the `0x20` gate is the chapter card's, not dead
+
+The rig's note (`tools/hod2lib/rigs.py`, and `rigs_data.ts` generated from it)
+ended: "gated on DAT_009A5900 & 0x20, and [likely] that bit is dead: of 54
+references ... nothing sets 0x20, so the early-out never fires". **Wrong.**
+`[proved]` from the disassembly of all 67 references `get_xrefs_to 0x009A5900`
+returns now:
+
+* **Set only by `ChapterCardInstall`** (`FUN_004342E0`): `OR AL, 0x20` at
+  `0x0043436B` in sub 0, and `OR EDX, 0x20` at `0x004342F6` / `0x00434324` in
+  the Boss Mode and app-state-`0x0B` installer arms. Every other writer ORs
+  1, 2, 8, `0x10` or `0x18`, or ANDs one of those out (`PlayerTryStartPress`'s
+  `OR EAX, EBP` is `EBP = 1`, loaded at `0x00415018`).
+* **Cleared** at `0x004348C7` after flag 248, by `BossModeChapterCardUpdate`
+  at `0x00434CE4` and by `FUN_00434DA0` at `0x00434ED4`; and wholesale by
+  `CommitAppState`'s `AND 0xFFFFFFC7` (`0x0040E8C5`) and `FUN_0040A920`'s
+  `MOV [0x009A5900], 3` (`0x0040AA85`).
+
+So the early-out fires for every chapter card's 180 frames. Why the earlier
+sweep missed three plain `OR`s is `[open]`; the reference count it quoted (54)
+is not the count there is now (67), so it was read off a different list.
+
+**The early-out is a draw gate, not a routine gate** -- the note's "the whole
+routine is gated" was also wrong. `ScriptedHumanoidDraw`'s `JNZ` at
+`0x0048500D` lands on the tick at `0x0048523A` (`if obj+0x1324 == 0,
+obj+0x194++`), not the `RET`; `SetPiecePropDrawAndTick`'s at `0x00483503`
+lands on the type-`0x55` test at `0x00483520`, past the skeleton draw only. So
+classes 0x24 and 0x25 **keep animating** behind the card and are only undrawn;
+this log's chapter-card entry above lists them among routines that "hold
+still", which is right for `Class22CutsceneHoldUntilChapterCard` (its gate is
+on `DrawAndStep`) and not for these two.
+
+**The port has nothing to gate.** What sits under the test in both routines is
+the draw, which is the renderer's; the tick, which is the port's
+(`ActorAdvanceMotion`), is outside it. The bit itself is modelled by the
+screen-card session (`c1e6e721`, merged to main as `ccb956b7`;
+`ScreenFurniture.ChapterCard` in `game/globals.ts`), and under the user's skip-every-card decision (NEW-BUGS 13)
+sub 0 raises it and the countdown drops it inside one `ChapterCardInstall`
+update, so no draw could observe it. A render-side gate is worth writing only
+if the card is ever held for its dwell. Comments at class 0x24's tail and
+class 0x25's `ScriptedHumanoidIdle` say so where the next reader will look.
+
+**Wrong turn.** The pseudocode of both routines `return`s after the
+`MatrixStackPop` that ends each decoration arm, and after
+`SetPiecePropDrawAndTick`'s type-`0x53` draw of slot `0x1382` -- which read as
+"those arms never tick". The disassembly falls through into the tick every
+time (`0x00485237`, `JMP 0x0048523A` at `0x004851F3`, `0x004835BA`): **L35**,
+the no-return `MatrixStackPop`. Nothing is lost here in practice: no class-0x24
+placement in the six stages has character type `0x53` or `0x55` -- the 28
+reached use `0x22`/`0x26`/`0x2E`/`0x30`/`0x31`/`0x33`/`0x34`/`0x35`/`0x37`/`0x47`.
+
+**Bundle.** The note is data, and it travels twice: `rigsJson` writes it into
+`rigs[].note` of the script JSON, and the glTF carries it as the rig node's
+`extras.hod2_note` -- stages 2 and 3, both modes, eight files. All twelve
+bundles were exported before and after the change and diffed chunk by chunk:
+those eight notes, and `rigs_data.ts`'s entry and the builder stamp in
+`manifest.json`, are the whole difference. Every `.glb` BIN chunk and every
+other file is byte-identical.
+
+**Two more slips, both caught.** (1) The first "after" export was started
+before `tools/gen_builder_hash.py` had run -- **L33** exactly; `rigs_data.ts`
+is in the builder digest, and `verify_exporters.py` said so. Stopped, hash
+regenerated, re-exported. (2) `grep -rl` over the bundle listed only the four
+script JSONs, which read as "the glTF does not carry the note". macOS `grep`
+exits 1 on these `.glb` files and prints nothing, even with `-c` -- **L13**.
+Counting the bytes in Python found it in all four.
+
+---
+
+## 2026-09-27 -- the head aim: zombies and throwers look at you
+
+**Outcome:** `ActorAimHeadAtCamera` (`0x00453BE0`) and its target
+`ActorHeadAimAngles` (`0x00453D70`) read whole, named, and ported for classes
+0x30 and 0x31; class 0x25's twin `ScriptedHumanoidAimHeadAtCamera`
+(`0x00485BA0`) and its seed `ScriptedHumanoidSeedHeadAim` (`0x00485D70`) read
+and named, not ported. `combat.md`'s "do zombies aim their head" section is
+rewritten from the listing.
+
+**The reading.** Both node draw hooks push the matrix and, for bone 2, call the
+routine before anything else: `ZombieDrawBonePart` while `obj+0x34` lacks
+`0x40000`, `ThrowerDrawBonePart` also only while `obj+0x136C` has `0x100` or
+lacks `0x20` (ground or ceiling, not a wall). It steps `obj+0x1320`/`+0x1324`
+toward the eye raised 15 (a camera-space shoulder point with two attackers) at
+`0xC0` a draw, keeps each inside `0x4000` of level / of the body's facing
+`obj+0x68 - 0x8000` or steps it back, and rotates the pushed matrix
+`Ry(-centre) Ry(yaw) Rx(pitch)`. Its point is bone 2's view-space hit-sphere
+centre, which `SkeletonEmitNode` writes **after** the hook and not while
+`obj+0x34` has `0x8000` -- so it is always last frame's, and a corpse's
+(`ZombieEnterCorpseState` raises `0xC000`) is frozen where it died. Both combat
+`Init`s seed the angles toward the same point under the same `0x40000` test.
+
+**The data.** `0x40000` has no writer in `.text` (dword, byte and register
+forms scanned), so it is a spawn-record bit for life. 160 of the 608 class-0x30
+rows across the twelve bundles carry it -- all 138 that start or attack into one
+of the eleven states using `obj+0x1320` as a motion id, all 114 civilian
+captors, all 12 class-0x18 rows; none of the 42 class-0x31 rows. So the two
+readings of `obj+0x1320` never meet in one actor, and the port gives them two
+fields. No class-0x30/0x31 row carries `0x8000` without `0x40000`, but the
+corpse raises it, so the stale record is a shipped case and is carried
+(`headRecord` + a latch). Op 12, the only thing that switches class 0x25's aim
+on, is in none of the 274 exported class-0x25 programs.
+
+**The port.** `game/class30/head_aim.ts` (the stepping, the seed, the target,
+and two port-only halves of `SkeletonEmitNode`'s record write around the node
+walk); `game/class30/draw.ts` (`ZombieDrawBonePart`'s state half, called from
+`EnemyZombieUpdate` through main's new `ActorRunNodeDrawHooks`); the aim added
+to `class31/draw.ts`'s hook. `NodeDrawHook` now takes the `ClassFrame`, since
+the aim reads the camera. `G.g_camera_eye` is new, written by
+`GameSystem.update` beside `g_camera_yaw_bams`, for the `Init`s. `render/characters/head_aim.ts` turns bone
+2's own meshes in `onBeforeRender`/`onAfterRender` (and the shadow pair) --
+the engine's push and pop -- so attachments and the hit sphere keep the pose.
+Class 0x25's `boneDecoration`/`SetBoneDecoration` are now `aimsHead`/`SetHeadAim`,
+and op 12's missing seed is declared.
+
+**Checked.** Fourteen assertions in `port.test.ts`, each of eight mutants
+failing at least one. The page, stage 1 block 1 step 2 at frame 5, rendered
+with and without the render half: identical bodies, and with it the walking
+zombie's head faces the viewer instead of its walk.
+
+**Wrong turns.**
+
+* The prompt said `TurnAngleToward` and `AngleWithinTolerance` were already
+  ported exactly; in this worktree they were not -- a peer's agent had them
+  uncommitted. Asked rather than duplicated, and merged main once it landed.
+* I first planned to read the live pose for the aim point and call the
+  camera-motion residue a divergence. Reading `ZombieEnterCorpseState`'s
+  `0xC000` is what showed the stale record is ordinary play, not an edge.
+* My doc said a head whose target is out of reach "comes back to the front";
+  the arithmetic says it walks to the edge and alternates across the last
+  `0xC0`. Found writing the test's expected values.
+* I wrote "the 52 civilian captors" into `ActorFlag.NoHeadAim` from memory of
+  "fifty"; the count is 114 rows. Recounted before it went anywhere.
+* The first thrower gate assertion ANDed in `ThrowerHeadAims` itself, so a
+  mutant that dropped the gate from the hook passed. Now it asserts the hook's
+  output alone.
+* Two chained substitutions in my annotation batch made it non-idempotent;
+  collapsed into one.
+* `SkeletonEmitNode`'s pseudocode `return`s after the tracked-bone pop; the
+  listing falls through to the `+0x68` write and the children (L37's shape).
+* Main's `combat.md` said the pose hook has exactly two installers; both combat
+  `Init`s write their push-outs there as `obj+0x12F0`. Corrected in place.
+* I first wrote `G.g_camera_eye` in `syncPortGlobals`, in the script phase,
+  because the spawns there read it. `test:state` failed every stage at frame 0
+  after a load: that call runs before the frame's camera is placed, and the
+  camera is not in a snapshot, so a load's first frame read the pre-load
+  camera. Written in `GameSystem.update` from `ctx.view`, as the yaw is, a
+  spawn reads the previous tick's eye out of `G` and the replay holds.
+* The `boneDecoration` rename moved `builder_hash.ts`: `class25/state.ts` is in
+  the exporter's import closure. Regenerated with the change.
+
+**Next actions.**
+
+* Port class 0x25's twin if a program ever uses op 12 (none does).
+* Training's hook swap is declared on both updates; it needs a per-actor
+  hook pointer.
+* `SkeletonEmitNode` still has its tracked-bone `return` in Ghidra and
+  `SkeletonApplyRootMotion` the same after its root-motion pop; both are worth
+  the L55 check.
 
 ## 2026-09-28 -- `ThrowerEmitGroundDust`: the bounce's puff, the landing's column, `zsass`'s trail
 

@@ -102,8 +102,10 @@ export enum MotionFlag {
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
    * clear it writes back `obj+0x40` and `obj+0x48` only, with it set it writes
-   * `obj+0x44` too. Nothing in the port sets it, and no routine read so far
-   * writes it. `[open]`
+   * `obj+0x44` too (`0x00410E48`). `[proved]` Its one writer found is
+   * `ThrowerStateDelayedPounce` (`FUN_0044E830`), which raises it for its wait
+   * clip (`OR ECX, 0x10` at `0x0044E863`) and drops it when the wait ends;
+   * `ApplyRootMotion` in `game/root_motion.ts` honours it.
    */
   RootMotionY = 0x10,
   /**
@@ -147,7 +149,9 @@ export enum ActorFlag {
   /**
    * `obj+0x34` bit 8. While it is set `ThrowerShotFeedback` forces the hit
    * result to 5, so a downed thrower only ricochets — a real invulnerability
-   * window, counted down by `obj+0x133C`.
+   * window, counted down by `obj+0x133C`. `ThrowerStateDelayedPounce`
+   * (`FUN_0044E830`) holds it up for the whole of its wait instead
+   * (`OR CH, 0x1` at `0x0044E884`, `AND CH, 0xfe` at `0x0044E8BD`).
    */
   ShotImmune = 0x100,
   /**
@@ -273,7 +277,10 @@ export enum ActorFlag {
    * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
    * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
    * of the throw clip and `ZombieStateTargetMotionScript` for an entry whose
-   * mode is not negative.
+   * mode is not negative. Class 0x31's pounces raise it for the flight --
+   * `ThrowerStateLeapDown` at `0x0044B6F0`, `ThrowerStateLeapStrike` and
+   * `ThrowerStateDelayedPounce` at `0x0044E8E6` -- and not
+   * {@link BackingOff}, which is the next bit up.
    */
   Committed = 0x10000000,
   /**
@@ -366,6 +373,28 @@ export enum ActorFlag {
    * the props.
    */
   NoShotTest = 0x8000,
+  /**
+   * `obj+0x34` bit `0x40000` — **this actor's head does not follow the
+   * camera.**
+   *
+   * `[proved]` that it has exactly four readers, all `TEST dword ptr
+   * [reg + 0x34], 0x40000`: the aim seed in `EnemyZombieInit` (`0x00452EAB`)
+   * and `EnemyThrowerInit` (`0x004496FE`), and the bone-2 gate in front of
+   * `ActorAimHeadAtCamera` in `ZombieDrawBonePart` (`0x004534E0`) and
+   * `ThrowerDrawBonePart` (`0x00449FCF`). `[likely]` that nothing in `.text`
+   * writes it: a scan for every `OR`/`AND` form that can name bit 18 of
+   * `+0x34` -- dword immediate, byte at `+0x36`, and the register forms --
+   * finds none, so it comes from the spawn record alone, through
+   * `ActorInitFlags`, and holds for the actor's life.
+   *
+   * The shipped data is what makes it the switch between the head's two
+   * readings of `obj+0x1320`: 160 of the 608 class-0x30 spawn rows across the
+   * twelve bundles carry it, and so do **all 138** whose start or attack state
+   * is one of the eleven class-0x30 states that read or write that word
+   * (34-38, 40, 41, 43-46), all 114 civilian captors, and all twelve of class
+   * 0x18's rows. None of the 42 class-0x31 rows does.
+   */
+  NoHeadAim = 0x40000,
   /**
    * `obj+0x34` bit `0x200` — **this actor's parts do not get swapped.**
    * `ActorSwapDamagedPart` (`FUN_004098E0`) returns before it touches

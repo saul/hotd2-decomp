@@ -18,7 +18,7 @@ import { ActorFlag, ThrowerFlag, type Actor } from "../actor";
 import { ActorSetOneShotBlended } from "../class30/motion_cue";
 import { GAME_HZ } from "../class30/states";
 import type { GameHost } from "../host";
-import { MotionOf, SecondsToTicks } from "../tables";
+import { MotionOf, MotionPlayFrame, SecondsToTicks } from "../tables";
 import { dist2d, vec3, type Vec3 } from "../vec";
 import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
 import {
@@ -250,6 +250,22 @@ export function ActorClipFrame(obj: Actor): number {
 export function ActorClipLength(obj: Actor, motion: number): number {
   const m = MotionOf(obj, motion);
   return m ? (m.frames / Math.max(1, m.fps)) * GAME_HZ : 0;
+}
+
+/**
+ * `obj+0x19C` whichever clip is on the track: the one-shot's cursor while one
+ * runs, the base motion's otherwise.
+ *
+ * `[port-only]` The engine has one track and one cursor, so a routine that
+ * reads `obj+0x19C` gets whatever was last set on it. The port keeps the arc's
+ * stages on `obj.action` and everything else on the base motion, so where a
+ * routine reads the cursor across that boundary -- `ThrowerStateDelayedPounce`
+ * does, on the frame its wait clip hands to the arc -- this is the one field
+ * the engine would have read. {@link ActorClipFrame} is the reading for a
+ * routine that only ever sees its own one-shot.
+ */
+export function ActorPlayCursor(obj: Actor): number {
+  return obj.action ? obj.action.ticks : MotionPlayFrame(obj);
 }
 
 /**

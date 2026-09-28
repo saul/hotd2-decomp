@@ -1674,9 +1674,11 @@ assertion behind it kept a hang alive for two sessions.
    which changes how the whole game looks. Tagged on `ActorModelScale` in
    `game/root_motion.ts`.
 
-Still `[open]`, and deliberately left so: `MotionFlag.RootMotionY`, bit `0x10`
-of the same word, has no writer anywhere that has been read — nine other classes
-write `model+0x64` and none of their values were read here. And the engine's
+`MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
+no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
+clip (`0x0044E863`), and `ApplyRootMotion` now honours it — the height store at
+`0x00410E48`. The shipped wait clip's root height is flat, so no stage moves
+differently for it. And the engine's
 wrap damper makes the applied delta `(baseline_old - root)/play_length` where
 `rootDelta` computes `(root - root[0])/frames`; both are small, neither was
 touched, they are not the same number and nothing asserts either.
@@ -2174,6 +2176,18 @@ so the stab connects because the flight put it there on that frame. And the
 difference between the four character types that share this machine is
 *data* — the behaviour set is a byte in the spawn descriptor, and `zsass`'s
 picks contain only the throw where `zstin`'s contain the climb.
+
+**State 23, the delayed pounce, is transcribed whole** (`class31/entrance.ts`,
+stage 2 block 21's pair). The port had the shape and little else: it played
+the wait as a one-shot that ran out after one cycle, left the actor shootable,
+raised `BackingOff` (`0x20000000`) where the exe raises `0x10000000`, aimed at
+the actor's own tracked height for `g_camera_eye_y`, and never raised the
+flinch veto. Now the wait loops on the ordinary track and walks, every shot in
+it ricochets, the flight ends six units in front of the eye at the eye's own
+height — `ThrowerPickLandingPoint` switches on the *state*, and nothing in the
+port had read that — and past the pounce row's hit frame the actor stops
+reacting to shots. `ThrowerLoadAttackArcScript` no longer latches the stance
+the connect reads: the exe's does not, so the swing connects on row 0's frame.
 
 **And it now dies its own death.** Class 0x31 does not use the shared stagger
 or the shared *directional* death clip — it has a four-state chain of its own,
@@ -4562,6 +4576,36 @@ arrives, while it is not drawn. And a seek replays every placer and runs
 their constructors on the first live frame, so after a seek a task starts its
 lifetime where the seek lands -- the same thing every class-0x41 prop does,
 which is why the canal tile is still there after a seek into block 35.
+
+### Zombies and throwers look at you
+
+The head follows the camera now. Bone 2 of every class-0x30 and class-0x31
+actor turns toward the eye raised 15 units -- up to a quarter turn from its
+body's facing and its level, at `0xC0` BAMS a drawn frame -- and a thrower does
+it on the ground and on the ceiling but not on a wall. The routine is
+`ActorAimHeadAtCamera` (`FUN_00453BE0`), which the two node draw hooks call
+for bone 2 and which Ghidra had no function for, so `combat.md` had recorded
+the opposite as a settled result.
+
+* **Where it is.** The two angles, `obj+0x1320`/`+0x1324`, are state on both
+  arms (`HeadAimWords`) and are stepped by `class30/head_aim.ts` from the node
+  walk each class's update runs where the engine draws. The turn is drawn by
+  `render/characters/head_aim.ts` around each mesh the hook draws on bone 2 --
+  its own model, a gore swap, a cel -- and not around the hair or hat hung on
+  it, nor the hit sphere, which keep the pose's matrix in the engine too.
+* **It starts aimed.** Both `Init`s seed the angles toward the camera, which
+  is why the port now carries `g_camera_eye` in `G` for the spawn to read.
+* **It aims from the last draw.** The point is the bone's hit-sphere centre as
+  the previous frame left it, and a corpse stops refreshing it, so a dead
+  zombie's head goes on turning from where it fell.
+* **Captors do not look.** Every spawn that can reach one of the eleven states
+  that use `obj+0x1320` for a motion id carries `obj+0x34` bit `0x40000`
+  (`ActorFlag.NoHeadAim`), which gates the seed and the aim; so do all of class
+  0x18's.
+
+What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
+absolute turn on two other words, switched by an op no exported program
+uses), and Training's hook swap, which is declared on both updates.
 
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 

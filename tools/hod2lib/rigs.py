@@ -551,10 +551,17 @@ OBJ_484FF0_PROPS = Rig(
          "at (-635.1, 43.0, -955.9), which is where the routine hardcodes "
          "part_10df_v4 -- independent corroboration of both readings. The "
          "variant-3 parts take their path slot from obj+0x135C at runtime and "
-         "are still not placeable. The whole routine is gated on "
-         "DAT_009A5900 & 0x20, and [likely] that bit is dead: of 54 "
-         "references, the setters are OR 1/2/8/0x10/0x18 and nothing sets "
-         "0x20, so the early-out never fires in the retail build.",
+         "are still not placeable. Nothing is drawn while "
+         "g_screen_furniture_flags (DAT_009A5900) & 0x20 is set, and "
+         "[proved] that bit is the chapter card's: ChapterCardInstall "
+         "(FUN_004342E0) ORs it in at 0x0043436D, or at 0x004342FA / "
+         "0x00434328 in its Boss Mode and app-state-0x0B arms, and clears it "
+         "at 0x004348C9 as it raises g_script_flags[0xF8]; "
+         "BossModeChapterCardUpdate (0x00434CE7) and FUN_00434DA0 "
+         "(0x00434ED6) clear it for the other two. So the body and every "
+         "part here are hidden for the card's 180 frames unless it is "
+         "skipped. The early-out lands on the tick at 0x0048523A, not the "
+         "return: the motion frame keeps advancing behind the card.",
     parts=(
         RigPart("part_1a37_v1", (0x1A37,),
                 translation=(-1367.0, -17.0, -1845.3),

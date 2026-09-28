@@ -64,7 +64,84 @@
  *   for all four classes, together with a split of that function. That is a
  *   job of its own; it is recorded here rather than half-done. `[open]`
  */
-export interface ZombieTail {
+import { vec3, type Vec3 } from "../vec";
+
+/**
+ * The words the head aim keeps, on both arms that run it.
+ *
+ * `ZombieTail` and `ThrowerTail` extend this: the routine,
+ * `ActorAimHeadAtCamera` (`FUN_00453BE0`), is shared, reads `g_cur_actor`,
+ * and finds the same offsets on either class. It is ported in
+ * `class30/head_aim.ts`, which has the reading.
+ */
+export interface HeadAimWords {
+  /**
+   * `obj+0x1320` — the head's pitch, BAMS, as `TurnAngleToward` left it
+   * (unmasked; the next call masks it). `[proved]`: written at `0x00453CCB` and
+   * `0x00453CE9`, read at `0x00453D52` for `MatrixRotateX`.
+   *
+   * The same word is class 0x30's `scriptMotion` -- see the file comment --
+   * and, outside these two classes, class 0x24's `holdFrames` and class
+   * 0x25's `stallFrames`.
+   */
+  headPitch: number;          // +0x1320, also `zom.scriptMotion`
+  /**
+   * `obj+0x1324` — the head's yaw, BAMS, world-relative: straight ahead is
+   * `(obj+0x68 - 0x8000) & 0xFFFF`. `[proved]`: written at `0x00453D1B` and
+   * `0x00453D38`, read at `0x00453D46` for `MatrixRotateY`.
+   *
+   * The same word is class 0x24's `frozen`, which is why it is not that field.
+   */
+  headYaw: number;            // +0x1324
+  /**
+   * Bone 2's draw record `+0x68..+0x70`, at `obj+0x394`: the hit-sphere
+   * centre **in view space**, as the draw that last wrote it left it.
+   *
+   * `SkeletonEmitNode` (`FUN_004114C0`) writes it at `0x004116C3` -- after it
+   * has called the hook -- so the aim always reads the previous draw's point,
+   * and it is not written at all while `obj+0x34` has `0x8000`. Every
+   * class-0x30 corpse has that bit (`ZombieEnterCorpseState` raises `0xC000`
+   * at `0x0045675E`), so a corpse's head goes on aiming from where it was
+   * when it died, re-projected through wherever the camera has since moved.
+   * Zero until the first draw: the allocation clears it, and the view-space
+   * origin is the eye.
+   */
+  headRecord: Vec3;           // +0x394, bone 2's record +0x68
+  /**
+   * `[port-only]` — the last frame's draw wrote {@link headRecord}.
+   *
+   * The port's pose is the renderer's, so the value the engine would have
+   * written can only be read on the **next** tick, from the pose that draw
+   * left: {@link HeadAimBeginDraw} takes it then, and only if this says the
+   * engine would have written it.
+   */
+  headRecordDue: boolean;
+  /**
+   * `[port-only]` — this frame's hook turned bone 2. The renderer draws the
+   * turn when it is set and not otherwise; the engine says the same thing by
+   * running the three `MatrixRotate` calls or not.
+   */
+  headAimed: boolean;
+}
+
+/**
+ * The words for a fresh actor. [port-only] -- see {@link makeZombieTail} for
+ * why the port zeroes what the engine leaves to the allocation.
+ */
+export function makeHeadAimWords(): HeadAimWords {
+  return {
+    headPitch: 0,
+    headYaw: 0,
+    headRecord: vec3(),
+    headRecordDue: false,
+    headAimed: false,
+  };
+}
+
+/**
+ * Class 0x30's own words. See the file comment.
+ */
+export interface ZombieTail extends HeadAimWords {
   /**
    * `obj+0x1320` — the clip the captor script wants; the tail re-blends to it.
    *
@@ -75,8 +152,14 @@ export interface ZombieTail {
    * The same word is class 0x24's `holdFrames` and class 0x25's
    * `hum.stallFrames` — both frame counters, where this is a motion id. One
    * word, three readings that do not convert.
+   *
+   * **And, within this class, {@link HeadAimWords.headPitch}**: the head aim
+   * steps this word as an angle on every drawn frame of an actor without
+   * `ActorFlag.NoHeadAim`. The two never meet in one actor in the shipped
+   * data -- every spawn that can reach a state reading this word carries the
+   * flag -- so they are two fields, as `holdFrames` and `throwDelay` are.
    */
-  scriptMotion: number;       // +0x1320, also class 0x24 / class 0x25
+  scriptMotion: number;       // +0x1320, also `headPitch`, class 0x24 / 0x25
   /**
    * `obj+0x132C` — the state `ZombieStateHoldForCameraCue` runs on this
    * actor's behalf while it waits for its camera cue.
@@ -317,6 +400,7 @@ export interface ZombieTail {
  */
 export function makeZombieTail(): ZombieTail {
   return {
+    ...makeHeadAimWords(),
     scriptMotion: 0,
     delegate: 0,
     holdFrames: 0,

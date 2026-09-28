@@ -82,8 +82,9 @@ export function ActorSetPartVisibility(obj: Actor, visible: number): void {
  * And the frame, which the engine's hook does not take as an argument but
  * reads as globals: the head aim both combat hooks run for bone 2,
  * `ActorAimHeadAtCamera` (`FUN_00453BE0`), reads `g_camera_eye_x/y/z` and the
- * camera block's matrix, which are `ClassFrame.eye` and `ClassFrame.host`
- * here.
+ * camera block's matrix, which are `G.g_camera_eye` and `ClassFrame.host`
+ * here. **Not `ClassFrame.eye`**: that is the lens, the camera the renderer
+ * drew, and the engine's eye is the gameplay eye fifteen below it.
  */
 export type NodeDrawHook = (obj: Actor, bone: number, slot: number,
                             f: ClassFrame) => void;

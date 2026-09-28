@@ -32,7 +32,7 @@
  * `runCommand`, which is the same path a click takes.
  */
 import type { ToggleName } from "../ui/commands";
-import { TOGGLES } from "../ui/panels/Toggles";
+import { TOGGLES, TOGGLE_DEFAULTS } from "../ui/panels/Toggles";
 
 const KEY = "hod2.viewPrefs";
 
@@ -59,8 +59,14 @@ const KEY = "hod2.viewPrefs";
  * **5**: the texture filter is anisotropic by default and a choice, the same
  * way again: a pre-5 `filterMode: "asset"` is the old default and goes; any
  * other value was chosen, and stays.
+ *
+ * **6**: the muzzle flash is on by default, and the toggles are written only
+ * where they differ from their defaults -- which is the general form of every
+ * migration above, each of which was a default moving under a save that had
+ * written the old one down as if somebody chose it. A pre-6 `muzzle: false`
+ * is that, and goes.
  */
-const VERSION = 5;
+const VERSION = 6;
 
 /** The overlay switches, which a pre-2 save cannot be trusted about. */
 const OVERLAYS: ReadonlySet<string> =
@@ -122,6 +128,7 @@ export function readViewPrefs(): ViewPrefs {
     if (saved < 3 && out.fourByThree !== true) delete out.fourByThree;
     if (saved < 4 && out.lightMode !== "scene") delete out.lightMode;
     if (saved < 5 && out.filterMode === "asset") delete out.filterMode;
+    if (saved < 6 && toggles.muzzle === false) delete toggles.muzzle;
     return out;
   } catch {
     return { toggles: {} };
@@ -131,7 +138,11 @@ export function readViewPrefs(): ViewPrefs {
 export function writeViewPrefs(p: ViewPrefs): void {
   const toggles: Partial<Record<ToggleName, boolean>> = {};
   for (const [k, on] of Object.entries(p.toggles)) {
-    if (!NOT_SAVED.has(k as ToggleName)) toggles[k as ToggleName] = on;
+    const name = k as ToggleName;
+    // A switch at its default is not a choice: leave it to the default, so
+    // the default can move without this save pinning the old one.
+    if (NOT_SAVED.has(name) || TOGGLE_DEFAULTS[name] === on) continue;
+    toggles[name] = on;
   }
   try {
     window.localStorage.setItem(KEY,

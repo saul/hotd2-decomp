@@ -15,6 +15,8 @@ import { AppState, G } from "./globals";
 import { PlayerState, RunPhase } from "./player_state";
 import { IsDemoRun, PlayerResumeContinue, g_player_state_handlers }
   from "./player_shell";
+import { ContinueSprite } from "./hud_sprites";
+import { DrawScreenSprite } from "./screen_sprite";
 import { T } from "./tables";
 
 /** `g_continue_timer`'s start, and what a frame takes off it. */
@@ -22,6 +24,28 @@ const CONTINUE_TIMER_START = 0x9fff;
 const CONTINUE_TIMER_STEP = 0x2d;
 /** `RunPhaseNoContinue` requests the game-over screen after this many. */
 const NO_CONTINUE_FRAMES = 1;
+
+/**
+ * Where `RunPhaseContinueCountdown` draws "CONTINUE?" -- `PUSH 0x43000000`,
+ * `PUSH 0x43480000` at `0x00460612` / `0x0046060D` -- and its digit, 64x128,
+ * beside the question mark: `PUSH 0x43F10000`, `PUSH 0x433C0000` at
+ * `0x0046064D` / `0x00460645`. Both at depth 1.0, scale 1, flags 0: `(x, y)`
+ * is the top-left. `[proved]`
+ */
+export const RUN_CONTINUE_X = 128;
+export const RUN_CONTINUE_Y = 200;
+export const RUN_CONTINUE_DIGIT_X = 482;
+export const RUN_CONTINUE_DIGIT_Y = 188;
+
+/**
+ * The continue countdown's digit: `timer >> 12`, rounding toward zero
+ * (`CDQ; AND EDX, 0xFFF; ADD EAX, EDX; SAR EAX, 0xC`). 9 at `0x9FFF`, and the
+ * digit changes every `0x1000 / 0x2D` -- 91 -- frames. `[port-only]` as a
+ * function; it is the same three instructions at each draw.
+ */
+export function ContinueDigit(timer: number): number {
+  return Math.trunc(timer / 0x1000);
+}
 
 /** The `out` flag of `g_player_state_handlers[state]`, at `0x00579CD4`. */
 function StateIsOut(state: number): boolean {
@@ -133,7 +157,8 @@ export function ResetGameOnStart(walk: () => void): void {
 /**
  * `RunPhaseInPlay` — `FUN_004601D0`, phase 2. With both players out it hands
  * the run to the continue screen -- phase 3 -- or, in Arcade or Original with
- * no credit to continue on, to phase 11. Then the frame.
+ * no credit to continue on, to phase 11. Then the frame, and
+ * `g_screen_frames` up one (`0x00460244`).
  */
 export function RunPhaseInPlay(walk: () => void): void {
   if (NobodyInPlay()) {
@@ -149,6 +174,7 @@ export function RunPhaseInPlay(walk: () => void): void {
     }
   }
   RunSceneTasksAndTimers(walk);
+  G.g_screen_frames = (G.g_screen_frames + 1) | 0;
 }
 
 /**
@@ -163,11 +189,25 @@ export function RunPhaseContinueArm(walk: () => void): void {
 }
 
 /**
- * `RunPhaseContinueCountdown` — `FUN_00460530`, phase 4. The run's continue
- * digit, which the per-player countdown defers to in this phase. The continue
- * button of a player at 4 knocks it to the bottom of its digit. As soon as
- * anybody is back in play the run returns to phase 2 and a player still at 4
- * gets their own countdown back; if it runs out first, the game-over screen.
+ * `RunPhaseContinueCountdown` — `FUN_00460530`, phase 4, the screen a
+ * one-player game shows when the last life goes: the scene runs on under it,
+ * and over it "CONTINUE?" and a 64x128 digit, 9 down to 0. The per-player
+ * countdown defers to this one in this phase and draws neither of its own.
+ *
+ * A credit change restarts it. Pad bit `0x4` of a player at 4 -- the A
+ * button, the trigger of a pad or of the keyboard -- knocks it to the bottom
+ * of its digit. Then the two draws, with the knocked timer and before this
+ * frame's step. As soon as anybody is back in play the run returns to phase
+ * 2 and a player still at 4 gets their own countdown back; otherwise `0x2D`
+ * comes off, and at under 1 the game-over screen is asked for. `[proved]`
+ *
+ * A click does not hurry it in the port, and `[likely]` does not in the game
+ * either with the mouse in input mode 5, which is what the port's pointer
+ * is: `InputMapDevicesToMaple` (`FUN_0041E530`) gives mode 5 the gun's pull
+ * flags and writes nothing into the device's button word, which is what
+ * `PadReadMapleDevices` builds `g_pad_state` from -- only mode 6 ORs the
+ * mouse's buttons (left `0x4`) into it. `FUN_0041EA80`, which mode 5 also
+ * calls, is unread; that is what stands between this and a proof.
  */
 export function RunPhaseContinueCountdown(walk: () => void): void {
   RunSceneTasksAndTimers(walk);
@@ -185,6 +225,9 @@ export function RunPhaseContinueCountdown(walk: () => void): void {
   if (pressed !== 0 && G.g_continue_timer < 0x8000) {
     G.g_continue_timer = (G.g_continue_timer & ~0xfff) + 1;
   }
+  DrawScreenSprite(ContinueSprite.Continue, RUN_CONTINUE_X, RUN_CONTINUE_Y);
+  DrawScreenSprite(ContinueSprite.BigDigit0 + ContinueDigit(G.g_continue_timer),
+                   RUN_CONTINUE_DIGIT_X, RUN_CONTINUE_DIGIT_Y);
   if (!NobodyInPlay()) {
     G.g_nRunPhase = RunPhase.InPlay;
     PlayerResumeContinue(0);

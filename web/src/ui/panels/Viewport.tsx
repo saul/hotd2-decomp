@@ -102,10 +102,11 @@ export function Viewport(
   // `boolean` in every projection and `undefined` only when there is none.
   const ready = paused !== undefined;
   const hud = useSlice((p) => p?.toggles.hud);
-  // The crosshair follows the firing gate, because the engine's does:
+  // The crosshair is shown on the frames the engine draws one:
   // `HudDrawCrosshair` (0x004169C0) will not draw the reticle while
-  // `g_nFiringGate` is zero, and the same word is what makes the trigger dead.
-  // A cutscene therefore takes the crosshair with it.
+  // `g_nFiringGate` is zero, the same word that makes the trigger dead, nor
+  // for a player with no life -- so a cutscene takes the crosshair with it,
+  // and so does the continue screen.
   //
   // The `shooting` class goes with it, which is a *port* decision and not the
   // engine's: the cabinet has a physical gun and nothing to hide, so hiding
@@ -113,8 +114,8 @@ export function Viewport(
   // away and leave `cursor: none` behind and the viewer has nothing at all to
   // point with for the length of a cutscene. So the pointer comes back exactly
   // while the game's own reticle is gone.
-  const firingGate = useSlice((p) => p?.firingGate);
-  const aiming = ready && firingGate === true;
+  const crosshair = useSlice((p) => p?.crosshair);
+  const aiming = ready && crosshair === true;
   return (
     <div id="viewport" ref={refs.host}
          className={[paused && "paused", aiming && "shooting"]

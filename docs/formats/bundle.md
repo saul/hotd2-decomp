@@ -41,6 +41,13 @@ The `.text` immediates that are join keys (the logo sprite ids, the figures'
 clips, the disc and footprint slots) live in `web/src/game/player_body_data.ts`,
 which the exporter imports.
 
+`screen_sprites` also carries the continue screen's sprites -- CONTINUE?, the
+64x128 countdown digits, the credit line's words and the small GAME OVER --
+from `CONTINUE_SCREEN_SPRITES` in `web/src/game/hud_sprites.ts` (see
+`texbank.md`). A new key in an existing map, not a new field: no format bump,
+and a bundle built before it reads fine and draws no continue screen until it
+is re-exported, which the builder hash says.
+
 ## Three versions, and only one of them moves on its own
 
 **1. `format` — `BUNDLE_FORMAT` in `web/src/hod2lib/bundle.ts`, `SUPPORTED_FORMAT` in

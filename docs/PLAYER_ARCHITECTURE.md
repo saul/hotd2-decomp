@@ -699,6 +699,12 @@ web/src/
     hud_readout.ts  the bullets, the RELOAD prompt and the lives, drawn as
                   screen sprites; hud_sprites.ts their ids, for the exporter
     screen_sprite.ts  `DrawScreenSprite`, recorded for the HUD layer to draw
+    continue_readout.ts  what a player's task draws off the play: the small
+                  CONTINUE? and digit, the small GAME OVER, the score cheat,
+                  and the crosshair's decision (the reticle is the page's)
+    credit_prompt.ts  the credit line ("PRESS START BUTTON / CREDIT(S) n")
+                  and the blink clock it runs on; the run's own CONTINUE? is
+                  drawn in run_phase.ts
     credits.ts    what a start and a continue spend
     combat/       shot.ts (the queue, the score), resolve_hit.ts, permits.ts
     effects/                                 coli.ts, motion.ts, tables.ts, ...

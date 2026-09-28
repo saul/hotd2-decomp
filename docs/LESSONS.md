@@ -779,3 +779,23 @@ by other regions, simply absent, while nothing said a drawer was missing. The
 drawer was class 0x41 type 1, a task no port had read. When a loaded model is
 missing or wrong, search `.text` for its slot as an immediate (and as bytes,
 for the ones in unfunctioned code): what draws it is whatever names it.
+
+**L55 -- The URL is the walker's address as of the last throttled write, and
+a driven harness outruns the throttle.** Checking that the script stood still
+under the continue screen, a harness read `block/step/op` out of
+`location.search` and saw `11/2/26` become `11/2/34` during the countdown --
+"the gate is broken". It was not: the walker had been at `34` since before
+the player died. `syncUrlToWalker` writes through `Pacer.mayWriteUrl`, a
+wall-clock throttle (the history API is rate-limited), and under `?drive=1`
+hundreds of frames go by between two writes, so the URL answered for a frame
+long past. **Read the walker's own address**, `__hotd2Drive.now().a`, which is
+`L44`'s "print the state, never the request" with the request being the page's
+own bookkeeping.
+
+The same session had the other half of that shape in the port itself: the
+gameplay gate was first transcribed as a term of each wait's condition, where
+it is right for the wait -- and `G.g_evt_gameplay_live` then only moved on the
+frames a wait's earlier terms let the `&&` reach it, so it sat at 1 through the
+whole continue screen. The engine computes that global once, before the frame's
+first instruction. **A value the engine computes once a frame is computed once
+a frame**, not wherever a condition happens to evaluate it.

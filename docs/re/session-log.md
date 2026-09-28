@@ -20626,3 +20626,90 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+
+## 2026-09-28 -- the continue screen: what it draws, and the script standing still under it
+
+`NEW-BUGS-2`: "the continue screen should show as it does in the game, with
+the countdown timer". The state was ported and nothing was drawn: the
+countdown ran, the reticle stayed up, and the script walked on through the
+stage with nobody playing it.
+
+Read end to end from the EXE: `PlayerUpdateInPlay` (state 4 the frame lives
+reach 0), `PlayerStateArmContinue`, `PlayerContinueCountdown`
+(`FUN_00414280`, from its listing -- the draw flags are `EBX` and the reused
+argument slot `[ESP+0x18]`, which the decompile shows as two booleans),
+`RunPhaseInPlay`/`ContinueArm`/`ContinueCountdown`, `PlayerTryStartPress`,
+`PlayerStateEnterContinue`, `PlayerStateArmGameOver`/`PlayerGameOverWait`,
+`PlayerPollStart`, and the draws they call, all of which were unnamed:
+`HudDrawContinuePrompt`/`HudDrawContinueDigit`/`HudDrawPlayerGameOver`
+(`0x00416880..0x00416900`), `HudDrawScoreCheat`/`HudDrawScoreDigits`, and the
+credit line `CreditPromptDraw` (`FUN_00406CE0`) with its drawer, message,
+count and index routines. Then `CreditBlinkTick` (the tail of
+`AppStateDispatch`), `InputReadFrame` (`FUN_0040D590`, which steps the frame
+counter the blink runs on and refreshes the credit tiers every frame),
+`GunReadPositions`, `CreditsBootReset`, and the eight wait handlers
+`0x40..0x47`. Every sprite id was decoded out of `scr_common` and looked at
+before it was named: CONTINUE?, the 64x128 digits, CREDIT(S), FREE PLAY,
+INSERT COIN(S), INSERT MORE COIN(S), PRESS START BUTTON twice, GAME OVER.
+
+What the exe does, in one paragraph: the run's phase 4 draws CONTINUE? at
+(128, 200) and digit `0x4F + (timer >> 12)` at (482, 188) from `0x9FFF` down
+`0x2D` a frame, with the knocked timer and before the step; each player on a
+countdown draws the credit line, blinking 64/32, and outside phase 4 (two
+players) its own small CONTINUE? and digit through the layered queue; a
+player whose countdown runs out in play draws a small GAME OVER for 119
+frames; a player at 9 in app 6 draws the credit line too (player 2's corner,
+always, in a one-player game); `HudDrawCrosshair` is only called in play; and
+`EvtInterpreterLoop` recomputes `g_evt_gameplay_live` -- a player at 5 with a
+life, or a demo run -- before its first instruction, and every wait opcode
+tests it. No routine on the path plays a sound. START with a credit is state
+1: `PlayerEnterPlay(1)`, three lives, 180 frames' grace, and the run back to
+phase 2 at the scene as it stands.
+
+Ported as that: `game/continue_readout.ts`, `game/credit_prompt.ts`, the
+draws in `RunPhaseContinueCountdown`, the calls in `player_shell.ts`, the
+gate in `script/walker.ts` and every wait rule, and the crosshair's decision
+in `G` for the page's reticle. The layered queue's flush moved from the end
+of the task walk to after the run phase, where `FUN_00418550` is.
+`RunPhaseInPlay` got its missing `g_screen_frames += 1`.
+`tools/verify_continue.py` asserts every position, scale, id, table, both
+timer constants, that only one credit drawer is reachable (every store to
+the two credit costs is `CreditsBootReset`'s, of 1), and that all eight wait
+handlers name the gate; mutated three ways, it failed all three.
+
+**Wrong turns.**
+
+* **The gate was first read inside each wait's `&&` chain.** Right for the
+  wait, wrong for the global: a wait that fails an earlier term never reaches
+  the gate, so `g_evt_gameplay_live` sat at 1 in the page for the whole
+  continue screen while the walker held for another reason. The engine
+  computes it once, before the first instruction; the walker does too now,
+  and the rules read that.
+* **The URL is not the walker.** The first harness read the address out of
+  `location.search`, saw it go from `11/2/26` to `11/2/34` during the
+  countdown, and reported the gate broken. The walker had been at 34 the
+  whole time -- `syncUrlToWalker` is lazy. The harness reads
+  `__hotd2Drive.now().a`, which is the walker's own.
+* **The frame the run enters phase 4 is phase 3's.** Read on that frame, the
+  draws had the *small* CONTINUE? in them -- the per-player countdown runs in
+  phase 3 with the run's phase not yet 4, so the exe really does flash the
+  two-player prompt for one frame. Harmless and faithful; the harness reads
+  one frame later.
+* **Two annotations were wrong.** `g_evt_gameplay_live`'s said wait `0x41`
+  does not test it and that `wait_frames`' countdown freezes: `0x41` tests it
+  before either arm, and `0x42` keeps counting and only its pass is gated.
+  `EvtInterpreterLoop`'s said the gate was "a player in state 5 with
+  credits"; it is lives.
+* **An old port test read player 2's credit count as ammo digits.** It
+  filtered the frame's draws for the 16x32 digits and now found the `5` of
+  "CREDIT(S) 5" too; it filters on the readout's own row.
+* The Ghidra MCP naming gate refused `CreditPromptDrawSingle`,
+  `CreditPromptDrawMessage` and `CreditPromptDrawCount` as token subsets of
+  existing names; overridden, since the TSV is the authority and the names
+  say what differs.
+
+**Left, and said where it lives.** `RunPhaseNoContinue`'s red fog (the
+no-credit path, two frames) is still not carried. Whether the PC mouse in
+input mode 5 raises pad bit `0x4` is `[likely]` no, pending `FUN_0041EA80`.
+`HudDrawScoreDigits`' record has zero UV extents, and what that quad shows is
+open; nothing the port runs can set the cheat.

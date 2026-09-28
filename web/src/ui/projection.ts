@@ -384,16 +384,16 @@ export interface UiProjection {
    */
   paused: boolean;
   /**
-   * The script is letting the player shoot.
+   * The game drew player 1's crosshair this frame.
    *
-   * `g_nFiringGate` as `game/globals.ts` holds it. The UI's only use for it is
-   * the crosshair, which the engine draws under exactly this condition —
-   * `HudDrawCrosshair` (0x004169C0) tests the same word before it draws
-   * anything, and `PlayerUpdateInPlay` (0x00413E90) tests it again before the
-   * ammo readout. A dead trigger with a reticle still on it would be the port
-   * telling the viewer something the game does not.
+   * `HudDrawCrosshair` (0x004169C0) decides it, in `game/`, and it is called
+   * only from `PlayerUpdateInPlay` (0x00413E90): app state 6, a life, and the
+   * firing gate up -- so a cutscene takes the reticle away, and so does the
+   * continue screen, where the player has no life and no in-play task. A
+   * reticle over "CONTINUE?" would be the port telling the viewer something
+   * the game does not.
    */
-  firingGate: boolean;
+  crosshair: boolean;
   toggles: Readonly<Record<ToggleName, boolean>>;
   transport: TransportProjection;
   sound: SoundProjection;

@@ -764,9 +764,15 @@ export const G = {
   g_free_play: 0,
   /** `g_credits_per_player` — 0x009C8E74. 0: one shared count. */
   g_credits_per_player: 0,
-  /** `g_credits_to_start` — 0x009C8E78. `FUN_004066D0` sets 1. */
+  /**
+   * `g_credits_to_start` — 0x009C8E78. `CreditsBootReset` (`FUN_004066D0`)
+   * sets 1, and nothing else writes it.
+   */
   g_credits_to_start: 1,
-  /** `g_credits_to_continue` — 0x009C8E7C. `FUN_004066D0` sets 1. */
+  /**
+   * `g_credits_to_continue` — 0x009C8E7C. `CreditsBootReset`
+   * (`FUN_004066D0`) sets 1, and nothing else writes it.
+   */
   g_credits_to_continue: 1,
   /**
    * `g_title_start_armed` — 0x009A21C0. `TitleMenuUpdateAndSelect` raises it
@@ -1671,6 +1677,60 @@ export const G = {
   g_continue_credit_seen: [0, 0, 0, 0] as number[],
   /** `g_no_continue_frames` — 0x007DCCD4, a byte. */
   g_no_continue_frames: 0,
+  /**
+   * `g_input_frame` — 0x009A5C40. `InputReadFrame` (`FUN_0040D590`) adds one
+   * on every frame's input read, before any screen runs; `CreditBlinkTick`
+   * takes the credit line's clock from its difference. The boot reset is its
+   * only other writer. Survives a scene load.
+   */
+  g_input_frame: 0,
+  /**
+   * `g_screen_frames` — 0x009A5C44. Frames the current screen has run:
+   * `RunPhaseInPlay` (`FUN_004601D0`) counts it up after the task walk, and
+   * each attract and title screen zeroes and counts its own. Read by
+   * `CreditBlinkTick`, past 3, for the attract screens' PRESS START.
+   */
+  g_screen_frames: 0,
+  /**
+   * `g_credit_blink_clock` — 0x005A4D44. The credit line's blink clock:
+   * `CreditBlinkTick` (`FUN_004067D0`) adds the frames `g_input_frame` moved
+   * since it last looked, so it steps once a frame. `CreditPromptDrawSingle`
+   * (`FUN_00406860`) hides the line while `(clock >> 5) % 3 == 2`.
+   * `CreditsBootReset` (`FUN_004066D0`) zeroes it at boot.
+   */
+  g_credit_blink_clock: 0,
+  /** `g_credit_blink_seen` — 0x005A4D48: `g_input_frame` as last seen. */
+  g_credit_blink_seen: 0,
+  /**
+   * `g_credit_prompt_player` — 0x005A4D28. Whose credit tier the prompt
+   * reads: `CreditPromptDraw` (`FUN_00406CE0`) writes the player when counts
+   * are per player and 0 when they are shared.
+   */
+  g_credit_prompt_player: 0,
+  /**
+   * `g_score_cheat` — 0x009C87FC. `HudDrawScoreCheat` (`FUN_00413FB0`) draws
+   * a player's score only while it is 7. Its one setter, `FUN_00495EB0` (app
+   * state 3), writes 7 when the L/R presses spell the string at `0x005978C0`,
+   * "LLRRRLR"; it and `TitleMenuUpdateAndSelect` (for Training and Boss)
+   * zero it. The port does not run screen 3, so it stays 0. `[proved]`
+   */
+  g_score_cheat: 0,
+  /**
+   * `[port-only]` -- which players `HudDrawCrosshair` (`FUN_004169C0`) drew
+   * the crosshair for this frame, 1 or 0. The engine draws a sprite; the
+   * port's crosshair is the page's reticle, which follows the pointer between
+   * ticks, so what the routine decides is recorded here and `app/` hands it
+   * across. Cleared with `g_screen_sprite_draws` at the head of the player
+   * walk.
+   */
+  g_crosshair_drawn: [0, 0] as number[],
+  /**
+   * `g_evt_gameplay_live` — 0x007DCCA4. Recomputed at the top of
+   * `EvtInterpreterLoop` (`FUN_0045ECC0`) and read by every wait opcode,
+   * `0x40` to `0x47`: the script may pass a wait only while it is 1. See
+   * `EvtGameplayLiveUpdate`. BSS, so 0 until the first frame computes it.
+   */
+  g_evt_gameplay_live: 0,
   /**
    * `g_script_flags` — 0x009C7200. The byte array `set_script_flag` (evt 0x48)
    * writes and the set-pieces read for their other removal trigger.

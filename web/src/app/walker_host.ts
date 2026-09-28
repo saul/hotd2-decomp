@@ -15,8 +15,9 @@
  *   to be events on the bus, not host methods; the script is telling, not
  *   asking.
  * * **Questions about the world** — `aliveEnemies`, `presentEnemies`,
- *   `aliveCivilians`, `cameraFree`. The genuinely irreducible part, and the
- *   read-only port the doc says should be all that survives.
+ *   `aliveCivilians`, `cameraFree`, `gameplayLive`. The genuinely
+ *   irreducible part, and the read-only port the doc says should be all
+ *   that survives.
  * * **Output devices** — `playSound`, `setShutter`, `showMessage`,
  *   `endDialogue`. Audio and the screen-space layer, reached directly.
  *
@@ -29,6 +30,7 @@ import { Walker, type WalkerHost } from "../script/walker";
 import type { ScriptJson } from "../bundle";
 import { G } from "../game/globals";
 import { CameraTargetsClear } from "../script/waits/targets";
+import { EvtGameplayLiveUpdate } from "../game/player_shell";
 import { screenMessage } from "./projection/message";
 import type { Player } from "./main";
 
@@ -82,6 +84,10 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
     // `EvtOpWaitTargetsClear47` (`FUN_0045FD20`): the camera is settled or
     // free, and nothing registered for camera tracking this frame.
     cameraTargetsClear: () => CameraTargetsClear(),
+    // `g_evt_gameplay_live`, recomputed as `EvtInterpreterLoop` does before
+    // its first instruction: the continue screen holds the script at its
+    // wait.
+    gameplayLive: () => EvtGameplayLiveUpdate() !== 0,
     // The shutter is the walker's own state now: there is nothing to tell.
     showMessage: (g) => {
       // Variant 0 is the 1P / player-1 configuration, which is what a

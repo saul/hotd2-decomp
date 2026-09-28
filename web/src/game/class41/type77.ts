@@ -28,11 +28,13 @@ import { ScoreAddForPlayer } from "../combat/score";
 import { SpawnScaledPropSpark } from "../effects/sprite";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
-import type { GameHost } from "../host";
-import { MatIdentity, MatrixRotateY, MatrixTranslate } from "../matrix";
+import {
+  MatrixLoadIdentity, MatrixRotateY, MatrixScale, MatrixTranslate,
+} from "../matrix";
 import { PlayerHoldsOriginalItem } from "../original_mode";
-import { MsvcRand } from "./group";
+import { PropEvalObjectPath6 } from "./object_path";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
+import { PropDrawBegin, PropDrawSlot, PropMatrixPush } from "./prop_draw";
 import { BreakableFlag, type BreakableProp } from "./prop_state";
 import { PropRegisterForShotTest } from "./shot_test";
 
@@ -73,19 +75,17 @@ export const SFX_TYPE77_APPEAR = 0x700a9;
 /** `PlaySoundId(0xB16A9)` — shot. */
 export const SFX_TYPE77_SHOT = 0xb16a9;
 
-const _m = MatIdentity();
-
 /**
  * `PropUpdateType77` — `FUN_004717A0`. One prop, one 60 Hz frame.
  *
  * `+0x2C0` is {@link BreakableProp.shake} (the path cursor), `+0x2A0`
  * {@link BreakableProp.storyItem} (the blink), `+0x1DC`
  * {@link BreakableProp.yawSpin} (the spin) and `+0x192`
- * {@link BreakableProp.routinePhase}. `CamEvalObjectPath6` is the host's; the
- * draw is `render/prop_parts.ts`'s, from {@link BreakableProp.pathPose}.
+ * {@link BreakableProp.routinePhase}.
  */
-export function PropUpdateType77(p: BreakableProp, rng: Rng, events?: Events,
-                                 host?: GameHost): void {
+export function PropUpdateType77(p: BreakableProp, rng: Rng,
+                                 events?: Events): void {
+  PropDrawBegin(p);
   if (G.g_GameMode !== GameMode.Original
       || !PlayerHoldsOriginalItem(TYPE77_ITEM)) {
     events?.emit("sound.play", { id: SFX_TYPE77_LEAVE });
@@ -95,7 +95,7 @@ export function PropUpdateType77(p: BreakableProp, rng: Rng, events?: Events,
   // `FLD [ESI+0x2C0]; CALL __ftol; TEST EAX, EAX` -- the first frame, and any
   // frame the cursor has not yet left 0.
   if (Math.trunc(p.shake) === 0) {
-    if (MsvcRand(rng) % TYPE77_STAY_ODDS === 0) {
+    if (rng.int(TYPE77_STAY_ODDS) === 0) {
       ActorDespawnProp(p);
       return;
     }
@@ -121,7 +121,7 @@ export function PropUpdateType77(p: BreakableProp, rng: Rng, events?: Events,
 
   // `CamEvalObjectPath6(0x195, obj+0x2C0, &local)` at the cursor as it was
   // before this frame's step.
-  const at = host?.objectPath?.(TYPE77_PATH, p.shake) ?? null;
+  const at = PropEvalObjectPath6(TYPE77_PATH, p.shake);
   if (p.storyItem === 0) p.shake += TYPE77_RIDE_STEP;
   // `FCOMP 400.0; TEST AH, 0x41; JNZ` -- on at or below 400.
   if (!(p.shake <= TYPE77_RIDE_LENGTH)) {
@@ -134,32 +134,34 @@ export function PropUpdateType77(p: BreakableProp, rng: Rng, events?: Events,
   // MSVC's `% 2` on the blink counter: the draw block runs on even frames,
   // which before the shot is every frame.
   if (p.storyItem % 2 === 0) {
-    p.pathPose = at
-      ? { slot: TYPE77_SLOT, x: at.x, y: at.y, z: at.z,
-          pitch: 0, yaw: 0, roll: 0 }
-      : null;
-    // `T(pos) RotY(yaw) T(path)`, and `MatrixGetTranslation` of it: the
-    // path's point turned by the placement's yaw and carried to its position.
-    for (let i = 0; i < 16; i++) _m[i] = i % 5 === 0 ? 1 : 0;
-    MatrixTranslate(_m, p.x, p.y, p.z);
-    MatrixRotateY(_m, p.yaw);
-    if (at) MatrixTranslate(_m, at.x, at.y, at.z);
-    p.shotX = Math.fround(_m[12]);
-    p.shotY = Math.fround(_m[13]);
-    p.shotZ = Math.fround(_m[14]);
-  } else {
-    // [diverges] On an odd blink frame the draw block is skipped, and the
-    // point the routine then registers is three stack locals
-    // (`[ESP+0x8]`..`[ESP+0x10]` at `0x004719BC`) that only the draw block
-    // writes -- whatever the previous task left at that depth of the stack.
-    // The port has no such value and keeps the point the last draw computed.
-    // The one input it reaches is a shot on the blinking prop, which the port
-    // does resolve against this sphere; what that shot does -- stop there, or
-    // go on to what is behind -- is all that depends on it, because the shot
-    // arm is latched by then and the prop itself reacts to nothing. Pinned by
-    // `port.test.ts`, "at the point the last draw computed".
-    p.pathPose = null;
+    // `0x004718F1`..`0x004719B4`: `Push; MatrixLoadIdentity; T(pos);
+    // RotY(yaw); T(path)`, kept with `MatrixStore` and its translation taken
+    // (the shot point), then popped; a fresh push of the view times the kept
+    // matrix, `RotY(+0x1DC)`, `Scale(2)`, `AssetDrawSlot(0x10AB)`. In the
+    // port's world-space record the view drops out of both.
+    const m = PropMatrixPush();
+    MatrixLoadIdentity(m);
+    MatrixTranslate(m, p.x, p.y, p.z);
+    MatrixRotateY(m, p.yaw);
+    if (at) MatrixTranslate(m, at.x, at.y, at.z);
+    p.shotX = Math.fround(m[12]);
+    p.shotY = Math.fround(m[13]);
+    p.shotZ = Math.fround(m[14]);
+    MatrixRotateY(m, p.yawSpin);
+    MatrixScale(m, TYPE77_SCALE, TYPE77_SCALE, TYPE77_SCALE);
+    // `NoOpStub(2.0f)` (`FUN_0041EBB0`), an empty function.
+    PropDrawSlot(p, m, TYPE77_SLOT);
   }
+  // [diverges] On an odd blink frame the draw block is skipped, and the
+  // point the routine then registers is three stack locals
+  // (`[ESP+0x8]`..`[ESP+0x10]` at `0x004719BC`) that only the draw block
+  // writes -- whatever the previous task left at that depth of the stack.
+  // The port has no such value and keeps the point the last draw computed.
+  // The one input it reaches is a shot on the blinking prop, which the port
+  // does resolve against this sphere; what that shot does -- stop there, or
+  // go on to what is behind -- is all that depends on it, because the shot
+  // arm is latched by then and the prop itself reacts to nothing. Pinned by
+  // `port.test.ts`, "at the point the last draw computed".
   PropRegisterForShotTest(p, p.shotX, p.shotY, p.shotZ);
 
   if (shot) {

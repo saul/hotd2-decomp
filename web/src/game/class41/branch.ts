@@ -10,14 +10,14 @@
  * their rows so the nine are still read together:
  *
  * ```
- * type 14  first hit          -> 1 - obj+0x11C     both modes
- * type 19  first hit          -> 1 - obj+0x11C     both modes
- * type 25  first hit, block 0x17 -> 1              both modes
+ * type 14  first hit          -> 1 - obj+0x11C     both modes     (type14.ts)
+ * type 19  first hit          -> 1 - obj+0x11C     both modes     (type19.ts)
+ * type 25  first hit, block 0x17 -> 1              both modes     (type25.ts)
  * type 40  both sub-kind 9 broken, flag 0x11 -> 2  original only  (type40.ts)
- * type 56  script flag 5, block 9 -> 2             original only
- * type 69  flag 0x23, already 1, shot -> 2         original only
+ * type 56  script flag 5, block 9 -> 2             original only  (type56.ts)
+ * type 69  flag 0x23, already 1, shot -> 2         original only  (type69.ts)
  * type 70  scene 2, block 4, flag 0x13 -> scene    original only  (original_item.ts)
- * type 73  first hit, block 7, flag 0x12, key -> 2 original only
+ * type 73  first hit, block 7, flag 0x12, key -> 2 original only  (type73.ts)
  * type 76  first hit, block 5 or 0x0E + key -> 2   original only  (type76.ts)
  * chain    any link, group 1, block 0x16 -> 2      original only
  * switch   scene/block table, its own flag -> 2    original only
@@ -36,15 +36,18 @@
  *
  * ## What is transcribed here, and what is not
  *
- * **The gate and the write, and the latch that stops it firing twice.** Every
- * one of these routines also falls, spins, swings a hinge curve, draws two or
- * three parts and plays sounds, and none of that is here — `class41/
- * generic.ts` already declares that the generic props are placed, drawn and
- * otherwise inert, and this narrows that divergence rather than removing it.
- * What each routine's doc comment lists as unported is what a later pass
- * still owes it.
+ * Eight of the nine are no longer here: types 14, 19, 25, 56, 69, 70 (and 71,
+ * the same routine), 73 and 76 are transcribed whole, each in its own file
+ * beside type 40's, and their branch write sits in its routine exactly where
+ * the exe has it — with the fall, the swing, the sounds, the draws and, for
+ * 14, 19 and 25, the enemy count their arms raise and their routines give
+ * back.
  *
- * The reason to draw the line there and not lower: a route the stage takes is
+ * **What is left here is the gate and the write, and the latch that stops it
+ * firing twice**, for the routines whose other arms are not yet read: the
+ * chain segments and the story-mode switch. What each doc comment lists as
+ * unported is what a later pass still
+ * owes it. The line was drawn there first because a route the stage takes is
  * a fact about where the whole rest of the level goes, and a prop that swings
  * correctly while sending the player down the wrong road is worth less than
  * one that stands still and routes right.
@@ -95,222 +98,6 @@ export enum BranchBlock {
   Chain = 0x16,
   /** `PropUpdateType25`. */
   Type25 = 0x17,
-}
-
-/** The original items `PropUpdateType73` will open its route for. */
-const TYPE73_KEYS = [5, 6, 0x0c];
-
-/** `g_script_flags[n]`, defaulted — an unraised flag is *absent* from the
- *  array, and an undefined slips straight through a bare `=== 1`. */
-function ScriptFlag(n: number): number {
-  return G.g_script_flags[n] ?? 0;
-}
-
-/**
- * `PlaceGenericProp`'s three spawn-time writes, by type.
- *
- * `null` means "the descriptor's own `+0x11C`", which is what cases 0x0E and
- * 0x13 write; case 0x19 writes the literal 0. A type absent here writes
- * nothing at spawn.
- *
- * These are the **defaults** the matching update routines flip. Reading the
- * constructor and the update apart is what made this mechanism look like two
- * unrelated writes to the same global for as long as it did.
- */
-export const GENERIC_BRANCH_SEED: Partial<Record<number, number | null>> = {
-  0x0e: null,
-  0x13: null,
-  0x19: 0,
-};
-
-/** Did a shot land on this prop this frame, with the route still unanswered? */
-function FirstHit(p: BreakableProp): boolean {
-  return (p.flags & BreakableFlag.Hit) !== 0 && !p.branchLatched;
-}
-
-/**
- * `PropUpdateType14` — `FUN_00468180`. `g_class41_updates[14]`.
- *
- * ```c
- * if ((obj->+0x34 & 8) && !(obj->+0x34 & 0x40000000)) {
- *     BreakablePropAwardHit(obj->+0x34, 0);
- *     g_script_branch_var = 1 - obj->+0x11C;
- *     PlaySoundId(0x1116A9);
- *     obj->+0x34 |= 0x40000000;
- *     ...the fall, the spin, the rail...
- * }
- * ```
- *
- * `obj+0x11C` here is the **lifetime word the placer copied**, which for this
- * type is also the default route: `PlaceGenericProp` case 0x0E writes the
- * same number into `g_script_branch_var` at spawn. One shipped spawn, stage 2
- * block 5, carrying 0 — so the block routes to `next[0]` untouched and to
- * `next[1]` when shot, and its record is `{21, 6, -1}`.
- *
- * Not transcribed: the fall at `rand()%0x81 + 0xC0` BAMS a frame, the landing
- * on one of four rails, the swing to `0x4000`, the `g_enemies_alive` give-back
- * at frame 0xD1 and the scene-light override this object applies while
- * upright.
- */
-export function PropUpdateType14(p: BreakableProp): void {
-  if (!FirstHit(p)) return;
-  G.g_script_branch_var = 1 - p.lifetime;
-  p.branchLatched = true;
-  p.flags |= PROP_BRANCH_ANSWERED;
-}
-
-/**
- * `PropUpdateType19` — `FUN_00468F00`. `g_class41_updates[19]`.
- *
- * The same write as {@link PropUpdateType14} with one more condition on it:
- * the engine also requires `obj+0x192 < 2`, the object's own state, which is
- * 2 only after the step-change counter has retired it. The port's equivalent
- * is that a retired prop is out of the pool, so the test has nothing left to
- * refuse — recorded rather than transcribed, because inventing a `+0x192`
- * this port does not otherwise keep would be inventing state.
- *
- * One shipped spawn, stage 2 block 7, carrying 0, record `{8, 25, -1}`.
- *
- * Not transcribed: the four-swing idle on `obj+0x1E8`, the `g_script_flags`
- * `0x21` reaction that runs a hinge curve, the `g_enemies_present` give-back
- * and the fall.
- */
-export function PropUpdateType19(p: BreakableProp): void {
-  if (!FirstHit(p)) return;
-  G.g_script_branch_var = 1 - p.lifetime;
-  p.branchLatched = true;
-  p.flags |= PROP_BRANCH_ANSWERED;
-}
-
-/**
- * `PropUpdateType25` — `FUN_00469AE0`. `g_class41_updates[25]`.
- *
- * ```c
- * if ((obj->+0x34 & 8) && !(obj->+0x34 & 0x40000000) && g_evt_block_index == 0x17) {
- *     BreakablePropAwardHit(obj->+0x34, 0);
- *     g_script_branch_var = 1;
- *     ...
- * }
- * ```
- *
- * The block gate is the difference from types 14 and 19, and it is not
- * decoration: this prop's route is only block 0x17's, and `PlaceGenericProp`
- * case 0x19 seeds the variable to **0** rather than to the descriptor's word.
- * One shipped spawn, stage 2 block 23 — which is 0x17 — record
- * `{24, 26, -1}`.
- *
- * Not transcribed: the effect at `obj+0x324`, the frame-0xFE retirement and
- * the `g_enemies_present` give-back.
- */
-export function PropUpdateType25(p: BreakableProp): void {
-  if (!FirstHit(p)) return;
-  if (G.g_evt_block_index !== BranchBlock.Type25) return;
-  G.g_script_branch_var = 1;
-  p.branchLatched = true;
-  p.flags |= PROP_BRANCH_ANSWERED;
-}
-
-/**
- * `PropUpdateType56` — `FUN_0046F090`. `g_class41_updates[56]`.
- *
- * **The shot is not what opens this one.** A script flag is:
- *
- * ```c
- * if (g_script_flags[5] == 1 && obj->+0x192 == 0) {
- *     obj->+0x192 = 1;
- *     PlaySoundId(0x2116A9);
- *     FUN_00420810(4, 0x14);
- *     if (g_GameMode == 1 && g_evt_block_index == 9) g_script_branch_var = 2;
- * }
- * ```
- *
- * The latch is outside the mode and block test, so the flag is consumed even
- * in arcade — where the route is simply never written. One shipped spawn,
- * stage 4 block 9, record `{11, -1, 17}`.
- *
- * Not transcribed: the hit that raises `DAT_009C720E` and starts the fall,
- * the 60 frames of `g_pHingeCurvesXYZ`, and the two draws.
- */
-export function PropUpdateType56(p: BreakableProp): void {
-  if (ScriptFlag(BranchScriptFlag.Type56Trigger) !== 1 || p.branchLatched) {
-    return;
-  }
-  p.branchLatched = true;
-  if (G.g_GameMode === GameMode.Original
-      && G.g_evt_block_index === BranchBlock.Type56) {
-    G.g_script_branch_var = 2;
-  }
-}
-
-/**
- * `PropUpdateType69` — `FUN_00470500`. `g_class41_updates[69]`.
- *
- * **The one writer that reads the variable before writing it.**
- *
- * ```c
- * if (g_script_flags[0x23] == 1 && g_script_branch_var == 1 && obj->+0x192 > 0) {
- *     g_script_branch_var = 2;
- *     ...spawn a story-mode item at a fixed point...
- * }
- * ```
- *
- * It does not choose a route; it **promotes** one. A rescue has already put a
- * 1 there, and with the flag raised and this prop already shot the story route
- * replaces it. The whole routine is dead unless `g_GameMode == 1`, and dead in
- * blocks 8 and 3.
- *
- * Two shipped spawns, stage 1 blocks 1 and 9. Block 9's record is `{2, 7, 12}`
- * and slot 2 is real; **block 1's is `{10, 9, -1}` and slot 2 is a hole** — a
- * 2 there would end the scene. It is unreachable in practice because that
- * prop's `+0x11C` is 1, so `PropExpireByStepLifetime` retires it after a
- * single step change and block 1 has ten steps. The port does not special-case
- * it: if the lifetime is ever transcribed wrong, this is where it shows.
- *
- * Not transcribed: the story-mode item spawn, the hit that sparks and starts
- * the fall, and the two draws.
- */
-export function PropUpdateType69(p: BreakableProp): void {
-  if (G.g_GameMode !== GameMode.Original) return;
-  if (G.g_evt_block_index === 8 || G.g_evt_block_index === 3) return;
-  if (ScriptFlag(BranchScriptFlag.Type69Promote) === 1
-      && G.g_script_branch_var === 1 && p.branchLatched) {
-    G.g_script_branch_var = 2;
-  }
-  // `obj+0x192 = 1` — the routine's own hit arm, which is the only thing
-  // above that reads it. Transcribed because the promotion is gated on it and
-  // a latch nothing ever sets is a route that can never open.
-  if ((p.flags & BreakableFlag.Hit) !== 0) p.branchLatched = true;
-}
-
-/**
- * `PropUpdateType73` — `FUN_00470B70`. `g_class41_updates[73]`.
- *
- * ```c
- * if (g_GameMode == 1 && g_evt_block_index == 7 && g_script_flags[0x12] != 0
- *     && (obj->+0x34 & 8)) {
- *     BreakablePropAwardHit(...);
- *     if (obj->+0x192 == 0 && (HasItem(5) || HasItem(6) || HasItem(0x0C))) {
- *         obj->+0x192 = 1;
- *         g_script_branch_var = 2;
- *     }
- * }
- * ```
- *
- * **The key is checked after the hit is paid**, not before, so shooting it
- * without the key still scores and still sparks — it just does not open the
- * road. One shipped spawn, stage 4 block 7, record `{8, -1, 22}`.
- *
- * Not transcribed: object path 0x179 playing forward with its two sound cues,
- * the spark, and the draw.
- */
-export function PropUpdateType73(p: BreakableProp): void {
-  if (G.g_GameMode !== GameMode.Original) return;
-  if (G.g_evt_block_index !== BranchBlock.Type73) return;
-  if (ScriptFlag(BranchScriptFlag.Type73Trigger) === 0) return;
-  if ((p.flags & BreakableFlag.Hit) === 0 || p.branchLatched) return;
-  if (!TYPE73_KEYS.some(PlayerHoldsOriginalItem)) return;
-  p.branchLatched = true;
-  G.g_script_branch_var = 2;
 }
 
 /**
@@ -457,8 +244,11 @@ export const STORY_SWITCH_FLAG_AT: readonly [number, number] = [2, 2];
  * The item spawn carries the **second** write of `g_script_flags[0x15]`, at
  * `0x004751B1`: in Original Mode, once `obj+0x192` has latched and the item
  * has been handed out, the routine waits for `g_script_flags[0x18]` and then
- * counts `obj+0x2B0` past `0x4C` before raising the flag. It is out only
- * because `SpawnStoryModeItem` (`FUN_00467B90`) is, and it is reachable only
+ * counts `obj+0x2B0` past `0x4C` before raising the flag. It was left out
+ * while `SpawnStoryModeItem` (`FUN_00467B90`) was unported; that is ported now
+ * (`class41/items.ts`), and each of these two arms also clears
+ * `g_original_item_pickup_blocked` after its item (`0x00475168`,
+ * `0x0047522F`), so this arm is what is left to read. It is reachable only
  * once the switch is thrown — which for stage 3's switch needs
  * `PlayerHoldsOriginalItem` of item 0 or 6, since its `obj+0x1FC` is 0 and not
  * -1. A player who has one of those in Original Mode still hangs on that gate.

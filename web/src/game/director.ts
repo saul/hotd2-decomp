@@ -549,7 +549,6 @@ export function SpawnPropContainers(spawns: readonly ScriptSpawn[]): void {
     // generic one. Four meanings, one offset.
     const type = pl.container === "kinded" ? PropContainerType.KindedProp
       : pl.container === "generic" ? (pl.type ?? 0)
-      : pl.container === "falling" ? PropContainerType.FallingContainer
       : pl.container === "chain" ? PropContainerType.ChainSegments
       : pl.container === "fragment" ? PropContainerType.FragmentProps
       : pl.container === "flicker_light" ? FLICKER_LIGHT_TYPE

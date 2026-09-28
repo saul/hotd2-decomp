@@ -17,45 +17,73 @@
  * The bug report calls the falling part a ladder; nothing in the code says so
  * and nothing contradicts it. `[open]` beyond "a tall thin part that drops".
  *
+ * The whole routine, `0x00467F50`..`0x00468170`, read off the disassembly —
+ * the decompile stops at the first `PlaySoundId`, which is marked no-return,
+ * so both sound arms and everything after them are invisible there (`L35`):
+ *
  * ```c
- * if (g_evt_step_index != obj->+0x196) {           // inlined lifetime
- *     if (obj->+0x11C < ++obj->+0x197) { ActorKill(); return; }
+ * if ((s16)g_evt_step_index != (s8)obj->+0x196) {       // inlined lifetime
+ *     if (obj->+0x11C < (s16)(s8)++obj->+0x197) { ActorKill(); return; }
  *     obj->+0x2A0 = 1; obj->+0x196 = g_evt_step_index; obj->+0x28C = 0x1A4A;
  * }
  * if (g_scene_index == 1 && g_script_flags[0x77]) { ActorDespawn(obj); return; }
- * if (g_script_flags[0x6D] == 1 && g_cutscene_skipping) { phase = 2; y = -6.0; }
- * switch (phase) {
- * case 0: if (!obj->+0x2A0 && g_scene_tick_counter % 40 == 0)
- *             obj->+0x28C = 0x1A49 + (obj->+0x2A4 = 1 - obj->+0x2A4);
- *         if (g_script_flags[0x6D] == 1) {
- *             PlaySoundId(0x19A9); PlaySoundId(0x3517A9); PoseHookNone(1, 500);
- *             phase = 1; obj->+0x28C = 0x1A49;
- *         } break;
- * case 1: vy -= 0.02; y += vy;
- *         if (y < -6.0) { y = -6.0; phase = 2; judder = 0.4;
- *                         PlaySoundId(0x1916A9); PoseHookNone(0, 1); } break;
- * case 2: judder *= -0.925; if (fabs(judder) < 0.05) { judder = 0; phase = 3; }
+ * if (g_script_flags[0x6D] == 1 && g_cutscene_skipping) {  // 0x00467FC8
+ *     obj->+0x192 = 2; obj->+0x1A0 = -6.0;
  * }
- * AssetDrawSlot(obj->+0x28C);                       // no matrix: world space
- * Push; Translate(x, y, z + judder); AssetDrawSlot(0x1A43); Pop;
+ * switch ((s8)obj->+0x192) {
+ * case 0:                                               // 0x004680AF
+ *     if (!obj->+0x2A0 && g_scene_tick_counter % 40 == 0)
+ *         obj->+0x28C = 0x1A49 + (obj->+0x2A4 = 1 - obj->+0x2A4);
+ *     if (g_script_flags[0x6D] == 1) {
+ *         PlaySoundId(0x19A9); PlaySoundId(0x3517A9); PoseHookNone(1, 500);
+ *         obj->+0x192 = 1; obj->+0x28C = 0x1A49;
+ *     } break;
+ * case 1:                                               // 0x00468053
+ *     obj->+0x1C4 -= 0.02; obj->+0x1A0 += obj->+0x1C4;
+ *     if (obj->+0x1A0 < -6.0) {
+ *         obj->+0x1A0 = -6.0; obj->+0x192 = 2; obj->+0x1C8 = 0.4;
+ *         PlaySoundId(0x1916A9); PoseHookNone(0, 1);
+ *     } break;
+ * case 2:                                               // 0x00468007
+ *     obj->+0x1C8 *= -0.925;
+ *     if (fabs(obj->+0x1C8) < 0.05) { obj->+0x1C8 = 0; obj->+0x192 = 3; }
+ * }
+ * AssetDrawSlot((s16)obj->+0x28C);                      // 0x0046812A, no push
+ * MatrixStackPush(0);
+ * MatrixTranslate(obj->+0x19C, obj->+0x1A0, obj->+0x1A4 + obj->+0x1C8);
+ * AssetDrawSlot(0x1A43);
+ * MatrixStackPop(1);                                    // 0x00468166, then RET
  * ```
  *
- * Every constant was read off the disassembly (`L1`): `0.02` at `0x004E3100`,
- * `-6.0` at `0x0055CB4C`, `-0.925` at `0x0056908C`, `0.05` at `0x004C4C88`,
- * and the `0.4` and `-6.0` stores are `MOV dword` immediates
- * (`0x3ECCCCCD`, `0xC0C00000`). `PoseHookNone` (`FUN_00420810`) is an empty
- * function and is not called here.
+ * `[proved]` every line. Every constant was read off the instruction stream
+ * (`L1`): `0.02` at `0x004E3100` (`0x3CA3D70A`), `-6.0` at `0x0055CB4C`
+ * (`0xC0C00000`), `-0.925` at `0x0056908C` (`0xBF6CCCCD`), `0.05` at
+ * `0x004C4C88` (`0x3D4CCCCD`), the `fabs` as `FCOM [0x004C436C]` (0.0) and
+ * `FMUL [0x004C4C64]` (-1.0), and the `0.4` and `-6.0` stores are `MOV`
+ * immediates (`0x3ECCCCCD`, `0xC0C00000`). Each arm ends in a `JMP` to the
+ * draw at `0x00468122` (`L53`) and state 3 reaches it through the switch's
+ * default.
  *
- * The draw is `render/breakables.ts`'. The routine registers no shot sphere
- * and never masks `obj+0x34`.
+ * `PoseHookNone` (`FUN_00420810`) **is** called, twice — `(1, 0x1F4)` on the
+ * release at `0x0046810B` and `(0, 1)` on the landing at `0x004680A5` — and is
+ * a bare `RET`, so neither call does anything and neither is transcribed.
+ *
+ * The first draw is made **with no push**, on whatever the stack top is when
+ * the task runs — the camera's world-to-view, which is the identity here (see
+ * `class41/prop_draw.ts`) — so the panel's model is in world coordinates.
+ * The routine registers no shot sphere and never masks `obj+0x34`.
  */
 import type { Events } from "../../core/events";
+import type { Rng } from "../../core/rng";
+import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
+import { MatIdentity, MatrixTranslate } from "../matrix";
 import { ActorDespawnProp, ActorKillProp } from "./prop";
 import { SCRIPT_FLAG_CLEAR_PROPS } from "./lifetime";
+import { PropDrawBegin, PropDrawSlot, PropMatrixPush } from "./prop_draw";
 import type { BreakableProp } from "./prop_state";
 
-/** `obj+0x192` as `PropUpdateType13` (`FUN_00467F50`) switches on it. */
+/** `obj+0x192` as `PropUpdateType13` switches on it. */
 export enum Type13Phase {
   /** Hanging, and blinking the panel until the first step change. */
   Wait = 0,
@@ -63,7 +91,7 @@ export enum Type13Phase {
   Fall = 1,
   /** Landed; `+0x1C8` rings down across Z. */
   Judder = 2,
-  /** At rest. Nothing moves again. */
+  /** At rest. Nothing moves again; the switch's default, straight to the draw. */
   Rest = 3,
 }
 
@@ -77,18 +105,18 @@ export const TYPE13_PANEL_LIT_SLOT = 0x1a49;
 /** `0x1A43` — `komono_tokeidai.bin[0]`, the part that falls. */
 export const TYPE13_DROP_SLOT = 0x1a43;
 
-/** `g_scene_tick_counter % 0x28` — the blink period, in ticks. */
+/** `g_scene_tick_counter % 0x28` — the blink period, in ticks (`DIV`, unsigned). */
 const TYPE13_BLINK_TICKS = 0x28;
-/** `0x004E3100` — subtracted from `+0x1C4` every falling frame. */
-const TYPE13_GRAVITY = 0.02;
-/** `0x0055CB4C` — the floor, and where a skip leaves it. */
+/** `0x004E3100` (`0x3CA3D70A`) — subtracted from `+0x1C4` every falling frame. */
+const TYPE13_GRAVITY = Math.fround(0.02);
+/** `0x0055CB4C` (`0xC0C00000`) — the floor, and where a skip leaves it. */
 export const TYPE13_FLOOR_Y = -6.0;
 /** `MOV [ESI+0x1C8], 0x3ECCCCCD` — the landing judder's first amplitude. */
-const TYPE13_JUDDER = 0.4;
-/** `0x0056908C` — what the judder is multiplied by each frame. */
-const TYPE13_JUDDER_DECAY = -0.925;
-/** `0x004C4C88` — below this magnitude the judder stops. */
-const TYPE13_JUDDER_EPS = 0.05;
+export const TYPE13_JUDDER = Math.fround(0.4);
+/** `0x0056908C` (`0xBF6CCCCD`) — what the judder is multiplied by each frame. */
+const TYPE13_JUDDER_DECAY = Math.fround(-0.925);
+/** `0x004C4C88` (`0x3D4CCCCD`) — below this magnitude the judder stops. */
+const TYPE13_JUDDER_EPS = Math.fround(0.05);
 
 /** `STAGE2_SE\BEEP6_44.wav`, on release. */
 export const SFX_TYPE13_BEEP = 0x19a9;
@@ -107,14 +135,26 @@ export const SFX_TYPE13_LAND = 0x1916a9;
  * change), `+0x2A4` {@link BreakableProp.removeFlag} (the blink toggle) and
  * `+0x192` {@link BreakableProp.routinePhase}.
  *
- * `[diverges]` The skip arm —
- * `g_script_flags[0x6D] == 1 && g_cutscene_skipping` snaps it to the floor in
- * {@link Type13Phase.Judder} — is not transcribed:
- * `g_cutscene_skipping` (`0x009A2230`) has no port in `G`, the gap
- * `class25/index.ts` and `class21/index.ts` already declare. A skipped cut
- * scene therefore lets the part finish falling on its own, 136 frames.
+ * The step count comes **before** the scene-1 sweep here, the other way round
+ * from `PropExpireByStepLifetime` (`FUN_00466640`), and it ends in
+ * `ActorKill` (`FUN_004A7040`) where the sweep's end is `ActorDespawn`
+ * (`FUN_00409CC0`). Both are transcribed.
+ *
+ * [diverges] The skip arm at `0x00467FC8` — `g_script_flags[0x6D] == 1` and
+ * `g_cutscene_skipping` (`0x009A2230`) set, which snaps the part to the floor
+ * in {@link Type13Phase.Judder} with no landing sound — is not transcribed:
+ * `G` has no port of that global, the gap `class25/index.ts` and
+ * `class21/index.ts` already declare. `CheckCutsceneSkipRequest`
+ * (`FUN_00435F40`) raises it and `FinishCutsceneSkip` (`FUN_00435FA0`)
+ * lowers it on the task's next run. A skipped cut scene therefore lets the
+ * part finish falling on its own, 136 frames.
+ *
+ * Float stores are `float`s the routine reads back next frame, so they are
+ * rounded to single; the compares are made on the unrounded values still in
+ * `ST0` (`FST`, then `FCOMP`), which is what the locals here hold.
  */
 export function PropUpdateType13(p: BreakableProp, events?: Events): void {
+  PropDrawBegin(p);
   if (G.g_evt_step_index !== p.lastStepIndex) {
     p.stepsElapsed += 1;
     if (p.lifetime < p.stepsElapsed) {
@@ -125,47 +165,81 @@ export function PropUpdateType13(p: BreakableProp, events?: Events): void {
     p.lastStepIndex = G.g_evt_step_index;
     p.slot = TYPE13_PANEL_SLOT;
   }
-  // The sweep comes **after** the step count here, the other way round from
-  // `PropExpireByStepLifetime`, and it is the prologue's `ActorDespawn`.
   if (G.g_scene_index === 1
       && (G.g_script_flags[SCRIPT_FLAG_CLEAR_PROPS] ?? 0) !== 0) {
     ActorDespawnProp(p);
     return;
   }
-  const released = (G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] ?? 0) === 1;
 
   switch (p.routinePhase as Type13Phase) {
     case Type13Phase.Wait:
       if (p.storyItem === 0
           && G.g_scene_tick_counter % TYPE13_BLINK_TICKS === 0) {
         p.removeFlag = 1 - p.removeFlag;
-        p.slot = p.removeFlag + TYPE13_PANEL_LIT_SLOT;
+        // `MOV AX,DX; ADD AX,0x1A49; MOV word [ESI+0x28C],AX`.
+        p.slot = ((p.removeFlag + TYPE13_PANEL_LIT_SLOT) << 16) >> 16;
       }
-      if (released) {
+      if ((G.g_script_flags[SCRIPT_FLAG_TYPE13_DROP] ?? 0) === 1) {
         events?.emit("sound.play", { id: SFX_TYPE13_BEEP });
         events?.emit("sound.play", { id: SFX_TYPE13_RELEASE });
         p.routinePhase = Type13Phase.Fall;
         p.slot = TYPE13_PANEL_LIT_SLOT;
       }
       break;
-    case Type13Phase.Fall:
-      p.vy -= TYPE13_GRAVITY;
-      p.y += p.vy;
-      if (p.y < TYPE13_FLOOR_Y) {
-        events?.emit("sound.play", { id: SFX_TYPE13_LAND });
+    case Type13Phase.Fall: {
+      const vy = p.vy - TYPE13_GRAVITY;
+      p.vy = Math.fround(vy);
+      const y = vy + p.y;
+      p.y = Math.fround(y);
+      if (y < TYPE13_FLOOR_Y) {
         p.y = TYPE13_FLOOR_Y;
         p.routinePhase = Type13Phase.Judder;
         p.vz = TYPE13_JUDDER;
+        events?.emit("sound.play", { id: SFX_TYPE13_LAND });
       }
       break;
-    case Type13Phase.Judder:
-      p.vz *= TYPE13_JUDDER_DECAY;
-      if (Math.abs(p.vz) < TYPE13_JUDDER_EPS) {
+    }
+    case Type13Phase.Judder: {
+      const judder = p.vz * TYPE13_JUDDER_DECAY;
+      p.vz = Math.fround(judder);
+      if (Math.abs(judder) < TYPE13_JUDDER_EPS) {
         p.vz = 0;
         p.routinePhase = Type13Phase.Rest;
       }
       break;
-    case Type13Phase.Rest:
+    }
+    default:
       break;
   }
+
+  // `AssetDrawSlot((s16)obj+0x28C)` on the stack top the task was entered
+  // with: the view, which the recording's identity stands for.
+  PropDrawSlot(p, MatIdentity(), p.slot);
+  const m = PropMatrixPush();
+  // `FLD [+0x1C8]; FADD [+0x1A4]; FSTP [ESP]` — a float argument.
+  MatrixTranslate(m, p.x, p.y, Math.fround(p.vz + p.z));
+  PropDrawSlot(p, m, TYPE13_DROP_SLOT);
+}
+
+/**
+ * The arm of `PlaceGenericProp` (`FUN_00461CF0`) for type 13.
+ *
+ * `[port-only]` as a *function*: in the engine it is the arm at `0x00461F24`
+ * of `PlaceGenericProp`'s switch (entry 7 of `g_place_generic_prop_arms`,
+ * `0x004628D4`, which `g_place_generic_prop_arm_index` holds for `13 - 6`):
+ *
+ * ```
+ * 00461F24  MOV word ptr [ESI+0x28C], 0x1A4A ; then POP/RET
+ * ```
+ *
+ * That is the whole arm; it reads nothing of the placer. The routine's blink
+ * toggles `obj+0x2A4` from the zero `ActorClearGameFields` (`FUN_004A73D0`)
+ * left there, which the port's struct default (the story switch's -1) is
+ * not, so the zero is written here too.
+ */
+export function PlaceGenericPropType13(p: BreakableProp,
+                                       _pl: BreakablePlacement,
+                                       _rng: Rng): void {
+  p.slot = TYPE13_PANEL_SLOT;
+  p.removeFlag = 0;
 }

@@ -36,7 +36,8 @@ ask for:
 * for the Original Mode collectibles, types 70, 71 and 72, both models of
   every item the placement's row can draw and both pickup strips -- the
   descriptor's word is a lifetime for those, and `PickOriginalModeItem`
-  writes the model.
+  writes the model -- and the same for row 0 of a type 7 or 43, whose drop
+  picks from it, and for every story item's row.
 
 A generic type outside that set is *not* checked: its `+0x11C` is a lifetime,
 the port knows it, and demanding a model for `slot 4` would be demanding the
@@ -208,34 +209,64 @@ def story_item_slots(breakables: dict, pl: dict) -> list[tuple[int, str]]:
         out += original_item_slots(breakables, {"field_1f4": row},
                                    "a story item")
     return out
+#: One generated run, `Array.from({ length: N }, (_, i) => 0xBASE + i)`.
+_RUN = re.compile(r"Array\.from\(\{\s*length:\s*(\d+)\s*\}[^)]*\)\s*=>\s*"
+                  r"(0x[0-9a-fA-F]+|\d+)\s*\+\s*i\s*\)")
+
+
+def _run(text: str) -> list[int] | None:
+    m = _RUN.fullmatch(text.strip())
+    if not m:
+        return None
+    base = int(m.group(2), 0)
+    return [base + i for i in range(int(m.group(1)))]
 
 
 def static_slots() -> dict[int, list[int]]:
     """`GENERIC_STATIC_SLOTS`, read out of the exporter.
 
-    The generated row -- type 21's ``Array.from`` -- is expanded here rather
-    than skipped: a routine that steps through ten slots needs all ten.
+    A row is a list of literals, a generated run (``Array.from``), or a list
+    that spreads runs among its literals; every run is expanded rather than
+    skipped, because a routine that steps through ten slots needs all ten.
+    An element this cannot read fails the check rather than being dropped: a
+    row read short is a slot nobody checks.
     """
     text = BUNDLE_TS.read_text(encoding="utf-8")
     m = re.search(r"GENERIC_STATIC_SLOTS[^{]*\{(.*?)\n\};", text, re.S)
     if not m:
         raise SystemExit(f"{BUNDLE_TS}: GENERIC_STATIC_SLOTS not found")
+    body = "\n".join(line.split("//")[0] for line in m.group(1).splitlines())
     out: dict[int, list[int]] = {}
-    for line in m.group(1).splitlines():
-        line = line.split("//")[0].strip()
-        e = re.match(r"(\d+):\s*(.*?),?$", line)
-        if not e:
+    for e in re.finditer(r"(\d+):\s*(\[[^\]]*\]|Array\.from\([^\n]*?=>[^,\n]*\+\s*i\s*\))",
+                         body):
+        key, row = int(e.group(1)), e.group(2).strip()
+        run = _run(row)
+        if run is not None:
+            out[key] = run
             continue
-        key, body = int(e.group(1)), e.group(2)
-        gen = re.match(r"Array\.from\(\{\s*length:\s*(\d+)\s*\}[^)]*\)\s*=>\s*"
-                       r"(0x[0-9a-fA-F]+)\s*\+\s*i\s*\)", body)
-        if gen:
-            base = int(gen.group(2), 16)
-            out[key] = [base + i for i in range(int(gen.group(1)))]
-            continue
-        b = re.match(r"\[(.*)\]$", body)
-        if b:
-            out[key] = [int(x, 0) for x in b.group(1).split(",") if x.strip()]
+        slots: list[int] = []
+        depth, cur, parts = 0, "", []
+        for ch in row[1:-1]:
+            depth += ch in "({"
+            depth -= ch in ")}"
+            if ch == "," and depth == 0:
+                parts.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        parts.append(cur)
+        for part in (x.strip() for x in parts):
+            if not part:
+                continue
+            if part.startswith("..."):
+                spread = _run(part[3:])
+                if spread is None:
+                    raise SystemExit(f"{BUNDLE_TS}: GENERIC_STATIC_SLOTS[{key}]"
+                                     f" spreads something unreadable: {part}")
+                slots += spread
+            else:
+                slots.append(int(part, 0))
+        out[key] = slots
     return out
 
 
@@ -339,6 +370,7 @@ def main() -> int:
         breakables = json.loads(script.read_text()).get("breakables", {})
         placements = breakables.get("placements", [])
         collectible_types = _int_list("ORIGINAL_ITEM_TYPES")
+        row_zero_types = _int_list("ORIGINAL_ITEM_ROW_ZERO_TYPES")
         story_rows = story_item_rows()
 
         for pl in placements:
@@ -375,6 +407,10 @@ def main() -> int:
                 if ty in collectible_types:
                     want += original_item_slots(breakables, pl)
                     items += 1
+                if ty in row_zero_types:
+                    # Type 7's drop and type 43's break pick from row 0.
+                    want += original_item_slots(
+                        breakables, {"field_1f4": 0}, f"type {ty}'s drop")
                 if ty in story_rows:
                     want += original_item_slots(
                         breakables, {"field_1f4": story_rows[ty]},

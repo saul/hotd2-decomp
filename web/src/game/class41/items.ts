@@ -10,7 +10,8 @@
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { G } from "../globals";
-import { PickOriginalModeItem } from "./original_item";
+import { COLLECTIBLE_WORDS_ZERO, PickOriginalModeItem } from "./original_item";
+import { PropWords } from "./words";
 import {
   BreakableState, ItemSet, makeBreakableProp, PropFamily, type BreakableProp,
 } from "./prop_state";
@@ -120,7 +121,11 @@ export function SpawnScorePickup(p: BreakableProp, kind: number,
  *
  * It inherits the prop's step counters and its `+0x11C`, so it ages on the
  * prop's clock from where the prop was. `ActorAlloc` appends it to the task
- * list the prop is on, so it runs on the frame it is made.
+ * list the prop is on, so it runs on the frame it is made. Its routine is
+ * `g_class41_updates[70]`'s, so the port files it as a generic prop of that
+ * type and the pool's generic arm runs it through the same row
+ * (`class41/generic_routines.ts`); its flags word has no bit `0x200000`, so
+ * it turns rather than bobs.
  *
  * The `item.released` event is the port's own notice for its feed; the
  * engine has no counterpart and the game reads nothing from it.
@@ -128,13 +133,15 @@ export function SpawnScorePickup(p: BreakableProp, kind: number,
 export function SpawnStoryModeItem(p: BreakableProp, rng: Rng,
                                    events?: Events): void {
   const q = makeBreakableProp(G.g_breakable_next_id++, 0, 0);
-  q.family = PropFamily.OriginalItem;
+  q.family = PropFamily.Generic;
+  q.kind = STORY_ITEM_ROUTINE_TYPE;
   q.flags = STORY_ITEM_FLAGS;
   q.state = BreakableState.Standing;
   // `ActorClearGameFields` zeroes the pickup strip's frame and base.
   q.storyItem = 0;
   q.removeFlag = 0;
-  q.group = (p.storyItem << 24) >> 24;
+  const w = PropWords(q, COLLECTIBLE_WORDS_ZERO);
+  w.o194 = (p.storyItem << 24) >> 24;
   q.x = p.x;
   q.y = p.y;
   q.z = p.z;
@@ -148,7 +155,7 @@ export function SpawnStoryModeItem(p: BreakableProp, rng: Rng,
   q.lastStepIndex = p.lastStepIndex;
   q.lifetime = PropWord11C(p);
   q.hitRadius = STORY_ITEM_RADIUS;
-  PickOriginalModeItem(q, q.group, rng);
+  PickOriginalModeItem(q, w.o194, rng);
   G.g_original_item_banner_count = 0;
   G.g_breakable_props.push(q);
   events?.emit("item.released", {
@@ -156,6 +163,12 @@ export function SpawnStoryModeItem(p: BreakableProp, rng: Rng,
   });
 }
 
+/**
+ * `PUSH 0x004675A0` into `ActorAlloc` — `OriginalItemPropUpdate`, which is
+ * `g_class41_updates[70]`. `[port-only]` as a type number: the engine's
+ * object carries the routine and not a type.
+ */
+const STORY_ITEM_ROUTINE_TYPE = 70;
 /** `MOV dword ptr [EAX + 0x34], 0x80000001` — live, and bit 31. */
 const STORY_ITEM_FLAGS = 0x80000001;
 /** `MOV dword ptr [EAX + 0x124], 0x40400000` — a collectible's 3.0. */
@@ -178,6 +191,26 @@ function PropWord11C(p: BreakableProp): number {
 }
 
 /**
+ * Which of the engine's three copies of the release switch a destroy path is
+ * running. They are identical in the set arms but for the height the item is
+ * released at, and **not** in the story arm, which is why the port has to
+ * know: each copy writes `g_original_item_pickup_blocked` (`0x007DCD14`)
+ * its own way.
+ */
+export enum HiddenItemCopy {
+  /** `BreakablePropUpdate` (`FUN_00464620`), `0x00464B41`..`0x00464B8B`. */
+  Group = 0,
+  /** `KindedPropUpdate` (`FUN_00465FB0`), `0x00466158`..`0x004661F4`. */
+  Kinded = 1,
+  /** `FallingContainerUpdate` (`FUN_0046A580`), `0x0046A9BB`..`0x0046AA6E`. */
+  Falling = 2,
+}
+
+/** `CMP [0x009A1A08], BX` with `BX = 2`, and `CMP [0x009A2BC0], 4`. */
+const KINDED_STORY_BLOCK_SCENE = 2;
+const KINDED_STORY_BLOCK_BLOCK = 4;
+
+/**
  * The tail of the destroy path: count this break against the prop's item set
  * and, if that empties the countdown, let the item out.
  *
@@ -186,19 +219,31 @@ function PropWord11C(p: BreakableProp): number {
  * its own `storyItem` releases that in place of its set's item.
  *
  * The engine spells this switch out **three times** — once each in
- * `BreakablePropUpdate`, `KindedPropUpdate` and `FallingContainerUpdate` — and
- * the three copies are identical but for the height the item is released at.
- * That difference is `rise`; everything else is one routine here rather than
- * three, because three transcriptions of one switch is three places for it to
- * drift.
+ * `BreakablePropUpdate`, `KindedPropUpdate` and `FallingContainerUpdate` —
+ * and `copy` says which. The set arms are identical but for the height the
+ * item is released at, which is `rise`. The story arms differ more:
  *
- * `storyRise` is the one copy whose two arms differ: `FallingContainerUpdate`
- * (`FUN_0046A580`) seats a story item at its floor **plus 0.5**
- * (`FADD [0x004C43AC]` at `0x0046A9FA`) and a set's item at the floor itself.
- * Everywhere else it is `rise`.
+ * ```c
+ * // BreakablePropUpdate, 0x00464B7B
+ * SpawnStoryModeItem(obj);  g_original_item_pickup_blocked = 0;
+ * // KindedPropUpdate, 0x00466192
+ * g_original_item_pickup_blocked = 0;
+ * if (g_scene_index == 2 && g_evt_block_index == 4) g_original_item_pickup_blocked = 1;
+ * if ((s16)obj->+0x290 == 2) { y += 1.0; SpawnStoryModeItem(obj); y -= 1.0; }
+ * else SpawnStoryModeItem(obj);
+ * // FallingContainerUpdate, 0x0046A9F4 -- +0x11C = (s8)+0x199 on both arms
+ * y = floor + 0.5;  SpawnStoryModeItem(obj);  g_original_item_pickup_blocked = 0;
+ * ```
+ *
+ * `storyRise` is the story arm's height: 1.0 for a kind-2 kinded prop, 0.5
+ * over the floor for the falling container, and nothing for a group member.
+ * The falling container's `obj+0x11C = (s8)obj+0x199` (`0x0046AA0F`,
+ * `0x0046AA35`) is what the story item inherits as its lifetime; the port
+ * holds `+0x11C` in `hp` for that family and `+0x199` in `lifetime`.
  */
 export function ReleaseHiddenItem(p: BreakableProp, rng: Rng,
-                                  events?: Events,
+                                  events: Events | undefined,
+                                  copy: HiddenItemCopy,
                                   rise = 0, storyRise = rise): void {
   // [open] `g_GameMode == 1 && DAT_009C88AA != 0` forces `itemSet = 1` on
   // every prop, so each one drops an extra life. What sets that flag has not
@@ -209,32 +254,46 @@ export function ReleaseHiddenItem(p: BreakableProp, rng: Rng,
   G.g_item_set_countdown[p.itemSet] = left;
   if (left !== 0) return;
 
+  if (copy === HiddenItemCopy.Falling) p.hp = p.lifetime;
+  if (G.g_GameMode === 1 && p.storyItem !== -1) {
+    if (copy === HiddenItemCopy.Kinded) {
+      G.g_original_item_pickup_blocked = 0;
+      if (G.g_scene_index === KINDED_STORY_BLOCK_SCENE
+          && G.g_evt_block_index === KINDED_STORY_BLOCK_BLOCK) {
+        G.g_original_item_pickup_blocked = 1;
+      }
+    }
+    // `FLD; FADD float; FSTP float` before the call; the kinded copy takes
+    // it back off after (`FSUB`), the falling one is despawned next.
+    if (storyRise !== 0) p.y = Math.fround(p.y + storyRise);
+    SpawnStoryModeItem(p, rng, events);
+    if (storyRise !== 0 && copy === HiddenItemCopy.Kinded) {
+      p.y = Math.fround(p.y - storyRise);
+    }
+    if (copy !== HiddenItemCopy.Kinded) G.g_original_item_pickup_blocked = 0;
+    return;
+  }
+
   // The per-family height tweak, applied for the release and taken straight
   // back off — the engine does exactly this, `+0x1A0 += r` then `-= r`.
-  const story = G.g_GameMode === 1 && p.storyItem !== -1;
-  const lift = story ? storyRise : rise;
-  p.y += lift;
-  if (story) {
-    SpawnStoryModeItem(p, rng, events);
-  } else {
-    switch (p.itemSet) {
-      case ItemSet.ExtraLife:
-        SpawnExtraLifePickup(p, events);
-        break;
-      case ItemSet.GoldenFrog:
-        SpawnGoldenFrog(p, events);
-        break;
-      case ItemSet.Score2:
-      case ItemSet.Score5:
-      case ItemSet.Score6:
-      case ItemSet.Score7:
-      case ItemSet.Score8:
-        SpawnScorePickup(p, p.itemSet, events);
-        break;
-      default:
-        // Set 4 has no arm in the engine's switch, and no shipped prop uses it.
-        break;
-    }
+  p.y += rise;
+  switch (p.itemSet) {
+    case ItemSet.ExtraLife:
+      SpawnExtraLifePickup(p, events);
+      break;
+    case ItemSet.GoldenFrog:
+      SpawnGoldenFrog(p, events);
+      break;
+    case ItemSet.Score2:
+    case ItemSet.Score5:
+    case ItemSet.Score6:
+    case ItemSet.Score7:
+    case ItemSet.Score8:
+      SpawnScorePickup(p, p.itemSet, events);
+      break;
+    default:
+      // Set 4 has no arm in the engine's switch, and no shipped prop uses it.
+      break;
   }
-  p.y -= lift;
+  p.y -= rise;
 }

@@ -411,18 +411,20 @@ export interface BreakablesJson {
   /** 7.540296 — one stack level, in world units. */
   level_height: number;
   /**
-   * What `PickOriginalModeItem` (`FUN_004629C0`) reads for this scene's
-   * collectibles: class 0x41 types 70, 71 and 72, and the story items
+   * What `PickOriginalModeItem` (`FUN_004629C0`) reads for this scene: the
+   * rows the class-0x41 types that call it can name -- 70, 71 and 72 by
+   * their placer byte, 7's and 43's drops by row 0 -- and the story items
    * `SpawnStoryModeItem` (`FUN_00467B90`) makes. Written by every export;
    * optional so a hand-built table without collectibles still type-checks.
    */
   original_items?: OriginalItemsJson;
   /**
-   * `g_pHingeCurvesXYZ` curves a class-0x41 routine reads directly, by
-   * selector: `PropUpdateType76` (`FUN_00471330`) swings its doors on curve
-   * 0. Present when the stage places a routine that reads one.
+   * `g_pHingeCurvesXYZ` (`0x005960B4`) by curve index — 0, 2 and 3, the
+   * selectors that read the XYZ table — each `[rx, ry, rz]` BAMS per frame.
+   * The class-0x41 generic routines that swing a part name a curve by a
+   * literal, and read it from here.
    */
-  hinge_curves?: Record<string, [number, number, number][]>;
+  hinge_curves_xyz?: Record<string, number[][]>;
 }
 
 /** One `g_original_item_tables` row: four item ids and their weights. */
@@ -450,10 +452,10 @@ export interface OriginalItemRecordJson {
  *
  * `g_original_item_tables[g_scene_index]` is the scene's row list. The rows
  * carried are the ones the stage's placements can name -- a collectible's
- * placer byte (types 70, 71, 72), types 74's and 75's own immediates, and the
- * story item a group member or a falling container hands `SpawnStoryModeItem`
- * -- and the records are the ids those rows name. Nothing is read by
- * adjacency (`L6`).
+ * placer byte (types 70, 71, 72), row 0 for type 7's drop and type 43's
+ * break, types 74's and 75's own immediates, and the story item a group
+ * member or a falling container hands `SpawnStoryModeItem` -- and the
+ * records are the ids those rows name. Nothing is read by adjacency (`L6`).
  */
 export interface OriginalItemsJson {
   /** `g_scene_index` the rows were read for. */

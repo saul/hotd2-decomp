@@ -24,20 +24,25 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import type { BreakablePlacement } from "../../bundle";
 import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
 import {
-  MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
-  MatrixTransformPoint, MatrixTranslate,
+  MatrixLoadIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ,
+  MatrixScale, MatrixTransformPoint, MatrixTranslate,
 } from "../matrix";
 import { PlayerHoldsOriginalItem } from "../original_mode";
 import { T } from "../tables";
 import { vec3 } from "../vec";
 import { BranchBlock, PROP_BRANCH_ANSWERED } from "./branch";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx,
+} from "./prop_draw";
 import { BreakableFlag, type BreakableProp } from "./prop_state";
 import { PropRegisterForShotTest } from "./shot_test";
+import { PropWords } from "./words";
 
 /** `obj+0x192` as `PropUpdateType76` reads it. */
 export enum Type76Phase {
@@ -65,6 +70,8 @@ export const SFX_TYPE76_HIT = 0xf16a9;
 export const SFX_TYPE76_OPEN = 0x2116a9;
 /** `CMP ECX, 0x3C; JGE` — the swing's length, frames of curve 0. */
 export const TYPE76_SWING_FRAMES = 0x3c;
+/** `MOV EDX, [0x005960B4]` — `*g_pHingeCurvesXYZ`, curve 0. */
+export const TYPE76_HINGE_CURVE = 0;
 
 /** The single door's plate: `T(-2.5, -30, -17.5) RotY(0x4000) Scale(1.2)`. */
 export const TYPE76_PLATE_SLOT = 0x10d3;
@@ -104,18 +111,30 @@ export const TYPE76_SINGLE_SHOT_OFFSET: readonly [number, number, number] =
   [-2.5, -30.0, -17.5];
 
 /**
+ * The one word of the 0x378 object this routine keeps that no shared field
+ * carries. See `class41/words.ts`.
+ */
+interface Type76Words {
+  /** `obj+0x194` (s8) — the placer's byte: which door this is. */
+  o194: number;
+}
+const TYPE76_WORDS_ZERO: Type76Words = { o194: 0 };
+
+/**
  * `PlaceGenericProp` case 0x4C, `0x004628A8`: `obj+0x194` from the placer's
- * byte, beside the 3.0 radius `generic.ts`'s table has. `[port-only]` as a
- * *function*, as `PlaceGenericPropType43` is.
+ * byte, beside the 3.0 radius `generic.ts`'s table has.
+ *
+ * `[port-only]` as a *function*: an arm of the switch, reached through
+ * `GENERIC_PLACE_ARMS` (`class41/generic_routines.ts`).
  */
 export function PlaceGenericPropType76(p: BreakableProp,
-                                       pl: { field_1f4?: number }): void {
-  p.group = ((pl.field_1f4 ?? 0) << 24) >> 24;
+                                       pl: BreakablePlacement,
+                                       _rng: Rng): void {
+  PropWords(p, TYPE76_WORDS_ZERO).o194 = ((pl.field_1f4 ?? 0) << 24) >> 24;
   // `+0x2A8`, the swing's frame, is zero from `ActorClearGameFields`.
   p.cueCursorB = 0;
 }
 
-const _m = MatIdentity();
 const _p = vec3();
 const _o = vec3();
 
@@ -124,11 +143,12 @@ const _o = vec3();
  *
  * `+0x2A8` is {@link BreakableProp.cueCursorB} (the swing's frame), `+0x1E4`
  * {@link BreakableProp.restPitch} and `+0x1E8` {@link BreakableProp.hingeB}
- * (the first leaf's own pitch and yaw), `+0x194` {@link BreakableProp.group}
- * and `+0x192` {@link BreakableProp.routinePhase}.
+ * (the first leaf's own pitch and yaw), `+0x194` its own word and `+0x192`
+ * {@link BreakableProp.routinePhase}.
  */
 export function PropUpdateType76(p: BreakableProp, rng: Rng,
                                  events?: Events): void {
+  PropDrawBegin(p);
   if (G.g_GameMode !== GameMode.Original) {
     ActorDespawnProp(p);
     return;
@@ -154,7 +174,7 @@ export function PropUpdateType76(p: BreakableProp, rng: Rng,
     events?.emit("sound.play", { id: SFX_TYPE76_HIT });
     // The key is asked only in block 0x0E, and only after the hit has paid:
     // a shot without it still scores and still sparks.
-    if ((p.group === Type76Door.Pair
+    if ((PropWords(p, TYPE76_WORDS_ZERO).o194 === Type76Door.Pair
          && G.g_evt_block_index === BranchBlock.Type76First)
         || (G.g_evt_block_index === BranchBlock.Type76Keyed
             && TYPE76_KEYS.some(PlayerHoldsOriginalItem))) {
@@ -169,7 +189,8 @@ export function PropUpdateType76(p: BreakableProp, rng: Rng,
   p.flags &= ~(BreakableFlag.HitByPlayer0 | BreakableFlag.HitByPlayer1);
   if (p.routinePhase === Type76Phase.Open
       && p.cueCursorB < TYPE76_SWING_FRAMES) {
-    const k = T.breakables?.hinge_curves?.["0"]?.[p.cueCursorB];
+    const k = T.breakables?.hinge_curves_xyz?.[String(TYPE76_HINGE_CURVE)]
+      ?.[p.cueCursorB];
     const [rx, ry, rz] = k ?? [0, 0, 0];
     p.roll += rz;
     p.pitch -= rx;
@@ -179,26 +200,63 @@ export function PropUpdateType76(p: BreakableProp, rng: Rng,
     p.cueCursorB += 1;
   }
 
-  // The draws are `render/prop_parts.ts`'s. The registration is not.
-  switch (p.group as Type76Door) {
-    case Type76Door.Single:
-      PropRegisterForShotTest(p, p.x + TYPE76_SINGLE_SHOT_OFFSET[0],
-                              p.y + TYPE76_SINGLE_SHOT_OFFSET[1],
-                              p.z + TYPE76_SINGLE_SHOT_OFFSET[2]);
+  // The draw, by `obj+0x194` (`MOVSX EAX, byte ptr [ESI+0x194]; SUB EAX, 0;
+  // JZ; DEC EAX; JNZ`), and each arm registers its own point.
+  switch (PropWords(p, TYPE76_WORDS_ZERO).o194 as Type76Door) {
+    case Type76Door.Single: {
+      // `0x0047168E`..`0x00471735`: one push, the plate inside it.
+      const m = PropMatrixPush();
+      PropMatrixTRzRyRx(m, p.x, p.y, p.z, p.pitch, p.yaw, p.roll);
+      PropDrawSlot(p, m, TYPE76_SINGLE_SLOT);
+      if (p.routinePhase === Type76Phase.Shut) {
+        MatrixTranslate(m, ...TYPE76_PLATE_AT);
+        MatrixRotateY(m, TYPE76_PLATE_YAW);
+        MatrixScale(m, TYPE76_PLATE_SCALE, TYPE76_PLATE_SCALE,
+                    TYPE76_PLATE_SCALE);
+        // `NoOpStub(1.2f)` (`FUN_0041EBB0`), an empty function.
+        PropDrawSlot(p, m, TYPE76_PLATE_SLOT);
+      }
+      // `FLD float; FSUB double; FSTP float` for each axis.
+      PropRegisterForShotTest(
+        p, Math.fround(p.x + TYPE76_SINGLE_SHOT_OFFSET[0]),
+        Math.fround(p.y + TYPE76_SINGLE_SHOT_OFFSET[1]),
+        Math.fround(p.z + TYPE76_SINGLE_SHOT_OFFSET[2]));
       return;
+    }
     case Type76Door.Pair: {
-      // `LoadIdentity; T(a); RotY(-0x2168); RotZ; RotY(+0x1E8); RotX(+0x1E4);
-      // MatrixStore; T(12.5, 23.5, 0.5); MatrixGetTranslation` -- the plate's
-      // world point, which is the sphere's.
-      for (let i = 0; i < 16; i++) _m[i] = i % 5 === 0 ? 1 : 0;
-      MatrixTranslate(_m, ...TYPE76_PAIR_A_AT);
-      MatrixRotateY(_m, TYPE76_PAIR_YAW);
-      MatrixRotateZ(_m, p.roll);
-      MatrixRotateY(_m, p.hingeB);
-      MatrixRotateX(_m, p.restPitch);
-      MatrixTranslate(_m, ...TYPE76_PAIR_PLATE_AT);
-      PropRegisterForShotTest(p, Math.fround(_m[12]), Math.fround(_m[13]),
-                              Math.fround(_m[14]));
+      // `0x0047150D`..`0x0047163C`. The first leaf's matrix is built from
+      // `MatrixLoadIdentity` (`FUN_004A9E10`) -- a world matrix -- kept with
+      // `MatrixStore`, its plate's world point taken with
+      // `MatrixGetTranslation`, and then drawn under a fresh push of the view
+      // times it (`MatrixMultiply`), which in the port's world-space record
+      // is the matrix itself.
+      const a = PropMatrixPush();
+      MatrixLoadIdentity(a);
+      MatrixTranslate(a, ...TYPE76_PAIR_A_AT);
+      MatrixRotateY(a, TYPE76_PAIR_YAW);
+      MatrixRotateZ(a, p.roll);
+      MatrixRotateY(a, p.hingeB);
+      MatrixRotateX(a, p.restPitch);
+      const plate = PropMatrixPush(a);
+      MatrixTranslate(plate, ...TYPE76_PAIR_PLATE_AT);
+      _p.x = Math.fround(plate[12]);
+      _p.y = Math.fround(plate[13]);
+      _p.z = Math.fround(plate[14]);
+      PropDrawSlot(p, a, TYPE76_PAIR_SLOT_A);
+      if (p.routinePhase === Type76Phase.Shut) {
+        // The same `T(12.5, 23.5, 0.5)` on the leaf, and `NoOpStub(1.2f)`:
+        // no scale.
+        MatrixTranslate(a, ...TYPE76_PAIR_PLATE_AT);
+        PropDrawSlot(p, a, TYPE76_PLATE_SLOT);
+      }
+      const b = PropMatrixPush();
+      MatrixTranslate(b, ...TYPE76_PAIR_B_AT);
+      MatrixRotateY(b, TYPE76_PAIR_YAW);
+      MatrixRotateZ(b, p.roll);
+      MatrixRotateY(b, p.yaw);
+      MatrixRotateX(b, p.pitch);
+      PropDrawSlot(p, b, TYPE76_PAIR_SLOT_B);
+      PropRegisterForShotTest(p, _p.x, _p.y, _p.z);
       return;
     }
     default:

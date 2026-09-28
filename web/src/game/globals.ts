@@ -37,8 +37,8 @@ import type { WaterRing } from "./effects/water_ring";
 import type { WaterSurface, WaterSurfaceUv } from "./class41/water";
 import type { St2Car } from "./class21/car";
 import type { Actor } from "./actor";
-import type { BreakableProp } from "./class41/prop_state";
 import type { OriginalItemBanner } from "./class41/item_banner";
+import type { BreakableProp, PropFinalDraw } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
 import type { ShotRequest } from "./combat/shot";
 import type { ShotTestEntry } from "./combat/shot_test";
@@ -1587,6 +1587,36 @@ export const G = {
    * `BreakablePropShatterUpdate`. `game/class41/shatter.ts`.
    */
   g_prop_shatters: [] as PropShatter[],
+  /**
+   * `[port-only]` — the draws of every prop that died this frame **after**
+   * drawing: a routine that draws and then `ActorKill`s itself (the last
+   * frame of `PropDrawOnlyType33`'s strip, of `PropUpdateType18`'s effect, a
+   * type-8 part going under the water) has submitted that draw in the engine,
+   * and the object is freed with it already queued. The port's pool drops a
+   * dead prop before the renderer runs, so the draw is kept here for
+   * `render/breakables.ts`, and cleared at the head of the pool's next frame.
+   */
+  g_prop_final_draws: [] as PropFinalDraw[],
+  /**
+   * `g_prop67_by_index` — `0x007DCD08`. The class-0x41 type-67 prop the arm
+   * last placed with each index 0..2, as a prop id (0 for none): what
+   * `Type67MountedPartUpdate` finds its parent through.
+   */
+  g_prop67_by_index: [0, 0, 0] as number[],
+  /**
+   * `[port-only]` in shape — what `PropUpdateType45` (`FUN_0046DAB0`) has
+   * done to the four banner models it bends in place (`TYPE45_WAVE_SLOTS`):
+   * the wave clock each was last bent at, `-1` for one still as authored.
+   * The engine's state is the vertex data; this is the one number it was
+   * written from, which `render/banner_wave.ts` rewrites it with.
+   */
+  g_prop45_wave_clock: [-1, -1, -1, -1] as number[],
+  /**
+   * `[port-only]` — each banner model's {@link g_prop45_wave_clock} as it
+   * stood when the routine's draws of this frame were submitted, which is
+   * before its bend: what an opaque-pass mesh, drawn at submission, shows.
+   */
+  g_prop45_wave_clock_drawn: [-1, -1, -1, -1] as number[],
   /** `[port-only]` — see {@link PropShatter.id}. */
   g_prop_shatter_seq: 1,
 
@@ -2668,6 +2698,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_item_set_countdown = [];
   G.g_breakable_next_id = 1;
   G.g_prop_shatters = [];
+  G.g_prop_final_draws = [];
+  G.g_prop67_by_index = [0, 0, 0];
+  G.g_prop45_wave_clock = [-1, -1, -1, -1];
+  G.g_prop45_wave_clock_drawn = [-1, -1, -1, -1];
   G.g_prop_shatter_seq = 1;
   G.g_evt_step_index = 0;
   G.g_evt_block_index = 0;

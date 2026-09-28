@@ -24,7 +24,7 @@ import { G } from "../globals";
 import { T } from "../tables";
 import { PropRegisterForShotTest } from "./shot_test";
 import { MsvcRand } from "./group";
-import { ReleaseHiddenItem } from "./items";
+import { HiddenItemCopy, ReleaseHiddenItem } from "./items";
 import {
   BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, ItemSet,
   makeBreakableProp, PropFamily, type BreakableProp,
@@ -193,12 +193,19 @@ function EffectFrames(_variant: number): number {
 /**
  * The item release, with the two height tweaks this family has and the others
  * do not: set 6 lifts the drop by 0.5 for kinds 2, 8 and 9, and set 7 by 0.9
- * when the prop is wearing `0x17AB`.
+ * when the prop is wearing `0x17AB`. Its story arm has a lift of its own: 1.0
+ * for kind 2 (`CMP word ptr [ESI+0x290], BX` with `BX = 2`; `FADD float
+ * [0x004C4380]` at `0x004661C2`), whatever the set.
  */
 function ReleaseKindedItem(p: BreakableProp, rng: Rng,
                            events?: Events): void {
   let rise = 0;
   if (p.itemSet === 6 && SET6_RAISED_KINDS.includes(p.kind)) rise = SET6_RISE;
   else if (p.itemSet === 7 && p.slot === 0x17ab) rise = SET7_RISE;
-  ReleaseHiddenItem(p, rng, events, rise);
+  const storyRise = p.kind === KINDED_STORY_RAISED_KIND ? KINDED_STORY_RISE : 0;
+  ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Kinded, rise, storyRise);
 }
+
+/** The one kind whose story item is released 1.0 up. */
+const KINDED_STORY_RAISED_KIND = 2;
+const KINDED_STORY_RISE = 1.0;

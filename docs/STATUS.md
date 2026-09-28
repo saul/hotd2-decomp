@@ -19,42 +19,42 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 93548 | 299 | engine |
-| `hod2lib/` | 18798 | 35 | engine |
-| `render/` | 14995 | 53 | render |
+| `game/` | 101785 | 336 | engine |
+| `hod2lib/` | 18880 | 35 | engine |
+| `render/` | 14763 | 53 | render |
 | `app/` | 7982 | 28 | app |
-| `script/` | 4390 | 25 | engine |
+| `script/` | 4410 | 25 | engine |
 | `ui/` | 3031 | 23 | ui |
-| `bundle/` | 2684 | 11 | engine |
+| `bundle/` | 2686 | 11 | engine |
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **147775** | **486** | |
+| **total** | **155884** | **523** | |
 
 The largest files, which is where the pressure to split next is:
 
-* `game/globals.ts` — 2759
+* `game/globals.ts` — 2793
 * `game/actor.ts` — 2587
 * `app/main.ts` — 2340
+* `hod2lib/bundle.ts` — 2322
 * `hod2lib/exetab.ts` — 2269
-* `hod2lib/bundle.ts` — 2240
 
 ## The port
 
 | | |
 |---|---|
 | Gameplay coverage | **228 of 297** annotated functions in the gameplay address ranges have a port (76%) |
-| Ported outside those ranges | 490 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 718 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 526 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 754 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **135** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **106** — questions the port and the exporter are honest about not having answered |
+| Declared `[diverges]` | **134** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers | **123** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 121 | 103 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 120 | 120 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |
@@ -65,8 +65,8 @@ The two declared seams between the UI and the player: **`PlayerCommands` has 48 
 
 | | |
 |---|---|
-| Named functions | 1340 in `ghidra/annotations/functions.tsv` |
-| Named globals | 670 in `ghidra/annotations/globals.tsv` |
+| Named functions | 1370 in `ghidra/annotations/functions.tsv` |
+| Named globals | 672 in `ghidra/annotations/globals.tsv` |
 | Verifier scripts | 45 under `tools/`, run together by `verify_all.py` |
 
 Phase and format status is a judgement about what counts as solved,

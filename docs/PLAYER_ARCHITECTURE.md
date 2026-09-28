@@ -901,9 +901,7 @@ web/src/
                   character pool cannot hold one: it has no character type
     prop_parts.ts the class-0x41 routines that draw several models at
                   several poses (types 38, 39, 40, 44) as lists of parts;
-                  breakables.ts clones and poses them, with a part's
-                  `AssetDrawSlotWithAlpha` alpha and `MatrixClearRotation`
-    prop_parts_items.ts  the same for types 70..77 (the collectibles)
+                  breakables.ts clones and poses them
     prop_shatter.ts  a stacked prop's fifteen shatter pieces
                   (`G.g_prop_shatters`), off breakables.ts's templates
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone

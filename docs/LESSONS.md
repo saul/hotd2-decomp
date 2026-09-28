@@ -1069,3 +1069,21 @@ instruction that put it there** -- the `LEA` or the `MOV` -- and when a note
 overturns an earlier reading, it owes the earlier one the same trace, not a
 louder adjective. `verify_combat.py` check 15 now reads the `LEA`'s operand out
 of the image in both routines.
+
+**L72 -- `PlaySoundId` is marked no-return too, and `ActorDespawn` really
+does not return.** Two facts about the same kind of call, pointing opposite
+ways, and the class-0x41 generic props were full of both. The database marks
+`PlaySoundId` (`FUN_0041CFD0`) no-return, so **every hit arm the decompiler
+shows ends at its sound**: `PropUpdateType41`'s decompile stops before the
+`+0x2A0 = 0x200` that starts its swing, `PropUpdateType28`'s before the clamp
+that stops it, `PropUpdateType7`'s before the kick, the hit effect and the
+Original Mode item drop that are the rest of its hit arm.
+L35 and L37 name `MatrixStackPop`; this is the same trap on the commonest
+call in a hit arm. Meanwhile `ActorDespawn` (`FUN_00409CC0`) ends in a call to
+`ActorKill`, which longjmps out of the task walk, so a routine that calls
+`PropExpireByStepLifetime` and ignores its result **does** stop when it
+despawns -- and `class41/type35.ts` had built "a retired door runs its rattle
+once more before the pool drops it" on a return that never happens. **Read
+the listing past every `PlaySoundId`, and read the callee before believing a
+caller carries on**: the pseudocode is wrong in the first direction and a
+reading of the pseudocode is wrong in the second.

@@ -29,13 +29,17 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import type { BreakablePlacement } from "../../bundle";
 import { SpawnPropHitEffectScaled } from "../effects/sprite";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
 import { SpawnStoryModeItem } from "./items";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
+import { PropDrawBegin, PropDrawSlot, PropMatrixPush, PropMatrixTRzRyRx }
+  from "./prop_draw";
 import { BreakableFlag, type BreakableProp } from "./prop_state";
 import { PropRegisterForShotTest } from "./shot_test";
+import { PropWords } from "./words";
 
 /** `obj+0x192` as `PropUpdateType74` reads it. */
 export enum Type74Phase {
@@ -88,25 +92,43 @@ export const TYPE74_SHOT_DROP = 2.0;
 const PLAYER_HIT_BITS = BreakableFlag.HitByPlayer0 | BreakableFlag.HitByPlayer1;
 
 /**
- * `PlaceGenericProp` case 0x4A's one field beyond the 9.0 radius (which is in
- * `generic.ts`'s table). `[port-only]` as a *function*.
+ * The one word of the 0x378 object this routine keeps that no shared field
+ * carries. See `class41/words.ts`.
  */
-export function PlaceGenericPropType74(p: BreakableProp): void {
-  p.shotsLeft = TYPE74_SHOTS;
-  // `ActorClearGameFields` leaves `+0x2A4` at zero; it counts frames here.
-  p.removeFlag = 0;
+interface Type74Words {
+  /**
+   * `obj+0x199` (s8) — the shots it takes before it drops its item. The
+   * group props keep their lifetime in this byte; this family keeps its in
+   * `+0x11C` (`L3`).
+   */
+  o199: number;
+}
+const TYPE74_WORDS_ZERO: Type74Words = { o199: 0 };
+
+/**
+ * `PlaceGenericProp` case 0x4A, `0x00462883`: the 9.0 radius (which is in
+ * `generic.ts`'s table) and `MOV byte ptr [ESI+0x199], 0x3`.
+ *
+ * `[port-only]` as a *function*: an arm of the switch, reached through
+ * `GENERIC_PLACE_ARMS` (`class41/generic_routines.ts`).
+ */
+export function PlaceGenericPropType74(p: BreakableProp,
+                                       _pl: BreakablePlacement,
+                                       _rng: Rng): void {
+  PropWords(p, TYPE74_WORDS_ZERO).o199 = TYPE74_SHOTS;
 }
 
 /**
  * `PropUpdateType74` — `FUN_00470E20`. One prop, one 60 Hz frame.
  *
- * `+0x199` is {@link BreakableProp.shotsLeft}, `+0x2A4`
- * {@link BreakableProp.removeFlag} (frames since the drop, in block 5),
+ * `+0x199` is its own word, `+0x2A4` {@link BreakableProp.removeFlag}
+ * (frames since the drop, in block 5),
  * `+0x1C4` {@link BreakableProp.vy} and `+0x192`
  * {@link BreakableProp.routinePhase}.
  */
 export function PropUpdateType74(p: BreakableProp, rng: Rng,
                                  events?: Events): void {
+  PropDrawBegin(p);
   // The inline lifetime, without the scene-1 sweep, and ahead of the mode.
   if (G.g_evt_step_index !== p.lastStepIndex) {
     p.stepsElapsed += 1;
@@ -148,8 +170,9 @@ export function PropUpdateType74(p: BreakableProp, rng: Rng,
     }
     events?.emit("sound.play", { id: SFX_TYPE74_HIT });
     // `DEC CL; MOV [ESI+0x199], CL; TEST AL, AL; JG` -- a signed byte.
-    p.shotsLeft = ((p.shotsLeft - 1) << 24) >> 24;
-    if (p.shotsLeft <= 0) {
+    const w = PropWords(p, TYPE74_WORDS_ZERO);
+    w.o199 = ((w.o199 - 1) << 24) >> 24;
+    if (w.o199 <= 0) {
       p.storyItem = TYPE74_STORY_ITEM;
       const [x, y, z] = [p.x, p.y, p.z];
       [p.x, p.y, p.z] = TYPE74_DROP_AT;
@@ -169,7 +192,9 @@ export function PropUpdateType74(p: BreakableProp, rng: Rng,
     p.y = Math.fround(v + p.y);
     if (p.pitch < TYPE74_TIP_LIMIT) p.pitch += TYPE74_TIP_STEP;
   }
-  // The draw is `T(pos) Rz Ry Rx AssetDrawSlot(0xA64)`, `render/`'s.
+  const m = PropMatrixPush();
+  PropMatrixTRzRyRx(m, p.x, p.y, p.z, p.pitch, p.yaw, p.roll);
+  PropDrawSlot(p, m, TYPE74_SLOT);
   PropRegisterForShotTest(
     p, p.x,
     Math.fround(p.hitRadius * TYPE74_SHOT_RADIUS_SCALE + p.y

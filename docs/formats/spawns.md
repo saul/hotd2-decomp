@@ -375,8 +375,9 @@ standing in for scenery.
 **[proved]** Types 70, 71, 72, 76 and 77 leave on their first Arcade frame
 (`if (g_GameMode != 1) ActorDespawn`, 77 with `PlaySoundId(0x800A9)` too);
 types 74 and 75 raise a script flag on the way out — `g_script_flags[0x13]`
-and `[0x14]`. Each is ported whole, as its own family (`game/class41/
-original_item.ts`, `flag_prop.ts`, `type72.ts`..`type77.ts`):
+and `[0x14]`. Each is ported whole and records its own draws, as its
+`g_class41_updates` row (`game/class41/original_item.ts`, `flag_prop.ts`,
+`type72.ts`..`type77.ts`, registered in `generic_routines.ts`):
 
 | type | routine | spawns | what it is |
 |---|---|---:|---|
@@ -392,9 +393,13 @@ and 0x48 call `PickOriginalModeItem` (`FUN_004629C0`) with the placer's
 `desc+0x24` byte as a row of `g_original_item_tables[g_scene_index]`, and it
 writes the drawn item's `g_original_item_records` model over `obj+0x28C`. So
 the `+0x11C` word is a lifetime for 70 and 71 and nothing at all for 72. The
-bundle carries the rows the stage's placements name and the records those rows
-name (`breakables.original_items`); the banner's pictures are one-picture tex
-banks `0x193..0x1B4`, palette `0x14` (`TexBankPaletteIndex`'s entry 2).
+same function makes the model of every other Original Mode item: the story
+item `SpawnStoryModeItem` (`FUN_00467B90`) allocates -- the same object, run by
+`g_class41_updates[70]`'s routine -- type 7's drop and type 43's break (both
+row 0). The bundle carries the rows the stage's placements name and the
+records those rows name (`breakables.original_items`); the banner's pictures
+are one-picture tex banks `0x193..0x1B4`, palette `0x14`
+(`TexBankPaletteIndex`'s entry 2).
 
 ### Stage 1's church: class 0x41 types 38, 39, 40 and 44 build from tables
 

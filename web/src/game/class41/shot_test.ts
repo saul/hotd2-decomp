@@ -36,7 +36,8 @@
  * while its *draw* orbits around it; type 7 registers 57 units **below** its
  * origin; type 57 ignores its position entirely and registers a hard-coded
  * world point. There is no general rule and this file does not invent one:
- * {@link PROP_SHOT_OFFSET} is a table read out of the routines one at a time.
+ * every routine (`class41/generic_routines.ts` for the generic types) calls
+ * {@link PropRegisterForShotTest} itself with the point it builds.
  *
  * [diverges] The engine's `obj+0x70..0x78` is a **view-space** point, because
  * `RayTestSphere` (`FUN_004062A0`) works in the shot's own frame. The port
@@ -48,9 +49,7 @@
  * where that lives instead.
  */
 import { G } from "../globals";
-import {
-  BreakableFlag, BreakableState, PropFamily, type BreakableProp,
-} from "./prop_state";
+import { BreakableFlag, PropFamily, type BreakableProp } from "./prop_state";
 
 /**
  * `obj+0x34` bit 15 — **do not register**. `ActorDespawn` (`FUN_00409CC0`)
@@ -76,111 +75,6 @@ export const FALLING_CONTAINER_RADIUS = 8.0;
  * only assigns the rise inside its `state == 0` arm.
  */
 export const BREAKABLE_STANDING_RISE = 3.770148;
-
-/** One type's shot-point offset, in the prop's own space. */
-export interface PropShotOffset {
-  x?: number;
-  y?: number;
-  z?: number;
-  /** A world point the routine uses **instead** of its own position. */
-  world?: readonly [number, number, number];
-}
-
-/**
- * What each **generic** type's routine adds to its own position before
- * registering, read one routine at a time out of the twenty that were read.
- *
- * There is no general rule and this table does not invent one. Type 7
- * registers **57 units below** its origin against a radius of 12; type 11
- * registers its raw origin while its draw orbits around it; type 57 ignores
- * its position entirely. Several are a plain zero, which is why an absent
- * entry means that and not "unread" — {@link PROP_SHOT_READ} is what says
- * which is which.
- */
-export const PROP_SHOT_OFFSET: Partial<Record<number, PropShotOffset>> = {
-  7: { y: -57.0 },     // `FUN_00466930`, against a radius of 12
-  11: {},              // `FUN_00467C80`; its DRAW orbits, the sphere does not
-  14: {},              // `PropUpdateType14`
-  19: {},              // `PropUpdateType19` -- see PROP_SHOT_DERIVED
-  20: { y: -1.0 },     // `FUN_00469380`
-  25: { y: 12.0 },     // `PropUpdateType25`
-  41: { y: 5.0 },      // `FUN_0046CC50`, a two-panel hinge; one sphere either way
-  49: { y: 1.0 },      // `FUN_0046E6E0` -- see PROP_SHOT_DERIVED
-  56: { x: 4.8, y: -0.55, z: -10.5 },   // `PropUpdateType56`, off the base
-  57: { world: [-697.042, -9.861, -529.244] },   // `FUN_0046F350`
-  58: {},              // `FUN_0046F580`
-  60: {},              // `FUN_0046F840`
-  69: { y: 1.5 },      // `PropUpdateType69`
-  73: { y: 8.0 },      // `PropUpdateType73`; its DRAW adds +0x1C8 to z, this does not
-  // 70..77 are families of their own and each routine registers its own
-  // point: `class41/original_item.ts`, `flag_prop.ts` and `type72.ts` ..
-  // `type77.ts`.
-};
-
-/**
- * The types whose registration the routine **gates**, and on what.
- *
- * A gate here is the difference between a prop you can shoot once and a prop
- * you can shoot for ever. Type 25's is the sharpest: a scoring hit sets
- * `obj+0x34 |= 0x44000000` and bit 26 removes it from the shot test
- * permanently, which is why its route can only be opened once.
- *
- * [port-only] as a *function*: a few routines put their own test around their
- * own registration, and they are gathered here so a reader can see there are
- * a few and not thirty. (Types 40 and 72 had rows; each has its own routine
- * now, and its own tail.)
- */
-export function PropIsRegisteredThisFrame(p: BreakableProp): boolean {
-  switch (p.kind) {
-    // `CMP AL,1 / JG` on `obj+0x192`: states 0 and 1 register, 2 and 3 do not.
-    case 14: return p.state <= BreakableState.Falling;
-    // `TEST [ESI+0x34], 0x4000000 / JNZ` -- one scoring hit ends it.
-    case 25: return (p.flags & PROP_SHOT_TEST_DONE) === 0;
-    default: return true;
-  }
-}
-
-/**
- * `obj+0x34` bit 26 — `PropUpdateType25`'s "already answered, stop testing".
- * Its scoring hit sets `0x44000000`, and bit 26 is the half that gates the
- * registration; bit 30 alone (which the frame-0xFE timeout sets) stops the
- * award and leaves it shootable.
- */
-export const PROP_SHOT_TEST_DONE = 0x04000000;
-
-/**
- * The types whose registered point the engine **derives every frame** from a
- * matrix chain the port does not run.
- *
- * [diverges] For these the port registers the placed position plus whatever
- * of the offset is a constant, and the sphere therefore sits where the object
- * was put rather than where it has swung, fallen or flown to. Named here
- * rather than left implicit, because a sphere in the wrong place is a shot
- * that misses and there is no other way to tell.
- *
- * * **19** — the point is `obj+0x40` plus `(-9.0, 11.0, 0.5)` put through
- *   `RotY(0xC000) * Rz(+0x6C) * RotY(+0x68) * Rx(+0x64) * Rx(+0x1E4)` and then
- *   `translate(0, -2, 0)`. All four angle fields are zero on a freshly placed
- *   prop, so only the constant `RotY(0xC000)` is missing at rest.
- * * **49** — the position is rewritten each frame by resting one of thirteen
- *   hull vertices on the floor; the port does not run the tumble.
- *
- * Types 75 and 77 used to be here; both routines are ported whole and
- * register their own points (`class41/flag_prop.ts`, `class41/type77.ts`).
- */
-export const PROP_SHOT_DERIVED: ReadonlySet<number> = new Set([19, 49]);
-
-/**
- * Every generic type whose routine has been read for its shot point.
- *
- * A type **absent** from this set has not been read, and the port registers it
- * at its own origin — which is right for eight of the twenty that were read
- * and is a guess for the rest. Saying which is which is the whole point of
- * having the set.
- */
-export const PROP_SHOT_READ: ReadonlySet<number> = new Set([
-  7, 11, 14, 19, 20, 25, 41, 49, 56, 57, 58, 60, 69, 73,
-]);
 
 /**
  * `ChainSegmentUpdate`'s link spacing — `MatrixTranslate(0, -1.5, 0)` at the
@@ -251,29 +145,6 @@ export function PropRegisterForShotTest(p: BreakableProp, x: number, y: number,
  */
 export function PropRegisterAtOrigin(p: BreakableProp): void {
   PropRegisterForShotTest(p, p.x, p.y, p.z);
-}
-
-/**
- * A generic prop's tail, from {@link PROP_SHOT_OFFSET} and
- * {@link PROP_SHOT_WORLD_POINT}.
- *
- * [port-only] as a *function*: the engine writes these three lines out at the
- * bottom of thirty routines. One here, driven by a table, because thirty
- * copies of `y + k` is thirty chances for one of them to be `y - k`.
- */
-export function GenericPropRegisterForShotTest(p: BreakableProp): void {
-  if (!PropIsRegisteredThisFrame(p)) {
-    p.shotRegistered = false;
-    return;
-  }
-  const off = PROP_SHOT_OFFSET[p.kind];
-  if (off?.world) {
-    PropRegisterForShotTest(p, off.world[0], off.world[1], off.world[2]);
-    return;
-  }
-  const rise = off?.y ?? 0;
-  PropRegisterForShotTest(p, p.x + (off?.x ?? 0), p.y + rise,
-                          p.z + (off?.z ?? 0));
 }
 
 /**

@@ -21,30 +21,22 @@ import { RisingDoorUpdate } from "../class44/rising_door";
 import { ScriptFlagEffectUpdate } from "../class44/script_flag_effect";
 import {
   ChainSegmentUpdate, StoryModeSwitchUpdate,
-  PropUpdateType14,
-  PropUpdateType19, PropUpdateType25, PropUpdateType56,
-  PropUpdateType69, PropUpdateType73,
   STORY_SWITCH_FLAG_AT, STORY_SWITCH_SCRIPT_FLAG,
 } from "./branch";
-import { PropUpdateType75 } from "./flag_prop";
 import {
-  PropDrawOnlyType31, PropDrawOnlyType53, PropDrawOnlyType54,
+  PropDrawOnlyType33, PropDrawOnlyType53, PropDrawOnlyType54,
 } from "./draw_only";
+import { GENERIC_ROUTINES } from "./generic_routines";
 import { OriginalItemBannersTick } from "./item_banner";
-import { OriginalItemPropUpdate } from "./original_item";
-import { PropUpdateType72 } from "./type72";
-import { PropUpdateType74 } from "./type74";
-import { PropUpdateType76 } from "./type76";
-import { PropUpdateType77 } from "./type77";
 import { PropUpdateType13 } from "./type13";
-import { PropUpdateType35 } from "./type35";
+import { OriginalItemDropUpdate } from "./type07";
+import { Type8MountedPartUpdate } from "./type08";
+import { Type67MountedPartUpdate } from "./type67";
 import { PropUpdateType43 } from "./type43";
 import { PropUpdateType48FlickerLight } from "./type48";
 import { KindedPropUpdate } from "./kinded";
 import { PropExpireByStepLifetime } from "./lifetime";
-import {
-  ClearPropShotTestList, GenericPropRegisterForShotTest, PropRegisterAtOrigin,
-} from "./shot_test";
+import { ClearPropShotTestList, PropRegisterAtOrigin } from "./shot_test";
 import { ActorDespawnProp, BreakablePropUpdate } from "./prop";
 import { HIT_FLAG_MASK, PropFamily, type BreakableProp }
   from "./prop_state";
@@ -58,12 +50,8 @@ import { PropUpdateType44 } from "./type44";
  * Every live container, once a frame.
  *
  * `PropFamily` is the routine `ActorAlloc` was handed, so switching on it here
- * is the call the engine makes indirectly. `Generic` is the arm with no
- * behaviour behind it — those objects are placed and drawn and otherwise do
- * nothing, which is declared in `class41/generic.ts` — but it is **not** an
- * empty arm: twenty-five of the routines it stands for open with
- * `PropExpireByStepLifetime`, and a prop that never expires is a prop that
- * stands in the level for the rest of the stage.
+ * is the call the engine makes indirectly. `Generic` is `g_class41_updates`
+ * itself, one row per type (see {@link GenericPropUpdate}).
  */
 export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
                                         host?: GameHost): void {
@@ -72,6 +60,8 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
   // what makes a prop which returned early this frame unshootable for exactly
   // as long as the engine makes it. See `class41/shot_test.ts`.
   ClearPropShotTestList();
+  // Last frame's final draws have been shown; this frame makes its own.
+  G.g_prop_final_draws = [];
   // The view the group props' draw blocks compose onto this frame -- what
   // `MatrixStore(obj+0x2E4)` keeps under the model, and what the shatter's
   // `MatrixInvert(0)` takes back off. Null with no camera.
@@ -93,7 +83,7 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       case PropFamily.ContainerFragment:
         FallingContainerFragmentUpdate(p, rng, events); break;
       case PropFamily.Lift: LiftUpdate(p, events); break;
-      case PropFamily.Generic: GenericPropUpdate(p, events); break;
+      case PropFamily.Generic: GenericPropUpdate(p, rng, events); break;
       case PropFamily.StoryModeSwitch: StoryModeSwitchPoolUpdate(p); break;
       case PropFamily.ScriptFlagEffect:
         ScriptFlagEffectUpdate(p, events); break;
@@ -102,31 +92,23 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // `obj+0x34` and no `RegisterForShotTest` in it. Its remove flag is its
       // whole lifetime.
       case PropFamily.RisingDoor: RisingDoorUpdate(p); break;
-      // No `p.flags &= ~HIT_FLAG_MASK` and no `PropExpireByStepLifetime`
-      // around this one: `PropUpdateType75` inlines its own variant of the
-      // prologue and has no `AND` on `obj+0x34` anywhere in it. Adding either
-      // here would be two lines the engine does not run.
-      case PropFamily.Type75: PropUpdateType75(p, rng, events, host); break;
-      // Original Mode's collectibles and their neighbours, each with its own
-      // head, its own lifetime rule or none, its own mask of `obj+0x34` and
-      // its own registration. See `class41/original_item.ts` and
-      // `class41/type72.ts`..`type77.ts`.
-      case PropFamily.OriginalItem: OriginalItemPropUpdate(p, rng, events); break;
-      case PropFamily.Type72: PropUpdateType72(p, rng, events); break;
-      case PropFamily.Type74: PropUpdateType74(p, rng, events); break;
-      case PropFamily.Type76: PropUpdateType76(p, rng, events); break;
-      case PropFamily.Type77: PropUpdateType77(p, rng, events, host); break;
       // Neither of these calls `PropExpireByStepLifetime` — 53 inlines its
       // own variant of it and 54 has no lifetime at all — so neither can ride
       // the generic arm, which runs that prologue before it dispatches.
       // Neither masks `obj+0x34` and neither registers a shot sphere either.
       case PropFamily.DrawOnlyType53: PropDrawOnlyType53(p); break;
       case PropFamily.DrawOnlyType54: PropDrawOnlyType54(p); break;
-      // Nothing here, and deliberately: `PropDrawOnlyType33` draws before it
-      // steps, so its step ran at the head of this frame in
-      // `PropDrawOnlyType33Tick` -- see `class41/draw_only.ts`. Letting it
-      // reach the default arm below would run a group prop's routine on it.
-      case PropFamily.DrawOnlyType33: break;
+      // It draws, steps and kills; the draw is recorded where it is made,
+      // so it runs in the walk like the rest. See `class41/draw_only.ts`.
+      case PropFamily.DrawOnlyType33: PropDrawOnlyType33(p); break;
+      // The Original Mode item `SpawnOriginalItemDrop` releases.
+      case PropFamily.OriginalItemDrop:
+        OriginalItemDropUpdate(p, rng, events); break;
+      // The two mounted-part objects: their own lifetimes, hit arms and
+      // spheres, drawn on the parent's stored matrix.
+      case PropFamily.Type8Piece: Type8MountedPartUpdate(p, rng, events); break;
+      case PropFamily.Type67Piece:
+        Type67MountedPartUpdate(p, rng, events, cam); break;
       // Its own lifetime, its own hit arms, its own shot-test tail. Nothing
       // the generic arm supplies belongs to it.
       case PropFamily.Type43: PropUpdateType43(p, rng, events); break;
@@ -147,6 +129,14 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
     }
   }
   if (G.g_breakable_props.some((p) => p.dead)) {
+    // A routine that drew and then died this frame had its draw submitted
+    // before the object went: keep it for the renderer. See
+    // `g_prop_final_draws`.
+    for (const p of G.g_breakable_props) {
+      if (p.dead && p.draws?.length) {
+        G.g_prop_final_draws.push({ id: p.id, draws: p.draws });
+      }
+    }
     G.g_breakable_props = G.g_breakable_props.filter((p) => !p.dead);
   }
   // The shatter objects the walk above allocated, and the ones still flying
@@ -158,59 +148,34 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
 }
 
 /**
- * `g_class41_updates[type]`, for the types that have a port.
+ * The pool's generic arm: `g_class41_updates[type]` for the objects
+ * `PlaceGenericProp` (`FUN_00461CF0`) builds with no family of their own, and
+ * `ChainSegmentUpdate` for the twenty links `PlaceChainSegments` builds.
  *
- * This table **is** the engine's indirect call: `ActorAlloc` was handed
+ * Every class-0x41 generic routine is transcribed whole and is a
+ * `GENERIC_ROUTINES` row (`class41/generic_routines.ts`): it brings its own
+ * head and tail, and nothing here is its. Switching on the type is the
+ * engine's indirect call written out -- `ActorAlloc` was handed
  * `g_class41_updates[obj->+0x130C]` and the object calls through it every
- * frame, so switching on the type here is that call written out. Most of the
- * entries are branch triggers — see `class41/branch.ts` — because a route the
- * stage takes is worth more than a swing.
+ * frame.
  *
- * A type absent here is placed, drawn and otherwise inert, which is the
- * standing divergence `class41/generic.ts` declares.
+ * What is left below is a chain link (type 0, which has no row): the shared
+ * `PropExpireByStepLifetime` head, its branch arm (`class41/branch.ts`), the
+ * mask of the four hit bits and its sphere at its own link.
  */
-const GENERIC_UPDATE: Partial<Record<number,
-  (p: BreakableProp, events?: Events) => void>> = {
-  14: PropUpdateType14,
-  // 31 *does* open with `PropExpireByStepLifetime`, so unlike 53 and 54 it
-  // rides the generic arm and only owes its camera cue and its strip cursor.
-  31: PropDrawOnlyType31,
-  // Opens with `PropExpireByStepLifetime` too, and ignores what it did: a
-  // retired door runs its rattle once more before the pool drops it, which
-  // the arm below does not reproduce because nothing can see it.
-  35: PropUpdateType35,
-  19: PropUpdateType19,
-  25: PropUpdateType25,
-  56: PropUpdateType56,
-  69: PropUpdateType69,
-  73: PropUpdateType73,
-};
-
-/**
- * The two lines every unported generic routine still owes the level, and then
- * whatever that type's own routine does.
- *
- * The prologue is not a function in the exe — it is the head of thirty of
- * them, and the two things they all do before whatever else they do. A prop
- * that runs neither is a prop that stands in the stage for ever.
- *
- * **The hit bits are cleared here**, after the type's routine has read them.
- * Every one of these routines masks `obj+0x34` itself, and a prop whose hit
- * bit survived the frame would answer its branch on every frame afterwards.
- */
-function GenericPropUpdate(p: BreakableProp, events?: Events): void {
+function GenericPropUpdate(p: BreakableProp, rng: Rng,
+                           events?: Events): void {
+  const routine = GENERIC_ROUTINES[p.kind];
+  if (routine) {
+    routine(p, rng, events);
+    return;
+  }
   if (PropExpireByStepLifetime(p)) return;
   if (p.chainGroup > 0) {
     ChainSegmentUpdate(p, ChainSegmentZero(p.chainGroup));
-  } else {
-    GENERIC_UPDATE[p.kind]?.(p, events);
   }
   p.flags &= ~HIT_FLAG_MASK;
-  // The tail thirty of these routines share: publish the sphere. A chain
-  // segment registers its own link's origin; everything else goes through the
-  // per-type offset table.
-  if (p.chainGroup > 0) PropRegisterAtOrigin(p);
-  else GenericPropRegisterForShotTest(p);
+  PropRegisterAtOrigin(p);
 }
 
 /**

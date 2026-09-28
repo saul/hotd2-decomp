@@ -30,7 +30,9 @@ const opt = (n, d = null) => {
 const where = opt("url", "?stage=4&original=1&mode=play&block=2&step=5&op=0");
 const tag = opt("out", "collectibles");
 const BUDGET = Number(opt("budget", "3000"));
-const FAMILIES = [8, 70, 72, 74, 76, 77];
+// Class 0x41 types 70..77, generic props (`PropFamily.Generic` is 4).
+const FAMILIES = [70, 71, 72, 73, 74, 75, 76, 77];
+const GENERIC = 4;
 const hold = opt("hold") === null ? null : Number(opt("hold"));
 
 const { page, state, close } = await openPlayer({
@@ -83,35 +85,39 @@ try {
       G.g_original_item_slots[0] = [id, -1];
     }, hold);
   }
-  const census = () => page.evaluate(async (fams) => {
+  const census = () => page.evaluate(async ([fams, GENERIC]) => {
     const { G } = await import("/src/game/globals.ts");
     return G.g_breakable_props
-      .filter((p) => !p.dead && fams.includes(p.family))
+      .filter((p) => !p.dead && (p.family === GENERIC && fams.includes(p.kind)))
       .map((p) => ({
         id: p.id, at: p.at, family: p.family, type: p.kind,
-        slot: p.slot, slotB: p.slotB, item: p.originalItem,
+        slot: p.slot, slotB: p.words?.o28e, item: p.words?.o290,
         phase: p.routinePhase, cue: p.cuePhase, strip: p.storyItem,
         pos: [p.x, p.y, p.z], shot: [p.shotX, p.shotY, p.shotZ],
-        reg: p.shotRegistered, path: p.pathPose,
+        reg: p.shotRegistered,
+        draws: (p.draws ?? []).map((c) => c.slot),
         cam: `${G.g_active_cam_path}/${G.g_cam_path_frame}`,
         mode: G.g_GameMode,
       }));
-  }, FAMILIES);
-  const shootAll = () => page.evaluate(async (fams) => {
+  }, [FAMILIES, GENERIC]);
+  const shootAll = () => page.evaluate(async ([fams, GENERIC]) => {
     const { G } = await import("/src/game/globals.ts");
     const { BreakablePropTakeShot } = await import("/src/game/class41/prop.ts");
     for (const p of G.g_breakable_props) {
-      if (!p.dead && fams.includes(p.family)) BreakablePropTakeShot(p, 0);
+      if (!p.dead && (p.family === GENERIC && fams.includes(p.kind))) BreakablePropTakeShot(p, 0);
     }
-  }, FAMILIES);
-  const targets = () => page.evaluate(async (fams) => {
+  }, [FAMILIES, GENERIC]);
+  const targets = () => page.evaluate(async ([fams, GENERIC]) => {
     const { G } = await import("/src/game/globals.ts");
     const { MatrixTransformPoint } = await import("/src/game/matrix.ts");
     const out = [];
     for (const p of G.g_breakable_props) {
-      if (p.dead || !fams.includes(p.family)) continue;
-      const at = p.pathPose && p.family === 8
-        ? { x: p.pathPose.x, y: p.pathPose.y, z: p.pathPose.z }
+      if (p.dead || !(p.family === GENERIC && fams.includes(p.kind))) continue;
+      // Type 75's model flies its path while its sphere stays: aim at the
+      // model, which is its one draw's translation.
+      const m = p.kind === 75 ? p.draws?.[0]?.m : null;
+      const at = m
+        ? { x: m[12], y: m[13], z: m[14] }
         : { x: p.shotX || p.x, y: p.shotY || p.y, z: p.shotZ || p.z };
       const v = { x: 0, y: 0, z: 0 };
       MatrixTransformPoint(G.g_camera_world_to_view, at, v);
@@ -119,7 +125,7 @@ try {
       out.push({ id: p.id, x: v.x / -v.z, y: v.y / -v.z, z: -v.z });
     }
     return out;
-  }, FAMILIES);
+  }, [FAMILIES, GENERIC]);
   const box = await page.locator("#viewport").boundingBox();
   const shot = async (name, clip) => {
     const path = join(SHOTS, `${tag}-${name}.png`);
@@ -171,11 +177,11 @@ try {
   const start = f;
   while (f < start + BUDGET && want.length) {
     if (hide && f + 1 - start >= want[0]) {
-      await page.evaluate(async (fams) => {
+      await page.evaluate(async ([fams, GENERIC]) => {
         const { G } = await import("/src/game/globals.ts");
         G.g_breakable_props = G.g_breakable_props.filter(
-          (p) => !fams.includes(p.family));
-      }, FAMILIES);
+          (p) => !(p.family === GENERIC && fams.includes(p.kind)));
+      }, [FAMILIES, GENERIC]);
     }
     await advance(1);
     f += 1;

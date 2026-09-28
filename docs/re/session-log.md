@@ -23894,9 +23894,94 @@ the shot check read the weapon's mark on the frame the pull was queued, before
 in which five had been. And class 0x30 is never on `shotTargets` (bone-sphere
 pick), so the walker is found by a grid of real pulls.
 
+## 2026-09-28 -- merging "one departure, one tag" into the crowd push (branch `worktree-agent-a8acf8294623e3a11`)
+
+Main's bookkeeping pass retagged `worldPushDepth` once, on `Actor`, and the
+writers in `class30/ground.ts` and `class31/collide.ts` now point at it with
+no token; both merged cleanly into the rewritten hook. It also turned
+`ThrowerPushOutOfWorld`'s open question about `g_coli_hit_object` into a
+declared divergence -- which this branch had already retired by porting the
+case, so the merge keeps the port and drops the tag. `ActorFlag.FireLoop`'s
+note took both findings: main's `ZombieStateEmerge` test of the bit at
+`0x00458509` and this branch's `ThrowerPushOutOfWorld` test at `0x00449D8F`.
+
+Under the same convention, `coli.ts`'s `ColiDynamicObjects` carried an open
+question -- which frame's registrations the two moving-object passes see --
+that this branch's reading of `ProcessPlayerShots` settles: the previous
+frame's, published before any actor runs. The pool walk that stands in for
+the list is a known departure, so it is declared as one. The note also
+records, from the disassembly of `RegisterForShotTest` (`0x00405176`,
+`0x004051D7`), that a blob-carrying object's `0x10` bit sends it through the
+matrix rebuild and on into the append, which the decompile's early `return`
+hides (`L35`). Class 0x26's boat does not yet register at `0x0048EE9C`,
+which is what moving those passes onto the list needs first.
+
+## 2026-09-28 -- class 0x41's generic props, transcribed whole (types 5-69, 73, 78)
+
+**What was done.** The inventory first: `g_class41_constructors`
+(`0x00593580`) and `g_class41_updates` (`0x005936BC`) give fifty types built
+by `PlaceGenericProp`, not the forty-four the old note said. Twenty-three of
+their routines had no name (two had no function: `0x0046CC50`, `0x0046DAB0`);
+they are `PropUpdateTypeNN` now, plus `Type8MountedPartUpdate`,
+`Type67MountedPartUpdate`, `SpawnOriginalItemDrop`, `OriginalItemDropUpdate`,
+`SpawnPropHitEffectAtDepth`, `SpawnPropSplash` and `PropSplashUpdate`, and the
+globals `g_prop_type63_items` and `g_prop67_by_index`. Every routine except the
+Original Mode half (70-77) is transcribed whole and records its own draws;
+the renderer's per-type arms for 13, 35, the lift, 43 and the falling
+container went with it. The reading was fanned out over eight agents with a
+common brief; each routine was read from `disassemble_bytes` over its whole
+extent, and each agent's tests were mutation-checked.
+
+**What the old port and its notes had wrong.** Type 5 ran the shared lifetime
+prologue it does not have (and its scene-1 sweep). Types 6 and 10's `+0x11C`
+literals were read as shot counts; they are step lifetimes. Type 7's, 8's, 9's
+and 19's routines charge a literal lifetime, not `+0x11C`. Type 8 has three
+parts, not eight. Types 14, 19 and 25 never raised the enemy counts their arms
+raise, so their steps' waits passed early and the route was decided before the
+shot could land. Type 14's y is the arm's 36.0, not the descriptor's. Type 19
+had its sphere at the placement, nine units from where the routine puts it.
+Type 25's registration gate tested a bit nothing set. Type 31's cursor led the
+engine's by a frame, and 53's two strips were "unportable billboards" that are
+one computed yaw each. Type 35's "a retired door rattles once more" rested on
+`ActorDespawn` returning; it longjmps (`L72`, written as L70 in the
+branch's first commit and renumbered at the merge, where two other sessions'
+lessons had taken 70 and 71). Type 41's Z is its panel's
+hinge angle, not an unread register. Type 43's arm drew a fifth `rand()`, its
+pickup section was missing and a cracked crate is an effect tree. Type 69
+despawns in blocks 3 and 8 rather than idling. Class 0x41 type 34 was built
+by class 0x44's constructor, dropping the placer's pitch. Type 59 had no
+radius at all.
+
+**Wrong turns.**
+
+* Reading the arm table I took the byte past `g_place_generic_prop_arm_index`'s
+  end for type 78's arm, and told the agents 78 shares 31's. The prologue's
+  `CMP EAX,0x47; JA` at `0x00461DAA` sends everything past 77 to the default:
+  `L6` in a jump table, corrected before anything used it.
+* The first draw record had no alpha and no draw layer, and three agents
+  declared divergences against that; both are fields now. The same agents
+  declared the "last frame is lost" divergence of a routine that draws and then
+  dies; the pool keeps that frame in `g_prop_final_draws` now.
+* `PropWords` first required an index signature, which an `interface` does
+  not satisfy; typed against `Record<keyof T, number>` instead.
+* Type 45's vertex wave first went in with the renderer calling the port's
+  wave and clock functions off the live prop, which `verify_layers`'
+  `render-drives-the-port` refuses -- and rightly: the bend is the model's and
+  outlasts the object, so a renderer reading the prop lost it at the prop's
+  death and at every resync. The port keeps the clock each model was bent at
+  (`g_prop45_wave_clock`, and the one its draws went out against), and
+  `render/banner_wave.ts` walks the vertices from it, the split
+  `render/water_surfaces.ts` already has with `WaterSurfaceUpdate`.
+
+**Left open.** `tools/verify_prop_pose.py` reads past the end of a routine
+with no model draw (18, 28, 59, 62, 63) and takes `obj+0x64/+0x68` for the
+descriptor's words (20, 27); its rows no longer drive any transcribed type.
+Type 14's per-draw light direction has no render path. `g_civilians_seen_total`, `g_original_items_taken` and
+`g_original_item_pickup_blocked` are not in this branch's `G`.
+
 ## 2026-09-28 -- class 0x41 types 70, 71, 72, 74, 75, 76 and 77, and the story item (branch `worktree-agent-ab40562e548c4231e`)
 
-Ported whole, each as its own family: `OriginalItemPropUpdate` (70, 71),
+Ported whole: `OriginalItemPropUpdate` (70, 71),
 `PropUpdateType72`, `PropUpdateType74`, `PropUpdateType75` (its draw, sounds
 and blocked byte), `PropUpdateType76` and `PropUpdateType77`, with their
 constructor arms, `PickOriginalModeItem`, `SpawnOriginalItemBanner` /
@@ -23972,3 +24057,49 @@ hanging from its pivot -- is behind the wall the camera faces. The pivot's
 projection being in the frustum is not the model being on screen (`L66`). A
 banner-fade assertion at frame 0x87 could not fail: `15 * (1/15)` is 1.0 in
 float, so the fade's first frame reads as unfaded; moved to 0x90.
+
+**The merge with the other half of the family** (main at `cc219d8a`, types
+5-69, 73 and 78). That branch had moved every routine onto
+`GENERIC_ROUTINES` and draws recorded in the routine (`prop_draw.ts`), so
+the seven moved too: each is its `g_class41_updates` row now, not a family
+(75's `PropFamily.Type75` went with them), and `render/prop_parts_items.ts`
+was deleted -- each routine records its own `AssetDrawSlot`,
+`AssetDrawSlotWithAlpha` and `MatrixClearRotation` (now one function,
+`PropMatrixClearRotation`, where 7's drop and 43 had a copy each). The draws
+were re-read from the listing rather than carried over from the parts, and
+two things the parts had were not the routine's: 72's first block has **no**
+test on `+0x28C` (70's has), and 77's and 76's leaves are composed from
+`MatrixLoadIdentity`, stored and multiplied back onto a fresh view, which in
+the port's world-space record is the matrix itself. The pool's older generic
+arm, `GENERIC_UPDATE`, `GENERIC_ORIGINAL_MODE_ONLY` and `shot_test.ts`'s
+per-type offset table (with its declared divergence) had nothing left to
+serve and are gone; the family-wide divergence in `generic.ts` went with
+them.
+
+`type07.ts` carried a second `PickOriginalModeItem` over TS copies of both
+tables, keyed differently (`PropWords` `o290`/`o28e`/`o2c4`, where this
+branch had fields). One function now, in `original_item.ts`, reading the
+bundle, on the words (the fields were dropped); the exporter carries row 0
+for type 7's drop and type 43's break (`ORIGINAL_ITEM_ROW_ZERO_TYPES`) and
+derives the item models it used to list by hand. With the two globals in
+`G`, 7's drop and 43's wreck count and raise the banner, and 58 and 69 clear
+the blocked byte: five declared divergences gone.
+
+**Found by a byte search, not the xref list.** `get_xrefs_to(0x007DCD14)`
+listed twelve references; a search for the operand bytes found seventeen.
+The missing writers are the story arms of the item release in
+`BreakablePropUpdate`, `KindedPropUpdate` and `FallingContainerUpdate`,
+which the port spells once (`ReleaseHiddenItem`) and which differ: the
+kinded copy writes 0 (and 1 in scene 2 block 4) *before* its spawn and lifts
+a kind-2 prop's item 1.0 whatever its set -- the port had lifted it by the
+set's rise -- and the falling copy hands `+0x11C` its `+0x199` first, which
+is the lifetime the story item inherits; the port handed it the shot count,
+1. `ReleaseHiddenItem` takes the copy now. And the xref the list did have
+from `ChainSegmentUpdate` (`0x00469897`) is not this byte at all: it is
+`g_chain_segments[i - 1]`, whose table starts four bytes later; the TSV row
+said it was a writer. `StoryModeSwitchUpdate`'s two item spawns clear it
+too, and are still not transcribed.
+
+Counts on the merged tree: divergences 134 (main 142), uncited exports held
+at 82.
+

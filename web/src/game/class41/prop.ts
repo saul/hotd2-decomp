@@ -31,7 +31,7 @@ import { BAMS } from "../vec";
 import {
   BreakableGroupMembers, BreakablePropAt, MsvcRand, SetBreakableMemberSlot,
 } from "./group";
-import { ReleaseHiddenItem } from "./items";
+import { HiddenItemCopy, ReleaseHiddenItem } from "./items";
 import {
   BreakableFlag, BreakableSlot, BreakableState, HIT_FLAG_MASK, PropFamily,
   type BreakableProp,
@@ -452,7 +452,7 @@ function BreakDestroy(p: BreakableProp, level: number, rng: Rng,
   p.effectPrevFrame = 0;
   p.family = PropFamily.Effect;
   p.hp = p.lifetime;
-  ReleaseHiddenItem(p, rng, events);
+  ReleaseHiddenItem(p, rng, events, HiddenItemCopy.Group);
   return false;
 }
 

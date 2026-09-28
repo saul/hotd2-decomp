@@ -201,42 +201,69 @@ export const GENERIC_DESCRIPTOR_SLOT = [5, 12, 31, 33, 51, 53, 54];
 export const GENERIC_SLOT_STRIP = [31, 33];
 
 /**
- * The literal slots each read routine passes to `AssetDrawSlot`, in the order
- * it draws them. Cited by the routine that draws each one.
+ * The literal slots each read routine passes to `AssetDrawSlot`, and every
+ * slot a strip or a cursor it steps can reach. Cited by the routine that
+ * draws each one.
+ *
+ * Since the routines record their own draws (`game/class41/prop_draw.ts`) a
+ * slot missing here is a draw that happens and shows nothing, so each row is
+ * the whole of what its routine can ask for in the shipped data. The models
+ * an Original Mode item can wear are not here: they are the item records'
+ * (`originalItemSlots`), for every row `originalItemsJson` carries -- which
+ * is how type 7's and type 43's drops, the collectibles and the story items
+ * all come by theirs. `tools/verify_prop_slots.py` holds every placed type to
+ * its row.
  */
 export const GENERIC_STATIC_SLOTS: Record<number, number[]> = {
-  6: [0x1032],                        // ctor arm; FUN_004668A0 animates from it
-  8: [0x1a36],                        // FUN_00467080, `0x1A36 - obj+0x290`
-  10: [0x10c4],                       // ctor arm; FUN_004668A0
-  11: [0x01cf, 0x01d0],               // FUN_00467C80, `0x1CF + (frame & 1)`
-  13: [0x1a4a, 0x1a49, 0x1a43],       // FUN_00467F50
-  14: [0x10d2],                       // FUN_00468180
-  19: [0x01ce, 0x10d3],               // FUN_00468F00, body plus the ctor arm
-  20: [0x01e2],                       // FUN_00469380
-  21: Array.from({ length: 10 }, (_, i) => 0x132f + i),  // FUN_004694A0
-  27: [0x17a9],                       // FUN_00469E60
-  30: [0x01df],                       // FUN_0046A0F0
+  // PropUpdateType6: the model is the cursor, 0x1032 up to the 0x1063 that wraps.
+  6: Array.from({ length: 49 }, (_, i) => 0x1032 + i),
+  // PropUpdateType7, and the shadow of the drop SpawnOriginalItemDrop makes in
+  // stage 1's Original Mode (its item and strips are row 0's, carried below).
+  7: [0x1736, 0x10d0],
+  8: [0x1a36, 0x1aaa],                // PropUpdateType8 and its three parts
+  9: [0x123b, 0x123c],                // PropUpdateType9, before and after
+  // PropUpdateType6 again, type 10's arm: 0x10C4 up to the 0x10CD that wraps.
+  10: Array.from({ length: 9 }, (_, i) => 0x10c4 + i),
+  11: [0x01cf, 0x01d0],               // PropUpdateType11, `0x1CF + (frame & 1)`
+  13: [0x1a4a, 0x1a49, 0x1a43],       // PropUpdateType13
+  14: [0x10d2],                       // PropUpdateType14
+  19: [0x01ce, 0x10d3],               // PropUpdateType19, body plus the ctor arm
+  20: [0x01e2],                       // PropUpdateType20
+  21: Array.from({ length: 10 }, (_, i) => 0x132f + i),  // PropDrawOnlyType21
+  27: [0x17a9],                       // PropKillOnBranchOneUpdate
+  30: [0x01df],                       // PropUpdateType30
+  // PropDrawOnlyType31's scene-2 block-11 pair, `tick % 7 + 0x1797`; the strip
+  // itself is the descriptor's (GENERIC_SLOT_STRIP).
+  31: Array.from({ length: 7 }, (_, i) => 0x1797 + i),
   32: [0x197a, 0x197b, 0x1981],       // LiftUpdate -- car, cage leaf, panel
-  35: [0x1812, 0x1813],               // FUN_0046B320
-  // PropUpdateType43 (FUN_0046CEA0). Its `obj+0x28C` is NOT the descriptor's
-  // -- the arm computes `kind == 3 ? 0x19E8 : 0xFFFF` -- so the slots it can
-  // wear are literals and belong here rather than in GENERIC_DESCRIPTOR_SLOT:
-  // the crate 0x19E8 and its broken half 0x19E6, the 0x17A9 piece a kind 2
-  // draws lifted 0.8 because its effect id is 7, and the two pickup models
-  // 0x116A/0x119C the wreckage becomes when the item comes out.
-  43: [0x19e8, 0x19e6, 0x17a9, 0x116a, 0x119c],
-  49: [0x01d2, 0x10d0],               // FUN_0046E6E0, body plus its shadow
-  56: [0x10d3],                       // ctor arm 0x38
-  58: [0x01d1],                       // FUN_0046F580
-  60: [0x01d8],                       // FUN_0046F840
-  64: [0x1a39, 0x0c27],               // FUN_0046FBE0
-  74: [0x0a64],                       // PropUpdateType74 (FUN_00470E20)
+  35: [0x1812, 0x1813],               // PropUpdateType35
+  36: Array.from({ length: 24 }, (_, i) => 0x161b + i),  // PropUpdateType36
+  41: [0x0930],                       // PropUpdateType41, both panels
+  // PropUpdateType43. Its `obj+0x28C` is NOT the descriptor's -- the arm
+  // computes `kind == 3 ? 0x19E8 : 0xFFFF` -- so the slots it can wear are
+  // literals: the crate, the kind-2 piece, the heart, the two tags and the
+  // two pickup strips the life's pickup plays. A cracked crate is effect 0's
+  // tree, not a model (`genericPropEffects`); its Original item is row 0's.
+  43: [0x19e8, 0x17a9, 0x10c3, 0x1256, 0x1257, ...Array.from({ length: 49 }, (_, i) => 0x116a + i), ...Array.from({ length: 49 }, (_, i) => 0x119c + i)],
+  45: Array.from({ length: 5 }, (_, i) => 0x1731 + i),   // PropUpdateType45
+  49: [0x01d2, 0x10d0],               // PropUpdateType49, body plus its shadow
+  // PropDrawOnlyType53's two camera-facing strips in blocks 4 and 5.
+  53: [...Array.from({ length: 15 }, (_, i) => 0x135f + i), ...Array.from({ length: 8 }, (_, i) => 0x0b67 + i)],
+  56: [0x1866, 0x10d3],               // PropUpdateType56, base and part
+  57: [0x0d43, 0x0d44],               // PropUpdateType57
+  58: [0x01d1],                       // PropUpdateType58
+  60: [0x01d8],                       // PropUpdateType60
+  64: [0x1a39, 0x0c27],               // PropUpdateType64
+  67: [0x1a36, 0x1a35, 0x1a0f, 0x19e8, 0x19e6],  // PropUpdateType67 and its three
+  69: [0x13f8, 0x13f7],               // PropUpdateType69
+  73: [0x1871],                       // PropUpdateType73
+  74: [0x0a64],                       // PropUpdateType74
   75: [0x0a6b],                       // PropUpdateType75, on op_ path 0x178
-  // PropUpdateType76 (FUN_00471330): the near door 0xA6D and the plate 0x10D3
-  // on it for the +0x194 == 0 arm; the two leaves 0xA67/0xA68 and the same
-  // plate for the +0x194 == 1 arm.
+  // PropUpdateType76: the near door 0xA6D and the plate 0x10D3 on it for the
+  // +0x194 == 0 arm; the two leaves 0xA67/0xA68 and the same plate for the
+  // +0x194 == 1 arm.
   76: [0x0a6d, 0x10d3, 0x0a67, 0x0a68],
-  77: [0x10ab],                       // PropUpdateType77 (FUN_004717A0)
+  77: [0x10ab],                       // PropUpdateType77, item 31's own model
 };
 
 /**
@@ -251,8 +278,63 @@ export const FLICKER_LIGHT_SLOTS: number[] = [
   0x17ac, 0x17ad, ...Array.from({ length: 30 }, (_, i) => 0xca5 + i),
 ];
 
-/** Types whose routine draws only an effect, never a static model. */
-export const GENERIC_NO_MODEL = [18, 25, 28];
+/**
+ * The effect trees a generic type's routine draws, as `[effect, motion]`
+ * pairs -- the state block its arm writes at `obj+0x324`/`+0x328`, which the
+ * routine hands to `EffectDrawUnlit` (`FUN_0040DD90`) or `EffectDrawSceneLit`
+ * (`FUN_0040DFA0`). A type drawing two rewrites the block between them, so
+ * both travel. Type 18's arm picks its effect by scene. The trees go into
+ * `breakables.effects`, keyed by effect id, beside class 0x44's.
+ */
+export function genericPropEffects(type: number,
+                                   scene: number): Array<[number, number]> {
+  switch (type) {
+    case 9: return [[8, 0x1d0], [9, 0x1d1]];      // PropUpdateType9
+    case 18: return [[scene === 1 ? 1 : 0x19, 0x1d8]];   // PropUpdateType18
+    case 25: return [[10, 0x1c9]];                // PropUpdateType25
+    case 27: return [[7, 0x1d5]];                 // PropKillOnBranchOneUpdate
+    case 28: return [[10, 0x1c9]];                // PropUpdateType28
+    // PropUpdateType43: a cracked crate is effect 0's tree, and a kind 2 is
+    // effect 7's (`g_prop_kind_params`).
+    case 43: return [[0, 0x1d9], [7, 0x1d5]];
+    case 62: return [[0x1c, 0x1c6]];              // PropUpdateType62
+    default: return [];
+  }
+}
+
+/**
+ * The effect trees the stage's generic props draw, keyed by effect id, for
+ * the same map {@link scriptFlagEffectsJson} fills. One motion per id is all
+ * the map can hold: a second motion for an id already there is noted and not
+ * exported, rather than silently posing one effect with another's clip.
+ */
+export async function genericPropEffectsJson(
+    stage: Stage, placements: Record<string, unknown>[],
+    have: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const pl of placements) {
+    if (pl.container !== "generic") continue;
+    for (const [effect, motion] of genericPropEffects(pl.type as number,
+                                                      stage.scene ?? -1)) {
+      const key = String(effect);
+      const prior = (out[key] ?? have[key]) as { motion?: number } | undefined;
+      if (prior) {
+        if (prior.motion !== motion) {
+          degraded.note("hod2lib.bundle.generic_prop_effects",
+                        `effect ${effect}`,
+                        "a generic prop's second motion for it is not exported",
+                        `motion 0x${motion.toString(16)} against `
+                        + `0x${(prior.motion ?? -1).toString(16)}`);
+        }
+        continue;
+      }
+      const def = await effectDefJson(
+        stage, effect, motion, "hod2lib.bundle.generic_prop_effects", []);
+      if (def) out[key] = def;
+    }
+  }
+  return out;
+}
 
 /**
  * Stage number -> the index in the BGM tables of that stage's own track.
@@ -451,18 +533,6 @@ export function containerPlacements(tables: ExeTables, evt: evtlib.EvtFile,
         out.push({
           at: rec.offset, container: "group", group: rec.hp,
           lifetime_evt_steps: s8(rec.offset + 0x24),
-        });
-      } else if (ctor === 34) {
-        // `PlaceGenericProp` case 0x22 builds a falling container: `+0x11C` is
-        // the lifetime and the slot is forced to 0xA50, so this is the same
-        // object class 0x44 selector 16 places.
-        out.push({
-          at: rec.offset, container: "falling", kind: 0,
-          item_set: s8(rec.offset + 0x24),
-          story_item: -1,
-          set_size: rec.orient[0],
-          lifetime_evt_steps: rec.hp & 0xff,
-          pos: [...rec.pos], yaw: rec.orient[1],
         });
       } else if (ctor === FLICKER_LIGHT_TYPE) {
         // `PlaceFlickerLightProp48`: its own constructor. `+0x11C` (the
@@ -784,18 +854,15 @@ export function breakablesJson(tables: ExeTables,
     effects,
     level_height: 7.540296,
     original_items: originalItemsJson(tables, placements, scene),
+    // `g_pHingeCurvesXYZ`, whole: the class-0x41 generic routines that swing
+    // a hinge read it by a literal curve index, in `game/`, where the
+    // class-0x44 hinges' own copy in `props.curves` cannot be reached.
+    hinge_curves_xyz: Object.fromEntries(
+      propslib.HINGE_CURVES_XYZ_SELECTORS.map(
+        (c) => [String(c), propslib.hingeCurve(tables, c)])),
   };
-  // `PropUpdateType76` (`FUN_00471330`) reads `*g_pHingeCurvesXYZ` -- curve
-  // 0 -- straight out of the table, `MOV EDX, [0x005960B4]`.
-  if (placements.some((pl) => pl.container === "generic"
-                      && pl.type === HINGE_CURVE_0_TYPE)) {
-    out.hinge_curves = { "0": propslib.hingeCurve(tables, 0) };
-  }
   return out;
 }
-
-/** Class 0x41 type 76, whose routine swings its doors on hinge curve 0. */
-const HINGE_CURVE_0_TYPE = 76;
 
 /**
  * The class-0x41 types whose arm calls `PickOriginalModeItem`
@@ -803,6 +870,14 @@ const HINGE_CURVE_0_TYPE = 76;
  * (`0x0046273F`, `0x00462797`, `0x00462860`).
  */
 export const ORIGINAL_ITEM_TYPES = [70, 71, 72];
+
+/**
+ * The class-0x41 types whose routine calls `PickOriginalModeItem` with a
+ * literal row 0: `SpawnOriginalItemDrop` (`FUN_00466B40`), which
+ * `PropUpdateType7` (`FUN_00466930`) calls with `PUSH 0x0` at `0x00466A04`,
+ * and `PropUpdateType43` (`FUN_0046CEA0`)'s break at `0x0046D019`.
+ */
+export const ORIGINAL_ITEM_ROW_ZERO_TYPES = [7, 43];
 
 /**
  * The pickup the collectible becomes when shot: `OriginalItemPropUpdate`
@@ -834,7 +909,7 @@ export const STORY_ITEM_ROW_BY_TYPE: Record<number, number> = { 74: 2, 75: 1 };
  * placements can reach. See `OriginalItemsJson`.
  *
  * A row is named by the placer's byte for a collectible (types 70, 71, 72),
- * by a routine's own immediate for types 74 and 75, and by a story item --
+ * by a routine's own immediate for types 7, 43, 74 and 75, and by a story item --
  * `obj+0x2A0` -- for a group member or a falling container, whose destroy
  * path hands `SpawnStoryModeItem` that word in Original Mode.
  */
@@ -849,6 +924,9 @@ export function originalItemsJson(tables: ExeTables,
     const type = pl.type as number;
     if (pl.container === "generic" && ORIGINAL_ITEM_TYPES.includes(type)) {
       named.push((pl.field_1f4 as number) ?? 0);
+    } else if (pl.container === "generic"
+               && ORIGINAL_ITEM_ROW_ZERO_TYPES.includes(type)) {
+      named.push(0);
     } else if (pl.container === "generic" && type in STORY_ITEM_ROW_BY_TYPE) {
       named.push(STORY_ITEM_ROW_BY_TYPE[type]);
     } else if (pl.container === "group") {
@@ -1888,9 +1966,13 @@ export async function buildStage(stage: Stage, sink: BundleSink,
   const placements = evt ? containerPlacements(tables, evt, spawnRecords) : [];
   const carriedEffects = await carriedPropEffectsJson(
     stage, charPlaces as unknown as Record<string, unknown>[]);
-  const effectDefs = {
+  const flagEffects = {
     ...(await scriptFlagEffectsJson(stage, placements)),
     ...carriedEffects,
+  };
+  const effectDefs = {
+    ...flagEffects,
+    ...(await genericPropEffectsJson(stage, placements, flagEffects)),
   };
   const brk = await breakableSlotEntry(stage, placements, effectDefs, cache);
   // Decoded here rather than beside the rest of the script json below,

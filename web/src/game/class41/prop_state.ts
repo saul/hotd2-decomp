@@ -49,21 +49,6 @@ export enum PropFamily {
    */
   ScriptFlagEffect = 7,
   /**
-   * `PropUpdateType75` (`FUN_004710C0`) — class 0x41 type 75, and the one
-   * object in the game whose routine opens a `wait_script_flag` gate.
-   *
-   * Its own family and not `Generic` for the same reason
-   * {@link PropFamily.StoryModeSwitch} is: it does **not** call
-   * `PropExpireByStepLifetime`. It inlines a variant of that routine with the
-   * scene-1 sweep left out and its own flag tick folded into the middle, and
-   * its Arcade-Mode head raises `g_script_flags[20]` before despawning rather
-   * than just despawning. See `class41/flag_prop.ts`.
-   *
-   * Named for the type number because that is all the engine identifies it
-   * by: what the object at `AssetDrawSlot(0xA6B)` actually is, is `[open]`.
-   */
-  Type75 = 8,
-  /**
    * `RisingDoorUpdate` (`FUN_004753F0`) — class 0x44 selector 11, a door that
    * slides straight up when a script flag is raised. Two spawns in the game:
    * stage 3's roller shutter and stage 5's. See `class44/rising_door.ts`.
@@ -167,42 +152,30 @@ export enum PropFamily {
    * Its own family and not {@link Generic} for the reason
    * {@link DrawOnlyType53} is, and one more: its routine has **no**
    * `PropExpireByStepLifetime` and no `RegisterForShotTest` — it is a draw, a
-   * step and an `ActorKill` — and it draws *before* it steps, so it is
-   * stepped at the head of the frame rather than in the pool's walk. See
-   * `class41/draw_only.ts`.
+   * step and an `ActorKill`. See `class41/draw_only.ts`.
    */
   DrawOnlyType33 = 20,
-  // The five below take their **type number** as their value, so that two
-  // workstreams adding families at once cannot hand out the same one.
   /**
-   * `OriginalItemPropUpdate` (`FUN_004675A0`) — class 0x41 types 70 **and**
-   * 71, Original Mode's collectible: one routine, and bit `0x200000` of
-   * `obj+0x34` (set by type 71's arm) is what makes it bob. Its own family
-   * because it masks only bit 3 of `obj+0x34` and registers its own point.
-   * See `class41/original_item.ts`.
+   * `OriginalItemDropUpdate` (`FUN_00466BE0`) — the Original Mode item
+   * `SpawnOriginalItemDrop` (`FUN_00466B40`) releases, which
+   * `PropUpdateType7`'s first hit does. See `class41/type07.ts`.
+   *
+   * These three are numbered 100 past the type whose arm or routine makes
+   * them, so that no family numbered for a type can land on one.
    */
-  OriginalItem = 70,
+  OriginalItemDrop = 107,
   /**
-   * `PropUpdateType72` (`FUN_00470750`) — the collectible that pops up on a
-   * camera cue and falls. No lifetime of any kind. See `class41/type72.ts`.
+   * `Type8MountedPartUpdate` (`FUN_00467290`) — one of the three 0x1C0
+   * objects `PlaceGenericProp` case 8 allocates, drawn on its parent's stored
+   * matrix. See `class41/type08.ts`.
    */
-  Type72 = 72,
+  Type8Piece = 108,
   /**
-   * `PropUpdateType74` (`FUN_00470E20`) — three shots and it drops an item;
-   * raises `g_script_flags[0x13]` on its Arcade exit. See
-   * `class41/type74.ts`.
+   * `Type67MountedPartUpdate` (`FUN_004702E0`) — one of the three objects
+   * `PlaceGenericProp` case 0x43 allocates beside a type-67 prop, drawn the
+   * same way. See `class41/type67.ts`.
    */
-  Type74 = 74,
-  /**
-   * `PropUpdateType76` (`FUN_00471330`) — the stage-4 door pair a shot swings
-   * open, and a route. See `class41/type76.ts`.
-   */
-  Type76 = 76,
-  /**
-   * `PropUpdateType77` (`FUN_004717A0`) — the flying bonus that rides object
-   * path 0x195 while item 0x1F is held. See `class41/type77.ts`.
-   */
-  Type77 = 77,
+  Type67Piece = 167,
 }
 
 /**
@@ -228,6 +201,47 @@ export interface PosedNode {
   slot: number;
   x: number; y: number; z: number;
   pitch: number; yaw: number; roll: number;
+}
+
+/**
+ * One `AssetDrawSlot` a transcribed routine made this frame, and the matrix
+ * it made it under. See {@link BreakableProp.draws}.
+ */
+export interface PropDrawCall {
+  /** The slot handed to `AssetDrawSlot` (`FUN_00418560`), sign-extended. */
+  slot: number;
+  /**
+   * `g_MatrixStackTop` at the call, in `game/matrix.ts`'s layout, built from
+   * the identity rather than from the view the engine's stack starts on — so
+   * this is the model's **world** matrix, which is the view-space one with
+   * the camera taken back off.
+   */
+  m: number[];
+  /**
+   * The `SetDrawLayerNibble` (`0x004A79F0`) layer the call was made in, when
+   * the routine set one other than the world's own 8. `RenderEnqueueCommand`
+   * ORs it into the translucent pass's sort key and the flush sorts it
+   * **first**, so a higher layer blends over everything in a lower one
+   * whatever its depth. Absent means 8.
+   */
+  layer?: number;
+  /**
+   * The alpha of an `AssetDrawSlotWithAlpha` (`FUN_004185A0`) call — the
+   * forced-blend draw, at any value, 1 included — or absent for a plain
+   * `AssetDrawSlot`. `render/draw_order.ts`'s `setAssetDrawAlpha` is what
+   * the renderer hands it to.
+   */
+  alpha?: number;
+}
+
+/**
+ * `[port-only]` The draws of a prop that died on the frame it made them. See
+ * `g_prop_final_draws` in `game/globals.ts`.
+ */
+export interface PropFinalDraw {
+  /** The prop's id, which the renderer keys its nodes on. */
+  id: number;
+  draws: PropDrawCall[];
 }
 
 /**
@@ -446,7 +460,7 @@ export interface BreakableProp {
   /**
    * `obj+0x2C0` — the shake a crack imparts; decays by 0.85 a frame.
    *
-   * **{@link PropFamily.Type75} reads it as a cursor**, not a displacement:
+   * **Class 0x41 type 75 reads it as a cursor**, not a displacement:
    * `PropUpdateType75` (`FUN_004710C0`) adds 1.0 to it every frame after the
    * prop is shot and hands it to `CamEvalObjectPath6` as the frame of object
    * path 0x178, and at 290.0 it raises `g_script_flags[20]`. Another of the
@@ -548,11 +562,13 @@ export interface BreakableProp {
    * `obj+0x40`/`+0x44`/`+0x48` — the object's world position as the shared
    * actor fields hold it.
    *
-   * `ActorAlloc` zeroes the object from `+0x34` up and **nothing in class
-   * 0x41 ever writes these**: a prop keeps its position at `+0x19C` instead.
-   * The one routine that reads them is the fall's land-on-another-prop test,
-   * which therefore compares zero against zero for every pair. Kept so that
-   * test can be transcribed as it is written rather than quietly dropped.
+   * `ActorAlloc` zeroes the object from `+0x34` up and most of class 0x41
+   * never writes these: a prop keeps its position at `+0x19C` instead. For
+   * those the fall's land-on-another-prop test compares zero against zero for
+   * every pair, and the field is kept so that test can be transcribed as it
+   * is written. **Some generic arms do write them** — types 19 and 56 copy the
+   * placer's position here and draw from it, and the mounted parts of types 8
+   * and 67 keep their world point here — so check the type.
    */
   hitPos: { x: number; y: number; z: number };   // +0x40
   /**
@@ -616,7 +632,7 @@ export interface BreakableProp {
    * into `g_script_flag_effect_cues_a` — so this is another of the offsets
    * L3 is about. Check the family.
    *
-   * And a third reading: for {@link PropFamily.Type75} it is a count of how
+   * And a third reading: for class 0x41 type 75 it is a count of how
    * many times `g_evt_step_index` has *changed* since the prop was placed,
    * which `PropUpdateType75` tests for equality with 2. That is a different
    * count from {@link BreakableProp.stepsElapsed} (`+0x197`) even though both
@@ -647,19 +663,17 @@ export interface BreakableProp {
    * The **branch latch** — the field that stops a trigger opening its route
    * twice.
    *
-   * One port field for four engine offsets, and they really are four:
-   * `obj+0x34` bit `0x40000000` for types 14, 19, 25 and 76, `obj+0x192` for
-   * types 56 and 73 and the story switch, `obj+0x1B9` for type 40, and
-   * `obj+0x1B0` of a chain's **segment 0** for the chain. They are one field
-   * here because the port transcribes only the branch arm of those routines,
-   * so nothing else reads any of them — and a `+0x192` shared with
-   * {@link BreakableState} would have the latch and the fall state disagree
-   * about what 1 means. Where a routine's other arms are ported later, this
-   * splits.
+   * One port field for the engine offsets of the routines ported only as far
+   * as their branch arm — `obj+0x34` bit `0x40000000` for type 76,
+   * `obj+0x192` for the story switch, `obj+0x1B0` of a chain's **segment 0**
+   * for the chain — and `obj+0x1B9` for type 40. Types 14, 19, 25, 56, 69
+   * and 73 used to be here too; they are transcribed whole now and keep
+   * their latch in the word their routine does. Where the rest are ported,
+   * this splits the same way.
    */
   branchLatched: boolean;
   /**
-   * `obj+0x192` for {@link PropFamily.Type75}. See {@link PropCuePhase}.
+   * `obj+0x192` for class 0x41 type 75. See {@link PropCuePhase}.
    *
    * The fourth port field standing for that one engine word, and the second
    * that is not {@link BreakableProp.state}. It is separate rather than shared
@@ -704,6 +718,43 @@ export interface BreakableProp {
    */
   drawSkipped: boolean;
   /**
+   * [port-only] Every `AssetDrawSlot` the object's routine made on its last
+   * frame, in the order it made them, each with the matrix it was made under
+   * — or `null` for a routine that does not record its draws, which
+   * `render/breakables.ts` then poses from the fields as it always has.
+   *
+   * The engine draws **inside** the routine, interleaved with the state it
+   * steps, so what a frame shows is the state at the moment of each call and
+   * not the state the routine leaves behind: `FUN_004668A0` draws its slot
+   * and then increments it, a sweep draws before it swings. A renderer that
+   * posed from the fields afterwards showed every such routine one step
+   * along. Recording the call where the routine makes it is what lets the
+   * draw be transcribed with the routine instead of rebuilt beside it. The
+   * routine clears the list at its head (`PropDrawBegin`, `class41/
+   * prop_draw.ts`), so a frame it returns early from draws nothing — which
+   * is also what the engine does.
+   */
+  draws: PropDrawCall[] | null;
+  /**
+   * The words of the 0x378-byte object that a transcribed generic routine
+   * keeps and no field above carries, **keyed by their offset** — `"o200"` is
+   * `obj+0x200`.
+   *
+   * Keyed by offset and not by meaning because in this family the offset is
+   * all the words share: `PlaceGenericProp` builds one object for fifty
+   * routines, and `obj+0x200` is one routine's hinge angle and another's
+   * nothing at all (`L3`). Each routine's file declares the words it keeps as
+   * an interface of its own, named for what *that* routine uses them for,
+   * and reads them through it. `ActorClearGameFields` (`FUN_004A73D0`) has
+   * zeroed every one of them, so an absent key reads as 0.
+   *
+   * A word that a field above already carries — `+0x2A0`, `+0x1E8`, `+0x192`
+   * and the rest, each documented with its offset — is read through that
+   * field, and never through this. Plain numbers only, so the pool still
+   * survives `clonePlain`.
+   */
+  words: Record<string, number>;
+  /**
    * [port-only] Where the last shot on this prop was aimed, at the prop's own
    * camera depth — `g_crosshair_x/y` unprojected by `obj+0x78`, which is what
    * `SpawnPropHitEffectScaled` (`FUN_004666B0`) computes when a routine calls
@@ -725,41 +776,6 @@ export interface BreakableProp {
   dead: boolean;
   /** {@link PropFamily.Type48}'s own words, and null for every other family. */
   flicker: FlickerLightState | null;
-  /**
-   * `obj+0x290` as `PickOriginalModeItem` (`FUN_004629C0`) writes it: the
-   * Original Mode item id a collectible is, `-1` for none. The **same engine
-   * word** as {@link BreakableProp.kind}, which for a generic prop the port
-   * uses for the class-0x41 type; separate here for the reason
-   * {@link BreakableProp.cuePhase} is (`L3`). Only
-   * {@link PropFamily.OriginalItem} and {@link PropFamily.Type72} read it.
-   */
-  originalItem: number;     // +0x290
-  /**
-   * `obj+0x28E` — a collectible's second model, from its item record's
-   * `+0x02`: drawn camera-facing, 1.5 toward the viewer. `0xFFFF` for none.
-   */
-  slotB: number;            // +0x28E
-  /**
-   * `obj+0x2C4` — a collectible's draw scale, from its item record's `+0x04`
-   * (1.0 or 1.5), and 1.0 for an item id of -1.
-   */
-  itemScale: number;        // +0x2C4
-  /**
-   * `obj+0x199` for {@link PropFamily.Type74}: the shots it takes before it
-   * drops its item, 3 from `PlaceGenericProp` case 0x4A. The group props keep
-   * their lifetime in this byte; a generic prop keeps its in `+0x11C`, which
-   * the port holds in {@link BreakableProp.lifetime} — check the family.
-   */
-  shotsLeft: number;        // +0x199
-  /**
-   * `[port-only]` The pose `CamEvalObjectPath6` (`FUN_004042D0`) handed the
-   * routine this frame, for the two that ride an `op_` path —
-   * {@link PropFamily.Type75} draws at all six values, {@link PropFamily.Type77}
-   * translates by the three positions. The engine keeps it in a stack local;
-   * the port leaves it here for `render/`, which draws it, and it is
-   * recomputed every update. `null` before the first, or with no path.
-   */
-  pathPose: PosedNode | null;
 }
 
 /** `obj+0x34` bits `BreakablePropUpdate` tests. */
@@ -842,13 +858,10 @@ export function makeBreakableProp(id: number, group: number,
     drawScale: [1, 1, 1],
     effectPoses: [],
     drawSkipped: false,
+    draws: null,
+    words: {},
     hitAim: null,
     dead: false,
     flicker: null,
-    originalItem: -1,
-    slotB: 0,
-    itemScale: 1,
-    shotsLeft: 0,
-    pathPose: null,
   };
 }

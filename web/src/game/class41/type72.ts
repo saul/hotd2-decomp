@@ -22,15 +22,15 @@
  * ## The draw, and one quirk in it
  *
  * While `obj+0x192` is above 0 the routine draws the item's model under
- * `Rz Ry Rx` and `obj+0x2C4`, then — **gated on `obj+0x28C` rather than on
- * `obj+0x28E`**, `CMP word ptr [ESI + 0x28C], -1` at `0x00470A60`, where
- * `OriginalItemPropUpdate` tests `+0x28E` — its second model camera-facing,
- * then the pickup strip. So an item with no second model hands
- * `AssetDrawSlot` a -1, which reads the flags word at `0x009A669C`, just past
- * the four camera blocks and before the slot table; `[likely]` that draws
- * nothing, because no instruction in the image names that word and it is
- * therefore the BSS zero it starts as. The port has no model at `0xFFFF`
- * either. See `render/prop_parts.ts`.
+ * `Rz Ry Rx` and `obj+0x2C4` — with no test on the model, where
+ * `OriginalItemPropUpdate` has one — then, **gated on `obj+0x28C` rather than
+ * on `obj+0x28E`** (`CMP word ptr [ESI + 0x28C], -1` at `0x00470A60`), its
+ * second model camera-facing, then the pickup strip. So an item with no
+ * second model hands `AssetDrawSlot` a -1, which reads the flags word at
+ * `0x009A669C`, just past the four camera blocks and before the slot table;
+ * `[likely]` that draws nothing, because no instruction in the image names
+ * that word and it is therefore the BSS zero it starts as. The port records
+ * the -1 as the routine makes it, and no model is carried at that slot.
  *
  * Read from the disassembly of `0x00470750`..`0x00470B6D`: `PlaySoundId` is
  * marked no-return, so the pseudocode stops at the pickup sound and returns
@@ -38,20 +38,28 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
+import type { BreakablePlacement } from "../../bundle";
 import { G } from "../globals";
 import { GameMode } from "../game_mode";
+import { MatrixRotateY, MatrixScale, MatrixTranslate } from "../matrix";
 import { ActorDespawnProp, BreakablePropAwardHit } from "./prop";
 import { T } from "../tables";
-import { MsvcRand } from "./group";
 import { SpawnOriginalItemBanner } from "./item_banner";
 import {
-  ORIGINAL_ITEM_NONE, ORIGINAL_ITEM_PICKUP_FRAMES, ORIGINAL_ITEM_PICKUP_SLOT,
-  ORIGINAL_ITEM_PICKUP_SLOT_P1, ORIGINAL_ITEM_PICKUP_SLOT_STRIDE,
+  COLLECTIBLE_WORDS_ZERO, ORIGINAL_ITEM_NONE, ORIGINAL_ITEM_PICKUP_FRAMES,
+  ORIGINAL_ITEM_PICKUP_SLOT, ORIGINAL_ITEM_PICKUP_SLOT_P1,
+  ORIGINAL_ITEM_PICKUP_SLOT_STRIDE, ORIGINAL_ITEM_SECOND_TOWARD_VIEWER,
   ORIGINAL_ITEM_SHOT_RISE, ORIGINAL_ITEM_TAKEN, ORIGINAL_ITEM_TURN,
-  ORIGINAL_ITEMS_TAKEN_CAP, PickOriginalModeItem, SFX_ORIGINAL_ITEM_PICKUP,
+  ORIGINAL_ITEMS_TAKEN_CAP, OriginalItemDrawMaybeFaded, PickOriginalModeItem,
+  SFX_ORIGINAL_ITEM_PICKUP,
 } from "./original_item";
+import {
+  PropDrawBegin, PropDrawSlot, PropMatrixClearRotation, PropMatrixPush,
+  PropMatrixTRzRyRx,
+} from "./prop_draw";
 import { BreakableFlag, type BreakableProp } from "./prop_state";
 import { PropRegisterForShotTest } from "./shot_test";
+import { PropWords } from "./words";
 
 /** `obj+0x192` as `PropUpdateType72` switches on it. */
 export enum Type72Phase {
@@ -79,14 +87,15 @@ export const TYPE72_GRAVITY = 0.03810799866914749;
  * `g_original_item_pickup_blocked = 0` — the 3.0 radius is in `generic.ts`'s
  * table.
  *
- * `[port-only]` as a *function*, as `PlaceGenericPropType43` is.
+ * `[port-only]` as a *function*: an arm of the switch, reached through
+ * `GENERIC_PLACE_ARMS` (`class41/generic_routines.ts`).
  */
 export function PlaceGenericPropType72(p: BreakableProp,
-                                       pl: { field_1f4?: number },
+                                       pl: BreakablePlacement,
                                        rng: Rng): void {
-  p.group = ((pl.field_1f4 ?? 0) << 24) >> 24;
-  p.removeFlag = 0;
-  PickOriginalModeItem(p, p.group, rng);
+  const w = PropWords(p, COLLECTIBLE_WORDS_ZERO);
+  w.o194 = ((pl.field_1f4 ?? 0) << 24) >> 24;
+  PickOriginalModeItem(p, w.o194, rng);
   G.g_original_item_pickup_blocked = 0;
 }
 
@@ -95,10 +104,12 @@ export function PlaceGenericPropType72(p: BreakableProp,
  *
  * `+0x1C4` is {@link BreakableProp.vy}, `+0x1AC` {@link BreakableProp.restY}
  * (the height it was thrown from), `+0x2A0` {@link BreakableProp.storyItem}
- * (the pickup strip's frame) and `+0x192` {@link BreakableProp.routinePhase}.
+ * (the pickup strip's frame), `+0x2A4` {@link BreakableProp.removeFlag} (the
+ * strip's base) and `+0x192` {@link BreakableProp.routinePhase}.
  */
 export function PropUpdateType72(p: BreakableProp, rng: Rng,
                                  events?: Events): void {
+  PropDrawBegin(p);
   if (G.g_GameMode !== GameMode.Original) {
     ActorDespawnProp(p);
     return;
@@ -110,7 +121,8 @@ export function PropUpdateType72(p: BreakableProp, rng: Rng,
       return;
     }
   }
-  if (p.originalItem === ORIGINAL_ITEM_NONE) {
+  const w = PropWords(p, COLLECTIBLE_WORDS_ZERO);
+  if (w.o290 === ORIGINAL_ITEM_NONE) {
     ActorDespawnProp(p);
     return;
   }
@@ -138,7 +150,7 @@ export function PropUpdateType72(p: BreakableProp, rng: Rng,
         p.routinePhase = Type72Phase.Taken;
         BreakablePropAwardHit(p.flags, false, rng);
         p.flags |= ORIGINAL_ITEM_TAKEN;
-        const id = p.originalItem;
+        const id = w.o290;
         const n = G.g_original_items_taken[id] ?? 0;
         if (n < ORIGINAL_ITEMS_TAKEN_CAP) G.g_original_items_taken[id] = n + 1;
         SpawnOriginalItemBanner(
@@ -149,7 +161,7 @@ export function PropUpdateType72(p: BreakableProp, rng: Rng,
         const p1 = (p.flags & BreakableFlag.HitByPlayer1) !== 0;
         if (p0 && p1) {
           p.removeFlag = ORIGINAL_ITEM_PICKUP_SLOT
-            + (MsvcRand(rng) & 1) * ORIGINAL_ITEM_PICKUP_SLOT_STRIDE;
+            + rng.int(2) * ORIGINAL_ITEM_PICKUP_SLOT_STRIDE;
         } else {
           p.removeFlag = p0 ? ORIGINAL_ITEM_PICKUP_SLOT
             : ORIGINAL_ITEM_PICKUP_SLOT_P1;
@@ -174,13 +186,38 @@ export function PropUpdateType72(p: BreakableProp, rng: Rng,
         ActorDespawnProp(p);
         return;
       }
-      PropRegisterForShotTest(p, p.x, y + ORIGINAL_ITEM_SHOT_RISE, p.z);
+      PropRegisterForShotTest(p, p.x, Math.fround(y + ORIGINAL_ITEM_SHOT_RISE),
+                              p.z);
       break;
     }
     case Type72Phase.Taken:
       break;
   }
   // No mask of `obj+0x34` anywhere: the taken bit is what refuses a second
-  // pickup, and the routine reads nothing else of the word. The draw blocks
-  // are `render/prop_parts.ts`'s, and they are skipped while it waits.
+  // pickup, and the routine reads nothing else of the word.
+
+  // `MOV AL, [ESI+0x192]; TEST AL, AL; JLE` at `0x0047099B`: nothing is
+  // drawn while it waits.
+  if (((p.routinePhase << 24) >> 24) <= 0) return;
+  const s = w.o2c4;
+  let m = PropMatrixPush();
+  PropMatrixTRzRyRx(m, p.x, p.y, p.z, p.pitch, p.yaw, p.roll);
+  MatrixScale(m, s, s, s);
+  OriginalItemDrawMaybeFaded(p, m, p.slot);
+  // `CMP word ptr [ESI+0x28C], -1` at `0x00470A60` -- the first model's word,
+  // not the second's.
+  if (((p.slot << 16) >> 16) !== -1) {
+    m = PropMatrixPush();
+    MatrixTranslate(m, p.x, p.y, p.z);
+    PropMatrixClearRotation(m);
+    MatrixTranslate(m, 0, 0, ORIGINAL_ITEM_SECOND_TOWARD_VIEWER);
+    MatrixScale(m, s, s, s);
+    OriginalItemDrawMaybeFaded(p, m, w.o28e);
+  }
+  if (p.storyItem > 0) {
+    m = PropMatrixPush();
+    MatrixTranslate(m, p.x, p.y, p.z);
+    MatrixRotateY(m, p.yaw);
+    PropDrawSlot(p, m, p.removeFlag + p.storyItem - 1);
+  }
 }

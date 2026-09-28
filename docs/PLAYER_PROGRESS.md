@@ -782,6 +782,30 @@ a prop the script placed for one block no longer stands there all stage, and
 Original Mode's collectibles (types 70–72, 77) leave on their first Arcade
 frame the way the engine sends them.
 
+**Forty-three of the family's fifty routines are transcribed whole**, every
+type from 5 to 69, 73 and 78 (`game/class41/typeNN.ts`, registered in
+`generic_routines.ts`). Each has its own head -- the shared step lifetime, an
+inline variant with a literal limit or an `ActorKill`, or none -- its hit arms
+and sounds, its shot sphere where it registers one, and its constructor arm.
+**The draw is transcribed with the routine**: each `AssetDrawSlot` a routine
+makes lands in `BreakableProp.draws` with the matrix it was made under
+(`game/class41/prop_draw.ts`, built with `game/matrix.ts`), and
+`render/breakables.ts` sets those matrices and decides nothing -- which is
+what shows a routine that draws and then steps its model (types 6, 10, 31,
+33) on the right frame, a draw layer (21), a fade (the Original Mode items of
+types 7 and 43), an effect tree (9, 18, 25, 27, 28, 43, 62) and a
+camera-facing billboard (53) without a per-type arm in the renderer. The
+renderer's own lift, door-leaf and clock-tower arms are gone with it. What
+moves now: type 8's rocking boat and its three shootable parts, 11's orbit
+and fall, 14's and 19's swings and give-backs of the enemy count their arms
+raise, 20's spin, 30's fall, 36's three rising strips, 41's two panels, 45's
+table of banners and the wave it bends into them, 49's tumble on its hull, 56's hinge curve and fall, 57's
+shudder, 58's and 60's flights, 62's eight camera-facing water effects, 63's
+twelve items, 64's swaying part, 67's boats (Training only), 69's fall and
+Original Mode item, 73's ride along its object path. Class 0x41 type 34 is
+built by `PlaceGenericProp` as the engine builds it, and keeps its pitch.
+The other seven, 70 to 77, are the Original Mode half, ported separately.
+
 **Class 0x41 type 75 is ported** (`game/class41/flag_prop.ts`), and it is the
 one class-0x41 object whose routine opens a `wait_script_flag` gate.
 `PropUpdateType75` (`FUN_004710C0`) raises `g_script_flags[20]` from **three**
@@ -5494,9 +5518,13 @@ section.)
 
 Types 70, 71, 72, 74, 75, 76 and 77 were placed and drawn with whatever
 `obj+0x28C` held and did nothing, or -- 70, 71 and 76 -- ran their route
-write and nothing else. Each is now its own family, its routine transcribed
-from the listing (`PlaySoundId` is marked no-return in the database, so every
-one of these pseudocodes stops at its first sound; `L35`):
+write and nothing else. Each is now its `g_class41_updates` row
+(`class41/generic_routines.ts`), its routine transcribed from the listing with
+its draws recorded where it makes them (`PlaySoundId` is marked no-return in
+the database, so every one of these pseudocodes stops at its first sound;
+`L35`). With them every one of the fifty generic routines is transcribed whole,
+and the family-wide declared divergence, the pool's older generic arm and
+`shot_test.ts`'s per-type offset table are gone:
 
 * **70 and 71, `OriginalItemPropUpdate` (`FUN_004675A0`)** -- the collectible.
   Its model is **not** the descriptor's word: the constructor's arm calls
@@ -5524,17 +5552,30 @@ one of these pseudocodes stops at its first sound; `L35`):
   flying `op_` path `0x195` while item 0x1F is held, worth 2000 points.
 
 **`SpawnStoryModeItem` (`FUN_00467B90`) makes a collectible** -- the same
-object -- where the port used to emit an event and nothing else, so a group
-member's, a falling container's, type 74's and type 75's story item now
-appears, turns and can be taken.
+object, run by type 70's routine -- where the port used to emit an event and
+nothing else, so a group member's, a falling container's, and types 58's,
+69's, 74's and 75's story items now appear, turn and can be taken.
 
-The bundle carries `breakables.original_items` (the rows the stage's
-placements can name and the records they name), `hinge_curves` for type 76,
-every model an item can wear and both pickup strips, and the banner's
+**One `PickOriginalModeItem`.** The item tables are `.rdata` and travel in the
+bundle (`breakables.original_items`: the rows the stage's spawns can name --
+now type 7's drop and type 43's break too -- and the records they name), and
+every caller goes through the one function in `class41/original_item.ts`; the
+TS copy of both tables `type07.ts` carried is gone, and with it the literal
+item models in the exporter's rows for 7 and 43. `g_original_items_taken` and
+`g_original_item_pickup_blocked` are in `G`, so the pickups of 7's drop and
+43's wreck count the item and raise its banner, and 58 and 69 clear the byte
+after their story item: five declared divergences fewer. The item release's
+story arm is three copies in the engine and one in the port
+(`ReleaseHiddenItem`), and it now knows which it is running: each writes the
+blocked byte its own way, the kinded copy lifts a kind-2 prop's item 1.0 (it
+had the set's rise), and the falling container's story item inherits the
+container's `+0x199` lifetime (it had its shot count, 1, and left at the next
+step). The bundle also
+carries every model an item can wear and both pickup strips, and the banner's
 pictures, which needed `TexBankPaletteIndex`'s palette `0x14` for banks
-`0x156` and `0x193..0x1B4`. `render/prop_parts_items.ts` draws the seven,
-including the two things none of the other props did: `AssetDrawSlotWithAlpha`
-and `MatrixClearRotation`. `web/tools/collectibles_look.mjs` looks at them in
+`0x156` and `0x193..0x1B4`. `MatrixClearRotation` is one function now
+(`PropMatrixClearRotation`, `class41/prop_draw.ts`), where 7's drop and 43
+each had a copy. `web/tools/collectibles_look.mjs` looks at the collectibles in
 the page.
 
 **One declared divergence**: on an odd blink frame a shot type 77 registers

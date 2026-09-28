@@ -692,7 +692,7 @@ export const RIGS: readonly Rig[] = [
       {
         name: "part_002f",
         slots: [47],
-        translation: [9.0582619, 6.368186, 8.9433079],
+        translation: [9.0583, 6.3682, 8.9433],
         animated: "RotY by obj+0x1334, applied only while obj+0x1324 is non-zero -- which happens only under FUN_004522A0, once the car is parked on either shot. obj+0x1334 is then 0x4000 - CamEvalObjectPath6(0x153, n + 100.0).ry for n = 1..39, and held after. So this part only moves once the body has stopped.",
         condition: "obj+0x13F0 == 0: column 1 of row 0",
         parent: "part_002d",
@@ -701,7 +701,7 @@ export const RIGS: readonly Rig[] = [
       {
         name: "part_0034",
         slots: [52],
-        translation: [0.0, 3.1674952, 13.6489019],
+        translation: [0.0, 3.1675, 13.6489],
         animated: "RotX by obj+0x1330, applied only while obj+0x1320 is set -- and NOT applied, so drawn at RotX 0, once it is cleared. obj+0x1330 gains 0x1000 BAMS (22.5 deg) every frame under FUN_004521B0 and FUN_00452930, and is never reset; FUN_004522A0 does not advance it, so the spin holds there.",
         condition: "obj+0x13F0 == 0: column 2 of row 0",
         note: "raw z=0x415A61E5, y=0x404AB852, x=0.0. Row 1 draws 0x35 (part_0035). Its true parent is a roll-limited copy of the body frame: MatrixGetAngles (FUN_004018E0) of Rz.Ry.Rx gives a (pitch, yaw, roll) triple the frame re-applies as RotY RotX RotZ, and the roll r (&0xFFFF) is remapped first -- r<=0x800 -> 0; 0x800<r<=0x4000 -> r-0x800; 0x4000<r<0xC000 -> r; 0xC000<=r<0xE800 -> r-0xE800; r>=0xE800 -> 0 (0x00452414..0x0045245A). An asymmetric deadzone over -33.75..+11.25 deg, identity at rest.",
@@ -709,7 +709,7 @@ export const RIGS: readonly Rig[] = [
       {
         name: "part_0031",
         slots: [49],
-        translation: [0.0, 3.1674952, -9.4799995],
+        translation: [0.0, 3.1675, -9.48],
         animated: "RotX by obj+0x1330, same rule and same gate as part_0034",
         condition: "obj+0x13F0 == 0: column 3 of row 0",
         note: "raw z=0xC117AE14, y=0x404AB852, x=0.0. Row 1 draws 0x32 (part_0032). [likely] this and part_0034 are the wheels or axles: both sit on the centreline at x=0 and the same height, 23.13 apart in Z, both spin about X only at a constant rate under one shared flag, and their parent carries a roll limiter of exactly the kind you write so wheels do not cut through the ground when the body rolls. Note there are only TWO such parts and both are at x=0, so they are not four wheels; and the code gives no forward axis, so neither is named front or rear.",
@@ -723,7 +723,7 @@ export const RIGS: readonly Rig[] = [
       {
         name: "part_0030",
         slots: [48],
-        translation: [9.0582619, 6.368186, 8.9433079],
+        translation: [9.0583, 6.3682, 8.9433],
         animated: "RotY by obj+0x1334 while obj+0x1324 != 0, as part_002f",
         condition: "obj+0x13F0 == 1: column 1 of row 1",
         parent: "part_002e",
@@ -731,14 +731,14 @@ export const RIGS: readonly Rig[] = [
       {
         name: "part_0035",
         slots: [53],
-        translation: [0.0, 3.1674952, 13.6489019],
+        translation: [0.0, 3.1675, 13.6489],
         animated: "RotX by obj+0x1330 while obj+0x1320 != 0, on the roll-limited frame, as part_0034",
         condition: "obj+0x13F0 == 1: column 2 of row 1",
       },
       {
         name: "part_0032",
         slots: [50],
-        translation: [0.0, 3.1674952, -9.4799995],
+        translation: [0.0, 3.1675, -9.48],
         animated: "RotX by obj+0x1330 while obj+0x1320 != 0, on the roll-limited frame, as part_0031",
         condition: "obj+0x13F0 == 1: column 3 of row 1",
       },

@@ -11,6 +11,8 @@
  * side. The fields the port does not use yet are still named and still carry
  * their offset: an unnamed gap is where the next wrong reading goes.
  */
+import { CivilianSphereMode } from "./ops";
+
 export interface CivilianState {
   /** +0x00 the wait word op 0x2C loads, `& 0xFBFFFFFF`. See `CivilianWait`. */
   wait: number;
@@ -126,11 +128,12 @@ export interface CivilianState {
   scaleStep: number;
   /**
    * +0x80 op 0x17 — which point `CivilianUpdate`'s switch writes into
-   * `obj+0x12C`, the collision-sphere centre — `Actor.sphereCentre`. It is not
-   * what `ActorRegisterCameraPoint` (`FUN_00409B70`) registers: that is
-   * `obj+0x100`, which the skeleton walk writes.
+   * `obj+0x12C`, the collision-sphere centre — `Actor.sphereCentre`. A byte,
+   * read signed; see {@link CivilianSphereMode}. `CivilianInit` writes `2`,
+   * bone 1. It is not what `ActorRegisterCameraPoint` (`FUN_00409B70`)
+   * registers: that is `obj+0x100`, which the skeleton walk writes.
    */
-  cameraPointMode: number;
+  sphereCentreMode: number;
   /** +0x81 op 0x2A — which death voice, or `0xFF` to pick by character type. */
   deathVoice: number;
   /** +0x84 / +0x88 the sound queued to play, and the frames left before it. */
@@ -167,7 +170,8 @@ export function makeCivilianState(): CivilianState {
     cursor: 0, onShot: 0, onShotAlt: 0, resume: 0, sounds: [],
     hook: 0, children: [], carrier: 0, rescuePlayer: -1,
     items: [], pickedItem: -1, attachSet: 5,
-    scaleTarget: 1, scaleStep: 0, cameraPointMode: 2, deathVoice: 0xff,
+    scaleTarget: 1, scaleStep: 0, sphereCentreMode: CivilianSphereMode.Bone1,
+    deathVoice: 0xff,
     soundId: 0, soundDelay: 0, cameraBone: 2,
     moveFrames: 0, moveTo: { x: 0, y: 0, z: 0 },
     script: -1, pc: 0, onShotScript: -1, onShotAltScript: -1,

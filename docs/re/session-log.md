@@ -23387,6 +23387,199 @@ were read that far, so the row now says the *model* is drawn nowhere else.
 and 9 (`0x0043FFC0`, `0x004400D0`, `0x00445050`) -- no stage record uses them,
 though `0x004400D0` also calls `PropSeatOnObjectPath` (`0x00440101`).
 
+## 2026-09-28 -- the stage-2 car's draw, checked a second time; its push translations were the wrong float32s (branch `claude/adoring-lehmann-1b16dc`)
+
+The brief was to port what `St2CarDraw` (`FUN_00452320`) does and the player
+did not draw -- the post-crash asset row, the door's `RotY(obj+0x1334)`, the
+two spun parts on the roll-limited frame -- and to export row 1's slots. **All
+of it was already on `main`**, in `00061004` from this morning's
+`fix/newbugs2-crashed-car`; the brief had been written before that landed. So
+this session re-read the routine and checked the landed work instead of
+redoing it (L17: one agent's reading is not a fact, a positive one included).
+
+**Re-read, `[proved]`.** `disassemble_bytes 0x00452320..0x0045253F`
+matches `car.ts`'s pseudocode instruction for instruction: the four rows at
+`0x565F2C`/`30`/`34`/`38` after `SHL EAX, 0x4`; the door push nested inside
+the body's (two `Pop(1)` at `0x004523BD`/`0x004523C4`); `MatrixGetAngles`'
+three outputs at `[ESP0-0xC]`, `[ESP0-8]`, `[ESP0-4]` re-applied as
+`RotY(out2)`, `RotX(out1)`, `RotZ(limited out3)` at `0x0045247B`..
+`0x0045248B`; the dead zone's five arms. `MatrixGetAngles` (`FUN_004018E0`)
+decompiled: out1 and out2 are `VecToAngles`' pitch and yaw, out3 is
+`fpatan(y, x)` of `M·(1,0,0)` after `RotX(-p)·RotY(-y)` -- which is the
+`{x, y, z}` `carrier.ts` returns and `applyTaskDraw` composes as `"YXZ"`. The
+real stage-2 glb has three roots of eight parts each, the door under its own
+row's body and the four spun parts on the root, all at identity rotation --
+the hierarchy `applyTaskDraw`'s `root⁻¹ · limited` arithmetic assumes.
+
+In the page (`?stage=2&mode=play&entry=0&block=0&step=2&op=0&drive=1`, headless,
+private bundle), unshot: the draw names `2d 2f 34 31` through `0x39` frame 369
+and `2e 30 35 32` from 370; the door runs `-27` at 371 to `-14009` at 404; the
+spin holds at `2260992`. The screenshots show the intact car on `0x38` frame
+100, the crash fireball at `0x39` 369, and the scorched row-1 body parked nose
+first in the storefront at 404 with its door swung out about the front hinge
+and both wheels seated.
+
+**What was wrong: the translations.** The three pushes are `PUSH imm32`s --
+`0x4110EECC 0x40CBC84B 0x410F17C2` (x y z) at `0x00452377`, `0 0x404AB852
+0x415A61E5` at `0x00452497`, `0 0x404AB852 0xC117AE14` at `0x004524E8` -- and
+those are 9.0583, 6.3682, 8.9433, 3.1675, 13.6489 and -9.48. `rigs.py` has
+carried 9.0582619, 6.368186, 8.9433079, 3.1674952, 13.6489019 and -9.4799995
+since `8684c7bf`: five of six components 2 to 40 ulps off, while the note
+beside them quoted the right hex. Invisible (under 4e-5 of a unit) and still a
+wrong number, so fixed in `rigs.py` and regenerated into `rigs_data.ts` and
+`builder_hash.ts`; `car.ts`'s pseudocode had copied them too. A scan of every
+rig part whose note quotes raw hex: 21 components, all agree now, and the car's
+were the only ones that ever did not.
+
+**What pins it.** `render.test.ts`'s car block used to build its graph from
+hand-typed numbers, so nothing tied it to what the exporter ships: it now
+builds from `RIGS` itself and asserts first that both rows of
+`ST2CAR_ASSET_VARIANTS` are one part a slot, that column 1 sits in its own
+row's body and the rest on the root, and that each translation is the float32
+of its push. Mutations: `HEAD`'s decimals fail the third; re-parenting row 1's
+door to row 0's body fails the second and then "row 1 is drawn".
+
+**Wrong turns.** None in the code. The time went on establishing that the task
+was done before starting it -- `git log` on the four files the brief names is
+the first thing to run, not the last.
+
+## 2026-09-28 -- the civilian's collision sphere: modes 1, 2 and 3 are draw records (branch `worktree-agent-a2f32c8a45a21688b`)
+
+**The report.** `class10/update.ts` and `actor.ts` carried an open question:
+of `CivilianUpdate`'s switch on `sub+0x80` (op 0x17), only mode 0 -- the
+position -- was ported, because modes 1-3 "multiply the camera matrix by a
+matrix inside the model block (`model+0x70`, `model+0x4C`, and the midpoint of
+`model+0x244` and `model+0x1D8`)", which "are not bone records". The brief
+called it the camera-point switch and asked for the camera look-at, the shot
+sphere, the HUD marker and the rescue logic to be checked as readers.
+
+**What the switch is.** `0x0048ADB5`..`0x0048AF83`, after
+`ActorRegisterCameraPoint`: `MOVSX EAX, byte [sub+0x80]; CMP EAX, 3; JA past;
+JMP [EAX*4 + 0x0048B12C]`, cells `0x0048ADDB`, `0x0048ADFC`, `0x0048AE60`,
+`0x0048AEC4`. It writes `obj+0x12C..0x134`, the collision-sphere centre, and
+nothing else. `[proved]`
+
+* 0: `obj+0x40` -- the position (carrier-relative on a carrier: the arm reads
+  `g_cur_actor_xform`).
+* 1, 2: `MatrixStackSetTopFromArray(0x009A6040 + cam*0x1A4)`,
+  `MatrixMultiply(model + 0x1C0 / 0x130)`, `MatrixGetTranslation`.
+* 3: the same for `model+0x910` and `model+0x760`, halved (`0x004C43AC` =
+  `0x3F000000`).
+
+The offsets are **bytes** -- `ADD ECX, 0x1C0`, `ADD EDX, 0x130`, `ADD EAX,
+0x910`, `ADD ECX, 0x760` -- and `model` is `g_cur_actor_model`, `obj+0x194`.
+Ghidra's pseudocode types it `int *`, so it prints `0x70`, `0x4C`, `0x244`,
+`0x1D8`; the old note read those as byte offsets. As bytes they are
+`model+0xA0 + bone*0x90`: the matrix `SkeletonEmitNode` stores with
+`MatrixStore(record+0x28)` just after `SkeletonPoseNode`, record =
+`g_skeleton_node_out + bone*0x90` = `obj+0x20C + bone*0x90` (the base
+`DrawSkinnedModelAndShadow` is handed as `model+0x78`). **Bones 2, 1, 15 and
+12.** The shot branch's own read of the op-0x28 bone, `LEA ECX,[EAX+EAX*8];
+SHL ECX,4; LEA EAX,[ECX+EDX+0xA0]` at `0x0048ABD2`, is the same formula, which
+is the check on it. `[proved]`
+
+`MatrixMultiply` post-multiplies (`top = top x arg` in `Matrix4`'s element
+layout, from the sixteen sums), so each arm is view-to-world times the
+bone's view-space frame: the bone's origin in the world, from the draw a few
+lines up in the same routine. `SkeletonEmitNode` takes the same product for
+`obj+0x100` through `FUN_004A9570`, which pre-multiplies (`top = arg x top`)
+and is named `MatrixPremultiplyTop` now. `GameHost.boneWorld` answers exactly
+that point, so no new host query was needed. `CivilianInit` writes mode **2**
+(`MOV byte [sub+0x80], 2`), so the arm the port left out was the one nearly
+every civilian runs. In the skeletons of the civilian types, bone 1 is the
+root node (offset zero), bone 2 its child 3.2-5.5 up, and 12 and 15 the
+children of 11 and 14, 4.76 below them -- `[likely]` the lower leg joints,
+from the tree only.
+
+**Who uses which.** Streams 5, 6, 18, 24, 31, 43, 45, 89 set mode 1; 5, 28,
+31, 89 mode 2; 28 and 30 mode 3; 38 mode 0. Through `entries`: mode 1,
+stage 1's `0x4AE4`, stage 2's `0x51AC`, `0x8510`, `0x8620`, `0xBBA8`,
+`0xEA54`, `0xEA8C`, stage 4's `0x59C8`; mode 3, stage 2's `0x8598` (stream 28
+is her on-shot script: the fall, radius 4, the sphere between the knees);
+mode 0, stage 2's `0xA134`.
+
+**The readers.** A sweep for `0x12c` in operands (both `[r + 0x12c]` and
+`ADD r, 0x12c`) and for `+ 0x130]` finds, for a civilian, two:
+`RegisterForShotTest` (through `ActorRegisterCameraPoint`, *before* the switch,
+so it publishes last frame's centre; `ColiPublishDynamicList` copies it for
+`ColiTestSphereAgainstActors`), and `PoseHookGrowAndPushOutOfWorld`
+(`LEA EDX, [ESI+0x12C]` at `0x0048D0F8`), which the draw calls through
+`model+0x115C` from `SkeletonApplyRootMotion` at `0x00410E93` -- both of that
+routine's arms reach the call; the root-motion arm does so past a
+`MatrixStackPop` Ghidra marks no-return (L35). The gunshot does not read it:
+`ShotTestSphere` measures `obj+0x70`. Nor does the camera:
+`SelectCameraLookAtTarget` aims at `obj+0x100`, which `SkeletonEmitNode`
+writes, and the sweep finds only stores with a `+0x130` displacement, no
+load. So **the brief's camera, HUD and rescue readers do not read this
+field** (`[proved]` for the displacement forms the sweep covers, L32); the
+camera point is untouched by any mode.
+
+**What was wrong in the port, and is fixed.**
+
+* Modes 1-3 were missing; `CivilianWriteSphereCentre` has all four arms, and
+  anything else writes nothing (signed byte, unsigned compare).
+* Op 0x17 stored the whole dword; it stores the signed low byte now. Renamed
+  `SetCameraPointMode` -> `SetSphereCentreMode`, `cameraPointMode` ->
+  `sphereCentreMode`, with a `CivilianSphereMode` enum.
+* Class 0x10 did not set `ClassHandler.ownsSphereCentre`, so the actor push
+  rebuilt class 0x30's feet-plus-radius-plus-one over every civilian.
+* `PoseHookGrowAndPushOutOfWorld` rebuilt that same point with
+  `ActorUpdateBoundingSphere` before tracing it; the engine traces `obj+0x12C`
+  as it stands. And it ran after the switch; it runs where the draw is now,
+  so it reads the previous frame's centre, as the engine's does.
+* `CivilianInit`'s note said both pose hooks and the part list were the
+  renderer's; the part list is bound in the port and the grow-and-push hook
+  is the game's.
+
+**What is still not the engine's.** The switch reads the pose the renderer
+last drew, a tick behind the engine's same-routine draw for a moving
+civilian -- the same reading the camera point and the frog take, and the
+seam `game/host.ts` declares at its head, so it adds no marker of its own.
+What closes it already exists for class 0x14: the engine's model block in
+`game/skeleton.ts` (`Actor.skel`), posed by the class's own
+`DrawSkinnedModelAndShadow` call. Moving civilians onto it moves their clip
+clock, root motion and draw off the director and the renderer's posing, and a
+carrier's matrix has to go under the walk -- a class-wide change, not this
+switch's; it is the question for the user in this session's report.
+`[port-only]` at the seam: with no pose (a headless host, or the tick before
+the renderer adopts a spawn) a bone arm writes nothing, as the camera point
+does.
+
+**In the page** (`?drive=1`, stage bundles exported in this worktree): on
+mode 2 the sphere equals bone 1 to the digit -- bone 1 is also the tracked
+camera bone for every civilian type, so it is `lookAt - (0, 4, 0)` --
+through stage 1 block 9, stage 2 blocks 9, 14, 16 and 17, stage 3 block 2,
+stage 4 (entry 4) block 9. Mode 1 on `0xBBA8` sits 3.11-3.15 above bone 1,
+which is `hitoc.bin`'s bone-2 offset of 3.22 with the pose's bend; on
+`0xEA54` about 5 above, `hito_oyaji`'s 5.45. Mode 3 on `0x8598` after a
+(cheated, printed) shot follows the legs down through the fall and hands
+back to bone 1 when stream 28 reaches its mode-2 command. The camera stays in
+front of each, converging to within a few degrees of her; screenshots
+`web/shots/civ-sphere-8598-f150.png` and `civ-sphere-8510-f150.png`.
+
+**Wrong turns.**
+
+* My first map from spawns to streams used the spawn's `script` as a stream
+  index. It is an index into `entries`, and the list that came out -- mode 0
+  "stage 4's `0x59C8`", mode 3 "stage 3's `0x32A4`" -- was a list of other
+  women. The first two page runs watched the wrong civilians and reported
+  mode 2 throughout, which read like a port that never changes mode.
+* I went back and forth on the no-pose case. A fallback to the position keeps
+  a headless civilian's sphere off the world origin, where the pool's cleared
+  field would otherwise sit; it is also a default no exe instruction makes,
+  which is the port-only gameplay logic the rules exclude. It writes nothing
+  now, as the camera point does, and the headless consequence -- a sphere at
+  the origin until something poses her -- is the seam's.
+* A first draft declared the renderer's pose lag as a new divergence on the
+  switch. It is the seam `game/host.ts` already declares; the count stays
+  where it was.
+* One mutant for the mutation run was a syntax error (a second `default:`);
+  the run printed "exit 1, 0 failing", which is a build failure and not a
+  check failing. Rewritten, it failed six checks.
+* `web/tools/civilians.mjs` fails (`moved 17/37`, `rescued 0/21`, `mauled
+  14/10`) -- identically on the base commit, so it is not this change; it is
+  not in `verify_all.py`.
+
 ## 2026-09-28 -- class 0x41 types 70, 71, 72, 74, 75, 76 and 77, and the story item (branch `worktree-agent-ab40562e548c4231e`)
 
 Ported whole, each as its own family: `OriginalItemPropUpdate` (70, 71),

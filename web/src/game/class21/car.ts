@@ -445,7 +445,7 @@ export function St2CarHeldUpdate(car: St2Car, host: GameHost): boolean {
  * row = g_st2car_asset_variants[obj->+0x13F0];
  * Push(0); Translate(obj->+0x40..); RotZ(+0x6C); RotY(+0x68); RotX(+0x64);
  *   AssetDrawSlot(row[0]);
- *   Push(0); Translate(9.058262, 6.368186, 8.943308);        // nested
+ *   Push(0); Translate(9.0583, 6.3682, 8.9433);              // nested
  *     if (obj->+0x1324) RotY(obj->+0x1334);
  *     AssetDrawSlot(row[1]);
  *   Pop(1);
@@ -455,11 +455,11 @@ export function St2CarHeldUpdate(car: St2Car, host: GameHost): boolean {
  * Pop(1);
  * r = z & 0xFFFF;  lim = <the deadzone>;
  * Push(0); Translate(obj->+0x40..); RotY(y); RotX(x); RotZ(lim);
- *   Push(0); Translate(0, 3.167495, 13.648902);
+ *   Push(0); Translate(0, 3.1675, 13.6489);
  *     if (obj->+0x1320) RotX(obj->+0x1330);
  *     AssetDrawSlot(row[2]);
  *   Pop(1);
- *   Push(0); Translate(0, 3.167495, -9.48);
+ *   Push(0); Translate(0, 3.1675, -9.48);
  *     if (obj->+0x1320) RotX(obj->+0x1330);
  *     AssetDrawSlot(row[3]);
  *   Pop(1);

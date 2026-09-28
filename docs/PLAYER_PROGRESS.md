@@ -145,6 +145,15 @@ fixes it, and `PoseHookGrowAndPushOutOfWorld` (`FUN_0048D070`) is now ported
 with it: the per-frame hook that ramps that radius toward whatever op 0x16 set
 and pushes the civilian out of the world when its wait word asks.
 
+*And the sphere is where she is drawn.* The centre of that body sphere,
+`obj+0x12C`, is `CivilianUpdate`'s to write, from a switch on op 0x17's mode:
+the position, bone 2, bone 1 -- every civilian's until a script says
+otherwise -- or halfway between bones 12 and 15, the fallen body's. Each bone
+is its draw record taken back to the world. Only the position had been
+ported, so the push measured every civilian at class 0x30's feet-plus-radius
+point and the pose hook traced that same point; both read the switch's
+centre now (`class10/update.ts`, `docs/formats/civilians.md`).
+
 *The maul was an animation with no consequence.* `obj+0x19C` — the frame every
 script cue is counted in — is the **play** clock: it ticks once per 60 Hz frame
 over 30 Hz data, so it runs to `g_motion_play_length[motion]`, about twice the
@@ -2032,8 +2041,8 @@ doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
 view-space draw record, so the product is bone 1 in the world. The push is
 scaled by bone 1's travel between two readings of that record through one
 camera block — relative to the camera — and the pushed point is the sphere
-the frog publishes; `ClassHandler.ownsSphereCentre` keeps
-`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+the frog publishes, which `ColiTestSphereAgainstActors` now reads out of the
+published registration list (see "The crowd push tests what registered").
 Reading the two states whole also found four wrong ports inside them: the
 wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
 was inverted; both launch frames run on into the flight and halve the turn
@@ -5927,7 +5936,8 @@ caller, as `0x00409BED` does; the shot test's class-at-a-time migration is a
 filter at the pick (`ShotTestPickedHere`) instead of a gate on the
 registration, which had kept every zombie, thrower, civilian and frog out of
 the list. Class 0x33's chair registers from its own tail (`0x00433CC6`), and
-the frog's `ownsSphereCentre` is gone -- the list carries its point. The
+the `ownsSphereCentre` flag the frog and the civilian carried is gone -- the
+list carries each one's point. The
 thrower's special case on `g_coli_hit_object` is in: an off-ground thrower
 shouldered by an object with `obj+0x34` `0x200000` falls instead of sliding.
 The hook's shove timer counts calls, and its 1.8x is the strike's commit and

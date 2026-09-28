@@ -1136,7 +1136,9 @@ Things established while building it, now folded back into the format docs.
   where it stands and draining the asset queue. Every consumer is honoured
   here: `30` drops its action, `40`/`41`/`42` fall through, `0D`/`3A`/`3B`
   suppress, `2D` says nothing and cuts a subtitle already on screen, `2E`
-  restarts the BGM. Two earlier notes called this dead code; the task is only
+  stops the voice line (it was read as "restarts the BGM", and the mixer
+  stopped the music instead -- see [the music](#the-music-loops-where-the-engines-does)).
+  Two earlier notes called this dead code; the task is only
   ever reached through a function pointer, so it appeared in no xref list.
   See [`re/session-log.md`](re/session-log.md).
 - **Fog is per-mesh, and its values were in the data all along.** TSP bit 23
@@ -1149,7 +1151,8 @@ Things established while building it, now folded back into the format docs.
   all four name tables read out. Three of the four store no count and are
   bounded only by the table that follows them. `se_play` is **not** restricted
   to SE: across the six stage scripts its operand names 9 BGM tracks, 6 voice
-  lines and a stop as well. [`formats/sound.md`](formats/sound.md).
+  lines and a stop as well -- and it is how each stage starts its own track.
+  [`formats/sound.md`](formats/sound.md).
 - **Light and fog values are readable.** The `0x20`–`0x27` operands are
   pointers to float constants in the evt file; dereferencing them turns 1,888
   bytes of "unattributed residue" into real values — stage 2 block 3 opens with
@@ -1161,7 +1164,6 @@ Ranked by what they would actually change on screen.
 
 | Open | Effect | Where the work is |
 |---|---|---|
-| What starts a stage's own BGM | the player names the stage track by convention and says so | decomp — the scene-entry path, not an xref sweep over 496 callers |
 | `path.y - 15` compensation | nothing today; the player is correct without it | decomp — `0x009A60C0` is the camera block's eye at block+0x80, and `CameraFromViewAngles` reads a **4x4 matrix** at the block base (0x009A6040) instead, offsetting `(0, -15, 0)` in its own frame. Which of the two the shipped hooks agree on is the remaining question |
 | `CameraEaseBlockEyeToPathPose` (`FUN_00402EF0`) | the block eye is taken straight off the curve; the engine can ease it a sixteenth a frame toward a *second* pose block at 0x009C70C0 | decomp — what writes 0x009C70C0 outside the deferred-rail hooks |
 | `0x40C790` | whether deferred (state 6/7) shots are yaw-only | decomp, small |
@@ -2095,6 +2097,59 @@ already correct.
 `npm run loops` is the check, and it is the only one in the tree that measures
 the mixer rather than the intent: it taps `window.Audio` before the app boots
 and watches the cursor wrap.
+
+## The music loops where the engine's does
+
+The report was that the port's music "seems to start from scratch on loop",
+and the question whether the game does that. **It does** `[proved]`: there are
+no loop points in the files or the exe. Channel `0xF` is streamed, and
+`SoundStreamThread` (`FUN_004A4640`) seeks back to the first sample when a
+refill reads past **end of file** -- so a track is its file from sample 0 to
+EOF, end to end, for ever. What the game does not do is stop between passes:
+the wrap is made inside one ring refill. The port's `<audio loop>` element put
+**8.4 ms of digital silence** at the seam of `ST1.WAV` `[measured]`, which is
+the join made audible. Every detail is in
+[`formats/sound.md`](formats/sound.md#the-music-stream-no-loop-points),
+including the per-track table.
+
+Six things were wrong, and all six were in the same two files:
+
+* **The seam.** `audio/stream.ts` transcribes the stream -- `SoundChannelOpenWav`'s
+  header walk and the thread's wrap -- and `audio/bgm.ts` plays one period of it
+  as a Web Audio buffer looped whole. That period includes what the engine
+  plays and an element never would: the file's `LIST` chunk, a few frames of
+  `"LIST"…"INFO"` read as PCM between the last sample and the first, and, for a
+  track whose pass is `2 mod 4` bytes, the next pass half a frame late -- the
+  channels exchanged every other time round.
+* **Three tracks do not loop.** `PlaySoundId` passes `loop = 0` for exactly
+  `0x10000009` (`OVR_AR`, the game-over track), `0x10000025` (`CLR2`) and
+  `0x10000014` (`HOD1_ADV`). The port looped everything, so the game-over sting
+  went round again.
+* **Playing a track restarts it.** `SoundPlayOnFreeChannel` reopens the file
+  on every call; the port ignored a request for the track already playing. A
+  seek, which has no engine counterpart, still leaves a correct track alone
+  (`Bgm.syncTrack`, port-only).
+* **`bgm_entry_play` is a stop and then a play.** The port played only, so
+  `bgm_entry_play 0` -- which stages 2, 3, 4 and 6 open step 1 with -- did
+  nothing.
+* **Each stage's track is started by its script**, with a `se_play` at step 2
+  of each entry block (stage 5: `bgm_entry_play`). The record said no script
+  did, having looked only at `bgm_entry_play`, and the player started the
+  track at load "by convention" -- a step early -- and then ignored the
+  script's own `se_play` of it. The walker's `bgmTrack` now follows both
+  instructions, as `g_current_bgm_id` does, and a stage load is `SoundStopAll`.
+* **`0x80000002` stops the voice.** The mixer took every namespace-8 id as a
+  music stop; `PlaySoundControl` (`FUN_0041D3E0`) has three arms. evt `0x2E`,
+  which plays it after a cutscene skip, was named `resume_bgm_if_skipped`, and
+  it is `stop_voice_if_skipped` -- so every skip used to silence the music. The
+  host no longer cuts the voice itself at the moment of the skip; the script's
+  `0x2E` does, as in the game.
+
+Checks: `npm run test:audio` (the dispatch and the stream, with no browser),
+`test:seek` (each stage's first track, across a seek), `npm run bgm-loop` (the
+page: the buffer the script's track reaches Web Audio as is compared frame by
+frame with the file, rendered across the wrap, and heard), and
+`tools/verify_bgm_stream.py` (the exe's own bytes, and every track).
 
 ## The gameplay loop
 
@@ -5216,7 +5271,7 @@ missed. Meanings and confidence marks live in
 | `2C` | `set_skippable_region` | flow | **done** | opens/closes the skippable window (`DAT_009A2D7C`); raises the Skip bar once the shutter's firing gate is also down, which is exactly when the game polls Start |
 | `0D` | `spawn_obj_unless_skip` | spawn | **done** | spawns, unless a skip is in progress — `FUN_00408B70` walks the list either way |
 | `2D` | `play_dialogue` | hud | **done** | **plays the voice and shows the subtitles** — the real script text, centred on a 384 baseline, advancing line by line on the game's countdown |
-| `2E` | `resume_bgm_if_skipped` | audio | **done** | restarts BGM `0x80000002` when a skip actually happened; inert otherwise, as in the game |
+| `2E` | `stop_voice_if_skipped` | audio | **done** | `PlaySoundId(0x80000002)`, the voice channel's stop, when a skip actually happened; inert otherwise, as in the game |
 | `2F` | `suppress_accuracy_stats` | flow | shown | suppresses the counters 0x2B grades |
 | `30` | `queue_event` | camera | **done** | the scripted-action ring — see the selector table below |
 | `31` | `goto_scene_state` | flow | *tracked* | the end-of-room instruction: enters scene state (1, 3) and retires the outstanding `queue_event 0x21`. The camera hook it installs reads the player view angles, which this client does not have — it draws the `cam/` path. [diverges] |
@@ -5265,7 +5320,7 @@ missed. Meanings and confidence marks live in
 | `5C` | `nop0_c` | nop | n/a | proved no-ops |
 | `5D` | `snd_load_pack_stub` | audio | n/a | OutputDebugStringA stubs — the PC port streams .wav instead |
 | `5E` | `snd_free_pack_stub` | audio | n/a | OutputDebugStringA stubs — the PC port streams .wav instead |
-| `5F` | `bgm_entry_play` | audio | **done** | **plays a BGM track** |
+| `5F` | `bgm_entry_play` | audio | **done** | **stops the music, then plays a BGM track** -- `BgmStopThenPlay`; with a track of 0 it is a stop |
 
 ### `queue_event` (`0x30`) selectors
 

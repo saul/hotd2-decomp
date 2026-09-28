@@ -872,6 +872,22 @@ export class Walker {
    * `g_training_lesson` here instead: no stage script is entered in that mode.
    */
   nextEntryBlock: number | null = null;
+  /**
+   * The BGM id the script has left on channel `0xF`, or null once it has
+   * stopped it -- the engine's `g_current_bgm_id` (`0x009C8FB8`), which
+   * `PlaySoundId` writes on every track it opens and clears on
+   * `0x80000000`.
+   *
+   * Written by **both** instructions that reach `PlaySoundId`: `se_play`
+   * (`0x38`-`0x3B`), which is how five of the six stage scripts start their
+   * own track, and `bgm_entry_play` (`0x5F`). It used to be written by `0x5F`
+   * alone, so a seek past the `se_play` at block 0 step 2 had no music to put
+   * back, and the player started each stage's track at load "by convention"
+   * to cover for it.
+   *
+   * Script state for the reason {@link Walker.loopingSe} is: a seek replays
+   * the instructions silently, and this is what `Bgm.syncTrack` puts back.
+   */
   bgmTrack: number | null = null;
   /** The most recent `se_play` operand, for the HUD. */
   lastSound: number | null = null;
@@ -1738,7 +1754,35 @@ export class Walker {
   static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
     w.lastSound = op.sound ?? null;
     Walker.trackLoopingSe(w, op.sound ?? 0);
+    Walker.trackBgm(w, op.sound ?? 0);
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
+  }
+
+  /**
+   * Keep {@link Walker.bgmTrack} in step with what one `PlaySoundId` does to
+   * channel `0xF` -- **whether or not the sound is played**, as
+   * {@link trackLoopingSe} does for the loops.
+   *
+   * `PlaySoundId` (`FUN_0041CFD0`): a namespace-1 id whose table entry is a
+   * name opens that track and becomes `g_current_bgm_id`; one whose entry is
+   * null breaks out and changes nothing. A namespace-8 id reaches
+   * `PlaySoundControl` (`FUN_0041D3E0`), where `0x80000001` is the SE and
+   * `0x80000002` the voice and **every other value stops the music**. Only
+   * `0x80000000` also zeroes `g_current_bgm_id`; this clears on all of them,
+   * because what a seek needs is what is sounding, and the two differ only
+   * for control words no shipped script uses.
+   */
+  static trackBgm(w: Walker, id: number): void {
+    const ns = id >>> 28;
+    if (ns === 8) {
+      if (id !== 0x80000001 && id !== 0x80000002) w.bgmTrack = null;
+      return;
+    }
+    if (ns !== 1) return;
+    const idx = id & 0xfff;
+    const names = w.script.bgm?.names;
+    if (names && !(names.ar[idx] ?? null) && !(names.plain[idx] ?? null)) return;
+    w.bgmTrack = id >>> 0;
   }
 
   /**
@@ -1755,6 +1799,13 @@ export class Walker {
    */
   static trackLoopingSe(w: Walker, id: number): void {
     if (!id) return;
+    // `PlaySoundId(0x80000001)` releases every SE channel, the loops with
+    // them: `PlaySoundControl` (`FUN_0041D3E0`) → `SoundCommand(n, 0x1100A0)`
+    // (`FUN_004ABF80`).
+    if (id === 0x80000001) {
+      w.loopingSe = [];
+      return;
+    }
     for (const pair of w.script.sound?.looping ?? []) {
       if (pair.play === id) {
         if (!w.loopingSe.includes(id)) w.loopingSe.push(id);

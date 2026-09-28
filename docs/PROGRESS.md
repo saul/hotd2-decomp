@@ -451,12 +451,13 @@ Tracked as they arise; each should end up answered in `docs/formats/` or
 18. Are `+0x14` / `+0x1C` of the spawn descriptor really the other two Euler
     angles? They sit either side of a confirmed BAMS yaw but do not look like
     angles. (Phase 6)
-19. What starts a stage's own BGM? No `bgm_entry_play` in any of the six stage
-    scripts names its stage track — they only switch to boss and transition
-    music. The tables and the dispatcher are solved
-    ([`formats/sound.md`](formats/sound.md)); the scene-entry path that plays
-    `ST1_AR`..`ST6_AR` is not. `PlaySoundId` has 496 callers, so this wants the
-    scene-entry path, not an xref sweep. **Which of the two tables it plays
+19. ~~What starts a stage's own BGM?~~ **Closed: the script does**, with a
+    `se_play` of the track at step 2 of each entry block (stage 5 uses
+    `bgm_entry_play`). The question was asked of `bgm_entry_play` alone, which
+    only switches to boss and transition music; `se_play` reaches the same
+    `PlaySoundId`. The stream the track is played as -- no loop points, the
+    file from its first sample to end of file, three ids unlooped -- is in
+    [`formats/sound.md`](formats/sound.md#the-music-stream-no-loop-points). **Which of the two tables it plays
     from is closed**: `g_app_state == 6 && g_GameMode == 0` is not the
     unreachable state it was written up as — mode 0 is **Arcade** — so the
     plain names are the arcade mix and `_AR` is Original, Training and Boss.

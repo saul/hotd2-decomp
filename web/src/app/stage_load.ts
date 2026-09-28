@@ -262,6 +262,10 @@ export async function loadStageInto(p: Player): Promise<void> {
     return s ? { w: s.w, h: s.h, url: s.png } : null;
   };
   p.deepSprites.images = p.hudLayer.spriteImages;
+  // `SoundStopAll` (`FUN_0041D350`) -- what `MarkSceneOver` and
+  // `ResetGameOnStart` both call on the way into the next scene -- so the
+  // last stage's music, voice and SE do not carry over into this one.
+  p.bgm.stopAll();
   p.bgm.setTable(bundle.script.bgm, entry.game_mode);
   p.bgm.setSoundTables(bundle.script.sound);
   p.treeProj = treeProjection(bundle.script);
@@ -291,11 +295,13 @@ export async function loadStageInto(p: Player): Promise<void> {
   }
 
   applyIncomingState(p);
-  // No `bgm_entry_play` in any stage script starts the stage's own track --
-  // they only switch to boss and transition music -- so the opening track
-  // is started here and labelled as not script-driven.
-  const st = bundle.script.bgm?.stage_track;
-  if (st) p.bgm.play(st.id, "stage");
+  // Nothing starts the music here. Every stage script starts its own track
+  // at step 2 of each entry block: stages 1-4 and 6 with a `se_play` of it,
+  // stage 5 with a `bgm_entry_play`. This used to play the bundle's
+  // `stage_track` at load "by convention", on the belief that no script did
+  // -- a belief that had looked only at `bgm_entry_play` -- so the music
+  // opened a step early and the script's own `se_play` of the same track,
+  // which in the engine starts it from the top, found it already playing.
   p.setLoading(null);
   // The bundle screen's picker shows a frame of each stage, and this is the
   // **fallback** ask: a few frames along, so the script has placed the camera

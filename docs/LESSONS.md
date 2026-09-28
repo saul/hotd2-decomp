@@ -826,3 +826,23 @@ would make it matter, and check that every one of them reaches the port** --
 here, `grep` the placements for a nonzero pitch or roll. It is `L27` and
 `L34`'s "scan the shipped data" applied one step further upstream: the scan has
 to cover the fields the exporter throws away, not only the ones it keeps.
+
+**L58 -- A dispatcher has more than one caller, and "nothing plays X" was
+asked of one of them.** `sound.md` carried "no stage script starts its own
+track" as an open question, `bundle.ts` wrote it into every bundle's
+`stage_track.note`, and the player started each stage's music at load "by
+convention" to make up for it -- all from a table of every `bgm_entry_play` in
+the six scripts. Every one of those names a boss or transition track. But
+`se_play` hands its operand to the same `PlaySoundId`, and **the same document
+said so**: its operand names nine BGM tracks. Five of them are the stage
+tracks, each at step 2 of its entry block. The convention start opened the
+music a step early, and because the port ignored a request for the track
+already playing, the script's own start -- which in the engine reopens the file
+from its first sample -- was swallowed. The same afternoon found evt `0x2E`
+named `resume_bgm_if_skipped` from the word it plays, `0x80000002`, when
+`PlaySoundControl` sends that word to the **voice**; the mixer had taken every
+namespace-8 id as a music stop, so a cutscene skip silenced the stage. **Before
+recording that nothing reaches a routine, enumerate every instruction and
+every call site that can reach it, and read the routine a word is handed to
+before naming the word.** It is `L17` pointed at a dispatcher: the negative was
+true of the caller that was looked at.

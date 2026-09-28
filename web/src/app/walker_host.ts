@@ -100,13 +100,16 @@ export function makeWalkerHost(p: Player, script: ScriptJson): WalkerHost {
       };
     },
     // The subtitle task tests the skip flag every frame and ends itself, so
-    // the caption goes at once. The voice is a fire-and-forget PlaySoundId
-    // that the game leaves playing; it is stopped here because the player
-    // owns the audio element and a line talking over a scene you have just
-    // skipped past reads as a bug rather than as fidelity.
-    endDialogue: () => {
-      p.bgm.stopVoice();
-    },
+    // the caption goes at once -- and that is all a skip does to a dialogue
+    // at the moment it is taken. The voice is stopped by the script, where it
+    // is stopped at all: skippable regions carry `stop_voice_if_skipped` (evt
+    // 0x2E), whose `PlaySoundId(0x80000002)` is the voice channel's stop, and
+    // the walker reaches it a few frames later as it races through the
+    // skipped waits. A region without one leaves the line playing, in the
+    // game as here. This used to stop the voice here instead, on the belief
+    // that the game never did; that belief was the misreading of 0x2E as
+    // "resume the BGM".
+    endDialogue: () => {},
   };
 }
 

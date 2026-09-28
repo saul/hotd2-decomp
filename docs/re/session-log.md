@@ -21391,3 +21391,78 @@ Checks: six quarter-turn assertions on `ApplyRootMotion` (`L48`), five on the
 shipped placement through spawn, climb and leap, three on the render root.
 Mutating the roll out of the matrix, out of the spawn, or the draw order to
 `ZYX` fails them. The new lesson is `L57`.
+
+## 2026-09-28 -- the music has no loop points: channel 0xF, end of file, and three control words
+
+The question (NEW-BUGS-2): the port's music "seems to start from scratch on
+loop -- does the game?" **It does.** `[proved]` Nothing in the files or the
+exe names a loop point. `PlaySoundId` sends every BGM id to
+`SoundPlayOnFreeChannel(name, loop, 0xF, -1)`; channel `0xF` alone is opened
+streamed (`SoundChannelOpenWav(0xF, name, 1, 3000)`, `0x004AC131`), whose header
+walk counts bytes into `+0x3C` and stops at `data` -- the first sample, 44 in
+every shipped track. `SoundStreamThread` (`FUN_004A4640`) refills half a ring
+at a time with a raw `ReadFile`, and a short read is end of **file**: on the
+loop bit it seeks to `+0x3C` and reads the rest into the same lock
+(`0x004A4991`, `0x004A4AAF`). So a track is `[first sample, EOF)` end to end,
+gapless -- with the file's trailing `LIST` chunk played as PCM once a pass, and
+the channels exchanged on every other pass wherever that tail leaves a pass
+`2 mod 4` bytes long. None of the 38 tracks has an intro that plays once.
+
+What the port got wrong around it, all fixed here:
+
+* the seam -- an `<audio loop>` element, which also returns to sample 0 but
+  stops at the end of `data` and put **8.4 ms** of silence at the join of
+  `ST1.WAV` (measured, scratch harness against the old code). `audio/stream.ts`
+  builds one period of the engine's stream and `bgm.ts` loops it in Web Audio;
+* three ids are unlooped -- `CMP EBX` at `0x0041D1FB/05/0D`: `OVR_AR`, `CLR2`,
+  `HOD1_ADV` -- and the port looped all of them, the game-over sting included
+  (its own `game_over.ts` said "not looped");
+* the engine reopens the file on every play, so replaying the current track
+  restarts it; the port ignored it;
+* `bgm_entry_play` is `BgmStopThenPlay` and the port only played, so
+  `bgm_entry_play 0` was inert;
+* `PlaySoundControl` (`FUN_0041D3E0`, named here) has three arms -- 0x80000001
+  the SE channels, 0x80000002 the **voice**, anything else the music -- and
+  the mixer stopped the music on all of them.
+
+**Wrong turn in the record, not in this session: "no stage script starts its
+own track".** `sound.md` had it as an open question, `bundle.ts` wrote it into
+every bundle's `stage_track.note`, and `stage_load.ts` started the track at load
+"by convention" on the strength of it. It was concluded from the
+`bgm_entry_play` table -- while the same document said `se_play` names nine BGM
+tracks. Every stage's script starts its own track with a `se_play` at step 2 of
+each entry block (stage 5 with `bgm_entry_play`); `test:seek` now asserts it
+across the bundles. The convention start is gone and the walker's `bgmTrack`
+follows `se_play` too, which is what makes a deep link keep its music. L58.
+
+**Wrong turn, the second: `resume_bgm_if_skipped`.** evt `0x2E` plays
+`0x80000002` after a skip, and was named for resuming the music. Reading
+`PlaySoundControl` shows `0x80000002` reaches `SoundStopGroup(g_voice_stop_group)`
+-- channel `0x10`, the voice. Renamed `EvtOpStopVoiceIfSkipped2E` /
+`stop_voice_if_skipped` in the TSV, the live database and both `evt` tables.
+The port's walker host had been cutting the voice at the moment of a skip "because
+the game leaves it playing"; the script's `0x2E` does it, a few frames later,
+and the host no longer does.
+
+**Mine.** The first harness run counted the `RAIN3ST_44_OFF.wav` 404 (a
+looping SE's stop id plays its own absent name) as a page fault; `audio.mjs`
+already excuses `_OFF` by pattern and `bgm_loop.mjs` now does the same. A
+run of three scenarios also hit vite's `504 Outdated Optimize Dep` on the third
+server -- `node_modules` is symlinked to the shared checkout, so its `.vite`
+cache is shared -- and passed on a re-run.
+
+Not done, noted: looping **SE** are static buffers the size of the `data`
+chunk with `DSBPLAY_LOOPING` (`[likely]`, `FUN_004A4500` unread) and the port
+still loops them on elements, with an element's seam; the voice is one channel
+(`0x10`) that a new line cuts, and the port plays voice over a pool of eight;
+`FUN_0040E500` stops the music and replays `g_current_bgm_id` from the top on
+toggling back -- `[likely]` the in-game pause, which the port's transport
+pause is not.
+
+Checks: `test:audio` (new), `test:seek` (new section), `bgm_loop.mjs` (new),
+`verify_bgm_stream.py` (new). Named: `SoundStopGroup`, `SoundStopGroupsInit`,
+`SoundStopAll`, `PlaySoundControl`, `SoundStopGroupThunk`, `SoundChannelsRelease`,
+`SoundStreamFree`, `SoundChannelPause` (`[likely]`), `SoundChannelStopAndRewind`,
+`SoundStreamRewind`, `SoundStreamFill`, `SoundChannelOpenWav`, `SoundStreamThread`,
+`SoundOpenFile`, `SoundCommand`; `g_sound_channels`, `g_sound_channel_count`,
+`g_bgm_stop_group`, `g_voice_stop_group`.

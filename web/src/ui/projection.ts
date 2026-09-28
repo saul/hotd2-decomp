@@ -30,7 +30,8 @@ export type StripRow = readonly [string, string, boolean?];
  * connecting them.
  */
 export type DebugGroupName =
-  "camera" | "scene" | "actors" | "props" | "collision" | "shooting";
+  "camera" | "scene" | "actors" | "props" | "collision" | "shooting"
+  | "route";
 
 /** One route out of a branch point, as a button. */
 export interface BranchOption {

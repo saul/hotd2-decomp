@@ -422,7 +422,7 @@ What it is for, in rough order of value:
 | **The VM** — program counter over block/step/op, the dispatch table, `executeOne`, `apply` | `walker.ts`. **Not split into a `vm.ts`**, and not going to be — see below |
 | **The opcodes** | `script/ops/*.ts`, one module per category, merged by `ops/index.ts` |
 | **Resumption** — what makes the VM *stop*: wait policies, the enemy gates, the skip request | `script/waits/*.ts`, one file per policy kind, registered the way `ops/` register |
-| **Script-driven state** — channel tweens, queued events, the shutter and its firing gate, the `queue_event` actions | `script/state/{channels,queued,shutter,camera_action}.ts` |
+| **Script-driven state** — channel tweens, queued events, the shutter's accessors, the `queue_event` actions | `script/state/{channels,queued,shutter,camera_action}.ts` |
 | **Seek** — `seek`, `seekInner`, `reaches`, `takeBranchToward` | `script/seek.ts`, a planner that drives the VM's public surface |
 
 **No `vm.ts`.** The plan had one, at ~250 lines, and the extraction is not
@@ -439,21 +439,22 @@ comes out whole. `queued.ts` is the action ring *and* the outstanding
 engine runs the ring one action at a time, so a shot being replaced **is** the
 previous action completing. Splitting *those* is what would let the count and
 the flag be written down inconsistently, which is the bug that used to park a
-reload for ever. `shutter.ts` is the nine-state machine `HudDrawShutterState`
-runs *and* the firing gate it drives, for the same reason: `g_nFiringGate` is
-written on five of that function's paths and by nothing else that runs inside a
-scene, so a second writer of it would be a second owner of one word — which is
-what the port already had once, when the slide counter existed twice and a seek
-reset one copy while restoring the other.
+reload for ever.
 
-The **word itself** is in `game/globals.ts`, not on the walker, and that is not
-a contradiction: `shutter.ts` remains its only writer and reaches it through an
-accessor. It moved there when the port started honouring it, because the
-routine that *reads* it — `PlayerFireAndReloadUpdate`, whose whole fire block
-sits under `else if (g_nFiringGate != 0)` — is in `game/`, and a copy pushed
-across from `script/` would have been exactly the second owner this paragraph
-is about. The shutter's own three fields stay in `script/`: nothing outside the
-script reads them.
+`shutter.ts` is **not** the shutter's machine any more, only the script's view
+of it. evt `0x1F` is one store into `g_bHudShutterState`; the nine-state
+machine, the 40-frame slide and every write of `g_nFiringGate` are
+`HudDrawShutterState`'s, which is a task of the scene's own that runs **after
+the player tasks and before every actor** (`HudShutterTaskCreate` is the
+eighth call of the task-list builder). The machine was here and stepped at the
+top of the walker's next tick, which put it on the wrong side of the players:
+the opcode raised the gate a frame before the engine lets a shot through and
+the slide drew a counter behind. So it moved to `game/hud_shutter.ts`, where
+`SceneTaskWalk` runs it in the engine's place, and its four words -- the state,
+`g_bHudShutterPrev`, the task's counter and the gate -- are all in `G`, with
+`shutter.ts` holding accessors onto them so the walker's names still read.
+What it draws is recorded into `G.g_hud_shutter_bars` for `hud/` to put on the
+screen, the way `DrawScreenSprite` calls are.
 
 `camera_action.ts` is the one that was still a hidden switch. `queue_event`
 (0x30) dispatches on a selector, and the port had that as ~140 lines of
@@ -594,9 +595,9 @@ itself** is a different matter and is allowed where React's model is the wrong
 tool — the script tree's highlight and the minimap's canvas both do it.
 
 **7. State the script drives belongs to the script**, not to the layer that
-draws it. The shutter's state and slide counter and the caption's countdown all
-live on `Walker` and go in the snapshot; `hud/` reads them every tick and holds
-nothing.
+draws it. The caption's countdown lives on `Walker` and goes in the snapshot;
+the shutter's state, slide counter and the bars it drew are the engine's and
+live in `G`. `hud/` reads them every tick and holds nothing.
 
 ### One region dies instead of the page
 
@@ -675,7 +676,10 @@ web/src/
                   (`Actor.partVisible`), `ActorDrawShadow`'s gate, and the node
                   walk a class's draw hook runs from when its pose is
                   render/'s. render/characters/draw_gates.ts applies them node
-                  by node; none of it is an alpha
+                  by node; none of it is an alpha. The head aim both combat
+                  hooks run from that walk is class30/head_aim.ts; the angles
+                  are state on each arm, and render/characters/head_aim.ts
+                  turns bone 2's own meshes around their draw
     original_mode.ts  the two-slot inventory, and the one query the branch
                   triggers make of it
     registry.ts   the handler contracts and an empty table. Imports no class
@@ -698,6 +702,9 @@ web/src/
     player_gun.ts the trigger, the magazine and the reload
     hud_readout.ts  the bullets, the RELOAD prompt and the lives, drawn as
                   screen sprites; hud_sprites.ts their ids, for the exporter
+    hud_shutter.ts  `HudDrawShutterState`: the letterbox, its slide and the
+                  firing gate, run after the player tasks; the bars it draws
+                  are recorded for the HUD layer
     screen_sprite.ts  `DrawScreenSprite`, recorded for the HUD layer to draw
     continue_readout.ts  what a player's task draws off the play: the small
                   CONTINUE? and digit, the small GAME OVER, the score cheat,
@@ -714,7 +721,8 @@ web/src/
     registry.ts   table assembly that refuses a duplicate key
     ops/          the opcodes, one module per group
     waits/        one module per wait policy
-    state/        channels, queued events, shutter, camera actions
+    state/        channels, queued events, the shutter's accessors,
+                  camera actions
     seek.ts       the planner
     (there is deliberately no `vm.ts`: the machine is the part that was
      never the problem -- see "`script/`: the machine, and the state the
@@ -765,7 +773,8 @@ web/src/
     panels/       one file per panel, each subscribing to what it reads;
                   Viewport.tsx renders the canvas, hud nodes and crosshair;
                   GameOver.tsx the game-over sprites and its two buttons
-  hud/          hud.ts — the shutter and the caption, drawn. Holds no state
+  hud/          hud.ts — the shutter bars the engine recorded, the caption
+                and the screen sprites, drawn. Holds no state
                 and imports nothing; React renders its nodes and hands them
                 over through `UiHost`
   audio/        bgm.ts — audio, not UI

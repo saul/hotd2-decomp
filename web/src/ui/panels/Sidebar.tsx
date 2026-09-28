@@ -127,7 +127,12 @@ export function Sidebar() {
         <SoundPanel />
       </Panel>
 
-      <Panel id="panel-route" title="Route graph">
+      <Panel id="panel-route" title="Route graph"
+             subTitle={"The stage's blocks and the routes between them. At a "
+               + "branch the game takes next[g_script_branch_var] on the "
+               + "frame the steps run out; `Pause at branches` is a debug aid "
+               + "that holds there so the other road can be taken by hand."}>
+        <DebugGroup group="route" />
         <Minimap />
       </Panel>
 

@@ -10,23 +10,26 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ThrowerFlag, type ThrowerActor } from "../actor";
+import { ActorFlag, MotionFlag, ThrowerFlag, type ThrowerActor }
+  from "../actor";
 import { ThrowerTryClaimAttackSlot } from "../combat/permits";
 import type { GameHost } from "../host";
 import { MotionOf, SecondsToTicks } from "../tables";
-import { vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
 import { TurnAngleTowardFrames } from "../actor_turn";
-import { ZombieSetMotionIfIdle } from "../class30/motion_cue";
+import { ActorSetMotionBlended, ZombieSetMotionIfIdle }
+  from "../class30/motion_cue";
 import { GAME_HZ, MotionFade } from "../class30/states";
 import {
   ActorArcBegin, ActorArcStep, ActorClipFrame, ActorClipLength,
-  InstallArcMotionScript,
+  ActorPlayCursor, ArcPhase,
 } from "./arc";
 import { ThrowerPickLandingPoint } from "./leap_down";
 import { ThrowerMotion, ThrowerState } from "./states";
 import { ThrowerStrikeConnect } from "./strike";
 import {
-  ThrowerAttackOf, ThrowerMotionOf, ThrowerPickAttack, ThrowerStanceOf,
+  ThrowerAttackOf, ThrowerLoadAttackArcScript, ThrowerMotionOf,
+  ThrowerPickAttack, ThrowerStanceOf,
 } from "./tables";
 
 const _dest = vec3();
@@ -84,47 +87,98 @@ const POUNCE_ROLL_RATE = 0xccc;
 /**
  * `ThrowerStateDelayedPounce` — `FUN_0044E830`, class 0x31 state 23.
  *
- * Both an entrance and an attack, and the only one that aims at the camera's
- * *own* height rather than at a point below it: the destination is
- * `ThrowerPickLandingPoint`'s x and z at `g_camera_eye_y`. It rolls its roll
- * angle back to level at 0xCCC a frame on the way in, and ends in
- * `ThrowerStateWithdraw` rather than in the leap aside.
+ * Both an entrance and an attack: a wait on a clip, then a leap at the camera
+ * that ends in `ThrowerStateWithdraw` rather than in the leap aside. Stage 2
+ * block 21's two `zstin` are the shipped spawns in it -- motion 310, a walk,
+ * for 45 and 60 frames. `[proved]` from the listing, three subs that fall into
+ * each other with no `RET` between (`SUB EAX,0/JZ`, `DEC/JZ`, `DEC/JZ` at
+ * `0x0044E846`):
  *
- * Note which stance each half reads. The **script** comes from the row
- * including the pounce bit, and the **hit frame** from `obj+0x1364`, which
- * this state never writes — so the swing plays row 4's clip and connects on
- * row 0's frame. That is what the code does, and it is not a transcription
- * slip.
+ * ```
+ * sub 0  0044e863  obj+0x1F8 |= 0x10                      ; RootMotionY
+ *        0044e879  ActorSetMotionBlended(obj+0x194, desc+4, 0, 5)
+ *        0044e884  obj+0x34 |= 0x100                       ; ShotImmune
+ *        0044e894  obj+0x1330 = desc+8; sub 1, and on
+ * sub 1  0044e8a0  if (--obj+0x1330 > 0) return
+ *        0044e8ba  obj+0x1F8 &= ~0x10; obj+0x34 &= ~0x100
+ *        0044e8ca  if (!ThrowerTryClaimAttackSlot(obj)) obj+0x121 = 0xFF
+ *        0044e8e6  obj+0x34 |= 0x10000000; obj+0x136C |= 0x20000
+ *        0044e927  obj+0x131A = g_class31_attack_picks[set]
+ *                               [(rand() >> 4) % 10 + (obj+0x1318 & 7) * 10]
+ *        0044e930  ThrowerLoadAttackArcScript(obj)
+ *        0044e93b  ThrowerPickLandingPoint(obj, &p)
+ *        0044e964  ActorArcBegin(obj+0x40..0x48, p.x, g_camera_eye_y, p.z,
+ *                                desc+8)
+ *        0044e96c  sub 2; obj+0x1360 = 0, and on
+ * sub 2  0044e988  obj+0x6C = TurnAngleToward(obj+0x6C, 0, 0xCCC)
+ *        0044e99e  if (obj+0x121 != 0xFF) ThrowerStrikeConnect(obj)
+ *        0044e9f5  if (obj+0x19C > g_class31_melee_attacks[set]
+ *                                   [attack + stance*4].hit_frame)
+ *                    obj+0x34 |= 0x2000                    ; NoHitReaction
+ *        0044ea07  if (ActorArcStep(obj, 1) != 1) {
+ *                    obj+0x34 &= ~0x10000000; obj+0x136C &= ~0x20000
+ *                    state 0x19, sub 0 }
+ * ```
+ *
+ * **The wait cannot be shot and it walks.** `ShotImmune` makes every hit a
+ * ricochet until the counter runs out -- and on that same frame
+ * `ActorArcStep`'s windup raises it again, so the actor is only shootable
+ * from the takeoff on. The clip is the ordinary motion,
+ * so it loops for the whole wait and its root carries the actor -- 310 covers
+ * seven units a cycle. Bit `0x10` would carry its height as well; 310's root
+ * height never changes, so it moves nothing, but the bit is the engine's.
+ *
+ * **Three stances, and they are not the same one.** The script comes from the
+ * live stance, which `obj+0x136C |= 0x20000` has just moved to the pounce
+ * rows; the connect reads its hit frame through `obj+0x1364`, which only
+ * `ThrowerStateLeapDown` writes and so is 0 for a spawn that has never leapt
+ * down; and the `0x2000` test reads the live stance again. So stage 2's pair
+ * swing row 4's clip 289, connect on row 0's frame 62 or 64, and stop
+ * flinching past row 4's 66. That is what the code does, and it is not a
+ * transcription slip.
+ *
+ * It used to play the wait as a one-shot, with no immunity and no root
+ * height; raise `ActorFlag.BackingOff` (`0x20000000`, the bit
+ * `RankEnemiesByDistance` drops from the queue) for `0x10000000`; latch the
+ * connect's stance itself; aim at `obj.lookAt.y`, the actor's own tracked
+ * point, for the eye's height; and never raise `0x2000`.
  */
-export function ThrowerStateDelayedPounce(obj: ThrowerActor, dt: number,
-                                          rng: Rng,
+export function ThrowerStateDelayedPounce(obj: ThrowerActor, eye: Vec3,
+                                          dt: number, rng: Rng,
                                           host: GameHost,
                                           events?: Events): void {
   const p = obj.pounce;
+  // [port-only] The engine reads `obj+0x1390` blind; the exporter emits no
+  // tail for a descriptor whose clip or count is out of range.
   if (!p) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
 
   if (obj.sub === 0) {
-    obj.action = { motion: p.motion, ticks: 0, loop: false };
-    obj.rootActionFrame = -1;
-    obj.slideTimer = p.frames;
+    obj.motionFlags |= MotionFlag.RootMotionY;
+    ActorSetMotionBlended(obj, p.motion, 0, MotionFade.Quick);
+    obj.flags |= ActorFlag.ShotImmune;
     obj.sub = 1;
+    obj.slideTimer = p.frames;
   }
 
   if (obj.sub === 1) {
     obj.slideTimer -= dt * GAME_HZ;
     if (obj.slideTimer > 0) return;
+    obj.motionFlags &= ~MotionFlag.RootMotionY;
+    obj.flags &= ~ActorFlag.ShotImmune;
     if (!ThrowerTryClaimAttackSlot(obj, host)) obj.attackPermit = -1;
-    obj.flags |= ActorFlag.BackingOff;
+    obj.flags |= ActorFlag.Committed;
     obj.flags2 |= ThrowerFlag.Pouncing;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
-    InstallArcMotionScript(obj,
-      ThrowerAttackOf(obj, ThrowerStanceOf(obj), obj.attack)?.script ?? null);
+    ThrowerLoadAttackArcScript(obj);
     ThrowerPickLandingPoint(obj, host, _dest);
-    _dest.y = obj.lookAt.y;
+    _dest.y = eye.y;                      // `g_camera_eye_y`, `0x009C71E4`
     ActorArcBegin(obj, _dest, p.frames);
-    obj.arcPhase = 0;
     obj.sub = 2;
+    obj.arcPhase = ArcPhase.Windup;
   }
+  // A sub-state past 2 is the engine's `POP EDI / POP ESI / RET` at
+  // `0x0044E855`: the dispatch has three arms and nothing else.
+  if (obj.sub !== 2) return;
 
   // Roll back to level at 0xCCC a frame -- it comes in off the vertical.
   // `0044e97d`: `obj+0x6C = TurnAngleToward(obj+0x6C, 0, 0xCCC)`, on the
@@ -133,9 +187,16 @@ export function ThrowerStateDelayedPounce(obj: ThrowerActor, dt: number,
   obj.roll = TurnAngleTowardFrames(obj.roll, 0, POUNCE_ROLL_RATE,
                                    SecondsToTicks(dt));
   if (obj.attackPermit >= 0) ThrowerStrikeConnect(obj, events);
-  if (ActorArcStep(obj, 1, dt)) return;
 
-  obj.flags &= ~ActorFlag.BackingOff;
+  // Past the **live** stance's hit frame the actor stops flinching. Nothing
+  // here takes the bit down again; `ThrowerStateWithdraw`'s exit does.
+  const e = ThrowerAttackOf(obj, ThrowerStanceOf(obj), obj.attack);
+  if (e && ActorPlayCursor(obj) > e.hit_frame) {
+    obj.flags |= ActorFlag.NoHitReaction;
+  }
+  if (ActorArcStep(obj, 1, dt, host, events)) return;
+
+  obj.flags &= ~ActorFlag.Committed;
   obj.flags2 &= ~ThrowerFlag.Pouncing;
   obj.state = ThrowerState.Withdraw;
   obj.sub = 0;

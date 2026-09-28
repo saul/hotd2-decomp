@@ -116,6 +116,14 @@ export function Viewport(
   // while the game's own reticle is gone.
   const crosshair = useSlice((p) => p?.crosshair);
   const aiming = ready && crosshair === true;
+  // The letterbox is a fraction of the *frame*, not of this element: the
+  // engine's bars sit at view-space y = +-0.35 against the frustum's
+  // half-height, so they belong to the rendered view. Pillarboxed, that is the
+  // 4:3 box `Player.resize` gives the canvas, which in a window taller than
+  // 4:3 is shorter than the viewport -- and the bars used to be measured off
+  // the viewport there, covering the frame's black margin and a sliver of the
+  // picture instead of a tenth of it.
+  const boxed = useSlice((p) => p?.pillarbox) === true;
   return (
     <div id="viewport" ref={refs.host}
          className={[paused && "paused", aiming && "shooting"]
@@ -128,8 +136,10 @@ export function Viewport(
           have no height until `Hud.draw` runs, which cannot happen before
           `app/` exists to tick it. */}
       <div className="hud-layer" ref={refs.hud} hidden={!hud}>
-        <div className="shutter shutter-top" ref={refs.shutterTop} />
-        <div className="shutter shutter-bottom" ref={refs.shutterBottom} />
+        <div className={boxed ? "hud-frame boxed" : "hud-frame"}>
+          <div className="shutter shutter-top" ref={refs.shutterTop} />
+          <div className="shutter shutter-bottom" ref={refs.shutterBottom} />
+        </div>
         {/* The caption is the one node on this subtree whose `hidden` stays
             with the layer, and it is deliberately not written here at all:
             whether there is a caption is a countdown on the walker, not a

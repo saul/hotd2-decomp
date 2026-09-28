@@ -282,9 +282,9 @@ body.resizing { cursor: col-resize; user-select: none; }
   font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
   color: var(--dim); cursor: help;
 }
-.grp-debug { border-top: 1px dashed var(--line); padding-top: 5px; }
-.grp-debug label { color: var(--dim); }
-.grp-debug label:hover { color: var(--text); }
+.grp-debug, .grp-aid { border-top: 1px dashed var(--line); padding-top: 5px; }
+.grp-debug label, .grp-aid label { color: var(--dim); }
+.grp-debug label:hover, .grp-aid label:hover { color: var(--text); }
 .grp-rows {
   display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
   font-size: 12px;
@@ -389,6 +389,16 @@ body.resizing { cursor: col-resize; user-select: none; }
   z-index: 1;
 }
 .hud-layer[hidden] { display: none; }
+/* The frame the letterbox is a fraction of: the rendered view. Unboxed that
+   is the whole viewport, which the fixed vertical FOV spans; pillarboxed it is
+   the largest centred 4:3 box -- the canvas's own box (`Player.resize`), and
+   the same one `.hud-screen` fits. */
+.hud-frame { position: absolute; inset: 0; }
+.hud-frame.boxed {
+  inset: auto; left: 50%; top: 50%;
+  width: min(100cqw, 133.3333cqh); height: min(75cqw, 100cqh);
+  transform: translate(-50%, -50%);
+}
 .shutter {
   position: absolute; left: 0; right: 0; height: 0;
   background: #000;

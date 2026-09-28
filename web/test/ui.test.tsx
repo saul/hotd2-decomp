@@ -46,7 +46,10 @@ import { App } from "../src/ui/App";
 import { ErrorBoundary } from "../src/ui/ErrorBoundary";
 import { UiStore } from "../src/ui/store";
 import { Transport } from "../src/ui/panels/Transport";
-import { TOGGLE_DEFAULTS } from "../src/ui/panels/Toggles";
+import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
+import { DebugGroup } from "../src/ui/panels/DebugGroup";
+import { StoreContext } from "../src/ui/store_context";
+import { shutterCover } from "../src/hud/hud";
 import { readPersisted, writePersisted } from "../src/ui/persist";
 import type { UiProjection } from "../src/ui/projection";
 
@@ -119,6 +122,7 @@ function projection(): UiProjection {
       props: [["props", "44/44 up"]],
       collision: [["coli", "0 quads selected"]],
       shooting: [["shooting", "off"]],
+      route: [["g_script_branch_var", "0"]],
     },
     skip: { canSkip: true, sub: "region 3", stacked: false },
     branch: { sub: "two routes", options: [], countdown: "5s",
@@ -559,6 +563,71 @@ console.log("\nOne key per preference:\n");
     threw = true;
   }
   check("...and neither call escapes", !threw);
+}
+
+// The branch pause is a debug aid: the engine goes the moment the steps run
+// out, so the switch that holds there has to start off, has to say what it
+// is, and has to be where the other switches are -- the route panel's group,
+// drawn from the one table.
+console.log("\nThe branch pause is a debug aid, off by default:\n");
+{
+  const spec = TOGGLES.find((t) => t.name === "branchPause");
+  check("it is a row of the toggle table, in the route group, as an aid",
+        spec?.kind === "aid" && spec.group === "route", JSON.stringify(spec));
+  check("...and it starts off, which is the engine",
+        TOGGLE_DEFAULTS.branchPause === false);
+  const store = new UiStore();
+  store.publish(projection());
+  const html = renderToStaticMarkup(createElement(
+    StoreContext.Provider, { value: store },
+    createElement(DebugGroup, { group: "route" })));
+  const box = /<label[^>]*>\s*<input type="checkbox"([^>]*)\/>\s*Pause at branches/
+    .exec(html);
+  check("the route group draws it as a checkbox", box !== null, html);
+  check("...unchecked", box !== null && !/checked/.test(box[1]), box?.[1]);
+  check("...under its own heading, apart from the game and the overlays",
+        html.includes("grp-aid") && html.includes("debug aids"));
+}
+
+// The letterbox is drawn from the bars the engine's routine recorded, not
+// from a state. These are the numbers `HudDrawShutterState` draws: shut at
+// +-0.35, a slide at 0.35 + counter * 0.0025, and the blackout's one bar
+// scaled 8 -- against a 41.1 degree frustum's half-height of 0.3748.
+console.log("\nThe shutter bars, as the HUD layer covers the frame:\n");
+{
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.05;
+  const shut = shutterCover([{ y: 0.35, sy: 1 }, { y: -0.35, sy: 1 }]);
+  check("shut bars cover a 10% band top and bottom",
+        near(shut.top, 9.98) && near(shut.bottom, 9.98), JSON.stringify(shut));
+  const none = shutterCover([]);
+  check("no bars cover nothing", none.top === 0 && none.bottom === 0);
+  const past = shutterCover([{ y: 0.35 + 30 * 0.0025, sy: 1 },
+                             { y: -0.35 - 30 * 0.0025, sy: 1 }]);
+  check("thirty frames into an open the bars have cleared the frame",
+        past.top === 0 && past.bottom === 0, JSON.stringify(past));
+  const half = shutterCover([{ y: 0.35 + 15 * 0.0025, sy: 1 },
+                             { y: -0.35 - 15 * 0.0025, sy: 1 }]);
+  check("...and fifteen in they are part-way, the same both sides",
+        half.top > 0 && half.top < shut.top && half.top === half.bottom,
+        JSON.stringify(half));
+  const black = shutterCover([{ y: 0, sy: 8 }]);
+  check("the blackout covers all of it", black.top === 100
+        && black.bottom === 100, JSON.stringify(black));
+
+  // ...and "the frame" is the rendered view. Pillarboxed in a window taller
+  // than 4:3 the canvas is a centred 4:3 box shorter than the viewport, and
+  // bars measured off the viewport covered its black margin instead.
+  const frameOf = (boxed: boolean) => {
+    const html = render({ ...projection(), pillarbox: boxed });
+    const layer = html.slice(html.indexOf('class="hud-layer"'));
+    const m = /<div class="(hud-frame[^"]*)">\s*<div class="shutter shutter-top"/
+      .exec(layer);
+    return m?.[1] ?? null;
+  };
+  check("pillarboxed, the bars sit in the 4:3 frame box",
+        frameOf(true) === "hud-frame boxed", String(frameOf(true)));
+  check("...and unboxed, in a frame that is the whole viewport",
+        frameOf(false) === "hud-frame", String(frameOf(false)));
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

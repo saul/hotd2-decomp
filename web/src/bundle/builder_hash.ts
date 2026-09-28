@@ -43,7 +43,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "game/class19/slots.ts": "38d0cfd41dc2700247a3de6f65a43301d1331df05ea2a79035f9facf38177d41",
   "game/class22/records.ts": "57874272e772536b9bdf7584b9e2ba3b6a337253cb4a645b3fe4aac188208d58",
   "game/class23/records.ts": "2d83661511c6b3b412986cd0a2d1d9a49784fdbcf862f65edb7feead201fe109",
-  "game/class25/state.ts": "aef47ee1636919fb933d733fb3c9b67d7eafc1e013c3ebc7dd884c409f4e0795",
+  "game/class25/state.ts": "38d6e2bf9aa2212ed0a26c5e0df45351f44b19a79a0d9a1a5dbc9c196cb52b88",
   "game/class30/bonecels.ts": "8d9f2553b5c7dbb065d6a3a48ead984a757ce5f3fbf6c830938a49a3ebcf6a40",
   "game/class41/water_slots.ts": "654c7b121971e16e7ecbca8fb3f2c265948c1fe82abd2ef009510b02ddec5235",
   "game/class45/tables.ts": "9c4cc0760b37ba37b4f88255ceb6c07d3540753b766400416f2624ec0bb2585c",
@@ -59,7 +59,7 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
   "props.ts": "7186ef2c37d5b64e8893cee5b51e1894f09972ce14c7f487f10e125e2e49bc30",
   "pyjson.ts": "693a387ed9d4ef67ee50cb7da5502d9dc8132871893eff3a0a0009047c5feb5a",
   "rigs.ts": "bff39ab9d598b2566b653be5b3b69a018906faef517a7c3ec58f485a7bb3f0be",
-  "rigs_data.ts": "d3d6680105b6a08ef46d60358752a05550db035a83aca5c2d067623ae58dd7bc",
+  "rigs_data.ts": "6ce7cfdc91a9d992cfd9880f8b07880908d62eef0c7824705b522e5cade44c0a",
   "script.ts": "f06caa37c419015f5673f993aac6ca105e4ca0f62dbd0a28af142df99c781cd2",
   "sha256.ts": "7c01f5b843a50a7fc05e749c7a737c252482557ebc523eef7da0f46c7baa427c",
   "spawnres.ts": "42e05c9f9904e1b569e4d066762eb2cdc296729c9e7bd54e7e57fbb791c9b272",
@@ -68,4 +68,4 @@ export const BUILDER_FILES: Readonly<Record<string, string>> = {
 };
 
 /** One digest over {@link BUILDER_FILES}, in filename order. */
-export const BUILDER_HASH = "ce21e563d58edc8deb0ab7fb4037e6bb577f2a722932330b9aea2c63541cc557";
+export const BUILDER_HASH = "198e3423d2c1612e0bee81596eb9bcdeb03ad377c4a0d580a18cb209021c25d7";

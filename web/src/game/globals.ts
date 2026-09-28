@@ -433,6 +433,20 @@ export const G = {
    */
   g_original_fire_mode: [0, 0] as number[],
   /**
+   * `g_original_character` — 0x009A2242 + player*0x14, `+0x02` of the same
+   * Original Mode block: the character a player plays in Original Mode. Its
+   * readers decode 0..7 as character types 0x39..0x40, 8 as 0x21 and 9 as
+   * 0x34, and take `3*c` as a row of `g_player_hand_slots` -- class 0x25's
+   * Init and its `op 9` among them, both only while `g_GameMode` is 1.
+   *
+   * Seeded as `ResetOriginalModeLoadout` (`FUN_0048A0D0`) leaves it -- the
+   * player index, `puVar1[-5] = cVar2` -- like the rest of this block, whose
+   * reset is part of the stage load the port has already done
+   * (`ResetGameOnStart`). Every instruction that names `0x009A2242` or
+   * `0x009A2256` as a literal reads it; that reset is the one writer found.
+   */
+  g_original_character: [0, 1] as number[],
+  /**
    * The four auto-fire bytes at `+0x10..+0x13` of `g_original_item_slots`
    * (`0x009A2250 + player*0x14`), which `OriginalWeaponLoadFireParams`
    * (`FUN_00416420`) loads and `PlayerFireOriginalModeWeapon` counts down:

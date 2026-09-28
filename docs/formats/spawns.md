@@ -712,7 +712,7 @@ six stages reach carry a literal frame.
 block**:
 
 ```
-tail+0x00  s8   character type   (Boss Mode remaps 0x39/0x3A to the player's)
+tail+0x00  s8   character type   (Original Mode remaps 0x39/0x3A through g_original_character)
 tail+0x02  s16  removal: cam path, or a script-flag index
 tail+0x04  s16  removal: cam frame threshold
 tail+0x08  u32  a model handle
@@ -736,7 +736,7 @@ reach decode with every opcode in `0..18` or `-1`.
 | 3 | set the motion, with a blend | 195 |
 | 14 | set the draw mode | 155 |
 | 0 | wait, and record which condition released it | 145 |
-| 9 | swap the model in a hand, from `0x004EC9E0` | 114 |
+| 9 | bone 5's draw slot from `g_player_hand_slots` (`0x004EC9E0`) — see below | 117 |
 | 10 | skip an arm unless the player count matches | 100 |
 | 1 | as 0, with the mark set to 1 | 88 |
 | -1 | leave the VM for the idle routine | 69 |
@@ -746,7 +746,7 @@ reach decode with every opcode in `0..18` or `-1`.
 | 8 | set the position | 13 |
 | 17 | by mode: install one of three routines (0, 1, 4), or spawn a sprite and run on (2, 3) — see below | 12 |
 | 2 | set the motion | 10 |
-| 16 | swap one bone's draw slot | 8 |
+| 16 | blood on bone `a`, then its draw slot from the effect table — see below | 8 |
 | 6 | stop turning, or face the camera | 8 |
 | 7 | face a point once | 4 |
 | 5 | turn by a fixed amount over N frames | 1 |
@@ -787,6 +787,34 @@ all shipped:
 The three installed routines run no removal test and never read the command
 block again. A mode above 4 (or negative) steps past the command and ends the
 frame. Ported in `game/class25/`.
+
+**`op 9` and `op 16` write a bone's draw record, and nothing else** `[proved]`
+(`0x00484739`, `0x00484972`). Both run on into the next command in the same
+frame.
+
+* `op 9` stores `g_player_hand_slots[3*row + mode]` (`s16`, `0x004EC9E0`) into
+  `obj+0x4DC`, bone 5's `+0x00`, unconditionally. `row` is `a`, except in
+  Original Mode (`g_GameMode == 1`), where an `a` of 0 or 1 is
+  `g_original_character[a]` (`0x009A2242 + p*0x14`) -- which its one writer,
+  `ResetOriginalModeLoadout`, sets to the player index, so the row is the same.
+  The table is ten rows of three, one per character the byte can name (0..7
+  are types 0x39..0x40, 8 is 0x21, 9 is 0x34), and `PlayerBodySetHandSlot`
+  (`FUN_00416810`) is its other reader. Each character's own skeleton slot
+  for bone 5 is in its row (variant 1 for rows 0-3, variant 0 for row 4).
+  117 commands in 114 programs, in all six stages, name rows 0 to 4; stage 3
+  block 11's James takes row 0's variant 2 (`0x1592`) for the closing scene.
+* `op 16` calls `SpawnBloodSpray(obj, a, 0.75)` and then reads the character's
+  effect table (`g_pBoneEffectSlots`, `0x004C7160`) at `6*a + b`, storing it
+  into bone `a`'s record only when it is above 2 -- 0, 1 and 2 are the table's
+  control codes. It is **not** `ActorSwapDamagedPart`: no `NoPartSwap` test,
+  no hit sphere, no step counter, no zone bit. 8 commands, all in stage 2's four
+  jetty zombies (type 0xF, `znebi2`): 43584 and 55372 take the head, `0x1BFA`
+  and then `0x1BFB`; 43740 and 55536 take bone 3, `0x1C00`, then the head.
+
+The bundle carries the hand table as `characters.player_hand_slots`, and every
+slot either command can write rides the character's hidden template
+(`humanoidModelSlots` in `web/src/hod2lib/characters.ts`);
+`tools/verify_attachments.py` check 6 holds both to the exe.
 
 ## Two name tables, not none
 

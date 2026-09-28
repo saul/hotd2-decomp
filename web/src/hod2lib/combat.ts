@@ -466,6 +466,49 @@ export function boneZones(tables: ExeTables): number[] {
 }
 
 /**
+ * `g_player_hand_slots` -- `0x004EC9E0`, `s16[c * 3 + variant]`: the model a
+ * body's bone 5 draws, per character. `PlayerBodySetHandSlot`
+ * (`FUN_00416810`) and class 0x25's `op 9` (`ScriptedHumanoidUpdate`,
+ * `MOVSX EAX, word ptr [ECX*2 + 0x4ec9e0]` at `0x00484773`) are its readers.
+ */
+export const PLAYER_HAND_SLOTS = 0x004ec9e0;
+
+/** `LEA ECX, [EAX + EAX*2]` at `0x0048476B`: three variants a character. */
+export const PLAYER_HAND_VARIANTS = 3;
+
+/**
+ * **Ten rows, and the bound is the index's, not the data's** (`L6`). A row
+ * is named by the command's `a` or, in Original Mode, by
+ * `g_original_character`, whose readers decode 0..7 as character types
+ * 0x39..0x40, 8 as 0x21 and 9 as 0x34 (`0x0048415B`..`0x00484177`) -- so ten
+ * characters, and the word after row 9 (`0x004ECA1C`) is 0.
+ */
+export const PLAYER_HAND_ROWS = 10;
+
+/** {@link PLAYER_HAND_SLOTS}, flat, `PLAYER_HAND_ROWS * 3` entries. */
+export function playerHandSlots(tables: ExeTables): number[] {
+  const o = tables.v2r(PLAYER_HAND_SLOTS);
+  const n = PLAYER_HAND_ROWS * PLAYER_HAND_VARIANTS;
+  if (o === null || o + n * 2 > tables.data.length) return [];
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(i16(tables.data, o + i * 2));
+  return out;
+}
+
+/**
+ * Entry *j* of *charType*'s {@link HIT_EFFECT} row, read flat -- class 0x25's
+ * `op 16` computes `6*a + b` (`0x0048498A`..`0x00484993`) and reads the `u16`
+ * there, `MOV AX, word ptr [EBP + EDX*2]` at `0x004849B0`. 0 when the index is
+ * outside what the table holds, which is a value the command never stores.
+ */
+export function boneEffectSlot(tables: ExeTables, charType: number,
+                               j: number): number {
+  if (j < 0) return 0;
+  const eff = u16Flat(tables, HIT_EFFECT, charType, j + 1);
+  return j < eff.length ? eff[j] : 0;
+}
+
+/**
  * The variant array for *charType*, bounded by the next array's start.
  *
  * These arrays sit end to end with no count, so reading a fixed number of

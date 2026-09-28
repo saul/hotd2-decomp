@@ -98,7 +98,8 @@ from .arcscript import (  # noqa: F401
 from .charmotion import (  # noqa: F401
     BODY_CREATURE_HOST_CLIPS,
     BOSS3_CLIPS, BOSS4_CLIPS, CLASS20_DEATH_MOTION, CLASS20_IDLE_MOTIONS,
-    CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS, humanoid_motion_ids,
+    CLASS21_FREED_MOTION, CLASS30_DEATH_CLIPS, humanoid_model_commands,
+    humanoid_motion_ids,
                          MAX_BAKED_FRAMES, MOTION_FPS, MOTION_RULES,
                          MOTION_STATE_CUE, bake, intro_for, motion_for)
 from .combat import (  # noqa: F401
@@ -124,11 +125,13 @@ from .combat import (  # noqa: F401
                      ZOMBIE_THROW_SLOTS, ZOMBIE_THROW_SPEED,
                      ZOMBIE_THROW_SPEED_STANDING, actor_radius,
                      attack_hit_lands, attack_picks, attack_tables,
-                     bone_zones, combat_tables,
+                     bone_effect_slot, bone_zones, combat_tables,
                      damage_rank_row, death_motions, difficulty_tables,
                      gore_parts, hit_reactions, hit_sphere, hit_steps,
                      motion_row, PART_SPHERE_FALLBACK_TYPES,
-                     part_sphere_rows, player_damage, reaction_groups,
+                     part_sphere_rows, PLAYER_HAND_ROWS, PLAYER_HAND_SLOTS,
+                     PLAYER_HAND_VARIANTS, player_damage,
+                     player_hand_slots, reaction_groups,
                      throw_tables,
                      torso_stage_count, zombie_throw_tables)
 from .approach import (  # noqa: F401
@@ -311,6 +314,7 @@ __all__ = [
     "camera_tracking",
     "characters_json",
     "civilian_item_slots",
+    "humanoid_model_slots",
     "civilian_motion_ids",
     "class31_motion_ids",
     "class31_tables",
@@ -808,6 +812,32 @@ def class23_tail(rec) -> dict:
         "pos": list(rec.pos),
         "angles": list(rec.orient),
     }
+
+
+def humanoid_model_slots(tables, evt, rec, char_type: int) -> list[int]:
+    """The asset slots a class-0x25 program's `op 9` and `op 16` can write
+    into a bone's draw record, resolved as `ScriptedHumanoidUpdate`
+    (`FUN_004842A0`) resolves them.
+
+    `op 9` stores ``g_player_hand_slots[3*a + mode]`` unconditionally. In
+    Original Mode an ``a`` of 0 or 1 is replaced by
+    ``g_original_character[a]``, whose one writer, `ResetOriginalModeLoadout`
+    (`FUN_0048A0D0`), stores the player index -- so that is row ``a`` again.
+    `op 16` stores the character's effect-table entry ``6*a + b`` only when it
+    is above 2: 0, 1 and 2 are the table's control codes.
+    """
+    hand = player_hand_slots(tables)
+    out: list[int] = []
+    for op, mode, a, b in humanoid_model_commands(evt, rec):
+        if op == 9:
+            i = a * PLAYER_HAND_VARIANTS + mode
+            if 0 <= i < len(hand) and hand[i] > 0:
+                out.append(hand[i])
+        else:
+            s = bone_effect_slot(tables, char_type, a * HIT_STEPS + b)
+            if s > 2:
+                out.append(s)
+    return out
 
 
 def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
@@ -1329,6 +1359,12 @@ def resolve_for_stage(stage, prog=None, pose_frame: int | None = None,
         # VM parks and the skeleton holds one pose for the rest of the stage.
         if sp["class"] == 0x25:
             entry_clips += humanoid_motion_ids(prog.evt, rec)
+            # ...and the models its `op 9` and `op 16` put on a bone. Each is
+            # a slot the skeleton may not name -- the hand another character
+            # holds, a wound -- and the swap clones by slot, so they ride the
+            # hidden template. The TypeScript half's `humanoidModelSlots`.
+            c.held_slots.update(humanoid_model_slots(tables, prog.evt, rec,
+                                                     res.char_type))
         # Class 0x20's four idles -- `OneHitTargetInit` picks between them with
         # `rand() & 3`, so all four have to exist before the draw is made --
         # and the clip `OneHitTargetUpdate` cues the frame the actor is shot.
@@ -1404,6 +1440,8 @@ def characters_json(chars: dict[int, Character],
         "bone_zones": bone_zones(tables) if tables is not None else [],
         "part_spheres": (part_spheres(tables, chars)
                          if tables is not None else {}),
+        "player_hand_slots": (player_hand_slots(tables)
+                              if tables is not None else []),
         "class31": class31_tables(tables) if tables is not None else {},
         "types": {str(ct): c.to_json() for ct, c in sorted(chars.items())},
         "placements": [p.to_json() for p in placements],

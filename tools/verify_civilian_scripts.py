@@ -75,6 +75,29 @@ def main() -> int:
         print(f"FAIL {inner} streams carry a 0x2D that is not the last command")
         bad += 1
 
+    # Op 0x18 copies six DWORDS with MOV -- three floats into obj+0x40..0x48,
+    # three BAMS integers into obj+0x64..0x6C (0x0048BE71..0x0048BEA9). The
+    # decoder read all six as floats, and every rotation came out a denormal:
+    # stage 1's bin civilian's 0xC000 yaw was 6.9e-41, so she fell off the
+    # bridge facing the wrong way. Five commands run it.
+    poses = [c["pose"] for s in scripts for c in s
+             if c["op"] == 0x18 and c.get("pose")]
+    wrong = [p for p in poses
+             if not all(isinstance(v, int) and -0x10000 < v < 0x10000
+                        for v in p[3:])]
+    print(f"{len(poses)} op-0x18 poses, rotations "
+          + ", ".join(f"{p[4]:#x}" if isinstance(p[4], int) else repr(p[4])
+                      for p in poses))
+    if len(poses) != 5 or wrong:
+        print(f"FAIL {len(wrong)} of {len(poses)} op-0x18 poses do not carry "
+              "three BAMS integers after the position (expected 5)")
+        bad += 1
+    elif not any(p[:3] == [-698.0, p[1], -541.0] and p[4] == 0xC000
+                 for p in poses):
+        print("FAIL stage 1's bin civilian's pose (-698, _, -541, yaw 0xC000) "
+              "is not among them")
+        bad += 1
+
     # Re-walk with the addresses, for the overlap and coverage checks. The
     # low bound comes from the walk, not from the table: one stream that only
     # an op-0x0E operand points at starts *before* the first table entry.

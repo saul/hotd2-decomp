@@ -90,6 +90,24 @@ itself, so the walker's spawn list names only the civilian; 6da5fab walked
 that list to keep the script's order and every captor in the game went
 unmade. `syncCharacterSpawns` now makes them straight after their civilian.
 
+**Stage 1's bin civilian falls onto the bin and climbs off it** (block 6,
+`0x3C38`, stream 13). Three faults, one scene. Op 0x18's pose was exported as
+six floats where the exe copies three floats and three BAMS integers, so her
+`0xC000` yaw arrived as 6.9e-41 and the fall carried her along -Z instead of
++X, off the bin. `CivilianApplyMotionPose` (`FUN_0048C310`), which every
+civilian clip change runs, was unported: its `0x20000` arm is what moves her
+down to the ground after the climb-off clip, so she walked the rest of the scene
+at the height of the lid; it also turns her by the heading her drawn pose has
+and the new clip lacks, and starts the clip over op 0x03's fade -- op 0x03 was
+`SetTurnRate` and is the blend length. And the bin captor (`0x3D34`) bursts
+into state 36 and walks past its point in state 40, whose subs 0/1 write the
+script cursor's **blob** as well as its index; the port wrote the index alone
+(d82271fb made the cursor a pointer and missed this writer and state 41's), so
+state 35 replayed the burst -- the target blob's entry -- and bounced back to
+40 for ever. It now plays its attack list once and turns on the player. Tests:
+"class 0x10's clip change" and "the bin captor's walk" in `port.test.ts`, and
+`tools/verify_civilian_scripts.py`'s pose check.
+
 **And they have a size.** `EnemyZombieInit` writes two radii — `obj+0x124`
 from `g_actor_radius_by_char`, which is the shot sphere, and `obj+0x128` = 3.5,
 which is the **body** sphere every collision uses — and the port wrote neither.

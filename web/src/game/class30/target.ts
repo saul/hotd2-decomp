@@ -548,20 +548,22 @@ export function ZombieStateTargetScriptWithFlag(obj: ZombieActor): void {
  */
 export function ZombieStateRetireOffScreen(obj: ZombieActor, host: GameHost,
                                            rng: Rng): void {
-  const s = ZombieScriptForState(obj);
   if (obj.sub === 0) {
     obj.flags |= ActorFlag.NoCameraTrack;
-    const h = s?.head ?? {};
+    const h = ZombieScriptForState(obj)?.head ?? {};
     obj.target = vec3(h.point?.[0] ?? 0, h.point?.[1] ?? 0, h.point?.[2] ?? 0);
     const m = h.motion ?? 0;
     ActorSetMotionBlended(obj, m, h.frame ?? 0, obj.motion === m ? 0 : 10);
     obj.zom.scriptMotion = m;
     obj.zom.targetLoops = h.loops ?? 0;
     obj.zom.targetCue = h.mode ?? 0;
-    obj.zom.scriptPc = 0;
+    // `ADD EDI, 0x8; MOV [ESI + 0x1398], EDI` at `0x0045B858`: the cursor,
+    // blob and all, past the 0x14-byte header. Subs 1 and 2 read it back
+    // (`0x0045B890`, `0x0045B90A`) -- see L76.
+    aimCursor(obj, blobForState(obj), 0);
     obj.sub = 2;
   } else if (obj.sub === 1) {
-    const e = entryAt(s, obj.zom.scriptPc);
+    const e = entryAt(cursorScript(obj), obj.zom.scriptPc);
     if (e) {
       if (obj.motion !== e.motion) {
         ActorSetMotionBlended(obj, e.motion, e.frame, 10);
@@ -576,7 +578,7 @@ export function ZombieStateRetireOffScreen(obj: ZombieActor, host: GameHost,
     if (atLastFrame(obj)) {
       obj.zom.targetLoops -= 1;
       if (obj.zom.targetLoops === 0) {
-        obj.sub = entryAt(s, obj.zom.scriptPc) ? 1 : obj.sub + 1;
+        obj.sub = entryAt(cursorScript(obj), obj.zom.scriptPc) ? 1 : obj.sub + 1;
       }
     }
   } else if (obj.sub === 4) {

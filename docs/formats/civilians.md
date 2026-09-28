@@ -79,12 +79,12 @@ and the high bits, which are not waits at all:
 
 | Bit | Meaning | of 596 |
 |---|---|---:|
-| `0x00008000` | `CivilianApplyMotionPose`: with `0x10000` it enters the bone-direction turn; on its own it selects the counter-rotation arm. Not ported. `[open]` | 28 |
-| `0x00010000` | `CivilianApplyMotionPose`: without `0x8000`, write the frame's rotation into `model+0x7C/0x80/0x84`. Not ported. `[open]` | 4 |
-| `0x00020000` | `CivilianApplyMotionPose`: **the other translation** — place the actor from the frame's root plus the pol file's root-bone offset, both scaled by `model+0x116C`. Not ported. `[open]` | 16 |
+| `0x00008000` | `CivilianApplyMotionPose` (see *The clip change* below): this or `0x10000` turns the actor by the heading her drawn pose has and the new clip's first frame lacks; this one then rebases records 1 and 9 by the same, so the body does not swing. `[proved]` | 28 |
+| `0x00010000` | `CivilianApplyMotionPose`: the same turn; without `0x8000`, record 0 (`model+0x7C/0x80/0x84`) takes the new frame's angles. `[proved]` | 4 |
+| `0x00020000` | `CivilianApplyMotionPose`: **hold bone 1** — move the actor so bone 1 of the new clip's first frame lands where the last draw put it, both translations scaled by `model+0x116C`. How a clip that climbs down hands the height to the next. `[proved]` | 16 |
 | `0x00080000` | leave `g_civilians_alive` now rather than on removal | 125 |
 | `0x00100000` | **this block's clip carries her** — the root-motion gate, below | 289 |
-| `0x00200000` | `CivilianApplyMotionPose`: skip the whole rotation arm. `[open]` | 75 |
+| `0x00200000` | `CivilianApplyMotionPose`: **cut** — start the clip with no fade, and skip the record rewrites and the `0x100000` root hand-off. `[proved]` | 75 |
 | `0x02000000` | may be removed when off camera | 90 |
 | `0x08000000` | uncounted: no `g_civilians_alive`, and worth no score | 9 |
 | `0x10000000` | **rescued** — pay 400 and clear the bit | 37 |
@@ -155,7 +155,42 @@ translation either moves the object or moves the pose, never both.
 
 `CivilianReapplyWaitCommand` (`FUN_0048B760`) deliberately does **not** write
 either `model+0x20` or `model+0x64`, so a skipped block leaves the gate where
-the last real clip change put it.
+the last real clip change put it. Its op 0x01 writes `model+0x08` -- the start
+**cursor** -- as the operand has it, as the real change does.
+
+### The clip change — `CivilianApplyMotionPose`
+
+`uVar3` above is `EBX`, the word loaded at `0x0048B9EA` **before** the VM's
+loop: the word the block now ending ran under. Everything else the routine
+reads is the new block's word. `[proved]`, from the listing, because the
+pseudocode stops at the `0x8000` arm's `MatrixStackPop(1)` (`0x0048C767`) and
+returns there, which it does not (L35): the bytes run on through record 9's
+rewrite and `JMP 0x0048C7F9` into the blend like every other arm.
+
+```
+f = MotionFrameAddress(type, new clip, start / 2)
+if (new & 0x18000)   yaw += heading(drawn records 0, 1) - heading(f's 0, 1)
+if (new & 0x20000) { pos += bone 1 drawn - bone 1 under f  (scaled by +0x116C)
+                     model+0x6C..0x74 = f.root }
+if (new & 0x200000)  ActorSetMotionBlended(model, clip, start, 0)
+else {
+  if (new & 0x8000)        records 1, 9 rebased by -turn about record 0
+  else if (new & 0x10000)  record 0 = f's record 0
+  if (old & 0x100000)      model+0x6C = f.root.x;  model+0x74 = f.root.z
+  ActorSetMotionBlended(model, clip, start, sub+0xE)
+}
+```
+
+What the arms write into `model+0x6C` and the angle records is what the
+blend's snapshot (`MotionLoadPoseSlot` mode 0xC) copies into slot A, so it is
+what the fade dissolves from; the port carries it on `Actor.fadeFrom`.
+**Stage 1's bin civilian** (`0x3C38`, block 6, stream 13) is the scene that
+needed it: she falls onto the bin on 619 after `SetPose` (whose yaw the
+bundle read as a denormal float, so she fell the wrong way), climbs down on
+611, whose root ends 15.4 units below its start, and the next block's
+`0x160100` carries `0x20000`, which moves her down onto the ground -- she
+walked the rest of the scene at the height of the bin lid without it.
+`web/src/game/class10/pose.ts` is the port.
 
 **The delta is scaled by `model+0x116C`**, which `SkeletonApplyRootMotion` runs
 `MatrixScale` with. `ActorBuildSkinnedModel` sets it from the character type
@@ -196,9 +231,9 @@ Two consequences worth knowing, both the engine's:
 | Op | Name | Operands |
 |---|---|---|
 | `0x00` | `SetMotion` | motion, loops (negative loops for ever) |
-| `0x01` | `SetMotionFrom` | motion, loops, starting frame |
+| `0x01` | `SetMotionFrom` | motion, loops, start **cursor** (`model+0x08` takes it as it is) |
 | `0x02` | `SetFrameLimit` | stop the clip on this frame |
-| `0x03` | `SetTurnRate` | BAMS per frame; the Init's default is 10 |
+| `0x03` | `SetMotionBlend` | the fade of the next clip change, `sub+0xE`; the Init's default is 10. Its one reader is `CivilianApplyMotionPose`. It was `SetTurnRate`, which nothing read supported |
 | `0x04` | `SetMotionFrame` | the frame wait bit `0x200` looks for |
 | `0x05` | `SetTarget` | point pointer or mode, arrival radius |
 | `0x06` | `SetTargetPoint` | point pointer, always dereferenced |
@@ -219,7 +254,7 @@ Two consequences worth knowing, both the engine's:
 | `0x15` | `PickHeldItem` | weighted table |
 | `0x16` | `SetRadiusRamp` | target radius, frames |
 | `0x17` | `SetSphereCentreMode` | **[proved]** the low byte of `cmd[1]` to `sub+0x80` (`0x0048BE5B`), which picks the collision-sphere centre `CivilianUpdate` writes to `obj+0x12C` -- see *The collision sphere* below. It was `SetCameraPointMode`; the camera's point is `obj+0x100` and this never reaches it |
-| `0x18` | `SetPose` | pointer to six floats |
+| `0x18` | `SetPose` | pointer to six dwords, copied: three floats into `obj+0x40..0x48`, three BAMS **integers** into `obj+0x64..0x6C`. The five shipped yaws are `0xC000`, `0x2D00`, `0x4000`, `0x6000`, `0x7000` |
 | `0x19` | `SetRouteBranch` | **[proved]** `g_script_branch_var = (s16)cmd[1]` — the selector `EvtAdvanceStepOrRoute` indexes a route record's `next[]` with, so **this is how the game decides which way a branching stage goes**. Eleven streams run it, all eleven pass 1, and all eleven put it after the `SetOnShot 0` that makes the civilian safe. See [evt.md](evt.md#how-a-branch-is-decided) |
 | `0x1A` | `SetChildCue` | applied only while children survive |
 | `0x1B` | `SetGlobalB` | `DAT_009CA0F4`. `[open]` |

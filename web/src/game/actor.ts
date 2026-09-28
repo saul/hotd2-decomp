@@ -1203,8 +1203,11 @@ export interface ActorBase {
    */
   charType: number;         // +0x1F4, s16
   /**
-   * `model+0x116C` — the character's size, and the factor
-   * `SkeletonApplyRootMotion` scales its root delta by.
+   * `model+0x116C` — the character's size: the `MatrixScale` the draw puts
+   * between the actor's rotation and its pose, so the drawn model, the pose
+   * offset, every bone and every hit centre, and the factor
+   * `SkeletonApplyRootMotion` scales its root delta by. The renderer draws
+   * the root node under it.
    *
    * `ActorBuildSkinnedModel` sets it from {@link Actor.charType} alone; the
    * civilian VM's op 0x27 `SetScale` is the only thing that changes it after.
@@ -2138,16 +2141,20 @@ export interface ActorBase {
   /** Per-bone asset slot overrides — the draw record at +0x20C + bone*0x90. */
   boneSlot: Record<string, number>;
   /**
-   * Per-bone **hit-sphere radius** overrides — the same record's `+0x78`,
+   * Per-bone **hit-sphere radius** — the same record's `+0x78`,
    * `obj + 0x284 + bone*0x90`, which `SkeletonWalkNode` (`FUN_004107E0`)
-   * fills from the character type's table as the skeleton is built.
+   * fills as the skeleton is built: the character type's table radius
+   * **times the model's size**, `model+0x116C` (`0x00410837`). The port's
+   * build, `ActorBuildSkinnedModel` in `game/spawn.ts`, writes one for every
+   * bone the type has a sphere for, so a civilian's are 0.9 of her table's.
    *
-   * A routine that writes the record wins over the table, as the engine's
-   * record does: `ShotTestBoneSphere` (`FUN_004047D0`) skips a bone whose
-   * radius is zero, and `BoneHitSpriteDrawAndTick` (`FUN_00407120`) and
-   * `DrawBloodSpray` (`FUN_00407230`) add it to the view-space depth. Empty
-   * until one does; `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) zeroes the
-   * frog's bone 2 (`part+0x210`, `0x0043A35D`).
+   * A routine that writes the record afterwards wins, as the engine's record
+   * does: `ShotTestBoneSphere` (`FUN_004047D0`) skips a bone whose radius is
+   * zero, and `BoneHitSpriteDrawAndTick` (`FUN_00407120`) and
+   * `DrawBloodSpray` (`FUN_00407230`) add it to the view-space depth.
+   * `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) zeroes the frog's bone 2
+   * (`part+0x210`, `0x0043A35D`). A bone with no entry -- an actor that was
+   * never built -- reads the table's radius unscaled.
    */
   boneRadius: Record<string, number>;
   /**

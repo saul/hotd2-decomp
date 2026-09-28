@@ -11,6 +11,7 @@
  * already put the actor where the swing will reach.
  */
 import type { Actor } from "../actor";
+import { PROJECTION_DISTANCE_PX } from "../combat/permits";
 import { G } from "../globals";
 import type { GameHost } from "../host";
 import type { Vec3 } from "../vec";
@@ -20,7 +21,10 @@ import { ThrowerState } from "./states";
 const LANDING_DEPTH = -15.5;
 /** `MOV [ESP+0x10], 0xc0c00000` at `0x0044CBDA`: state 23's, much nearer. */
 const LANDING_DEPTH_DELAYED_POUNCE = -6.0;
-/** `fVar1` — the vertical pixel offset, by character type... */
+/**
+ * `fVar1` — the vertical pixel offset, by character type: `float ptr
+ * [0x00565E0C]` = 390.0 for 0x16 and `[0x004C49CC]` = 320.0 otherwise...
+ */
 const LANDING_PX_ZSASS = 390;
 const LANDING_PX_OTHER = 320;
 /** ...and from states 22 and 23, whatever the type: `0x00565E08`. */
@@ -28,15 +32,9 @@ const LANDING_PX_SCRIPTED = -350;
 /** `fVar2` — the sideways pixel offset, `+` for player 0 and `-` for 1. */
 const LANDING_PX_SIDE = 160;
 const CHAR_ZSASS = 0x16;
-/**
- * `g_projection_distance_px` — 0x009A2D70.
- *
- * [likely] Not read out of the binary; derived from `SetupSceneProjection`,
- * which builds the projection from 41.100 degrees vertical over 4:3. For a
- * 480-line frame that is `240 / tan(41.1/2)` = 640.2. Only the ratio
- * `px / this` matters, and it puts the landing point 9.4 units below the eye.
- */
-const PROJECTION_DISTANCE_PX = 640.2;
+// `g_projection_distance_px` is {@link PROJECTION_DISTANCE_PX}, the shared
+// constant, which is `[proved]` 640.2079 from `SetupSceneProjection`'s
+// listing; this file used to carry its own rounded copy of it, 640.2.
 
 /**
  * `[proved]`, from the listing -- every constant is an `FLD` the pseudocode

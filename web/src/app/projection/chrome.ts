@@ -167,6 +167,15 @@ const GAME_OVER_LABELS = [
 ];
 
 /**
+ * Whether the game drew player 1's crosshair this frame --
+ * `HudDrawCrosshair`'s decision, recorded in `G.g_crosshair_drawn`. The
+ * reticle itself is the page's, because it follows the pointer between ticks.
+ */
+export function crosshairProjection(): boolean {
+  return G.g_crosshair_drawn[0] !== 0;
+}
+
+/**
  * The game-over screen, read off `G`. Null while app state 6 runs; on the
  * game-over screen (7) the phase -- its sprites are the HUD layer's, through
  * `G.g_screen_sprite_draws` like every other screen sprite; once it has

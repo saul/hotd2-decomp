@@ -299,28 +299,68 @@ the single builder now, and folding the harnesses into it turned up the same
 drift the other way: `replay.mjs` had been passing four class-0x31 descriptor
 fields the player never did.
 
-[open] You are meant to be able to shoot the axe out of the air — the weapon
-registers for the shot test every frame, and in the tutorial that is the whole
-lesson. The port's projectile pool is plain records and its shot test walks
-actors, so `ZombieThrownWeaponStateShotDown` is named rather than half-done.
+**You can shoot a thrown weapon out of the air** — the axe, and every knife
+and blade in the game. Both weapon routines end their frame with the draw, the
+view point at `obj+0x70` and `RegisterForShotTest` (`FUN_00405160`), so a
+weapon is an ordinary object to the shot test: a whole two-unit sphere
+(`obj+0x124 = 2.0`, `obj+0x34 = 0x80000001`, no per-bone bit), marked by
+`MarkActorShot` like anything else. Its own routine reads the mark on its next
+frame, counts a hit in `g_player_hit_count`, gives its thrower's permit back
+on the spot and goes to its shot-down state — `ThrownWeaponDeflected`
+(`FUN_00450050`) for class 0x31, `ZombieThrownWeaponStateShotDown`
+(`FUN_00459D20`) for class 0x30: a spark, `KNIFE*_OFF` and `BULLET_MET3`, five
+frames hanging where it was hit, and off to a random point up to a hundred
+units away in view space, cartwheeling about X at 1.3 times its old spin. It
+scores nothing. `game/thrown_weapon.ts` has the whole path.
 
-The shape of what that costs is now read rather than guessed. In the engine a
-thrown weapon is **not a record in a pool at all** — it is a whole object.
-`SpawnThrownWeapon` (`FUN_004504E0`) allocates `0x13F4` bytes with its own
-update `ThrownWeaponUpdate` (`FUN_00450780`), links it into the same object
-list every actor lives on, and calls `ActorClaimHitSlot` (`FUN_00409270`),
-which is what puts it in `g_hit_slots` — `0x009C88C0`, fourteen slots — and
-raises `obj+0x38` bit `0x40`. It dispatches on its own two-entry state table
-`g_thrown_weapon_states` — `0x00592AE0`: state 0 `ThrownWeaponFlyToTarget`
-(`FUN_0044FD40`) and state 1 `ThrownWeaponDeflected` (`FUN_00450050`), which
-`ThrownWeaponUpdate` routes into the moment `obj+0x34` bit `0x8` — the
-pending-shot bit — is set on it. It also
-**inherits the thrower's attack permit** (`obj+0x121` is copied across and the
-thrower's is cleared), and only gives it back when it lands or is deflected. So
-"shoot the axe down" is not a special case bolted onto a projectile: it is the
-ordinary shot path finding an ordinary object. Making the port able to do it
-means the pool becoming actors, which is a change to the shot path and to the
-snapshot, not to the projectile.
+It did not need the pool to become actors, which is what this paragraph used
+to say it would cost. The pool keeps the engine's fields at their offsets,
+each record runs the routine its launcher installed, and a shot-test entry can
+name a weapon as well as an actor; `ProcessPlayerShotsTestList` tests both in
+one pass and one sort. What the engine's weapon also does and the record does
+not: it claims a `g_hit_slots` entry (read only for a class-0x30 bone's cel
+phase), registers for camera tracking, draws a 5-by-5 ground shadow, and —
+for `zslman`'s blades — trails fading afterimages (`ZslmanBladeEmitAfterimage`,
+`FUN_00450930`). Each is declared where the call is not made.
+
+**The spin was the port's own, and slow.** Every thrown weapon tumbled at
+`0x200` BAMS a frame, declared as the port's invention on a reading that
+nothing writes `obj+0x135C` and the allocator leaves it uninitialised. Both
+launchers write it, past a `MatrixStackPop` the decompiler stops at (`L35`),
+and `ActorClearGameFields` clears the block on the line after `ActorAlloc`
+anyway:
+
+| weapon | rate | axis | from |
+|---|---|---|---|
+| `zsass`'s knives, `zslman`'s blades (class 0x31) | `0x2400`, signed by the hand | Y, with a fixed `0x600` lean on X for `zsass` | `SpawnThrownWeapon`, `0x0045072C` |
+| the axe (class 0x30, straight) | `0xB00` | X | `ZombieThrowHandWeapon`, `0x0045A427` |
+| `znassb`'s blades (class 0x30, arc) | `0x1600` | Y | `ZombieThrowHandWeapon`, `0x0045A43C` |
+
+Class 0x30's weapon also leaves the hand pointed at its target and rolled
+`0x800`, and both families land in the engine's own pose — class 0x31's faces
+the eye with two random kicks and keeps its lean, class 0x30's faces back the
+way it came — rather than a look-at the renderer used to do for them. The
+renderer now draws each weapon under the modelview its own routine built, so
+there is no second copy of the rotation order to drift.
+
+**And the permit rides the weapon.** Both launchers copy `obj+0x121` onto the
+projectile and leave the thrower holding **0**; the weapon gives it back when
+it has blinked out, or at once when it is shot down. The port freed it at the
+throw — class 0x31 — or at the end of the throw clip — class 0x30's
+`ZombieStateStandAndThrow`, whose clip end in fact drops only the off-screen
+latch. So a knife in the air now holds the room's permit for its flight, its
+thirty frames on the screen and its sixty blinking, and **shooting it down is
+what lets the next enemy in**: in stage 2 block 5 the second `zsass` used to
+throw twenty-seven frames after the first, with both knives in the air at
+once.
+
+**`znassb` throws both blades at once.** `ZombieStateStandAndThrow`'s release
+arm throws a second weapon for character type 1 — `TryClaimAttackSlot`, whose
+answer it ignores, `ZombiePickThrowingHand` and a second
+`ZombieThrowHandWeapon` (`0x004592E4`..`0x00459301`) — so in a two-permit game
+each player gets a blade. Then `ZombieRetireThrowConditionIfUnarmed`
+(`FUN_004595F0`) takes a condition-8 walker with nothing left in its hands to
+condition 0 and raises its sprint bit.
 
 **A new overlay, `Wedged`**, answers the question the collision one leaves open.
 `#show-coli` says what the engine can feel; this marks in red every zombie the
@@ -2206,8 +2246,9 @@ status bar.
 `zsass.bin` and `zslman.bin`, spawned out of walking reach — compete for the same attack permit
 as the zombies, play the throw clip and release on the frame the table names.
 The weapon flies in a straight line at 1.2 units/frame to a point 4 units in
-front of the camera, tumbling, and costs a life on arrival: the hit is timed,
-not tested. Throwing leaves the hand bare and sets the arm's destroyed-zone
+front of the camera, spinning `0x2400` BAMS a frame, and costs a life on
+arrival: the hit is timed, not tested — unless it is shot out of the air
+first. Throwing leaves the hand bare and sets the arm's destroyed-zone
 bit, so the cancel mask treats a thrown arm and a shot-off one alike.
 
 **And it re-arms, which turns out to hold the whole state machine up.**
@@ -2512,17 +2553,12 @@ Three more things came out of reading the state properly, all `[proved]`:
   `zsass` throw is 22 cursor ticks of wind-up against its entry's release frame
   of 48, not 48.
 * **The state releases no permit.** `SpawnThrownWeapon` hands `obj+0x121` to
-  the projectile actor and leaves the thrower holding **0** — not −1 — and the
+  the projectile and leaves the thrower holding **0** — not −1 — and the
   weapon frees the slot at the end of its stick-and-blink life, in
-  `ThrownWeaponFlyToTarget`. The port's weapon is a plain pool record shared
-  with class 0x30's, which has its own state table and its own release site, so
-  a record cannot carry a permit and releasing from the shared flight routine
-  would free a class-0x30 slot through class 0x31's routine — the exact
-  wrong-bit mistake `ThrowerReleaseAttackPermit`'s note warns about. The slot
-  therefore goes back in `SpawnThrownWeapon`, where the engine hands it over,
-  about 90 frames early, and that is now the `[diverges]` the re-arm one used to
-  be. Making `G.g_thrown_weapons` carry a permit is the fix, and it is a change
-  to both classes' projectiles.
+  `ThrownWeaponFlyToTarget`, or when it is shot down. The port used to free it
+  in `SpawnThrownWeapon` instead, about ninety frames early, because its weapon
+  record could not hold one; the record carries the permit now, and each
+  family's weapon gives it back through its own family's release.
 
 ### Four things that stopped the throwers working
 
@@ -2909,10 +2945,46 @@ counted by the routine that counts them; `g_player_lives` has no default. The
 
 **Lives now drain, and a game can end.** `PlayerTakeDamage` is exact: on the
 path camera the last life goes, the player drops out of play, and the
-continue countdown runs (the HUD strip shows `CONTINUE? n`). **Press S** --
-START -- to continue on a credit; otherwise the run's own continue screen
-counts down and asks for the game-over screen (below). Player 2 can join by
-the same route, but the page has no second START key yet.
+continue screen comes up (below). **Press S** -- START -- to continue on a
+credit; otherwise the run's own continue screen counts down and asks for the
+game-over screen (below). Player 2 can join by the same route, but the page
+has no second START key yet.
+
+**The continue screen is drawn, and the script waits under it** (2026-09-28,
+`NEW-BUGS-2`). It used to be state with nothing on screen: the countdown ran
+and the reticle stayed up over a scene that played on, script and all. Now,
+all of it read from the exe and recorded as screen sprites for the HUD layer:
+
+* **The run's CONTINUE?** -- `RunPhaseContinueCountdown` (`FUN_00460530`)
+  draws `0x22C` at (128, 200) and the 64x128 digit `0x4F + (timer >> 12)` at
+  (482, 188) every frame of run phase 4, from `0x9FFF` down `0x2D` a frame:
+  each digit 91 or 92 frames, the whole count about fifteen seconds. The
+  continue buttons (pad `0x4`) knock it to the bottom of its digit from the 7
+  down; the port's mouse is input mode 5, which `[likely]` never raises that
+  bit, so a click does not hurry it -- START does not either, it takes it.
+* **The credit line** -- `CreditPromptDraw` (`FUN_00406CE0`) and its drawer:
+  "PRESS START BUTTON" over "CREDIT(S) n", blinking 64 frames on and 32 off,
+  in the continuing player's corner; and the same line in the corner of a
+  player who is out, which is player 2's for the whole of a one-player game.
+  "INSERT COIN(S)" when the count is 0, "FREE PLAY" in free play.
+* **The two-player share** -- a player continuing while the other plays
+  draws a small CONTINUE? and digit in their own half through the layered
+  queue (`HudDrawContinuePrompt`, `HudDrawContinueDigit`), and a small GAME
+  OVER for 119 frames when it runs out (`HudDrawPlayerGameOver`).
+* **No crosshair.** `HudDrawCrosshair` (`FUN_004169C0`) is called only from
+  the in-play task; its decision is recorded in `G` and the page's reticle
+  follows it, where it used to follow the firing gate alone.
+* **The script stands still.** `g_evt_gameplay_live` (`0x007DCCA4`) is
+  recomputed at the top of `EvtInterpreterLoop` and every wait opcode,
+  `0x40..0x47`, tests it, so the walker holds at the wait it had reached while
+  the enemies and the camera run on. It used to walk on through the stage
+  with nobody playing it.
+
+The sprites are new in the bundle: **re-export** for the continue screen to
+show (`screen_sprites` in `script.json`). `tools/continue_page.mjs` drives it
+in the real page and shoots `continue-9.png`, `continue-6.png`,
+`continue-3.png` and `continue-taken.png`; `tools/verify_continue.py` holds
+every position, id and table against the EXE.
 
 **Ammo, the reload and the HUD readouts.** A gun holds six, and **R**
 reloads. The whole of it is below, under *The magazine, the reload and the
@@ -4694,7 +4766,52 @@ past the 44-frame play length of the 23-frame clips under them. The engine's
 cursor wraps there, so an actor on that data would wait out its landing for
 ever; the old port only finished because it bailed out when the arc landed.
 The fixture carries the exe's own wall script now, and `verify_combat.py`
-check 16 asserts that none of the 38 shipped scripts does that.
+check 16 asserts that none of the shipped scripts does that.
+
+### The rooftop route is flown at the waypoint's own step (NEW-BUGS-2)
+
+**Reported:** "the zombie that jumps across the rooftops at
+`?stage=2&original=1&mode=play&block=14&step=2&op=9&frame=372` moves quite
+slowly compared to the real game." It is spawn `0x7EA4`, a class-0x31 `zsass`
+in `ThrowerStatePathFollow` (`FUN_0044EE00`, state 26): a 45-frame wait, then
+five leaps -- one at step 1, four at step 3 -- and a pounce at the player.
+
+The waypoint's `step` goes to **both** `ActorArcBeginTo`, which makes the leg
+`dist2d * step` parameter frames long, and `ActorArcStep`, whose
+`ActorArcInterpolate` flies `step` of them a frame. The port handed it only to
+the first and flew one a frame, so every step-3 leg took three times as long:
+
+| leg | T | before | after (and the engine's arithmetic) |
+|---|---:|---:|---:|
+| 2, 8.2 units | 24 | 25 frames | 10 |
+| 3, 16.0 units | 48 | 49 | 18 |
+| 4, 15.3 units | 45 | 46 | 17 |
+| 5, 12.0 units | 36 | 37 | 14 |
+
+Measured in the running player at the report's URL: the route took frames
+45-220 and now takes 45-135; ground speed over the step-3 legs went from
+0.33-0.35 units a frame to 0.92-0.96. The parabola was already the engine's --
+it is solved over the same `T` -- so the hops are no higher, only three times
+quicker.
+
+The state was a sketch in the port and is a transcription now: the leg
+installs the style's arc motion script (`g_class31_arc_path_style0/1/2`, or
+`_c17` for character type 0x17) through `ActorArcBeginToWaypoint` and is
+flown by `ActorArcStep`, so the actor hops in clip 301 held on frame 12 where
+it used to slide in its idle; the route raises `obj+0x34` bit `0x100` for its
+whole length; every leg ends on `ENE_WALK6_22.WAV`. None of the three
+scripts was in the bundle -- no table the exporter read names them -- and
+nor was clip 301; `CLASS31_ARC_SCRIPTS` carries them now, and the bake list
+follows.
+
+`FitArcScriptByFadeLength` (`FUN_0044D5F0`), which every arc but `zstin`'s
+runs through, was also wrong: the port had one function for it and
+`FitArcScriptByStartFrame` (`FUN_0044E140`), with the latter's slack -- net of
+both fades -- and its halved `k` applied to every type. The engine's slack has
+no fades in it, grows both fades a frame at a time, gives the odd frame to
+stage 2, and resets both fades to 1 in the tight case. Both are transcribed now,
+under their own names, and the `zstin` one no longer clamps its fades at
+`0x7F`, because the engine's does not.
 
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 

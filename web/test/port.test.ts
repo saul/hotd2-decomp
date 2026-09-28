@@ -70,7 +70,8 @@ import {
 } from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
-  PadBit, PlayerBlockCapture, PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
+  EvtGameplayLiveUpdate, PadBit, PlayerBlockCapture,
+  PlayerTasksDrawWithoutAFrame, PlayerTasksRun,
 } from "../src/game/player_shell";
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
@@ -87,8 +88,8 @@ import {
 } from "../src/game/carried_prop";
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
-  MatrixRotateZ, MatrixToEulerZYX, MatrixTransformVector, MatrixTranslate,
-  VecAimXAxisYThenZ, VecAimYAxisZThenX, FtolS16,
+  MatrixRotateZ, MatrixToEulerZYX, MatrixTransformPoint, MatrixTransformVector,
+  MatrixTranslate, VecAimXAxisYThenZ, VecAimYAxisZThenX, FtolS16,
 } from "../src/game/matrix";
 import { CameraTargetsClear, waitTargetsClear }
   from "../src/script/waits/targets";
@@ -164,8 +165,18 @@ import { ZombieStateWalkDistance } from "../src/game/class30/walk_distance";
 import { ZombieArmedHands, ZombiePickThrowingHand,
          ZombieShouldStandAndThrow, ZombieStateStandAndThrow }
   from "../src/game/class30/stand_throw";
-import { ThrownWeaponUpdate, THROWN_SPIN_RATE }
-  from "../src/game/class31/projectile";
+import {
+  DeflectSub, FlySub, ThrownWeaponPoolUpdate, ThrownWeaponState,
+  THROWN_WEAPON_SPIN,
+} from "../src/game/class31/projectile";
+import {
+  ZombieThrownWeaponBeginArc, ZombieThrownWeaponState, ZOMBIE_AXE_SPIN,
+  ZOMBIE_BLADE_SPIN, ZOMBIE_WEAPON_ROLL,
+} from "../src/game/class30/thrown_weapon";
+import { ZombieThrowHandWeapon } from "../src/game/class30/throw";
+import {
+  ThrownWeaponFlag, ThrownWeaponRoutine, type ThrownWeaponFrame,
+} from "../src/game/thrown_weapon";
 import { ActorPlayHitVoice, ActorVoice }
   from "../src/game/combat/voice";
 import { ZombieReleaseWeaponLoopSe } from "../src/game/class30/weapon_loop";
@@ -197,8 +208,8 @@ import {
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
 import {
-  ReleaseAttackSlot, ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot,
-  TryClaimAttackSlot,
+  PROJECTION_DISTANCE_PX as G_PROJECTION_DISTANCE_PX, ReleaseAttackSlot,
+  ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot, TryClaimAttackSlot,
 } from "../src/game/combat/permits";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
 import { ZombieEnterCorpseState, ZombieReleasePermitAndUntrack }
@@ -275,7 +286,7 @@ import {
 import {
   HudDrawLives, RELOAD_VOICE, SHOOT_VOICE,
 } from "../src/game/hud_readout";
-import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
+import { BossHpBarSprite, ContinueSprite, HUD_READOUT_SPRITES, HudSprite }
   from "../src/game/hud_sprites";
 import { BOSS_HP_BAR_KILL, BossHpBarSpawn, BossHpBarsTick, BossHpFractionOf }
   from "../src/game/boss_hp_bar";
@@ -294,8 +305,10 @@ import { ThrowerStateStandAndDecide } from "../src/game/class31/stand";
 import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
 import {
-  ActorArcBegin, ActorArcStep, ActorClipFrame, InstallArcMotionScript,
+  ActorArcBegin, ActorArcBeginTo, ActorArcStep, ActorClipFrame,
+  FitArcScriptByFadeLength, FitArcScriptByStartFrame, InstallArcMotionScript,
 } from "../src/game/class31/arc";
+import { SND_PATH_LEG_LANDED } from "../src/game/class31/path";
 import { ActorBodyConditionFromHands, SPENT_CONDITION }
   from "../src/game/class30/condition";
 import { ThrowerState, ThrowSub } from "../src/game/class31/states";
@@ -1096,74 +1109,10 @@ console.log("RankEnemiesByDistance:");
 }
 
 // -- 3c. the route ----------------------------------------------------------
-
-console.log("ThrowerStatePathFollow:");
-{
-  const rng = new Rng(6);
-  const events = scene(0, rng);
-  // Stage 2 block 3's zsass, 3/3/4, descriptor 0x1EF0, verbatim: wait 30
-  // frames, then climb three legs before it fights.
-  const z = ActorSpawn(0x1ef0, SpawnClass.Thrower, 1, "zsass", {
-    initialState: ThrowerState.PathFollow,
-    path: {
-      delay: 30,
-      points: [
-        { step: 1, motion_set: 1, dest: [-741.9, 100.0, -890.7] },
-        { step: 1, motion_set: 1, dest: [-741.9, 110.0, -845.7] },
-        { step: 1, motion_set: 2, dest: [-737.5, 115.0, -810.0] },
-      ],
-    },
-  });
-  z.visible = true;
-  z.hp = 10;
-  z.pos = vec3(-741.9, 90.0, -930.0);
-  z.motion = 10;
-  const start = { ...z.pos };
-
-  check("it starts on the route, not standing and throwing",
-        z.state === ThrowerState.PathFollow, `state ${z.state}`);
-  for (let i = 0; i < 20; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
-  check("it holds still for the descriptor's delay",
-        Math.abs(z.pos.z - start.z) < 0.01, `moved ${(z.pos.z - start.z).toFixed(2)}`);
-
-  // The leap at the end lands in front of the camera, so the camera has to be
-  // somewhere plausible: in the real scene it is on the street below the roof,
-  // not a thousand units away at the origin.
-  const roofEye = vec3(-737.5, 100.0, -780.0);
-  const roofHost = {
-    ...NULL_HOST,
-    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
-      out.x = roofEye.x + x;
-      out.y = roofEye.y + y;
-      out.z = roofEye.z + zz;
-    },
-  };
-  let reachedLast = false;
-  for (let i = 0; i < 900; i++) {
-    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
-    if (!reachedLast && Math.abs(z.pos.x + 737.5) < 0.2
-        && Math.abs(z.pos.z + 810.0) < 0.2
-        && Math.abs(z.pos.y - 115.0) < 0.2) reachedLast = true;
-  }
-  check("it walks the route to the last waypoint", reachedLast,
-        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
-  // `ThrowerStateLeapDown`: off the roof and into shot, at a place picked on
-  // the *screen* rather than on the map -- 15.5 in front, 9.4 below.
-  // The depth is exact -- 15.5 is a literal in `ThrowerPickLandingPoint`. The
-  // drop is not asserted to the unit because it divides by
-  // `g_projection_distance_px`, which is derived from the projection rather
-  // than read out of the binary; what matters is that it comes *down* and
-  // lands in front.
-  check("then it comes down off the roof, in front of the camera",
-        Math.abs(z.pos.z - (roofEye.z - 15.5)) < 0.5
-        && z.pos.y < 115 - 5 && z.pos.y < roofEye.y,
-        `(${z.pos.x.toFixed(1)}, ${z.pos.y.toFixed(1)}, ${z.pos.z.toFixed(1)})`);
-  // ...and the pounce hands to the leap aside, not to the hub: state 9 always
-  // ends in state 10. Standing again is two states further on.
-  check("and only then goes for the player",
-        z.state === ThrowerState.LeapAside
-        || z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
-}
+//
+// `ThrowerStatePathFollow` is tested with the other class-0x31 states, under
+// "class 0x31, ThrowerStatePathFollow": it needs `CHARS31`'s arc scripts,
+// which are declared further down this file than this section runs.
 
 // -- 3c2. the entrance that arrives on a clip -----------------------------
 
@@ -6184,6 +6133,22 @@ const WALL_SCRIPT = (motionId: number) => [
   { motion: motionId, start: 34, fade: 5, until: 43 },
 ];
 
+/**
+ * `g_class31_arc_path_style0` (`0x00565EB8`) -- motion 301 cut at 0..8, 9..17
+ * and 18..23, no fades -- and `g_class31_arc_path_style1` (`0x00565E58`):
+ * 301 held on frame 12 three times over, fade 1 each.
+ */
+const PATH_STYLE0 = [
+  { motion: 301, start: 0, fade: 0, until: 8 },
+  { motion: 301, start: 9, fade: 0, until: 17 },
+  { motion: 301, start: 18, fade: 0, until: 23 },
+];
+const PATH_STYLE1 = [
+  { motion: 301, start: 12, fade: 1, until: 12 },
+  { motion: 301, start: 12, fade: 1, until: 12 },
+  { motion: 301, start: 12, fade: 1, until: 12 },
+];
+
 const TYPE31: CharacterType = {
   ...TYPE,
   type: 0x19, name: "zstin", file: "zstin.bin",
@@ -6199,6 +6164,8 @@ const TYPE31: CharacterType = {
     "929": motion(20), "930": motion(20), "931": motion(20), "934": motion(50),
     "935": motion(20), "938": motion(20), "939": motion(20),
     "283b": motion(1), "285": motion(50), "287": motion(29),
+    // The path follow's hop, 13 authored frames as `szom.bin` has it.
+    "301": motion(13),
   },
 };
 
@@ -6248,6 +6215,15 @@ const CLASS31 = {
       { motion: 439, start: 0, fade: 0, until: 19 },
       { motion: 439, start: 20, fade: 0, until: 31 },
       { motion: 439, start: 32, fade: 0, until: 42 },
+    ],
+    // `ThrowerStatePathFollow`'s three, verbatim from `0x00565EB8`,
+    // `0x00565E58` and `0x00565E88`.
+    path_style0: PATH_STYLE0,
+    path_style1: PATH_STYLE1,
+    path_style2: [
+      { motion: 301, start: 7, fade: 0, until: 11 },
+      { motion: 300, start: 48, fade: 1, until: 65 },
+      { motion: 301, start: 17, fade: 1, until: 22 },
     ],
   },
 };
@@ -6597,6 +6573,181 @@ console.log("class 0x31, ThrowerStateLeapToPoint:");
   check("...and the first frame of the hub overwrites it with the set's walk",
         z.motion === 313 && z.action === null,
         `motion ${z.motion} action ${z.action?.motion ?? "null"}`);
+}
+
+// `FitArcScriptByFadeLength` (`FUN_0044D5F0`) and `FitArcScriptByStartFrame`
+// (`FUN_0044E140`) are two routines with two slacks, and the port had one
+// function standing in for both. Every expected value here is worked by hand
+// from the listing, not from the port.
+console.log("class 0x31, the two arc-script fits:");
+{
+  const fit = (script: typeof PATH_STYLE0, T: number, byStart = false) => {
+    const a = thrower(ThrowerState.Idle);
+    InstallArcMotionScript(a, script);
+    a.arcTotal = T;
+    if (byStart) FitArcScriptByStartFrame(a);
+    else FitArcScriptByFadeLength(a);
+    return a.arcScript!;
+  };
+  // slack = s1.start - s1.until + T = 9 - 17 + 19 = 11: both fades climb to
+  // 6 and 6, twelve is past eleven, so stage 1 gives one back.
+  let s = fit(PATH_STYLE0, 19);
+  check("the fade fit grows both fades and gives the odd frame to stage 2",
+        s[1].fade === 5 && s[2].fade === 6,
+        `fades ${s[1].fade}, ${s[2].fade}`);
+  s = fit(PATH_STYLE1, 24);
+  check("...a slack of 24 splits evenly", s[1].fade === 12 && s[2].fade === 12,
+        `fades ${s[1].fade}, ${s[2].fade}`);
+  s = fit(PATH_STYLE0, 8);
+  check("...a slack of 0 leaves the script alone",
+        s[1].fade === 0 && s[2].fade === 0 && s[1].start === 9
+        && s[1].until === 17, JSON.stringify(s[1]));
+  // A slack the authored fades already cover: 10 - 12 + 5 = 3 against fades
+  // of 4 and 6. The engine runs no increment and takes stage 1's fade down to
+  // 3 -- `CMP EDI, ESI / JGE` then `DEC EDX` at 0x0044D68F. The old single
+  // function measured this slack net of the fades, found it negative, and
+  // walked stage 1's window instead.
+  s = fit([{ motion: 301, start: 0, fade: 0, until: 5 },
+           { motion: 301, start: 10, fade: 4, until: 12 },
+           { motion: 301, start: 13, fade: 6, until: 20 }], 5);
+  check("...and a slack inside the fades only trims stage 1's",
+        s[1].fade === 3 && s[2].fade === 6 && s[1].start === 10
+        && s[1].until === 12, JSON.stringify(s.slice(1)));
+  // 9 - 17 + 4 = -4: both fades to 1, then stage 1's window closes from both
+  // ends -- 10..16, 11..15, 12..14, 13..13 -- until it fits and is at most a
+  // frame wide, and a window of nothing gives its start back.
+  s = fit(PATH_STYLE0, 4);
+  check("the tight branch resets both fades to 1 and closes stage 1",
+        s[1].fade === 1 && s[2].fade === 1 && s[1].start === 12
+        && s[1].until === 13, JSON.stringify(s.slice(1)));
+  // zstin's: slack = 400 - 0 - 5 - 46 + 23 = 372, k = 186, and nothing clamps.
+  s = fit(ARC(303), 400, true);
+  check("the start-frame fit halves its slack onto both fades, unclamped",
+        s[1].fade === 191 && s[2].fade === 186,
+        `fades ${s[1].fade}, ${s[2].fade}`);
+}
+
+console.log("class 0x31, ThrowerStatePathFollow:");
+{
+  // Stage 2 block 14's zsass, descriptor 0x7EA4, verbatim out of the bundle:
+  // wait 45 frames, then five legs over the rooftops -- the first at step 1
+  // on style 3 (which is style 0), the other four at step 3 on style 1.
+  const route = {
+    delay: 45,
+    points: [
+      { step: 1, motion_set: 3, dest: [-984.199951171875, 23.599998474121094, -1087.5] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-984.0999755859375, 37.29999923706055, -1095.699951171875] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-979.2999877929688, 45.19999694824219, -1111] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-964.5, 47.69999694824219, -1114.89990234375] as [number, number, number] },
+      { step: 3, motion_set: 1, dest: [-952.5, 27.599998474121094, -1114.5999755859375] as [number, number, number] },
+    ],
+  };
+  // `ActorArcBeginTo`: n = (int)(dist2d * step), T = n - n % step.
+  const t = thrower(ThrowerState.Idle);
+  t.pos = vec3(...route.points[0].dest);
+  ActorArcBeginTo(t, vec3(...route.points[1].dest), 3);
+  check("a step-3 leg of 8.2 units is 24 parameter frames",
+        t.arcTotal === 24, `T ${t.arcTotal}`);
+
+  const rng = new Rng(14);
+  const events = new Events();
+  // `thrower()`'s scene without its zstin.
+  ResetGameGlobals();
+  SetGameTables(CHARS31);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  G.g_camera_yaw_bams = 0;
+  const a = ActorSpawn(0x7ea4, SpawnClass.Thrower, 0x16, "zsass", {
+    initialState: ThrowerState.PathFollow, condition: 0, path: route,
+  });
+  if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+  a.visible = true;
+  a.hp = 130;
+  a.motion = 936;
+  a.pos = vec3(-1003.7, 17.1, -1086.2);
+  const start = { ...a.pos };
+  let frame = 0;
+  const ends: number[] = [];
+  events.on("sound.play", (d) => {
+    if (d.id === SND_PATH_LEG_LANDED) ends.push(frame);
+  });
+  // The pounce at the end lands in front of the camera, so put one where the
+  // route comes down: on the street below its last roof.
+  const roofEye = vec3(-952.5, 10.0, -1090.0);
+  const roofHost = {
+    ...NULL_HOST,
+    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+      out.x = roofEye.x + x; out.y = roofEye.y + y; out.z = roofEye.z + zz;
+    },
+  };
+  const pos: Vec3[] = [];
+  const sub: number[] = [];
+  const clip: number[] = [];
+  const cursor: number[] = [];
+  let immune = 0;
+  for (; frame < 400 && a.state === ThrowerState.PathFollow; frame++) {
+    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
+    pos.push({ ...a.pos });
+    sub.push(a.sub);
+    clip.push(a.action?.motion ?? -1);
+    cursor.push(ActorClipFrame(a));
+    if (a.flags & ActorFlag.ShotImmune) immune += 1;
+  }
+  const same = (p: Vec3, q: Vec3, e = 1e-6) =>
+    Math.abs(p.x - q.x) < e && Math.abs(p.y - q.y) < e && Math.abs(p.z - q.z) < e;
+  // `DEC` then `JG`: the 45th update is the one that begins the first leg.
+  check("it waits out the descriptor's 45 frames where it stands",
+        sub[43] === 1 && sub[44] === 3 && pos.slice(0, 44).every((p) => same(p, start)),
+        `sub ${sub[43]} -> ${sub[44]}`);
+  check("...and winds up on the spot for style 0's first stage",
+        pos.slice(44, 52).every((p) => same(p, start)) && clip[44] === 301,
+        `clip ${clip[44]}`);
+  check("five legs, and a footfall at the end of each",
+        ends.length === 5, `${ends.length}: ${ends.join(", ")}`);
+  // **The pace.** `ActorArcStep` flies the arc `step` parameter frames a
+  // frame, so a step-3 leg of T lasts T/3 frames of flight, plus the frame it
+  // begins on and the frame `ActorArcInterpolate` reports it over: 24/3 + 2,
+  // 48/3 + 2, 45/3 + 2 and 36/3 + 2. The port flew one parameter frame a frame,
+  // which made these 25, 49, 46 and 37 -- the "moves quite slowly" report.
+  const legs = ends.slice(1).map((e, i) => e - ends[i]);
+  check("each step-3 leg lasts T / 3 + 2 frames",
+        legs.join() === "10,18,17,14", legs.join(", "));
+  // 3 * 8.2006 / 24 on the ground each frame of the second leg's flight.
+  let fastest = 0;
+  for (let i = ends[0] + 2; i <= ends[1]; i++) {
+    fastest = Math.max(fastest, dist2d(pos[i], pos[i - 1]));
+  }
+  check("...covering about a unit of ground a frame",
+        Math.abs(fastest - 3 * 8.200609 / 24) < 1e-3, fastest.toFixed(4));
+  check("every leg lands on its waypoint",
+        ends.every((e, k) => same(pos[e], vec3(...route.points[k].dest), 1e-3)),
+        ends.map((e) => `(${pos[e].x.toFixed(2)}, ${pos[e].y.toFixed(2)}, `
+                        + `${pos[e].z.toFixed(2)})`).join(" "));
+  // Style 1 is motion 301 held on frame 12 by three fade-1 stages, and the fit
+  // grows the fades to cover the leg, so the clip never leaves the frame.
+  const hop = clip.slice(ends[0] + 1, ends[4]);
+  const hopAt = cursor.slice(ends[0] + 1, ends[4]);
+  check("the four hops are clip 301 held on frame 12",
+        hop.every((m) => m === 301) && hopAt.every((c) => c === 12),
+        `${[...new Set(hop)].join()} at ${[...new Set(hopAt)].join()}`);
+  // `OR AH, 0x1` at 0x0044EE3E and `AND CH, 0xFE` at 0x0044EF22; the arc's own
+  // windup finds the bit already up and leaves it alone.
+  check("it cannot be shot on the route, and can when it leaves it",
+        immune === pos.length - 1 && (a.flags & ActorFlag.ShotImmune) === 0,
+        `${immune} of ${pos.length}`);
+  check("then it claims a permit and pounces",
+        a.state === ThrowerState.Pounce && a.attackPermit !== -1,
+        `state ${a.state} permit ${a.attackPermit}`);
+  // `ThrowerStateLeapDown`: off the roof and into shot, at a place picked on
+  // the *screen* -- 15.5 in front, 9.4 below.
+  for (let i = 0; i < 300 && a.state === ThrowerState.Pounce; i++) {
+    GameUpdate(roofEye, 1 / 60, roofHost, rng, events);
+  }
+  check("then it comes down off the roof, in front of the camera",
+        Math.abs(a.pos.z - (roofEye.z - 15.5)) < 0.5 && a.pos.y < roofEye.y,
+        `(${a.pos.x.toFixed(1)}, ${a.pos.y.toFixed(1)}, ${a.pos.z.toFixed(1)})`);
+  check("...and the pounce hands to the leap aside",
+        a.state === ThrowerState.LeapAside, `state ${a.state}`);
 }
 
 console.log("class 0x31, ThrowerStateWalkDistance:");
@@ -7016,7 +7167,11 @@ console.log("class 0x31, ThrowerPickLandingPoint's arms:");
     ThrowerPickLandingPoint(z, host, out);
     return { x: out.x, y: out.y, z: out.z };
   };
-  const PX = 640.2;
+  // `g_projection_distance_px`, `[proved]` 240 / tan(0.35866388296751145) =
+  // 640.2079 from `SetupSceneProjection`'s listing.
+  const PX = G_PROJECTION_DISTANCE_PX;
+  check("g_projection_distance_px is SetupSceneProjection's 240 / tan(20.55 deg)",
+        Math.abs(PX - 640.2079) < 1e-4, `${PX}`);
   const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
   let p = at(ThrowerState.PounceNear, 0x19, 0, 1);
   check("an ordinary leap: 320px down at -15.5, one attacker, no side",
@@ -7490,21 +7645,24 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
   if (seen) {
     check("...at the hand's own height, not at the actor's feet",
           seen.pos.y > z.pos.y, `${seen.pos.y} vs ${z.pos.y}`);
-    // **`0x600` is a tilt, not a rate**, and this used to assert the opposite.
-    // `SpawnThrownWeapon` (`FUN_004504E0`) writes it to the projectile's
-    // `obj+0x1364`, and `ThrownWeaponUpdate` (`FUN_00450780`) draws
-    // `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — so it is
-    // added once, to X, and the *rate* is `obj+0x135C`, which no launcher
-    // writes at all. The port had been driving the Y tumble with it.
+    // **`0x600` is a tilt, not a rate.** `SpawnThrownWeapon` (`FUN_004504E0`)
+    // writes it to the projectile's `obj+0x1364`, and `ThrownWeaponUpdate`
+    // (`FUN_00450780`) draws `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 +
+    // obj+0x64)` — so it is added once, to X. The *rate* is `obj+0x135C`,
+    // which the same launcher writes as `0x2400` past the `MatrixStackPop`
+    // its decompilation stops at (`0x0045072C`).
     check("...carrying the character type's own X tilt",
           seen.tilt === 0x600, String(seen.tilt));
+    check("...spinning at the launcher's own 0x2400 a frame",
+          seen.spinRate === THROWN_WEAPON_SPIN, String(seen.spinRate));
     // Class 0x31 tumbles about Y and negates for the other hand —
     // `ThrownWeaponFlyToTarget` (`FUN_0044FD40`) at `0x0044FDE9`, which tests
-    // the throwing hand `obj+0x1358` against bone 5. Class 0x30 does neither.
+    // the throwing hand `obj+0x1358` against bone 5. The launch frame is also
+    // a flight frame, so one step has been taken already.
     check("...tumbling about Y, which is class 0x31's term",
-          seen.axis === "y", `axis ${seen.axis}`);
-    check("...at the rate the port declares, signed by the hand",
-          Math.abs(seen.spin) === THROWN_SPIN_RATE, String(seen.spin));
+          seen.rx === 0 && seen.rz === 0
+          && seen.ry === (seen.hand === 5 ? 1 : -1) * THROWN_WEAPON_SPIN,
+          `rx ${seen.rx} ry ${seen.ry} rz ${seen.rz} hand ${seen.hand}`);
 
     // ...and it is a thing that moves. `ThrownWeaponFlyToTarget` sets the
     // velocity once, at launch, and the flight is a straight line at a
@@ -7518,19 +7676,309 @@ console.log("class 0x31, the thrower actually lets go of the weapon:");
           `${dist2d(seen.pos, launch).toFixed(1)} units`);
     check("...toward the camera", dist2d(seen.pos, EYE) < before,
           `${dist2d(seen.pos, EYE).toFixed(1)} from ${before.toFixed(1)}`);
-    check("...tumbling as it goes", seen.spinAngle !== 0,
-          String(seen.spinAngle));
+    check("...a whole 0x2400 more every frame of it",
+          seen.ry === (seen.hand === 5 ? 21 : -21) * THROWN_WEAPON_SPIN,
+          String(seen.ry));
 
     // The hit is **timed, not tested**: the weapon damages the player when its
     // flight time runs out, wherever it happens to be. That is
     // `ThrownWeaponFlyToTarget`'s own shape, the same as the melee hit frame.
     let damaged = 0;
     events.on("player.damaged", () => { damaged += 1; });
-    for (let i = 0; i < 200 && !seen.hit; i++) {
+    for (let i = 0; i < 200 && seen.sub < FlySub.Stick; i++) {
       GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
     }
     check("...and lands on the player when the flight time is up",
-          seen.hit && damaged >= 1, `hit ${seen.hit}, ${damaged} damaged`);
+          seen.sub >= FlySub.Stick && damaged >= 1,
+          `sub ${seen.sub}, ${damaged} damaged`);
+  }
+}
+
+console.log("thrown weapons, the spin and the shot that takes one down:");
+{
+  // Reported as *"the knives that are thrown can't be shot out of the way"*,
+  // and *"ensure that all knives follow the correct rotation speed and axis"*.
+  //
+  // Both weapon routines end their frame with the draw, the view point at
+  // `obj+0x70` and `RegisterForShotTest` (`FUN_00405160`) --
+  // `ThrownWeaponUpdate` (`FUN_00450780`) at `0x00450864`..`0x004508AA`,
+  // `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) at `0x0045A5CC`..`0x0045A612`
+  // -- and the port had none of it, so the shot test never saw a weapon. The
+  // spin was the port's own `0x200` for every weapon; the launchers write
+  // `0x2400` (class 0x31), `0xB00` (the axe) and `0x1600` (`znassb`'s
+  // blades), and the three turn about Y, X and Y.
+  //
+  // A camera at the origin looking down world **+Z**, where the throwers
+  // stand: `MatrixRotateY(0x8000)` is its own inverse, so it is both of the
+  // camera block's matrices, and the view point the weapon's own draw leaves
+  // is what the shot test measures against.
+  const flip = MatIdentity();
+  MatrixRotateY(flip, 0x8000);
+  const HAND = vec3(0, 5, 60);
+  const KNIFE_HOST: GameHost = {
+    ...NULL_HOST,
+    boneWorld: (_at, _bone, out) => {
+      out.x = HAND.x; out.y = HAND.y; out.z = HAND.z;
+      return true;
+    },
+    cameraMatrices: (w2v, v2w) => {
+      for (let i = 0; i < 16; i++) { w2v[i] = flip[i]; v2w[i] = flip[i]; }
+      return true;
+    },
+    viewSpaceOfPoint: (p, out) => {
+      MatrixTransformPoint(flip, p, out);
+      return true;
+    },
+  };
+  const pullAt = (p: Vec3, rng: Rng, events: Events): void => {
+    const l = Math.hypot(p.x - EYE.x, p.y - EYE.y, p.z - EYE.z);
+    FireShotRequest({ player: 0, frame: 0, onScreen: 1, ray: {
+      origin: vec3(EYE.x, EYE.y, EYE.z),
+      dir: vec3((p.x - EYE.x) / l, (p.y - EYE.y) / l, (p.z - EYE.z) / l),
+    } }, KNIFE_HOST, rng, events);
+  };
+  const registered = (id: number): boolean =>
+    G.g_shot_test_list.some((e) => e.thrown === id);
+
+  // -- class 0x31: zsass's knife ------------------------------------------
+  {
+    const HANDS = [
+      { bone: 5, motion: 8, release_frame: 6, range: 20, overlay_kind: 6,
+        cancel_mask: 2, held: 8098, bare: 8095, projectile: 0x1f91 },
+      { bone: 8, motion: 9, release_frame: 6, range: 20, overlay_kind: 6,
+        cancel_mask: 4, held: 8094, bare: 8091, projectile: 0x1f90 },
+    ];
+    const TYPE_ZSASS = {
+      ...TYPE31, type: 0x16,
+      motions: { ...TYPE31.motions, "8": motion(24), "9": motion(24),
+                 "5": motion(20) },
+      throw: { hands: { "0": HANDS }, spin: 0x600, speed: 1.2, aim_ahead: 4,
+               aim_side: 0.6, stick_frames: 30, blink_frames: 60 },
+    } as unknown as CharacterType;
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS31, types: { "1": TYPE, "22": TYPE_ZSASS } } as
+                  unknown as CharactersJson);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const z = ActorSpawn(0x9300, SpawnClass.Thrower, 0x16, "zsass", {
+      initialState: ThrowerState.StandAndDecide, condition: 0,
+    });
+    z.visible = true;
+    z.hp = 100;
+    z.pos = vec3(0, 0, 60);
+    z.state = ThrowerState.Throw;
+    z.sub = 0;
+    const rng = new Rng(29);
+    const events = new Events();
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    let damaged = 0;
+    events.on("player.damaged", () => { damaged += 1; });
+
+    let w = G.g_thrown_weapons[0];
+    for (let i = 0; i < 300 && !w; i++) {
+      GameUpdate(EYE, 1 / 60, KNIFE_HOST, rng, events);
+      w = G.g_thrown_weapons[0];
+    }
+    check("zsass lets a knife go", w !== undefined
+          && w.routine === ThrownWeaponRoutine.Thrower
+          && (w.slot === 0x1f91 || w.slot === 0x1f90),
+          `slot ${w?.slot}`);
+    if (w) {
+      const sign = w.hand === 5 ? 1 : -1;
+      // `SpawnThrownWeapon` (`FUN_004504E0`): `MOV [ESI+0x135C], 0x2400` at
+      // `0x0045072C`, past the `MatrixStackPop` its pseudocode stops at.
+      check("...spinning 0x2400 a frame, the launcher's own rate",
+            w.spinRate === THROWN_WEAPON_SPIN && w.ry === sign * 0x2400,
+            `rate ${w.spinRate} ry ${w.ry}`);
+      // Square to the world, leaning its type's 0x600 on X, spinning on Y.
+      check("...about Y alone, square to the world but for the 0x600 lean",
+            w.rx === 0 && w.rz === 0 && w.tilt === 0x600,
+            `rx ${w.rx} rz ${w.rz} tilt ${w.tilt}`);
+      // **The permit went with it**, and the thrower is left on 0, not -1.
+      const permit = w.attackPermit;
+      check("...carrying the thrower's permit, the thrower left on 0",
+            permit >= 0 && z.attackPermit === 0
+            && G.g_attack_permits[permit] !== -1,
+            `weapon ${permit} thrower ${z.attackPermit} `
+            + `table ${G.g_attack_permits.join(",")}`);
+      check("...and in the shot test the frame it drew", registered(w.id)
+            && w.draw !== null && w.view.z < 0,
+            `registered ${registered(w.id)} view z ${w.view.z}`);
+      for (let i = 0; i < 5; i++) {
+        GameUpdate(EYE, 1 / 60, KNIFE_HOST, rng, events);
+      }
+      check("...another 0x2400 every flight frame",
+            w.ry === sign * 6 * 0x2400 && w.sub === FlySub.Flight,
+            `ry ${w.ry} sub ${w.sub}`);
+
+      // The pull. `ShotTestSphere` takes the weapon whole as a two-unit
+      // sphere at the view point its last draw left.
+      const hits = G.g_player_hit_count[0];
+      const score = G.g_player_score[0];
+      let resolved = "";
+      events.on("shot.resolved", (e) => { resolved = e.kind; });
+      pullAt(w.pos, rng, events);
+      check("a pull at a knife in flight marks it", resolved === "marked"
+            && (w.flags & ThrownWeaponFlag.Hit) !== 0, resolved);
+      sounds.length = 0;
+      const sprites = G.g_sprite_effects.length;
+      GameUpdate(EYE, 1 / 60, KNIFE_HOST, rng, events);
+      // `ThrownWeaponUpdate`'s hit test, then `ThrownWeaponDeflected`
+      // (`FUN_00450050`): subs 0 and 1 run through into 2 on one frame.
+      check("...and on its next frame it is deflected",
+            w.state === ThrownWeaponState.Deflected
+            && w.sub === DeflectSub.Hang && w.timer === 4,
+            `state ${w.state} sub ${w.sub} timer ${w.timer}`);
+      check("...counting a hit and scoring nothing",
+            G.g_player_hit_count[0] === hits + 1
+            && G.g_player_score[0] === score,
+            `hits ${G.g_player_hit_count[0]} score ${G.g_player_score[0]}`);
+      check("...giving its permit back on the spot",
+            G.g_attack_permits[permit] === -1 && w.attackPermit === -1,
+            G.g_attack_permits.join(","));
+      check("...with KNIFE2_OFF and the ricochet",
+            sounds.includes(0x5217a9) && sounds.includes(0x1116a9),
+            sounds.map((s) => s.toString(16)).join(","));
+      check("...and zsass's kind-3 spark where it was hit",
+            G.g_sprite_effects.length === sprites + 1
+            && G.g_sprite_effects[sprites].kind === 3,
+            `${G.g_sprite_effects[sprites]?.kind}`);
+      // `ftol(0x2400 * 1.3 * ±1)` at `0x004501F3`..`0x0045020B`.
+      check("...its spin now 1.3 times as fast, either way round",
+            Math.abs(w.spinRate) === 11980, String(w.spinRate));
+      check("...and out of the shot test for good", !registered(w.id)
+            && (w.flags & ThrownWeaponFlag.Spent) !== 0);
+      // Five frames hanging, then away, cartwheeling about X.
+      for (let i = 0; i < 4; i++) {
+        GameUpdate(EYE, 1 / 60, KNIFE_HOST, rng, events);
+      }
+      const ry = w.ry, rx = w.rx;
+      GameUpdate(EYE, 1 / 60, KNIFE_HOST, rng, events);
+      check("...then it tumbles away about X at the new rate",
+            w.sub === DeflectSub.Away && w.ry === ry
+            && Math.abs(w.rx - rx) === 11980,
+            `sub ${w.sub} ry ${ry}->${w.ry} rx ${rx}->${w.rx}`);
+      for (let i = 0; i < 200 && G.g_thrown_weapons.includes(w); i++) {
+        GameUpdate(EYE, 1 / 60, KNIFE_HOST, rng, events);
+      }
+      check("...and goes without ever touching the player",
+            !G.g_thrown_weapons.includes(w) && damaged === 0,
+            `in pool ${G.g_thrown_weapons.includes(w)} damaged ${damaged}`);
+    }
+  }
+
+  // -- class 0x30: znassb's blades ------------------------------------------
+  {
+    const BLADES = [
+      { bone: 5, held: 0x1ba9, bare: 0x1bac, weapon_bone: 6,
+        projectile: 0x1b8d },
+      { bone: 8, held: 0x1ba5, bare: 0x1ba8, weapon_bone: 9,
+        projectile: 0x1b8c },
+    ];
+    const TYPE_ZNASSB = {
+      ...TYPE,
+      zombie_throw: { ...TYPE.zombie_throw, hands: BLADES, straight: false },
+    } as unknown as CharacterType;
+    const scene = () => {
+      ResetGameGlobals();
+      SetGameTables({ ...CHARS, types: { "1": TYPE_ZNASSB } } as unknown as
+                    CharactersJson);
+      G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+      EnterPlay();
+      const z = spawnZombie(0x7800, 1, "znassb", {
+        initialState: ZombieState.StandAndThrow, condition: 8,
+        standThrow: { delay_two_hands: 0, delay_one_hand: 0,
+                      delay_after_throw: 2, exit_state: 0, walk_distance: 5 },
+      });
+      z.visible = true;
+      z.hp = z.maxHp = 100;
+      z.pos = vec3(0, 0, 60);
+      return z;
+    };
+
+    // The flight, straight off the launcher.
+    {
+      const z = scene();
+      z.attackPermit = 0;
+      G.g_attack_permits[0] = z.at;
+      const rng = new Rng(3);
+      ZombieThrowHandWeapon(z, 5, KNIFE_HOST);
+      const w = G.g_thrown_weapons[0];
+      check("znassb's blade flies the arc, spinning 0x1600",
+            w.state === ZombieThrownWeaponState.Arc
+            && w.spinRate === ZOMBIE_BLADE_SPIN && w.slot === 0x1b8d,
+            `state ${w.state} rate ${w.spinRate} slot ${w.slot}`);
+      check("...rolled 0x800, and the permit is the blade's now",
+            w.rz === ZOMBIE_WEAPON_ROLL && w.attackPermit === 0
+            && z.attackPermit === 0 && G.g_attack_permits[0] === z.at);
+      const rx0 = w.rx, ry0 = w.ry;
+      const frame: ThrownWeaponFrame = {
+        eye: EYE, cam: { w2v: flip, v2w: flip }, host: KNIFE_HOST, rng,
+      };
+      for (let i = 0; i < 4; i++) ThrownWeaponPoolUpdate(frame);
+      // `ZombieThrownWeaponStateArc` (`FUN_004598F0`) at `0x00459998`:
+      // `obj+0x68 += obj+0x135C`. The axe's straight state turns `obj+0x64`
+      // instead; the port had both of them on X.
+      check("...about Y, which is the arc's term and not the axe's",
+            w.ry - ry0 === 4 * ZOMBIE_BLADE_SPIN && w.rx === rx0,
+            `ry ${ry0}->${w.ry} rx ${rx0}->${w.rx}`);
+      // Thrown down Z from (0, 0, 60) at a target four units out, so
+      // `ZombieThrownWeaponBeginArc` bends it along **X**.
+      check("...bending across the throw, along X, by the right hand's +0.009",
+            w.acc.x > 0.0089 && w.acc.x < 0.0091 && w.acc.z === 0,
+            `acc ${w.acc.x}, ${w.acc.z}`);
+
+      // Shot down: `ZombieThrownWeaponStateShotDown` (`FUN_00459D20`).
+      pullAt(w.pos, rng, new Events());
+      const sprites = G.g_sprite_effects.length;
+      ThrownWeaponPoolUpdate(frame);
+      check("a pull takes the blade down: state 3, kind 0x52, permit freed",
+            w.state === ZombieThrownWeaponState.ShotDown
+            && G.g_sprite_effects[sprites]?.kind === 0x52
+            && G.g_attack_permits[0] === -1,
+            `state ${w.state} kind ${G.g_sprite_effects[sprites]?.kind} `
+            + `table ${G.g_attack_permits.join(",")}`);
+      check("...spinning 1.3 times as fast", Math.abs(w.spinRate) === 7321,
+            String(w.spinRate));
+    }
+
+    // `ZombieThrownWeaponBeginArc` (`FUN_00459B70`): the other window bends
+    // it along Z instead.
+    {
+      const z = scene();
+      z.pos = vec3(-60, 0, 4);
+      ZombieThrowHandWeapon(z, 8, KNIFE_HOST);
+      const w = G.g_thrown_weapons[0];
+      const t = ZombieThrownWeaponBeginArc(w, { ...w.pos }, { ...w.target },
+                                           -0.009, 1.0);
+      check("a blade thrown down X bends along Z, the time from dx and dy",
+            w.acc.z === -0.009 && w.acc.x === 0
+            && Math.abs(t - Math.hypot(w.target.x - w.pos.x,
+                                       w.target.y - w.pos.y)) < 1e-9,
+            `acc ${w.acc.x}, ${w.acc.z} t ${t}`);
+    }
+
+    // Both hands at once, and what it leaves the walker as.
+    {
+      const z = scene();
+      for (let i = 0; i < 40 && G.g_thrown_weapons.length < 2; i++) {
+        ZombieStateStandAndThrow(z, EYE, new Rng(1), KNIFE_HOST);
+        ActorAdvanceMotion(z, 1 / 60);
+      }
+      // `0x004592E4`..`0x00459301`: character type 1 claims again, picks the
+      // other hand and throws that too, on the same frame.
+      check("znassb throws both blades on the one release frame",
+            G.g_thrown_weapons.length === 2
+            && G.g_thrown_weapons[0].hand !== G.g_thrown_weapons[1].hand,
+            `${G.g_thrown_weapons.length} weapons`);
+      // `ZombieRetireThrowConditionIfUnarmed` (`FUN_004595F0`).
+      check("...and a condition-8 walker with nothing left sprints on as "
+            + "condition 0", z.condition === 0
+            && (z.flags & ZOMBIE_SPRINTS) !== 0,
+            `condition ${z.condition} flags 0x${(z.flags >>> 0).toString(16)}`);
+    }
   }
 }
 
@@ -7787,8 +8235,10 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   let threwBeforeHub = -1;
   events.on("enemy.threw", () => { threw += 1; });
   const seen = new Set<number>();
+  let weapon: (typeof G.g_thrown_weapons)[number] | undefined;
   for (let i = 0; i < 600; i++) {
     GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    weapon ??= G.g_thrown_weapons[0];
     seen.add(z.state);
     if (threwBeforeHub < 0 && threw > 0
         && z.state === ThrowerState.StandAndDecide) {
@@ -7814,9 +8264,14 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
         `bone ${bare} ${z.boneSlot[bare]}`);
   check("...with neither arm still counted destroyed", (z.zones & ARMS) === 0,
         `zones ${z.zones}`);
-  check("...and the permit is back in the pool", z.attackPermit < 0
-        && G.g_attack_permits.every((p) => p === -1),
-        `permit ${z.attackPermit}, pool ${G.g_attack_permits.join(",")}`);
+  // **The permit left with the weapon.** `SpawnThrownWeapon` (`FUN_004504E0`)
+  // copies `obj+0x121` onto the projectile and writes the thrower's to 0 --
+  // `MOV [EDI+0x121], BL` at `0x004506D5` with `EBX` zeroed -- and the weapon
+  // gives it back when it is spent. This used to assert the thrower on -1 and
+  // the pool empty, which was the port freeing the slot at the throw.
+  check("...and the thrower is left on permit 0, its weapon holding the one "
+        + "it had", z.attackPermit === 0 && weapon?.attackPermit === 0,
+        `thrower ${z.attackPermit}, weapon ${weapon?.attackPermit}`);
 }
 
 // -- 13c. a body on the ground is not a target -------------------------------
@@ -10552,6 +11007,240 @@ console.log("\nthe player shell: in, hit, out, continue, over:");
         CheckPlayerCanBeHit(1) === -3 && CheckPlayerCanBeHit(0) === 0);
 }
 
+console.log("\nthe continue screen, as the exe draws it:");
+{
+  // Into the continue the way a game gets there: the reset's start press, a
+  // strike on the path camera that takes the last life, and `GameUpdate`.
+  // What is asserted is what the frame drew -- `g_screen_sprite_draws`, which
+  // the HUD layer puts on the screen -- read against the pushes in
+  // `RunPhaseContinueCountdown` (`FUN_00460530`), `CreditPromptDraw`
+  // (`FUN_00406CE0`) and `PlayerContinueCountdown` (`FUN_00414280`).
+  const rng = new Rng(5);
+  const ev = new Events();
+  G.g_GameMode = GameMode.Arcade;
+  scene(0, rng);
+  const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
+  const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
+    [d.id.toString(16), d.x, d.y]));
+  run(1, rng, ev);
+  check("in play: the crosshair is drawn, the gameplay gate is open, and "
+        + "player 2's corner has the credit line -- 'PRESS START BUTTON' at "
+        + "(384, 412) x1.4 over 'CREDIT(S)' at (424, 427)",
+        G.g_crosshair_drawn[0] === 1 && EvtGameplayLiveUpdate() === 1
+        && at(ContinueSprite.PressStart).some((d) => d.x === 384
+          && d.y === 412 && Math.abs(d.sx - 1.4) < 1e-6 && d.flags === 5)
+        && at(ContinueSprite.Credits).some((d) => d.x === 424 && d.y === 427),
+        listed());
+
+  // Frame 1 takes the player out (state 4), frame 2 puts the run in phase 3
+  // and arms the countdown, frame 3 is phase 3 and moves the run to 4.
+  G.g_player_lives[0] = 1;
+  PlayerTakeDamage(0, 1, 9);
+  run(3, rng, ev);
+  check("the last life gone: player 1 at 4 and the run in phase 4",
+        G.g_player_state[0] === PlayerState.Continue
+        && G.g_nRunPhase === RunPhase.ContinueCountdown,
+        `state ${G.g_player_state[0]} phase ${G.g_nRunPhase}`);
+  run(1, rng, ev);
+  const big = at(ContinueSprite.Continue);
+  const digits = G.g_screen_sprite_draws.filter(
+    (d) => d.id >= ContinueSprite.BigDigit0
+      && d.id <= ContinueSprite.BigDigit0 + 9);
+  check("the run draws 'CONTINUE?' 0x22C at (128, 200) and the 64x128 digit "
+        + "0x4F + 9 at (482, 188), scale 1, top-left anchored -- and nothing "
+        + "else draws a CONTINUE?",
+        big.length === 1 && big[0].x === 128 && big[0].y === 200
+        && big[0].sx === 1 && big[0].flags === 0
+        && digits.length === 1 && digits[0].id === ContinueSprite.BigDigit0 + 9
+        && digits[0].x === 482 && digits[0].y === 188,
+        JSON.stringify([...big, ...digits]));
+  check("...under it player 1's credit line, 'PRESS START BUTTON' at "
+        + "(42, 412) and 'CREDIT(S) 5' from (82, 427), the 5 at 176",
+        at(ContinueSprite.PressStart).some((d) => d.x === 42 && d.y === 412)
+        && at(ContinueSprite.Credits).some((d) => d.x === 82 && d.y === 427)
+        && G.g_screen_sprite_draws.some((d) => d.id === HudSprite.Digit0 + 5
+          && d.x === 176 && d.y === 427),
+        listed());
+  check("...no crosshair, no lives, and the script's gate shut",
+        G.g_crosshair_drawn[0] === 0
+        && at(HudSprite.Lamp1P).length === 0 && EvtGameplayLiveUpdate() === 0);
+
+  // The digit, frame by frame: 0x9FFF less 0x2D a frame, `>> 12`. The frame
+  // above was the first of phase 4; these are the second onwards.
+  const shown: number[] = [];
+  const lineOn: boolean[] = [];
+  const lineWanted: boolean[] = [];
+  const clocks: number[] = [];
+  for (let f = 0; f < 200; f++) {
+    // The walk reads the clock `CreditBlinkTick` left last frame.
+    const c = G.g_credit_blink_clock;
+    clocks.push(c);
+    run(1, rng, ev);
+    const d = G.g_screen_sprite_draws.find(
+      (s) => s.id >= ContinueSprite.BigDigit0
+        && s.id <= ContinueSprite.BigDigit0 + 9);
+    shown.push(d ? d.id - ContinueSprite.BigDigit0 : -1);
+    lineOn.push(at(ContinueSprite.PressStart).some((s) => s.x === 42));
+    lineWanted.push(((c >> 5) % 3) !== 2);
+  }
+  const nines = shown.filter((d) => d === 9).length;
+  check("the digit shows 9 for 92 frames in all -- 0x1000 / 0x2D -- then 8, "
+        + "and 7 by the 184th",
+        nines === 91 && shown[91] === 8 && shown[182] === 7
+        && shown.every((d) => d >= 7),
+        `${nines} nines after the first, then ${shown.slice(88, 96)}`);
+  check("...the credit line's clock steps one a frame, and the line is off "
+        + "exactly where (clock >> 5) % 3 == 2: 64 frames on, 32 off",
+        clocks.every((c, i) => i === 0 || c === clocks[i - 1] + 1)
+        && lineOn.every((b, i) => b === lineWanted[i])
+        && lineOn.includes(true) && lineOn.includes(false),
+        `${lineOn.filter((b) => !b).length} frames off of 200`);
+
+  // START with a credit: back in play, and the screen goes. The frame of the
+  // press still draws CONTINUE? -- the run draws before it tests -- and the
+  // next is in play.
+  G.g_pad_state = PadBit.Start0;
+  run(1, rng, ev);
+  G.g_pad_state = 0;
+  run(1, rng, ev);
+  check("START continues: in play, 'CONTINUE?' gone, the crosshair back, "
+        + "the gate open, and a credit spent",
+        G.g_player_state[0] === PlayerState.InPlay
+        && G.g_nRunPhase === RunPhase.InPlay
+        && at(ContinueSprite.Continue).length === 0
+        && G.g_crosshair_drawn[0] === 1 && EvtGameplayLiveUpdate() === 1
+        && G.g_credits[0] === 4,
+        `state ${G.g_player_state[0]} credits ${G.g_credits[0]} ${listed()}`);
+}
+
+{
+  // Two players: player 1 continues in their half while player 2 plays on,
+  // so the run stays in phase 2 and the per-player countdown draws its own.
+  const rng = new Rng(6);
+  const ev = new Events();
+  const at = (id: number) => G.g_screen_sprite_draws.filter((d) => d.id === id);
+  const listed = () => JSON.stringify(G.g_screen_sprite_draws.map((d) =>
+    [d.id.toString(16), d.x, d.y]));
+  G.g_GameMode = GameMode.Arcade;
+  scene(0, rng);
+  JoinPlayerTwo();
+  G.g_player_lives[0] = 1;
+  PlayerTakeDamage(0, 1, 9);
+  run(3, rng, ev);
+  const layered = G.g_screen_sprite_draws.filter((d) => (d.flags & 0x700));
+  const small = layered.find((d) => d.id === ContinueSprite.Continue);
+  const digit = layered.find((d) => d.id === ContinueSprite.BigDigit0 + 9);
+  check("two players: the run stays in play and player 1's countdown draws "
+        + "the small CONTINUE? at (48, 170) x0.6/0.8 and its digit at "
+        + "(260, 160), through the layered queue",
+        G.g_nRunPhase === RunPhase.InPlay
+        && G.g_player_state[0] === PlayerState.Continue
+        && !!small && small.x === 48 && small.y === 170
+        && Math.abs(small.sx - 0.6) < 1e-6 && Math.abs(small.sy - 0.8) < 1e-6
+        && !!digit && digit.x === 260 && digit.y === 160
+        && G.g_screen_sprite_draws.every((d) =>
+          d.id !== ContinueSprite.Continue || d === small),
+        JSON.stringify(layered));
+  check("...and player 2 in play keeps the script's gate open",
+        EvtGameplayLiveUpdate() === 1);
+  // The trigger: no use on the first two digits (`CMP EAX, 0x8000; JGE`),
+  // and from 7 down it knocks the count to the bottom of its digit.
+  const pull = () => QueueShotRequest(0, { origin: vec3(), dir: vec3(0, 0, 1) });
+  let before = G.g_player_continue_timer[0];
+  pull();
+  run(1, rng, ev);
+  check("a pull on the 9 does nothing but the frame's 0x2D",
+        G.g_player_continue_timer[0] === before - 0x2d,
+        `${before.toString(16)} -> `
+        + `${G.g_player_continue_timer[0].toString(16)}`);
+  while (G.g_player_continue_timer[0] >= 0x8000) run(1, rng, ev);
+  before = G.g_player_continue_timer[0];
+  pull();
+  run(1, rng, ev);
+  check("...one on the 7 knocks it to the bottom of its digit",
+        G.g_player_continue_timer[0] === (before & ~0xfff) + 1 - 0x2d,
+        `${before.toString(16)} -> `
+        + `${G.g_player_continue_timer[0].toString(16)}`);
+  // Let it run out: the small GAME OVER, then out.
+  let frames = 0;
+  while (G.g_player_state[0] === PlayerState.Continue && frames < 1200) {
+    run(1, rng, ev);
+    frames += 1;
+  }
+  run(1, rng, ev);
+  const overs = G.g_screen_sprite_draws.filter(
+    (d) => d.id === ContinueSprite.GameOver);
+  check("run out, player 1 is game over in play: the arming frame draws the "
+        + "small GAME OVER 0x43E at (45, 170) x0.6/0.7 twice -- "
+        + "PlayerStateArmGameOver, then the wait it calls",
+        G.g_player_state[0] === PlayerState.GameOver && overs.length === 2
+        && overs[0].x === 45 && overs[0].y === 170
+        && Math.abs(overs[0].sy - 0.7) < 1e-6,
+        `state ${G.g_player_state[0]} ${JSON.stringify(overs)}`);
+  let shownFor = 1;
+  while (G.g_player_state[0] === PlayerState.GameOver && shownFor < 400) {
+    run(1, rng, ev);
+    if (G.g_screen_sprite_draws.some((d) => d.id === ContinueSprite.GameOver)) {
+      shownFor += 1;
+    }
+  }
+  check("...on 119 frames in all: the wait counts 0x78 and draws on every "
+        + "one but the last, which puts player 1 out",
+        shownFor === 119 && G.g_player_state[0] === PlayerState.Out,
+        `${shownFor} frames, state ${G.g_player_state[0]}`);
+  const c = G.g_credit_blink_clock;
+  run(1, rng, ev);
+  check("...and out, player 1's corner has the credit line again",
+        at(ContinueSprite.Credits).some((d) => d.x === 82)
+          === (((c >> 5) % 3) !== 2),
+        listed());
+}
+
+{
+  // `g_evt_gameplay_live` in the walker: with the gate shut every wait holds,
+  // `wait_frames` included, and it goes on the first frame the gate opens.
+  const script = {
+    scene: 0, stage: 1, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x42, name: "wait_frames", cat: "wait", arg: 3,
+          blocks_on: "frames" },
+        { i: 1, at: 1, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+          arg: 0, blocks_on: "enemies alive <= arg" },
+        { i: 2, at: 2, op: 0x42, name: "wait_frames", cat: "wait", arg: 100,
+          blocks_on: "frames" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  let live = false;
+  const w = new Walker(script, {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => 0,
+    presentEnemies: () => 0, aliveCivilians: () => 0, cameraFree: () => true,
+    scriptFlagRaised: () => null, gameplayLive: () => live,
+    showMessage: () => null, endDialogue: () => undefined,
+  });
+  for (let f = 0; f < 10; f++) w.tick(1 / 60);
+  check("the script holds at wait_frames 3 for ten frames while no player "
+        + "is in play", w.opIndex === 0, `op ${w.opIndex}`);
+  live = true;
+  w.tick(1 / 60);
+  check("...and goes on the frame the gate opens: the count ran down while "
+        + "it was shut", w.opIndex === 1, `op ${w.opIndex}`);
+  live = false;
+  for (let f = 0; f < 10; f++) w.tick(1 / 60);
+  check("wait_enemies_alive 0 with nobody alive holds while the gate is shut",
+        w.opIndex === 1, `op ${w.opIndex}`);
+  live = true;
+  w.tick(1 / 60);
+  check("...and passes once it opens", w.opIndex === 2, `op ${w.opIndex}`);
+}
+
 console.log("\nIsPlayerAttackable: the scene has to be running:");
 {
   // Three clauses, all ported. The first is the interesting one:
@@ -11103,8 +11792,11 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
       ZombieStateStandAndThrow(z, EYE, new Rng(1), host);
       ActorAdvanceMotion(z, 1 / 60);
     }
-    check("the throw puts a weapon in the world",
-          G.g_thrown_weapons.length === 1,
+    // **Two**, because this fixture is character type 1, and type 1 throws
+    // both hands on the one release frame -- `ZombieStateStandAndThrow`
+    // (`FUN_00459080`) at `0x004592E4`..`0x00459301`.
+    check("the throw puts a weapon in the world -- one per hand, for type 1",
+          G.g_thrown_weapons.length === 2,
           String(G.g_thrown_weapons.length));
     const w = G.g_thrown_weapons[0];
     check("...drawing the kit's own projectile slot",
@@ -11114,7 +11806,10 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
           || z.boneSlot["8"] === kit.hands[1].bare,
           JSON.stringify(z.boneSlot));
     const before = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
-    for (let i = 0; i < 10; i++) ThrownWeaponUpdate(1);
+    const rx0 = w.rx, ry0 = w.ry;
+    const frame: ThrownWeaponFrame = { eye: EYE, cam: null, host,
+                                       rng: new Rng(1) };
+    for (let i = 0; i < 10; i++) ThrownWeaponPoolUpdate(frame);
     const after = Math.hypot(w.pos.x - EYE.x, w.pos.z - EYE.z);
     check("...and it closes on the camera rather than hanging there",
           after < before - 1, `${before.toFixed(1)} -> ${after.toFixed(1)}`);
@@ -11127,14 +11822,18 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     // and the port turned everything about Y, which cartwheeled exactly one
     // of the two families. It was reported as the spin depending on which
     // zombie threw.
-    check("...tumbling about X, which is class 0x30's term",
-          w.axis === "x", `axis ${w.axis}`);
-    check("...and unsigned by the hand, unlike class 0x31's",
-          w.spin > 0, String(w.spin));
+    check("...tumbling about X, which is the axe's term",
+          w.rx - rx0 === 10 * ZOMBIE_AXE_SPIN && w.ry === ry0,
+          `rx ${rx0} -> ${w.rx}, ry ${ry0} -> ${w.ry}`);
+    check("...at the launcher's 0xB00, unsigned by the hand",
+          w.spinRate === ZOMBIE_AXE_SPIN, String(w.spinRate));
     check("...with no `obj+0x1364` tilt, which only class 0x31's launcher writes",
           w.tilt === 0, String(w.tilt));
-    check("...and it is actually turning", w.spinAngle !== 0,
-          String(w.spinAngle));
+    // `MOV dword ptr [ESI+0x6c], 0x800` at `0x0045A4C4`, and the yaw
+    // `VecToAngles` gave it toward its target, which the flight never moves.
+    check("...rolled 0x800 and facing its target from the hand",
+          w.rz === ZOMBIE_WEAPON_ROLL && ry0 !== 0,
+          `rz ${w.rz} ry ${ry0}`);
   }
 
   // The other way in: a condition-8 walker already facing the camera.
@@ -22058,7 +22757,8 @@ console.log("\nclass 0x30 state 37 — the drum-carriers on stage 3's bridge:");
         G.g_camera_settled = 1;
         gateHeld ||= !waitTargetsClear.satisfied!(
           { kind: "targets" }, { op: 0x47 } as never,
-          { host: { cameraTargetsClear: CameraTargetsClear } } as never);
+          { host: { cameraTargetsClear: CameraTargetsClear },
+            gameplayLive: () => true } as never);
       }
       if (p?.routine === CarriedPropRoutine.StuckToScreen) hitFrame = f;
     }
@@ -23604,8 +24304,12 @@ console.log("\nthe gun: the magazine, the reload, and the HUD readouts:");
   reload();
   check("Original Mode reloads to the magazine size",
         G.g_player_ammo[0] === 9, `${G.g_player_ammo[0]}`);
+  // The readout's own row, y 372: player 2's credit line, which
+  // `PlayerPollStart` draws for a player at 9, counts its credits in the
+  // same digits at y 427.
   const digits = G.g_screen_sprite_draws.filter(
-    (s) => s.id >= HudSprite.Digit0 && s.id <= HudSprite.Digit0 + 9);
+    (s) => s.id >= HudSprite.Digit0 && s.id <= HudSprite.Digit0 + 9
+      && s.y === 372);
   check("...and draws seven or more as one bullet, 'x' and two digits",
         bullets().length === 1 && sprites(HudSprite.Times).length === 1
         && digits.map((d) => d.id - HudSprite.Digit0).join("") === "09",

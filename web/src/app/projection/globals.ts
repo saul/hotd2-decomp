@@ -16,6 +16,11 @@ import { SpawnClass } from "../../game/spawn_class";
 import { SetPieceState } from "../../game/class24";
 import { ZombieState } from "../../game/class30/states";
 import { g_class_handlers } from "../../game/registry";
+import {
+  ThrownWeaponFlag, ThrownWeaponRoutine, type ThrownWeapon,
+} from "../../game/thrown_weapon";
+import { ThrownWeaponState } from "../../game/class31/projectile";
+import { ZombieThrownWeaponState } from "../../game/class30/thrown_weapon";
 import type { ActorRow, GlobalRow, GlobalsProjection, ThrownRow }
   from "../../ui/projection";
 
@@ -110,7 +115,7 @@ export function globalsProjection(): GlobalsProjection {
   }
   const thrown: ThrownRow[] = G.g_thrown_weapons.map((w) => ({
     id: w.id, slot: w.slot, ttl: num(w.ttl),
-    state: w.hit ? "hit" : "in flight",
+    state: thrownState(w),
   }));
   return {
     rows,
@@ -118,4 +123,15 @@ export function globalsProjection(): GlobalsProjection {
     liveActors: G.g_object_list.filter((a) => a.visible && !a.dead).length,
     thrown,
   };
+}
+
+/**
+ * A weapon's state by the name its own family's table gives it, and whether
+ * it is spent -- landed or shot down, so neither hittable nor a threat.
+ */
+function thrownState(w: ThrownWeapon): string {
+  const name = w.routine === ThrownWeaponRoutine.Thrower
+    ? ThrownWeaponState[w.state] : ZombieThrownWeaponState[w.state];
+  const spent = (w.flags & ThrownWeaponFlag.Spent) !== 0 ? " · spent" : "";
+  return `${name ?? w.state}/${w.sub}${spent}`;
 }

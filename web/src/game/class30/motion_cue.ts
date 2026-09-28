@@ -208,9 +208,11 @@ export function ActorSetMotionBlended(obj: Actor, motion: number,
  * back as `s8` the hold's limit is `-127`, so the engine drops the bit on the
  * first draw and recomputes the cursor from a counter this call never reset.
  * The channel keeps no counter apart from its cursor, so this holds `0x80`
- * frames instead. Only the arc's fit can produce `0x7F` -- it clamps there --
- * and only for a leap of about 250 frames or more, which no shipped spawn has
- * been shown to make. `[open]` whether one does.
+ * frames instead. Only the arc's fits can produce a fade that large --
+ * `FitArcScriptByFadeLength` clamps at `0x7F`, and zstin's
+ * `FitArcScriptByStartFrame` does not clamp at all, so it can go past -- and
+ * either only for a leap of about 250 frames or more, which no shipped spawn
+ * has been shown to make. `[open]` whether one does.
  */
 export function ActorSetOneShotBlended(obj: Actor, motion: number,
                                        start: number, fade: number): void {

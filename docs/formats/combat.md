@@ -1688,22 +1688,92 @@ its frames (`PUSH 0x1d / CALL 0x0044afb0`, `6a1d e834fcffff`, at 0x0044B375;
 ttl      = |target - pos| * 0.8333333;      /* = distance / 1.2 */
 velocity = (target - pos) / ttl;            /* constant 1.2 units per frame */
 ...each frame:
-yaw += spin;  pos += velocity;
+yaw += hand == 5 ? spin : -spin;  pos += velocity;
 if (--ttl <= 0) PlayerTakeDamage(permit, 1, 6);
 ```
 
 A **straight line at a constant speed, and a timed hit** — there is no
 collision test at all, exactly like the melee strike landing on a frame number.
-`AimThrownWeapon` puts the target 4 units in front of the camera (offset
-sideways by 0.6 per player in two-player), so the weapon is aimed at where you
-are, not where you will be.
+`AimThrownWeapon` (`FUN_004503D0`) puts the target 4 units down the camera's
+own -Z (offset sideways by 0.6 per player in a two-permit game), through the
+camera block's `+0x40` matrix, so the weapon is aimed at where you are, not
+where you will be. It is the **weapon's** routine — it reads the permit the
+weapon inherited — and the stuck arms call it every frame.
 
-Afterwards it sticks facing the camera for 30 frames and blinks for 60 —
-`obj+0x1F8` bit 0 toggled on alternate frames — before despawning.
+**The spin is `0x2400` BAMS a frame**, fifty degrees: `MOV dword ptr
+[ESI+0x135C], 0x2400` (`c7865c13000000240000`) at `0x0045072C`, the last thing
+`SpawnThrownWeapon` writes, and it goes into `obj+0x68` — the Y term of the
+draw `Rz(obj+0x6C) · Ry(obj+0x68) · Rx(obj+0x1364 + obj+0x64)` — negated
+unless the throwing hand is bone 5. `obj+0x64` and `obj+0x6C` are zero through
+the flight (`ActorClearGameFields` cleared them), so a knife starts square to
+the world, leans by its type's `obj+0x1364` (`0x600` for `zsass`, 0 for
+`zslman`) and spins flat about the vertical. `[proved]` The write is past a
+`MatrixStackPop` the decompiler has marked no-return (`L35`); an earlier
+reading of the pseudocode alone concluded that nothing writes the rate.
 
-It is **shootable in flight**: `ThrownWeaponUpdate` registers it for the shot
-test, and a hit sends it to `ThrownWeaponDeflected`, which sprays an impact,
-plays `BULLET_MET3` and throws it off in a random direction.
+On arrival it faces the **eye** — `VecToAngles(g_camera_eye - pos)` into the
+yaw, pitch zeroed — with a random pitch kick of `±(rand()&2)*0x100` and a yaw
+kick of `(rand()&5)*0x100`, negative for bone 5 (`zslman`'s blades instead
+take a half turn for the other player's blade in a two-permit game and the yaw
+kick alone). It sticks to the screen for 30 frames, re-aimed every frame, and
+blinks for 60 — `obj+0x1F8` bit 0 on the counter's parity — then gives the
+permit back and despawns.
+
+### Shooting one down
+
+Every frame it draws, `ThrownWeaponUpdate` (`FUN_00450780`) writes the
+view-space position to `obj+0x70..0x78` and calls `RegisterForShotTest`
+(`0x00450864`..`0x004508AA`, past the draw's `MatrixStackPop`). With
+`obj+0x34 = 0x80000001` and `obj+0x124 = 2.0`, `ShotTestSphere` takes it
+**whole**, as a two-unit sphere. The next frame's `ThrownWeaponUpdate` finds
+`obj+0x34` bit 8 without `0x4000000`, bumps `g_player_hit_count` — always
+player 0's, since it reads bit `0x10` for the player and `MarkActorShot` writes
+`0x2` or `0x4` — and enters state 1, `ThrownWeaponDeflected` (`FUN_00450050`):
+
+```c
+SpawnSpriteEffect(pos, zsass's 0x1F90/0x1F91 ? 3 : 0x51, 1, -1);
+obj+0x34 |= 0x4008000;  ThrowerReleaseAttackPermit(obj);    /* at once */
+target = view(obj+0x70) + ((rand()%10+1)*10*(±1), (rand()%10+1)*10*(±1), 0)
+spin   = ftol(spin * 1.3 * (±1));  KNIFE2_OFF;  BULLET_MET3;
+wait 5 frames; then each frame: pos += normalize(target - pos) * 1.2;
+         obj+0x64 -= spin (bone 5) or += spin;   /* now about X */
+gone after 180 frames, or once within 1.2 of the target on every axis
+```
+
+It scores nothing. The landing raises `0x400C000` — `0x4000000` and `0x8000`
+among it — so a weapon that has landed is out of the shot test and cannot be
+deflected. `[proved]`
+
+### Class 0x30's weapon
+
+`ZombieThrowHandWeapon` (`FUN_0045A240`) allocates the same `0x13F4` object
+with its own task, `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`), and its own
+four-state table at `0x00593170`: 0 a bare `RET`, 1 the straight flight (the
+axe `0x249`), 2 the arc (everything else — `znassb`'s two blades), 3 shot
+down. It hands the permit over the same way (thrower left on 0; no latch moves
+here), latches `g_max_attackers` into `obj+0x1360`, points the weapon at its
+target with `VecToAngles` and rolls it `0x800`.
+
+| state | spin (`obj+0x135C`) | into | hit kind | speed |
+|---|---|---|---|---|
+| 1, straight | `0xB00` | `obj+0x64`, **X** | 4 | `obj+0x1370`: 1.5 in body condition 7, else 1.0 |
+| 2, arc | `0x1600` | `obj+0x68`, **Y** | 6 | a literal 1.0 |
+
+Neither is signed by the hand, and the draw has **no** `obj+0x1364` term.
+`ZombieThrownWeaponBeginArc` (`FUN_00459B70`) takes the heading from the
+**thrower** to the target: within `0x2000` of 0 or `0x8000` (down Z) the lob
+bends along X with `t = |(dy, dz)| / speed`, otherwise along Z with
+`t = |(dx, dy)| / speed`; the acceleration is `+0.009` for bone 5 and `-0.009`
+otherwise. The aim (`ZombieThrownWeaponAimAtCamera`, `FUN_0045A070`) is
+`(side, axe ? -1.5 : 0, -4)` in camera space. Landing faces back along the
+flight (`VecToAngles(target - pos)` plus `0x8000`) with the pitch kick; shot
+down (`FUN_00459D20`) is class 0x31's deflect with sprite `0x52`, `KNIFE1_OFF`,
+the throw's own `obj+0x1370` for both the speed away and the arrival box, and
+no hand test on the spin.
+
+`znassb` throws **both** blades on one release frame: `ZombieStateStandAndThrow`
+calls `ZombieThrowHandWeapon` a second time for character type 1 after a
+`TryClaimAttackSlot` it does not look at (`0x004592E4`..`0x00459301`).
 
 ## 11. What the player implements
 
@@ -2612,7 +2682,17 @@ ActorArcInterpolate(n):      /* FUN_0044DD00, an absolute position */
 
 with the duration from `ActorArcBeginToAtSpeed` (`FUN_0044DB50`) for character
 type 0x19 — the horizontal distance at a fixed **30 units per `minFrames`**,
-so 2.0 units a frame — and from `ActorArcBeginTo` for the rest.
+so 2.0 units a frame — and from `ActorArcBeginTo` (`FUN_0044DC70`) for the
+rest: `n = (int)(dist2d * step)`, `T = n - n % step`, x and z only.
+
+**`n` advances by `step` a call, not by one.** `ActorArcStep(obj, step)` hands
+its step to `ActorArcInterpolate`, which adds it to `obj+0x1330` (`ADD EDX,
+ESI` at `0x0044DD85`), and every caller that begins with `ActorArcBeginTo`
+passes the same step to both. So a leg lasts `T / step` frames -- about **one
+unit of ground a frame whatever the step** -- and what the step changes is the
+arc's height, since the parabola is solved over `T = dist * step` parameter
+frames. `ThrowerStatePathFollow`'s waypoints carry step 1 or 3; the pounce, the
+leap aside and the surface leaps pass 1. `[proved]`
 
 Over it runs a **three-stage arc motion script**, twelve dwords that
 `InstallArcMotionScript` (`FUN_0044DA60`) copies into `g_arc_scripts`:
@@ -2621,12 +2701,28 @@ Over it runs a **three-stage arc motion script**, twelve dwords that
 { s32 motion, s32 start frame, s32 fade, s32 threshold } x 3
 ```
 
-A script is nearly always one clip cut into windup, flight and landing. Seven
-of the 38 that classes 0x30 and 0x31 can install end on a different clip —
-`zslman`'s leap aside in stances 1 and 3 (504 then 506, 494 then 496) and set
-3's attack 3 in all five stances — and every start and threshold of all 38 lies
-inside the play length of its own stage's clip, which `tools/verify_combat.py`
-check 16 asserts. `ActorArcStep` (`FUN_0044D860`) plays stage 0 on the spot,
+A script is nearly always one clip cut into windup, flight and landing. Some
+of the ones classes 0x30 and 0x31 can install switch clips — `zslman`'s leap
+aside in stances 1 and 3 (504 then 506, 494 then 496) and set 3's attack 3 in
+all five stances end on a different clip, and `ThrowerStatePathFollow`'s
+style-2 script flies on 300 between two stages of 301 — and every start and
+threshold of every one lies inside the play length of its own stage's clip,
+which `tools/verify_combat.py` check 16 asserts and counts.
+
+`ThrowerStatePathFollow` (`FUN_0044EE00`) picks its leg's script from the
+waypoint's style word, the `s16` at `+0x02`, and the bundle carries all four
+under `class31.scripts`:
+
+| style | address | name | bundle key | stages |
+|---|---|---|---|---|
+| 1 | `0x00565E58` | `g_class31_arc_path_style1` | `path_style1` | `{301,12,1,12}` three times |
+| 2 | `0x00565E88` | `g_class31_arc_path_style2` | `path_style2` | `{301,7,0,11}{300,48,1,65}{301,17,1,22}` |
+| other | `0x00565EB8` | `g_class31_arc_path_style0` | `path_style0` | `{301,0,0,8}{301,9,0,17}{301,18,0,23}` |
+| (type 0x17) | `0x00565E28` | `g_class31_arc_path_c17` | `drop_zskamere` | `{439,0,0,19}{439,20,0,31}{439,32,0,42}` |
+
+Style 1 is a pose, not a clip: 301 held on frame 12 by three stages whose
+thresholds are their own start frames, so the fit grows the fades over the
+whole leg and the actor flies it in one frame of the hop. `ActorArcStep` (`FUN_0044D860`) plays stage 0 on the spot,
 stage 1 once the clip frame reaches stage 0's threshold, stage 2 once it
 reaches stage 1's, and reports the arc over once the landing clip reaches
 stage 2's — **not** when the arc lands: its flight phase ignores
@@ -2645,6 +2741,30 @@ name is compared against that held cursor, and it is what the fit is fitting:
 `FitArcScriptByFadeLength` (`FUN_0044D5F0`) grows stages 1 and 2's fades to
 take up the slack of a long arc, so a long leap holds the flight clip's first
 frame through the air rather than playing it slowly. `[proved]`
+
+The two fits are different routines with different slacks, chosen by
+`CMP CX, 0x19` at `0x0044D8C1`:
+
+```
+FitArcScriptByFadeLength   (every type but 0x19)
+  slack = s1.start - s1.until + T                     ; no fades in it
+  > 0:  while (s1.fade + s2.fade < slack) both++
+        if (slack < s1.fade + s2.fade) s1.fade--      ; the odd frame is stage 2's
+        both clamped at 0x7F
+  < 0:  s1.fade = s2.fade = 1
+        until (fades + s1.until - s1.start <= T and s1.until - s1.start <= 1):
+          s1.start++, s1.until--
+        if (s1.until - s1.start < 1) s1.start--
+
+FitArcScriptByStartFrame   (0x19, zstin)
+  slack = T - s2.fade - s1.fade - s1.until + s1.start
+  k     = __ftol(|slack * 0.5|)
+  > 0:  both fades += k; the rest onto s1.fade; NO clamp
+  <= 0: both starts += k, each clamped at its own until; the rest onto s1.start
+```
+
+The port had one function for both, with the second's slack and `k`, until
+the rooftop route of NEW-BUGS-2 was read.
 
 > ⚠️ **Every one of those thresholds is in engine frames, at 60 Hz.** `mot/` is
 > authored at 30 Hz, so the baked clip's own index is half of it: clip 303

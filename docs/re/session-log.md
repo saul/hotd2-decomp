@@ -21467,6 +21467,195 @@ Checks: `test:audio` (new), `test:seek` (new section), `bgm_loop.mjs` (new),
 `SoundOpenFile`, `SoundCommand`; `g_sound_channels`, `g_sound_channel_count`,
 `g_bgm_stop_group`, `g_voice_stop_group`.
 
+## 2026-09-28 -- the continue screen: what it draws, and the script standing still under it
+
+`NEW-BUGS-2`: "the continue screen should show as it does in the game, with
+the countdown timer". The state was ported and nothing was drawn: the
+countdown ran, the reticle stayed up, and the script walked on through the
+stage with nobody playing it.
+
+Read end to end from the EXE: `PlayerUpdateInPlay` (state 4 the frame lives
+reach 0), `PlayerStateArmContinue`, `PlayerContinueCountdown`
+(`FUN_00414280`, from its listing -- the draw flags are `EBX` and the reused
+argument slot `[ESP+0x18]`, which the decompile shows as two booleans),
+`RunPhaseInPlay`/`ContinueArm`/`ContinueCountdown`, `PlayerTryStartPress`,
+`PlayerStateEnterContinue`, `PlayerStateArmGameOver`/`PlayerGameOverWait`,
+`PlayerPollStart`, and the draws they call, all of which were unnamed:
+`HudDrawContinuePrompt`/`HudDrawContinueDigit`/`HudDrawPlayerGameOver`
+(`0x00416880..0x00416900`), `HudDrawScoreCheat`/`HudDrawScoreDigits`, and the
+credit line `CreditPromptDraw` (`FUN_00406CE0`) with its drawer, message,
+count and index routines. Then `CreditBlinkTick` (the tail of
+`AppStateDispatch`), `InputReadFrame` (`FUN_0040D590`, which steps the frame
+counter the blink runs on and refreshes the credit tiers every frame),
+`GunReadPositions`, `CreditsBootReset`, and the eight wait handlers
+`0x40..0x47`. Every sprite id was decoded out of `scr_common` and looked at
+before it was named: CONTINUE?, the 64x128 digits, CREDIT(S), FREE PLAY,
+INSERT COIN(S), INSERT MORE COIN(S), PRESS START BUTTON twice, GAME OVER.
+
+What the exe does, in one paragraph: the run's phase 4 draws CONTINUE? at
+(128, 200) and digit `0x4F + (timer >> 12)` at (482, 188) from `0x9FFF` down
+`0x2D` a frame, with the knocked timer and before the step; each player on a
+countdown draws the credit line, blinking 64/32, and outside phase 4 (two
+players) its own small CONTINUE? and digit through the layered queue; a
+player whose countdown runs out in play draws a small GAME OVER for 119
+frames; a player at 9 in app 6 draws the credit line too (player 2's corner,
+always, in a one-player game); `HudDrawCrosshair` is only called in play; and
+`EvtInterpreterLoop` recomputes `g_evt_gameplay_live` -- a player at 5 with a
+life, or a demo run -- before its first instruction, and every wait opcode
+tests it. No routine on the path plays a sound. START with a credit is state
+1: `PlayerEnterPlay(1)`, three lives, 180 frames' grace, and the run back to
+phase 2 at the scene as it stands.
+
+Ported as that: `game/continue_readout.ts`, `game/credit_prompt.ts`, the
+draws in `RunPhaseContinueCountdown`, the calls in `player_shell.ts`, the
+gate in `script/walker.ts` and every wait rule, and the crosshair's decision
+in `G` for the page's reticle. The layered queue's flush moved from the end
+of the task walk to after the run phase, where `FUN_00418550` is.
+`RunPhaseInPlay` got its missing `g_screen_frames += 1`.
+`tools/verify_continue.py` asserts every position, scale, id, table, both
+timer constants, that only one credit drawer is reachable (every store to
+the two credit costs is `CreditsBootReset`'s, of 1), and that all eight wait
+handlers name the gate; mutated three ways, it failed all three.
+
+**Wrong turns.**
+
+* **The gate was first read inside each wait's `&&` chain.** Right for the
+  wait, wrong for the global: a wait that fails an earlier term never reaches
+  the gate, so `g_evt_gameplay_live` sat at 1 in the page for the whole
+  continue screen while the walker held for another reason. The engine
+  computes it once, before the first instruction; the walker does too now,
+  and the rules read that.
+* **The URL is not the walker.** The first harness read the address out of
+  `location.search`, saw it go from `11/2/26` to `11/2/34` during the
+  countdown, and reported the gate broken. The walker had been at 34 the
+  whole time -- `syncUrlToWalker` is lazy. The harness reads
+  `__hotd2Drive.now().a`, which is the walker's own.
+* **The frame the run enters phase 4 is phase 3's.** Read on that frame, the
+  draws had the *small* CONTINUE? in them -- the per-player countdown runs in
+  phase 3 with the run's phase not yet 4, so the exe really does flash the
+  two-player prompt for one frame. Harmless and faithful; the harness reads
+  one frame later.
+* **Two annotations were wrong.** `g_evt_gameplay_live`'s said wait `0x41`
+  does not test it and that `wait_frames`' countdown freezes: `0x41` tests it
+  before either arm, and `0x42` keeps counting and only its pass is gated.
+  `EvtInterpreterLoop`'s said the gate was "a player in state 5 with
+  credits"; it is lives.
+* **An old port test read player 2's credit count as ammo digits.** It
+  filtered the frame's draws for the 16x32 digits and now found the `5` of
+  "CREDIT(S) 5" too; it filters on the readout's own row.
+* The Ghidra MCP naming gate refused `CreditPromptDrawSingle`,
+  `CreditPromptDrawMessage` and `CreditPromptDrawCount` as token subsets of
+  existing names; overridden, since the TSV is the authority and the names
+  say what differs.
+
+**Left, and said where it lives.** `RunPhaseNoContinue`'s red fog (the
+no-credit path, two frames) is still not carried. Whether the PC mouse in
+input mode 5 raises pad bit `0x4` is `[likely]` no, pending `FUN_0041EA80`.
+`HudDrawScoreDigits`' record has zero UV extents, and what that quad shows is
+open; nothing the port runs can set the cheat.
+
+## 2026-09-28 -- the rooftop route is flown at the waypoint's step, and the two arc fits are two routines
+
+NEW-BUGS-2: "the zombie that jumps across the rooftops at
+`?stage=2&original=1&mode=play&block=14&step=2&op=9&frame=372` moves quite
+slowly compared to the real game." Probed the page headlessly (`G` imported
+into `page.evaluate`, one row a rAF): spawn `0x7EA4`, class 0x31, character
+type 0x16 `zsass`, initial state 26 `ThrowerStatePathFollow`, delay 45 and five
+waypoints -- one at step 1 on style 3, four at step 3 on style 1. The port flew
+the step-3 legs in 25, 49, 46 and 37 frames at 0.33-0.35 units of ground a
+frame, in the base clip 936, and reached the pounce at frame 220.
+
+Read `ThrowerStatePathFollow` (`FUN_0044EE00`) from the listing, not the
+pseudocode: jump table `0x0044EF7C` (cases `0x44EE29`, `0x44EE52`, `0x44EE70`,
+`0x44EEE8` -- case 2 lands after the `INC` at `0x44EE69`, so the sub goes 2 -> 3
+once, not twice), `OR AH, 1` on `obj+0x34` in sub 0 and `AND CH, 0xFE` at the
+terminator, the style switch at `0x44EE80..0x44EEA4`, `PUSH 0x565e28` for type
+0x17, and **`ActorArcStep(obj, wp.step)`** at `0x44EEEE`. `ActorArcStep`
+(`FUN_0044D860`) passes `EDI` -- its second argument -- to `ActorArcInterpolate`
+at `0x44D989` and `0x44D9EC`, and `ActorArcInterpolate` (`FUN_0044DD00`) adds it
+to `obj+0x1330` (`ADD EDX, ESI` at `0x44DD85`). `ActorArcBeginTo`
+(`FUN_0044DC70`) is `n = __ftol(sqrt(dx*dx + dz*dz) * step)` (`FIMUL [ESP+0x20]`
+at `0x44DCDD`), `T = n - n % step`. So a leg is `T / step` frames, about one
+unit of ground a frame whatever the step, and the step buys height.
+
+The port's `path.ts` had the duration right and flew it one parameter frame a
+game frame through `ActorArcVelocity`, with no arc motion script and none of
+the state's flags or sound. Transcribed it whole. Its three scripts --
+`g_class31_arc_path_style0/1/2`, already named in `globals.tsv` -- were not in
+the bundle and neither was clip 301 they play; added to `CLASS31_ARC_SCRIPTS`
+in both halves of the library (the `c17` script is `drop_zskamere`'s address).
+`verify_combat.py` check 16 now reads 41 scripts and nine clip switches.
+After, in the running player at the report's URL: legs of 10, 18, 17 and 14
+frames, 0.92-0.96 units a frame, the pounce at frame 135, clip 301 held on
+frame 12 through the hops.
+
+**`FitArcScriptByFadeLength` (`FUN_0044D5F0`) was wrong, and so was its
+annotation.** Both said `slack = T - s2.fade - s1.fade - s1.until + s1.start`,
+which is `FitArcScriptByStartFrame`'s (`FUN_0044E140`). The listing's is
+`s1.start - s1.until + T` (`0x44D606..0x44D614`); the positive arm grows both
+fades together until they cover it and takes one back off stage 1, the tight
+arm resets both fades to 1 first, and only this routine clamps at `0x7F` --
+`FitArcScriptByStartFrame` does not, which the port's shared function did.
+Split into the two routines; the port's two declared divergences for "one
+function where the engine has two" and "the fixed point of the loop, not the
+loop" are gone with it. The existing `zstin` assertion (fades 9 and 14 over a
+30-frame drop) is unchanged, which is the start-frame arm agreeing.
+
+`g_projection_distance_px` (`0x009A2D70`): its one writer,
+`SetupSceneProjection` at `0x00418528..0x0041853B`, is `240.0 /
+tan(double [0x004ED1D0] = 0.35866388296751145)` = 640.2079. The port had it as
+640.2, `[likely]`, in four places; `combat/permits.ts` has the exact value now
+and `ThrowerPickLandingPoint` imports it. The other two copies
+(`scene_lights.ts`, `class11/index.ts`) are left for whoever opens those files.
+
+**Wrong turns.**
+* `ActorArcBeginTo`'s annotation said step "is frames per unit: 1 gives a unit
+  a frame, 2 gives half" and that it "selects which axis carries the arc".
+  Both wrong -- it is flown at `step` a frame, and the axis is `obj+0x1354`.
+  `tools/hod2lib/placement.py`'s waypoint comment had it right all along (with
+  a routine name, `ActorArcStepInterp`, that does not exist; fixed).
+* A first draft of the fit's doc comment gave the old port's answer for the
+  rooftop's first leg as a 3-frame hold; worked by hand it was 6 and 5 against
+  the engine's 5 and 6. Numbers in prose get computed or left out.
+* `page.waitForFunction` with an `async` predicate resolved at once -- the
+  returned promise is truthy -- so the first screenshot sequence was labelled
+  with frames it was not taken at. Polled `G.g_frame` from Node instead, and
+  paused with Space for each shot.
+
+**Found, not fixed** -- a peer is on `ThrowerStateLeapDown` /
+`ThrowerStateLeapStrike`, so these are for that workstream. From the
+decompilation of `FUN_0044B670` and `FUN_0044B880`, not yet re-read in the
+listing:
+* LeapDown raises `obj+0x34` bit `0x10000000` (`ActorFlag.Committed`) and
+  clears it on the way to state 10; the port raises and clears `BackingOff`,
+  `0x20000000`.
+* LeapDown clears `obj+0x136C & ~0x180000` when the arc returns 0, so the
+  post-landing re-snap runs without collision; the port leaves it up.
+* LeapDown's exit is `obj+0x19C >= g_motion_play_length[obj+0x1B4] - 2`; the
+  port waits for its one-shot channel to end.
+* LeapDown's clear for types other than 0x18 is `0x9E0`; the port's includes
+  `0x200`. For 0x18 it saves the position to `obj+0x13D8` and clears `0x800`
+  only; the port does neither. The `rand()` is drawn for 0x18 too and then
+  overridden to 3; the port skips the draw. `ActorPlayHitVoice(obj, 3)` when
+  `obj+0x32C == 0x2002` is not ported.
+* LeapAside's sub 0 raises `obj+0x34 |= 0x20000000`, `obj+0x136C |= 0x180000`
+  (and `0x2000` for type 0x17); the port does not. Its landing clip goes
+  through `SetCurrentActorMotionBlended(set[4], 0, 1)` (`ActorSetMotionBlended`
+  with a stance clip at fade 5 for 0x18); the port calls class 0x30's
+  `ZombieSetMotionIfIdle`, which refuses while a one-shot is on -- the L11
+  shape `ThrowerStateLeapToPoint` already had fixed. Its exit also waits on
+  the cursor, `>= play_length - 2`, not on the channel. Ghidra shows a
+  `return` after `MatrixStackPop` in sub 0 that would stop the state ever
+  leaving sub 0; it is the no-return artefact of L35 -- the listing runs on
+  from `CALL 0x004a9840` at `0x0044BA37` into the script choice at
+  `0x0044BA3F` and the arc at `0x0044BAEB`.
+
+**And one for the camera workstream:** with the route at the engine's pace the
+tracking camera (`g_camera_is_tracking` 1, the look-at on the actor's tracked
+point) lags it, and in legs 3 and 4 the actor's torso sits 18-21 degrees above
+the look axis against a 20.55-degree half-field -- at the top edge. Whether
+the engine's camera keeps up better is the camera's question, not this one's.
+
 ## 2026-09-27 -- `ZombieStateStrike` commits at the pick (`obj+0x34` bit `0x10000000`)
 
 `ZombieStateStrike` (`FUN_00455A40`) sub 0 opens, before the draw, with
@@ -21576,6 +21765,107 @@ that the lunge's root motion stands still through its hold, passes vacuously
 when there is no hold. Reverting only the gate fails the three lunge-gate
 checks.
 
+## 2026-09-28 -- thrown weapons: the spin the launchers write, and the shot that takes one down
+
+Reported (`docs/NEW-BUGS-2.md`): the knives cannot be shot out of the way, and
+every knife should spin at the exe's rate about the exe's axis. Stage 2 block
+5 step 6 op 10 is the repro -- two `zsass` (class 0x31, type 0x16) dropping in
+and throwing `zsass.bin` 17 and 18, which render as kukris.
+
+Read, in full and from the listing where the pseudocode stops: both launchers
+(`SpawnThrownWeapon` `FUN_004504E0`, `ZombieThrowHandWeapon` `FUN_0045A240`),
+both per-frame tasks (`ThrownWeaponUpdate` `FUN_00450780`,
+`ZombieThrownWeaponUpdate` `FUN_0045A4F0`), all six states behind them, the two
+aims, `ZombieThrownWeaponBeginArc`, the release arm and clip end of
+`ZombieStateStandAndThrow`, and `FUN_004595F0`, `FUN_00450930`, `FUN_00450A30`
+and `FUN_0040A600`, which are named now.
+
+**The rate.** `0x2400` for class 0x31 (`0x0045072C`), `0xB00` for the axe
+(`0x0045A427`), `0x1600` for `znassb`'s blades (`0x0045A43C`); Y, X and Y. The
+port had `0x200` for everything, as a declared divergence whose reason was
+that nothing writes `obj+0x135C` and `ActorAlloc` does not clear the block.
+Both halves were wrong: the writes are past `MatrixStackPop` calls Ghidra marks
+no-return (L35 -- `SpawnThrownWeapon`'s whole second half, flags, permit, hand,
+rate and aim, is outside its pseudocode), and every allocator of a game object
+calls `ActorClearGameFields` on the next line. The `ActorAlloc` and
+`ZombieThrownWeaponStateStraight` annotations carried the wrong reading and are
+corrected. The arc state's axis had never been read at all.
+
+**The shot.** Both tasks end with the draw, `obj+0x70` and `RegisterForShotTest`
+-- again past a `MatrixStackPop`. The port's weapon pool never registered, so
+no shot could find one. `ShotTestEntry` and `ShotCandidate` can name a weapon
+now; `ProcessPlayerShotsTestList` tests it in the same pass and sort as the
+actors; `FireShotRequest` marks it; its routine reads the mark and runs the
+shot-down state. Transcribed: `ThrownWeaponDeflected`,
+`ZombieThrownWeaponStateShotDown`, and the rest of both flight states (the
+landings face the engine's way now and the stuck weapon is re-aimed every
+frame rather than left where it landed).
+
+**The permit.** Both launchers hand `obj+0x121` to the weapon and leave the
+thrower on 0; the weapon frees it when spent or shot. The port freed it at the
+throw (class 0x31) or at the clip end (class 0x30, whose clip end in fact only
+drops the latch). The record carries it now, and `ReleaseAttackSlot` /
+`ThrowerReleaseAttackPermit` take a `PermitHolder` rather than an `Actor`.
+Measured in the repro: before, the second `zsass` threw 27 frames after the
+first with both knives in the air; after, it waits for the first knife -- or
+for it to be shot.
+
+**`znassb` throws twice.** The release arm throws a second weapon for type 1
+(`0x004592E4`..`0x00459301`), and `ZombieRetireThrowConditionIfUnarmed`
+(`FUN_004595F0`) retires condition 8 and raises the sprint bit once the hands
+are empty. That OR at `0x00459682` contradicted a note on `ZOMBIE_SPRINTS`
+saying the bit is never raised at run time; a sweep for the immediate found a
+second writer too, `ZombieOnShot` at `0x00453F17`, which the port does not
+make.
+
+**Verified in the player** (headless, `?stage=2&original=1&mode=play&block=5&step=6&op=10&frame=90&drive=1`):
+before, the knife turned `-512` a frame about Y, the shot-test list was empty,
+a pull at its screen position missed and the knife took a life 24 frames
+later. After, `-9216` a frame about Y with `rx = 0` and the `0x600` lean, the
+list held the knife, a pull at its entry marked it, the next frame it was in
+`ThrownWeaponDeflected` with the permit back and `g_player_hit_count` up one,
+`ry` held while `rx` cartwheeled at 11980 a frame, and it cost no life. The
+same run on stage 6 (`zslman`, 0x1FE1) and stage 1 (the axe: `rx += 0xB00`,
+`rz = 0x800`, `ry` fixed at the launch heading, shot down into state 3) behaved
+the same way.
+
+**Wrong turns.** The `mcp__ghidra__*` analysis tools never appeared in this
+client after `connect_instance`; the bridge's own HTTP API on port 8089
+(`/decompile_function`, `/disassemble_bytes`, `/rename_function`) did the
+work. The first `verify_port` pass after the rewrite reported coverage 190:
+three doc tables and two enums cited routines by their parenthesised form in
+the files that define them, which is L42's trap exactly, and seven ports were
+missing from the count until they became bare addresses (198 with an older
+one in `thrower.ts`). The first test run failed two assertions that encoded the
+old divergences -- the thrower's permit back at -1 after a throw, and one
+weapon from a type-1 fixture -- and both were rewritten to the engine's
+answer rather than the fixture bent to keep them.
+
+**Found, not fixed.**
+
+* `ZombieShouldStandAndThrow` (`FUN_00458E10`) reads the **camera block's**
+  yaw, `g_camera_block_yaw_bams[g_camera_index]` (`0x009A60D0`), minus
+  `0x8000`. The port reads `G.g_camera_yaw_bams`, which it computes as
+  `atan2(forward)` -- the camera's -Z -- and the block yaw of a camera built
+  `T(eye) Ry Rx Rz` looking down -Z is `atan2(-forward)`, so the port's test is
+  half a turn out `[likely]`. Measured: stage 4's condition-8 `znassb` walked
+  in facing the camera at `0x8000` off the port's window and never threw in
+  2500 frames. So none of `znassb`'s blades appear in stages 4 and 5, and
+  condition-8 axe walkers do not throw either. `G.g_camera_block_yaw_bams` is
+  not published outside the stage-3 boss, and class 0x41's cracked props,
+  class 0x46 and the fish read it too.
+* `ZombieOnShot`'s `obj+0x34 |= 0x8000000` (the sprint bit, `0x00453F17`).
+* The weapons' `g_hit_slots` claim, camera tracking, 5-by-5 ground shadow and
+  `zslman`'s afterimages -- each declared where the call is not made.
+* `ghidra/run.sh export-annotations` was not run: it refuses a worktree path.
+  The four MCP renames and the TSV rows carry the same names.
+
+**Next actions.** Publish `g_camera_block_yaw_bams` from the camera each frame
+and move `ZombieShouldStandAndThrow` onto it, then check every other reader;
+port the `zslman` afterimage task (`ZslmanBladeEmitAfterimage`,
+`ZslmanBladeAfterimageFade`) once the renderer can tint a node; round-trip the
+annotations through `export-annotations` from the main checkout.
+
 ## 2026-09-28 -- translucency: the two passes, the depth write, and a sort that runs nearest first
 
 **The reports** (`docs/NEW-BUGS-2.md`). (a) "depth rendering bugs with some
@@ -21636,7 +21926,8 @@ at stages 2-6 differ by 0-0.5% elsewhere (hair edges, overlaps) except stage
   mesh as the key. Reading `g_view_flip_z` reversed both halves: the minimum
   of a negative-forward z is the farthest point, and descending is nearest
   first. The comparator had been read right; the axis had been assumed
-  (L59 -- the commit message says L57, which main had taken meanwhile).
+  (L61 -- the commit message says L57; main took L57 to L60
+  while this was in review).
 * The user's URL is free roam at the rail start, where the car is not in
   view. My first capture hook patched `WebGLRenderer.prototype.render`, which
   three.js does not call (it assigns `render` per instance); patching

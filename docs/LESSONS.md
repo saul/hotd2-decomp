@@ -847,7 +847,43 @@ every call site that can reach it, and read the routine a word is handed to
 before naming the word.** It is `L17` pointed at a dispatcher: the negative was
 true of the caller that was looked at.
 
-**L59 -- A loader's default is a claim about the game, and so is the sign of
+**L59 -- The URL is the walker's address as of the last throttled write, and
+a driven harness outruns the throttle.** Checking that the script stood still
+under the continue screen, a harness read `block/step/op` out of
+`location.search` and saw `11/2/26` become `11/2/34` during the countdown --
+"the gate is broken". It was not: the walker had been at `34` since before
+the player died. `syncUrlToWalker` writes through `Pacer.mayWriteUrl`, a
+wall-clock throttle (the history API is rate-limited), and under `?drive=1`
+hundreds of frames go by between two writes, so the URL answered for a frame
+long past. **Read the walker's own address**, `__hotd2Drive.now().a`, which is
+`L44`'s "print the state, never the request" with the request being the page's
+own bookkeeping.
+
+The same session had the other half of that shape in the port itself: the
+gameplay gate was first transcribed as a term of each wait's condition, where
+it is right for the wait -- and `G.g_evt_gameplay_live` then only moved on the
+frames a wait's earlier terms let the `&&` reach it, so it sat at 1 through the
+whole continue screen. The engine computes that global once, before the frame's
+first instruction. **A value the engine computes once a frame is computed once
+a frame**, not wherever a condition happens to evaluate it.
+
+**L60 -- "The engine leaves it uninitialised" is a claim about the caller,
+not the allocator.** Every thrown weapon in the port tumbled at a rate of its
+own, eighteen times too slow for the knives, behind a divergence that said
+the engine has no value to copy: nothing writes the projectile's `obj+0x135C`,
+and `ActorAlloc` (`FUN_004A6FA0`) hands back its block uncleared, so the rate
+is whatever the arena's previous occupant left. The allocator half was true
+and beside the point -- both launchers call `ActorClearGameFields` on the very
+next line -- and the other half was L35: `SpawnThrownWeapon`'s pseudocode ends
+at a `MatrixStackPop` Ghidra marks no-return, and the rate (`0x2400`), the
+flags, the permit hand-off and the aim are all in the listing after it. A
+divergence whose justification is garbage memory should send you to the
+listing past every no-return call in each writer, and to the line after the
+allocation, before it is written: an engine that really read garbage there
+would spin its knives differently from throw to throw, which is itself a claim
+about the game that nobody had checked.
+
+**L61 -- A loader's default is a claim about the game, and so is the sign of
 an axis.** `GLTFLoader` turns `alphaMode: BLEND` into `depthWrite: false` and a
 normal blend, and three.js sorts transparent primitives farthest first. The
 player took both for as long as it existed, and they were three wrong claims

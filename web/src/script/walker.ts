@@ -338,6 +338,19 @@ export interface WalkerHost {
    */
   cameraTargetsClear?(): boolean | null;
   /**
+   * `g_evt_gameplay_live` (`0x007DCCA4`) -- may the script pass a wait this
+   * frame -- or `null` when this client has no player to ask.
+   *
+   * `EvtInterpreterLoop` (`FUN_0045ECC0`) recomputes it before its first
+   * instruction: 1 while a player is in play (state 5) with a life, or in a
+   * demo run. Every wait opcode, `0x40` to `0x47`, tests it before it lets
+   * the script on, so on the continue screen the script stands at whatever
+   * wait it had reached while the scene runs on under it. Optional, so the
+   * walker-only hosts in `test/` and `web/tools/`, which have no player,
+   * leave every gate as it was.
+   */
+  gameplayLive?(): boolean | null;
+  /**
    * evt `0x2D`: start a dialogue group's voice, and say how long it runs.
    *
    * The **countdown** is the walker's, because it is script state that has to
@@ -1527,6 +1540,11 @@ export class Walker {
   /** `EvtInterpreterLoop`'s share of one frame. See {@link tick}. */
   private runInstructions(dt: number, fps: number): void {
     let frames = dt * fps;
+    // `EvtInterpreterLoop`'s first act, before any instruction: whether the
+    // script may pass a wait this frame. Asked once and kept, as the engine
+    // keeps it in a global -- the condition of a wait that short-circuits
+    // before this term must not leave last frame's answer standing.
+    this.gameplayLiveNow = (this.host.gameplayLive?.() ?? null) !== false;
 
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.lightBlock.step(dt * fps);
@@ -1550,6 +1568,13 @@ export class Walker {
         w.framesLeft -= used;
         frames -= used;
         if (w.framesLeft > 0) return;
+        // Both clocks, `0x41` and `0x42`, pass only while the gameplay gate
+        // is open. `EvtOpWaitFrames42` (`FUN_0045FB30`) keeps counting down
+        // while it is shut and holds at -1; `EvtOpWaitCameraPathFrame41`
+        // (`FUN_0045FAC0`) tests nothing while it is shut and the camera,
+        // which is not the script's, runs on. Either way the wait goes on the
+        // first frame the gate opens.
+        if (!this.gameplayLive()) return;
       } else if (!this.waitSatisfied()) {
         return;
       }
@@ -1633,6 +1658,26 @@ export class Walker {
     return this.host.cameraFree() !== false;
   }
 
+  /**
+   * `g_evt_gameplay_live`, the term every wait opcode tests, as the top of
+   * this frame's `runInstructions` found it. A host that cannot evaluate it
+   * reports `null` and the term drops out, as `cameraFree`'s does. Public
+   * because the wait rules test it.
+   */
+  gameplayLive(): boolean {
+    return this.gameplayLiveNow;
+  }
+
+  /**
+   * `[port-only]` as a field: the engine keeps the answer in
+   * `g_evt_gameplay_live` (`0x007DCCA4`), recomputed before the frame's first
+   * instruction, and the host's `gameplayLive` writes it there. Not in a
+   * snapshot, because nothing reads it before the next frame computes it
+   * again; true until then, so a seek's replay -- which observes no waits --
+   * is not held by a gate it never asked about.
+   */
+  private gameplayLiveNow = true;
+
   private waitSatisfied(): boolean {
     const w = this.wait;
     if (!w) return true;
@@ -1644,7 +1689,7 @@ export class Walker {
    * What a wait rule may ask of the machine, and nothing more.
    *
    * The walker *is* one of these — `WaitContext` is a structural view of the
-   * six members a rule may touch, so this costs nothing and the interface is
+   * members a rule may touch, so this costs nothing and the interface is
    * the whole of the surface. A rule that needs something not on it is a rule
    * reaching into the interpreter rather than being driven by it, and it will
    * not compile.

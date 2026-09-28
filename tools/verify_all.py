@@ -309,6 +309,17 @@ CHECKS: list[Check] = [
           "descriptors split five hordes to two props on the byte PlaceHorde "
           "switches on",
           NEEDS_GAME),
+    Check("verify_continue", ".",
+          ["python3", "tools/verify_continue.py", "--game-dir", "{game_dir}"],
+          "that the continue screen the port draws -- the run's CONTINUE? "
+          "and digit, the two-player small ones, the small GAME OVER and the "
+          "credit line -- is at the EXE's positions, scales and sprite ids, "
+          "read as instruction bytes and `.rdata` rows; that only one "
+          "credit-line drawer can run, because the credit costs are stored "
+          "once, as 1; and that all eight wait opcodes read the gameplay gate "
+          "that holds the script while nobody is in play. Nothing else looks "
+          "at a picture that, when wrong, is simply not there",
+          NEEDS_GAME),
     Check("verify_water", ".",
           ["python3", "tools/verify_water.py", "--game-dir", "{game_dir}"],
           "that class 0x41 type 1, the canal water task, starts from the table "

@@ -34,7 +34,8 @@
  *   the same routine blinks "HOLD YOUR FIRE!" instead, unless a result card
  *   has the screen (`g_screen_furniture_flags` bit `0x10`).
  * * Neither for a player out of lives: the continue countdown has its own
- *   screen, which the port does not draw.
+ *   screen -- `RunPhaseContinueCountdown` (`FUN_00460530`) draws it, and
+ *   `continue_readout.ts` and `credit_prompt.ts` the player's own share.
  */
 import type { Events } from "../core/events";
 import { GameMode } from "./game_mode";

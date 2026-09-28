@@ -34,9 +34,9 @@
  * rescue behind and step 4's boat shot sailed straight past her and her
  * captor. See `docs/BUGS.md`, "the civilian/enemy are jumped over".
  *
- * `g_evt_gameplay_live` (`0x007DCCA4`) is **not** modelled: it is the engine's
- * "may the script advance" — a player in state 5 with lives left — and the
- * port has no continue screen to freeze for. `[open]`.
+ * `g_evt_gameplay_live` (`0x007DCCA4`) is the engine's "may the script
+ * advance" -- a player in state 5 with lives left -- and it is what holds the
+ * script on the continue screen. `WaitContext.gameplayLive` answers it.
  *
  * The first-visit yield is not modelled either; that is the standing
  * `[diverges]` on `0x41`/`0x42`/`0x45` described in {@link WaitRule.enter}.
@@ -284,6 +284,7 @@ export const waitScriptFlag: WaitRule = {
   },
   satisfied(policy: WaitPolicy, op: OpJson, ctx: WaitContext): boolean {
     return ctx.host.scriptFlagRaised(
-      policy.kind === "flag" ? policy.index : (op.arg ?? 0)) === true;
+      policy.kind === "flag" ? policy.index : (op.arg ?? 0)) === true
+      && ctx.gameplayLive();
   },
 };

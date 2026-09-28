@@ -11,6 +11,7 @@
  * 300 frames in stage 1, the banner's own length, and 840 in stage 5 -- and
  * join the counters and spawn the health bar on the same frame.
  */
+import { ReleaseCameraEnemySlot } from "../camera/slots";
 import type { JudgmentActor } from "../actor";
 import { BossHpBarSpawn } from "../boss_hp_bar";
 import { ActorSetMotion, ActorSetMotionBlended }
@@ -38,7 +39,7 @@ import {
   CAM_PATH_LENGTH, CUTSCENE_FLAP_FRAME, Class22Clip, RIDE_IN_GLIDE_FRAME,
   RIDE_IN_NODE2_OFF_FRAME, RIDE_IN_NODE2_ON_FRAME, RIDE_LEAVE_GLIDE_FRAME,
 } from "./records";
-import { Class22PlaySound, JudgmentReleaseEnemySlot } from "./shot";
+import { Class22PlaySound } from "./shot";
 import type { Class22Descriptor } from "./state";
 import { BACK_OFF_DISTANCE } from "../class23/records";
 
@@ -226,7 +227,7 @@ export function Class22CutsceneRideAndLeave(obj: JudgmentActor,
     // `ActorFreeHitSlot` if `+0x3C != -1`, `ReleaseCameraEnemySlot` if
     // `+0x120 != 0xFF`, then `ActorKill` -- not `ActorDespawn`.
     ActorReleaseHitSlot(obj);
-    JudgmentReleaseEnemySlot(t);
+    ReleaseCameraEnemySlot(obj);
     Class22Kill(obj);
     return;
   }
@@ -271,7 +272,7 @@ export function Class22PoseUntilCameraCue(obj: JudgmentActor, f: ClassFrame,
                                           d: Class22Descriptor): void {
   if (Class22TailCueReached(d)) {
     ActorReleaseHitSlot(obj);
-    JudgmentReleaseEnemySlot(obj.judgment);
+    ReleaseCameraEnemySlot(obj);
     Class22Kill(obj);
     return;
   }

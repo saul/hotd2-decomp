@@ -62,8 +62,8 @@ camera tracks her, `g_camera_free` stays down and `wait_enemies_alive` holds;
 her script drops the bit in the block that reopens the shutter. The port kept
 every non-enemy out of the candidate list, so stage 4 (Original) block 1 handed
 the room back the frame her captor died and the two throwers walked in 180
-frames into her line with the shutter still closed. `ClassHandler.tracksCamera`
-is how a non-enemy class says its routine makes the call; `web/tools/civ_speech.mjs`
+frames into her line with the shutter still closed. Her port now makes the
+call from her own update, where the exe does; `web/tools/civ_speech.mjs`
 times rescue, lines, shutter, gate and next spawn on stage 4 (Original) block 1
 and stage 2 block 6. Stage 1 block 1's script untracks her for the two turn
 clips before her line, so there the gate can still open before she speaks --

@@ -15,6 +15,7 @@
  * differ only in their entrance (`g_class23_states_subtype0` `0x00597268`,
  * `_subtype1` `0x00597278`, `_training` `0x00597288`).
  */
+import { RegisterEnemySlot } from "../camera/slots";
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
 import type { Actor, JudgmentCompanionActor } from "../actor";
@@ -23,7 +24,6 @@ import {
   registerClass, type ActorDebug, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
-import { JudgmentRegisterEnemySlot } from "../class22/shot";
 import {
   Class23Collapse, Class23FightBesideCompanion,
   Class23LieUntilCameraCue,
@@ -83,7 +83,10 @@ export function Class23Init(obj: Actor, rng?: Rng, events?: Events): void {
   G.g_enemies_alive += 1;                              // 0x0048FE1D
   obj.attackPermit = -1;
   obj.rank = -1;
-  JudgmentRegisterEnemySlot(t);
+  // `RegisterEnemySlot(obj)` at `0x0048FE30`. Class 0x22 spawns this actor
+  // from its own update, so this runs in the task walk, as the engine's
+  // first run does: the slot is the next frame's camera's.
+  RegisterEnemySlot(obj);
   t.hpStage = 0;
 }
 
@@ -96,8 +99,6 @@ export function Class23Init(obj: Actor, rng?: Rng, events?: Events): void {
 export function Class23Update(obj: Actor, f: ClassFrame): void {
   if (obj.cls !== SpawnClass.JudgmentCompanion) return;
   const t = obj.companion;
-  t.cameraListed = false;
-  t.enemySlot = false;
   obj.alpha = 0;
   switch (obj.state) {
     case Class23State.Entrance:
@@ -183,10 +184,6 @@ export const Class23Handler: ClassHandler = {
   // `Class23TakeShots` reads the part bytes itself and never charges its own
   // hit points outside Training.
   ownsShotResult: true,
-  // `ActorRegisterCameraPoint(6.0)` in state 1's tail, and the one-frame
-  // `RegisterEnemySlot` in the `Init`.
-  tracksCamera: (obj) => obj.cls === SpawnClass.JudgmentCompanion
-    && (obj.companion.cameraListed || obj.companion.enemySlot),
   // State 1's `RegisterForShotTest` (`0x004901E9`) and
   // `ActorRegisterCameraPoint(6.0)` (`0x00490917`), and the collapse's
   // `RegisterForShotTest` (`0x00490C3B`), made from `fight.ts` at those sites.

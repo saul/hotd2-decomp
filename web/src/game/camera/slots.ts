@@ -181,6 +181,16 @@ export function UpdateCameraEnemySlots(): void {
  * from 2 to 13, with no sort and no candidate entry; `obj+0x120` is `0xFF`
  * when all twelve are taken. It lasts until the next
  * {@link UpdateCameraEnemySlots} clears the table. `[proved]`
+ *
+ * Eleven `Init`s make the call -- the bosses' among them (`0x00475F73`,
+ * `0x004918AB`, `0x0048FE30`, `0x004200AE`/`D4`, `0x00420531`). The port runs
+ * a script-spawned object's `Init` from `ActorSpawn`, inside the interpreter,
+ * which the scene's list walks ahead of `CameraUpdateTick` and this table's
+ * fill; the engine runs it from the task's own place in the ring. So the one
+ * `CameraUpdateTick` that sees an `Init`'s slot is this frame's in the port.
+ * Whether it is the same frame's or the next one's in the engine turns on
+ * where `ActorAlloc` links a new task and whether the walk in progress reaches
+ * it -- `[open]`.
  */
 export function RegisterEnemySlot(obj: Actor): void {
   obj.cameraSlot = -1;

@@ -11,6 +11,7 @@
  *
  * Both tails were read past the `MatrixStackPop` Ghidra ends them at (L35).
  */
+import { RegisterEnemySlot } from "../camera/slots";
 import type { JudgmentActor } from "../actor";
 import { BossHpFractionOf } from "../boss_hp_bar";
 import { ActorRegisterCameraPoint } from "../camera/track";
@@ -38,7 +39,7 @@ import {
 import {
   Class22ChargeShots, Class22Phase1TakeShots, Class22Phase2TakeShots,
   Class22PlaySound, Class22StepAggression,
-  Class22StrikePlayers, JudgmentRegisterEnemySlot,
+  Class22StrikePlayers,
 } from "./shot";
 import {
   Class22Flag, Class22Relative, Class22Variant, type Class22Descriptor,
@@ -506,8 +507,9 @@ export function Class22FightPhase2(obj: JudgmentActor, f: ClassFrame): void {
         Snap(obj);
         ActorSetMotionBlended(obj, Class22Clip.Hover, 0, 3);
         obj.flags &= ~Class22Flag.Reacting;
-        // `RegisterEnemySlot(obj)` at `0x0049C347`.
-        JudgmentRegisterEnemySlot(t);
+        // `RegisterEnemySlot(obj)` at `0x0049C347`: a slot until the next
+        // fill.
+        RegisterEnemySlot(obj);
         t.counter = 0;
         obj.sub = 7;
       }
@@ -633,12 +635,10 @@ export function Class22FightPhase2(obj: JudgmentActor, f: ClassFrame): void {
   obj.flags = was & ~0xe;
   // `if (!(obj+0x34 & 0x100)) ActorRegisterCameraPoint(2.0)` at `0x0049C8CE`
   // -- the shot list (its own tail call, `0x00409BED`) **and** the camera
-  // candidacy, on the flags as they were before the clear. The candidacy is
-  // `RegisterForCameraTracking` at `0x00409C03`, which the port answers with
-  // `tracksCamera` reading `cameraListed`.
+  // candidacy (`RegisterForCameraTracking`, its second, `0x00409C03`), on the
+  // flags as they were before the clear.
   if ((was & Class22Flag.Flinched) === 0) {
     ActorRegisterCameraPoint(obj, f.host, CLASS22_CAMERA_RISE);  // 0x0049C8CE
-    t.cameraListed = true;
   }
 }
 

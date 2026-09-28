@@ -81,26 +81,6 @@ const SND_KILLED: Readonly<Record<number, number>> = {
 };
 
 
-/**
- * The call `RegisterEnemySlot` (`FUN_00408E80`) at one of the two classes'
- * call sites: the first free general slot of `g_enemy_slots`, held until the
- * next `UpdateCameraEnemySlots` (`FUN_00408DD0`) empties the table.
- * `[port-only]` as a function -- see `JudgmentTail.enemySlot`.
- */
-export function JudgmentRegisterEnemySlot(t: { enemySlot: boolean }): void {
-  t.enemySlot = true;
-}
-
-/**
- * `ReleaseCameraEnemySlot` (`FUN_004092B0`) at one of the two classes' call
- * sites: `g_enemy_slots[obj+0x120] = 0; obj+0x120 = 0xFF`.
- * `[port-only]` as a function.
- */
-export function JudgmentReleaseEnemySlot(t: { enemySlot: boolean;
-                                             cameraListed: boolean }): void {
-  t.enemySlot = false;
-  t.cameraListed = false;
-}
 
 /**
  * `Class22ChargeShots` — `FUN_0049D640`. Returns `last`: -1 nobody, 0 or 1

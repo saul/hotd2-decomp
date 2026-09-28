@@ -11,6 +11,7 @@
  * move outside Training. It falls on the frame the flier's hit points reach
  * its own (90, the flier's phase-2 floor).
  */
+import { ReleaseCameraEnemySlot } from "../camera/slots";
 import { ActorFlag, type Actor, type JudgmentCompanionActor } from "../actor";
 import { ActorRegisterCameraPoint } from "../camera/track";
 import { ActorSetMotionBlended } from "../class30/motion_cue";
@@ -34,8 +35,7 @@ import { ActorDespawn } from "../despawn";
 import type { SpriteEffect } from "../effects/sprite";
 import { Class22FaceCamera } from "../class22/paths";
 import {
-  Class22PlaySound, Class22StrikePlayers,
-  JudgmentReleaseEnemySlot, ORIGINAL_WEAPON_SCALE,
+  Class22PlaySound, Class22StrikePlayers, ORIGINAL_WEAPON_SCALE,
 } from "../class22/shot";
 import {
   ARENA0_X_MIN, ARENA0_Z_MAX, ARENA0_Z_MIN, ARENA1_X_MAX, ARENA1_X_MIN,
@@ -332,10 +332,8 @@ export function Class23FightBesideCompanion(obj: JudgmentCompanionActor,
   Class23DrawAndStep(obj, f);
   obj.flags &= ~ActorFlag.Hit;
   // `ActorRegisterCameraPoint(6.0)` at `0x00490917`, no gate: the shot list
-  // (its own tail call) and the camera candidacy, which the port answers
-  // with `tracksCamera` reading `cameraListed`.
+  // and the camera candidacy, its two tail calls.
   ActorRegisterCameraPoint(obj, f.host, CLASS23_CAMERA_RISE);  // 0x00490917
-  t.cameraListed = true;
 }
 
 /**
@@ -433,7 +431,7 @@ export function Class23Collapse(obj: JudgmentCompanionActor,
   if (t.cursor === MotionPlayLength(obj)) {
     G.g_enemies_present -= 1;                          // 0x00490B5C
     ActorReleaseHitSlot(obj);
-    JudgmentReleaseEnemySlot(t);
+    ReleaseCameraEnemySlot(obj);                       // 0x00490B7E
     obj.sub = 0;
     obj.state += 1;
     obj.flags |= ActorFlag.NoShotTest;

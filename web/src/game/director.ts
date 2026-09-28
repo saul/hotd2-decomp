@@ -13,8 +13,7 @@ import type { Actor } from "./actor";
 import { ActorSpawn } from "./spawn";
 export { ActorInitFlags, ActorSpawn } from "./spawn";
 import { ActorDeadSweep, ActorDespawn } from "./despawn";
-import { RegisterForCameraTracking, UpdateCameraEnemySlots }
-  from "./camera/slots";
+import { UpdateCameraEnemySlots } from "./camera/slots";
 import { CameraActorTick, CameraUpdateTick } from "./camera/actor";
 import { SkeletonRecordCameraPoint }
   from "./camera/track";
@@ -798,22 +797,6 @@ function SceneTaskWalk(eye: Vec3, dt: number, host: GameHost,
     // object collision passes skip it. See `Globals.g_cur_actor`.
     G.g_cur_actor = obj.at;
     handler?.update(obj, f);
-    // **The boss classes' camera candidacy, until their updates make it.**
-    // `[port-only]` bridge for the classes whose ports still answer
-    // `tracksCamera`, the old predicate over the pool, rather than making the
-    // call: a class that says it tracks and filed nothing this frame is filed
-    // here, through `RegisterForCameraTracking` and its `NoCameraTrack` test.
-    // Classes 0x22 and 0x23 answer `RegisterEnemySlot` with a latch it reads.
-    // A class that already filed itself -- 0x14 and 0x19 call
-    // `ActorRegisterCameraPoint` from their updates -- is not filed twice.
-    //
-    // Every other class makes its calls from its own update, where the
-    // engine's routine does, and sets nothing. See `camera/track.ts`.
-    if (handler?.tracksCamera?.(obj)
-        && !G.g_camera_candidates.some((c) => c.prop === null
-                                           && c.at === obj.at)) {
-      RegisterForCameraTracking(obj);
-    }
     G.g_cur_actor = -1;
   }
 

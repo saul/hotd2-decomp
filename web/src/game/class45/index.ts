@@ -98,8 +98,7 @@ export function Boss3ClassHandler(obj: Boss3Actor, f: ClassFrame): void {
   }
   obj.flags = 1;
   obj.hitSlot = -1;
-  // `obj+0x120 = 0xFF`: the enemy slot, which the port's per-frame pass
-  // (`camera/slots.ts`) owns -- see `tracksCamera` below.
+  obj.cameraSlot = -1;                            // `obj+0x120 = 0xFF`
   t.counter = 0; t.camFrame = 0; t.camFrames = 0; t.unread133C = 0;
   t.blend = 0; t.bob = 0;
   // `obj+0x1348` and `obj+0x134C` are zeroed too; nothing in the class reads
@@ -201,10 +200,6 @@ export const Boss3Handler: ClassHandler = {
   // Every `INC dword ptr [model]` in the class sits behind a state test --
   // see `class45/model.ts`.
   advancesOwnMotion: true,
-  // `RegisterForCameraTracking` (`FUN_00408EC0`) is called by a fighting
-  // head's tail at `0x00421871`, and by nothing else in the class.
-  tracksCamera: (obj) => obj.cls === SpawnClass.Boss3
-    && obj.boss3.cameraTracked,
   // The class does its own counting in and out -- head 2 and the body, by
   // `INC`/`DEC` at the addresses their routines cite -- and nothing else.
   onDeadSweep: () => {},

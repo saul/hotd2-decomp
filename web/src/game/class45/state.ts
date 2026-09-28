@@ -412,11 +412,6 @@ export interface Boss3Tail {
   boneOrigin: number[];
   bonePoint: number[];
   /**
-   * `[port-only]` -- this frame's update called `RegisterForCameraTracking`
-   * (`FUN_00408EC0`). Read by the class's `tracksCamera`.
-   */
-  cameraTracked: boolean;
-  /**
    * `[port-only]` -- what this frame's update drew, for `render/`: the
    * skeleton at all (`drawn`); the bite flash, as the clock value its cels
    * were chosen by (`flash`, -1 for none); the wake, as a mask of the bones
@@ -448,7 +443,7 @@ export function makeBoss3Tail(): Boss3Tail {
     pivot: vec3(), composed: false,
     boneOrigin: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
     bonePoint: new Array<number>(BOSS3_MAX_BONES * 3).fill(0),
-    cameraTracked: false, drawn: false, flash: -1, wakeBones: 0,
+    drawn: false, flash: -1, wakeBones: 0,
     wakeCel: 0, shadow: false, block: null,
   };
 }

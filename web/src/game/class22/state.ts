@@ -181,21 +181,6 @@ export interface JudgmentTail {
    */
   cursor: number;
   done: number;
-  /**
-   * `[port-only]` — did this frame's update call `ActorRegisterCameraPoint`
-   * (`FUN_00409B70`)? The call is the camera candidacy, and the port's is a
-   * predicate over the pool read after the update; `tracksCamera` reads this.
-   */
-  cameraListed: boolean;
-  /**
-   * `[port-only]` — `RegisterEnemySlot` (`FUN_00408E80`) ran since the last
-   * update: the actor holds one of `g_enemy_slots`' general slots directly,
-   * until `UpdateCameraEnemySlots` (`FUN_00408DD0`) empties the table at the
-   * top of its next run. The port's slot table is rebuilt from the
-   * candidates once a frame, so the direct write is a candidacy for the
-   * frame it happens in; `tracksCamera` reads this beside `cameraListed`.
-   */
-  enemySlot: boolean;
 }
 
 /** A fresh tail, as the engine's zeroed allocation leaves it before `Init`. `[port-only]` as a function. */
@@ -208,7 +193,6 @@ export function makeJudgmentTail(): JudgmentTail {
     strikesLanded: 0, taunt: 0, companionDist: 0, companionAt: -1,
     subActorAt: -1, point: vec3(), savedTarget: vec3(),
     subClipWanted: 0, subClipShown: 0, cursor: 0, done: 0,
-    cameraListed: false, enemySlot: false,
   };
 }
 

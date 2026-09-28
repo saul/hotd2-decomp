@@ -25271,15 +25271,19 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
   tick(1);
   const listed = (at: number): boolean =>
     G.g_shot_test_list.some((e) => e.at === at);
+  // The candidates this frame's actors filed, which the next frame's slot
+  // fill deals and empties.
+  const candidate = (at: number): boolean =>
+    G.g_camera_candidates.some((c) => c.prop === null && c.at === at);
   check("phase 1 registers the flier for the shot test, and not as a camera "
         + "candidate (RegisterForShotTest at 0x0049C145)",
         listed(FLIER_AT) && flier.cls === SpawnClass.Judgment
-        && !flier.judgment.cameraListed);
+        && !candidate(FLIER_AT));
   check("...the walker in state 1 through ActorRegisterCameraPoint(6.0) "
         + "(0x00490917), a camera candidate as well",
         walker?.state === Class23State.Fight
         && listed(WALKER_AT) && walker.cls === SpawnClass.JudgmentCompanion
-        && walker.companion.cameraListed,
+        && candidate(WALKER_AT),
         `walker state ${walker?.state}`);
   check("...and never the sub-actor, which is not updated and has 0x8000",
         !listed(Class22SubActorAt(FLIER_AT)));
@@ -25342,9 +25346,9 @@ console.log("\nclasses 0x22/0x23: JUDGMENT, the flier and the walker:");
     tick(1);
     check("phase 2 registers the flier through ActorRegisterCameraPoint(2.0) "
           + "while bit 0x100 is down: the list and the camera",
-          listed(FLIER_AT) && flier.judgment.cameraListed
+          listed(FLIER_AT) && candidate(FLIER_AT)
           && listed(WALKER_AT),
-          `listed ${listed(FLIER_AT)} camera ${flier.judgment.cameraListed}`);
+          `listed ${listed(FLIER_AT)} camera ${candidate(FLIER_AT)}`);
     let n = 0;
     while (walker.state === Class23State.Collapse && n++ < 400) tick(1);
     check("the collapse ends on its clip's play length: out of the present "

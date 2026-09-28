@@ -259,20 +259,6 @@ export interface ClassHandler {
    */
   debug?(obj: Actor): ActorDebug;
   /**
-   * `[port-only]` -- **a transitional hook for the boss classes**, and every
-   * other class leaves it unset. The engine has no predicate: a class is a
-   * camera candidate on the frames its update calls `RegisterForCameraTracking`
-   * (`FUN_00408EC0`) -- almost always as the tail of `ActorRegisterCameraPoint`
-   * (`FUN_00409B70`) -- or holds a slot on the frames it calls
-   * `RegisterEnemySlot` (`FUN_00408E80`), and the classes ported to that shape
-   * make those calls from their own updates (`camera/track.ts` lists the
-   * sites). A class whose port still answers with this predicate is filed by
-   * `SceneTaskWalk` after its update when it answers true and filed nothing
-   * itself; see `director.ts`. Classes 0x22 and 0x23 read their
-   * `RegisterEnemySlot` latch here.
-   */
-  tracksCamera?(obj: Actor): boolean;
-  /**
    * **This class registers for the shot test the engine's way.**
    *
    * Its own update calls `RegisterForShotTest` (`FUN_00405160`) where the
@@ -367,8 +353,8 @@ export const ENEMY_CLASSES: ReadonlySet<number> = new Set([
   SpawnClass.CarriedZombie,
   // Class 0x40's members do both `INC`s in `HordeMemberInit` (`FUN_0043BEF0`)
   // and both `DEC`s in the kill. The placer, the emerge prop and the splash
-  // share the class id and are not counted; `ClassHandler.onDeadSweep` and
-  // `tracksCamera` are how the class tells them apart.
+  // share the class id and are not counted; `ClassHandler.onDeadSweep` is how
+  // the class tells them apart.
   SpawnClass.HordeSpawner,
 ]);
 

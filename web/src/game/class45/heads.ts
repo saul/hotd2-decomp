@@ -20,6 +20,8 @@ import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { PlayerState } from "../player_state";
 import { CharacterTypeOf } from "../tables";
+import { CameraSlotVacate, RegisterEnemySlot, RegisterForCameraTracking }
+  from "../camera/slots";
 import {
   Boss3BlockNew, Boss3HeadState, Boss3IdleTable, Boss3AttackTable,
   Boss3BystanderState, Boss3Phase, Boss3PoseHook, Boss3Routine, Boss3Variant,
@@ -255,8 +257,7 @@ export function Boss3FightHeadInit(obj: Boss3Actor): void {
       t.modelFrame = HELD_START_4;
     }
   }
-  // `RegisterEnemySlot` (`FUN_00408E80`): the port's slots are the camera
-  // candidates of the frame -- see `tracksCamera` in `class45/index.ts`.
+  RegisterEnemySlot(obj);                         // `0x004200AE` / `0x004200D4`
   t.routine = Boss3Routine.FightHeadUpdate;
 }
 
@@ -413,7 +414,6 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
   if (!blk) return;
   const idx = t.index;
   if (idx >= 0 && idx < G.g_boss3_heads.length) G.g_boss3_heads[idx] = obj.at;
-  t.cameraTracked = false;
 
   // -- 1. the shot, only in the fight and outside the flinch and death;
   //       outside that window the hit bits are left latched.
@@ -460,8 +460,7 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
         EnterDead(obj);
         G.g_boss3_heads_left = ((G.g_boss3_heads_left - 1) << 24) >> 24;
         t.counter = 0;
-        // `g_enemy_slots[obj+0x120 * 8] = 0` -- the head leaves the camera's
-        // slots, which in the port is its `tracksCamera` going false.
+        CameraSlotVacate(obj);                          // `0x00420CA8`
         Boss3SetMotionBlended(obj, blk.deathClip, 8, 8);
         if (G.g_boss3_heads_left === 0) {
           t.counter = 0;
@@ -557,8 +556,8 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
     obj.lookAt.y = tp.y;
     obj.lookAt.z = tp.z;
     // `RegisterForCameraTracking` (`FUN_00408EC0`) at `0x00421871`, unless
-    // the head is dead: the latch `tracksCamera` answers from.
-    if (obj.state !== Boss3HeadState.Dead) t.cameraTracked = true;
+    // the head is dead -- the class's only call of it.
+    if (obj.state !== Boss3HeadState.Dead) RegisterForCameraTracking(obj);
   }
   if (G.g_boss3_variant !== Boss3Variant.Stage6 && G.g_boss3_heads_left === 1
       && idx === 2) {
@@ -566,6 +565,7 @@ export function Boss3FightHeadUpdate(obj: Boss3Actor, f: ClassFrame): void {
     EnterDead(obj);
     G.g_boss3_heads_left = ((G.g_boss3_heads_left - 1) << 24) >> 24;
     t.counter = 0;
+    CameraSlotVacate(obj);                            // `0x004218C0`
     Boss3SetMotionBlended(obj, blk.deathClip, 8, 8);
     G.g_boss3_phase = Boss3Phase.AllDown;
   }
@@ -775,6 +775,7 @@ function Boss3FightHeadAllDown(obj: Boss3Actor, f: ClassFrame): boolean {
       G.g_enemies_present -= 1;                   // `0x00421623`
       G.g_enemies_alive -= 1;                     // `0x0042162A`
       G.g_boss3_phase = Boss3Phase.Despawn;
+      CameraSlotVacate(obj);                      // `0x00421645`
       t.counter = 0;
       if (G.g_boss3_variant !== Boss3Variant.Stage6) {
         Boss3FightHeadLeave(obj);

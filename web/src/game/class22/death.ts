@@ -16,6 +16,7 @@
  * The orbit at the routine's tail sits past a `MatrixStackPop` Ghidra
  * believes does not return (L35), and was read from the instruction stream.
  */
+import { ReleaseCameraEnemySlot } from "../camera/slots";
 import type { JudgmentActor } from "../actor";
 import { ActorSetMotion } from "../class30/motion_cue";
 import { CamBlockSetAnglesFromLookAt, CameraPoseBlock } from "../camera/path";
@@ -37,7 +38,7 @@ import {
   DEATH_LAND_HEIGHT, DEATH_REST_HEIGHT, DEATH_STAGE5_Z_MAX,
   DEATH_STAGE5_Z_MIN,
 } from "./records";
-import { Class22PlaySound, JudgmentReleaseEnemySlot } from "./shot";
+import { Class22PlaySound } from "./shot";
 import { Class22Variant, type Class22Descriptor } from "./state";
 
 /** `g_script_flags[3]` — stage 1's gate, `MOV byte [0x009C7203], 1` at `0x0049CC95`. */
@@ -202,11 +203,11 @@ function Class22DeathRelease(obj: JudgmentActor): void {
   G.g_enemies_present -= 1;                            // 0x0049C995
   // `ReleaseCameraEnemySlot` / `ActorFreeHitSlot` on the flier, then on its
   // sub-actor.
-  JudgmentReleaseEnemySlot(t);
+  ReleaseCameraEnemySlot(obj);                          // 0x0049C9AA
   ActorReleaseHitSlot(obj);
   const sub = ActorByAt(t.subActorAt);
   if (sub && sub.cls === obj.cls) {
-    JudgmentReleaseEnemySlot(sub.judgment);
+    ReleaseCameraEnemySlot(sub);                        // 0x0049C9CF
     ActorReleaseHitSlot(sub);
   }
   obj.sub += 1;

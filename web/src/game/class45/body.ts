@@ -22,6 +22,7 @@ import { ActorDespawn } from "../despawn";
 import { GameMode } from "../game_mode";
 import { PlayerState } from "../player_state";
 import { MotionPlayLength } from "../tables";
+import { CameraSlotVacate, RegisterEnemySlot } from "../camera/slots";
 import { FtolS16 } from "../matrix";
 import { vec3, VecToAngles } from "../vec";
 import {
@@ -218,6 +219,7 @@ export function Boss3BodyInit(obj: Boss3Actor): void {
   }
   G.g_enemies_present += 1;                       // `0x00420522`
   G.g_enemies_alive += 1;                         // `0x00420529`
+  RegisterEnemySlot(obj);                         // `0x00420531`
   t.routine = Boss3Routine.BodyUpdate;
 }
 
@@ -579,6 +581,7 @@ function Boss3BodyDie(obj: Boss3Actor, f: ClassFrame): void {
   G.g_camera_driver_held = 0;
   G.g_camera_free = 1;
   G.g_camera_hand_back_started = 0;
+  CameraSlotVacate(obj);                          // `0x0042343B`
   Boss3PlayStageSound(7, f.events);
   if (G.g_GameMode === GameMode.Boss) G.g_boss_engaged = 0;
 }

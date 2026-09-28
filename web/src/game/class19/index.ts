@@ -53,6 +53,7 @@
  * | the camera cues | `camera.ts` |
  * | footfalls, the draw half, the rank, the chainsaw | `frame.ts` |
  */
+import { RegisterEnemySlot } from "../camera/slots";
 import type { Actor } from "../actor";
 import { ActorFlag } from "../actor";
 import { ActorRegisterCameraPoint } from "../camera/track";
@@ -130,8 +131,8 @@ const BOSS4_TAIL_BONES = 15;
  *   the per-bone shot bit's (`obj+0x34 |= 0x80`, `ActorSpawn` in
  *   `spawn.ts`); `char+0x68 = 1` is the rotation order `RotX RotZ RotY`,
  *   which is how every actor is drawn.
- * * `RegisterEnemySlot` (`FUN_00408E80`, `0x004918AB`) is the port's
- *   per-frame slot pass, `camera/slots.ts`.
+ * * `RegisterEnemySlot` (`FUN_00408E80`, `0x004918AB`) holds a camera slot
+ *   until the next slot fill; see `camera/slots.ts`.
  * * The per-bone words are `obj.boneColi`: a record with one is shot-tested
  *   against its mesh (`ShotTestBoneMesh`) and not its sphere, which is what
  *   `+0x74 |= 0x51` and the zeroed radius say to `ShotTestBoneTree`.
@@ -147,8 +148,9 @@ export function Boss4Init(obj: Actor): void {
   G.g_enemies_alive += 1;
   // `MOV byte ptr [ESI + 0x121], 0xFF` and `+0x120`.
   obj.attackPermit = -1;
-  // `RegisterEnemySlot(obj)` -- `FUN_00408E80` at `0x004918AB`: the port's
-  // per-frame slot pass (`UpdateCameraEnemySlots`) stands in for it.
+  obj.cameraSlot = -1;
+  // `RegisterEnemySlot(obj)` -- `FUN_00408E80` at `0x004918AB`.
+  RegisterEnemySlot(obj);
   b.state = (obj.class19?.entrance ?? obj.initialState) & 0xff;
   if (b.state <= 1) {
     b.flags = Boss4Flag.OnCarrier;
@@ -313,11 +315,6 @@ export const Boss4Handler: ClassHandler = {
   // `Boss4StateEntranceCarried`/`Dropped` raise 31 and `Boss4StateDeath` 32
   // (`0x004958C7`); every link between them is ported.
   raisesScriptFlag: [BOSS4_FIGHT_READY_FLAG, BOSS4_DEAD_FLAG],
-  // `Boss4Update` calls `ActorRegisterCameraPoint(state+0x70)` at
-  // `0x00491A49` every frame, ungated, and so registers for the camera
-  // whenever `obj+0x34` bit `0x10000` is clear. Not in `ENEMY_CLASSES`, so
-  // this is the only way in.
-  tracksCamera: () => true,
   // ...and the same call puts him in the shot test. `Boss4Update` makes it
   // itself, so the director's lift does not run for this class, and `render/`
   // does not pick him: a frame he did not register is a frame he cannot be

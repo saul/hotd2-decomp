@@ -111,7 +111,8 @@ export function Class22Init(obj: Actor, rng?: Rng, events?: Events): void {
   obj.sub = 0;
   // `obj+0x3C = -1`: the slot `ActorBuildSkinnedModel` then claims is the
   // one `ActorSpawn` already claimed for this class (`hit_slots.ts`).
-  t.enemySlot = false;
+  // `obj+0x120 = 0xFF`: no camera slot.
+  obj.cameraSlot = -1;
   t.variant = (d.variant << 24) >> 24;
   obj.charType = CLASS22_CHAR_TYPE;
   obj.motion = d.clip;
@@ -146,6 +147,8 @@ export function Class22Init(obj: Actor, rng?: Rng, events?: Events): void {
       sub.flags |= SUBACTOR_FLAGS;
       s.subClipWanted = SUBACTOR_FIRST_CLIP_INDEX;
       s.subClipShown = SUBACTOR_FIRST_CLIP_INDEX;
+      // `MOV byte ptr [EAX + 0x120], 0xFF` on the sub-actor too.
+      sub.cameraSlot = -1;
     }
   }
   t.subActorAt = subAt;
@@ -221,8 +224,7 @@ export function Class22RunFromDescent(obj: JudgmentActor, f: ClassFrame): void {
  * The installed update, one frame. `[port-only]` as a wrapper: the engine's
  * handler slot holds the variant's routine itself; the port's table holds
  * one function per class, so this picks the routine the `Init` installed and
- * opens the frame the two port-only ways the class needs -- the camera
- * candidacy latches (see `JudgmentTail.cameraListed`) and the "drawn this
+ * opens the frame the one port-only way the class needs: the "drawn this
  * frame" alpha (see `draw.ts`).
  */
 export function Class22Update(obj: Actor, f: ClassFrame): void {
@@ -230,8 +232,6 @@ export function Class22Update(obj: Actor, f: ClassFrame): void {
   const t = obj.judgment;
   // The sub-actor has no update.
   if (t.isSubActor) return;
-  t.cameraListed = false;
-  t.enemySlot = false;
   obj.alpha = 0;
   const sub = ActorByAt(t.subActorAt);
   if (sub && sub !== obj) sub.alpha = 0;
@@ -300,11 +300,6 @@ export const Class22Handler: ClassHandler = {
   // `Class22ChargeShots` reads the per-player part bytes itself.
   ownsShotResult: true,
   raisesScriptFlag: Class22RaisesScriptFlag,
-  // Phase 2's `ActorRegisterCameraPoint(2.0)` (`0x0049C8CE`) while bit
-  // `0x100` is down, and the one-frame `RegisterEnemySlot` at `0x0049C347`.
-  tracksCamera: (obj) => obj.cls === SpawnClass.Judgment
-    && !obj.judgment.isSubActor
-    && (obj.judgment.cameraListed || obj.judgment.enemySlot),
   // Phase 1's `RegisterForShotTest` (`0x0049C145`) and phase 2's
   // `ActorRegisterCameraPoint` (`0x0049C8CE`), made from `fight.ts` at those
   // sites. The sub-actor never registers: it is never updated, and its

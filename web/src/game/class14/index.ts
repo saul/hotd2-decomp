@@ -42,6 +42,7 @@
  * phase and rank, `entrance.ts`, `fight.ts`, `summon.ts`, `react.ts` and
  * `death.ts` the 21 states, and this file the class itself.
  */
+import { RegisterEnemySlot } from "../camera/slots";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor, type Boss2Actor } from "../actor";
 import { ActorRegisterCameraPoint } from "../camera/track";
@@ -119,8 +120,9 @@ function IsBoss2(obj: Actor): obj is Boss2Actor {
  * ```
  *
  * **Both counters**, so a `wait_enemies_alive` or `wait_enemies_present` gate
- * sees the boss. `RegisterEnemySlot` (`FUN_00408E80`) is the camera's slot
- * pass in the port (`camera/slots.ts`), which asks `tracksCamera` below.
+ * sees the boss. `RegisterEnemySlot` (`FUN_00408E80`, at `0x00475F73`) holds
+ * a camera slot until the next slot fill; see `camera/slots.ts` for what an
+ * `Init` running at spawn does to that.
  */
 export function Class14Init(obj: Actor, rng?: Rng): void {
   void rng;
@@ -142,6 +144,9 @@ export function Class14Init(obj: Actor, rng?: Rng): void {
   G.g_enemies_present += 1;
   G.g_enemies_alive += 1;
   obj.attackPermit = -1;
+  // `obj+0x120 = 0xFF`, then `RegisterEnemySlot(obj)` at `0x00475F73`.
+  obj.cameraSlot = -1;
+  RegisterEnemySlot(obj);
   t.state = (d?.state ?? 0) as Class14State;
   t.sub = 0;
   t.cameraRise = CLASS14_CAMERA_RISE;
@@ -270,11 +275,6 @@ export const Boss2Handler: ClassHandler = {
     CLASS14_FLAG_BREAK_A_DONE, CLASS14_FLAG_BREAK_B_OPEN,
     CLASS14_FLAG_BREAK_B_DONE, CLASS14_FLAG_DEAD, CLASS14_FLAG_DEAD_STAGE5,
   ],
-  // `ActorRegisterCameraPoint` tail-calls `RegisterForCameraTracking`
-  // (`FUN_00408EC0`), which tests only `obj+0x34` bit `0x10000`; the boss is a
-  // candidate whenever that bit is clear, which this class sets and clears
-  // itself. The class is not in `ENEMY_CLASSES`, so it says so here.
-  tracksCamera: () => true,
   onDeadSweep: () => {
     // Nothing. `Class14ApplyBoneDamage` has already dropped the alive count
     // and the class's own death states drop the present count, so the generic

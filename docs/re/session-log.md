@@ -23915,3 +23915,69 @@ records, from the disassembly of `RegisterForShotTest` (`0x00405176`,
 matrix rebuild and on into the append, which the decompile's early `return`
 hides (`L35`). Class 0x26's boat does not yet register at `0x0048EE9C`,
 which is what moving those passes onto the list needs first.
+
+## 2026-09-28 -- a shot zombie's sprint, end to end, and what it does to a playthrough (branch `claude/charming-kepler-5a32f7`)
+
+The brief was to port `ZombieOnShot` (`FUN_00453EB0`)'s `OR ECX, 0x8000000`
+at `0x00453F17` into `class30/on_shot.ts`. Read in full from the disassembly
+first, `[proved]`: after the `obj+0x34 & 8` and `ShotImmune` (`TEST AH, 0x1`
+at `0x00453EC7`) gates, the per-player loop skips a player whose
+`g_shot_bone[p] <= 0` (`JLE` at `0x00453EF7`) and otherwise, before
+`ActorShotFeedback` and before the death latch at `0x00453F3B`, stores
+`g_hit_result[p]` to `obj+0x1364`, clears `obj+0x136C` bit `0x400`
+(`0x00453F14`) and raises the sprint (`0x00453F17`), written back at
+`0x00453F24`/`0x00453F2A`. Unconditional inside the loop: a corpse and a
+latched corpse take it too.
+
+**The port itself was not this branch's to write.** A peer session had
+committed exactly that reading an hour earlier (`30a0ebf0`, with seven
+assertions) on its own branch, still running; it merged to main during this
+session (`d91c2737`) and came in through main. My reading agrees with it
+instruction for instruction.
+
+What this branch adds:
+
+* **One assertion chain the two landed test sets do not have.** The peer's
+  checks read `ZombieRunMotion`/`ZombieRunTurnRate` after the shot; main's
+  crowd-push checks write `0x8000000` by hand. `port.test.ts` now drives the
+  whole path from `ResetGameGlobals` with the bit put there by a shot (`L49`):
+  a jogger (spawn record without the bit) is shot and survives, and on its
+  next `ZombieStateAttackRun` frame plays row 3 (clip 13, not 12) and turns
+  `0x410` rather than `0x1A0`; in a published two-actor crowd it is pushed
+  out 1.8x as far (`004549b6`, on itself), and the actor it pushed is shoved
+  1.8x as far on that actor's own next frame (`00454944`, on the pusher,
+  read through `obj+0x138`). Deleting the one `OR` line fails all five, and
+  the peer's three.
+* **`ScriptedPushableApplyPush33`'s row** (`0x00433CE0`) still called the
+  pusher's `0x18000000` "either airborne bit"; it now names Committed and the
+  sprint, with `TEST ECX, 0x18000000` at `0x00433D11` read (`f7c100000018`).
+
+**Measured**, `web/tools/playthrough.mjs --stage N --headless --no-damage`,
+seed 1, private bundle of the merged tree, with the `OR` line deleted and
+then restored -- nothing else differs between the two:
+
+| stage | without | with | route |
+|---|---|---|---|
+| 1 | end at 9315 frames, 92 instr | end at 9090, 93 | same blocks; block 4's leg 210 frames shorter, block 6 reached 225 sooner |
+| 2 | end at 14085, 145 instr, 1 console error | end at 14235, 144, none | same blocks; 135 frames slower by block 12 and carried |
+| 3 | end at 9075, 70 instr, 2 console errors | end at 8985, 71, none | same blocks |
+| 4 | end at 7770, 81 instr | end at 7770, 81 | identical |
+| 5 | hangs, block 1 op 69 | hangs, block 1 op 69 | Judgment's room: `wait_enemies_alive`, 2 alive, `g_camera_free 0` |
+| 6 | hangs, block 2 op 77 | hangs, block 2 op 77 | the stage-6 boss, four heads dead, `g_enemies_present 1` |
+
+So a shot that does not kill now brings its zombie in at a sprint, and on a
+grid-firing harness that mostly clears rooms sooner (stages 1 and 3) but
+not always (stage 2). The two hangs are the same instruction either way and
+are boss rooms the brief's command does not fight (`--boss` is off); they
+are not this change. The console errors were counted by the harness and not
+printed, and appeared only in the runs without the `OR`; not chased.
+
+**Wrong turn, mine.** Having found the peer's commit, I checked the other
+worktrees for the *follow-on* files (`ground.ts`, `class33/pushable.ts`,
+`backoff.ts`, `spawns.md`, the `0x00454900` row) with `git status
+--porcelain`, found them clean, and rewrote their stale notes -- "what
+`0x8000000` means is open", "airborne", "the push is not ported". A second
+peer had made the same rewrite and **committed** it on its crowd-push branch
+(`3030a653`), which `status` cannot see. Five conflicts at the merge, all
+resolved by taking main's side. Search a peer's branch commits
+(`git log origin/main..<branch> -- <path>`), not only its working tree.

@@ -654,13 +654,32 @@ OBJ_470080 = Rig(
     ),
 )
 
-#: `FUN_00416B00`. Not a static rig: a loop i = 0..5 over three parallel
-#: 0x30-byte record arrays, record = ARRAY + 0x30*(i + 6*player). Every
-#: translation and rotation is runtime data and all but one slot id is
-#: computed, so only the record layout and the rules are transcribed.
+#: `FUN_00416B00`, `PlayerShotEffectsThink`. Not a static rig: a loop i = 0..5
+#: over three parallel 0x30-byte record arrays, record = ARRAY + 0x30*(i +
+#: 6*player). Every translation and rotation is runtime data and all but one
+#: slot id is computed, so only the record layout and the rules are
+#: transcribed.
+#:
+#: **Not placed.** Its one literal slot, 0x109D (`etc_1.bin` entry 41), is the
+#: tracer arm for Original Mode weapon kind 5, and the exe draws it only from a
+#: live `g_shot_tracer_ring` record of that kind: `CMP EAX, 0x5` on `+0x2C` at
+#: 0x00416CBE, then `Translate(record) . Translate(CamEvalObjectPath6(0x194,
+#: age % 24)) . MatrixClearRotation . RotZ RotY RotX` and `PUSH 0x109D` at
+#: 0x00416DA1 [proved, from the listing]. It used to carry `Route(0x194)`,
+#: which the exporter turned into an ungated root the player drew from stage
+#: load at the path's own pose, (0.5, 0, 0): a green mound in front of
+#: Goldman's desk in every Original Mode stage-2 cutscene, with no shot fired.
+#: The ring is `web/src/game/effects/shot_effects.ts`'s and its draw is
+#: `web/src/render/effects.ts`'s, so nothing here is a root to place.
 OBJ_416B00 = Rig(
     name="obj_416b00",
     routine="FUN_00416B00",
+    placement_blocked="runtime records: PlayerShotEffectsThink draws every "
+                      "part from a live g_shot_tracer_ring / flash / weapon "
+                      "record at a position the shot wrote, and slot 0x109D "
+                      "only for a kind-5 tracer (0x00416CBE). The client's "
+                      "effect layer draws those rings; a root placed from "
+                      "op_ 0x194 alone is a pose the object never holds.",
     routes=(Route(0x194, frame="(age % 24), a 24-frame loop"),),
     note="[likely] the per-shot gunfire effect set -- spawned from the "
          "player's crosshair at unit view depth by FUN_00416F70, per player, "
@@ -849,8 +868,20 @@ OBJ_4331D0 = Rig(
 #: fired by the event script.
 #:
 #: This rig is why the 9-vs-22 split in `docs/re/rig-survey.md` is a filter and
-#: not a definition: the posers evaluate the path and never draw, while the rig
-#: lives here.
+#: not a definition: the posers evaluate the path and never call AssetDrawSlot
+#: themselves, while the rig lives here. They do draw -- `St2CarRouteUpdate`
+#: (FUN_004521B0) and `St2CarHeldUpdate` (FUN_004522A0) each end by calling
+#: this routine, at 0x0045228C and 0x00452308; this said "never draw" until
+#: 2026-09-28.
+#:
+#: **Both asset rows are parts.** Every part draws
+#: `g_st2car_asset_variants[obj+0x13F0][column]` (0x00565F2C, int[2][4]): row
+#: 0 = 0x2D 0x2F 0x34 0x31, row 1 = 0x2E 0x30 0x35 0x32, read from the image.
+#: The eight slots are `pol/char_adv04.bin` entries 2..10 through the pol slot
+#: list, so each row is its own part here, and `web/src/render/rigs.ts` shows
+#: the part whose slot `St2CarDraw` names this frame -- the port's
+#: `web/src/game/class21/car.ts` computes the row, the two gated rotations and
+#: the roll-limited frame, all of it read from 0x00452320..0x0045253F.
 OBJ_452320 = Rig(
     name="obj_452320",
     routine="FUN_00452320",
@@ -861,7 +892,10 @@ OBJ_452320 = Rig(
               note="playlen 370. At frame >= 370 the asset set swaps to "
                    "variant 1 and the think pointer becomes FUN_004522A0, "
                    "which never re-samples a path -- so the body pose freezes "
-                   "there permanently. [likely] the crash."),
+                   "there permanently. [likely] the crash: the unshot branch "
+                   "plays this shot to 405 in stage 2 block 11 step 1, and "
+                   "its script plays 0x519A9, STAGE2_SE\\BRIDGE_CRASH1_22.wav, "
+                   "at frame 340 of it."),
         Route(0x14D, cam_paths=(0x3A,),
               note="playlen 130. At frame >= 80 the X-spin flag obj+0x1320 is "
                    "cleared permanently; at 130 the think pointer becomes "
@@ -878,63 +912,79 @@ OBJ_452320 = Rig(
          "written verbatim from CamEvalObjectPath6. "
          "Spawned by FUN_00452120 -> FUN_004A6FA0(FUN_00452150, 0x13F4), which "
          "sets obj+0x1350 to the instance index; the think pointer is "
-         "FUN_004521B0, or FUN_00452930 when g_GameMode == 2. "
+         "FUN_004521B0, or FUN_00452930 when g_GameMode == 2. Both of the "
+         "arcade think routines end by calling this draw (0x0045228C, "
+         "0x00452308). "
          "ASSET VARIANT: every part draws "
-         "dword[0x00565F2C + obj+0x13F0 * 0x10 + column], a 2x4 int table. "
-         "Variant 0 is exported; variant 1 is the set it swaps to after shot "
-         "0x39 ends. Only two rows exist. "
+         "dword[0x00565F2C + obj+0x13F0 * 0x10 + column], a 2x4 int table: "
+         "row 0 = 0x2D 0x2F 0x34 0x31, row 1 = 0x2E 0x30 0x35 0x32. Both rows "
+         "are exported, one part per slot; row 1 is the set the car swaps to "
+         "after shot 0x39 ends. Only two rows exist. The slots are "
+         "pol/char_adv04.bin entries 2..10 through the pol slot list. "
          "LATENT BUG [proved], same shape as FUN_0048F560's: on a camera path "
          "other than 0x38/0x39/0x3A, FUN_004521B0 leaves the actor pointer in "
-         "ECX and sign-extends its low 16 bits as the path index. Harmless "
-         "only because the actor exists solely during those three shots. "
-         "[open] asset identities -- slots 0x2D..0x35 are runtime indices with "
-         "no static name table in the exe.",
+         "ECX and sign-extends its low 16 bits as the path index. An unbroken "
+         "run does not reach it: the car's first update is already on 0x38, "
+         "the shots that follow are 0x39 and then 0x39 or 0x3A, and it parks "
+         "inside the last.",
     parts=(
+        # Row 0 of g_st2car_asset_variants: what St2CarDraw draws until shot
+        # 0x39 runs out.
         RigPart("part_002d", (0x2D,),
+                condition="obj+0x13F0 == 0: column 0 of row 0",
                 note="the object root itself: Translate(pose) then RotZ, RotY, "
                      "RotX from obj+0x40/44/48 and 0x6C/68/64. "
-                     "Variant 1 draws 0x2E instead."),
+                     "Row 1 draws 0x2E instead (part_002e)."),
         # A genuine nested push: this one is inside part_002d's, not a sibling.
         RigPart("part_002f", (0x2F,),
                 translation=(9.0582619, 6.368186, 8.9433079),
                 parent="part_002d",
+                condition="obj+0x13F0 == 0: column 1 of row 0",
                 animated="RotY by obj+0x1334, applied only while obj+0x1324 is "
                          "non-zero -- which happens only under FUN_004522A0, "
-                         "after the shot-0x39 freeze. obj+0x1334 is then "
-                         "0x4000 - CamEvalObjectPath6(0x153, t + 100.0).ry for "
-                         "t = 1..39, and frozen after. So this part only moves "
-                         "once the body has stopped.",
+                         "once the car is parked on either shot. obj+0x1334 is "
+                         "then 0x4000 - CamEvalObjectPath6(0x153, n + 100.0).ry "
+                         "for n = 1..39, and held after. So this part only "
+                         "moves once the body has stopped.",
                 note="raw z=0x410F17C2, y=0x40CBC84B, x=0x4110EECC. "
-                     "Variant 1 draws 0x30. [open] what it is: the geometry "
-                     "and the timing would fit a panel swinging open, but "
-                     "nothing in the code or any string says so."),
-        # Both of these are really children of a second, non-drawing root that
+                     "Row 1 draws 0x30 (part_0030). [likely] the driver's "
+                     "door: rendered, it is the door the rescued man climbs "
+                     "out through at the end of shot 0x3A, swinging out "
+                     "through op_ 0x153's 0x4000..0x7A43 ry (about 82 deg). "
+                     "Nothing in the code or any string names it."),
+        # Both of these are children of a second, non-drawing root that
         # re-applies the body orientation with the roll passed through a
-        # limiter. That root is identical to the object root whenever the roll
-        # is inside the limiter's deadzone, so they are exported as children of
-        # the rig root and the limiter is recorded here instead.
+        # limiter. That root is identical to the object root whenever the body
+        # has no roll, so they are exported as children of the rig root, and
+        # the player moves them onto the limited frame the port computes each
+        # frame (web/src/game/class21/car.ts, St2CarDraw).
         RigPart("part_0034", (0x34,),
                 translation=(0.0, 3.1674952, 13.6489019),
+                condition="obj+0x13F0 == 0: column 2 of row 0",
                 animated="RotX by obj+0x1330, applied only while obj+0x1320 is "
-                         "set. obj+0x1330 gains 0x1000 BAMS (22.5 deg) every "
-                         "frame under FUN_004521B0 and FUN_00452930, and is "
-                         "never reset; FUN_004522A0 does not advance it, so "
-                         "the spin freezes there.",
-                note="raw z=0x415A61E5, y=0x404AB852, x=0.0. Variant 1 draws "
-                     "0x35. Its true parent is a roll-limited copy of the body "
-                     "frame: FUN_004018E0 decomposes Rz.Ry.Rx into a YXZ "
-                     "triple, then the roll r (&0xFFFF) is remapped -- "
-                     "r<=0x800 -> 0; 0x800<r<=0x4000 -> r-0x800; "
-                     "0x4000<r<0xC000 -> r; 0xC000<=r<0xE800 -> r-0xE800; "
-                     "r>=0xE800 -> 0. An asymmetric deadzone over "
-                     "-33.75..+11.25 deg, identity at rest."),
+                         "set -- and NOT applied, so drawn at RotX 0, once it "
+                         "is cleared. obj+0x1330 gains 0x1000 BAMS (22.5 deg) "
+                         "every frame under FUN_004521B0 and FUN_00452930, and "
+                         "is never reset; FUN_004522A0 does not advance it, so "
+                         "the spin holds there.",
+                note="raw z=0x415A61E5, y=0x404AB852, x=0.0. Row 1 draws 0x35 "
+                     "(part_0035). Its true parent is a roll-limited copy of "
+                     "the body frame: MatrixGetAngles (FUN_004018E0) of "
+                     "Rz.Ry.Rx gives a (pitch, yaw, roll) triple the frame "
+                     "re-applies as RotY RotX RotZ, and the roll r (&0xFFFF) "
+                     "is remapped first -- r<=0x800 -> 0; 0x800<r<=0x4000 -> "
+                     "r-0x800; 0x4000<r<0xC000 -> r; 0xC000<=r<0xE800 -> "
+                     "r-0xE800; r>=0xE800 -> 0 (0x00452414..0x0045245A). An "
+                     "asymmetric deadzone over -33.75..+11.25 deg, identity "
+                     "at rest."),
         RigPart("part_0031", (0x31,),
                 translation=(0.0, 3.1674952, -9.4799995),
+                condition="obj+0x13F0 == 0: column 3 of row 0",
                 animated="RotX by obj+0x1330, same rule and same gate as "
                          "part_0034",
-                note="raw z=0xC117AE14, y=0x404AB852, x=0.0. Variant 1 draws "
-                     "0x32. [likely] this and part_0034 are the wheels or "
-                     "axles: both sit on the centreline at x=0 and the same "
+                note="raw z=0xC117AE14, y=0x404AB852, x=0.0. Row 1 draws 0x32 "
+                     "(part_0032). [likely] this and part_0034 are the wheels "
+                     "or axles: both sit on the centreline at x=0 and the same "
                      "height, 23.13 apart in Z, both spin about X only at a "
                      "constant rate under one shared flag, and their parent "
                      "carries a roll limiter of exactly the kind you write so "
@@ -942,6 +992,32 @@ OBJ_452320 = Rig(
                      "rolls. Note there are only TWO such parts and both are "
                      "at x=0, so they are not four wheels; and the code gives "
                      "no forward axis, so neither is named front or rear."),
+        # Row 1: the same four pushes, the same transforms and the same gated
+        # rotations, on the slots St2CarDraw names once St2CarRouteUpdate has
+        # written obj+0x13F0 = 1 (0x00452239).
+        RigPart("part_002e", (0x2E,),
+                condition="obj+0x13F0 == 1: column 0 of row 1",
+                note="row 1's body, where part_002d is row 0's; [likely] the "
+                     "crashed car -- the row is chosen only as shot 0x39 "
+                     "runs out, after the script's crash sound at frame 340, "
+                     "and it is row 0's geometry on another texture set "
+                     "(char_adv04 textures 26/30/34 for 0/1/2/33)"),
+        RigPart("part_0030", (0x30,),
+                translation=(9.0582619, 6.368186, 8.9433079),
+                parent="part_002e",
+                condition="obj+0x13F0 == 1: column 1 of row 1",
+                animated="RotY by obj+0x1334 while obj+0x1324 != 0, as "
+                         "part_002f"),
+        RigPart("part_0035", (0x35,),
+                translation=(0.0, 3.1674952, 13.6489019),
+                condition="obj+0x13F0 == 1: column 2 of row 1",
+                animated="RotX by obj+0x1330 while obj+0x1320 != 0, on the "
+                         "roll-limited frame, as part_0034"),
+        RigPart("part_0032", (0x32,),
+                translation=(0.0, 3.1674952, -9.4799995),
+                condition="obj+0x13F0 == 1: column 3 of row 1",
+                animated="RotX by obj+0x1330 while obj+0x1320 != 0, on the "
+                         "roll-limited frame, as part_0031"),
     ),
 )
 

@@ -1092,6 +1092,201 @@ console.log("\nrigs: the stage-2 car is drawn from the port's task, not from loa
   ResetGameGlobals();
 }
 
+console.log("\nrigs: the car draws the parts St2CarDraw names, posed as it posed them");
+{
+  // New bug (NEW-BUGS-2): the car's rig showed its first asset row for good
+  // -- the exporter shipped nothing else -- with the spun parts still and the
+  // parked part never turning. `St2CarDraw` (`FUN_00452320`) picks a row of
+  // `g_st2car_asset_variants` per frame, turns one push by `obj+0x1334` and
+  // two by `obj+0x1330`, and hangs those two off a roll-limited frame.
+  const { G, ResetGameGlobals } = await import("../src/game/globals");
+  const { St2CarSpawn, St2CarsTick } = await import("../src/game/class21/car");
+  const { NULL_HOST } = await import("../src/game/host");
+  const { Euler, Quaternion } = await import("three");
+  const { BAMS_TO_RAD } = await import("../src/core/bams");
+  ResetGameGlobals();
+  const RIGS = {
+    rigs: [{ name: "obj_452320", routine: "FUN_00452320", note: "",
+             spawn_ats: null, routes: [] }],
+    blocked: [], note: "",
+  };
+  const root = new Group();
+  const rigRoot = new Group();
+  rigRoot.userData = { hod2_kind: "rig", hod2_rig: "obj_452320",
+                       hod2_routine: "FUN_00452320", hod2_path_slot: 334 };
+  root.add(rigRoot);
+  // The exporter's parts: both rows, the second column nested in the first.
+  const T2 = [9.0582619, 6.368186, 8.9433079];
+  const TW = [[0, 3.1674952, 13.6489019], [0, 3.1674952, -9.4799995]];
+  const part = (slot: number, t: number[], parent: InstanceType<typeof Group>) => {
+    const g = new Group();
+    g.position.set(t[0], t[1], t[2]);
+    g.userData = { hod2_kind: "rig_part", hod2_rig: "obj_452320",
+                   hod2_slots: [`0x${slot.toString(16).toUpperCase()
+                     .padStart(4, "0")}`] };
+    parent.add(g);
+    return g;
+  };
+  const nodes = new Map<number, InstanceType<typeof Group>>();
+  for (const row of [[0x2d, 0x2f, 0x34, 0x31], [0x2e, 0x30, 0x35, 0x32]]) {
+    const body = part(row[0], [0, 0, 0], rigRoot);
+    nodes.set(row[0], body);
+    nodes.set(row[1], part(row[1], T2, body));
+    nodes.set(row[2], part(row[2], TW[0], rigRoot));
+    nodes.set(row[3], part(row[3], TW[1], rigRoot));
+  }
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never,
+             new CamPaths({ fps: 60, paths: {}, object_paths: {} } as never));
+  const at = { walker: { cam: { slot: 57, frame: 0 }, spawns: [] } } as
+    unknown as Parameters<typeof rigs.update>[0];
+  // A pose with a roll outside the limiter's dead zone, so the second frame
+  // is not the body's.
+  let pose = { x: -885, y: -7, z: -597, pitch: 0x300, yaw: 0x7428, roll: 0x2000 };
+  const host = {
+    ...NULL_HOST,
+    objectPath: (slot: number, frame: number) =>
+      slot === 0x153 ? { x: 0, y: 0, z: 0, pitch: 0, roll: 0,
+                         yaw: 16384 + (frame - 100) * 370 }
+        : { ...pose },
+  };
+  const visible = (s: number) => {
+    let o: InstanceType<typeof Obj3D> | null = nodes.get(s)!;
+    while (o) { if (!o.visible) return false; o = o.parent; }
+    return true;
+  };
+  G.g_active_cam_path = 0x39;
+  G.g_cam_path_frame = 360;
+  const car = St2CarSpawn(0);
+  St2CarsTick(host);
+  St2CarsTick(host);
+  rigs.update(at);
+  check("riding 0x39, row 0 is drawn and row 1 is not",
+        [0x2d, 0x2f, 0x34, 0x31].every(visible)
+        && ![0x2e, 0x30, 0x35, 0x32].some(visible),
+        [...nodes.keys()].map((s) => `${s.toString(16)}:${visible(s)}`).join(" "));
+
+  // The spun part, in world space, against the exe's own product:
+  // T(pos) · RotY(y) · RotX(x) · RotZ(lim) · T(offset) · RotX(spin).
+  const d = car.draw.limited;
+  const qd = new Quaternion().setFromEuler(new Euler(
+    d.pitch * BAMS_TO_RAD, d.yaw * BAMS_TO_RAD, d.roll * BAMS_TO_RAD, "YXZ"));
+  const qs = new Quaternion().setFromEuler(new Euler(
+    car.spin * BAMS_TO_RAD, 0, 0, "YXZ"));
+  root.updateMatrixWorld(true);
+  const wheel = nodes.get(0x34)!;
+  const wq = wheel.getWorldQuaternion(new Quaternion());
+  const wp = wheel.getWorldPosition(new Vector3());
+  const want = new Vector3(...TW[0]).applyQuaternion(qd)
+    .add(new Vector3(pose.x, pose.y, pose.z));
+  check("the limited frame is not the body's for this roll",
+        d.roll !== 0 && d.roll !== pose.roll, JSON.stringify(d));
+  check("a spun part sits on the roll-limited frame",
+        wp.distanceTo(want) < 1e-3, `${wp.toArray()} vs ${want.toArray()}`);
+  check("...turned by it and then by RotX(obj+0x1330)",
+        Math.abs(Math.abs(wq.dot(qd.clone().multiply(qs))) - 1) < 1e-6,
+        `${wq.toArray()}`);
+  const spinWas = wheel.quaternion.clone();
+  St2CarsTick(host);
+  rigs.update(at);
+  check("...a frame later it has turned by another 0x1000",
+        Math.abs(wheel.quaternion.angleTo(spinWas)) > 0.1,
+        String(wheel.quaternion.angleTo(spinWas)));
+
+  // Crash: 0x39 runs out, the row changes and the parked part turns.
+  pose = { ...pose, roll: 0 };
+  G.g_cam_path_frame = 370;
+  St2CarsTick(host);
+  St2CarsTick(host);
+  St2CarsTick(host);
+  rigs.update(at);
+  check("parked after 0x39, row 1 is drawn and row 0 is not",
+        [0x2e, 0x30, 0x35, 0x32].every(visible)
+        && ![0x2d, 0x2f, 0x34, 0x31].some(visible));
+  const door = nodes.get(0x30)!;
+  const yaw = new Euler().setFromQuaternion(door.quaternion, "YXZ").y;
+  check("...and the second column is turned RotY by obj+0x1334",
+        car.partYaw !== 0
+        && Math.abs(yaw - car.partYaw * BAMS_TO_RAD) < 1e-6
+        && door.position.x === T2[0],
+        `${yaw} vs ${car.partYaw * BAMS_TO_RAD}`);
+  ResetGameGlobals();
+}
+
+console.log("\nthe weapon-5 round and the tracer face the camera");
+{
+  // The rig `obj_416b00` put `PlayerShotEffectsThink`'s one literal slot,
+  // 0x109D, in front of Goldman's desk in every Original Mode stage-2 opening:
+  // the exporter placed a root at `op_` 0x194's own pose. The exe draws that
+  // slot only from a live kind-5 `g_shot_tracer_ring` record, at the record
+  // plus the path, after `MatrixClearRotation`.
+  const { RIGS } = await import("../src/hod2lib/rigs_data");
+  const { originalWeaponRoundSlots } = await import("../src/hod2lib/bundle");
+  const { OriginalWeaponKind, TRACER_WEAPON5_SLOT }
+    = await import("../src/game/effects/shot_effects");
+  const { Euler, Quaternion } = await import("three");
+  const { BAMS_TO_RAD } = await import("../src/core/bams");
+  check("obj_416b00 is not a rig the exporter places",
+        !!RIGS.find((r) => r.name === "obj_416b00")?.placementBlocked);
+  check("...and its slot rides the effect templates, in Original Mode only",
+        originalWeaponRoundSlots(true).includes(0x109d)
+        && originalWeaponRoundSlots(false).length === 0);
+
+  const root = new Obj3D();
+  for (const slot of [TRACER_WEAPON5_SLOT, 0xb78]) {
+    const p = new Obj3D();
+    p.name = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    p.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(p);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.position.set(10, 5, 30);
+  camera.rotation.set(0.2, 0.9, 0.1, "YXZ");
+  camera.updateMatrixWorld(true);
+  const key = (v: number) => [[0, v, 0, 0], [30, v, 0, 0]];
+  const paths = new CamPaths({
+    fps: 60, paths: {},
+    object_paths: { "404": { file: "op_org", index: 0, start: 0, duration: 24,
+      channels: { pos_x: key(0.5), pos_y: key(0.25), pos_z: key(-1),
+                  rot_x: key(0x800), rot_y: key(0x1000), rot_z: key(0) } } },
+  } as never);
+  const ctx = { camera, paths } as unknown as Parameters<typeof layer.update>[0];
+  layer.update(ctx);
+  check("no record, no round", layer.group.children.length === 0);
+
+  const t = G.g_shot_tracer_ring[0]!;
+  t.live = true; t.player = 0; t.kind = OriginalWeaponKind.Slow;
+  t.pos = { x: 1, y: 2, z: 3 }; t.frame = 30;
+  layer.update(ctx);
+  const n = layer.group.children[0];
+  check("a live kind-5 record draws slot 0x109D in the world",
+        layer.group.children.length === 1 && !!n,
+        `${layer.group.children.length}`);
+  check("...at the record plus op_ 0x194 at frame % 24",
+        !!n && Math.abs(n.position.x - 1.5) < 1e-6
+        && Math.abs(n.position.y - 2.25) < 1e-6
+        && Math.abs(n.position.z - 2) < 1e-6,
+        n ? n.position.toArray().join(",") : "none");
+  const cq = camera.getWorldQuaternion(new Quaternion());
+  const pr = new Quaternion().setFromEuler(
+    new Euler(0x800 * BAMS_TO_RAD, 0x1000 * BAMS_TO_RAD, 0, "ZYX"));
+  check("...turned in the camera's axes: MatrixClearRotation, then the path",
+        !!n && Math.abs(Math.abs(n.quaternion.dot(cq.clone().multiply(pr))) - 1)
+          < 1e-6, n ? n.quaternion.toArray().join(",") : "none");
+
+  t.kind = 0; t.spin = 0x2000;
+  layer.update(ctx);
+  const s = layer.group.children[0];
+  const zr = new Quaternion().setFromEuler(new Euler(0, 0, 0x2000 * BAMS_TO_RAD));
+  check("an ordinary tracer faces the camera and rolls in its plane",
+        !!s && Math.abs(Math.abs(s.quaternion.dot(cq.clone().multiply(zr))) - 1)
+          < 1e-6, s ? s.quaternion.toArray().join(",") : "none");
+  ResetGameGlobals();
+}
+
 console.log("\nthe object-path seam carries six values");
 
 {

@@ -87,6 +87,18 @@ export const TRACER_SPIN = 0x1000;
 export const TRACER_SLOT_OFFSET = 2;
 
 /**
+ * The kind-5 round's arm of `PlayerShotEffectsThink` (`FUN_00416B00`), after
+ * `CMP EAX, 0x5` at `0x00416CBE`: `CamEvalObjectPath6(0x194, (float)(+0x28 %
+ * 0x18))` (`PUSH 0x194` at `0x00416D60`, `MOV ECX, 0x18; IDIV` at
+ * `0x00416D4B`), translated onto the record, and `AssetDrawSlot(0x109D)` at
+ * `0x00416DA1` -- `etc_1.bin` entry 41. `op_org` 0 is slot 0x194, so only an
+ * Original Mode stage carries the path.
+ */
+export const TRACER_WEAPON5_PATH = 0x194;
+export const TRACER_WEAPON5_LOOP = 0x18;
+export const TRACER_WEAPON5_SLOT = 0x109d;
+
+/**
  * `g_original_weapon_kind` — 0x009A2249. Zero in arcade, and every arm that
  * reads it is behind `g_GameMode == 1`.
  */

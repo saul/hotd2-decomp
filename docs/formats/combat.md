@@ -1248,7 +1248,7 @@ records every frame.
 | Ring | Address | Space | Frames | Slots |
 |---|---|---|---|---|
 | muzzle flash | `g_shot_flash_ring` 0x009A2960 | camera | 9 | `g_muzzle_flash_slots[player] + frame` at scale 0.1, then `g_muzzle_smoke_slots[player] + frame` at **0.05** — see below |
-| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad |
+| tracer | `g_shot_tracer_ring` 0x009A2460 | world | 60 | `g_muzzle_smoke_slots[player] + 2`, one billboarded quad; Original Mode weapon kind 5: `0x109D` at the record plus `op_` `0x194` at `frame % 24`, no spin — see below |
 | Original Mode | `g_shot_weapon_ring` 0x009A2700 | camera | 24 | `0xA6F + frame` at scale 0.05, weapon kind 4 only |
 
 `g_muzzle_flash_slots` (0x00579F78) is `{0x175, 0x17F}` and
@@ -1273,6 +1273,18 @@ and flies `normalize(point - eye) * 20.0` a frame, spinning `0x1000` BAMS.
 (0x009C9010) as "the candidate list is not empty", and that is its only reader.
 So a round that hit is a stub of streak leaving the barrel and a round that
 missed flies for a full second.
+
+**Both tracer arms are camera-facing** `[proved]`. Each one
+`MatrixTranslate`s onto the record and then calls `MatrixClearRotation`
+(`FUN_004A9F70`), which writes the top 3x3 to the identity -- the view's
+rotation with it -- so the roll, and the kind-5 arm's `RotZ RotY RotX`, turn in
+the camera's axes. The kind-5 arm (`CMP EAX, 0x5` at `0x00416CBE`) also
+`MatrixTranslate`s by `CamEvalObjectPath6(0x194, frame % 0x18)` first -- two
+translations, summed (L5) -- and draws `0x109D` (`etc_1.bin` entry 41), the
+only draw of that slot in the program. `op_` `0x194` is `op_org` 0, so only an
+Original Mode stage has the path. The exporter once placed that arm as the rig
+`obj_416b00` at the path's own pose, which stood in front of Goldman's desk in
+stage 2's opening; it is not a placeable rig.
 
 Two smaller findings from the same routine:
 

@@ -143,7 +143,8 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.MotionCue:   return ZombieStateMotionCue21(obj, eye, dt);
     case ZombieState.HoldAtRange:
       return ZombieStateHoldAtRange(obj, eye, rng, host, events);
-    case ZombieState.Strike:      return ZombieStateStrike(obj, eye, rng, events);
+    case ZombieState.Strike:
+      return ZombieStateStrike(obj, eye, rng, events, host);
     case ZombieState.BackOff:     return ZombieStateBackOff(obj, eye, dt, rng);
     case ZombieState.WaitTurn:    return ZombieStateWaitTurn(obj, eye, rng);
     // **State 10 is terminal, and the table says so.** `g_class30_states`
@@ -194,7 +195,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     // wait and hand over (`entrance.ts`), four attack outright
     // (`scripted.ts`), and `ZombieStateRideCarrier` does neither.
     case ZombieState.SurfaceOnCameraCue:
-      return ZombieStateSurfaceOnCameraCue(obj, events);
+      return ZombieStateSurfaceOnCameraCue(obj, rng, host, events);
     case ZombieState.RunInPlaceTimed:
       return ZombieStateRunInPlaceTimed(obj, dt, rng);
     case ZombieState.HoldClipThenBranch:
@@ -206,7 +207,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.WaitScriptFlagThenBranch:
       return ZombieStateWaitScriptFlagThenBranch(obj);
     case ZombieState.ScriptedGrabAndDespawn:
-      return ZombieStateScriptedGrabAndDespawn(obj, eye, rng, events);
+      return ZombieStateScriptedGrabAndDespawn(obj, eye, rng, host, events);
     case ZombieState.ReleaseBodyCreature:
       return ZombieStateReleaseBodyCreature(obj, eye, rng, host);
     case ZombieState.LeapToPoint:
@@ -236,7 +237,7 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.WalkToTarget:
       return ZombieStateWalkToTarget(obj);
     case ZombieState.TargetMotionScript:
-      return ZombieStateTargetMotionScript(obj, rng, events);
+      return ZombieStateTargetMotionScript(obj, rng, events, host);
     case ZombieState.TargetScriptWithFlag:
       return ZombieStateTargetScriptWithFlag(obj);
     case ZombieState.RetireOffScreen:

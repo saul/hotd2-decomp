@@ -106,7 +106,8 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
 
 - [x] Global device state decoded (`RenderInitStates`) — `CULLMODE` is
       `D3DCULL_NONE`, `COLORVERTEX` off, all material sources `D3DMCS_MATERIAL`,
-      global alpha test at `GREATEREQUAL`/ref 1
+      alpha test at `GREATEREQUAL`/ref 1 (enabled per mesh, for the
+      translucent pass only)
 - [x] **PVR2 → D3D7 translation located and fully decoded** —
       `TranslatePvr2StateToD3D` at `0x004A7780`, with all five lookup tables
       resolved against the SDK. See [`formats/materials.md`](formats/materials.md)
@@ -132,6 +133,15 @@ PowerVR2 → D3D7 state translation is fully decompiled. See
       semantics measured corpus-wide
 - [x] Opaque/translucent two-pass selector decoded
       (`(tsp & 0x180000) != 0x80000`)
+- [x] What the pass switches: `ALPHATESTENABLE` per mesh (state 0x0F, not
+      blending), `ALPHABLENDENABLE` per pass (`RenderBeginCommandList` off,
+      `RenderFlushCommandList` on); depth write and test per mesh, and on in
+      all 82,494 meshes
+- [x] Translucent order: whole commands, `+4` descending, where `+4` is the
+      least stack eye z of the origin and the skipped meshes and the stack
+      looks down -z (`g_view_flip_z`) -- **nearest first**, not the painter's
+      order the docs had. Checked by `tools/verify_draw_order.py`; drawn by
+      `web/src/render/draw_order.ts`
 
 ## Phase 6 — Remaining formats ✅ `evt/`, `cam/`, `coli/` and `mot/` all solved
 

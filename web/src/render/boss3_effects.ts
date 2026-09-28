@@ -59,6 +59,7 @@ import {
   BOSS3_FLASH_B_FIRST_SLOT, BOSS3_PATH_EFFECTS, BOSS3_PATH_EFFECT_FIRST_SLOT,
   BOSS3_SPARK_FIRST_SLOT, BOSS3_WAKE_CELS, BOSS3_WAKE_FIRST_SLOT,
 } from "../game/class45/tables";
+import { applyForcedAlphaBlend } from "./draw_order";
 
 /** What this needs of the effect layer and the character layer. */
 export interface Boss3EffectHost {
@@ -108,6 +109,16 @@ function place(node: Object3D, m: Matrix4): void {
  * `AssetDrawSlotWithAlpha` (`FUN_004185A0`)'s second argument. The clone
  * shares its template's materials, so it gets its own the first time it
  * fades, and keeps them; they are freed with the node (see `effects.ts`).
+ *
+ * The state is `DrawModelWithForcedAlphaBlend`'s (`FUN_004A8440`), through
+ * `applyForcedAlphaBlend`: every mesh in the translucent pass, blended
+ * `SRCALPHA`/`INVSRCALPHA`, at its **own** base alpha times this one -- the
+ * clone records the base before the first fade overwrites it.
+ *
+ * An alpha of 1 on a node never faded keeps the plain draw, sharing the
+ * template's materials. The engine would still defer such a command and
+ * blend it; with every mesh's alpha at its unfaded value the picture differs
+ * only where an opaque mesh's texture carries alpha the exporter stripped.
  */
 export function setSlotAlpha(node: Object3D, alpha: number): void {
   const a = Math.max(0, Math.min(1, alpha));
@@ -120,6 +131,7 @@ export function setSlotAlpha(node: Object3D, alpha: number): void {
       if (!mesh.material) return;
       const clone = (x: Material): Material => {
         const c = x.clone();
+        c.userData.hod2BaseOpacity = x.opacity;
         owned.push(c);
         return c;
       };
@@ -130,8 +142,8 @@ export function setSlotAlpha(node: Object3D, alpha: number): void {
   }
   node.userData.boss3Alpha = a;
   for (const mat of node.userData.ownedMaterials as Material[]) {
-    mat.transparent = true;
-    mat.opacity = a;
+    applyForcedAlphaBlend(mat, a,
+                          (mat.userData.hod2BaseOpacity as number | undefined) ?? 1);
   }
 }
 

@@ -780,6 +780,11 @@ web/src/
     prop_shatter.ts  a stacked prop's fifteen shatter pieces
                   (`G.g_prop_shatters`), off breakables.ts's templates
     scope3d.ts    attachTo / ownGeometry / ownMaterial / clone
+    draw_order.ts the engine's two passes on every exported material
+                  (`TranslatePvr2StateToD3D`'s blend, depth and alpha-test
+                  state, applied once at load) and the renderer's transparent
+                  sort (`RenderCommandCompare`: whole models, nearest first,
+                  chain order within); `app/` installs the sort
     characters/boss3.ts, boss3_effects.ts  class 0x45 composes its own bone
                   matrices in `game/class45/`; these place them, and draw
                   what its routines drew beside them (card, flash, wake,

@@ -307,11 +307,12 @@
 005978c0	g_score_cheat_code	The string LLRRRLR: FUN_00495EB0 (app state 3) records left/right presses (pad 0x40/0x400000 as L, 0x80/0x800000 as R) and sets g_score_cheat to 7 when they spell it. [proved]
 00598000	g_class22_states	Class 0x22's state table, ten pointers: [0] Class22CutsceneHoldUntilChapterCard [1] Class22CutsceneRideAndLeave [2] Class22RideInAndJoinFight [3] Class22FightPhase1 [4] Class22FightPhase2 [5] Class22Death [6] Class22DescendAndJoinFight [7..9] = [3..5]. obj+0x1310 is RELATIVE: variant 0 dispatches from 0x00598000, variant 1 from 0x00598008 (index 2), variant 2 from 0x00598018 (index 6). Read from memory; 0x00598028 holds 1, not a pointer.
 00598778	g_d3du_unused_fov_degrees
-00598ab0	g_SrcBlendTable
-00598ad0	g_DstBlendTable
+00598ab0	g_SrcBlendTable	PVR2 TSP source blend (bits 31-29) -> D3DBLEND for SRCBLEND, read by TranslatePvr2StateToD3D: [1, 2, 9, 10, 5, 6, 7, 8] = ZERO, ONE, DESTCOLOR, INVDESTCOLOR, SRCALPHA, INVSRCALPHA, DESTALPHA, INVDESTALPHA. [proved]
+00598ad0	g_DstBlendTable	PVR2 TSP destination blend (bits 28-26) -> D3DBLEND for DESTBLEND: [1..8] = ZERO, ONE, SRCCOLOR, INVSRCCOLOR, SRCALPHA, INVSRCALPHA, DESTALPHA, INVDESTALPHA. Entries 2 and 3 differ from g_SrcBlendTable's: PVR2's 'other colour' is the destination for a source factor and the source for a destination one. [proved]
 00598af0	g_TexAddressModeTable
 00598b00	g_ZFuncTable	PVR2 ISP depth-compare mode (bits 29..31) -> D3DCMPFUNC, read by TranslatePvr2StateToD3D for D3DRENDERSTATE_ZFUNC: [1, 7, 3, 5, 4, 6, 2, 8] = NEVER, GREATEREQUAL, EQUAL, GREATER, LESSEQUAL, NOTEQUAL, LESS, ALWAYS. DrawSpriteQuadCommand takes the mode from a sprite's flags bits 8..10 (0 meaning 4), so a plain screen sprite is LESSEQUAL and a queued one (ScreenSpriteQueuePush ORs 0x700) ALWAYS. [proved]
 00598b20	g_CullModeTable
+00598b38	g_view_flip_z	The D3D VIEW transform RenderInitStates installs and nothing changes: diag(1, 1, -1, 1). The matrix stack is GL-style (camera looks down -z) and this flips it for the left-handed projection BuildPerspectiveProjection builds (_34 = +1), which is why eye z in the sort key is negative in front. [proved]
 00598b78	g_sprite_quad_corners	s32 {1,3},{3,3},{1,1},{3,1}: DrawSpriteQuadCommand's corner multipliers of the half extents, less the anchor (1,1 by default) -- so a sprite's (x,y) is its top-left and the strip's first vertex is the BOTTOM-left, carrying (u0,v0). [proved]
 00598c5c	g_texture_palette_current	The palette TextureSlotAcquire hands DecodeTextureToSurface; -1 (palette 0) otherwise. [proved]
 0059c988	g_camera_is_tracking	Zeroed by SelectCameraLookAtTarget when no enemy is registered; CameraTrackEnemiesTick uses it to choose between the angle-error curve and a flat rate.
@@ -411,6 +412,9 @@
 007de5a8	g_sound_channels	Heap array of 0x44-byte channel records, g_sound_channel_count of them. +0x00 IDirectSoundBuffer, +0x0C stream file handle, +0x34 ring bytes, +0x38 next half to fill, +0x3C file offset of the first sample (SoundChannelOpenWav), +0x40 flags: 0x80000000 open, 0x40000000 streaming, 0x08000000 loop, 0x10000/0x20000 stopped/paused. Channel 0xF is BGM, 0x10 voice. [proved]
 007de5bc	g_sound_channel_count	Number of records at g_sound_channels; every channel routine bounds its index by it. [proved]
 007de5c8	g_d3du_unused_projection
+007e78bc	g_draw_layer_nibble	The draw layer RenderEnqueueCommand ORs into a queued command's key (& 0xF), which RenderCommandCompare sorts on first. SetDrawLayerNibble writes it; RenderInitStates sets 8, the world's layer; RegionDrawResidentSet uses 7 for a draw-mode-2 region entry, the effects 0xA/0xC/0xE, each restoring 8. [proved]
+007e7938	g_render_sort_depth	The command being walked's sort depth: WalkMeshChainAndDraw seeds it from cmd+4 (the modelview _43) and lowers it to each skipped mesh's eye z; RenderEnqueueCommand copies it back to the queued command's +4. Eye z, negative in front. [proved]
+007e7940	g_render_single_pass	Non-zero collapses WalkMeshChainAndDraw's two passes into one (every mesh drawn at submission). Written only by FUN_004A79E0, which only TitleMenuUpdateAndSelect calls; in play it is 0. [proved]
 007e7948	g_projection_matrix_cache
 007e7990	g_MatrixStackTop
 007e7994	g_matrix_mode

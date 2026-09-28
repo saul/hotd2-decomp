@@ -54,6 +54,7 @@ import { G } from "../game/globals";
 import type { System } from "../core/system";
 import type { RenderContext } from "./context";
 import { BAMS_TO_RAD } from "../core/bams";
+import { applyForcedAlphaBlend } from "./draw_order";
 import { prepareFogMaterial } from "./fog";
 
 /** One drawn drop. Its *position* is `G.g_rain_particles[i]`, not here. */
@@ -132,12 +133,16 @@ export class Rain implements System<RenderContext> {
         const mats = Array.isArray(mesh.material)
           ? mesh.material : [mesh.material];
         const swap = mats.map((m) => {
-          // AssetDrawSlotAlpha(0x53, 0.5) is the forced-alpha-blend path, and
-          // it must not write depth or the drops occlude each other.
+          // `AssetDrawSlotWithAlpha(0x53, 0.5)` (`FUN_004185A0`) is the
+          // forced-alpha-blend path, `DrawModelWithForcedAlphaBlend`
+          // (`FUN_004A8440`): it rewrites the TSP word and leaves the ISP
+          // alone, so a drop **does** write depth, as every mesh in the game
+          // does. Its one mesh is in the translucent pass, so the alpha test
+          // discards the streak's clear texels and only the streak occludes.
+          // This used to turn the depth write off "or the drops occlude each
+          // other", which is what the engine lets them do.
           const clone = (m as Material).clone();
-          clone.transparent = true;
-          clone.opacity = cfg.alpha;
-          clone.depthWrite = false;
+          applyForcedAlphaBlend(clone, cfg.alpha, (m as Material).opacity);
           // Cloned after `sceneFog.prepare` ran over the stage tree; the hook
           // it installed is not something `Material.copy` carries.
           prepareFogMaterial(clone);

@@ -241,8 +241,8 @@ const radialUniform = { value: 0 };
  *
  * Exported because `prepare` is not the only place materials appear. It runs
  * once per stage, over the tree the loader just built -- and then `Backdrop`
- * and `Rain` *clone* materials out of that tree, because the dome must not
- * write depth and a drop must not occlude the drop behind it. `Material.copy`
+ * and `Rain` *clone* materials out of that tree -- the dome to drop its depth
+ * write, a drop for its own fading alpha. `Material.copy`
  * copies `fog` and `userData` and does **not** copy `onBeforeCompile`, so the
  * clones compiled without `vFogRadial` and fell back to planar fog while the
  * stage around them fogged radially: the sky banded differently as the camera

@@ -373,21 +373,39 @@ export function bamsEulerToQuat(rx: number, ry: number, rz: number):
 
 /**
  * How a frame is ordered, recorded so a target renderer can reproduce it
- * rather than guess. Proved from `RenderFlushCommandList` (0x004A88E0) and its
- * qsort comparator (0x004A8A20).
+ * rather than guess. Proved from `RenderFlushCommandList` (0x004A88E0), its
+ * qsort comparator `RenderCommandCompare` (0x004A8A20), `WalkMeshChainAndDraw`
+ * (0x004A7EF0) and `TranslatePvr2StateToD3D` (0x004A7780). `render/
+ * draw_order.ts` is the player's implementation of all of it.
+ *
+ * The depth is **eye-space z in the matrix stack's convention, where the
+ * camera looks down -z**: `RenderInitStates` (0x004A7630) installs a VIEW
+ * transform of diag(1, 1, -1, 1) under the left-handed projection
+ * `BuildPerspectiveProjection` builds, so a point in front of the camera has a
+ * negative z on the stack. The key is the *least* such z, which is the
+ * farthest point, and the sort is descending -- nearest first. An earlier
+ * version of this record read the same code with +z forward and called it
+ * "farthest first (back-to-front painter's order)"; the arithmetic was right
+ * and the direction was not.
  */
 export const DRAW_ORDER: Doc = {
   passes: ["opaque", "translucent"],
   opaque: "drawn at submission time by RenderEnqueueCommand, in submission "
-    + "order -- not sorted",
+    + "order -- not sorted; ALPHABLENDENABLE off (0x004A7A10 clears it when "
+    + "the command list is opened), no alpha test",
   translucent: "drawn by RenderFlushCommandList after sorting the whole "
-    + "command list",
+    + "command list; ALPHABLENDENABLE on, blend factors from TSP 31-26, "
+    + "alpha test on (ALPHAREF 1, GREATEREQUAL), z-write from ISP bit 26 -- "
+    + "which no mesh in the game sets, so translucent meshes write depth",
   sort_key: "(draw_layer ASC, sort_depth DESC)",
   sort_comparator: "0x004A8A20: layer = flags & 0xF compared ascending; on a "
-    + "tie, sort_depth compared descending, i.e. farthest first "
-    + "(back-to-front painter's order)",
-  sort_depth: "command +0x04: seeded from the world matrix _43 and refined to "
-    + "the nearest mesh Z by the walker",
+    + "tie, sort_depth compared descending. Eye z is negative in front of "
+    + "the camera, so descending is nearest first",
+  sort_depth: "command +0x04: seeded from the modelview matrix _43 (the "
+    + "model origin's eye z) and lowered by pass 0 of the walker to the "
+    + "least eye z of the sphere centre of every mesh it skips -- each "
+    + "translucent mesh, and each opaque one whose sphere is outside the "
+    + "frustum. The least z is the farthest of those points",
   within_a_command: "meshes are walked in chain (file) order; meshes "
     + "belonging to the other pass are skipped",
   pass_selector: "(tsp & 0x180000) == 0x80000 -> opaque; anything else is "
@@ -395,14 +413,29 @@ export const DRAW_ORDER: Doc = {
   default_draw_layer: 8,
   note: "glTF cannot express render order, so primitives are emitted "
     + "opaque-first then translucent, each in chain order, and every "
-    + "primitive carries hod2_pass and hod2_chain_index in its extras.",
+    + "primitive carries in its extras hod2_pass, hod2_chain_index, "
+    + "hod2_model (which of the glTF mesh's NL1 models it belongs to: one "
+    + "draw command each) and hod2_sphere (the mesh header's centroid and "
+    + "radius, +0x10 and +0x1C, in model space).",
 };
 
-/** Per-primitive draw-order data, for a renderer that can honour it. */
-function drawOrderExtras(mesh: Mesh, chainIndex: number): Doc {
+/**
+ * Per-primitive draw-order data, for a renderer that can honour it.
+ *
+ * `model` is the NL1 model the mesh came from, counted within the one glTF
+ * mesh being built: a level model is always one (0), and a rig part that
+ * draws several slots is several `AssetDrawSlot` calls, each its own command
+ * to the sort. `hod2_sphere` is what `WalkMeshChainAndDraw` tests against the
+ * frustum and transforms for the sort depth -- the header's own sphere, which
+ * for one mesh in ten is not the centre of the vertices' bounding box.
+ */
+function drawOrderExtras(mesh: Mesh, chainIndex: number, model = 0): Doc {
   return {
     hod2_pass: mesh.opaquePass ? "opaque" : "translucent",
     hod2_chain_index: chainIndex,
+    hod2_model: model,
+    hod2_sphere: [mesh.centroid[0], mesh.centroid[1], mesh.centroid[2],
+                  mesh.radius],
   };
 }
 
@@ -1170,7 +1203,8 @@ export async function exportLevel(
       for (const [part, models] of entry.parts as PartModels[]) {
         let prims: Doc[] = [];
         let meshIndex = 0;
-        for (const [model, bank, label] of models) {
+        for (let k = 0; k < models.length; k++) {
+          const [model, bank, label] = models[k];
           for (const mesh of model.meshes) {
             const mi = meshIndex++;
             if (!mesh.triangles.length || !mesh.vertices.length) continue;
@@ -1201,7 +1235,7 @@ export async function exportLevel(
               indices: buf.indices(idx),
               material: await getMaterial(label, bank, mesh),
               mode: TRIANGLES,
-              extras: drawOrderExtras(mesh, prims.length),
+              extras: drawOrderExtras(mesh, prims.length, k),
             });
           }
         }

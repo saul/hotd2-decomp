@@ -9,20 +9,29 @@
  *
  * ## The shutter — evt `0x1F`
  *
- * `FUN_00413970` is a 9-state machine over `DAT_009CA0F4`, drawing asset
- * `0x93E` twice, at view-space `(0, +y, -1)` and `(0, -y, -1)`:
+ * `HudDrawShutterState` (`FUN_00413970`, ported in `game/hud_shutter.ts`) is a
+ * nine-state machine over `g_bHudShutterState`, drawing asset `0x93E` at
+ * view-space `(0, +y, -1)` and `(0, -y, -1)`:
  *
  * ```
  * 0  draw closed at y = 0.35, then -> 4, firing gate on
- * 1  opening: counter 0 -> 40, y = 0.35 + counter * 0.0025, then -> 2
- * 2  (no case) nothing drawn -- fully open
- * 3  closing: counter 40 -> 0, same y; at 0 draw closed and -> 4, gate off
- * 4  draw closed at y = 0.35 (unless DAT_009A5900 & 0x30)
+ * 1  opening: counter 1 .. 40, y = 0.35 + counter * 0.0025; on the 41st
+ *    frame nothing is drawn and it is 2
+ * 2  (the tail) nothing drawn -- fully open
+ * 3  closing: counter 39 .. 0, same y; on the 41st frame draw closed, -> 4,
+ *    gate off
+ * 4  draw closed at y = 0.35 (unless g_screen_furniture_flags & 0x30)
  * 5  draw closed, -> 4, gate off
  * 6  gate on, -> 2
- * 7  restore the previous state
+ * 7  restore the previous state, and draw nothing that frame
  * 8  one bar at (0, 0, -1) scaled (1, 8, 1) -- a full blackout
  * ```
+ *
+ * **This layer does not run that machine or read its state.** The routine
+ * records each bar it draws into `G.g_hud_shutter_bars` and `app/` hands the
+ * list across, the way it hands over the screen sprites -- so what is on the
+ * screen is exactly what the engine drew on the last frame, including the
+ * frames a 7 draws nothing and the frames a screen card hides the bars.
  *
  * So closed is `y = 0.35` and fully open `y = 0.45`, and the slide is 40
  * frames either way — but `y` positions the bar's **origin**. Asset `0x93E` is
@@ -116,15 +125,6 @@ export interface ScreenMessage {
 }
 
 /**
- * Closed centre offset, and the step per slide frame.
- *
- * The slide's *length* is `SHUTTER_FRAMES` in `script/state/shutter.ts`, where
- * counter lives — this layer only turns a counter into a height.
- */
-const SHUTTER_CLOSED_Y = 0.35;
-const SHUTTER_STEP = 0.0025;
-
-/**
  * Half-height of the bar itself.
  *
  * `MatrixTranslate` positions the bar's **origin**, not its edge, and asset
@@ -136,6 +136,9 @@ const SHUTTER_STEP = 0.0025;
  * the frustum half-height below, an inner edge of 0.30 covers 20% of the half
  * height -- a 10% band top and bottom, which is what the game looks like --
  * where 0.35 covers 6.6%, or 3.3% of the frame, which is nearly invisible.
+ *
+ * A bar's own vertical scale multiplies it: the blackout's 8 makes it 0.4,
+ * past the frustum's 0.3748 both ways.
  */
 const SHUTTER_HALF = 0.05;
 
@@ -162,10 +165,10 @@ const GLYPH_ADVANCE = 11.2;
 /**
  * The shutter and the caption, drawn.
  *
- * A `System`, and it holds **no state of its own**. The shutter's state, its
- * slide counter and the caption's countdown are all on `Walker`, because they
- * are what the script decided and a snapshot has to bring them back. This
- * layer reads them every tick and places two bars and a line of text.
+ * A `System`, and it holds **no state of its own**. The caption's countdown is
+ * on `Walker` and the shutter's bars are in `G`, as the engine's routine drew
+ * them, because a snapshot has to bring both back. This layer reads them every
+ * tick and places two bars and a line of text.
  *
  * That is the whole of step 19, and the bug it fixes is small and long-lived:
  * `loadSnapshot` restored the shutter *state* and not the slide phase, because
@@ -187,7 +190,7 @@ const GLYPH_ADVANCE = 11.2;
  * only to make that one string say `"off"`. What is left here draws.
  */
 /**
- * What this layer reads. Structural on purpose.
+ * What this layer reads of the walker: the caption. Structural on purpose.
  *
  * It is `Walker`'s shape and it is deliberately not `Walker`'s *type*: `hud/`
  * is the UI layer, and an import from `script/` would make it a second reader
@@ -195,17 +198,29 @@ const GLYPH_ADVANCE = 11.2;
  * this the first time round. `app/` is the composition root and the only
  * layer allowed to see both sides, so the two lines that put this in the tick
  * order live in `app/systems.ts`.
+ *
+ * It carried the shutter's state and counter too, and this layer turned them
+ * into bars. It no longer does: the bars are {@link ShutterBarView}s, what the
+ * engine's routine drew.
  */
-export interface ShutterView {
-  shutterState: number;
-  shutterCounter: number;
+export interface CaptionView {
   captionGroup: number;
   captionFrames: number;
 }
 
 /**
+ * One bar `HudDrawShutterState` drew: its origin's `y` in view space at
+ * `z = -1`, and its vertical scale. Structural, like {@link ScreenSpriteView}:
+ * the engine's type is `ShutterBar` in `game/hud_shutter.ts`.
+ */
+export interface ShutterBarView {
+  y: number;
+  sy: number;
+}
+
+/**
  * One screen sprite to draw: `DrawScreenSprite`'s arguments as the engine
- * recorded them. Structural, like {@link ShutterView}: the engine's type is
+ * recorded them. Structural, like {@link CaptionView}: the engine's type is
  * `ScreenSprite` in `game/hud_readout.ts`, and `app/` hands its list across.
  */
 export interface ScreenSpriteView {
@@ -323,15 +338,16 @@ export class Hud {
   }
 
   /**
-   * Draw, from the script's state and nothing else.
+   * Draw, from what the engine drew and nothing else.
    *
    * This is the layer's whole update **and** its whole rebuild, which is why
    * `app/` can register it with `drawSystem` and a load, a seek and an
    * ordinary frame all go through one path.
    */
-  draw(w: ShutterView | null,
-       sprites: readonly ScreenSpriteView[] = []): void {
-    this.apply(w?.shutterState ?? 2, w?.shutterCounter ?? 0);
+  draw(w: CaptionView | null,
+       sprites: readonly ScreenSpriteView[] = [],
+       bars: readonly ShutterBarView[] = []): void {
+    this.apply(bars);
     this.drawLine(w?.captionGroup ?? -1, w?.captionFrames ?? 0);
     this.drawSprites(sprites);
   }
@@ -429,31 +445,47 @@ export class Hud {
   }
 
   /**
-   * Two bars, from the state and the counter.
+   * The engine's bars, as two edge-anchored bands.
    *
    * `drawn` is a one-string guard rather than a diff: this runs every tick and
    * the shutter changes on perhaps one frame in a thousand.
    */
-  private apply(state: number, counter: number): void {
-    const key = `${state}:${counter}`;
+  private apply(bars: readonly ShutterBarView[]): void {
+    const { top, bottom } = shutterCover(bars);
+    const key = `${top}:${bottom}`;
     if (key === this.drawn) return;
     this.drawn = key;
-    // State 8 is a full blackout: one bar at y = 0 scaled 8x vertically, so
-    // its half-height is 0.4 against a frustum half-height of 0.375.
-    if (state === 8) {
-      this.top.style.height = "100%";
-      this.bottom.style.height = "0";
-      return;
-    }
-    // 2 and 6 draw nothing at all.
-    const open = state === 2 || state === 6;
-    const inner = open
-      ? Number.POSITIVE_INFINITY
-      : SHUTTER_CLOSED_Y + counter * SHUTTER_STEP - SHUTTER_HALF;
-    // The inner edge as a fraction of half-height, then of the whole frame.
-    const frac = Math.min(1, inner / HALF_HEIGHT);
-    const pct = Math.max(0, (1 - frac) * 50);
-    this.top.style.height = `${pct}%`;
-    this.bottom.style.height = `${pct}%`;
+    this.top.style.height = `${top}%`;
+    this.bottom.style.height = `${bottom}%`;
   }
+}
+
+/**
+ * How much of the frame the engine's bars cover from the top edge and from
+ * the bottom edge, in percent of the frame's height.
+ *
+ * Every bar the routine draws touches an edge of the frustum -- a shut bar
+ * spans 0.30..0.40 against a half-height of 0.3748, a sliding one moves out
+ * past it, and the blackout's spans -0.4..0.4 and so touches both -- which is
+ * why two bands anchored at the edges are enough to show all of them. A bar
+ * that reached neither edge could not be drawn this way, and no arm of the
+ * routine draws one.
+ *
+ * Exported for `test:ui`, which pins the closed band, the slide and the
+ * blackout against the numbers the routine draws.
+ */
+export function shutterCover(bars: readonly ShutterBarView[])
+    : { top: number; bottom: number } {
+  let top = 0;
+  let bottom = 0;
+  const frame = 2 * HALF_HEIGHT;
+  for (const b of bars) {
+    const half = SHUTTER_HALF * b.sy;
+    const lo = b.y - half;
+    const hi = b.y + half;
+    if (hi >= HALF_HEIGHT) top = Math.max(top, HALF_HEIGHT - lo);
+    if (lo <= -HALF_HEIGHT) bottom = Math.max(bottom, hi + HALF_HEIGHT);
+  }
+  const pct = (v: number) => Math.min(100, Math.max(0, v / frame * 100));
+  return { top: pct(top), bottom: pct(bottom) };
 }

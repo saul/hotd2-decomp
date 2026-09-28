@@ -237,13 +237,25 @@ export interface FeedEntry {
 
 export interface WalkerOptions {
   /**
-   * Seconds a branch point waits before the seeded RNG picks. Hovering the
-   * branch bar freezes it, so this is the unattended pace, not a deadline.
+   * `[port-only]` debug aid, **off by default**: hold at a route branch for
+   * {@link branchCountdown} seconds so a viewer can take the other road.
+   *
+   * Off is the engine. `EvtAdvanceStepOrRoute` (`FUN_0045F000`) reads
+   * `g_script_branch_var` when the step list runs out and goes straight to
+   * `next[choice]` on the same frame; there is no window in the game. The
+   * sidebar's "Pause at branches" switch sets this.
+   */
+  branchPause: boolean;
+  /**
+   * Seconds a paused branch waits before it takes the game's own answer.
+   * Hovering the branch bar freezes it, so this is the unattended pace, not a
+   * deadline. Only read with {@link branchPause} on.
    */
   branchCountdown: number;
 }
 
 export const DEFAULT_OPTIONS: WalkerOptions = {
+  branchPause: false,
   branchCountdown: 1.5,
 };
 
@@ -1322,10 +1334,9 @@ export class Walker {
    */
   stepOnce(): boolean {
     this.stepOverWait();
-    // Stepping advances instructions, not frames, so a shutter close that is
-    // still counting down would never finish and would hold the firing gate up
-    // for the rest of the session.
-    if (this.shutterState === 3) this.shutter.settle();
+    // A shutter close still sliding is not settled here any more: the slide
+    // is the game's task (`game/hud_shutter.ts`), and step mode runs the game
+    // underneath, so it finishes on its own frames as the engine's does.
     return this.executeOne(false);
   }
 
@@ -1506,7 +1517,8 @@ export class Walker {
     // `PushSceneLightStateToDevice` steps both blocks' channel tweens.
     this.lightBlock1.step(dt * fps);
 
-    this.shutter.step(dt * fps);
+    // No shutter step: `HudDrawShutterState` is a task of the scene's own and
+    // runs in `SceneTaskWalk`, after the players -- see `game/hud_shutter.ts`.
     // The caption is a countdown in script frames, not in wall time: stepping
     // onto a `play_dialogue` and having the line expire two seconds later
     // while nothing is playing makes it unreadable.
@@ -2006,14 +2018,15 @@ export class Walker {
       return false;
     }
 
-    if (route.kind === "branch" && !quiet) {
+    if (route.kind === "branch" && !quiet && this.options.branchPause) {
       const targets = route.next.filter((n) => n >= 0);
       if (targets.length > 1) {
-        // [diverges] **The pause is the port's, the choice is the game's.**
-        // The engine reads `g_script_branch_var` here and goes; this holds
-        // for `branchCountdown` seconds so a viewer can take the other route,
-        // and takes the engine's answer if nobody does. The value is latched
-        // now, for the reason on `BranchChoice.choice`.
+        // `[port-only]` debug aid, and off by default -- see
+        // `WalkerOptions.branchPause`. The engine reads `g_script_branch_var`
+        // here and goes, which is the fall-through below. With the aid on
+        // this holds for `branchCountdown` seconds so a viewer can take the
+        // other route, and takes the engine's answer if nobody does. The value
+        // is latched now, for the reason on `BranchChoice.choice`.
         this.branch = {
           block: this.block,
           targets,

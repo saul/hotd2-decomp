@@ -75,6 +75,14 @@ export enum SpriteEffectKind {
    */
   Dust = 0x46,
   /**
+   * The second label on {@link Dust}'s arm -- `case 0x46: case 0x4B:` -- so
+   * the same strip and the same base scale. `ThrowerEmitGroundDust`
+   * (`FUN_0044D260`) spawns this one: the tall column where a leap lands and
+   * the stretched scuffs of `zsass`'s trail. Why the routine names 0x4B
+   * rather than 0x46 is `[open]`; nothing in the switch tells them apart.
+   */
+  DustAlt = 0x4b,
+  /**
    * Slots `0x1339..0x1356`, `common.bin` 307..336 -- the strip the bat's and
    * the owl's water splashes flip through -- and `PlayImpactSoundForMaterial`
    * gives it `COMMON\BOMB2_16.WAV`. What those two routines spawn on the wet

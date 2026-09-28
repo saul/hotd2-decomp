@@ -35,7 +35,15 @@ Four assertions, and each is a different way it can go wrong:
    the client's `cloneSlot` answered null. The axe men of stage 3 block 2
    threw on time, dealt their damage, and drew nothing at all -- the weapon
    was invisible in flight and stayed in the fist, because `swapGore` returns
-   false for a slot it has no template for.
+   false for a slot it has no template for;
+6. **and every model a class-0x25 program's `op 9` or `op 16` writes into a
+   bone resolves the same way**, against the bundle's copy of the table `op 9`
+   reads, held row for row to the exe's words. `ScriptedHumanoidUpdate`
+   (`FUN_004842A0`) swaps bone 5 to ``g_player_hand_slots[3*a + mode]``
+   (``0x004EC9E0``) and bone ``a`` to the effect table's ``6*a + b`` when that
+   is above 2; the same failure again -- the stage-2 jetty zombies were shot
+   on cue and wore no wound -- and a table the port reads at run time, so a
+   bundle whose copy is a word out is a hand the page draws wrong.
 
     python3 tools/verify_attachments.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 """
@@ -52,7 +60,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from hod2lib import evt as evtlib  # noqa: E402
-from hod2lib.combat import ZOMBIE_THROW_SLOTS  # noqa: E402
+from hod2lib.charmotion import humanoid_model_commands  # noqa: E402
+from hod2lib.combat import (HIT_EFFECT, HIT_STEPS,  # noqa: E402
+                            PLAYER_HAND_ROWS, PLAYER_HAND_VARIANTS,
+                            ZOMBIE_THROW_SLOTS)
 from hod2lib.exetab import ExeTables  # noqa: E402
 from hod2lib.placement import (ATTACHMENT_TAIL_OFFSET,  # noqa: E402
                                attachment_list)
@@ -95,6 +106,44 @@ def cloneable_slots(gltf: dict) -> set[int]:
     return out
 
 
+#: `ScriptedHumanoidUpdate`'s two slot writers, as instruction bytes with the
+#: operand the check reads out of them. The table address and both strides
+#: come from these, not from the library's constants, so a library that reads
+#: another address or another stride is caught by the image itself (`L65`).
+OP9_ROW_LEA = (0x0048476B, bytes.fromhex("8d0c40"))          # ECX = 3*row
+OP9_TABLE_LOAD = (0x00484773, bytes.fromhex("0fbf044d"))     # + disp32
+OP9_BONE5_STORE = (0x0048477B, bytes.fromhex("8987dc040000"))
+OP16_TABLE_LOAD = (0x004849A7, bytes.fromhex("8b2c85"))      # + disp32
+OP16_FILTER = (0x004849B9, bytes.fromhex("83f8027e02"))      # CMP 2; JLE
+
+
+def _text(tables, va: int, n: int) -> bytes:
+    o = tables._v2r(va)
+    return bytes(tables.data[o:o + n])
+
+
+def check_humanoid_model_tables(tables, bad: list[str]) -> list[int]:
+    """The instructions `op 9` and `op 16` read their tables with, and the
+    hand table's rows as the exe holds them. Returns the rows, flat."""
+    for va, want in (OP9_ROW_LEA, OP9_TABLE_LOAD, OP9_BONE5_STORE,
+                     OP16_TABLE_LOAD, OP16_FILTER):
+        got = _text(tables, va, len(want))
+        if got != want:
+            bad.append(f"0x{va:08X} is {got.hex()}, not {want.hex()}: "
+                       "ScriptedHumanoidUpdate is not what this reads")
+    hand_va = struct.unpack("<I", _text(tables, OP9_TABLE_LOAD[0] + 4, 4))[0]
+    eff_va = struct.unpack("<I", _text(tables, OP16_TABLE_LOAD[0] + 3, 4))[0]
+    if eff_va != HIT_EFFECT:
+        bad.append(f"op 16 reads 0x{eff_va:08X}, the library 0x{HIT_EFFECT:08X}")
+    n = PLAYER_HAND_ROWS * PLAYER_HAND_VARIANTS
+    rows = list(struct.unpack(f"<{n}h", _text(tables, hand_va, n * 2)))
+    after = struct.unpack("<h", _text(tables, hand_va + n * 2, 2))[0]
+    if after != 0:
+        bad.append(f"the word after g_player_hand_slots' ten rows is "
+                   f"{after:#x}, not 0 -- the extent is wrong")
+    return rows
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--game-dir", required=True, type=Path)
@@ -127,7 +176,9 @@ def main() -> int:
     lists = 0
     ids_checked = 0
     hand_slots_checked = 0
+    humanoid_slots_checked = 0
     stages = 0
+    hand_rows = check_humanoid_model_tables(tables, bad)
     for entry in json.loads(manifest.read_text())["stages"]:
         stem = EVT_OF_STAGE.get(entry["stage"])
         if stem is None:
@@ -225,9 +276,42 @@ def main() -> int:
                             f"{what} model (slot 0x{slot:04X}) has no model "
                             f"in the glTF -- the client has nothing to clone")
 
+        # 6. class 0x25's op 9 and op 16: the table op 9 reads at run time,
+        # and every model either command writes into a bone.
+        got_rows = chars.get("player_hand_slots")
+        if got_rows != hand_rows:
+            bad.append(f"{name}: the bundle's player_hand_slots is "
+                       f"{got_rows!r:.80}, the exe's words are "
+                       f"{[hex(v) for v in hand_rows]!r:.80}")
+        eff_base = tables._v2r(HIT_EFFECT)
+        for sp in evtlib.spawns(e):
+            if sp.cls != 0x25 or sp.offset not in have:
+                continue
+            ct = sp.param(0, "i8")
+            for op, mode, a, b in humanoid_model_commands(e, sp):
+                if op == 9:
+                    i = a * PLAYER_HAND_VARIANTS + mode
+                    slot = hand_rows[i] if 0 <= i < len(hand_rows) else 0
+                else:
+                    # A raw read of `g_pBoneEffectSlots[ct][6a + b]`, not the
+                    # library's: the pointer, then the u16.
+                    row = tables._v2r(struct.unpack_from(
+                        "<I", tables.data, eff_base + ct * 4)[0])
+                    slot = struct.unpack_from(
+                        "<H", tables.data, row + (a * HIT_STEPS + b) * 2)[0]
+                    if slot <= 2:
+                        continue        # a control code: the bone is left
+                humanoid_slots_checked += 1
+                if slot not in clones:
+                    bad.append(
+                        f"{name}: spawn {sp.offset:#x}'s op {op} "
+                        f"(mode {mode}, a {a}, b {b}) writes slot "
+                        f"0x{slot:04X}, which has no model in the glTF")
+
     print(f"{stages} stage bundles, {lists} spawn lists, "
-          f"{ids_checked} attachment ids and {hand_slots_checked} throwing-hand "
-          f"slots resolved to a model in the glTF")
+          f"{ids_checked} attachment ids, {hand_slots_checked} throwing-hand "
+          f"slots and {humanoid_slots_checked} class-0x25 op 9/op 16 slots "
+          f"resolved to a model in the glTF")
     if bad:
         print()
         for line in bad[:40]:

@@ -1200,6 +1200,145 @@ console.log("\nrigs: class 0x28's cars are drawn from its actors, not from the "
   ResetGameGlobals();
 }
 
+console.log("\nrigs: class 0x28's sprite cels draw in their own meshes' state -- "
+            + "translucent, depth-writing, nearest first");
+{
+  // `PathRidingPropDraw` (`FUN_00432840`) sets no render state of its own
+  // around the two sprites: from `0x0043288C` to its `RET` at `0x004329C8` it
+  // calls MatrixStackPush/Pop, MatrixTranslate, MatrixRotateY, MatrixScale,
+  // VecToAngles, NoOpStub and `AssetDrawSlot` (`0x00432941`, `0x004329B7`) --
+  // the plain draw, no alpha -- and nothing else. So each cel composites by
+  // its own mesh's words through `TranslatePvr2StateToD3D`: ISP `0x83000000`
+  // (LESSEQUAL, depth write on) and TSP `0x94002453` for the 0x135F loop,
+  // `0x9400241B` for the 0xB67 loop -- SRCALPHA / INVSRCALPHA, pass bits
+  // clear so the translucent pass, alpha-tested at ALPHAREF 1. Then
+  // `RenderCommandCompare` (`FUN_004A8A20`) draws the nearer command first,
+  // and the 0xB67 cel stands 12.0 toward the eye: it draws before the 0x135F
+  // cel and writes depth wherever its texel alpha is at least 1, so the
+  // column is cut away round every flame. That pale fringe is the exe's
+  // picture, not a port fault; these checks hold the state that makes it.
+  //
+  // The loops are named by slot, not by what they show: the cel commit
+  // called 0x135F "fire" and 0xB67 "smoke", and the textures read the other
+  // way round (a 32x64 near-black column, a 64x64 flame) -- `[likely]`, from
+  // the pictures and nothing else.
+  const { prepareDrawCommands, RenderCommandOrder, ALPHA_REF }
+    = await import("../src/render/draw_order");
+  const { ActorSpawn } = await import("../src/game/director");
+  const { Rng } = await import("../src/core/rng");
+  const { CustomBlending, LessEqualDepth, OneMinusSrcAlphaFactor,
+          SrcAlphaFactor } = await import("three");
+  ResetGameGlobals();
+  const RIGS = {
+    rigs: [{ name: "obj_432840", routine: "FUN_00432840", note: "",
+             spawn_class: 0x28, spawn_ats: null, routes: [] }],
+    blocked: [], note: "",
+  };
+  // The parts as the bundle carries them (`stage1.glb`, `obj_432840_*`): one
+  // single-primitive node per cel, so the node is the mesh and the command,
+  // its material carrying the mesh header's words and its geometry the
+  // header's sphere.
+  const assoc = new Map<InstanceType<typeof Obj3D>, { nodes?: number }>();
+  let node = 0;
+  const cel = (slot: number, tsp: string, sphere: number[],
+               pos: [number, number, number], scale: [number, number, number]) => {
+    const g = new PlaneGeometry(1, 1);
+    g.userData = { hod2_chain_index: 0, hod2_model: 0, hod2_sphere: sphere };
+    const mat = new MeshBasicMaterial({ transparent: true, depthWrite: false });
+    mat.userData = { pvr2: { isp_tsp_instruction: "0x83000000",
+                             tsp_instruction: tsp } };
+    const m = new Mesh(g, mat);
+    m.position.set(...pos);
+    m.scale.set(...scale);
+    m.userData = { hod2_kind: "rig_part", hod2_rig: "obj_432840",
+                   hod2_slots: [`0x${slot.toString(16).padStart(4, "0")}`] };
+    assoc.set(m, { nodes: node++ });
+    return m;
+  };
+  const LOOP_135F = Array.from({ length: 15 }, (_, i) =>
+    cel(0x135f + i, "0x94002453", [0, 38.037654, 0, 40.183147],
+        [0, 5, 0], [1.5, 2, 1]));
+  const LOOP_B67 = Array.from({ length: 8 }, (_, i) =>
+    cel(0xb67 + i, "0x9400241B", [0, 1.6, 0, 2.262742],
+        [0, 0, 12], [7, 7, 7]));
+  const body = new Group();
+  body.userData = { hod2_kind: "rig_part", hod2_rig: "obj_432840",
+                    hod2_slots: ["0x0033"] };
+  const s0 = new Group();
+  s0.name = "obj_432840_spawn000";
+  s0.userData = { hod2_kind: "rig", hod2_rig: "obj_432840",
+                  hod2_routine: "FUN_00432840", hod2_spawn_at: 24472,
+                  hod2_spawn_class: 0x28 };
+  s0.add(body, ...LOOP_135F, ...LOOP_B67);
+  const root = new Group();
+  root.add(s0);
+  // What `StageScene.load` does to the whole stage glTF, rigs included,
+  // before anything else sees it.
+  prepareDrawCommands(root, assoc as never);
+  const rigs = new RigLayer();
+  rigs.build(root, RIGS as never, new CamPaths({
+    fps: 60, paths: {}, object_paths: {},
+  } as never));
+  const a = ActorSpawn(24472, SpawnClass.PathRidingProp, -1, "car",
+                       { hp: 0 }, new Rng(28));
+  a.visible = true;
+  a.pos.x = -1021.62; a.pos.y = -8.04; a.pos.z = -497.51;
+  G.g_camera_block_eye.x = a.pos.x + 30;
+  G.g_camera_block_eye.y = a.pos.y + 10;
+  G.g_camera_block_eye.z = a.pos.z + 40;
+  const ctx = { walker: { cam: { slot: 47, frame: 191 }, spawns: [] } } as
+    unknown as Parameters<typeof rigs.update>[0];
+  rigs.update(ctx);
+  root.updateMatrixWorld(true);
+  const on135f = LOOP_135F.filter((m) => m.visible);
+  const onB67 = LOOP_B67.filter((m) => m.visible);
+  check("one cel of each loop is drawn", s0.visible
+        && on135f.length === 1 && onB67.length === 1,
+        `${on135f.length} + ${onB67.length}`);
+  type M = InstanceType<typeof MeshBasicMaterial>;
+  const state = (m: InstanceType<typeof Mesh>) => {
+    const t = m.material as M;
+    return `${t.transparent}/${t.blending}/${t.blendSrc}/${t.blendDst}`
+      + `/${t.alphaTest.toFixed(5)}/${t.depthTest}/${t.depthWrite}/${t.depthFunc}`;
+  };
+  const exe = `true/${CustomBlending}/${SrcAlphaFactor}/${OneMinusSrcAlphaFactor}`
+    + `/${(ALPHA_REF / 255).toFixed(5)}/true/true/${LessEqualDepth}`;
+  const drawn = [...on135f, ...onB67];
+  check("both drawn cels are translucent-pass, SRCALPHA/INVSRCALPHA, "
+        + "alpha-tested at ALPHAREF 1 and depth-writing under LESSEQUAL -- "
+        + "their words' state, not the loader's",
+        drawn.length === 2 && drawn.every((m) => state(m) === exe),
+        drawn.map(state).join(" | "));
+  check("...and every cel of both loops carries it, drawn or not",
+        [...LOOP_135F, ...LOOP_B67].every((m) => state(m) === exe));
+
+  // The translucent order, from the eye the sprites turn to.
+  const cam = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  const e = G.g_camera_block_eye;
+  cam.position.set(e.x, e.y, e.z);
+  cam.lookAt(a.pos.x, a.pos.y, a.pos.z);
+  cam.updateMatrixWorld(true);
+  const order = new RenderCommandOrder(cam);
+  order.beginFrame();
+  let id = 0;
+  const item = (o: InstanceType<typeof Obj3D>) => ({
+    id: id++, object: o, groupOrder: 0, renderOrder: 0, z: 0,
+    geometry: null, material: null, program: null, group: null,
+  }) as unknown as Parameters<typeof order.compare>[0];
+  if (on135f.length === 1 && onB67.length === 1) {
+    const [c135f, cB67] = [on135f[0], onB67[0]];
+    const first = [item(c135f), item(cB67)].sort(order.compare)[0].object;
+    check("the 0xB67 cel, 12 toward the eye, is drawn before the 0x135F "
+          + "cel: RenderCommandCompare puts the nearer command first",
+          first === cB67,
+          `keys ${order.key(cB67).depth.toFixed(2)} / `
+          + `${order.key(c135f).depth.toFixed(2)}`);
+  }
+  a.despawned = true;
+  rigs.update(ctx);
+  ResetGameGlobals();
+}
+
 console.log("\nrigs: the stage-2 car is drawn from the port's task, not from load");
 {
   // New bug (NEW-BUGS-2): the car stood in Goldman's office through stage 2

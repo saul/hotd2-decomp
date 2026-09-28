@@ -43,15 +43,18 @@ import { MotionFlag, type Actor, type HumanoidActor } from "../actor";
 import { ActorBindPartList } from "../attachments";
 import { ActorSetMotion, ActorSetMotionBlended } from "../class30/motion_cue";
 import { ScriptedHumanoidDebug } from "./debug";
+import { SpawnBloodSpray } from "../effects/blood";
 import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
 import { G, HIT_SLOT_NONE } from "../globals";
+import { GameMode } from "../game_mode";
 import { ActorFreeHitSlot } from "../hit_slots";
 import {
   registerClass, type ClassFrame, type ClassHandler,
 } from "../registry";
 import { SpawnClass } from "../spawn_class";
 import { HumanoidDrawVariant, HumanoidRoutine } from "./state";
-import { MotionPlayFrame, MotionPlayLength, T } from "../tables";
+import { CharacterTypeOf, MotionPlayFrame, MotionPlayLength, T }
+  from "../tables";
 import { vec3, VecToAngles } from "../vec";
 
 /** The opcodes `ScriptedHumanoidUpdate` switches on. */
@@ -74,7 +77,11 @@ export enum HumanoidOp {
   FacePoint = 7,
   /** Set the position — y alone in mode 1, x and z otherwise. */
   SetPos = 8,
-  /** Swap the model in a hand, from a per-character weapon table. */
+  /**
+   * Bone 5's draw slot from `g_player_hand_slots[3*a + mode]` -- `a` a
+   * character's row, `mode` one of its three hand models. See
+   * {@link RunCommand}'s arm for the Original Mode row.
+   */
   SetHandModel = 9,
   /**
    * `if (g_active_player == mode)` — run the following commands, or skip past
@@ -115,7 +122,10 @@ export enum HumanoidOp {
   SetBonePropMode = 14,
   /** Jump. */
   Jump = 15,
-  /** Swap one bone's draw slot. */
+  /**
+   * Blood on bone `a`, then bone `a`'s draw slot from the character's effect
+   * table at `6*a + b` -- a scripted wound, shot on cue.
+   */
   SetBoneModel = 16,
   /**
    * Five different things by mode, and only three of them leave the VM:
@@ -290,6 +300,29 @@ export const PATH_SLOT_LIFT_LO = 0x156;
 export const PATH_SLOT_LIFT_HI = 0x15c;
 export const PATH_SLOT_LIFT = 2.0;
 
+// -- the two commands that write a bone's draw slot --------------------------
+
+/**
+ * `op 9`'s bone: `MOV dword ptr [EDI + 0x4dc], EAX` at `0x0048477B`, and the
+ * bone records are `obj + 0x20C + bone*0x90` -- `0x4DC` is bone 5's `+0x00`.
+ */
+export const HAND_BONE = 5;
+/** `LEA ECX, [EAX + EAX*2]` at `0x0048476B`: a character's row is three wide. */
+export const HAND_SLOT_VARIANTS = 3;
+/**
+ * `op 16`'s row stride: `LEA EAX, [EAX + EAX*2]` then `LEA EDX, [EDX + EAX*2]`
+ * at `0x0048498D`/`0x00484993` -- `6*a + b`, six steps a bone, the stride
+ * `ResolveHit` walks the same table at.
+ */
+export const BONE_EFFECT_STEPS = 6;
+/**
+ * `CMP EAX, 0x2; JLE` at `0x004849B9`: 0, 1 and 2 are the effect table's
+ * control codes, and `op 16` leaves the bone alone for them.
+ */
+export const BONE_EFFECT_CONTROL_MAX = 2;
+/** `PUSH 0x3f400000` at `0x00484976` -- `SpawnBloodSpray`'s severity, 0.75. */
+export const BONE_MODEL_BLOOD = 0.75;
+
 /** The character types `ScriptedHumanoidInit` seeds `bonePropMode` to 1 for. */
 export const BONE_PROP_CHAR_LO = 0x39;
 export const BONE_PROP_CHAR_HI = 0x3b;
@@ -359,10 +392,15 @@ export function HumanoidProgramOf(a: Actor): HumanoidProgram | null {
 /**
  * `ScriptedHumanoidInit` — `FUN_004840D0`.
  *
- * [diverges] Boss Mode remaps the character type through the two selected-
- * player bytes at `0x009A2242` / `0x009A2256` — types 0x39 and 0x3A become the
- * chosen character, or 0x21. Nothing in the port chooses a player character,
- * so the descriptor's own type stands.
+ * [diverges] Original Mode -- `g_GameMode == 1`, `DEC EAX; JZ` at
+ * `0x00484106`; this note said Boss Mode -- remaps character types 0x39 and
+ * 0x3A through `g_original_character` before the model is built: `c <= 7`
+ * gives `0x39 + c`, 8 gives 0x21, 9 gives 0x34, and anything else leaves the
+ * type unwritten (`0x00484116`-`0x00484183`). The port builds the model in
+ * `ActorSpawn`, before this runs, so the remap has no place here. With
+ * `g_original_character` as its one writer leaves it -- the player index --
+ * the remap is 0x39 to 0x39 and 0x3A to 0x3A, so nothing a shipped stage can
+ * reach draws differently; it would take a writer of another character.
  */
 export function ScriptedHumanoidInit(obj: HumanoidActor, rng?: Rng): void {
   // `model+0x1170 = *(u32 *)(tail + 8)`, then `ActorBindPartList` --
@@ -782,16 +820,64 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
     case HumanoidOp.Handoff:
       return HumanoidHandoff(obj, c, f);
 
-    // [diverges] These two need routines this port has not read: `op 9` and
-    // `op 16` swap a model from per-character tables at `0x004EC9E0` and
-    // `PTR_DAT_004C7160` (and `op 16` sprays blood from the bone first). The
-    // command is stepped over so the rest of the program still runs —
-    // stalling on it would park the actor for ever.
-    case HumanoidOp.SetHandModel:
-    case HumanoidOp.SetBoneModel:
+    case HumanoidOp.SetHandModel: {
+      // `0x00484739`-`0x00484787`. The row is `a`, except in Original Mode
+      // (`g_GameMode == 1`: `DEC EAX; JNZ 0x00484767`), where an `a` of 0 or 1
+      // is the character that player plays -- `MOVSX EAX, byte ptr
+      // [0x009a2242]` at `0x00484760`, `[0x009a2256]` at `0x00484757`. Then
+      // `MOVSX EAX, word ptr [ECX*2 + 0x4ec9e0]` with `ECX = 3*row + mode` and
+      // `MOV [EDI + 0x4dc], EAX`: bone 5's draw slot, written whatever it is.
+      let row = c.a;
+      if (G.g_GameMode === GameMode.Original && (c.a === 0 || c.a === 1)) {
+        row = G.g_original_character[c.a];
+      }
+      const slot = T.chars?.player_hand_slots
+        ?.[row * HAND_SLOT_VARIANTS + c.mode];
+      // [port-only] The bundle carries the table's ten rows, the ones the
+      // character byte can name; an index outside them reads the words after
+      // the table in the engine and nothing here. The 117 shipped commands
+      // name rows 0 to 4 and modes 0 to 2.
+      if (slot !== undefined) {
+        obj.boneSlot[String(HAND_BONE)] = slot;
+        f.host.setBoneSlot(obj.at, HAND_BONE, slot);
+      }
       obj.hum.stallFrames = 0;
       obj.hum.pc += 1;
       return true;
+    }
+
+    case HumanoidOp.SetBoneModel: {
+      // `0x00484972`-`0x004849C9`. `SpawnBloodSpray(obj, a, 0.75)` first,
+      // always -- the call at `0x0048497D` is `SpawnBloodSpray` (`FUN_00407310`)
+      // and it is the port's -- then the character's effect-table entry
+      // `6*a + b` (`MOV EBP, [EAX*4 + 0x4c7160]` on `obj+0x1F4`, `MOV AX, word
+      // ptr [EBP + EDX*2]` into a cleared `EAX`), and bone `a`'s record
+      // (`LEA ECX, [ECX + EDI + 0x20c]`, `ECX = a*0x90`) takes it only when
+      // `CMP EAX, EBX; JL` or `CMP EAX, 0x2; JLE` lets it past: never for a
+      // control code, and the `JL` arm cannot fire on a zero-extended `u16`.
+      //
+      // **Not `ActorSwapDamagedPart` (`FUN_004098E0`).** Only the slot is
+      // written: no `NoPartSwap` test, no hit sphere, no step counter at
+      // `+0x8C`, no zone bit. The class is not shot at, so a wound here is
+      // drawn and nothing else.
+      SpawnBloodSpray(obj.at, c.a, BONE_MODEL_BLOOD);
+      // The bundle carries the table as six steps per skeleton bone, so the
+      // flat index is split back into the row it lands in -- which is `a`'s
+      // own for the shipped `b` of 0 and 1, and the next bone's for a `b` of
+      // six or more, as in the engine. [port-only] A row the skeleton has no
+      // bone for reads 0 here, which the command never stores.
+      const j = c.a * BONE_EFFECT_STEPS + c.b;
+      const bone = Math.floor(j / BONE_EFFECT_STEPS);
+      const slot = CharacterTypeOf(obj)?.bones.find((x) => x.bone === bone)
+        ?.steps?.[j - bone * BONE_EFFECT_STEPS]?.[0] ?? 0;
+      if (slot < 0 || slot > BONE_EFFECT_CONTROL_MAX) {
+        obj.boneSlot[String(c.a)] = slot;
+        f.host.setBoneSlot(obj.at, c.a, slot);
+      }
+      obj.hum.stallFrames = 0;
+      obj.hum.pc += 1;
+      return true;
+    }
 
     default:
       // `LEA EDX,[EAX+1]; CMP EDX,0x13; JA 0x00484a8d` at `0x00484365`: an

@@ -39,6 +39,19 @@
  * `g_player_hit_count`, and **gives its thrower's permit back on the spot**:
  * the reason to shoot a knife is not only the life it would have cost but the
  * next enemy it lets in sooner. Nothing is scored.
+ *
+ * ## The trail
+ *
+ * A `zslman` blade leaves **afterimages** while it is in the air — launching,
+ * flying, or cartwheeling away after it was shot — and stops the frame it
+ * lands. `ZslmanBladeEmitAfterimage`, below, makes one every fifth
+ * frame, under ten at a time, each a copy of the blade's pose that draws a
+ * single-mesh model of its own (`0x1FE4` / `0x1FE5`, `zslman.bin` parts 13 and
+ * 14, both additive) and dims over fifteen frames through
+ * `SetRenderLightColour` (`FUN_004AA0A0`): 0.75 to below zero, so the last
+ * few frames add nothing to the screen before it goes. They give their count
+ * back as they go — but not once the blade is spent, so a blade that has been
+ * shot down stops trailing after its tenth. `[proved]`
  */
 import type { Rng } from "../../core/rng";
 import { ActorByAt, G } from "../globals";
@@ -47,10 +60,11 @@ import { ThrowerReleaseAttackPermit } from "../combat/permits";
 import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
 import { FtolS16, MatIdentity, MatrixTransformPoint } from "../matrix";
 import {
-  RegisterThrownWeaponForShotTest, ThrownWeaponDespawn,
-  ThrownWeaponDrawAndProject, ThrownWeaponFlag, ThrownWeaponRoutine,
-  ThrownWeaponShotDownTarget, ThrownWeaponTakeMark, Vec3Normalize,
-  SFX_RICOCHET, SHOT_DOWN_FRAMES, SHOT_DOWN_SPIN_SCALE, THROWN_WEAPON_DRAWN,
+  RegisterThrownWeaponForShotTest, ThrownWeaponAlloc, ThrownWeaponDespawn,
+  ThrownWeaponDraw, ThrownWeaponDrawAndProject, ThrownWeaponFlag,
+  ThrownWeaponRoutine, ThrownWeaponShotDownTarget, ThrownWeaponTakeMark,
+  Vec3Normalize, SFX_RICOCHET, SHOT_DOWN_FRAMES, SHOT_DOWN_SPIN_SCALE,
+  THROWN_WEAPON_DRAWN,
   type ThrownWeapon, type ThrownWeaponCamera, type ThrownWeaponFrame,
 } from "../thrown_weapon";
 import { ZombieThrownWeaponUpdate } from "../class30/thrown_weapon";
@@ -94,6 +108,12 @@ export enum DeflectSub {
 
 /** `mov dword ptr [esi+0x135c], 0x2400` at `0x0045072C`. BAMS a frame. */
 export const THROWN_WEAPON_SPIN = 0x2400;
+/**
+ * `obj+0x133C = obj+0x1338 = 4` at `0x00450736`: the afterimage timers
+ * `SpawnThrownWeapon` (`FUN_004504E0`) arms, so a `zslman` blade trails every
+ * fifth frame.
+ */
+export const THROWN_WEAPON_AFTERIMAGE_PERIOD = 4;
 /** `FMUL float ptr [0x00565EE8]` — `0x3F555555`, the flight time per unit. */
 const TTL_PER_UNIT = 0.8333333134651184;
 /** `FSUB float ptr [0x004C4380]` — one frame of flight. */
@@ -106,8 +126,35 @@ const STICK_FRAMES = 0x1e;
 const BLINK_FRAMES = 0x3c;
 /** Bone 5, the right hand: its spin is added and its landing kick negated. */
 const RIGHT_HAND = 5;
+/** `zslman`'s blade out of hand 8 (`SpawnThrownWeapon`, `FUN_004504E0`). */
+const ZSLMAN_BLADE_HAND8 = 0x1fe1;
+/** ...and out of hand 5. */
+const ZSLMAN_BLADE_HAND5 = 0x1fe2;
 /** `zslman`'s two blades, the landing's other arm: `CMP EAX, 0x1FE1 / 0x1FE2`. */
-const ZSLMAN_BLADES: readonly number[] = [0x1fe1, 0x1fe2];
+const ZSLMAN_BLADES: readonly number[] = [ZSLMAN_BLADE_HAND8, ZSLMAN_BLADE_HAND5];
+/** What hand 8's blade trails: `MOV [EBX+0x13F0], 0x1FE4` at `0x004509E0`. */
+const ZSLMAN_AFTERIMAGE_HAND8 = 0x1fe4;
+/** ...and hand 5's: `MOV [EBX+0x13F0], 0x1FE5` at `0x004509FC`. */
+const ZSLMAN_AFTERIMAGE_HAND5 = 0x1fe5;
+/**
+ * `CMP word ptr [ESI+0x1F4], 0x18` (`6683bef401000018`) at `0x004508C2`: the
+ * one character type whose weapon trails, `zslman`. `obj+0x1F4` is the
+ * thrower's type, which `SpawnThrownWeapon` copies onto the weapon.
+ */
+const CHAR_ZSLMAN = 0x18;
+/** `CMP dword ptr [EBP+0x1368], 0xA` / `JGE` at `0x00450948`: under ten out. */
+const AFTERIMAGE_LIMIT = 0xa;
+/** `MOV dword ptr [EBX+0x1330], 0xF` at `0x0045099D`: its life. */
+const AFTERIMAGE_LIFE = 0xf;
+/** `MOV dword ptr [EBX+0x1384], 0x3F800000` at `0x004509A7`: its light. */
+const AFTERIMAGE_LIGHT = 1.0;
+/** `MOV ECX, 0x3F400000` at `0x004509D3`: a `zslman` blade's instead. */
+const AFTERIMAGE_BLADE_LIGHT = 0.75;
+/**
+ * `MOV dword ptr [EBX+0x1388], 0x3D888889` at `0x004509B1` — a fifteenth, as
+ * an f32, taken off the light every frame the afterimage draws.
+ */
+const AFTERIMAGE_LIGHT_STEP = 0.06666667014360428;
 /** `zsass`'s two knives, which spark kind 3 when shot rather than 0x51. */
 const ZSASS_KNIVES: readonly number[] = [0x1f90, 0x1f91];
 /** `CMP word ptr [0x009C8E84], 0x2` — the two-permit game. */
@@ -363,49 +410,206 @@ export function ThrownWeaponDeflected(w: ThrownWeapon,
  * if (obj+0x1F8 & 1) { draw; obj+0x70 = view pos; RegisterForShotTest(obj);
  *                      ActorDrawGroundShadow(obj, 5.0, 5.0) }
  * if (obj+0x1F4 == 0x18 && (state == 0 && sub < 2 || state == 1))
- *     FUN_00450930(obj);                      // zslman's afterimages
+ *     ZslmanBladeEmitAfterimage(obj);
  * if (state == 0) { obj+0x100 = pos; RegisterForCameraTracking(obj); }
  * ```
  *
  * The draw is not a tail the decompiler shows: it returns after
  * `MatrixStackPop` (`L35`), and the view point, the registration and the
  * shadow are `0x00450840`..`0x004508BF`, which then fall through to the
- * `zslman` test like the undrawn path does.
+ * `zslman` test like the undrawn path does. The test reads the state and
+ * sub-state the dispatch **left**, so a blade that launched this frame is
+ * already at sub 1 and trails, and one that landed is at sub 3 and does not.
  *
- * `[diverges]` Three calls are not made, each for a reason of its own:
+ * A state routine that despawned the weapon never returns here: see
+ * {@link ThrownWeaponDespawn}. So the weapon is not drawn on the frame it
+ * goes, and makes no afterimage then.
+ *
+ * `[diverges]` Two calls are not made, each for a reason of its own:
  * `FUN_0040A600` is `ActorDrawGroundShadow` at 5 by 5, and the port draws no
- * ground shadow for anything yet (`ActorDrawShadow` in `model_draw.ts`);
- * `FUN_00450930` spawns `zslman`'s fading afterimages, a task of its own with
- * a light colour the renderer has no path for; and `RegisterForCameraTracking`
- * wants the camera candidate list to take a non-actor, the same gap
- * `body_creature.ts` records for the creature.
+ * ground shadow for anything yet (`ActorDrawShadow` in `model_draw.ts`); and
+ * `RegisterForCameraTracking` wants the camera candidate list to take a
+ * non-actor, the same gap `body_creature.ts` records for the creature.
  */
 export function ThrownWeaponUpdate(w: ThrownWeapon,
                                    f: ThrownWeaponFrame): void {
   ThrownWeaponTakeMark(w, ThrownWeaponState.Deflected);
+  w.draw = null;
   switch (w.state as ThrownWeaponState) {
     case ThrownWeaponState.Fly: ThrownWeaponFlyToTarget(w, f); break;
     case ThrownWeaponState.Deflected: ThrownWeaponDeflected(w, f); break;
   }
-  w.draw = null;
+  // `ActorKill`'s `_longjmp`: a despawn inside the state is the end of it.
+  if (w.despawned) return;
   if (w.drawFlags & THROWN_WEAPON_DRAWN) {
     if (ThrownWeaponDrawAndProject(w, (w.tilt + w.rx) | 0, f.cam)) {
       RegisterThrownWeaponForShotTest(w);
     }
   }
+  if (w.charType === CHAR_ZSLMAN
+      && ((w.state === ThrownWeaponState.Fly && w.sub < FlySub.Land)
+          || w.state === ThrownWeaponState.Deflected)) {
+    ZslmanBladeEmitAfterimage(w);
+  }
 }
+
+/**
+ * `ZslmanBladeEmitAfterimage` — `FUN_00450930`. One more afterimage behind a
+ * `zslman` blade, if it is time and there are fewer than ten.
+ *
+ * ```
+ * if (--obj+0x1338 < 0) {                          // JNS at 0x00450942
+ *     if (obj+0x1368 < 10) {
+ *         a = ActorAlloc(ZslmanBladeAfterimageFade, 0x13F4); ActorClearGameFields(a)
+ *         a+0x40..0x6C = obj+0x40..0x6C            // REP MOVSD, 12 dwords
+ *         a+0x1390 = obj; a+0x135C = obj+0x135C; a+0x1364 = obj+0x1364
+ *         a+0x1330 = 15; a+0x1384 = 1.0; a+0x1388 = 1/15; a+0x3C = -1
+ *         a+0x13F0 = obj+0x13F0
+ *         if (a+0x13F0 == 0x1FE1) { a+0x1384 = 0.75; a+0x13F0 = 0x1FE4 }
+ *         if (a+0x13F0 == 0x1FE2) { a+0x1384 = 0.75; a+0x13F0 = 0x1FE5 }
+ *         a+0x1368 = obj+0x1368; obj+0x1368++
+ *     }
+ *     obj+0x1338 = obj+0x133C
+ * }
+ * ```
+ *
+ * The count is decremented **before** the test, and the test is `JNS`, so
+ * the launcher's 4 makes the first afterimage on the fifth call and every
+ * fifth after it — not every fourth. The second model test reads the
+ * afterimage's slot *after* the first has rewritten it, so it cannot fire on
+ * a slot the first just made; transcribed as the two tests it is.
+ *
+ * `a+0x1390` is the weapon itself (`MOV [EBX+0x1390], EBP`), which is how the
+ * afterimage finds the count to give back. `a+0x3C = -1` is "no hit slot" for
+ * `ActorDespawn` (`FUN_00409CC0`), whose clear of `g_hit_slots` is gated on
+ * `obj+0x38` bit `0x40` first, which nothing sets here — so the store has no
+ * reader on this object and the port does not carry it.
+ *
+ * `ActorAlloc` (`FUN_004A6FA0`) links the new task at the **tail** of the
+ * running one's sibling list, so it runs, and draws, on the frame it is made,
+ * after its weapon: the port appends it to the list the pool is walking.
+ * `[proved]`
+ */
+export function ZslmanBladeEmitAfterimage(w: ThrownWeapon): void {
+  w.afterimageTimer -= 1;
+  if (w.afterimageTimer >= 0) return;
+  if (w.afterimages < AFTERIMAGE_LIMIT) {
+    const a = ThrownWeaponAlloc(ThrownWeaponRoutine.ZslmanAfterimage);
+    a.pos.x = w.pos.x; a.pos.y = w.pos.y; a.pos.z = w.pos.z;
+    a.vel.x = w.vel.x; a.vel.y = w.vel.y; a.vel.z = w.vel.z;
+    a.acc.x = w.acc.x; a.acc.y = w.acc.y; a.acc.z = w.acc.z;
+    a.rx = w.rx; a.ry = w.ry; a.rz = w.rz;
+    a.weapon = w.id;
+    a.spinRate = w.spinRate;
+    a.tilt = w.tilt;
+    a.timer = AFTERIMAGE_LIFE;
+    a.light = AFTERIMAGE_LIGHT;
+    a.lightStep = AFTERIMAGE_LIGHT_STEP;
+    a.slot = w.slot;
+    if (a.slot === ZSLMAN_BLADE_HAND8) {
+      a.light = AFTERIMAGE_BLADE_LIGHT;
+      a.slot = ZSLMAN_AFTERIMAGE_HAND8;
+    }
+    if (a.slot === ZSLMAN_BLADE_HAND5) {
+      a.light = AFTERIMAGE_BLADE_LIGHT;
+      a.slot = ZSLMAN_AFTERIMAGE_HAND5;
+    }
+    a.afterimages = w.afterimages;
+    w.afterimages += 1;
+    G.g_thrown_weapons.push(a);
+  }
+  w.afterimageTimer = w.afterimagePeriod;
+}
+
+/**
+ * `ZslmanBladeAfterimageFade` — `FUN_00450A30`. One afterimage, one frame.
+ *
+ * ```
+ * if (--obj+0x1330 >= 0 && !(weapon+0x34 & 0x4000)) {
+ *     obj+0x1384 -= obj+0x1388
+ *     MatrixStackPush(0); T(pos); Rz(obj+0x6C); Ry(obj+0x68)
+ *     Rx(obj+0x1364 + obj+0x64)
+ *     obj+0x13F0 is 0x1FE1 or 0x1FE2 ? SetRenderLightColour(0, 0, light)
+ *                                    : SetRenderLightColour(light, light, light)
+ *     AssetDrawSlot(obj+0x13F0); MatrixStackPop(1)
+ *     return
+ * }
+ * if (!(weapon+0x34 & 0x4000000)) weapon+0x1368--
+ * ActorDespawn(obj)
+ * ```
+ *
+ * It stands where it was made — nothing here moves it — and draws the pose it
+ * was given, dimmer each frame. It goes when its fifteen are up, or at once
+ * when its blade has landed ({@link ThrownWeaponFlag.Landed}, raised only by
+ * the landing arm at `0x0044FE64`). Either way it gives its place in the
+ * blade's count back, unless the blade is {@link ThrownWeaponFlag.Spent} —
+ * which the landing and the shot-down arm both make it.
+ *
+ * **The blue arm is not reached.** The light goes to red, green and blue
+ * alike unless the model is `0x1FE1` or `0x1FE2`, and the emitter has already
+ * swapped exactly those two for `0x1FE4` and `0x1FE5`: the only weapons that
+ * trail are `zslman`'s, and those are the only two models they throw. So
+ * every afterimage in the game is lit grey. `[proved]` — the arm is
+ * transcribed anyway, because it is the routine's.
+ *
+ * **Its blade may be gone.** A blade shot out of the air despawns when it
+ * reaches its point, with afterimages up to fifteen frames younger than that
+ * still out. The engine reads the freed task's `+0x34` regardless:
+ * `ActorKill` (`FUN_004A7040`) rewrites only the header's `+0x08`, `+0x0C`
+ * and `+0x14`, so what it finds is the blade's last word — spent, not landed
+ * — and the afterimage fades out its fifteen and returns nothing. The port
+ * reads the record while it is in the list and that same answer when it is
+ * not. `[likely]`: whether the block is handed to another `ActorAlloc` inside
+ * those frames, and what that one writes at `+0x34`, is the allocator's and
+ * is not modelled.
+ */
+export function ZslmanBladeAfterimageFade(a: ThrownWeapon,
+                                          f: ThrownWeaponFrame): void {
+  const weapon = G.g_thrown_weapons.find((x) => x.id === a.weapon);
+  const weaponFlags = weapon ? weapon.flags : GONE_WEAPON_FLAGS;
+  a.draw = null;
+  a.lightColour = null;
+  a.timer -= 1;
+  if (a.timer >= 0 && !(weaponFlags & ThrownWeaponFlag.Landed)) {
+    // `FLD [ESI+0x1384]; FSUB [ESI+0x1388]; FSTP [ESI+0x1384]`.
+    a.light = Math.fround(a.light - a.lightStep);
+    a.lightColour = ZSLMAN_BLADES.includes(a.slot)
+      ? [0, 0, a.light] : [a.light, a.light, a.light];
+    ThrownWeaponDraw(a, (a.tilt + a.rx) | 0, f.cam);
+    return;
+  }
+  if (weapon && !(weaponFlags & ThrownWeaponFlag.Spent)) weapon.afterimages -= 1;
+  ThrownWeaponDespawn(a);
+}
+
+/**
+ * What an afterimage reads for a blade that is no longer in the list: the
+ * word a shot-down blade leaves when it despawns — spent, not landed. See
+ * {@link ZslmanBladeAfterimageFade}.
+ */
+const GONE_WEAPON_FLAGS = ThrownWeaponFlag.Spent;
 
 /**
  * `[port-only]` The weapons' share of the task walk: each record runs the
  * routine its allocator installed, in allocation order, and a record despawned
  * on an earlier frame leaves first — the engine unlinks it, the port filters.
+ *
+ * A record made **during** the walk — an afterimage — is appended to the list
+ * being walked and so runs on the frame it was made, after everything already
+ * in it: the tail of the sibling list, which is where `ActorAlloc` links it.
  */
 export function ThrownWeaponPoolUpdate(f: ThrownWeaponFrame): void {
   if (G.g_thrown_weapons.some((w) => w.despawned)) {
     G.g_thrown_weapons = G.g_thrown_weapons.filter((w) => !w.despawned);
   }
-  for (const w of G.g_thrown_weapons) {
-    if (w.routine === ThrownWeaponRoutine.Thrower) ThrownWeaponUpdate(w, f);
-    else ZombieThrownWeaponUpdate(w, f);
+  const list = G.g_thrown_weapons;
+  for (let i = 0; i < list.length; i++) {
+    const w = list[i]!;
+    switch (w.routine) {
+      case ThrownWeaponRoutine.Thrower: ThrownWeaponUpdate(w, f); break;
+      case ThrownWeaponRoutine.Zombie: ZombieThrownWeaponUpdate(w, f); break;
+      case ThrownWeaponRoutine.ZslmanAfterimage:
+        ZslmanBladeAfterimageFade(w, f); break;
+    }
   }
 }

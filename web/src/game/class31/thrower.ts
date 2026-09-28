@@ -79,6 +79,7 @@ import { ThrowerStanceOf } from "./tables";
 import { ThrowerState, ThrowSub } from "./states";
 import {
   AimThrownWeapon, FlySub, ThrownWeaponState, THROWN_WEAPON_SPIN,
+  THROWN_WEAPON_AFTERIMAGE_PERIOD,
 } from "./projectile";
 import {
   ThrownWeaponAlloc, ThrownWeaponCameraOf, ThrownWeaponRoutine,
@@ -369,9 +370,11 @@ export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
   w.from = obj.at;
   w.hand = hand.bone;
   w.spinRate = THROWN_WEAPON_SPIN;
-  // `obj+0x133C = obj+0x1338 = 4` at `0x00450736`: the `zslman` afterimage
-  // timers, read by `FUN_00450930`, which the port does not run -- see
-  // `ThrownWeaponUpdate` (`FUN_00450780`).
+  // `obj+0x133C = obj+0x1338 = 4` at `0x00450736`: the afterimage timers,
+  // which `ZslmanBladeEmitAfterimage` (`FUN_00450930`) counts down for a
+  // `zslman` blade and nothing reads for any other.
+  w.afterimageTimer = THROWN_WEAPON_AFTERIMAGE_PERIOD;
+  w.afterimagePeriod = THROWN_WEAPON_AFTERIMAGE_PERIOD;
   w.state = ThrownWeaponState.Fly;
   w.sub = FlySub.Launch;
   AimThrownWeapon(w, ThrownWeaponCameraOf(host));

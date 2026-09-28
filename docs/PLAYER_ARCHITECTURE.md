@@ -124,10 +124,12 @@ should take it:
 
 * **The renderer answers questions; it never decides.** `GameHost.pickShot`
   (`ShotTestSphere`, `FUN_00404630`) returns the nearest actor-and-bone or prop
-  along a segment, for the classes that do not register for the shot test.
-  For those that do (`ClassHandler.registersForShotTest`), **who is a
-  candidate is the game's**. Their updates call `RegisterForShotTest` into
-  `G.g_shot_test_list`, and `game/combat/shot_test.ts` runs the broad phase,
+  along a segment, for the classes the port's own pick has not taken over.
+  For those it has (`ClassHandler.registersForShotTest`), **who is a
+  candidate is the game's**. Every class's update calls `RegisterForShotTest`
+  into `G.g_shot_test_list` where the exe's does -- the list is also the
+  crowd push's, a frame later -- and `game/combat/shot_test.ts` picks from
+  the entries of the classes that have moved across, running the broad phase,
   the fork and the sort itself. It asks the host only for what a pose knows:
   `boneSphere` and `viewSpaceOfPoint`. `MergeShotPicks` puts the two answers
   together until every class has moved across. `GameHost.boneWorld` returns where a bone is.

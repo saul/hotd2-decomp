@@ -207,15 +207,18 @@ export enum ActorFlag {
    * arm plays `0x823A9`, `CAR_FIRE_22_OFF.wav`, which is what says the bit
    * stands for a *loop that has to be stopped* rather than a one-shot.
    *
-   * `[proved]` its two readers that name `obj+0x34` are `0x004332DA` and
-   * `0x00433830`, both inside that routine — a sweep for `TEST` against a
-   * `0x200000` mask returns 39 sites and no other names `+0x34`. One of the
-   * bare-register tests it could not attribute does hold that word:
-   * `ZombieStateEmerge` loads `obj+0x34` into `EAX`, tests it at `0x00458509`
-   * (`a900002000`) and clears the bit at `0x00458510` -- a class-0x30 actor,
-   * whose bit can only have come in on its spawn record (`class30/emerge.ts`,
-   * `L3`). Whether any other bare-register test holds `obj+0x34` is `[open]`;
-   * this name describes the one class that provably writes it. The same bit
+   * `[proved]` two of its readers on `obj+0x34` are `0x004332DA` and
+   * `0x00433830`, both inside that routine. The sweep that found those two --
+   * `TEST` against a `0x200000` mask, 39 sites -- missed two more. One is
+   * `TEST dword ptr [ECX + 0x34], 0x200000` at `0x00449D8F` in
+   * `ThrowerPushOutOfWorld` (`FUN_00449D40`), on whatever object the crowd
+   * push found, which knocks an off-ground thrower down instead of pushing
+   * it. The other is `ZombieStateEmerge`, which loads `obj+0x34` into `EAX`,
+   * tests it at `0x00458509` (`a900002000`) and clears the bit at
+   * `0x00458510` -- a class-0x30 actor, whose bit can only have come in on its
+   * spawn record (`class30/emerge.ts`, `L3`). Whether any other bare-register
+   * test holds `obj+0x34` is `[open]`; this name describes the one class that
+   * provably writes it. The same bit
    * number in `obj+0x136C` is {@link ThrowerFlag.DeathLatched}, which is a
    * different word and a different fact.
    */
@@ -955,7 +958,8 @@ export enum ZombieFlag2 {
    * While it is up the same state exempts the actor from the too-close retreat
    * (`0045577c f7866c13000000040400`, the `0x40400` pair with
    * {@link ZombieFlag2.StrikeAnchor}) and refuses the attack claim outright
-   * (`00455815 f6c404`). `ZombieOnShot` also clears it (`00453efd`).
+   * (`00455815 f6c404`). `ZombieOnShot` also clears it, for every shot that
+ * lands (`00453f14 80e6fb AND DH, 0xFB`, stored at `00453f24`).
    * `[proved]` — the ops. That the clip in question is the *authored entrance*
    * one is `[likely]`: it is what character type 2's spawns carry.
    */
@@ -1907,9 +1911,10 @@ export interface ActorBase {
    * switch for class 0x10 — the actor's position, bone 2, bone 1 (the
    * default), or halfway between bones 12 and 15, each bone read out of its
    * draw record as a world point (`class10/update.ts`,
-   * `CivilianWriteSphereCentre`). A class that sets
-   * `ClassHandler.ownsSphereCentre` keeps what it wrote; for any other the
-   * actor push rebuilds class 0x30's point over it.
+   * `CivilianWriteSphereCentre`). Whatever a class writes here is what the
+   * others' crowd push measures: `RegisterForShotTest` records it and
+   * `ColiTestSphereAgainstActors` reads it back out of `g_coli_dynamic_list`
+   * a frame later, whichever class wrote it.
    *
    * It is **not** what the camera aims at: that is `obj+0x100`
    * ({@link Actor.lookAt}), which the skeleton walk writes and
@@ -2356,11 +2361,13 @@ const LOW_SPHERE = 0x2000000;
  * x and z, with y lifted by the **body** radius `obj+0x128` and then by one
  * unit — or a half when `obj+0x136C` bit `0x2000000` is set.
  *
- * It lives here rather than beside its caller because both the class-0x30 push
- * and `ColiTestSphereAgainstActors` need it, and the second must be able to
- * ask it about an actor that has not ticked yet. The engine solves that with a
- * per-frame registration list; deriving the sphere from the position is the
- * same answer without the ordering hazard.
+ * Its caller is the class-0x30 push, `ZombiePushOutOfWorldAndActors`
+ * (`FUN_00454900`). What another actor's push measures against is **not**
+ * this function's answer but the centre the actor registered with
+ * `RegisterForShotTest` last frame, which `ColiTestSphereAgainstActors`
+ * (`FUN_00405B10`) reads out of `g_coli_dynamic_list`; it used to re-derive
+ * every sphere through here instead, a frame early and in class 0x30's shape
+ * whatever the class.
  */
 export function ActorUpdateBoundingSphere(obj: Actor): void {
   obj.sphereCentre.x = obj.pos.x;

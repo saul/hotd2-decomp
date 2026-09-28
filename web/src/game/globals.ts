@@ -883,6 +883,16 @@ export const G = {
    */
   g_shot_test_list: [] as ShotTestEntry[],
   /**
+   * `g_coli_dynamic_list` — `0x005A3098`, with `g_coli_dynamic_count`
+   * (`0x0059D8E4`) as the array's length. `ColiPublishDynamicList`
+   * (`FUN_00405360`)'s copy of {@link g_shot_test_list}, made at the end of
+   * `ProcessPlayerShots` before any actor runs, so it holds the **previous**
+   * frame's registrations for the whole of this frame's actor walk.
+   * `ColiTestSphereAgainstActors` (`FUN_00405B10`), the crowd push, walks it
+   * and reads each object's sphere centre out of it.
+   */
+  g_coli_dynamic_list: [] as ShotTestEntry[],
+  /**
    * `[port-only]` — the heads the 1-in-4 headshot burst has thrown.
    *
    * The engine allocates each one as a task with its own per-frame routine
@@ -2030,6 +2040,21 @@ export const G = {
   /** How far inside the surface a sphere test found the centre. */
   g_coli_hit_depth: 0,
   /**
+   * `g_coli_hit_dist_sq` — `0x009CAC48`. Record `+0x34` of the candidate
+   * `ColiSelectNearestHitCandidate` (`FUN_00405760`) chose, whatever its
+   * caller put there: for `ColiTestSphereAgainstActors` it is the distance
+   * from the tested centre to the other sphere's near surface, and not a
+   * square at all.
+   */
+  g_coli_hit_dist_sq: 0,
+  /**
+   * `g_coli_hit_object` — `0x009C71C8`, record `+0x24` of the chosen
+   * candidate: the object a sphere or segment test found, by spawn address,
+   * or `-1`. `ThrowerPushOutOfWorld` reads its `obj+0x34` after the crowd
+   * test.
+   */
+  g_coli_hit_object: -1,
+  /**
    * The two script-selected collision sets, as `"<file>:<offset>"` blob keys.
    *
    * evt `0x10` fills the **full** set, which both the segment and the sphere
@@ -2465,6 +2490,10 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   // [port-only] The engine's list holds object pointers into a pool the scene
   // load has just emptied; nothing registered survives into the new scene.
   G.g_shot_test_list = [];
+  // ...and its published copy, which the crowd push walks.
+  // `ProcessPlayerShotsTaskCreate` (`FUN_00404480`) zeroes both counts when
+  // the scene makes the task (`0x00404539`, `0x0040454F`).
+  G.g_coli_dynamic_list = [];
   G.g_severed_heads = [];
   G.g_severed_head_seq = 0;
   G.g_sprite_effects = [];
@@ -2671,6 +2700,7 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_coli_full_set = [];
   G.g_coli_ray_set = [];
   G.g_coli_hit_surface = 0;
+  G.g_coli_hit_object = -1;
   G.g_carrier_object = -1;
   G.g_civilian_carrier = -1;
   // `LoadSceneAndReset` zeroes the counter at `0x00460030`, and

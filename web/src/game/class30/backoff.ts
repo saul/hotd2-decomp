@@ -86,14 +86,15 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
   // Retreating along a shared radial away from the player instead, as this
   // did, funnels every one of them onto the same line.
   //
-  // [open] An earlier revision of this comment asserted there is **no**
-  // separation pass anywhere in the engine. That is wrong:
-  // `ZombiePushOutOfWorldAndActors` (`FUN_00454900`), the per-frame hook
-  // `EnemyZombieInit` installs at `obj+0x12F0`, runs
-  // `ColiTestSphereAgainstActors` against `obj+0x12C` with radius `obj+0x128`
-  // and pushes the actor out by a tenth of the penetration each frame — 1.8x
-  // that while airborne. It is not ported, and porting it would change how a
-  // crowd packs and therefore how often the one with the permit is in range.
+  // An earlier revision of this comment asserted there is **no** separation
+  // pass anywhere in the engine. That is wrong: `ZombiePushOutOfWorldAndActors`
+  // (`FUN_00454900`), the per-frame hook `EnemyZombieInit` installs at
+  // `obj+0x12F0`, runs `ColiTestSphereAgainstActors` against `obj+0x12C` with
+  // radius `obj+0x128` and pushes the actor out by a tenth of the penetration
+  // each frame -- 1.8x that while it, or the actor that pushed it, holds
+  // `obj+0x34 & 0x18000000`: committed to a strike, or sprinting, which every
+  // zombie that has been shot is. It is ported, in `class30/ground.ts`.
+  // `[proved]`
   //
   // The negative rate turns the long way, toward the *opposite* of
   // `VecToAngles(obj - p)`: the anchor is further out than the actor now is,

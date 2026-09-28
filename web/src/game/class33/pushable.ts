@@ -92,9 +92,12 @@ const PUSH_BOOST = 1.8;
 /**
  * `TEST ECX, 0x18000000` at `0x00433D11`, on the **pusher's** `obj+0x34`.
  * The pusher is a class-0x30 actor, and on that class `0x10000000` is
- * `ActorFlag.Committed` -- a zombie in its strike -- and `0x8000000` is the
- * same unanswered bit `class30/ground.ts` notes. This used to say "either of the pusher's two airborne bits"; see
- * `PUSH_BOOST_BITS` in `class30/ground.ts`.
+ * `ActorFlag.Committed` -- a zombie in its strike -- and `0x8000000` is
+ * `ZOMBIE_SPRINTS` in `class30/states.ts`: a sprinter's spawn record sets it,
+ * and `ZombieOnShot` (`FUN_00453EB0`) raises it at `0x00453F17` on every shot
+ * that lands, so a zombie that has been shot shoves the chair harder too. The
+ * same mask as `class30/ground.ts`'s two tests. This used to say "either of
+ * the pusher's two airborne bits".
  */
 const PUSHER_BOOST_BITS = 0x18000000;
 

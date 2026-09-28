@@ -22,7 +22,7 @@ import {
   QueryGroundHeightAt,
 } from "../coli";
 import { ActorByAt, G } from "../globals";
-import { ZombieState } from "./states";
+import { ZOMBIE_SPRINTS, ZombieState } from "./states";
 
 /** `ActorSnapToGroundHeight` probes from this far above the actor's own y. */
 const GROUND_PROBE_RISE = 6;
@@ -33,21 +33,28 @@ const SHOVE_PERIOD = 0x3c;
 /**
  * The push applies a tenth of the penetration a frame (`0x004c4cc8`,
  * `cdcccc3d`) -- 1.8x that (`0x0055dd48`, `6666e63f`) while the actor holds
- * either bit of {@link PUSH_BOOST_BITS}.
- */
-const PUSH_FRACTION = 0.1;
-const PUSH_BOOST = 1.8;
-/**
- * `obj+0x34 & 0x18000000`, tested at `00454944` on the actor that did the
- * pushing and at `004549b6` on this one.
+ * either bit of `obj+0x34 & 0x18000000`. That mask is tested twice: at
+ * `00454944` on the actor that did the pushing (`TEST ECX, 0x18000000`,
+ * `f7c100000018`, `ECX` loaded from the `obj+0x138` actor's `+0x34`), and at
+ * `004549b6` on this one (`TEST EAX, 0x18000000`, `a900000018`).
  *
  * `0x10000000` is {@link ActorFlag.Committed}: a zombie in its strike, from
  * the pick to the first frame of the retreat, shoves and is shoved harder.
- * What `0x8000000` means on class 0x30 is `[open]`. This was called "either
- * of the two airborne bits", and neither is -- airborne is
- * {@link ActorFlag.Airborne}, `0x20000`.
+ * `0x8000000` is {@link ZOMBIE_SPRINTS}, the bit `ZombieStateAttackRun`
+ * (`FUN_004554D0`) takes the sprint of its run pair on -- set by a spawn
+ * record, and raised by `ZombieOnShot` (`FUN_00453EB0`) at `0x00453F17` for
+ * every shot that lands, and by `ZombieRetireThrowConditionIfUnarmed`
+ * (`FUN_004595F0`) at `0x00459682`. So a sprinter, and every zombie that has
+ * been shot and is still up, shoves and is shoved 1.8x as hard for the rest
+ * of its life. This was called "either of the two airborne bits", and neither
+ * is -- airborne is {@link ActorFlag.Airborne}, `0x20000`. `[proved]`
+ *
+ * The mask is spelled at each test, as the two immediates are, and not held
+ * in a constant: both halves are another module's exports, and a constant
+ * would read them at module load (`L56`).
  */
-const PUSH_BOOST_BITS = ActorFlag.Committed | 0x8000000;
+const PUSH_FRACTION = 0.1;
+const PUSH_BOOST = 1.8;
 
 /**
  * `ActorSnapToGroundHeight` — `FUN_00454B10`.
@@ -93,7 +100,10 @@ export function ZombiePushOutOfWorldAndActors(obj: ZombieActor, frames: number):
     if (obj.pushedBy >= 0) {
       const by = ActorByAt(obj.pushedBy);
       let f = obj.pushDepth * PUSH_FRACTION;
-      if (by && (by.flags & PUSH_BOOST_BITS)) f *= PUSH_BOOST;
+      // `00454944`, on the pusher.
+      if (by && (by.flags & (ActorFlag.Committed | ZOMBIE_SPRINTS))) {
+        f *= PUSH_BOOST;
+      }
       obj.pos.x += obj.pushNormal.x * f;
       obj.pos.y += obj.pushNormal.y * f;
       obj.pos.z += obj.pushNormal.z * f;
@@ -103,7 +113,8 @@ export function ZombiePushOutOfWorldAndActors(obj: ZombieActor, frames: number):
     if (ColiTestSphereAgainstActors(obj, obj.sphereCentre.x, obj.sphereCentre.y,
                                     obj.sphereCentre.z, obj.bodyRadius)) {
       let f = G.g_coli_hit_depth * PUSH_FRACTION;
-      if (obj.flags & PUSH_BOOST_BITS) f *= PUSH_BOOST;
+      // `004549b6`, on this actor.
+      if (obj.flags & (ActorFlag.Committed | ZOMBIE_SPRINTS)) f *= PUSH_BOOST;
       // x and z only: an actor is never pushed up out of another.
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * f;
       obj.pos.z += (G.g_coli_hit_normal[2] ?? 0) * f;

@@ -20981,6 +20981,27 @@ the port against:
   a stand-in main filled from the drawn camera, which the merge removes. It
   reads the block's yaw now. Its eye is still `ClassFrame.eye`.
 
+**Playthroughs again, after `39a7065` and the boss-camera fixes**, one
+Chrome at a time, both trees on this worktree's export:
+
+| run | main `39a7065` | this branch |
+|---|---|---|
+| stage 1 | end block at 9390 | end block at 9750 |
+| stage 2 | GAME OVER, block 16 op 7/35, 10440 | GAME OVER, block 16 op 3/13, 9405 |
+| stage 3 | end block at 8415 | end block at 8970 |
+| stage 4 | end block at 7980, 6 continues | end block at 8250, 5 continues |
+| stage 5 | hung at block 1 op 69 | hung at block 1 op 69 |
+| stage 6 | GAME OVER at the Tower gate, 6270 | the same gate, 6765 |
+| stage 1 `--boss` | left block 14 at 13819 (4429 in it) | 14042 (4292) |
+| stage 2 `--boss --no-damage` | 19707 (5352) | 19948 (5233) |
+| stage 3 `--boss --no-damage --hang 3000 --shoot-for 1500` | 17549 (9055) | 18183 (9149) |
+| stage 4 `--boss --no-damage` | 15174 (7029) | 15352 (7072) |
+| stage 5 `--boss` | 13275 (1650) | 13321 (1635) |
+
+Every run now ends where main's does. Three runs with screenshots taken inside
+the loop came out 15 to 90 frames off their plain twins: taking a screenshot is
+not free under the drive seam, so the table is the plain runs only.
+
 **Still `[diverges]`, camera-related:** `CamPathCueReached` treats a cue the
 seek landed past as reached (the engine never seeks); four class routines read
 camera block 0 where the exe reads block 2 or the bare block-0 symbol

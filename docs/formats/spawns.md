@@ -293,7 +293,7 @@ draw `obj+0x28C`:
 |---|---|---|
 | 5 | `FUN_00466820` | `obj+0x28C`; killed by script flag 0x13 |
 | 12 | `FUN_00467E50` | `obj+0x28C`, scaled; removed at cam path 0x2F frame 0x96 |
-| 33 | `FUN_00472950` | `obj+0x28C + n`, a strip played as an animation |
+| 33 | `FUN_00472950` | `obj+0x28C + n`, `n` = 0..`obj+0x2A4` (the descriptor's roll word), then `ActorKill`; it is **not** one of the 25 -- no lifetime prologue, and it draws before it steps |
 
 Every other type hardcodes its model, or takes it from the constructor's own
 switch arm, or draws no static model at all (18, 25 and 28 draw only an effect

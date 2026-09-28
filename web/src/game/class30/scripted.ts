@@ -37,7 +37,10 @@ import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotion, ActorSetMotionBlended, ZombieSetMotionIfIdle }
   from "./motion_cue";
 import { MotionFade, ZombieState, ZombieWaitMotion } from "./states";
-import type { Vec3 } from "../vec";
+import { vec3, type Vec3 } from "../vec";
+import type { GameHost } from "../host";
+import { SpawnSpriteEffect, SpriteEffectKind } from "../effects/sprite";
+import { ZombieStrikeStartSplash } from "./splash";
 
 /**
  * `ZombieStateScriptedGrabAndDespawn`'s special clip pair. When the
@@ -52,7 +55,6 @@ const GRAB_MOTION_WAIT = 0xbb;
  */
 const GRAB_HIT_KIND = 9;
 const GRAB_HIT_KIND_MOTION = 0xb1;
-const GRAB_EFFECT = 0x62;
 
 /** `ZombieStateLeapToPoint`'s damage kind — `PlayerTakeDamage(p, 1, 7)`. */
 const LEAP_HIT_KIND = 7;
@@ -207,9 +209,18 @@ export function ZombieStateWaitForCameraFrame(obj: ZombieActor, dt: number,
  * Two of the six have a cue of `-1`, which fires at once — those are stage
  * 1's pair, whose clip is `0xB1` and whose damage kind is therefore 0 rather
  * than 9.
+ *
+ * Two effects, both now here. On the cue, `CALL dword ptr [0x00592BCC]` at
+ * `0x00457C2D` is `ZombieStrikeStartSplash` (`FUN_00456C50`) -- the strike's
+ * own wading splash, which for this state (0x17) throws sprite 0x62. At the
+ * end, `SpawnSpriteEffect({obj+0x40, +0x44, +0x48}, 0x62, 1, -1)` at
+ * `0x00457CB8`, just before `ZombieReleaseAndDespawn`: the port had a feed
+ * note there. And `obj.frozen` is gone from both ends: it is class 0x24's
+ * `obj+0x1324` (L3), no store in this routine touches it, and
+ * {@link ActorFlag.PoseFrozen} is what holds the clock.
  */
 export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
-                                                  rng: Rng,
+                                                  rng: Rng, host?: GameHost,
                                                   events?: Events): void {
   const t = obj.entry;
   if (!t) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
@@ -222,11 +233,13 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
     } else {
       if (t.motion !== undefined) ActorSetMotion(obj, t.motion);
       obj.flags |= ActorFlag.PoseFrozen | ActorFlag.ShotImmune;
-      obj.frozen = 1;
     }
     obj.flags2 |= ZombieFlag2.Carried;
+    // `INC word ptr [ESI+0x1312]` at `0x00457BCA` and no `RET`: the jump
+    // table at `0x00457CCC` puts sub 1 at `0x00457BD7`, the next instruction
+    // after sub 0's last store (L53). So the two `-1` spawns take their cue
+    // on the frame they are made; the port returned here, a frame late.
     obj.sub = 1;
-    return;
   }
 
   if (obj.sub === 1) {
@@ -242,7 +255,7 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
     TryClaimAttackSlot(obj, rng);
     ActorFacePlayerTarget(obj, eye);
     obj.flags &= ~(ActorFlag.PoseFrozen | ActorFlag.ShotImmune);
-    obj.frozen = 0;
+    ZombieStrikeStartSplash(obj, rng, host, events);
     // `obj+0x13C4 = obj+0x44` — the y the actor is pinned at for the grab.
     obj.arcFrom.y = obj.pos.y;
     obj.sub = 2;
@@ -260,10 +273,8 @@ export function ZombieStateScriptedGrabAndDespawn(obj: ZombieActor, eye: Vec3,
 
   if (obj.sub !== 3) return;
   if (!atLastFrame(obj)) return;
-  events?.emit("feed.note", {
-    name: "zombie", cat: "combat",
-    note: `scripted grab ends — effect ${GRAB_EFFECT}`,
-  });
+  SpawnSpriteEffect(vec3(obj.pos.x, obj.pos.y, obj.pos.z), 0, 0,
+                    SpriteEffectKind.SplashLarge, 1, -1, host, events);
   ZombieReleaseAndDespawn(obj);
 }
 

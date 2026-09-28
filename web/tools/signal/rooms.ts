@@ -13,10 +13,16 @@
  * ```
  * POST {base}/rooms                        -> { code, token, iceServers }
  * POST {base}/rooms/{code}/join            -> { token, iceServers }  | 404 | 409
+ *      body { token? }: a player 2 that lost its connection -- or reloaded
+ *      without the leave getting through -- rejoins with the token it had
  * GET  {base}/rooms/{code}/events?token=   -> text/event-stream of Signal
  * POST {base}/rooms/{code}/send?token=     <- { data }
  * POST {base}/rooms/{code}/leave?token=
  * ```
+ *
+ * Every join is numbered (`Signal.peer.n`), so the host can tell player 2
+ * coming back -- a new connection to make -- from its own stream reconnecting
+ * and hearing that player 2 is still there.
  *
  * A room holds nothing but two tokens and whatever one side has said that the
  * other has not yet read. It never sees game state: once the peers connect,
@@ -31,7 +37,8 @@
 
 /** What a peer is told on its event stream. */
 export type Signal =
-  | { t: "peer"; joined: boolean }
+  /** Whether player 2 is in the room, and which join of theirs this is. */
+  | { t: "peer"; joined: boolean; n: number }
   | { t: "signal"; data: unknown }
   | { t: "closed"; reason: string };
 
@@ -115,6 +122,8 @@ interface Room {
   host: Side;
   replica: Side | null;
   touched: number;
+  /** Joins so far, rejoins included. */
+  joins: number;
 }
 
 export class Rooms {
@@ -168,19 +177,31 @@ export class Rooms {
     if (this.rooms.size >= this.cfg.maxRooms) throw new SignalError(503, "too many rooms");
     const c = code?.toUpperCase() ?? this.code();
     const host: Side = { token: this.token(), sink: null, queue: [] };
-    this.rooms.set(c, { code: c, host, replica: null, touched: this.now() });
+    this.rooms.set(c, { code: c, host, replica: null, touched: this.now(), joins: 0 });
     return { code: c, token: host.token, iceServers: await this.iceServers(c) };
   }
 
-  async join(code: string): Promise<{ token: string; iceServers: IceServer[] }> {
+  /**
+   * Player 2 comes in -- or comes back, with the token it had, when its
+   * connection died without a leave reaching here. A rejoin keeps the token
+   * and drops whatever was queued for the connection that is gone.
+   */
+  async join(code: string, token?: string): Promise<{ token: string; iceServers: IceServer[] }> {
     const room = this.rooms.get(code.toUpperCase());
     if (!room) throw new SignalError(404, "no such room");
-    if (room.replica) throw new SignalError(409, "the room already has a second player");
-    room.replica = { token: this.token(), sink: null, queue: [] };
+    if (room.replica) {
+      if (!token || token !== room.replica.token) {
+        throw new SignalError(409, "the room already has a second player");
+      }
+      room.replica.queue.length = 0;
+    } else {
+      room.replica = { token: this.token(), sink: null, queue: [] };
+    }
     room.touched = this.now();
+    room.joins++;
     // Told now only if the host is listening. If not, `attach` tells it when
     // its stream opens -- once, rather than a queued copy and then its own.
-    if (room.host.sink) room.host.sink.write({ t: "peer", joined: true });
+    room.host.sink?.write({ t: "peer", joined: true, n: room.joins });
     return { token: room.replica.token, iceServers: await this.iceServers(room.code) };
   }
 
@@ -206,7 +227,7 @@ export class Rooms {
     for (const s of queued) sink.write(s);
     // The host hears who is in the room on every (re)connect: `peer` is a
     // state, and the client treats it as one.
-    if (me === room.host && other) sink.write({ t: "peer", joined: true });
+    if (me === room.host && other) sink.write({ t: "peer", joined: true, n: room.joins });
     return () => {
       if (me.sink === sink) me.sink = null;
       // The idle clock starts when the last listener goes, not when it came.
@@ -231,7 +252,7 @@ export class Rooms {
     } else {
       room.replica = null;
       me.sink?.close();
-      this.deliver(room.host, { t: "peer", joined: false });
+      this.deliver(room.host, { t: "peer", joined: false, n: room.joins });
     }
   }
 

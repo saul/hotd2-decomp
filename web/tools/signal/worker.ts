@@ -215,7 +215,9 @@ export class SignalRoom {
       const verb = r?.code ? r.verb : null;
       const code = r?.code ?? "";
       if (verb === "join" && request.method === "POST") {
-        return json(200, await this.rooms.join(code));
+        const raw = await readBody(request);
+        const body = (raw ? JSON.parse(raw) : {}) as { token?: string };
+        return json(200, await this.rooms.join(code, body.token));
       }
       if (verb === "events" && request.method === "GET") return this.events(code, token);
       if (verb === "send" && request.method === "POST") {

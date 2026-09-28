@@ -73,7 +73,11 @@ const QUIET_MS = 150;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const same = isDeepStrictEqual;
-const joined = (j: boolean): Signal => ({ t: "peer", joined: j });
+/** A `peer` signal saying player 2 is (or is not) in, and, when given, on which join. */
+const isPeer = (v: unknown, j: boolean, n?: number): boolean => {
+  const s = v as Signal | null;
+  return !!s && s.t === "peer" && s.joined === j && (n === undefined || s.n === n);
+};
 
 // -- a client -------------------------------------------------------------------
 
@@ -248,7 +252,7 @@ async function suite(api: Api): Promise<void> {
   check(`${n}: ...with a token of its own`, /^[0-9a-f]{32}$/.test(rep.token) && rep.token !== H);
   checkTurn(`${n}: join`, rep.iceServers[1], C, t0);
   check(`${n}: the host, listening, hears {peer, joined:true} when the replica joins`,
-        same(await host.next(), joined(true)));
+        isPeer(await host.next(), true));
   check(`${n}: a second join is 409`, (await post(api, `${rooms}/${C}/join`)).status === 409);
 
   // -- relay --------------------------------------------------------------------
@@ -302,18 +306,29 @@ async function suite(api: Api): Promise<void> {
         JSON.stringify(away));
   host.close();
   const host2 = await Stream.open(api, C, H);
-  check(`${n}: a host that reconnects is told the replica is there`, same(await host2.next(), joined(true)));
+  check(`${n}: a host that reconnects is told the replica is there, on the same join`,
+        isPeer(await host2.next(), true, 1));
+
+  // -- a rejoin: player 2's connection died without a leave getting through --
+  const rj = await post(api, `${rooms}/${C}/join`, { token: rep.token });
+  check(`${n}: a join with the replica's own token is a rejoin: 200, the same token`,
+        rj.status === 200 && (rj.body as Joined).token === rep.token,
+        `${rj.status} ${JSON.stringify(rj.body)}`);
+  check(`${n}: ...and the host hears player 2 back, on a new join number`,
+        isPeer(await host2.next(), true, 2));
+  check(`${n}: a join with some other token while the slot is held is 409`,
+        (await post(api, `${rooms}/${C}/join`, { token: "not-theirs" })).status === 409);
 
   // -- the replica leaves -------------------------------------------------------
   const left = await post(api, at(C, "leave", rep.token));
   check(`${n}: the replica's leave is 200`, left.status === 200, `${left.status}`);
-  check(`${n}: the host hears {peer, joined:false}`, same(await host2.next(), joined(false)));
+  check(`${n}: the host hears {peer, joined:false}`, isPeer(await host2.next(), false));
   check(`${n}: ...and the replica's own stream is ended`, await replica3.end());
   check(`${n}: a send to nobody is 409`, (await say(C, H, 1)).status === 409);
   check(`${n}: the old replica token is refused with 403`, (await say(C, rep.token, 1)).status === 403);
   const j2 = await post(api, `${rooms}/${C}/join`);
   check(`${n}: the slot is free: a new join is 200`, j2.status === 200, `${j2.status}`);
-  check(`${n}: ...and the host hears it`, same(await host2.next(), joined(true)));
+  check(`${n}: ...and the host hears it, as join 3`, isPeer(await host2.next(), true, 3));
   const rep2 = j2.body as Joined;
 
   // -- the host leaves ----------------------------------------------------------
@@ -335,7 +350,7 @@ async function suite(api: Api): Promise<void> {
   const early = await post(api, `${rooms}/${r2.code}/join`);
   const late = await Stream.open(api, r2.code, r2.token);
   check(`${n}: a host that starts listening after the replica joined hears {peer, joined:true}`,
-        early.status === 200 && same(await late.next(), joined(true)));
+        early.status === 200 && isPeer(await late.next(), true));
   const again = await late.next(QUIET_MS);
   check(`${n}: ...once`, again === null, `then ${JSON.stringify(again)} again`);
   await post(api, at(r2.code, "leave", r2.token));

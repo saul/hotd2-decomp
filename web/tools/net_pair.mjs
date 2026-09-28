@@ -211,8 +211,79 @@ async function session(label, replicaQuery, seconds, webrtc = false) {
   if (webrtc) {
     check(`WebRTC connected (${rf.transport}, route ${rf.route}, ICE ${rf.ICE})`,
           rf.transport.startsWith("webrtc") && /connected|completed/.test(rf.ICE), rf.ICE);
+    await robustness(host, replica);
   }
   await context.close();
+}
+
+/**
+ * What a session has to survive: the host pausing, player 2 reloading their
+ * tab mid-game, and the host moving to another stage.
+ */
+async function robustness(host, replica) {
+  // The host pauses: player 2 is held, and says why.
+  await host.keyboard.press("Space");
+  let held = "";
+  for (let i = 0; i < 20 && !/paused/.test(held); i++) {
+    await replica.waitForTimeout(150);
+    held = await replica.$eval("#net-overlay .net-held", (e) => e.textContent).catch(() => "");
+  }
+  check(`the host's pause holds player 2, and says so ("${held.trim()}")`, /paused/.test(held));
+  // The host still sends a tick now and then while paused, so what changes
+  // reaches player 2 -- but no game time passes on either screen. The first
+  // of those ticks brings player 2 the ticks its buffer was still holding, so
+  // settle first; then player 2 stands exactly where the host stands.
+  await replica.waitForTimeout(600);
+  const frame0 = await readG(replica, (G) => G.g_frame);
+  const hostFrame = await readG(host, (G) => G.g_frame);
+  const ticks0 = num((await figures(replica))["ticks verified"]);
+  await replica.waitForTimeout(1000);
+  const frame1 = await readG(replica, (G) => G.g_frame);
+  const f1 = await figures(replica);
+  check(`...player 2 stands on the host's frame while it is held (${frame0} and `
+        + `${hostFrame}), and no game time passes (${frame1})`,
+        frame0 === hostFrame && frame1 === frame0, `${frame0} / ${hostFrame} / ${frame1}`);
+  check(`...and the held host's own ticks still verify (${ticks0} -> ${f1["ticks verified"]})`,
+        num(f1["ticks verified"]) > ticks0 && f1["hash mismatches"] === "0", JSON.stringify(f1));
+  await host.keyboard.press("Space");
+
+  // Player 2 reloads the tab: the same game comes back, and matches.
+  await replica.reload({ waitUntil: "domcontentloaded" });
+  await replica.waitForSelector("#loading", { state: "detached", timeout: 120_000 });
+  let f = {};
+  for (let i = 0; i < 60; i++) {
+    f = await figures(replica);
+    if (num(f["ticks verified"]) > 120) break;
+    await replica.waitForTimeout(500);
+  }
+  check(`a reloaded player 2 rejoins the same room and verifies ticks (${f["ticks verified"]})`,
+        num(f["ticks verified"]) > 120 && f["hash mismatches"] === "0", JSON.stringify(f));
+  const hf = await figures(host);
+  check(`...with the host back to streaming (${hf.phase})`, /streaming/.test(hf.phase ?? ""),
+        hf.phase);
+
+  // The host changes stage: player 2 loads it too, and it still matches.
+  await host.click("#crumbs .crumb-trail");
+  const picked = await host.$('#stage-picker button[data-stage="2"]');
+  if (picked) {
+    // A stage picked from the menu loads and plays by itself (`loadAndPlay`):
+    // no Space here, which would pause it.
+    await picked.click();
+    await host.waitForSelector("#loading", { state: "detached", timeout: 120_000 });
+    let rf2 = {};
+    for (let i = 0; i < 80; i++) {
+      await replica.waitForTimeout(500);
+      rf2 = await figures(replica);
+      if (num(rf2["ticks verified"]) > 200 && (await readG(replica, (G) => G.g_scene_index)) === 1) break;
+    }
+    const scene = await readG(replica, (G) => G.g_scene_index);
+    check(`the host's stage change takes player 2 to stage 2 too (scene index ${scene}), `
+          + `still matching (${rf2["hash mismatches"]} mismatches)`,
+          scene === 1 && rf2["hash mismatches"] === "0" && num(rf2["ticks verified"]) > 200,
+          JSON.stringify(rf2));
+  } else {
+    check("the host's menu offered stage 2", false, "no #stage-picker button for stage 2");
+  }
 }
 
 const ONLY = flag("only", "");

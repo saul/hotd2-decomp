@@ -17,17 +17,22 @@
  *   join over a `BroadcastChannel` (`local.ts`) -- for development, and for
  *   the headless harness.
  *
+ * **A dropped connection is not the end of the session.** The host keeps its
+ * room and goes back to waiting; player 2 rejoins by itself, a few times,
+ * with the token it had -- and a reloaded tab rejoins from its link. The
+ * game on the host plays on meanwhile, with player 2's gun put down.
+ *
  * `?netsim=lat:80,jit:20,loss:5` makes this end's outgoing link that much
  * worse; `?relay=1` forces WebRTC through TURN.
  */
 import type { HoldReason } from "../../core/net/protocol";
 import { NetHost, type HostSim } from "./host";
 import { LocalTransport } from "./local";
-import type { Identity } from "./peer";
+import type { Identity, NetPeer } from "./peer";
 import { NetReplica, type ReplicaSim } from "./replica";
 import { RtcTransport } from "./rtc";
 import { SignalClient, signalBase } from "./signal";
-import type { NetStats } from "./stats";
+import { pushLog, type NetStats } from "./stats";
 import { SimLink, parseSim, type Transport } from "./transport";
 
 export type NetRole = "solo" | "host" | "replica";
@@ -40,13 +45,15 @@ export interface NetPlayerHooks {
   readonly replicaSim: ReplicaSim;
   /** The role changed: the player makes its world fit it. */
   roleChanged(role: NetRole): void;
+  /** The host lost player 2: their gun goes down until they are back. */
+  peerGone(): void;
   /** Something the session wants on screen. */
   wake(): void;
 }
 
 export type LobbyPhase =
   | "idle" | "creating" | "waiting" | "joining" | "connecting" | "connected"
-  | "closed" | "error";
+  | "reconnecting" | "closed" | "error";
 
 export interface LobbyState {
   phase: LobbyPhase;
@@ -59,6 +66,8 @@ export interface LobbyState {
 
 /** How often the session polls while the page's own loop sleeps. */
 const POLL_MS = 100;
+/** Player 2's rejoin attempts after a drop, and the wait before each. */
+const REJOIN_DELAYS_MS = [500, 1500, 3000, 6000, 10000];
 
 export class NetSession {
   role: NetRole = "solo";
@@ -69,9 +78,21 @@ export class NetSession {
   private transport: Transport | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly params: URLSearchParams;
+  /** Online or over the tab link: what a rebuild makes again. */
+  private kind: "online" | "local" = "online";
+  private rejoins = 0;
+  private rejoinTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The last peer's log, carried into the next so a drop does not erase the story. */
+  private carriedLog: NetStats["log"] = [];
 
   constructor(private readonly hooks: NetPlayerHooks, search: string) {
     this.params = new URLSearchParams(search);
+    if (typeof window !== "undefined") {
+      // A closing tab leaves its room, so the other player hears it now
+      // rather than when their link times out -- and a replica keeps its token
+      // in case the leave never lands, so its reload can rejoin.
+      window.addEventListener("pagehide", () => this.unload());
+    }
   }
 
   /**
@@ -97,7 +118,8 @@ export class NetSession {
     return sim ? new SimLink(t, sim) : t;
   }
 
-  private begin(role: "host" | "replica", t: Transport): boolean {
+  /** A peer on `t` for the role, replacing any before it. */
+  private attach(role: "host" | "replica", t: Transport): boolean {
     const me = this.hooks.identity();
     if (!me) {
       this.fail("no bundle is loaded yet");
@@ -105,16 +127,20 @@ export class NetSession {
       return false;
     }
     this.transport = this.wrap(t);
-    if (role === "host") {
-      this.host = new NetHost(this.transport, me, this.hooks.hostSim);
-    } else {
-      this.replica = new NetReplica(this.transport, me, this.hooks.replicaSim);
+    const peer: NetPeer = role === "host"
+      ? (this.host = new NetHost(this.transport, me, this.hooks.hostSim))
+      : (this.replica = new NetReplica(this.transport, me, this.hooks.replicaSim));
+    peer.stats.log.push(...this.carriedLog);
+    this.carriedLog = [];
+    if (this.role !== role) {
+      this.role = role;
+      this.hooks.roleChanged(role);
     }
-    this.role = role;
-    this.hooks.roleChanged(role);
-    // The page's frame loop sleeps when there is nothing to draw; the session
-    // still has pings to send and a link to watch.
-    this.timer = setInterval(() => this.poll(performance.now()), POLL_MS);
+    if (!this.timer) {
+      // The page's frame loop sleeps when there is nothing to draw; the
+      // session still has pings to send and a link to watch.
+      this.timer = setInterval(() => this.poll(performance.now()), POLL_MS);
+    }
     this.hooks.wake();
     return true;
   }
@@ -127,6 +153,7 @@ export class NetSession {
   /** Host over the internet: make a room, and wait for player 2. */
   async hostOnline(): Promise<void> {
     if (this.active) return;
+    this.kind = "online";
     this.lobby = { phase: "creating", code: null, link: null, error: null };
     this.hooks.wake();
     try {
@@ -135,46 +162,65 @@ export class NetSession {
       const link = new URL(location.href);
       link.hash = `join=${signal.code}`;
       link.searchParams.delete("net");
-      const rtc = new RtcTransport(signal, { relayOnly: this.params.has("relay") });
       this.lobby = { phase: "waiting", code: signal.code, link: link.href, error: null };
-      this.begin("host", rtc);
+      this.attach("host", this.rtc(signal));
     } catch (e) {
       this.fail(`could not make a room: ${(e as Error).message}`);
     }
   }
 
+  private rtc(signal: SignalClient): RtcTransport {
+    return new RtcTransport(signal, { relayOnly: this.params.has("relay") });
+  }
+
   /** Join over the internet, by the host's code. */
   async joinOnline(code: string): Promise<void> {
-    if (this.active) return;
-    this.lobby = { phase: "joining", code: code.toUpperCase(), link: null, error: null };
+    if (this.active && this.lobby.phase !== "reconnecting") return;
+    this.kind = "online";
+    const c = code.toUpperCase();
+    if (this.lobby.phase !== "reconnecting") {
+      this.lobby = { phase: "joining", code: c, link: null, error: null };
+    }
     this.hooks.wake();
     try {
-      const signal = await SignalClient.join(signalBase(location.search), code);
+      const signal = await SignalClient.join(signalBase(location.search), c);
+      this.signal?.pause();
       this.signal = signal;
-      const rtc = new RtcTransport(signal, { relayOnly: this.params.has("relay") });
-      this.lobby = { ...this.lobby, phase: "connecting" };
-      this.begin("replica", rtc);
+      // The address says which game this tab is in, so a reload comes back
+      // to it (`urlstate.ts` keeps the hash through every rewrite after).
+      if (location.hash !== `#join=${c}`) {
+        history.replaceState(history.state, "",
+                             `${location.pathname}${location.search}#join=${c}`);
+      }
+      this.lobby = { ...this.lobby, phase: "connecting", code: c };
+      this.attach("replica", this.rtc(signal));
     } catch (e) {
-      this.fail(`could not join ${code.toUpperCase()}: ${(e as Error).message}`);
+      if (this.lobby.phase === "reconnecting") this.rejoinLater((e as Error).message);
+      else this.fail(`could not join ${c}: ${(e as Error).message}`);
     }
   }
 
   hostLocal(): void {
     if (this.active) return;
+    this.kind = "local";
     this.lobby = { phase: "waiting", code: "local", link: null, error: null };
-    this.begin("host", new LocalTransport("host", this.params.get("room") ?? "default"));
+    this.attach("host", new LocalTransport("host", this.params.get("room") ?? "default"));
   }
 
   joinLocal(): void {
-    if (this.active) return;
+    if (this.active && this.lobby.phase !== "reconnecting") return;
+    this.kind = "local";
     this.lobby = { phase: "connecting", code: "local", link: null, error: null };
-    this.begin("replica", new LocalTransport("replica", this.params.get("room") ?? "default"));
+    this.attach("replica", new LocalTransport("replica", this.params.get("room") ?? "default"));
   }
 
   /** Leave, whichever role this is. The player goes back to playing alone. */
-  leave(reason = "left"): void {
+  leave(reason = this.role === "host" ? "the host left" : "player 2 left"): void {
+    if (this.rejoinTimer) clearTimeout(this.rejoinTimer);
+    this.rejoinTimer = null;
     if (!this.active) {
       this.lobby = { phase: "idle", code: null, link: null, error: null };
+      this.hooks.wake();
       return;
     }
     this.host?.close(reason);
@@ -186,10 +232,70 @@ export class NetSession {
     this.host = this.replica = null;
     this.transport = null;
     this.signal = null;
+    this.carriedLog = [];
+    this.rejoins = 0;
     this.role = "solo";
     this.lobby = { phase: "idle", code: null, link: null, error: null };
     this.hooks.roleChanged("solo");
     this.hooks.wake();
+  }
+
+  /** The tab is closing. */
+  private unload(): void {
+    if (!this.active) return;
+    this.host?.close("the host closed the page");
+    this.replica?.close("player 2 closed the page");
+    this.transport?.close("page closed");
+    this.signal?.close({ keepToken: true });
+  }
+
+  /**
+   * The peer's link is gone and nobody chose to leave. The host goes back to
+   * waiting in the same room; player 2 tries to come back.
+   */
+  private dropped(peer: NetPeer): void {
+    const why = peer.stats.problem ?? "the link closed";
+    this.carriedLog = peer.stats.log.slice();
+    pushLog(this.carriedLog, { at: performance.now(), tick: peer.stats.tick,
+                               kind: "report", text: `link lost: ${why}` });
+    if (this.role === "host") {
+      this.hooks.peerGone();
+      this.host = null;
+      this.lobby = { ...this.lobby, phase: "waiting",
+                     error: `player 2 dropped (${why}); the room is still open` };
+      if (this.kind === "local") {
+        this.attach("host", new LocalTransport("host", this.params.get("room") ?? "default"));
+      } else if (this.signal) {
+        this.attach("host", this.rtc(this.signal));
+      }
+    } else {
+      // A host that closed its room is not coming back.
+      if (/host left|host closed/.test(why)) {
+        this.lobby = { ...this.lobby, phase: "closed", error: why };
+        this.hooks.wake();
+        return;
+      }
+      this.replica = null;
+      this.lobby = { ...this.lobby, phase: "reconnecting", error: why };
+      this.rejoinLater(why);
+    }
+    this.hooks.wake();
+  }
+
+  private rejoinLater(why: string): void {
+    if (this.rejoins >= REJOIN_DELAYS_MS.length) {
+      this.lobby = { ...this.lobby, phase: "closed",
+                     error: `could not reconnect: ${why}` };
+      this.hooks.wake();
+      return;
+    }
+    const delay = REJOIN_DELAYS_MS[this.rejoins++];
+    this.rejoinTimer = setTimeout(() => {
+      this.rejoinTimer = null;
+      if (this.lobby.phase !== "reconnecting") return;
+      if (this.kind === "local") this.joinLocal();
+      else if (this.lobby.code) void this.joinOnline(this.lobby.code);
+    }, delay);
   }
 
   /** Once a frame from the player, and on the session's own timer. */
@@ -198,14 +304,11 @@ export class NetSession {
     if (!peer) return;
     peer.poll(now);
     if (peer.isClosed) {
-      if (this.lobby.phase !== "closed") {
-        this.lobby = { ...this.lobby, phase: "closed",
-                       error: peer.stats.problem ?? "the link closed" };
-        this.hooks.wake();
-      }
+      this.dropped(peer);
     } else if (this.transport?.info.state === "open") {
       if (this.lobby.phase !== "connected") {
         this.lobby = { ...this.lobby, phase: "connected", error: null };
+        this.rejoins = 0;
         this.hooks.wake();
       }
     }

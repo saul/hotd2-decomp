@@ -396,6 +396,15 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get localPlayer(): number {
     return this.net.role === "replica" ? 1 : 0;
   }
+  /**
+   * This page is player 2's: its state is the host's, whether or not the link
+   * is up this moment. Decided by the role and never by the peer object,
+   * which is absent while a dropped link reconnects -- and a page that took
+   * that absence for "alone" would start simulating the host's state.
+   */
+  private get asReplica(): boolean {
+    return this.net.role === "replica";
+  }
   /** The one random source in the player, and part of every snapshot. */
   readonly rng = new Rng(1);
   /**
@@ -539,8 +548,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // one -- so it is where player 2 was looking, and the host checks it
     // against its own record of that camera (`NetHost.checkAim`).
     this.shooting.onFire = (ray) => {
-      if (this.net.replica) {
-        this.net.replica.press(PressKind.Pull, ray);
+      if (this.asReplica) {
+        this.net.replica?.press(PressKind.Pull, ray);
       } else {
         this.gunInput(0, PressKind.Pull, ray);
       }
@@ -573,8 +582,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       const y = ny * half;
       this.localAim.x = x;
       this.localAim.y = y;
-      if (this.net.replica) {
-        this.net.replica.setAim(x, y, true);
+      if (this.asReplica) {
+        this.net.replica?.setAim(x, y, true);
         return;
       }
       SetPlayerAimFromPointer(0, x, y);
@@ -1292,7 +1301,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
       this.wake();
       // Player 2's keys are its gun's: START and the reload. The transport,
       // the rewind and the modes are the host's.
-      if (this.net.replica && ["Space", "ArrowLeft", "Digit1", "Digit2"]
+      if (this.asReplica && ["Space", "ArrowLeft", "Digit1", "Digit2"]
             .includes(e.code)) {
         return;
       }
@@ -1328,7 +1337,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
 
     window.addEventListener("popstate", () => {
       // Player 2's address is the host's to move, not the back button's.
-      if (this.net.replica) return;
+      if (this.asReplica) return;
       this.state = readState();
       this.wake();
       void this.loadStage();
@@ -1552,7 +1561,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * reload. Queued only while the clock can consume it, as a click is.
    */
   offscreenPull(): void {
-    if (this.net.replica) this.net.replica.press(PressKind.Offscreen);
+    if (this.asReplica) this.net.replica?.press(PressKind.Offscreen);
     else this.gunInput(0, PressKind.Offscreen);
     this.pacer.wake();
   }
@@ -1566,8 +1575,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * of the key handler. As player 2 it is player 2's START, and the host's.
    */
   pressStart(): void {
-    if (this.net.replica) {
-      this.net.replica.press(PressKind.Start);
+    if (this.asReplica) {
+      this.net.replica?.press(PressKind.Start);
       this.pacer.wake();
       return;
     }
@@ -1906,7 +1915,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   idleTick(t: Tick): void {
     if (!this.walker) return;
     // A replica's script phase is the host's: nothing of it runs here.
-    if (!this.net.replica) this.pushPortGlobals();
+    if (!this.asReplica) this.pushPortGlobals();
     this.cam.scripted = this.state.mode !== "free";
     this.world.update(this.ctx, t);
   }
@@ -1919,9 +1928,10 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * what it has; the loop never runs ahead of what the host has sent.
    */
   private replicaStep(): boolean {
-    const r = this.net.replica!;
     if (this.perfMeter.enabled) this.perfMeter.tick();
-    const applied = r.step(performance.now());
+    // Between connections -- reconnecting after a drop -- there is nothing to
+    // apply, and still nothing this page may simulate: it draws what it has.
+    const applied = this.net.replica?.step(performance.now()) ?? false;
     this.cam.scripted = true;
     this.world.update(this.ctx, applied ? DRIVEN_TICK : STOPPED_TICK);
     return true;
@@ -2352,7 +2362,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    */
   get gameRunning(): boolean {
     // A replica's clock is the host's: it runs while the host's does.
-    if (this.net.replica) return this.net.replica.running && !!this.walker;
+    if (this.asReplica) return !!this.net.replica?.running && !!this.walker;
     // A host holds its own while player 2 loads the stage, so neither of
     // them starts it without the other.
     if (this.net.host?.holding) return false;
@@ -2384,8 +2394,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     // The network overlay is live figures: while it is open, the page keeps
     // drawing them whether or not the game moves.
     if (this.net.active && this.toggles.netStats) return true;
-    if (this.net.replica) {
-      return this.net.replica.running || this.shooting.busy;
+    if (this.asReplica) {
+      return !!this.net.replica?.running || this.shooting.busy;
     }
     if (this.state.mode === "free") return true;
     if (this.state.freeze) return false;
@@ -2456,7 +2466,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   stepOneFrame(): boolean {
     const w = this.walker;
     if (!w || this.state.freeze) return false;
-    if (this.net.replica) return this.replicaStep();
+    if (this.asReplica) return this.replicaStep();
     if (this.perfMeter.enabled) this.perfMeter.tick();
     // Player 2's gun, before anything of this tick runs -- the same moment a
     // local press made between frames is in `G`.
@@ -2622,7 +2632,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   get paused(): boolean {
     // Player 2 sees the host's pause as a pause; a host that is only waiting
     // for player 2 to load is not one.
-    if (this.net.replica) return this.net.hostHold === "paused" && !!this.walker;
+    if (this.asReplica) return this.net.hostHold === "paused" && !!this.walker;
     return this.state.mode === "play" && !this.playing && !!this.walker;
   }
 
@@ -2810,7 +2820,7 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
   pushUrl(): void {
     // A replica's address carries the room it joined (`#join=`); the stage
     // and block are the host's, and writing them would only mislead a reload.
-    if (this.net.replica) return;
+    if (this.asReplica) return;
     writeState(this.state);
   }
 

@@ -101,6 +101,9 @@ export function makeNetHooks(p: Player): NetPlayerHooks {
     hostSim,
     replicaSim,
     roleChanged: (role: NetRole) => p.netRoleChanged(role),
+    // Player 2's gun, pointed off the screen: the cabinet's gun put down.
+    // Their player plays on as the game plays any player nobody is aiming.
+    peerGone: () => { G.g_aim_on_screen[1] = 0; },
     wake: () => p.wake(),
   };
 }

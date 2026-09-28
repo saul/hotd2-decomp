@@ -137,6 +137,9 @@ export class NetReplica extends NetPeer {
         if (head.tick <= this.at || this.buffer.has(head.tick)) return;
         this.buffer.set(head.tick, { head, bytes: data, arrived: this.now });
         if (head.tick > this.newest) this.newest = head.tick;
+        // The host's clock is held, so the player's is, and no step will come
+        // for this: what the host sends while paused is shown as it lands.
+        if (this.hold !== null && this.phase === "streaming") this.applyNewest();
         this.sim.wake();
         return;
       }
@@ -321,6 +324,19 @@ export class NetReplica extends NetPeer {
     if (skipped > 0) this.stats.skips += skipped;
     this.apply(pick);
     return true;
+  }
+
+  /** The newest tick that applies from here, now, and nothing older. */
+  private applyNewest(): void {
+    let pick: Buffered | null = null;
+    for (const [t, b] of this.buffer) {
+      if (t > this.at && b.head.base <= this.at && (!pick || t > pick.head.tick)) pick = b;
+    }
+    if (!pick) return;
+    const skipped = pick.head.tick - this.at - 1;
+    if (skipped > 0) this.stats.skips += skipped;
+    this.apply(pick);
+    for (const t of [...this.buffer.keys()]) if (t <= this.at) this.buffer.delete(t);
   }
 
   /** The depth the jitter says the buffer needs, in ticks. */

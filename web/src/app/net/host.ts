@@ -70,6 +70,8 @@ const KEYFRAME_COOLDOWN_MS = 500;
 const MAX_UNRELIABLE = 12 * 1024;
 /** How long the host holds its clock for a replica that is loading. */
 const LOAD_WAIT_MS = 45_000;
+/** While the host's clock is held, a tick this often all the same. See `poll`. */
+const HELD_TICK_MS = 250;
 
 export class NetHost extends NetPeer {
   private epoch = 0;
@@ -100,6 +102,8 @@ export class NetHost extends NetPeer {
   private readonly deltaCount = new Rate();
   private readonly out = new ByteWriter(16 * 1024);
   private aimErrorAt = -Infinity;
+  /** When the last tick went, for the held clock's own ticks. */
+  private lastTickAt = -Infinity;
 
   constructor(transport: Transport, me: Identity, private readonly sim: HostSim) {
     super(transport, me, "host");
@@ -178,6 +182,7 @@ export class NetHost extends NetPeer {
       return;
     }
     const t0 = performance.now();
+    this.lastTickAt = now;
     this.tick++;
     const t = this.tick;
     if (!this.tracker) this.tracker = new StateTracker();
@@ -369,11 +374,27 @@ export class NetHost extends NetPeer {
     return off > 0.5 ? Math.max(deg, 90) : deg;
   }
 
-  /** The session state, sent when it changes and once a second regardless. */
+  /**
+   * The session state, sent when it changes and once a second regardless --
+   * and, while the host's clock is held, a tick of its own now and then.
+   *
+   * **A held clock still owes player 2 the state.** A keyframe that is due
+   * -- player 2 has just loaded the stage the host moved to, or asked for one
+   * -- goes at once rather than when the host next unpauses; and what changes
+   * while it is paused (a debug kill, a rewind's landing) reaches player 2
+   * within a quarter of a second. Such a tick is a sequence number and a
+   * diff, like any other: nothing simulated, so nothing it carries is new
+   * game time.
+   */
   override poll(now: number): void {
     super.poll(now);
     if (this.closed || !this.peerHello) return;
-    const hold: HoldReason = this.phase === "loading" ? "loading" : this.sim.hold();
+    const simHold = this.sim.hold();
+    if (this.phase === "streaming" && simHold !== null && simHold !== "loading"
+        && (this.needKeyframe || now - this.lastTickAt >= HELD_TICK_MS)) {
+      this.endTick(now);
+    }
+    const hold: HoldReason = this.phase === "loading" ? "loading" : simHold;
     const msg: SessionMsg = { epoch: this.epoch, hold, branch: this.sim.branch() };
     const key = JSON.stringify(msg);
     if (key !== this.lastSession || now - this.lastSessionAt >= 1000) {

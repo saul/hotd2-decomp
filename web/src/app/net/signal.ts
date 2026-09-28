@@ -16,7 +16,8 @@ export interface IceServer {
 
 /** What the rendezvous says on the event stream. */
 export type SignalEvent =
-  | { t: "peer"; joined: boolean }
+  /** Whether player 2 is in the room, and which of their joins this is. */
+  | { t: "peer"; joined: boolean; n: number }
   | { t: "signal"; data: unknown }
   | { t: "closed"; reason: string };
 
@@ -31,6 +32,12 @@ export function signalBase(search: string): string {
 
 export class SignalClient {
   onEvent: (e: SignalEvent) => void = () => {};
+  /**
+   * The last word on player 2's presence. A transport made after it -- the
+   * host's next connection, once the last one dropped -- reads it rather
+   * than waiting for an event that has already been and gone.
+   */
+  peer: { joined: boolean; n: number } | null = null;
   /** The stream's own state, for the lobby: it reconnects by itself. */
   onStream: (open: boolean) => void = () => {};
   private es: EventSource | null = null;
@@ -66,10 +73,21 @@ export class SignalClient {
     return new SignalClient(base, r.code, r.token, r.iceServers, "host");
   }
 
+  /**
+   * Join a room -- or rejoin it with the token this tab had, when the last
+   * connection died without its leave reaching the rendezvous. The token is
+   * kept per tab (`sessionStorage`), so a reload rejoins and a new tab does
+   * not take another's place.
+   */
   static async join(base: string, code: string): Promise<SignalClient> {
     const c = code.trim().toUpperCase();
-    const r = await SignalClient.post(`${base}/rooms/${encodeURIComponent(c)}/join`) as
+    const key = `hod2.net.token.${c}`;
+    let kept: string | null = null;
+    try { kept = sessionStorage.getItem(key); } catch { /* storage blocked */ }
+    const r = await SignalClient.post(`${base}/rooms/${encodeURIComponent(c)}/join`,
+                                      kept ? { token: kept } : {}) as
       { token: string; iceServers: IceServer[] };
+    try { sessionStorage.setItem(key, r.token); } catch { /* storage blocked */ }
     return new SignalClient(base, c, r.token, r.iceServers, "replica");
   }
 
@@ -78,7 +96,10 @@ export class SignalClient {
       + `?token=${encodeURIComponent(this.token)}`;
   }
 
-  /** Open the event stream. `EventSource` reconnects on its own after a drop. */
+  /**
+   * Open the event stream, if it is not open. `EventSource` reconnects on its
+   * own after a drop; after a `pause` this opens it again.
+   */
   listen(): void {
     if (this.es || this.closed) return;
     const es = new EventSource(this.url("events"));
@@ -86,9 +107,14 @@ export class SignalClient {
     es.onopen = () => this.onStream(true);
     es.onerror = () => this.onStream(false);
     es.onmessage = (m) => {
+      let e: SignalEvent;
       try {
-        this.onEvent(JSON.parse(m.data) as SignalEvent);
-      } catch { /* a malformed event is dropped, not fatal */ }
+        e = JSON.parse(m.data) as SignalEvent;
+      } catch {
+        return; // a malformed event is dropped, not fatal
+      }
+      if (e.t === "peer") this.peer = { joined: e.joined, n: e.n };
+      this.onEvent(e);
     };
   }
 
@@ -97,12 +123,29 @@ export class SignalClient {
     await SignalClient.post(this.url("send"), { data });
   }
 
-  /** Leave the room. Best effort: a page being closed may not finish it. */
-  close(): void {
+  /**
+   * Stop listening without leaving: the connection is being made again on
+   * the same room and token.
+   */
+  pause(): void {
+    this.es?.close();
+    this.es = null;
+  }
+
+  /**
+   * Leave the room. Best effort: a page being closed may not finish it --
+   * which is why a closing page (`keepToken`) keeps its token: if the leave
+   * never arrives, the reload rejoins with it instead of finding its own
+   * ghost in player 2's place.
+   */
+  close(opts: { keepToken?: boolean } = {}): void {
     if (this.closed) return;
     this.closed = true;
     this.es?.close();
     this.es = null;
+    if (this.role === "replica" && !opts.keepToken) {
+      try { sessionStorage.removeItem(`hod2.net.token.${this.code}`); } catch { /* */ }
+    }
     const url = this.url("leave");
     // `sendBeacon` survives the page unloading; `fetch` is the fallback.
     if (!navigator.sendBeacon?.(url, new Blob(["{}"], { type: "application/json" }))) {

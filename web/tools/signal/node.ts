@@ -65,7 +65,9 @@ export function handle(rooms: Rooms, base: string, req: IncomingMessage,
       if (!r.code && req.method === "POST") {
         json(res, 200, await rooms.create());
       } else if (r.code && r.verb === "join" && req.method === "POST") {
-        json(res, 200, await rooms.join(r.code));
+        const raw = await readBody(req);
+        const body = (raw ? JSON.parse(raw) : {}) as { token?: string };
+        json(res, 200, await rooms.join(r.code, body.token));
       } else if (r.code && r.verb === "events" && req.method === "GET") {
         // Headers set, not sent: `attach` refuses a wrong token or a gone room
         // by throwing, and that has to reach the client as a 403 or a 404 --

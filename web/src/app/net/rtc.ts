@@ -58,8 +58,8 @@ export class RtcTransport implements Transport {
   private readonly early: RTCIceCandidateInit[] = [];
   private restarts = 0;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The host's first offer has gone. */
-  private offered = false;
+  /** Which of player 2's joins this connection is for; null before the first. */
+  private peerN: number | null = null;
 
   constructor(private readonly signal: SignalClient, opts: RtcOptions) {
     this.pc = new RTCPeerConnection({
@@ -94,15 +94,35 @@ export class RtcTransport implements Transport {
     };
     signal.onEvent = (e) => {
       if (e.t === "signal") void this.heard(e.data as RtcSignal);
-      // `peer` is a state, repeated on every reconnect of the host's stream:
-      // the first says offer, the rest say nothing new.
-      else if (e.t === "peer" && e.joined && signal.role === "host" && !this.offered) {
-        this.offered = true;
-        void this.offer(false);
-      } else if (e.t === "peer" && !e.joined) this.close("player 2 left");
+      else if (e.t === "peer") this.peerChanged(e.joined, e.n);
       else if (e.t === "closed") this.close(e.reason);
     };
     signal.listen();
+    // Made after player 2 came in -- the host's next connection, once the
+    // last one dropped -- there is no event coming: offer now.
+    if (signal.role === "host" && signal.peer?.joined) {
+      this.peerChanged(true, signal.peer.n);
+    }
+  }
+
+  /**
+   * Player 2's presence. `peer` is a state, repeated whenever the host's
+   * stream reconnects, so the same join number again says nothing new; a new
+   * one is player 2 back on a new connection, which this one is not, so it
+   * closes and the session makes the one that is.
+   */
+  private peerChanged(joined: boolean, n: number): void {
+    if (!joined) {
+      this.close("player 2 left");
+      return;
+    }
+    if (this.signal.role !== "host") return;
+    if (this.peerN === null) {
+      this.peerN = n;
+      void this.offer(false);
+    } else if (n !== this.peerN) {
+      this.close("player 2 reconnected");
+    }
   }
 
   private async say(s: RtcSignal): Promise<void> {

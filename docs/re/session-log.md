@@ -23893,3 +23893,25 @@ the shot check read the weapon's mark on the frame the pull was queued, before
 `ProcessShotRequests` had run -- so it reported "no blade shot down" over a run
 in which five had been. And class 0x30 is never on `shotTargets` (bone-sphere
 pick), so the walker is found by a grid of real pulls.
+
+## 2026-09-28 -- merging "one departure, one tag" into the crowd push (branch `worktree-agent-a8acf8294623e3a11`)
+
+Main's bookkeeping pass retagged `worldPushDepth` once, on `Actor`, and the
+writers in `class30/ground.ts` and `class31/collide.ts` now point at it with
+no token; both merged cleanly into the rewritten hook. It also turned
+`ThrowerPushOutOfWorld`'s open question about `g_coli_hit_object` into a
+declared divergence -- which this branch had already retired by porting the
+case, so the merge keeps the port and drops the tag. `ActorFlag.FireLoop`'s
+note took both findings: main's `ZombieStateEmerge` test of the bit at
+`0x00458509` and this branch's `ThrowerPushOutOfWorld` test at `0x00449D8F`.
+
+Under the same convention, `coli.ts`'s `ColiDynamicObjects` carried an open
+question -- which frame's registrations the two moving-object passes see --
+that this branch's reading of `ProcessPlayerShots` settles: the previous
+frame's, published before any actor runs. The pool walk that stands in for
+the list is a known departure, so it is declared as one. The note also
+records, from the disassembly of `RegisterForShotTest` (`0x00405176`,
+`0x004051D7`), that a blob-carrying object's `0x10` bit sends it through the
+matrix rebuild and on into the append, which the decompile's early `return`
+hides (`L35`). Class 0x26's boat does not yet register at `0x0048EE9C`,
+which is what moving those passes onto the list needs first.

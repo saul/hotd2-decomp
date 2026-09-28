@@ -20275,6 +20275,159 @@ under test, so a mutation of either lifetime passed; they are literals.
 `[open]`: `FUN_004702E0`, a second caller of the shatter that forces group 99
 (no floor), is not in `g_class41_updates`; what allocates it is unread.
 
+## 2026-09-27 -- class 0x30's death effects, the corpse's ring, the landings' thud
+
+Five declared divergences in `class30/death.ts`, `knockback.ts`, `entrance.ts`
+and `class20/index.ts` said the dust, the splash, the ring under a corpse and
+the entrance landing's sound and shake were not drawn. All five are ported;
+`PLAYER_PROGRESS.md` has what the exe does. What is worth keeping here:
+
+* **`g_class30_states[0x37]` and `[0x38]` are not states.** The xrefs to
+  `PTR_FUN_00592BC4` / `PTR_FUN_00592BC8` are state 6, and states 9, 12, 26
+  and 30 -- the delayed leap's call was in no note at all, and the port's leap
+  landed without its sound, shake, dust or attack cry.
+* **The decompiler folds the cue tick's parameter block.** Which of the dust,
+  the wader's flat splash and the wet splash sit on the traced floor and which
+  on `obj+0x44` is only readable from the stores (`0x00456A4B`, `0x00456B1B`).
+* **`SpawnGroundRingEffect` reads `obj+0x1F8` bit 4**, which nothing in the
+  port had: `EnemyZombieInit` and `EnemyThrowerInit` raise it after
+  `ActorBuildSkinnedModel`, and `ActorDrawGroundShadow` is its other reader.
+  `MotionFlag.TraceGround`.
+* **The ring task's three routines step, then draw**, the opposite of the
+  sprite effects -- each installs its successor into `obj[0]` and still draws
+  its own picture that frame.
+* **Two wrong ports in `ZombieStateArcScriptedEntrance`**, both from the
+  bytes: `CALL 0x004119A0` with fade 5 for the crouch (the port cut), and
+  `AND ECX, 0xfffeffff` -- the landing latch -- at sub 3 and on the way out,
+  where the port cleared `0x100000`, the carried bit.
+
+**Wrong turns.**
+
+* **I ported the ring task a second time.** A peer (the owl and fish effects)
+  had it in `ring_effect.ts` in their tree, uncommitted, and had named the
+  three routines in Ghidra an hour before; I created the functions, named them
+  `GroundRingEffect*`, and my `rename_function` calls **overwrote their names**
+  -- the tool's result said "from 'RingEffectSpread'", which is the only place
+  it showed. The names were put back, and once their branch reached `main` my
+  copy was folded onto theirs: `SpawnGroundRingEffect` now lives in
+  `ring_effect.ts` and feeds its pool. See `L52`.
+* The first staged screenshot showed nothing: the effects were thirty units
+  ahead of a camera fifteen above the water, under the bottom of the frame.
+  Sixty units ahead, all six draw -- the red pools, the strip cels, the two
+  white water rings, the splash and the grey dust.
+
+**Mutation-checked:** the cue tick reduced to a no-op, the landing effect
+reduced to its latch, `SpawnGroundRingEffect` returning early, the entrance's
+and the leap's sounds and shake removed, the rain opcode not writing `G`, and
+the sub-3 latch put back on the carried bit each fail `npm run test:port`.
+
+## 2026-09-27 -- the screen cards' furniture bits, 0x20 and 0x10
+
+`game/class60/` and `game/class61/` both said `[port-only] the bit is not
+modelled` for `g_screen_furniture_flags` (`0x009A5900`) because nothing in
+the port read the word. Two readers had landed since -- `HudDrawLives` (bit
+`0x10`, "HOLD YOUR FIRE!") and `Class22CutsceneHoldUntilChapterCard` (bit
+`0x20`) -- and a third, `HudDrawShutterState`'s state 4 (`& 0x30` at
+`0x00413BB5`), is on a branch not yet merged. Both cards now write it, and
+`ScreenFurniture` in `game/globals.ts` names the two bits for writers and
+readers alike. `[proved]` off the disassembly:
+
+* `ChapterCardInstall` ORs `0x20` in **three** places, not one: sub 0
+  (`0x0043436B`), and each installer arm before it hands over -- Boss Mode at
+  `0x004342F6`, app state `0x0B` at `0x00434324`. It clears it at `0x004348C7`
+  after the flag at `0x004348C1`. The two variants clear it for their own
+  arms (`BossModeChapterCardUpdate` at `0x00434CE7`, `FUN_00434DA0` at
+  `0x00434ED4`), and neither is ported, so an actor on either arm holds the
+  bit up as long as it holds the gate shut. Both arms are unreachable from a
+  bundle.
+* `ResultCardInstall` ORs `0x10` at `0x00434FD0` beside the firing-gate drop
+  and clears it at `0x00435683` after the flag at `0x0043567C`. The tail's
+  `CMP word ptr [EBP+0x11c], BX` compares with zero: `EBX` is cleared at
+  `0x00435188` and nothing in the draw after it writes it -- which the port
+  had assumed and nobody had checked.
+
+**The skip.** By the user's decision (NEW-BUGS 13) every chapter card is cut
+on its first update. That path still sets and clears `0x20` in the same
+call, exactly as the exe does for a player who skips on the first frame, so
+**no reader ever sees the chapter card's bit** -- class 0x22's cameo and the
+shutter's state-4 bars draw straight through where an unskipped card would
+hide them for three seconds. A before-and-after test cannot tell that from a
+card that never wrote the word, so `test:port` records the writes themselves
+through an accessor on `G`, each with flag 248 as it stood.
+
+**Found in passing.** `obj_484ff0_props`' rig note, in both
+`tools/hod2lib/rigs.py` and `web/src/hod2lib/rigs_data.ts`, says "nothing
+sets 0x20" and calls the bit dead; the chapter card sets it on every stage.
+Left for its own change -- it is bundle-writer text with a Python twin.
+
+## 2026-09-27 -- the bats: every sub-type drawn, the wing on its body, the splash
+
+Class 0x46 had two declared divergences: the scatter's and the swarm's members
+undrawn, and `SpawnBatSplash` a sound with no picture. Both are gone; reading
+the routines around them again found six more things the first transcription
+had wrong.
+
+* **What draws a bat** `[proved]`: every arm of `PlaceBats` writes
+  `obj+0x1F4 = 0x1E`, clip `0x407`, `obj+0x1FC = 5`, builds the model and
+  installs `BatDrawBoneSlot` (`FUN_0042E020`), which draws the node's own slot
+  and nothing else. The model is the character type's; a member's descriptor,
+  or its lack of one, never enters the draw. The port's character layer binds
+  geometry by spawn address, so the exporter now emits a synthetic body row
+  and wing row per runtime child at the port's own address for it, parented to
+  the placer -- the horde's arrangement.
+* **`BatChildAt` collided.** It gave the member four bits; the scatter has 25,
+  so members 16..24 took 0..8's addresses and `tools/bats.mjs` had been
+  counting 16 scatter bats, not 25, for as long as it had run.
+* **The wing seat** `[proved]`: `g_camera_blocks[cur] * body+0x2C4 *
+  (0, 1, 2)`, and `body+0x2C4` is node 1's draw record `+0x28` --
+  `SkeletonEmitNode` (`FUN_004114C0`) stores it straight after
+  `FUN_00411700` has translated and turned the node, and the matrix under it is
+  `SkeletonApplyRootMotion`'s `T Rz Ry Rx S(model+0x116C)` and closing
+  translate, then `SkeletonPoseRootFrame`'s three turns. The port had
+  `(0, 1, 2)` in the body's yaw alone; the clip's root record is a half turn
+  tipped by 3679, so the wing sat four units off, on the far side. Ported as
+  `BatBodyNodeMatrix` in `game/`, cross-checked in `test:render` against the
+  pose the character layer actually makes. The bat's and the wing's roots are
+  now drawn in order 5 with pitch and roll and at 0.6 / 0.7.
+* **The shot.** The bat now registers the engine's way. The wing never
+  registers (the routine ends on its draw at `0x0042F7D8`), but the render
+  pick had walked every drawn bone and the wing's bone 3 has a 0.3 sphere, so a
+  wing could take a bullet meant for its bat. The dive registers in every
+  state and clears bit 3 only when its gate takes the hit: a bat shot during
+  its launch delay dies at launch. The port had cleared the bit every frame.
+  A sweep for `AND ..., 0xF7`/`0xFFFFFFF7` finds no clear in the task walk or
+  the shot processor `[likely]`.
+* **The scatter takes its hit inside its flying arm** (its `AND AL, 0xF7` is at `0x0042EB04`), and
+  the arm runs on: the kill frame is a flying frame (`* 1.05`, `* 1.08`), and
+  only that arm registers.
+* **The swarm's dive bobs by 5.0.** `FMUL [0x0055D2B4]` at `0x0042F035`; the
+  port used the orbit's 8.0 (`FMUL double [0x0055D2D0]`, `0x0042F2FE`).
+* **`PlaceBats`' dive member keeps the placer's pitch and yaw** (it had
+  zeroed the yaw), and every member and wing builds its model, which claims a
+  `g_hit_slots` entry -- a scatter fills the table.
+* **The splash** `[proved]`: `BatSplashUpdate` at `0x0042F930` was a bare label
+  (`SpawnBatSplash` passes `&LAB_0042f930` to `ActorAlloc`); created and named.
+  Translate to `(x, -25, z)`, `AssetDrawSlot(0x1339 + n)`, `n` 0..0x1D, one a
+  frame from the frame it is made. Stepped after the actors like the owl's and
+  the fish's tasks; `common.bin` 307..336 is the same run theirs use.
+
+**Wrong turns.** I first planned to key the draw on the character type with a
+runtime clone path in the character layer, as the task suggested; the layer's
+whole lifetime model (pending, adopted, spent, released on unlisting) is keyed
+on rows, and the horde, JUDGMENT's sub-actor and the players' bodies already
+use synthetic rows, so a second mechanism for one class would have been the
+wrong refactor. And the scratchpad this session was given is shared with other
+agents: my first bundle log was overwritten by a sibling's, and the size
+comparison was made against their export until a baseline was rebuilt from
+`git archive HEAD` in a private directory.
+
+**Mutation-checked:** the four-bit address, a per-frame hit clear, the yaw-only
+seat, a seat without the model scale, the orbit's bob, the scatter's hit ahead
+of the switch, a registering wing, a scatter registering while it waits, a
+zeroed dive yaw, no hit slot, a splash at the caller's y, the splash stepped
+at the head of the frame, and a splash drawn one frame late each fail
+`npm run test:port`.
+
 ## 2026-09-27 -- `ActorArcStep`'s stages, and the hold `ActorSetMotionBlended` puts on the cursor
 
 Reported from the state-23 port: its `obj+0x19C > 66` test first fired at 68

@@ -253,11 +253,20 @@ export const G = {
   // -- attack permits ----------------------------------------------------
   /**
    * `g_attack_permits` — 0x009A2BA0, one per player. `-1` is free, otherwise
-   * the `at` of the actor holding it. `TryClaimAttackSlot` offers
-   * `g_max_attackers` of them, so with one player exactly one enemy is
-   * committed at a time — which is the game's feel.
+   * the `at` of the actor holding it — the engine stores 1 and frees with 0,
+   * so a transcribed reader tests against -1, never the engine's literals
+   * (`L63`). `TryClaimAttackSlot` offers each claimant one player's permit,
+   * so with one player exactly one enemy is committed at a time — which is
+   * the game's feel.
    */
   g_attack_permits: [-1, -1] as number[],
+  /**
+   * `g_hit_player_order` — 0x009C8908, two ints: which players' marks a shot
+   * handler resolves this frame and in what order, `-1` for an unused slot.
+   * `ChooseHitPlayerOrder` (`FUN_004093C0`) writes both before every reader
+   * walks them, so the zero the image starts with is never read.
+   */
+  g_hit_player_order: [0, 0] as number[],
   /**
    * `g_max_attackers` — 0x009C8E84. `PlayerEnterPlay` (`FUN_00414770`) raises
    * it on row flag `0x20`, `PlayerContinueCountdown` (`FUN_00414280`) lowers
@@ -2362,8 +2371,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_cur_actor = -1;
   ResetSceneOnEnter();
   // Two permits, one a player, whatever `g_max_attackers` says: the array at
-  // `0x009A2BA0` is fixed and `TryClaimAttackSlot` offers the first N of it.
+  // `0x009A2BA0` is fixed and `TryClaimAttackSlot` picks a player in it.
   G.g_attack_permits = [-1, -1];
+  G.g_hit_player_order = [0, 0];
   G.g_attack_committed = 0;
   G.g_enemy_approach_rings = [];
   G.g_enemy_approach_ring_mid = [];

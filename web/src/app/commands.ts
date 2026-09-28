@@ -27,7 +27,6 @@ import type { PerspectiveCamera, Scene } from "three";
 import type { ToggleName, UiCommand } from "../ui/commands";
 import type { PlayerState } from "./urlstate";
 import type { CamCommand, FeedEntry, Walker } from "../script/walker";
-import type { Snapshot } from "../core/snapshot";
 import { ActorKillAll } from "../game/combat/resolve_hit";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
@@ -55,7 +54,7 @@ import type { StuckDebugLayer } from "../render/stuck_debug";
  *
  * The `readonly` marks are the distinction that carries the information, so
  * they are worth reading carefully: a member is mutable here only if a command
- * *assigns to it* (`p.speed = c.speed`), and `readonly` if the commands merely
+ * *assigns to it* (`p.boxWait = c.on`), and `readonly` if the commands merely
  * reach *through* it (`p.lighting.setMode(...)`, `p.cam.rails?.setVisible()`).
  * The reference is fixed; what it names is not. So the mutable block is the
  * short honest list of player fields a click can overwrite, and the rest is
@@ -73,14 +72,10 @@ export interface PlayerCommands {
   boxWait: boolean;
   /** Replaced rather than mutated, so the projection settles it by id. */
   toggles: Readonly<Record<ToggleName, boolean>>;
-  speed: number;
   /** True while the pointer is over the branch bar; freezes the countdown. */
   branchHover: boolean;
-  /** Set while the frame slider is driving the camera by hand. */
-  scrubbing: boolean;
+  /** Box the frame to 4:3, or fill the window. See `UiProjection.pillarbox`. */
   pillarbox: boolean;
-  /** The last snapshot taken, for the Load button. */
-  saved: Snapshot | null;
 
   // -- reached through --------------------------------------------------
 
@@ -89,8 +84,6 @@ export interface PlayerCommands {
   readonly walker: Walker | null;
   /** Sets, so the contents move while the reference does not. */
   readonly boxedClasses: Set<number>;
-  /** The rigs panel's outline selection, by rig name. */
-  readonly boxedRigs: Set<string>;
   readonly shutClasses: Set<number>;
   readonly camera: PerspectiveCamera;
   readonly scene: Scene;
@@ -120,13 +113,17 @@ export interface PlayerCommands {
 
   seekTo(block: number, step: number, op: number): void;
   setMode(mode: PlayerState["mode"]): void;
-  togglePlay(): void;
-  stepOnce(): void;
-  stepBack(): void;
-  rewind(): void;
+  play(): void;
+  pause(): void;
+  /** The start screen's button. See the `start` command. */
+  startGame(): void;
+  /** Sound on or off, as the viewer's own choice. */
+  setMuted(muted: boolean): void;
   requestSkip(): void;
-  /** The game-over screen's buttons. See {@link UiCommand}. */
+  /** The game-over screen's buttons and the menu's Restart. */
   restartRun(stage: number): void;
+  /** A stage the menu chose, loaded and -- once started -- running. */
+  loadAndPlay(): void;
   poseFromSlot(slot: number, frame: number): void;
   syncCameraToWalker(reseat?: boolean): void;
   onCamera(cmd: CamCommand): void;
@@ -134,12 +131,9 @@ export interface PlayerCommands {
   clearFeed(): void;
   markAddress(): void;
   pushUrl(): void;
-  loadStage(): Promise<void>;
   /** Put the bundle screen on the page. See `app/install/ExportScreen.tsx`. */
   openBundles(): void;
   resize(): void;
-  saveSnapshot(): Snapshot;
-  loadSnapshot(snap: Snapshot): string | null;
 }
 
 export function runCommand(p: PlayerCommands, c: UiCommand): void {
@@ -154,10 +148,6 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       return;
     case "boxWait":
       p.boxWait = c.on;
-      return;
-    case "boxRig":
-      if (c.on) p.boxedRigs.add(c.name);
-      else p.boxedRigs.delete(c.name);
       return;
     case "seek":
       p.seekTo(c.block, c.step, c.op);
@@ -175,7 +165,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.state.block = p.state.step = p.state.op = undefined;
       p.state.slot = p.state.frame = undefined;
       p.pushUrl();
-      void p.loadStage();
+      p.loadAndPlay();
       return;
     case "setEntry":
       p.state.entry = c.entry;
@@ -184,20 +174,17 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.state.block = p.state.step = p.state.op = undefined;
       p.state.slot = p.state.frame = undefined;
       p.pushUrl();
-      void p.loadStage();
+      p.loadAndPlay();
       return;
     case "setOriginal":
       p.state.original = c.on;
       p.pushUrl();
-      void p.loadStage();
+      p.loadAndPlay();
       return;
     case "setMode":    p.setMode(c.mode); return;
-    case "setSpeed":   p.speed = c.speed; return;
-    case "play":
-    case "pause":      p.togglePlay(); return;
-    case "stepForward": p.stepOnce(); return;
-    case "stepBack":   p.stepBack(); return;
-    case "rewind":     p.rewind(); return;
+    case "play":       p.play(); return;
+    case "pause":      p.pause(); return;
+    case "start":      p.startGame(); return;
     case "requestSkip": p.requestSkip(); return;
     case "restartStage": p.restartRun(p.state.stage); return;
     case "restartFromStageOne": p.restartRun(1); return;
@@ -229,27 +216,6 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       else p.cam.rails?.highlight(null);
       return;
     }
-    case "reset":
-      p.clearFeed();
-      p.walker?.reset();
-      p.walker?.primeToFirstWait();
-      p.syncCameraToWalker(true);
-      p.markAddress();
-      p.pushUrl();
-      return;
-    case "scrubFrame": {
-      // `done` is the pointer coming off the slider. While it is down the
-      // camera systems must not fight the drag for the pose, which is what
-      // `cam.driving` is read for in the frame.
-      p.scrubbing = !c.done;
-      const w = p.walker;
-      if (!w?.cam) return;
-      w.setCameraFrame(c.frame);
-      p.syncCameraToWalker(true);
-      p.state.frame = w.cam?.frame;
-      p.pushUrl();
-      return;
-    }
     case "setPillarbox":
       p.pillarbox = c.on;
       p.resize();
@@ -268,31 +234,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       p.texFilter.setMode(c.mode as TextureFilterMode);
       return;
     case "setVolume":  p.bgm.setVolume(c.volume / 100); return;
-    case "toggleMute": p.bgm.setMuted(!p.bgm.muted); return;
-    case "saveState": {
-      // Held in memory rather than written out: the value is plain JSON, so
-      // a `copy(player.saveSnapshot())` in the console is a file whenever
-      // one is wanted, and the button is for the loop you actually run --
-      // snapshot, try something, put it back.
-      const snap = p.saved = p.saveSnapshot();
-      p.onFeed({
-        seq: -1, block: p.walker?.block ?? -1, step: -1, opIndex: -1,
-        op: { i: -1, at: 0, op: -1, name: "state saved", cat: "flow" },
-        note: `block ${snap.stage}/${snap.frame | 0} · `
-            + `${Object.keys(snap.parts).length} slices`,
-      });
-      return;
-    }
-    case "loadState": {
-      if (!p.saved) return;
-      const err = p.loadSnapshot(p.saved);
-      p.onFeed({
-        seq: -1, block: p.walker?.block ?? -1, step: -1, opIndex: -1,
-        op: { i: -1, at: 0, op: -1, name: "state loaded", cat: "flow" },
-        note: err ?? `back to frame ${p.saved.frame | 0}`,
-      });
-      return;
-    }
+    case "toggleMute": p.setMuted(!p.bgm.muted); return;
     case "killAll": {
       // The debug clear: `killAll` drops every live actor to zero hit points
       // and starts its directional death, which is what opens the enemy gate.
@@ -359,10 +301,6 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     case "props":        p.props.setEnabled(on); return;
     case "breakables":   p.breakables.setEnabled(on); return;
     case "propBoxes":    p.props.setDebugVisible(on); return;
-    case "trackEnemies":
-      p.cam.trackEnabled = on;
-      p.syncCameraToWalker();
-      return;
     // Both of these are about what is *drawn*, not about what the game does:
     // the port spawns the same records and marks the same materials either
     // way, so neither changes a snapshot.

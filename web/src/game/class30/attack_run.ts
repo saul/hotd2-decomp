@@ -151,7 +151,7 @@ export function ZombieStateAttackRun(obj: ZombieActor, eye: Vec3, dt: number,
   // takes the permit as part of asking — which is why the band-2 exclusion
   // matters: the port asked from band 2 as well, where the engine leaves the
   // permit for `ZombieStateHoldAtRange` to claim.
-  if (band !== 2 && ZombieShouldStandAndThrow(obj)) {
+  if (band !== 2 && ZombieShouldStandAndThrow(obj, rng)) {
     obj.state = ZombieState.StandAndThrow;
     obj.sub = 0;
   }

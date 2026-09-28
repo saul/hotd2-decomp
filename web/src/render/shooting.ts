@@ -116,6 +116,20 @@ import type { Scope } from "../core/scope";
 /** `FUN_00404AD0` builds its segment as origin + direction * 1000. */
 const SHOT_RANGE = 1000;
 
+/**
+ * A pointer, twice over: `x`/`y` in the viewport's pixels, for the crosshair,
+ * and `nx`/`ny` in the 4:3 frame's normalised coordinates, for the ray and the
+ * aim. `inside` is whether it is on the frame at all -- off it, the gun is
+ * pointed off the screen.
+ */
+interface FramePoint {
+  x: number;
+  y: number;
+  nx: number;
+  ny: number;
+  inside: boolean;
+}
+
 export interface ShotResult {
   hit: boolean;
   bone?: number;
@@ -165,14 +179,15 @@ export class Shooting implements System {
    */
   onFire: (ray: { origin: Vector3; dir: Vector3 }) => void = () => {};
   /**
-   * The right button: a trigger pull with the aim outside the screen, which is
-   * how the exe's mouse-gun reloads (`MouseGunResolvePull`, `FUN_0041EB30`).
-   * No ray -- the engine builds none for it. Wired by `app/main.ts`.
+   * The right button, or a press in the bars beside the 4:3 frame: a trigger
+   * pull with the aim outside the screen, which is how the exe's mouse-gun
+   * reloads (`MouseGunResolvePull`, `FUN_0041EB30`). No ray -- the engine
+   * builds none for it. Wired by `app/main.ts`.
    */
   onOffscreenPull: () => void = () => {};
   /**
-   * Where the pointer is aiming, in normalised device coordinates, on every
-   * move. The same shape as {@link onFire} and for the same reason: the aim is
+   * Where the pointer is aiming, in the frame's normalised device coordinates,
+   * on every move and every press. The same shape as {@link onFire} and for the same reason: the aim is
    * input the port owns (`g_crosshair_x`, which the gun lights are built
    * from), so this layer reports it and `app/` writes it.
    */
@@ -180,7 +195,9 @@ export class Shooting implements System {
 
   private combat: CombatJson | null = null;
   /**
-   * The viewport and the crosshair are React's, and arrive through `UiHost`.
+   * The viewport, the canvas and the crosshair are React's, and arrive
+   * through `UiHost`. The canvas is here for its rectangle: it is the 4:3
+   * frame the ray is cast through, which the viewport is not.
    *
    * This layer used to build `.crosshair` and append it into `#viewport`,
    * which put a node React had never heard of inside the element React
@@ -191,6 +208,7 @@ export class Shooting implements System {
    * following the pointer.
    */
   constructor(private readonly viewport: HTMLElement,
+              private readonly canvas: HTMLElement,
               private readonly dot: HTMLElement,
               private readonly chars: CharacterLayer,
               scope: Scope,
@@ -199,7 +217,8 @@ export class Shooting implements System {
     // what decides what the shot did. Owned by the app scope, like everything
     // else this layer holds that outlives a stage.
     scope.defer(events.on("shot.resolved", (r) => this.onResolved(r)));
-    // The context menu would take the right button, which is the reload.
+    // The context menu would take the right button, which is the reload --
+    // and on a phone, a finger held still, which is a shot.
     viewport.addEventListener("contextmenu", (e) => e.preventDefault());
     viewport.addEventListener("pointerdown", (e) => {
       if (e.button === 2) {
@@ -207,7 +226,22 @@ export class Shooting implements System {
         this.onOffscreenPull();
         return;
       }
+      // A finger, a pen and the left button all arrive here as button 0.
       if (e.button !== 0) return;
+      // **A second finger is a reload.** With the frame filling a phone there
+      // are no black bars to tap, and the flick (`app/device.ts`) needs motion
+      // sensors a browser may not grant -- plain `http://` on a LAN, or a
+      // refused permission prompt. The first finger is the trigger; one put
+      // down while it is still on the glass is a pull off the screen.
+      if (e.pointerType === "touch") {
+        const second = this.touches.size > 0;
+        this.touches.add(e.pointerId);
+        if (second) {
+          e.preventDefault();
+          this.onOffscreenPull();
+          return;
+        }
+      }
       // `preventDefault` stops the drag-select a click on the scene would
       // otherwise start. It also stops the **focus change** the browser would
       // have made, and that half has to be done by hand: without it a click on
@@ -218,42 +252,77 @@ export class Shooting implements System {
       e.preventDefault();
       const active = document.activeElement as HTMLElement | null;
       if (active && active !== document.body) active.blur?.();
-      this.fire(e);
+      const f = this.pointerAt(e);
+      this.follow(f);
+      // **Off the frame is off the screen.** With the 4:3 frame on there are
+      // black bars beside it -- and a gun pointed there is pointed off the
+      // screen, which is how the arcade gun reloads (`MouseGunResolvePull`,
+      // `FUN_0041EB30`). Filling the window, there is nowhere off the frame
+      // to press and this never fires.
+      if (!f.inside) {
+        this.onOffscreenPull();
+        return;
+      }
+      this.fire(f);
     });
     viewport.addEventListener("pointermove", (e) => {
-      const p = this.pointerAt(e);
-      this.dot.style.left = `${p.x}px`;
-      this.dot.style.top = `${p.y}px`;
-      const r = this.viewport.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        this.onAim((p.x / r.width) * 2 - 1, -(p.y / r.height) * 2 + 1);
-      }
+      this.follow(this.pointerAt(e));
     });
+    // A finger lifting, or taken by the browser, is no longer down.
+    const lift = (e: PointerEvent) => { this.touches.delete(e.pointerId); };
+    viewport.addEventListener("pointerup", lift);
+    viewport.addEventListener("pointercancel", lift);
+  }
+
+  /** The fingers on the glass right now, by pointer id. */
+  private readonly touches = new Set<number>();
+
+  /** The crosshair onto the pointer, and the aim with it. */
+  private follow(f: FramePoint): void {
+    this.dot.style.left = `${f.x}px`;
+    this.dot.style.top = `${f.y}px`;
+    // A press, not only a move: a finger lands where it lands without having
+    // moved there first, and the gun lights follow the aim.
+    this.onAim(f.nx, f.ny);
   }
 
   /**
-   * Where the pointer is, in the viewport's own pixels.
+   * Where the pointer is: in the viewport's pixels for the crosshair, and in
+   * the **frame's** normalised coordinates for the ray.
+   *
+   * The two are different rectangles. The canvas is the 4:3 frame, centred in
+   * the viewport with bars beside or above it, and the camera's projection is
+   * the canvas's. The ray used to be built against the viewport's rectangle,
+   * which is the same thing only when the window happens to be 4:3 -- on a
+   * wide window every shot landed nearer the middle than the crosshair, by as
+   * much as a third of the frame on a phone held sideways.
    *
    * **A locked pointer has no position**, only deltas: `clientX` and `clientY`
    * stay frozen at wherever the lock was taken. Free roam captures the pointer
-   * to the canvas (`render/freeroam.ts`), so with shooting also on the
-   * crosshair would stick to the spot that was clicked and every shot would
-   * leave from it. A locked pointer is at the centre of the element it is
-   * locked to, which is where the reticle of anything that locks a pointer
-   * sits, so that is what both the crosshair and the ray are given.
+   * to the canvas (`render/freeroam.ts`), so the crosshair would stick to the
+   * spot that was clicked and every shot would leave from it. A locked pointer
+   * is at the centre of the element it is locked to, which is where the
+   * reticle of anything that locks a pointer sits -- and the canvas is centred
+   * in the viewport, so that is the middle of the frame as well.
    *
    * `document.pointerLockElement` is read rather than imported: it is a fact
    * about the document, and this layer asking another layer whether it has the
    * pointer would be `render/` importing `render/` sideways for a value the
    * browser already publishes.
    */
-  private pointerAt(e: PointerEvent): { x: number; y: number } {
-    const r = this.viewport.getBoundingClientRect();
+  private pointerAt(e: PointerEvent): FramePoint {
+    const v = this.viewport.getBoundingClientRect();
     if (document.pointerLockElement
         && this.viewport.contains(document.pointerLockElement)) {
-      return { x: r.width / 2, y: r.height / 2 };
+      return { x: v.width / 2, y: v.height / 2, nx: 0, ny: 0, inside: true };
     }
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    const c = this.canvas.getBoundingClientRect();
+    const nx = c.width > 0 ? ((e.clientX - c.left) / c.width) * 2 - 1 : 0;
+    const ny = c.height > 0 ? -((e.clientY - c.top) / c.height) * 2 + 1 : 0;
+    return {
+      x: e.clientX - v.left, y: e.clientY - v.top, nx, ny,
+      inside: Math.abs(nx) <= 1 && Math.abs(ny) <= 1,
+    };
   }
 
   /**
@@ -319,11 +388,9 @@ export class Shooting implements System {
    * the hit does, what it is worth — is the port's, and reaches it as a queued
    * request. See `game/combat/shot.ts`.
    */
-  private fire(e: PointerEvent): void {
+  private fire(f: FramePoint): void {
     if (!this._camera) return;
-    const r = this.viewport.getBoundingClientRect();
-    const p = this.pointerAt(e);
-    this.ndc.set((p.x / r.width) * 2 - 1, -(p.y / r.height) * 2 + 1);
+    this.ndc.set(f.nx, f.ny);
     this.ray.setFromCamera(this.ndc, this._camera as never);
     this.ray.far = SHOT_RANGE;
     this.shots++;

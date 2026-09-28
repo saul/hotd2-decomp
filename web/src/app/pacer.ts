@@ -93,8 +93,6 @@ export const STOPPED_TICK: Tick =
 export interface PacerHost extends DriveTarget {
   /** `?freeze=1` — one frame by definition, and no game time in it. */
   readonly frozen: boolean;
-  /** The transport's multiplier. Scales the accumulator's input, never a tick. */
-  readonly speed: number;
   /** Is there game time to advance at all? False when paused or in free roam. */
   readonly gameRunning: boolean;
   /** The frame has begun; `wall` is the unclamped delta since the last one. */
@@ -214,7 +212,6 @@ export class Pacer {
     const wall = this.loop.wallDelta(now);
 
     this.loop.freeze = this.host.frozen;
-    this.loop.speed = this.host.speed;
     this.loop.running = this.host.gameRunning;
 
     this.host.beginFrame(wall);

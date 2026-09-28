@@ -30,8 +30,8 @@ const _view = new Matrix4();
 const _scale = new Vector3();
 
 /**
- * The state both halves share: the pose scratch, the rails, and the two
- * switches the player's own chrome owns.
+ * The state both halves share: the pose scratch, the rails, and whether the
+ * script owns the shot.
  *
  * The path table is **not** here. It is on the context, where every layer that
  * evaluates a shot already reads it; a copy of it on this class was a second
@@ -44,10 +44,11 @@ export class CameraRig {
    * shot must not fight them for it.
    */
   scripted = true;
-  /** False while the frame slider is driving the camera by hand. */
-  driving = true;
-  /** UI toggle — off draws the authored shot, the path itself, not the block. */
-  trackEnabled = true;
+  // `driving` and `trackEnabled` were here: the frame slider's hold on the
+  // pose, and the Track switch, which drew the authored shot off the curve
+  // instead of the port's block. The slider went with the bottom bar, and the
+  // gameplay camera is the game rather than a view of it, so it is not a
+  // switch any more.
 
   readonly pose: CameraPose = {
     eye: new Vector3(0, 0, 0),
@@ -65,18 +66,6 @@ export class CameraRig {
   draw(ctx: RenderContext): void {
     if (!ctx.walker || !this.scripted) return;
     const cam = ctx.camera;
-    // The chrome's "authored shot" toggle: the path the camera is on, at the
-    // frame it published, drawn straight off the curve with nothing the port
-    // did to it. A view, not a write -- the port's block is untouched.
-    const p = this.trackEnabled ? null
-      : ctx.paths?.paths.get(G.g_active_cam_path) ?? null;
-    if (p) {
-      p.pose(G.g_cam_path_frame, G.g_cam_roll_enabled !== 0, this.pose);
-      applyPose(cam, this.pose);
-      cam.updateMatrixWorld(true);
-      this.rails?.setCameraPose(cam.position, this.pose.target);
-      return;
-    }
     _view.fromArray(G.g_camera_view_to_world);
     _view.decompose(cam.position, cam.quaternion, _scale);
     cam.updateMatrixWorld(true);
@@ -141,7 +130,6 @@ export class CameraDrawSystem implements System<RenderContext> {
   constructor(private readonly rig: CameraRig) {}
 
   update(ctx: RenderContext): void {
-    if (!this.rig.driving) return;
     this.rig.draw(ctx);
   }
 

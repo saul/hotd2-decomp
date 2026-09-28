@@ -52,13 +52,17 @@
  * under the body `[likely]` the talons, and the slot table names files, not
  * parts.
  *
- * `[diverges]` **The corpse's landing geometry.** `OwlCorpseFallAndSettle`
- * (`FUN_00448210`) has four of them — a stairwell with two reflecting rails at
- * `g_class43_corpse_rails` and a thirteen-step floor for sub-type 0, a plane
- * for 1, a box with an eight-step floor for 2, and water at `y = -25` for 3.
- * The port keeps the fall, the tumble, the 121-frame life and the despawn, and
- * leaves the four sets of literals out. The corpse lands at the wrong height
- * for 121 frames and then goes, which is the visible cost.
+ * ## The corpse lands where each group flies
+ *
+ * `OwlCorpseFallAndSettle` replaces the update on death, and the ground it
+ * falls to is **four sets of literals, one per sub-type** — the class knows
+ * nothing of the stage's collision. Sub-type 0 falls down a stairwell: two
+ * rails at `g_class43_corpse_rails` turn it back, a wall at `x = -739` stops
+ * it, thirteen steps bounce it, and it lands for good at `y = 35.91906`.
+ * Sub-type 1 lands on one side of a line on a flat at `49.16` and on the
+ * other against a sloped plane; sub-type 2 bounces once on an eight-step
+ * stair inside a box and lands at `-36` outside it; sub-type 3 goes into
+ * water at `-25`. Each landing but the water leaves a ground ring.
  *
  * ## The effects
  *
@@ -67,7 +71,9 @@
  * strike -- the ground impact ring and the water splash. The death also leaves
  * a spray of blood at the owl's camera-space point, `SpawnBloodSprayAtPoint`
  * (`FUN_00430C50`). The ring and the splash are made only by the corpse's
- * four landing arms, above, so they are ported and wait on those.
+ * landing arms, at `0x00448319` and `0x00448376` (sub-type 1's two),
+ * `0x00448710` (the tail sub-types 0 and 2 share) and `0x00448758` (sub-type
+ * 3's splash).
  */
 import type { Rng } from "../../core/rng";
 import type { Events } from "../../core/events";
@@ -85,19 +91,19 @@ import { SpawnClass } from "../spawn_class";
 // The effect tasks this class spawns (`game/effects/owl.ts`), and the blood
 // its death leaves at a point.
 import { SpawnBloodSprayAtPoint } from "../effects/blood";
-import { OwlSpawnFeatherBurst } from "../effects/owl";
+import {
+  OwlSpawnFeatherBurst, OwlSpawnGroundImpactRing, OwlSpawnWaterSplashFlipbook,
+} from "../effects/owl";
+import { RegisterForShotTest } from "../combat/shot_test";
 import { vec3 } from "../vec";
-import { OwlDiveKind, OwlState, type OwlTail } from "./state";
+import { OwlDiveKind, OwlFlag, OwlState, type OwlTail } from "./state";
 
-export { OwlDiveKind, OwlState } from "./state";
+export { OwlDiveKind, OwlFlag, OwlState } from "./state";
 export type { OwlTail } from "./state";
 
 /** BAMS to radians, and back. */
 const BAMS = (Math.PI * 2) / 65536;
 const TO_BAMS = 65536 / (Math.PI * 2);
-/** `FMUL float ptr [0x0055CB80]`, `0x3C888889`: 1/60, the two-player aim's
- * share of the owl's distance from the eye. */
-const OWL_AIM_PER_UNIT = Math.fround(1 / 60);
 
 // -- the numbers the class spells as literals -------------------------------
 
@@ -174,10 +180,114 @@ export const OWL_ORBIT_END_LOW = 0x7800;
 /** The coast waits this long, and then for frame 18 of the wing beat. */
 export const OWL_COAST_MIN = 30;
 export const OWL_RELAUNCH_BEAT = 0x12;
-/** The corpse: its gravity, its spin, and how long it lasts. */
-export const OWL_CORPSE_GRAVITY = -0.020415;
+/**
+ * The corpse: its gravity (`[0x00564798]`, subtracted), the spin the death
+ * gives it (`0xFFFFFD00`) and the share of it each frame keeps (`[0x0055CB40]`,
+ * through `ftol`), how long it lasts, and how fast it sinks once it has landed
+ * (`[0x005644F8]`).
+ */
+export const OWL_CORPSE_GRAVITY = -Math.fround(0.020415);
 export const OWL_CORPSE_SPIN = -768;
+export const OWL_CORPSE_SPIN_KEEP = Math.fround(0.95);
 export const OWL_CORPSE_FRAMES = 0x79;
+export const OWL_CORPSE_SINK = Math.fround(0.03);
+/** `PUSH 0x3F400000` — every ring a corpse leaves is at three quarters. */
+export const OWL_CORPSE_RING_SCALE = 0.75;
+/** `PUSH 0xDC00` — sub-type 1's two rings are turned to this yaw. */
+export const OWL_CORPSE_RING_YAW_SUBTYPE1 = 0xdc00;
+/** `PUSH 0x1000` — ...and the one on its sloped plane pitched by this. */
+export const OWL_CORPSE_RING_PITCH_SLOPE = 0x1000;
+/** `COMMON\DAMAGE5_22.WAV` (`0x1E16A9`, the record at `0x00584BDC`). */
+export const SND_OWL_CORPSE_THUD = 0x1e16a9;
+/** `COMMON\SIBUKI8_16.WAV` — sub-type 3's water. */
+export const SND_OWL_CORPSE_SPLASH = 0x4616a9;
+
+/**
+ * `g_class43_corpse_rails` — 0x005928C8. `f32[2 rail][5 point][x, y, z]`,
+ * 0x78 bytes ending exactly at `g_class43_launch_delay` (`0x00592940`), and
+ * only `OwlCorpseFallAndSettle` reads it. The y column is read by nothing:
+ * the rail test is in x and z.
+ */
+export const OWL_CORPSE_RAILS: readonly (readonly (readonly [number, number,
+  number])[])[] = [
+  [[-666.02686, 47.17505, -1090.4563], [-682.09937, 44.237053, -1097.3513],
+   [-695.5081, 41.20505, -1100.8845], [-707.83405, 38.285065, -1099.6738],
+   [-720.60425, 35.91906, -1093.8978]],
+  [[-666.06506, 47.17505, -1107.1716], [-677.01935, 44.237053, -1112.084],
+   [-694.1037, 41.20505, -1115.2294], [-710.3227, 38.285065, -1112.7423],
+   [-720.60425, 35.91906, -1106.6577]],
+].map((rail) => rail.map((p) =>
+  [Math.fround(p[0]), Math.fround(p[1]), Math.fround(p[2])] as const));
+
+/**
+ * Sub-type 0's stairwell, `OwlCorpseFallAndSettle`'s literals in the order
+ * the arm reads them. The rails are tested only east of
+ * {@link OWL_STAIR_RAILS_END_X} (`[0x00564764]`, which is both rails' last
+ * x, bit for bit); west of {@link OWL_STAIR_WALL_X} the corpse is stopped
+ * dead. Below {@link OWL_STAIR_LANDED_Y} it has landed; above it, the floor
+ * under it is a step `n` of {@link OWL_STAIR_STEP_RUN} in x and one unit in
+ * y, from {@link OWL_STAIR_TOP_Y} at {@link OWL_STAIR_TOP_X} down twelve.
+ */
+export const OWL_STAIR_RAILS_END_X = Math.fround(-720.60425);
+export const OWL_STAIR_WALL_X = -739.0;
+export const OWL_STAIR_WALL_SPIN = 0x600;
+export const OWL_STAIR_LANDED_Y = Math.fround(35.91906);
+/** `PUSH 0x420FC199` — the ring sits two hundredths above the landing. */
+export const OWL_STAIR_RING_Y = Math.fround(35.93906);
+export const OWL_STAIR_TOP_X = -671.0;
+export const OWL_STAIR_TOP_Y = 45.0;
+export const OWL_STAIR_STEP_RUN = 6.0;
+export const OWL_STAIR_STEPS_DOWN = 12;
+/** A step bounce: `x0.8` across, `x-0.4` up, and `0x400` off the spin. */
+export const OWL_STAIR_BOUNCE_KEEP = Math.fround(0.8);
+export const OWL_STAIR_BOUNCE_UP = Math.fround(-0.4);
+export const OWL_STAIR_BOUNCE_SPIN = 0x400;
+
+/**
+ * Sub-type 1's two grounds. A line through `(-630.6, -923.8)` along
+ * `(-34.9, -15.5)` divides a flat at {@link OWL_FLAT_LANDED_Y} from a slope,
+ * `OwlTestPositionBelowPlane`'s `(0, 0.979029, 0.203721, 140.1687)`. The
+ * line is four doubles, `[0x00564790]`, `[0x00564780]`, `[0x00564778]` and
+ * `[0x00564788]`, and the third is `-34.89999999999998` rather than `-34.9`:
+ * `[likely]` the compiler folding `-665.5 - -630.6`.
+ */
+export const OWL_FLAT_LINE_X = -630.6;
+export const OWL_FLAT_LINE_Z = -923.8;
+export const OWL_FLAT_LINE_DX = -34.89999999999998;
+export const OWL_FLAT_LINE_DZ = -15.5;
+export const OWL_FLAT_LANDED_Y = Math.fround(49.16);
+/** `PUSH 0x42453333` — the flat's ring is at 49.3, whatever the corpse's y. */
+export const OWL_FLAT_RING_Y = Math.fround(49.3);
+export const OWL_SLOPE_PLANE = [
+  0, Math.fround(0.979029), Math.fround(0.203721), Math.fround(140.1687),
+] as const;
+/** `[0x004C4380]` — the slope's ring is a unit under the corpse. */
+export const OWL_SLOPE_RING_DROP = 1.0;
+
+/**
+ * Sub-type 2's box and stair. Inside the box the floor is step `n` of
+ * {@link OWL_BOX_STEP_RISE} for every {@link OWL_BOX_STEP_RUN} the corpse is
+ * south of {@link OWL_BOX_STAIR_Z}, eight at most; below
+ * {@link OWL_BOX_FLOOR_Y}, in the box or out of it, it has landed.
+ */
+export const OWL_BOX_MIN_X = -1136.0;
+export const OWL_BOX_MAX_X = -1113.0;
+export const OWL_BOX_MIN_Z = -1121.0;
+export const OWL_BOX_MAX_Z = Math.fround(-1098.7);
+export const OWL_BOX_STAIR_Z = Math.fround(-1102.4666);
+export const OWL_BOX_STEP_RUN = Math.fround(3.7666);
+export const OWL_BOX_STEPS = 8.0;
+export const OWL_BOX_STEP_RISE = 3.5;
+export const OWL_BOX_BOTTOM_STEP_Y = -33.0;
+/** The one bounce: `x-0.5` on all three, and `0x600` on the spin. */
+export const OWL_BOX_BOUNCE = -0.5;
+export const OWL_BOX_BOUNCE_SPIN = 0x600;
+export const OWL_BOX_FLOOR_Y = -36.0;
+/** `PUSH 0xC20FEB85` — the ring two hundredths above the floor. */
+export const OWL_BOX_RING_Y = Math.fround(-35.98);
+
+/** Sub-type 3's water: at or below this the corpse splashes and settles. */
+export const OWL_WATER_Y = -25.0;
 /** `obj+0x1A0/1A8` keep this much of themselves when the owl is shot. */
 export const OWL_DEATH_DAMP = 0.4;
 /** How many feathers the death sheds, and how many a strike does. */
@@ -319,34 +429,39 @@ export function OwlEvalApproachSplinePoint(sub: OwlTail): void {
  * `OwlPickTargetPlayerAndAimOffset` — `FUN_00447FB0`. Called on every launch.
  *
  * With two players it flips a coin and then places an aim offset a quarter
- * turn either side of the camera's yaw, so two owls arrive from opposite
- * sides. With one, `obj+0x121` follows `g_active_player` when that is 0 or 1
- * and is **left where it was** when it is -1 or 2 — a real asymmetry, not an
- * oversight to tidy up.
+ * turn either side of the camera block's yaw, so two owls arrive from
+ * opposite sides. With one, `obj+0x121` follows `g_active_player` when that
+ * is 0 or 1 and is **left where it was** when it is -1 or 2 — a real
+ * asymmetry, not an oversight to tidy up.
+ *
+ * The offset's length is the owl's horizontal distance from the block's eye,
+ * `ftol`'d, over sixty (`[0x0055CB80]`, `0x3C888889`), and its heading is
+ * `g_camera_block_yaw_bams` (`0x009A60D0`, read at `0x00448050`) plus
+ * `0xC000` for player 0 or `0x4000` for player 1. The port used to take the
+ * length from the sway rate and the heading from `g_camera_yaw_bams`, which
+ * is the block's turned half round, so the two players' owls came in on each
+ * other's side.
  */
 export function OwlPickTargetPlayerAndAimOffset(obj: Actor, sub: OwlTail,
                                                 rng: Rng): void {
   if (G.g_players_in_play === 2) {
     const p = rng.int(2);
     obj.attackPermit = p;
-    // `0x0044800D`..`0x00448105`: `d = ftol(sqrt(dx² + dz²)) / 60` from the
-    // camera block's eye (`0x009A60C0`/`C8`), and the offset is a quarter
-    // turn either side of the camera block's yaw, `g_camera_block_yaw_bams`
-    // (`0x009A60D0`), read at `0x00448050`. This took `d` from the sway rate
-    // and the heading from `g_camera_yaw_bams` (`0x009C71F0`), a camera
-    // heading turned half round, which swapped the two sides. `[proved]`
     const e = G.g_camera_block_eye;
-    const d = Math.trunc(Math.sqrt((obj.pos.x - e.x) * (obj.pos.x - e.x)
-                                   + (obj.pos.z - e.z) * (obj.pos.z - e.z)))
+    const d = Math.trunc(Math.hypot(obj.pos.x - e.x, obj.pos.z - e.z))
       * OWL_AIM_PER_UNIT;
-    const off = p === 0 ? 0xc000 : 0x4000;
-    sub.aimX = Math.sin((G.g_camera_block_yaw_bams + off) * BAMS) * d;
-    sub.aimZ = Math.cos((G.g_camera_block_yaw_bams + off) * BAMS) * d;
+    const a = (G.g_camera_block_yaw_bams + (p !== 0 ? 0x4000 : 0xc000))
+      * BAMS;
+    sub.aimX = Math.sin(a) * d;
+    sub.aimZ = Math.cos(a) * d;
     return;
   }
   if (G.g_active_player === 0) obj.attackPermit = 0;
   if (G.g_active_player === 1) obj.attackPermit = 1;
 }
+
+/** `[0x0055CB80]` — a sixtieth, as a `float`. */
+export const OWL_AIM_PER_UNIT = Math.fround(1 / 60);
 
 /** The launch every dive shares, from state 3's coast and from state 5. */
 function OwlBeginSwayDive(obj: Actor, sub: OwlTail, f: ClassFrame): void {
@@ -467,6 +582,17 @@ export function PlaceOwlFlockMember(obj: Actor, rng?: Rng): void {
  *
  * The first test is the odd one: **a sub-type-0 owl cannot be shot until the
  * camera's path frame passes 682**, and no other sub-type has that guard.
+ * **Nothing clears bit 3 while it waits** — no instruction in the class ANDs
+ * `obj+0x34` with a mask that drops it, and `MarkActorShot` only raises it —
+ * so a bullet that lands early is kept, and the owl dies on the first frame
+ * the guard lets it. The port used to clear the bit every frame, which
+ * forgot the early bullet.
+ *
+ * The death marks the body `OwlFlag.Corpse` (`0x1000000`), the bit
+ * `OwlDrawBodyChain` reads, and never `ActorFlag.Dead`; and it zeroes
+ * `obj+0x24C`, `+0x250` and `+0x254` — not the settle flag at `+0x26C`,
+ * which nothing but a landing ever writes. `+0x254` has no other reference in
+ * the image, so it is not carried.
  */
 export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   const sub = Tail(obj);
@@ -492,7 +618,7 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   G.g_player_hit_count[who] = (G.g_player_hit_count[who] ?? 0) + 1;
 
   if (sub.state === OwlState.Dive) G.g_class43_attack_token = -1;
-  obj.flags |= ActorFlag.Dead;
+  obj.flags |= OwlFlag.Corpse;
   G.g_enemies_alive -= 1;
   G.g_enemies_present -= 1;
   obj.flags |= ActorFlag.NoCameraTrack;
@@ -500,12 +626,12 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   if (sub.state === OwlState.WaitLaunch || sub.state === OwlState.FlyToCircle) {
     obj.flags |= ActorFlag.Reacting;
   }
-  // The corpse is thrown at unit speed along the camera block's yaw turned
-  // half round -- `g_camera_block_yaw_bams + 0x8000` (`0x009A60D0`, read at
-  // `0x0044627B` and `0x004462B6`), the camera's forward, away from the
-  // viewer -- on top of four tenths of whatever it was doing. This read
-  // `g_camera_yaw_bams` (`0x009C71F0`), a camera heading already turned half
-  // round, and threw the corpse at the camera. `[proved]`
+  // The corpse is thrown at unit speed, on top of four tenths of whatever it
+  // was doing, along `g_camera_block_yaw_bams + 0x8000` -- the block's yaw
+  // (`0x009A60D0`, read at `0x0044627B` and `0x004462B6`) faces back at the
+  // viewer, so this is **away from the camera**, the way the shot pushed it.
+  // It read `g_camera_yaw_bams`, which already faces forward, and so threw
+  // every corpse back over the player's head.
   const a = (G.g_camera_block_yaw_bams + 0x8000) * BAMS;
   sub.vx = sub.vx * OWL_DEATH_DAMP + Math.sin(a);
   sub.vz = sub.vz * OWL_DEATH_DAMP + Math.cos(a);
@@ -513,7 +639,6 @@ export function OwlResolveShot(obj: Actor, f: ClassFrame): boolean {
   sub.state = OwlState.Dead;
   sub.timer = 0;
   sub.bounced = 0;
-  sub.settled = 0;
   // `0x004462E7`, the block's last call before it swaps `obj[0]`.
   OwlSpawnFeatherBurst(OWL_FEATHERS_DEATH, obj, f.rng);
   return true;
@@ -924,28 +1049,204 @@ export function OwlStateOrbitAwayAfterStrike(obj: Actor, f: ClassFrame): void {
 }
 
 /**
+ * `OwlTestPositionBelowPlane` — `FUN_00448850`.
+ *
+ * `a*x + b*y + c*z + d <= 0` for the actor's `obj+0x40/44/48`, as `AL`:
+ * `TEST AH, 0x41` after the compare with `0.0`, so "equal" is below too.
+ * Its one caller is sub-type 1's corpse.
+ */
+export function OwlTestPositionBelowPlane(obj: Actor, a: number, b: number,
+                                          c: number, d: number): boolean {
+  return a * obj.pos.x + b * obj.pos.y + c * obj.pos.z + d <= 0.0;
+}
+
+/**
  * `OwlCorpseFallAndSettle` — `FUN_00448210`.
  *
  * Not a state: the death block swaps `obj[0]` for it, so it replaces the
- * update wholesale. What is here is the fall, the tumble, the 121-frame life
- * and the despawn.
+ * update wholesale — no state dispatch, no yaw, no camera point and no shot
+ * test from here on. Every frame it falls or sinks, then counts, and on its
+ * 121st it is gone without drawing.
  *
- * `[diverges]` The four per-sub-type landings are not — see the file's note.
+ * **Falling** is gravity, the move, and the tumble: `obj+0x64 += spin`, then
+ * `spin = ftol(spin * 0.95)` — the spin dies away rather than turning the body
+ * over for ever. Then the landing, which is a `switch` on the sub-type
+ * through the jump table at `0x004487B8` and is **four sets of literals** —
+ * nothing here asks the stage's collision:
+ *
+ * * **0** (`0x00448397`) — a stairwell. East of both rails' last point each
+ *   rail tests which side of its current segment the corpse is on and flips
+ *   `vz` — rail 0 on one side, rail 1 on the other, so between them both
+ *   fire and cancel and beyond either one fires and turns it back. West of
+ *   `x = -739` it is stopped dead with a kick to the spin. Under `35.91906`
+ *   it has landed: the ring (at `0x00448710`, the tail it shares with 2), the
+ *   thud. Otherwise the step under it bounces it, with the thud.
+ * * **1** (`0x004482BA`) — one side of a line is a flat: under `49.16` a ring
+ *   at `0x00448319`, and **no thud**, and the corpse is not moved onto it.
+ *   The other side is a slope, `OwlTestPositionBelowPlane`: a ring a unit
+ *   under the corpse pitched `0x1000` at `0x00448376`, and the thud.
+ * * **2** (`0x004485BA`) — inside a box an eight-step stair turns its fall
+ *   back every time and bounces it across once (`obj+0x250`); at `-36`,
+ *   anywhere, it has landed: the ring at `0x00448710` and the thud.
+ * * **3** (`0x0044872E`) — at `-25` or under, the water: the splash at
+ *   `0x00448758` and `SIBUKI8`. The corpse is not stopped at the surface;
+ *   it sinks through it like every settled one.
+ *
+ * `obj+0x26C` is raised by those four landings only. **Settled**, the corpse
+ * sinks `0.03` a frame and does nothing else.
+ *
+ * The positions and velocities are `float` in the engine and compared as
+ * they were stored; the port keeps doubles, as the rest of the class does,
+ * and every literal is the engine's `float` (or, for sub-type 1's line, its
+ * `double`) bit for bit.
  */
-export function OwlCorpseFallAndSettle(obj: Actor): void {
+export function OwlCorpseFallAndSettle(obj: Actor, events?: Events): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.settled !== 0) {
-    obj.pos.y -= 0.03;
+    obj.pos.y -= OWL_CORPSE_SINK;
   } else {
+    // `0x00448227`..`0x004482A7`. The locals are what the arms compare.
     sub.vy += OWL_CORPSE_GRAVITY;
     obj.pos.x += sub.vx;
-    obj.pos.y += sub.vy;
     obj.pos.z += sub.vz;
-    obj.pitch = s16(obj.pitch + sub.spin);
+    obj.pos.y += sub.vy;
+    const x = obj.pos.x;
+    const y = obj.pos.y;
+    const z = obj.pos.z;
+    obj.pitch += sub.spin;
+    sub.spin = Math.trunc(sub.spin * OWL_CORPSE_SPIN_KEEP);
+    switch (sub.subtype) {
+      case 0: {
+        if (x > OWL_STAIR_RAILS_END_X) {
+          for (let rail = 0; rail < 2; rail += 1) {
+            const pts = OWL_CORPSE_RAILS[rail];
+            // The segment whose x span holds the corpse: 0 east of point 1,
+            // else the first `i` past it with `pts[i+1].x <= x`. Point 4's x
+            // is the guard above, so the walk never reaches past point 4.
+            let seg = 0;
+            if (x < pts[1][0]) {
+              while (seg < 4) {
+                const past = x < pts[seg + 2][0];
+                seg += 1;
+                if (!past) break;
+              }
+            }
+            const p0 = pts[seg];
+            const p1 = pts[seg + 1];
+            const side = (p1[2] - p0[2]) * (p0[0] - x)
+              - (p1[0] - p0[0]) * (p0[2] - obj.pos.z);
+            // Rail 0 `TEST AH, 0x41; JZ` flips on `> 0`; rail 1
+            // `TEST DL, AH` with `DL = 1` flips on `< 0`.
+            if (rail === 0 ? side > 0.0 : side < 0.0) sub.vz *= -1.0;
+          }
+        }
+        if (x < OWL_STAIR_WALL_X) {
+          sub.spin += OWL_STAIR_WALL_SPIN;
+          obj.pos.x = OWL_STAIR_WALL_X;
+          sub.vx = 0;
+          sub.vz = 0;
+        }
+        if (y < OWL_STAIR_LANDED_Y) {
+          obj.pos.y = OWL_STAIR_LANDED_Y;
+          OwlSpawnGroundImpactRing(obj.pos.x, OWL_STAIR_RING_Y, obj.pos.z,
+                                   OWL_CORPSE_RING_SCALE, 0, obj.yaw, events);
+          sub.settled = 1;
+          play(events, SND_OWL_CORPSE_THUD);
+          break;
+        }
+        // The step: `n` counts down from 0 while `n * 6 - 671` is still
+        // east of the corpse, twelve at most, and the floor is `n + 45`.
+        let n = 0.0;
+        if (obj.pos.x < OWL_STAIR_TOP_X) {
+          while (n > -OWL_STAIR_STEPS_DOWN) {
+            n -= 1.0;
+            if (!(n * OWL_STAIR_STEP_RUN + OWL_STAIR_TOP_X > obj.pos.x)) break;
+          }
+        }
+        const floor = n + OWL_STAIR_TOP_Y;
+        if (y <= floor) {
+          obj.pos.y = floor;
+          play(events, SND_OWL_CORPSE_THUD);
+          sub.vx *= OWL_STAIR_BOUNCE_KEEP;
+          sub.spin -= OWL_STAIR_BOUNCE_SPIN;
+          sub.vy *= OWL_STAIR_BOUNCE_UP;
+          sub.vz *= OWL_STAIR_BOUNCE_KEEP;
+        }
+        break;
+      }
+      case 1: {
+        const side = (OWL_FLAT_LINE_X - x) * OWL_FLAT_LINE_DZ
+          - (OWL_FLAT_LINE_Z - z) * OWL_FLAT_LINE_DX;
+        if (side > 0.0) {
+          if (y < OWL_FLAT_LANDED_Y) {
+            OwlSpawnGroundImpactRing(x, OWL_FLAT_RING_Y, z,
+                                     OWL_CORPSE_RING_SCALE, 0,
+                                     OWL_CORPSE_RING_YAW_SUBTYPE1, events);
+            sub.settled = 1;
+          }
+        } else if (OwlTestPositionBelowPlane(obj, ...OWL_SLOPE_PLANE)) {
+          OwlSpawnGroundImpactRing(obj.pos.x, obj.pos.y - OWL_SLOPE_RING_DROP,
+                                   obj.pos.z, OWL_CORPSE_RING_SCALE,
+                                   OWL_CORPSE_RING_PITCH_SLOPE,
+                                   OWL_CORPSE_RING_YAW_SUBTYPE1, events);
+          sub.settled = 1;
+          play(events, SND_OWL_CORPSE_THUD);
+        }
+        break;
+      }
+      case 2: {
+        if (x > OWL_BOX_MIN_X && x < OWL_BOX_MAX_X
+            && z > OWL_BOX_MIN_Z && z < OWL_BOX_MAX_Z) {
+          // `n` counts up while `-1098.7 - n * 3.7666 - 3.7666` is still
+          // north of the corpse, eight at most; the step is `n * 3.5 - 33`.
+          let n = 0.0;
+          if (z < OWL_BOX_STAIR_Z) {
+            while (n < OWL_BOX_STEPS) {
+              n += 1.0;
+              if (!(OWL_BOX_MAX_Z - n * OWL_BOX_STEP_RUN - OWL_BOX_STEP_RUN
+                    > z)) {
+                break;
+              }
+            }
+          }
+          const step = n * OWL_BOX_STEP_RISE + OWL_BOX_BOTTOM_STEP_Y;
+          if (y < step) {
+            obj.pos.y = step;
+            sub.vy *= OWL_BOX_BOUNCE;
+            if (sub.bounced === 0) {
+              sub.bounced = 1;
+              sub.vx *= OWL_BOX_BOUNCE;
+              sub.vz *= OWL_BOX_BOUNCE;
+              play(events, SND_OWL_CORPSE_THUD);
+              sub.spin += OWL_BOX_BOUNCE_SPIN;
+            }
+          }
+        }
+        if (obj.pos.y > OWL_BOX_FLOOR_Y) break;
+        obj.pos.y = OWL_BOX_FLOOR_Y;
+        OwlSpawnGroundImpactRing(obj.pos.x, OWL_BOX_RING_Y, obj.pos.z,
+                                 OWL_CORPSE_RING_SCALE, 0, obj.yaw, events);
+        sub.settled = 1;
+        play(events, SND_OWL_CORPSE_THUD);
+        break;
+      }
+      case 3:
+        if (y <= OWL_WATER_Y) {
+          sub.settled = 1;
+          OwlSpawnWaterSplashFlipbook(x, y, z);
+          play(events, SND_OWL_CORPSE_SPLASH);
+        }
+        break;
+      default:
+        // `CMP EAX, 3; JA 0x0044877C` — no landing at all.
+        break;
+    }
   }
+  // `0x0044877C`: the count, and on its 121st frame the despawn instead of
+  // the draw.
   sub.timer += 1;
-  if (sub.timer >= OWL_CORPSE_FRAMES) ActorDespawn(obj);
+  if (sub.timer > OWL_CORPSE_FRAMES - 1) ActorDespawn(obj);
 }
 
 /** `g_class43_states` — 0x00592944. Seven entries used; the eighth is a stub. */
@@ -966,19 +1267,29 @@ const g_class43_states: Record<number, (obj: Actor, f: ClassFrame) => void> = {
  * worth reading twice: **states 1 and 2 point the owl along its own velocity
  * and the attack states point it at the camera**, and the turn is a tenth of
  * the error a frame, or a quarter while circling.
+ *
+ * The tail runs on every frame the owl is alive, **the death frame
+ * included**: the camera point and `RegisterForCameraTracking`, then the
+ * owl's own position through the view into `obj+0x70..0x78` and
+ * `RegisterForShotTest` (`0x0044644E`..`0x00446488`). The corpse routine that
+ * replaces this one makes neither call, so a corpse is never a candidate for
+ * a bullet — which is why the class registers the engine's way
+ * (`ClassHandler.registersForShotTest`) rather than being picked by its
+ * sphere from `render/`, where a corpse went on taking the shots meant for
+ * the owl behind it.
  */
 export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);
   if (!sub) return;
   if (sub.state === OwlState.Dead) {
-    OwlCorpseFallAndSettle(obj);
+    OwlCorpseFallAndSettle(obj, f.events);
     return;
   }
   // **The death block falls through** (`0x004462EF` into `0x004462F5`): the
   // state it has just set is 6, whose table entry is a bare `RET`, and the
-  // yaw below still steers on the frame the owl dies.
+  // yaw below still steers on the frame the owl dies. Bit 3 is not cleared:
+  // see `OwlResolveShot`.
   OwlResolveShot(obj, f);
-  obj.flags &= ~ActorFlag.Hit;
   g_class43_states[sub.state]?.(obj, f);
 
   if (sub.state !== OwlState.WaitLaunch) {
@@ -989,7 +1300,11 @@ export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
       || (sub.state === OwlState.OrbitAway && sub.timer > 0)
       || (sub.state === OwlState.Approach && sub.timer > 0);
     if (faceCamera) h = BamsOf(f.eye.x - obj.pos.x, f.eye.z - obj.pos.z);
-    const e = s16(h - s16(obj.yaw));
+    // `SUB AX, [ESI+0x68]; AND EAX, 0xFFFF; CMP ECX, 0x8000; JLE` then
+    // `SUB ECX, 0x10000`: the error runs `-0x7FFF..+0x8000`, so a target
+    // exactly behind turns the positive way.
+    let e = (h - obj.yaw) & 0xffff;
+    if (e > 0x8000) e -= 0x10000;
     obj.yaw += Math.trunc(sub.state === OwlState.Circle ? e / 4 : e / 10);
   }
   // `OwlDrawBodyChain`, then the camera point: the circle's centre four units
@@ -1005,6 +1320,13 @@ export function OwlUpdateAndResolveShot(obj: Actor, f: ClassFrame): void {
     obj.lookAt.z = obj.pos.z;
   }
   RegisterForCameraTracking(obj);
+  // `MatrixTransformPoint(obj+0x40, obj+0x70)` and `RegisterForShotTest(obj)`.
+  // The port keeps `obj+0x70..0x78` in world space (`Actor.shotCentre`) and
+  // the shot test takes the depth itself: the owl's point, unlifted.
+  obj.shotCentre.x = obj.pos.x;
+  obj.shotCentre.y = obj.pos.y;
+  obj.shotCentre.z = obj.pos.z;
+  RegisterForShotTest(obj, f.host);
   sub.prevX = obj.pos.x;
   sub.prevY = obj.pos.y;
   sub.prevZ = obj.pos.z;
@@ -1020,21 +1342,36 @@ const handler: ClassHandler = {
   update: OwlUpdateAndResolveShot,
   updatesWhenDead: true,
   ownsShotResult: true,
+  registersForShotTest: true,
+  /**
+   * The owl has no leave routine in the exe; this stands in for one under
+   * `RetireUnlistedActor`'s declared divergence, and it gives back only what
+   * the death block would: the token if the owl holds it — which is state 4,
+   * the one state the death block tests — and both counts **unless the owl is
+   * already a corpse**, which gave them back when it died. It used to test
+   * the token against `obj+0x228`, which two groups in one block share, and
+   * to release the counts whatever the owl's state. (Owls are slot actors,
+   * which nothing retires today, so neither was reached; the hook should
+   * still say what the death block says.)
+   */
   leave(obj: Actor): void {
     const sub = Tail(obj);
-    if (sub && G.g_class43_attack_token === sub.member) {
-      G.g_class43_attack_token = -1;
+    if (sub && sub.state === OwlState.Dive) G.g_class43_attack_token = -1;
+    if (!(obj.flags & OwlFlag.Corpse)) {
+      G.g_enemies_alive -= 1;
+      G.g_enemies_present -= 1;
     }
-    G.g_enemies_alive -= 1;
-    G.g_enemies_present -= 1;
     ActorDespawn(obj);
   },
-  onDeadSweep(obj: Actor): void {
-    const sub = Tail(obj);
-    if (sub && G.g_class43_attack_token === sub.member) {
-      G.g_class43_attack_token = -1;
-    }
-  },
+  /**
+   * Nothing. The owl gives everything back in its own death block — the
+   * counts, the camera slot, and the token if it was diving — and its corpse
+   * gives nothing back when it despawns. The hook is here so the generic
+   * teardown, which would retire both counts a second time, is not run; it
+   * used to free `g_class43_attack_token` whenever the despawned owl's member
+   * index matched it, which in stage 2 block 5 is an owl of the other group.
+   */
+  onDeadSweep(): void {},
   debug(obj: Actor): ActorDebug {
     const sub = Tail(obj);
     if (!sub) return { summary: "owl" };

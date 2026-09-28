@@ -101,6 +101,7 @@ import {
   placeJudgmentRoot, seatJudgmentSubActors, syncJudgmentWings,
 } from "./characters/judgment";
 import { restoreGore, swapGore } from "./characters/gore";
+import { placeBatRoot } from "./characters/bat";
 export type { Instance };
 
 
@@ -541,6 +542,9 @@ export class CharacterLayer implements System {
         } else if (placeJudgmentRoot(inst)) {
           // Classes 0x22 and 0x23: all three angles, in each model's own
           // order (`model+0x68`). See `render/characters/judgment.ts`.
+        } else if (placeBatRoot(inst)) {
+          // Class 0x46: all three angles in order 5, at the model's own
+          // size. See `render/characters/bat.ts`.
         } else if (inst.a.carrierAt >= 0) {
           inst.root.position.set(inst.a.carrierWorld.x,
                                  inst.a.carrierWorld.y,
@@ -1133,6 +1137,8 @@ export class CharacterLayer implements System {
         if (placeHordeRoot(inst)) {
           // See `update`.
         } else if (placeJudgmentRoot(inst)) {
+          // See `update`.
+        } else if (placeBatRoot(inst)) {
           // See `update`.
         } else if (inst.a.carrierAt >= 0) {
           inst.root.position.set(inst.a.carrierWorld.x,

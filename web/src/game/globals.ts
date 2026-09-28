@@ -32,6 +32,7 @@ import type { FishBloodCloud, FishSurfaceRing, FishWaterSplash }
 import type { OwlFeather, OwlGroundRing, OwlWaterSplash }
   from "./effects/owl";
 import type { RingEffect } from "./effects/ring_effect";
+import type { WaterRing } from "./effects/water_ring";
 import type { Actor } from "./actor";
 import type { BreakableProp } from "./class41/prop_state";
 import type { PropShatter } from "./class41/shatter";
@@ -47,6 +48,7 @@ import type {
 } from "./class45/state";
 import type { ScreenSpriteAnim } from "./game_over";
 import type { Boss4HitMark } from "./class19/hit_mark";
+import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
@@ -111,6 +113,37 @@ export enum AppState {
    * xref and it is on the way in, not the way out.
    */
   Boot = 0x10,
+}
+
+/**
+ * `g_screen_furniture_flags` — `0x009A5900`, the bits a screen card holds
+ * while it has the screen.
+ *
+ * Each card ORs its bit in when it starts and ANDs it out on the frame it
+ * raises its gate's flag, and the readers are draw routines that stand aside
+ * for it: `HudDrawShutterState` (`FUN_00413970`) holds no bars in state 4
+ * while either is up (`TEST byte ptr [0x009a5900], 0x30` at `0x00413BB5`),
+ * `HudDrawLives` (`FUN_004174A0`) drops "HOLD YOUR FIRE!" under the result
+ * card, and `Class22CutsceneHoldUntilChapterCard` (`FUN_0049B280`) draws
+ * only while the chapter card is down. `[proved]`
+ *
+ * Only the two cards' bits are members. Bits 0, 1 and 3 have writers of
+ * their own -- `PlayerTryStartPress` and `UpdateSceneViewAndLight` for 0,
+ * `CommitAppState` for 1, `EvtLoadBlockProgram` for 3 -- and are still
+ * literals where the port uses them.
+ */
+export enum ScreenFurniture {
+  /**
+   * `ResultCardInstall` (`FUN_00434EF0`): `OR EDX, 0x10` at `0x00434FD0` in
+   * sub 0, `AND AL, 0xEF` at `0x00435683` beside `g_script_flags[0xFE]`.
+   */
+  ResultCard = 0x10,
+  /**
+   * `ChapterCardInstall` (`FUN_004342E0`): `OR AL, 0x20` at `0x0043436B` in
+   * sub 0 (and in both installer arms), `AND AL, 0xDF` at `0x004348C7`
+   * beside `g_script_flags[0xF8]`.
+   */
+  ChapterCard = 0x20,
 }
 
 export { PlayerState, PlayerTask, RunPhase } from "./player_state";
@@ -965,6 +998,13 @@ export const G = {
   /** `[port-only]` — see {@link PropStripEffect.id}. */
   g_prop_strip_effect_seq: 0,
   /**
+   * `[port-only]` — the rings `SpawnWaterRing` (`FUN_004567C0`) has put on a
+   * wet surface. `game/effects/water_ring.ts`.
+   */
+  g_water_rings: [] as WaterRing[],
+  /** `[port-only]` — see {@link WaterRing.id}. */
+  g_water_ring_seq: 0,
+  /**
    * `[port-only]` — the owl's and the fish's effect tasks, and the ring task
    * the fish's corpse leaves on the water: `game/effects/owl.ts`,
    * `game/effects/fish.ts` and `game/effects/ring_effect.ts`. Each is an
@@ -1309,6 +1349,15 @@ export const G = {
    * because no two of them are ever in play at once.
    */
   g_bat_members: [] as number[],
+  /**
+   * `[port-only]` as a pool: the `0x50`-byte objects `SpawnBatSplash`
+   * (`FUN_0042F980`) allocates, each running `BatSplashUpdate`
+   * (`FUN_0042F930`). Plain records for the same reason as
+   * `g_severed_heads`. `game/class46/splash.ts`.
+   */
+  g_bat_splashes: [] as BatSplash[],
+  /** `[port-only]` — see {@link BatSplash.id}. */
+  g_bat_splash_seq: 0,
 
   // -- the horde, class 0x40 ---------------------------------------------
   /**
@@ -1516,7 +1565,8 @@ export const G = {
   /**
    * `g_screen_furniture_flags` — 0x009A5900. Bit 0 lets a start press take
    * effect at once (else it waits in state 10); bit 1 is raised by
-   * `CommitAppState` and required by `PlayerTryStartPress`.
+   * `CommitAppState` and required by `PlayerTryStartPress`. Bits `0x10` and
+   * `0x20` are the two screen cards' — see {@link ScreenFurniture}.
    */
   g_screen_furniture_flags: 0,
   /**
@@ -1938,6 +1988,14 @@ export const G = {
    * with `RotY(camera_yaw) * p + camera_eye` at draw time.
    */
   g_rain_particles: [] as RainParticle[],
+  /**
+   * `g_rain_enabled` — 0x009C8E50. `EvtOpEnableRain1D` (`FUN_0045F340`)
+   * stores its operand here and `ResetSceneOnEnter` zeroes it (`0x0045EE78`).
+   * The draw of the rain itself reads the walker's copy; what reads this one
+   * is gameplay: `ZombieDeathEffectCueTick` and `ZombieDeathLandingEffect`
+   * splash rather than raise dust while it is `1`.
+   */
+  g_rain_enabled: 0,
 
   /** 60 Hz frames since the scene reset. Not an exe global; the port's clock. */
   g_frame: 0,
@@ -2022,7 +2080,8 @@ export type Globals = typeof G;
  *   the hit-slot system are ported and which are not. |
  * | `g_bHudShutterState` back to 5 | ◑ written, as 2 -- see the field, and `Shutter.reset` |
  * | `g_bHudShutterPrev` back to 5 | ❌ the walker owns that one |
- * | `g_backdrop_mode = 0`, `g_rain_enabled = 0` | ❌ neither global exists |
+ * | `g_backdrop_mode = 0` | ❌ the global does not exist |
+ * | `g_rain_enabled = 0` (`0x0045EE78`) | ✅ |
  * | `g_nFiringGate = 0` | ✅ |
  * | the scene light block, via `LightBlockSetDirection` (`FUN_0040E140`) | ❌ |
  * | `ColiLoadForScene`, `AssetDrainAllJobs` and three loader calls | ❌ the
@@ -2086,6 +2145,8 @@ export function ResetSceneOnEnter(): void {
   G.g_bHudShutterState = 2;
   // `g_screen_shake_frames`, `MOV [0x009c8e8c], EBX` at `0x0045EE29`.
   G.g_screen_shake_frames = 0;
+  // `g_rain_enabled`, `MOV [0x009c8e50], EBX` at `0x0045EE78`.
+  G.g_rain_enabled = 0;
   // `MOV [0x009ca098], EBX` at `0x0045EE7E`: the stashed rail obeys its gate
   // again in a new scene.
   G.g_force_rail_advance = 0;
@@ -2163,6 +2224,8 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_sprite_effect_seq = 0;
   G.g_prop_strip_effects = [];
   G.g_prop_strip_effect_seq = 0;
+  G.g_water_rings = [];
+  G.g_water_ring_seq = 0;
   // ...and the owl's and the fish's tasks, which the scene's list takes
   // with it like every other task.
   G.g_owl_feathers = [];
@@ -2261,6 +2324,9 @@ export function ResetGameGlobals(carry?: PlayerBlock): void {
   G.g_slot_actors_built = [];
   G.g_class43_attack_token = -1;
   G.g_bat_members = [];
+  // The splash is a task, and the scene's task list goes with the scene.
+  G.g_bat_splashes = [];
+  G.g_bat_splash_seq = 0;
   G.g_horde_members = [];
   G.g_horde_live_count = 0;
   G.g_horde_diver = 0;

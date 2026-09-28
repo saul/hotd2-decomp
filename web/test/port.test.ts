@@ -66,6 +66,7 @@ import { ActorBuildSkinnedModel } from "../src/game/spawn";
 import {
   ColiSortHitCandidatesByDistance, ProcessPlayerShotsTestList, RayTestSphere,
   RegisterForShotTest, ShotCandidateKey, ShotRayAnglesFromView,
+  ShotTestListReset,
 } from "../src/game/combat/shot_test";
 import { ActorStrikeConnect } from "../src/game/class30/strike";
 import {
@@ -74,7 +75,7 @@ import {
 import { ScoreAddForPlayer } from "../src/game/combat/score";
 import { RunSceneTasksAndTimers, UpdateDamageRank } from "../src/game/run_phase";
 import { ActorByAt, AppState, G, HIT_SLOT_NONE, PlayerState, PlayerTask,
-  ResetGameGlobals, ResetSceneOnEnter, RunPhase }
+  ResetGameGlobals, ResetSceneOnEnter, RunPhase, ScreenFurniture }
   from "../src/game/globals";
 import {
   RAIN_PARTICLE_COUNT, RainAdvanceParticles, RainResetParticles,
@@ -116,8 +117,12 @@ import {
   EmergePropState, type HordeTail,
 } from "../src/game/class40";
 import { makeSubModel, SubModelFlag } from "../src/game/class40/submodel";
-import { BatDiveUpdate, BatUpdate, BAT_CHAR_TYPE, BAT_SPLINE_POINTS,
-  BAT_WING_CHAR_TYPE } from "../src/game/class46";
+import { BatChildAt, BatDiveUpdate, BatSplashesTick, BatUpdate, BatWingAt,
+  BAT_CHAR_TYPE, BAT_CLIP, BAT_DIVE_BOB_SCALE, BAT_FLAG_80000,
+  BAT_SCATTER_ACCEL_XZ, BAT_SCATTER_ACCEL_Y, BAT_SCATTER_CORPSE_DAMP,
+  BAT_SCATTER_CORPSE_GRAVITY, BAT_SPLASH_LAST_FRAME, BAT_SPLASH_Y,
+  BAT_SPLINE_POINTS, BAT_WING_CHAR_TYPE, BAT_WING_CLIP, BAT_WING_PITCH,
+  SND_BAT_SPLASH, SpawnBatSplash } from "../src/game/class46";
 import { BatState, type BatTail } from "../src/game/class46/state";
 import { OwlDiveKind, OwlState, type OwlTail }
   from "../src/game/class43/state";
@@ -198,6 +203,20 @@ import { ActorDeadSweep, ActorDespawn } from "../src/game/despawn";
 import { g_class30_bone_cels, ZombieBoneCelSlots }
   from "../src/game/class30/bonecels";
 import { HIT_SLOT_CLAIMED } from "../src/game/hit_slots";
+import {
+  COND_HEAVY_LANDING, LANDING_HEAVY_SHAKE, SND_LANDING, SND_LANDING_HEAVY,
+  ZOMBIE_DEATH_EFFECT_CUES,
+} from "../src/game/class30/death_effects";
+import { SpawnGroundRingEffect, type RingEffect }
+  from "../src/game/effects/ring_effect";
+import { WATER_RING_FRAMES, WATER_RING_SLOT }
+  from "../src/game/effects/water_ring";
+import { ZombieStateArcScriptedEntrance } from "../src/game/class30/entrance";
+import { ZombieStateDelayedLeap } from "../src/game/class30/emerge";
+import { ArcPhase } from "../src/game/class31/arc";
+import { OPS as SCENE_OPS } from "../src/script/ops/scene";
+import type { SpriteEffect } from "../src/game/effects/sprite";
+import { UpdateScreenShake } from "../src/game/effects/damage_overlay";
 import { ActorIsEnemy, type ClassFrame, DeadSweep, ENEMY_CLASSES, g_class_handlers, registerClass }
   from "../src/game/registry";
 import { PORTED_CLASSES } from "../src/game/classes";
@@ -247,7 +266,7 @@ import {
   RELOAD_SOUND,
 } from "../src/game/player_gun";
 import {
-  RELOAD_VOICE, SHOOT_VOICE,
+  HudDrawLives, RELOAD_VOICE, SHOOT_VOICE,
 } from "../src/game/hud_readout";
 import { BossHpBarSprite, HUD_READOUT_SPRITES, HudSprite }
   from "../src/game/hud_sprites";
@@ -12229,8 +12248,10 @@ console.log("the skinned model's draw gates, as state:");
   // `ActorBuildSkinnedModel` (`FUN_00410440`): `model+0x64 = 3`, and one
   // eight-byte record per `g_pCharacterExtraParts` entry with byte `+1` at 1.
   const z = spawnZombie(0x3080, 1, "built");
+  // ...and then `EnemyZombieInit` ORs bit 4 in (`0x00452E21`), the trace the
+  // corpse's ring and the shadow take -- so a class-0x30 actor carries 7.
   check("the build leaves the skeleton drawn and one byte per part, all 1",
-        z.motionFlags === MOTION_FLAGS_INIT
+        z.motionFlags === (MOTION_FLAGS_INIT | MotionFlag.TraceGround)
         && (z.motionFlags & MotionFlag.Drawn) !== 0
         && z.partVisible.length === TYPE.parts!.length
         && z.partVisible.every((v) => v === 1),
@@ -12744,6 +12765,308 @@ console.log("class 0x30 state 12, with no clip to wait on:");
         `state ${z.state} sub ${z.sub}`);
   check("...and `g_enemies_present` is leaked for the rest of the stage",
         G.g_enemies_present === 1, `present ${G.g_enemies_present}`);
+}
+
+/**
+ * **What a body throws up when it goes down**, which the port used to leave
+ * out: `ZombieInstallDeathEffectCues` (`FUN_004563F0`) and
+ * `ZombieDeathEffectCueTick` (`FUN_004569B0`) put dust or a splash at the
+ * death clip's cue frames, `ZombieDeathLandingEffect` (`FUN_00456B70`) at a
+ * landing, `SpawnWaterRing` (`FUN_004567C0`) on the wet surfaces, and
+ * `SpawnGroundRingEffect` (`FUN_00407DA0`) opens a ring under the corpse.
+ * Every assertion that names an effect, a sound or the shake fails on the old
+ * port, which drew none of them.
+ */
+console.log("class 0x30, the dust, the splash and the rings a death leaves:");
+{
+  const SPRITES = {
+    blood_scale: { "1": 0.75, "2": 0.5, "3": 1.0 },
+    impact_sprite: {
+      [String(SpriteEffectKind.Dust)]: [0x94, 0xa2, 0.7],
+      [String(SpriteEffectKind.Splash)]: [0x1339, 0x1356, 1.0],
+    },
+    impact_sprite_default: [0x0904, 0x0904, 0.1],
+    ricochet: {},
+    impact: [], head_impact: [],
+    voice: { hurt: [], kill: [], head: [],
+             attack: [[{ id: 40, file: "" }], [{ id: 50, file: "" }]] },
+    voice_set_a_types: [1],
+  };
+  const WET_BLOB = coliQuad([0, 1, 0, 0], 1,
+                            [-200, 0, 200, 200, 0, 200, 200, 0, -200,
+                             -200, 0, -200], 5);
+  // `SetGameTables` puts `T.coli` back, so the floor goes in after it.
+  const dying = (at: number, condition: number, wet = false) => {
+    const rng = new Rng(31);
+    const events = scene(0, rng);
+    SetGameTables({ ...CHARS, combat: SPRITES } as unknown as CharactersJson);
+    T.coli = { files: ["test"], blobs: { floor: wet ? WET_BLOB : FLOOR_BLOB } };
+    G.g_coli_full_set = ["floor"];
+    const z = spawnZombie(at, 1, "dying");
+    z.visible = true;
+    z.hp = 0;
+    z.dead = true;
+    z.flags |= ActorFlag.Dead;
+    z.condition = condition;
+    z.pos = vec3(3, 2, 40);
+    z.lookAt = vec3(5, 6, 44);
+    z.state = ZombieState.Death;
+    z.sub = 0;
+    return { z, rng, events };
+  };
+  const newSprites = (since: number) =>
+    G.g_sprite_effects.filter((e) => e.id >= since);
+
+  // -- the cue list and the dust ---------------------------------------------
+  {
+    const { z, rng, events } = dying(0x3700, 5);
+    check("`EnemyZombieInit` raises `obj+0x1F8` bit 4 -- the ring traces the floor",
+          (z.motionFlags & MotionFlag.TraceGround) !== 0,
+          `0x${z.motionFlags.toString(16)}`);
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    // Body condition 5 with no remap bits takes clip 0x3DB, whose list is the
+    // one at 0x005930C4: a single cue, play frame 25.
+    check("a condition-5 death plays 0x3DB and installs its cue list",
+          z.motion === 0x3db && z.zom.deathCue === 6
+          && ZOMBIE_DEATH_EFFECT_CUES[z.zom.deathCue] === 25,
+          `motion 0x${z.motion.toString(16)} cue ${z.zom.deathCue}`);
+    const seq0 = G.g_sprite_effect_seq;
+    let at = -1;
+    let dust: SpriteEffect | undefined;
+    for (let i = 0; i < 60 && z.state === ZombieState.Death; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      const fresh = newSprites(seq0);
+      if (fresh.length && at < 0) { at = MotionPlayFrame(z); dust = fresh[0]; }
+    }
+    check("the dust goes up on the cue frame and not before",
+          at === 25, `first effect at play frame ${at}`);
+    check("...one of it, kind 0x46", G.g_sprite_effect_seq - seq0 === 1
+          && dust?.kind === SpriteEffectKind.Dust,
+          `${G.g_sprite_effect_seq - seq0} spawned, kind ${dust?.kind}`);
+    check("...on the traced floor, not at the body's own height",
+          dust?.pos.y === 0 && dust.pos.x === 3 && dust.pos.z === 40,
+          JSON.stringify(dust?.pos));
+    check("...stretched by the cue's own override, not the kind's 0.7",
+          dust?.scale.x === 0.5 && dust.scale.y === 1.5 && dust.scale.z === 1.5,
+          JSON.stringify(dust?.scale));
+    check("...and the cursor steps on to the list's terminator",
+          ZOMBIE_DEATH_EFFECT_CUES[z.zom.deathCue] === -1,
+          `cue ${z.zom.deathCue}`);
+    check("no water rings on a dry floor", G.g_water_rings.length === 0);
+
+    // The corpse: the ring opens under the tracked bone on the corpse state's
+    // first frame, at the traced floor plus 0.05.
+    for (let i = 0; i < 10 && z.state === ZombieState.Death; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    check("the death clip ends in a sinking corpse",
+          z.state === ZombieState.CorpseSink, `state ${z.state}`);
+    // The corpse state's first frame is the next one.
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    const ring = G.g_ring_effects[0];
+    check("...which opens one ring task", G.g_ring_effects.length === 1,
+          `${G.g_ring_effects.length}`);
+    check("...at the tracked bone's x and z, not the origin's",
+          ring?.x === 5 && ring.z === 44, JSON.stringify(ring));
+    check("...on the traced floor plus 0.05, at scale 1",
+          ring !== undefined && ring.y === Math.fround(0.05)
+          && ring.scale === 1, `${ring?.y}`);
+    check("...and the frame that spawned it already shows the spread",
+          ring !== undefined && ring.drawnStrips.length === 4
+          && ring.count === RING_EFFECT_SPREAD_FRAMES - 1, `${ring?.count}`);
+
+    // 120 frames spreading, 30 holding, 39 fading, and gone on the 40th --
+    // outliving the corpse, which leaves after its own 120.
+    const drew = (r: RingEffect) => r.drawnStrips.length === 4 ? "spread"
+      : r.drawnAlpha < 1 ? "fade" : "hold";
+    const drawn: string[] = [];
+    if (ring) drawn.push(drew(ring));
+    for (let i = 0; i < 400 && G.g_ring_effects.length; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (G.g_ring_effects[0]) drawn.push(drew(G.g_ring_effects[0]));
+    }
+    const count = (s: string) => drawn.filter((d) => d === s).length;
+    check("the ring spreads for 120 frames, holds 30 and fades for 39",
+          count("spread") === 120 && count("hold") === 30
+          && count("fade") === 39 && drawn.length === 189,
+          `${count("spread")}/${count("hold")}/${count("fade")} `
+          + `of ${drawn.length}`);
+    check("...and the corpse it opened under is long gone by then", z.despawned);
+  }
+
+  // -- in the attract demo, no ring --------------------------------------------
+  {
+    const { z } = dying(0x3710, 5);
+    G.g_app_state = AppState.Attract;
+    SpawnGroundRingEffect(z);
+    check("`SpawnGroundRingEffect` does nothing outside play",
+          G.g_ring_effects.length === 0);
+    G.g_app_state = AppState.InPlay;
+    z.motionFlags &= ~MotionFlag.TraceGround;
+    SpawnGroundRingEffect(z);
+    check("...and without bit 4 the ring sits at the body's own height",
+          G.g_ring_effects[0]?.y === Math.fround(2 + Math.fround(0.05)),
+          `${G.g_ring_effects[0]?.y}`);
+  }
+
+  // -- on water: the rings, then the splash ----------------------------------
+  {
+    const { z, rng, events } = dying(0x3720, 5, true);
+    const seq0 = G.g_sprite_effect_seq;
+    for (let i = 0; i < 60 && z.state === ZombieState.Death; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (G.g_water_rings.length) break;
+    }
+    const splash = newSprites(seq0);
+    const rings = G.g_water_rings;
+    check("on a wet surface the cue puts down two water rings",
+          rings.length === 2 && rings.every((r) => r.slot === WATER_RING_SLOT),
+          `${rings.length}`);
+    check("...at 1.0 and 0.5, each give or take a tenth or two",
+          rings.length === 2
+          && [0.8, 0.9, 1.0, 1.1, 1.2].some((s) =>
+            Math.abs(rings[0]!.size - s) < 1e-6)
+          && [0.3, 0.4, 0.5, 0.6, 0.7].some((s) =>
+            Math.abs(rings[1]!.size - s) < 1e-6),
+          rings.map((r) => r.size).join(", "));
+    check("...on the floor, and a splash beside them there too",
+          rings.every((r) => r.pos.y === 0) && splash.length === 1
+          && splash[0]!.kind === SpriteEffectKind.Splash
+          && splash[0]!.pos.y === 0,
+          `${splash.map((s) => `${s.kind}@${s.pos.y}`).join(",")}`);
+    check("...and the rings are once per death: the latch is up",
+          (z.flags2 & ZombieFlag2.OneShotFired) !== 0);
+    // Sixty frames drawn, the spawn frame the first of them.
+    let alive = 1;
+    const first = rings[0]!;
+    while (G.g_water_rings.includes(first) && alive < 200) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      if (G.g_water_rings.some((r) => r.id === first.id)) alive++;
+      else break;
+    }
+    check("a water ring lives sixty frames, widening and fading",
+          alive === WATER_RING_FRAMES, `${alive}`);
+  }
+
+  // -- in the rain, a splash at the body -------------------------------------
+  {
+    const { rng, events } = dying(0x3730, 5);
+    // `EvtOpEnableRain1D` stores its operand in `g_rain_enabled`, and the
+    // scene reset takes it back to 0.
+    SCENE_OPS[0x1d]!.run!({} as Walker, { value: 1 } as never, true);
+    check("the rain opcode writes `g_rain_enabled`", G.g_rain_enabled === 1);
+    const seq0 = G.g_sprite_effect_seq;
+    for (let i = 0; i < 60 && !newSprites(seq0).length; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    }
+    const s = newSprites(seq0)[0];
+    check("in the rain the cue splashes instead of raising dust",
+          s?.kind === SpriteEffectKind.Splash, `kind ${s?.kind}`);
+    check("...at the body's own height, and puts down no rings",
+          s?.pos.y === 2 && G.g_water_rings.length === 0,
+          `${s?.pos.y}, ${G.g_water_rings.length} rings`);
+    ResetSceneOnEnter();
+    check("...and `ResetSceneOnEnter` puts `g_rain_enabled` back to 0",
+          G.g_rain_enabled === 0);
+  }
+
+  // -- the landing: state 12 -------------------------------------------------
+  {
+    const { z, rng, events } = dying(0x3740, 0);
+    z.flags |= ActorFlag.HoldingWeapon;
+    z.pos = vec3(0, 40, 40);
+    const seq0 = G.g_sprite_effect_seq;
+    const seen = new Map<number, SpriteEffect>();
+    for (let i = 0; i < 500 && z.state !== ZombieState.CorpseSink; i++) {
+      GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+      for (const e of newSprites(seq0)) seen.set(e.id, e);
+    }
+    const spawned = [...seen.values()];
+    check("a body that falls and bounces raises dust where it lands, once",
+          spawned.length === 1 && spawned[0]!.kind === SpriteEffectKind.Dust
+          && spawned[0]!.pos.y === 0 && z.state === ZombieState.CorpseSink,
+          `${spawned.map((e) => `${e.kind}@${e.pos.y}`)}, state ${z.state}`);
+  }
+
+  // -- the arc entrance's landing: the sound, the shake ----------------------
+  const landArc = (condition: number) => {
+    const { z, rng, events } = dying(0x3750 + condition, condition);
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    z.dead = false;
+    z.flags &= ~ActorFlag.Dead;
+    z.hp = 10;
+    z.state = ZombieState.ArcScriptedEntrance;
+    z.sub = 4;
+    z.arcPhase = ArcPhase.Settled;
+    z.flags2 |= ZombieFlag2.Carried;
+    G.g_screen_shake_frames = 0;
+    const seq0 = G.g_sprite_effect_seq;
+    ZombieStateArcScriptedEntrance(z, 1 / 60, rng, NULL_HOST, events);
+    return { z, heard, spawned: newSprites(seq0) };
+  };
+  {
+    const light = landArc(0);
+    check("an arc entrance lands with the footfall and the landing hook's dust",
+          light.heard.includes(SND_LANDING)
+          && light.spawned.some((e) => e.kind === SpriteEffectKind.Dust),
+          `${light.heard.map((h) => h.toString(16))}`);
+    check("...and no shake", G.g_screen_shake_frames === 0,
+          `${G.g_screen_shake_frames}`);
+    check("...clearing the carried bit on the settled phase",
+          (light.z.flags2 & ZombieFlag2.Carried) === 0);
+    const heavy = landArc(COND_HEAVY_LANDING);
+    check("body condition 5 lands heavy: the knock and a 0x20-frame shake",
+          heavy.heard.includes(SND_LANDING_HEAVY)
+          && !heavy.heard.includes(SND_LANDING)
+          && G.g_screen_shake_frames === LANDING_HEAVY_SHAKE,
+          `${heavy.heard.map((h) => h.toString(16))}, `
+          + `shake ${G.g_screen_shake_frames}`);
+    check("...and no dust", heavy.spawned.length === 0);
+    // Sub 3 arms the arc and drops the landing's latch -- `AND ECX,
+    // 0xfffeffff` at `0x00458BA1`, bit 0x10000 -- so a latch left up by
+    // anything earlier cannot swallow this landing. The port used to clear
+    // the carried bit there instead, one hex digit over.
+    const armed = landArc(0);
+    armed.z.sub = 3;
+    armed.z.entry = { dest: [0, 0, 60], frames: 20, step: 1 };
+    armed.z.flags2 |= ZombieFlag2.OneShotFired;
+    ZombieStateArcScriptedEntrance(armed.z, 1 / 60, new Rng(3), NULL_HOST,
+                                   new Events());
+    check("arming the arc drops the landing latch, bit 0x10000",
+          (armed.z.flags2 & ZombieFlag2.OneShotFired) === 0,
+          `sub ${armed.z.sub} flags2 0x${armed.z.flags2.toString(16)}`);
+    // `UpdateScreenShake` is what turns the count into the camera's nod.
+    G.g_screen_shake_frames = LANDING_HEAVY_SHAKE;
+    UpdateScreenShake();
+    check("...which `UpdateScreenShake` counts down into a nod",
+          G.g_screen_shake_frames === LANDING_HEAVY_SHAKE - 1
+          && G.g_screen_shake_pitch !== 0, `pitch ${G.g_screen_shake_pitch}`);
+  }
+
+  // -- the delayed leap's landing, the same pair and the attack cry ----------
+  {
+    const { z, rng, events } = dying(0x3760, 0);
+    const heard: number[] = [];
+    events.on("sound.play", (d) => heard.push(d.id));
+    z.dead = false;
+    z.flags &= ~ActorFlag.Dead;
+    z.hp = 10;
+    z.state = ZombieState.DelayedLeap;
+    z.sub = 3;
+    z.delayedLeap = { delay: 0, dest: [0, 0, 40], gravity: -0.03 };
+    z.zom.holdFrames = 0;
+    const seq0 = G.g_sprite_effect_seq;
+    ZombieStateDelayedLeap(z, 1 / 60, rng, NULL_HOST, events);
+    check("a delayed leap lands with the footfall, the dust and the attack cry",
+          heard.includes(SND_LANDING) && heard.includes(40)
+          && newSprites(seq0).some((e) => e.kind === SpriteEffectKind.Dust),
+          `heard ${heard.map((h) => h.toString(16))}`);
+    check("...and the cry comes after the footfall, as the exe plays them",
+          heard.includes(SND_LANDING)
+          && heard.indexOf(SND_LANDING) < heard.indexOf(40),
+          heard.map((h) => h.toString(16)).join(","));
+  }
 }
 
 console.log("`ActorKillAll` routes class 0x30 through its death chain:");
@@ -14510,6 +14833,98 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
           `at ${w.block}/${w.step}/${w.opIndex} wait ${w.wait?.op.op}`);
   }
 
+  /**
+   * Every value written to `g_screen_furniture_flags` while `run` runs, each
+   * with `g_script_flags[flag]` as it stood at that write.
+   *
+   * A skipped chapter card raises its bit and drops it inside one call, so
+   * the word before and after that call is the same whether the card wrote
+   * it twice or never touched it. Only the writes themselves can tell.
+   */
+  const furnitureWrites = (flag: number, run: () => void) => {
+    let word = G.g_screen_furniture_flags;
+    const writes: { word: number; flag: number }[] = [];
+    Object.defineProperty(G, "g_screen_furniture_flags", {
+      configurable: true, enumerable: true,
+      get: () => word,
+      set: (v: number) => {
+        word = v;
+        writes.push({ word: v, flag: G.g_script_flags[flag] ?? 0 });
+      },
+    });
+    try {
+      run();
+    } finally {
+      Object.defineProperty(G, "g_screen_furniture_flags", {
+        configurable: true, enumerable: true, writable: true, value: word,
+      });
+    }
+    return writes;
+  };
+  /** What a card must leave alone: start bits 0 and 1, and the other card. */
+  const OTHER_FURNITURE = 0x3;
+
+  // The chapter card's bit: `OR AL, 0x20` at `0x0043436B` first thing in
+  // sub 0, and `AND AL, 0xDF` at `0x004348C7` straight after flag 248 goes
+  // up at `0x004348C1`. The skip (NEW-BUGS bug 13) runs both in the one
+  // update, which is the exe's own skip path -- so the bit is up for exactly
+  // the stretch of that call between sub 0's head and the flag, and down
+  // again before any other routine runs.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    const before = OTHER_FURNITURE | ScreenFurniture.ResultCard;
+    G.g_screen_furniture_flags = before;
+    const writes = furnitureWrites(CHAPTER_CARD_FLAG, () => {
+      if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
+    });
+    const shown = writes.map((x) => `0x${x.word.toString(16)}@${x.flag}`);
+    check("the chapter card raises g_screen_furniture_flags bit 0x20 before "
+          + "flag 248 and drops it after, both in its one skipped update",
+          writes.length === 2
+          && writes[0].word === (before | ScreenFurniture.ChapterCard)
+          && writes[0].flag === 0
+          && writes[1].word === before && writes[1].flag === 1
+          && card?.dead === true,
+          `${shown.join(" ")} dead ${card?.dead}`);
+    check("...so the update ends with the bit down and every other bit as "
+          + "it found them",
+          G.g_screen_furniture_flags === before,
+          `0x${G.g_screen_furniture_flags.toString(16)}`);
+  }
+
+  // The installer's two arms raise the same bit before they hand over:
+  // `OR EDX, 0x20` at `0x004342F6` (Boss Mode) and `0x00434324` (app state
+  // 0x0B). The clears are in the variants, which the port does not run, so
+  // neither the flag nor the drop comes.
+  {
+    ResetGameGlobals();
+    EnterPlay();
+    SetGameTables(CHARS);
+    const w = new Walker(cardScript(SpawnClass.ChapterCard, CHAPTER_CARD_FLAG),
+                         cardHost);
+    w.tick(1 / 60);
+    const card = G.g_object_list.find((o) => o.cls === SpawnClass.ChapterCard);
+    const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    G.g_GameMode = GameMode.Boss;
+    G.g_screen_furniture_flags = OTHER_FURNITURE;
+    if (card) g_class_handlers[SpawnClass.ChapterCard]?.update(card, f);
+    check("in Boss Mode the installer raises bit 0x20 and hands over, with "
+          + "no latch, no flag and no kill of its own",
+          G.g_screen_furniture_flags
+            === (OTHER_FURNITURE | ScreenFurniture.ChapterCard)
+          && (G.g_script_flags[CHAPTER_CARD_FLAG] ?? 0) === 0
+          && card?.sub === 0 && card?.dead === false,
+          `0x${G.g_screen_furniture_flags.toString(16)} `
+          + `flag ${G.g_script_flags[CHAPTER_CARD_FLAG]} sub ${card?.sub}`);
+  }
+
   // The result card: 420 frames, and it drops the trigger on its first.
   {
     ResetGameGlobals();
@@ -14521,15 +14936,40 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
     w.tick(1 / 60);
     const card = G.g_object_list.find((o) => o.cls === SpawnClass.ResultCard);
     const f = { eye: EYE, dt: 1 / 60, rng: new Rng(3), host: NULL_HOST };
+    /** `HudDrawLives`' state-4 arm, the reader of bit 0x10 on this side:
+     *  how many "HOLD YOUR FIRE!" it draws, on a frame it would blink on. */
+    const holdYourFire = (): number => {
+      G.g_bHudShutterState = 4;
+      G.g_frame_counter = 60;
+      G.g_screen_sprite_draws = [];
+      HudDrawLives(0);
+      return G.g_screen_sprite_draws
+        .filter((d) => d.id === HudSprite.HoldYourFire).length;
+    };
+    G.g_screen_furniture_flags = OTHER_FURNITURE;
     if (card) g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
     check("the result card drops `g_nFiringGate` on its first frame",
           card !== undefined && G.g_nFiringGate === 0,
           `card ${card !== undefined} gate ${G.g_nFiringGate}`);
+    // `OR EDX, 0x10` at `0x00434FD0`, in sub 0 beside the gate.
+    check("...and raises g_screen_furniture_flags bit 0x10 there, leaving "
+          + "the other bits alone",
+          G.g_screen_furniture_flags
+            === (OTHER_FURNITURE | ScreenFurniture.ResultCard)
+          && (G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0,
+          `0x${G.g_screen_furniture_flags.toString(16)}`);
+    check("...so shutter state 4 blinks no 'HOLD YOUR FIRE!' under it",
+          holdYourFire() === 0);
     let frames = 1;
+    let upThroughout = true;
     while (card && frames < RESULT_CARD_FRAMES + 60
            && (G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0) {
       g_class_handlers[SpawnClass.ResultCard]?.update(card, f);
       frames += 1;
+      if ((G.g_script_flags[RESULT_CARD_FLAG] ?? 0) === 0
+          && (G.g_screen_furniture_flags & ScreenFurniture.ResultCard) === 0) {
+        upThroughout = false;
+      }
       w.tick(1 / 60);
     }
     check(`...holds ${RESULT_CARD_FRAMES} frames, then raises `
@@ -14537,6 +14977,15 @@ console.log("\n`spawn_simple` builds the cards, and the cards open the gate:");
           frames === RESULT_CARD_FRAMES
           && G.g_script_flags[RESULT_CARD_FLAG] === 1,
           `${frames} frames, flag ${G.g_script_flags[RESULT_CARD_FLAG]}`);
+    // `AND AL, 0xEF` at `0x00435683`, after the flag at `0x0043567C`.
+    check("...with bit 0x10 up on every frame before the flag, and down on "
+          + "the frame the flag goes up",
+          upThroughout && card?.dead === true
+          && G.g_screen_furniture_flags === OTHER_FURNITURE,
+          `up ${upThroughout} dead ${card?.dead} `
+          + `0x${G.g_screen_furniture_flags.toString(16)}`);
+    check("...and 'HOLD YOUR FIRE!' is back once the card has gone",
+          holdYourFire() === 1);
     check("...and the gate behind it opens, so the script runs on",
           w.wait === null && !(w.step === 0 && w.opIndex === 1)
           && (G.g_script_flags[9] ?? 0) === 1,
@@ -17601,6 +18050,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           bat(six[0]).group === bat(six[3]).group
           && six[0].pos.x === six[3].pos.x && six[0].pos.z === six[3].pos.z,
           `${six[0].pos.x} vs ${six[3].pos.x}`);
+    // `obj+0x64/0x68 = placer+0x64/0x68; obj+0x6C = 0`, after the heading
+    // seed: the member faces the descriptor's way until its spline turns it.
+    check("...and each faces its descriptor's yaw, not zero, while it waits",
+          six[1].yaw === 0x8000 && six[1].pitch === 0 && six[1].roll === 0,
+          `${six[1].yaw.toString(16)}`);
     // Twenty frames apart. Member 0 leaves on its first update; member 1 is
     // still waiting twenty updates later.
     BatDiveUpdate(six[0], frame(rng));
@@ -17627,9 +18081,11 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
   }
 
   {
-    // The hit gate. A diving bat is invulnerable for its whole launch delay --
-    // the engine tests `state != 2 && state != 0` -- and killable once it is
-    // flying, for 80.
+    // The hit gate. A diving bat cannot die during its launch delay -- the
+    // engine tests `state != 2 && state != 0` -- but **only the arm that takes
+    // a hit clears bit 3** (`AND AL, 0xF7` at `0x0042E2A5`), so a shot that
+    // lands while it waits is still standing when it launches, and the same
+    // gate takes it on its first flying frame.
     const rng = new Rng(61);
     scene(0, rng);
     G.g_players_in_play = 1;
@@ -17642,15 +18098,18 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...and is still in both counters",
           G.g_enemies_alive === 1 && G.g_enemies_present === 1,
           `${G.g_enemies_alive}/${G.g_enemies_present}`);
-    for (let i = 0; i < 41; i += 1) BatUpdate(o, frame(rng));
-    check("...it is flying once its stagger is up",
-          bat(o).state === BatState.Fly, BatState[bat(o).state]);
+    check("...but the hit is not dropped: bit 3 is still up",
+          (o.flags & ActorFlag.Hit) !== 0, o.flags.toString(16));
+    for (let i = 0; i < 40; i += 1) BatUpdate(o, frame(rng));
+    check("...it launches when its stagger is up, the hit still pending",
+          bat(o).state === BatState.Fly && (o.flags & ActorFlag.Hit) !== 0,
+          `${BatState[bat(o).state]} ${o.flags.toString(16)}`);
     const score = G.g_player_score[0];
-    o.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
     BatUpdate(o, frame(rng));
-    check("...and one bullet kills it then, for 80",
+    check("...and the pending hit kills it on its first flying frame, for 80",
           bat(o).state === BatState.Dead
-          && G.g_player_score[0] - score === 80,
+          && G.g_player_score[0] - score === 80
+          && (o.flags & ActorFlag.Hit) === 0,
           `${BatState[bat(o).state]} +${G.g_player_score[0] - score}`);
     check("...dropping both counters on the hit, not on the corpse",
           G.g_enemies_alive === 0 && G.g_enemies_present === 0,
@@ -17658,6 +18117,17 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     for (let i = 0; i < 0x51; i += 1) BatUpdate(o, frame(rng));
     check("...and the corpse lasts eighty frames", o.despawned,
           `${o.despawned}`);
+
+    // ...and one that nobody shot while it waited dies to its first bullet.
+    const p = mkBat(0x9d40, 0, 0, 0, rng);
+    BatUpdate(p, frame(rng));
+    const before = G.g_player_score[0];
+    p.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    BatUpdate(p, frame(rng));
+    check("a flying bat dies to one bullet, for 80",
+          bat(p).state === BatState.Dead
+          && G.g_player_score[0] - before === 80,
+          `${BatState[bat(p).state]} +${G.g_player_score[0] - before}`);
   }
 
   {
@@ -17813,17 +18283,247 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     check("...of character type 0x1F, on its own clip",
           wing!.charType === BAT_WING_CHAR_TYPE && wing!.motion === 0x406,
           `${wing!.charType.toString(16)} clip ${wing!.motion.toString(16)}`);
-    for (let i = 0; i < 3; i += 1) BatUpdate(o, frame(rng));
-    BatUpdate(wing!, frame(rng));
-    check("...which follows its body a unit above it",
-          Math.abs(wing!.pos.y - (o.pos.y + 1)) < 1e-3,
-          `${wing!.pos.y.toFixed(2)} vs ${o.pos.y.toFixed(2)}`);
+    check("...at its body's address with bit 30 set",
+          wing!.at === BatWingAt(o.at) && wing!.at === (0xa200 | 0x40000000),
+          wing!.at.toString(16));
     // The body leaves; the wing reads an empty slot and goes on the next frame.
     ActorDespawn(o);
     G.g_bat_members[bat(o).subtype * 0x19 + bat(o).member] = 0;
     BatUpdate(wing!, frame(rng));
     check("...and despawns the frame its body's slot goes empty",
           wing!.despawned, `${wing!.despawned}`);
+  }
+
+  {
+    // **The seat is the body's node matrix, not its yaw.** `BatWingUpdate`
+    // multiplies `body+0x2C4` -- node 1's draw record -- and translates
+    // `(0, 1, 2)` in it, so the offset is turned by the clip's root record,
+    // lifted by its root height and shrunk by the model's 0.6 before the
+    // body's own yaw turns it. A clip whose root record is a plain half-turn
+    // about y and whose root height is -0.5, a body at a quarter turn (L48):
+    //
+    //   Ry(0x8000) (0, 1, 2)  = (0, 1, -2)
+    //   T(0, -0.5, 0)         = (0, 0.5, -2)
+    //   S(0.6)                = (0, 0.3, -1.2)
+    //   Ry(0x4000)            = (-1.2, 0.3, 0)     x' = x cos + z sin
+    //   + (10, -5, -100)      = (8.8, -4.7, -100)
+    //
+    // The first cut took `(0, 1, 2)` in the yaw alone -- (12, -4, -100) -- which
+    // for the real clip put the wings four units off, on the wrong side.
+    const rng = new Rng(97);
+    const SEAT_CLIP = { bank: "t", frames: 1, fps: 30, root: [0, -0.5, 0],
+                        rot: [0, 0x8000, 0, 0, 0, 0] };
+    const BAT_T = { ...TYPE, type: BAT_CHAR_TYPE, name: "zabat",
+      bone_count: 2,
+      bones: [{ bone: 1, part: "bone01_1b01", slot: 0x1b01,
+                offset: [0, 0, 0], parent: null, steps: [] }],
+      motions: { [String(BAT_CLIP)]: SEAT_CLIP } } as unknown as CharacterType;
+    const WING_T = { ...BAT_T, type: BAT_WING_CHAR_TYPE, name: "zabat_wing",
+      motions: { [String(BAT_WING_CLIP)]: SEAT_CLIP } } as unknown as
+      CharacterType;
+    ResetGameGlobals();
+    SetGameTables({ ...CHARS, types: { ...CHARS.types,
+      [String(BAT_CHAR_TYPE)]: BAT_T, [String(BAT_WING_CHAR_TYPE)]: WING_T },
+    } as CharactersJson);
+    G.g_players_in_play = 1;
+    const o = mkBat(0xa240, 0, 0, 0, rng);
+    const wing = G.g_object_list.find(
+      (a) => a.cls === SpawnClass.Bat && bat(a).isWing)!;
+    o.pos = vec3(10, -5, -100);
+    o.yaw = 0x4000;
+    o.pitch = 0;
+    BatUpdate(wing, frame(rng));
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+    check("a wing sits on its body's node: (0, 1, 2) through the clip's root "
+          + "record, its height and the 0.6 model scale",
+          near(wing.pos.x, 8.8) && near(wing.pos.y, -4.7)
+          && near(wing.pos.z, -100),
+          `${wing.pos.x.toFixed(3)},${wing.pos.y.toFixed(3)},`
+          + `${wing.pos.z.toFixed(3)}`);
+    check("...turned half round from its body and pitched 0xE800",
+          wing.yaw === 0x4000 + 0x8000 && wing.pitch === BAT_WING_PITCH,
+          `${wing.yaw.toString(16)} ${wing.pitch.toString(16)}`);
+    check("...on its body's motion clock",
+          wing.playTicks === o.playTicks, `${wing.playTicks} ${o.playTicks}`);
+
+    // The bob the swarm dives with is the dive's 5.0 -- `FMUL [0x0055D2B4]` at
+    // `0x0042F035` -- and not the orbit's 8.0.
+    mkBat(0xa280, 2, 0, 0, rng, vec3(0, 0, -40));
+    const m = G.g_object_list.find((a) => a.cls === SpawnClass.Bat
+      && !bat(a).isWing && bat(a).subtype === 2)!;
+    bat(m).timer = 0;
+    BatUpdate(m, frame(rng));
+    check("a swarm member whose orbit has run out turns to dive",
+          bat(m).state === BatState.Fly, BatState[bat(m).state]);
+    const fromY = bat(m).fromY;
+    BatUpdate(m, frame(rng));
+    check("...and dives bobbing by the clip's root height times 5, not 8",
+          near(m.pos.y - fromY, -0.5 * BAT_DIVE_BOB_SCALE),
+          `${(m.pos.y - fromY).toFixed(3)}`);
+  }
+
+  {
+    // **A placer's members need an address each**, because the port keys both
+    // the pool and the drawn hierarchy on one. The scatter has twenty-five,
+    // and four bits of member index gave members 16..24 the addresses of
+    // 0..8: two bats per row, and a wing seated on the wrong one.
+    const rng = new Rng(101);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    mkBat(0xa300, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const bodies = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && !bat(a).isWing && !a.despawned);
+    const wings = G.g_object_list.filter(
+      (a) => a.cls === SpawnClass.Bat && bat(a).isWing && !a.despawned);
+    check("a scatter's twenty-five members answer to twenty-five addresses",
+          bodies.length === 25 && new Set(bodies.map((a) => a.at)).size === 25,
+          `${new Set(bodies.map((a) => a.at)).size}`);
+    check("...and their wings to twenty-five more, none shared",
+          new Set([...bodies, ...wings].map((a) => a.at)).size === 50,
+          `${new Set([...bodies, ...wings].map((a) => a.at)).size}`);
+    check("...each at BatChildAt(placer, 1, member)",
+          bodies.every((a) => a.at === BatChildAt(0xa300, 1, bat(a).member)));
+    // `obj+0x34 = 1`, the build raises `0x80`, then `& ~0x80 | 0x80000`.
+    check("...with the engine's flag word, 0x80001, bit 0x80 taken back",
+          bodies.every((a) => (a.flags & ~ActorFlag.NoCameraTrack)
+                              === (BAT_FLAG_80000 | 1)),
+          bodies[0].flags.toString(16));
+    // `ActorBuildSkinnedModel` claims a hit slot for every member and every
+    // wing, body then wing, and the fourteenth claim fills the table.
+    const w0 = wings.find((a) => bat(a).member === 0)!;
+    const b6 = bodies.find((a) => bat(a).member === 6)!;
+    const b7 = bodies.find((a) => bat(a).member === 7)!;
+    check("...and each claims a hit slot, body then wing, until the table fills",
+          bodies[0].hitSlot === 0 && w0.hitSlot === 1 && b6.hitSlot === 12
+          && b7.hitSlot === HIT_SLOT_NONE,
+          `${bodies[0].hitSlot} ${w0.hitSlot} ${b6.hitSlot} ${b7.hitSlot}`);
+  }
+
+  {
+    // **Who registers for the shot test, and when.** The dive and the swarm at
+    // their tails in every state; the scatter only at the end of its flying
+    // arm; the wing never. The engine's list is the whole of what a shot can
+    // find (`ClassHandler.registersForShotTest`).
+    const rng = new Rng(103);
+    scene(0, rng);
+    G.g_players_in_play = 1;
+    G.g_active_player = 0;
+    const listed = (a: Actor) => G.g_shot_test_list.some((e) => e.at === a.at);
+    const dive = mkBat(0xa340, 0, 0, 3, rng);
+    const wing = G.g_object_list.find((a) => a.at === BatWingAt(0xa340))!;
+    ShotTestListReset();
+    BatUpdate(dive, frame(rng));
+    BatUpdate(wing, frame(rng));
+    check("a waiting dive bat is in the shot test", listed(dive)
+          && bat(dive).state === BatState.Wait);
+    check("...its sphere a unit above it",
+          dive.shotCentre.y === dive.pos.y + 1
+          && dive.shotCentre.x === dive.pos.x,
+          `${dive.shotCentre.y} vs ${dive.pos.y}`);
+    check("...and the camera aims at its position, not at a bone",
+          dive.lookAt.x === dive.pos.x && dive.lookAt.y === dive.pos.y
+          && dive.lookAt.z === dive.pos.z);
+    check("...and its wing never is", !listed(wing));
+
+    mkBat(0xa380, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const m0 = G.g_object_list.find((a) => a.at === BatChildAt(0xa380, 1, 0))!;
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    check("a scattering bat is no target while it waits",
+          !listed(m0), BatState[bat(m0).state]);
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    check("...and is once it flies",
+          listed(m0) && bat(m0).state === BatState.Fly);
+
+    // The kill is taken inside the flying arm, and the arm carries on: the
+    // damped velocity goes through the flight's own 1.05 and 1.08, and the
+    // corpse's gravity starts on the next frame.
+    const vx = bat(m0).vx, vy = bat(m0).vy, vz = bat(m0).vz;
+    const y = m0.pos.y;
+    m0.flags |= ActorFlag.Hit | ActorFlag.HitByPlayer0;
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+    check("...a shot one dies inside its flying arm",
+          bat(m0).state === BatState.Dead, BatState[bat(m0).state]);
+    check("...and the kill frame is still a flying frame: x and z bounce by "
+          + "-0.3 and accelerate, y climbs by 1.08",
+          near(bat(m0).vx, vx * BAT_SCATTER_CORPSE_DAMP * BAT_SCATTER_ACCEL_XZ)
+          && near(bat(m0).vz, vz * BAT_SCATTER_CORPSE_DAMP)
+          && near(bat(m0).vy, vy * BAT_SCATTER_ACCEL_Y)
+          && near(m0.pos.y, y + vy * BAT_SCATTER_ACCEL_Y),
+          `vy ${bat(m0).vy} vs ${vy * BAT_SCATTER_ACCEL_Y}`);
+    check("...registered for the shot test on that frame too", listed(m0));
+    const vy1 = bat(m0).vy;
+    ShotTestListReset();
+    BatUpdate(m0, frame(rng));
+    check("...and falling from the next, and no longer a target",
+          near(bat(m0).vy, vy1 - BAT_SCATTER_CORPSE_GRAVITY) && !listed(m0),
+          `${bat(m0).vy}`);
+  }
+
+  {
+    // `SpawnBatSplash` (`FUN_0042F980`) and `BatSplashUpdate`
+    // (`FUN_0042F930`): the caller's x and z, **y forced to -25**, thirty
+    // models drawn once each, and gone.
+    ResetGameGlobals();
+    SpawnBatSplash(3, -40, 7);
+    const s = G.g_bat_splashes[0];
+    check("a splash sits on the water plane, whatever height it was given",
+          !!s && s.x === 3 && s.y === BAT_SPLASH_Y && s.y === -25 && s.z === 7,
+          `${s?.x},${s?.y},${s?.z}`);
+    const drawn: number[] = [];
+    for (let i = 0; i < 40 && G.g_bat_splashes.length; i += 1) {
+      BatSplashesTick();
+      if (G.g_bat_splashes.length) drawn.push(G.g_bat_splashes[0].drawn);
+    }
+    check("...draws its thirty models once each, the first first",
+          drawn.length === BAT_SPLASH_LAST_FRAME + 1
+          && drawn.every((d, i) => d === i), drawn.join(","));
+    check("...and is gone on the tick after the thirtieth",
+          G.g_bat_splashes.length === 0);
+  }
+
+  {
+    // Both corpses that reach the water leave one, and the frame they do is
+    // the splash's first: the pool is stepped after the actors, as a task the
+    // bat allocated would be walked after it.
+    const rng = new Rng(107);
+    const events = scene(0, rng);
+    const sounds: number[] = [];
+    events.on("sound.play", (e) => sounds.push(e.id));
+    G.g_players_in_play = 1;
+    mkBat(0xa3c0, 1, 0, 0, rng, vec3(-407, -10, -3688));
+    const m = G.g_object_list.find((a) => a.at === BatChildAt(0xa3c0, 1, 0))!;
+    bat(m).state = BatState.Dead;
+    m.pos = vec3(5, -24.99, -3600);
+    bat(m).vx = 0;
+    bat(m).vy = 0;
+    bat(m).vz = 0;
+    GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    const sp = G.g_bat_splashes[0];
+    check("a scattering bat's corpse that reaches the water splashes",
+          m.despawned && !!sp && sp.x === 5 && sp.y === -25 && sp.z === -3600,
+          `${m.despawned} ${sp?.x},${sp?.y},${sp?.z}`);
+    check("...drawing its first model on that same frame",
+          sp?.drawn === 0, `${sp?.drawn}`);
+    check("...to the sound of SIBUKI8", sounds.includes(SND_BAT_SPLASH),
+          sounds.map((x) => x.toString(16)).join(","));
+
+    // The swarm's corpse falls with no frame limit to the same plane, and is
+    // heard only in stage 3.
+    G.g_scene_index = 3;
+    mkBat(0xa400, 2, 0, 0, rng, vec3(0, 0, -40));
+    const w = G.g_object_list.find((a) => a.at === BatChildAt(0xa400, 2, 0))!;
+    bat(w).state = BatState.Dead;
+    w.pos = vec3(-6, -24.999, -40);
+    const heard = sounds.length;
+    GameUpdate(EYE, 1 / 60, HOST, rng, events);
+    check("a swarm corpse splashes too, silently outside stage 3",
+          w.despawned && G.g_bat_splashes.some((q) => q.x === -6 && q.y === -25)
+          && !sounds.slice(heard).includes(SND_BAT_SPLASH),
+          `${w.despawned} ${G.g_bat_splashes.length}`);
   }
 
   // -- class 0x13, the prop that carries, and class 0x18, what rides it -----

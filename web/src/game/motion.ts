@@ -143,8 +143,10 @@ export function ActorAdvanceMotion(obj: Actor, dt: number): void {
     obj.rootFrame = -1;
   }
 
-  // A strike or lunge at full weight. The lunge loops; the strike ends itself,
-  // and the state machine reads the null as "the swing is over".
+  // A one-shot at full weight -- a swing, an arc stage, an entrance. It ends
+  // itself, and the state machine reads the null as "the swing is over". The
+  // `loop` arm below was class 0x30's lunge, which plays on the base track now
+  // as `ZombieStateStrike` (`FUN_00455A40`) plays it; nothing sets it today.
   const act = obj.action;
   if (act) {
     const wasAct = obj.rootActionFrame;

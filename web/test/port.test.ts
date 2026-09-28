@@ -12050,9 +12050,12 @@ console.log("\nthe strike anchor and the cooldown it gates:");
                      { state: ZombieState.Strike, sub: StrikeSub.Lunge,
                        attack: 1, pos: vec3(0, 0, atk.distance + 20) });
     ZombieStateStrike(z, EYE, new Rng(4));
+    // On the ordinary track, where `SetCurrentActorMotionBlended` at
+    // `0x00455B49` puts it -- not the one-shot channel.
     check("...and one without the latch still lunges in",
-          z.sub === StrikeSub.Lunge && z.action?.motion === atk.lunge,
-          `${z.sub}/${z.action?.motion}`);
+          z.sub === StrikeSub.Lunge && z.action === null
+            && z.motion === atk.lunge,
+          `${z.sub}/${z.motion} action ${JSON.stringify(z.action)}`);
   }
 
   // -- B5. the retreat's third exit ----------------------------------------
@@ -12414,6 +12417,170 @@ console.log("class 0x30, a fatal hit lands *during* the swing:");
   check("...and the swing is gone, so the death clip is what is posed",
         z.action === null && (z.motion === 900 || z.motion === 901),
         `action ${JSON.stringify(z.action)} motion ${z.motion}`);
+}
+
+/**
+ * **`ZombieStateStrike`'s two motion calls fade, and the fade holds.**
+ *
+ * `SetCurrentActorMotionBlended(obj+0x194, entry->lunge, 0, 10)` at
+ * `0x00455B49` and `ActorSetMotionBlended(obj+0x194, entry->strike, 0, 5)` at
+ * `0x00455B63`: one track, a fade each, and `SkeletonAdvancePlayCursor`
+ * (`FUN_004111A0`) holds the cursor `obj+0x19C` on the start frame while the
+ * fade runs. The port started both on its one-shot channel with no fade, so
+ * the swing's cursor left 0 on the frame after it was set and the hit landed
+ * `fade` frames early -- and it restarted the lunge unless the one-shot
+ * channel already held it, where the engine skips the call while **the track**
+ * is playing it (`00455b31 CMP [ESI+0x1b4], EAX` / `00455b37 JZ`).
+ *
+ * The frames are driven in the director's order -- `ActorAdvanceMotion`, then
+ * the state -- so every count here is what the port's states actually see.
+ */
+console.log("class 0x30, the lunge and the swing hold through their fades:");
+{
+  const rng = new Rng(43);
+  scene(0, rng);
+  const atk = TYPE.attacks["0"]["1"];
+  const walk = TYPE.motion_row["0"][MotionRow.Walk];
+  const striker = (dz: number, over: Partial<Actor> = {}): ZombieActor => {
+    const z = spawnZombie(0x7a00, 1, "striker");
+    z.visible = true;
+    z.hp = z.maxHp = 100;
+    z.attackState = 1;
+    z.attackPermit = 0;
+    z.state = ZombieState.Strike;
+    z.sub = StrikeSub.Lunge;
+    z.attack = 1;
+    z.motion = walk;
+    z.playTicks = 7;
+    z.action = null;
+    z.fadeFrom = null;
+    z.fade = 0;
+    z.pos = vec3(0, 0, dz);
+    Object.assign(z, over);
+    return z;
+  };
+  const frame = (z: ZombieActor): void => {
+    ActorAdvanceMotion(z, 1 / 60);
+    ZombieStateStrike(z, EYE, rng);
+  };
+
+  // The lunge: on the ordinary track, fade 10, held 11 frames.
+  {
+    const z = striker(atk.distance + 20);
+    ZombieStateStrike(z, EYE, rng);
+    check("the lunge goes on the ordinary track, fading out of the walk over 10",
+          z.action === null && z.motion === atk.lunge && z.playTicks === 0
+            && z.fadeFrom?.motion === walk
+            && z.fadeLen === MotionFade.Normal + 1,
+          `action ${JSON.stringify(z.action)} motion ${z.motion} `
+          + `ticks ${z.playTicks} from ${JSON.stringify(z.fadeFrom)} `
+          + `len ${z.fadeLen}`);
+    const at = { ...z.pos };
+    let held = 1;
+    let moved = 0;
+    for (; held < 40; held++) {
+      frame(z);
+      if (z.playTicks !== 0) break;
+      moved = Math.max(moved, dist2d(z.pos, at));
+    }
+    check("...its cursor holds 0 for `fade + 1` = 11 frames, "
+          + "counting the one that set it",
+          held === MotionFade.Normal + 1 && z.playTicks === 1
+            && z.sub === StrikeSub.Lunge,
+          `${held} frames, then ${z.playTicks}`);
+    check("...and its root motion holds with it", moved === 0,
+          `moved ${moved.toFixed(3)}`);
+    // Past a whole cycle, kept out of range: the clip wraps on the track and
+    // nothing sets it again.
+    let restarted = false;
+    let last = z.playTicks;
+    for (let i = 0; i < 90; i++) {
+      z.pos = vec3(0, 0, atk.distance + 20);
+      frame(z);
+      if (z.playTicks <= last || z.fadeFrom !== null) restarted = true;
+      last = z.playTicks;
+    }
+    check("...and then runs on through its own wrap without being restarted",
+          !restarted && z.motion === atk.lunge && z.action === null,
+          `restarted ${restarted} ticks ${z.playTicks}`);
+  }
+
+  // The gate is the track, not a channel of the port's.
+  {
+    // 155 of the 311 shipped attack entries name their run as the lunge. The
+    // hold hands to the strike before it sets its idle, so the run is still
+    // on the track here, and the engine lets it run on as the lunge.
+    const z = striker(atk.distance + 20, { motion: atk.lunge,
+                                           playTicks: 23 });
+    ZombieStateStrike(z, EYE, rng);
+    check("a lunge clip already on the track is left running",
+          z.action === null && z.motion === atk.lunge && z.playTicks === 23
+            && z.fadeFrom === null,
+          `action ${JSON.stringify(z.action)} ticks ${z.playTicks} `
+          + `from ${JSON.stringify(z.fadeFrom)}`);
+  }
+  {
+    // ...but with a one-shot over it, the one-shot is what is on screen.
+    const z = striker(atk.distance + 20, {
+      motion: atk.lunge, playTicks: 23,
+      action: { motion: 700, ticks: 9, loop: false },
+    });
+    ZombieStateStrike(z, EYE, rng);
+    check("...while one under a one-shot is set again, out of the one-shot",
+          z.action === null && z.motion === atk.lunge && z.playTicks === 0
+            && z.fadeFrom?.motion === 700 && z.fadeFrom?.ticks === 9,
+          `action ${JSON.stringify(z.action)} ticks ${z.playTicks} `
+          + `from ${JSON.stringify(z.fadeFrom)}`);
+  }
+
+  // The swing: fade 5, held 6 frames, and the hit waits it out.
+  {
+    const z = striker(atk.distance - 1, { motion: atk.lunge, playTicks: 30 });
+    const m = MotionOf(z, atk.strike);
+    let swungAt = -1;
+    let hitAt = -1;
+    let ticksAtHit = -1;
+    let endAt = -1;
+    let fadedFromLunge = false;
+    const zeros: number[] = [];
+    for (let i = 0; i < 120 && endAt < 0; i++) {
+      frame(z);
+      if (swungAt < 0 && z.sub === StrikeSub.Swinging) {
+        swungAt = i;
+        fadedFromLunge = z.fadeFrom?.motion === atk.lunge
+          && z.fadeLen === MotionFade.Quick + 1
+          && z.action?.motion === atk.strike;
+      }
+      if (z.action?.motion === atk.strike && z.action.ticks === 0) {
+        zeros.push(i);
+      }
+      if (hitAt < 0 && z.struck) {
+        hitAt = i;
+        ticksAtHit = z.action?.ticks ?? -1;
+      }
+      if (z.state === ZombieState.BackOff) endAt = i;
+    }
+    const q = MotionFade.Quick;
+    check("the swing starts on the frame the lunge comes in range, "
+          + "fading out of the lunge over 5",
+          swungAt === 0 && fadedFromLunge,
+          `swung at ${swungAt}, from ${JSON.stringify(z.fadeFrom)}`);
+    check("...its cursor holds 0 for `fade + 1` = 6 frames, "
+          + "counting the one that set it",
+          zeros.length === q + 1 && zeros[0] === swungAt
+            && zeros[q] === swungAt + q,
+          zeros.join(","));
+    check("...so the hit lands `fade` frames after the unheld clip put it, "
+          + "on the entry's own frame",
+          hitAt === swungAt + q + atk.hit_frame
+            && ticksAtHit === atk.hit_frame,
+          `hit at ${hitAt} (was ${swungAt + atk.hit_frame}), `
+          + `ticks ${ticksAtHit}`);
+    check("...and the clip hands to the retreat that much later too",
+          m !== null && endAt === swungAt + q
+            + ticksOfAuthoredFrame(m.frames - 1, m.fps),
+          `end at ${endAt}`);
+  }
 }
 
 /**

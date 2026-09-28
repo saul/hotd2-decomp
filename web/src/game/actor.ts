@@ -2018,7 +2018,11 @@ export interface ActorBase {
    */
   rootFrame: number;
   rootActionFrame: number;
-  /** A one-shot or lunge at full weight: the lunge loops, the strike does not. */
+  /**
+   * A one-shot at full weight: a swing, an arc stage, an entrance. The
+   * class-0x30 lunge used to be one and to loop here. It is on the ordinary
+   * track now, as `ZombieStateStrike` (`FUN_00455A40`) plays it.
+   */
   action: ActorClip | null;
   /** The death clip, once. */
   death: { motion: number; ticks: number } | null;

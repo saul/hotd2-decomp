@@ -28,6 +28,7 @@ import type { ToggleName, UiCommand } from "../ui/commands";
 import type { PlayerState } from "./urlstate";
 import type { CamCommand, FeedEntry, Walker } from "../script/walker";
 import { ActorKillAll } from "../game/combat/resolve_hit";
+import { toggleFullscreen } from "./device";
 import type { Bgm } from "../audio/bgm";
 import type { Backdrop } from "../render/backdrop";
 import type { BloodColourLayer } from "../render/bloodcolour";
@@ -235,6 +236,7 @@ export function runCommand(p: PlayerCommands, c: UiCommand): void {
       return;
     case "setVolume":  p.bgm.setVolume(c.volume / 100); return;
     case "toggleMute": p.setMuted(!p.bgm.muted); return;
+    case "toggleFullscreen": toggleFullscreen(); return;
     case "killAll": {
       // The debug clear: `killAll` drops every live actor to zero hit points
       // and starts its directional death, which is what opens the enemy gate.

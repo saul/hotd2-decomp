@@ -64,6 +64,8 @@ export type UiCommand =
   | { kind: "setPillarbox"; on: boolean }
   | { kind: "setVolume"; volume: number }
   | { kind: "toggleMute" }
+  /** `F`: the page fullscreen, or back. A key press is the gesture it needs. */
+  | { kind: "toggleFullscreen" }
   | { kind: "requestSkip" }
   /**
    * `[port-only]` -- a new game at this stage's entry, or at stage 1, through

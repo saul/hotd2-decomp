@@ -56,6 +56,8 @@ import { PauseScreen, SoundButton } from "../src/ui/panels/Overlays";
 import { Tree } from "../src/ui/panels/Tree";
 import { TOGGLE_DEFAULTS, TOGGLES } from "../src/ui/panels/Toggles";
 import { DebugGroup } from "../src/ui/panels/DebugGroup";
+import { ShortcutsDialog } from "../src/ui/panels/Shortcuts";
+import { SHORTCUT_GROUPS, keyCap } from "../src/ui/shortcuts";
 import { shutterCover } from "../src/hud/hud";
 import { readPersisted, writePersisted } from "../src/ui/persist";
 import { readViewPrefs } from "../src/app/viewprefs";
@@ -694,6 +696,94 @@ console.log("\nThe branch pause is a debug aid, off by default:\n");
   check("...unchecked", box !== null && !/checked/.test(box[1]), box?.[1]);
   check("...under its own heading, apart from the game and the overlays",
         html.includes("grp-aid") && html.includes("debug aids"));
+}
+
+// Three handlers answer keys -- `app/main.ts`, `render/freeroam.ts` and
+// `ui/App.tsx` -- and `ui/shortcuts.ts` is the one list of what they do, which
+// the `?` dialog draws. A list of keys drifts the moment a handler grows a
+// branch nobody added a row for, so the handlers' own source is read here and
+// held to the table in both directions.
+console.log("\nThe keys:\n");
+{
+  const src = (...p: string[]) => {
+    try { return readFileSync(join(process.cwd(), "src", ...p), "utf8"); }
+    catch { return ""; }
+  };
+  const codesIn = (text: string, re: RegExp) =>
+    new Set([...text.matchAll(re)].map((m) => m[1]));
+  const rows = SHORTCUT_GROUPS.flatMap((g) => g.rows);
+  const listed = (by: string) =>
+    new Set(rows.filter((r) => r.by === by).flatMap((r) => r.codes));
+  const same = (a: Set<string>, b: Set<string>) =>
+    a.size === b.size && [...a].every((x) => b.has(x));
+  const show = (a: Set<string>, b: Set<string>) =>
+    `bound ${[...a].sort().join(" ")} / listed ${[...b].sort().join(" ")}`;
+
+  const main = src("app", "main.ts");
+  const app = codesIn(main, /e\.code === "(\w+)"/g);
+  check("app/main.ts binds exactly the keys the table gives it",
+        main !== "" && same(app, listed("app")), show(app, listed("app")));
+
+  const fly = src("render", "freeroam.ts");
+  const moveBlock = /const MOVE_KEYS[^{]*\{([^}]*)\}/.exec(fly)?.[1] ?? "";
+  const roam = new Set([...codesIn(moveBlock, /(Key[A-Z]):/g),
+                        ...codesIn(fly, /keys\.has\("(\w+)"\)/g)]);
+  check("free roam flies on exactly the keys the table gives it",
+        roam.size > 0 && same(roam, listed("freeRoam")),
+        show(roam, listed("freeRoam")));
+
+  const page = src("ui", "App.tsx");
+  const ui = new Set([...codesIn(page, /e\.code === "(\w+)"/g),
+                      ...TOGGLES.flatMap((t) => (t.key ? [t.key] : []))]);
+  check("ui/App.tsx answers exactly the keys the table gives it",
+        page !== "" && same(ui, listed("ui")), show(ui, listed("ui")));
+
+  // One owner a key. The one overlap is old and stated: S is the pad's Start
+  // to the game and back to free roam, and free roam has no Start to press.
+  const owners = new Map<string, Set<string>>();
+  for (const r of rows) {
+    for (const c of r.codes) owners.set(c, (owners.get(c) ?? new Set()).add(r.by));
+  }
+  const shared = [...owners].filter(([c, o]) => o.size > 1 && c !== "KeyS");
+  check("no key has two owners, but S", shared.length === 0,
+        shared.map(([c, o]) => `${c}: ${[...o].join("+")}`).join(", "));
+  const twice = [...new Set(rows.flatMap((r) => r.codes)
+    .filter((c, i, all) => all.indexOf(c) !== i && c !== "KeyS"))];
+  check("...and no key is listed twice", twice.length === 0, twice.join(", "));
+  check("Z is bound by nothing: tools/pacing.mjs presses it for that",
+        !owners.has("KeyZ"));
+  check("only overlays have keys",
+        TOGGLES.every((t) => !t.key || t.kind === "debug"),
+        TOGGLES.filter((t) => t.key && t.kind !== "debug").map((t) => t.name).join(", "));
+  check("the actor bounding boxes have one",
+        TOGGLES.find((t) => t.name === "boxes")?.key === "KeyB");
+
+  const keyed = TOGGLES.filter((t) => t.key);
+  const dialog = renderIn(projection(), createElement(ShortcutsDialog,
+                                                      { onClose: () => {} }));
+  check("the ? dialog is a dialog, under the id the harnesses reach it by",
+        dialog.includes('id="shortcuts"') && dialog.includes('role="dialog"'));
+  check("...and lists every overlay key with its label",
+        keyed.every((t) => dialog.includes(`<kbd>${keyCap(t.key as string)}</kbd>`)
+                           && dialog.includes(t.label)));
+  check("...each one saying it is off, as they all start",
+        (dialog.match(/class="state"/g) ?? []).length === keyed.length
+        && !dialog.includes('class="state on"'));
+  const boxesOn = renderIn({ ...projection(),
+                             toggles: { ...TOGGLE_DEFAULTS, boxes: true } },
+                           createElement(ShortcutsDialog, { onClose: () => {} }));
+  check("...and one that is on saying so",
+        (boxesOn.match(/class="state on"/g) ?? []).length === 1);
+
+  const withKeys = renderIn(projection(), createElement(CrumbMenu, {
+    debugOpen: false, onToggleDebug: () => {}, onShowKeys: () => {},
+    onClose: () => {} }));
+  check("the menu offers the list, to a mouse",
+        withKeys.includes('class="keys-open only-fine"'));
+  const actorsGroup = renderIn(projection(),
+                               createElement(DebugGroup, { group: "actors" }));
+  check("an overlay's switch shows its key",
+        actorsGroup.includes('<kbd class="key-hint">B</kbd>'));
 }
 
 // The letterbox is drawn from the bars the engine's routine recorded, not

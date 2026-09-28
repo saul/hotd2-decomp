@@ -61,14 +61,26 @@ export interface ToggleSpec {
    * forget it went there.
    */
   group: DebugGroupName;
+  /**
+   * The key that flips it, as a `KeyboardEvent.code`, when it has one.
+   *
+   * Here and not in a key map of its own, for the reason `group` is: the table
+   * is the one owner of what a toggle is, and a second table of keys would be
+   * a second place to add a row. `ui/App.tsx` dispatches from it, the `?`
+   * dialog lists it, and the switch shows it beside its label. Only overlays
+   * have keys -- the things you turn on to look at a question and off again
+   * -- and `test:ui` holds every key to being free of the game's, free
+   * roam's and the rest of the page's.
+   */
+  key?: string;
 }
 
 export const TOGGLES: readonly ToggleSpec[] = [
-  { name: "allRegions", kind: "debug", label: "All regions", on: false, group: "scene",
+  { name: "allRegions", kind: "debug", label: "All regions", on: false, group: "scene", key: "KeyG",
     title: "Draw every region at once. Consecutive regions overlap heavily, so this is how the interpenetration becomes legible as a deliberate mechanism rather than an export bug." },
-  { name: "rails", kind: "debug", label: "Rails", on: false, group: "camera",
+  { name: "rails", kind: "debug", label: "Rails", on: false, group: "camera", key: "KeyV",
     title: "Camera eye rails, one polyline per cam/ path." },
-  { name: "aimRails", kind: "debug", label: "Look-at", on: false, group: "camera",
+  { name: "aimRails", kind: "debug", label: "Look-at", on: false, group: "camera", key: "KeyL",
     title: "The look-at track: where each camera path is aimed, as opposed to where it sits." },
   { name: "sky", kind: "game", label: "Sky", on: true, group: "scene",
     title: "The camera-following backdrop dome the script selects with evt 0x1B/0x1C." },
@@ -76,23 +88,23 @@ export const TOGGLES: readonly ToggleSpec[] = [
     title: "The screen-space layer: the letterbox shutter (evt 0x1F) and the dialogue subtitles (evt 0x2D)." },
   { name: "rigs", kind: "game", label: "Rigs", on: true, group: "props",
     title: "Objects that ride op_ object paths \u2014 vehicles and props, assembled from transcribed draw routines. They appear only while the camera is on a path that selects them." },
-  { name: "spawns", kind: "debug", label: "Spawns", on: false, group: "actors",
+  { name: "spawns", kind: "debug", label: "Spawns", on: false, group: "actors", key: "KeyN",
     title: "A marker and a label at every spawn the script has placed, so a spawn whose class the port cannot pose yet is still visible as something the game put there. The characters themselves are Characters; this is what stands in for the ones that have no pose." },
   { name: "chars", kind: "game", label: "Characters", on: true, group: "actors",
     title: "Spawned characters assembled from the EXE skeleton and posed from mot/. A spawn whose class has no motion rule yet keeps its marker instead \u2014 an unposed character is a heap of parts, not a character." },
   { name: "props", kind: "game", label: "Props", on: true, group: "props",
     title: "Scripted scenery: doors, shutters and the vans they hang off. They swing when the script sets their flag (evt 0x48) and vanish on a second one. The overlay that says which of those four states each one is in is its own switch, Prop boxes." },
-  { name: "propBoxes", kind: "debug", label: "Prop boxes", on: false, group: "props",
+  { name: "propBoxes", kind: "debug", label: "Prop boxes", on: false, group: "props", key: "KeyP",
     title: "The prop overlay: a bounding box, an origin cross and a state label on every prop the bundle names \u2014 green drawn, amber hidden, magenta no geometry, red no glTF node \u2014 so a prop that is not on screen can be told from one that was never exported. Separate from Props, which draws the props themselves: a debug overlay is never what somebody wants to look at the scene through." },
   { name: "breakables", kind: "game", label: "Breakables", on: true, group: "props",
     title: "The class-0x41 breakable props \u2014 the barrels and boxes the game hides its items in. Built at run time by PlaceBreakableGroup from the exe's own member records, two shots each, and a stack collapses when what it stands on is destroyed." },
-  { name: "unported", kind: "debug", label: "Unported", on: false, group: "actors",
+  { name: "unported", kind: "debug", label: "Unported", on: false, group: "actors", key: "KeyU",
     title: "Empty boxes wherever the script has spawned an actor whose class has no module in the port's g_class_handlers. The game would be running a state machine for it; this player is not. docs/formats/spawns.md says what each class is." },
-  { name: "coli", kind: "debug", label: "Collision", on: false, group: "collision",
+  { name: "coli", kind: "debug", label: "Collision", on: false, group: "collision", key: "KeyC",
     title: "The game's own coli/ collision, as the port traces it: amber for the blobs the script has selected into the sphere-and-segment set, blue for the ray-only ones, with a spike on each quad's normal so the one-sided winding is visible. A quad in neither set is not tested by anything and is not drawn." },
-  { name: "stuck", kind: "debug", label: "Wedged", on: false, group: "collision",
+  { name: "stuck", kind: "debug", label: "Wedged", on: false, group: "collision", key: "KeyX",
     title: "Which enemies are wedged. ZombiePushOutOfWorldAndActors traces every zombie's body sphere against the selected collision each frame and shoves it back out; one frame of that is normal, half a second of it is an actor that cannot get where its state is taking it. Marks those in red at the sphere the push actually tests. Counts only the world half, not the shoulder-past-another-zombie half." },
-  { name: "boxes", kind: "debug", label: "Boxes", on: false, group: "actors",
+  { name: "boxes", kind: "debug", label: "Boxes", on: false, group: "actors", key: "KeyB",
     title: "Bounding boxes on the actor holding an attack permit \u2014 the one about to swing, and the one SelectCameraLookAtTarget is aiming at \u2014 and, while wait_enemies_alive is blocking, on every enemy keeping it blocked." },
   // `trackEnemies` was here. It switched off the gameplay camera --
   // `SelectCameraLookAtTarget` aiming at the permit holder -- which is the game

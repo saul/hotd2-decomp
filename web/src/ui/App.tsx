@@ -1,11 +1,11 @@
 /**
  * The UI layer's root, and the page.
  *
- * **The page is the game.** The rendered frame fills the window, pillarboxed to
- * the game's own 4:3, and everything else is either over it — the breadcrumb
- * menu, the sound button, the start and pause screen, the skip prompt, the
- * branch bar, the game-over buttons — or in a debug sidebar that is closed
- * until you ask for it. The top and bottom bars that used to frame the view
+ * **The page is the game.** The rendered frame fills the window (or, with the
+ * sidebar's 4:3 switch, a pillarboxed box in it), and everything else is
+ * either over it — the breadcrumb menu, the sound button, the start and pause
+ * screen, the skip prompt, the branch bar, the game-over buttons, the `?`
+ * list of keys — or in a debug sidebar that is closed until you ask for it. The top and bottom bars that used to frame the view
  * grew one debugging need at a time; what was worth keeping from them is in
  * the menu and the sidebar now.
  *
@@ -43,9 +43,9 @@
  * WebGL drawing into a detached element, which is a dead page that looks like
  * a graphics bug.
  */
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { UiStore } from "./store";
-import { StoreContext } from "./store_context";
+import { StoreContext, useStore } from "./store_context";
 import { useHasProjection, useSlice } from "./useSlice";
 import { usePersisted } from "./persist";
 import { Crumbs } from "./panels/Crumbs";
@@ -55,7 +55,13 @@ import { SkipBar } from "./panels/SkipBar";
 import { GameOver } from "./panels/GameOver";
 import { BranchBar } from "./panels/BranchBar";
 import { LoadingOverlay, Viewport } from "./panels/Viewport";
+import { ShortcutsDialog } from "./panels/Shortcuts";
+import { TOGGLES, type ToggleSpec } from "./panels/Toggles";
 import { ErrorBoundary } from "./ErrorBoundary";
+
+/** The overlays by the key that flips them. See `ToggleSpec.key`. */
+const TOGGLE_KEYS: ReadonlyMap<string, ToggleSpec> =
+  new Map(TOGGLES.filter((t) => t.key).map((t) => [t.key as string, t]));
 
 /**
  * The elements the layers below need, handed over once React has them.
@@ -144,6 +150,7 @@ function Page(
   // The only subscription above a panel. It flips once, when `app/` publishes
   // its first projection, and never back.
   const ready = useHasProjection();
+  const store = useStore();
   const [debugOpen, setDebugOpen] = usePersisted("debug", false);
   const toggleDebug = useCallback(() => setDebugOpen(!debugOpen),
                                   [debugOpen, setDebugOpen]);
@@ -179,18 +186,61 @@ function Page(
     }
   }, [onHost]);
 
-  // The backquote opens and closes the sidebar. A key the player binds
-  // nothing else to: `app/`'s handler owns Space, Enter, the digits, the
-  // arrows, S and R, and free roam owns WASDQE and Shift.
+  // The `?` dialog. Opening it holds the game, and closing it lets go only of
+  // a hold it took: a game somebody had paused stays paused.
+  const [keysOpen, setKeysOpen] = useState(false);
+  const held = useRef(false);
+  const showKeys = useCallback((open: boolean) => {
+    if (open && !held.current
+        && store.getSnapshot()?.transport.playing === true) {
+      held.current = true;
+      store.dispatch({ kind: "pause" });
+    } else if (!open && held.current) {
+      held.current = false;
+      store.dispatch({ kind: "play" });
+    }
+    setKeysOpen(open);
+  }, [store]);
+
+  // What an overlay key just did, for a moment over the game: the switch it
+  // flipped is in a sidebar that is usually shut.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef(0);
+  const flash = useCallback((text: string) => {
+    setToast(text);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 1400);
+  }, []);
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  // The page's keys. The rest are `app/`'s (Space, Enter, the digits, the
+  // arrows, S and R) and free roam's (WASDQE, Shift and Alt), and
+  // `ui/shortcuts.ts` is the list of all of them that `test:ui` holds every
+  // handler to. A chord is the browser's, never ours: Cmd-R is a reload and
+  // Ctrl-F is find.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.code !== "Backquote" || e.repeat || typingIn(e.target)) return;
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey
+          || typingIn(e.target)) return;
+      if (e.code === "Backquote") toggleDebug();
+      // `?` wherever the layout puts it, and the key it shares on most.
+      else if (e.key === "?" || e.code === "Slash") showKeys(!keysOpen);
+      else if (e.code === "Escape" && keysOpen) showKeys(false);
+      else if (!store.getSnapshot()) return;
+      else if (e.code === "KeyM") store.dispatch({ kind: "toggleMute" });
+      else if (e.code === "KeyF") store.dispatch({ kind: "toggleFullscreen" });
+      else {
+        const t = TOGGLE_KEYS.get(e.code);
+        if (!t) return;
+        const on = !(store.getSnapshot()?.toggles[t.name] ?? t.on);
+        store.dispatch({ kind: "toggle", name: t.name, on });
+        flash(`${t.label} ${on ? "on" : "off"}`);
+      }
       e.preventDefault();
-      toggleDebug();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [toggleDebug]);
+  }, [toggleDebug, showKeys, keysOpen, store, flash]);
 
   return (
     <ErrorBoundary label="The player" onError={onError}>
@@ -217,7 +267,8 @@ function Page(
 
           <Overlay>
             <ErrorBoundary label="The game overlay" onError={onError}>
-              <Crumbs debugOpen={debugOpen} onToggleDebug={toggleDebug} />
+              <Crumbs debugOpen={debugOpen} onToggleDebug={toggleDebug}
+                      onShowKeys={() => showKeys(true)} />
               {ready && <>
                 <SoundButton />
                 <PauseScreen />
@@ -230,6 +281,9 @@ function Page(
                 <GameOver />
               </>}
               <RotateHint />
+              <div id="toast" role="status" aria-live="polite"
+                   className={toast ? "shown" : undefined}>{toast}</div>
+              {keysOpen && <ShortcutsDialog onClose={() => showKeys(false)} />}
             </ErrorBoundary>
           </Overlay>
         </main>

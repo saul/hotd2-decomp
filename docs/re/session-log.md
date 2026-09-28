@@ -24247,3 +24247,42 @@ too, and are still not transcribed.
 Counts on the merged tree: divergences 134 (main 142), uncited exports held
 at 82.
 
+
+## 2026-09-28 -- zombies' waists stretched: a hidden skin joint stopped updating
+
+Reported as "some vertices become stretched with the zombies", introduced in
+the last couple of hours. It was `130a5798` (20:09), the frame that updates
+world matrices down the visible branches only (`render/visible_world.ts`),
+meeting `swapGore`'s multi-primitive arm, which hides every non-bone child of
+a bone. A character's vertex-blended part is skinned to `jointNN` nodes that
+hang under the bones; the swap hid them with the primitives, which cost
+nothing while the whole scene was walked every frame. Walked down the visible
+branches only, a hidden joint kept the matrix it had when it was hidden, and
+three.js's skinning -- `Skeleton.update` reads `bone.matrixWorld` as it stands
+and asks nothing -- drew every vertex bound to it there. Shoot a zombie in the
+torso and watch it walk or fall: its waist stayed behind, stretched back to
+where the chest had been. `visible_world.ts`' own contract was "every reader
+asks for the matrix it reads", and the one reader it did not list is
+three.js's.
+
+The fix is in the walk: a visible skinned mesh brings its skeleton up to date,
+hidden bones and all, as the whole-scene walk did. A render test builds the
+case -- a joint under a hidden node, the bone moved -- and fails three
+assertions on the old walk.
+
+**How it was found, and the wrong turns.** Before-and-after screenshots of the
+same seed (`abb5b194` against `c1f770bc`, each on its own bundle) and three
+detectors in the live page, run every few frames across stages 1, 2 and 6
+with a volley between: every skinned vertex's distance from its nearest bone,
+every rigid part's world scale, and every skinned triangle's longest edge.
+All three read identical on both trees, for most of an hour, because **the
+detector called `inst.root.updateMatrixWorld(true)` before measuring** -- the
+one call that refreshes exactly the matrices the bug had left stale. Read
+without it, as the renderer had drawn them, the longest skinned edge was 20.6
+units on `c1f770bc` against 2.9 on `abb5b194`, in 19 of 30 samples, all of them
+waist parts (`part0_1f4b`, `part0_1f02`) of zombies that had taken a torso
+swap; with the fix, 2.9 and none. The pictures had been pointing at the
+sprint change (`30a0ebf0`), which alters which strike a shot zombie picks and
+so which poses show up in a given run; it was not that. A measurement that
+refreshes the state it measures agrees with any claim about it -- `L69`'s
+shape, one layer further in.

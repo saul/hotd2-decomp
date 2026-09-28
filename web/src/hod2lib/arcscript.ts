@@ -33,7 +33,7 @@ export const CLASS31_ARC_SCRIPTS: Record<string, number> = {
   aside: 0x00564ac8,             // every character but 0x16 and 0x18
   aside_attack3: 0x00564af8,     // ...unless obj+0x131A is 3
   aside_zsass: 0x005649a8,       // character type 0x16
-  aside_zslman: 0x00564d08,      // character type 0x18, then +0x60 a stance
+  aside_zslman: 0x00564d08,      // character type 0x18: see CLASS31_ASIDE_ZSLMAN_STRIDE
   wall_left: 0x00564a68,         // state 14
   wall_right: 0x00564a38,        // state 15
   ceiling: 0x00564a98,           // state 16
@@ -76,8 +76,20 @@ export const CLASS30_ARC_SCRIPTS: Record<string, number> = {
   entrance_other: 0x00567958,
 };
 
-/** `ThrowerStateLeapAside`'s character-0x18 block is one script per stance. */
+/** One arc motion script's twelve dwords. */
 export const CLASS31_ARC_SCRIPT_BYTES = ARC_SCRIPT_STAGES * 4 * 4;
+
+/**
+ * `ThrowerStateLeapAside`'s character-0x18 scripts, one per surface row, sit
+ * **`0x60` apart, not `0x30`**: the listing names `0x00564D08` for row 0 and
+ * the default (`MOV ESI` at `0x0044BAB1`), `0x00564D68` for row 1
+ * (`0x0044BAD0`), `0x00564DC8` for row 2 (`0x0044BAC4`) and `0x00564E28` for
+ * row 3 (`0x0044BAB8`). Between each pair lies one of `zslman`'s pounce
+ * scripts -- the ones `g_class31_melee_attacks` set 3 names for attack 3 --
+ * and reading at a script's own width gave rows 1 to 3 a pounce and its
+ * neighbour's leap. `verify_combat.py` check 16 reads the four immediates.
+ */
+export const CLASS31_ASIDE_ZSLMAN_STRIDE = 0x60;
 
 export interface ArcStage {
   motion: number;

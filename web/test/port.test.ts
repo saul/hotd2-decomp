@@ -276,7 +276,8 @@ import {
 } from "../src/game/actor_turn";
 import { ZombieRunTurnRate, ZombieStateAttackRun, g_wait_turn_variant }
   from "../src/game/class30/attack_run";
-import { ThrowerStateWithdraw } from "../src/game/class31/pounce";
+import { ThrowerStateLeapAside, ThrowerStateLeapDown, ThrowerStateWithdraw }
+  from "../src/game/class31/pounce";
 import { ThrowerStateDelayedPounce } from "../src/game/class31/entrance";
 import { SeveredHeadPhase, SeveredHeadUpdate, SpawnSeveredHead }
   from "../src/game/effects/severed_head";
@@ -7200,6 +7201,374 @@ console.log("class 0x31, ThrowerStrikeConnect tests no range:");
   ThrowerStrikeConnect(z, events);
   check("but an attack whose zone has been shot off whiffs", hits === before,
         `${hits} vs ${before}`);
+}
+
+// `ThrowerStateLeapDown` (`FUN_0044B670`), states 9/12/13, and
+// `ThrowerStateLeapAside` (`FUN_0044B880`), state 10, against the listing --
+// and `ThrowerStrikeConnect` (`FUN_0044CE60`) and `ActorArcBeginToWaypoint`
+// (`FUN_0044D780`), which the pounce runs every frame of.
+console.log("class 0x31, states 9 and 10 -- the pounce and the leap back:");
+{
+  /** `zslman`'s leap-aside scripts: one clip cut 0..1, 2..21 and 22..43. */
+  const ASIDE_ZSLMAN = (m: number) => [
+    { motion: m, start: 0, fade: 5, until: 1 },
+    { motion: m, start: 2, fade: 5, until: 21 },
+    { motion: m, start: 22, fade: 0, until: 43 },
+  ];
+  const SET0 = CLASS31.sets[0]!;
+  // What these states read that CHARS31 does not carry: the cry's pair, a
+  // `zskamere`, `zslman`'s four leap-aside scripts and four landing clips, a
+  // wall row for `zslman`'s forced attack 3, and set 0's throw-table row 0.
+  const TABLES = {
+    ...CHARS31,
+    types: {
+      ...CHARS31.types,
+      "23": { ...TYPE31, type: 0x17, name: "zskamere" },
+      "24": {
+        ...TYPE31_ZSLMAN,
+        motions: {
+          ...TYPE31_ZSLMAN.motions,
+          "491": motion(23), "505": motion(23), "495": motion(23),
+          "513": motion(23),
+          "523": motion(20), "526": motion(20), "529": motion(20),
+          "532": motion(20),
+        },
+      },
+    },
+    class31: {
+      ...CLASS31,
+      sets: [{
+        ...SET0,
+        attacks: {
+          ...SET0.attacks,
+          "1": { ...SET0.attacks["1"],
+                 "3": { script: ARC(299), hit_frame: 41, overlay_kind: 7,
+                        cancel_mask: 8 } },
+        },
+        strikes: {
+          "0": { strike: 9, lunge: 287, distance: 20, hit_frame: 48,
+                 overlay_kind: 6, cancel_mask: 2 },
+        },
+      }],
+      scripts: {
+        ...CLASS31.scripts,
+        aside_zslman_0: ASIDE_ZSLMAN(491), aside_zslman_1: ASIDE_ZSLMAN(505),
+        aside_zslman_2: ASIDE_ZSLMAN(495), aside_zslman_3: ASIDE_ZSLMAN(513),
+      },
+    },
+    combat: {
+      impact: [], head_impact: [],
+      voice: { hurt: [], kill: [], head: [],
+               attack: [[{ id: 40, file: "" }, { id: 41, file: "" }],
+                        [{ id: 50, file: "" }, { id: 51, file: "" }]] },
+      voice_set_a_types: [], ricochet: {},
+    },
+  } as unknown as CharactersJson;
+
+  const at = (type: number, state: ThrowerState) => {
+    ResetGameGlobals();
+    SetGameTables(TABLES);
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    G.g_scene_state_major = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    G.g_camera_yaw_bams = 0;
+    const a = ActorSpawn(0x9000, SpawnClass.Thrower, type, "t",
+                         { initialState: state, condition: 0 });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = 100;
+    a.motion = 936;
+    a.pos = vec3(0, 0, 80);
+    a.yaw = 0;
+    a.state = state;
+    a.sub = 0;
+    return a;
+  };
+  const near = (p: Vec3, q: Vec3) =>
+    Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6
+    && Math.abs(p.z - q.z) < 1e-6;
+  const columns = (since: number) => G.g_sprite_effects.filter(
+    (e) => e.id >= since && e.kind === SpriteEffectKind.DustAlt).length;
+  // A seed whose first draw is under 5: set 0's intact picks then name
+  // attack 0, the one every stance in the fixture has.
+  let seed = 1;
+  while (new Rng(seed).int(10) >= 5) seed++;
+
+  // -- sub 0 -------------------------------------------------------------------
+  {
+    const z = at(0x19, ThrowerState.Pounce);
+    z.flags &= ~(ActorFlag.ShotImmune | ActorFlag.BackingOff
+                 | ActorFlag.Committed);
+    z.flags2 = ThrowerFlag.WallA | ThrowerFlag.OffGround | ThrowerFlag.Struck
+             | ThrowerFlag.ArcSuppressedShotImmune;
+    ThrowerStateLeapDown(z, 1 / 60, new Rng(seed), CAM_HOST);
+    check("the pounce raises 0x10000000 (`OR ECX` at 0x0044B6F0), not BackingOff",
+          (z.flags & ActorFlag.Committed) !== 0
+          && (z.flags & ActorFlag.BackingOff) === 0,
+          `flags 0x${(z.flags >>> 0).toString(16)}`);
+    check("...latches the wall's row, then takes the actor off the wall",
+          z.state === ThrowerState.Pounce && z.sub === 1
+          && z.thr.stance === ThrowerStance.WallA
+          && (z.flags2 & (ThrowerFlag.Surface | ThrowerFlag.OffGround
+                          | ThrowerFlag.Struck)) === 0,
+          `sub ${z.sub} stance ${z.thr.stance} 0x${z.flags2.toString(16)}`);
+    check("...and leaves bit 0x200 alone (`AND EAX, 0xfffff61f`)",
+          (z.flags2 & ThrowerFlag.ArcSuppressedShotImmune) !== 0,
+          `0x${z.flags2.toString(16)}`);
+  }
+  {
+    // `zslman`: the draw is still taken inside `ActorArcBeginToWaypoint`,
+    // then overwritten with 3; the wall stays; the start point is kept.
+    const z = at(0x18, ThrowerState.Pounce);
+    z.pos = vec3(3, 12, 70);
+    z.flags2 = ThrowerFlag.WallA | ThrowerFlag.OffGround | ThrowerFlag.Struck;
+    const rng = new Rng(8);
+    const ref = new Rng(8);
+    ref.int(10);
+    ThrowerStateLeapDown(z, 1 / 60, rng, CAM_HOST);
+    check("zslman's pounce takes the attack draw (`0x0044D7FC`) and swings 3",
+          rng.state === ref.state && z.attack === 3,
+          `attack ${z.attack} draws ${rng.state === ref.state ? 1 : "?"}`);
+    check("...keeps its wall, dropping only the connect latch",
+          z.sub === 1 && (z.flags2 & ThrowerFlag.WallA) !== 0
+          && (z.flags2 & ThrowerFlag.OffGround) !== 0
+          && (z.flags2 & ThrowerFlag.Struck) === 0,
+          `sub ${z.sub} 0x${z.flags2.toString(16)}`);
+    check("...and records where it left from in obj+0x13D8 (`0x0044B737`)",
+          near(z.strikeStart, vec3(3, 12, 70)),
+          `(${z.strikeStart.x}, ${z.strikeStart.y}, ${z.strikeStart.z})`);
+  }
+  {
+    // The cry is `obj+0x32C == 0x2002`, the head's draw record.
+    const cried = (slot: number) => {
+      const z = at(0x19, ThrowerState.Pounce);
+      z.boneSlot["2"] = slot;
+      const heard: number[] = [];
+      const ev = new Events();
+      ev.on("sound.play", (d) => heard.push(d.id));
+      ThrowerStateLeapDown(z, 1 / 60, new Rng(seed), CAM_HOST, ev);
+      return heard.some((id) => id === 50 || id === 51);
+    };
+    check("a pounce with head slot 0x2002 cries out (`0x0044B709`)",
+          cried(0x2002));
+    check("...and one with any other head does not", !cried(0x2003));
+  }
+
+  // -- the flight, the landing and the exit -------------------------------------
+  {
+    const z = at(0x19, ThrowerState.Pounce);
+    z.flags2 |= ThrowerFlag.Collide;
+    const rng = new Rng(seed);
+    const seq0 = G.g_sprite_effect_seq;
+    let collideAtLanding = -1;
+    let exitCursor = -1;
+    let exitLength = -1;
+    let exitOnClip = false;
+    for (let i = 0; i < 400 && z.state === ThrowerState.Pounce; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      const wasSub = z.sub;
+      const cursor = ActorPlayCursor(z);
+      const len = z.action ? MotionPlayLength(z, z.action.motion) : -1;
+      const onClip = z.action !== null;
+      ThrowerStateLeapDown(z, 1 / 60, rng, CAM_HOST);
+      if (wasSub === 1 && z.sub === 2) {
+        collideAtLanding = z.flags2 & ThrowerFlag.Collide;
+      }
+      if ((z.state as ThrowerState) === ThrowerState.LeapAside) {
+        exitCursor = cursor;
+        exitLength = len;
+        exitOnClip = onClip;
+      }
+    }
+    check("it lands with both collision bits down (`AND ECX, 0xffe7ffff`)",
+          collideAtLanding === 0, `0x${collideAtLanding.toString(16)}`);
+    check("...and leaves two frames short of the clip's end, the clip still on",
+          exitOnClip && exitCursor === exitLength - 2,
+          `cursor ${exitCursor} of ${exitLength}, on ${exitOnClip}`);
+    check("...having dropped 0x10000000 and the connect latch on the way",
+          (z.flags & ActorFlag.Committed) === 0
+          && (z.flags2 & ThrowerFlag.Struck) === 0);
+    // `ThrowerEmitGroundDust`'s column answers `0x20000000` with
+    // `0x10000000` down -- the leap back, not the pounce.
+    check("the pounce's landing raises no dust column", columns(seq0) === 0,
+          `${columns(seq0)}`);
+  }
+  {
+    // Training Mode holds the re-snap while `g_script_flags[0xF2]` is up.
+    const snapped = (mode: GameMode, flag: number) => {
+      const z = at(0x19, ThrowerState.Pounce);
+      z.sub = 2;
+      z.action = { motion: 303, ticks: 0 };
+      z.pos = vec3(1, 2, 3);
+      G.g_GameMode = mode;
+      G.g_script_flags[0xf2] = flag;
+      ThrowerStateLeapDown(z, 1 / 60, new Rng(1), CAM_HOST);
+      return !near(z.pos, vec3(1, 2, 3));
+    };
+    check("sub 2 re-snaps to the landing point every frame",
+          snapped(GameMode.Arcade, 1) && snapped(GameMode.Training, 0));
+    check("...except in Training Mode with g_script_flags[0xF2] up (`0x0044B7EE`)",
+          !snapped(GameMode.Training, 1));
+    const z = at(0x19, ThrowerState.Pounce);
+    z.sub = 4;
+    ThrowerStateLeapDown(z, 1 / 60, new Rng(1), CAM_HOST);
+    check("a sub past 3 does nothing (`JA 0x0044B861`)",
+          z.state === ThrowerState.Pounce && z.sub === 4, `state ${z.state}`);
+  }
+
+  // -- ThrowerStrikeConnect -------------------------------------------------------
+  {
+    const z = at(0x19, ThrowerState.StandAndDecide);
+    z.attackPermit = 0;
+    G.g_attack_permits[0] = z.at;
+    z.attack = 0;
+    z.thr.stance = 0;
+    let hits = 0;
+    const ev = new Events();
+    ev.on("player.damaged", () => hits++);
+    z.action = { motion: 303, ticks: 63 };
+    ThrowerStrikeConnect(z, ev);
+    check("a swing one frame past its hit frame does not connect "
+          + "(`CMP EDX, ECX` at 0x0044CE9F is ==)", hits === 0, `${hits}`);
+    RunOutInvulnerability();
+    let h0 = hits;
+    z.flags2 |= ThrowerFlag.Struck;
+    z.action = { motion: 303, ticks: 62 };
+    ThrowerStrikeConnect(z, ev);
+    check("...and 0x800 is the caller's to test: the connect lands through it",
+          hits === h0 + 1, `${hits - h0}`);
+    RunOutInvulnerability();
+    h0 = hits;
+    z.flags2 = ThrowerFlag.UseThrowTable;
+    z.action = { motion: 9, ticks: 48 };
+    ThrowerStrikeConnect(z, ev);
+    check("with 0x400 up it lands on g_class31_throws' frame and overlay",
+          hits === h0 + 1 && G.g_player_damage_overlay_kind[0] === 6
+          && (z.flags2 & ThrowerFlag.Struck) === 0,
+          `${hits - h0} hits, overlay ${G.g_player_damage_overlay_kind[0]}`);
+    z.flags2 = 0;
+    z.attackPermit = -1;
+    z.flags |= ActorFlag.StrikeAndLeave;
+    z.action = { motion: 303, ticks: 62 };
+    ThrowerStrikeConnect(z, ev);
+    check("the despawning arm leaves even with no player to hit",
+          z.despawned && (z.flags2 & ThrowerFlag.Struck) !== 0,
+          `despawned ${z.despawned}`);
+  }
+
+  // -- ThrowerStateLeapAside -------------------------------------------------------
+  {
+    const z = at(0x19, ThrowerState.LeapAside);
+    z.flags &= ~(ActorFlag.BackingOff | ActorFlag.NoHitReaction);
+    z.flags2 &= ~ThrowerFlag.Collide;
+    ThrowerStateLeapAside(z, EYE, 1 / 60, new Rng(2), CAM_HOST);
+    check("the leap back raises 0x20000000 and both collision bits "
+          + "(`0x0044B8BA`)",
+          z.sub === 1 && (z.flags & ActorFlag.BackingOff) !== 0
+          && (z.flags2 & ThrowerFlag.Collide) === ThrowerFlag.Collide
+          && (z.flags & ActorFlag.NoHitReaction) === 0,
+          `sub ${z.sub} 0x${(z.flags >>> 0).toString(16)} `
+          + `0x${z.flags2.toString(16)}`);
+    const k = at(0x17, ThrowerState.LeapAside);
+    k.flags &= ~ActorFlag.NoHitReaction;
+    k.attack = 0;
+    ThrowerStateLeapAside(k, EYE, 1 / 60, new Rng(2), CAM_HOST);
+    check("zskamere raises 0x2000 as well, and is given no script "
+          + "(`JZ 0x0044BAE7`)",
+          (k.flags & ActorFlag.NoHitReaction) !== 0 && k.arcScript === null,
+          `script ${k.arcScript?.[0]?.motion}`);
+  }
+  {
+    // `zslman` leaps back to where `ThrowerStateLeapDown` said it left from.
+    const z = at(0x18, ThrowerState.LeapAside);
+    z.flags2 = ThrowerFlag.WallB | ThrowerFlag.OffGround;
+    z.strikeStart.x = 7;
+    z.strikeStart.y = 30;
+    z.strikeStart.z = 90;
+    const rng = new Rng(5);
+    const s0 = rng.state;
+    ThrowerStateLeapAside(z, EYE, 1 / 60, rng, CAM_HOST);
+    check("zslman leaps back to where it pounced from, drawing no side",
+          near(z.arcTo, vec3(7, 30, 90)) && rng.state === s0,
+          `to (${z.arcTo.x}, ${z.arcTo.y}, ${z.arcTo.z})`);
+    check("...on its own wall's script", z.arcScript?.[0]?.motion === 495,
+          `${z.arcScript?.[0]?.motion}`);
+    for (let i = 0; i < 400 && z.sub === 1; i++) {
+      ActorAdvanceMotion(z, 1 / 60);
+      ThrowerStateLeapAside(z, EYE, 1 / 60, rng, CAM_HOST);
+    }
+    check("...and lands into that wall's own clip, 0x20E (`0x0044BBC6`)",
+          z.sub === 2 && z.motion === 0x20e && z.action === null,
+          `sub ${z.sub} motion 0x${z.motion.toString(16)}`);
+    const w = at(0x18, ThrowerState.LeapAside);
+    w.flags2 = ThrowerFlag.WallB | ThrowerFlag.Ceiling;
+    ThrowerStateLeapAside(w, EYE, 1 / 60, new Rng(5), CAM_HOST);
+    check("...and a row the switch does not name takes the default arm",
+          w.arcScript?.[0]?.motion === 491, `${w.arcScript?.[0]?.motion}`);
+  }
+  {
+    // The landing clip is set outright, over the arc's own clip, at fade 1,
+    // and the landing is where the column goes up.
+    const z = at(0x19, ThrowerState.LeapAside);
+    const rng = new Rng(6);
+    const seq0 = G.g_sprite_effect_seq;
+    let landed = false;
+    let drew = true;
+    let motionAfter = -1;
+    let oneShotAfter = true;
+    for (let i = 0; i < 400 && z.sub < 2; i++) {
+      if (z.sub === 1) ActorAdvanceMotion(z, 1 / 60);
+      const was = z.sub;
+      const before = rng.state;
+      ThrowerStateLeapAside(z, EYE, 1 / 60, rng, CAM_HOST);
+      if (was === 1 && z.sub === 2) {
+        landed = true;
+        drew = rng.state !== before;
+        motionAfter = z.motion;
+        oneShotAfter = z.action !== null;
+      }
+    }
+    check("the leap back lands straight into the set's landing clip "
+          + "(`SetCurrentActorMotionBlended` at 0x0044BB84)",
+          landed && motionAfter === 283 && !oneShotAfter,
+          `motion ${motionAfter}, one-shot ${oneShotAfter}`);
+    check("...drawing nothing on the way", landed && !drew);
+    check("...and its landing puts up the dust column", columns(seq0) === 1,
+          `${columns(seq0)}`);
+  }
+  {
+    const z = at(0x19, ThrowerState.LeapAside);
+    z.sub = 2;
+    z.pos = vec3(0, 0, 20);                // inside fifty units
+    z.action = null;
+    z.motion = 283;                        // 16 frames, play length 30
+    z.playTicks = 30;
+    z.thr.sinceLanding = 0x59;
+    ThrowerStateLeapAside(z, EYE, 1 / 60, new Rng(1), CAM_HOST);
+    check("the pause is ninety frames counted with >= (`JGE` at 0x0044BBFF)",
+          z.state === ThrowerState.StandAndDecide, `state ${z.state}`);
+    const y = at(0x19, ThrowerState.LeapAside);
+    y.sub = 2;
+    y.pos = vec3(0, 0, 80);                // clear of the camera
+    y.action = null;
+    y.motion = 283;
+    y.playTicks = 27;
+    ThrowerStateLeapAside(y, EYE, 1 / 60, new Rng(1), CAM_HOST);
+    const waited = y.state === ThrowerState.LeapAside;
+    y.playTicks = 28;
+    ThrowerStateLeapAside(y, EYE, 1 / 60, new Rng(1), CAM_HOST);
+    check("...and clear or not it waits for the cursor to reach length - 2",
+          waited && y.state === ThrowerState.StandAndDecide,
+          `waited ${waited} state ${y.state}`);
+    const q = at(0x19, ThrowerState.LeapAside);
+    q.sub = 3;
+    q.pos = vec3(0, 0, 80);
+    q.motion = 283;
+    q.playTicks = 28;
+    ThrowerStateLeapAside(q, EYE, 1 / 60, new Rng(1), CAM_HOST);
+    check("a sub past 2 does nothing (`RET` at 0x0044B8A8)",
+          q.state === ThrowerState.LeapAside, `state ${q.state}`);
+  }
 }
 
 

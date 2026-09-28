@@ -5042,6 +5042,52 @@ stage 2, and resets both fades to 1 in the tight case. Both are transcribed now,
 under their own names, and the `zstin` one no longer clamps its fades at
 `0x7F`, because the engine's does not.
 
+### The pounce and the leap back, as the listing has them (NEW-BUGS-2)
+
+The rooftop route ends in states 9 and 10, `ThrowerStateLeapDown`
+(`FUN_0044B670`) and `ThrowerStateLeapAside` (`FUN_0044B880`), and the agent
+that fixed the route left a list of what they got wrong. Both are
+transcriptions of the disassembly now, and so are the two routines the pounce
+runs every frame, `ActorArcBeginToWaypoint` (`FUN_0044D780`) and
+`ThrowerStrikeConnect` (`FUN_0044CE60`). What changed, in the running player:
+
+* **The pounce raises `0x10000000`, not `BackingOff`**, and takes it down on
+  the way to state 10; **the leap back raises `BackingOff`** and both
+  collision bits on its first frame, and takes `BackingOff` down when it
+  lands. So the leap back's landing puts up `ThrowerEmitGroundDust`'s column
+  and the pounce's does not -- the other way round from before.
+* **The landing clip plays.** The leap back used class 0x30's conditional
+  setter, which refused while the arc's own clip was still on, so the actor
+  stood in its flight pose and waited out the whole ninety frames. It goes
+  through `SetCurrentActorMotionBlended` now: at the report's URL the rooftop
+  `zsass` lands into clip 4, walks itself clear on that clip's root, and is
+  back at the hub 38 frames after landing where it used to take 90.
+* **Both states leave on the cursor**, two frames short of the clip's end,
+  not when the port's one-shot channel happens to empty; the pounce is five
+  frames shorter for it, and the pause counts ninety with `>=`.
+* **Down, the pounce collides with nothing** (`0xffe7ffff` on landing), and a
+  head still on its 0x2002 model cries out as it leaves.
+* **`zslman` goes back where it came from.** It keeps its surface, records the
+  point it pounced from and leaps back to it on its own surface's script,
+  where the port sent it to a point beside the camera. Stage 6's first
+  `zslman` now lands its pounce and returns to (484.4, -51.2, -9556.2), the
+  spot it left, instead of (475.3, -51.2, -9574.3). Its four scripts were
+  also exported at the wrong stride -- `0x30` where the engine names them
+  `0x60` apart -- so on a wall it would have leapt back on a pounce clip.
+* **`zskamere`'s standing attacks land.** `ThrowerStrikeConnect`'s throw-table
+  arm, which `ThrowerStateWaitForPermit` sends type 0x17 to, was a `return`.
+  Stage 4 block 2's first `zskamere`, perched in state 32, took a life at
+  frames 327 and 528 of a driven run; before, it swung six times in 1200
+  frames and never hit.
+* **The hit frame is `==`**, and the connect latch is the callers' to test --
+  the port tested it inside the connect, which was what stood in for the
+  `==`. `ActorArcBeginToWaypoint` takes the attack draw itself, for `zslman`
+  too, so a `zslman` pounce moves the `rand()` stream as the engine's does.
+
+One divergence is declared: `zskamere` in state 10 is given no arc script,
+because the engine's arm for it skips the copy and hands the arc twelve dwords
+of uninitialised stack. No shipped run has been shown to reach it.
+
 ### A zombie's swing holds its first frame, and its run becomes its lunge
 
 `ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track

@@ -22651,3 +22651,104 @@ frame 369 and row 1 from 370, the door turns from 371 to 409 (-27 .. -14887
 BAMS), the spin holds at 2260992; rescue (the class-0x21 target marked shot
 each frame), `+0x1320` drops at `0x3A` frame 80 and the spun parts draw at
 `RotX` 0, the car parks at 130 on row 0 and the door swings through 169.
+
+## 2026-09-28 -- class 0x31 states 9 and 10, the pounce and the leap back (branch `fix/newbugs2-pounce-leapback`)
+
+The rooftop-route session left a list of what `ThrowerStateLeapDown`
+(`FUN_0044B670`) and `ThrowerStateLeapAside` (`FUN_0044B880`) got wrong, read
+from the decompilation and not yet from the listing. Both are read from the
+listing now, arm by arm, with every routine they call:
+`ThrowerPickLandingPoint`, `ActorArcBeginToWaypoint`, `ThrowerLoadAttackArcScript`,
+`InstallArcMotionScript`, `ActorPlayHitVoice` (kind 3: one `rand() & 1`),
+`ThrowerStrikeConnect`, `TurnActorAwayFromPoint`, `ThrowerReleaseAttackPermit`
+(which zeroes the permit, where the port's representation writes -1 -- `L63`'s
+kind of difference, and harmless here).
+
+**The list was right as far as it went**, and short. What it did not have:
+
+* `ActorArcBeginToWaypoint` (`FUN_0044D780`) draws the attack itself on the
+  `&DAT_007DCC70` sentinel -- `(rand() >> 4) % 10` into
+  `g_class31_attack_picks`, then 3 over it for type 0x18 at `0x0044D83B`. The
+  port handed the draw to its caller as a callback, and the caller skipped it
+  for `zslman`. The sentinel is named now, `g_arc_script_draw_attack`
+  (`0x007DCC70`, zero, two references: the `PUSH` and the `CMP`).
+* `ThrowerStrikeConnect` (`FUN_0044CE60`) compares the hit frame with `==`
+  (`CMP EDX, ECX; JZ` at `0x0044CE9F`), and **does not test `0x800`** -- the
+  port had `>=` and an internal `Struck` return, which together stood in for
+  the `==` and hid that LeapDown's own two `0x800` tests were missing. Its
+  throw-table arm (`0x0044CF2C`, `g_class31_throws`, no `0x800`) was a
+  `return`, and `ThrowerStateWaitForPermit` raises that bit for type 0x17 --
+  so no `zskamere` standing attack had ever landed. Its despawning arm ran
+  only with a permit held; the engine calls `PlayerTakeDamage(-1)`, which
+  refuses, and `ThrowerLeave`s anyway. All six callers checked for their own
+  guards (`0x0044B76F`, `0x0044B7B0`, `0x0044E7CF`, `0x0044E99E`,
+  `0x0044EC1E`, `0x00450C41`).
+* LeapAside's `zslman` arm (`CMP CX, 0x18; JZ 0x0044BA3F`) skips the whole
+  camera-relative point: it leaps back to `obj+0x13D8`, which only
+  LeapDown's type-0x18 arm writes -- the spot it pounced from. And its four
+  scripts are `0x60` apart (`MOV ESI, imm32` at `0x0044BAB1`, `BAD0`, `BAC4`,
+  `BAB8`), not the `0x30` both exporters read them at.
+* LeapAside's type-0x17 arm jumps past the `MOVSD.REP` (`JZ 0x0044BAE7`), so
+  `zskamere` arcs on uninitialised stack. Declared in the port, which installs
+  no script; reachable only through `ThrowerStateFallToSurface` with
+  `0x20000000` up, `[open]` whether any shipped run gets there.
+* The leap aside's pause counts with `JGE` at `0x0044BBFF`; the port counted
+  with `>`. Its landing clip goes through `SetCurrentActorMotionBlended` at
+  fade 1 (`zslman`: `ActorSetMotionBlended` at fade 5, its own four clips);
+  the port's class-0x30 `ZombieSetMotionIfIdle` refused over the arc's clip
+  and, when it did not, drew a `rand()` the engine does not.
+* LeapDown's Training-Mode test is on `g_script_flags[0xF2]`
+  (`0x009C72F2`), which is in `G` already; the read is the engine's, whatever
+  writes the byte. Nothing to declare.
+* Both states return for a sub past their last arm; the port ran their exits.
+
+**The exporter.** `CLASS31_ARC_SCRIPT_BYTES` (`0x30`, one script) was the
+stride for `zslman`'s four -- and the comment beside the address said "+0x60
+a stance" while the code said `0x30`, and `globals.tsv`'s row said "stride
+0x30" while listing four motions that sit `0x60` apart. Rows 1 and 3 came out
+as two of set 3's pounce scripts and row 2 as row 1's leap.
+`CLASS31_ASIDE_ZSLMAN_STRIDE = 0x60` in both halves; the builder hash moves.
+`verify_combat.py` check 16 had **enshrined** the misread: it expected nine
+clip-switching stage changes and named "zslman's aside in stances 1 and 3" as
+two of them -- which are the two pounce scripts. It expects seven now, and
+reads the four `MOV ESI` immediates out of `.text` and holds the export to
+the scripts at exactly those addresses. `L65`.
+
+**Measured** with a driven probe (`drive=1`, one row a frame, `G` imported
+into the page), before on main's three files and the shared bundle, after on
+this branch and its own export:
+
+* rooftop `zsass` (`?stage=2&original=1&mode=play&block=14&step=2&op=9`):
+  the pounce ran frames 135-200 and runs 135-195, leaving on the clip's
+  cursor with it still on; `obj+0x34` in the pounce was `0x20000181` and is
+  `0x30000181` (the spawn record's own flags word carries `0x20000000`, so
+  both are up in flight -- no dust column on landing, where there was one);
+  collision `0x180800` in sub 2 and `0` now. The leap back used to hold the
+  flight clip `1@34` for 90 frames after landing; it lands into clip 4 now,
+  walks clear on its root and is back at the hub 38 frames later, with the
+  column. It hits once in both.
+* stage 6's first `zslman` (`block=0&step=4&op=2`): leapt back to
+  (475.3, -51.2, -9574.3), beside the camera; now to (484.4, -51.2,
+  -9556.2), the spot it pounced from, landing into `0x20B`.
+* stage 4 block 2's first `zskamere`, perched in state 32: six swings and no
+  hit in 1200 frames before; a life at frames 327 and 528 after (the one at
+  222 is the same in both runs and is not its).
+
+31 `port.test.ts` assertions; 25 fail against main's `arc.ts`, `pounce.ts`
+and `strike.ts` (the other six hold on the old code too and are kept for what
+they pin).
+
+**Wrong turns.**
+* I read the arc-script dump at `0x005649A8` by eye and was a whole script
+  out: I had `0x00564D08` holding clip 490. Counting the twelve-dword blocks
+  from the start said 491, which is what the bundle held -- the bug was only
+  in rows 1 to 3. L6 in a memory dump.
+* One of the new assertions ("the connect lands through `0x800`") passed on
+  the old code: its `hits === 1` counted the hit the *previous* assertion's
+  `>=` had let through. Each check takes its own baseline now.
+* Before/after swaps were file copies of the three sources (L43): each was
+  `cmp`'d against the saved copy after restoring, and the merge of
+  `origin/main` came after the first commit, not between a copy and its
+  restore.
+* The sandbox refuses a shell line that runs `node` or `git` with a path held
+  in a variable; the swaps had to be spelled out in full.

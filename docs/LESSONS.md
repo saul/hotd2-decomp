@@ -795,3 +795,90 @@ decompilation stops at a call that does return, **ask the instruction before
 the function**: L35 says read past the end, and this says the end may be
 movable. The override lives in the database and not in `ghidra/annotations/`,
 so a rebuild can bring it back; say so in the row.
+
+**L56 -- A value computed at module load through an import cycle is a page
+that does not start, behind a green `test:port`.** `game/globals.ts` imports
+`game/hud_shutter.ts` for `HudShutterTaskCreate`, and `hud_shutter.ts` imports
+`G` and the `ScreenFurniture` enum back. Calls across that cycle are fine; a
+top-level `const MASK = ScreenFurniture.ChapterCard | ...` is not. Which module
+of a cycle evaluates first depends on which one the program enters by, and the
+page enters through `app/`, so there `hud_shutter.ts` ran first, found
+`ScreenFurniture` undefined and threw "reading 'ChapterCard'". `tsc` passed,
+and so did `test:port`, which enters the graph elsewhere; only `loops`, a check
+that loads the real page, failed -- as a timeout waiting for a button, with the
+throw two lines above it. **In `game/`, derive anything that touches another
+module's export inside the function that uses it**, and when a page check fails
+after a merge, read its `threw:` line before its timeout.
+
+**L57 -- A divergence parked "until something needs it" is blind if the
+input that would need it is dropped upstream.** `ApplyRootMotion` turned the
+root delta by yaw alone, and the note on it said that was wrong only for a
+class-0x31 actor on a wall, and could wait until something needed it, "because
+the clips those stances play carry no root translation". The premise was true
+of the stance clips and missed the case that needed it. Stage 2 block 21's two
+`zstin` are not put on the wall by a stance at all: their **spawn record**
+places them there, orient `(0, 0xC000, 0xC000)`, and the exporter kept only the
+yaw. With pitch and roll dropped before the port ever saw them, no run of the
+port could have shown the divergence mattering. The actors stood upright a
+hundred units up and walked out into the air, and it went in as "they jump
+from way above the player". **When you park a divergence, name the inputs that
+would make it matter, and check that every one of them reaches the port** --
+here, `grep` the placements for a nonzero pitch or roll. It is `L27` and
+`L34`'s "scan the shipped data" applied one step further upstream: the scan has
+to cover the fields the exporter throws away, not only the ones it keeps.
+
+**L58 -- A dispatcher has more than one caller, and "nothing plays X" was
+asked of one of them.** `sound.md` carried "no stage script starts its own
+track" as an open question, `bundle.ts` wrote it into every bundle's
+`stage_track.note`, and the player started each stage's music at load "by
+convention" to make up for it -- all from a table of every `bgm_entry_play` in
+the six scripts. Every one of those names a boss or transition track. But
+`se_play` hands its operand to the same `PlaySoundId`, and **the same document
+said so**: its operand names nine BGM tracks. Five of them are the stage
+tracks, each at step 2 of its entry block. The convention start opened the
+music a step early, and because the port ignored a request for the track
+already playing, the script's own start -- which in the engine reopens the file
+from its first sample -- was swallowed. The same afternoon found evt `0x2E`
+named `resume_bgm_if_skipped` from the word it plays, `0x80000002`, when
+`PlaySoundControl` sends that word to the **voice**; the mixer had taken every
+namespace-8 id as a music stop, so a cutscene skip silenced the stage. **Before
+recording that nothing reaches a routine, enumerate every instruction and
+every call site that can reach it, and read the routine a word is handed to
+before naming the word.** It is `L17` pointed at a dispatcher: the negative was
+true of the caller that was looked at.
+
+**L59 -- The URL is the walker's address as of the last throttled write, and
+a driven harness outruns the throttle.** Checking that the script stood still
+under the continue screen, a harness read `block/step/op` out of
+`location.search` and saw `11/2/26` become `11/2/34` during the countdown --
+"the gate is broken". It was not: the walker had been at `34` since before
+the player died. `syncUrlToWalker` writes through `Pacer.mayWriteUrl`, a
+wall-clock throttle (the history API is rate-limited), and under `?drive=1`
+hundreds of frames go by between two writes, so the URL answered for a frame
+long past. **Read the walker's own address**, `__hotd2Drive.now().a`, which is
+`L44`'s "print the state, never the request" with the request being the page's
+own bookkeeping.
+
+The same session had the other half of that shape in the port itself: the
+gameplay gate was first transcribed as a term of each wait's condition, where
+it is right for the wait -- and `G.g_evt_gameplay_live` then only moved on the
+frames a wait's earlier terms let the `&&` reach it, so it sat at 1 through the
+whole continue screen. The engine computes that global once, before the frame's
+first instruction. **A value the engine computes once a frame is computed once
+a frame**, not wherever a condition happens to evaluate it.
+
+**L60 -- "The engine leaves it uninitialised" is a claim about the caller,
+not the allocator.** Every thrown weapon in the port tumbled at a rate of its
+own, eighteen times too slow for the knives, behind a divergence that said
+the engine has no value to copy: nothing writes the projectile's `obj+0x135C`,
+and `ActorAlloc` (`FUN_004A6FA0`) hands back its block uncleared, so the rate
+is whatever the arena's previous occupant left. The allocator half was true
+and beside the point -- both launchers call `ActorClearGameFields` on the very
+next line -- and the other half was L35: `SpawnThrownWeapon`'s pseudocode ends
+at a `MatrixStackPop` Ghidra marks no-return, and the rate (`0x2400`), the
+flags, the permit hand-off and the aim are all in the listing after it. A
+divergence whose justification is garbage memory should send you to the
+listing past every no-return call in each writer, and to the line after the
+allocation, before it is written: an engine that really read garbage there
+would spin its knives differently from throw to throw, which is itself a claim
+about the game that nobody had checked.

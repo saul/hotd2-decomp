@@ -30,14 +30,17 @@
  *
  * ## What the port leaves out
  *
- * `[diverges]` **The draws.** The `+0x80` hook places the player's entity on
- * the view (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`), `PlayerHookDrawBody`
- * draws the body, and every handler draws its own HUD -- crosshair, the
- * continue digit, "GAME OVER", "PRESS START". Those are the renderer's and
- * the HUD's and read the state this module writes. The damage overlay's state
- * half is ported (`effects/damage_overlay.ts`) and runs from here, and so are
- * the lives, the bullets and the RELOAD prompt (`hud_readout.ts`), which keep
- * state of their own and record what they draw.
+ * `[diverges]` **Two draws.** The `+0x80` hook places the player's entity on
+ * the view (`PlacePlayerEntityFromViewPose`, `FUN_004159A0`) and
+ * `PlayerHookDrawBody` draws the body; both are the renderer's and read the
+ * state this module writes. The rest of what the handlers draw is recorded
+ * here as screen sprites for the HUD layer: the lives, the bullets and the
+ * RELOAD prompt (`hud_readout.ts`), the continue's CONTINUE? and digit, the
+ * small GAME OVER and the cheat's score (`continue_readout.ts`), and the
+ * credit line (`credit_prompt.ts`). The crosshair is recorded as a decision
+ * (`HudDrawCrosshair`) and drawn by the page, which owns the pointer. The
+ * damage overlay's state half is ported (`effects/damage_overlay.ts`) and
+ * runs from here.
  * `PlayerEnterPlay`'s crosshair zeroing is left out: the engine re-polls the
  * aim the next frame, and the port's aim is written on pointer moves only, so
  * zeroing it would park the gun light in the middle of the
@@ -47,6 +50,10 @@ import type { Events } from "../core/events";
 import { CommitAppState, RequestAppState } from "./app_state";
 import { FirstDueShotRequest } from "./combat/shot";
 import { HudDrawAmmoAndReloadPrompt, HudDrawLives } from "./hud_readout";
+import { HudDrawContinueDigit, HudDrawContinuePrompt, HudDrawCrosshair,
+         HudDrawPlayerGameOver, HudDrawScoreCheat } from "./continue_readout";
+import { CreditPromptDraw } from "./credit_prompt";
+import { HudDrawShutterState } from "./hud_shutter";
 import {
   OriginalWeaponLoadFireParams, PlayerFireAndReloadUpdate,
   PlayerFireOriginalModeWeapon,
@@ -330,6 +337,35 @@ export function IsDemoRun(): boolean {
   }
 }
 
+/**
+ * `[port-only]` -- the prologue of `EvtInterpreterLoop` (`FUN_0045ECC0`),
+ * which recomputes `g_evt_gameplay_live` before the script's first
+ * instruction of the frame. The walker is the rest of that routine and lives
+ * in `script/`; it asks for this through `WalkerHost.gameplayLive`.
+ *
+ * ```
+ * Training:  live = state[0] == 5 || state[1] == 5
+ * otherwise: live = (lives[0] >= 1 && state[0] == 5)
+ *                || (lives[1] >= 1 && state[1] == 5) || IsDemoRun()
+ * ```
+ *
+ * So the script stands at its wait while both players are on the continue
+ * or out, and moves again the frame one is back in play. `[proved]` from the
+ * decompile; the lives are compared as s16.
+ */
+export function EvtGameplayLiveUpdate(): number {
+  const inPlay = (p: number) => G.g_player_state[p] === PlayerState.InPlay;
+  const lived = (p: number) => (G.g_player_lives[p] << 16 >> 16) >= 1;
+  let live: boolean;
+  if (G.g_GameMode === GameMode.Training) {
+    live = inPlay(0) || inPlay(1);
+  } else {
+    live = (lived(0) && inPlay(0)) || (lived(1) && inPlay(1)) || IsDemoRun();
+  }
+  G.g_evt_gameplay_live = live ? 1 : 0;
+  return G.g_evt_gameplay_live;
+}
+
 // -- the handlers --------------------------------------------------------------
 
 /** `PlayerStateEnterNewGame` — `FUN_00413DB0`. */
@@ -393,7 +429,15 @@ export function PlayerStateArmContinue(player: number): void {
  * their attacker slot and is game over.
  *
  * While the run is on its own continue screen (phase 4) this timer stands
- * still: that screen counts for everybody.
+ * still: that screen counts for everybody, and draws for everybody.
+ *
+ * Then the draws, each on its own flag -- `EBX` and the reused argument slot
+ * `[ESP+0x18]`, both 1 on entry. A continue taken or a countdown run out this
+ * frame clears both. The small CONTINUE? and its digit need the first still
+ * set, app state 6, a mode that is neither Training nor Boss, a credit, and a
+ * run phase other than 4; the credit line needs only the second. The score
+ * cheat is drawn before the start press is tested, on every frame. `[proved]`
+ * from the listing, `0x0041435B`..`0x00414408`.
  */
 export function PlayerContinueCountdown(player: number,
                                         f: PlayerFrame): void {
@@ -418,12 +462,31 @@ export function PlayerContinueCountdown(player: number,
     G.g_player_continue_timer[player] -= CONTINUE_TIMER_STEP;
     expired = G.g_player_continue_timer[player] < 1;
   }
-  if (PlayerTryStartPress(player, PlayerState.EnterContinue) === 0
-      && expired) {
+  HudDrawScoreCheat(player);
+  let drawDigit = true;
+  let drawCredits = true;
+  if (PlayerTryStartPress(player, PlayerState.EnterContinue) !== 0) {
+    drawDigit = false;
+    drawCredits = false;
+  } else if (expired) {
+    drawDigit = false;
+    drawCredits = false;
     G.g_player_continue_timer[player] = 0;
     G.g_max_attackers -= 1;
     PlayerSetState(PlayerState.GameOver, 1, player);
   }
+  if (G.g_app_state !== AppState.InPlay
+      || (G.g_GameMode >= GameMode.Training && G.g_GameMode <= GameMode.Boss)
+      || CreditsAvailable() === 0) {
+    drawDigit = false;
+  }
+  if (G.g_nRunPhase !== RunPhase.ContinueCountdown && drawDigit) {
+    HudDrawContinuePrompt(player);
+    // `CDQ; AND EDX, 0xFFF; ADD; SAR 0xC`: the digit rounds toward zero.
+    HudDrawContinueDigit(player,
+                         Math.trunc(G.g_player_continue_timer[player] / 0x1000));
+  }
+  if (drawCredits) CreditPromptDraw(player);
 }
 
 /**
@@ -454,13 +517,15 @@ export function PlayerResumeContinue(player: number): void {
  * game-over screen puts the body on its fall, motion `0x004EC8B4[p]`. Then
  * `GameOverPlaceBody`, a 120-frame wait, and `PlayerGameOverWait` this frame.
  *
- * Left out: outside app state 7 it first calls `FUN_00416900` (unread, a
- * draw), and on it `FUN_00416810(task, 1)` writes node 5's model slot from
+ * Outside app state 7 it first draws the small GAME OVER
+ * (`HudDrawPlayerGameOver`). Left out: in app state 7,
+ * `FUN_00416810(task, 1)` writes node 5's model slot from
  * `0x004EC9E0[p*3 + 1]` -- which is the skeleton's own slot for bone 5
  * (`0x1591`, `0x15A4`), so the bundle's body already wears it. It also clears
  * bit 1 of `0x009A5D8C + p*0x130` (unread).
  */
 export function PlayerStateArmGameOver(player: number): void {
+  if (G.g_app_state !== AppState.GameOver) HudDrawPlayerGameOver(player);
   G.g_player_camera_hook[player] = PlayerCameraHook.DrawBodyUntilMotionEnd;
   const body = G.g_player_bodies[player];
   if (G.g_app_state === AppState.GameOver && body) {
@@ -474,7 +539,8 @@ export function PlayerStateArmGameOver(player: number): void {
 
 /**
  * `PlayerGameOverWait` — `FUN_004144C0`. On the game-over screen it only runs
- * the camera hook; otherwise it counts down and puts the player out.
+ * the camera hook; otherwise it counts down and puts the player out -- and on
+ * every frame of the count but the last, draws the small GAME OVER.
  *
  * The hook `PlayerStateArmGameOver` installed is the body's, and it is run
  * from here because this module can reach `game/player_body.ts` and
@@ -495,7 +561,9 @@ export function PlayerGameOverWait(player: number, events?: Events): void {
   G.g_player_gameover_timer[player] -= 1;
   if (G.g_player_gameover_timer[player] === 0) {
     PlayerSetState(PlayerState.Out, 1, player);
+    return;
   }
+  HudDrawPlayerGameOver(player);
 }
 
 /**
@@ -513,13 +581,19 @@ export function PlayerStateOut(player: number, f: PlayerFrame): void {
 
 /**
  * `PlayerPollStart` — `FUN_00414600` (behind the `0x004145F0` thunk). A START
- * off the play screen is a new game (0); on it, a join (3).
+ * off the play screen is a new game (0); on it, a join (3). A player still at
+ * 9 on the play screen, with `g_screen_furniture_flags` bit 1 up, gets the
+ * credit line -- player 2's "PRESS START BUTTON" through a one-player game.
  */
 export function PlayerPollStart(player: number): void {
   PlayerTryStartPress(player, G.g_app_state !== AppState.InPlay
     ? PlayerState.EnterNewGame : PlayerState.EnterJoinIn);
-  // `0x009C6EF0 = 1` for a join, and "PRESS START" for a player at 9 -- the
-  // flag is not modelled and the message is the HUD's.
+  // `0x009C6EF0 = 1` for a join; the flag is not modelled.
+  if (G.g_player_state[player] === PlayerState.Out
+      && (G.g_screen_furniture_flags & 2) !== 0
+      && G.g_app_state === AppState.InPlay) {
+    CreditPromptDraw(player);
+  }
 }
 
 /** `PlayerStateArmPendingStart` — `FUN_00414680`. */
@@ -558,9 +632,10 @@ export function PlayerStateFireOnly(player: number, f: PlayerFrame): void {
  * the firing gate is up (`0x00413F63`), the lives always -- and takes the
  * shown copy. Then, only in a demo run, a start press can join.
  *
- * `HudDrawCrosshair` (`FUN_004169C0`) and `PlayerShotEffectsThink`
- * (`FUN_00416B00`) sit between the trigger and the HUD; the crosshair is the
- * UI's reticle and the shot rings are stepped by `ShotEffectsTick`.
+ * `HudDrawCrosshair` and `PlayerShotEffectsThink` (`FUN_00416B00`) sit
+ * between the trigger and the HUD; the crosshair's decision is recorded for
+ * the page's reticle and the shot rings are stepped by `ShotEffectsTick`. The
+ * score cheat's readout is the last call.
  */
 export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
   // The `+0x80` hook (`PlacePlayerEntityFromViewPose`) is the renderer's.
@@ -575,6 +650,7 @@ export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
       PlayerFireAndReloadUpdate(player, f);
     }
   }
+  HudDrawCrosshair(player);
   if (G.g_app_state !== 9 && G.g_app_state !== AppState.Attract) {
     if (G.g_player_lives[player] === 0) {
       if (G.g_GameMode === GameMode.Training) {
@@ -591,6 +667,7 @@ export function PlayerUpdateInPlay(player: number, f: PlayerFrame): void {
   }
   DamageOverlayUpdateAndDraw(player, f.rng, f.events);
   if (IsDemoRun()) PlayerPollStart(player);
+  HudDrawScoreCheat(player);
 }
 
 /**
@@ -638,6 +715,7 @@ export function PlayerTaskRun(player: number, f: PlayerFrame): void {
  */
 export function PlayerTasksRun(f: PlayerFrame): void {
   G.g_screen_sprite_draws = [];
+  G.g_crosshair_drawn = [0, 0];
   const offscreen = [false, false];
   for (let p = 0; p < 2; p++) {
     const r = FirstDueShotRequest(p);
@@ -661,11 +739,15 @@ export function PlayerTasksRun(f: PlayerFrame): void {
  * then show the reset's empty `G.g_screen_sprite_draws`: a seek into a fight,
  * paused, had no bullets and no lives on it.
  *
- * So this runs the next frame's player turn, {@link PlayerTasksRun}, and
- * throws it away: `G` is copied first and written back after, keeping only
- * the sprites. Nothing is heard (no events), the world's generator is not
- * drawn from (a scratch one), and nothing is asked of the renderer
- * (`NULL_HOST`). There is no invented "does this player have a HUD" test:
+ * So this runs the next frame's player turn, {@link PlayerTasksRun}, and the
+ * task the scene list runs straight after it, `HudDrawShutterState` -- the
+ * letterbox is drawn from the bars that routine records, so a stage loaded
+ * or seeked into a cutscene would otherwise show no bars until it played --
+ * and throws both away: `G` is copied first and written back after, keeping
+ * only what they drew: the sprites, the crosshair's decision and the bars.
+ * Nothing is heard (no events), the world's generator is not drawn from (a
+ * scratch one), and nothing is asked of the renderer (`NULL_HOST`). There
+ * is no invented "does this player have a HUD" test:
  * the routines that draw the readouts decide, from a player task that is
  * often not yet `InPlay` after a seek -- the enter-play states run
  * `PlayerUpdateInPlay` on their own first frame.
@@ -679,9 +761,14 @@ export function PlayerTasksDrawWithoutAFrame(): void {
   const live = { ...G };
   RestoreGameGlobals(clonePlain(G));
   PlayerTasksRun({ host: NULL_HOST, rng: new Rng(0) });
+  HudDrawShutterState();
   const sprites = G.g_screen_sprite_draws;
+  const crosshair = G.g_crosshair_drawn;
+  const bars = G.g_hud_shutter_bars;
   RestoreGameGlobals(live);
   G.g_screen_sprite_draws = sprites;
+  G.g_crosshair_drawn = crosshair;
+  G.g_hud_shutter_bars = bars;
 }
 
 /**
@@ -713,8 +800,8 @@ export function SelectAttackablePlayer(): void {
 /**
  * `[port-only]` -- the boot slice of the player block, from three routines:
  * `FUN_0040A920` zeroes the data segment and writes 9 to both players
- * (`0x0040AA3D`); `FUN_004066D0` sets the credit costs; `FUN_0040AB50` loads
- * the start lives from the options.
+ * (`0x0040AA3D`); `CreditsBootReset` (`FUN_004066D0`) sets the credit costs;
+ * `FUN_0040AB50` loads the start lives from the options.
  */
 export function PlayerBlockBoot(): void {
   G.g_damage_rank_pending = 0;
@@ -768,6 +855,16 @@ export function PlayerBlockBoot(): void {
   G.g_route_marks = [];
   G.g_continue_credit_seen = [0, 0, 0, 0];
   G.g_no_continue_frames = 0;
+  // `FUN_0040A920` zeroes the data segment; `CreditsBootReset`
+  // (`FUN_004066D0`) then seeds the credit line's clock at 0 and its last
+  // look at `g_input_frame`.
+  G.g_input_frame = 0;
+  G.g_screen_frames = 0;
+  G.g_credit_blink_clock = 0;
+  G.g_credit_blink_seen = 0;
+  G.g_credit_prompt_player = 0;
+  G.g_score_cheat = 0;
+  G.g_crosshair_drawn = [0, 0];
   G.g_start_lives = START_LIVES_BY_OPTION[OPTION_LIVES];
 }
 
@@ -864,6 +961,10 @@ const PLAYER_BLOCK_FIELDS = [
   // The rank is the run's, not the scene's: only `ResetDamageRank` resets it.
   "g_damage_rank", "g_damage_rank_pending", "g_rank_clock", "g_rank_clock_on",
   "g_rank_players_seen", "g_rank_attackers_seen",
+  // The input and screen counters and the credit line's clock: no scene load
+  // writes them.
+  "g_input_frame", "g_screen_frames", "g_credit_blink_clock",
+  "g_credit_blink_seen", "g_score_cheat",
 ] as const;
 
 /**

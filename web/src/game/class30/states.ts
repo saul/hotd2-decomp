@@ -258,10 +258,17 @@ export enum StrikeSub {
  * `obj+0x34` bit `0x08000000` — **this spawn sprints.**
  *
  * `ZombieStateAttackRun` (`FUN_004554D0`) indexes its motion row with
- * `2 + ((obj+0x34 >> 0x1B) & 1)`, and states 14 and 15 use the same pair. The
- * bit is never `OR`ed anywhere in the image: it arrives on the actor from the
- * **spawn record's own flags word**, through `ActorInitFlags`
- * (`FUN_00408970`), so it is placement data and not a runtime decision.
+ * `2 + ((obj+0x34 >> 0x1B) & 1)`, and states 14 and 15 use the same pair. It
+ * arrives on the actor from the **spawn record's own flags word**, through
+ * `ActorInitFlags` (`FUN_00408970`), so it is placement data first.
+ *
+ * It is also raised at run time, which an earlier note here denied: a sweep
+ * of `.text` for the immediate finds two class-0x30 writes to `obj+0x34`,
+ * `OR ECX, 0x8000000` (`81c900000008`) at `0x00453F17` inside `ZombieOnShot`
+ * (`FUN_00453EB0`)'s per-player loop, and the same bytes at `0x00459682` in
+ * `ZombieRetireThrowConditionIfUnarmed` (`FUN_004595F0`), which the port
+ * transcribes. So a zombie that has been shot, or a walker that has thrown its
+ * last weapon, comes on at a run. The on-shot raise is not ported yet.
  *
  * **192 of the 402 class-0x30 spawns in the shipped stages set it.** This port
  * took the first *baked* motion of the pair instead, which is always `Run`,

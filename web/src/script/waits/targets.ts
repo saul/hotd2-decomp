@@ -24,8 +24,8 @@
  * script left for block 4 with a zombie still standing on the bridge holding
  * its drum.
  *
- * `g_evt_gameplay_live` (`0x007DCCA4`) is not modelled, for the reason
- * `waits/flag.ts` gives. `[open]`
+ * `g_evt_gameplay_live` (`0x007DCCA4`) is the first term, and
+ * `WaitContext.gameplayLive` answers it; see `waits/flag.ts`.
  */
 import type { OpJson } from "../../bundle";
 import { G } from "../../game/globals";
@@ -54,6 +54,6 @@ export const waitTargetsClear: WaitRule = {
     return { kind: "targets" };
   },
   satisfied(_policy, _op: OpJson, ctx: WaitContext): boolean {
-    return ctx.host.cameraTargetsClear?.() ?? true;
+    return ctx.gameplayLive() && (ctx.host.cameraTargetsClear?.() ?? true);
   },
 };

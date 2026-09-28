@@ -22,7 +22,9 @@
  */
 import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
-import { ActorFlag, ZombieAux, type Actor, type ZombieActor } from "../actor";
+import {
+  ActorFlag, ZombieAux, ZombieFlag2, type Actor, type ZombieActor,
+} from "../actor";
 import { ReleaseAttackSlot, TryClaimAttackSlot } from "../combat/permits";
 import {
   ReleaseEnemyAliveCount, ReleaseEnemyPresentCount,
@@ -36,8 +38,8 @@ import type { GameHost } from "../host";
 import { bamsDelta, type Vec3 } from "../vec";
 import { ZombieReleaseAndDespawn } from "./walk_distance";
 import { ActorSetMotionBlended, ZombieSetMotionIfIdle } from "./motion_cue";
-import { SpawnZombieThrownWeapon } from "./throw";
-import { MotionFade, ZombieState } from "./states";
+import { ZombieThrowHandWeapon } from "./throw";
+import { MotionFade, ZOMBIE_SPRINTS, ZombieState } from "./states";
 import { ActorPlayHitVoice, ActorVoice } from "../combat/voice";
 
 /**
@@ -141,10 +143,40 @@ export function ZombieShouldStandAndThrow(obj: ZombieActor): boolean {
 
 /** The condition an ordinary walker must be in to stop and throw. */
 export const ATTACK_RUN_THROW_CONDITION = 8;
+
+/** Character type 1, `znassb.bin` -- the one that throws both hands at once. */
+const CHAR_ZNASSB = 1;
+
+/**
+ * `ZombieRetireThrowConditionIfUnarmed` — `FUN_004595F0`. A condition-8
+ * walker with nothing left to throw stops being one.
+ *
+ * ```
+ * if (obj+0x130C != 8) return;
+ * armed = hands whose draw slot is still the held one (1, 0x13 and 0x14)
+ * if (armed == 0) { obj+0x130C = 0; obj+0x34 |= 0x8000000; }
+ * ```
+ *
+ * `OR ECX, 0x8000000` (`81c900000008`) at `0x00459682`: the **sprint** bit
+ * `ZombieStateAttackRun` picks `row[3]` over `row[2]` by, so a walker that has
+ * thrown its last weapon comes on at a run. A character type outside the three
+ * jumps straight to the writes (`JNZ 0x00459675` at `0x00459613`). Called once,
+ * from the release arm of `ZombieStateStandAndThrow`, after the throw.
+ * `[proved]`
+ */
+export function ZombieRetireThrowConditionIfUnarmed(obj: ZombieActor): void {
+  if (obj.condition !== ATTACK_RUN_THROW_CONDITION) return;
+  const known = obj.charType === CHAR_ZNASSB || obj.charType === 0x13
+    || obj.charType === 0x14;
+  if (known && ZombieArmedHands(obj) !== 0) return;
+  obj.condition = 0;
+  obj.flags |= ZOMBIE_SPRINTS;
+}
 /** `FUN_0040A040`'s window here: 0x400 BAMS, a little over five degrees. */
 const FACING_WINDOW = 0x400;
 
-export function ZombieStateStandAndThrow(obj: ZombieActor, eye: Vec3, rng: Rng,
+export function ZombieStateStandAndThrow(obj: ZombieActor, _eye: Vec3,
+                                         rng: Rng,
                                          host: GameHost,
                                          events?: Events): void {
   const tail = obj.standThrow;
@@ -203,18 +235,42 @@ export function ZombieStateStandAndThrow(obj: ZombieActor, eye: Vec3, rng: Rng,
     const a = AttackListOf(obj)[String(obj.attack)];
     // `obj+0x19C == entry+0x08`, the hit frame, in the play clock.
     if (!a || MotionPlayFrame(obj) !== a.hit_frame) return;
-    if (obj.zom.throwHand) {
-      SpawnZombieThrownWeapon(obj, obj.zom.throwHand, eye, host, events);
+    // `ZombieThrowHandWeapon(obj, obj+0x135C)` at `0x004592D7`, with no test
+    // on the hand: the claim arm only gets here with one armed.
+    ZombieThrowHandWeapon(obj, obj.zom.throwHand, host, events);
+    // **`znassb` throws both blades at once.** `CMP word ptr [ESI+0x1f4], DI`
+    // with `EDI = 1` at `0x004592E4`, then `TryClaimAttackSlot`, whose answer
+    // is not looked at, `ZombiePickThrowingHand` into `obj+0x135C`, and a
+    // second `ZombieThrowHandWeapon` (`0x004592ED`..`0x00459301`). The first
+    // weapon took the permit and left the thrower on 0, so the claim is for
+    // the *other* player's permit: in a two-permit game each player gets a
+    // blade, and in a one-permit game the claim fails and both carry permit
+    // 0. A thrower with only one hand left throws it and then a second weapon
+    // with no model at all, which is what the routine does with hand 0.
+    if (obj.charType === CHAR_ZNASSB) {
+      TryClaimAttackSlot(obj);
+      obj.zom.throwHand = ZombiePickThrowingHand(obj, rng);
+      ZombieThrowHandWeapon(obj, obj.zom.throwHand, host, events);
     }
+    ZombieRetireThrowConditionIfUnarmed(obj);
+    // `INC word ptr [ESI+0x1312]; JMP 0x00459320` -- straight on into the
+    // clip-end test, on the same frame.
     obj.sub = Sub.Recover;
-    return;
   }
 
   if (obj.sub === Sub.Recover) {
     const len = MotionPlayLength(obj);
     if (len > 0 && MotionPlayFrame(obj) !== len - 1) return;
     obj.flags &= ~ActorFlag.Committed;
-    ReleaseAttackSlot(obj);
+    // **Only the latch.** `0x0045934C`..`0x00459361`: `obj+0x136C & 0x20000`
+    // cleared and `g_attack_committed` lowered, and nothing else -- the permit
+    // itself left with the weapon, which gives it back when it is spent. This
+    // was a whole `ReleaseAttackSlot`, which freed the permit at the end of
+    // the clip while the axe was still in the air.
+    if (obj.flags2 & ZombieFlag2.OffScreenPermit) {
+      obj.flags2 &= ~ZombieFlag2.OffScreenPermit;
+      G.g_attack_committed = 0;
+    }
     // A condition-8 walker throws once and goes back to closing on you.
     if (!standing) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
     // The stationary one throws again while it still has a hand.

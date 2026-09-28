@@ -191,13 +191,25 @@ export interface FeedEntry {
 
 export interface WalkerOptions {
   /**
-   * Seconds a branch point waits before the seeded RNG picks. Hovering the
-   * branch bar freezes it, so this is the unattended pace, not a deadline.
+   * `[port-only]` debug aid, **off by default**: hold at a route branch for
+   * {@link branchCountdown} seconds so a viewer can take the other road.
+   *
+   * Off is the engine. `EvtAdvanceStepOrRoute` (`FUN_0045F000`) reads
+   * `g_script_branch_var` when the step list runs out and goes straight to
+   * `next[choice]` on the same frame; there is no window in the game. The
+   * sidebar's "Pause at branches" switch sets this.
+   */
+  branchPause: boolean;
+  /**
+   * Seconds a paused branch waits before it takes the game's own answer.
+   * Hovering the branch bar freezes it, so this is the unattended pace, not a
+   * deadline. Only read with {@link branchPause} on.
    */
   branchCountdown: number;
 }
 
 export const DEFAULT_OPTIONS: WalkerOptions = {
+  branchPause: false,
   branchCountdown: 1.5,
 };
 
@@ -279,6 +291,19 @@ export interface WalkerHost {
    * host that has neither passes the gate, as `WAIT_NOTES` says.
    */
   cameraTargetsClear?(): boolean | null;
+  /**
+   * `g_evt_gameplay_live` (`0x007DCCA4`) -- may the script pass a wait this
+   * frame -- or `null` when this client has no player to ask.
+   *
+   * `EvtInterpreterLoop` (`FUN_0045ECC0`) recomputes it before its first
+   * instruction: 1 while a player is in play (state 5) with a life, or in a
+   * demo run. Every wait opcode, `0x40` to `0x47`, tests it before it lets
+   * the script on, so on the continue screen the script stands at whatever
+   * wait it had reached while the scene runs on under it. Optional, so the
+   * walker-only hosts in `test/` and `web/tools/`, which have no player,
+   * leave every gate as it was.
+   */
+  gameplayLive?(): boolean | null;
   /**
    * evt `0x2D`: start a dialogue group's voice, and say how long it runs.
    *
@@ -790,6 +815,22 @@ export class Walker {
    * `g_training_lesson` here instead: no stage script is entered in that mode.
    */
   nextEntryBlock: number | null = null;
+  /**
+   * The BGM id the script has left on channel `0xF`, or null once it has
+   * stopped it -- the engine's `g_current_bgm_id` (`0x009C8FB8`), which
+   * `PlaySoundId` writes on every track it opens and clears on
+   * `0x80000000`.
+   *
+   * Written by **both** instructions that reach `PlaySoundId`: `se_play`
+   * (`0x38`-`0x3B`), which is how five of the six stage scripts start their
+   * own track, and `bgm_entry_play` (`0x5F`). It used to be written by `0x5F`
+   * alone, so a seek past the `se_play` at block 0 step 2 had no music to put
+   * back, and the player started each stage's track at load "by convention"
+   * to cover for it.
+   *
+   * Script state for the reason {@link Walker.loopingSe} is: a seek replays
+   * the instructions silently, and this is what `Bgm.syncTrack` puts back.
+   */
   bgmTrack: number | null = null;
   /** The most recent `se_play` operand, for the HUD. */
   lastSound: number | null = null;
@@ -1261,10 +1302,9 @@ export class Walker {
    */
   stepOnce(): boolean {
     this.stepOverWait();
-    // Stepping advances instructions, not frames, so a shutter close that is
-    // still counting down would never finish and would hold the firing gate up
-    // for the rest of the session.
-    if (this.shutterState === 3) this.shutter.settle();
+    // A shutter close still sliding is not settled here any more: the slide
+    // is the game's task (`game/hud_shutter.ts`), and step mode runs the game
+    // underneath, so it finishes on its own frames as the engine's does.
     return this.executeOne(false);
   }
 
@@ -1340,13 +1380,19 @@ export class Walker {
   /** `EvtInterpreterLoop`'s share of one frame. See {@link tick}. */
   private runInstructions(dt: number, fps: number): void {
     let frames = dt * fps;
+    // `EvtInterpreterLoop`'s first act, before any instruction: whether the
+    // script may pass a wait this frame. Asked once and kept, as the engine
+    // keeps it in a global -- the condition of a wait that short-circuits
+    // before this term must not leave last frame's answer standing.
+    this.gameplayLiveNow = (this.host.gameplayLive?.() ?? null) !== false;
 
     // Light and fog animate on the same 60 Hz clock as everything else.
     this.lightBlock.step(dt * fps);
     // `PushSceneLightStateToDevice` steps both blocks' channel tweens.
     this.lightBlock1.step(dt * fps);
 
-    this.shutter.step(dt * fps);
+    // No shutter step: `HudDrawShutterState` is a task of the scene's own and
+    // runs in `SceneTaskWalk`, after the players -- see `game/hud_shutter.ts`.
     // The caption is a countdown in script frames, not in wall time: stepping
     // onto a `play_dialogue` and having the line expire two seconds later
     // while nothing is playing makes it unreadable.
@@ -1362,6 +1408,13 @@ export class Walker {
         w.framesLeft -= used;
         frames -= used;
         if (w.framesLeft > 0) return;
+        // Both clocks, `0x41` and `0x42`, pass only while the gameplay gate
+        // is open. `EvtOpWaitFrames42` (`FUN_0045FB30`) keeps counting down
+        // while it is shut and holds at -1; `EvtOpWaitCameraPathFrame41`
+        // (`FUN_0045FAC0`) tests nothing while it is shut and the camera,
+        // which is not the script's, runs on. Either way the wait goes on the
+        // first frame the gate opens.
+        if (!this.gameplayLive()) return;
       } else if (!this.waitSatisfied()) {
         return;
       }
@@ -1440,6 +1493,26 @@ export class Walker {
     return this.host.cameraFree() !== false;
   }
 
+  /**
+   * `g_evt_gameplay_live`, the term every wait opcode tests, as the top of
+   * this frame's `runInstructions` found it. A host that cannot evaluate it
+   * reports `null` and the term drops out, as `cameraFree`'s does. Public
+   * because the wait rules test it.
+   */
+  gameplayLive(): boolean {
+    return this.gameplayLiveNow;
+  }
+
+  /**
+   * `[port-only]` as a field: the engine keeps the answer in
+   * `g_evt_gameplay_live` (`0x007DCCA4`), recomputed before the frame's first
+   * instruction, and the host's `gameplayLive` writes it there. Not in a
+   * snapshot, because nothing reads it before the next frame computes it
+   * again; true until then, so a seek's replay -- which observes no waits --
+   * is not held by a gate it never asked about.
+   */
+  private gameplayLiveNow = true;
+
   private waitSatisfied(): boolean {
     const w = this.wait;
     if (!w) return true;
@@ -1453,7 +1526,7 @@ export class Walker {
    * What a wait rule may ask of the machine, and nothing more.
    *
    * The walker *is* one of these — `WaitContext` is a structural view of the
-   * six members a rule may touch, so this costs nothing and the interface is
+   * members a rule may touch, so this costs nothing and the interface is
    * the whole of the surface. A rule that needs something not on it is a rule
    * reaching into the interpreter rather than being driven by it, and it will
    * not compile.
@@ -1570,7 +1643,35 @@ export class Walker {
   static playSe(w: Walker, op: OpJson, quiet: boolean): string | undefined {
     w.lastSound = op.sound ?? null;
     Walker.trackLoopingSe(w, op.sound ?? 0);
+    Walker.trackBgm(w, op.sound ?? 0);
     return quiet || !op.sound ? undefined : w.host.playSound(op.sound);
+  }
+
+  /**
+   * Keep {@link Walker.bgmTrack} in step with what one `PlaySoundId` does to
+   * channel `0xF` -- **whether or not the sound is played**, as
+   * {@link trackLoopingSe} does for the loops.
+   *
+   * `PlaySoundId` (`FUN_0041CFD0`): a namespace-1 id whose table entry is a
+   * name opens that track and becomes `g_current_bgm_id`; one whose entry is
+   * null breaks out and changes nothing. A namespace-8 id reaches
+   * `PlaySoundControl` (`FUN_0041D3E0`), where `0x80000001` is the SE and
+   * `0x80000002` the voice and **every other value stops the music**. Only
+   * `0x80000000` also zeroes `g_current_bgm_id`; this clears on all of them,
+   * because what a seek needs is what is sounding, and the two differ only
+   * for control words no shipped script uses.
+   */
+  static trackBgm(w: Walker, id: number): void {
+    const ns = id >>> 28;
+    if (ns === 8) {
+      if (id !== 0x80000001 && id !== 0x80000002) w.bgmTrack = null;
+      return;
+    }
+    if (ns !== 1) return;
+    const idx = id & 0xfff;
+    const names = w.script.bgm?.names;
+    if (names && !(names.ar[idx] ?? null) && !(names.plain[idx] ?? null)) return;
+    w.bgmTrack = id >>> 0;
   }
 
   /**
@@ -1587,6 +1688,13 @@ export class Walker {
    */
   static trackLoopingSe(w: Walker, id: number): void {
     if (!id) return;
+    // `PlaySoundId(0x80000001)` releases every SE channel, the loops with
+    // them: `PlaySoundControl` (`FUN_0041D3E0`) → `SoundCommand(n, 0x1100A0)`
+    // (`FUN_004ABF80`).
+    if (id === 0x80000001) {
+      w.loopingSe = [];
+      return;
+    }
     for (const pair of w.script.sound?.looping ?? []) {
       if (pair.play === id) {
         if (!w.loopingSe.includes(id)) w.loopingSe.push(id);
@@ -1862,14 +1970,15 @@ export class Walker {
       return false;
     }
 
-    if (route.kind === "branch" && !quiet) {
+    if (route.kind === "branch" && !quiet && this.options.branchPause) {
       const targets = route.next.filter((n) => n >= 0);
       if (targets.length > 1) {
-        // [diverges] **The pause is the port's, the choice is the game's.**
-        // The engine reads `g_script_branch_var` here and goes; this holds
-        // for `branchCountdown` seconds so a viewer can take the other route,
-        // and takes the engine's answer if nobody does. The value is latched
-        // now, for the reason on `BranchChoice.choice`.
+        // `[port-only]` debug aid, and off by default -- see
+        // `WalkerOptions.branchPause`. The engine reads `g_script_branch_var`
+        // here and goes, which is the fall-through below. With the aid on
+        // this holds for `branchCountdown` seconds so a viewer can take the
+        // other route, and takes the engine's answer if nobody does. The value
+        // is latched now, for the reason on `BranchChoice.choice`.
         this.branch = {
           block: this.block,
           targets,

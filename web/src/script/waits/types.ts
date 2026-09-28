@@ -40,6 +40,11 @@ export interface WaitContext {
    * open while a scripted shot is still playing.
    */
   cameraHasHandedBack(): boolean;
+  /**
+   * `g_evt_gameplay_live` (`0x007DCCA4`): a player is in play with a life.
+   * Every wait opcode tests it; a host with no player answers true.
+   */
+  gameplayLive(): boolean;
 }
 
 export interface WaitRule {

@@ -60,7 +60,13 @@ export enum SpriteEffectKind {
   WoodAlt = 0x38,
   /** `ActorShotFeedback`'s ricochet for character type 3. */
   NoEffectType3 = 0x51,
-  /** `ThrownWeaponDeflected` (`FUN_00450050`) — the same range as `Other`. */
+  /**
+   * `ZombieThrownWeaponStateShotDown` (`FUN_00459D20`), for every class-0x30
+   * weapon shot out of the air (`PUSH 0x52` at `0x00459D54`) — the same range
+   * as `Other`. Class 0x31's `ThrownWeaponDeflected` (`FUN_00450050`) spawns
+   * {@link Other} for `zsass`'s knives and {@link NoEffectType3} for
+   * `zslman`'s blades instead (`0x00450086`..`0x004500AD`).
+   */
   DeflectedWeapon = 0x52,
   /**
    * The Original Mode blast `MarkActorShot` (`FUN_00404DB0`) adds for weapon
@@ -74,6 +80,14 @@ export enum SpriteEffectKind {
    * `[likely]` dust, from that choice and nothing else.
    */
   Dust = 0x46,
+  /**
+   * The second label on {@link Dust}'s arm -- `case 0x46: case 0x4B:` -- so
+   * the same strip and the same base scale. `ThrowerEmitGroundDust`
+   * (`FUN_0044D260`) spawns this one: the tall column where a leap lands and
+   * the stretched scuffs of `zsass`'s trail. Why the routine names 0x4B
+   * rather than 0x46 is `[open]`; nothing in the switch tells them apart.
+   */
+  DustAlt = 0x4b,
   /**
    * Slots `0x1339..0x1356`, `common.bin` 307..336 -- the strip the bat's and
    * the owl's water splashes flip through -- and `PlayImpactSoundForMaterial`

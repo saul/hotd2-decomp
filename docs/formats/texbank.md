@@ -134,6 +134,25 @@ The exporter (`hod2lib/texbank.ts`, `exetab.ts`, and `bundle.ts`'s
 them into `script.json` as `screen_sprites` (format 12; `hud_sprites` before):
 `{w, h, png}` by sprite id.
 
+The continue screen's are in `scr_common` too, PAL4 like the HUD's, and
+`hud_sprites.ts`'s `CONTINUE_SCREEN_SPRITES` lists them. Each was decoded and
+looked at before it was named `[proved]`:
+
+| id | size | shows | drawn by |
+|---|---|---|---|
+| `0x22C` | 512x64 | CONTINUE? | `RunPhaseContinueCountdown`, `HudDrawContinuePrompt` |
+| `0x4F..0x58` | 64x128 | the countdown's `0`..`9` | the same two, `0x4F + digit` |
+| `0x22E` | 128x32 | CREDIT(S) | `CreditPromptDrawCount` |
+| `0x332` | 128x32 | FREE PLAY | `CreditPromptDrawCount` |
+| `0x43E` | 512x64 | GAME OVER (the small one, in play) | `HudDrawPlayerGameOver` |
+| `0x5BB` | 256x32 | INSERT COIN(S) | `CreditPromptDrawMessage` |
+| `0x5BC` | 256x32 | INSERT MORE COIN(S) | `CreditPromptDrawMessage` |
+| `0x8FF` | 128x16 | PRESS START BUTTON | `CreditPromptDrawMessage`, at 1.4 |
+| `0x900` | 512x32 | PRESS START BUTTON (attract) | `CreditBlinkTick` |
+
+The credit count's digits are the HUD's `0x59 + d`, 16x32, at the credit
+line's 0.85. `tools/verify_continue.py` checks each id resolves at that size.
+
 ## Two banks that overwrite a third: the blood colour
 
 `tex/scr_blood_red.bin` and `tex/scr_blood_green.bin` hold **39 textures each,

@@ -156,7 +156,7 @@ export function soundProjection(p: Player): SoundProjection {
       ? "no bgm"
       : bs.blocked && on
         ? "click 🔇 to allow audio"
-        : `${bs.file}${bs.source === "stage" ? " (stage)" : ""}`,
+        : `${bs.file}${bs.loop === false ? " (once)" : ""}`,
   };
 }
 
@@ -165,6 +165,15 @@ const GAME_OVER_LABELS = [
   "game over", "game over", "game over", "GAME OVER", "your route",
   "your route -- click to go on",
 ];
+
+/**
+ * Whether the game drew player 1's crosshair this frame --
+ * `HudDrawCrosshair`'s decision, recorded in `G.g_crosshair_drawn`. The
+ * reticle itself is the page's, because it follows the pointer between ticks.
+ */
+export function crosshairProjection(): boolean {
+  return G.g_crosshair_drawn[0] !== 0;
+}
 
 /**
  * The game-over screen, read off `G`. Null while app state 6 runs; on the

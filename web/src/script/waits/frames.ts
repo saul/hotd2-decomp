@@ -8,7 +8,7 @@
 import type { OpJson } from "../../bundle";
 import { G } from "../../game/globals";
 import type { WaitPolicy } from "../walker";
-import type { WaitRule } from "./types";
+import type { WaitContext, WaitRule } from "./types";
 
 /**
  * `EvtOpWaitFrames42` (`FUN_0045FB30`):
@@ -68,8 +68,11 @@ export const waitCameraPathFrame: WaitRule = {
   enter(op: OpJson): WaitPolicy {
     return { kind: "camera", arg: op.arg ?? 0 };
   },
-  satisfied(policy: WaitPolicy): boolean {
+  satisfied(policy: WaitPolicy, _op: OpJson, ctx: WaitContext): boolean {
     if (policy.kind !== "camera") return true;
+    // Nothing is tested while the gameplay gate is shut -- the continue
+    // screen -- and the camera, which is not the script's, runs on.
+    if (!ctx.gameplayLive()) return false;
     return policy.arg === 0
       ? G.g_cam_path_frames_left < 1
       : G.g_cam_path_frame > policy.arg;

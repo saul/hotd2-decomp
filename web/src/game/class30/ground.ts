@@ -30,11 +30,24 @@ const GROUND_PROBE_RISE = 6;
 const GROUND_SNAP_LIMIT = 10;
 /** `ZombiePushOutOfWorldAndActors`' shove timer, and the bit it flips. */
 const SHOVE_PERIOD = 0x3c;
-/** The push applies a tenth of the penetration a frame — 1.8x while airborne. */
+/**
+ * The push applies a tenth of the penetration a frame (`0x004c4cc8`,
+ * `cdcccc3d`) -- 1.8x that (`0x0055dd48`, `6666e63f`) while the actor holds
+ * either bit of {@link PUSH_BOOST_BITS}.
+ */
 const PUSH_FRACTION = 0.1;
-const PUSH_AIRBORNE = 1.8;
-/** `obj+0x34 & 0x18000000` — either of the two airborne bits. */
-const AIRBORNE_EITHER = 0x18000000;
+const PUSH_BOOST = 1.8;
+/**
+ * `obj+0x34 & 0x18000000`, tested at `00454944` on the actor that did the
+ * pushing and at `004549b6` on this one.
+ *
+ * `0x10000000` is {@link ActorFlag.Committed}: a zombie in its strike, from
+ * the pick to the first frame of the retreat, shoves and is shoved harder.
+ * What `0x8000000` means on class 0x30 is `[open]`. This was called "either
+ * of the two airborne bits", and neither is -- airborne is
+ * {@link ActorFlag.Airborne}, `0x20000`.
+ */
+const PUSH_BOOST_BITS = ActorFlag.Committed | 0x8000000;
 
 /**
  * `ActorSnapToGroundHeight` — `FUN_00454B10`.
@@ -80,7 +93,7 @@ export function ZombiePushOutOfWorldAndActors(obj: ZombieActor, frames: number):
     if (obj.pushedBy >= 0) {
       const by = ActorByAt(obj.pushedBy);
       let f = obj.pushDepth * PUSH_FRACTION;
-      if (by && (by.flags & AIRBORNE_EITHER)) f *= PUSH_AIRBORNE;
+      if (by && (by.flags & PUSH_BOOST_BITS)) f *= PUSH_BOOST;
       obj.pos.x += obj.pushNormal.x * f;
       obj.pos.y += obj.pushNormal.y * f;
       obj.pos.z += obj.pushNormal.z * f;
@@ -90,7 +103,7 @@ export function ZombiePushOutOfWorldAndActors(obj: ZombieActor, frames: number):
     if (ColiTestSphereAgainstActors(obj, obj.sphereCentre.x, obj.sphereCentre.y,
                                     obj.sphereCentre.z, obj.bodyRadius)) {
       let f = G.g_coli_hit_depth * PUSH_FRACTION;
-      if (obj.flags & AIRBORNE_EITHER) f *= PUSH_AIRBORNE;
+      if (obj.flags & PUSH_BOOST_BITS) f *= PUSH_BOOST;
       // x and z only: an actor is never pushed up out of another.
       obj.pos.x += (G.g_coli_hit_normal[0] ?? 0) * f;
       obj.pos.z += (G.g_coli_hit_normal[2] ?? 0) * f;

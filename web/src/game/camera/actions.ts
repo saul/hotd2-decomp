@@ -68,7 +68,7 @@ export interface EvtQueuedAction {
  *
  * ```c
  * ring[DAT_009CA108] = g_evt_ip;
- * if (selector == 0x21) g_attack_committed = 0;
+ * if (selector == 0x21) g_attack_committed = 0;     // CMP EDX, 0x21 at 0x0045F82E
  * DAT_009CA108 = (DAT_009CA108 + 1) & 0xF;
  * g_queued_events_pending++;
  * ```

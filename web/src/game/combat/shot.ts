@@ -62,6 +62,7 @@ import type { Rng } from "../../core/rng";
 import { ActorFlag, type Actor } from "../actor";
 import { MarkBodyCreatureShot } from "../body_creature";
 import { MarkCarriedPropShot } from "../carried_prop";
+import { MarkThrownWeaponShot } from "../thrown_weapon";
 import { BreakablePropTakeShot } from "../class41/prop";
 import { PropFamily } from "../class41/prop_state";
 
@@ -289,6 +290,10 @@ export function MergeShotPicks(picked: ShotPick | null,
                                ShotPick | null {
   if (!registered) return picked;
   if (picked && (picked.t ?? Infinity) <= registered.t) return picked;
+  if (registered.thrown !== undefined) {
+    return { kind: "thrown", thrownId: registered.thrown,
+             point: registered.point, t: registered.t };
+  }
   return { kind: "actor", at: registered.at, bone: registered.bone,
            whole: registered.whole, point: registered.point,
            ...(registered.mesh ? { mesh: registered.mesh } : {}),
@@ -393,6 +398,21 @@ export function FireShotRequest(req: ShotRequest, host: GameHost, rng: Rng,
     events?.emit("shot.resolved", {
       player, kind: c ? "marked" : "miss", ray: req.ray,
       point: c ? pick.point : undefined, points: 0,
+    });
+    return;
+  }
+
+  if (pick.kind === "thrown") {
+    // `MarkActorShot` and nothing else. What being hit does to a thrown
+    // weapon -- the spark, the ricochet, the permit given back, the hit
+    // counted -- is its own routine's, on its next update: `ThrownWeaponUpdate`
+    // (`FUN_00450780`) or `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`). No
+    // score and no head-combo reset, both of which are `ResolveHit`'s.
+    const w = G.g_thrown_weapons.find((x) => x.id === pick.thrownId);
+    if (w) MarkThrownWeaponShot(w, player);
+    events?.emit("shot.resolved", {
+      player, kind: w ? "marked" : "miss", ray: req.ray,
+      point: w ? pick.point : undefined, points: 0,
     });
     return;
   }

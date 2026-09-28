@@ -92,3 +92,89 @@ export const BOSS_HP_BAR_SPRITES: readonly number[] = [
   BossHpBarSprite.Fill, BossHpBarSprite.Empty, BossHpBarSprite.Trail,
   BossHpBarSprite.Frame,
 ];
+
+/**
+ * The sprites of the continue screen and of the credit line under it, as
+ * the routines in `continue_readout.ts`, `credit_prompt.ts` and
+ * `RunPhaseContinueCountdown` (`FUN_00460530`) push them. Every one resolves
+ * to `tex/scr_common.bin` -- the bank `hud_readout.ts`'s sprites are in -- and
+ * each is named for what its texture shows, decoded and looked at.
+ */
+export enum ContinueSprite {
+  /** "CONTINUE?", 512x64. `PUSH 0x22C` at `0x00460617` and `0x004168A6`. */
+  Continue = 0x22c,
+  /**
+   * The countdown's digits `0`..`9`, 64x128 each, are this plus the digit:
+   * `ADD EAX, 0x4F` at `0x0046064A` and `ADD ECX, 0x4F` at `0x004168F0`.
+   * Not {@link HudSprite.Digit0}'s 16x32 set, which the credit count uses.
+   */
+  BigDigit0 = 0x4f,
+  /** "CREDIT(S)", 128x32: `g_credit_count_layout[0]`. */
+  Credits = 0x22e,
+  /** "FREE PLAY", 128x32: `g_credit_count_layout[1]`. */
+  FreePlay = 0x332,
+  /** "GAME OVER", 512x64: `PUSH 0x43E` at `0x00416924`. */
+  GameOver = 0x43e,
+  /** "INSERT COIN(S)", 256x32: `g_credit_prompt_messages[0]`. */
+  InsertCoins = 0x5bb,
+  /** "INSERT MORE COIN(S)", 256x32: `g_credit_prompt_messages[1]`. */
+  InsertMoreCoins = 0x5bc,
+  /** "PRESS START BUTTON", 128x16: `g_credit_prompt_messages[3]`. */
+  PressStart = 0x8ff,
+  /**
+   * "PRESS START BUTTON", 512x32, the attract screens' larger copy:
+   * `MOV [0x005A4CE8], 0x900` at `0x00406842`, in `CreditBlinkTick`.
+   */
+  PressStartAttract = 0x900,
+}
+
+/** One row of `g_credit_prompt_messages`, or of `g_credit_count_layout`. */
+export interface CreditPromptRow {
+  /** Added to the line's x and y. */
+  dx: number;
+  dy: number;
+  /** Both of the record's scales. */
+  scale: number;
+  /** The sprite id; 0 in rows whose id is not read. */
+  id: number;
+}
+
+/**
+ * `g_credit_prompt_messages` — `0x004C4B10`, four `{f32 dx, f32 dy, f32
+ * scale, u32 id}` indexed by `CreditPromptMessageIndex`: no credit, not
+ * enough, the caption-mode blink (a row whose id is 0 and which no call can
+ * reach -- see `CreditPromptMessageIndex`), and enough. `[proved]` read out of
+ * the image; `tools/verify_continue.py` reads it again.
+ */
+export const CREDIT_PROMPT_MESSAGES: readonly CreditPromptRow[] = [
+  { dx: 24, dy: 0, scale: 0.85, id: ContinueSprite.InsertCoins },
+  { dx: 0, dy: 0, scale: 0.85, id: ContinueSprite.InsertMoreCoins },
+  { dx: 0, dy: 0, scale: 0.85, id: 0 },
+  { dx: -8, dy: 0, scale: 1.4, id: ContinueSprite.PressStart },
+];
+
+/**
+ * `g_credit_count_layout` — `0x004C4A40`, the same record shape, read by
+ * `CreditPromptDrawCount` (`FUN_00406920`) at its own fixed offsets: row 0
+ * "CREDIT(S)" and row 1 "FREE PLAY" whole; rows 2 and 3 only for their dx,
+ * the step to the tens digit and on to the units. `[proved]`
+ */
+export const CREDIT_COUNT_LAYOUT: readonly CreditPromptRow[] = [
+  { dx: 32, dy: 15, scale: 0.85, id: ContinueSprite.Credits },
+  { dx: 34, dy: 15, scale: 0.85, id: ContinueSprite.FreePlay },
+  { dx: 82, dy: 0, scale: 0.85, id: 0 },
+  { dx: 12, dy: 0, scale: 0.85, id: 0 },
+];
+
+/**
+ * Every sprite the continue screen, the player's GAME OVER and the credit
+ * line can draw -- the exporter's list. The credit count's digits are
+ * {@link HudSprite.Digit0}'s, already in {@link HUD_READOUT_SPRITES}.
+ */
+export const CONTINUE_SCREEN_SPRITES: readonly number[] = [
+  ContinueSprite.Continue,
+  ...Array.from({ length: 10 }, (_, d) => ContinueSprite.BigDigit0 + d),
+  ContinueSprite.Credits, ContinueSprite.FreePlay, ContinueSprite.GameOver,
+  ContinueSprite.InsertCoins, ContinueSprite.InsertMoreCoins,
+  ContinueSprite.PressStart, ContinueSprite.PressStartAttract,
+];

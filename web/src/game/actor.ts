@@ -37,6 +37,7 @@ import { makeBoss3Tail, type Boss3Tail } from "./class45/state";
 import { makeHordeTail, type HordeTail } from "./class40/state";
 import { makeFishTail, type FishTail } from "./class51/state";
 import { makeMouseTail, type MouseTail } from "./class52/state";
+import { makeCatTail, type CatTail } from "./class53/state";
 import { makeScriptedSceneryTail, type ScriptedSceneryTail }
   from "./class33/state";
 import { makeSetPiecePropTail, type SetPiecePropTail }
@@ -98,11 +99,14 @@ export enum MotionFlag {
    */
   TraceGround = 0x04,
   /**
-   * Bit `0x10` — take the root's **y** as well.
+   * Bit `0x10` — root motion moves the actor's **height** as well.
    *
    * `SkeletonApplyRootMotion`'s two arms differ by one store: with the bit
    * clear it writes back `obj+0x40` and `obj+0x48` only, with it set it writes
-   * `obj+0x44` too (`0x00410E48`). `[proved]` Its one writer found is
+   * `obj+0x44` too (`0x00410E48`). `[proved]` What it writes is the height of
+   * the delta *after* the actor's rotation, not the clip root's own y: on an
+   * actor rolled onto a wall that height comes from the root's z, which is
+   * how a walk clip becomes a climb. Its one writer found is
    * `ThrowerStateDelayedPounce` (`FUN_0044E830`), which raises it for its wait
    * clip (`OR ECX, 0x10` at `0x0044E863`) and drops it when the wait ends;
    * `ApplyRootMotion` in `game/root_motion.ts` honours it.
@@ -274,13 +278,32 @@ export enum ActorFlag {
    */
   KeepCameraWhenLast = 0x800000,
   /**
-   * `obj+0x34` bit `0x10000000` — this actor is mid-attack and will not be
-   * re-ranked out of it. `ZombieStateStandAndThrow` raises it for the length
-   * of the throw clip and `ZombieStateTargetMotionScript` for an entry whose
-   * mode is not negative. Class 0x31's pounces raise it for the flight --
-   * `ThrowerStateLeapDown` at `0x0044B6F0`, `ThrowerStateLeapStrike` and
-   * `ThrowerStateDelayedPounce` at `0x0044E8E6` -- and not
-   * {@link BackingOff}, which is the next bit up.
+   * `obj+0x34` bit `0x10000000` — this actor is mid-attack, and **a shot may
+   * not stagger it out of the attack**.
+   *
+   * On class 0x30 the writers are the attacks themselves:
+   * `ZombieStateStrike` raises it in sub 0, before the draw (`00455a96`), and
+   * `ZombieStateBackOff`'s first frame is what clears it (`00455ca1`), so it
+   * spans the pick, the lunge and the whole swing. `ZombieStateStandAndThrow`
+   * holds it for the throw clip, `ZombieStateTargetMotionScript` for an entry
+   * whose mode is not negative, and `ZombieStateDelayedStrikeInPlace` for its
+   * own swing. `[proved]`
+   *
+   * The readers that matter to class 0x30, from a sweep of every `TEST`
+   * against a mask holding the bit and every `AND` that clears it:
+   * `ActorPlayHitReaction`'s opening refusal (`004544d8`, mask
+   * `0x10002000`), `ZombieStateDelayedStrikeInPlace`'s idle (`0045eab3`),
+   * `ZombieTwinFollowHost` (`004532e7`, the host's bit: the twin stops
+   * copying its pose while the host attacks) and `ZombieDrawBonePart`'s
+   * `0x1C6C` cel arm. The last two are not ported. `ZombieStateRideCarrier`
+   * (`00458a35`) reads the **carrier's**, which is another class.
+   *
+   * It said "will not be re-ranked out of it". `RankEnemiesByDistance`
+   * reads bit 1 and {@link BackingOff} and not this. `[proved]`
+   *
+   * Class 0x31's pounces raise it for the flight -- `ThrowerStateLeapDown` at
+   * `0x0044B6F0`, `ThrowerStateLeapStrike` and `ThrowerStateDelayedPounce` at
+   * `0x0044E8E6` -- and not {@link BackingOff}, which is the next bit up.
    */
   Committed = 0x10000000,
   /**
@@ -629,8 +652,8 @@ export enum ThrowerFlag {
    * (0x004512F3) clear it as the body settles, which is what makes the puff
    * once per landing rather than once per actor. `[proved]`
    *
-   * The port clears it where the exe does; the emitter itself is a particle
-   * effect and is not ported, so nothing sets it yet.
+   * The latch is on the bounce's arm only (code 0x46): the thump
+   * `ThrowerStateFallAndLand` plays after it goes out on every bounce.
    */
   LandingDustEmitted = 0x4000,
   /** `ThrowerPickNextState` has committed to a band; `moveBand` holds which. */
@@ -1260,21 +1283,31 @@ export interface ActorBase {
   /**
    * `obj+0x64` — the **x** word of the same triple.
    *
-   * One writer is ported: body condition 4's knockback spins the falling body
-   * by `±(rand() % 5) * 0x100` BAMS at 0x004551D5. `render/` poses an actor
-   * from `yaw` alone, so nothing draws this yet; it is state the engine keeps
-   * on the actor, so the port keeps it where the engine does and the renderer
-   * is the half that has to catch up.
+   * `SpawnFromDescriptor` (`FUN_00408A20`) fills it from the record's sixth
+   * dword, the first word of its orientation, for every class; for a
+   * character `SpawnScriptedCharacters` takes it from the placement's `pitch`.
+   * One writer after the spawn is ported: body condition 4's knockback spins
+   * the falling body by `±(rand() % 5) * 0x100` BAMS at 0x004551D5.
+   * `ApplyRootMotion` turns every root delta by it. `render/` draws it for the
+   * classes that place their own root -- class 0x31 among them -- and poses
+   * every other actor from `yaw` alone, so the knockback's spin is not drawn
+   * yet; it is state the engine keeps on the actor, so the port keeps it where
+   * the engine does and the renderer is the half that has to catch up.
    */
   pitch: number;            // +0x64
   /**
    * `obj+0x6C` — the third orientation word, which every spawn allocator fills
-   * from the descriptor and `MatrixRotateZ` consumes.
+   * from the descriptor and `MatrixRotateZ` consumes. For a character it comes
+   * from the placement's `roll`: stage 2 block 21's two `zstin` are spawned
+   * at `0xC000`, on their sides against a wall, and are the only character
+   * placements in the game that are not upright.
    *
-   * Only class 0x43 writes it after the spawn: the owl banks into its dive and
-   * rolls through its orbit. Class 0x41 type 4 reads the same word as an
-   * object **kind**, which is the polymorphism `docs/formats/spawns.md` warns
-   * about — check the class before believing it is an angle.
+   * Two classes write it after the spawn: the owl, class 0x43, banks into its
+   * dive and rolls through its orbit, and `ThrowerStateDelayedPounce`
+   * (`FUN_0044E830`) turns it back to level at `0xCCC` a frame as its
+   * wall-climber leaps. Class 0x41 type 4 reads the same word as an object
+   * **kind**, which is the polymorphism `docs/formats/spawns.md` warns about —
+   * check the class before believing it is an angle.
    */
   roll: number;             // +0x6C
   /**
@@ -1434,6 +1467,11 @@ export interface ActorBase {
    * `ActorFacePlayerTarget`. With one attacker it is the camera eye; with two
    * it is a shoulder offset from it, which is why it is stored rather than
    * recomputed.
+   *
+   * On a class-0x31 `zsass` (character type 0x16) the same words are the
+   * last point of its trail (L3): `ThrowerStateStandAndDecide` seeds them
+   * where it stands, and `ThrowerEmitGroundDust` (`FUN_0044D260`) spawns its
+   * scuffs between them and the actor and then moves them up to it.
    */
   target: Vec3;             // +0x13E4
   /** Where the actor stood when its strike began; `ZombieStateBackOff`
@@ -1681,7 +1719,9 @@ export interface ActorBase {
   hitRadius: number;        // +0x124
   /**
    * Class 0x53's descriptor tail — the animation set and the sub-type. Sub-type
-   * 2 and up is a shootable route-branch trigger, and only in event block 8.
+   * 2 and up is a shootable route-branch trigger, and only in event block 8;
+   * 0 and 1 play their set's playlist. `CatInit` copies what it keeps into
+   * the class's own sub-block, `cat` (`class53/state.ts`).
    */
   class53: CharacterPlacement["class53"];
   /**
@@ -2055,7 +2095,11 @@ export interface ActorBase {
    */
   rootFrame: number;
   rootActionFrame: number;
-  /** A one-shot or lunge at full weight: the lunge loops, the strike does not. */
+  /**
+   * A one-shot at full weight: a swing, an arc stage, an entrance. The
+   * class-0x30 lunge used to be one and to loop here. It is on the ordinary
+   * track now, as `ZombieStateStrike` (`FUN_00455A40`) plays it.
+   */
   action: ActorClip | null;
   /** The death clip, once. */
   death: { motion: number; ticks: number } | null;
@@ -2160,6 +2204,7 @@ export type Actor =
                    companion: JudgmentCompanionTail })
   | (ActorBase & { cls: SpawnClass.RankScaledEnemy; rescue: RescueTargetTail })
   | (ActorBase & { cls: SpawnClass.Mouse; mouse: MouseTail })
+  | (ActorBase & { cls: SpawnClass.SkinnedNpc; cat: CatTail })
   | (ActorBase & { cls: SpawnClass.WaterEnemy; fish: FishTail })
   | (ActorBase & { cls: SpawnClass.Frog; frog: FrogTail })
   | (ActorBase & { cls: SpawnClass.FlyingEnemy; owl: OwlTail })
@@ -2175,7 +2220,7 @@ export type Actor =
       | SpawnClass.Thrower | SpawnClass.Zombie
       | SpawnClass.OneHitTarget | SpawnClass.RankScaledEnemy
       | SpawnClass.Boss2 | SpawnClass.Judgment | SpawnClass.JudgmentCompanion
-      | SpawnClass.Mouse | SpawnClass.WaterEnemy
+      | SpawnClass.Mouse | SpawnClass.SkinnedNpc | SpawnClass.WaterEnemy
       | SpawnClass.Frog | SpawnClass.FlyingEnemy | SpawnClass.Bat
       | SpawnClass.Boss3
       | SpawnClass.ScriptedProp | SpawnClass.CarriedZombie
@@ -2430,6 +2475,9 @@ export function makeActor(at: number, cls: SpawnClass, charType: number,
   }
   if (cls === SpawnClass.Mouse) {
     return { ...head, cls, mouse: makeMouseTail() };
+  }
+  if (cls === SpawnClass.SkinnedNpc) {
+    return { ...head, cls, cat: makeCatTail() };
   }
   if (cls === SpawnClass.WaterEnemy) {
     return { ...head, cls, fish: makeFishTail() };

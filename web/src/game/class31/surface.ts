@@ -14,12 +14,14 @@
  * wall there" is to refuse the state, and the actor stands instead — which is
  * exactly what a host with no collision data gets.
  */
+import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ThrowerFlag, type Actor } from "../actor";
 import {
   ColiLoaded, ColiTraceSegmentAllSets, QueryGroundHeightAt,
 } from "../coli";
 import { G } from "../globals";
+import type { GameHost } from "../host";
 import { bamsDelta, bamsWrap, vec3, type Vec3 } from "../vec";
 import {
   ActorArcBeginToAtSpeed, ActorArcStep, ActorLocalPoint,
@@ -99,7 +101,9 @@ const SURFACES: Record<number, { flag: ThrowerFlag; script: string }> = {
  * runs out, together with `OffGround`; from that frame on the actor is a
  * different creature as far as every table is concerned.
  */
-export function ThrowerStateLeapToSurface(obj: Actor, dt: number): void {
+export function ThrowerStateLeapToSurface(obj: Actor, dt: number,
+                                          host?: GameHost,
+                                          events?: Events): void {
   const s = SURFACES[obj.state];
   if (!s) { obj.state = ThrowerState.StandAndDecide; obj.sub = 0; return; }
 
@@ -112,7 +116,7 @@ export function ThrowerStateLeapToSurface(obj: Actor, dt: number): void {
     obj.sub = 1;
   }
 
-  if (ActorArcStep(obj, 1, dt)) return;
+  if (ActorArcStep(obj, 1, dt, host, events)) return;
 
   obj.flags2 |= s.flag | ThrowerFlag.OffGround;
   obj.state = ThrowerState.StandAndDecide;

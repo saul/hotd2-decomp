@@ -1184,6 +1184,97 @@ for (const stage of STAGES) {
   }
 }
 
+// -- the music a seek has to put back ----------------------------------------
+
+/**
+ * Every stage script starts its own track, and a seek has to know it did.
+ *
+ * `PlaySoundId` (`FUN_0041CFD0`) is reached by `se_play` as well as by
+ * `bgm_entry_play`, and the stage tracks are started through the first: at
+ * step 2 of the entry block, a `se_play` of `0x10000000 | index` (stage 5
+ * alone uses `bgm_entry_play`). The walker used to record only `0x5F`, so a
+ * seek past that `se_play` had no music to restore, and the player covered
+ * for it by starting a track "by convention" at load. This asserts the
+ * script's own first track, that the walker records it across a seek, that a
+ * `bgm_entry_play 0` -- `BgmStopThenPlay` (`FUN_0041D450`), a stop then
+ * nothing -- clears it, and that live play hands the mixer the stop before
+ * the track.
+ */
+{
+  const isBgm = (id: number | null | undefined): id is number =>
+    typeof id === "number" && id >>> 28 === 1;
+  for (const name of ["stage1", "stage2", "stage3", "stage4", "stage5",
+                      "stage6", "stage1_original", "stage5_original"]) {
+    const file = join(ROOT, name, `${name}.script.json`);
+    if (!existsSync(file)) continue;
+    ran++;
+    const script = JSON.parse(readFileSync(file, "utf8")) as ScriptJson;
+    const entry = script.entry_block;
+    // The first BGM id the entry block plays, by either instruction, and the
+    // first `bgm_entry_play 0` anywhere.
+    let first: [number, number, number, number] | null = null;
+    let silence: [number, number, number] | null = null;
+    for (let bi = 0; bi < script.blocks.length; bi++) {
+      const steps = script.blocks[bi].steps ?? [];
+      for (let si = 0; si < steps.length; si++) {
+        const ops = steps[si].ops ?? [];
+        for (let oi = 0; oi < ops.length; oi++) {
+          const op = ops[oi] as OpJson;
+          const id = op.op === 0x5f ? op.track : op.sound;
+          if (bi === entry && !first && isBgm(id)) first = [bi, si, oi, id >>> 0];
+          if (op.op === 0x5f && !op.track && !silence && first) {
+            silence = [bi, si, oi];
+          }
+        }
+      }
+    }
+    const want = script.bgm?.stage_track?.id ?? null;
+    check(`${name}: the entry block starts the stage's own track at step 2`,
+          !!first && first[1] === 2 && first[3] === want,
+          first ? `${first.slice(0, 3).join("/")} plays 0x${first[3].toString(16)}`
+                  + `, stage_track 0x${(want ?? 0).toString(16)}`
+                : "no BGM id in the entry block");
+    if (!first) continue;
+    const [fb, fs, fo, fid] = first;
+    const before = new Walker(script, mkHost());
+    seekTo(before, fb, fs, fo);
+    check(`${name}: ...a seek to just before it has no music`,
+          before.bgmTrack === null, String(before.bgmTrack));
+    const after = new Walker(script, mkHost());
+    seekTo(after, fb, fs, fo + 1);
+    check(`${name}: ...and a seek past it has that track on the channel`,
+          after.bgmTrack === fid, String(after.bgmTrack));
+    if (silence) {
+      const [sb, ss, so] = silence;
+      const v = new Walker(script, mkHost());
+      if (seekTo(v, sb, ss, so + 1)) {
+        check(`${name}: a seek past bgm_entry_play 0 at ${sb}/${ss}/${so} `
+              + "leaves the channel empty", v.bgmTrack === null,
+              String(v.bgmTrack));
+      }
+    }
+
+    // Live, not a replay: the instruction reaches the mixer, and a
+    // `bgm_entry_play` reaches it as a stop and then a play.
+    const heard: number[] = [];
+    const host = { ...mkHost(), playSound: (id: number) => {
+      heard.push(id >>> 0);
+      return undefined;
+    } };
+    const live = new Walker(script, host);
+    seekTo(live, fb, fs, fo);
+    live.replaying = false;
+    heard.length = 0;
+    (live as unknown as Inner).executeOne(false);
+    const op = ((script.blocks[fb].steps ?? [])[fs].ops ?? [])[fo] as OpJson;
+    const expect = op.op === 0x5f ? [0x80000000, fid] : [fid];
+    check(`${name}: ...played live, it reaches the mixer as `
+          + expect.map((x) => `0x${x.toString(16)}`).join(" then "),
+          JSON.stringify(heard) === JSON.stringify(expect),
+          heard.map((x) => `0x${x.toString(16)}`).join(" "));
+  }
+}
+
 // **A class-0x18 rider carries class 0x30's script blobs.**
 // `CarriedZombieInit18` (`FUN_0045CD60`) is `EnemyZombieInit` and two stores,
 // so its tail is class 0x30's and `ZombieScriptForState` reads the same two

@@ -443,7 +443,7 @@ inference; **[open]** = undetermined.
 | `2B` | `award_accuracy_bonus` | **[proved]** `pct = hits*100/shots` (needs shots > 0x13), bonus = `g_accuracy_bonus_table[pct/10]` = `{0,0,0,0,500,1000,1500,2000,2500,3000,4000}` |
 | `2C` | `set_skippable_region` | **[proved]** `arg != 0` → `DAT_009A2230 = 0; DAT_009A2D7C = 1`; `arg == 0` → `DAT_009A2D7C = 0` and the skip flag is cleared. `DAT_009A2D7C` is live and read; the flag it would eventually raise is not — see below |
 | `2D` | `play_dialogue` | **[proved]** u16 group → variant by player configuration (0 = 1P/P1, 1 = 1P/P2, 2 = 2P), then a voice line **and up to four timed subtitle lines**. See below |
-| `2E` | `resume_bgm_if_skipped` | **[proved]** `if (skip) PlaySoundId(0x80000002)` — restart the BGM a skipped cutscene interrupted. Unreachable in this build; see below |
+| `2E` | `stop_voice_if_skipped` | **[proved]** `if (skip) PlaySoundId(0x80000002)` — and `0x80000002` is the **voice** channel's stop (`PlaySoundControl` → `SoundStopGroup(g_voice_stop_group)`), so this cuts the line a skipped cutscene was in the middle of. It was named `resume_bgm_if_skipped`, which the code never did. See [`sound.md`](sound.md#control-words) and the skip below |
 | `2F` | `suppress_accuracy_stats` | **[proved]** non-zero stops the shots/hits counters that `2B` grades |
 | `30` | `queue_event` | the scripted-action ring — see below |
 | `31` | `goto_scene_state` | **[proved]** the end-of-room instruction. Enters `(1, op0)` — and **all 548 sites pass 3**, `CameraFromViewAngles` — parks `g_evt_action_handler` on a bare `RET`, tearing down the driver the `finish_sequence` installed, and **decrements `g_queued_events_pending`**, which is how selector `0x21` gets retired. Also clears `g_evt_cam_override_valid`, `g_camera_ease_eye` and bit 0 of both players' flags |
@@ -524,7 +524,7 @@ retail build.
    | `0D` `spawn_obj_unless_skip` | consumes its `-1`-terminated list, spawns nothing |
    | `3A` / `3B` `se_play*_unless_skip` | do not play |
    | `2D` `play_dialogue` | no voice, no subtitle task — and `DrawDialogueSubtitleTask` ends a line already on screen |
-   | `2E` `resume_bgm_if_skipped` | `PlaySoundId(0x80000002)` |
+   | `2E` `stop_voice_if_skipped` | `PlaySoundId(0x80000002)` -- stops the voice line |
 
    With nothing queued and every wait passing through, the interpreter races to
    the end of the region.
@@ -558,6 +558,31 @@ retail build.
 States 0 and 5 both draw a closed shutter and set the gate to 1 and 0
 respectively, which is the whole reason the gate is a separate global: a
 letterboxed moment can still be playable.
+
+**The opcode is one store.** `EvtOpSetHudShutterState1F` (`FUN_0045F380`)
+writes its operand into `g_bHudShutterState` and returns **[proved]**. The
+table above is `HudDrawShutterState` (`FUN_00413970`), a task of its own that
+`HudShutterTaskCreate` (`FUN_00413950`) allocates from the scene's task-list
+builder at `0x00460733` -- after both player tasks and before every actor, so
+in one frame the script writes the byte, the players read it and the gate,
+and only then does the routine seed, slide and write the gate **[proved]**
+(`ActorAlloc` appends, `TaskRunTree` walks in order). Frame by frame, read off
+the disassembly and the jump table at `0x00413C80`:
+
+* A state that differs from `g_bHudShutterPrev` seeds the task's `+0x50`
+  counter: `0x28` into 3, 0 into 1. Nothing else is seeded.
+* 1 steps the counter **before** drawing, so an open draws 1..40 and hands over
+  to 2 on the 41st frame, drawing nothing on it; 3 draws 39..0 and on the 41st
+  draws shut, drops the gate and leaves 4.
+* 7 puts `g_bHudShutterPrev` back and draws nothing on its own frame.
+* The tail writes `g_bHudShutterPrev = state` on every path but 8's.
+
+`ResetSceneOnEnter` sets **both** bytes to 5 (`0x0045EE58`..`0x0045EE64`), and
+the script task's first handler, `EvtTaskInstallInterpreter`
+(`FUN_0045ECB0`), only installs the interpreter -- so a scene's first frame
+runs no script and draws the bars shut. Every stage's block 0 step 1 then
+writes a 5 of its own before its first wait, and opens the bars later (stage
+6's block 0 step 2 with a 6, the others with a 1).
 
 `hod2lib.script` attaches these readings to the instruction as `means` and
 `firing_gate`, so the player shows "5 — close, and disable firing" rather than
@@ -780,7 +805,7 @@ null, and the sub-tables are laid out immediately **before** it:
 | `0x14` | `set_global` | `DAT_009C6F00 = op0` |
 | `0x15` | `set_flag` | `DAT_009C6F33 = 1`; the operand is ignored |
 | `0x20` | `hold_camera_preset` | op0 is a frame countdown; each frame copies 6 dwords from `0x00576CF0 + op1 * 0x18` into the player's camera block |
-| `0x21` | `finish_sequence` | `EvtEnterSceneState(2, op0)`; sets `DAT_009A5900 \| 1` |
+| `0x21` | `finish_sequence` | **[proved]** frees **both attack permits** first (`g_attack_permits[0] = g_attack_permits[1] = 0`, `0x00403714`/`0x0040371E`), then `g_camera_mode = 3`, `EvtEnterSceneState(2, op0)` without the stamp, sets `DAT_009A5900 \| 1` and installs `g_camera_action_starters[minor]`. And **queueing** one — before it runs — clears `g_attack_committed` (`EvtOpQueueEvent30`, `0x0045F833`, the only selector that op tests itself). Between them a scene change hands the attack to whoever claims next; it is what frees a `ZombieStateHoldForCameraCue` captor that graduated on its cue frame holding a permit |
 | `0x40` | **`cam_play`** | **plays a `cam/` path** — see below |
 | `0x60` | `store_branch_previews` | **[proved]** the arcade **branch-preview shots** — one camera pose per route the next branch can take. See below |
 

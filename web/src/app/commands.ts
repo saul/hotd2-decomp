@@ -368,5 +368,15 @@ export function applyToggle(p: PlayerCommands, name: ToggleName,
     // way, so neither changes a snapshot.
     case "muzzle":       p.effects.setMuzzle(on); return;
     case "redBlood":     p.bloodColour.setColour(on ? "red" : "green"); return;
+    // A debug aid, not a view: it changes when the script moves on. The walker
+    // reads it at the next branch; a stage loads its walker with the current
+    // value (`stage_load.ts`). Turning it off while a branch is being held
+    // lets the script go the way the engine would have on that frame, with the
+    // choice it latched then.
+    case "branchPause":
+      if (!p.walker) return;
+      p.walker.options.branchPause = on;
+      if (!on && p.walker.branch) p.walker.takeBranch();
+      return;
   }
 }

@@ -67,6 +67,10 @@ export function ZombieStateBackOff(obj: ZombieActor, eye: Vec3, dt: number,
     // `00455cb1`): no longer committed to the swing, and out of the compacted
     // queue while retreating, so whoever is behind moves up and can take its
     // turn.
+    //
+    // The clear is the other half of `ZombieStateStrike`'s sub 0, which raised
+    // {@link ActorFlag.Committed}; this is the first frame since then that a
+    // shot may stagger the actor.
     obj.flags = (obj.flags & ~ActorFlag.Committed) | ActorFlag.BackingOff;
     // `obj+0x136C &= ~0x400000` (`00455cc0`): every retreat starts turning
     // the ordinary way. Only the shove timer flips it after this.

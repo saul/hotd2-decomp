@@ -91,15 +91,19 @@ byte. The readings under test are the ones docs/formats/combat.md states:
     waits on `obj+0x19C` reaching each stage's threshold, and that cursor
     wraps at ``g_motion_play_length + 1``: a threshold or a start frame past
     the play length of the motion the stage plays is an actor parked in its
-    leap for ever. All 38 scripts class 0x31 and class 0x30 can install --
+    leap for ever. All 41 scripts class 0x31 and class 0x30 can install --
     the named ones, every attack entry's, the two entrance scripts -- keep
     every start and threshold inside it, which is what says the port's
     one-shot channel ending first is never the thing that ends an arc.
-    Seven scripts end on a different clip from the two stages before it --
-    zslman's aside in stances 1 and 3, and set 3's attack 3 in all five
-    stances -- so the bound is taken per stage, not per script, and
+    Nine stage changes switch clips: seven scripts end on a different clip
+    from the two stages before it -- zslman's aside in stances 1 and 3, and
+    set 3's attack 3 in all five stances -- and `ThrowerStatePathFollow`'s
+    style-2 script (`0x00565E88`) flies on 300 between two stages of 301,
+    so the bound is taken per stage, not per script, and
     `InstallArcMotionScript`'s old note that every script is one clip was
-    wrong.
+    wrong. The count was 38 until the path follow's three scripts were
+    exported -- they were not, and the rooftop route in stage 2 flew with no
+    clip at all.
 
 Known exception, reported rather than hidden: character type 21 (`samson`, a
 boss) has a `PTR_DAT_004D032C` entry that is not the ``{slot, centre, radius}``
@@ -622,11 +626,11 @@ def main() -> int:
                             f"play {play}")
     print(f"  arc scripts: {len(arcs)}, every start and threshold inside its "
           f"own clip's play length; {switches} stage changes switch clips")
-    if switches != 7:
-        fails.append(f"expected seven arc scripts to switch clips for their "
-                     f"last stage, counted {switches}")
-    if len(arcs) != 38:
-        fails.append(f"expected the 38 arc scripts classes 0x30 and 0x31 can "
+    if switches != 9:
+        fails.append(f"expected nine arc-script stage changes to switch "
+                     f"clips, counted {switches}")
+    if len(arcs) != 41:
+        fails.append(f"expected the 41 arc scripts classes 0x30 and 0x31 can "
                      f"install, read {len(arcs)}")
     if past:
         fails.append(f"arc-script stages past their clip's play length: "

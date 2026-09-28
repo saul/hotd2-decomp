@@ -120,13 +120,20 @@ const POUNCE_ROLL_RATE = 0xccc;
  *                    state 0x19, sub 0 }
  * ```
  *
- * **The wait cannot be shot and it walks.** `ShotImmune` makes every hit a
- * ricochet until the counter runs out -- and on that same frame
+ * **The wait cannot be shot, and it is a climb.** `ShotImmune` makes every
+ * hit a ricochet until the counter runs out -- and on that same frame
  * `ActorArcStep`'s windup raises it again, so the actor is only shootable
- * from the takeoff on. The clip is the ordinary motion,
- * so it loops for the whole wait and its root carries the actor -- 310 covers
- * seven units a cycle. Bit `0x10` would carry its height as well; 310's root
- * height never changes, so it moves nothing, but the bit is the engine's.
+ * from the takeoff on. The clip is the ordinary motion, so it loops for the
+ * whole wait and its root carries the actor: 310 walks 7.19 units along its
+ * own -Z a cycle. Both shipped spawns are placed on their sides against a
+ * wall -- orient `(0, 0xC000, 0xC000)`, which `SpawnFromDescriptor`
+ * (`FUN_00408A20`) copies to `obj+0x64..0x6C` -- and `SkeletonApplyRootMotion`
+ * (`FUN_00410C50`) turns the delta by `Rz(roll) Ry(yaw) Rx(pitch)`, which
+ * takes that -Z to world -Y. Bit `0x10` is what lets the height through, so
+ * the walk is a climb straight down the wall: measured in the page, 8.7 units
+ * in the 45-frame wait and 12.6 in the 60, the fade holding the first six
+ * frames still (see `ApplyRootMotion`). Then the roll comes back to level in
+ * the first six frames of the leap.
  *
  * **Three stances, and they are not the same one.** The script comes from the
  * live stance, which `obj+0x136C |= 0x20000` has just moved to the pounce

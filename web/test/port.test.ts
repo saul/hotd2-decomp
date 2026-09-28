@@ -29,8 +29,8 @@ import { HingePose } from "../src/render/hinge";
 import { Events } from "../src/core/events";
 import { authoredFrameHeld, authoredFrameOfTicks,
          ticksOfAuthoredFrame } from "../src/core/play_cursor";
-import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor }
-  from "../src/game/director";
+import { ActorInitHitPoints, ActorSpawn, GameUpdate, RetireUnlistedActor,
+         SpawnScriptedCharacters } from "../src/game/director";
 import { ActorKillAll, RemoveBoneSubtree } from "../src/game/combat/resolve_hit";
 import { UpdateCameraEnemySlots } from "../src/game/camera/slots";
 import { CamAdvancePathFrame, CamPathCueReached, CamSetPathTarget }
@@ -6621,6 +6621,171 @@ console.log("root motion: model+0x64 bit 0x10 carries the height:");
   ApplyRootMotion(z, 0, 0, 2);
   check("and bit 1 still gates the whole arm", z.pos.y === 3 + 2 * z.scale,
         `y ${z.pos.y}`);
+}
+
+// ...and the delta is turned by **all three** angles first:
+// `T · Rz(obj+0x6C) · Ry(obj+0x68) · Rx(obj+0x64) · S`, `0x00410D56` to
+// `0x00410D9B`. It used to be turned by yaw alone. L48: a quarter turn on
+// each axis, where a wrong axis, sign or order all show.
+console.log("root motion: the delta is turned by roll, yaw and pitch:");
+{
+  const z = thrower(ThrowerState.StandAndDecide);
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+  const put = (pitch: number, yaw: number, roll: number, flags: number) => {
+    z.pos = vec3(10, 20, 30);
+    z.pitch = pitch; z.yaw = yaw; z.roll = roll;
+    z.motionFlags = flags;
+  };
+  const at = () => `(${z.pos.x.toFixed(4)}, ${z.pos.y.toFixed(4)}, `
+    + `${z.pos.z.toFixed(4)})`;
+  const WITH_Y = MOTION_FLAGS_INIT | MotionFlag.RootMotionY;
+
+  // Stage 2 block 21's pair, as their spawn record places them.
+  put(0, 0xc000, 0xc000, WITH_Y);
+  ApplyRootMotion(z, 0, -7, 0);
+  check("rolled onto a wall (yaw and roll 0xC000), the clip's -Z is world -Y",
+        near(z.pos.x, 10) && near(z.pos.y, 13) && near(z.pos.z, 30), at());
+  put(0, 0xc000, 0xc000, MOTION_FLAGS_INIT);
+  ApplyRootMotion(z, 0, -7, 0);
+  check("...and with bit 0x10 down the same step goes nowhere at all",
+        near(z.pos.x, 10) && near(z.pos.y, 20) && near(z.pos.z, 30), at());
+  put(0, 0xc000, 0xc000, WITH_Y);
+  ApplyRootMotion(z, -1.75, 0, 0);
+  check("...where the clip's sideways sway runs along the wall, in z",
+        near(z.pos.x, 10) && near(z.pos.y, 20) && near(z.pos.z, 28.25), at());
+
+  // Upright: yaw alone, which is the old formula and has to survive.
+  put(0, 0x4000, 0, MOTION_FLAGS_INIT);
+  ApplyRootMotion(z, 0, -7, 0);
+  check("upright, a quarter yaw takes -Z to -X, exactly as it always did",
+        near(z.pos.x, 3) && near(z.pos.y, 20) && near(z.pos.z, 30), at());
+  put(0x4000, 0, 0, WITH_Y);
+  ApplyRootMotion(z, 0, -7, 0);
+  check("a quarter pitch takes -Z to +Y", near(z.pos.x, 10)
+        && near(z.pos.y, 27) && near(z.pos.z, 30), at());
+  // Pitch first, then yaw: +X under Rx is +X, and Ry(0x4000) takes that to
+  // -Z. Yaw first and pitch after would take it to +Y instead.
+  put(0x4000, 0x4000, 0, WITH_Y);
+  ApplyRootMotion(z, 1, 0, 0);
+  check("the pitch is applied before the yaw, not after it",
+        near(z.pos.x, 10) && near(z.pos.y, 20) && near(z.pos.z, 29), at());
+}
+
+// Stage 2 block 21 step 2's two `zstin`, from the placement to the leap:
+// `SpawnFromDescriptor` (`FUN_00408A20`) copies the record's orientation --
+// `(0, 0xC000, 0xC000)` -- to `obj+0x64..0x6C`, `ThrowerStateDelayedPounce`
+// (`FUN_0044E830`) plays motion 310 with bit 0x10 up for 45 frames, and the
+// root the clip carries along its -Z is a climb down the wall.
+console.log("class 0x31, state 23 -- the wall-climbers climb down the wall:");
+{
+  // Motion 310 as `szom.bin` ships it: sixteen frames, a flat root height of
+  // 5.26, a sway of up to 1.75 sideways and 7.19 along -Z.
+  const ROOT_310 = [
+    0, 5.2569, 0, -0.06, 5.2569, -0.4957, -0.2209, 5.2569, -0.9915,
+    -0.4537, 5.2569, -1.4872, -0.7298, 5.2569, -1.9829, -1.0202, 5.2569,
+    -2.4787, -1.2963, 5.2569, -2.9744, -1.5291, 5.2569, -3.4701, -1.69,
+    5.2569, -3.9658, -1.75, 5.2569, -4.4616, -1.6204, 5.2569, -4.9573,
+    -1.2963, 5.2569, -5.453, -0.875, 5.2569, -5.9487, -0.4537, 5.2569,
+    -6.4445, -0.1296, 5.2569, -6.9402, -0.0344, 5.2569, -7.1881,
+  ];
+  const AT = 59548;
+  const chars = {
+    ...CHARS31,
+    types: {
+      ...CHARS31.types,
+      "25": {
+        ...TYPE31,
+        motions: {
+          ...TYPE31.motions,
+          "310": { ...motion(16, 0, 29), root: ROOT_310 },
+          "289": motion(58),
+          "936": motion(20),
+        },
+      },
+    },
+    // Set 0's pounce rows (stance 4) as the game ships them, so the leap has
+    // an arc script to ride: clip 289 cut 25..34, 34..66, 67..90.
+    class31: {
+      ...CLASS31,
+      sets: [{
+        ...CLASS31.sets[0],
+        attacks: {
+          ...CLASS31.sets[0].attacks,
+          "4": Object.fromEntries(["0", "1"].map((k) => [k, {
+            script: [
+              { motion: 289, start: 25, fade: 5, until: 34 },
+              { motion: 289, start: 34, fade: 5, until: 66 },
+              { motion: 289, start: 67, fade: 5, until: 90 },
+            ],
+            hit_frame: 66, overlay_kind: 2, cancel_mask: 2,
+          }])),
+        },
+      }],
+    },
+    // The exporter's row for it, and the two keys this fix added.
+    placements: [{
+      at: AT, class: 0x31, char_type: 25, motion: 936, hp: 100,
+      body_condition: 0, initial_state: ThrowerState.DelayedPounce,
+      attack_state: 0, ring_set: 0, yaw: 0xc000, roll: 0xc000,
+      pounce: { motion: 310, frames: 45 },
+    }],
+  } as unknown as CharactersJson;
+
+  ResetGameGlobals();
+  SetGameTables(chars);
+  G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+  EnterPlay();
+  G.g_max_attackers = 1;
+  const [a] = SpawnScriptedCharacters(
+    [{ at: AT, motion: 936, pos: vec3(-830.3, 163.9, -1289.8) }]);
+  check("the spawn carries all three words of the record's orientation",
+        !!a && a.pitch === 0 && a.yaw === 0xc000 && a.roll === 0xc000,
+        a ? `${a.pitch}/${a.yaw}/${a.roll}` : "no actor");
+  if (!a || a.cls !== SpawnClass.Thrower) throw new Error("no zstin");
+  check("...and starts in state 23", a.state === ThrowerState.DelayedPounce,
+        `state ${a.state}`);
+
+  // The camera where the block's `finish_sequence` leaves it: path 33 at
+  // frame 64, eye height 51 -- a hundred units below the pair.
+  const eye = vec3(-766.8, 51, -1299.3);
+  const host = {
+    ...CAM_HOST,
+    viewPoint: (x: number, y: number, zz: number, out: Vec3) => {
+      out.x = eye.x + zz; out.y = eye.y + y; out.z = eye.z + x;
+    },
+  };
+  const rng = new Rng(21);
+  const events = new Events();
+  const x0 = a.pos.x;
+  const y0 = a.pos.y;
+  let offWall = 0;
+  let frames = 0;
+  while (a.state === ThrowerState.DelayedPounce && a.sub !== 2
+         && frames++ < 100) {
+    GameUpdate(eye, 1 / 60, host, rng, events);
+    if (a.sub !== 2) offWall = Math.max(offWall, Math.abs(a.pos.x - x0));
+  }
+  const climbed = y0 - a.pos.y;
+  // Thirty cursor ticks a cycle, less the six the fade holds the start frame:
+  // about 39 frames of a 7.19-unit cycle.
+  check("the 45-frame wait climbs down the wall, not along the floor",
+        frames === 45 && climbed > 8 && climbed < 10 && offWall < 1e-6,
+        `${frames} frames, down ${climbed.toFixed(3)}, off the wall `
+        + `${offWall.toFixed(6)}`);
+  check("...and the leap starts from where the climb ended",
+        a.arcFrom.y === a.pos.y && a.arcTo.y === eye.y,
+        `from ${a.arcFrom.y.toFixed(2)} to ${a.arcTo.y}`);
+  // `TurnAngleToward(obj+0x6C, 0, 0xCCC)`: 0x4000 to go through the seam,
+  // five steps and a sixth that lands.
+  let level = -1;
+  const rolls: string[] = [a.roll.toString(16)];
+  for (let i = 1; i <= 10 && level < 0; i++) {
+    GameUpdate(eye, 1 / 60, host, rng, events);
+    rolls.push(a.roll.toString(16));
+    if ((a.roll & 0xffff) === 0) level = i;
+  }
+  check("the roll comes back to level early in the leap",
+        level > 0 && level <= 6, `level after ${level} frames: ${rolls}`);
 }
 
 

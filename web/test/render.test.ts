@@ -2490,6 +2490,52 @@ console.log("\nthe shot: a character with no bone sphere is one sphere");
  *   through `readySpawns`, or the wing is a hierarchy that never learns what
  *   it draws and a bat has no wings.
  */
+console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
+{
+  // `EnemyThrowerInit` writes `obj+0x1FC = 1` (`c686fc01000001` at
+  // `0x004496A2`), and `SkeletonApplyRootMotion`'s draw tail takes arm 1 of
+  // the jump table at `0x00411038`: `T; RotX; RotZ; RotY`. Built here with
+  // the port's own transcriptions of those four calls, and compared element
+  // by element against the node -- three unequal angles, so a wrong order, a
+  // wrong axis or a dropped angle each move some element.
+  const { placeThrowerRoot } = await import("../src/render/characters/thrower");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  } = await import("../src/game/matrix");
+  const { Object3D } = await import("three");
+  type Inst = Parameters<typeof placeThrowerRoot>[0];
+
+  const a = makeActor(59548, SpawnClass.Thrower, 0x19, "zstin");
+  a.pos = { x: -830.3, y: 163.9, z: -1289.8 };
+  a.pitch = 0x1234; a.yaw = 0xc000; a.roll = 0xb000;
+  const inst = { a, root: new Object3D() } as unknown as Inst;
+  const placed = placeThrowerRoot(inst);
+  inst.root.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, a.pos.x, a.pos.y, a.pos.z);
+  MatrixRotateX(want, a.pitch);
+  MatrixRotateZ(want, a.roll);
+  MatrixRotateY(want, a.yaw);
+  const got = inst.root.matrix.elements;
+  const worst = Math.max(...want.map((v, i) => Math.abs(v - got[i])));
+  check("a thrower's root is T * Rx(pitch) * Rz(roll) * Ry(yaw)",
+        placed && worst < 1e-4, `placed ${placed}, worst element ${worst}`);
+
+  // The wall-climber on its wall: its own up (+Y) points out of the wall,
+  // toward +X, and its forward (-Z) points down it.
+  a.pitch = 0; a.yaw = 0xc000; a.roll = 0xc000;
+  placeThrowerRoot(inst);
+  inst.root.updateMatrix();
+  const e = inst.root.matrix.elements;
+  check("stage 2's zstin lies on its wall: up is +X, forward is down",
+        Math.abs(e[4] - 1) < 1e-6 && Math.abs(e[9] - 1) < 1e-6,
+        `up (${e[4]}, ${e[5]}, ${e[6]}) back (${e[8]}, ${e[9]}, ${e[10]})`);
+
+  const z = makeActor(0x30, SpawnClass.Zombie, 1, "zombie");
+  check("...and any other class is left to the ordinary arm",
+        !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
+}
+
 console.log("\nthe bat's wings: a synthetic row, adopted not spawned");
 {
   const { CharacterLayer } = await import("../src/render/characters");

@@ -27,6 +27,17 @@ exporter both used to claim: 23 of 51 class-0x31 and 76 of 345 class-0x30
 descriptors set it. It reaches the bundle as `desc_flags`. See
 [evt.md](evt.md#0x20--the-class-flag-word-and-the-reading-that-was-wrong).
 
+`FUN_00408A20` copies the header's orientation whole, too: `desc+0x14`,
+`+0x18` and `+0x1C` to `obj+0x64`, `+0x68` and `+0x6C` — pitch, yaw and roll
+(`0x00408A61`..`0x00408A70`). `[proved]` A character placement carried the yaw
+alone for a long time; it now carries `pitch` and `roll` beside it whenever
+either is not zero. Across the six stages, including the class-0x10 civilians'
+children, that is two character placements: stage 2 block 21 step 2's
+class-0x31 `zstin`, placed at `(0, 0xC000, 0xC000)` on their sides against the
+clock face they climb down. Five stage-2 class-0x13 props carry a pitch as
+well; `SpawnSlotActor`'s class-0x13 arm still takes the yaw alone, and whether
+that shows before `PropSeatOnObjectPath` overwrites all three is `[open]`.
+
 The handler itself comes from the 112-slot array at `0x009A2280`, built by
 `FUN_0040AC90` from the `{class_id, handler}` pairs at `0x00593358` — 56
 entries, of which **35 are used** by the shipped stages.

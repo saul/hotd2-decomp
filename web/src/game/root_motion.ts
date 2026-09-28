@@ -104,14 +104,35 @@
  * every skinned actor's drawn size, which is a change to how the whole game
  * looks and not to this arithmetic. [diverges]
  *
- * [diverges] The engine rotates the delta by the full `Rz · Ry · Rx`; this
- * rotates by yaw alone. That is exact for anything standing upright and wrong
- * for a class-0x31 actor on a wall or a ceiling, whose pitch and roll are not
- * zero — which is `[open]` until something needs it, because the clips those
- * stances play carry no root translation.
+ * **The delta is turned by all three angles**, in the one order the gated
+ * arm hard-codes, whatever the model's own draw order is:
+ *
+ * ```asm
+ * 00410d3b  MatrixStackPush(0); MatrixLoadIdentity()
+ * 00410d56  MatrixTranslate(obj+0x40, obj+0x44, obj+0x48)
+ * 00410d64  MatrixRotateZ(obj+0x6C)          ; roll
+ * 00410d73  MatrixRotateY(obj+0x68)          ; yaw
+ * 00410d82  MatrixRotateX(obj+0x64)          ; pitch
+ * 00410d9b  MatrixScale(model+0x116C) x3
+ * 00410dde  MatrixTransformPoint(&delta, &out)
+ * ```
+ *
+ * This used to turn by yaw alone, which is the same thing for every upright
+ * actor, and it was written down as waiting "until something needs it,
+ * because the clips those stances play carry no root translation". Something
+ * did: stage 2 block 21's two `zstin` are *spawned* rolled onto a wall --
+ * orient `(0, 0xC000, 0xC000)` -- and climb down it on motion 310, whose root
+ * runs along its own -Z. Only the roll turns that into world -Y, so yaw alone
+ * walked them 7.2 units out from the wall along +X instead, a hundred units
+ * up in mid-air. See {@link ApplyRootMotion}.
  */
 import type { BakedMotion } from "../bundle";
 import { MotionFlag, type Actor } from "./actor";
+import {
+  MatIdentity, MatrixLoadIdentity, MatrixRotateX, MatrixRotateY,
+  MatrixRotateZ, MatrixScale, MatrixTransformPoint, MatrixTranslate, type Mat,
+} from "./matrix";
+import type { Vec3 } from "./vec";
 
 /**
  * The character's size, as `ActorBuildSkinnedModel` (`FUN_00410440`) sets it.
@@ -141,8 +162,8 @@ export function ActorModelScale(charType: number): number {
  * The root translation between two frames of a clip, wrapping across the loop.
  *
  * `prev` is the frame the delta was last taken at, `-1` on the first call.
- * Returns the delta in the clip's own space, which the caller rotates by the
- * actor's yaw.
+ * Returns the delta in the clip's own space, which {@link ApplyRootMotion}
+ * turns by the actor's three angles.
  *
  * **The engine's baseline is a field, not a remembered frame index**, and the
  * difference is worth stating because it is what this port nearly got wrong.
@@ -175,15 +196,29 @@ export function rootDelta(m: BakedMotion, prev: number, next: number):
   return { x: (nx - sx) / n, y: (ny - sy) / n, z: (nz - sz) / n };
 }
 
+/** The gated arm's matrix, rebuilt from identity on every call. */
+const _m: Mat = MatIdentity();
+const _delta: Vec3 = { x: 0, y: 0, z: 0 };
+const _out: Vec3 = { x: 0, y: 0, z: 0 };
+
 /**
- * Apply a clip-space root delta to the actor, rotated into world space by its
- * own yaw. The clips walk along their local -Z, which is the actor's forward.
+ * Apply a clip-space root delta to the actor: `SkeletonApplyRootMotion`'s
+ * (`FUN_00410C50`) gated arm, `0x00410D39`..`0x00410E58`. The clips walk
+ * along their local -Z, which is the actor's forward.
  *
- * `dy` is the root's **height** delta, and it moves the actor only while
- * {@link MotionFlag.RootMotionY} is up: `SkeletonApplyRootMotion`'s gated arm
- * writes `obj+0x40` and `obj+0x48` back always and `obj+0x44` only under
- * `TEST [model+0x64], 0x10` at `0x00410DB0`. `[proved]` Its one writer read so
- * far is `ThrowerStateDelayedPounce` (`FUN_0044E830`), for the wait clip.
+ * The delta goes through `T(obj+0x40..0x48) · Rz(roll) · Ry(yaw) · Rx(pitch)
+ * · S(model+0x116C)` -- all three angles, in that order for every actor; the
+ * model's own order at `model+0x68` is for the draw's matrix and not this one
+ * -- and the point that comes out is the actor's new position. `[proved]`
+ *
+ * `dy` is the root's **height** delta, and the transformed point's height is
+ * written back only while {@link MotionFlag.RootMotionY} is up:
+ * `TEST [model+0x64], 0x10` at `0x00410DB0` picks between an arm that stores
+ * `out.x` and `out.z` (`0x00410DF0`, `0x00410DFD`) and one that stores all
+ * three (`0x00410E3C`, `0x00410E48`, `0x00410E55`). Its one writer read so far
+ * is `ThrowerStateDelayedPounce` (`FUN_0044E830`), for the wait clip -- and
+ * that wait is a climb only because the actor is rolled onto a wall, where the
+ * clip's forward is world down.
  */
 export function ApplyRootMotion(obj: Actor, dx: number, dz: number,
                                 dy = 0): void {
@@ -195,19 +230,22 @@ export function ApplyRootMotion(obj: Actor, dx: number, dz: number,
   // wherever her clip's root went, in the 297 of 596 shipped blocks whose wait
   // word does not ask for it just as much as in the 289 that do.
   if ((obj.motionFlags & MotionFlag.RootMotion) === 0) return;
-  // Yaw alone leaves a height unturned, so the scale is all it takes -- the
-  // pitch and roll the engine also rotates by are the yaw-only divergence
-  // declared at the top of this file.
-  if (obj.motionFlags & MotionFlag.RootMotionY) obj.pos.y += dy * obj.scale;
-  if (dx === 0 && dz === 0) return;
-  // `MatrixScale(model+0x116C)`, in the same matrix as the rotation.
-  dx *= obj.scale;
-  dz *= obj.scale;
-  const a = obj.yaw * ((Math.PI * 2) / 65536);
-  const s = Math.sin(a);
-  const c = Math.cos(a);
-  const nx = obj.pos.x + dx * c + dz * s;
-  const nz = obj.pos.z + dz * c - dx * s;
+  // [port-only] A zero delta transforms to the position itself, bit for bit
+  // -- the rotations touch rows 0..2 and the translation is row 3 -- so this
+  // skips building a matrix that would change nothing.
+  if (dx === 0 && dy === 0 && dz === 0) return;
+  const m = _m;
+  MatrixLoadIdentity(m);
+  MatrixTranslate(m, obj.pos.x, obj.pos.y, obj.pos.z);
+  MatrixRotateZ(m, obj.roll);
+  MatrixRotateY(m, obj.yaw);
+  MatrixRotateX(m, obj.pitch);
+  MatrixScale(m, obj.scale, obj.scale, obj.scale);
+  _delta.x = dx; _delta.y = dy; _delta.z = dz;
+  MatrixTransformPoint(m, _delta, _out);
+  const nx = _out.x;
+  const nz = _out.z;
+  if (obj.motionFlags & MotionFlag.RootMotionY) obj.pos.y = _out.y;
 
   // The bite's floor -- see `Actor.strikeFloor`. Zero means no floor.
   if (obj.strikeFloor > 0) {

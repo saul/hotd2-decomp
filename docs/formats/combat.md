@@ -2457,12 +2457,28 @@ sub 2  roll -> 0 at 0xCCC a frame; ThrowerStrikeConnect if a permit is held
   has never leapt down it is row 0. The `0x2000` test reads the live stance
   again. Stage 2's pair therefore swing row 4's clip 289, connect on row 0's
   frame 62 or 64, and stop flinching past row 4's 66.
-* **The wait is shot-proof and walks.** `ShotImmune` is up for all of it --
-  sub 1 drops it and `ActorArcStep`'s phase 0 raises it again on the same
-  frame (`0x0044D8BB`), so it stays up until the takeoff -- and the clip is
-  the ordinary motion, so it loops and its root carries the actor.
-  Bit `0x10` of `obj+0x1F8` is `SkeletonApplyRootMotion`'s height store
-  (`0x00410E48`); 310's root height is flat, so here it moves nothing.
+* **The wait is shot-proof, and it is a climb down a wall.** `ShotImmune` is
+  up for all of it -- sub 1 drops it and `ActorArcStep`'s phase 0 raises it
+  again on the same frame (`0x0044D8BB`), so it stays up until the takeoff --
+  and the clip is the ordinary motion, so it loops and its root carries the
+  actor. Both spawns are placed **on their sides against the clock face**:
+  their records carry orient `(0, 0xC000, 0xC000)`, which
+  `SpawnFromDescriptor` (`FUN_00408A20`) copies whole to `obj+0x64..0x6C`, and
+  `SkeletonApplyRootMotion` (`FUN_00410C50`) turns every root delta by
+  `T · Rz(roll) · Ry(yaw) · Rx(pitch) · S` before it stores it
+  (`0x00410D56`..`0x00410DDE`). Motion 310 walks 7.19 units a cycle along its
+  own -Z; that rotation takes -Z to world -Y, and bit `0x10` of `obj+0x1F8` is
+  the store that lets the height through (`0x00410E48`). So the wait walks the
+  pair straight down the wall -- 8.7 units in 45 frames and 12.6 in 60,
+  measured in the page, the fade holding the first six still -- and sub 2
+  rolls each one level (`0xCCC` a frame, six frames from `0xC000`) as it
+  leaps. `EnemyThrowerInit` sets the draw's rotation order to 1
+  (`obj+0x1FC`, `0x004496A2`): `RotX; RotZ; RotY`.
+* **Where the stab lands.** The arc is 45 (or 60) frames and the connect
+  waits for row 0's frame 62 or 64 on clip 289's flight stage (cut 34..66), so
+  the stab lands thirteen frames before the landing (measured in the page),
+  with the body some thirty units above the eye and closing -- the swing, not
+  the arrival, is what hurts.
 
 ### The arc, and the three-stage script
 

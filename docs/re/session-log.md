@@ -21257,6 +21257,73 @@ and it is still parked, drawn, through 0x3B.
   (0.5, 0, 0) -- a green object in front of Goldman's desk in the same shot,
   `[likely]` that rig by position.
 
+## 2026-09-28 -- the held captor's permit, and the `finish_sequence` that frees it
+
+NEW-BUGS-2: "if the first zombie mauls the civilian, the zombie then never
+attacks the player", stage 2 block 16 step 6. Reproduced under `?drive=1`
+(`web/tools/maul_then_attack.mjs`): the civilian `0x9FE8` dies on frame 200,
+`0xA030` ends its maul script into `ZombieStateHoldForCameraCue` (42) with
+`AttackRun` as the delegate, reaches the ring at camera frame 611 and is bounced
+out of `Strike` every frame until 660, its cue -- and on 660 lands in
+`ZombieStateHoldAtRange` with `g_attack_permits[0]` naming itself, where it
+stood for the rest of the stage.
+
+Read `ZombieStateHoldForCameraCue` (`FUN_0045BFD0`) from the listing: the
+delegate runs first (`CALL [EAX*4 + 0x592AE8]` at `0x0045BFE6`), then the cue
+test, then the `Strike` bounce. So a captor already at the ring claims on the
+cue frame too, and the cue arm (`obj+0x1310 = obj+0x132C` at `0x0045C01B`)
+puts it back in the hub holding the permit. The port matched that. What frees
+it in the engine is not class 0x30: a sweep for `9a2ba` finds
+`EvtActionFinishSequence21` (`FUN_00403710`) zeroing both permits as its first
+two stores (`0x00403714`, `0x0040371E`), and `9a34f0` finds
+`EvtOpQueueEvent30` (`FUN_0045F7F0`) clearing `g_attack_committed` at queue
+time for selector 0x21 (`0x0045F833`). Block 16 step 6 queues
+`finish_sequence 4` right after `wait_camera_path_frame 0` on `cam_play
+581..660`; block 9 step 3 does the same after `cam_play 386..430` for the other
+two held spawns (`0x51F4`, `0x5250`, cue `66:430`). The port had neither write.
+`[likely]` that the engine's release lands after the cue frame's actor update
+too, because the wait on the path's end cannot finish before the path has
+published its last frame; measured in the port it is the next frame.
+
+On the same path, and fixed with it, all `[proved]`:
+
+* the bounce writes `g_attack_permits[obj+0x121] = 0` and nothing else
+  (`0x0045C049`); the port ran the whole `ReleaseAttackSlot`, voiding
+  `obj+0x121` and dropping the off-screen latch;
+* `TryClaimAttackSlot` (`FUN_00455DE0`) and `ThrowerTryClaimAttackSlot`
+  (`FUN_0044CA40`) open with `obj+0x121 = 0xFF` (`0x00455DE5`, `0x0044CA45`);
+* `ZombieStateHoldAtRange` (`FUN_00455720`) drops `g_attack_committed` when the
+  actor owning it is back at the ring and still off screen
+  (`0x00455748..0x0045576D`) -- the `globals.tsv` row for the latch already
+  said so and the port had no copy;
+* the hub's gate is four inline tests and then `CALL TryClaimAttackSlot`
+  (`0x0045580F..0x0045583B`). The port asked `ZombieAttackRefusal`, which also
+  *predicted* the claim's refusals, and skipped the call -- `L11`, a test moved
+  across a function boundary. That kept a stale `obj+0x121` the claim would
+  have voided, and refused a two-player claim whenever either permit was out.
+
+Named `FUN_00409C90` `ActorScreenHalfSign`: `-1` when the actor's projected x
+is `>= 0`, else `1`, the two-player pick in both claim routines.
+
+**Wrong turns.** The reported address (`block=16&step=6&op=10`) seeks *past*
+the step-5 `spawn_obj_c` that makes the civilian and her three captors, so the
+first trace showed step 7's two zombies attacking normally and no civilian at
+all; the encounter needs `step=5&op=9`. Then, with the `obj+0x121` reset
+transcribed, the new port test still read a stale index -- because the hub
+never called the claim, which is how the `L11` fold above was found. The first
+name tried for `0x00409C90`, `ActorScreenXSide`, collided with `ActorScreenX`
+(`0x0043EF30`, the same product truncated). And a hit for `0xfffeffff` in
+`ZombieStateStrike` at `0x00455B77` looked like the engine's clear of
+`NoCameraTrack` that the port has in `TryClaimAttackSlot`; it is an `AND` on
+`obj+0x136C`, not `obj+0x34`.
+
+**Left, and declared.** `TryClaimAttackSlot`'s port still takes the first free
+permit rather than the engine's one-player pick, and still clears
+`obj+0x34` bit `0x10000`, which neither claim routine writes. Both are
+`[diverges]` on the spot: the first wants an `Rng` in every claimant, class
+0x31's included, and the second wants every claimant's own clear read first.
+For player 1 alone the pick agrees.
+
 ## 2026-09-27 -- `ZombieStateStrike` commits at the pick (`obj+0x34` bit `0x10000000`)
 
 `ZombieStateStrike` (`FUN_00455A40`) sub 0 opens, before the draw, with

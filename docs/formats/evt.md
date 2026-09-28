@@ -805,7 +805,7 @@ null, and the sub-tables are laid out immediately **before** it:
 | `0x14` | `set_global` | `DAT_009C6F00 = op0` |
 | `0x15` | `set_flag` | `DAT_009C6F33 = 1`; the operand is ignored |
 | `0x20` | `hold_camera_preset` | op0 is a frame countdown; each frame copies 6 dwords from `0x00576CF0 + op1 * 0x18` into the player's camera block |
-| `0x21` | `finish_sequence` | `EvtEnterSceneState(2, op0)`; sets `DAT_009A5900 \| 1` |
+| `0x21` | `finish_sequence` | **[proved]** frees **both attack permits** first (`g_attack_permits[0] = g_attack_permits[1] = 0`, `0x00403714`/`0x0040371E`), then `g_camera_mode = 3`, `EvtEnterSceneState(2, op0)` without the stamp, sets `DAT_009A5900 \| 1` and installs `g_camera_action_starters[minor]`. And **queueing** one — before it runs — clears `g_attack_committed` (`EvtOpQueueEvent30`, `0x0045F833`, the only selector that op tests itself). Between them a scene change hands the attack to whoever claims next; it is what frees a `ZombieStateHoldForCameraCue` captor that graduated on its cue frame holding a permit |
 | `0x40` | **`cam_play`** | **plays a `cam/` path** — see below |
 | `0x60` | `store_branch_previews` | **[proved]** the arcade **branch-preview shots** — one camera pose per route the next branch can take. See below |
 

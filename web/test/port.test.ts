@@ -11598,14 +11598,23 @@ console.log("\nthe crawler's undamaged swing:");
         `ran ${ran}, state ${held.state}`);
 
   // The delegate wants to strike: bounced to HoldAtRange, permit given up.
+  // **The table entry only** -- `0x0045C049` writes `g_attack_permits
+  // [obj+0x121] = 0` and leaves `obj+0x121` itself alone. It used to be the
+  // whole `ReleaseAttackSlot`, which also voids the index and drops the latch.
   held.attackPermit = 0;
   G.g_attack_permits[0] = 1;
+  G.g_attack_committed = 1;
   ZombieStateHoldForCameraCue(held, (o) => { o.state = ZombieState.Strike; });
   check("a delegate that reaches Strike is bounced, and gives the permit back",
         held.state === ZombieState.HoldForCameraCue
         && held.zom.delegate === ZombieState.HoldAtRange
-        && held.attackPermit === -1,
-        `state ${held.state} delegate ${held.zom.delegate} permit ${held.attackPermit}`);
+        && G.g_attack_permits[0] === -1,
+        `state ${held.state} delegate ${held.zom.delegate} `
+        + `permits ${JSON.stringify(G.g_attack_permits)}`);
+  check("...and only the table's entry: the index and the latch are left",
+        held.attackPermit === 0 && G.g_attack_committed === 1,
+        `permit ${held.attackPermit} latch ${G.g_attack_committed}`);
+  G.g_attack_committed = 0;
 
   // The camera arrives: it graduates to the delegate and is visible again.
   G.g_active_cam_path = 75;
@@ -11615,6 +11624,194 @@ console.log("\nthe crawler's undamaged swing:");
         held.state === ZombieState.HoldAtRange
         && (held.flags & ActorFlag.NoCameraTrack) === 0,
         `state ${held.state} flags 0x${(held.flags >>> 0).toString(16)}`);
+}
+
+// **The captor that mauls the civilian and then never attacks** -- NEW-BUGS-2,
+// stage 2 block 16, `0xA030`. Driven through `GameUpdate`, so the delegate is
+// the real `ZombieStateHoldAtRange` and the claim the real `TryClaimAttackSlot`.
+//
+// A held captor that reaches the hub before the camera claims on every frame
+// of the wait and is bounced on every frame, so it claims on the **cue frame**
+// too: the delegate writes Strike, the cue matches, and
+// `ZombieStateHoldForCameraCue` (`FUN_0045BFD0`) puts it back in HoldAtRange
+// still owning the permit. Its next claim then fails on its own permit. In the
+// engine the script lets it go -- `finish_sequence` is queued right after
+// every held cue in the game, and `EvtActionFinishSequence21` (`FUN_00403710`)
+// zeroes both permits -- and the port had no copy of that, so the zombie stood
+// at the ring for the rest of the stage.
+console.log("\na held captor's cue frame, and the finish_sequence that frees it:");
+{
+  const rng = new Rng(3);
+  const events = scene(0, rng);
+  const z = spawnZombie(0xa030, 1, "held captor");
+  z.visible = true;
+  z.hp = 1000;
+  z.pos = vec3(0, 0, 45);
+  z.motion = 10;
+  z.attackState = ZombieState.WalkPastPoint;
+  z.cameraCue = { path: 75, frame: 660 };
+  z.state = ZombieState.HoldForCameraCue;
+  z.zom.delegate = ZombieState.HoldAtRange;
+  z.flags |= ActorFlag.NoCameraTrack;
+  G.g_active_cam_path = 75;
+
+  // The wait: claimed and bounced, every frame, and the table ends each frame
+  // empty. `obj+0x121` keeps naming the slot, as the engine leaves it.
+  let everHeld = false;
+  for (let f = 600; f < 610; f++) {
+    G.g_cam_path_frame = f;
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    if (G.g_attack_permits[0] !== -1) everHeld = true;
+  }
+  check("before the cue the hold bounces every claim",
+        z.state === ZombieState.HoldForCameraCue && !everHeld
+        && z.zom.delegate === ZombieState.HoldAtRange && z.attackPermit === 0,
+        `state ${z.state} delegate ${z.zom.delegate} permit ${z.attackPermit} `
+        + `permits ${JSON.stringify(G.g_attack_permits)} `
+        + `refusal ${ZombieAttackRefusal(z)}`);
+
+  // The cue frame: it graduates into HoldAtRange **holding** the permit the
+  // delegate claimed on this same frame.
+  G.g_cam_path_frame = 660;
+  GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("on the cue frame it graduates to HoldAtRange still owning the permit",
+        z.state === ZombieState.HoldAtRange
+        && G.g_attack_permits[0] === z.at && z.attackPermit === 0,
+        `state ${z.state} permit ${z.attackPermit} `
+        + `permits ${JSON.stringify(G.g_attack_permits)}`);
+
+  // Nothing in class 0x30 lets go of it: the hub's claim fails on its own
+  // permit, and `TryClaimAttackSlot` voids `obj+0x121` first.
+  G.g_cam_path_frame = 661;
+  for (let i = 0; i < 30; i++) GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+  check("...and its own permit refuses every claim after it",
+        z.state === ZombieState.HoldAtRange && z.attackPermit === -1
+        && G.g_attack_permits[0] === z.at,
+        `state ${z.state} permit ${z.attackPermit} `
+        + `permits ${JSON.stringify(G.g_attack_permits)}`);
+
+  // The script's `queue_event finish_sequence 4`, as block 16 step 6 queues
+  // it. Queueing drops the off-screen latch (`EvtOpQueueEvent30`,
+  // `0x0045F833`) and the action frees both permits (`0x00403714`,
+  // `0x0040371E`).
+  G.g_attack_committed = 1;
+  const script = {
+    scene: 0, stage: 2, game_mode: 0, evt_file: "test", entry_block: 0,
+    entry_step: 0, routes: [{ kind: "end", next: [-1, -1, -1] }],
+    regions: [], cam_slots_used: [], warnings: [],
+    blocks: [{
+      index: 0, at: 0, route: { kind: "end", next: [-1, -1, -1] },
+      steps: [{ index: 0, at: 0, ops: [
+        { i: 0, at: 0, op: 0x30, name: "queue_event", cat: "camera",
+          sel: 0x21, action: "finish_sequence", args: [4, 0],
+          scene_state: { major: 2, minor: 4 },
+          camera_state: "snap_to_path_eye" },
+        { i: 1, at: 1, op: 0x44, name: "wait_enemies_alive", cat: "wait",
+          arg: 0, blocks_on: "enemies alive <= arg" },
+      ] }],
+    }],
+  } as unknown as ScriptJson;
+  const host = {
+    enterRegion: () => undefined, loadSlot: () => undefined,
+    unloadSlot: () => undefined, startCamera: () => undefined,
+    onFeed: () => undefined, onBranch: () => undefined,
+    playSound: () => undefined, aliveEnemies: () => 1,
+    presentEnemies: () => 1,
+    aliveCivilians: () => null, cameraFree: () => null,
+    scriptFlagRaised: () => null,
+    showMessage: () => null, endDialogue: () => undefined,
+  };
+  const w = new Walker(script, host);
+  w.tick(1 / 60);
+  check("finish_sequence frees both permits and drops the latch",
+        G.g_attack_permits.every((p) => p === -1) && G.g_attack_committed === 0,
+        `permits ${JSON.stringify(G.g_attack_permits)} `
+        + `latch ${G.g_attack_committed}`);
+
+  // And now it strikes.
+  let struck = false;
+  for (let i = 0; i < 5 && !struck; i++) {
+    GameUpdate(EYE, 1 / 60, NULL_HOST, rng, events);
+    struck = z.state === ZombieState.Strike;
+  }
+  check("...after which the captor strikes",
+        struck && G.g_attack_permits[0] === z.at,
+        `state ${z.state} permits ${JSON.stringify(G.g_attack_permits)}`);
+}
+
+// `ZombieStateHoldAtRange` (`FUN_00455720`) gives back an off-screen claim's
+// latch while the actor is still off screen -- `0x00455748`..`0x0045576D` --
+// and keeps it while it is on screen. The held captor's bounce leaves the
+// latch up, and this is where it comes down.
+console.log("\nthe hub drops an off-screen latch:");
+{
+  const rng = new Rng(4);
+  const events = scene(0, rng);
+  const z = spawnZombie(0x5100, 1, "latched");
+  z.visible = true;
+  z.hp = 1000;
+  z.pos = vec3(0, 0, 45);
+  z.motion = 10;
+  const offscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 900; out.y = 0; out.z = -40;
+      return true;
+    },
+  };
+  const onscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 0; out.y = 0; out.z = -40;
+      return true;
+    },
+  };
+  // In rank and at the head of the queue, the two fields the director's
+  // `GameUpdate` would have written; the hub's own gate is not under test.
+  z.rank = 0;
+  z.queueRank = 0;
+  // The state 42 bounce: the table entry freed, the latch and bit left.
+  const latch = () => {
+    z.flags2 |= ZombieFlag2.OffScreenPermit;
+    G.g_attack_committed = 1;
+    G.g_attack_permits = [-1, -1];
+    z.state = ZombieState.HoldAtRange;
+    z.sub = 0;
+  };
+  latch();
+  ZombieStateHoldAtRange(z, EYE, rng, onscreen, events);
+  check("on screen the hub keeps the latch",
+        G.g_attack_committed === 1
+        && (z.flags2 & ZombieFlag2.OffScreenPermit) !== 0
+        && z.state === ZombieState.HoldAtRange,
+        `latch ${G.g_attack_committed} state ${z.state}`);
+  latch();
+  ZombieStateHoldAtRange(z, EYE, rng, offscreen, events);
+  check("off screen it drops the latch, and claims again at once",
+        z.state === ZombieState.Strike && z.attackPermit === 0
+        && G.g_attack_committed === 1,
+        `latch ${G.g_attack_committed} state ${z.state} permit ${z.attackPermit}`);
+}
+
+// `TryClaimAttackSlot` (`FUN_00455DE0`) and its thrower copy void `obj+0x121`
+// before they test anything (`0x00455DE5`, `0x0044CA45`), so a refused claim
+// leaves the actor holding no index -- and its release frees no one else's.
+console.log("\na refused claim voids the index:");
+{
+  const rng = new Rng(5);
+  scene(0, rng);
+  const a = spawnZombie(0x5200, 1, "stale");
+  const b = spawnZombie(0x5204, 1, "holder");
+  a.attackPermit = 0;                 // what state 42's bounce leaves behind
+  check("the holder claims", TryClaimAttackSlot(b) && b.attackPermit === 0,
+        `permit ${b.attackPermit}`);
+  check("a refused claim leaves obj+0x121 at -1",
+        !TryClaimAttackSlot(a) && a.attackPermit === -1,
+        `permit ${a.attackPermit}`);
+  ReleaseAttackSlot(a);
+  check("...so releasing it does not free the holder's permit",
+        G.g_attack_permits[0] === b.at,
+        `permits ${JSON.stringify(G.g_attack_permits)}`);
 }
 
 // -- the rain, which used to be unreachable from here ----------------------

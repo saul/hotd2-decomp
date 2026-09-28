@@ -56,7 +56,7 @@ import type { GameHost } from "../host";
 import { ActorPointIsAhead, TurnActorAwayFromPoint, TurnAngleTowardFrames }
   from "../actor_turn";
 import { CivilianWait } from "../class10/ops";
-import { ActorIsOnScreen, ReleaseAttackSlot } from "../combat/permits";
+import { ActorIsOnScreen } from "../combat/permits";
 import { ReleaseEnemyAliveCount, ReleaseEnemyPresentCount }
   from "../combat/counts";
 import { ActorDespawn } from "../despawn";
@@ -1000,6 +1000,27 @@ export function ZombieStatePounceOnTarget(obj: ZombieActor, dt: number): void {
  * forbidden to **land the blow** until the camera is looking. Reaching `Strike`
  * is bounced back to `HoldAtRange` and the permit is handed back, which is why
  * this is the only code in the captor family that touches `g_attack_permits`.
+ *
+ * **And the cue frame leaves the permit held.** A zombie that reached the hub
+ * before the camera claims on every frame of the wait and is bounced on every
+ * frame — so on the cue frame too: the delegate claims and writes 3, the cue
+ * test matches, and `obj+0x1310 = obj+0x132C` puts it back in `HoldAtRange`
+ * **still owning** `g_attack_permits[obj+0x121]`. From there the hub's next
+ * claim fails on its own permit, every frame. Nothing in class 0x30 lets go of
+ * it; the script does. All three held spawns have their cue on the **last**
+ * frame of a shot that the script waits out and then follows with a
+ * `queue_event` `finish_sequence`: `0xA030`'s is `75:660`, and block 16 step 6
+ * queues one after `wait_camera_path_frame 0` on `cam_play 581..660`;
+ * `0x51F4` and `0x5250` share `66:430`, and block 9 step 3 queues one after
+ * `wait_queued_events_done` on `cam_play 386..430`. And
+ * `EvtActionFinishSequence21` (`FUN_00403710`) opens with
+ * `g_attack_permits[0] = g_attack_permits[1] = 0` (`0x00403714`,
+ * `0x0040371E`). The port had neither half of that, which is the report "the
+ * zombie that mauls the civilian never attacks": it stood in `HoldAtRange`
+ * holding the only permit for the rest of the stage. `[proved]` for both
+ * routines; `[likely]` that the release lands after the cue frame's update in
+ * the engine too, because the script's wait on the path's end cannot finish
+ * before the path has published that frame.
  */
 export function ZombieStateHoldForCameraCue(
     obj: ZombieActor, runState: (obj: ZombieActor, state: ZombieState) => void): void {
@@ -1018,7 +1039,26 @@ export function ZombieStateHoldForCameraCue(
   if (obj.state === ZombieState.HoldForCameraCue) return;
   if (obj.state === ZombieState.Strike) {
     obj.zom.delegate = ZombieState.HoldAtRange;
-    ReleaseAttackSlot(obj);
+    // **The table entry, and nothing else** — not `ReleaseAttackSlot`
+    // (`FUN_00456520`), which this used to call:
+    //
+    // ```
+    // 0045c037  0fbe8e21010000        MOVSX ECX, byte ptr [ESI + 0x121]
+    // 0045c03e  c7862c13000002000000  MOV   dword ptr [ESI + 0x132c], 0x2
+    // 0045c049  c7048da02b9a0000000000 MOV  dword ptr [ECX*0x4 + 0x9a2ba0], 0x0
+    // 0045c054  66c786101300002a00    MOV   word ptr [ESI + 0x1310], 0x2a
+    // ```
+    //
+    // `obj+0x121` keeps the index and the off-screen latch stays up. The next
+    // frame of the hold runs the delegate again: `TryClaimAttackSlot` voids
+    // `obj+0x121` before it tests anything, and the hub drops the latch if
+    // the actor is still off screen (`ZombieStateHoldAtRange`, `0x00455748`)
+    // -- on screen it stays up until a queued `finish_sequence` clears it.
+    // There is no `-1` test on the index. `[likely]` it never needs one: of
+    // the states a hold delegates to, only the hub writes 3, and only after a
+    // claim that succeeded this frame. The port's guard is for an array,
+    // which unlike the engine's has nothing at index `-1` to scribble.
+    if (obj.attackPermit >= 0) G.g_attack_permits[obj.attackPermit] = -1;
     obj.state = ZombieState.HoldForCameraCue;
     return;
   }

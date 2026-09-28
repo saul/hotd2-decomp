@@ -9,11 +9,11 @@
  * standing states only — snap the actor back onto whatever surface it is
  * clinging to.
  *
- * **Only the third was ported.** The two push-outs were left out with a
- * `[diverges]` saying the engine's penetration depth had not been read; it
- * had, and `ColiTestSphereAgainstFullSet` in `game/coli.ts` has been writing
- * `g_coli_hit_depth` and `g_coli_hit_normal` for class 0x30 all along. So a
- * thrower was tested against the world at its **origin** and nowhere else,
+ * **Only the third was ported.** The two push-outs were left out, declared a
+ * divergence on the grounds that the engine's penetration depth had not been
+ * read; it had, and `ColiTestSphereAgainstFullSet` in `game/coli.ts` has been
+ * writing `g_coli_hit_depth` and `g_coli_hit_normal` for class 0x30 all along.
+ * So a thrower was tested against the world at its **origin** and nowhere else,
  * and its body stood as far into a wall as its radius allowed.
  */
 import { ThrowerFlag, type Actor } from "../actor";
@@ -68,7 +68,7 @@ export function ThrowerPlaceCollisionSphere(obj: Actor): void {
  * reads `g_coli_hit_object`'s own `obj+0x34` bit `0x200000` and, for anything
  * but character type 0x18, knocks *this* actor into state 2 rather than
  * pushing it — a thrower shouldered by a falling body falls too. The port has
- * no `g_coli_hit_object`, so it always pushes. `[open]`
+ * no `g_coli_hit_object`, so it always pushes.
  */
 export function ThrowerPushOutOfWorld(obj: Actor): void {
   ThrowerPlaceCollisionSphere(obj);
@@ -86,10 +86,11 @@ export function ThrowerPushOutOfWorld(obj: Actor): void {
     }
   }
 
-  // [diverges] The port's own, and the only thing here the exe has no line
-  // for: `worldPushDepth` is what `render/stuck_debug.ts` draws. It is
-  // cleared whether or not the push runs, so an actor that stops colliding
-  // stops being marked -- the same reasoning as class 0x30's.
+  // The port's own, and the only thing here the exe has no line for:
+  // `worldPushDepth` is what `render/stuck_debug.ts` draws, a port-only field
+  // whose divergence is declared on `Actor.worldPushDepth`. It is cleared
+  // whether or not the push runs, so an actor that stops colliding stops
+  // being marked -- the same reasoning as class 0x30's.
   obj.worldPushDepth = 0;
   if (obj.flags2 & ThrowerFlag.CollideWorld) {
     if (ColiTestSphereAgainstFullSet(obj.sphereCentre.x, obj.sphereCentre.y,

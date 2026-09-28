@@ -23,8 +23,12 @@
  * ```
  *
  * The draws are records in `G.g_screen_sprite_draws`, the way every screen
- * sprite in the port is; the layer nibble is not carried, as it is not for
- * `BossIntroBannerUpdate`'s records either.
+ * sprite in the port is. The layer nibble has nothing to carry into them:
+ * `SetDrawLayerNibble` (`FUN_004A79F0`) stores it at `0x007E78BC`, and the
+ * image names that word four times -- the setter, `RenderInitStates`, and
+ * the two model-command enqueuers, `RenderEnqueueCommand` and
+ * `RenderEnqueueCommandFaded`. A screen sprite's quad goes through neither,
+ * so the two calls here change nothing about what this draws. `[proved]`
  */
 import { G } from "../globals";
 

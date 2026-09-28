@@ -43,6 +43,23 @@ const EMERGE_SPLASH_FRAMES: readonly [number, number][] =
   [[0x16, 0x62], [0x23, 0x61]];
 
 /**
+ * `obj+0x34` bit `0x200000`, which sub 0 tests at `0x00458509` and clears at
+ * `0x00458510` -- an `obj+0x34` reader of the bit class 0x33 names
+ * {@link ActorFlag.FireLoop}, and not that bit's meaning here (`L3`): for a
+ * class-0x30 actor it can only have come in with the spawn record. A literal
+ * for that reason.
+ */
+const EMERGE_ALT_ENTRY = 0x200000;
+/** `OR AL, 0x10` at `0x0045851E` -- the arc-target veto, on that arm. */
+const EMERGE_ALT_136C = 0x10;
+/**
+ * `OR EAX, 0x100002` at `0x00458528` -- on the other: {@link
+ * ZombieFlag2.Carried} and `0x2`. A literal and not an `|` of the enum,
+ * because a top-level value built from another module's export is `L56`.
+ */
+const EMERGE_136C = 0x100002;
+
+/**
  * `ZombieStateDelayedLeap`'s clips.
  *
  * `LEAP_MOTION` is the ordinary jump and `LEAP_MOTION_ALT` the wind-up variant
@@ -103,10 +120,18 @@ function atLastFrame(obj: ZombieActor): boolean {
  * {@link ActorFlag.ShotImmune} for the submerged half of it. Each is on its
  * line below with the address that writes it.
  *
- * [open] `obj+0x136C |= 0x100002` in sub 0 (`0x00458528`; `|= 0x10` instead
- * when `obj+0x34` has `0x200000`, which it clears) and `&= ~0x100000` on the
- * hand-over are not ported. `0x100000` is `ZombieFlag2.Carried` for the
- * carrier states, and L3 says not to assume it means that here.
+ * **Two writes to `obj+0x136C` span it as well**, and both are ported: sub 0
+ * raises `0x100002` (`OR EAX, 0x100002` at `0x00458528`) -- or, when
+ * `obj+0x34` carries `0x200000`, clears that and raises `0x10` instead
+ * (`OR AL, 0x10` at `0x0045851E`) -- and the hand-over takes `0x100000` back
+ * down (`AND EDX, 0xffefffff` at `0x004586B4`). `[proved]` `0x100000` is the
+ * bit the carrier states call {@link ZombieFlag2.Carried} and `0x2` one of
+ * the three `ChooseDeathMotion` sends to its directional arm; this state
+ * writes them for its own reasons (`L3`), and what the port's readers see is
+ * the bit. So a zombie killed while it climbs out dies through state 9, as
+ * it does in the engine. `0x10` is the arc-target veto `class30/knockback.ts`
+ * reads, and this is its writer. These were left out as an open question,
+ * and it was not one: the writes are the code, whatever the bits mean.
  */
 export function ZombieStateEmerge(obj: ZombieActor, dt: number,
                                   events?: Events): void {
@@ -114,6 +139,13 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
   if (!p) { obj.state = ZombieState.AttackRun; obj.sub = 0; return; }
 
   if (obj.sub === 0) {
+    // `0x00458506`..`0x0045852D`: either arm, then the store below.
+    if (obj.flags & EMERGE_ALT_ENTRY) {
+      obj.flags &= ~EMERGE_ALT_ENTRY;
+      obj.flags2 |= EMERGE_ALT_136C;
+    } else {
+      obj.flags2 |= EMERGE_136C;
+    }
     // `0x00458535  AND ECX, 0xdfffffff` on `obj+0x136C` -- off the world
     // push until it is up: the pose is under the floor on purpose.
     obj.flags2 &= ~ZombieFlag2.CollideWorld;
@@ -178,6 +210,9 @@ export function ZombieStateEmerge(obj: ZombieActor, dt: number,
     // `0045869F  80e6df  AND DH, 0xdf`, in the same breath as the `1` into
     // `obj+0x1310`: the entrance is over, so shots stagger again.
     obj.flags &= ~ActorFlag.NoHitReaction;
+    // `004586B4  AND EDX, 0xffefffff` / `OR EDX, 0x20000000`: sub 0's
+    // `0x100000` comes down and the world push comes back.
+    obj.flags2 &= ~ZombieFlag2.Carried;
     obj.flags2 |= ZombieFlag2.CollideWorld;
   }
 }

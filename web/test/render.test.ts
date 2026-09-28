@@ -3265,6 +3265,42 @@ console.log("\nclass 0x31's root: all three angles, in obj+0x1FC's order 1");
         !placeThrowerRoot({ a: z, root: new Object3D() } as unknown as Inst));
 }
 
+console.log("\nclass 0x25's root: all three angles, in model+0x68's order 1");
+{
+  // `ScriptedHumanoidInit` writes `model+0x68 = 1` straight after the build
+  // (`c6476801` at `0x004841A9`, `EDI = obj+0x194`), so the body draws through
+  // the same arm 1 as class 0x31: `T; RotX; RotZ; RotY`. Its object-path ride
+  // writes all three angles, and a renderer that drew yaw alone stood the
+  // boat's riders upright on a pitching deck.
+  const { placeHumanoidRoot } =
+    await import("../src/render/characters/humanoid");
+  const {
+    MatIdentity, MatrixRotateX, MatrixRotateY, MatrixRotateZ, MatrixTranslate,
+  } = await import("../src/game/matrix");
+  const { Object3D } = await import("three");
+  type Inst = Parameters<typeof placeHumanoidRoot>[0];
+
+  const a = makeActor(4128, SpawnClass.ScriptedHumanoid, 0x21, "rider");
+  a.pos = { x: 12.5, y: -20, z: -300 };
+  a.pitch = 0x3d8e; a.yaw = 0x4000; a.roll = 0x0800;
+  const inst = { a, root: new Object3D() } as unknown as Inst;
+  const placed = placeHumanoidRoot(inst);
+  inst.root.updateMatrix();
+  const want = MatIdentity();
+  MatrixTranslate(want, a.pos.x, a.pos.y, a.pos.z);
+  MatrixRotateX(want, a.pitch);
+  MatrixRotateZ(want, a.roll);
+  MatrixRotateY(want, a.yaw);
+  const got = inst.root.matrix.elements;
+  const worst = Math.max(...want.map((v, i) => Math.abs(v - got[i])));
+  check("a scripted humanoid's root is T * Rx(pitch) * Rz(roll) * Ry(yaw)",
+        placed && worst < 1e-4, `placed ${placed}, worst element ${worst}`);
+
+  const z = makeActor(0x30, SpawnClass.Zombie, 1, "zombie");
+  check("...and any other class is left to the ordinary arm",
+        !placeHumanoidRoot({ a: z, root: new Object3D() } as unknown as Inst));
+}
+
 console.log("\nclass 0x13's prop: the record's three angles, drawn RotX first");
 {
   // `ScriptedPropUpdate13` (`FUN_0043FE90`) draws `MatrixTranslate(obj+0x40);

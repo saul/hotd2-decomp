@@ -1569,7 +1569,7 @@ And the pose copy was `yaw` alone where the engine copies `obj+0x64`, `0x68`
   `ZombieSubState.hasCooldown`. `ChooseDeathMotion` reads bit `0x10` for
   motion `0x1A5`, so a captor killed while dragging plays the wrong death.
 
-## 24. `ZombieStateStandAndThrow` raises a bit the engine only tests — `[open]`, and it is the reason *these* two zombies were in state 12
+## 24. `ZombieStateStandAndThrow` raised a bit the engine only tests — **fixed**, and it was the reason *these* two zombies were in state 12
 
 Found while fixing item 22, and **it is a second defect with the same
 symptom**, so it is filed separately rather than folded in. Nothing is changed
@@ -1645,6 +1645,17 @@ that ice is: `ZombieStateDeath6`'s test takes its mask from
 invisible to the sweep that concluded there is none** (`L32`). Re-run
 `get_xrefs_to 0x00459080` and a proper writer search when Ghidra is back,
 before changing the write.
+
+**Fixed, with Ghidra back.** The listing is the one above, read out of the
+database this time; `get_xrefs_to 0x00459080` gives the one reference,
+`g_class30_states[33]` at `0x00592B6C`; and an operand search for
+`0x1000000` over the whole image finds no class-0x30 raise of `obj+0x34` --
+the `OR`s it does find are class 0x40's, class 0x31's, class 0x41's, and
+`ZombieStateCollapseToCondition4`'s at `0x0045E6A2`, which is on
+`obj+0x136C`. So `class30/stand_throw.ts` makes the engine's two writes
+now and raises nothing, and a body-condition-7 thrower whose record lacks the
+bit and stands off the floor dies through state 9, as the paragraph above
+said it would. `web/test/port.test.ts` pins all three arms and the death.
 
 ## 25. Stage 2's blocks 1-10 and 21-32 have now been played — and two of them stop
 

@@ -62,7 +62,7 @@
  *   port-only, deliberately class-agnostic decoder that writes all of them as
  *   one `Partial<Actor>`, and every one of them would have to move at once,
  *   for all four classes, together with a split of that function. That is a
- *   job of its own; it is recorded here rather than half-done. `[open]`
+ *   job of its own; it is recorded here rather than half-done.
  */
 import type { ActorRef } from "../actor";
 import { vec3, type Vec3 } from "../vec";

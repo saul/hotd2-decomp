@@ -62,12 +62,12 @@ const STATE_UNREAD_0x34 = 0x34;
  * (`FUN_00454050`) for the blood and the sound, and on a *survivable* hit
  * calls `ActorReactToHit` (`FUN_004543F0`) for the stagger. The port's shared
  * `ResolveHit` already does the damage, the gore, the score and the stagger
- * generically — `ThrowerShotFeedback` carries the same `[diverges]` for the
- * same reason — so what is left here is the half no shared routine can do,
- * which is choosing a state.
+ * generically — `ThrowerShotFeedback` declares the same departure for its own
+ * routine, for the same reason — so what is left here is the half no shared
+ * routine can do, which is choosing a state.
  *
- * **State 9 is ported.** It used to carry a `[diverges]` here saying it was
- * not: every actor this half of the routine chose state 9 for was sent to
+ * **State 9 is ported.** It used to be declared a divergence here, saying it
+ * was not: every actor this half of the routine chose state 9 for was sent to
  * {@link ZombieState.Death} instead, on the argument that the two states share
  * a terminus, so the 44 shipped spawns carrying body condition 5 or 6 died
  * where they stood rather than where they were thrown. That was **D2** in
@@ -91,9 +91,10 @@ export function ZombieOnShot(obj: ZombieActor): void {
   // (`FUN_004543F0`): `0045401A PUSH EDI / CALL 0x004543F0`.
   //
   // The stagger half of that routine has already run, inside the port's
-  // shared `ResolveHit`. [diverges] What has *not*, and cannot, is its
-  // `znjoe` arm: that arm raises {@link ActorFlag.Dead}, and the test five
-  // instructions above is the one thing that reads it -- so the arm only
+  // shared `ResolveHit` -- this routine's declared divergence, above. What
+  // has *not*, and cannot, is its `znjoe` arm: that arm raises
+  // {@link ActorFlag.Dead}, and the test five instructions above is the one
+  // thing that reads it -- so the arm only
   // works from a point the test has already passed. Called from `ResolveHit`
   // instead, at the head of the frame, it set state 25 and this routine
   // overwrote it with {@link ZombieState.Death} on the very same frame.

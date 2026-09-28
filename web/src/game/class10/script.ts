@@ -133,8 +133,8 @@ export function CivilianRunScript(obj: Actor, script: number, pc: number,
         // **The order.** `sub+0x2C` is a class-0x30 state id and `sub+0x2E` a
         // countdown, and the captors sitting in
         // `ZombieStateAwaitCivilianOrder` are what read them. An earlier
-        // revision kept only the second operand and called it `childCue2`
-        // `[open]`, which threw the order itself away.
+        // revision kept only the second operand and called it `childCue2`,
+        // an open question, which threw the order itself away.
         if (sub.childCount !== 0) {
           sub.childOrder = a[0];
           sub.childOrderFrames = a[1];

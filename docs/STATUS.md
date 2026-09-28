@@ -19,7 +19,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 92104 | 293 | engine |
+| `game/` | 92108 | 293 | engine |
 | `hod2lib/` | 18604 | 35 | engine |
 | `render/` | 14743 | 52 | render |
 | `app/` | 7982 | 28 | app |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **145833** | **479** | |
+| **total** | **145837** | **479** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -44,17 +44,17 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **228 of 297** annotated functions in the gameplay address ranges have a port (76%) |
-| Ported outside those ranges | 482 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 710 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 483 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 711 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
-| Declared `[diverges]` | **136** — where the port knowingly departs from the exe, each with its reason on the spot |
-| `[open]` markers | **108** — questions the port and the exporter are honest about not having answered |
+| Declared `[diverges]` | **137** — where the port knowingly departs from the exe, each with its reason on the spot |
+| `[open]` markers | **107** — questions the port and the exporter are honest about not having answered |
 
 Both markers are counted in **every** `.ts`/`.tsx` file under `web/src/`, one per occurrence, and only in comments — a word in code or in a string is not a marker (`verify_port.marker_lines`). Each departure and each question is written once, where it is made; everything that refers to it names it in words ([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "One departure, one tag"). By layer, from the same table as the directories above:
 
 | Layer | Directories | `[diverges]` | `[open]` |
 |---|---|---:|---:|
-| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 122 | 105 |
+| engine | `core/`, `bundle/`, `script/`, `game/`, `hod2lib/` | 123 | 104 |
 | render | `render/`, `audio/` | 13 | 3 |
 | ui | `hud/`, `ui/` | 0 | 0 |
 | app | `app/` | 1 | 0 |

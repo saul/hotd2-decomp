@@ -24044,3 +24044,81 @@ peer had made the same rewrite and **committed** it on its crowd-push branch
 (`3030a653`), which `status` cannot see. Five conflicts at the merge, all
 resolved by taking main's side. Search a peer's branch commits
 (`git log origin/main..<branch> -- <path>`), not only its working tree.
+
+## 2026-09-28 -- every writer of a bone record's hit sphere (branch `claude/sleepy-hypatia-18b988`)
+
+The brief named three pieces: `SkeletonWalkNode`'s slot gate,
+`ResolveDamagedPartSphere` on every part swap, and the thrower hands. A sweep
+of `.text` with capstone for stores to `0x284 + b*0x90` and `0x288.. + b*0x90`
+(every bone), then for `[reg+0x78]` in every function that holds a record
+pointer, found the rest, and they are the part worth writing down:
+
+* `ThrowerStateRearm` (`FUN_0044F7A0`) writes spheres too, and the pseudocode
+  shows them as float literals. They are a load through
+  `[0x004D0384]` -- `g_character_part_tables[0x16]` -- rows 4 and 7 (`L73`).
+* `EnemyZombieInitByCharType` (`FUN_00452FD0`) zeroes bones 5 and 8's radius
+  for types 2 and 3, and bone 5's for 0xE, while making those bones collision
+  meshes from the descriptor tail's `+0x10`. Three notes called that "loading
+  a held prop" into "draw slots"; `obj+0x550/0x564/0x554` are a record's
+  `+0x74`, `+0x88`, `+0x78`. The same arm raises `NoDismember` for 2 and 3 and
+  type 2's entry latch, which `ZombieStateHoldAtRange` already read and
+  nothing raised.
+* `EnemyThrowerInit` arms `zsass` (`0x00449877`) and the port did not, and the
+  headshot is `ActorSwapDamagedPart(rec, 0, 2)` where the port called
+  `RemoveBoneSubtree`.
+* Both enemy `Init`s double bone 2's radius under Original Mode's big-head
+  item; not ported, with the item.
+* `ZombieHideBoneSubtree` (`0x0045DD70`) zeroes slot and radius for
+  `ZombieInitHalved`, which a peer branch (`claude/musing-goldstine-ad68da`,
+  not in main as this is written) ports with `Actor.removed`. **When the two
+  meet**, its bones should also get `boneRadius = 0` -- that branch puts bone
+  9's stump slot back on a removed bone, and with a radius left on it the
+  stump would be shootable where the engine's has none.
+
+`ResolveDamagedPartSphere` returns 0 on both paths, so `ActorSwapDamagedPart`
+always runs the type-7 (or 0xB) search after the actor's own. `combat.md`
+said "falls back ... when a character has no variant of its own"; that is what
+the `TEST EAX,EAX` would mean if the routine ever returned anything else. The
+shipped rows both searches find agree, which `verify_combat` now holds.
+
+**Wrong turns.**
+
+* I typed `ThrowerStateRearm`'s eight words up as literals before
+  disassembling it. They are table reads, and they equal type 0x16's rows 4
+  and 7 bit for bit -- which is now the check, against `EnemyThrowerInit`'s
+  immediates.
+* The first gated-rows list in the check was the brief's, "the shipped
+  types", and the check said so by failing: types 0x1F and 0x46 are built as
+  sub-actors no placement names, and Python's `resolve_for_stage` does not
+  build the frog's type 0x1B at all. The check now holds every row over
+  every type with a skeleton, 109 of them in 23 types, and the prose points at
+  it rather than quoting a subset.
+* The first render mesh arm called `BoneMeshSegmentHit` from
+  `render/characters.ts`, and `verify_layers` failed `render-drives-the-port`,
+  rightly: the renderer may read `Actor.boneColi` and may not run the
+  engine's test. The second was `ShotTestPickedBoneMeshes`, a game-side pass
+  over the meshes of the classes the renderer picks, merged as a third
+  answer -- port-only logic standing in for a routine the port already had.
+  After the merge with main, whose shot test files every class and migrates
+  only the pick (`ShotTestPickedHere`), the faithful version was one flag:
+  class 0x30 picked through the list, where `ShotTestBoneTree`'s mesh arm
+  already runs. The one thing the flag needed was `obj+0x124` in
+  `Actor.hitRadius` -- the zombie wrote the word only as `Actor.radius`, the
+  port's other field for it. Stage 2 plays to the same GAME OVER at block 16
+  step 6 before and after (9825 frames, 10020), the runs parting at the first
+  volley.
+* I cited `0x0044F9E4`/`0x0044FA4C` for `ThrowerStateRestoreBothHands`' table
+  loads from memory of the decompile and then disassembled: they are
+  `0x0044F9E6` and `0x0044FA4E`.
+* The TypeScript and Python halves' `part_spheres` differ for stages 1 and 2:
+  TypeScript builds three types (27, 29, 70) Python's `resolve_for_stage`
+  does not, which widens the slot filter. Every type both build has the same
+  rows; the difference predates this.
+* My `ZombieOnShot` edit gated the entry latch's clear on `hit.bone > 0`,
+  after the loop's `g_shot_bone[p] > 0`. A peer's port of the same loop head
+  landed first and clears it for every landed shot, and that is right: a mark
+  always writes a bone byte of at least 1 (`MarkActorShot` writes 1 for an
+  actor hit whole), so the gate never refuses. Theirs kept at the merge, and
+  my assertion for a bone-0 hit dropped with mine. The lesson was written as
+  L70 in the branch's commit and renumbered L73 over two merges, as main
+  took 70, 71 and 72.

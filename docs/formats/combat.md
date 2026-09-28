@@ -247,9 +247,13 @@ through the camera its frame reads.
 
 **The mesh arm.** `ShotTestBoneTree` takes `ShotTestBoneMesh` (`FUN_004048A0`)
 for a record whose `+0x74` has bit `0x10` and whose `+0x88` names a blob; the
-skeleton build writes `0x21`, and the only `Init` that raises the bit is
-`Boss4Init`, for the ten bones its descriptor gives a `coli4.bin` mesh
-(`Actor.boneColi`). The port tests the shot segment (`ShotBuildSegment`, a
+skeleton build writes `0x21`, and two `Init`s raise the bit: `Boss4Init`, for
+the ten bones its descriptor gives a `coli4.bin` mesh, and
+`EnemyZombieInitByCharType`, for class 0x30's weapon hands (types 2 and 3's
+bones 5 and 8, 0xE's bone 5, the blob at the tail's `+0x10`) --
+`Actor.boneColi` either way. Only the tree walk tests a mesh, so class 0x30
+(and 0x18, which runs its update) is picked through the list now -- see the
+table below. The port tests the shot segment (`ShotBuildSegment`, a
 thousand units) against the blob in the bone's frame, over
 `GameHost.boneMatrix` and `ColiSegmentVsMesh`, and the candidate
 (`ShotPushColiHitCandidate`, `FUN_00404CB0`) carries the point, the normal and
@@ -266,9 +270,13 @@ instead of `G.g_crosshair_ray`; with one pull a frame they are the same object.
 
 JUDGMENT's two classes set the flag (`game/class22/`, `game/class23/`), and
 so does Strength (`game/class19/`: `Boss4Update` calls
-`ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line, and the mesh
-arm above is its alone), at the sites below; the other bosses are being ported
-in other workstreams and each will set it with its own module. The sites:
+`ActorRegisterCameraPoint(state+0x70)` at its `0x00491A49` line), at the
+sites below; the other bosses are being ported in other workstreams and each
+will set it with its own module. **Class 0x30 sets it too**, and 0x18 with
+it: the zombie registered every frame already, and the weapon hands'
+collision meshes are only tested by the tree walk. Its `obj+0x124` is the
+port's `Actor.hitRadius` as well as `Actor.radius` -- one word, two readers.
+The sites:
 
 | class | registers at | through | gate | `obj+0x124` | `0x80` | `0x8000` |
 |---|---|---|---|---|---|---|
@@ -280,6 +288,9 @@ in other workstreams and each will set it with its own module. The sites:
 | `0x23` | state 1 (`0x00490150`) `0x004901E9` | `RegisterForShotTest`, `obj+0x70` left from last frame | companion's HP ≤ own | `g_actor_radius_by_char[0x44]`, `Class23Init` `0x0048FE04` | build `0x0048FDE6` | set by `0x00490B00` at `0x00490B92` |
 | `0x23` | state 1 `0x00490917`; subtype-2 state 1 (`0x00490FD0`) `0x004912EA` | `ActorRegisterCameraPoint(6.0)` | none | | | |
 | `0x23` | state 2 (`0x00490B00`) `0x00490C3B` | `RegisterForShotTest`, after `obj+0x70 = view(obj+0x100)` inline | after its own `0x8000` | | | |
+| `0x30` | `EnemyZombieUpdate` `0x0045347A`, every path through `ZombieAdvanceMotion` | `ActorRegisterCameraPoint(4.0)` | none | `g_actor_radius_by_char[type]`, `EnemyZombieInit` `0x00452E72` | build `0x00452E13` | — |
+| `0x30` twin | `ZombieTwinFollowHost` `0x004533CB` | `RegisterForShotTest` | none | | | |
+| `0x18` | through `EnemyZombieUpdate`, as `0x30` | | | | | |
 | `0x45` head | `Boss3FightHeadUpdate` `0x004215AF` | `RegisterForShotTest`, after `obj+0x100 = obj+0x40` and `obj+0x70 = view(obj+0x100)` | `obj+0x1310 != 7` | `g_actor_radius_by_char`, `Boss3FightHeadInit` `0x0041FF81` | build `0x0041FF5C` | set `0x0041FF68`; cleared at `0x00420E81`, `0x00420F96`, `0x00422DD5` |
 | `0x45` body | `Boss3BodyUpdate` `0x00424160` | `RegisterForShotTest`, `obj+0x70 = view(obj+0x40..0x48)` at `0x00423FD1` | none at the call | `[0x004C4E48]`, `Boss3BodyInit` `0x004203C0` | build `0x004203A0` | — (`|= 0x80080000`) |
 
@@ -296,10 +307,9 @@ these sites. The pools that already model their own registration (class
 list instead:
 
 * `0x10` `CivilianUpdate` `0x0048ADB0` (camera point, 4.0); `0x11` `FrogUpdate`
-  `0x0043A2C7` (1.0); `0x30` `EnemyZombieUpdate` `0x0045347A` (4.0),
-  `ZombieTwinFollowHost` `0x004533CB`, the thrown weapon `0x0045A612`; `0x31`
+  `0x0043A2C7` (1.0); `0x30`'s thrown weapon `0x0045A612`; `0x31`
   `EnemyThrowerUpdate` `0x00449991` (0.0), its projectile
-  (`ThrownWeaponUpdate`) `0x004508AA`; `0x18` through `EnemyZombieUpdate`.
+  (`ThrownWeaponUpdate`) `0x004508AA`.
 * `0x13` `0x0043FFA4`; `0x20` `0x00449366`, `0x00449519`; `0x21` `0x00451D08`,
   `0x0045283A`; `0x26`'s boat `0x0048EE9C` (a mesh); `0x33` `0x004334D0`,
   `0x00433CC7`; `0x40` `0x0043C42A`, `0x0043D425`, `0x0043D7DD`, `0x0043D9DB`,
@@ -627,8 +637,14 @@ land harmlessly on bit 31.
 ### The gore swap — `ActorSwapDamagedPart`
 
 ```c
+if (obj->flags & 0x200) return;              /* NoPartSwap */
 record[0] = slot;                            /* record[0] IS the slot the bone draws */
-ResolveDamagedPartSphere(record, slot, char_type);
+if (slot == 0 || slot == 1) record[0x78] = 0;
+else {
+    ResolveDamagedPartSphere(record, slot, char_type);
+    ResolveDamagedPartSphere(record, slot, char_type == 0xD ? 0xB : 7);
+}
+if (next_code == 0 || next_code == 1) obj[0x1318] |= 1 << g_bone_damage_zone[bone];
 ```
 
 The bone's **draw slot is replaced**, which is why a zombie visibly comes apart
@@ -637,8 +653,13 @@ see [§8b](#8b-what-a-bone-actually-draws--zombiedrawbonepart), where nine arms
 of class 0x30's own draw hook substitute a cel or add a second model. The slots
 are ordinary asset slots and resolve through the slot table like anything else — `char_adv02`'s gore lives in `harold.bin`,
 `char_adv00`'s in `char_adv07.bin`, so there really is a shared gore set behind
-the per-character ones. `ResolveDamagedPartSphere` falls back to character type
-7 (or `0x0B`) when a character has no variant of its own.
+the per-character ones. `ResolveDamagedPartSphere` searches character type 7's
+table (or `0x0B`'s) **after the actor's own on every swap**, not only when the
+first search finds nothing -- see [§8](#8-the-gore-swap--resolvedamagedpartsphere).
+`next_code` is the effect table's entry after the current step, read off the
+record's own step counter (`rec+0x8C`) before the refusal, so the headshot's
+swap to slot 0 raises the zone bit only when the head's current step is its
+last.
 
 ### Result codes
 
@@ -920,13 +941,59 @@ PTR_DAT_004D032C[char_type] + (bone_count - 1) * 0x14
 
 So a half-destroyed arm keeps a sensible hit volume — `char_adv00`'s head stage
 1 (`0x1F28`) has the head's own 1.3 radius, and stage 2 (`0x1F29`) drops to 1.0
-as more of it is gone. There are 23 such entries for `char_adv00` and **none for
-the cat**, which is also the split between characters that escalate damage and
-characters that do not.
+as more of it is gone. A search that finds nothing **writes nothing**: the
+record keeps the radius and centre it had, the build's or the last stage's, and
+many of the slots the effect tables name have no row anywhere.
 
-`FUN_004098E0` calls it twice — once for the character's own type and, if that
-finds nothing, once for type 7 (or 0x0B) — so type 7's table is a shared set
-behind the per-character ones.
+The copy is `rec+0x78 = row.radius; rec+0x7C..+0x84 = row.centre`,
+**unscaled** -- the build multiplies by the model's size and this does not --
+and the comparison is against `rec+0x00`, which the caller has just written; the
+slot pushed as the second argument is never read.
+
+`FUN_004098E0` calls it twice, and **both calls always run**: this page said the
+second was a fallback for a character with no variant of its own, but the
+routine returns 0 on both of its paths (`XOR EAX,EAX` at `0x004099D7` and
+`0x004099F7`), so the `TEST EAX,EAX; JNZ` at `0x00409943` never skips the
+second. A row for the slot in type 7's table (or 0x0B's, for type 0x0D)
+therefore overwrites the actor's own. In the shipped data every slot both
+searches find has the same row in both tables, so the difference cannot be
+seen; `tools/verify_combat.py` check 17 holds that, and that every tail a
+search can reach ends in its `-1`.
+
+The bundle carries the tails as `characters.part_spheres`, by character type,
+for every type a stage builds and for 7 and 0xB, keeping the rows whose slot
+some effect table names -- which leaves every search's first match where it
+was. Ported as `ResolveDamagedPartSphere` in `game/combat/resolve_hit.ts`.
+
+### 8a. Every writer of a bone record's hit sphere
+
+`+0x78` is the radius and `+0x7C..+0x84` the centre, in the bone's own space,
+of `obj + 0x20C + bone*0x90`. A sweep of `.text` for writes to those offsets,
+fixed and bone-indexed, finds these, and the port has each on
+`Actor.boneRadius` / `Actor.boneCentre`:
+
+| Writer | What | Where in the port |
+|---|---|---|
+| `SkeletonWalkNode` (`FUN_004107E0`), at build | row `bone-1` of the type's table, radius × model size, **only when the row's slot is the node's** (`0x00410830`); zero otherwise | `ActorBuildSkinnedModel` |
+| `ActorSwapDamagedPart` (`FUN_004098E0`) | radius 0 for slot 0 or 1; otherwise the two searches above | `combat/resolve_hit.ts` |
+| `RemoveBoneSubtree` (`FUN_00409AF0`) | radius 0 with the slot, down the subtree | `combat/resolve_hit.ts` |
+| `SpawnThrownWeapon` (`FUN_004504E0`), `ZombieThrowHandWeapon` (`FUN_0045A240`) | the emptied hand's radius 0 | `class31/thrower.ts`, `class30/throw.ts` |
+| `ThrowerStateRearm` (`FUN_0044F7A0`) | type 0x16's rows 4 and 7 into bones 5 and 8, unscaled -- a load through `[0x004D0384]` the decompiler shows as float literals | `class31/standing.ts` |
+| `ThrowerStateRestoreBothHands` (`FUN_0044F900`) | the actor's own rows 4 and 7, unscaled | `class31/standing.ts` |
+| `EnemyZombieInitByCharType` (`FUN_00452FD0`) | radius 0 on the bones it gives a collision mesh: 5 and 8 of types 2 and 3, 5 of 0xE | `class30/init_char.ts` |
+| `Boss4Init` (`FUN_004917E0`) | radius 0 on the ten bones it gives a mesh | `class19/` (as `Actor.boneColi`) |
+| `FrogAwardKillAndEnterDeath` (`FUN_0043A2E0`) | the frog's bone 2 | `class11/` |
+| `EnemyZombieInit` (`FUN_00452DA0`) / `EnemyThrowerInit` (`FUN_00449620`) | the head's radius × 2 (× 1.8 for type 0xE) under Original Mode's big-head item | **not ported** -- the item (`DAT_009C88A8`) is not, and the draw hook it installs is a declared divergence in both classes |
+| `ZombieHideBoneSubtree` (`0x0045DD70`) | radius 0 with the slot, for `ZombieInitHalved` and the split | another workstream's port of the halved crawler |
+
+The build's test is why several types' rows never reach a record at all: some
+tables are a stub that ends in `-1` after a row or two and are read on past it,
+and on others a real row names another model than the node does. `zsass`'s two
+hands are the one case a player meets: rows 4 and 7 name the armed hands
+`EnemyThrowerInit` puts in (`0x1FA2`, `0x1F9E` at `0x00449877`/`0x00449881`),
+the skeleton names the bare ones, so a `zsass` holding its weapons cannot be
+shot in either hand until it has thrown one and `ThrowerStateRearm` has given
+it a sphere. `GATED` in `tools/verify_combat.py` has every refused row.
 
 ## 8b. What a bone actually draws — `ZombieDrawBonePart`
 

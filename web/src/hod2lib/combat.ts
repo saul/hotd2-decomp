@@ -861,9 +861,20 @@ export function goreParts(tables: ExeTables,
   return out;
 }
 
-/** `[centre, radius]` for one bone, or null when it has no sphere. */
+/**
+ * `[centre, radius, slot]` for one bone's row, or null when it has no sphere.
+ *
+ * The row is `bone - 1`, and **its own slot comes with it**, because
+ * `SkeletonWalkNode` (`FUN_004107E0`) takes the row only when that slot is
+ * the skeleton node's -- `MOV EDX,[EAX-0x14]; CMP EDX,[EDI]; JNZ 0x00410876`
+ * at `0x00410830`, and the other arm zeroes the radius and the centre. The
+ * comparison is the port's to make (`ActorBuildSkinnedModel`), so the row
+ * travels as it is: `ThrowerStateRestoreBothHands` (`FUN_0044F900`) copies
+ * rows 4 and 7 into bones 5 and 8 later without asking the slot, and needs
+ * the row the build refused.
+ */
 export function hitSphere(tables: ExeTables, charType: number, bone: number):
-    [[number, number, number], number] | null {
+    [[number, number, number], number, number] | null {
   const b = tables.v2r(HIT_SPHERES);
   if (b === null || bone < 1) return null;
   const p = tables.v2r(u32(tables.data, b + charType * 4));
@@ -874,8 +885,64 @@ export function hitSphere(tables: ExeTables, charType: number, bone: number):
                                        f32(tables.data, o + 8),
                                        f32(tables.data, o + 12)];
   const r = f32(tables.data, o + 16);
-  return r > 0 ? [c, r] : null;
+  return r > 0 ? [c, r, i32s(tables.data, o, 1)[0]] : null;
 }
+
+/**
+ * The damaged-part rows `ResolveDamagedPartSphere` (`FUN_004099A0`) searches
+ * for one character type, in table order: `{slot, centre, radius}`.
+ *
+ * ```
+ * row = g_character_part_tables[type] + (g_character_bone_counts[type] - 1) * 0x14
+ * while (row.slot != -1) { if (row.slot == rec.slot) { copy; break } row++ }
+ * ```
+ *
+ * The walk starts one row past the last bone's and ends at the first `-1`,
+ * and the exporter walks exactly that -- bounded by the image and nothing
+ * else (L22). Several types' pointers are a stub six dwords long whose rows
+ * run on into the next type's table; the engine reads those as rows too, and
+ * so does this.
+ *
+ * Only rows whose slot is in *slots* are kept, which is the set of slots
+ * `ActorSwapDamagedPart` (`FUN_004098E0`) can be handed: its five callers are
+ * all in `ResolveHit` (`FUN_00409430`), and each passes an effect-table slot
+ * or 0. The walk stops at the **first** match, so a filter that keeps every
+ * row a search can ask for, in order, answers every search the same.
+ */
+export function partSphereRows(tables: ExeTables, charType: number,
+                               slots: ReadonlySet<number>):
+    { slot: number; centre: [number, number, number]; radius: number }[] {
+  const out: { slot: number; centre: [number, number, number];
+               radius: number }[] = [];
+  const b = tables.v2r(HIT_SPHERES);
+  if (b === null || !slots.size) return out;
+  const p = tables.v2r(u32(tables.data, b + charType * 4));
+  if (p === null) return out;
+  const n = tables.characterBoneCount(charType);
+  for (let o = p + (n - 1) * 0x14; o + 0x14 <= tables.data.length;
+       o += 0x14) {
+    const slot = i32s(tables.data, o, 1)[0];
+    if (slot === -1) break;
+    if (!slots.has(slot)) continue;
+    out.push({
+      slot,
+      centre: [f32(tables.data, o + 4), f32(tables.data, o + 8),
+               f32(tables.data, o + 12)],
+      radius: f32(tables.data, o + 16),
+    });
+  }
+  return out;
+}
+
+/**
+ * The two tables `ActorSwapDamagedPart` (`FUN_004098E0`) searches after the
+ * actor's own, whatever the first search found -- `ResolveDamagedPartSphere`
+ * returns 0 on every path (`XOR EAX,EAX` at `0x004099D7` and `0x004099F7`), so
+ * the `TEST EAX,EAX; JNZ` at `0x00409943` never skips it: type `0x0B` for
+ * character type `0x0D` (`CMP word ptr [ECX+0x1f4],0xd` at `0x0040994D`), and
+ * type 7 for every other.
+ */
+export const PART_SPHERE_FALLBACK_TYPES = [7, 0xb];
 
 /**
  * `g_actor_radius_by_char` -- one float per character type, copied to

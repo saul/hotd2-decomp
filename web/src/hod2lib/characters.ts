@@ -48,8 +48,8 @@ import { BODY_CREATURE_HOST_CLIPS, CLASS20_DEATH_MOTION,
 import { class31MotionIds, class31Tables } from "./class31";
 import { class14Tables } from "./class14";
 import { boneZones, combatTables, DEATH_LEFT, DEATH_RIGHT, deathMotions,
-         difficultyTables, playerDamage, reactionGroups,
-         STAND_AND_THROW_STATES } from "./combat";
+         difficultyTables, PART_SPHERE_FALLBACK_TYPES, partSphereRows,
+         playerDamage, reactionGroups, STAND_AND_THROW_STATES } from "./combat";
 import * as colilib from "./coli";
 import * as degraded from "./degraded";
 import * as evtlib from "./evt";
@@ -337,6 +337,44 @@ export function class19Tail(
     despawn_path: rec.param(0x40, "i16") ?? 0,
     despawn_frame: rec.param(0x42, "i16") ?? 0,
   };
+}
+
+/**
+ * The character types whose arm of `EnemyZombieInitByCharType`
+ * (`FUN_00452FD0`) reads the tail's `+0x10`: 2 and 3 share one arm (case 2
+ * falls into case 3) and 0xE has its own.
+ */
+export const ZOMBIE_BONE_MESH_TYPES: ReadonlySet<number> = new Set([2, 3, 0xe]);
+
+/**
+ * Class 0x30's tail `+0x10`, for the three character types whose arm of
+ * `EnemyZombieInitByCharType` reads it:
+ *
+ * ```
+ * case 2, 3:  rec(5)+0x74 |= 0x51; rec(5)+0x88 = tail+0x10; rec(5)+0x78 = 0
+ *             rec(8)+0x74 |= 0x51; rec(8)+0x88 = tail+0x10; rec(8)+0x78 = 0
+ * case 0xE:   rec(5)+0x74 |= 0x51; rec(5)+0x88 = tail+0x10; rec(5)+0x78 = 0
+ * ```
+ *
+ * The same kind of word class 0x19's bones carry -- a relocated pointer
+ * into the collision buffers, which `ShotTestBoneTree` (`FUN_00404750`)
+ * tests the bone against instead of its sphere -- resolved to the `coli.blobs`
+ * key the same way. Every shipped spawn of the three resolves: 14 of type 2
+ * (stages 1 and 2), 11 of 0xE (stage 4), 9 of 3 (stage 6). Class 0x18 is
+ * `EnemyZombieInit` and two stores (`CarriedZombieInit18`, `FUN_0045CD60`), so
+ * its tail is read the same way.
+ *
+ * Gated on the character type, because `+0x10` is something else for every
+ * other type (L3).
+ */
+export function zombieBoneMeshColi(
+    rec: Spawn, charType: number | null,
+    sets: [colilib.ColiFile, colilib.ColiFile] | null): string | null {
+  if (charType === null || !ZOMBIE_BONE_MESH_TYPES.has(charType)) return null;
+  const word = rec.param(0x10, "u32");
+  if (word === null || word === 0xffffffff || !sets) return null;
+  const hit = colilib.pointerToOffset(word, sets[0], sets[1]);
+  return hit ? `${hit[0]}:${hit[1]}` : null;
 }
 
 export function class13Tail(rec: Spawn): Record<string, unknown> {
@@ -1473,6 +1511,8 @@ export async function resolveForStage(
     const class18 = cls === 0x18 ? class18Tail(rec) : null;
     const class26 = cls === 0x26 ? class26Tail(rec, coliSets) : null;
     const class19 = cls === 0x19 ? class19Tail(rec, coliSets) : null;
+    const boneMeshColi = cls === 0x30 || cls === 0x18
+      ? zombieBoneMeshColi(rec, res.charType, coliSets) : null;
     const class20 = cls === 0x20 ? class20Tail(rec) : null;
     const class11 = cls === 0x11 ? class11Tail(rec) : null;
     const class43 = cls === 0x43 ? class43Tail(rec) : null;
@@ -1586,6 +1626,7 @@ export async function resolveForStage(
     p.class18 = class18;
     p.class26 = class26;
     p.class19 = class19;
+    p.bone_mesh_coli = boneMeshColi;
     p.class20 = class20;
     p.class11 = class11;
     p.class43 = class43;
@@ -1930,6 +1971,36 @@ export async function resolveForStage(
   return { chars, placements, entries };
 }
 
+/**
+ * `g_character_part_tables`' damaged-part rows, by character type, for every
+ * type this stage builds and for the two `ActorSwapDamagedPart`
+ * (`FUN_004098E0`) searches after the actor's own -- see
+ * {@link partSphereRows} and {@link PART_SPHERE_FALLBACK_TYPES}.
+ *
+ * The rows kept are the ones whose slot some bone's effect table can hand
+ * the swap: every step slot above 1 of every type here, since 0 and 1 zero
+ * the radius without a search (`0x00409924`, `0x00409929`). Keyed and walked
+ * the same way for all of them, because the search is keyed by the table and
+ * not by whose slot it is looking for.
+ */
+export function partSpheres(tables: ExeTables,
+                            chars: Map<number, Character>):
+    Record<string, unknown> {
+  const slots = new Set<number>();
+  for (const c of chars.values()) {
+    for (const b of c.bones) {
+      for (const st of b.steps ?? []) if (st[0] > 1) slots.add(st[0]);
+    }
+  }
+  const types = new Set<number>([...chars.keys(),
+                                 ...PART_SPHERE_FALLBACK_TYPES]);
+  const out: Record<string, unknown> = {};
+  for (const ct of [...types].sort((a, b) => a - b)) {
+    out[String(ct)] = partSphereRows(tables, ct, slots);
+  }
+  return out;
+}
+
 /** The `characters` block of `<stage>.script.json`. */
 export function charactersJson(chars: Map<number, Character>,
                                placements: Placement[],
@@ -1949,6 +2020,7 @@ export function charactersJson(chars: Map<number, Character>,
     tracking: tables !== null ? cameraTracking(tables) : {},
     player: playerDamage(),
     bone_zones: tables !== null ? boneZones(tables) : [],
+    part_spheres: tables !== null ? partSpheres(tables, chars) : {},
     class31: tables !== null ? class31Tables(tables) : {},
     // Class 0x14's `.rdata` -- the stage-2 boss's cue, cone, window and
     // round tables. See `class14.ts`.

@@ -42,6 +42,8 @@ export interface CharacterBone {
   parent: number | null;
   hit_centre?: number[];
   hit_radius?: number;
+  /** The row's own slot, which `SkeletonWalkNode` compares with `slot`. */
+  hit_slot?: number;
   steps?: number[][];
   damage_rank?: number[];
 }
@@ -241,6 +243,7 @@ export function build(tables: ExeTables, charType: number,
     if (sph) {
       b.hit_centre = [...sph[0]];
       b.hit_radius = sph[1];
+      b.hit_slot = sph[2];
     }
     // `[slot, code, damage]` per step, with the control codes intact. An
     // earlier revision folded 0/1/2 to 0 and trimmed the tail, which threw

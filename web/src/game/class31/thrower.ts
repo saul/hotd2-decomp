@@ -326,9 +326,10 @@ function ThrowerThrowCue(obj: ThrowerActor, hand: ThrowHandJson):
  * The hand's hit-sphere radius **is** zeroed -- `MOV [reg + EDI + 0x284],
  * EBX` with the index `obj+0x1358 * 0x90`, in all four arms (`0x0045054E`,
  * `0x00450580`, `0x004505BF`, `0x004505E8`) -- onto {@link Actor.boneRadius},
- * and `ThrowerRestoreHand` gives it back from the table as the two re-arm
- * states do. It was left out, declared a divergence, for as long as the actor
- * had no per-bone radius to zero.
+ * and the centre is left alone; `ThrowerStateRearm` or
+ * `ThrowerStateRestoreBothHands` gives the sphere back with the weapon. It was
+ * left out, declared a divergence, for as long as the actor had no per-bone
+ * radius to zero.
  */
 export function SpawnThrownWeapon(obj: ThrowerActor, hand: ThrowHandJson,
                                   host: GameHost,
@@ -536,6 +537,8 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // which grows nothing, for the next frame whenever it holds the clock
   // (`obj+0x34` bit `0x4000`, or bytes `0x009C72F1`/`0x009C72F2` not 1 and
   // 0). `DAT_009C88A8` has not been read, and the port keeps no hook pointer.
+  // The big-head arm also doubles bone 2's hit radius (`obj+0x3A4`,
+  // `FADD ST0,ST0` at `0x004498E1`), which goes with the item.
   HeadAimBeginDraw(obj, obj.thr, host);
   ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
   HeadAimEndDraw(obj, obj.thr);
@@ -647,6 +650,9 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
 
 /** `param_1[0x4a]` in `EnemyThrowerInit`: `obj+0x128`, the body sphere. */
 const CHAR_ZSASS = 0x16;
+/** `EnemyThrowerInit`'s armed hands for `zsass` (`0x00449877`, `0x00449881`). */
+const ZSASS_ARMED_RIGHT = 0x1fa2;
+const ZSASS_ARMED_LEFT = 0x1f9e;
 const BODY_RADIUS_ZSASS = 5.0;
 const BODY_RADIUS_OTHER = 4.0;
 
@@ -761,6 +767,23 @@ export function EnemyThrowerInit(obj: ThrowerActor): void {
     } else {
       obj.alpha = 1;
     }
+  }
+  // **`zsass` is armed here**, and only its draw records are:
+  //
+  //   00449871  CMP  CX, 0x16
+  //   00449877  MOV  dword ptr [ESI + 0x4dc], 0x1fa2   ; bone 5's slot
+  //   00449881  MOV  dword ptr [ESI + 0x68c], 0x1f9e   ; bone 8's
+  //
+  // `[proved]`. The skeleton names the bare hands (`0x1F9F`, `0x1F9B`), and
+  // until this was ported nothing else put the weapons in them before the
+  // first `ThrowerStateRearm`. The radius is not written: the
+  // build refused both hands' rows, whose slots are these two and not the
+  // skeleton's, so a `zsass` holding its weapons cannot be shot in either
+  // hand until it has thrown and re-armed. The renderer replays the slots
+  // when it adopts the actor, as it does `ActorBindPartList`'s.
+  if (obj.charType === CHAR_ZSASS) {
+    obj.boneSlot[String(RIGHT_HAND_BONE)] = ZSASS_ARMED_RIGHT;
+    obj.boneSlot[String(LEFT_HAND_BONE)] = ZSASS_ARMED_LEFT;
   }
   obj.pendingHit = null;
   obj.thr.knockCount = 0;

@@ -204,6 +204,7 @@ def build(stage, tables, char_type: int, asset_file: str) -> Character | None:
         if sph:
             b["hit_centre"] = list(sph[0])
             b["hit_radius"] = sph[1]
+            b["hit_slot"] = sph[2]
         # `[slot, code, damage]` per step, with the control codes intact. An
         # earlier revision folded 0/1/2 to 0 and trimmed the tail, which threw
         # away the sever code entirely -- so a limb was reskinned on the first

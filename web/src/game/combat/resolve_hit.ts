@@ -22,7 +22,7 @@ import { ZombieState } from "../class30/states";
 import { ScoreAddForPlayer } from "./score";
 import { ActorIsEnemy, g_class_handlers } from "../registry";
 import type { GameHost } from "../host";
-import { CharacterTypeOf, MotionOf, T } from "../tables";
+import { CharacterTypeOf, MotionOf, PartSphereRowsOf, T } from "../tables";
 
 // -- `.text` immediates ----------------------------------------------------
 //
@@ -162,29 +162,133 @@ function markZone(obj: Actor, bone: number): void {
 
 /**
  * `ActorSwapDamagedPart` — `FUN_004098E0`. Replace a bone's model with the
- * damaged variant at *slot*, and set the zone bit when this bone has reached
- * its last stage.
+ * damaged variant at *slot*, give it that part's hit sphere, and set the
+ * zone bit when this bone has reached its last stage.
  *
- * **{@link ActorFlag.NoPartSwap} refuses it outright**, before anything: the
- * engine's first act after reading the bone's table entry is
+ * ```
+ * next = effect[type][(rec+0x8C) + bone*6 + 1]            ; 0x004098ED..0x0040990E
+ * if (g_cur_actor+0x34 & 0x200) return                     ; 0x00409916
+ * rec+0x00 = slot                                          ; 0x00409922
+ * if (slot == 0 || slot == 1) rec+0x78 = 0                 ; 0x00409973
+ * else {
+ *   ResolveDamagedPartSphere(rec, slot, type)              ; 0x0040993B
+ *   ResolveDamagedPartSphere(rec, slot, type == 0xD ? 0xB : 7)
+ * }
+ * if (next == 0 || next == 1) obj+0x1318 |= 1 << g_bone_damage_zone[bone]
+ * ```
+ *
+ * **{@link ActorFlag.NoPartSwap} refuses it outright**, before anything:
  * `00409913 8b4834` / `00409916 f6c502 TEST CH,0x2` / `00409919 757f JNZ`,
- * and the jump target is the epilogue. Nothing is swapped, `obj+0x78` keeps
+ * and the jump target is the epilogue. Nothing is swapped, `+0x78` keeps
  * whatever it held and the `obj+0x1318` zone bit is not raised.
+ *
+ * **Both searches run on every swap.** `ResolveDamagedPartSphere` returns 0
+ * on both of its paths, so the `TEST EAX,EAX; JNZ 0x0040997a` at `0x00409943`
+ * never skips the second one, and a row type 7 (or 0xB) has for the slot
+ * overwrites whatever the actor's own table gave. `docs/formats/combat.md`
+ * used to say the second was a fallback for a character with no variant of
+ * its own; the shipped rows the two searches both find agree, so the
+ * difference cannot be seen, and the routine is transcribed as it runs.
+ *
+ * **A search that finds nothing writes nothing**: the record keeps the
+ * radius and centre it had -- the build's, or the last stage's. Many of
+ * the slots the shipped effect tables name have no row in either table.
+ *
+ * *next* is read from the record's own step counter at the moment of the
+ * call, which is why it is read here and not handed in: the headshot's swap
+ * to slot 0 runs after a head hit may already have advanced the counter.
+ *
+ * Slot 0 is the port's {@link Actor.removed} rather than a `boneSlot` of 0:
+ * a zero draw slot is what that list means (`BoneDrawSlot` in
+ * `shot_test.ts`), and it is what the renderer hides. It removes this bone
+ * alone, where `RemoveBoneSubtree` walks the subtree too; the only caller
+ * that passes 0 in the shipped data is the headshot, on the head. The
+ * renderer hides a removed node with everything under it, and bone 2 has
+ * children only in types 0x1D, 0x1F, 0x46, 0x48, 0x49 and 0x4E -- the horde,
+ * the bats, JUDGMENT's rider and the stage-3 boss, all hit whole or through
+ * their own class's shot routine -- so no head the burst can take has
+ * anything under it. `[likely]`, from the classes the bundles place those
+ * types under.
  */
 export function ActorSwapDamagedPart(obj: Actor, bone: number, slot: number,
-                                     last: boolean, host: GameHost): boolean {
+                                     host: GameHost): boolean {
+  const b = CharacterTypeOf(obj)?.bones.find((x) => x.bone === bone);
+  const next = b?.steps?.[obj.hits[bone] ?? 0]?.[1] ?? EffectCode.Last;
   if (obj.flags & ActorFlag.NoPartSwap) return false;
-  if (!slot) return false;
-  // `obj+0x20C + bone*0x90` -- the draw record.
-  obj.boneSlot[bone] = slot;
-  host.setBoneSlot(obj.at, bone, slot);
-  if (last) markZone(obj, bone);
-  return true;
+  const k = String(bone);
+  // `obj+0x20C + bone*0x90` -- the draw record's slot.
+  if (slot === 0) {
+    if (!obj.removed.includes(bone)) obj.removed.push(bone);
+  } else {
+    obj.boneSlot[k] = slot;
+    host.setBoneSlot(obj.at, bone, slot);
+  }
+  if (slot === 0 || slot === 1) {
+    obj.boneRadius[k] = 0;
+  } else {
+    ResolveDamagedPartSphere(obj, bone, slot, obj.charType);
+    ResolveDamagedPartSphere(obj, bone, slot,
+                             obj.charType === PART_SPHERE_TYPE_0B_OWNER
+                               ? PART_SPHERE_FALLBACK_0B
+                               : PART_SPHERE_FALLBACK);
+  }
+  if (next === EffectCode.Last || next === EffectCode.Sever) {
+    markZone(obj, bone);
+  }
+  return slot !== 0;
 }
 
-/** `RemoveBoneSubtree` — `FUN_00409AF0`. This bone and everything under it. */
+/** `PUSH 0x7` at `0x00409957`: the table every other type searches second. */
+const PART_SPHERE_FALLBACK = 7;
+/** `PUSH 0xb` at `0x00409965`, for the one type `0x0040994D` names. */
+const PART_SPHERE_FALLBACK_0B = 0xb;
+/** `CMP word ptr [ECX + 0x1f4], 0xd` at `0x0040994D`. */
+const PART_SPHERE_TYPE_0B_OWNER = 0xd;
+
+/**
+ * `ResolveDamagedPartSphere` — `FUN_004099A0`. Give a swapped part its own
+ * hit sphere, if *type*'s table has one for it.
+ *
+ * ```
+ * row = g_character_part_tables[type] + (g_character_bone_counts[type] - 1) * 0x14
+ * for (; row.slot != -1; row++)
+ *   if (row.slot == rec+0x00) { rec+0x78 = row.radius; rec+0x7C = row.centre; break }
+ * return 0
+ * ```
+ *
+ * The rows start one past the last bone's, which is where the per-bone rows
+ * end; the bundle carries them as `part_spheres`. The comparison is against
+ * the record's slot, which the caller has just written -- the pushed *slot*
+ * is the same number and is never read. The radius is **not** scaled by the
+ * model's size, unlike the build's (`MOV EDX,[ECX+0x10]; MOV [ESI+0x78],EDX`
+ * at `0x004099DB`), so a damaged part on an actor drawn at another size is
+ * shot through the table's own sphere.
+ */
+export function ResolveDamagedPartSphere(obj: Actor, bone: number,
+                                         _slot: number, type: number): number {
+  const k = String(bone);
+  const drawn = obj.boneSlot[k];
+  for (const row of PartSphereRowsOf(type)) {
+    if (row.slot !== drawn) continue;
+    obj.boneRadius[k] = row.radius;
+    obj.boneCentre[k] = [row.centre[0], row.centre[1], row.centre[2]];
+    break;
+  }
+  return 0;
+}
+
+/**
+ * `RemoveBoneSubtree` — `FUN_00409AF0`. This bone and everything under it.
+ *
+ * ```
+ * obj+0x1318 |= 1 << g_bone_damage_zone[bone]
+ * rec+0x00 = 0; rec+0x78 = 0                   ; 0x00409B3A, 0x00409B41
+ * for each child: RemoveBoneSubtree(child)
+ * ```
+ */
 export function RemoveBoneSubtree(obj: Actor, bone: number): void {
   if (!obj.removed.includes(bone)) obj.removed.push(bone);
+  obj.boneRadius[String(bone)] = 0;
   markZone(obj, bone);
   const type = CharacterTypeOf(obj);
   if (!type) return;
@@ -627,11 +731,10 @@ export function ResolveHit(obj: Actor, bone: number,
   let result = HitResultCode.None;
   let gore = false;
   let severed = false;
-  // The zone bit is set when the *next* code is 0 or 1 -- that is, when this
-  // bone has reached its last stage.
+  // `ActorSwapDamagedPart` reads the step's code itself, off the counter,
+  // which every arm below advances only after the swap.
   const swap = (): void => {
-    const last = code === EffectCode.Last || code === EffectCode.Sever;
-    gore = ActorSwapDamagedPart(obj, bone, slot, last, host) || gore;
+    gore = ActorSwapDamagedPart(obj, bone, slot, host) || gore;
   };
   const sever = (): void => { severed = true; SeverBoneChildren(obj, bone); };
 
@@ -762,8 +865,9 @@ export function ResolveHit(obj: Actor, bone: number,
     && result !== HitResultCode.NoEffect;
   if (killed) {
     obj.dead = true;
-    // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0, which
-    // is `RemoveBoneSubtree`'s "gone" -- the head simply leaves.
+    // The 1-in-4 headshot burst: `ResolveHit` swaps the head to slot 0 --
+    // `ActorSwapDamagedPart(rec, 0, 2)` at `0x004097AA`, which zeroes the
+    // slot and the radius of the head alone -- and the head simply leaves.
     //
     // `ResolveHit`'s **second** read of `g_app_state` opens this block, and it
     // is the same question as the first: `00409741 833d988e9c0006 CMP dword
@@ -792,8 +896,8 @@ export function ResolveHit(obj: Actor, bone: number,
       // `ActorAlloc` of an object with its own per-frame routine that carries
       // the head's own model and bounces it off the floor.
       //
-      // The model has to be read **before** the subtree goes, because that is
-      // what zeroes the slot the head is drawn with.
+      // The model has to be read **before** the swap, because that is what
+      // zeroes the slot the head is drawn with.
       //
       // **`boneSlot` is only written by a swap.** It starts empty, so a head
       // that has never been shot before the killing shot has no entry in it —
@@ -815,7 +919,11 @@ export function ResolveHit(obj: Actor, bone: number,
       const at = vec3(obj.pos.x, obj.pos.y + HEAD_LAUNCH_RISE, obj.pos.z);
       host.boneWorld(obj.at, bone, at);
       if (slot > 0) SpawnSeveredHead(at, slot, 0, obj.yaw);
-      RemoveBoneSubtree(obj, bone);
+      // The third call, and **not** `RemoveBoneSubtree`, which this was: the
+      // swap takes the head and nothing under it, raises the zone bit only if
+      // the head's current step is its last, and is refused like any other
+      // swap under `NoPartSwap` -- where the head is thrown all the same.
+      ActorSwapDamagedPart(obj, bone, 0, host);
       severed = true;
     }
     // `ResolveHit` also raises `obj+0x34` bit 0x4000000, which is what

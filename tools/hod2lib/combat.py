@@ -894,7 +894,14 @@ def gore_parts(tables, char_type: int) -> dict:
 
 
 def hit_sphere(tables, char_type: int, bone: int):
-    """``(centre, radius)`` for one bone, or None when it has no sphere."""
+    """``(centre, radius, slot)`` for one bone's row, or None when it has no
+    sphere.
+
+    The row's own slot comes with it because `SkeletonWalkNode`
+    (`FUN_004107E0`) takes the row only when that slot is the skeleton node's
+    (``CMP EDX,[EDI]; JNZ`` at ``0x00410830``). The TypeScript half's
+    ``hitSphere`` says why the row travels unfiltered.
+    """
     b = tables._v2r(HIT_SPHERES)
     if b is None or bone < 1:
         return None
@@ -904,8 +911,39 @@ def hit_sphere(tables, char_type: int, bone: int):
     o = p + (bone - 1) * 0x14
     if o + 0x14 > len(tables.data):
         return None
-    cx, cy, cz, r = struct.unpack_from("<4f", tables.data, o + 4)
-    return ((cx, cy, cz), r) if r > 0 else None
+    slot, cx, cy, cz, r = struct.unpack_from("<i4f", tables.data, o)
+    return ((cx, cy, cz), r, slot) if r > 0 else None
+
+
+#: The two tables `ActorSwapDamagedPart` (`FUN_004098E0`) searches after the
+#: actor's own on every swap -- `ResolveDamagedPartSphere` always returns 0 --
+#: type 0xB for character type 0xD and type 7 for every other.
+PART_SPHERE_FALLBACK_TYPES = (7, 0xB)
+
+
+def part_sphere_rows(tables, char_type: int, slots) -> list[dict]:
+    """The damaged-part rows `ResolveDamagedPartSphere` (`FUN_004099A0`)
+    searches, in table order: from row ``bone_count - 1`` to the first slot
+    of -1, bounded by the image and nothing else, keeping only rows whose
+    slot is in *slots*. The TypeScript half's ``partSphereRows`` says why the
+    filter leaves every search's first match where it was.
+    """
+    out: list[dict] = []
+    b = tables._v2r(HIT_SPHERES)
+    if b is None or not slots:
+        return out
+    p = tables._v2r(struct.unpack_from("<I", tables.data, b + char_type * 4)[0])
+    if p is None:
+        return out
+    o = p + (tables.character_bone_count(char_type) - 1) * 0x14
+    while o + 0x14 <= len(tables.data):
+        slot, cx, cy, cz, r = struct.unpack_from("<i4f", tables.data, o)
+        if slot == -1:
+            break
+        if slot in slots:
+            out.append({"slot": slot, "centre": [cx, cy, cz], "radius": r})
+        o += 0x14
+    return out
 
 
 #: `g_actor_radius_by_char` -- one float per character type, copied to

@@ -7,8 +7,8 @@
  */
 import type { CamPaths } from "./camera/curve";
 import type {
-  AttackJson, BakedMotion, BreakablesJson, CharactersJson, CharacterType,
-  ColiJson, ThrowHandJson,
+  AttackJson, BakedMotion, BreakablesJson, CharacterBone, CharactersJson,
+  CharacterType, ColiJson, PartSphereRow, ThrowHandJson,
 } from "../bundle";
 import { authoredFrameOfTicks, ticksOfAuthoredFrame, ticksOfSeconds }
   from "../core/play_cursor";
@@ -159,6 +159,35 @@ export function SetGameTables(chars: CharactersJson | undefined,
 
 export function CharacterTypeOf(a: Actor): CharacterType | null {
   return T.types[String(a.charType)] ?? null;
+}
+
+/**
+ * One bone's hit-sphere radius as its draw record holds it, `obj + 0x284 +
+ * bone*0x90` -- {@link Actor.boneRadius} -- or the table row's, unscaled, for
+ * an actor the build never ran on. `[port-only]` as a function: the engine
+ * reads the word.
+ */
+export function BoneHitRadius(a: Actor, b: CharacterBone): number {
+  return a.boneRadius[String(b.bone)] ?? b.hit_radius ?? 0;
+}
+
+/**
+ * The same record's centre, `+0x7C..+0x84` in the bone's own space --
+ * {@link Actor.boneCentre} -- or the table row's. `[port-only]` as a
+ * function, like {@link BoneHitRadius}.
+ */
+export function BoneHitCentre(a: Actor, b: CharacterBone):
+    readonly number[] | null {
+  return a.boneCentre[String(b.bone)] ?? b.hit_centre ?? null;
+}
+
+/**
+ * `g_character_part_tables[type]`'s damaged-part rows, as far as the bundle
+ * carries them -- see `CharactersJson.part_spheres`. `[port-only]`: the
+ * engine indexes the table.
+ */
+export function PartSphereRowsOf(type: number): readonly PartSphereRow[] {
+  return T.chars?.part_spheres?.[String(type)] ?? [];
 }
 
 export function MotionOf(a: Actor, id: number): BakedMotion | null {

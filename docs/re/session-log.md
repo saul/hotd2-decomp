@@ -23131,19 +23131,20 @@ the matrix, drawing nothing; `GoldenFrogDrawBonePart` (`0x00463F90`),
 `GoldenFrogUpdate` (`0x00471FA0`; Ghidra's naming gate refused it for its
 token overlap with `FrogUpdate` and it went in with the gate off).
 
-**Screenshots** (scratch, not committed; before = main at `14098154` with the
-shared bundle, after = this branch with its own export):
-`shots/znele-compare.png` (stage 6 block 0 step 2 op 19, frames 60/105/115/
-125/135, before left: solid from the first frame; after, before the twin:
-invisible, then 0.17/0.5/0.83, then solid), `shots/twin-compare.png` and
-`shots/twin-f60-zoom.png` (the same with the twin: three quarter-alpha
-ghosts), `shots/zslman-compare.png` (stage 6 block 0 step 4 op 2, frames
-40/41/100/101: the blink's odd frames and the waiting `zslman`'s depth),
-`shots/pulse2-compare.png` (stage 4 block 1 step 2 op 5 with bit 2 forced on
-`zskamere` 4236 from frame 1: frame 100 is solid before and a third after),
-`shots/kamere-compare.png` (0 of 218,400 pixels differ: `zskamere`'s parts at
-the forced blend's 1 against the plain draw -- its textures have no
-transparent texels there).
+**Screenshots** (`web/shots/`, not committed; before = main at `14098154`
+with the shared bundle, after = this branch with its own export, both under
+`?drive=1`; each is before on the left, after on the right, a row a frame):
+`charfades-znele-compare.png` (stage 6 block 0 step 2 op 19, frames 60/105/
+115/125/135, before the twin was ported: solid from the first frame against
+invisible, then 0.17/0.5/0.83, then solid), `charfades-twin-compare.png` and
+`charfades-twin-f60-zoom.png` (the same with the twin: three quarter-alpha
+ghosts; the zoom's rows are before, no twin, twin), `charfades-zslman-
+compare.png` (stage 6 block 0 step 4 op 2, frames 40/41/100/101: the blink's
+odd frames and the waiting `zslman`'s depth), `charfades-pulse2-compare.png`
+(stage 4 block 1 step 2 op 5 with bit 2 forced on `zskamere` 4236 from frame
+1: frame 100 is solid before and a third after), `charfades-kamere-compare.png`
+(0 of 218,400 pixels differ: `zskamere`'s parts at the forced blend's 1
+against the plain draw -- its textures have no transparent texels there).
 
 **Wrong turns.**
 
@@ -23162,3 +23163,12 @@ transparent texels there).
 * The builder hash was generated, the stages exported, and then a comment
   edit to `class30/bonecels.ts` -- which the exporter imports -- moved it
   again (`L33`, with my own hands). Re-exported after the merge.
+* The first full `verify_all` with the new bundle failed `verify_bone_cels`:
+  "`znjikken1` draws `0x1C97`". It does not. The check read each
+  character's `HIT_EFFECT` rows `1..nb+1`, and the table is a pointer per
+  character at `nb` rows each -- every one of the 86 skeletons numbers its
+  bones below its own count -- so rows `nb` and `nb + 1` were the next
+  character's rows 0 and 1, and `znjikken1`'s row 17 is `znjoe`'s row 1.
+  `L6`, in a checker, latent until a bundle carried type 9. Bounded at `nb`
+  now; the count went from 79 to 77, the two dropped being those two reads,
+  and the shared bundle gives 77 as well.

@@ -207,8 +207,16 @@ def main() -> int:
             # a per-character `u16[bone][6]` and reading past the last bone
             # walks into the *next* character's table. Doing that once
             # attributed `znjoe`'s eighteen cels to `char_adv01`, which is L6.
+            #
+            # And bounded **below** `nb`, not two past it: the table is one
+            # pointer per character, each at `nb` rows (bones 0..nb-1), and
+            # every one of the 86 skeletons numbers its bones below its own
+            # count. This read `range(1, nb + 2)` -- rows `nb` and `nb + 1`,
+            # which are the next character's rows 0 and 1 -- and it only
+            # showed once a bundle carried `znjikken1` (type 9, for `znele`'s
+            # twin): its row 17 is `znjoe`'s row 1, `0x1C97`, the same L6.
             nb = tables.character_bone_count(ct) or 0
-            for b in range(1, nb + 2):
+            for b in range(1, nb):
                 used |= {v for v in combat._u16_table(tables, combat.HIT_EFFECT,
                                                       ct, b) if v > 2}
             for trigger, arm in table.items():

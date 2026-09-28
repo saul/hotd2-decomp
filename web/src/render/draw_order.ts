@@ -376,7 +376,11 @@ export function setMeshDrawAlpha(mesh: Mesh, alpha: number | null): void {
   let f = meshFades.get(mesh);
   if (alpha === null) {
     if (f) {
-      mesh.material = f.under;
+      // What the mesh draws now, seen through the fade: a layer may have
+      // written it since the last fade (a cel stepping), and that is what it
+      // draws unfaded.
+      const cur = mesh.material;
+      mesh.material = Array.isArray(cur) ? cur.map(unfadedOf) : unfadedOf(cur);
       for (const c of f.clones.values()) c.dispose();
       meshFades.delete(mesh);
       return;

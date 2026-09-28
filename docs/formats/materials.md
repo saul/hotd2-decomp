@@ -102,6 +102,17 @@ So, by pass:
 | translucent pass | on, TSP factors | on, ref 1 | blends and is tested |
 | `DrawModelWithForcedAlphaBlend` (any `AssetDrawSlotWithAlpha`, 1.0 included) | on, `SRCALPHA`/`INVSRCALPHA` | the mesh's own pass's | blends — **also on an opaque-pass mesh** |
 
+**And at 0.** The material alpha of a faded draw is the mesh's base alpha
+times the command's, set at `0x004A85D5` with no test, and
+`TranslatePvr2StateToD3D` (`FUN_004A7780`) sets `ALPHATESTENABLE` (state 15)
+from the TSP pass bits alone, which the forced mask keeps. So a faded draw at
+0 still rasterises every opaque-pass mesh, leaves the colour where it was and
+**writes depth**; only its translucent-pass meshes are dropped by the alpha
+test. `[proved]` The characters that fade -- `znele`, the twin, the blinking
+throwers -- are drawn at 0 for whole stretches, and what they cover of any
+translucent geometry the sort draws after them is left undrawn. See
+`docs/PLAYER_PROGRESS.md`, "Character fades".
+
 Measured over the corpus: 112 translucent-pass meshes set `IgnoreTexAlpha` on
 an ARGB texture, and **101** of those textures have alpha below 255 — the
 additive blades of `zslman` and `zndina`, `eff_boss5`'s cels, a sliver of

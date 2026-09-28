@@ -21764,3 +21764,104 @@ and the hit lands at swing + 5 + `hit_frame`, where it was swing +
 that the lunge's root motion stands still through its hold, passes vacuously
 when there is no hold. Reverting only the gate fails the three lunge-gate
 checks.
+
+## 2026-09-28 -- thrown weapons: the spin the launchers write, and the shot that takes one down
+
+Reported (`docs/NEW-BUGS-2.md`): the knives cannot be shot out of the way, and
+every knife should spin at the exe's rate about the exe's axis. Stage 2 block
+5 step 6 op 10 is the repro -- two `zsass` (class 0x31, type 0x16) dropping in
+and throwing `zsass.bin` 17 and 18, which render as kukris.
+
+Read, in full and from the listing where the pseudocode stops: both launchers
+(`SpawnThrownWeapon` `FUN_004504E0`, `ZombieThrowHandWeapon` `FUN_0045A240`),
+both per-frame tasks (`ThrownWeaponUpdate` `FUN_00450780`,
+`ZombieThrownWeaponUpdate` `FUN_0045A4F0`), all six states behind them, the two
+aims, `ZombieThrownWeaponBeginArc`, the release arm and clip end of
+`ZombieStateStandAndThrow`, and `FUN_004595F0`, `FUN_00450930`, `FUN_00450A30`
+and `FUN_0040A600`, which are named now.
+
+**The rate.** `0x2400` for class 0x31 (`0x0045072C`), `0xB00` for the axe
+(`0x0045A427`), `0x1600` for `znassb`'s blades (`0x0045A43C`); Y, X and Y. The
+port had `0x200` for everything, as a declared divergence whose reason was
+that nothing writes `obj+0x135C` and `ActorAlloc` does not clear the block.
+Both halves were wrong: the writes are past `MatrixStackPop` calls Ghidra marks
+no-return (L35 -- `SpawnThrownWeapon`'s whole second half, flags, permit, hand,
+rate and aim, is outside its pseudocode), and every allocator of a game object
+calls `ActorClearGameFields` on the next line. The `ActorAlloc` and
+`ZombieThrownWeaponStateStraight` annotations carried the wrong reading and are
+corrected. The arc state's axis had never been read at all.
+
+**The shot.** Both tasks end with the draw, `obj+0x70` and `RegisterForShotTest`
+-- again past a `MatrixStackPop`. The port's weapon pool never registered, so
+no shot could find one. `ShotTestEntry` and `ShotCandidate` can name a weapon
+now; `ProcessPlayerShotsTestList` tests it in the same pass and sort as the
+actors; `FireShotRequest` marks it; its routine reads the mark and runs the
+shot-down state. Transcribed: `ThrownWeaponDeflected`,
+`ZombieThrownWeaponStateShotDown`, and the rest of both flight states (the
+landings face the engine's way now and the stuck weapon is re-aimed every
+frame rather than left where it landed).
+
+**The permit.** Both launchers hand `obj+0x121` to the weapon and leave the
+thrower on 0; the weapon frees it when spent or shot. The port freed it at the
+throw (class 0x31) or at the clip end (class 0x30, whose clip end in fact only
+drops the latch). The record carries it now, and `ReleaseAttackSlot` /
+`ThrowerReleaseAttackPermit` take a `PermitHolder` rather than an `Actor`.
+Measured in the repro: before, the second `zsass` threw 27 frames after the
+first with both knives in the air; after, it waits for the first knife -- or
+for it to be shot.
+
+**`znassb` throws twice.** The release arm throws a second weapon for type 1
+(`0x004592E4`..`0x00459301`), and `ZombieRetireThrowConditionIfUnarmed`
+(`FUN_004595F0`) retires condition 8 and raises the sprint bit once the hands
+are empty. That OR at `0x00459682` contradicted a note on `ZOMBIE_SPRINTS`
+saying the bit is never raised at run time; a sweep for the immediate found a
+second writer too, `ZombieOnShot` at `0x00453F17`, which the port does not
+make.
+
+**Verified in the player** (headless, `?stage=2&original=1&mode=play&block=5&step=6&op=10&frame=90&drive=1`):
+before, the knife turned `-512` a frame about Y, the shot-test list was empty,
+a pull at its screen position missed and the knife took a life 24 frames
+later. After, `-9216` a frame about Y with `rx = 0` and the `0x600` lean, the
+list held the knife, a pull at its entry marked it, the next frame it was in
+`ThrownWeaponDeflected` with the permit back and `g_player_hit_count` up one,
+`ry` held while `rx` cartwheeled at 11980 a frame, and it cost no life. The
+same run on stage 6 (`zslman`, 0x1FE1) and stage 1 (the axe: `rx += 0xB00`,
+`rz = 0x800`, `ry` fixed at the launch heading, shot down into state 3) behaved
+the same way.
+
+**Wrong turns.** The `mcp__ghidra__*` analysis tools never appeared in this
+client after `connect_instance`; the bridge's own HTTP API on port 8089
+(`/decompile_function`, `/disassemble_bytes`, `/rename_function`) did the
+work. The first `verify_port` pass after the rewrite reported coverage 190:
+three doc tables and two enums cited routines by their parenthesised form in
+the files that define them, which is L42's trap exactly, and seven ports were
+missing from the count until they became bare addresses (198 with an older
+one in `thrower.ts`). The first test run failed two assertions that encoded the
+old divergences -- the thrower's permit back at -1 after a throw, and one
+weapon from a type-1 fixture -- and both were rewritten to the engine's
+answer rather than the fixture bent to keep them.
+
+**Found, not fixed.**
+
+* `ZombieShouldStandAndThrow` (`FUN_00458E10`) reads the **camera block's**
+  yaw, `g_camera_block_yaw_bams[g_camera_index]` (`0x009A60D0`), minus
+  `0x8000`. The port reads `G.g_camera_yaw_bams`, which it computes as
+  `atan2(forward)` -- the camera's -Z -- and the block yaw of a camera built
+  `T(eye) Ry Rx Rz` looking down -Z is `atan2(-forward)`, so the port's test is
+  half a turn out `[likely]`. Measured: stage 4's condition-8 `znassb` walked
+  in facing the camera at `0x8000` off the port's window and never threw in
+  2500 frames. So none of `znassb`'s blades appear in stages 4 and 5, and
+  condition-8 axe walkers do not throw either. `G.g_camera_block_yaw_bams` is
+  not published outside the stage-3 boss, and class 0x41's cracked props,
+  class 0x46 and the fish read it too.
+* `ZombieOnShot`'s `obj+0x34 |= 0x8000000` (the sprint bit, `0x00453F17`).
+* The weapons' `g_hit_slots` claim, camera tracking, 5-by-5 ground shadow and
+  `zslman`'s afterimages -- each declared where the call is not made.
+* `ghidra/run.sh export-annotations` was not run: it refuses a worktree path.
+  The four MCP renames and the TSV rows carry the same names.
+
+**Next actions.** Publish `g_camera_block_yaw_bams` from the camera each frame
+and move `ZombieShouldStandAndThrow` onto it, then check every other reader;
+port the `zslman` afterimage task (`ZslmanBladeEmitAfterimage`,
+`ZslmanBladeAfterimageFade`) once the renderer can tint a node; round-trip the
+annotations through `export-annotations` from the main checkout.

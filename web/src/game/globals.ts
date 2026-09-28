@@ -18,6 +18,7 @@
 import type { BloodSpray, PointBloodSpray } from "./effects/blood";
 import type { BodyCreature } from "./body_creature";
 import type { CarriedProp } from "./carried_prop";
+import type { ThrownWeapon } from "./thrown_weapon";
 import type { SeveredHead } from "./effects/severed_head";
 import type { ShotFlash, ShotTracer, ShotWeaponEffect }
   from "./effects/shot_effects";
@@ -54,7 +55,7 @@ import type { BatSplash } from "./class46/splash";
 import type { PlayerBody } from "./player_body";
 import type { RouteFigure, RouteMapState, RouteMark } from "./route_map";
 import { GameMode } from "./game_mode";
-import { vec3, type Vec3 } from "./vec";
+import { vec3 } from "./vec";
 import { makeEntityLights } from "./entity_light";
 import { PlayerState, PlayerTask, RunPhase } from "./player_state";
 import { AdvanceToNextScene, PlayerBlockBoot, PlayerBlockRestore,
@@ -175,104 +176,6 @@ export interface RainParticle {
   x: number;
   y: number;
   z: number;
-}
-
-/** One weapon in flight — the pool `ThrownWeaponUpdate` walks. */
-export interface ThrownWeapon {
-  /** Unique and stable; the renderer binds its node to this, not to an index. */
-  id: number;
-  /** The thrower's spawn address, so the renderer can source the model. */
-  from: number;
-  /** The asset slot of the projectile model. */
-  slot: number;
-  pos: Vec3;
-  /** Units per 60 Hz frame. */
-  vel: Vec3;
-  /** Frames of flight left. */
-  ttl: number;
-  /**
-   * BAMS per frame. `[diverges]` — see {@link ThrownWeapon.spinAngle}, which
-   * carries the whole of why this number is the port's own.
-   */
-  spin: number;
-  /**
-   * Which axis the tumble turns about, and it is **not the same for both
-   * throwing families**.
-   *
-   * Both draw the weapon the same way — `ThrownWeaponUpdate` (`FUN_00450780`)
-   * and `ZombieThrownWeaponUpdate` (`FUN_0045A4F0`) each emit
-   * `Rz(obj+0x6C) * Ry(obj+0x68) * Rx(obj+0x1364 + obj+0x64)` — but they
-   * accumulate the tumble into **different terms**:
-   *
-   * | family | flight step | term | axis |
-   * |---|---|---|---|
-   * | class 0x31 | `ThrownWeaponFlyToTarget` (`FUN_0044FD40`), `0x0044FDE9` | `obj+0x68` | **Y** |
-   * | class 0x30 | `ZombieThrownWeaponStateStraight` (`FUN_00459690`), `0x00459731` | `obj+0x64` | **X** |
-   *
-   * `[proved]`. Class 0x31 also negates the step unless the throwing hand
-   * `obj+0x1358` is bone 5; class 0x30 has no such test and adds it plainly.
-   * The port turned **everything** about Y, so a class-0x30 thrower's axe
-   * cartwheeled while a class-0x31 thrower's looked right — which is exactly
-   * how it was reported: *the spin depends on which zombie is throwing*.
-   *
-   * `axis` is the port's way of carrying the difference to the renderer
-   * without giving the record two nearly-identical angle fields.
-   */
-  axis: "x" | "y";
-  /**
-   * The accumulated tumble — `obj+0x68` for class 0x31, `obj+0x64` for class
-   * 0x30. See {@link ThrownWeapon.axis}.
-   *
-   * `[diverges]` **The rate is the port's invention, because the engine's is
-   * uninitialised memory.** Neither launcher writes the projectile's
-   * `obj+0x135C`: `SpawnThrownWeapon` (`FUN_004504E0`) writes only the model
-   * and `obj+0x1364`, and `ZombieThrowHandWeapon` (`FUN_0045A240`) only the
-   * model and the position. `ThrowerReleaseAttackPermit`'s sibling writes on
-   * `+0x135C` are all onto the *thrower*, where the field holds the hand bone.
-   * And the allocator does not clear it: `FUN_004A6FA0` zeroes exactly the
-   * first 0xD dwords — the task header — and `FUN_004A7400` is a free-list
-   * split that hands back the block as it stands. So every field from
-   * `obj+0x34` up is whatever the previous occupant of that arena block left,
-   * and the tumble rate with it. `[proved]` for the two zeroing bounds; the
-   * consequence is stated as a reading, not measured against a running game.
-   *
-   * The port has no arena to recycle, so there is no faithful value to copy.
-   * It picks a stable one instead and says so here.
-   */
-  spinAngle: number;
-  /**
-   * `obj+0x1364` — a **constant** added to the X term at draw time, per
-   * character type: `0x600` for `zsass` (0x16) and 0 for 0x18, both written by
-   * `SpawnThrownWeapon` (`FUN_004504E0`). Class 0x30's launcher never writes
-   * it at all, so it is 0 there.
-   *
-   * It is a fixed tilt and **not** a rate, which is what the port had been
-   * using it as: `THROWER_SLOTS[0x16].spin = 0x600` drove the Y tumble with a
-   * number the engine adds once, to X.
-   */
-  tilt: number;
-  /** Frames spent in the stick-and-blink tail once the flight is done. */
-  after: number;
-  hit: boolean;
-  stickFrames: number;
-  blinkFrames: number;
-  /** The renderer hides it on alternate frames once it is blinking. */
-  visible: boolean;
-  /**
-   * Constant acceleration, for the one throw that arcs.
-   *
-   * Class 0x31's weapon always flies straight, so this is zero for every one
-   * of its throws. `ZombieThrownWeaponStateArc` (`FUN_004598F0`) is the other
-   * family: char type 1 lobs its weapon with `±0.009` on whichever of X and Z
-   * `ZombieThrownWeaponBeginArc` picks, and the axe throwers do not.
-   */
-  acc?: Vec3;
-  /**
-   * The damage kind `PlayerTakeDamage` is given on arrival — 4 for a flat
-   * throw and 6 for an arced one. Absent means class 0x31's, which passes 6
-   * (`0x0044FE4C`).
-   */
-  hitKind?: number;
 }
 
 export const G = {
@@ -2093,6 +1996,10 @@ export const G = {
   g_script_branch_var: 0,
 
   // -- thrown weapons ----------------------------------------------------
+  /**
+   * The weapons class 0x30 and class 0x31 have thrown, each an `ActorAlloc`'d
+   * task in the engine running one of two routines. See `game/thrown_weapon.ts`.
+   */
   g_thrown_weapons: [] as ThrownWeapon[],
   /** Hands out `ThrownWeapon.id`. Part of the state, so ids never collide. */
   g_thrown_next_id: 1,

@@ -60,7 +60,13 @@ export enum SpriteEffectKind {
   WoodAlt = 0x38,
   /** `ActorShotFeedback`'s ricochet for character type 3. */
   NoEffectType3 = 0x51,
-  /** `ThrownWeaponDeflected` (`FUN_00450050`) — the same range as `Other`. */
+  /**
+   * `ZombieThrownWeaponStateShotDown` (`FUN_00459D20`), for every class-0x30
+   * weapon shot out of the air (`PUSH 0x52` at `0x00459D54`) — the same range
+   * as `Other`. Class 0x31's `ThrownWeaponDeflected` (`FUN_00450050`) spawns
+   * {@link Other} for `zsass`'s knives and {@link NoEffectType3} for
+   * `zslman`'s blades instead (`0x00450086`..`0x004500AD`).
+   */
   DeflectedWeapon = 0x52,
   /**
    * The Original Mode blast `MarkActorShot` (`FUN_00404DB0`) adds for weapon

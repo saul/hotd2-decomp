@@ -866,3 +866,19 @@ frames a wait's earlier terms let the `&&` reach it, so it sat at 1 through the
 whole continue screen. The engine computes that global once, before the frame's
 first instruction. **A value the engine computes once a frame is computed once
 a frame**, not wherever a condition happens to evaluate it.
+
+**L60 -- "The engine leaves it uninitialised" is a claim about the caller,
+not the allocator.** Every thrown weapon in the port tumbled at a rate of its
+own, eighteen times too slow for the knives, behind a divergence that said
+the engine has no value to copy: nothing writes the projectile's `obj+0x135C`,
+and `ActorAlloc` (`FUN_004A6FA0`) hands back its block uncleared, so the rate
+is whatever the arena's previous occupant left. The allocator half was true
+and beside the point -- both launchers call `ActorClearGameFields` on the very
+next line -- and the other half was L35: `SpawnThrownWeapon`'s pseudocode ends
+at a `MatrixStackPop` Ghidra marks no-return, and the rate (`0x2400`), the
+flags, the permit hand-off and the aim are all in the listing after it. A
+divergence whose justification is garbage memory should send you to the
+listing past every no-return call in each writer, and to the line after the
+allocation, before it is written: an engine that really read garbage there
+would spin its knives differently from throw to throw, which is itself a claim
+about the game that nobody had checked.

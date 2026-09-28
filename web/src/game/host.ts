@@ -85,7 +85,13 @@ export type ShotPick =
    * `G.g_carried_props`, by `id`. Its own kind for the reason the creature's
    * is: a separate pool in the port, one list in the engine.
    */
-  | { kind: "carried"; carriedId: number; point: Vec3 })
+  | { kind: "carried"; carriedId: number; point: Vec3 }
+  /**
+   * A thrown weapon -- `G.g_thrown_weapons`, by `id`. It only ever arrives
+   * from the registration list, never from `pickShot`: the weapon registers
+   * itself the engine's way (`game/thrown_weapon.ts`).
+   */
+  | { kind: "thrown"; thrownId: number; point: Vec3 })
   & {
     /**
      * `[port-only]` How far along the shot the pick is, which is how two

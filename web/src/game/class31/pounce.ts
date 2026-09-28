@@ -171,7 +171,7 @@ export function ThrowerStateLeapDown(obj: ThrowerActor, dt: number, rng: Rng,
     if (!(obj.flags2 & ThrowerFlag.Struck) && obj.charType !== CHAR_ZSLMAN) {
       ThrowerStrikeConnect(obj, events);
     }
-    if (ActorArcStep(obj, 1, dt)) return;
+    if (ActorArcStep(obj, 1, dt, host, events)) return;
     // Down: `AND ECX, 0xffe7ffff` at `0x0044B791`. It collides with nothing
     // until a claim in `ThrowerStateStandAndDecide` raises both again.
     obj.flags2 &= ~ThrowerFlag.Collide;
@@ -229,7 +229,8 @@ function asideScript(obj: ThrowerActor): string {
  * `g_camera_fixed_eye_y`, which is what a host with no collision always gets.
  */
 export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
-                                      rng: Rng): void {
+                                      rng: Rng, host?: GameHost,
+                                      events?: Events): void {
   if (obj.sub === 0) {
     const side = (obj.flags2 & 0x10) ? 1 : (rng.int(2) === 0 ? 1 : -1);
     // The camera's **yaw only**, not its whole matrix: the point stays level
@@ -259,7 +260,7 @@ export function ThrowerStateLeapAside(obj: ThrowerActor, eye: Vec3, dt: number,
     if (!(obj.flags2 & ThrowerFlag.OffGround)) {
       TurnActorAwayFromPoint(obj, obj.strikeStart, LEAP_ASIDE_TURN_RATE, dt);
     }
-    if (ActorArcStep(obj, 1, dt)) return;
+    if (ActorArcStep(obj, 1, dt, host, events)) return;
     obj.thr.sinceLanding = 0;
     obj.flags &= ~ActorFlag.BackingOff;
     ThrowerReleaseAttackPermit(obj);

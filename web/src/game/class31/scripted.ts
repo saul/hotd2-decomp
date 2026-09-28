@@ -156,7 +156,7 @@ export function ThrowerStateLeapStrike(obj: ThrowerActor, dt: number, rng: Rng,
     return;
   }
   if (IsPlayerAttackable(obj.attackPermit)) ThrowerStrikeConnect(obj, events);
-  if (ActorArcStep(obj, 1, dt)) return;
+  if (ActorArcStep(obj, 1, dt, host, events)) return;
   obj.flags &= ~ActorFlag.Committed;
   obj.flags2 &= ~ThrowerFlag.Pouncing;
   obj.state = ThrowerState.LeapAside;

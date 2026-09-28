@@ -925,7 +925,7 @@ enumerable place, it can be shown:
 | **W1** | Vite + TS + Three scaffold, bundle loader, static render, URL state | ✅ typechecks and builds clean; all state URL-addressable including `freeze=1` |
 | **W2** | Hermite eval, rails, free-roam camera | ✅ curves evaluated client-side; rails per path with the active sub-range highlighted |
 | **W3** | Script walker, region visibility, step mode | ✅ every op reachable and seekable; only the current region drawn |
-| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; branch points pause with a seeded countdown; the live-enemy waits are the real gate |
+| **W4** | Play mode, branching, enemy simulation | ✅ route graph walked; a branch goes on the frame its steps run out, as the engine's does (the sidebar's *Pause at branches* debug aid holds it for an override); the live-enemy waits are the real gate |
 | **W5** | Audio, fog, route minimap, Arcade/Original toggle, event feed, inspector | ✅ BGM, SE and voice all play, dispatched by namespace; scene fog rendered radially |
 | **W6** | Visual regression harness | deferred — `freeze=1` and the URL state it needs are already in place |
 
@@ -942,7 +942,7 @@ each one.
 | Most of a stage never ran; regions and camera barely changed | **A block's steps are sequential.** `advance_step` advances to the next *step*; only an exhausted step table reaches the route table. Treating every `advance_step` as a block exit ran one step per block | read `EvtAdvanceStepOrRoute` |
 | Scene ended early | Route **kind 2 is not "end"** — it falls through to `block + 1`. The scene ends when that block is a hole | same |
 | Branch buttons picked the wrong route | A branch takes `next[branch_choice]`, not "a target"; every writer of `branch_choice` is gameplay code | same |
-| The branch was the viewer's choice, not the game's | `branch_choice` resets on every **step** advance, not every block change, and the writer the port reaches is a rescued civilian's `SetRouteBranch` (`CivilianRunScript` op `0x19`). An unanswered branch used to take the lowest block number; it takes `next[g_script_branch_var]` now, and the bar is a 1.5 s override of a decision the game has already made | read `EvtAdvanceStepOrRoute`'s tail; `tools/verify_branches.py` |
+| The branch was the viewer's choice, not the game's | `branch_choice` resets on every **step** advance, not every block change, and the writer the port reaches is a rescued civilian's `SetRouteBranch` (`CivilianRunScript` op `0x19`). An unanswered branch used to take the lowest block number; it takes `next[g_script_branch_var]` now. The bar was a 1.5 s override of a decision the game has already made, held at every branch; it is a debug aid now, off by default, because the engine has no window at all | read `EvtAdvanceStepOrRoute`'s tail; `tools/verify_branches.py` |
 | Clicking a branch button did nothing | The countdown re-announced the branch every frame, so the UI rebuilt the buttons 60×/s and the click never landed between `pointerdown` and `pointerup` | notify on *change*, not on tick |
 | Branch preview showed an unrelated shot | The `store_six` preview was carried across block changes. All four in stage 2 sit *inside* branch blocks | discard on block change, same lifetime as `branch_choice` |
 | Whole view tilted down | `eye.y = path.y - 15` was applied **before** the look-at, but the game derives pitch and yaw from the *unshifted* `eye - target` and only then overwrites `eye.y` | translate after orienting |
@@ -1674,9 +1674,11 @@ assertion behind it kept a hang alive for two sessions.
    which changes how the whole game looks. Tagged on `ActorModelScale` in
    `game/root_motion.ts`.
 
-Still `[open]`, and deliberately left so: `MotionFlag.RootMotionY`, bit `0x10`
-of the same word, has no writer anywhere that has been read — nine other classes
-write `model+0x64` and none of their values were read here. And the engine's
+`MotionFlag.RootMotionY`, bit `0x10` of the same word, was `[open]` here with
+no writer read. It has one: `ThrowerStateDelayedPounce` raises it for its wait
+clip (`0x0044E863`), and `ApplyRootMotion` now honours it — the height store at
+`0x00410E48`. The shipped wait clip's root height is flat, so no stage moves
+differently for it. And the engine's
 wrap damper makes the applied delta `(baseline_old - root)/play_length` where
 `rootDelta` computes `(root - root[0])/frames`; both are small, neither was
 touched, they are not the same number and nothing asserts either.
@@ -2175,6 +2177,18 @@ difference between the four character types that share this machine is
 *data* — the behaviour set is a byte in the spawn descriptor, and `zsass`'s
 picks contain only the throw where `zstin`'s contain the climb.
 
+**State 23, the delayed pounce, is transcribed whole** (`class31/entrance.ts`,
+stage 2 block 21's pair). The port had the shape and little else: it played
+the wait as a one-shot that ran out after one cycle, left the actor shootable,
+raised `BackingOff` (`0x20000000`) where the exe raises `0x10000000`, aimed at
+the actor's own tracked height for `g_camera_eye_y`, and never raised the
+flinch veto. Now the wait loops on the ordinary track and walks, every shot in
+it ricochets, the flight ends six units in front of the eye at the eye's own
+height — `ThrowerPickLandingPoint` switches on the *state*, and nothing in the
+port had read that — and past the pounce row's hit frame the actor stops
+reacting to shots. `ThrowerLoadAttackArcScript` no longer latches the stance
+the connect reads: the exe's does not, so the swing connects on row 0's frame.
+
 **And it now dies its own death.** Class 0x31 does not use the shared stagger
 or the shared *directional* death clip — it has a four-state chain of its own,
 and until this it was borrowing `zom.bin`'s, a different creature's animation.
@@ -2207,7 +2221,10 @@ non-blinking frame of the hold, not once; the engine has no edge test there and
 `0x10000000` for the flight, and the port raised `BackingOff`, `0x20000000`,
 the next bit up. It is not the distance queue that sees the difference -- no
 thrower ever registers for it -- but `ThrowerStateFallToSurface`, which sends
-an actor with `0x20000000` up to the leap aside instead of the hub. Re-reading
+an actor with `0x20000000` up to the leap aside instead of the hub, and
+`ThrowerEmitGroundDust`, whose landing column needs `0x20000000` up and
+`0x10000000` down: with the wrong bit every pounce landed in a column of dust
+that only the leap aside should raise. Re-reading
 `ThrowerStateLeapDown` against its listing turned up five more things it did
 not do: it **cries out** as it pounces, `ActorPlayHitVoice` kind 3, when its
 head is still model `0x2002`, so a thrower whose head has been shot pounces in
@@ -3267,6 +3284,37 @@ bit one hex digit over; and `ZombieStateDelayedLeap` landed in silence.
 `web/tools/death_fx.mjs` kills what is on screen and photographs each effect;
 `--staged` puts one of each in front of the camera.
 
+### What the ground does under a thrower
+
+Class 0x31 had none of its ground effects; `ThrowerEmitGroundDust`
+(`FUN_0044D260`, `game/class31/ground_dust.ts`) is ported and called from all
+three of the exe's call sites, which took `ActorArcStep`'s last `[diverges]`
+with it:
+
+* **The bounce** (`ThrowerStateFallAndLand`, code 0x46). Once per landing --
+  `obj+0x136C` bit 0x4000, which the port cleared as the body settled but
+  nothing set -- a kind-0x46 dust sprite at the body, or the 0x61 splash in the
+  rain or on surfaces 5 and 0x37. It works out the floor's tilt with
+  `VecAimYAxisZThenX` (`FUN_00401870`, newly named) and then has the sprite
+  face the camera, which throws the tilt away. The bounce also thumps now:
+  `COMMON\ENE_WALK4_16.WAV` (`0x2716A9`) on **every** bounce, which the port
+  never played.
+* **The arc's landing** (`ActorArcStep`, code 0x50). A thrower of type
+  0x16..0x19 landing with `obj+0x34` bit 0x20000000 up and 0x10000000 down
+  raises a narrow column of dust, kind 0x4B stretched `(0.4, 2.0, 0.2)`, or a
+  splash in the rain. Then it **falls into** the trail.
+* **`zsass`'s trail** (`ThrowerStateStandAndDecide`, code 0x5A, and every
+  0x50). For character type 0x16 while the track holds behaviour set 1's walk
+  (read by address, `PTR_DAT_005929F4` = `g_class31_motion_sets[1]`): on the
+  walk's footfalls, cursor 0x19 and 0x32, or on any frame out of state 7, it
+  lays two scuffs across the step since `obj+0x13E4` -- a quarter-turn each
+  side of the line walked, as wide as the step is long times 0.0598 -- and
+  moves `obj+0x13E4` up to the actor. They are splashes on water.
+
+The stand's port returned early from two of its three exits, the re-arm and
+the fall; the exe runs all three -- those two and the router -- on to
+`0x0044B3B2`, which is where the trail call is, so the port does too.
+
 ## A cross-fade dissolves from a still, and holds the new clip
 
 Emerging zombies in stage 2's block 16 finished their climb out of the water,
@@ -3576,6 +3624,51 @@ the HUD readouts"), and in the page: six live shots each play
 `COMMON/GUN5_22.WAV`, a dry pull `vo_RELOAD_16.wav`, a dry pull past 120
 frames `vo_SHOOT_16.wav`, R and the right button `RELOAD1_44.WAV`, R on a full
 gun nothing.
+
+## The letterbox is a task of the scene's, not a part of the script
+
+`HudDrawShutterState` (`FUN_00413970`) is ported whole in
+`game/hud_shutter.ts`, and it runs where the engine's task list runs it:
+`HudShutterTaskCreate` (`FUN_00413950`) is the eighth call of the scene's
+task-list builder, after both player tasks, so `SceneTaskWalk` calls it after
+`PlayerTasksRun` and before any actor. evt `0x1F` is one store into
+`g_bHudShutterState` and nothing else. See `formats/evt.md` for the frame by
+frame.
+
+What that fixed, all inside the one routine:
+
+* **The reset.** `ResetSceneOnEnter` stores 5 in the state and in
+  `g_bHudShutterPrev`; the port stored 2, so a freshly loaded stage drew no
+  bars on the frame the engine draws them shut. The picture this was held back
+  for -- the bars shut on every freshly loaded stage until its script opens
+  them -- is the engine's, and every stage's own script writes a 5 before its
+  first wait anyway, so the only frame it moves is the first.
+* **The order.** The machine used to step at the top of the walker's next
+  tick, and the opcode raised the firing gate itself. So a shot on the frame
+  of a `hud_shutter_state 6` fired, where the engine's player task has already
+  run against the old gate; the slide drew one counter behind; a close dropped
+  the gate a frame early.
+* **The picture.** `hud/hud.ts` turned a state and a counter into bars, and
+  drew the shut states 0, 4 and 5 from the slide counter, which a finished
+  open leaves at 40: a 5 after a 1 with no close between drew **no bars at
+  all**, where the engine draws them shut at 0.35 whatever the counter says.
+  The six stages have thirteen such 5s inside a block alone. It draws what the
+  routine recorded now (`G.g_hud_shutter_bars`), so a shut state is shut, a 7
+  draws nothing on its frame, and the chapter and result cards'
+  `g_screen_furniture_flags & 0x30` hide the held bars (classes 0x60 and 0x61
+  write those bits).
+* **A seek or a paused load** runs no frame, so the next frame's bars are drawn
+  on a copy with the readouts (`PlayerTasksDrawWithoutAFrame`).
+* **The frame the bars are a tenth of** is the rendered view. Pillarboxed in a
+  window taller than 4:3, the canvas is a centred 4:3 box shorter than the
+  viewport, and the bars were measured off the viewport: they covered the
+  box's black margin and a sliver of the picture. They sit in a `.hud-frame`
+  that is that box now (`ui/panels/Viewport.tsx`), and in the whole viewport
+  unboxed, where the fixed vertical FOV spans it.
+
+Pinned by `test:port`'s "the shutter frame by frame" section, driven from
+`ResetGameGlobals`: each of the reset, the order, the slide's timing, the card
+flags, the 7 and the no-frame draw fails its own assertions when reverted.
 
 ## Scripted scenery: doors, shutters and vans
 
@@ -4548,6 +4641,36 @@ their constructors on the first live frame, so after a seek a task starts its
 lifetime where the seek lands -- the same thing every class-0x41 prop does,
 which is why the canal tile is still there after a seek into block 35.
 
+### Zombies and throwers look at you
+
+The head follows the camera now. Bone 2 of every class-0x30 and class-0x31
+actor turns toward the eye raised 15 units -- up to a quarter turn from its
+body's facing and its level, at `0xC0` BAMS a drawn frame -- and a thrower does
+it on the ground and on the ceiling but not on a wall. The routine is
+`ActorAimHeadAtCamera` (`FUN_00453BE0`), which the two node draw hooks call
+for bone 2 and which Ghidra had no function for, so `combat.md` had recorded
+the opposite as a settled result.
+
+* **Where it is.** The two angles, `obj+0x1320`/`+0x1324`, are state on both
+  arms (`HeadAimWords`) and are stepped by `class30/head_aim.ts` from the node
+  walk each class's update runs where the engine draws. The turn is drawn by
+  `render/characters/head_aim.ts` around each mesh the hook draws on bone 2 --
+  its own model, a gore swap, a cel -- and not around the hair or hat hung on
+  it, nor the hit sphere, which keep the pose's matrix in the engine too.
+* **It starts aimed.** Both `Init`s seed the angles toward the camera, which
+  is why the port now carries `g_camera_eye` in `G` for the spawn to read.
+* **It aims from the last draw.** The point is the bone's hit-sphere centre as
+  the previous frame left it, and a corpse stops refreshing it, so a dead
+  zombie's head goes on turning from where it fell.
+* **Captors do not look.** Every spawn that can reach one of the eleven states
+  that use `obj+0x1320` for a motion id carries `obj+0x34` bit `0x40000`
+  (`ActorFlag.NoHeadAim`), which gates the seed and the aim; so do all of class
+  0x18's.
+
+What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
+absolute turn on two other words, switched by an op no exported program
+uses), and Training's hook swap, which is declared on both updates.
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),
@@ -4917,7 +5040,7 @@ missed. Meanings and confidence marks live in
 | `1C` | `set_backdrop_mode` | scenery | **done** | dome mode: 0 off, 2 frozen, anything else spins at the preset's rate |
 | `1D` | `enable_rain` | scenery | **done** | **50 particles**, transcribed from `DrawRainParticles` — only stage 1 ever turns it on |
 | `1E` | `set_unread_global` | nop | n/a | dead: the global it writes has no readers anywhere in the binary |
-| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**, all 9 states with the 40-frame slide, sized from asset `0x93E`'s own quad; the UI names each state and says what it does to the firing gate |
+| `1F` | `set_hud_shutter_state` | hud | **done** | **the letterbox shutter**: the opcode's one store, and `HudDrawShutterState`'s 9 states with the 40-frame slide run as the scene's own task after the players (`game/hud_shutter.ts`), drawn from the bars it records and sized from asset `0x93E`'s own quad; the UI names each state and says what it does to the firing gate |
 | `20` | `light0_set` | light | **done** | light block 0: **fog near/far and colour, light colour and ambient all applied** |
 | `21` | `light0_tween_rate` | light | ~approx~ | jumps to the target; the per-frame step is not modelled |
 | `22` | `light0_stop` | light | shown | clears a channel tween |

@@ -374,6 +374,28 @@ export enum ActorFlag {
    */
   NoShotTest = 0x8000,
   /**
+   * `obj+0x34` bit `0x40000` — **this actor's head does not follow the
+   * camera.**
+   *
+   * `[proved]` that it has exactly four readers, all `TEST dword ptr
+   * [reg + 0x34], 0x40000`: the aim seed in `EnemyZombieInit` (`0x00452EAB`)
+   * and `EnemyThrowerInit` (`0x004496FE`), and the bone-2 gate in front of
+   * `ActorAimHeadAtCamera` in `ZombieDrawBonePart` (`0x004534E0`) and
+   * `ThrowerDrawBonePart` (`0x00449FCF`). `[likely]` that nothing in `.text`
+   * writes it: a scan for every `OR`/`AND` form that can name bit 18 of
+   * `+0x34` -- dword immediate, byte at `+0x36`, and the register forms --
+   * finds none, so it comes from the spawn record alone, through
+   * `ActorInitFlags`, and holds for the actor's life.
+   *
+   * The shipped data is what makes it the switch between the head's two
+   * readings of `obj+0x1320`: 160 of the 608 class-0x30 spawn rows across the
+   * twelve bundles carry it, and so do **all 138** whose start or attack state
+   * is one of the eleven class-0x30 states that read or write that word
+   * (34-38, 40, 41, 43-46), all 114 civilian captors, and all twelve of class
+   * 0x18's rows. None of the 42 class-0x31 rows does.
+   */
+  NoHeadAim = 0x40000,
+  /**
    * `obj+0x34` bit `0x200` — **this actor's parts do not get swapped.**
    * `ActorSwapDamagedPart` (`FUN_004098E0`) returns before it touches
    * anything, so the bone keeps the model it has, `obj+0x78` is not cleared

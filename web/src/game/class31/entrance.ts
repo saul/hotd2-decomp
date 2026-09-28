@@ -194,7 +194,7 @@ export function ThrowerStateDelayedPounce(obj: ThrowerActor, eye: Vec3,
   if (e && ActorPlayCursor(obj) > e.hit_frame) {
     obj.flags |= ActorFlag.NoHitReaction;
   }
-  if (ActorArcStep(obj, 1, dt)) return;
+  if (ActorArcStep(obj, 1, dt, host, events)) return;
 
   obj.flags &= ~ActorFlag.Committed;
   obj.flags2 &= ~ThrowerFlag.Pouncing;

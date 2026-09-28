@@ -88,7 +88,7 @@ import {
 import {
   MatCopy, MatIdentity, MatrixGetTranslation, MatrixRotateX, MatrixRotateY,
   MatrixRotateZ, MatrixToEulerZYX, MatrixTransformVector, MatrixTranslate,
-  VecAimXAxisYThenZ,
+  VecAimXAxisYThenZ, VecAimYAxisZThenX, FtolS16,
 } from "../src/game/matrix";
 import { CameraTargetsClear, waitTargetsClear }
   from "../src/script/waits/targets";
@@ -285,8 +285,12 @@ import { bannerCardSlots } from "../src/game/boss_banner_records";
 import { DrawScreenSpriteLayered, SCREEN_SPRITE_QUEUE_CELLS,
   ScreenSpriteQueueFlush, ScreenSpriteQueueReset }
   from "../src/game/screen_sprite";
-import { ThrowerBeginKnockbackArc, ThrowerStateCorpse }
+import { FALL_GRAVITY, SND_BOUNCE, ThrowerBeginKnockbackArc,
+         ThrowerStateCorpse, ThrowerStateFallAndLand }
   from "../src/game/class31/death";
+import { GroundDustCode, ThrowerEmitGroundDust }
+  from "../src/game/class31/ground_dust";
+import { ThrowerStateStandAndDecide } from "../src/game/class31/stand";
 import { ThrowerStateRestoreBothHands } from "../src/game/class31/standing";
 import { ActorClipLength } from "../src/game/class31/arc";
 import {
@@ -24094,6 +24098,362 @@ console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce
     ThrowerStateDelayedPounce(p, EYE, 2 / 60, new Rng(1), NULL_HOST);
     check("the pounce levels its roll at 0xCCC a frame",
           p.roll === 0x2000 - 2 * 0xccc, p.roll.toString(16));
+  }
+}
+
+/**
+ * **What the ground does under a class-0x31 actor**, which the port left out:
+ * `ThrowerEmitGroundDust` (`FUN_0044D260`), keyed by the code each of its
+ * three callers passes -- 0x46 from `ThrowerStateFallAndLand`'s bounce, 0x50
+ * from `ActorArcStep`'s landing, 0x5A from every exit of
+ * `ThrowerStateStandAndDecide` -- and the bounce's thump beside it. The 0x50
+ * arm falls into the 0x5A one, which is `zsass`'s trail. Every assertion that
+ * names a sprite, a latch or the thump fails on the old port, which spawned
+ * none of them and never set `obj+0x136C` bit 0x4000.
+ */
+console.log("\nclass 0x31, the ground: the bounce's puff, the landing's column and zsass's trail:");
+{
+  // `VecAimYAxisZThenX` (`FUN_00401870`): the pair that carries +Y onto the
+  // normal as `MatrixRotateZ(rz); MatrixRotateX(rx)`, and not the other order.
+  {
+    const up = { x: 0, y: 1, z: 0 };
+    const out = vec3();
+    let worst = 0;
+    let other = 0;
+    for (const v of [vec3(0.3, 0.9, 0.2), vec3(-0.5, 0.7, 0.4),
+                     vec3(0.1, 0.95, -0.3), vec3(0.6, 0.2, -0.7)]) {
+      const l = Math.hypot(v.x, v.y, v.z);
+      const n = vec3(v.x / l, v.y / l, v.z / l);
+      const { rx, rz } = VecAimYAxisZThenX(n.x, n.y, n.z);
+      const m = MatIdentity();
+      MatrixRotateZ(m, rz);
+      MatrixRotateX(m, rx);
+      MatrixTransformVector(m, up, out);
+      worst = Math.max(worst, Math.hypot(out.x - n.x, out.y - n.y, out.z - n.z));
+      const w = MatIdentity();
+      MatrixRotateX(w, rx);
+      MatrixRotateZ(w, rz);
+      MatrixTransformVector(w, up, out);
+      other = Math.max(other, Math.hypot(out.x - n.x, out.y - n.y, out.z - n.z));
+    }
+    check("`VecAimYAxisZThenX` tips +Y onto the vector through Z then X",
+          worst < 1e-3 && other > 0.1, `Z;X off by ${worst}, X;Z by ${other}`);
+    const flat = VecAimYAxisZThenX(0, 1, 0);
+    check("...and a level floor's normal is no tilt at all",
+          flat.rx === 0 && flat.rz === 0, JSON.stringify(flat));
+  }
+
+  const WALK = 10;
+  const WALK_ALT = 12;
+  const COMBAT = {
+    blood_scale: { "1": 0.75, "2": 0.5, "3": 1.0 },
+    impact_sprite: {
+      [String(SpriteEffectKind.Dust)]: [0x94, 0xa2, 0.7],
+      [String(SpriteEffectKind.DustAlt)]: [0x94, 0xa2, 0.7],
+      [String(SpriteEffectKind.Splash)]: [0x1339, 0x1356, 1.0],
+    },
+    impact_sprite_default: [0x0904, 0x0904, 0.1],
+    // `COMMON\BOMB2_16.WAV`: the splash plays its own sound, the dust none.
+    ricochet: { [String(SpriteEffectKind.Splash)]: { id: 0x0c16a9, file: "" } },
+    impact: [], head_impact: [],
+    voice: { hurt: [], kill: [], head: [], attack: [[], []] },
+    voice_set_a_types: [1],
+  };
+  // Set 1 carries the real walk pair's first id and a made-up second one, so
+  // that bit 27's choice between them can be seen at all -- the shipped pair
+  // is `{10, 10}`.
+  const SET1 = { ...CLASS31.sets[0], set: 1,
+                 motions: [7, 7, WALK, WALK_ALT, 4, 0x3a4] };
+  const TABLES = {
+    ...CHARS31,
+    combat: COMBAT,
+    types: {
+      ...(CHARS31 as unknown as { types: Record<string, CharacterType> }).types,
+      "22": { ...TYPE31_ZSASS,
+              motions: { ...TYPE31_ZSASS.motions,
+                         [String(WALK)]: motion(40),
+                         [String(WALK_ALT)]: motion(40) } },
+    },
+    class31: { ...CLASS31, sets: [CLASS31.sets[0], SET1] },
+  } as unknown as CharactersJson;
+  const WET_FLOOR = coliQuad([0, 1, 0, 0], 1,
+                             [-200, 0, 200, 200, 0, 200, 200, 0, -200,
+                              -200, 0, -200], 5);
+  let nextAt = 0x9400;
+  const spawn = (type: number, name: string, condition = 0) => {
+    ResetGameGlobals();
+    SetGameTables(TABLES);
+    // `SetGameTables` puts `T.coli` back, so the floor goes in after it.
+    T.coli = { files: ["test"], blobs: { floor: FLOOR_BLOB, wet: WET_FLOOR } };
+    G.g_coli_full_set = ["floor"];
+    G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
+    EnterPlay();
+    const a = ActorSpawn(nextAt++, SpawnClass.Thrower, type, name, {
+      initialState: ThrowerState.StandAndDecide, condition,
+    });
+    if (a.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
+    a.visible = true;
+    a.hp = 100;
+    a.pos = vec3(0, 0, 40);
+    a.yaw = 0;
+    return a;
+  };
+  const fresh = (since: number) =>
+    G.g_sprite_effects.filter((e) => e.id >= since);
+  const sounds = (events: Events) => {
+    const ids: number[] = [];
+    events.on("sound.play", (e) => ids.push(e.id));
+    return ids;
+  };
+
+  // -- 0x46, the bounce --------------------------------------------------------
+  {
+    const z = spawn(0x16, "zsass");
+    z.pos = vec3(1, 0, 40);
+    z.thr.landSurface = 52;
+    G.g_coli_hit_surface = 52;
+    const l = Math.hypot(0.3, 0.9, 0.2);
+    G.g_coli_hit_normal = [0.3 / l, 0.9 / l, 0.2 / l];
+    const want = VecAimYAxisZThenX(0.3 / l, 0.9 / l, 0.2 / l).rx;
+    let seq = G.g_sprite_effect_seq;
+    // No host: the sprite keeps the pose it was handed rather than being
+    // re-aimed at an eye, so the normal's angle is visible.
+    ThrowerEmitGroundDust(z, GroundDustCode.Bounce);
+    const puff = fresh(seq);
+    check("a bounce on dry ground raises one dust sprite at the body",
+          puff.length === 1 && puff[0]!.kind === SpriteEffectKind.Dust
+          && puff[0]!.pos.x === 1 && puff[0]!.pos.y === 0
+          && puff[0]!.pos.z === 40,
+          puff.map((s) => `${s.kind}@${JSON.stringify(s.pos)}`).join());
+    check("...tilted by the floor's normal through `VecAimYAxisZThenX`, "
+          + "the yaw left at 0",
+          puff[0]?.pitch === want && want !== 0 && puff[0]?.yaw === 0,
+          `pitch ${puff[0]?.pitch} want ${want}`);
+    check("...at the kind's own 0.7: `SpawnSpriteEffect` passes no override",
+          Math.abs((puff[0]?.scale.x ?? 0) - 0.7) < 1e-6);
+    check("...and raises `obj+0x136C` bit 0x4000, which nothing did before",
+          (z.flags2 & ThrowerFlag.LandingDustEmitted) !== 0);
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Bounce);
+    check("...so a second bounce of the same landing raises nothing",
+          fresh(seq).length === 0);
+
+    z.flags2 &= ~ThrowerFlag.LandingDustEmitted;
+    z.thr.landSurface = 0;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Bounce);
+    check("with no surface latched in `obj+0x1350` the pose is level",
+          fresh(seq)[0]?.pitch === 0, `${fresh(seq)[0]?.pitch}`);
+
+    const events = new Events();
+    const heard = sounds(events);
+    z.flags2 &= ~ThrowerFlag.LandingDustEmitted;
+    G.g_coli_hit_surface = 5;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Bounce, NULL_HOST, events);
+    check("on water (surface 5) it splashes instead, and the splash is heard",
+          fresh(seq)[0]?.kind === SpriteEffectKind.Splash
+          && heard.includes(0x0c16a9), `${fresh(seq)[0]?.kind} ${heard}`);
+    z.flags2 &= ~ThrowerFlag.LandingDustEmitted;
+    G.g_coli_hit_surface = 52;
+    G.g_rain_enabled = 1;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Bounce, NULL_HOST, events);
+    check("...and in the rain it splashes on dry ground too",
+          fresh(seq)[0]?.kind === SpriteEffectKind.Splash);
+    G.g_rain_enabled = 0;
+  }
+
+  // -- the bounce as `ThrowerStateFallAndLand` plays it ------------------------
+  {
+    // `zstin` re-bounces where `zsass` settles on the first contact.
+    const t = spawn(0x19, "zstin");
+    const events = new Events();
+    const heard = sounds(events);
+    t.state = ThrowerState.FallAndLand;
+    t.sub = 2;
+    t.pos = vec3(0, 12, 40);
+    t.vel = vec3(0, -1.5, 0);
+    t.accY = FALL_GRAVITY;
+    t.thr.sinceLanding = 0;
+    const seq = G.g_sprite_effect_seq;
+    const rng = new Rng(46);
+    let frames = 0;
+    let latchedOnFirst = false;
+    while (t.sub === 2 && frames < 600) {
+      const before = heard.length;
+      ThrowerStateFallAndLand(t, NULL_HOST, 1 / 60, rng, events);
+      if (before === 0 && heard.length) {
+        latchedOnFirst = (t.flags2 & ThrowerFlag.LandingDustEmitted) !== 0
+          || t.sub !== 2;
+      }
+      frames++;
+    }
+    const thumps = heard.filter((id) => id === SND_BOUNCE).length;
+    const dust = fresh(seq);
+    check("a knocked-down body thumps on every bounce",
+          thumps >= 2 && t.sub === 3, `${thumps} thumps, sub ${t.sub}`);
+    check("...and raises its puff on the first one only",
+          dust.length === 1 && dust[0]!.kind === SpriteEffectKind.Dust
+          && latchedOnFirst, `${dust.length} sprites`);
+    check("...then drops the latch as it settles, so the next landing puffs",
+          (t.flags2 & ThrowerFlag.LandingDustEmitted) === 0);
+  }
+
+  // -- 0x50, the arc's landing -------------------------------------------------
+  {
+    const t = spawn(0x19, "zstin");
+    t.flags = (t.flags | ActorFlag.BackingOff) & ~ActorFlag.Committed;
+    let seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(t, GroundDustCode.ArcLanding);
+    const col = fresh(seq);
+    check("a leaping thrower lands in one tall column, kind 0x4B",
+          col.length === 1 && col[0]!.kind === SpriteEffectKind.DustAlt,
+          col.map((s) => s.kind).join());
+    check("...stretched (0.4, 2.0, 0.2) by its own parameter block",
+          col[0]?.scale.x === Math.fround(0.4) && col[0]?.scale.y === 2
+          && col[0]?.scale.z === Math.fround(0.2),
+          JSON.stringify(col[0]?.scale));
+    G.g_rain_enabled = 1;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(t, GroundDustCode.ArcLanding);
+    check("...a splash in the rain",
+          fresh(seq).length === 1
+          && fresh(seq)[0]!.kind === SpriteEffectKind.Splash);
+    G.g_rain_enabled = 0;
+    t.flags |= ActorFlag.Committed;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(t, GroundDustCode.ArcLanding);
+    check("...and nothing with `obj+0x34` bit 0x10000000 up",
+          fresh(seq).length === 0);
+    t.flags &= ~(ActorFlag.Committed | ActorFlag.BackingOff);
+    ThrowerEmitGroundDust(t, GroundDustCode.ArcLanding);
+    check("...or with bit 0x20000000 down", fresh(seq).length === 0);
+
+    // Through `ActorArcStep`: the frame the arc refuses to move is the one.
+    t.flags |= ActorFlag.BackingOff;
+    ActorArcBegin(t, vec3(5, 0, 50), 10);
+    InstallArcMotionScript(t, ARC(283));
+    t.arcPhase = ArcPhase.Landing;
+    t.arcFrames = t.arcTotal + 1;
+    seq = G.g_sprite_effect_seq;
+    ActorArcStep(t, 1, 1 / 60);
+    const landed = fresh(seq);
+    check("`ActorArcStep` raises the column where the arc comes down",
+          landed.length === 1 && landed[0]!.kind === SpriteEffectKind.DustAlt
+          && landed[0]!.pos.x === 5 && landed[0]!.pos.z === 50,
+          landed.map((s) => `${s.kind}@${JSON.stringify(s.pos)}`).join());
+  }
+
+  // -- 0x5A, zsass's trail -----------------------------------------------------
+  {
+    const z = spawn(0x16, "zsass");
+    const walking = (ticks: number) => {
+      z.action = null;
+      z.motion = WALK;
+      z.playTicks = ticks;
+      z.state = ThrowerState.StandAndDecide;
+      z.flags &= ~0x8000000;
+      z.target = vec3(0, 0, 30);
+      z.pos = vec3(3, 0, 34);
+    };
+    walking(0x19);
+    let seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    const two = fresh(seq);
+    const yaw = FtolS16(VecToAngles(3, 0, 4).yaw);
+    check("on the walk's footfall zsass leaves two scuffs",
+          two.length === 2
+          && two.every((s) => s.kind === SpriteEffectKind.DustAlt),
+          two.map((s) => s.kind).join());
+    check("...at the midpoint of the step, on the line walked",
+          two.every((s) => s.pos.x === 1.5 && s.pos.y === 0 && s.pos.z === 32),
+          JSON.stringify(two[0]?.pos));
+    check("...a quarter-turn off it on each side: +0x4000, then +0xC000",
+          two[0]?.yaw === yaw + 0x4000 && two[1]?.yaw === yaw + 0xc000
+          && two[0]?.pitch === 0,
+          `${two[0]?.yaw} ${two[1]?.yaw}, base ${yaw}`);
+    check("...as wide as the step is long, times 0.0598",
+          two[0]?.scale.x === Math.fround(5 * Math.fround(0.05981133))
+          && two[0]?.scale.y === Math.fround(0.8)
+          && two[0]?.scale.z === Math.fround(0.2),
+          JSON.stringify(two[0]?.scale));
+    check("...and the trail point moves up to the actor",
+          z.target.x === 3 && z.target.z === 34, JSON.stringify(z.target));
+
+    walking(0x18);
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("between footfalls, in the stand, nothing -- and the point stays",
+          fresh(seq).length === 0 && z.target.z === 30);
+    walking(0x32);
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("the second footfall, cursor 0x32, scuffs again",
+          fresh(seq).length === 2);
+    walking(0x18);
+    z.state = ThrowerState.WalkDistance;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("out of the stand it scuffs on any frame",
+          fresh(seq).length === 2);
+
+    walking(0x19);
+    z.motion = CLASS31.sets[0]!.motions[2]!;
+    z.condition = 0;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("it is set 1's walk the routine asks for, not the actor's own set's",
+          fresh(seq).length === 0);
+    walking(0x19);
+    z.flags |= 0x8000000;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("with `obj+0x34` bit 27 up the first walk no longer counts...",
+          fresh(seq).length === 0);
+    z.motion = WALK_ALT;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("...and the second one does", fresh(seq).length === 2);
+
+    walking(0x19);
+    G.g_coli_full_set = ["wet"];
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.Trail);
+    check("on water the scuffs are splashes -- the probe is at the midpoint",
+          fresh(seq).length === 2
+          && fresh(seq).every((s) => s.kind === SpriteEffectKind.Splash));
+    G.g_coli_full_set = ["floor"];
+
+    // The fall-through: an arc landing runs the trail after its own column.
+    walking(0x18);
+    z.state = ThrowerState.Pounce;
+    z.flags |= ActorFlag.BackingOff;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(z, GroundDustCode.ArcLanding);
+    const all = fresh(seq).map((s) => s.kind);
+    check("0x50 falls into the trail: a zsass landing on its walk makes three",
+          all.length === 3 && all.every((k) => k === SpriteEffectKind.DustAlt)
+          && fresh(seq)[0]!.scale.y === 2, all.join());
+
+    const s = spawn(0x19, "zstin");
+    s.motion = WALK;
+    s.playTicks = 0x19;
+    seq = G.g_sprite_effect_seq;
+    ThrowerEmitGroundDust(s, GroundDustCode.Trail);
+    check("no other character type leaves a trail", fresh(seq).length === 0);
+  }
+
+  // -- the stand lays the trail ------------------------------------------------
+  {
+    const z = spawn(0x16, "zsass", 1);
+    z.sub = 1;
+    z.motion = WALK;
+    z.playTicks = 0x19;
+    z.target = vec3(0, 0, 30);
+    z.pos = vec3(3, 0, 34);
+    const seq = G.g_sprite_effect_seq;
+    ThrowerStateStandAndDecide(z, EYE, 1 / 60, new Rng(7), NULL_HOST);
+    check("`ThrowerStateStandAndDecide` ends by laying the trail",
+          fresh(seq).length === 2 && z.target.z === 34,
+          `${fresh(seq).length} sprites, state ${ThrowerState[z.state]}`);
   }
 }
 

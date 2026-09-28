@@ -3265,6 +3265,37 @@ bit one hex digit over; and `ZombieStateDelayedLeap` landed in silence.
 `web/tools/death_fx.mjs` kills what is on screen and photographs each effect;
 `--staged` puts one of each in front of the camera.
 
+### What the ground does under a thrower
+
+Class 0x31 had none of its ground effects; `ThrowerEmitGroundDust`
+(`FUN_0044D260`, `game/class31/ground_dust.ts`) is ported and called from all
+three of the exe's call sites, which took `ActorArcStep`'s last `[diverges]`
+with it:
+
+* **The bounce** (`ThrowerStateFallAndLand`, code 0x46). Once per landing --
+  `obj+0x136C` bit 0x4000, which the port cleared as the body settled but
+  nothing set -- a kind-0x46 dust sprite at the body, or the 0x61 splash in the
+  rain or on surfaces 5 and 0x37. It works out the floor's tilt with
+  `VecAimYAxisZThenX` (`FUN_00401870`, newly named) and then has the sprite
+  face the camera, which throws the tilt away. The bounce also thumps now:
+  `COMMON\ENE_WALK4_16.WAV` (`0x2716A9`) on **every** bounce, which the port
+  never played.
+* **The arc's landing** (`ActorArcStep`, code 0x50). A thrower of type
+  0x16..0x19 landing with `obj+0x34` bit 0x20000000 up and 0x10000000 down
+  raises a narrow column of dust, kind 0x4B stretched `(0.4, 2.0, 0.2)`, or a
+  splash in the rain. Then it **falls into** the trail.
+* **`zsass`'s trail** (`ThrowerStateStandAndDecide`, code 0x5A, and every
+  0x50). For character type 0x16 while the track holds behaviour set 1's walk
+  (read by address, `PTR_DAT_005929F4` = `g_class31_motion_sets[1]`): on the
+  walk's footfalls, cursor 0x19 and 0x32, or on any frame out of state 7, it
+  lays two scuffs across the step since `obj+0x13E4` -- a quarter-turn each
+  side of the line walked, as wide as the step is long times 0.0598 -- and
+  moves `obj+0x13E4` up to the actor. They are splashes on water.
+
+The stand's port returned early from two of its three exits, the re-arm and
+the fall; the exe runs all three -- those two and the router -- on to
+`0x0044B3B2`, which is where the trail call is, so the port does too.
+
 ## A cross-fade dissolves from a still, and holds the new clip
 
 Emerging zombies in stage 2's block 16 finished their climb out of the water,

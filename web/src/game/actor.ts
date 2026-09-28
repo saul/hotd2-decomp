@@ -629,8 +629,8 @@ export enum ThrowerFlag {
    * (0x004512F3) clear it as the body settles, which is what makes the puff
    * once per landing rather than once per actor. `[proved]`
    *
-   * The port clears it where the exe does; the emitter itself is a particle
-   * effect and is not ported, so nothing sets it yet.
+   * The latch is on the bounce's arm only (code 0x46): the thump
+   * `ThrowerStateFallAndLand` plays after it goes out on every bounce.
    */
   LandingDustEmitted = 0x4000,
   /** `ThrowerPickNextState` has committed to a band; `moveBand` holds which. */
@@ -1426,6 +1426,11 @@ export interface ActorBase {
    * `ActorFacePlayerTarget`. With one attacker it is the camera eye; with two
    * it is a shoulder offset from it, which is why it is stored rather than
    * recomputed.
+   *
+   * On a class-0x31 `zsass` (character type 0x16) the same words are the
+   * last point of its trail (L3): `ThrowerStateStandAndDecide` seeds them
+   * where it stands, and `ThrowerEmitGroundDust` (`FUN_0044D260`) spawns its
+   * scuffs between them and the actor and then moves them up to it.
    */
   target: Vec3;             // +0x13E4
   /** Where the actor stood when its strike began; `ZombieStateBackOff`

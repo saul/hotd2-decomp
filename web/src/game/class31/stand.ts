@@ -8,6 +8,7 @@
  * attack permit comes free, and it is the only way into the pounce at close
  * range.
  */
+import type { Events } from "../../core/events";
 import type { Rng } from "../../core/rng";
 import { ActorFlag, ThrowerFlag, ThrowerStance, type ThrowerActor }
   from "../actor";
@@ -19,6 +20,7 @@ import { MotionOf } from "../tables";
 import { dist2d, type Vec3 } from "../vec";
 import { SetCurrentActorMotionBlended } from "../class30/motion_cue";
 import { MotionFade } from "../class30/states";
+import { GroundDustCode, ThrowerEmitGroundDust } from "./ground_dust";
 import { ThrowerPickNextState, ThrowerTryEnterState } from "./router";
 import {
   STAND_AIM_TOLERANCE, STAND_TURN_RATE, ThrowerMotion, ThrowerState,
@@ -31,7 +33,8 @@ const CHAR_ZSLMAN = 0x18;
 /**
  * The character type whose ground arm stores its position instead of drawing a
  * new start frame — `CMP word ptr [ESI + 0x1F4], 0x16` at `0x0044B202`.
- * Named for what the arm does, because nothing in the image says more.
+ * The position is `obj+0x13E4`, the start of the trail `ThrowerEmitGroundDust`
+ * (`FUN_0044D260`) lays behind character type 0x16 and alone among the four.
  */
 const CHAR_TYPE_STANDS_ON_ITS_MARK = 0x16;
 
@@ -81,7 +84,8 @@ const WAIT_DEFAULT = 0x127;
  */
 export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
                                            dt: number,
-                                           rng: Rng, host: GameHost): void {
+                                           rng: Rng, host: GameHost,
+                                           events?: Events): void {
   const stance = ThrowerSurfaceStance(obj);
   if (obj.sub === 0) {
     let motion = ThrowerMotionOf(obj, ThrowerMotion.Walk);
@@ -95,7 +99,8 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
     } else if (stance === ThrowerStance.Ground) {
       if (obj.charType === CHAR_TYPE_STANDS_ON_ITS_MARK) {
         // `0x0044B21E` — character type 0x16 keeps the drawn frame and stores
-        // where it is standing instead.
+        // where it is standing instead: the trail's first point, which
+        // `ThrowerEmitGroundDust` measures the first scuff from.
         obj.target.x = obj.pos.x;
         obj.target.y = obj.pos.y;
         obj.target.z = obj.pos.z;
@@ -135,9 +140,15 @@ export function ThrowerStateStandAndDecide(obj: ThrowerActor, eye: Vec3,
   // its weapon back before it does anything else.
   const rearm = obj.charType === CHAR_ZSLMAN
     ? ThrowerState.RestoreBothHands : ThrowerState.Rearm;
-  if (ThrowerTryEnterState(obj, rearm, rng, host)) return;
-  if (obj.state === ThrowerState.FallToSurface) return;
-  ThrowerPickNextState(obj, eye, rng, host);
+  if (!ThrowerTryEnterState(obj, rearm, rng, host)
+      && obj.state !== ThrowerState.FallToSurface) {
+    ThrowerPickNextState(obj, eye, rng, host);
+  }
+  // `0x0044B3B2`, which all three of those paths reach: the re-arm's `JZ`,
+  // the fall's `JZ` and the router's fall-through. It runs after the router,
+  // so a frame that leaves the stand for another state takes the trail's
+  // any-state arm rather than its footfall test.
+  ThrowerEmitGroundDust(obj, GroundDustCode.Trail, host, events);
 }
 
 /**

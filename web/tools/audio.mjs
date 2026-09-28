@@ -5,10 +5,13 @@
  * unit tests assert that `sound.play` was emitted, which is the port asking
  * itself whether it meant to make a sound; `render.test.ts` never gets near an
  * `<audio>` element. So this loads the real page, unmutes it with a real
- * click, fires real shots, and measures **decoded samples**: every media
- * element the page plays is routed through an `AnalyserNode` and its peak
- * amplitude is read while it plays. A file that 200s and decodes to silence
- * fails here, and so does one the page never asked for.
+ * click, fires real shots, and measures **decoded samples**: every sound the
+ * page plays is routed through an `AnalyserNode` and its peak amplitude is
+ * read while it plays -- a media element (the looping SE) through
+ * `createMediaElementSource`, and a one-shot, which is a Web Audio buffer,
+ * by tapping its source as it starts and knowing which file the buffer was
+ * decoded from. A file that 200s and decodes to silence fails here, and so
+ * does one the page never asked for.
  *
  *     node tools/audio.mjs
  *     node tools/audio.mjs --url '?stage=1&block=4' --head
@@ -44,7 +47,7 @@ const opt = (n, d = null) => {
  * bookkeeping follows `src`.
  */
 const TAP = () => {
-  const out = { plays: [], peaks: {}, ctxState: "none" };
+  const out = { plays: [], peaks: {}, ctxState: "none", sounding: {}, most: {} };
   window.__audio = out;
   let ctx = null;
   const taps = [];
@@ -61,7 +64,7 @@ const TAP = () => {
             const v = Math.abs(t.buf[i]);
             if (v > p) p = v;
           }
-          const key = t.el.currentSrc || t.el.src;
+          const key = t.key ?? (t.el.currentSrc || t.el.src);
           if (!key) continue;
           if (!(key in out.peaks) || out.peaks[key] < p) out.peaks[key] = p;
         }
@@ -69,6 +72,46 @@ const TAP = () => {
     }
     if (ctx.state === "suspended") void ctx.resume();
     return ctx;
+  };
+  // One-shots are buffers on the page's own graph (`audio/bgm.ts`). Which
+  // file a buffer is follows the bytes: the response that produced them, the
+  // decode that consumed them, the source that plays the result.
+  const bytesFrom = new WeakMap();
+  const bufferFrom = new WeakMap();
+  const readBytes = Response.prototype.arrayBuffer;
+  Response.prototype.arrayBuffer = async function () {
+    const b = await readBytes.call(this);
+    bytesFrom.set(b, this.url);
+    return b;
+  };
+  const decode = BaseAudioContext.prototype.decodeAudioData;
+  BaseAudioContext.prototype.decodeAudioData = function (b, ...rest) {
+    const url = bytesFrom.get(b);
+    const p = decode.call(this, b, ...rest);
+    if (url && p && typeof p.then === "function") {
+      p.then((buf) => bufferFrom.set(buf, url), () => {});
+    }
+    return p;
+  };
+  const start = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function () {
+    const url = this.buffer && bufferFrom.get(this.buffer);
+    if (url) {
+      ensureCtx();
+      // The page's own context, so the analyser hears this source; Chrome
+      // pulls an analyser with nothing downstream of it.
+      const an = this.context.createAnalyser();
+      an.fftSize = 2048;
+      this.connect(an);
+      taps.push({ key: url, an, buf: new Float32Array(an.fftSize) });
+      out.plays.push(url);
+      // How many of this file are sounding at once: the layering an iPhone
+      // lost when each shot reloaded a pooled <audio> element.
+      out.sounding[url] = (out.sounding[url] ?? 0) + 1;
+      out.most[url] = Math.max(out.most[url] ?? 0, out.sounding[url]);
+      this.addEventListener("ended", () => { out.sounding[url] -= 1; });
+    }
+    return start.apply(this, arguments);
   };
   const orig = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function () {
@@ -185,6 +228,10 @@ try {
         `${played.length} sources played, none above 0.01 peak`);
   check("the gunshot is audible", heardName(/GUN5_22\.WAV/i),
         "no COMMON/GUN5_22.WAV above 0.01 peak");
+  // The volley fires a shot every ~60 ms, and a gunshot outlasts that.
+  const gun = Object.entries(a.most).find(([u]) => /GUN5_22\.WAV/i.test(name(u)));
+  check("rapid shots layer: several gunshots sound at once",
+        (gun?.[1] ?? 0) >= 3, `at most ${gun?.[1] ?? 0} at once`);
   check("an impact is audible",
         heardName(/BLOOD0|BONE01|BULLET_/i),
         "no flesh impact and no ricochet above 0.01 peak");

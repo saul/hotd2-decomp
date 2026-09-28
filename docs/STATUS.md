@@ -27,9 +27,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `ui/` | 3161 | 24 | ui |
 | `bundle/` | 2680 | 11 | engine |
 | `core/` | 978 | 9 | engine |
-| `audio/` | 907 | 2 | render |
+| `audio/` | 973 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **155637** | **520** | |
+| **total** | **155703** | **520** | |
 
 The largest files, which is where the pressure to split next is:
 

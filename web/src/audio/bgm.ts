@@ -93,6 +93,11 @@ export const BGM_ONE_SHOT_IDS: readonly number[] =
 /** Concurrent one-shot voices, and how loud they sit under the music. */
 const SFX_VOICES = 8;
 const SFX_GAIN = 0.85;
+/**
+ * Decoded SE and voice clips kept, most recently used last. A stage's shots,
+ * hits and deaths are a few dozen files; a clip is under a megabyte decoded.
+ */
+const CLIP_CACHE = 48;
 
 /** What `PlaySoundId` does with one id, decided and not yet done. */
 export type SoundAction =
@@ -207,11 +212,30 @@ export class Bgm {
 
   private sound: SoundJson | null = null;
   /**
-   * One-shot voices for SE and speech. A pool, because a script can fire
-   * several in a frame and a single element would cut each off.
+   * One-shot SE and speech, sounding now, oldest first.
+   *
+   * **Buffers on the Web Audio graph, not elements.** They were a pool of
+   * eight `<audio>` elements, each shot assigning its file to the next one,
+   * and on an iPhone that went silent under fire: every assignment reloads the
+   * element, the `play()` it had started is abandoned by the next assignment,
+   * and iOS ignores an element's `volume` besides. A decoded buffer can be
+   * started any number of times at once, starts on the next audio quantum,
+   * and goes through the same gain as the music.
+   *
+   * Eight at once still, as the pool was -- the engine's channel allocator is
+   * not modelled, and a ninth takes the oldest's place.
    */
-  private readonly pool: HTMLAudioElement[] = [];
-  private poolNext = 0;
+  private readonly voices: { node: AudioBufferSourceNode;
+                             kind: "se" | "voice" }[] = [];
+  /** Decoded clips by URL, most recently used last; see `CLIP_CACHE`. */
+  private readonly clips = new Map<string, Promise<AudioBuffer | null>>();
+  /**
+   * Bumped by each stop of its kind, so a clip still decoding when the SE or
+   * the voice is stopped does not start afterwards.
+   */
+  private readonly stopGen = { se: 0, voice: 0 };
+  /** The SE and voice level under the music, into the master gain. */
+  private sfx: GainNode | null = null;
 
   /**
    * The looping SE currently sounding, by the id that started each.
@@ -460,15 +484,19 @@ export class Bgm {
     return buffer;
   }
 
-  private graph(): { ctx: AudioContext; gain: GainNode } {
-    if (!this.ctx || !this.gain) {
+  private graph(): { ctx: AudioContext; gain: GainNode; sfx: GainNode } {
+    if (!this.ctx || !this.gain || !this.sfx) {
       this.ctx = new AudioContext();
       this.gain = this.ctx.createGain();
       this.gain.connect(this.ctx.destination);
+      // SE and voice sit under the music: their own level, then the master.
+      this.sfx = this.ctx.createGain();
+      this.sfx.gain.value = SFX_GAIN;
+      this.sfx.connect(this.gain);
       this.ctx.addEventListener("statechange", () => this.emit());
       this.applyGain();
     }
-    return { ctx: this.ctx, gain: this.gain };
+    return { ctx: this.ctx, gain: this.gain, sfx: this.sfx };
   }
 
   private applyGain(): void {
@@ -572,32 +600,70 @@ export class Bgm {
   /**
    * Fire and forget. Failures are silent on purpose: 36 of the 324 SE names
    * end in `_OFF` and are not shipped at all, so a 404 here is expected data,
-   * not a fault worth interrupting playback for.
+   * not a fault worth interrupting playback for -- and it is remembered, so
+   * it is asked for once.
+   *
+   * The first play of a file waits for its fetch and decode; every later one
+   * starts at once. A stop of the kind while it decodes cancels it.
    */
   private oneShot(kind: "se" | "voice", file: string): void {
     if (this._muted) return;
-    const url = soundUrl(kind, file);
-    let el = this.pool[this.poolNext];
-    if (!el) {
-      el = new Audio();
-      this.pool[this.poolNext] = el;
-    }
-    this.poolNext = (this.poolNext + 1) % SFX_VOICES;
-    el.src = url;
-    // SE sit under the music rather than over it.
-    el.volume = Math.min(1, this._volume * SFX_GAIN);
-    el.muted = this._muted;
-    void el.play().catch(() => {});
+    const gen = this.stopGen[kind];
+    void this.clip(soundUrl(kind, file)).then((buffer) => {
+      if (!buffer || this._muted || gen !== this.stopGen[kind]) return;
+      const { ctx, sfx } = this.graph();
+      while (this.voices.length >= SFX_VOICES) this.release(this.voices[0]);
+      const node = ctx.createBufferSource();
+      node.buffer = buffer;
+      node.connect(sfx);
+      const v = { node, kind };
+      node.onended = () => this.forget(v);
+      this.voices.push(v);
+      node.start();
+      this.resume();
+    });
   }
 
-  /** Stop every element in the pool whose URL is under `/<kind>/`. */
-  private stopPool(kind: "se" | "voice"): void {
-    for (const el of this.pool) {
-      if (el && !el.paused && el.src.includes(`/${kind}/`)) {
-        el.pause();
-        el.currentTime = 0;
-      }
+  /** A clip, fetched and decoded once. See `CLIP_CACHE`. */
+  private clip(url: string): Promise<AudioBuffer | null> {
+    const hit = this.clips.get(url);
+    if (hit) {
+      this.clips.delete(url);
+      this.clips.set(url, hit);
+      return hit;
     }
+    const p = (async () => {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        return await this.graph().ctx.decodeAudioData(await r.arrayBuffer());
+      } catch {
+        return null;
+      }
+    })();
+    this.clips.set(url, p);
+    while (this.clips.size > CLIP_CACHE) {
+      this.clips.delete(this.clips.keys().next().value as string);
+    }
+    return p;
+  }
+
+  private release(v: { node: AudioBufferSourceNode }): void {
+    v.node.onended = null;
+    try { v.node.stop(); } catch { /* already ended */ }
+    v.node.disconnect();
+    this.forget(v);
+  }
+
+  private forget(v: { node: AudioBufferSourceNode }): void {
+    const i = this.voices.indexOf(v as (typeof this.voices)[number]);
+    if (i >= 0) this.voices.splice(i, 1);
+  }
+
+  /** Stop every one-shot of `kind`, and any still decoding. */
+  private stopPool(kind: "se" | "voice"): void {
+    this.stopGen[kind] += 1;
+    for (const v of [...this.voices]) if (v.kind === kind) this.release(v);
   }
 
   /**
@@ -605,9 +671,9 @@ export class Bgm {
    * which is what `PlaySoundId(0x80000002)` reaches.
    *
    * That is the call `stop_voice_if_skipped` (evt `0x2E`) makes after a
-   * cutscene skip. SE and voice share one element pool, so the URL is what
-   * distinguishes them -- and stopping SE here would be wrong, since a
-   * gunshot is not part of the dialogue being skipped.
+   * cutscene skip. SE and voice share one set of voices, each marked with
+   * its kind -- and stopping SE here would be wrong, since a gunshot is not
+   * part of the dialogue being skipped.
    */
   stopVoice(): void {
     this.stopPool("voice");

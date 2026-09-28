@@ -41,9 +41,23 @@ const HEAD = args.includes("--head");
 const TAP = () => {
   const out = { starts: [], stops: 0, peak: 0 };
   window.__bgm = out;
+  // The SE and the voice are buffers too since they left `<audio>`, and
+  // they come out of `decodeAudioData`; the music never does -- it is filled
+  // sample by sample from the engine's stream (`audio/stream.ts`). So a
+  // decoded buffer is not the track, and is not recorded.
+  const decoded = new WeakSet();
+  const decode = BaseAudioContext.prototype.decodeAudioData;
+  BaseAudioContext.prototype.decodeAudioData = function (...a) {
+    const p = decode.apply(this, a);
+    if (p && typeof p.then === "function") {
+      p.then((buf) => decoded.add(buf), () => {});
+    }
+    return p;
+  };
   const origStart = AudioBufferSourceNode.prototype.start;
   AudioBufferSourceNode.prototype.start = function (...a) {
     const b = this.buffer;
+    if (b && decoded.has(b)) return origStart.apply(this, a);
     out.starts.push({
       node: this, frames: b?.length ?? 0, rate: b?.sampleRate ?? 0,
       channels: b?.numberOfChannels ?? 0, loop: this.loop,

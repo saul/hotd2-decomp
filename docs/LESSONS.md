@@ -1025,3 +1025,25 @@ check that the pixels it should not touch are identical -- which is also what
 tells you the runs stayed in step. It is `L44`'s "a harness that prints its
 arguments as its result" one layer down: a redraw that repeats the frame
 agrees with any claim about it.
+
+**L70 -- A list with two readers cannot be gated for one of them.**
+`RegisterForShotTest` appends to one list, and the engine reads it twice: the
+shot pick, and -- copied a frame later by `ColiPublishDynamicList` -- the crowd
+push, `ColiTestSphereAgainstActors`. The port migrates the pick a class at a
+time, and put the migration's gate on the *writer*: `ActorRegisterCameraPoint`
+filed an actor only if its class had moved across. That starved the second
+reader of every zombie, thrower, civilian and frog, and nothing showed it,
+because the crowd push had been given a substitute -- it walked the pool,
+re-deriving every sphere, under a comment that the pool "is the same set". It
+is not the same set (the list holds only what registered, in front of the eye,
+without `0x8000`) and not the same time (the list is last frame's spheres, as
+each class left them). Two notes elsewhere then built on the gap: the frog got
+`ownsSphereCentre` to stop the substitute overwriting its published point, and
+`backoff.ts`'s note that the whole hook was unported -- written half an hour
+before it was ported -- outlived the port by four weeks. **When a port stands something in for a structure the exe shares
+between two routines, find every reader of the structure before gating any
+writer of it**, and put a migration's boundary at the reader it is migrating.
+The same session tripped `L56` with its own hands: a new `import` from
+`coli.ts` into `thrown_weapon.ts` put a top-level `ActorFlag.Hit` inside
+`actor.ts`'s cycle, `tsc` and `test:port` passed, and the page threw at
+startup -- found only because the next driven playthrough measured nothing.

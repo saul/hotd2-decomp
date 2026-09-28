@@ -1365,8 +1365,9 @@ const _bone1 = { x: 0, y: 0, z: 0 };
  * which it pushed frogs the wrong way. The test is skipped during the leap,
  * the one state that means to end up inside the player's space, but the point
  * is written on every frame, and `RegisterForShotTest` (`FUN_00405160`)
- * publishes it on the next as the sphere other actors test against — which is
- * why the class sets `ClassHandler.ownsSphereCentre`.
+ * records it, at `ActorRegisterCameraPoint` on the next frame, as the sphere
+ * other actors test against one frame after that
+ * (`ColiPublishDynamicList`, `FUN_00405360`).
  *
  * The push is **scaled by how far bone 1 moved** since the last draw, not by
  * the overlap alone: a frog sitting still is nudged at a twentieth of the
@@ -1500,7 +1501,6 @@ const handler: ClassHandler = {
   update: FrogUpdate,
   updatesWhenDead: true,
   ownsShotResult: true,
-  ownsSphereCentre: true,
   // `[port-only]`: `RetireUnlistedActor`'s route out. A frog gives back what
   // it still holds -- `g_enemies_alive` only until its death state has run,
   // which drops it on the frame of the kill; the corpse retired while it

@@ -29,12 +29,13 @@ import { ActorFlag, type Actor, type ZombieActor } from "../actor";
 import { ActorDespawn } from "../despawn";
 import { ActorInitHitPoints } from "../director";
 import { ActorByAt } from "../globals";
-import { g_class_handlers, type ClassFrame } from "../registry";
+import type { ClassFrame } from "../registry";
 import { ActorSpawn } from "../spawn";
 import { SpawnClass } from "../spawn_class";
 import { RegisterForShotTest } from "../combat/shot_test";
 import { ActorRunNodeDrawHooks } from "../model_draw";
 import { ZombieDrawBonePart } from "./draw";
+import { ZombiePushOutOfWorldAndActors } from "./ground";
 import { ZombieOnShot } from "./on_shot";
 
 /** `MOV word ptr [EBX + 0x1f4], 0x9` at `0x00453249`. */
@@ -177,20 +178,24 @@ export function ZombieTwinFollowHost(obj: ZombieActor, f: ClassFrame): void {
   }
   // `ZombieAdvanceMotion` (`FUN_00454860`): the draw, and with it the node
   // hook, which runs the `0x1C7C` arm's clock. The clock half is the
-  // director's.
+  // director's. Inside the same draw `SkeletonApplyRootMotion` calls the
+  // pose hook at `obj+0x12F0` before any node, and `EnemyZombieInit` put
+  // `ZombiePushOutOfWorldAndActors` there for the twin as for every class-0x30
+  // actor (`0x00452E4A`, unconditional). Both push bits are down on a twin
+  // (`ZombieInitTwinFade`), so what it does here is the ground snap and the
+  // shove timer.
+  ZombiePushOutOfWorldAndActors(obj);
   ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
   // `obj+0x70`: the port keeps the point in world space and lets the shot
   // test take the depth (`RegisterForShotTest`). The point is `obj+0x100`,
   // the tracked bone the walk recorded, not lifted -- the twin never calls
-  // `ActorRegisterCameraPoint`. The shot test's migration is a class at a
-  // time and class 0x30 is still picked by the renderer, so the filing
-  // waits on that class's flag, as `ActorRegisterCameraPoint`'s does.
+  // `ActorRegisterCameraPoint`. Filed whatever the class, as the engine
+  // files it: the list is the crowd push's as well as the pick's, and the
+  // pick passes over a class the renderer still picks (`ShotTestPickedHere`).
   obj.shotCentre.x = obj.lookAt.x;
   obj.shotCentre.y = obj.lookAt.y;
   obj.shotCentre.z = obj.lookAt.z;
-  if (g_class_handlers[obj.cls]?.registersForShotTest) {
-    RegisterForShotTest(obj, f.host);
-  }
+  RegisterForShotTest(obj, f.host);
 }
 
 /**

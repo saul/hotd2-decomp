@@ -2041,8 +2041,8 @@ doubt: `g_camera_blocks` is the view-to-world matrix and `part+0x130` a
 view-space draw record, so the product is bone 1 in the world. The push is
 scaled by bone 1's travel between two readings of that record through one
 camera block — relative to the camera — and the pushed point is the sphere
-the frog publishes; `ClassHandler.ownsSphereCentre` keeps
-`ColiTestSphereAgainstActors` from overwriting it with class 0x30's feet.
+the frog publishes, which `ColiTestSphereAgainstActors` now reads out of the
+published registration list (see "The crowd push tests what registered").
 Reading the two states whole also found four wrong ports inside them: the
 wedge clamp is `acos`, not `asin` (`CrtAcos`); state 1's middle heading band
 was inverted; both launch frames run on into the flight and halve the turn
@@ -4172,7 +4172,8 @@ that goes never publishes a draw slot.
 
 The move is class 0x30's own arithmetic on furniture — a tenth of the
 penetration along the reversed normal, times 1.8 when the **pusher** carries
-either airborne bit — followed by a re-resolve against the actors in x and z
+either bit of `0x18000000` — its strike's commit or the sprint bit, not an
+airborne bit — followed by a re-resolve against the actors in x and z
 and one against the full collision set at the full depth, with the sphere
 re-seated after every move. The sphere convention is this class's own:
 `obj+0x130 = obj+0x44 + obj+0x128`, the position plus exactly the body radius,
@@ -5914,6 +5915,35 @@ nothing but shooting opens its gates.
 * Default stage 6 now hangs at block 2's gate, because the boss exists: the
   default meter cannot see its damage and 900 frames is shorter than the
   fight.
+
+## The crowd push tests what registered, a frame late
+
+`ZombiePushOutOfWorldAndActors` (`FUN_00454900`) has been ported since the
+crowd separation landed; what it tested against had not been.
+`ColiTestSphereAgainstActors` (`FUN_00405B10`) walked the object pool and
+re-derived each actor's sphere where it stood. The engine walks
+`g_coli_dynamic_list`, the copy `ColiPublishDynamicList` (`FUN_00405360`)
+makes of `g_shot_test_list` before any actor runs -- so the candidates are
+what registered **last frame**, each at the sphere its own class published,
+and a body behind the camera, which never registers, pushes nobody. Both are
+ported, with the rest of the routine: the two surface points, the stable
+radix pick of the nearest, the depth re-derived from them (which differs from
+`r + R - d` when the radii do), the `nx + ny + nz == 0` miss, and
+`g_coli_hit_object` and `g_coli_hit_dist_sq` among its outputs.
+
+For the list to hold anything, `ActorRegisterCameraPoint` now files every
+caller, as `0x00409BED` does; the shot test's class-at-a-time migration is a
+filter at the pick (`ShotTestPickedHere`) instead of a gate on the
+registration, which had kept every zombie, thrower, civilian and frog out of
+the list. Class 0x33's chair registers from its own tail (`0x00433CC6`), and
+the `ownsSphereCentre` flag the frog and the civilian carried is gone -- the
+list carries each one's point. The
+thrower's special case on `g_coli_hit_object` is in: an off-ground thrower
+shouldered by an object with `obj+0x34` `0x200000` falls instead of sliding.
+The hook's shove timer counts calls, and its 1.8x is the strike's commit and
+the sprint bit, which `docs/formats/combat.md` section 10 now sets out.
+
+Measured over the eight entry routes with `--no-damage`: see the session log.
 
 ## The model's size: every skinned actor is drawn at `model+0x116C`
 

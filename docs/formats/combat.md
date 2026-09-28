@@ -2894,7 +2894,17 @@ Things worth naming.
   all: it keeps every bit but `0x800`, and records where it left from.
 * **The bit is `0x10000000`**, not `0x20000000`. `ThrowerEmitGroundDust`'s
   landing column answers `0x20000000` with `0x10000000` down, so the pounce's
-  landing raises none and the leap back's does.
+  landing raises none and the leap back's does. It is every strike's bit on
+  this class: states 9/12/13 (`0x0044B6F0`), 22 (`0x0044E72B`), 23
+  (`0x0044E8E6`), 24 (`0x0044EB5F`) and 32 (`0x00450BD2`) raise
+  `obj+0x34 |= 0x10000000` and clear it on their own way out; only the two
+  retreats, state 10 (`0x0044B8BA`) and state 25 (`0x0044EC9F`), raise
+  `0x20000000`. `[proved]` by a linear sweep of `.text` for every 32-bit
+  `TEST`/`OR`/`AND` touching either bit. The one reader outside the class is
+  the zombie crowd push, which shoves 1.8x when the actor that shoved it
+  carries `0x18000000` (`00454944`) -- so a thrower mid-swing shoves a zombie
+  harder. Class 0x31 is never distance-ranked, so `RankEnemiesByDistance`'s
+  `0x20000000` test never sees it.
 * **Down, it collides with nothing**, and the re-snap to the landing point
   holds it on a camera that may still be moving until the clip is two frames
   from its end. The one gate on the re-snap is Training Mode with

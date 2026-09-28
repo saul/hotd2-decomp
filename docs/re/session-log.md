@@ -24802,3 +24802,78 @@ effect spawners that read the drawn block's eye through `GameHost.viewPoint`
 are `[likely]` equal and unchanged; `ThrowerStateCloseAndStrike` also raises
 and clears `BackingOff` (`0x20000000`) where the exe raises and clears
 `0x10000000` (`0x0044EA50` sub 0, and the exit) -- not an eye, not touched.
+
+## 2026-09-29 -- class 0x31's strikes raise 0x10000000, not BackingOff
+
+The eye audit left one line open: `ThrowerStateCloseAndStrike` raised and
+cleared `ActorFlag.BackingOff` (`0x20000000`) where the exe uses
+`0x10000000`. It is right, and it was not alone.
+
+**The bytes.** `ThrowerStateCloseAndStrike` (`FUN_0044EA50`), whose `ESI` is
+the actor throughout: sub 0 loads `8b5634` `MOV EDX, [ESI+0x34]` at
+`0x0044EB59`, `81ca00000010` `OR EDX, 0x10000000` at `0x0044EB5F`, stores
+`895634` at `0x0044EB77`; the exit loads `8b4634` at `0x0044EC46`,
+`25ffffffef` `AND EAX, 0xefffffff` at `0x0044EC52`, stores `894634` at
+`0x0044EC60` with state `0x19`. The word is `obj+0x34` -- the port's
+`obj.flags` -- not `obj+0x136C` and not a class-0x31 tail word. `[proved]`
+
+**The sweep.** Ghidra's `search_instructions` for the two immediates, then a
+capstone linear sweep of `.text` for every 32-bit `TEST`/`OR`/`XOR`/`AND`
+whose immediate touches either bit, because a substring search misses masks
+like `0x10002000`, `0x18000000` and `0xcfffffff`. On class 0x31, `obj+0x34`:
+
+* `0x10000000` up: `ThrowerStateLeapDown` `0x0044B6F0`,
+  `ThrowerStateLeapStrike` `0x0044E72B`, `ThrowerStateDelayedPounce`
+  `0x0044E8E6`, `ThrowerStateCloseAndStrike` `0x0044EB5F`,
+  `ThrowerStateStrikeOnTheSpot` `0x00450BD2`; each clears it on its way out
+  (`0x0044B841`, `0x0044E7F0`, `0x0044EA1D`, `0x0044EC52`, `0x00450C6D`).
+* `0x20000000` up: `ThrowerStateLeapAside` `0x0044B8BA` and
+  `ThrowerStateWithdraw` `0x0044EC9F` only; cleared at `0x0044BB43` and
+  `0x0044EDDF` (`0xdfffdfff`, with `0x2000`).
+* Both cleared by `ThrowerOnShot` (`25ffffffcf` at `0x00449A24`).
+* Read: `ThrowerEmitGroundDust`'s arc-landing column wants `0x10000000` down
+  and `0x20000000` up (`0x0044D296`, `0x0044D2A1`); `ThrowerStateFallToSurface`
+  lands into state 10 on `0x20000000` (`0x0044BE87`). `ThrowerStateLeapToPoint`'s
+  `0x10000000` (`0x0044E577`) is on `obj+0x136C`, `TrackBone2`, not this word.
+
+Across classes: `RankEnemiesByDistance` tests `0x20000000` (`0x00409149`), but
+a byte scan for `E8` calls finds `RegisterForDistanceRank`'s only caller at
+`0x0045346D` (`EnemyZombieUpdate`), so no thrower is ever ranked.
+`ZombiePushOutOfWorldAndActors` tests `0x18000000` on the actor that shoved
+it (`f7c100000018` at `00454944`), and that actor is whoever
+`ColiTestSphereAgainstActors` ran for -- `found+0x138 = g_cur_actor`
+(`899638010000` at `0x00405F2B`) -- which includes a thrower. The other
+`0x10000000` readers (`SubModelPoseBoneHalfRate`'s type-0x1D arm at
+`0x0040EF0C`, class 0x22's companion test at `0x0049BDA1`, class 0x30's
+routines) never see a class-0x31 actor.
+
+**What the port had.** Three of the five strikes -- states 24, 32 and 22 --
+raised and cleared `BackingOff`; state 9's own copy of the mistake was fixed
+earlier (NEW-BUGS-2). With the wrong bit, a striking thrower never boosted the
+zombie push, and state 22's landing put up the leap back's dust column.
+`ThrowerOnShot` spelled the second bit as a literal. All four now say
+`ActorFlag.Committed`; `actor.ts` documents both enum members' class-0x31
+writers and readers.
+
+**Proof.** Nine checks in `port.test.ts` ("states 22, 24 and 32 raise
+0x10000000"). They drive each state through its swing, or its arc and
+landing, and measure the consequence: a zombie shoved by the thrower
+mid-swing moves 0.9 (1.8 x 0.1 x 5), and 0.5 once the swing is over; state 22
+lands with no column. With the three source files reverted, seven of the nine
+fail (flags `0x20000081`, shove 0.5, one column).
+
+**Wrong turns.** The first state-22 check passed for the wrong reason. The
+fixture had no stance-4 attack row, and state 22 raises `obj+0x136C` 0x20000
+before `ThrowerLoadAttackArcScript` reads the stance, so the arc script was
+null. The leap then ended on its first frame, before the flag could be
+observed or any landing happen. The fixture now has a row 4, and the
+failing-first run shows the column.
+
+**Left open.** `ThrowerStateCloseAndStrike`'s port still differs from the
+listing in ways this commit does not touch. It fires the connect on
+`frame >= hit_frame` behind a `struck` latch, where the exe compares
+`obj+0x19C == (s16)entry+8` every frame (`0x0044EC15`). It omits sub 0's
+`obj+0x1360 = g_players_in_play` (`0x0044EA93`) and the strike arm's attack
+cry, `ActorPlayHitVoice(obj, 3)` (`CALL 0x0040a6f0` at `0x0044EC02`). And a
+port-only `!e` guard sends a missing strike entry to state 25 with
+`Committed` still up.

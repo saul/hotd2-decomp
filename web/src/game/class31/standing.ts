@@ -120,7 +120,11 @@ export function ThrowerStateCloseAndStrike(obj: ThrowerActor,
     obj.attack = obj.charType === CHAR_ZSKAMERE
       ? ThrowerPickAttackFromSet0(obj, rng.int(10))
       : ThrowerPickAttack(obj, rng.int(10));
-    obj.flags |= ActorFlag.BackingOff;
+    // `8b5634` / `81ca00000010` / `895634` at `0x0044EB59`..`0x0044EB77`:
+    // `obj+0x34 |= 0x10000000` -- mid-attack, as every class-0x31 strike has
+    // it. It raised `BackingOff`, the next bit up, which on this class only
+    // `ThrowerStateLeapAside` and `ThrowerStateWithdraw` write.
+    obj.flags |= ActorFlag.Committed;
     obj.flags2 &= ~(ThrowerFlag.Surface | ThrowerFlag.OffGround);
     obj.strikeStart = { x: obj.pos.x, y: obj.pos.y, z: obj.pos.z };
     obj.struck = false;
@@ -154,7 +158,8 @@ export function ThrowerStateCloseAndStrike(obj: ThrowerActor,
     obj.sub = 3;
   }
 
-  obj.flags &= ~ActorFlag.BackingOff;
+  // `25ffffffef` at `0x0044EC52`, stored back to `obj+0x34` at `0x0044EC60`.
+  obj.flags &= ~ActorFlag.Committed;
   obj.state = ThrowerState.Withdraw;
   obj.sub = 0;
 }
@@ -199,7 +204,9 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
     obj.pos.z = obj.strikeStart.z;
     // The claim's answer is ignored: it swings whether or not it got one.
     if (obj.attackPermit < 0) ThrowerTryClaimAttackSlot(obj, rng, host);
-    obj.flags |= ActorFlag.BackingOff;
+    // `81c900000010` at `0x00450BD2` on `obj+0x34` (`8b4e34` / `894e34`):
+    // bit `0x10000000`, not `BackingOff`.
+    obj.flags |= ActorFlag.Committed;
     obj.attack = ThrowerPickAttack(obj, rng.int(10));
     const e = ThrowerStrikeEntry(obj, obj.attack);
     if (e) playOnce(obj, e.strike);
@@ -215,7 +222,8 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
   }
 
   if (obj.sub === 4) {
-    obj.flags &= ~ActorFlag.BackingOff;
+    // `25ffffffef` at `0x00450C6D`.
+    obj.flags &= ~ActorFlag.Committed;
     if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
     const idle = ThrowerMotionOf(obj, ThrowerMotion.IdleAlt);
     if (idle !== undefined) playOnce(obj, idle);

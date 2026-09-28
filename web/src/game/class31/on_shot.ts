@@ -68,7 +68,8 @@ export function ThrowerOnShot(obj: ThrowerActor): void {
   if (obj.flags2 & ThrowerFlag.DeathLatched) return;
 
   obj.flags2 &= ~(ThrowerFlag.Pouncing | ThrowerFlag.BandLatched | 0x200);
-  obj.flags &= ~(ActorFlag.BackingOff | 0x10000000);
+  // `25ffffffcf` at `0x00449A24`: both bits of the attack pair.
+  obj.flags &= ~(ActorFlag.BackingOff | ActorFlag.Committed);
   if (obj.attackPermit >= 0) ThrowerReleaseAttackPermit(obj);
 
   if (obj.dead) {

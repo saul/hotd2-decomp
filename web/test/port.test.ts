@@ -25022,13 +25022,14 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
           Math.abs(c.pos.x - (x1 + 0.2)) < 1e-6, String(c.pos.x));
   }
 
-  // -- C3. the pusher's airborne bits, not the chair's ----------------------
+  // -- C3. the pusher's boost bits, not the chair's -------------------------
   //
   // `if ((*(uint *)(obj+0x138) + 0x34) & 0x18000000) f *= 1.8` -- the test is
   // on the actor that did the pushing. Reading the chair's own flags there
   // would be `L11` with the object the other way round, and it would be
-  // silent: 1.8 times nothing is still nothing until an airborne zombie
-  // arrives.
+  // silent: 1.8 times nothing is still nothing until a zombie that is
+  // striking (`ActorFlag.Committed`) or sprinting (`ZOMBIE_SPRINTS`, which a
+  // shot raises) arrives. These were called the airborne bits; neither is.
   {
     reset();
     G.g_script_flags[PUSH_FLAG] = 1;
@@ -25041,8 +25042,8 @@ console.log("\nclass 0x33 selector 4: the scenery an actor shoves aside:");
     c.pushNormal = vec3(1, 0, 0);
     const x0 = c.pos.x;
     tick(c, 1);
-    check("an airborne pusher shoves 1.8x as far, and the bit read is the "
-          + "**pusher's**",
+    check("a striking or sprinting pusher shoves 1.8x as far, and the bit "
+          + "read is the **pusher's**",
           Math.abs(c.pos.x - (x0 + 0.36)) < 1e-6, String(c.pos.x));
 
     // ...and the chair's own copy of the same bits changes nothing.
@@ -32025,6 +32026,79 @@ console.log("\nZombieStateAttackRun: the turn rate, the bands, and the wait clip
     check("...band 3 does",
           far.state === ZombieState.StandAndThrow && far.attackPermit >= 0,
           `${ZombieState[far.state]} permit ${far.attackPermit}`);
+  }
+  {
+    // A shot is what makes a jogger sprint, and everything that reads the bit
+    // follows. `ZombieOnShot` (`FUN_00453EB0`) ORs `0x8000000` into `obj+0x34`
+    // at the head of its per-player loop for every shot that finds a bone,
+    // alive or dead:
+    //
+    //   00453ef7  JLE 0x00454035               ; g_shot_bone[p] <= 0: skip
+    //   00453f17  OR  ECX, 0x8000000           ; 81c900000008
+    //   00453f2a  MOV dword ptr [ESI+0x34], ECX
+    //
+    // Nothing between the shot and the next frame of the run puts the jogger
+    // anywhere else: the spawn record here asked for the jog, and the only
+    // input is the hit record `ResolveHit` leaves.
+    const shot = runner(0, 45);
+    shot.yaw = 0x4000;
+    const before = ZombieRunTurnRate(shot);
+    shot.pendingHit = { bone: 4, result: HitResultCode.Plain, player: 0 };
+    ZombieOnShot(shot);
+    ZombieStateAttackRun(shot, EYE, 1 / 60, new Rng(1));
+    check("a jogger shot and still up runs its next frame on row 3, the sprint",
+          before === 0x1a0 && shot.state === ZombieState.AttackRun
+          && shot.motion === 13 && !shot.dead,
+          `${ZombieState[shot.state]} motion ${shot.motion}`);
+    check("...and turns at the sprint's 0x410, not the jog's 0x1A0",
+          shot.yaw === 0x4000 - 0x410, shot.yaw.toString(16));
+
+    // `ZombiePushOutOfWorldAndActors` (`FUN_00454900`) moves an actor out of
+    // a crowd by a tenth of the penetration, and by 1.8 times that
+    // (`0x0055dd48`, `6666e63f`) while `obj+0x34 & 0x18000000` -- tested on
+    // the actor itself at `004549b6`, and on the actor that recorded the push
+    // at `00454944`. "The crowd push, as the exe runs it" pins both with the
+    // bit written by hand; this is the same two with the bit put there by a
+    // shot. Neither actor is committed to a strike, so the only bit of the
+    // mask either can hold is the one `ZombieOnShot` raised.
+    const crowd = (shoot: boolean) => {
+      const a = runner(0, 40);
+      const b = spawnZombie(0x7b01, 1, "in the way");
+      b.visible = true;
+      b.hp = b.maxHp = 100;
+      for (const z of [a, b]) z.flags2 |= ZombieFlag2.CollideActors;
+      b.pos = vec3(2, 0, 40);             // two 3.5 bodies, five deep
+      if (shoot) {
+        a.pendingHit = { bone: 4, result: HitResultCode.Plain, player: 0 };
+        ZombieOnShot(a);
+      }
+      const mask = (a.flags | b.flags) & 0x18000000;
+      PublishCrowd(a, b);
+      ZombiePushOutOfWorldAndActors(a);     // a moves, and records b's push
+      const self = a.pos.x;                 // from x = 0
+      const recorded = b.pushedBy === a.at;
+      // An empty list for `b`'s own frame, so what moves it is the push it
+      // was handed and nothing it finds itself. `00454935` reads the
+      // pusher's flags through the recorded pointer, not the list.
+      PublishCrowd();
+      const bx = b.pos.x;
+      ZombiePushOutOfWorldAndActors(b);
+      return { self, pushed: b.pos.x - bx, mask, recorded };
+    };
+    const calm = crowd(false);
+    const hurt = crowd(true);
+    check("...with the sprint the only bit of the mask either actor holds",
+          calm.mask === 0 && hurt.mask === ZOMBIE_SPRINTS,
+          `0x${calm.mask.toString(16)} 0x${hurt.mask.toString(16)}`);
+    check("...and it is pushed out of a crowd 1.8x as far (004549b6)",
+          calm.self < 0 && Math.abs(hurt.self / calm.self - 1.8) < 1e-6,
+          `${hurt.self.toFixed(4)} against ${calm.self.toFixed(4)}`);
+    check("...and the actor it pushed is shoved 1.8x as far on that actor's "
+          + "own next frame (00454944)",
+          calm.recorded && hurt.recorded && calm.pushed > 0
+          && Math.abs(hurt.pushed / calm.pushed - 1.8) < 1e-6,
+          `${hurt.pushed.toFixed(4)} against ${calm.pushed.toFixed(4)}, `
+          + `recorded ${calm.recorded}/${hurt.recorded}`);
   }
 }
 

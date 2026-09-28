@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 91122 | 293 | engine |
+| `game/` | 91217 | 293 | engine |
 | `hod2lib/` | 18583 | 35 | engine |
-| `render/` | 14650 | 52 | render |
+| `render/` | 14666 | 52 | render |
 | `app/` | 7979 | 28 | app |
 | `script/` | 4390 | 25 | engine |
 | `ui/` | 3031 | 23 | ui |
@@ -29,12 +29,12 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **144734** | **479** | |
+| **total** | **144845** | **479** | |
 
 The largest files, which is where the pressure to split next is:
 
 * `game/globals.ts` — 2689
-* `game/actor.ts` — 2570
+* `game/actor.ts` — 2577
 * `app/main.ts` — 2340
 * `hod2lib/exetab.ts` — 2212
 * `script/walker.ts` — 2140
@@ -142,7 +142,7 @@ nothing exits 3 and is never counted as green.
 | `verify_scene_exits` | that a terminal route record's `next[0]` is a live block of the *next* scene, and that a hole follows every one of them -- the only check that reads the handover from one stage to the next, and so the only thing that can say stage 3 and stage 4 have two entry points each | game-dir |
 | `verify_looping_se` | that `PlaySoundId`'s two loop tables really do pair index for index -- every entry is `X.wav` against `X_OFF.wav` and no `_OFF` file ships, which is the only thing that says a stop id is a control word rather than a sound, and so the only thing that makes the chainsaw a loop rather than a one-shot | game-dir |
 | `verify_bgm_stream` | that the music has no loop points to find -- the exe's own bytes stream channel 0xF and seek it back to the first sample at end of file, the port's one-shot ids are the exe's three, and every looping track in both tables is long enough for that model to be exact | game-dir |
-| `verify_root_pose` | that a clip's root translation still either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes because Ghidra shows neither of them whole -- and the only place the set of actors the second arm can move is enumerated: every motion block in the game measured for an absolute horizontal root, paired with the class-0x10 wait word that governs it | game-dir |
+| `verify_root_pose` | that a clip's root translation still either moves the object or offsets the pose -- the two arms of one `model+0x64` bit, quoted as bytes because Ghidra shows neither of them whole -- and the only place the set of actors the second arm can move is enumerated: every motion block in the game measured for an absolute horizontal root, paired with the class-0x10 wait word that governs it -- and the size both arms are drawn at: `ActorBuildSkinnedModel`'s per-type switch decoded from its jump table against the port's `ActorModelScale`, and the characters that pose those clips found in the six stages' spawns | game-dir |
 | `verify_combat` | that the shot and damage tables hold together across every character type -- and the only place the *exact* set of attacks the engine can never land is asserted, which is what stops the crawlers' condition-4 swing being filtered out again as an impossible row | game-dir |
 | `verify_effects` | that each of the 29 effect trees walks to exactly the node count `g_effect_bone_counts` declares, and that every motion the effect system plays divides by the stride that count implies -- the only check that reads a motion at the effect stride rather than a character's | game-dir |
 | `verify_horde` | that every number the class-0x40 horde is steered by -- its entry splines, spline rates, shot delays, wander grid, second skin and the emerge prop's corners -- is the EXE's, and that the seven descriptors split five hordes to two props on the byte PlaceHorde switches on | game-dir |

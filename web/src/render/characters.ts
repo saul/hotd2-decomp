@@ -26,8 +26,11 @@
  * for (node in skeleton) FUN_004107E0(node);   // each bone, recursively
  * ```
  *
- * The first three lines are baked into the instance root by the exporter. The
- * middle two are *between* the object transform and the bones, which is why
+ * The first three lines are the instance root's: the exporter bakes the spawn
+ * pose into it, and `placeRoot` replaces that with the live position, rotation
+ * and size every frame (the scale commutes with the rotations, being uniform,
+ * so this build's `T S R` and the per-frame draw's `T R S` are one matrix).
+ * The middle two are *between* the object transform and the bones, which is why
  * this inserts a group of its own rather than writing onto the instance root:
  * the motion root translation is expressed in the object's rotated frame, so
  * putting it on the root would apply it in world space and slide every
@@ -526,44 +529,11 @@ export class CharacterLayer implements System {
         this._up.z = this._v2w[6];
         if (PoseFromModelBlock(inst, this._up)) continue;
       }
-      // The director owns position and facing; apply what it decided. The
-      // exporter baked the spawn pose into the root, and this replaces it
-      // with the live one rather than composing onto it.
-      // **A rider is drawn where its carrier's matrix puts it.**
-      // `CarriedZombieUpdate18` (`FUN_0045CD90`) and `CivilianUpdateOnCarrier`
-      // (`FUN_0048B140`) push the carrier's transform around their whole
-      // update, so the actor's own position is carrier-relative and the draw
-      // inherits the matrix. The port composes the point in `game/carrier.ts`
-      // and publishes it; this reads it.
       if (poseBoss3(inst)) {
         // Class 0x45 composes its own matrices; this places them. See
         // `render/characters/boss3.ts`.
       } else {
-        if (placeHordeRoot(inst)) {
-          // Class 0x40's sub-model: its own object transform. See
-          // `render/characters/horde.ts`.
-        } else if (placeJudgmentRoot(inst)) {
-          // Classes 0x22 and 0x23: all three angles, in each model's own
-          // order (`model+0x68`). See `render/characters/judgment.ts`.
-        } else if (placeBatRoot(inst)) {
-          // Class 0x46: all three angles in order 5, at the model's own
-          // size. See `render/characters/bat.ts`.
-        } else if (placeThrowerRoot(inst)) {
-          // Class 0x31: all three angles in order 1. See
-          // `render/characters/thrower.ts`.
-        } else if (placeHumanoidRoot(inst)) {
-          // Class 0x25: the same order, which `ScriptedHumanoidInit` writes.
-          // See `render/characters/humanoid.ts`.
-        } else if (inst.a.carrierAt >= 0) {
-          inst.root.position.set(inst.a.carrierWorld.x,
-                                 inst.a.carrierWorld.y,
-                                 inst.a.carrierWorld.z);
-          inst.root.rotation.set(
-            0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
-        } else {
-          inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
-          inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
-        }
+        this.placeRoot(inst);
         // The clocks belong to the port -- `ActorAdvanceMotion` -- so the
         // game can be run with no renderer at all, and so a swing keeps its
         // play position across a save state. This only reads them.
@@ -602,6 +572,67 @@ export class CharacterLayer implements System {
     // *after* drawing the flier, so it reads this frame's pose: every
     // instance is posed by now.
     seatJudgmentSubActors(this.instances);
+  }
+
+  /**
+   * The object matrix `SkeletonApplyRootMotion` (`FUN_00410C50`) puts on the
+   * stack before the pose -- `T(obj+0x40)`, the actor's rotation in its
+   * model's order, then `MatrixScale(model+0x116C)` -- onto the root node, so
+   * that the pose group and every bone below it hang from it as the engine's
+   * do.
+   *
+   * The director owns position and facing; this applies what it decided. The
+   * exporter baked the spawn pose into the root, and this replaces it with the
+   * live one rather than composing onto it. Class 0x45 (`poseBoss3`) and an
+   * actor drawn from the model block (`PoseFromModelBlock`) place their own
+   * roots and never come here.
+   *
+   * **The size is every skinned actor's, and it is the last thing on the
+   * matrix.** `MOV EAX,[EDX+0x116C]` and three `PUSH EAX` into `MatrixScale`
+   * at `0x00410FEA`..`0x00410FF7`, after whichever of the six rotation orders
+   * `model+0x68` picks and before the pose translate at `0x0041100B` or
+   * `0x00411020` -- the same place for every class that draws through this
+   * routine, which is every class this layer places. A root node's scale is
+   * applied after its rotation and inside its children, so the pose offset
+   * (`render/characters/pose.ts`, on the pose group), the bones, their hit
+   * centres, the attachments and the held items all shrink with the model, as
+   * they do on the engine's stack. `Actor.scale` is `ActorModelScale` from
+   * the build, or what class 0x10's op 0x27 wrote over it.
+   *
+   * Class 0x40's member is the one exception, and not through this routine:
+   * `SubModelApplyObjectTransform` scales by the sub-model's own `obj+0x134C`
+   * (`render/characters/horde.ts`).
+   */
+  private placeRoot(inst: Instance): void {
+    const a = inst.a;
+    if (placeHordeRoot(inst)) return;
+    if (placeJudgmentRoot(inst)) {
+      // Classes 0x22 and 0x23: all three angles, in each model's own order
+      // (`model+0x68`). See `render/characters/judgment.ts`.
+    } else if (placeBatRoot(inst)) {
+      // Class 0x46: all three angles in order 5. See
+      // `render/characters/bat.ts`.
+    } else if (placeThrowerRoot(inst)) {
+      // Class 0x31: all three angles in order 1. See
+      // `render/characters/thrower.ts`.
+    } else if (placeHumanoidRoot(inst)) {
+      // Class 0x25: the same order, which `ScriptedHumanoidInit` writes. See
+      // `render/characters/humanoid.ts`.
+    } else if (a.carrierAt >= 0) {
+      // **A rider is drawn where its carrier's matrix puts it.**
+      // `CarriedZombieUpdate18` (`FUN_0045CD90`) and `CivilianUpdateOnCarrier`
+      // (`FUN_0048B140`) push the carrier's transform around their whole
+      // update, so the actor's own position is carrier-relative and the draw
+      // inherits the matrix. The port composes the point in `game/carrier.ts`
+      // and publishes it; this reads it.
+      inst.root.position.set(a.carrierWorld.x, a.carrierWorld.y,
+                             a.carrierWorld.z);
+      inst.root.rotation.set(0, (a.yaw + a.carrierYaw) * BAMS_TO_RAD, 0);
+    } else {
+      inst.root.position.set(a.pos.x, a.pos.y, a.pos.z);
+      inst.root.rotation.set(0, a.yaw * BAMS_TO_RAD, 0);
+    }
+    inst.root.scale.setScalar(a.scale);
   }
 
   /**
@@ -775,8 +806,10 @@ export class CharacterLayer implements System {
         continue;
       }
       for (const b of inst.type.bones) {
-        // The record's radius, which a class may have written over the
-        // table's -- `Actor.boneRadius`; `ShotTestBoneSphere` skips a zero.
+        // The record's radius -- `Actor.boneRadius`, which the build wrote as
+        // the table's times the model's size and a class may have written
+        // over since; `ShotTestBoneSphere` skips a zero. The centre needs no
+        // such care: it goes through the bone's node, which carries the size.
         const r = inst.a.boneRadius[String(b.bone)] ?? b.hit_radius;
         if (!r) continue;
         // A removed bone has a zero draw slot, and `ShotTestBoneTree` never
@@ -874,8 +907,8 @@ export class CharacterLayer implements System {
       if (!b || !node || !b.hit_centre) return null;
       out.set(b.hit_centre[0], b.hit_centre[1], b.hit_centre[2]);
       node.localToWorld(out);
-      // `+0x284` is the record's, and a class may have written it --
-      // `Actor.boneRadius`.
+      // `+0x284` is the record's: the build's scaled radius, or what a class
+      // wrote over it -- `Actor.boneRadius`.
       return inst.a.boneRadius[String(bone)] ?? b.hit_radius ?? null;
     }
     return null;
@@ -1151,26 +1184,7 @@ export class CharacterLayer implements System {
       if (poseBoss3(inst)) {
         // See `update`.
       } else {
-        if (placeHordeRoot(inst)) {
-          // See `update`.
-        } else if (placeJudgmentRoot(inst)) {
-          // See `update`.
-        } else if (placeBatRoot(inst)) {
-          // See `update`.
-        } else if (placeThrowerRoot(inst)) {
-          // See `update`.
-        } else if (placeHumanoidRoot(inst)) {
-          // See `update`.
-        } else if (inst.a.carrierAt >= 0) {
-          inst.root.position.set(inst.a.carrierWorld.x,
-                                 inst.a.carrierWorld.y,
-                                 inst.a.carrierWorld.z);
-          inst.root.rotation.set(
-            0, (inst.a.yaw + inst.a.carrierYaw) * BAMS_TO_RAD, 0);
-        } else {
-          inst.root.position.set(inst.a.pos.x, inst.a.pos.y, inst.a.pos.z);
-          inst.root.rotation.set(0, inst.a.yaw * BAMS_TO_RAD, 0);
-        }
+        this.placeRoot(inst);
         this.poser.pose(inst);
         poseHordeJaw(inst, this.poser);
         syncJudgmentWings(this.goreParts, inst, this.poser);

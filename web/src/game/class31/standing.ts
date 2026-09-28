@@ -228,8 +228,9 @@ export function ThrowerStateStrikeOnTheSpot(obj: ThrowerActor, dt: number,
  * into `+0x7C` -- `ThrowerStateRearm` at `0x0044F831`/`0x0044F891` through
  * type 0x16's own pointer, `ThrowerStateRestoreBothHands` at `0x0044F9F6` and
  * `0x0044FA61` through `obj+0x1F4`'s. `[proved]` That is the radius
- * `SpawnThrownWeapon` zeroed, **unscaled**, which is exactly the table value
- * the port falls back to, so dropping the override is the write.
+ * `SpawnThrownWeapon` zeroed, written back **unscaled** -- a plain `MOV` of
+ * the row's float, where `SkeletonWalkNode`'s build multiplies it by the
+ * model's size -- so it is the bundle's `hit_radius` as it stands.
  */
 function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
                             h: { bone: number; bare: number; armed: number;
@@ -237,7 +238,8 @@ function ThrowerRestoreHand(obj: ThrowerActor, host: GameHost,
   if (obj.boneSlot[String(h.bone)] !== h.bare) return false;
   host.setBoneSlot(obj.at, h.bone, h.armed);
   obj.boneSlot[String(h.bone)] = h.armed;
-  delete obj.boneRadius[String(h.bone)];
+  obj.boneRadius[String(h.bone)] = CharacterTypeOf(obj)?.bones
+    .find((b) => b.bone === h.bone)?.hit_radius ?? 0;
   obj.zones &= ~h.zone;
   return true;
 }

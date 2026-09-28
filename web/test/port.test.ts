@@ -8866,6 +8866,13 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   const TYPE_REARM = {
     ...TYPE31,
     type: 0x16, name: "zsass", file: "zsass.bin",
+    // Both hands carry a sphere, so the re-arm's write can be told from the
+    // throw's zero whichever hand the coin gives.
+    bones: [
+      ...TYPE31.bones,
+      { bone: 8, part: "l_hand", slot: 8, offset: [0, 0, 0], parent: null,
+        damage_rank: [], hit_radius: 1.5, steps: [] },
+    ],
     motions: {
       ...TYPE31.motions, "8": motion(24), "9": motion(24), "5": motion(20),
     },
@@ -8953,9 +8960,11 @@ console.log("class 0x31, a throw ends at the hub and state 29 re-arms it:");
   // is the override coming off.
   check("...the throw zeroed the bare hand's hit-sphere radius",
         radiusThrown === 0, `bone ${bare} radius ${radiusThrown}`);
-  check("...and the re-arm put the table's back",
-        bare !== "" && z.boneRadius[bare] === undefined,
-        JSON.stringify(z.boneRadius));
+  const tableR = TYPE_REARM.bones.find((b) => String(b.bone) === bare)
+    ?.hit_radius ?? 0;
+  check("...and the re-arm wrote the table's radius back, unscaled",
+        bare !== "" && tableR > 0 && z.boneRadius[bare] === tableR,
+        `${JSON.stringify(z.boneRadius)} table ${tableR}`);
   // **The permit left with the weapon.** `SpawnThrownWeapon` (`FUN_004504E0`)
   // copies `obj+0x121` onto the projectile and writes the thrower's to 0 --
   // `MOV [EDI+0x121], BL` at `0x004506D5` with `EBX` zeroed -- and the weapon
@@ -12699,8 +12708,8 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
         return true;
       },
     };
-    check("before the throw the hand has no radius override",
-          z.boneRadius["5"] === undefined, JSON.stringify(z.boneRadius));
+    check("before the throw the hand has the radius the build gave it",
+          (z.boneRadius["5"] ?? 0) > 0, JSON.stringify(z.boneRadius));
     ZombieThrowHandWeapon(z, 5, host);
     check("the throw zeroes the emptied hand's hit-sphere radius",
           z.boneRadius["5"] === 0 && z.boneRadius["8"] === undefined,
@@ -17736,12 +17745,22 @@ console.log("\na stashed path is played by a hook that steps first:");
 // delta by it -- so a smaller character takes smaller steps. This port applied
 // 1.0 to everything and called the field "drawing only".
 {
+  // The three arms store float immediates -- `0x3f19999a`, `0x3f333333`,
+  // `0x3f666666` -- so the port's values are those floats, not the doubles
+  // they round from.
   check("the scale table is the engine's jump table, not a guess",
-        ActorModelScale(30) === 0.6 && ActorModelScale(31) === 0.7
-        && ActorModelScale(32) === 0.9 && ActorModelScale(56) === 0.9
+        ActorModelScale(30) === Math.fround(0.6)
+        && ActorModelScale(31) === Math.fround(0.7)
+        && ActorModelScale(32) === Math.fround(0.9)
+        && ActorModelScale(56) === Math.fround(0.9)
         && ActorModelScale(29) === 1 && ActorModelScale(57) === 1
         && ActorModelScale(8) === 1,
         `${[29, 30, 31, 32, 56, 57].map(ActorModelScale).join(", ")}`);
+  check("...and they are the engine's float bits",
+        [30, 31, 32].map((t) => {
+          const f = new Float32Array([ActorModelScale(t)]);
+          return new Uint32Array(f.buffer)[0].toString(16);
+        }).join(",") === "3f19999a,3f333333,3f666666");
 
   // Stage 1's rescue, in one line: the civilian is type 38 and her captor
   // type 8, so she flees at 0.9 of her clip and he walks at all of his.
@@ -17754,6 +17773,49 @@ console.log("\na stashed path is played by a hook that steps first:");
   const ratio = (captorWalk - civRun) / (0.800 - 0.6885);
   check("...so the captor closes on the civilian 1.6x faster than unscaled",
         Math.abs(ratio - 1.61) < 0.02, `${ratio.toFixed(2)}x`);
+}
+
+// **The build writes the size for every skinned actor, and the hit radii from
+// it.** `ActorBuildSkinnedModel` (`FUN_00410440`) stores `model+0x116C` first,
+// whatever the actor, and `SkeletonWalkNode` (`FUN_004107E0`) then writes each
+// bone record's radius as the table's times that size:
+//
+//     00410837  FLD  float ptr [ECX + 0x1300]   ; g_cur_actor's model+0x116C
+//     0041083D  FMUL float ptr [EAX + -0x4]     ; the row's radius
+//     00410840  FSTP float ptr [ESI + 0x78]     ; the record's
+//
+// The port wrote the size only for an actor that carries the model block, and
+// no radius at all -- every reader took the table's, so a civilian drawn at
+// 0.9 would have been shot through spheres drawn for 1.0.
+{
+  ResetGameGlobals();
+  const PEOPLE: CharacterType = { ...TYPE, type: 38, name: "test civilian" };
+  SetGameTables({ ...CHARS, types: { ...CHARS.types, "38": PEOPLE } } as
+                unknown as CharactersJson);
+  const civ = makeActor(0x3000, SpawnClass.Civilian, 38, "civ");
+  // What op 0x27 might have left on a pooled object: the build overwrites it.
+  civ.scale = 50;
+  ActorBuildSkinnedModel(civ);
+  const s = Math.fround(0.9);
+  check("the build writes the size for an actor with no model block",
+        civ.scale === s && !civ.skel, `${civ.scale}`);
+  check("...and every bone's hit radius, as the table's times the size",
+        civ.boneRadius["1"] === Math.fround(s * 3)
+        && civ.boneRadius["2"] === Math.fround(s * 2)
+        && civ.boneRadius["4"] === Math.fround(s * 2)
+        && civ.boneRadius["5"] === Math.fround(s * 2),
+        JSON.stringify(civ.boneRadius));
+  const z = makeActor(0x3001, SpawnClass.Zombie, 1, "z");
+  ActorBuildSkinnedModel(z);
+  check("...and a type at 1.0 keeps the table's own",
+        z.scale === 1 && z.boneRadius["1"] === 3 && z.boneRadius["2"] === 2,
+        JSON.stringify(z.boneRadius));
+  // The one later writer of the size is op 0x27, and it writes the size only:
+  // the radii are the build's for the rest of the actor's life. That is held
+  // where it could go wrong -- a reader deriving the radius from the live
+  // size -- in `test/render.test.ts`.
+  ResetGameGlobals();
+  SetGameTables(CHARS);
 }
 
 // `ActorPointIsAhead` (`FUN_0045BC10`): the world delta rotated into the

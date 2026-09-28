@@ -23251,6 +23251,82 @@ sprite per part hit) and `RescueTargetInit`'s direct call of the ride-in on
 its own frame are unported; `obj+0x1FC`, the rotation order the rescue sets to
 2, has no field because nothing in `game/` composes a rotation from it.
 
+## 2026-09-28 -- every skinned actor drawn at its model's size (branch `worktree-agent-a271ad1688e59a06c`)
+
+**The report.** `game/root_motion.ts` carried a declared divergence: the
+engine draws the pose offset -- and the whole model -- under
+`MatrixScale(model+0x116C)`, and the port drew every skinned actor at 1.0 but
+the bat. "Making it faithful means scaling every skinned actor's drawn size."
+
+**What the exe does with the field.** Read from the instruction stream, not
+the pseudocode (`L1`: every consumer passes it as a pushed float):
+
+* `ActorBuildSkinnedModel` (`0x00410440`) writes it first, from the type at
+  `model+0x60`: `ADD EAX,-0x1E; CMP EAX,0x1A; JA` to `0x3F800000`, else the
+  index bytes at `0x00410568` (`00 01` and twenty-five `02`) into the jump
+  table at `0x0041055C` -- 0.6 for 30, 0.7 for 31, 0.9 for 32..56. `[proved]`
+* The draw tail of `SkeletonApplyRootMotion` pushes it three times into
+  `MatrixScale` at `0x00410FEA`..`0x00410FF7`, between the rotation (any of the
+  six orders) and the pose translate; `SkeletonBuildAndPose` at `0x0041061B`
+  likewise. Every bone hangs from that matrix. `[proved]`
+* `SkeletonWalkNode` (`0x004107E0`) stores each bone record's hit radius as
+  `obj+0x1300 * row.radius` (`0x00410837`..`0x00410840`) -- once, at build --
+  and the centre unscaled, because the node matrix scales it. `[proved]`
+* Every other reader -- `SkeletonDrawNodeSlot`, `ActorDrawAttachedParts(Lit)`,
+  `DrawCharacterPartSlot`, `CivilianDrawHeldItems`, the unfunctioned
+  `0x0041A213` -- hands it to `NoOpStub` and nothing else. A byte search for
+  `6c110000` (`L32`) found that last one, which the operand search had missed
+  because no function covers it. `[proved]`
+* The one later writer is class 0x10's op 0x27, and the one command that runs
+  it -- 50.0, stage 4's `player_gold` in blocks 23 and 25 -- is how Goldman
+  gets onto the arena's jumbotron. `[likely]`: the port showed an empty screen
+  through his whole speech before this and shows him filling it after.
+
+**The port.** `ActorBuildSkinnedModel` writes `Actor.scale` for every actor it
+builds (it wrote it only for the one class that carries the model block) and
+each bone's radius into `Actor.boneRadius`; `ActorModelScale` returns the
+engine's floats. `render/characters.ts` has one `placeRoot` for the update and
+the resync, which puts `Actor.scale` on every root it places -- the bat's
+special case is now the general rule. Class 0x45 and the model block already
+carried their own. `tools/verify_root_pose.py` decodes the switch against
+`ActorModelScale` and finds, in the six stages' evts, every character that
+poses a clip's root: one, stage 4's type-48 civilian at `0x3578`.
+
+**Screenshots** (`extract/compare/model-scale/` in the worktree, before/after
+pairs under `?drive=1&seed=1`, game canvas only): `s1b1_f0020` (stage 1 block
+1 step 8: the suited civilian a head shorter, the zombie beside him
+unchanged), `s4b4_f0090` (stage 4 entry 4 block 4 step 7: the crawling
+civilian smaller and further into his hole), `s4b23_f0220`/`f0320` (the
+jumbotron, empty before and Goldman after), and `s1b14_f0400` (JUDGMENT) and
+`s2b3b_f0340`/`f0400` (a `zsass` thrower), which are byte-identical PNGs --
+every type at 1.0 draws exactly as it did. Playthroughs: stage 2 ends at the
+same frame (9750, GAME OVER at block 16) before and after; stage 1 reaches its
+end block both times, at 9120 frames against 9285 -- where the two runs part
+was not pinned down.
+
+**Wrong turns.**
+
+* The old note's "2.594 units" was `0.9 * 2.882` with the 2.882 already
+  rounded; the root is `(-0.104, 0.805, -2.880)`, 2.8816 across, and the
+  engine draws 2.5935. The check caught it the first time it computed the
+  number instead of quoting it.
+* I meant to export a per-type scale into the bundle, as the brief suggested
+  if it was missing. It is not missing: the port transcribes the switch and
+  every actor carries the result, and `Actor.scale` has to be the per-actor
+  field anyway because op 0x27 writes it. A bundle copy would have been a
+  second source the renderer must not read. The switch is pinned by the
+  verifier instead.
+* `SkeletonWalkNode` also gates each row on its slot matching the node's, and
+  the exporter does not: the rows of twelve shipped types disagree with
+  their nodes on at least one bone, zndina's, zsass's and the frog's among
+  them (the list is on `ActorBuildSkinnedModel`). Porting that gate alone would zero the thrower's hands for
+  good, because what restores them -- `ResolveDamagedPartSphere` on a part
+  swap and `ThrowerStateRestoreBothHands` -- is unported. Declared on
+  `ActorBuildSkinnedModel` rather than half-done.
+* The first stage-2 playthrough after the change died on "Execution context was
+  destroyed" at frame 8055; alone, it ran to the same GAME OVER at 9750 as the
+  old code. That was another page reload, not the change (`L29`).
+
 ## 2026-09-28 -- the `[diverges]` and `[open]` counts made true (branch `worktree-agent-aacb922d35020b0ee`)
 
 **The report.** STATUS's two honest measures were inflated and partial: tags

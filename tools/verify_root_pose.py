@@ -45,6 +45,24 @@ This checks the reading two ways, both of which can fail:
 The second half is the part that would have caught this: it names every actor
 in the shipped game the fix can move, and there are four.
 
+**And the offset is drawn at the character's size.** Both translates sit
+under `MatrixScale(model+0x116C)`, which the draw tail pushes between the
+actor's rotation and the pose translate:
+
+    00410fea  MOV EAX,[EDX+0x116C]; PUSH EAX x3  ; model+0x116C
+    00410ff7  CALL MatrixScale                   ; before 0x0041100B/0x00411020
+
+and `ActorBuildSkinnedModel` writes that field from the character type alone,
+through a jump table this check decodes rather than trusts: types 30 and 31
+at 0.6 and 0.7, 32..56 at 0.9, everything else 1.0. So the posed offset the
+engine draws is the clip's times the size of whoever plays it, and the check
+finds who does -- every class-0x10 spawn in the six stages whose script can
+reach a posed clip -- and asserts they are all people at 0.9: **2.593 units
+drawn, of the 2.882 authored.** The port drew the 2.882 for as long as it drew
+every skinned actor at 1.0. `SkeletonWalkNode`'s radius store, the other place
+the size is read as a size, is held too: the bone's hit radius is the table's
+times it, at build.
+
     python3 tools/verify_root_pose.py --game-dir ~/"THE HOUSE OF THE DEAD 2"
 """
 from __future__ import annotations
@@ -57,7 +75,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from hod2lib import evt as evtlib  # noqa: E402
 from hod2lib import mot as motlib, stage as stagelib  # noqa: E402
+from hod2lib.actorscript import civilian_motion_ids  # noqa: E402
 from hod2lib.exetab import ExeTables  # noqa: E402
 
 #: The instruction stream, address -> (hex bytes, what it is). Every one of
@@ -80,7 +100,47 @@ INSTRUCTIONS = {
                  "ActorBuildSkinnedModel: MOV [ESI+0x64],3 -- on for everyone"),
     0x00451759: ("83e2fd",
                  "RescueTargetInit: AND EDX,0xFFFFFFFD -- and off for class 0x21"),
+    # -- the size both translates are drawn at ------------------------------
+    0x00410FEA: ("8b826c110000",
+                 "the draw tail: MOV EAX,[EDX+0x116C], the model's size"),
+    0x00410FF0: ("505050", "...pushed three times"),
+    0x00410FF7: ("e8c48c0900",
+                 "...into MatrixScale (0x004A9CC0), before the pose translate"),
+    0x00410451: ("0fbf4660",
+                 "ActorBuildSkinnedModel: MOVSX EAX,[ESI+0x60], the type"),
+    0x00410455: ("83c0e2", "...ADD EAX,-0x1E"),
+    0x00410458: ("83f81a", "...CMP EAX,0x1A: types 30..56 take the table"),
+    0x0041045B: ("7733", "...and the rest JA to the 1.0 arm"),
+    0x00410490: ("c7866c1100000000803f",
+                 "the 1.0 arm: MOV [ESI+0x116C],0x3F800000"),
+    0x00410837: ("d98100130000",
+                 "SkeletonWalkNode: FLD [ECX+0x1300], g_cur_actor's size"),
+    0x0041083D: ("d848fc", "...FMUL [EAX-4], the sphere row's radius"),
+    0x00410840: ("d95e78", "...FSTP [ESI+0x78], the record's radius"),
 }
+
+#: `ActorBuildSkinnedModel`'s switch: the index bytes, one per type from 30,
+#: and the jump table they index. Decoded below, not quoted.
+SCALE_FIRST_TYPE, SCALE_TYPES = 30, 27
+SCALE_INDEX, SCALE_JUMPS = 0x00410568, 0x0041055C
+
+#: What the decode has to come to: `ActorModelScale` in
+#: `web/src/game/root_motion.ts`, which transcribes it.
+def expected_scale(char_type: int) -> float:
+    f = lambda v: struct.unpack("<f", struct.pack("<f", v))[0]  # noqa: E731
+    if char_type == 30:
+        return f(0.6)
+    if char_type == 31:
+        return f(0.7)
+    if 32 <= char_type <= 56:
+        return f(0.9)
+    return 1.0
+
+
+#: The size of every character that can pose `CIVILIAN_POSED_CLIPS`, and the
+#: offset the engine therefore draws. `[proved]` by enumeration below.
+CIVILIAN_POSED_SCALE = expected_scale(48)
+CIVILIAN_POSED_DRAWN = 2.5935
 
 #: `CivilianWait.RootMotion` -- bit 0x00100000 of the wait word that opened the
 #: block, which `CivilianRunScript` (`FUN_0048B9E0`) copies into `model+0x64`
@@ -209,8 +269,36 @@ def main() -> int:
         if got != want:
             problems.append(f"{va:#010x}: expected {hexb} ({what}), "
                             f"found {got.hex() or '<unmapped>'}")
-    print(f"{len(INSTRUCTIONS)} instructions of the two arms, "
+    print(f"{len(INSTRUCTIONS)} instructions of the two arms and the size, "
           f"{len(INSTRUCTIONS) - len(problems)} matching their bytes")
+
+    # -- the size, decoded from the switch rather than quoted --------------
+    # `MOV CL,[EAX+0x410568]; JMP [ECX*4+0x41055C]`, and each arm a
+    # `MOV dword ptr [ESI+0x116C], imm32` -- `c7 86 6c 11 00 00` and the float.
+    index = at(SCALE_INDEX, SCALE_TYPES)
+    jumps = [struct.unpack("<I", at(SCALE_JUMPS + 4 * i, 4) or b"\0" * 4)[0]
+             for i in range(max(index or b"\0") + 1)]
+    scale: dict[int, float] = {}
+    for i, k in enumerate(index):
+        arm = at(jumps[k], 10)
+        if len(arm) != 10 or arm[:6] != bytes.fromhex("c7866c110000"):
+            problems.append(f"type {SCALE_FIRST_TYPE + i}: jump arm "
+                            f"{jumps[k]:#010x} is not a store to +0x116C "
+                            f"({arm.hex()})")
+            continue
+        scale[SCALE_FIRST_TYPE + i] = struct.unpack("<f", arm[6:])[0]
+    wrong = [t for t, v in scale.items() if v != expected_scale(t)]
+    for t in wrong:
+        problems.append(f"type {t}: the switch stores {scale[t]!r}, the port "
+                        f"says {expected_scale(t)!r}")
+    runs: dict[float, list[int]] = {}
+    for t, v in sorted(scale.items()):
+        runs.setdefault(v, []).append(t)
+    print(f"ActorBuildSkinnedModel's size switch, types {SCALE_FIRST_TYPE}.."
+          f"{SCALE_FIRST_TYPE + SCALE_TYPES - 1}: "
+          + ", ".join(f"{v:.8g} for {min(ts)}..{max(ts)}"
+                      for v, ts in runs.items())
+          + f"; {len(scale) - len(wrong)} of {SCALE_TYPES} as the port has them")
 
     # -- the population ----------------------------------------------------
     blocks = load_all_blocks(game)
@@ -263,6 +351,39 @@ def main() -> int:
                             f"{CIVILIAN_POSED_ROOT}")
         print(f"  motion {m} in {name}: ({r0[0]:.3f}, {r0[1]:.3f}, "
               f"{r0[2]:.3f}), {h:.3f} units")
+
+    # -- ...and who poses them, at what size -------------------------------
+    # Every class-0x10 spawn in the six stages: `{i8 char_type; i8 script}` at
+    # the descriptor's `+0x24`, and the script's reachable clips. The offset
+    # the engine draws is the clip's times that character's size.
+    civ = ExeTables(exe).civilian_scripts()
+    authored = max((blocks[m][2] for m in posed), default=0.0)
+    players: list[tuple[int, int, int]] = []
+    for n in range(1, 7):
+        ev = stagelib.Stage(game, stage=n).evt()
+        if ev is None:
+            problems.append(f"stage {n}: no evt")
+            continue
+        for rec in evtlib.spawns(ev):
+            if rec.cls != 0x10 or rec.offset + 0x26 > len(ev.raw):
+                continue
+            ct, entry = struct.unpack_from("<bb", ev.raw, rec.offset + 0x24)
+            if set(civilian_motion_ids(civ, entry)) & posed:
+                players.append((n, rec.offset, ct))
+    if not players:
+        problems.append("no class-0x10 spawn reaches a posed clip -- the "
+                        "pairing below asserted nothing")
+    for n, off, ct in players:
+        size = scale.get(ct, 1.0)
+        drawn = size * authored
+        print(f"  stage {n} spawn {off:#x}, character type {ct}: size "
+              f"{size:.8g}, so {drawn:.4f} units drawn of the {authored:.4f} "
+              "authored")
+        if size != CIVILIAN_POSED_SCALE or abs(drawn - CIVILIAN_POSED_DRAWN) \
+                > 5e-4:
+            problems.append(f"stage {n} spawn {off:#x} (type {ct}) poses a "
+                            f"clip at size {size}, drawing {drawn:.3f} units "
+                            f"-- the port's notes say {CIVILIAN_POSED_DRAWN}")
 
     print()
     if problems:

@@ -22033,6 +22033,29 @@ Every run now ends where main's does. Three runs with screenshots taken inside
 the loop came out 15 to 90 frames off their plain twins: taking a screenshot is
 not free under the drive seam, so the table is the plain runs only.
 
+**And after `a237a5c`** (the continue screen's hold, the shutter task, the
+thrown weapons), both trees on a fresh export:
+
+| run | main `a237a5c` | this branch |
+|---|---|---|
+| stage 1 | hung at block 3 op 1/26 (the frogs' room) | end block at 9930, block 3 cleared only by the debug clear |
+| stage 2 | GAME OVER, block 16 op 6/10, 9840 | GAME OVER, block 16 op 6/10, 9915 |
+| stage 3 | end block at 8355 | end block at 8970 |
+| stage 4 | end block at 7635 | end block at 7695 |
+| stage 5 | hung at block 1 op 69 | the same |
+| stage 6 | hung at the Tower gate, block 2 op 77 | the same |
+| stage 1 `--boss` | left block 14 at 14194 (4293 in it); block 3 unclearable | 14268 (4338); the same |
+| stage 2 `--boss --no-damage` | 19605 (5400) | 19371 (5256) |
+| stage 3 `--boss --no-damage --hang 3000 --shoot-for 1500` | 16280 (7890) | 18255 (9130) |
+| stage 4 `--boss --no-damage` | 14865 (7110) | 14735 (6815) |
+| stage 5 `--boss` | 13483 (1650) | 13561 (1635) |
+
+Stage 1's frog room fails on both: two frogs stand in `Die` sub 1 with
+`g_enemies_alive` 1 and present 3, which is class 0x11's and not the camera's.
+The Tower's block 11 takes the branch 1240 frames longer than main now, where
+at `39a7065` the two were within 100 (9149 against 9055); main's time fell and
+this branch's did not, and I have not traced why. `[open]`
+
 **Still `[diverges]`, camera-related:** `CamPathCueReached` treats a cue the
 seek landed past as reached (the engine never seeks); four class routines read
 camera block 0 where the exe reads block 2 or the bare block-0 symbol

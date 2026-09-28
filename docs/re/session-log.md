@@ -24286,3 +24286,69 @@ sprint change (`30a0ebf0`), which alters which strike a shot zombie picks and
 so which poses show up in a given run; it was not that. A measurement that
 refreshes the state it measures agrees with any claim about it -- `L69`'s
 shape, one layer further in.
+
+
+## 2026-09-28 -- zombies' heads always pitched up: the head aim read the lens
+
+Reported as "zombies heads are now always pitched up". The cause is in the
+head aim's own commit, `d274af2b` (merged `39a7065e`), not a later one:
+`ActorAimHeadAtCamera` passed `ClassFrame.eye` to `ActorHeadAimAngles`, which
+added the exe's 15.0 to it. `ClassFrame.eye` is `ctx.view.eye`, the lens --
+the camera the renderer drew -- and the exe's routine reads `g_camera_eye`
+(`0x009C71E0..E8`) in both branches and nothing else (`MOV`s at
+`0x00453DA3..0x00453DAE`, `FLD`s at `0x00453E66`/`0x00453E7B`/`0x00453E8E`;
+its one argument is `pt`) `[proved]`. `g_camera_eye` is the gameplay eye,
+which the path hooks write as `pose.y - 15.0` (`0x004C4398`), so the exe's
+`+ 15` lands the target back on the lens; the port's landed it fifteen above
+the camera. At 39a7065e the port had no gameplay eye at all -- `GameSystem`
+copied the lens into `G.g_camera_eye` -- so reading `G` then would have been
+wrong the same way; since the camera-faithful merge the hooks write it, and
+only the head aim was still reading the frame's copy of the lens. The doc
+comment on `ActorHeadAimAngles` had said the two "coincide on a path"; they
+differ by exactly the fifteen.
+
+**Bisected numerically, not by eye.** A driven page (`?stage=1&block=1&
+mode=play&drive=1&seed=1`, 900 frames, every 15th sampled) read every
+class-0x30 actor's `headPitch` and the world point of its record. At
+`39a7065e` (on a bundle that commit's exporter wrote) the mean aimed pitch
+was -6333 BAMS, -34.8 degrees; at `58c0c60f` -6323, -34.7 -- the same fault,
+with 22 of 104 samples identical to the unit. After the fix +415 (+2.3), and
+the miss against the pitch that looks into the lens falls from 37.0 degrees
+to 0.3. At frame 285 the nearest zombie, ten units off, had its head thrown
+back 58 degrees at the ceiling; after, it looks into the camera.
+
+**The suspects that were not it.** (1) The hit-sphere gate in
+`ActorBuildSkinnedModel` (`629832ca`): `SkeletonWalkNode` does zero the
+centre as well as the radius when the row's slot is not the node's -- `XOR
+EBP, EBP` at `0x004107EE`, then `MOV [ESI+0x78/0x84/0x80/0x7C], EBP` at
+`0x00410876..0x00410885` `[proved]` -- so the port's gate is right, and stage
+1's zombies carry bone 2's row anyway (`[0, 0.5, 0.35]`, radius 1.3 in the
+page). `SkeletonEmitNode` writes `+0x68 = MatrixTransformPoint(top, +0x7C)`
+at `0x0041168A..0x004116C9` `[proved]`, the record the aim reads. (2)
+`host.cameraMatrices`: the record's world point came back at head height
+(y 22.6 against a lens at 21), so the round trip was sound.
+
+**And a second, smaller fault in the same routine.** The record the aim reads
+is in the view of the frame that drew it, and the aim reads it back through
+this frame's `g_camera_blocks`, so in the exe it moves with the camera for one
+frame. The port took it through this tick's world-to-view -- since
+`3a28137a` that is the matrix the camera actor built this tick, before the
+head aim ran, and before that it was the renderer's, the same at both ends --
+so it always came back as exactly the posed point. `HeadAimEndDraw` now keeps
+the view its frame's draw used (`HeadAimWords.headRecordView`, port-only) and
+`HeadAimBeginDraw` takes the record through it. Under a degree at the speeds
+the rails move, but it is what the engine computes.
+
+Two checks in `port.test.ts`, both seen failing on a mutant that restored the
+old reads (pitch -3040 where 0 is right, record z 60 where 50 is): a head
+level with the lens settles level when the eye is written by
+`CameraHoldEyeTick` rather than by hand (`L49`), and a camera that backs off
+ten between two frames leaves the record where the first view put it. The
+existing fixture set `G.g_camera_eye` to the lens by hand, which is the one
+arrangement under which the fault cannot show; it now says so.
+
+**Open, not touched:** `ClassFrame.eye` is the lens for every class. Where
+an exe routine that the port hands `f.eye` actually reads `g_camera_eye`,
+the port is fifteen high there too; x and z agree, so turns and ground
+ranges cannot show it, but a height or a 3D distance to the eye could.
+`[open]` -- not audited here.

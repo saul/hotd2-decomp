@@ -45,7 +45,7 @@ import { CameraUpdateHook, EvtActionHandler }
   from "../src/game/camera/driver";
 import { CameraActorTick, CameraUpdateTick } from "../src/game/camera/actor";
 import { UpdateSceneViewAndLight } from "../src/game/camera/view";
-import { CameraFromViewAngles } from "../src/game/camera/hooks";
+import { CameraFromViewAngles, CameraHoldEyeTick } from "../src/game/camera/hooks";
 import { CameraBlocksReset } from "../src/game/camera/actions";
 import { ChooseDeathMotionDirectional } from "../src/game/combat/resolve_hit";
 import { FishSpawnWaterSplash, WaterSplashUpdate }
@@ -33554,8 +33554,10 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
     ResetGameGlobals();
     SetGameTables(CHARS);
     EnterPlay();
-    // What `GameSystem.update` writes from the camera each tick, and the
-    // spawn opcodes read on the next.
+    // A gameplay eye **at** the lens, which only a fixed eye height set to
+    // the lens's own would give: it keeps the arithmetic below readable. On a
+    // path the two are fifteen apart, and that case -- the page's -- is
+    // driven through the hook that writes it, further down.
     G.g_camera_eye.x = eye.x; G.g_camera_eye.y = eye.y; G.g_camera_eye.z = eye.z;
     head.x = 0; head.y = 12; head.z = 50;
     const z = spawnZombie(0x9400, 1, "aim", { pos: vec3(0, 0, 50), flags });
@@ -33567,7 +33569,7 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
   const draw = (z: ZombieActor): void => {
     HeadAimBeginDraw(z, z.zom, host);
     ActorRunNodeDrawHooks(z, ZombieDrawBonePart, fr);
-    HeadAimEndDraw(z, z.zom);
+    HeadAimEndDraw(z, z.zom, host);
   };
   const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
 
@@ -33678,17 +33680,69 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
   const t = zombie();
   G.g_camera_block_yaw_bams = 0x8000;
   const far = vec3(0, 10, 101.5);
-  const one = ActorHeadAimAngles(t, far, eye).yaw;
+  const one = ActorHeadAimAngles(t, far).yaw;
   G.g_max_attackers = 2;
   t.attackPermit = 0;
-  const p0 = ActorHeadAimAngles(t, far, eye).yaw;
+  const p0 = ActorHeadAimAngles(t, far).yaw;
   t.attackPermit = 1;
-  const p1 = ActorHeadAimAngles(t, far, eye).yaw;
+  const p1 = ActorHeadAimAngles(t, far).yaw;
   const off = Math.trunc(Math.atan2(1.2, 100) * 65536 / (Math.PI * 2));
   check("two attackers aim 1.5 ahead and 1.2 aside, one side per permit",
         one === -0x8000 && Math.abs(p0 - (0x8000 - off)) <= 1
         && Math.abs(p1 - (-0x8000 + off)) <= 1,
         `${one} ${p0} ${p1} (off ${off})`);
+
+  // The page's case. On a path the gameplay eye is fifteen **below** the
+  // lens -- `CameraHoldEyeTick` writes `g_camera_eye.y = pose.y - 15.0`
+  // (`0x004C4398`) -- while the view, and the `ClassFrame`'s eye, are the
+  // pose's own. `ActorHeadAimAngles` reads `g_camera_eye` in both branches
+  // (`0x00453DA3`, `0x00453E66..0x00453E8E`) and adds the fifteen back, so a
+  // head level with the lens looks level into it. Reading the frame's eye --
+  // the lens -- put the target fifteen above the camera, and every head in
+  // the game looked up.
+  {
+    const lens = vec3(0, 25, 0);
+    const cam = vec3(lens.x, lens.y, lens.z);
+    const lensHost: GameHost = {
+      ...host,
+      cameraMatrices: (w2v, v2w) => {
+        for (let i = 0; i < 16; i++) w2v[i] = v2w[i] = i % 5 === 0 ? 1 : 0;
+        w2v[12] = -cam.x; w2v[13] = -cam.y; w2v[14] = -cam.z;
+        v2w[12] = cam.x; v2w[13] = cam.y; v2w[14] = cam.z;
+        return true;
+      },
+    };
+    const lensFrame: ClassFrame = { eye: cam, dt: 1 / 60, rng: new Rng(1),
+                                    host: lensHost };
+    const drawAt = (z: ZombieActor): void => {
+      HeadAimBeginDraw(z, z.zom, lensHost);
+      ActorRunNodeDrawHooks(z, ZombieDrawBonePart, lensFrame);
+      HeadAimEndDraw(z, z.zom, lensHost);
+    };
+    const z = zombie();
+    G.g_cam_path_eye.x = lens.x; G.g_cam_path_eye.y = lens.y;
+    G.g_cam_path_eye.z = lens.z;
+    CameraHoldEyeTick();
+    check("the path hook puts the gameplay eye fifteen below the lens",
+          G.g_camera_eye.y === lens.y - 15, `${G.g_camera_eye.y}`);
+    head.x = 0; head.y = lens.y; head.z = 50;
+    for (let i = 0; i < 80; i++) drawAt(z);
+    check("a head level with the lens settles level: it looks into the "
+          + "camera, not fifteen above it",
+          (z.zom.headPitch & 0xffff) === 0 && (z.zom.headYaw & 0xffff) === 0x8000,
+          `pitch ${s16(z.zom.headPitch)} yaw ${z.zom.headYaw.toString(16)}`);
+
+    // The record is in the view of the frame that drew it. Between two
+    // frames the camera backs off ten: the engine's record, taken in the old
+    // view and read back through the new, is the head moved ten with it.
+    drawAt(z);
+    cam.z = lens.z - 10;
+    drawAt(z);
+    check("the record is taken in the view its draw used, not the next "
+          + "frame's",
+          z.zom.headRecord.x === 0 && z.zom.headRecord.y === 0
+          && z.zom.headRecord.z === 50, JSON.stringify(z.zom.headRecord));
+  }
 
   // Class 0x31: the same routine, behind the hook's own surface test. A
   // thrower on a wall does not look at you; on the ceiling it does.
@@ -33700,7 +33754,7 @@ console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
       | bits;
     HeadAimBeginDraw(th, th.thr, host);
     ActorRunNodeDrawHooks(th, ThrowerDrawBonePart, fr);
-    HeadAimEndDraw(th, th.thr);
+    HeadAimEndDraw(th, th.thr, host);
     return th.thr.headAimed;
   };
   const ground = aims(0), onWall = aims(wall), onCeiling = aims(ceiling);

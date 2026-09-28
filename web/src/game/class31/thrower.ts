@@ -541,7 +541,7 @@ export function EnemyThrowerUpdate(obj: ThrowerActor, f: ClassFrame): void {
   // `FADD ST0,ST0` at `0x004498E1`), which goes with the item.
   HeadAimBeginDraw(obj, obj.thr, host);
   ActorRunNodeDrawHooks(obj, ThrowerDrawBonePart, f);
-  HeadAimEndDraw(obj, obj.thr);
+  HeadAimEndDraw(obj, obj.thr, host);
   // `PUSH 0; CALL 0x00409b70` at `0x0044998F`, the routine's last act and on
   // every path: the camera point, not lifted, and the candidate filing. The
   // death chain's `0x10000` keeps a corpse off the list.

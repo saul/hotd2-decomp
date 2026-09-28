@@ -1777,11 +1777,39 @@ moves it to **state 3**, which is the swing:
 ```c
 sub 0:  idx = picks[(rand % 10) + (destroyed_zones & 7) * 10];
         atk = attacks[body_condition][idx];
-sub 1:  if (distance > atk.distance)  { play atk.lunge, keep closing; }
-        else { play atk.strike; ActorPlayHitVoice(obj, 3); sub = 2; }
+sub 1:  if (distance > atk.distance && !cooldown_latch) {
+            if (obj+0x1B4 != atk.lunge)            // the track's own motion
+                SetCurrentActorMotionBlended(obj+0x194, atk.lunge, 0, 10);
+            return;                                // keep closing
+        }
+        ActorSetMotionBlended(obj+0x194, atk.strike, 0, 5);
+        ActorPlayHitVoice(obj, 3); sub = 2;
 sub 2:  if (play_position == atk.hit_frame) ActorStrikeConnect(obj);
         if (play_position >= length - 1) -> state 4, re-approach
 ```
+
+**Both motion calls fade, and the fade holds the cursor.** `ActorSetMotionBlended`
+(`FUN_004119A0`) writes `obj+0x19C` = the start frame and raises
+`track+0x37` bit 0, and `SkeletonAdvancePlayCursor` (`FUN_004111A0`) does not
+recompute the cursor from the clock while that bit is up. It lets go once
+`clock - track+0x28` reaches `fade + 2`. `EnemyZombieUpdate` runs the
+state at `0x00453434` and `ZombieAdvanceMotion` at `0x00453457`. That routine
+draws first (`SkeletonDrawWalk` calls the sampler at `0x004110F3`) and steps the
+clock only after. So the swing's frame 0 is drawn `fade + 1` = 6 times, sub 2
+reads it on `fade + 2` = 7 consecutive frames, and the hit lands
+`6 + hit_frame` frames after the swing starts, not `hit_frame`. The
+lunge's clip is held 11 draws the same way. `[proved]`
+
+**The lunge's test is against the track, not against a lunge the state set.**
+`00455b31 CMP [ESI+0x1b4], EAX` / `00455b37 JZ` skips the call whenever the
+track is already playing that clip. In 155 of the 311 shipped entries the lunge
+*is* the actor's run clip (`row[2]` or `row[3]`). `ZombieStateHoldAtRange`
+tries its claim before it sets its idle: `TryClaimAttackSlot` at `0x0045583B`
+hands to state 3 and returns at `0x0045587B`, and the idle's
+`ActorSetMotionBlended` at `0x004558CC` is only on the path where the claim
+failed. So an actor whose claim succeeds on its first frame at the ring is
+still on its run, and keeps playing it as the lunge, with no restart and no
+fade. `[proved]`
 
 The entry is 0x10 bytes:
 

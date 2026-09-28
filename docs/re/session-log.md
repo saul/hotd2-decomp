@@ -21466,3 +21466,112 @@ Checks: `test:audio` (new), `test:seek` (new section), `bgm_loop.mjs` (new),
 `SoundStreamRewind`, `SoundStreamFill`, `SoundChannelOpenWav`, `SoundStreamThread`,
 `SoundOpenFile`, `SoundCommand`; `g_sound_channels`, `g_sound_channel_count`,
 `g_bgm_stop_group`, `g_voice_stop_group`.
+
+## 2026-09-27 -- `ZombieStateStrike` commits at the pick (`obj+0x34` bit `0x10000000`)
+
+`ZombieStateStrike` (`FUN_00455A40`) sub 0 opens, before the draw, with
+`00455a82 MOV ECX,[ESI+0x34]` / `00455a93 AND CH,0xfe` /
+`00455a96 OR ECX,0x10000000` / `00455a9c MOV [ESI+0x34],ECX`: bit `0x100`
+down and `ActorFlag.Committed` up. `ZombieStateBackOff` (`FUN_00455C30`) sub 0
+takes it down in the write that raises `BackingOff` (`00455ca1`/`00455cb1`).
+The port had neither half on this path, so a shot could stagger any zombie out
+of its swing. Both are ported, with the strike's fall-through from sub 1 into
+sub 2 on the frame the clip starts (`00455bc5`, no `RET`) and the one-shot
+latch clear at the swing start (`00455b77`).
+
+**Every reader, swept** -- `TEST` against every mask holding bit 28 (register
+and memory forms, filtered out of all 726 `TEST ..., 0x1…` hits), every `AND`
+that clears it, and the byte forms at `+0x37`:
+
+* `ActorPlayHitReaction` `004544d8` (mask `0x10002000`) -- ported; now fires.
+* `ZombiePushOutOfWorldAndActors` `00454944` (the pusher's) and `004549b6`
+  (its own), mask `0x18000000`, the 1.8x push -- ported, **misnamed** "either
+  airborne bit" in `class30/ground.ts` and `class33/pushable.ts`; renamed.
+* `ZombieStateDelayedStrikeInPlace` `0045eab3` -- ported; that state raises
+  and clears its own.
+* `ZombieTwinFollowHost` `004532e7` (the host's bit) and `ZombieDrawBonePart`'s
+  `0x1C6C` arm `004536bc` -- both unported.
+* `ZombieStateRideCarrier` `00458a35` -- the carrier's `+0x34`, another class.
+* **Not** `RankEnemiesByDistance`: it reads bit 1 and `0x20000000` only.
+  `ActorFlag.Committed`'s doc said "will not be re-ranked out of it"; wrong,
+  corrected.
+* `EnemyZombieUpdate` `0045341c` and `ZombieStateDelayedLeap` `004583ef` test
+  `0x10000000` on `obj+0x136C`, a different word.
+
+Clears on class 0x30: BackOff, StandAndThrow, TargetMotionScript (two),
+DelayedStrikeInPlace, and `FUN_0045DA60` -- reached from
+`ActorAbortAttackAndLeave`, which `ActorReactToHit` calls on **result 4** at
+bones 1 and 9. It clears the bit, releases the permit, sets body condition 4
+and state `0x32`. The port has no result 4 in `HitResultCode`, no state
+`0x32`, and no arm for it: left unported and unnamed here.
+
+**Not ported, declared:** the strike's two effect hooks
+(`ZombieStrikeStartSplash`, `ZombieStrikeFrameSplash`) and the
+`ZombieFlag2.StrikeStarted` raise, whose only reader and clear is
+`ZombieDrawBonePart`'s unported `0x1F09` arm -- raising it with no clear would
+leave it up for good. That is the one new divergence (178 → 179), and it was a
+silent one before.
+
+**Wrong turn.** The task arrived saying BackOff's clear was "now ported". It
+was not, on this branch or on main: it sits uncommitted in a peer worktree
+(`agent-ab760a17…`), in the same hunk as that peer's `BackOffTurnFlip` work.
+Porting the strike's raise without it would have left every zombie that had
+ever swung unstaggerable for the rest of its life. The clear here is the
+peer's line verbatim, so the eventual merge is a context conflict and not a
+disagreement.
+
+**Measured**: `test:port` green with eleven new checks in B8-B10; each of the
+five changes mutated out fails exactly its own assertions (strike write: 7,
+bit-8 clear: 1, BackOff clear: 2, fall-through: 1, latch: 1).
+No reachable shipped attack has a hit frame of 0 or a one-frame strike clip
+(`hod2lib.combat.attack_tables` over all 64 types), so the fall-through changes
+nothing in shipped data.
+
+
+## 2026-09-28 -- `ZombieStateStrike`'s two motion calls: the fade holds, and the lunge's test is the track's
+
+Re-read the two calls from the listing. The lunge is `PUSH 0xa; PUSH 0x0;
+PUSH entry->lunge; PUSH obj+0x194; CALL SetCurrentActorMotionBlended` at
+`0x00455B49`, behind `00455b31 CMP [ESI+0x1b4], EAX` / `00455b37 JZ` to the
+`RET`. The swing is `PUSH 0x5; PUSH 0x0; ...; CALL 0x004119a0` at
+`0x00455B63`. `ActorEndOneShot`'s doc quoted both at the wrong addresses: the
+lunge at `0x00455B54`, which is the strike branch's first instruction, with
+`6a00 6a00` for `6a0a 6a00`; the strike at `0x00455B8A`, which is the
+`ActorPlayHitVoice` call; and the play-length read at `0x00455BD6` rather than
+`0x00455C02`. Corrected from `disassemble_bytes`.
+
+Proved the class-0x30 half of the phase the arc session found.
+`EnemyZombieUpdate` calls the state at `0x00453434`, then
+`ZombieAdvanceMotion` at `0x00453457`. That calls `DrawSkinnedModelAndShadow`
+-> `SkeletonDrawWalk`, whose first call is `SkeletonAdvancePlayCursor` at
+`0x004110F3` (its only caller), and only then `INC [obj+0x194]`. So the swing's
+frame 0 is drawn 6 times, the state reads it 7 times, and the hit lands
+`6 + hit_frame` frames after the swing starts.
+
+**The lunge gate.** The port tested `obj.action?.motion !== atk.lunge`, which
+cannot see a lunge clip that is on the base track. Measured on the disc with
+`hod2lib.combat`: 155 of 311 picked entries name a lunge that is `row[2]` or
+`row[3]`, the run. `ZombieStateHoldAtRange`'s claim (`0x0045583B`) hands over
+and returns before its idle's `ActorSetMotionBlended` (`0x004558CC`), so on a
+first-frame claim the run is still on the track and the engine never calls the
+setter. The lunge was moved to the base track rather than kept on the
+one-shot channel with a wider test, because that is where the engine has it.
+On the base track the hold, the wrap and the gate all come from code that
+already exists. `ActorSetOneShotBlended` would have needed a `loop` argument
+the engine does not have.
+
+Checked before moving it: nothing in class 0x30 reads `obj.action` as "is
+attacking" except the IfIdle guard, the root-motion gate and the poser. No
+shipped row has `row[4]`, the back-away clip, equal to the lunge or to the run.
+So `obj.motion` still naming the lunge after the swing cannot make
+`ZombieStateBackOff`'s IfIdle test skip where the engine's track holds the
+strike.
+
+Port test: the lunge holds 11 frames and its root motion with it, then wraps
+without a restart. A lunge clip already on the track is left alone, and one
+under a one-shot is set again, out of the one-shot. The swing holds 6 frames,
+and the hit lands at swing + 5 + `hit_frame`, where it was swing +
+`hit_frame`. Reverting `strike.ts` fails nine of the ten and B4. The tenth,
+that the lunge's root motion stands still through its hold, passes vacuously
+when there is no hold. Reverting only the gate fails the three lunge-gate
+checks.

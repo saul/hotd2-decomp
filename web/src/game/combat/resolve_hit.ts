@@ -250,13 +250,28 @@ export function ActorPlayHitReaction(obj: Actor, bone: number,
   // Not a state test — a flag test, and the states that must not be
   // interrupted are the ones that raise a bit. `ZombieStateEmerge`
   // (`FUN_004584E0`) holds {@link ActorFlag.NoHitReaction} from its first sub
-  // to the frame it hands over to `AttackRun`; `ZombieStateStandAndThrow` and
-  // `ZombieStateTargetMotionScript` hold {@link ActorFlag.Committed} for the
-  // length of a throw or a maul.
+  // to the frame it hands over to `AttackRun`; `ZombieStateStrike` holds
+  // {@link ActorFlag.Committed} from its pick to `ZombieStateBackOff`'s first
+  // frame, and `ZombieStateStandAndThrow` and `ZombieStateTargetMotionScript`
+  // for the length of a throw or a maul.
   //
   // The port had neither half — no gate here and no raise in the emerge — so
   // every shot on a zombie climbing out of the water or the ground cut its
-  // entrance clip with a stumble.
+  // entrance clip with a stumble. It then had the gate and not the strike's
+  // raise, which let a shot stagger any zombie out of its swing.
+  //
+  // Behind the gate the routine has one more arm, which is not here:
+  // `if (obj+0x1310 == 3 && obj+0x1312 == 2) { obj+0x1310 = 4; obj+0x1312 = 0; }`
+  // -- a shot mid-swing ends the strike. The gate makes it unreachable for
+  // this class: every entry to state 3 writes sub 0 (`00455867`,
+  // `00457743`, `00458c9d`), sub 0 raises `0x10000000` before it can reach
+  // sub 2, and none of the five class-0x30 routines that clear the bit leaves
+  // an actor in state 3 with it down -- `FUN_0045DA60`, the one that can run
+  // mid-strike (from this routine's caller's result-4 arm), writes state
+  // 0x32 in the same breath. `[likely]`, because state writes taken from
+  // script data were not enumerated. The port's copy of this routine is also reached by
+  // classes whose state 3 is something else, which is why it is not
+  // transcribed as dead code.
   if (obj.flags & (ActorFlag.NoHitReaction | ActorFlag.Committed)) {
     return undefined;
   }

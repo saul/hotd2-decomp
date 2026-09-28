@@ -3350,6 +3350,26 @@ it. **The bit had been named `ArcSpent`** after the one thing class 0x31's fall
 states get from it; it is `ActorFlag.NoHitReaction` now, which is what its two
 readers — `ActorPlayHitReaction` and `ThrowerOnShot` — actually do with it.
 
+### A zombie cannot be staggered out of its own attack
+
+The other half of that mask is raised by the **strike itself**, and the port
+had never raised it. `ZombieStateStrike`'s sub 0 opens with one
+read-modify-write of `obj+0x34`, before it draws an attack —
+`00455a93 AND CH, 0xfe` / `00455a96 OR ECX, 0x10000000` — and nothing on the
+melee path lowers the bit again until `ZombieStateBackOff`'s first frame
+(`00455ca1 AND ECX, 0xefffffff`, in the same write that raises `BackingOff`).
+So from the pick, through the lunge and the whole swing, **a shot takes its hit
+points but plays no stumble**; the ways to stop an attack are to kill the
+zombie or to shoot off every limb its entry's cancel mask names, which whiffs
+it in `ActorStrikeConnect`. In the port, every strike could be cut short by a
+stagger. The same bit is half of `ZombiePushOutOfWorldAndActors`' `0x18000000`
+test, which the port had transcribed as "the airborne bits" — a zombie in its
+strike is shoved out of a crowd, and shoves a chair, 1.8× as hard.
+
+`ActorPlayHitReaction` also carries a `state 3 && sub 2 → BackOff` arm behind
+the gate — a shot ending the swing — which the gate makes unreachable for
+class 0x30: every entry to state 3 writes sub 0, and sub 0 raises the bit.
+
 ### What a death throws up, what a corpse leaves, and what a landing sounds like
 
 Five `[diverges]` notes said class 0x30 drew none of this; it draws all of it
@@ -4675,6 +4695,31 @@ cursor wraps there, so an actor on that data would wait out its landing for
 ever; the old port only finished because it bailed out when the arc landed.
 The fixture carries the exe's own wall script now, and `verify_combat.py`
 check 16 asserts that none of the 38 shipped scripts does that.
+
+### A zombie's swing holds its first frame, and its run becomes its lunge
+
+`ZombieStateStrike` (`FUN_00455A40`) sets both of its clips on the one track
+with a fade: the lunge through `SetCurrentActorMotionBlended(obj+0x194, lunge,
+0, 10)` at `0x00455B49`, and the swing through `ActorSetMotionBlended(obj+0x194,
+strike, 0, 5)` at `0x00455B63`. Each call holds the cursor on frame 0 for the
+fade. The port started both on its one-shot channel with no fade, so the arm
+snapped up. Worse, the swing's cursor left 0 on the next frame, so every hit
+landed six frames before the engine's. The swing now goes through
+`ActorSetOneShotBlended`. Its cursor holds 0 for six frames and the hit lands
+five frames later than it did, one frame short of the engine's. That last frame
+is the port's clocks-before-states phase, which the arc work above found and
+which covers every cursor test in the port.
+
+The lunge moved to the ordinary track, where the engine has it. That is what
+makes the engine's own test work: `00455b31 CMP [ESI+0x1b4], EAX` skips the
+call while **the track** is playing the lunge. In 155 of the 311 shipped
+attack entries the lunge is the same clip as the actor's run (`row[2]` or
+`row[3]`), and `ZombieStateHoldAtRange` claims before it sets its idle. So an
+actor that runs straight into its attack just keeps running into it, and the
+run *is* its lunge. The port tested only its one-shot channel, so it cut back to
+the lunge's frame 0 every time. On the base track the lunge also gets its
+11-frame hold, stands still for it, and wraps as the engine's clip does; the
+lunge was the one looping one-shot, and nothing sets `loop` any more.
 
 ### The canal is drawn by a task: class 0x41 type 1
 

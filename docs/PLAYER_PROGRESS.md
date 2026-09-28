@@ -4163,7 +4163,8 @@ that goes never publishes a draw slot.
 
 The move is class 0x30's own arithmetic on furniture — a tenth of the
 penetration along the reversed normal, times 1.8 when the **pusher** carries
-either airborne bit — followed by a re-resolve against the actors in x and z
+either bit of `0x18000000` — its strike's commit or the sprint bit, not an
+airborne bit — followed by a re-resolve against the actors in x and z
 and one against the full collision set at the full depth, with the sphere
 re-seated after every move. The sphere convention is this class's own:
 `obj+0x130 = obj+0x44 + obj+0x128`, the position plus exactly the body radius,

@@ -197,11 +197,11 @@ function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
     case ZombieState.WaitCameraFrameThenBranch:
       return ZombieStateWaitCameraFrameThenBranch(obj);
     case ZombieState.WaitForCameraFrame:
-      return ZombieStateWaitForCameraFrame(obj, dt);
+      return ZombieStateWaitForCameraFrame(obj, dt, rng);
     case ZombieState.WaitScriptFlagThenBranch:
       return ZombieStateWaitScriptFlagThenBranch(obj);
     case ZombieState.ScriptedGrabAndDespawn:
-      return ZombieStateScriptedGrabAndDespawn(obj, eye, events);
+      return ZombieStateScriptedGrabAndDespawn(obj, eye, rng, events);
     case ZombieState.ReleaseBodyCreature:
       return ZombieStateReleaseBodyCreature(obj, eye, rng, host);
     case ZombieState.LeapToPoint:

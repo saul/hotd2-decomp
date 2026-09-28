@@ -27,8 +27,9 @@ import {
 import { SpawnClass } from "../spawn_class";
 import { ActorRegisterCameraPoint } from "../camera/track";
 import { RegisterEnemySlot } from "../camera/slots";
-import { ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot }
-  from "../combat/permits";
+import {
+  AttackClaimRefusal, ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot,
+} from "../combat/permits";
 import {
   ThrowerRetireFromAliveCount, ThrowerRetireFromPresentCount,
 } from "../combat/counts";
@@ -416,7 +417,7 @@ export function ThrowerStateThrow(obj: ThrowerActor, host: GameHost, _eye: Vec3,
     // case 0x1F claims one before it writes the state — but it is the engine's
     // own answer to arriving without one, and the port's used to be a bail to
     // the hub.
-    if (obj.attackPermit < 0 && !ThrowerTryClaimAttackSlot(obj, host)) {
+    if (obj.attackPermit < 0 && !ThrowerTryClaimAttackSlot(obj, rng, host)) {
       obj.attackPermit = 0;
     }
     const bone = ThrowerPickThrowingHand(obj, rng);
@@ -557,7 +558,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
     case ThrowerState.GetUp:
       return ThrowerStateGetUp(obj, eye, rng, host);
     case ThrowerState.RideObjectPath:
-      return ThrowerStateRideObjectPath(obj, dt, host);
+      return ThrowerStateRideObjectPath(obj, dt, rng, host);
     case ThrowerState.LeapStrike:
       return ThrowerStateLeapStrike(obj, dt, rng, host, events);
     case ThrowerState.CloseAndStrike:
@@ -606,7 +607,7 @@ function ThrowerRunState(obj: ThrowerActor, eye: Vec3, dt: number, rng: Rng,
       return ThrowerStateLeapToPoint(obj, dt, rng, events, host);
     case ThrowerState.PathFollow:
       // It moves itself: each leg is an arc with its own duration.
-      return ThrowerStatePathFollow(obj, dt, events, host);
+      return ThrowerStatePathFollow(obj, dt, rng, events, host);
     // No turn here. `TurnActorTowardCamera` (`FUN_00409ED0`) has two callers
     // in the image and both are `ZombieStateAttackRun`'s; `ThrowerStateThrow`
     // calls no turn routine at all, so a thrower throws on the facing
@@ -771,17 +772,13 @@ export function ThrowerEntryState(obj: ThrowerActor): ThrowerState {
 export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
   // `ThrowerStateWaitForPermit` is a pose held until a permit frees, so an
   // actor parked in it looks exactly like one whose own logic has stalled.
-  // `ThrowerTryClaimAttackSlot` refuses on two things and neither is visible
-  // from the row without saying so.
+  // `ThrowerTryClaimAttackSlot` refuses on the latch, the one player it
+  // offers and that player's state, and none of it is visible from the row
+  // without saying so.
   const waiting = obj.state === ThrowerState.WaitForPermit
     && obj.attackPermit < 0;
-  const held = G.g_attack_permits.findIndex((p) => p !== -1);
   const why = !waiting ? null
-    : G.g_attack_committed !== 0 ? "another enemy is committed off screen"
-    : held !== -1
-      ? `all ${G.g_max_attackers} permits held — 0x`
-        + `${(G.g_attack_permits[held] ?? 0).toString(16).toUpperCase()} has it`
-      : "a permit is free — the claim is not being made";
+    : AttackClaimRefusal() ?? "a permit is free — the claim is not being made";
   const detail = [
     `rank ${obj.rank}/${obj.allowance} · queue ${obj.queueRank}`,
     `hp ${obj.hp}/${obj.maxHp} · motion ${obj.motion}`
@@ -800,9 +797,9 @@ export function EnemyThrowerDebug(obj: ThrowerActor): ActorDebug {
  * What a class-0x31 thrower gives back when `GameUpdate`'s sweep reaches it.
  *
  * The permit on every reason, in **its own** bit: `ThrowerFlag.OffScreenPermit`
- * is `obj+0x136C` bit 0x40000000, because class 0x30 already uses 0x20000000
- * of the same word for its own actors — the note on
- * `ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) is where that split is proved.
+ * is `obj+0x136C` bit `0x8000` where class 0x30's claim raises `0x20000` —
+ * the note on `ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) is where that
+ * split is proved.
  *
  * The counts **only on a despawn**, and that is not an omission. Class 0x31's
  * death is four states and it runs the two retires where the exe does —

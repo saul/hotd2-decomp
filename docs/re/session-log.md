@@ -22346,3 +22346,90 @@ sub-type-2 corpse on the floor at the foot of the stair,
 `web/shots/owl-corpse-subtype2-floor.png` (gitignored). A sub-type-0 corpse
 was driven into the `-739` wall and landed at `35.92`; stage 3's water was not
 reached, because the deep link lands behind a room the harness does not clear.
+
+## 2026-09-28 -- the attack claim's one-player pick, and who lowers `NoCameraTrack` (branch `fix/newbugs2-claim-pick`)
+
+The mauler fix (`abea8507`) left two declared divergences in
+`combat/permits.ts`: the claim took the first free permit, and it cleared
+`obj+0x34` bit `0x10000`. Both are gone.
+
+**Read.** `TryClaimAttackSlot` (`FUN_00455DE0`) and
+`ThrowerTryClaimAttackSlot` (`FUN_0044CA40`) from the listing, all 93
+instructions of each, side by side: identical except `OR EAX, 0x20000` at
+`0x00455F10` against `OR AH, 0x80` at `0x0044CB70`. `[proved]`
+
+* Void `obj+0x121`; the latch; then on the s16 `g_max_attackers`: 1 ->
+  `g_active_player`'s permit if free (a taken one, or `g_active_player` 2,
+  offers nothing); 2 -> `rand() % 2` if the s16 `g_players_in_play` is 1, the
+  same pick NOT-ed when taken if the s16 `g_enemies_present` is 1, else
+  `ActorScreenHalfSign` (`FUN_00409C90`, twelve instructions, read and ported).
+  `IsPlayerAttackable` voids the pick; only `0xFF` fails, so a `-2` it passes
+  (attract mode) claims "permit -2" at `0x009A2B98`.
+* The only stores are `obj+0x121`, the latch bit, `g_attack_committed` and the
+  table. **No `obj+0x34`.**
+* `rand` is `0x004ABE60` -> `0x004ADED2`, the MSVC per-thread LCG, one draw a
+  call; `Rng.int(2)` is the port's spelling (`L46`).
+
+**Every caller** -- `get_xrefs_to` gave 9 and 12, and `search_instructions`
+for the `CALL` operand and a byte search for the address as a pointer agreed
+(no table holds either). For `NoCameraTrack` I swept every `AND` with an
+immediate clearing bit 16 and every `OR` setting it in `0x00449000`..
+`0x0045F000`, then read each claim site's own listing:
+
+| caller | clear of `0x10000` |
+|---|---|
+| `ZombieStateApproach` | after a grant, `0x00457A4E` (the port had it) |
+| `ZombieStateWaitForCameraFrame` | before the claim, hidden kind only, `0x004576E5` (the port had it) |
+| `ZombieStateHoldForCameraCue` (the hub's holder) | at the cue, `0x0045C00C` (the port had it) |
+| hub, both stand-and-throw routines, the scripted grab | none |
+| state 28 (`0x004586E0`) | before its claim, `0xfff6feff` at `0x004587B5`; not ported |
+| class 0x31, all twelve | none anywhere in the class; it raises the bit only on the way to a corpse |
+
+So the claim's clear was simply deleted; no caller needed one moved into it.
+
+**Found on the way, each at a claim site, each fixed:**
+
+* `ZombieShouldStandAndThrow` claims *before* its hand test for type 1
+  (`0x00458EC3`) and after it for 0x13/0x14 (`0x00458EB0`); the port tested
+  hands first for all three.
+* `ThrowerTryEnterState`'s state 0x20 (jump-table arm 9, `0x0044B0E4`) claims
+  and then tests surface `0x35` at `y + 4.5`; the port refused the state
+  without claiming and called the surface an open question, but
+  `QueryGroundSurfaceAt` has been ported for a while.
+* `ThrowerStateRideObjectPath` raises `0x100` for its ride and lowers it before
+  the claim; the port had neither.
+* `ThrowerStateBlinkInThreeHops` raises and lowers `obj+0x34` bit `0x100`
+  (`0x004514F3`, `0x004516B7`); the port wrote `NoCameraTrack` there. Found
+  by asking which class-0x31 routines the port lets touch `0x10000` -- the
+  exe has three, all death.
+* `ZombieScriptedPickPlayer` and `ThrowerGrabTakePermit` tested the permit
+  table with `=== 1` / `=== 0`, the engine's literals (`CMP ..., 1` at
+  `0x00457E32` and `0x0044F249`); the port's table holds the holder's `at` or
+  -1, so neither ever saw a claimed permit (`L63`). `ZombieStateStandAndThrow`'s
+  re-mark of the table after the claim (`0x00459260`) was missing too.
+
+**Wrong turns.**
+
+* My first mutant for the old pick replaced only the one-attacker arm and left
+  the two-attacker arms live; 7 of the 13 pick assertions failed on it and I
+  nearly took that as the proof. Replacing the whole chain with the old loop
+  fails all 13.
+* I wrote in `ActorScreenHalfSign`'s doc that `SkeletonEmitNode` writes
+  `obj+0x70/0x78`. That was from the name of a routine that writes a
+  *different* view-space triple (`obj+0x10C`); I have not read the writer of
+  `+0x70`, and the note now cites only its readers. `[open]` which routine
+  writes it for class 0x30.
+* The xref list named `0x004587C4` as in no function. By the time I read it
+  the live database had a function there called `ZombieStateDelayedPounce`
+  that no worktree's TSV contains -- a peer's, mid-flight. Per `L52` I named
+  nothing; state 28 stays unported and unnamed in the annotations.
+
+**Checks.** 32 new `port.test.ts` assertions; a mutation script restoring each
+old behaviour (the first-free loop, the claim's clear, the type-1 order, state
+0x20's missing claim, the ride's missing immunity, the blink's bit, the
+scripted `=== 1`) fails 13, 3, 3, 1, 1, 1 and 2 of them respectively.
+One-player play draws nothing new from the `Rng`, so determinism and
+`test:state` see only the behaviour changes.
+
+**Still declared:** a `-2` pick in attract mode is refused, not claimed (the
+port runs no attract mode and has no index -2).

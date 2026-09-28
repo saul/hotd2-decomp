@@ -212,9 +212,15 @@ import {
 import { QUEUE_CAP, RANK_SLOTS, RankEnemiesByDistance }
   from "../src/game/combat/rank";
 import {
+  ActorScreenHalfSign,
   PROJECTION_DISTANCE_PX as G_PROJECTION_DISTANCE_PX, ReleaseAttackSlot,
   ThrowerReleaseAttackPermit, ThrowerTryClaimAttackSlot, TryClaimAttackSlot,
 } from "../src/game/combat/permits";
+import { ZombieStateApproach } from "../src/game/class30/approach";
+import { ZombieScriptedPickPlayer } from "../src/game/class30/scripted";
+import { ThrowerTryEnterState } from "../src/game/class31/router";
+import { ThrowerStateBlinkInThreeHops, ThrowerStateRideObjectPath }
+  from "../src/game/class31/scripted";
 import { EnemyZombieUpdate, ZombieEntryState } from "../src/game/class30";
 import { ZombieEnterCorpseState, ZombieReleasePermitAndUntrack }
   from "../src/game/class30/death";
@@ -1294,13 +1300,13 @@ console.log("ActorIsOnScreen:");
     },
   };
   check("a second enemy cannot claim while the latch is up",
-        !TryClaimAttackSlot(other, onscreen), `permit ${other.attackPermit}`);
+        !TryClaimAttackSlot(other, new Rng(1), onscreen), `permit ${other.attackPermit}`);
 
   // Releasing the off-screen permit lifts it, and only then.
   ReleaseAttackSlot(z);
   check("releasing it lifts the latch", G.g_attack_committed === 0
         && (z.flags2 & ZombieFlag2.OffScreenPermit) === 0);
-  check("and the next enemy may claim", TryClaimAttackSlot(other, onscreen),
+  check("and the next enemy may claim", TryClaimAttackSlot(other, new Rng(1), onscreen),
         `permit ${other.attackPermit}`);
   ReleaseAttackSlot(other);
 
@@ -1313,7 +1319,7 @@ console.log("ActorIsOnScreen:");
   // `TryClaimAttackSlot`'s first line, and a crowd walked to the ring and
   // stood there wanting a permit nobody held.
   check("an off-screen attacker takes the latch again",
-        TryClaimAttackSlot(z, offscreen) && G.g_attack_committed === 1,
+        TryClaimAttackSlot(z, new Rng(1), offscreen) && G.g_attack_committed === 1,
         `latch ${G.g_attack_committed}`);
   z.dead = true;
   GameUpdate(EYE, 1 / 60, offscreen, rng, events);
@@ -1322,7 +1328,7 @@ console.log("ActorIsOnScreen:");
         && G.g_attack_permits.every((p) => p === -1),
         `latch ${G.g_attack_committed} permits ${JSON.stringify(G.g_attack_permits)}`);
   check("so the enemies still standing can attack",
-        TryClaimAttackSlot(other, onscreen), `permit ${other.attackPermit}`);
+        TryClaimAttackSlot(other, new Rng(1), onscreen), `permit ${other.attackPermit}`);
   ReleaseAttackSlot(other);
 }
 
@@ -11398,12 +11404,12 @@ console.log("\nIsPlayerAttackable: the scene has to be running:");
     G.g_scene_state_major_entered = 1;
     G.g_scene_state_major = 1;
     check("no permit is granted while a scripted camera drives",
-          !TryClaimAttackSlot(z) && z.attackPermit === -1,
+          !TryClaimAttackSlot(z, new Rng(1)) && z.attackPermit === -1,
           `permit ${z.attackPermit}`);
     G.g_scene_state_major_entered = SCENE_MAJOR_PLAYING;
     G.g_scene_state_major = SCENE_MAJOR_PLAYING;
     check("...and one is the moment the path camera takes over",
-          TryClaimAttackSlot(z) && z.attackPermit === 0,
+          TryClaimAttackSlot(z, new Rng(1)) && z.attackPermit === 0,
           `permit ${z.attackPermit}`);
   }
 }
@@ -11947,14 +11953,14 @@ console.log("\nclass 0x30 state 33: the stationary thrower:");
     G.g_camera_yaw_bams = 0x8000;
     z.yaw = 0;                                 // facing the camera's reverse
     check("a condition-8 walker facing the camera stops and throws",
-          ZombieShouldStandAndThrow(z));
+          ZombieShouldStandAndThrow(z, new Rng(1)));
     const away = thrower(8);
     away.yaw = 0x4000;                         // ninety degrees off
-    check("...and one facing away does not", !ZombieShouldStandAndThrow(away));
+    check("...and one facing away does not", !ZombieShouldStandAndThrow(away, new Rng(1)));
     const ordinary = thrower(0);
     ordinary.yaw = 0;
     check("...nor does an ordinary body condition",
-          !ZombieShouldStandAndThrow(ordinary));
+          !ZombieShouldStandAndThrow(ordinary, new Rng(1)));
   }
 }
 
@@ -12779,15 +12785,286 @@ console.log("\na refused claim voids the index:");
   const a = spawnZombie(0x5200, 1, "stale");
   const b = spawnZombie(0x5204, 1, "holder");
   a.attackPermit = 0;                 // what state 42's bounce leaves behind
-  check("the holder claims", TryClaimAttackSlot(b) && b.attackPermit === 0,
+  check("the holder claims", TryClaimAttackSlot(b, new Rng(1)) && b.attackPermit === 0,
         `permit ${b.attackPermit}`);
   check("a refused claim leaves obj+0x121 at -1",
-        !TryClaimAttackSlot(a) && a.attackPermit === -1,
+        !TryClaimAttackSlot(a, new Rng(1)) && a.attackPermit === -1,
         `permit ${a.attackPermit}`);
   ReleaseAttackSlot(a);
   check("...so releasing it does not free the holder's permit",
         G.g_attack_permits[0] === b.at,
         `permits ${JSON.stringify(G.g_attack_permits)}`);
+}
+
+// `TryClaimAttackSlot` (`FUN_00455DE0`) offers **one** player's permit and
+// never the other's: `g_active_player`'s with one attacker, a `rand() % 2`
+// with two attackers and one player in play or one enemy present, and the
+// actor's own half of the screen otherwise (`ActorScreenHalfSign`,
+// `FUN_00409C90`). The port took the first free permit, which is the same
+// answer for player 1 alone and a different one everywhere else.
+console.log("\nthe claim's pick, one player and two:");
+{
+  const rng = new Rng(6);
+  scene(0, rng);
+  const z = spawnZombie(0x5300, 1, "claimant");
+  z.visible = true;
+  z.hp = 1000;
+  const reset = () => {
+    G.g_attack_permits = [-1, -1];
+    G.g_attack_committed = 0;
+    z.attackPermit = -1;
+  };
+  // Both players in play, so `IsPlayerAttackable` refuses neither.
+  G.g_player_state = [PlayerState.InPlay, PlayerState.InPlay];
+  /** A generator whose next `int(2)` is `want`, and the state one draw on. */
+  const seeded = (want: number) => {
+    let s = 1;
+    while (new Rng(s).int(2) !== want) s++;
+    const after = new Rng(s);
+    after.next();
+    return { r: new Rng(s), after: after.state };
+  };
+
+  G.g_max_attackers = 1;
+  G.g_active_player = 1;
+  reset();
+  const s0 = rng.state;
+  check("player 2 alone is offered player 2's permit",
+        TryClaimAttackSlot(z, rng) && z.attackPermit === 1
+        && G.g_attack_permits[1] === z.at && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+  check("...and the one-attacker pick draws nothing", rng.state === s0);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...with it held, player 1's free permit is not offered instead",
+        !TryClaimAttackSlot(z, rng) && z.attackPermit === -1
+        && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+  G.g_active_player = 2;
+  reset();
+  check("g_active_player 2 with one attacker offers no permit at all",
+        !TryClaimAttackSlot(z, rng) && z.attackPermit === -1);
+  G.g_active_player = 0;
+  reset();
+  check("player 1 alone is still offered permit 0",
+        TryClaimAttackSlot(z, rng) && z.attackPermit === 0);
+
+  // Two attackers, one player in play: the coin.
+  G.g_max_attackers = 2;
+  G.g_players_in_play = 1;
+  G.g_enemies_present = 4;
+  let t = seeded(1);
+  reset();
+  check("two attackers, one player in play: rand() % 2 picks permit 1",
+        TryClaimAttackSlot(z, t.r) && z.attackPermit === 1,
+        `permit ${z.attackPermit}`);
+  check("...drawing exactly once", t.r.state === t.after);
+  t = seeded(1);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...and a held pick is refused, not swapped for the free one",
+        !TryClaimAttackSlot(z, t.r) && z.attackPermit === -1
+        && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+
+  // Two players and one enemy present: a held pick is NOT-ed, to -1 or -2.
+  G.g_players_in_play = 2;
+  G.g_enemies_present = 1;
+  t = seeded(0);
+  reset();
+  G.g_attack_permits[0] = 0x77;
+  check("one enemy present: ~0 is -1, refused",
+        !TryClaimAttackSlot(z, t.r) && z.attackPermit === -1
+        && t.r.state === t.after);
+  t = seeded(1);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...and ~1 is -2, which IsPlayerAttackable refuses too",
+        !TryClaimAttackSlot(z, t.r) && z.attackPermit === -1
+        && G.g_attack_permits[0] === -1,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+  t = seeded(1);
+  reset();
+  check("...while a free pick is taken", TryClaimAttackSlot(z, t.r)
+        && z.attackPermit === 1);
+
+  // Two players and a crowd: the actor's own half of the screen, no draw.
+  G.g_enemies_present = 3;
+  const side = (x: number) => ({
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = x; out.y = 0; out.z = -40;      // forty in front, on screen
+      return true;
+    },
+  });
+  check("ActorScreenHalfSign: the right half is 1 and the left -1",
+        ActorScreenHalfSign(z, side(5)) === 1
+        && ActorScreenHalfSign(z, side(-5)) === -1
+        && ActorScreenHalfSign(z, side(0)) === -1);
+  reset();
+  const s1 = rng.state;
+  check("an enemy on the right of the screen comes for player 2",
+        TryClaimAttackSlot(z, rng, side(5)) && z.attackPermit === 1,
+        `permit ${z.attackPermit}`);
+  check("...drawing nothing", rng.state === s1);
+  reset();
+  check("...and one on the left for player 1",
+        TryClaimAttackSlot(z, rng, side(-5)) && z.attackPermit === 0);
+  reset();
+  G.g_attack_permits[1] = 0x77;
+  check("...and the right with player 2's permit held is refused",
+        !TryClaimAttackSlot(z, rng, side(5)) && G.g_attack_permits[0] === -1);
+
+  // The gate runs after the pick and voids it.
+  G.g_max_attackers = 1;
+  G.g_active_player = 1;
+  G.g_player_state = [PlayerState.InPlay, PlayerState.Out];
+  reset();
+  check("a picked player out of play refuses the claim outright",
+        !TryClaimAttackSlot(z, rng) && z.attackPermit === -1
+        && G.g_attack_permits.every((p) => p === -1));
+
+  // The thrower's copy is the same pick with its own latch bit.
+  const w = spawnZombie(0x5304, 1, "stand-in");   // any Actor carries flags2
+  G.g_player_state = [PlayerState.InPlay, PlayerState.InPlay];
+  G.g_attack_permits = [-1, -1];
+  G.g_attack_committed = 0;
+  const offscreen = {
+    ...NULL_HOST,
+    viewSpaceOf: (_at: number, out: Vec3) => {
+      out.x = 900; out.y = 0; out.z = -40;
+      return true;
+    },
+  };
+  check("ThrowerTryClaimAttackSlot: player 2 alone gets permit 1 too",
+        ThrowerTryClaimAttackSlot(w, rng, offscreen) && w.attackPermit === 1);
+  check("...and off screen latches obj+0x136C bit 0x8000, not 0x20000",
+        (w.flags2 & ThrowerFlag.OffScreenPermit) !== 0
+        && (w.flags2 & ZombieFlag2.OffScreenPermit) === 0
+        && G.g_attack_committed === 1,
+        `flags2 0x${w.flags2.toString(16)}`);
+  G.g_active_player = 0;
+}
+
+// Neither claim routine stores to `obj+0x34`: `NoCameraTrack` is each
+// caller's to lower. `ZombieStateApproach` does it on a grant (`0x00457A4E`);
+// the hub does not (`0x00455845`..`0x0045587B`), which is what keeps a captor
+// that `ZombieStateHoldForCameraCue` is holding off the camera until its cue.
+console.log("\nthe claim leaves NoCameraTrack to its callers:");
+{
+  const rng = new Rng(7);
+  const events = scene(0, rng);
+  const z = spawnZombie(0x5400, 1, "untracked");
+  z.visible = true;
+  z.hp = 1000;
+  z.flags |= ActorFlag.NoCameraTrack;
+  check("a bare claim grants and leaves the bit up",
+        TryClaimAttackSlot(z, rng) && (z.flags & ActorFlag.NoCameraTrack) !== 0);
+  ReleaseAttackSlot(z);
+  check("...and so does the thrower's",
+        ThrowerTryClaimAttackSlot(z, rng)
+        && (z.flags & ActorFlag.NoCameraTrack) !== 0);
+  ThrowerReleaseAttackPermit(z);
+
+  z.pos = vec3(0, 0, 45);
+  z.motion = 10;
+  z.rank = 0;
+  z.queueRank = 0;
+  z.state = ZombieState.HoldAtRange;
+  z.sub = 0;
+  ZombieStateHoldAtRange(z, EYE, rng, NULL_HOST, events);
+  check("the hub's grant goes to the strike with the bit still up",
+        z.state === ZombieState.Strike && z.attackPermit === 0
+        && (z.flags & ActorFlag.NoCameraTrack) !== 0,
+        `state ${z.state} permit ${z.attackPermit} flags 0x${z.flags.toString(16)}`);
+  ReleaseAttackSlot(z);
+
+  z.state = ZombieState.Approach;
+  z.sub = 1;
+  z.allowance = 5;
+  z.attackState = ZombieState.AttackRun;
+  ZombieStateApproach(z, EYE, rng, NULL_HOST);
+  check("ZombieStateApproach lowers it itself on its grant",
+        z.state === ZombieState.AttackRun && z.attackPermit === 0
+        && (z.flags & ActorFlag.NoCameraTrack) === 0,
+        `state ${z.state} permit ${z.attackPermit} flags 0x${z.flags.toString(16)}`);
+  ReleaseAttackSlot(z);
+}
+
+// The callers around the claim that were read with it.
+console.log("\nthe claim's callers, as the exe orders them:");
+{
+  // `ZombieShouldStandAndThrow` (`FUN_00458E10`): type 1 claims *before* it
+  // tests its hands (`0x00458EC3`), so an unarmed `znassb` walker still takes
+  // the permit and is answered no.
+  scene(0, new Rng(8));
+  const z = spawnZombie(0x5500, 1, "bare znassb", { condition: 8 });
+  z.visible = true;
+  z.hp = 1000;
+  G.g_camera_yaw_bams = 0x8000;
+  z.yaw = 0;
+  z.boneSlot["5"] = -2;
+  z.boneSlot["8"] = -2;
+  check("an unarmed type-1 walker is answered no...",
+        ZombieArmedHands(z) === 0 && !ZombieShouldStandAndThrow(z, new Rng(1)));
+  check("...but has claimed the permit on the way",
+        z.attackPermit === 0 && G.g_attack_permits[0] === z.at,
+        `permit ${z.attackPermit} ${JSON.stringify(G.g_attack_permits)}`);
+
+  // `ZombieScriptedPickPlayer`: "spoken for" is a held entry, whatever the
+  // port stored in it -- the holder's `at` from a claim included.
+  G.g_player_state = [PlayerState.InPlay, PlayerState.InPlay];
+  check("a scripted attacker named for a claimed player falls back to the other",
+        ZombieScriptedPickPlayer(0, new Rng(1)) === 1);
+  G.g_attack_permits[1] = 0x77;
+  check("...and gives up when both are held",
+        ZombieScriptedPickPlayer(0, new Rng(1)) === -1);
+
+  // `ThrowerTryEnterState` (`FUN_0044AFB0`) arm 9: state 0x20 claims first,
+  // then asks for surface 0x35 -- and a refusal on the surface keeps the
+  // permit.
+  const w = thrower(ThrowerState.StandAndDecide);
+  check("state 0x20 claims, and is refused off surface 0x35",
+        !ThrowerTryEnterState(w, ThrowerState.StrikeOnTheSpot, new Rng(1),
+                              NULL_HOST)
+        && w.attackPermit === 0 && G.g_attack_permits[0] === w.at
+        && w.state === ThrowerState.StandAndDecide,
+        `permit ${w.attackPermit} state ${w.state}`);
+
+  // `ThrowerStateRideObjectPath` (`FUN_0044E5D0`): shot-immune for the ride
+  // (`0x0044E603`), and the bit comes down before the claim (`0x0044E67D`).
+  const r = thrower(ThrowerState.StandAndDecide);
+  r.state = ThrowerState.RideObjectPath;
+  r.sub = 0;
+  ThrowerStateRideObjectPath(r, 1 / 60, new Rng(1), NULL_HOST);
+  check("the ride raises ShotImmune and nothing on the camera",
+        (r.flags & ActorFlag.ShotImmune) !== 0
+        && (r.flags & ActorFlag.NoCameraTrack) === 0
+        && r.state === ThrowerState.RideObjectPath);
+  r.slideTimer = 0xc4;
+  ThrowerStateRideObjectPath(r, 1 / 60, new Rng(1), NULL_HOST);
+  check("...and its last frame lowers it, claims and pounces",
+        (r.flags & ActorFlag.ShotImmune) === 0 && r.attackPermit === 0
+        && r.state === ThrowerState.Pounce,
+        `flags 0x${r.flags.toString(16)} state ${r.state}`);
+
+  // `ThrowerStateBlinkInThreeHops` (`FUN_00451480`): the bit is `0x100`.
+  const b = thrower(ThrowerState.StandAndDecide);
+  b.state = ThrowerState.BlinkIn;
+  b.sub = 0;
+  b.attackState = ThrowerState.StandAndDecide;
+  ThrowerStateBlinkInThreeHops(b, 1 / 60, 0);
+  check("the blink-in cannot be shot and is not hidden from the camera",
+        (b.flags & ActorFlag.ShotImmune) !== 0
+        && (b.flags & ActorFlag.NoCameraTrack) === 0,
+        `flags 0x${b.flags.toString(16)}`);
+  for (let i = 0; i < 400 && b.state === ThrowerState.BlinkIn; i++) {
+    ThrowerStateBlinkInThreeHops(b, 1 / 60, 0);
+  }
+  check("...and arriving lowers it",
+        b.state === ThrowerState.StandAndDecide
+        && (b.flags & ActorFlag.ShotImmune) === 0,
+        `state ${b.state} flags 0x${b.flags.toString(16)}`);
 }
 
 // -- the rain, which used to be unreachable from here ----------------------
@@ -12925,7 +13202,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
   {
     const z = thrower(ThrowerState.StandAndDecide);
     check("a thrower off the side of the frame takes a permit and latches",
-          ThrowerTryClaimAttackSlot(z, offscreen)
+          ThrowerTryClaimAttackSlot(z, new Rng(1), offscreen)
           && G.g_attack_committed === 1
           && (z.flags2 & ThrowerFlag.OffScreenPermit) !== 0,
           `latch ${G.g_attack_committed} flags2 ${z.flags2.toString(16)}`);
@@ -12957,7 +13234,7 @@ console.log("\nrain: DrawRainParticles' simulation half");
     }
     check("a thrower that has pounced once can claim again",
           pounced && G.g_attack_committed === 0
-          && ThrowerTryClaimAttackSlot(z, offscreen),
+          && ThrowerTryClaimAttackSlot(z, new Rng(1), offscreen),
           `pounced ${pounced} latch ${G.g_attack_committed}`
           + ` state ${z.state} permit ${z.attackPermit}`);
     ThrowerReleaseAttackPermit(z);
@@ -13333,7 +13610,7 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
   check("one zombie is one enemy alive and present",
         G.g_enemies_alive === 1 && G.g_enemies_present === 1,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
-  check("...and it takes a permit", TryClaimAttackSlot(z, NULL_HOST));
+  check("...and it takes a permit", TryClaimAttackSlot(z, new Rng(1), NULL_HOST));
 
   ActorDeadSweep(z, DeadSweep.Unloaded);
   check("an undrawn zombie gives the permit back",
@@ -13378,7 +13655,7 @@ console.log("\n`ActorDeadSweep`, and what each class gives back:");
         G.g_enemies_alive === 1 && G.g_enemies_present === 1,
         `${G.g_enemies_alive}/${G.g_enemies_present}`);
   check("...and it takes a permit in its own bit",
-        ThrowerTryClaimAttackSlot(w, NULL_HOST) && w.attackPermit >= 0);
+        ThrowerTryClaimAttackSlot(w, new Rng(1), NULL_HOST) && w.attackPermit >= 0);
 
   ActorDeadSweep(w, DeadSweep.Dead);
   check("a dead thrower gives the permit back",
@@ -14282,7 +14559,7 @@ console.log("class 0x30, the death chain:");
   const present0 = G.g_enemies_present;
   check("one zombie, alive and present", alive0 === 1 && present0 === 1,
         `${alive0}/${present0}`);
-  TryClaimAttackSlot(z, NULL_HOST);
+  TryClaimAttackSlot(z, new Rng(1), NULL_HOST);
 
   ResolveHit(z, 1, 0, NULL_HOST, rng);
   check("the killing shot leaves a hit record for `ZombieOnShot`",
@@ -14976,7 +15253,7 @@ console.log("class 0x30 state 9: the body is thrown, not dropped:");
     const rng = new Rng(21);
     const events = new Events();
     const z = shot(5);
-    TryClaimAttackSlot(z, camHost);
+    TryClaimAttackSlot(z, new Rng(1), camHost);
     kill(z);
     GameUpdate(EYE, 1 / 60, camHost, rng, events);
     check("body condition 5 dies through state 9, not state 6",
@@ -15623,7 +15900,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     const z = spawnZombie(0x2400, 1, "zombie");
     z.visible = true;
     z.hp = 10;
-    check("a zombie takes a permit", TryClaimAttackSlot(z, NULL_HOST));
+    check("a zombie takes a permit", TryClaimAttackSlot(z, new Rng(1), NULL_HOST));
     ReleaseAttackSlot(z);
     check("`ReleaseAttackSlot` gives the permit back",
           z.attackPermit === -1 && G.g_attack_permits[0] === -1);
@@ -15635,7 +15912,7 @@ console.log("\n`NoCameraTrack` is the caller's write, and it is guarded:");
     w.visible = true;
     w.hp = 10;
     check("...and a thrower's release is the same routine, same silence",
-          ThrowerTryClaimAttackSlot(w, NULL_HOST)
+          ThrowerTryClaimAttackSlot(w, new Rng(1), NULL_HOST)
           && (ThrowerReleaseAttackPermit(w), w.attackPermit === -1)
           && (w.flags & ActorFlag.NoCameraTrack) === 0,
           `flags ${w.flags.toString(16)}`);

@@ -39,7 +39,7 @@
  * the frame a state 7 draws nothing, and the frames a screen card hides the
  * closed bars.
  */
-import { G } from "./globals";
+import { G, ScreenFurniture } from "./globals";
 
 /**
  * `g_bHudShutterState` (`0x009CA0F4`), the nine states the jump table at
@@ -84,10 +84,20 @@ export const SHUTTER_BLACKOUT_SCALE = 8;
 
 /**
  * `g_screen_furniture_flags` bits that stop state 4 drawing: `TEST byte ptr
- * [0x009a5900], 0x30` at `0x00413BB5`. `0x20` is the chapter card's
- * (`ChapterCardInstall`), `0x10` the result card's (`ResultCardInstall`).
+ * [0x009a5900], 0x30` at `0x00413BB5` -- the chapter card's and the result
+ * card's, while either has the screen.
+ *
+ * **A function, not a `const`**, and on purpose: `globals.ts` imports this
+ * module (for `HudShutterTaskCreate`) and this module imports `globals.ts`, so
+ * in the browser's module order this file is evaluated before
+ * `ScreenFurniture` exists. A top-level `const` built from the enum threw at
+ * startup -- "reading 'ChapterCard'" -- and the page never loaded, while
+ * `test:port`, which enters the graph from another module, passed. Read at
+ * call time, the enum is always there.
  */
-export const SHUTTER_HIDDEN_BY_CARDS = 0x30;
+function ShutterHiddenByCards(): number {
+  return ScreenFurniture.ChapterCard | ScreenFurniture.ResultCard;
+}
 
 /**
  * One `AssetDrawSlot(0x93E)` this routine made: the bar's origin in view
@@ -192,7 +202,7 @@ export function HudDrawShutterState(): void {
       break;
     }
     case ShutterState.Closed:
-      if ((G.g_screen_furniture_flags & SHUTTER_HIDDEN_BY_CARDS) === 0) {
+      if ((G.g_screen_furniture_flags & ShutterHiddenByCards()) === 0) {
         DrawShutterClosed();
       }
       break;

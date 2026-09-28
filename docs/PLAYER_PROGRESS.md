@@ -920,6 +920,16 @@ is that list now, and the camera lives entirely inside it:
   `UpdateCameraEnemySlots` deals the slots, and the camera reads them the frame
   after that. The camera is two frames behind the room, as the exe's is.
 
+**What flies the camera has to write angles, or say why it does not.** The
+view is the block's angles, so a routine that moves the eye and the target and
+stops there moves the camera without turning it. The exe's routines that aim by
+look-at all call `CamBlockSetAnglesFromLookAt` (its eleven callers include
+Strength's cues and Judgment's death orbit, and the port's now do too). Two
+fly the camera without it, and the port keeps that: the boss-name banner and
+class 0x14's cut write eye and target through `CamEvalPath7`, which writes
+nothing else, so their flights carry the eye and keep the heading they found.
+The Tower writes the yaw and pitch itself. `[proved]`
+
 A block change leaves the ring alone. `EvtAdvanceStepOrRoute` moves the block
 and the program pointer; only a scene's task list runs `EvtLoadBlockProgram`,
 which empties the ring and zeroes the count. So an action still running when a

@@ -20949,6 +20949,38 @@ fires a fixed grid through the view, so a camera that follows the fight as the
 exe's does changes which volleys land, and with them when lives are lost.
 That last part is not a per-frame account and I do not claim one.
 
+**The boss cameras under the angle-built view** (after merging main at
+`39a7065`). The view is built from the block's angles, so every routine that
+aims by look-at has to turn the pair into angles, as the exe's do. The eleven
+callers of `CamBlockSetAnglesFromLookAt` (`FUN_00403AC0`) are the list to hold
+the port against:
+
+* `Boss4PlayCameraCue` calls it at `0x00493277` and Judgment's death orbit at
+  `0x0049CDBC`. The port had left both out, with notes saying its view came
+  from the look-at; under the angle-built view both would have slid the camera
+  along the cue facing the old way. Added; a port test fails without the cue's.
+* The boss-name banner and class 0x14's cut do **not** call it.
+  `CamEvalPath7` writes eye and target and nothing else, and nothing in
+  `BossIntroBannerUpdate` names `0x009A60CC..D4`. So the card flight carries
+  the eye along the path and keeps the heading the camera had when the banner
+  took it. `[proved]` Measured in the page on stage 1 block 14: the heading
+  held at yaw 18042, pitch 1614 for all 300 frames; the drawn translation was
+  the banner's eye one frame late (the view is built at the head of the frame,
+  the banner writes after it); the path's own target ran from 60 degrees off
+  the view axis to 4 and back to 16, and nothing drew from it. The action slot
+  was `NoOpStub` for the whole flight, so the view came from
+  `UpdateSceneViewAndLight` alone -- not from mode 6, which needs
+  `CameraDriverSelectMode` in the slot.
+* The Tower writes the block's yaw and pitch itself. Its two port-only
+  stand-ins for the look-at view went: `Boss3SeatCameraAngles` replaced the
+  engine's angles with the look-at's when the body took the camera, and
+  `Boss3PublishCameraAngles` rewrote the target from the angles every frame, so
+  the hand-back turned from a target the exe never has.
+* The head aim that landed on main reads the camera block's yaw at
+  `0x00453DD1` for two attackers; the port read `g_camera_yaw_bams + 0x8000`,
+  a stand-in main filled from the drawn camera, which the merge removes. It
+  reads the block's yaw now. Its eye is still `ClassFrame.eye`.
+
 **Still `[diverges]`, camera-related:** `CamPathCueReached` treats a cue the
 seek landed past as reached (the engine never seeks); four class routines read
 camera block 0 where the exe reads block 2 or the bare block-0 symbol

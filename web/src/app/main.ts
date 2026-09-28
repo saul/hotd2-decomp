@@ -107,6 +107,7 @@ import { PropShatterLayer } from "../render/prop_shatter";
 import { BloodColourLayer } from "../render/bloodcolour";
 import { EffectLayer } from "../render/effects";
 import { SlotModelLayer } from "../render/slotmodels";
+import { WaterSurfaceLayer } from "../render/water_surfaces";
 import { ResetPropContainers } from "../game/class41";
 import { ActorByAt, AppState, G, ResetGameGlobals } from "../game/globals";
 import {
@@ -266,6 +267,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
    * hold one: those actors have no character type to resolve.
    */
   readonly slotModels = new SlotModelLayer();
+  /** Class 0x41 type 1's canal water: the tiles it draws and ripples. */
+  readonly waterSurfaces = new WaterSurfaceLayer();
   /**
    * The shot effects — blood, muzzle flash, tracer, impacts. Its own layer
    * because it draws in two spaces at once: one group in the world and one
@@ -502,6 +505,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.shatters.source = this.breakables;
     this.scene.add(this.slotModels.group);
     this.lighting.addRoot(this.slotModels.group);
+    this.scene.add(this.waterSurfaces.group);
+    this.lighting.addRoot(this.waterSurfaces.group);
     this.scene.add(this.effects.group);
     this.scene.add(this.effects.viewGroup);
 
@@ -561,6 +566,8 @@ export class Player implements PlayerView, PlayerCommands, PacerHost {
     this.world.add("render", this.breakables);
     this.world.add("render", this.shatters);
     this.world.add("render", this.slotModels);
+    // After the slot models, whose templates its clones come from.
+    this.world.add("render", this.waterSurfaces);
     this.world.add("render", this.effects);
     this.world.add("render", this.bullets);
     this.world.add("render", this.heads);

@@ -341,7 +341,9 @@ at `0x00409bec`–`0x00409c03`, **after** the `JMP` to `MatrixStackPop` that
 Ghidra has marked no-return: the function body ends there, the pseudocode ends
 there with a `WARNING: Subroutine does not return`, and the call past it is in
 no xref list. `disassemble_bytes` from the last address the body claims is what
-finds it.
+finds it. The same thing hides a **loop**: `RegionDrawResidentSet`'s body ends
+at `0x0040143E` and its loop tail, `0x00401443..0x0040145F`, lies outside it,
+so the decompile of a list walk draws one entry and stops.
 
 It is **L32** one level down — that lesson is about a search over decoded
 operands seeing one addressing mode; this is about a search over Ghidra's
@@ -766,3 +768,14 @@ short for as long as it existed. The tell is in the addresses: an arm whose
 last instruction is not a `RET`, a `JMP` to the epilogue or a `JMP` elsewhere
 falls through, and the jump table says where to. Check each arm's last
 instruction against the next arm's first address before writing its `return`.
+
+**L54 -- "The script loaded it" is not "something draws it".** Opcode 0x50 and
+`asset_load_polfile` make a slot resident and nothing more; the model is on
+screen only if a region lists it or some routine calls `AssetDrawSlot` on it.
+The player's `StageScene` stood in for the second case with "loaded and in no
+region, so drawn", which looked right for as long as the stand-in happened to
+agree with the drawer -- and made stage 2's block 16 canal, loaded but listed
+by other regions, simply absent, while nothing said a drawer was missing. The
+drawer was class 0x41 type 1, a task no port had read. When a loaded model is
+missing or wrong, search `.text` for its slot as an immediate (and as bytes,
+for the ones in unfunctioned code): what draws it is whatever names it.

@@ -211,10 +211,17 @@ export interface BreakablePlacement {
    * build their objects from tables in the image rather than from the spawn:
    * the placement carries only the step lifetime, and for `table44` the
    * effect and motion its two breakable rows draw. See `game/class41/`.
+   *
+   * `water_surface` is constructor 1, `PlaceWaterSurface` (`FUN_00462F70`):
+   * not a prop but the task that draws a canal water tile and ripples it.
+   * `slot` is the tile, already looked up in `g_water_surface_slots`
+   * (`0x00593DA4`) by `field_1f4`, and `lifetime_evt_steps` is the
+   * descriptor's `+0x11C`. See `game/class41/water.ts`.
    */
   container: "group" | "kinded" | "falling" | "generic"
     | "chain" | "fragment" | "story_switch" | "script_flag_effect"
-    | "rising_door" | "flicker_light" | "table38" | "table39" | "table44";
+    | "rising_door" | "flicker_light" | "table38" | "table39" | "table44"
+    | "water_surface";
   /** How many evt blocks it lives for. */
   lifetime_evt_steps: number;
   /** `group` only — the row of `g_breakable_group_ptrs` to build. */

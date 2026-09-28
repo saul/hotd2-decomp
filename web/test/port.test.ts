@@ -343,6 +343,10 @@ import {
   PropExpireByStepLifetime, GENERIC_DRAW_SLOT, GENERIC_DESCRIPTOR_SLOT,
   GENERIC_LIFETIME_FROM_1F4,
   GENERIC_ORIGINAL_MODE_ONLY, makeBreakableProp, type BreakableProp,
+  WaterSurfaceFlag, WaterSurfacesTick, WATER_ARENA_ALT_PAIR_SLOT,
+  WATER_ARENA_ALT_SLOT, WATER_ARENA_PAIR_SLOT, WATER_ARENA_SLOT,
+  WATER_CANAL_SLOT, WATER_DEATH_ALT_SLOT, WATER_DEATH_CAM_PATH,
+  WATER_DEATH_SLOT, WATER_PHASE_PER_TICK, WATER_SURFACE_ALSO_DRAWS,
   PropCuePhase, PropContainerRaisesScriptFlag, PROP75_DROP_AT,
   PROP75_RIDE_LENGTH, PROP75_SCRIPT_FLAG, PROP75_TYPE,
 } from "../src/game/class41";
@@ -1772,6 +1776,148 @@ console.log("\nclass 0x41, the placer:");
         String(G.g_item_set_countdown[ItemSet.Score2]));
   check("a prop takes two shots and carries the group's lifetime",
         G.g_breakable_props.every((p) => p.hp === 2 && p.lifetime === 4));
+}
+
+console.log("\nclass 0x41 type 1, the canal water task:");
+{
+  // Stage 2's three tiles and one of stage 3's, as the exporter resolves
+  // them: `slot` is `g_water_surface_slots[field_1f4]`.
+  const water = (at: number, index: number, slot: number, life: number) =>
+    ({ at, container: "water_surface" as const, field_1f4: index, slot,
+       lifetime_evt_steps: life });
+  const rng = new Rng(7);
+  propScene(rng, GameMode.Arcade);
+  SetGameTables(CHARS, { ...BREAKABLES, placements: [
+    ...(BREAKABLES.placements ?? []),
+    water(0x8ae4, 2, WATER_CANAL_SLOT, 15),
+    water(0x14940, 0, WATER_ARENA_SLOT, 20),
+    water(0x15684, 1, WATER_DEATH_SLOT, 1),
+    water(0x237c, 4, 0x13ad, 11),
+  ] });
+  const f = { eye: EYE, dt: 1 / 60, rng, host: NULL_HOST };
+  const place = (at: number, index: number, life: number) => {
+    const placer = ActorSpawn(at, SpawnClass.PropContainerPlacer, index,
+                              "placer");
+    placer.visible = true;
+    placer.hp = life;           // +0x11C: the lifetime in step changes
+    placer.condition = 1;       // +0x130C: PlaceWaterSurface
+    PropContainerPlacerUpdate(placer, f);
+    return { placer, task: G.g_water_surfaces.find(
+      (w) => w.slot === T.breakables!.placements!.find(
+        (q) => q.at === at)!.slot) };
+  };
+  const uvOf = (slot: number) =>
+    G.g_water_surface_uv.find((u) => u.slot === slot);
+  G.g_scene_index = 1;
+  G.g_evt_block_index = 16;
+  G.g_evt_step_index = 0;
+  G.g_scene_tick_counter = 100;
+
+  const canal = place(0x8ae4, 2, 15);
+  check("constructor 1 builds a water task and the placer dies",
+        canal.placer.dead && G.g_water_surfaces.length === 1
+        && canal.task?.slot === WATER_CANAL_SLOT && canal.task.index === 2
+        && canal.task.lifetime === 15 && canal.task.killFlag === 0,
+        JSON.stringify(G.g_water_surfaces));
+  WaterSurfacesTick();
+  const a = (100 * WATER_PHASE_PER_TICK & 0xffff) * (Math.PI * 2 / 65536);
+  const u = uvOf(WATER_CANAL_SLOT);
+  check("...which draws its tile and ripples it by the tick's phase",
+        canal.task!.drawn.join() === String(WATER_CANAL_SLOT)
+        && u?.frames === 1 && u.sin === Math.sin(a) && u.cos === Math.cos(a)
+        && !u.zLimited, JSON.stringify(u));
+  for (let step = 1; step < 0xf; step++) {
+    G.g_evt_step_index = step;
+    WaterSurfacesTick();
+  }
+  check("...lives through fourteen step changes",
+        G.g_water_surfaces.length === 1 && canal.task!.stepChanges === 14);
+  G.g_evt_step_index = 0xf;
+  WaterSurfacesTick();
+  check("...and 0x13B5 is killed at step 0xF, a change inside its lifetime",
+        G.g_water_surfaces.length === 0);
+  check("the tile keeps what the walk did to it after the task goes",
+        uvOf(WATER_CANAL_SLOT)?.frames === 15);
+
+  G.g_evt_step_index = 10;
+  const arena = place(0x14940, 0, 20).task!;
+  WaterSurfacesTick();
+  check("index 0 draws the arena water and 0x13A5 beside it",
+        arena.drawn.join() === [WATER_ARENA_SLOT, WATER_ARENA_PAIR_SLOT].join());
+  check("...and does not ripple it until flag 8", !uvOf(WATER_ARENA_SLOT));
+  G.g_script_flags[WaterSurfaceFlag.ArenaRipple] = 1;
+  WaterSurfacesTick();
+  check("...then ripples only the vertices at z <= -1870",
+        uvOf(WATER_ARENA_SLOT)?.frames === 1
+        && uvOf(WATER_ARENA_SLOT)?.zLimited === true);
+  G.g_script_flags[WaterSurfaceFlag.RippleOff] = 1;
+  WaterSurfacesTick();
+  check("flag 0x6A stops every ripple and not the draw",
+        uvOf(WATER_ARENA_SLOT)?.frames === 1 && arena.drawn.length === 2);
+  G.g_script_flags[WaterSurfaceFlag.RippleOff] = 0;
+  G.g_script_flags[WaterSurfaceFlag.SwapTiles] = 1;
+  WaterSurfacesTick();
+  check("flag 9 swaps the arena water after this frame's draw",
+        arena.slot === WATER_ARENA_ALT_SLOT
+        && arena.drawn[0] === WATER_ARENA_SLOT);
+  WaterSurfacesTick();
+  check("...and the alternate is drawn with its own pair",
+        arena.drawn.join()
+          === [WATER_ARENA_ALT_SLOT, WATER_ARENA_ALT_PAIR_SLOT].join());
+  check("...which the exporter's list of what it can draw covers",
+        [WATER_ARENA_PAIR_SLOT, WATER_ARENA_ALT_SLOT, WATER_ARENA_ALT_PAIR_SLOT]
+          .every((s) => WATER_SURFACE_ALSO_DRAWS[WATER_ARENA_SLOT]!.includes(s)));
+
+  const death = place(0x15684, 1, 1).task!;
+  G.g_active_cam_path = 0x40;
+  WaterSurfacesTick();
+  check("the death water swaps on flag 9 off camera path 0x6E",
+        death.slot === WATER_DEATH_ALT_SLOT && !uvOf(WATER_DEATH_SLOT));
+  G.g_active_cam_path = WATER_DEATH_CAM_PATH;
+  WaterSurfacesTick();
+  check("...and on 0x6E turns back after the draw, in the same frame",
+        death.drawn[0] === WATER_DEATH_ALT_SLOT
+        && death.slot === WATER_DEATH_SLOT);
+  WaterSurfacesTick();
+  check("...where flag 9 swaps it and the last line swaps it back again",
+        death.slot === WATER_DEATH_SLOT && uvOf(WATER_DEATH_SLOT)?.frames === 1);
+  check("a snapshot carries the tasks and the tiles as they are",
+        JSON.stringify(clonePlain(G.g_water_surfaces))
+          === JSON.stringify(G.g_water_surfaces)
+        && JSON.stringify(clonePlain(G.g_water_surface_uv))
+          === JSON.stringify(G.g_water_surface_uv));
+  G.g_evt_block_index = 0x23;
+  G.g_evt_step_index = 2;
+  G.g_GameMode = GameMode.Boss;
+  WaterSurfacesTick();
+  check("in Boss mode none of the kill tests runs",
+        G.g_water_surfaces.length === 2);
+  G.g_GameMode = GameMode.Arcade;
+  WaterSurfacesTick();
+  check("on stage 2, block 0x23 step 2 kills every task",
+        G.g_water_surfaces.length === 0);
+
+  G.g_scene_index = 2;
+  G.g_evt_block_index = 1;
+  const st3 = place(0x237c, 4, 11).task!;
+  check("on stage 3 the kill flag is the index plus 0x0B", st3.killFlag === 15);
+  G.g_script_flags[15] = 1;
+  WaterSurfacesTick();
+  check("...and raising it kills the task", G.g_water_surfaces.length === 0);
+  G.g_script_flags[15] = 0;
+  place(0x237c, 4, 11);
+  G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 1;
+  WaterSurfacesTick();
+  check("...as flag 4 kills every one", G.g_water_surfaces.length === 0);
+  G.g_script_flags[WaterSurfaceFlag.KillAllStage3] = 0;
+  G.g_script_flags[WaterSurfaceFlag.ArenaRipple] = 0;
+  G.g_script_flags[WaterSurfaceFlag.SwapTiles] = 0;
+  G.g_scene_index = 0;
+  G.g_active_cam_path = -1;
+  SetGameTables(CHARS, BREAKABLES);
+  ResetGameGlobals();
+  check("the scene takes its tasks and its tiles with it",
+        G.g_water_surfaces.length === 0 && G.g_water_surface_uv.length === 0);
 }
 
 console.log("\nclass 0x41, breaking a prop:");

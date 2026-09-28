@@ -102,6 +102,8 @@
 005679f4	g_initial_damage_rank	s8[5], difficulty -> starting g_damage_rank: -3, -1, 1, 4, 8. Not clamped on the way in; UpdateDamageRank clamps to [0,15] on its first pass.
 005679fc	g_route_map_tiles	s16[4]: the first DrawScreenSprite id of each of the route map's four 640x480 screens (5 x 15 tiles of 128x32, id base + row*5 + col; scr_bunki.bin). [proved]
 00567a04	g_route_waypoints	{s16 x, s16 y}, indexed wp + (stage * 0x27 + block) * 6: the map points each block's walk visits, x -1 after the last. [proved]
+00569108	g_water_surface_uv_step	f64 0.00075: what WaterSurfaceUpdate adds to a vertex's u and v per frame, times the sine and cosine of its phase. [proved]
+00569110	g_water_surface_z_limit	f32 -1870.0: with index 0 (slot 0x13A7, the boss arena's water) WaterSurfaceUpdate moves only the vertices at z <= this. [proved]
 0056b0e4	g_hp_percent_by_rank	u8[16], g_damage_rank -> the percentage of a spawn's descriptor hit points it actually starts with: 60 60 70 80 90 100 100 100 105 110 115 120 125 125 130 130. CivilianInit applies it to every child it builds.
 005702a8	g_civilian_scripts	Class 0x10's script table: 67 dword pointers into 0x0056B9E4..0x005702A8, indexed by the spawn tail's byte +0x01. CivilianRunScript walks the stream it names. Ops 0x0E/0x0F/0x1E/0x1F point at further streams that live in the gaps between the table's own entries, so the whole set is 136 streams and 1967 commands. Decoded by ExeTables.civilian_scripts.
 005703b4	g_class26_path_by_selector	selector 6 -> path 0x183, 7 -> 0x184
@@ -245,6 +247,7 @@
 00593ad4	g_shatter_fragment_angles	15 x {s16 rx, s16 ry, s16 rz} in BAMS -- each shatter fragment's initial orientation.
 00593cf0	g_breakable_group_ptrs	nine pointers to 10-byte member records
 00593d14	g_breakable_group_counts	nine member counts: {4,2,3,9,5,3,3,6,7}
+00593da4	g_water_surface_slots	s16[10], indexed by a class-0x41 type-1 placer's obj+0x1F4: 0x13A7 komono_boss2[0], 0x13A0 st2_07[0], 0x13B5 st2_07[3], 0x13B7 komono_venis[4], 0x13AD/0x13AE/0x13B0/0x13B2 st1_1[9/10/12/14], 0x183C st1_1[34], 0x13A4 komono_venis[3] -- every one a flat water tile at y -25 (-15 for 0x183C). Read only by PlaceWaterSurface (0x00462FA5). [proved]
 00593db8	g_prop_kind_params	Per class-0x41-type-4 object kind, stride 0xC: {s16 effect_id @+0, s16 effect_arg @+2, ..., s16 radius @+8}. PlaceKindedProp copies them into the prop's +0x324/+0x328/+0x124.
 00593e70	g_prop_table38	PlaceTable38Props' nine rows, stride 0x18: {f32 x, y, z; f32 rx, ry, rz in DEGREES}. The constructor reads it from 0x00593E74 as [-1],[0],[1] and scales the angles by 182.0444 (0x00569010).
 00593f48	g_prop_table39	PlaceTable39Stacks' eight rows, the same {x,y,z, three angles in degrees} shape as g_prop_table38 and immediately after it.

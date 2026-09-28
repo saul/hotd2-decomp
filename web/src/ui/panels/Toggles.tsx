@@ -14,6 +14,9 @@
 import type { ToggleName } from "../commands";
 import type { DebugGroupName } from "../projection";
 
+/** What kind of switch a toggle is. See {@link ToggleSpec.kind}. */
+export type ToggleKind = "game" | "debug" | "aid";
+
 export interface ToggleSpec {
   name: ToggleName;
   label: string;
@@ -33,8 +36,12 @@ export interface ToggleSpec {
    * `game` — the game itself draws it, and off is an inspection convenience.
    * `debug` — drawing this player invented, over the top. None of it changes
    * what the game does, so none of it is in a snapshot.
+   * `aid` — a debug aid that makes the player **behave** unlike the game so
+   * that something can be looked at. It is not drawing, so it is not `debug`,
+   * and the game has no such switch, so it is not `game`: off is the engine,
+   * and every one of these is off by default.
    */
-  kind: "game" | "debug";
+  kind: ToggleKind;
   /**
    * Which sidebar panel draws this control.
    *
@@ -90,6 +97,8 @@ export const TOGGLES: readonly ToggleSpec[] = [
     title: "The nine-frame flash and its second draw, at the crosshair on every shot \u2014 PlayerShotEffectSpawn's first ring. Off by default: it sits under the aim point because the cabinet's gun needed something bright there, and with a mouse it mostly covers what you are shooting. The port spawns the records either way; this only decides whether they are drawn." },
   { name: "redBlood", kind: "game", label: "Red blood", on: true, group: "shooting",
     title: "The game's own Blood Color option. tex/scr_blood_red.bin and tex/scr_blood_green.bin are the same 39 images at the same texture slots, and the game loads one bank over the other; the bundle carries the green one, so this swaps the red and green channels on every material that draws blood \u2014 the spray, the gore parts a zombie swaps in, and the decals." },
+  { name: "branchPause", kind: "aid", label: "Pause at branches", on: false, group: "route",
+    title: "Debug aid, off by default. The game has no pause at a route branch: EvtAdvanceStepOrRoute reads g_script_branch_var \u2014 which only gameplay writes, a rescue or a shot prop \u2014 and goes to that route on the same frame. On, the script holds at every branch for 1.5 seconds and the branch bar offers the other routes; nobody answering takes the game's own. Taking another route by hand can leave the world in a state the game cannot reach." },
 ];
 
 /** The defaults, as a record — what `app/` initialises its state from. */

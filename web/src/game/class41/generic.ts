@@ -284,11 +284,11 @@ export const GENERIC_DESCRIPTOR_SLOT: ReadonlySet<number> =
  * is a fifth of a degree. Both readings are the engine's and the port makes
  * both.
  *
- * `[open]` Type 33's strip and its death are not ported: its single stage-2
- * spawn plays 60 frames of `eff_shop.bin` and then kills itself, and the port
- * draws frame 0 and holds it — the standing divergence this module declares.
- * It is in this table so the exporter carries the strip either way, because
- * what travels is decided by the routine and not by how far the port has got.
+ * Type 33's strip and its death are ported: its single stage-2 spawn plays 60
+ * frames of `eff_shop.bin` and then kills itself — `PropDrawOnlyType33` in
+ * `class41/draw_only.ts`, its own family because the routine has no lifetime
+ * prologue. Until that was read the port drew frame 0 and held it for the rest
+ * of the stage.
  */
 export const GENERIC_SLOT_STRIP: ReadonlySet<number> = new Set([31, 33]);
 
@@ -452,6 +452,8 @@ const PropContainerType32 = 32;
 const TYPE43 = 43;
 /** Class 0x41 type 13, which has its own lifetime and so its own family. */
 const TYPE13 = 13;
+/** Class 0x41 type 33, the slot strip played once. See `class41/draw_only.ts`. */
+const TYPE33 = 33;
 const TYPE53 = 53;
 const TYPE54 = 54;
 
@@ -507,6 +509,10 @@ export const GENERIC_FAMILY: Partial<Record<number, PropFamily>> = {
   // Inlines its own lifetime and registers no sphere: the part that drops
   // out of stage 2's clock tower. See `class41/type13.ts`.
   [TYPE13]: PropFamily.Type13,
+  // No prologue, no shot-test tail, and it draws before it steps, so it is
+  // stepped at the head of the frame rather than in the pool's walk. See
+  // `class41/draw_only.ts`.
+  [TYPE33]: PropFamily.DrawOnlyType33,
 };
 
 /**

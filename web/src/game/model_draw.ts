@@ -43,6 +43,7 @@
 import type { CharacterBone, CharacterType } from "../bundle";
 import { ActorFlag, MotionFlag, type Actor } from "./actor";
 import { SkeletonNodeDrawSuppressed } from "./parts";
+import type { ClassFrame } from "./registry";
 import { CharacterTypeOf } from "./tables";
 
 /**
@@ -77,8 +78,15 @@ export function ActorSetPartVisibility(obj: Actor, visible: number): void {
  * What a class's node draw hook — `model+0x1158`, installed at `obj+0x12EC`
  * by the class's `Init` — is handed: the node's bone and the slot its draw
  * record holds this frame.
+ *
+ * And the frame, which the engine's hook does not take as an argument but
+ * reads as globals: the head aim both combat hooks run for bone 2,
+ * `ActorAimHeadAtCamera` (`FUN_00453BE0`), reads `g_camera_eye_x/y/z` and the
+ * camera block's matrix, which are `ClassFrame.eye` and `ClassFrame.host`
+ * here.
  */
-export type NodeDrawHook = (obj: Actor, bone: number, slot: number) => void;
+export type NodeDrawHook = (obj: Actor, bone: number, slot: number,
+                            f: ClassFrame) => void;
 
 /**
  * The slot a node's draw record holds: `obj+0x20C + bone*0x90`, `+0`.
@@ -91,6 +99,22 @@ export type NodeDrawHook = (obj: Actor, bone: number, slot: number) => void;
 function nodeSlotOf(obj: Actor, node: CharacterBone): number {
   if (obj.removed.includes(node.bone)) return 0;
   return obj.boneSlot[String(node.bone)] ?? node.slot;
+}
+
+/**
+ * The slot one bone's draw record holds, by bone number: `nodeSlotOf` for a
+ * routine that asks about one node rather than walking them all. Zero for a
+ * bone the character type does not have, which is what the engine's record
+ * for it would hold.
+ *
+ * [port-only], for the same reason as `nodeSlotOf`. Its reader is the head
+ * aim's record write, which `SkeletonEmitNode` makes after the hook under the
+ * slot and `MotionFlag.Drawn` half of this gate and not under the veto -- see
+ * `HeadAimEndDraw` in `class30/head_aim.ts`.
+ */
+export function DrawRecordSlot(obj: Actor, bone: number): number {
+  const node = CharacterTypeOf(obj)?.bones.find((b) => b.bone === bone);
+  return node ? nodeSlotOf(obj, node) : 0;
 }
 
 /**
@@ -130,25 +154,26 @@ function nodeSlotOf(obj: Actor, node: CharacterBone): number {
  * pose for these classes; every state that closes the gate also raises
  * `obj+0x34` bits that take the actor out of the camera and the shot test.
  */
-export function ActorRunNodeDrawHooks(obj: Actor, hook: NodeDrawHook): void {
+export function ActorRunNodeDrawHooks(obj: Actor, hook: NodeDrawHook,
+                                      f: ClassFrame): void {
   const type = CharacterTypeOf(obj);
   if (!type) return;
   for (let i = 0; i < type.bones.length; i++) {
-    if (type.bones[i].parent === null) emitNodeHook(obj, type, i, hook);
+    if (type.bones[i].parent === null) emitNodeHook(obj, type, i, hook, f);
   }
 }
 
 /** One node and its subtree, for {@link ActorRunNodeDrawHooks}. */
 function emitNodeHook(obj: Actor, type: CharacterType, index: number,
-                      hook: NodeDrawHook): void {
+                      hook: NodeDrawHook, f: ClassFrame): void {
   const node = type.bones[index];
   const slot = nodeSlotOf(obj, node);
   if (slot !== 0 && (obj.motionFlags & MotionFlag.Drawn) !== 0
       && !SkeletonNodeDrawSuppressed(obj, node.bone, slot)) {
-    hook(obj, node.bone, slot);
+    hook(obj, node.bone, slot, f);
   }
   for (let j = index + 1; j < type.bones.length; j++) {
-    if (type.bones[j].parent === index) emitNodeHook(obj, type, j, hook);
+    if (type.bones[j].parent === index) emitNodeHook(obj, type, j, hook, f);
   }
 }
 

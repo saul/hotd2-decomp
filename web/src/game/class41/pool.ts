@@ -108,6 +108,11 @@ export function BreakablePropPoolUpdate(rng: Rng, events?: Events,
       // Neither masks `obj+0x34` and neither registers a shot sphere either.
       case PropFamily.DrawOnlyType53: PropDrawOnlyType53(p); break;
       case PropFamily.DrawOnlyType54: PropDrawOnlyType54(p); break;
+      // Nothing here, and deliberately: `PropDrawOnlyType33` draws before it
+      // steps, so its step ran at the head of this frame in
+      // `PropDrawOnlyType33Tick` -- see `class41/draw_only.ts`. Letting it
+      // reach the default arm below would run a group prop's routine on it.
+      case PropFamily.DrawOnlyType33: break;
       // Its own lifetime, its own hit arms, its own shot-test tail. Nothing
       // the generic arm supplies belongs to it.
       case PropFamily.Type43: PropUpdateType43(p, rng, events); break;

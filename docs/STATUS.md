@@ -19,9 +19,9 @@ is in `tools/verify_all.py`, beside the command that runs it.
 
 | Directory | Lines | Files | Layer |
 |---|---:|---:|---|
-| `game/` | 92513 | 293 | engine |
+| `game/` | 92483 | 293 | engine |
 | `hod2lib/` | 18753 | 35 | engine |
-| `render/` | 14760 | 52 | render |
+| `render/` | 14752 | 52 | render |
 | `app/` | 7982 | 28 | app |
 | `script/` | 4390 | 25 | engine |
 | `ui/` | 3031 | 23 | ui |
@@ -29,7 +29,7 @@ is in `tools/verify_all.py`, beside the command that runs it.
 | `core/` | 949 | 9 | engine |
 | `audio/` | 907 | 2 | render |
 | `hud/` | 491 | 1 | ui |
-| **total** | **146449** | **479** | |
+| **total** | **146411** | **479** | |
 
 The largest files, which is where the pressure to split next is:
 
@@ -44,8 +44,8 @@ The largest files, which is where the pressure to split next is:
 | | |
 |---|---|
 | Gameplay coverage | **229 of 297** annotated functions in the gameplay address ranges have a port (77%) |
-| Ported outside those ranges | 481 (opcodes, and the classes whose handlers sit elsewhere) |
-| Citations checked | 710 ported functions match `functions.tsv` under the same name |
+| Ported outside those ranges | 482 (opcodes, and the classes whose handlers sit elsewhere) |
+| Citations checked | 711 ported functions match `functions.tsv` under the same name |
 | Spawn classes | **29 of 42** read classes have a module, covering 1535 of 1619 placements |
 | Declared `[diverges]` | **136** — where the port knowingly departs from the exe, each with its reason on the spot |
 | `[open]` markers | **107** — questions the port and the exporter are honest about not having answered |

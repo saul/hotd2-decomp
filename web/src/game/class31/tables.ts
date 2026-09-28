@@ -82,11 +82,22 @@ export function ThrowerPickState(a: Actor, band: number,
 /**
  * `ThrowerLoadAttackArcScript` — `FUN_0044B610`. Install the arc motion script
  * of the attack the actor has drawn, against the stance it is in.
+ *
+ * **It latches nothing.** The stance is computed and used for the one lookup;
+ * `obj+0x1364`, which `ThrowerStrikeConnect` (`FUN_0044CE60`) reads its hit
+ * frame through, is not written here. `[proved]`: the only store to
+ * `[reg + 0x1364]` on a thrower anywhere in the image is
+ * `ThrowerStateLeapDown`'s at `0x0044B6FB`. The others in class 0x31's range
+ * write other objects -- `SpawnThrownWeapon`'s three (`0x0045055F`,
+ * `0x00450591`, `0x004505F9`) go through `ESI`, the projectile whose `+0x13F0`
+ * takes the weapon model while `EDI`'s hand slots are cleared, and
+ * `FUN_00450930`'s through the object it has just allocated. This used to
+ * write it, which made states 22 and 23 connect on the pounce row's hit frame
+ * where the engine connects on whatever row the last leap down latched.
  */
 export function ThrowerLoadAttackArcScript(obj: ThrowerActor): void {
-  obj.thr.stance = ThrowerStanceOf(obj);
   InstallArcMotionScript(obj,
-    ThrowerAttackOf(obj, obj.thr.stance, obj.attack)?.script ?? null);
+    ThrowerAttackOf(obj, ThrowerStanceOf(obj), obj.attack)?.script ?? null);
 }
 
 /** One of the arc scripts a *state* names rather than an attack entry. */

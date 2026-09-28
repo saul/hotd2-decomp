@@ -20626,6 +20626,123 @@ frame but the one that set the clip. The draws agree. The held start frame is
 therefore seen `fade + 1` times by a port state and `fade + 2` by the engine's.
 Not this change's to fix -- it is every cursor test in the port.
 
+## 2026-09-27 -- class 0x31 state 23, the delayed pounce, read against the listing
+
+`ThrowerStateDelayedPounce` (`FUN_0044E830`) re-ported from the disassembly;
+the roll turn is the turn-routines branch's and was left alone here. What the
+port had wrong, all `[proved]`:
+
+* The wait clip was a one-shot. The exe calls `ActorSetMotionBlended`
+  (`0x004119A0`) directly, so it is the ordinary motion and loops for the
+  whole wait -- its root walks the actor. It also raises `obj+0x1F8` bit
+  `0x10`, which is `MotionFlag.RootMotionY` and had no known writer; that is
+  the height store at `0x00410E48`, now honoured by `ApplyRootMotion`.
+* `obj+0x34 |= 0x100` (`ShotImmune`) for the wait was missing, so the pair
+  could be knocked down before they moved.
+* `ActorFlag.BackingOff` (`0x20000000`) for the exe's `0x10000000`
+  (`Committed`). `ThrowerStateLeapDown` and `ThrowerStateLeapStrike` make the
+  same substitution; they were left to their owners and reported.
+* The flight aimed at `obj.lookAt.y`, the actor's own tracked point, for
+  `g_camera_eye_y`.
+* The `obj+0x34 |= 0x2000` raise past the live row's hit frame was not there.
+* **`ThrowerPickLandingPoint` switches on the state** (`obj+0x1310`, at
+  `0x0044CBB1`): states 22 and 23 take -350 px, and 23 unprojects at -6.0. The
+  annotation already said so; the port ignored it and had no sideways offset
+  either. State 23 was landing 9.5 units short.
+* `ThrowerLoadAttackArcScript` wrote `obj+0x1364`. The exe's does not; the only
+  store to that word on a thrower is `ThrowerStateLeapDown`'s at `0x0044B6FB`.
+
+**Wrong turns.** I first wrote that seven `+0x1364` instructions in class
+0x31's range held one store. There are five stores: `SpawnThrownWeapon`'s
+three go through `ESI`, the projectile, and `FUN_00450930`'s through an object
+it has just allocated. The claim is now "one store on a thrower". And the first
+port test pinned the flinch veto to cursor 67. The port shows 68, because
+`ActorArcStep`'s `playStage` starts stage 2 on its start frame with no fade
+hold, and the state never sees 67. That is the arc's approximation, not state
+23's, so the test now asserts "past 66" and the hold is reported.
+
+Checks: 29 new assertions in `port.test.ts`, 2223 passing. Mutating the veto
+to read `obj.thr.stance` fails it at cursor 63.
+
+**After merging the arc hold (98627e93).** The veto check is back to exactly
+67, because stage 2 now holds on its start frame. The merge also caught a third
+wrong turn, found by the hold's session. I had asserted that `ShotImmune` is
+down at the end of the frame the wait ends. Sub 1 does drop it (`0x0044E8BA`),
+but the same frame falls into `ActorArcStep`, whose phase 0 raises it again
+for types 0x16..0x19 outside state 10 (`0x0044D8A4`..`0x0044D8BE`, jump-table
+entry 0 at `0x0044DA4C`). It latches `obj+0x136C` bit `0x200` only if `0x100`
+was already up. The takeoff (`0x0044D966`..`0x0044D97D`) drops it. So the
+windup cannot be shot either. I asserted what the state does in isolation
+rather than the end of the engine's frame, and the check now asserts the
+latter.
+
+## 2026-09-27 -- `obj_484ff0_props`: the `0x20` gate is the chapter card's, not dead
+
+The rig's note (`tools/hod2lib/rigs.py`, and `rigs_data.ts` generated from it)
+ended: "gated on DAT_009A5900 & 0x20, and [likely] that bit is dead: of 54
+references ... nothing sets 0x20, so the early-out never fires". **Wrong.**
+`[proved]` from the disassembly of all 67 references `get_xrefs_to 0x009A5900`
+returns now:
+
+* **Set only by `ChapterCardInstall`** (`FUN_004342E0`): `OR AL, 0x20` at
+  `0x0043436B` in sub 0, and `OR EDX, 0x20` at `0x004342F6` / `0x00434324` in
+  the Boss Mode and app-state-`0x0B` installer arms. Every other writer ORs
+  1, 2, 8, `0x10` or `0x18`, or ANDs one of those out (`PlayerTryStartPress`'s
+  `OR EAX, EBP` is `EBP = 1`, loaded at `0x00415018`).
+* **Cleared** at `0x004348C7` after flag 248, by `BossModeChapterCardUpdate`
+  at `0x00434CE4` and by `FUN_00434DA0` at `0x00434ED4`; and wholesale by
+  `CommitAppState`'s `AND 0xFFFFFFC7` (`0x0040E8C5`) and `FUN_0040A920`'s
+  `MOV [0x009A5900], 3` (`0x0040AA85`).
+
+So the early-out fires for every chapter card's 180 frames. Why the earlier
+sweep missed three plain `OR`s is `[open]`; the reference count it quoted (54)
+is not the count there is now (67), so it was read off a different list.
+
+**The early-out is a draw gate, not a routine gate** -- the note's "the whole
+routine is gated" was also wrong. `ScriptedHumanoidDraw`'s `JNZ` at
+`0x0048500D` lands on the tick at `0x0048523A` (`if obj+0x1324 == 0,
+obj+0x194++`), not the `RET`; `SetPiecePropDrawAndTick`'s at `0x00483503`
+lands on the type-`0x55` test at `0x00483520`, past the skeleton draw only. So
+classes 0x24 and 0x25 **keep animating** behind the card and are only undrawn;
+this log's chapter-card entry above lists them among routines that "hold
+still", which is right for `Class22CutsceneHoldUntilChapterCard` (its gate is
+on `DrawAndStep`) and not for these two.
+
+**The port has nothing to gate.** What sits under the test in both routines is
+the draw, which is the renderer's; the tick, which is the port's
+(`ActorAdvanceMotion`), is outside it. The bit itself is modelled by the
+screen-card session (`c1e6e721`, merged to main as `ccb956b7`;
+`ScreenFurniture.ChapterCard` in `game/globals.ts`), and under the user's skip-every-card decision (NEW-BUGS 13)
+sub 0 raises it and the countdown drops it inside one `ChapterCardInstall`
+update, so no draw could observe it. A render-side gate is worth writing only
+if the card is ever held for its dwell. Comments at class 0x24's tail and
+class 0x25's `ScriptedHumanoidIdle` say so where the next reader will look.
+
+**Wrong turn.** The pseudocode of both routines `return`s after the
+`MatrixStackPop` that ends each decoration arm, and after
+`SetPiecePropDrawAndTick`'s type-`0x53` draw of slot `0x1382` -- which read as
+"those arms never tick". The disassembly falls through into the tick every
+time (`0x00485237`, `JMP 0x0048523A` at `0x004851F3`, `0x004835BA`): **L35**,
+the no-return `MatrixStackPop`. Nothing is lost here in practice: no class-0x24
+placement in the six stages has character type `0x53` or `0x55` -- the 28
+reached use `0x22`/`0x26`/`0x2E`/`0x30`/`0x31`/`0x33`/`0x34`/`0x35`/`0x37`/`0x47`.
+
+**Bundle.** The note is data, and it travels twice: `rigsJson` writes it into
+`rigs[].note` of the script JSON, and the glTF carries it as the rig node's
+`extras.hod2_note` -- stages 2 and 3, both modes, eight files. All twelve
+bundles were exported before and after the change and diffed chunk by chunk:
+those eight notes, and `rigs_data.ts`'s entry and the builder stamp in
+`manifest.json`, are the whole difference. Every `.glb` BIN chunk and every
+other file is byte-identical.
+
+**Two more slips, both caught.** (1) The first "after" export was started
+before `tools/gen_builder_hash.py` had run -- **L33** exactly; `rigs_data.ts`
+is in the builder digest, and `verify_exporters.py` said so. Stopped, hash
+regenerated, re-exported. (2) `grep -rl` over the bundle listed only the four
+script JSONs, which read as "the glTF does not carry the note". macOS `grep`
+exits 1 on these `.glb` files and prints nothing, even with `-c` -- **L13**.
+Counting the bytes in Python found it in all four.
+
 
 ## 2026-09-27 -- the HUD shutter as the scene's task, and no pause at a branch
 

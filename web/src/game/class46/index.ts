@@ -1070,11 +1070,17 @@ export function BatScatterUpdate(obj: Actor, f: ClassFrame): void {
  * {@link BatDiveUpdate}'s homing arm at `0.01` a frame instead of `0.015`, and
  * a yaw eased a quarter of the way rather than an eighth.
  *
- * `[diverges]` **The dive's yaw reads camera block 0**, not the active one.
- * The engine indexes `g_camera_block_eye` by `g_camera_index` for the position
- * and takes the bare symbol for the heading, three lines apart. The two are
- * the same object in a one-player game, which is every shipped case the port
- * runs, and the port uses the active block for both.
+ * **The dive's yaw reads camera block 0**, and its position the block
+ * `g_camera_index` selects: the engine indexes `g_camera_block_eye` by
+ * `g_camera_index` for the homing (`0x0042EFE4`, `0x0042F016`, `0x0042F05B`)
+ * and for the wobble's heading (`0x0042F0C9`), and takes the bare symbol for
+ * the yaw's `fpatan` (`0x0042F147`, `0x0042F153`). `[proved]` The port keeps
+ * one block, `G.g_camera_block_eye`, because `g_camera_index` is 0 in every
+ * shipped write (see the global) -- so block `g_camera_index` **is** block 0
+ * and both reads are the one entry, exactly as they are in the engine. This
+ * was declared a divergence on the argument that the two differ outside a
+ * one-player game; they differ only if something writes `g_camera_index`,
+ * and nothing shipped does.
  */
 export function BatSwarmUpdate(obj: Actor, f: ClassFrame): void {
   const sub = Tail(obj);

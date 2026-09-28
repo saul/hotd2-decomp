@@ -71,11 +71,12 @@ let cache: {
 
 /**
  * The flags **something this port runs can actually raise**, for one bundle.
- * `[diverges]`
+ * `[port-only]`: the derivation behind the divergence `waitScriptFlag`
+ * declares at the line where the wait passes instead of blocking.
  *
  * The engine needs no such set: every writer of `g_script_flags` is code it is
  * running. This port runs some of them and not others, and that difference is
- * the whole of this divergence — a gate on a flag whose writer is not ported
+ * the whole of the divergence — a gate on a flag whose writer is not ported
  * is a gate nothing can ever open, and a faithful `0x45` parks the stage on it
  * for good. So this is the rule `WAIT_NOTES` already states for every other
  * opcode — *a wait this client cannot evaluate does not block* — made precise
@@ -97,28 +98,31 @@ let cache: {
  *   flag belongs to one of its 79 constructors, so a class-wide answer would
  *   claim it for all 441 of the six stages' class-0x41 spawns.
  *
- * ## What is still excused, and what each one needs
+ * ## What is still excused, and what it needs
  *
- * **14 of the game's 61 gates** are still excused, down from 50 when the two
- * cards were unreachable and from 35 before class 0x14. Stages 2, 3 and 6
- * have nothing left to excuse. The rest are three unported classes, and
- * **every one is an enemy or a boss** -- the last prop went with
- * `class41/flag_prop.ts`, which raises flag 20 and lets stage 4's block-2
- * gate be honoured:
+ * `web/tools/flag_gates.ts` is the measurement: it runs this derivation over
+ * the twelve bundles and prints, per stage, the flags whose gates are held and
+ * the ones excused. Nothing is quoted from it here but what it names, because
+ * a count in prose rots (`L16`) -- this docstring said fourteen gates for as
+ * long as it took classes 0x19 and 0x22 to be ported, and gave the bosses'
+ * being out of scope as the reason for two rows that no longer existed.
  *
- * | flag(s) | stages | writer |
+ * What it names is **one flag, in one stage**: stage 5's `wait_script_flag
+ * 30`, the gate at step 4 of block 7 and of block 9, in both mode sets. Its
+ * writer is an enemy the port does not run:
+ *
+ * | flag | stage | writer |
  * |---|---|---|
- * | 4 | 32 | **class 0x19**'s death, `Boss4StateDeath` (`FUN_00495770`) at `0x004958C7`. The class **is** ported; only its arena progression is not, and only that lifts the shot refusal that reaches the death |
- * | 3 | 0, 3 | **class 0x22** (`FUN_0049B0D0`) — the stage-1 and stage-5 boss, `0x0049CC85` and `0x0049CC95` |
- * | 2 | 30 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
+ * | 30 | 5 | **class 0x32** (`FUN_0047F5F0`), state 4 at `0x00480590` |
  *
- * The bosses are out of scope by the user's own decision, so classes 0x19
- * (flag 32) and 0x22 stay excused deliberately rather than pending.
- * Class 0x32 is not small either: it is an enemy with thirteen states,
- * and declaring its flag without the actor would turn a stage that
- * completes into one that hangs.
+ * Class 0x32 is not small: it is an enemy with thirteen states, and
+ * declaring its flag without the actor would turn a stage that completes into
+ * one that hangs (`docs/PLAYER_HANGS.md` item 20). Every other shipped gate
+ * -- the two cards', classes 0x14, 0x19 and 0x22's, class 0x41's type 75, the
+ * civilians' op 0x1C and the captors' state 36 -- has a writer the port runs,
+ * and is honoured.
  *
- * The row this table used to carry for class 0x14 said "stage 2's blocks 35-41
+ * The row this table once carried for class 0x14 said "stage 2's blocks 35-41
  * **and stage 4's 23-29**", and the second half was wrong: stage 4 has no
  * class-0x14 spawn at all, and its four blocks gate on 31 and 32, both of
  * which class 0x19 writes. Flag 31 has two writers and the stage decides which
@@ -131,24 +135,22 @@ let cache: {
  * turn out to open **no gate in any shipped script**: every flag they write
  * comes off a descriptor, and no `wait_script_flag` in the game names one.
  *
- * ## Class 0x19 is half in and half out, on purpose
+ * ## Class 0x19's writes
  *
- * The stage-4 boss (`game/class19/`) declares `raisesScriptFlag` for **31** and
- * not for 32, so stage 4's four `wait_script_flag 31` gates are honoured and
- * its four `wait_script_flag 32` gates are still excused. That is not a gap
- * left by accident: the port runs the whole of the first chain —
- * `set_script_flag 30` -> the boss's intro banner -> `g_bHudShutterState = 1`
- * -> `g_script_flags[31]` — and cannot yet reach the second, because
- * `Boss4ResolveShot` refuses every shot once the hit points reach the phase
- * floor and only the unported arena progression lifts it. A class that raises
- * two flags and can reach one of them declares one.
+ * The stage-4 boss (`game/class19/`) declares `raisesScriptFlag` for both of
+ * its flags now, **31** and **32**: the port runs the whole of the first
+ * chain -- `set_script_flag 30` -> the boss's intro banner ->
+ * `g_bHudShutterState = 1` -> `g_script_flags[31]` -- and, with the arena
+ * progression ported, the second as far as `Boss4StateDeath`. A class that
+ * raises two flags and can reach only one of them declares one; this one
+ * used to, and was excused on 32 for as long as that was true.
  *
  * The survey this file used to carry named `0x0049390C` and `0x004958C7` as
  * class 0x19's two writes. There are **three**: `0x00493B99` is the second
  * entrance routine's own copy of the flag-31 write, and without it blocks 25
- * and 29 would have had no writer at all. Same flag, so the count above does
- * not move; found by searching the bare `9c72` over the class's range (L32),
- * which is the same search that produced this table in the first place.
+ * and 29 would have had no writer at all. Found by searching the bare `9c72`
+ * over the class's range (L32), which is the same search that produced this
+ * table in the first place.
  */
 export function ScriptFlagsThisBundleCanRaise(
     script: ScriptJson): ReadonlySet<number> {
@@ -273,7 +275,7 @@ export const waitScriptFlag: WaitRule = {
     // writer has no module is one it could only park on for ever; it passes
     // instead, and says so in the feed. See
     // {@link ScriptFlagsThisBundleCanRaise} for the derivation and for the
-    // five classes that would retire it. [diverges]
+    // class that would retire it. [diverges]
     if (!ScriptFlagsThisBundleCanRaise(ctx.script).has(index)) {
       return { kind: "yield",
                why: "nothing this port runs raises "

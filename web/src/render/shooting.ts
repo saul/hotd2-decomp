@@ -101,7 +101,7 @@
  * A **miss** has a material now. `game/coli.ts` traces the shot segment
  * against the game's own collision sets, so the impact point, the normal and
  * the surface id are the engine's numbers rather than a raycast against
- * whatever happened to be drawn. That `[open]` is closed.
+ * whatever happened to be drawn. That open question is answered.
  */
 
 import { Raycaster, Vector2, Vector3, type Camera } from "three";
@@ -420,7 +420,7 @@ export class Shooting implements System {
       // The class scores it and the class draws it: `OneHitTargetUpdate`
       // spawns its own `SpawnBoneHitSprite`. A civilian's own effect is
       // `SpawnCivilianBloodPool` (`FUN_0048E080`), a decal object that is
-      // still unported -- [open].
+      // still unported; `game/class10/index.ts` asks what its update does.
       this.onShot({ hit: true, bone: r.bone, points: 0 },
                   `${r.who} · marked, its own class scores it`);
       return;

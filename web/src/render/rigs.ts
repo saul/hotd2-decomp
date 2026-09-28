@@ -180,8 +180,8 @@ interface Instance {
    *
    * Until one has, the routine's `default:` arm is what runs and the object
    * draws at the pose the **spawn** left in `obj+0x40`..`obj+0x6C` — so this
-   * layer must not write a pose at all. See the `[diverges]` at the top of
-   * the file for why the baked root pose is that pose.
+   * layer must not write a pose at all. The divergence declared at the top of
+   * the file says why the baked root pose is that pose.
    */
   posed: boolean;
   /**
@@ -526,7 +526,7 @@ export class RigLayer implements System {
       // No route selected: the routine's `default:` draws anyway, at the pose
       // it last wrote, so the instance that was showing keeps showing. Before
       // any shot has ever selected one, that is the first root, at the pose
-      // the exporter baked -- see the `[diverges]` at the top of this file.
+      // the exporter baked -- the divergence declared at the top of this file.
       // `posed` is what keeps that true: without it the fallback root was
       // placed from its *path* at frame 0, which is a pose the object never
       // holds. Stage 3's boat sat parked at `op_st3` 342 frame 0 -- in the

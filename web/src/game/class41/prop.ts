@@ -543,7 +543,7 @@ function BeginFall(p: BreakableProp, rng: Rng): void {
  * corner has reached the floor.
  */
 function FallStep(p: BreakableProp, events?: Events): void {
-  // [open] The engine first looks for another member of the same group that
+  // The engine first looks for another member of the same group that
   // is *below* this one and within 6 units, and zeroes the fall if it finds
   // one — a prop landing on a prop. It measures that with `obj+0x40..0x48`,
   // and nothing in this class ever writes those three floats: `ActorAlloc`

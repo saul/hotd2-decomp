@@ -23579,3 +23579,58 @@ front of each, converging to within a few degrees of her; screenshots
 * `web/tools/civilians.mjs` fails (`moved 17/37`, `rescued 0/21`, `mauled
   14/10`) -- identically on the base commit, so it is not this change; it is
   not in `verify_all.py`.
+
+## 2026-09-28 -- the `[diverges]` and `[open]` counts made true (branch `worktree-agent-aacb922d35020b0ee`)
+
+**The report.** STATUS's two honest measures were inflated and partial: tags
+describing departures since fixed, back-references that repeated the token so
+one departure counted twice or three times, `[open]`s that recorded answered
+questions, and counters that saw three directories for one marker and one for
+the other.
+
+**The rule** (`PLAYER_ARCHITECTURE.md`, "One departure, one tag"): a tag goes
+where the port's code departs -- the routine or branch, or for a departure in
+representation the field's declaration; two routines departing for one reason
+are two tags (the three readers of block 0's path frame); everything else --
+headers, "see above", "the same trade", history -- names it in words (`L41`).
+`[open]` follows the same rule, and a thing the port knowingly does not do is
+a `[diverges]`, not a question.
+
+**The counters.** `verify_port.marker_files()` is every `.ts`/`.tsx` under
+`web/src/`; `marker_lines` counts occurrences in comments only, through a small
+lexer (strings, templates, regex literals), so `ui/panels/Crumbs.tsx`'s
+`}, [open]);` and `rigs_data.ts`'s bundle note are not markers. It pins itself
+against a fixture and fails a file that leaves it inside a comment or
+template. STATUS prints both totals and a per-layer table.
+
+**Code the stale notes were covering for**, each read in the database first:
+
+* `ZombieStateStandAndThrow` sub 0 (`0x004590E3`..`0x00459109`) tests
+  `obj+0x34` bit `0x1000000` and writes `obj+0x136C` 1 and, if airborne,
+  0x100000; the port raised the held-weapon bit (PLAYER_HANGS 24). Its retire
+  arm's hit-slot free (`0x00459535`) was said to be unported; it is ported.
+* `ZombieThrowHandWeapon` and `SpawnThrownWeapon` zero the hand's bone-record
+  radius (`+0x78`); the two re-arm states write the table's back
+  (`0x0044F831`/`0x0044F891`, `0x0044F9F6`/`0x0044FA61`). `Actor.boneRadius`
+  carries both.
+* `ScriptedHumanoidUpdate`'s path ride writes all three angles
+  (`0x00484B6E`..`0x00484B74`); `ScriptedHumanoidInit` writes `model+0x68 = 1`
+  (`0x004841A9`), so the new `render/characters/humanoid.ts` draws them in
+  order 1.
+* `ZombieStateEmerge` writes `obj+0x136C` too: `0x100002`, or `0x10` when
+  `obj+0x34` has `0x200000` (`OR AL, 0x10` at `0x0045851E`), and drops
+  `0x100000` on the hand-over. That `OR AL` is the arc-target veto's writer,
+  which `class30/knockback.ts` had recorded as unfound after two sweeps -- the
+  one form they did not cover (`L32`).
+* `ActorShotFeedback`'s result-5 arm skips the sprite for a mesh-tested bone;
+  the note said the port had no per-bone blobs. It has, since the stage-4 boss.
+* `CivilianUpdate`'s leave frees the hit slot by index (`0x0048B085`).
+* class 0x46's dive "yaw reads block 0" is not a departure: the port's one
+  block **is** block `g_camera_index`, which every shipped write keeps at 0.
+
+**Wrong turns.** My mutation script restored each file by reversing the
+replacement, and a mutation whose replacement was empty reversed as an
+insertion at offset 0: `class30/throw.ts` came back with the line at the top
+and not in place. Caught by the script's own equality assert, repaired by
+hand, and the script changed to write the pre-mutation text back. Every fix
+above fails its new assertion with the fix removed.

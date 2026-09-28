@@ -343,7 +343,7 @@ function Type43FirstHit(p: BreakableProp, rng: Rng, events?: Events): void {
   if (p.group === Type43ItemSet.OriginalItem
       && G.g_GameMode === GameMode.Original) {
     // `PickOriginalModeItem(obj, 0)` chooses the item into `obj+0x290` and
-    // the prop rises 4.0. `[open]` The port does not run the weighted draw
+    // the prop rises 4.0. `[diverges]` The port does not run the weighted draw
     // here: `obj+0x290` is this family's *kind* and overwriting it would swap
     // the prop's model and radius, which is the one thing the engine can do
     // and the port cannot read back yet.
@@ -382,7 +382,7 @@ function Type43ReleaseOnSecondHit(p: BreakableProp, rng: Rng,
   events?.emit("prop.pickup",
                { id: p.id, player: who, sound: SFX_TYPE43_PICKUP });
   p.storyItem = 1;
-  // `[open]` `g_original_items_taken[obj+0x290]++`, capped at 0x63, and the
+  // `[diverges]` `g_original_items_taken[obj+0x290]++`, capped at 0x63, and the
   // award `FUN_00475E40(g_original_item_records[id].pickup)`. Neither is
   // ported; the port shows the pickup's model and records the shot.
   p.slot = TYPE43_PICKUP_SLOT + TYPE43_PICKUP_SLOT_STRIDE * who;

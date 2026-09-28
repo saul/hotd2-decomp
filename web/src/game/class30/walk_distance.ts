@@ -47,7 +47,7 @@ import { MotionFade, MotionRow, ZombieRunMotion, ZombieState } from "./states";
  * derived `g_enemies_alive` from the pool instead of stepping it; it does not
  * any more — see `combat/counts.ts`.
  *
- * [open] No shipped spawn reaches the state-15 arm: it is the
+ * No shipped spawn *starts* on the state-15 arm: it is the
  * `obj+0x34 & 0x20000000` branch, set on three class-0x31 spawn records and on
  * no class-0x30 one. `ZombieStateStandAndThrow` reaches it, though, and
  * `ZombieStateScriptedGrabAndDespawn` ends in it.

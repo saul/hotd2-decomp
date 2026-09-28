@@ -105,23 +105,28 @@ def tsv_rows(path: Path) -> int:
                if line and not line.startswith("#"))
 
 
-def count_diverges() -> int:
-    """Every declared departure, over `verify_port.divergence_files()`.
+def count_diverges() -> dict[str, int]:
+    """Every declared departure, by directory of `web/src/`.
 
     This counted `game_files()` alone while `verify_port` already counted
     `game/` **plus** `script/`, so the table published one number and the check
-    printed a larger one for the same concept. Both are the wider set now, and
-    the wider set includes `render/` -- see `verify_port.divergence_files`.
+    printed a larger one for the same concept. Both measure the same thing now
+    -- `verify_port.marker_counts`, which is every source file under
+    `web/src/`, in comments only, one per occurrence.
     """
-    return sum(len(verify_port.DIVERGES.findall(p.read_text()))
-               for p in verify_port.divergence_files())
+    return verify_port.marker_counts(verify_port.DIVERGES_TAG)
 
 
-def count_open() -> int:
-    """`[open]` markers in the port: questions it is honest about not having
-    answered. Together with the divergences, the two numbers that say how
-    finished the transcription is."""
-    return sum(p.read_text().count("[open]") for p in verify_port.game_files())
+def count_open() -> dict[str, int]:
+    """`[open]` markers: questions the port and the exporter are honest about
+    not having answered. Together with the divergences, the two numbers that
+    say how finished the transcription is.
+
+    It counted `game/` alone while the marker was written in `render/`,
+    `hod2lib/`, `app/` and `ui/` too -- and counted raw text, so `ui/`'s one
+    was a React dependency array. Same measurement as `count_diverges` now.
+    """
+    return verify_port.marker_counts(verify_port.OPEN_TAG)
 
 
 def count_uncited() -> int:
@@ -202,10 +207,36 @@ def render() -> str:
         f"`functions.tsv` under the same name |")
     add(f"| Spawn classes | **{n_cls} of {n_known}** read classes have a "
         f"module, covering {cov_pl} of {all_pl} placements |")
-    add(f"| Declared `[diverges]` | **{count_diverges()}** — where the port "
+    div, opn = count_diverges(), count_open()
+    add(f"| Declared `[diverges]` | **{sum(div.values())}** — where the port "
         f"knowingly departs from the exe, each with its reason on the spot |")
-    add(f"| `[open]` markers in `game/` | **{count_open()}** — questions the "
-        f"port is honest about not having answered |")
+    add(f"| `[open]` markers | **{sum(opn.values())}** — questions the port "
+        f"and the exporter are honest about not having answered |")
+    add("")
+    add("Both markers are counted in **every** `.ts`/`.tsx` file under "
+        "`web/src/`, one per occurrence, and only in comments — a word in "
+        "code or in a string is not a marker (`verify_port.marker_lines`). "
+        "Each departure and each question is written once, where it is "
+        "made; everything that refers to it names it in words "
+        "([`PLAYER_ARCHITECTURE.md`](PLAYER_ARCHITECTURE.md), "
+        "\"One departure, one tag\"). By layer, from the same table as the "
+        "directories above:")
+    add("")
+    add("| Layer | Directories | `[diverges]` | `[open]` |")
+    add("|---|---|---:|---:|")
+    layers: dict[str, list[str]] = {}
+    for name, layer in LAYER_OF.items():
+        if (SRC / name).is_dir():
+            layers.setdefault(layer, []).append(name)
+    for layer, names in layers.items():
+        shown = ", ".join(f"`{n}/`" for n in names)
+        add(f"| {layer} | {shown} | {sum(div.get(n, 0) for n in names)} | "
+            f"{sum(opn.get(n, 0) for n in names)} |")
+    # A marker in a directory `LAYER_OF` has not heard of is still counted
+    # in the totals above; it gets a row of its own rather than vanishing
+    # from this one.
+    for n in sorted(k for k in set(div) | set(opn) if k not in LAYER_OF):
+        add(f"| (no layer) | `{n}` | {div.get(n, 0)} | {opn.get(n, 0)} |")
     add("")
     n_cmd = interface_members(SRC / "app" / "commands.ts", "PlayerCommands")
     n_view = interface_members(SRC / "app" / "projection" / "player.ts",

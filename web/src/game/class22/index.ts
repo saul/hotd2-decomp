@@ -71,7 +71,13 @@ export const CLASS22_INTRO_BANNER = 0x00570ec8;
 
 /** `g_actor_radius_by_char[0x45]` — `0x004C4E3C`, `00002041`, 10.0. */
 const CLASS22_RADIUS = 10.0;
-/** `MOV byte ptr [EDI + 0x68], 0x5` — `model+0x68`, the flier's and the sub-actor's. `[open]` meaning. */
+/**
+ * `MOV byte ptr [EDI + 0x68], 0x5` — `model+0x68`, the flier's and the
+ * sub-actor's: the order `SkeletonApplyRootMotion` (`FUN_00410C50`) turns the
+ * object in, whose `default:` arm 5 is `RotZ; RotY; RotX`. `[proved]`
+ * `render/characters/judgment.ts` draws it; this is the value, kept beside
+ * the write.
+ */
 const MODEL_68 = 5;
 /** `obj+0x1F8 |= 4` — `model+0x64` bit 2. `[open]` meaning; kept on the word. */
 const MOTION_FLAG_4 = 4;

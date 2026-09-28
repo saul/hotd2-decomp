@@ -123,7 +123,7 @@
  * did: stage 2 block 21's two `zstin` are *spawned* rolled onto a wall --
  * orient `(0, 0xC000, 0xC000)` -- and climb down it on motion 310, whose root
  * runs along its own -Z. Only the roll turns that into world -Y, so yaw alone
- * walked them 7.2 units out from the wall along +X instead, a hundred units
+ * walked them 8.7 units out from the wall along +X instead, a hundred units
  * up in mid-air. See {@link ApplyRootMotion}.
  */
 import type { BakedMotion } from "../bundle";

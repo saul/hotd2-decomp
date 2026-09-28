@@ -2200,7 +2200,7 @@ carry orient `(0, 0xC000, 0xC000)` -- on their sides against the wall -- and
 the port kept only the yaw: the placement had no `pitch` or `roll`, so the
 actors stood upright a hundred units up in mid-air, drawn upright, and
 `ApplyRootMotion` turned motion 310's forward walk by the yaw alone, which
-walked them 7.2 units out from the wall along +X. Three things changed, all
+walked them 8.7 units out from the wall along +X. Three things changed, all
 from the exe: the exporter emits the record's other two orientation words
 (`SpawnFromDescriptor`, `FUN_00408A20`, copies all three) and
 `SpawnScriptedCharacters` puts them on the actor; `ApplyRootMotion` turns the
@@ -2209,12 +2209,13 @@ delta by roll, yaw and pitch (`SkeletonApplyRootMotion`, `FUN_00410C50`); and
 1, `RotX; RotZ; RotY`. Measured in the page at
 `?stage=2&mode=play&entry=0&block=21&step=2&op=7&frame=64`, before and after:
 
-| | before | after |
+| | before (main at `2e6de214`) | after |
 |---|---|---|
 | height over the 45-frame wait | 163.9 -> 163.9 | 163.9 -> 155.2 (8.7 down) |
 | height over the 60-frame wait | 153.2 -> 153.2 | 153.2 -> 140.6 (12.6 down) |
-| x (the wall is at -830.3) | -830.3 -> -823.1 | -830.3 throughout |
-| roll | 0 throughout | `0xC000`, level six frames into the leap |
+| x over the 45-frame wait (the wall is at -830.3) | -830.3 -> -821.6 | -830.3 throughout |
+| roll | 0 throughout, drawn upright | `0xC000` on the wall, level six frames into the leap |
+| leap starts at | 163.9 | 155.2 |
 
 The leap itself was fixed with the rest of the state above: it lands six
 units in front of the eye at `g_camera_eye_y` (51) instead of at the actor's

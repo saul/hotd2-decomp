@@ -54,6 +54,9 @@ import { ZombieStateDeathKnockbackArc } from "./knockback";
 import { CountEnemyZombieIn } from "../combat/counts";
 import { ZombieFlag2 } from "../actor";
 import { ZombiePushOutOfWorldAndActors } from "./ground";
+import { ActorRunNodeDrawHooks } from "../model_draw";
+import { ZombieDrawBonePart } from "./draw";
+import { HeadAimBeginDraw, HeadAimEndDraw, HeadAimSeed } from "./head_aim";
 import { ZombieAttachToCarrier } from "./carrier";
 import { ZombieStateDelayedLeap, ZombieStateEmerge } from "./emerge";
 import { ZombieStateFallToGround } from "./fall";
@@ -100,6 +103,22 @@ export function EnemyZombieUpdate(obj: ZombieActor, f: ClassFrame): void {
   obj.pos.y += obj.vel.y;
   obj.pos.z += obj.vel.z;
   ZombiePushOutOfWorldAndActors(obj, SecondsToTicks(dt));
+  // `ZombieAdvanceMotion` (`FUN_00454860`) at `0x0045343F`: the draw, and
+  // with it the node hook -- which is where the head is aimed. The push above
+  // is the pose hook at `obj+0x12F0`, which `SkeletonApplyRootMotion` runs
+  // inside the same draw before any node is emitted. The clock half of the
+  // routine is the director's `ActorAdvanceMotion`.
+  //
+  // [diverges] The hook is always `ZombieDrawBonePart`. In Training
+  // `EnemyZombieInit` installs `ZombieDrawBoneSlotOnly` (`FUN_00453B30`),
+  // which aims nothing, and `ZombieAdvanceMotion` swaps between the two for
+  // the next frame on `obj+0x34` bit `0x4000` and bytes `0x009C72F1`/
+  // `0x009C72F3`; no stage bundle is exported in Training, and the port keeps
+  // no hook pointer. Original Mode's big-head hook, `ZombieDrawWithEnlargedHead`
+  // (`FUN_00453B50`), calls this one inside a scale, so it aims the same.
+  HeadAimBeginDraw(obj, obj.zom, host);
+  ActorRunNodeDrawHooks(obj, ZombieDrawBonePart, f);
+  HeadAimEndDraw(obj, obj.zom);
 }
 
 function ZombieRunState(obj: ZombieActor, eye: Vec3, dt: number, rng: Rng,
@@ -291,6 +310,9 @@ export function EnemyZombieInit(obj: ZombieActor, _rng?: Rng,
   // `EnemyZombieInit`: `obj+0x136C |= 0x60000000` — take part in both pushes.
   obj.flags2 |= ZombieFlag2.CollideWorld | ZombieFlag2.CollideActors;
   obj.zom.shoveTimer = 0;
+  // `00452EAB  TEST EAX, 0x40000` and the `VecToAngles` after it: the head
+  // aim's seed, toward the camera eye raised 15 -- see `HeadAimSeed`.
+  HeadAimSeed(obj, obj.zom);
   // `00452F0F  CALL EnemyZombieInitByCharType` — the engine's own position for
   // it, after the hit points and the aim angles and before `obj+0x121 = 0xFF`.
   // Three of the spawn record's flag bits move into `obj+0x38` in there, and

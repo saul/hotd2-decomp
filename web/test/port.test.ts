@@ -163,6 +163,11 @@ import { ZombieReleaseWeaponLoopSe } from "../src/game/class30/weapon_loop";
 import { ActorDrawShadow, ActorSetPartVisibility, PART_ALPHA_CHAR_TYPES,
          ActorRunNodeDrawHooks } from "../src/game/model_draw";
 import { REGROW_FULL, ThrowerDrawBonePart } from "../src/game/class31/draw";
+import { ZombieDrawBonePart } from "../src/game/class30/draw";
+import {
+  ActorAimHeadAtCamera, ActorHeadAimAngles, HEAD_AIM_RATE, HeadAimBeginDraw,
+  HeadAimEndDraw, ThrowerHeadAims,
+} from "../src/game/class30/head_aim";
 import { ActorFlag, CountFlag, DamageZone, ThrowerFlag, ThrowerStance,
          ZombieFlag2,
          type Actor, type HumanoidActor, type OneHitTargetActor,
@@ -642,6 +647,16 @@ const CHARS = {
 const SCENE_MAJOR_PLAYING = 2;
 
 const EYE = vec3(0, 0, 0);
+
+/**
+ * One frame with no camera, for the node draw hooks: `ActorRunNodeDrawHooks`
+ * hands each hook the frame, because the head aim both combat hooks run reads
+ * the camera. With `NULL_HOST` there is none, so the aim holds and every
+ * other arm of the hook runs as it did.
+ */
+const DRAW_FRAME: ClassFrame = {
+  eye: EYE, dt: 1 / 60, rng: new Rng(1), host: NULL_HOST,
+};
 
 /**
  * `ActorSpawn` narrowed to class 0x30.
@@ -2728,22 +2743,22 @@ console.log("\nclass 0x25, the two draw fields the VM writes:");
   // `op 14` picks the hand prop and mode 2 restarts the cel counter; `op 12`
   // is a persistent bone toggle, not the one-shot effect it was read as.
   const { a, events } = humanoidScene([
-    { op: HumanoidOp.SetBoneDecoration, mode: 1, a: 0, b: 0 },
+    { op: HumanoidOp.SetHeadAim, mode: 1, a: 0, b: 0 },
     { op: HumanoidOp.SetBonePropMode, mode: 2, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 4, b: 0 },
-    { op: HumanoidOp.SetBoneDecoration, mode: 0, a: 0, b: 0 },
+    { op: HumanoidOp.SetHeadAim, mode: 0, a: 0, b: 0 },
     { op: HumanoidOp.SetBonePropMode, mode: 7, a: 0, b: 0 },
     { op: HumanoidOp.WaitUntil, mode: HumanoidCond.Frames, a: 9999, b: 0 },
   ]);
   a.hum.bonePropFrame = 9;
   hFrame(a, events, rng);
-  check("op 12 mode 1 sets the bone decoration and it stays set",
-        a.hum.boneDecoration === 1);
+  check("op 12 mode 1 sets the head-aim toggle and it stays set",
+        a.hum.aimsHead === 1);
   check("op 14 mode 2 picks hand prop 2 and restarts the cel counter",
         a.hum.bonePropMode === 2 && a.hum.bonePropFrame === 0);
 
   for (let i = 0; i < 4; i++) hFrame(a, events, rng);
-  check("op 12 mode 0 clears it again", a.hum.boneDecoration === 0);
+  check("op 12 mode 0 clears it again", a.hum.aimsHead === 0);
   check("and a mode op 14 does not know leaves the prop alone",
         a.hum.bonePropMode === 2, `mode ${a.hum.bonePropMode}`);
 }
@@ -11906,12 +11921,12 @@ console.log("the skinned model's draw gates, as state:");
   };
   z.boneSlot["1"] = 0x77;
   RemoveBoneSubtree(z, 4);
-  ActorRunNodeDrawHooks(z, hook);
+  ActorRunNodeDrawHooks(z, hook, DRAW_FRAME);
   check("the walk hands each drawn node its current slot, in skeleton order",
         walked.join() === "1:77,2:30", walked.join());
   z.motionFlags &= ~MotionFlag.Drawn;
   walked.length = 0;
-  ActorRunNodeDrawHooks(z, hook);
+  ActorRunNodeDrawHooks(z, hook, DRAW_FRAME);
   check("...and no node at all while `obj+0x1F8` bit 0 is down",
         walked.length === 0, walked.join());
 }
@@ -11948,7 +11963,7 @@ console.log("class 0x31, the hand grows back in the draw:");
   // `ThrowerAdvanceMotion`'s walk with `ThrowerDrawBonePart` on each node.
   const frame = (a: ThrowerActor) => {
     ThrowerStateRestoreBothHands(a, 0, NULL_HOST);
-    ActorRunNodeDrawHooks(a, ThrowerDrawBonePart);
+    ActorRunNodeDrawHooks(a, ThrowerDrawBonePart, DRAW_FRAME);
   };
 
   // One bare hand: one regrowing node a frame. Forty f32 additions of 0.025f
@@ -12009,10 +12024,10 @@ console.log("class 0x31, the hand grows back in the draw:");
   blink.state = ThrowerState.StandAndDecide;
   blink.flags2 |= ThrowerFlag.Blinking;
   blink.alpha = 0;
-  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart);
+  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart, DRAW_FRAME);
   const at0 = [4, 5, 1, 2, 8].map((b) => blink.thr.boneDrawAlpha[b]).join();
   blink.flags2 &= ~ThrowerFlag.Blinking;
-  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart);
+  ActorRunNodeDrawHooks(blink, ThrowerDrawBonePart, DRAW_FRAME);
   const solid = [4, 5, 1, 2, 8].map((b) => blink.thr.boneDrawAlpha[b]).join();
   check("a blinking zslman's bones are drawn at its alpha, and solid without",
         at0 === "0,0,0,0,0" && solid === "1,1,1,1,1", `${at0} / ${solid}`);
@@ -12023,10 +12038,10 @@ console.log("class 0x31, the hand grows back in the draw:");
   if (tin.cls !== SpawnClass.Thrower) throw new Error("not class 0x31");
   tin.flags2 |= ThrowerFlag.Blinking;
   tin.alpha = 0;
-  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart);
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
   const live = tin.thr.boneDrawAlpha[1];
   tin.flags |= ActorFlag.Dead;
-  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart);
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
   check("...another type blinks too, but a dead one is drawn solid",
         live === 0 && tin.thr.boneDrawAlpha[1] === 1,
         `${live} then ${tin.thr.boneDrawAlpha[1]}`);
@@ -12035,7 +12050,7 @@ console.log("class 0x31, the hand grows back in the draw:");
   tin.flags &= ~ActorFlag.Dead;
   tin.boneSlot["4"] = 0x1fb9;
   G.g_blink_frame_counter = 90;
-  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart);
+  ActorRunNodeDrawHooks(tin, ThrowerDrawBonePart, DRAW_FRAME);
   check("...and the 0x1FB9 node writes a 120-frame ramp into `obj+0x138C`",
         Math.abs(tin.alpha - 0.5) < 1e-6
         && Math.abs(tin.thr.boneDrawAlpha[2] - 0.5) < 1e-6,
@@ -21894,6 +21909,204 @@ console.log("\nclass 0x31: the stand's aim test, the withdraw's turn, the pounce
     check("the pounce levels its roll at 0xCCC a frame",
           p.roll === 0x2000 - 2 * 0xccc, p.roll.toString(16));
   }
+}
+
+console.log("\nthe head aim (0x00453BE0): bone 2 follows the camera");
+{
+  // A camera at `eye` whose view is a translation of the world, so a record
+  // taken in view space reads back as the world point it was taken from and
+  // the view-space origin -- the allocation's zero record -- is the eye.
+  const eye = vec3(0, 10, 0);
+  const head = vec3(0, 12, 50);
+  const camera = (w2v: number[], v2w: number[]): boolean => {
+    for (let i = 0; i < 16; i++) w2v[i] = v2w[i] = i % 5 === 0 ? 1 : 0;
+    w2v[12] = -eye.x; w2v[13] = -eye.y; w2v[14] = -eye.z;
+    v2w[12] = eye.x; v2w[13] = eye.y; v2w[14] = eye.z;
+    return true;
+  };
+  const host: GameHost = {
+    ...NULL_HOST,
+    cameraMatrices: camera,
+    // Bone 2's hit-sphere centre, as the renderer's last pose left it.
+    boneSphere: (_at, bone, out) => {
+      if (bone !== 2) return null;
+      out.x = head.x; out.y = head.y; out.z = head.z;
+      return 1;
+    },
+  };
+  const fr: ClassFrame = { eye, dt: 1 / 60, rng: new Rng(1), host };
+  const zombie = (flags = 0): ZombieActor => {
+    ResetGameGlobals();
+    SetGameTables(CHARS);
+    EnterPlay();
+    // What `GameSystem.update` writes from the camera each tick, and the
+    // spawn opcodes read on the next.
+    G.g_camera_eye.x = eye.x; G.g_camera_eye.y = eye.y; G.g_camera_eye.z = eye.z;
+    head.x = 0; head.y = 12; head.z = 50;
+    const z = spawnZombie(0x9400, 1, "aim", { pos: vec3(0, 0, 50), flags });
+    z.visible = true;
+    return z;
+  };
+  // One drawn frame, in the order `EnemyZombieUpdate`'s draw runs it: what
+  // the last draw left in the record, the node walk, this draw's write.
+  const draw = (z: ZombieActor): void => {
+    HeadAimBeginDraw(z, z.zom, host);
+    ActorRunNodeDrawHooks(z, ZombieDrawBonePart, fr);
+    HeadAimEndDraw(z, z.zom);
+  };
+  const s16 = (v: number): number => (Math.trunc(v) << 16) >> 16;
+
+  // `EnemyZombieInit`: `VecToAngles(eye - pos + (0, 15, 0))`, masked. The
+  // actor stands at +z of the eye, so the yaw is half a turn.
+  const z = zombie();
+  const seed = VecToAngles(0, 25, -50);
+  check("EnemyZombieInit seeds the head toward the eye raised 15",
+        z.zom.headYaw === 0x8000
+        && z.zom.headPitch === (s16(seed.pitch) & 0xffff),
+        `${z.zom.headYaw.toString(16)} ${z.zom.headPitch.toString(16)}`);
+
+  // The first draw reads the record the allocation cleared: the view-space
+  // origin, which is the eye. So the head's first step is toward straight up,
+  // one 0xC0 of it, and only then does the pose's own point arrive.
+  draw(z);
+  check("the first draw aims from the zeroed record -- the eye -- by one step",
+        z.zom.headAimed
+        && z.zom.headPitch === (s16(seed.pitch) & 0xffff) - HEAD_AIM_RATE
+        && z.zom.headYaw === 0x8000 - HEAD_AIM_RATE
+        && z.zom.headRecordDue,
+        `${z.zom.headPitch.toString(16)} ${z.zom.headYaw.toString(16)}`);
+  draw(z);
+  check("...and the next takes bone 2's centre into view space from the pose",
+        z.zom.headRecord.x === 0 && z.zom.headRecord.y === 2
+        && z.zom.headRecord.z === 50, JSON.stringify(z.zom.headRecord));
+  let biggest = 0;
+  for (let i = 0; i < 60; i++) {
+    const p = z.zom.headPitch, y = z.zom.headYaw;
+    draw(z);
+    biggest = Math.max(biggest, Math.abs(z.zom.headPitch - p),
+                       Math.abs(z.zom.headYaw - y));
+  }
+  const settled = VecToAngles(0, 13, -50);
+  check("the head settles on the eye raised 15, from its own centre",
+        (z.zom.headYaw & 0xffff) === 0x8000
+        && (z.zom.headPitch & 0xffff) === (s16(settled.pitch) & 0xffff),
+        `${z.zom.headYaw.toString(16)} ${z.zom.headPitch.toString(16)}`);
+  check("...never faster than 0xC0 a drawn frame", biggest === HEAD_AIM_RATE,
+        biggest.toString(16));
+
+  // Out of reach: facing away, so straight ahead is yaw 0 and the camera is
+  // half a turn from it. The step out past 0x4000 is refused and the head
+  // steps back; the step after is inside and is taken. It alternates.
+  z.yaw = 0x8000;
+  z.zom.headYaw = 0x3f80;
+  draw(z);
+  const back = z.zom.headYaw;
+  draw(z);
+  const out = z.zom.headYaw;
+  draw(z);
+  check("a head whose camera is behind it alternates across the quarter turn",
+        back === 0x3ec0 && out === 0x3f80 && z.zom.headYaw === 0x3ec0,
+        `${back.toString(16)} ${out.toString(16)} ${z.zom.headYaw.toString(16)}`);
+
+  // A quarter turn (L48): the actor at +x of the eye, facing it. Straight
+  // ahead is then 0xC000, which is exactly where the camera is.
+  const q = zombie();
+  q.pos = vec3(50, 0, 0);
+  q.yaw = 0x4000;
+  q.zom.headYaw = 0xc000;
+  q.zom.headPitch = 0;
+  head.x = 50; head.y = 10; head.z = 0;
+  draw(q);
+  draw(q);
+  draw(q);
+  check("a quarter-turned actor facing the camera keeps its head straight",
+        (q.zom.headYaw & 0xffff) === 0xc000, q.zom.headYaw.toString(16));
+
+  // The record is not written while `obj+0x34` has 0x8000: a corpse's head
+  // goes on aiming from where it was when it died.
+  const c = zombie();
+  draw(c);
+  draw(c);
+  c.flags |= ActorFlag.NoShotTest;
+  draw(c);
+  head.z = 80;
+  draw(c);
+  draw(c);
+  const stale = c.zom.headRecord.z;
+  c.flags &= ~ActorFlag.NoShotTest;
+  draw(c);
+  draw(c);
+  check("the record holds while 0x8000 is up, and is taken again after",
+        stale === 50 && c.zom.headRecord.z === 80,
+        `${stale} then ${c.zom.headRecord.z}`);
+
+  // `ActorFlag.NoHeadAim`, from the spawn record: no seed and no aim.
+  const n = zombie(ActorFlag.NoHeadAim);
+  n.zom.scriptMotion = 0x1a4;
+  for (let i = 0; i < 5; i++) draw(n);
+  check("a spawn with 0x40000 is never seeded and never aimed",
+        n.zom.headPitch === 0 && n.zom.headYaw === 0 && !n.zom.headAimed
+        && n.zom.scriptMotion === 0x1a4,
+        `${n.zom.headPitch} ${n.zom.headYaw} ${n.zom.headAimed}`);
+
+  // No camera, no aim: a headless host cannot say where the head is.
+  const h = zombie();
+  const before = h.zom.headYaw;
+  ActorAimHeadAtCamera(h, h.zom, { ...fr, host: NULL_HOST });
+  check("...and with no camera the head holds",
+        h.zom.headYaw === before && !h.zom.headAimed);
+
+  // `ActorHeadAimAngles`, with two attackers: 1.5 in front of the camera, 15
+  // up, and 1.2 to the side of the player whose permit the actor holds. This
+  // file's camera looks down +z, `g_camera_yaw_bams` 0, so "in front" is +z.
+  const t = zombie();
+  G.g_camera_yaw_bams = 0;
+  const far = vec3(0, 10, 101.5);
+  const one = ActorHeadAimAngles(t, far, eye).yaw;
+  G.g_max_attackers = 2;
+  t.attackPermit = 0;
+  const p0 = ActorHeadAimAngles(t, far, eye).yaw;
+  t.attackPermit = 1;
+  const p1 = ActorHeadAimAngles(t, far, eye).yaw;
+  const off = Math.trunc(Math.atan2(1.2, 100) * 65536 / (Math.PI * 2));
+  check("two attackers aim 1.5 ahead and 1.2 aside, one side per permit",
+        one === -0x8000 && Math.abs(p0 - (0x8000 - off)) <= 1
+        && Math.abs(p1 - (-0x8000 + off)) <= 1,
+        `${one} ${p0} ${p1} (off ${off})`);
+
+  // Class 0x31: the same routine, behind the hook's own surface test. A
+  // thrower on a wall does not look at you; on the ceiling it does.
+  const th = thrower(ThrowerState.StandAndDecide);
+  const wall = ThrowerFlag.OffGround | ThrowerFlag.WallA;
+  const ceiling = ThrowerFlag.OffGround | ThrowerFlag.Ceiling;
+  const aims = (bits: number): boolean => {
+    th.flags2 = (th.flags2 & ~(ThrowerFlag.Surface | ThrowerFlag.OffGround))
+      | bits;
+    HeadAimBeginDraw(th, th.thr, host);
+    ActorRunNodeDrawHooks(th, ThrowerDrawBonePart, fr);
+    HeadAimEndDraw(th, th.thr);
+    return th.thr.headAimed;
+  };
+  const ground = aims(0), onWall = aims(wall), onCeiling = aims(ceiling);
+  check("a thrower aims on the ground and the ceiling, not on a wall",
+        ground && !onWall && onCeiling, `${ground} ${onWall} ${onCeiling}`);
+  th.flags2 = (th.flags2 & ~ThrowerFlag.Surface) | ThrowerFlag.OffGround
+    | ThrowerFlag.WallB;
+  check("...which is `ThrowerHeadAims`: on either wall it does not",
+        !ThrowerHeadAims(th));
+
+  // And through the page's own path: `GameUpdate` runs `EnemyZombieUpdate`,
+  // whose draw is where the head is stepped.
+  const rng = new Rng(3);
+  const events = scene(1, rng);
+  G.g_camera_eye.x = eye.x; G.g_camera_eye.y = eye.y; G.g_camera_eye.z = eye.z;
+  const live = G.g_object_list[0];
+  if (live.cls !== SpawnClass.Zombie) throw new Error("not class 0x30");
+  const start = live.zom.headYaw;
+  for (let i = 0; i < 3; i++) GameUpdate(eye, 1 / 60, host, rng, events);
+  check("GameUpdate steps a live zombie's head in its own draw",
+        live.zom.headAimed && live.zom.headYaw !== start,
+        `${live.zom.headAimed} ${start.toString(16)} -> ${live.zom.headYaw.toString(16)}`);
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

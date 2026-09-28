@@ -1947,39 +1947,98 @@ passes 0 as well. A life is still taken; no overlay and no shake.
 
 ### Do zombies aim their torso and head at the player? The body, and the head.
 
-This section used to answer "no" outright. The first two bullets below are
-still true; the third was wrong, and the head **is** aimed -- by a per-bone
-draw hook rather than by the pose hook, which is why the search that settled
-it looked in the wrong place (L39: a negative result about the wrong question).
+This section answered "no" for a long time, on three bullets. The first is
+still true, the second was about the wrong hook, and the third was wrong: the
+head **is** aimed, by the per-node draw hook rather than the pose hook, which
+is why the search that settled it looked in the wrong place (L39: a negative
+result about the wrong question). The routine that does it had no function in
+Ghidra, so its callers were in no xref list either (L35).
 
 * **The bone pose is pure motion.** `SkeletonWalkNode` takes every bone's
   rotation from `g_frame_bone_rotations`, which points straight into the loaded
   motion bank, and adds nothing derived from the actor.
-* **The per-frame pose hook is empty.** `SkeletonApplyRootMotion` ends by
-  calling a hook stored in the motion block at `+0x115C`. Across the whole
-  197,671-instruction program **exactly two** writes to that field exist:
-  `FUN_00410440` installs `PoseHookNone` — a bare `return`, and the one every
-  skeletal actor including the zombie gets — and one special class installs
-  `PoseHookGrowAndPushOutOfWorld`, which ramps a radius and pushes the actor
-  out of world collision. Neither rotates a bone.
-* **The angles `EnemyZombieInit` computes are read -- by the head.**
-  `EnemyZombieInit` computes a pitch and yaw toward the camera into
-  `obj+0x1320`/`+0x1324`, and the routine at `0x00453BE0` steps both of them
-  toward the camera again every time bone 2 is drawn: `ZombieDrawBonePart`
-  (`FUN_004534A0`) calls it at `004534ea` when the node's bone index is 2 and
-  `obj+0x34` bit `0x40000` is clear, and `ThrowerDrawBonePart`
-  (`FUN_00449F90`) does the same at `00449fd9`. It turns each angle with
-  `TurnAngleToward(.., .., 0xC0)` (`00453caf`, `00453d00`), keeps the result
-  only while `AngleWithinTolerance` says it is within `0x4000` of its centre
-  -- level for the pitch, the body's facing (`obj+0x68 - 0x8000`) for the yaw
-  -- and otherwise turns the angle back toward that centre at the same rate;
-  then it applies `MatrixRotateY` and `MatrixRotateX` of them to the bone. So
-  the head follows the camera, up to a quarter turn either way of the body, at
-  `0xC0` BAMS a draw. Ghidra has no function at `0x00453BE0`, which is why its four
-  calls to `TurnAngleToward` are in no xref list; a byte scan for `E8`
-  finds them (L35). Class 0x25's `ScriptedHumanoidBoneDrawHook` calls a twin
-  at `0x00485BA0`. `[proved]` that they read and turn the angles; the rest of
-  both routines is unread, and **the port has neither**.
+* **The pose hook rotates nothing.** `SkeletonApplyRootMotion` calls the hook
+  at `model+0x115C` -- `obj+0x12F0` -- and for these two classes that is their
+  push-out: `EnemyZombieInit` writes `ZombiePushOutOfWorldAndActors` there and
+  `EnemyThrowerInit` `ThrowerPushOutOfWorld`, both as `obj+0x12F0`, which is
+  why a count of writes to `+0x115C` found only `PoseHookNone` and
+  `PoseHookGrowAndPushOutOfWorld` and called the zombie's hook empty. None of
+  the four rotates a bone. `[proved]`
+* **The node draw hook aims bone 2.** `ZombieDrawBonePart` (`FUN_004534A0`)
+  pushes the matrix, and for bone 2 while `obj+0x34` lacks `0x40000` calls
+  `ActorAimHeadAtCamera` (`FUN_00453BE0`) at `0x004534EA`, before its switch;
+  `ThrowerDrawBonePart` (`FUN_00449F90`) does the same at `0x00449FD9`, but
+  only while `obj+0x136C` has `0x100` or lacks `0x20` -- on the ground or the
+  ceiling, never on a wall. An `E8` scan of `.text` finds no third caller.
+  `[proved]`
+
+`ActorAimHeadAtCamera`, from its listing (`0x00453BE0..0x00453D67`):
+
+```
+centre = (obj+0x68 - 0x8000) & 0xFFFF         ; straight ahead for the head
+pt     = g_camera_blocks[cam] (view to world) * record[bone] + 0x68
+{pitch, yaw} = ActorHeadAimAngles(&pt)        ; FUN_00453D70
+t = TurnAngleToward(obj+0x1320, pitch & 0xFFFF, 0xC0)
+obj+0x1320 = AngleWithinTolerance(t, 0, 0x4000) ? t
+           : TurnAngleToward(obj+0x1320, 0, 0xC0)
+t = TurnAngleToward(obj+0x1324, yaw & 0xFFFF, 0xC0)
+obj+0x1324 = AngleWithinTolerance(t, centre, 0x4000) ? t
+           : TurnAngleToward(obj+0x1324, centre, 0xC0)
+MatrixRotateY(-centre); MatrixRotateY(obj+0x1324); MatrixRotateX(obj+0x1320)
+```
+
+`ActorHeadAimAngles` is `VecToAngles(target - pt)`, and the target is the
+camera eye raised **15.0** (`FADD double [0x00565DD8]`) -- unless
+`g_max_attackers == 2` and the actor holds a permit, when it is
+`T(eye) Ry(g_camera_block_yaw_bams)` applied to `((1 - 2*permit) * -1.2, 15,
+-1.5)`: 1.2 to the side of the player whose permit it holds. `[proved]`
+
+What follows from it, each `[proved]` from the same listings:
+
+* **A quarter turn each way, at `0xC0` a drawn frame.** A step that would
+  leave the window is thrown away and the head steps back toward the centre
+  instead, so a head whose player has gone behind it walks out to the edge and
+  alternates across its last `0xC0`, a frame each way.
+* **Only bone 2's own draw turns.** The rotations land on the matrix the hook
+  pushed. The stored node matrix at `+0x28`, which `ActorDrawAttachedParts`
+  hangs hair and hats from, and the hit-sphere centre and camera point
+  `SkeletonEmitNode` takes, all keep the pose's. Bone 2 is a leaf under bone 1
+  in every skeleton from type 0 to 0x19.
+* **It aims from the previous draw.** `pt` is the bone's view-space hit-sphere
+  centre, which `SkeletonEmitNode` writes at `0x004116C3` **after** it has
+  called the hook, and not at all while `obj+0x34` has `0x8000`. Every
+  class-0x30 corpse does (`ZombieEnterCorpseState` raises `0xC000` at
+  `0x0045675E`), and nothing in the hook tests death, so a corpse's head keeps
+  turning toward the camera from the point where it died, re-projected through
+  wherever the camera is now.
+* **The angles start aimed.** `EnemyZombieInit` (`0x00452EAB`) and
+  `EnemyThrowerInit` (`0x004496FE`) both seed `obj+0x1320`/`+0x1324` with
+  `VecToAngles(eye + (0, 15, 0) - pos)` under the same `0x40000` test.
+* **`0x40000` is a spawn-record bit, and it is what keeps the head apart from
+  the captor script.** Nothing in `.text` writes it -- no dword, byte or
+  register form of an `OR`/`AND` names that bit of `+0x34` -- and eleven
+  class-0x30 states (34-38, 40, 41, 43-46) use `obj+0x1320` for something
+  else, the motion id among them. Across the twelve bundles, 160 of 608
+  class-0x30 spawn rows carry the bit, and they include **all 138** whose
+  start or attack state is one of those eleven, all 114 civilian captors and
+  all twelve class-0x18 rows; none of the 42 class-0x31 rows carries it.
+* **Class 0x25 has a twin** at `0x00485BA0`,
+  `ScriptedHumanoidAimHeadAtCamera`, called by `ScriptedHumanoidBoneDrawHook`
+  for bone 2 while `obj+0x1364 != 0`. The same stepping on other words --
+  pitch `obj+0x1368`, yaw `obj+0x136C` -- toward the eye raised 15 with the yaw
+  offset by `-0x8000`, and an **absolute** turn: `MatrixClearRotation`
+  (`FUN_004A9F70`) wipes the bone's 3x3 before the two rotations. Its seed is
+  `ScriptedHumanoidSeedHeadAim` (`FUN_00485D70`), which op 12 mode 1 calls as
+  it raises `obj+0x1364`; op 12 is in none of the 274 class-0x25 programs the
+  twelve bundles carry, so in the exported data this twin never runs.
+
+**Ported** for classes 0x30 and 0x31: `game/class30/head_aim.ts` steps the
+angles, which live on both arms as `HeadAimWords`, from the two hooks the node
+walk runs in each class's update; `render/characters/head_aim.ts` draws the
+turn around each mesh the hook draws, as the engine's push and pop.
+`web/test/port.test.ts` asserts the seed, the rate, the window and its edge,
+the quarter-turned centre, the stale record, both gates and the two-attacker
+target. Class 0x25's twin is not ported.
 
 So the aiming you see is the **whole actor turning**, plus the head. The body
 turn is `TurnActorTowardCamera` (`FUN_00409ED0`), a rate limit of `0x1A0`
@@ -1993,7 +2052,7 @@ stumbles, and the four-arc deaths.
 The pose-hook half took a hook search rather than an xref sweep to establish,
 because the pose is reached through a stored function pointer -- the same
 shape that made the camera tracking invisible earlier in this file. That hook
-was found and read, and it is empty; the head's aim is in the draw hook
+was found and read, and it rotates nothing; the head's aim is in the draw hook
 beside it.
 
 ### Locomotion is still open, but narrower

@@ -737,3 +737,19 @@ my name. **Make a subdirectory named for your task and keep every scratch
 file in it**, and treat a name at the scratch root as something another agent
 may already own. It is L28 and L36 pointed at the one directory that is
 outside every worktree by design.
+
+**L52 — A body Ghidra cut short at a call may be one flow override, and it
+can be cleared.** `ActorAimHeadAtCamera` (`FUN_00453BE0`) decompiled as a
+transform and a `MatrixStackPop` and nothing else, which is L35's shape --
+and `MatrixStackPop` is not marked no-return: `ActorHeadAimAngles` flows past
+its own pop. What cut this body was a `CALL_RETURN` flow override on the one
+`CALL` instruction at `0x00453C78`, and class 0x25's twin had the same on its
+pop at `0x00485C38`. `clear_instruction_flow_override` with `dry_run: true`
+names it without touching anything; clearing it, disassembling the tail and
+re-creating the function gave both routines their whole pseudocode -- the
+stepping, the tolerance test and the three rotations the listing had been
+hiding for as long as the head aim was believed not to exist. So when a
+decompilation stops at a call that does return, **ask the instruction before
+the function**: L35 says read past the end, and this says the end may be
+movable. The override lives in the database and not in `ghidra/annotations/`,
+so a rebuild can bring it back; say so in the row.

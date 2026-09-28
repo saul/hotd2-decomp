@@ -91,11 +91,14 @@ export enum HumanoidOp {
   /** Ride an object path. */
   FollowPath = 11,
   /**
-   * `obj+0x1364` — a **persistent** bone decoration. Mode 1 sets it and mode 0
-   * clears it; the per-bone draw hook then decorates bone 2 for as long as it
-   * is set. It used to be read here as a one-shot effect.
+   * `obj+0x1364` — **the head follows the camera**, persistently. Mode 1 sets
+   * it and seeds the aim, mode 0 clears it; `ScriptedHumanoidBoneDrawHook`
+   * then turns bone 2 through `ScriptedHumanoidAimHeadAtCamera`
+   * (`FUN_00485BA0`) for as long as it is set. It used to be read here as a
+   * one-shot effect, and then as a bone "decoration", before either routine
+   * was read.
    */
-  SetBoneDecoration = 12,
+  SetHeadAim = 12,
   /** `PlaySoundId`. */
   PlaySound = 13,
   /**
@@ -319,7 +322,7 @@ export function ScriptedHumanoidInit(obj: HumanoidActor): void {
   // and it cannot change; see {@link HumanoidTail.drawVariant} for why the
   // port keeps a copy instead.
   obj.hum.drawVariant = p?.drawVariant ?? HumanoidDrawVariant.None;
-  obj.hum.boneDecoration = 0;
+  obj.hum.aimsHead = 0;
   obj.hum.bonePropFrame = 0;
   // `MOVSX ECX, word ptr [EDI + 0x60]` (= `obj+0x1F4`), `CMP ECX,0x39 / JL /
   // CMP ECX,0x3b / JG` at `0x00484247`-`0x00484253`: character types 0x39
@@ -525,12 +528,20 @@ function RunCommand(obj: HumanoidActor, c: HumanoidCmd, f: ClassFrame): boolean 
       obj.hum.pc += 1;
       return true;
 
-    case HumanoidOp.SetBoneDecoration:
+    case HumanoidOp.SetHeadAim:
       // `0x004848B2`-`0x004848E4`: mode 1 sets the toggle and calls
-      // `FUN_00485D70` (`[open]`, and the renderer's), mode 0 clears it, and
+      // `ScriptedHumanoidSeedHeadAim` (`FUN_00485D70`), mode 0 clears it, and
       // any other mode leaves it as it was.
-      if (c.mode === 1) obj.hum.boneDecoration = 1;
-      else if (c.mode === 0) obj.hum.boneDecoration = 0;
+      //
+      // [diverges] The seed is not made. It writes the head's two angles,
+      // `obj+0x1368`/`+0x136C`, toward the camera eye raised 15, and nothing
+      // reads them but `ScriptedHumanoidAimHeadAtCamera` -- class 0x25's head
+      // aim, which is not ported. Op 12 is in none of the 274 class-0x25
+      // programs the twelve bundles carry, so neither routine ever runs in the
+      // exported data; porting the pair is `class30/head_aim.ts` over two
+      // other words, with an absolute turn in place of a relative one.
+      if (c.mode === 1) obj.hum.aimsHead = 1;
+      else if (c.mode === 0) obj.hum.aimsHead = 0;
       obj.hum.stallFrames = 0;
       obj.hum.pc += 1;
       return true;

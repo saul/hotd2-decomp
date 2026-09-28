@@ -4289,6 +4289,36 @@ modelled.
 no-return pop); the port does not draw a character's shadow yet, and
 `ActorDrawShadow`'s gate is ported for when it does.
 
+### Zombies and throwers look at you
+
+The head follows the camera now. Bone 2 of every class-0x30 and class-0x31
+actor turns toward the eye raised 15 units -- up to a quarter turn from its
+body's facing and its level, at `0xC0` BAMS a drawn frame -- and a thrower does
+it on the ground and on the ceiling but not on a wall. The routine is
+`ActorAimHeadAtCamera` (`FUN_00453BE0`), which the two node draw hooks call
+for bone 2 and which Ghidra had no function for, so `combat.md` had recorded
+the opposite as a settled result.
+
+* **Where it is.** The two angles, `obj+0x1320`/`+0x1324`, are state on both
+  arms (`HeadAimWords`) and are stepped by `class30/head_aim.ts` from the node
+  walk each class's update runs where the engine draws. The turn is drawn by
+  `render/characters/head_aim.ts` around each mesh the hook draws on bone 2 --
+  its own model, a gore swap, a cel -- and not around the hair or hat hung on
+  it, nor the hit sphere, which keep the pose's matrix in the engine too.
+* **It starts aimed.** Both `Init`s seed the angles toward the camera, which
+  is why the port now carries `g_camera_eye` in `G` for the spawn to read.
+* **It aims from the last draw.** The point is the bone's hit-sphere centre as
+  the previous frame left it, and a corpse stops refreshing it, so a dead
+  zombie's head goes on turning from where it fell.
+* **Captors do not look.** Every spawn that can reach one of the eleven states
+  that use `obj+0x1320` for a motion id carries `obj+0x34` bit `0x40000`
+  (`ActorFlag.NoHeadAim`), which gates the seed and the aim; so do all of class
+  0x18's.
+
+What is not done: class 0x25's twin (`ScriptedHumanoidAimHeadAtCamera`, an
+absolute turn on two other words, switched by an op no exported program
+uses), and Training's hook swap, which is declared on both updates.
+
 ## The bosses' shared furniture: the health bar, the name banner, the shot test
 
 Four bosses end stages 1-4 -- Judgment (class 0x22 with its companion 0x23),

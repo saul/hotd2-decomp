@@ -10,6 +10,7 @@ import type { Group, Mesh, Object3D } from "three";
 import type { Actor } from "../../game/actor";
 import type { BakedMotion, CharacterType } from "../../bundle";
 import type { CelRunNode } from "./cels";
+import type { HeadTurn } from "./head_aim";
 
 /**
  * What one gore swap did to a bone, and therefore what undoing it must put
@@ -89,6 +90,13 @@ export interface Instance {
    * fresh instance and any frame with a gate closed all are.
    */
   gates?: string;
+  /**
+   * The turn `ActorAimHeadAtCamera` (`FUN_00453BE0`) gives bone 2's own draw
+   * this frame, as a matrix, and whether it gave one. Render bookkeeping,
+   * rebuilt by every update from the actor's `headPitch`, `headYaw`,
+   * `headAimed` and yaw. See `render/characters/head_aim.ts`.
+   */
+  headTurn?: HeadTurn;
   /**
    * The exporter's `part<i>_<slot>` nodes — the vertex-blended parts, which
    * are not bones — by part index. Found once by name; render bookkeeping.

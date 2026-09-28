@@ -1147,33 +1147,50 @@ pointer into `+0x0A` need not show as a reference to that address.
 ### Hitting — `ActorShotFeedback` and `ActorPlayHitVoice`
 
 `ZombieOnShot` (`FUN_00453EB0`) runs the reaction once `ResolveHit` has set
-`g_hit_result`:
+`g_hit_result`, per player in `g_hit_player_order`:
 
 ```c
+if (obj+0x34 & 0x100) return;                   /* ShotImmune: the whole loop */
+obj+0x1364 = result; obj+0x136C &= ~0x400; obj+0x34 |= 0x8000000;   /* sprint */
 ActorShotFeedback(player);                      /* FUN_00454050 -- blood or ricochet */
+if (obj+0x136C & 0x80000000) continue;          /* the death latch: silent */
 if (still alive)  { hit reaction motion; if (result != 5) voice(obj, 0); }
-else              { voice(obj, result == 2 ? 2 : 1); state = 6; }
+else              { latch; voice(obj, bone == 2 ? 2 : 1); state = 6 or 9; }
 ```
 
-**The kind is the hit-result code and nothing else.** `[proved]`, from the
-instruction stream and from a second routine that agrees:
+**The dead arm's kind is the shot bone; the live arm's is the result.**
+`[proved]`, from the instruction stream and from a second routine that agrees.
+The loop loads two pointers at its head and holds them to its end:
 
 ```
+00453eee  8d2cbd882d9a00   LEA  EBP, [EDI*4 + 0x9a2d88]   ; &g_shot_bone[p]
+00453f0d  8d1cbdf8589a00   LEA  EBX, [EDI*4 + 0x9a58f8]   ; &g_hit_result[p]
+00453f3b  a900000080       TEST EAX, 0x80000000  ; latched -> neither arm
 00453f46  f7463400000004   TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
-00453f4d  0f84c7000000     JZ   0x0045401a                         ; ...alive
-00453f6e  83f802           CMP  EAX, 0x2       ; g_hit_result, read back
-00453f73  6a02             PUSH 0x2            ; dead, result 2 -> kind 2
-00453f77  6a01             PUSH 0x1            ; dead, otherwise -> kind 1
+00453f68  8b4500           MOV  EAX, [EBP]     ; the bone
+00453f6e  83f802           CMP  EAX, 0x2       ; the head?
+00453f73  6a02             PUSH 0x2            ; dead, head      -> kind 2
+00453f77  6a01             PUSH 0x1            ; dead, elsewhere -> kind 1
+00454020  8b03             MOV  EAX, [EBX]     ; the result
 00454025  83f805           CMP  EAX, 0x5
 0045402a  6a00             PUSH 0x0            ; alive, result != 5 -> kind 0
 ```
 
-`ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the same two
-constants at `0x00449A76`, `0x00449A7B` and `0x00449A88`. **Neither tests the
-bone and neither tests whether the actor died of *this* shot.** This page said
-`bone == 2 ? 2 : 1` for a long time, the browser player's shot path was written
-from it, and the correction is small only because of the table below: kind 2's
-voice pair *is* kind 1's, so what changes is the impact and not the line.
+`EBP` is callee-saved across the two calls between the `LEA` and the read, and
+`DispatchHit` fills `g_shot_bone[p]` from `obj+0x190 + p`, the byte
+`MarkActorShot` writes the hit bone into. `ThrowerOnShot` (`FUN_004499A0`) is
+the same: `LEA EBP` of the same address at `0x004499D4`, `MOV EAX, [EBP]` at
+`0x00449A70`, `CMP EAX, 0x2` at `0x00449A76`. Neither tests whether the actor
+died of *this* shot — only that it is dead and its death not yet latched.
+`tools/verify_combat.py` check 15 reads those operands out of the image.
+
+This page said `bone == 2 ? 2 : 1` when the routine was first read, which was
+right. A later session read `[EBP]` at `0x00453F6E` as `g_hit_result` — the
+other of the two pointers, the one in `EBX` — rewrote this section, the
+player's shot path and its tests to "the result is 2", and said so here as a
+correction. It is corrected back, with the register this time. What made either
+reading easy to hold is the table below: kind 2's voice pair *is* kind 1's, so
+what changes between them is the impact and not the line.
 
 `ActorPlayHitVoice` (`FUN_0040A6F0`) plays **two** sounds — a flesh impact and
 a voice:
@@ -1181,8 +1198,8 @@ a voice:
 | Event | Impact, one at random | Voice |
 |---|---|---|
 | hurt (kind 0) | `BLOOD02`, `BLOOD03`, `BLOOD04`, `BLOOD06`, `BONE01` | `ZOMBIE_010` / `ZOMBIE_012` |
-| dead, result != 2 (kind 1) | the same five | `ZOMBIE_019` / `ZOMBIE_018` |
-| dead, result == 2 (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
+| dead, not the head (kind 1) | the same five | `ZOMBIE_019` / `ZOMBIE_018` |
+| dead, the head (kind 2) | `BLOOD01` or `BLOOD05` | `ZOMBIE_019` / `ZOMBIE_018` |
 | attack cry (kind 3) | *none* | a coin flip **within** the set's own pair |
 
 Kinds 1 and 2 carry the **same voice pair**, which is checked against every

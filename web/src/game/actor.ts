@@ -207,18 +207,18 @@ export enum ActorFlag {
    * arm plays `0x823A9`, `CAR_FIRE_22_OFF.wav`, which is what says the bit
    * stands for a *loop that has to be stopped* rather than a one-shot.
    *
-   * `[proved]` its two readers that name `obj+0x34` are `0x004332DA` and
-   * `0x00433830`, both inside that routine — a sweep for `TEST` against a
-   * `0x200000` mask returns 39 sites and no other names `+0x34`. Two tests it
-   * could not attribute do hold that word. `ZombieStateEmerge` loads
-   * `obj+0x34` into `EAX`, tests it at `0x00458509` (`a900002000`) and clears
-   * the bit at `0x00458510` -- a class-0x30 actor, whose bit can only have
-   * come in on its spawn record (`class30/emerge.ts`, `L3`). And
-   * `ThrowerPushOutOfWorld` (`FUN_00449D40`) tests it at `0x00449D8F` on
-   * whatever object the crowd push found, which knocks an off-ground thrower
-   * down instead of pushing it. Whether any other bare-register test holds
-   * `obj+0x34` is `[open]`; this name describes the one class that provably
-   * writes it. The same bit
+   * `[proved]` two of its readers on `obj+0x34` are `0x004332DA` and
+   * `0x00433830`, both inside that routine. The sweep that found those two --
+   * `TEST` against a `0x200000` mask, 39 sites -- missed two more. One is
+   * `TEST dword ptr [ECX + 0x34], 0x200000` at `0x00449D8F` in
+   * `ThrowerPushOutOfWorld` (`FUN_00449D40`), on whatever object the crowd
+   * push found, which knocks an off-ground thrower down instead of pushing
+   * it. The other is `ZombieStateEmerge`, which loads `obj+0x34` into `EAX`,
+   * tests it at `0x00458509` (`a900002000`) and clears the bit at
+   * `0x00458510` -- a class-0x30 actor, whose bit can only have come in on its
+   * spawn record (`class30/emerge.ts`, `L3`). Whether any other bare-register
+   * test holds `obj+0x34` is `[open]`; this name describes the one class that
+   * provably writes it. The same bit
    * number in `obj+0x136C` is {@link ThrowerFlag.DeathLatched}, which is a
    * different word and a different fact.
    */
@@ -958,7 +958,8 @@ export enum ZombieFlag2 {
    * While it is up the same state exempts the actor from the too-close retreat
    * (`0045577c f7866c13000000040400`, the `0x40400` pair with
    * {@link ZombieFlag2.StrikeAnchor}) and refuses the attack claim outright
-   * (`00455815 f6c404`). `ZombieOnShot` also clears it (`00453efd`).
+   * (`00455815 f6c404`). `ZombieOnShot` also clears it, for every shot that
+ * lands (`00453f14 80e6fb AND DH, 0xFB`, stored at `00453f24`).
    * `[proved]` — the ops. That the clip in question is the *authored entrance*
    * one is `[likely]`: it is what character type 2's spawns carry.
    */

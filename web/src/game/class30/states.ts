@@ -268,7 +268,9 @@ export enum StrikeSub {
  * (`FUN_00453EB0`)'s per-player loop, and the same bytes at `0x00459682` in
  * `ZombieRetireThrowConditionIfUnarmed` (`FUN_004595F0`), which the port
  * transcribes. So a zombie that has been shot, or a walker that has thrown its
- * last weapon, comes on at a run. The on-shot raise is not ported yet.
+ * last weapon, comes on at a run. Both raises are ported; the on-shot one is in
+ * `class30/on_shot.ts`, at the head of the per-player loop, and it is made for
+ * every shot that lands and is not refused as shot-immune.
  *
  * **192 of the 402 class-0x30 spawns in the shipped stages set it.** This port
  * took the first *baked* motion of the pair instead, which is always `Run`,

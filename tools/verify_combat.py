@@ -569,12 +569,31 @@ def main() -> int:
     #
     # This is load-bearing rather than trivia. `ZombieOnShot` (`FUN_00453EB0`)
     # and `ThrowerOnShot` (`FUN_004499A0`) choose between those two kinds on
-    # `g_hit_result == 2` and on nothing else -- no test of the bone, and none
-    # of whether the actor died of this shot. `combat.md` said `bone == 2` for
-    # a long time and the browser player's shot path was written from it; the
-    # reason that correction is nearly inaudible is exactly this equality, so
-    # it wants a check and not a sentence. Both pairs come out of
-    # `g_hit_voice_table` (0x00577674), five dwords apart.
+    # `g_shot_bone == 2` -- the head -- for an actor that is dead and not yet
+    # latched, and on nothing else. For a while this said `g_hit_result == 2`,
+    # which is the other of the two pointers the loop holds, and the player's
+    # shot path was rewritten from that; the reason neither reading is loud is
+    # exactly this equality, so it wants a check and not a sentence. Both
+    # pairs come out of `g_hit_voice_table` (0x00577674), five dwords apart.
+    #
+    # ...and so does which variable is compared, read out of the image rather
+    # than out of a comment: `LEA EBP, [EDI*4 + 0x9A2D88]` (`g_shot_bone`),
+    # then `MOV EAX, [EBP]` and `CMP EAX, 2` on the dead arm, in both routines.
+    # `EBP` is callee-saved across the calls between them.
+    for fn, sites in (
+        ("ZombieOnShot", ((0x00453EEE, "8d2cbd882d9a00"),
+                          (0x00453F68, "8b4500"), (0x00453F6E, "83f802"))),
+        ("ThrowerOnShot", ((0x004499D4, "8d2cbd882d9a00"),
+                           (0x00449A70, "8b4500"), (0x00449A76, "83f802"))),
+    ):
+        for va, want in sites:
+            r = tables._v2r(va)
+            got = (tables.data[r:r + len(want) // 2].hex()
+                   if r is not None else "")
+            if got != want:
+                fails.append(f"{fn}'s voice-kind test at {va:#010x} is "
+                             f"{got or 'unmapped'}, not {want}: the kind may "
+                             f"no longer be read off g_shot_bone")
     kill_ids = [s["id"] for s in combat["voice"]["kill"]]
     head_ids = [s["id"] for s in combat["voice"]["head"]]
     if kill_ids != head_ids:

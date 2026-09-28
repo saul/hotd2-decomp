@@ -178,7 +178,8 @@ import { ZombieArmedHands, ZombiePickThrowingHand,
   from "../src/game/class30/stand_throw";
 import {
   DeflectSub, FlySub, ThrownWeaponPoolUpdate, ThrownWeaponState,
-  THROWN_WEAPON_SPIN,
+  THROWN_WEAPON_AFTERIMAGE_PERIOD, THROWN_WEAPON_SPIN,
+  ZslmanBladeAfterimageFade, ZslmanBladeEmitAfterimage,
 } from "../src/game/class31/projectile";
 import {
   ZombieThrownWeaponBeginArc, ZombieThrownWeaponState, ZOMBIE_AXE_SPIN,
@@ -186,7 +187,9 @@ import {
 } from "../src/game/class30/thrown_weapon";
 import { ZombieThrowHandWeapon } from "../src/game/class30/throw";
 import {
-  ThrownWeaponFlag, ThrownWeaponRoutine, type ThrownWeaponFrame,
+  ThrownWeaponAlloc, ThrownWeaponFlag, ThrownWeaponRoutine,
+  THROWN_WEAPON_DRAW_FLAGS, THROWN_WEAPON_SPAWN_FLAGS,
+  type ThrownWeapon, type ThrownWeaponFrame,
 } from "../src/game/thrown_weapon";
 import { ActorPlayHitVoice, ActorVoice }
   from "../src/game/combat/voice";
@@ -8684,6 +8687,216 @@ console.log("thrown weapons, the spin and the shot that takes one down:");
   }
 }
 
+console.log("zslman's blades trail afterimages, and stop when they land:");
+{
+  // `ThrownWeaponUpdate` (`FUN_00450780`) ends, drawn or not, in
+  //
+  //   004508c2  CMP word ptr [ESI+0x1f4], 0x18      ; zslman's weapon only
+  //   004508d3  TEST AX, AX / CMP [ESI+0x1312], 2   ; state 0, sub < 2
+  //   004508e2  CMP AX, 1                           ; ...or state 1
+  //   004508e9  CALL 0x00450930                     ; ZslmanBladeEmitAfterimage
+  //
+  // and the emitter allocates `ZslmanBladeAfterimageFade` (`FUN_00450A30`)
+  // tasks. The port declared the call away. These drive the pool walk itself,
+  // `ThrownWeaponPoolUpdate`, because the afterimage has to run on the frame
+  // it is made -- `ActorAlloc` links it at the tail of the list being walked.
+  const flip = MatIdentity();
+  MatrixRotateY(flip, 0x8000);
+  const cam = { w2v: flip, v2w: flip };
+  const frame = (): ThrownWeaponFrame => ({
+    eye: vec3(0, 0, 0), cam, host: NULL_HOST, rng: new Rng(3),
+  });
+  // A blade as `SpawnThrownWeapon` (`FUN_004504E0`) leaves one: hand 8's
+  // 0x1FE1, zslman's type copied across, both timers at 4, flying at a point
+  // 50 units off so it is in the air for 41 frames.
+  const blade = (slot = 0x1fe1, charType = 0x18): ThrownWeapon => {
+    ResetGameGlobals();
+    const w = ThrownWeaponAlloc(ThrownWeaponRoutine.Thrower);
+    w.slot = slot;
+    w.hand = slot === 0x1fe2 ? 5 : 8;
+    w.charType = charType;
+    w.flags = THROWN_WEAPON_SPAWN_FLAGS;
+    w.drawFlags = THROWN_WEAPON_DRAW_FLAGS;
+    w.spinRate = THROWN_WEAPON_SPIN;
+    w.afterimageTimer = THROWN_WEAPON_AFTERIMAGE_PERIOD;
+    w.afterimagePeriod = THROWN_WEAPON_AFTERIMAGE_PERIOD;
+    w.attackPermit = -1;
+    w.pos = vec3(0, 5, 54);
+    w.target = vec3(0, 5, 4);
+    G.g_thrown_weapons.push(w);
+    return w;
+  };
+  const trail = () => G.g_thrown_weapons.filter(
+    (x) => x.routine === ThrownWeaponRoutine.ZslmanAfterimage);
+
+  // -- the cadence: the fifth call, then every fifth -----------------------
+  {
+    const w = blade();
+    const madeOn: number[] = [];
+    const seen = new Set<number>();
+    for (let n = 1; n <= 20; n++) {
+      ThrownWeaponPoolUpdate(frame());
+      for (const a of trail()) {
+        if (!seen.has(a.id)) { seen.add(a.id); madeOn.push(n); }
+      }
+    }
+    // `DEC EAX` then `JNS` at 0x0045093B/0x00450942: 4, 3, 2, 1, 0 pass and
+    // only the fifth call's -1 makes one -- then the 4 is reloaded.
+    check("a zslman blade makes its first afterimage on the fifth frame, "
+          + "then every fifth", JSON.stringify(madeOn) === "[5,10,15,20]",
+          JSON.stringify(madeOn));
+    check("...still flying the whole time", w.state === ThrownWeaponState.Fly
+          && w.sub === FlySub.Flight, `state ${w.state} sub ${w.sub}`);
+  }
+
+  // -- one afterimage: what it copies, and how it fades --------------------
+  {
+    const w = blade();
+    for (let n = 0; n < 5; n++) ThrownWeaponPoolUpdate(frame());
+    const a = trail()[0];
+    check("the afterimage is its own task, behind its blade",
+          a !== undefined && G.g_thrown_weapons.indexOf(a) === 1
+          && a.weapon === w.id, `${a?.weapon} vs ${w.id}`);
+    if (a) {
+      // `0x004509C8`..`0x004509E0`: 0x1FE1 becomes 0x1FE4 at 0.75.
+      check("...drawing 0x1FE4 for hand 8's 0x1FE1, where the blade was",
+            a.slot === 0x1fe4 && a.pos.z === w.pos.z && a.ry === w.ry
+            && a.tilt === w.tilt && a.spinRate === w.spinRate,
+            `slot ${a.slot.toString(16)} z ${a.pos.z}/${w.pos.z}`);
+      // It ran the frame it was made: one fifteenth off 0.75, as an f32.
+      const step = Math.fround(1 / 15);
+      check("...and it ran on the frame it was made: 14 left, one step dimmer",
+            a.timer === 14 && a.light === Math.fround(0.75 - step)
+            && a.draw !== null, `timer ${a.timer} light ${a.light}`);
+      check("...lit grey, because the model it draws is no longer 0x1FE1",
+            a.lightColour !== null && a.lightColour[0] === a.light
+            && a.lightColour[1] === a.light && a.lightColour[2] === a.light,
+            JSON.stringify(a.lightColour));
+      check("...and the blade counts it out, the afterimage its own index",
+            w.afterimages === 1 && a.afterimages === 0,
+            `${w.afterimages}/${a.afterimages}`);
+      const z = a.pos.z;
+      for (let n = 0; n < 3; n++) ThrownWeaponPoolUpdate(frame());
+      check("...standing where it was made while the blade flies on",
+            a.pos.z === z && w.pos.z < z, `${a.pos.z} vs ${w.pos.z}`);
+      // Fifteen draws in all: the light is below zero by the last of them.
+      let lastLight = a.light;
+      for (let n = 0; n < 11; n++) {
+        ThrownWeaponPoolUpdate(frame());
+        lastLight = a.light;
+      }
+      check("...drawing a fifteenth time with its light below zero",
+            a.timer === 0 && !a.despawned && lastLight < 0 && a.draw !== null,
+            `timer ${a.timer} light ${lastLight}`);
+      const out = w.afterimages;
+      ThrownWeaponPoolUpdate(frame());
+      check("...and gone on the sixteenth, giving its place back",
+            a.despawned && a.draw === null && w.afterimages === out,
+            `despawned ${a.despawned} count ${out}->${w.afterimages}`);
+    }
+    // Hand 5's blade trails 0x1FE5.
+    blade(0x1fe2);
+    for (let n = 0; n < 5; n++) ThrownWeaponPoolUpdate(frame());
+    check("hand 5's 0x1FE2 trails 0x1FE5, at the same 0.75",
+          trail()[0]?.slot === 0x1fe5
+          && trail()[0]?.light === Math.fround(0.75 - Math.fround(1 / 15)),
+          `${trail()[0]?.slot.toString(16)}`);
+  }
+
+  // -- the landing ends the trail, and gives nothing back ------------------
+  {
+    const w = blade();
+    let landed = -1;
+    for (let n = 1; n <= 60 && landed < 0; n++) {
+      ThrownWeaponPoolUpdate(frame());
+      if (w.flags & ThrownWeaponFlag.Landed) landed = n;
+    }
+    const live = trail().filter((a) => !a.despawned);
+    check("the frame a blade lands, every afterimage behind it goes",
+          landed > 0 && trail().length > 0 && live.length === 0,
+          `landed on ${landed}, ${trail().length} out, ${live.length} live`);
+    check("...without giving its count back, because the blade is spent",
+          w.afterimages === trail().length && w.afterimages > 0,
+          `count ${w.afterimages}, ${trail().length} were out`);
+    const count = G.g_thrown_weapons.length;
+    for (let n = 0; n < 30; n++) ThrownWeaponPoolUpdate(frame());
+    check("...and a stuck blade makes no more",
+          trail().length === 0 && G.g_thrown_weapons.length === 1
+          && count > 1 && w.sub >= FlySub.Stick,
+          `${trail().length} afterimages, sub ${w.sub}`);
+  }
+
+  // -- shot down: the trail carries on, and stops at ten -------------------
+  {
+    const w = blade();
+    for (let n = 0; n < 12; n++) ThrownWeaponPoolUpdate(frame());
+    w.flags |= ThrownWeaponFlag.Hit;
+    ThrownWeaponPoolUpdate(frame());
+    check("a blade shot out of the air is deflected, and spent",
+          w.state === ThrownWeaponState.Deflected
+          && (w.flags & ThrownWeaponFlag.Spent) !== 0, `state ${w.state}`);
+    // Far enough that it is still in the air when the count runs out: the
+    // point the deflection drew is up to a hundred units off, or as little as
+    // fourteen.
+    w.target = vec3(w.pos.x + 150, w.pos.y, w.pos.z);
+    let made = trail().length;
+    let most = w.afterimages;
+    for (let n = 0; n < 150 && !w.despawned; n++) {
+      ThrownWeaponPoolUpdate(frame());
+      made = Math.max(made, G.g_thrown_weapons.filter(
+        (x) => x.routine === ThrownWeaponRoutine.ZslmanAfterimage).length);
+      most = Math.max(most, w.afterimages);
+    }
+    // `CMP [EBP+0x1368], 0xA` / `JGE`, and the fade's `TEST [EAX+0x34],
+    // 0x4000000` / `JNZ` over the `DEC`: spent, nothing comes back, so the
+    // count climbs to ten and the emitter stops for good.
+    check("...and it keeps trailing until its count reaches ten, then stops",
+          most === 10 && w.afterimages === 10, `count ${w.afterimages}`);
+  }
+
+  // -- a blade that is gone: its afterimage fades out its own fifteen ------
+  {
+    const w = blade();
+    w.afterimageTimer = 0;
+    ZslmanBladeEmitAfterimage(w);
+    const a = trail()[0]!;
+    // The blade leaves the list, as a shot-down one does when it arrives.
+    G.g_thrown_weapons = G.g_thrown_weapons.filter((x) => x !== w);
+    let drawn = 0;
+    for (let n = 0; n < 20 && !a.despawned; n++) {
+      ZslmanBladeAfterimageFade(a, frame());
+      if (a.draw) drawn++;
+    }
+    check("an afterimage whose blade has gone still draws its fifteen",
+          drawn === 15 && a.despawned && w.afterimages === 1,
+          `${drawn} drawn, count ${w.afterimages}`);
+  }
+
+  // -- ActorKill's longjmp: a despawn ends the weapon's routine ------------
+  {
+    const w = blade();
+    w.state = ThrownWeaponState.Deflected;
+    w.sub = DeflectSub.Away;
+    w.flags |= ThrownWeaponFlag.Spent;
+    w.target = vec3(w.pos.x + 0.5, w.pos.y, w.pos.z);
+    w.afterimageTimer = 0;
+    ThrownWeaponPoolUpdate(frame());
+    check("a blade that despawns in its state is not drawn that frame, and "
+          + "trails nothing", w.despawned && w.draw === null
+          && trail().length === 0 && w.afterimageTimer === 0,
+          `draw ${w.draw !== null}, ${trail().length} afterimages`);
+  }
+
+  // -- nobody else trails ---------------------------------------------------
+  {
+    const w = blade(0x1f91, 0x16);
+    for (let n = 0; n < 30; n++) ThrownWeaponPoolUpdate(frame());
+    check("zsass's knife never calls the emitter", trail().length === 0
+          && w.afterimageTimer === THROWN_WEAPON_AFTERIMAGE_PERIOD,
+          `${trail().length} afterimages, timer ${w.afterimageTimer}`);
+  }
+}
+
 console.log("class 0x31, the grab ends in the engine's one leave routine:");
 {
   // **`ThrowerLeave` (`FUN_0044AD60`) was transcribed twice, with different
@@ -16742,6 +16955,83 @@ console.log("class 0x30, `ZombieOnShot`'s two refusals and its second death:");
         far.flags2.toString(16));
 }
 
+console.log("class 0x30, `ZombieOnShot`: a zombie that has been shot runs:");
+{
+  // The head of the per-player loop, before the latch and before the test for
+  // dead -- `ShotImmune` is the only thing ahead of it:
+  //
+  //   00453f14  80e6fb          AND DH, 0xfb          ; obj+0x136C &= ~0x400
+  //   00453f17  81c900000008    OR  ECX, 0x8000000    ; obj+0x34 |= 0x8000000
+  //   00453f24  89966c130000    MOV [ESI+0x136c], EDX
+  //   00453f2a  894e34          MOV [ESI+0x34], ECX
+  //
+  // `0x8000000` is the bit `ZombieStateAttackRun` (`FUN_004554D0`) takes the
+  // second of its run pair with, and turns 2.5 times as fast on.
+  const rng = new Rng(17);
+  scene(0, rng);
+  const row = [900, 901, 902, 903, 904];
+
+  // Alive, off a spawn record that did not ask to sprint.
+  const walker = spawnZombie(0x3600, 1, "walker");
+  walker.visible = true;
+  walker.hp = 100;
+  walker.flags &= ~ZOMBIE_SPRINTS;
+  walker.flags2 |= ZombieFlag2.EntryClipPlaying;
+  const jog = ZombieRunMotion(walker, row);
+  const turn = ZombieRunTurnRate(walker);
+  walker.pendingHit = { bone: 4, result: HitResultCode.Plain, player: 0 };
+  ZombieOnShot(walker);
+  check("a zombie shot and not killed is made to sprint",
+        (walker.flags & ZOMBIE_SPRINTS) !== 0 && !walker.dead,
+        `flags 0x${(walker.flags >>> 0).toString(16)}`);
+  check("...so its run is the second of the pair, and turns 0x410 a frame",
+        jog === 902 && ZombieRunMotion(walker, row) === 903
+        && turn === 0x1a0 && ZombieRunTurnRate(walker) === 0x410,
+        `${jog}->${ZombieRunMotion(walker, row)}, `
+        + `${turn}->${ZombieRunTurnRate(walker)}`);
+  check("...and its entrance-clip exemption is over",
+        (walker.flags2 & ZombieFlag2.EntryClipPlaying) === 0,
+        walker.flags2.toString(16));
+
+  // Shot-immune: `TEST AH, 0x1` at 0x00453EC7 jumps past the whole loop.
+  const immune = spawnZombie(0x3700, 1, "immune");
+  immune.visible = true;
+  immune.flags = (immune.flags & ~ZOMBIE_SPRINTS) | ActorFlag.ShotImmune;
+  immune.flags2 |= ZombieFlag2.EntryClipPlaying;
+  immune.pendingHit = { bone: 4, result: HitResultCode.Plain, player: 0 };
+  ZombieOnShot(immune);
+  check("a shot-immune zombie takes neither write",
+        (immune.flags & ZOMBIE_SPRINTS) === 0
+        && (immune.flags2 & ZombieFlag2.EntryClipPlaying) !== 0,
+        `flags 0x${(immune.flags >>> 0).toString(16)} `
+        + `flags2 0x${immune.flags2.toString(16)}`);
+
+  // A corpse whose death is already latched still takes both, and nothing
+  // else: the latch test is after them, and before both arms.
+  const corpse = spawnZombie(0x3800, 1, "corpse");
+  corpse.visible = true;
+  corpse.dead = true;
+  corpse.flags = (corpse.flags & ~ZOMBIE_SPRINTS) | ActorFlag.Dead;
+  corpse.flags2 |= ZombieFlag2.DiedInFlight | ZombieFlag2.EntryClipPlaying;
+  corpse.state = ZombieState.Death;
+  corpse.sub = 3;
+  corpse.pendingHit = { bone: 2, result: HitResultCode.Plain, player: 0 };
+  ZombieOnShot(corpse);
+  check("a latched corpse is still marked -- the loop head runs before the "
+        + "latch", (corpse.flags & ZOMBIE_SPRINTS) !== 0
+        && (corpse.flags2 & ZombieFlag2.EntryClipPlaying) === 0,
+        `flags 0x${(corpse.flags >>> 0).toString(16)}`);
+  check("...and nothing else happens to it", corpse.state === ZombieState.Death
+        && corpse.sub === 3, `state ${corpse.state}.${corpse.sub}`);
+
+  // No shot, no write: the routine is gated on the hit record.
+  const idle = spawnZombie(0x3900, 1, "idle");
+  idle.flags &= ~ZOMBIE_SPRINTS;
+  ZombieOnShot(idle);
+  check("...and a zombie nobody shot is left jogging",
+        (idle.flags & ZOMBIE_SPRINTS) === 0);
+}
+
 console.log("class 0x30 state 9: the body is thrown, not dropped:");
 {
   // A camera at (0, 6, 0) looking down world +Z, in the engine's own view
@@ -18520,9 +18810,10 @@ console.log("\nthe camera block's yaw (0x009A60D0) and its readers:");
 // Which of the run pair a zombie takes, and who decides.
 //
 // `ZombieStateAttackRun` (`FUN_004554D0`) indexes its motion row with
-// `2 + ((obj+0x34 >> 0x1B) & 1)`. Nothing in the image ORs that bit: it comes
-// off the spawn record through `ActorInitFlags`, so it is placement data. The
-// port took "the first of the pair this bundle carries" instead, which is
+// `2 + ((obj+0x34 >> 0x1B) & 1)`. The bit comes off the spawn record through
+// `ActorInitFlags`, so it is placement data first; two run-time `OR`s raise
+// it as well (`ZombieOnShot`, below, and `ZombieRetireThrowConditionIfUnarmed`).
+// The port took "the first of the pair this bundle carries" instead, which is
 // always row 2, so 192 of the 402 shipped class-0x30 spawns jogged where the
 // data says they sprint.
 {
@@ -18855,22 +19146,24 @@ console.log("\nthe shot effects:");
         G.g_blood_sprays[0]!.severity === 0.75);
   G.g_blood_sprays = [];
 
-  // -- the voice kind is the hit-result code, and nothing else --------------
+  // -- the voice: the result while alive, the head bone once dead ------------
   //
-  // `[proved]` from two routines that agree, which is what makes this a rule
-  // and not one function's habit. `ZombieOnShot` (`FUN_00453EB0`):
+  // `[proved]` from two routines that agree. `ZombieOnShot` (`FUN_00453EB0`)
+  // holds two pointers across its per-player loop:
   //
+  //   00453eee  LEA  EBP, [EDI*4 + 0x9a2d88]   ; &g_shot_bone[p]
+  //   00453f0d  LEA  EBX, [EDI*4 + 0x9a58f8]   ; &g_hit_result[p]
+  //   00453f3b  TEST EAX, 0x80000000           ; latched: neither arm
   //   00453f46  TEST dword ptr [ESI + 0x34], 0x4000000   ; Dead?
-  //   00453f6e  CMP  EAX, 0x2      ; g_hit_result -- dead and 2 -> kind 2
-  //   00453f77  PUSH 0x1           ; dead and anything else -> kind 1
-  //   00454025  CMP  EAX, 0x5      ; alive and not 5 -> kind 0
+  //   00453f68  MOV  EAX, [EBP]                ; the BONE
+  //   00453f6e  CMP  EAX, 0x2                  ; the head -> 2, else 1
+  //   00454020  MOV  EAX, [EBX]                ; the RESULT
+  //   00454025  CMP  EAX, 0x5                  ; alive and not 5 -> kind 0
   //
-  // and `ThrowerOnShot` (`FUN_004499A0`) is the same two instructions with the
-  // same two constants at 0x00449A76, 0x00449A7B and 0x00449A88. **Neither
-  // tests the bone and neither tests whether the actor died of this shot** --
-  // which is what `render/shooting.ts`'s copy keyed on, so these five checks
-  // are the behaviour change the move carried. Every one of them fails on the
-  // old `killed ? (head ? "head" : "kill") : "hurt"` mapping.
+  // and `ThrowerOnShot` (`FUN_004499A0`) reads the same `[EBP]` at 0x00449A70.
+  // These checks used to say the reverse -- result 2 was kind 2 off a shot to
+  // the leg, and a head kill was kind 1 -- on a reading of `[EBP]` as the
+  // result pointer. The three dead-arm checks below fail on that reading.
   const voiced: number[] = [];
   const ear = new Events();
   ear.on("sound.play", (d) => voiced.push(d.id));
@@ -18882,6 +19175,9 @@ console.log("\nthe shot effects:");
   const lineOf = (xs: number[]) => xs.filter((id) => VOICE_IDS.includes(id));
   z0.charType = 0;                      // set A, per `voice_set_a_types`
   z0.flags &= ~(ActorFlag.Dead | ActorFlag.ShotImmune);
+  z0.flags2 &= ~ZombieFlag2.DiedInFlight;
+  check("the voice checks' actor is class 0x30, whose latch is bit 0x80000000",
+        z0.cls === SpawnClass.Zombie, `class ${z0.cls}`);
 
   // Alive: kind 0, whatever the bone was. Bone 2 is the head.
   voiced.length = 0;
@@ -18894,25 +19190,39 @@ console.log("\nthe shot effects:");
         impactOf(voiced).length === 1 && impactOf(voiced)[0] === 1,
         JSON.stringify(voiced));
 
-  // Dead and result 2: kind 2 -- and it is the *result*, not the bone.
+  // Dead and shot in the head: kind 2 -- and it is the *bone*, not the result.
   voiced.length = 0;
   z0.flags |= ActorFlag.Dead;
-  G.g_hit_result = HitResultCode.Plain;
-  ActorShotFeedback(z0, 4, vec3(), host, rng, ear);
-  check("result 2 on a dead actor is kind 2, off a shot to the leg",
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a dead actor shot in the head is kind 2, on a result of 1",
         lineOf(voiced).length === 1 && lineOf(voiced)[0] === 30,
         JSON.stringify(voiced));
   check("...and kind 2's tell is the head impact table",
         impactOf(voiced).length === 1 && impactOf(voiced)[0] === 2,
         JSON.stringify(voiced));
 
-  // Dead and anything else: kind 1 -- including a shot to the head.
+  // Dead and anywhere else: kind 1 -- result 2 included.
   voiced.length = 0;
-  G.g_hit_result = HitResultCode.Damaged;
-  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
-  check("a head shot that kills is kind 1, because the result is 1",
+  G.g_hit_result = HitResultCode.Plain;
+  ActorShotFeedback(z0, 4, vec3(), host, rng, ear);
+  check("result 2 on a dead actor shot in the leg is kind 1, not kind 2",
         lineOf(voiced).length === 1 && lineOf(voiced)[0] === 20
         && impactOf(voiced)[0] === 1, JSON.stringify(voiced));
+
+  // The latch comes before the live/dead split (`00453f3b`): once
+  // `ZombieOnShot` has dispatched the death, every later shot is silent.
+  voiced.length = 0;
+  z0.flags2 |= ZombieFlag2.DiedInFlight;
+  G.g_hit_result = HitResultCode.Damaged;
+  ActorShotFeedback(z0, 2, vec3(), host, rng, ear);
+  check("a corpse whose death is latched says nothing, even to the head",
+        lineOf(voiced).length === 0, JSON.stringify(voiced));
+  check("...though it still bleeds",
+        impactOf(voiced).length === 0 && G.g_blood_sprays.length > 0,
+        JSON.stringify(voiced));
+  z0.flags2 &= ~ZombieFlag2.DiedInFlight;
+  G.g_blood_sprays = [];
 
   // The two gates that silence it: `obj+0x34` bit 0x100 jumps the whole
   // routine (0x00453ec7), and the live arm refuses result 5 (0x00454025).

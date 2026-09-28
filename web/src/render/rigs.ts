@@ -258,17 +258,34 @@ const ACTOR_POSED_ROUTINES: Readonly<Record<string, SpawnClass>> = {
 };
 
 /**
- * `PathRidingPropDraw`'s two sprites, by the asset slot their `rig_part` was
- * exported with: `+5.0` (`0x0055D2B4`) and `+8.0` (`0x004C43A0`) on the
- * object's `y` before the yaw, and `T(0, 0, 12.0)` (`PUSH 0x41400000` at
- * `0x0043297B`) after it for the second. Their scales are the parts' baked
- * ones -- `(1.5, 2.0, 1.0)` and `(7, 7, 7)`, the `MatrixScale`s at
- * `0x0043291D` and `0x00432998`.
+ * `PathRidingPropDraw`'s two sprite loops: the first cel's asset slot, how
+ * many cels the loop has, and which one the draw names from
+ * `g_frame_counter` (`0x009A32A0`) --
+ *
+ * ```
+ * 0043292C  MOV EAX,[0x009A32A0] ; XOR EDX,EDX ; MOV ECX,0xF ; DIV ECX
+ * 0043293A  ADD EDX,0x135F ; PUSH EDX ; CALL AssetDrawSlot
+ * 004329A7  MOV EDX,[0x009A32A0] ; AND EDX,7
+ * 004329B0  ADD EDX,0xB67  ; PUSH EDX ; CALL AssetDrawSlot
+ * ```
+ *
+ * -- an unsigned `DIV`, hence the `>>> 0`. Not `g_scene_tick_counter`, which
+ * `PropDrawOnlyType53` (`FUN_0046EBD0`) reads for the same two loops. Every
+ * cel is a `rig_part` of its own (`obj_432840` in `hod2lib/rigs.py`), which is
+ * how the stage-2 car's rig carries both of its rows.
+ *
+ * Then `+5.0` (`0x0055D2B4`) and `+8.0` (`0x004C43A0`) on the object's `y`
+ * before the yaw, and `T(0, 0, 12.0)` (`PUSH 0x41400000` at `0x0043297B`)
+ * after it for the second. Their scales are the parts' baked ones -- `(1.5,
+ * 2.0, 1.0)` and `(7, 7, 7)`, the `MatrixScale`s at `0x0043291D` and
+ * `0x00432998`.
  */
-const PATH_PROP_SPRITES: ReadonlyArray<{ slot: number; lift: number;
-                                         ahead: number }> = [
-  { slot: 0x135f, lift: 5.0, ahead: 0 },
-  { slot: 0xb67, lift: 8.0, ahead: 12.0 },
+const PATH_PROP_SPRITES: ReadonlyArray<{
+  slot: number; cels: number; cel: (frame: number) => number;
+  lift: number; ahead: number;
+}> = [
+  { slot: 0x135f, cels: 15, cel: (n) => (n >>> 0) % 15, lift: 5.0, ahead: 0 },
+  { slot: 0xb67, cels: 8, cel: (n) => n & 7, lift: 8.0, ahead: 12.0 },
 ];
 
 /**
@@ -690,10 +707,10 @@ export class RigLayer implements System {
    * block 2's -- truncated to a `short` of BAMS.
    *
    * The sprites are children of the root in the scene graph, so their world
-   * transform is undone through the root's rotation here. What is **not**
-   * drawn is each loop's cel: the draw names `0x135F + g_frame_counter % 15`
-   * and `0xB67 + (g_frame_counter & 7)`, and the rig carries the first cel of
-   * each, so both loops stand on their first frame.
+   * transform is undone through the root's rotation here. Each loop draws one
+   * cel, `0x135F + g_frame_counter % 15` and `0xB67 + (g_frame_counter & 7)`
+   * ({@link PATH_PROP_SPRITES}): that cel's part is shown and posed, and the
+   * loop's other cels are hidden.
    */
   private PathRidingPropDraw(inst: Instance, launched: number): void {
     const eye = G.g_camera_index === 2 ? G.g_camera_block2_eye
@@ -705,10 +722,13 @@ export class RigLayer implements System {
     const undo = this._rel.copy(inst.root.quaternion).invert();
     const turn = this._own.setFromAxisAngle(AXIS_Y, yaw * BAMS_TO_RAD);
     for (const s of PATH_PROP_SPRITES) {
-      const part = inst.slotParts.get(s.slot);
+      const drawn = launched === 0 ? s.slot + s.cel(G.g_frame_counter) : -1;
+      for (let i = 0; i < s.cels; i++) {
+        const cel = inst.slotParts.get(s.slot + i);
+        if (cel) cel.node.visible = s.slot + i === drawn;
+      }
+      const part = inst.slotParts.get(drawn);
       if (!part) continue;
-      part.node.visible = launched === 0;
-      if (launched !== 0) continue;
       // World: lift, then the yaw, then `ahead` along the turned +z.
       this._v.set(0, 0, s.ahead).applyQuaternion(turn);
       this._v.y += s.lift;

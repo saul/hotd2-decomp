@@ -993,6 +993,50 @@ read it -- `CameraDriverFromDeferredPose` copies it whole,
 roll zeroed, the yaw turned half round) while the drawn camera takes the pose's
 full angles through the driver. `[proved]`
 
+**Two yaws, and which one each reader takes.** The camera block's yaw,
+`g_camera_block_yaw_bams` (`0x009A60D0`), is `VecToAngles(eye - target)` --
+the camera's own +z, pointing back at the viewer -- and it is what the view is
+built from. `g_camera_yaw_bams` (`0x009C71F0`) is the gameplay eye's heading,
+which the scene state's hooks write half a turn round from a camera heading:
+the rail pose's yaw `+ 0x8000`, or the block's `- 0x8000`. Before the camera
+was two tasks the port had only the second, and every routine the exe points at
+the first read the second in its place -- **half a turn out**. With the block
+kept current each frame they read the block now, as the exe does, and a sweep
+of the image's 63 references to `0x009A60D0` (operand search and the bytes
+agree) found every ported one:
+
+* **`ZombieShouldStandAndThrow`** (`FUN_00458E10`). The facing window is the
+  block's yaw turned half round, which is the heading of an actor facing the
+  camera; reading `g_camera_yaw_bams` put it behind the actor, so no
+  condition-8 walker ever threw -- none of stage 4's ten `znassb` or stage 5's
+  one, nor the axe walkers in stages 2 and 3. Measured in the headless player
+  with `tools/blade_throw.mjs`: stage 4's first `znassb` (evt 3740) closes to a
+  facing error of 297 BAMS against the block (20544 against the old word), and
+  now stands at frame 70 and throws both blades; stage 5's (2948), stage 3's
+  axe walker (8312, two axes) and stage 2's (26500) do the same. Before,
+  stage 4's and stage 5's never entered state 33 in 1500 frames. The claim
+  and the hands come in the character type's order: `znassb` claims first,
+  the axe types look first, and any other type answers no.
+* **`ChooseDeathMotionDirectional`** (`FUN_00456220`) reads the block itself;
+  its callers used to hand in `g_camera_yaw_bams`, which swapped the falls
+  front for back. Its four arcs are tested in a row, as the exe does, so a
+  boundary heading takes the later one.
+* **`SeveredHeadUpdate`** and **`OwlUpdateAndResolveShot`** threw the head and
+  the owl's corpse *at* the camera; they go away from it now.
+* **`Class26Subtype2Update`**'s face-camera latch, the **bat**'s wobble, the
+  **fish** splash, class 0x14's six splash strips, the carrier's bow strip and
+  its drawn wake strip, and **`PropUpdateType43`**'s crack all turn by the
+  block; **`KindedPropUpdate`**'s crack now makes the write at all.
+* **`OwlPickTargetPlayerAndAimOffset`**'s two-player offset takes the block's
+  yaw and the owl's distance from the block eye, not the sway rate.
+* **The frog** reads camera block **2**'s yaw (`0x009A6418`), which is not the
+  view: `EvtRunQueuedActionsSyncViewBlock` copies block 0's pose into it only
+  during a (1, 3) view-angle turn. The port keeps block 2 for that read, with
+  the sync, the reset and the per-frame rebuild.
+
+What the class-0x31 leaps, the grab and class 0x22 read is `g_camera_yaw_bams`
+itself, and those were right. `[proved]`
+
 A replay also has to honour what a wait *leaves behind*, not only what it
 blocks on. `wait_enemies_alive` and `wait_enemies_present` open only when the
 counters fall, and the counters fall only when the actors die — so past one of

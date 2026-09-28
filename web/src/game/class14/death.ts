@@ -35,7 +35,7 @@ import { vec3, type Vec3 } from "../vec";
 import { OBJ_BIT_80000, Class14Flag, type Boss2Tail } from "./state";
 import { Class14FollowSegment } from "./steer";
 import {
-  Class14BlendAnim, Class14CameraBlockYaw, Class14ClipLength, Class14Cursor,
+  Class14BlendAnim, Class14ClipLength, Class14Cursor,
   Class14Sound as Sound,
 } from "./motion";
 import { CLASS14_TURN_STEP, Class14Sound } from "./tables";
@@ -249,7 +249,7 @@ export function Class14StateDeathA(obj: Boss2Actor, f: ClassFrame): void {
         t.flags |= Class14Flag.FeetOff;
         for (const c of G.g_class14_foot_contacts) c.strength = 0;
         SpawnPropStripEffect({ pos: B1, pitch: 0,
-                               yaw: Class14CameraBlockYaw(), roll: 0 },
+                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
                              PropStripKind.Kind0, SPLASH_SMALL, f.events);
         SpawnPropStripEffect({ pos: vec3(B1.x, B1.y, B1.z), pitch: 0, yaw: 0,
                                roll: 0 },
@@ -326,7 +326,7 @@ export function Class14StateDeathB(obj: Boss2Actor, f: ClassFrame): void {
       const B2 = BoneWorld(obj, 2);
       if (B2.y <= Math.fround(h)) {
         SpawnPropStripEffect({ pos: B2, pitch: 0,
-                               yaw: Class14CameraBlockYaw(), roll: 0 },
+                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
                              PropStripKind.Kind0, SPLASH_LARGE, f.events);
         SpawnPropStripEffect({ pos: vec3(B2.x, B2.y, B2.z), pitch: 0, yaw: 0,
                                roll: 0 },
@@ -431,7 +431,7 @@ export function Class14StateDeathC(obj: Boss2Actor, f: ClassFrame): void {
       if (t.counter0 === 0) {
         const B2 = BoneWorld(obj, 2);
         SpawnPropStripEffect({ pos: B2, pitch: 0,
-                               yaw: Class14CameraBlockYaw(), roll: 0 },
+                               yaw: G.g_camera_block_yaw_bams, roll: 0 },
                              PropStripKind.Kind0, SPLASH_LARGE, f.events);
         t.counter0 = GONE_FRAMES_C;
         t.sub += 1;

@@ -599,13 +599,15 @@ export class SlotModelLayer implements System<RenderContext> {
         if (t.stripDrawn) {
           // States 5/6: `Translate(pos); RotX; RotZ; RotY; Translate(0, 0,
           // -5); RotY(-yaw); RotZ(roll); RotX(pitch); RotY(camera yaw)`, as
-          // written -- the three turns after the bow are not an inverse.
+          // written -- the three turns after the bow are not an inverse. The
+          // camera yaw is the camera block's, `g_camera_block_yaw_bams`
+          // (`0x009A60D0`, read at `0x004406AD` and `0x0044168D`).
           _m.identity();
           mTranslate(_m, a.pos.x, a.pos.y, a.pos.z);
           mRotX(_m, a.pitch); mRotZ(_m, a.roll); mRotY(_m, a.yaw);
           mTranslate(_m, 0, 0, lit.stripZ);
           mRotY(_m, -a.yaw); mRotZ(_m, a.roll); mRotX(_m, a.pitch);
-          mRotY(_m, G.g_camera_yaw_bams);
+          mRotY(_m, G.g_camera_block_yaw_bams);
           this.extra(`t1:${a.at}`, t.stripDrawn, _m, seen);
         }
       }

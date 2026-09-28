@@ -91,7 +91,7 @@ try {
   const killed = await page.evaluate(async () => {
     const { ActorKillAll } = await import("/src/game/combat/resolve_hit.ts");
     const { Rng } = await import("/src/core/rng.ts");
-    return ActorKillAll(0, new Rng(5));
+    return ActorKillAll(new Rng(5));
   });
   console.log(`killed ${JSON.stringify(killed)}, rain ${p.rain}`);
 

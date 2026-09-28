@@ -22434,6 +22434,123 @@ One-player play draws nothing new from the `Rng`, so determinism and
 **Still declared:** a `-2` pick in attract mode is refused, not claimed (the
 port runs no attract mode and has no index -2).
 
+## 2026-09-28 -- the camera block's yaw, and the readers that took the other one (branch `fix/newbugs2-blade-throw-yaw`)
+
+**The report** (from the thrown-weapons session, `a237a5cc`): "znassb and
+condition-8 axe walkers never throw [likely]. `ZombieShouldStandAndThrow`
+(`FUN_00458E10`) reads the camera block's yaw at `0x009A60D0`. The port reads
+its own camera yaw instead, which is half a turn out."
+
+**What main had by then.** `fix/camera-faithful` (`6706e323`) had already made
+the camera the exe's two tasks: `CameraActorTick` runs the queued driver and
+`UpdateSceneViewAndLight`, so `G.g_camera_block_yaw_bams` is written every
+frame, before any actor, and read back through `MatrixGetAngles`. The "keep it
+current" half of the report was done; what was left was the readers.
+
+**The reading.** `ZombieShouldStandAndThrow`, from the listing: `obj+0x130C ==
+8`; `AngleWithinTolerance((block_yaw[g_camera_index] - 0x8000) & 0xFFFF,
+obj+0x68 & 0xFFFF, 0x400)` (`0x00458E48`, the index scaled by `0x69` dwords);
+then a switch on `(s16)obj+0x1F4` that the port had flattened -- type 1 claims
+the permit **before** it tests the blades (`0x00458EC2`), 0x13 and 0x14 test
+the axes first (`0x00458E7F`/`0x00458E97`), and every other type returns 0
+without claiming. The block's yaw is `VecToAngles(eye - target)`, the camera's
++z; an actor facing the camera has `obj+0x68 = VecToAngles(obj - eye)`, which
+is the block's plus half a turn, so the `- 0x8000` makes the window sit on the
+actor's own heading. `g_camera_yaw_bams` (`0x009C71F0`) is written by the
+scene state's hooks as a heading already turned half round (the rail pose's
+`+ 0x8000`), so `g_camera_yaw_bams - 0x8000` was the block's own yaw, half a
+turn from the window. `[proved]`
+
+**Every reader.** `get_xrefs_to 0x009A60D0` gave 62, an operand search for
+`9a60d0` 58 and the bytes `d0609a00` 63 (L32): the five the byte search adds
+are Boss3BodyUpdate's read and write (`0x004240D9`, `0x0042410F`), the body
+creature's launch (`0x0043E980`), an unnamed spawner at `0x00472A50` and a boss
+routine at `0x00498058` -- each in code Ghidra has no function for. Of the
+ported ones, these read `g_camera_yaw_bams` or something else and now read the
+block, each with its own address in the comment:
+`ZombieShouldStandAndThrow`; `ChooseDeathMotionDirectional` (it now reads the
+global itself, so `ResolveHit`, `DispatchHit` and `ActorKillAll` lose a
+parameter the exe never had, and `render/shooting.ts` loses the getter that fed
+it); `SeveredHeadUpdate` (the head flew at the camera); `OwlUpdateAndResolveShot`
+(so did the corpse) and `OwlPickTargetPlayerAndAimOffset` (whose distance was
+also the sway rate, where the exe takes `ftol(|owl - block eye|) / 60`);
+`BatDiveUpdate`/`BatSwarmUpdate`'s wobble; `WaterSplashUpdate`;
+`Class26Subtype2Update`'s latch (`+ 0x8000`, unmasked); `PropUpdateType43`
+(which carried an `[open]` saying the port did not have the word);
+`KindedPropUpdate`, whose crack made **no** write at all; the six class-0x14
+strips, through a `[port-only]` helper that returned the wrong global and is
+gone; the carrier's bow strips and `render/slotmodels.ts`'s drawn strip.
+Already right: `ActorHeadAimAngles`, `FallingContainerUpdate`,
+`BreakablePropUpdate`, class 0x45 and `render/boss3_effects.ts`, the camera's
+own routines. Unported, and left: class 0x2D's seven, `ZombieStateLeapStrike`
+(state 0x34), the target script's splash strip (`0x0045AD5C`), carrier
+routines 3/4/5/7/8, the backdrop's view-space presets, `ChapterCardInstall`'s
+light block, `FUN_0048F190`'s face-camera latch (its rig is drawn with no
+latch at all), and the body creature's `obj+0x68` (its draw rotates by X
+only). `g_camera_yaw_bams`'s own nineteen readers (class 0x31's leaps, the
+grab, class 0x22, the player bodies) were checked and were right.
+
+**The frog** reads camera block **2**'s yaw, `0x009A6418` -- one literal read
+in the image, `0x0043AB62`. Block 2 is written by `CameraBlocksReset` (zeroed),
+`EvtRunQueuedActionsSyncViewBlock` (block 0's pose copied in while the scene
+state is (1, 3), angles derived from it) and `UpdateSceneViewAndLight`'s loop
+over all four blocks (`ESI` from `0x009A60D4` to `0x009A6764`). The sync's
+other arm needs `0x009C6F1C == 5`, and both writers of that word store a
+zeroed `EBX` (`0x0040220E`, `0x0045EE2F`), so it is dead. The port now keeps
+block 2's eye, angles and look-at in `G`, runs the sync as the major-1 hook,
+zeroes it in the reset and rebuilds its angles each frame, and the frog reads
+it; the `[diverges]` that said the port had one camera yaw is gone.
+
+**Named.** `DrawBackdropSlotInViewSpace` (`0x00413620`), `CameraTaskCreateAtOrigin`
+(`0x00482C00`), `TitleMenuCameraTaskCreate` (`0x00496850`) -- the last two are
+the other direct writers of the block's yaw; five labels for block 2's words.
+
+**Verified.** `web/tools/blade_throw.mjs` drives the page under `?drive=1` from
+the spawn's own script address and prints, per sample, the actor's state and
+its facing error against both words. Stage 4's first `znassb` (evt 3740,
+`?stage=4&block=0&step=5&op=5`): before, it reached a facing error of 397 BAMS
+against the block and 20544 against the old word, never entered state 33 in
+1500 frames and threw nothing; after, it stands at frame 70 and both blades
+are in the air by 110. Stage 5's (2948): before, 322 against the block and
+never stood; after, stands by frame 40 and throws both. Stage 3's axe walker
+(8312) throws twice and stage 2's (26500) once. In `port.test.ts`: the
+condition-8 test builds the camera with the camera's own routines, runs the
+scene state's hook over it and turns the walker with `TurnActorTowardCamera`,
+and asserts the walker is inside the block's window and outside the old one;
+the character-type arms; the death arcs, the boundary draw included; the head,
+the fish, the owl, the carrier, the kinded crack, the boat latch, and block 2's
+sync, hold and reset. Mutating each reader back to `g_camera_yaw_bams` fails
+eleven checks, and the stand-and-throw alone six.
+
+**Wrong turns.** The first death-chain run failed three tests that had passed
+for as long as the fixture's camera and its zombie disagreed about nothing: the
+fixture's camera looks down +x at a zombie with yaw 0, which puts the death in
+the 0xC000 arc, and the fixture had no clip for the two side deaths, so
+`ChooseDeathMotion` played nothing and the actor went straight to the corpse.
+The old code had been handed `g_camera_yaw_bams` = 0, which the scene never
+wrote, and landed in the front arc by accident. The fix was to give the fixture
+the side clips the shipped banks have, not to steer the camera. And the
+thrown-weapon harnesses: `tools/throwers.mjs` reports 0 of 9 stationary
+throwers throwing and `tools/axeman.mjs` fails its despawn checks -- both
+**identically on `HEAD`**, run from a `git archive` of it, so neither is this
+branch's; they are left for whoever next opens them.
+
+**Found, not fixed.** `ActorShotFeedback`'s bursting head is spawned with
+`g_camera_yaw_bams` as its yaw, where `SpawnSeveredHead` copies the actor's
+`obj+0x330`/`0x334`; `ResolveHit`'s own call passes `(0, obj.yaw)` for the same
+two words. `ZombieShouldStandAndThrow` still calls `TryClaimAttackSlot`
+without a host, so an off-screen claim raises no latch: `ZombieStateAttackRun`
+is not handed one to pass. `ActorFacePlayerTarget`'s two-player arm is not
+ported.
+
+**Merged with main at `c9846149`.** The attack-slot claim merge had landed the
+same per-type order in `ZombieShouldStandAndThrow` from its side, with the
+claim's `rng`; the resolution keeps its order and argument and this branch's
+block-yaw window and `AngleWithinTolerance`, and its own test of the unarmed
+`znassb` now sets the block's yaw rather than `g_camera_yaw_bams`. The owl
+corpse merge had already moved `OwlPickTargetPlayerAndAimOffset` and the
+corpse's throw onto the block, the same way; main's text was kept for both.
+
 ## 2026-09-28 -- class 0x13's static props: the record's pitch, and every spawn site's three angles (branch `fix/newbugs2-class13-pitch`)
 
 The wall-climbers left this `[open]`: "five stage-2 scripted props (class
@@ -22526,4 +22643,4 @@ alone) and two `render.test.ts` ones (a prop spawned from its record is drawn
 `T·Rx·Rz·Ry·S` element for element with three unequal angles and 15x; the
 shipped `etc_1.bin[63]` faces `(0, -sin, cos)`). Reverting the class-0x13 arm
 to the yaw fails three and two of them; drawing `"YZX"` fails the render one.
-The new lesson is `L64`.
+The new lesson is `L65` (written as L64; main took that number first).

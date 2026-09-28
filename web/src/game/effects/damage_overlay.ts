@@ -32,13 +32,31 @@
  * One model out of `pol/common.bin` (entries 116..126, asset slots
  * 0x931..0x93B), drawn in the camera's own space at `z = -1.02` and a scale of
  * 0.02, which makes each one most of a screen tall. Every one of the eleven
- * is a single translucent, alpha-blended (`src_alpha / inv_src_alpha`)
- * ARGB4444 texture: claw marks, a slash, a bite ring, a splat.
+ * is a single mesh on an ARGB4444 texture: claw marks, a slash, a bite ring,
+ * a splat.
  *
  * **It does not fade, flash or animate.** `DamageOverlayUpdateAndDraw` makes
  * the same draw with the same matrix on every one of its 59 frames, and no
  * colour, alpha or scale is touched anywhere in the chain `[proved]`. It is on,
  * unchanged, for just under a second, and then it is off.
+ *
+ * **It is opaque where the mark is, and nothing elsewhere** `[proved]`. The
+ * draw is a plain `AssetDrawSlot` (`FUN_00418560`) -- its `CALL` is at
+ * `0x004173B5` -- and not `AssetDrawSlotWithAlpha` (`FUN_004185A0`): it hands
+ * the model no alpha, so the meshes draw by their own state. All eleven carry
+ * TSP `0x9400041B` (`0x9404041B` for the two U-flipped models) --
+ * `SRCALPHA / INVSRCALPHA`, `UseAlpha` and `IgnoreTexAlpha` both clear, so
+ * the translucent pass with the alpha test on (`TranslatePvr2StateToD3D`
+ * (`FUN_004A7780`)), and shading mode 0, so `ALPHAOP MODULATE` of the texel
+ * and the diffuse -- and a base colour of `(1, 1, 1, 1)`, which
+ * `WalkMeshChainAndDraw` (`FUN_004A7EF0`) hands `SetMaterial` as the diffuse.
+ * The alpha on screen is the texel's. The textures (26..33) are 55-84% alpha
+ * 0 around the mark, and 255 over 31-82% of the texels the mark covers (the
+ * thin claw marks are mostly edge), with a 4-bit soft edge between. So a hit
+ * puts a solid mark on the screen with feathered edges, not a translucent
+ * one; `tools/hurt_alpha.mjs` measures the same off the page's pixels, and
+ * `tools/verify_texture_alpha.py` holds the words, the colour and the
+ * textures to it.
  *
  * ## Under which camera
  *

@@ -1875,6 +1875,131 @@ console.log("\nthe shot effects are models, one per frame:");
 }
 
 
+console.log("\nthe damage overlay: a plain AssetDrawSlot, drawn by the texture's alpha:");
+{
+  // `DamageOverlayUpdateAndDraw` (`FUN_00417300`) calls `AssetDrawSlot`, not
+  // `AssetDrawSlotWithAlpha`: no draw alpha, no fade. The eleven templates as
+  // the exporter writes them -- one mesh each, with the TSP words
+  // `common.bin` 116..126 carry -- and the pass `prepareDrawCommands` gives
+  // them at load. What reaches the screen must then be the template's own
+  // material on every one of the 59 frames: the translucent pass, blending by
+  // the texel's alpha at material alpha 1.
+  const { applyPvr2DrawState, pvr2Words, ALPHA_REF }
+    = await import("../src/render/draw_order");
+  const { PlayerTask } = await import("../src/game/player_state");
+  const { DAMAGE_OVERLAY_FRAMES, DAMAGE_OVERLAY_SCALES, DAMAGE_OVERLAY_SLOTS,
+          DAMAGE_OVERLAY_Z, DamageOverlayKind }
+    = await import("../src/game/effects/damage_overlay");
+  const { CustomBlending, OneMinusSrcAlphaFactor, SrcAlphaFactor }
+    = await import("three");
+  type Basic = InstanceType<typeof MeshBasicMaterial>;
+  const root = new Obj3D();
+  const mats = new Map<number, Basic>();
+  for (let slot = 0x931; slot <= 0x93b; slot++) {
+    const mat = new MeshBasicMaterial();
+    // 0x938 and 0x939 are the U-flipped models: bit 18 more, nothing else.
+    const flipped = slot === 0x938 || slot === 0x939;
+    mat.userData = { pvr2: { isp_tsp_instruction: "0x83000000",
+                             tsp_instruction: flipped ? "0x9404041B"
+                                                      : "0x9400041B" } };
+    applyPvr2DrawState(mat, pvr2Words(mat)!);
+    const part = new Mesh(new PlaneGeometry(1, 1), mat);
+    part.name = `slots_effect_fixed000_slot_${slot.toString(16).padStart(4, "0")}`;
+    part.userData = { hod2_kind: "rig_part", hod2_rig: "slots_effect" };
+    root.add(part);
+    mats.set(slot, mat);
+  }
+  ResetGameGlobals();
+  const layer = new EffectLayer();
+  layer.adopt(root);
+  const camera = new PerspectiveCamera(41.1, 4 / 3, 0.8, 8000);
+  camera.updateMatrixWorld(true);
+  const ctx = { camera } as unknown as Parameters<typeof layer.update>[0];
+
+  // The record as the port's spawn and first update leave it -- the state
+  // half is `port.test.ts`'s, driven through `GameUpdate`.
+  G.g_player_task[0] = PlayerTask.InPlay;
+  const o = G.g_damage_overlays[0]!;
+  Object.assign(o, { active: 1, frames: DAMAGE_OVERLAY_FRAMES - 1, x: 0,
+                     kind: DamageOverlayKind.Slash, count: 1 });
+  layer.update(ctx);
+  const slot = DAMAGE_OVERLAY_SLOTS[DamageOverlayKind.Slash]![0];
+  check("a live record draws one node, in the camera's own space",
+        layer.viewGroup.children.length === 1
+        && layer.group.children.length === 0 && slot === 0x933,
+        `${layer.viewGroup.children.length}/${layer.group.children.length}`);
+  const node = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+  check("...at (0, 0, -1.02), unturned, scale 0.02, in draw layer 0xA",
+        node.position.x === 0 && node.position.y === 0
+        && node.position.z === DAMAGE_OVERLAY_Z
+        && Math.abs(DAMAGE_OVERLAY_Z + 1.02) < 1e-6
+        && node.quaternion.w === 1
+        && node.scale.x === DAMAGE_OVERLAY_SCALES[DamageOverlayKind.Slash]
+        && Math.abs(node.scale.x - 0.02) < 1e-6 && node.renderOrder === 899,
+        `${node.position.toArray()} ${node.scale.x} ${node.renderOrder}`);
+  const mat = node.material as Basic;
+  check("...with the template's own material: the draw gives it no alpha",
+        mat === mats.get(0x933));
+  check("...the translucent pass TSP 0x9400041B names: SRCALPHA / "
+        + "INVSRCALPHA, the alpha test at 1",
+        mat.transparent && mat.blending === CustomBlending
+        && mat.blendSrc === SrcAlphaFactor
+        && mat.blendDst === OneMinusSrcAlphaFactor
+        && mat.alphaTest === ALPHA_REF / 255 && mat.depthWrite,
+        `${mat.transparent} ${mat.blending} ${mat.blendSrc} ${mat.blendDst}`);
+  check("...at material alpha 1, so the texel's alpha is the whole of it",
+        mat.opacity === 1, `${mat.opacity}`);
+
+  // Every frame of its life draws the same thing.
+  const looks = new Set<string>();
+  for (let f = DAMAGE_OVERLAY_FRAMES - 1; f >= 1; f--) {
+    o.frames = f;
+    layer.update(ctx);
+    const n = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+    const m = n.material as Basic;
+    looks.add([m === mats.get(0x933), m.opacity, m.transparent, m.blending,
+               n.visible, n.scale.x, ...n.position.toArray()].join(" "));
+  }
+  const varied = [...looks];
+  check("no fade, flash or scale ramp over the 59 frames it is drawn",
+        looks.size === 1,
+        `${varied.length} different draws, first ${varied[0]}, last `
+        + `${varied[varied.length - 1]}`);
+  o.active = 0;
+  o.frames = 0;
+  layer.update(ctx);
+  check("...and on the sixtieth it is gone",
+        layer.viewGroup.children.length === 0);
+
+  // The mirrored slash is the same pass; two players move it and, for the
+  // gash, swap the model.
+  Object.assign(o, { active: 1, frames: 30, x: 0,
+                     kind: DamageOverlayKind.SlashMirrored, count: 1 });
+  layer.update(ctx);
+  const flip = (layer.viewGroup.children[0] as InstanceType<typeof Mesh>)
+    .material as Basic;
+  check("the U-flipped slash (0x939) blends the same way",
+        flip === mats.get(0x939) && flip.transparent
+        && flip.blendSrc === SrcAlphaFactor && flip.opacity === 1);
+  Object.assign(o, { kind: DamageOverlayKind.Gash, count: 2, x: -0.22 });
+  layer.update(ctx);
+  const gash = layer.viewGroup.children[0] as InstanceType<typeof Mesh>;
+  check("with two players the gash is 0x936, 0.22 to the left",
+        gash.material === mats.get(0x936)
+        && Math.abs(gash.position.x + 0.22) < 1e-6);
+
+  // Only the two tasks that call the routine draw it.
+  G.g_player_task[0] = PlayerTask.None;
+  layer.update(ctx);
+  check("a player not in play or on the countdown draws no overlay",
+        layer.viewGroup.children.length === 0);
+  G.g_player_task[0] = PlayerTask.ContinueCountdown;
+  layer.update(ctx);
+  check("...and one on the countdown does",
+        layer.viewGroup.children.length === 1);
+  ResetGameGlobals();
+}
+
 console.log("\nthe water ring is drawn from its record alone:");
 {
   const root = new Obj3D();
